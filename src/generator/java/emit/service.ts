@@ -171,6 +171,18 @@ export function renderJavaService(
     (!!ctx.authed &&
       agg.operations.some((op) => op.visibility === "public" && operationUsesCurrentUser(op))) ||
     anyStampUsesUser;
+  // Per-operation audit: any audited public op needs the AuditRecordRepository
+  // injected + the OffsetDateTime / UUID / RequestContext imports.
+  const anyAudited = agg.operations.some((op) => op.visibility === "public" && op.audited);
+  if (anyAudited) {
+    imports.add("java.time.OffsetDateTime");
+    imports.add("java.util.UUID");
+  }
+  // The audit-record actor reads `currentUserAccessor.user()` on an authed
+  // system even when no operation otherwise uses the current user, so the
+  // accessor must be injected whenever audit + auth are both present — not only
+  // when `anyOpUsesUser`, or the audit call references an uninjected field.
+  const needsUserAccessor = anyOpUsesUser || (anyAudited && !!ctx.authed);
   const unionReturnNames = new Set<string>();
   const opLines = agg.operations
     .filter((op) => op.visibility === "public")
@@ -215,6 +227,13 @@ export function renderJavaService(
       // ProblemDetail translation).
       const spec = returnUnionSpec(op, ctx.boundedContext);
       if (spec) unionReturnNames.add(spec.name);
+      // Per-operation audit (audit-and-logging.md): an `audited` op records a
+      // who/what/when + before/after wire snapshot.  before/after are the
+      // aggregate's wire projection either side of the mutation; the record is
+      // persisted INSIDE this @Transactional method (same txn as the state
+      // change) via the injected AuditRecordRepository.  The actor / correlation
+      // / scope / parent ids are stamped from the ambient RequestContext.
+      const audited = !!op.audited;
       return [
         `    public ${spec ? spec.name : "void"} ${op.name}(${paramSig}) {`,
         ...lets,
@@ -226,11 +245,27 @@ export function renderJavaService(
           : null,
         `        var aggregate = repository.getById(id);`,
         whenGateLine(op),
+        audited ? `        var __before = ${agg.name}Response.from(aggregate);` : null,
         spec
           ? `        var result = aggregate.${op.name}(${args});`
           : `        aggregate.${op.name}(${args});`,
         hasStamp("update") ? stampCall("update") : null,
         `        repository.save(aggregate);`,
+        audited ? `        var __after = ${agg.name}Response.from(aggregate);` : null,
+        audited ? `        auditRecords.save(new AuditRecord(` : null,
+        audited ? `            UUID.randomUUID().toString(),` : null,
+        audited ? `            ${JSON.stringify(`${op.name}${agg.name}`)},` : null,
+        audited ? `            ${JSON.stringify(op.name)},` : null,
+        audited ? `            ${JSON.stringify(agg.name)},` : null,
+        audited ? `            id.value().toString(),` : null,
+        audited ? `            ${ctx.authed ? "currentUserAccessor.user()" : "null"},` : null,
+        audited ? `            __before,` : null,
+        audited ? `            __after,` : null,
+        audited ? `            OffsetDateTime.now(),` : null,
+        audited ? `            "ok",` : null,
+        audited ? `            RequestContext.correlationId(),` : null,
+        audited ? `            RequestContext.scopeId(),` : null,
+        audited ? `            RequestContext.parentId()));` : null,
         `        publishEvents(aggregate);`,
         spec ? `        return result;` : null,
         `    }`,
@@ -297,8 +332,11 @@ export function renderJavaService(
       ? [...unionReturnNames].sort().map((u) => `import ${ctx.entityPkg}.${u};`)
       : []),
     ctx.domainRepoPkg !== ctx.pkg ? `import ${ctx.domainRepoPkg}.${agg.name}Repository;` : null,
-    anyOpUsesUser ? `import ${ctx.basePkg}.auth.CurrentUserAccessor;` : null,
-    anyOpUsesUser ? `import ${ctx.basePkg}.auth.User;` : null,
+    needsUserAccessor ? `import ${ctx.basePkg}.auth.CurrentUserAccessor;` : null,
+    needsUserAccessor ? `import ${ctx.basePkg}.auth.User;` : null,
+    anyAudited ? `import ${ctx.basePkg}.config.RequestContext;` : null,
+    anyAudited ? `import ${ctx.basePkg}.infrastructure.persistence.AuditRecord;` : null,
+    anyAudited ? `import ${ctx.basePkg}.infrastructure.persistence.AuditRecordRepository;` : null,
     declaredFinds(repo).some(isPagedFind) ? `import ${ctx.basePkg}.domain.common.Paged;` : null,
     `import ${ctx.basePkg}.domain.enums.*;`,
     `import ${ctx.basePkg}.domain.ids.*;`,
@@ -314,23 +352,26 @@ export function renderJavaService(
       (op) =>
         `    private final ${upperFirst(op.name)}${agg.name}Handler ${lowerFirst(op.name)}Handler;`,
     ),
-    anyOpUsesUser ? `    private final CurrentUserAccessor currentUserAccessor;` : null,
+    needsUserAccessor ? `    private final CurrentUserAccessor currentUserAccessor;` : null,
     dispatches ? `    private final ApplicationEventPublisher eventPublisher;` : null,
+    anyAudited ? `    private final AuditRecordRepository auditRecords;` : null,
     ``,
     `    public ${agg.name}Service(${[
       `${agg.name}Repository repository`,
       ...externOps.map(
         (op) => `${upperFirst(op.name)}${agg.name}Handler ${lowerFirst(op.name)}Handler`,
       ),
-      ...(anyOpUsesUser ? ["CurrentUserAccessor currentUserAccessor"] : []),
+      ...(needsUserAccessor ? ["CurrentUserAccessor currentUserAccessor"] : []),
       ...(dispatches ? ["ApplicationEventPublisher eventPublisher"] : []),
+      ...(anyAudited ? ["AuditRecordRepository auditRecords"] : []),
     ].join(", ")}) {`,
     `        this.repository = repository;`,
     ...externOps.map(
       (op) => `        this.${lowerFirst(op.name)}Handler = ${lowerFirst(op.name)}Handler;`,
     ),
-    anyOpUsesUser ? `        this.currentUserAccessor = currentUserAccessor;` : null,
+    needsUserAccessor ? `        this.currentUserAccessor = currentUserAccessor;` : null,
     dispatches ? `        this.eventPublisher = eventPublisher;` : null,
+    anyAudited ? `        this.auditRecords = auditRecords;` : null,
     `    }`,
     ``,
     ...createLines,

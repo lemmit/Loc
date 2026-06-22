@@ -112,6 +112,10 @@ const FIXTURES: Array<[string, string]> = [
   // principal's id scalar (`user { id: guid }` → UUID), never a dangling
   // `UserId`.  Compiles the full audit-columns + create/update stamp bundle.
   ["test/e2e/fixtures/java-build/auditable.ddd", "api"],
+  // Per-operation `audited` (audit-and-logging.md): an audited op persists a
+  // who/what/when + before/after wire snapshot into `audit_records` INSIDE the
+  // service's @Transactional method (the same txn as the aggregate save).
+  ["test/e2e/fixtures/java-build/audited-operation.ddd", "api"],
   // `when` canCommand state gate (criterion.md, use site 2): the service
   // throws DisallowedException (→ 409) before mutating, and the controller
   // auto-exposes `GET /orders/{id}/can_cancel` → CanResponse { allowed }.

@@ -2066,7 +2066,7 @@ export function validateProvenancedStorage(
 // Either mismatch is an error, not a silent no-op.  (This gates the per-operation
 // `audited` flag only; the `with audit` capability macro emits stamping rules via
 // `contextStamps`, a separate concern.)
-const AUDIT_OP_BACKENDS = new Set(["node", "dotnet"]);
+const AUDIT_OP_BACKENDS = new Set(["node", "dotnet", "java", "python"]);
 const AUDIT_LIFECYCLE_BACKENDS = new Set(["node"]);
 export function validateAuditedOperationSupport(
   ctx: BoundedContextIR,
@@ -2108,7 +2108,7 @@ export function validateAuditedOperationSupport(
         "operation",
         auditedOps.map((o) => o.name),
         opUnsupported,
-        "Hono (node) / .NET (dotnet)",
+        "Hono (node) / .NET (dotnet) / Java (java) / Python (python)",
       );
     }
     const auditedLifecycle = [...(agg.creates ?? []), ...(agg.destroys ?? [])].filter(

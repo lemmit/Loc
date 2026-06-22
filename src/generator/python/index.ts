@@ -21,12 +21,14 @@ import {
 } from "./base-reader-builder.js";
 import { buildPyDispatchFile, dispatchSubscriptionsOf } from "./dispatch-builder.js";
 import { renderPyAggregate } from "./emit/aggregate.js";
+import { emitPyAudit } from "./emit/audit.js";
 import { renderPyDomainServices } from "./emit/domain-service.js";
 import { ERRORS_PY } from "./emit/errors.js";
 import { renderPyEvents } from "./emit/events.js";
 import { renderPyWireModels } from "./emit/http-models.js";
 import { renderPyIds } from "./emit/ids.js";
 import {
+  emitPythonAuditMigration,
   emitPythonMigrations,
   emitPythonProvenanceMigration,
   MIGRATE_PY,
@@ -231,6 +233,13 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // field, so non-provenance projects stay byte-identical.
   emitPyProvenance(args.contexts, out);
   emitPythonProvenanceMigration(args.contexts, out, args.sys);
+  // Per-operation audit runtime (audit-and-logging.md): the AuditRecordRow
+  // model + the LATE hand-emitted migration (`audit_records`).  No-op when no
+  // aggregate declares an `audited` op, so non-audit projects stay
+  // byte-identical.  The per-op capture + the record_audit helper are wired by
+  // routes-builder.ts / repository-builder.ts.
+  emitPyAudit(args.contexts, out);
+  emitPythonAuditMigration(args.contexts, out);
   if (seedFile != null) out.set("app/db/seed.py", seedFile);
 
   // In-process event dispatch (channels.md): only when a channel routes

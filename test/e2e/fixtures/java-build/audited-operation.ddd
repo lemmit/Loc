@@ -1,0 +1,40 @@
+// Per-operation `audited` (audit-and-logging.md) on the Java / Spring backend —
+// the port of the node / .NET runtime.  An audited public operation appends a
+// who/what/when + before/after wire-DTO snapshot row into the append-only
+// audit_records table, persisted INSIDE the service's @Transactional method
+// (the same transaction as the aggregate save — atomic).  The before snapshot
+// is taken BEFORE the mutation, the after post-save; the record is never on the
+// operation response.
+//
+// Boot-verified end-to-end against Postgres via LOOM_JAVA_BUILD — generate,
+// `gradle testClasses bootJar`, then an audited op that produces an
+// audit_records row with the before/after projections.
+system AuditSystem {
+  subdomain Core {
+    context Ordering {
+      aggregate Order ids guid with crudish {
+        reference: string
+        status: string
+        operation cancel() audited {
+          status := "cancelled"
+        }
+        operation reopen() audited {
+          status := "open"
+        }
+      }
+      repository Orders for Order {
+        find byReference(reference: string): Order? where this.reference == reference
+      }
+    }
+  }
+  api OrderingApi from Core
+  storage primary { type: postgres }
+  resource orderingState { for: Ordering, kind: state, use: primary }
+  deployable api {
+    platform: java
+    contexts: [Ordering]
+    dataSources: [orderingState]
+    serves: OrderingApi
+    port: 8081
+  }
+}

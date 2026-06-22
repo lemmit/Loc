@@ -1,9 +1,10 @@
 // Tier-0 honest-gate guard.  Per-operation audit-record emission (`operation …
-// audited`) is implemented on the Hono (node) and .NET (dotnet) backends; on
-// phoenix the modifier is inert, so an `audited` operation hosted there silently
-// records nothing.  The validator rejects that mismatch with
-// loom.audited-backend-unsupported.  Audited LIFECYCLE actions (audited create /
-// destroy) stay node-only (the .NET create/destroy handlers aren't instrumented).
+// audited`) is implemented on the Hono (node), .NET (dotnet), Java (java) and
+// Python (python) backends; on phoenix the modifier is inert, so an `audited`
+// operation hosted there silently records nothing.  The validator rejects that
+// mismatch with loom.audited-backend-unsupported.  Audited LIFECYCLE actions
+// (audited create / destroy) stay node-only (the other backends' create/destroy
+// handlers aren't instrumented).
 //
 // Note: this gates the per-operation `audited` flag only — the `with audit`
 // capability macro (context stamps) is a separate concern and is NOT gated here.
@@ -47,6 +48,14 @@ describe("audited-operation capability validation", () => {
 
   it("accepts an audited operation on a .NET deployable (audit runtime ported)", async () => {
     expect(await auditErrors(sys("dotnet"))).toEqual([]);
+  });
+
+  it("accepts an audited operation on a Java deployable (audit runtime ported)", async () => {
+    expect(await auditErrors(sys("java"))).toEqual([]);
+  });
+
+  it("accepts an audited operation on a Python deployable (audit runtime ported)", async () => {
+    expect(await auditErrors(sys("python"))).toEqual([]);
   });
 
   it("rejects an audited operation on a Phoenix deployable (no audit emission)", async () => {

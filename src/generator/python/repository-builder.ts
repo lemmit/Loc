@@ -24,6 +24,7 @@ import {
 } from "../../ir/util/inheritance.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
+import { aggHasAuditedOp } from "./emit/audit.js";
 import { provColumn, provenancedFieldsOf } from "./emit/provenance.js";
 import {
   contextFilterPredicate,
@@ -155,6 +156,7 @@ export function buildPyRepositoryFile(
     "",
     toWireMethod(agg, ctx),
     ...parts.flatMap((p) => ["", partWireMethod(p, ctx)]),
+    aggHasAuditedOp(agg) ? ["", recordAuditMethod()] : null,
   );
 
   // Import narrowing via body scan (string literals stripped).
@@ -190,18 +192,29 @@ export function buildPyRepositoryFile(
   const saNames = ["and_", "delete", "func", "not_", "or_", "select"].filter(refersTo);
 
   const hasProv = provenancedFieldsOf(agg).length > 0;
+  const hasAudit = aggHasAuditedOp(agg);
+  // The obs.log RequestContext accessors are shared between provenance (which
+  // also reads `actor_id`) and audit (correlation / scope / parent).  Union the
+  // names so a single sorted import covers both without duplication.
+  const obsAccessors = [
+    ...new Set([
+      ...(hasProv ? ["actor_id", "correlation_id", "parent_id", "scope_id"] : []),
+      ...(hasAudit ? ["correlation_id", "parent_id", "scope_id"] : []),
+    ]),
+  ].sort();
   return lines(
     `"""${agg.name} repository.  Auto-generated."""`,
     "",
-    hasProv ? "from datetime import UTC, datetime" : null,
+    hasProv || hasAudit ? "from datetime import UTC, datetime" : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
-    hasProv ? "from uuid import uuid4" : null,
-    refersTo("Decimal") || hasProv ? "" : null,
+    hasProv || hasAudit ? "from uuid import uuid4" : null,
+    refersTo("Decimal") || hasProv || hasAudit ? "" : null,
     saNames.length > 0 ? `from sqlalchemy import ${saNames.join(", ")}` : null,
     refersTo("insert") ? "from sqlalchemy.dialects.postgresql import insert" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "",
     emittableFinds(repo).some(findUsesCurrentUser) ? "from app.auth.user import User" : null,
+    hasAudit ? "from app.db.audit import AuditRecordRow" : null,
     refersTo("PagedResult") ? "from app.db.paging import PagedResult" : null,
     hasProv ? "from app.db.provenance import ProvenanceRecord" : null,
     rowNames.length > 0 ? `from app.db.schema import ${rowNames.join(", ")}` : null,
@@ -216,7 +229,7 @@ export function buildPyRepositoryFile(
     voEnumNames.length > 0
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
       : null,
-    hasProv ? "from app.obs.log import actor_id, correlation_id, parent_id, scope_id" : null,
+    obsAccessors.length > 0 ? `from app.obs.log import ${obsAccessors.join(", ")}` : null,
     "",
     "",
     body,
@@ -829,6 +842,47 @@ function syncJoinTable(assoc: AssociationIR, f: FieldIR, aggVar: string): string
     "                )",
     "            )",
   ];
+}
+
+/** The per-operation audit insert — staged in the request's own session so
+ *  the audit row commits in the SAME transaction as the aggregate save
+ *  (atomic).  before/after are the wire-DTO snapshots the route captures
+ *  either side of the mutation; the actor + correlation / scope / parent ids
+ *  are the ambient RequestContext slices.  Parity with the .NET IAuditWriter
+ *  staging + the Java service insert. */
+function recordAuditMethod(): string {
+  return lines(
+    "    async def record_audit(",
+    "        self,",
+    "        *,",
+    "        operation_id: str,",
+    "        action: str,",
+    "        target_type: str,",
+    "        target_id: str,",
+    "        before: dict[str, object],",
+    "        after: dict[str, object],",
+    "        actor: object | None = None,",
+    '        status: str = "ok",',
+    "    ) -> None:",
+    "        self._session.add(",
+    "            AuditRecordRow(",
+    "                audit_id=uuid4().hex,",
+    "                operation_id=operation_id,",
+    "                action=action,",
+    "                target_type=target_type,",
+    "                target_id=target_id,",
+    "                actor=actor,",
+    "                before=before,",
+    "                after=after,",
+    "                at=datetime.now(UTC),",
+    "                status=status,",
+    "                correlation_id=correlation_id(),",
+    "                scope_id=scope_id(),",
+    "                parent_id=parent_id(),",
+    "            )",
+    "        )",
+    "        await self._session.flush()",
+  );
 }
 
 function deleteMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {

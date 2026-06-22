@@ -655,6 +655,26 @@ function canOpRoute(
   );
 }
 
+/** Per-operation audit capture (audit-and-logging.md): an `audited` op records
+ *  a who/what/when + before/after wire snapshot.  before/after are the
+ *  aggregate's wire projection (`repo.to_wire`) either side of the mutation;
+ *  the record is persisted through the repo INSIDE the request session (same
+ *  txn as the save) via `record_audit`.  The actor + correlation / scope /
+ *  parent ids are stamped from the ambient RequestContext inside record_audit.
+ *  Parity with the Hono transactional route + the .NET / Java service insert. */
+function auditRecordCall(agg: EnrichedAggregateIR, op: OperationIR): string[] {
+  return [
+    "    await repo.record_audit(",
+    `        operation_id=${JSON.stringify(`${op.name}${agg.name}`)},`,
+    `        action=${JSON.stringify(op.name)},`,
+    `        target_type=${JSON.stringify(agg.name)},`,
+    "        target_id=str(id),",
+    "        before=__before,",
+    "        after=__after,",
+    "    )",
+  ];
+}
+
 function operationRoute(
   agg: EnrichedAggregateIR,
   op: OperationIR,
@@ -695,9 +715,12 @@ function operationRoute(
       "    repo = _repo(session)",
       `    found = await repo.get_by_id(${agg.name}Id(id))`,
       ...whenGate(agg, op),
+      op.audited ? "    __before = repo.to_wire(found)" : null,
       `    result = found.${snake(op.name)}(${callArgs.join(", ")})`,
       hasStamp(agg, "update") ? stampCall(agg, "update", "found") : null,
       "    await repo.save(found)",
+      op.audited ? "    __after = repo.to_wire(found)" : null,
+      ...(op.audited ? auditRecordCall(agg, op) : []),
       ...translations,
       "    return result",
     );
@@ -725,9 +748,12 @@ function operationRoute(
     "    repo = _repo(session)",
     `    found = await repo.get_by_id(${agg.name}Id(id))`,
     ...whenGate(agg, op),
+    op.audited ? "    __before = repo.to_wire(found)" : null,
     `    found.${snake(op.name)}(${callArgs.join(", ")})`,
     hasStamp(agg, "update") ? stampCall(agg, "update", "found") : null,
     "    await repo.save(found)",
+    op.audited ? "    __after = repo.to_wire(found)" : null,
+    ...(op.audited ? auditRecordCall(agg, op) : []),
     "    return Response(status_code=204)",
   );
 }

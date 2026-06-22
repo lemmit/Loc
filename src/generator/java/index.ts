@@ -28,6 +28,12 @@ import type {
 import { emitJavaResourceFiles } from "./adapters/resource-clients.js";
 import { inlineRunBypassesByRetrieval, promotedCapabilities } from "./capability-filter.js";
 import { renderApiExceptionAdvice, renderJavaController } from "./emit/api.js";
+import {
+  contextsHaveAudit,
+  emitJavaAuditMigration,
+  renderAuditRecordEntity,
+  renderAuditRecordRepository,
+} from "./emit/audit.js";
 import { renderAuthFiles } from "./emit/auth.js";
 import {
   renderAggregateNotFoundException,
@@ -283,6 +289,22 @@ function emitProjectFromContexts(
     place("LoomJsonFormatMapperConfig.java", "config", renderJsonFormatMapperConfig(basePkg));
   }
 
+  // Per-operation audit runtime (audit-and-logging.md) — the append-only
+  // `audit_records` JPA entity + its Spring Data port.  Emitted only when a
+  // served context declares an `audited` public operation (gated on the op,
+  // not a backend allowlist).  The per-op capture + the AuditRecord persist
+  // are wired by service.ts; the late DDL lands in the migrations block below.
+  // The actor / before / after blobs ride jsonb columns, so the Hibernate JSON
+  // FormatMapper config is forced on too (idempotent with provenance).
+  const hasAudit = contextsHaveAudit(contexts);
+  if (hasAudit) {
+    place("AuditRecord.java", "infra-persistence", renderAuditRecordEntity(basePkg));
+    place("AuditRecordRepository.java", "infra-persistence", renderAuditRecordRepository(basePkg));
+    if (!hasProvenance) {
+      place("LoomJsonFormatMapperConfig.java", "config", renderJsonFormatMapperConfig(basePkg));
+    }
+  }
+
   for (const ctx of contexts) {
     // Ids — an abstract TPC base keeps no identity (each concrete owns a
     // typed id); a TPH base owns the shared single-table key.
@@ -484,8 +506,14 @@ function emitProjectFromContexts(
   // the co-located-column ALTERs).  Feature-local — not part of MigrationsIR.
   // Gated on a `provenanced` field, not a backend allowlist.
   emitJavaProvenanceMigration(contexts, system?.sys, out);
+  // Per-operation audit DDL (audit-and-logging.md): one extra late Flyway
+  // migration creating `audit_records`, sorting after every module migration.
+  // Feature-local — not part of MigrationsIR.  Gated on an `audited` op.
+  emitJavaAuditMigration(contexts, out);
   const hasMigrations =
-    allMigrations.some((m) => m.steps.length > 0 || m.baseline !== null) || hasProvenance;
+    allMigrations.some((m) => m.steps.length > 0 || m.baseline !== null) ||
+    hasProvenance ||
+    hasAudit;
 
   // Project shell — stable from S1 on.
   out.set(
