@@ -34,4 +34,21 @@ describe("Svelte named `action` handlers", () => {
     expect(page).toContain("onclick={bump}");
     expect(page).not.toContain("onclick={() =>");
   });
+
+  it("closes a 3-action transitive chain A→B→C — all three handlers emit (Fix 1)", async () => {
+    const files = await svelteFiles(`
+      page P {
+        route: "/p"
+        state { n: int = 0 }
+        action a() { b() }
+        action b() { c() }
+        action c() { n := n + 1 }
+        body: Stack { Button { "A", onClick: a } }
+      }
+    `);
+    const page = [...files].find(([p]) => p.endsWith("+page.svelte"))?.[1] ?? "";
+    expect(page).toContain("const a = () => { b(); };");
+    expect(page).toContain("const b = () => { c(); };");
+    expect(page).toContain("const c = () => { n = (n + 1); };");
+  });
 });

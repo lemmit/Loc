@@ -49,4 +49,38 @@ describe("React named `action` handlers", () => {
     expect(tsx).toContain("const bump = () => { setN((n + 1)); };");
     expect(tsx).toContain("onClick={bump}");
   });
+
+  it("emits a callee action whose only reference is a sibling body call (Fix 1)", async () => {
+    // `go` is referenced by markup; `bump` only by `go`'s body — the
+    // transitive-closure marks `bump` used so its handler still emits.
+    const files = await reactFiles(`
+      page P {
+        route: "/p"
+        state { n: int = 0 }
+        action go() { bump() }
+        action bump() { n := n + 1 }
+        body: Stack { Button { "Go", onClick: go } }
+      }
+    `);
+    const tsx = files.get("web/src/pages/p.tsx")!;
+    expect(tsx).toContain("const go = () => { bump(); };");
+    expect(tsx).toContain("const bump = () => { setN((n + 1)); };");
+  });
+
+  it("closes a 3-action transitive chain A→B→C — all three handlers emit", async () => {
+    const files = await reactFiles(`
+      page P {
+        route: "/p"
+        state { n: int = 0 }
+        action a() { b() }
+        action b() { c() }
+        action c() { n := n + 1 }
+        body: Stack { Button { "A", onClick: a } }
+      }
+    `);
+    const tsx = files.get("web/src/pages/p.tsx")!;
+    expect(tsx).toContain("const a = () => { b(); };");
+    expect(tsx).toContain("const b = () => { c(); };");
+    expect(tsx).toContain("const c = () => { setN((n + 1)); };");
+  });
 });

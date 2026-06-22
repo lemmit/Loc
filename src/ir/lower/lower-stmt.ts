@@ -91,10 +91,20 @@ export function lowerStatement(stmt: Statement, env: Env): { stmt: StmtIR; envAf
   if (isAssignOrCallStmt(stmt)) {
     const lv: LValue = stmt.target;
     if (!stmt.op) {
-      // `name(args)` — local function or private operation.
+      // `name(args)` — sibling action, local function, or private operation.
       if (lv.call && lv.tail.length === 0) {
-        const fn = findFunctionInEnv(env, lv.head);
         const args = (lv.args ?? []).map((a) => lowerExpr(a, env));
+        // A bare call inside a page/component action body that names a SIBLING
+        // action on the same surface lowers to a `target: "action"` call so the
+        // frontend walkers invoke the callee's handler (and mark it used) rather
+        // than treating it as a backend private-operation (Proposal A Stage 1).
+        if (env.actions?.has(lv.head)) {
+          return {
+            stmt: { kind: "call", target: "action", name: lv.head, args },
+            envAfter: env,
+          };
+        }
+        const fn = findFunctionInEnv(env, lv.head);
         const target: "function" | "private-operation" = fn ? "function" : "private-operation";
         return {
           stmt: { kind: "call", target, name: lv.head, args },

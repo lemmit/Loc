@@ -23,9 +23,17 @@ import type {
   EnrichedLoomModel,
   ExprIR,
   PageIR,
+  StmtIR,
 } from "../../types/loom-ir.js";
 import { allAggregates, allContexts } from "../../types/loom-ir.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
+
+// View-effect builtins (`navigate(…)`, `toast(…)`) lower to bare
+// `private-operation`-shaped calls but resolve against the page's imports at
+// emit time (`src/generator/_walker/primitives/controls.ts`,
+// `elixir/heex-walker-core.ts`), so an action body calling one is legitimate —
+// the unresolved-action-ref check must NOT flag them.
+const VIEW_EFFECT_BUILTINS = new Set<string>(["navigate", "toast"]);
 
 /** Form primitives that introduce a mutation shell-local into their
  *  `onSubmit:` lambda.  The walker binds these names so the body may
@@ -61,11 +69,17 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         ...workflowNames,
         "Views",
       ]);
+      // UI extern-function names (`function f(…) extern from "…"`) — a bare
+      // call to one in an action body lowers to a `private-operation` (no UI
+      // function is in `findFunctionInEnv`), so the unresolved-action-ref check
+      // must NOT flag it (extern-function-hook-escape-hatch.md).
+      const functionNames = new Set<string>((ui.functions ?? []).map((f) => f.name));
       for (const page of ui.pages) {
         const actionsByName = new Map(page.actions.map((a) => [a.name, a]));
         const ctx: BodyCheckCtx = {
           aggByName,
           handles,
+          functionNames,
           scope: new Set(),
           where: pageWhere(page),
           actionsByName,
@@ -73,17 +87,20 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
         checkBody(page.body, ctx, diags);
         checkBody(page.title, ctx, diags);
         checkBody(page.requires, ctx, diags);
+        checkActionBodies(page.actions, ctx, diags);
       }
       for (const comp of ui.components) {
         const actionsByName = new Map(comp.actions.map((a) => [a.name, a]));
         const ctx: BodyCheckCtx = {
           aggByName,
           handles,
+          functionNames,
           scope: new Set(),
           where: `component '${comp.name}'`,
           actionsByName,
         };
         checkBody(comp.body, ctx, diags);
+        checkActionBodies(comp.actions, ctx, diags);
       }
     }
   }
@@ -104,10 +121,42 @@ interface BodyCheckCtx {
    *  used by the payload-conformance check to look up the referenced action's
    *  declared arity / param type (named-actions-and-stores.md, Proposal A). */
   actionsByName: ReadonlyMap<string, ActionIR>;
+  /** UI extern-function names (`function f(…) extern from "…"`) in scope — a
+   *  bare call to one is a legitimate `private-operation`-shaped call in an
+   *  action body, not an unresolved action reference. */
+  functionNames: ReadonlySet<string>;
+  /** True while walking inside an action body (Fix 4/5).  Drives the
+   *  action-body call checks: a bare call that lowered to `private-operation`
+   *  is an unresolved action reference here (no such backend op exists on a
+   *  frontend surface), and a remote/mutating op call needs an `await` marker
+   *  Proposal B hasn't shipped (`loom.action-requires-await`). */
+  inActionBody?: boolean;
 }
 
 function pageWhere(p: PageIR): string {
   return `page '${p.name}'`;
+}
+
+/** Fix 4 — run the same IR body checks over every named action's body, with
+ *  the action's params in scope.  Action bodies previously escaped the page's
+ *  IR checks entirely (only `page.body/title/requires` were walked); this gives
+ *  them the F1/F2/payload checks and, via the `inActionBody` flag, the
+ *  action-only purity checks (Fix 3 body-call + Fix 5 await-floor). */
+function checkActionBodies(
+  actions: readonly ActionIR[],
+  baseCtx: BodyCheckCtx,
+  diags: LoomDiagnostic[],
+): void {
+  for (const action of actions) {
+    const scope = new Set<string>([...baseCtx.scope, ...action.params.map((p) => p.name)]);
+    const ctx: BodyCheckCtx = {
+      ...baseCtx,
+      scope,
+      inActionBody: true,
+      where: `${baseCtx.where} action '${action.name}'`,
+    };
+    for (const s of action.body) checkStmt(s, ctx, diags);
+  }
 }
 
 /** Walk a body expression, applying F1 (Action) and F2 (method-call
@@ -121,6 +170,9 @@ function checkBody(e: ExprIR | undefined, ctx: BodyCheckCtx, diags: LoomDiagnost
       // Named-action payload conformance — a bare `onSubmit:`/`onRowClick:`
       // action reference must match (arity) what the primitive supplies.
       checkActionPayload(e, ctx, diags);
+      // Fix 3 — an unresolved bare ref in an action-handler slot
+      // (`onRowClick: ghost`) names no sibling action and nothing else.
+      checkHandlerSlotRefs(e, ctx, diags);
       // Descend, extending scope for any form primitive's lambda args.
       const shellLocals = FORM_SHELL_LOCALS[e.name];
       const childScope = shellLocals ? new Set<string>([...ctx.scope, ...shellLocals]) : ctx.scope;
@@ -130,6 +182,9 @@ function checkBody(e: ExprIR | undefined, ctx: BodyCheckCtx, diags: LoomDiagnost
     case "method-call": {
       // F2 — the receiver must resolve to a binding.
       checkMethodCallReceiver(e, ctx, diags);
+      // Fix 5 — a remote/mutating backend command in action-body position
+      // needs an `await` marker (Proposal B) that doesn't exist yet.
+      if (ctx.inActionBody) checkActionRequiresAwait(e, ctx, diags);
       checkBody(e.receiver, ctx, diags);
       for (const a of e.args) checkBody(a, ctx, diags);
       return;
@@ -190,6 +245,29 @@ function checkStmt(
   ctx: BodyCheckCtx,
   diags: LoomDiagnostic[],
 ): void {
+  // Action-body call statement (Fix 3 / Fix 5).  Only reachable with
+  // `inActionBody` set; `target: "action"` is a resolved sibling call, but a
+  // `private-operation`/`function` fall-through inside a frontend action body
+  // is a bare call that resolved to nothing local — there are no backend ops on
+  // a UI surface, so it's an unresolved action reference.
+  if (ctx.inActionBody && s.kind === "call") {
+    const stmt = s as Extract<StmtIR, { kind: "call" }>;
+    if (
+      stmt.target !== "action" &&
+      !ctx.actionsByName.has(stmt.name) &&
+      !ctx.functionNames.has(stmt.name) &&
+      !VIEW_EFFECT_BUILTINS.has(stmt.name)
+    ) {
+      diags.push({
+        severity: "error",
+        code: "loom.unresolved-action-ref",
+        message:
+          `${ctx.where}: call \`${stmt.name}(…)\` references no sibling action and resolves to no ` +
+          `function — declare an \`action ${stmt.name}(…)\` on this page/component, or fix the name.`,
+        source: ctx.where,
+      });
+    }
+  }
   for (const key of ["expr", "value"] as const) {
     const v = s[key];
     if (v && typeof v === "object" && "kind" in (v as object)) {
@@ -315,6 +393,44 @@ function checkActionPayload(
   }
 }
 
+/** The named-arg slots that bind a page/component action handler — a bare
+ *  reference here is an `action-ref` when it resolves, or an unresolved ref
+ *  when it names nothing (`src/generator/_walker/shared/args.ts:actionRefArg`,
+ *  enumerated from the primitives' `actionRefArg(call, …)` slots). */
+const ACTION_HANDLER_SLOTS = ["onClick", "onRowClick", "onSubmit"] as const;
+
+/** Fix 3 (handler position) — a bare reference in an action-handler slot that
+ *  lowered to an unresolved `unknown` ref names no sibling action (it would
+ *  have lowered to an `action-ref`) and isn't a declared handle.  Flag it as an
+ *  unresolved action reference rather than letting it render a dangling
+ *  identifier. */
+function checkHandlerSlotRefs(
+  call: Extract<ExprIR, { kind: "call" }>,
+  ctx: BodyCheckCtx,
+  diags: LoomDiagnostic[],
+): void {
+  for (const slot of ACTION_HANDLER_SLOTS) {
+    const arg = namedArg(call, slot);
+    if (!arg || arg.kind !== "ref" || arg.refKind !== "unknown") continue;
+    if (
+      ctx.actionsByName.has(arg.name) ||
+      ctx.handles.has(arg.name) ||
+      ctx.scope.has(arg.name) ||
+      ctx.functionNames.has(arg.name)
+    ) {
+      continue;
+    }
+    diags.push({
+      severity: "error",
+      code: "loom.unresolved-action-ref",
+      message:
+        `${ctx.where}: \`${call.name} { ${slot}: ${arg.name} }\` references '${arg.name}', which is ` +
+        `not a sibling action on this page/component — declare \`action ${arg.name}(…)\`, or fix the name.`,
+      source: ctx.where,
+    });
+  }
+}
+
 /** F2 — flag a method-call whose receiver root doesn't resolve to a known
  *  binding.  A clean receiver is anything except an `unknown`-rooted chain
  *  whose root is neither a ui api-handle nor an in-scope lambda / form
@@ -339,6 +455,58 @@ function checkMethodCallReceiver(
       `unresolved receiver '${root.name}'. A method-call receiver must resolve to a page/component ` +
       `parameter, state / derived value, lambda binding, or a declared api handle ` +
       `(\`api <Handle>: <Api>\`). Declare the handle, or fix the reference.`,
+    source: ctx.where,
+  });
+}
+
+/** Fix 5 — `loom.action-requires-await`.  An action body MUST NOT contain an
+ *  inline call that lowers to a REMOTE, MUTATING backend command (a cross-
+ *  aggregate `Sales.Order.confirm(o)` / `Order.confirm(o)` in action-body
+ *  position): such an effect needs the `await` marker Proposal B will add, which
+ *  doesn't exist yet.  CONSERVATIVE — only flags a `method-call` we can
+ *  positively identify as an aggregate-rooted mutating command:
+ *    Pattern E:  `Order.confirm(o)`            — `method-call(ref:<Aggregate>, op)`
+ *    Pattern B:  `api.Order.confirm(o)`        — `method-call(member(ref:apiParam, agg), op)`
+ *  whose `op` resolves to a public mutate-kind operation (or a create/destroy)
+ *  on the aggregate.  Reads (`byId`, finders), sibling-action calls, pure
+ *  helpers, and view-effects (`navigate`/`toast`) are deliberately NOT flagged
+ *  (the await-floor boundary — see the report). */
+function checkActionRequiresAwait(
+  call: Extract<ExprIR, { kind: "method-call" }>,
+  ctx: BodyCheckCtx,
+  diags: LoomDiagnostic[],
+): void {
+  let aggName: string | undefined;
+  // Pattern E: receiver is a bare aggregate ref.
+  if (call.receiver.kind === "ref" && ctx.aggByName.has(call.receiver.name)) {
+    aggName = call.receiver.name;
+  }
+  // Pattern B: receiver is `apiParam.Aggregate` (member rooted at an api handle).
+  else if (
+    call.receiver.kind === "member" &&
+    call.receiver.receiver.kind === "ref" &&
+    ctx.handles.has(call.receiver.receiver.name) &&
+    ctx.aggByName.has(call.receiver.member)
+  ) {
+    aggName = call.receiver.member;
+  }
+  if (!aggName) return;
+  const agg = ctx.aggByName.get(aggName);
+  if (!agg) return;
+  const op = call.member;
+  const isMutating =
+    agg.operations.some((o) => o.name === op && o.visibility === "public") ||
+    (agg.creates ?? []).some((o) => o.name === op) ||
+    (agg.destroys ?? []).some((o) => o.name === op);
+  if (!isMutating) return;
+  diags.push({
+    severity: "error",
+    code: "loom.action-requires-await",
+    message:
+      `${ctx.where}: action body calls \`${aggName}.${op}(…)\`, a remote mutating command on ` +
+      `aggregate '${aggName}'. A frontend action can't inline a remote effect yet — it needs an ` +
+      `\`await\` marker (Proposal B), which isn't available. Move the command to a form's \`onSubmit\` ` +
+      `(\`OperationForm\`/\`Form\`), or wait for the await marker.`,
     source: ctx.where,
   });
 }

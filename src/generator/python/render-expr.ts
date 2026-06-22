@@ -316,6 +316,9 @@ function renderCall(args: string[], e: CallExpr, ctx: PyRenderContext): string {
       const ref = e.serviceRef!;
       return `${snake(ref.op)}(${argList})`;
     }
+    case "action":
+    // Sibling action call (Proposal A Stage 1) — frontend-only; never lowered
+    // into a backend domain expression.  Plain call keeps the switch total.
     case "free":
       return `${snake(e.name)}(${argList})`;
   }

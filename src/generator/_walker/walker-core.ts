@@ -946,14 +946,44 @@ export function extendLambdaParams(
  *  `renderNamedHandler` seam (JSX/markup default: `const <name> = (<p>?) =>
  *  { … }`).  Returns one joined string (newline-separated), or `""` when
  *  nothing is emitted — splice it into the shell's declaration region. */
+/** Expand a set of directly-referenced action names to its transitive
+ *  closure over sibling action→action calls (Proposal A Stage 1, Fix 1).  An
+ *  action whose handler is emitted (because markup referenced it) may itself
+ *  call another sibling action via a `target: "action"` body statement; that
+ *  callee's handler must also emit, even if no markup references it directly.
+ *  Pure over the action list — declaration order is irrelevant. */
+export function closeUsedActions(
+  actions: readonly ActionIR[],
+  seed: ReadonlySet<string>,
+): Set<string> {
+  const byName = new Map(actions.map((a) => [a.name, a] as const));
+  const closed = new Set(seed);
+  const stack = [...seed];
+  while (stack.length > 0) {
+    const name = stack.pop() as string;
+    const action = byName.get(name);
+    if (!action) continue;
+    for (const s of action.body) {
+      if (s.kind === "call" && s.target === "action" && !closed.has(s.name)) {
+        closed.add(s.name);
+        stack.push(s.name);
+      }
+    }
+  }
+  return closed;
+}
+
 export function renderActionHandlers(
   actions: readonly ActionIR[],
   used: ReadonlySet<string>,
   baseCtx: WalkContext,
 ): string {
   const out: string[] = [];
+  // Transitively include any sibling action a used action's body calls, so
+  // its handler emits too (Proposal A Stage 1, Fix 1).
+  const effectiveUsed = closeUsedActions(actions, used);
   for (const action of actions) {
-    if (!used.has(action.name)) continue;
+    if (!effectiveUsed.has(action.name)) continue;
     // The single payload param (v1) binds as a lambda param so body refs to
     // it resolve; nullary actions bind nothing.
     const param = action.params[0]?.name;
@@ -1331,6 +1361,13 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
       // plain `name(args);` line; the generated code expects the
       // user to import / declare `<name>` somewhere in their app
       // shell.
+      //
+      // `target: "action"` — a call to a SIBLING page/component action.  The
+      // callee's handler is a `const <name> = (…) => { … }` arrow emitted by
+      // `renderActionHandlers`, but ONLY when it's in `usedActions`.  A body
+      // call must therefore mark its target used so the callee's handler is
+      // emitted alongside the caller's (Proposal A Stage 1).
+      if (stmt.target === "action") ctx.usedActions?.add(stmt.name);
       if (ctx.externFunctions?.has(stmt.name)) ctx.usedExternFunctions?.add(stmt.name);
       const args = stmt.args.map((a) => emitExpr(a, ctx)).join(", ");
       return `${stmt.name}(${args});`;

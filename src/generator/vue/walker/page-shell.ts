@@ -14,6 +14,7 @@ import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/n
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { ImportSpec, LoadedPack } from "../../_packs/loader.js";
 import {
+  closeUsedActions,
   emitExpr,
   emitStmt,
   extendLambdaParams,
@@ -1095,8 +1096,11 @@ function buildActionLines(
 ): { lines: string[]; usesState: boolean } {
   const lines: string[] = [];
   let usesState = false;
+  // Transitively include any sibling action a used action's body calls
+  // (Proposal A Stage 1, Fix 1) so its handler emits too.
+  const effectiveUsed = closeUsedActions(actions, used);
   for (const action of actions) {
-    if (!used.has(action.name)) continue;
+    if (!effectiveUsed.has(action.name)) continue;
     const param = action.params[0]?.name;
     const baseCtx: WalkContext = {
       target: vueTarget,
