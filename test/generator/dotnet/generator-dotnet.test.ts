@@ -189,6 +189,16 @@ describe(".NET generator", () => {
       expect(program).toMatch(/RequestPath/);
       expect(program).toMatch(/ResponseStatusCode/);
       expect(program).toMatch(/Duration/);
+      // Runtime log-level knob — LOG_LEVEL (default info) mapped onto the
+      // ASP.NET Core LogLevel via SetMinimumLevel.
+      expect(program).toMatch(
+        /SetMinimumLevel\(\(System\.Environment\.GetEnvironmentVariable\("LOG_LEVEL"\) \?\? "info"\)/,
+      );
+      expect(program).toMatch(/"trace" => Microsoft\.Extensions\.Logging\.LogLevel\.Trace/);
+      expect(program).toMatch(/"debug" => Microsoft\.Extensions\.Logging\.LogLevel\.Debug/);
+      expect(program).toMatch(/"warn" => Microsoft\.Extensions\.Logging\.LogLevel\.Warning/);
+      expect(program).toMatch(/"error" => Microsoft\.Extensions\.Logging\.LogLevel\.Error/);
+      expect(program).toMatch(/_ => Microsoft\.Extensions\.Logging\.LogLevel\.Information/);
     });
 
     // Bite 4: catalog-identity request log via a custom middleware.

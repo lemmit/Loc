@@ -77,7 +77,10 @@ describe("python platform — registry resolution", () => {
       slug: "s_api",
     });
     expect(shape).toEqual({
-      env: [["DATABASE_URL", "postgresql+asyncpg://postgres:postgres@db:5432/s_api"]],
+      env: [
+        ["DATABASE_URL", "postgresql+asyncpg://postgres:postgres@db:5432/s_api"],
+        ["LOG_LEVEL", "info"],
+      ],
       dependsOnDb: true,
       healthPath: "/ready",
       internalPort: 8000,

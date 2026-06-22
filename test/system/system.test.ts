@@ -96,6 +96,14 @@ describe("system / module / deployable", () => {
     expect(compose).toMatch(/postgres:postgres@db:5432\/catalog_web/);
   });
 
+  it("wires the runtime LOG_LEVEL knob (default info) into each backend service env", async () => {
+    const model = await buildModel("examples/acme.ddd");
+    const { files } = generateSystems(model);
+    const compose = files.get("docker-compose.yml")!;
+    // Overridable per backend service; the runtime default is "info".
+    expect(compose).toMatch(/LOG_LEVEL: "info"/);
+  });
+
   it("emits a /health endpoint on each deployable", async () => {
     const model = await buildModel("examples/acme.ddd");
     const { files } = generateSystems(model);

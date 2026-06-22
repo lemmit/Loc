@@ -281,6 +281,17 @@ builder.Logging.AddJsonConsole(opts =>
         Indented = false,
     };
 });
+// Runtime log-level knob — read LOG_LEVEL (default "info") and map the
+// catalog levels (trace/debug/info/warn/error) onto ASP.NET Core's
+// LogLevel.  Distinct from the generate-time --trace switch.
+builder.Logging.SetMinimumLevel((System.Environment.GetEnvironmentVariable("LOG_LEVEL") ?? "info").ToLowerInvariant() switch
+{
+    "trace" => Microsoft.Extensions.Logging.LogLevel.Trace,
+    "debug" => Microsoft.Extensions.Logging.LogLevel.Debug,
+    "warn" => Microsoft.Extensions.Logging.LogLevel.Warning,
+    "error" => Microsoft.Extensions.Logging.LogLevel.Error,
+    _ => Microsoft.Extensions.Logging.LogLevel.Information,
+});
 
 // Per-request HTTP log.  ASP.NET Core's built-in middleware records
 // method/path on entry and status/duration on exit.  Combined with

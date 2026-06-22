@@ -112,14 +112,29 @@ import Config
 config :${appName}, ${appModule}Web.Endpoint,
   cache_static_manifest: "priv/static/cache_manifest.json",
   server: true
-
-config :logger, level: :info
 `;
 }
 
 export function renderRuntimeExs(appName: string, appModule: string): string {
   return `# Auto-generated.
 import Config
+
+# Runtime log-level knob — LOG_LEVEL (default "info").  Read at boot here in
+# runtime.exs (NOT compile-time prod.exs) so the deployed container / k8s env
+# actually controls verbosity instead of baking the build-time value.  The
+# catalog's trace/debug/info/warn/error map onto Elixir's Logger levels
+# (warn -> :warning, trace -> :debug, since Elixir has no :trace); distinct
+# from the generate-time --trace switch.  Extracted to a variable because
+# \`config :logger, level: case ... end\` binds the do/end block to \`config\`,
+# not \`case\` (=> "undefined function case/1").
+log_level =
+  case System.get_env("LOG_LEVEL") || "info" do
+    "trace" -> :debug
+    "warn" -> :warning
+    other -> String.to_atom(other)
+  end
+
+config :logger, level: log_level
 
 if config_env() == :prod do
   database_url = System.fetch_env!("DATABASE_URL")

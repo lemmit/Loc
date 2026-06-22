@@ -42,6 +42,11 @@ describe("python observability", () => {
     // request_id on every line is the carrier's correlation id (subsumed channel).
     expect(log).toContain('body["request_id"] = cid');
     expect(log).toContain("def log(level: str, event: str, **fields: object) -> None:");
+    // Runtime log-level knob — LOG_LEVEL (default info) mapped via _LEVELNO.
+    expect(log).toContain("import os");
+    expect(log).toContain(
+      'logger.setLevel(_LEVELNO.get(os.environ.get("LOG_LEVEL", "info").lower(), logging.INFO))',
+    );
     const mw = files.get("api/app/obs/middleware.py")!;
     // Correlation resolves x-correlation-id || x-request-id || minted.
     expect(mw).toContain('request.headers.get("x-correlation-id")');

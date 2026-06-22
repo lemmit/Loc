@@ -57,7 +57,11 @@ const pythonPlatform: PlatformSurface = {
   },
   composeService({ slug }): ComposeServiceShape {
     return {
-      env: [["DATABASE_URL", `postgresql+asyncpg://postgres:postgres@db:5432/${slug}`]],
+      env: [
+        ["DATABASE_URL", `postgresql+asyncpg://postgres:postgres@db:5432/${slug}`],
+        // Runtime log-level knob (default info; overridable here / in k8s).
+        ["LOG_LEVEL", "info"],
+      ],
       dependsOnDb: true,
       // Compose healthcheck → /ready (DB-aware), /health stays for
       // cheap liveness probing — same split as dotnet/hono.

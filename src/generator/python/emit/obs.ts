@@ -36,6 +36,7 @@ read from the ambient RequestContext carrier below.
 
 import json
 import logging
+import os
 import sys
 import uuid
 from contextvars import ContextVar, Token
@@ -165,7 +166,10 @@ def _build_logger() -> logging.Logger:
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(CatalogFormatter())
     logger.addHandler(handler)
-    logger.setLevel(TRACE)
+    # Runtime log-level knob — LOG_LEVEL (default "info"), mapped via the
+    # catalog's _LEVELNO (trace/debug/info/warn/error).  Distinct from the
+    # generate-time --trace switch.
+    logger.setLevel(_LEVELNO.get(os.environ.get("LOG_LEVEL", "info").lower(), logging.INFO))
     logger.propagate = False
     return logger
 
