@@ -82,6 +82,72 @@ describe("typescript generator — capability filter (contextFilters)", () => {
     expect(repo.match(/not\(eq\(schema\.docs\.isDeleted, true\)\)/g)).toHaveLength(1);
   });
 
+  it("AND-s the capability filter into criterion retrievals (run<Name>) — silent-leak regression", async () => {
+    // A `retrieval` lowers to a `run<Name>` repo method.  Its own `where`
+    // (a distinct criterion) must still carry the always-on capability
+    // filter — omitting it leaked soft-deleted / other-tenant rows through
+    // every retrieval (the one root read that forgot the predicate).
+    const RETRIEVAL_SRC = `
+system T {
+  subdomain S {
+    context Sales {
+      criterion InCategory(c: string) of Doc = this.category == c
+      aggregate Doc ids guid {
+        subject: string
+        category: string
+        isDeleted: bool
+        filter !this.isDeleted
+      }
+      retrieval ByCategory(c: string) of Doc {
+        where: InCategory(c)
+        sort: [subject asc]
+      }
+    }
+  }
+  api A from S
+  storage pg { type: postgres }
+  resource st { for: Sales, kind: state, use: pg }
+  deployable d { platform: node, contexts: [Sales], dataSources: [st], serves: A, port: 4000 }
+}`;
+    const repo = (await generateSystemFiles(RETRIEVAL_SRC)).get(
+      "d/db/repositories/doc-repository.ts",
+    )!;
+    expect(repo).toBeDefined();
+    // runByCategory: its criterion `where` AND-ed with the capability filter.
+    expect(repo).toMatch(
+      /runByCategory[\s\S]*?\.where\(and\(inCategoryCriterion\(c\), not\(eq\(schema\.docs\.isDeleted, true\)\)\)\)/,
+    );
+  });
+
+  it("leaves a criterion retrieval bare when the aggregate has no filter", async () => {
+    const NOFILTER_SRC = `
+system T {
+  subdomain S {
+    context Sales {
+      criterion InCategory(c: string) of Doc = this.category == c
+      aggregate Doc ids guid {
+        subject: string
+        category: string
+      }
+      retrieval ByCategory(c: string) of Doc {
+        where: InCategory(c)
+        sort: [subject asc]
+      }
+    }
+  }
+  api A from S
+  storage pg { type: postgres }
+  resource st { for: Sales, kind: state, use: pg }
+  deployable d { platform: node, contexts: [Sales], dataSources: [st], serves: A, port: 4000 }
+}`;
+    const repo = (await generateSystemFiles(NOFILTER_SRC)).get(
+      "d/db/repositories/doc-repository.ts",
+    )!;
+    // No capability filter → the retrieval keeps its bare criterion where.
+    expect(repo).toMatch(/runByCategory[\s\S]*?\.where\(inCategoryCriterion\(c\)\)/);
+    expect(repo).not.toContain("isDeleted");
+  });
+
   it("emits no capability predicate when the aggregate has no filter", async () => {
     const { model } = await parseString(`
       context Sales {
