@@ -106,6 +106,13 @@ export function renderRepositoryImpl(
     /** Strongly-typed id class for this aggregate's key (default `<Agg>Id`); a
      *  TPH concrete passes its base's `<Base>Id` (the shared inherited key). */
     idClass?: string;
+    /** True when this is a `shape(embedded)` aggregate: its reference
+     *  collections (`X id[]`) fold into a JSONB column on the root row
+     *  (mapped by `<Agg>Configuration` via a value-converter), NOT a join
+     *  table — so EF round-trips the `List<TargetId>` property automatically
+     *  and the repository emits NO join-table load/save sync (nor the
+     *  `JoinTables` using). */
+    embedded?: boolean;
   },
 ): string {
   const emitTrace = !!options?.emitTrace;
@@ -117,7 +124,10 @@ export function renderRepositoryImpl(
   const finds = (repo?.finds ?? []).map((f) => unionFindAsOptionalTwin(f, agg.name));
   const anyFindUsesUser = finds.some(findUsesCurrentUser);
   const setName = plural(upperFirst(agg.name));
-  const associations = agg.associations;
+  // Embedded aggregates persist their reference collections as a JSONB column
+  // on the root (EF maps the `List<TargetId>` property directly), so there are
+  // no join tables to load/save — drop the associations for join-sync purposes.
+  const associations = options?.embedded ? [] : agg.associations;
   // Reference-collection (`Id<T>[]`) load + save lines.  Each
   // association is a separate `_db.<JoinDbSet>` whose rows are
   // explicitly queried/inserted/deleted by the repository — we don't

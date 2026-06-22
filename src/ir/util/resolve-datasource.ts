@@ -133,6 +133,17 @@ export function isDocumentShaped(
   return effectiveSavingShape(agg, resolved) === "document";
 }
 
+/** Convenience predicate — true when the effective shape is the queryable
+ *  root row whose containments / reference-collections fold into JSONB
+ *  columns (`shape(embedded)`).  Thin derivation over
+ *  {@link effectiveSavingShape}, mirroring {@link isDocumentShaped}. */
+export function isEmbeddedShaped(
+  agg: EnrichedAggregateIR,
+  resolved?: Pick<ResolvedDataSource, "shape">,
+): boolean {
+  return effectiveSavingShape(agg, resolved) === "embedded";
+}
+
 /** Resolve the effective transaction isolation level for a workflow.
  *
  *  The DSL has two surfaces that can set isolation:
