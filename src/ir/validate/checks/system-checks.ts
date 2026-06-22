@@ -1045,6 +1045,17 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
     (family === "node" && (shp === "document" || shp === "embedded")) ||
     (family === "java" && (shp === "document" || shp === "embedded")) ||
     (family === "elixir" && shp === "embedded");
+  // PRINCIPAL (`currentUser.x`) filter on a NON-relational shape (DEBT-02, the
+  // actor + non-relational intersection).  An `embedded` aggregate's root
+  // scalars are real columns, so node/elixir/java reuse their relational
+  // principal path (node weaves `requireCurrentUser()` into the embedded SQL
+  // read; elixir's `base_filter expr(... == ^actor(:f))` renders per-aggregate
+  // regardless of shape; java AND-s the SpEL-principal clause into the embedded
+  // scoped reads).  A `document` aggregate filters IN-APP over the rehydrated
+  // doc, so a principal predicate there needs in-app actor evaluation — still
+  // deferred (Slice B), hence `embedded`-only here.
+  const supportsPrincipalNonRelationalFilter = (family: string, shp: string): boolean =>
+    shp === "embedded" && (family === "node" || family === "elixir" || family === "java");
 
   for (const dep of sys.deployables) {
     const fam = platformFamily(dep.platform);
@@ -1059,18 +1070,26 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
         const usesPrincipal = filters.some((p) => exprUsesCurrentUser(p));
         const shape = effectiveSavingShape(enriched, resolveDataSourceConfig(enriched, ctx, sys));
         const nonRelational = shape !== "relational";
-        const nonRelationalUnsupported =
-          nonRelational && !(supportsNonRelationalFilter(fam, shape) && !usesPrincipal);
-        const principalUnsupported = usesPrincipal && !supportsPrincipalFilter(fam, dep.foundation);
-        // A principal filter on a backend that DOES wire it (node) still needs
-        // a request principal to scope by — so the deployable must enforce auth
-        // (and the system must declare a `user {}` block).  Without it the
-        // ambient `requireCurrentUser()` accessor isn't even emitted.  Mirror
-        // the `validateJavaStampSupport` precedent with a clear, actionable error.
+        // Does THIS family wire a principal filter on THIS shape?  Relational →
+        // `supportsPrincipalFilter`; non-relational → the `embedded`-only
+        // `supportsPrincipalNonRelationalFilter`.
+        const principalSupportedHere = nonRelational
+          ? supportsPrincipalNonRelationalFilter(fam, shape)
+          : supportsPrincipalFilter(fam, dep.foundation);
+        // The shape itself must be wired (any filter); then, if the filter is
+        // principal-referencing, that intersection must be wired too.
+        const nonRelationalUnsupported = nonRelational && !supportsNonRelationalFilter(fam, shape);
+        const principalUnsupported = usesPrincipal && !principalSupportedHere;
+        // A principal filter on a backend that DOES wire it (incl. embedded on
+        // node/elixir/java) still needs a request principal to scope by — so the
+        // deployable must enforce auth (and the system must declare a `user {}`
+        // block).  Without it the ambient `requireCurrentUser()` accessor isn't
+        // even emitted.  Mirror the `validateJavaStampSupport` precedent with a
+        // clear, actionable error.
         if (
           usesPrincipal &&
-          !principalUnsupported &&
-          !nonRelational &&
+          principalSupportedHere &&
+          !nonRelationalUnsupported &&
           !(dep.auth?.required && sys.user)
         ) {
           diags.push({
@@ -1087,15 +1106,22 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
           continue;
         }
         // A non-relational shape gates on the families that don't yet wire it
-        // (DEBT-02); a principal filter gates everywhere except the families above.
+        // (DEBT-02); a principal filter gates where the actor intersection isn't
+        // wired (relational: python; non-relational: document everywhere).
         if (!principalUnsupported && !nonRelationalUnsupported) continue;
-        // Non-relational is the harder limitation — report it first when both
-        // apply (e.g. a principal filter on a document-shaped aggregate).
+        // The unwired shape is the harder limitation — report it first when both
+        // apply.  Otherwise it's a principal filter on a shape whose actor
+        // intersection isn't wired (a `document` aggregate filters in-app, so a
+        // principal predicate there needs in-app actor evaluation — Slice B).
         const reason = nonRelationalUnsupported
           ? `is persisted as shape(${shape}); capability filters are only wired for ` +
             `relational aggregates on the ${fam} backend today`
-          : `references currentUser (e.g. a tenancy filter); principal-referencing capability ` +
-            `filters are not yet wired on the ${fam} backend`;
+          : nonRelational
+            ? `references currentUser (e.g. a tenancy filter) on a shape(${shape}) aggregate; ` +
+              `principal-referencing filters on ${shape} aggregates are not yet wired on the ` +
+              `${fam} backend (they evaluate in-app, not as a column predicate)`
+            : `references currentUser (e.g. a tenancy filter); principal-referencing capability ` +
+              `filters are not yet wired on the ${fam} backend`;
         diags.push({
           severity: "error",
           message:

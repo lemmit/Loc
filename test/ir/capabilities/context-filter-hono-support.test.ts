@@ -5,8 +5,12 @@
 // loom.context-filter-unsupported:
 //   1. non-relational shapes (shape(document) / shape(embedded)) — on node too;
 //   2. principal-referencing filters on the elixir / java backends.
-// A non-principal filter on a relational aggregate is accepted (and emitted —
-// see context-filter-emit.test.ts).  On .NET, all are accepted.
+//   2b. principal-referencing filters on a DOCUMENT shape (in-app actor eval) —
+//       still gated everywhere but .NET (DEBT-02 Slice B).
+// Principal filters on an EMBEDDED shape now ship on node/elixir/java (DEBT-02
+// Slice A — embedded root scalars are real columns, so they reuse the relational
+// principal path).  A non-principal filter on a relational aggregate is accepted
+// (and emitted — see context-filter-emit.test.ts).  On .NET, all are accepted.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../../src/ir/enrich/enrichments.js";
@@ -139,12 +143,36 @@ system Shop {
     ).toEqual([]);
   });
 
-  it("still gates a PRINCIPAL filter on an elixir embedded aggregate (principal + non-relational not wired)", async () => {
+  it("accepts a PRINCIPAL filter on an elixir embedded aggregate (DEBT-02 — base_filter ^actor)", async () => {
+    expect(
+      await honoFilterErrors(
+        sys("elixir", { shape: "embedded", filter: "filter this.tenantId == currentUser.tenantId" }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("accepts a PRINCIPAL filter on a node embedded aggregate (DEBT-02 — requireCurrentUser() SQL where)", async () => {
+    expect(
+      await honoFilterErrors(
+        sys("node", { shape: "embedded", filter: "filter this.tenantId == currentUser.tenantId" }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("accepts a PRINCIPAL filter on a java embedded aggregate (DEBT-02 — SpEL @Query overrides)", async () => {
+    expect(
+      await honoFilterErrors(
+        sys("java", { shape: "embedded", filter: "filter this.tenantId == currentUser.tenantId" }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("still gates a PRINCIPAL filter on a node DOCUMENT aggregate (in-app actor eval — DEBT-02 Slice B)", async () => {
     const errs = await honoFilterErrors(
-      sys("elixir", { shape: "embedded", filter: "filter this.tenantId == currentUser.tenantId" }),
+      sys("node", { shape: "document", filter: "filter this.tenantId == currentUser.tenantId" }),
     );
     expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("shape(embedded)");
+    expect(errs[0]).toContain("shape(document)");
   });
 
   it("accepts a non-principal capability filter on a java EMBEDDED aggregate (DEBT-02 — @SQLRestriction)", async () => {
