@@ -367,9 +367,24 @@ What shipped, and what stays deferred after an end-to-end investigation of the
 >   with `ignoring softDeletable` / `ignoring *` reads compiles under
 >   `mix compile --warnings-as-errors` against real Ash 3.x
 >   (`test/e2e/fixtures/elixir-ash-build/filter-bypass.ddd`). ✅
-> - **Deferred** (each a later gated slice, fail-fast until then): **Java** (the
->   §11.6 `@Filter`/`@SQLRestriction` triage — the analogous always-on↔bypassable
->   split), **Python** (wire `contextFilters` first, then bypass).
+> - **Slice 4** — **Java/Spring Boot** honors bypass via the §11.6 "pay for what
+>   you use" triage: a never-bypassed cap (and any bare filter) stays on the
+>   always-on `@SQLRestriction`; a capability some read `ignoring`s is PROMOTED to
+>   `@FilterDef(autoEnabled = true, applyToLoadByKey = true)` + `@Filter`, and the
+>   bypassing find/view/retrieval bodies wrap with
+>   `em.unwrap(Session.class).disableFilter(…)` / `enableFilter(…)` (finally-rearmed).
+>   Triage derived at codegen (`src/generator/java/capability-filter.ts`). Runtime-
+>   verified: `gradle testClasses bootJar` against Spring Boot 4.1 / Hibernate 7.x
+>   (`test/e2e/fixtures/java-build/filter-bypass.ddd`). ✅
+> - **Slice 5** — **Python/SQLAlchemy** honors bypass by omitting the bypassed
+>   conjunct (find + view bake-in; `run_<retrieval>` unions its inline call-site
+>   bypasses). The proposal's "wire `contextFilters` first" prerequisite was
+>   already satisfied on `main` (Python emits capability filters today). Runtime-
+>   verified: `ruff` + `mypy --strict` + `pytest`
+>   (`test/e2e/fixtures/python-build/filter-bypass.ddd`). ✅
+>
+> All five DB backends now honor `ignoring`;
+> `FILTER_BYPASS_FAMILIES = {dotnet, node, elixir, java, python}` is complete.
 >
 > **Known pre-existing gap (orthogonal):** on node/Drizzle the criterion-based
 > retrieval path (`Repo.findAll(<Criterion>)`) does **not** apply capability
@@ -439,11 +454,14 @@ scoping (you own that source); revisit only if a real need appears.
 | **1** | surface (`find`+`view`+inline) + **.NET** | `ddd.langium` `ignoring`-clause on `FindDecl` + `View` (×2 forms) + the `Repo.findAll`/`run` call expr (+`langium:generate`, commit generated); `lower` → bypass-set on `FindIR`/`ViewIR`/the `repo-run` `ExprIR`; printer arms (print-completeness); `efcore.ts` resolve origin→EF name→`IgnoreQueryFilters` (repo finds + view reads + inline); `loom.filter-bypass-*` validators (`ir/validate/checks/*`, mirror `validateContextFilterSupport`) | runtime: `dotnet-build`, `dotnet-obs-e2e`, `k8s-e2e` read+write | no (grammar→regen→lower→emit is a chain) |
 | **2** | **Drizzle + Ecto** honor bypass (omit predicate from the AND-chain) | `typescript/repository-find-predicate.ts`; `elixir/vanilla/capability-filter.ts` | `behavioral-e2e`, `k8s-e2e` | **yes — 2 agents** (disjoint trees) |
 | **3** | **Ash** honors bypass — §11.6 triage (promote a bypassed cap out of `base_filter`, apply per-read) | `elixir/capability-filter.ts` (triage + per-read predicate); `elixir/domain-emit.ts` (reduced `base_filter` + default-`:read` override); `elixir/domain/actions.ts` (explicit `read :read`); `elixir/repository-emit.ts` (per-find/-view/-retrieval `filter`); validator widened to allow elixir-Ash | `elixir-ash-build` (`filter-bypass.ddd`) `mix compile --warnings-as-errors` | ✅ done |
-| defer | **Java** (`@SQLRestriction`→`@Filter` *only where bypassed* — §11.6), **Python** (filter-emission gap first, then bypass) | per-backend emit + drop from `NO_FILTER_EMISSION`/`LIMITED_FAMILIES` | each own runtime gate | **yes — independent fan-out** |
+| **4** | **Java** (`@SQLRestriction`→`@Filter` *only where bypassed* — §11.6 triage; `Session.disableFilter`/`enableFilter` at bypass sites) | `java/capability-filter.ts` (triage + `inlineRunBypassesByRetrieval`); `java/emit/entity.ts` (split `@SQLRestriction` ↔ `@FilterDef(autoEnabled)`/`@Filter`); `java/emit/repository.ts` (Session disable/enable wrap); `java/emit/view.ts` + `document-store.ts`; `java/index.ts` threads `promotedCaps` | `java-build` (`filter-bypass.ddd`) `gradle testClasses bootJar` | ✅ done |
+| **5** | **Python** (filter-emission already on `main`; bypass = omit conjunct, find+view+inline) | `python/find-predicate.ts` (`FilterBypass` + bypass-filtered `contextFilterPredicate`); `python/repository-builder.ts` (per-find/-view bake-in + `run_<retrieval>` union bypass) | `python-build` (`filter-bypass.ddd`) `ruff` + `mypy --strict` + `pytest` | ✅ done |
 
-Backends that can't honor a given `ignoring <Cap>` **fail-fast** via the new
-validator (mirrors `loom.context-filter-unsupported`), so an unsupported target
-errors at compile rather than silently still-filtering.
+All five DB backends (dotnet, node, elixir-vanilla + Ash, java, python) now honor
+`ignoring`; `FILTER_BYPASS_FAMILIES = {dotnet, node, elixir, java, python}`. The
+`loom.filter-bypass-unsupported` fail-fast (mirrors `loom.context-filter-unsupported`)
+is now unreachable for backend deployables — kept as a guard for any future
+non-honoring target rather than removed.
 
 ### 11.6 Java — the "pay for what you use" hybrid (researched; no regression)
 
