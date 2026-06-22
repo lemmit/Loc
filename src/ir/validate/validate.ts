@@ -1,5 +1,6 @@
 import type { EnrichedLoomModel } from "../types/loom-ir.js";
 import { allContexts } from "../types/loom-ir.js";
+import { validateStampReadsBeforeFlush } from "./checks/capability-checks.js";
 import type { LoomDiagnostic } from "./checks/diagnostic.js";
 import { validateDomainServices } from "./checks/domain-service-checks.js";
 import {
@@ -167,6 +168,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateAggregateTestBodies(c, diags);
     validateDomainServices(c, diags);
     validateExternOperations(c, diags);
+    validateStampReadsBeforeFlush(c, diags);
     validateEventSourcedDiscipline(c, diags);
     validateWorkflows(c, diags);
     validateViews(c, diags);

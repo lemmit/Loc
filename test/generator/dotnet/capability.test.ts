@@ -178,12 +178,14 @@ describe(".NET generator: registry-driven SaveChangesInterceptor", () => {
     expect(src).toMatch(/case Order /);
   });
 
-  it("interceptor body assigns the macro-supplied fields", async () => {
+  it("interceptor body assigns the macro-supplied fields via the EF lambda accessor", async () => {
     const model = await modelFrom(trioed("audit", "auditable"));
     const files = generateDotnet(model);
     const src = files.get("Infrastructure/Persistence/AuditableInterceptor.cs")!;
-    expect(src).toMatch(/e\.CreatedAt =/);
-    expect(src).toMatch(/e\.UpdatedAt =/);
+    // Compile-checked lambda write (capability-stamp-dedup) — keeps the stamped
+    // property `private set` while the write stays bound to a real property.
+    expect(src).toMatch(/ctx\.Entry\(e\)\.Property\(x => x\.CreatedAt\)\.CurrentValue =/);
+    expect(src).toMatch(/ctx\.Entry\(e\)\.Property\(x => x\.UpdatedAt\)\.CurrentValue =/);
   });
 
   it("audit stamps render the now() builtin as DateTime.UtcNow (not a bogus Now() call)", async () => {
@@ -193,8 +195,12 @@ describe(".NET generator: registry-driven SaveChangesInterceptor", () => {
     const model = await modelFrom(trioed("audit", "auditable"));
     const files = generateDotnet(model);
     const src = files.get("Infrastructure/Persistence/AuditableInterceptor.cs")!;
-    expect(src).toMatch(/e\.CreatedAt = DateTime\.UtcNow;/);
-    expect(src).toMatch(/e\.UpdatedAt = DateTime\.UtcNow;/);
+    expect(src).toMatch(
+      /ctx\.Entry\(e\)\.Property\(x => x\.CreatedAt\)\.CurrentValue = DateTime\.UtcNow;/,
+    );
+    expect(src).toMatch(
+      /ctx\.Entry\(e\)\.Property\(x => x\.UpdatedAt\)\.CurrentValue = DateTime\.UtcNow;/,
+    );
     expect(src).not.toMatch(/= Now\(\)/);
   });
 

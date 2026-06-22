@@ -9,11 +9,16 @@ import { renderCsExpr } from "../render-expr.js";
 // no per-aggregate handler logic — adding a new stamping macro
 // just adds a switch arm here.
 //
-// The generator emits one switch on entry.Entity.GetType(), one
-// arm per aggregate that has any stamping rules.  Inside each arm,
-// the onCreate / onUpdate assignments are rendered using the same
-// expression machinery operation bodies use; `now()` resolves to
-// `DateTime.UtcNow` through its normal IR lowering.
+// The generator emits one switch on entry.Entity, one arm per
+// aggregate that has any stamping rules.  Inside each arm, the
+// onCreate / onUpdate assignments are written through EF's metadata
+// accessor via the COMPILE-CHECKED lambda overload
+// (`ctx.Entry(e).Property(x => x.CreatedAt).CurrentValue = …`), not the
+// CLR setter — so the entity's stamped columns stay `{ get; private set; }`
+// (no `internal set` leak) while the write site stays bound to a real
+// property at compile time (a renamed/removed column is a build error, not a
+// runtime `Property("…")` throw).  The RHS uses the same expression machinery
+// operation bodies use; `now()` resolves to `DateTime.UtcNow`.
 //
 // A `currentUser` stamp value (`createdBy := currentUser`) is the
 // principal id — the .NET analogue of the Java backend's
@@ -40,17 +45,15 @@ export function renderAuditableInterceptor(
     .map((a) => ({ agg: a, rules: a.contextStamps ?? [] }))
     .filter((x) => x.rules.length > 0);
 
-  // Build the switch body: for each aggregate, an arm that casts
+  // Build the switch body: for each aggregate, an arm that matches
   // entry.Entity to the concrete type and applies the relevant
   // assignments based on entry.State.
   const switchArms = stamping.map(({ agg, rules }) => renderArm(rules, agg, actorIdProp));
 
-  // Per-aggregate using directives so the cast in each arm can name
+  // Per-aggregate using directives so the pattern in each arm can name
   // the type unqualified.
   const usings = stamping.map(({ agg }) => `using ${ns}.Domain.${plural(agg.name)};`);
 
-  // Principal stamps reach into the ambient RequestContext (Domain.Common) for
-  // the verified User (Auth); pull those namespaces in only when used.
   // Principal stamps reach into the ambient RequestContext for the verified
   // User; the namespaces (and the special rendering) only apply when the
   // principal id property is known — i.e. the deployable carries auth.  Without
@@ -123,10 +126,13 @@ function isCurrentUserRef(value: ExprIR): boolean {
   return value.kind === "ref" && value.refKind === "current-user";
 }
 
-/** Switch arm for one aggregate's stamping rules.  Body assigns
- * per-event fields on the casted entity using the macro-supplied
- * value expressions, rendered with `entity` as the `this` binder.  A bare
- * `currentUser` value renders to the ambient principal's id
+/** Switch arm for one aggregate's stamping rules.  Body assigns per-event
+ * fields on the matched entity through EF's metadata accessor via the
+ * compile-checked lambda overload (`ctx.Entry(e).Property(x => x.Field)
+ * .CurrentValue = …`), so the stamped property can stay `private set` while
+ * the write remains bound to a real property at compile time.  The value
+ * expressions are rendered with `e` as the `this` binder; a bare `currentUser`
+ * value renders to the ambient principal's id
  * (`RequestContext.Current!.CurrentUser!.<actorIdProp>`), mirroring the Java
  * backend's `currentUser.id()`. */
 function renderArm(
@@ -134,7 +140,7 @@ function renderArm(
   agg: AggregateIR,
   actorIdProp?: string,
 ): string {
-  const argName = "e"; // local for the casted entity inside the arm
+  const argName = "e"; // local for the matched entity inside the arm
   const onCreate = rules.find((r) => r.event === "create")?.assignments ?? [];
   const onUpdate = rules.find((r) => r.event === "update")?.assignments ?? [];
 
@@ -142,12 +148,13 @@ function renderArm(
     isCurrentUserRef(value) && actorIdProp
       ? `RequestContext.Current!.CurrentUser!.${actorIdProp}`
       : renderCsExpr(value, { thisName: argName });
-  const createAssigns = onCreate.map(
-    (a) => `                        ${argName}.${upperFirst(a.field)} = ${renderValue(a.value)};`,
-  );
-  const updateAssigns = onUpdate.map(
-    (a) => `                        ${argName}.${upperFirst(a.field)} = ${renderValue(a.value)};`,
-  );
+  // EF metadata write through the compile-checked lambda: keeps the stamped
+  // property `private set` (the CLR setter is never invoked) yet binds the
+  // write to a real property name at build time.
+  const assign = (field: string, value: ExprIR): string =>
+    `                        ctx.Entry(${argName}).Property(x => x.${upperFirst(field)}).CurrentValue = ${renderValue(value)};`;
+  const createAssigns = onCreate.map((a) => assign(a.field, a.value));
+  const updateAssigns = onUpdate.map((a) => assign(a.field, a.value));
 
   const arm = [`                case ${agg.name} ${argName}:`];
   if (createAssigns.length) {

@@ -7,7 +7,7 @@ import type {
   RepositoryIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
-import { exprUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../../util/naming.js";
 import { javaValueTypeForId, renderJavaExpr, renderJavaType } from "../render-expr.js";
@@ -71,18 +71,13 @@ export function renderJavaService(
       `        var ${f.name} = ${wireToDomain(eff(f.type, !!f.optional), `request.${f.name}()`)};`,
   );
   const createArgs = createParams.map((f) => f.name).join(", ");
-  // Lifecycle stamps (audit / softDelete): the entity exposes
-  // `_stampOnCreate` / `_stampOnUpdate` the service calls before save.
-  // A stamp value that references currentUser resolves to the principal
-  // id; the method takes a `User currentUser` arg threaded from the
-  // request-scoped accessor.
-  const stampRules = (event: "create" | "update") =>
-    (agg.contextStamps ?? []).filter((r) => r.event === event).flatMap((r) => r.assignments);
-  const hasStamp = (event: "create" | "update"): boolean => stampRules(event).length > 0;
-  const stampUsesUser = (event: "create" | "update"): boolean =>
-    stampRules(event).some((a) => exprUsesCurrentUser(a.value));
-  const stampCall = (event: "create" | "update"): string =>
-    `        aggregate._stampOn${upperFirst(event)}(${stampUsesUser(event) ? "currentUser" : ""});`;
+  // Lifecycle stamps (audit / softDelete) are persist-time on Java: the entity
+  // carries Spring Data JPA auditing annotations (@CreatedDate / @CreatedBy /
+  // @LastModifiedDate / @LastModifiedBy) filled by the AuditingEntityListener
+  // at flush — there is no service call site (the §5 dedup move).  The
+  // JpaAuditingConfig's AuditorAware<UUID> supplies the principal for
+  // @CreatedBy / @LastModifiedBy, so the service no longer threads currentUser
+  // for stamping.  See §5c of docs/plans/capability-stamp-dedup-simulation.md.
   // Audited lifecycle (audit-and-logging.md): the route-driving create / the
   // canonical destroy stage an audit_records row in the SAME @Transactional
   // method as the save / delete.  The route-driving create is the ES `create`
@@ -120,9 +115,7 @@ export function renderJavaService(
           hasCreateValidator && !ctx.esCreateParams
             ? `        ${agg.name}Validators.create(${createArgs});`
             : null,
-          stampUsesUser("create") ? `        var currentUser = currentUserAccessor.user();` : null,
           `        var aggregate = ${agg.name}.create(${createArgs});`,
-          hasStamp("create") ? stampCall("create") : null,
           `        repository.save(aggregate);`,
           ...createAuditLines,
           `        publishEvents(aggregate);`,
@@ -196,11 +189,9 @@ export function renderJavaService(
     op.when
       ? `        if (!(${renderJavaExpr(op.when, { thisName: "aggregate", accessorProps: true })})) throw new DisallowedException("operation '${op.name}' is not allowed in the current state of ${agg.name}.");`
       : null;
-  const anyStampUsesUser = stampUsesUser("create") || stampUsesUser("update");
   const anyOpUsesUser =
-    (!!ctx.authed &&
-      agg.operations.some((op) => op.visibility === "public" && operationUsesCurrentUser(op))) ||
-    anyStampUsesUser;
+    !!ctx.authed &&
+    agg.operations.some((op) => op.visibility === "public" && operationUsesCurrentUser(op));
   // Audit: any audited COMMAND ACTION — public operation OR lifecycle
   // create/destroy — needs the AuditRecordRepository injected + the
   // OffsetDateTime / UUID / RequestContext imports.  Lifecycle audit also pulls
@@ -244,15 +235,12 @@ export function renderJavaService(
         return [
           `    public void ${op.name}(${paramSig}) {`,
           ...lets,
-          usesUser || stampUsesUser("update")
-            ? `        var currentUser = currentUserAccessor.user();`
-            : null,
+          usesUser ? `        var currentUser = currentUserAccessor.user();` : null,
           `        var aggregate = repository.getById(id);`,
           whenGateLine(op),
           `        aggregate.check${upperFirst(op.name)}(${args});`,
           `        ${lowerFirst(op.name)}Handler.handle(${handlerArgs});`,
           `        aggregate._assertInvariants();`,
-          hasStamp("update") ? stampCall("update") : null,
           `        repository.save(aggregate);`,
           `        publishEvents(aggregate);`,
           `    }`,
@@ -274,9 +262,7 @@ export function renderJavaService(
       return [
         `    public ${spec ? spec.name : "void"} ${op.name}(${paramSig}) {`,
         ...lets,
-        usesUser || stampUsesUser("update")
-          ? `        var currentUser = currentUserAccessor.user();`
-          : null,
+        usesUser ? `        var currentUser = currentUserAccessor.user();` : null,
         opHasValidator
           ? `        ${agg.name}Validators.${op.name}(${op.params.map((p) => p.name).join(", ")});`
           : null,
@@ -286,7 +272,6 @@ export function renderJavaService(
         spec
           ? `        var result = aggregate.${op.name}(${args});`
           : `        aggregate.${op.name}(${args});`,
-        hasStamp("update") ? stampCall("update") : null,
         `        repository.save(aggregate);`,
         audited ? `        var __after = ${agg.name}Response.from(aggregate);` : null,
         audited ? `        auditRecords.save(new AuditRecord(` : null,

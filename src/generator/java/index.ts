@@ -8,6 +8,7 @@ import type {
   RepositoryIR,
   SystemIR,
 } from "../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import { isTpcBase, isTphBase, tableOwnerName } from "../../ir/util/inheritance.js";
 import { effectiveSavingShape, resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
@@ -37,6 +38,7 @@ import {
 import { renderAuthFiles } from "./emit/auth.js";
 import {
   renderAggregateNotFoundException,
+  renderAuditableInterface,
   renderDisallowedException,
   renderDomainEventInterface,
   renderDomainException,
@@ -56,6 +58,7 @@ import { renderJavaEventSourcedRepositoryImpl } from "./emit/event-store.js";
 import { renderJavaEvent } from "./emit/events.js";
 import { renderExternHandlerInterface, renderExternHandlerStub } from "./emit/extern.js";
 import { renderJavaId } from "./emit/ids.js";
+import { renderJpaAuditingConfig } from "./emit/jpa-auditing-config.js";
 import { emitJavaMigrations } from "./emit/migrations.js";
 import {
   renderCatalogLogger,
@@ -304,6 +307,36 @@ function emitProjectFromContexts(
     if (!hasProvenance) {
       place("LoomJsonFormatMapperConfig.java", "config", renderJsonFormatMapperConfig(basePkg));
     }
+  }
+
+  // Lifecycle-stamp auditing (capability-stamp-dedup-simulation.md §5): any
+  // aggregate carrying `contextStamps` (`with auditable` / a context `stamp`)
+  // is auditable — its stamp fields are filled at persist time by the Spring
+  // Data AuditingEntityListener, so once per app we emit the pure `Auditable`
+  // marker interface (§5a) and the `JpaAuditingConfig` (§5d: @EnableJpaAuditing
+  // + an AuditorAware<UUID> over the request-scoped principal for the
+  // @CreatedBy / @LastModifiedBy fields).  The auditor provider is wired only
+  // when a stamp references currentUser AND the deployable is authed (else
+  // CurrentUserAccessor doesn't exist); a purely `now()`-stamped system still
+  // gets @EnableJpaAuditing so @CreatedDate / @LastModifiedDate fire.
+  const auditableAggregates = contexts.flatMap((c) =>
+    c.aggregates.filter((a) => (a.contextStamps ?? []).length > 0),
+  );
+  const hasAuditable = auditableAggregates.length > 0;
+  if (hasAuditable) {
+    place("Auditable.java", "domain-common", renderAuditableInterface(basePkg));
+    const stampsUsePrincipal = auditableAggregates.some((a) =>
+      (a.contextStamps ?? []).some((r) => r.assignments.some((x) => exprUsesCurrentUser(x.value))),
+    );
+    place(
+      "JpaAuditingConfig.java",
+      "config",
+      renderJpaAuditingConfig(
+        basePkg,
+        system?.sys.user?.fields ?? [],
+        stampsUsePrincipal && authRequired,
+      ),
+    );
   }
 
   for (const ctx of contexts) {

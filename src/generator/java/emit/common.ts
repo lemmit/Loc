@@ -118,6 +118,23 @@ export function renderPagedRecord(basePkg: string): string {
   );
 }
 
+/** Pure marker interface for aggregates carrying lifecycle-stamp audit
+ *  columns (`with auditable` / a context `stamp`).  Zero members — runtime
+ *  type identity only; the JPA auditing wiring keys off the field annotations
+ *  + AuditingEntityListener, not this interface, but it gives a documented
+ *  join point and a single readable "this aggregate is audited" signal.
+ *  See §5a of docs/plans/capability-stamp-dedup-simulation.md. */
+export function renderAuditableInterface(basePkg: string): string {
+  return lines(
+    `package ${basePkg}.domain.common;`,
+    ``,
+    `/** Pure tag: this aggregate carries audit columns. Zero members. */`,
+    `public interface Auditable {`,
+    `}`,
+    ``,
+  );
+}
+
 export function renderDomainEventInterface(basePkg: string): string {
   return lines(
     `package ${basePkg}.domain.events;`,
