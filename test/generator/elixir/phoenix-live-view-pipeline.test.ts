@@ -131,6 +131,35 @@ describe("phoenixLiveView pipeline", () => {
     expect(smoke!).toMatch(/await expect\(page\)\.toHaveURL\(new RegExp\(/);
   });
 
+  it("types page-object form inputs precisely (no Record<string, unknown>)", async () => {
+    // The Phoenix backend ships no generated TS request types, so the page
+    // objects type their `input` from an inline object literal derived from the
+    // filled fields (page-objects-emit.ts::e2eInputParamType).  The old
+    // `Record<string, unknown>` made `input.x!` resolve to `{}` and every page
+    // object failed `tsc` — these assertions pin the precise typing so the
+    // emitted e2e suite typechecks (the reason the page objects were never
+    // runnable before).
+    const model = await buildFixture();
+    const { files } = generateSystems(model);
+
+    // The new-form fill types the Money value object as a nested object, and
+    // scalar fields as string — never the unknown-typed Record.
+    const newPage = files.get("phoenix_app/e2e/pages/customer_new.ts");
+    expect(newPage, "customer_new.ts emitted").toBeDefined();
+    expect(newPage!).not.toContain("Record<string, unknown>");
+    expect(newPage!).toMatch(/async fill\(input: Partial<\{[^}]*name: string/);
+    // creditLimit: Money (decimal amount + string currency) → nested optional shape.
+    expect(newPage!).toContain("creditLimit: { amount?: string | number; currency?: string }");
+
+    // The detail page's operation method types its decimal param as string|number.
+    const detailPage = files.get("phoenix_app/e2e/pages/customer_detail.ts");
+    expect(detailPage, "customer_detail.ts emitted").toBeDefined();
+    expect(detailPage!).not.toContain("Record<string, unknown>");
+    expect(detailPage!).toMatch(
+      /async adjustCredit\(input: Partial<\{ amount: string \| number \}>\)/,
+    );
+  });
+
   it("emits .dialyzer_ignore.exs at project root + wires mix.exs to read it", async () => {
     // Per docs/proposals/cross-stack-static-analysis.md — the ignore
     // template ships as future-proofing for the Tier 4 Dialyzer gate.
