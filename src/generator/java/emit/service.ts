@@ -83,6 +83,35 @@ export function renderJavaService(
     stampRules(event).some((a) => exprUsesCurrentUser(a.value));
   const stampCall = (event: "create" | "update"): string =>
     `        aggregate._stampOn${upperFirst(event)}(${stampUsesUser(event) ? "currentUser" : ""});`;
+  // Audited lifecycle (audit-and-logging.md): the route-driving create / the
+  // canonical destroy stage an audit_records row in the SAME @Transactional
+  // method as the save / delete.  The route-driving create is the ES `create`
+  // for an event-sourced aggregate, else the canonical create.
+  const createAction = agg.persistedAs === "eventLog" ? agg.creates?.[0] : agg.canonicalCreate;
+  const auditCreate = !!createAction?.audited;
+  const auditDestroy = !!agg.canonicalDestroy?.audited;
+  // create: before is JSON null (NullNode → the `null` token, satisfying the
+  // NOT NULL jsonb column), after is the freshly-created wire snapshot, keyed by
+  // the generated id; actor + correlation/scope/parent ids from RequestContext.
+  const createAuditLines = auditCreate
+    ? [
+        `        var __after = ${agg.name}Response.from(aggregate);`,
+        `        auditRecords.save(new AuditRecord(`,
+        `            UUID.randomUUID().toString(),`,
+        `            ${JSON.stringify(`create${agg.name}`)},`,
+        `            "create",`,
+        `            ${JSON.stringify(agg.name)},`,
+        `            aggregate.id().value().toString(),`,
+        `            ${ctx.authed ? "currentUserAccessor.user()" : "null"},`,
+        `            NullNode.getInstance(),`,
+        `            __after,`,
+        `            OffsetDateTime.now(),`,
+        `            "ok",`,
+        `            RequestContext.correlationId(),`,
+        `            RequestContext.scopeId(),`,
+        `            RequestContext.parentId()));`,
+      ]
+    : [];
   const createLines =
     hasCreate(agg) || ctx.esCreateParams
       ? [
@@ -95,6 +124,7 @@ export function renderJavaService(
           `        var aggregate = ${agg.name}.create(${createArgs});`,
           hasStamp("create") ? stampCall("create") : null,
           `        repository.save(aggregate);`,
+          ...createAuditLines,
           `        publishEvents(aggregate);`,
           `        return aggregate.id();`,
           `    }`,
@@ -171,12 +201,19 @@ export function renderJavaService(
     (!!ctx.authed &&
       agg.operations.some((op) => op.visibility === "public" && operationUsesCurrentUser(op))) ||
     anyStampUsesUser;
-  // Per-operation audit: any audited public op needs the AuditRecordRepository
-  // injected + the OffsetDateTime / UUID / RequestContext imports.
-  const anyAudited = agg.operations.some((op) => op.visibility === "public" && op.audited);
+  // Audit: any audited COMMAND ACTION — public operation OR lifecycle
+  // create/destroy — needs the AuditRecordRepository injected + the
+  // OffsetDateTime / UUID / RequestContext imports.  Lifecycle audit also pulls
+  // in Jackson's NullNode for the JSON-null side of the before/after asymmetry.
+  const anyOpAudited = agg.operations.some((op) => op.visibility === "public" && op.audited);
+  const anyLifecycleAudited = auditCreate || auditDestroy;
+  const anyAudited = anyOpAudited || anyLifecycleAudited;
   if (anyAudited) {
     imports.add("java.time.OffsetDateTime");
     imports.add("java.util.UUID");
+  }
+  if (anyLifecycleAudited) {
+    imports.add("com.fasterxml.jackson.databind.node.NullNode");
   }
   // The audit-record actor reads `currentUserAccessor.user()` on an authed
   // system even when no operation otherwise uses the current user, so the
@@ -275,11 +312,34 @@ export function renderJavaService(
   const externOps = agg.operations.filter((op) => op.extern);
 
   // --- destroy (lifecycle) ----------------------------------------------------------
+  // Audited destroy: snapshot the loaded wire shape, persist the audit row
+  // (before = the last snapshot, after = JSON null via NullNode → satisfies the
+  // NOT NULL jsonb column), THEN hard-delete — all in this @Transactional method
+  // so the audit insert + the delete commit or roll back together.
   const destroyLines =
     (agg.destroys?.length ?? 0) > 0
       ? [
           `    public void destroy${agg.name}(${idClass} id) {`,
           `        var aggregate = repository.getById(id);`,
+          ...(auditDestroy
+            ? [
+                `        var __before = ${agg.name}Response.from(aggregate);`,
+                `        auditRecords.save(new AuditRecord(`,
+                `            UUID.randomUUID().toString(),`,
+                `            ${JSON.stringify(`destroy${agg.name}`)},`,
+                `            "destroy",`,
+                `            ${JSON.stringify(agg.name)},`,
+                `            id.value().toString(),`,
+                `            ${ctx.authed ? "currentUserAccessor.user()" : "null"},`,
+                `            __before,`,
+                `            NullNode.getInstance(),`,
+                `            OffsetDateTime.now(),`,
+                `            "ok",`,
+                `            RequestContext.correlationId(),`,
+                `            RequestContext.scopeId(),`,
+                `            RequestContext.parentId()));`,
+              ]
+            : []),
           `        repository.delete(aggregate);`,
           `    }`,
           ``,

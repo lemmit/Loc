@@ -34,8 +34,14 @@ export function emitCreateCommandAndHandler(
   /** Emit the FluentValidation create-validator (built from invariants over
    *  the field set).  Skipped for event-sourced aggregates, whose create
    *  input is the command's params (not the field set) and whose invariants
-   *  are enforced on the fold.  Defaults true. */
-  opts?: { emitValidator?: boolean; idClass?: string },
+   *  are enforced on the fold.  Defaults true.  `auditCtx` is supplied when the
+   *  create action is `audited` — it carries the enclosing context for the wire
+   *  projection. */
+  opts?: {
+    emitValidator?: boolean;
+    idClass?: string;
+    auditCtx?: EnrichedBoundedContextIR;
+  },
 ): void {
   const emitValidator = opts?.emitValidator ?? true;
   const idClass = opts?.idClass ?? `${agg.name}Id`;
@@ -51,6 +57,44 @@ export function emitCreateCommandAndHandler(
       returnType: idClass,
     }),
   );
+  // Audited create (lifecycle parity with the per-op path): the row is STAGED
+  // onto the request-scoped unit of work (IAuditWriter.Stage → AppDbContext.Add)
+  // BEFORE the aggregate save, so the single `_repo.SaveAsync` flushes the audit
+  // row in the SAME transaction.  Asymmetry: `Before` is the JSON null literal
+  // ("null"), `After` is the freshly-created wire snapshot, keyed by the
+  // generated id; actor + correlation/scope/parent ids come from RequestContext.
+  const auditCreate = !!opts?.auditCtx;
+  const createAfterExpr = auditCreate
+    ? projectEntityExpr("aggregate", agg as EnrichedAggregateIR, opts!.auditCtx!)
+    : "";
+  const createAuditStage = auditCreate
+    ? `        _audit.Stage(new AuditRecord\n` +
+      `        {\n` +
+      `            AuditId = Guid.NewGuid().ToString(),\n` +
+      `            OperationId = ${JSON.stringify(`create${agg.name}`)},\n` +
+      `            Action = "create",\n` +
+      `            TargetType = ${JSON.stringify(agg.name)},\n` +
+      `            TargetId = aggregate.Id.Value.ToString(),\n` +
+      `            Actor = RequestContext.Current?.PrincipalJson(),\n` +
+      `            Before = "null",\n` +
+      `            After = System.Text.Json.JsonSerializer.Serialize(${createAfterExpr}),\n` +
+      `            At = DateTime.UtcNow,\n` +
+      `            Status = "ok",\n` +
+      `            CorrelationId = RequestContext.Current?.CorrelationId,\n` +
+      `            ScopeId = RequestContext.Current?.ScopeId,\n` +
+      `            ParentId = RequestContext.Current?.ParentId,\n` +
+      `        });\n`
+    : "";
+  const createAuditDeps = auditCreate ? [{ type: "IAuditWriter", field: "_audit" }] : [];
+  // `Domain.Common` is already in the base handler usings — don't repeat it
+  // here (CS0105 duplicate-using is an error under /warnaserror).
+  const createAuditUsings = auditCreate
+    ? [
+        `${ns}.Application.Common`,
+        `${ns}.Application.${plural(agg.name)}.Responses`,
+        `${ns}.Infrastructure.Persistence`,
+      ]
+    : [];
   out.set(
     `Application/${aggFolder}/Commands/Create${agg.name}Handler.cs`,
     renderCommandHandler({
@@ -59,10 +103,13 @@ export function emitCreateCommandAndHandler(
       handlerName: `Create${agg.name}Handler`,
       commandName: `Create${agg.name}Command`,
       returnType: idClass,
+      extraDeps: createAuditDeps,
+      extraUsings: createAuditUsings,
       body:
         `        var aggregate = ${agg.name}.Create(${requiredFields
           .map((f) => `command.${upperFirst(f.name)}`)
           .join(", ")});\n` +
+        createAuditStage +
         `        await _repo.SaveAsync(aggregate, cancellationToken);\n` +
         `        return aggregate.Id;\n`,
     }),
@@ -91,6 +138,9 @@ export function emitDestroyCommandAndHandler(
   aggFolder: string,
   out: Map<string, string>,
   idClass: string = `${agg.name}Id`,
+  /** Supplied when the destroy action is `audited` — carries the enclosing
+   *  context for the before-snapshot wire projection. */
+  auditCtx?: EnrichedBoundedContextIR,
 ): void {
   out.set(
     `Application/${aggFolder}/Commands/Destroy${agg.name}Command.cs`,
@@ -101,6 +151,44 @@ export function emitDestroyCommandAndHandler(
       commandParams: `${idClass} Id`,
     }),
   );
+  // Audited destroy (lifecycle parity with the per-op path): snapshot the
+  // loaded wire shape, STAGE the audit row, THEN hard-delete — the single
+  // `_repo.DeleteAsync` SaveChangesAsync flushes the audit insert + the delete
+  // in ONE transaction (a failed delete rolls back the spurious record).
+  // Asymmetry: `Before` is the last wire snapshot, `After` is the JSON null
+  // literal ("null"); actor + correlation/scope/parent ids from RequestContext.
+  const auditDestroy = !!auditCtx;
+  const destroyBeforeExpr = auditDestroy
+    ? projectEntityExpr("aggregate", agg as EnrichedAggregateIR, auditCtx)
+    : "";
+  const destroyAuditStage = auditDestroy
+    ? `        _audit.Stage(new AuditRecord\n` +
+      `        {\n` +
+      `            AuditId = Guid.NewGuid().ToString(),\n` +
+      `            OperationId = ${JSON.stringify(`destroy${agg.name}`)},\n` +
+      `            Action = "destroy",\n` +
+      `            TargetType = ${JSON.stringify(agg.name)},\n` +
+      `            TargetId = command.Id.Value.ToString(),\n` +
+      `            Actor = RequestContext.Current?.PrincipalJson(),\n` +
+      `            Before = System.Text.Json.JsonSerializer.Serialize(${destroyBeforeExpr}),\n` +
+      `            After = "null",\n` +
+      `            At = DateTime.UtcNow,\n` +
+      `            Status = "ok",\n` +
+      `            CorrelationId = RequestContext.Current?.CorrelationId,\n` +
+      `            ScopeId = RequestContext.Current?.ScopeId,\n` +
+      `            ParentId = RequestContext.Current?.ParentId,\n` +
+      `        });\n`
+    : "";
+  const destroyAuditDeps = auditDestroy ? [{ type: "IAuditWriter", field: "_audit" }] : [];
+  // `Domain.Common` is already in the base handler usings — don't repeat it
+  // here (CS0105 duplicate-using is an error under /warnaserror).
+  const destroyAuditUsings = auditDestroy
+    ? [
+        `${ns}.Application.Common`,
+        `${ns}.Application.${plural(agg.name)}.Responses`,
+        `${ns}.Infrastructure.Persistence`,
+      ]
+    : [];
   out.set(
     `Application/${aggFolder}/Commands/Destroy${agg.name}Handler.cs`,
     renderCommandHandler({
@@ -108,9 +196,12 @@ export function emitDestroyCommandAndHandler(
       aggName: agg.name,
       handlerName: `Destroy${agg.name}Handler`,
       commandName: `Destroy${agg.name}Command`,
+      extraDeps: destroyAuditDeps,
+      extraUsings: destroyAuditUsings,
       body:
         `        var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)\n` +
         `            ?? throw new AggregateNotFoundException($"${agg.name} {command.Id} not found");\n` +
+        destroyAuditStage +
         `        await _repo.DeleteAsync(aggregate, cancellationToken);\n` +
         `        return Unit.Value;\n`,
     }),

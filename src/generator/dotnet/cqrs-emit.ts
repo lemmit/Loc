@@ -82,15 +82,25 @@ export function emitCqrs(
   // mirroring the destroy gate below: an aggregate that declares no create
   // is not constructible over HTTP and emits no Create command/handler,
   // request DTO, response, or controller action.
+  // Audited lifecycle (audit-and-logging.md): a `create(...) audited` /
+  // `destroy audited` stages an audit_records row in the lifecycle transaction.
+  // The route-driving create is the ES `create` for an event-sourced aggregate,
+  // else the canonical create; a named create has no route, so only the
+  // route-driving action's `audited` flag matters (mirrors the Hono gate).
+  const auditedCreateAction = esCreate ?? agg.canonicalCreate ?? null;
+  const auditCreate = !options?.usingDapper && !!auditedCreateAction?.audited;
+  const auditDestroy = !options?.usingDapper && !!agg.canonicalDestroy?.audited;
   if (aggHasCreate) {
     emitCreateCommandAndHandler(agg, requiredFields, ns, aggFolder, out, {
       emitValidator: !esCreate,
       idClass,
+      auditCtx: auditCreate ? ctx : undefined,
     });
   }
   // Canonical destroy → Delete command + handler (gated on the IR
   // lifecycle, so plain aggregates emit no extra CQRS files).
-  if (agg.canonicalDestroy) emitDestroyCommandAndHandler(agg, ns, aggFolder, out, idClass);
+  if (agg.canonicalDestroy)
+    emitDestroyCommandAndHandler(agg, ns, aggFolder, out, idClass, auditDestroy ? ctx : undefined);
   emitOperationCommandsAndHandlers(agg, ctx, ns, aggFolder, out, idClass);
   emitGetByIdQueryAndHandler(agg, ctx, ns, aggFolder, out, idClass);
   emitCanOpQueriesAndHandlers(agg, ns, aggFolder, out, idClass);

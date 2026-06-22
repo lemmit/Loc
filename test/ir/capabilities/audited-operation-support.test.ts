@@ -1,10 +1,9 @@
 // Tier-0 honest-gate guard.  Per-operation audit-record emission (`operation …
-// audited`) is implemented on the Hono (node), .NET (dotnet), Java (java) and
-// Python (python) backends; on phoenix the modifier is inert, so an `audited`
-// operation hosted there silently records nothing.  The validator rejects that
-// mismatch with loom.audited-backend-unsupported.  Audited LIFECYCLE actions
-// (audited create / destroy) stay node-only (the other backends' create/destroy
-// handlers aren't instrumented).
+// audited`) AND audited LIFECYCLE actions (audited create / destroy) are
+// implemented on the Hono (node), .NET (dotnet), Java (java) and Python (python)
+// backends; on phoenix the modifier is inert, so an `audited` operation or
+// lifecycle action hosted there silently records nothing.  The validator rejects
+// that mismatch with loom.audited-backend-unsupported.
 //
 // Note: this gates the per-operation `audited` flag only — the `with audit`
 // capability macro (context stamps) is a separate concern and is NOT gated here.
@@ -71,9 +70,11 @@ describe("audited-operation capability validation", () => {
 });
 
 // Audited LIFECYCLE actions (`create(...) audited` / `destroy audited`) ship on
-// node ONLY in this slice — the .NET / Java / Python create/destroy handlers
-// aren't instrumented yet, so hosting an audited lifecycle action there silently
-// records nothing.  AUDIT_LIFECYCLE_BACKENDS = {"node"} gates exactly that.
+// node / dotnet / java / python — each backend's create/destroy handler stages
+// the lifecycle audit row (before:null/after=wire on create; before=wire/
+// after:null on destroy) in the lifecycle transaction.  Phoenix (elixir) stays
+// uninstrumented, so AUDIT_LIFECYCLE_BACKENDS = {node,dotnet,java,python} rejects
+// exactly an audited lifecycle action hosted on elixir.
 function lifecycleSys(platform: string): string {
   return `
 system Shop {
@@ -99,20 +100,20 @@ describe("audited-lifecycle capability validation", () => {
     expect(await auditErrors(lifecycleSys("node"))).toEqual([]);
   });
 
-  it("rejects audited lifecycle actions on a .NET deployable (not yet ported)", async () => {
-    const errs = await auditErrors(lifecycleSys("dotnet"));
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("lifecycle action");
+  it("accepts audited lifecycle actions on a .NET deployable (ported)", async () => {
+    expect(await auditErrors(lifecycleSys("dotnet"))).toEqual([]);
   });
 
-  it("rejects audited lifecycle actions on a Java deployable (not yet ported)", async () => {
-    const errs = await auditErrors(lifecycleSys("java"));
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("lifecycle action");
+  it("accepts audited lifecycle actions on a Java deployable (ported)", async () => {
+    expect(await auditErrors(lifecycleSys("java"))).toEqual([]);
   });
 
-  it("rejects audited lifecycle actions on a Python deployable (not yet ported)", async () => {
-    const errs = await auditErrors(lifecycleSys("python"));
+  it("accepts audited lifecycle actions on a Python deployable (ported)", async () => {
+    expect(await auditErrors(lifecycleSys("python"))).toEqual([]);
+  });
+
+  it("rejects audited lifecycle actions on a Phoenix deployable (no audit emission)", async () => {
+    const errs = await auditErrors(lifecycleSys("elixir"));
     expect(errs.length).toBe(1);
     expect(errs[0]).toContain("lifecycle action");
   });
