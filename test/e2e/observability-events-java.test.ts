@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 // stdout:
 //
 //   server_starting → server_listening → request_start {method,path} →
-//   request_end {status,durationMs} → server_shutdown → server_drained
+//   request_end {status,duration_ms} → server_shutdown → server_drained
 //
 // Catalog lines are flat JSON objects (see emit/observability.ts).
 // Postgres comes from docker (postgres:18-alpine) by default; set
@@ -90,7 +90,7 @@ interface CatalogLine {
   method?: string;
   path?: string;
   status?: number;
-  durationMs?: number;
+  duration_ms?: number;
   [k: string]: unknown;
 }
 
@@ -229,7 +229,7 @@ describe.skipIf(!ENABLED)(
         expect(end, ctx).toBeDefined();
         expect(start!.method).toBe("GET");
         expect(end!.status).toBe(200);
-        expect(typeof end!.durationMs).toBe("number");
+        expect(typeof end!.duration_ms).toBe("number");
         // scope_id rides every request-scoped line (MDC, set at the filter) —
         // the audit/provenance join key, shared across the request bracket.
         expect(start!.scope_id).toBeTruthy();
