@@ -119,6 +119,13 @@ export function renderActions(
   ctx: BoundedContextIR,
   renderCtx: RenderCtx,
   ctxModule: string,
+  /** The promoted-capability filter (§11.6) the default `:read` action must
+   *  apply — non-null when some read of `agg` `ignoring`s a capability, so that
+   *  capability's predicate left the always-on `base_filter` and must be
+   *  re-applied on every read that does NOT bypass it (the default `:read`
+   *  carries no `ignoring`, so it gets the full promoted predicate).  Null →
+   *  the default `:read` stays a bare default (byte-identical pre-bypass). */
+  promotedReadExpr?: string | null,
 ): string {
   const ops = agg.operations;
   // Ref-collection fields (`Id<T>[]`) aren't attributes on the
@@ -159,12 +166,25 @@ export function renderActions(
   // alone.  The action name is unchanged, so the unconditional PATCH
   // /<aggs>/{id} (action: :update) route still resolves.
   const opActionNames = new Set(ops.map((op) => snake(op.name)));
-  const defaultActions = ["read", "update", "destroy"].filter((a) => !opActionNames.has(a));
+  // §11.6: when a capability is promoted out of `base_filter`, its predicate is
+  // re-applied per-read.  The default `:read` action has no filter clause, so we
+  // replace it with an explicit `read :read do filter expr(<promoted>) end` and
+  // drop `:read` from the `defaults [...]` list.  `Ash.get` / by-id loads, the
+  // primary read, and the auto `findAll` all resolve through `:read`, so this
+  // keeps the promoted predicate applied on every read that doesn't `ignoring`
+  // it.  Off the promoted path (`promotedReadExpr` null) the default stays bare.
+  const explicitRead = promotedReadExpr != null && promotedReadExpr !== "";
+  const defaultActions = ["read", "update", "destroy"].filter(
+    (a) => !opActionNames.has(a) && !(a === "read" && explicitRead),
+  );
+  const explicitReadAction = explicitRead
+    ? `    read :read do\n      primary? true\n      filter expr(${promotedReadExpr})\n    end\n`
+    : "";
 
   return `\n  actions do
     defaults [${defaultActions.map((a) => `:${a}`).join(", ")}]
 
-${defaultCreate}
+${explicitReadAction}${defaultCreate}
 ${opActions.join("\n")}
   end\n`;
 }

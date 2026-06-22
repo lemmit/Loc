@@ -250,6 +250,13 @@ describe.skipIf(!ENABLED)(
         // columns — non-principal (now()) on one aggregate, principal
         // (currentUser → context.actor.id) via `with auditable` on another.
         { name: "stamps.ddd" },
+        // `ignoring` filter-bypass (named-filter-bypass.md §11.6): a capability
+        // bypassed by some read is PROMOTED out of the always-on `base_filter`
+        // and re-applied per-read via `filter expr(...)`, omitted on the reads
+        // that `ignoring` it.  The gate compiles the reduced base_filter, the
+        // explicit `read :read do primary? true; filter … end` override, and the
+        // per-find/per-view `filter expr(...)` lines against real Ash 3.x.
+        { name: "filter-bypass.ddd" },
       ]),
     )("$name → mix compile --warnings-as-errors", ({ name }) => {
       const fixturePath = path.join(fixturesDir, name);

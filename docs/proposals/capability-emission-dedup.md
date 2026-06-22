@@ -354,9 +354,22 @@ What shipped, and what stays deferred after an end-to-end investigation of the
 >   (elixir-**Ash**, java, python still fail-fast — foundation-aware). Runtime-
 >   verified: elixir-vanilla `mix compile --warnings-as-errors` + node
 >   `tsc --noEmit` both pass. ✅
+> - **Slice 3** — **Phoenix/Ash** honors bypass via the §11.6 "pay for what you
+>   use" triage: a capability some read `ignoring`s is PROMOTED out of the
+>   always-on `base_filter` and re-applied per-read via `filter expr(...)`,
+>   omitted on the reads that bypass it (the default `:read` becomes an explicit
+>   `read :read do primary? true; filter … end`; finds/views/retrievals get
+>   their own promoted `filter` line). A never-bypassed cap and a bare
+>   (capability-less) `filter` stay in `base_filter`. Triage is derived at
+>   codegen (`src/generator/elixir/capability-filter.ts`) from read-decls ×
+>   `contextFilterOrigins` — not stamped. Validator now allows elixir on BOTH
+>   foundations. Runtime-verified: a `with softDeletable` + bare-filter system
+>   with `ignoring softDeletable` / `ignoring *` reads compiles under
+>   `mix compile --warnings-as-errors` against real Ash 3.x
+>   (`test/e2e/fixtures/elixir-ash-build/filter-bypass.ddd`). ✅
 > - **Deferred** (each a later gated slice, fail-fast until then): **Java** (the
->   §11.6 `@Filter` hybrid), **elixir-Ash** (per-read `base_filter` bypass),
->   **Python** (wire `contextFilters` first, then bypass).
+>   §11.6 `@Filter`/`@SQLRestriction` triage — the analogous always-on↔bypassable
+>   split), **Python** (wire `contextFilters` first, then bypass).
 >
 > **Known pre-existing gap (orthogonal):** on node/Drizzle the criterion-based
 > retrieval path (`Repo.findAll(<Criterion>)`) does **not** apply capability
@@ -425,7 +438,8 @@ scoping (you own that source); revisit only if a real need appears.
 | **0** | `capabilityOrigin` provenance seam | `FilterEntry` + `collectFilters` (`lower-capabilities.ts:11-81`); `contextFilterOrigins?: (string\|undefined)[]` on `loom-ir.ts` (mirror `contextFilterRefs`) | **byte-identical** (no consumer) | no — serializing substrate |
 | **1** | surface (`find`+`view`+inline) + **.NET** | `ddd.langium` `ignoring`-clause on `FindDecl` + `View` (×2 forms) + the `Repo.findAll`/`run` call expr (+`langium:generate`, commit generated); `lower` → bypass-set on `FindIR`/`ViewIR`/the `repo-run` `ExprIR`; printer arms (print-completeness); `efcore.ts` resolve origin→EF name→`IgnoreQueryFilters` (repo finds + view reads + inline); `loom.filter-bypass-*` validators (`ir/validate/checks/*`, mirror `validateContextFilterSupport`) | runtime: `dotnet-build`, `dotnet-obs-e2e`, `k8s-e2e` read+write | no (grammar→regen→lower→emit is a chain) |
 | **2** | **Drizzle + Ecto** honor bypass (omit predicate from the AND-chain) | `typescript/repository-find-predicate.ts`; `elixir/vanilla/capability-filter.ts` | `behavioral-e2e`, `k8s-e2e` | **yes — 2 agents** (disjoint trees) |
-| defer | **Java** (`@SQLRestriction`→`@Filter` *only where bypassed* — §11.6), **Ash** (base_filter→unfiltered action/policy), **Python** (filter-emission gap first, then bypass) | per-backend emit + drop from `NO_FILTER_EMISSION`/`LIMITED_FAMILIES` | each own runtime gate | **yes — independent fan-out** |
+| **3** | **Ash** honors bypass — §11.6 triage (promote a bypassed cap out of `base_filter`, apply per-read) | `elixir/capability-filter.ts` (triage + per-read predicate); `elixir/domain-emit.ts` (reduced `base_filter` + default-`:read` override); `elixir/domain/actions.ts` (explicit `read :read`); `elixir/repository-emit.ts` (per-find/-view/-retrieval `filter`); validator widened to allow elixir-Ash | `elixir-ash-build` (`filter-bypass.ddd`) `mix compile --warnings-as-errors` | ✅ done |
+| defer | **Java** (`@SQLRestriction`→`@Filter` *only where bypassed* — §11.6), **Python** (filter-emission gap first, then bypass) | per-backend emit + drop from `NO_FILTER_EMISSION`/`LIMITED_FAMILIES` | each own runtime gate | **yes — independent fan-out** |
 
 Backends that can't honor a given `ignoring <Cap>` **fail-fast** via the new
 validator (mirrors `loom.context-filter-unsupported`), so an unsupported target

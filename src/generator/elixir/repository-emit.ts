@@ -8,10 +8,12 @@ import type {
   FindIR,
   RepositoryIR,
   RetrievalIR,
+  WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { effectiveSavingShape } from "../../ir/util/resolve-datasource.js";
 import { snake, upperFirst } from "../../util/naming.js";
+import { promotedCapabilities, promotedReadFilter } from "./capability-filter.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -46,6 +48,11 @@ export function buildFindActions(
   // render-expr.ts) can resolve `this.<refColl>.contains(param)` to
   // `exists(<rel>, id == ^arg(:<param>))` against the join entity.
   const ctx: RenderCtx = { thisName: "record", contextModule, agg };
+  // §11.6 triage: the capabilities promoted out of `base_filter` (some read
+  // `ignoring`s them) must be re-applied per-read.  Each find combines the
+  // promoted predicate — minus the capabilities IT bypasses — with its own
+  // `where`.
+  const promoted = new Set(promotedCapabilities(agg, bctx));
   // Skip the IR-enriched "all" find: Ash's `defaults [:read, ...]`
   // already provides an equivalent default :read action.  Emitting a
   // custom `read :all do end` block alongside is harmless but
@@ -55,7 +62,16 @@ export function buildFindActions(
   return repo.finds
     .filter((f) => f.name !== "all")
     .map((find) =>
-      renderFindAction(find, agg, ctx, reifiedCriterionForRef(find.criterionRef, bctx)),
+      renderFindAction(
+        find,
+        agg,
+        ctx,
+        reifiedCriterionForRef(find.criterionRef, bctx),
+        promotedReadFilter(agg, bctx, ctx, promoted, {
+          bypassAll: find.bypassAll,
+          bypassCaps: find.bypassCaps,
+        }),
+      ),
     );
 }
 
@@ -70,9 +86,62 @@ export function buildRetrievalActions(
   contextModule: string,
 ): string[] {
   const rctx: RenderCtx = { thisName: "record", contextModule, agg };
+  const promoted = new Set(promotedCapabilities(agg, ctx));
+  // §11.6: a retrieval read action is shared across its inline `Repo.run`
+  // call-sites.  When some call-site `ignoring`s a promoted capability, that
+  // capability's predicate is omitted from the SHARED action (the bypass is
+  // per-action here, not per-call — the validator admits no conflicting mix on
+  // one retrieval).  The union of the bypasses of every repo-run hitting this
+  // retrieval drives the omission.
+  const bypassByRetrieval = inlineRunBypassesByRetrieval(ctx, agg.name);
   return (ctx.retrievals ?? [])
     .filter((r) => r.targetType.kind === "entity" && r.targetType.name === agg.name)
-    .map((r) => renderRetrievalAction(r, rctx, agg, reifiedCriterionOf(r, ctx)));
+    .map((r) =>
+      renderRetrievalAction(
+        r,
+        rctx,
+        agg,
+        reifiedCriterionOf(r, ctx),
+        promotedReadFilter(agg, ctx, rctx, promoted, bypassByRetrieval.get(r.name)),
+      ),
+    );
+}
+
+/** The union bypass spec per retrieval name, drawn from the inline
+ *  `Repo.run(<Retrieval>(…)) ignoring …` call-sites in the context's workflows
+ *  that target `aggName`.  A retrieval read action is shared, so all its
+ *  call-sites' bypasses union (`bypassAll` if ANY bypasses all, else the union
+ *  of named caps). */
+function inlineRunBypassesByRetrieval(
+  ctx: BoundedContextIR,
+  aggName: string,
+): Map<string, { bypassAll?: boolean; bypassCaps?: string[] }> {
+  const acc = new Map<string, { bypassAll: boolean; caps: Set<string> }>();
+  const visit = (stmts: readonly WorkflowStmtIR[]): void => {
+    for (const s of stmts) {
+      if (s.kind === "repo-run" && s.aggName === aggName) {
+        const cur = acc.get(s.retrievalName) ?? { bypassAll: false, caps: new Set<string>() };
+        if (s.bypassAll) cur.bypassAll = true;
+        for (const c of s.bypassCaps ?? []) cur.caps.add(c);
+        acc.set(s.retrievalName, cur);
+      }
+      if (s.kind === "for-each") visit(s.body);
+      if (s.kind === "if-let") {
+        visit(s.thenBody);
+        visit(s.elseBody ?? []);
+      }
+    }
+  };
+  for (const wf of ctx.workflows) {
+    for (const c of wf.creates) visit(c.statements);
+    for (const h of wf.handlers ?? []) visit(h.statements);
+    for (const on of wf.subscriptions ?? []) visit(on.statements);
+  }
+  const out = new Map<string, { bypassAll?: boolean; bypassCaps?: string[] }>();
+  for (const [name, v] of acc) {
+    out.set(name, v.bypassAll ? { bypassAll: true } : { bypassCaps: [...v.caps] });
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,9 +257,17 @@ function renderRetrievalAction(
   ctx: RenderCtx,
   agg: EnrichedAggregateIR,
   reified: CriterionIR | undefined,
+  /** The §11.6 promoted-capability filter this retrieval action must apply
+   *  (minus the caps its inline `Repo.run` call-sites `ignoring`), or null. */
+  promotedFilter?: string | null,
 ): string {
   const lines: string[] = [];
   lines.push(`    read :${snake(r.name)} do`);
+  // §11.6: promoted-capability predicate, applied as its own `filter expr(...)`
+  // line (Ash conjoins multiple `filter` clauses on an action).
+  if (promotedFilter) {
+    lines.push(`      filter expr(${promotedFilter})`);
+  }
   for (const p of r.params) {
     lines.push(`      argument :${snake(p.name)}, ${ashArgType(p.type)}`);
   }
@@ -266,12 +343,23 @@ function renderFindAction(
   agg: AggregateIR,
   ctx: RenderCtx,
   reified?: CriterionIR | undefined,
+  /** The §11.6 promoted-capability filter this read must apply (minus the caps
+   *  it `ignoring`s), or null when none — see `promotedReadFilter`.  AND-ed with
+   *  the find's own `where`. */
+  promotedFilter?: string | null,
 ): string {
   const lines: string[] = [];
   lines.push(`    read :${snake(find.name)} do`);
   // Arguments
   for (const p of find.params) {
     lines.push(`      argument :${snake(p.name)}, :string`);
+  }
+  // §11.6: the promoted-capability predicate this read applies, AND-ed onto its
+  // own filter.  Rendered as its own `filter expr(...)` line — Ash conjoins
+  // multiple `filter` clauses on an action — so the find's own filter path
+  // below stays unchanged.
+  if (promotedFilter) {
+    lines.push(`      filter expr(${promotedFilter})`);
   }
   // Filter preparation
   if (find.filter) {
@@ -424,6 +512,10 @@ export function mergeViewFindsForAgg(
     params: [],
     returnType: arrayReturn,
     filter: v.filter,
+    // Carry the view's `ignoring` bypass onto the synthesised find so the
+    // §11.6 promoted-capability filter is OMITTED on the view's read action.
+    bypassAll: v.bypassAll,
+    bypassCaps: v.bypassCaps,
   }));
 
   if (!repo) {

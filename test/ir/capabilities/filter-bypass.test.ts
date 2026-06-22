@@ -181,7 +181,7 @@ describe("ignoring filter-bypass validator gates", () => {
     expect(diags).toEqual([]);
   });
 
-  it("loom.filter-bypass-unsupported — elixir Ash foundation still fails fast", async () => {
+  it("accepts a valid bypass on an elixir ASH deployable (Slice 3 — §11.6 base_filter→per-read triage)", async () => {
     const diags = await bypassDiags(
       systemWith(
         `repository R for Order {
@@ -190,7 +190,7 @@ describe("ignoring filter-bypass validator gates", () => {
         "elixir",
       ),
     );
-    expect(diags.map((d) => d.code)).toEqual(["loom.filter-bypass-unsupported"]);
+    expect(diags).toEqual([]);
   });
 
   it("loom.filter-bypass-unsupported — java backend still fails fast", async () => {
