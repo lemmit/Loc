@@ -23,6 +23,7 @@ import {
 import type { RenderCtx } from "../render-expr.js";
 import { renderAshType, renderExpr } from "../render-expr.js";
 import { renderElixirStatements } from "../render-stmt.js";
+import type { valueCollectionsWithVo } from "../value-collection-resource-emit.js";
 import {
   ashBuiltinValidate,
   exprUsesThis,
@@ -126,16 +127,47 @@ export function renderActions(
    *  carries no `ignoring`, so it gets the full promoted predicate).  Null →
    *  the default `:read` stays a bare default (byte-identical pre-bypass). */
   promotedReadExpr?: string | null,
+  /** Value-object collection fields (`charges: Money[]`) — `has_many` child
+   *  resources managed via `manage_relationship` on create/update rather than
+   *  `accept`ed as scalar attributes.  Empty → byte-identical pre-VO-collection
+   *  output. */
+  valueCollections: ReturnType<typeof valueCollectionsWithVo> = [],
 ): string {
   const ops = agg.operations;
-  // Ref-collection fields (`Id<T>[]`) aren't attributes on the
-  // resource (they live in a join table); the create action can't
-  // `accept` them without a `change manage_relationship` block, which
-  // we defer.  Callers seed reference collections via the operations
-  // that mutate them (`addToParty`, etc.).
+  // Ref-collection fields (`Id<T>[]`) aren't attributes on the resource (they
+  // live in a join table); value-object collection fields (`Money[]`) aren't
+  // either (they live in a child table, managed via `manage_relationship`).
+  // Neither can be `accept`ed by the create action, so exclude both.
+  const vcFieldNames = new Set(valueCollections.map((v) => v.vc.fieldName));
   const fieldNames = agg.fields
-    .filter((f) => !isRefCollection(f.type))
+    .filter((f) => !isRefCollection(f.type) && !vcFieldNames.has(f.name))
     .map((f) => `:${snake(f.name)}`);
+
+  // The value-object collection management seam — one `argument` + one
+  // `change manage_relationship` per VO-array field, shared by the create and
+  // update actions.  Replace-on-update semantics (`on_missing: :destroy`)
+  // mirror the TS/.NET repositories' delete-then-reinsert.  An ordinal is
+  // injected per position by a preceding `change` so the array round-trips in
+  // declared order (the client body carries no ordinal).
+  const vcArgLines = valueCollections.map(
+    ({ vc }) => `      argument :${snake(vc.fieldName)}, {:array, :map}, allow_nil?: true`,
+  );
+  const vcManageLines = valueCollections.flatMap(({ vc }) => {
+    const field = snake(vc.fieldName);
+    return [
+      `      change fn changeset, _ctx ->`,
+      `        case Ash.Changeset.get_argument(changeset, :${field}) do`,
+      `          items when is_list(items) ->`,
+      `            stamped = Enum.with_index(items, fn item, i -> Map.put(Map.new(item, fn {k, v} -> {to_string(k), v} end), "ordinal", i) end)`,
+      `            Ash.Changeset.set_argument(changeset, :${field}, stamped)`,
+      `          _ -> changeset`,
+      `        end`,
+      `      end`,
+      `      change manage_relationship(:${field}, :${field}, type: :direct_control)`,
+    ];
+  });
+  const vcCreateBody =
+    valueCollections.length > 0 ? `\n${[...vcArgLines, ...vcManageLines].join("\n")}` : "";
 
   // A non-constructible aggregate (no create surface — `!isConstructible`)
   // emits no `:create` action, matching the Hono/.NET backends and the
@@ -145,7 +177,7 @@ export function renderActions(
   const defaultCreate = isConstructible(agg)
     ? `    create :create do
       primary? true
-      accept [${fieldNames.join(", ")}]
+      accept [${fieldNames.join(", ")}]${vcCreateBody}
     end`
     : "";
 
@@ -156,7 +188,7 @@ export function renderActions(
   const opActions = ops.map((op) =>
     isAshReturningOpSupported(op)
       ? renderAshReturningOpAction(ctx, agg, op, ctxModule)
-      : renderOperationAction(op, renderCtx, ctxModule),
+      : renderOperationAction(op, renderCtx, ctxModule, valueCollections),
   );
 
   // Ash forbids two actions of the same name.  A mutate operation whose
@@ -261,9 +293,25 @@ export function renderStampChanges(
   return `\n  changes do\n${blocks.join("\n\n")}\n  end\n`;
 }
 
-function renderOperationAction(op: OperationIR, ctx: RenderCtx, _ctxModule: string): string {
+function renderOperationAction(
+  op: OperationIR,
+  ctx: RenderCtx,
+  _ctxModule: string,
+  valueCollections: ReturnType<typeof valueCollectionsWithVo> = [],
+): string {
+  // Value-object collection fields the op writes (e.g. crudish `update`'s
+  // `lineItems := lineItems`): they are `has_many` relationships, not stored
+  // attributes, so their argument is typed `{:array, :map}` (the managed
+  // input), their `change_attribute` assignment is dropped from the body, and
+  // a `manage_relationship` replace seam is appended instead.
+  const vcByField = new Map(valueCollections.map((v) => [v.vc.fieldName, v.vc]));
   const args = op.params
-    .map((p) => `      argument :${snake(p.name)}, ${renderAshType(p.type, ctx.contextModule)}`)
+    .map((p) => {
+      const ashType = vcByField.has(p.name)
+        ? "{:array, :map}"
+        : renderAshType(p.type, ctx.contextModule);
+      return `      argument :${snake(p.name)}, ${ashType}`;
+    })
     .join("\n");
 
   // Collect precondition statements and lower them to Ash validate clauses.
@@ -275,10 +323,33 @@ function renderOperationAction(op: OperationIR, ctx: RenderCtx, _ctxModule: stri
   // requires guards become Ash policies (see renderPolicies); neither
   // belongs in the change fn.  (A `requires` left here would raise an
   // ArgumentError → HTTP 500 instead of the policy's 403.)
-  const nonPrecondStmts = op.statements.filter(
-    (s) => s.kind !== "precondition" && s.kind !== "requires",
-  );
+  const nonPrecondStmts = op.statements
+    .filter((s) => s.kind !== "precondition" && s.kind !== "requires")
+    // Drop the VO-collection assignment(s) — they become `manage_relationship`
+    // changes (appended below) rather than `change_attribute` on a relationship.
+    .filter((s) => !(s.kind === "assign" && vcByField.has(s.target.segments[0] ?? "")));
   const stmts = renderElixirStatements(nonPrecondStmts, ctx, "changeset");
+
+  // The VO-collection management seam for the params this op actually writes:
+  // an ordinal-stamp `change` (the body carries no ordinal) + a
+  // `manage_relationship(... type: :direct_control)` replace, per field.
+  const opVcFields = op.params.map((p) => p.name).filter((n) => vcByField.has(n));
+  const vcManageBlock = opVcFields
+    .flatMap((field) => {
+      const f = snake(field);
+      return [
+        `      change fn changeset, _ctx ->`,
+        `        case Ash.Changeset.get_argument(changeset, :${f}) do`,
+        `          items when is_list(items) ->`,
+        `            stamped = Enum.with_index(items, fn item, i -> Map.put(Map.new(item, fn {k, v} -> {to_string(k), v} end), "ordinal", i) end)`,
+        `            Ash.Changeset.set_argument(changeset, :${f}, stamped)`,
+        `          _ -> changeset`,
+        `        end`,
+        `      end`,
+        `      change manage_relationship(:${f}, :${f}, type: :direct_control)`,
+      ];
+    })
+    .join("\n");
 
   // Bind the domain-style identifiers (`record`, `current_user`, each param)
   // that the rendered body refers to but Ash's `change fn changeset, ctx ->`
@@ -314,9 +385,12 @@ function renderOperationAction(op: OperationIR, ctx: RenderCtx, _ctxModule: stri
   // so an unnecessary `require_atomic? false` would be noise there.
   const hasFnValidate = validateLines.some((l) => l.includes("validate fn"));
   const atomicLine =
-    nonPrecondStmts.length > 0 || hasFnValidate ? "\n      require_atomic? false" : "";
+    nonPrecondStmts.length > 0 || hasFnValidate || opVcFields.length > 0
+      ? "\n      require_atomic? false"
+      : "";
+  const vcBlock = vcManageBlock ? `\n${vcManageBlock}` : "";
 
-  return `    update :${snake(op.name)} do${atomicLine}${argsBlock}${validateBlock}${changeBlock}
+  return `    update :${snake(op.name)} do${atomicLine}${argsBlock}${validateBlock}${changeBlock}${vcBlock}
     end`;
 }
 
