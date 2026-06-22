@@ -16,6 +16,7 @@ import {
   type NewExpr,
   type RefExpr,
   renderExprWith,
+  type UnaryExpr,
 } from "../_expr/target.js";
 
 // ---------------------------------------------------------------------------
@@ -158,7 +159,7 @@ const ELIXIR_TARGET: ExprTarget<RenderCtx> = {
   // Bare object literals appear in e2e contexts; not expected in domain
   // expression bodies.
   object: (fields) => `%{${fields.map((f) => `${snake(f.name)}: ${f.value}`).join(", ")}}`,
-  unary: renderUnary,
+  unary: (op, operand, e) => renderUnary(op, operand, e),
   binary: renderBinary,
   // Lower to `if … do … else … end`
   ternary: (cond, then, otherwise) => `if ${cond}, do: ${then}, else: ${otherwise}`,
@@ -181,6 +182,7 @@ const ELIXIR_TARGET: ExprTarget<RenderCtx> = {
 const ELIXIR_ASH_EXPR_TARGET: ExprTarget<RenderCtx> = {
   ...ELIXIR_TARGET,
   literal: (lit, value) => renderLiteral(lit, value, /* ashExpr */ true),
+  unary: (op, operand, e) => renderUnary(op, operand, e, /* ashExpr */ true),
   binary: (l, r, e) => renderBinary(l, r, e, /* ashExpr */ true),
   convert: (value, e) => renderElixirConvert(e.target, e.from, value, /* ashExpr */ true),
 };
@@ -481,9 +483,42 @@ function renderNew(fields: { name: string; value: string }[], e: NewExpr, ctx: R
 // Unary
 // ---------------------------------------------------------------------------
 
-function renderUnary(op: "-" | "!", operand: string): string {
+function renderUnary(op: "-" | "!", operand: string, e: UnaryExpr, ashExpr = false): string {
   if (op === "!") return `not ${operand}`;
+  // Negating a money/decimal `Decimal` struct: native `-` is `:erlang.-/1`,
+  // which raises on a `Decimal` ("bad argument in arithmetic").  Use
+  // `Decimal.negate/1` in native Elixir (op-bodies / emitted ExUnit tests);
+  // inside an Ash `expr()` money/decimal are data-layer-native, so plain `-`.
+  if (!ashExpr && isDecimalOperand(e.operand)) return `Decimal.negate(${operand})`;
   return `-${operand}`;
+}
+
+/** Does this expression evaluate to a money/decimal `Decimal` struct? — used to
+ *  route unary negation through `Decimal.negate/1`.  Covers the realistic
+ *  operand shapes (negative literal, a typed ref/member, an arithmetic binary,
+ *  a decimal cast, parens). */
+function isDecimalOperand(operand: ExprIR): boolean {
+  switch (operand.kind) {
+    case "literal":
+      return isDecimalStruct(operand.lit);
+    case "ref":
+      return operand.type?.kind === "primitive" && isDecimalStruct(operand.type.name);
+    case "member":
+      return operand.memberType.kind === "primitive" && isDecimalStruct(operand.memberType.name);
+    case "binary":
+      return (
+        (operand.resultType?.kind === "primitive" && isDecimalStruct(operand.resultType.name)) ||
+        (operand.leftType?.kind === "primitive" && isDecimalStruct(operand.leftType.name))
+      );
+    case "convert":
+      return isDecimalStruct(operand.target);
+    case "paren":
+      return isDecimalOperand(operand.inner);
+    case "unary":
+      return isDecimalOperand(operand.operand);
+    default:
+      return false;
+  }
 }
 
 // ---------------------------------------------------------------------------

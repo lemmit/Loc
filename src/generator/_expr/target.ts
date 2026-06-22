@@ -71,7 +71,7 @@ export interface ExprTarget<Ctx extends ExprCtxBase> {
   lambda(param: string, body: string | undefined): string;
   newPart(fields: RenderedField[], e: NewExpr, ctx: Ctx): string;
   object(fields: RenderedField[]): string;
-  unary(op: UnaryExpr["op"], operand: string): string;
+  unary(op: UnaryExpr["op"], operand: string, e: UnaryExpr): string;
   binary(left: string, right: string, e: BinaryExpr): string;
   ternary(cond: string, then: string, otherwise: string): string;
   convert(value: string, e: ConvertExpr): string;
@@ -118,7 +118,7 @@ export function renderExprWith<Ctx extends ExprCtxBase>(
     case "paren":
       return `(${r(e.inner)})`;
     case "unary":
-      return t.unary(e.op, r(e.operand));
+      return t.unary(e.op, r(e.operand), e);
     case "binary":
       return t.binary(r(e.left), r(e.right), e);
     case "ternary":
