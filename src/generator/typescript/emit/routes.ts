@@ -28,13 +28,18 @@ export function renderHttpIndex(
     `import { ${a.name}Repository } from "../db/repositories/${lowerFirst(a.name)}-repository";`,
   ]);
   const aggregateRoutes = aggregates.map((a) => {
-    // Aggregates with an audited OR provenanced public operation also
-    // receive `db` + `events` so the route can run its save + audit insert +
-    // provenance flush in one transaction (matches the transactional router
-    // signature in routes-builder).
-    const needsTx = a.operations.some(
-      (o) => o.visibility === "public" && (o.audited || opHasProvSite(o)),
-    );
+    // Aggregates with an audited OR provenanced public operation — or an
+    // audited lifecycle action (`create(...) audited` / `destroy audited`) —
+    // also receive `db` + `events` so the route can run its save + audit
+    // insert + provenance flush in one transaction (matches the
+    // transactional router signature in routes-builder; the lifecycle gate
+    // mirrors `auditCreate` / `auditDestroy` there).
+    const auditedCreateAction =
+      a.persistedAs === "eventLog" ? (a.creates?.[0] ?? null) : (a.canonicalCreate ?? null);
+    const needsTx =
+      a.operations.some((o) => o.visibility === "public" && (o.audited || opHasProvSite(o))) ||
+      !!auditedCreateAction?.audited ||
+      !!a.canonicalDestroy?.audited;
     const repoArg = `new ${a.name}Repository(db, events)`;
     const args = needsTx ? `${repoArg}, db, events` : repoArg;
     return `  app.route("${API_BASE_PATH}/${snake(plural(a.name))}", ${lowerFirst(a.name)}Routes(${args}));`;

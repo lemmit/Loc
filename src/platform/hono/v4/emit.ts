@@ -55,6 +55,7 @@ import {
   type UserIR,
 } from "../../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
+import { contextHasAuditedTarget } from "../../../ir/util/audit-capability.js";
 import { durableEventTypes, realtimeEventTypes } from "../../../ir/util/channels.js";
 import {
   isTpcBase,
@@ -296,12 +297,13 @@ export function generateTypeScriptForContexts(
   // read off presence at each call site) so a future build-level switch
   // can force emission for other consumers.
   const emitProvenance = contextsHaveProvenancedField(contexts);
-  // Emission is forced by presence: any `audited` operation turns on the
-  // audit SDK + per-route `recordAudit` calls.  Threaded as a flag (like
+  // Emission is forced by presence: any `audited` command action — an
+  // `operation`, or a lifecycle `create` / `destroy` — turns on the audit
+  // SDK + per-route audit-record inserts.  Threaded as a flag (like
   // emitProvenance) so a future build-level switch can force emission.
-  const emitAudit = contexts.some((c) =>
-    c.aggregates.some((a) => a.operations.some((o) => o.audited)),
-  );
+  // Uses the shared IR predicate so the operation ∪ create ∪ destroy gate
+  // can't drift back to operations-only (the pre-#1503 bug).
+  const emitAudit = contexts.some(contextHasAuditedTarget);
 
   // Multi-context Hono deployables (e.g. acme's catalogWeb spanning
   // Catalog + CustomerMgmt) need the shared domain files to UNION

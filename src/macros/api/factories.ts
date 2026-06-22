@@ -250,10 +250,13 @@ export function operation(
 export function create(
   params: Parameter[],
   body: Statement[],
-  opts: { name?: string } = {},
+  opts: { name?: string; audited?: boolean } = {},
 ): Create {
   const origin = currentOrigin();
-  const node: Create = tag(mkCreate({ $type: "Create", name: opts.name, params, body }), origin);
+  const node: Create = tag(
+    mkCreate({ $type: "Create", name: opts.name, params, body, audited: opts.audited ?? false }),
+    origin,
+  );
   params.forEach((p, i) => {
     setContainer(p, node, "params", i);
   });
@@ -270,11 +273,14 @@ export function create(
  * AST node. */
 export function destroy(
   body: Statement[] = [],
-  opts: { name?: string; params?: Parameter[] } = {},
+  opts: { name?: string; params?: Parameter[]; audited?: boolean } = {},
 ): Destroy {
   const origin = currentOrigin();
   const params = opts.params ?? [];
-  const node: Destroy = tag(mkDestroy({ $type: "Destroy", name: opts.name, params, body }), origin);
+  const node: Destroy = tag(
+    mkDestroy({ $type: "Destroy", name: opts.name, params, body, audited: opts.audited ?? false }),
+    origin,
+  );
   params.forEach((p, i) => {
     setContainer(p, node, "params", i);
   });

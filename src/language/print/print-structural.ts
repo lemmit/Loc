@@ -942,7 +942,8 @@ function printCreate(node: import("../generated/ast.js").Create): string {
   // a name is optional.  Parens are always present in the grammar.
   const name = node.name ? ` ${node.name}` : "";
   const params = node.params.map(printParameter).join(", ");
-  return block(`create${name}(${params})`, node.body.map(printStmt));
+  const audited = node.audited ? " audited" : "";
+  return block(`create${name}(${params})${audited}`, node.body.map(printStmt));
 }
 
 function printDestroy(node: import("../generated/ast.js").Destroy): string {
@@ -951,7 +952,8 @@ function printDestroy(node: import("../generated/ast.js").Destroy): string {
   const name = node.name ? ` ${node.name}` : "";
   const params = node.params.map(printParameter).join(", ");
   const paramClause = node.params.length > 0 || node.name ? `(${params})` : "";
-  return block(`destroy${name}${paramClause}`, node.body.map(printStmt));
+  const audited = node.audited ? " audited" : "";
+  return block(`destroy${name}${paramClause}${audited}`, node.body.map(printStmt));
 }
 
 function printApply(node: import("../generated/ast.js").Apply): string {

@@ -1461,7 +1461,7 @@ Operation:
 // joins `agg.operations` (which stays mutate-only).  See
 // docs/proposals/lifecycle-operations.md.
 Create:
-    'create' (name=ID)? '(' (params+=Parameter (',' params+=Parameter)*)? ')' '{'
+    'create' (name=ID)? '(' (params+=Parameter (',' params+=Parameter)*)? ')' (audited?='audited')? '{'
         body+=Statement*
     '}';
 
@@ -1472,7 +1472,7 @@ Create:
 // canonical hard delete reads `destroy { }`.  Lowers to an
 // `OperationIR` with `kind: "destroy"`.
 Destroy:
-    'destroy' (name=ID)? ('(' (params+=Parameter (',' params+=Parameter)*)? ')')? '{'
+    'destroy' (name=ID)? ('(' (params+=Parameter (',' params+=Parameter)*)? ')')? (audited?='audited')? '{'
         body+=Statement*
     '}';
 
