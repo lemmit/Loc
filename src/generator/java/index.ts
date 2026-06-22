@@ -26,6 +26,7 @@ import type {
   JavaLayoutAdapter,
 } from "./adapters/by-layer-layout.js";
 import { emitJavaResourceFiles } from "./adapters/resource-clients.js";
+import { inlineRunBypassesByRetrieval, promotedCapabilities } from "./capability-filter.js";
 import { renderApiExceptionAdvice, renderJavaController } from "./emit/api.js";
 import { renderAuthFiles } from "./emit/auth.js";
 import {
@@ -575,6 +576,12 @@ function emitAggregate(
   const shape = effectiveSavingShape(agg, sys ? resolveDataSourceConfig(agg, ctx, sys) : undefined);
   const isDocument = shape === "document" && agg.persistedAs !== "eventLog";
   const isEmbedded = shape === "embedded" && agg.persistedAs !== "eventLog";
+  // §11.6 triage: the non-principal capabilities some read of `agg` `ignoring`s.
+  // These leave the always-on @SQLRestriction (which is unbypassable by design)
+  // for a bypassable Hibernate named @Filter on the entity; the repository impl
+  // wraps a bypassing read with disableFilter/enableFilter.  Derived per
+  // aggregate from the context's read-decls — never stamped (capability-filter.ts).
+  const promotedCaps = new Set(promotedCapabilities(agg, ctx));
 
   // Abstract bases: TPC (`ownTable`) emits a @MappedSuperclass (columns
   // flatten into each concrete's table); a TPH (`sharedTable`) base owns
@@ -662,6 +669,7 @@ function emitAggregate(
       superType,
       operationReturnUnions,
       eventFields,
+      promotedCaps,
       // Event-sourced / document aggregates have no normalised state
       // tables — the entity is a plain domain class (no JPA bindings;
       // ES folds the stream, document round-trips one jsonb column).
@@ -713,6 +721,8 @@ function emitAggregate(
     retrievals: aggRetrievals,
     isReified,
     provenance: provenancedFieldsOf(agg).length > 0,
+    promotedCaps,
+    bypassByRetrieval: inlineRunBypassesByRetrieval(ctx, agg.name),
   };
   place(
     `${agg.name}Repository.java`,

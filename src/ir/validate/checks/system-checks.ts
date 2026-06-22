@@ -1134,19 +1134,25 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
 //       filter is a likely authoring mistake.
 //   loom.filter-bypass-unsupported — the read is served by a deployable whose
 //       backend family is NOT in the supported set.  Honored by dotnet (EF
-//       `IgnoreQueryFilters`), node (Drizzle), and elixir on BOTH foundations
+//       `IgnoreQueryFilters`), node (Drizzle), elixir on BOTH foundations
 //       (vanilla Ecto omits the `where:`; Ash uses the §11.6 base_filter→per-read
-//       triage).  Java / Python remain deferred (fail-fast until their slices).
+//       triage), and java (§11.6 @SQLRestriction→bypassable @Filter triage,
+//       disabled per-read via the Hibernate Session).  Python remains deferred
+//       (fail-fast until its slice).
 // ---------------------------------------------------------------------------
 
 /** Backend families that honor an `ignoring` filter-bypass clause.  `dotnet`
  *  (EF `IgnoreQueryFilters`, Slice 1), `node` (Drizzle — omits the bypassed
- *  conjunct from the `and(...)` chain, Slice 2), and `elixir` (Slice 2 vanilla
- *  Ecto omits the bypassed `where:`; Slice 3 Ash uses the §11.6 "pay for what
- *  you use" triage — a bypassed capability leaves the always-on `base_filter`
- *  and is applied per-read instead, omitted on the reads that `ignoring` it)
- *  all honor it on BOTH foundations.  `java` / `python` remain deferred. */
-const FILTER_BYPASS_FAMILIES = new Set(["dotnet", "node", "elixir"]);
+ *  conjunct from the `and(...)` chain, Slice 2), `elixir` (Slice 2 vanilla Ecto
+ *  omits the bypassed `where:`; Slice 3 Ash uses the §11.6 "pay for what you
+ *  use" triage — a bypassed capability leaves the always-on `base_filter` and is
+ *  applied per-read instead, omitted on the reads that `ignoring` it; both
+ *  foundations), and `java` (§11.6 hybrid — a bypassed capability leaves the
+ *  always-on `@SQLRestriction` for a bypassable Hibernate named `@Filter`, which
+ *  a bypassing read disables via `session.disableFilter`/`enableFilter`;
+ *  principal filters omit the JPQL conjunct; document repos re-apply promoted
+ *  caps per-find) all honor it.  `python` remains deferred. */
+const FILTER_BYPASS_FAMILIES = new Set(["dotnet", "node", "elixir", "java"]);
 
 /** Whether `dep`'s backend honors `ignoring` filter-bypass.  A backend must
  *  not pass this gate while still silently filtering — a family is supported

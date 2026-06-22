@@ -12,6 +12,7 @@ import { exprUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/types
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { UnionMember } from "../../_payload/union-wire.js";
+import { promotedFilters, sqlRestrictionFilters } from "../capability-filter.js";
 import {
   collectJavaExprImports,
   collectJavaTypeImports,
@@ -159,6 +160,13 @@ export interface JavaEntityOptions {
     embedded?: boolean;
     voLookup: ReadonlyMap<string, readonly FieldIR[]>;
   };
+  /** The §11.6 PROMOTED non-principal capabilities for this aggregate — those
+   *  some read `ignoring`s.  A promoted capability's filter(s) leave the
+   *  always-on `@SQLRestriction` and become a bypassable Hibernate named filter
+   *  (`@FilterDef` + `@Filter`).  Empty / absent → today's behaviour (every
+   *  non-principal cap rides `@SQLRestriction`).  Derived by the orchestrator
+   *  from the context's read-decls (`capability-filter.ts`). */
+  promotedCaps?: ReadonlySet<string>;
 }
 
 export function renderJavaEntity(
@@ -660,13 +668,38 @@ export function renderJavaEntity(
   // SELECT (the HasQueryFilter analog).  PRINCIPAL (tenancy) filters can't —
   // @SQLRestriction is static SQL with no runtime principal — so they're AND-ed
   // into the repository's per-query JPQL instead (see emit/repository.ts).
-  const contextFilters = (isRoot && isAgg(entity) ? (entity.contextFilters ?? []) : []).filter(
-    (p) => !exprUsesCurrentUser(p),
-  );
+  //
+  // §11.6 triage: a capability some read `ignoring`s (a PROMOTED cap, threaded
+  // in via `options.promotedCaps`) leaves @SQLRestriction — @SQLRestriction is
+  // unbypassable by design — and becomes a bypassable Hibernate named filter
+  // (`@FilterDef(autoEnabled, applyToLoadByKey)` + `@Filter`).  Everything else
+  // (never-bypassed caps + bare filters) keeps today's @SQLRestriction.
+  const promotedCaps =
+    isRoot && isAgg(entity) ? (options.promotedCaps ?? new Set<string>()) : new Set<string>();
+  const contextFilters = isRoot && isAgg(entity) ? sqlRestrictionFilters(entity, promotedCaps) : [];
   const sqlRestriction =
     persistence && contextFilters.length > 0
       ? `@SQLRestriction(${JSON.stringify(contextFilters.map(renderSqlRestriction).join(" and "))})`
       : null;
+  // Promoted capabilities → bypassable Hibernate named filters.  `autoEnabled`
+  // reproduces @SQLRestriction's always-on semantics with no interceptor;
+  // `applyToLoadByKey` keeps by-id / lazy loads filtered (else a promoted filter
+  // would leak previously-hidden rows on a primary-key load).  The condition is
+  // a constant SQL fragment (parameterless — the validator gates principal /
+  // non-relational shapes off java), so no `@ParamDef`/resolver is needed.
+  const promoted =
+    persistence && isRoot && isAgg(entity) ? promotedFilters(entity, promotedCaps) : [];
+  const filterDefAnnotations: string[] = [];
+  const filterAnnotations: string[] = [];
+  for (const p of promoted) {
+    filterDefAnnotations.push(
+      `@FilterDef(name = ${JSON.stringify(p.cap)}, autoEnabled = true, applyToLoadByKey = true)`,
+    );
+    filterAnnotations.push(
+      `@Filter(name = ${JSON.stringify(p.cap)}, condition = ${JSON.stringify(p.condition)})`,
+    );
+  }
+  const hasNamedFilters = promoted.length > 0;
   return lines(
     `package ${pkg};`,
     ``,
@@ -675,6 +708,8 @@ export function renderJavaEntity(
     persistence ? `import jakarta.persistence.*;` : null,
     usesHibernateTypes ? `import org.hibernate.annotations.JdbcTypeCode;` : null,
     sqlRestriction ? `import org.hibernate.annotations.SQLRestriction;` : null,
+    hasNamedFilters ? `import org.hibernate.annotations.Filter;` : null,
+    hasNamedFilters ? `import org.hibernate.annotations.FilterDef;` : null,
     usesHibernateTypes ? `import org.hibernate.type.SqlTypes;` : null,
     persistence ? `` : null,
     `import ${basePkg}.domain.common.*;`,
@@ -698,6 +733,8 @@ export function renderJavaEntity(
           })
         : null,
     sqlRestriction,
+    ...filterDefAnnotations,
+    ...filterAnnotations,
     jmolecules,
     `public class ${entity.name}${superType ? ` extends ${superType.name}` : ""} {`,
     ...fieldLines,

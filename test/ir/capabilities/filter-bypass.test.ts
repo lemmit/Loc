@@ -6,7 +6,8 @@
 // / `bypassAll` (the `*` wildcard).
 //
 // Validator (validateFilterBypassSupport), over a full system with a deployable:
-//   loom.filter-bypass-unsupported        — read served by a non-dotnet backend
+//   loom.filter-bypass-unsupported        — read served by an unsupported backend
+//                                            (python; dotnet/node/elixir/java honor it)
 //   loom.filter-bypass-unknown-capability — ignoring an unimplemented capability
 //   loom.filter-bypass-no-filter          — ignoring a stamps-only capability
 
@@ -193,7 +194,7 @@ describe("ignoring filter-bypass validator gates", () => {
     expect(diags).toEqual([]);
   });
 
-  it("loom.filter-bypass-unsupported — java backend still fails fast", async () => {
+  it("accepts a valid bypass on a java deployable (§11.6 @SQLRestriction→bypassable @Filter triage)", async () => {
     const diags = await bypassDiags(
       systemWith(
         `repository R for Order {
@@ -202,7 +203,7 @@ describe("ignoring filter-bypass validator gates", () => {
         "java",
       ),
     );
-    expect(diags.map((d) => d.code)).toEqual(["loom.filter-bypass-unsupported"]);
+    expect(diags).toEqual([]);
   });
 
   it("loom.filter-bypass-unknown-capability — capability not implemented", async () => {
