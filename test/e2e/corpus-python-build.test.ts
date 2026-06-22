@@ -40,13 +40,10 @@ const PYTHON_COMPILE_SKIP: Record<string, string> = {
   // lowered — the same cross-backend gap the Hono tier tracks (corpus-tsc-build).
   "workflow-view": "FEATURE GAP: workflow own-state mutation (`field := …`) not yet lowered",
   // (provenance: now emitted + ruff-/mypy-clean on python — W2 — so it gates here.)
-  // FEATURE GAP: inline value-object-array fields (`Money[]`) aren't persisted on
-  // python at all — the SQLAlchemy schema emits no jsonb column for them, and the
-  // repo's save `root` dict + `_hydrate`'s `_create(...)` both drop them (mypy
-  // flags the missing `_create` args; the deeper gap is the absent column).
-  // Mapping inline VO arrays to a jsonb column (+ serialize/hydrate) is the fix.
-  "value-collections":
-    "FEATURE GAP: inline value-object arrays unmapped on python (no jsonb column; repo drops them)",
+  // (value-collections: `<VO>[]` now persists to an id-less relational child
+  //  table — flattened VO columns keyed by (parent_fk, ordinal), wholesale
+  //  replace on save, ordinal-ordered hydrate — matching node/.NET/Java, so it
+  //  gates here.)
 };
 
 // Every corpus feature the manifest declares to generate on `python`, minus the
