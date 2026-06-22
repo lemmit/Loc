@@ -74,7 +74,7 @@ describe("java saga dispatcher", () => {
     );
     expect(d).toContain("if (state == null) {");
     expect(d).toContain(
-      'log.warn("event_unrouted workflow={} event={} key={}", "OrderFulfillment", "ShipmentRequested", __key);',
+      'CatalogLog.event("event_unrouted", "warn", "workflow", "OrderFulfillment", "event_type", "ShipmentRequested", "key", __key);',
     );
     expect(d).toContain("var sh = shipmentsRepository.getById(s.shipment());");
     expect(d).toContain("sh.mark();");
@@ -85,14 +85,16 @@ describe("java saga dispatcher", () => {
     expect(svc).toContain("import org.springframework.context.ApplicationEventPublisher;");
     expect(svc).toContain("private final ApplicationEventPublisher eventPublisher;");
     expect(svc).toContain("eventPublisher.publishEvent(event);");
-    expect(svc).not.toContain('log.info("domain_event');
+    expect(svc).not.toContain('CatalogLog.event("event_dispatched"');
   });
 
   it("stays log-only (no dispatcher, byte-identical publish) without subscriptions", async () => {
     const files = await gen(PLAIN);
     expect([...files.keys()].some((k) => k.endsWith("Dispatcher.java"))).toBe(false);
     const svc = [...files.entries()].find(([k]) => k.endsWith("CustomerService.java"))![1];
-    expect(svc).toContain('log.info("domain_event type={}", event.getClass().getSimpleName());');
+    expect(svc).toContain(
+      'CatalogLog.event("event_dispatched", "info", "event_type", event.getClass().getSimpleName(), "aggregate", "Customer");',
+    );
     expect(svc).not.toContain("ApplicationEventPublisher");
   });
 

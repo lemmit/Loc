@@ -89,6 +89,54 @@ describe("log-event catalog — Java emission parity", () => {
     expect(unknown, `Java emits events absent from src/generator/_obs/log-events.ts`).toEqual([]);
   });
 
+  it("every CatalogLog.event call passes a level that agrees with the catalog", async () => {
+    // The unified channel takes (name, level, …); the level must match the
+    // catalog so a `jq 'select(.level=="error")'` query is the same shape on
+    // every backend.  trace folds to debug (Java has no trace level), so the
+    // catalog's trace events are allowed to be emitted as debug.
+    const java = sourceFor(await generateSystemFiles(JAVA_SYSTEM), ".java");
+    const calls = [
+      ...java.matchAll(
+        /CatalogLog\.event\(\s*"([a-z][a-z0-9_]*)"\s*,\s*"(trace|debug|info|warn|error)"/g,
+      ),
+    ].map((m) => ({ event: m[1]!, level: m[2]! as LogLevel }));
+    expect(calls.length, "expected leveled CatalogLog.event calls").toBeGreaterThan(0);
+    const fold = (l: LogLevel): LogLevel => (l === "trace" ? "debug" : l);
+    const mismatch = calls
+      .filter((c) => CATALOG_LEVEL.has(c.event) && fold(CATALOG_LEVEL.get(c.event)!) !== c.level)
+      .map((c) => `${c.event}: emitted ${c.level}, catalog ${CATALOG_LEVEL.get(c.event)}`);
+    expect([...new Set(mismatch)], "Java CatalogLog level disagrees with the catalog").toEqual([]);
+  });
+
+  it("routes domain log lines through CatalogLog — no off-catalog slf4j survives", async () => {
+    // Before unification, domain lines went through plain-text slf4j
+    // (log.info/warn/error("<event> …")) — not JSON, not the envelope, some
+    // off-catalog.  Every such line must now either be gone (routed through
+    // CatalogLog) or, if any slf4j survives, name a known catalog event.
+    const java = sourceFor(await generateSystemFiles(JAVA_SYSTEM), ".java");
+    const slf4j = [
+      ...java.matchAll(/\blog\.(?:info|warn|error|debug)\(\s*"([a-z][a-z0-9_]*)/g),
+    ].map((m) => m[1]!);
+    const offCatalog = [...new Set(slf4j)].filter((name) => !CATALOG_LEVEL.has(name));
+    expect(
+      offCatalog,
+      "Java still logs off-catalog domain events via slf4j (route them through CatalogLog)",
+    ).toEqual([]);
+  });
+
+  it("the CatalogLog writer leads every line with the ts + level envelope keys", async () => {
+    // The cross-backend envelope is { ts, level, event, request_id, … }; the
+    // Java writer must emit `ts` (Instant.now) and `level` ahead of `event`,
+    // and gate emission on LOG_LEVEL.
+    const java = sourceFor(await generateSystemFiles(JAVA_SYSTEM), ".java");
+    expect(java, "CatalogLog must emit a ts key").toContain('"ts\\":\\"');
+    expect(java, "CatalogLog must emit a level key").toContain('"level\\":\\"');
+    expect(java, "CatalogLog must source ts from Instant.now()").toContain("Instant.now()");
+    expect(java, "CatalogLog must gate emission on LOG_LEVEL").toContain(
+      'System.getenv("LOG_LEVEL")',
+    );
+  });
+
   it("the request bracket carries the cross-backend `duration_ms` field (not camelCase)", async () => {
     // Java's writer takes raw "key", value pairs, so the field name is a bare
     // string literal with no naming helper — easy to drift to camelCase and

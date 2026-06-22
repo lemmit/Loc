@@ -89,6 +89,18 @@ describe("Java execution-context carrier", () => {
     // only `event` + the explicit fields, the gap that reddened java-obs-e2e.)
     const catalog = get(await generateSystemFiles(SYSTEM("")), "/config/CatalogLog.java");
     expect(catalog).toContain("import org.slf4j.MDC;");
+    // Cross-backend envelope: ts + level lead every line, ahead of event.
+    expect(catalog).toContain("import java.time.Instant;");
+    expect(catalog).toContain('"{\\"ts\\":\\"');
+    expect(catalog).toContain("Instant.now().toString()");
+    expect(catalog).toContain(',\\"level\\":\\"');
+    // Runtime level filtering: emission gated by LOG_LEVEL (default info),
+    // trace folds to debug (Java has no trace level).
+    expect(catalog).toContain('System.getenv("LOG_LEVEL")');
+    expect(catalog).toContain(
+      "public static void event(String name, String level, Object... kvs) {",
+    );
+    expect(catalog).toContain('if (l.equals("trace")) {');
     expect(catalog).toContain(
       'appendId(sb, "request_id", MDC.get(RequestContext.CORRELATION_ID));',
     );

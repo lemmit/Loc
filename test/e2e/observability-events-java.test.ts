@@ -86,6 +86,8 @@ async function freePort(): Promise<number> {
 }
 
 interface CatalogLine {
+  ts?: string;
+  level?: string;
   event?: string;
   method?: string;
   path?: string;
@@ -230,6 +232,18 @@ describe.skipIf(!ENABLED)(
         expect(start!.method).toBe("GET");
         expect(end!.status).toBe(200);
         expect(typeof end!.duration_ms).toBe("number");
+        // Cross-backend envelope: every catalog line leads with ts + level.
+        // (Unification onto the single channel + LOG_LEVEL parity — these were
+        // absent before, the gap this PR closes.)
+        for (const e of events) {
+          expect(typeof e.ts, `${e.event} missing ts`).toBe("string");
+          expect(e.ts, `${e.event} ts not ISO-8601`).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+          expect(["trace", "debug", "info", "warn", "error"], `${e.event} bad level`).toContain(
+            e.level,
+          );
+        }
+        expect(start!.level).toBe("info");
+        expect(end!.level).toBe("info");
         // scope_id rides every request-scoped line (MDC, set at the filter) —
         // the audit/provenance join key, shared across the request bracket.
         expect(start!.scope_id).toBeTruthy();

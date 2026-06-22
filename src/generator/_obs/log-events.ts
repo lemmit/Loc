@@ -114,6 +114,10 @@ export const LogEvents = {
     level: "info",
     fields: ["event_type", "aggregate", "id"],
   },
+  // A seed dataset (declared `seed …`) was applied to the database — one
+  // line per dataset, emitted by the boot-time seed runner.  `dataset` is
+  // the seed's stable name.
+  seedApplied: { event: "seed_applied", level: "info", fields: ["dataset"] },
   workflowStarted: { event: "workflow_started", level: "info", fields: ["workflow"] },
   workflowCompleted: { event: "workflow_completed", level: "info", fields: ["workflow"] },
   // An inbound event reached an `on(...)` reactor but no persisted workflow

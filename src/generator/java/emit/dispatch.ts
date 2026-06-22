@@ -143,7 +143,6 @@ export function renderJavaDispatcher(
   ].sort();
 
   const fields = [
-    `    private static final Logger log = LoggerFactory.getLogger(${className}.class);`,
     `    private final ApplicationEventPublisher events;`,
     ...repoAggs.map((a) => `    private final ${a}Repository ${repoField(a)};`),
     ...(esPresent ? [`    private final JdbcTemplate jdbc;`] : []),
@@ -207,8 +206,6 @@ export function renderJavaDispatcher(
       ``,
       ...[...imports].sort().map((i) => `import ${i};`),
       imports.size > 0 ? `` : null,
-      `import org.slf4j.Logger;`,
-      `import org.slf4j.LoggerFactory;`,
       `import org.springframework.context.ApplicationEventPublisher;`,
       `import org.springframework.context.event.EventListener;`,
       `import org.springframework.stereotype.Component;`,
@@ -220,6 +217,7 @@ export function renderJavaDispatcher(
       `import ${dctx.basePkg}.domain.events.*;`,
       `import ${dctx.basePkg}.domain.ids.*;`,
       `import ${dctx.basePkg}.domain.valueobjects.*;`,
+      `import ${dctx.basePkg}.config.CatalogLog;`,
       ``,
       `@Component`,
       `@Transactional`,
@@ -271,7 +269,7 @@ function renderHandler(
     out.push(`        var state = ${repo}.findById(__key).orElse(null);`);
     out.push(`        if (state == null) {`);
     out.push(
-      `            log.warn("event_unrouted workflow={} event={} key={}", "${wf.name}", "${sub.event}", __key);`,
+      `            CatalogLog.event("event_unrouted", "warn", "workflow", "${wf.name}", "event_type", "${sub.event}", "key", __key);`,
     );
     out.push(`            return;`);
     out.push(`        }`);
@@ -357,7 +355,7 @@ function renderEsHandler(
     );
     out.push(`        if (__rows.isEmpty()) {`);
     out.push(
-      `            log.warn("event_unrouted workflow={} event={} key={}", "${wf.name}", "${sub.event}", __key);`,
+      `            CatalogLog.event("event_unrouted", "warn", "workflow", "${wf.name}", "event_type", "${sub.event}", "key", __key);`,
     );
     out.push(`            return;`);
     out.push(`        }`);

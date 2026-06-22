@@ -60,6 +60,7 @@ import { emitJavaMigrations } from "./emit/migrations.js";
 import {
   renderCatalogLogger,
   renderLifecycleCatalog,
+  renderMigrationCatalogCallback,
   renderRequestCatalogFilter,
 } from "./emit/observability.js";
 import {
@@ -515,6 +516,16 @@ function emitProjectFromContexts(
     allMigrations.some((m) => m.steps.length > 0 || m.baseline !== null) ||
     hasProvenance ||
     hasAudit;
+
+  // Migration-lifecycle catalog (observability.md) — hangs a Flyway Callback
+  // off the in-process boot run so migrations_starting / migration_applied /
+  // migrations_complete / migration_failed surface through CatalogLog, sharing
+  // the cross-backend envelope.  Emitted only when the project ships migrations
+  // (Flyway is wired) — otherwise the FlywayConfigurationCustomizer bean would
+  // reference an auto-config type that isn't on the classpath.
+  if (hasMigrations) {
+    place("MigrationCatalogConfig.java", "config", renderMigrationCatalogCallback(basePkg));
+  }
 
   // Project shell — stable from S1 on.
   out.set(

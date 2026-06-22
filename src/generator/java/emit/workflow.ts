@@ -199,7 +199,7 @@ export function javaWorkflowStmtTarget(
       return emitSink
         ? [`${indent}${emitSink}.add(new ${s.eventName}(${args}));`]
         : [
-            `${indent}{ var __ev = new ${s.eventName}(${args}); log.info("domain_event type={}", __ev.getClass().getSimpleName()); }`,
+            `${indent}{ var __ev = new ${s.eventName}(${args}); CatalogLog.event("event_dispatched", "info", "event_type", __ev.getClass().getSimpleName()); }`,
           ];
     },
     repoRun: (s, indent) => {
@@ -386,8 +386,6 @@ export function renderJavaWorkflows(
       ``,
       ...[...imports].sort().map((i) => `import ${i};`),
       imports.size > 0 ? `` : null,
-      hasEmit ? `import org.slf4j.Logger;` : null,
-      hasEmit ? `import org.slf4j.LoggerFactory;` : null,
       `import org.springframework.stereotype.Service;`,
       `import org.springframework.transaction.annotation.Transactional;`,
       usesIsolation ? `import org.springframework.transaction.annotation.Isolation;` : null,
@@ -406,6 +404,7 @@ export function renderJavaWorkflows(
         ? `import ${wctx.resourcesPkg}.*;`
         : null,
       hasEmit ? `import ${wctx.basePkg}.domain.events.*;` : null,
+      hasEmit ? `import ${wctx.basePkg}.config.CatalogLog;` : null,
       `import ${wctx.basePkg}.domain.common.*;`,
       `import ${wctx.basePkg}.domain.enums.*;`,
       `import ${wctx.basePkg}.domain.ids.*;`,
@@ -414,9 +413,6 @@ export function renderJavaWorkflows(
       `@Service`,
       `@Transactional`,
       `public class ${serviceName} {`,
-      hasEmit
-        ? `    private static final Logger log = LoggerFactory.getLogger(${serviceName}.class);`
-        : null,
       ...repoFields.map((a) => `    private final ${a}Repository ${repoField(a)};`),
       anyUser ? `    private final CurrentUserAccessor currentUserAccessor;` : null,
       ``,
