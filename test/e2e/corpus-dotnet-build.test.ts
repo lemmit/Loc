@@ -58,10 +58,6 @@ const DOTNET_COMPILE_SKIP: Record<string, string> = {
   // scope (CS0103); the filter expr isn't threaded a current-user accessor there.
   "tenancy-filter":
     "EMITTER GAP: tenancy filter emits unbound `currentUser` in EF configuration on .NET (CS0103)",
-  // EMITTER GAP (analyzer): the generated S3 resource client field is typed as the
-  // interface `IAmazonS3`; CA1859 (use the concrete type for perf) is promoted to
-  // an error by `/warnaserror`.  Fix = emit the concrete `AmazonS3Client` field type.
-  resources: "EMITTER GAP: S3 resource client field trips CA1859 under /warnaserror on .NET",
   // EMITTER GAP: provenance pipeline behaviour — `ExecutionContextBehavior` doesn't
   // match the Mediator `IPipelineBehavior<,>.Handle(...)` signature it claims to
   // implement (CS0535) — a generated-vs-library API-shape drift on .NET.

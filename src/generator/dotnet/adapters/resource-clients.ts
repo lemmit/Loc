@@ -68,7 +68,7 @@ const s3DotnetAdapter: DotnetResourceAdapter = {
       lines.push(
         `    private static readonly string ${cls}Bucket =`,
         `        Environment.GetEnvironmentVariable("${envVar(r.name)}_BUCKET") ?? ${JSON.stringify(bucket)};`,
-        `    private static readonly IAmazonS3 ${cls}Client = new AmazonS3Client();`,
+        `    private static readonly AmazonS3Client ${cls}Client = new AmazonS3Client();`,
         "",
         `    public static async Task ${cls}_Put(string key, string body)`,
         "    {",
