@@ -590,6 +590,12 @@ export function buildRoutesFile(
     lines.push(`    }),`);
     lines.push(`    async (c) => {`);
     lines.push(`      const { id } = c.req.valid("param");`);
+    if (!auditDestroy) {
+      // Non-audited: the not-found probe stays OUTSIDE the FK-violation
+      // try, byte-identical to the pre-audit baseline.  getById throws
+      // AggregateNotFoundError (→ 404) when absent.
+      lines.push(`      await repo.getById(Ids.${agg.name}Id(id));`);
+    }
     lines.push(`      try {`);
     if (auditDestroy) {
       // Audited destroy — snapshot the loaded wire shape, write the
@@ -625,8 +631,6 @@ export function buildRoutesFile(
       lines.push(`          await repoTx.delete(Ids.${agg.name}Id(id));`);
       lines.push(`        });`);
     } else {
-      // getById throws AggregateNotFoundError (→ 404) when absent.
-      lines.push(`        await repo.getById(Ids.${agg.name}Id(id));`);
       lines.push(`        await repo.delete(Ids.${agg.name}Id(id));`);
     }
     lines.push(`      } catch (err) {`);
