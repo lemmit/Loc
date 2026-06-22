@@ -27,6 +27,23 @@ system InventorySystem {
         qty: int
       }
 
+      // Emitted by the ReservationTracker saga (below) and folded by its
+      // apply(...) — an event the workflow owns, so it lands on the saga's
+      // own `<wf>_events` stream.
+      event ReservationRecorded {
+        warehouse: Warehouse id,
+        units: int
+      }
+
+      // Carries the events the ReservationTracker saga reacts to / emits, so
+      // the dispatcher wires its create/on reactors (which append to the
+      // saga's stream).
+      channel Reservations {
+        carries: ItemReserved, ReservationRecorded
+        delivery: broadcast
+        retention: ephemeral
+      }
+
       aggregate Warehouse ids guid with crudish {
         code: string
         contains stocks: Stock[]
@@ -65,6 +82,28 @@ system InventorySystem {
           let warehouse = Warehouses.getById(warehouseId)
           warehouse.reserve(sku, qty)
         }
+      }
+
+      // Event-sourced workflow: an observable saga keyed by warehouse that
+      // accrues reserved units through its OWN emitted ReservationRecorded
+      // events (every emit is folded by an apply(...), so it lands on the
+      // saga's `<wf>_events` stream).  Started by ItemReserved, it re-records
+      // the reservation as a folded event.  Being correlation-bearing +
+      // observable, the `scaffold(subdomains:)` above emits its read-only
+      // `<Wf>InstancesList` / `<Wf>InstanceDetail` instance pages — exercising
+      // the ES-workflow scaffold-instance-pages path on the generated
+      // react/svelte/vue build gates.
+      workflow ReservationTracker eventSourced {
+        warehouseId: Warehouse id   // correlation field → stream key
+        reservedUnits: int          // folded state
+
+        create(r: ItemReserved) by r.warehouse {
+          emit ReservationRecorded { warehouse: r.warehouse, units: r.qty }
+        }
+        on(r: ItemReserved) by r.warehouse {
+          emit ReservationRecorded { warehouse: r.warehouse, units: r.qty }
+        }
+        apply(rec: ReservationRecorded) { reservedUnits := reservedUnits + rec.units }
       }
     }
   }

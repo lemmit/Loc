@@ -76,10 +76,28 @@ describe("workflow-sourced views — validation", () => {
     expect(explicit).toContain("loom.view-where-unknown-field");
   });
 
-  it("rejects an event-sourced workflow as a view source", async () => {
+  it("accepts an event-sourced workflow with a correlation field as a view source", async () => {
+    // event-sourced workflows now carry an instance read model (folded from
+    // the `<wf>_events` stream); a view over one reads that fold-projected
+    // read model in-memory, so the source is observable.
     const codes = await diags({
       workflow: `workflow Fulfillment eventSourced {
         orderId: Order id
+        status: FulfillmentStatus
+        create(paid: PaymentReceived) by paid.order { emit PaymentReceived { order: paid.order, amount: paid.amount } }
+        apply(paid: PaymentReceived) { }
+      }`,
+      view: "view ActiveFulfillments = Fulfillment where status == Pending",
+    });
+    expect(codes).not.toContain("loom.view-workflow-not-observable");
+    expect(codes).toEqual([]);
+  });
+
+  it("rejects a workflow with no single id-shaped correlation field as a view source", async () => {
+    // No id-shaped state field ⇒ no correlation ⇒ no instance read model on
+    // either a state-table saga or an event-sourced workflow.
+    const codes = await diags({
+      workflow: `workflow Fulfillment eventSourced {
         status: FulfillmentStatus
         create(paid: PaymentReceived) by paid.order { emit PaymentReceived { order: paid.order, amount: paid.amount } }
         apply(paid: PaymentReceived) { }

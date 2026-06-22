@@ -12,7 +12,8 @@ import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { responsePyType } from "./emit/http-models.js";
 import { lowerWorkflowFilterToSqlAlchemy, type PyPredicate } from "./find-predicate.js";
-import { renderPyExpr } from "./render-expr.js";
+import { collectPyExprImports, renderPyExpr } from "./render-expr.js";
+import { esFns } from "./workflow-eventsourced-emit.js";
 import { instanceFieldValue } from "./workflows-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -46,10 +47,14 @@ export function buildPyViewsFile(
     (v) => v.source.kind === "workflow" && wfByName.get(v.source.name)?.instanceWireShape != null,
   );
   if (views.length === 0 && wfViews.length === 0) return null;
-  // Lower each workflow view's filter once (reused by the route + import scan).
+  // Lower each STATE-based workflow view's filter once to SQLAlchemy (reused by
+  // the route + import scan).  An event-sourced workflow has no `<Wf>Row` table
+  // to push the predicate into — it group-folds the `<wf>_events` stream and
+  // filters the folded instances in memory — so its filter is NOT lowered here.
   const wfLowered = new Map<string, PyPredicate | null>();
   for (const v of wfViews) {
     const wf = wfByName.get(v.source.name)!;
+    if (wf.eventSourced) continue;
     wfLowered.set(v.name, v.filter ? lowerWorkflowFilterToSqlAlchemy(v.filter, wf) : null);
   }
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
@@ -88,6 +93,14 @@ export function buildPyViewsFile(
       workflowViewRoute(v, wfByName.get(v.source.name)!, wfLowered.get(v.name) ?? null),
     ),
   ];
+  // ES workflow-view filters render to in-memory Python predicates (`row.<col>`)
+  // via `renderPyExpr`; collect their imports (e.g. `re` for `.matches`) so the
+  // module header stays correct.
+  const esWfViews = wfViews.filter((v) => wfByName.get(v.source.name)!.eventSourced);
+  const stateWfViews = wfViews.filter((v) => !wfByName.get(v.source.name)!.eventSourced);
+  const esFilterImports = new Set<string>();
+  for (const v of esWfViews) if (v.filter) collectPyExprImports(v.filter, esFilterImports);
+  const needsRe = esFilterImports.has("re");
   const routes = routeBlocks.join("\n\n\n");
   const body = `${models.join("")}${wfModels}router = APIRouter(prefix="/views", tags=["views"])\n\n\n${routes}`;
 
@@ -106,12 +119,21 @@ export function buildPyViewsFile(
   const voEnumNames = [...ctx.valueObjects.map((v) => v.name), ...ctx.enums.map((e) => e.name)]
     .filter(refersTo)
     .sort();
-  // SQLAlchemy helpers a workflow-sourced view route calls: `select` for the
-  // saga read, plus any `and_`/`or_`/`not_` its lowered filter needs.
-  const saOps = new Set<string>(wfViews.length > 0 ? ["select"] : []);
+  // SQLAlchemy helpers a STATE-based workflow-sourced view route calls: `select`
+  // for the saga read, plus any `and_`/`or_`/`not_` its lowered filter needs.
+  // (ES views fold the stream + filter in memory — no SQLAlchemy.)
+  const saOps = new Set<string>(stateWfViews.length > 0 ? ["select"] : []);
   for (const p of wfLowered.values()) for (const op of p?.ops ?? []) saOps.add(op);
-  // Saga-state row classes the workflow views read.
-  const wfRows = [...new Set(wfViews.map((v) => `${wfByName.get(v.source.name)!.name}Row`))].sort();
+  // Saga-state row classes the STATE-based workflow views read from schema.  ES
+  // views have no `<Wf>Row` table — they fold the event stream via dispatch.
+  const wfRows = [
+    ...new Set(stateWfViews.map((v) => `${wfByName.get(v.source.name)!.name}Row`)),
+  ].sort();
+  // ES workflow-view fold helpers (`_load_all_<wf>`), reused from `app.dispatch`
+  // so the read mirrors the dispatch-handler / instance-LIST load machinery.
+  const esLoadAll = [
+    ...new Set(esWfViews.map((v) => esFns(wfByName.get(v.source.name)!).loadAll)),
+  ].sort();
   // Authorization gates: any `view … requires <expr>` pulls in ForbiddenError;
   // a currentUser-referencing gate additionally threads `Request` + the `User`
   // principal type.  `requires true` needs only ForbiddenError.
@@ -121,6 +143,8 @@ export function buildPyViewsFile(
   return lines(
     `"""Read-model view routes.  Auto-generated."""`,
     "",
+    needsRe ? "import re" : null,
+    needsRe ? "" : null,
     `from fastapi import APIRouter, Depends${anyGateUsesUser ? ", Request" : ""}`,
     models.length > 0 || wfModels.length > 0 ? "from pydantic import BaseModel, RootModel" : null,
     saOps.size > 0 ? `from sqlalchemy import ${[...saOps].sort().join(", ")}` : null,
@@ -130,6 +154,7 @@ export function buildPyViewsFile(
     "from app.db.engine import get_session",
     ...repoAggs.map((n) => `from app.db.repositories.${snake(n)}_repository import ${n}Repository`),
     wfRows.length > 0 ? `from app.db.schema import ${wfRows.join(", ")}` : null,
+    esLoadAll.length > 0 ? `from app.dispatch import ${esLoadAll.join(", ")}` : null,
     refersTo("iso") ? "from app.db.wire import iso" : null,
     hasDispatch && refersTo("make_dispatcher") ? "from app.dispatch import make_dispatcher" : null,
     !hasDispatch && refersTo("NoopDomainEventDispatcher")
@@ -233,20 +258,43 @@ function workflowViewModels(view: ViewIR, wf: WorkflowIR, ctx: EnrichedBoundedCo
   );
 }
 
-/** `GET /views/<view>` over the source workflow's saga-state row with the
- *  shorthand filter lowered to a SQLAlchemy `where`; rows project through the
- *  shared instance wire projection (camelCase key ← snake column). */
+/** `GET /views/<view>` over the source workflow's instance read model.  The
+ *  read diverges on `wf.eventSourced`:
+ *
+ *   - **state-based saga** — selects the `<Wf>Row` correlation table with the
+ *     shorthand filter lowered to a SQLAlchemy `where` (SQL-pushed);
+ *   - **event-sourced** — has no `<Wf>Row` table, so it group-folds the
+ *     `<wf>_events` stream via `_load_all_<wf>` (the same helper the ES instance
+ *     LIST route uses) and applies the SAME predicate IN-MEMORY as a Python
+ *     boolean over the folded state's attributes (`row.<col>`).
+ *
+ *  Both paths project through the shared instance wire projection (camelCase key
+ *  ← snake column), so operationIds / route paths / the response component are
+ *  identical across the two. */
 function workflowViewRoute(view: ViewIR, wf: WorkflowIR, pred: PyPredicate | null): string {
   const fn = snake(view.name);
-  const row = `${wf.name}Row`;
   const proj = (wf.instanceWireShape ?? [])
     .map((f: WireField) => `"${f.name}": ${instanceFieldValue("row", f)}`)
     .join(", ");
-  const where = pred ? `.where(${pred.expr})` : "";
-  return lines(
+  const head = [
     `@router.get("/${fn}", response_model=${view.name}Response, operation_id="${camelId(opView(view.name))}")`,
     `async def ${fn}_view(${viewSig(view)}) -> list[dict[str, object]]:`,
     ...viewGateLines(view),
+  ];
+  if (wf.eventSourced) {
+    const loadAll = esFns(wf).loadAll;
+    // In-memory predicate over the folded state — `this.<col>` → `row.<col>`.
+    const guard = view.filter ? ` if ${renderPyExpr(view.filter, { thisName: "row" })}` : "";
+    return lines(
+      ...head,
+      `    rows = await ${loadAll}(session)`,
+      `    return [{${proj}} for row in rows${guard}]`,
+    );
+  }
+  const row = `${wf.name}Row`;
+  const where = pred ? `.where(${pred.expr})` : "";
+  return lines(
+    ...head,
     `    rows = (await session.execute(select(${row})${where})).scalars().all()`,
     `    return [{${proj}} for row in rows]`,
   );

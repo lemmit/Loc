@@ -64,10 +64,12 @@ export function emitVanillaViewModules(
 
   for (const view of ctx.views) {
     // Workflow-sourced view (workflow-instance-views.md): a curated saga
-    // projection over the persisted correlation state — a plain Ecto read of
-    // the workflow's `<Wf>State` schema, the read-side sibling of the instance
-    // endpoints (workflow-instances-emit.ts).  Only observable (correlation-
-    // bearing, non-eventSourced) workflows have an `instanceWireShape`.
+    // projection over the correlation instance read model, the read-side sibling
+    // of the instance endpoints (workflow-instances-emit.ts).  Only observable
+    // (correlation-bearing) workflows have an `instanceWireShape` — a state-table
+    // saga reads its `<Wf>State` Ecto schema, an event-sourced workflow folds the
+    // `<wf>_events` stream and filters the instances in memory
+    // (renderVanillaWorkflowView branches on `wf.eventSourced`).
     if (view.source.kind === "workflow") {
       const wf = ctx.workflows.find((w) => w.name === view.source.name);
       if (!wf?.instanceWireShape) continue; // validator gated / not observable
@@ -86,13 +88,22 @@ export function emitVanillaViewModules(
   }
 }
 
-/** A workflow-sourced view module — a shorthand Ecto read of the saga-state
- *  schema with the view's filter, projecting `instanceWireShape` (camelCase
+/** A workflow-sourced view module — a curated saga projection over the
+ *  workflow's instance read model, projecting `instanceWireShape` (camelCase
  *  wire key ← snake struct field; Jason ISO-encodes any datetime).  `run/1`
  *  returns plain maps, so the project-wide `ViewsController` action's
  *  `serialize/1` is the identity on them — no struct handling needed.  Full-form
  *  workflow views are rejected upstream (`loom.view-workflow-fullform-unsupported`),
- *  so this only handles the shorthand (filter-only) form. */
+ *  so this only handles the shorthand (filter-only) form.
+ *
+ *  The read diverges on `wf.eventSourced`:
+ *   - **state-based saga** — a plain Ecto read of the `<Wf>State` schema with the
+ *     filter pushed into the query (`from(record in <State>, where: …)`);
+ *   - **event-sourced** — has no `<Wf>State` table, so it group-folds the
+ *     `<wf>_events` stream via `<Wf>Stream.list_instances/0` (the same helper the
+ *     ES instance LIST uses) and applies the SAME filter IN-MEMORY through
+ *     `Enum.filter`.  The folded `<Wf>State` struct exposes the same `record.<f>`
+ *     fields, so projection / route paths / wire keys stay identical. */
 function renderVanillaWorkflowView(
   view: ViewIR,
   wf: WorkflowIR,
@@ -101,20 +112,38 @@ function renderVanillaWorkflowView(
   typesModule: string,
 ): string {
   const moduleName = `${contextModule}.Views.${upperFirst(view.name)}`;
-  const stateMod = stateModule(contextModule, wf);
   const renderCtx: RenderCtx = {
     thisName: "record",
     contextModule,
     typesModule,
     foundation: "vanilla",
   };
-  const query = view.filter
-    ? `    from(record in ${stateMod}, where: ${renderExpr(view.filter, renderCtx)})
-    |> Repo.all()`
-    : `    Repo.all(${stateMod})`;
   const proj = (wf.instanceWireShape ?? [])
     .map((f) => `${f.name}: record.${snake(f.name)}`)
     .join(", ");
+  let query: string;
+  let preamble: string;
+  if (wf.eventSourced) {
+    // Group-fold the stream into instances, then filter in memory.  No Ecto.Query
+    // / Repo here — the fold helper lives on the stream module.
+    const streamMod = `${contextModule}.Workflows.${upperFirst(wf.name)}Stream`;
+    const filtered = view.filter
+      ? `    |> Enum.filter(fn record -> ${renderExpr(view.filter, renderCtx)} end)\n`
+      : "";
+    query = `    ${streamMod}.list_instances()\n${filtered}`;
+    preamble = "";
+  } else {
+    const stateMod = stateModule(contextModule, wf);
+    query =
+      (view.filter
+        ? `    from(record in ${stateMod}, where: ${renderExpr(view.filter, renderCtx)})
+    |> Repo.all()`
+        : `    Repo.all(${stateMod})`) + "\n";
+    preamble = `  import Ecto.Query
+  alias ${appModule}.Repo
+
+`;
+  }
   return `# Auto-generated.
 defmodule ${moduleName} do
   @moduledoc """
@@ -125,15 +154,11 @@ defmodule ${moduleName} do
   Foundation: vanilla (plain Ecto).
   """
 
-  import Ecto.Query
-  alias ${appModule}.Repo
-
-  @doc "Execute the view query and return the matching saga instances."
+${preamble}  @doc "Execute the view query and return the matching saga instances."
   @spec run(any()) :: [map()]
   def run(current_user \\\\ nil) do
     _ = current_user
-${query}
-    |> Enum.map(fn record -> %{${proj}} end)
+${query}    |> Enum.map(fn record -> %{${proj}} end)
   end
 end
 `;

@@ -153,6 +153,86 @@ describe("scaffold macro: workflow / view / module selectors", () => {
   });
 });
 
+// An event-sourced workflow is now observable too (it carries `instanceWireShape`
+// + a folded `GET /workflows/<wf>/instances[/{id}]` read model since #1497), so a
+// correlation-bearing ES workflow listed in `scaffold(workflows: [...])` emits the
+// same read-only `<Wf>InstancesList` / `<Wf>InstanceDetail` instance pages a
+// state-table saga does — it previously did NOT (the macro excluded ES workflows).
+// A stateless ES workflow (no id-shaped state field ⇒ no correlation read model)
+// still produces no instance pages.
+const ES_OBS = `
+  system Demo {
+    subdomain Sales {
+      context Orders {
+        aggregate Order { subject: string  create place() { subject := "x"  emit OrderPlaced { order: id } } }
+        repository Orders for Order { }
+        event OrderPlaced { order: Order id }
+        event Paid { order: Order id, amount: int }
+        channel L { carries: OrderPlaced, Paid  delivery: broadcast  retention: ephemeral }
+        workflow Fulfillment eventSourced {
+          orderId: Order id
+          total: int
+          create(p: OrderPlaced) by p.order { emit Paid { order: p.order, amount: 0 } }
+          apply(pr: Paid) { total := total + pr.amount }
+        }
+      }
+    }
+    ui App with scaffold(workflows: [Fulfillment]) { }
+  }
+`;
+
+const ES_STATELESS = `
+  system Demo {
+    subdomain Sales {
+      context Orders {
+        aggregate Order { subject: string  create place() { subject := "x"  emit OrderPlaced { order: id } } }
+        repository Orders for Order { }
+        event OrderPlaced { order: Order id }
+        event Paid { order: Order id, amount: int }
+        channel L { carries: OrderPlaced, Paid  delivery: broadcast  retention: ephemeral }
+        workflow Counter eventSourced {
+          total: int
+          create(p: OrderPlaced) by p.order { emit Paid { order: p.order, amount: 0 } }
+          apply(pr: Paid) { total := total + pr.amount }
+        }
+      }
+    }
+    ui App with scaffold(workflows: [Counter]) { }
+  }
+`;
+
+describe("scaffold macro: event-sourced workflow instance pages", () => {
+  it("emits InstancesList + InstanceDetail for a correlation-bearing ES workflow", async () => {
+    const { model, errors } = await parseString(ES_OBS);
+    expect(errors).toEqual([]);
+    const names = pageNames(model);
+    expect(names).toContain("FulfillmentInstancesList");
+    expect(names).toContain("FulfillmentInstanceDetail");
+  });
+
+  it("gives the ES instance pages the conventional instance routes", async () => {
+    const { model } = await parseString(ES_OBS);
+    expect(pageRoute(model, "FulfillmentInstancesList")).toBe("/workflows/fulfillment/instances");
+    expect(pageRoute(model, "FulfillmentInstanceDetail")).toBe(
+      "/workflows/fulfillment/instances/:id",
+    );
+  });
+
+  it("emits the bodies as full unfoldable trees (top-level Stack), not sentinels", async () => {
+    const { model } = await parseString(ES_OBS);
+    expect(pageBodyCallee(model, "FulfillmentInstancesList")).toBe("Stack");
+    expect(pageBodyCallee(model, "FulfillmentInstanceDetail")).toBe("Stack");
+  });
+
+  it("emits no instance pages for a stateless ES workflow (no id-shaped field)", async () => {
+    const { model, errors } = await parseString(ES_STATELESS);
+    expect(errors).toEqual([]);
+    const names = pageNames(model);
+    expect(names).not.toContain("CounterInstancesList");
+    expect(names).not.toContain("CounterInstanceDetail");
+  });
+});
+
 describe("scaffold macro: composition rules", () => {
   it("reports unknown aggregate name with a helpful diagnostic", async () => {
     const { errors } = await parseString(wrapWith("aggregates: [Bogus]"));

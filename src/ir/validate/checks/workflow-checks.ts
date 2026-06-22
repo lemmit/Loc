@@ -933,12 +933,14 @@ export function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): v
         continue;
       }
       // A workflow source needs an observable instance read model: a single
-      // id-shaped correlation field, and not event-sourced (no state table).
-      if (!wf.correlationField || wf.eventSourced) {
+      // id-shaped correlation field.  Both state-table sagas and event-sourced
+      // workflows qualify — the ES path reads the fold-projected instance read
+      // model (group-fold `<wf>_events`) instead of a `<Wf>State` table.
+      if (!wf.correlationField) {
         diags.push({
           severity: "error",
           code: "loom.view-workflow-not-observable",
-          message: `view '${view.name}': workflow '${wf.name}' has no observable instance state (it needs a single id-shaped state field and must not be event-sourced), so it can't be a view source.`,
+          message: `view '${view.name}': workflow '${wf.name}' has no observable instance state (it needs a single id-shaped correlation/state field), so it can't be a view source.`,
           source: `${ctx.name}/${view.name}`,
         });
         continue;

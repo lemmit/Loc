@@ -57,3 +57,55 @@ describe("vanilla foundation — workflow-sourced view", () => {
     ).toBeDefined();
   });
 });
+
+// An event-sourced workflow has no `<Wf>State` Ecto table, so a `view =
+// <ESWorkflow>` can't push its filter into an `from(.. where: ..)` query.  The
+// view module group-folds the `<wf>_events` stream via `<Wf>Stream.list_instances/0`
+// (the same helper the ES instance LIST uses) and applies the SAME filter
+// IN-MEMORY with `Enum.filter`.  The folded `<Wf>State` struct exposes the same
+// `record.<f>` fields, so projection / route paths / wire keys stay identical.
+const ES_FIXTURE = fs.readFileSync(
+  path.resolve(here, "../../e2e/fixtures/elixir-vanilla-build/vanilla-eventsourced-workflow.ddd"),
+  "utf8",
+);
+
+async function buildEs(): Promise<Map<string, string>> {
+  const { model, errors } = await parseString(ES_FIXTURE);
+  if (errors.length) throw new Error(`fixture has validation errors:\n${errors.join("\n")}`);
+  return generateSystems(model).files;
+}
+
+describe("vanilla foundation — event-sourced workflow-sourced view", () => {
+  it("group-folds the stream via list_instances/0 and filters IN-MEMORY", async () => {
+    const files = await buildEs();
+    const view = files.get("api/lib/api/fulfillment/views/paid_fulfillments.ex");
+    expect(view, "ES workflow view module not emitted").toBeDefined();
+    // Reads the group-fold instance read model — NOT an Ecto saga-state query.
+    expect(view).toContain("Api.Fulfillment.Workflows.OrderFulfillmentStream.list_instances()");
+    expect(view).toContain("|> Enum.filter(fn record -> record.paid > 0 end)");
+    expect(view).not.toContain("from(record in");
+    expect(view).not.toContain("|> Repo.all()");
+    // No Ecto.Query / Repo import on the ES path.
+    expect(view).not.toContain("import Ecto.Query");
+    // Projects instanceWireShape: camelCase wire key ← snake struct field.
+    expect(view).toContain(
+      "|> Enum.map(fn record -> %{orderId: record.order_id, paid: record.paid, cancelled: record.cancelled} end)",
+    );
+  });
+
+  it("emits no mutable saga-state schema, and the stream exposes list_instances/0", async () => {
+    const files = await buildEs();
+    const state = files.get("api/lib/api/fulfillment/workflows/order_fulfillment_state.ex")!;
+    // ES fold struct, not an Ecto schema.
+    expect(state).not.toContain("use Ecto.Schema");
+    const stream = files.get("api/lib/api/fulfillment/workflows/order_fulfillment_stream.ex")!;
+    expect(stream).toContain("def list_instances do");
+  });
+
+  it("wires the ES view into the ViewsController under the same route", async () => {
+    const controller = (await buildEs()).get("api/lib/api_web/controllers/views_controller.ex")!;
+    expect(controller).toContain('@doc "GET /api/views/paid_fulfillments"');
+    expect(controller).toContain("def paid_fulfillments(conn, _params) do");
+    expect(controller).toContain("Api.Fulfillment.Views.PaidFulfillments.run(current_user)");
+  });
+});

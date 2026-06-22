@@ -115,8 +115,20 @@ function renderApplierStmt(s: StmtIR, indent: string): string {
  *    load<T>Events(db, key): Events[]      — read + deserialise the stream
  *    append<T>Events(db, key, events)      — gap-free append of the own-events
  *    <T>_FOLDED_EVENTS                     — the event types this workflow folds
- *  Reads the `<wf>_events` Drizzle table the schema emitter produces. */
-export function emitWorkflowFoldHelpers(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string[] {
+ *  Reads the `<wf>_events` Drizzle table the schema emitter produces.
+ *
+ *  `opts.readOnly` emits only the READ-side helpers (state type, apply, fold,
+ *  loadAll) — the subset a workflow-sourced VIEW needs.  The write-side
+ *  (`load<T>Events`, `append<T>Events`, `<T>_FOLDED_EVENTS`) is omitted so the
+ *  views file stays free of dead declarations under Biome's noUnusedVariables;
+ *  the dispatcher (which appends own-events) leaves it unset to get the full
+ *  set.  loadAll only reaches `rowToEvent`, so a read-only consumer can pass
+ *  `{ readOnly: true }` to `emitWorkflowStreamSerializers` too. */
+export function emitWorkflowFoldHelpers(
+  wf: WorkflowIR,
+  ctx: EnrichedBoundedContextIR,
+  opts: { readOnly?: boolean } = {},
+): string[] {
   const T = upperFirst(wf.name);
   const corr = wf.correlationField as string;
   const table = streamTable(wf);
@@ -161,18 +173,22 @@ export function emitWorkflowFoldHelpers(wf: WorkflowIR, ctx: EnrichedBoundedCont
   out.push(`  return state;`);
   out.push(`}`);
 
-  // load<T>Events — read + deserialise the per-correlation stream in order.
-  out.push(`async function load${T}Events(`);
-  out.push(`  db: NodePgDatabase<typeof schema>,`);
-  out.push(`  key: string,`);
-  out.push(`): Promise<Events.DomainEvent[]> {`);
-  out.push(`  const rows = await db`);
-  out.push(`    .select()`);
-  out.push(`    .from(${table})`);
-  out.push(`    .where(eq(${table}.streamId, key))`);
-  out.push(`    .orderBy(${table}.version);`);
-  out.push(`  return rows.map((r) => rowToEvent({ type: r.type, data: r.data }));`);
-  out.push(`}`);
+  // load<T>Events — read + deserialise the per-correlation stream in order.  A
+  // read-only (view) consumer never loads a single correlation stream, so skip
+  // it to keep the views file free of dead declarations.
+  if (!opts.readOnly) {
+    out.push(`async function load${T}Events(`);
+    out.push(`  db: NodePgDatabase<typeof schema>,`);
+    out.push(`  key: string,`);
+    out.push(`): Promise<Events.DomainEvent[]> {`);
+    out.push(`  const rows = await db`);
+    out.push(`    .select()`);
+    out.push(`    .from(${table})`);
+    out.push(`    .where(eq(${table}.streamId, key))`);
+    out.push(`    .orderBy(${table}.version);`);
+    out.push(`  return rows.map((r) => rowToEvent({ type: r.type, data: r.data }));`);
+    out.push(`}`);
+  }
 
   // loadAll<T> — read every stream, group by correlation key, fold each.  The
   // instance-LIST read body (workflow-instance-visibility.md) mirrors the
@@ -192,6 +208,11 @@ export function emitWorkflowFoldHelpers(wf: WorkflowIR, ctx: EnrichedBoundedCont
   out.push(`  }`);
   out.push(`  return [...byStream.entries()].map(([id, evs]) => fold${T}(id, evs));`);
   out.push(`}`);
+
+  if (opts.readOnly) {
+    // A view consumer never appends own-events or inspects the folded-event set.
+    return out;
+  }
 
   // append<T>Events — gap-free append of the workflow's own (folded) events.
   out.push(`async function append${T}Events(`);
@@ -228,11 +249,18 @@ export function emitWorkflowFoldHelpers(wf: WorkflowIR, ctx: EnrichedBoundedCont
  *  context folds — `eventToData` (domain → JSON row) + `rowToEvent` (row →
  *  tagged domain event).  Emitted once; reuses the aggregate event store's
  *  emitters over the union of folded event types. */
-export function emitWorkflowStreamSerializers(ctx: EnrichedBoundedContextIR): string[] {
+export function emitWorkflowStreamSerializers(
+  ctx: EnrichedBoundedContextIR,
+  opts: { readOnly?: boolean } = {},
+): string[] {
   const folded = new Set<string>();
   for (const wf of eventSourcedWorkflows(ctx)) for (const n of foldedEventNames(wf)) folded.add(n);
   if (folded.size === 0) return [];
   const events: EventIR[] = ctx.events.filter((e) => folded.has(e.name));
+  // A read-only (view) consumer only group-folds the stream → only `rowToEvent`
+  // is reached; omit `eventToData` (write-side) so the views file carries no
+  // dead declaration.
+  if (opts.readOnly) return [rowToEventFn(events, ctx)];
   return [eventToDataFn(events, ctx), "", rowToEventFn(events, ctx)];
 }
 

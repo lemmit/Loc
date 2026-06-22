@@ -12,7 +12,8 @@ import { camelId, opView } from "../../ir/util/openapi-ids.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { dtoParam, projectEntityExpr, projectToResponse, wireType } from "./dto-mapping.js";
 import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
-import { workflowStateDbSet } from "./workflow-state-emit.js";
+import { esCorrIdClass, esEventDbSet } from "./workflow-eventsourced-emit.js";
+import { workflowStateClass, workflowStateDbSet } from "./workflow-state-emit.js";
 
 // ---------------------------------------------------------------------------
 // .NET view emission.
@@ -292,6 +293,7 @@ function renderWorkflowViewHandler(
   const handlerName = `${upperFirst(view.name)}Handler`;
   const responseRecord = `${upperFirst(wf.name)}InstanceResponse`;
   const dbSet = workflowStateDbSet(wf);
+  const eventSourced = !!wf.eventSourced;
   const usings = new Set<string>();
   const where = view.filter ? renderCsExpr(view.filter, { thisName: "r" }) : undefined;
   if (view.filter) collectCsExprUsings(view.filter, usings);
@@ -320,6 +322,28 @@ function renderWorkflowViewHandler(
     : `    private readonly AppDbContext _db;\n    public ${handlerName}(AppDbContext db) => _db = db;`;
   const authUsing = gateUsesUser ? `using ${ns}.Auth;\n` : "";
   const commonUsing = view.requires ? `using ${ns}.Domain.Common;\n` : "";
+  // The read body diverges on `wf.eventSourced`.  A state-based saga pushes the
+  // view filter into the EF query over the `<Wf>State` DbSet (SQL `WHERE`).  An
+  // event-sourced workflow has no state table — it group-folds the `<wf>_events`
+  // stream into the same instance read model the ES instance LIST produces
+  // (load all event rows, group by StreamId, fold each via `_FromEvents`), then
+  // applies the SAME predicate IN-MEMORY (`.Where(r => …)` over the folded
+  // state).  Both project `instanceWireShape` field-for-field, so operationIds,
+  // route paths, and the response component stay identical across the two paths.
+  let queryBody: string;
+  if (eventSourced) {
+    const eventSet = esEventDbSet(wf);
+    const stateCls = workflowStateClass(wf);
+    const corrId = esCorrIdClass(wf);
+    queryBody =
+      `        var __rows = await _db.${eventSet}.AsNoTracking().OrderBy(e => e.StreamId).ThenBy(e => e.Version).ToListAsync(cancellationToken);\n` +
+      `        var rows = __rows.GroupBy(e => e.StreamId).Select(g => ${stateCls}._FromEvents(new ${corrId}(System.Guid.Parse(g.Key)), g.Select(${stateCls}.RowToEvent).ToList()))${where ? `.Where(r => ${where})` : ""};\n` +
+      `        return rows.Select(r => new ${responseRecord}(${proj})).ToList();`;
+  } else {
+    queryBody =
+      `        var rows = await _db.${dbSet}.AsNoTracking()${where ? `.Where(r => ${where})` : ""}.ToListAsync(cancellationToken);\n` +
+      `        return rows.Select(r => new ${responseRecord}(${proj})).ToList();`;
+  }
   return `// Auto-generated.
 using System.Collections.Generic;
 using System.Linq;
@@ -341,8 +365,7 @@ ${ctorFields}
 
     public async ValueTask<IReadOnlyList<${responseRecord}>> Handle(${queryName} query, CancellationToken cancellationToken)
     {
-${gateLines.length > 0 ? gateLines.join("\n") + "\n" : ""}        var rows = await _db.${dbSet}.AsNoTracking()${where ? `.Where(r => ${where})` : ""}.ToListAsync(cancellationToken);
-        return rows.Select(r => new ${responseRecord}(${proj})).ToList();
+${gateLines.length > 0 ? gateLines.join("\n") + "\n" : ""}${queryBody}
     }
 }
 `;

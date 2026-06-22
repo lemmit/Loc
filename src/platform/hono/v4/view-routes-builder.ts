@@ -12,6 +12,11 @@ import { viewUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { camelId, opView } from "../../../ir/util/openapi-ids.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { zodForResponse } from "./routes-builder.js";
+import {
+  emitWorkflowFoldHelpers,
+  emitWorkflowStreamSerializers,
+  esHelperNames,
+} from "./workflow-eventsourced-builder.js";
 
 // ---------------------------------------------------------------------------
 // Hono view routes emission.
@@ -35,16 +40,33 @@ export function buildViewsRoutesFile(
   aggsByName: Map<string, AggregateIR>,
 ): string {
   if (ctx.views.length === 0) return "";
-  // Workflow-sourced views (workflow-instance-views.md) read the saga-state
-  // table directly with the view's filter lowered to a Drizzle predicate (no
-  // aggregate repository).  Precompute each one's table + where + the Drizzle
-  // ops it needs so the imports below can include them.
-  const wfViews: Array<{ view: ViewIR; wf: WorkflowIR; table: string; where?: string }> = [];
+  // Workflow-sourced views (workflow-instance-views.md).  The read diverges on
+  // `wf.eventSourced`:
+  //   - **state-based saga** — reads its `<Wf>State` table directly with the
+  //     view's filter lowered to a Drizzle `where` (SQL-pushed, no aggregate
+  //     repository);
+  //   - **event-sourced** — has no state table, so it group-folds the
+  //     `<wf>_events` stream via the file-local `loadAll<T>` helper (the same
+  //     one the ES instance LIST emits) and applies the SAME predicate
+  //     IN-MEMORY (`.filter(r => …)`) over the folded state.
+  // Both project `instanceWireShape`, so operationIds / route paths / response
+  // components stay identical across the two paths.
+  const wfViews: Array<{
+    view: ViewIR;
+    wf: WorkflowIR;
+    eventSourced: boolean;
+    table?: string;
+    where?: string;
+  }> = [];
   const wfDrizzleOps = new Set<string>();
   for (const v of ctx.views) {
     if (v.source.kind !== "workflow") continue;
     const wf = ctx.workflows.find((w) => w.name === v.source.name);
     if (!wf?.instanceWireShape) continue;
+    if (wf.eventSourced) {
+      wfViews.push({ view: v, wf, eventSourced: true });
+      continue;
+    }
     // `lowerToDrizzle` prepends `schema.` to the table name itself when it
     // renders column refs, so it takes the BARE table name; the `.from(...)`
     // below uses the `schema.`-qualified form.
@@ -58,7 +80,24 @@ export function buildViewsRoutesFile(
         for (const op of lowered.ops) wfDrizzleOps.add(op);
       }
     }
-    wfViews.push({ view: v, wf, table, where });
+    wfViews.push({ view: v, wf, eventSourced: false, table, where });
+  }
+  // Event-sourced workflow-views need the per-workflow fold machinery
+  // (apply / fold / loadAll) + the shared stream (de)serialisers in scope — the
+  // file-local helpers the ES instance LIST also emits.  Emitted once into THIS
+  // file (a separate module from `http/workflows.ts`, so no name collision).
+  const esWfViews = wfViews.filter((v) => v.eventSourced);
+  const esHelperLines: string[] = [];
+  if (esWfViews.length > 0) {
+    esHelperLines.push(...emitWorkflowStreamSerializers(ctx, { readOnly: true }));
+    esHelperLines.push("");
+    const done = new Set<string>();
+    for (const { wf } of esWfViews) {
+      if (done.has(wf.name)) continue;
+      done.add(wf.name);
+      esHelperLines.push(...emitWorkflowFoldHelpers(wf, ctx, { readOnly: true }));
+      esHelperLines.push("");
+    }
   }
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
@@ -70,14 +109,32 @@ export function buildViewsRoutesFile(
   lines.push(`import { type DomainEventDispatcher } from "../domain/events";`);
   lines.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
   // A workflow-sourced view reads `schema.<table>` as a runtime value
-  // (`db.select().from(...)`); aggregate-only files keep the type-only import.
+  // (`db.select().from(...)` for state sagas, the ES fold helpers' stream reads
+  // for event-sourced ones); aggregate-only files keep the type-only import.
   lines.push(
     wfViews.length > 0
       ? `import * as schema from "../db/schema";`
       : `import type * as schema from "../db/schema";`,
   );
+  // ES fold helpers reference `Events.*`, drizzle `eq`/`asc`, and (for typed
+  // saga-state defaults) `Decimal` / `Ids` — derive these from the emitted
+  // helper text, the same body-scan the workflows file uses.
+  const esHelperStr = esHelperLines.join("\n");
+  const esDrizzleOps = ["and", "asc", "eq", "isNull", "lt"].filter((op) =>
+    new RegExp(`(?<!\\.)\\b${op}\\(`).test(esHelperStr),
+  );
+  for (const op of esDrizzleOps) wfDrizzleOps.add(op);
   if (wfDrizzleOps.size > 0) {
     lines.push(`import { ${[...wfDrizzleOps].sort().join(", ")} } from "drizzle-orm";`);
+  }
+  if (/\bEvents\.\w/.test(esHelperStr)) {
+    lines.push(`import type * as Events from "../domain/events";`);
+  }
+  if (/\bIds\.\w/.test(esHelperStr)) {
+    lines.push(`import * as Ids from "../domain/ids";`);
+  }
+  if (/(?<!\.)\bDecimal\b/.test(esHelperStr)) {
+    lines.push(`import Decimal from "decimal.js";`);
   }
   // Source aggregates + repo imports per view, plus any foreign
   // aggregates referenced via `X id` follow auxiliaries.
@@ -143,9 +200,21 @@ export function buildViewsRoutesFile(
   }
   if (wfViews.length > 0) lines.push("");
 
+  // ES fold machinery (module-level, file-local) for any event-sourced
+  // workflow-view source.
+  if (esHelperLines.length > 0) {
+    lines.push(...esHelperLines);
+  }
+
+  // `events` is threaded into aggregate-view repositories (`new XRepo(db,
+  // events)`); a workflow-views-only file never constructs a repository, so the
+  // param is unused there — name it `_events` to stay clean under Biome's
+  // noUnusedFunctionParameters (callers pass it positionally, so the name is
+  // irrelevant to them).
+  const usesEvents = ctx.views.some((v) => v.source.kind === "aggregate");
   lines.push(`export function viewsRoutes(`);
   lines.push(`  db: NodePgDatabase<typeof schema>,`);
-  lines.push(`  events: DomainEventDispatcher,`);
+  lines.push(`  ${usesEvents ? "events" : "_events"}: DomainEventDispatcher,`);
   lines.push(`): OpenAPIHono {`);
   // `newApp()` from `./problem-details` pre-wires the validation hook
   // that maps Zod parse failures (query/path params on view endpoints) to
@@ -158,10 +227,11 @@ export function buildViewsRoutesFile(
     lines.push(...emitViewRoute(view, ctx, aggsByName).map((l) => `  ${l}`));
     lines.push("");
   }
-  // Workflow-sourced view routes — `GET /<view>` over the saga-state table
-  // with the lowered filter (workflow-instance-views.md).
-  for (const { view, wf, table, where } of wfViews) {
-    lines.push(...emitWorkflowViewRoute(view, wf, table, where).map((l) => `  ${l}`));
+  // Workflow-sourced view routes — `GET /<view>` (workflow-instance-views.md):
+  // a state saga's SQL-pushed read or an ES workflow's group-fold + in-memory
+  // filter.
+  for (const { view, wf, eventSourced, table, where } of wfViews) {
+    lines.push(...emitWorkflowViewRoute(view, wf, eventSourced, table, where).map((l) => `  ${l}`));
     lines.push("");
   }
 
@@ -288,14 +358,21 @@ function emitWorkflowViewSchema(view: ViewIR, wf: WorkflowIR): string[] {
   return out;
 }
 
-/** A workflow-sourced view route: `GET /<view>` over the saga-state table with
- *  the view's filter lowered to a Drizzle `where` (workflow-instance-views.md).
- *  Rows cast to the response type — `c.json` JSON-serialises them (Date → ISO,
- *  branded ids → string), the read-side analogue of the instance endpoints. */
+/** A workflow-sourced view route: `GET /<view>` (workflow-instance-views.md).
+ *  The read diverges on `wf.eventSourced`:
+ *   - **state-based saga** — `db.select().from(<Wf>State).where(<lowered filter>)`
+ *     (SQL-pushed);
+ *   - **event-sourced** — `loadAll<T>(db)` group-folds the `<wf>_events` stream
+ *     into instances (the same helper the ES instance LIST uses), then the SAME
+ *     filter is applied IN-MEMORY (`.filter((r) => <predicate>)`).
+ *  Either way rows cast to the response type — `c.json` JSON-serialises them
+ *  (Date → ISO, branded ids → string), the read-side analogue of the instance
+ *  endpoints, and the projected wire shape is identical across the two paths. */
 function emitWorkflowViewRoute(
   view: ViewIR,
   wf: WorkflowIR,
-  table: string,
+  eventSourced: boolean,
+  table: string | undefined,
   where: string | undefined,
 ): string[] {
   const T = upperFirst(view.name);
@@ -319,7 +396,18 @@ function emitWorkflowViewRoute(
     );
   }
   for (const line of viewGateLines(view)) out.push(line);
-  out.push(`    const rows = await db.select().from(${table})${where ? `.where(${where})` : ""};`);
+  if (eventSourced) {
+    const loadAll = esHelperNames(wf).loadAll;
+    // In-memory predicate over the folded `<T>State` (`this.<col>` → `r.<col>`).
+    const filterClause = view.filter
+      ? `.filter((r) => ${renderTsExpr(view.filter, { thisName: "r" })})`
+      : "";
+    out.push(`    const rows = (await ${loadAll}(db))${filterClause};`);
+  } else {
+    out.push(
+      `    const rows = await db.select().from(${table})${where ? `.where(${where})` : ""};`,
+    );
+  }
   out.push(`    return httpCtx.json(rows as unknown as z.infer<typeof ${T}Response>, 200);`);
   out.push(`  },`);
   out.push(`);`);

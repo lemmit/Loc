@@ -110,16 +110,18 @@ export function workflowIsEventTriggeredOnly(wf: Workflow): boolean {
   return !!facade.correlation;
 }
 
-/** Whether a workflow persists an observable instance row
+/** Whether a workflow exposes an observable instance read model
  *  (workflow-instance-visibility.md).  AST mirror of the IR rule
- *  (`lower-workflow.ts`): a single id-shaped `Property` state field is the
- *  correlation field, and only a correlation-bearing, non-event-sourced
- *  workflow has a state table to list.  Two id fields (ambiguous) or zero
+ *  (`lower-workflow.ts` / `enrichWorkflowInstanceShape`): a single id-shaped
+ *  `Property` state field is the correlation field that keys the instance read
+ *  surface.  This holds for BOTH state-table sagas (list a `<Wf>State` row) and
+ *  event-sourced workflows (group-fold the `<wf>_events` stream per
+ *  correlation) — both now carry `instanceWireShape` and expose
+ *  `GET /workflows/<wf>/instances[/{id}]`.  Two id fields (ambiguous) or zero
  *  (no correlation) ⇒ no instance surface, matching the IR's
  *  `instanceWireShape` gate, so the scaffolded pages never reference hooks
  *  that weren't emitted. */
 export function workflowIsObservable(wf: Workflow): boolean {
-  if (wf.eventSourced) return false;
   const props = wf.members.filter(
     (m): m is Extract<Workflow["members"][number], { $type: "Property" }> => m.$type === "Property",
   );
