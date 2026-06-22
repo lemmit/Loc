@@ -93,26 +93,22 @@ function targetModule(appModule: string, ctxModule: string, assoc: AssociationIR
   return `${appModule}.${ctxModule}.${upperFirst(assoc.targetAgg)}`;
 }
 
-/** Schema-qualified join-table name for `join_through:` — `"<schema>.<table>"`
- *  when the table lives in a non-public Postgres schema (matching the migration
- *  and `@schema_prefix`), else the bare table name. */
-function joinThrough(assoc: AssociationIR, schemaPrefix?: string): string {
-  return schemaPrefix ? `${schemaPrefix}.${assoc.joinTable}` : assoc.joinTable;
-}
-
 /** The `many_to_many` schema line for one ref-collection field.  Mirrors the
  *  Ash `many_to_many ... through ...` — a plain Ecto join_through with explicit
  *  join_keys and `on_replace: :delete` so a `put_assoc` REPLACES the prior set
- *  (set semantics for `Id<T>[]`). */
-export function manyToManyLine(
-  appModule: string,
-  ctxModule: string,
-  rc: RefCollField,
-  schemaPrefix?: string,
-): string {
+ *  (set semantics for `Id<T>[]`).
+ *
+ *  `join_through:` is the BARE table name even when the owner lives in a
+ *  non-public Postgres schema: Ecto applies the owner schema's `@schema_prefix`
+ *  to a string join_through at query time, so qualifying it here would
+ *  DOUBLE-prefix the insert (`"pokedex"."pokedex.trainer_party"` → undefined
+ *  table).  The join table always lives in the owner's schema (the migration
+ *  creates it with the owner context's prefix), so inherited qualification is
+ *  exactly right. */
+export function manyToManyLine(appModule: string, ctxModule: string, rc: RefCollField): string {
   const rel = snake(rc.field.name);
   const target = targetModule(appModule, ctxModule, rc.assoc);
-  const through = JSON.stringify(joinThrough(rc.assoc, schemaPrefix));
+  const through = JSON.stringify(rc.assoc.joinTable);
   return `    many_to_many :${rel}, ${target}, join_through: ${through}, join_keys: [${rc.assoc.ownerFk}: :id, ${rc.assoc.targetFk}: :id], on_replace: :delete`;
 }
 

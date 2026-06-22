@@ -56,7 +56,13 @@ describe("vanilla `X id[]` reference collections", () => {
   it("the owner schema is a many_to_many through the join table — NOT a phantom array column", async () => {
     const trainer = file(await generateSystemFiles(SOURCE), "/roster/trainer.ex");
     expect(trainer).toContain("many_to_many :party, Api.Roster.Pokemon");
-    expect(trainer).toContain('join_through: "roster.trainer_party"');
+    // `join_through:` is the BARE table name, NOT schema-qualified: the owner
+    // schema's `@schema_prefix "roster"` already qualifies a string join_through
+    // at query time, so qualifying it here would DOUBLE-prefix the join insert
+    // (`"roster"."roster.trainer_party"` → undefined_table 500 at runtime — caught
+    // only by a real boot, invisible to `mix compile`).
+    expect(trainer).toContain('join_through: "trainer_party"');
+    expect(trainer).not.toContain('join_through: "roster.trainer_party"');
     // the runtime-crash bug: a stored array column with no backing migration column
     expect(trainer).not.toContain("field :party");
   });

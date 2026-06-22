@@ -162,9 +162,7 @@ function renderSchema(
     .filter(Boolean);
   // `many_to_many :party, App.Ctx.Pokemon, join_through: "<schema>.trainer_party", …`
   // — the runtime side of the already-correct join migration.
-  const refCollLines = refCollFields(agg).map((rc) =>
-    manyToManyLine(appModule, ctxModule, rc, schemaPrefix),
-  );
+  const refCollLines = refCollFields(agg).map((rc) => manyToManyLine(appModule, ctxModule, rc));
   // Co-located provenance backing columns — one `<field>_provenance` jsonb
   // (the pass-through `Provenance.Json` Ecto type) per provenanced field,
   // holding the current lineage persisted on the row.  Never cast from client
