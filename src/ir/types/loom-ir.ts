@@ -1250,6 +1250,20 @@ export type WorkflowStmtIR =
       /** Saves for aggregates created in `elseBody` (e.g. a not-found →
        *  `Agg.create(...)` fallback) — emitted at the end of the else-branch. */
       savesInElse: { name: string; aggName: string; repoName: string }[];
+    }
+  | {
+      // `field := value` — assignment to one of the workflow's OWN state
+      // fields inside a `create`/`handle`/`on` body (workflow.md, "handle =
+      // own-state mutation").  The `target` PathIR resolves to a `this-prop`
+      // on the workflow's persisted correlation/instance state row; the write
+      // lands on that state object (NOT an aggregate `this`).  Mirrors the
+      // aggregate-op `StmtIR` `assign` (loom-ir.ts) exactly.  Only `:=` lowers
+      // here — `+=`/`-=` and cross-aggregate mutations stay `__bad__` and are
+      // rejected at IR-validate.
+      kind: "assign";
+      target: PathIR;
+      value: ExprIR;
+      targetType: TypeIR;
     };
 
 export interface LoomModel {
@@ -2819,6 +2833,8 @@ function workflowStmtUsesCurrentUser(s: WorkflowStmtIR): boolean {
     case "requires":
     case "expr-let":
       return exprUsesCurrentUser(s.expr);
+    case "assign":
+      return exprUsesCurrentUser(s.value);
     case "emit":
     case "factory-let":
       return s.fields.some((f) => exprUsesCurrentUser(f.value));

@@ -44,13 +44,14 @@ import type {
   LoadSegmentIR,
   OnIR,
   ParamIR,
+  PathIR,
   SortTermIR,
   TypeIR,
   WorkflowIR,
   WorkflowStmtIR,
 } from "../types/loom-ir.js";
 import { resolveBypass } from "./lower-capabilities.js";
-import { inferExprType, lowerExpr } from "./lower-expr.js";
+import { inferExprType, lowerExpr, lowerExprInContext, pathType } from "./lower-expr.js";
 import { computeSaves, lowerApply, lowerField, plural } from "./lower-members.js";
 import { cstText, type Env, inWorkflow, lowerType, withLocal } from "./lower-types.js";
 
@@ -563,6 +564,27 @@ function lowerWorkflowStatement(
           op: lv.tail[0]!,
           args,
         },
+        envAfter: env,
+      };
+    }
+    // `field := value` — own-state mutation (workflow.md, "handle = own-state
+    // mutation").  Allowed ONLY for `:=` (not `+=`/`-=`) onto one of the
+    // workflow's OWN state `Property` members (a single-segment path resolving
+    // to `this`).  Cross-aggregate writes (`order.status := …`) and deep paths
+    // stay on the `__bad__` path below and are rejected at IR-validate.  Mirrors
+    // the aggregate-op `:=` lowering in lower-stmt.ts.
+    if (
+      stmt.op === ":=" &&
+      !lv.call &&
+      lv.tail.length === 0 &&
+      env.workflow !== undefined &&
+      env.workflow.members.some((m) => isProperty(m) && m.name === lv.head)
+    ) {
+      const path: PathIR = { segments: [lv.head] };
+      const targetType = pathType(path, env);
+      const value = lowerExprInContext(stmt.value, targetType, env);
+      return {
+        stmt: { kind: "assign", target: path, value, targetType },
         envAfter: env,
       };
     }

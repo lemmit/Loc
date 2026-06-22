@@ -35,6 +35,10 @@ export interface WorkflowStmtTarget {
   factoryLet(st: ByKind<"factory-let">, indent: string): string[];
   repoLet(st: ByKind<"repo-let">, indent: string): string[];
   exprLet(st: ByKind<"expr-let">, indent: string): string[];
+  /** `field := value` — write `value` to the workflow's own persisted state
+   *  field named by `st.target` (a single-segment `this-prop` path).  The
+   *  target writes onto the backend's correlation/instance state object. */
+  assign(st: ByKind<"assign">, indent: string): string[];
   repoRun(st: ByKind<"repo-run">, indent: string): string[];
   opCall(st: ByKind<"op-call">, indent: string): string[];
   resourceCall(st: ByKind<"resource-call">, indent: string): string[];
@@ -86,6 +90,8 @@ function renderWorkflowStmt(
       return target.repoLet(st, indent);
     case "expr-let":
       return target.exprLet(st, indent);
+    case "assign":
+      return target.assign(st, indent);
     case "repo-run":
       return target.repoRun(st, indent);
     case "op-call":
