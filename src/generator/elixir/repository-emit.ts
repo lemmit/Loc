@@ -405,8 +405,9 @@ function renderFindAction(
 }
 
 function renderFilterPreparation(find: FindIR, _agg: AggregateIR, ctx: RenderCtx): string {
-  // Render as an Ash expr(...) filter
-  const exprStr = renderExpr(find.filter!, { ...ctx, thisName: "record" });
+  // Render as an Ash expr(...) filter — money/decimal lower to the data layer
+  // via native operators here, not the Elixir `Decimal.*` struct API.
+  const exprStr = renderExpr(find.filter!, { ...ctx, thisName: "record", ashExpr: true });
   return `expr(${exprStr})`;
 }
 
