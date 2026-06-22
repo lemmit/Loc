@@ -63,7 +63,7 @@ describe("value-object collection — child-table persistence (Hono)", () => {
   });
 });
 
-describe("value-object collection — migration (relational child table / Ash :array of :map)", () => {
+describe("value-object collection — migration (relational child table, all backends)", () => {
   it("the Hono migration creates the child table and drops the parent column", async () => {
     const files = await generateSystemFiles(FIXTURE);
     const sql = findFile(files, /api\/db\/migrations\/.*\.sql$/);
@@ -79,12 +79,43 @@ describe("value-object collection — migration (relational child table / Ash :a
     expect(ordersTable).not.toMatch(/charges/);
   });
 
-  it("the Phoenix migration stores the array inline as {:array, :map}, no child table", async () => {
+  it("the Phoenix migration creates the id-less child table and drops the parent column", async () => {
     const files = await generateSystemFiles(FIXTURE);
+    // A dedicated child-table migration (synthetic uuid PK + parent FK +
+    // ordinal + flattened VO columns) — NOT an inline `{:array, :map}` column.
+    const child = findFile(files, /px\/.*migrations\/.*create_order_charges\.exs$/);
+    expect(child).toMatch(/create table\(:order_charges, primary_key: false/);
+    expect(child).toMatch(/add :id, :uuid, primary_key: true/);
+    expect(child).toMatch(
+      /add :order_id, references\(:orders, type: :uuid, on_delete: :delete_all\), null: false/,
+    );
+    expect(child).toMatch(/add :ordinal, :integer, null: false/);
+    expect(child).toMatch(/add :amount, :decimal/);
+    expect(child).toMatch(/add :currency, :text/);
+    // The parent migration carries no `charges` column.
     const orders = findFile(files, /px\/priv\/repo\/migrations\/.*create_orders\.exs$/);
-    expect(orders).toMatch(/add :charges, \{:array, :map\}/);
-    // No separate child-table migration file.
-    expect([...files.keys()].some((k) => /px\/.*order_charges\.exs$/.test(k))).toBe(false);
+    expect(orders).not.toMatch(/:charges/);
+    expect(orders).not.toMatch(/\{:array, :map\}/);
+  });
+
+  it("the Phoenix Ash resource models the VO array as a child has_many, stripped from the wire", async () => {
+    const files = await generateSystemFiles(FIXTURE);
+    const order = findFile(files, /px\/.*\/order\.ex$/);
+    // `has_many` onto the child resource, ordinal-ordered; managed via
+    // `manage_relationship`; the field is gone from the attributes block.
+    expect(order).toMatch(/has_many :charges, \S+\.OrderCharges do\s+sort ordinal: :asc/);
+    expect(order).toMatch(
+      /change manage_relationship\(:charges, :charges, type: :direct_control\)/,
+    );
+    expect(order).not.toMatch(/attribute :charges/);
+    // The child resource Jason-encodes ONLY the value object's own fields —
+    // synthetic id / parent FK / ordinal stripped, so the wire stays
+    // `[{amount,currency},…]`.
+    const child = findFile(files, /px\/.*\/order_charges\.ex$/);
+    expect(child).toMatch(/uuid_primary_key :id/);
+    expect(child).toMatch(/attribute :order_id, :uuid/);
+    expect(child).toMatch(/attribute :ordinal, :integer/);
+    expect(child).toMatch(/encode_struct\(value, \[:amount, :currency\], opts\)/);
   });
 });
 

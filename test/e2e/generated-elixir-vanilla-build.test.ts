@@ -183,6 +183,11 @@ describe.skipIf(!ENABLED)(
         // (DB-free) on top of the prod compile.  Pins the test-emission parity
         // and the F6 field-default fix.
         { name: "vanilla-domain-tests.ddd", deployable: "api" },
+        // Value-object COLLECTION (`Money[]`) persisted as id-less child tables
+        // (`has_many` + `cast_assoc`, replace-on-update) alongside a single VO
+        // field (`total: Money`, stays jsonb) and a VO invariant (`amount >= 0`)
+        // enforced on both the single VO and every array element.
+        { name: "vanilla-value-collections.ddd", deployable: "api" },
       ]),
     )("$name → mix compile --warnings-as-errors", ({ name, deployable }) => {
       const fixturePath = path.join(fixturesDir, name);
