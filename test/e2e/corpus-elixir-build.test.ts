@@ -80,11 +80,6 @@ const ELIXIR_COMPILE_SKIP: Record<string, string> = {
   // python/elixir-vanilla, not the Ash foundation.
   provenance:
     "PLATFORM LIMITATION: provenance runtime not on Ash foundation (use foundation: vanilla)",
-  // EMITTER GAP: a workflow `let prev = <resource>.get(...)` whose bind is never
-  // read emits an unused `prev =` in the `with`-chain (compile warning →
-  // --warnings-as-errors).  Same class the Python tier already fixed (drop the
-  // dead bind, keep the side-effecting RHS as a bare `with` clause); pending on Ash.
-  resources: "EMITTER GAP: unused workflow `let` bind (`prev =`) trips --warnings-as-errors on Ash",
 };
 
 // Every corpus feature the manifest declares to generate on `phoenix`, minus the
