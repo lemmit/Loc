@@ -123,7 +123,7 @@ describe("vanilla audit runtime (audit-and-logging.md)", () => {
     const ctx = file(await generateSystemFiles(SOURCE), "/api/orders.ex");
     // `before` snapshot is taken from the original record before the body runs.
     expect(ctx).toContain(
-      "__audit_before = (record |> Map.from_struct() |> Map.drop([:__meta__, :__struct__]))",
+      "audit_before = (record |> Map.from_struct() |> Map.drop([:__meta__, :__struct__]))",
     );
     // Forced transaction tail (no provenance here — audit alone forces it).
     expect(ctx).toContain("Api.Repo.transaction(fn ->");
@@ -132,7 +132,7 @@ describe("vanilla audit runtime (audit-and-logging.md)", () => {
     expect(ctx).toContain('action: "cancel"');
     expect(ctx).toContain('target_type: "Order"');
     expect(ctx).toContain("target_id: saved.id");
-    expect(ctx).toContain("before: __audit_before");
+    expect(ctx).toContain("before: audit_before");
     expect(ctx).toContain(
       "after: (saved |> Map.from_struct() |> Map.drop([:__meta__, :__struct__]))",
     );
