@@ -1,0 +1,63 @@
+// Workflow own-state COMPOUND mutation (`field += value` / `field -= value`)
+// on the Phoenix/Ash backend.  The compound forms lower to the same `assign`
+// WorkflowStmtIR as `:=`, with the RHS rewritten to a `binary` over the current
+// value — so the saga dispatcher emits a `Repo.update!(Ecto.Changeset.change(
+// state, %{field: <state.field +|- value>}))` write, type-correct per operand:
+//   * int    → `state.attempts + 1`
+//   * money  → `Decimal.add(state.accrued, Decimal.new("9.99"))` (Decimal is a
+//              struct in Elixir — the `+` operator would be a *runtime* crash,
+//              so the money path is the real arithmetic-dispatch bar).
+// The `mix compile --warnings-as-errors` gate compiles the changeset shape +
+// the Decimal call sites.  Mirrors the `:=` coverage in dispatch.ddd.
+system CompoundSys {
+  subdomain Fulfillment {
+    context Fulfillment {
+      aggregate Order {
+        customerId: string
+        derived display: string = customerId
+        status: string
+      }
+      repository Orders for Order { }
+
+      event OrderPlaced { order: Order id, at: datetime }
+      event RetryRequested { order: Order id, at: datetime }
+
+      channel Lifecycle {
+        carries: OrderPlaced, RetryRequested
+        delivery: broadcast
+        retention: ephemeral
+      }
+
+      workflow OrderFulfillment {
+        orderId: Order id          // correlation field — one instance per order
+        attempts: int              // scalar int own-state (native `+`)
+        accrued: money             // scalar money own-state (Decimal.add/sub)
+
+        // Starter: allocate the instance, seed counters via compound assigns.
+        create(p: OrderPlaced) by p.order {
+          attempts += 1
+          accrued += 9.99
+        }
+
+        // Continuation: routes to the started instance by order; compound
+        // mutations against the loaded state row (read-modify-write).
+        on(r: RetryRequested) by r.order {
+          attempts += 1
+          accrued -= 0.01
+        }
+      }
+    }
+  }
+  api FulfillmentApi from Fulfillment
+  ui FulfillmentAdmin with scaffold(subdomains: [Fulfillment]) { }
+  storage primary { type: postgres }
+  resource fulfillmentState { for: Fulfillment, kind: state, use: primary }
+  deployable phoenixApp {
+    platform: elixir { foundation: ash }
+    contexts: [Fulfillment]
+    dataSources: [fulfillmentState]
+    serves: FulfillmentApi
+    ui: FulfillmentAdmin
+    port: 4000
+  }
+}

@@ -1,10 +1,14 @@
 // Workflow own-state mutation (workflow.md, "handle = own-state mutation").
-// A single-segment `field := value` inside a workflow `create`/`handle`/`on`
+// A single-segment `field := value` (and the SCALAR compound forms
+// `field += value` / `field -= value`) inside a workflow `create`/`handle`/`on`
 // body whose head resolves to one of the workflow's OWN state `Property`
 // members lowers to a `WorkflowStmtIR` of `kind: "assign"` (NOT the `__bad__`
-// placeholder).  Scope is `:=` only: `+=`/`-=` and cross-aggregate / deep
-// paths stay unrecognised and are rejected at IR-validate.  An event-sourced
-// workflow may not assign its own state directly — `loom.workflow-eventsourced-assign`.
+// placeholder).  The compound forms rewrite `value` to a `binary` over the
+// current value, riding every backend's shared expression renderer.
+// Out of scope (still `__bad__` → `loom.workflow-unrecognised-statement`):
+// COLLECTION own-state `+=`/`-=`, cross-aggregate writes, and deep paths.  An
+// event-sourced workflow may not write its own state directly (any of
+// `:=`/`+=`/`-=`) — `loom.workflow-eventsourced-assign`.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -115,13 +119,57 @@ describe("workflow own-state assignment — validation", () => {
     expect(diags).not.toContain("loom.workflow-eventsourced-assign");
   });
 
-  it("rejects a compound own-state mutation `attempts += 1` (still unrecognised)", async () => {
+  it("accepts a scalar compound own-state mutation `attempts += 1`", async () => {
+    // `+=`/`-=` on a SCALAR own-state field is a recognised form (it lowers to
+    // an `assign` whose value is a `binary` over the current value) — no longer
+    // the `__bad__` placeholder.
     const diags = await irDiagCodes(
       `orderId: Order id
        attempts: int
        create(p: OrderPlaced) by p.order { attempts += 1 }`,
     );
-    expect(diags).toContain("loom.workflow-unrecognised-statement");
+    expect(diags).not.toContain("loom.workflow-unrecognised-statement");
+  });
+
+  it("lowers `attempts += 1` to an `assign` with a `+` binary over the current value", async () => {
+    const stmts = await createStmts(
+      `orderId: Order id
+       attempts: int
+       create(p: OrderPlaced) by p.order { attempts += 1 }`,
+    );
+    expect(
+      stmts.some((s) => s.kind === "expr-let" && (s as { name?: string }).name === "__bad__"),
+    ).toBe(false);
+    const assign = stmts.find((s) => s.kind === "assign");
+    expect(assign?.kind).toBe("assign");
+    if (assign?.kind === "assign") {
+      expect(assign.target.segments).toEqual(["attempts"]);
+      expect(assign.value.kind).toBe("binary");
+      if (assign.value.kind === "binary") {
+        expect(assign.value.op).toBe("+");
+        // Left operand is the current own-state value (a `this-prop` read).
+        expect(assign.value.left).toEqual({
+          kind: "ref",
+          name: "attempts",
+          refKind: "this-prop",
+          type: { kind: "primitive", name: "int" },
+        });
+        expect(assign.value.leftType).toEqual({ kind: "primitive", name: "int" });
+      }
+    }
+  });
+
+  it("lowers `attempts -= 1` to an `assign` with a `-` binary", async () => {
+    const stmts = await createStmts(
+      `orderId: Order id
+       attempts: int
+       create(p: OrderPlaced) by p.order { attempts -= 1 }`,
+    );
+    const assign = stmts.find((s) => s.kind === "assign");
+    expect(assign?.kind).toBe("assign");
+    if (assign?.kind === "assign" && assign.value.kind === "binary") {
+      expect(assign.value.op).toBe("-");
+    }
   });
 
   it("rejects a cross-aggregate `:=` in a workflow body (still unrecognised)", async () => {

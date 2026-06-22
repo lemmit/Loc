@@ -1,0 +1,55 @@
+// Workflow own-state COMPOUND mutation (`field += value` / `field -= value`)
+// on the VANILLA (Ecto, non-Ash) Phoenix foundation — the sibling of
+// test/e2e/fixtures/elixir-ash-build/workflow-compound-assign.ddd.  The saga
+// dispatcher's create + continuation handlers persist each compound write as a
+// `Repo.update!(Ecto.Changeset.change(state, %{field: <state.field +|- value>}))`,
+// type-correct per operand: int → `state.attempts + 1`, money →
+// `Decimal.add(state.accrued, Decimal.new("9.99"))` (Decimal is a struct, so a
+// native `+` would be a runtime crash).  Compiled by the
+// elixir-vanilla-build.yml `mix compile --warnings-as-errors` gate.
+system CompoundVanillaSys {
+  subdomain Fulfillment {
+    context Fulfillment {
+      aggregate Order {
+        customerId: string
+        status: string
+      }
+      repository Orders for Order { }
+
+      event OrderPlaced { order: Order id, at: datetime }
+      event RetryRequested { order: Order id, at: datetime }
+
+      channel Lifecycle {
+        carries: OrderPlaced, RetryRequested
+        delivery: broadcast
+        retention: ephemeral
+      }
+
+      workflow OrderFulfillment {
+        orderId: Order id          // correlation field — one instance per order
+        attempts: int              // scalar int own-state (native `+`)
+        accrued: money             // scalar money own-state (Decimal.add/sub)
+
+        create(p: OrderPlaced) by p.order {
+          attempts += 1
+          accrued += 9.99
+        }
+
+        on(r: RetryRequested) by r.order {
+          attempts += 1
+          accrued -= 0.01
+        }
+      }
+    }
+  }
+  api FulfillmentApi from Fulfillment
+  storage primary { type: postgres }
+  resource fulfillmentState { for: Fulfillment, kind: state, use: primary }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Fulfillment]
+    dataSources: [fulfillmentState]
+    serves: FulfillmentApi
+    port: 4000
+  }
+}
