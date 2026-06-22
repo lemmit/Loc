@@ -16,6 +16,7 @@ import {
   type NewExpr,
   type RefExpr,
   renderExprWith,
+  type UnaryExpr,
 } from "../_expr/target.js";
 
 // ---------------------------------------------------------------------------
@@ -25,6 +26,15 @@ import {
 // ExprIR.  Output is idiomatic Elixir 1.16 / Ash 3.x.  The 17-arm dispatch +
 // recursion live in `../_expr/target.ts`; this file is the Elixir leaf table
 // (`ELIXIR_TARGET`) plus the thin `renderExpr` entry point.
+//
+// DECIMAL == MONEY here.  Elixir models BOTH `money` and `decimal` as plain
+// `Decimal` structs (the schema/migration/saga layers all map both to Ecto
+// `:decimal`; there is no currency library — `money` is rendered as a bare
+// `Decimal`).  Every site that special-cases one must cover the other, or the
+// expression renderer drifts from the storage layer: literals must wrap in
+// `Decimal.new(...)`, arithmetic must dispatch through `Decimal.add/sub/mult/div`
+// + `Decimal.compare`, coercions must mirror.  `isDecimalStruct` is the single
+// predicate every site shares so the two can't drift again.
 //
 // `RenderCtx.thisName` names the implicit receiver for `this-prop`
 // references.  In aggregate action bodies the receiver is the changeset
@@ -65,6 +75,13 @@ export interface RenderCtx {
    *  `where` predicates that bind declared parameters.  Off everywhere
    *  else (op / derived / invariant bodies use plain locals). */
   filterArgs?: boolean;
+  /** When true, the expression renders inside an Ash `expr()` macro — an Ash
+   *  `calculate … expr(…)` calculation body (the filter sibling sets
+   *  `filterArgs` instead).  In that context money/decimal lower to the data
+   *  layer via native operators/literals, NOT the Elixir `Decimal.*` struct API
+   *  (which Ash rejects: "Invalid reference! Decimal.new").  `renderExpr` selects
+   *  the data-layer-native target when `ashExpr || filterArgs`. */
+  ashExpr?: boolean;
   /** Foundation the expression is rendered for (workflow-instance-views.md /
    *  D-PHOENIX-FOUNDATION-STRATEGY).  Defaults to `"ash"` (back-compat).
    *  Under `"vanilla"` (plain Ecto/Phoenix, no Ash) two leaf renderings
@@ -98,6 +115,12 @@ export interface RenderCtx {
 }
 
 const DEFAULT: RenderCtx = { thisName: "record", contextModule: "MyApp" };
+
+/** Both `money` and `decimal` are rendered as bare `Decimal` structs on the
+ *  Elixir backend (see the header note).  This predicate is the single source
+ *  of truth shared by every renderer site so the two stay in lockstep. */
+const isDecimalStruct = (name: string | undefined): boolean =>
+  name === "money" || name === "decimal";
 
 /** Ash relationship name for a reference-collection association —
  *  always `<fieldName>_through`.  We can't reuse the field name
@@ -136,7 +159,7 @@ const ELIXIR_TARGET: ExprTarget<RenderCtx> = {
   // Bare object literals appear in e2e contexts; not expected in domain
   // expression bodies.
   object: (fields) => `%{${fields.map((f) => `${snake(f.name)}: ${f.value}`).join(", ")}}`,
-  unary: renderUnary,
+  unary: (op, operand, e) => renderUnary(op, operand, e),
   binary: renderBinary,
   // Lower to `if … do … else … end`
   ternary: (cond, then, otherwise) => `if ${cond}, do: ${then}, else: ${otherwise}`,
@@ -148,36 +171,65 @@ const ELIXIR_TARGET: ExprTarget<RenderCtx> = {
   list: (elements) => `[${elements.join(", ")}]`,
 };
 
+// Ash `expr()` rendering target — for calculations (`calculate … expr(…)`) and
+// read-action filters (`filter expr(…)`).  Inside an Ash `expr(...)` macro a
+// money/decimal value is NOT an Elixir `Decimal` struct: Ash lowers `>` / `+` /
+// bare numerals straight to the data layer (Postgres `numeric`), so the
+// `Decimal.add` / `Decimal.compare` / `Decimal.new` forms the native op-body
+// path emits are *rejected* there ("Invalid reference! Decimal.new").  This
+// target overrides exactly the three decimal-sensitive leaves to emit the
+// native operator / bare literal; everything else is shared with ELIXIR_TARGET.
+const ELIXIR_ASH_EXPR_TARGET: ExprTarget<RenderCtx> = {
+  ...ELIXIR_TARGET,
+  literal: (lit, value) => renderLiteral(lit, value, /* ashExpr */ true),
+  unary: (op, operand, e) => renderUnary(op, operand, e, /* ashExpr */ true),
+  binary: (l, r, e) => renderBinary(l, r, e, /* ashExpr */ true),
+  convert: (value, e) => renderElixirConvert(e.target, e.from, value, /* ashExpr */ true),
+};
+
 export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
-  return renderExprWith(e, ELIXIR_TARGET, ctx);
+  // `filterArgs` (read-action filters) and `ashExpr` (calculations) both render
+  // inside an Ash `expr()` macro, where money/decimal are data-layer-native.
+  const target = ctx.ashExpr || ctx.filterArgs ? ELIXIR_ASH_EXPR_TARGET : ELIXIR_TARGET;
+  return renderExprWith(e, target, ctx);
 }
 
 /**
  * Render an explicit conversion expression for the Phoenix/Ash
- * backend.  Per-(from, target) pair, using Elixir idioms:
- *   string(x: int|long|decimal|bool) → `to_string(x)`
- *   string(x: money)                 → `Decimal.to_string(x)`
- *   long(x: int)                     → `x`           (Elixir has only
- *                                                     integer)
- *   decimal(x: int|long)             → `x`           (Loom's `decimal`
- *                                                     is a plain number
- *                                                     on Phoenix —
- *                                                     no boxing needed)
- *   decimal(x: money)                → `Decimal.to_float(x)` (lossy)
- *   money(x: int|long|decimal)       → `Decimal.new(x)`
- *   money(x: money)                  → `x`           (no-op)
+ * backend.  Both `money` and `decimal` are `Decimal` structs here, so the
+ * two are interchangeable on either side of a coercion:
+ *   string(x: int|long|bool)            → `to_string(x)`
+ *   string(x: money|decimal)            → `Decimal.to_string(x)`
+ *   long(x: int)                        → `x`           (Elixir has only
+ *                                                        integer)
+ *   long(x: money|decimal)              → `Decimal.to_integer(x)`
+ *   decimal|money(x: int|long)          → `Decimal.new(x)`  (box the int)
+ *   decimal|money(x: money|decimal)     → `x`           (both already Decimal)
  */
-function renderElixirConvert(target: string, from: string | undefined, v: string): string {
+function renderElixirConvert(
+  target: string,
+  from: string | undefined,
+  v: string,
+  // Inside an Ash `expr()` macro money/decimal are data-layer-native, not
+  // `Decimal` structs, so the `Decimal.*` coercions are invalid — treat them as
+  // plain numerics (the pre-Decimal-struct behaviour).
+  ashExpr = false,
+): string {
+  const decimalStruct = (name: string | undefined) => !ashExpr && isDecimalStruct(name);
   if (target === "string") {
-    if (from === "money") return `Decimal.to_string(${v})`;
+    if (decimalStruct(from)) return `Decimal.to_string(${v})`;
     return `to_string(${v})`;
   }
-  if (target === "long" || target === "decimal") {
-    if (from === "money") return `Decimal.to_float(${v})`;
+  if (target === "long" || target === "int") {
+    // A Decimal → integer narrowing truncates toward zero (`Decimal.to_integer`
+    // raises on a fractional value, so round down first); the int/long
+    // passthrough (`x` already an integer) is unchanged.
+    if (decimalStruct(from)) return `Decimal.to_integer(Decimal.round(${v}, 0, :down))`;
     return v;
   }
-  if (target === "money") {
-    if (from === "money") return v;
+  if (decimalStruct(target)) {
+    // money|decimal target: already a Decimal → no-op; otherwise box.
+    if (decimalStruct(from)) return v;
     return `Decimal.new(${v})`;
   }
   return v;
@@ -187,13 +239,18 @@ function renderElixirConvert(target: string, from: string | undefined, v: string
 // Literals
 // ---------------------------------------------------------------------------
 
-function renderLiteral(lit: string, value: string): string {
+function renderLiteral(lit: string, value: string, ashExpr = false): string {
   if (lit === "string") return JSON.stringify(value);
   if (lit === "null") return "nil";
   if (lit === "bool") return value === "true" ? "true" : "false";
   if (lit === "now") return "DateTime.utc_now()";
-  if (lit === "decimal") return value; // Elixir decimals are plain numbers
-  if (lit === "money") return `Decimal.new(${JSON.stringify(value)})`;
+  // Both decimal and money literals are `Decimal` structs on Elixir; wrap the
+  // source numeral as a string so `Decimal.new` keeps full precision.  Inside an
+  // Ash `expr()` macro, however, a numeral is data-layer-native (`Decimal.new`
+  // is rejected there) — emit it bare.
+  if (lit === "decimal" || lit === "money") {
+    return ashExpr ? value : `Decimal.new(${JSON.stringify(value)})`;
+  }
   // int
   return value;
 }
@@ -426,9 +483,42 @@ function renderNew(fields: { name: string; value: string }[], e: NewExpr, ctx: R
 // Unary
 // ---------------------------------------------------------------------------
 
-function renderUnary(op: "-" | "!", operand: string): string {
+function renderUnary(op: "-" | "!", operand: string, e: UnaryExpr, ashExpr = false): string {
   if (op === "!") return `not ${operand}`;
+  // Negating a money/decimal `Decimal` struct: native `-` is `:erlang.-/1`,
+  // which raises on a `Decimal` ("bad argument in arithmetic").  Use
+  // `Decimal.negate/1` in native Elixir (op-bodies / emitted ExUnit tests);
+  // inside an Ash `expr()` money/decimal are data-layer-native, so plain `-`.
+  if (!ashExpr && isDecimalOperand(e.operand)) return `Decimal.negate(${operand})`;
   return `-${operand}`;
+}
+
+/** Does this expression evaluate to a money/decimal `Decimal` struct? — used to
+ *  route unary negation through `Decimal.negate/1`.  Covers the realistic
+ *  operand shapes (negative literal, a typed ref/member, an arithmetic binary,
+ *  a decimal cast, parens). */
+function isDecimalOperand(operand: ExprIR): boolean {
+  switch (operand.kind) {
+    case "literal":
+      return isDecimalStruct(operand.lit);
+    case "ref":
+      return operand.type?.kind === "primitive" && isDecimalStruct(operand.type.name);
+    case "member":
+      return operand.memberType.kind === "primitive" && isDecimalStruct(operand.memberType.name);
+    case "binary":
+      return (
+        (operand.resultType?.kind === "primitive" && isDecimalStruct(operand.resultType.name)) ||
+        (operand.leftType?.kind === "primitive" && isDecimalStruct(operand.leftType.name))
+      );
+    case "convert":
+      return isDecimalStruct(operand.target);
+    case "paren":
+      return isDecimalOperand(operand.inner);
+    case "unary":
+      return isDecimalOperand(operand.operand);
+    default:
+      return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -487,7 +577,7 @@ function isStringType(e: ExprIR): boolean {
   return false;
 }
 
-function renderBinary(l: string, r: string, e: BinaryExpr): string {
+function renderBinary(l: string, r: string, e: BinaryExpr, ashExpr = false): string {
   // `x == null` / `x != null` → `is_nil(x)` / `not is_nil(x)`.  Comparing
   // against `nil` with `==`/`!=` is an Elixir footgun: the compiler warns
   // ("Comparing values with nil will always return false. Use is_nil/1
@@ -501,14 +591,20 @@ function renderBinary(l: string, r: string, e: BinaryExpr): string {
       return e.op === "==" ? `is_nil(${operand})` : `not is_nil(${operand})`;
     }
   }
-  // Money operands cannot use the native `+`/`*`/`>` operators in
-  // Elixir — `Decimal` is a struct.  Arithmetic dispatches through
+  // money / decimal operands cannot use the native `+`/`*`/`>` operators in
+  // Elixir — both are `Decimal` structs.  Arithmetic dispatches through
   // `Decimal.add/2` / `mult/2` / `div/2`; comparisons go through
   // `Decimal.compare/2` (returns `:lt | :eq | :gt` — three tokens,
   // not a single operator, so the result shape isn't `${l} ${op}
-  // ${r}` like the primitive path).
-  if (e.leftType?.kind === "primitive" && e.leftType.name === "money") {
-    return renderMoneyBinary(e.op, l, r);
+  // ${r}` like the primitive path).  An integer operand on either side is
+  // accepted by the `Decimal.*` functions as-is (they coerce integers); a
+  // `decimal`/`money` literal is already wrapped in `Decimal.new(...)`, so
+  // no extra boxing is needed here.
+  // Inside an Ash `expr()` macro money/decimal lower to the data layer via the
+  // native operators — `Decimal.compare`/`Decimal.add` are invalid there — so
+  // only the native op-body path dispatches through `Decimal.*`.
+  if (!ashExpr && e.leftType?.kind === "primitive" && isDecimalStruct(e.leftType.name)) {
+    return renderDecimalBinary(e.op, l, r);
   }
   // Prefer the IR-level `leftType` over the AST-shape check: chained
   // string concats (`a + b + c`) carry `leftType: string` on the outer
@@ -523,15 +619,16 @@ function renderBinary(l: string, r: string, e: BinaryExpr): string {
   return `${l} ${elOp} ${r}`;
 }
 
-const MONEY_ARITH: Record<string, string | undefined> = {
+const DECIMAL_ARITH: Record<string, string | undefined> = {
   "+": "Decimal.add",
   "-": "Decimal.sub",
   "*": "Decimal.mult",
   "/": "Decimal.div",
 };
 
-function renderMoneyBinary(op: BinOp, l: string, r: string): string {
-  const arithFn = MONEY_ARITH[op];
+// Shared by money AND decimal operands — both are `Decimal` structs here.
+function renderDecimalBinary(op: BinOp, l: string, r: string): string {
+  const arithFn = DECIMAL_ARITH[op];
   if (arithFn) return `${arithFn}(${l}, ${r})`;
   if (op === "==") return `Decimal.compare(${l}, ${r}) == :eq`;
   if (op === "!=") return `Decimal.compare(${l}, ${r}) != :eq`;

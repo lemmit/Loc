@@ -387,16 +387,19 @@ export function renderExpr(expr: ExprIR, ctx: WalkContext): string {
       // idioms apply (Decimal.to_string for money, to_string for
       // primitives, Decimal.new for the inverse).
       const v = renderExpr(expr.value, ctx);
+      // money AND decimal are Decimal structs here — mirror render-expr.ts's
+      // `renderElixirConvert` exactly.
+      const fromDecimal = expr.from === "money" || expr.from === "decimal";
       if (expr.target === "string") {
-        if (expr.from === "money") return `Decimal.to_string(${v})`;
+        if (fromDecimal) return `Decimal.to_string(${v})`;
         return `to_string(${v})`;
       }
-      if (expr.target === "long" || expr.target === "decimal") {
-        if (expr.from === "money") return `Decimal.to_float(${v})`;
+      if (expr.target === "long" || expr.target === "int") {
+        if (fromDecimal) return `Decimal.to_integer(Decimal.round(${v}, 0, :down))`;
         return v;
       }
-      if (expr.target === "money") {
-        if (expr.from === "money") return v;
+      if (expr.target === "decimal" || expr.target === "money") {
+        if (fromDecimal) return v;
         return `Decimal.new(${v})`;
       }
       return v;
@@ -427,12 +430,13 @@ function renderLiteral(kind: string, value: string): string {
       // value already has source quoting stripped; re-quote for Elixir.
       return JSON.stringify(value);
     case "int":
-    case "decimal":
       return value;
+    case "decimal":
     case "money":
-      // Money literal as an Elixir Decimal.new("…") call; the HEEx
-      // template embeds it via `<%= … %>` so the precise value is
-      // rendered as the canonical decimal string at request time.
+      // Both decimal and money literals are Decimal structs; emit a
+      // `Decimal.new("…")` call.  The HEEx template embeds it via
+      // `<%= … %>` so the precise value is rendered as the canonical
+      // decimal string at request time.
       return `Decimal.new(${JSON.stringify(value)})`;
     case "bool":
       return value === "true" ? "true" : "false";
@@ -1296,9 +1300,10 @@ export function defaultInitFor(t: TypeIR): string {
       switch (t.name) {
         case "int":
         case "long":
-        case "decimal":
           return "0";
+        case "decimal":
         case "money":
+          // Both are Decimal structs — zero is `Decimal.new("0")`.
           return `Decimal.new("0")`;
         case "bool":
           return "false";

@@ -47,12 +47,37 @@ describe("phoenix renderExpr — literals", () => {
     expect(renderExpr({ kind: "literal", lit: "now", value: "" }, ctx)).toBe("DateTime.utc_now()");
   });
 
-  it("renders decimal literals as plain numbers", () => {
-    expect(renderExpr({ kind: "literal", lit: "decimal", value: "1.5" }, ctx)).toBe("1.5");
+  it('wraps decimal literals in Decimal.new("…") (decimal is a Decimal struct on Elixir, like money)', () => {
+    expect(renderExpr({ kind: "literal", lit: "decimal", value: "1.5" }, ctx)).toBe(
+      'Decimal.new("1.5")',
+    );
   });
 
   it('wraps money literals in Decimal.new("…")', () => {
     expect(renderExpr(litMoney("9.99"), ctx)).toBe('Decimal.new("9.99")');
+  });
+
+  it("negates a money/decimal operand via Decimal.negate (native `-` raises on a Decimal struct)", () => {
+    expect(renderExpr({ kind: "unary", op: "-", operand: litMoney("1.0") }, ctx)).toBe(
+      'Decimal.negate(Decimal.new("1.0"))',
+    );
+    expect(
+      renderExpr(
+        { kind: "unary", op: "-", operand: { kind: "literal", lit: "decimal", value: "2.5" } },
+        ctx,
+      ),
+    ).toBe('Decimal.negate(Decimal.new("2.5"))');
+  });
+
+  it("negates a plain numeric operand with native `-`", () => {
+    expect(renderExpr({ kind: "unary", op: "-", operand: litInt("3") }, ctx)).toBe("-3");
+  });
+
+  it("renders money/decimal natively inside an Ash expr() (no Decimal.* — Ash lowers to the data layer)", () => {
+    // Negative money literal in a calculation/filter expr.
+    expect(
+      renderExpr({ kind: "unary", op: "-", operand: litMoney("1.0") }, { ...ctx, ashExpr: true }),
+    ).toBe("-1.0");
   });
 });
 
@@ -448,7 +473,7 @@ describe("phoenix renderExpr — member, method-call, call, new, list, lambda", 
         },
         ctx,
       ),
-    ).toBe('%MyApp.Money{amount: 9.99, currency_code: "USD"}');
+    ).toBe('%MyApp.Money{amount: Decimal.new("9.99"), currency_code: "USD"}');
   });
 
   it("renders entity-part constructor (kind: new) with snake field keys", () => {

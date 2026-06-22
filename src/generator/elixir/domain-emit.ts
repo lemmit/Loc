@@ -651,7 +651,10 @@ function renderCalculations(
     // constraint.
     if (d.name === "inspect") continue;
     const ashType = renderAshType(d.type, ctx.contextModule);
-    const exprStr = renderExpr(d.expr, ctx);
+    // The calculation body renders inside an Ash `expr()` macro: money/decimal
+    // lower to the data layer via native operators (`budget > 100.0`), not the
+    // Elixir `Decimal.*` struct API that op-bodies use.
+    const exprStr = renderExpr(d.expr, { ...ctx, ashExpr: true });
     derivedLines.push(`    calculate :${snake(d.name)}, ${ashType}, expr(${exprStr})`);
   }
   // Re-expose each reference collection as a calculation that maps the
