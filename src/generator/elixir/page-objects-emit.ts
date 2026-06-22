@@ -28,6 +28,7 @@
 import type { AggregateIR, BoundedContextIR, PageIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { classifyPage, type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
+import { unwrapOpt } from "../_frontend/form-helpers.js";
 import { fillBlock } from "../_frontend/page-objects-builder.js";
 
 export interface BuildPlaywrightPageObjectArgs {
@@ -35,6 +36,56 @@ export interface BuildPlaywrightPageObjectArgs {
   appName: string;
   aggregatesByName: Map<string, AggregateIR>;
   contextByAggName: Map<string, BoundedContextIR>;
+}
+
+// ---------------------------------------------------------------------------
+// Form-input parameter typing.
+//
+// The Phoenix backend ships no generated TS request types (unlike React, whose
+// page objects import `Create<Agg>Request`), so the `fill`/operation methods
+// type their `input` from an inline object type derived HERE — one that mirrors
+// exactly the property accesses `fillBlock` emits per field type.  Without it
+// the param was `Record<string, unknown>`, and `input.x!` (→ `NonNullable<
+// unknown>` = `{}`) blew up against `.fill(string)` / `input.vo!.amount`.
+//
+// Mapping (must track fillBlock's branching):
+//   valueobject → nested `{ field?: … }`   bool → boolean
+//   int/long/decimal/money → string | number   id/enum/datetime/string → string
+//   anything else (array/entity) → unknown (filled via `String(…)`, no access).
+// All fields optional — fillBlock guards every access with `!== undefined`.
+function e2eInputFieldType(t: TypeIR, ctx: BoundedContextIR): string {
+  const inner = unwrapOpt(t);
+  if (inner.kind === "valueobject") {
+    const vo = ctx.valueObjects.find((v) => v.name === inner.name);
+    if (!vo) return "string";
+    const fields = vo.fields.map((f) => `${f.name}?: ${e2eInputFieldType(f.type, ctx)}`).join("; ");
+    return `{ ${fields} }`;
+  }
+  if (inner.kind === "primitive") {
+    if (inner.name === "bool") return "boolean";
+    if (
+      inner.name === "int" ||
+      inner.name === "long" ||
+      inner.name === "decimal" ||
+      inner.name === "money"
+    ) {
+      return "string | number";
+    }
+    return "string";
+  }
+  if (inner.kind === "id" || inner.kind === "enum") return "string";
+  return "unknown";
+}
+
+/** The `input:` param type for a `fill`/operation method: an all-optional
+ *  inline object over the named fields (`Record<string, never>` when empty). */
+function e2eInputParamType(
+  fields: readonly { name: string; type: TypeIR }[],
+  ctx: BoundedContextIR,
+): string {
+  if (fields.length === 0) return "Record<string, never>";
+  const body = fields.map((f) => `${f.name}: ${e2eInputFieldType(f.type, ctx)}`).join("; ");
+  return `Partial<{ ${body} }>`;
 }
 
 /** Emit a Playwright page-object TypeScript module for one Phoenix LiveView
@@ -182,7 +233,7 @@ function buildAggregateListPageObject(
   lines.push(`  }`);
   lines.push(``);
   const required = agg.fields.filter((f) => !f.optional);
-  lines.push(`  async fill(input: Partial<Record<string, unknown>>): Promise<this> {`);
+  lines.push(`  async fill(input: ${e2eInputParamType(required, _ctx)}): Promise<this> {`);
   for (const f of required) {
     const fillLines = fillBlock("input", f.name, f.type, _ctx, `${slug}-new-input-${f.name}`);
     for (const l of fillLines) lines.push(`    ${l}`);
@@ -226,7 +277,9 @@ function buildAggregateListPageObject(
       lines.push(`  }`);
     } else {
       lines.push(``);
-      lines.push(`  async ${opCamel}(input: Record<string, unknown>): Promise<this> {`);
+      lines.push(
+        `  async ${opCamel}(input: ${e2eInputParamType(op.params, _ctx)}): Promise<this> {`,
+      );
       lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}").click();`);
       lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}-form").waitFor();`);
       for (const p of op.params) {
@@ -283,7 +336,7 @@ function buildAggregateNewPageObject(
   lines.push(`    return this;`);
   lines.push(`  }`);
   lines.push(``);
-  lines.push(`  async fill(input: Partial<Record<string, unknown>>): Promise<this> {`);
+  lines.push(`  async fill(input: ${e2eInputParamType(required, ctx)}): Promise<this> {`);
   for (const f of required) {
     const fillLines = fillBlock("input", f.name, f.type, ctx, `${slug}-new-input-${f.name}`);
     for (const l of fillLines) lines.push(`    ${l}`);
@@ -366,7 +419,9 @@ function buildAggregateDetailPageObject(
       lines.push(`  }`);
     } else {
       lines.push(``);
-      lines.push(`  async ${opCamel}(input: Record<string, unknown>): Promise<this> {`);
+      lines.push(
+        `  async ${opCamel}(input: ${e2eInputParamType(op.params, ctx)}): Promise<this> {`,
+      );
       lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}").click();`);
       lines.push(`    await this.page.getByTestId("${slug}-op-${op.name}-form").waitFor();`);
       for (const p of op.params) {
@@ -421,7 +476,7 @@ function buildWorkflowFormPageObject(
   lines.push(`    return this;`);
   lines.push(`  }`);
   lines.push(``);
-  lines.push(`  async fill(input: Partial<Record<string, unknown>>): Promise<this> {`);
+  lines.push(`  async fill(input: ${e2eInputParamType(wf.params, ctx)}): Promise<this> {`);
   for (const p of wf.params) {
     const fillLines = fillBlock("input", p.name, p.type, ctx, `workflow-${slug}-input-${p.name}`);
     for (const l of fillLines) lines.push(`    ${l}`);
