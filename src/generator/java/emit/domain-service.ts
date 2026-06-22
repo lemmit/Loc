@@ -65,7 +65,7 @@ export function renderJavaDomainServices(
   if (ctx.domainServices.length === 0) return [];
   const aggNames = new Set(ctx.aggregates.map((a) => a.name));
   const out: DomainServiceFile[] = [];
-  for (const svc of ctx.domainServices) {
+  for (const svc of ctx.domainServices ?? []) {
     // Collect the distinct op-return unions of this service (keyed by name),
     // so the sealed interface + variant records are emitted once each.
     const unions = new Map<string, JavaReturnUnionSpec>();

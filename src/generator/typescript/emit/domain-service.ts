@@ -59,7 +59,7 @@ export function renderDomainServices(ctx: BoundedContextIR): string | undefined 
   // Types named in any signature (params + returns) — these always need an
   // import even when the body never re-mentions them.
   const sigTypeNames = new Set<string>();
-  for (const svc of ctx.domainServices) {
+  for (const svc of ctx.domainServices ?? []) {
     for (const op of svc.operations) {
       for (const p of op.params) collectTypeNames(p.type, sigTypeNames);
       if (op.returnType) collectTypeNames(op.returnType, sigTypeNames);

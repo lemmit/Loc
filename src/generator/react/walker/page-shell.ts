@@ -6,6 +6,7 @@
 // primitives push onto the walk sink.
 
 import type {
+  ActionIR,
   AggregateIR,
   BoundedContextIR,
   DerivedIR,
@@ -21,6 +22,7 @@ import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/n
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import { routerPackageForStack } from "../../_packs/stack-runtime.js";
+import { renderActionHandlers } from "../../_walker/walker-core.js";
 import type {
   ActionMutationState,
   FormOfState,
@@ -142,6 +144,10 @@ export function renderCustomLayoutPage(
    *  `requires` guard).  When any such button is gated, the shell binds
    *  `currentUser` even if the page itself has no `requires`. */
   authUi: boolean = false,
+  /** Named, typed page event handlers — `action next() { … }` (Proposal A
+   *  Stage 1).  Each referenced action hoists to a `const <name> = … =>`
+   *  handler before the body; a bare `onSubmit: <name>` reference binds it. */
+  actions: ActionIR[] = [],
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -160,6 +166,7 @@ export function renderCustomLayoutPage(
     formOfs,
     actionMutations,
     usedExternFunctions,
+    usedActions,
     usesFragment,
   } = walkBodyToTsx(
     body,
@@ -229,6 +236,55 @@ export function renderCustomLayoutPage(
     seenDerived.add(d.name);
     usesMemo = true;
   }
+  // Named-action handlers → hoisted `const <name> = (<p>?) => { … }` consts
+  // before the body (Proposal A Stage 1).  Only referenced actions emit
+  // (`usedActions`).  Bodies reuse `emitStmt` against a ctx with the page's
+  // state/derived/params in scope, so a handler that mutates state sets
+  // `usesState` (tracked into `effectiveUsesState`) and resolves `setX`.
+  let actionLines = "";
+  let usesStateForActions = false;
+  if (actions.length > 0 && usedActions && usedActions.size > 0) {
+    const actx: WalkContext = {
+      target: tsxTarget,
+      imports,
+      pack,
+      paramNames,
+      usedParams,
+      usesNavigate,
+      stateNames,
+      derivedNames,
+      authUi: false,
+      usesState: false,
+      usesCurrentUser: false,
+      usesRouterLink: false,
+      usesRouteId: false,
+      userComponents: new Map(),
+      usedUserComponents: new Set(),
+      usesChildren: false,
+      apiParamNames: new Map(),
+      usedApiHooks,
+      lambdaParams: new Map(),
+      shellLocals: new Set(),
+      aggregatesByName,
+      bcByAggregate,
+      workflowsByName,
+      bcByWorkflow,
+      formOfs: [],
+      actionMutations: [],
+      collectedTestids: new Set(),
+      usesCodeBlock: false,
+      externFunctions,
+      usedExternFunctions,
+    };
+    const handlers = renderActionHandlers(actions, usedActions, actx);
+    if (handlers) {
+      actionLines = `${handlers
+        .split("\n")
+        .map((l) => `  ${l}`)
+        .join("\n")}\n`;
+    }
+    usesStateForActions = actx.usesState;
+  }
   // Render the title expression through emitExpr
   // (sharing the body's tracking state so the shell destructures
   // any param/state the title references).  Compute the deps
@@ -278,7 +334,8 @@ export function renderCustomLayoutPage(
     titleEffect = `  useEffect(() => { document.title = ${titleExpr}; }, [${deps.join(", ")}]);\n`;
     usesEffect = true;
   }
-  const effectiveUsesState = usesState || usesStateForTitle || usesStateForDerived;
+  const effectiveUsesState =
+    usesState || usesStateForTitle || usesStateForDerived || usesStateForActions;
 
   const mantineImport = renderImportLines(imports, srcImportPrefix);
   // One default-import line per user component
@@ -411,7 +468,7 @@ export function renderCustomLayoutPage(
   return `// Auto-generated.  Do not edit by hand.
 ${gate.import}${reactImport}${decimalImport}${reactRouterImport}${mantineImport}${apiHookImports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${form.moduleScope}
 export default function ${pageName}() {
-${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${derivedLines}${titleEffect}${gate.guard}  return (
+${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}${titleEffect}${gate.guard}  return (
     ${indentJsx(tsx, "    ")}
   );
 }
@@ -661,6 +718,9 @@ export function renderUserComponentFile(
    *  is gated, the component binds `currentUser` + imports `useSession`.
    *  Components never carry a page-level `requires`, so no Forbidden guard. */
   authUi: boolean = false,
+  /** Named, typed component event handlers — the component twin of the page
+   *  `actions` (Proposal A Stage 1). */
+  actions: ActionIR[] = [],
 ): string {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -678,6 +738,7 @@ export function renderUserComponentFile(
     actionMutations,
     formOfs,
     usedExternFunctions,
+    usedActions,
     usesFragment,
   } = walkBodyToTsx(
     body,
@@ -744,7 +805,53 @@ export function renderUserComponentFile(
     seenDerived.add(d.name);
     usesMemo = true;
   }
-  const compUsesState = usesState || usesStateForDerived;
+  // Named-action handlers → hoisted `const <name> = … =>` consts (same as the
+  // page shell; Proposal A Stage 1).
+  let actionLines = "";
+  let usesStateForActions = false;
+  if (actions.length > 0 && usedActions && usedActions.size > 0) {
+    const actx: WalkContext = {
+      target: tsxTarget,
+      imports,
+      pack,
+      paramNames,
+      usedParams,
+      usesNavigate,
+      stateNames,
+      derivedNames,
+      authUi: false,
+      usesState: false,
+      usesCurrentUser: false,
+      usesRouterLink: false,
+      usesRouteId: false,
+      userComponents: new Map(),
+      usedUserComponents: new Set(),
+      usesChildren: false,
+      apiParamNames: new Map(),
+      usedApiHooks: new Map(),
+      lambdaParams: new Map(),
+      shellLocals: new Set(),
+      aggregatesByName,
+      bcByAggregate,
+      workflowsByName: new Map(),
+      bcByWorkflow: new Map(),
+      formOfs: [],
+      actionMutations: [],
+      collectedTestids: new Set(),
+      usesCodeBlock: false,
+      externFunctions,
+      usedExternFunctions,
+    };
+    const handlers = renderActionHandlers(actions, usedActions, actx);
+    if (handlers) {
+      actionLines = `${handlers
+        .split("\n")
+        .map((l) => `  ${l}`)
+        .join("\n")}\n`;
+    }
+    usesStateForActions = actx.usesState;
+  }
+  const compUsesState = usesState || usesStateForDerived || usesStateForActions;
   // Components live at `src/components/<Name>.tsx` (one hop to `src/`),
   // so api imports for Action mutation hooks resolve via `../api/<agg>`.
   const actionWiring = renderActionMutations(actionMutations, "../");
@@ -873,7 +980,7 @@ export function renderUserComponentFile(
   return `// Auto-generated.  Do not edit by hand.
 ${gate.import}${reactImport}${reactTypesImport}${reactRouterImport}${mantineImport}${dtoImportLines}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsType}${form.moduleScope}
 export default function ${name}(${propDestructure}) {
-${navigateLine}${actionWiring.decls}${form.decls}${stateLines}${derivedLines}${gate.guard}  return (
+${navigateLine}${actionWiring.decls}${form.decls}${stateLines}${derivedLines}${actionLines}${gate.guard}  return (
     ${indentJsx(tsx, "    ")}
   );
 }

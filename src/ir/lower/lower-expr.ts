@@ -864,6 +864,16 @@ function resolveNameRef(name: string, env: Env): ExprIR {
       }
     }
   }
+  // Named page/component action reference — a bare `onSubmit: next` /
+  // `rowAction: add` handler arg.  Resolves to a fully-typed `action-ref`
+  // carrying the action's single declared payload param type (undefined ⇒
+  // nullary), so backends + the validator never re-resolve.  `env.actions`
+  // is populated only while lowering a page/component body; elsewhere this
+  // is skipped and the name falls through to the ordinary path.
+  if (env.actions?.has(name)) {
+    const { paramType } = env.actions.get(name) as { paramType?: TypeIR };
+    return { kind: "action-ref", actionName: name, ...(paramType ? { paramType } : {}) };
+  }
   // Parameterless criterion reference — inline the predicate body.  A
   // parameterised criterion referenced bare (no argument list) falls
   // through to the unresolved path; the validator reports the arity

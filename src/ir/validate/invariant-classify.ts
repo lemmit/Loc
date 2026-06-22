@@ -163,6 +163,10 @@ function constructionEvaluable(
       );
     case "list":
       return e.elements.every((el) => constructionEvaluable(el, available, scope));
+    case "action-ref":
+      // UI-handler-arg form — never appears in a construction-evaluable
+      // invariant body.
+      return false;
   }
 }
 
@@ -291,6 +295,9 @@ function exprIsTranslatable(
       // List literals only appear as walker-config sugar (e.g. responsive
       // Grid cols) — never in wire-validated invariants.  Mark them
       // server-side only so the classifier doesn't try to translate one.
+      return false;
+    case "action-ref":
+      // UI-handler-arg form — never wire-translatable.
       return false;
   }
 }
@@ -561,6 +568,9 @@ function firstFieldRef(e: ExprIR): string | null {
     case "literal":
     case "this":
     case "id":
+      return null;
+    case "action-ref":
+      // UI-handler-arg form — carries no field reference.
       return null;
   }
 }

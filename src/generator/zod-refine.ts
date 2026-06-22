@@ -128,6 +128,7 @@ function renderRefineExpr(e: ExprIR): string {
     case "convert":
     case "match":
     case "list":
+    case "action-ref":
       // `classifyForWire` excludes these; reaching the renderer
       // means a bug upstream — emit a placeholder so a failing
       // build is louder than a silently-wrong refine.

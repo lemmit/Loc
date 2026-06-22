@@ -320,6 +320,10 @@ export function checkPage(p: Page, ui: Ui, accept: ValidationAcceptor): void {
   for (const prop of p.props) {
     const key = prop.$type;
     if (key === "StateBlock") continue; // multiple allowed
+    // Multiple named `action`s per page are the norm (`action next()` +
+    // `action submit()`) — they're declarations, not single-valued props
+    // (named-actions-and-stores.md, Proposal A Stage 1).
+    if (key === "ActionDecl") continue;
     seen.set(key, (seen.get(key) ?? 0) + 1);
   }
   for (const [key, count] of seen) {

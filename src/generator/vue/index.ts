@@ -250,6 +250,8 @@ export function generateVueForContexts(
       // `auth: ui` enables currentUser-only operation-`requires` gating on
       // `Action(...)` buttons in this component.
       authUi,
+      // Named, typed component event handlers (Proposal A Stage 1).
+      c.actions,
     );
     if (component.usesFormToast) hasFormToast = true;
     out.set(`src/components/${c.name}.vue`, component.source);

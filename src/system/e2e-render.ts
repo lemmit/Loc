@@ -433,6 +433,10 @@ function renderE2EExpr(e: ExprIR, ctx: RenderCtx): string {
       // tests don't currently surface them, but keep the renderer total
       // with a TS array literal so unexpected uses still compile.
       return `[${e.elements.map((el) => renderE2EExpr(el, ctx)).join(", ")}]`;
+    case "action-ref":
+      // Named-action references are a UI-handler-arg form — never reached by
+      // the e2e (api) renderer; keep the switch total with a placeholder.
+      return `/* action:${e.actionName} */`;
   }
 }
 

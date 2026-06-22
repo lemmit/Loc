@@ -306,6 +306,19 @@ export function walkBodyToHeex(
     partContextModule,
   };
 
+  // Hoist named page `action`s (named-actions-and-stores.md, Proposal A
+  // Stage 1) into `handle_event` clauses named `snake(action.name)`, so a
+  // bare `onClick: next` reference — lowered to an `action-ref` ExprIR that
+  // renders to `snake(name)` — binds to a real clause.  Mirrors the inline-
+  // lambda hoist (`hoistLambdaToHandler`) but keyed by the declared name.
+  // Guarded with `?? []`: component synth-pages carry no `actions`.
+  for (const action of page.actions ?? []) {
+    const bodyLines: string[] = [`    socket =`, `      socket`];
+    for (const s of action.body) bodyLines.push(`      ${renderStmt(s, ctx)}`);
+    bodyLines.push(`    {:noreply, socket}`);
+    ctx.handlers.push({ name: snake(action.name), paramsPattern: "_params", body: bodyLines });
+  }
+
   const heex = body ? renderExpr(body, ctx) : `<!-- empty body -->`;
 
   return {
@@ -389,6 +402,16 @@ export function renderExpr(expr: ExprIR, ctx: WalkContext): string {
       // No HEEx page-body emit path consumes one today; emit a literal
       // Elixir list so unexpected uses produce valid Elixir.
       return `[${expr.elements.map((el) => renderExpr(el, ctx)).join(", ")}]`;
+    case "action-ref":
+      // Named-action reference (named-actions-and-stores.md, Proposal A
+      // Stage 1).  A handler-arg referencing a named page `action`.  Returns
+      // the bare phx-event name — `snake(actionName)` — exactly like the
+      // inline-lambda hoist (`hoistLambdaToHandler` returns `event_N`); the
+      // matching `handle_event` clause is hoisted from `page.actions` at the
+      // top of `walkBodyToHeex`.  (Component-level actions, like component-
+      // level lambdas, do not hoist to the host LiveView — a pre-existing
+      // HEEx limitation tracked by the parity gate.)
+      return snake(expr.actionName);
   }
 }
 
@@ -911,8 +934,12 @@ export function renderPrimitive(
         // so children typically arrive as a single sub-expression.
         childrenExprs.push(arg);
       } else if (name === "on" || name === "onClick" || name === "onSubmit" || name === "then") {
-        // Lambda → handle_event hoist.
-        const eventName = hoistLambdaToHandler(arg, ctx);
+        // Inline lambda → handle_event hoist; a bare named-action reference
+        // (`onClick: bump`) is an `action-ref` ExprIR that renders to the
+        // declared event name (its `handle_event` clause is hoisted from
+        // `page.actions` at the top of `walkBodyToHeex`).
+        const eventName =
+          arg.kind === "action-ref" ? renderExpr(arg, ctx) : hoistLambdaToHandler(arg, ctx);
         const phxAttr = name === "onSubmit" ? "phx-submit" : "phx-click";
         namedAttrs.push(`${phxAttr}="${eventName}"`);
       } else if (name === "testid") {

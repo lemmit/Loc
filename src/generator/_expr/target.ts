@@ -132,5 +132,12 @@ export function renderExprWith<Ctx extends ExprCtxBase>(
       );
     case "list":
       return t.list(e.elements.map(r));
+    case "action-ref":
+      // A named page/component action reference is a UI-handler-arg form
+      // (named-actions-and-stores.md, Proposal A Stage 1).  It is consumed by
+      // the JSX walker's call-site primitives, never by a domain-logic
+      // expression renderer — reaching it here means it leaked to a domain
+      // position, which the IR validator should already have rejected.
+      throw new Error("renderExprWith: 'action-ref' is not a domain expression");
   }
 }

@@ -274,6 +274,8 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
         // `auth: ui` enables currentUser-only operation `requires` gating on
         // `Action(...)` buttons in this component.
         ctx.authUi,
+        // Named, typed component event handlers (Proposal A Stage 1).
+        c.actions,
       ),
     );
   }
@@ -328,6 +330,9 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
           // `auth: ui` also enables currentUser-only operation `requires`
           // gating on `Action(...)` buttons inside the body.
           ctx.authUi,
+          // Named, typed page event handlers — hoisted as `const <name> = …`
+          // and bound by bare `onSubmit: <name>` references.
+          page.actions,
         ),
       );
     }

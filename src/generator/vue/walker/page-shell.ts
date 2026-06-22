@@ -1,4 +1,5 @@
 import type {
+  ActionIR,
   AggregateIR,
   BoundedContextIR,
   DerivedIR,
@@ -14,6 +15,8 @@ import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { ImportSpec, LoadedPack } from "../../_packs/loader.js";
 import {
   emitExpr,
+  emitStmt,
+  extendLambdaParams,
   type FormOfState,
   type OperationFormState,
   type WalkContext,
@@ -160,12 +163,25 @@ export function renderVuePage(input: VuePageShellInput): string {
   const derivedLines = derivedResult.lines;
   if (derivedLines.length > 0) vueImports.add("computed");
 
+  // Named-action handlers → `<script setup>` arrow consts (Proposal A
+  // Stage 1).  Built before stateLines so a handler that mutates state
+  // forces the `ref()` declaration (same as a derived that reads state).
+  const actionResult = buildActionLines(
+    page.actions,
+    result.usedActions ?? new Set(),
+    input.pack,
+    new Set(page.params.map((p) => p.name)),
+    stateNames,
+    repointDerived,
+  );
+  const actionLines = actionResult.lines;
+
   // State fields — `ref()` per declared field; the walked markup
   // reads bare names (template auto-unwrap) per vueTarget.  A `derived`
   // that reads a state field also forces the `ref()` declaration even
   // when the body never reads it directly.
   const stateLines: string[] = [];
-  if (result.usesState || derivedResult.usesState) {
+  if (result.usesState || derivedResult.usesState || actionResult.usesState) {
     for (const f of page.state) {
       stateLines.push(`const ${f.name} = ref(${vueTarget.defaultInitFor(f.type)});`);
       // The shared input primitives' VM carries the React-style
@@ -440,6 +456,7 @@ export function renderVuePage(input: VuePageShellInput): string {
   script.push(...hookLines);
   script.push(...opFormLines);
   script.push(...derivedLines);
+  script.push(...actionLines);
   // Trim trailing blanks.
   while (script.length > 0 && script[script.length - 1] === "") script.pop();
 
@@ -662,6 +679,8 @@ export function renderVueComponentFile(
    *  operation-`requires` gating on `Action(...)` buttons (a component is the
    *  canonical Action host).  Binding-only: components carry no page gate. */
   authUi = false,
+  /** Named, typed component event handlers (Proposal A Stage 1). */
+  actions: readonly ActionIR[] = [],
 ): { source: string; usesFormToast: boolean } {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -737,11 +756,24 @@ export function renderVueComponentFile(
   const derivedLines = derivedResult.lines;
   if (derivedLines.length > 0) vueImports.add("computed");
 
+  // Named-action handlers → `<script setup>` arrow consts (Proposal A
+  // Stage 1).  `rewriteScript` re-points state reads/writes to `.value` and
+  // param reads to `props.<name>`, matching the component derived path.
+  const actionResult = buildActionLines(
+    actions,
+    result.usedActions ?? new Set(),
+    pack,
+    paramNames,
+    stateNames,
+    rewriteScript,
+  );
+  const actionLines = actionResult.lines;
+
   // State — `ref()` per field + a `set<Pascal>` setter (the shared input
   // primitives' VM references it), matching the page shell.  A `derived`
   // reading a state field also forces the `ref()` declaration.
   const stateLines: string[] = [];
-  if (result.usesState || derivedResult.usesState) {
+  if (result.usesState || derivedResult.usesState || actionResult.usesState) {
     for (const f of state) {
       stateLines.push(`const ${f.name} = ref(${vueTarget.defaultInitFor(f.type)});`);
       const pascal = upperFirst(f.name);
@@ -963,6 +995,7 @@ export function renderVueComponentFile(
   script.push(...rewrittenHooks);
   script.push(...formLines);
   script.push(...derivedLines);
+  script.push(...actionLines);
   while (script.length > 0 && script[script.length - 1] === "") script.pop();
 
   const dialogs = dialogBlocks.length > 0 ? `\n${dialogBlocks.join("\n")}` : "";
@@ -1039,6 +1072,68 @@ function buildDerivedLines(
     }
     lines.push(`const ${d.name} = computed(() => ${exprStr});`);
     seenDerived.add(d.name);
+  }
+  return { lines, usesState };
+}
+
+/** Build the `<script setup>` action handlers for a page/component's named
+ *  `action`s (named-actions-and-stores.md, Proposal A Stage 1).  Mirrors
+ *  `buildDerivedLines`: only referenced actions emit; the body lowers through
+ *  the shared `emitStmt` against `vueTarget`, then `repointToScript` re-points
+ *  every state ref to `.value` (vueTarget renders bare names for template
+ *  inline-handler position, but a script-position `const <name> = () => …`
+ *  arrow needs the explicit `.value` deref/assign).  The negative-lookahead
+ *  in `repointToScript` keeps already-`.value` refs from double-pointing, so
+ *  a `step := step + 1` write renders `step.value = step.value + 1`. */
+function buildActionLines(
+  actions: readonly ActionIR[],
+  used: ReadonlySet<string>,
+  pack: LoadedPack,
+  paramNames: ReadonlySet<string>,
+  stateNames: ReadonlySet<string>,
+  repointToScript: (s: string) => string,
+): { lines: string[]; usesState: boolean } {
+  const lines: string[] = [];
+  let usesState = false;
+  for (const action of actions) {
+    if (!used.has(action.name)) continue;
+    const param = action.params[0]?.name;
+    const baseCtx: WalkContext = {
+      target: vueTarget,
+      imports: new Map(),
+      pack,
+      paramNames,
+      usedParams: new Set(),
+      usesNavigate: false,
+      stateNames,
+      derivedNames: new Set(),
+      authUi: false,
+      usesState: false,
+      usesCurrentUser: false,
+      usesRouterLink: false,
+      usesRouteId: false,
+      userComponents: new Map(),
+      usedUserComponents: new Set(),
+      usesChildren: false,
+      apiParamNames: new Map(),
+      usedApiHooks: new Map(),
+      lambdaParams: new Map(),
+      shellLocals: new Set(),
+      aggregatesByName: new Map(),
+      bcByAggregate: new Map(),
+      workflowsByName: new Map(),
+      bcByWorkflow: new Map(),
+      formOfs: [],
+      actionMutations: [],
+      collectedTestids: new Set(),
+      usesCodeBlock: false,
+    };
+    const handlerCtx: WalkContext = param
+      ? { ...baseCtx, lambdaParams: extendLambdaParams(baseCtx, param, param) }
+      : baseCtx;
+    const body = action.body.map((s) => repointToScript(emitStmt(s, handlerCtx))).join(" ");
+    if (handlerCtx.usesState) usesState = true;
+    lines.push(`const ${action.name} = (${param ?? ""}) => { ${body} };`);
   }
   return { lines, usesState };
 }

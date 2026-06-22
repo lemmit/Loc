@@ -6,6 +6,8 @@
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
+  actionHandlerName,
+  actionRefArg,
   boolNamed,
   escapeJsxText,
   lambdaArg,
@@ -32,6 +34,11 @@ export function emitTable(
 ): string {
   const rowsArg = namedArgValue(call, "rows");
   const rowsExpr = rowsArg ? emitExpr(rowsArg, ctx) : "[]";
+  // A named-action reference (`onRowClick: add`) binds the hoisted handler
+  // the page-shell emits from `page.actions` (named-actions-and-stores.md,
+  // Proposal A Stage 1): a single-payload action receives the clicked `row`;
+  // a nullary action is called with no arg.
+  const onRowClickAction = actionRefArg(call, "onRowClick");
   const onRowClick = lambdaArg(call, "onRowClick");
 
   const positionals = positionalArgs(call);
@@ -41,7 +48,11 @@ export function emitTable(
 
   const rowVar = "row";
   let onRowClickJs: string | undefined;
-  if (onRowClick) {
+  if (onRowClickAction) {
+    ctx.usedActions?.add(onRowClickAction.actionName);
+    const arg = onRowClickAction.paramType ? rowVar : "";
+    onRowClickJs = `{ ${actionHandlerName(onRowClickAction.actionName)}(${arg}); }`;
+  } else if (onRowClick) {
     const childCtx: WalkContext = {
       ...ctx,
       lambdaParams: extendLambdaParams(ctx, onRowClick.param, rowVar),

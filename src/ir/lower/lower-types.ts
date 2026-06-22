@@ -107,6 +107,12 @@ export interface Env {
    *  operation body so a `return <expr>` can tag its value with the matching
    *  variant.  Undefined for mutation operations / non-operation bodies. */
   returnVariants?: TypeIR[];
+  /** Named page/component `action`s in scope, keyed by name to the action's
+   *  single declared payload param type (`undefined` ⇒ nullary action).  Set
+   *  only while lowering a page/component body (named-actions-and-stores.md,
+   *  Proposal A Stage 1) so a bare handler-arg reference (`onSubmit: next`)
+   *  resolves to a fully-typed `action-ref` ExprIR.  Undefined elsewhere. */
+  actions?: Map<string, { paramType?: TypeIR }>;
 }
 
 export function newEnv(

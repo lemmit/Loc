@@ -312,6 +312,25 @@ export type DddKeywordNames =
 
 export type DddTokenNames = DddTerminalNames | DddKeywordNames;
 
+export interface ActionDecl extends langium.AstNode {
+    readonly $container: Component | Page;
+    readonly $type: 'ActionDecl';
+    name: string;
+    params: Array<Parameter>;
+    stmts: Array<Statement>;
+}
+
+export const ActionDecl = {
+    $type: 'ActionDecl',
+    name: 'name',
+    params: 'params',
+    stmts: 'stmts'
+} as const;
+
+export function isActionDecl(item: unknown): item is ActionDecl {
+    return reflection.isInstance(item, ActionDecl.$type);
+}
+
 export interface ActionType extends langium.AstNode {
     readonly $container: TypeAtom | TypeRef;
     readonly $type: 'ActionType';
@@ -455,7 +474,7 @@ export function isAreaMember(item: unknown): item is AreaMember {
 }
 
 export interface AssignOrCallStmt extends langium.AstNode {
-    readonly $container: Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | StampDecl | TestBlock | TestE2E | UiNotification | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | StampDecl | TestBlock | TestE2E | UiNotification | WorkflowCreateDecl;
     readonly $type: 'AssignOrCallStmt';
     op?: '+=' | '-=' | ':=';
     target: LValue;
@@ -847,7 +866,7 @@ export function isComponent(item: unknown): item is Component {
     return reflection.isInstance(item, Component.$type);
 }
 
-export type ComponentDecl = DerivedProp | StateBlock;
+export type ComponentDecl = ActionDecl | DerivedProp | StateBlock;
 
 export const ComponentDecl = {
     $type: 'ComponentDecl'
@@ -1154,7 +1173,7 @@ export function isEmitField(item: unknown): item is EmitField {
 }
 
 export interface EmitStmt extends langium.AstNode {
-    readonly $container: Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | TestBlock | TestE2E | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | TestBlock | TestE2E | WorkflowCreateDecl;
     readonly $type: 'EmitStmt';
     event: langium.Reference<EventDecl>;
     fields: Array<EmitField>;
@@ -1354,7 +1373,7 @@ export function isFindDecl(item: unknown): item is FindDecl {
 }
 
 export interface ForStmt extends langium.AstNode {
-    readonly $container: Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | WorkflowCreateDecl;
     readonly $type: 'ForStmt';
     body: Array<Statement>;
     iterable: Expression;
@@ -1459,7 +1478,7 @@ export function isIdType(item: unknown): item is IdType {
 }
 
 export interface IfLetStmt extends langium.AstNode {
-    readonly $container: Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | WorkflowCreateDecl;
     readonly $type: 'IfLetStmt';
     elseBody: Array<Statement>;
     source: Expression;
@@ -1668,7 +1687,7 @@ export function isLayoutSlotName(item: unknown): item is LayoutSlotName {
 }
 
 export interface LetStmt extends langium.AstNode {
-    readonly $container: Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | TestBlock | TestE2E | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | TestBlock | TestE2E | WorkflowCreateDecl;
     readonly $type: 'LetStmt';
     expr: Expression;
     name: string;
@@ -2338,7 +2357,7 @@ export function isPageMenuMeta(item: unknown): item is PageMenuMeta {
     return reflection.isInstance(item, PageMenuMeta.$type);
 }
 
-export type PageProp = BodyProp | CanonicalProp | DerivedProp | DescriptionProp | LayoutProp | OgImageProp | PageMenuMeta | RequiresProp | RouteProp | StateBlock | TitleProp;
+export type PageProp = ActionDecl | BodyProp | CanonicalProp | DerivedProp | DescriptionProp | LayoutProp | OgImageProp | PageMenuMeta | RequiresProp | RouteProp | StateBlock | TitleProp;
 
 export const PageProp = {
     $type: 'PageProp'
@@ -2349,7 +2368,7 @@ export function isPageProp(item: unknown): item is PageProp {
 }
 
 export interface Parameter extends langium.AstNode {
-    readonly $container: Component | Create | Criterion | Destroy | DomainServiceOperation | FindDecl | FunctionDecl | HandleDecl | Operation | Page | Retrieval | UiFunction | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Component | Create | Criterion | Destroy | DomainServiceOperation | FindDecl | FunctionDecl | HandleDecl | Operation | Page | Retrieval | UiFunction | WorkflowCreateDecl;
     readonly $type: 'Parameter';
     name: LooseName;
     type: TypeRef;
@@ -2475,7 +2494,7 @@ export function isPostfixSuffix(item: unknown): item is PostfixSuffix {
 }
 
 export interface PreconditionStmt extends langium.AstNode {
-    readonly $container: Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | TestBlock | TestE2E | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | TestBlock | TestE2E | WorkflowCreateDecl;
     readonly $type: 'PreconditionStmt';
     expr: Expression;
 }
@@ -2637,7 +2656,7 @@ export function isRequiresProp(item: unknown): item is RequiresProp {
 }
 
 export interface RequiresStmt extends langium.AstNode {
-    readonly $container: Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | WorkflowCreateDecl;
     readonly $type: 'RequiresStmt';
     expr: Expression;
 }
@@ -2737,7 +2756,7 @@ export function isRetrievalLiteral(item: unknown): item is RetrievalLiteral {
 }
 
 export interface ReturnStmt extends langium.AstNode {
-    readonly $container: Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | WorkflowCreateDecl;
     readonly $type: 'ReturnStmt';
     value: Expression;
 }
@@ -3693,6 +3712,7 @@ export function isWorkflowMember(item: unknown): item is WorkflowMember {
 }
 
 export type DddAstType = {
+    ActionDecl: ActionDecl
     ActionType: ActionType
     Aggregate: Aggregate
     AggregateMember: AggregateMember
@@ -3886,6 +3906,25 @@ export type DddAstType = {
 
 export class DddAstReflection extends langium.AbstractAstReflection {
     override readonly types = {
+        ActionDecl: {
+            name: ActionDecl.$type,
+            properties: {
+                name: {
+                    name: ActionDecl.name
+                },
+                params: {
+                    name: ActionDecl.params,
+                    defaultValue: [],
+                    optional: true
+                },
+                stmts: {
+                    name: ActionDecl.stmts,
+                    defaultValue: [],
+                    optional: true
+                }
+            },
+            superTypes: [ComponentDecl.$type, PageProp.$type]
+        },
         ActionType: {
             name: ActionType.$type,
             properties: {

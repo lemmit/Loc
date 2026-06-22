@@ -63,7 +63,7 @@ export function emitDomainServices(
   // domain service lives inside its declaring context, so its parameter and
   // return types name siblings of that context.
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
-  for (const svc of ctx.domainServices) {
+  for (const svc of ctx.domainServices ?? []) {
     const path = `lib/${appName}/domain/services/${snake(svc.name)}.ex`;
     out.set(path, renderDomainServiceModule(svc, ctx, appModule, contextModule));
   }

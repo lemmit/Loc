@@ -252,6 +252,26 @@ export interface DerivedIR {
   expr: ExprIR;
 }
 
+/** A named, typed page/component event handler — `action next(p: T) { … }`
+ *  (named-actions-and-stores.md, Proposal A Stage 1).  The named form of
+ *  today's anonymous handler lambda: a stable identity, a typed payload
+ *  param list (declared by the action; the call-site primitive supplies the
+ *  value), and a statement block reusing the existing `StmtIR` set — no new
+ *  statement semantics.  Each JSX frontend hoists one named handler function
+ *  per action at the page/component top; a bare `onSubmit: <name>` reference
+ *  binds the handler instead of an inline arrow. */
+export interface ActionIR {
+  name: string;
+  /** Declared payload params (zero or one in v1 — a Form `into:` two-way
+   *  binding ⇒ nullary; a Form value / List row id ⇒ a single payload
+   *  param).  The validator gates arity + assignability against what the
+   *  call-site primitive supplies. */
+  params: ParamIR[];
+  /** Handler body — the same `StmtIR` block an anonymous handler lambda
+   *  lowers to (`:=` / `+=` / `-=` / `let` / calls / `navigate` / `emit`). */
+  body: StmtIR[];
+}
+
 export interface InvariantIR {
   expr: ExprIR;
   guard?: ExprIR;
@@ -1939,6 +1959,11 @@ export interface PageIR {
    *  frontend hoists these before the body (React `useMemo`, Vue
    *  `computed`, Svelte `$derived`, HEEx inline-recompute). */
   derived: DerivedIR[];
+  /** Named, typed event handlers — `action next() { … }` (Proposal A
+   *  Stage 1).  Each frontend hoists one named handler function per action
+   *  before the body; a bare `onSubmit: <name>` reference binds it instead
+   *  of an inline arrow. */
+  actions: ActionIR[];
   /** Single body expression.  Conditional rendering uses `match` in
    *  the expression engine, not a guarded-declaration form. */
   body?: ExprIR;
@@ -2002,6 +2027,9 @@ export interface ComponentIR {
    *  reactive/sequential semantics).  Absent (empty) on an `extern`
    *  component. */
   derived: DerivedIR[];
+  /** Named, typed event handlers — the component twin of `PageIR.actions`
+   *  (Proposal A Stage 1).  Absent (empty) on an `extern` component. */
+  actions: ActionIR[];
   /** Walked region tree.  Absent for an `extern` component, whose
    *  rendering is owned by a hand-written file. */
   body?: ExprIR;
@@ -2563,6 +2591,20 @@ export type ExprIR =
        *  Use the ordered `entries` shape (not a `Record`) so entry order
        *  survives the IR pipeline. */
       style?: StyleIR;
+    }
+  | {
+      /** A bare reference to a named page/component `action` in
+       *  handler-arg position (`onSubmit: next`, `rowAction: add`) — the
+       *  named-action analogue of an inline handler lambda (Proposal A
+       *  Stage 1).  Fully resolved at lowering time: `actionName` is the
+       *  declared action; `paramType` is its single declared payload param
+       *  type (undefined ⇒ nullary action).  Backends and the validator
+       *  read these directly — they never re-resolve the name.  The walker
+       *  binds the hoisted handler (whose name derives from `actionName`)
+       *  instead of emitting an inline arrow. */
+      kind: "action-ref";
+      actionName: string;
+      paramType?: TypeIR;
     }
   | {
       kind: "lambda";

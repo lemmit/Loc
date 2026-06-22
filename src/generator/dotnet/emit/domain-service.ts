@@ -43,7 +43,7 @@ export function emitDomainServices(
   ns: string,
   out: Map<string, string>,
 ): void {
-  for (const svc of ctx.domainServices) {
+  for (const svc of ctx.domainServices ?? []) {
     out.set(`Domain/Services/${upperFirst(svc.name)}.cs`, renderDomainService(svc, ctx, ns));
     // Pure Domain union types for exception-less operation returns — Domain-layer
     // artifacts (the service method produces them), placed alongside the entity

@@ -23,6 +23,8 @@ import {
   renderPrimitive,
 } from "../render-primitive.js";
 import {
+  actionHandlerName,
+  actionRefArg,
   lambdaArg,
   namedArgValue,
   positionalArgs,
@@ -298,6 +300,18 @@ function emitFormOnSubmit(
   idTargets: AggregateIR[],
   mutationLocal: string,
 ): string | null {
+  // A named-action reference (`onSubmit: setCustomer`) binds the hoisted
+  // handler the page-shell emits from `page.actions` (named-actions-and-
+  // stores.md, Proposal A Stage 1): the submit body is a single call to it.
+  // A nullary action (a Form `into:` two-way binding) is called with no arg;
+  // a single-payload action receives the form's `vals`.  The validator
+  // (`loom.action-payload-mismatch`) gates that arity at the IR level.
+  const onSubmitAction = actionRefArg(call, "onSubmit");
+  if (onSubmitAction) {
+    ctx.usedActions?.add(onSubmitAction.actionName);
+    const arg = onSubmitAction.paramType ? "vals" : "";
+    return `{ ${actionHandlerName(onSubmitAction.actionName)}(${arg}); }`;
+  }
   const onSubmit = lambdaArg(call, "onSubmit");
   if (!onSubmit) return null;
   const shellLocals = new Set<string>([

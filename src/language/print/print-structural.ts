@@ -7,6 +7,7 @@ import {
   readArgString,
 } from "../../macros/api/_read.js";
 import type {
+  ActionDecl,
   Aggregate,
   Api,
   AuthBlock,
@@ -516,6 +517,8 @@ function printPageProp(node: PageProp): string {
       return `canonical: ${quote(node.value)}`;
     case "DerivedProp":
       return printDerivedProp(node);
+    case "ActionDecl":
+      return printActionDecl(node);
     default: {
       const exhaustive: never = node;
       throw new Error(`printPageProp: unhandled ${(exhaustive as { $type: string }).$type}`);
@@ -524,7 +527,14 @@ function printPageProp(node: PageProp): string {
 }
 
 function printComponentDecl(node: ComponentDecl): string {
-  return node.$type === "DerivedProp" ? printDerivedProp(node) : printStateBlock(node);
+  switch (node.$type) {
+    case "DerivedProp":
+      return printDerivedProp(node);
+    case "ActionDecl":
+      return printActionDecl(node);
+    default:
+      return printStateBlock(node);
+  }
 }
 
 function printComponent(node: Component): string {
@@ -889,6 +899,14 @@ function printContainment(node: Containment): string {
 
 function printDerivedProp(node: DerivedProp): string {
   return `derived ${node.name}: ${printTypeRef(node.type)} = ${printExpr(node.expr)}`;
+}
+
+/** `action <name>(<params>) { <stmts> }` — the named page/component event
+ *  handler (named-actions-and-stores.md, Proposal A Stage 1).  Body prints
+ *  through the shared statement printer, exactly like an operation body. */
+function printActionDecl(node: ActionDecl): string {
+  const params = node.params.map(printParameter).join(", ");
+  return block(`action ${node.name}(${params})`, node.stmts.map(printStmt));
 }
 
 function printInvariant(node: Invariant): string {

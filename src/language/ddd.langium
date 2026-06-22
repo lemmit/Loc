@@ -518,8 +518,24 @@ Page:
     '}';
 
 PageProp:
-      RouteProp | TitleProp | RequiresProp | StateBlock | DerivedProp | BodyProp | PageMenuMeta
+      RouteProp | TitleProp | RequiresProp | StateBlock | DerivedProp | ActionDecl | BodyProp | PageMenuMeta
     | LayoutProp | DescriptionProp | OgImageProp | CanonicalProp;
+
+// Named, typed page/component event handler — `action next() { … }`
+// (named-actions-and-stores.md, Proposal A Stage 1).  Names today's
+// anonymous handler lambda: a declared identity + a typed payload
+// param list + a statement block (reusing the existing `Parameter`
+// and `Statement` rules — NO new statement semantics).  Positionally
+// distinct from the `ActionType` param-slot type (`action(Order)`,
+// a handler-typed component PARAM) and the `Action {}` render
+// primitive (PascalCase builder-call in body position) — `action`
+// here leads a member declaration in a page/component body.  A
+// call site references it by bare name (`onSubmit: next`); the
+// reference resolves + carries the action's param type during
+// lowering so backends never re-resolve.
+ActionDecl:
+    'action' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')'
+        '{' stmts+=Statement* '}';
 
 RouteProp:
     'route' ':' value=STRING;
@@ -620,7 +636,7 @@ Component:
         '}')?;
 
 ComponentDecl:
-    StateBlock | DerivedProp;
+    StateBlock | DerivedProp | ActionDecl;
 
 // ---- state --------------------------------------------------------------
 

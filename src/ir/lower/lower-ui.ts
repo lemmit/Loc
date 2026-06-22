@@ -5,6 +5,7 @@
 // -------------------------------------------------------------------------
 
 import type {
+  ActionDecl,
   Component,
   DerivedProp,
   Layout,
@@ -16,6 +17,7 @@ import type {
 } from "../../language/generated/ast.js";
 import { snake } from "../../util/naming.js";
 import type {
+  ActionIR,
   ComponentIR,
   DerivedIR,
   ExprIR,
@@ -27,6 +29,8 @@ import type {
   PageLayoutIR,
   PageMetadataIR,
   StateFieldIR,
+  StmtIR,
+  TypeIR,
   UiApiParamIR,
   UiChannelParamIR,
   UiFunctionIR,
@@ -36,7 +40,44 @@ import type {
 } from "../types/loom-ir.js";
 import { lowerExpr } from "./lower-expr.js";
 import { lowerDerived } from "./lower-members.js";
+import { lowerStatement } from "./lower-stmt.js";
 import { type Env, lowerType, withLocal } from "./lower-types.js";
+
+/** Build the `env.actions` index (action name → single declared payload
+ *  param type) consumed by `resolveNameRef` so a bare handler-arg reference
+ *  (`onSubmit: next`) lowers to a fully-typed `action-ref`.  The action's
+ *  body is lowered separately by `lowerAction`; this only carries the
+ *  call-site-facing param type (named-actions-and-stores.md, Proposal A). */
+function indexActions(decls: ReadonlyArray<ActionDecl>): Map<string, { paramType?: TypeIR }> {
+  const index = new Map<string, { paramType?: TypeIR }>();
+  for (const a of decls) {
+    // v1: a single payload param (the call-site supplies it); arity > 1 is
+    // gated by the IR validator (`loom.action-payload-mismatch`).  Carry the
+    // first param's type as the call-site contract; nullary ⇒ undefined.
+    const paramType = a.params[0] ? lowerType(a.params[0].type) : undefined;
+    index.set(a.name, { paramType });
+  }
+  return index;
+}
+
+/** Lower a named `action name(p: T) { … }` member.  Params bind as locals in
+ *  the action-body env; the body statements lower through the SAME
+ *  `lowerStatement` path an anonymous handler block uses — no new statement
+ *  semantics (named-actions-and-stores.md, Proposal A Stage 1). */
+function lowerAction(a: ActionDecl, env: Env): ActionIR {
+  const params = a.params.map((p) => ({ name: p.name, type: lowerType(p.type) }));
+  let scopeEnv = env;
+  for (const p of params) {
+    scopeEnv = withLocal(scopeEnv, p.name, "param", p.type);
+  }
+  const body: StmtIR[] = [];
+  for (const s of a.stmts) {
+    const lowered = lowerStatement(s, scopeEnv);
+    body.push(lowered.stmt);
+    scopeEnv = lowered.envAfter;
+  }
+  return { name: a.name, params, body };
+}
 
 // ---------------------------------------------------------------------------
 // Page metamodel lowering.
@@ -212,6 +253,11 @@ function lowerPage(p: Page, user?: UserIR): PageIR {
       }
     }
   }
+  // Index named actions before lowering bodies so a bare handler-arg
+  // reference (`onSubmit: next`) in the page body resolves to a typed
+  // `action-ref` (named-actions-and-stores.md, Proposal A Stage 1).
+  const actionDecls = p.props.filter((prop): prop is ActionDecl => prop.$type === "ActionDecl");
+  env = { ...env, actions: indexActions(actionDecls) };
   // Page-derived bindings — read-only computed values in the render scope.
   // Lowered sequentially (in source order) so a derived may reference
   // params, state, and EARLIER derived; each name binds into `env` after
@@ -225,6 +271,9 @@ function lowerPage(p: Page, user?: UserIR): PageIR {
       env = withLocal(env, d.name, "let", d.type);
     }
   }
+  // Action bodies lower through the standard statement path, in source
+  // order, against the page env (params + state + derived in scope).
+  const actions = actionDecls.map((a) => lowerAction(a, env));
   for (const prop of p.props) {
     if (prop.$type === "RouteProp") route = prop.value;
     else if (prop.$type === "TitleProp") title = lowerExpr(prop.value, env);
@@ -276,6 +325,7 @@ function lowerPage(p: Page, user?: UserIR): PageIR {
     requires,
     state,
     derived,
+    actions,
     body,
     menuMeta,
     layout,
@@ -293,7 +343,15 @@ export function lowerComponent(c: Component): ComponentIR {
   // path; the React generator emits a `<Name>.props.ts` interface and
   // imports the user's module at call sites.
   if (c.extern) {
-    return { name: c.name, params, state: [], derived: [], extern: true, externPath: c.externPath };
+    return {
+      name: c.name,
+      params,
+      state: [],
+      derived: [],
+      actions: [],
+      extern: true,
+      externPath: c.externPath,
+    };
   }
   // Component-scoped env: params + state bind so `inferExprType`
   // resolves refs to their declared types (same reason as
@@ -311,6 +369,13 @@ export function lowerComponent(c: Component): ComponentIR {
       }
     }
   }
+  // Index named actions before lowering bodies (same as `lowerPage`) so a
+  // bare handler-arg reference in the component body resolves to a typed
+  // `action-ref`.
+  const actionDecls = (c.decls ?? []).filter(
+    (decl): decl is ActionDecl => decl.$type === "ActionDecl",
+  );
+  env = { ...env, actions: indexActions(actionDecls) };
   // Component-derived bindings — same sequential, reactive-over-state
   // semantics as `lowerPage`.
   const derived: DerivedIR[] = [];
@@ -321,10 +386,12 @@ export function lowerComponent(c: Component): ComponentIR {
       env = withLocal(env, d.name, "let", d.type);
     }
   }
+  // Action bodies lower through the standard statement path (same as pages).
+  const actions = actionDecls.map((a) => lowerAction(a, env));
   // Non-extern components always carry a body (validator-enforced);
   // guard defensively so lowering an invalid model can't crash.
   const body = c.body ? lowerExpr(c.body, env) : undefined;
-  return { name: c.name, params, state, derived, body };
+  return { name: c.name, params, state, derived, actions, body };
 }
 
 function lowerStateField(f: StateField, env: Env): StateFieldIR {
