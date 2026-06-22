@@ -9,6 +9,7 @@
 
 // Hono-framework builders now live in this package (P2b) — siblings.
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../../../generator/_adapters/index.js";
+import { renderHonoBaseLogCall } from "../../../generator/_obs/render-hono.js";
 import {
   buildBaseReaderFile,
   buildBaseUnionFile,
@@ -874,7 +875,7 @@ function renderProjectIndexTs(
     ? `\n// Apply first-boot seed data after migrations (database-seeding.md).\n// Ship-once per dataset via the __loom_seed marker; idempotent across boots.\nawait runSeeds(db);\n`
     : "";
   const migCall = runMigrationsAtBoot
-    ? `\n// Apply pending schema migrations before serving traffic.  Drizzle's\n// runtime migrator reads db/migrations/meta/_journal.json + each\n// referenced .sql file, tracking state in \`__drizzle_migrations\`;\n// idempotent across boots.\nawait migrate(db, { migrationsFolder: "./db/migrations" });\n`
+    ? `\n// Apply pending schema migrations before serving traffic.  Drizzle's\n// runtime migrator reads db/migrations/meta/_journal.json + each\n// referenced .sql file, tracking state in \`__drizzle_migrations\`;\n// idempotent across boots.  Bracketed with the catalog migration\n// lifecycle events (observability.md) — drizzle's migrator runs the\n// whole batch in one opaque call, so there's no per-migration\n// \`migration_applied\` seam (Hono limitation; Python/.NET emit it).\n${renderHonoBaseLogCall("migrationsStarting")}\ntry {\n  await migrate(db, { migrationsFolder: "./db/migrations" });\n  ${renderHonoBaseLogCall("migrationsComplete")}\n} catch (err) {\n  ${renderHonoBaseLogCall("migrationFailed", "error: err instanceof Error ? err.message : String(err)")}\n  throw err;\n}\n`
     : "";
   // createApp() calls assertUserVerifierRegistered() when auth is required.
   // With an `auth { oidc }` block (D-AUTH-OIDC) we register the generated

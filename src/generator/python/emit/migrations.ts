@@ -132,12 +132,14 @@ pattern).  Out of band: \`python -m app.db.migrate\`.
 """
 
 import asyncio
+import time
 from pathlib import Path
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.db.engine import engine
+from app.obs.log import log
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent.parent.parent / "migrations"
 
@@ -157,17 +159,35 @@ async def run_migrations(target: AsyncEngine = engine) -> None:
         )
         rows = (await conn.execute(text("SELECT tag FROM __loom_migrations"))).all()
         applied = {row[0] for row in rows}
-        for f in files:
+        pending = [f for f in files if f.stem not in applied]
+        # Catalog migration-lifecycle events (observability.md) — same
+        # event names + level Hono/.NET emit so a cross-backend log
+        # consumer pivots on one identity.
+        log("info", "migrations_starting", count=len(pending))
+        count = 0
+        for f in pending:
             tag = f.stem
-            if tag in applied:
-                continue
-            for statement in f.read_text().split(_BREAKPOINT):
-                stmt = statement.strip()
-                if stmt:
-                    await conn.execute(text(stmt))
-            await conn.execute(
-                text("INSERT INTO __loom_migrations (tag) VALUES (:tag)"), {"tag": tag}
+            started = time.monotonic()
+            try:
+                for statement in f.read_text().split(_BREAKPOINT):
+                    stmt = statement.strip()
+                    if stmt:
+                        await conn.execute(text(stmt))
+                await conn.execute(
+                    text("INSERT INTO __loom_migrations (tag) VALUES (:tag)"), {"tag": tag}
+                )
+            except Exception as exc:  # noqa: BLE001 — log + re-raise to abort boot
+                log("error", "migration_failed", id=tag, name=tag, error=str(exc))
+                raise
+            count += 1
+            log(
+                "info",
+                "migration_applied",
+                id=tag,
+                name=tag,
+                duration_ms=round((time.monotonic() - started) * 1000, 3),
             )
+        log("info", "migrations_complete", applied=count)
 
 
 if __name__ == "__main__":

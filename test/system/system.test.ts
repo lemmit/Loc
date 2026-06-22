@@ -170,6 +170,60 @@ describe("system / module / deployable", () => {
     });
   });
 
+  describe("boot migration lifecycle events (observability.md)", () => {
+    it("Hono root index.ts brackets the drizzle boot migrate with catalog events", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const idx = files.get("catalog_web/index.ts")!;
+      // drizzle's migrate() runs the whole batch in one opaque call, so
+      // starting/complete bracket it and failed sits in the catch — no
+      // per-migration migration_applied seam (Python/.NET emit that).
+      expect(idx).toMatch(/baseLogger\.info\(\{ event: "migrations_starting" \}\)/);
+      expect(idx).toMatch(/await migrate\(db, \{ migrationsFolder: "\.\/db\/migrations" \}\)/);
+      expect(idx).toMatch(/baseLogger\.info\(\{ event: "migrations_complete" \}\)/);
+      expect(idx).toMatch(
+        /baseLogger\.error\(\{ event: "migration_failed", error: err instanceof Error \? err\.message : String\(err\) \}\)/,
+      );
+    });
+
+    it(".NET Program.cs brackets the EF boot migrate with catalog events (per-id applied)", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const program = files.get("api/Program.cs")!;
+      // EF exposes the pending ids before applying, so migration_applied
+      // fires per id (no cheap per-migration duration → duration_ms omitted).
+      expect(program).toMatch(
+        /var pendingMigrations = db\.Database\.GetPendingMigrations\(\)\.ToList\(\)/,
+      );
+      expect(program).toMatch(
+        /migrationLog\.LogInformation\("\{Event\} count=\{Count\}", "migrations_starting", pendingMigrations\.Count\)/,
+      );
+      expect(program).toMatch(
+        /migrationLog\.LogInformation\("\{Event\} id=\{Id\} name=\{Name\}", "migration_applied", migrationId, migrationId\)/,
+      );
+      expect(program).toMatch(
+        /migrationLog\.LogInformation\("\{Event\} applied=\{Applied\}", "migrations_complete", pendingMigrations\.Count\)/,
+      );
+      // Failure carries the exception so the stack trace rides the record.
+      expect(program).toMatch(
+        /migrationLog\.LogError\(migrationError, "\{Event\} error=\{Error\}", "migration_failed", migrationError\.Message\)/,
+      );
+    });
+
+    it("Python boot migrate runner emits the catalog migration-lifecycle events", async () => {
+      const model = await buildModel("test/e2e/fixtures/python-build/shell.ddd");
+      const { files } = generateSystems(model);
+      const migrate = files.get("api/app/db/migrate.py")!;
+      expect(migrate).toContain("from app.obs.log import log");
+      expect(migrate).toContain('log("info", "migrations_starting", count=len(pending))');
+      // per-file applied (id/name/duration_ms) inside the loop
+      expect(migrate).toContain('"migration_applied",');
+      expect(migrate).toContain("duration_ms=round((time.monotonic() - started) * 1000, 3),");
+      expect(migrate).toContain('log("error", "migration_failed", id=tag, name=tag, error=str(exc))');
+      expect(migrate).toContain('log("info", "migrations_complete", applied=count)');
+    });
+  });
+
   it("rejects `generate system` on a file with no system blocks", async () => {
     // Legacy bare-context files don't have a system; generateSystems
     // returns an empty file map.
