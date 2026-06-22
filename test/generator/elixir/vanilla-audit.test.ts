@@ -23,10 +23,15 @@ const SOURCE = `
 system Auditing {
   subdomain Sales {
     context Orders {
+      error NotFound { resource: string }
+
       aggregate Order ids guid {
         status: string
         operation cancel() audited {
           status := "cancelled"
+        }
+        operation settle() audited: Order or NotFound {
+          status := "settled"
         }
         create(status: string) audited {
           status := status
@@ -70,6 +75,36 @@ system Plain {
     contexts: [Stock]
     dataSources: [itemState]
     serves: StockApi
+    port: 4000
+  }
+}
+`;
+
+// A DOCUMENT-shaped aggregate with audited create/destroy — the audit
+// before/after must store the FLATTENED wire shape (`serialize/1` = id + data),
+// not the nested `%{id:, data: …}` struct dump (cross-backend wire parity).
+const DOC = `
+system DocAudit {
+  subdomain Sales {
+    context Carts {
+      aggregate Cart shape(document) with crudish {
+        reference: string
+        create(reference: string) audited {
+          reference := reference
+        }
+        destroy audited { }
+      }
+      repository Carts for Cart { }
+    }
+  }
+  api CartsApi from Sales
+  storage pg { type: postgres }
+  resource cartState { for: Carts, kind: state, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Carts]
+    dataSources: [cartState]
+    serves: CartsApi
     port: 4000
   }
 }
@@ -138,6 +173,57 @@ describe("vanilla audit runtime (audit-and-logging.md)", () => {
     );
   });
 
+  it("wraps the audited RETURNING operation persist in a forced transaction + records before/after(saved)", async () => {
+    const ctx = file(await generateSystemFiles(SOURCE), "/api/orders.ex");
+    // The returning fn — distinct from the non-returning `cancel` — must now
+    // persist + record an audit row on the success branch, not silently drop it.
+    const settleIdx = ctx.indexOf("def settle_order(");
+    expect(settleIdx).toBeGreaterThan(-1);
+    const settle = ctx.slice(settleIdx);
+    // `before` snapshot taken before the body rebinds any field.
+    expect(settle).toContain(
+      "audit_before = (record |> Map.from_struct() |> Map.drop([:__meta__, :__struct__]))",
+    );
+    // The persist runs inside a forced transaction (audit alone forces it).
+    expect(settle).toContain("Api.Repo.transaction(fn ->");
+    expect(settle).toContain("case Api.Orders.OrderRepository.persist_change(changeset) do");
+    expect(settle).toContain("Api.Audit.record(Api.Repo, %{");
+    expect(settle).toContain('operation_id: "settleOrder"');
+    expect(settle).toContain('action: "settle"');
+    expect(settle).toContain('target_type: "Order"');
+    expect(settle).toContain("target_id: saved.id");
+    expect(settle).toContain("before: audit_before");
+    // `after` is the SAVED aggregate state (post-save), regardless of union arm.
+    expect(settle).toContain(
+      "after: (saved |> Map.from_struct() |> Map.drop([:__meta__, :__struct__]))",
+    );
+    // The audit insert must NOT change the controller-facing return shape — the
+    // success branch returns the wire map (the controller `json`s it).
+    expect(settle).toContain("%{id: saved.id, status: saved.status}");
+  });
+
+  it("maps the returning audited op's persist-failure to a 422 (validation clause)", async () => {
+    const ctrl = file(await generateSystemFiles(SOURCE), "/order_controller.ex");
+    // The `_result/2` helper gains an Ecto.Changeset clause because the op now
+    // persists inside a transaction (a validation failure rolls back to a 2-tuple).
+    expect(ctrl).toContain(
+      "def settle_order_result(conn, {:ok, success}), do: json(conn, success)",
+    );
+    expect(ctrl).toContain('def settle_order_result(conn, {:error, "NotFound", data}),');
+    expect(ctrl).toContain(
+      "def settle_order_result(conn, {:error, %Ecto.Changeset{} = changeset}),",
+    );
+  });
+
+  it("inserts the audit row with the raising insert!/1 so a failure rolls the txn back", async () => {
+    const audit = file(await generateSystemFiles(SOURCE), "/api/audit.ex");
+    // insert!/1 (not insert/1): a failed audit insert must raise → roll back the
+    // whole action transaction (the atomic-commit guarantee), matching Python.
+    expect(audit).toContain("repo.insert!(struct(Record, row))");
+    expect(audit).not.toContain("repo.insert(struct(Record, row))");
+    expect(audit).toContain("@spec record(module(), map()) :: Record.t()");
+  });
+
   it("audits the CREATE with before:nil / after=wire(created) AFTER the insert", async () => {
     const ctrl = file(await generateSystemFiles(SOURCE), "/order_controller.ex");
     expect(ctrl).toContain("def create(conn, params) do");
@@ -148,9 +234,10 @@ describe("vanilla audit runtime (audit-and-logging.md)", () => {
     expect(ctrl).toContain('action: "create"');
     expect(ctrl).toContain("target_id: record.id");
     expect(ctrl).toContain("before: nil");
-    expect(ctrl).toContain(
-      "after: (record |> Map.from_struct() |> Map.drop([:__meta__, :__struct__]))",
-    );
+    // `after` uses the controller's own `serialize/1` (in scope here) so a
+    // document-shaped aggregate records the flattened wire shape, not the nested
+    // `%{id:, data: …}` struct dump — wire-parity with the other backends.
+    expect(ctrl).toContain("after: serialize(record)");
   });
 
   it("audits the DESTROY with before=wire(loaded) / after:nil BEFORE the delete", async () => {
@@ -159,9 +246,9 @@ describe("vanilla audit runtime (audit-and-logging.md)", () => {
     expect(ctrl).toContain('operation_id: "destroyOrder"');
     expect(ctrl).toContain('action: "destroy"');
     expect(ctrl).toContain("target_id: id");
-    expect(ctrl).toContain(
-      "before: (record |> Map.from_struct() |> Map.drop([:__meta__, :__struct__]))",
-    );
+    // `before` uses the controller's own `serialize/1` (doc-aware) so the wire
+    // shape recorded matches the other backends + this controller's own bodies.
+    expect(ctrl).toContain("before: serialize(record)");
     expect(ctrl).toContain("after: nil");
     // The audit row is recorded inside the transaction, BEFORE the delete call.
     const auditIdx = ctrl.indexOf('operation_id: "destroyOrder"');
@@ -169,6 +256,21 @@ describe("vanilla audit runtime (audit-and-logging.md)", () => {
     expect(auditIdx).toBeGreaterThan(-1);
     expect(deleteIdx).toBeGreaterThan(-1);
     expect(auditIdx).toBeLessThan(deleteIdx);
+  });
+
+  it("records the FLATTENED wire shape for a document-storage aggregate (serialize/1, not the struct dump)", async () => {
+    const ctrl = file(await generateSystemFiles(DOC), "/cart_controller.ex");
+    // The doc agg's serialize/1 is the flattened wire shape (id merged over data).
+    expect(ctrl).toContain("Map.merge(%{id: record.id}, record.data || %{})");
+    // create audit `after` + destroy audit `before` route through serialize/1, so
+    // they carry the flattened wire shape — NOT the nested `%{id:, data: …}` dump.
+    expect(ctrl).toContain("after: serialize(record)");
+    expect(ctrl).toContain("before: serialize(record)");
+    // And specifically NOT the struct-drop projection (which on a doc agg would
+    // capture the nested `{id, data}` row instead of the flattened document).
+    expect(ctrl).not.toContain(
+      "after: (record |> Map.from_struct() |> Map.drop([:__meta__, :__struct__]))",
+    );
   });
 
   it("is gated: no audit files/capture when nothing is audited", async () => {

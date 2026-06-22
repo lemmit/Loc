@@ -130,8 +130,14 @@ defmodule ${appModule}.Audit do
   / parent ids + the principal \`actor\` (only the id is carried).  \`fields\` is the
   per-action map (operation_id / action / target_type / target_id / before /
   after).  Call inside the action's transaction so the history commits atomically.
+
+  Uses \`insert!/1\` (the raising variant): a failed audit insert (NOT NULL /
+  duplicate audit_id / …) must roll back the WHOLE action transaction, so the
+  aggregate state change can never commit without its audit row — the same
+  "audit commits atomically with the state change" guarantee the Python sink
+  gives by raising on \`session.commit()\`.  Returns the inserted \`Record\`.
   """
-  @spec record(module(), map()) :: {:ok, Record.t()} | {:error, Ecto.Changeset.t()}
+  @spec record(module(), map()) :: Record.t()
   def record(repo, fields) when is_map(fields) do
     actor_id = RequestContext.actor_id()
 
@@ -149,7 +155,7 @@ defmodule ${appModule}.Audit do
         fields
       )
 
-    repo.insert(struct(Record, row))
+    repo.insert!(struct(Record, row))
   end
 end
 `;
@@ -213,11 +219,18 @@ export function auditRecordCall(args: {
   ].join("\n");
 }
 
-/** The wire-snapshot expression for a vanilla aggregate record — the same
- *  `Map.from_struct |> Map.drop` projection the controller's `serialize/1`
- *  uses, inlined where `serialize/1` is out of scope (the context module). */
-export function wireSnapshot(recordExpr: string): string {
-  return `(${recordExpr} |> Map.from_struct() |> Map.drop([:__meta__, :__struct__]))`;
+/** The wire-snapshot expression for a vanilla aggregate record — the SAME wire
+ *  projection the controller's `serialize/1` uses, inlined where `serialize/1`
+ *  is out of scope (the context module + the returning-op fn).  Relational
+ *  aggregates dump the whole struct (`Map.from_struct |> Map.drop`); a
+ *  document-shaped aggregate (`shape(document)`) stores its wire form as the
+ *  `data` jsonb merged under the row id — mirror `renderDocSerialize` so the
+ *  audit before/after row carries the flattened wire shape every other backend
+ *  records, not a nested `%{id:, data: …}`.  Pass `isDoc: true` for a doc agg. */
+export function wireSnapshot(recordExpr: string, isDoc = false): string {
+  return isDoc
+    ? `Map.merge(%{id: ${recordExpr}.id}, ${recordExpr}.data || %{})`
+    : `(${recordExpr} |> Map.from_struct() |> Map.drop([:__meta__, :__struct__]))`;
 }
 
 /** The audited create's `operationId` / `action`. */

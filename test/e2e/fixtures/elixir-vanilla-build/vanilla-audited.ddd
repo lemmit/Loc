@@ -19,10 +19,20 @@
 system VanillaAudited {
   subdomain Sales {
     context Orders {
+      error NotFound { resource: string }
+
       aggregate Order ids guid {
         status: string
         operation cancel() audited {
           status := "cancelled"
+        }
+        // A RETURNING audited op (`: Order or NotFound`): the success branch
+        // persists the mutated columns + records the audit row INSIDE the same
+        // forced transaction (before = wire pre-body, after = wire(saved)); the
+        // controller maps each union arm to its HTTP status.  Exercises the
+        // returning-op audit instrumentation under `mix --warnings-as-errors`.
+        operation settle() audited: Order or NotFound {
+          status := "settled"
         }
         create(status: string) audited {
           status := status

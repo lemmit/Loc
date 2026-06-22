@@ -25,10 +25,10 @@ import {
 } from "./eventsourced-emit.js";
 import {
   isReturningOperation,
+  persistPutBodies,
   renderReturningOpFunction,
   renderReturningStmt,
 } from "./operation-returns-emit.js";
-import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
 import { customFindsOf } from "./repository-emit.js";
 import { stampUsesPrincipal } from "./stamp-emit.js";
 
@@ -173,7 +173,6 @@ function renderNamedOpFunction(
   aggSnake: string,
   op: OperationIR,
 ): string {
-  const containNames = new Set(agg.contains.map((c) => snake(c.name)));
   const opSnake = snake(op.name);
   const aggModule = `${facadeMod}.${aggPascal}`;
   const repoMod = `${aggModule}Repository`;
@@ -213,33 +212,11 @@ function renderNamedOpFunction(
   // statement index disambiguates per-write provenance temp vars.
   const bodyLines = op.statements.map((s, i) => renderReturningStmt(s, ctx, rc, i));
 
-  // Persist the fields the body assigned (deduped, declaration order).  Each is
-  // a real schema column on the mutated `record`, so `put_change` is safe.
-  const assignedFields: string[] = [];
-  for (const s of op.statements) {
-    // `assign` (`field := v`), collection `add`/`remove` (`items += Item{…}`),
-    // and scalar compound `add`/`remove` (`total += n`) all re-bind a real
-    // schema column on `record` — persist each via `put_change`.
-    if (s.kind !== "assign" && s.kind !== "add" && s.kind !== "remove") continue;
-    const f = snake(s.target.segments[0] ?? "");
-    if (f.length > 0 && !assignedFields.includes(f)) assignedFields.push(f);
-  }
-  // Co-located provenance columns ride the same changeset: a `<field>_provenance`
-  // jsonb backing column for each provenanced field the body actually assigned.
-  const provNames = new Set(provenancedFieldsOf(agg).map((f) => snake(f.name)));
-  const provColumns = assignedFields.filter((f) => provNames.has(f)).map((f) => provColumn(f));
-  // Put bodies — re-indented per persist path (4-space for the plain pipe,
-  // 6-space inside the `changeset =` assignment).  A containment
-  // (`embeds_many`/`embeds_one`) round-trips via `put_embed`; scalar columns
-  // (incl. the provenance backing columns) via `put_change`.
-  const putBodies = [
-    ...assignedFields.map((f) =>
-      containNames.has(f)
-        ? `Ecto.Changeset.put_embed(:${f}, record.${f})`
-        : `Ecto.Changeset.put_change(:${f}, record.${f})`,
-    ),
-    ...provColumns.map((c) => `Ecto.Changeset.put_change(:${c}, record.${c})`),
-  ];
+  // Persist the fields the body assigned (deduped, declaration order) + the
+  // co-located `<field>_provenance` backing columns — shared with the
+  // returning-op persist tail.  Re-indented per persist path (4-space for the
+  // plain pipe, 6-space inside the `changeset =` assignment).
+  const putBodies = persistPutBodies(op, agg);
   const putBlock = putBodies.map((b) => `\n    |> ${b}`).join("");
   const putBlock6 = putBodies.map((b) => `\n      |> ${b}`).join("");
 

@@ -22,7 +22,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { ApiRoute } from "../api-emit.js";
-import { auditRecordCall, createAuditMeta, destroyAuditMeta, wireSnapshot } from "./audit-emit.js";
+import { auditRecordCall, createAuditMeta, destroyAuditMeta } from "./audit-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 import { CRUD_RESERVED_NAMES } from "./context-emit.js";
 import { isVanillaDocAgg, renderDocSerialize } from "./document-emit.js";
@@ -248,7 +248,7 @@ ${auditRecordCall({
   targetType: aggPascal,
   targetId: "record.id",
   before: "nil",
-  after: wireSnapshot("record"),
+  after: "serialize(record)",
   indent: "            ",
 })}
 
@@ -292,7 +292,7 @@ ${auditRecordCall({
   action: destroyMeta.action,
   targetType: aggPascal,
   targetId: "id",
-  before: wireSnapshot("record"),
+  before: "serialize(record)",
   after: "nil",
   indent: "             ",
 })}
