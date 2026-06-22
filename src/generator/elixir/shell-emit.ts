@@ -22,6 +22,7 @@ import {
   renderRelease,
   renderRelServer,
   renderRuntimeExs,
+  renderTestExs,
 } from "./shell/config.js";
 import {
   renderDockerfile,
@@ -243,6 +244,9 @@ export function emitShellFiles(
   out.set("config/dev.exs", renderDevExs(appName, appModule, port));
   out.set("config/prod.exs", renderProdExs(appName, appModule));
   out.set("config/runtime.exs", renderRuntimeExs(appName, appModule));
+  // `config/test.exs` lets `mix test` load (Rec3 DB-free domain-test gate); the
+  // prod image never copies it.  Mirrors the vanilla shell.
+  out.set("config/test.exs", renderTestExs(appName, appModule));
 
   // Priv — first-boot seed data (database-seeding.md, Phase 3b).  Through the
   // domain create action (D-SEED-PATH), ship-once per dataset

@@ -40,10 +40,10 @@ Python (`python`), Java (`java`).
 
 | Capability | node | dotnet | elixir | python | java |
 |---|:--:|:--:|:--:|:--:|:--:|
-| Domain `test "…"` → unit-test file | ✅ vitest `*.test.ts` | ✅ xUnit `*Tests.cs` | ✅ ExUnit `*_test.exs` (**vanilla**: full port via a pure domain core; **ash**: pure-subset, `create`/op/`toThrow` `@tag :skip`) | ✅ pytest `tests/test_*.py` | ✅ JUnit 5 `*Tests.java` |
+| Domain `test "…"` → unit-test file | ✅ vitest `*.test.ts` | ✅ xUnit `*Tests.cs` | ✅ ExUnit `*_test.exs` (**vanilla**: full port via a pure domain core; **ash**: rejection subset DB-free, only happy-path state `@tag :skip`) | ✅ pytest `tests/test_*.py` | ✅ JUnit 5 `*Tests.java` |
 | `expect(x).toBe/…` (5 value matchers) | ✅ | ✅ | ✅ (pure tests) | ✅ | ✅ |
-| `expect(call).toThrow()` | ✅ | ✅ | ✅ vanilla (create→`{:error}`, op→`assert_raise`); ash skipped | ✅ | ✅ |
-| `create({…})` → factory | ✅ | ✅ | ✅ vanilla (`apply_action`, money→Decimal); ash skipped | ✅ | ✅ |
+| `expect(call).toThrow()` | ✅ | ✅ | ✅ vanilla (create→`{:error}`, op→`assert_raise`); ✅ ash DB-free (`refute …for_create/for_update.valid?`) | ✅ | ✅ |
+| `create({…})` → factory | ✅ | ✅ | ✅ vanilla (`apply_action`, money→Decimal); ash: rejection via `for_create` `valid?`, happy-path skipped | ✅ | ✅ |
 | `currentUser`-gated op → synthetic admin actor threaded | ✅ | ✅ | n/a (no actor seam in the pure core yet) | ✅ | ✅ |
 | `expect` with no matcher (bare boolean) | throws (gated) | throws (gated) | — | `assert <expr>` | `assertTrue(<expr>)` |
 | Dedicated unit test for the emitter | ✅ | ✅ | ✅ | ❌ | ❌ |
@@ -52,7 +52,7 @@ Python (`python`), Java (`java`).
 
 ## Findings
 
-### F1 — Phoenix/Elixir silently drops domain `test "…"` blocks (major) — *closed for vanilla; pure-subset for ash*
+### F1 — Phoenix/Elixir silently drops domain `test "…"` blocks (major) — *closed (vanilla full port; ash rejection subset DB-free)*
 
 > **Update (shipped):** Phoenix now emits an ExUnit suite
 > (`test/<ctx>/<agg>_test.exs` + `test/test_helper.exs`), wired into
@@ -71,11 +71,18 @@ Python (`python`), Java (`java`).
 >   only skip is a value-object construction invariant (`expect(Money{…})
 >   .toThrow()`) — a vanilla VO is an unvalidated map (a real *runtime* gap,
 >   see F5).
-> * **ash — pure-subset.**  An Ash resource validates only through the data
->   layer (actions need a live DB) and has no in-memory object-with-methods,
->   so only an in-memory value-object field read runs; `create`/op/`toThrow`
->   stay `@tag :skip`.  (`Ash.Changeset.for_create/for_update` + `valid?`
->   could lower the *rejection* tests DB-free — a viable follow-up.)
+> * **ash — rejection subset, DB-free (Rec3, shipped).**  An Ash resource has
+>   no in-memory object-with-methods, but its `validations` and an action's
+>   `validate` clause run at **changeset-build** time, so the REJECTION half of
+>   the idiom runs with no data layer: an invariant / precondition /
+>   value-object-construction `toThrow` lowers to
+>   `refute Ash.Changeset.for_create/for_update(...).valid?` (the precondition
+>   case builds the subject as an in-memory `%Resource{}` struct).  In-memory
+>   value-object field reads run too.  Only a happy-path post-operation **state**
+>   assertion still `@tag :skip`s (it needs a persisted record / `SQL.Sandbox`).
+>   **Verified green under `mix test` with no database** against real Ash 3.x;
+>   gated by the `domain-tests.ddd` fixture in the `elixir-ash-build` suite,
+>   which now runs `mix test` whenever a project carries `test/test_helper.exs`.
 >
 > The "silent drop" is gone — assertions are now run or *visibly* skipped.
 
@@ -252,11 +259,17 @@ default would fail only on vanilla.
    on top of the `MIX_ENV=prod` `mix compile --warnings-as-errors` gate
    (which never compiles `test/`).  Pinned by the `vanilla-domain-tests.ddd`
    fixture (4 tests, green).  This also gates the F6 default fix.
-3. **Un-skip the ash rejection tests DB-free** via
-   `Ash.Changeset.for_create/for_update` + `valid?` (validations run at
-   changeset build, no data layer) — lowers invariant/precondition
-   `toThrow` on ash without a DB.  Happy-path state assertions on ash
-   still need a DataCase + `SQL.Sandbox` harness (deferred).
+3. ~~**Un-skip the ash rejection tests DB-free**~~ — **done**.  Ash's
+   `validations` / action `validate` run at changeset build, so invariant /
+   precondition / value-object-construction `toThrow` lower to
+   `refute Ash.Changeset.for_create/for_update(...).valid?` (the precondition
+   subject is an in-memory `%Resource{}` struct) — no data layer.  `tests-emit.ts`
+   ports them; only the happy-path post-operation **state** assertion still
+   `@tag :skip`s (needs a `SQL.Sandbox` DataCase — deferred).  The
+   `elixir-ash-build` gate now runs `mix test` (DB-free) on any project carrying
+   `test/test_helper.exs`, pinned by the `domain-tests.ddd` fixture; a
+   `config/test.exs` is emitted so `mix test` can load (never copied into the
+   prod image).  Verified green against real Ash 3.x.
 4. ~~**Close F5/F6 (vanilla runtime gaps)**~~ — **done**.  F6 emits field
    defaults onto the Ecto field; F5 emits a validating VO constructor
    (`valueobject-emit.ts`) and runs it from `base_changeset` (`validate_vo`),

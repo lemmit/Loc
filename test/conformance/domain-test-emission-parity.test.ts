@@ -16,8 +16,9 @@
 // drift apart silently:
 //   * full port  (node / dotnet / java / python / elixir-vanilla) — every test
 //     is runnable; no skip marker in the emitted file.
-//   * pure-subset (elixir-ash) — create/op/toThrow are visibly `@tag :skip`,
-//     not dropped.
+//   * pure-subset (elixir-ash) — the rejection tests run DB-free, but a
+//     happy-path post-operation STATE assertion is a visible `@tag :skip`
+//     (needs a persisted record), not a dropped assertion.
 //
 // Frontends (react/vue/svelte/angular) run no domain logic and are n/a — they
 // are out of scope here by construction (no backend test emitter).
@@ -47,6 +48,14 @@ system S {
         test "money builds" {
           let m = Money { amount: 1.0, currency: "USD" }
           expect(m.currency).toBe("USD")
+        }
+        // A happy-path post-operation STATE assertion: the full-port foundations
+        // run it; the Ash subset emits it as @tag :skip (needs a persisted
+        // record) — this is the cell that keeps the pure-vs-skip pin honest.
+        test "confirming an open order" {
+          let o = Order.create({ customer: "acme" })
+          o.confirm()
+          expect(o.status).toBe("confirmed")
         }
       }
       repository Orders for Order { }
@@ -82,7 +91,7 @@ const CASES: readonly Case[] = [
   { platform: "dotnet", file: /\/Orders\/OrderTests\.cs$/, shape: "full" },
   { platform: "java", file: /\/OrderTests\.java$/, shape: "full" },
   { platform: "python", file: /\/tests\/test_order\.py$/, shape: "full" },
-  // Ash — pure-subset: create/op/toThrow are @tag :skip placeholders.
+  // Ash — rejection tests run DB-free; the happy-path state test is @tag :skip.
   { platform: "elixir", file: /\/test\/selling\/order_test\.exs$/, shape: "subset" },
   // Vanilla — full port via the pure domain core; nothing skips.
   {
