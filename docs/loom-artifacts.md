@@ -87,7 +87,7 @@ populates these.
 
 | Pattern | Producer | What it is |
 |---|---|---|
-| `<Subdomain>.snapshot.json` | `src/system/snapshot.ts` + `src/system/migrations-builder.ts` (phase ⑨) | Migration baseline.  One file per subdomain that owns a database schema; written on every `generate system` run.  Diffed against the previous file on the next regen by `buildMigrations` to derive the next migration step; per-backend emitters in `src/generator/{phoenix-live-view,typescript,dotnet}/emit/migrations*.ts` translate the resulting `MigrationsIR` to platform-specific files. |
+| `<Subdomain>.snapshot.json` | `src/system/snapshot.ts` + `src/system/migrations-builder.ts` (phase ⑨) | Migration baseline.  One file per subdomain that owns a database schema; written on every `generate system` run.  Diffed against the previous file on the next regen by `buildMigrations` to derive the next migration step; per-backend emitters (`src/generator/typescript/emit/migrations.ts`, `dotnet/emit/migrations.ts`, `python/emit/migrations.ts`, `java/emit/migrations.ts`, and `elixir/migrations-emit.ts`) translate the resulting `MigrationsIR` to platform-specific files — see [`migrations.md`](migrations.md). |
 | `<ts>-<guid>.loomsnap.json` | `ddd snapshot` (`src/system/loomsnap.ts`) | Provenance rule snapshot.  One immutable timestamped+GUID file per system; captures the rule snapshots for every `provenanced` field.  The latest such file is the one the generated runtime loads at startup.  See [`provenance.md`](provenance.md). |
 
 Migration snapshots are derived from the IR and written on every

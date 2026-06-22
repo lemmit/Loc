@@ -4,10 +4,11 @@
 
 Loom is a high-level DSL that lets you describe complete systems at the
 altitude of a no-code platform &mdash; and walk away with real, owned
-source code across **Hono**, **.NET**, **Phoenix LiveView**, and
-**React**.  No vendor lock-in.  No scaling cliff.  No drift between
-layers.  Just the model, a visual builder, and full ownership of every
-line that's generated.
+source code across five backends (**Hono**, **.NET**, **Phoenix
+LiveView**, **Java/Spring Boot**, **Python/FastAPI**) and four frontends
+(**React**, **Vue**, **Svelte**, **Angular**).  No vendor lock-in.  No
+scaling cliff.  No drift between layers.  Just the model, a visual
+builder, and full ownership of every line that's generated.
 
 - All the speed of no-code
 - All the source you'd write by hand
@@ -23,8 +24,9 @@ in-browser test runner), and the full documentation set.
 
 | | |
 |---|---|
-| **Runtimes** | Hono · .NET · Phoenix LiveView · React |
-| **Design systems** | Mantine · shadcn/ui · MUI · Chakra · Phoenix HEEx — swap any time |
+| **Backends** | Hono · .NET · Phoenix LiveView · Java/Spring Boot · Python/FastAPI |
+| **Frontends** | React · Vue · Svelte · Angular |
+| **Design systems** | Mantine · shadcn/ui · MUI · Chakra (React) · Vuetify · shadcnVue (Vue) · shadcnSvelte · Flowbite (Svelte) · Angular Material · Phoenix HEEx — swap any time |
 | **Visual tools** | Typed editor · system builder · live preview · in-browser test runner |
 | **Quality story** | `requirement` → `solution` → `testCase` → `test` → `ddd verify` → per-requirement Definition-of-Done verdicts |
 | **LLM-safe** | One source of truth · validated before emission · refactor the model, regenerate the stack |

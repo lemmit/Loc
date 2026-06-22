@@ -14,6 +14,7 @@ section that matches what you need.
 | [`tools.md`](tools.md) | You're using the `ddd` CLI, `.loomignore`, watch mode, the docker workflow, or the OpenAPI parity check. |
 | [`generators.md`](generators.md) | You want to know exactly what each backend (Hono, .NET, Phoenix LiveView, Java, Python) or frontend (React, Vue, Svelte, Angular) emits for a given DSL construct. |
 | [`kubernetes.md`](kubernetes.md) | You want to deploy the generated system to a cluster — the opt-in `generate system --k8s` Helm chart + raw manifests. |
+| [`playground.md`](playground.md) | You want to know what the browser playground is — the typed editor, visual builders, live preview, and in-browser PGlite test runner at lemmit.github.io/Loc/playground. |
 
 ## Per-feature references
 
@@ -28,6 +29,7 @@ These cover a single language feature each.  Each one is self-contained.
 | [`workflow.md`](workflow.md) | `workflow` blocks, transactional vs non-transactional, isolation levels, event drain semantics. |
 | [`resources.md`](resources.md) | `storage` / `resource`, source types, the `objectStore` / `queue` / `api` kinds, the `config` map, and workflow-level resource consumption (`files.put`, `jobs.enqueue`, `rates.get`). |
 | [`extern.md`](extern.md) | `extern` operations and their per-backend handler registries. |
+| [`criterion.md`](criterion.md) | `criterion` — reusable named predicate specifications, shared across queries, validation, and permissions. |
 | [`capabilities.md`](capabilities.md) | `filter`, `stamp`, `implements` — cross-aggregate behaviours like soft-delete and audit. |
 | [`domain-services.md`](domain-services.md) | `domainService` — stateless cross-aggregate pure calculators, the no-infra contract, and per-backend emission. |
 | [`scaffold-macros.md`](scaffold-macros.md) | The `scaffold`, `crudish`, `audit`, and `softDelete` macros — what they expand to. |
@@ -35,6 +37,8 @@ These cover a single language feature each.  Each one is self-contained.
 | [`observability.md`](observability.md) | The catalog envelope, per-backend log emission, the catalog extension surface. |
 | [`traceability.md`](traceability.md) | `requirement` / `solution` / `testCase` artefacts and the generated coverage report. |
 | [`conformance.md`](conformance.md) | The cross-generator OpenAPI parity harness — the nine dimensions, strict vs report-only mode. |
+| [`migrations.md`](migrations.md) | `MigrationsIR` — the phase-⑨ schema-delta IR derived once and shared by every DB backend: how IR maps to tables/columns/join-tables, `migrationsOwner`, the shared Postgres SQL renderer, and where each backend applies migrations. |
+| [`verify.md`](verify.md) | The `ddd verify` gate — joins a test-results JSON onto the requirements graph for per-requirement Definition-of-Done verdicts (VERIFIED / FAILING / UNVERIFIED / UNTESTED); CLI flags, `results.json` contract, and the emitted `.loom/verification.*`. |
 
 ## Platforms, packs, stacks
 
@@ -51,6 +55,8 @@ These cover a single language feature each.  Each one is self-contained.
 | [`testing.md`](testing.md) | The test-tier placement guide — given a change, which tier proves it and where a new test belongs (fast vitest vs behavioral api/unit/ui vs per-backend build vs conformance vs playground e2e). |
 | [`macro-api.md`](macro-api.md) | You're authoring a macro (stdlib or project-local).  Covers `defineMacro`, parameter types, the factory surface, composability rules. |
 | [`loom-artifacts.md`](loom-artifacts.md) | The `.loom/` output directory — wire-spec, mermaid + C4 diagrams, traceability files, verification, snapshots.  What each artefact is and which CLI command produces it. |
+| [`api-toolkit.md`](api-toolkit.md) | The transport-neutral `src/api/` toolkit (`validate` / `generate` / `outline` / `applyPatches` + nav/refactor) and the `src/diagnostics/contract.ts` wire shapes — one browser-safe core behind the CLI, MCP, LSP, and playground. |
+| [`mcp.md`](mcp.md) | The MCP stdio server (`ddd-mcp`) + the transport-neutral `loom_*` agent-tool catalog — the three-layer tools/api/mcp stack and how to wire it into an MCP host. |
 
 ## Operational / legal
 
