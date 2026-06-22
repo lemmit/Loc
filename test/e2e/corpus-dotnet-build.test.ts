@@ -43,11 +43,6 @@ const DOTNET_COMPILE_SKIP: Record<string, string> = {
   // The same shape java skip-lists; use shape(document)/relational or host on node.
   embedded:
     "PLATFORM LIMITATION: jsonb-embedded + ref collection has no join-table type on .NET (CS0234)",
-  // EMITTER GAP: tenancy `filter this.tenantId == currentUser.tenantId` — the EF
-  // entity configuration emits a bare `currentUser` reference with nothing in
-  // scope (CS0103); the filter expr isn't threaded a current-user accessor there.
-  "tenancy-filter":
-    "EMITTER GAP: tenancy filter emits unbound `currentUser` in EF configuration on .NET (CS0103)",
 };
 
 // Every corpus feature the manifest declares to generate on `dotnet`, minus the

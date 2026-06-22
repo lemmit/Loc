@@ -60,6 +60,15 @@ export interface CsRenderContext {
    *  the concretes override (`public override object IdBoxed => Id;`).  When
    *  set, an `id` expr renders `this.<idAccessor>` instead of `this.Id`. */
   idAccessor?: string;
+  /** Static-position principal resolution (tenancy).  An EF Core query filter
+   *  lambda is built once in `OnModelCreating` and cannot close over a
+   *  request-scoped `currentUser` local the way an operation/workflow body can.
+   *  When set, the `current-user` arm renders this expression instead of the
+   *  bare `currentUser` token, so a capability `filter this.x == currentUser.x`
+   *  resolves through the ambient accessor (`RequestContext.Current!.CurrentUser!`)
+   *  the read side already uses — one currentUser resolution for the whole
+   *  backend.  Unset everywhere a `currentUser` local is actually in scope. */
+  currentUserExpr?: string;
 }
 
 const DEFAULT: CsRenderContext = { thisName: "this" };
@@ -282,8 +291,10 @@ function renderRef(e: RefExpr, ctx: CsRenderContext): string {
       // emitter for each per-request context (operation, workflow,
       // view bind) materialises a local / parameter named
       // `currentUser` typed as `User`; this rendering keeps member
-      // access (`currentUser.role`) idiomatic on both backends.
-      return "currentUser";
+      // access (`currentUser.role`) idiomatic on both backends.  In a
+      // static EF query-filter lambda no such local exists — `ctx.currentUserExpr`
+      // redirects to the ambient accessor the read side already uses.
+      return ctx.currentUserExpr ?? "currentUser";
     default:
       // `refKind === "unknown"` is intentional for some positions
       // (e2e test bodies, member-chain receivers like `Order.byId(...)`

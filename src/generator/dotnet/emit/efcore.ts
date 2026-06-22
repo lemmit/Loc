@@ -324,12 +324,23 @@ export function renderConfiguration(
   // every predicate applies — and lets a query selectively bypass a single one
   // via `IgnoreQueryFilters(["<Name>"])` instead of dropping them all.
   const filterNames = queryFilterNames(agg);
+  // A capability `filter this.x == currentUser.x` (tenancy) references the
+  // principal.  An EF query filter is a STATIC lambda built once in
+  // `OnModelCreating`, so it cannot close over a request-scoped `currentUser`
+  // local the way an operation body can — resolve it through the same ambient
+  // accessor the read side uses (`RequestContext.Current!.CurrentUser!`), so
+  // the whole backend resolves `currentUser` one way.
+  const AMBIENT_USER = "RequestContext.Current!.CurrentUser!";
   const filterLines = tph
     ? []
     : (agg.contextFilters ?? []).map(
         (predicate, i) =>
-          `        builder.HasQueryFilter(${JSON.stringify(filterNames[i])}, x => ${renderCsExpr(predicate, { thisName: "x" })});`,
+          `        builder.HasQueryFilter(${JSON.stringify(filterNames[i])}, x => ${renderCsExpr(predicate, { thisName: "x", currentUserExpr: AMBIENT_USER })});`,
       );
+  // The ambient accessor lives in `<ns>.Domain.Common` (RequestContext); only
+  // import it when a filter actually references the principal.
+  const filterRefsCurrentUser =
+    !tph && (agg.contextFilters ?? []).some((p) => exprRefsCurrentUser(p));
   // Co-located provenance (provenance.md): each `provenanced` field's
   // `<Field>Provenance` lineage maps to a `<field>_provenance` jsonb column via
   // a System.Text.Json value-converter (ProvJson.Options → the same Web-default
@@ -368,7 +379,7 @@ export function renderConfiguration(
       `using ${ns}.Domain.Enums;`,
       // Provenance lineage type + its shared JSON options for the co-located
       // `<field>_provenance` value-converter.
-      provColumnLines.length > 0 ? `using ${ns}.Domain.Common;` : null,
+      provColumnLines.length > 0 || filterRefsCurrentUser ? `using ${ns}.Domain.Common;` : null,
       "",
       `namespace ${ns}.Infrastructure.Persistence.Configurations;`,
       "",
@@ -474,6 +485,37 @@ function queryFilterName(
     return `${upperFirst(col!)}Filter`;
   }
   return `Filter${index + 1}`;
+}
+
+/** Does a query-filter predicate reference the `currentUser` principal?
+ *  Tenancy filters (`filter this.x == currentUser.x`) do; structural filters
+ *  (`softDelete`) don't.  Drives the conditional `Domain.Common` using for the
+ *  ambient accessor.  Walks only the expr shapes a capability filter can take. */
+function exprRefsCurrentUser(e: ExprIR): boolean {
+  switch (e.kind) {
+    case "ref":
+      return e.refKind === "current-user" || e.name === "currentUser";
+    case "member":
+      return exprRefsCurrentUser(e.receiver);
+    case "binary":
+      return exprRefsCurrentUser(e.left) || exprRefsCurrentUser(e.right);
+    case "paren":
+      return exprRefsCurrentUser(e.inner);
+    case "unary":
+      return exprRefsCurrentUser(e.operand);
+    case "method-call":
+      return exprRefsCurrentUser(e.receiver) || e.args.some(exprRefsCurrentUser);
+    case "call":
+      return e.args.some(exprRefsCurrentUser);
+    case "ternary":
+      return (
+        exprRefsCurrentUser(e.cond) ||
+        exprRefsCurrentUser(e.then) ||
+        exprRefsCurrentUser(e.otherwise)
+      );
+    default:
+      return false;
+  }
 }
 
 function collectColumnRefs(e: ExprIR, out: Set<string>): void {
