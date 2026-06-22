@@ -122,7 +122,7 @@ export function renderRequestCatalogFilter(basePkg: string): string {
     `                "method", request.getMethod(),`,
     `                "path", request.getRequestURI(),`,
     `                "status", response.getStatus(),`,
-    `                "durationMs", durationMs);`,
+    `                "duration_ms", durationMs);`,
     `        }`,
     `    }`,
     `}`,

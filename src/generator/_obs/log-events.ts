@@ -86,6 +86,17 @@ export const LogEvents = {
     fields: ["aggregate", "count", "ops"],
   },
   authEnabled: { event: "auth_enabled", level: "info", fields: ["required"] },
+  // Verifier-registration lifecycle (auth.md).  Emitted once at boot by the
+  // backends that wire a token verifier: `auth_oidc_verifier_registered`
+  // when a real OIDC verifier is installed, `auth_dev_stub_registered` (warn)
+  // when the dev-only accept-everything stub is — the warn level makes a
+  // production deploy that forgot to swap the stub loud in the log stream.
+  authOidcVerifierRegistered: {
+    event: "auth_oidc_verifier_registered",
+    level: "info",
+    fields: [],
+  },
+  authDevStubRegistered: { event: "auth_dev_stub_registered", level: "warn", fields: [] },
 
   // ─── domain — info (business narrative) ──────────────────────────────
   aggregateCreated: { event: "aggregate_created", level: "info", fields: ["aggregate", "id"] },
@@ -121,6 +132,11 @@ export const LogEvents = {
     level: "warn",
     fields: ["type", "attempts", "error"],
   },
+  // Outbox relay lifecycle (dispatch-delivery-semantics.md).  The background
+  // relay that drains __loom_outbox announces its start, and logs a recoverable
+  // error (warn) when a drain pass throws — the relay keeps running.
+  outboxRelayStarted: { event: "outbox_relay_started", level: "info", fields: [] },
+  outboxRelayError: { event: "outbox_relay_error", level: "warn", fields: ["error"] },
 
   // ─── domain — warn (client/domain fault, recoverable) ────────────────
   domainError: {
