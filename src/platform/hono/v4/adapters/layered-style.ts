@@ -33,6 +33,7 @@ import type {
   OperationIR,
   RepositoryIR,
 } from "../../../../ir/types/loom-ir.js";
+import { contextHasAuditedTarget } from "../../../../ir/util/audit-capability.js";
 import { contextsHaveProvenancedField } from "../../../../ir/util/prov-id.js";
 import { lowerFirst } from "../../../../util/naming.js";
 import { buildRoutesFile } from "../routes-builder.js";
@@ -99,9 +100,10 @@ export const layeredStyleAdapter: StyleAdapter = {
     const enriched = agg as EnrichedAggregateIR;
     const repo = findRepoFor(owningCtx, agg.name);
     const emitProvenance = contextsHaveProvenancedField(ctx.contexts);
-    const emitAudit = ctx.contexts.some((c) =>
-      c.aggregates.some((a) => a.operations.some((o) => o.audited)),
-    );
+    // Shared predicate: audited operations ∪ creates ∪ destroys (mirrors
+    // emit.ts's `contextHasAuditedTarget` gate so lifecycle-only-audited
+    // systems still get the audit instrumentation in system mode).
+    const emitAudit = ctx.contexts.some(contextHasAuditedTarget);
     const content = buildRoutesFile(
       enriched,
       repo,

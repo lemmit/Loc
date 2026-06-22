@@ -232,8 +232,9 @@ export function lowerOperation(op: Operation, env: Env): OperationIR {
 // unnamed declaration is the aggregate's canonical creator / terminator
 // — its synthesised IR `name` is the keyword itself, and `canonical` is
 // set so the Phase-2 route enrichment can route it to the bare
-// collection URL.  create / destroy are never `private` / `extern` /
-// `audited` (no grammar slot), so those default off.
+// collection URL.  create / destroy are never `private` / `extern`, so
+// those default off; `audited` is read from the postfix grammar slot
+// (`create(...) audited { }` / `destroy audited { }`).
 export function lowerCreate(c: Create, env: Env): OperationIR {
   return lowerActionBody(
     {
@@ -244,7 +245,7 @@ export function lowerCreate(c: Create, env: Env): OperationIR {
       body: c.body,
       visibility: "public",
       extern: false,
-      audited: false,
+      audited: c.audited ?? false,
     },
     env,
   );
@@ -260,7 +261,7 @@ export function lowerDestroy(d: Destroy, env: Env): OperationIR {
       body: d.body,
       visibility: "public",
       extern: false,
-      audited: false,
+      audited: d.audited ?? false,
     },
     env,
   );

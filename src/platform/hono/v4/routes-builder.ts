@@ -92,14 +92,22 @@ export function buildRoutesFile(
   emitProvenance = false,
   emitTrace = false,
 ): string {
-  // An audited public operation instruments its route handler with a
-  // `recordAudit(...)` call; the SDK file (`domain/audit.ts`) is only
-  // emitted when some operation is audited, so the import is gated on the
-  // same presence to keep "auditing off pays nothing".
+  // An audited public command action instruments its route handler with an
+  // `audit_records` insert; the schema table is only emitted when some
+  // action is audited, so the imports are gated on the same presence to keep
+  // "auditing off pays nothing".
   const auditOps = emitAudit
     ? agg.operations.filter((o) => o.audited && o.visibility === "public")
     : [];
-  const fileHasAudit = auditOps.length > 0;
+  // Audited LIFECYCLE actions (`create(...) audited` / `destroy audited`).
+  // The canonical create/destroy drive the POST `/` and DELETE `/{id}`
+  // routes; an ES aggregate's create action is `agg.creates?.[0]`.  A named
+  // create has no route, so only the route-driving action's flag matters.
+  const auditedCreateAction =
+    agg.persistedAs === "eventLog" ? (agg.creates?.[0] ?? null) : (agg.canonicalCreate ?? null);
+  const auditCreate = emitAudit && !!auditedCreateAction?.audited;
+  const auditDestroy = emitAudit && !!agg.canonicalDestroy?.audited;
+  const fileHasAudit = auditOps.length > 0 || auditCreate || auditDestroy;
   // A provenanced write needs the same save+flush transaction: the
   // operation's `provenance_records` history rows must commit atomically
   // with the state change.  Detected by presence of a write-site (mirrors
@@ -453,15 +461,49 @@ export function buildRoutesFile(
     // A `currentUser` value resolves to the principal id inside the entity's
     // `_stampOnCreate`, which then takes the typed principal — read from the
     // request scope where the auth middleware stashed it.
+    const createStampUsesUser = hasStamp("create") && stampUsesUser("create");
     if (hasStamp("create")) {
-      if (stampUsesUser("create")) {
+      if (createStampUsesUser) {
         lines.push(
           `      const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
         );
       }
-      lines.push(`      created._stampOnCreate(${stampUsesUser("create") ? "currentUser" : ""});`);
+      lines.push(`      created._stampOnCreate(${createStampUsesUser ? "currentUser" : ""});`);
     }
-    lines.push(`      await repo.save(created);`);
+    if (auditCreate) {
+      // Audited create — persist + write the lifecycle audit row in ONE
+      // transaction (mirrors the operation audit path).  Asymmetry: create
+      // has no `before` (JSON null on the not-NULL column), `after` is the
+      // freshly-created wire snapshot, keyed by the generated id.  Actor =
+      // the typed currentUser if a stamp already read it, else the inbound
+      // claim via the untyped-key bridge (null when no auth).
+      const actorExpr = createStampUsesUser
+        ? "currentUser"
+        : `(c as unknown as { get(k: "currentUser"): unknown }).get("currentUser") ?? null`;
+      lines.push(`      const actor = ${actorExpr};`);
+      lines.push(`      const reqCtx = requestContext();`);
+      lines.push(`      await db.transaction(async (tx) => {`);
+      lines.push(`        const repoTx = new ${agg.name}Repository(tx, events);`);
+      lines.push(`        await repoTx.save(created);`);
+      lines.push(`        await tx.insert(schema.auditRecords).values({`);
+      lines.push(`          auditId: randomUUID(),`);
+      lines.push(`          operationId: "${camelId(opCreate(agg.name))}",`);
+      lines.push(`          action: "create",`);
+      lines.push(`          targetType: "${agg.name}",`);
+      lines.push(`          targetId: created.id as string,`);
+      lines.push(`          actor,`);
+      lines.push(`          before: null,`);
+      lines.push(`          after: repoTx.toWire(created),`);
+      lines.push(`          at: new Date(),`);
+      lines.push(`          status: "ok",`);
+      lines.push(`          correlationId: reqCtx?.correlationId ?? null,`);
+      lines.push(`          scopeId: reqCtx?.scopeId ?? null,`);
+      lines.push(`          parentId: reqCtx?.parentId ?? null,`);
+      lines.push(`        });`);
+      lines.push(`      });`);
+    } else {
+      lines.push(`      await repo.save(created);`);
+    }
     lines.push(
       `      ${renderHonoLogCall("aggregateCreated", `aggregate: "${agg.name}", id: created.id as string`)}`,
     );
@@ -548,10 +590,45 @@ export function buildRoutesFile(
     lines.push(`    }),`);
     lines.push(`    async (c) => {`);
     lines.push(`      const { id } = c.req.valid("param");`);
-    // getById throws AggregateNotFoundError (→ 404) when absent.
-    lines.push(`      await repo.getById(Ids.${agg.name}Id(id));`);
     lines.push(`      try {`);
-    lines.push(`        await repo.delete(Ids.${agg.name}Id(id));`);
+    if (auditDestroy) {
+      // Audited destroy — snapshot the loaded wire shape, write the
+      // lifecycle audit row, THEN hard-delete, all in ONE transaction so
+      // the row + deletion commit or roll back together (a failed delete
+      // must not leave a spurious destroy record).  Asymmetry: `before` is
+      // the last wire snapshot, `after` is JSON null (hard delete).  Actor
+      // = the inbound claim via the untyped-key bridge (null when no auth).
+      lines.push(
+        `        const actor = (c as unknown as { get(k: "currentUser"): unknown }).get("currentUser") ?? null;`,
+      );
+      lines.push(`        const reqCtx = requestContext();`);
+      lines.push(`        await db.transaction(async (tx) => {`);
+      lines.push(`          const repoTx = new ${agg.name}Repository(tx, events);`);
+      // getById throws AggregateNotFoundError (→ 404) when absent.
+      lines.push(`          const loaded = await repoTx.getById(Ids.${agg.name}Id(id));`);
+      lines.push(`          const before = repoTx.toWire(loaded);`);
+      lines.push(`          await tx.insert(schema.auditRecords).values({`);
+      lines.push(`            auditId: randomUUID(),`);
+      lines.push(`            operationId: "${camelId(opDestroy(agg.name))}",`);
+      lines.push(`            action: "destroy",`);
+      lines.push(`            targetType: "${agg.name}",`);
+      lines.push(`            targetId: id,`);
+      lines.push(`            actor,`);
+      lines.push(`            before,`);
+      lines.push(`            after: null,`);
+      lines.push(`            at: new Date(),`);
+      lines.push(`            status: "ok",`);
+      lines.push(`            correlationId: reqCtx?.correlationId ?? null,`);
+      lines.push(`            scopeId: reqCtx?.scopeId ?? null,`);
+      lines.push(`            parentId: reqCtx?.parentId ?? null,`);
+      lines.push(`          });`);
+      lines.push(`          await repoTx.delete(Ids.${agg.name}Id(id));`);
+      lines.push(`        });`);
+    } else {
+      // getById throws AggregateNotFoundError (→ 404) when absent.
+      lines.push(`        await repo.getById(Ids.${agg.name}Id(id));`);
+      lines.push(`        await repo.delete(Ids.${agg.name}Id(id));`);
+    }
     lines.push(`      } catch (err) {`);
     // PG foreign_key_violation (SQLSTATE 23503) — the row is still
     // referenced.  Map to a 409 problem locally so the shared onError

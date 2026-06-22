@@ -11747,6 +11747,16 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "value": ")"
           },
           {
+            "$type": "Assignment",
+            "feature": "audited",
+            "operator": "?=",
+            "terminal": {
+              "$type": "Keyword",
+              "value": "audited"
+            },
+            "cardinality": "?"
+          },
+          {
             "$type": "Keyword",
             "value": "{"
           },
@@ -11848,6 +11858,16 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 "value": ")"
               }
             ],
+            "cardinality": "?"
+          },
+          {
+            "$type": "Assignment",
+            "feature": "audited",
+            "operator": "?=",
+            "terminal": {
+              "$type": "Keyword",
+              "value": "audited"
+            },
             "cardinality": "?"
           },
           {

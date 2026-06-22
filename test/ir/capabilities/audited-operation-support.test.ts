@@ -69,3 +69,56 @@ describe("audited-operation capability validation", () => {
     expect(await auditErrors(src)).toEqual([]);
   });
 });
+
+// Audited LIFECYCLE actions (`create(...) audited` / `destroy audited`) ship on
+// node ONLY in this slice — the .NET / Java / Python create/destroy handlers
+// aren't instrumented yet, so hosting an audited lifecycle action there silently
+// records nothing.  AUDIT_LIFECYCLE_BACKENDS = {"node"} gates exactly that.
+function lifecycleSys(platform: string): string {
+  return `
+system Shop {
+  subdomain Core {
+    context Ordering {
+      aggregate Order ids guid {
+        status: string
+        create(status: string) audited { status := status }
+        destroy audited { }
+      }
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource ordersState { for: Ordering, kind: state, use: pg }
+  deployable api { platform: ${platform}, contexts: [Ordering], dataSources: [ordersState], port: 4000 }
+}
+`;
+}
+
+describe("audited-lifecycle capability validation", () => {
+  it("accepts audited create/destroy on a Hono (node) deployable", async () => {
+    expect(await auditErrors(lifecycleSys("node"))).toEqual([]);
+  });
+
+  it("rejects audited lifecycle actions on a .NET deployable (not yet ported)", async () => {
+    const errs = await auditErrors(lifecycleSys("dotnet"));
+    expect(errs.length).toBe(1);
+    expect(errs[0]).toContain("lifecycle action");
+  });
+
+  it("rejects audited lifecycle actions on a Java deployable (not yet ported)", async () => {
+    const errs = await auditErrors(lifecycleSys("java"));
+    expect(errs.length).toBe(1);
+    expect(errs[0]).toContain("lifecycle action");
+  });
+
+  it("rejects audited lifecycle actions on a Python deployable (not yet ported)", async () => {
+    const errs = await auditErrors(lifecycleSys("python"));
+    expect(errs.length).toBe(1);
+    expect(errs[0]).toContain("lifecycle action");
+  });
+
+  it("does not fire for non-audited lifecycle actions on Java", async () => {
+    const src = lifecycleSys("java").replaceAll("audited ", "");
+    expect(await auditErrors(src)).toEqual([]);
+  });
+});

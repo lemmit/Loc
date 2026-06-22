@@ -947,6 +947,7 @@ export function isContextMember(item: unknown): item is ContextMember {
 export interface Create extends langium.AstNode {
     readonly $container: Aggregate;
     readonly $type: 'Create';
+    audited: boolean;
     body: Array<Statement>;
     name?: string;
     params: Array<Parameter>;
@@ -954,6 +955,7 @@ export interface Create extends langium.AstNode {
 
 export const Create = {
     $type: 'Create',
+    audited: 'audited',
     body: 'body',
     name: 'name',
     params: 'params'
@@ -1101,6 +1103,7 @@ export function isDesignPack(item: unknown): item is DesignPack {
 export interface Destroy extends langium.AstNode {
     readonly $container: Aggregate;
     readonly $type: 'Destroy';
+    audited: boolean;
     body: Array<Statement>;
     name?: string;
     params: Array<Parameter>;
@@ -1108,6 +1111,7 @@ export interface Destroy extends langium.AstNode {
 
 export const Destroy = {
     $type: 'Destroy',
+    audited: 'audited',
     body: 'body',
     name: 'name',
     params: 'params'
@@ -4429,6 +4433,11 @@ export class DddAstReflection extends langium.AbstractAstReflection {
         Create: {
             name: Create.$type,
             properties: {
+                audited: {
+                    name: Create.audited,
+                    defaultValue: false,
+                    optional: true
+                },
                 body: {
                     name: Create.body,
                     defaultValue: [],
@@ -4595,6 +4604,11 @@ export class DddAstReflection extends langium.AbstractAstReflection {
         Destroy: {
             name: Destroy.$type,
             properties: {
+                audited: {
+                    name: Destroy.audited,
+                    defaultValue: false,
+                    optional: true
+                },
                 body: {
                     name: Destroy.body,
                     defaultValue: [],
