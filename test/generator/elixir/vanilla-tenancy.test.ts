@@ -122,3 +122,58 @@ describe("vanilla tenancy — principal filter threaded + pinned", () => {
     expect(router).toContain('get "/me", AuthController, :me');
   });
 });
+
+// ---------------------------------------------------------------------------
+// DEBT-02 Slice A — a PRINCIPAL-referencing (tenancy) capability filter on a
+// `shape(embedded)` aggregate (vanilla Ecto).  The embedded root scalars are
+// real columns, so the principal predicate reuses the relational-principal
+// path: `record.tenant_id == ^(current_user && current_user.tenant_id)` threaded
+// through every read, with `current_user` from `conn.assigns` (the Auth plug).
+// Previously gated by `loom.context-filter-unsupported`.
+// ---------------------------------------------------------------------------
+
+const EMBEDDED_SOURCE = `
+system EmbTenancy {
+  user { id: string  tenantId: string }
+  auth {
+    provider: keycloak
+    oidc { issuer: env("OIDC_ISSUER")  clientId: env("OIDC_CLIENT_ID") }
+    claims: { tenantId: "tenant_id" }
+  }
+  subdomain D {
+    context Shop {
+      aggregate Order shape(embedded) {
+        tenantId: string
+        code: string
+        filter this.tenantId == currentUser.tenantId
+        contains items: Item[]
+        entity Item { sku: string }
+        operation addItem(sku: string) { items += Item { sku: sku } }
+      }
+      repository Orders for Order { find byCode(code: string): Order[] where this.code == code }
+    }
+  }
+  api A from D
+  storage pg { type: postgres }
+  resource st { for: Shop, kind: state, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Shop]
+    serves: A
+    dataSources: [st]
+    port: 4000
+    auth: required
+  }
+}
+`;
+
+describe("vanilla embedded principal (tenancy) capability filter (DEBT-02 Slice A)", () => {
+  it("threads current_user into the embedded repository reads and pins the predicate", async () => {
+    const repo = file(await generateSystemFiles(EMBEDDED_SOURCE), "/shop/order_repository.ex");
+    expect(repo).toContain("def list(current_user \\\\ nil) do");
+    expect(repo).toContain(`where: record.tenant_id == ${PIN}`);
+    expect(repo).toContain(`where: record.id == ^id and (record.tenant_id == ${PIN})`);
+    // The custom find carries the actor too.
+    expect(repo).toContain(`(record.code == ^code) and (record.tenant_id == ${PIN})`);
+  });
+});

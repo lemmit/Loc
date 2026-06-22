@@ -249,6 +249,63 @@ describe("Phoenix capability filter — principal (tenancy) base_filter (DEBT-01
 });
 
 // ---------------------------------------------------------------------------
+// DEBT-02 Slice A — a PRINCIPAL-referencing (tenancy) capability filter on a
+// `shape(embedded)` aggregate (Ash).  The embedded resource's root attributes
+// are real columns, so the principal predicate reuses the relational-principal
+// path: `base_filter expr(tenant_id == ^actor(:tenant_id))` on a resource that
+// ALSO carries an `{:array, Item}` embedded attribute, with `actor:
+// current_user` threaded onto every read.  Previously gated by
+// `loom.context-filter-unsupported`.
+// ---------------------------------------------------------------------------
+
+function embeddedTenancySys(): string {
+  return `
+system EmbTenancy {
+  user { id: string  tenantId: string }
+  subdomain D {
+    context Shop {
+      aggregate Order shape(embedded) {
+        tenantId: string
+        code: string
+        filter this.tenantId == currentUser.tenantId
+        contains items: Item[]
+        entity Item { sku: string }
+        operation addItem(sku: string) { items += Item { sku: sku } }
+      }
+      repository Orders for Order {}
+    }
+  }
+  api A from D
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+  deployable api {
+    platform: elixir { foundation: ash }
+    contexts: [Shop]
+    dataSources: [st]
+    serves: A
+    auth: required
+    port: 4000
+  }
+}
+`;
+}
+
+describe("Phoenix embedded principal (tenancy) base_filter (DEBT-02 Slice A)", () => {
+  it("renders the principal base_filter on the embedded resource and threads actor on reads", async () => {
+    const files = await generate(embeddedTenancySys());
+    const order = find(files, (k) => k.endsWith("/shop/order.ex"), "order.ex");
+    expect(order).toContain("base_filter expr(tenant_id == ^actor(:tenant_id))");
+    expect(order).not.toContain("current_user");
+    // The embedded containment still rides an embedded attribute on the resource.
+    expect(order).toContain("items");
+
+    const ctrl = find(files, (k) => k.endsWith("_controller.ex"), "controller");
+    expect(ctrl).toContain("list_orders!(actor: conn.assigns.current_user)");
+    expect(ctrl).toContain("get_order!(id, actor: conn.assigns.current_user)");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // DEBT-01 follow-up — actor threading through the two read paths the first
 // Ash slice deferred: an `or`-union returning op (Ash.get) and a context
 // retrieval invoked from a workflow (Repo.run).  Both read the tenancy

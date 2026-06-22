@@ -146,7 +146,10 @@ system Shop {
   it("accepts a PRINCIPAL filter on an elixir embedded aggregate (DEBT-02 — base_filter ^actor)", async () => {
     expect(
       await honoFilterErrors(
-        sys("elixir", { shape: "embedded", filter: "filter this.tenantId == currentUser.tenantId" }),
+        sys("elixir", {
+          shape: "embedded",
+          filter: "filter this.tenantId == currentUser.tenantId",
+        }),
       ),
     ).toEqual([]);
   });
