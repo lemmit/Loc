@@ -80,3 +80,55 @@ describe("java workflow-sourced views", () => {
     expect(svc).toContain("import java.util.Objects;");
   });
 });
+
+// An event-sourced workflow has no `<Wf>State` correlation table, so a
+// `view = <ESWorkflow>` can't read it through a Spring Data repository.  The
+// views service group-folds the `<wf>_events` stream over a shared JdbcTemplate
+// (load the rows, group by stream_id, fold each via `_fromEvents` — mirroring
+// the ES instance LIST) and applies the SAME filter IN-MEMORY over the folded
+// state's record accessors.  The route path stays identical to the state path.
+const ES_SRC = `system S { subdomain O { context O {
+  aggregate Order ids guid { total: int  create place() { total := 0  emit OrderPlaced { order: id } } }
+  repository Orders for Order { }
+  event OrderPlaced { order: Order id }
+  event PaymentReceived { order: Order id, amount: int }
+  channel L { carries: OrderPlaced, PaymentReceived  delivery: broadcast  retention: ephemeral }
+  workflow OrderFulfillment eventSourced { orderId: Order id  paid: int
+    create(p: OrderPlaced) by p.order { emit PaymentReceived { order: p.order, amount: 0 } }
+    apply(pr: PaymentReceived) { paid := paid + pr.amount } }
+  view PaidFulfillments = OrderFulfillment where paid > 0
+} } api A from O storage pg { type: postgres } deployable api { platform: java contexts: [O] serves: A port: 8080 } }`;
+
+describe("java event-sourced workflow-sourced view", () => {
+  it("emits a <View>Row record over the ES instance wire shape", async () => {
+    const row = find(await gen(ES_SRC), "PaidFulfillmentsRow.java");
+    expect(row, "view row not emitted").toBeDefined();
+    expect(row).toContain("public record PaidFulfillmentsRow(UUID orderId, int paid) {");
+  });
+
+  it("group-folds the <wf>_events stream over JdbcTemplate, filtering IN-MEMORY", async () => {
+    const svc = find(await gen(ES_SRC), "OViews.java");
+    expect(svc, "views service not emitted").toBeDefined();
+    // A shared JdbcTemplate folds the stream — NOT a saga-state repository.
+    expect(svc).toContain("private final JdbcTemplate jdbc;");
+    expect(svc).not.toContain("OrderFulfillmentStateRepository");
+    expect(svc).toContain("public List<PaidFulfillmentsRow> paidFulfillments() {");
+    expect(svc).toContain(
+      '"select stream_id, type, data from order_fulfillment_events order by stream_id, version");',
+    );
+    expect(svc).toContain(
+      ".map(__e -> OrderFulfillmentState._fromEvents(new OrderId(UUID.fromString(__e.getKey())), __e.getValue()))",
+    );
+    // The filter renders to an in-memory Java predicate over the folded accessors.
+    expect(svc).toContain(".filter(x -> x.paid() > 0)");
+    expect(svc).toContain(".map(x -> new PaidFulfillmentsRow(x.orderId().value(), x.paid()))");
+  });
+
+  it("routes the ES workflow view under /api/views", async () => {
+    const ctrl = find(await gen(ES_SRC), "OViewsController.java");
+    expect(ctrl, "views controller not emitted").toBeDefined();
+    expect(ctrl).toContain('@RequestMapping("/api/views")');
+    expect(ctrl).toContain('@GetMapping("/paid_fulfillments")');
+    expect(ctrl).toContain("public List<PaidFulfillmentsRow> paidFulfillments() {");
+  });
+});

@@ -83,3 +83,71 @@ describe("Python workflow-sourced view", () => {
     expect(main).toContain('app.include_router(views_router, prefix="/api")');
   });
 });
+
+// An event-sourced workflow has no `<Wf>Row` correlation table, so a
+// `view = <ESWorkflow>` can't push its filter into a SQLAlchemy `where`.  The
+// route group-folds the `<wf>_events` stream via `_load_all_<wf>` (the shared
+// dispatch helper the ES instance LIST also uses) and applies the SAME predicate
+// IN-MEMORY as a Python boolean over the folded state's attributes.  The
+// operationId / route path / response component stay identical to the state path.
+const ES_SRC = `
+  system Sys {
+    subdomain Ops {
+      context Ops {
+        aggregate Order ids guid { total: int  create place() { total := 0  emit OrderPlaced { order: id } } }
+        event OrderPlaced { order: Order id }
+        event PaymentReceived { order: Order id, amount: int }
+        channel Lifecycle { carries: OrderPlaced, PaymentReceived  delivery: broadcast  retention: ephemeral }
+        workflow OrderFulfillment eventSourced {
+          orderId: Order id
+          paid: int
+          create(p: OrderPlaced) by p.order { emit PaymentReceived { order: p.order, amount: 0 } }
+          apply(pr: PaymentReceived) { paid := paid + pr.amount }
+        }
+        view PaidFulfillments = OrderFulfillment where paid > 0
+        repository Orders for Order {}
+      }
+    }
+    storage primary { type: postgres }
+    deployable api { platform: python  contexts: [Ops]  port: 3000 }
+  }
+`;
+
+async function esViewsFile(): Promise<string> {
+  const files = (await generateSystems(await parseValid(ES_SRC))).files;
+  const path = [...files.keys()].find((k) => k.endsWith("app/http/views_routes.py"));
+  expect(path, "views_routes.py not emitted").toBeDefined();
+  return files.get(path!)!;
+}
+
+describe("Python event-sourced workflow-sourced view", () => {
+  it("emits a <View>Row / <View>Response DTO from the ES instance shape", async () => {
+    const vf = await esViewsFile();
+    expect(vf).toContain("class PaidFulfillmentsRow(BaseModel):");
+    expect(vf).toContain("    orderId: str");
+    expect(vf).toContain("    paid: int");
+    expect(vf).toContain("class PaidFulfillmentsResponse(RootModel[list[PaidFulfillmentsRow]]):");
+  });
+
+  it("reads the fold helper + filters IN-MEMORY (no SQLAlchemy select/where)", async () => {
+    const vf = await esViewsFile();
+    expect(vf).toContain("from app.dispatch import _load_all_order_fulfillment");
+    expect(vf).toContain("    rows = await _load_all_order_fulfillment(session)");
+    expect(vf).toContain(
+      '    return [{"orderId": row.order_id, "paid": row.paid} for row in rows if row.paid > 0]',
+    );
+    // The ES read does NOT push the predicate into a SQLAlchemy select/where.
+    expect(vf).not.toContain("select(");
+    expect(vf).not.toContain(".where(");
+  });
+
+  it("keeps the same operationId + route path as the state path", async () => {
+    const vf = await esViewsFile();
+    expect(vf).toContain(
+      '@router.get("/paid_fulfillments", response_model=PaidFulfillmentsResponse, operation_id="paidFulfillmentsView")',
+    );
+    expect(vf).toContain(
+      "async def paid_fulfillments_view(session: SessionDep) -> list[dict[str, object]]:",
+    );
+  });
+});

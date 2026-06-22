@@ -62,3 +62,67 @@ describe(".NET workflow-sourced view", () => {
     expect(c).toContain("IReadOnlyList<OrderFulfillmentInstanceResponse>");
   });
 });
+
+// An event-sourced workflow has no `<Wf>State` DbSet, so a `view = <ESWorkflow>`
+// can't push its filter into the EF query.  The handler group-folds the
+// `<wf>_events` table into the same instance read model the ES instance LIST
+// produces (load all event rows, GroupBy(StreamId), fold each via _FromEvents)
+// and applies the SAME predicate IN-MEMORY (`.Where(r => …)`).  The query type,
+// operationId, route path and response component stay identical to the state path.
+const ES_SRC = `
+  system Sys {
+    subdomain Ops {
+      context Ops {
+        aggregate Order ids guid { total: int  create place() { total := 0  emit OrderPlaced { order: id } } }
+        event OrderPlaced { order: Order id }
+        event PaymentReceived { order: Order id, amount: int }
+        channel Lifecycle { carries: OrderPlaced, PaymentReceived  delivery: broadcast  retention: ephemeral }
+        workflow OrderFulfillment eventSourced {
+          orderId: Order id
+          paid: int
+          create(p: OrderPlaced) by p.order { emit PaymentReceived { order: p.order, amount: 0 } }
+          apply(pr: PaymentReceived) { paid := paid + pr.amount }
+        }
+        view PaidFulfillments = OrderFulfillment where paid > 0
+        repository Orders for Order {}
+      }
+    }
+    storage primary { type: postgres }
+    deployable api { platform: dotnet  contexts: [Ops]  port: 3000 }
+  }
+`;
+
+async function esFiles(): Promise<Map<string, string>> {
+  return (await generateSystems(await parseValid(ES_SRC))).files;
+}
+
+describe(".NET event-sourced workflow-sourced view", () => {
+  it("emits a query returning the ES workflow instance response (same shape as state)", async () => {
+    const q = get(await esFiles(), "Application/Views/PaidFulfillmentsQuery.cs");
+    expect(q).toContain(
+      "public sealed record PaidFulfillmentsQuery() : IQuery<IReadOnlyList<OrderFulfillmentInstanceResponse>>;",
+    );
+  });
+
+  it("group-folds the <wf>_events stream and filters IN-MEMORY (no SQL Where)", async () => {
+    const h = get(await esFiles(), "Application/Views/PaidFulfillmentsHandler.cs");
+    // Loads the event rows ordered by stream, then folds each stream group.
+    expect(h).toContain(
+      "var __rows = await _db.OrderFulfillmentEvents.AsNoTracking().OrderBy(e => e.StreamId).ThenBy(e => e.Version).ToListAsync(cancellationToken);",
+    );
+    expect(h).toContain(
+      "var rows = __rows.GroupBy(e => e.StreamId).Select(g => OrderFulfillmentState._FromEvents(new OrderId(System.Guid.Parse(g.Key)), g.Select(OrderFulfillmentState.RowToEvent).ToList())).Where(r => r.Paid > 0);",
+    );
+    expect(h).toContain(
+      "return rows.Select(r => new OrderFulfillmentInstanceResponse(r.OrderId.Value, r.Paid)).ToList();",
+    );
+    // The ES read does NOT read a saga-state DbSet.
+    expect(h).not.toContain("_db.OrderFulfillments.AsNoTracking().Where");
+  });
+
+  it("exposes it on the ViewsController under the same route", async () => {
+    const c = get(await esFiles(), "ViewsController.cs");
+    expect(c).toContain('[HttpGet("paid_fulfillments")]');
+    expect(c).toContain("IReadOnlyList<OrderFulfillmentInstanceResponse>");
+  });
+});

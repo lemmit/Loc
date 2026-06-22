@@ -1,9 +1,19 @@
-import type { EnrichedBoundedContextIR, ViewIR, WorkflowIR } from "../../../ir/types/loom-ir.js";
+import type {
+  EnrichedBoundedContextIR,
+  ViewIR,
+  WireField,
+  WorkflowIR,
+} from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
-import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
+import { collectJavaExprImports, javaValueTypeForId, renderJavaExpr } from "../render-expr.js";
 import { collectWireImports, domainToWire, wireJavaType } from "./wire.js";
+import {
+  esWorkflowCorrIdClass,
+  esWorkflowStateClass,
+  esWorkflowStreamTable,
+} from "./workflow-eventsourced.js";
 import { workflowStateClass } from "./workflow-state.js";
 
 // ---------------------------------------------------------------------------
@@ -54,6 +64,9 @@ export interface ViewCtx {
   /** Saga-state Spring Data repository package (workflow-sourced views read
    *  the persisted correlation row through it). */
   stateRepoPkg: string;
+  /** Workflow-service package (application.workflows) — the home of the ES
+   *  `<Wf>State` fold class an event-sourced workflow-view reads through. */
+  workflowPkg: string;
 }
 
 export function renderJavaViews(
@@ -64,10 +77,12 @@ export function renderJavaViews(
   // Workflow-sourced views (workflow-instance-views.md): a shorthand
   // `view X = <Workflow> where …` reads the saga-state row (the source's
   // `instanceWireShape`) with the filter applied, the read-side analogue of the
-  // instance endpoints.  Only observable (correlation-bearing, non-eventSourced)
-  // workflows have an `instanceWireShape`; full-form workflow views are rejected
-  // upstream (`loom.view-workflow-fullform-unsupported`), so these are always
-  // shorthand (filter-only).
+  // instance endpoints.  Only observable (correlation-bearing) workflows have an
+  // `instanceWireShape` — both state-table sagas (read the `<Wf>State` row) and
+  // event-sourced workflows (group-fold the `<wf>_events` stream in memory);
+  // full-form workflow views are rejected upstream
+  // (`loom.view-workflow-fullform-unsupported`), so these are always shorthand
+  // (filter-only).
   const wfByName = new Map(ctx.workflows.map((w) => [w.name, w] as const));
   const wfViews = ctx.views.filter(
     (v) => v.source.kind === "workflow" && !!wfByName.get(v.source.name)?.instanceWireShape,
@@ -79,8 +94,11 @@ export function renderJavaViews(
   const methods: string[] = [];
   const repoAggs = new Set<string>();
   const routes: string[] = [];
-  // Source workflows whose saga-state repository the service must inject.
+  // Source workflows whose saga-state repository the service must inject
+  // (state-based sagas), and event-sourced workflows whose stream the service
+  // group-folds over a shared JdbcTemplate.
   const stateWfs: WorkflowIR[] = [];
+  const esWfs: WorkflowIR[] = [];
 
   // Authorization gate (D-AUTH-OIDC / default-deny).  A `view … requires <expr>`
   // gate runs in the views service method before the read — the read-side
@@ -190,7 +208,6 @@ export function renderJavaViews(
   // projecting each row through the same wire shape the instance endpoints use.
   for (const view of wfViews) {
     const wf = wfByName.get((view.source as { name: string }).name)!;
-    stateWfs.push(wf);
     const findName = lowerFirst(view.name);
     const rowName = `${upperFirst(view.name)}Row`;
     const shape = wf.instanceWireShape ?? [];
@@ -216,24 +233,66 @@ export function renderJavaViews(
         ``,
       ),
     });
-    const repo = `${lowerFirst(wf.name)}StateRepository`;
     const proj = shape.map((f) => domainToWire(f.type, `x.${f.name}()`)).join(", ");
+    // The filter renders to an in-memory boolean over the folded state's
+    // record-style accessors (`accessorProps`).  Both source kinds filter in
+    // memory: a state-based saga over the `<Wf>State` rows from its repository,
+    // an event-sourced workflow over the group-folded `<wf>_events` stream
+    // (mirroring the ES instance LIST) — there is no `<Wf>State` table to push
+    // the predicate into for ES.
     const filterLine = view.filter
       ? (() => {
           collectJavaExprImports(view.filter, imports);
-          return `            .filter(x -> ${renderJavaExpr(view.filter, { thisName: "x", accessorProps: true })})\n`;
+          return `            .filter(x -> ${renderJavaExpr(view.filter, { thisName: "x", accessorProps: true })})`;
         })()
-      : "";
-    methods.push(
-      `    public List<${rowName}> ${findName}() {`,
-      ...gateLinesFor(view),
-      `        return ${repo}.findAll().stream()`,
-      ...(filterLine ? [filterLine.trimEnd()] : []),
-      `            .map(x -> new ${rowName}(${proj}))`,
-      `            .toList();`,
-      `    }`,
-      ``,
-    );
+      : undefined;
+    if (wf.eventSourced) {
+      esWfs.push(wf);
+      const cls = esWorkflowStateClass(wf);
+      const corrId = esWorkflowCorrIdClass(wf);
+      const table = esWorkflowStreamTable(wf);
+      const corr = shape.find((f) => f.source === "id");
+      const idJava = javaValueTypeForId(idValueTypeOf(corr));
+      imports.add("java.util.ArrayList");
+      imports.add("java.util.LinkedHashMap");
+      // `UUID.fromString(...)` rewraps the stream_id key when the correlation id
+      // is guid-typed (mirrors the ES instance LIST controller's import).
+      if (idJava === "UUID") imports.add("java.util.UUID");
+      explicitImports.add(`${vctx.workflowPkg}.${cls}`);
+      explicitImports.add(`${vctx.basePkg}.domain.events.DomainEvent`);
+      methods.push(
+        `    public List<${rowName}> ${findName}() {`,
+        ...gateLinesFor(view),
+        `        var __rows = jdbc.queryForList(`,
+        `            "select stream_id, type, data from ${table} order by stream_id, version");`,
+        `        var __byStream = new LinkedHashMap<String, List<DomainEvent>>();`,
+        `        for (var __r : __rows) {`,
+        `            var __sid = (String) __r.get("stream_id");`,
+        `            __byStream.computeIfAbsent(__sid, __k -> new ArrayList<>())`,
+        `                .add(${cls}._rowToEvent((String) __r.get("type"), String.valueOf(__r.get("data"))));`,
+        `        }`,
+        `        return __byStream.entrySet().stream()`,
+        `            .map(__e -> ${cls}._fromEvents(new ${corrId}(${idFromString("__e.getKey()", idJava)}), __e.getValue()))`,
+        ...(filterLine ? [filterLine] : []),
+        `            .map(x -> new ${rowName}(${proj}))`,
+        `            .toList();`,
+        `    }`,
+        ``,
+      );
+    } else {
+      stateWfs.push(wf);
+      const repo = `${lowerFirst(wf.name)}StateRepository`;
+      methods.push(
+        `    public List<${rowName}> ${findName}() {`,
+        ...gateLinesFor(view),
+        `        return ${repo}.findAll().stream()`,
+        ...(filterLine ? [filterLine] : []),
+        `            .map(x -> new ${rowName}(${proj}))`,
+        `            .toList();`,
+        `    }`,
+        ``,
+      );
+    }
     routes.push(
       `    @GetMapping("/${snake(view.name)}")`,
       `    public List<${rowName}> ${findName}() {`,
@@ -266,6 +325,10 @@ export function renderJavaViews(
     (wf) =>
       `        this.${lowerFirst(wf.name)}StateRepository = ${lowerFirst(wf.name)}StateRepository;`,
   );
+  // A single shared JdbcTemplate folds every event-sourced workflow-view's
+  // stream (no mutable state repository to inject).
+  const esPresent = esWfs.length > 0;
+  if (esPresent) explicitImports.add("org.springframework.jdbc.core.JdbcTemplate");
   out.set(`${serviceName}.java`, {
     category: "view-service",
     content: lines(
@@ -286,15 +349,18 @@ export function renderJavaViews(
       `public class ${serviceName} {`,
       ...repoFields.map((a) => `    private final ${a}Repository ${repoField(a)};`),
       ...stateFields,
+      esPresent ? `    private final JdbcTemplate jdbc;` : null,
       anyGateUsesUser ? `    private final CurrentUserAccessor currentUserAccessor;` : null,
       ``,
       `    public ${serviceName}(${[
         ...repoFields.map((a) => `${a}Repository ${repoField(a)}`),
         ...stateCtorParams,
+        ...(esPresent ? ["JdbcTemplate jdbc"] : []),
         ...(anyGateUsesUser ? ["CurrentUserAccessor currentUserAccessor"] : []),
       ].join(", ")}) {`,
       ...repoFields.map((a) => `        this.${repoField(a)} = ${repoField(a)};`),
       ...stateCtorAssigns,
+      esPresent ? `        this.jdbc = jdbc;` : null,
       anyGateUsesUser ? `        this.currentUserAccessor = currentUserAccessor;` : null,
       `    }`,
       ``,
@@ -342,4 +408,26 @@ export function renderJavaViews(
 
 function repoField(aggName: string): string {
   return `${lowerFirst(plural(aggName))}Repository`;
+}
+
+/** The correlation id's value type, off the `source: "id"` wire field. */
+function idValueTypeOf(f: WireField | undefined): string {
+  const t = f && f.type.kind === "optional" ? f.type.inner : f?.type;
+  return t && t.kind === "id" ? t.valueType : "guid";
+}
+
+/** Convert a stream_id `String` back to the correlation id's value type so a
+ *  folded ES instance can wrap it in `new <Corr>Id(...)` — mirroring the ES
+ *  instance LIST controller (workflow-instances.ts). */
+function idFromString(expr: string, idJava: string): string {
+  switch (idJava) {
+    case "UUID":
+      return `UUID.fromString(${expr})`;
+    case "int":
+      return `Integer.parseInt(${expr})`;
+    case "long":
+      return `Long.parseLong(${expr})`;
+    default:
+      return expr;
+  }
 }
