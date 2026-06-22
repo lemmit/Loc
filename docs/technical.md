@@ -40,7 +40,7 @@ them was costing readers an accurate mental model.
                                          cross-aggregate part refs must
                                          use `X id` (enforced here).
          │
-         ▼   ④ AST validation               src/language/ddd-validator.ts
+         ▼   ④ AST validation               src/language/validators/
    AST'' + diagnostics                 ─ semantic checks on the linked
                                          AST; CLI aborts non-zero on
                                          errors.
@@ -251,7 +251,12 @@ user can hand-write — and vice versa.
 ## Phase ④ — AST validation
 
 **Files**
-- `src/language/ddd-validator.ts` — semantic checks.
+- `src/language/ddd-validator.ts` — thin dispatcher (~360 LOC) that
+  wires Langium's `ValidationRegistry` to the themed check modules.
+- `src/language/validators/` — the per-theme checks themselves
+  (`deployable.ts`, `auth.ts`, `criterion.ts`, `composition.ts`, …),
+  barrelled through `validators/index.ts`.  The previous ~2.5k-LOC
+  monolith was split here; `ddd-validator.ts` owns no check logic.
 - `src/language/type-system.ts` — `DddType` + AST-walk helpers
   (`typeOf`, `lookupRootMember`, `stepInto`, `findFunction`,
   `findOperation`, etc.).
@@ -314,7 +319,7 @@ sub-pass runs once per `lowerModel` call:
 
 ### Phase ⑤a — Structure layer
 
-**File**: `src/ir/lower/lower.ts` (~1.1k lines) — a thin **orchestrator**.
+**File**: `src/ir/lower/lower.ts` (~1.3k lines) — a thin **orchestrator**.
 The per-declaration-kind lowerers were extracted into sibling leaf modules
 it imports (the graph is acyclic — leaves never import `lower.ts`):
 `lower-platform.ts` (design/platform qualification), `lower-requirements.ts`,
@@ -364,7 +369,7 @@ the rest of the cross-cutting derivations now live in **phase ⑥
 
 ### Phase ⑤b — Expression layer
 
-**File**: `src/ir/lower/lower-expr.ts` (~1440 lines).
+**File**: `src/ir/lower/lower-expr.ts` (~1650 lines).
 
 **Responsibilities** — name resolution + member typing + IR
 expression / statement construction:
@@ -588,7 +593,7 @@ backend.
 
 ## Phase ⑦ — IR validation
 
-**File**: `src/ir/validate/validate.ts` (~120 lines) — a thin
+**File**: `src/ir/validate/validate.ts` (~220 lines) — a thin
 `validateLoomModel` orchestrator that fans out to per-theme check
 leaves under `src/ir/validate/checks/` (`system-checks` /
 `query-checks` / `test-checks` / `workflow-checks` /
@@ -648,15 +653,23 @@ Each platform has the same module shape (in `src/generator/<platform>/`):
 
 ### Shared generator subdirs
 
-Four `_`-prefixed subdirs under `src/generator/` are consumed by
-multiple platforms:
+Several `_`-prefixed subdirs under `src/generator/` hold logic
+consumed by multiple platforms.  The four principal ones:
 
 | Subdir | Consumed by | What it owns |
 |---|---|---|
-| `_packs/` | every UI-mounting backend (react, fullstack dotnet, phoenixLiveView) | Design-pack discovery + loader.  `loader-fs.ts` / `loader-vfs.ts` are the FS / browser-VFS backends.  (The pack-identity metadata — `BUILTIN_PACK_FORMATS` / `BUILTIN_PACK_LATEST` + the `parseBuiltinDesignRef` parser — lives in [`src/util/builtin-formats.ts`](../src/util/builtin-formats.ts): language validators and IR lowering consume it too, so it sits at the foundational `util/` layer.)  See [`design-packs.md`](design-packs.md). |
+| `_packs/` | the JSX/markup frontends (react, vue, svelte, angular) + the Phoenix HEEx path | Design-pack discovery + loader.  `loader-fs.ts` / `loader-vfs.ts` are the FS / browser-VFS backends.  (The pack-identity metadata — `BUILTIN_PACK_FORMATS` / `BUILTIN_PACK_LATEST` + the `parseBuiltinDesignRef` parser — lives in [`src/util/builtin-formats.ts`](../src/util/builtin-formats.ts): language validators and IR lowering consume it too, so it sits at the foundational `util/` layer.)  See [`design-packs.md`](design-packs.md). |
 | `_expr/` | every domain-logic backend (TS, .NET, Phoenix, Python, Java) | `target.ts` defines the `ExprTarget` interface (the eight leaf-divergence axes — operators, naming, money arithmetic, collection ops, `refColl.contains` membership, regex, `ref` role, `callKind` call syntax) and `renderExprWith(e, target, ctx)`, which owns the 17-arm `ExprIR.kind` dispatch + all recursion.  Each backend's `render-expr.ts` supplies only the leaf table (`TS_TARGET` / `CS_TARGET` / `ELIXIR_TARGET` / `PY_TARGET` / `JAVA_TARGET`).  Expression-side analogue of `WalkerTarget`; already five backends — a 6th domain-logic backend writes one target, not a 6th dispatcher. |
 | `_walker/` | the JSX/markup frontends (react, vue, svelte, angular) + a parallel HEEx engine (phoenixLiveView) | `target.ts` defines the `WalkerTarget` interface that captures the framework-shaped seams (state read/write, navigation, API call lowering, `match` rendering).  The four JSX/markup targets are implemented and consumed: `react/walker/tsx-target.ts`, `vue/walker/vue-target.ts`, `svelte/walker/svelte-target.ts`, and `angular/walker/angular-target.ts` all drive the shared `walker-core.ts`; Phoenix/HEEx runs a parallel engine via `elixir/heex-target.ts` (its output topology diverges). |
-| `_obs/` | hono, dotnet, phoenixLiveView | Observability catalog + per-backend renderers.  `log-events.ts` defines the envelope schema; `render-<platform>.ts` emits the per-backend instrumentation.  See [`observability.md`](observability.md). |
+| `_obs/` | hono, dotnet, phoenixLiveView, python | Observability catalog + per-backend renderers.  `log-events.ts` defines the envelope schema; `render-<platform>.ts` emits the per-backend instrumentation (hono / dotnet / phoenix; python wires the shared catalog from its own `emit/obs.ts`).  Java emits an equivalent catalog-JSON channel without sharing this subdir.  See [`observability.md`](observability.md). |
+
+Four more carry narrower shared seams: `_frontend/` (framework-neutral
+frontend pieces shared across the JSX/markup frontends — zod schema
+emission, menu derivation, form helpers, Playwright page objects, the
+e2e harness, the smoke spec), `_workflow/` (the shared workflow
+statement-target seam), `_payload/` (discriminated-union wire encoding),
+and `_adapters/` (the per-resource/persistence/layout/runtime surface
+seams the backends plug into).
 
 ### All-procedural emission
 
@@ -674,15 +687,22 @@ module exporting `render<Thing>(args)` functions.  No runtime
 parsing, no SafeString escaping, no helper registration — the type
 checker validates every data flow from the IR to the rendered string.
 
-### Hono backend (`src/platform/hono/v4/` + `src/generator/typescript/`)
+### Hono backend (`src/platform/hono/v4/` + `v5/` + `src/generator/typescript/`)
 
-The Hono backend is split between a *versioned* package
-(`src/platform/hono/v4/` — owns the package shell, the per-version
-dep pin set, and any per-version routing glue) and a *shared*
-TypeScript emitter library (`src/generator/typescript/` — the
-per-aggregate procedural builders that every Hono version reuses).
-A future `hono@v5` would ship its own `pins.ts` + shell next to
-`v4/` and continue to import the shared emitter library.
+The Hono backend is split between *versioned* packages under
+`src/platform/hono/` (each owns its package shell + dep pin set) and a
+*shared* TypeScript emitter library (`src/generator/typescript/` — the
+per-aggregate procedural builders every Hono version reuses).  Two
+versions ship today: `v4/` (zod 3 / TS 5) and `v5/` (zod 4 / TS 6).
+Bareword `platform: node` resolves to **v5** (the default lane,
+`honoV5Platform` in `src/platform/registry.ts`); v4 stays loadable via
+the pinned `platform: node@v4`.
+
+`v5/` is deliberately tiny — `index.ts` + `pins.ts` only.  The zod 3→4 /
+TS 5→6 jump touches no emitter logic, so v5 just feeds its new pin set
+through `makeHonoPlatform(...)` imported from `v4/index.ts` and reuses
+the whole shell + emitter table below.  The table's `platform/hono/v4/`
+files are therefore the active shell for both versions.
 
 | File | Owns |
 | --- | --- |
@@ -1121,8 +1141,8 @@ Rough recipe:
 1. **Grammar** — add the syntax in `ddd.langium`; run
    `npm run langium:generate` to regenerate the parser + AST types.
 2. **AST scope / validation** — if the new node introduces names
-   or has type constraints, update `ddd-scope.ts` /
-   `ddd-validator.ts` / `type-system.ts`.
+   or has type constraints, update `ddd-scope.ts` / the relevant
+   themed module under `src/language/validators/` / `type-system.ts`.
 3. **IR** — add the IR node in `loom-ir.ts`; lower it in the
    relevant `lower/` module — the matching per-kind sibling
    (`lower-members.ts`, `lower-workflow.ts`, …) wired into the
@@ -1139,7 +1159,7 @@ Rough recipe:
    feature.
 8. **Examples** — extend an existing `.ddd` to exercise the
    feature end-to-end; verify with `npx vitest run` and
-   `LOOM_TS_BUILD=1 npx vitest run test/generated-build.test.ts`.
+   `LOOM_TS_BUILD=1 npx vitest run test/e2e/generated-build.test.ts`.
 
 ### Adding a new backend
 
@@ -1183,8 +1203,9 @@ The shape:
    not recomputed per backend.
 6. If the platform needs a new value in `Platform`, also extend
    `language/ddd.langium`'s `Platform` rule, `ir/loom-ir.ts`'s
-   `Platform` type, and `language/ddd-validator.ts`'s
-   `checkDeployable` — see the `'react'` addition for the pattern.
+   `Platform` type, and `checkDeployable` in
+   `language/validators/deployable.ts` — see the `'react'` addition
+   for the pattern.
 
 Most of the work is the builders / templates — the IR already
 carries everything needed for code generation.
@@ -1205,9 +1226,9 @@ layout mirrors the pipeline:
 | `test/ir/enrichments.test.ts`, `test/ir/wire-shape.test.ts`, `test/ir/wire-spec.test.ts` | ⑥ enrichment |
 | `test/ir/multifile-validate.test.ts`, `test/ir/invariant-classify.test.ts` | ⑦ IR validation |
 | `test/system/architecture-*.test.ts`, `test/system/deployable-composition.test.ts`, `test/system/traceability.test.ts` | ⑨ system orchestration |
-| `test/generator/*` (per backend, ~358 files) | ⑧ per-platform output |
+| `test/generator/*` (per backend, ~409 files) | ⑧ per-platform output |
 | `test/cli/*.test.ts` | ⑩ output writing (`.loomignore`, `--dry-run`) |
-| `test/generator/walker-*.test.ts` (46 files) | ⑧ React body-walker primitives |
+| `test/generator/walker-*.test.ts` (~44 files) | ⑧ body-walker primitives |
 | `LOOM_TS_BUILD=1 npm run test:tsc` | ⑧ regression — generated TS compiles under strict tsc |
 | `LOOM_E2E=1 npm run test:e2e` | full pipeline + content-shape OpenAPI parity + Playwright UI suite |
 
