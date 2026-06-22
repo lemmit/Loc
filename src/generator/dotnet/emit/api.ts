@@ -540,6 +540,10 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             problem.Extensions["errors"] = fv.Errors
                 .Select(e => new { pointer = PointerOf(e.PropertyName), message = e.ErrorMessage })
                 .ToArray();
+            ${renderDotnetLogCall("domainError", [
+              { name: "message", valueExpr: `"Validation failed"` },
+              { name: "status", valueExpr: "422" },
+            ])}
             context.HttpContext.Response.Headers["x-request-id"] = trace_id;
             context.Result = new ObjectResult(problem)
             {
@@ -553,24 +557,37 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         }
         if (context.Exception is ForbiddenException fe)
         {
+            ${renderDotnetLogCall("forbidden", [
+              { name: "message", valueExpr: "fe.Message" },
+              { name: "status", valueExpr: "403" },
+            ])}
             context.Result = Problem(context, 403, "Forbidden", fe.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }
         if (context.Exception is DisallowedException dx)
         {
+            ${renderDotnetLogCall("disallowed", [
+              { name: "message", valueExpr: "dx.Message" },
+              { name: "status", valueExpr: "409" },
+            ])}
             context.Result = Problem(context, 409, "Disallowed", dx.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }
         if (context.Exception is DomainException de)
         {
+            ${renderDotnetLogCall("domainError", [
+              { name: "message", valueExpr: "de.Message" },
+              { name: "status", valueExpr: "400" },
+            ])}
             context.Result = Problem(context, 400, "Bad Request", de.Message, trace_id);
             context.ExceptionHandled = true;
             return;
         }
         if (context.Exception is AggregateNotFoundException nf)
         {
+            ${renderDotnetLogCall("notFound", [{ name: "status", valueExpr: "404" }])}
             context.Result = Problem(context, 404, "Not Found", nf.Message, trace_id);
             context.ExceptionHandled = true;
             return;

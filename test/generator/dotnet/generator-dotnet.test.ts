@@ -263,6 +263,25 @@ describe(".NET generator", () => {
         /Problem\(context, 500, "Internal Server Error", "internal", trace_id\)/,
       );
     });
+
+    it("DomainExceptionFilter logs the fault tier with each fault's real status", async () => {
+      // S1 parity: every fault arm emits its catalog event at the real HTTP
+      // status (validation 422, domain 400, forbidden 403, disallowed 409,
+      // not_found 404) — matching Hono/Python so a `jq select(.event==…)`
+      // query is the same shape cross-backend.
+      const model = await buildModel("examples/sales.ddd");
+      const filter = generateDotnet(model).get("Api/DomainExceptionFilter.cs")!;
+      expect(filter).toContain(
+        '_log.LogWarning("{Event} message={Message} status={Status}", "forbidden", fe.Message, 403);',
+      );
+      expect(filter).toContain(
+        '_log.LogWarning("{Event} message={Message} status={Status}", "disallowed", dx.Message, 409);',
+      );
+      expect(filter).toContain(
+        '_log.LogWarning("{Event} message={Message} status={Status}", "domain_error", de.Message, 400);',
+      );
+      expect(filter).toContain('_log.LogWarning("{Event} status={Status}", "not_found", 404);');
+    });
   });
 
   it("auto-includes a GET /<plural> find via the `all` repository method", async () => {
