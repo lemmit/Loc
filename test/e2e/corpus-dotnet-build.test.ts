@@ -37,12 +37,19 @@ const CASE = process.env.LOOM_CORPUS_DOTNET_CASE;
 // precise, reproducible bug report).  Widen the gate by FIXING the emitter,
 // then dropping the entry.
 const DOTNET_COMPILE_SKIP: Record<string, string> = {
-  // PLATFORM LIMITATION: `shape(embedded)` + a ref-collection (`X id[]`) — the
-  // join-table type (`...Persistence.JoinTables`, `OrderTags`) the AppDbContext +
-  // repository reference is not emitted on .NET for an embedded aggregate (CS0234).
-  // The same shape java skip-lists; use shape(document)/relational or host on node.
+  // EMITTER BUG (deferred): `shape(embedded)` + a ref-collection (`X id[]`).
+  // The phase-⑨ migration folds the ref-collection into a JSONB column on the
+  // embedded root (matching node — there is NO `order_tags` table), but the
+  // .NET repository + AppDbContext emitters still treat the association as a
+  // join table: they reference the `...Persistence.JoinTables.OrderTags` entity
+  // / DbSet that's never emitted (CS0234) — and even if it were, it would map
+  // to a table the migration never creates. The coherent fix is to fold the
+  // embedded ref-collection into jsonb on .NET too (suppress the join-entity /
+  // DbSet / repo-sync blocks for embedded aggregates), which lives in the
+  // repository + entity emitters (emit/repository.ts, emit/entity.ts) — NOT a
+  // join-table emit in efcore.ts. Java skip-lists the same shape.
   embedded:
-    "PLATFORM LIMITATION: jsonb-embedded + ref collection has no join-table type on .NET (CS0234)",
+    "EMITTER BUG (deferred): jsonb-embedded + ref collection — .NET repo/DbContext reference a join entity the migration folds into jsonb; needs jsonb-fold in repository.ts/entity.ts, not a join-table emit (CS0234)",
 };
 
 // Every corpus feature the manifest declares to generate on `dotnet`, minus the
