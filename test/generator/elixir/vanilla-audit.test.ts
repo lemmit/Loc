@@ -155,7 +155,7 @@ describe("vanilla audit runtime (audit-and-logging.md)", () => {
 
   it("audits the DESTROY with before=wire(loaded) / after:nil BEFORE the delete", async () => {
     const ctrl = file(await generateSystemFiles(SOURCE), "/order_controller.ex");
-    expect(ctrl).toContain("def delete(conn, %{\"id\" => id}) do");
+    expect(ctrl).toContain('def delete(conn, %{"id" => id}) do');
     expect(ctrl).toContain('operation_id: "destroyOrder"');
     expect(ctrl).toContain('action: "destroy"');
     expect(ctrl).toContain("target_id: id");
