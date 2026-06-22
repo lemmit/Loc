@@ -4,9 +4,11 @@ import type {
   ExprIR,
   FieldIR,
   ViewIR,
+  WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { aggregateUsesPrincipalContextFilter } from "../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../util/naming.js";
+import { stateModule } from "./dispatch-emit.js";
 import { type RenderCtx, renderExpr, renderTypespec } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -40,13 +42,86 @@ export function emitViews(
   const typesModule = `${appModule}.Types`;
 
   for (const view of ctx.views) {
+    const path = `lib/${appName}/${ctxSnake}/views/${snake(view.name)}.ex`;
+
+    // Workflow-sourced view (`view V = <workflow> where ...`): a curated saga
+    // projection over the correlation-instance read model — the source isn't in
+    // `ctx.aggregates`, so it never matched the aggregate lookup and was silently
+    // skipped, yet `views_controller.ex` still calls `<Ctx>.Views.V.run/1`
+    // (undefined-function under `--warnings-as-errors`).  Only observable
+    // (correlation-bearing) workflows have an `instanceWireShape`.  On the Ash
+    // foundation the saga-state schema (`stateModule`) is a PLAIN Ecto schema and
+    // `<App>.Repo` is an `AshPostgres.Repo` (an `Ecto.Repo`), so a plain
+    // `from(... where:) |> Repo.all()` over it compiles and runs.  Event-sourced
+    // workflows are gated off Ash (`eventsourced-workflow` skip), so only the
+    // state-saga branch is reachable here.
+    if (view.source.kind === "workflow") {
+      const wf = ctx.workflows.find((w) => w.name === view.source.name);
+      if (!wf?.instanceWireShape || wf.eventSourced) continue; // not observable / ES off Ash
+      out.set(path, renderWorkflowView(view, wf, appModule, contextModule, typesModule));
+      continue;
+    }
+
     const agg = aggsByName.get(view.source.name);
     if (!agg) continue; // validator already errored
 
-    const path = `lib/${appName}/${ctxSnake}/views/${snake(view.name)}.ex`;
     const content = renderView(view, agg, ctx, contextModule, appModule, typesModule);
     out.set(path, content);
   }
+}
+
+/** A workflow-sourced view module on the Ash foundation — a curated saga
+ *  projection over the workflow's instance read model, projecting
+ *  `instanceWireShape` (camelCase wire key ← snake struct field).  Full-form
+ *  workflow views are rejected upstream
+ *  (`loom.view-workflow-fullform-unsupported`), so only the shorthand
+ *  (filter-only) form is handled.
+ *
+ *  Only the state-based saga branch is reachable on Ash (event-sourced
+ *  workflows are a documented Ash skip).  The saga-state schema (`stateModule`)
+ *  is a plain Ecto schema and `<App>.Repo` is an `AshPostgres.Repo` (an
+ *  `Ecto.Repo`), so a plain `from(record in <State>, where: …) |> Repo.all()`
+ *  read compiles and runs — `import Ecto.Query` / `alias <App>.Repo`, mirroring
+ *  the vanilla foundation's state-saga path. */
+function renderWorkflowView(
+  view: ViewIR,
+  wf: WorkflowIR,
+  appModule: string,
+  contextModule: string,
+  typesModule: string,
+): string {
+  const moduleName = `${contextModule}.Views.${upperFirst(view.name)}`;
+  const renderCtx: RenderCtx = { thisName: "record", contextModule, typesModule };
+  const proj = (wf.instanceWireShape ?? [])
+    .map((f) => `${f.name}: record.${snake(f.name)}`)
+    .join(", ");
+  const stateMod = stateModule(contextModule, wf);
+  const query = view.filter
+    ? `    from(record in ${stateMod}, where: ${renderExpr(view.filter, renderCtx)})
+    |> Repo.all()`
+    : `    Repo.all(${stateMod})`;
+
+  return `# Auto-generated.
+defmodule ${moduleName} do
+  @moduledoc """
+  View: ${upperFirst(view.name)}
+
+  Source workflow: ${upperFirst(wf.name)} (saga instance state)
+  Form: shorthand
+  """
+
+  import Ecto.Query
+  alias ${appModule}.Repo
+
+  @doc "Execute the view query and return the matching saga instances."
+  @spec run(any()) :: [map()]
+  def run(current_user \\\\ nil) do
+    _ = current_user
+${query}
+    |> Enum.map(fn record -> %{${proj}} end)
+  end
+end
+`;
 }
 
 function renderView(
