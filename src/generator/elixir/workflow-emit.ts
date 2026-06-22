@@ -209,6 +209,25 @@ function renderWorkflowBody(
     lines.push(...renderWorkflowStmt(st, ctx, renderCtx, contextModule));
   }
 
+  // Drop a value-bind (`name = expr`) whose name is never read elsewhere in the
+  // body: an unread bind trips `mix compile --warnings-as-errors` (e.g. a
+  // workflow `let prev = <resource>.get(...)` whose result is unused).  The RHS
+  // stays — it may side-effect (a resource call) — as a bare `with`-clause,
+  // matching the form the resource-call branch already emits.  A referenced
+  // name always renders into another line, so a name absent from every other
+  // line is provably unused.  The chain's return value is the LAST bound name
+  // (renderTransactional/SequentialBody), so that bind is never stripped.
+  const lastBind = [...lines].reverse().find((l) => l.bindName);
+  for (const line of lines) {
+    if (!line.bindName || line === lastBind) continue;
+    if (line.kind !== "expr" && line.kind !== "stmt") continue;
+    const name = line.bindName;
+    const re = new RegExp(`\\b${name}\\b`);
+    if (lines.some((other) => other !== line && re.test(other.text))) continue;
+    line.text = line.text.replace(`${name} = `, "");
+    line.bindName = undefined;
+  }
+
   return lines;
 }
 
