@@ -1,4 +1,4 @@
-name: Elixir / Ash runtime e2e (observability + embeds-react)
+name: Elixir / Ash runtime e2e (observability + embeds-react + ui-smoke)
 
 # Boots the generated Phoenix backend against a real postgres sidecar,
 # hits /health, then asserts the JSON-per-line stdout from the custom
@@ -22,11 +22,14 @@ on:
     paths:
       - 'src/generator/elixir/**'
       - 'src/generator/_obs/**'
+      - 'src/generator/_frontend/**'
       - 'src/generator/react/**'
       - 'src/platform/elixir.ts'
       - 'designs/ashPhoenix/**'
+      - 'web/src/examples/storefront-elixir.ddd'
       - 'test/e2e/observability-events-elixir-ash.test.ts'
       - 'test/e2e/embed-react-elixir.test.ts'
+      - 'test/e2e/phoenix-ui-smoke-e2e.test.ts'
       - 'test/e2e/fixtures/elixir-ash-build/elixir-embed-react.ddd'
       - 'package.json'
       - '.github/workflows/elixir-ash-obs-e2e.yml'
@@ -137,6 +140,22 @@ jobs:
           LOOM_OBS_PG_DB: 'phoenix_app_embed'
         run: npx vitest run test/e2e/embed-react-elixir.test.ts --reporter=verbose
 
+      # Third runtime guard — the LiveView UI smoke.  Boots a ui-mounting
+      # Phoenix deployable (storefront-elixir) and runs its emitted
+      # route-driven Playwright smoke spec against the live server (every
+      # param-less LiveView route navigates + asserts its URL).  The
+      # server-rendered sibling of the SPA `generated-{vue,svelte}-e2e` gates,
+      # sharing this workflow's postgres + BEAM provisioning.
+      - name: Run Phoenix LiveView UI smoke runtime e2e
+        env:
+          LOOM_PHOENIX_UI_E2E: '1'
+          LOOM_OBS_PG_URL: 'postgres://postgres:postgres@127.0.0.1:5432'
+          # Distinct database from the other two steps — the generated apps
+          # share an initial-migration version, so a shared DB would let the
+          # first step's schema_migrations shadow this one's migration.
+          LOOM_OBS_PG_DB: 'phoenix_app_uismoke'
+        run: npx vitest run test/e2e/phoenix-ui-smoke-e2e.test.ts --reporter=verbose
+
       - name: Surface failure context
         if: failure()
         run: |
@@ -145,3 +164,4 @@ jobs:
           echo 'See the runtime-e2e steps above for the captured server stdout.' >> $GITHUB_STEP_SUMMARY
           echo '- Observability: asserts the <App>.LogFormatter stream carries the catalog envelope (server_starting → server_listening → request_start → request_end → server_shutdown → server_drained).' >> $GITHUB_STEP_SUMMARY
           echo '- Embeds-React: asserts GET /app serves the SPA index.html and GET /api/products serves the Ash JSON API from one origin.' >> $GITHUB_STEP_SUMMARY
+          echo '- UI smoke: boots a ui-mounting Phoenix deployable and runs the emitted route-driven Playwright smoke spec against the live LiveView server.' >> $GITHUB_STEP_SUMMARY
