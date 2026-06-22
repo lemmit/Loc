@@ -40,6 +40,12 @@ export function workflowStateClass(wf: WorkflowIR): string {
   return `${upperFirst(wf.name)}State`;
 }
 
+/** The JavaBean setter name for a state field (`attempts` → `setAttempts`) —
+ *  the write seam a workflow body's own-state `:=` targets. */
+export function setterName(field: string): string {
+  return `set${upperFirst(field)}`;
+}
+
 /** The saga table name — matches `workflowStateTableShape` in the migrations
  *  builder and dotnet's `workflowStateTable`. */
 export function workflowStateTable(wf: WorkflowIR): string {
@@ -120,9 +126,23 @@ export function renderWorkflowStateEntity(
     `    }`,
     ``,
   ];
+  // Public setters for the non-correlation state fields — a workflow body's
+  // own-state `:=` (`attempts := 1`) writes through these from the dispatcher
+  // package (the fields themselves are package-private, so a cross-package
+  // direct write wouldn't compile).  The correlation field stays write-only via
+  // `_allocate` (it's the immutable key).  Mirrors dotnet's `{ get; set; }`.
+  const setter = (type: string, name: string): string[] => [
+    `    public void ${setterName(name)}(${type} ${name}) {`,
+    `        this.${name} = ${name};`,
+    `    }`,
+    ``,
+  ];
   const accessors = [
     ...accessor(corrIdClass(wf), corr),
-    ...stateOnly.flatMap((f) => accessor(renderJavaType(f.type), f.name)),
+    ...stateOnly.flatMap((f) => [
+      ...accessor(renderJavaType(f.type), f.name),
+      ...setter(renderJavaType(f.type), f.name),
+    ]),
   ];
 
   const usesHibernateTypes = needsHibernateTypes(stateOnly);

@@ -1364,6 +1364,12 @@ function honoWorkflowStmtTarget(
       return [callLine];
     },
     exprLet: (st, indent) => [`${indent}const ${st.name} = ${renderArg(st.expr)};`],
+    // `field := value` — own-state mutation: write `value` onto the loaded
+    // correlation-state row (`thisName` = `state` on the persisted-state path),
+    // which `save<Wf>(db, state)` flushes at handler exit.
+    assign: (st, indent) => [
+      `${indent}${thisName}.${st.target.segments[0]} = ${renderArg(st.value)};`,
+    ],
     repoRun: (st, indent) => {
       // `Repo.run(<Retrieval>(args), page?)` → the generated
       // `run<Name>(args, page?)` repository method (retrieval.md / PR3-A).

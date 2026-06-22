@@ -579,6 +579,16 @@ export function pyWorkflowStmtTarget(
       }
       return [`${i}${snake(st.name)} = ${rendered}`];
     },
+    // `field := value` — own-state mutation.  Render the LHS as a synthetic
+    // `this-prop` ref so it reuses the `state.<snake>` mapping (persisted
+    // correlation row, `thisName = "state"`); the handler saves the row at exit.
+    assign: (st, i) => {
+      const lhs = renderPyExpr(
+        { kind: "ref", name: st.target.segments[0]!, refKind: "this-prop", type: st.targetType },
+        rctx,
+      );
+      return [`${i}${lhs} = ${renderPyExpr(st.value, rctx)}`];
+    },
     opCall: (st, i) => {
       // A currentUser-gated op takes the actor as its trailing argument
       // (in scope: the route bound `current_user` for this workflow).

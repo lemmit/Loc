@@ -353,6 +353,22 @@ function renderWorkflowStmt(
         },
       ];
     }
+    case "assign": {
+      // `field := value` — own-state mutation in a command-triggered Ash
+      // workflow's `run/2` facade.  This orchestration entry point holds the
+      // workflow state struct in `state` (immutable), so the write rebinds it
+      // via a struct update.  Event-triggered (correlation-persisted) sagas go
+      // through `dispatch-emit.ts`, which additionally persists the row.
+      const val = renderExpr(st.value, renderCtx);
+      const field = snake(st.target.segments[0]!);
+      return [
+        {
+          kind: "expr",
+          text: `    state = %{state | ${field}: ${val}}`,
+          bindName: "state",
+        },
+      ];
+    }
     case "resource-call":
       // 4c: the Phoenix ResourceAdapter renders the call here.
       // renderExpr already throws via the resource-op guard; keep an

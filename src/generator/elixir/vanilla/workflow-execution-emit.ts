@@ -239,6 +239,22 @@ function lowerStatement(
       ];
     }
 
+    case "assign": {
+      // `field := value` — own-state mutation in a vanilla command-triggered
+      // workflow body.  Rebind the immutable workflow `state` struct via a
+      // struct update; a with-clause binding always succeeds.  (Event-triggered
+      // correlation sagas persist the row in `dispatch-emit.ts`.)
+      const value = renderExpr(st.value, renderCtx);
+      const field = snake(st.target.segments[0]!);
+      return [
+        {
+          kind: "with-clause",
+          text: `state <- (%{state | ${field}: ${value}})`,
+          bindName: "state",
+        },
+      ];
+    }
+
     case "repo-let": {
       // Two shapes, both lowering to a with-clause:
       //
@@ -606,6 +622,16 @@ function renderLoopBody(
       case "resource-call":
         doLines.push(`_ = ${renderExpr(inner.call, renderCtx)}`);
         break;
+      case "assign": {
+        // `field := value` — own-state mutation inside a loop body.  Rebind the
+        // immutable workflow `state` struct via a struct update (vanilla command
+        // path; persistence of correlation sagas is handled in dispatch-emit).
+        lastBind = "state";
+        doLines.push(
+          `state = %{state | ${snake(inner.target.segments[0]!)}: ${renderExpr(inner.value, renderCtx)}}`,
+        );
+        break;
+      }
       case "for-each":
       case "if-let":
       case "repo-run":

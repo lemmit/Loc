@@ -1067,6 +1067,19 @@ function csWorkflowStmtTarget(
       const exprText = renderArg(st.expr);
       return [`${indent}var ${st.name} = ${isResourceOp ? "await " : ""}${exprText};`];
     },
+    // `field := value` — own-state mutation.  Render the LHS through `renderArg`
+    // as a synthetic `this-prop` ref so it picks up the same `state.`/`this.` +
+    // PascalCase mapping the read side uses (`state.Attempts`); the loaded row
+    // is persisted by the handler's SaveAsync at exit.
+    assign: (st, indent) => {
+      const lhs = renderArg({
+        kind: "ref",
+        name: st.target.segments[0]!,
+        refKind: "this-prop",
+        type: st.targetType,
+      });
+      return [`${indent}${lhs} = ${renderArg(st.value)};`];
+    },
     repoRun: (st, indent) => {
       // `Repo.run(<Retrieval>(args), page?)` → the generated
       // `Run<Name>Async(args, page?, cancellationToken)` repository method.

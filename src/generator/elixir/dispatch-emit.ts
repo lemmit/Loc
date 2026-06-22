@@ -334,6 +334,12 @@ function bodyUsesThis(statements: WorkflowStmtIR[]): boolean {
       case "expr-let":
         visitExpr(st.expr);
         break;
+      case "assign":
+        // The write target IS `state` (`Repo.update!(... state ...)`), so an
+        // own-state assignment always references it — bind `state`, not `_state`.
+        used = true;
+        visitExpr(st.value);
+        break;
       case "precondition":
       case "requires":
         visitExpr(st.expr);
@@ -611,6 +617,24 @@ function renderStmt(
           kind: "expr",
           text: `${snake(st.name)} = ${renderExpr(st.expr, renderCtx)}`,
           bindName: snake(st.name),
+        },
+      ];
+    }
+    case "assign": {
+      // `field := value` — own-state mutation.  Saga state is a plain Ecto
+      // schema (no Ash resource), so persist the write directly: rebind `state`
+      // to the updated struct via an `Ecto.Changeset.change/2` + `Repo.update!`.
+      // Runs in the do-branch (`dispatch` kind) after any `with`-chain succeeds;
+      // the row already exists (allocated on `create`, loaded on `on`).  `Repo`
+      // is reached off the app module (the segment(s) before the context name
+      // in `contextModule = "<App>.<Ctx>"`).
+      const appModule = contextModule.split(".").slice(0, -1).join(".");
+      const field = snake(st.target.segments[0]!);
+      const value = renderExpr(st.value, renderCtx);
+      return [
+        {
+          kind: "dispatch",
+          text: `state = ${appModule}.Repo.update!(Ecto.Changeset.change(state, %{${field}: ${value}}))`,
         },
       ];
     }
