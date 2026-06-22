@@ -18,12 +18,13 @@ const OUT  = join(HERE, '_site');
 // Subdirs whose .md content is also rendered so links from reference
 // docs into plans/audits don't 404.  proposals/ is excluded — those
 // docs deliberately don't ship as the source of truth.
-const RENDERED_SUBDIRS = ['plans', 'audits'];
+const RENDERED_SUBDIRS = ['plans', 'audits', 'language-reference'];
 
 // Nav surfaces the top-level reading order — keep in sync with
 // docs/README.md's "Start here" table and docs/index.html's footer.
 const NAV = [
   { label: 'All docs',     href: 'README.html' },
+  { label: 'Reference',    href: 'language-reference/README.html' },
   { label: 'Language',     href: 'language.html' },
   { label: 'Pages',        href: 'page-metamodel.html' },
   { label: 'System',       href: 'architecture.html' },
@@ -48,6 +49,60 @@ marked.use({
 const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ({
   '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;',
 }[c]));
+const escapeAttr = (s) => escapeHtml(String(s));
+
+// Platform-tabs block extension.  Authoring syntax (also degrades
+// readably on GitHub, which just shows the markers as text but still
+// renders the inner code fences):
+//
+//   ::: tabs backend
+//   == node
+//   ```ts
+//   ...generated output...
+//   ```
+//   == dotnet
+//   ```csharp
+//   ...
+//   ```
+//   ::: end
+//
+// The optional word after `tabs` is the *group*: every tab group on a
+// page sharing a group name switches together (pick "node" once, every
+// backend group follows), persisted in localStorage.  Inner content of
+// each `== <name>` segment is full markdown (so a tab can hold prose +
+// multiple code blocks), rendered with highlight.js client-side.
+const platformTabs = {
+  name: 'platformTabs',
+  level: 'block',
+  start(src) {
+    const i = src.indexOf('::: tabs');
+    return i < 0 ? undefined : i;
+  },
+  tokenizer(src) {
+    const m = /^::: tabs[ \t]*([^\n]*)\n([\s\S]*?)\n::: end[ \t]*(?:\n|$)/.exec(src);
+    if (!m) return undefined;
+    const group = (m[1] || 'platform').trim() || 'platform';
+    const segments = m[2].split(/^==[ \t]+/m).filter((s) => s.trim().length);
+    const tabs = segments.map((seg) => {
+      const nl = seg.indexOf('\n');
+      const name = (nl < 0 ? seg : seg.slice(0, nl)).trim();
+      const inner = nl < 0 ? '' : seg.slice(nl + 1);
+      return { name, tokens: this.lexer.blockTokens(inner.trim()) };
+    });
+    return { type: 'platformTabs', raw: m[0], group, tabs };
+  },
+  renderer(token) {
+    const btns = token.tabs.map((t, i) =>
+      `<button class="lt-tab${i === 0 ? ' active' : ''}" type="button" role="tab" data-tab="${escapeAttr(t.name)}">${escapeHtml(t.name)}</button>`,
+    ).join('');
+    const panels = token.tabs.map((t, i) =>
+      `<div class="lt-panel${i === 0 ? ' active' : ''}" role="tabpanel" data-tab="${escapeAttr(t.name)}">${this.parser.parse(t.tokens)}</div>`,
+    ).join('');
+    return `<div class="lt-tabs" data-group="${escapeAttr(token.group)}"><div class="lt-tablist" role="tablist">${btns}</div>${panels}</div>`;
+  },
+};
+
+marked.use({ extensions: [platformTabs] });
 
 const extractTitle = (md, fallback) => {
   const m = md.match(/^#\s+(.+?)\s*$/m);
@@ -95,6 +150,44 @@ const footer = (depth) => {
 </footer>`;
 };
 
+// Self-contained styling + behaviour for the platform-tabs widget,
+// injected once per page so the reference's lowering examples render as
+// a tabbed picker (node/dotnet/java/python/elixir, react/vue/svelte/…).
+const TAB_STYLE = `<style>
+.lt-tabs{margin:1.25rem 0;border:1px solid rgba(255,255,255,.10);border-radius:10px;overflow:hidden;background:rgba(255,255,255,.02)}
+.lt-tablist{display:flex;flex-wrap:wrap;gap:2px;padding:6px 6px 0;border-bottom:1px solid rgba(255,255,255,.08)}
+.lt-tab{appearance:none;background:transparent;border:0;color:#9aa4b2;font:600 .82rem/1.4 'Inter',system-ui,sans-serif;padding:.45rem .8rem;border-radius:7px 7px 0 0;cursor:pointer}
+.lt-tab:hover{color:#cdd6e3;background:rgba(255,255,255,.04)}
+.lt-tab.active{color:#0d1117;background:linear-gradient(135deg,#b58cff,#6fd1ff)}
+.lt-panel{display:none;padding:.25rem 1rem 1rem}
+.lt-panel.active{display:block}
+.lt-panel pre{margin:.75rem 0}
+</style>`;
+const TAB_SCRIPT = `<script>
+(function(){
+  function apply(group,name){
+    document.querySelectorAll('.lt-tabs[data-group="'+group+'"]').forEach(function(box){
+      var hit=box.querySelector('.lt-tab[data-tab="'+name+'"]');
+      if(!hit)return;
+      box.querySelectorAll('.lt-tab').forEach(function(b){b.classList.toggle('active',b.dataset.tab===name)});
+      box.querySelectorAll('.lt-panel').forEach(function(p){p.classList.toggle('active',p.dataset.tab===name)});
+    });
+  }
+  document.addEventListener('DOMContentLoaded',function(){
+    document.querySelectorAll('.lt-tabs').forEach(function(box){
+      var group=box.dataset.group||'platform';
+      try{var saved=localStorage.getItem('lt-'+group);if(saved)apply(group,saved);}catch(e){}
+      box.querySelectorAll('.lt-tab').forEach(function(btn){
+        btn.addEventListener('click',function(){
+          apply(group,btn.dataset.tab);
+          try{localStorage.setItem('lt-'+group,btn.dataset.tab);}catch(e){}
+        });
+      });
+    });
+  });
+})();
+</script>`;
+
 const page = ({ title, body, currentHref, depth, styleHref }) => `<!doctype html>
 <html lang="en">
 <head>
@@ -106,6 +199,7 @@ const page = ({ title, body, currentHref, depth, styleHref }) => `<!doctype html
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
 <link rel="stylesheet" href="${styleHref}">
+${TAB_STYLE}
 </head>
 <body>
 ${header(currentHref, depth)}
@@ -116,6 +210,7 @@ ${header(currentHref, depth)}
 ${footer(depth)}
 <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
 <script>document.addEventListener('DOMContentLoaded', () => window.hljs && window.hljs.highlightAll());</script>
+${TAB_SCRIPT}
 </body>
 </html>
 `;
