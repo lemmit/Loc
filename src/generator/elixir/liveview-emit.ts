@@ -31,6 +31,13 @@ import type {
 import { type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import {
+  E2E_FIXTURES_TS,
+  E2E_PACKAGE_JSON_PHOENIX,
+  E2E_TSCONFIG_JSON,
+  PLAYWRIGHT_CONFIG_TS_PHOENIX,
+} from "../_frontend/e2e-harness.js";
+import { smokeSpec } from "../_frontend/smoke-spec.js";
+import {
   type ActionBinding,
   defaultInitFor,
   type HandleEventClause,
@@ -175,6 +182,22 @@ export function emitLiveViewPages(args: {
       contextByAggName,
     });
     out.set(`e2e/pages/${snake(emitName)}.ts`, pageObjectSource);
+  }
+
+  // Playwright harness + route-driven smoke spec — the same e2e surface
+  // the four SPA frontends emit (shared `_frontend/` generators), so a
+  // Phoenix deployable's page objects have something to run under and the
+  // smoke spec (every param-less LiveView route navigates + loads) can be
+  // driven against the running server.  Unlike the SPAs' backendless `vite
+  // preview`, LiveView is server-rendered, so the smoke targets the Phoenix
+  // server (port 4000 by default; override via E2E_BASE_URL).  Only when the
+  // ui actually mounts a routed page (otherwise there's nothing to smoke).
+  if (ui.pages.some((p) => p.route)) {
+    out.set("e2e/smoke.spec.ts", smokeSpec(ui, nameCtx));
+    out.set("e2e/fixtures.ts", E2E_FIXTURES_TS);
+    out.set("e2e/playwright.config.ts", PLAYWRIGHT_CONFIG_TS_PHOENIX);
+    out.set("e2e/package.json", E2E_PACKAGE_JSON_PHOENIX);
+    out.set("e2e/tsconfig.json", E2E_TSCONFIG_JSON);
   }
 
   // User-defined components → one HEEx function component per

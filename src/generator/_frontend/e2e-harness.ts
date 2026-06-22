@@ -98,6 +98,23 @@ export const E2E_PACKAGE_JSON_ANGULAR = E2E_PACKAGE_JSON.replace(
   '"loom-angular-app-e2e"',
 );
 
+/** Phoenix/LiveView harness manifest — honestly-named package (same
+ *  framework-neutral, testid-keyed Playwright runtime as the SPAs; the
+ *  React constant keeps its bytes for the byte-identity gate). */
+export const E2E_PACKAGE_JSON_PHOENIX = E2E_PACKAGE_JSON.replace(
+  '"loom-react-app-e2e"',
+  '"loom-phoenix-app-e2e"',
+);
+
+/** Phoenix/LiveView Playwright config — identical to the SPA harness
+ *  except the default baseURL targets the Phoenix server (port 4000, the
+ *  `elixir` platform's `defaultPort`) rather than the vite preview port.
+ *  Still overridable via E2E_BASE_URL (the compose/CI port). */
+export const PLAYWRIGHT_CONFIG_TS_PHOENIX = PLAYWRIGHT_CONFIG_TS.replace(
+  "// Tests target a running web_app — typically the docker-compose\n// service on port 3001.  Override via E2E_BASE_URL.",
+  "// Tests target a running Phoenix/LiveView server — typically the\n// docker-compose service on port 4000.  Override via E2E_BASE_URL.",
+).replace('"http://localhost:3001"', '"http://localhost:4000"');
+
 export const E2E_TSCONFIG_JSON =
   JSON.stringify(
     {

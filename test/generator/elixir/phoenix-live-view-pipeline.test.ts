@@ -103,6 +103,34 @@ describe("phoenixLiveView pipeline", () => {
     expect(files.has("phoenix_app/mix.exs")).toBe(true);
   });
 
+  it("emits the Playwright e2e harness + route-driven smoke spec for the mounted ui", async () => {
+    // Parity with the four SPA frontends: a Phoenix deployable that mounts a
+    // `ui:` now ships the same `e2e/` Playwright surface (shared `_frontend/`
+    // generators) so its page objects have a harness and the route smoke can
+    // run.  Unlike the SPAs' backendless `vite preview`, the config targets the
+    // server (port 4000); see liveview-emit.ts.
+    const model = await buildFixture();
+    const { files } = generateSystems(model);
+
+    // Harness manifest + config + fixtures + tsconfig.
+    const pkg = files.get("phoenix_app/e2e/package.json");
+    expect(pkg, "e2e/package.json is emitted").toBeDefined();
+    expect(pkg!).toContain('"loom-phoenix-app-e2e"');
+    const config = files.get("phoenix_app/e2e/playwright.config.ts");
+    expect(config, "e2e/playwright.config.ts is emitted").toBeDefined();
+    // Targets the Phoenix server port, not the SPA vite port (3001).
+    expect(config!).toContain('process.env.E2E_BASE_URL ?? "http://localhost:4000"');
+    expect(files.has("phoenix_app/e2e/fixtures.ts"), "e2e/fixtures.ts").toBe(true);
+    expect(files.has("phoenix_app/e2e/tsconfig.json"), "e2e/tsconfig.json").toBe(true);
+
+    // Route-driven smoke: every param-less page navigates + asserts its URL.
+    const smoke = files.get("phoenix_app/e2e/smoke.spec.ts");
+    expect(smoke, "e2e/smoke.spec.ts is emitted").toBeDefined();
+    expect(smoke!).toContain('import { test, expect } from "./fixtures";');
+    expect(smoke!).toMatch(/await page\.goto\("\/customers"\)/);
+    expect(smoke!).toMatch(/await expect\(page\)\.toHaveURL\(new RegExp\(/);
+  });
+
   it("emits .dialyzer_ignore.exs at project root + wires mix.exs to read it", async () => {
     // Per docs/proposals/cross-stack-static-analysis.md — the ignore
     // template ships as future-proofing for the Tier 4 Dialyzer gate.
