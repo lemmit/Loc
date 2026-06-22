@@ -186,6 +186,26 @@ describe("java generator — wire validators + advice (S5)", () => {
     expect(advice).toContain('problem(404, "Not Found", e.getMessage(), request), 404');
   });
 
+  it("advice logs the fault tier through CatalogLog with each fault's real status", async () => {
+    // S1 parity: every fault handler emits its catalog event (warn) at the
+    // real HTTP status, alongside the existing internal_error — matching
+    // Hono/.NET/Python/vanilla so the log stream is uniform cross-backend.
+    const advice = (await files()).get(`${ROOT}/api/ApiExceptionAdvice.java`)!;
+    expect(advice).toContain(
+      'CatalogLog.event("domain_error", "warn", "message", "Validation failed", "status", 422);',
+    );
+    expect(advice).toContain(
+      'CatalogLog.event("forbidden", "warn", "message", e.getMessage(), "status", 403);',
+    );
+    expect(advice).toContain(
+      'CatalogLog.event("domain_error", "warn", "message", e.getMessage(), "status", 400);',
+    );
+    expect(advice).toContain(
+      'CatalogLog.event("disallowed", "warn", "message", e.getMessage(), "status", 409);',
+    );
+    expect(advice).toContain('CatalogLog.event("not_found", "warn", "status", 404);');
+  });
+
   it("serves the OpenAPI document at /openapi.json", async () => {
     const files_ = await files();
     expect(files_.get("shop_api/src/main/resources/application.yml")).toContain(
