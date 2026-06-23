@@ -4,7 +4,7 @@ import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
 } from "../../../ir/types/loom-ir.js";
-import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { operationAuthzOnly, operationUsesCurrentUserAsData } from "../../../ir/types/loom-ir.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { domainToRequestExpr, projectEntityExpr } from "../dto-mapping.js";
 import { renderCommand, renderCommandHandler } from "../emit.js";
@@ -19,6 +19,30 @@ function whenGate(agg: AggregateIR, op: AggregateIR["operations"][number]): stri
   if (!op.when) return "";
   const pred = renderCsExpr(op.when, { thisName: "aggregate" });
   return `        if (!(${pred})) throw new DisallowedException("operation '${op.name}' is not allowed in the current state of ${agg.name}.");\n`;
+}
+
+/** The relocated authorization gate for an `operationAuthzOnly` op: the 403
+ *  `requires` the pure domain method used to throw, lifted to the Mediator
+ *  command `Handle` and rendered in HANDLER scope.  `currentUser` resolves to
+ *  the ctor-injected accessor (`_currentUser.User`); `this.<field>` resolves
+ *  against `thisName` — the loaded aggregate var (`aggregate`, public getters)
+ *  for update/destroy ops, or the validated create command (`command`, the
+ *  create-input the entity will be built from) for creates, since on a create
+ *  there is no constructed entity yet.  Emitted BEFORE the domain dispatch so a
+ *  denied caller never reaches the (now pure) domain method.  Empty unless the
+ *  op is authz-only. */
+function relocatedAuthzGate(op: AggregateIR["operations"][number], thisName: string): string {
+  if (!operationAuthzOnly(op)) return "";
+  const renderCtx = { thisName, currentUserExpr: "_currentUser.User" };
+  return op.statements
+    .filter((s) => s.kind === "requires")
+    .map(
+      (s) =>
+        `        if (!(${renderCsExpr(s.expr, renderCtx)})) throw new ForbiddenException(${JSON.stringify(
+          `Forbidden: ${(s as { source: string }).source}`,
+        )});\n`,
+    )
+    .join("");
 }
 
 // ---------------------------------------------------------------------------
@@ -41,10 +65,26 @@ export function emitCreateCommandAndHandler(
     emitValidator?: boolean;
     idClass?: string;
     auditCtx?: EnrichedBoundedContextIR;
+    /** The create action driving this POST route (ES `create(...)` or the
+     *  canonical field-based create).  When it is `operationAuthzOnly`, its 403
+     *  `requires` gate relocates here — checked against the validated create
+     *  command input (`command.<Field>`), since on a create there is no
+     *  constructed entity yet — before the `Create(...)` factory. */
+    createAction?: AggregateIR["operations"][number] | null;
   },
 ): void {
   const emitValidator = opts?.emitValidator ?? true;
   const idClass = opts?.idClass ?? `${agg.name}Id`;
+  // Relocated authorization (403) for an authz-only create — checked against the
+  // validated create command (`command.<Field>`, the create-input the entity
+  // will be built from) + the injected principal, before the factory.
+  const createAction = opts?.createAction ?? null;
+  const createIsAuthzOnly = !!createAction && operationAuthzOnly(createAction);
+  const createAuthzGate = createIsAuthzOnly ? relocatedAuthzGate(createAction, "command") : "";
+  const createAuthzDeps = createIsAuthzOnly
+    ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }]
+    : [];
+  const createAuthzUsings = createIsAuthzOnly ? [`${ns}.Auth`] : [];
   out.set(
     `Application/${aggFolder}/Commands/Create${agg.name}Command.cs`,
     renderCommand({
@@ -103,9 +143,10 @@ export function emitCreateCommandAndHandler(
       handlerName: `Create${agg.name}Handler`,
       commandName: `Create${agg.name}Command`,
       returnType: idClass,
-      extraDeps: createAuditDeps,
-      extraUsings: createAuditUsings,
+      extraDeps: [...createAuthzDeps, ...createAuditDeps],
+      extraUsings: [...createAuthzUsings, ...createAuditUsings],
       body:
+        createAuthzGate +
         `        var aggregate = ${agg.name}.Create(${requiredFields
           .map((f) => `command.${upperFirst(f.name)}`)
           .join(", ")});\n` +
@@ -273,16 +314,23 @@ export function emitOperationCommandAndHandler(
         opValidator.content,
       );
     }
-    // When the op body references `currentUser`, the aggregate
-    // method's signature picks up a trailing `User currentUser`
-    // parameter; the handler injects ICurrentUserAccessor and passes
-    // its `User` into the call.  Any non-auth-aware op stays
-    // untouched — no DI changes, no handler-ctor surface widening.
-    const usesUser = operationUsesCurrentUser(op);
+    // When the op body uses `currentUser` AS DATA, the pure domain method keeps
+    // a trailing `User currentUser` parameter the handler threads in.  Pure
+    // AUTHORIZATION (`requires currentUser…`, an authz-only op) does NOT thread —
+    // its 403 gate is relocated to this handler (rendered against the loaded
+    // aggregate, before the now-pure dispatch) and the method is param-less.
+    // Either way the handler injects ICurrentUserAccessor when it needs the
+    // principal (threaded as a data arg or consumed by the relocated gate).  Any
+    // op that touches neither stays untouched — no DI changes.
+    const usesUser = operationUsesCurrentUserAsData(op);
+    const authzOnly = operationAuthzOnly(op);
+    const needsCurrentUser = usesUser || authzOnly;
     const baseCallArgs = op.params.map((p) => `command.${upperFirst(p.name)}`);
     const callArgs = (usesUser ? [...baseCallArgs, "_currentUser.User"] : baseCallArgs).join(", ");
-    const userExtraDeps = usesUser ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }] : [];
-    const userExtraUsings = usesUser ? [`${ns}.Auth`] : [];
+    const userExtraDeps = needsCurrentUser
+      ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }]
+      : [];
+    const userExtraUsings = needsCurrentUser ? [`${ns}.Auth`] : [];
     if (op.extern) {
       // Emit the user-implementable handler interface alongside the
       // auto Mediator handler, then dispatch through it.
@@ -345,6 +393,7 @@ export function emitOperationCommandAndHandler(
           body:
             `        var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)\n` +
             `            ?? throw new AggregateNotFoundException($"${agg.name} {command.Id} not found");\n` +
+            relocatedAuthzGate(op, "aggregate") +
             whenGate(agg, op) +
             `        aggregate.Check${upperFirst(op.name)}(${callArgs});\n` +
             `        var request = new ${reqName}(${reqArgs});\n` +
@@ -414,6 +463,9 @@ export function emitOperationCommandAndHandler(
     const loadLine =
       `        var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)\n` +
       `            ?? throw new AggregateNotFoundException($"${agg.name} {command.Id} not found");\n` +
+      // Relocated authorization (403) — checked against the loaded aggregate +
+      // injected principal, before the when-gate and the now-pure dispatch.
+      relocatedAuthzGate(op, "aggregate") +
       whenGate(agg, op);
     const handlerBody = returnUnion
       ? loadLine +

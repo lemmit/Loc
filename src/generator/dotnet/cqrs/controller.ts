@@ -162,6 +162,15 @@ export function emitController(
       idClass,
       idClrType: csIdValueClrType(agg.idValueType),
       createAction: createActionOverride ?? hasCreate(agg),
+      // The create action driving the POST route — ES `create(...)` for an
+      // event-sourced aggregate, else the canonical create.  A guarded create
+      // declares 403 (its 403 throw relocated to the handler, but the contract
+      // must not regress).
+      createGuarded: (() => {
+        const createAction =
+          (agg.persistedAs === "eventLog" ? agg.creates?.[0] : agg.canonicalCreate) ?? null;
+        return !!createAction && operationIsGuarded(createAction);
+      })(),
       destroyAction: !!agg.canonicalDestroy,
       createCmdArgs: requiredFields.map((f) =>
         wireToCommandArgument(`request.${upperFirst(f.name)}`, f.type, ctx),

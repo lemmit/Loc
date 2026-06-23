@@ -3,7 +3,8 @@ import {
   type AggregateIR,
   type EnrichedBoundedContextIR,
   type ExprIR,
-  operationUsesCurrentUser,
+  operationAuthzOnly,
+  operationUsesCurrentUserAsData,
   type SystemIR,
   type WorkflowIR,
   type WorkflowStmtIR,
@@ -651,7 +652,23 @@ function renderHandler(
 ): string {
   const cmdName = `${upperFirst(wf.name)}Command`;
   const handlerName = `${upperFirst(wf.name)}Handler`;
-  const usesUser = workflowUsesCurrentUser(wf);
+  // The handler materialises a `currentUser` local (`_currentUser.User`) when
+  // the workflow body names `currentUser`, OR when it op-calls an aggregate op
+  // that needs the principal in scope — threaded into a data-use op's method
+  // call, or consumed by the relocated 403 gate of an authz-only op.  Both
+  // resolve `currentUser` in handler scope, so either reason requires the local.
+  const callsUserGatedOp = (sts: readonly WorkflowStmtIR[]): boolean =>
+    sts.some((s) => {
+      if (s.kind === "op-call") {
+        const o = ctx.aggregates
+          .find((a) => a.name === s.aggName)
+          ?.operations.find((op) => op.name === s.op);
+        return !!o && (operationUsesCurrentUserAsData(o) || operationAuthzOnly(o));
+      }
+      if (s.kind === "for-each") return callsUserGatedOp(s.body);
+      return false;
+    });
+  const usesUser = workflowUsesCurrentUser(wf) || callsUserGatedOp(wf.statements);
   // Effective isolation: workflow's `transactional(<level>)` wins; else
   // the state-kind dataSource for this context's `isolationLevel:`; else
   // undefined (connection default applies at runtime).
@@ -1035,15 +1052,28 @@ function csWorkflowStmtTarget(
           `${indent}${st.target}.AssertInvariants();`,
         ];
       }
-      // Operations that reference `currentUser` pick up a trailing
-      // `User currentUser` parameter on the aggregate method — pass
-      // the workflow handler's local `currentUser` through.
+      // An op that uses currentUser AS DATA keeps a trailing `User currentUser`
+      // param (operationUsesCurrentUserAsData); thread the in-scope local.  An
+      // authz-only op's method is now pure — its 403 gate relocates to this call
+      // site (rendered against the loaded aggregate var, before the now-pure
+      // dispatch), and no `currentUser` arg is threaded.
       const callArgs =
-        op && operationUsesCurrentUser(op)
+        op && operationUsesCurrentUserAsData(op)
           ? argList.length > 0
             ? `${argList}, currentUser`
             : "currentUser"
           : argList;
+      const authzGate =
+        op && operationAuthzOnly(op)
+          ? op.statements
+              .filter((s) => s.kind === "requires")
+              .map(
+                (s) =>
+                  `${indent}if (!(${renderCsExpr(s.expr, { thisName: st.target })})) throw new ForbiddenException(${JSON.stringify(
+                    `Forbidden: ${(s as { source: string }).source}`,
+                  )});`,
+              )
+          : [];
       const callLine = `${indent}${st.target}.${upperFirst(st.op)}(${callArgs});`;
       // Audited op invoked inline → stage an AuditRecord bracketing the call
       // with before/after wire snapshots, mirroring the per-operation command
@@ -1056,6 +1086,7 @@ function csWorkflowStmtTarget(
         const before = `__wfAuditBefore${n}`;
         const after = `__wfAuditAfter${n}`;
         return [
+          ...authzGate,
           `${indent}var ${before} = System.Text.Json.JsonSerializer.Serialize(${projectEntityExpr(st.target, agg, ctx)});`,
           callLine,
           `${indent}var ${after} = System.Text.Json.JsonSerializer.Serialize(${projectEntityExpr(st.target, agg, ctx)});`,
@@ -1077,7 +1108,7 @@ function csWorkflowStmtTarget(
           `${indent}});`,
         ];
       }
-      return [callLine];
+      return [...authzGate, callLine];
     },
     exprLet: (st, indent) => {
       // `let x = files.get(k)` — a resource-op RHS is an async helper, so

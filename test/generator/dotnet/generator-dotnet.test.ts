@@ -1812,10 +1812,21 @@ describe(".NET generator", () => {
       }
     `;
 
-    it("`requires` lowers to a ForbiddenException throw inside the operation method", async () => {
+    it("an authz-only op's `requires` 403 gate relocates to the Mediator handler; the domain method is pure", async () => {
       const files = await emitForAuthSystem(SRC_REQUIRES);
       const order = files.get("Domain/Orders/Order.cs")!;
-      expect(order).toMatch(/throw new ForbiddenException\(/);
+      // The pure domain method drops the 403 throw AND its `User` param — the
+      // authorization moved to the application/handler boundary.
+      expect(order).not.toMatch(/throw new ForbiddenException\(/);
+      expect(order).toMatch(/public void Cancel\(\)/);
+      // The relocated gate lands in the command `Handle`, AFTER the aggregate is
+      // loaded, BEFORE the (now pure) domain dispatch, driven by the injected
+      // principal (`_currentUser.User`).
+      const handler = files.get("Application/Orders/Commands/CancelHandler.cs")!;
+      expect(handler).toMatch(/private readonly ICurrentUserAccessor _currentUser;/);
+      expect(handler).toMatch(
+        /\?\? throw new AggregateNotFoundException[\s\S]*if \(!\(_currentUser\.User\.Role == "manager"\)\) throw new ForbiddenException\([\s\S]*aggregate\.Cancel\(\);/,
+      );
       // The `precondition` 400-mapping path stays distinct.
       expect(order).not.toMatch(/throw new DomainException\([^)]*Forbidden/);
     });

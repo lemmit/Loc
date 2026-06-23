@@ -5,7 +5,7 @@ import type {
   IdValueType,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
-import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { operationAuthzOnly, operationUsesCurrentUserAsData } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import type { UnionMember } from "../../_payload/union-wire.js";
@@ -266,13 +266,21 @@ export function renderEntity(
   });
 
   const opLines: string[] = [];
-  // Whether any operation references `currentUser`.  When true, we
-  // pull in the Auth namespace alongside the existing usings so the
-  // `User` type resolves; per-op signatures append a `User currentUser`
-  // parameter (and the Mediator handler passes _currentUser.User).
-  const anyOpUsesCurrentUser = operations.some(operationUsesCurrentUser);
+  // Whether any operation uses `currentUser` AS DATA.  When true, we pull in
+  // the Auth namespace alongside the existing usings so the `User` type
+  // resolves; such an op's signature appends a `User currentUser` parameter
+  // (and the Mediator handler passes _currentUser.User).  Pure AUTHORIZATION
+  // (`requires currentUser…`, an authz-only op) does NOT thread the principal —
+  // its 403 gate is relocated to the handler, so the domain method is param-less
+  // and the file no longer imports `User` on its behalf.
+  const anyOpUsesCurrentUser = operations.some(operationUsesCurrentUserAsData);
   for (const op of operations) {
-    const usesUser = operationUsesCurrentUser(op);
+    // The pure domain method keeps its `User currentUser` param only when the op
+    // uses the principal AS DATA.  An authz-only op (currentUser used only in
+    // `requires`) has its 403 gate relocated to the Mediator handler, so the
+    // method is pure — no param, and its `requires` throw is suppressed below.
+    const usesUser = operationUsesCurrentUserAsData(op);
+    const authzOnly = operationAuthzOnly(op);
     const userParam = usesUser ? "User currentUser" : "";
     const baseParams = op.params.map((p) => `${renderCsType(p.type)} ${p.name}`).join(", ");
     const params = [baseParams, userParam].filter(Boolean).join(", ");
@@ -289,6 +297,7 @@ export function renderEntity(
         aggregate: entity.name,
         op: op.name,
         eventSourced,
+        suppressRequires: authzOnly,
       });
       if (body.length > 0) opLines.push(body);
       opLines.push("    }");
@@ -312,6 +321,7 @@ export function renderEntity(
         aggregate: entity.name,
         op: op.name,
         eventSourced,
+        suppressRequires: authzOnly,
       },
     );
     if (body.length > 0) opLines.push(body);

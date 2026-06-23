@@ -52,6 +52,12 @@ export interface ControllerShape {
    *  aggregate (no explicit/`crudish` create) emits no create action,
    *  request DTO, command, or response. */
   createAction?: boolean;
+  /** When true, the canonical create action has a `requires` guard → the
+   *  POST `/` action declares 403 (authorization denied).  The 403 throw site
+   *  relocated to the create command `Handle`, but the published contract must
+   *  not regress — so the declared response stays driven by `operationIsGuarded`
+   *  on the create action (mirrors the Hono guarded-create 403). */
+  createGuarded?: boolean;
   /** When true, the aggregate has a canonical `destroy` — emit a
    *  `DELETE /{id}` action dispatching `Destroy<Agg>Command`. */
   destroyAction?: boolean;
@@ -280,6 +286,12 @@ export function renderController(
             "    [HttpPost]",
             `    [ProducesResponseType(typeof(Create${agg.name}Response), 201)]`,
             ...producesProblem("create"),
+            // A guarded create denies with 403 (ForbiddenException → filter) —
+            // declare it so the published contract documents the relocated
+            // authorization outcome (the throw moved to the handler).
+            ...(shape.createGuarded
+              ? ["    [ProducesResponseType(typeof(ProblemDetails), 403)]"]
+              : []),
             `    public async Task<ActionResult<Create${agg.name}Response>> ${actionName(opCreate(agg.name))}([FromBody] Create${agg.name}Request request)`,
             "    {",
             `        var cmd = new Create${agg.name}Command(`,

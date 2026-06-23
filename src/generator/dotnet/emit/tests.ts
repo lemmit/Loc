@@ -6,15 +6,17 @@ import type {
   TestIR,
   TestStmtIR,
 } from "../../../ir/types/loom-ir.js";
-import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { operationUsesCurrentUserAsData } from "../../../ir/types/loom-ir.js";
 import { intrinsicMatcherSig } from "../../../util/intrinsic-matchers.js";
 import { upperFirst } from "../../../util/naming.js";
 import { renderCsExpr } from "../render-expr.js";
 
-// A currentUser-gated operation's method signature picks up a trailing
-// `User currentUser` parameter; a domain `test` block has no auth context, so
-// calls to such ops are supplied a synthetic full-access actor (admin + `*`
-// permission) — parity with the Hono backend's TEST_ACTOR.
+// An operation that uses currentUser AS DATA keeps a trailing `User currentUser`
+// parameter on its (still-impure) domain method; a domain `test` block has no
+// auth context, so calls to such ops are supplied a synthetic full-access actor
+// (admin + `*` permission) — parity with the Hono backend's TEST_ACTOR.  An
+// AUTHZ-ONLY op's method is pure (its 403 gate relocated to the handler, param
+// dropped), so the test calls it with NO actor.
 const TEST_ACTOR = 'new User(System.Guid.Empty, "admin", new List<string> { "*" })';
 
 // ---------------------------------------------------------------------------
@@ -204,7 +206,7 @@ function renderTestExpr(e: ExprIR, ctx: BoundedContextIR): string {
     const entityName = e.receiverType.name;
     const agg = ctx.aggregates.find((a) => a.name === entityName);
     const op = agg?.operations.find((o) => o.name === e.member);
-    if (op && operationUsesCurrentUser(op)) {
+    if (op && operationUsesCurrentUserAsData(op)) {
       const recv = renderTestExpr(e.receiver, ctx);
       const args = [...e.args.map((a) => renderTestExpr(a, ctx)), TEST_ACTOR];
       return `${recv}.${upperFirst(e.member)}(${args.join(", ")})`;

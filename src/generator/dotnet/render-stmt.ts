@@ -22,6 +22,13 @@ export interface TraceCtx {
    *  command's response — the state transition the appliers own.  Off ⇒
    *  `emit` is byte-identical to the legacy notification-event add. */
   eventSourced?: boolean;
+  /** True when this op's authorization (`requires`) gate has been relocated to
+   *  the application/handler (Mediator command `Handle`) boundary — an
+   *  `operationAuthzOnly` op: the pure domain method must NOT re-emit the 403
+   *  throw (it renders to nothing here, and the handler emits the gate before
+   *  dispatch).  `precondition` (400 / DomainException) is unaffected and always
+   *  stays in the domain body.  Mirrors the Hono render-stmt `suppressRequires`. */
+  suppressRequires?: boolean;
 }
 
 const NO_TRACE: TraceCtx = { emitTrace: false, aggregate: "", op: "" };
@@ -31,7 +38,10 @@ export function renderCsStatements(
   ctx: CsRenderContext = DEFAULT_CTX,
   traceCtx: TraceCtx = NO_TRACE,
 ): string {
-  return stmts.map((s, i) => renderCsStatement(s, i, ctx, traceCtx)).join("\n");
+  return stmts
+    .map((s, i) => renderCsStatement(s, i, ctx, traceCtx))
+    .filter((line) => line !== "")
+    .join("\n");
 }
 
 /** Namespaces a statement body reaches into beyond the SDK's implicit
@@ -81,7 +91,11 @@ function renderCsStatement(
       return precondition(s.expr, s.source, index, ctx, traceCtx);
     case "requires":
       // Authorization gate — surfaces as 403 (handled by
-      // DomainExceptionFilter mapping ForbiddenException → 403).
+      // DomainExceptionFilter mapping ForbiddenException → 403).  For an
+      // `operationAuthzOnly` op the gate has been relocated to the Mediator
+      // command `Handle` (rendered in handler scope before dispatch), so the
+      // pure domain method drops the throw entirely — emit nothing here.
+      if (traceCtx.suppressRequires) return "";
       return `${INDENT}if (!(${renderCsExpr(s.expr, ctx)})) throw new ForbiddenException(${JSON.stringify(`Forbidden: ${s.source}`)});`;
     case "let":
       return `${INDENT}var ${s.name} = ${renderCsExpr(s.expr, ctx)};`;

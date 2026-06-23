@@ -95,6 +95,7 @@ export function emitCqrs(
       emitValidator: !esCreate,
       idClass,
       auditCtx: auditCreate ? ctx : undefined,
+      createAction: auditedCreateAction ?? undefined,
     });
   }
   // Canonical destroy → Delete command + handler (gated on the IR
