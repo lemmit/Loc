@@ -177,7 +177,8 @@ describe("provenanced — TypeScript emission", () => {
     const files = generateSystems(model).files;
     const routes = files.get("api/http/cart.routes.ts")!;
     expect(routes).toContain("await db.transaction(async (tx) => {");
-    expect(routes).toContain("for (const t of aggregate.drainProv())");
+    expect(routes).toContain("const __prov = aggregate.drainProv();");
+    expect(routes).toContain("for (const t of __prov) {");
     expect(routes).toContain("tx.insert(schema.provenanceRecords).values({");
     // co-located lineage is part of the response DTO, via the shared schema
     expect(routes).toContain("const ProvenanceLineage = z.object({");
