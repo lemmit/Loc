@@ -123,6 +123,7 @@ const DESIGN_KEYWORDS = new Set([
   "mui",
   "chakra",
   "coreComponents",
+  "daisyui",
   "shadcnSvelte",
   "flowbite",
 ]);

@@ -21,7 +21,7 @@ name: Corpus compile gate (Elixir / Ash)
 # (the loopback TLS mirror is only for the fingerprint-filtering sandbox proxy
 # — see CLAUDE.md §14).
 #
-# Triggers: changes to the Elixir generator / ashPhoenix pack / corpus
+# Triggers: changes to the Elixir generator / HEEx packs / corpus
 # fixtures / the corpus test, plus push:main and manual dispatch.
 
 on:
@@ -32,7 +32,8 @@ on:
       - 'src/platform/elixir.ts'
       - 'src/ir/**'
       - 'src/system/**'
-      - 'designs/ashPhoenix/**'
+      - 'designs/coreComponents/**'
+      - 'designs/daisyui/**'
       - 'test/fixtures/corpus/**'
       - 'test/e2e/corpus-elixir-build.test.ts'
       - 'package.json'
@@ -44,7 +45,8 @@ on:
       - 'src/platform/elixir.ts'
       - 'src/ir/**'
       - 'src/system/**'
-      - 'designs/ashPhoenix/**'
+      - 'designs/coreComponents/**'
+      - 'designs/daisyui/**'
       - 'test/fixtures/corpus/**'
       - 'test/e2e/corpus-elixir-build.test.ts'
       - 'package.json'

@@ -41,6 +41,7 @@ export const BUILTIN_PACK_FORMATS = {
   "shadcn@v3": "tsx",
   "shadcn@v4": "tsx",
   "coreComponents@v3": "heex",
+  "daisyui@v1": "heex",
   "shadcnSvelte@v1": "svelte",
   "flowbite@v1": "svelte",
   "vuetify@v3": "vue",
@@ -86,6 +87,11 @@ export const BUILTIN_PACK_LATEST = {
   // this doesn't touch test/fixtures/baseline-output/.
   shadcn: "v4",
   coreComponents: "v3",
+  // The genuine-daisyUI HEEx pack ships its first version; bareword
+  // `design: daisyui` resolves to daisyui@v1.  coreComponents (plain
+  // Tailwind core_components) stays the elixir default; daisyui is the
+  // opt-in design-system look.
+  daisyui: "v1",
   // Svelte packs ship a single version each so far; barewords resolve
   // straight to v1.
   shadcnSvelte: "v1",

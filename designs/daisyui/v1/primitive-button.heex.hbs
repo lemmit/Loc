@@ -1,0 +1,5 @@
+<%!-- primitive-button --%>
+<.button class={if @variant == "primary" do "btn btn-primary" else "btn btn-ghost" end}
+         phx-click={assigns[:on_click]}>
+  <%= @label %>
+</.button>

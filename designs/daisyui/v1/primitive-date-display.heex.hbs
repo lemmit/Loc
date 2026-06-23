@@ -1,0 +1,4 @@
+<%!-- primitive-date-display --%>
+<time datetime={@value} class="whitespace-nowrap text-sm text-base-content/70">
+  <%= if @value, do: Calendar.strftime(@value, "%Y-%m-%d %H:%M"), else: "—" %>
+</time>

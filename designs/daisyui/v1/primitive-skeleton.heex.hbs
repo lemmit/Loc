@@ -1,0 +1,6 @@
+<%!-- primitive-skeleton --%>
+<div class="space-y-2">
+  <%= for _i <- 1..(assigns[:lines] || 3) do %>
+  <div class="skeleton h-6"></div>
+  <% end %>
+</div>

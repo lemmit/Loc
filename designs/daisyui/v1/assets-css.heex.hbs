@@ -1,0 +1,21 @@
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
+
+/* daisyUI component classes (btn / card / badge / table / alert / …) and the
+   theme variables come from the daisyUI plugin wired in tailwind.config.js — the
+   daisyui Loom pack uses them instead of hand-rolling utility recipes. */
+
+/* Phoenix LiveView specific styles */
+[data-phx-feedback-for] .phx-no-feedback {
+  display: none;
+}
+
+.phx-click-loading {
+  opacity: 0.5;
+  transition: opacity 1s ease 0.2s;
+}
+
+.phx-loading {
+  cursor: wait;
+}

@@ -75,6 +75,7 @@ const BUILT_IN_PACKS: ReadonlyArray<PackUnderTest> = [
   { dir: "designs/chakra/v2", label: "chakra@v2", format: "tsx" },
   { dir: "designs/chakra/v3", label: "chakra@v3", format: "tsx" },
   { dir: "designs/coreComponents/v3", label: "coreComponents@v3", format: "heex" },
+  { dir: "designs/daisyui/v1", label: "daisyui@v1", format: "heex" },
   // Svelte + Vue packs share the TSX contract — same walker, same
   // testidAttr splices in the templates.
   { dir: "designs/shadcnSvelte/v1", label: "shadcnSvelte@v1", format: "svelte" },

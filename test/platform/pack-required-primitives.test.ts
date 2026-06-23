@@ -38,6 +38,7 @@ const BUILTIN_PACKS: ReadonlyArray<{ name: string; format: "tsx" | "heex" | "sve
   { name: "chakra@v2", format: "tsx" },
   { name: "chakra@v3", format: "tsx" },
   { name: "coreComponents@v3", format: "heex" },
+  { name: "daisyui@v1", format: "heex" },
   { name: "shadcnSvelte@v1", format: "svelte" },
   { name: "flowbite@v1", format: "svelte" },
 ];

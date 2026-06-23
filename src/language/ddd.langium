@@ -326,7 +326,7 @@ Platform returns string:
 // otherwise.  Named `design` (not `ui`) to avoid colliding with
 // the test-DSL's `ui.workflows.X(...)` accessor.
 DesignPack returns string:
-    'mantine' | 'shadcn' | 'mui' | 'chakra' | 'coreComponents' | 'shadcnSvelte' | 'flowbite' | 'vuetify' | 'shadcnVue' | 'angularMaterial' | 'primeng' | 'spartanNg' | STRING;
+    'mantine' | 'shadcn' | 'mui' | 'chakra' | 'coreComponents' | 'daisyui' | 'shadcnSvelte' | 'flowbite' | 'vuetify' | 'shadcnVue' | 'angularMaterial' | 'primeng' | 'spartanNg' | STRING;
 // Per-deployable auth opt-in.  `required` enables JWT-decode middleware
 // and the user-supplied verifier hook on a backend; `ui` mounts the
 // login redirect + route guard on a frontend (react / LiveView) under a

@@ -1,0 +1,12 @@
+<%!-- primitive-query-view: wraps an async data display with loading/error states --%>
+<div data-testid={assigns[:testid]}>
+  <%= if assigns[:loading] do %>
+    {{> primitive-skeleton}}
+  <% else %>
+    <%= if assigns[:error] do %>
+      {{> primitive-alert color="red" message={@error}}}
+    <% else %>
+      <%= @inner_content %>
+    <% end %>
+  <% end %>
+</div>

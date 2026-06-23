@@ -20,7 +20,7 @@ name: Elixir / Ash build verification
 # additions no longer need a separate workflow-side update.
 #
 # Triggers:
-#   - PRs that touch the Phoenix generator, the ashPhoenix design pack,
+#   - PRs that touch the Phoenix generator, the HEEx design packs,
 #     the fixtures, or the test.
 #   - Pushes to main (full regression check).
 #   - Manual dispatch.
@@ -31,7 +31,8 @@ on:
     paths:
       - 'src/generator/elixir/**'
       - 'src/platform/elixir.ts'
-      - 'designs/ashPhoenix/**'
+      - 'designs/coreComponents/**'
+      - 'designs/daisyui/**'
       - 'examples/**'
       - 'test/e2e/fixtures/elixir-ash-build/**'
       - 'test/e2e/generated-elixir-ash-build.test.ts'
@@ -41,7 +42,8 @@ on:
     paths:
       - 'src/generator/elixir/**'
       - 'src/platform/elixir.ts'
-      - 'designs/ashPhoenix/**'
+      - 'designs/coreComponents/**'
+      - 'designs/daisyui/**'
       - 'examples/**'
       - 'test/e2e/fixtures/elixir-ash-build/**'
       - 'test/e2e/generated-elixir-ash-build.test.ts'
