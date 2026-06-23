@@ -123,8 +123,8 @@ end`;
  *  `on_lookup: :relate, on_no_match: :error, on_missing: :unrelate`), so the join
  *  rows end up exactly the given set without ever creating a target.  The exact
  *  analogue of the VO-collection seam; the READ side
- *  (the `<f>_through` m2m relationship + the `:<f>` `{:array, :uuid}` calculate +
- *  the load preparation) is already emitted by domain-emit, and the wire encoder
+ *  (the `<f>_through` m2m relationship + the `:<f>` `{:array, :uuid}` `list`
+ *  aggregate + the load preparation) is already emitted by domain-emit, and the wire encoder
  *  now includes `:<f>` too — so create/update accepting the id list is the last
  *  missing half.  Empty → byte-identical pre-ref-collection output. */
 function refCollManageLines(agg: AggregateIR, associations: AssociationIR[]): string[] {

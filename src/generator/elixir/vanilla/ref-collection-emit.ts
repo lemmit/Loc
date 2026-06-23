@@ -7,7 +7,7 @@
 // `trainer_party` join table).  On the vanilla foundation it must be an Ecto
 // `many_to_many` relationship through that join table, mirroring what the Ash
 // foundation does with a `many_to_many ... do through ... end` + a
-// `calculate :party, {:array, :uuid}, expr(party_through.id)` wire field.
+// `list :party, :party_through, :id` aggregate for the id-array wire field.
 //
 // This module owns the small structural query (`refCollFields`) plus the four
 // runtime fragments the schema / changeset / repository / controller emitters
