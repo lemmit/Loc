@@ -83,7 +83,11 @@ describe("vanilla — workflow body lowering (factory-let + op-call)", () => {
     const wf = files.get(
       [...files.keys()].find((k) => k.endsWith("/workflows/create_and_complete.ex"))!,
     )!;
-    expect(wf).toMatch(/with [\s\S]*do\n\s+\{:ok, t\}\n\s+end/);
+    // The do-branch now opens with the woven `workflow_completed` log line
+    // (S3 lifecycle events) before the `{:ok, t}` success result.
+    expect(wf).toMatch(
+      /with [\s\S]*do\n\s+Logger\.info\("workflow_completed"[\s\S]*?\n\s+\{:ok, t\}\n\s+end/,
+    );
   });
 
   it("the lowered body is wrapped in Repo.transaction for a `transactional` workflow", async () => {

@@ -693,6 +693,14 @@ function renderHandler(
     ctorParamPairs.push("ICurrentUserAccessor currentUser");
     ctorAssigns.push("_currentUser = currentUser");
   }
+  // Workflow lifecycle narrative (workflow_started / workflow_completed) — the
+  // command handler always logs both, so inject the catalog logger
+  // (`renderDotnetLogCall` assumes a `_log` ILogger field).  Shared catalog
+  // identity (field `workflow`) with the Phoenix-Ash reference + every backend.
+  fields.push(`    private readonly ILogger<${handlerName}> _log;`);
+  ctorParamPairs.push(`ILogger<${handlerName}> log`);
+  ctorAssigns.push("_log = log");
+  usings.add("Microsoft.Extensions.Logging");
   // Extern op-call DI: each unique extern target needs its
   // user-supplied IXAggHandler injected.  Field name follows the
   // op+agg convention (`_confirmOrderHandler`).
@@ -781,12 +789,22 @@ function renderHandler(
     stmtLines.push(`        await ${fieldName}.SaveAsync(${save.name}, cancellationToken);`);
   }
 
-  let body: string;
+  // `workflow_started` at handler entry (before any tx begins); `workflow_completed`
+  // on the success tail (after emits dispatch, before returning Unit) — a thrown
+  // guard / domain error short-circuits past it.
+  const startedLog = `        ${renderDotnetLogCall("workflowStarted", [
+    { name: "workflow", valueExpr: JSON.stringify(wf.name) },
+  ])}\n`;
+  const completedLog = `        ${renderDotnetLogCall("workflowCompleted", [
+    { name: "workflow", valueExpr: JSON.stringify(wf.name) },
+  ])}\n`;
+
+  let body: string = startedLog;
   if (wf.transactional) {
     const beginCall = effectiveIsolation
       ? `_db.Database.BeginTransactionAsync(IsolationLevel.${csIsolationLevel(effectiveIsolation)}, cancellationToken)`
       : `_db.Database.BeginTransactionAsync(cancellationToken)`;
-    body =
+    body +=
       `        await using var tx = await ${beginCall};\n` +
       `        try\n` +
       `        {\n` +
@@ -800,13 +818,14 @@ function renderHandler(
       `            throw;\n` +
       `        }\n`;
   } else {
-    body = stmtLines.join("\n") + "\n";
+    body += stmtLines.join("\n") + "\n";
   }
   if (usage.hasEmit) {
     body +=
       `        foreach (var ev in _workflowEvents)\n` +
       `            await _events.DispatchAsync(ev, cancellationToken);\n`;
   }
+  body += completedLog;
   body += "        return Unit.Value;\n";
 
   const ctor =

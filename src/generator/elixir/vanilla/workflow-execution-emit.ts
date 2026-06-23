@@ -76,6 +76,7 @@ import {
   workflowEmitsCommandRoute,
 } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
+import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import type { ApiRoute } from "../api-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 
@@ -984,7 +985,7 @@ function referencedParams(wf: WorkflowIR): string[] {
  *  `{:ok, _} | {:error, _}`.  An emit-only `do`-branch ends with
  *  `:ok` so the workflow still satisfies the `{:ok, _} | {:error, _}`
  *  contract. */
-function assembleBody(lines: BodyLine[]): string {
+function assembleBody(lines: BodyLine[], completedCall: string): string {
   const withClauses = lines.filter((l) => l.kind === "with-clause");
   const emitLines = lines.filter((l) => l.kind === "emit");
   const stmtLines = lines.filter((l) => l.kind === "stmt");
@@ -992,22 +993,24 @@ function assembleBody(lines: BodyLine[]): string {
 
   const resultExpr = lastBind ? `{:ok, ${lastBind}}` : "{:ok, params}";
   // The `do`-branch body: emits first (only run on with-chain success),
-  // then the success result.  Indented to match the `with ... do ... end`
-  // shape — 6 spaces under `run_inner`.
+  // then `workflow_completed` (the success tail), then the success result.
+  // Indented to match the `with ... do ... end` shape — 6 spaces under
+  // `run_inner`.  The log fires only on success (the with-chain's do-branch),
+  // never on an `{:error, _}` short-circuit.
   const doBody =
     emitLines.length > 0
-      ? `${emitLines.map((l) => `      ${l.text}`).join("\n")}\n      ${resultExpr}`
-      : `      ${resultExpr}`;
+      ? `${emitLines.map((l) => `      ${l.text}`).join("\n")}\n      ${completedCall}\n      ${resultExpr}`
+      : `      ${completedCall}\n      ${resultExpr}`;
 
   if (stmtLines.length === 0 && withClauses.length === 0 && emitLines.length === 0) {
-    // Empty body — keep the stub semantics.
-    return `    {:ok, params}`;
+    // Empty body — keep the stub semantics; still announce completion.
+    return `    ${completedCall}\n    {:ok, params}`;
   }
 
   if (stmtLines.length === 0 && withClauses.length === 0 && emitLines.length > 0) {
     // Emit-only body — no with-chain to gate on, broadcasts run
     // unconditionally then return :ok.
-    return `${emitLines.map((l) => `    ${l.text}`).join("\n")}\n    {:ok, :emitted}`;
+    return `${emitLines.map((l) => `    ${l.text}`).join("\n")}\n    ${completedCall}\n    {:ok, :emitted}`;
   }
 
   if (stmtLines.length === 0 && withClauses.length > 0) {
@@ -1029,6 +1032,7 @@ ${doBody}
 ${stmtLines.map((l) => `    ${l.text}`).join("\n")}${
   emitLines.length > 0 ? `\n${emitLines.map((l) => `    ${l.text}`).join("\n")}` : ""
 }
+    ${completedCall}
     ${resultExpr}`;
   }
 
@@ -1061,8 +1065,20 @@ function renderWorkflowModule(
     foundation: "vanilla",
     resourceModules,
   };
+  // Workflow lifecycle narrative — `workflow_started` at run entry, woven into
+  // the success tail of the body by `assembleBody` (`workflow_completed`).  The
+  // workflow name is a compile-time string literal, so it interpolates straight
+  // into the `valueExpr` (no inline `case`/expr that would mis-parse as a
+  // keyword-arg value).  Shared catalog identity (field `workflow`) with the
+  // Phoenix-Ash reference + every backend.
+  const startedCall = renderPhoenixLogCall("workflowStarted", [
+    { name: "workflow", valueExpr: JSON.stringify(wf.name) },
+  ]);
+  const completedCall = renderPhoenixLogCall("workflowCompleted", [
+    { name: "workflow", valueExpr: JSON.stringify(wf.name) },
+  ]);
   const lines = lowerStatements(wf.statements ?? [], contextModuleFq, renderCtx);
-  const body = assembleBody(lines);
+  const body = assembleBody(lines, completedCall);
   const hasContextCall = lines.some((l) => l.kind === "with-clause");
   const contextAlias = hasContextCall ? `\n  alias ${contextModuleFq}, as: Context` : "";
   // Rewrite the body's fully-qualified context module to the `Context`
@@ -1077,7 +1093,9 @@ function renderWorkflowModule(
     params.length > 0
       ? `    %{${params.map((n) => `"${snake(n)}" => ${snake(n)}`).join(", ")}} = params\n`
       : "";
-  const finalBody = paramDestructure + aliasedBody;
+  // `workflow_started` runs first thing in the body (before the destructure +
+  // the with-chain), so it fires at run/1 entry on every invocation.
+  const finalBody = `    ${startedCall}\n` + paramDestructure + aliasedBody;
 
   const transactionalDoc = transactional
     ? "\n\n  Marked `transactional` — the body runs inside `Repo.transaction/1`;\n  a rejection result rolls the transaction back."
@@ -1090,6 +1108,7 @@ defmodule ${moduleName} do
   Workflow \`${wf.name}\` — vanilla foundation (plain Elixir, no Ash).${transactionalDoc}
   """
 
+  require Logger
   alias ${repoMod}${contextAlias}
 
   @spec run(map()) :: {:ok, term()} | {:error, term()}
@@ -1115,7 +1134,9 @@ end
 defmodule ${moduleName} do
   @moduledoc """
   Workflow \`${wf.name}\` — vanilla foundation (plain Elixir, no Ash).
-  """${hasContextCall ? `${contextAlias}\n` : ""}
+  """
+
+  require Logger${hasContextCall ? `${contextAlias}\n` : ""}
 
   @spec run(map()) :: {:ok, term()} | {:error, term()}
   def run(params) when is_map(params) do
