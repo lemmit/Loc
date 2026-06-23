@@ -2,6 +2,22 @@
 
 **Snapshot date:** 2026-06-21
 
+> **[2026-06-23 refresh, code-verified against `main` @ `b598dba`]** Folded in
+> since the 2026-06-22 pass: **per-operation `audited` shipped on Java + Python**
+> (#1503/W3a — `AUDIT_OP_BACKENDS = {node, dotnet, java, python}`) and **audited
+> lifecycle widened to all four** (`AUDIT_LIFECYCLE_BACKENDS = {node, dotnet,
+> java, python}`), both also on elixir·**vanilla** via the foundation predicate —
+> so **F2's audit gap is essentially closed**; **`ignoring` filter-bypass** is now
+> all five families incl. **both** elixir foundations (`bypassSupported` →
+> `FILTER_BYPASS_FAMILIES` has every family; ash honours it via the §11.6 promoted
+> read); and **`X id[]` reference collections now emit end-to-end on BOTH elixir
+> foundations** — #1533 (vanilla `many_to_many`) and #1551 (Ash
+> create/update `manage_relationship` + encoder + join-resource schema + `list`
+> aggregate), **boot-verified across all five backends** (a real-Postgres
+> POST→GET round-trip; the gap had no validator code and was invisible to
+> `mix compile`). The cited gate line numbers were re-synced (they had all
+> shifted ~50 lines).
+
 > **[2026-06-22 refresh, code-verified against `main` @ `cf77fcf`]** Since the
 > original snapshot a wave of plan workstreams landed. Changes folded in below:
 > **provenance now ships on Java + Python** (#1490/W2 — `PROVENANCE_BACKENDS` is
@@ -50,9 +66,9 @@ Legend: ✓ implemented · ✗ gated (validator error) · ⚠ partial · 🔴 **
 
 | Feature | node | dotnet | java | python | elixir·ash | elixir·vanilla | Gate (source of truth) |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|---|
-| Event-sourced storage `persistedAs(eventLog)` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | `EVENT_SOURCING_BACKENDS` · system-checks.ts:1849 |
-| Event-sourced **workflow** (saga appliers) | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | `EVENT_SOURCING_WORKFLOW_BACKENDS` · system-checks.ts:1950 |
-| TPH inheritance `inheritanceUsing(sharedTable)` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `TPH_CAPABLE` · system-checks.ts:1798 |
+| Event-sourced storage `persistedAs(eventLog)` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | `EVENT_SOURCING_BACKENDS` · system-checks.ts:1900 |
+| Event-sourced **workflow** (saga appliers) | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | `EVENT_SOURCING_WORKFLOW_BACKENDS` · system-checks.ts:2001 |
+| TPH inheritance `inheritanceUsing(sharedTable)` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `TPH_CAPABLE` · system-checks.ts:1849 |
 | TPC inheritance `inheritanceUsing(ownTable)` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | (universal) |
 | `shape(document)` persistence | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | `PLATFORM_SAVING_SHAPES` · platform-axes.ts:40 |
 | `shape(embedded)` persistence | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `PLATFORM_SAVING_SHAPES` · platform-axes.ts:40 |
@@ -60,24 +76,30 @@ Legend: ✓ implemented · ✗ gated (validator error) · ⚠ partial · 🔴 **
 | Generic carriers (`paged<T>`, `envelope<T>`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_PAGED_BACKENDS` · structural-checks.ts:232 |
 | `when` canCommand gate + `can_<op>` query | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_WHEN_BACKENDS` · structural-checks.ts:484 |
 | Exception-less returns (`op(): X or NotFound`) | ✓ | ✓ | ✓ | ✓ | ⚠ return-dominant only | ✓ | `SUPPORTED_RETURN_BACKENDS` · structural-checks.ts:518 |
-| Non-principal capability `filter` (relational) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `LIMITED_FAMILIES` · system-checks.ts:1004 |
+| Non-principal capability `filter` (relational) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `LIMITED_FAMILIES` · system-checks.ts:1006 |
 | Principal capability `filter` (`currentUser`/tenancy, relational) | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | `supportsPrincipalFilter` · system-checks.ts:1021 |
-| Capability `filter` on non-relational shape (doc/embedded) | ✓ | ✓ | ✓ | ✗ | ⚠ embedded only | ⚠ embedded only | `supportsNonRelationalFilter` · system-checks.ts:1044 |
-| `ignoring <Cap>` filter-bypass | ✓ | ✓ | ✗ | ✗ | ✗ | ✓ | `FILTER_BYPASS_FAMILIES` / `bypassSupported` · system-checks.ts:1148 |
-| Provenanced fields (runtime trace) | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | `PROVENANCE_BACKENDS` · system-checks.ts:1999 |
-| Per-operation `audited` | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | `AUDIT_OP_BACKENDS` · system-checks.ts:2055 |
-| Audited **lifecycle** (`audited create`/`destroy`) | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | `AUDIT_LIFECYCLE_BACKENDS` · system-checks.ts:2056 |
+| Capability `filter` on non-relational shape (doc/embedded) | ✓ | ✓ | ✓ | ✗ | ⚠ embedded only | ⚠ embedded only | `supportsPrincipalNonRelationalFilter` · system-checks.ts:1067 |
+| `ignoring <Cap>` filter-bypass | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `FILTER_BYPASS_FAMILIES` / `bypassSupported` · system-checks.ts:1199 |
+| Provenanced fields (runtime trace) | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | `PROVENANCE_BACKENDS` · system-checks.ts:2050 |
+| Per-operation `audited` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | `AUDIT_OP_BACKENDS` (+ elixir·vanilla) · system-checks.ts:2111 |
+| Audited **lifecycle** (`audited create`/`destroy`) | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | `AUDIT_LIFECYCLE_BACKENDS` (+ elixir·vanilla) · system-checks.ts:2112 |
 | Audit/context stamping (`with audit` → `contextStamps`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | not gated (all reference it; runtime depth varies — see §6) |
-| Ordered `X id[]` reference collections | ✓ | ✓ | ✓ | ✓ | ✗ set | ✗ set | set semantics (see §7) |
+| `X id[]` reference collections (set) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | not gated — emitted + boot-verified on all 5 (see §7) |
 
 The reference platforms (node/dotnet/react) are now the **trailing** view: the
 big movements since the 2026-06-03 inventory are (1) **TPH is no longer node-only
 — all five backends emit it**, (2) **Java and Python reached full backend status**
 (unions, carriers, `when`, returns, ES, all three saving shapes), (3) the
 **Phoenix `vanilla` foundation** unlocked ES + document + provenance that the Ash
-foundation still gates, and (4) **provenance landed on Java + Python** (#1490),
-leaving per-operation `audited` as the last cross-cutting gap on those two (W3a,
-in flight — #1503).
+foundation still gates, and (4) **provenance landed on Java + Python** (#1490).
+As of [2026-06-23] the remaining cross-cutting items also closed: (5) **per-op +
+lifecycle `audited`** now ship on all four non-elixir backends + elixir·vanilla
+(#1503), (6) **`ignoring` filter-bypass** is all five families incl. both elixir
+foundations, and (7) **`X id[]` reference collections** were drained on both
+elixir foundations (#1533 vanilla / #1551 ash) and boot-verified on all five — the
+last had been an ungated 🔴 silent gap. The standing cross-backend gaps are now
+foundation-shaped (elixir·ash gates ES/document/provenance/audit) rather than
+backend-shaped.
 
 ---
 
@@ -149,13 +171,21 @@ rows are returned, and tenancy isolation is silently absent.
 > `foundation === "vanilla"`, system-checks.ts:1158). The original "Java/Python emit
 > no provenance" claim is no longer true.
 
-What remains: `AUDIT_OP_BACKENDS = {node, dotnet}` (system-checks.ts:2055) and
-`AUDIT_LIFECYCLE_BACKENDS = {node}` (system-checks.ts:2056). Java and Python still
-gate per-operation `audited` (fail-fast, good) — closing that is **W3a, in flight**
-(#1503). Lifecycle `audited` (`audited create`/`destroy`) is node-only and is a
-grammar/feature gap, not a port (no other backend emits it). So the
-cross-cutting/compliance gap has narrowed from "provenance + audit on two backends"
-to "per-op audit on two backends, with the PR open."
+> **[2026-06-23] Closed.** W3a landed (#1503): `AUDIT_OP_BACKENDS = {node,
+> dotnet, java, python}` (system-checks.ts:2111) and `AUDIT_LIFECYCLE_BACKENDS =
+> {node, dotnet, java, python}` (system-checks.ts:2112) — both also on
+> elixir·**vanilla** via `elixirAuditCapable` (foundation === "vanilla";
+> elixir·ash stays gated, like provenance/ES). So per-op AND lifecycle `audited`
+> now ship on all four non-elixir backends + vanilla; the "audit runtime" gap is
+> no longer cross-cutting — only elixir·ash remains gated (a foundation fit, not a
+> port). The text below is the superseded 2026-06-22 state.
+
+What remained (2026-06-22): `AUDIT_OP_BACKENDS = {node, dotnet}` and
+`AUDIT_LIFECYCLE_BACKENDS = {node}`. Java and Python still gated per-operation
+`audited` (fail-fast, good) — closing that was **W3a, in flight** (#1503, since
+merged). Lifecycle `audited` (`audited create`/`destroy`) was node-only. So the
+cross-cutting/compliance gap had narrowed from "provenance + audit on two
+backends" to "per-op audit on two backends, with the PR open" — now resolved.
 
 ### F3 — Elixir foundation split is the dominant elixir story
 
@@ -233,20 +263,23 @@ and gates principal (W1b) + non-relational filters — see **F1** (resolved #148
 
 **`ignoring <Cap>` filter-bypass** (#1501): a read may carry an `ignoring *` /
 `ignoring <Cap>` clause that drops a specific capability filter from that read.
-`FILTER_BYPASS_FAMILIES = {dotnet, node}` (system-checks.ts:1148) honor it on every
-foundation (EF `IgnoreQueryFilters`; Drizzle omits the bypassed conjunct);
-elixir·`vanilla` honors it (Ecto omits the bypassed `where:`) but elixir·`ash`,
-`java`, and `python` are **deferred** — `bypassSupported` keeps them fail-fast
-(`loom.filter-bypass-*`), never silently still-filtering.
+`FILTER_BYPASS_FAMILIES = {dotnet, node, elixir, java, python}` (system-checks.ts:1199)
+— **all five families** now honor it (EF `IgnoreQueryFilters`; Drizzle omits the
+bypassed conjunct; Ecto omits the bypassed `where:`; java/python omit the
+predicate). Elixir honors it on **both** foundations: vanilla omits the `where:`,
+ash promotes the capability out of `base_filter` and applies it per-read minus the
+bypassed reads (§11.6). _([2026-06-23] widened from the 2026-06-22 `{dotnet, node}`
++ vanilla; java/python/ash were deferred then.)_
 
 ### 5. Provenance & audit
 
-`PROVENANCE_BACKENDS = {node, dotnet, java, python}` (system-checks.ts:1999) +
-elixir·vanilla via the foundation predicate (`foundation === "vanilla"`,
-system-checks.ts:1158). `AUDIT_OP_BACKENDS = {node, dotnet}` (system-checks.ts:2055);
-`AUDIT_LIFECYCLE_BACKENDS = {node}` (system-checks.ts:2056). Java and Python now
-**emit provenance** (#1490/W2) but still gate per-operation `audited` (W3a in flight,
-#1503). See **F2**.
+`PROVENANCE_BACKENDS = {node, dotnet, java, python}` (system-checks.ts:2050) +
+elixir·vanilla via the foundation predicate (`foundation === "vanilla"`). As of
+[2026-06-23] audit caught up to provenance: `AUDIT_OP_BACKENDS` and
+`AUDIT_LIFECYCLE_BACKENDS` are both `{node, dotnet, java, python}`
+(system-checks.ts:2111-2112) + elixir·vanilla (`elixirAuditCapable`). So provenance
+**and** per-op/lifecycle audit now ship on all four non-elixir backends + vanilla;
+only elixir·ash stays gated for both (a foundation fit, like ES storage). See **F2**.
 
 ### 6. Audit / context stamping (`contextStamps`)
 
@@ -258,13 +291,31 @@ equivalence (e.g. principal-referencing stamp values, lifecycle hooks) still
 varies per backend and is worth a dedicated runtime conformance pass rather than a
 static-reference count.
 
-### 7. `X id[]` reference-collection ordering
+### 7. `X id[]` reference collections
 
-Unchanged: node (Drizzle) / dotnet (EF) / java (JPA `@ElementCollection` / join)
-/ python write an `ordinal` and `ORDER BY ordinal`; elixir (Ash) leaves the
-ordinal at default and returns Postgres order. The **wire contract is unordered
-(set semantics)** — `party[0]` means "some element," not "the first." Documented
-in `generators.md` → "What the generators don't do."
+> **[2026-06-23] Now emitted + boot-verified on all five backends.** This was an
+> ungated 🔴 silent gap on **both** elixir foundations until a cross-backend
+> sweep boot-tested it (a real-Postgres POST→GET round-trip — the only check that
+> catches it, since `mix compile` passes on the broken output):
+> - **elixir·vanilla** (#1533) emitted `field :party, {:array, :binary_id}` on a
+>   column the migration never created → first query crashed. Fixed to an Ecto
+>   `many_to_many` over the already-correct join table (preload on read,
+>   `put_assoc` on write).
+> - **elixir·ash** (#1551) emitted the `many_to_many`/calculate but the
+>   create/update actions never wired it (POST 422), the encoder omitted it, the
+>   join resource lacked the schema prefix, and the read projection was a
+>   single-valued calculate that crashed the `::uuid[]` cast. Fixed: create/update
+>   `manage_relationship` (set-replace), encoder inclusion, join-resource `schema`,
+>   and a `list` aggregate read projection.
+> - **node / dotnet / java / python** were boot-verified correct in the same sweep
+>   (Drizzle join select+delete+insert, EF join entity, JPA `@ElementCollection`,
+>   SQLAlchemy association rows).
+
+Ordering: node (Drizzle) / dotnet (EF) / java / python write an `ordinal` and
+`ORDER BY ordinal`; elixir leaves the ordinal at default and returns Postgres
+order. The **wire contract is unordered (set semantics)** — `party[0]` means
+"some element," not "the first" — so per-backend ordering divergence is within
+contract. Documented in `generators.md` → "What the generators don't do."
 
 ---
 

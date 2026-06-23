@@ -4,8 +4,14 @@
 > out as backends and the Phoenix `vanilla` foundation gaining event-sourcing /
 > document / provenance support. For the current five-backend picture see
 > [`backend-feature-parity-2026-06.md`](backend-feature-parity-2026-06.md).
-> Several rows below are stale (notably: TPH is no longer node-only — all five
-> backends emit it).
+> Several rows below are stale — the gate sets have widened since. As of
+> 2026-06-23: TPH is no longer node-only (all five backends); event-sourced
+> storage is `{node, dotnet, java, python}` + elixir·vanilla; provenance AND
+> per-op/lifecycle `audited` are `{node, dotnet, java, python}` + elixir·vanilla;
+> `ignoring` filter-bypass is all five families incl. both elixir foundations; and
+> `X id[]` reference collections now emit on all five backends (the matrix row
+> below showing phoenix `✗ set` is wrong — #1533/#1551 fixed both foundations).
+> Use the current audit for any decision.
 
 **Snapshot date:** 2026-06-03
 
