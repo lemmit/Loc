@@ -9,7 +9,7 @@
 //
 // Output target: `priv/static/assets/theme.css` (caller decides the path).
 //
-// The ashPhoenix pack's `theme.heex.hbs` template emits a `<style>` block
+// The daisyui pack's `theme.heex.hbs` template emits a `<style>` block
 // suitable for inlining in a `.html.heex` layout.  This module instead emits
 // a standalone CSS file — no `<style>` wrapper — by extracting the same
 // tokens from the ThemeVM and writing them directly.  This approach avoids

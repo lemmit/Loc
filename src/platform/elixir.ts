@@ -19,7 +19,7 @@ import type { ComposeServiceShape, PlatformSurface } from "./surface.js";
 // Unlike `dotnet`/`hono` (backend-only) and `react`/`static` (frontend-only),
 // an `elixir` deployable ships ONE project that both serves an
 // Ash-derived API (when `serves:` is populated) AND mounts a `ui:`
-// rendered as Phoenix LiveView modules against the `ashPhoenix` HEEx
+// rendered as Phoenix LiveView modules against the `daisyui` HEEx
 // design pack.  It owns its own Postgres database (`needsDb: true`),
 // matches the backend platforms for `serves:` validity, and matches
 // the frontend platforms for `ui:` mount validity (`mountsUi: true`).

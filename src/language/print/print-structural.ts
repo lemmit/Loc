@@ -122,7 +122,7 @@ const DESIGN_KEYWORDS = new Set([
   "shadcn",
   "mui",
   "chakra",
-  "ashPhoenix",
+  "daisyui",
   "shadcnSvelte",
   "flowbite",
 ]);

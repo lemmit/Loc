@@ -946,7 +946,7 @@ function renderToast(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext):
 
 export interface PrimitiveSpec {
   /** HEEx component tag, e.g. ".heading", "div" (for raw layout), or
-   *  ".button" — driven by the ashPhoenix pack conventions. */
+   *  ".button" — driven by the daisyui pack conventions. */
   tag: string;
   /** Attribute keys that take literal values rendered as static
    *  strings (vs JS-expression braces).  Empty by default. */

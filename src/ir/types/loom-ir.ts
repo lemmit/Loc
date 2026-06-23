@@ -2251,7 +2251,7 @@ export interface NeedIR {
 // `phoenixLiveView` is the fullstack Elixir/Ash + Phoenix LiveView
 // platform: a single deployable serves an Ash-derived API AND mounts
 // a `ui:` whose pages render as LiveView modules against the
-// `ashPhoenix` HEEx pack.  Unlike `react`/`static` it owns its own
+// `daisyui` HEEx pack.  Unlike `react`/`static` it owns its own
 // database (`needsDb: true`) and never declares `targets:` —
 // validator enforces both.
 // `java` is the Spring Boot / Spring Data JPA backend (backend-only,
@@ -2318,7 +2318,7 @@ export interface DeployableIR {
   targetName?: string;
   /** Design-system template pack the React frontend generator renders
    *  pages against.  Built-ins: "mantine", "chakra", "mui", "shadcn",
-   *  "ashPhoenix".  A string starting with "./" or "/" is a custom
+   *  "daisyui".  A string starting with "./" or "/" is a custom
    *  pack path resolved relative to the .ddd file (a directory
    *  containing pack.json).  Only meaningful when platform === "react"
    *  (or "static"/"dotnet" with a UI mount, or "phoenix");

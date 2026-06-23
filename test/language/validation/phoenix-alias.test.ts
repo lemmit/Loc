@@ -78,12 +78,12 @@ describe("validator: retired phoenix-family platform + framework aliases", () =>
     ).toBe(true);
   });
 
-  it("an elixir host with the ashPhoenix pack passes the design-pack format check", async () => {
+  it("an elixir host with the daisyui pack passes the design-pack format check", async () => {
     const { errors } = await parseString(`
       system S {
         subdomain M { context C { aggregate A { x: int = 0 } repository As for A { } } }
         ui Admin { framework: phoenixLiveView  page Home { route: "/" } }
-        deployable app { platform: elixir, contexts: [C], hosts: Admin, port: 4000, design: ashPhoenix }
+        deployable app { platform: elixir, contexts: [C], hosts: Admin, port: 4000, design: daisyui }
       }
     `);
     expect(

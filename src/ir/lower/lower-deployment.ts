@@ -26,7 +26,7 @@ export function lowerDeployable(d: Deployable): DeployableIR {
   // this deployable — keeping the IR honest about which deployables
   // mount a frontend.  `react`/`static` always render React (TSX
   // packs).  `phoenixLiveView` is fullstack and always renders HEEx
-  // against the `ashPhoenix` pack.  `dotnet` is dual-mode: it renders
+  // against the `daisyui` pack.  `dotnet` is dual-mode: it renders
   // an embedded React SPA when (and only when) the deployable declares
   // `ui:`; backend-only dotnet drops the field.  Other platforms
   // (`hono`) silently drop `design:` and the validator already warns.
@@ -65,7 +65,7 @@ export function lowerDeployable(d: Deployable): DeployableIR {
   // `ui X { framework: svelte }` + `ui: X` would silently lower as the
   // platform default.  Computed before `design` so the pack default can
   // branch on it (a phoenix host embedding react needs a tsx pack, not
-  // ashPhoenix).
+  // daisyui).
   const boundUi = d.uiSugar?.ref?.ref ?? d.uiCompose?.ref?.ref ?? d.uiBlock?.ref?.ref;
   const uiFramework =
     d.uiBlock?.framework ??
@@ -89,7 +89,7 @@ export function lowerDeployable(d: Deployable): DeployableIR {
   //  - svelte frontends render Svelte → `shadcnSvelte`;
   //  - vue frontends render Vue → `vuetify`;
   //  - angular frontends render Angular → `angularMaterial`;
-  //  - phoenixLiveView renders HEEx → `ashPhoenix`, UNLESS it embeds a
+  //  - phoenixLiveView renders HEEx → `daisyui`, UNLESS it embeds a
   //    `framework: react` ui (D-PHOENIX-SURFACE), in which case the SPA
   //    needs a tsx pack → `mantine`;
   //  - backends without a `ui:` mount carry no design.
@@ -115,7 +115,7 @@ export function lowerDeployable(d: Deployable): DeployableIR {
                 ? "shadcnSvelte"
                 : uiFramework === "angular"
                   ? "angularMaterial"
-                  : "ashPhoenix",
+                  : "daisyui",
         )
       : (platform === "dotnet" || platform === "java") && uiName
         ? qualifyDesign(

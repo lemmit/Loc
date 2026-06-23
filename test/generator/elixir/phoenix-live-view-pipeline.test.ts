@@ -1415,7 +1415,7 @@ describe.skip("integration (parent wires emitters)", () => {
       "../../src/generator/elixir/extra-archetype-emit.js"
     );
     const { loadPack, resolvePackDir } = await import("../../../src/generator/_packs/loader-fs.js");
-    const pack = loadPack(resolvePackDir("ashPhoenix"));
+    const pack = loadPack(resolvePackDir("daisyui"));
     const ctx = {
       name: "Sales",
       enums: [],

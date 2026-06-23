@@ -4,7 +4,7 @@
 // View-models are framework-neutral: they carry every *decision* the
 // generator has made (humanized labels, formatter choice per type,
 // link targets) but no UI-library-specific text.  Every pack
-// (Mantine, shadcn, MUI, chakra, ashPhoenix) renders against the same VMs.
+// (Mantine, shadcn, MUI, chakra, daisyui) renders against the same VMs.
 //
 // VMs lean on string-typed JS expression slots (`valueExpr`,
 // `errorExpr`) where the template needs to splice raw JS.  Templates
