@@ -44,11 +44,25 @@ filter is structurally identical to the relational principal filter.
 The same `auth: required` + system `user {}` precondition the relational
 principal path enforces applies here (no request principal otherwise).
 
-### Slice B — `document` + principal (node, java) — follow-up
+### Slice B — `document` + principal (node, java) — IN PROGRESS (claim PR open)
 A `document` aggregate filters **in-app** over the rehydrated aggregate, so the
 principal predicate must be evaluated in-app against the request principal
 (`requireCurrentUser()` / the injected accessor), not pushed to SQL. This is the
 genuinely new rendering; sequenced after Slice A.
+
+- **Gate:** `supportsPrincipalNonRelationalFilter` (`system-checks.ts`) now also
+  accepts `document` for node/java (was `embedded`-only); the `auth: required` +
+  `user {}` precondition flows through unchanged.
+- **node (DONE):** `repository-document-builder.ts` — `documentCapabilityBody`
+  keeps the principal predicate (was dropped); each in-app read site binds
+  `const currentUser = requireCurrentUser();` (fail-closed) so the rendered
+  `currentUser.tenantId` resolves, and imports the accessor when
+  `aggregateUsesPrincipalContextFilter(agg)`. A find with its own `currentUser`
+  param reuses it rather than re-binding.
+- **java (in flight):** `emit/document-store.ts` — inject the
+  `CurrentUserAccessor` bean + bind `var currentUser = currentUserAccessor.user()`
+  before the `.stream().filter`, since `renderJavaExpr` emits a bare `currentUser`
+  token (unlike the relational/embedded SpEL path).
 
 `elixir` has no `document` shape (`validateSavingShapeSupport` gates it — see
 DEBT-07), and `python` doesn't yet wire principal filters at all (out of scope —

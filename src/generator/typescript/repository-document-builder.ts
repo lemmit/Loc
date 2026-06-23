@@ -9,7 +9,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import {
   aggregateUsesMoney,
-  exprUsesCurrentUser,
+  aggregateUsesPrincipalContextFilter,
   findUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
@@ -46,11 +46,20 @@ export function buildDocumentRepositoryFile(
   const tableName = lowerFirst(plural(agg.name));
   const idVar = `Ids.${agg.name}Id`;
   const repoUsesUser = (repo?.finds ?? []).some(findUsesCurrentUser);
+  // A principal-referencing (tenancy) capability filter evaluates the request
+  // actor IN-APP over the rehydrated document (DEBT-02 Slice B): each read binds
+  // `requireCurrentUser()` so the in-app predicate (`currentUser.tenantId`) can
+  // read it.  Fail-closed — the accessor throws when unauthenticated.
+  const usesPrincipalFilter = aggregateUsesPrincipalContextFilter(agg);
+  const principalBind = usesPrincipalFilter
+    ? `    const currentUser = requireCurrentUser();`
+    : null;
 
   const findMethods = (repo?.finds ?? []).map((find) => documentFindMethod(agg, find, ctx));
 
-  // Capability filter (e.g. soft-delete) applied in-app on the by-id reads so a
-  // hidden record reads as not-found, matching the find paths above.
+  // Capability filter (e.g. soft-delete / tenancy) applied in-app on the by-id
+  // reads so a hidden / cross-tenant record reads as not-found, matching the
+  // find paths above.
   const capRec = documentCapabilityBody(agg, "rec");
   const capX = documentCapabilityBody(agg, "x");
 
@@ -70,6 +79,7 @@ export function buildDocumentRepositoryFile(
     // to the pre-DEBT-02 emission); with one, bind it and gate by the predicate.
     ...(capRec
       ? [
+          ...(principalBind ? [principalBind] : []),
           `    const rec = ${lowerFirst(agg.name)}FromDoc(row.data as ${agg.name}Doc);`,
           `    if (!(${capRec})) return null;`,
           `    return rec;`,
@@ -85,6 +95,7 @@ export function buildDocumentRepositoryFile(
     "",
     `  async findManyByIds(ids: ${idVar}[]): Promise<${agg.name}[]> {`,
     `    if (ids.length === 0) return [];`,
+    ...(principalBind && capX ? [principalBind] : []),
     `    const rows = await this.db.select().from(schema.${tableName}).where(inArray(schema.${tableName}.id, ids));`,
     `    return rows.map((r) => ${lowerFirst(agg.name)}FromDoc(r.data as ${agg.name}Doc))${capX ? `.filter((x) => ${capX})` : ""};`,
     `  }`,
@@ -154,6 +165,10 @@ export function buildDocumentRepositoryFile(
     `import * as Ids from "../../domain/ids";`,
     `import { AggregateNotFoundError } from "../../domain/errors";`,
     `import type { DomainEventDispatcher } from "../../domain/events";`,
+    // A principal-referencing capability filter (tenancy) binds
+    // `requireCurrentUser()` into the in-app document predicate (DEBT-02 Slice
+    // B), the same ambient-accessor path the relational/embedded builders use.
+    usesPrincipalFilter && `import { requireCurrentUser } from "../../auth/middleware";`,
     `import { requestLog } from "../../obs/als";`,
     "",
     `type Db = NodePgDatabase<typeof schema>;`,
@@ -169,13 +184,15 @@ export function buildDocumentRepositoryFile(
  *  column, so a capability `filter` can't be a SQL column predicate — it's
  *  applied in-app against the rehydrated aggregate (the read already
  *  deserialises every row, so this matches the document read model).  Returns
- *  the boolean body under `varName` (`!varName.isDeleted`), AND-ed across the
- *  aggregate's NON-principal filters, or null.  (Principal/tenancy filters on a
- *  document aggregate stay gated — see validateContextFilterSupport.) */
+ *  the boolean body under `varName` (`!varName.isDeleted`), AND-ed across ALL
+ *  the aggregate's filters, or null.  A principal/tenancy predicate renders its
+ *  `currentUser.<claim>` access against a `currentUser` binding the caller
+ *  introduces (`requireCurrentUser()` for by-id reads, the find's own
+ *  `currentUser` param when it has one) — DEBT-02 Slice B. */
 export function documentCapabilityBody(agg: EnrichedAggregateIR, varName: string): string | null {
-  const preds = (agg.contextFilters ?? [])
-    .filter((p) => !exprUsesCurrentUser(p))
-    .map((p) => `(${renderTsExpr(p, { thisName: varName })})`);
+  const preds = (agg.contextFilters ?? []).map(
+    (p) => `(${renderTsExpr(p, { thisName: varName })})`,
+  );
   return preds.length > 0 ? preds.join(" && ") : null;
 }
 
@@ -205,8 +222,13 @@ function documentFindMethod(
       ? `${allExpr}.find(${pred ?? "() => true"}) ?? null`
       : `${allExpr}.find(${pred ?? "() => true"})!`;
   const rowsExpr = isArray ? "result.length" : "result == null ? 0 : 1";
+  // A principal capability filter needs `currentUser` in scope.  A find that
+  // already takes a `currentUser: User` param (findUsesCurrentUser) reuses it;
+  // otherwise bind the ambient accessor (fail-closed).
+  const needsPrincipalBind = aggregateUsesPrincipalContextFilter(agg) && !usesUser;
   return lines(
     `  async ${find.name}(${params}): Promise<${ret}> {`,
+    ...(needsPrincipalBind ? [`    const currentUser = requireCurrentUser();`] : []),
     `    const rows = await this.db.select().from(schema.${tableName});`,
     `    const all = rows.map((r) => ${lowerFirst(agg.name)}FromDoc(r.data as ${agg.name}Doc));`,
     `    const result = ${selector};`,
