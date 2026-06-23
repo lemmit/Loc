@@ -115,7 +115,7 @@ calculate :qty_label, :string, expr("qty=" <> to_string(record.qty))
 
 ## Money arithmetic (closed)
 
-Money is the headline divergence axis. The DSL `money` type maps to a precise-decimal host type, and the backends split into two camps: **.NET and Python** use native operators (their decimal type overloads them precisely); **TypeScript, Java, and Elixir** route through a method/library call because their decimal type does *not* do precise math under `+`/`*`.
+Money is the headline divergence axis. The DSL `money` type maps to a precise-decimal host type, and the backends split: **.NET and Python** use native operators (their decimal type overloads them precisely); **TypeScript and Java** route through a method/library call because their decimal type does *not* do precise math under `+`/`*`. **Elixir is context-dependent**: in native code — operation and invariant bodies that run in the BEAM — it routes through the `Decimal` library (`Decimal.mult` / `Decimal.add` / `Decimal.compare`), but inside an Ash `expr()` (derived calculations and `find` filters, which is where the examples below emit) it uses the **native operators**, because Ash lowers `expr()` to the data layer where the `Decimal.*` struct API is invalid.
 
 ```ddd
 aggregate Order {
@@ -157,9 +157,10 @@ def total(self) -> Decimal: return self._subtotal + self.tax
 ```
 == elixir
 ```elixir
-# Decimal library: Decimal.mult / Decimal.add
-calculate :tax, :decimal, expr(Decimal.mult(record.subtotal, record.tax_rate))
-calculate :total, :decimal, expr(Decimal.add(record.subtotal, record.tax))
+# In an Ash expr() (derived calc / find) the operators are native — Ash
+# lowers them to the data layer.  A native op-body would use Decimal.mult/add.
+calculate :tax, :decimal, expr(record.subtotal * record.tax_rate)
+calculate :total, :decimal, expr(record.subtotal + record.tax)
 ```
 ::: end
 
@@ -184,11 +185,12 @@ self._subtotal > Decimal("100.00")
 ```
 == elixir
 ```elixir
-Decimal.compare(record.subtotal, Decimal.new("100.00")) == :gt
+# Ash expr() (derived/find): native operator + bare literal
+expr(record.subtotal > 100.00)
 ```
 ::: end
 
-Java division emits `divide(r, MathContext.DECIMAL128)` (a bare `BigDecimal.divide` throws on non-terminating expansions); the `==`/`!=`/`<`… set maps to `compareTo(...) </==/> 0`. Elixir ordering maps to `Decimal.compare(...) == :gt` (and `in [:lt, :eq]` for `<=`).
+Java division emits `divide(r, MathContext.DECIMAL128)` (a bare `BigDecimal.divide` throws on non-terminating expansions); the `==`/`!=`/`<`… set maps to `compareTo(...) </==/> 0`. For Elixir this depends on context: inside an Ash `expr()` ordering is the native operator (above), but a native op/invariant body maps it to `Decimal.compare(...) == :gt` (and `in [:lt, :eq]` for `<=`).
 
 ## Comparison, logical & unary
 
@@ -225,8 +227,7 @@ def is_big(self) -> bool:
 ```
 == elixir
 ```elixir
-calculate :is_big, :boolean,
-  expr(Decimal.compare(record.subtotal, Decimal.new("100.00")) == :gt and record.qty >= 5)
+calculate :is_big, :boolean, expr(record.subtotal > 100.00 and record.qty >= 5)
 ```
 ::: end
 
