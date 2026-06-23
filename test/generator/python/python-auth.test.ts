@@ -8,12 +8,13 @@ import { parseString } from "../../_helpers/index.js";
 // ---------------------------------------------------------------------------
 // Python backend — auth gate (plan S16, docs/auth.md).  An
 // `auth: required` deployable emits the User dataclass + verifier
-// registry + Starlette middleware; a `requires`-guarded operation
-// gains a trailing `current_user: User` parameter (threaded from
-// `request.state.current_user`, denied with RFC 7807 403), a
-// currentUser-scoped find threads the actor into the repository
-// predicate, and domain tests inject a synthetic full-access actor.
-// Verified live (401 / 403 / 204 / row-level `mine` scoping).
+// registry + Starlette middleware.  An AUTHZ-ONLY operation (currentUser
+// used only in `requires`) keeps a PURE domain method — its 403 gate
+// relocates to the FastAPI route/workflow handler (denied with RFC 7807
+// 403 before dispatch); only a data-use op keeps the trailing
+// `current_user: User` param.  A currentUser-scoped find threads the
+// actor into the repository predicate.  Verified live (401 / 403 / 204 /
+// row-level `mine` scoping).
 // ---------------------------------------------------------------------------
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -69,16 +70,31 @@ describe("python auth gate", () => {
     expect(authAt).toBeLessThan(corsAt);
   });
 
-  it("guarded op gains the trailing actor param and the route threads + declares 403", async () => {
+  it("authz-only op stays a pure domain method; its 403 gate relocates to the route", async () => {
     const files = await build();
     const domain = files.get("api/app/domain/order.py")!;
-    expect(domain).toContain("from app.auth.user import User");
-    expect(domain).toContain("def cancel(self, current_user: User) -> None:");
-    expect(domain).toContain("raise ForbiddenError(");
+    // `cancel` is authz-only (currentUser only in `requires`) — the domain
+    // method is pure: no `current_user` param, no `ForbiddenError` raise (and so
+    // no `User`/`ForbiddenError` import in the domain module).  The 400
+    // precondition stays in the body.
+    expect(domain).toContain("def cancel(self) -> None:");
+    expect(domain).not.toContain("def cancel(self, current_user: User)");
+    expect(domain).not.toContain("from app.auth.user import User");
+    expect(domain).not.toContain("ForbiddenError");
+    expect(domain).toContain('raise DomainError("Precondition failed: status != ');
+    // The gate moves to the route handler: bind the principal, raise 403 BEFORE
+    // dispatch (the now-pure method takes no actor), declare 403 in OpenAPI.
     const routes = files.get("api/app/http/order_routes.py")!;
     expect(routes).toContain("current_user: User = request.state.current_user");
-    expect(routes).toContain("found.cancel(current_user)");
+    expect(routes).toContain("raise ForbiddenError(");
+    expect(routes).toContain("found.cancel()");
+    expect(routes).not.toContain("found.cancel(current_user)");
     expect(routes).toContain('403: {"model": ProblemDetails, "description": "Forbidden"}');
+    // Gate is raised before the domain dispatch.
+    const gateAt = routes.indexOf("raise ForbiddenError(");
+    const dispatchAt = routes.indexOf("found.cancel()");
+    expect(gateAt).toBeGreaterThan(-1);
+    expect(gateAt).toBeLessThan(dispatchAt);
   });
 
   it("currentUser-scoped find threads the actor into the repository predicate", async () => {
@@ -91,24 +107,29 @@ describe("python auth gate", () => {
     expect(routes).toContain("await repo.mine(current_user)");
   });
 
-  it("guarded workflow binds the actor, threads gated op-calls, declares 403", async () => {
+  it("guarded workflow binds the actor; an authz-only op-call relocates its gate and threads no actor", async () => {
     const files = await build();
     const wf = files.get("api/app/http/workflows_routes.py")!;
     expect(wf).toContain("current_user: User = request.state.current_user");
-    // The gated op takes the actor as its trailing argument.
-    expect(wf).toContain("o.cancel(current_user)");
+    // `cancel` is authz-only, so its method is pure — the op-call threads no
+    // actor, and its 403 gate is rendered at the call site before dispatch.
+    expect(wf).toContain("o.cancel()");
+    expect(wf).not.toContain("o.cancel(current_user)");
     expect(wf).toContain('403: {"model": ProblemDetails, "description": "Forbidden"}');
+    // Both the workflow's own `requires` (handler-layer) and the relocated
+    // op-call gate raise 403.
     expect(wf).toContain("raise ForbiddenError(");
   });
 
-  it("domain tests inject the synthetic full-access actor", async () => {
+  it("domain tests call an authz-only op with NO actor (its method is now pure)", async () => {
     const files = await build();
     const tests = files.get("api/tests/test_order.py")!;
-    expect(tests).toContain("from types import SimpleNamespace");
-    expect(tests).toContain("from app.auth.user import User");
-    expect(tests).toContain(
-      'o.cancel(cast(User, SimpleNamespace(id="00000000-0000-0000-0000-000000000000", role="admin", permissions=["*"])))',
-    );
+    // `cancel`'s 403 gate relocated to the handler, so the domain method dropped
+    // its actor param — the test calls it with no synthetic actor (and the file
+    // needs neither the SimpleNamespace nor the User import for it).
+    expect(tests).toContain("o.cancel()");
+    expect(tests).not.toContain("SimpleNamespace");
+    expect(tests).not.toContain("from app.auth.user import User");
   });
 
   it("anonymous deployables emit no auth module and stay Noop-shaped", async () => {

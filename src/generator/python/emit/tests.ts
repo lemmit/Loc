@@ -3,7 +3,7 @@ import {
   type AggregateIR,
   type BoundedContextIR,
   type ExprIR,
-  operationUsesCurrentUser,
+  operationUsesCurrentUserAsData,
   type TestIR,
   type TestStmtIR,
   type TypeIR,
@@ -11,14 +11,15 @@ import {
 import { snake } from "../../../util/naming.js";
 import { renderPyExpr } from "../render-expr.js";
 
-// A currentUser-gated operation's method signature picks up a trailing
-// `current_user: User` parameter; a domain `test` block has no auth
-// context, so calls to such ops are supplied a synthetic full-access
-// actor — admin role + non-empty permissions so guards pass and the
-// test exercises the op's domain logic.  Built on a SimpleNamespace +
-// cast so it stays valid regardless of the system's actual
-// `user { ... }` claim shape (the Python analogue of the TS emitter's
-// `as unknown as User`).
+// An operation that uses currentUser AS DATA keeps a trailing
+// `current_user: User` parameter on its (still-impure) domain method; a domain
+// `test` block has no auth context, so calls to such ops are supplied a
+// synthetic full-access actor — admin role + non-empty permissions so any
+// in-method check passes and the test exercises the op's domain logic.  Built
+// on a SimpleNamespace + cast so it stays valid regardless of the system's
+// actual `user { ... }` claim shape (the Python analogue of the TS emitter's
+// `as unknown as User`).  An AUTHZ-ONLY op's method is pure (its 403 gate
+// relocated to the handler, param dropped), so the test calls it with NO actor.
 const TEST_ACTOR_PY =
   'cast(User, SimpleNamespace(id="00000000-0000-0000-0000-000000000000", role="admin", permissions=["*"]))';
 
@@ -138,7 +139,7 @@ function renderTestExpr(e: ExprIR, ctx: BoundedContextIR, lets?: Map<string, str
           : undefined;
     const agg = aggName ? ctx.aggregates.find((a) => a.name === aggName) : undefined;
     const op = agg?.operations.find((o) => o.name === e.member);
-    if (op && operationUsesCurrentUser(op)) {
+    if (op && operationUsesCurrentUserAsData(op)) {
       const recv = renderTestExpr(e.receiver, ctx, lets);
       const args = [...e.args.map((a) => renderTestExpr(a, ctx, lets)), TEST_ACTOR_PY];
       return `${recv}.${snake(e.member)}(${args.join(", ")})`;

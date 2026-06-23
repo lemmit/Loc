@@ -15,8 +15,10 @@ import {
   exprUsesCurrentUser,
   findUsesCurrentUser,
   type OperationIR,
+  operationAuthzOnly,
   operationIsGuarded,
   operationUsesCurrentUser,
+  operationUsesCurrentUserAsData,
   type RepositoryIR,
   type TypeIR,
 } from "../../ir/types/loom-ir.js";
@@ -181,7 +183,11 @@ export function buildPyRoutesFile(
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "from typing import Annotated",
     "",
+    // `User` is imported when a route binds `current_user: User` — an op/create
+    // that uses the principal (as data or in a relocated authz gate), a
+    // currentUser-scoped find, or a principal-referencing lifecycle stamp.
     [...publicOps, ...externOps].some(operationUsesCurrentUser) ||
+      createActionOf(agg).some(operationUsesCurrentUser) ||
       emittableFinds(repo).some(findUsesCurrentUser) ||
       stampUsesUser(agg, "create") ||
       stampUsesUser(agg, "update")
@@ -230,7 +236,14 @@ function problemImports(refersTo: (n: string) => boolean): string | null {
  *  the content to application/problem+json — and routes that declare
  *  their own 422 here suppress FastAPI's auto HTTPValidationError. */
 export function errorResponsesKwarg(kind: OpErrorKind, guarded = false): string {
-  const statuses = errorStatuses(kind, guarded);
+  const base = errorStatuses(kind, guarded);
+  // A guarded create denies with 403 (relocated `requires` → ForbiddenError →
+  // the global handler) — declare it so the published contract documents the
+  // authorization outcome.  `errorStatuses` honours `guarded` only for the
+  // operation/workflow kinds, so the create case is augmented here (mirrors the
+  // Hono routes-builder, which inserts 403 on a guarded create inline).
+  const statuses =
+    kind === "create" && guarded ? [...base.slice(0, 1), 403, ...base.slice(1)] : base;
   if (statuses.length === 0) return "";
   const entries = statuses.map(
     (st) => `${st}: {"model": ProblemDetails, "description": "${problemTitle(st)}"}`,
@@ -535,6 +548,15 @@ function hasStamp(agg: EnrichedAggregateIR, event: "create" | "update"): boolean
   return stampRules(agg, event).length > 0;
 }
 
+/** The create action the POST `/` route drives (ES `create(...)` or the
+ *  canonical field-based create), as a 0-or-1 array so callers can `.some(...)`
+ *  uniformly.  Used to fold the create's relocated-authz principal use into the
+ *  routes file's `User`-import decision. */
+function createActionOf(agg: EnrichedAggregateIR): OperationIR[] {
+  const action = agg.persistedAs === "eventLog" ? agg.creates?.[0] : agg.canonicalCreate;
+  return action ? [action] : [];
+}
+
 /** Whether the `event` stamp references the request principal (so the route
  *  must thread `current_user` into the stamp call). */
 function stampUsesUser(agg: EnrichedAggregateIR, event: "create" | "update"): boolean {
@@ -570,13 +592,30 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
   const createAction = agg.persistedAs === "eventLog" ? agg.creates?.[0] : agg.canonicalCreate;
   const auditCreate = !!createAction?.audited;
   const esCreate = agg.persistedAs === "eventLog" ? agg.creates?.[0] : undefined;
+  // An authz-only create's `requires` 403 gate relocates to this route — checked
+  // against the validated input (`body`), since on a create there is no
+  // constructed entity yet — before the `create(...)` factory.  Its `requires`
+  // raise is suppressed in the domain factory body (operationAuthzOnly).
+  const createIsAuthzOnly = !!createAction && operationAuthzOnly(createAction);
+  const createIsGuarded = !!createAction && operationIsGuarded(createAction);
+  // Bind `current_user` when the relocated gate references the principal — for an
+  // authz-only create, any currentUser use is in the gate (not as data).
+  const createGateUsesUser = createIsAuthzOnly && operationUsesCurrentUser(createAction);
   if (esCreate) {
     const args = esCreate.params
       .map((p) => `${snake(p.name)}=${pyWireToDomain(`body.${p.name}`, p.type, ctx)}`)
       .join(", ");
+    const needsRequest = createGateUsesUser;
+    const sig = [
+      `body: Create${agg.name}Request`,
+      ...(needsRequest ? ["request: Request"] : []),
+      "session: SessionDep",
+    ].join(", ");
     return lines(
-      `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create")})`,
-      `async def create_${snake(agg.name)}(body: Create${agg.name}Request, session: SessionDep) -> dict[str, object]:`,
+      `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create", createIsGuarded)})`,
+      `async def create_${snake(agg.name)}(${sig}) -> dict[str, object]:`,
+      needsRequest ? "    current_user: User = request.state.current_user" : null,
+      ...relocatedAuthzGate(esCreate, "body", "    ", true),
       `    created = ${agg.name}.create(${args})`,
       auditCreate ? "    repo = _repo(session)" : null,
       auditCreate ? "    await repo.save(created)" : "    await _repo(session).save(created)",
@@ -591,17 +630,21 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
     .join(", ");
   // Lifecycle stamps (audit / softDelete): apply onCreate stamps right before
   // the persist.  A principal-referencing stamp threads `current_user` off the
-  // request scope (the route then takes a `request: Request` param).
+  // request scope (the route then takes a `request: Request` param).  The
+  // relocated authz gate also reads the principal — `current_user` is bound once
+  // for whichever needs it.
   const stampUsesPrincipal = stampUsesUser(agg, "create");
+  const needsUser = stampUsesPrincipal || createGateUsesUser;
   const sig = [
     `body: Create${agg.name}Request`,
-    ...(stampUsesPrincipal ? ["request: Request"] : []),
+    ...(needsUser ? ["request: Request"] : []),
     "session: SessionDep",
   ].join(", ");
   return lines(
-    `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create")})`,
+    `@router.post("", status_code=201, response_model=Create${agg.name}Response, operation_id="${camelId(opCreate(agg.name))}"${errorResponsesKwarg("create", createIsGuarded)})`,
     `async def create_${snake(agg.name)}(${sig}) -> dict[str, object]:`,
-    stampUsesPrincipal ? "    current_user: User = request.state.current_user" : null,
+    needsUser ? "    current_user: User = request.state.current_user" : null,
+    ...(createAction ? relocatedAuthzGate(createAction, "body", "    ", true) : []),
     `    created = ${agg.name}.create(${args})`,
     hasStamp(agg, "create") ? stampCall(agg, "create", "created") : null,
     auditCreate ? "    repo = _repo(session)" : null,
@@ -685,6 +728,80 @@ function whenGate(agg: EnrichedAggregateIR, op: OperationIR): string[] {
   ];
 }
 
+/** The relocated authorization gate for an `operationAuthzOnly` op: the 403
+ *  `requires` the domain method used to raise, lifted to the FastAPI route and
+ *  rendered in HANDLER scope.  `currentUser` resolves to the route-bound
+ *  principal (`current_user`, read from `request.state.current_user`);
+ *  `this.<field>` resolves against `thisName` — the loaded aggregate var
+ *  (`found`, public properties) for update/destroy ops, or the validated create
+ *  input (`body`) for creates, since on a create there is no constructed entity
+ *  yet but the handler holds the input the entity will be built from.  On a
+ *  create the input DTO carries WIRE-cased (camelCase) attributes, so
+ *  `wireField` is set for `body` to read `body.ownerId` (not the snake domain
+ *  name).  Emitted BEFORE the domain dispatch so a denied caller never reaches
+ *  the (now pure) domain method.  Empty unless the op is authz-only. */
+function relocatedAuthzGate(
+  op: OperationIR,
+  thisName: string,
+  pad: string,
+  wireField = false,
+): string[] {
+  if (!operationAuthzOnly(op)) return [];
+  const rctx = { thisName, wireField };
+  return op.statements
+    .filter((s) => s.kind === "requires")
+    .flatMap((s) => [
+      `${pad}if not (${renderPyExpr(thisMemberToRef(s.expr), rctx)}):`,
+      `${pad}    raise ForbiddenError(${JSON.stringify(
+        `Forbidden: ${(s as { source: string }).source}`,
+      )})`,
+    ]);
+}
+
+/** Normalise `this.<field>` member access to a `this-prop` ref so the gate's
+ *  field reads route through `renderRef` (which honours `thisName` + the
+ *  `wireField` casing flag).  In an operation body `this.<field>` already lowers
+ *  to a `this-prop` ref, but a CREATE action — where `this` is not yet a
+ *  constructed entity — lowers it to a `member` on `this`, which `renderMember`
+ *  would snake-case (`body.owner_id`) instead of reading the wire DTO attribute
+ *  (`body.ownerId`).  Rewriting to a `this-prop` ref makes both the
+ *  update-against-`found` (snake property) and create-against-`body` (wire-cased
+ *  input) renderings correct from one path.  Recurses through the expression so
+ *  nested `this.<field>` references inside a compound `requires` are covered. */
+function thisMemberToRef(e: ExprIR): ExprIR {
+  if (e.kind === "member" && e.receiver.kind === "this") {
+    return { kind: "ref", name: e.member, refKind: "this-prop", type: e.memberType };
+  }
+  switch (e.kind) {
+    case "member":
+      return { ...e, receiver: thisMemberToRef(e.receiver) };
+    case "method-call":
+      return {
+        ...e,
+        receiver: thisMemberToRef(e.receiver),
+        args: e.args.map(thisMemberToRef),
+      };
+    case "call":
+      return { ...e, args: e.args.map(thisMemberToRef) };
+    case "binary":
+      return { ...e, left: thisMemberToRef(e.left), right: thisMemberToRef(e.right) };
+    case "unary":
+      return { ...e, operand: thisMemberToRef(e.operand) };
+    case "paren":
+      return { ...e, inner: thisMemberToRef(e.inner) };
+    case "ternary":
+      return {
+        ...e,
+        cond: thisMemberToRef(e.cond),
+        // biome-ignore lint/suspicious/noThenProperty: the ternary IR node's branch field is named `then` across the IR
+        then: thisMemberToRef(e.then),
+        otherwise: thisMemberToRef(e.otherwise),
+      };
+    default:
+      return e;
+  }
+}
+
 /** The auto-exposed, side-effect-free `GET /{id}/can_<op>` companion of a
  *  `when`-gated operation — loads the aggregate, evaluates the predicate,
  *  returns `{ allowed }` so a UI can enable/disable the action without
@@ -750,21 +867,28 @@ function operationRoute(
         "        )",
       ];
     });
-    const usesUser = operationUsesCurrentUser(op);
+    // Threading vs. relocated authorization: a data-use op keeps the threaded
+    // `current_user` param; an authz-only op's 403 gate moves to this handler
+    // (rendered against the loaded `found`, before dispatch) and the domain
+    // method is pure.  Either way the route binds `current_user` whenever the
+    // principal is referenced (threaded, or by the relocated gate).
+    const usesAsData = operationUsesCurrentUserAsData(op);
+    const bindsUser = operationUsesCurrentUser(op);
     // Update stamps apply right before the persist; a principal-referencing
     // stamp needs `current_user` bound (the route already takes `request`).
     const stampUpdateUsesUser = stampUsesUser(agg, "update");
     const callArgs = [...op.params.map((p) => pyWireToDomain(`body.${p.name}`, p.type, ctx))];
-    if (usesUser) callArgs.push("current_user");
+    if (usesAsData) callArgs.push("current_user");
     return lines(
       `@router.post("/{id}/${opSnake}", response_model=None, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op))})`,
       `async def ${snake(op.name)}_${snake(agg.name)}(${ID_PARAM}, body: ${upperFirst(op.name)}${agg.name}Request, request: Request, session: SessionDep) -> dict[str, object] | JSONResponse:`,
-      usesUser || stampUpdateUsesUser
+      bindsUser || stampUpdateUsesUser
         ? "    current_user: User = request.state.current_user"
         : null,
       "    repo = _repo(session)",
       `    found = await repo.get_by_id(${agg.name}Id(id))`,
       `    log("info", "operation_invoked", aggregate=${JSON.stringify(agg.name)}, op=${JSON.stringify(op.name)}, id=id)`,
+      ...relocatedAuthzGate(op, "found", "    "),
       ...whenGate(agg, op),
       op.audited ? "    __before = repo.to_wire(found)" : null,
       `    result = found.${snake(op.name)}(${callArgs.join(", ")})`,
@@ -776,14 +900,18 @@ function operationRoute(
       "    return result",
     );
   }
-  // currentUser-gated ops read the actor the auth middleware stashed on
-  // the request scope and thread it as the trailing domain argument; a
-  // `requires`-guarded op additionally declares its 403 outcome.
-  const usesUser = operationUsesCurrentUser(op);
+  // A data-use op reads the actor the auth middleware stashed on the request
+  // scope and threads it as the trailing domain argument; an authz-only op's
+  // 403 gate is relocated to this handler (rendered against the loaded `found`,
+  // before dispatch) and the domain method is pure.  A guarded op declares its
+  // 403 outcome either way.  `current_user` is bound whenever the principal is
+  // referenced (threaded, or by the relocated gate).
+  const usesAsData = operationUsesCurrentUserAsData(op);
+  const bindsUser = operationUsesCurrentUser(op);
   // Update stamps apply right before the persist; a principal-referencing
   // stamp threads `current_user` off the request scope (and takes `request`).
   const stampUpdateUsesUser = stampUsesUser(agg, "update");
-  const needsRequest = usesUser || stampUpdateUsesUser;
+  const needsRequest = bindsUser || stampUpdateUsesUser;
   const opSig = [
     ID_PARAM,
     `body: ${upperFirst(op.name)}${agg.name}Request`,
@@ -791,7 +919,7 @@ function operationRoute(
     "session: SessionDep",
   ].join(", ");
   const callArgs = [...op.params.map((p) => pyWireToDomain(`body.${p.name}`, p.type, ctx))];
-  if (usesUser) callArgs.push("current_user");
+  if (usesAsData) callArgs.push("current_user");
   return lines(
     `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op))})`,
     `async def ${snake(op.name)}_${snake(agg.name)}(${opSig}) -> Response:`,
@@ -799,6 +927,7 @@ function operationRoute(
     "    repo = _repo(session)",
     `    found = await repo.get_by_id(${agg.name}Id(id))`,
     `    log("info", "operation_invoked", aggregate=${JSON.stringify(agg.name)}, op=${JSON.stringify(op.name)}, id=id)`,
+    ...relocatedAuthzGate(op, "found", "    "),
     ...whenGate(agg, op),
     op.audited ? "    __before = repo.to_wire(found)" : null,
     `    found.${snake(op.name)}(${callArgs.join(", ")})`,
@@ -821,11 +950,15 @@ function externRoute(
   ctx: EnrichedBoundedContextIR,
 ): string {
   const opSnake = snake(op.routeSlug ?? op.name);
-  const usesUser = operationUsesCurrentUser(op);
+  // A data-use extern op threads `current_user` into its `check_<op>`; an
+  // authz-only one's 403 gate relocates to this handler (before the check) and
+  // its `check_<op>` is pure.  `current_user` binds whenever referenced.
+  const usesAsData = operationUsesCurrentUserAsData(op);
+  const bindsUser = operationUsesCurrentUser(op);
   // Update stamps apply after the handler mutates, right before persist; a
   // principal-referencing stamp threads `current_user` (and takes `request`).
   const stampUpdateUsesUser = stampUsesUser(agg, "update");
-  const needsRequest = usesUser || stampUpdateUsesUser;
+  const needsRequest = bindsUser || stampUpdateUsesUser;
   const sig = [
     ID_PARAM,
     `body: ${upperFirst(op.name)}${agg.name}Request`,
@@ -834,7 +967,7 @@ function externRoute(
   ].join(", ");
   const checkArgs = [
     ...op.params.map((p) => pyWireToDomain(`body.${p.name}`, p.type, ctx)),
-    ...(usesUser ? ["current_user"] : []),
+    ...(usesAsData ? ["current_user"] : []),
   ];
   const reqEntries = op.params.map(
     (p) => `"${snake(p.name)}": ${pyWireToDomain(`body.${p.name}`, p.type, ctx)}`,
@@ -846,6 +979,7 @@ function externRoute(
     "    repo = _repo(session)",
     `    found = await repo.get_by_id(${agg.name}Id(id))`,
     `    log("info", "operation_invoked", aggregate=${JSON.stringify(agg.name)}, op=${JSON.stringify(op.name)}, id=id)`,
+    ...relocatedAuthzGate(op, "found", "    "),
     ...whenGate(agg, op),
     `    found.check_${snake(op.name)}(${checkArgs.join(", ")})`,
     `    handler = ${snake(agg.name)}_handlers.${snake(op.name)}`,

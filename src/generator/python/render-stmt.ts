@@ -37,6 +37,12 @@ export interface PyStmtCtx {
    *  routes it to the co-located `_<field>_provenance` backing field, and
    *  pushes it onto the per-request ContextVar buffer via `record(...)`. */
   emitProvenance?: boolean;
+  /** True when this op's authorization (`requires`) gate has been relocated to
+   *  the application/handler boundary (an `operationAuthzOnly` op): the domain
+   *  method must NOT re-raise the 403 — it renders to nothing here, and the
+   *  route handler raises the gate before dispatch.  `precondition` (400) is
+   *  unaffected and always stays in the domain body. */
+  suppressRequires?: boolean;
 }
 
 const METHOD_BODY_INDENT = "        ";
@@ -54,6 +60,7 @@ export function renderPyStatements(
       const pi = (s.kind === "assign" || s.kind === "add") && s.prov ? provIndex++ : 0;
       return renderPyStatement(s, indent, ctx, pre, pi);
     })
+    .filter((line) => line !== "")
     .join("\n");
 }
 
@@ -187,7 +194,10 @@ function renderPyStatement(
     }
     case "requires":
       // Authorization gate — surfaces as 403 via the route-level
-      // ForbiddenError handler (S16).
+      // ForbiddenError handler (S16).  For an `operationAuthzOnly` op the gate
+      // has been relocated to the route handler (raised in handler scope before
+      // dispatch), so the domain method drops the raise entirely — emit nothing.
+      if (ctx.suppressRequires) return "";
       return [
         `${i}if not (${renderPyExpr(s.expr)}):`,
         `${sub}raise ForbiddenError(${JSON.stringify(`Forbidden: ${s.source}`)})`,

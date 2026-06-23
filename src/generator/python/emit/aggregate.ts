@@ -12,7 +12,8 @@ import {
   type FunctionIR,
   type InvariantIR,
   type OperationIR,
-  operationUsesCurrentUser,
+  operationAuthzOnly,
+  operationUsesCurrentUserAsData,
   type TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
@@ -160,8 +161,13 @@ export function renderPyAggregate(
     shapes.some((s) =>
       s.operations.some((op) => op.statements.some((st) => st.kind === "precondition")),
     );
+  // A `requires` raises `ForbiddenError` in the domain body only when the op
+  // keeps its gate there — an authz-only op relocated its gate to the route, so
+  // its method no longer raises (importing `ForbiddenError` would be unused).
   const usesForbidden = shapes.some((s) =>
-    s.operations.some((op) => op.statements.some((st) => st.kind === "requires")),
+    s.operations.some(
+      (op) => !operationAuthzOnly(op) && op.statements.some((st) => st.kind === "requires"),
+    ),
   );
   const errorNames = [
     usesDomainError ? "DomainError" : null,
@@ -183,8 +189,13 @@ export function renderPyAggregate(
   ].sort();
   const eventImports = ["DomainEvent", ...emittedEvents];
 
+  // `from app.auth.user import User` is only needed when a method keeps a
+  // `current_user: User` param — i.e. an op uses the principal AS DATA, or a
+  // context stamp references it.  An authz-only op's `requires` relocated to the
+  // route, so it no longer names `current_user` in the domain module (importing
+  // `User` for it would be an unused import — ruff/mypy --strict would fail).
   const usesCurrentUser =
-    shapes.some((s) => s.operations.some(operationUsesCurrentUser)) ||
+    shapes.some((s) => s.operations.some(operationUsesCurrentUserAsData)) ||
     shapes.some((s) =>
       (s.contextStamps ?? []).some((r) => r.assignments.some((a) => exprUsesCurrentUser(a.value))),
     );
@@ -419,9 +430,13 @@ function renderEntity(
 
   const ops = e.operations.flatMap((op) => {
     const params = ["self", ...op.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`)];
-    // currentUser-gated ops pick up a trailing actor parameter — the
-    // route threads `request.state.current_user` into it.
-    if (operationUsesCurrentUser(op)) params.push("current_user: User");
+    // The pure domain method keeps its trailing `current_user: User` param
+    // only when the op uses the principal AS DATA.  An authz-only op
+    // (currentUser used only in `requires`) has its 403 gate relocated to the
+    // route handler, so the method is pure — no param, and its `requires`
+    // raise is suppressed below (`precondition`/400 stays in the body).
+    const authzOnly = operationAuthzOnly(op);
+    if (operationUsesCurrentUserAsData(op)) params.push("current_user: User");
     // An extern op has no body of its own — the user handler owns the
     // logic.  Only the precondition gate is generated (`check_<op>`),
     // run by the route before dispatching to the registered handler.
@@ -431,6 +446,7 @@ function renderEntity(
         eventSourced: e.eventSourced,
         trace,
         emitProvenance,
+        suppressRequires: authzOnly,
       });
       return [
         "",
@@ -444,6 +460,7 @@ function renderEntity(
       eventSourced: e.eventSourced,
       trace,
       emitProvenance,
+      suppressRequires: authzOnly,
     });
     return [
       "",

@@ -3,7 +3,9 @@ import {
   type EnrichedBoundedContextIR,
   type ExprIR,
   type OperationIR,
+  operationAuthzOnly,
   operationUsesCurrentUser,
+  operationUsesCurrentUserAsData,
   type SystemIR,
   type WireField,
   type WorkflowIR,
@@ -602,14 +604,29 @@ export function pyWorkflowStmtTarget(
       return [`${i}${lhs} = ${renderPyExpr(st.value, rctx)}`];
     },
     opCall: (st, i) => {
-      // A currentUser-gated op takes the actor as its trailing argument
-      // (in scope: the route bound `current_user` for this workflow).
+      // An op that uses currentUser AS DATA takes the actor as its trailing
+      // argument (in scope: the route-bound `current_user` for this workflow).
+      // An authz-only op's method is now pure — its 403 gate relocates to this
+      // call site (rendered against the loaded aggregate var, before dispatch)
+      // and no actor is threaded.  The workflow's OWN `requires` stays handler-
+      // layer (the `requires` arm above).
       const op = ctx ? lookupOp(ctx, st.aggName, st.op) : undefined;
       const args = [
         ...st.args.map((a) => renderPyExpr(a, rctx)),
-        ...(op && operationUsesCurrentUser(op) ? ["current_user"] : []),
+        ...(op && operationUsesCurrentUserAsData(op) ? ["current_user"] : []),
       ].join(", ");
-      return [`${i}${snake(st.target)}.${snake(st.op)}(${args})`];
+      const authzGate =
+        op && operationAuthzOnly(op)
+          ? op.statements
+              .filter((s) => s.kind === "requires")
+              .flatMap((s) => [
+                `${i}if not (${renderPyExpr(s.expr, { ...rctx, thisName: snake(st.target) })}):`,
+                `${i}    raise ForbiddenError(${JSON.stringify(
+                  `Forbidden: ${(s as { source: string }).source}`,
+                )})`,
+              ])
+          : [];
+      return [...authzGate, `${i}${snake(st.target)}.${snake(st.op)}(${args})`];
     },
     forEach: (st, i, body) => {
       const saves = st.savesPerIteration.map(
