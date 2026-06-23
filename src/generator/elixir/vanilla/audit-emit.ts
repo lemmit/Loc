@@ -34,6 +34,7 @@
 import type { AggregateIR, BoundedContextIR } from "../../../ir/types/loom-ir.js";
 import { contextHasAuditedTarget } from "../../../ir/util/audit-capability.js";
 import { upperFirst } from "../../../util/naming.js";
+import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 
 // A version far in the future so this migration sorts after every module's
 // initial + delta migrations.  `…001` is one higher than the provenance
@@ -122,6 +123,8 @@ defmodule ${appModule}.Audit do
   principal \`actor_id\`) are stamped here, the same per-process discipline
   \`Provenance.flush\` and \`RequestContext\` use for \`Logger.metadata\`.
   """
+  require Logger
+
   alias ${appModule}.Audit.Record
   alias ${appModule}.RequestContext
 
@@ -136,6 +139,12 @@ defmodule ${appModule}.Audit do
   aggregate state change can never commit without its audit row — the same
   "audit commits atomically with the state change" guarantee the Python sink
   gives by raising on \`session.commit()\`.  Returns the inserted \`Record\`.
+
+  After the row commits, announces the write on the neutral log catalog
+  (\`audit_recorded\`, level debug — action/target/actor in scope) so a downstream
+  filter sees the audit history on the same JSON channel every other backend
+  emits it on.  The log fires only here, so it follows every audited action
+  (operation / create / destroy) without touching the per-action call sites.
   """
   @spec record(module(), map()) :: Record.t()
   def record(repo, fields) when is_map(fields) do
@@ -155,7 +164,13 @@ defmodule ${appModule}.Audit do
         fields
       )
 
-    repo.insert!(struct(Record, row))
+    inserted = repo.insert!(struct(Record, row))
+    ${renderPhoenixLogCall("auditRecorded", [
+      { name: "action", valueExpr: "row.action" },
+      { name: "target", valueExpr: '"#{row.target_type}/#{row.target_id}"' },
+      { name: "actor", valueExpr: "actor_id" },
+    ])}
+    inserted
   end
 end
 `;
