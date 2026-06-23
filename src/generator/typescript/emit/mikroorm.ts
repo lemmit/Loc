@@ -48,6 +48,7 @@ import {
 import { hydrateRootExpr } from "../repository-find-builder.js";
 import { projectFieldEntries, projectionObject } from "../repository-save-builder.js";
 import { toWireMethod } from "../repository-wire-builder.js";
+import { aggregateIsAudited, insertStampEntries, updateStampEntries } from "./audit-stamp.js";
 
 /** Postgres table for an aggregate — lowercase plural (e.g. `orders`). */
 const tableOf = (aggName: string): string => plural(snake(aggName));
@@ -420,6 +421,28 @@ export function renderMikroRepository(
     ...agg.fields.flatMap((f) => projectFieldEntries(f, "aggregate", ctx)),
   ]);
 
+  // Persist-time audit stamping (node-persist-time-auditing): on an audited
+  // aggregate the upsert payload is wrapped in `stampInsert(...)` so the audit
+  // columns are filled from the ambient request principal at save time, and
+  // the create-only columns (createdAt/createdBy — insert-set minus update-set)
+  // are excluded from the conflict UPDATE via `onConflictExcludeFields`, so a
+  // re-save leaves them at their on-disk values (immutable).  A non-audited
+  // aggregate keeps the byte-identical bare upsert.
+  const audited = aggregateIsAudited(agg);
+  const upsertCall = audited
+    ? (() => {
+        const updateFields = new Set(updateStampEntries(agg).map((e) => e.field));
+        const createOnly = insertStampEntries(agg)
+          .map((e) => e.field)
+          .filter((f) => !updateFields.has(f));
+        const opts =
+          createOnly.length > 0
+            ? `, { onConflictExcludeFields: [${createOnly.map((f) => JSON.stringify(f)).join(", ")}] }`
+            : "";
+        return `    await em.upsert(${row}, stampInsert(${saveProjection})${opts});`;
+      })()
+    : `    await em.upsert(${row}, ${saveProjection});`;
+
   const dbg = (find: string, rowsExpr: string) =>
     `    requestLog().debug({ event: "find_executed", aggregate: "${agg.name}", find: "${find}", rows: ${rowsExpr} });`;
 
@@ -499,7 +522,7 @@ export function renderMikroRepository(
     "",
     `  async save(aggregate: ${agg.name}): Promise<void> {`,
     `    const em = this.em.fork();`,
-    `    await em.upsert(${row}, ${saveProjection});`,
+    upsertCall,
     `    requestLog().debug({ event: "repository_save", aggregate: "${agg.name}", id: aggregate.id as string });`,
     "",
     `    for (const event of aggregate.pullEvents()) {`,
@@ -541,6 +564,10 @@ export function renderMikroRepository(
       usesDecimal && `import Decimal from "decimal.js";`,
       `import { EntityManager } from "@mikro-orm/postgresql";`,
       `import { ${row} } from "../entities";`,
+      // Persist-time audit stamping helper — pulled in only when this
+      // aggregate's `save()` stamps (audited).  Stamps the audit columns from
+      // the ambient request principal at the upsert (db/audit-stamp.ts).
+      audited && `import { stampInsert } from "../audit-stamp";`,
       `import { ${agg.name} } from "../../domain/${lowerFirst(agg.name)}";`,
       voImportLine,
       `import * as Ids from "../../domain/ids";`,
