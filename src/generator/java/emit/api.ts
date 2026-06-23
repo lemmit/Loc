@@ -120,6 +120,7 @@ export function renderJavaController(
           hasParams
             ? `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id, @RequestBody ${reqType} request) {`
             : `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id) {`,
+          `        CatalogLog.event("operation_invoked", "info", "aggregate", "${agg.name}", "op", "${op.name}", "id", id);`,
           hasParams
             ? `        var result = service.${op.name}(new ${idClass}(id), request);`
             : `        var result = service.${op.name}(new ${idClass}(id));`,
@@ -137,6 +138,7 @@ export function renderJavaController(
         hasParams
           ? `    public void ${op.name}${agg.name}(@PathVariable ${idJava} id, @RequestBody ${reqType} request) {`
           : `    public void ${op.name}${agg.name}(@PathVariable ${idJava} id) {`,
+        `        CatalogLog.event("operation_invoked", "info", "aggregate", "${agg.name}", "op", "${op.name}", "id", id);`,
         hasParams
           ? `        service.${op.name}(new ${idClass}(id), request);`
           : `        service.${op.name}(new ${idClass}(id));`,

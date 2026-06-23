@@ -111,4 +111,31 @@ describe("python observability", () => {
       'log("warn", "event_unrouted", workflow="OrderFulfillment", event_type="ShipmentRequested", key=__key)',
     );
   });
+
+  // S2 — info narrative (domain-seam-log-parity.md): aggregate_created (create
+  // route after persist), operation_invoked (per-op route after load),
+  // event_dispatched (repository publish loop).
+  it("the create route logs aggregate_created after persist", async () => {
+    const files = await build(SAGA);
+    const routes = files.get("api/app/http/order_routes.py")!;
+    expect(routes).toContain("from app.obs.log import log");
+    expect(routes).toContain('log("info", "aggregate_created", aggregate="Order", id=created.id)');
+  });
+
+  it("each operation route logs operation_invoked with aggregate/op/id", async () => {
+    const files = await build(SAGA);
+    const routes = files.get("api/app/http/order_routes.py")!;
+    expect(routes).toContain(
+      'log("info", "operation_invoked", aggregate="Order", op="place", id=id)',
+    );
+  });
+
+  it("the repository publish loop logs event_dispatched per pulled event", async () => {
+    const files = await build(SAGA);
+    const repo = files.get("api/app/db/repositories/order_repository.py")!;
+    expect(repo).toContain("from app.obs.log import log");
+    expect(repo).toContain(
+      'log("info", "event_dispatched", event_type=type(event).__name__, aggregate="Order", id=str(aggregate.id))',
+    );
+  });
 });

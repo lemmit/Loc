@@ -21,6 +21,7 @@ import type {
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import type { ApiRoute } from "../api-emit.js";
 import { auditRecordCall, createAuditMeta, destroyAuditMeta } from "./audit-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
@@ -216,7 +217,12 @@ function renderController(
       return `
   def ${opSnake}(conn, %{"id" => id} = params) do
     attrs = Map.drop(params, ["id"])
-${cuBind}
+${cuBind}    ${renderPhoenixLogCall("operationInvoked", [
+        { name: "aggregate", valueExpr: `"${aggPascal}"` },
+        { name: "op", valueExpr: `"${op.name}"` },
+        { name: "id", valueExpr: "id" },
+      ])}
+
     with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id${getActor}),
          {:ok, _updated} <- ${ctxModule}.${opSnake}_${aggSnake}(record, attrs) do
       send_resp(conn, 204, "")
@@ -278,6 +284,11 @@ ${auditRecordCall({
 
     case result do
       {:ok, record} ->
+        ${renderPhoenixLogCall("aggregateCreated", [
+          { name: "aggregate", valueExpr: `"${aggPascal}"` },
+          { name: "id", valueExpr: "record.id" },
+        ])}
+
         conn
         |> put_status(201)
         |> json(serialize(record))
@@ -289,6 +300,11 @@ ${auditRecordCall({
     : `  def create(conn, params) do
 ${createCuBind}    case ${ctxModule}.create_${aggSnake}(params${createActor}) do
       {:ok, record} ->
+        ${renderPhoenixLogCall("aggregateCreated", [
+          { name: "aggregate", valueExpr: `"${aggPascal}"` },
+          { name: "id", valueExpr: "record.id" },
+        ])}
+
         conn
         |> put_status(201)
         |> json(serialize(record))
@@ -344,6 +360,7 @@ ${cuBind}    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id${getActor}),
   return `# Auto-generated.
 defmodule ${appModule}Web.${aggPascal}Controller do
   use ${appModule}Web, :controller
+  require Logger
   alias ${facadeMod}
   alias ${appModule}Web.ProblemDetails
 
