@@ -860,6 +860,16 @@ def install_error_handlers(app: FastAPI) -> None:
             for e in err.errors()
         ]
         return problem(request, 422, "Unprocessable Entity", "Request validation failed.", errors)
+
+    @app.exception_handler(Exception)
+    async def _internal(request: Request, err: Exception) -> JSONResponse:
+        # Catch-all fallback for any unhandled exception — logs the catalog
+        # internal_error event (matching Hono/.NET/Java/vanilla) and returns a
+        # sanitized 500 so the real message stays in the log stream, not on the
+        # wire.  The specific handlers above still win via the exception MRO
+        # (Starlette looks each exception's type up most-specific-first).
+        log("error", "internal_error", error=str(err), status=500)
+        return problem(request, 500, "Internal Server Error", "An unexpected error occurred.")
 `;
 
 // Shared paged-result carrier (P3b) — the domain-side mirror of the
