@@ -181,4 +181,33 @@ describe("vanilla orchestrator — Slice 0 shell skeleton", () => {
     // prod.exs starts the endpoint server (a release doesn't run mix phx.server).
     expect(out.get("config/prod.exs")!).toContain("server: true");
   });
+
+  it("release.ex emits the migration-lifecycle catalog events on boot migrate", () => {
+    // Parity with Hono/.NET/Java/Python (observability.md): the Ecto release
+    // migrate task was silent — a fresh vanilla-Phoenix DB boot produced no
+    // migration log lines. It now emits the same catalog events at the same
+    // levels + field names so a cross-backend log consumer pivots on one
+    // identity. (Shared with Ash's release task — same Ecto.Migrator seam.)
+    const out = generateVanillaElixirProject({
+      contexts: [],
+      deployable: vanillaDeployable(),
+      sys: emptySystem(),
+    });
+    const release = out.get("lib/api/release.ex")!;
+    expect(release).toContain("require Logger");
+    expect(release).toContain(
+      'Logger.info("migrations_starting", event: "migrations_starting", count: pending)',
+    );
+    expect(release).toContain(
+      'Logger.info("migration_applied", event: "migration_applied", id: version, name: Map.get(names, version))',
+    );
+    expect(release).toContain(
+      'Logger.info("migrations_complete", event: "migrations_complete", applied: length(applied))',
+    );
+    expect(release).toContain(
+      'Logger.error("migration_failed", event: "migration_failed", error: Exception.message(error))',
+    );
+    // The failure path re-raises so a bad migration still aborts the boot.
+    expect(release).toContain("reraise error, __STACKTRACE__");
+  });
 });

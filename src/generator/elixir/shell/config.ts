@@ -1,5 +1,6 @@
 import type { BoundedContextIR } from "../../../ir/types/loom-ir.js";
 import { upperFirst } from "../../../util/naming.js";
+import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 
 // ---------------------------------------------------------------------------
 // Config + release shell files — config/config.exs (with the Ash domain
@@ -254,12 +255,46 @@ export function renderRelease(appName: string, appModule: string): string {
   """
   @app :${appName}
 
+  require Logger
+
   def migrate do
     load_app()
 
     for repo <- repos() do
-      {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))
+      {:ok, _, _} = Ecto.Migrator.with_repo(repo, &migrate_repo/1)
     end
+  end
+
+  # Runs every pending migration for one repo, emitting the cross-backend
+  # migration-lifecycle catalog events (observability.md) at the same level +
+  # field names Hono/.NET/Java/Python emit, so a fresh DB boot surfaces the
+  # same log stream regardless of backend.
+  defp migrate_repo(repo) do
+    all = Ecto.Migrator.migrations(repo)
+    names = Map.new(all, fn {_status, version, name} -> {version, name} end)
+    pending = Enum.count(all, fn {status, _version, _name} -> status == :down end)
+
+    ${renderPhoenixLogCall("migrationsStarting", [{ name: "count", valueExpr: "pending" }])}
+
+    applied =
+      try do
+        Ecto.Migrator.run(repo, :up, all: true)
+      rescue
+        error ->
+          ${renderPhoenixLogCall("migrationFailed", [
+            { name: "error", valueExpr: "Exception.message(error)" },
+          ])}
+          reraise error, __STACKTRACE__
+      end
+
+    for version <- applied do
+      ${renderPhoenixLogCall("migrationApplied", [
+        { name: "id", valueExpr: "version" },
+        { name: "name", valueExpr: "Map.get(names, version)" },
+      ])}
+    end
+
+    ${renderPhoenixLogCall("migrationsComplete", [{ name: "applied", valueExpr: "length(applied)" }])}
   end
 
   defp repos do
