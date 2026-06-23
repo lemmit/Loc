@@ -196,6 +196,23 @@ declared `function`.  `requires` is admissible in workflow
 bodies too; the workflow handler / route handler maps it to 403
 the same way as the operation route does.
 
+**Where the gate runs — the application/handler boundary, not the domain
+body.** Authorization is an application-layer concern, so an authz `requires`
+(one whose `currentUser` use is confined to the guard — `operationAuthzOnly`)
+is enforced in the *handler* before it dispatches to the domain method: the
+route handler (Hono / FastAPI), the Mediator command `Handle` (.NET, via the
+injected `ICurrentUserAccessor`), the Spring service (Java, via
+`CurrentUserAccessor`), or an Ash `policies` block reading the `actor` (Elixir).
+The generated **domain method stays pure** — no ambient `User` parameter, no
+`Forbidden*` throw, no auth import — and the `precondition` (400) is all that
+remains in the body. `this.<field>` in a relocated gate reads the loaded
+aggregate (update/destroy) or the create input (create). An operation that uses
+`currentUser` **as data** (a stamp, `assignedTo := currentUser.id`, a
+`currentUser`-referencing `precondition`/call — `operationUsesCurrentUserAsData`)
+still receives the principal, since the domain genuinely needs it. The 403
+OpenAPI/ProblemDetails response is unchanged (driven by whether the op is
+guarded, not by where the throw lives).
+
 Default-deny is opt-in via `auth { enforcement: denyByDefault }`
 (see the note at the top).  Without it (`enforcement: opt`, the
 default) a deployable on `auth: required` still serves any
@@ -323,12 +340,16 @@ Register in `Program.cs` (or any DI extension):
 builder.Services.AddScoped<IUserVerifier, JwtUserVerifier>();
 ```
 
-When an aggregate operation references `currentUser`, the generated
-C# method picks up a trailing `User currentUser` parameter and the
-Mediator handler injects `ICurrentUserAccessor`, passing
-`_currentUser.User` into the call.  Operations that don't reference
-`currentUser` stay untouched — no DI surface widening, no parameter
-noise.
+When an aggregate operation uses `currentUser` **as data** (a stamp,
+`assignedTo := currentUser.id`, a `currentUser`-referencing
+`precondition`/call), the generated C# method picks up a trailing
+`User currentUser` parameter and the Mediator handler injects
+`ICurrentUserAccessor`, passing `_currentUser.User` into the call.  An
+**authz-only** operation (`currentUser` used only in a `requires` gate) keeps a
+**pure** domain method: the handler injects `ICurrentUserAccessor` and evaluates
+the 403 gate itself *before* dispatching, so no principal crosses into the
+domain.  Operations that don't reference `currentUser` at all stay untouched —
+no DI surface widening, no parameter noise.
 
 ## Hono
 

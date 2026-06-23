@@ -452,7 +452,17 @@ Verified by exploration; cited so the proposal is concrete, not aspirational.
 2. **`policy { data {} }` reachability** — directions + row-attribute clauses +
    `function`/`let` helpers → .NET set filter. Baseline = Strict Self.
 3. **Operation/view/workflow gates** → .NET handler pre-checks (403); relocate
-   gating out of domain bodies.
+   gating out of domain bodies. **⟶ operation-`requires` relocation SHIPPED**
+   (the existing `requires`/`currentUser` gate, not the new `policy {}` surface):
+   an authz-only operation's 403 gate now runs in the application handler before
+   the pure domain method on **all five backends** — the route handler
+   (Hono/FastAPI), the Mediator command `Handle` (.NET), the Spring service
+   (Java), and the Ash `policies`/actor boundary (Elixir, which was already this
+   shape). The domain method drops its ambient `User` param; `precondition` (400)
+   stays in the body; `currentUser`-as-data ops keep the principal. Pinned by
+   `test/conformance/authz-relocation-parity.test.ts` and the
+   `operationAuthzOnly` / `operationUsesCurrentUserAsData` IR predicates. The
+   `policy {}`-block / view-gate halves of this phase remain unstarted.
 4. **TS/Hono + Phoenix/Ash parity** for phases 2–3.
 5. **`exists <Aggregate>` quantifier** (reuse view resolution + new EXISTS
    rendering) for domain-relationship and `Share`-aggregate access.
