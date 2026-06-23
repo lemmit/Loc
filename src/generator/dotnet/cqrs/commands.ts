@@ -434,11 +434,12 @@ export function emitOperationCommandAndHandler(
           { type: `ILogger<${upperFirst(op.name)}Handler>`, field: "_log" },
         ]
       : [];
+    // `Domain.Common` is already in the base handler usings — don't repeat it
+    // here (CS0105 duplicate-using is an error under /warnaserror).
     const auditUsings = audited
       ? [
           `${ns}.Application.Common`,
           `${ns}.Application.${plural(agg.name)}.Responses`,
-          `${ns}.Domain.Common`,
           `${ns}.Infrastructure.Persistence`,
           `Microsoft.Extensions.Logging`,
         ]
