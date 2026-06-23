@@ -1457,6 +1457,14 @@ export function validateDapperSupport(sys: SystemIR, diags: LoomDiagnostic[]): v
 // the dapper gate — reject any feature mikroorm v1 doesn't emit so a selection
 // either works end-to-end or fails fast at validate time.  drizzle supports the
 // full surface, so this only fires for an explicit `persistence: mikroorm`.
+//
+// Persist-time audit stamping IS supported (node-persist-time-auditing): the
+// MikroORM `save()` injects the audit columns into `em.upsert(...)` from the
+// ambient request principal (`stampInsert`, db/audit-stamp.ts), keeping
+// createdAt/createdBy immutable on conflict via `onConflictExcludeFields`.  So
+// the stamp-target fields' `managed` access is no longer rejected, and an
+// `auditable` aggregate is accepted.  Other server-managed fields
+// (token / internal / secret) and provenanced fields stay gated.
 // ---------------------------------------------------------------------------
 export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
@@ -1503,12 +1511,17 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
           reject(where, "has reference-collection associations (Id[] join tables)");
         if ((a.parts ?? []).length > 0 || (a.contains ?? []).length > 0)
           reject(where, "contains nested entity parts");
-        if ((a.contextStamps ?? []).length > 0) reject(where, "uses audit stamping");
         if ((a.contextFilters ?? []).length > 0)
           reject(where, "uses a 'filter' capability predicate");
+        // Audit-stamp targets are filled by the save-layer stamp (`stampInsert`
+        // injected into `em.upsert`), so their `managed` access is fine; skip
+        // them when gating server-managed access below.
+        const stampFields = new Set(
+          (a.contextStamps ?? []).flatMap((r) => r.assignments.map((x) => x.field)),
+        );
         for (const f of a.fields) {
           if (f.provenanced) reject(`field '${agg.name}.${f.name}'`, "is provenanced");
-          else if (f.access && MANAGED_ACCESS.has(f.access))
+          else if (f.access && MANAGED_ACCESS.has(f.access) && !stampFields.has(f.name))
             reject(`field '${agg.name}.${f.name}'`, `has server-managed access '${f.access}'`);
         }
       }

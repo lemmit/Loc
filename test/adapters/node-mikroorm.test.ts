@@ -155,4 +155,78 @@ describe("mikroorm capability gating (loom.mikroorm-unsupported)", () => {
     const { errors } = await emit(sys("mikroorm"));
     expect(errors).toEqual([]);
   });
+
+  // A NON-stamp server-managed field (token access) still trips the gate — the
+  // managed-access relaxation is scoped to audit-stamp targets only.
+  it("still rejects a non-stamp server-managed (token) field", () =>
+    rejects("token apiKey: string", /server-managed access 'token'/));
+});
+
+// ---------------------------------------------------------------------------
+// Persist-time audit stamping on mikroorm (node-persist-time-auditing, 2nd
+// adapter).  The save-layer stamp (`stampInsert` injected into `em.upsert`,
+// createdAt/createdBy held immutable via `onConflictExcludeFields`) replaces
+// the old "uses audit stamping" gate, mirroring the drizzle relocation.
+// ---------------------------------------------------------------------------
+describe("mikroorm — persist-time audit stamping", () => {
+  // Full `auditable`-shaped stamp set (the four fields) on an auth deployable
+  // (a `currentUser` stamp needs a request-scoped principal).
+  const AUDIT_SRC = `system M {
+  user { id: guid  name: string }
+  api A from S
+  subdomain S {
+    context O {
+      stamp onCreate { createdAt := now()  createdBy := currentUser }
+      stamp onUpdate { updatedAt := now()  updatedBy := currentUser }
+      aggregate Order with crudish {
+        customer: string
+        createdAt: datetime
+        createdBy:  guid
+        updatedAt: datetime
+        updatedBy:  guid
+      }
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080  auth: required }
+}`;
+
+  it("an auditable aggregate on mikroorm NO LONGER trips loom.mikroorm-unsupported", async () => {
+    const { errors } = await emit(AUDIT_SRC);
+    // No 'uses audit stamping' nor 'server-managed access' rejection for the
+    // four stamp-target fields.
+    expect(errors.filter((e) => /persistence: mikroorm/.test(e))).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+
+  it("emits the shared db/audit-stamp.ts helper (was drizzle-only)", async () => {
+    const { files } = await emit(AUDIT_SRC);
+    const helper = files.get("api/db/audit-stamp.ts")!;
+    expect(helper).toBeDefined();
+    // Adapter-agnostic principal source.
+    expect(helper).toContain('import { requestContext } from "../obs/als";');
+    expect(helper).toContain("export function stampInsert");
+    expect(helper).toContain("createdBy: ctx.actorId");
+  });
+
+  it("the mikro save() wraps the upsert in stampInsert + excludes create-only fields", async () => {
+    const { files } = await emit(AUDIT_SRC);
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    expect(repo).toContain('import { stampInsert } from "../audit-stamp";');
+    // stampInsert wraps the upsert payload; createdAt/createdBy (create-only:
+    // on `create` but not `update`) are excluded from the conflict UPDATE.
+    expect(repo).toMatch(
+      /await em\.upsert\(OrderRow, stampInsert\([\s\S]*?\), \{ onConflictExcludeFields: \["createdAt", "createdBy"\] \}\);/,
+    );
+  });
+
+  it("a non-audited mikro aggregate keeps the byte-identical bare upsert", async () => {
+    const { files } = await emit(sys("mikroorm"));
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    expect(repo).toContain("await em.upsert(OrderRow,");
+    expect(repo).not.toContain("stampInsert");
+    expect(repo).not.toContain("onConflictExcludeFields");
+  });
 });

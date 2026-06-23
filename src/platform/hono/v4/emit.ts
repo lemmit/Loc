@@ -546,9 +546,12 @@ export function generateTypeScriptForContexts(
   emitObservabilityFiles(out);
   // Persist-time audit-stamp helper (node-persist-time-auditing): emitted once
   // per project when any served aggregate carries lifecycle stamps, so the
-  // drizzle `save()` can stamp the audit columns from the ambient request
-  // principal.  Drizzle-only — mikroorm gates audit stamping out upstream.
-  if (!usingMikro) {
+  // backend `save()` can stamp the audit columns from the ambient request
+  // principal.  Adapter-agnostic — both drizzle (`.values(stampInsert(row))` /
+  // `set: stampUpdate(row)`) and mikroorm (`em.upsert(row, stampInsert(...))`
+  // + `onConflictExcludeFields`) consume it; it imports `requestContext` from
+  // `obs/als`, present on every node adapter.
+  {
     const audited = merged.aggregates.filter((a) => !a.isAbstract && aggregateIsAudited(a));
     if (audited.length > 0) {
       out.set("db/audit-stamp.ts", renderAuditStampHelper(audited));
