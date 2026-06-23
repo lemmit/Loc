@@ -304,6 +304,12 @@ describe.skipIf(!ENABLED)(
         // op argument → the Ash `validate fn` must bind it via get_argument
         // (else `undefined variable`).  Pins the binding against real Ash 3.x.
         { name: "op-precondition-arg.ddd" },
+        // A `store` on a phoenixLiveView deployable (the fifth-target store
+        // projection): the store collapses into its own module + struct
+        // (`lib/<app>_web/stores/cart.ex`) and the using page folds it into a
+        // `:cart` assign + `update(:cart, &Cart.fn/1)` handlers.  Pins that the
+        // emitted store module + LiveView wiring compile against real Ash 3.x.
+        { name: "store-liveview.ddd" },
       ]),
     )("$name → mix compile --warnings-as-errors", ({ name }) => {
       const fixturePath = path.join(fixturesDir, name);
