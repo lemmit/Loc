@@ -242,6 +242,36 @@ export function renderJavaEntity(
       (inv) => exprCallsDomainService(inv.expr) || exprCallsDomainService(inv.guard),
     );
 
+  // --- lifecycle-stamp auditing (audit / softDelete capability stamps) --------
+  // `contextStamps` (from `stamp onCreate`/`onUpdate`, hand-written or
+  // macro-emitted by `with auditable`) drive idiomatic Spring Data JPA
+  // auditing rather than a service-called stamp method: each stamped field is
+  // annotated so the AuditingEntityListener fills it at persist/flush time —
+  // a `now()`-valued stamp → @CreatedDate/@LastModifiedDate (the framework
+  // clock); a `currentUser`-valued stamp → @CreatedBy/@LastModifiedBy (the
+  // AuditorAware<UUID> bean).  create-event fields are `updatable = false`
+  // (set once, on INSERT).  Event-sourced aggregates and principal stamps
+  // without auth are gated upstream (loom.java-stamp-unsupported).  See §5b of
+  // docs/plans/capability-stamp-dedup-simulation.md.
+  const auditAnnotationFor = new Map<string, { annotation: string; createEvent: boolean }>();
+  if (isRoot && isAgg(entity)) {
+    for (const rule of entity.contextStamps ?? []) {
+      const createEvent = rule.event === "create";
+      for (const a of rule.assignments) {
+        const principal = exprUsesCurrentUser(a.value);
+        const annotation = principal
+          ? createEvent
+            ? "CreatedBy"
+            : "LastModifiedBy"
+          : createEvent
+            ? "CreatedDate"
+            : "LastModifiedDate";
+        auditAnnotationFor.set(a.field, { annotation, createEvent });
+      }
+    }
+  }
+  const isAuditable = auditAnnotationFor.size > 0;
+
   // --- fields --------------------------------------------------------------
   const persistence = options.persistence;
   const fieldLines: string[] = [];
@@ -261,6 +291,21 @@ export function renderJavaEntity(
   }
   for (const f of entity.fields) {
     if (superType?.fieldNames.has(f.name)) continue;
+    const audit = auditAnnotationFor.get(f.name);
+    if (audit) {
+      // Spring Data auditing field: the @Created*/@LastModified* annotation
+      // drives the value; the @Column keeps the explicit snake_case binding
+      // against the Flyway-owned schema (`updatable = false` on create-event
+      // columns, which are set once on INSERT).
+      fieldLines.push(`    @${audit.annotation}`);
+      if (persistence) {
+        fieldLines.push(
+          `    @Column(name = "${snake(f.name)}"${audit.createEvent ? ", updatable = false" : ""})`,
+        );
+      }
+      fieldLines.push(`    ${renderJavaType(f.type)} ${f.name};`);
+      continue;
+    }
     if (persistence) fieldLines.push(...jpaFieldAnnotations(f, entity, persistence));
     if (isRefCollection(f.type)) {
       fieldLines.push(`    ${renderJavaType(f.type)} ${f.name} = new ArrayList<>();`);
@@ -602,38 +647,6 @@ export function renderJavaEntity(
       ]
     : [];
 
-  // --- lifecycle stamps (audit / softDelete capability stamps) ----------------------
-  // `contextStamps` (from `stamp onCreate`/`onUpdate`, hand-written or
-  // macro-emitted) become package-private `_stampOnCreate` / `_stampOnUpdate`
-  // methods the service calls before save.  A `currentUser` value resolves
-  // to the principal id (a guid): the method takes a `User currentUser`
-  // param and the assignment renders `currentUser.id()`.  Event-sourced
-  // aggregates and principal stamps without auth are gated upstream.
-  const stampsFor = (event: "create" | "update"): { field: string; value: ExprIR }[] =>
-    isRoot && isAgg(entity)
-      ? (entity.contextStamps ?? []).filter((r) => r.event === event).flatMap((r) => r.assignments)
-      : [];
-  // A bare `currentUser` value is the principal id; member access
-  // (`currentUser.role`) renders normally via the expr renderer.
-  const renderStampValue = (value: ExprIR): string =>
-    value.kind === "ref" && value.refKind === "current-user"
-      ? "currentUser.id()"
-      : renderJavaExpr(value, renderCtx);
-  const stampMethod = (event: "create" | "update"): string[] => {
-    const rules = stampsFor(event);
-    if (rules.length === 0) return [];
-    const usesUser = rules.some((a) => exprUsesCurrentUser(a.value));
-    if (usesUser) javaImports.add(`${basePkg}.auth.User`);
-    for (const a of rules) collectJavaExprImports(a.value, javaImports);
-    return [
-      `    void _stampOn${upperFirst(event)}(${usesUser ? "User currentUser" : ""}) {`,
-      ...rules.map((a) => `        this.${a.field} = ${renderStampValue(a.value)};`),
-      `    }`,
-      ``,
-    ];
-  };
-  const stampLines = [...stampMethod("create"), ...stampMethod("update")];
-
   const jmolecules = isRoot
     ? "@org.jmolecules.ddd.annotation.AggregateRoot"
     : // jakarta.persistence.Entity shares the simple name — keep both
@@ -649,7 +662,6 @@ export function renderJavaEntity(
     ...drainProvLines,
     ...assertLines,
     "",
-    ...stampLines,
     ...createPublicLines,
     ...partFactoryLines,
     ...applierLines,
@@ -711,6 +723,16 @@ export function renderJavaEntity(
     hasNamedFilters ? `import org.hibernate.annotations.Filter;` : null,
     hasNamedFilters ? `import org.hibernate.annotations.FilterDef;` : null,
     usesHibernateTypes ? `import org.hibernate.type.SqlTypes;` : null,
+    // Spring Data JPA auditing: the @Created*/@LastModified* field annotations
+    // + the listener that fills them at persist time (§5b).
+    ...(isAuditable
+      ? [
+          ...[...new Set([...auditAnnotationFor.values()].map((a) => a.annotation))]
+            .sort()
+            .map((a) => `import org.springframework.data.annotation.${a};`),
+          `import org.springframework.data.jpa.domain.support.AuditingEntityListener;`,
+        ]
+      : []),
     persistence ? `` : null,
     `import ${basePkg}.domain.common.*;`,
     `import ${basePkg}.domain.enums.*;`,
@@ -735,8 +757,13 @@ export function renderJavaEntity(
     sqlRestriction,
     ...filterDefAnnotations,
     ...filterAnnotations,
+    // Compose the auditing listener (it stacks with inheritance — no
+    // @MappedSuperclass needed, so it doesn't collide with `extends`).
+    isAuditable ? `@EntityListeners(AuditingEntityListener.class)` : null,
     jmolecules,
-    `public class ${entity.name}${superType ? ` extends ${superType.name}` : ""} {`,
+    `public class ${entity.name}${superType ? ` extends ${superType.name}` : ""}${
+      isAuditable ? ` implements Auditable` : ""
+    } {`,
     ...fieldLines,
     ``,
     `    ${entity.name}() {`,
