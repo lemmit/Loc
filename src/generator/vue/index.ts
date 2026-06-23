@@ -47,6 +47,7 @@ import {
 import { emitPageObjectsForUi } from "../react/pages-emitter.js";
 import { prepareVueNamedLayouts } from "./layouts-emitter.js";
 import { buildVueRealtimeHandlers } from "./realtime-handlers-builder.js";
+import { renderVueStoreModule } from "./store-builder.js";
 import {
   renderVueComponentFile,
   renderVueExternComponentProps,
@@ -252,6 +253,8 @@ export function generateVueForContexts(
       authUi,
       // Named, typed component event handlers (Proposal A Stage 1).
       c.actions,
+      // Store declarations — drives store-member binding (Stage 5).
+      ui.stores,
     );
     if (component.usesFormToast) hasFormToast = true;
     out.set(`src/components/${c.name}.vue`, component.source);
@@ -299,10 +302,18 @@ export function generateVueForContexts(
         pack,
         externComponents: externComponentNames,
         authUi,
+        stores: ui.stores,
       }),
     );
   }
   out.set("src/pages/NotFound.vue", renderShell(pack, "not-found-page", {}));
+
+  // Store modules (named-actions-and-stores.md §3, Stage 5) — one `reactive()`
+  // singleton per `store Cart { … }` at `src/stores/<snake>.ts`.  Page/component
+  // shells import these (`../stores/cart`) and bind one local per used member.
+  for (const store of ui.stores) {
+    out.set(`src/stores/${snake(store.name)}.ts`, renderVueStoreModule(store));
+  }
 
   // Named layouts (Phase 8).  A page selects one via `layout: <Name>`;
   // `layout: none` mounts outside all chrome.  When any page uses a

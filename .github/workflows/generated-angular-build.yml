@@ -7,9 +7,9 @@ name: Generated Angular build
 # the per-PR `ng build` verification from the Slice-4 batches.
 #
 # Matrix policy:
-#   - pull_request    → 1 cell: the showcase case (read + create-form + byId
-#                       + action surface) × the single angularMaterial pack.
-#   - push: main /    → full 3-cell sweep ({minimal, scaffold, showcase}).
+#   - pull_request    → showcase (read + create-form + byId + action surface)
+#                       and store (shared signal-store surface) × the packs.
+#   - push: main /    → full sweep ({minimal, scaffold, showcase, store}).
 #     workflow_dispatch
 #
 # Cell names MUST match the case labels in
@@ -58,9 +58,9 @@ jobs:
         run: |
           PACKS='["angularMaterial@v1", "primeng@v1", "spartanNg@v1"]'
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            CASES='["showcase"]'
+            CASES='["showcase","store"]'
           else
-            CASES='["minimal","scaffold","showcase"]'
+            CASES='["minimal","scaffold","showcase","store"]'
           fi
           echo "matrix={\"case\":$CASES,\"pack\":$PACKS}" >> "$GITHUB_OUTPUT"
 

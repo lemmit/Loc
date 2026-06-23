@@ -7,12 +7,14 @@ import type {
   PageIR,
   ParamIR,
   StateFieldIR,
+  StoreIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { typeUsesMoney } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { ImportSpec, LoadedPack } from "../../_packs/loader.js";
+import { storeHookName } from "../../_walker/js-target-helpers.js";
 import {
   closeUsedActions,
   emitExpr,
@@ -74,6 +76,10 @@ export interface VuePageShellInput {
    *  then renders a `v-if` `<Forbidden/>` guard against the verified session
    *  claims (`useSession().user`).  Absent ⇒ ungated. */
   authUi?: boolean;
+  /** The ui's `store` declarations — the field/action shape the store
+   *  wiring needs to bind each used member (a field → reactive `computed`,
+   *  an action → a bound callable).  Empty when the ui declares no stores. */
+  stores?: readonly StoreIR[];
 }
 
 export function renderVuePage(input: VuePageShellInput): string {
@@ -160,6 +166,7 @@ export function renderVuePage(input: VuePageShellInput): string {
     new Set(page.params.map((p) => p.name)),
     stateNames,
     repointDerived,
+    result.usedStores,
   );
   const derivedLines = derivedResult.lines;
   if (derivedLines.length > 0) vueImports.add("computed");
@@ -167,6 +174,9 @@ export function renderVuePage(input: VuePageShellInput): string {
   // Named-action handlers → `<script setup>` arrow consts (Proposal A
   // Stage 1).  Built before stateLines so a handler that mutates state
   // forces the `ref()` declaration (same as a derived that reads state).
+  // The shared `result.usedStores` map flows in so a store referenced ONLY
+  // from an action body (`discard() { Cart.clear() }`) still drives the
+  // shell's store import + member bind (Stage 5).
   const actionResult = buildActionLines(
     page.actions,
     result.usedActions ?? new Set(),
@@ -174,8 +184,16 @@ export function renderVuePage(input: VuePageShellInput): string {
     new Set(page.params.map((p) => p.name)),
     stateNames,
     repointDerived,
+    result.usedStores,
   );
   const actionLines = actionResult.lines;
+
+  // Store wiring (Stage 5) — computed AFTER the action/derived walks so a
+  // store member referenced only from a handler body is recorded.  One hook
+  // import + singleton bind + per-member local for each used store; a field
+  // bind is a reactive `computed`, so pull `computed` into the import.
+  const storeWiring = renderStoreWiring(result.usedStores, input.stores ?? [], relPrefix(input));
+  if (storeWiring.usesComputed) vueImports.add("computed");
 
   // State fields — `ref()` per declared field; the walked markup
   // reads bare names (template auto-unwrap) per vueTarget.  A `derived`
@@ -430,6 +448,7 @@ export function renderVuePage(input: VuePageShellInput): string {
     }
     script.push(`import { ${[...names].sort().join(", ")} } from "${from}";`);
   }
+  for (const line of storeWiring.imports) script.push(line);
   script.push("");
   if (needsRoute) {
     script.push("const route = useRoute();");
@@ -453,6 +472,7 @@ export function renderVuePage(input: VuePageShellInput): string {
   if (gated) {
     script.push(`const loomPageAllowed = ${renderGateExpr(page.requires!, "currentUser")};`);
   }
+  for (const line of storeWiring.decls) script.push(line);
   script.push(...stateLines);
   script.push(...hookLines);
   script.push(...opFormLines);
@@ -484,6 +504,50 @@ ${script.join("\n")}
 ${templateBody}
 </template>
 `;
+}
+
+/** Wire the stores a page/component body references (named-actions-and-
+ *  stores.md §3, Stage 5).  For each used store, emit one hook import
+ *  (`import { useCart } from "<prefix>stores/cart"`), one singleton bind
+ *  (`const cart = useCart()`), and one local per used member:
+ *
+ *    - a FIELD read (`Cart.lines`) → `const lines = computed(() => cart.state.lines)`
+ *      — a `ComputedRef` the template auto-unwraps (the body reads the bare
+ *      name, per `vueTarget.renderStoreFieldRead`), staying reactive;
+ *    - an ACTION call (`Cart.clear()`) → `const clear = cart.clear` — a bound
+ *      callable the body invokes bare.
+ *
+ *  Returns the import lines + the script-decl lines and whether any field bind
+ *  was emitted (so the caller pulls `computed` into the `vue` import). */
+function renderStoreWiring(
+  usedStores: Map<string, Set<string>> | undefined,
+  stores: readonly StoreIR[],
+  srcImportPrefix: string,
+): { imports: string[]; decls: string[]; usesComputed: boolean } {
+  if (!usedStores || usedStores.size === 0) {
+    return { imports: [], decls: [], usesComputed: false };
+  }
+  const storesByName = new Map(stores.map((s) => [s.name, s]));
+  const imports: string[] = [];
+  const decls: string[] = [];
+  let usesComputed = false;
+  for (const storeName of [...usedStores.keys()].sort()) {
+    const hook = storeHookName(storeName);
+    const local = lowerFirst(storeName);
+    imports.push(`import { ${hook} } from "${srcImportPrefix}stores/${snake(storeName)}";`);
+    decls.push(`const ${local} = ${hook}();`);
+    const store = storesByName.get(storeName);
+    const actionNames = new Set((store?.actions ?? []).map((a) => a.name));
+    for (const member of [...usedStores.get(storeName)!].sort()) {
+      if (actionNames.has(member)) {
+        decls.push(`const ${member} = ${local}.${member};`);
+      } else {
+        usesComputed = true;
+        decls.push(`const ${member} = computed(() => ${local}.state.${member});`);
+      }
+    }
+  }
+  return { imports, decls, usesComputed };
 }
 
 /** Relative prefix from the page's emit dir up to `src/` —
@@ -682,6 +746,9 @@ export function renderVueComponentFile(
   authUi = false,
   /** Named, typed component event handlers (Proposal A Stage 1). */
   actions: readonly ActionIR[] = [],
+  /** The ui's `store` declarations — drives store-member binding (Stage 5).
+   *  Components reference stores by dotted name exactly like pages do. */
+  stores: readonly StoreIR[] = [],
 ): { source: string; usesFormToast: boolean } {
   const paramNames = new Set(params.map((p) => p.name));
   const stateNames = new Set(state.map((s) => s.name));
@@ -753,13 +820,22 @@ export function renderVueComponentFile(
   // re-points state reads to `.value` and param reads to `props.<name>`
   // (the same rewrite the action-mutation hoists use), so a derived can
   // read both; `computed` auto-tracks deps.
-  const derivedResult = buildDerivedLines(derived, pack, paramNames, stateNames, rewriteScript);
+  const derivedResult = buildDerivedLines(
+    derived,
+    pack,
+    paramNames,
+    stateNames,
+    rewriteScript,
+    result.usedStores,
+  );
   const derivedLines = derivedResult.lines;
   if (derivedLines.length > 0) vueImports.add("computed");
 
   // Named-action handlers → `<script setup>` arrow consts (Proposal A
   // Stage 1).  `rewriteScript` re-points state reads/writes to `.value` and
-  // param reads to `props.<name>`, matching the component derived path.
+  // param reads to `props.<name>`, matching the component derived path.  The
+  // shared `result.usedStores` map flows in so a store action called only
+  // from a handler (`addOne() { Cart.add(...) }`) drives store wiring.
   const actionResult = buildActionLines(
     actions,
     result.usedActions ?? new Set(),
@@ -767,8 +843,16 @@ export function renderVueComponentFile(
     paramNames,
     stateNames,
     rewriteScript,
+    result.usedStores,
   );
   const actionLines = actionResult.lines;
+
+  // Store wiring (Stage 5) — computed AFTER the action/derived walks so a
+  // store member referenced only from a handler body is recorded.  A
+  // component lives at `src/components/<name>.vue`, so the import prefix up
+  // to `src/` is always `../`.
+  const storeWiring = renderStoreWiring(result.usedStores, stores, "../");
+  if (storeWiring.usesComputed) vueImports.add("computed");
 
   // State — `ref()` per field + a `set<Pascal>` setter (the shared input
   // primitives' VM references it), matching the page shell.  A `derived`
@@ -977,6 +1061,7 @@ export function renderVueComponentFile(
     }
     script.push(`import { ${[...names].sort().join(", ")} } from "${from}";`);
   }
+  for (const line of storeWiring.imports) script.push(line);
   script.push("");
   if (propFields.length > 0) {
     // `const props =` only when the script references a prop — keeps an
@@ -992,6 +1077,7 @@ export function renderVueComponentFile(
   if (result.usesCurrentUser) {
     script.push(`const currentUser = (useSession().user.value ?? {}) as Record<string, any>;`);
   }
+  for (const line of storeWiring.decls) script.push(line);
   script.push(...stateLines);
   script.push(...rewrittenHooks);
   script.push(...formLines);
@@ -1028,6 +1114,7 @@ function buildDerivedLines(
   paramNames: ReadonlySet<string>,
   stateNames: ReadonlySet<string>,
   repointToScript: (s: string) => string,
+  usedStores?: Map<string, Set<string>>,
 ): { lines: string[]; usesState: boolean } {
   const lines: string[] = [];
   const seenDerived = new Set<string>();
@@ -1062,6 +1149,9 @@ function buildDerivedLines(
       actionMutations: [],
       collectedTestids: new Set(),
       usesCodeBlock: false,
+      // Share the body's store-usage map so a store read in a derived
+      // expression records into the shell's store wiring (Stage 5).
+      usedStores,
     };
     let exprStr = repointToScript(emitExpr(d.expr, dctx));
     if (dctx.usesState) usesState = true;
@@ -1093,6 +1183,7 @@ function buildActionLines(
   paramNames: ReadonlySet<string>,
   stateNames: ReadonlySet<string>,
   repointToScript: (s: string) => string,
+  usedStores?: Map<string, Set<string>>,
 ): { lines: string[]; usesState: boolean } {
   const lines: string[] = [];
   let usesState = false;
@@ -1131,6 +1222,10 @@ function buildActionLines(
       actionMutations: [],
       collectedTestids: new Set(),
       usesCodeBlock: false,
+      // Share the body's store-usage map so a store action called ONLY from
+      // an action handler (`discard() { Cart.clear() }`) drives the shell's
+      // store import + member bind (Stage 5).
+      usedStores,
     };
     const handlerCtx: WalkContext = param
       ? { ...baseCtx, lambdaParams: extendLambdaParams(baseCtx, param, param) }

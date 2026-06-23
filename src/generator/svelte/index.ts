@@ -39,6 +39,7 @@ import {
   emitSveltePageObjectsForUi,
   emitSveltePagesForUi,
 } from "./routes-emitter.js";
+import { renderSvelteStoreModule, storeModulePath } from "./store-builder.js";
 import { allViews, buildViewsApiModule, hasAnyView } from "./view-builder.js";
 import { allWorkflows, buildWorkflowsApiModule, hasAnyWorkflow } from "./workflow-builder.js";
 
@@ -145,6 +146,15 @@ export function generateSvelteForContexts(
   };
   for (const [path, content] of emitSveltePagesForUi(ui, emitCtx)) out.set(path, content);
   for (const [path, content] of emitSveltePageObjectsForUi(ui, emitCtx)) out.set(path, content);
+
+  // Store modules (named-actions-and-stores.md §3, Stage 5) — one Svelte 5
+  // runes (`$state`) module singleton per `store Cart { … }` at
+  // `src/lib/stores/<snake>.svelte.ts`.  Page/component shells import the store
+  // object + actions and bind `$derived` per used field (see page-shell's
+  // `renderStoreWiring`).
+  for (const store of ui.stores) {
+    out.set(storeModulePath(store.name), renderSvelteStoreModule(store));
+  }
 
   // Named layouts (`layout <Name> { … }`) → a `(<name>)/+layout.svelte`
   // route group whose pages route in via groupForLayout.  No-op when no

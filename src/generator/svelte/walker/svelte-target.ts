@@ -284,4 +284,23 @@ export const svelteTarget: WalkerTarget = {
   escapeText(text: string): string {
     return escapeJsFamilyText(text);
   },
+
+  // --- Store seam (Stage 5) -----------------------------------------------
+
+  /** A `<Store>.<field>` read.  The Svelte store module is a `$state` rune
+   *  singleton (`export const cart = $state<…>({ … })`), so a field read is
+   *  `<storeVar>.<field>` (`cart.lines`).  The page shell binds this to a
+   *  local named after the field via `const <field> = $derived(<this>)` so
+   *  the reactive read survives, and the body references the bare local — this
+   *  return value is the canonical read form the shell wraps. */
+  renderStoreFieldRead(ref: { storeName: string; field: string }): string {
+    return `${lowerFirstName(ref.storeName)}.${ref.field}`;
+  },
+
+  /** A `<Store>.<action>(args)` call.  Store actions are bare module-level
+   *  arrow exports (`export const clear = () => { … }`), so the call site
+   *  imports the action and invokes the bare name — `clear(args)`. */
+  renderStoreActionCall(ref: { storeName: string; action: string }, renderedArgs: string): string {
+    return `${ref.action}(${renderedArgs})`;
+  },
 };

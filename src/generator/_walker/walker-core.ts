@@ -803,7 +803,9 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
           );
         }
         recordStoreUse(ctx, expr.storeName, expr.name);
-        return ctx.target.renderInterpolation(expr.name);
+        return ctx.target.renderInterpolation(
+          storeFieldReadUseSite(ctx, expr.storeName, expr.name),
+        );
       }
       // Refs that match a route param name emit as
       // interpolated expressions (`{name}`).  React Router's
@@ -959,6 +961,23 @@ export function recordStoreUse(ctx: WalkContext, storeName: string, member: stri
     ctx.usedStores.set(storeName, members);
   }
   members.add(member);
+}
+
+/** The use-site read form for a `<Store>.<field>` reference (Stage 5).  The
+ *  expression diverges per frontend: React references the shell-bound local
+ *  (`lines` — the shell hoists `const lines = useCart((s) => s.lines)`), while
+ *  Angular reads the injected store member's signal in place
+ *  (`this.cart.lines()` — the shell injects `readonly cart = inject(CartStore)`).
+ *  Angular qualifies with `this.` so the SAME form works in a template binding
+ *  AND in a generated class-method body (a page action) — Angular templates
+ *  accept `this`, and a method body requires it.  The walker records the use
+ *  via `recordStoreUse`; this only decides what the body emits at the
+ *  reference. */
+export function storeFieldReadUseSite(ctx: WalkContext, storeName: string, field: string): string {
+  if (ctx.target.framework === "angular") {
+    return `this.${storeName[0]!.toLowerCase()}${storeName.slice(1)}.${field}()`;
+  }
+  return field;
 }
 
 /** Extend the WalkContext.lambdaParams map with a new
@@ -1162,7 +1181,7 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
           );
         }
         recordStoreUse(ctx, expr.storeName, expr.name);
-        return expr.name;
+        return storeFieldReadUseSite(ctx, expr.storeName, expr.name);
       }
       if (ctx.stateNames.has(expr.name)) {
         ctx.usesState = true;
@@ -1255,7 +1274,13 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
         }
         recordStoreUse(ctx, expr.storeAction.store, expr.storeAction.action);
         const callArgs = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
-        return `${expr.storeAction.action}(${callArgs})`;
+        // The use-site call form is per-frontend: React references the
+        // shell-bound local (`clear(args)`); Angular calls the injected store
+        // member (`this.cart.clear(args)`).  The seam owns the divergence.
+        return ctx.target.renderStoreActionCall(
+          { storeName: expr.storeAction.store, action: expr.storeAction.action },
+          callArgs,
+        );
       }
       if (ctx.externFunctions?.has(expr.name)) ctx.usedExternFunctions?.add(expr.name);
       const args = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
@@ -1447,7 +1472,10 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
         }
         recordStoreUse(ctx, stmt.store, stmt.name);
         const callArgs = stmt.args.map((a) => emitExpr(a, ctx)).join(", ");
-        return `${stmt.name}(${callArgs});`;
+        // Use-site call form is per-frontend (see the expr-position twin
+        // above): React → bound local `clear(args)`; Angular → injected member
+        // `this.cart.clear(args)`.
+        return `${ctx.target.renderStoreActionCall({ storeName: stmt.store, action: stmt.name }, callArgs)};`;
       }
       if (ctx.externFunctions?.has(stmt.name)) ctx.usedExternFunctions?.add(stmt.name);
       const args = stmt.args.map((a) => emitExpr(a, ctx)).join(", ");
@@ -1658,7 +1686,7 @@ export function renderTextContent(expr: ExprIR, ctx: WalkContext): string | unde
         );
       }
       recordStoreUse(ctx, expr.storeName, expr.name);
-      return ctx.target.renderInterpolation(expr.name);
+      return ctx.target.renderInterpolation(storeFieldReadUseSite(ctx, expr.storeName, expr.name));
     }
     if (ctx.paramNames.has(expr.name)) {
       ctx.usedParams.add(expr.name);

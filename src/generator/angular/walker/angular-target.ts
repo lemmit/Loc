@@ -385,4 +385,43 @@ export const angularTarget: WalkerTarget = {
     }
     return expr ?? "";
   },
+
+  // --- Store seam (Stage 5) -----------------------------------------------
+  //
+  // Angular stores are `@Injectable({ providedIn: "root" })` signal services
+  // (frontend-state-management.md §4.1).  Unlike React's shell-bound-local
+  // model, Angular reads the injected store member IN PLACE: the page-shell
+  // injects `readonly cart = inject(CartStore)` once per used store, and every
+  // field read / action call references `this.cart.<member>` (qualified with
+  // `this.` so the same form works in a template binding AND a class-method
+  // body — the walker-core `storeFieldReadUseSite` builds the read form;
+  // `renderStoreActionCall` below builds the call form).
+
+  /** A `<Store>.<field>` read.  React returns the Zustand SELECTOR the shell
+   *  binds; Angular's selector is unused — the read is rendered in place by
+   *  `walker-core`'s `storeFieldReadUseSite` (`this.cart.lines()`).  Kept
+   *  defined so the walker's presence-guard passes (a frontend without it
+   *  fails loud) and the cross-target contract test sees a populated seam;
+   *  returns the same in-place read for a standalone caller. */
+  renderStoreFieldRead(ref: { storeName: string; field: string }): string {
+    const member = `${ref.storeName[0]!.toLowerCase()}${ref.storeName.slice(1)}`;
+    return `this.${member}.${ref.field}()`;
+  },
+
+  /** A `<Store>.<action>(args)` call → the injected store member's method,
+   *  `this.cart.clear(args)`.  Qualified with `this.` so the call works
+   *  identically in a template `(click)` binding and a generated page-action
+   *  class method. */
+  renderStoreActionCall(ref: { storeName: string; action: string }, renderedArgs: string): string {
+    const member = `${ref.storeName[0]!.toLowerCase()}${ref.storeName.slice(1)}`;
+    return `this.${member}.${ref.action}(${renderedArgs})`;
+  },
+
+  // `renderStoreModule` is intentionally NOT implemented on `angularTarget`:
+  // like React (which emits its Zustand module directly in `react/index.ts`),
+  // the Angular orchestrator (`angular/index.ts`) emits each store's
+  // `@Injectable` signal service via `renderAngularStoreModule` — keeping the
+  // store-builder ↔ target dependency one-directional (the builder imports the
+  // target for its action-body sub-target; the target never imports the
+  // builder).
 };

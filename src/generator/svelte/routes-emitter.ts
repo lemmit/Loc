@@ -187,6 +187,8 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
         ctx.authUi,
         // Named, typed component event handlers (Proposal A Stage 1).
         c.actions,
+        // Shared client-side stores (Stage 5) — for store-import + bindings.
+        ui.stores,
       ),
     );
   }
@@ -229,6 +231,8 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
         ctx.authUi,
         // Named, typed page event handlers (Proposal A Stage 1).
         page.actions,
+        // Shared client-side stores (Stage 5) — for store-import + bindings.
+        ui.stores,
       ),
     );
   }

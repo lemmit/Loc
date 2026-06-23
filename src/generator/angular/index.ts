@@ -30,6 +30,7 @@ import { walkBody } from "../_walker/walker-core.js";
 import { emitPageObjectsForUi } from "../react/pages-emitter.js";
 import { buildAngularApiModule } from "./api-module.js";
 import { type AngularRouteDesc, renderAngularRoutes, routePath } from "./routes-emitter.js";
+import { renderAngularStoreModule, storeFileSlug } from "./store-builder.js";
 import { buildAngularViewsModule } from "./views-module.js";
 import { angularTarget } from "./walker/angular-target.js";
 import {
@@ -182,6 +183,19 @@ export function generateAngularForContexts(
     }
     out.set(`src/app/pages/${slug}.component.ts`, content);
     routeDescs.push({ route: page.route!, component: pageComponentName(page, pageCtx), slug });
+  }
+
+  // Store modules (named-actions-and-stores.md §3, Stage 5) — one injectable
+  // signal service per `store Cart { … }` at `src/app/stores/<dasherized>.store.ts`.
+  // Page shells `inject()` these (`../stores/cart.store`) per used store.  Like
+  // React's index, the module is emitted here directly (not via the optional
+  // `WalkerTarget.renderStoreModule` seam) so the store-builder ↔ target import
+  // stays one-directional.
+  for (const store of ui?.stores ?? []) {
+    out.set(
+      `src/app/stores/${storeFileSlug(store.name)}.store.ts`,
+      renderAngularStoreModule(store),
+    );
   }
 
   // Nav sidebar — one entry per routed page (routerLink keeps the

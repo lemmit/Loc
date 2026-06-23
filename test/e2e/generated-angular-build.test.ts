@@ -162,6 +162,83 @@ const SHOWCASE: Case = {
   `,
 };
 
+/** Store surface (named-actions-and-stores.md §3, Stage 5) — a shared
+ *  client-side `store Cart { state {…} action … }` injectable signal service,
+ *  a page that READS store state by dotted name (`Cart.lines`, `Cart.count`)
+ *  in markup (`For { each: Cart.lines }`, a Heading) and CALLS a store action
+ *  from a page action (`discard() { Cart.clear() }`).  Page-only (Angular emits
+ *  no standalone user-component files), so the store-from-component path of the
+ *  React `store-showcase.ddd` is covered here purely through pages.  Asserts
+ *  the `@Injectable` signal store at `src/app/stores/cart.store.ts` and the
+ *  per-page `inject(CartStore)` + `this.cart.lines()` read / `this.cart.clear()`
+ *  call all `ng build` cleanly. */
+const STORE: Case = {
+  name: "store",
+  angularDir: "web",
+  source: `
+    system StoreShowcase {
+      subdomain Sales {
+        context Sales {
+          aggregate Order with crudish {
+            customerId: string
+          }
+          repository Orders for Order { }
+        }
+      }
+      api SalesApi from Sales
+      ui WebApp {
+        api Sales: SalesApi
+        store Cart {
+          state {
+            lines: string[]
+            count: int = 0
+          }
+          action add(sku: string) {
+            lines += sku
+            count += 1
+          }
+          action clear() {
+            lines := [ ]
+            count := 0
+          }
+        }
+        page CartPage {
+          route: "/cart"
+          state { confirming: bool = false }
+          action discard() { Cart.clear() }
+          action addOne() { Cart.add("SKU-1") }
+          body: Stack {
+            Heading { "Your cart", level: 1 },
+            Heading { Cart.count, level: 3 },
+            For { each: Cart.lines, line => Card { line } },
+            Button { "Add item", onClick: addOne },
+            Button { "Discard", onClick: discard }
+          }
+        }
+        page Home {
+          route: "/"
+          body: Heading { "Store showcase", level: 1 }
+        }
+      }
+      storage primary { type: postgres }
+      resource salesState { for: Sales, kind: state, use: primary }
+      deployable api {
+        platform: node
+        contexts: [Sales]
+        dataSources: [salesState]
+        serves: SalesApi
+        port: 3000
+      }
+      deployable web {
+        platform: angular
+        targets: api
+        ui: WebApp { Sales: api }
+        port: 3004
+      }
+    }
+  `,
+};
+
 /** The angular pack matrix.  angularMaterial (Material components), primeng
  *  (PrimeNG components), and spartanNg (shadcn-for-Angular design language,
  *  plain styled elements) all ship the required template surface. */
@@ -172,7 +249,7 @@ interface MatrixCase extends Case {
   label: string;
 }
 
-const allCases: MatrixCase[] = [MINIMAL, SCAFFOLD, SHOWCASE].flatMap((c) =>
+const allCases: MatrixCase[] = [MINIMAL, SCAFFOLD, SHOWCASE, STORE].flatMap((c) =>
   PACKS.map((pack) => ({ ...c, pack, label: `${c.name}:${pack}` })),
 );
 

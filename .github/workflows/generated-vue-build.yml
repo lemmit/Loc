@@ -7,10 +7,9 @@ name: Generated Vue build
 # Slice 9).
 #
 # Matrix policy:
-#   - pull_request    → 2 cells: the showcase case (the acme-scale
-#                       feature-comprehensive example) × both packs.
-#   - push: main /    → full 6-cell Cartesian
-#     workflow_dispatch  ({minimal, scaffold, showcase} × packs).
+#   - pull_request    → 4 cells: the showcase + store cases × both packs.
+#   - push: main /    → full 8-cell Cartesian
+#     workflow_dispatch  ({minimal, scaffold, showcase, store} × packs).
 #
 # Cell names MUST match the case labels in
 # test/e2e/generated-vue-build.test.ts (`<case>:<pack>`).
@@ -23,6 +22,7 @@ on:
       - 'designs/vuetify/**'
       - 'designs/shadcnVue/**'
       - 'examples/vue-showcase.ddd'
+      - 'web/src/examples/vue-store-showcase.ddd'
       - 'vue/**'
       - 'api/**'
       - 'docker/**'
@@ -39,6 +39,7 @@ on:
       - 'designs/vuetify/**'
       - 'designs/shadcnVue/**'
       - 'examples/vue-showcase.ddd'
+      - 'web/src/examples/vue-store-showcase.ddd'
       - 'vue/**'
       - 'api/**'
       - 'docker/**'
@@ -64,9 +65,9 @@ jobs:
         run: |
           PACKS='["vuetify@v3","shadcnVue@v1"]'
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            CASES='["showcase"]'
+            CASES='["showcase","store"]'
           else
-            CASES='["minimal","scaffold","showcase"]'
+            CASES='["minimal","scaffold","showcase","store"]'
           fi
           echo "matrix={\"case\":$CASES,\"pack\":$PACKS}" >> "$GITHUB_OUTPUT"
 

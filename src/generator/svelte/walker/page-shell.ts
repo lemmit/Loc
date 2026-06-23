@@ -27,6 +27,7 @@ import type {
   ExprIR,
   ParamIR,
   StateFieldIR,
+  StoreIR,
   TypeIR,
   UiApiParamIR,
   WorkflowIR,
@@ -45,6 +46,7 @@ import type {
   WorkflowFormState,
 } from "../../_walker/walker-core.js";
 import { emitExpr, renderActionHandlers, walkBody } from "../../_walker/walker-core.js";
+import { storeImportSpecifier, storeVarName } from "../store-builder.js";
 import { renderSvelteApiHookImports, renderSvelteImportLines } from "./import-lines.js";
 import { svelteTarget } from "./svelte-target.js";
 
@@ -213,6 +215,10 @@ export function renderSveltePage(
   /** Named, typed page event handlers — hoisted as `const <name> = … =>`
    *  arrow consts in `<script>` (Proposal A Stage 1). */
   actions: ActionIR[] = [],
+  /** Shared client-side stores declared on the hosting ui (`store Cart { … }`).
+   *  Drives the `<script>` store-import + `$derived` field bindings for any
+   *  store this page reads / calls (named-actions-and-stores.md §3, Stage 5). */
+  stores: readonly StoreIR[] = [],
 ): string {
   void pageName;
   const paramNames = new Set(params.map((p) => p.name));
@@ -232,6 +238,7 @@ export function renderSveltePage(
     actionMutations,
     usedExternFunctions,
     usedActions,
+    usedStores,
   } = walkBody(
     body,
     svelteTarget,
@@ -257,15 +264,21 @@ export function renderSveltePage(
   const derivedLines = derivedResult.lines;
 
   // Named-action handlers → `<script>` arrow consts (Proposal A Stage 1).
-  // A handler that mutates state forces the `$state` declaration.
+  // A handler that mutates state forces the `$state` declaration.  Share the
+  // body walk's `usedStores` map so a store referenced ONLY from an action body
+  // (`discard() { Cart.clear() }`) still drives the shell's store import + bind.
   const actionResult = buildActionLines(
     actions,
     usedActions ?? new Set(),
     pack,
     paramNames,
     stateNames,
+    usedStores,
   );
   const actionLines = actionResult.lines;
+  // Store wiring (Stage 5) — import + `$derived` field bindings.  Computed AFTER
+  // action handlers so action-body store use is included in `usedStores`.
+  const store = renderStoreWiring(usedStores, stores);
 
   // Title — a plain `$effect`; runes auto-track any param/state the
   // expression reads, so no deps array is derived.
@@ -358,7 +371,7 @@ export function renderSveltePage(
     : indentJsx(tsx, "");
   return `<!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">
-${gate.import}${navigateImport}${pageStateImport}${decimalImport}${packImports}${apiHookImports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${paramLines}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}${gate.binding}${titleEffect}</script>
+${gate.import}${navigateImport}${pageStateImport}${decimalImport}${packImports}${apiHookImports}${store.imports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${paramLines}${stateLines}${apiHookDecls}${store.decls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}${gate.binding}${titleEffect}</script>
 
 ${markup}
 ${templateScope}`;
@@ -396,6 +409,48 @@ function renderSveltePageGate(
   };
 }
 
+/** Render the `<script>` store wiring for a page/component
+ *  (named-actions-and-stores.md §3, Stage 5).  For every store member the body
+ *  used, import it from the store's `.svelte.ts` module and — for FIELD reads —
+ *  bind a local named after the field via `$derived` so the reactive read
+ *  survives (the walker emits the body ref as the bare field name).  ACTION
+ *  calls need only the import; the body invokes the bare imported name.
+ *
+ *  The store object singleton (`cart`) is imported when any field is read so
+ *  `$derived(cart.lines)` resolves; individual action functions are imported by
+ *  name.  Distinguishing fields from actions needs the store definitions, hence
+ *  the `stores` lookup. */
+function renderStoreWiring(
+  usedStores: Map<string, Set<string>> | undefined,
+  stores: readonly StoreIR[],
+): { imports: string; decls: string } {
+  if (!usedStores || usedStores.size === 0) return { imports: "", decls: "" };
+  const storesByName = new Map(stores.map((s) => [s.name, s]));
+  const importLines: string[] = [];
+  const declLines: string[] = [];
+  for (const storeName of [...usedStores.keys()].sort()) {
+    const store = storesByName.get(storeName);
+    const fieldNames = new Set((store?.state ?? []).map((f) => f.name));
+    const storeVar = storeVarName(storeName);
+    const used = [...usedStores.get(storeName)!].sort();
+    const usedFields = used.filter((m) => fieldNames.has(m));
+    const usedActions = used.filter((m) => !fieldNames.has(m));
+    // Named imports: the store-object singleton (only when a field is read) +
+    // each used action function.  Deduped + sorted for stable output.
+    const named = [...(usedFields.length > 0 ? [storeVar] : []), ...usedActions].sort();
+    importLines.push(`  import { ${named.join(", ")} } from "${storeImportSpecifier(storeName)}";`);
+    // Field reads → reactive `$derived` binding named after the field (the body
+    // references the bare local).
+    for (const field of usedFields) {
+      declLines.push(`  const ${field} = $derived(${storeVar}.${field});`);
+    }
+  }
+  return {
+    imports: importLines.length > 0 ? `${importLines.join("\n")}\n` : "",
+    decls: declLines.length > 0 ? `${declLines.join("\n")}\n` : "",
+  };
+}
+
 /** Render one ComponentIR as `src/lib/components/<Name>.svelte`:
  *  typed `$props()` destructure, runes state, body walked through
  *  the shared machinery. */
@@ -419,6 +474,9 @@ export function renderSvelteComponentFile(
   authUi = false,
   /** Named, typed component event handlers (Proposal A Stage 1). */
   actions: ActionIR[] = [],
+  /** Shared client-side stores declared on the hosting ui — drives the
+   *  `<script>` store-import + `$derived` field bindings (Stage 5). */
+  stores: readonly StoreIR[] = [],
 ): string {
   void name;
   const paramNames = new Set(params.map((p) => p.name));
@@ -437,6 +495,7 @@ export function renderSvelteComponentFile(
     formOfs,
     usedExternFunctions,
     usedActions,
+    usedStores,
   } = walkBody(
     body,
     svelteTarget,
@@ -464,14 +523,19 @@ export function renderSvelteComponentFile(
   const derivedResult = buildDerivedLines(derived, pack, paramNames, stateNames);
   const derivedLines = derivedResult.lines;
   // Named-action handlers → `<script>` arrow consts (Proposal A Stage 1).
+  // Share `usedStores` so an action-body store call is recorded for the shell.
   const actionResult = buildActionLines(
     actions,
     usedActions ?? new Set(),
     pack,
     paramNames,
     stateNames,
+    usedStores,
   );
   const actionLines = actionResult.lines;
+  // Store wiring (Stage 5) — after action handlers so action-body store use is
+  // included.
+  const store = renderStoreWiring(usedStores, stores);
   const actionWiring = renderActionMutations(actionMutations);
   const form = formOfs.reduce<FormWiring>(
     (acc, st) => {
@@ -559,7 +623,7 @@ export function renderSvelteComponentFile(
   const templateScope = form.templateScope === "" ? "" : `\n${form.templateScope}`;
   return `<!-- Auto-generated.  Do not edit by hand. -->
 <script lang="ts">
-${gate.import}${snippetImport}${navigateImport}${decimalImport}${packImports}${apiHookImports}${dtoImportLines}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsDestructure}${gate.binding}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}</script>
+${gate.import}${snippetImport}${navigateImport}${decimalImport}${packImports}${apiHookImports}${dtoImportLines}${store.imports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsDestructure}${gate.binding}${stateLines}${apiHookDecls}${store.decls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}</script>
 
 ${indentJsx(markup, "")}
 ${templateScope}`;
@@ -747,8 +811,13 @@ function buildActionLines(
   pack: LoadedPack,
   paramNames: ReadonlySet<string>,
   stateNames: ReadonlySet<string>,
+  /** Shared by reference from the page/component body walk so a store call in an
+   *  action body (`discard() { Cart.clear() }`) is recorded for the shell's
+   *  store wiring (Stage 5). */
+  usedStores?: Map<string, Set<string>>,
 ): { lines: string; usesState: boolean } {
   const ctx = dummyCtx(pack, paramNames, stateNames, new Set());
+  if (usedStores) ctx.usedStores = usedStores;
   const handlers = renderActionHandlers(actions, used, ctx);
   const lines = handlers
     ? `${handlers
