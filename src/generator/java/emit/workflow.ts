@@ -369,9 +369,15 @@ export function renderJavaWorkflows(
         : []),
       `    public void ${lowerFirst(wf.name)}(${wf.params.length > 0 ? `${reqType} request` : ""}) {`,
       ...(usesUser && authed ? [`        var currentUser = currentUserAccessor.user();`] : []),
+      // Workflow narrative — `workflow_started` at method entry; shared catalog
+      // identity (field `workflow`) with the Phoenix-Ash reference + every backend.
+      `        CatalogLog.event("workflow_started", "info", "workflow", ${JSON.stringify(wf.name)});`,
       ...paramLets,
       ...bodyLines,
       ...saves,
+      // `workflow_completed` on the success tail — a thrown guard / domain
+      // exception short-circuits before reaching here.
+      `        CatalogLog.event("workflow_completed", "info", "workflow", ${JSON.stringify(wf.name)});`,
       `    }`,
       ``,
     );
@@ -415,7 +421,9 @@ export function renderJavaWorkflows(
         ? `import ${wctx.resourcesPkg}.*;`
         : null,
       hasEmit ? `import ${wctx.basePkg}.domain.events.*;` : null,
-      hasEmit ? `import ${wctx.basePkg}.config.CatalogLog;` : null,
+      // CatalogLog is always referenced now (workflow_started/completed on every
+      // command-workflow method), not only when the body emits a domain event.
+      `import ${wctx.basePkg}.config.CatalogLog;`,
       `import ${wctx.basePkg}.domain.common.*;`,
       `import ${wctx.basePkg}.domain.enums.*;`,
       `import ${wctx.basePkg}.domain.ids.*;`,

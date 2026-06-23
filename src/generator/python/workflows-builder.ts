@@ -21,6 +21,7 @@ import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
 import { walkExpr } from "../../ir/validate/checks/shared.js";
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
+import { LogEvents } from "../_obs/log-events.js";
 import { renderWorkflowStmts, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
 import { domainServiceImportLinesForWorkflow } from "./emit/domain-service.js";
 import { responsePyType } from "./emit/http-models.js";
@@ -151,6 +152,9 @@ export function buildPyWorkflowsFile(
     "",
     anyUser ? "from app.auth.user import User" : null,
     "from app.db.engine import get_session",
+    // Command-workflow routes always log the lifecycle narrative; observable-
+    // only contexts (no command route) emit no `log(...)` call, so gate on wfs.
+    wfs.length > 0 ? "from app.obs.log import log" : null,
     ...resourceImports,
     ...repoAggs.map((n) => `from app.db.repositories.${snake(n)}_repository import ${n}Repository`),
     (() => {
@@ -379,6 +383,9 @@ function workflowRoute(
     `@router.post("/${snake(wf.name)}", status_code=204, operation_id="${camelId(opWorkflow(wf.name))}"${errorResponsesKwarg("workflow", workflowIsGuarded(wf))})`,
     `async def ${snake(wf.name)}_workflow(${sig}) -> Response:`,
     ...(usesUser ? ["    current_user: User = request.state.current_user"] : []),
+    // Workflow narrative — `workflow_started` at the route entry; shared catalog
+    // identity (field `workflow`) with the Phoenix-Ash reference + every backend.
+    `    log("${LogEvents.workflowStarted.level}", "${LogEvents.workflowStarted.event}", workflow=${JSON.stringify(wf.name)})`,
   ];
   // A `transactional(<level>)` workflow (or its state dataSource's
   // `isolationLevel:`) pins the request transaction's isolation before any
@@ -415,6 +422,11 @@ function workflowRoute(
     out.push("    for ev in workflow_events:");
     out.push("        await dispatcher.dispatch(ev)");
   }
+  // `workflow_completed` on the success tail — a raised guard / domain error
+  // short-circuits before reaching here.
+  out.push(
+    `    log("${LogEvents.workflowCompleted.level}", "${LogEvents.workflowCompleted.event}", workflow=${JSON.stringify(wf.name)})`,
+  );
   out.push("    return Response(status_code=204)");
   return out.join("\n");
 }

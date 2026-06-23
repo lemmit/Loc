@@ -475,6 +475,12 @@ function emitWorkflowRoute(
   out.push(`  }),`);
   out.push(`  async (httpCtx) => {`);
   out.push(`    const body = httpCtx.req.valid("json");`);
+  // Workflow narrative — `workflow_started` at the command-route entry; the
+  // shared catalog identity (field `workflow`) means a dashboard pivots on one
+  // event name across every backend.  ALS-backed (`renderHonoStoreLogCall`)
+  // since the handler param is `httpCtx`, not the `c` the per-request renderer
+  // hardcodes; the request-bound child logger still resolves via ALS.
+  out.push(`    ${renderHonoStoreLogCall("workflowStarted", `workflow: "${wf.name}"`)}`);
   // Param-name → domain expression; precomputed so factory/repo/op-call
   // and emit references all resolve to the wire-converted body field.
   const paramExprs = new Map<string, string>();
@@ -588,6 +594,10 @@ function emitWorkflowRoute(
   if (hasEmit) {
     out.push(`    for (const ev of workflowEvents) await events.dispatch(ev);`);
   }
+  // `workflow_completed` on the success path — emits / a thrown guard / a domain
+  // error short-circuit before reaching here, so the line fires only when the
+  // body ran to its terminal 204.
+  out.push(`    ${renderHonoStoreLogCall("workflowCompleted", `workflow: "${wf.name}"`)}`);
   out.push(`    return httpCtx.body(null, 204);`);
   out.push(`  },`);
   out.push(`);`);

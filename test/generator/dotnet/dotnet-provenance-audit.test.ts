@@ -308,7 +308,9 @@ describe("dotnet workflow audit", () => {
     // The handler injects the audit writer + stages a record bracketed by
     // before/after wire snapshots, mirroring the per-operation command handler.
     expect(h).toContain("private readonly IAuditWriter _audit;");
-    expect(h).toContain("public BuildCartHandler(ICartRepository carts, IAuditWriter audit)");
+    expect(h).toContain(
+      "public BuildCartHandler(ICartRepository carts, ILogger<BuildCartHandler> log, IAuditWriter audit)",
+    );
     expect(h).toContain("var __wfAuditBefore0 = System.Text.Json.JsonSerializer.Serialize(");
     expect(h).toContain("var __wfAuditAfter0 = System.Text.Json.JsonSerializer.Serialize(");
     expect(h).toContain("_audit.Stage(new AuditRecord");

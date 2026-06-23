@@ -87,8 +87,11 @@ describe("vanilla — workflow body lowering (precondition / requires / expr-let
     const wf = await loadWorkflow();
     // The with-chain returns `{:ok, t}` (the Task), NOT `{:ok, normalised}`
     // (the pure binding) — expr-let carries `bindName: undefined` so a
-    // subsequent factory-let claims the success result.
-    expect(wf).toMatch(/with [\s\S]*do\n\s+\{:ok, t\}\n\s+end/);
+    // subsequent factory-let claims the success result.  The do-branch opens
+    // with the woven `workflow_completed` log line (S3) before the result.
+    expect(wf).toMatch(
+      /with [\s\S]*do\n\s+Logger\.info\("workflow_completed"[\s\S]*?\n\s+\{:ok, t\}\n\s+end/,
+    );
   });
 });
 
