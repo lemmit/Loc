@@ -61,8 +61,12 @@ export function printExpr(node: Expression): string {
       return `${node.type} {${printBuilderEntries(node.entries)}}`;
     case "ObjectLit":
       return `{${printObjectFields(node.fields)}}`;
-    case "ListLit":
-      return `[${(node.elements ?? []).map((e) => printExpr(e)).join(", ")}]`;
+    case "ListLit": {
+      // An empty list prints as `[ ]` (spaced) — the bare `[]` token is lexed
+      // as the array-type marker, so an adjacent form wouldn't re-parse.
+      const elems = node.elements ?? [];
+      return elems.length === 0 ? "[ ]" : `[${elems.map((e) => printExpr(e)).join(", ")}]`;
+    }
     case "MatchExpr":
       return printMatch(node);
     case "RetrievalLiteral": {

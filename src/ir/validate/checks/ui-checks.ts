@@ -254,6 +254,9 @@ function checkStmt(
     const stmt = s as Extract<StmtIR, { kind: "call" }>;
     if (
       stmt.target !== "action" &&
+      // A `<Store>.<action>()` call is a resolved cross-surface dispatch
+      // (Stage 5) — not an unresolved sibling-action reference.
+      stmt.target !== "store-action" &&
       !ctx.actionsByName.has(stmt.name) &&
       !ctx.functionNames.has(stmt.name) &&
       !VIEW_EFFECT_BUILTINS.has(stmt.name)

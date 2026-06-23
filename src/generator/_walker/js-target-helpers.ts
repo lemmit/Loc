@@ -114,6 +114,14 @@ export function upperFirstName(s: string): string {
   return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
 }
 
+/** The exported store-hook name for a `store <Name>` (Stage 5).  Shared by
+ *  the JS-family targets' store seam + the React store-module emitter so
+ *  the use-site selector (`useCart((s) => s.lines)`) and the module's
+ *  `export const useCart` agree.  `Cart` → `useCart`. */
+export function storeHookName(storeName: string): string {
+  return `use${upperFirstName(storeName)}`;
+}
+
 /** Conservative plural rules matching `src/util/naming.ts:plural`. */
 function pluralName_(s: string): string {
   if (s.endsWith("y") && !/[aeiou]y$/.test(s)) return `${s.slice(0, -1)}ies`;

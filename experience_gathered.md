@@ -1521,3 +1521,69 @@ a workflow-form page emitting to the wrong path). **Lesson:** a context object
 reused across a loop must hold re-iterable collections — materialise
 `[...map.keys()]` at the boundary, never hand a single-use iterator to a helper
 that's called per element.
+
+## 16. The `store` feature (Stage 5) — two gotchas and one seam decision
+
+### `[]` (adjacent) is lexed as the array-type marker, not an empty-list literal
+
+The grammar's array-type suffix `'[]'` is a single token. So in *expression*
+position a bare `[]` (e.g. `lines := []`, or a `state { xs: T[] = [] }`
+initializer) is lexed as that token and fails to parse as an empty `ListLit`.
+Workarounds: write `[ ]` (spaced — the tokens separate) or omit the initializer
+(the array zero-value already IS `[]`). This bit the store example's `clear()`
+action and surfaced a latent **printer** bug too — `printExpr` re-emitted an
+empty `ListLit` as `[]`, which then wouldn't round-trip; the fix was to print an
+empty list as `[ ]` (`src/language/print/print-expr.ts`). Lesson: a
+single-token operator that also looks like a two-token literal is a lexer trap;
+the printer must emit the spaced form to stay round-trippable.
+
+### Dotted UI refs resolve at LOWERING, not in the scope provider
+
+`Cart.lines` / `Cart.clear()` are NOT Langium cross-references — page/component
+bodies parse `NameRef` + `PostfixSuffix` as plain strings (`name=NameRefIdent`),
+so the scope provider never sees them. Resolution happens in `lower-expr.ts`
+(`applySuffixToRecv`, against an `env.stores` index) — a `<Store>.<field>`
+becomes a `refKind:"store-field"` ref carrying the store name, a
+`<Store>.<action>()` becomes a `callKind:"store-action"` call. This is the
+fully-resolved-IR invariant in action: the emitter reads the store name off the
+ref/call, never re-resolves. (The reviewer's "mirror UiNotification/MenuLink"
+note meant *resolve at IR-time, not emit-time* — UiNotification DOES use a real
+cross-ref because its `param`/`event` are grammar references; the body-expr
+store refs are the lowering-time analog, since there's no cross-ref to hang a
+scope rule on.)
+
+### The walker store seam touches THREE ref sites, not one
+
+A store-field read reaches the JSX walker at three independent points:
+`emitExpr`'s `ref` arm (handler/expression position), `walk`'s `ref` arm
+(markup-child position), and `renderTextContent`'s `ref` branch (a primitive's
+text arg, e.g. `Heading { Cart.count }`). Each had its own bare-name fallback
+(`renderComment("ref: …")`). A new ref *kind* has to be wired into all three or
+it silently degrades to a `{/* ref: x */}` comment in whichever position the
+test example didn't exercise — caught here only because the example put
+`Cart.count` in a `Heading` text slot. Lesson: when adding an `ExprIR` ref
+shape the walker must render, grep every `renderComment(`ref:` fallback, not
+just the first one.
+
+### A new keyword breaks plain-`ID` positions the soft-keyword escape hatch can't reach
+
+Stage 5 first shipped a `StoreLifetime` grammar (`store Cart persist: local`),
+introducing `persist`/`sync`/`local`/`session`/`url` as keyword tokens. That
+turned `main` red one merge later: `operation sync() { … }` and a `url: string`
+field stopped parsing, because **operation/aggregate/event NAMES are
+`name=ID`** — and you cannot soft-admit a word into a plain `ID` position
+without rewriting every `name=ID` to a name-rule. The soft-keyword escape hatch
+(adding `'sync'` to `LooseName`/`MemberName`/`NameRefIdent`/`Property.name`)
+covers field/param/member-access/NameRef positions, but NOT declaration names.
+`store` itself was fine (a *field* named `store` only needs the soft-keyword
+rules), but the lifetime words were too common and landed in declaration-name
+positions. **Resolution:** drop the lifetime *surface* entirely for v1 (the IR
+field + `loom.store-lifetime-unsupported` gate stay, defaulting to `"memory"`),
+so the persistence follow-up adds syntax later with the soft-keyword care it
+needs. **Lesson:** before adding a bareword keyword, grep the example/test
+corpus for it as an identifier — if it appears as an operation/aggregate/event
+*name* (plain `ID`), a soft keyword can't save you; either pick a
+collision-free spelling or defer the surface. The heavy per-backend gates
+(elixir/dotnet/java generate-and-compile) are where this surfaces — a narrow
+grammar diff's fast tests can stay green while a generated-backend example with
+the now-reserved identifier fails to parse downstream.

@@ -12,7 +12,9 @@ import type {
   LayoutNamedSlot,
   MenuBlock,
   Page,
+  StateBlock,
   StateField,
+  Store,
   Ui,
 } from "../../language/generated/ast.js";
 import { snake } from "../../util/naming.js";
@@ -30,6 +32,7 @@ import type {
   PageMetadataIR,
   StateFieldIR,
   StmtIR,
+  StoreIR,
   TypeIR,
   UiApiParamIR,
   UiChannelParamIR,
@@ -77,6 +80,61 @@ function lowerAction(a: ActionDecl, env: Env): ActionIR {
     scopeEnv = lowered.envAfter;
   }
   return { name: a.name, params, body };
+}
+
+/** Build the ui-wide store index (store name → field types + action param
+ *  types) threaded into every body env so dotted store refs resolve during
+ *  lowering (named-actions-and-stores.md §3, Stage 5).  Built BEFORE any
+ *  page/component/store body lowers, since all three may reference a store. */
+function indexStores(
+  stores: ReadonlyArray<Store>,
+): Map<string, { fields: Map<string, TypeIR>; actions: Map<string, { paramType?: TypeIR }> }> {
+  const index = new Map<
+    string,
+    { fields: Map<string, TypeIR>; actions: Map<string, { paramType?: TypeIR }> }
+  >();
+  for (const s of stores) {
+    const fields = new Map<string, TypeIR>();
+    const actions = new Map<string, { paramType?: TypeIR }>();
+    for (const decl of s.decls) {
+      if (decl.$type === "StateBlock") {
+        for (const f of (decl as StateBlock).fields) fields.set(f.name, lowerType(f.type));
+      } else {
+        const a = decl as ActionDecl;
+        actions.set(a.name, { paramType: a.params[0] ? lowerType(a.params[0].type) : undefined });
+      }
+    }
+    index.set(s.name, { fields, actions });
+  }
+  return index;
+}
+
+/** Lower a `store Name { state {…} action …}` member.  Reuses `lowerStateField`
+ *  for state and `lowerAction` for actions — no new statement lowering.  Store
+ *  action bodies lower against an env whose `this`-owner is the store's own
+ *  state (so `lines := …` resolves to a store-field write) and whose `stores`
+ *  index is in scope (so a store action may call another store action). */
+function lowerStore(s: Store, baseEnv: Env): StoreIR {
+  // The store's own state binds as `let` locals so a bare `lines` inside an
+  // action body resolves to its own field (a same-store write); the dotted
+  // `Cart.lines` form from a foreign body resolves via the `stores` index.
+  let env = baseEnv;
+  const state: StateFieldIR[] = [];
+  for (const decl of s.decls) {
+    if (decl.$type === "StateBlock") {
+      for (const f of (decl as StateBlock).fields) {
+        env = withLocal(env, f.name, "let", lowerType(f.type));
+        state.push(lowerStateField(f, env));
+      }
+    }
+  }
+  const actionDecls = s.decls.filter((d): d is ActionDecl => d.$type === "ActionDecl");
+  env = { ...env, actions: indexActions(actionDecls) };
+  const actions = actionDecls.map((a) => lowerAction(a, env));
+  // v1: always in-memory — the lifetime ladder has no grammar surface yet
+  // (see the `Store` rule comment); the IR field + validator gate exist so the
+  // persistence follow-up only adds syntax.
+  return { name: s.name, lifetime: "memory", state, actions };
 }
 
 // ---------------------------------------------------------------------------
@@ -130,11 +188,17 @@ export function lowerLayout(layout: Layout): LayoutIR {
 export function lowerUi(ui: Ui, user?: UserIR): UiIR {
   const pages: PageIR[] = [];
   const components: ComponentIR[] = [];
+  const stores: StoreIR[] = [];
   const apiParams: UiApiParamIR[] = [];
   const channelParams: UiChannelParamIR[] = [];
   const notifications: UiNotificationIR[] = [];
   const functions: UiFunctionIR[] = [];
   let menu: MenuBlockIR | undefined;
+  // Build the ui-wide store index up front so every page/component/store body
+  // resolves a dotted `Cart.lines` / `Cart.clear()` ref during lowering (the
+  // IR stays fully resolved).  Empty index ⇒ no stores declared.
+  const storeDecls = ui.members.filter((m): m is Store => m.$type === "Store");
+  const storeIndex = storeDecls.length > 0 ? indexStores(storeDecls) : undefined;
   // Pages inside `area { … }` blocks group by containment: the file lands at
   // `src/pages/<area-path>/<page>.tsx`, the path joining down the nesting.
   const collectArea = (
@@ -144,7 +208,7 @@ export function lowerUi(ui: Ui, user?: UserIR): UiIR {
     const path = [...parent, snake(area.name)];
     for (const member of area.members) {
       if (member.$type === "Page") {
-        const p = lowerPage(member, user);
+        const p = lowerPage(member, user, storeIndex);
         p.area = path;
         p.emitPath = `src/pages/${path.join("/")}/${snake(p.name)}.tsx`;
         pages.push(p);
@@ -154,10 +218,13 @@ export function lowerUi(ui: Ui, user?: UserIR): UiIR {
     }
   };
   for (const m of ui.members) {
-    if (m.$type === "Page") pages.push(lowerPage(m, user));
+    if (m.$type === "Page") pages.push(lowerPage(m, user, storeIndex));
     else if (m.$type === "Area") collectArea(m, []);
-    else if (m.$type === "Component") components.push(lowerComponent(m));
-    else if (m.$type === "UiApiParam") {
+    else if (m.$type === "Component") components.push(lowerComponent(m, storeIndex));
+    else if (m.$type === "Store") {
+      const env: Env = { locals: new Map(), user, stores: storeIndex };
+      stores.push(lowerStore(m, env));
+    } else if (m.$type === "UiApiParam") {
       apiParams.push({
         name: m.name,
         apiName: m.apiRef?.$refText ?? "",
@@ -206,6 +273,7 @@ export function lowerUi(ui: Ui, user?: UserIR): UiIR {
     framework: ui.framework,
     pages,
     components,
+    stores,
     menu,
     apiParams,
     ...(channelParams.length > 0 ? { channelParams } : {}),
@@ -214,7 +282,7 @@ export function lowerUi(ui: Ui, user?: UserIR): UiIR {
   };
 }
 
-function lowerPage(p: Page, user?: UserIR): PageIR {
+function lowerPage(p: Page, user?: UserIR, stores?: Env["stores"]): PageIR {
   const params = (p.params ?? []).map((param) => ({
     name: param.name,
     type: lowerType(param.type),
@@ -242,7 +310,7 @@ function lowerPage(p: Page, user?: UserIR): PageIR {
   // string-concat convert injection) don't mis-fire on page bodies.
   // `user` is threaded so a page `requires` gate (and any page-scope
   // `currentUser` ref) resolves to a `current-user` ref rather than `unknown`.
-  let env: Env = { locals: new Map(), user };
+  let env: Env = { locals: new Map(), user, stores };
   for (const param of p.params ?? []) {
     env = withLocal(env, param.name, "param", lowerType(param.type));
   }
@@ -333,7 +401,7 @@ function lowerPage(p: Page, user?: UserIR): PageIR {
   };
 }
 
-export function lowerComponent(c: Component): ComponentIR {
+export function lowerComponent(c: Component, stores?: Env["stores"]): ComponentIR {
   const params = c.params.map((param) => ({
     name: param.name,
     type: lowerType(param.type),
@@ -356,7 +424,7 @@ export function lowerComponent(c: Component): ComponentIR {
   // Component-scoped env: params + state bind so `inferExprType`
   // resolves refs to their declared types (same reason as
   // `lowerPage`; see comment there).
-  let env: Env = { locals: new Map(), user: undefined };
+  let env: Env = { locals: new Map(), user: undefined, stores };
   for (const param of c.params) {
     env = withLocal(env, param.name, "param", lowerType(param.type));
   }

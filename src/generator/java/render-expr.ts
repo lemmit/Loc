@@ -405,6 +405,8 @@ function renderCall(args: string[], e: CallExpr, ctx: JavaRenderContext): string
     case "action":
     // Sibling action call (Proposal A Stage 1) — frontend-only; never lowered
     // into a backend domain expression.  Plain call keeps the switch total.
+    case "store-action":
+    // `<Store>.<action>()` call (Stage 5) — frontend-only; plain-call fall-through.
     case "free":
       return `${e.name}(${argList})`;
   }

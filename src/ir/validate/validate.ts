@@ -8,6 +8,7 @@ import {
   validateRetrievals,
   validateViewGates,
 } from "./checks/query-checks.js";
+import { validateStores } from "./checks/store-checks.js";
 import {
   validateCurrentUserScope,
   validateEventSourcedDiscipline,
@@ -220,5 +221,6 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   }
   validateExprIntegrity(loom, diags);
   validateUiBodies(loom, diags);
+  validateStores(loom, diags);
   return diags;
 }

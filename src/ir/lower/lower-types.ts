@@ -113,6 +113,17 @@ export interface Env {
    *  Proposal A Stage 1) so a bare handler-arg reference (`onSubmit: next`)
    *  resolves to a fully-typed `action-ref` ExprIR.  Undefined elsewhere. */
   actions?: Map<string, { paramType?: TypeIR }>;
+  /** Stores in scope while lowering any page/component/store body — keyed by
+   *  store name to its field types + action param types (named-actions-and-
+   *  stores.md §3, Stage 5).  Drives dotted-name resolution so `Cart.lines`
+   *  lowers to a `store-field` ref and `Cart.clear()` to a `store-action`
+   *  call, both carrying the store name (the IR stays fully resolved — no
+   *  emitter re-resolution).  Set on every body env in a ui that declares
+   *  ≥1 store; undefined elsewhere. */
+  stores?: Map<
+    string,
+    { fields: Map<string, TypeIR>; actions: Map<string, { paramType?: TypeIR }> }
+  >;
 }
 
 export function newEnv(

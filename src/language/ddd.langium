@@ -364,7 +364,33 @@ Ui:
     '}';
 
 UiMember:
-    UiApiParam | UiChannelParam | UiNotification | UiFunction | Page | Component | Area | MenuBlock;
+    UiApiParam | UiChannelParam | UiNotification | UiFunction | Page | Component | Store | Area | MenuBlock;
+
+// Shared client-side state container — a top-level `ui` member, sibling to
+// `page` / `component` (named-actions-and-stores.md §3, Stage 5).  Holds named
+// `state {}` + named `action`s, reused VERBATIM from the page/component
+// surface; the body interleaves both (`StoreDecl: StateBlock | ActionDecl`).
+// There is NO `use` clause — a store is referenced purely by DOTTED qualified
+// name from a page/component body (`Cart.lines` read, `Cart.clear()` call);
+// the per-page store dependency is DERIVED from the page's resolved refs at
+// emit time (derive-don't-stamp), never bound per-surface.
+//
+// v1 is **in-memory only**.  The `persist: local|session` / `sync: url`
+// lifetime ladder is intentionally NOT in the grammar yet: those words are
+// common identifiers (a `url` field, an `operation sync()`), and aggregate /
+// operation / event NAMES are plain `ID`, so admitting them as keywords would
+// break existing source the soft-keyword escape hatch can't reach without
+// touching every `name=ID`.  The IR carries a `lifetime` field (always
+// `"memory"` today) + a `loom.store-lifetime-unsupported` validator so the
+// follow-up that ships persistence only adds the surface syntax (with the
+// soft-keyword care that needs) — the semantics + gate already exist.
+Store:
+    'store' name=ID '{'
+        decls+=StoreDecl*
+    '}';
+
+StoreDecl:
+    StateBlock | ActionDecl;
 
 // Page grouping — an `area` clusters pages (and sub-areas) into a named
 // functional division.  Grouping is by containment: a contained page's file
@@ -1403,7 +1429,12 @@ Property:
         // (`requirement R parent R0`); soft in property position so the
         // canonical self-referential field `parent: Self id?` (and any
         // domain field named `parent`) parses.
-        | 'parent')
+        | 'parent'
+        // `store` is hard only as the leading keyword of the `Store` UI member
+        // (`store Cart { … }`); soft in property position so a pre-existing
+        // domain field named `store` (`Receipt { store: string }`,
+        // persistence-shapes.ddd) keeps parsing (named-actions-and-stores.md §3).
+        | 'store')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -1514,7 +1545,7 @@ LooseName returns string:
     // treatment).
     | 'of'
     | 'id' | 'permissions' | 'contains'
-    | 'ui' | 'page' | 'component' | 'state' | 'menu'
+    | 'ui' | 'page' | 'component' | 'store' | 'state' | 'menu'
     | 'section' | 'link' | 'route' | 'title' | 'body' | 'framework' | 'static'
     | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
     | 'design' | 'targets'
@@ -1819,7 +1850,11 @@ LValueIdent returns string:
        | 'by' | 'handle'
        // `action` soft in l-value position (Tier 2 `ActionType` is the only
        // hard position).
-       | 'action';
+       | 'action'
+       // `store` soft in l-value position so an assignment target naming a
+       // field `store` (`store := store`, persistence-shapes.ddd) parses —
+       // hard only as the `Store` UI-member leading keyword (Stage 5).
+       | 'store';
 
 // ---------------------------------------------------------------------------
 // Expressions (precedence climbing, lowest to highest)
@@ -1966,6 +2001,9 @@ MemberName returns string:
        // `action` admitted after `.` (Tier 2 `ActionType` is the only hard
        // position).
        | 'action'
+       // `store` admitted after `.` so member access on a field named `store`
+       // parses — hard only as the `Store` UI-member leading keyword (Stage 5).
+       | 'store'
        // Page-metadata + favicon soft keywords admitted after `.` so member
        // access on a field named `description` / `title` / `body` / `state` /
        // etc. parses — e.g. a scaffolded view-list column over a `description`
@@ -2142,7 +2180,7 @@ NameRefIdent returns string:
        // (`onSubmit: v => create.mutateAsync(v)`).  They only act as
        // hard keywords at aggregate-member position (`Create`/`Destroy`).
        | 'create' | 'destroy'
-       | 'contains' | 'page' | 'component' | 'state' | 'menu'
+       | 'contains' | 'page' | 'component' | 'store' | 'state' | 'menu'
        | 'section' | 'link' | 'route' | 'title' | 'body' | 'framework' | 'static'
        | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
        | 'design' | 'targets' | 'bind'

@@ -430,6 +430,31 @@ web_app/
         └── product.ts
 ```
 
+#### Stores (`store Cart { state … action … }`)
+
+A top-level `ui` member `store Cart { state { … } action … }` (a shared
+client-side container, sibling to page/component — named-actions-and-stores.md
+§3) emits one **Zustand** module per store at `src/stores/<snake>.ts`:
+`export const useCart = create<CartState>((set) => ({ …fields, …actions }))`.
+The action bodies reuse the **same** `:=`/`+=` statement lowering a page action
+does, targeting Zustand's `set((s) => ({ … }))` instead of a `useState` setter
+(`zustand` is added to the generated `package.json`). At a use site a
+page/component references the store by **dotted name** — `Cart.lines` (a
+`store-field` read) and `Cart.clear()` (a `store-action` call). Each consuming
+shell derives its store dependency from those resolved refs (derive-don't-
+stamp), imports `useCart`, and hoists one selector binding per used member
+(`const lines = useCart((s) => s.lines)`); the body / action handlers reference
+the bare local. v1 stores are **in-memory only** — the `persist:`/`sync:`
+lifetime ladder has no grammar surface yet (those words collide with common
+identifiers), though the IR + a `loom.store-lifetime-unsupported` gate carry it
+for the persistence follow-up. Validator gates: a store action can't call a
+view-scoped effect (`navigate`/`toast` — `loom.store-action-view-effect`), a
+page can't write store state inline (`loom.store-state-inline-write`), a
+store→store call cycle is rejected (`loom.store-action-cycle`), and a store on
+a `phoenixLiveView` ui is rejected (`loom.store-on-liveview-unsupported`).
+**React only in v1** — Vue/Svelte/Angular store-module emit is a fan-out
+follow-up and throws loudly until ported.
+
 ### Per-aggregate detail
 
 **`src/api/<aggregate>.ts`** — built by `api-builder.ts`:
