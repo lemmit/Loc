@@ -192,8 +192,10 @@ function renderAggregateResource(
   const promotedReadExpr = promotedReadFilter(agg, ctx, renderCtx, promoted);
 
   // Field list for the `defimpl Jason.Encoder` block: :id, persisted
-  // fields only, timestamps.  Reference-collection fields are excluded
-  // (lazy-loaded via the join table; would surface as nil otherwise).
+  // fields, timestamps.  Reference-collection fields ARE included — they're a
+  // `{:array, :uuid}` calculation loaded on every read by the preparation
+  // (renderPreparations), exactly like VO collections, so they materialise on
+  // the wire as an id array rather than surfacing as nil.
   // Embedded (`shape(embedded)`) containment attributes: each `contains`
   // becomes `attribute :<name>, {:array, <Part>}` (collection) /
   // `attribute :<name>, <Part>` (single), where `<Part>` is the
@@ -216,8 +218,9 @@ function renderAggregateResource(
     // collection fields (the latter are `has_many` relationships, loaded on
     // read; their child structs Jason-encode to the VO array via the child's
     // own VO-only encoder, so the wire stays `[{amount,currency},…]`).  Both
-    // are emitted in their source declaration order, only ref-collections drop.
-    ...agg.fields.filter((f) => !isRefCollection(f.type)).map((f) => `:${snake(f.name)}`),
+    // are emitted in their source declaration order, ref-collections included
+    // (their `{:array, :uuid}` calculation is loaded on read — see preparation).
+    ...agg.fields.map((f) => `:${snake(f.name)}`),
     // Embedded containments serialise inline (each has its own Jason
     // encoder); add them to the wire shape.  Relational containments are
     // separate relationships and stay out of the attribute encoder.
@@ -316,7 +319,7 @@ ${baseFilterLine}
     ${renderPrimaryKey(agg.idValueType)}
     ${[...(kindValue ? [`attribute :kind, :string, default: ${JSON.stringify(kindValue)}, allow_nil?: false`] : []), ...persistedFields.map((f) => renderAttribute(f, ctxModule)), ...embeddedAttrLines].join("\n    ")}${timestampLines ? `\n    ${timestampLines}` : ""}
   end
-${renderRelationships(embedded ? [] : agg.contains, associations, ctxModule, agg, valueCollections)}${renderAggregates(agg.derived, embedded ? [] : agg.contains)}${renderCalculations(agg.derived, associations, renderCtx, agg, criterionCalcLines)}${renderPreparations(associations, agg, valueCollections)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderStampChanges(agg, renderCtx, options.principalIdKey ?? "id")}${renderActions(agg, ctx, renderCtx, ctxModule, promotedReadExpr, valueCollections)}${policiesBlock}${renderHelperFunctions(agg.functions, renderCtx)}${inspectFn}end
+${renderRelationships(embedded ? [] : agg.contains, associations, ctxModule, agg, valueCollections)}${renderAggregates(agg.derived, embedded ? [] : agg.contains, agg, associations)}${renderCalculations(agg.derived, associations, renderCtx, agg, criterionCalcLines)}${renderPreparations(associations, agg, valueCollections)}${renderValidations(agg.invariants, renderCtx, new Set(agg.fields.map((f) => f.name)))}${renderStampChanges(agg, renderCtx, options.principalIdKey ?? "id")}${renderActions(agg, ctx, renderCtx, ctxModule, promotedReadExpr, valueCollections, associations)}${policiesBlock}${renderHelperFunctions(agg.functions, renderCtx)}${inspectFn}end
 
 ${jasonImpl}`;
 }
@@ -594,11 +597,27 @@ function renderRelationships(
   return `\n  relationships do\n${lines.join("\n")}\n  end\n`;
 }
 
-function renderAggregates(derived: DerivedIR[], contains: ContainmentIR[]): string {
+function renderAggregates(
+  derived: DerivedIR[],
+  contains: ContainmentIR[],
+  agg: AggregateIR,
+  associations: AssociationIR[] = [],
+): string {
   const lines: string[] = [];
   for (const d of derived) {
     const rel = isRelationshipCountDerive(d, contains);
     if (rel) lines.push(`    count :${snake(d.name)}, :${snake(rel)}`);
+  }
+  // Re-expose each reference collection (`Id<T>[]`) as a `list` aggregate over
+  // the m2m `<f>_through` relationship's `:id` — yielding `{:array, :uuid}`, the
+  // same wire shape as the TS/Hono `party: string[]`.  A `calculate … expr(
+  // <rel>.id)` can't do this: `<to-many>.id` is single-valued, so Postgres
+  // rejects the `::uuid[]` cast (`cannot cast type uuid to uuid[]`).  `uniq?`
+  // dedupes (the join PK already prevents dupes; belt-and-suspenders for the set
+  // contract).  Loaded on every read by renderPreparations; encoded by the wire.
+  for (const a of associations) {
+    const rel = relationshipNameFor(agg, a.fieldName);
+    lines.push(`    list :${snake(a.fieldName)}, :${rel}, :id, uniq?: true`);
   }
   if (lines.length === 0) return "";
   return `\n  aggregates do\n${lines.join("\n")}\n  end\n`;
@@ -633,7 +652,7 @@ function renderPreparations(
 
 function renderCalculations(
   derived: DerivedIR[],
-  associations: AssociationIR[],
+  _associations: AssociationIR[],
   ctx: RenderCtx,
   agg: AggregateIR,
   extraCalcLines: string[] = [],
@@ -657,21 +676,14 @@ function renderCalculations(
     const exprStr = renderExpr(d.expr, { ...ctx, ashExpr: true });
     derivedLines.push(`    calculate :${snake(d.name)}, ${ashType}, expr(${exprStr})`);
   }
-  // Re-expose each reference collection as a calculation that maps the
-  // m2m relationship to a list of target ids — same wire shape as the
-  // TS/Hono `party: string[]` and .NET `List<TargetId> Party`.  Loaded
-  // explicitly on demand (callers add `load: [:party, :caught]`); not
-  // auto-derived into JSON to avoid an N+1 on every read.
-  const assocLines = associations.map((a) => {
-    const fieldName = snake(a.fieldName);
-    const rel = relationshipNameFor(agg, a.fieldName);
-    return `    calculate :${fieldName}, {:array, :uuid}, expr(${rel}.id)`;
-  });
+  // Reference collections (`Id<T>[]`) are re-exposed as a `list` AGGREGATE (see
+  // renderAggregates), NOT a calculation — `expr(<rel>.id)` over a to-many is
+  // single-valued and Postgres rejects the `::uuid[]` cast.
   // Reified-criterion boolean calculations (one per named criterion a
   // retrieval reifies to — see reifiedCriteriaFor / renderCriterionCalculation
-  // in repository-emit).  Joins the derived + association calculations in the
+  // in repository-emit).  Joins the derived + criterion calculations in the
   // single `calculations do … end` block.
-  const lines = [...derivedLines, ...assocLines, ...extraCalcLines];
+  const lines = [...derivedLines, ...extraCalcLines];
   if (lines.length === 0) return "";
   return `\n  calculations do\n${lines.join("\n")}\n  end\n`;
 }

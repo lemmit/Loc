@@ -92,9 +92,14 @@ export function emitContext(
     // context's Ash.Domain like any other resource so the auto-discovery
     // sees it.  Naming flows through `joinEntityName(assoc)` so all four
     // emitters (resource, configuration, domain, migration) stay in sync.
+    // The owning aggregate's dataSource schema — the join table is created in
+    // it (the migration uses `prefix: "<schema>"`), so the join RESOURCE must
+    // declare the same `schema "<name>"` or Ash queries `public.<table>` and
+    // every read of the m2m calculate 500s with `undefined_table`.
+    const aggDs = options.resolveDataSource?.(agg);
     for (const assoc of agg.associations) {
       const joinPath = `lib/${appName}/${ctxSnake}/${assoc.joinTable}.ex`;
-      out.set(joinPath, renderJoinResource(assoc, contextModule, appModule));
+      out.set(joinPath, renderJoinResource(assoc, contextModule, appModule, aggDs?.schema));
       allResources.push(`${contextModule}.${joinEntityName(assoc)}`);
     }
     // Value-object collection (`charges: Money[]`) child resources — one
@@ -102,7 +107,6 @@ export function emitContext(
     // child table.  Registered on the domain like the join resources so
     // Ash's auto-discovery sees them; the parent's `has_many` +
     // `manage_relationship` (domain-emit) point here by the same name.
-    const aggDs = options.resolveDataSource?.(agg);
     for (const { vc, vo } of valueCollectionsWithVo(agg, ctx)) {
       const vcPath = `lib/${appName}/${ctxSnake}/${vc.childTable}.ex`;
       out.set(
