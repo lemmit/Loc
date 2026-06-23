@@ -1,0 +1,174 @@
+name: Corpus compile gates
+
+# Compiles EVERY corpus feature (test/fixtures/corpus/*.ddd) on each
+# domain-logic backend and fails on any feature whose generated project
+# won't build.  This is the cross-feature regression net the single-fixture
+# per-backend gates (dotnet-build / java-build / python-build / hono-build,
+# which each build only a handful of `examples/` fixtures) cannot see: a
+# shared IR/system/generator change can break one feature on one backend
+# while every example still compiles.  The recent .NET drain (#1543) fixed
+# six such silently-broken corpus features that NO CI gate was exercising —
+# this workflow is what keeps them (and their tsc/java/python siblings) green.
+#
+# Each job runs the FULL corpus suite for its backend via the matching
+# `npm run test:<backend>-corpus` script.  The feature list is computed
+# inside each `corpus-<backend>-build.test.ts` from the shared manifest
+# (test/fixtures/corpus/manifest.ts) minus that backend's documented
+# COMPILE_SKIP map — one source of truth, no list duplicated here.  Adding a
+# corpus feature (drop a `<feature>.ddd` + a manifest row) automatically
+# extends every job.
+#
+# Per-feature sharding is available (each test honours
+# LOOM_CORPUS_<BACKEND>_CASE=<feature-id>) if a single job's wall time ever
+# needs splitting across runners — wire a `configure` matrix job then, à la
+# generated-react-build.yml.  Until then one job per backend keeps it simple.
+#
+# Elixir/Phoenix has a corpus suite too (test:elixir-corpus) but needs the
+# docker hexpm image + the LOOM_HEX_MIRROR loopback CA dance behind the
+# egress proxy — wired separately as a follow-up, not here.
+#
+# Triggers: any change to a generator / the shared IR / system / platform
+# layers / the corpus fixtures (so a cross-backend regression fires every
+# job), plus push:main and manual dispatch.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/**'
+      - 'src/ir/**'
+      - 'src/system/**'
+      - 'src/platform/**'
+      - 'src/language/**'
+      - 'test/fixtures/corpus/**'
+      - 'test/e2e/corpus-tsc-build.test.ts'
+      - 'test/e2e/corpus-dotnet-build.test.ts'
+      - 'test/e2e/corpus-java-build.test.ts'
+      - 'test/e2e/corpus-python-build.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/corpus-build.yml'
+  pull_request:
+    paths:
+      - 'src/generator/**'
+      - 'src/ir/**'
+      - 'src/system/**'
+      - 'src/platform/**'
+      - 'src/language/**'
+      - 'test/fixtures/corpus/**'
+      - 'test/e2e/corpus-tsc-build.test.ts'
+      - 'test/e2e/corpus-dotnet-build.test.ts'
+      - 'test/e2e/corpus-java-build.test.ts'
+      - 'test/e2e/corpus-python-build.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/corpus-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # TS/Hono — tsc --noEmit per feature.  No external SDK; npm install per
+  # feature dominates the wall time.
+  corpus-tsc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    name: corpus × tsc (Hono/node)
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install Loom toolchain
+        run: npm ci
+      - name: Build toolchain
+        run: npm run build
+      - name: tsc against every corpus feature
+        run: npm run test:tsc-corpus
+
+  # .NET — dotnet restore + build /warnaserror per feature.
+  corpus-dotnet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    name: corpus × dotnet (.NET)
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('src/generator/dotnet/templates/program.tpl.ts') }}
+          restore-keys: |
+            nuget-
+      - name: Install Loom toolchain
+        run: npm ci
+      - name: Build toolchain
+        run: npm run build
+      - name: dotnet build /warnaserror against every corpus feature
+        run: npm run test:dotnet-corpus
+
+  # Java/Spring — gradle testClasses bootJar per feature.
+  corpus-java:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    name: corpus × java (Spring Boot)
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      - name: Cache Gradle packages
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('src/generator/java/emit/program.ts') }}
+          restore-keys: |
+            gradle-
+      - name: Install Loom toolchain
+        run: npm ci
+      - name: Build toolchain
+        run: npm run build
+      - name: gradle build against every corpus feature
+        run: npm run test:java-corpus
+
+  # Python/FastAPI — uv sync + ruff + mypy --strict per feature.
+  corpus-python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    name: corpus × python (FastAPI)
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          cache-dependency-glob: 'src/generator/python/pins.ts'
+      - name: Install Loom toolchain
+        run: npm ci
+      - name: Build toolchain
+        run: npm run build
+      - name: uv sync + ruff + mypy against every corpus feature
+        run: npm run test:python-corpus
