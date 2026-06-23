@@ -1,0 +1,44 @@
+// DEBT-02 Slice B — principal-referencing (tenancy) capability filter on a
+// `shape(document)` aggregate, on the JAVA (Spring Boot + JPA/Hibernate)
+// backend.  The whole aggregate lives in one `data` jsonb column, so the filter
+// can't be a SQL predicate — it's applied in-app over the rehydrated aggregate
+// on every read.  The principal reference can't ride the static @SQLRestriction
+// either, so the document store injects a `CurrentUserAccessor` bean, binds
+// `var currentUser = currentUserAccessor.user();` and applies the fail-closed
+// `currentUser != null && (Objects.equals(x.tenantId(), currentUser.tenantId()))`
+// in-app predicate to every read.  `auth: required` emits the
+// CurrentUserAccessor / User the accessor resolves through.  Previously gated by
+// `loom.context-filter-unsupported`.
+//
+// Decisive check that the generated in-app document store compiles under
+// `gradle testClasses bootJar` (the java-build gate).
+system JavaDocTenancy {
+  user { id: guid  tenantId: string }
+
+  subdomain Core {
+    context Ledger {
+      aggregate Account ids guid shape(document) {
+        tenantId: string
+        balance: int
+        // Always-on row scoping by the requesting principal's tenant.
+        filter this.tenantId == currentUser.tenantId
+        operation deposit(amount: int) { balance := balance + amount }
+      }
+      repository Accounts for Account {
+        find byMinBalance(min: int): Account[] where this.balance >= min
+      }
+    }
+  }
+
+  api LedgerApi from Core
+  storage primary { type: postgres }
+  resource ledgerState { for: Ledger, kind: state, use: primary }
+  deployable api1 {
+    platform: java
+    contexts: [Ledger]
+    dataSources: [ledgerState]
+    serves: LedgerApi
+    port: 8081
+    auth: required
+  }
+}

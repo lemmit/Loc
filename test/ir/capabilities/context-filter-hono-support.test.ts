@@ -1,15 +1,18 @@
 // Capability-filter support guard.  Principal-referencing filters (tenancy,
-// `currentUser.*`) on a RELATIONAL aggregate are now wired on the Hono/Drizzle
+// `currentUser.*`) on a RELATIONAL aggregate are wired on the Hono/Drizzle
 // backend (DEBT-01 — rendered against the ambient `requireCurrentUser()`
 // accessor, the analogue of EF Core `HasQueryFilter`).  Still gated with
 // loom.context-filter-unsupported:
-//   1. non-relational shapes (shape(document) / shape(embedded)) — on node too;
-//   2. principal-referencing filters on the elixir / java backends.
-//   2b. principal-referencing filters on a DOCUMENT shape (in-app actor eval) —
-//       still gated everywhere but .NET (DEBT-02 Slice B).
-// Principal filters on an EMBEDDED shape now ship on node/elixir/java (DEBT-02
+//   1. non-relational shapes (shape(document) / shape(embedded)) carrying a
+//      principal filter on the elixir backend (handled below per case);
+//   2. any capability filter (principal or not) on a non-relational shape on
+//      python (no in-app filtering path there yet).
+// Principal filters on an EMBEDDED shape ship on node/elixir/java (DEBT-02
 // Slice A — embedded root scalars are real columns, so they reuse the relational
-// principal path).  A non-principal filter on a relational aggregate is accepted
+// principal path).  Principal filters on a DOCUMENT shape now ship on
+// node/java/.NET too (DEBT-02 Slice B — the in-app document read binds the
+// ambient principal fail-closed and AND-s the predicate over the rehydrated
+// aggregate).  A non-principal filter on a relational aggregate is accepted
 // (and emitted — see context-filter-emit.test.ts).  On .NET, all are accepted.
 
 import { describe, expect, it } from "vitest";
@@ -107,14 +110,15 @@ system Shop {
     expect(errs[0]).toContain("auth: required");
   });
 
-  it("still rejects a principal filter on a non-relational (document) hono aggregate", async () => {
-    // Non-relational gates on node too — the principal-filter wiring is
-    // relational-only.  Report the shape limitation.
-    const errs = await honoFilterErrors(
-      sys("node", { shape: "document", filter: "filter this.tenantId == currentUser.tenantId" }),
-    );
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("shape(document)");
+  it("accepts a principal filter on a non-relational (document) hono aggregate (DEBT-02 Slice B — in-app actor eval)", async () => {
+    // The document read binds the ambient principal fail-closed
+    // (`const currentUser = requireCurrentUser();`) and AND-s the principal
+    // predicate over the rehydrated aggregate.
+    expect(
+      await honoFilterErrors(
+        sys("node", { shape: "document", filter: "filter this.tenantId == currentUser.tenantId" }),
+      ),
+    ).toEqual([]);
   });
 
   it("accepts a non-principal capability filter on a node DOCUMENT aggregate (DEBT-02 — in-app)", async () => {
@@ -170,12 +174,20 @@ system Shop {
     ).toEqual([]);
   });
 
-  it("still gates a PRINCIPAL filter on a node DOCUMENT aggregate (in-app actor eval — DEBT-02 Slice B)", async () => {
-    const errs = await honoFilterErrors(
-      sys("node", { shape: "document", filter: "filter this.tenantId == currentUser.tenantId" }),
-    );
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("shape(document)");
+  it("accepts a PRINCIPAL filter on a node DOCUMENT aggregate (DEBT-02 Slice B — requireCurrentUser() in-app eval)", async () => {
+    expect(
+      await honoFilterErrors(
+        sys("node", { shape: "document", filter: "filter this.tenantId == currentUser.tenantId" }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("accepts a PRINCIPAL filter on a java DOCUMENT aggregate (DEBT-02 Slice B — CurrentUserAccessor in-app eval)", async () => {
+    expect(
+      await honoFilterErrors(
+        sys("java", { shape: "document", filter: "filter this.tenantId == currentUser.tenantId" }),
+      ),
+    ).toEqual([]);
   });
 
   it("accepts a non-principal capability filter on a java EMBEDDED aggregate (DEBT-02 — @SQLRestriction)", async () => {

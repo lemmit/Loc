@@ -73,3 +73,73 @@ describe("node document capability filter (DEBT-02 slice 1)", () => {
     expect(r).not.toContain("const rec =");
   });
 });
+
+// ---------------------------------------------------------------------------
+// DEBT-02 Slice B — a PRINCIPAL-referencing capability filter
+// (`filter this.tenantId == currentUser.tenantId`) on a `shape(document)`
+// node aggregate.  The principal can't be a static predicate, so each in-app
+// document read binds `const currentUser = requireCurrentUser();` (fail-closed
+// — throws when unauthenticated) and AND-s the principal predicate over the
+// rehydrated aggregate.  Requires `auth: required` + a system `user {}` block.
+// ---------------------------------------------------------------------------
+
+const PRINCIPAL_SOURCE = `
+system DocTenancy {
+  user { id: string  tenantId: string }
+  subdomain Sales {
+    context Shop {
+      aggregate Order ids guid shape(document) {
+        tenantId: string
+        code: string
+        filter this.tenantId == currentUser.tenantId
+        operation rename(code: string) { code := code }
+      }
+      repository Orders for Order { find byCode(c: string): Order[] where code == c }
+    }
+  }
+  api ShopApi from Sales
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api { platform: node, contexts: [Shop], dataSources: [shopState], serves: ShopApi, auth: required, port: 4000 }
+}
+`;
+
+async function principalRepo(): Promise<string> {
+  const files = await generateSystemFiles(PRINCIPAL_SOURCE);
+  const key = [...files.keys()].find((k) => /repositories\/.*order/i.test(k))!;
+  expect(key, "Order document repository not emitted").toBeDefined();
+  return files.get(key!)!;
+}
+
+describe("node document principal capability filter (DEBT-02 Slice B)", () => {
+  it("imports requireCurrentUser from the auth middleware", async () => {
+    expect(await principalRepo()).toContain(
+      'import { requireCurrentUser } from "../../auth/middleware";',
+    );
+  });
+
+  it("binds the fail-closed principal in findById and gates the rehydrated aggregate", async () => {
+    const r = await principalRepo();
+    expect(r).toContain("const currentUser = requireCurrentUser();");
+    expect(r).toContain("const rec = orderFromDoc(row.data as OrderDoc);");
+    expect(r).toContain("if (!((rec.tenantId === currentUser.tenantId))) return null;");
+  });
+
+  it("binds the principal in findManyByIds and AND-s the in-app predicate", async () => {
+    expect(await principalRepo()).toContain(
+      "rows.map((r) => orderFromDoc(r.data as OrderDoc)).filter((x) => (x.tenantId === currentUser.tenantId));",
+    );
+  });
+
+  it("narrows the synthesized findAll by the principal predicate", async () => {
+    const r = await principalRepo();
+    expect(r).toContain("const all = rows.map((r) => orderFromDoc(r.data as OrderDoc));");
+    expect(r).toContain("all.filter((x) => (x.tenantId === currentUser.tenantId))");
+  });
+
+  it("applies the principal capability BEFORE a custom find's own predicate", async () => {
+    expect(await principalRepo()).toContain(
+      "all.filter((x) => (x.tenantId === currentUser.tenantId)).filter((x) => x.code === c)",
+    );
+  });
+});
