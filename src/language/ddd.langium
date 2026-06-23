@@ -282,7 +282,7 @@ UiBlockBinding:
 
 // Frameworks the `ui:` mount lowers against.  `react` renders TSX
 // against a design pack (`mantine`/`shadcn`); `phoenixLiveView`
-// renders HEEx against the `daisyui` pack as part of a fullstack
+// renders HEEx against the `coreComponents` pack as part of a fullstack
 // Elixir/Ash deployable.  (The `liveview` framework alias was RETIRED —
 // `phoenixLiveView` is the only spelling, mirroring the retired platform
 // aliases.)  Future values (`blazor-wasm`, `blazor-server`, …) extend
@@ -316,7 +316,7 @@ Platform returns string:
 
 // Design-system pack selector — picks the template pack the UI
 // generator renders pages against.  `mantine` (default), `shadcn`,
-// and `mui` are React/TSX packs; `daisyui` is the HEEx pack for
+// and `mui` are React/TSX packs; `coreComponents` is the HEEx pack for
 // the Phoenix LiveView platform; `shadcnSvelte` and `flowbite` are
 // the Svelte packs; `vuetify` and `shadcnVue` are the Vue packs;
 // `angularMaterial`, `primeng`, and `spartanNg` are the Angular packs.
@@ -326,7 +326,7 @@ Platform returns string:
 // otherwise.  Named `design` (not `ui`) to avoid colliding with
 // the test-DSL's `ui.workflows.X(...)` accessor.
 DesignPack returns string:
-    'mantine' | 'shadcn' | 'mui' | 'chakra' | 'daisyui' | 'shadcnSvelte' | 'flowbite' | 'vuetify' | 'shadcnVue' | 'angularMaterial' | 'primeng' | 'spartanNg' | STRING;
+    'mantine' | 'shadcn' | 'mui' | 'chakra' | 'coreComponents' | 'shadcnSvelte' | 'flowbite' | 'vuetify' | 'shadcnVue' | 'angularMaterial' | 'primeng' | 'spartanNg' | STRING;
 // Per-deployable auth opt-in.  `required` enables JWT-decode middleware
 // and the user-supplied verifier hook on a backend; `ui` mounts the
 // login redirect + route guard on a frontend (react / LiveView) under a

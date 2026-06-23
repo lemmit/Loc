@@ -12,7 +12,7 @@
 //      file (custom) via `parseBuiltinDesignRef`.
 //   2. The Langium validator (`ddd-validator.ts`) uses the format value
 //      to reject a `design:` whose format doesn't match the deployable's
-//      framework (e.g. `platform: react, design: daisyui` would
+//      framework (e.g. `platform: react, design: coreComponents` would
 //      render a HEEx pack through the TSX renderer).
 //
 // Adding a new built-in pack version: drop the pack directory under
@@ -40,7 +40,7 @@ export const BUILTIN_PACK_FORMATS = {
   "mui@v7": "tsx",
   "shadcn@v3": "tsx",
   "shadcn@v4": "tsx",
-  "daisyui@v3": "heex",
+  "coreComponents@v3": "heex",
   "shadcnSvelte@v1": "svelte",
   "flowbite@v1": "svelte",
   "vuetify@v3": "vue",
@@ -85,7 +85,7 @@ export const BUILTIN_PACK_LATEST = {
   // pin `design: "shadcn@v3"`.  acme.ddd has no `design:` slot so
   // this doesn't touch test/fixtures/baseline-output/.
   shadcn: "v4",
-  daisyui: "v3",
+  coreComponents: "v3",
   // Svelte packs ship a single version each so far; barewords resolve
   // straight to v1.
   shadcnSvelte: "v1",

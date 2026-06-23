@@ -517,7 +517,7 @@ interface NewOptions {
  * `ddd new <name>` — scaffold a small, provably-valid starter project
  * (docs/proposals/quickstart-and-day-one-batteries.md §3.1).  Picks the
  * backend platform (`--platform`) and frontend (`--design`: a React pack, or
- * `daisyui` for a Phoenix LiveView fullstack), renders a `main.ddd` +
+ * `coreComponents` for a Phoenix LiveView fullstack), renders a `main.ddd` +
  * `README.md` + `.loomignore`, validates the rendered model in-memory, and
  * only then writes.  Validate-only — the README points the author at
  * `ddd generate system` to emit the runnable tree.
@@ -541,13 +541,14 @@ async function runNew(name: string, options: NewOptions): Promise<void> {
     fail(`unknown --template "${options.template}". Valid: ${STARTER_TEMPLATES.join(" | ")}.`);
   }
   // Frontend: a React pack for node/dotnet (default mantine); a Phoenix
-  // LiveView (daisyui) is the default for elixir.
-  const design = (options.design ?? (platform === "elixir" ? "daisyui" : "mantine")) as DesignPack;
+  // LiveView (coreComponents) is the default for elixir.
+  const design = (options.design ??
+    (platform === "elixir" ? "coreComponents" : "mantine")) as DesignPack;
   if (!DESIGN_PACKS.includes(design)) {
     fail(`unknown --design "${options.design}". Valid: ${DESIGN_PACKS.join(" | ")}.`);
   }
-  if (design === "daisyui" && platform !== "elixir") {
-    fail("--design daisyui requires --platform elixir (it is the Ash/Phoenix LiveView UI).");
+  if (design === "coreComponents" && platform !== "elixir") {
+    fail("--design coreComponents requires --platform elixir (it is the Ash/Phoenix LiveView UI).");
   }
 
   const outDir = path.resolve(options.out ?? name);
@@ -857,7 +858,7 @@ program
   .option("--template <template>", "starter model: blank | crud (default: crud)")
   .option(
     "--design <pack>",
-    "frontend: mantine | shadcn | mui | chakra (React), shadcnSvelte | flowbite (Svelte), or daisyui (Phoenix LiveView)",
+    "frontend: mantine | shadcn | mui | chakra (React), shadcnSvelte | flowbite (Svelte), or coreComponents (Phoenix LiveView)",
   )
   .option("-o, --out <dir>", "output directory (default: ./<name>)")
   .option("--force", "scaffold into an existing, non-empty directory")

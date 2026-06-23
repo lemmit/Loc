@@ -14,7 +14,7 @@
 //   3. Optional named args (id/top/size/title/language) flow
 //      through correctly; defaults match the TSX side.
 //
-// What it does NOT pin: byte-identical Mantine-vs-daisyui output
+// What it does NOT pin: byte-identical Mantine-vs-coreComponents output
 // — the two frameworks emit different markup by design (`<section>`
 // is identical, but `<Box pos="sticky">` becomes `<div style="…">`
 // in HEEx because LiveView doesn't have a Mantine-equivalent

@@ -1,5 +1,5 @@
 {
-  "name": "daisyui",
+  "name": "coreComponents",
   "version": "v3",
   "format": "heex",
   "emits": {

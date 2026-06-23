@@ -19,7 +19,7 @@
 // 1. Ship it in `mantine/v9` first (the lead pack).
 // 2. Backfill the other three TSX packs: `shadcn/v4`, `mui/v7`, `chakra/v3`.
 // 3. Add to `REQUIRED_PRIMITIVES.tsx.core` here.
-// 4. (Optional) Backfill `daisyui/v3` if the primitive makes sense in
+// 4. (Optional) Backfill `coreComponents/v3` if the primitive makes sense in
 //    LiveView; if you do, move it from TSX-only to both formats.
 //
 // Why staged: a primitive in this list is a hard load-time failure if

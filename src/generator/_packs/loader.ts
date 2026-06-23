@@ -48,7 +48,7 @@ export type { PackFormat };
 /** Manifest schema for `<pack>/pack.json`. */
 export interface PackManifest {
   /** Pack family name — informational, e.g. "mantine", "shadcn",
-   *  "daisyui".  Used in error messages; resolution is by
+   *  "coreComponents".  Used in error messages; resolution is by
    *  directory layout, not by this field. */
   name: string;
   /** Pack version — **load-bearing.**
@@ -69,7 +69,7 @@ export interface PackManifest {
    *  partial, so pack templates can pull in cross-cutting
    *  fragments via `{{> stack-package-deps}}` and friends.  Omit
    *  the field for packs outside the TSX-stack world (e.g.
-   *  daisyui runs on Elixir / Phoenix and ignores this axis). */
+   *  coreComponents runs on Elixir / Phoenix and ignores this axis). */
   stack?: string;
   /** Output format — `"tsx"` (default) or `"heex"`.  See `PackFormat`. */
   format?: PackFormat;

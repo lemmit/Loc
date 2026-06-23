@@ -86,12 +86,12 @@ describe("ddd new — platform/frontend wiring", () => {
     fs.rmSync(tmp, { recursive: true });
   });
 
-  it("elixir defaults to a LiveView fullstack (daisyui, no react deployable)", () => {
+  it("elixir defaults to a LiveView fullstack (coreComponents, no react deployable)", () => {
     const tmp = tmpdir();
     const out = path.join(tmp, "p");
     runCli(["new", "app", "-o", out, "--platform", "elixir"]);
     const src = fs.readFileSync(path.join(out, "main.ddd"), "utf8");
-    expect(src).toContain("design: daisyui");
+    expect(src).toContain("design: coreComponents");
     expect(src).not.toContain("platform: react");
     fs.rmSync(tmp, { recursive: true });
   });
@@ -139,7 +139,7 @@ describe("ddd new — guards and ergonomics", () => {
     fs.rmSync(tmp, { recursive: true });
   });
 
-  it("rejects --design daisyui with a non-elixir platform", () => {
+  it("rejects --design coreComponents with a non-elixir platform", () => {
     const tmp = tmpdir();
     const r = runCli([
       "new",
@@ -149,10 +149,10 @@ describe("ddd new — guards and ergonomics", () => {
       "--platform",
       "node",
       "--design",
-      "daisyui",
+      "coreComponents",
     ]);
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain("daisyui requires --platform elixir");
+    expect(r.stderr).toContain("coreComponents requires --platform elixir");
     expect(fs.existsSync(path.join(tmp, "p"))).toBe(false);
     fs.rmSync(tmp, { recursive: true });
   });

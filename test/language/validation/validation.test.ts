@@ -832,7 +832,7 @@ describe("validation", () => {
 
     // Rule 14 — design-pack format must match the deployable's framework.
     // TSX packs (mantine/shadcn/mui/chakra) need a `react` framework;
-    // HEEx packs (daisyui) need `phoenixLiveView`.  Custom packs warn
+    // HEEx packs (coreComponents) need `phoenixLiveView`.  Custom packs warn
     // (validator can't read pack.json); `design:` on a non-UI deployable
     // warns that the value will be dropped.
     it("rejects a heex pack on a react frontend", async () => {
@@ -846,13 +846,13 @@ describe("validation", () => {
             targets: api
             ui: WebApp
             port: 3001
-            design: daisyui
+            design: coreComponents
           }
         }
       `);
       expect(
         errors.some((e) =>
-          /Design pack 'daisyui' is a heex pack but framework 'react' renders tsx/.test(e),
+          /Design pack 'coreComponents' is a heex pack but framework 'react' renders tsx/.test(e),
         ),
       ).toBe(true);
     });

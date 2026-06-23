@@ -191,9 +191,9 @@ export function checkDeployable(
 
   // Rule 14: design-pack format must match the framework the deployable
   // renders against.  TSX packs (mantine/shadcn/mui/chakra) need a
-  // `react` framework; HEEx packs (daisyui) need `phoenixLiveView`.
+  // `react` framework; HEEx packs (coreComponents) need `phoenixLiveView`.
   // Without this rule, a mismatched pair (e.g. `platform: react,
-  // design: daisyui`) lowers cleanly and explodes at generation
+  // design: coreComponents`) lowers cleanly and explodes at generation
   // time with a confusing "template not registered" error.  Custom
   // packs (any name not in BUILTIN_PACK_FORMATS) get a warning
   // instead — the validator can't read their `pack.json` to know the
@@ -201,7 +201,7 @@ export function checkDeployable(
   // The framework the design pack must match: prefer a hosted/referenced
   // `ui` declaration's own `framework:` (D-PHOENIX-SURFACE — the ui owns
   // it; e.g. a phoenix host embedding `framework: react` needs a tsx
-  // pack, not daisyui), then the legacy block-binding framework.
+  // pack, not coreComponents), then the legacy block-binding framework.
   // Mirrors the lowering precedence in `lower.ts`.
   const uiDeclaredFramework = mountedUis.find((u) => u?.framework)?.framework;
   checkDeployableDesignPack(d, hasUiBinding, uiDeclaredFramework ?? framework, accept);
@@ -440,7 +440,7 @@ export function checkDeployableRealizationAxes(d: Deployable, accept: Validation
 /** Rule 14 — design-pack format must match the deployable's
  *  framework.  Three cases:
  *    1. `design:` set to a built-in name (mantine/shadcn/mui/chakra/
- *       daisyui) whose format doesn't match the deployable's
+ *       coreComponents) whose format doesn't match the deployable's
  *       framework → error.  Suggests the valid built-ins for the
  *       framework's format so the fix is one rename away.
  *    2. `design:` set to a custom path (anything not in the
