@@ -1,14 +1,15 @@
 // ---------------------------------------------------------------------------
 // Hono (node) backend — lifecycle stamps (`stamp onCreate`/`onUpdate`, the
-// audit / softDelete capability stamps).  Non-principal state stamps become
-// `_stampOnCreate` / `_stampOnUpdate` methods on the aggregate
-// (`this._<field> = <value>`) the route handler calls right before save —
-// closing the prior silent-drop (the audit columns were emitted but never
-// populated).  A `currentUser` value resolves to the principal id
-// (`currentUser.<idField>`); the route threads the typed principal read from
-// the request scope.  Principal-referencing stamps on a deployable WITHOUT
-// auth and stamps on an event-sourced aggregate stay fail-fast gated
-// (loom.node-stamp-unsupported), mirroring the java / dotnet gates.
+// audit / softDelete capability stamps).  node-persist-time-auditing relocated
+// stamping out of the domain method + handler into the drizzle persistence
+// layer: a per-project `db/audit-stamp.ts` helper exposes `stampInsert` /
+// `stampUpdate`, and the aggregate's `save()` wraps the upsert
+// (`.values(stampInsert(rootRow))` on the insert branch, `set: stampUpdate(
+// rootRow)` on the conflict branch).  The principal comes from the ambient
+// request context (`requestContext().actorId`); the domain entity is pure (no
+// `_stampOn*`) and the route handler never stamps.  Principal-referencing
+// stamps on a deployable WITHOUT auth and stamps on an event-sourced aggregate
+// stay fail-fast gated (loom.node-stamp-unsupported), mirroring java / dotnet.
 // ---------------------------------------------------------------------------
 
 import { describe, expect, it } from "vitest";
@@ -83,38 +84,61 @@ function find(files: Map<string, string>, re: RegExp): string {
 }
 
 describe("Hono (node) generator — lifecycle stamps", () => {
-  it("emits _stampOnCreate / _stampOnUpdate methods over the stamp fields", async () => {
+  it("the domain entity is pure — no _stampOn* methods", async () => {
     const entity = find(await build(SRC), /domain\/order\.ts$/);
-    expect(entity).toContain("  _stampOnCreate(): void {");
-    expect(entity).toContain("    this._createdAt = new Date();");
-    expect(entity).toContain("  _stampOnUpdate(): void {");
-    expect(entity).toContain("    this._updatedAt = new Date();");
+    expect(entity).not.toContain("_stampOnCreate");
+    expect(entity).not.toContain("_stampOnUpdate");
+    // The audit fields + getters remain (only the stamp methods are gone).
+    expect(entity).toContain("get createdAt(): Date");
+    expect(entity).toContain("get updatedAt(): Date");
   });
 
-  it("the create route calls _stampOnCreate immediately before save", async () => {
+  it("emits a per-project audit-stamp helper that stamps insert (all) + update (mutable only)", async () => {
+    const helper = find(await build(SRC), /db\/audit-stamp\.ts$/);
+    expect(helper).toContain('import { requestContext } from "../obs/als";');
+    // Request-scoped only — a non-request save (seed/system) returns the row
+    // unstamped.
+    expect(helper).toContain("if (!ctx) return row;");
+    // now()-only stamps → `new Date()` on both branches; no actor (no auth).
+    expect(helper).toContain("export function stampInsert");
+    expect(helper).toContain("createdAt: new Date()");
+    expect(helper).toContain("export function stampUpdate");
+    // createdAt is stripped from the update result so the upsert `set` leaves
+    // it immutable.
+    expect(helper).toContain("const { createdAt: _createdAt, ...rest } = row;");
+  });
+
+  it("the save() upsert stamps via stampInsert (values) + stampUpdate (set)", async () => {
+    const repo = find(await build(SRC), /repositories\/order-repository\.ts$/);
+    expect(repo).toContain('import { stampInsert, stampUpdate } from "../audit-stamp";');
+    expect(repo).toMatch(
+      /\.values\(stampInsert\(rootRow\)\)\.onConflictDoUpdate\(\{ target: schema\.orders\.id, set: stampUpdate\(rootRow\) \}\)/,
+    );
+  });
+
+  it("neither the create route nor the update route stamps", async () => {
     const routes = find(await build(SRC), /order\.routes\.ts$/);
-    expect(routes).toContain("created._stampOnCreate();");
-    // The stamp runs immediately before the persist.
-    expect(routes).toMatch(/created\._stampOnCreate\(\);\s*\n\s*await repo\.save\(created\);/);
+    expect(routes).not.toContain("_stampOnCreate");
+    expect(routes).not.toContain("_stampOnUpdate");
+    // The handler is just create → save.
+    expect(routes).toMatch(
+      /const created = Order\.create\(\{[^}]*\}\);\s*\n\s*await repo\.save\(created\);/,
+    );
   });
 
-  it("the update operation route calls _stampOnUpdate before save", async () => {
-    const routes = find(await build(SRC), /order\.routes\.ts$/);
-    expect(routes).toContain("aggregate._stampOnUpdate();");
-    expect(routes).toMatch(/aggregate\._stampOnUpdate\(\);\s*\n\s*await repo\.save\(aggregate\);/);
-  });
-
-  it("a currentUser stamp on an auth deployable resolves to the principal id", async () => {
+  it("a currentUser stamp on an auth deployable reads the ambient actor in the helper", async () => {
     const files = await build(PRINCIPAL_SRC);
+    // Entity stays pure even with a principal stamp — no User import for stamps.
     const entity = find(files, /domain\/order\.ts$/);
-    // The method takes the typed principal; the value renders to the id field.
-    expect(entity).toContain("  _stampOnCreate(currentUser: User): void {");
-    expect(entity).toContain("    this._createdBy = currentUser.id;");
-    expect(entity).toContain('import type { User } from "../auth/user-types";');
-    // The route reads the principal from the request scope and threads it in.
+    expect(entity).not.toContain("_stampOnCreate");
+    // The helper reads the principal from the ambient request context, not a
+    // threaded currentUser param.
+    const helper = find(files, /db\/audit-stamp\.ts$/);
+    expect(helper).toContain("createdBy: ctx.actorId");
+    // The route no longer reads currentUser for stamping (op body doesn't use it).
     const routes = find(files, /order\.routes\.ts$/);
-    expect(routes).toContain('.get("currentUser")');
-    expect(routes).toContain("created._stampOnCreate(currentUser);");
+    expect(routes).not.toContain("_stampOnCreate");
+    expect(routes).not.toContain('.get("currentUser")');
   });
 
   it("gates a currentUser stamp on a deployable WITHOUT auth fail-fast", async () => {
