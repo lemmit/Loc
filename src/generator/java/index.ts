@@ -42,6 +42,7 @@ import {
   renderDisallowedException,
   renderDomainEventInterface,
   renderDomainException,
+  renderExternHandlerException,
   renderForbiddenException,
   renderPackageMarker,
   renderPagedRecord,
@@ -255,6 +256,7 @@ function emitProjectFromContexts(
     renderAggregateNotFoundException(basePkg),
   );
   place("WireValidationException.java", "domain-common", renderWireValidationException(basePkg));
+  place("ExternHandlerException.java", "domain-common", renderExternHandlerException(basePkg));
   place("Paged.java", "domain-common", renderPagedRecord(basePkg));
   place("DomainEvent.java", "event", renderDomainEventInterface(basePkg));
   place("_Namespace.java", "enum", renderPackageMarker(pkgFor("enum")));
