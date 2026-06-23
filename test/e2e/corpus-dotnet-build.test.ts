@@ -36,38 +36,7 @@ const CASE = process.env.LOOM_CORPUS_DOTNET_CASE;
 // generation gate still covers all of them on all six backends; each line is a
 // precise, reproducible bug report).  Widen the gate by FIXING the emitter,
 // then dropping the entry.
-const DOTNET_COMPILE_SKIP: Record<string, string> = {
-  // PLATFORM LIMITATION: `shape(embedded)` + a ref-collection (`X id[]`) — the
-  // join-table type (`...Persistence.JoinTables`, `OrderTags`) the AppDbContext +
-  // repository reference is not emitted on .NET for an embedded aggregate (CS0234).
-  // The same shape java skip-lists; use shape(document)/relational or host on node.
-  embedded:
-    "PLATFORM LIMITATION: jsonb-embedded + ref collection has no join-table type on .NET (CS0234)",
-  // EMITTER GAP: aggregate inheritance (TPH/TPC) — a polymorphic find body reads
-  // `.Id` off the abstract base (`Asset`), which the base class doesn't expose
-  // (CS1061).  The base aggregate's `Id` property isn't surfaced on .NET.
-  inheritance:
-    "EMITTER GAP: abstract base aggregate missing `Id` for polymorphic find on .NET (CS1061)",
-  // EMITTER GAP: outbox dispatcher — `OutboxDomainEventDispatcher` references
-  // `IDomainEvent` / `IDomainEventDispatcher.DispatchAsync` shapes that aren't
-  // emitted for the durable-channel outbox on .NET (CS0246 / CS0535).
-  outbox:
-    "EMITTER GAP: outbox dispatcher references unemitted IDomainEvent shapes on .NET (CS0246/CS0535)",
-  // EMITTER GAP: tenancy `filter this.tenantId == currentUser.tenantId` — the EF
-  // entity configuration emits a bare `currentUser` reference with nothing in
-  // scope (CS0103); the filter expr isn't threaded a current-user accessor there.
-  "tenancy-filter":
-    "EMITTER GAP: tenancy filter emits unbound `currentUser` in EF configuration on .NET (CS0103)",
-  // EMITTER GAP (analyzer): the generated S3 resource client field is typed as the
-  // interface `IAmazonS3`; CA1859 (use the concrete type for perf) is promoted to
-  // an error by `/warnaserror`.  Fix = emit the concrete `AmazonS3Client` field type.
-  resources: "EMITTER GAP: S3 resource client field trips CA1859 under /warnaserror on .NET",
-  // EMITTER GAP: provenance pipeline behaviour — `ExecutionContextBehavior` doesn't
-  // match the Mediator `IPipelineBehavior<,>.Handle(...)` signature it claims to
-  // implement (CS0535) — a generated-vs-library API-shape drift on .NET.
-  provenance:
-    "EMITTER GAP: provenance IPipelineBehavior.Handle signature mismatch on .NET (CS0535)",
-};
+const DOTNET_COMPILE_SKIP: Record<string, string> = {};
 
 // Every corpus feature the manifest declares to generate on `dotnet`, minus the
 // documented compile-tier skips.

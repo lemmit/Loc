@@ -59,6 +59,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using ${ns}.Domain.Common;
+using ${ns}.Domain.Events;
 using ${ns}.Infrastructure.Persistence;
 
 namespace ${ns}.Infrastructure.Events;

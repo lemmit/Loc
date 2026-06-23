@@ -56,6 +56,12 @@ export function renderDbContext(
    *  normalised entity DbSet/config; its reference-collection join tables
    *  are skipped (state lives in the stream).  Empty ⇒ byte-identical. */
   eventSourcedAggs: ReadonlySet<string> = new Set(),
+  /** Names of embedded-shaped (`shape(embedded)`) aggregates.  Each is a
+   *  queryable root row whose reference-collections fold into a JSONB
+   *  column on the row (mapped by `<Agg>Configuration` via a value-
+   *  converter), NOT a join table — so its associations are dropped from
+   *  the join-entity DbSet/configuration set here.  Empty ⇒ byte-identical. */
+  embeddedAggs: ReadonlySet<string> = new Set(),
   /** Transactional outbox (dispatch-delivery-semantics.md): when the
    *  context carries any durable channel (`retention: log | work`), the
    *  AppDbContext maps the shared `__loom_outbox` table (OutboxMessage
@@ -72,6 +78,7 @@ export function renderDbContext(
 ): string {
   const isDoc = (name: string) => documentAggs.has(name);
   const isEs = (name: string) => eventSourcedAggs.has(name);
+  const isEmbedded = (name: string) => embeddedAggs.has(name);
   // Abstract bases split by layout.  A TPC (`ownTable`) base owns no table —
   // it is excluded from the EF model via `modelBuilder.Ignore<Base>()` so each
   // concrete maps standalone (its own table carrying the inherited base columns
@@ -122,7 +129,7 @@ export function renderDbContext(
   // Document aggregates fold their reference collections into the JSON
   // document — no join table, so drop their associations here.
   const joinAssocs = contextAssociations(ctx).filter(
-    (a) => !isDoc(a.ownerAgg) && !isEs(a.ownerAgg),
+    (a) => !isDoc(a.ownerAgg) && !isEs(a.ownerAgg) && !isEmbedded(a.ownerAgg),
   );
   const joinUsings =
     joinAssocs.length > 0 ? [`using ${ns}.Infrastructure.Persistence.JoinTables;`] : [];
@@ -267,9 +274,17 @@ export function renderConfiguration(
   // A TPH concrete configures only its OWN columns (the base columns belong to
   // the base config); a base / standalone aggregate configures all its fields.
   const cfgFields = tph?.role === "concrete" ? ownFieldsOf(agg, tph.base) : agg.fields;
-  const fieldConfigs = cfgFields.flatMap((f) =>
-    fieldConfigLines(f, "        ", "builder", voLookup, false, agg.name),
-  );
+  // Reference-collection (`X id[]`) fields are persisted out-of-band — a join
+  // table on the relational/TPH path, a JSONB column on the embedded path
+  // (see `refCollectionLines` below).  Either way they must NOT flow through
+  // the scalar `fieldConfigLines` (whose primitive-collection arm would pin a
+  // stray `.Property(x => x.Tags).HasColumnName("tags")` that the join path
+  // immediately `.Ignore`s and the embedded path replaces).
+  const isRefCollectionField = (f: FieldIR): boolean =>
+    f.type.kind === "array" && f.type.element.kind === "id";
+  const fieldConfigs = cfgFields
+    .filter((f) => !isRefCollectionField(f))
+    .flatMap((f) => fieldConfigLines(f, "        ", "builder", voLookup, false, agg.name));
   // Table + key + id-conversion live on the table-owning config: a standalone
   // aggregate or a TPH base.  A TPH concrete inherits all three from the base.
   const tableKeyLines = isTphConcreteCfg
@@ -302,12 +317,27 @@ export function renderConfiguration(
   const containmentLines = tph
     ? []
     : agg.contains.flatMap((c) => containmentConfigLines(c, agg, options));
-  // Reference-collection (`Id<T>[]`) fields persist via a separate join entity,
-  // so the public `List<TargetId>` accessor must be unmapped (else EF Core 8's
-  // primitive-collection support pins it as a JSON column on the row).
-  const refCollectionIgnores = tph
+  // Reference-collection (`X id[]`) fields persist out-of-band.  Two shapes:
+  //
+  //   • relational / TPH (default): a separate join entity owns the link, so
+  //     the public `List<TargetId>` accessor is `.Ignore`d (else EF Core's
+  //     primitive-collection support would pin it as a JSON column AND the
+  //     repository's join-sync would double-write).
+  //
+  //   • embedded (`shape(embedded)`): the migration folds the collection into
+  //     a single `<field> JSONB` column on the root row (no join table — the
+  //     node backend stores it identically), so we map `List<TargetId>` to
+  //     that column via a value-converter that (de)serialises a bare JSON
+  //     array of the underlying id values (`["<uuid>", ...]`), matching the
+  //     cross-backend wire.  A `ValueComparer` is required for EF to track
+  //     the mutable collection.
+  const refCollectionLines = tph
     ? []
-    : agg.associations.map((a) => `        builder.Ignore(x => x.${upperFirst(a.fieldName)});`);
+    : agg.associations.flatMap((a) =>
+        options.embedded
+          ? embeddedRefCollectionLines(a)
+          : [`        builder.Ignore(x => x.${upperFirst(a.fieldName)});`],
+      );
   // HasIndex for every root column referenced by a repository find — same set
   // the Drizzle schema indexes; without them `find byEmail` scans sequentially.
   const indexLines = tph
@@ -324,12 +354,23 @@ export function renderConfiguration(
   // every predicate applies — and lets a query selectively bypass a single one
   // via `IgnoreQueryFilters(["<Name>"])` instead of dropping them all.
   const filterNames = queryFilterNames(agg);
+  // A capability `filter this.x == currentUser.x` (tenancy) references the
+  // principal.  An EF query filter is a STATIC lambda built once in
+  // `OnModelCreating`, so it cannot close over a request-scoped `currentUser`
+  // local the way an operation body can — resolve it through the same ambient
+  // accessor the read side uses (`RequestContext.Current!.CurrentUser!`), so
+  // the whole backend resolves `currentUser` one way.
+  const AMBIENT_USER = "RequestContext.Current!.CurrentUser!";
   const filterLines = tph
     ? []
     : (agg.contextFilters ?? []).map(
         (predicate, i) =>
-          `        builder.HasQueryFilter(${JSON.stringify(filterNames[i])}, x => ${renderCsExpr(predicate, { thisName: "x" })});`,
+          `        builder.HasQueryFilter(${JSON.stringify(filterNames[i])}, x => ${renderCsExpr(predicate, { thisName: "x", currentUserExpr: AMBIENT_USER })});`,
       );
+  // The ambient accessor lives in `<ns>.Domain.Common` (RequestContext); only
+  // import it when a filter actually references the principal.
+  const filterRefsCurrentUser =
+    !tph && (agg.contextFilters ?? []).some((p) => exprRefsCurrentUser(p));
   // Co-located provenance (provenance.md): each `provenanced` field's
   // `<Field>Provenance` lineage maps to a `<field>_provenance` jsonb column via
   // a System.Text.Json value-converter (ProvJson.Options → the same Web-default
@@ -359,6 +400,9 @@ export function renderConfiguration(
   return (
     lines(
       "// Auto-generated.",
+      // The embedded ref-collection value-converter uses LINQ (`Select`/
+      // `SequenceEqual`/`Aggregate`) over the `List<TargetId>` ⇄ JSON mapping.
+      options.embedded && agg.associations.length > 0 ? "using System.Linq;" : null,
       "using Microsoft.EntityFrameworkCore;",
       "using Microsoft.EntityFrameworkCore.Metadata.Builders;",
       `using ${ns}.Domain.${plural(agg.name)};`,
@@ -368,7 +412,7 @@ export function renderConfiguration(
       `using ${ns}.Domain.Enums;`,
       // Provenance lineage type + its shared JSON options for the co-located
       // `<field>_provenance` value-converter.
-      provColumnLines.length > 0 ? `using ${ns}.Domain.Common;` : null,
+      provColumnLines.length > 0 || filterRefsCurrentUser ? `using ${ns}.Domain.Common;` : null,
       "",
       `namespace ${ns}.Infrastructure.Persistence.Configurations;`,
       "",
@@ -381,7 +425,7 @@ export function renderConfiguration(
       ...provColumnLines,
       ...discriminatorLines,
       ...containmentLines,
-      ...refCollectionIgnores,
+      ...refCollectionLines,
       ...indexLines,
       ...filterLines,
       ...domainEventsIgnore,
@@ -389,6 +433,47 @@ export function renderConfiguration(
       "}",
     ) + "\n"
   );
+}
+
+/** The underlying CLR type a strongly-typed id wraps, by its value kind —
+ *  the type the JSON array of id values (de)serialises as. */
+function idValueClrType(vt: AssociationIR["valueType"]): string {
+  switch (vt) {
+    case "int":
+      return "int";
+    case "long":
+      return "long";
+    case "string":
+      return "string";
+    default:
+      return "Guid";
+  }
+}
+
+/** EF mapping for an EMBEDDED aggregate's reference-collection (`X id[]`):
+ *  a `<field> JSONB` column on the root row whose value-converter
+ *  (de)serialises `List<TargetId>` ⇄ a bare JSON array of the underlying id
+ *  values (`["<uuid>", ...]`), matching the migration's `<field> JSONB` and
+ *  the node backend's identical storage.  A `ValueComparer` lets EF track the
+ *  mutable list (required for value-converted reference-type collections). */
+function embeddedRefCollectionLines(a: AssociationIR): string[] {
+  const prop = upperFirst(a.fieldName);
+  const idClass = `${a.targetAgg}Id`;
+  const inner = idValueClrType(a.valueType);
+  const listOfId = `System.Collections.Generic.List<${idClass}>`;
+  const listOfInner = `System.Collections.Generic.List<${inner}>`;
+  return [
+    `        builder.Property(x => x.${prop})`,
+    `            .HasColumnName("${snake(a.fieldName)}")`,
+    `            .HasColumnType("jsonb")`,
+    `            .HasConversion(`,
+    `                v => System.Text.Json.JsonSerializer.Serialize(v.Select(__e => __e.Value).ToList(), (System.Text.Json.JsonSerializerOptions?)null),`,
+    `                v => System.Text.Json.JsonSerializer.Deserialize<${listOfInner}>(v, (System.Text.Json.JsonSerializerOptions?)null)!.Select(__v => new ${idClass}(__v)).ToList(),`,
+    `                new Microsoft.EntityFrameworkCore.ChangeTracking.ValueComparer<${listOfId}>(`,
+    `                    (__a, __b) => __a!.SequenceEqual(__b!),`,
+    `                    v => v.Aggregate(0, (__acc, __e) => System.HashCode.Combine(__acc, __e.GetHashCode())),`,
+    `                    v => v.ToList()));`,
+  ];
 }
 
 /** Aggregate-root columns referenced by any of this aggregate's
@@ -474,6 +559,37 @@ function queryFilterName(
     return `${upperFirst(col!)}Filter`;
   }
   return `Filter${index + 1}`;
+}
+
+/** Does a query-filter predicate reference the `currentUser` principal?
+ *  Tenancy filters (`filter this.x == currentUser.x`) do; structural filters
+ *  (`softDelete`) don't.  Drives the conditional `Domain.Common` using for the
+ *  ambient accessor.  Walks only the expr shapes a capability filter can take. */
+function exprRefsCurrentUser(e: ExprIR): boolean {
+  switch (e.kind) {
+    case "ref":
+      return e.refKind === "current-user" || e.name === "currentUser";
+    case "member":
+      return exprRefsCurrentUser(e.receiver);
+    case "binary":
+      return exprRefsCurrentUser(e.left) || exprRefsCurrentUser(e.right);
+    case "paren":
+      return exprRefsCurrentUser(e.inner);
+    case "unary":
+      return exprRefsCurrentUser(e.operand);
+    case "method-call":
+      return exprRefsCurrentUser(e.receiver) || e.args.some(exprRefsCurrentUser);
+    case "call":
+      return e.args.some(exprRefsCurrentUser);
+    case "ternary":
+      return (
+        exprRefsCurrentUser(e.cond) ||
+        exprRefsCurrentUser(e.then) ||
+        exprRefsCurrentUser(e.otherwise)
+      );
+    default:
+      return false;
+  }
 }
 
 function collectColumnRefs(e: ExprIR, out: Set<string>): void {

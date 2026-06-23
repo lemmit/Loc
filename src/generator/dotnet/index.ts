@@ -16,6 +16,7 @@ import { isTpcBase, isTphBase, tableOwnerName, tphConcretesOf } from "../../ir/u
 import {
   effectiveSavingShape,
   isDocumentShaped,
+  isEmbeddedShaped,
   resolveDataSourceConfig,
 } from "../../ir/util/resolve-datasource.js";
 import type { Model } from "../../language/generated/ast.js";
@@ -380,6 +381,7 @@ function emitProjectFromContexts(
         ns,
         documentAggNames(contexts, system?.sys),
         eventSourcedAggNames(contexts),
+        embeddedAggNames(contexts, system?.sys),
         hasOutbox,
         hasProvenance,
         hasAudit,
@@ -859,6 +861,7 @@ function emitAggregate(
             retrievals: aggRetrievals,
             retrievalBodies,
             idClass,
+            embedded: isEmbedded,
           }),
     );
     if (isDoc) {
@@ -947,7 +950,14 @@ function emitInfrastructure(
   const hasOutbox = ctx.eventSubscriptions.length > 0 && durableEventTypes(ctx).size > 0;
   out.set(
     "Infrastructure/Persistence/AppDbContext.cs",
-    renderDbContext(ctx, ns, documentAggNames([ctx]), eventSourcedAggNames([ctx]), hasOutbox),
+    renderDbContext(
+      ctx,
+      ns,
+      documentAggNames([ctx]),
+      eventSourcedAggNames([ctx]),
+      embeddedAggNames([ctx]),
+      hasOutbox,
+    ),
   );
   emitWorkflowStatePersistence(ctx.workflows, ns, out, durableEventTypes(ctx).size > 0);
   emitEventSourcedWorkflowFiles(ctx.workflows, ns, out);
@@ -1120,6 +1130,23 @@ function eventSourcedAggNames(contexts: EnrichedBoundedContextIR[]): Set<string>
   for (const ctx of contexts) {
     for (const agg of ctx.aggregates) {
       if (agg.persistedAs === "eventLog") names.add(agg.name);
+    }
+  }
+  return names;
+}
+
+/** Names of embedded-shaped (`shape(embedded)`) aggregates across the given
+ *  contexts, resolved the same way `emitAggregate` does (binding wins, header
+ *  default).  Consumed by `renderDbContext` to drop their reference-collection
+ *  associations from the join-entity DbSet/configuration set — an embedded
+ *  ref-collection folds into a JSONB column on the root, not a join table. */
+function embeddedAggNames(contexts: EnrichedBoundedContextIR[], sys?: SystemIR): Set<string> {
+  const names = new Set<string>();
+  for (const ctx of contexts) {
+    for (const agg of ctx.aggregates) {
+      if (agg.persistedAs === "eventLog") continue; // event sourcing wins over the shape axis
+      const ds = sys ? resolveDataSourceConfig(agg, ctx, sys) : undefined;
+      if (isEmbeddedShaped(agg, ds)) names.add(agg.name);
     }
   }
   return names;
