@@ -154,7 +154,7 @@ if not (price > Decimal("0.00")):
 ```elixir
 # Ash action — both raise ArgumentError; the controller maps the message
 if not (is_staff), do: raise(ArgumentError, "Forbidden: isStaff")
-if not (Decimal.gt?(price, Decimal.new("0.00"))), do: raise(ArgumentError, "Precondition failed: price > money(\"0.00\")")
+if not (Decimal.compare(price, Decimal.new("0.00")) == :gt), do: raise(ArgumentError, "Precondition failed: price > money(\"0.00\")")
 ```
 ::: end
 

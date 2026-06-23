@@ -221,8 +221,7 @@ public static Specification<Order> HighValue(BigDecimal min) {
 ```elixir
 # lib/.../catalog/order.ex — a :boolean Ash calculation the read filters by
 calculations do
-  calculate :high_value, :boolean,
-      expr(Decimal.compare(record.total, ^arg(:min)) in [:gt, :eq]) do
+  calculate :high_value, :boolean, expr(record.total >= ^arg(:min)) do
     argument :min, :string
   end
 end
