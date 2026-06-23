@@ -1059,10 +1059,14 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // read; elixir's `base_filter expr(... == ^actor(:f))` renders per-aggregate
   // regardless of shape; java AND-s the SpEL-principal clause into the embedded
   // scoped reads).  A `document` aggregate filters IN-APP over the rehydrated
-  // doc, so a principal predicate there needs in-app actor evaluation — still
-  // deferred (Slice B), hence `embedded`-only here.
+  // doc, so a principal predicate there evaluates the actor in-app (Slice B):
+  // node binds `requireCurrentUser()` into the in-app predicate; java injects
+  // the `CurrentUserAccessor` bean and binds it before the `.stream().filter`.
+  // (`elixir` has no `document` shape — `validateSavingShapeSupport` gates it;
+  // `python` doesn't wire non-relational filters at all — so both stay off.)
   const supportsPrincipalNonRelationalFilter = (family: string, shp: string): boolean =>
-    shp === "embedded" && (family === "node" || family === "elixir" || family === "java");
+    (shp === "embedded" && (family === "node" || family === "elixir" || family === "java")) ||
+    (shp === "document" && (family === "node" || family === "java"));
 
   for (const dep of sys.deployables) {
     const fam = platformFamily(dep.platform);

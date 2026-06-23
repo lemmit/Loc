@@ -1,5 +1,8 @@
 import type { EnrichedAggregateIR, ExprIR, RepositoryIR } from "../../../ir/types/loom-ir.js";
-import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import {
+  aggregateUsesPrincipalContextFilter,
+  exprUsesCurrentUser,
+} from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake } from "../../../util/naming.js";
 import { bypassDrops, type FilterBypass } from "../capability-filter.js";
@@ -51,17 +54,41 @@ export function renderJavaDocumentRepositoryImpl(
   // is threaded by the orchestrator (capability-filter.ts).
   const promotedCaps = ctx.promotedCaps ?? new Set<string>();
   const origins = agg.contextFilterOrigins ?? [];
-  // The (predicate, origin) entries, principal-filters excluded (gated off java).
+  // The (predicate, origin) entries, split by whether the predicate reads the
+  // request principal (`currentUser`).  Non-principal filters are applied in-app
+  // over the rehydrated aggregate as before; PRINCIPAL filters (DEBT-02 Slice B,
+  // e.g. `filter this.tenantId == currentUser.tenantId`) are also applied in-app
+  // here — a document aggregate can't push them to SQL/JPQL (the relational path
+  // does via a SpEL @Query) — but they need the `currentUser` local bound from
+  // the injected accessor and a fail-closed null guard (see `principalPred`).
   const capEntries: { pred: ExprIR; origin: string | undefined }[] = (agg.contextFilters ?? [])
     .map((pred, i) => ({ pred, origin: origins[i] }))
     .filter((e) => !exprUsesCurrentUser(e.pred));
+  // Principal (tenancy) filters: always-on (never promoted/bypassable — the
+  // relational path AND-s them into every root read unconditionally), rendered
+  // with `accessorProps` so `currentUser.tenantId` → `currentUser.tenantId()`.
+  const principalPreds: ExprIR[] = (agg.contextFilters ?? []).filter(exprUsesCurrentUser);
+  const hasPrincipal = aggregateUsesPrincipalContextFilter(agg);
   const renderPred = (p: ExprIR, varName: string): string =>
     `(${renderJavaExpr(p, { thisName: varName, agg, accessorProps: true })})`;
-  // Always-on predicates: bare filters (undefined origin) + non-promoted caps.
+  // The principal conjunct over `varName`, guarded fail-closed: a null
+  // `currentUser` (unauthenticated scope) short-circuits to NO rows rather than
+  // NPE-ing on `currentUser.tenantId()`.  This is the in-app analogue of the
+  // relational path's null-safe SpEL (`@currentUserAccessor.user()?.tenantId()`),
+  // which a null principal makes match nothing.  Null when no principal filter.
+  const principalPred = (varName: string): string | null => {
+    if (principalPreds.length === 0) return null;
+    const preds = principalPreds.map((p) => renderPred(p, varName));
+    return `currentUser != null && ${preds.join(" && ")}`;
+  };
+  // Always-on predicates: bare filters (undefined origin) + non-promoted caps
+  // + the fail-closed principal conjunct.
   const alwaysOn = (varName: string): string | null => {
     const preds = capEntries
       .filter((e) => e.origin == null || !promotedCaps.has(e.origin))
       .map((e) => renderPred(e.pred, varName));
+    const principal = principalPred(varName);
+    if (principal) preds.push(principal);
     return preds.length > 0 ? preds.join(" && ") : null;
   };
   // Promoted predicates a read does NOT bypass — conjoined into the find stream.
@@ -157,6 +184,7 @@ export function renderJavaDocumentRepositoryImpl(
     ctx.domainPkg !== ctx.infraPkg ? `import ${ctx.domainPkg}.${agg.name}Repository;` : null,
     `import ${ctx.basePkg}.domain.common.AggregateNotFoundException;`,
     finds.some(isPagedFind) ? `import ${ctx.basePkg}.domain.common.Paged;` : null,
+    hasPrincipal ? `import ${ctx.basePkg}.auth.CurrentUserAccessor;` : null,
     `import ${ctx.basePkg}.domain.ids.*;`,
     ``,
     `/** Document repository — the whole aggregate round-trips one jsonb`,
@@ -176,9 +204,18 @@ export function renderJavaDocumentRepositoryImpl(
     `        .build();`,
     ``,
     `    private final JdbcTemplate jdbc;`,
+    // DEBT-02 Slice B: a principal (tenancy) capability filter is applied in-app
+    // over the rehydrated document, so the impl needs the request principal —
+    // inject the same CurrentUserAccessor bean the relational path uses.  Only
+    // wired when the aggregate carries such a filter (non-principal document
+    // aggregates stay byte-identical: no field, no ctor param, no import).
+    hasPrincipal ? `    private final CurrentUserAccessor currentUserAccessor;` : null,
     ``,
-    `    public ${agg.name}RepositoryImpl(JdbcTemplate jdbc) {`,
+    hasPrincipal
+      ? `    public ${agg.name}RepositoryImpl(JdbcTemplate jdbc, CurrentUserAccessor currentUserAccessor) {`
+      : `    public ${agg.name}RepositoryImpl(JdbcTemplate jdbc) {`,
     `        this.jdbc = jdbc;`,
+    hasPrincipal ? `        this.currentUserAccessor = currentUserAccessor;` : null,
     `    }`,
     ``,
     `    @Override`,
@@ -200,9 +237,10 @@ export function renderJavaDocumentRepositoryImpl(
     ...(capRec
       ? [
           `        if (rows.isEmpty()) return Optional.empty();`,
+          hasPrincipal ? `        var currentUser = currentUserAccessor.user();` : null,
           `        var rec = fromJson(rows.get(0));`,
           `        return (${capRec}) ? Optional.of(rec) : Optional.empty();`,
-        ]
+        ].filter((l): l is string => l != null)
       : [`        return rows.isEmpty() ? Optional.empty() : Optional.of(fromJson(rows.get(0)));`]),
     `    }`,
     ``,
@@ -218,11 +256,12 @@ export function renderJavaDocumentRepositoryImpl(
     `        var out = new ArrayList<${agg.name}>();`,
     ...(capX
       ? [
+          hasPrincipal ? `        var currentUser = currentUserAccessor.user();` : null,
           `        for (var data : rows) {`,
           `            var x = fromJson(data);`,
           `            if (${capX}) out.add(x);`,
           `        }`,
-        ]
+        ].filter((l): l is string => l != null)
       : [`        for (var data : rows) out.add(fromJson(data));`]),
     `        return out;`,
     `    }`,
