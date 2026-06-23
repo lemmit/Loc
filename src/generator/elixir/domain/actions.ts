@@ -433,12 +433,28 @@ function renderOperationValidates(
     }
 
     // Fall back to the function form.  Render against `record` (= changeset.data)
-    // when the predicate touches `this` so the rendered output's `record.X`
-    // resolves; emit the local binding only when actually used.
+    // when the predicate touches `this`, and bind any operation arguments /
+    // `currentUser` the predicate references — the `validate fn changeset, ctx ->`
+    // callback supplies none of these natively (an unbound `amount` would be an
+    // `undefined variable` compile error under `--warnings-as-errors`).  Mirrors
+    // the change-fn binding block below; emit only the bindings actually used.
     const exprStr = renderExpr(stmt.expr, ctx);
-    const recordLine = exprUsesThis(stmt.expr) ? "        record = changeset.data\n" : "";
+    const usesCurrentUser = exprUsesCurrentUser(stmt.expr);
+    const usedParams = op.params.filter((p) => stmtUsesParam(stmt, p.name));
+    const bindings: string[] = [];
+    if (exprUsesThis(stmt.expr)) bindings.push("        record = changeset.data");
+    if (usesCurrentUser) bindings.push("        current_user = context.actor");
+    for (const p of usedParams) {
+      bindings.push(
+        `        ${snake(p.name)} = Ash.Changeset.get_argument(changeset, :${snake(p.name)})`,
+      );
+    }
+    const bindingBlock = bindings.length > 0 ? `${bindings.join("\n")}\n` : "";
+    // The validate callback's second arg is the actor `context` only when the
+    // predicate reads `currentUser`; otherwise it stays the ignored `_opts`.
+    const ctxParam = usesCurrentUser ? "context" : "_opts";
     lines.push(
-      `      validate fn changeset, _opts ->\n${recordLine}        if ${exprStr}, do: :ok, else: {:error, ${JSON.stringify(`Precondition failed: ${stmt.source}`)}}\n      end`,
+      `      validate fn changeset, ${ctxParam} ->\n${bindingBlock}        if ${exprStr}, do: :ok, else: {:error, ${JSON.stringify(`Precondition failed: ${stmt.source}`)}}\n      end`,
     );
   }
 
