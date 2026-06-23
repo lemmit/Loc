@@ -21,6 +21,12 @@ export interface JavaTraceCtx {
    *  records the event AND folds it via `_apply(ev)` so in-memory state
    *  reflects the transition before the command returns. */
   eventSourced?: boolean;
+  /** When true, `requires` (the 403 authorization gate) renders to nothing —
+   *  it has been relocated to the Spring service handler (before the domain
+   *  dispatch).  Set for an `operationAuthzOnly` op so the pure domain method
+   *  drops its in-method throw.  `precondition` (400) is unaffected and always
+   *  stays in the domain body. */
+  suppressRequires?: boolean;
 }
 
 const NO_TRACE: JavaTraceCtx = { emitTrace: false, aggregate: "", op: "" };
@@ -30,7 +36,10 @@ export function renderJavaStatements(
   ctx: JavaRenderContext = DEFAULT_CTX,
   traceCtx: JavaTraceCtx = NO_TRACE,
 ): string {
-  return stmts.map((s, i) => renderJavaStatement(s, i, ctx, traceCtx)).join("\n");
+  return stmts
+    .map((s, i) => renderJavaStatement(s, i, ctx, traceCtx))
+    .filter((line) => line !== "")
+    .join("\n");
 }
 
 /** Imports a statement body needs — the union of
@@ -75,7 +84,10 @@ function renderJavaStatement(
       return precondition(s.expr, s.source, index, ctx, traceCtx);
     case "requires":
       // Authorization gate — ForbiddenException maps to 403 in the
-      // controller advice.
+      // controller advice.  For an `operationAuthzOnly` op the gate is
+      // relocated to the Spring service handler (rendered before the domain
+      // dispatch), so the pure domain method drops the throw — emit nothing.
+      if (traceCtx.suppressRequires) return "";
       return `${INDENT}if (!(${renderJavaExpr(s.expr, ctx)})) throw new ForbiddenException(${JSON.stringify(`Forbidden: ${s.source}`)});`;
     case "let":
       return `${INDENT}var ${s.name} = ${renderJavaExpr(s.expr, ctx)};`;

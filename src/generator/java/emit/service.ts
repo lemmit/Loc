@@ -3,14 +3,26 @@ import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   FieldIR,
+  OperationIR,
   ParamIR,
   RepositoryIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
-import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import {
+  exprUsesCurrentUser,
+  operationAuthzOnly,
+  operationUsesCurrentUser,
+  operationUsesCurrentUserAsData,
+} from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../../util/naming.js";
-import { javaValueTypeForId, renderJavaExpr, renderJavaType } from "../render-expr.js";
+import {
+  collectJavaExprImports,
+  type JavaRenderContext,
+  javaValueTypeForId,
+  renderJavaExpr,
+  renderJavaType,
+} from "../render-expr.js";
 import { declaredFinds, isPagedFind, unionFindAsOptionalTwin } from "./repository.js";
 import { returnUnionSpec } from "./unions.js";
 import { aggHasCreateWireValidator, renderJavaValidators } from "./validator.js";
@@ -107,11 +119,23 @@ export function renderJavaService(
         `            RequestContext.parentId()));`,
       ]
     : [];
+  // A guarded CREATE relocates its `requires` 403 gate here — checked against
+  // the validated create-input locals (bare names), since on a create there's no
+  // constructed entity yet but the handler holds the inputs the entity is built
+  // from.  `currentUser` resolves to the request principal.  Mirrors the node
+  // create route (routes-builder `relocatedAuthzGate(createAction, "body", …)`).
+  const createIsAuthzOnly = !!createAction && operationAuthzOnly(createAction);
+  const createGateUsesUser = !!ctx.authed && !!createAction && authzGateUsesUser(createAction);
+  const createGateLines = createIsAuthzOnly
+    ? relocatedAuthzGate(createAction, { thisName: "this", bareProps: true }, imports)
+    : [];
   const createLines =
     hasCreate(agg) || ctx.esCreateParams
       ? [
           `    public ${idClass} create${agg.name}(Create${agg.name}Request request) {`,
           ...createLets,
+          createGateUsesUser ? `        var currentUser = currentUserAccessor.user();` : null,
+          ...createGateLines,
           hasCreateValidator && !ctx.esCreateParams
             ? `        ${agg.name}Validators.create(${createArgs});`
             : null,
@@ -210,7 +234,17 @@ export function renderJavaService(
   // system even when no operation otherwise uses the current user, so the
   // accessor must be injected whenever audit + auth are both present — not only
   // when `anyOpUsesUser`, or the audit call references an uninjected field.
-  const needsUserAccessor = anyOpUsesUser || (anyAudited && !!ctx.authed);
+  // A guarded CREATE whose relocated authz gate reads the principal also needs
+  // the accessor injected (`anyOpUsesUser` covers it via `operationUsesCurrentUser`
+  // only for operations, not the create action).
+  const needsUserAccessor = anyOpUsesUser || createGateUsesUser || (anyAudited && !!ctx.authed);
+  // A relocated 403 gate (authz-only create or operation) throws
+  // ForbiddenException from this handler — import it (mirrors the DisallowedException
+  // add for the `when` gate).
+  const anyRelocatedAuthzGate =
+    createIsAuthzOnly ||
+    agg.operations.some((op) => op.visibility === "public" && operationAuthzOnly(op));
+  if (anyRelocatedAuthzGate) imports.add(`${ctx.basePkg}.domain.common.ForbiddenException`);
   const unionReturnNames = new Set<string>();
   const opLines = agg.operations
     .filter((op) => op.visibility === "public")
@@ -222,9 +256,23 @@ export function renderJavaService(
         (p) => `        var ${p.name} = ${wireToDomain(p.type, `request.${p.name}()`)};`,
       );
       for (const p of op.params) collectWireToDomainImports(p.type, imports);
-      const usesUser = !!ctx.authed && operationUsesCurrentUser(op);
-      const args = [...op.params.map((p) => p.name), ...(usesUser ? ["currentUser"] : [])].join(
-        ", ",
+      // Param/threading kept only when the op uses the principal AS DATA; an
+      // authz-only op's 403 gate is relocated to this handler (rendered against
+      // the loaded `aggregate`'s accessors, before dispatch) and no actor is
+      // threaded into the now-pure domain method.  Both shapes bind a local
+      // `currentUser` when they read the principal — data threading, or the
+      // relocated gate.
+      const usesUserAsData = !!ctx.authed && operationUsesCurrentUserAsData(op);
+      const gateUsesUser = !!ctx.authed && authzGateUsesUser(op);
+      const bindUser = usesUserAsData || gateUsesUser;
+      const args = [
+        ...op.params.map((p) => p.name),
+        ...(usesUserAsData ? ["currentUser"] : []),
+      ].join(", ");
+      const authzGateLines = relocatedAuthzGate(
+        op,
+        { thisName: "aggregate", accessorProps: true },
+        imports,
       );
       const opHasValidator = opHasWireValidator(agg, op.name);
       if (op.extern) {
@@ -235,9 +283,10 @@ export function renderJavaService(
         return [
           `    public void ${op.name}(${paramSig}) {`,
           ...lets,
-          usesUser ? `        var currentUser = currentUserAccessor.user();` : null,
+          bindUser ? `        var currentUser = currentUserAccessor.user();` : null,
           `        var aggregate = repository.getById(id);`,
           whenGateLine(op),
+          ...authzGateLines,
           `        aggregate.check${upperFirst(op.name)}(${args});`,
           `        ${lowerFirst(op.name)}Handler.handle(${handlerArgs});`,
           `        aggregate._assertInvariants();`,
@@ -262,12 +311,13 @@ export function renderJavaService(
       return [
         `    public ${spec ? spec.name : "void"} ${op.name}(${paramSig}) {`,
         ...lets,
-        usesUser ? `        var currentUser = currentUserAccessor.user();` : null,
+        bindUser ? `        var currentUser = currentUserAccessor.user();` : null,
         opHasValidator
           ? `        ${agg.name}Validators.${op.name}(${op.params.map((p) => p.name).join(", ")});`
           : null,
         `        var aggregate = repository.getById(id);`,
         whenGateLine(op),
+        ...authzGateLines,
         audited ? `        var __before = ${agg.name}Response.from(aggregate);` : null,
         spec
           ? `        var result = aggregate.${op.name}(${args});`
@@ -441,6 +491,41 @@ function collectVoNames(t: TypeIR, into: Set<string>): void {
   if (t.kind === "valueobject") into.add(t.name);
   else if (t.kind === "array") collectVoNames(t.element, into);
   else if (t.kind === "optional") collectVoNames(t.inner, into);
+}
+
+/** True when any `requires` guard on an authz-only op references the
+ *  principal — gates the `var currentUser = currentUserAccessor.user();`
+ *  binding the relocated gate needs in handler scope. */
+function authzGateUsesUser(op: OperationIR): boolean {
+  if (!operationAuthzOnly(op)) return false;
+  return op.statements.some((s) => s.kind === "requires" && exprUsesCurrentUser(s.expr));
+}
+
+/** The relocated authorization gate for an `operationAuthzOnly` op: the 403
+ *  `requires` checks the (now pure) domain method used to throw, lifted to the
+ *  Spring service handler.  `currentUser` resolves to `currentUserAccessor.user()`
+ *  (bound by the caller); `this.<field>` binds against `renderCtx` — the loaded
+ *  aggregate's public accessors (`aggregate.status()`) for update/destroy ops, or
+ *  the validated create-input locals (bare names) for creates.  Emitted BEFORE
+ *  the domain dispatch so a denied caller never reaches the pure domain method.
+ *  Empty unless the op is authz-only. */
+function relocatedAuthzGate(
+  op: OperationIR,
+  renderCtx: JavaRenderContext,
+  imports: Set<string>,
+): string[] {
+  if (!operationAuthzOnly(op)) return [];
+  return op.statements
+    .filter((s): s is Extract<typeof s, { kind: "requires" }> => s.kind === "requires")
+    .map((s) => {
+      // The gate expr can reference java.util.Objects (equals on objects/strings),
+      // Comparator, etc. — collect its imports so the handler-scope render
+      // type-checks (the in-domain emission did this via collectJavaStmtImports).
+      collectJavaExprImports(s.expr, imports);
+      return `        if (!(${renderJavaExpr(s.expr, renderCtx)})) throw new ForbiddenException(${JSON.stringify(
+        `Forbidden: ${s.source}`,
+      )});`;
+    });
 }
 
 /** True when the op's preconditions yield at least one wire rule —

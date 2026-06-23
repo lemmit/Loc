@@ -7,7 +7,7 @@ import type {
   TestIR,
   TestStmtIR,
 } from "../../../ir/types/loom-ir.js";
-import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { operationUsesCurrentUserAsData } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { intrinsicMatcherSig } from "../../../util/intrinsic-matchers.js";
 import { upperFirst } from "../../../util/naming.js";
@@ -78,16 +78,18 @@ interface TestEmitState {
   ctx: BoundedContextIR;
 }
 
-/** Append the stub test user to top-level op calls whose target
- *  operation references currentUser (the entity method takes a trailing
- *  User parameter). */
+/** Append the stub test user to top-level op calls whose target operation uses
+ *  the principal AS DATA (the entity method takes a trailing User parameter).
+ *  An authz-only op's domain method is now pure — its 403 gate relocated to the
+ *  service handler — so it's invoked with NO actor; the regex-append is gated
+ *  off for it (`operationUsesCurrentUserAsData`, not `operationUsesCurrentUser`). */
 function withTestUser(expr: ExprIR, rendered: string, state: TestEmitState): string {
   if (expr.kind !== "method-call" || expr.receiverType.kind !== "entity") return rendered;
   const agg = state.ctx.aggregates.find(
     (a) => a.name === (expr.receiverType as { name: string }).name,
   );
   const op = agg?.operations.find((o) => o.name === expr.member);
-  if (!op || !operationUsesCurrentUser(op) || !state.userFields) return rendered;
+  if (!op || !operationUsesCurrentUserAsData(op) || !state.userFields) return rendered;
   state.usesTestUser = true;
   return rendered.replace(/\)$/, expr.args.length > 0 ? ", __testUser)" : "__testUser)");
 }

@@ -8,7 +8,11 @@ import type {
   StmtIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
-import { exprUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import {
+  exprUsesCurrentUser,
+  operationAuthzOnly,
+  operationUsesCurrentUserAsData,
+} from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { UnionMember } from "../../_payload/union-wire.js";
@@ -229,7 +233,12 @@ export function renderJavaEntity(
     agg: isAgg(entity) ? entity : undefined,
     eventFields: options.eventFields,
   };
-  const anyOpUsesCurrentUser = operations.some(operationUsesCurrentUser);
+  // The domain method keeps its `User currentUser` param — and the file keeps
+  // the `auth.User` import — only when an op uses the principal AS DATA
+  // (assign/stamp/precondition/emit/call-arg).  Pure authorization
+  // (`requires currentUser…`, an authz-only op) relocates its 403 gate to the
+  // Spring service handler, so the domain method is pure and needs no import.
+  const anyOpUsesCurrentUser = operations.some(operationUsesCurrentUserAsData);
   // A body that calls a domain service (`Pricing.quote(...)`) needs the
   // `domain.services.*` import so the generated static class resolves.
   const callsDomainService =
@@ -436,10 +445,21 @@ export function renderJavaEntity(
   // --- operations ------------------------------------------------------------
   const opLines: string[] = [];
   for (const op of operations) {
-    const usesUser = operationUsesCurrentUser(op);
+    // Param kept only when the op uses the principal AS DATA; an authz-only op
+    // (currentUser used only in `requires`) becomes a pure method — no param —
+    // with its 403 gate relocated to the Spring service handler, so its
+    // in-method `requires` throw is suppressed below.
+    const usesUser = operationUsesCurrentUserAsData(op);
+    const authzOnly = operationAuthzOnly(op);
     const baseParams = op.params.map((p) => `${renderJavaType(p.type)} ${p.name}`).join(", ");
     const params = [baseParams, usesUser ? "User currentUser" : ""].filter(Boolean).join(", ");
-    const traceCtx = { emitTrace, aggregate: entity.name, op: op.name, eventSourced };
+    const traceCtx = {
+      emitTrace,
+      aggregate: entity.name,
+      op: op.name,
+      eventSourced,
+      suppressRequires: authzOnly,
+    };
     if (op.extern) {
       // Extern op: `check<Op>` runs preconditions only; the user-supplied
       // handler owns the business decision (wired by the API slice).

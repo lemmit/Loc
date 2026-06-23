@@ -87,10 +87,27 @@ describe("java generator — auth surface (S6)", () => {
     expect(filter).toContain("response.setStatus(401);");
   });
 
-  it("threads currentUser from the accessor into ops that require it", async () => {
+  it("relocates an authz-only op's `requires` 403 gate to the service handler, before a pure domain dispatch", async () => {
     const svc = (await files()).get(`${ROOT}/features/projects/ProjectService.java`)!;
+    // `rename` is authz-only (`requires currentUser.role`; no currentUser data
+    // use), so the principal binds in handler scope and the 403 gate runs
+    // BEFORE the (now pure) domain method — which is called with NO actor.
     expect(svc).toContain("var currentUser = currentUserAccessor.user();");
-    expect(svc).toContain("aggregate.rename(newName, currentUser);");
+    expect(svc).toContain(
+      'if (!(Objects.equals(currentUser.role(), "admin"))) throw new ForbiddenException',
+    );
+    expect(svc).toContain("aggregate.rename(newName);");
+    expect(svc).not.toContain("aggregate.rename(newName, currentUser);");
+  });
+
+  it("emits the authz-only op as a pure domain method — no User param, no in-method requires throw", async () => {
+    const entity = (await files()).get(`${ROOT}/features/projects/Project.java`)!;
+    // Pure: no ambient User param; the 403 gate relocated to the service.
+    expect(entity).toContain("public void rename(String newName) {");
+    expect(entity).not.toContain("rename(String newName, User currentUser)");
+    expect(entity).not.toMatch(/rename[^}]*ForbiddenException/s);
+    // `precondition` (400 / DomainException) STAYS in the domain body.
+    expect(entity).toMatch(/rename[^}]*DomainException/s);
   });
 });
 
@@ -126,8 +143,12 @@ describe("java generator — workflows (S6)", () => {
     );
     // factory-let orders the target's create-input list, nulls for absent.
     expect(svc).toContain("var proj = Project.create(name, visibility, true);");
-    // op-call threads currentUser into ops that use it.
-    expect(svc).toContain("proj.rename(name, currentUser);");
+    // `rename` is authz-only: its 403 gate relocates to this call site (before
+    // the now-pure op call), and no actor is threaded into the domain method.
+    expect(svc).toMatch(
+      /if \(!\(Objects\.equals\(currentUser\.role\(\), "admin"\)\)\) throw new ForbiddenException[^\n]*\n\s*proj\.rename\(name\);/,
+    );
+    expect(svc).not.toContain("proj.rename(name, currentUser);");
     // at-exit save for the dirty let.
     expect(svc).toContain("projectsRepository.save(proj);");
   });

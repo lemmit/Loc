@@ -9,7 +9,8 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import {
   exprUsesCurrentUser,
-  operationUsesCurrentUser,
+  operationAuthzOnly,
+  operationUsesCurrentUserAsData,
   workflowEmitsCommandRoute,
 } from "../../../ir/types/loom-ir.js";
 import { resolveWorkflowIsolation } from "../../../ir/util/resolve-datasource.js";
@@ -187,13 +188,29 @@ export function javaWorkflowStmtTarget(
     opCall: (s, indent) => {
       for (const a of s.args) collectJavaExprImports(a, imports);
       const rendered = s.args.map((a) => renderJavaExpr(a, renderCtx));
-      // Aggregate ops that reference currentUser take it as a trailing
-      // parameter (the entity emitter appends it) — thread it through.
       const targetOp = ctx.aggregates
         .find((a) => a.name === s.aggName)
         ?.operations.find((o) => o.name === s.op);
-      if (targetOp && operationUsesCurrentUser(targetOp)) rendered.push("currentUser");
-      return [`${indent}${s.target}.${s.op}(${rendered.join(", ")});`];
+      // An op that uses currentUser AS DATA keeps a trailing `currentUser`
+      // param (the entity emitter appends it) — thread the workflow's in-scope
+      // binding.  An authz-only op's domain method is now pure: its 403 gate
+      // relocates to this call site (rendered against the loaded aggregate var,
+      // before dispatch) and no actor is threaded.
+      if (targetOp && operationUsesCurrentUserAsData(targetOp)) rendered.push("currentUser");
+      const gate =
+        targetOp && operationAuthzOnly(targetOp)
+          ? targetOp.statements
+              .filter(
+                (st): st is Extract<typeof st, { kind: "requires" }> => st.kind === "requires",
+              )
+              .map((st) => {
+                collectJavaExprImports(st.expr, imports);
+                return `${indent}if (!(${renderJavaExpr(st.expr, { thisName: s.target, accessorProps: true })})) throw new ForbiddenException(${JSON.stringify(
+                  `Forbidden: ${st.source}`,
+                )});`;
+              })
+          : [];
+      return [...gate, `${indent}${s.target}.${s.op}(${rendered.join(", ")});`];
     },
     emit: (s, indent) => {
       // Workflow-level emission has no aggregate stream to ride: the
