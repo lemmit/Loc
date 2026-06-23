@@ -2850,6 +2850,28 @@ export function operationIsGuarded(op: OperationIR): boolean {
   return op.statements.some((s) => s.kind === "requires");
 }
 
+/** True when the operation references `currentUser` OUTSIDE a `requires`
+ *  guard — i.e. as *data* the domain body needs (an assignment target/value,
+ *  a stamp, an emitted-event field, a precondition, a call argument).  Such an
+ *  op legitimately needs the principal threaded into its domain method; the
+ *  pure-domain relocation must keep its `User`/actor param.  Authorization
+ *  (`requires currentUser…`) is NOT a data use and is excluded — it relocates
+ *  to the application/handler boundary instead. */
+export function operationUsesCurrentUserAsData(op: OperationIR): boolean {
+  return op.statements.some((s) => s.kind !== "requires" && stmtUsesCurrentUser(s));
+}
+
+/** True when a guarded op's ONLY use of `currentUser` is inside its `requires`
+ *  guard(s) (or it references no `currentUser` at all).  Its authorization gate
+ *  can move to the application handler and the pure domain method drops the
+ *  ambient `User`/actor param — the Elixir/Ash shape every imperative backend
+ *  converges to (authorization is application-layer, not woven into the domain
+ *  body; `precondition`/400 stays in the body).  A guarded op that *also* uses
+ *  `currentUser` as data (`operationUsesCurrentUserAsData`) keeps its param. */
+export function operationAuthzOnly(op: OperationIR): boolean {
+  return operationIsGuarded(op) && !operationUsesCurrentUserAsData(op);
+}
+
 /** True when the workflow has at least one `requires` guard — same 403
  *  contract as a guarded operation. */
 export function workflowIsGuarded(wf: WorkflowIR): boolean {
