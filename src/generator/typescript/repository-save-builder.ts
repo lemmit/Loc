@@ -18,6 +18,7 @@ import { isValueCollectionType, valueCollectionsFor } from "../../ir/util/value-
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
+import { aggregateIsAudited } from "./emit/audit-stamp.js";
 import { joinColumnName, joinTableConstName } from "./emit.js";
 import { associationsOf, isRefCollection } from "./repository-associations-builder.js";
 
@@ -109,9 +110,18 @@ function saveTxBody(agg: EnrichedAggregateIR, ctx: BoundedContextIR, emitTrace: 
       `      }`,
     ];
   });
+  // Persist-time audit stamping (node-persist-time-auditing): an audited
+  // aggregate's root upsert stamps createdAt/createdBy/updatedAt/updatedBy from
+  // the ambient request principal at the save choke point — `stampInsert` on
+  // the insert branch (all four), `stampUpdate` on the conflict branch (mutable
+  // fields only, createdAt/createdBy preserved).  Domain + handler carry no
+  // stamping.  A non-audited aggregate's upsert is byte-identical to before.
+  const audited = aggregateIsAudited(agg);
+  const insertValues = audited ? "stampInsert(rootRow)" : "rootRow";
+  const updateSet = audited ? "stampUpdate(rootRow)" : "rootRow";
   return [
     `      const rootRow = ${rootProjection(agg, "aggregate", ctx)};`,
-    `      await tx.insert(schema.${tableName}).values(rootRow).onConflictDoUpdate({ target: schema.${tableName}.id, set: rootRow });`,
+    `      await tx.insert(schema.${tableName}).values(${insertValues}).onConflictDoUpdate({ target: schema.${tableName}.id, set: ${updateSet} });`,
     ...containBlocks,
     ...assocBlocks,
     ...valueCollectionBlocks,

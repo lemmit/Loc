@@ -41,7 +41,6 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import {
   aggregateUsesMoney,
-  exprUsesCurrentUser,
   findUsesCurrentUser,
   operationIsGuarded,
   operationUsesCurrentUser,
@@ -128,17 +127,9 @@ export function buildRoutesFile(
   // Either feature pulls in the transactional handler + its db/events/
   // schema/randomUUID imports.
   const needsTx = fileHasAudit || fileHasProv;
-  // Lifecycle stamps (audit / softDelete): `_stampOnCreate` / `_stampOnUpdate`
-  // on the aggregate populate the audit columns before save.  The route only
-  // decides whether the method exists and whether to thread the principal
-  // (`currentUser`); the value rendering — incl. `currentUser` → the
-  // principal id — lives in the aggregate class.  Event-sourced + no-auth
-  // principal stamps are gated upstream (loom.node-stamp-unsupported).
-  const stampRules = (event: "create" | "update") =>
-    (agg.contextStamps ?? []).filter((r) => r.event === event).flatMap((r) => r.assignments);
-  const hasStamp = (event: "create" | "update"): boolean => stampRules(event).length > 0;
-  const stampUsesUser = (event: "create" | "update"): boolean =>
-    stampRules(event).some((a) => exprUsesCurrentUser(a.value));
+  // Lifecycle stamps (audit / softDelete) no longer touch the route handler:
+  // node-persist-time-auditing relocated stamping into the drizzle save()
+  // (db/audit-stamp.ts), reading the principal from the ambient request context.
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
   if (aggregateUsesMoney(agg)) {
@@ -457,29 +448,17 @@ export function buildRoutesFile(
       .map((f) => `${f.name}: ${wireToDomainExpr(`body.${f.name}`, f.type, ctx)}`)
       .join(", ");
     lines.push(`      const created = ${agg.name}.create({ ${createArgs} });`);
-    // Lifecycle stamps: populate createdAt / createdBy before persisting.
-    // A `currentUser` value resolves to the principal id inside the entity's
-    // `_stampOnCreate`, which then takes the typed principal — read from the
-    // request scope where the auth middleware stashed it.
-    const createStampUsesUser = hasStamp("create") && stampUsesUser("create");
-    if (hasStamp("create")) {
-      if (createStampUsesUser) {
-        lines.push(
-          `      const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
-        );
-      }
-      lines.push(`      created._stampOnCreate(${createStampUsesUser ? "currentUser" : ""});`);
-    }
+    // Lifecycle stamps (createdAt/createdBy/…) are NO LONGER set here.
+    // node-persist-time-auditing relocated stamping into the drizzle save()
+    // (db/audit-stamp.ts), which reads the principal from the ambient request
+    // context — so the handler is just create → save.
     if (auditCreate) {
       // Audited create — persist + write the lifecycle audit row in ONE
       // transaction (mirrors the operation audit path).  Asymmetry: create
       // has no `before` (JSON null on the not-NULL column), `after` is the
       // freshly-created wire snapshot, keyed by the generated id.  Actor =
-      // the typed currentUser if a stamp already read it, else the inbound
-      // claim via the untyped-key bridge (null when no auth).
-      const actorExpr = createStampUsesUser
-        ? "currentUser"
-        : `(c as unknown as { get(k: "currentUser"): unknown }).get("currentUser") ?? null`;
+      // the inbound claim via the untyped-key bridge (null when no auth).
+      const actorExpr = `(c as unknown as { get(k: "currentUser"): unknown }).get("currentUser") ?? null`;
       lines.push(`      const actor = ${actorExpr};`);
       lines.push(`      const reqCtx = requestContext();`);
       lines.push(`      await db.transaction(async (tx) => {`);
@@ -836,13 +815,8 @@ function emitOperationRoute(
   prov: boolean,
   emitTrace: boolean,
 ): string[] {
-  // Lifecycle-stamp helpers (audit / softDelete onUpdate) — same derivation
-  // as buildRoutesFile; recomputed here since this is a top-level function.
-  const stampRules = (event: "create" | "update") =>
-    (agg.contextStamps ?? []).filter((r) => r.event === event).flatMap((r) => r.assignments);
-  const hasStamp = (event: "create" | "update"): boolean => stampRules(event).length > 0;
-  const stampUsesUser = (event: "create" | "update"): boolean =>
-    stampRules(event).some((a) => exprUsesCurrentUser(a.value));
+  // Lifecycle stamps are applied persist-time in the drizzle save()
+  // (node-persist-time-auditing); the operation route no longer stamps.
   const aggSlug = snake(plural(agg.name));
   // Operation URL segment from the enriched routeSlug (D-URLSTYLE):
   // op.name under urlStyle:literal, plural(name) under :resource.  The
@@ -925,21 +899,16 @@ function emitOperationRoute(
   // deployable, the validator already prevents currentUser from
   // appearing in operation bodies, so this branch is dead.
   const usesUser = operationUsesCurrentUser(op);
-  // An onUpdate stamp that references the principal needs the typed
-  // `currentUser` bound too (threaded into `_stampOnUpdate`) — bind it once
-  // here, whether the op body reads currentUser or only the stamp does.
-  if (usesUser || stampUsesUser("update")) {
+  // The operation body reads the typed `currentUser` only when it references
+  // it directly; lifecycle stamps no longer thread the principal through the
+  // handler (stamped persist-time in the drizzle save()).
+  if (usesUser) {
     out.push(
       `    const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
     );
   }
   const baseCallArgs = op.params.map((p) => wireToDomainExpr(`body.${p.name}`, p.type, ctx));
   const callArgs = (usesUser ? [...baseCallArgs, "currentUser"] : baseCallArgs).join(", ");
-  // The onUpdate stamp call, threaded before each save (plain + transactional).
-  const updateStamp = (pad: string): string[] =>
-    hasStamp("update")
-      ? [`${pad}aggregate._stampOnUpdate(${stampUsesUser("update") ? "currentUser" : ""});`]
-      : [];
 
   // The mutation block — extern dispatch or the direct method call —
   // operates on `aggregate` and is independent of which repo loaded it,
@@ -974,7 +943,6 @@ function emitOperationRoute(
     out.push(`    const aggregate = await repo.getById(Ids.${agg.name}Id(id));`);
     out.push(...whenGateLine(agg, op, "    "));
     out.push(...mutation("    "));
-    out.push(...updateStamp("    "));
     out.push(`    await repo.save(aggregate);`);
   } else {
     // Audited / provenanced: load, mutate, save, then write the audit row
@@ -1000,7 +968,6 @@ function emitOperationRoute(
     out.push(...whenGateLine(agg, op, "      "));
     if (audit) out.push(`      const before = repoTx.toWire(aggregate);`);
     out.push(...mutation("      "));
-    out.push(...updateStamp("      "));
     out.push(`      await repoTx.save(aggregate);`);
     if (audit) {
       out.push(`      const after = repoTx.toWire(aggregate);`);
@@ -1081,12 +1048,8 @@ function emitReturningOperationRoute(
   ctx: BoundedContextIR,
   emitTrace: boolean,
 ): string[] {
-  // Lifecycle-stamp helpers (onUpdate) — recomputed here (top-level fn).
-  const stampRules = (event: "create" | "update") =>
-    (agg.contextStamps ?? []).filter((r) => r.event === event).flatMap((r) => r.assignments);
-  const hasStamp = (event: "create" | "update"): boolean => stampRules(event).length > 0;
-  const stampUsesUser = (event: "create" | "update"): boolean =>
-    stampRules(event).some((a) => exprUsesCurrentUser(a.value));
+  // Lifecycle stamps are applied persist-time in the drizzle save()
+  // (node-persist-time-auditing); the operation route no longer stamps.
   const aggSlug = snake(plural(agg.name));
   const opSnake = snake(op.routeSlug ?? op.name);
   const variants = op.returnType?.kind === "union" ? op.returnType.variants : [];
@@ -1143,7 +1106,7 @@ function emitReturningOperationRoute(
     `    ${renderHonoLogCall("operationInvoked", `aggregate: "${agg.name}", op: "${op.name}", id`)}`,
   );
   const usesUser = operationUsesCurrentUser(op);
-  if (usesUser || stampUsesUser("update")) {
+  if (usesUser) {
     out.push(
       `    const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
     );
@@ -1152,10 +1115,9 @@ function emitReturningOperationRoute(
   const callArgs = (usesUser ? [...baseCallArgs, "currentUser"] : baseCallArgs).join(", ");
   out.push(`    const aggregate = await repo.getById(Ids.${agg.name}Id(id));`);
   out.push(...whenGateLine(agg, op, "    "));
+  // Lifecycle stamps are applied persist-time in the drizzle save()
+  // (node-persist-time-auditing) — the handler no longer stamps.
   out.push(`    const result = aggregate.${lowerFirst(op.name)}(${callArgs});`);
-  if (hasStamp("update")) {
-    out.push(`    aggregate._stampOnUpdate(${stampUsesUser("update") ? "currentUser" : ""});`);
-  }
   out.push(`    await repo.save(aggregate);`);
   // Translate each error variant to a ProblemDetails before the success path.
   // Status / title / type come from the stdlib defaults (exception-less.md A1);

@@ -168,13 +168,13 @@ describe.skipIf(!ENABLED)(
     }, 300_000);
 
     // Lifecycle stamping (capabilities.md) — `with auditable` on an
-    // `auth: required` node deployable.  The route handler calls the
-    // aggregate's `_stampOnCreate` / `_stampOnUpdate` before save; a `now()`
-    // value renders to `new Date()`, a `currentUser` value to the principal id
-    // (`currentUser.id`) read from the request scope.  System-mode only (the
-    // user block + auth/middleware.ts are system-level), so this gate compiles
-    // the emitted entity stamp methods (taking the typed `User` param) + the
-    // route's principal threading end-to-end.
+    // `auth: required` node deployable.  node-persist-time-auditing relocated
+    // stamping into the drizzle `save()` (db/audit-stamp.ts): the upsert wraps
+    // its insert values in `stampInsert` and conflict `set` in `stampUpdate`,
+    // reading the principal from the ambient request context — so the domain
+    // entity is pure (no `_stampOn*`) and the handler never stamps.  System-mode
+    // only (the user block + auth/middleware.ts are system-level), so this gate
+    // compiles the emitted helper + the stamped repository end-to-end.
     it("system lifecycle stamps (auditable + auth) — generated project type-checks + bundles", () => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-stamps-"));
       try {
@@ -183,12 +183,17 @@ describe.skipIf(!ENABLED)(
           { stdio: "inherit", cwd: repoRoot },
         );
         const proj = path.join(outDir, "api");
-        // Sanity: auth middleware was emitted (the principal source the
-        // stamp threads from) + the entity carries the stamp methods.
+        // Sanity: auth middleware was emitted (the principal source the persist
+        // hook reads), the persist-time stamp helper was emitted, and the
+        // domain entity is pure (no `_stampOn*` method).
         expect(fs.existsSync(path.join(proj, "auth", "middleware.ts"))).toBe(true);
-        expect(fs.readFileSync(path.join(proj, "domain", "order.ts"), "utf8")).toContain(
-          "_stampOnCreate(currentUser: User): void {",
+        expect(fs.existsSync(path.join(proj, "db", "audit-stamp.ts"))).toBe(true);
+        expect(fs.readFileSync(path.join(proj, "domain", "order.ts"), "utf8")).not.toContain(
+          "_stampOnCreate",
         );
+        expect(
+          fs.readFileSync(path.join(proj, "db", "repositories", "order-repository.ts"), "utf8"),
+        ).toContain("stampInsert(rootRow)");
         execSync(`npm install --silent --no-audit --no-fund`, {
           cwd: proj,
           stdio: "inherit",

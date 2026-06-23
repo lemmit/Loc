@@ -5,21 +5,15 @@ import type {
   ApplyIR,
   BoundedContextIR,
   ContainmentIR,
-  ContextStampIR,
   DerivedIR,
   EntityPartIR,
-  ExprIR,
   FieldIR,
   FunctionIR,
   InvariantIR,
   OperationIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
-import {
-  aggregateUsesMoney,
-  exprUsesCurrentUser,
-  operationUsesCurrentUser,
-} from "../../../ir/types/loom-ir.js";
+import { aggregateUsesMoney, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { stmtHasProv } from "../../../ir/util/prov-id.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst } from "../../../util/naming.js";
@@ -61,16 +55,6 @@ interface EntityShape {
    *  `create(...)` factory — construct an empty shell, run the body so it
    *  emits-and-folds the creation event (appliers A2.2). */
   creates?: OperationIR[];
-  /** Lifecycle stamping rules (root only) — `stamp onCreate`/`onUpdate`
-   *  (incl. the `audit`/`auditable` macros).  Drive the `_stampOnCreate` /
-   *  `_stampOnUpdate` methods the route handler calls before save. */
-  contextStamps?: ContextStampIR[];
-  /** The principal's id field name (the `user { … }` block's `id` claim,
-   *  else the first declared field) — a `currentUser` stamp value renders
-   *  to `currentUser.<userIdField>`, mirroring Java's `currentUser.id()`.
-   *  `null` when the deployable has no auth (principal stamps are gated
-   *  upstream by `validateNodeStampSupport`). */
-  userIdField?: string | null;
 }
 
 export function renderAggregate(
@@ -78,9 +62,6 @@ export function renderAggregate(
   ctx: BoundedContextIR,
   emitProvenance = false,
   emitTrace = false,
-  /** Principal id field name — threaded to render `currentUser` stamp
-   *  values; `null`/undefined when the deployable has no auth. */
-  userIdField: string | null = null,
 ): string {
   const valueObjectAliases = ctx.valueObjects.map((v) => v.name);
   const enumAliases = ctx.enums.map((e) => e.name);
@@ -97,16 +78,16 @@ export function renderAggregate(
   const partsRendered = agg.parts.map((p) =>
     renderEntity(partShape(p, agg), ctx, emitProvenance, emitTrace),
   );
-  const rootRendered = renderEntity(rootShape(agg, userIdField), ctx, emitProvenance, emitTrace);
+  const rootRendered = renderEntity(rootShape(agg), ctx, emitProvenance, emitTrace);
   // When any aggregate op references `currentUser` we pull the User
   // type from the auth/ package so the operation's `currentUser:
   // User` parameter typechecks.  Files emitted under deployables
   // without `auth: required` don't import this — and operations
   // can't reference currentUser there because the validator gates it.
-  const stampUsesUser = (agg.contextStamps ?? []).some((r) =>
-    r.assignments.some((a) => exprUsesCurrentUser(a.value)),
-  );
-  const usesUser = agg.operations.some(operationUsesCurrentUser) || stampUsesUser;
+  // Lifecycle stamps no longer thread the principal into the domain (it's
+  // stamped persist-time in the drizzle save()), so only operation bodies
+  // pull in the User type now.
+  const usesUser = agg.operations.some(operationUsesCurrentUser);
   const usesMoney = aggregateUsesMoney(agg);
   // The errors-module imports are conditional on what the body emits
   // (see render-stmt.ts and the invariant renderer below):
@@ -171,7 +152,7 @@ export function renderAggregate(
   );
 }
 
-function rootShape(a: AggregateIR, userIdField: string | null): EntityShape {
+function rootShape(a: AggregateIR): EntityShape {
   return {
     name: a.name,
     isRoot: true,
@@ -185,8 +166,6 @@ function rootShape(a: AggregateIR, userIdField: string | null): EntityShape {
     appliers: a.appliers,
     eventSourced: a.persistedAs === "eventLog",
     creates: a.creates,
-    contextStamps: a.contextStamps,
-    userIdField,
   };
 }
 
@@ -570,36 +549,13 @@ function renderEntity(
       ]
     : [];
 
-  // Lifecycle stamps (audit / softDelete capability stamps) — root only.
-  // `contextStamps` (from `stamp onCreate`/`onUpdate`, hand-written or
-  // macro-emitted via `audit`/`auditable`) become `_stampOnCreate` /
-  // `_stampOnUpdate` methods the route handler calls right before save.
-  // A `currentUser` value resolves to the principal id
-  // (`currentUser.<userIdField>`); the method then takes a `currentUser:
-  // User` param the route threads from the request scope.  Non-principal
-  // values (e.g. `createdAt := now()`) render through the expr renderer.
-  // Event-sourced aggregates + principal stamps without auth are gated
-  // upstream (loom.node-stamp-unsupported).
-  const stampsFor = (event: "create" | "update"): { field: string; value: ExprIR }[] =>
-    e.isRoot
-      ? (e.contextStamps ?? []).filter((r) => r.event === event).flatMap((r) => r.assignments)
-      : [];
-  const renderStampValue = (value: ExprIR): string =>
-    value.kind === "ref" && value.refKind === "current-user"
-      ? `currentUser.${e.userIdField ?? "id"}`
-      : renderTsExpr(value);
-  const stampMethod = (event: "create" | "update"): string[] => {
-    const rules = stampsFor(event);
-    if (rules.length === 0) return [];
-    const usesUser = rules.some((a) => exprUsesCurrentUser(a.value));
-    return [
-      `  _stampOn${event[0]!.toUpperCase()}${event.slice(1)}(${usesUser ? "currentUser: User" : ""}): void {`,
-      ...rules.map((a) => `    this._${a.field} = ${renderStampValue(a.value)};`),
-      "  }",
-      "",
-    ];
-  };
-  const stampMethods = [...stampMethod("create"), ...stampMethod("update")];
+  // Lifecycle stamps (audit / softDelete capability stamps) are NO LONGER
+  // emitted on the domain entity.  Persist-time auditing
+  // (node-persist-time-auditing) relocated stamping into the drizzle `save()`
+  // (db/audit-stamp.ts), reading the principal from the ambient request
+  // context — so the aggregate stays pure (no `_stampOnCreate`/`_stampOnUpdate`)
+  // and the route handler never stamps.  The audit FIELDS + getters
+  // (createdAt/createdBy/updatedAt/updatedBy) remain, as before.
 
   // Event-sourcing fold (appliers A2): one `_apply<Event>` method per
   // applier (body rendered at the natural method-body depth), a `_apply`
@@ -656,7 +612,6 @@ function renderEntity(
     ...ops,
     ...provDrain,
     ...pullEvents,
-    ...stampMethods,
     ...appliersBlock,
     // Under --trace, the helper takes an `__op` string param threaded by
     // each call site (ctor → "<init>", per-op → op name, extern public

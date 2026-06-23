@@ -15,6 +15,10 @@ import {
   buildBaseUnionFile,
   buildTpcBaseReaderFile,
 } from "../../../generator/typescript/base-reader-builder.js";
+import {
+  aggregateIsAudited,
+  renderAuditStampHelper,
+} from "../../../generator/typescript/emit/audit-stamp.js";
 import { renderDomainServices } from "../../../generator/typescript/emit/domain-service.js";
 import { emitTypescriptMigrations } from "../../../generator/typescript/emit/migrations.js";
 import {
@@ -72,7 +76,6 @@ import {
 import type { Model } from "../../../language/generated/ast.js";
 import { dedupeByName } from "../../../util/dedupe.js";
 import { lowerFirst } from "../../../util/naming.js";
-import { principalIdField } from "../../../util/principal.js";
 import {
   byLayerLayoutAdapter,
   type HonoArtifact,
@@ -281,12 +284,6 @@ export function generateTypeScriptForContexts(
   const emitTrace = !!options.emitTrace;
   const out = new Map<string, string>();
   const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
-  // The principal's id field — threaded into the aggregate emitter so a
-  // `currentUser` lifecycle-stamp value renders to `currentUser.<idField>`
-  // (the principal id), mirroring the Java backend's `currentUser.id()`.
-  // `null` without auth: a principal-referencing stamp is gated upstream
-  // (loom.node-stamp-unsupported), so only non-principal stamps can occur.
-  const userIdField = authRequired ? principalIdField(system?.sys.user) : null;
   // OIDC turnkey auth (D-AUTH-OIDC): present when the system declares an
   // `auth { oidc { … } }` block AND this deployable opts in.  Drives the
   // generated verifier + `/auth/*` handshake + the `jose` dep, replacing
@@ -461,11 +458,7 @@ export function generateTypeScriptForContexts(
       // the shared table filtered by `kind` (see the repository builders).
       if (agg.isAbstract) continue;
       const repo = findRepoFor(ctx, agg.name);
-      place(
-        "domain-aggregate",
-        agg.name,
-        renderAggregate(agg, ctx, emitProvenance, emitTrace, userIdField),
-      );
+      place("domain-aggregate", agg.name, renderAggregate(agg, ctx, emitProvenance, emitTrace));
       // Persistence routing.  Event-sourced (`persistedAs(eventLog)`) wins
       // over the saving-shape axis — its repository appends to / folds the
       // event stream rather than reading a state table.  Otherwise the
@@ -551,6 +544,16 @@ export function generateTypeScriptForContexts(
     emitAuthFiles(system.sys, out);
   }
   emitObservabilityFiles(out);
+  // Persist-time audit-stamp helper (node-persist-time-auditing): emitted once
+  // per project when any served aggregate carries lifecycle stamps, so the
+  // drizzle `save()` can stamp the audit columns from the ambient request
+  // principal.  Drizzle-only — mikroorm gates audit stamping out upstream.
+  if (!usingMikro) {
+    const audited = merged.aggregates.filter((a) => !a.isAbstract && aggregateIsAudited(a));
+    if (audited.length > 0) {
+      out.set("db/audit-stamp.ts", renderAuditStampHelper(audited));
+    }
+  }
   // Per-module Postgres migrations + Drizzle journal — emitted whenever
   // the system orchestrator hands us a migrations slice.  Empty slice
   // (non-system entry points) → no-op.
