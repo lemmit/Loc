@@ -216,6 +216,9 @@ export function buildPyRepositoryFile(
   // names so a single sorted import covers both without duplication.
   const obsAccessors = [
     ...new Set([
+      // `log` for the per-event `event_dispatched` line emitted in the save
+      // publish loop (the loop only runs when the context declares events).
+      ...(ctx.events.length > 0 ? ["log"] : []),
       ...(hasProv ? ["actor_id", "correlation_id", "parent_id", "scope_id"] : []),
       ...(hasAudit ? ["correlation_id", "parent_id", "scope_id"] : []),
     ]),
@@ -800,6 +803,9 @@ function saveMethod(
   }
   if (ctx.events.length > 0) {
     out.push("        for event in aggregate.pull_events():");
+    out.push(
+      `            log("info", "event_dispatched", event_type=type(event).__name__, aggregate=${JSON.stringify(agg.name)}, id=str(${aggVar}.id))`,
+    );
     out.push("            await self._events.dispatch(event)");
   }
   // Provenance flush (provenance.md): drain the per-request trace buffer and

@@ -153,6 +153,12 @@ ${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}`;
     ? `\n${renderContextRefCollHelpers(appModule)}\n`
     : "";
 
+  // A named-/returning-op body that `emit`s a domain event renders a catalog
+  // `event_dispatched` line (`renderReturningStmt` "emit" arm) — that needs
+  // `require Logger` in this host module.  Gate it so the require never sits
+  // unused.
+  const requireLogger = contextEmitsEvent(ctx) ? "\n  require Logger" : "";
+
   return `# Auto-generated.
 defmodule ${facadeMod} do
   @moduledoc """
@@ -161,10 +167,24 @@ defmodule ${facadeMod} do
   handlers (Slice 5c prerequisite — workflows on vanilla need
   \`<op>_<agg>(record, params)\` for cross-aggregate calls in the
   workflow body).  Vanilla foundation (no Ash.Domain).
-  """${refCollHelpers ? "\n  import Ecto.Query" : ""}
+  """${requireLogger}${refCollHelpers ? "\n  import Ecto.Query" : ""}
 
 ${blocks.join("\n")}${retrievalBlock}${ensureBlock}${refCollHelpers}end
 `;
+}
+
+/** Does any non-CRUD, non-ES named/returning operation in the context `emit` a
+ *  domain event?  Those bodies render the catalog `event_dispatched` line via
+ *  `renderReturningStmt`'s "emit" arm, which needs `require Logger` in this host
+ *  module.  Gates the require so it never sits unused. */
+function contextEmitsEvent(ctx: BoundedContextIR): boolean {
+  return ctx.aggregates.some(
+    (agg) =>
+      !isEventSourced(agg) &&
+      (agg.operations ?? []).some(
+        (op) => !CRUD_RESERVED_NAMES.has(op.name) && op.statements.some((s) => s.kind === "emit"),
+      ),
+  );
 }
 
 /** Does any non-CRUD named operation in the context append/remove through a

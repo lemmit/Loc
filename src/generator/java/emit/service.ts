@@ -425,9 +425,11 @@ export function renderJavaService(
     ...voMappers,
     `    private void publishEvents(${agg.name} aggregate) {`,
     `        for (var event : aggregate.pullEvents()) {`,
-    dispatches
-      ? `            eventPublisher.publishEvent(event);`
-      : `            CatalogLog.event("event_dispatched", "info", "event_type", event.getClass().getSimpleName(), "aggregate", "${agg.name}");`,
+    // The domain-event narrative line fires at the dispatch seam regardless of
+    // whether the event has in-process subscribers — when it does, the in-VM
+    // publish follows.
+    `            CatalogLog.event("event_dispatched", "info", "event_type", event.getClass().getSimpleName(), "aggregate", "${agg.name}");`,
+    dispatches ? `            eventPublisher.publishEvent(event);` : null,
     `        }`,
     `    }`,
     `}`,

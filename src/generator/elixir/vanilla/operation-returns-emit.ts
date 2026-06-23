@@ -24,6 +24,7 @@ import type {
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { snake, upperFirst } from "../../../util/naming.js";
+import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
 import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
@@ -336,7 +337,13 @@ export function renderReturningStmt(
       const fields = s.fields.map((f) => `${snake(f.name)}: ${renderExpr(f.value, rc)}`).join(", ");
       const appModule = rc.contextModule.split(".")[0]!;
       const struct = `%${rc.contextModule}.Events.${upperFirst(s.eventName)}{${fields}}`;
-      return `    Phoenix.PubSub.broadcast(${appModule}.PubSub, "events", ${struct})`;
+      // Narrative line at the dispatch seam (catalog `event_dispatched`) before
+      // the broadcast.  The host module declares `require Logger`.
+      const logCall = renderPhoenixLogCall("eventDispatched", [
+        { name: "event_type", valueExpr: `"${upperFirst(s.eventName)}"` },
+        ...(rc.agg ? [{ name: "aggregate", valueExpr: `"${upperFirst(rc.agg.name)}"` }] : []),
+      ]);
+      return `    ${logCall}\n    Phoenix.PubSub.broadcast(${appModule}.PubSub, "events", ${struct})`;
     }
     case "expression":
       return `    _ = ${renderExpr(s.expr, rc)}`;
@@ -489,6 +496,11 @@ export function renderReturningOpControllerAction(
   return `
   def ${opSnake}(conn, %{"id" => id} = params) do
     attrs = Map.drop(params, ["id"])
+    ${renderPhoenixLogCall("operationInvoked", [
+      { name: "aggregate", valueExpr: `"${aggPascal}"` },
+      { name: "op", valueExpr: `"${op.name}"` },
+      { name: "id", valueExpr: "id" },
+    ])}
 
     with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id) do
       ${resultFn}(conn, ${ctxModule}.${opSnake}_${aggSnake}(record, attrs))

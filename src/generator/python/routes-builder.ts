@@ -203,6 +203,9 @@ export function buildPyRoutesFile(
     voModelImports.length > 0
       ? `from app.http.wire_models import ${voModelImports.map((n) => `${n} as ${n}Model`).join(", ")}`
       : null,
+    // The catalog `log(...)` facade — `aggregate_created` (create route) and
+    // `operation_invoked` (operation routes) narrative lines.
+    refersTo("log") ? "from app.obs.log import log" : null,
     "",
     "SessionDep = Annotated[AsyncSession, Depends(get_session)]",
     "",
@@ -578,6 +581,7 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
       auditCreate ? "    repo = _repo(session)" : null,
       auditCreate ? "    await repo.save(created)" : "    await _repo(session).save(created)",
       ...(auditCreate ? createAuditCall(agg) : []),
+      `    log("info", "aggregate_created", aggregate=${JSON.stringify(agg.name)}, id=created.id)`,
       `    return {"id": created.id}`,
     );
   }
@@ -603,6 +607,7 @@ function createRoute(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): s
     auditCreate ? "    repo = _repo(session)" : null,
     auditCreate ? "    await repo.save(created)" : "    await _repo(session).save(created)",
     ...(auditCreate ? createAuditCall(agg) : []),
+    `    log("info", "aggregate_created", aggregate=${JSON.stringify(agg.name)}, id=created.id)`,
     `    return {"id": created.id}`,
   );
 }
@@ -759,6 +764,7 @@ function operationRoute(
         : null,
       "    repo = _repo(session)",
       `    found = await repo.get_by_id(${agg.name}Id(id))`,
+      `    log("info", "operation_invoked", aggregate=${JSON.stringify(agg.name)}, op=${JSON.stringify(op.name)}, id=id)`,
       ...whenGate(agg, op),
       op.audited ? "    __before = repo.to_wire(found)" : null,
       `    result = found.${snake(op.name)}(${callArgs.join(", ")})`,
@@ -792,6 +798,7 @@ function operationRoute(
     needsRequest ? "    current_user: User = request.state.current_user" : null,
     "    repo = _repo(session)",
     `    found = await repo.get_by_id(${agg.name}Id(id))`,
+    `    log("info", "operation_invoked", aggregate=${JSON.stringify(agg.name)}, op=${JSON.stringify(op.name)}, id=id)`,
     ...whenGate(agg, op),
     op.audited ? "    __before = repo.to_wire(found)" : null,
     `    found.${snake(op.name)}(${callArgs.join(", ")})`,
@@ -838,6 +845,7 @@ function externRoute(
     needsRequest ? "    current_user: User = request.state.current_user" : null,
     "    repo = _repo(session)",
     `    found = await repo.get_by_id(${agg.name}Id(id))`,
+    `    log("info", "operation_invoked", aggregate=${JSON.stringify(agg.name)}, op=${JSON.stringify(op.name)}, id=id)`,
     ...whenGate(agg, op),
     `    found.check_${snake(op.name)}(${checkArgs.join(", ")})`,
     `    handler = ${snake(agg.name)}_handlers.${snake(op.name)}`,

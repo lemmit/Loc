@@ -206,6 +206,22 @@ describe("java generator — wire validators + advice (S5)", () => {
     expect(advice).toContain('CatalogLog.event("not_found", "warn", "status", 404);');
   });
 
+  it("the controller logs the S2 info narrative (aggregate_created + operation_invoked)", async () => {
+    // S2 parity (domain-seam-log-parity.md): the create route emits
+    // `aggregate_created` after persist; every op route emits `operation_invoked`
+    // with aggregate/op/id — matching Hono/.NET so the narrative anchors faults.
+    const ctrl = (await files()).get(`${ROOT}/features/orders/OrdersController.java`)!;
+    expect(ctrl).toContain(
+      'CatalogLog.event("aggregate_created", "info", "aggregate", "Order", "id", id.value());',
+    );
+    expect(ctrl).toContain(
+      'CatalogLog.event("operation_invoked", "info", "aggregate", "Order", "op", "confirm", "id", id);',
+    );
+    expect(ctrl).toContain(
+      'CatalogLog.event("operation_invoked", "info", "aggregate", "Order", "op", "addItem", "id", id);',
+    );
+  });
+
   it("serves the OpenAPI document at /openapi.json", async () => {
     const files_ = await files();
     expect(files_.get("shop_api/src/main/resources/application.yml")).toContain(

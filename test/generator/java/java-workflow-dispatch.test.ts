@@ -85,7 +85,12 @@ describe("java saga dispatcher", () => {
     expect(svc).toContain("import org.springframework.context.ApplicationEventPublisher;");
     expect(svc).toContain("private final ApplicationEventPublisher eventPublisher;");
     expect(svc).toContain("eventPublisher.publishEvent(event);");
-    expect(svc).not.toContain('CatalogLog.event("event_dispatched"');
+    // S2 (domain-seam-log-parity.md): the catalog `event_dispatched` narrative
+    // line fires at the dispatch seam regardless of subscriptions — so the
+    // dispatching path now emits BOTH the catalog line and the in-VM publish.
+    expect(svc).toContain(
+      'CatalogLog.event("event_dispatched", "info", "event_type", event.getClass().getSimpleName(), "aggregate", "Order");',
+    );
   });
 
   it("stays log-only (no dispatcher, byte-identical publish) without subscriptions", async () => {
