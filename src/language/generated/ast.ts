@@ -272,6 +272,7 @@ export type DddKeywordNames =
     | "state"
     | "static"
     | "storage"
+    | "store"
     | "string"
     | "subdomain"
     | "svelte"
@@ -313,7 +314,7 @@ export type DddKeywordNames =
 export type DddTokenNames = DddTerminalNames | DddKeywordNames;
 
 export interface ActionDecl extends langium.AstNode {
-    readonly $container: Component | Page;
+    readonly $container: Component | Page | Store;
     readonly $type: 'ActionDecl';
     name: string;
     params: Array<Parameter>;
@@ -1794,10 +1795,10 @@ export function isLoadSegment(item: unknown): item is LoadSegment {
     return reflection.isInstance(item, LoadSegment.$type);
 }
 
-export type LooseName = 'action' | 'aggregates' | 'api' | 'application' | 'asc' | 'bind' | 'body' | 'by' | 'cache' | 'canonical' | 'command' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'dataSources' | 'desc' | 'description' | 'design' | 'directoryLayout' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'foundation' | 'framework' | 'handle' | 'id' | 'ignoring' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'loads' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'of' | 'ogImage' | 'option' | 'or' | 'page' | 'paged' | 'payload' | 'permissions' | 'persistence' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'route' | 'runtime' | 'schema' | 'secret' | 'section' | 'service' | 'snapshot' | 'sort' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'transactional' | 'transport' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | string;
+export type LooseName = 'action' | 'aggregates' | 'api' | 'application' | 'asc' | 'bind' | 'body' | 'by' | 'cache' | 'canonical' | 'command' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'dataSources' | 'desc' | 'description' | 'design' | 'directoryLayout' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'foundation' | 'framework' | 'handle' | 'id' | 'ignoring' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'loads' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'of' | 'ogImage' | 'option' | 'or' | 'page' | 'paged' | 'payload' | 'permissions' | 'persistence' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'route' | 'runtime' | 'schema' | 'secret' | 'section' | 'service' | 'snapshot' | 'sort' | 'state' | 'static' | 'store' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'transactional' | 'transport' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | string;
 
 export function isLooseName(item: unknown): item is LooseName {
-    return item === 'of' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'by' || item === 'handle' || item === 'cache' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || item === 'urlStyle' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'foundation' || item === 'application' || item === 'persistence' || item === 'directoryLayout' || item === 'transport' || item === 'runtime' || item === 'transactional' || item === 'retrieval' || item === 'sort' || item === 'loads' || item === 'asc' || item === 'desc' || item === 'action' || item === 'ignoring' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'of' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'store' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'by' || item === 'handle' || item === 'cache' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || item === 'urlStyle' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'foundation' || item === 'application' || item === 'persistence' || item === 'directoryLayout' || item === 'transport' || item === 'runtime' || item === 'transactional' || item === 'retrieval' || item === 'sort' || item === 'loads' || item === 'asc' || item === 'desc' || item === 'action' || item === 'ignoring' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export interface LValue extends langium.AstNode {
@@ -1821,10 +1822,10 @@ export function isLValue(item: unknown): item is LValue {
     return reflection.isInstance(item, LValue.$type);
 }
 
-export type LValueIdent = 'action' | 'aggregates' | 'api' | 'by' | 'command' | 'contains' | 'contexts' | 'create' | 'destroy' | 'envelope' | 'error' | 'handle' | 'id' | 'modules' | 'option' | 'or' | 'paged' | 'payload' | 'permissions' | 'query' | 'response' | 'ui' | 'views' | 'workflows' | string;
+export type LValueIdent = 'action' | 'aggregates' | 'api' | 'by' | 'command' | 'contains' | 'contexts' | 'create' | 'destroy' | 'envelope' | 'error' | 'handle' | 'id' | 'modules' | 'option' | 'or' | 'paged' | 'payload' | 'permissions' | 'query' | 'response' | 'store' | 'ui' | 'views' | 'workflows' | string;
 
 export function isLValueIdent(item: unknown): item is LValueIdent {
-    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'create' || item === 'destroy' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'by' || item === 'handle' || item === 'action' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'create' || item === 'destroy' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'by' || item === 'handle' || item === 'action' || item === 'store' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export interface MacroArg extends langium.AstNode {
@@ -1980,10 +1981,10 @@ export function isMatchExpr(item: unknown): item is MatchExpr {
     return reflection.isInstance(item, MatchExpr.$type);
 }
 
-export type MemberName = 'action' | 'aggregates' | 'api' | 'body' | 'by' | 'canonical' | 'command' | 'contains' | 'contexts' | 'create' | 'description' | 'destroy' | 'envelope' | 'error' | 'favicon' | 'filter' | 'find' | 'handle' | 'id' | 'ignoring' | 'implements' | 'modules' | 'ogImage' | 'option' | 'or' | 'paged' | 'payload' | 'permissions' | 'query' | 'response' | 'stamp' | 'state' | 'title' | 'ui' | 'views' | 'where' | 'workflows' | string;
+export type MemberName = 'action' | 'aggregates' | 'api' | 'body' | 'by' | 'canonical' | 'command' | 'contains' | 'contexts' | 'create' | 'description' | 'destroy' | 'envelope' | 'error' | 'favicon' | 'filter' | 'find' | 'handle' | 'id' | 'ignoring' | 'implements' | 'modules' | 'ogImage' | 'option' | 'or' | 'paged' | 'payload' | 'permissions' | 'query' | 'response' | 'stamp' | 'state' | 'store' | 'title' | 'ui' | 'views' | 'where' | 'workflows' | string;
 
 export function isMemberName(item: unknown): item is MemberName {
-    return item === 'by' || item === 'handle' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'create' || item === 'destroy' || item === 'find' || item === 'where' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'action' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'title' || item === 'body' || item === 'state' || item === 'ignoring' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'by' || item === 'handle' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'create' || item === 'destroy' || item === 'find' || item === 'where' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'action' || item === 'store' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'title' || item === 'body' || item === 'state' || item === 'ignoring' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export interface MemberSuffix extends langium.AstNode {
@@ -2173,10 +2174,10 @@ export function isNameRef(item: unknown): item is NameRef {
     return reflection.isInstance(item, NameRef.$type);
 }
 
-export type NameRefIdent = 'action' | 'aggregates' | 'api' | 'asc' | 'bind' | 'body' | 'by' | 'cache' | 'canonical' | 'command' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'create' | 'dataSources' | 'desc' | 'description' | 'design' | 'destroy' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'filter' | 'framework' | 'handle' | 'ignoring' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'loads' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'ogImage' | 'option' | 'or' | 'page' | 'paged' | 'payload' | 'permissions' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'route' | 'schema' | 'secret' | 'section' | 'service' | 'snapshot' | 'sort' | 'stamp' | 'state' | 'static' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | string;
+export type NameRefIdent = 'action' | 'aggregates' | 'api' | 'asc' | 'bind' | 'body' | 'by' | 'cache' | 'canonical' | 'command' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'create' | 'dataSources' | 'desc' | 'description' | 'design' | 'destroy' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'filter' | 'framework' | 'handle' | 'ignoring' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'loads' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'ogImage' | 'option' | 'or' | 'page' | 'paged' | 'payload' | 'permissions' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'route' | 'schema' | 'secret' | 'section' | 'service' | 'snapshot' | 'sort' | 'stamp' | 'state' | 'static' | 'store' | 'tablePrefix' | 'targets' | 'title' | 'token' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | string;
 
 export function isNameRefIdent(item: unknown): item is NameRefIdent {
-    return item === 'permissions' || item === 'ui' || item === 'api' || item === 'money' || item === 'create' || item === 'destroy' || item === 'contains' || item === 'page' || item === 'component' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'by' || item === 'handle' || item === 'cache' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || item === 'urlStyle' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'retrieval' || item === 'sort' || item === 'loads' || item === 'asc' || item === 'desc' || item === 'action' || item === 'ignoring' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'permissions' || item === 'ui' || item === 'api' || item === 'money' || item === 'create' || item === 'destroy' || item === 'contains' || item === 'page' || item === 'component' || item === 'store' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'by' || item === 'handle' || item === 'cache' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || item === 'urlStyle' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'retrieval' || item === 'sort' || item === 'loads' || item === 'asc' || item === 'desc' || item === 'action' || item === 'ignoring' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export interface NowExpr extends langium.AstNode {
@@ -2550,7 +2551,7 @@ export interface Property extends langium.AstNode {
     access?: FieldAccess;
     check?: Expression;
     default?: Expression;
-    name: 'action' | 'asc' | 'body' | 'by' | 'canonical' | 'command' | 'config' | 'connection' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'handle' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'managed' | 'money' | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'parent' | 'payload' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema' | 'secret' | 'service' | 'snapshot' | 'sort' | 'state' | 'tablePrefix' | 'title' | 'token' | 'ttl' | 'use' | string;
+    name: 'action' | 'asc' | 'body' | 'by' | 'canonical' | 'command' | 'config' | 'connection' | 'dataSources' | 'desc' | 'description' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'handle' | 'immutable' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'literal' | 'loads' | 'managed' | 'money' | 'objectStore' | 'ogImage' | 'option' | 'or' | 'paged' | 'parent' | 'payload' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'schema' | 'secret' | 'service' | 'snapshot' | 'sort' | 'state' | 'store' | 'tablePrefix' | 'title' | 'token' | 'ttl' | 'use' | string;
     provenanced: boolean;
     sensitivity?: SensitivityClause;
     type: TypeRef;
@@ -2980,7 +2981,7 @@ export function isStampEvent(item: unknown): item is StampEvent {
 }
 
 export interface StateBlock extends langium.AstNode {
-    readonly $container: Component | Page;
+    readonly $container: Component | Page | Store;
     readonly $type: 'StateBlock';
     fields: Array<StateField>;
 }
@@ -3056,6 +3057,33 @@ export type StorageType = 'bigquery' | 'clickhouse' | 'elastic' | 'inMemory' | '
 
 export function isStorageType(item: unknown): item is StorageType {
     return item === 'postgres' || item === 'mysql' || item === 'sqlite' || item === 'inMemory' || item === 'redis' || item === 'elastic' || item === 'meilisearch' || item === 'kafka' || item === 'clickhouse' || item === 'bigquery' || item === 's3' || item === 'rabbitmq' || item === 'nats' || item === 'restApi';
+}
+
+export interface Store extends langium.AstNode {
+    readonly $container: Ui;
+    readonly $type: 'Store';
+    decls: Array<StoreDecl>;
+    name: string;
+}
+
+export const Store = {
+    $type: 'Store',
+    decls: 'decls',
+    name: 'name'
+} as const;
+
+export function isStore(item: unknown): item is Store {
+    return reflection.isInstance(item, Store.$type);
+}
+
+export type StoreDecl = ActionDecl | StateBlock;
+
+export const StoreDecl = {
+    $type: 'StoreDecl'
+} as const;
+
+export function isStoreDecl(item: unknown): item is StoreDecl {
+    return reflection.isInstance(item, StoreDecl.$type);
 }
 
 export interface StringConfigValue extends langium.AstNode {
@@ -3462,7 +3490,7 @@ export function isUiFunction(item: unknown): item is UiFunction {
     return reflection.isInstance(item, UiFunction.$type);
 }
 
-export type UiMember = Area | Component | MenuBlock | Page | UiApiParam | UiChannelParam | UiFunction | UiNotification;
+export type UiMember = Area | Component | MenuBlock | Page | Store | UiApiParam | UiChannelParam | UiFunction | UiNotification;
 
 export const UiMember = {
     $type: 'UiMember'
@@ -3868,6 +3896,8 @@ export type DddAstType = {
     StateField: StateField
     Statement: Statement
     Storage: Storage
+    Store: Store
+    StoreDecl: StoreDecl
     StringConfigValue: StringConfigValue
     StringLit: StringLit
     Subdomain: Subdomain
@@ -3927,7 +3957,7 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                     optional: true
                 }
             },
-            superTypes: [ComponentDecl.$type, PageProp.$type]
+            superTypes: [ComponentDecl.$type, PageProp.$type, StoreDecl.$type]
         },
         ActionType: {
             name: ActionType.$type,
@@ -6050,7 +6080,7 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                     optional: true
                 }
             },
-            superTypes: [ComponentDecl.$type, PageProp.$type]
+            superTypes: [ComponentDecl.$type, PageProp.$type, StoreDecl.$type]
         },
         StateField: {
             name: StateField.$type,
@@ -6098,6 +6128,26 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 }
             },
             superTypes: [ModelMember.$type, SystemMember.$type]
+        },
+        Store: {
+            name: Store.$type,
+            properties: {
+                decls: {
+                    name: Store.decls,
+                    defaultValue: [],
+                    optional: true
+                },
+                name: {
+                    name: Store.name
+                }
+            },
+            superTypes: [UiMember.$type]
+        },
+        StoreDecl: {
+            name: StoreDecl.$type,
+            properties: {
+            },
+            superTypes: []
         },
         StringConfigValue: {
             name: StringConfigValue.$type,

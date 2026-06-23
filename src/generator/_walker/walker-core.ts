@@ -67,6 +67,7 @@ import { WALKER_LAYOUT_PRIMITIVES } from "../../language/walker-stdlib.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { tryDetectApiHook } from "./api-hook-detector.js";
 import { registerApiHook } from "./api-hook-register.js";
+import { storeMemberLocal } from "./js-target-helpers.js";
 import { emitUserComponent } from "./primitives/controls.js";
 import { WALKER_PRIMITIVES } from "./registry.js";
 import { describeReceiver, positionalArgs } from "./shared/args.js";
@@ -96,6 +97,13 @@ export interface WalkResult {
    *  emits one hoisted handler function per name from the IR's `actions`
    *  list (named-actions-and-stores.md, Proposal A Stage 1). */
   usedActions?: Set<string>;
+  /** Stores referenced from this body, keyed by store name to the set of
+   *  members (state fields read + actions called) actually used (named-
+   *  actions-and-stores.md §3, Stage 5).  The page/component shell reads
+   *  this to import each used store's hook (`import { useCart } from
+   *  "../stores/cart"`) and hoist one selector binding per used member
+   *  (`const lines = useCart((s) => s.lines)`). */
+  usedStores?: Map<string, Set<string>>;
   /** True when a `For { … }` comprehension emitted a keyed React
    *  `<Fragment>` (TSX target only).  The React shell adds `Fragment`
    *  to its `react` import line when set. */
@@ -423,6 +431,7 @@ export function walkBody(
     externFunctions,
     usedExternFunctions: new Set(),
     usedActions: new Set(),
+    usedStores: new Map(),
   };
   const tsx = walk(body, ctx, 0);
   return {
@@ -450,6 +459,7 @@ export function walkBody(
     usesFragment: ctx.usesFragment,
     usedExternFunctions: ctx.usedExternFunctions ?? new Set(),
     usedActions: ctx.usedActions ?? new Set(),
+    usedStores: ctx.usedStores ?? new Map(),
   };
 }
 
@@ -595,6 +605,11 @@ export interface Sink {
    *  tracking which are USED keeps unreferenced actions from tripping
    *  `noUnusedLocals` in the generated TSX. */
   usedActions?: Set<string>;
+  /** Stores referenced from this body — store name → the set of members
+   *  (state fields + actions) used (Stage 5).  The shell hoists one store
+   *  hook import + per-member selector binding from this.  A shared `Map`
+   *  reference, so child contexts accumulate into the same instance. */
+  usedStores?: Map<string, Set<string>>;
   /** True when a `CodeBlock { … }` primitive emitted from this body.
    *  Read by the React orchestrator (aggregated across all pages)
    *  to drive conditional injection of the highlight.js CDN payload
@@ -779,6 +794,20 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
         const jsName = ctx.lambdaParams.get(expr.name);
         if (jsName) return ctx.target.renderInterpolation(jsName);
       }
+      // `<Store>.<field>` read in markup-child position (Stage 5) — record the
+      // use (shell hoists the selector) and interpolate the bound local.  Fail
+      // loudly on a frontend that hasn't wired stores.
+      if (expr.refKind === "store-field" && expr.storeName) {
+        if (!ctx.target.renderStoreFieldRead) {
+          throw new Error(
+            `store: ${ctx.target.framework} not yet implemented (\`${expr.storeName}.${expr.name}\` read)`,
+          );
+        }
+        recordStoreUse(ctx, expr.storeName, expr.name);
+        return ctx.target.renderInterpolation(
+          storeFieldReadUseSite(ctx, expr.storeName, expr.name),
+        );
+      }
       // Refs that match a route param name emit as
       // interpolated expressions (`{name}`).  React Router's
       // `useParams()` brings these into scope at render time; the
@@ -919,6 +948,48 @@ export function propagateChildFlags(parent: WalkContext, child: WalkContext): vo
   for (const f of child.formOfs) {
     if (!parent.formOfs.includes(f)) parent.formOfs.push(f);
   }
+}
+
+/** Record that a store member (field read / action call) was used from this
+ *  body so the page/component shell can hoist the store hook import + one
+ *  selector binding per member (named-actions-and-stores.md §3, Stage 5).
+ *  The `usedStores` map is shared by reference across child contexts. */
+export function recordStoreUse(ctx: WalkContext, storeName: string, member: string): void {
+  if (!ctx.usedStores) return;
+  let members = ctx.usedStores.get(storeName);
+  if (!members) {
+    members = new Set();
+    ctx.usedStores.set(storeName, members);
+  }
+  members.add(member);
+}
+
+/** The use-site read form for a `<Store>.<field>` reference (Stage 5).  The
+ *  expression diverges per frontend: React references the shell-bound local
+ *  (`lines` — the shell hoists `const lines = useCart((s) => s.lines)`), while
+ *  Angular reads the injected store member's signal in place
+ *  (`this.cart.lines()` — the shell injects `readonly cart = inject(CartStore)`).
+ *  Angular qualifies with `this.` so the SAME form works in a template binding
+ *  AND in a generated class-method body (a page action) — Angular templates
+ *  accept `this`, and a method body requires it.  The walker records the use
+ *  via `recordStoreUse`; this only decides what the body emits at the
+ *  reference. */
+export function storeFieldReadUseSite(ctx: WalkContext, storeName: string, field: string): string {
+  if (ctx.target.framework === "angular") {
+    return `this.${storeName[0]!.toLowerCase()}${storeName.slice(1)}.${field}()`;
+  }
+  return storeLocalFor(ctx, storeName, field);
+}
+
+/** The shell-bound local name for a store member referenced from this body
+ *  (Stage 5).  Bare member name in the common case; store-qualified
+ *  (`cartLines`) when it collides with a page-level binding (state / param /
+ *  derived) to avoid a duplicate declaration.  The page/component shell's
+ *  `renderStoreWiring` computes the same name from the same reserved set, so the
+ *  binding and the use-site always agree. */
+export function storeLocalFor(ctx: WalkContext, storeName: string, member: string): string {
+  const reserved = new Set<string>([...ctx.stateNames, ...ctx.paramNames, ...ctx.derivedNames]);
+  return storeMemberLocal(storeName, member, reserved);
 }
 
 /** Extend the WalkContext.lambdaParams map with a new
@@ -1110,6 +1181,20 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
         const jsName = ctx.lambdaParams.get(expr.name);
         if (jsName) return jsName;
       }
+      // `<Store>.<field>` read (Stage 5) — record the use so the shell hoists
+      // the selector binding, and reference the bare field local in the body.
+      // A frontend that hasn't wired stores (no `renderStoreFieldRead`) fails
+      // LOUDLY here rather than emitting an unresolved name (Vue/Svelte/Angular
+      // are fan-out follow-ups; the IR validator already gates LiveView).
+      if (expr.refKind === "store-field" && expr.storeName) {
+        if (!ctx.target.renderStoreFieldRead) {
+          throw new Error(
+            `store: ${ctx.target.framework} not yet implemented (\`${expr.storeName}.${expr.name}\` read)`,
+          );
+        }
+        recordStoreUse(ctx, expr.storeName, expr.name);
+        return storeFieldReadUseSite(ctx, expr.storeName, expr.name);
+      }
       if (ctx.stateNames.has(expr.name)) {
         ctx.usesState = true;
         // Delegated to tsxTarget.renderStateRead — expression
@@ -1189,6 +1274,31 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // user to import / declare `<name>` somewhere in their app
       // shell.  Powers patterns like `let n = inc(count)` and the
       // statement form `Button("…", onClick: e => { saveOrder() })`.
+      // `<Store>.<action>(args)` call (Stage 5) — record the use (so the
+      // shell binds the action via the store hook) and emit the bound-local
+      // call.  `name` mirrors `storeAction.action`.
+      if (expr.callKind === "store-action" && expr.storeAction) {
+        if (!ctx.target.renderStoreActionCall) {
+          throw new Error(
+            `store: ${ctx.target.framework} not yet implemented ` +
+              `(\`${expr.storeAction.store}.${expr.storeAction.action}()\` call)`,
+          );
+        }
+        recordStoreUse(ctx, expr.storeAction.store, expr.storeAction.action);
+        const callArgs = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
+        // The use-site call form is per-frontend: React references the
+        // shell-bound local (`clear(args)`); Angular calls the injected store
+        // member (`this.cart.clear(args)`).  The seam owns the divergence.
+        // `local` is the collision-resolved bound-local name the JS shells use.
+        return ctx.target.renderStoreActionCall(
+          {
+            storeName: expr.storeAction.store,
+            action: expr.storeAction.action,
+            local: storeLocalFor(ctx, expr.storeAction.store, expr.storeAction.action),
+          },
+          callArgs,
+        );
+      }
       if (ctx.externFunctions?.has(expr.name)) ctx.usedExternFunctions?.add(expr.name);
       const args = expr.args.map((a) => emitExpr(a, ctx)).join(", ");
       return `${expr.name}(${args})`;
@@ -1368,6 +1478,22 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
       // call must therefore mark its target used so the callee's handler is
       // emitted alongside the caller's (Proposal A Stage 1).
       if (stmt.target === "action") ctx.usedActions?.add(stmt.name);
+      // `target: "store-action"` — a `<Store>.<action>()` call (Stage 5).
+      // Record the use so the shell binds the action via the store hook, then
+      // emit the bound-local call `<action>(args);`.
+      if (stmt.target === "store-action" && stmt.store) {
+        if (!ctx.target.renderStoreActionCall) {
+          throw new Error(
+            `store: ${ctx.target.framework} not yet implemented (\`${stmt.store}.${stmt.name}()\` call)`,
+          );
+        }
+        recordStoreUse(ctx, stmt.store, stmt.name);
+        const callArgs = stmt.args.map((a) => emitExpr(a, ctx)).join(", ");
+        // Use-site call form is per-frontend (see the expr-position twin
+        // above): React → bound local `clear(args)`; Angular → injected member
+        // `this.cart.clear(args)`.
+        return `${ctx.target.renderStoreActionCall({ storeName: stmt.store, action: stmt.name, local: storeLocalFor(ctx, stmt.store, stmt.name) }, callArgs)};`;
+      }
       if (ctx.externFunctions?.has(stmt.name)) ctx.usedExternFunctions?.add(stmt.name);
       const args = stmt.args.map((a) => emitExpr(a, ctx)).join(", ");
       return `${stmt.name}(${args});`;
@@ -1568,6 +1694,17 @@ export function renderTextContent(expr: ExprIR, ctx: WalkContext): string | unde
     return JSON.stringify(expr.value);
   }
   if (expr.kind === "ref") {
+    // `<Store>.<field>` read in text position (Stage 5) — record the use and
+    // interpolate the bound local (the shell hoists the store selector).
+    if (expr.refKind === "store-field" && expr.storeName) {
+      if (!ctx.target.renderStoreFieldRead) {
+        throw new Error(
+          `store: ${ctx.target.framework} not yet implemented (\`${expr.storeName}.${expr.name}\` read)`,
+        );
+      }
+      recordStoreUse(ctx, expr.storeName, expr.name);
+      return ctx.target.renderInterpolation(storeFieldReadUseSite(ctx, expr.storeName, expr.name));
+    }
     if (ctx.paramNames.has(expr.name)) {
       ctx.usedParams.add(expr.name);
       return ctx.target.renderInterpolation(expr.name);

@@ -363,6 +363,39 @@ function applySuffixToRecv(
   }
   // MemberSuffix
   const ms = suffix as MemberSuffix;
+  // `<Store>.<member>` — a dotted store reference from a page/component/store
+  // body (named-actions-and-stores.md §3, Stage 5).  When the receiver is a
+  // bare ref naming an in-scope store, `.field` resolves to a `store-field`
+  // ref and `.action(…)` to a `store-action` call, both carrying the store
+  // name so backends never re-resolve.  Checked before the generic member /
+  // method-call paths so a store name shadows nothing it shouldn't.
+  if (recv.kind === "ref" && env.stores?.has(recv.name)) {
+    const store = env.stores.get(recv.name) as {
+      fields: Map<string, TypeIR>;
+      actions: Map<string, { paramType?: TypeIR }>;
+    };
+    const storeName = recv.name;
+    if (ms.call) {
+      const args = ms.args.map((a) => lowerExpr(a.value, env));
+      const argNames = ms.args.map((a) => a.name || undefined);
+      const callIR: ExprIR = {
+        kind: "call",
+        callKind: "store-action",
+        name: ms.member,
+        args,
+        ...(argNames.some((n) => n !== undefined) ? { argNames } : {}),
+        storeAction: { store: storeName, action: ms.member },
+      };
+      // A store action has no return value (it reduces to state); type the
+      // call as the unit-ish string placeholder the other void calls use.
+      return { recv: callIR, recvType: { kind: "primitive", name: "string" } };
+    }
+    const fieldType = store.fields.get(ms.member) ?? { kind: "primitive", name: "string" };
+    return {
+      recv: { kind: "ref", name: ms.member, refKind: "store-field", storeName, type: fieldType },
+      recvType: fieldType,
+    };
+  }
   if (ms.call) {
     const args = ms.args.map((a) => lowerExpr(a.value, env));
     const argNames = ms.args.map((a) => a.name || undefined);
@@ -1085,6 +1118,22 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
         }
         return curType;
       }
+    }
+    // Probe: `<Store>.<field>` / `<Store>.<action>(…)` — head is a `NameRef`
+    // naming an in-scope store (Stage 5).  A field access types as the field's
+    // declared type; a store-action call returns no value (string placeholder).
+    if (first && isMemberSuffix(first) && isNameRef(expr.head) && env.stores?.has(expr.head.name)) {
+      const store = env.stores.get(expr.head.name) as {
+        fields: Map<string, TypeIR>;
+        actions: Map<string, { paramType?: TypeIR }>;
+      };
+      curType = first.call
+        ? { kind: "primitive", name: "string" }
+        : (store.fields.get(first.member) ?? { kind: "primitive", name: "string" });
+      for (let i = 1; i < expr.suffixes.length; i++) {
+        curType = inferSuffixType(curType, expr.suffixes[i]!, env);
+      }
+      return curType;
     }
     // Probe: `Pricing.quote(...)` domain-service member call — head is a
     // `NameRef` resolving to a `domainService`, first suffix is a call

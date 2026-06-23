@@ -100,6 +100,17 @@ const SHOWCASE: Case = {
   fromFile: "examples/vue-showcase.ddd",
 };
 
+/** Store showcase (named-actions-and-stores.md §3, Stage 5): a `store Cart`
+ *  shared client-side container read/written by a page AND a component — the
+ *  Vue sibling of `store-showcase.ddd`.  Validates the `reactive()` singleton
+ *  module + the per-member store wiring (field → `computed`, action → bound
+ *  callable) compiles under each vue pack. */
+const STORE: Case = {
+  name: "store",
+  vueDir: "web",
+  fromFile: "web/src/examples/vue-store-showcase.ddd",
+};
+
 /** The vue pack matrix.  Mirrors the React harness's
  *  `{example × pack}` sweep: every case runs against each pack via a
  *  `design:` injection into the vue deployable. */
@@ -110,7 +121,7 @@ interface MatrixCase extends Case {
   label: string;
 }
 
-const allCases: MatrixCase[] = [MINIMAL, SCAFFOLD, SHOWCASE].flatMap((c) =>
+const allCases: MatrixCase[] = [MINIMAL, SCAFFOLD, SHOWCASE, STORE].flatMap((c) =>
   PACKS.map((pack) => ({ ...c, pack, label: `${c.name}:${pack}` })),
 );
 

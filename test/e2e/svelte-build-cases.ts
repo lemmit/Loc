@@ -8,6 +8,11 @@ export const svelteBuildExamples = [
   // `auth: ui` guard (D-AUTH-OIDC): builds the emitted AuthGate.svelte +
   // session client + <AuthGate> wrap against real SvelteKit types.
   "test/e2e/fixtures/svelte-build/auth-ui.ddd",
+  // `store Cart { … }` shared client-side state (Stage 5): builds the emitted
+  // `$state` runes module + the page/component `$derived` store bindings
+  // against real SvelteKit/svelte-check.  Svelte sibling of the React
+  // store-showcase matrix case.
+  "web/src/examples/svelte-store-showcase.ddd",
 ] as const;
 
 export const sveltePacks = ["shadcnSvelte@v1", "flowbite@v1"] as const;

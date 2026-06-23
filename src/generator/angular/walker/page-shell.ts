@@ -22,6 +22,7 @@ import type { AngularCreateFormSpec } from "../create-form.js";
 import type { AngularDestroyFormSpec } from "../destroy-form.js";
 import type { AngularModalSpec } from "../modal.js";
 import type { AngularOperationFormSpec } from "../operation-form.js";
+import { storeClassName, storeFileSlug } from "../store-builder.js";
 import type { AngularWorkflowFormSpec } from "../workflow-form.js";
 import { angularTarget } from "./angular-target.js";
 
@@ -253,6 +254,25 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     members.push("  readonly router = inject(Router);");
   }
 
+  // Stores referenced from this body (named-actions-and-stores.md §3, Stage 5)
+  // — inject each used store ONCE (`readonly cart = inject(CartStore)`); the
+  // body reads `this.cart.lines()` and calls `this.cart.clear(args)` (the
+  // walker-core store seam emits the `this.`-qualified member forms).  Pages
+  // sit at `src/app/pages/<slug>.component.ts` and stores at
+  // `src/app/stores/<dasherized>.store.ts` — both under `src/app/`, so the
+  // import path is ONE hop up (`../stores/<dasherized>.store`).  The member
+  // declarations register here (alongside `inject`); the import lines ride the
+  // `imports` array built below.
+  const usedStoreNames = result.usedStores ? [...result.usedStores.keys()].sort() : [];
+  if (usedStoreNames.length > 0) {
+    coreSymbols.add("inject");
+    for (const storeName of usedStoreNames) {
+      const className = storeClassName(storeName);
+      const member = `${storeName[0]!.toLowerCase()}${storeName.slice(1)}`;
+      members.push(`  readonly ${member} = inject(${className});`);
+    }
+  }
+
   // `Anchor(to:)` / `IdLink` / `Breadcrumbs` emit `[routerLink]` bindings — the
   // standalone component registers the `RouterLink` directive.
   if (result.usesRouterLink) {
@@ -287,6 +307,15 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   ];
   if (routerSymbols.size > 0) {
     imports.push(`import { ${[...routerSymbols].sort().join(", ")} } from "@angular/router";`);
+  }
+
+  // Store-service imports for each used store (the `inject(<Store>Store)`
+  // members registered above) — `import { CartStore } from
+  // "../stores/cart.store"`.
+  for (const storeName of usedStoreNames) {
+    imports.push(
+      `import { ${storeClassName(storeName)} } from "../stores/${storeFileSlug(storeName)}.store";`,
+    );
   }
 
   // Format helpers the walked markup calls (Money/DateDisplay/IdLink) — import

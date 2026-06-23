@@ -226,6 +226,8 @@ export function printStructural(node: AstNode): string {
       return printPage(node as Page);
     case "Component":
       return printComponent(node as Component);
+    case "Store":
+      return printStore(node as import("../generated/ast.js").Store);
     case "Area":
       return printArea(node as import("../generated/ast.js").Area);
     case "StateBlock":
@@ -550,6 +552,17 @@ function printComponent(node: Component): string {
     `body: ${node.body ? printExpr(node.body) : ""}`,
   ];
   return block(`component ${node.name}(${params})`, items);
+}
+
+/** `store Name { state {…} action …(…) {…} }` — a shared client-side state
+ *  container (named-actions-and-stores.md §3).  Its decls reuse the StateBlock
+ *  / ActionDecl printers verbatim (same surface as a page/component body).
+ *  v1 has no lifetime surface (see the grammar `Store` rule). */
+function printStore(node: import("../generated/ast.js").Store): string {
+  return block(
+    `store ${node.name}`,
+    node.decls.map((d) => (d.$type === "ActionDecl" ? printActionDecl(d) : printStateBlock(d))),
+  );
 }
 
 function printStateBlock(node: StateBlock): string {

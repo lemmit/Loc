@@ -342,4 +342,29 @@ export const vueTarget: WalkerTarget = {
   escapeText(text: string): string {
     return escapeJsFamilyText(text);
   },
+
+  // --- Store seam (Stage 5) -----------------------------------------------
+
+  /** A `<Store>.<field>` read.  The shared walker records the use
+   *  (`ctx.usedStores`) and emits the BARE member name (`lines`) — like
+   *  a state ref under Vue's template auto-unwrap — so this method's
+   *  return value is unused by the body; its presence gates the
+   *  "store not implemented" throw and keeps the contract shape with
+   *  the other JS-family targets.  The page shell binds the bare local
+   *  (`const lines = computed(() => cart.state.lines)`) — see
+   *  `renderStoreWiring` in `page-shell.ts`. */
+  renderStoreFieldRead(ref: { storeName: string; field: string }): string {
+    return ref.field;
+  },
+
+  /** A `<Store>.<action>(args)` call.  As with field reads, the shared
+   *  walker emits the bound-local call (`clear(args)`) directly; the
+   *  page shell binds `const clear = cart.clear`.  Returned for contract
+   *  shape symmetry. */
+  renderStoreActionCall(
+    ref: { storeName: string; action: string; local: string },
+    renderedArgs: string,
+  ): string {
+    return `${ref.local}(${renderedArgs})`;
+  },
 };

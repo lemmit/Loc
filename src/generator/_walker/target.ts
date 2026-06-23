@@ -68,7 +68,7 @@
 // code.
 // ---------------------------------------------------------------------------
 
-import type { ExprIR, StateFieldIR, TypeIR } from "../../ir/types/loom-ir.js";
+import type { ExprIR, StateFieldIR, StoreIR, TypeIR } from "../../ir/types/loom-ir.js";
 import type { DetectedApiCall } from "./api-hook-detector.js";
 import type { WalkContext } from "./walker-core.js";
 
@@ -512,4 +512,62 @@ export interface WalkerTarget {
     param: string | undefined,
     bodyStmts: readonly string[],
   ): string;
+
+  // --- Store seam (named-actions-and-stores.md §3, Stage 5) ---------------
+  //
+  // CONTRACT FOR FAN-OUT FRONTENDS (Vue / Svelte / Angular):
+  // A `store Cart { state {…} action …}` is a shared client-side state
+  // container referenced by DOTTED name from page/component bodies
+  // (`Cart.lines` read, `Cart.clear()` call).  Three seam methods cover the
+  // two halves — USE SITE (the page/component reading/calling) and MODULE
+  // (the store's own emitted file).  The React reference (`tsx-target.ts`)
+  // implements all three against Zustand:
+  //
+  //   1. `renderStoreFieldRead({ storeName, field })` — a `Cart.lines` read.
+  //      React: `useCart((s) => s.lines)`.  The walker records the use in
+  //      `ctx.usedStores` so the shell hoists `const lines =
+  //      useCart((s) => s.lines)` ONCE and the body references the bare
+  //      local — so this method returns the SELECTOR EXPRESSION the shell
+  //      binds, while the body emits the bare member name (see `usedStores`).
+  //   2. `renderStoreActionCall({ storeName, action }, args)` — a
+  //      `Cart.clear()` call.  React: the shell hoists `const clear =
+  //      useCart((s) => s.clear)` and the call site emits `clear(args)`.
+  //   3. `renderStoreModule(store, ctx)` — the per-store FILE.  React emits a
+  //      Zustand `create<…State>((set) => ({ …fields, …actions }))` whose
+  //      action bodies reuse the SAME `:=`/`+=` statement lowering as page
+  //      actions (targeting `set(...)` instead of a `useState` setter).
+  //      Vue → a Pinia `defineStore`; Svelte → a `$state` rune module store;
+  //      Angular → an injectable signal store.  v1 stubs throw loudly so a
+  //      store on those frontends fails LOUD, never silent.
+  //
+  // The use-site methods are OPTIONAL on the interface so a frontend that
+  // hasn't wired stores yet still typechecks; the IR validator
+  // (`loom.store-on-liveview-unsupported`) gates LiveView, and the module
+  // emitter throws for the rest — so an un-implemented frontend can never
+  // silently drop a store.
+
+  /** Render the SELECTOR for a `<Store>.<field>` read (Stage 5).  React
+   *  returns `use<Store>((s) => s.<field>)`; the shell binds it to a local
+   *  named `<field>` and the body references the bare name.  `field` is the
+   *  field identifier, `storeName` the declaring store. */
+  renderStoreFieldRead?(ref: { storeName: string; field: string }): string;
+
+  /** Render a `<Store>.<action>(args)` call (Stage 5).  React binds the
+   *  action via `useStore` in the shell and returns the bound-local call
+   *  `<local>(args)`.  `local` is the shell-bound local name (collision-resolved
+   *  by walker-core — usually `action`, store-qualified when it clashes with a
+   *  page binding); `renderedArgs` is the already-rendered arg list.  Angular
+   *  ignores `local` and calls the injected member `this.<store>.<action>(…)`. */
+  renderStoreActionCall?(
+    ref: { storeName: string; action: string; local: string },
+    renderedArgs: string,
+  ): string;
+
+  /** Render the per-store MODULE file (Stage 5).  Returns `{ path, content }`
+   *  — `path` relative to the generated project root (React:
+   *  `web/src/stores/<store-snake>.ts`).  React emits a Zustand store; the
+   *  fan-out frontends throw `Error("store: <frontend> not yet implemented")`
+   *  until ported.  `renderStmt` is the body-statement renderer the action
+   *  bodies reuse (so `:=`/`+=` lower identically to a page action). */
+  renderStoreModule?(store: StoreIR): { path: string; content: string };
 }

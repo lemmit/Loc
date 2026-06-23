@@ -268,6 +268,9 @@ function renderCall(
     // A sibling page/component action call (Proposal A Stage 1) — frontend-
     // only; never lowered into a backend domain expression.  Render as a plain
     // call so the exhaustive switch stays total.
+    case "store-action":
+    // A `<Store>.<action>()` call (Stage 5) — frontend-only; never reaches a
+    // backend domain expression.  Plain-call fall-through keeps the switch total.
     case "free":
       return `${e.name}(${argList})`;
   }

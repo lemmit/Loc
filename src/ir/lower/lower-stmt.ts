@@ -111,6 +111,18 @@ export function lowerStatement(stmt: Statement, env: Env): { stmt: StmtIR; envAf
           envAfter: env,
         };
       }
+      // `<Store>.<action>(args)` — a store-action call from a page/store
+      // action body (Stage 5).  Lowers to a `target: "store-action"` call
+      // carrying the resolved store, so frontends bind + invoke the store
+      // action (and a store→store call stays acyclic, gated by the validator)
+      // rather than treating the dotted form as an arbitrary host call.
+      if (lv.call && lv.tail.length === 1 && env.stores?.has(lv.head)) {
+        const args = (lv.args ?? []).map((a) => lowerExpr(a, env));
+        return {
+          stmt: { kind: "call", target: "store-action", name: lv.tail[0]!, store: lv.head, args },
+          envAfter: env,
+        };
+      }
       // `a.b.c(args)` — chained call (e.g. `api.orders.addLine(...)`
       // in an e2e body).  Synthesise a method-call expression and
       // wrap as an expression-statement.

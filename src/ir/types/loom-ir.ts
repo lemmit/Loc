@@ -272,6 +272,36 @@ export interface ActionIR {
   body: StmtIR[];
 }
 
+/** A shared client-side state container — `store Cart { state {…} action …}`
+ *  (named-actions-and-stores.md §3, Stage 5).  A top-level `ui` member, sibling
+ *  to page/component, holding named state + named actions.  Referenced purely
+ *  by DOTTED qualified name from a page/component body (`Cart.lines` read,
+ *  `Cart.clear()` call) — there is no `use` binding; each consuming page's
+ *  store dependency is DERIVED at emit time by walking its already-resolved
+ *  refs (the `store-field` refs + `store-action` calls carry the store name).
+ *  The `state`/`actions` reuse the exact `StateFieldIR`/`ActionIR` shapes a
+ *  page/component carries.  v1 is `"memory"` only — the lifetime ladder has no
+ *  grammar surface yet (the keywords would collide with common identifiers; see
+ *  the `Store` grammar rule), so `lifetime` is always `"memory"` today.  The
+ *  field + the `loom.store-lifetime-unsupported` gate stay so the persistence
+ *  follow-up only adds the (soft-keyword-careful) syntax. */
+export interface StoreIR {
+  name: string;
+  /** v1: always `"memory"`.  `"persistLocal"`/`"persistSession"`/`"url"` have
+   *  no syntax yet (see `Store` grammar rule) but the IR + validator carry them
+   *  so the persistence follow-up only adds the surface.  The validator gate
+   *  stays as a defensive check on programmatic IR construction. */
+  lifetime: "memory" | "persistLocal" | "persistSession" | "url";
+  /** Shared reactive fields — the store twin of `PageIR.state`. */
+  state: StateFieldIR[];
+  /** Named actions that transition the store state — the store twin of
+   *  `PageIR.actions`.  A store action `:=`-writes only its own store state
+   *  and may call another store action (acyclic); it may NOT call a page
+   *  action (scope-resolution failure) nor a view-scoped effect
+   *  (`navigate`/`toast` — `loom.store-action-view-effect`). */
+  actions: ActionIR[];
+}
+
 export interface InvariantIR {
   expr: ExprIR;
   guard?: ExprIR;
@@ -1843,6 +1873,12 @@ export interface UiIR {
   framework?: string;
   pages: PageIR[];
   components: ComponentIR[];
+  /** Shared client-side state containers — `store Cart { … }`
+   *  (named-actions-and-stores.md §3, Stage 5).  Referenced by dotted name
+   *  from page/component bodies; each consumer's dependency is DERIVED from
+   *  its resolved `store-field` refs + `store-action` calls.  Empty when the
+   *  ui declares none. */
+  stores: StoreIR[];
   /** Optional ui-level menu block.  When undefined the sidebar is
    *  derived from each page's `menuMeta` (see spec §11). */
   menu?: MenuBlockIR;
@@ -2419,9 +2455,13 @@ export type StmtIR =
     }
   | {
       kind: "call";
-      target: "function" | "private-operation" | "action";
+      target: "function" | "private-operation" | "action" | "store-action";
       name: string;
       args: ExprIR[];
+      /** Populated when `target === "store-action"` (Stage 5) — the resolved
+       *  store the `<Store>.<action>(…)` call dispatches to.  `name` is the
+       *  action; backends bind the store action without re-resolving. */
+      store?: string;
     }
   /**
    * Bare expression-statement.  Used when a chained call like
@@ -2505,6 +2545,7 @@ export type RefKind =
   | "enum-value"
   | "current-user" // magic identifier — system's `user` block shape
   | "resource" // ambient resource handle — `files`, `jobs`, … (Phase 4)
+  | "store-field" // a `<Store>.<field>` read from a page/component/store body (Stage 5)
   | "unknown";
 
 export type CallKind =
@@ -2514,6 +2555,7 @@ export type CallKind =
   | "resource-op" // a verb call on an ambient resource handle (Phase 4)
   | "domain-service" // a member call on a `domainService` (domain-services.md)
   | "action" // a bare call to a SIBLING page/component `action` (Proposal A Stage 1)
+  | "store-action" // a `<Store>.<action>(…)` call from a page/component/store body (Stage 5)
   | "free"; // unresolved free call
 
 export type BinOp =
@@ -2546,6 +2588,11 @@ export type ExprIR =
        *  lower to a `resource-op` without re-resolving (Phase 4). */
       resourceName?: string;
       resourceKind?: DataSourceKind;
+      /** Populated when `refKind === "store-field"` — the declaring store's
+       *  name, so a `<Store>.<field>` read renders against the right store
+       *  module without re-resolving the receiver (Stage 5).  `name` is the
+       *  field; `type` its declared type. */
+      storeName?: string;
     }
   | {
       kind: "member";
@@ -2598,6 +2645,11 @@ export type ExprIR =
        *  Structured (not overloaded onto flat `name`) so backends render
        *  the call without re-resolving the receiver. */
       serviceRef?: { service: string; op: string };
+      /** Populated when `callKind === "store-action"` (Stage 5) — the resolved
+       *  store + action a `<Store>.<action>(…)` call dispatches to.  Structured
+       *  (not overloaded onto flat `name`) so backends bind the store action
+       *  without re-resolving the receiver.  `name` mirrors `storeAction.action`. */
+      storeAction?: { store: string; action: string };
       /** Per-primitive `style:` escape hatch.  Populated by lowering
        *  when the source supplied a `style: { … }` named arg on a
        *  walker-primitive call (`Container { style: { background: "red" }, ... }`).

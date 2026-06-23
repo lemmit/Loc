@@ -13,7 +13,7 @@ import {
 import { realtimeEventTypes } from "../../ir/util/channels.js";
 import { classifyPage, type PageNameCtx } from "../../ir/util/page-kind.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
-import { lowerFirst } from "../../util/naming.js";
+import { lowerFirst, snake } from "../../util/naming.js";
 import { buildApiModule } from "../_frontend/api-module.js";
 import { AUTH_GATE_TSX, AUTH_SESSION_TS } from "../_frontend/auth-ui.js";
 import { renderRealtimeClient } from "../_frontend/realtime.js";
@@ -45,6 +45,7 @@ import {
   uiUsesCodeBlock,
 } from "./pages-emitter.js";
 import { buildRealtimeHandlers } from "./realtime-handlers-builder.js";
+import { renderZustandStoreModule } from "./store-builder.js";
 import { renderAppShell, renderMain, renderShellFile, renderTheme } from "./templating/render.js";
 
 // ---------------------------------------------------------------------------
@@ -198,6 +199,13 @@ export function generateReactForContexts(
   for (const [path, content] of pages) out.set(path, content);
   const pageObjects = emitPageObjectsForUi(ui, emitCtx);
   for (const [path, content] of pageObjects) out.set(path, content);
+
+  // Store modules (named-actions-and-stores.md §3, Stage 5) — one Zustand
+  // module per `store Cart { … }` at `src/stores/<snake>.ts`.  Page/component
+  // shells import these (`../stores/cart`) and bind the hook per used member.
+  for (const store of ui.stores) {
+    out.set(`src/stores/${snake(store.name)}.ts`, renderZustandStoreModule(store));
+  }
 
   // Workflow UI — the shared workflows API module is 1:1 with the
   // workflow inventory; emit it regardless of the page-emission

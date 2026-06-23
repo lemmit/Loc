@@ -22,6 +22,7 @@ import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/n
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import { routerPackageForStack } from "../../_packs/stack-runtime.js";
+import { storeHookName, storeMemberLocal } from "../../_walker/js-target-helpers.js";
 import { renderActionHandlers } from "../../_walker/walker-core.js";
 import type {
   ActionMutationState,
@@ -167,6 +168,7 @@ export function renderCustomLayoutPage(
     actionMutations,
     usedExternFunctions,
     usedActions,
+    usedStores,
     usesFragment,
   } = walkBodyToTsx(
     body,
@@ -275,6 +277,10 @@ export function renderCustomLayoutPage(
       usesCodeBlock: false,
       externFunctions,
       usedExternFunctions,
+      // Share the body walk's store-usage map so a store referenced ONLY from
+      // an action body (`discard() { Cart.clear() }`) still drives the shell's
+      // store-hook import + binding hoist (Stage 5).
+      usedStores,
     };
     const handlers = renderActionHandlers(actions, usedActions, actx);
     if (handlers) {
@@ -465,10 +471,15 @@ export function renderCustomLayoutPage(
   // stays unconditional) and right before the body `return`, keeping the
   // rules-of-hooks contract intact while short-circuiting the render.
   const gate = renderPageGate(requires, usesCurrentUser, srcImportPrefix);
+  const store = renderStoreWiring(
+    usedStores,
+    srcImportPrefix,
+    new Set([...stateNames, ...paramNames, ...derivedNames]),
+  );
   return `// Auto-generated.  Do not edit by hand.
-${gate.import}${reactImport}${decimalImport}${reactRouterImport}${mantineImport}${apiHookImports}${actionWiring.imports}${userComponentImports}${externFunctionImports}${form.moduleScope}
+${gate.import}${reactImport}${decimalImport}${reactRouterImport}${mantineImport}${apiHookImports}${actionWiring.imports}${store.imports}${userComponentImports}${externFunctionImports}${form.moduleScope}
 export default function ${pageName}() {
-${paramsLine}${navigateLine}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}${titleEffect}${gate.guard}  return (
+${paramsLine}${navigateLine}${store.decls}${stateLines}${apiHookDecls}${actionWiring.decls}${form.decls}${derivedLines}${actionLines}${titleEffect}${gate.guard}  return (
     ${indentJsx(tsx, "    ")}
   );
 }
@@ -516,6 +527,38 @@ function renderPageGate(
   return {
     import: `import { useSession } from "${srcImportPrefix}auth/AuthGate";\n`,
     guard,
+  };
+}
+
+/** Wire the stores a page/component body references (named-actions-and-
+ *  stores.md §3, Stage 5).  For each used store, emit one hook import
+ *  (`import { useCart } from "<prefix>stores/cart"`) and one selector binding
+ *  per used member (`const lines = useCart((s) => s.lines)`).  Field reads and
+ *  action calls share the SAME Zustand selector form, so the shell binds every
+ *  used member uniformly — the body / action handlers reference the bare local. */
+function renderStoreWiring(
+  usedStores: Map<string, Set<string>> | undefined,
+  srcImportPrefix: string,
+  /** Page-level binding names (state / params / derived).  A store member whose
+   *  name collides with one of these binds a store-qualified local (`cartLines`)
+   *  so the selector binding doesn't shadow/duplicate the page declaration —
+   *  matching the body use-site (`storeLocalFor` in walker-core). */
+  reserved: ReadonlySet<string> = new Set(),
+): { imports: string; decls: string } {
+  if (!usedStores || usedStores.size === 0) return { imports: "", decls: "" };
+  const importLines: string[] = [];
+  const declLines: string[] = [];
+  for (const storeName of [...usedStores.keys()].sort()) {
+    const hook = storeHookName(storeName);
+    importLines.push(`import { ${hook} } from "${srcImportPrefix}stores/${snake(storeName)}";`);
+    for (const member of [...usedStores.get(storeName)!].sort()) {
+      const local = storeMemberLocal(storeName, member, reserved);
+      declLines.push(`  const ${local} = ${hook}((s) => s.${member});`);
+    }
+  }
+  return {
+    imports: importLines.length > 0 ? `${importLines.join("\n")}\n` : "",
+    decls: declLines.length > 0 ? `${declLines.join("\n")}\n` : "",
   };
 }
 
@@ -739,6 +782,7 @@ export function renderUserComponentFile(
     formOfs,
     usedExternFunctions,
     usedActions,
+    usedStores,
     usesFragment,
   } = walkBodyToTsx(
     body,
@@ -841,6 +885,10 @@ export function renderUserComponentFile(
       usesCodeBlock: false,
       externFunctions,
       usedExternFunctions,
+      // Share the body walk's store-usage map so a store referenced ONLY from
+      // an action body (`discard() { Cart.clear() }`) still drives the shell's
+      // store-hook import + binding hoist (Stage 5).
+      usedStores,
     };
     const handlers = renderActionHandlers(actions, usedActions, actx);
     if (handlers) {
@@ -977,10 +1025,15 @@ export function renderUserComponentFile(
   // not yet wired) shouldn't trigger TS lint noise.  We reference
   // them with a `void` block when none made it into `tsx`.
   void usedParams;
+  const store = renderStoreWiring(
+    usedStores,
+    "../",
+    new Set([...stateNames, ...paramNames, ...derivedNames]),
+  );
   return `// Auto-generated.  Do not edit by hand.
-${gate.import}${reactImport}${reactTypesImport}${reactRouterImport}${mantineImport}${dtoImportLines}${actionWiring.imports}${userComponentImports}${externFunctionImports}${propsType}${form.moduleScope}
+${gate.import}${reactImport}${reactTypesImport}${reactRouterImport}${mantineImport}${dtoImportLines}${actionWiring.imports}${store.imports}${userComponentImports}${externFunctionImports}${propsType}${form.moduleScope}
 export default function ${name}(${propDestructure}) {
-${navigateLine}${actionWiring.decls}${form.decls}${stateLines}${derivedLines}${actionLines}${gate.guard}  return (
+${navigateLine}${store.decls}${actionWiring.decls}${form.decls}${stateLines}${derivedLines}${actionLines}${gate.guard}  return (
     ${indentJsx(tsx, "    ")}
   );
 }

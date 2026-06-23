@@ -32,6 +32,7 @@ import {
   referencesIdent,
   renderJsMatch,
   renderJsNavigate,
+  storeHookName,
   upperFirstName,
 } from "../../_walker/js-target-helpers.js";
 import type {
@@ -311,5 +312,24 @@ export const tsxTarget: WalkerTarget = {
    *  (kept local so this module stays self-contained). */
   escapeText(text: string): string {
     return escapeJsFamilyText(text);
+  },
+
+  // --- Store seam (Stage 5) -----------------------------------------------
+
+  /** A `<Store>.<field>` read → the Zustand selector the page shell binds:
+   *  `useCart((s) => s.lines)`.  The shell binds it to a local named after
+   *  the field; the body references that bare local. */
+  renderStoreFieldRead(ref: { storeName: string; field: string }): string {
+    return `${storeHookName(ref.storeName)}((s) => s.${ref.field})`;
+  },
+
+  /** A `<Store>.<action>(args)` call.  The shell binds the action via
+   *  `useCart((s) => s.clear)` to a local named after the action; the call
+   *  site invokes that bare local. */
+  renderStoreActionCall(
+    ref: { storeName: string; action: string; local: string },
+    renderedArgs: string,
+  ): string {
+    return `${ref.local}(${renderedArgs})`;
   },
 };
