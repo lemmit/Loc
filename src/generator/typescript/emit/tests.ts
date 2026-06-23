@@ -3,7 +3,7 @@ import {
   type AggregateIR,
   type BoundedContextIR,
   type ExprIR,
-  operationUsesCurrentUser,
+  operationUsesCurrentUserAsData,
   type TestIR,
   type TestStmtIR,
   type TypeIR,
@@ -11,12 +11,14 @@ import {
 import { lowerFirst } from "../../../util/naming.js";
 import { renderTsExpr } from "../render-expr.js";
 
-// A currentUser-gated operation's method signature picks up a trailing
-// `currentUser: User` parameter; a domain `test` block has no auth context,
-// so calls to such ops are supplied a synthetic full-access actor — admin
-// role + non-empty permissions so guards pass and the test exercises the
-// op's domain logic.  Cast through `unknown` so it stays valid regardless of
-// the system's actual `user { ... }` claim shape.
+// An operation that uses currentUser AS DATA keeps a trailing
+// `currentUser: User` parameter on its (still-impure) domain method; a domain
+// `test` block has no auth context, so calls to such ops are supplied a
+// synthetic full-access actor — admin role + non-empty permissions so any
+// in-method check passes and the test exercises the op's domain logic.  Cast
+// through `unknown` so it stays valid regardless of the system's actual
+// `user { ... }` claim shape.  An AUTHZ-ONLY op's method is pure (its 403 gate
+// relocated to the handler, param dropped), so the test calls it with NO actor.
 const TEST_ACTOR =
   '{ id: "00000000-0000-0000-0000-000000000000", role: "admin", permissions: ["*"] } as unknown as import("../auth/user-types").User';
 
@@ -89,7 +91,7 @@ function renderTestExpr(e: ExprIR, ctx: BoundedContextIR): string {
     const entityName = e.receiverType.name;
     const agg = ctx.aggregates.find((a) => a.name === entityName);
     const op = agg?.operations.find((o) => o.name === e.member);
-    if (op && operationUsesCurrentUser(op)) {
+    if (op && operationUsesCurrentUserAsData(op)) {
       const recv = renderTestExpr(e.receiver, ctx);
       const args = [...e.args.map((a) => renderTestExpr(a, ctx)), TEST_ACTOR];
       return `${recv}.${e.member}(${args.join(", ")})`;

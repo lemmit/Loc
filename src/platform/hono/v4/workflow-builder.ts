@@ -9,7 +9,9 @@ import {
   type BoundedContextIR,
   type EnrichedBoundedContextIR,
   type ExprIR,
+  operationAuthzOnly,
   operationUsesCurrentUser,
+  operationUsesCurrentUserAsData,
   type TypeIR,
   type WorkflowIR,
   type WorkflowStmtIR,
@@ -1331,12 +1333,26 @@ function honoWorkflowStmtTarget(
           `${indent}${st.target}.assertInvariants();`,
         ];
       }
-      // A currentUser-gated op takes a trailing `currentUser` argument
-      // (appended to the method signature); thread the in-scope binding.
+      // An op that uses currentUser AS DATA keeps a trailing `currentUser`
+      // param (operationUsesCurrentUserAsData); thread the in-scope binding.  An
+      // authz-only op's method is now pure — its 403 gate relocates to this call
+      // site (rendered against the loaded aggregate var, before dispatch), and
+      // no `currentUser` arg is threaded.
       const callArgs =
-        op && operationUsesCurrentUser(op)
+        op && operationUsesCurrentUserAsData(op)
           ? [args, "currentUser"].filter(Boolean).join(", ")
           : args;
+      const authzGate =
+        op && operationAuthzOnly(op)
+          ? op.statements
+              .filter((s) => s.kind === "requires")
+              .map(
+                (s) =>
+                  `${indent}if (!(${renderTsExpr(s.expr, { thisName: st.target })})) throw new ForbiddenError(${JSON.stringify(
+                    `Forbidden: ${(s as { source: string }).source}`,
+                  )});`,
+              )
+          : [];
       const callLine = `${indent}${st.target}.${lowerFirst(st.op)}(${callArgs});`;
       // Audited op invoked inline → stage an audit_records row bracketing the
       // call with before/after wire snapshots, mirroring the per-operation
@@ -1350,6 +1366,7 @@ function honoWorkflowStmtTarget(
         const after = `__auditAfter${n}`;
         const c = `__auditCtx${n}`;
         return [
+          ...authzGate,
           `${indent}const ${before} = ${repoVar}.toWire(${st.target});`,
           callLine,
           `${indent}const ${after} = ${repoVar}.toWire(${st.target});`,
@@ -1371,7 +1388,7 @@ function honoWorkflowStmtTarget(
           `${indent}});`,
         ];
       }
-      return [callLine];
+      return [...authzGate, callLine];
     },
     exprLet: (st, indent) => [`${indent}const ${st.name} = ${renderArg(st.expr)};`],
     // `field := value` — own-state mutation: write `value` onto the loaded

@@ -1726,14 +1726,23 @@ describe("typescript generator", () => {
       }
     `;
 
-    it("`requires` lowers to a ForbiddenError throw inside the aggregate method", async () => {
+    it("an authz-only `requires` relocates its 403 gate to the route — the domain method is pure", async () => {
       const files = await emitForAuthSystem(SRC_REQUIRES);
       const order = files.get("domain/order.ts")!;
-      expect(order).toMatch(/throw new ForbiddenError\(/);
-      // The errors-module import is now narrowed to what the body actually
-      // emits — this fixture has a `requires` (ForbiddenError) but no
-      // invariants/preconditions, so DomainError isn't imported.
-      expect(order).toMatch(/import \{ ForbiddenError \} from "\.\/errors";/);
+      // `cancel` is authz-only (currentUser only in `requires`): the 403 gate
+      // moves to the handler, so the domain method drops the throw, the
+      // `currentUser: User` param, and the now-unused ForbiddenError + User
+      // imports.
+      expect(order).not.toMatch(/throw new ForbiddenError\(/);
+      expect(order).not.toMatch(/import \{[^}]*ForbiddenError[^}]*\} from "\.\/errors";/);
+      expect(order).not.toMatch(/import type \{ User \} from "\.\.\/auth\/user-types";/);
+      expect(order).toMatch(/cancel\(\): void/);
+      // The 403 gate lands in the route, before the (no-actor) dispatch.
+      const route = files.get("http/order.routes.ts")!;
+      expect(route).toMatch(
+        /if \(!\(currentUser\.role === "manager"\)\) throw new ForbiddenError\(/,
+      );
+      expect(route).toMatch(/aggregate\.cancel\(\);/);
     });
 
     it("errors.ts exports ForbiddenError", async () => {

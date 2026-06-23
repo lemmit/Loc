@@ -18,7 +18,8 @@ import type {
 import {
   aggregateUsesMoney,
   exprUsesCurrentUser,
-  operationUsesCurrentUser,
+  operationAuthzOnly,
+  operationUsesCurrentUserAsData,
 } from "../../../ir/types/loom-ir.js";
 import { stmtHasProv } from "../../../ir/util/prov-id.js";
 import { lines } from "../../../util/code-builder.js";
@@ -106,19 +107,27 @@ export function renderAggregate(
   const stampUsesUser = (agg.contextStamps ?? []).some((r) =>
     r.assignments.some((a) => exprUsesCurrentUser(a.value)),
   );
-  const usesUser = agg.operations.some(operationUsesCurrentUser) || stampUsesUser;
+  // The domain method only keeps its `currentUser: User` param when an op uses
+  // the principal AS DATA (assign/stamp/precondition/call-arg).  Pure
+  // authorization (`requires currentUser…`) relocates to the application/handler
+  // boundary, so an authz-only op drops the param — and the file drops the User
+  // import when nothing else needs it.
+  const usesUser = agg.operations.some(operationUsesCurrentUserAsData) || stampUsesUser;
   const usesMoney = aggregateUsesMoney(agg);
   // The errors-module imports are conditional on what the body emits
   // (see render-stmt.ts and the invariant renderer below):
   //   DomainError    — invariants (root + parts) and `precondition` statements
-  //   ForbiddenError — `requires` statements (RBAC preconditions)
+  //   ForbiddenError — `requires` statements that STAY in the domain body.
+  // An authz-only op's `requires` 403 gate relocates to the route handler, so it
+  // no longer pulls ForbiddenError into the domain module; only a data-use op
+  // (which keeps its param + its in-method `requires`) does.
   // Keeps the import line free of dead names per Loom's "ok generated code" gate.
   const usesDomain =
     agg.invariants.length > 0 ||
     agg.parts.some((p) => p.invariants.length > 0) ||
     agg.operations.some((op) => op.statements.some((s) => s.kind === "precondition"));
-  const usesForbidden = agg.operations.some((op) =>
-    op.statements.some((s) => s.kind === "requires"),
+  const usesForbidden = agg.operations.some(
+    (op) => !operationAuthzOnly(op) && op.statements.some((s) => s.kind === "requires"),
   );
   const errorsImportList = [usesDomain && "DomainError", usesForbidden && "ForbiddenError"]
     .filter(Boolean)
@@ -390,14 +399,14 @@ function renderEntity(
   }
 
   const ops: string[] = [];
-  // True when ANY op references currentUser — drives whether the
-  // file imports the User type from auth/.  Per-op signatures still
-  // get the parameter conditionally so a non-auth op stays
-  // un-burdened with a User param.
-  const _anyOpUsesCurrentUser = e.operations.some(operationUsesCurrentUser);
   for (const op of e.operations) {
     const visibility = op.visibility === "public" ? "public" : "private";
-    const usesUser = operationUsesCurrentUser(op);
+    // The pure domain method keeps its `currentUser: User` param only when the
+    // op uses the principal AS DATA.  An authz-only op (currentUser used only in
+    // `requires`) has its 403 gate relocated to the route handler, so the method
+    // is pure — no param, and its `requires` throw is suppressed below.
+    const usesUser = operationUsesCurrentUserAsData(op);
+    const authzOnly = operationAuthzOnly(op);
     const baseParams = op.params.map((p) => `${p.name}: ${renderTsType(p.type)}`).join(", ");
     const userParam = usesUser ? "currentUser: User" : "";
     const params = [baseParams, userParam].filter(Boolean).join(", ");
@@ -414,6 +423,7 @@ function renderEntity(
         aggregate: e.name,
         op: op.name,
         eventSourced: e.eventSourced,
+        suppressRequires: authzOnly,
       });
       if (body.length > 0) ops.push(body);
       ops.push("  }");
@@ -432,6 +442,7 @@ function renderEntity(
       aggregate: e.name,
       op: op.name,
       eventSourced: e.eventSourced,
+      suppressRequires: authzOnly,
     });
     if (body.length > 0) ops.push(body);
     if (!op.returnType) {

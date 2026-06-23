@@ -19,6 +19,12 @@ export interface TraceCtx {
    *  for the command's response — the state transition the appliers own.
    *  Off ⇒ `emit` is byte-identical to the legacy notification-event push. */
   eventSourced?: boolean;
+  /** True when this op's authorization (`requires`) gate has been relocated to
+   *  the application/handler boundary (an `operationAuthzOnly` op): the domain
+   *  method must NOT re-emit the 403 throw — it renders to nothing here, and the
+   *  route handler emits the gate before dispatch.  `precondition` (400) is
+   *  unaffected and always stays in the domain body. */
+  suppressRequires?: boolean;
 }
 
 const NO_TRACE: TraceCtx = { emitTrace: false, aggregate: "", op: "" };
@@ -34,7 +40,10 @@ export function renderTsStatements(
   emitProvenance = false,
   traceCtx: TraceCtx = NO_TRACE,
 ): string {
-  return stmts.map((s, i) => renderTsStatement(s, emitProvenance, i, traceCtx)).join("\n");
+  return stmts
+    .map((s, i) => renderTsStatement(s, emitProvenance, i, traceCtx))
+    .filter((line) => line !== "")
+    .join("\n");
 }
 
 function renderTsStatement(
@@ -48,7 +57,11 @@ function renderTsStatement(
       return precondition(s.expr, s.source, index, traceCtx);
     case "requires":
       // Authorization gate — surfaces as 403 via the route-level
-      // ForbiddenError catch in the per-aggregate routes file.
+      // ForbiddenError catch in the per-aggregate routes file.  For an
+      // `operationAuthzOnly` op the gate has been relocated to the route
+      // handler (rendered in handler scope before dispatch), so the domain
+      // method drops the throw entirely — emit nothing here.
+      if (traceCtx.suppressRequires) return "";
       return `${INDENT}if (!(${renderTsExpr(s.expr)})) throw new ForbiddenError(${JSON.stringify(`Forbidden: ${s.source}`)});`;
     case "let":
       return `${INDENT}const ${s.name} = ${renderTsExpr(s.expr)};`;

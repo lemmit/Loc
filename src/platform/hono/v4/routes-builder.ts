@@ -43,8 +43,9 @@ import {
   aggregateUsesMoney,
   exprUsesCurrentUser,
   findUsesCurrentUser,
+  operationAuthzOnly,
   operationIsGuarded,
-  operationUsesCurrentUser,
+  operationUsesCurrentUserAsData,
 } from "../../../ir/types/loom-ir.js";
 import {
   peelCollection,
@@ -247,6 +248,12 @@ export function buildRoutesFile(
   // action (validator-enforced); without one it exposes no POST route (rather
   // than calling the suppressed field-based factory).
   const emitCreate = esCreate ? true : agg.persistedAs === "eventLog" ? false : hasCreate(agg);
+  // The create action driving the POST `/` route (ES `create(...)` or the
+  // canonical field-based create).  An authz-only create's `requires` 403 gate
+  // relocates here — checked against the validated input (`body`), since on a
+  // create there is no constructed entity yet, before the `create(...)` factory.
+  const createAction = esCreate ?? agg.canonicalCreate ?? null;
+  const createIsAuthzOnly = !!createAction && operationAuthzOnly(createAction);
   // Unified create-input shape: `{ name, type, optional, default }`.  ES
   // takes the create action's params (no defaults); state takes the
   // create-input field set (server-controlled fields excluded).
@@ -446,10 +453,25 @@ export function buildRoutesFile(
     lines.push(
       `        422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },`,
     );
+    // A guarded create denies with 403 (ForbiddenError → onError) — declare it so
+    // the published contract documents the relocated authorization outcome.
+    if (createAction && operationIsGuarded(createAction)) {
+      lines.push(
+        `        403: { description: "Forbidden", content: { "application/problem+json": { schema: ProblemDetails } } },`,
+      );
+    }
     lines.push(`      },`);
     lines.push(`    }),`);
     lines.push(`    async (c) => {`);
     lines.push(`      const body = c.req.valid("json");`);
+    // Relocated authorization (403) for an authz-only create — checked against
+    // the validated input `body` and the bound principal, before the factory.
+    if (createIsAuthzOnly) {
+      lines.push(
+        `      const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
+      );
+      lines.push(...relocatedAuthzGate(createAction, "body", "      "));
+    }
     // Wrap each wire-shape field into the typed factory argument (brand
     // ids, instantiate value objects).  Avoids `as never` and lets
     // strict tsc catch shape drift between Zod and the domain class.
@@ -463,7 +485,9 @@ export function buildRoutesFile(
     // request scope where the auth middleware stashed it.
     const createStampUsesUser = hasStamp("create") && stampUsesUser("create");
     if (hasStamp("create")) {
-      if (createStampUsesUser) {
+      // `currentUser` may already be bound above by the relocated authz gate;
+      // only bind it here when the stamp needs it AND the gate didn't.
+      if (createStampUsesUser && !createIsAuthzOnly) {
         lines.push(
           `      const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
         );
@@ -828,6 +852,29 @@ function emitCanOpRoute(agg: AggregateIR, op: OperationIR, emitTrace: boolean): 
   return out;
 }
 
+/** The relocated authorization gate for an `operationAuthzOnly` op: the 403
+ *  `requires` checks the domain method used to throw, lifted to the application
+ *  handler and rendered in HANDLER scope.  `currentUser` resolves to the
+ *  route-bound principal (`c.get("currentUser")`); `this.<field>` resolves
+ *  against `thisName` — the loaded aggregate var (`aggregate`, public getters)
+ *  for update/destroy ops, or the validated create input (`body`) for creates,
+ *  since on a create there is no constructed entity yet but the handler holds
+ *  the input the entity will be built from.  Emitted BEFORE the domain dispatch
+ *  so a denied caller never reaches the (now pure) domain method.  Empty unless
+ *  the op is authz-only. */
+function relocatedAuthzGate(op: OperationIR, thisName: string, pad: string): string[] {
+  if (!operationAuthzOnly(op)) return [];
+  const renderCtx = { thisName };
+  return op.statements
+    .filter((s) => s.kind === "requires")
+    .map(
+      (s) =>
+        `${pad}if (!(${renderTsExpr(s.expr, renderCtx)})) throw new ForbiddenError(${JSON.stringify(
+          `Forbidden: ${(s as { source: string }).source}`,
+        )});`,
+    );
+}
+
 function emitOperationRoute(
   agg: AggregateIR,
   op: OperationIR,
@@ -917,18 +964,18 @@ function emitOperationRoute(
   out.push(
     `    ${renderHonoLogCall("operationInvoked", `aggregate: "${agg.name}", op: "${op.name}", id`)}`,
   );
-  // When the operation body references `currentUser`, the aggregate
-  // method's signature picks up a trailing `currentUser: User`
-  // parameter (see operationUsesCurrentUser).  The route reads the
-  // user from the request scope where the auth middleware stashed it
-  // earlier in the pipeline; without `auth: required` on the
-  // deployable, the validator already prevents currentUser from
-  // appearing in operation bodies, so this branch is dead.
-  const usesUser = operationUsesCurrentUser(op);
-  // An onUpdate stamp that references the principal needs the typed
-  // `currentUser` bound too (threaded into `_stampOnUpdate`) — bind it once
-  // here, whether the op body reads currentUser or only the stamp does.
-  if (usesUser || stampUsesUser("update")) {
+  // When the operation body uses `currentUser` AS DATA (assign/stamp/
+  // precondition/call-arg), the pure domain method keeps a trailing
+  // `currentUser: User` param (operationUsesCurrentUserAsData) the route
+  // threads in.  Pure AUTHORIZATION (`requires currentUser…`, an
+  // operationAuthzOnly op) does NOT thread — its 403 gate is relocated to this
+  // handler and the domain method is param-less.  Either way the route reads the
+  // user from the request scope where the auth middleware stashed it.
+  const usesUser = operationUsesCurrentUserAsData(op);
+  const authzOnly = operationAuthzOnly(op);
+  // Bind `currentUser` whenever it's needed in handler scope: threaded as a data
+  // arg, consumed by the relocated 403 gate, or read by an onUpdate stamp.
+  if (usesUser || authzOnly || stampUsesUser("update")) {
     out.push(
       `    const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
     );
@@ -972,6 +1019,9 @@ function emitOperationRoute(
 
   if (!audit && !prov) {
     out.push(`    const aggregate = await repo.getById(Ids.${agg.name}Id(id));`);
+    // Relocated authorization (403) — checked against the loaded aggregate +
+    // bound principal, before the domain dispatch (which is now pure).
+    out.push(...relocatedAuthzGate(op, "aggregate", "    "));
     out.push(...whenGateLine(agg, op, "    "));
     out.push(...mutation("    "));
     out.push(...updateStamp("    "));
@@ -997,6 +1047,8 @@ function emitOperationRoute(
     out.push(`    await db.transaction(async (tx) => {`);
     out.push(`      const repoTx = new ${agg.name}Repository(tx, events);`);
     out.push(`      const aggregate = await repoTx.getById(Ids.${agg.name}Id(id));`);
+    // Relocated authorization (403) — before any state snapshot or mutation.
+    out.push(...relocatedAuthzGate(op, "aggregate", "      "));
     out.push(...whenGateLine(agg, op, "      "));
     if (audit) out.push(`      const before = repoTx.toWire(aggregate);`);
     out.push(...mutation("      "));
@@ -1142,8 +1194,12 @@ function emitReturningOperationRoute(
   out.push(
     `    ${renderHonoLogCall("operationInvoked", `aggregate: "${agg.name}", op: "${op.name}", id`)}`,
   );
-  const usesUser = operationUsesCurrentUser(op);
-  if (usesUser || stampUsesUser("update")) {
+  // Param threading vs. relocated authorization — same split as the void
+  // operation route: a data-use op keeps the threaded `currentUser` param; an
+  // authz-only op's 403 gate moves to this handler and the domain method is pure.
+  const usesUser = operationUsesCurrentUserAsData(op);
+  const authzOnly = operationAuthzOnly(op);
+  if (usesUser || authzOnly || stampUsesUser("update")) {
     out.push(
       `    const currentUser = (c as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
     );
@@ -1151,6 +1207,8 @@ function emitReturningOperationRoute(
   const baseCallArgs = op.params.map((p) => wireToDomainExpr(`body.${p.name}`, p.type, ctx));
   const callArgs = (usesUser ? [...baseCallArgs, "currentUser"] : baseCallArgs).join(", ");
   out.push(`    const aggregate = await repo.getById(Ids.${agg.name}Id(id));`);
+  // Relocated authorization (403) — against the loaded aggregate, before dispatch.
+  out.push(...relocatedAuthzGate(op, "aggregate", "    "));
   out.push(...whenGateLine(agg, op, "    "));
   out.push(`    const result = aggregate.${lowerFirst(op.name)}(${callArgs});`);
   if (hasStamp("update")) {

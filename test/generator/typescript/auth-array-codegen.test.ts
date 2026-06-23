@@ -5,9 +5,11 @@
 //
 //   • scalar `T[]` field → native Postgres array column (`.array()`), not a
 //     scalar `text(...)` the repository then can't assign a `T[]` into;
-//   • a currentUser-gated operation called from a workflow / domain test is
-//     supplied the trailing `currentUser` argument its method signature now
-//     takes (route handlers already did; workflows + tests did not);
+//   • an AUTHZ-ONLY operation (currentUser used only in `requires`) called from
+//     a workflow has its 403 gate relocated to the call site (rendered against
+//     the loaded aggregate var, before the now-pure dispatch); the domain method
+//     is param-less, so the workflow threads NO actor and a domain test calls it
+//     with no actor either (the data-use case still threads the param);
 //   • the request-scoped `currentUser` is read through a cast — the Hono
 //     context Variables map has no `currentUser` key, so a bare
 //     `c.get("currentUser")` does not type-check (overload resolves to
@@ -63,22 +65,32 @@ describe("hono backend codegen — showcase regressions", () => {
     expect(schema).not.toMatch(/arrays not supported as inline columns/);
   });
 
-  it("a workflow calling a currentUser-gated op threads currentUser", async () => {
+  it("a workflow calling an authz-only op emits the relocated 403 gate before a no-actor call", async () => {
     const files = await generateSystemFiles(FIXTURE);
     const wf = findFile(files, /http\/workflows\.ts$/);
-    // The binding is read via the context cast, then threaded into the call.
+    // `deactivate` is authz-only: its method is now pure (param dropped), so the
+    // workflow binds the request-scoped principal, emits the 403 gate against it
+    // (the loaded aggregate var supplies any `this.<field>`), then dispatches
+    // WITHOUT threading an actor.
     expect(wf).toMatch(/const currentUser = \(httpCtx as unknown as \{ get\(k: "currentUser"\)/);
-    expect(wf).toMatch(/item\.deactivate\(currentUser\)/);
+    expect(wf).toMatch(
+      /if \(!\(currentUser\.role === "admin"\)\) throw new ForbiddenError\("Forbidden: currentUser\.role == /,
+    );
+    expect(wf).toMatch(/item\.deactivate\(\);/);
+    // The relocated gate runs BEFORE the dispatch.
+    const gateIdx = wf.indexOf("throw new ForbiddenError");
+    const callIdx = wf.indexOf("item.deactivate();");
+    expect(gateIdx).toBeGreaterThan(-1);
+    expect(callIdx).toBeGreaterThan(gateIdx);
   });
 
-  it("a domain test calling a currentUser-gated op supplies a synthetic actor", async () => {
+  it("a domain test calling an authz-only op passes NO actor (its method is pure)", async () => {
     const files = await generateSystemFiles(FIXTURE);
     const test = findFile(files, /item\.test\.ts$/);
-    // The op's signature gained a trailing `currentUser`; the test has no
-    // auth context, so a full-access actor is passed (cast through unknown so
-    // it stays valid regardless of the system's `user { ... }` shape).
-    expect(test).toMatch(
-      /i\.deactivate\(\{[^}]*role: "admin"[^}]*\} as unknown as import\("\.\.\/auth\/user-types"\)\.User\)/,
-    );
+    // The authz-only op's 403 gate relocated to the handler, so its domain
+    // method dropped the `currentUser` param — the test calls it bare, with no
+    // synthetic actor.
+    expect(test).toMatch(/i\.deactivate\(\)/);
+    expect(test).not.toMatch(/as unknown as import\("\.\.\/auth\/user-types"\)\.User/);
   });
 });
