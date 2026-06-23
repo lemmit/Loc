@@ -101,6 +101,13 @@ describe("python observability", () => {
     expect(problem).toContain('log("warn", "forbidden", message=str(err), status=403)');
     expect(problem).toContain('log("warn", "not_found", message=str(err), status=404)');
     expect(problem).toContain('log("error", "extern_handler_threw", error=str(err), status=500)');
+    // Catch-all fallback: an otherwise-unhandled exception logs internal_error
+    // (parity with Hono/.NET/Java/vanilla) and returns a sanitized 500.
+    expect(problem).toContain("@app.exception_handler(Exception)");
+    expect(problem).toContain('log("error", "internal_error", error=str(err), status=500)');
+    expect(problem).toContain(
+      'return problem(request, 500, "Internal Server Error", "An unexpected error occurred.")',
+    );
   });
 
   it("the dispatcher's drop path logs event_unrouted on the catalog stream", async () => {
