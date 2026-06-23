@@ -105,6 +105,7 @@ export function renderJavaService(
         `            RequestContext.correlationId(),`,
         `            RequestContext.scopeId(),`,
         `            RequestContext.parentId()));`,
+        `        CatalogLog.event("audit_recorded", "debug", "action", "create", "target", ${JSON.stringify(agg.name)}, "actor", RequestContext.actorId());`,
       ]
     : [];
   const createLines =
@@ -288,6 +289,9 @@ export function renderJavaService(
         audited ? `            RequestContext.correlationId(),` : null,
         audited ? `            RequestContext.scopeId(),` : null,
         audited ? `            RequestContext.parentId()));` : null,
+        audited
+          ? `        CatalogLog.event("audit_recorded", "debug", "action", ${JSON.stringify(op.name)}, "target", ${JSON.stringify(agg.name)}, "actor", RequestContext.actorId());`
+          : null,
         `        publishEvents(aggregate);`,
         spec ? `        return result;` : null,
         `    }`,
@@ -323,6 +327,7 @@ export function renderJavaService(
                 `            RequestContext.correlationId(),`,
                 `            RequestContext.scopeId(),`,
                 `            RequestContext.parentId()));`,
+                `        CatalogLog.event("audit_recorded", "debug", "action", "destroy", "target", ${JSON.stringify(agg.name)}, "actor", RequestContext.actorId());`,
               ]
             : []),
           `        repository.delete(aggregate);`,

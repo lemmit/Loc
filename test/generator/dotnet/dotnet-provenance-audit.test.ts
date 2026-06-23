@@ -112,10 +112,13 @@ describe("dotnet provenance runtime", () => {
 
   it("flushes the lineage buffer into provenance_records inside the save transaction", async () => {
     const repo = (await files()).get("api/Infrastructure/Repositories/OrderRepository.cs")!;
-    expect(repo).toContain("foreach (var __lin in aggregate.DrainProv())");
+    expect(repo).toContain("var __prov = aggregate.DrainProv();");
+    expect(repo).toContain("foreach (var __lin in __prov)");
     expect(repo).toContain("_db.ProvenanceRecords.Add(new ProvenanceRecord");
     // staged BEFORE SaveChangesAsync → same transaction
     expect(repo.indexOf("DrainProv")).toBeLessThan(repo.indexOf("SaveChangesAsync"));
+    // provenance_recorded (debug) announced once per non-empty flush
+    expect(repo).toContain('_log.LogDebug("{Event} aggregate={Aggregate} count={Count}"');
   });
 
   it("stamps the request correlation id + scope id + actor id onto each provenance row (M3)", async () => {
@@ -188,6 +191,11 @@ describe("dotnet per-operation audit runtime", () => {
     expect(handler).toContain('TargetType = "Order"');
     // staged BEFORE the save → same transaction
     expect(handler.indexOf("_audit.Stage")).toBeLessThan(handler.indexOf("SaveAsync"));
+    // audit_recorded (debug) announced after the stage; ILogger injected
+    expect(handler).toContain("private readonly ILogger<CancelHandler> _log;");
+    expect(handler).toContain(
+      '_log.LogDebug("{Event} action={Action} target={Target} actor={Actor}", "audit_recorded", "cancel", "Order", RequestContext.Current?.PrincipalJson());',
+    );
   });
 
   it("stamps actor + correlation id + scope id from the ambient RequestContext (M3)", async () => {

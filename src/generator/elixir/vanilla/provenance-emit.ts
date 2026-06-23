@@ -33,6 +33,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { resolveDataSourceConfig } from "../../../ir/util/resolve-datasource.js";
 import { plural, snake } from "../../../util/naming.js";
+import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 
 /** The provenanced fields declared on an aggregate (root fields only — the
  *  vanilla foundation captures named-operation write sites, which target root
@@ -158,6 +159,8 @@ defmodule ${appModule}.Provenance do
   alias ${appModule}.Provenance.Record
   alias ${appModule}.RequestContext
 
+  require Logger
+
   @buffer_key :loom_prov_traces
 
   @doc "Push one lineage onto the per-process trace buffer; returns it unchanged."
@@ -201,7 +204,14 @@ defmodule ${appModule}.Provenance do
         }
       end)
 
-    if rows != [], do: repo.insert_all(Record, rows)
+    if rows != [] do
+      repo.insert_all(Record, rows)
+      ${renderPhoenixLogCall("provenanceRecorded", [
+        { name: "aggregate", valueExpr: "hd(rows).target_type" },
+        { name: "count", valueExpr: "length(rows)" },
+      ])}
+    end
+
     :ok
   end
 end

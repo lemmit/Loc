@@ -145,7 +145,8 @@ export function renderRepositoryImpl(
   // aggregate has no `provenanced` fields.
   const provFlushLines = agg.fields.some((f) => f.provenanced)
     ? [
-        "        foreach (var __lin in aggregate.DrainProv())",
+        "        var __prov = aggregate.DrainProv();",
+        "        foreach (var __lin in __prov)",
         "        {",
         "            _db.ProvenanceRecords.Add(new ProvenanceRecord",
         "            {",
@@ -161,6 +162,13 @@ export function renderRepositoryImpl(
         "                ActorId = RequestContext.Current?.ActorId,",
         "                ParentId = RequestContext.Current?.ParentId,",
         "            });",
+        "        }",
+        "        if (__prov.Count > 0)",
+        "        {",
+        `            ${renderDotnetLogCall("provenanceRecorded", [
+          { name: "aggregate", valueExpr: JSON.stringify(agg.name) },
+          { name: "count", valueExpr: "__prov.Count" },
+        ])}`,
         "        }",
       ]
     : [];

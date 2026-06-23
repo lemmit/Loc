@@ -500,6 +500,9 @@ export function buildRoutesFile(
       lines.push(`          scopeId: reqCtx?.scopeId ?? null,`);
       lines.push(`          parentId: reqCtx?.parentId ?? null,`);
       lines.push(`        });`);
+      lines.push(
+        `        ${renderHonoLogCall("auditRecorded", `action: "create", target: "${agg.name}", actor`)}`,
+      );
       lines.push(`      });`);
     } else {
       lines.push(`      await repo.save(created);`);
@@ -628,6 +631,9 @@ export function buildRoutesFile(
       lines.push(`            scopeId: reqCtx?.scopeId ?? null,`);
       lines.push(`            parentId: reqCtx?.parentId ?? null,`);
       lines.push(`          });`);
+      lines.push(
+        `          ${renderHonoLogCall("auditRecorded", `action: "destroy", target: "${agg.name}", actor`)}`,
+      );
       lines.push(`          await repoTx.delete(Ids.${agg.name}Id(id));`);
       lines.push(`        });`);
     } else {
@@ -1019,11 +1025,15 @@ function emitOperationRoute(
       out.push(`        scopeId: reqCtx?.scopeId ?? null,`);
       out.push(`        parentId: reqCtx?.parentId ?? null,`);
       out.push(`      });`);
+      out.push(
+        `      ${renderHonoLogCall("auditRecorded", `action: "${op.name}", target: "${agg.name}", actor`)}`,
+      );
     }
     if (prov) {
       // One history row per provenanced write captured during the mutation;
       // traceId + at are stamped here so the domain layer stays pure.
-      out.push(`      for (const t of aggregate.drainProv()) {`);
+      out.push(`      const __prov = aggregate.drainProv();`);
+      out.push(`      for (const t of __prov) {`);
       out.push(`        await tx.insert(schema.provenanceRecords).values({`);
       out.push(`          traceId: randomUUID(),`);
       out.push(`          snapshotId: t.snapshotId,`);
@@ -1037,6 +1047,11 @@ function emitOperationRoute(
       out.push(`          actorId: reqCtx?.actorId ?? null,`);
       out.push(`          parentId: reqCtx?.parentId ?? null,`);
       out.push(`        });`);
+      out.push(`      }`);
+      out.push(`      if (__prov.length > 0) {`);
+      out.push(
+        `        ${renderHonoLogCall("provenanceRecorded", `aggregate: "${agg.name}", count: __prov.length`)}`,
+      );
       out.push(`      }`);
     }
     out.push(`    });`);
