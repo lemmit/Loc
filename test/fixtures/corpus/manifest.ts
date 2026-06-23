@@ -60,8 +60,7 @@ export const CORPUS: readonly CorpusFeature[] = [
     id: "criterion-filter",
     title: "reusable criterion (criterion.md) used as `filter <Criterion>`",
     doc: "criterion",
-    backends: BACKENDS.filter((b) => b !== "java"),
-    note: "Java's criteria renderer does not reify `filter <Criterion>` (rejects the member-access predicate); Phoenix lowers it to an Ash calculation. Tracked backend gap — widen once the Java criteria renderer supports criterion-ref filters.",
+    backends: ALL,
   },
 ] as const;
 
