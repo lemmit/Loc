@@ -123,6 +123,11 @@ export function renderJavaDocumentRepositoryImpl(
       promotedFilterClause(ctx.bypassByRetrieval?.get(retrievalName), varName),
   );
 
+  // find_executed (debug) per declared find — the `rows` field is an integer
+  // count (paged → total, list → size, single → 0/1).  Mirrors the relational
+  // repo + .NET/Hono document emission.
+  const findExecutedLog = (name: string, rowsExpr: string): string =>
+    `        CatalogLog.event("find_executed", "debug", "aggregate", "${agg.name}", "find", "${name}", "rows", ${rowsExpr});`;
   const findLines = finds.flatMap((f) => {
     const params = f.params.map((p) => `${renderJavaType(p.type)} ${p.name}`);
     const ownFilter = f.filter
@@ -138,6 +143,7 @@ export function renderJavaDocumentRepositoryImpl(
         `    public Paged<${agg.name}> ${f.name}(${sig}) {`,
         `        var all = findAll().stream()${filter}.toList();`,
         `        var items = all.stream().skip((long) (page - 1) * pageSize).limit(pageSize).toList();`,
+        findExecutedLog(f.name, "all.size()"),
         `        return new Paged<>(items, page, pageSize, all.size(), (all.size() + pageSize - 1) / pageSize);`,
         `    }`,
         ``,
@@ -147,7 +153,9 @@ export function renderJavaDocumentRepositoryImpl(
       return [
         `    @Override`,
         `    public ${agg.name} ${f.name}(${params.join(", ")}) {`,
-        `        return findAll().stream()${filter}.findFirst().orElse(null);`,
+        `        var result = findAll().stream()${filter}.findFirst().orElse(null);`,
+        findExecutedLog(f.name, "result == null ? 0 : 1"),
+        `        return result;`,
         `    }`,
         ``,
       ];
@@ -155,7 +163,9 @@ export function renderJavaDocumentRepositoryImpl(
     return [
       `    @Override`,
       `    public List<${agg.name}> ${f.name}(${params.join(", ")}) {`,
-      `        return findAll().stream()${filter}.toList();`,
+      `        var result = findAll().stream()${filter}.toList();`,
+      findExecutedLog(f.name, "result.size()"),
+      `        return result;`,
       `    }`,
       ``,
     ];
@@ -180,6 +190,7 @@ export function renderJavaDocumentRepositoryImpl(
     `import org.springframework.jdbc.core.JdbcTemplate;`,
     `import org.springframework.stereotype.Repository;`,
     ``,
+    `import ${ctx.basePkg}.config.CatalogLog;`,
     ctx.entityPkg !== ctx.infraPkg ? `import ${ctx.entityPkg}.${agg.name};` : null,
     ctx.domainPkg !== ctx.infraPkg ? `import ${ctx.domainPkg}.${agg.name}Repository;` : null,
     `import ${ctx.basePkg}.domain.common.AggregateNotFoundException;`,
@@ -228,6 +239,9 @@ export function renderJavaDocumentRepositoryImpl(
     `        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {`,
     `            throw new IllegalStateException("document serialization failed", e);`,
     `        }`,
+    // repository_save (debug) — after the upsert; (aggregate, id) prefix mirrors
+    // the relational repo + .NET/Hono emission (children omitted).
+    `        CatalogLog.event("repository_save", "debug", "aggregate", "${agg.name}", "id", String.valueOf(aggregate.id().value()));`,
     `        return aggregate;`,
     `    }`,
     ``,
@@ -246,7 +260,11 @@ export function renderJavaDocumentRepositoryImpl(
     ``,
     `    @Override`,
     `    public ${agg.name} getById(${idClass} id) {`,
-    `        return findById(id).orElseThrow(() ->`,
+    `        var found = findById(id);`,
+    // aggregate_loaded (debug) — `found` is a bool so a downstream filter can
+    // grep failed loads by (event="aggregate_loaded", found=false).
+    `        CatalogLog.event("aggregate_loaded", "debug", "aggregate", "${agg.name}", "id", String.valueOf(id.value()), "found", found.isPresent());`,
+    `        return found.orElseThrow(() ->`,
     `            new AggregateNotFoundException("${agg.name} " + id + " not found"));`,
     `    }`,
     ``,

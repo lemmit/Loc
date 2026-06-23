@@ -56,6 +56,7 @@ export function buildPyEmbeddedRepositoryFile(
     "",
     `    async def get_by_id(self, id: ${agg.name}Id) -> ${agg.name}:`,
     "        found = await self.find_by_id(id)",
+    `        log("debug", "aggregate_loaded", aggregate=${JSON.stringify(agg.name)}, id=str(id), found=found is not None)`,
     "        if found is None:",
     `            raise AggregateNotFoundError(f"${agg.name} {id} not found")`,
     "        return found",
@@ -130,6 +131,9 @@ export function buildPyEmbeddedRepositoryFile(
     voEnumNames.length > 0
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
       : null,
+    // `log` for the mechanism-debug trio (aggregate_loaded / repository_save;
+    // find_executed rides the shared relationalFindMethod) — always emitted (S5).
+    "from app.obs.log import log",
     "",
     "",
     body,
@@ -198,6 +202,7 @@ function saveMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): st
     `            insert(${row}).values(**root).on_conflict_do_update(index_elements=["id"], set_=root)`,
     "        )",
     "        await self._session.flush()",
+    `        log("debug", "repository_save", aggregate=${JSON.stringify(agg.name)}, id=str(aggregate.id))`,
   ];
   if (ctx.events.length > 0) {
     out.push("        for event in aggregate.pull_events():");

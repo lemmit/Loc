@@ -14,7 +14,12 @@ import { snake } from "../../util/naming.js";
 import { lowerToSqlAlchemy } from "./find-predicate.js";
 import { rowClassName } from "./py-columns.js";
 import { renderPyExpr, renderPyType } from "./render-expr.js";
-import { emittableFinds, partWireMethod, toWireMethod } from "./repository-builder.js";
+import {
+  emittableFinds,
+  findExecutedLine,
+  partWireMethod,
+  toWireMethod,
+} from "./repository-builder.js";
 
 // ---------------------------------------------------------------------------
 // Document-shaped (`shape(document)`) repository for the Python backend —
@@ -56,6 +61,7 @@ export function buildPyDocumentRepositoryFile(
     "",
     `    async def get_by_id(self, id: ${agg.name}Id) -> ${agg.name}:`,
     "        found = await self.find_by_id(id)",
+    `        log("debug", "aggregate_loaded", aggregate=${JSON.stringify(agg.name)}, id=str(id), found=found is not None)`,
     "        if found is None:",
     `            raise AggregateNotFoundError(f"${agg.name} {id} not found")`,
     "        return found",
@@ -78,6 +84,7 @@ export function buildPyDocumentRepositoryFile(
     "            existing.data = data",
     "            existing.version += 1",
     "        await self._session.flush()",
+    `        log("debug", "repository_save", aggregate=${JSON.stringify(agg.name)}, id=str(aggregate.id))`,
     ...(ctx.events.length > 0
       ? [
           "        for event in aggregate.pull_events():",
@@ -140,6 +147,9 @@ export function buildPyDocumentRepositoryFile(
     voEnumNames.length > 0
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
       : null,
+    // `log` for the mechanism-debug trio (aggregate_loaded / repository_save /
+    // find_executed) — always emitted now (S5).
+    "from app.obs.log import log",
     "",
     "",
     body,
@@ -171,9 +181,12 @@ function findMethod(agg: EnrichedAggregateIR, find: FindIR, ctx: EnrichedBounded
     "        items = await self.all()",
   ];
   if (isList) {
-    out.push(`        return ${filtered}`);
+    out.push(`        result = ${filtered}`);
+    out.push(findExecutedLine(agg, find.name, "len(result)"));
+    out.push("        return result");
   } else {
     out.push(`        matches = ${filtered}`);
+    out.push(findExecutedLine(agg, find.name, "len(matches)"));
     out.push(
       isOptional ? "        return matches[0] if matches else None" : "        return matches[0]",
     );

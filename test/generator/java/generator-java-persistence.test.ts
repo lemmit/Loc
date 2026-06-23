@@ -160,7 +160,10 @@ describe("java generator — repository triple (S4)", () => {
     const impl = (await files()).get(`${ROOT}/features/orders/OrderRepositoryImpl.java`)!;
     expect(impl).toContain("@Repository");
     expect(impl).toContain("public class OrderRepositoryImpl implements OrderRepository {");
-    expect(impl).toContain("jpa.findById(id).orElseThrow(() ->");
+    // getById now captures the optional (to log aggregate_loaded) then throws
+    // on the miss.
+    expect(impl).toContain("var found = jpa.findById(id);");
+    expect(impl).toContain("return found.orElseThrow(() ->");
     expect(impl).toContain('new AggregateNotFoundException("Order " + id + " not found"));');
   });
 });

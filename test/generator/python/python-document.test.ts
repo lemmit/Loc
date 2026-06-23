@@ -57,6 +57,11 @@ describe("python shape(document)", () => {
     const repo = files.get("api/app/db/repositories/article_repository.py")!;
     expect(repo).toContain("async def popular(self, min: int) -> list[Article]:");
     expect(repo).toContain("items = await self.all()");
-    expect(repo).toContain("return [x for x in items if (lambda x: x.view_count >= min)(x)]");
+    expect(repo).toContain("result = [x for x in items if (lambda x: x.view_count >= min)(x)]");
+    // find_executed (S5) — rows is the post-filter cardinality.
+    expect(repo).toContain(
+      'log("debug", "find_executed", aggregate="Article", find="popular", rows=len(result))',
+    );
+    expect(repo).toContain("        return result");
   });
 });
