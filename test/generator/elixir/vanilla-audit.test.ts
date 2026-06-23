@@ -215,6 +215,36 @@ describe("vanilla audit runtime (audit-and-logging.md)", () => {
     );
   });
 
+  it("emits the audit_recorded log line (catalog debug event) after the insert, inside record/2", async () => {
+    const audit = file(await generateSystemFiles(SOURCE), "/api/audit.ex");
+    // The Audit module logs, so it must `require Logger`.
+    expect(audit).toContain("require Logger");
+    // One catalog line per audited insert — fired from the shared sink so every
+    // audited action (operation / create / destroy) gets it for free, with
+    // action/target/actor all in scope.  `event:` is re-stamped for cross-backend
+    // pivoting; level is debug (Elixir maps catalog `debug` → `Logger.debug`).
+    expect(audit).toContain(
+      'Logger.debug("audit_recorded", event: "audit_recorded", action: row.action, ' +
+        'target: "#{row.target_type}/#{row.target_id}", actor: actor_id)',
+    );
+    // The log fires AFTER the row commits and the insert's return value is still
+    // handed back unchanged (record/2's contract is the inserted Record).
+    expect(audit).toContain("inserted = repo.insert!(struct(Record, row))");
+    const logIdx = audit.indexOf('Logger.debug("audit_recorded"');
+    const insertIdx = audit.indexOf("inserted = repo.insert!");
+    expect(insertIdx).toBeGreaterThan(-1);
+    expect(logIdx).toBeGreaterThan(insertIdx);
+  });
+
+  it("does not emit audit_recorded (or require Logger for it) when nothing is audited", async () => {
+    const files = await generateSystemFiles(PLAIN);
+    // Gated with the whole audit runtime — no audit.ex, so no audit_recorded.
+    expect([...files.keys()].some((k) => k.endsWith("/audit.ex"))).toBe(false);
+    for (const content of files.values()) {
+      expect(content).not.toContain("audit_recorded");
+    }
+  });
+
   it("inserts the audit row with the raising insert!/1 so a failure rolls the txn back", async () => {
     const audit = file(await generateSystemFiles(SOURCE), "/api/audit.ex");
     // insert!/1 (not insert/1): a failed audit insert must raise → roll back the
