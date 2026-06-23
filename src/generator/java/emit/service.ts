@@ -186,6 +186,18 @@ export function renderJavaService(
   // can_<op> companion returns.
   const gatedOps = agg.operations.filter((op) => op.visibility === "public" && !!op.when);
   if (gatedOps.length > 0) imports.add(`${ctx.basePkg}.domain.common.DisallowedException`);
+  // Extern ops: the user handler call is wrapped so a non-domain throw becomes
+  // an ExternHandlerException (→ catalog extern_handler_threw + sanitized 500);
+  // domain exceptions raised by the handler re-throw untranslated so the real
+  // 400/403/404/409 still apply (parity with Hono/.NET/Python).
+  const anyExtern = agg.operations.some((op) => op.visibility === "public" && !!op.extern);
+  if (anyExtern) {
+    imports.add(`${ctx.basePkg}.domain.common.ExternHandlerException`);
+    imports.add(`${ctx.basePkg}.domain.common.DomainException`);
+    imports.add(`${ctx.basePkg}.domain.common.ForbiddenException`);
+    imports.add(`${ctx.basePkg}.domain.common.DisallowedException`);
+    imports.add(`${ctx.basePkg}.domain.common.AggregateNotFoundException`);
+  }
   const whenGateLine = (op: (typeof agg.operations)[number]): string | null =>
     op.when
       ? `        if (!(${renderJavaExpr(op.when, { thisName: "aggregate", accessorProps: true })})) throw new DisallowedException("operation '${op.name}' is not allowed in the current state of ${agg.name}.");`
@@ -240,7 +252,13 @@ export function renderJavaService(
           `        var aggregate = repository.getById(id);`,
           whenGateLine(op),
           `        aggregate.check${upperFirst(op.name)}(${args});`,
-          `        ${lowerFirst(op.name)}Handler.handle(${handlerArgs});`,
+          `        try {`,
+          `            ${lowerFirst(op.name)}Handler.handle(${handlerArgs});`,
+          `        } catch (DomainException | ForbiddenException | DisallowedException | AggregateNotFoundException e) {`,
+          `            throw e;`,
+          `        } catch (RuntimeException e) {`,
+          `            throw new ExternHandlerException("${op.name}", "${agg.name}", e);`,
+          `        }`,
           `        aggregate._assertInvariants();`,
           `        repository.save(aggregate);`,
           `        publishEvents(aggregate);`,
