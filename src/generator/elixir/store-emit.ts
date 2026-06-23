@@ -13,8 +13,14 @@
 //       %{state | count: state.count + 1}
 //     end
 //
-//     def clear(%__MODULE__{} = state), do: %{state | lines: [], count: 0}
+//     def clear(%__MODULE__{} = state) do
+//       state = %{state | lines: []}
+//       %{state | count: 0}
+//     end
 //   end
+//
+//   (A single-write action collapses to the `def … do: %{…}` one-liner form;
+//   a multi-write body renders the `do…end` block shown above.)
 //
 //   - `defstruct` carries every state field with its declared default (or the
 //     type's zero value: `[]` / `0` / `false` / `nil` / …).
