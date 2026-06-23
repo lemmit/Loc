@@ -521,8 +521,10 @@ export function validateOperationReturnsUnimplemented(
   // return-dominant ops PLUS in-memory mutation (`assign`), `precondition`/
   // `requires` guards, and `emit` (PubSub broadcast in the generic action)
   // (DEBT-03).  So elixir can serve an op iff every foundation it runs under
-  // can — `vanilla` always, `ash` when the body is Ash-emittable (`add` /
-  // `remove` still defer to vanilla — manage_relationship needs a changeset).
+  // can — `vanilla` always, `ash` when the body is Ash-emittable.  `add` /
+  // `remove` stay gated to vanilla *by design* (D-PHOENIX-FOUNDATION-STRATEGY):
+  // manage_relationship needs a changeset the generic union action lacks, and
+  // calling `Ash.update` mid-run-fn is the action-wrapping that decision forbids.
   const elixirCapableForOp = (op: OperationIR): boolean =>
     elixirFoundations.size > 0 &&
     [...elixirFoundations].every((f) => f === "vanilla" || isAshReturningOpEmittable(op));

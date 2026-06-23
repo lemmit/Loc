@@ -30,8 +30,8 @@ an unreachable stub), DEBT-31 (sortBy dropped). Per-entry verdicts:
 | ID | Verified | Note |
 |---|---|---|
 | 01 | ✅ DONE | tenancy filter on all 5 backends |
-| 02 | 🟡 OPEN (partial) | node + java + elixir non-relational `filter` ship (java/node both shapes; elixir `embedded` — its only non-rel shape); only **principal-on-non-relational** gated everywhere |
-| 03 | 🟡 OPEN (**narrowed**) | Ash union returns ship for return/let, **in-memory `assign` mutation, `precondition`/`requires` guards, and `emit`** (PubSub broadcast in the generic action); only **`add`/`remove`** bodies still gate to vanilla (manage_relationship needs a changeset) |
+| 02 | ✅ DONE | non-relational `filter` (incl. principal/tenancy) ships on node + java (both shapes) + elixir (`embedded`); principal-on-non-relational landed via #1520 (embedded) + #1549 (document, node/java). elixir `document` carries no capability filter (D-PHOENIX-FOUNDATION-STRATEGY) |
+| 03 | ✅ DONE (by policy) | Ash union returns ship for return/let/`assign`/`precondition`/`requires`/`emit`. `add`/`remove` stay gated to vanilla **deliberately** — closing them needs `Ash.update` mid-run-fn (the action-wrapping **D-PHOENIX-FOUNDATION-STRATEGY** forbids). Intended end state, not open debt |
 | 04 | ⚠️ RE-SCOPED | elixir audit-ops = real greenfield; lifecycle = vaporware (→16) |
 | 05 | ✅ DONE | `For` shipped; List/Detail removed |
 | 06 | ✅ DONE (vanilla) | Provenance runtime shipped on `foundation: vanilla` (#1400); gate now foundation-aware (`system-checks.ts:~1443`) — `elixir+vanilla` capable, only `ash` excluded. (Updated 2026-06-20; the earlier 🔴 contradicted this doc's own DEBT-06 detail block.) |
@@ -60,10 +60,13 @@ an unreachable stub), DEBT-31 (sortBy dropped). Per-entry verdicts:
 
 **Takeaway for picking work:** trust the backend-tier rows; with DEBT-06
 (provenance) and DEBT-07 (`shape(document)`) now landed on `foundation:
-vanilla`, the highest-value *real* items remaining are DEBT-03 (Ash union
-`add`/`remove` bodies — `emit` now ships), DEBT-13 (elixir `Id[]` join `ordinal`), and
-DEBT-24 (principal criterion query-face). The frontend tier is essentially
-cleared.
+vanilla`, and DEBT-02 (non-relational filters) + DEBT-03 closed (the latter
+**by policy** — `add`/`remove` on ash stay gated to vanilla per
+D-PHOENIX-FOUNDATION-STRATEGY rather than contorting the generic action), the
+highest-value *real* items remaining are DEBT-13 (elixir `Id[]` join `ordinal`)
+and DEBT-24 (principal criterion query-face). The frontend tier is essentially
+cleared. **When weighing an Ash-foundation gap: if it's materially harder on
+Ash than the other targets, the policy is to gate it out on Ash, not close it.**
 
 ---
 
@@ -104,7 +107,7 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 | **P0 — parity completion, common, tractable** |
 | DEBT-01 | ~~Principal-referencing capability `filter` (`currentUser` / tenancy)~~ **DONE** — all five backends (node, .NET, elixir Ash + vanilla, java) wire it, incl. java reified-criterion retrievals | ~~node, elixir, java~~ | 5 | L | `proposals/criterion-everywhere.md` · **fully landed on every backend** |
 | DEBT-02 | ~~Non-relational (`shape(document/embedded)`) capability `filter`, incl. principal/tenancy~~ **DONE** — node (both shapes) + java (both shapes) + elixir (`embedded`) wire it (document → in-app over the rehydrated aggregate; embedded → root scalars are real columns, so SQL `where` / `@SQLRestriction` / Ash `base_filter`); principal-on-non-relational landed via #1520 (embedded) + #1549 (document, node/java). elixir wires non-relational filters only on `embedded`, not `document` — its vanilla `document` shape (DEBT-07) is CRUD-only and carries no capability filter | ~~node, java, elixir~~ | 4 | M | **fully landed** |
-| DEBT-03 | Operation `or`-union return (exception-less ProblemDetails) | elixir/ash | 4 | M | `exception-less.md` · **return-dominant + mutation(`assign`)/guard(`precondition`/`requires`)/`emit` landed**; only `add`/`remove` bodies gate to vanilla |
+| DEBT-03 | ~~Operation `or`-union return (exception-less ProblemDetails)~~ **DONE (by policy)** | elixir/ash | 4 | M | `exception-less.md` · return/let/`assign`/`precondition`/`requires`/`emit` all ship on ash; `add`/`remove` stay gated to vanilla **deliberately** ([D-PHOENIX-FOUNDATION-STRATEGY](../decisions.md#d-phoenix-foundation-strategy) — closing them needs the forbidden `Ash.update`-mid-run-fn action-wrapping) |
 | DEBT-04 | Audit runtime parity — **RE-SCOPED** (see detail): `audited` ops → **elixir greenfield Ash audit** (real); `audited` lifecycle → **vaporware** (no grammar slot → DEBT-16); `with audit` stamping → vanilla-foundation | elixir | 4 | L | `type-system-feature-migration.md` (DBT) |
 | DEBT-05 | React walker `List` / `Detail` / `For` primitives (comment-only today) — **DONE: `For` implemented (all 4 frontends + HEEx; now with an optional `empty:` arm); `List`/`Detail`/`MasterDetail` were inert duplicates of `scaffoldList`/`scaffoldDetails` and were REMOVED** ([D-NO-PAGE-ARCHETYPES](../decisions.md#d-no-page-archetypes)) | react (→ vue/svelte) | — | — | resolved |
 | **P1 — parity + frontend completeness** |
