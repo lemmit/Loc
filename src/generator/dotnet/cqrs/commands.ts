@@ -5,8 +5,8 @@ import type {
   EnrichedBoundedContextIR,
 } from "../../../ir/types/loom-ir.js";
 import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
-import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
 import { plural, upperFirst } from "../../../util/naming.js";
+import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
 import { domainToRequestExpr, projectEntityExpr } from "../dto-mapping.js";
 import { renderCommand, renderCommandHandler } from "../emit.js";
 import { renderCsExpr, renderCsType } from "../render-expr.js";

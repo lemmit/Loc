@@ -59,6 +59,10 @@ describe("python per-operation audit runtime", () => {
     expect(f).toContain("scope_id=scope_id(),");
     expect(f).toContain("parent_id=parent_id(),");
     expect(f).toContain("await self._session.flush()");
+    // audit_recorded (debug) announced after the staged add
+    expect(f).toContain(
+      'log("debug", "audit_recorded", action=action, target=target_type, actor=actor)',
+    );
   });
 
   it("captures before/after around the mutation and records it in the route", async () => {

@@ -85,4 +85,14 @@ describe("hono routes — audited lifecycle actions", () => {
     const schema = files.get("db/schema.ts")!;
     expect(schema).toContain('pgTable("audit_records"');
   });
+
+  it("announces audit_recorded (debug) after each audit insert", async () => {
+    const r = await routes();
+    expect(r).toContain(
+      '.debug({ event: "audit_recorded", action: "create", target: "Invoice", actor });',
+    );
+    expect(r).toContain(
+      '.debug({ event: "audit_recorded", action: "destroy", target: "Invoice", actor });',
+    );
+  });
 });

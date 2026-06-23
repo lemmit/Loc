@@ -125,8 +125,13 @@ describe("java provenance runtime", () => {
   it("flushes the lineage buffer into provenance_records inside the @Transactional save", async () => {
     const repo = await file("/OrderRepositoryImpl.java");
     expect(repo).toContain("@Transactional");
-    expect(repo).toContain("for (var __lin : aggregate.drainProv()) {");
+    expect(repo).toContain("var __prov = aggregate.drainProv();");
+    expect(repo).toContain("for (var __lin : __prov) {");
     expect(repo).toContain("provenanceRecords.save(new ProvenanceRecord(");
+    // provenance_recorded (debug) announced once per non-empty flush
+    expect(repo).toContain(
+      'CatalogLog.event("provenance_recorded", "debug", "aggregate", "Order", "count", __prov.size());',
+    );
     // drained AFTER the jpa.save (same @Transactional method) and stamped with
     // the ambient request-context ids.
     expect(repo).toContain("RequestContext.correlationId()");

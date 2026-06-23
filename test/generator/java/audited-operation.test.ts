@@ -89,6 +89,12 @@ describe("java generator — audited operation instrumentation", () => {
     expect(svc).toContain("RequestContext.parentId()));");
   });
 
+  it("announces audit_recorded (debug) on the catalog channel after the save", () => {
+    expect(svc).toContain(
+      'CatalogLog.event("audit_recorded", "debug", "action", "cancel", "target", "Order", "actor", RequestContext.actorId());',
+    );
+  });
+
   it("instruments every audited op (cancel + reopen)", () => {
     expect(svc).toContain('"reopenOrder",');
     expect(svc).toContain('"reopen",');

@@ -135,6 +135,10 @@ describe("vanilla provenance runtime (DEBT-06)", () => {
     // Governance stamps drawn from the ambient request context.
     expect(prov).toContain("correlation_id: RequestContext.correlation_id()");
     expect(prov).toContain("actor_id: RequestContext.actor_id()");
+    // provenance_recorded (debug) announced once per non-empty flush.
+    expect(prov).toContain("require Logger");
+    expect(prov).toContain('Logger.debug("provenance_recorded"');
+    expect(prov).toContain("count: length(rows)");
   });
 
   it("emits the schema-prefixed ALTER + the history CREATE migration", async () => {
