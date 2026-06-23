@@ -34,7 +34,7 @@ system Sys {
   resource billingState { for: Billing, kind: state, use: primary }
   ui WebApp {}
   deployable webApp {
-    platform: elixir
+    platform: elixir { foundation: ash }
     contexts: [Orders, Billing]
     dataSources: [ordersState, billingState]
     ui: WebApp

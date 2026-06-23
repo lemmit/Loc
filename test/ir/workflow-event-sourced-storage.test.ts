@@ -38,26 +38,22 @@ async function diagnose(src: string) {
 // Vanilla variant — `platform: elixir { foundation: vanilla }` (the only elixir
 // foundation that hosts pure ES, D-VANILLA-ES-HOME).
 const mkVanilla = (eventSourced: boolean): string =>
-  mk("elixir", eventSourced).replace(
-    "platform: elixir contexts:",
-    "platform: elixir { foundation: vanilla } contexts:",
-  );
+  mk("elixir { foundation: vanilla }", eventSourced);
 
 describe("event-sourced workflow storage gate", () => {
   // The Hono (node) + .NET (dotnet) + Python (FastAPI) + Java (Spring) backends
   // and elixir-vanilla now emit the event-sourced workflow runtime, so the gate
-  // does NOT fire there; the rest stay gated.  Bare `platform: elixir` defaults
-  // to the Ash foundation, which has no pure-ES fit → still gated.
-  for (const plat of ["elixir"]) {
-    it(`errors when an eventSourced workflow is hosted by ${plat}`, async () => {
-      const diags = await diagnose(mk(plat, true));
-      const gate = diags.find((d) => d.code === "loom.event-sourced-workflow-unsupported");
-      expect(gate, `expected the ES-workflow gate to fire on ${plat}`).toBeDefined();
-      expect(gate?.severity).toBe("error");
-      expect(gate?.message).toContain("Tally");
-      expect(gate?.message).toContain("eventSourced");
-    });
-  }
+  // does NOT fire there; the rest stay gated.  The Ash foundation has no
+  // pure-ES fit → still gated (post D-VANILLA-DEFAULT ash is the explicit
+  // opt-in; the bare default is now vanilla, the ES home — tested below).
+  it("errors when an eventSourced workflow is hosted by elixir + foundation: ash", async () => {
+    const diags = await diagnose(mk("elixir { foundation: ash }", true));
+    const gate = diags.find((d) => d.code === "loom.event-sourced-workflow-unsupported");
+    expect(gate, "expected the ES-workflow gate to fire on the Ash foundation").toBeDefined();
+    expect(gate?.severity).toBe("error");
+    expect(gate?.message).toContain("Tally");
+    expect(gate?.message).toContain("eventSourced");
+  });
 
   for (const plat of ["node", "dotnet", "python", "java"]) {
     it(`is supported on ${plat} — no gate error`, async () => {

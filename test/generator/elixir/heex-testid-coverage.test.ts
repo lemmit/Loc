@@ -47,7 +47,7 @@ const phoenixSystem = (uiBody: string): string => `
       }
     }
     deployable phoenixApp {
-      platform: elixir, contexts: [C], serves: DemoApi,
+      platform: elixir { foundation: ash }, contexts: [C], serves: DemoApi,
       ui: DemoUi, port: 4000
     }
   }

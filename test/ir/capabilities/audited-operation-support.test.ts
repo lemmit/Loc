@@ -58,8 +58,9 @@ describe("audited-operation capability validation", () => {
   });
 
   it("rejects an audited operation on a Phoenix ASH deployable (no audit emission)", async () => {
-    // Bare `platform: elixir` defaults to foundation: ash — no audit fit.
-    const errs = await auditErrors(sys("elixir"));
+    // The Ash foundation has no audit fit (post D-VANILLA-DEFAULT, ash is the
+    // explicit opt-in; the bare default is now vanilla, which DOES emit audit).
+    const errs = await auditErrors(sys("elixir { foundation: ash }"));
     expect(errs.length).toBe(1);
     expect(errs[0]).toContain("audit-record emission");
     // The diagnostic points at the foundation escape hatch.
@@ -121,8 +122,9 @@ describe("audited-lifecycle capability validation", () => {
   });
 
   it("rejects audited lifecycle actions on a Phoenix ASH deployable (no audit emission)", async () => {
-    // Bare `platform: elixir` defaults to foundation: ash — no audit fit.
-    const errs = await auditErrors(lifecycleSys("elixir"));
+    // The Ash foundation has no audit fit (post D-VANILLA-DEFAULT, ash is the
+    // explicit opt-in; the bare default is now vanilla, which DOES emit audit).
+    const errs = await auditErrors(lifecycleSys("elixir { foundation: ash }"));
     expect(errs.length).toBe(1);
     expect(errs[0]).toContain("lifecycle action");
     expect(errs[0]).toContain("foundation: vanilla");

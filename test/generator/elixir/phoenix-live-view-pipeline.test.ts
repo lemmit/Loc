@@ -59,7 +59,7 @@ const FIXTURE_SOURCE = `system MiniLiveView {
   }
 
   deployable phoenixApp {
-    platform: elixir,
+    platform: elixir { foundation: ash },
     contexts: [Sales],
     serves: SalesApi,
     ui: SalesAdmin,
@@ -449,7 +449,7 @@ describe("phoenixLiveView pipeline", () => {
     contexts: [Sales]
   }
   deployable phoenixApp {
-    platform: elixir,
+    platform: elixir { foundation: ash },
     contexts: [Sales],
     targets: peer,
     serves: SalesApi,
@@ -1264,7 +1264,7 @@ describe("router wiring (orchestrator integration)", () => {
     permissions: string[]
   }
   deployable phoenixApp {
-    platform: elixir,
+    platform: elixir { foundation: ash },
     contexts: [Sales],
     serves: SalesApi,
     ui: SalesAdmin,
@@ -1527,7 +1527,7 @@ const ACME_LIVEVIEW_SOURCE = `system AcmeLV {
   api SalesApi from Sales
   ui SalesAdmin with scaffold(subdomains: [Sales]) {}
   deployable phoenixApp {
-    platform: elixir
+    platform: elixir { foundation: ash }
     contexts: [Sales]
     serves: SalesApi
     ui: SalesAdmin
@@ -2142,7 +2142,7 @@ const ACME_UI_E2E_SOURCE = `system AcmeUI {
   api SalesApi from Sales
   ui SalesAdmin with scaffold(subdomains: [Sales]) {}
   deployable phoenixApp {
-    platform: elixir
+    platform: elixir { foundation: ash }
     contexts: [Sales]
     serves: SalesApi
     ui: SalesAdmin
@@ -2235,7 +2235,7 @@ const FORM_FIXTURE = `system AcmeForm {
   api SalesApi from Sales
   ui SalesAdmin with scaffold(subdomains: [Sales]) {}
   deployable phoenixApp {
-    platform: elixir
+    platform: elixir { foundation: ash }
     contexts: [Sales]
     serves: SalesApi
     ui: SalesAdmin
@@ -3085,7 +3085,7 @@ describe("Ash 3.x compile-correctness regressions", () => {
             repository People for Person {}
           }
         }
-        deployable api { platform: elixir, contexts: [People], port: 4000 }
+        deployable api { platform: elixir { foundation: ash }, contexts: [People], port: 4000 }
       }
     `;
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-inspect-redact-"));
@@ -3284,7 +3284,7 @@ describe("reference-collection join tables (Phoenix/Ash)", () => {
   }
   api RosterApi from Roster
   ui RosterAdmin with scaffold(subdomains: [Roster]) { }
-  deployable phoenixApp { platform: elixir  contexts: [Roster]  serves: RosterApi  ui: RosterAdmin  port: 4000 }
+  deployable phoenixApp { platform: elixir { foundation: ash }  contexts: [Roster]  serves: RosterApi  ui: RosterAdmin  port: 4000 }
 }
 `;
 
@@ -3431,7 +3431,7 @@ describe("JasonCamelCase shell module (parity follow-up C/4)", () => {
         api SalesApi from Sales
         ui SalesUi with scaffold(subdomains: [Sales]) { }
         deployable phoenixApp {
-          platform: elixir
+          platform: elixir { foundation: ash }
           contexts: [Sales]
           serves: SalesApi
           ui: SalesUi
@@ -3485,7 +3485,7 @@ describe("JasonCamelCase shell module (parity follow-up C/4)", () => {
         api SalesApi from Sales
         ui SalesUi with scaffold(subdomains: [Sales]) { }
         deployable phoenixApp {
-          platform: elixir
+          platform: elixir { foundation: ash }
           contexts: [Sales]
           serves: SalesApi
           ui: SalesUi
@@ -3548,7 +3548,7 @@ const WIRE_SOURCE = `system MiniWire {
   }
 
   deployable phoenixApp {
-    platform: elixir,
+    platform: elixir { foundation: ash },
     contexts: [Sales],
     serves: SalesApi,
     ui: SalesAdmin,

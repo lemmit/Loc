@@ -47,15 +47,18 @@ describe("realization axes — lowering defaults", () => {
     expect(d.runtime).toBe("transactional");
   });
 
-  it("bare elixir → ash foundation + ashPostgres/byFeature (after canonicalization)", async () => {
+  it("bare elixir → vanilla foundation + ecto/layered/byFeature (D-VANILLA-DEFAULT)", async () => {
     // D-ELIXIR-PLATFORM: `platform: elixir` is the canonical (and only)
     // name — the legacy `phoenix` / `phoenixLiveView` platform aliases
     // were retired.  D-PHOENIX-TRANSPORT: `transport: phoenix` is the
     // canonical (and only) value — the `phoenixRouter` alias was retired.
+    // D-VANILLA-DEFAULT: the default foundation flipped from ash to vanilla,
+    // so a bare `platform: elixir` now lowers to plain Phoenix LiveView on
+    // Ecto (the `layered` style); `foundation: ash` is the explicit opt-in.
     const d = await lowerDeployable("elixir");
-    expect(d.foundation).toBe("ash");
-    expect(d.application).toBe("ash");
-    expect(d.persistence).toBe("ashPostgres");
+    expect(d.foundation).toBe("vanilla");
+    expect(d.application).toBe("layered");
+    expect(d.persistence).toBe("ecto");
     expect(d.directoryLayout).toBe("byFeature");
     expect(d.transport).toBe("phoenix");
     expect(d.runtime).toBe("transactional");
@@ -119,8 +122,8 @@ describe("realization axes — lowering defaults", () => {
     expect(d.runtime).toBe("transactional");
   });
 
-  it("default elixir foundation (ash) keeps ashPostgres / ash — vanilla override is foundation-scoped", async () => {
-    const d = await lowerDeployable("elixir");
+  it("explicit `foundation: ash` opts back into ashPostgres / ash — the base adapter defaults", async () => {
+    const d = await lowerDeployable("elixir { foundation: ash }");
     expect(d.foundation).toBe("ash");
     expect(d.application).toBe("ash");
     expect(d.persistence).toBe("ashPostgres");

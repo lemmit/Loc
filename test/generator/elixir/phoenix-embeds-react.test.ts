@@ -24,7 +24,7 @@ system Sys {
   resource ordersState { for: Orders, kind: state, use: primary }
   ui WebApp { framework: react }
   deployable app {
-    platform: elixir
+    platform: elixir { foundation: ash }
     contexts: [Orders]
     dataSources: [ordersState]
     hosts: WebApp
@@ -45,7 +45,7 @@ system Sys {
   resource ordersState { for: Orders, kind: state, use: primary }
   ui WebApp { framework: phoenixLiveView  page Home { route: "/" } }
   deployable app {
-    platform: elixir
+    platform: elixir { foundation: ash }
     contexts: [Orders]
     dataSources: [ordersState]
     hosts: WebApp

@@ -30,7 +30,7 @@ system Sys {
   } }
   storage pg { type: postgres }
   resource salesState { for: Sales, kind: state, use: pg }
-  deployable api { platform: elixir, contexts: [Sales], dataSources: [salesState], port: 4000, auth: required }
+  deployable api { platform: elixir { foundation: ash }, contexts: [Sales], dataSources: [salesState], port: 4000, auth: required }
 }`;
 
 describe("Phoenix workflow guard short-circuit", () => {
@@ -68,7 +68,7 @@ system Sys {
   } }
   storage pg { type: postgres }
   resource salesState { for: Sales, kind: state, use: pg }
-  deployable api { platform: elixir, contexts: [Sales], dataSources: [salesState], port: 4000 }
+  deployable api { platform: elixir { foundation: ash }, contexts: [Sales], dataSources: [salesState], port: 4000 }
 }`;
     const files = await gen(plain);
     const wf = files.get("api/lib/api/sales/workflows/touch.ex")!;

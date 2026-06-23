@@ -29,7 +29,7 @@ system Banking {
   resource accountState { for: Ledger, kind: state, use: pg }
 
   deployable phoenixApp {
-    platform: elixir
+    platform: elixir { foundation: ash }
     contexts: [Ledger]
     dataSources: [accountState]
     serves: LedgerApi

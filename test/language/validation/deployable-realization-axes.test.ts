@@ -242,11 +242,22 @@ describe("realization axes — R6 foundation ↔ persistence/application compati
     ).toBe(true);
   });
 
-  it("rejects `persistence: ecto` with NO foundation on elixir (defaults to ash)", async () => {
+  it("accepts `persistence: ecto` with NO foundation on elixir (defaults to vanilla)", async () => {
+    // Post D-VANILLA-DEFAULT the omitted-foundation default is vanilla, whose
+    // data layer IS ecto — so the aligned pair needs no explicit `foundation:`.
     const { errors } = await parse(sys("elixir { persistence: ecto }"));
+    expect(errors).toEqual([]);
+  });
+
+  it("rejects `persistence: ashPostgres` with NO foundation on elixir (defaults to vanilla)", async () => {
+    // The mirror: the default vanilla foundation does NOT admit Ash's framework
+    // data layer — `foundation: ash` must be set explicitly to use ashPostgres.
+    const { errors } = await parse(sys("elixir { persistence: ashPostgres }"));
     expect(
       errors.some((e) =>
-        /persistence: ecto.*incompatible with 'foundation: ash'.*default on 'elixir'/.test(e),
+        /persistence: ashPostgres.*incompatible with 'foundation: vanilla'.*default on 'elixir'/.test(
+          e,
+        ),
       ),
     ).toBe(true);
   });

@@ -71,7 +71,7 @@ system Sys {
   storage primary { type: postgres }
   resource docsState { for: Docs, kind: state, use: primary }
   deployable api {
-    platform: elixir
+    platform: elixir { foundation: ash }
     contexts: [Docs]
     dataSources: [docsState]
     serves: DocsApi
@@ -172,7 +172,7 @@ system Sys {
   storage primary { type: postgres }
   resource docsState { for: Docs, kind: state, use: primary }
   deployable api {
-    platform: elixir
+    platform: elixir { foundation: ash }
     contexts: [Docs]
     dataSources: [docsState]
     serves: DocsApi

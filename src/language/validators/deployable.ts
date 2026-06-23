@@ -332,20 +332,12 @@ export function checkDeployableRealizationAxes(d: Deployable, accept: Validation
     { name: "runtime", value: d.runtime },
   ];
 
-  // D-VANILLA-DEFAULT — warn-then-flip release.  A bare `platform: elixir`
-  // (no explicit `foundation:`) is heading for vanilla after the next
-  // release cycle's default flip.  Tell the user now so they can set
-  // `foundation: ash` explicitly if they want today's behaviour, or
-  // `foundation: vanilla` to opt in early.  Once the flip lands, this
-  // warning is removed and `lower-platform.ts:greenfieldAxisDefaults`
-  // changes its `elixir` arm from `"ash"` to `"vanilla"`.
-  if (family === "elixir" && d.foundation == null) {
-    accept(
-      "warning",
-      `Deployable '${d.name}': 'platform: elixir' without an explicit 'foundation:' will switch from 'ash' to 'vanilla' in the next release (D-VANILLA-DEFAULT).  Set 'foundation: ash' to keep today's behaviour, or 'foundation: vanilla' to opt in now.`,
-      { node: d, property: "platform", code: "loom.foundation-default-flipping" },
-    );
-  }
+  // D-VANILLA-DEFAULT — the default flip has landed.  A bare `platform:
+  // elixir` (no explicit `foundation:`) now resolves to `vanilla` (plain
+  // Phoenix LiveView on Ecto) via `lower-platform.ts:greenfieldAxisDefaults`;
+  // `foundation: ash` is the explicit opt-in.  The transitional
+  // `loom.foundation-default-flipping` warning that preceded the flip is
+  // gone — omitting `foundation:` is no longer ambiguous.
 
   // R1 — every set axis value must be in its platform menu.
   for (const { name, value } of axes) {

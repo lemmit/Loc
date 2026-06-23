@@ -33,7 +33,7 @@ const NON_PRINCIPAL = `system ST {
   api A from D
   storage primary { type: postgres }
   resource st { for: Shop, kind: state, use: primary }
-  deployable api1 { platform: elixir, contexts: [Shop], dataSources: [st], serves: A, port: 8081 }
+  deployable api1 { platform: elixir { foundation: ash }, contexts: [Shop], dataSources: [st], serves: A, port: 8081 }
 }`;
 
 // Principal stamps (`with auditable` → createdBy/updatedBy := currentUser) on an
@@ -49,7 +49,7 @@ const PRINCIPAL = `system PS {
   api A from D
   storage primary { type: postgres }
   resource st { for: Shop, kind: state, use: primary }
-  deployable api1 { platform: elixir, contexts: [Shop], dataSources: [st], serves: A, port: 8081, auth: required }
+  deployable api1 { platform: elixir { foundation: ash }, contexts: [Shop], dataSources: [st], serves: A, port: 8081, auth: required }
 }`;
 
 const RESOURCE = "api1/lib/api1/shop/order.ex";
@@ -130,7 +130,7 @@ describe("elixir/Ash generator — lifecycle stamps", () => {
       api A from D
       storage primary { type: postgres }
       resource el { for: Shop, kind: eventLog, use: primary }
-      deployable api1 { platform: elixir, contexts: [Shop], dataSources: [el], serves: A, port: 8081 }
+      deployable api1 { platform: elixir { foundation: ash }, contexts: [Shop], dataSources: [el], serves: A, port: 8081 }
     }`;
     const loom = await buildLoomModel(eventSourced);
     const errors = validateLoomModel(loom).filter(
@@ -151,11 +151,11 @@ describe("elixir/Ash generator — lifecycle stamps", () => {
 // ---------------------------------------------------------------------------
 
 const VANILLA_NON_PRINCIPAL = NON_PRINCIPAL.replace(
-  "platform: elixir,",
+  "platform: elixir { foundation: ash },",
   "platform: elixir { foundation: vanilla },",
 );
 const VANILLA_PRINCIPAL = PRINCIPAL.replace(
-  "platform: elixir,",
+  "platform: elixir { foundation: ash },",
   "platform: elixir { foundation: vanilla },",
 );
 const VANILLA_REPO = "api1/lib/api1/shop/order_repository.ex";

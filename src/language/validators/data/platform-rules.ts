@@ -201,11 +201,13 @@ function adapterKindForAxis(
 /** Menu for the one remaining greenfield axis, `foundation`.  `transport` and
  *  `runtime` are now adapter-backed (realization-axes-alignment.md), resolved
  *  via `availableAdapterNames(family, …)` in `realizationAxisMenu`.  Elixir
- *  carries a two-element foundation menu: today's `ash` and `vanilla`
- *  (D-VANILLA-PHOENIX-FOUNDATION); every other backend is `vanilla` only. */
+ *  carries a two-element foundation menu (D-VANILLA-PHOENIX-FOUNDATION); the
+ *  FIRST entry is the platform default (`defaultFoundationFor`).  Post
+ *  D-VANILLA-DEFAULT that is `vanilla` (plain Phoenix LiveView on Ecto);
+ *  `ash` is the opt-in.  Every other backend is `vanilla` only. */
 function greenfieldMenu(family: Platform, axis: "foundation"): string[] {
   void axis;
-  return family === "elixir" ? ["ash", "vanilla"] : ["vanilla"];
+  return family === "elixir" ? ["vanilla", "ash"] : ["vanilla"];
 }
 
 /** The DSL-legal values for one realization axis on a platform family.
@@ -277,7 +279,7 @@ export const FOUNDATION_FAMILY_ADAPTERS: Record<
 };
 
 /** The platform's DEFAULT foundation — the primary (first) entry of its
- *  foundation menu (`elixir` → `ash`, every other backend → `vanilla`).
+ *  foundation menu (every backend → `vanilla` post D-VANILLA-DEFAULT).
  *  Used by R6 to resolve the effective foundation when the knob is omitted.
  *  (Mirror of the `foundation` default in `greenfieldAxisDefaults`, kept here
  *  in the language layer so the validator need not reach into lowering.) */

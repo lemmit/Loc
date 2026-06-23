@@ -100,11 +100,14 @@ const elixirPlatform: PlatformSurface = {
   // application axis: `ash` (Ash's action surface) and `layered` (DSL
   // `serviceLayer` — plain Phoenix's controller → context → repository).
   // `vanilla` is a FOUNDATION value, never a style.
-  // The defaults below describe elixir's DEFAULT foundation (ash); a
-  // `foundation: vanilla` deployable overrides them to `ecto` / `layered` in
-  // lowering (`foundationAdapterOverride`).  The resource/style/transport
-  // adapters are real; `genserver` (process-per-aggregate runtime) is a
-  // reserved stub.
+  // The defaults below encode elixir's ASH data layer + style.  Post
+  // D-VANILLA-DEFAULT the DEFAULT foundation is `vanilla`, so the
+  // omitted-knob and explicit-`vanilla` paths override `style`/`persistence`
+  // to `layered` / `ecto` in lowering (`foundationAdapterOverride`); only an
+  // explicit `foundation: ash` resolves the base `ash` / `ashPostgres` values.
+  // (The shared axes — `byFeature` / `phoenix` / `transactional` — apply to
+  // both foundations.)  The resource/style/transport adapters are real;
+  // `genserver` (process-per-aggregate runtime) is a reserved stub.
   adapters(): PlatformAdapters {
     const menu: PlatformAdapters = {
       persistence: { ashPostgres: ashPostgresPersistenceAdapter, ecto: ectoPersistenceAdapter },

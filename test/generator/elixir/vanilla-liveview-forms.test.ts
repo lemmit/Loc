@@ -113,10 +113,10 @@ describe("vanilla — change_<agg> facade (2-B)", () => {
 });
 
 describe("ash LiveView forms — byte-identical guard", () => {
-  it("the ash (default-foundation) path keeps the AshPhoenix.Form lifecycle", async () => {
+  it("the explicit `foundation: ash` path keeps the AshPhoenix.Form lifecycle", async () => {
     const ashSource = SOURCE.replace(
       "platform: elixir { foundation: vanilla }",
-      "platform: elixir",
+      "platform: elixir { foundation: ash }",
     );
     const fs = await generateSystemFiles(ashSource);
     const create = get(fs, "/live/customer_new_live.ex");

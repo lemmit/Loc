@@ -56,7 +56,7 @@ const REDACTION_SOURCE = `
     }
     deployable honoApi { platform: node, contexts: [People], port: 3000 }
     deployable dotnetApi { platform: dotnet, contexts: [People], port: 3001 }
-    deployable elixirApi { platform: elixir, contexts: [People], port: 4000 }
+    deployable elixirApi { platform: elixir { foundation: ash }, contexts: [People], port: 4000 }
   }
 `;
 

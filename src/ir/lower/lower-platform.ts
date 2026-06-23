@@ -39,12 +39,14 @@ export function qualifyDesign(raw: string | undefined, fallback: BuiltinPackFami
 export function greenfieldAxisDefaults(platform: Platform): {
   foundation: string;
 } {
+  void platform;
   return {
-    // Elixir's domain framework defaults to Ash (matches today's
-    // `phoenixLiveView` behaviour after desugar — D-PHOENIX-SURFACE
-    // open-item 2, renamed to elixir by D-ELIXIR-PLATFORM); every other
-    // backend is `vanilla` (no framework).
-    foundation: platform === "elixir" ? "ash" : "vanilla",
+    // Every backend — elixir included — defaults to `vanilla` (no
+    // framework).  The elixir flip from `ash` to `vanilla` landed per
+    // D-VANILLA-DEFAULT: `platform: elixir` with no explicit `foundation:`
+    // now generates plain Phoenix LiveView on Ecto.  An explicit
+    // `foundation: ash` opts back into the Ash data layer + action surface.
+    foundation: "vanilla",
   };
 }
 
@@ -61,14 +63,14 @@ export function greenfieldAxisDefaults(platform: Platform): {
 /** Per-foundation overrides of the adapter-axis defaults
  *  (D-REALIZATION-AXES; docs/plans/realization-axes-alignment.md).
  *
- *  A platform's `adapterDefaults()` describe its DEFAULT foundation's axes —
- *  for elixir that is `ash` (→ `ashPostgres` / `ash`).  A non-default
- *  foundation still implies its own data layer + application style even though
- *  `vanilla` *owns* no axis (FOUNDATION_OWNED_AXES), so the omitted-knob
- *  default must follow the foundation, not the platform.  `elixir` +
+ *  Elixir's `adapterDefaults()` encode the ASH data layer + style
+ *  (`ashPostgres` / `ash`), but post D-VANILLA-DEFAULT the default foundation
+ *  is `vanilla`, which implies its own data layer + application style even
+ *  though `vanilla` *owns* no axis (FOUNDATION_OWNED_AXES) — so the
+ *  omitted-knob (and explicit-`vanilla`) path overrides them: `elixir` +
  *  `vanilla` ⇒ plain Ecto + the `layered` style (DSL `serviceLayer`: plain
- *  Phoenix's controller → context → repository pipeline).  Everything else
- *  uses the platform `adapterDefaults` unchanged (returns `{}`). */
+ *  Phoenix's controller → context → repository pipeline).  An explicit
+ *  `foundation: ash` returns `{}` and resolves the base `ash` defaults. */
 export function foundationAdapterOverride(
   platform: Platform,
   foundation: string | undefined,

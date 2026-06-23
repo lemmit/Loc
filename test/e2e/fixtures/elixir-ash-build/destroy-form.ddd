@@ -56,7 +56,7 @@ system DestroyDemo {
   }
 
   deployable phoenixApp {
-    platform: elixir
+    platform: elixir { foundation: ash }
     contexts: [Inventory]
     dataSources: [invState]
     serves: InventoryApi

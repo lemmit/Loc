@@ -92,7 +92,11 @@ const CASES: readonly Case[] = [
   { platform: "java", file: /\/OrderTests\.java$/, shape: "full" },
   { platform: "python", file: /\/tests\/test_order\.py$/, shape: "full" },
   // Ash — rejection tests run DB-free; the happy-path state test is @tag :skip.
-  { platform: "elixir", file: /\/test\/selling\/order_test\.exs$/, shape: "subset" },
+  {
+    platform: "elixir { foundation: ash }",
+    file: /\/test\/selling\/order_test\.exs$/,
+    shape: "subset",
+  },
   // Vanilla — full port via the pure domain core; nothing skips.
   {
     platform: "elixir { foundation: vanilla }",

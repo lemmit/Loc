@@ -35,7 +35,7 @@ system Sys {
   ${dataSourceClause}
   ui WebApp {}
   deployable api {
-    platform: elixir
+    platform: elixir { foundation: ash }
     contexts: [Orders]
     dataSources: [ordersState]
     ui: WebApp

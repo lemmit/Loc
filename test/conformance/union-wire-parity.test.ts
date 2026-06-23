@@ -44,7 +44,7 @@ const PHX_SYSTEM = `
     storage pg { type: postgres }
     resource s { for: Orders, kind: state, use: pg }
     deployable d {
-      platform: elixir
+      platform: elixir { foundation: ash }
       contexts: [Orders]
       dataSources: [s]
       serves: OrdersApi

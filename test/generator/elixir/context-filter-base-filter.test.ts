@@ -27,7 +27,7 @@ system Sys {
   resource docsState { for: Docs, kind: state, use: primary }
   ui WebApp {}
   deployable api {
-    platform: elixir
+    platform: elixir { foundation: ash }
     contexts: [Docs]
     dataSources: [docsState]
     ui: WebApp
@@ -90,7 +90,7 @@ system Sys {
   resource docsState { for: Docs, kind: state, use: primary }
   ui WebApp {}
   deployable api {
-    platform: elixir
+    platform: elixir { foundation: ash }
     contexts: [Docs]
     dataSources: [docsState]
     ui: WebApp
@@ -142,7 +142,7 @@ system Sys {
   resource docsState { for: Docs, kind: state, use: primary }
   ui WebApp {}
   deployable api {
-    platform: elixir
+    platform: elixir { foundation: ash }
     contexts: [Docs]
     dataSources: [docsState]
     ui: WebApp
@@ -177,7 +177,7 @@ system Sys {
   resource docsState { for: Docs, kind: state, use: primary }
   ui WebApp {}
   deployable api {
-    platform: elixir
+    platform: elixir { foundation: ash }
     contexts: [Docs]
     dataSources: [docsState]
     ui: WebApp
@@ -221,7 +221,7 @@ system Bank {
   storage primary { type: postgres }
   resource ledgerState { for: Ledger, kind: state, use: primary }
   deployable api {
-    platform: elixir
+    platform: elixir { foundation: ash }
     contexts: [Ledger]
     dataSources: [ledgerState]
     serves: LedgerApi

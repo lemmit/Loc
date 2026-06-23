@@ -118,7 +118,7 @@ describe.each([
 
 describe("style threading — phoenix", () => {
   it("dispatches config DI through the THREADED style adapter", async () => {
-    const { contexts, deployable, sys } = await emitInputs("elixir");
+    const { contexts, deployable, sys } = await emitInputs("elixir { foundation: ash }");
     const files = (elixirPlatform as PlatformSurface).emitProject({
       contexts,
       deployable,

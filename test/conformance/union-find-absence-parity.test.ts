@@ -100,7 +100,7 @@ const BACKENDS: Backend[] = [
     hasResource: true,
   },
   {
-    platform: "elixir",
+    platform: "elixir { foundation: ash }",
     ui: true,
     file: "d/lib/d_web/controllers/orders_controller.ex",
     anchor: /def recent/,

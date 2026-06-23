@@ -83,8 +83,10 @@ describe("union finds — producer shape gate", () => {
     expect(msgs[0]).toContain("resource: string");
   });
 
-  it("exempts a context hosted exclusively by elixir (shipped P4d tagger)", async () => {
-    expect(await codesFor(sysWith("elixir", "", "Order or Cancel"))).toEqual([]);
+  it("exempts a context hosted exclusively by elixir + foundation: ash (shipped P4d tagger)", async () => {
+    expect(await codesFor(sysWith("elixir { foundation: ash }", "", "Order or Cancel"))).toEqual(
+      [],
+    );
   });
 
   it("enforces on a node-hosted context", async () => {

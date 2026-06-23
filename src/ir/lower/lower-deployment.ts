@@ -154,10 +154,12 @@ export function lowerDeployable(d: Deployable): DeployableIR {
     adapterDefaults !== undefined
       ? (() => {
           const gf = greenfieldAxisDefaults(platform);
-          // The foundation selects which adapter-axis defaults apply: the
-          // platform `adapterDefaults` describe its DEFAULT foundation (elixir
-          // → ash), so a non-default foundation (`vanilla`) overrides the
-          // omitted-knob default for the axes it implies (D-REALIZATION-AXES;
+          // The foundation selects which adapter-axis defaults apply.  Elixir's
+          // platform `adapterDefaults` encode the ASH data layer + style, but
+          // post D-VANILLA-DEFAULT the default foundation is `vanilla`, so the
+          // omitted-knob (and explicit-`vanilla`) path overrides `style` /
+          // `persistence` to `layered` / `ecto`; an explicit `foundation: ash`
+          // gets the base values (D-REALIZATION-AXES;
           // realization-axes-alignment.md).
           const foundation = d.foundation ?? gf.foundation;
           const fdn = foundationAdapterOverride(platform, foundation);

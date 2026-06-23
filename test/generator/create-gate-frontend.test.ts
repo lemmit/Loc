@@ -39,7 +39,7 @@ system Demo {
   } }
   api ShopApi from Shop
   ui Admin with scaffold(subdomains: [Shop]) { }
-  deployable app { platform: elixir, contexts: [Catalog], serves: ShopApi, ui: Admin, port: 4000 }
+  deployable app { platform: elixir { foundation: ash }, contexts: [Catalog], serves: ShopApi, ui: Admin, port: 4000 }
 }`;
 
 const has = (files: Map<string, string>, re: RegExp): boolean =>

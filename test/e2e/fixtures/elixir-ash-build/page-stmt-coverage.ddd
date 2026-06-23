@@ -33,7 +33,7 @@ system PageStmtCoverage {
   storage primary { type: postgres }
   resource cState { for: C, kind: state, use: primary }
   deployable phoenixApp {
-    platform: elixir
+    platform: elixir { foundation: ash }
     contexts: [C]
     dataSources: [cState]
     serves: CoverageApi

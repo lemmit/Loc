@@ -72,12 +72,16 @@ describe("vanilla containment support gate", () => {
   });
 
   it("accepts an entity containment on the Ash foundation (embedded resources / relationships)", async () => {
-    // Default `platform: elixir` is the Ash foundation, which persists parts on
-    // both shapes.
-    expect(await containmentErrors(sys("elixir", { contains: true }))).toEqual([]);
-    expect(await containmentErrors(sys("elixir", { contains: true, shape: "embedded" }))).toEqual(
+    // The Ash foundation persists parts on both shapes (post D-VANILLA-DEFAULT
+    // ash is the explicit opt-in; bare `platform: elixir` is now vanilla).
+    expect(await containmentErrors(sys("elixir { foundation: ash }", { contains: true }))).toEqual(
       [],
     );
+    expect(
+      await containmentErrors(
+        sys("elixir { foundation: ash }", { contains: true, shape: "embedded" }),
+      ),
+    ).toEqual([]);
   });
 
   it("does not fire for non-elixir backends (this gate is vanilla-only)", async () => {

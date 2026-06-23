@@ -863,7 +863,7 @@ describe("validation", () => {
           subdomain M { context T { } }
           ui WebApp { }
           deployable fullstack {
-            platform: elixir
+            platform: elixir { foundation: ash }
             contexts: [T]
             ui: WebApp
             port: 4000

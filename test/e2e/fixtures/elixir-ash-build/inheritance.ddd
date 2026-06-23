@@ -33,7 +33,7 @@ system Parties {
   storage pg { type: postgres }
   resource partiesState { for: Parties, kind: state, use: pg }
   deployable phoenixApp {
-    platform: elixir
+    platform: elixir { foundation: ash }
     contexts: [Parties]
     dataSources: [partiesState]
     serves: PartiesApi

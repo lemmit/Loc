@@ -47,8 +47,8 @@ describe("saving-shape capability validation", () => {
     expect(await shapeErrors(sys("node", "embedded"))).toEqual([]);
   });
 
-  it("rejects shape(document) on a phoenix deployable (defaults to ash — no document emitter)", async () => {
-    const errs = await shapeErrors(sys("elixir", "document"));
+  it("rejects shape(document) on a phoenix ash deployable (foundation: ash — no document emitter)", async () => {
+    const errs = await shapeErrors(sys("elixir { foundation: ash }", "document"));
     expect(errs.length).toBe(1);
     expect(errs[0]).toContain("shape(document)");
     expect(errs[0]).toContain("Cart");
@@ -110,7 +110,7 @@ system Shop {
   }
   storage pg { type: postgres }
   resource shopState { for: Shop, kind: state, use: pg, shape: document }
-  deployable api { platform: elixir, contexts: [Shop], dataSources: [shopState], port: 4000 }
+  deployable api { platform: elixir { foundation: ash }, contexts: [Shop], dataSources: [shopState], port: 4000 }
 }
 `;
     const errs = await shapeErrors(src);

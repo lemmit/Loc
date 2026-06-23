@@ -28,7 +28,7 @@ system Sys {
   resource ordersState { for: Orders, kind: state, use: primary }
   ui WebApp {}
   deployable api {
-    platform: elixir
+    platform: elixir { foundation: ash }
     contexts: [Orders]
     dataSources: [ordersState]
     ui: WebApp

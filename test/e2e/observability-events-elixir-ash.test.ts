@@ -110,7 +110,7 @@ const FIXTURE_DDD = `system PhxObs {
   storage primary { type: postgres }
   resource salesState { for: Sales, kind: state, use: primary }
   deployable phoenixApp {
-    platform: elixir
+    platform: elixir { foundation: ash }
     contexts: [Sales]
     dataSources: [salesState]
     serves: SalesApi

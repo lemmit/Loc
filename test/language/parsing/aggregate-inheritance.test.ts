@@ -449,7 +449,9 @@ system Sys {
   });
 
   it("emits a Phoenix polymorphic reader: list_parties! on the domain module", async () => {
-    const { files } = generateSystems(await parseValid(TPC_TWO_CONCRETE("elixir", 4000)));
+    const { files } = generateSystems(
+      await parseValid(TPC_TWO_CONCRETE("elixir { foundation: ash }", 4000)),
+    );
     const paths = [...files.keys()];
     // Concrete subtypes emit Ash resources; the abstract base emits none.
     expect(paths.some((p) => p.endsWith("parties/customer.ex"))).toBe(true);

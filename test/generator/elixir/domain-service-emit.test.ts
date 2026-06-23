@@ -42,7 +42,7 @@ system Orders {
   storage primary { type: postgres }
   resource ordersState { for: Pricing, kind: state, use: primary }
   deployable shop {
-    platform: elixir
+    platform: elixir { foundation: ash }
     foundation: ${foundation}
     contexts: [Pricing]
     dataSources: [ordersState]

@@ -34,7 +34,7 @@ system Demo {
   api ProjectsApi from Projects
   deployable honoApi    { platform: node            contexts: [Catalog] serves: ProjectsApi port: 3000 }
   deployable dotnetApi  { platform: dotnet          contexts: [Catalog] serves: ProjectsApi port: 8080 }
-  deployable phoenixApi { platform: elixir contexts: [Catalog] serves: ProjectsApi port: 4000 }
+  deployable phoenixApi { platform: elixir { foundation: ash } contexts: [Catalog] serves: ProjectsApi port: 4000 }
 }
 `;
 

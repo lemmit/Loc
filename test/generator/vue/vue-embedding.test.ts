@@ -60,7 +60,9 @@ describe("vue embedding on backend hosts", () => {
   });
 
   it("phoenix host embeds the Vue SPA under assets/", async () => {
-    const out = await files(src("elixir"));
+    // Pin foundation: ash — the elixir SPA-embed path is exercised on the Ash
+    // foundation (post D-VANILLA-DEFAULT the bare default is vanilla LiveView).
+    const out = await files(src("elixir { foundation: ash }"));
     expect(out.has("app/assets/src/App.vue")).toBe(true);
     expect(out.get("app/assets/src/api/config.ts")).toContain('?? "/api"');
     // No LiveView page modules for the vue ui.

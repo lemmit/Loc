@@ -53,7 +53,7 @@ describe("event-sourced storage capability validation", () => {
     // names the Ash foundation as the constraint, distinguishes from a
     // Phoenix-platform limitation, points at foundation: vanilla as the
     // planned escape, and lists the today-actionable alternatives.
-    const errs = await esErrors(sys("elixir"));
+    const errs = await esErrors(sys("elixir { foundation: ash }"));
     expect(errs.length).toBe(1);
     const msg = errs[0];
     expect(msg).toContain("Account");
