@@ -608,7 +608,8 @@ export function renderJavaRepositoryImpl(
     ...(provenance
       ? [
           `        var __now = Instant.now();`,
-          `        for (var __lin : aggregate.drainProv()) {`,
+          `        var __prov = aggregate.drainProv();`,
+          `        for (var __lin : __prov) {`,
           `            provenanceRecords.save(new ProvenanceRecord(`,
           `                java.util.UUID.randomUUID().toString(),`,
           `                __lin.snapshotId(),`,
@@ -621,6 +622,9 @@ export function renderJavaRepositoryImpl(
           `                RequestContext.scopeId(),`,
           `                RequestContext.actorId(),`,
           `                RequestContext.parentId()));`,
+          `        }`,
+          `        if (!__prov.isEmpty()) {`,
+          `            CatalogLog.event("provenance_recorded", "debug", "aggregate", "${agg.name}", "count", __prov.size());`,
           `        }`,
         ]
       : []),

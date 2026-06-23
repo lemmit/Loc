@@ -5,6 +5,7 @@ import type {
   EnrichedBoundedContextIR,
 } from "../../../ir/types/loom-ir.js";
 import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { domainToRequestExpr, projectEntityExpr } from "../dto-mapping.js";
 import { renderCommand, renderCommandHandler } from "../emit.js";
@@ -83,9 +84,19 @@ export function emitCreateCommandAndHandler(
       `            CorrelationId = RequestContext.Current?.CorrelationId,\n` +
       `            ScopeId = RequestContext.Current?.ScopeId,\n` +
       `            ParentId = RequestContext.Current?.ParentId,\n` +
-      `        });\n`
+      `        });\n` +
+      `        ${renderDotnetLogCall("auditRecorded", [
+        { name: "action", valueExpr: `"create"` },
+        { name: "target", valueExpr: JSON.stringify(agg.name) },
+        { name: "actor", valueExpr: "RequestContext.Current?.PrincipalJson()" },
+      ])}\n`
     : "";
-  const createAuditDeps = auditCreate ? [{ type: "IAuditWriter", field: "_audit" }] : [];
+  const createAuditDeps = auditCreate
+    ? [
+        { type: "IAuditWriter", field: "_audit" },
+        { type: `ILogger<Create${agg.name}Handler>`, field: "_log" },
+      ]
+    : [];
   // `Domain.Common` is already in the base handler usings — don't repeat it
   // here (CS0105 duplicate-using is an error under /warnaserror).
   const createAuditUsings = auditCreate
@@ -93,6 +104,7 @@ export function emitCreateCommandAndHandler(
         `${ns}.Application.Common`,
         `${ns}.Application.${plural(agg.name)}.Responses`,
         `${ns}.Infrastructure.Persistence`,
+        `Microsoft.Extensions.Logging`,
       ]
     : [];
   out.set(
@@ -177,9 +189,19 @@ export function emitDestroyCommandAndHandler(
       `            CorrelationId = RequestContext.Current?.CorrelationId,\n` +
       `            ScopeId = RequestContext.Current?.ScopeId,\n` +
       `            ParentId = RequestContext.Current?.ParentId,\n` +
-      `        });\n`
+      `        });\n` +
+      `        ${renderDotnetLogCall("auditRecorded", [
+        { name: "action", valueExpr: `"destroy"` },
+        { name: "target", valueExpr: JSON.stringify(agg.name) },
+        { name: "actor", valueExpr: "RequestContext.Current?.PrincipalJson()" },
+      ])}\n`
     : "";
-  const destroyAuditDeps = auditDestroy ? [{ type: "IAuditWriter", field: "_audit" }] : [];
+  const destroyAuditDeps = auditDestroy
+    ? [
+        { type: "IAuditWriter", field: "_audit" },
+        { type: `ILogger<Destroy${agg.name}Handler>`, field: "_log" },
+      ]
+    : [];
   // `Domain.Common` is already in the base handler usings — don't repeat it
   // here (CS0105 duplicate-using is an error under /warnaserror).
   const destroyAuditUsings = auditDestroy
@@ -187,6 +209,7 @@ export function emitDestroyCommandAndHandler(
         `${ns}.Application.Common`,
         `${ns}.Application.${plural(agg.name)}.Responses`,
         `${ns}.Infrastructure.Persistence`,
+        `Microsoft.Extensions.Logging`,
       ]
     : [];
   out.set(
@@ -398,15 +421,26 @@ export function emitOperationCommandAndHandler(
         `            CorrelationId = RequestContext.Current?.CorrelationId,\n` +
         `            ScopeId = RequestContext.Current?.ScopeId,\n` +
         `            ParentId = RequestContext.Current?.ParentId,\n` +
-        `        });\n`
+        `        });\n` +
+        `        ${renderDotnetLogCall("auditRecorded", [
+          { name: "action", valueExpr: JSON.stringify(op.name) },
+          { name: "target", valueExpr: JSON.stringify(agg.name) },
+          { name: "actor", valueExpr: "RequestContext.Current?.PrincipalJson()" },
+        ])}\n`
       : "";
-    const auditDeps = audited ? [{ type: "IAuditWriter", field: "_audit" }] : [];
+    const auditDeps = audited
+      ? [
+          { type: "IAuditWriter", field: "_audit" },
+          { type: `ILogger<${upperFirst(op.name)}Handler>`, field: "_log" },
+        ]
+      : [];
     const auditUsings = audited
       ? [
           `${ns}.Application.Common`,
           `${ns}.Application.${plural(agg.name)}.Responses`,
           `${ns}.Domain.Common`,
           `${ns}.Infrastructure.Persistence`,
+          `Microsoft.Extensions.Logging`,
         ]
       : [];
     // A return-typed op threads the union value: capture the method result,

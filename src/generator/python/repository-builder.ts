@@ -865,6 +865,9 @@ function saveMethod(
     out.push("                    for __lin in __traces");
     out.push("                ],");
     out.push("            )");
+    out.push(
+      `            log("debug", "provenance_recorded", aggregate=${JSON.stringify(agg.name)}, count=len(__traces))`,
+    );
   }
   // One transaction per request: the session dependency commits.
   out.push("        await self._session.flush()");
@@ -1024,6 +1027,7 @@ function recordAuditMethod(): string {
     "            )",
     "        )",
     "        await self._session.flush()",
+    '        log("debug", "audit_recorded", action=action, target=target_type, actor=actor)',
   );
 }
 
