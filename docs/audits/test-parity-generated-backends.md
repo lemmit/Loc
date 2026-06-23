@@ -164,15 +164,28 @@ Recommendation: make python/java `throw` on the no-matcher /
 unknown-matcher path too, matching node/dotnet, so an invariant
 violation surfaces identically everywhere.
 
-### F4 — Emitter test coverage is uneven (minor)
+### F4 — Emitter test coverage is uneven (minor) — *fixed*
 
-`test/generator/create-in-test-emission.test.ts` asserts the
-`create({…})` coercion only for **TS and .NET**. The **Python and Java**
-domain-test emitters have **no dedicated unit test** (grep for
-`renderPyTestsFile` / `renderJavaTestsFile` across `test/` finds
-none) — they are only exercised indirectly if a build-gated corpus
-example happens to contain `test` blocks. The emitters that emit are
-themselves unequally guarded.
+> **Update (shipped):** `test/generator/py-java-test-emission.test.ts` is the
+> dedicated coverage F4 asked for — the Python/Java sibling of
+> `create-in-test-emission.test.ts`.  It pins both emitters' distinctive
+> lowering over shared fixtures: keyword-arg vs positional `create({…})`
+> (omitted optional → Python factory default vs Java `null`; defaulted field →
+> its literal), typed coercion (`X id` brand, value-object positional ctor,
+> datetime), the matcher → `assert ==` / `assertEquals` + BigDecimal
+> `compareTo`, and `toThrow` → `pytest.raises` / `assertThrows`.  Python's
+> synthetic-actor threading into a `currentUser`-gated op is covered too.
+>
+> Found while writing it (not fixed — separate follow-up): Java threads the
+> stub actor only when the call's receiver type is `entity`, so a *let-bound*
+> `o.cancel()` on a `currentUser`-gated op emits no actor argument (Python
+> resolves it via its let-binding type table).  The test deliberately doesn't
+> lock that path.
+
+The original gap: `test/generator/create-in-test-emission.test.ts` asserted the
+`create({…})` coercion only for **TS and .NET**; the **Python and Java**
+domain-test emitters had **no dedicated unit test** — exercised only indirectly
+when a build-gated corpus example happened to carry `test` blocks.
 
 ### F5 — vanilla value objects weren't validated at construction (runtime gap) — *fixed*
 
@@ -283,5 +296,7 @@ default would fail only on vanilla.
 6. **Unify the no-matcher / unknown-matcher failure mode** across the
    emitters (F3): python and java should `throw`, matching node/dotnet.
    (Both new elixir emitters already `throw` / skip on an unknown shape.)
-5. **Backfill emitter unit tests** for the python and java domain-test
-   emitters (F4), mirroring `create-in-test-emission.test.ts`.
+7. ~~**Backfill emitter unit tests** for the python and java domain-test
+   emitters (F4)~~ — **done**.  `test/generator/py-java-test-emission.test.ts`
+   mirrors `create-in-test-emission.test.ts` for Python + Java (create
+   coercion, matchers, `toThrow`, typed inputs, actor threading).
