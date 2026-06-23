@@ -47,6 +47,13 @@ const SOURCE = `system MiniAtomic {
         operation rename(newName: string) {
           precondition newName.length > 0
         }
+
+        // Function-form precondition that references the op ARGUMENT
+        // (cross-field newName != name) → the validate fn must bind new_name
+        // via Ash.Changeset.get_argument or it's an undefined var.
+        operation relabel(newName: string) {
+          precondition newName != name
+        }
       }
       repository Projects for Project { }
     }
@@ -98,6 +105,20 @@ describe("Phoenix --warnings-as-errors hardening", () => {
     const resource = files.get("phoenix_app/lib/phoenix_app/sales/project.ex")!;
     // The `sync` action's precondition lowers to `validate fn …`.
     expect(resource).toMatch(/update :sync do\s*\n\s*require_atomic\? false/);
+  });
+
+  it("binds the op argument in a function-form precondition validate (get_argument)", async () => {
+    const files = await build();
+    const resource = files.get("phoenix_app/lib/phoenix_app/sales/project.ex")!;
+    const relabel = resource.slice(
+      resource.indexOf("update :relabel do"),
+      resource.indexOf("update :relabel do") + 400,
+    );
+    // The validate fn references `new_name`, so it must bind it from the
+    // changeset argument (and `record` for the `name` attribute).
+    expect(relabel).toContain("new_name = Ash.Changeset.get_argument(changeset, :new_name)");
+    expect(relabel).toContain("record = changeset.data");
+    expect(relabel).toMatch(/if new_name != record\.name/);
   });
 
   it("leaves a built-in-validation-only action atomic (no opt-out)", async () => {

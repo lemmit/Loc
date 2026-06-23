@@ -300,6 +300,10 @@ describe.skipIf(!ENABLED)(
         // compile.  Pins both the changeset-build emission and that `config/test.exs`
         // lets `mix test` load.
         { name: "domain-tests.ddd" },
+        // A plain mutating op whose function-form `precondition` references the
+        // op argument → the Ash `validate fn` must bind it via get_argument
+        // (else `undefined variable`).  Pins the binding against real Ash 3.x.
+        { name: "op-precondition-arg.ddd" },
       ]),
     )("$name → mix compile --warnings-as-errors", ({ name }) => {
       const fixturePath = path.join(fixturesDir, name);
