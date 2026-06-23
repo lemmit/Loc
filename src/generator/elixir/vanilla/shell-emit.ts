@@ -14,7 +14,19 @@
 
 import { AUTH_BASE_PATH } from "../../../util/api-base.js";
 import type { ApiRoute } from "../api-emit.js";
-import { renderApplication, renderLogFormatter, renderRequestContext } from "../shell/runtime.js";
+import type { LiveRoute } from "../liveview-emit.js";
+import {
+  renderApplication,
+  renderLiveNav,
+  renderLogFormatter,
+  renderRequestContext,
+} from "../shell/runtime.js";
+import {
+  renderAppLayout,
+  renderCoreComponents,
+  renderLayouts,
+  renderRootLayout,
+} from "../shell/web.js";
 import { renderTelemetry } from "../telemetry-emit.js";
 
 export function emitVanillaShellFiles(
@@ -25,8 +37,19 @@ export function emitVanillaShellFiles(
   extraHexDeps: Record<string, string> = {},
   authEnabled = false,
   oidc = false,
+  // LiveView spine — when the deployable mounts a HEEx `ui:`, these are the
+  // `live "<route>", <Module>` entries spliced into a `live_session` and the
+  // flag that turns on the live socket + browser pipeline + LiveView deps.
+  // Empty / false ⇒ the byte-identical JSON-API-only shell (no live_view dep,
+  // no browser pipeline, no layouts/CoreComponents/Nav).
+  liveRoutes: LiveRoute[] = [],
+  hasSidebar = false,
 ): void {
-  out.set("mix.exs", renderVanillaMixExs(appName, appModule, extraHexDeps, authEnabled && oidc));
+  const hasLiveView = liveRoutes.length > 0 || hasSidebar;
+  out.set(
+    "mix.exs",
+    renderVanillaMixExs(appName, appModule, extraHexDeps, authEnabled && oidc, hasLiveView),
+  );
   out.set(".formatter.exs", renderVanillaFormatterExs());
   // Application boot — shared renderer emits the catalog
   // `server_starting` / `server_listening` / `server_shutdown` /
@@ -51,12 +74,33 @@ export function emitVanillaShellFiles(
   // Ambient execution-context carrier (Logger.metadata) — the Plug is mounted
   // in the endpoint after Plug.RequestId; shared with the ash foundation.
   out.set(`lib/${appName}/request_context.ex`, renderRequestContext(appModule));
-  out.set(`lib/${appName}_web.ex`, renderVanillaWebModule(appName, appModule));
-  out.set(`lib/${appName}_web/endpoint.ex`, renderVanillaEndpoint(appName, appModule));
+  out.set(`lib/${appName}_web.ex`, renderVanillaWebModule(appName, appModule, hasLiveView));
+  out.set(`lib/${appName}_web/endpoint.ex`, renderVanillaEndpoint(appName, appModule, hasLiveView));
   out.set(
     `lib/${appName}_web/router.ex`,
-    renderVanillaRouter(appModule, apiRoutes, authEnabled, oidc),
+    renderVanillaRouter(appModule, apiRoutes, authEnabled, oidc, liveRoutes),
   );
+  // LiveView spine files — only when a HEEx `ui:` is mounted.  The
+  // CoreComponents library + layouts (module + root/app HEEx) + the Nav
+  // on_mount hook are all foundation-neutral, so they reuse the shared Ash
+  // shell renderers verbatim.  Omitted on a JSON-API-only deployable (no
+  // LiveView dep to support them).
+  if (hasLiveView) {
+    out.set(
+      `lib/${appName}_web/components/core_components.ex`,
+      renderCoreComponents(appModule),
+    );
+    out.set(`lib/${appName}_web/components/layouts.ex`, renderLayouts(appName, appModule));
+    out.set(
+      `lib/${appName}_web/components/layouts/root.html.heex`,
+      renderRootLayout(appName),
+    );
+    out.set(
+      `lib/${appName}_web/components/layouts/app.html.heex`,
+      renderAppLayout(appModule, hasSidebar, authEnabled),
+    );
+    out.set(`lib/${appName}_web/nav.ex`, renderLiveNav(appModule));
+  }
   out.set(`lib/${appName}_web/controllers/error_json.ex`, renderVanillaErrorJson(appModule));
   out.set(
     `lib/${appName}_web/controllers/health_controller.ex`,
@@ -74,7 +118,13 @@ function renderVanillaMixExs(
   appModule: string,
   extraHexDeps: Record<string, string>,
   oidc: boolean,
+  hasLiveView: boolean,
 ): string {
+  // LiveView dep — only when the deployable mounts a HEEx `ui:`.
+  // `phoenix_html` is already in the base set; LiveView adds
+  // `phoenix_live_view` (the `~H`/`live` runtime).  Pinned to the same
+  // `~> 1.0` the Ash shell uses (shell/project.ts:68).
+  const liveViewDep = hasLiveView ? `,\n      {:phoenix_live_view, "~> 1.0"}` : "";
   // Resource-adapter hex deps (s3 → ex_aws_s3, rabbitmq → amqp, restApi →
   // req) ride alongside the core Phoenix/Ecto set.  Sorted for stable output.
   // Values already include the surrounding `"…"` (matching the Ash
@@ -122,7 +172,7 @@ defmodule ${appModule}.MixProject do
       {:postgrex, "~> 0.20"},
       {:phoenix_html, "~> 4.1"},
       {:jason, "~> 1.4"},
-      {:plug_cowboy, "~> 2.6"}${extraBlock}${oidcDep}
+      {:plug_cowboy, "~> 2.6"}${liveViewDep}${extraBlock}${oidcDep}
     ]
   end
 
@@ -155,14 +205,25 @@ end
 `;
 }
 
-function renderVanillaWebModule(_appName: string, appModule: string): string {
-  return `# Auto-generated.
-defmodule ${appModule}Web do
+function renderVanillaWebModule(
+  _appName: string,
+  appModule: string,
+  hasLiveView: boolean,
+): string {
+  const webModule = `${appModule}Web`;
+  // LiveView spine: a HEEx `ui:` needs the `:live_view` / `:html` /
+  // `:component` quotes (each pulls in the `~H` sigil + CoreComponents +
+  // verified routes), and the router quote must import
+  // `Phoenix.LiveView.Router` so the `live` macro is in scope.  A JSON-API
+  // -only deployable emits the minimal byte-identical web module instead.
+  if (!hasLiveView) {
+    return `# Auto-generated.
+defmodule ${webModule} do
   @moduledoc """
   The entrypoint for defining the web interface.  Use the helpers to
   build controllers, routers, etc:
 
-      use ${appModule}Web, :controller
+      use ${webModule}, :controller
   """
 
   def controller do
@@ -185,9 +246,109 @@ defmodule ${appModule}Web do
   end
 end
 `;
+  }
+  return `# Auto-generated.
+defmodule ${webModule} do
+  @moduledoc """
+  The entrypoint for defining the web interface, such as controllers,
+  components, and so on.  This can be used in your application as:
+
+      use ${webModule}, :live_view
+
+  """
+
+  def live_view do
+    quote do
+      use Phoenix.LiveView, layout: {${webModule}.Layouts, :app}
+      unquote(html_helpers())
+    end
+  end
+
+  def live_component do
+    quote do
+      use Phoenix.LiveComponent
+      unquote(html_helpers())
+    end
+  end
+
+  def controller do
+    quote do
+      use Phoenix.Controller, formats: [:json]
+      import Plug.Conn
+    end
+  end
+
+  def router do
+    quote do
+      use Phoenix.Router
+      import Plug.Conn
+      import Phoenix.Controller
+      import Phoenix.LiveView.Router
+    end
+  end
+
+  def verified_routes do
+    quote do
+      use Phoenix.VerifiedRoutes,
+        endpoint: ${webModule}.Endpoint,
+        router: ${webModule}.Router,
+        statics: ~w(assets fonts images favicon.ico robots.txt)
+    end
+  end
+
+  def component do
+    quote do
+      use Phoenix.Component
+      unquote(html_helpers())
+    end
+  end
+
+  def html do
+    quote do
+      use Phoenix.Component
+      import Phoenix.Controller,
+        only: [get_csrf_token: 0, view_module: 1, view_template: 1]
+      unquote(html_helpers())
+    end
+  end
+
+  defp html_helpers do
+    quote do
+      import Phoenix.HTML
+      import ${webModule}.CoreComponents
+      alias Phoenix.LiveView.JS
+      unquote(verified_routes())
+    end
+  end
+
+  defmacro __using__(which) when is_atom(which) do
+    apply(__MODULE__, which, [])
+  end
+end
+`;
 }
 
-function renderVanillaEndpoint(appName: string, appModule: string): string {
+function renderVanillaEndpoint(
+  appName: string,
+  appModule: string,
+  hasLiveView: boolean,
+): string {
+  // LiveView spine: the live socket carries the WebSocket connection
+  // (session forwarded so a future auth slice can read it), and
+  // `Plug.Static` serves `priv/static` so the root layout's
+  // `~p"/assets/app.css"` / `app.js` references resolve.  A JSON-API-only
+  // deployable serves no static assets and mounts no live socket.
+  const liveViewPlugs = hasLiveView
+    ? `  socket "/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]]
+
+  plug Plug.Static,
+    at: "/",
+    from: :${appName},
+    gzip: false,
+    only: ~w(assets fonts images favicon.ico robots.txt)
+
+`
+    : "";
   return `# Auto-generated.
 defmodule ${appModule}Web.Endpoint do
   use Phoenix.Endpoint, otp_app: :${appName}
@@ -199,7 +360,7 @@ defmodule ${appModule}Web.Endpoint do
     same_site: "Lax"
   ]
 
-  plug Plug.RequestId
+${liveViewPlugs}  plug Plug.RequestId
   plug ${appModule}.RequestContext
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
@@ -221,10 +382,51 @@ function renderVanillaRouter(
   apiRoutes: ApiRoute[],
   authEnabled: boolean,
   oidc: boolean,
+  liveRoutes: LiveRoute[] = [],
 ): string {
   const routeLines = apiRoutes
     .map((r) => `    ${r.method} "${r.path}", ${r.controller}, ${r.action}`)
     .join("\n");
+  // LiveView spine: a `:browser` pipeline (session + live-flash + root
+  // layout + CSRF/secure headers) and a `live_session :default` wrapping
+  // the live routes so the `${appModule}Web.Nav` on_mount hook assigns
+  // `@current_path` on every page (the sidebar reads it).  Live module
+  // names strip the leading `${appModule}Web.` since they sit inside a
+  // `scope "/", ${appModule}Web` block.  Emitted only when the deployable
+  // mounts a HEEx `ui:`.
+  const hasLiveView = liveRoutes.length > 0;
+  const webModule = `${appModule}Web`;
+  const liveLines = liveRoutes
+    .map((r) => {
+      const local = r.liveModule.startsWith(`${webModule}.`)
+        ? r.liveModule.slice(webModule.length + 1)
+        : r.liveModule;
+      return `      live ${JSON.stringify(r.route)}, ${local}`;
+    })
+    .join("\n");
+  const browserPipeline = hasLiveView
+    ? `
+  pipeline :browser do
+    plug :accepts, ["html"]
+    plug :fetch_session
+    plug :fetch_live_flash
+    plug :put_root_layout, html: {${webModule}.Layouts, :root}
+    plug :protect_from_forgery
+    plug :put_secure_browser_headers
+  end
+`
+    : "";
+  const liveScope = hasLiveView
+    ? `
+  scope "/", ${webModule} do
+    pipe_through :browser
+
+    live_session :default, on_mount: [${webModule}.Nav] do
+${liveLines}
+    end
+  end
+`
+    : "";
   // Auth plug in the :api pipeline — populates `conn.assigns.current_user` from
   // the Bearer JWT so principal (tenancy) filters can scope reads by the actor.
   // Mirrors the Ash router (`shell/runtime.ts`).
@@ -250,7 +452,7 @@ function renderVanillaRouter(
   return `# Auto-generated.
 defmodule ${appModule}Web.Router do
   use ${appModule}Web, :router
-
+${browserPipeline}
   pipeline :api do
     plug :accepts, ["json"]${authApiPlug}
   end
@@ -262,7 +464,7 @@ defmodule ${appModule}Web.Router do
   scope "/ready" do
     get "/", ${appModule}Web.HealthController, :readiness
   end
-${authScope}
+${liveScope}${authScope}
   scope "/api", ${appModule}Web do
     pipe_through :api
 ${routeLines}

@@ -59,8 +59,17 @@ export function emitLiveViewPages(args: {
   sys: SystemIR;
   appName: string;
   appModule: string;
+  /** Persistence foundation of the host deployable.  Defaults to `"ash"`
+   *  (the Ash code-interface read shapes — `list_<agg>s!()` / `get_<agg>!()`
+   *  + `rescue Ash.Error.Query.NotFound`).  `"vanilla"` swaps the reads for
+   *  the plain-Ecto vanilla context API (`list_<agg>s()` → `{:ok, list}`,
+   *  `get_<agg>(id)` → `{:ok, record} | {:error, :not_found}`).  Only the
+   *  read emission branches; the form-lifecycle paths (Ash-only for now) are
+   *  unreachable on a read-only `ui`. */
+  foundation?: "ash" | "vanilla";
 }): { files: Map<string, string>; routes: LiveRoute[] } {
   const { contexts, deployable, sys, appName, appModule } = args;
+  const foundation = args.foundation ?? "ash";
   const out = new Map<string, string>();
   const routes: LiveRoute[] = [];
 
@@ -191,6 +200,7 @@ export function emitLiveViewPages(args: {
       partContextModule,
       componentInfo,
       authEnabled,
+      foundation,
     });
     out.set(filePath, source);
     routes.push({ route: page.route, liveModule });
@@ -273,6 +283,9 @@ interface RenderArgs {
   /** True when the deployable runs `auth: required` — drives currentUser
    *  action-button gating in the page body (off ⇒ byte-identical). */
   authEnabled: boolean;
+  /** Persistence foundation — `"ash"` (default) emits the Ash code-interface
+   *  read shapes; `"vanilla"` emits the plain-Ecto vanilla context reads. */
+  foundation: "ash" | "vanilla";
 }
 
 interface ComponentActionInfo {
@@ -415,6 +428,7 @@ function renderLiveView(a: RenderArgs): string {
     partContextModule,
     componentInfo,
     authEnabled,
+    foundation,
   } = a;
   const webModule = `${appModule}Web`;
 
@@ -465,6 +479,7 @@ function renderLiveView(a: RenderArgs): string {
     walked.queryBindings,
     walked.formBindings,
     contextModuleByAggName,
+    foundation,
   );
   const detailBaseRoute = page.route ? page.route.replace(/\/:[^/]+$/, "") : null;
   // Hoist `Action(...)` handlers from the page body + every component
@@ -616,6 +631,7 @@ function renderHandleParams(
   queryBindings: import("./heex-walker.js").QueryBinding[],
   formBindings: import("./heex-walker.js").FormBinding[],
   contextModuleByAggName: ReadonlyMap<string, string>,
+  foundation: "ash" | "vanilla",
 ): string {
   const paramAssigns: string[] = [];
   for (const p of page.params) {
@@ -638,15 +654,33 @@ function renderHandleParams(
     if (qb.kind === "single") {
       // Operation forms for this aggregate bind to the loaded
       // record via `for_update` — assigned here, in the success
-      // branch, where `record` is in scope.
-      const opAssigns = formBindings
-        .filter((fb) => fb.kind === "operation" && fb.name === qb.aggregate)
-        .map(
-          (fb) =>
-            `        |> assign(:${fb.op}_form, AshPhoenix.Form.for_update(record, :${fb.op}, as: "${fb.op}") |> to_form())`,
+      // branch, where `record` is in scope.  AshPhoenix-only; a
+      // read-only vanilla `ui` carries no operation forms.
+      const opAssigns =
+        foundation === "vanilla"
+          ? []
+          : formBindings
+              .filter((fb) => fb.kind === "operation" && fb.name === qb.aggregate)
+              .map(
+                (fb) =>
+                  `        |> assign(:${fb.op}_form, AshPhoenix.Form.for_update(record, :${fb.op}, as: "${fb.op}") |> to_form())`,
+              );
+      if (foundation === "vanilla") {
+        // Vanilla read: `get_<agg>(id)` is a plain-Ecto fetch returning
+        // `{:ok, record} | {:error, :not_found}` (no exception to rescue).
+        // The `:not_found` / `:error` sentinels feed the same 4-way `cond`
+        // the Ash path's rescue arms produce.
+        loadBlocks.push(
+          `    socket =
+      case ${ctxModule}.get_${aggSnake}(socket.assigns.id) do
+        {:ok, record} -> assign(socket, :${qb.assign}, record)
+        {:error, :not_found} -> assign(socket, :${qb.assign}, :not_found)
+        _ -> assign(socket, :${qb.assign}, :error)
+      end`,
         );
-      loadBlocks.push(
-        `    socket =
+      } else {
+        loadBlocks.push(
+          `    socket =
       try do
         record = ${ctxModule}.get_${aggSnake}!(socket.assigns.id)
 
@@ -655,6 +689,18 @@ function renderHandleParams(
 ${opAssigns.length > 0 ? opAssigns.join("\n") + "\n" : ""}      rescue
         Ash.Error.Query.NotFound -> assign(socket, :${qb.assign}, :not_found)
         Ash.Error.Invalid -> assign(socket, :${qb.assign}, :error)
+      end`,
+        );
+      }
+    } else if (foundation === "vanilla") {
+      // Vanilla list read: `list_<agg>s()` returns `{:ok, list}` (the repo
+      // wraps `Repo.all/1`).  The `{:error, _}` arm maps to the `:error`
+      // sentinel the list `cond` renders as the error slot.
+      loadBlocks.push(
+        `    socket =
+      case ${ctxModule}.list_${aggSnake}s() do
+        {:ok, items} -> assign(socket, :${qb.assign}, items)
+        _ -> assign(socket, :${qb.assign}, :error)
       end`,
       );
     } else {

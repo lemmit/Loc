@@ -310,6 +310,16 @@ describe.skipIf(!ENABLED)(
         // `:cart` assign + `update(:cart, &Cart.fn/1)` handlers.  Pins that the
         // emitted store module + LiveView wiring compile against real Ash 3.x.
         { name: "store-liveview.ddd" },
+        // Vanilla LiveView READ (de-Ash port, slice 2-A): a `foundation:
+        // vanilla` deployable with a hand-authored read-only `ui:` emits a
+        // Phoenix LiveView app over the plain-Ecto context API.  Pins the
+        // vanilla LiveView spine (live socket, browser pipeline, live_session,
+        // web-module live quotes, CoreComponents, layouts, Nav, the
+        // phoenix_live_view dep) AND the vanilla read pattern-matches
+        // (`list_<agg>s()` → `{:ok, list}`; `get_<agg>(id)` → `{:ok, record} |
+        // {:error, :not_found}`) against `mix compile --warnings-as-errors`.
+        // The decisive check that LiveView compiles on plain Ecto without Ash.
+        { name: "vanilla-liveview-read.ddd" },
       ]),
     )("$name → mix compile --warnings-as-errors", ({ name }) => {
       const fixturePath = path.join(fixturesDir, name);

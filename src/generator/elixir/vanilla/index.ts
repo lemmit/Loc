@@ -14,6 +14,7 @@
 //   Later slices: policies, ProblemDetails parity, workflows + views, CI.
 // ---------------------------------------------------------------------------
 
+import type { PageNameCtx } from "../../../ir/util/page-kind.js";
 import {
   buildPhoenixResourceModules,
   emitPhoenixResourceFiles,
@@ -23,11 +24,14 @@ import { actorIdKey, emitAuth } from "../auth-emit.js";
 import { emitDispatch, emitWorkflowStateSchemas } from "../dispatch-emit.js";
 import { emitDomainServices } from "../domain-service-emit.js";
 import type { GenerateElixirArgs } from "../index.js";
+import { emitLiveViewPages, type LiveRoute } from "../liveview-emit.js";
 import { emitMigrations } from "../migrations-emit.js";
 import { renderRelEnv, renderRelease, renderRelServer } from "../shell/config.js";
 import { renderDockerfile, renderDockerignore } from "../shell/project.js";
 import { toModulePrefix, toSnakeApp } from "../shell-emit.js";
+import { renderSidebarComponent } from "../sidebar-emit.js";
 import { emitAggregateTests, emitTestHelper } from "../tests-emit.js";
+import { renderThemeCss } from "../theme-emit.js";
 import { emitVanillaApiControllers } from "./api-emit.js";
 import { emitVanillaAudit } from "./audit-emit.js";
 import { emitVanillaChangesets } from "./changeset-emit.js";
@@ -166,6 +170,57 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // command action (operation / create / destroy) (audit-and-logging.md).
   emitVanillaAudit(appName, appModule, contexts, out);
 
+  // --- LiveView pages (vanilla foundation) ----------------------------------
+  // A `foundation: vanilla` deployable that mounts a HEEx `ui:` (not an
+  // embedded SPA) now emits Phoenix LiveView pages over the plain-Ecto context
+  // API — `emitLiveViewPages({ foundation: "vanilla" })` swaps the Ash
+  // code-interface reads for the vanilla `list_<agg>s()` / `get_<agg>(id)`
+  // tuple-returning fetches.  The collected `liveRoutes` are spliced into the
+  // router's `live_session` by `emitVanillaShellFiles` below.  An embedded-SPA
+  // (`framework: react|vue|svelte`) ui owns its own UI, so no LiveView pages.
+  const embedReact =
+    deployable.uiFramework === "react" ||
+    deployable.uiFramework === "vue" ||
+    deployable.uiFramework === "svelte";
+  const liveRoutes: LiveRoute[] = [];
+  let hasSidebar = false;
+  if (deployable.uiName && !embedReact) {
+    const { files: liveFiles, routes } = emitLiveViewPages({
+      contexts,
+      deployable,
+      sys,
+      appName,
+      appModule,
+      foundation: "vanilla",
+    });
+    for (const [path, content] of liveFiles) out.set(path, content);
+    liveRoutes.push(...routes);
+
+    // Sidebar + theme — emitted exactly as the Ash path does (the sidebar
+    // derivation + theme renderer are both foundation-neutral).
+    const ui = sys.uis.find((u) => u.name === deployable.uiName);
+    if (ui) {
+      const nameCtx: PageNameCtx = {
+        aggregateNames: contexts.flatMap((c) => c.aggregates.map((a) => a.name)),
+        workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
+        viewNames: contexts.flatMap((c) => c.views.map((v) => v.name)),
+      };
+      out.set(
+        `lib/${appName}_web/components/sidebar.ex`,
+        renderSidebarComponent({
+          ui,
+          appName,
+          appModule,
+          nameCtx,
+          authEnabled: deployable.auth?.required === true,
+        }),
+      );
+      hasSidebar = true;
+      out.set("priv/static/assets/theme.css", renderThemeCss(sys.theme));
+    }
+  }
+  const hasLiveView = liveRoutes.length > 0 || hasSidebar;
+
   // Auth modules — the foundation-agnostic Auth plug (Bearer-JWT → `conn.assigns
   // .current_user`), LiveAuth on_mount, and /auth controller.  Emitted when the
   // deployable requires auth — the request principal a tenancy (principal)
@@ -178,11 +233,13 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     appModule,
   });
   for (const [path, content] of authFiles) {
-    // Skip the LiveView `on_mount` hook — it imports `Phoenix.Component` /
-    // `Phoenix.LiveView`, which the vanilla foundation has no dep for (it's a
-    // JSON API with no live_session).  Dead code here, and it would break
-    // `mix compile --warnings-as-errors`.
-    if (path.endsWith("/live_auth.ex")) continue;
+    // The LiveView `on_mount` hook imports `Phoenix.Component` /
+    // `Phoenix.LiveView` — only available once the deployable mounts a HEEx
+    // `ui:` (which pulls in the `phoenix_live_view` dep + a `live_session`).
+    // A JSON-API-only vanilla deployable has no LiveView dep, so the hook would
+    // be dead code that breaks `mix compile --warnings-as-errors`; skip it
+    // there.  When LiveView IS emitted, keep it (the live_session can mount it).
+    if (path.endsWith("/live_auth.ex") && !hasLiveView) continue;
     out.set(path, content);
   }
 
@@ -197,6 +254,8 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     resourceEmission.hexDeps,
     authEnabled,
     !!sys.auth?.oidc,
+    liveRoutes,
+    hasSidebar,
   );
 
   // Deployment + boot machinery — reused verbatim from the Ash shell because
