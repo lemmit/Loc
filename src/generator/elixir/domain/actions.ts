@@ -8,6 +8,7 @@
 import { isConstructible } from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
+  AssociationIR,
   BoundedContextIR,
   ContextStampAssignmentIR,
   ExprIR,
@@ -21,7 +22,7 @@ import {
   renderAshReturningOpAction,
 } from "../operation-returns-ash-emit.js";
 import type { RenderCtx } from "../render-expr.js";
-import { renderAshType, renderExpr } from "../render-expr.js";
+import { relationshipNameFor, renderAshType, renderExpr } from "../render-expr.js";
 import { renderElixirStatements } from "../render-stmt.js";
 import type { valueCollectionsWithVo } from "../value-collection-resource-emit.js";
 import {
@@ -115,6 +116,28 @@ end`;
 // Actions (operations)
 // ---------------------------------------------------------------------------
 
+/** The reference-collection (`Id<T>[]`) management seam for an Ash create/update
+ *  action — one `argument :<f>, {:array, :uuid}` + one `change manage_relationship`
+ *  per ref-collection field.  Set-replace by id: `:append_and_remove` looks each
+ *  input id up by primary key and relates the existing target (its preset is
+ *  `on_lookup: :relate, on_no_match: :error, on_missing: :unrelate`), so the join
+ *  rows end up exactly the given set without ever creating a target.  The exact
+ *  analogue of the VO-collection seam; the READ side
+ *  (the `<f>_through` m2m relationship + the `:<f>` `{:array, :uuid}` calculate +
+ *  the load preparation) is already emitted by domain-emit, and the wire encoder
+ *  now includes `:<f>` too — so create/update accepting the id list is the last
+ *  missing half.  Empty → byte-identical pre-ref-collection output. */
+function refCollManageLines(agg: AggregateIR, associations: AssociationIR[]): string[] {
+  return associations.flatMap((a) => {
+    const f = snake(a.fieldName);
+    const rel = relationshipNameFor(agg, a.fieldName);
+    return [
+      `      argument :${f}, {:array, :uuid}, allow_nil?: true`,
+      `      change manage_relationship(:${f}, :${rel}, type: :append_and_remove)`,
+    ];
+  });
+}
+
 export function renderActions(
   agg: AggregateIR,
   ctx: BoundedContextIR,
@@ -132,6 +155,11 @@ export function renderActions(
    *  `accept`ed as scalar attributes.  Empty → byte-identical pre-VO-collection
    *  output. */
   valueCollections: ReturnType<typeof valueCollectionsWithVo> = [],
+  /** Reference-collection fields (`party: Pokemon id[]`) — `many_to_many` join
+   *  resources managed via `manage_relationship` on create/update (NOT `accept`ed,
+   *  they're a calculated `{:array, :uuid}` on read).  Empty → byte-identical
+   *  pre-ref-collection output. */
+  associations: AssociationIR[] = [],
 ): string {
   const ops = agg.operations;
   // Ref-collection fields (`Id<T>[]`) aren't attributes on the resource (they
@@ -168,6 +196,10 @@ export function renderActions(
   });
   const vcCreateBody =
     valueCollections.length > 0 ? `\n${[...vcArgLines, ...vcManageLines].join("\n")}` : "";
+  // The reference-collection management seam — same shape, for `Id<T>[]` join
+  // fields (set-replace by id).  Appended to create alongside the VO seam.
+  const rcCreateBody =
+    associations.length > 0 ? `\n${refCollManageLines(agg, associations).join("\n")}` : "";
 
   // A non-constructible aggregate (no create surface — `!isConstructible`)
   // emits no `:create` action, matching the Hono/.NET backends and the
@@ -177,7 +209,7 @@ export function renderActions(
   const defaultCreate = isConstructible(agg)
     ? `    create :create do
       primary? true
-      accept [${fieldNames.join(", ")}]${vcCreateBody}
+      accept [${fieldNames.join(", ")}]${vcCreateBody}${rcCreateBody}
     end`
     : "";
 
@@ -188,7 +220,7 @@ export function renderActions(
   const opActions = ops.map((op) =>
     isAshReturningOpSupported(op)
       ? renderAshReturningOpAction(ctx, agg, op, ctxModule)
-      : renderOperationAction(op, renderCtx, ctxModule, valueCollections),
+      : renderOperationAction(op, renderCtx, ctxModule, valueCollections, agg, associations),
   );
 
   // Ash forbids two actions of the same name.  A mutate operation whose
@@ -298,6 +330,8 @@ function renderOperationAction(
   ctx: RenderCtx,
   _ctxModule: string,
   valueCollections: ReturnType<typeof valueCollectionsWithVo> = [],
+  agg?: AggregateIR,
+  associations: AssociationIR[] = [],
 ): string {
   // Value-object collection fields the op writes (e.g. crudish `update`'s
   // `lineItems := lineItems`): they are `has_many` relationships, not stored
@@ -305,11 +339,20 @@ function renderOperationAction(
   // input), their `change_attribute` assignment is dropped from the body, and
   // a `manage_relationship` replace seam is appended instead.
   const vcByField = new Map(valueCollections.map((v) => [v.vc.fieldName, v.vc]));
+  // Reference-collection fields the op writes (crudish `update`'s
+  // `party := party`): `many_to_many` join relationships, NOT stored attributes
+  // either — typed `{:array, :uuid}`, their `change_attribute` dropped, and a
+  // `manage_relationship` set-replace appended (mirrors the VO seam).  Without
+  // this an `Id<T>[]` assign emits `change_attribute(:party, …)` on the
+  // calculated field, which Ash rejects at runtime.
+  const rcByField = new Set(associations.map((a) => a.fieldName));
   const args = op.params
     .map((p) => {
       const ashType = vcByField.has(p.name)
         ? "{:array, :map}"
-        : renderAshType(p.type, ctx.contextModule);
+        : rcByField.has(p.name)
+          ? "{:array, :uuid}"
+          : renderAshType(p.type, ctx.contextModule);
       return `      argument :${snake(p.name)}, ${ashType}`;
     })
     .join("\n");
@@ -325,9 +368,16 @@ function renderOperationAction(
   // ArgumentError → HTTP 500 instead of the policy's 403.)
   const nonPrecondStmts = op.statements
     .filter((s) => s.kind !== "precondition" && s.kind !== "requires")
-    // Drop the VO-collection assignment(s) — they become `manage_relationship`
-    // changes (appended below) rather than `change_attribute` on a relationship.
-    .filter((s) => !(s.kind === "assign" && vcByField.has(s.target.segments[0] ?? "")));
+    // Drop the VO-collection AND ref-collection assignment(s) — they become
+    // `manage_relationship` changes (appended below) rather than
+    // `change_attribute` on a relationship/calculated field.
+    .filter(
+      (s) =>
+        !(
+          s.kind === "assign" &&
+          (vcByField.has(s.target.segments[0] ?? "") || rcByField.has(s.target.segments[0] ?? ""))
+        ),
+    );
   const stmts = renderElixirStatements(nonPrecondStmts, ctx, "changeset");
 
   // The VO-collection management seam for the params this op actually writes:
@@ -348,6 +398,18 @@ function renderOperationAction(
         `      end`,
         `      change manage_relationship(:${f}, :${f}, type: :direct_control)`,
       ];
+    })
+    .join("\n");
+
+  // The ref-collection management seam for the `Id<T>[]` params this op writes —
+  // a `manage_relationship(:<f>, :<f>_through, …)` set-replace (no ordinal stamp;
+  // a reference collection is an unordered id set, not an ordered VO array).
+  const opRcFields = op.params.map((p) => p.name).filter((n) => rcByField.has(n));
+  const rcManageBlock = opRcFields
+    .map((field) => {
+      const f = snake(field);
+      const rel = relationshipNameFor(agg ?? ({} as AggregateIR), field);
+      return `      change manage_relationship(:${f}, :${rel}, type: :append_and_remove)`;
     })
     .join("\n");
 
@@ -385,12 +447,13 @@ function renderOperationAction(
   // so an unnecessary `require_atomic? false` would be noise there.
   const hasFnValidate = validateLines.some((l) => l.includes("validate fn"));
   const atomicLine =
-    nonPrecondStmts.length > 0 || hasFnValidate || opVcFields.length > 0
+    nonPrecondStmts.length > 0 || hasFnValidate || opVcFields.length > 0 || opRcFields.length > 0
       ? "\n      require_atomic? false"
       : "";
   const vcBlock = vcManageBlock ? `\n${vcManageBlock}` : "";
+  const rcBlock = rcManageBlock ? `\n${rcManageBlock}` : "";
 
-  return `    update :${snake(op.name)} do${atomicLine}${argsBlock}${validateBlock}${changeBlock}${vcBlock}
+  return `    update :${snake(op.name)} do${atomicLine}${argsBlock}${validateBlock}${changeBlock}${vcBlock}${rcBlock}
     end`;
 }
 

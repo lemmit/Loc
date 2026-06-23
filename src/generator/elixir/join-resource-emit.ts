@@ -38,6 +38,10 @@ export function renderJoinResource(
   assoc: AssociationIR,
   ctxModule: string,
   appModule: string,
+  /** The owning aggregate's dataSource schema — the join table is created in it
+   *  (migration `prefix:`), so the resource must declare the same `schema` or
+   *  Ash queries `public.<table>` and the m2m read 500s (`undefined_table`). */
+  schema?: string,
 ): string {
   const moduleName = `${ctxModule}.${joinEntityName(assoc)}`;
   const repoModule = `${appModule}.Repo`;
@@ -52,7 +56,7 @@ export function renderJoinResource(
 
   postgres do
     table "${assoc.joinTable}"
-    repo ${repoModule}
+    repo ${repoModule}${schema ? `\n    schema "${schema}"` : ""}
   end
 
   attributes do

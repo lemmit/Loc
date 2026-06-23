@@ -3330,11 +3330,15 @@ describe("reference-collection join tables (Phoenix/Ash)", () => {
     expect(tr).toMatch(/many_to_many :caught_through, PhoenixApp\.Roster\.Pokemon do/);
   });
 
-  it("re-exposes the wire shape as a calculation list of uuids", async () => {
+  it("re-exposes the wire shape as a `list` aggregate of uuids", async () => {
     const files = await generateRoster();
     const tr = files.get("phoenix_app/lib/phoenix_app/roster/trainer.ex")!;
-    expect(tr).toMatch(/calculate :party, \{:array, :uuid\}, expr\(party_through\.id\)/);
-    expect(tr).toMatch(/calculate :caught, \{:array, :uuid\}, expr\(caught_through\.id\)/);
+    // A `list` aggregate over the m2m through-relationship's `:id` — NOT a
+    // `calculate … expr(<rel>.id)`, which is single-valued over a to-many and
+    // makes Postgres reject the `::uuid[]` cast at read time (boot-verified).
+    expect(tr).toMatch(/list :party, :party_through, :id/);
+    expect(tr).toMatch(/list :caught, :caught_through, :id/);
+    expect(tr).not.toMatch(/calculate :party, \{:array, :uuid\}, expr\(party_through\.id\)/);
   });
 
   it("suppresses the array-of-id attribute, derive list, accept list, and PG column", async () => {
@@ -3343,11 +3347,12 @@ describe("reference-collection join tables (Phoenix/Ash)", () => {
     // No `attribute :party, {:array, :uuid}` line on the resource.
     expect(tr).not.toMatch(/attribute :party,/);
     expect(tr).not.toMatch(/attribute :caught,/);
-    // Jason encoder atom list excludes party/caught (ref-collection
-    // attributes are persisted via the join table, not as a column;
-    // surfacing them on the wire would require an explicit Ash.load).
-    expect(tr).toMatch(/encode_struct\(value, \[:id, :name, :inserted_at, :updated_at\], opts\)/);
-    // create action's accept[...] drops the ref-collections.
+    // Jason encoder atom list INCLUDES party/caught — they're a `list` aggregate
+    // loaded on every read by the preparation, so they materialise on the wire
+    // as an id array (the read path was boot-verified to round-trip).
+    expect(tr).toMatch(/encode_struct\(value, \[[^\]]*:party[^\]]*:caught[^\]]*\], opts\)/);
+    // create action's accept[...] drops the ref-collections (they're managed via
+    // manage_relationship, not accepted as attributes).
     expect(tr).toMatch(/accept \[:name\]/);
     expect(tr).not.toMatch(/accept \[[^\]]*:party/);
     // Owner migration has no `party` column.
