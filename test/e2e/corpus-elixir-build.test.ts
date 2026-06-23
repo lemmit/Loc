@@ -95,22 +95,33 @@ describe.skipIf(!ENABLED)("corpus features compile under mix (Phoenix / Ash 3.x)
   });
 
   it.each(elixirFeatures)("%s — generated Phoenix project compiles", (featureId) => {
-    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), `loom-corpus-elixir-${featureId}-`));
+    // CI knob `LOOM_PHOENIX_OUT_DIR`: shard one feature per cell and cache
+    // its deps/_build across runs (mirrors generated-elixir-ash-build.test.ts).
+    // When set, reuse a stable per-feature path, skip regeneration if the
+    // project is already on disk (so restored deps survive), and DON'T delete
+    // it.  Unset (local): an ephemeral temp dir, cleaned up after.
+    const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;
+    const outDir = baseOutDir
+      ? path.join(baseOutDir, featureId, "out")
+      : fs.mkdtempSync(path.join(os.tmpdir(), `loom-corpus-elixir-${featureId}-`));
+    fs.mkdirSync(outDir, { recursive: true });
+    // The deployable is named `d` → its project lands under `d/`.
+    const proj = path.join(outDir, CORPUS_DEPLOYABLE);
     try {
-      const src = materializeCorpusFixture(featureId, "phoenix", outDir);
-      execSync(`node ${cli} generate system ${src} -o ${outDir}`, {
-        stdio: "inherit",
-        cwd: repoRoot,
-      });
-      // The deployable is named `d` → its project lands under `d/`.
-      const proj = path.join(outDir, CORPUS_DEPLOYABLE);
+      if (!fs.existsSync(path.join(proj, "mix.exs"))) {
+        const src = materializeCorpusFixture(featureId, "phoenix", outDir);
+        execSync(`node ${cli} generate system ${src} -o ${outDir}`, {
+          stdio: "inherit",
+          cwd: repoRoot,
+        });
+      }
       expect(
         fs.existsSync(path.join(proj, "mix.exs")),
         `${featureId}: phoenix project emitted`,
       ).toBe(true);
       runMixCompile(proj, mirror);
     } finally {
-      fs.rmSync(outDir, { recursive: true, force: true });
+      if (!baseOutDir) fs.rmSync(outDir, { recursive: true, force: true });
     }
   }, 660_000);
 });
