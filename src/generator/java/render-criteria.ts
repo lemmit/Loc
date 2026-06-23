@@ -43,6 +43,14 @@ function bool(e: ExprIR, ctx: CriteriaCtx): string {
       }
       if (e.refKind === "param") return `cb.isTrue(cb.literal(${e.name}))`;
       throw unsupported(`ref '${e.refKind}'`);
+    case "member":
+    case "this": {
+      // Bare boolean field accessed as a `this`-path (`this.archived` inside a
+      // criterion body lowers to a `member`; explicit `this` to a `this` expr).
+      const segs = pathSegments(e);
+      if (segs && segs.length > 0) return `cb.isTrue(${path(segs, ctx)})`;
+      throw unsupported(`expression kind '${e.kind}'`);
+    }
     case "literal":
       if (e.lit === "bool") return e.value === "true" ? "cb.conjunction()" : "cb.disjunction()";
       throw unsupported(`literal '${e.lit}'`);
