@@ -1711,6 +1711,13 @@ deferral or an off-Ash workaround:
    `Plug.ErrorHandler` rescue tower that translates `Ash.Error.*` is a
    *designed-in* feature on Ash that fights the cross-backend typed-`or`-union
    dispatch (`proposals/exception-less.md`; D-VANILLA-PHOENIX-FOUNDATION §1).
+5. **`add`/`remove` collection mutation in a returning op** — a returning
+   `or`-union op compiles to a generic `:term` action whose `run fn` has **no
+   changeset**, but `add`/`remove` need `Ash.Changeset.manage_relationship`
+   (which requires one). The only way to close it is to call `Ash.update` from
+   inside the run fn — i.e. the **action-wrapping this decision forbids**, and it
+   changes the op's transactional semantics. Stays gated to vanilla (DEBT-03;
+   `add`/`remove` are the last two statement kinds an ash returning op defers).
 
 The common cause is structural and consistent: **`Ash.Resource`'s
 changeset-shaped action model + `Ash.DataLayer`'s current-state queryable
@@ -1729,7 +1736,14 @@ the issue, not the framework.
    sweet spot and gets cheap parity where it falls out naturally, but we do
    **not** grow bespoke Ash workarounds (custom data layers, AshEvents/AshCommanded
    bridges, action-wrapping) to force ill-fitting patterns onto it. This makes
-   explicit the de-facto pattern already in the tree (1–4 above).
+   explicit the de-facto pattern already in the tree (1–5 above).
+   - **The test is comparative.** When a capability is *materially harder to
+     support on Ash than on the other targets* — needs an emitter contortion, a
+     second action invocation, or a runtime-semantics change the other backends
+     don't — that disproportion is itself the signal to **gate it out on Ash and
+     let vanilla carry it**, not to invest in reaching parity. A clean
+     `loom.*-unsupported` defer-to-vanilla is the *intended* end state for these
+     cells, not open debt; don't reopen it chasing completeness.
 2. **Vanilla is the next foundation investment.** Building the vanilla emit
    subtree (P2 of `proposals/vanilla-phoenix-foundation.md`) is now the gating
    dependency for *multiple* deferred features, so its cost is paid once instead

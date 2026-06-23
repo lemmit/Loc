@@ -518,10 +518,13 @@ export function validateOperationReturnsUnimplemented(
   const SUPPORTED_RETURN_BACKENDS = new Set(["node", "dotnet", "python", "java"]);
 
   // Elixir capability is per-op: vanilla handles every returning op; ash handles
-  // return-dominant ops PLUS in-memory mutation (`assign`) and `precondition`/
-  // `requires` guards (DEBT-03).  So elixir can serve an op iff every foundation
-  // it runs under can — `vanilla` always, `ash` when the body is Ash-emittable
-  // (`emit` / `add` / `remove` still defer to vanilla).
+  // return-dominant ops PLUS in-memory mutation (`assign`), `precondition`/
+  // `requires` guards, and `emit` (PubSub broadcast in the generic action)
+  // (DEBT-03).  So elixir can serve an op iff every foundation it runs under
+  // can — `vanilla` always, `ash` when the body is Ash-emittable.  `add` /
+  // `remove` stay gated to vanilla *by design* (D-PHOENIX-FOUNDATION-STRATEGY):
+  // manage_relationship needs a changeset the generic union action lacks, and
+  // calling `Ash.update` mid-run-fn is the action-wrapping that decision forbids.
   const elixirCapableForOp = (op: OperationIR): boolean =>
     elixirFoundations.size > 0 &&
     [...elixirFoundations].every((f) => f === "vanilla" || isAshReturningOpEmittable(op));
@@ -543,8 +546,8 @@ export function validateOperationReturnsUnimplemented(
         !isAshReturningOpEmittable(op);
       const ashNote = ashDeferred
         ? ` On foundation: ash a returning op's body may use \`return\`/\`let\`, in-memory ` +
-          `\`field := value\` mutation, and \`precondition\`/\`requires\` guards; this op uses ` +
-          `\`emit\`/\`add\`/\`remove\` (or a bare expression), so host it on foundation: vanilla.`
+          `\`field := value\` mutation, \`precondition\`/\`requires\` guards, and \`emit\`; this op ` +
+          `uses \`add\`/\`remove\` (or a bare expression), so host it on foundation: vanilla.`
         : "";
       diags.push({
         severity: "error",
