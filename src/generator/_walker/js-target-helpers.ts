@@ -122,6 +122,25 @@ export function storeHookName(storeName: string): string {
   return `use${upperFirstName(storeName)}`;
 }
 
+/** The local-variable name a JS-family page/component shell binds for a used
+ *  store member (Stage 5).  Normally the bare member name (`lines`), so the
+ *  body reads it directly and the output matches the approved shape — but when
+ *  that name collides with a page-level binding (a `state` field, route param,
+ *  or `derived`) the shell would emit a DUPLICATE declaration (`const lines =
+ *  useState(...)` AND `const lines = useCart(...)`), invalid TS where the store
+ *  read also shadows the page value.  In that case the store local is qualified
+ *  with the store name (`cartLines`) to disambiguate.  The body use-site
+ *  (walker-core) and the shell binding compute this with the SAME `reserved`
+ *  set, so they always agree.  (Angular is exempt — its store reads are
+ *  `this.cart.x()`-qualified and never bind a bare local.) */
+export function storeMemberLocal(
+  storeName: string,
+  member: string,
+  reserved: ReadonlySet<string>,
+): string {
+  return reserved.has(member) ? `${lowerFirstName(storeName)}${upperFirstName(member)}` : member;
+}
+
 /** Conservative plural rules matching `src/util/naming.ts:plural`. */
 function pluralName_(s: string): string {
   if (s.endsWith("y") && !/[aeiou]y$/.test(s)) return `${s.slice(0, -1)}ies`;

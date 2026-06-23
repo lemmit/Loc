@@ -554,8 +554,14 @@ export interface WalkerTarget {
 
   /** Render a `<Store>.<action>(args)` call (Stage 5).  React binds the
    *  action via `useStore` in the shell and returns the bound-local call
-   *  `<action>(args)`.  `renderedArgs` is the already-rendered arg list. */
-  renderStoreActionCall?(ref: { storeName: string; action: string }, renderedArgs: string): string;
+   *  `<local>(args)`.  `local` is the shell-bound local name (collision-resolved
+   *  by walker-core — usually `action`, store-qualified when it clashes with a
+   *  page binding); `renderedArgs` is the already-rendered arg list.  Angular
+   *  ignores `local` and calls the injected member `this.<store>.<action>(…)`. */
+  renderStoreActionCall?(
+    ref: { storeName: string; action: string; local: string },
+    renderedArgs: string,
+  ): string;
 
   /** Render the per-store MODULE file (Stage 5).  Returns `{ path, content }`
    *  — `path` relative to the generated project root (React:

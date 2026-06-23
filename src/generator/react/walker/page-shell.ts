@@ -22,7 +22,7 @@ import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/n
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { LoadedPack } from "../../_packs/loader.js";
 import { routerPackageForStack } from "../../_packs/stack-runtime.js";
-import { storeHookName } from "../../_walker/js-target-helpers.js";
+import { storeHookName, storeMemberLocal } from "../../_walker/js-target-helpers.js";
 import { renderActionHandlers } from "../../_walker/walker-core.js";
 import type {
   ActionMutationState,
@@ -471,7 +471,11 @@ export function renderCustomLayoutPage(
   // stays unconditional) and right before the body `return`, keeping the
   // rules-of-hooks contract intact while short-circuiting the render.
   const gate = renderPageGate(requires, usesCurrentUser, srcImportPrefix);
-  const store = renderStoreWiring(usedStores, srcImportPrefix);
+  const store = renderStoreWiring(
+    usedStores,
+    srcImportPrefix,
+    new Set([...stateNames, ...paramNames, ...derivedNames]),
+  );
   return `// Auto-generated.  Do not edit by hand.
 ${gate.import}${reactImport}${decimalImport}${reactRouterImport}${mantineImport}${apiHookImports}${actionWiring.imports}${store.imports}${userComponentImports}${externFunctionImports}${form.moduleScope}
 export default function ${pageName}() {
@@ -535,6 +539,11 @@ function renderPageGate(
 function renderStoreWiring(
   usedStores: Map<string, Set<string>> | undefined,
   srcImportPrefix: string,
+  /** Page-level binding names (state / params / derived).  A store member whose
+   *  name collides with one of these binds a store-qualified local (`cartLines`)
+   *  so the selector binding doesn't shadow/duplicate the page declaration —
+   *  matching the body use-site (`storeLocalFor` in walker-core). */
+  reserved: ReadonlySet<string> = new Set(),
 ): { imports: string; decls: string } {
   if (!usedStores || usedStores.size === 0) return { imports: "", decls: "" };
   const importLines: string[] = [];
@@ -543,7 +552,8 @@ function renderStoreWiring(
     const hook = storeHookName(storeName);
     importLines.push(`import { ${hook} } from "${srcImportPrefix}stores/${snake(storeName)}";`);
     for (const member of [...usedStores.get(storeName)!].sort()) {
-      declLines.push(`  const ${member} = ${hook}((s) => s.${member});`);
+      const local = storeMemberLocal(storeName, member, reserved);
+      declLines.push(`  const ${local} = ${hook}((s) => s.${member});`);
     }
   }
   return {
@@ -1015,7 +1025,11 @@ export function renderUserComponentFile(
   // not yet wired) shouldn't trigger TS lint noise.  We reference
   // them with a `void` block when none made it into `tsx`.
   void usedParams;
-  const store = renderStoreWiring(usedStores, "../");
+  const store = renderStoreWiring(
+    usedStores,
+    "../",
+    new Set([...stateNames, ...paramNames, ...derivedNames]),
+  );
   return `// Auto-generated.  Do not edit by hand.
 ${gate.import}${reactImport}${reactTypesImport}${reactRouterImport}${mantineImport}${dtoImportLines}${actionWiring.imports}${store.imports}${userComponentImports}${externFunctionImports}${propsType}${form.moduleScope}
 export default function ${name}(${propDestructure}) {

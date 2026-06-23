@@ -412,7 +412,12 @@ export const angularTarget: WalkerTarget = {
    *  `this.cart.clear(args)`.  Qualified with `this.` so the call works
    *  identically in a template `(click)` binding and a generated page-action
    *  class method. */
-  renderStoreActionCall(ref: { storeName: string; action: string }, renderedArgs: string): string {
+  renderStoreActionCall(
+    ref: { storeName: string; action: string; local: string },
+    renderedArgs: string,
+  ): string {
+    // `local` is unused — Angular reads are `this.<store>.<action>()`-qualified,
+    // so they never collide with a page binding and need no aliasing.
     const member = `${ref.storeName[0]!.toLowerCase()}${ref.storeName.slice(1)}`;
     return `this.${member}.${ref.action}(${renderedArgs})`;
   },

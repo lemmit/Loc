@@ -361,7 +361,10 @@ export const vueTarget: WalkerTarget = {
    *  walker emits the bound-local call (`clear(args)`) directly; the
    *  page shell binds `const clear = cart.clear`.  Returned for contract
    *  shape symmetry. */
-  renderStoreActionCall(ref: { storeName: string; action: string }, renderedArgs: string): string {
-    return `${ref.action}(${renderedArgs})`;
+  renderStoreActionCall(
+    ref: { storeName: string; action: string; local: string },
+    renderedArgs: string,
+  ): string {
+    return `${ref.local}(${renderedArgs})`;
   },
 };

@@ -326,7 +326,10 @@ export const tsxTarget: WalkerTarget = {
   /** A `<Store>.<action>(args)` call.  The shell binds the action via
    *  `useCart((s) => s.clear)` to a local named after the action; the call
    *  site invokes that bare local. */
-  renderStoreActionCall(ref: { storeName: string; action: string }, renderedArgs: string): string {
-    return `${ref.action}(${renderedArgs})`;
+  renderStoreActionCall(
+    ref: { storeName: string; action: string; local: string },
+    renderedArgs: string,
+  ): string {
+    return `${ref.local}(${renderedArgs})`;
   },
 };

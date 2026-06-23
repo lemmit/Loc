@@ -14,7 +14,7 @@ import { typeUsesMoney } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { ImportSpec, LoadedPack } from "../../_packs/loader.js";
-import { storeHookName } from "../../_walker/js-target-helpers.js";
+import { storeHookName, storeMemberLocal } from "../../_walker/js-target-helpers.js";
 import {
   closeUsedActions,
   emitExpr,
@@ -192,7 +192,12 @@ export function renderVuePage(input: VuePageShellInput): string {
   // store member referenced only from a handler body is recorded.  One hook
   // import + singleton bind + per-member local for each used store; a field
   // bind is a reactive `computed`, so pull `computed` into the import.
-  const storeWiring = renderStoreWiring(result.usedStores, input.stores ?? [], relPrefix(input));
+  const storeWiring = renderStoreWiring(
+    result.usedStores,
+    input.stores ?? [],
+    relPrefix(input),
+    new Set([...stateNames, ...page.params.map((p) => p.name), ...page.derived.map((d) => d.name)]),
+  );
   if (storeWiring.usesComputed) vueImports.add("computed");
 
   // State fields — `ref()` per declared field; the walked markup
@@ -523,6 +528,10 @@ function renderStoreWiring(
   usedStores: Map<string, Set<string>> | undefined,
   stores: readonly StoreIR[],
   srcImportPrefix: string,
+  /** Page-level binding names (state / params / derived).  A store member whose
+   *  name collides binds a store-qualified local (`cartLines`) so it doesn't
+   *  duplicate the page declaration — matching `storeLocalFor` in walker-core. */
+  reserved: ReadonlySet<string> = new Set(),
 ): { imports: string[]; decls: string[]; usesComputed: boolean } {
   if (!usedStores || usedStores.size === 0) {
     return { imports: [], decls: [], usesComputed: false };
@@ -539,11 +548,12 @@ function renderStoreWiring(
     const store = storesByName.get(storeName);
     const actionNames = new Set((store?.actions ?? []).map((a) => a.name));
     for (const member of [...usedStores.get(storeName)!].sort()) {
+      const memberLocal = storeMemberLocal(storeName, member, reserved);
       if (actionNames.has(member)) {
-        decls.push(`const ${member} = ${local}.${member};`);
+        decls.push(`const ${memberLocal} = ${local}.${member};`);
       } else {
         usesComputed = true;
-        decls.push(`const ${member} = computed(() => ${local}.state.${member});`);
+        decls.push(`const ${memberLocal} = computed(() => ${local}.state.${member});`);
       }
     }
   }
@@ -851,7 +861,12 @@ export function renderVueComponentFile(
   // store member referenced only from a handler body is recorded.  A
   // component lives at `src/components/<name>.vue`, so the import prefix up
   // to `src/` is always `../`.
-  const storeWiring = renderStoreWiring(result.usedStores, stores, "../");
+  const storeWiring = renderStoreWiring(
+    result.usedStores,
+    stores,
+    "../",
+    new Set([...stateNames, ...paramNames, ...derivedNames]),
+  );
   if (storeWiring.usesComputed) vueImports.add("computed");
 
   // State — `ref()` per field + a `set<Pascal>` setter (the shared input

@@ -300,7 +300,10 @@ export const svelteTarget: WalkerTarget = {
   /** A `<Store>.<action>(args)` call.  Store actions are bare module-level
    *  arrow exports (`export const clear = () => { … }`), so the call site
    *  imports the action and invokes the bare name — `clear(args)`. */
-  renderStoreActionCall(ref: { storeName: string; action: string }, renderedArgs: string): string {
-    return `${ref.action}(${renderedArgs})`;
+  renderStoreActionCall(
+    ref: { storeName: string; action: string; local: string },
+    renderedArgs: string,
+  ): string {
+    return `${ref.local}(${renderedArgs})`;
   },
 };

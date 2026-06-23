@@ -37,6 +37,7 @@ import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/n
 import { idTargetHookVar } from "../../_frontend/form-helpers.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { LoadedPack } from "../../_packs/loader.js";
+import { storeMemberLocal } from "../../_walker/js-target-helpers.js";
 import { indentJsx } from "../../_walker/shared/args.js";
 import type {
   ActionMutationState,
@@ -278,7 +279,11 @@ export function renderSveltePage(
   const actionLines = actionResult.lines;
   // Store wiring (Stage 5) — import + `$derived` field bindings.  Computed AFTER
   // action handlers so action-body store use is included in `usedStores`.
-  const store = renderStoreWiring(usedStores, stores);
+  const store = renderStoreWiring(
+    usedStores,
+    stores,
+    new Set([...stateNames, ...paramNames, ...derivedNames]),
+  );
 
   // Title — a plain `$effect`; runes auto-track any param/state the
   // expression reads, so no deps array is derived.
@@ -423,6 +428,11 @@ function renderSveltePageGate(
 function renderStoreWiring(
   usedStores: Map<string, Set<string>> | undefined,
   stores: readonly StoreIR[],
+  /** Page-level binding names (state / params / derived).  A store member whose
+   *  name collides binds/imports a store-qualified local (`cartLines`) so it
+   *  doesn't duplicate the page declaration — matching `storeLocalFor` in
+   *  walker-core.  An aliased action imports `{ clear as cartClear }`. */
+  reserved: ReadonlySet<string> = new Set(),
 ): { imports: string; decls: string } {
   if (!usedStores || usedStores.size === 0) return { imports: "", decls: "" };
   const storesByName = new Map(stores.map((s) => [s.name, s]));
@@ -436,13 +446,20 @@ function renderStoreWiring(
     const usedFields = used.filter((m) => fieldNames.has(m));
     const usedActions = used.filter((m) => !fieldNames.has(m));
     // Named imports: the store-object singleton (only when a field is read) +
-    // each used action function.  Deduped + sorted for stable output.
-    const named = [...(usedFields.length > 0 ? [storeVar] : []), ...usedActions].sort();
+    // each used action function.  An action whose name collides with a page
+    // binding imports aliased (`clear as cartClear`) so the body's bound-local
+    // call resolves.  Deduped + sorted for stable output.
+    const actionImports = usedActions.map((a) => {
+      const local = storeMemberLocal(storeName, a, reserved);
+      return local === a ? a : `${a} as ${local}`;
+    });
+    const named = [...(usedFields.length > 0 ? [storeVar] : []), ...actionImports].sort();
     importLines.push(`  import { ${named.join(", ")} } from "${storeImportSpecifier(storeName)}";`);
     // Field reads → reactive `$derived` binding named after the field (the body
-    // references the bare local).
+    // references the bare local, store-qualified on collision).
     for (const field of usedFields) {
-      declLines.push(`  const ${field} = $derived(${storeVar}.${field});`);
+      const local = storeMemberLocal(storeName, field, reserved);
+      declLines.push(`  const ${local} = $derived(${storeVar}.${field});`);
     }
   }
   return {
@@ -535,7 +552,11 @@ export function renderSvelteComponentFile(
   const actionLines = actionResult.lines;
   // Store wiring (Stage 5) — after action handlers so action-body store use is
   // included.
-  const store = renderStoreWiring(usedStores, stores);
+  const store = renderStoreWiring(
+    usedStores,
+    stores,
+    new Set([...stateNames, ...paramNames, ...derivedNames]),
+  );
   const actionWiring = renderActionMutations(actionMutations);
   const form = formOfs.reduce<FormWiring>(
     (acc, st) => {

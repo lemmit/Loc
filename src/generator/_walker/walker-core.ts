@@ -67,6 +67,7 @@ import { WALKER_LAYOUT_PRIMITIVES } from "../../language/walker-stdlib.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { tryDetectApiHook } from "./api-hook-detector.js";
 import { registerApiHook } from "./api-hook-register.js";
+import { storeMemberLocal } from "./js-target-helpers.js";
 import { emitUserComponent } from "./primitives/controls.js";
 import { WALKER_PRIMITIVES } from "./registry.js";
 import { describeReceiver, positionalArgs } from "./shared/args.js";
@@ -977,7 +978,18 @@ export function storeFieldReadUseSite(ctx: WalkContext, storeName: string, field
   if (ctx.target.framework === "angular") {
     return `this.${storeName[0]!.toLowerCase()}${storeName.slice(1)}.${field}()`;
   }
-  return field;
+  return storeLocalFor(ctx, storeName, field);
+}
+
+/** The shell-bound local name for a store member referenced from this body
+ *  (Stage 5).  Bare member name in the common case; store-qualified
+ *  (`cartLines`) when it collides with a page-level binding (state / param /
+ *  derived) to avoid a duplicate declaration.  The page/component shell's
+ *  `renderStoreWiring` computes the same name from the same reserved set, so the
+ *  binding and the use-site always agree. */
+export function storeLocalFor(ctx: WalkContext, storeName: string, member: string): string {
+  const reserved = new Set<string>([...ctx.stateNames, ...ctx.paramNames, ...ctx.derivedNames]);
+  return storeMemberLocal(storeName, member, reserved);
 }
 
 /** Extend the WalkContext.lambdaParams map with a new
@@ -1277,8 +1289,13 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
         // The use-site call form is per-frontend: React references the
         // shell-bound local (`clear(args)`); Angular calls the injected store
         // member (`this.cart.clear(args)`).  The seam owns the divergence.
+        // `local` is the collision-resolved bound-local name the JS shells use.
         return ctx.target.renderStoreActionCall(
-          { storeName: expr.storeAction.store, action: expr.storeAction.action },
+          {
+            storeName: expr.storeAction.store,
+            action: expr.storeAction.action,
+            local: storeLocalFor(ctx, expr.storeAction.store, expr.storeAction.action),
+          },
           callArgs,
         );
       }
@@ -1475,7 +1492,7 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
         // Use-site call form is per-frontend (see the expr-position twin
         // above): React → bound local `clear(args)`; Angular → injected member
         // `this.cart.clear(args)`.
-        return `${ctx.target.renderStoreActionCall({ storeName: stmt.store, action: stmt.name }, callArgs)};`;
+        return `${ctx.target.renderStoreActionCall({ storeName: stmt.store, action: stmt.name, local: storeLocalFor(ctx, stmt.store, stmt.name) }, callArgs)};`;
       }
       if (ctx.externFunctions?.has(stmt.name)) ctx.usedExternFunctions?.add(stmt.name);
       const args = stmt.args.map((a) => emitExpr(a, ctx)).join(", ");
