@@ -11,10 +11,17 @@
 //        store actions (§3.1, encapsulation).
 //   loom.store-lifetime-unsupported   — a store with a non-memory lifetime;
 //        v1 is in-memory only (the persist/sync ladder parses but is gated).
-//   loom.store-on-liveview-unsupported — a ui with ≥1 store mounted by a
-//        `phoenixLiveView` deployable; the store emitters are React-only in
-//        v1 (LiveView is a fan-out follow-up), so fail loudly here rather
-//        than crashing the HEEx generator.
+//   loom.store-cross-store-on-liveview-unsupported — a store action that calls
+//        a DIFFERENT store's action, on a `phoenixLiveView` deployable.  The
+//        LiveView projection seeds each used store as its OWN per-page assign
+//        (`assign(:cart, %Cart{})`), so a pure store fn has no handle to a
+//        sibling store's struct; same-store action→action composition is fine
+//        (a pure in-module call), cross-store is not.  React/Zustand reaches
+//        the sibling hook freely, so the gate is LiveView-scoped.
+//
+// (Stores on the Phoenix LiveView frontend ARE supported — the
+// `loom.store-on-liveview-unsupported` gate was lifted once the HEEx target
+// gained the store-module + per-page-assign projection.)
 //
 // Plus a store→store action-composition acyclicity check so a store's
 // `update` graph stays well-founded (a store→page call is impossible by
@@ -166,10 +173,14 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
       }
     }
 
-    // loom.store-on-liveview-unsupported — a deployable mounting a ui with
-    // ≥1 store whose resolved frontend framework is LiveView.  v1's store
-    // emitters are React-only; a HEEx store-module emit throws loudly, so
-    // gate it here with a precise diagnostic instead.
+    // loom.store-cross-store-on-liveview-unsupported — a ui mounted by a
+    // `phoenixLiveView` deployable whose store has an action that calls a
+    // DIFFERENT store's action.  The HEEx projection seeds each used store as
+    // its own per-page assign (`assign(:cart, %Cart{})`) and renders a store
+    // action as a pure `def <action>(%__MODULE__{} = state, …)` fn — which has
+    // no handle to a sibling store's struct.  Same-store action→action calls
+    // are fine (a pure in-module call); cross-store is gated here so the HEEx
+    // store emitter never mis-emits an unbound reference.
     for (const dep of sys.deployables) {
       const mounted = [dep.uiName, ...(dep.hostedUiNames ?? [])].filter((n): n is string => !!n);
       for (const uiName of mounted) {
@@ -178,17 +189,31 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
         const ui = sys.uis.find((u) => u.name === uiName);
         const isLiveView =
           dep.uiFramework === "phoenixLiveView" || ui?.framework === "phoenixLiveView";
-        if (isLiveView) {
-          const where = `deployable '${dep.name}'`;
-          diags.push({
-            severity: "error",
-            code: "loom.store-on-liveview-unsupported",
-            message:
-              `${where}: ui '${uiName}' declares ${stores.length} store(s), but stores are not ` +
-              `supported on the phoenixLiveView frontend yet (React only in v1).  Remove the ` +
-              `store(s) or mount this ui on a React deployable.`,
-            source: where,
-          });
+        if (!isLiveView) continue;
+        for (const store of stores) {
+          for (const action of store.actions) {
+            forEachStmt(action.body, (s) => {
+              if (
+                s.kind === "call" &&
+                s.target === "store-action" &&
+                s.store &&
+                s.store !== store.name
+              ) {
+                const where = `store '${store.name}' action '${action.name}'`;
+                diags.push({
+                  severity: "error",
+                  code: "loom.store-cross-store-on-liveview-unsupported",
+                  message:
+                    `${where}: calls \`${s.store}.${s.name}(…)\`, a DIFFERENT store's action, ` +
+                    `on the phoenixLiveView frontend.  A LiveView store action is a pure struct ` +
+                    `transform over its OWN store's per-page assign and can't reach store ` +
+                    `'${s.store}'.  Move the cross-store coordination to the calling page's action ` +
+                    `(call \`${store.name}.${action.name}()\` then \`${s.store}.${s.name}()\` from the page).`,
+                  source: where,
+                });
+              }
+            });
+          }
         }
       }
     }

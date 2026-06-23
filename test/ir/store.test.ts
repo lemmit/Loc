@@ -217,10 +217,12 @@ describe("store — validation negatives", () => {
     ).not.toContain("loom.store-state-inline-write");
   });
 
-  it("loom.store-on-liveview-unsupported fires for a phoenixLiveView mount; a React mount is clean", async () => {
+  it("a store on a phoenixLiveView mount is now SUPPORTED (gate lifted) — no store diagnostic fires", async () => {
     // A `platform: elixir` deployable hosting the ui directly (`ui: Web`)
-    // lowers the mounted ui's framework to phoenixLiveView — the store
-    // emitters are React/Vue/Svelte/Angular only (HEEx is gated).
+    // lowers the mounted ui's framework to phoenixLiveView.  The HEEx target
+    // gained the store-module + per-page-assign projection, so the old
+    // `loom.store-on-liveview-unsupported` gate was lifted — a same-store
+    // store on LiveView is clean.
     const liveview = `
 system Demo {
   subdomain S { context C { aggregate Order with crudish { customerId: string } } }
@@ -243,12 +245,11 @@ system Demo {
 }`;
     const { model, errors } = await parseString(liveview);
     if (errors.length) throw new Error(errors.join("\n"));
-    expect(validateLoomModel(enrichLoomModel(lowerModel(model))).map((d) => d.code)).toContain(
-      "loom.store-on-liveview-unsupported",
-    );
+    const liveCodes = validateLoomModel(enrichLoomModel(lowerModel(model))).map((d) => d.code);
+    expect(liveCodes).not.toContain("loom.store-on-liveview-unsupported");
+    expect(liveCodes).not.toContain("loom.store-cross-store-on-liveview-unsupported");
 
-    // The SAME ui on each SPA deployable is clean (all four SPA frontends emit
-    // store modules — only HEEx/LiveView is gated).
+    // The SAME ui on each SPA deployable is clean too.
     for (const fw of ["react", "vue", "svelte", "angular"]) {
       expect(
         await codes(
@@ -259,6 +260,50 @@ system Demo {
         ),
       ).not.toContain("loom.store-on-liveview-unsupported");
     }
+  });
+
+  it("loom.store-cross-store-on-liveview-unsupported fires for a cross-store action call on LiveView; same-store is clean", async () => {
+    // On phoenixLiveView each store is its own per-page assign, so a store
+    // action calling a DIFFERENT store's action has no handle to the sibling
+    // struct — gated.  (A → A self-call is acyclic-rejected separately; B → C
+    // here is acyclic, so only the cross-store gate fires.)
+    const mk = (body: string) => `
+system Demo {
+  subdomain S { context C { aggregate Order with crudish { customerId: string } } }
+  api A from S
+  ui Web {
+    api C: A
+    ${body}
+  }
+  storage primary { type: postgres }
+  resource st { for: C, kind: state, use: primary }
+  deployable app {
+    platform: elixir { foundation: ash }
+    contexts: [C]
+    dataSources: [st]
+    serves: A
+    ui: Web { C: app }
+    port: 4000
+  }
+}`;
+    const codesOf = async (body: string) => {
+      const { model, errors } = await parseString(mk(body));
+      if (errors.length) throw new Error(errors.join("\n"));
+      return validateLoomModel(enrichLoomModel(lowerModel(model))).map((d) => d.code);
+    };
+    expect(
+      await codesOf(`
+      store B { state { y: int = 0 } action g() { D.h() } }
+      store D { state { z: int = 0 } action h() { z := 1 } }
+      page P { route: "/p" body: Heading { B.y, level: 1 } }`),
+    ).toContain("loom.store-cross-store-on-liveview-unsupported");
+
+    // Same-store action→action composition is fine.
+    expect(
+      await codesOf(`
+      store B { state { y: int = 0 } action g() { reset() } action reset() { y := 0 } }
+      page P { route: "/p" body: Heading { B.y, level: 1 } }`),
+    ).not.toContain("loom.store-cross-store-on-liveview-unsupported");
   });
 
   it("loom.store-action-cycle fires for store→store→store; an acyclic chain is clean", async () => {
