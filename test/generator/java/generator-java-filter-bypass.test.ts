@@ -51,7 +51,7 @@ describe("java generator — `ignoring` filter bypass (§11.6 triage)", () => {
     expect(impl).toContain("private EntityManager em;");
     // `recent` ignores softDeletable → disable/re-arm around the delegate.
     expect(impl).toMatch(
-      /public List<Product> recent\(\) \{[\s\S]*em\.unwrap\(org\.hibernate\.Session\.class\)[\s\S]*disableFilter\("softDeletable"\)[\s\S]*return jpa\.recent\(\);[\s\S]*finally[\s\S]*enableFilter\("softDeletable"\)/,
+      /public List<Product> recent\(\) \{[\s\S]*em\.unwrap\(org\.hibernate\.Session\.class\)[\s\S]*disableFilter\("softDeletable"\)[\s\S]*var result = jpa\.recent\(\);[\s\S]*return result;[\s\S]*finally[\s\S]*enableFilter\("softDeletable"\)/,
     );
   });
 
@@ -59,15 +59,18 @@ describe("java generator — `ignoring` filter bypass (§11.6 triage)", () => {
     const files = await generateSystemFiles(SRC);
     const impl = files.get(`${ROOT}/ProductRepositoryImpl.java`)!;
     expect(impl).toMatch(
-      /public List<Product> allRows\(\) \{[\s\S]*disableFilter\("softDeletable"\)[\s\S]*return jpa\.allRows\(\);[\s\S]*enableFilter\("softDeletable"\)/,
+      /public List<Product> allRows\(\) \{[\s\S]*disableFilter\("softDeletable"\)[\s\S]*var result = jpa\.allRows\(\);[\s\S]*return result;[\s\S]*enableFilter\("softDeletable"\)/,
     );
   });
 
   it("(e) a non-bypassing find delegates plainly (the @Filter stays armed)", async () => {
     const files = await generateSystemFiles(SRC);
     const impl = files.get(`${ROOT}/ProductRepositoryImpl.java`)!;
-    // `normal` has no `ignoring` clause → a bare delegate, no Session unwrap.
-    expect(impl).toMatch(/public List<Product> normal\(\) \{\s*return jpa\.normal\(\);\s*\}/);
+    // `normal` has no `ignoring` clause → a bare delegate (capture + log +
+    // return), no Session unwrap.
+    expect(impl).toMatch(
+      /public List<Product> normal\(\) \{\s*var result = jpa\.normal\(\);\s*CatalogLog\.event\("find_executed"[\s\S]*?return result;\s*\}/,
+    );
   });
 
   it("a view's `ignoring` rides its synthesized find — wraps with disableFilter", async () => {

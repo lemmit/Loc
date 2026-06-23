@@ -139,6 +139,10 @@ export function buildPyRepositoryFile(
     "",
     `    async def get_by_id(self, id: ${agg.name}Id) -> ${agg.name}:`,
     "        found = await self.find_by_id(id)",
+    // aggregate_loaded (debug) — `found` is a bool so a downstream filter can
+    // grep failed loads by (event="aggregate_loaded", found=false).  Mirrors the
+    // Hono/.NET repo emission.
+    `        log("debug", "aggregate_loaded", aggregate=${JSON.stringify(agg.name)}, id=str(id), found=found is not None)`,
     "        if found is None:",
     `            raise AggregateNotFoundError(f"${agg.name} {id} not found")`,
     "        return found",
@@ -216,9 +220,11 @@ export function buildPyRepositoryFile(
   // names so a single sorted import covers both without duplication.
   const obsAccessors = [
     ...new Set([
-      // `log` for the per-event `event_dispatched` line emitted in the save
-      // publish loop (the loop only runs when the context declares events).
-      ...(ctx.events.length > 0 ? ["log"] : []),
+      // `log` is always needed now — every repository emits the mechanism-debug
+      // trio (aggregate_loaded / repository_save / find_executed), and the save
+      // publish loop adds the per-event `event_dispatched` line when the context
+      // declares events.
+      "log",
       ...(hasProv ? ["actor_id", "correlation_id", "parent_id", "scope_id"] : []),
       ...(hasAudit ? ["correlation_id", "parent_id", "scope_id"] : []),
     ]),
@@ -322,6 +328,7 @@ export function relationalFindMethod(
       `            await self._session.execute(select(${root})${where}.limit(page_size).offset(offset))`,
       "        ).scalars().all()",
       "        items = [await self._hydrate(row) for row in rows]",
+      findExecutedLine(agg, find.name, "total"),
       "        return PagedResult(items=items, page=page, page_size=page_size, total=total, total_pages=total_pages)",
     );
   }
@@ -330,16 +337,32 @@ export function relationalFindMethod(
     return lines(
       `    async def ${snake(find.name)}(${sig}) -> list[${agg.name}]:`,
       `        rows = (await self._session.execute(select(${root})${where})).scalars().all()`,
-      "        return [await self._hydrate(row) for row in rows]",
+      "        items = [await self._hydrate(row) for row in rows]",
+      findExecutedLine(agg, find.name, "len(items)"),
+      "        return items",
     );
   }
   return lines(
     `    async def ${snake(find.name)}(${sig}) -> ${agg.name} | None:`,
     `        row = (await self._session.execute(select(${root})${where})).scalars().first()`,
+    findExecutedLine(agg, find.name, "0 if row is None else 1"),
     "        if row is None:",
     "            return None",
     "        return await self._hydrate(row)",
   );
+}
+
+/** The `find_executed` (debug) catalog line for a repository find method —
+ *  `rows` is an integer count expression (cardinality-mapped by the caller).
+ *  Mirrors the Hono/.NET repo emission so cross-backend log consumers see the
+ *  same event identity + field set.  Shared with the document / embedded /
+ *  event-sourced repository builders. */
+export function findExecutedLine(
+  agg: EnrichedAggregateIR,
+  findName: string,
+  rowsExpr: string,
+): string {
+  return `        log("debug", "find_executed", aggregate=${JSON.stringify(agg.name)}, find=${JSON.stringify(findName)}, rows=${rowsExpr})`;
 }
 
 /** Convention matching for clause-less finds: each param pairs with the
@@ -462,7 +485,9 @@ function viewFindMethod(
   return lines(
     `    async def ${snake(view.name)}(self) -> list[${agg.name}]:`,
     `        rows = (await self._session.execute(select(${root})${where})).scalars().all()`,
-    "        return [await self._hydrate(row) for row in rows]",
+    "        items = [await self._hydrate(row) for row in rows]",
+    findExecutedLine(agg, view.name, "len(items)"),
+    "        return items",
   );
 }
 
@@ -509,7 +534,9 @@ function runMethod(
     "        if limit is not None:",
     "            query = query.limit(limit)",
     "        rows = (await self._session.execute(query)).scalars().all()",
-    "        return [await self._hydrate(row) for row in rows]",
+    "        items = [await self._hydrate(row) for row in rows]",
+    findExecutedLine(agg, `run_${snake(retrieval.name)}`, "len(items)"),
+    "        return items",
   );
 }
 
@@ -841,6 +868,11 @@ function saveMethod(
   }
   // One transaction per request: the session dependency commits.
   out.push("        await self._session.flush()");
+  // repository_save (debug) — after the flush; (aggregate, id) prefix mirrors
+  // the Hono/.NET emission (children omitted — not cheaply available here).
+  out.push(
+    `        log("debug", "repository_save", aggregate=${JSON.stringify(agg.name)}, id=str(${aggVar}.id))`,
+  );
   return out.join("\n");
 }
 

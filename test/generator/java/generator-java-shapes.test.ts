@@ -54,7 +54,12 @@ describe("java generator — shape(document)", () => {
     const impl = files.get(
       "doc_api/src/main/java/com/loom/docapi/features/articles/ArticleRepositoryImpl.java",
     )!;
-    expect(impl).toContain("return findAll().stream().filter(x -> x.viewCount() >= min).toList();");
+    expect(impl).toContain(
+      "var result = findAll().stream().filter(x -> x.viewCount() >= min).toList();",
+    );
+    expect(impl).toContain(
+      'CatalogLog.event("find_executed", "debug", "aggregate", "Article", "find", "popular", "rows", result.size());',
+    );
   });
 });
 

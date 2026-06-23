@@ -49,7 +49,7 @@ describe("python per-operation audit runtime", () => {
   it("emits the record_audit repository helper staged in the request session", async () => {
     const f = (await build()).get("api/app/db/repositories/order_repository.py")!;
     expect(f).toContain("from app.db.audit import AuditRecordRow");
-    expect(f).toContain("from app.obs.log import correlation_id, parent_id, scope_id");
+    expect(f).toContain("from app.obs.log import correlation_id, log, parent_id, scope_id");
     expect(f).toContain("async def record_audit(");
     expect(f).toContain("self._session.add(");
     expect(f).toContain("AuditRecordRow(");

@@ -496,6 +496,12 @@ export function renderJavaRepositoryImpl(
       ``,
     ];
   });
+  // find_executed (debug) per declared find — the `rows` field is just an
+  // integer count, so map every cardinality to a number (paged → total
+  // elements, list → size, single nullable → 0/1).  Mirrors the .NET/Hono repo
+  // emission so cross-backend consumers see the same event identity + fields.
+  const findExecutedLog = (f: FindIR, rowsExpr: string): string =>
+    `        CatalogLog.event("find_executed", "debug", "aggregate", "${agg.name}", "find", "${f.name}", "rows", ${rowsExpr});`;
   const delegateLines = finds.flatMap((f) => {
     const sig = findSignature(f, imports);
     const findBypass: FilterBypass = { bypassAll: f.bypassAll, bypassCaps: f.bypassCaps };
@@ -509,6 +515,7 @@ export function renderJavaRepositoryImpl(
         `    public ${sig} {`,
         ...wrapBypass(findBypass, [
           `        var result = jpa.${f.name}(${args});`,
+          findExecutedLog(f, "result.getTotalElements()"),
           `        return new Paged<>(result.getContent(), page, pageSize, (int) result.getTotalElements(), result.getTotalPages());`,
         ]),
         `    }`,
@@ -516,10 +523,15 @@ export function renderJavaRepositoryImpl(
       ];
     }
     const args = f.params.map((p) => p.name).join(", ");
+    const rowsExpr = f.returnType.kind === "array" ? "result.size()" : "result == null ? 0 : 1";
     return [
       `    @Override`,
       `    public ${sig} {`,
-      ...wrapBypass(findBypass, [`        return jpa.${f.name}(${args});`]),
+      ...wrapBypass(findBypass, [
+        `        var result = jpa.${f.name}(${args});`,
+        findExecutedLog(f, rowsExpr),
+        `        return result;`,
+      ]),
       `    }`,
       ``,
     ];
@@ -549,6 +561,7 @@ export function renderJavaRepositoryImpl(
     ``,
     `import org.springframework.stereotype.Repository;`,
     ``,
+    `import ${ctx.basePkg}.config.CatalogLog;`,
     ctx.entityPkg !== ctx.infraPkg ? `import ${ctx.entityPkg}.${agg.name};` : null,
     ctx.domainPkg !== ctx.infraPkg ? `import ${ctx.domainPkg}.${agg.name}Repository;` : null,
     `import ${ctx.basePkg}.domain.common.AggregateNotFoundException;`,
@@ -587,7 +600,7 @@ export function renderJavaRepositoryImpl(
     provenance ? `    @Transactional` : null,
     `    @Override`,
     `    public ${agg.name} save(${agg.name} aggregate) {`,
-    provenance ? `        var saved = jpa.save(aggregate);` : `        return jpa.save(aggregate);`,
+    `        var saved = jpa.save(aggregate);`,
     // Provenance flush (provenance.md): drain the per-write lineage buffer and
     // persist one provenance_records row per write, BEFORE the @Transactional
     // method returns, so the history commits atomically with the state (the
@@ -609,9 +622,13 @@ export function renderJavaRepositoryImpl(
           `                RequestContext.actorId(),`,
           `                RequestContext.parentId()));`,
           `        }`,
-          `        return saved;`,
         ]
       : []),
+    // repository_save (debug) — after the save committed; field set mirrors the
+    // Hono/.NET emission's (aggregate, id) prefix (children omitted — not
+    // cheaply available here).
+    `        CatalogLog.event("repository_save", "debug", "aggregate", "${agg.name}", "id", String.valueOf(saved.id().value()));`,
+    `        return saved;`,
     `    }`,
     ``,
     `    @Override`,
@@ -621,7 +638,12 @@ export function renderJavaRepositoryImpl(
     ``,
     `    @Override`,
     `    public ${agg.name} getById(${idClass} id) {`,
-    `        return jpa.findById(id).orElseThrow(() ->`,
+    `        var found = jpa.findById(id);`,
+    // aggregate_loaded (debug) — mirrors the Hono/.NET repo emission; `found` is
+    // a bool so a downstream filter can grep failed loads by
+    // (event="aggregate_loaded", found=false).
+    `        CatalogLog.event("aggregate_loaded", "debug", "aggregate", "${agg.name}", "id", String.valueOf(id.value()), "found", found.isPresent());`,
+    `        return found.orElseThrow(() ->`,
     `            new AggregateNotFoundException("${agg.name} " + id + " not found"));`,
     `    }`,
     ``,

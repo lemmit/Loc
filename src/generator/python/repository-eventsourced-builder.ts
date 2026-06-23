@@ -9,7 +9,7 @@ import type {
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { renderPyExpr } from "./render-expr.js";
-import { emittableFinds } from "./repository-builder.js";
+import { emittableFinds, findExecutedLine } from "./repository-builder.js";
 
 // ---------------------------------------------------------------------------
 // Event-sourced repository — `persistedAs(eventLog)` aggregates persist
@@ -53,6 +53,7 @@ export function buildPyEventSourcedRepositoryFile(
     "",
     `    async def get_by_id(self, id: ${agg.name}Id) -> ${agg.name}:`,
     "        found = await self.find_by_id(id)",
+    `        log("debug", "aggregate_loaded", aggregate=${JSON.stringify(agg.name)}, id=str(id), found=found is not None)`,
     "        if found is None:",
     `            raise AggregateNotFoundError(f"${agg.name} {id} not found")`,
     "        return found",
@@ -93,6 +94,7 @@ export function buildPyEventSourcedRepositoryFile(
     "                )",
     "                await self._events.dispatch(ev)",
     "        await self._session.flush()",
+    `        log("debug", "repository_save", aggregate=${JSON.stringify(agg.name)}, id=str(aggregate.id))`,
     "",
     rowToEvent(agg, events, row),
     "",
@@ -126,6 +128,9 @@ export function buildPyEventSourcedRepositoryFile(
     voEnumNames.length > 0
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
       : null,
+    // `log` for the mechanism-debug trio (aggregate_loaded / repository_save /
+    // find_executed) — always emitted now (S5).
+    "from app.obs.log import log",
     "",
     "",
     body,
@@ -153,12 +158,15 @@ function inMemoryFind(agg: EnrichedAggregateIR, find: FindIR): string {
   if (find.returnType.kind === "array") {
     return lines(
       `    async def ${snake(find.name)}(${sig}) -> list[${agg.name}]:`,
-      `        return [a for a in await self.all() if ${pred}]`,
+      `        result = [a for a in await self.all() if ${pred}]`,
+      findExecutedLine(agg, find.name, "len(result)"),
+      "        return result",
     );
   }
   return lines(
     `    async def ${snake(find.name)}(${sig}) -> ${agg.name} | None:`,
     `        matches = [a for a in await self.all() if ${pred}]`,
+    findExecutedLine(agg, find.name, "len(matches)"),
     "        return matches[0] if matches else None",
   );
 }
