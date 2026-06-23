@@ -310,6 +310,12 @@ describe.skipIf(!ENABLED)(
         // `:cart` assign + `update(:cart, &Cart.fn/1)` handlers.  Pins that the
         // emitted store module + LiveView wiring compile against real Ash 3.x.
         { name: "store-liveview.ddd" },
+        // The VANILLA twin of store-liveview.ddd (de-Ash port): the `store`
+        // LiveView projection (#1564) keeps working on `foundation: vanilla`.
+        // The store module is foundation-neutral and the page seam is
+        // data-layer-agnostic, so both compile on plain Phoenix LiveView (no
+        // Ash) under `mix compile --warnings-as-errors`.
+        { name: "store-liveview-vanilla.ddd" },
         // Vanilla LiveView READ (de-Ash port, slice 2-A): a `foundation:
         // vanilla` deployable with a hand-authored read-only `ui:` emits a
         // Phoenix LiveView app over the plain-Ecto context API.  Pins the

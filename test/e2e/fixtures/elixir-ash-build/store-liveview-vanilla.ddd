@@ -1,0 +1,75 @@
+// Store-on-LiveView regression fixture — the VANILLA (plain Ecto, no Ash) twin
+// of store-liveview.ddd.  Proves the `store` LiveView projection (#1564) keeps
+// working on the de-Ashed foundation (D-VANILLA-DEFAULT + the LiveView-on-
+// vanilla port): the store module is foundation-neutral (a per-process
+// defstruct + pure action fns) and the page seam (`:cart` assign + `@cart.count`
+// read + `update(:cart, …)` handlers) is data-layer-agnostic, so both compile
+// against plain Phoenix LiveView with `mix compile --warnings-as-errors`.
+system StoreLiveViewVanilla {
+  subdomain Sales {
+    context Sales {
+      aggregate Order with crudish {
+        customerId: string
+      }
+      repository Orders for Order { }
+    }
+  }
+
+  api SalesApi from Sales
+
+  ui WebApp {
+    api Sales: SalesApi
+
+    store Cart {
+      state {
+        lines: string[]
+        count: int = 0
+      }
+      action add(sku: string) {
+        lines += sku
+        count += 1
+      }
+      action clear() {
+        lines := [ ]
+        count := 0
+      }
+    }
+
+    component CartSummary() {
+      action addOne() { Cart.add("SKU-1") }
+      body: Stack {
+        Heading { "Items in cart", level: 3 },
+        Button { "Add item", onClick: addOne }
+      }
+    }
+
+    page CartPage {
+      route: "/cart"
+      state { confirming: bool = false }
+      action discard() { Cart.clear() }
+      body: Stack {
+        Heading { "Your cart", level: 1 },
+        Heading { Cart.count, level: 2 },
+        CartSummary(),
+        Button { "Discard", onClick: discard }
+      }
+    }
+
+    page Home {
+      route: "/"
+      body: Heading { "Store showcase", level: 1 }
+    }
+  }
+
+  storage primary { type: postgres }
+  resource salesState { for: Sales, kind: state, use: primary }
+
+  deployable phoenixApp {
+    platform: elixir { foundation: vanilla }
+    contexts: [Sales]
+    dataSources: [salesState]
+    serves: SalesApi
+    ui: WebApp { Sales: phoenixApp }
+    port: 4000
+  }
+}
