@@ -320,6 +320,14 @@ describe.skipIf(!ENABLED)(
         // {:error, :not_found}`) against `mix compile --warnings-as-errors`.
         // The decisive check that LiveView compiles on plain Ecto without Ash.
         { name: "vanilla-liveview-read.ddd" },
+        // Vanilla LiveView FORMS (de-Ash port, slice 2-B): a `foundation:
+        // vanilla` deployable with a `design: daisyui` `scaffold` `ui:` emits
+        // create + operation forms.  Pins the vanilla Ecto-changeset form
+        // lifecycle (`change_<agg>` facade → `to_form`, `create_<agg>` /
+        // `update_<agg>` submit, `Map.put(:action, :validate)` validate) against
+        // `mix compile --warnings-as-errors` — the AshPhoenix.Form lifecycle
+        // ported to plain Ecto.
+        { name: "daisyui-pack.ddd" },
       ]),
     )("$name → mix compile --warnings-as-errors", ({ name }) => {
       const fixturePath = path.join(fixturesDir, name);

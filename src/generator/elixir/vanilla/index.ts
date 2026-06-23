@@ -104,7 +104,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // Ecto schema + fold + event-store repository (D-VANILLA-ES-HOME).  The
     // state emitters above skip them; the context module + controllers branch.
     emitVanillaEventSourcedFiles(appModule, ctx, out);
-    emitVanillaContextModule(appModule, ctx, out);
+    emitVanillaContextModule(appModule, ctx, out, sys);
     // Domain services — stateless pure-calculator modules under
     // `<App>.Domain.Services.*` (domain-services.md).  Identical to the Ash
     // path: a domain service touches no persistence, so the module is

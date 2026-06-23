@@ -86,15 +86,9 @@ export function emitVanillaShellFiles(
   // shell renderers verbatim.  Omitted on a JSON-API-only deployable (no
   // LiveView dep to support them).
   if (hasLiveView) {
-    out.set(
-      `lib/${appName}_web/components/core_components.ex`,
-      renderCoreComponents(appModule),
-    );
+    out.set(`lib/${appName}_web/components/core_components.ex`, renderCoreComponents(appModule));
     out.set(`lib/${appName}_web/components/layouts.ex`, renderLayouts(appName, appModule));
-    out.set(
-      `lib/${appName}_web/components/layouts/root.html.heex`,
-      renderRootLayout(appName),
-    );
+    out.set(`lib/${appName}_web/components/layouts/root.html.heex`, renderRootLayout(appName));
     out.set(
       `lib/${appName}_web/components/layouts/app.html.heex`,
       renderAppLayout(appModule, hasSidebar, authEnabled),
@@ -205,11 +199,7 @@ end
 `;
 }
 
-function renderVanillaWebModule(
-  _appName: string,
-  appModule: string,
-  hasLiveView: boolean,
-): string {
+function renderVanillaWebModule(_appName: string, appModule: string, hasLiveView: boolean): string {
   const webModule = `${appModule}Web`;
   // LiveView spine: a HEEx `ui:` needs the `:live_view` / `:html` /
   // `:component` quotes (each pulls in the `~H` sigil + CoreComponents +
@@ -328,11 +318,7 @@ end
 `;
 }
 
-function renderVanillaEndpoint(
-  appName: string,
-  appModule: string,
-  hasLiveView: boolean,
-): string {
+function renderVanillaEndpoint(appName: string, appModule: string, hasLiveView: boolean): string {
   // LiveView spine: the live socket carries the WebSocket connection
   // (session forwarded so a future auth slice can read it), and
   // `Plug.Static` serves `priv/static` so the root layout's

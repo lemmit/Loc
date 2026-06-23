@@ -14,6 +14,7 @@ import type {
   BoundedContextIR,
   EnrichedAggregateIR,
   OperationIR,
+  SystemIR,
 } from "../../../ir/types/loom-ir.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { snake, upperFirst } from "../../../util/naming.js";
@@ -21,6 +22,7 @@ import { stmtUsesParam } from "../domain/predicates.js";
 import type { RenderCtx } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
+import { isVanillaDocAgg } from "./document-emit.js";
 import {
   customFindsOfAgg,
   esContextNeedsEnsure,
@@ -59,14 +61,20 @@ export function emitVanillaContextModule(
   appModule: string,
   ctx: BoundedContextIR,
   out: Map<string, string>,
+  sys?: SystemIR,
 ): void {
   const ctxSnake = snake(ctx.name);
   const ctxModule = upperFirst(ctx.name);
   const appSnake = appModule.replace(/([A-Z])/g, (_, c, i) => (i ? "_" : "") + c.toLowerCase());
-  out.set(`lib/${appSnake}/${ctxSnake}.ex`, renderContextModule(appModule, ctxModule, ctx));
+  out.set(`lib/${appSnake}/${ctxSnake}.ex`, renderContextModule(appModule, ctxModule, ctx, sys));
 }
 
-function renderContextModule(appModule: string, ctxModule: string, ctx: BoundedContextIR): string {
+function renderContextModule(
+  appModule: string,
+  ctxModule: string,
+  ctx: BoundedContextIR,
+  sys?: SystemIR,
+): string {
   const facadeMod = `${appModule}.${ctxModule}`;
   const blocks = ctx.aggregates.map((agg) => {
     // Event-sourced aggregates expose create/get/list + per-op command
@@ -110,12 +118,26 @@ function renderContextModule(appModule: string, ctxModule: string, ctx: BoundedC
       return `  defdelegate ${findSnake}_${aggSnake}(${findArgs}), to: ${repoMod}, as: :${findSnake}`;
     });
     const findBlock = findLines.length > 0 ? `\n${findLines.join("\n")}\n` : "";
+    // `change_<agg>/2` — a blank-or-seeded Ecto changeset facade the Phoenix
+    // LiveView form lifecycle calls (`change_<agg>(%Agg{})` for a create form,
+    // `change_<agg>(record, params)` for validate).  Delegates to the
+    // per-aggregate Changeset module's `base_changeset/2`.  A DOCUMENT
+    // aggregate has no `base_changeset` (it round-trips via `document_changeset`),
+    // so skip the facade there — its form path is out of scope for this slice.
+    const isDoc = isVanillaDocAgg(agg, ctx, sys);
+    const changesetMod = `${facadeMod}.${aggPascal}Changeset`;
+    const changeFacade = isDoc
+      ? ""
+      : `\n
+  @doc "Blank-or-seeded Ecto changeset for the ${aggPascal} create/operation forms."
+  def change_${aggSnake}(record_or_struct \\\\ %${facadeMod}.${aggPascal}{}, attrs \\\\ %{}),
+    do: ${changesetMod}.base_changeset(record_or_struct, attrs)`;
     return `  # ${aggPascal}
   defdelegate list_${aggSnake}s(${principal ? "current_user \\\\ nil" : ""}), to: ${repoMod}, as: :list
   defdelegate get_${aggSnake}(id${actorArg}), to: ${repoMod}, as: :find_by_id
   defdelegate create_${aggSnake}(attrs${stampActorArg}), to: ${repoMod}, as: :insert
   defdelegate update_${aggSnake}(record, attrs${stampActorArg}), to: ${repoMod}, as: :update
-  defdelegate delete_${aggSnake}(record), to: ${repoMod}, as: :delete
+  defdelegate delete_${aggSnake}(record), to: ${repoMod}, as: :delete${changeFacade}
 ${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}`;
   });
 

@@ -470,6 +470,7 @@ function renderLiveView(a: RenderArgs): string {
     walked.idOptionsBindings,
     contextModuleByAggName,
     aggregatesByName,
+    foundation,
     usedStores,
   );
   const handleParams = renderHandleParams(
@@ -493,9 +494,25 @@ function renderLiveView(a: RenderArgs): string {
   // component, so its `phx-click="add_one"` needs the page to carry the clause
   // (and the page already carries the `:cart` assign via gatherUsedStores).
   const storeHandlers = gatherStoreHandlers(walked.usedComponents, componentInfo);
+  // The list route a create-form success navigates back to — the create
+  // ("new") page route with the trailing `/new` segment stripped
+  // (`/customers/new` → `/customers`).  Vanilla only (the Ash path emits no
+  // create-submit handler, so this stays unused there → byte-identical).
+  const createSuccessRoute = page.route ? page.route.replace(/\/new$/, "") : null;
   const handleEventClauses =
     renderHandleEventClauses([...handlers, ...actionHandlers, ...storeHandlers]) +
-    renderOperationEventClauses(walked.formBindings, detailBaseRoute);
+    renderCreateEventClauses(
+      walked.formBindings,
+      contextModuleByAggName,
+      createSuccessRoute,
+      foundation,
+    ) +
+    renderOperationEventClauses(
+      walked.formBindings,
+      detailBaseRoute,
+      contextModuleByAggName,
+      foundation,
+    );
 
   return `# Auto-generated.
 defmodule ${liveModule} do
@@ -547,6 +564,11 @@ function renderMount(
    *  when absent, the assign falls back to the v0 shape with the
    *  record's id as both label and value. */
   aggregatesByName: ReadonlyMap<string, AggregateIR>,
+  /** Persistence foundation.  `"ash"` (default) emits the AshPhoenix.Form
+   *  create-form constructor + Ash bang-read option lists; `"vanilla"`
+   *  emits the plain-Ecto changeset facade (`change_<agg>`) + the
+   *  `{:ok, list}`-tuple option lists. */
+  foundation: "ash" | "vanilla",
   /** Stores this page touches (Stage 5) — each gets one
    *  `|> assign(:<store_snake>, %<Store>{})` seeding the per-page store struct
    *  (defaults from the store module's `defstruct`).  The matching `alias` is
@@ -575,12 +597,19 @@ function renderMount(
     const aggSnake = snake(aggName);
     const targetAgg = aggregatesByName.get(aggName);
     const hasDisplay = targetAgg?.displayDerived !== undefined;
-    const listCall = hasDisplay
-      ? `${ctxModule}.list_${aggSnake}s!(load: [:display])`
-      : `${ctxModule}.list_${aggSnake}s!()`;
-    const tupleFn = hasDisplay
-      ? `fn r -> {r.display, r.id} end`
-      : `fn r -> {to_string(r.id), r.id} end`;
+    // Vanilla has no `:display` calculation (no Ash `load:`); the label is
+    // the record id.  The vanilla read returns `{:ok, list}`, so unwrap to a
+    // bare list before mapping.
+    const tupleFn =
+      hasDisplay && foundation === "ash"
+        ? `fn r -> {r.display, r.id} end`
+        : `fn r -> {to_string(r.id), r.id} end`;
+    const listCall =
+      foundation === "vanilla"
+        ? `(case ${ctxModule}.list_${aggSnake}s() do {:ok, items} -> items; _ -> [] end)`
+        : hasDisplay
+          ? `${ctxModule}.list_${aggSnake}s!(load: [:display])`
+          : `${ctxModule}.list_${aggSnake}s!()`;
     assigns.push(`      |> assign(:${aggSnake}_options, ${listCall} |> Enum.map(${tupleFn}))`);
   }
   // @form assignment — one per CreateForm / WorkflowForm call in the page body.
@@ -597,8 +626,12 @@ function renderMount(
     if (fb.kind === "aggregate") {
       const ctxModule = contextModuleByAggName.get(fb.name);
       if (!ctxModule) continue; // unresolved — validator catches; silent skip
+      // Vanilla: a blank Ecto changeset off the schema struct via the
+      // `change_<agg>` context facade.  Ash: the AshPhoenix.Form create form.
       assigns.push(
-        `      |> assign(:form, AshPhoenix.Form.for_create(${ctxModule}.${upperFirst(fb.name)}, :create) |> to_form())`,
+        foundation === "vanilla"
+          ? `      |> assign(:form, ${ctxModule}.change_${snake(fb.name)}(%${ctxModule}.${upperFirst(fb.name)}{}) |> to_form())`
+          : `      |> assign(:form, AshPhoenix.Form.for_create(${ctxModule}.${upperFirst(fb.name)}, :create) |> to_form())`,
       );
       break; // single @form per page
     } else if (fb.kind === "workflow") {
@@ -652,28 +685,40 @@ function renderHandleParams(
     if (!ctxModule) continue; // unresolved — validator catches upstream
     const aggSnake = snake(qb.aggregate);
     if (qb.kind === "single") {
-      // Operation forms for this aggregate bind to the loaded
-      // record via `for_update` — assigned here, in the success
-      // branch, where `record` is in scope.  AshPhoenix-only; a
-      // read-only vanilla `ui` carries no operation forms.
+      // Operation forms for this aggregate bind to the loaded record —
+      // assigned here, where `record` is in scope.  Ash: an
+      // `AshPhoenix.Form.for_update`.  Vanilla: a plain Ecto changeset
+      // seeded from the loaded record via the `change_<agg>` facade.
+      const opFbs = formBindings.filter(
+        (fb) => fb.kind === "operation" && fb.name === qb.aggregate,
+      );
       const opAssigns =
         foundation === "vanilla"
-          ? []
-          : formBindings
-              .filter((fb) => fb.kind === "operation" && fb.name === qb.aggregate)
-              .map(
-                (fb) =>
-                  `        |> assign(:${fb.op}_form, AshPhoenix.Form.for_update(record, :${fb.op}, as: "${fb.op}") |> to_form())`,
-              );
+          ? opFbs.map(
+              (fb) =>
+                `        |> assign(:${fb.op}_form, ${ctxModule}.change_${aggSnake}(record) |> to_form())`,
+            )
+          : opFbs.map(
+              (fb) =>
+                `        |> assign(:${fb.op}_form, AshPhoenix.Form.for_update(record, :${fb.op}, as: "${fb.op}") |> to_form())`,
+            );
       if (foundation === "vanilla") {
         // Vanilla read: `get_<agg>(id)` is a plain-Ecto fetch returning
         // `{:ok, record} | {:error, :not_found}` (no exception to rescue).
         // The `:not_found` / `:error` sentinels feed the same 4-way `cond`
-        // the Ash path's rescue arms produce.
+        // the Ash path's rescue arms produce.  Operation forms (seeded from
+        // the loaded `record`) are bound in the `{:ok, record}` arm.
+        const okArm =
+          opAssigns.length > 0
+            ? `        {:ok, record} ->
+          socket
+          |> assign(:${qb.assign}, record)
+${opAssigns.map((a) => `  ${a}`).join("\n")}`
+            : `        {:ok, record} -> assign(socket, :${qb.assign}, record)`;
         loadBlocks.push(
           `    socket =
       case ${ctxModule}.get_${aggSnake}(socket.assigns.id) do
-        {:ok, record} -> assign(socket, :${qb.assign}, record)
+${okArm}
         {:error, :not_found} -> assign(socket, :${qb.assign}, :not_found)
         _ -> assign(socket, :${qb.assign}, :error)
       end`,
@@ -767,6 +812,13 @@ function renderOperationEventClauses(
   /** The detail page's route with the trailing `/:id` stripped,
    *  e.g. "/customers" — used to push_patch back after submit. */
   detailBaseRoute: string | null,
+  /** Module-qualified context per aggregate PascalCase name — resolves the
+   *  `<Ctx>.update_<agg>` / `<Ctx>.change_<agg>` calls on the vanilla path. */
+  contextModuleByAggName: ReadonlyMap<string, string>,
+  /** Persistence foundation.  `"ash"` (default) keeps the AshPhoenix.Form
+   *  lifecycle byte-identical; `"vanilla"` emits the Ecto-changeset
+   *  validate-on-change + `update_<agg>` submit. */
+  foundation: "ash" | "vanilla",
 ): string {
   const ops = formBindings.filter((fb) => fb.kind === "operation");
   if (ops.length === 0) return "";
@@ -779,6 +831,39 @@ function renderOperationEventClauses(
         const reload = detailBaseRoute
           ? `\n         |> push_patch(to: ~p"${detailBaseRoute}/#{record.id}")`
           : "";
+        if (foundation === "vanilla") {
+          // Vanilla op-form lifecycle: validate builds a changeset off the
+          // CURRENT @data record with the incoming params + `action: :validate`
+          // (so the form shows errors); submit persists via `update_<agg>` and
+          // re-seeds the op form from the saved record.
+          const ctxModule = contextModuleByAggName.get(fb.name);
+          const aggSnake = snake(fb.name);
+          if (!ctxModule) return ""; // unresolved — validator catches upstream
+          return `  @impl true
+  def handle_event("validate_${op}", %{"${op}" => params}, socket) do
+    changeset =
+      socket.assigns.data
+      |> ${ctxModule}.change_${aggSnake}(params)
+      |> Map.put(:action, :validate)
+
+    {:noreply, assign(socket, :${op}_form, to_form(changeset))}
+  end
+
+  @impl true
+  def handle_event("submit_${op}", %{"${op}" => params}, socket) do
+    case ${ctxModule}.update_${aggSnake}(socket.assigns.data, params) do
+      {:ok, record} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "${human} succeeded")
+         |> assign(:data, record)
+         |> assign(:${op}_form, ${ctxModule}.change_${aggSnake}(record) |> to_form())${reload}}
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:noreply, assign(socket, :${op}_form, to_form(changeset))}
+    end
+  end\n`;
+        }
         return `  @impl true
   def handle_event("validate_${op}", %{"${op}" => params}, socket) do
     form = AshPhoenix.Form.validate(socket.assigns.${op}_form, params)
@@ -802,6 +887,44 @@ function renderOperationEventClauses(
       })
       .join("\n")
   );
+}
+
+/** Create-form (`CreateForm(of: Agg)`) submit handler — `save_<agg>`.  The
+ *  scaffold "new" page's `<.simple_form phx-submit="save_<agg>">` needs a
+ *  matching `handle_event` or the submit no-ops.  Vanilla-only: the Ash path
+ *  emits no create-submit handler today (AshPhoenix.Form drives it
+ *  client-side), so gating on `"vanilla"` keeps Ash output byte-identical.
+ *  On success → flash + navigate to the list route; on a changeset error →
+ *  re-assign the form so the inline errors render. */
+function renderCreateEventClauses(
+  formBindings: import("./heex-walker.js").FormBinding[],
+  contextModuleByAggName: ReadonlyMap<string, string>,
+  /** The create page's route with a trailing `/new` stripped
+   *  (`/customers/new` → `/customers`), navigated to on success. */
+  listRoute: string | null,
+  foundation: "ash" | "vanilla",
+): string {
+  if (foundation !== "vanilla") return "";
+  const creates = formBindings.filter((fb) => fb.kind === "aggregate");
+  if (creates.length === 0) return "";
+  const fb = creates[0]!; // single @form per page
+  const ctxModule = contextModuleByAggName.get(fb.name);
+  if (!ctxModule) return "";
+  const aggSnake = snake(fb.name);
+  const human = humanizeOp(`create_${aggSnake}`);
+  const nav = listRoute ? `\n         |> push_navigate(to: ~p"${listRoute}")` : "";
+  return `\n  @impl true
+  def handle_event("save_${aggSnake}", %{"${aggSnake}" => params}, socket) do
+    case ${ctxModule}.create_${aggSnake}(params) do
+      {:ok, _record} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "${human} succeeded")${nav}}
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:noreply, assign(socket, :form, to_form(changeset))}
+    end
+  end\n`;
 }
 
 /** "adjust_credit" → "Adjust credit" — sentence-case the snake op
