@@ -1062,8 +1062,10 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // doc, so a principal predicate there evaluates the actor in-app (Slice B):
   // node binds `requireCurrentUser()` into the in-app predicate; java injects
   // the `CurrentUserAccessor` bean and binds it before the `.stream().filter`.
-  // (`elixir` has no `document` shape — `validateSavingShapeSupport` gates it;
-  // `python` doesn't wire non-relational filters at all — so both stay off.)
+  // (`elixir` wires non-relational filters only on `embedded`, not `document`
+  // — see `supportsNonRelationalFilter` — so an elixir document filter is gated
+  // by the shape arm regardless of whether it references the actor; `python`
+  // doesn't wire non-relational filters at all — so both stay off here.)
   const supportsPrincipalNonRelationalFilter = (family: string, shp: string): boolean =>
     (shp === "embedded" && (family === "node" || family === "elixir" || family === "java")) ||
     (shp === "document" && (family === "node" || family === "java"));
