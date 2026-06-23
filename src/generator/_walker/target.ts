@@ -541,10 +541,12 @@ export interface WalkerTarget {
   //      store on those frontends fails LOUD, never silent.
   //
   // The use-site methods are OPTIONAL on the interface so a frontend that
-  // hasn't wired stores yet still typechecks; the IR validator
-  // (`loom.store-on-liveview-unsupported`) gates LiveView, and the module
-  // emitter throws for the rest — so an un-implemented frontend can never
-  // silently drop a store.
+  // hasn't wired stores yet still typechecks; the module emitter throws for an
+  // un-implemented frontend so a store can never be silently dropped.  Phoenix
+  // LiveView implements the store seam through its PARALLEL heex walker (a
+  // dedicated `<App>Web.Stores.<Store>` module + per-page assign), NOT these
+  // shared-`walkBody` methods — see `src/generator/elixir/store-emit.ts` and
+  // the store seams in `heex-target.ts`.
 
   /** Render the SELECTOR for a `<Store>.<field>` read (Stage 5).  React
    *  returns `use<Store>((s) => s.<field>)`; the shell binds it to a local

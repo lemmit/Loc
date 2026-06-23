@@ -1,0 +1,96 @@
+// Store showcase on Phoenix LiveView — the elixir twin of store-showcase.ddd
+// (named-actions-and-stores.md §3, Stage 5).  Exercises the `store` surface on
+// a `platform: elixir` (phoenixLiveView) deployable so the Elixir/Ash compile
+// gate validates the per-LiveView-process store projection:
+//
+//   - a top-level `store Cart { state { … } action … }` → a dedicated
+//     `lib/<app>_web/stores/cart.ex` module (defstruct + pure action fns);
+//   - a page that READS store state by dotted name (`Cart.count`) and CALLS a
+//     store action from a page action (`discard() { Cart.clear() }`) → the page
+//     seeds `assign(:cart, %Cart{})` in mount and `update(socket, :cart, …)` in
+//     the handler;
+//   - a component that adds to the store (`Cart.add(...)` via a store action).
+
+system StoreShowcaseElixir {
+
+  subdomain Sales {
+    context Sales {
+      aggregate Order with crudish {
+        customerId: string
+      }
+      repository Orders for Order { }
+    }
+  }
+
+  api SalesApi from Sales
+
+  ui WebApp {
+    api Sales: SalesApi
+
+    // Shared client-side state container.  In-memory (no persist:/sync:).
+    store Cart {
+      state {
+        lines: string[]
+        count: int = 0
+      }
+      action add(sku: string) {
+        lines += sku
+        count += 1
+      }
+      action clear() {
+        lines := [ ]
+        count := 0
+      }
+    }
+
+    // A component reads the store (dotted) and calls a store action from its
+    // own action — store wiring works uniformly for pages AND components.
+    component CartSummary() {
+      action addOne() { Cart.add("SKU-1") }
+      body: Stack {
+        Heading { "Items in cart", level: 3 },
+        Button { "Add item", onClick: addOne }
+      }
+    }
+
+    // A page reads the store (dotted) and calls a store action from its own
+    // page action.  `confirming` is page-local state, side by side with the
+    // shared store reads.
+    page CartPage {
+      route: "/cart"
+      state { confirming: bool = false }
+      action discard() { Cart.clear() }
+      body: Stack {
+        Heading { "Your cart", level: 1 },
+        Heading { Cart.count, level: 2 },
+        CartSummary(),
+        Button { "Discard", onClick: discard }
+      }
+    }
+
+    page Home {
+      route: "/"
+      body: Heading { "Store showcase", level: 1 }
+    }
+  }
+
+  storage primary { type: postgres }
+  resource salesState { for: Sales, kind: state, use: primary }
+
+  deployable api {
+    platform: node
+    contexts: [Sales]
+    dataSources: [salesState]
+    serves: SalesApi
+    port: 3000
+  }
+
+  deployable webApp {
+    platform: elixir { foundation: ash }
+    contexts: [Sales]
+    dataSources: [salesState]
+    serves: SalesApi
+    ui: WebApp { Sales: webApp }
+    port: 4000
+  }
+}

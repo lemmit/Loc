@@ -22,7 +22,7 @@
 // `framework: "phoenixLiveView"` matches the IR enum.
 // ---------------------------------------------------------------------------
 
-import type { ExprIR, StateFieldIR, TypeIR } from "../../ir/types/loom-ir.js";
+import type { TypeIR } from "../../ir/types/loom-ir.js";
 import type { ApiCallSite, RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 
 export const heexTarget: WalkerTarget = {
@@ -208,6 +208,62 @@ export const heexTarget: WalkerTarget = {
 };
 
 // ---------------------------------------------------------------------------
+// Store seam (Stage 5) — HEEx-specific.
+//
+// The cross-framework `WalkerTarget.renderStoreFieldRead`/`…ActionCall`
+// signatures are shaped for the SHARED `walkBody` engine (`{ storeName,
+// field }` / a shell-bound `local`), which the JSX/markup frontends drive.
+// Phoenix LiveView runs the PARALLEL heex-walker engine and needs a
+// position-aware read + an `update/3` call form, so the store seams live as
+// standalone helpers the heex walker calls directly (the same way HEEx owns
+// its parallel match / For rendering).  Keeping them off the `WalkerTarget`
+// object keeps `heexTarget` byte-conformant to the shared contract.
+//
+// A `store Cart { … }` mounted on a LiveView page is seeded as one per-page
+// assign — `assign(:cart, %Cart{})` — and rendered as a dedicated
+// `<App>Web.Stores.Cart` module (defstruct + pure action fns).  The seams:
+//
+//   - read,  template position: `@cart.count`
+//   - read,  handler  position: `socket.assigns.cart.count`
+//   - call,  0 args: `update(socket, :cart, &Cart.clear/1)`
+//   - call,  N args: `update(socket, :cart, fn c -> Cart.add(c, sku) end)`
+//
+// Namespaced through the `:<store_snake>` assign so a page `state { count }`
+// and a `Cart.count` read never collide — there is no flat `@count`.
+
+/** `Cart.count` read → `@cart.count` (template) / `socket.assigns.cart.count`
+ *  (handler).  `store` is the PascalCase store name; the assign key is its
+ *  snake form. */
+export function renderHeexStoreFieldRead(
+  store: string,
+  field: string,
+  position: RenderPosition,
+): string {
+  const assign = snakeLocal(store);
+  const f = snakeLocal(field);
+  return position === "template" ? `@${assign}.${f}` : `socket.assigns.${assign}.${f}`;
+}
+
+/** `Cart.clear()` / `Cart.add(sku)` call → an `update/3` over the store's
+ *  per-page assign applying the store module's pure fn.  0 args → a captured
+ *  `&Cart.clear/1`; N args → a `fn c -> … end` so the draft struct flows in
+ *  as the first argument.  Emits handler-position Elixir (a `handle_event`
+ *  body) — it pipes/returns a new socket. */
+export function renderHeexStoreActionCall(
+  store: string,
+  action: string,
+  renderedArgs: string,
+): string {
+  const assign = snakeLocal(store);
+  const module = upperFirstLocal(store);
+  const fn = snakeLocal(action);
+  if (renderedArgs.length === 0) {
+    return `update(socket, :${assign}, &${module}.${fn}/1)`;
+  }
+  return `update(socket, :${assign}, fn c -> ${module}.${fn}(c, ${renderedArgs}) end)`;
+}
+
+// ---------------------------------------------------------------------------
 // Internals.
 // ---------------------------------------------------------------------------
 
@@ -262,4 +318,11 @@ function snakeLocal(s: string): string {
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
     .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
     .toLowerCase();
+}
+
+/** PascalCase the first character — the Elixir module-name spelling of a
+ *  store (`cart` / `Cart` → `Cart`).  Store names are already PascalCase in
+ *  source, so this is just a defensive upper-first. */
+function upperFirstLocal(s: string): string {
+  return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
 }

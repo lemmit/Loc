@@ -449,11 +449,25 @@ lifetime ladder has no grammar surface yet (those words collide with common
 identifiers), though the IR + a `loom.store-lifetime-unsupported` gate carry it
 for the persistence follow-up. Validator gates: a store action can't call a
 view-scoped effect (`navigate`/`toast` — `loom.store-action-view-effect`), a
-page can't write store state inline (`loom.store-state-inline-write`), a
-store→store call cycle is rejected (`loom.store-action-cycle`), and a store on
-a `phoenixLiveView` ui is rejected (`loom.store-on-liveview-unsupported`).
-**React only in v1** — Vue/Svelte/Angular store-module emit is a fan-out
-follow-up and throws loudly until ported.
+page can't write store state inline (`loom.store-state-inline-write`), and a
+store→store call cycle is rejected (`loom.store-action-cycle`).
+
+**Phoenix LiveView** also ships stores (the `loom.store-on-liveview-unsupported`
+gate was lifted): a `store Cart { … }` emits a dedicated
+`lib/<app>_web/stores/cart.ex` module — a `defstruct` carrying the state fields
+(with their defaults) plus one public pure function per action
+(`def clear(%__MODULE__{} = state), do: %{state | …}`). Each LiveView page that
+touches the store seeds one per-process assign in `mount/3`
+(`|> assign(:cart, %Cart{})` + an `alias <App>Web.Stores.Cart`); a `Cart.count`
+read renders `@cart.count` (template) / `socket.assigns.cart.count` (handler),
+and a `Cart.clear()` call renders `|> update(:cart, &Cart.clear/1)` (0 args) or
+`|> update(:cart, fn c -> Cart.add(c, sku) end)` (with args). Because each store
+is its own per-page assign, a store action calling a **different** store's
+action is gated (`loom.store-cross-store-on-liveview-unsupported`) — same-store
+action→action composition is fine (a pure in-module call).
+
+Vue/Svelte/Angular store-module emit is a fan-out follow-up and throws loudly
+until ported.
 
 ### Per-aggregate detail
 

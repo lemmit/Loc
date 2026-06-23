@@ -55,7 +55,7 @@ import type {
 import { humanize, snake, upperFirst } from "../../util/naming.js";
 import { tryRenderGate } from "../_frontend/gate-expr.js";
 import { WALKER_PRIMITIVES } from "../_walker/registry.js";
-import { heexTarget } from "./heex-target.js";
+import { heexTarget, renderHeexStoreActionCall, renderHeexStoreFieldRead } from "./heex-target.js";
 
 export type RenderPosition = "template" | "handler";
 
@@ -105,6 +105,12 @@ export interface WalkResult {
    *  read `options={@<x_snake>_options}`.  Empty when no `X id` form
    *  field appears. */
   idOptionsBindings: string[];
+  /** Store names (PascalCase) this page/component body uses — a `Cart.<field>`
+   *  read or a `Cart.<action>(…)` call anywhere in the body (Stage 5).  The
+   *  LiveView emitter seeds one `assign(:<store_snake>, %<Store>{})` per used
+   *  store in `mount/3` and adds the matching `alias <App>Web.Stores.<Store>`.
+   *  Empty when the body touches no store. */
+  usedStores: string[];
 }
 
 /** `Action(<instance>.<operation>)` → a `<.button phx-click=…>` plus a
@@ -214,6 +220,11 @@ export interface WalkContext {
    *  `{...ctx}` copies) so each Tabs gets a unique id used to scope its
    *  client-side `JS.show`/`JS.hide` toggle selectors. */
   tabSeq: { value: number };
+  /** Store names (PascalCase) referenced anywhere in this body — a
+   *  `Cart.<field>` read or `Cart.<action>(…)` call (Stage 5).  A Set so the
+   *  mutation survives the `{...ctx}` shallow copies nested renders make (like
+   *  the other accumulator Sets above), surfaced as `WalkResult.usedStores`. */
+  usedStores: Set<string>;
   /** Current rendering position — see RenderPosition. */
   position: RenderPosition;
   /** Module-qualified bounded-context name keyed by entity-part name
@@ -306,6 +317,7 @@ export function walkBodyToHeex(
     usedComponents: new Set(),
     slotUsed: { value: false },
     tabSeq: { value: 0 },
+    usedStores: new Set(),
     position: "template",
     instanceTypes,
     authEnabled,
@@ -336,6 +348,7 @@ export function walkBodyToHeex(
     usedComponents: [...ctx.usedComponents],
     usesSlot: ctx.slotUsed.value,
     idOptionsBindings: [...ctx.idOptionsBindings],
+    usedStores: [...ctx.usedStores],
   };
 }
 
@@ -450,6 +463,17 @@ function renderLiteral(kind: string, value: string): string {
 }
 
 function renderRef(expr: Extract<ExprIR, { kind: "ref" }>, ctx: WalkContext): string {
+  // Store-field read — `Cart.count` (Stage 5).  Resolved at lowering into a
+  // `ref` carrying `refKind: "store-field"` + the declaring `storeName`.  In a
+  // page/component body it reads the store's per-page assign
+  // (`@cart.count` / `socket.assigns.cart.count`); record the use so the
+  // LiveView emitter seeds the assign + alias.  (A store action's OWN field
+  // reads use the bare field name, never `Store.field`, so they don't land
+  // here — they're handled by the store-module emitter.)
+  if (expr.refKind === "store-field" && expr.storeName) {
+    ctx.usedStores.add(expr.storeName);
+    return renderHeexStoreFieldRead(expr.storeName, expr.name, ctx.position);
+  }
   // Variable remapping — QueryView maps lambda params (e.g. "rows") to
   // their LiveView assign names (e.g. "items").  Check this first.
   if (ctx.varRemapping) {
@@ -656,6 +680,20 @@ function gateActionButton(
 }
 
 function renderCall(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
+  // Store-action call — `Cart.add(sku)` / `Cart.clear()` (Stage 5).  Resolved
+  // at lowering into a `call` carrying `callKind: "store-action"` +
+  // `storeAction: { store, action }`.  Renders to an `update/3` over the
+  // store's per-page assign applying the pure store-module fn.  Always a
+  // handler-position effect (a `handle_event` body); record the use so the
+  // emitter seeds the assign + alias.  (A page action body reaches this via
+  // the `renderStmt` `call` arm, which pipes the result; an expr-position call
+  // — rare — returns the bare `update(...)` so an enclosing pipe can consume
+  // it.)
+  if (expr.callKind === "store-action" && expr.storeAction) {
+    ctx.usedStores.add(expr.storeAction.store);
+    const args = expr.args.map((a) => renderExpr(a, { ...ctx, position: "handler" })).join(", ");
+    return renderHeexStoreActionCall(expr.storeAction.store, expr.storeAction.action, args);
+  }
   // navigate(<Page>, { … }) — Loom's cross-page navigation primitive.
   if (expr.name === "navigate") {
     return renderNavigate(expr, ctx);
@@ -1187,6 +1225,25 @@ function renderStmt(stmt: StmtIR, ctx: WalkContext): string {
       return `|> tap(fn _ -> Phoenix.PubSub.broadcast(${ctx.appModule}.PubSub, "events", %${ctx.appModule}.Events.${moduleName}{${fields}}) end)`;
     }
     case "call": {
+      if (stmt.target === "store-action" && stmt.store) {
+        // `Cart.clear()` / `Cart.add(sku)` from a page/component action body
+        // (Stage 5).  A pipe step over the socket: `|> update(:cart, …)`
+        // applies the pure store-module fn to the store's per-page assign.
+        // (Same-store action→action composition is pure and handled inside the
+        // store module; a page calling a store action lands here.)  Record the
+        // use so the LiveView emitter seeds the `:cart` assign + alias.
+        ctx.usedStores.add(stmt.store);
+        const assign = snake(stmt.store);
+        const module = upperFirst(stmt.store);
+        const fn = snake(stmt.name);
+        if (stmt.args.length === 0) {
+          return `|> update(:${assign}, &${module}.${fn}/1)`;
+        }
+        const callArgs = stmt.args
+          .map((a) => renderExpr(a, { ...ctx, position: "handler" }))
+          .join(", ");
+        return `|> update(:${assign}, fn c -> ${module}.${fn}(c, ${callArgs}) end)`;
+      }
       if (stmt.target === "action") {
         // Sibling action→action call (Proposal A Stage 1, Fix 1).  LiveView
         // can't cleanly call one `handle_event` clause from another — the
@@ -1281,6 +1338,7 @@ function renderRequiresGuardAt(
     usedComponents: new Set(),
     slotUsed: { value: false },
     tabSeq: { value: 0 },
+    usedStores: new Set(),
     position,
     partContextModule: new Map(),
   };

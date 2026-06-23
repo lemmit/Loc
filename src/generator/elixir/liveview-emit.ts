@@ -45,6 +45,7 @@ import {
   walkBodyToHeex,
 } from "./heex-walker.js";
 import { buildPlaywrightPageObject } from "./page-objects-emit.js";
+import { renderStoreModule } from "./store-emit.js";
 
 /** One router entry the orchestrator splices into router.ex. */
 export interface LiveRoute {
@@ -73,6 +74,22 @@ export function emitLiveViewPages(args: {
   if (!deployable.uiName) return { files: out, routes };
   const ui = sys.uis.find((u) => u.name === deployable.uiName);
   if (!ui) return { files: out, routes };
+
+  // `<App>Web` module prefix — used for the store modules
+  // (`<App>Web.Stores.<Store>`) + the per-page `alias`.
+  const webModule = `${appModule}Web`;
+
+  // --- Store modules (Stage 5) -------------------------------------------
+  // One `lib/<app>_web/stores/<store_snake>.ex` per `store Cart { … }` the ui
+  // declares — a dedicated module (defstruct + pure action fns), the Elixir
+  // twin of the SPA's `stores/cart.ts`.  The page seam (assign + alias +
+  // `update/3` calls) is wired per-page below from `walked.usedStores`.
+  for (const store of ui.stores) {
+    out.set(
+      `lib/${appName}_web/stores/${snake(store.name)}.ex`,
+      renderStoreModule(store, webModule),
+    );
+  }
 
   // Workspace-wide aggregate registry — needed by the page-object
   // emitter's domain-method synthesis (fill, submit, expectRow) AND
@@ -120,6 +137,11 @@ export function emitLiveViewPages(args: {
       params: c.params,
       state: c.state,
       derived: c.derived,
+      // Include the component's named `action`s so the walk hoists their
+      // handlers — a store-mutating component action (`addOne() { Cart.add(…) }`)
+      // needs its `handle_event` clause + `usedStores` captured so the host
+      // page can hoist them (Stage 5).
+      actions: c.actions,
       body: c.body,
     } as PageIR;
     const w = walkBodyToHeex(
@@ -136,6 +158,8 @@ export function emitLiveViewPages(args: {
     componentInfo.set(c.name, {
       actionBindings: w.actionBindings,
       usedComponents: w.usedComponents,
+      usedStores: w.usedStores,
+      handlers: w.handlers,
     });
   }
 
@@ -254,6 +278,17 @@ interface RenderArgs {
 interface ComponentActionInfo {
   actionBindings: readonly ActionBinding[];
   usedComponents: readonly string[];
+  /** Store names the component body uses (Stage 5) — hoisted to the host page
+   *  so its mount seeds the `:store` assign + `alias` even when the store is
+   *  only touched inside the (stateless) component. */
+  usedStores: readonly string[];
+  /** The component's own `handle_event` clauses (named-action handlers) — a
+   *  store-mutating component action (`addOne() { Cart.add(...) }`) must hoist
+   *  its handler to the host page LiveView, since the component is a stateless
+   *  function component with no LiveView of its own.  Only store-touching
+   *  handlers are hoisted (see `gatherStoreHandlers`); the rest stay the
+   *  pre-existing component-named-action gap. */
+  handlers: readonly HandleEventClause[];
 }
 
 /** Transitive closure: every `ActionBinding` reachable from a page —
@@ -280,6 +315,59 @@ function gatherActionBindings(
     queue.push(...info.usedComponents);
   }
   return [...byEvent.values()];
+}
+
+/** Transitive closure of the stores a page touches — its own body's
+ *  `usedStores` plus those of every component it renders (recursively).  Drives
+ *  the per-page mount `assign(:store, %Store{})` + `alias` so a store touched
+ *  only inside a (stateless) component is still seeded on the host page. */
+function gatherUsedStores(
+  seedStores: readonly string[],
+  seedComponents: readonly string[],
+  componentInfo: ReadonlyMap<string, ComponentActionInfo>,
+): string[] {
+  const stores = new Set<string>(seedStores);
+  const seen = new Set<string>();
+  const queue = [...seedComponents];
+  while (queue.length > 0) {
+    const name = queue.shift()!;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const info = componentInfo.get(name);
+    if (!info) continue;
+    for (const s of info.usedStores) stores.add(s);
+    queue.push(...info.usedComponents);
+  }
+  return [...stores];
+}
+
+/** The store-touching `handle_event` clauses from every component a page
+ *  renders (transitively).  A component is a stateless function component, so a
+ *  store-mutating component action (`addOne() { Cart.add(...) }`) only works if
+ *  its handler is hoisted to the host page's LiveView (which owns the `:cart`
+ *  assign).  Only clauses whose body references `update(:` (a store mutation)
+ *  are hoisted — page-local component actions that mutate nothing the page owns
+ *  stay the pre-existing component-named-action HEEx gap.  Deduped by name. */
+function gatherStoreHandlers(
+  seedComponents: readonly string[],
+  componentInfo: ReadonlyMap<string, ComponentActionInfo>,
+): HandleEventClause[] {
+  const byName = new Map<string, HandleEventClause>();
+  const seen = new Set<string>();
+  const queue = [...seedComponents];
+  while (queue.length > 0) {
+    const name = queue.shift()!;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const info = componentInfo.get(name);
+    if (!info) continue;
+    for (const h of info.handlers) {
+      const touchesStore = h.body.some((l) => l.includes("update(:"));
+      if (touchesStore && !byName.has(h.name)) byName.set(h.name, h);
+    }
+    queue.push(...info.usedComponents);
+  }
+  return [...byName.values()];
 }
 
 /** A hoisted `Action` `handle_event` clause: load the instance by id,
@@ -349,12 +437,26 @@ function renderLiveView(a: RenderArgs): string {
   const heex = walked.heex;
   const handlers: HandleEventClause[] = walked.handlers;
 
+  // Stores this page touches (Stage 5) — its own body's `usedStores` plus
+  // every component it renders (transitively).  Drives the mount
+  // `assign(:store, %Store{})` + the `alias <App>Web.Stores.<Store>` so a
+  // `Cart.count` read / `Cart.clear()` call resolves.
+  const usedStores = gatherUsedStores(
+    walked.usedStores,
+    walked.usedComponents,
+    componentInfo,
+  ).sort();
+  const aliasLines = usedStores
+    .map((s) => `  alias ${webModule}.Stores.${upperFirst(s)}`)
+    .join("\n");
+
   const mount = renderMount(
     page,
     walked.formBindings,
     walked.idOptionsBindings,
     contextModuleByAggName,
     aggregatesByName,
+    usedStores,
   );
   const handleParams = renderHandleParams(
     page,
@@ -371,14 +473,19 @@ function renderLiveView(a: RenderArgs): string {
     gatherActionBindings(walked.actionBindings, walked.usedComponents, componentInfo),
     contextModuleByAggName,
   );
+  // Store-mutating component named-action handlers (`addOne() { Cart.add(...) }`)
+  // hoist to the host page's LiveView — the component is a stateless function
+  // component, so its `phx-click="add_one"` needs the page to carry the clause
+  // (and the page already carries the `:cart` assign via gatherUsedStores).
+  const storeHandlers = gatherStoreHandlers(walked.usedComponents, componentInfo);
   const handleEventClauses =
-    renderHandleEventClauses([...handlers, ...actionHandlers]) +
+    renderHandleEventClauses([...handlers, ...actionHandlers, ...storeHandlers]) +
     renderOperationEventClauses(walked.formBindings, detailBaseRoute);
 
   return `# Auto-generated.
 defmodule ${liveModule} do
   use ${webModule}, :live_view
-
+${aliasLines.length > 0 ? `\n${aliasLines}\n` : ""}
 ${mount}
 
 ${handleParams}
@@ -425,12 +532,21 @@ function renderMount(
    *  when absent, the assign falls back to the v0 shape with the
    *  record's id as both label and value. */
   aggregatesByName: ReadonlyMap<string, AggregateIR>,
+  /** Stores this page touches (Stage 5) — each gets one
+   *  `|> assign(:<store_snake>, %<Store>{})` seeding the per-page store struct
+   *  (defaults from the store module's `defstruct`).  The matching `alias` is
+   *  emitted by `renderLiveView` so `%Cart{}` resolves. */
+  usedStores: readonly string[] = [],
 ): string {
   const assigns: string[] = [];
   for (const f of page.state) {
     // Type-aware default from the walker — single source of truth so
     // `state.field` defaults match across scaffold and custom pages.
     assigns.push(`      |> assign(:${snake(f.name)}, ${defaultInitFor(f.type)})`);
+  }
+  // Per-store assign — one `%<Store>{}` (struct defaults) per used store.
+  for (const storeName of usedStores) {
+    assigns.push(`      |> assign(:${snake(storeName)}, %${upperFirst(storeName)}{})`);
   }
   // Option-list loads for `X id` form fields.  When the target
   // aggregate declares `derived display: string = ...` (always
