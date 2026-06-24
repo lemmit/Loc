@@ -59,4 +59,18 @@ describe("java workflow command-surface rule", () => {
     expect(keys.some((k) => k.endsWith("OWorkflowsController.java"))).toBe(true);
     expect(keys.some((k) => k.endsWith("RenameCustomerRequest.java"))).toBe(true);
   });
+
+  it("runs the command-workflow method in a per-dispatch child frame", async () => {
+    const { model, errors } = await parseString(COMMAND);
+    if (errors.length) throw new Error(errors.join("\n"));
+    const files = generateSystems(model).files;
+    const svc = [...files.entries()].find(([k]) => k.endsWith("OWorkflows.java"))![1];
+    // The workflow body runs in a child execution frame (parent_id <- the
+    // request's root scope) so its audit/provenance rows are distinguishable
+    // from a direct operation's.
+    expect(svc).toContain(".config.RequestContext;");
+    expect(svc).toMatch(
+      /public void renameCustomer\(RenameCustomerRequest request\) \{\n\s*try \(var __frame = RequestContext\.openChild\(\)\) \{/,
+    );
+  });
 });

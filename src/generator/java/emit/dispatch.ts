@@ -189,6 +189,8 @@ export function renderJavaDispatcher(
 
   if (methods.some((m) => m.includes("new ArrayList<"))) imports.add("java.util.ArrayList");
   if (esPresent) imports.add("org.springframework.jdbc.core.JdbcTemplate");
+  // Every reactor opens a per-dispatch child frame via RequestContext.openChild().
+  imports.add(`${dctx.basePkg}.config.RequestContext`);
   // Handler bodies can guard with `precondition` / `requires`, which throw the
   // domain.common exceptions — import them when a body uses one (the stmt target
   // emits the `throw` but leaves the import to the host).
@@ -263,27 +265,25 @@ function renderHandler(
   const stateClass = workflowStateClass(wf);
   const repo = stateRepoField(wf);
 
-  const out: string[] = [
-    `    @EventListener`,
-    `    public void ${handlerName(sub)}(${sub.event} ${param}) {`,
-    `        var __key = ${keyExpr};`,
-  ];
+  // The handler body at the 8-space base; wrapped below in a child frame so the
+  // base shifts to 12-space without rewriting every line.
+  const body: string[] = [`        var __key = ${keyExpr};`];
   if (sub.trigger === "create") {
-    out.push(
+    body.push(
       `        var state = ${repo}.findById(__key).orElseGet(() -> ${stateClass}._allocate(__key));`,
     );
   } else {
-    out.push(`        var state = ${repo}.findById(__key).orElse(null);`);
-    out.push(`        if (state == null) {`);
-    out.push(
+    body.push(`        var state = ${repo}.findById(__key).orElse(null);`);
+    body.push(`        if (state == null) {`);
+    body.push(
       `            CatalogLog.event("event_unrouted", "warn", "workflow", "${wf.name}", "event_type", "${sub.event}", "key", __key);`,
     );
-    out.push(`            return;`);
-    out.push(`        }`);
+    body.push(`            return;`);
+    body.push(`        }`);
   }
-  if (hasEmit) out.push(`        var __events = new ArrayList<DomainEvent>();`);
+  if (hasEmit) body.push(`        var __events = new ArrayList<DomainEvent>();`);
   // Handler body — emit appends to __events; the spine threads the 8-space base.
-  out.push(
+  body.push(
     ...renderWorkflowStmts(
       resolved.statements,
       javaWorkflowStmtTarget(ctx, imports, renderCtx, hasEmit ? "__events" : undefined),
@@ -293,15 +293,25 @@ function renderHandler(
   // Saves: persist each dirty aggregate, then re-publish its own domain events
   // (aggregate-level choreography re-entry).
   for (const s of resolved.saves) {
-    out.push(`        ${repoField(s.aggName)}.save(${s.name});`);
-    out.push(`        for (var __e : ${s.name}.pullEvents()) events.publishEvent(__e);`);
+    body.push(`        ${repoField(s.aggName)}.save(${s.name});`);
+    body.push(`        for (var __e : ${s.name}.pullEvents()) events.publishEvent(__e);`);
   }
-  out.push(`        ${repo}.save(state);`);
+  body.push(`        ${repo}.save(state);`);
   if (hasEmit) {
-    out.push(`        for (var __e : __events) events.publishEvent(__e);`);
+    body.push(`        for (var __e : __events) events.publishEvent(__e);`);
   }
-  out.push(`    }`, ``);
-  return out;
+  // A reactor is a per-dispatch boundary: run it in a child execution frame
+  // (fresh scope_id, parent_id ← the dispatching request's scope) so its audit /
+  // provenance rows record their call-structure position.
+  return [
+    `    @EventListener`,
+    `    public void ${handlerName(sub)}(${sub.event} ${param}) {`,
+    `        try (var __frame = RequestContext.openChild()) {`,
+    ...body.map((l) => `    ${l}`),
+    `        }`,
+    `    }`,
+    ``,
+  ];
 }
 
 /** The event-sourced handler (workflow-and-applier.md A2-S5b): fold the
@@ -350,48 +360,46 @@ function renderEsHandler(
     `        var state = ${cls}._fromEvents(__key, __loaded);`,
   ];
 
-  const out: string[] = [
-    `    @EventListener`,
-    `    public void ${handlerName(sub)}(${sub.event} ${param}) {`,
-    `        var __key = ${keyExpr};`,
-  ];
+  // The handler body at the 8-space base; wrapped below in a child frame so the
+  // base shifts to 12-space without rewriting every line.
+  const body: string[] = [`        var __key = ${keyExpr};`];
   // `__sid` is needed by an `on` reactor's stream load (always), the append
   // (when the body emits), and the fold load (when the body reads state).
   if (sub.trigger === "on" || hasEmit || usesState) {
-    out.push(`        var __sid = String.valueOf(__key.value());`);
+    body.push(`        var __sid = String.valueOf(__key.value());`);
   }
   if (sub.trigger === "on") {
     // A continuation needs a started saga (non-empty stream); else drop + log.
-    out.push(`        var __rows = jdbc.queryForList(`);
-    out.push(
+    body.push(`        var __rows = jdbc.queryForList(`);
+    body.push(
       `            "select type, data from ${table} where stream_id = ? order by version", __sid);`,
     );
-    out.push(`        if (__rows.isEmpty()) {`);
-    out.push(
+    body.push(`        if (__rows.isEmpty()) {`);
+    body.push(
       `            CatalogLog.event("event_unrouted", "warn", "workflow", "${wf.name}", "event_type", "${sub.event}", "key", __key);`,
     );
-    out.push(`            return;`);
-    out.push(`        }`);
-    if (usesState) out.push(...loadFold);
+    body.push(`            return;`);
+    body.push(`        }`);
+    if (usesState) body.push(...loadFold);
   } else if (usesState) {
     // A starter that reads state folds the (possibly empty) stream from zero.
-    out.push(`        var __rows = jdbc.queryForList(`);
-    out.push(
+    body.push(`        var __rows = jdbc.queryForList(`);
+    body.push(
       `            "select type, data from ${table} where stream_id = ? order by version", __sid);`,
     );
-    out.push(...loadFold);
+    body.push(...loadFold);
   }
-  if (hasEmit) out.push(`        var __events = new ArrayList<DomainEvent>();`);
-  out.push(...bodyLines);
+  if (hasEmit) body.push(`        var __events = new ArrayList<DomainEvent>();`);
+  body.push(...bodyLines);
   // Aggregate saves still re-publish their own events (choreography re-entry).
   for (const s of resolved.saves) {
-    out.push(`        ${repoField(s.aggName)}.save(${s.name});`);
-    out.push(`        for (var __e : ${s.name}.pullEvents()) events.publishEvent(__e);`);
+    body.push(`        ${repoField(s.aggName)}.save(${s.name});`);
+    body.push(`        for (var __e : ${s.name}.pullEvents()) events.publishEvent(__e);`);
   }
   // Every emit in an ES workflow has an applier (A1 discipline), so the emitted
   // events ARE the workflow's own stream — append them gap-free, then publish.
   if (hasEmit) {
-    out.push(
+    body.push(
       `        Integer __max = jdbc.queryForObject(`,
       `            "select max(version) from ${table} where stream_id = ?", Integer.class, __sid);`,
       `        int __v = __max == null ? 0 : __max;`,
@@ -404,8 +412,17 @@ function renderEsHandler(
       `        for (var __e : __events) events.publishEvent(__e);`,
     );
   }
-  out.push(`    }`, ``);
-  return out;
+  // A reactor is a per-dispatch boundary: child execution frame (parent_id ←
+  // the dispatching request's scope).
+  return [
+    `    @EventListener`,
+    `    public void ${handlerName(sub)}(${sub.event} ${param}) {`,
+    `        try (var __frame = RequestContext.openChild()) {`,
+    ...body.map((l) => `    ${l}`),
+    `        }`,
+    `    }`,
+    ``,
+  ];
 }
 
 function bodyHasEmit(statements: WorkflowStmtIR[]): boolean {

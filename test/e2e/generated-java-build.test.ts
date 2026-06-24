@@ -90,6 +90,11 @@ const FIXTURES: Array<[string, string]> = [
   // Event sourcing (persistedAs(eventLog)): JdbcTemplate stream
   // append + applier fold, no state table / Spring Data interface.
   ["test/e2e/fixtures/java-build/event-sourced.ddd", "es_api"],
+  // State-based saga: a broadcast channel + a correlation-row workflow with
+  // both a `create(...)` starter and an `on(...)` continuation reactor — the
+  // plain (non-event-sourced) `@EventListener` handler path, each reactor
+  // wrapping its body in a RequestContext.openChild() child frame.
+  ["test/e2e/fixtures/java-build/saga.ddd", "api"],
   // Event-sourced workflow: append-only `<wf>_events` stream + fold-on-load
   // + emit→append-own-event dispatch (the saga analogue of event-sourced.ddd).
   ["corpus:eventsourced-workflow", CORPUS_DEPLOYABLE],
