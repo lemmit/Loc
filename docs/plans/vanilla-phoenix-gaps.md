@@ -132,3 +132,22 @@ coverage was dropped (so the test can be restored alongside the fix).
 - **Gated out:** `test/e2e/fixtures/elixir-vanilla-build/pending/vanilla-destroy-form.ddd`.
 - **To close:** emit `def destroy_<agg>!/1` on the context module for aggregates
   with a destroy form; move the fixture back up to re-gate it.
+
+## 11. Full-showcase compile (conformance-parity deferral)
+
+- **Symptom:** the vanilla Phoenix backend can't `mix compile` the full
+  `examples/showcase.ddd` — it hits §9 (workflow-level `currentUser`, distinct
+  from the now-fixed op-level threading) and an aggregate-`function`-call gap (a
+  `function passed(): bool = …` used in an operation `precondition passed()`
+  renders a bare `passed()` in the context module instead of qualifying it to the
+  aggregate's domain-core module), and likely more behind those.
+- **Deferred:** `conformance-parity.yml` sets `LOOM_E2E_SKIP_PHOENIX=1`, so the
+  per-PR OpenAPI parity runs over node/.NET/Java/Python (the phoenix legs of the
+  `e2e.test.ts` parity cross-check are dropped). The elixir deployable stays in
+  `showcase.ddd` for the other gates (k8s validate, etc. — which don't mix-compile
+  it).
+- **To close:** (a) thread `current_user` into workflow `run`/`run_inner` (+ the
+  workflow controller), reusing the op-level mechanism; (b) qualify aggregate
+  `function` calls in op/workflow bodies to the domain-core module; drain any
+  further showcase compile errors; then remove `LOOM_E2E_SKIP_PHOENIX` from
+  `conformance-parity.yml` and restore the phoenix parity legs.
