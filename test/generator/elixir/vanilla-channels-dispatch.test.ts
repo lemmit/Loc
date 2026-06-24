@@ -107,6 +107,9 @@ describe("vanilla — in-process event dispatch", () => {
       "defmodule Api.Fulfillment.Workflows.OrderFulfillment.OnShipmentRequested do",
     );
     expect(onH!).toContain("def handle(%Api.Fulfillment.Events.ShipmentRequested{} = event) do");
+    // A reactor is a per-dispatch boundary: its body runs in a child execution
+    // frame (parent_id <- the dispatching request's scope).
+    expect(onH!).toContain("Api.RequestContext.with_child_frame(fn ->");
     expect(onH!).toContain("Api.Fulfillment.get_shipment(event.shipment)");
     // Vanilla context facade ops are arity-2 (`(record, params)`); the
     // op has no params so the trailing map is empty.

@@ -1262,6 +1262,10 @@ function renderWorkflowModule(
   // that references no actor renders byte-identically to before (no extra arg).
   const needsUser = ctx ? workflowNeedsCurrentUser(wf, ctx) : workflowUsesCurrentUser(wf);
   const userParam = needsUser ? ", current_user \\\\ nil" : "";
+  // OTP app module (leading segment of the FQ context module) — prefixes the
+  // `RequestContext.with_child_frame/1` call that wraps each workflow's `run/1`
+  // (the per-dispatch child execution frame).
+  const appModule = contextModuleFq.split(".")[0]!;
   const hasContextCall = lines.some((l) => l.kind === "with-clause");
   const contextAlias = hasContextCall ? `\n  alias ${contextModuleFq}, as: Context` : "";
   // Rewrite the body's fully-qualified context module to the `Context`
@@ -1307,7 +1311,12 @@ defmodule ${moduleName} do
 
   @spec run(map()${needsUser ? ", term()" : ""}) :: {:ok, term()} | {:error, term()}
   def run(params${userParam}) when is_map(params) do
-    Repo.transaction(fn ->${txnBody}end)
+    # A workflow is a per-dispatch boundary: run it in a child execution frame
+    # (parent_id <- the request's root scope) so its audit / provenance rows
+    # record their call-structure position.
+    ${appModule}.RequestContext.with_child_frame(fn ->
+      Repo.transaction(fn ->${txnBody}end)
+    end)
   end
 
   # Public (not defp): Elixir 1.18 narrows a private fn's parameter to
@@ -1334,7 +1343,12 @@ defmodule ${moduleName} do
 
   @spec run(map()${needsUser ? ", term()" : ""}) :: {:ok, term()} | {:error, term()}
   def run(params${userParam}) when is_map(params) do
+    # A workflow is a per-dispatch boundary: run it in a child execution frame
+    # (parent_id <- the request's root scope) so its audit / provenance rows
+    # record their call-structure position.
+    ${appModule}.RequestContext.with_child_frame(fn ->
 ${finalBody}
+    end)
   end
 end
 `;

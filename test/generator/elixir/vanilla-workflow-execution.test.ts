@@ -109,6 +109,9 @@ describe("vanilla — Slice 5c workflow execution", () => {
       [...files.keys()].find((k) => k.endsWith("/workflows/mark_all_done.ex"))!,
     )!;
     expect(wf).toContain("alias Api.Repo");
+    // A workflow is a per-dispatch boundary: run/1 opens a child execution frame
+    // (parent_id <- the request's root scope) around the transaction.
+    expect(wf).toContain("Api.RequestContext.with_child_frame(fn ->");
     expect(wf).toContain("Repo.transaction(fn ->");
     expect(wf).toContain("Repo.rollback(reason)");
     expect(wf).toContain("defp run_inner(params)");

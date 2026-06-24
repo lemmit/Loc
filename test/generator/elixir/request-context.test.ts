@@ -52,7 +52,8 @@ function assertCarrier(files: Map<string, string>): void {
   expect(rc).toContain("locale: resolve_locale(conn),");
   expect(rc).toContain("started_at: System.system_time(:millisecond)");
   // Frame-local tier: a fresh scope id for the root frame (parity with .NET's
-  // OpenRoot / Hono's root frame); parent_id stays nil (no per-dispatch nesting).
+  // OpenRoot / Hono's root frame); per-dispatch boundaries open child frames
+  // beneath it via with_child_frame/1.
   expect(rc).toContain("scope_id: generate_id(),");
   // Echoes the correlation id on the response.
   expect(rc).toContain("put_resp_header(conn, @correlation_header, correlation_id)");
@@ -64,6 +65,12 @@ function assertCarrier(files: Map<string, string>): void {
   // Principal slice: actor_id accessor is always present (nil before auth runs);
   // the Auth plug stamps it post-verification (asserted in the auth-emit tests).
   expect(rc).toContain("def actor_id, do: Logger.metadata()[:actor_id]");
+  // Per-dispatch child-frame seam: with_child_frame/1 mints a fresh scope_id,
+  // chains parent_id to the caller's scope, and restores it in `after`; a no-op
+  // outside a request (nil scope_id).
+  expect(rc).toContain("def with_child_frame(fun) when is_function(fun, 0) do");
+  expect(rc).toContain("Logger.metadata(scope_id: generate_id(), parent_id: parent_scope)");
+  expect(rc).toContain("Logger.metadata(scope_id: parent_scope, parent_id: prev_parent)");
 
   // The Plug is mounted in the endpoint between RequestId and Telemetry so the
   // request_start / request_end telemetry logs carry the correlation id.
