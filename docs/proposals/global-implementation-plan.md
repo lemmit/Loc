@@ -150,25 +150,23 @@ java-backend).
 
 1. **execution-context** (Tier-0 backbone) — compiler-emitted scope
    frames (`correlationId`/`scopeId`/`parentId`). **(No longer a Tier-4
-   unstarted item — PARTIAL, two-tier; 2026-06-24 code-verified, full
-   matrix in [`../audits/execution-context-parity-2026-06-24.md`](../audits/execution-context-parity-2026-06-24.md).)**
+   unstarted item — runtime backbone COMPLETE on all 5 backends;
+   2026-06-24 code-verified, full matrix in
+   [`../audits/execution-context-parity-2026-06-24.md`](../audits/execution-context-parity-2026-06-24.md).)**
    The **carrier + root frame + id-triad + governance consumers (audit /
-   provenance / log) ship on all five backends** — `.NET`
-   (`AsyncLocal<RequestContext>`), node/Hono (`AsyncLocalStorage`), Java
-   (`ExecutionContextFilter` / MDC), Elixir (`RequestContext` Plug /
-   `Logger.metadata`), Python (`ContextVar` / `ObservabilityMiddleware`);
-   pinned **D-CTX-SHAPE**,
+   provenance / log) AND the full per-dispatch discipline (child frames +
+   `parentId` chaining + enter/exit push-restore) now ship on all five
+   backends** — `.NET` (`AsyncLocal`; `OpenChild`/`Enter`), node/Hono
+   (`AsyncLocalStorage`; `runInChildContext`), Python (`ContextVar`;
+   `child_context`/`in_child_context`), Java (MDC; `openChild()` `Frame`),
+   Elixir (`Logger.metadata`; `with_child_frame/1`); pinned **D-CTX-SHAPE**,
    [`../architecture/request-context.md`](../architecture/request-context.md).
-   The **full discipline — per-dispatch child frames + `parentId` chaining
-   + enter/exit push-restore — ships on .NET, node, Python, and Java**
-   (`OpenChild`/`Enter`-restore; `runInChildContext`; Python's
-   `in_child_context` decorator; Java's `RequestContext.openChild()`
-   try-with-resources `Frame` — Python + Java drained 2026-06-24). Elixir
-   alone carries the request-stable tier + a single root `scopeId` with `parentId`
-   nil and per-dispatch nesting **deferred**. audit promotion (T3.13),
-   provenance parity (T2.k), and authorization consume it. **PARTIAL tail**:
-   (a) per-dispatch child frames + chaining on Elixir (the
-   last backend) + parallel-branch frame copying on the ambient backends; (b) the build-flag
+   The three fields-only backends (Python, Java, Elixir) were drained
+   2026-06-24, so every dispatch boundary (workflow run + reactor handlers)
+   opens a child frame whose `parentId` chains to the caller's scope. audit
+   promotion (T3.13), provenance parity (T2.k), and authorization consume it.
+   **Remaining tail** (cross-cutting, no longer per-backend parity):
+   (a) parallel-branch frame copying on the ambient backends; (b) the build-flag
    surface as **user-facing** options
    (`emitContextBoundaries`/`emitProvenance`/`emitTracing` are derived
    internally today, not exposed); (c) the scope-event genealogy

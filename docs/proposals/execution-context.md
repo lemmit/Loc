@@ -1,6 +1,7 @@
 # Execution-context backbone — scope frames
 
-> Status: **PARTIAL — two-tier** (2026-06-24 code-verified; full matrix in
+> Status: **runtime backbone COMPLETE across all five backends** (2026-06-24
+> code-verified; full matrix in
 > [`../audits/execution-context-parity-2026-06-24.md`](../audits/execution-context-parity-2026-06-24.md);
 > the architecture carrier doc,
 > [`../architecture/request-context.md`](../architecture/request-context.md),
@@ -8,25 +9,22 @@
 > context boundaries are emitted structurally from constructs Loom already
 > has, not annotated (see § Surface). The **carrier + root frame + id-triad
 > (`correlationId`/`scopeId`/`parentId`) + governance consumers (audit /
-> provenance / logging) ship on all five backends** — `.NET`
-> (`AsyncLocal<RequestContext>`), node/Hono (`AsyncLocalStorage`), Java
-> (`ExecutionContextFilter` / MDC), Elixir (`RequestContext` Plug /
-> `Logger.metadata`), Python (`ContextVar` / `ObservabilityMiddleware`).
-> But the **full discipline — per-dispatch child frames + `parentId`
-> chaining + enter/exit push-restore — ships on .NET, node, Python, and
-> Java** (`OpenChild`/`Enter`-restore; `runInChildContext`; Python's
-> `in_child_context` decorator; Java's `RequestContext.openChild()`
-> try-with-resources `Frame` — Python + Java drained 2026-06-24). On
-> **Elixir** alone the per-dispatch child frame is still **deferred**: a
-> single root `scopeId` per request, `parentId` always nil, the id-triad
-> carried and stamped onto audit/provenance rows but never nested (so the
-> call tree is not reconstructable from the governance tables). What
-> remains: (1) child frames + chaining on Elixir (the last backend) +
-> parallel-branch frame copying across the ambient backends; (2) exposing the build-flag surface below
-> as **user-facing** options (today derived internally from field presence,
-> not a CLI/build switch); (3) the scope-event genealogy (`operationId`
-> ships on audit records; `nodeId`/`kind`/`timestamp` do not); and (4) the
-> open `scopeId`-semantics decision. This is the shared substrate beneath
+> provenance / logging) AND the full per-dispatch discipline — child frames +
+> `parentId` chaining + enter/exit push-restore — now ship on all five
+> backends**: `.NET` (`AsyncLocal`; `OpenChild`/`Enter`-restore), node/Hono
+> (`AsyncLocalStorage`; `runInChildContext`), Python (`ContextVar`;
+> `child_context`/`in_child_context`), Java (MDC; `openChild()`
+> try-with-resources `Frame`), Elixir (`Logger.metadata`; `with_child_frame/1`
+> push + `after`-restore). The three fields-only backends (Python, Java,
+> Elixir) were drained 2026-06-24, so every dispatch boundary (workflow run +
+> reactor handlers) now opens a child frame whose `parentId` chains to the
+> caller's scope. What remains is **not** per-backend parity but the
+> cross-cutting tail: (1) exposing the build-flag surface below as
+> **user-facing** options (today derived internally from field presence, not a
+> CLI/build switch); (2) the scope-event genealogy (`operationId` ships on
+> audit records; `nodeId`/`kind`/`timestamp` do not); (3) parallel-branch frame
+> copying across the ambient backends; and (4) the open `scopeId`-semantics
+> decision. This is the shared substrate beneath
 > [provenance](./provenance.md), [audit](./audit-and-logging.md), and
 > logging.
 
