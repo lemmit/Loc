@@ -12,6 +12,13 @@ late-caught fallout, half-landed features).
   language feature across all nine targets. Covers: state audit → review →
   paper-simulation sign-off → implement → tests. The skills below are
   deliberately scoped to the work it *doesn't* cover.
+- **`session-finalizer`** (`.claude/skills/session-finalizer/`) — the META skill:
+  the end-of-session retrospective that feeds *this* backlog. It harvests session
+  gotchas into `experience_gathered.md`, proposes trigger/reference patches to the
+  skills above, and raises new-skill candidates here — **propose-only** (n=1 is a
+  candidate needing a second sighting, never an auto-merge). When a skill below is
+  built, it moves it into this "exists" list. The skill the user's "session
+  finalizer / self-improvement" idea became.
 - **Generic built-ins** — `code-review`, `simplify`, `verify`, `run`, `loop`,
   `security-review`, `update-config`, `session-start-hook`. These are
   language-neutral; the proposals below are Loom-specific where the leverage is.
