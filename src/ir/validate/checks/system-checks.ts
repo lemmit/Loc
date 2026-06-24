@@ -985,13 +985,15 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // Canonical families (D-NODE-PLATFORM / D-ELIXIR-PLATFORM): `node` (was
   // `hono`), `elixir` (was `phoenix` / `phoenixLiveView`).
   // `python` is included because it now emits the non-principal relational case
-  // (W1a) AND the PRINCIPAL relational case (DEBT-02): `contextFilterPredicate`
-  // in `src/generator/python/find-predicate.ts` AND-s both into every root read
+  // (W1a), the PRINCIPAL relational case (DEBT-02), AND both `embedded` cases
+  // (DEBT-02 tail): `contextFilterPredicate` in
+  // `src/generator/python/find-predicate.ts` AND-s them into every root read
   // (principal predicates render `current_user.<claim>` against the ambient
-  // `require_current_user()` accessor).  Only the NON-relational principal case
-  // stays gated — `supportsPrincipalNonRelationalFilter` omits python — so it
-  // must be in this set for the per-case logic below to reject that one shape
-  // (and accept the relational principal + non-principal cases).
+  // `require_current_user()` accessor).  Only the `document` shape stays gated —
+  // `supportsNonRelationalFilter`/`supportsPrincipalNonRelationalFilter` admit
+  // python for `embedded` but not `document` — so it must be in this set for the
+  // per-case logic below to reject that one shape (and accept the relational +
+  // embedded cases, principal or not).
   const LIMITED_FAMILIES = new Set(["node", "elixir", "java", "python"]);
   // Backends that now wire PRINCIPAL-referencing filters (`currentUser.x`) on
   // relational aggregates — node/elixir/java/python all do.  python renders the
@@ -1031,14 +1033,20 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // `embedded` (its only non-relational shape — `document` is unsupported there,
   // gated by `validateSavingShapeSupport`): an embedded aggregate's root
   // scalars are real columns, so the predicate AND-s into the Ecto read exactly
-  // like the relational path.  .NET handles all shapes (it's not in
-  // LIMITED_FAMILIES).  A PRINCIPAL filter on a non-relational shape stays gated
-  // everywhere for now (the actor + json intersection isn't wired) — hence the
-  // `!usesPrincipal` condition at the call site.
+  // like the relational path.  **python** handles `embedded` too (DEBT-02 tail):
+  // an embedded aggregate's root scalars are real columns, so
+  // `contextFilterPredicate` AND-s into the embedded SQL reads exactly like the
+  // relational path (`repository-embedded-builder.ts`).  python's `document`
+  // shape stays gated — the blob is one JSONB column, not per-field queryable, so
+  // it needs in-app filtering (not built; matches elixir, which has no `document`
+  // shape).  .NET handles all shapes (it's not in LIMITED_FAMILIES).  A PRINCIPAL
+  // filter on a non-relational shape stays gated for `document` everywhere (the
+  // actor + json intersection isn't wired) — hence the per-shape arms below.
   const supportsNonRelationalFilter = (family: string, shp: string): boolean =>
     (family === "node" && (shp === "document" || shp === "embedded")) ||
     (family === "java" && (shp === "document" || shp === "embedded")) ||
-    (family === "elixir" && shp === "embedded");
+    (family === "elixir" && shp === "embedded") ||
+    (family === "python" && shp === "embedded");
   // PRINCIPAL (`currentUser.x`) filter on a NON-relational shape (DEBT-02, the
   // actor + non-relational intersection).  An `embedded` aggregate's root
   // scalars are real columns, so node/elixir/java reuse their relational
@@ -1049,10 +1057,15 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // doc, so a principal predicate there evaluates the actor in-app (Slice B):
   // node binds `requireCurrentUser()` into the in-app predicate; java injects
   // the `CurrentUserAccessor` bean and binds it before the `.stream().filter`.
-  // (`elixir` has no `document` shape — `validateSavingShapeSupport` gates it;
-  // `python` doesn't wire non-relational filters at all — so both stay off.)
+  // **python** wires the embedded principal case (DEBT-02 tail): the embedded
+  // root scalars are real columns, so the `currentUser.<claim>` predicate renders
+  // against the ambient `require_current_user()` accessor and AND-s into the
+  // embedded SQL read like the relational principal path.  `document` stays off
+  // for python/elixir (`elixir` has no `document` shape; python's blob filters
+  // in-app, not built).
   const supportsPrincipalNonRelationalFilter = (family: string, shp: string): boolean =>
-    (shp === "embedded" && (family === "node" || family === "elixir" || family === "java")) ||
+    (shp === "embedded" &&
+      (family === "node" || family === "elixir" || family === "java" || family === "python")) ||
     (shp === "document" && (family === "node" || family === "java"));
 
   for (const dep of sys.deployables) {

@@ -78,6 +78,10 @@ const CASES: Array<[fixture: string, project: string, flags?: string]> = [
   // shape(embedded): queryable root row + one jsonb column per containment
   // / ref-collection; SQL finds over root columns.
   ["test/e2e/fixtures/python-build/embedded.ddd", "api"],
+  // shape(embedded) + capability filter (DEBT-02 tail): non-principal AND
+  // principal (`require_current_user()`) predicates AND-ed into the embedded
+  // root reads, ruff + mypy --strict clean.
+  ["test/e2e/fixtures/python-build/embedded-filter.ddd", "api"],
   // `when` state gate: DisallowedError (409) before the body + the
   // side-effect-free GET /{id}/can_<op> companion.
   ["test/e2e/fixtures/python-build/when.ddd", "api"],

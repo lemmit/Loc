@@ -217,10 +217,13 @@ describe("python capability-filter support guard (W1a)", () => {
   // (`currentUser.*`) RELATIONAL case: the predicate renders
   // `require_current_user().<claim>` against the ambient ContextVar accessor
   // and AND-s into every root read (no read-method parameter — the SQLAlchemy
-  // analogue of node's `requireCurrentUser()` weave).  The remaining gated case
-  // is a NON-RELATIONAL shape (supportsNonRelationalFilter false for python) —
-  // a `shape(document)` filter still errors.  A principal filter still requires
-  // `auth: required` (no principal to scope by otherwise).
+  // analogue of node's `requireCurrentUser()` weave).  DEBT-02 tail then wired
+  // the `shape(embedded)` case (both non-principal and principal): an embedded
+  // aggregate's root scalars are real columns, so `contextFilterPredicate` AND-s
+  // into the embedded SQL reads exactly like the relational path.  The only
+  // remaining gated case is `shape(document)` (the blob is one JSONB column, not
+  // per-field queryable — needs in-app filtering, not built; matches elixir).  A
+  // principal filter still requires `auth: required` (no principal otherwise).
 
   it("accepts a NON-PRINCIPAL relational filter (W1a — now emitted)", async () => {
     // `sys("python", …)` declares `auth: required`, but a non-principal filter
@@ -254,6 +257,20 @@ system Shop {
     const errs = await honoFilterErrors(noAuth);
     expect(errs.length).toBe(1);
     expect(errs[0]).toContain("auth: required");
+  });
+
+  it("accepts a NON-PRINCIPAL filter on a python embedded aggregate (DEBT-02 tail)", async () => {
+    expect(
+      await honoFilterErrors(sys("python", { shape: "embedded", filter: "filter !this.isDeleted" })),
+    ).toEqual([]);
+  });
+
+  it("accepts a PRINCIPAL filter on a python embedded aggregate (DEBT-02 tail — require_current_user() SQL where)", async () => {
+    expect(
+      await honoFilterErrors(
+        sys("python", { shape: "embedded", filter: "filter this.tenantId == currentUser.tenantId" }),
+      ),
+    ).toEqual([]);
   });
 
   it("still gates a non-relational (document) shape filter", async () => {

@@ -1,0 +1,54 @@
+// DEBT-02 tail — capability `filter` on a shape(embedded) PYTHON aggregate.
+// An embedded aggregate's root scalars are real queryable columns, so a
+// capability filter AND-s into every root read exactly like the relational
+// path (`repository-embedded-builder.ts` threads the SAME
+// `contextFilterPredicate`).  This fixture exercises BOTH wired cases on one
+// embedded aggregate:
+//   - a NON-PRINCIPAL filter (`filter !this.archived`) → `not_(CartRow.archived)`
+//   - a PRINCIPAL filter (`filter this.tenantId == currentUser.tenantId`) →
+//     `require_current_user().tenant_id` (the ambient ContextVar accessor; no
+//     read-method parameter, the SQLAlchemy analogue of node's
+//     `requireCurrentUser()` weave) — `auth: required` emits the accessor.
+// Containments still fold to jsonb; the root predicate constrains root rows.
+//
+// Decisive check that the embedded reads + the principal accessor stay ruff-
+// and mypy --strict-clean under the python-build gate.  `shape(document)`
+// filters stay validator-gated (the blob is one JSONB column — in-app
+// filtering, not built).
+system EmbFilter {
+  user { id: guid  tenantId: string }
+
+  subdomain Shop {
+    context Shop {
+      aggregate Cart shape(embedded) {
+        tenantId: string
+        total: money
+        archived: bool
+        contains lines: LineItem[]
+        entity LineItem { sku: string  qty: int }
+        // Always-on row scoping: hide archived carts AND restrict to the
+        // requesting principal's tenant.
+        filter !this.archived
+        filter this.tenantId == currentUser.tenantId
+        operation addLine(sku: string, qty: int) {
+          lines += LineItem { sku: sku, qty: qty }
+        }
+      }
+      repository Carts for Cart {
+        find byMinTotal(min: money): Cart[] where this.total >= min
+      }
+    }
+  }
+
+  api ShopApi from Shop
+  storage primary { type: postgres }
+  resource shopState { for: Shop, kind: state, use: primary }
+  deployable api {
+    platform: python
+    contexts: [Shop]
+    dataSources: [shopState]
+    serves: ShopApi
+    port: 8082
+    auth: required
+  }
+}
