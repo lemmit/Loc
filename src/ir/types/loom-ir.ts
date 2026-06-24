@@ -164,9 +164,9 @@ export interface FieldIR {
   /** True iff the source declared this property with the `provenanced`
    * modifier.  Every assignment statement (`:=`/`+=`/`-=`) targeting such
    * a field becomes a per-site rule snapshot; see `ProvSite`.  The provenance
-   * runtime is emitted on the Hono (`node`), .NET (`dotnet`) and elixir-
-   * `vanilla` backends — hosting a provenanced context on another surface (the
-   * Ash foundation, react) is rejected at validate time
+   * runtime is emitted on the Hono (`node`), .NET (`dotnet`) and `elixir`
+   * backends — hosting a provenanced context on another surface (e.g.
+   * react) is rejected at validate time
    * (`loom.provenanced-backend-unsupported`, `validateProvenancedStorage`)
    * rather than silently dropping the trail. */
   provenanced?: boolean;
@@ -607,8 +607,8 @@ export type InheritanceLayout = "sharedTable" | "ownTable";
  *      join tables.  The default.  Queryable everywhere.
  *    - `embedded` — queryable root row (its scalar / `X id` fields stay
  *      columns) with contained parts folded into JSONB columns; no child
- *      tables.  EF owned-types `.ToJson()`, Drizzle jsonb column, Ash
- *      embedded resources.
+ *      tables.  EF owned-types `.ToJson()`, Drizzle jsonb column, Phoenix
+ *      embedded schemas.
  *    - `document` — the whole aggregate (root included) serialised as one
  *      opaque JSONB blob (`id, data, version`); schema-flexible,
  *      load-by-id (Marten-style).  Not every backend supports it (see
@@ -1033,9 +1033,9 @@ export interface WorkflowIR {
   /** Event-subscription reactors declared via `on(e: Event) [by <expr>] { … }`
    *  members (workflow-and-applier.md Phase A2, surface slice).  Omitted when
    *  the workflow declares none.  Consumed by the in-process dispatcher
-   *  emission on node / dotnet / elixir-ash / python (channels.md); the `by`
+   *  emission on node / dotnet / python (channels.md); the `by`
    *  correlation-field type-check runs in the IR validator (workflow-checks.ts).
-   *  Java and elixir-vanilla dispatch emission are the remaining gaps. */
+   *  Java and elixir dispatch emission are the remaining gaps. */
   subscriptions?: OnIR[];
   /** Workflow state fields declared as `Property` members — the correlation
    *  field plus saga state (workflow-and-applier.md A2-S2).  Lowered with the
@@ -2248,10 +2248,10 @@ export interface NeedIR {
 // Vite bundle and serves it via a small static-asset host (nginx in
 // the v0 emitter).  Shares the `react` platform surface.
 //
-// `phoenixLiveView` is the fullstack Elixir/Ash + Phoenix LiveView
-// platform: a single deployable serves an Ash-derived API AND mounts
+// `phoenixLiveView` is the fullstack Elixir / Phoenix LiveView
+// platform: a single deployable serves a Phoenix API AND mounts
 // a `ui:` whose pages render as LiveView modules against the
-// `ashPhoenix` HEEx pack.  Unlike `react`/`static` it owns its own
+// `coreComponents` HEEx pack.  Unlike `react`/`static` it owns its own
 // database (`needsDb: true`) and never declares `targets:` —
 // validator enforces both.
 // `java` is the Spring Boot / Spring Data JPA backend (backend-only,
@@ -2318,7 +2318,7 @@ export interface DeployableIR {
   targetName?: string;
   /** Design-system template pack the React frontend generator renders
    *  pages against.  Built-ins: "mantine", "chakra", "mui", "shadcn",
-   *  "ashPhoenix".  A string starting with "./" or "/" is a custom
+   *  "coreComponents".  A string starting with "./" or "/" is a custom
    *  pack path resolved relative to the .ddd file (a directory
    *  containing pack.json).  Only meaningful when platform === "react"
    *  (or "static"/"dotnet" with a UI mount, or "phoenix");
@@ -2946,8 +2946,8 @@ export function aggregateUsesPrincipalContextFilter(agg: { contextFilters?: Expr
 /** True when any of the aggregate's lifecycle stamps (`contextStamps`, from
  *  `with audit`/`auditable` or `stamp onCreate`/`onUpdate`) assigns a value
  *  that reads `currentUser` (e.g. `createdBy := currentUser`).  Such a stamp
- *  needs the request principal threaded as the Ash actor onto the create /
- *  update call so the stamp's `change` block can read `context.actor` — the
+ *  needs the request principal threaded onto the create /
+ *  update call so the stamp can read the current actor — the
  *  stamp-side analogue of `aggregateUsesPrincipalContextFilter`. */
 export function aggregateStampUsesPrincipal(agg: { contextStamps?: ContextStampIR[] }): boolean {
   return (agg.contextStamps ?? []).some((r) =>

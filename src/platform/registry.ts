@@ -80,9 +80,9 @@ const platforms: Record<Platform, PlatformSurface> = {
   // `platform: static` lowers through the same code path a
   // `platform: react` deployable does.
   static: reactPlatform,
-  // Fullstack Elixir / Ash + Phoenix LiveView platform.  Owns its own
-  // database, mounts a `ui:`, and (when populated) `serves:` an
-  // Ash-derived API.  `elixir` is the only spelling — the legacy
+  // Fullstack Elixir / Phoenix LiveView platform.  Owns its own
+  // database, mounts a `ui:`, and (when populated) `serves:` a
+  // Phoenix API.  `elixir` is the only spelling — the legacy
   // `platform: phoenix` / `phoenixLiveView` aliases were retired
   // (D-ELIXIR-PLATFORM), mirroring the retired `hono` → `node` alias.
   elixir: elixirPlatform,

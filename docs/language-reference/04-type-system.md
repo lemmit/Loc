@@ -91,15 +91,15 @@ external_id: Mapped[str]      = mapped_column(Uuid)
 ```
 == elixir
 ```elixir
-# lib/.../orders/order.ex — Ash.Resource attributes
-attribute :qty,         :integer,      allow_nil?: false
-attribute :big_qty,     :integer,      allow_nil?: false
-attribute :rate,        :decimal,      allow_nil?: false
-attribute :ref,         :string,       allow_nil?: false
-attribute :active,      :boolean,      allow_nil?: false
-attribute :placed_at,   :utc_datetime, allow_nil?: false
-attribute :external_id, :uuid,         allow_nil?: false
-attribute :meta,        :map,          allow_nil?: false
+# lib/.../orders/order.ex — Ecto schema fields
+field :qty,         :integer
+field :big_qty,     :integer
+field :rate,        :decimal
+field :ref,         :string
+field :active,      :boolean
+field :placed_at,   :utc_datetime
+field :external_id, Ecto.UUID
+field :meta,        :map
 ```
 ::: end
 
@@ -141,7 +141,7 @@ total: Mapped[Decimal] = mapped_column(Numeric(19, 4))
 == elixir
 ```elixir
 # lib/.../orders/order.ex
-attribute :total, :decimal, allow_nil?: false
+field :total, :decimal
 ```
 ::: end
 
@@ -188,14 +188,14 @@ class OrderResponse(BaseModel):
 ```
 == elixir
 ```elixir
-# Ash serializes the :decimal attribute through Jason on the struct itself
+# Phoenix serializes the :decimal field through Jason on the struct itself
 # (no per-field stringify seam in this REST-less LiveView output); the
 # precise column is the guarantee here, the string-on-wire is not enforced.
-attribute :total, :decimal, allow_nil?: false
+field :total, :decimal
 ```
 ::: end
 
-So three backends (node, .NET, Java) deliver the full money contract — precise column **and** string wire. Python keeps the precise column but serializes the response field as a `float`; Elixir/Ash keeps the precise column and serializes via Jason's `Decimal` encoder. Treat string-on-wire as guaranteed on the typed-serializer backends.
+So three backends (node, .NET, Java) deliver the full money contract — precise column **and** string wire. Python keeps the precise column but serializes the response field as a `float`; Elixir keeps the precise column and serializes via Jason's `Decimal` encoder. Treat string-on-wire as guaranteed on the typed-serializer backends.
 
 ## `X id` — cross-aggregate references
 
@@ -248,8 +248,8 @@ customer: CustomerId            # app/domain/order.py
 ```
 == elixir
 ```elixir
-# Ash stores the reference as a plain :uuid attribute
-attribute :customer, :uuid, allow_nil?: false
+# Ecto stores the reference as a plain :binary_id field
+field :customer, Ecto.UUID
 ```
 ::: end
 
@@ -387,9 +387,9 @@ class PagedResult[T]:
 ```
 == elixir
 ```elixir
-# Ash offset pagination read action; the controller maps %Ash.Page.Offset{} to the envelope
-read :recent do
-  pagination offset?: true, required?: false
+# Ecto offset pagination query; the controller maps the limit/offset page to the envelope
+def recent(opts) do
+  Order |> limit(^opts.page_size) |> offset(^opts.offset) |> Repo.all()
 end
 ```
 ::: end

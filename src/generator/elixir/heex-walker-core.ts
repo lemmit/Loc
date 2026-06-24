@@ -36,8 +36,8 @@
 //
 // Navigate → `push_navigate(socket, to: ~p"<route>")` (handler position only).
 //
-// API binding (`Sales.Customer.create.mutate(args)`) → direct Ash code
-// interface call (`<App>.Sales.create_customer!(args)`) — no hook
+// API binding (`Sales.Customer.create.mutate(args)`) → direct context-module
+// call (`<App>.Sales.create_customer!(args)`) — no hook
 // hoisting, LiveView reads inline.
 // ---------------------------------------------------------------------------
 
@@ -76,15 +76,14 @@ export interface WalkResult {
   handlers: HandleEventClause[];
   /** Form bindings discovered inside the page body — one entry per
    *  `CreateForm(of: Agg)` or `WorkflowForm(runs: Wf)` call.  The LiveView emitter
-   *  uses this to assign `@form` in `mount/3` via
-   *  `AshPhoenix.Form.for_create(<AggModule>, :create)` (or
-   *  `for_action(...)` for workflows) and convert to `to_form(...)`.
+   *  uses this to assign `@form` in `mount/3` via a plain Ecto changeset
+   *  (`change_<agg>(...)`) converted with `to_form(...)`.
    *  Empty when the page body has no form. */
   formBindings: FormBinding[];
   /** Query bindings discovered inside the page body — one per
    *  `QueryView(of: …)` call.  The LiveView emitter consumes these
    *  in `handle_params/3` to load `@data` (single/detail) or
-   *  `@items` (list) via the aggregate's Ash code-interface.
+   *  `@items` (list) via the aggregate's context module function.
    *  Empty when the page has no QueryView. */
   queryBindings: QueryBinding[];
   /** Action bindings discovered inside the body — one per
@@ -114,12 +113,12 @@ export interface WalkResult {
 }
 
 /** `Action(<instance>.<operation>)` → a `<.button phx-click=…>` plus a
- *  hoisted `handle_event` that loads the instance and invokes the Ash
- *  action. */
+ *  hoisted `handle_event` that loads the instance and invokes the
+ *  operation. */
 export interface ActionBinding {
   /** Owning aggregate, PascalCase. */
   agg: string;
-  /** Operation name, snake_case (the Ash `update :<op>` action). */
+  /** Operation name, snake_case. */
   op: string;
   /** Human-readable operation label for the flash message. */
   opHuman: string;
@@ -128,9 +127,9 @@ export interface ActionBinding {
   /** Optional `then: navigate(<Page>)` target route. */
   thenRoute?: string;
   /** When set, the handler calls `<eventName>!(id)` directly with the route
-   *  id (the code interface does the lookup via `get_by: [:id]`), rather than
+   *  id (the context function does the lookup by id), rather than
    *  loading a record first.  Used by `DestroyForm`, whose `destroy_<agg>`
-   *  interface takes the id (matching the REST controller's destroy call). */
+   *  function takes the id (matching the REST controller's destroy call). */
   byId?: boolean;
 }
 
@@ -140,14 +139,14 @@ export interface FormBinding {
   /** Source name in PascalCase (e.g. "Customer", "PlaceOrder"; for
    *  an operation form, the owning aggregate). */
   name: string;
-  /** kind:"operation" only — snake-cased operation name (the Ash
-   *  `update :<op>` action the form submits to). */
+  /** kind:"operation" only — snake-cased operation name (the
+   *  `<op>` function the form submits to). */
   op?: string;
   /** kind:"operation" only — deterministic DOM id for the
    *  `<.modal>` wrapping the operation form. */
   modalId?: string;
   /** kind:"operation" only — the operation's params, for `<.input>`
-   *  emission and the `for_update` form constructor. */
+   *  emission and the changeset-backed form. */
   params?: readonly { name: string; type: TypeIR }[];
 }
 
@@ -163,7 +162,7 @@ export interface QueryBinding {
 }
 
 export interface WalkContext {
-  /** App's module prefix, e.g. "PhoenixApp" — used for Ash code-interface
+  /** App's module prefix, e.g. "PhoenixApp" — used for context-module
    *  call qualification (`PhoenixApp.Sales.create_customer!(...)`). */
   appModule: string;
   /** Aggregate registry keyed by PascalCase name — supplied by the
@@ -252,7 +251,7 @@ export interface WalkContext {
    *  Gates an `Action(<instance>.<op>)` button whose operation's `requires`
    *  predicates are all currentUser-only: the `<.button>` is wrapped in a
    *  HEEx `<%= if (@current_user.…) do %> … <% end %>` so it's hidden
-   *  server-side when the gate fails (the Ash action still enforces it).
+   *  server-side when the gate fails (the operation still enforces it).
    *  False ⇒ no `@current_user` exists, so NO gating is emitted and the
    *  button stays byte-identical. */
   authEnabled?: boolean;
@@ -599,7 +598,7 @@ function renderUserComponent(
 }
 
 /** `Action(<instance>.<operation>, then?)` → a `<.button phx-click=…>`
- *  whose event loads the instance by id and invokes the Ash action.
+ *  whose event loads the instance by id and invokes the operation.
  *  The operation is referenced through an in-scope aggregate instance
  *  (a component param or a QueryView record), resolved via
  *  `instanceTypes`.  The handler is recorded as an `ActionBinding` and
@@ -656,7 +655,7 @@ export function renderAction(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
  *  no `@current_user` to read, so the button is left ungated and the output
  *  stays byte-identical.  An op with no `requires`, or any predicate that
  *  touches `this.<field>` / params (not currentUser-only — `tryRenderGate`
- *  returns null), is also left ungated; the Ash action still enforces the
+ *  returns null), is also left ungated; the operation still enforces the
  *  gate server-side regardless (defence-in-depth). */
 function gateActionButton(
   button: string,
@@ -776,9 +775,9 @@ function renderObjectLiteral(expr: Extract<ExprIR, { kind: "object" }>, ctx: Wal
 }
 
 /** `new Part { … }` in a page body → an Elixir struct literal, mirroring
- *  the domain emitter (`render-expr.ts::renderNew`): a part is a struct on
- *  both foundations (an embedded Ash resource / an Ecto `embedded_schema`),
- *  addressed as `%<Ctx>.<Part>{field: value, …}`.  The context module is
+ *  the domain emitter (`render-expr.ts::renderNew`): a part is an Ecto
+ *  `embedded_schema` struct, addressed as `%<Ctx>.<Part>{field: value, …}`.
+ *  The context module is
  *  resolved from the part's owning aggregate via `ctx.partContextModule`;
  *  when the orchestrator hasn't threaded that map (or the part is unknown)
  *  it falls back to `ctx.appModule` so the output is still valid Elixir. */
@@ -946,7 +945,7 @@ function renderToast(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext):
 
 export interface PrimitiveSpec {
   /** HEEx component tag, e.g. ".heading", "div" (for raw layout), or
-   *  ".button" — driven by the ashPhoenix pack conventions. */
+   *  ".button" — driven by the coreComponents pack conventions. */
   tag: string;
   /** Attribute keys that take literal values rendered as static
    *  strings (vs JS-expression braces).  Empty by default. */

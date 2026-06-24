@@ -2,16 +2,15 @@
 // Vanilla capability-filter helper.
 //
 // A `filter <expr>` capability (`contextFilters` on the aggregate) must be
-// AND-ed into EVERY root read of the aggregate.  The Ash foundation installs
-// these once via the resource `base_filter`; plain Ecto has no global query
-// filter, so the generated repository / retrieval / view modules must conjoin
-// each predicate into every `from(record in <Agg>, where: …)` read site —
+// AND-ed into EVERY root read of the aggregate.  Plain Ecto has no global
+// query filter, so the generated repository / retrieval / view modules must
+// conjoin each predicate into every `from(record in <Agg>, where: …)` read site —
 // exactly the Hono/Drizzle situation (half-applying a soft-delete filter would
 // be a correctness hole).
 //
 // Predicates render under the `record` Ecto binding (`!this.isDeleted` →
 // `not record.is_deleted`).  A `filter <Criterion>` reference inlines its
-// predicate (vanilla has no Ash calculation to reify into).
+// predicate directly.
 //
 // **Principal (tenancy) filters** (`this.tenantId == currentUser.tenantId`) are
 // emitted only when the caller threads the request actor (`{ actor: true }`).
@@ -19,9 +18,9 @@
 // `where:` the principal side must be PINNED, and it must stay fail-closed when
 // no actor is present (an unauthenticated / workflow-internal read), so it
 // renders as `^(current_user && current_user.tenant_id)` — a pinned `nil` makes
-// the comparison match no rows (Ecto binds `= NULL`, never `IS NULL`).  This
-// mirrors Ash's `actor: nil` → empty-result behaviour.  Callers that pass
-// `{ actor: true }` MUST bind a `current_user` variable in scope.
+// the comparison match no rows (Ecto binds `= NULL`, never `IS NULL`), giving an
+// empty result.  Callers that pass `{ actor: true }` MUST bind a `current_user`
+// variable in scope.
 // ---------------------------------------------------------------------------
 
 import type { AggregateIR } from "../../../ir/types/loom-ir.js";
@@ -80,7 +79,7 @@ export function vanillaCapabilityFilter(
   if (preds.length === 0) return null;
   // `and` is a reserved word in Elixir — the infix form is the only valid one
   // inside `where:`.  Parenthesise each so a low-precedence operator inside one
-  // (`a or b`) can't bind across the join.  (Mirrors the Ash `renderBaseFilter`.)
+  // (`a or b`) can't bind across the join.
   return preds.length === 1 ? preds[0]! : preds.map((p) => `(${p})`).join(" and ");
 }
 

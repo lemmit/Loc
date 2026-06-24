@@ -182,7 +182,7 @@ used in operation / workflow expression bodies.  The
 | --- | --- |
 | `dotnet` | ASP.NET Core + EF Core + Mediator (martinothamar) + Swashbuckle.  Default port 8080. |
 | `node`   | Hono + Drizzle ORM + Zod with `@hono/zod-openapi`.  Default port 3000. |
-| `elixir` / `phoenixLiveView` | Phoenix + Ash 3.x (or vanilla Ecto via `foundation: vanilla`).  `phoenixLiveView` additionally mounts a HEEx UI (fullstack). |
+| `elixir` / `phoenixLiveView` | Phoenix + Ecto (plain Ecto/Phoenix — `foundation: vanilla` is the default and only valid foundation).  `phoenixLiveView` additionally mounts a HEEx UI (fullstack). |
 | `python` | FastAPI + SQLAlchemy + Pydantic. |
 | `java`   | Spring Boot + JPA + Hibernate. |
 | `react`  | Vite + React Router + React Query + Zod + Mantine + Playwright page objects.  Default port 3001. |
@@ -211,7 +211,7 @@ order:
 | --- | --- |
 | `enum Name { A, B, C }` | Closed enumeration; values are referenced bare. |
 | `valueobject Name { … }` | Immutable record with optional invariants and derived members. |
-| `aggregate Name [ids guid\|int\|long\|string] [persistedAs(eventLog\|state)] [shape(relational\|embedded\|document)] { … }` | Aggregate root with implicit `Name id` field.  Header modifiers (D-DOCUMENT-AXIS): `persistedAs(…)` picks the primary truth kind (default `state`); `shape(…)` picks the saving shape (default `relational`) — how the hierarchy is laid out physically: **`relational`** = table-per-entity; **`embedded`** = queryable root row + contained parts folded into one JSONB column (EF owned `.ToJson()` / Drizzle jsonb / Ash embedded resources); **`document`** = the whole aggregate as one opaque JSONB blob (`id, data, version`).  Emitted on all backends for `relational`/`embedded`; `document` on `dotnet`, `node`, `python`, and `java` (elixir is relational/embedded only) (a `shape(…)` a backend can't emit is a validation error — see `supportedShapes`). |
+| `aggregate Name [ids guid\|int\|long\|string] [persistedAs(eventLog\|state)] [shape(relational\|embedded\|document)] { … }` | Aggregate root with implicit `Name id` field.  Header modifiers (D-DOCUMENT-AXIS): `persistedAs(…)` picks the primary truth kind (default `state`); `shape(…)` picks the saving shape (default `relational`) — how the hierarchy is laid out physically: **`relational`** = table-per-entity; **`embedded`** = queryable root row + contained parts folded into one JSONB column (EF owned `.ToJson()` / Drizzle jsonb / Ecto embedded schemas); **`document`** = the whole aggregate as one opaque JSONB blob (`id, data, version`).  Emitted on all backends for `relational`/`embedded`; `document` on `dotnet`, `node`, `python`, and `java` (elixir is relational/embedded only) (a `shape(…)` a backend can't emit is a validation error — see `supportedShapes`). |
 | `event Name { field: Type, … }` | Flat record raised via `emit`. |
 | `repository Name for Aggregate { find … }` | Repository declaration with optional find queries. |
 
@@ -366,11 +366,10 @@ aggregate Account ids guid persistedAs(eventLog) {
 }
 ```
 
-Storage emission ships on **node, .NET, Python, and Java**, plus Phoenix under
-`foundation: vanilla`: an event-sourced aggregate persists to an append-only
+Storage emission ships on **node, .NET, Python, Java, and Phoenix** (plain
+Ecto/Phoenix): an event-sourced aggregate persists to an append-only
 `<agg>_events` table, constructs and mutates through emitted events, and
-rehydrates by folding the stream on load. Only an Ash-Phoenix host is a
-validation error (not a silent state fallback). See `generators.md` for the
+rehydrates by folding the stream on load. See `generators.md` for the
 per-backend matrix and `docs/proposals/workflow-and-applier.md` for the roadmap.
 
 #### Provenanced fields
@@ -504,7 +503,7 @@ MoneyLit      = 'money' '(' STRING ')'         // precise-decimal literal
 
 `json` is an **opaque JSON blob** — Loom does not model its interior.
 It maps to Postgres `JSONB` (Drizzle `jsonb`, EF `System.Text.Json.JsonElement`,
-Ash `:map`), TS `unknown`, Zod `z.unknown()`, and a freeform `object`
+Ecto `:map`), TS `unknown`, Zod `z.unknown()`, and a freeform `object`
 in the OpenAPI/wire spec (a leaf — never expanded or structurally
 diffed).  Reach for a `valueobject` instead when the shape is known.
 See [`document-and-json-hierarchies.md`](proposals/document-and-json-hierarchies.md)
@@ -633,7 +632,7 @@ for high-magnitude / high-precision values).
 | JSON wire | `number` (lossy) | `string` with `format: decimal` |
 | TS host type | `number` | `decimal.js` `Decimal` |
 | .NET host type | `System.Decimal` (lossy through JSON-number boundary) | `System.Decimal` (precise, string-on-wire) |
-| Phoenix/Ash host type | Elixir `Decimal` (lossy through Jason float) | Elixir `Decimal` (precise — Jason's default) |
+| Phoenix host type | Elixir `Decimal` (lossy through Jason float) | Elixir `Decimal` (precise — Jason's default) |
 | Python host type | `float` (lossy through JSON-number boundary) | `Decimal` (precise, string-on-wire) |
 | Java host type | `double` (lossy through JSON-number boundary) | `BigDecimal` (precise, string-on-wire) |
 | OpenAPI | `{ type: number }` | `{ type: string, format: decimal }` (PayPal/Coinbase/ISO 20022 convention) |

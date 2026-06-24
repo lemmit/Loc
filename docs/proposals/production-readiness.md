@@ -10,7 +10,7 @@
 > dedicated proposal, this doc points to it rather than restating it; the
 > features without a home below are the ones that still need their own
 > proposal.
-> **Scope:** all backends (.NET/EF, TS/Hono, Phoenix/Ash) plus the React
+> **Scope:** all backends (.NET/EF, TS/Hono, Phoenix LiveView on plain Ecto/Phoenix) plus the React
 > frontend, consistent with the one-directional pipeline and the
 > single platform-neutral IR.
 

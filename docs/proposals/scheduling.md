@@ -193,7 +193,7 @@ timezone, overlap }`). Each backend renders its idiomatic scheduler whose tick
 |---|---|---|
 | Hono / node | `node-cron` (or a bare interval) | `pg_try_advisory_lock` |
 | .NET | `BackgroundService` + `PeriodicTimer`, or Quartz.NET | Quartz cluster / advisory lock |
-| Phoenix / Elixir | **Oban** cron plugin (Ash) / Quantum (vanilla) | Oban native uniqueness |
+| Phoenix / Elixir | **Oban** cron plugin / Quantum | Oban native uniqueness |
 | Python / FastAPI | APScheduler | advisory lock |
 | Java / Spring | `@Scheduled` + `TaskScheduler`, or Quartz | Quartz cluster / advisory lock |
 

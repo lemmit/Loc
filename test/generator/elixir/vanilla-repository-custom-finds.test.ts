@@ -152,11 +152,17 @@ describe("vanilla — custom find functions on the repository module", () => {
     expect(task).toMatch(/Repo\.update\(changeset\)\n {2}end\nend\n?$/);
 
     // Regression: the per-aggregate context block must end with `\n` so the
-    // module's `end` doesn't fuse with the last defdelegate's `:delete` atom
-    // (the `as: :deleteend` mix-compile bug — TokenMissingError from CI).
+    // module's `end` doesn't fuse with the last member (the `as: :deleteend`
+    // mix-compile bug — TokenMissingError from CI).  The `change_<agg>` Ecto
+    // changeset facade (emitted after the CRUD defdelegates for the LiveView
+    // form lifecycle) is now the block's tail, so the module ends with its
+    // `base_changeset(...)` body, separated from `end` by a newline.
     const ctx = files.get([...files.keys()].find((k) => k.endsWith("/lib/api/tracker.ex"))!)!;
     expect(ctx).not.toContain(":deleteend");
-    expect(ctx).toMatch(/as: :delete\nend\n?$/);
+    expect(ctx).toContain(
+      "def change_task(record_or_struct \\\\ %Api.Tracker.Task{}, attrs \\\\ %{}),\n    do: Api.Tracker.TaskChangeset.base_changeset(record_or_struct, attrs)",
+    );
+    expect(ctx).toMatch(/base_changeset\(record_or_struct, attrs\)\nend\n?$/);
   });
 });
 

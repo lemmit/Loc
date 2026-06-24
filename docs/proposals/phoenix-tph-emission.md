@@ -3,11 +3,12 @@
 > **[2026-06-20 status audit]** 'all three DB backends' understated — the `loom.tph-backend-unsupported` gate admits five (`system-checks.ts:~1230`). Phoenix TPH itself ships (accurate).
 
 > Status: **SHIPPED.** The last TPH ✗ in the parity matrix — TPH (`sharedTable`)
-> on **Phoenix / Ash** — closed via the shared-table multi-resource +
+> on **Phoenix** — closed via the shared-table multi-resource +
 > `base_filter` design below; `loom.tph-backend-unsupported` now admits all
 > three DB backends (`node` / `dotnet` / `phoenix`). The per-file plan maps 1:1
-> onto the diff; `mix compile --warnings-as-errors` against real Ash 3.x (the
-> `phoenix-build` `tph.ddd` fixture) is the decisive gate.
+> onto the diff.
+
+> **(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain Ecto/Phoenix only and `foundation: ash` is now a validation error.)** This entire note describes the TPH emission against **Ash.Resource / ash_postgres** — the `base_filter` / multi-resource-one-table mechanism, the `mix compile --warnings-as-errors` against real Ash 3.x gate, and the Ash-specific per-file plan. None of it reflects current vanilla Ecto/Phoenix output; the shared-table TPH contract still holds cross-backend, but the Phoenix emission must be re-derived against plain Ecto schemas + a `kind` discriminator (no Ash resources, no `base_filter`). Read the rest of this file as the historical Ash-era design.
 
 ## The design problem: Ash has no native STI
 

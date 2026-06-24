@@ -6,7 +6,7 @@ How an aggregate changes state: the four action members — `operation` (a mutat
 
 Every body lowers through one shared `lowerStatement`, so an `operation`, a `create`, a `destroy`, and an `apply` all draw from the same statement set; the **kind tag** (not the body syntax) carries the lifecycle asymmetry. Each backend's `render-stmt.ts` turns the lowered `StmtIR` into source — the per-tab output below is exactly what those emitters produce.
 
-> **Output sourcing.** The `dotnet` tabs are excerpted byte-for-byte from the committed baseline fixture (`test/fixtures/baseline-output/`, captured from `examples/acme.ddd`). The remaining backend tabs are transcribed from the deterministic per-backend `render-stmt.ts` / aggregate emitters (the statement renderers are pure string templating — no hidden state), cross-checked against the `dotnet` baseline. Where a backend's emitted shape genuinely differs (Elixir's Ash changesets, Python's `dict` union returns), that divergence is the content.
+> **Output sourcing.** The `dotnet` tabs are excerpted byte-for-byte from the committed baseline fixture (`test/fixtures/baseline-output/`, captured from `examples/acme.ddd`). The remaining backend tabs are transcribed from the deterministic per-backend `render-stmt.ts` / aggregate emitters (the statement renderers are pure string templating — no hidden state), cross-checked against the `dotnet` baseline. Where a backend's emitted shape genuinely differs (Elixir's Ecto changesets, Python's `dict` union returns), that divergence is the content.
 
 ## `operation` — a mutating method
 
@@ -88,12 +88,12 @@ def confirm(self) -> None:
 ```
 == elixir
 ```elixir
-# Ash action body — statements fold onto the changeset (Ash.Changeset),
-# preconditions raise, the assignment becomes change_attribute, and the
+# Context function body — statements fold onto an Ecto.Changeset,
+# preconditions raise, the assignment becomes put_change, and the
 # event is broadcast over Phoenix.PubSub.
 if not (is_mutable(record)), do: raise(ArgumentError, "Precondition failed: isMutable()")
 if not (length(record.lines) > 0), do: raise(ArgumentError, "Precondition failed: lines.count > 0")
-changeset = Ash.Changeset.change_attribute(changeset, :status, :confirmed)
+changeset = Ecto.Changeset.put_change(changeset, :status, :confirmed)
 Phoenix.PubSub.broadcast(Orders.PubSub, "events", %Orders.Events.OrderConfirmed{order: record.id, at: DateTime.utc_now()})
 ```
 ::: end
@@ -152,7 +152,7 @@ if not (price > Decimal("0.00")):
 ```
 == elixir
 ```elixir
-# Ash action — both raise ArgumentError; the controller maps the message
+# Context function — both raise ArgumentError; the controller maps the message
 if not (is_staff), do: raise(ArgumentError, "Forbidden: isStaff")
 if not (Decimal.compare(price, Decimal.new("0.00")) == :gt), do: raise(ArgumentError, "Precondition failed: price > money(\"0.00\")")
 ```
@@ -236,7 +236,7 @@ self._events.append(LinePriced(order=self.id, total=next))
 == elixir
 ```elixir
 next = Decimal.add(record.subtotal, price)
-changeset = Ash.Changeset.change_attribute(changeset, :subtotal, next)
+changeset = Ecto.Changeset.put_change(changeset, :subtotal, next)
 Phoenix.PubSub.broadcast(Orders.PubSub, "events", %Orders.Events.LinePriced{order: record.id, total: next})
 ```
 ::: end
@@ -290,10 +290,10 @@ if __rm in self._notes:
 ```
 == elixir
 ```elixir
-# Ash: scalar → change_attribute; collection ops → manage_relationship
-changeset = Ash.Changeset.change_attribute(changeset, :status, :placed)
-changeset = Ash.Changeset.manage_relationship(changeset, :notes, [text], type: :create)
-changeset = Ash.Changeset.manage_relationship(changeset, :notes, ["draft"], type: :destroy)
+# Ecto: scalar → put_change; collection ops → put_assoc on the loaded list
+changeset = Ecto.Changeset.put_change(changeset, :status, :placed)
+changeset = Ecto.Changeset.put_assoc(changeset, :notes, record.notes ++ [text])
+changeset = Ecto.Changeset.put_assoc(changeset, :notes, record.notes -- ["draft"])
 ```
 ::: end
 

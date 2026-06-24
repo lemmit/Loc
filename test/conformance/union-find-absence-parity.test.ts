@@ -5,20 +5,19 @@
 // `NotFound` error variant.  Under A4 every backend maps that absent variant to
 // an RFC-7807 ProblemDetails at its mapped status (404) rather than a 200
 // tagged-union body: the HTTP status is the discriminator, not an inline `type:
-// "NotFound"` member.  This was the last divergence — Phoenix/Ash inline-tagged
-// the absent variant at 200 until the controller action learned the `case`
-// arm; every other backend (Hono / .NET / Python / Java / the vanilla Elixir
-// foundation) already 404'd it.  This pins the now-uniform contract.
+// "NotFound"` member.  Every backend (Hono / .NET / Python / Java / Elixir on
+// plain Phoenix+Ecto) maps the absent variant to a 404 ProblemDetails.  This
+// pins the now-uniform contract.
 //
 // Two tiers of assertion:
-//   * The decisive invariant, asserted for ALL six backends: the absent
+//   * The decisive invariant, asserted for ALL five backends: the absent
 //     variant produces HTTP 404 + the `/errors/not-found` type URI.
 //   * The `resource: "Order"` extension (the aggregate name), now asserted for
-//     ALL six backends.  .NET can't carry it through `ControllerBase.Problem`
+//     ALL five backends.  .NET can't carry it through `ControllerBase.Problem`
 //     (no extension-member slot), so when the payload declares `resource` it
 //     builds an explicit `ProblemDetails` + `ObjectResult` and sets
 //     `Extensions["resource"]` (`[JsonExtensionData]` → serialized at the body
-//     root), matching the other five.
+//     root), matching the other four.
 //
 // Lives in the always-on `test` gate (no docker) alongside
 // `union-wire-parity.test.ts` (which pins the union *type* shape — the inline
@@ -100,16 +99,9 @@ const BACKENDS: Backend[] = [
     hasResource: true,
   },
   {
+    // The Elixir backend (plain Phoenix + Ecto — the vanilla foundation is the
+    // only Elixir foundation) — established the A4 absent-variant shape (#1218).
     platform: "elixir",
-    ui: true,
-    file: "d/lib/d_web/controllers/orders_controller.ex",
-    anchor: /def recent/,
-    hasResource: true,
-  },
-  {
-    // The vanilla Elixir foundation (plain Phoenix + Ecto, no Ash) — the
-    // backend that established the A4 absent-variant shape (#1218).
-    platform: "elixir { foundation: vanilla }",
     ui: false,
     file: "d/lib/d_web/controllers/order_controller.ex",
     anchor: /def recent/,

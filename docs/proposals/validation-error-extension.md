@@ -203,6 +203,8 @@ this PR needs.
 
 ### Phoenix (Phase C — shipping)
 
+> **(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain Ecto/Phoenix only; `foundation: ash` is now a validation error.)** This section describes the original Ash-based emission (`Ash.Error.Invalid` walking) that no longer exists; on vanilla Ecto the shared `<App>Web.ProblemDetails` module walks `Ecto.Changeset` errors into the same `errors[]` wire shape instead.
+
 `Ash.Error.Invalid` wraps per-field validation errors with path information
 (`%Ash.Error.Invalid{errors: [%Ash.Error.Changes.InvalidAttribute{path: [...],
 field: :amount, message: "..."}, ...]}`). Phase C ships a shared

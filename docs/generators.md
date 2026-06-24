@@ -15,7 +15,7 @@ workflow see [`tools.md`](tools.md).
 To see one identical domain lowered onto every backend, pick the
 **Storefront** trio from the playground dropdown — `storefront-system`
 (Hono + React), `storefront-dotnet` (.NET + embedded SPA), and
-`storefront-elixir` (Elixir/Ash + LiveView). All three share the same
+`storefront-elixir` (Elixir/Phoenix LiveView). All three share the same
 aggregate tree (`Order` → `OrderLine` + `Money`), `Wallet` aggregate,
 and transactional `checkout` saga, so diffing their output is the
 fastest way to read this matrix concretely.
@@ -45,8 +45,9 @@ swap the repository/schema layer (minimal-v1 surface, validator-gated).
 Which of the five domain-logic backends **emits** each gated feature vs. **fails
 fast** at validate. A cell is `✓` (emitted, build-gate-verified), `🚫` (gated —
 the validator rejects the combination with the named `loom.*` diagnostic, a
-reviewed decision), or `⚠` (partial — see the note). Elixir splits by
-foundation (`ash` / `vanilla`). This grid is the **live** view, derived from the
+reviewed decision), or `⚠` (partial — see the note). Elixir runs on plain
+Ecto/Phoenix only (the Ash foundation was removed; `foundation: ash` is a
+validation error). This grid is the **live** view, derived from the
 validator gate sets in `src/ir/validate/checks/` and frozen against drift by
 [`test/platform/backend-parity-gates.test.ts`](../test/platform/backend-parity-gates.test.ts)
 (a backend can't be silently *ungated-and-unemitting* — the F1 class of bug).
@@ -55,25 +56,25 @@ The dated baseline write-up is
 remaining gaps + sequencing are in
 [`plans/backend-parity-plan.md`](plans/backend-parity-plan.md).
 
-| Feature | node | dotnet | java | python | elixir·ash | elixir·vanilla | Gate set |
-| --- | :-: | :-: | :-: | :-: | :-: | :-: | --- |
-| Event-sourced storage `persistedAs(eventLog)` | ✓ | ✓ | ✓ | ✓ | 🚫 | ✓ | `EVENT_SOURCING_BACKENDS` |
-| Event-sourced **workflow** (saga appliers) | ✓ | ✓ | ✓ | ✓ | 🚫 | 🚫 | `EVENT_SOURCING_WORKFLOW_BACKENDS` |
-| TPH inheritance `inheritanceUsing(sharedTable)` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `TPH_CAPABLE` |
-| TPC inheritance `inheritanceUsing(ownTable)` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | (universal) |
-| Discriminated unions / generic carriers (`paged`/`envelope`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_UNION_BACKENDS` |
-| `when` canCommand gate + `can_<op>` query | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_WHEN_BACKENDS` |
-| Exception-less returns (`op(): X or NotFound`) | ✓ | ✓ | ✓ | ✓ | ⚠ return-dominant | ✓ | `SUPPORTED_RETURN_BACKENDS` |
-| Capability `filter` — relational (non-principal) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `LIMITED_FAMILIES` |
-| Capability `filter` — principal (`currentUser`/tenancy) | ✓ | ✓ | ✓ | 🚫 | ✓ | ✓ | system-checks.ts |
-| Provenanced fields (runtime trace) | ✓ | ✓ | ✓ | ✓ | 🚫 | ✓ | `PROVENANCE_BACKENDS` |
-| Per-operation `audited` | ✓ | ✓ | 🚫 | 🚫 | 🚫 | 🚫 | `AUDIT_OP_BACKENDS` |
-| Audited **lifecycle** (`audited create`/`destroy`) | ✓ | 🚫 | 🚫 | 🚫 | 🚫 | 🚫 | `AUDIT_LIFECYCLE_BACKENDS` |
-| Audit/context stamping (`with audit`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | (universal) |
+| Feature | node | dotnet | java | python | elixir | Gate set |
+| --- | :-: | :-: | :-: | :-: | :-: | --- |
+| Event-sourced storage `persistedAs(eventLog)` | ✓ | ✓ | ✓ | ✓ | ✓ | `EVENT_SOURCING_BACKENDS` |
+| Event-sourced **workflow** (saga appliers) | ✓ | ✓ | ✓ | ✓ | 🚫 | `EVENT_SOURCING_WORKFLOW_BACKENDS` |
+| TPH inheritance `inheritanceUsing(sharedTable)` | ✓ | ✓ | ✓ | ✓ | ✓ | `TPH_CAPABLE` |
+| TPC inheritance `inheritanceUsing(ownTable)` | ✓ | ✓ | ✓ | ✓ | ✓ | (universal) |
+| Discriminated unions / generic carriers (`paged`/`envelope`) | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_UNION_BACKENDS` |
+| `when` canCommand gate + `can_<op>` query | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_WHEN_BACKENDS` |
+| Exception-less returns (`op(): X or NotFound`) | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_RETURN_BACKENDS` |
+| Capability `filter` — relational (non-principal) | ✓ | ✓ | ✓ | ✓ | ✓ | `LIMITED_FAMILIES` |
+| Capability `filter` — principal (`currentUser`/tenancy) | ✓ | ✓ | ✓ | 🚫 | ✓ | system-checks.ts |
+| Provenanced fields (runtime trace) | ✓ | ✓ | ✓ | ✓ | ✓ | `PROVENANCE_BACKENDS` |
+| Per-operation `audited` | ✓ | ✓ | 🚫 | 🚫 | 🚫 | `AUDIT_OP_BACKENDS` |
+| Audited **lifecycle** (`audited create`/`destroy`) | ✓ | 🚫 | 🚫 | 🚫 | 🚫 | `AUDIT_LIFECYCLE_BACKENDS` |
+| Audit/context stamping (`with audit`) | ✓ | ✓ | ✓ | ✓ | ✓ | (universal) |
 
 Open gaps (tracked in the plan): principal Python filters (W1b), per-op/
-lifecycle `audited` beyond node/dotnet (W3), and the Elixir·ash foundation
-routing for ES/provenance (W4).
+lifecycle `audited` beyond node/dotnet (W3), and event-sourced workflow
+(saga applier) support on Elixir (W4).
 
 | Construct | TypeScript (Hono + Drizzle) | .NET (ASP.NET + EF + Mediator) | React (Vite + RQ + Mantine) |
 | --- | --- | --- | --- |
@@ -85,18 +86,18 @@ routing for ES/provenance (W4).
 | `abstract aggregate` + `extends` / `inheritanceUsing` | **TPC** (`ownTable`): standalone Drizzle table per concrete; a read-only `<Base>Repository.findAll()` union reader + `<Base>` discriminated-union type. **TPH** (`sharedTable`, default): one shared table + `kind` discriminator + nullable per-concrete columns; `<Base> id` refs + base reader supported. | **TPC**: `abstract class <Base>` carrying shared fields, concretes `: <Base>`, EF `Ignore<<Base>>()` (each concrete maps standalone); read-only `I<Base>Repository` / `<Base>Repository` → `IReadOnlyList<<Base>>`. **TPH** (`sharedTable`): one shared table via EF Core native `HasDiscriminator<string>("kind")`; the abstract base owns the shared `Id` and `DbSet<<Base>>`, concretes inherit it (own columns only); `<Base> id` refs + base reader supported. | Concrete subtypes carry the merged base fields in their wire shape; no base-specific page. |
 | `persistedAs(eventLog)` + `apply(...)` (event sourcing) | Append-only `<agg>_events` stream table (`stream_id, version, type, data, occurred_at`); appliers render as a `_apply(ev)` fold + `_fromEvents(id, events)` rehydrator; `emit` records **and** folds; `create` builds an empty shell + runs its emit-only body (POST body = create params); repository folds the stream on load and appends pending events on save (fold-from-zero MVP). Both node persistences supported — **Drizzle** (default) and **MikroORM** (EntityManager event store + `<agg>_events` `EntitySchema`). | EF Core **and** Dapper supported — `<agg>_events` table (on the `DbContext` / raw Npgsql), C# `_Apply<Event>` methods + `_FromEvents` rehydrator + `_Apply` dispatch switch; EF-only, **not** a dedicated Marten backend (D-DOCUMENT-AXIS). The persistence-agnostic fold + CQRS create chain are reused across both. | (n/a — wire shape unchanged) |
 | `contains` (collection) | Drizzle table with `parent_id` FK; auto-loaded in repo | EF owned-collection; auto-loaded by tracker | Sub-table on detail; not editable in the create form |
-| `X id[]` (reference collection) | Auto-derived many-to-many **join table** (composite PK enforces set semantics); save diff-syncs join rows, `.contains(param)` lowers to an `inArray` subquery against the join table. The join table also carries an `ordinal` column written on every `+=`, but the wire contract is unordered — see "What the generators don't do" below. | EF Core join entity + `DbSet<JoinEntity>` (composite PK + `Ordinal`); `GetByIdAsync` loads via the join entity, `SaveAsync` diff-syncs, `.contains(param)` lowers to `_db.<JoinDbSet>.Any(...)`. (Phoenix/Ash backend: `many_to_many :<rel>_through ... through <JoinResource>` + a `list :<field>, :<rel>_through, :id` aggregate for the id-array wire shape, set on create/update via `manage_relationship(... type: :append_and_remove)`; `.contains` lowers to `exists(<rel>, id == ^arg(:<param>))`.) | `X id[]` appears in the wire shape as `string[]`; populated/displayed via the response, but no first-class editor yet |
+| `X id[]` (reference collection) | Auto-derived many-to-many **join table** (composite PK enforces set semantics); save diff-syncs join rows, `.contains(param)` lowers to an `inArray` subquery against the join table. The join table also carries an `ordinal` column written on every `+=`, but the wire contract is unordered — see "What the generators don't do" below. | EF Core join entity + `DbSet<JoinEntity>` (composite PK + `Ordinal`); `GetByIdAsync` loads via the join entity, `SaveAsync` diff-syncs, `.contains(param)` lowers to `_db.<JoinDbSet>.Any(...)`. (Phoenix/Ecto backend: a `many_to_many` association through the `<join>` table + the id-array wire shape projected from the loaded association, set on create/update via `put_assoc`; `.contains` lowers to an `EXISTS` subquery against the join table.) | `X id[]` appears in the wire shape as `string[]`; populated/displayed via the response, but no first-class editor yet |
 | `derived` | Getter that calls into the expression | Computed property that calls into the expression | Read-only field on detail; included in the response Zod schema |
 | `invariant` | Private `_assertInvariants()` called at the end of every mutator | Private `AssertInvariants()` called at the end of every mutator | (enforced server-side; surfaces as 400 in the UI) |
-| `provenanced` property | `domain/provenance.ts` SDK + `recordTrace(...)` after each write; `ddd snapshot` captures rule snapshots to `.loom/snapshots/*.loomsnap.json` | `Domain/Common/ProvLineage.cs` SDK + inline lineage capture after each write; co-located `<field>_provenance` jsonb column; `provenance_records` flushed in the EF save transaction; current lineage exposed on `<Agg>Response`. **Elixir `foundation: vanilla`** emits the same shape — the `<App>.Provenance` SDK (process-dictionary trace buffer + `flush/1`), a co-located `<field>_provenance` jsonb column, inline capture at each named-op write site, and a `provenance_records` flush inside the save `Repo.transaction` (`foundation: ash` stays gated). | (n/a — wire shape unaffected) |
+| `provenanced` property | `domain/provenance.ts` SDK + `recordTrace(...)` after each write; `ddd snapshot` captures rule snapshots to `.loom/snapshots/*.loomsnap.json` | `Domain/Common/ProvLineage.cs` SDK + inline lineage capture after each write; co-located `<field>_provenance` jsonb column; `provenance_records` flushed in the EF save transaction; current lineage exposed on `<Agg>Response`. **Elixir** emits the same shape — the `<App>.Provenance` SDK (process-dictionary trace buffer + `flush/1`), a co-located `<field>_provenance` jsonb column, inline capture at each named-op write site, and a `provenance_records` flush inside the save `Repo.transaction`. | (n/a — wire shape unaffected) |
 | `function` | Private method on the aggregate / part class | Private expression-bodied member | (server-only) |
 | `operation` | Public method (or private if marked) that enforces preconditions, mutates state, queues events, and re-asserts invariants | Same shape; visibility honoured | Mantine button on the detail page; opens a modal whose form binds to `<Op>Request`; submit calls `use<Op><Agg>()` |
 | `precondition` | `if (!cond) throw new DomainError(<source>)` | `if (!cond) throw new DomainException(<source>)` | (server-side; HTTP 400 surfaces as a Mantine error notification) |
 | `emit` | `_events.push({ type: "X", … })` | `_events.Add(new X(...))` | (server-side) |
 | `repository` find | Method on `<Agg>Repository`; `where` clauses lower to Drizzle predicates (`lowerToDrizzle`) over the queryable subset, paramless finds fall back to convention-matching | Method on `I<Agg>Repository`; LINQ `.Where(x => …)` for both convention and `where` forms | `use<FindName><Agg>(query)` React Query hook + a list-page filter bar (one input per `where` param) that drives the hook, falling back to `useAll<Agg>()` when unfiltered |
 | `criterion` (inline use-site) | Predicate body re-lowered + substituted at each `where` / invariant / precondition (same Drizzle predicate as a hand-written filter) | Same — inlined into the LINQ `.Where(...)` / guard | (server-side; not surfaced) |
-| `criterion` reified by a `retrieval` or `find` `where` | Module-level predicate fn `<name>Criterion = (args) => <Drizzle predicate>`, called by `run<Name>` and the matching `find` (one fn, deduped across both) | `Criterion<T>` (`IsSatisfiedBy` + `ToExpression()`) fed into the retrieval's Ardalis `Specification<T>` bundle and a `find`'s `.Where(crit.ToExpression())` (EF); a parameterised SQL fragment on Dapper. (Phoenix/Ash backend: a `:boolean` Ash **calculation** the read action filters by — `filter expr(<calc>(arg: ^arg(:p)))`; one calc shared by retrieval + find.) | (n/a — wire shape unchanged) |
-| `retrieval` (named query bundle) | `run<Name>(args, page?)` on `<Agg>Repository` — `where` + `.orderBy(...)` + `.limit/.offset` paging | `Run<Name>Async(args, page?, ct)` — `.WithSpecification(spec).ApplyPaging(page).ToListAsync(ct)` (EF) / parameterised SQL (Dapper). (Phoenix/Ash: a read action + `Ash.Query` page.) | (n/a — backend-only) |
+| `criterion` reified by a `retrieval` or `find` `where` | Module-level predicate fn `<name>Criterion = (args) => <Drizzle predicate>`, called by `run<Name>` and the matching `find` (one fn, deduped across both) | `Criterion<T>` (`IsSatisfiedBy` + `ToExpression()`) fed into the retrieval's Ardalis `Specification<T>` bundle and a `find`'s `.Where(crit.ToExpression())` (EF); a parameterised SQL fragment on Dapper. (Phoenix/Ecto backend: a shared `<name>_criterion/1` query fragment (an Ecto `dynamic`) the read filters by — one fragment shared by retrieval + find.) | (n/a — wire shape unchanged) |
+| `retrieval` (named query bundle) | `run<Name>(args, page?)` on `<Agg>Repository` — `where` + `.orderBy(...)` + `.limit/.offset` paging | `Run<Name>Async(args, page?, ct)` — `.WithSpecification(spec).ApplyPaging(page).ToListAsync(ct)` (EF) / parameterised SQL (Dapper). (Phoenix/Ecto: a context query function + `limit`/`offset` page.) | (n/a — backend-only) |
 | Auto `findById` / `getById` | Yes — load root + parts in a transaction; `getById` throws on missing | Yes — `GetByIdAsync` returns `Order?`, `getById` is implicit via the controller raising 404 | `use<Agg>ById(id)` hook, used by the detail page |
 | Auto `find all` | Yes — `GET /<plural>`, loads with master-detail | Yes — `GET /<plural>` via `GetAllQuery` + handler | `useAll<Agg>()` hook, used by the list page |
 | `test "name" { … }` | Vitest at `domain/<aggregate>.test.ts` | xUnit at `Tests/<Plural>/<Aggregate>Tests.cs` | (n/a — backend-only) |
@@ -187,10 +188,9 @@ auto-invoked by `$"{x}"` / `Console.WriteLine`), `toString()` +
 `[Symbol.for("nodejs.util.inspect.custom")]` (TS, auto-invoked by
 `String(x)` / `${x}` / `console.log`), a public
 `def inspect(record)` module function (Phoenix, **invoked
-explicitly** as `MyApp.Catalog.Customer.inspect(record)` — Ash 3.x
-auto-derives the `Inspect` protocol for every resource module, so
-the loom-emitted form lives at the module-function level to avoid a
-`redefining module Inspect.<...>` collision under `mix compile
+explicitly** as `MyApp.Catalog.Customer.inspect(record)` — the
+loom-emitted form lives at the module-function level to avoid an
+`Inspect`-protocol collision under `mix compile
 --warnings-as-errors`), a `__repr__` (Python, auto-invoked by
 `repr(x)` / f-strings), and a `toString()` override (Java).  Honours `sensitive(...)` field tags by
 substituting `<redacted>` for the value while keeping the field
@@ -779,9 +779,11 @@ stay byte-identical (`pipeline-layering` + the full suite gate this).
 ## Phoenix LiveView fullstack (`platform: elixir`)
 
 `generate system` for deployables marked `platform: elixir`.
-Single project that both serves an Ash-derived API (when `serves:` is
+Single project that both serves a context-derived API (when `serves:` is
 populated) AND mounts a `ui:` rendered as Phoenix LiveView modules.
-Owns its own Postgres database (`needsDb: true`).
+Owns its own Postgres database (`needsDb: true`). Plain Ecto/Phoenix —
+`foundation: vanilla` is the default and only valid foundation (`foundation:
+ash` is a validation error).
 
 ### File map
 
@@ -790,11 +792,11 @@ For a fullstack `phoenixApp` with `contexts: [Sales]` + matching
 
 ```
 phoenix_app/
-├── mix.exs                                       # phoenix, phoenix_live_view, ash, ash_postgres, ash_phoenix
+├── mix.exs                                       # phoenix, phoenix_live_view, ecto, ecto_sql, postgrex
 ├── .formatter.exs
 ├── Dockerfile                                    # multi-stage hexpm/elixir → debian, mix release
 ├── .dockerignore
-├── config/{config,dev,prod,runtime}.exs          # Phoenix + Ecto + Ash config
+├── config/{config,dev,prod,runtime}.exs          # Phoenix + Ecto config
 ├── priv/repo/
 │   ├── migrations/<ts>_create_<table>.exs        # one per aggregate, stable ordering, FK indexes
 │   └── seeds.exs
@@ -804,19 +806,19 @@ phoenix_app/
 │   ├── repo.ex                                   # Ecto.Repo
 │   ├── request_context.ex                        # ambient exec-context carrier (Plug → Logger.metadata: correlation_id/scope_id/actor_id) — see architecture/request-context.md
 │   └── sales/                                    # one folder per BoundedContext
-│       ├── customer.ex                           # Ash.Resource per aggregate
+│       ├── customer.ex                           # Ecto.Schema per aggregate
 │       ├── order.ex
-│       ├── order_line.ex                         # entity-part as embedded resource
-│       ├── order_status.ex                       # enums as Ash.Type.Enum
-│       ├── money.ex                              # value objects as Ash.Type.NewType / embedded
+│       ├── order_line.ex                         # entity-part as embedded_schema
+│       ├── order_status.ex                       # enums as Ecto.Enum
+│       ├── money.ex                              # value objects as embedded_schema / custom Ecto.Type
 │       ├── events/order_confirmed.ex             # plain defstruct modules
-│       ├── workflows/place_order.ex              # code-interface fns wrapping Ash.transaction
+│       ├── workflows/place_order.ex              # context fns wrapping Repo.transaction
 │       ├── dispatcher.ex                         # in-process event router (when a channel carries a subscribed event)
 │       ├── workflows/order_fulfillment_state.ex  # saga-state Ecto.Schema (correlation-keyed)
 │       ├── workflows/order_fulfillment/start_order_placed.ex   # event-create starter handle/1
 │       ├── workflows/order_fulfillment/on_shipment_requested.ex # on(...) reactor handle/1
-│       └── views/active_orders.ex                # Ash.Query.filter on read action
-│   └── sales.ex                                  # use Ash.Domain — resource list + code interfaces
+│       └── views/active_orders.ex                # Ecto query function (where filter)
+│   └── sales.ex                                  # context module — schema list + public functions
 ├── lib/phoenix_app_web.ex                        # __using__ macro
 └── lib/phoenix_app_web/
     ├── endpoint.ex                               # Phoenix.Endpoint
@@ -833,28 +835,28 @@ phoenix_app/
 
 ### Per-aggregate detail
 
-Aggregate IR maps onto Ash:
+Aggregate IR maps onto Ecto/Phoenix:
 
-| IR | Ash construct |
+| IR | Ecto/Phoenix construct |
 |---|---|
-| `aggregate X { … }` | `Ash.Resource` with `postgres { table "<plural>"; repo <App>.Repo }` |
-| `field: T` | `attribute :<snake>, <ash-type>, allow_nil?: <bool>` |
-| `contains lines: OrderLine[]` | `relationships do has_many :lines, <App>.<Ctx>.OrderLine end` |
-| `derived total: Money = expr` | `calculations do calculate :total, Money, expr(<lowered>) end` |
-| `invariant <pred> when <guard>` | `validations do validate <pred>, where: [<guard>] end` |
-| `operation op(args) { body }` | `actions do update :<snake_op>, accept: […], change <body-lowered> end` |
-| `valueobject Money { … }` | embedded `Ash.Resource` (composite) or `Ash.Type.NewType` (single-field) |
+| `aggregate X { … }` | `Ecto.Schema` (`schema "<plural>" do … end`) + a `base_changeset/2`; persisted via `<App>.Repo` |
+| `field: T` | `field :<snake>, <ecto-type>` + `validate_required` for non-optional |
+| `contains lines: OrderLine[]` | `has_many :lines, <App>.<Ctx>.OrderLine` (relational) or `embeds_many :lines, …` (embedded) |
+| `derived total: Money = expr` | a `def total(record)` function over the struct (`<lowered>`) |
+| `invariant <pred> when <guard>` | a `validate_change` / conditional validator in `base_changeset` |
+| `operation op(args) { body }` | a context function `def <snake_op>(record, params)` (precondition + `put_change` + `Repo.update`) |
+| `valueobject Money { … }` | embedded `embedded_schema` (composite) or a custom `Ecto.Type` (single-field) |
 | `event LineAdded { … }` | plain `defstruct` module under `<Ctx>.Events.<Event>` |
-| `repository finds: find byCustomer(...) where ...` | `read :by_customer do argument :customer_id, :uuid; filter expr(...) end` |
-| `workflow placeOrder(...) { ... }` | code-interface module with `Ash.transaction(<App>.<Ctx>, fn -> with … end)` |
-| `view ActiveOrders = Order where …` | thin module wrapping `Order |> Ash.Query.filter(…)` |
+| `repository finds: find byCustomer(...) where ...` | a context query function `def by_customer(customer_id) = Repo.all(from … where: …)` |
+| `workflow placeOrder(...) { ... }` | a context function wrapping `Repo.transaction(fn -> with … end)` |
+| `view ActiveOrders = Order where …` | thin module wrapping `from o in Order, where: …` |
 | `emit OrderConfirmed { … }` | `Phoenix.PubSub.broadcast(<App>.PubSub, "events", %Events.OrderConfirmed{…})`; inside an in-process dispatch handler, `emit` re-enters `<Ctx>.Dispatcher.dispatch(%Events.OrderConfirmed{…})` so choreography chains run. |
 | `on(e: Event)` reactor / event-triggered `create(e: Event) by …` (channel-carried) | one `<Ctx>.Workflows.<Wf>.On<Event>` / `.Start<Event>` module with `handle(event)`, routed by a per-context `<Ctx>.Dispatcher` that pattern-matches each event struct. Correlation persists through a `<Wf>State` `Ecto.Schema` keyed by the correlation field (`create` loads-or-allocates, `on` routes-or-drops + logs `event_unrouted`). An event-triggered-only workflow emits no `run/2` / HTTP route / UI form page. See [`workflow.md`](workflow.md) §Triggers and [`channels.md`](proposals/channels.md). |
-| `abstract aggregate Party` + `extends` (TPC) | base emits no resource; each concrete is a standalone `Ash.Resource`; the context Ash.Domain gains `list_parties!/0` (the union of the concrete `list_<concrete>!` reads). |
-| `abstract aggregate Party` + `inheritanceUsing(sharedTable)` (TPH) | Ash has no native STI, so the concretes share one table via multiple resources: each concrete `Ash.Resource` declares `table "<base_plural>"`, a `:kind` string attribute defaulted to its own name, and `base_filter expr(kind == "<Concrete>")` (inside the `resource do` block) so it reads/writes only its rows. The base owns no resource; the Ash.Domain gains the same polymorphic `list_parties!/0` union reader. See [`phoenix-tph-emission.md`](./proposals/phoenix-tph-emission.md). |
-| `persistedAs(eventLog)` + `apply(...)` (event sourcing) | **Supported on `foundation: vanilla`** (Ecto/Phoenix — `src/generator/elixir/vanilla/eventsourced-emit.ts`): an append-only `<agg>_events` stream + `apply` fold + rehydrator, the elixir sibling of the node/.NET/python/java event stores. **Gated on `foundation: ash`** (today's default Phoenix foundation) — `validateEventSourcedStorage` accepts `elixir` iff every hosting deployable is `vanilla`; Ash has no pure-ES fit (AshCommanded is full CQRS/ES, AshEvents keeps a state table — both partial). Switch the deployable to `foundation: vanilla`, or see [workflow-and-applier.md](proposals/workflow-and-applier.md). |
-| `shape(document)` persistence | **Supported on `foundation: vanilla` (CRUD — DEBT-07)** — `src/generator/elixir/vanilla/document-emit.ts`: the whole aggregate persists as one jsonb blob in an `(id, data, version)` table, validated through a **schemaless** Ecto changeset (`cast({%{}, @types}, attrs, …)` + the same `validate_required` / invariant validators the relational `base_changeset` runs); reads merge `data` back over the id. **Gated on `foundation: ash`** (no idiomatic Ash document fit). Custom finds + named ops on a document aggregate are a gated v1 follow-up (`loom.vanilla-document-unsupported`). `shape(embedded)` is supported on both foundations: Ash embedded resources on `ash`; on `vanilla` (DEBT-32, `src/generator/elixir/vanilla/schema-emit.ts`), each entity part is an Ecto `embedded_schema` module the root `embeds_many`s (value objects fold to `:map`), stored inline in the parent's jsonb column — a containment-mutating op (`lines += Line{…}`) appends the struct + `put_embed`s; `contains` on a *relational*-shape vanilla aggregate stays gated (`loom.vanilla-containment-unsupported`). |
-| `test "…" { … }` | **ExUnit** → `test/<ctx>/<agg>_test.exs` (`use ExUnit.Case, async: true`) + a once-per-project `test/test_helper.exs`. The two foundations diverge with their domain models. **`vanilla`** (`src/generator/elixir/vanilla/tests-emit.ts`) ports the full Loom idiom onto a **pure domain core** emitted on the aggregate module (`domain-core-emit.ts`): `def create(attrs) = base_changeset \|> Ecto.Changeset.apply_action(:insert)` and `def <op>(record, params)` = precondition + in-memory mutation — both Repo-free. So `Agg.create({…})` → `{:ok, p} = Agg.create(%{…})`, `expect(create({bad})).toThrow()` → `assert {:error, _} = …`, `o.op(x)` → `o = Agg.op(o, %{…})`, precondition `toThrow` → `assert_raise`, field reads → `assert ==` (money/decimal via `Decimal`). Verified green under `mix test` with no DB. A **value-object construction invariant** (`expect(Money{…}).toThrow()`) lowers to the VO's validating constructor — `assert {:error, _} = Money.new(%{…})` (F5; `valueobject-emit.ts` emits `<VO>.new/1`, and the aggregate `base_changeset` runs it via `validate_vo` so the invariant is enforced at the real create/update path, not just in tests). **`ash`** runs the **rejection subset DB-free** (`tests-emit.ts`, Rec3): Ash's `validations` and an action's `validate` clause run at *changeset-build* time, so an invariant / precondition / value-object-construction `toThrow` lowers to `refute Ash.Changeset.for_create/for_update(…).valid?` (the precondition subject is an in-memory `%<Ctx>.Resource{…}` struct), and in-memory value-object field reads run too — all with no data layer. Only a happy-path post-operation **state** assertion still `@tag :skip`s (it needs a persisted record / `SQL.Sandbox`). A `config/test.exs` is emitted so `mix test` can load (never copied into the prod image). Verified green under `mix test` with no DB against real Ash 3.x. See [`docs/audits/test-parity-generated-backends.md`](audits/test-parity-generated-backends.md). |
+| `abstract aggregate Party` + `extends` (TPC) | base emits no schema; each concrete is a standalone `Ecto.Schema` on its own table; the context module gains `list_parties/0` (the union of the concrete `list_<concrete>/0` reads). |
+| `abstract aggregate Party` + `inheritanceUsing(sharedTable)` (TPH) | the concretes share one table: each concrete `Ecto.Schema` declares `schema "<base_plural>"`, a `:kind` string field defaulted to its own name, and every read self-filters on `where: c.kind == "<Concrete>"` so it reads/writes only its rows. The base owns no schema; the context module gains the same polymorphic `list_parties/0` union reader. See [`phoenix-tph-emission.md`](./proposals/phoenix-tph-emission.md). |
+| `persistedAs(eventLog)` + `apply(...)` (event sourcing) | **Supported** (`src/generator/elixir/vanilla/eventsourced-emit.ts`): an append-only `<agg>_events` stream + `apply` fold + rehydrator, the elixir sibling of the node/.NET/python/java event stores. |
+| `shape(document)` persistence | **Supported (CRUD — DEBT-07)** — `src/generator/elixir/vanilla/document-emit.ts`: the whole aggregate persists as one jsonb blob in an `(id, data, version)` table, validated through a **schemaless** Ecto changeset (`cast({%{}, @types}, attrs, …)` + the same `validate_required` / invariant validators the relational `base_changeset` runs); reads merge `data` back over the id. Custom finds + named ops on a document aggregate are a gated v1 follow-up (`loom.vanilla-document-unsupported`). `shape(embedded)` (DEBT-32, `src/generator/elixir/vanilla/schema-emit.ts`): each entity part is an Ecto `embedded_schema` module the root `embeds_many`s (value objects fold to `:map`), stored inline in the parent's jsonb column — a containment-mutating op (`lines += Line{…}`) appends the struct + `put_embed`s; `contains` on a *relational*-shape aggregate stays gated (`loom.vanilla-containment-unsupported`). |
+| `test "…" { … }` | **ExUnit** → `test/<ctx>/<agg>_test.exs` (`use ExUnit.Case, async: true`) + a once-per-project `test/test_helper.exs`. (`src/generator/elixir/vanilla/tests-emit.ts`) ports the full Loom idiom onto a **pure domain core** emitted on the aggregate module (`domain-core-emit.ts`): `def create(attrs) = base_changeset \|> Ecto.Changeset.apply_action(:insert)` and `def <op>(record, params)` = precondition + in-memory mutation — both Repo-free. So `Agg.create({…})` → `{:ok, p} = Agg.create(%{…})`, `expect(create({bad})).toThrow()` → `assert {:error, _} = …`, `o.op(x)` → `o = Agg.op(o, %{…})`, precondition `toThrow` → `assert_raise`, field reads → `assert ==` (money/decimal via `Decimal`). Verified green under `mix test` with no DB. A **value-object construction invariant** (`expect(Money{…}).toThrow()`) lowers to the VO's validating constructor — `assert {:error, _} = Money.new(%{…})` (F5; `valueobject-emit.ts` emits `<VO>.new/1`, and the aggregate `base_changeset` runs it via `validate_vo` so the invariant is enforced at the real create/update path, not just in tests). A `config/test.exs` is emitted so `mix test` can load (never copied into the prod image). See [`docs/audits/test-parity-generated-backends.md`](audits/test-parity-generated-backends.md). |
 
 ### Per-page detail
 
@@ -1066,7 +1068,7 @@ Postgres-backed emitters lives in
 
 | Backend | Emits | Applied by |
 | --- | --- | --- |
-| Phoenix | `priv/repo/migrations/<ts>_<name>.exs` (Ecto DSL) | `mix ash.migrate` at boot via the existing release config |
+| Phoenix | `priv/repo/migrations/<ts>_<name>.exs` (Ecto DSL) | `mix ecto.migrate` at boot via the existing release config |
 | Hono | `db/migrations/<version>_<name>.sql` + `db/migrations/meta/_journal.json` | Drizzle's runtime migrator: `await migrate(db, { migrationsFolder })` in `index.ts` reads the journal + .sql files, tracks state in `__drizzle_migrations`.  `npm run db:migrate` (drizzle-kit migrate) works out of band |
 | .NET | `Migrations/<Version>_<Name>.cs` (`migrationBuilder.Sql(@"...")`) | `db.Database.Migrate()` in `Program.cs` after `builder.Build()`; no `ModelSnapshot` is emitted — Loom owns SQL generation, so `dotnet ef migrations add` is never run and the runtime migrator is happy without one |
 
@@ -1127,7 +1129,7 @@ Out of scope for v1 (intentional):
   unordered — a relational join table is naturally a set, and the
   three backends realise that differently (TS/Drizzle and .NET/EF
   happen to write a per-row `ordinal` and load `ORDER BY ordinal`;
-  Phoenix/Ash leaves ordinal at the column default and returns rows
+  Phoenix/Ecto leaves ordinal at the column default and returns rows
   in whatever order Postgres yields).  Treat `party[0]` as "some
   element of `party`," not "the first element of `party`."  When
   position is part of the domain (a battle slot, a draft pick

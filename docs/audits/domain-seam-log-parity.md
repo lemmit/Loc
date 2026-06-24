@@ -1,5 +1,7 @@
 # Domain-seam structured-log parity audit
 
+> **(Superseded 2026: the Ash foundation was removed — `platform: elixir` is plain Ecto/Phoenix only, `foundation: ash` is now a validation error. The `ash` foundation entries below, and the foundation split, are historical; on current `main` only the `vanilla` Phoenix surface emits.)**
+
 **Snapshot:** 2026-06-22, fresh `main` @ `ea6fa41e`.
 **Scope:** the DOMAIN-SEAM tier of the neutral log-event catalog
 (`src/generator/_obs/log-events.ts`) across the five domain-logic backends —

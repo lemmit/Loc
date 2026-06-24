@@ -26,15 +26,11 @@
 > shipped, so the only residue there is pack breadth. The standing backend debt
 > is now narrow: **python filter depth** and the **minimal alternate adapters**.
 
-**A note on the elixir·ash foundation.** Elixir ships two foundations —
-`ash` (default) and `vanilla` (Ecto). Several features are gated on `ash` but
-emit on `vanilla` (event-sourced storage, event-sourced **workflows**,
-`shape(document)`, provenance, per-op audit). Per the foundation-routing contract (`docs/platforms.md`, #1496), a
-feature ash can't idiomatically emit is reached by routing the deployable to
-`vanilla` — that is the **intended end state, not debt to close on ash**. So
-this register treats elixir as a single backend whose reference foundation is
-`vanilla`; ash-only gates are footnoted as foundation-fit, not counted as
-parity debt. They are listed in the backend audit's §F3 for completeness.
+**A note on the elixir foundation.** The Ash foundation was removed —
+`platform: elixir` now generates plain Phoenix LiveView on Ecto (the `vanilla`
+foundation, the only one; `foundation: ash` is a hard validation error). So this
+register treats elixir as a single backend whose foundation is `vanilla`; the
+old "✓ vanilla / ✗ ash" foundation-split caveats are gone.
 
 Legend: ✓ implemented · ✗ gated (fail-fast validator error) · ⚠ partial / stub · N/A.
 
@@ -47,31 +43,27 @@ cell notes otherwise.
 
 | Feature | node | dotnet | java | python | elixir | Gate · source of truth |
 |---|:---:|:---:|:---:|:---:|:---:|---|
-| Event-sourced storage `persistedAs(eventLog)` | ✓ | ✓ | ✓ | ✓ | ✓ vanilla / ✗ ash† | `EVENT_SOURCING_BACKENDS` · system-checks.ts:1913 |
-| Event-sourced **workflow** (saga appliers) | ✓ | ✓ | ✓ | ✓ | ✓ vanilla / ✗ ash† | `EVENT_SOURCING_WORKFLOW_BACKENDS` + elixir-vanilla branch · system-checks.ts:2014,2027 |
+| Event-sourced storage `persistedAs(eventLog)` | ✓ | ✓ | ✓ | ✓ | ✓ | `EVENT_SOURCING_BACKENDS` · system-checks.ts:1913 |
+| Event-sourced **workflow** (saga appliers) | ✓ | ✓ | ✓ | ✓ | ✓ | `EVENT_SOURCING_WORKFLOW_BACKENDS` · system-checks.ts:2014 |
 | TPH inheritance `inheritanceUsing(sharedTable)` | ✓ | ✓ | ✓ | ✓ | ✓ | `TPH_CAPABLE` · system-checks.ts:1862 |
 | TPC inheritance `inheritanceUsing(ownTable)` | ✓ | ✓ | ✓ | ✓ | ✓ | (universal) |
-| `shape(document)` persistence | ✓ | ✓ | ✓ | ✓ | ✓ vanilla / ✗ ash† | `PLATFORM_SAVING_SHAPES` · platform-axes.ts:40 |
+| `shape(document)` persistence | ✓ | ✓ | ✓ | ✓ | ✓ | `PLATFORM_SAVING_SHAPES` · platform-axes.ts:40 |
 | `shape(embedded)` persistence | ✓ | ✓ | ✓ | ✓ | ✓ | `PLATFORM_SAVING_SHAPES` · platform-axes.ts:40 |
 | Discriminated unions / generic carriers / `when` gate | ✓ | ✓ | ✓ | ✓ | ✓ | structural-checks.ts:414 / :232 / :484 |
-| Exception-less returns (`op(): X or NotFound`) | ✓ | ✓ | ✓ | ✓ | ✓ vanilla / ⚠ ash† | `SUPPORTED_RETURN_BACKENDS` · structural-checks.ts:518 |
+| Exception-less returns (`op(): X or NotFound`) | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_RETURN_BACKENDS` · structural-checks.ts:518 |
 | Non-principal capability `filter` (relational) | ✓ | ✓ | ✓ | ✓ | ✓ | `LIMITED_FAMILIES` · system-checks.ts:1006 |
 | **Principal `filter`** (`currentUser`/tenancy, relational) | ✓ | ✓ | ✓ | **✗** | ✓ | `supportsPrincipalFilter` · system-checks.ts:1021 |
 | **Filter on non-relational shape** (doc/embedded) | ✓ | ✓ | ⚠ doc+embedded | **✗** | ⚠ embedded | `supportsNonRelationalFilter` · system-checks.ts:1051 |
 | `ignoring <Cap>` filter-bypass | ✓ | ✓ | ✓ | ✓ | ✓ | `FILTER_BYPASS_FAMILIES` · system-checks.ts:1199 |
-| Provenanced fields (runtime trace) | ✓ | ✓ | ✓ | ✓ | ✓ vanilla / ✗ ash† | `PROVENANCE_BACKENDS` · system-checks.ts:2063 |
-| Per-operation `audited` | ✓ | ✓ | ✓ | ✓ | ✓ vanilla / ✗ ash† | `AUDIT_OP_BACKENDS` · system-checks.ts:2124 |
-| Audited **lifecycle** (`audited create`/`destroy`) | ✓ | ✓ | ✓ | ✓ | ✓ vanilla / ✗ ash† | `AUDIT_LIFECYCLE_BACKENDS` · system-checks.ts:2125 |
+| Provenanced fields (runtime trace) | ✓ | ✓ | ✓ | ✓ | ✓ | `PROVENANCE_BACKENDS` · system-checks.ts:2063 |
+| Per-operation `audited` | ✓ | ✓ | ✓ | ✓ | ✓ | `AUDIT_OP_BACKENDS` · system-checks.ts:2124 |
+| Audited **lifecycle** (`audited create`/`destroy`) | ✓ | ✓ | ✓ | ✓ | ✓ | `AUDIT_LIFECYCLE_BACKENDS` · system-checks.ts:2125 |
 | `X id[]` reference collections | ✓ | ✓ | ✓ | ✓ | ✓ | not gated — emitted + boot-verified on all 5 |
 
-† **Foundation-fit, not debt** — ash routes to `vanilla` for these (see the note
-above). Every daggered feature — including event-sourced **workflows** (the
-`<wf>_events` stream + fold-on-load handlers, shipped on `elixir·vanilla` and
-gated on `elixir·ash`, exactly like event-sourced *storage*) — is reached on
-elixir via the vanilla foundation; bare `platform: elixir` defaults to ash and
-stays gated. No feature in this matrix is gated on *both* foundations.
+The elixir column is fully ✓ — every feature in this matrix emits on the vanilla
+foundation (the only elixir foundation since Ash was removed).
 
-**The standing backend debt (after ignoring ash foundation-fit):**
+**The standing backend debt:**
 
 1. **Python filter depth** — principal `filter`s (`currentUser`/tenancy) and
    non-relational-shape filters are gated on python (fail-fast, not silent; #1481

@@ -1,0 +1,54 @@
+// LiveView sidebar menu-link + page hiding under auth on the vanilla foundation —
+// a port of the former auth-menu-gate fixture.  An auth-required LiveView app
+// whose sidebar links to a page with a currentUser-only `requires` gate: the
+// emitted sidebar wraps that link in a HEEx
+// `<%= if @current_user.role == "agent" do %> … <% end %>`.  An ungated page's
+// link stays unwrapped.
+system Helpdesk {
+  user {
+    id: string
+    role: string
+  }
+
+  subdomain Support {
+    context Tickets {
+      aggregate Ticket with crudish {
+        subject: string
+        open: bool
+      }
+      repository Tickets for Ticket { }
+    }
+  }
+
+  ui Console {
+    page Admin {
+      route: "/admin"
+      requires currentUser.role == "agent"
+      body: Stack { Heading("Admin", level: 1) }
+    }
+    page Public {
+      route: "/public"
+      body: Stack { Heading("Public", level: 1) }
+    }
+    menu {
+      section "Console" {
+        link Admin
+        link Public
+      }
+    }
+  }
+
+  storage primary { type: postgres }
+  resource ticketState { for: Tickets, kind: state, use: primary }
+
+  api SupportApi from Support
+  deployable phoenixApp {
+    platform: elixir { foundation: vanilla }
+    contexts: [Tickets]
+    serves: SupportApi
+    dataSources: [ticketState]
+    ui: Console
+    port: 4000
+    auth: required
+  }
+}

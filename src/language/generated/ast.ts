@@ -62,7 +62,6 @@ export type DddKeywordNames =
     | "apply"
     | "area"
     | "asc"
-    | "ashPhoenix"
     | "audience"
     | "audited"
     | "auth"
@@ -92,9 +91,11 @@ export type DddKeywordNames =
     | "context"
     | "contexts"
     | "cookie"
+    | "coreComponents"
     | "covers"
     | "create"
     | "criterion"
+    | "daisyui"
     | "dataSources"
     | "datetime"
     | "decimal"
@@ -1095,10 +1096,10 @@ export function isDescriptionProp(item: unknown): item is DescriptionProp {
     return reflection.isInstance(item, DescriptionProp.$type);
 }
 
-export type DesignPack = 'angularMaterial' | 'ashPhoenix' | 'chakra' | 'flowbite' | 'mantine' | 'mui' | 'primeng' | 'shadcn' | 'shadcnSvelte' | 'shadcnVue' | 'spartanNg' | 'vuetify' | string;
+export type DesignPack = 'angularMaterial' | 'chakra' | 'coreComponents' | 'daisyui' | 'flowbite' | 'mantine' | 'mui' | 'primeng' | 'shadcn' | 'shadcnSvelte' | 'shadcnVue' | 'spartanNg' | 'vuetify' | string;
 
 export function isDesignPack(item: unknown): item is DesignPack {
-    return item === 'mantine' || item === 'shadcn' || item === 'mui' || item === 'chakra' || item === 'ashPhoenix' || item === 'shadcnSvelte' || item === 'flowbite' || item === 'vuetify' || item === 'shadcnVue' || item === 'angularMaterial' || item === 'primeng' || item === 'spartanNg' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
+    return item === 'mantine' || item === 'shadcn' || item === 'mui' || item === 'chakra' || item === 'coreComponents' || item === 'daisyui' || item === 'shadcnSvelte' || item === 'flowbite' || item === 'vuetify' || item === 'shadcnVue' || item === 'angularMaterial' || item === 'primeng' || item === 'spartanNg' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
 }
 
 export interface Destroy extends langium.AstNode {

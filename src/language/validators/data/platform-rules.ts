@@ -200,12 +200,14 @@ function adapterKindForAxis(
 
 /** Menu for the one remaining greenfield axis, `foundation`.  `transport` and
  *  `runtime` are now adapter-backed (realization-axes-alignment.md), resolved
- *  via `availableAdapterNames(family, …)` in `realizationAxisMenu`.  Elixir
- *  carries a two-element foundation menu: today's `ash` and `vanilla`
- *  (D-VANILLA-PHOENIX-FOUNDATION); every other backend is `vanilla` only. */
+ *  via `availableAdapterNames(family, …)` in `realizationAxisMenu`.  Every
+ *  backend — elixir included — is `vanilla` only (the Ash foundation was
+ *  removed; `foundation: ash` is now rejected as an out-of-menu value).  The
+ *  FIRST entry is the platform default (`defaultFoundationFor`). */
 function greenfieldMenu(family: Platform, axis: "foundation"): string[] {
   void axis;
-  return family === "elixir" ? ["ash", "vanilla"] : ["vanilla"];
+  void family;
+  return ["vanilla"];
 }
 
 /** The DSL-legal values for one realization axis on a platform family.
@@ -247,13 +249,10 @@ export function isReservedStub(family: Platform, axis: RealizationAxis, dslValue
  *  — setting an owned axis alongside the foundation is an error (R4).
  *  `vanilla` owns nothing; a rung-3/4 framework owns the application +
  *  HTTP surface.  Data-driven: growing the foundation menu activates the
- *  rule with no code change.  (`ash` does NOT own `persistence:` — both
- *  `ashPostgres` and the plain `ecto` data layer stay on the persistence
- *  axis; which of them is legal under a given foundation is the
- *  compatibility rule R6 below, not ownership.) */
+ *  rule with no code change.  (`abp` / `nestjs` are reserved future
+ *  foundations, not yet on any platform menu.) */
 export const FOUNDATION_OWNED_AXES: Record<string, readonly RealizationAxis[]> = {
   vanilla: [],
-  ash: ["application", "transport"],
   abp: ["application", "transport"],
   nestjs: ["application", "transport"],
 };
@@ -264,20 +263,15 @@ export const FOUNDATION_OWNED_AXES: Record<string, readonly RealizationAxis[]> =
  *  `vanilla` admits the rest (the non-framework libraries).  Drives R6
  *  (foundation↔axis compatibility) + the foundation-narrowed menu.
  *
- *  Ash's data layer is per-DB (`ash_postgres` / `ash_sqlite` — not drop-in;
- *  see docs/plans/realization-axes-alignment.md §3.1), so its family lists
- *  the per-DB adapters; `ecto` is the DB-agnostic vanilla library and is NOT
- *  a framework adapter.  `abp` / `nestjs` gain entries when those foundations
- *  are wired. */
+ *  Empty today — the Ash foundation was removed.  `abp` / `nestjs` gain
+ *  entries when those foundations are wired. */
 export const FOUNDATION_FAMILY_ADAPTERS: Record<
   string,
   { readonly persistence?: readonly string[]; readonly application?: readonly string[] }
-> = {
-  ash: { persistence: ["ashPostgres", "ashSqlite"], application: ["ash"] },
-};
+> = {};
 
 /** The platform's DEFAULT foundation — the primary (first) entry of its
- *  foundation menu (`elixir` → `ash`, every other backend → `vanilla`).
+ *  foundation menu (every backend → `vanilla` post D-VANILLA-DEFAULT).
  *  Used by R6 to resolve the effective foundation when the knob is omitted.
  *  (Mirror of the `foundation` default in `greenfieldAxisDefaults`, kept here
  *  in the language layer so the validator need not reach into lowering.) */

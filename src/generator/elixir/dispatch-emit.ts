@@ -1,5 +1,4 @@
 import type {
-  AggregateIR,
   CreateIR,
   EnrichedBoundedContextIR,
   ExprIR,
@@ -16,7 +15,7 @@ import { type RenderCtx, renderExpr } from "./render-expr.js";
 import { renderEsWorkflowHandler } from "./vanilla/workflow-eventsourced-emit.js";
 
 // ---------------------------------------------------------------------------
-// In-process event dispatch for Phoenix LiveView / Ash (channels.md).
+// In-process event dispatch for Phoenix LiveView (channels.md).
 //
 // Mirrors the Hono (#970) and .NET (#1012) slices: each channel-routed
 // subscription — an `on(e: Event)` reactor or an event-triggered
@@ -30,9 +29,7 @@ import { renderEsWorkflowHandler } from "./vanilla/workflow-eventsourced-emit.js
 // the handler routes the event to a saga-instance row keyed by that field
 // (load-or-allocate for `create`, route-or-drop+log for `on`).  The row is
 // a plain `Ecto.Schema` over the saga table the shared `MigrationsIR`
-// already derives — read/written through the app `Repo` (an
-// `AshPostgres.Repo`, itself an `Ecto.Repo`), keeping the saga path off the
-// Ash action surface.
+// already derives — read/written through the app `Ecto.Repo`.
 //
 // Emitted files (only when `ctx.eventSubscriptions` is non-empty — a
 // channel-less context emits none of this, byte-identical):
@@ -138,7 +135,7 @@ export function emitDispatch(
   appModule: string,
   out: Map<string, string>,
   sys?: SystemIR,
-  foundation: "ash" | "vanilla" = "ash",
+  _foundation: "vanilla" = "vanilla",
 ): void {
   if ((ctx.eventSubscriptions ?? []).length === 0) return;
   const ctxSnake = snake(ctx.name);
@@ -168,12 +165,10 @@ export function emitDispatch(
   for (const sub of subs) {
     const verb = sub.trigger === "on" ? "on" : "start";
     // An event-sourced workflow's handler folds the stream on load and appends
-    // its own emitted events (the saga analogue of the ES aggregate); vanilla
-    // only (the gate keeps ES workflows off the Ash foundation).
-    const content =
-      foundation === "vanilla" && sub.workflow.eventSourced
-        ? renderEsWorkflowHandler(contextModule, sub)
-        : renderHandler(appModule, contextModule, ctx, sub, sys, foundation);
+    // its own emitted events (the saga analogue of the ES aggregate).
+    const content = sub.workflow.eventSourced
+      ? renderEsWorkflowHandler(contextModule, sub)
+      : renderHandler(appModule, contextModule, ctx, sub, sys);
     out.set(
       `lib/${appName}/${ctxSnake}/workflows/${snake(sub.workflow.name)}/${verb}_${snake(sub.event)}.ex`,
       content,
@@ -356,7 +351,6 @@ function renderHandler(
   ctx: EnrichedBoundedContextIR,
   sub: Subscription,
   sys?: SystemIR,
-  foundation: "ash" | "vanilla" = "ash",
 ): string {
   const wf = sub.workflow;
   const persisted = !!wf.correlationField;
@@ -371,7 +365,7 @@ function renderHandler(
 
   // Body statements → ordered Elixir lines (0-indented), woven into a
   // `with`-chain plus the re-entrant dispatches the do-branch runs.
-  const body = renderBody(sub.statements, ctx, renderCtx, contextModule, foundation);
+  const body = renderBody(sub.statements, ctx, renderCtx, contextModule);
 
   // Saga routing wrapper, indented to the `def handle` body (4 spaces).
   const inner = persisted
@@ -513,11 +507,9 @@ function renderBody(
   ctx: EnrichedBoundedContextIR,
   renderCtx: RenderCtx,
   contextModule: string,
-  foundation: "ash" | "vanilla" = "ash",
 ): string[] {
   const lines: BodyLine[] = [];
-  for (const st of statements)
-    lines.push(...renderStmt(st, ctx, renderCtx, contextModule, foundation));
+  for (const st of statements) lines.push(...renderStmt(st, ctx, renderCtx, contextModule));
 
   const guards = lines.filter((l) => l.kind === "guard");
   // `with` clauses + `=` matches compose the chain, in source order.
@@ -558,10 +550,9 @@ function renderBody(
 
 function renderStmt(
   st: WorkflowStmtIR,
-  ctx: EnrichedBoundedContextIR,
+  _ctx: EnrichedBoundedContextIR,
   renderCtx: RenderCtx,
   contextModule: string,
-  foundation: "ash" | "vanilla" = "ash",
 ): BodyLine[] {
   switch (st.kind) {
     case "factory-let": {
@@ -595,28 +586,13 @@ function renderStmt(
       ];
     }
     case "op-call": {
-      const op = ctx.aggregates
-        .find((a: AggregateIR) => a.name === st.aggName)
-        ?.operations.find((o) => o.name === st.op);
-      // Vanilla's context facade emits ops as arity-2 `<op>_<agg>(record, params)`
+      // The context facade emits ops as arity-2 `<op>_<agg>(record, params)`
       // regardless of param count — mirror `vanilla/workflow-execution-emit.ts`
-      // (key shape `arg<i>:` for positional args, `%{}` for none).  Ash's
-      // code-interface generates an arity-1 form when the action has no
-      // args, so the no-arg branch stays on the bare `(target)` call.
+      // (key shape `arg<i>:` for positional args, `%{}` for none).
       const action = `${snake(st.op)}_${snake(st.aggName)}`;
       const target = snake(st.target);
-      let call: string;
-      if (foundation === "vanilla") {
-        const fields = st.args.map((arg, i) => `arg${i}: ${renderExpr(arg, renderCtx)}`).join(", ");
-        call = `${contextModule}.${action}(${target}, %{${fields}})`;
-      } else {
-        const argEntries = (op?.params ?? []).map(
-          (p, i) => `${snake(p.name)}: ${renderExpr(st.args[i]!, renderCtx)}`,
-        );
-        call = argEntries.length
-          ? `${contextModule}.${action}(${target}, %{${argEntries.join(", ")}})`
-          : `${contextModule}.${action}(${target})`;
-      }
+      const fields = st.args.map((arg, i) => `arg${i}: ${renderExpr(arg, renderCtx)}`).join(", ");
+      const call = `${contextModule}.${action}(${target}, %{${fields}})`;
       return [{ kind: "with-clause", text: `{:ok, _} <- ${call}` }];
     }
     case "emit": {
@@ -637,7 +613,7 @@ function renderStmt(
     }
     case "assign": {
       // `field := value` — own-state mutation.  Saga state is a plain Ecto
-      // schema (no Ash resource), so persist the write directly: rebind `state`
+      // schema, so persist the write directly: rebind `state`
       // to the updated struct via an `Ecto.Changeset.change/2` + `Repo.update!`.
       // Runs in the do-branch (`dispatch` kind) after any `with`-chain succeeds;
       // the row already exists (allocated on `create`, loaded on `on`).  `Repo`

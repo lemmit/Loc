@@ -15,7 +15,9 @@
 > projections over running sagas the way they already do over aggregates,
 > reusing the `view` pipeline on top of that read model.
 
-> **[2026-06-20 status audit]** Also ships on Python (`python/views-builder.ts`), Java, and elixir-vanilla now — not just Hono/.NET/React. Only the Phoenix-Ash OpenAPI surface still defers (`openapi-emit.ts`).
+> **[2026-06-20 status audit]** Also ships on Python (`python/views-builder.ts`), Java, and elixir-vanilla now — not just Hono/.NET/React. Only the Phoenix OpenAPI surface still defers (`openapi-emit.ts`).
+
+> **(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain Ecto/Phoenix only; `foundation: ash` is now a validation error.)** The "Deferred" Ash-compatibility discussion below is moot — `platform: elixir` is vanilla Ecto only, so the plain-`Ecto.Schema` saga state and the Ecto-`where` view read it describes are simply the path, not a Promote-to-Ash-resource alternative.
 
 ## Problem
 
@@ -120,7 +122,7 @@ it does.
    read the saga-state table/DbSet/`Ecto.Schema` (the same handles the
    instance endpoints from #1035 already read) with the view's filter
    lowered to the backend's predicate, instead of the aggregate
-   repository. The Postgres/Drizzle/EF/Ash filter lowering is unchanged —
+   repository. The Postgres/Drizzle/EF/Ecto filter lowering is unchanged —
    it already turns `ViewIR.filter` into a `where` clause.
 
 5. **Scaffold + React.** No change. `scaffoldViewList` and the `Views.`

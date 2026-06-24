@@ -474,15 +474,6 @@ system DevPlatform {
         auth: required
     }
 
-    deployable phoenixApi {
-        platform: elixir { foundation: ash }
-        contexts: [Catalog, Builds, People]
-        dataSources: [catalogState, buildsState, peopleState]
-        serves: ProjectsApi, DeliveryApi, AccountsApi
-        port: 4000
-        auth: required
-    }
-
     deployable pythonApi {
         platform: python
         contexts: [Catalog, Builds, People]
@@ -599,7 +590,7 @@ system DevPlatform {
     }
 
     // malformed email: `check email.matches("^[^@]+@[^@]+\\.[^@]+$")`.
-    test e2e "registering an engineer with a malformed email is rejected" against phoenixApi {
+    test e2e "registering an engineer with a malformed email is rejected" against honoApi {
         expect(api.engineers.create({ handle: "grace", email: "not-an-email", level: 5, onCall: false })).toThrow(422)
     }
 }

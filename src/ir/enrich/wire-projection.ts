@@ -135,8 +135,8 @@ export function omittableCreateInputs(agg: AggregateIR): ReadonlySet<string> {
  *   - `false`    — a bare `bool`'s implicit default;
  *   - `null`     — an optional-typed field with no default.
  * Backends apply this when the client omits the field (factory `?? …`,
- * Ash `default:`), so a defaulted field's value is never lost just because
- * it became optional input. */
+ * Ecto changeset default), so a defaulted field's value is never lost just
+ * because it became optional input. */
 export type CreateOmissionValue =
   | { readonly kind: "default"; readonly expr: ExprIR }
   | { readonly kind: "false" }
@@ -156,7 +156,7 @@ export function createOmissionValue(f: FieldIR): CreateOmissionValue {
  *  the field has no `= default` or is a bare `bool` (bool optionality is
  *  owned by each backend's existing bool rule, not this one).  Backends
  *  render the result in their native default slot — Hono zod `.default(…)`,
- *  .NET record `= …`, Phoenix Ash `default: …` — so a defaulted field is
+ *  .NET record `= …`, Phoenix changeset default — so a defaulted field is
  *  optional input uniformly. */
 export function wireCreateDefault(f: FieldIR): ExprIR | undefined {
   if (f.default === undefined) return undefined;

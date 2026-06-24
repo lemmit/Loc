@@ -116,8 +116,14 @@ describe.each([
   });
 });
 
-describe("style threading — phoenix", () => {
-  it("dispatches config DI through the THREADED style adapter", async () => {
+describe("style threading — phoenix (vanilla)", () => {
+  // The Elixir backend has a single foundation (vanilla — plain Phoenix+Ecto).
+  // Its per-aggregate emit lives in the `vanilla/` subtree and does NOT consume
+  // a threaded style adapter (see src/generator/elixir/adapters/layered-style.ts):
+  // the `layered` style's `emitDi` returns nothing, so config/config.exs never
+  // carries a DI block.  We therefore pin the ABSENCE of any sentinel splice —
+  // a threaded sentinel style does not leak into the emitted config.
+  it("does not splice a threaded style's DI into config (vanilla emit is self-contained)", async () => {
     const { contexts, deployable, sys } = await emitInputs("elixir");
     const files = (elixirPlatform as PlatformSurface).emitProject({
       contexts,
@@ -126,11 +132,10 @@ describe("style threading — phoenix", () => {
       migrations: [],
       styleAdapter: sentinelStyle(),
     });
-    // Phoenix splices `style.emitDi(ctx)` into config/config.exs.
-    expect(files.get("config/config.exs")).toContain("# sentinel-di-line");
+    expect(files.get("config/config.exs")).not.toContain("# sentinel-di-line");
   });
 
-  it("falls back to ashStyleAdapter when no adapter is threaded", async () => {
+  it("emits config/config.exs with no DI block when no adapter is threaded", async () => {
     const { contexts, deployable, sys } = await emitInputs("elixir");
     const files = (elixirPlatform as PlatformSurface).emitProject({
       contexts,
@@ -138,6 +143,7 @@ describe("style threading — phoenix", () => {
       sys,
       migrations: [],
     });
+    expect(files.get("config/config.exs")).toBeDefined();
     expect(files.get("config/config.exs")).not.toContain("# sentinel-di-line");
   });
 });
@@ -152,7 +158,7 @@ describe("default selection keys match the sibling defaults", () => {
     expect(defs?.style).toBe("cqrs");
     expect(defs?.layout).toBe("byLayer");
   });
-  it("phoenix application default key is `ash`", () => {
-    expect(elixirPlatform.adapterDefaults?.().style).toBe("ash");
+  it("phoenix application default key is `layered` (vanilla is the only foundation)", () => {
+    expect(elixirPlatform.adapterDefaults?.().style).toBe("layered");
   });
 });

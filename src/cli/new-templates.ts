@@ -14,7 +14,7 @@ export type DesignPack =
   | "shadcn"
   | "mui"
   | "chakra"
-  | "ashPhoenix"
+  | "coreComponents"
   | "shadcnSvelte"
   | "flowbite"
   | "vuetify"
@@ -37,7 +37,7 @@ export const DESIGN_PACKS: readonly DesignPack[] = [
   ...REACT_DESIGN_PACKS,
   ...SVELTE_DESIGN_PACKS,
   ...VUE_DESIGN_PACKS,
-  "ashPhoenix",
+  "coreComponents",
 ];
 
 /** Backend listen port per platform (mirrors `defaultPort` in
@@ -69,7 +69,7 @@ export function toSystemName(name: string): string {
 /** True when the (platform, design) pair is the Phoenix LiveView fullstack
  *  shape — one deployable that both serves the API and mounts a HEEx UI. */
 function isLiveView(platform: StarterPlatform, design: DesignPack): boolean {
-  return platform === "elixir" && design === "ashPhoenix";
+  return platform === "elixir" && design === "coreComponents";
 }
 
 interface DomainBlock {
@@ -138,7 +138,7 @@ function renderDeployment(platform: StarterPlatform, design: DesignPack, context
     dataSources: [appState],
     ui: WebApp,
     port: ${BACKEND_PORT.elixir},
-    design: ashPhoenix
+    design: coreComponents
   }`;
   }
 

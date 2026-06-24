@@ -6,11 +6,20 @@
 > `proposals/platform-realization-axes.md`. Where a naming or scope question
 > arises, this plan defers to that decision rather than re-litigating it.
 >
-> Motivation: a review of the three backend targets (dotnet, node/hono, elixir)
-> found the axis *model* is pinned and partly implemented, but the
-> implementations diverge — most sharply, `foundation: vanilla` on elixir
-> **bypasses the adapter machinery entirely**, so Ecto is hardwired while the Ash
-> data layer is a first-class `PersistenceAdapter`. This plan catalogs every gap
+> **Update (2026):** the **Ash foundation has been removed.** `platform: elixir`
+> now generates Phoenix LiveView on **plain Ecto/Phoenix**; on the `foundation:`
+> axis, `vanilla` is the default and only valid value and `foundation: ash` is a
+> validation error (the knob stays). Consequently the elixir `foundation:` axis is
+> now greenfield size-1 (`vanilla`), the `ash`/`ashPostgres`/`ashSqlite` data
+> layers are gone, and `ecto` is the only elixir persistence value. The
+> ash-vs-vanilla menu/ruling detail below is retained as the record of how the
+> elixir axes were structured **before** Ash was removed.
+>
+> Motivation (historical): a review of the three backend targets (dotnet,
+> node/hono, elixir) found the axis *model* is pinned and partly implemented, but
+> the implementations diverged — most sharply, `foundation: vanilla` on elixir
+> **bypassed the adapter machinery entirely**, so Ecto was hardwired while the Ash
+> data layer was a first-class `PersistenceAdapter`. This plan catalogs every gap
 > and sequences the convergence.
 
 ## 1. The pinned target (recap, not a proposal)
@@ -54,7 +63,7 @@ Key rulings this plan leans on:
 | **application** | `cqrs` R, `layered` S | `layered` R, `cqrs` S | `ash` R · `layered` R | ✅ resolved (#1421): the plain-Phoenix style is now the real `layered` adapter (DSL `serviceLayer`), on-axis and spec-aligned — `vanilla` is foundation-only |
 | **directoryLayout** | `byLayer` R, `byFeature` R | `byLayer` R, `byFeature` R | `byFeature` R | elixir `byLayer` absent (idiom — see §4) |
 | **transport** | `minimalApi` **1** | `hono` **1** | `phoenix` **1** | **all** greenfield size-1; spec wants `minimalApi`·`controllers` etc. |
-| **foundation** | `vanilla` 1 (`abp` future) | `vanilla` 1 (`nestjs` future) | `ash`*(def)* · `vanilla` | elixir vanilla realized via a **bypass branch**, not the axis |
+| **foundation** | `vanilla` 1 (`abp` future) | `vanilla` 1 (`nestjs` future) | `vanilla` 1 (Ash removed; `ash` now rejected) | elixir vanilla realized via a **bypass branch**, not the axis |
 | **runtime** | `transactional` 1 | `transactional` 1 | `transactional` 1 | `orleans`/`akka`/`genserver` unrealized |
 
 ### The headline divergence

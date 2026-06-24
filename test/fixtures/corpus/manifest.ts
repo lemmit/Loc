@@ -14,7 +14,7 @@
 
 import { type Backend, BACKENDS } from "./backends.js";
 
-/** All six backends — the common case for platform-agnostic domain features. */
+/** All backends — the common case for platform-agnostic domain features. */
 const ALL: readonly Backend[] = BACKENDS;
 
 export interface CorpusFeature {

@@ -3,7 +3,7 @@ import type { ExprIR } from "../types/loom-ir.js";
 // ---------------------------------------------------------------------------
 // Pure ExprIR query shared by the backends that lower a
 // `this.<refColl>.contains(x)` membership predicate to a join-table
-// subquery (Hono/Drizzle, .NET/EF, Phoenix/Ash).
+// subquery (Hono/Drizzle, .NET/EF, Phoenix/Ecto).
 //
 // Returns the field name behind a `this`-rooted single member access
 // (the reference-collection field whose AssociationIR the caller then

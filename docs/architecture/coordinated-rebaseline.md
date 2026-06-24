@@ -31,7 +31,7 @@ re-baseline moments. The rule:
 | **M2** | exception-less A1 + A2 + A3 | `option`/`error` fields; ProblemDetails routes |
 | **M3** | exception-less A4 (`Repo.getById` → `T or NotFound`) | every repository + route touching `getById` |
 | **Lifecycle-1** | lifecycle grammar + `OperationIR.kind` | route slugs, form contracts (create/operation/destroy) |
-| **Inheritance** | abstract aggregates + `inheritanceUsing(…)` | repository SQL / EF / Ash table layout (TPH/TPC) |
+| **Inheritance** | abstract aggregates + `inheritanceUsing(…)` | repository SQL / EF / Ecto table layout (TPH/TPC) |
 
 M1/M2 bundle multiple sub-phases precisely so there is **one** drift
 event, not one per sub-phase (see global-plan "Coordinated single-PR

@@ -8,7 +8,7 @@
 // to every SELECT (the HasQueryFilter analog).  `@SQLRestriction` is unbypassable
 // by design (Hibernate javadoc: "always applied and cannot be disabled"), so a
 // capability some read `ignoring`s cannot stay there.  The idiomatic resolution
-// (same shape as the elixir-Ash base_filter triage) is to TRIAGE each capability
+// is to TRIAGE each capability
 // per aggregate at codegen:
 //
 //   - A capability NEVER bypassed on an aggregate stays in `@SQLRestriction`

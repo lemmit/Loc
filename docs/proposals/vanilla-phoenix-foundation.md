@@ -1,5 +1,7 @@
 # Vanilla Phoenix foundation — `foundation: vanilla` for `platform: phoenix`
 
+> **(Superseded 2026: the Ash foundation was removed.)** This proposal landed and then went further than its original "second adapter" framing: `platform: elixir` now generates Phoenix LiveView on plain Ecto/Phoenix **only**. `foundation:` resolves to `vanilla` — the default and **only** valid value — and `foundation: ash` is now a **validation error**. Everything below that describes Ash as the default, an unchanged path, a non-deprecated co-equal adapter, or a per-deployable choice is historical design record: the Ash foundation no longer ships at all. Read the vanilla emitter description as the description of the sole elixir foundation.
+
 > Status: **PARTIAL — state-based emitter SHIPPED** (slices 0–6,
 > #1046–#1051 + #1053/#1054/#1059; TDD plan in
 > [`../plans/vanilla-foundation-tdd-plan.md`](../plans/vanilla-foundation-tdd-plan.md)).

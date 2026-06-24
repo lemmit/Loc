@@ -11,9 +11,11 @@
 The review found bugs that every build/compile gate is structurally blind to:
 
 - **The Phoenix `ViewsController` raised `CaseClauseError` on every view
-  request** (both ash *and* vanilla foundations): the controller pattern-matched
+  request** (the elixir backend; at the time, both the ash and vanilla
+  foundations — Ash foundation removed since, vanilla Ecto/Phoenix is the
+  only foundation now): the controller pattern-matched
   `{:ok, records}` against a `run/1` that returns a bare list. It compiles
-  cleanly — only a *request* reveals it. There was **no test** over the ash
+  cleanly — only a *request* reveals it. There was **no test** over the
   view/controller path at all. (Fixed; pinned by
   `test/generator/elixir/view-controller-shape.test.ts`.)
 - **The generated .NET test project doesn't compile** (`p.Rename("")` — wrong
@@ -62,7 +64,7 @@ Scope to close the specific gaps found:
 
 | Gap | Tier-1 action |
 |---|---|
-| Phoenix view `CaseClauseError` | hit `GET /api/views/<v>` and assert 200 + body for both foundations |
+| Phoenix view `CaseClauseError` | hit `GET /api/views/<v>` and assert 200 + body (vanilla Ecto/Phoenix — the only elixir foundation; Ash removed) |
 | .NET generated tests don't compile/run | PARTIAL: the showcase dotnet case asserts the `Tests/` csproj is *emitted*, and the generated test code's compile-readiness (currentUser actor + no void→var) is guarded by a fast generator test. Actually `dotnet build`ing it in CI is blocked: the runner's NuGet feed lacks the test-only packages (AwesomeAssertions/xunit) and build-time restore of them isn't reliable. TODO: once the CI NuGet feed carries the test packages, `dotnet build` then `dotnet test` the Tests project. |
 | Generated test suites never executed | run the emitted vitest/JUnit/pytest/ExUnit suites where the toolchain is present |
 | React/Vue runtime behavior | extend the Playwright smoke (already emitted) to submit a form with a 422 and assert per-field error display; assert realtime files emitted |

@@ -12,7 +12,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import { renderCsType } from "../../src/generator/dotnet/render-expr.js";
-import { renderAshType } from "../../src/generator/elixir/render-expr.js";
+import { mapTypeToEcto } from "../../src/generator/elixir/vanilla/schema-emit.js";
 import { renderTsType } from "../../src/generator/typescript/render-expr.js";
 import type { BoundedContextIR } from "../../src/ir/types/loom-ir.js";
 import { jsonPropertyForType } from "../../src/system/wire-spec.js";
@@ -38,8 +38,8 @@ describe("json emission — type mappings per backend", () => {
     expect(renderCsType({ kind: "primitive", name: "json" })).toBe("System.Text.Json.JsonElement");
   });
 
-  it("Phoenix renderAshType('json') → ':map'", () => {
-    expect(renderAshType({ kind: "primitive", name: "json" }, "Webhooks")).toBe(":map");
+  it("Phoenix mapTypeToEcto('json') → ':map'", () => {
+    expect(mapTypeToEcto({ kind: "primitive", name: "json" }, new Map())).toBe(":map");
   });
 });
 

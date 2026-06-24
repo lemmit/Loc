@@ -1,5 +1,10 @@
 # Gated Features Inventory
 
+> **Superseded (2026).** The Ash foundation has since been removed entirely —
+> `platform: elixir` now generates plain Ecto/Phoenix only, `foundation: ash` is
+> a validation error, and `vanilla` is the default and only valid value. The
+> `ash`/`ashPostgres` foundation rows below are historical.
+>
 > **Superseded (2026-06-21).** This snapshot predates Java/Python being broken
 > out as backends and the Phoenix `vanilla` foundation gaining event-sourcing /
 > document / provenance support. For the current five-backend picture see

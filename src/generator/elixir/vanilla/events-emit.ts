@@ -2,7 +2,7 @@
 // Vanilla orchestrator hook for event struct modules.
 //
 // Per-context fan-out over `ctx.events` calling the shared sibling
-// `renderEventModule` (sibling, not Ash-owned — see ../events-emit.ts).
+// `renderEventModule` (see ../events-emit.ts).
 // Files: `lib/<app>/<ctx>/events/<event>.ex`.
 //
 // Emitted unconditionally — even a context with no `emit` in any
@@ -27,7 +27,7 @@ export function emitVanillaEventModules(
   for (const ev of ctx.events) {
     out.set(
       `lib/${appSnake}/${ctxSnake}/events/${snake(ev.name)}.ex`,
-      renderEventModule(ev, contextModule, typesModule, "vanilla"),
+      renderEventModule(ev, contextModule, typesModule),
     );
   }
 }

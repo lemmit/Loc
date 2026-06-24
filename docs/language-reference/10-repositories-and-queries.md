@@ -72,15 +72,12 @@ List<Product> findByPriceGreaterThanEqual(BigDecimal floor);
 ```
 == elixir
 ```elixir
-# lib/.../catalog/product.ex — Ash read actions
-read :by_sku do
-  argument :s, :string
-  filter expr(record.sku == ^arg(:s))
-  get? true
+# lib/.../catalog.ex — Ecto query functions
+def by_sku(s) do
+  Repo.one(from p in Product, where: p.sku == ^s)
 end
-read :pricey do
-  argument :floor, :string
-  filter expr(record.price >= ^arg(:floor))
+def pricey(floor) do
+  Repo.all(from p in Product, where: p.price >= ^floor)
 end
 ```
 ::: end
@@ -219,11 +216,9 @@ public static Specification<Order> HighValue(BigDecimal min) {
 ```
 == elixir
 ```elixir
-# lib/.../catalog/order.ex — a :boolean Ash calculation the read filters by
-calculations do
-  calculate :high_value, :boolean, expr(record.total >= ^arg(:min)) do
-    argument :min, :string
-  end
+# lib/.../catalog.ex — a reusable Ecto dynamic the query filters by
+def high_value(min) do
+  dynamic([o], o.total >= ^min)
 end
 ```
 == python

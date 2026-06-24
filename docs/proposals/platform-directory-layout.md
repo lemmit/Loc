@@ -2,6 +2,15 @@
 
 > Status: **Proposal**. Nothing in this document is implemented yet.
 
+> **(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain
+> Ecto/Phoenix only; `foundation: ash` is now a validation error.)** This proposal
+> uses Ash 3→4 / `style: ash` as a running *example* of a framework-version split.
+> That example is now moot — there is no Ash style/foundation to version. The
+> mechanism it illustrates (per-`<family>/v<N>/` homes for major-version-coupled
+> emitters) still stands for the surviving frameworks (hono v4→v5, net8→net10,
+> phoenix major bumps); read every Ash mention below as illustrative design
+> history, not a live target.
+
 > **Pinned decisions affecting this proposal.**
 > [D-BACKEND-PKG](../decisions.md#d-backend-pkg--per-version-backend-packages-are-canonical)
 > pins the packaging-split end-state

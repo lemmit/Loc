@@ -2,8 +2,7 @@
 // Vanilla foundation — `view` emission (vanilla-foundation-tdd-plan.md slice 5;
 // D-VANILLA-PHOENIX-FOUNDATION).
 //
-// On `foundation: vanilla` a `view` is a plain Ecto query — no `Ash.Query`,
-// no `Ash.read!`.  Two forms, mirroring the ash path's `view-emit.ts`:
+// A `view` is a plain Ecto query.  Two forms:
 //
 //   - Shorthand (`view X = Agg where filter`): emit
 //       from(record in <Agg>, where: <filter>) |> Repo.all()
@@ -20,8 +19,8 @@
 // `record.status == "confirmed"` (string column), not `:confirmed` atoms.
 //
 // A single project-wide `<App>Web.ViewsController` exposes
-// `GET /api/views/<snake>` per view, matching the ash path's route shape;
-// the routes are spliced into the `/api` scope by `shell-emit.ts`.
+// `GET /api/views/<snake>` per view; the routes are spliced into the `/api`
+// scope by `shell-emit.ts`.
 // ---------------------------------------------------------------------------
 
 import type {

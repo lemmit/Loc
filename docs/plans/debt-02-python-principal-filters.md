@@ -3,7 +3,7 @@
 **Created:** 2026-06-22 · **Status:** in progress (claim PR open)
 
 The last-backend parity gap on **principal-referencing** (`currentUser`, tenancy)
-capability filters: node / dotnet / elixir(ash+vanilla) / java all wire a
+capability filters: node / dotnet / elixir / java all wire a
 `filter this.tenantId == currentUser.tenantId` on a relational aggregate; **python
 emits only the non-principal relational case** and the IR validator gates the
 principal case off python.

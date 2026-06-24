@@ -4,7 +4,7 @@
 // vanilla-foundation-tdd-plan.md.
 //
 // Plain Ecto.Repo queries returning `{:ok, _} | {:error, _}` results.
-// No Ash code interface.  Slice 8 (custom finds) emits one fn per
+// Slice 8 (custom finds) emits one fn per
 // repository `find` declaration alongside the CRUD seam — a
 // parameterised Ecto query, return shape matched to the find's
 // declared type (`Customer?` → `Repo.one(query)`; `Customer[]` →
@@ -67,8 +67,7 @@ export function emitVanillaRepositories(
 
 /** Custom finds the repository module emits — the enrichment-synthesized
  *  `all` find is dropped (the existing `list/0` CRUD seam already covers
- *  it; emitting `all/0` would collide with the defdelegate).  Same skip
- *  policy as the Ash path (`repository-emit.ts:buildFindActions`). */
+ *  it; emitting `all/0` would collide with the defdelegate). */
 export function customFindsOf(repo: RepositoryIR | undefined): FindIR[] {
   return (repo?.finds ?? []).filter((f) => f.name !== "all");
 }
@@ -111,8 +110,8 @@ function renderRepository(
   // seam (the analogue of the read-side `current_user \\ nil` for tenancy
   // filters); a non-principal stamp (`createdAt := now()`) needs no actor.  On
   // insert BOTH onCreate AND onUpdate stamps apply (so NOT-NULL `updated_*`
-  // audit columns are filled on the initial insert, mirroring the Ash
-  // `on: [:create, :update]`); on update only onUpdate stamps apply.
+  // audit columns are filled on the initial insert); on update only onUpdate
+  // stamps apply.
   const hasStamps = aggregateHasStamps(agg);
   const stampPrincipal = stampUsesPrincipal(agg);
   const stampActorParam = stampPrincipal ? ", current_user \\\\ nil" : "";
@@ -237,7 +236,7 @@ defmodule ${repoMod} do
 
 /** One custom-find function — a parameterised Ecto query under the
  *  `record` Ecto binding, returning `{:ok, _}` shaped per the find's
- *  declared return type.  Mirrors the vanilla-retrieval shape from
+ *  declared return type.  Shares the retrieval shape from
  *  `retrieval-emit.ts` (filterArgs + foundation: "vanilla" → `^pin`
  *  syntax, enum strings).  Convention-finds without a `where` clause
  *  (params match aggregate property names; e.g. `byCustomer(customerId)`)
@@ -283,8 +282,7 @@ function renderFindFn(
   const specArgsEarly = [...argNames.map(() => "term()"), ...(principal ? ["map() | nil"] : [])];
 
   // `this.<refColl>.contains(arg)` over a reference collection → a join-table
-  // query against the `many_to_many` relationship (the vanilla analogue of the
-  // Ash `exists(<rel>, id == ^arg)` filter).  The orphan `Enum.member?` shape the
+  // query against the `many_to_many` relationship.  The orphan `Enum.member?` shape the
   // shared renderer produces would query a phantom array column — this joins the
   // real join table instead.  The argument is the find's single id parameter.
   const containsField = containsRefCollField(f.filter, agg);

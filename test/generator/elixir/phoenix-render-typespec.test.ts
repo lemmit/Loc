@@ -43,15 +43,11 @@ describe("renderTypespec — reference types", () => {
   it("maps id to String.t() (UUID string on the struct)", () => {
     expect(renderTypespec({ kind: "id", targetName: "Order" } as TypeIR, CTX)).toBe("String.t()");
   });
-  it("maps enum to <Ctx>.<Name>.t()", () => {
-    expect(renderTypespec({ kind: "enum", name: "OrderStatus" } as TypeIR, CTX)).toBe(
-      "MyApp.Sales.OrderStatus.t()",
-    );
+  it("maps enum to String.t() (vanilla stores the value as its string)", () => {
+    expect(renderTypespec({ kind: "enum", name: "OrderStatus" } as TypeIR, CTX)).toBe("String.t()");
   });
-  it("maps valueobject to <Ctx>.<Name>.t()", () => {
-    expect(renderTypespec({ kind: "valueobject", name: "Money" } as TypeIR, CTX)).toBe(
-      "MyApp.Sales.Money.t()",
-    );
+  it("maps valueobject to map() (vanilla stores value objects as plain JSON maps)", () => {
+    expect(renderTypespec({ kind: "valueobject", name: "Money" } as TypeIR, CTX)).toBe("map()");
   });
   it("maps entity to <Ctx>.<Name>.t()", () => {
     expect(renderTypespec({ kind: "entity", name: "OrderLine" } as TypeIR, CTX)).toBe(
@@ -77,7 +73,7 @@ describe("renderTypespec — combinators", () => {
         { kind: "array", element: { kind: "valueobject", name: "LineItem" } } as TypeIR,
         CTX,
       ),
-    ).toBe("[MyApp.Sales.LineItem.t()]");
+    ).toBe("[map()]");
   });
   it("composes optional array correctly", () => {
     expect(

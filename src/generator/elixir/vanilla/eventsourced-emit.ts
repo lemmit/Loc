@@ -3,8 +3,8 @@
 // plain Phoenix + Ecto foundation (D-VANILLA-ES-HOME).  Slice P4.1/P4.2 of
 // docs/plans/elixir-eventsourcing-vanilla-plan.md.
 //
-// Ash cannot host pure ES, so there is no Ash sibling to port — this mirrors
-// the cross-backend ES contract the Python/node/dotnet/java backends emit:
+// This mirrors the cross-backend ES contract the Python/node/dotnet/java
+// backends emit:
 //
 //   * the aggregate `<Agg>` is a plain in-memory struct (no state table —
 //     its truth is the append-only event stream), so it serialises to exactly

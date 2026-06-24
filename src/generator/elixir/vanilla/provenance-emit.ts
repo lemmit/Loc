@@ -35,9 +35,8 @@ import { resolveDataSourceConfig } from "../../../ir/util/resolve-datasource.js"
 import { plural, snake } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 
-/** The provenanced fields declared on an aggregate (root fields only — the
- *  vanilla foundation captures named-operation write sites, which target root
- *  columns). */
+/** The provenanced fields declared on an aggregate (root fields only —
+ *  named-operation write sites, which target root columns, are captured). */
 export function provenancedFieldsOf(agg: AggregateIR): FieldIR[] {
   return agg.fields.filter((f) => f.provenanced);
 }

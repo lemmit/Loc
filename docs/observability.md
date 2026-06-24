@@ -241,7 +241,7 @@ arrives on stdout with the expected envelope at runtime.
 For domain-injected trace events (gated by `--trace`), set
 `domain: true` in the catalog entry — the renderer routes through the
 domain-log seam (`DomainLog.Current` in .NET, `Logger` directly in
-Phoenix Ash where `:telemetry` carries it).
+Phoenix where `:telemetry` carries it).
 
 ## Further reading
 

@@ -8,7 +8,7 @@ not edit them for demo or marketing reasons.
 
 | File | Primary consumers |
 |---|---|
-| `acme.ddd` | generator/system/IR tests, `elixir-ash-build.yml`, `generated-react-build.yml`, parsing, capture-baseline |
+| `acme.ddd` | generator/system/IR tests, `elixir-vanilla-build.yml`, `generated-react-build.yml`, parsing, capture-baseline |
 | `acme-order-explicit.ddd` | `order-explicit-equivalence`, `scaffold-expander` |
 | `acme.md` | `README.md` (prose companion to `acme.ddd`) |
 | `sales.ddd` | `generator-ts` tests, `smoke-runtime.mjs`, npm mirror |

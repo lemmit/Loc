@@ -16,6 +16,13 @@
 > across backends. Folding it into the carrier is therefore a parity
 > **fix**, not a parity risk.
 >
+> **(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain
+> Ecto/Phoenix only; `foundation: ash` is now a validation error.)** Mentions of
+> "ash-Elixir" below as a non-capturing backend are stale — elixir is now
+> vanilla-only, and elixir-vanilla already emits the real lineage runtime. Read
+> those references as historical; the only remaining null-lineage targets are
+> Python and Java.
+>
 > **Single biggest risk:** the read-site unwrap (§6). A provenanced
 > field's value is currently *the field itself*; behind `.value` it
 > needs unwrapping at every read. The fix is architecturally clean (one

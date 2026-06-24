@@ -53,13 +53,12 @@ def _assert_invariants(self) -> None:
 ```
 == elixir
 ```elixir
-# Ash resource — single-field predicates reduce to a built-in validator
-validations do
-  validate compare(:tax_rate, greater_than_or_equal_to: 0),
-    message: "Invariant violated: taxRate >= 0"
-end
+# Ecto changeset — single-field predicates reduce to a built-in validator
+changeset
+|> validate_number(:tax_rate, greater_than_or_equal_to: 0,
+     message: "Invariant violated: taxRate >= 0")
 ```
-The Ash backend keeps invariants in the resource's `validations do … end` block (changeset layer), not in a hand-written assert method. A predicate the classifier can reduce to a single-field comparison becomes a built-in (`compare`); everything else falls through to the closure form shown under [`when` guards](#when--a-conditional-invariant).
+The Elixir backend keeps invariants in the schema's `changeset/2` (changeset layer), not in a hand-written assert method. A predicate the classifier can reduce to a single-field comparison becomes a built-in (`validate_number`); everything else falls through to the closure form shown under [`when` guards](#when--a-conditional-invariant).
 ::: end
 
 ### The wire layer
@@ -96,8 +95,8 @@ if (!(taxRate >= 0)) errors.add(WireValidationException.error("/taxRate", "Invar
 ```
 == elixir
 ```elixir
-# Ash validations run at the changeset layer; there is no separate
-# wire-validation pass — a violated invariant surfaces as Ash.Error.Invalid → 422.
+# Ecto changeset validations run at the changeset layer; there is no separate
+# wire-validation pass — a violated invariant surfaces as an invalid changeset → 422.
 ```
 ::: end
 
@@ -201,16 +200,15 @@ if (self._tax_rate > 0) and not (self._status.length() > 0):
 ```
 == elixir
 ```elixir
-# Ash: a guarded / cross-field invariant falls through to the closure form,
+# Ecto: a guarded / cross-field invariant falls through to the closure form,
 # emitted as the implication `not guard or cond`
-validations do
-  validate fn changeset, _opts ->
-    {:ok, record} = Ash.Changeset.apply_attributes(changeset, force?: true)
-    if not (record.tax_rate > 0) or (String.length(record.status) > 0),
-      do: :ok,
-      else: {:error, "Invariant violated: status.length > 0"}
-  end
-end
+changeset
+|> validate_change(:status, fn _field, _value ->
+  record = apply_changes(changeset)
+  if not (record.tax_rate > 0) or (String.length(record.status) > 0),
+    do: [],
+    else: [status: "Invariant violated: status.length > 0"]
+end)
 ```
 ::: end
 
@@ -277,9 +275,10 @@ def total(self) -> Decimal:
 ```
 == elixir
 ```elixir
-# Ash resource — an Ash calculation; the Jason encoder includes it on the wire
-calculations do
-  calculate :total, :decimal, expr(subtotal_amount + subtotal_amount * tax_rate)
+# Ecto schema — a derived function; the Jason encoder includes it on the wire
+def total(record) do
+  Decimal.add(record.subtotal_amount,
+    Decimal.mult(record.subtotal_amount, record.tax_rate))
 end
 ```
 ::: end
@@ -318,8 +317,7 @@ public override string ToString() => Inspect;
 ```
 == elixir
 ```elixir
-# A user-supplied `inspect` derived becomes a public module function
-# (it cannot be an Ash calculation), e.g.:
+# A user-supplied `inspect` derived becomes a public module function, e.g.:
 @spec inspect(t()) :: String.t()
 def inspect(record) do
   "Order " <> record.status

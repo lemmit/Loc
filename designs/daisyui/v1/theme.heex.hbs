@@ -1,0 +1,36 @@
+<%!-- Auto-generated. Design tokens as CSS custom properties. --%>
+<%!-- Emit this <style> block inside the <head> of root.html.heex or app.css. --%>
+<style>
+  :root {
+    /* Brand colour ramp (10 shades, index 6 is the primary) */
+    {{#each brandShades}}
+    --color-brand-{{@index}}: {{this}};
+    {{/each}}
+    --color-primary: var(--color-brand-6);
+
+    /* Neutral / surface colour ramp */
+    {{#each neutralShades}}
+    --color-neutral-{{@index}}: {{this}};
+    {{/each}}
+
+    /* Typography */
+    --font-family: {{fontFamily}};
+    --font-family-mono: {{fontFamilyMonospace}};
+
+    /* Border radius */
+    --radius-xs: 0.125rem;
+    --radius-sm: 0.25rem;
+    --radius-md: 0.375rem;
+    --radius-lg: 0.5rem;
+    --radius-xl: 0.75rem;
+    --radius: var(--radius-{{radius}});
+  }
+
+  body {
+    font-family: var(--font-family);
+  }
+
+  code, pre, kbd, samp {
+    font-family: var(--font-family-mono);
+  }
+</style>

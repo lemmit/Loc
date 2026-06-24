@@ -14,7 +14,7 @@
 //   3. Optional named args (id/top/size/title/language) flow
 //      through correctly; defaults match the TSX side.
 //
-// What it does NOT pin: byte-identical Mantine-vs-ashPhoenix output
+// What it does NOT pin: byte-identical Mantine-vs-coreComponents output
 // — the two frameworks emit different markup by design (`<section>`
 // is identical, but `<Box pos="sticky">` becomes `<div style="…">`
 // in HEEx because LiveView doesn't have a Mantine-equivalent
@@ -42,7 +42,7 @@ const phoenixSystem = (uiBody: string): string => `
       }
     }
     deployable phoenixApp {
-      platform: elixir, contexts: [C], serves: DemoApi,
+      platform: elixir { foundation: vanilla }, contexts: [C], serves: DemoApi,
       ui: DemoUi, port: 4000
     }
   }

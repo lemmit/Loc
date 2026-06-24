@@ -68,7 +68,7 @@ export function schemaFromModule(
    *  version)` blob).  Defaults to the aggregate-header value;
    *  `buildMigrations` passes a binding-aware resolver so a
    *  per-projection `dataSource shape:` override is honoured (the schema
-   *  stays consistent with the EF/Drizzle/Ash emitters, which resolve
+   *  stays consistent with the EF/Drizzle/Ecto emitters, which resolve
    *  the same way via `effectiveSavingShape`). */
   shapeOf: (agg: EnrichedAggregateIR) => SavingShape = (agg) => effectiveSavingShape(agg),
   /** Per-aggregate Postgres schema — the owning context's schema, from
@@ -302,7 +302,7 @@ function orderTablesByFkDependency(tables: TableShape[]): TableShape[] {
  *  JSONB column (the contained parts serialised inline) and reference
  *  collections fold into a JSONB id-array column.  No part tables, no
  *  join tables.  This is the shape EF owned-types `.ToJson()`, Drizzle
- *  jsonb columns, and Ash embedded resources all map to natively — one
+ *  jsonb columns, and Phoenix embedded schemas all map to natively — one
  *  physical layout shared across every backend. */
 function embeddedTableForAggregate(agg: AggregateIR, ownerModule: string): TableShape {
   const tableName = plural(snake(agg.name));
@@ -333,10 +333,9 @@ function embeddedTableForAggregate(agg: AggregateIR, ownerModule: string): Table
     }
   }
   for (const c of agg.contains) {
-    // Nullable: an empty `embeds_many` on the vanilla (Ecto) foundation inserts
+    // Nullable: an empty `embeds_many` on Ecto inserts
     // NULL (an empty embed is "no change", so it isn't written), which Ecto then
-    // loads back as `[]`.  Ash always writes the attribute default `[]`, so it is
-    // unaffected behaviourally — the column just also tolerates NULL.
+    // loads back as `[]` — so the column must tolerate NULL.
     columns.push({ name: snake(c.name), type: { kind: "json" }, nullable: true });
   }
   return { name: tableName, ownerModule, columns, primaryKey: ["id"], foreignKeys, indexes };

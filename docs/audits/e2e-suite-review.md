@@ -1,5 +1,7 @@
 # E2E Suite Review — what do we *really* test?
 
+> **(Superseded 2026: the Ash foundation was removed — `platform: elixir` is plain Ecto/Phoenix only, `foundation: ash` is now a validation error. The Ash-specific gates below — `generated-phoenix-build` against real Ash 3.x, the `elixir-ash`/`elixir-ash-dialyzer` CI jobs, the Ash-Phoenix obs leg — are historical; the elixir-vanilla gates compile against plain Ecto/Phoenix.)**
+
 *Snapshot audit, 2026-06-20. Scope: everything under `test/e2e/` plus the generated-app build/runtime gates and their CI workflows.*
 
 ## TL;DR

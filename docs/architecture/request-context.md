@@ -166,8 +166,7 @@ backend re-derives a field another backend computes differently — the
 table above is the single source of truth. **The carrier is keyed by
 `(platform × foundation)`, not by platform name** (D-REALIZATION-AXES): a
 `node` deployable realises the context differently under the minimal
-foundation than under `foundation: nest`, exactly as `elixir` does under
-`ash` vs `vanilla`.
+foundation than under `foundation: nest`.
 
 Two **realization classes** cover every target:
 
@@ -191,8 +190,7 @@ Two **realization classes** cover every target:
 | `node` (minimal / Hono) | ambient | `AsyncLocalStorage<RequestContext>` | `als.run(childFrame, …)` around a tagged boundary |
 | `node` + `foundation: nest` | ambient | request-scoped DI provider (`nestjs-cls`, an `AsyncLocalStorage` wrapper) | interceptor/guard at the boundary; the `@nestjs/cqrs` bus is the frame-open seam for command/query handlers (the Mediator-behaviour analog) |
 | `.NET` | ambient | **`AsyncLocal<RequestContext>`** — a dedicated slot the backbone owns (the direct `AsyncLocalStorage` twin), surfaced through a scoped `IRequestContext` accessor. **Not** `Activity.Current`: tracing is sampled, so a span is `null` on unsampled requests — governance state must never be sampleable | root + request-stable via boundary middleware; per-boundary child frames via emitted inline `using` scopes — the Mediator behaviour covers only the `Send`-shaped subset (see § Two seams) |
-| `elixir` + `foundation: ash` | ambient | **`Logger.metadata`** — stamped by a `RequestContext` Plug at the HTTP edge (foundation-neutral; the same module on both foundations). *Emitted today* (§ below) | root frame only — opened at the HTTP edge. Per-Ash-action child frames (`parentId` chaining) are deferred |
-| `elixir` + `foundation: vanilla` | ambient | **`Logger.metadata`** — the same `RequestContext` Plug as ash (no `with`-struct variant; the carrier is pure Plug + Logger, so both foundations emit it identically) | root frame only — opened at the HTTP edge. Per-`with`-step child frames are deferred |
+| `elixir` (Phoenix LiveView) | ambient | **`Logger.metadata`** — stamped by a `RequestContext` Plug at the HTTP edge (pure Plug + Logger). *Emitted today* (§ below) | root frame only — opened at the HTTP edge. Per-`with`-step child frames (`parentId` chaining) are deferred |
 | `Go` (proposed) | **explicit-threading** | `context.Context` (request-stable in `ctx.Value`; frame-local derived per call) | `ctx := context.WithValue(parent, …)` threaded into every call |
 | `java` (Spring MVC) | ambient | **SLF4J `MDC`** (a `ThreadLocal`-backed map, always on the classpath via spring-boot-starter-logging) — stamped by an `ExecutionContextFilter` at the HTTP edge. *Emitted today* (§ Emitted (Java) below). A WebFlux variant would need Reactor `Context` (`ThreadLocal` does not propagate across reactive operators); MVC is what ships | root frame only — opened by the outermost (`HIGHEST_PRECEDENCE`) filter. Per-dispatch child frames (`parentId` chaining) deferred |
 | `python` (FastAPI) | ambient | **`contextvars.ContextVar[RequestContext]`** — opened by the outermost `ObservabilityMiddleware`. *Emitted today* (§ Emitted (Python) below). **Subsumes** the pre-existing obs request-id contextvar (one ambient channel, not two): the log line's `request_id` is the carrier's `correlation_id` | root frame only — opened at the HTTP edge. Per-dispatch child frames (`parentId` chaining) deferred |
@@ -346,9 +344,9 @@ they do not open their own ambient channel.
 
 ## Emitted (Phoenix)
 
-The Phoenix carrier ships today on **both** foundations, emitted as a single
-foundation-neutral `<App>.RequestContext` module (pure Plug + `Logger`, so ash
-and vanilla emit it identically — `src/generator/elixir/shell/runtime.ts`).
+The Phoenix carrier ships today, emitted as a
+`<App>.RequestContext` module (pure Plug + `Logger` —
+`src/generator/elixir/shell/runtime.ts`).
 
 - **Carrier = `Logger.metadata`.** The BEAM has no `AsyncLocal`; the per-process
   `Logger.metadata` is the idiomatic ambient slot, with the bonus that every

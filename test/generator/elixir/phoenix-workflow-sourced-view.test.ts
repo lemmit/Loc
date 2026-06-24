@@ -18,7 +18,7 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 
 // State-based saga with a correlation field + a typed `int` state field, an
 // event-triggered `create ... by`, and a workflow-sourced view filtered on the
-// state field.  Mirrors `vanilla-channels.ddd` but pins `foundation: ash`.
+// state field.  Mirrors `vanilla-channels.ddd` but pins `foundation: vanilla`.
 const SYSTEM = `
 system FulfillmentSys {
   subdomain Fulfillment {
@@ -64,7 +64,7 @@ system FulfillmentSys {
   storage primary { type: postgres }
   resource fulfillmentState { for: Fulfillment, kind: state, use: primary }
   deployable api {
-    platform: elixir { foundation: ash }
+    platform: elixir { foundation: vanilla }
     contexts: [Fulfillment]
     dataSources: [fulfillmentState]
     serves: FulfillmentApi
@@ -117,9 +117,9 @@ describe("phoenix (ash) — workflow-sourced view", () => {
     ).toBeDefined();
   });
 
-  it("leaves the aggregate-sourced view on the Ash.Query/Ash.read! path", async () => {
+  it("keeps the aggregate-sourced view on the Ecto from/where |> Repo.all() path", async () => {
     // Sanity: the workflow branch must not regress the aggregate path — add an
-    // aggregate-sourced view to the same context and assert it stays on Ash.
+    // aggregate-sourced view to the same context and assert it stays on Ecto.
     const withAggView = SYSTEM.replace(
       "view BusyFulfillments = OrderFulfillment where attempts > 0",
       `view BusyFulfillments = OrderFulfillment where attempts > 0
@@ -128,7 +128,7 @@ describe("phoenix (ash) — workflow-sourced view", () => {
     const files = await generateSystemFiles(withAggView);
     const aggView = files.get("api/lib/api/fulfillment/views/open_orders.ex");
     expect(aggView, "aggregate view module not emitted").toBeDefined();
-    expect(aggView).toContain("Ash.read!");
-    expect(aggView).not.toContain("|> Repo.all()");
+    expect(aggView).toContain("|> Repo.all()");
+    expect(aggView).not.toContain("Ash.read!");
   });
 });

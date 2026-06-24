@@ -133,12 +133,12 @@ repository Customers for Customer {
 | .NET / EF | a `Criterion<Customer>` (with `IsSatisfiedBy` + a query-side `ToExpression()`), fed into the retrieval's Ardalis `Specification<Customer>` bundle (and into a `find`'s `.Where(crit.ToExpression())`) |
 | .NET / Dapper | a parameterised SQL `WHERE` fragment inlined into the retrieval's `Run<Name>Async` / the find method (Dapper emits SQL, not a reified object) |
 | Hono / Drizzle | a module-level predicate function `const namedLikeCriterion = (needle) => eq(schema.customers.name, needle)`, called by `run<Name>` and the matching `find` |
-| Phoenix / Ash | a `:boolean` Ash **calculation** the read action filters by (`filter expr(named_like(needle: ^arg(:needle)))`) |
+| Phoenix / Ecto | a shared query fragment `def named_like_criterion(needle), do: dynamic([c], c.name == ^needle)` the read filters by |
 | Java / JPA | a `Specification<T>` factory on `<Agg>Criteria`, consumed via `JpaSpecificationExecutor` (the first backend to consume `CriterionIR` directly) |
 | Python / SQLAlchemy | inlines the predicate at the call site (non-reifying) |
 
 A criterion shared by a retrieval and a find reifies to a **single**
-predicate object (one module-level fn / one Ash calculation), consumed by
+predicate object (one module-level fn / one Ecto query fragment), consumed by
 both.
 
 The emitted predicate is **byte-identical** to what inlining would

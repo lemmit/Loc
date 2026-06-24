@@ -4,10 +4,8 @@
 //
 // A `party: Pokemon id[]` field is NOT a stored `{:array, :binary_id}` column
 // on the owner table (the migration emits no such column — only a
-// `trainer_party` join table).  On the vanilla foundation it must be an Ecto
-// `many_to_many` relationship through that join table, mirroring what the Ash
-// foundation does with a `many_to_many ... do through ... end` + a
-// `list :party, :party_through, :id` aggregate for the id-array wire field.
+// `trainer_party` join table).  It is an Ecto `many_to_many` relationship
+// through that join table, projected to the id-array wire field.
 //
 // This module owns the small structural query (`refCollFields`) plus the four
 // runtime fragments the schema / changeset / repository / controller emitters
@@ -93,8 +91,8 @@ function targetModule(appModule: string, ctxModule: string, assoc: AssociationIR
   return `${appModule}.${ctxModule}.${upperFirst(assoc.targetAgg)}`;
 }
 
-/** The `many_to_many` schema line for one ref-collection field.  Mirrors the
- *  Ash `many_to_many ... through ...` — a plain Ecto join_through with explicit
+/** The `many_to_many` schema line for one ref-collection field — a plain
+ *  Ecto join_through with explicit
  *  join_keys and `on_replace: :delete` so a `put_assoc` REPLACES the prior set
  *  (set semantics for `Id<T>[]`).
  *
@@ -120,9 +118,8 @@ export function preloadList(agg: AggregateIR): string[] {
 }
 
 /** `Map.from_struct`-projection lines that replace each ref-collection
- *  relationship with its id array in the serialized wire map (the Ash
- *  `calculate :party, {:array, :uuid}` analogue).  Returned as pipe segments
- *  appended after the `Map.drop`. */
+ *  relationship with its id array in the serialized wire map.  Returned as
+ *  pipe segments appended after the `Map.drop`. */
 export function serializeRefCollLines(agg: AggregateIR): string[] {
   return refCollFields(agg).map((rc) => {
     const name = snake(rc.field.name);

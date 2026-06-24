@@ -40,7 +40,7 @@ system Demo {
   api Api from S
   storage primary { type: postgres }
   resource cState { for: C, kind: state, use: primary }
-  deployable app { platform: elixir { foundation: ash } contexts: [C] dataSources: [cState] serves: Api ui: Web port: 4000 }
+  deployable app { platform: elixir contexts: [C] dataSources: [cState] serves: Api ui: Web port: 4000 }
 }
 `;
 

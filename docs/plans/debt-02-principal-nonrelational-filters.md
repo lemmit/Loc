@@ -34,9 +34,11 @@ filter is structurally identical to the relational principal filter.
   weaves `contextFilterPredicate(...)`, which already threads the ambient
   `requireCurrentUser()` accessor for principal filters. Expectation: **gate
   unblock + verify + fixture**; no emitter change.
-- **elixir (Ash)** — `renderBaseFilter` (`domain-emit.ts`) renders the principal
-  via `^actor(:field)` per-aggregate regardless of shape. Expectation: **gate
-  unblock + verify** (embedded resource root attrs are real columns).
+- **elixir** — `renderBaseFilter` (`domain-emit.ts`) renders the principal
+  into a scoped Ecto `where` per-aggregate (from the ambient current user)
+  regardless of shape. Expectation: **gate
+  unblock + verify** (embedded root attrs are real columns).
+  (Plain Ecto/Phoenix now — Ash foundation removed.)
 - **java** — the static `@SQLRestriction` can't carry a runtime principal, so
   the embedded read needs the SpEL-principal clause woven into the scoped
   `findAll`/`findById` overrides, exactly like the relational-principal path.

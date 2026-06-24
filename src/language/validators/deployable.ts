@@ -57,7 +57,7 @@ export function checkDeployable(
 ): void {
   // Page-metamodel UI binding rules (3, 4, 4b).
   // Rule 3:  only platforms that mount a UI admit `ui:` — `react`,
-  //          `static`, and `elixir` (fullstack Ash + Phoenix).
+  //          `static`, and `elixir` (fullstack Phoenix LiveView).
   // Rule 4:  every `static` deployable must declare `ui:` (otherwise
   //          it has nothing to serve).
   // Rule 4b: every `react` deployable must declare `ui:`.  The
@@ -191,9 +191,9 @@ export function checkDeployable(
 
   // Rule 14: design-pack format must match the framework the deployable
   // renders against.  TSX packs (mantine/shadcn/mui/chakra) need a
-  // `react` framework; HEEx packs (ashPhoenix) need `phoenixLiveView`.
+  // `react` framework; HEEx packs (coreComponents) need `phoenixLiveView`.
   // Without this rule, a mismatched pair (e.g. `platform: react,
-  // design: ashPhoenix`) lowers cleanly and explodes at generation
+  // design: coreComponents`) lowers cleanly and explodes at generation
   // time with a confusing "template not registered" error.  Custom
   // packs (any name not in BUILTIN_PACK_FORMATS) get a warning
   // instead — the validator can't read their `pack.json` to know the
@@ -201,7 +201,7 @@ export function checkDeployable(
   // The framework the design pack must match: prefer a hosted/referenced
   // `ui` declaration's own `framework:` (D-PHOENIX-SURFACE — the ui owns
   // it; e.g. a phoenix host embedding `framework: react` needs a tsx
-  // pack, not ashPhoenix), then the legacy block-binding framework.
+  // pack, not coreComponents), then the legacy block-binding framework.
   // Mirrors the lowering precedence in `lower.ts`.
   const uiDeclaredFramework = mountedUis.find((u) => u?.framework)?.framework;
   checkDeployableDesignPack(d, hasUiBinding, uiDeclaredFramework ?? framework, accept);
@@ -332,20 +332,11 @@ export function checkDeployableRealizationAxes(d: Deployable, accept: Validation
     { name: "runtime", value: d.runtime },
   ];
 
-  // D-VANILLA-DEFAULT — warn-then-flip release.  A bare `platform: elixir`
-  // (no explicit `foundation:`) is heading for vanilla after the next
-  // release cycle's default flip.  Tell the user now so they can set
-  // `foundation: ash` explicitly if they want today's behaviour, or
-  // `foundation: vanilla` to opt in early.  Once the flip lands, this
-  // warning is removed and `lower-platform.ts:greenfieldAxisDefaults`
-  // changes its `elixir` arm from `"ash"` to `"vanilla"`.
-  if (family === "elixir" && d.foundation == null) {
-    accept(
-      "warning",
-      `Deployable '${d.name}': 'platform: elixir' without an explicit 'foundation:' will switch from 'ash' to 'vanilla' in the next release (D-VANILLA-DEFAULT).  Set 'foundation: ash' to keep today's behaviour, or 'foundation: vanilla' to opt in now.`,
-      { node: d, property: "platform", code: "loom.foundation-default-flipping" },
-    );
-  }
+  // `platform: elixir` generates `vanilla` (plain Phoenix LiveView on Ecto),
+  // the only foundation — the Ash foundation was removed.  A bare `platform:
+  // elixir` (no explicit `foundation:`) resolves to `vanilla` via
+  // `lower-platform.ts:greenfieldAxisDefaults`; an explicit `foundation: ash`
+  // is rejected by R1 below as an out-of-menu value.
 
   // R1 — every set axis value must be in its platform menu.
   for (const { name, value } of axes) {
@@ -389,12 +380,11 @@ export function checkDeployableRealizationAxes(d: Deployable, accept: Validation
 
   // R6 — `persistence:` / `application:` must be compatible with the
   // foundation (docs/plans/realization-axes-alignment.md).  A named
-  // foundation admits only its framework family (`ash` ⇒ `ashPostgres`);
-  // `vanilla` admits the non-framework libraries (`ecto`).  The effective
-  // foundation is the explicit value or the platform default, so
-  // `persistence: ecto` without a foundation on elixir (which defaults to
-  // `ash`) is caught too.  Owned axes (R4) are skipped to avoid a double
-  // diagnostic.
+  // foundation admits only its framework family; `vanilla` admits the
+  // non-framework libraries (`ecto`).  The effective foundation is the
+  // explicit value or the platform default.  Owned axes (R4) are skipped to
+  // avoid a double diagnostic.  (No named foundation ships today — the rule
+  // stays active for `abp`/`nestjs` when they're wired.)
   const effectiveFoundation = d.foundation ?? defaultFoundationFor(family);
   if (effectiveFoundation != null) {
     const owned = FOUNDATION_OWNED_AXES[effectiveFoundation] ?? [];
@@ -440,7 +430,7 @@ export function checkDeployableRealizationAxes(d: Deployable, accept: Validation
 /** Rule 14 — design-pack format must match the deployable's
  *  framework.  Three cases:
  *    1. `design:` set to a built-in name (mantine/shadcn/mui/chakra/
- *       ashPhoenix) whose format doesn't match the deployable's
+ *       coreComponents) whose format doesn't match the deployable's
  *       framework → error.  Suggests the valid built-ins for the
  *       framework's format so the fix is one rename away.
  *    2. `design:` set to a custom path (anything not in the

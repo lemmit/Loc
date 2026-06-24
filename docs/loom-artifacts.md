@@ -107,7 +107,7 @@ regen.  Provenance snapshots are only written by the explicit
   `.loomignore` if you absolutely must keep a custom version.
 - **Not part of the wire contract.**  The wire contract is what
   `wire-spec.json` *describes*, not the file itself.  Backends emit
-  the actual schemas (Zod, EF DTOs, Ash resources) directly into
+  the actual schemas (Zod, EF DTOs, Ecto schemas) directly into
   their own project trees.
 
 ## Cross-references

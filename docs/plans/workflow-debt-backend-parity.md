@@ -2,6 +2,15 @@
 
 **Created:** 2026-06-18 · **Status:** living (work through the gap table top-down)
 
+> **Update (2026):** the Ash foundation has been **removed** — `platform: elixir`
+> generates Phoenix LiveView on plain Ecto/Phoenix (vanilla is the only foundation;
+> `foundation: ash` is now a validation error). The historical `elixir-ash` column
+> below is therefore **gone**: every "ships on vanilla, gated/deferred on ash"
+> entry now simply ships on the one elixir backend, and the
+> `loom.event-sourced-workflow-unsupported` elixir branch no longer needs a
+> foundation discriminator. The ash columns/notes are retained as the record of how
+> the elixir workflow surface reached parity before Ash was deleted.
+
 Focused slice plan for **DEBT-26 (workflow execution & persistence)** from
 [`debt-prioritized-backlog.md`](./debt-prioritized-backlog.md). That backlog
 entry (and the IR doc-comments it cites) **predates most of the shipped
@@ -33,30 +42,31 @@ landed across most backends:
 
 ## Per-feature × backend gap table (the remaining work)
 
-| Feature | node | dotnet | elixir-ash | elixir-vanilla | python | java |
-|---|:--:|:--:|:--:|:--:|:--:|:--:|
-| command routes | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| saga-state row | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `on`/event-`create` dispatch | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| instance read endpoints | ✓ | ✓ | (Ash defer) | ✓ | ✓ | ✓ |
-| view-over-workflow | ✓ | ✓ | (Ash defer) | ✓ | ✓ | ✓ |
-| `eventSourced` workflows (`apply`) | ✓ | ✓ | gated | ✓ | ✓ | ✓ |
+(elixir = plain Ecto/Phoenix; the historical `elixir-ash` column is removed with
+the Ash foundation.)
 
-**`eventSourced` workflows now ship on every backend except elixir-ash.** The
+| Feature | node | dotnet | elixir | python | java |
+|---|:--:|:--:|:--:|:--:|:--:|
+| command routes | ✓ | ✓ | ✓ | ✓ | ✓ |
+| saga-state row | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `on`/event-`create` dispatch | ✓ | ✓ | ✓ | ✓ | ✓ |
+| instance read endpoints | ✓ | ✓ | ✓ | ✓ | ✓ |
+| view-over-workflow | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `eventSourced` workflows (`apply`) | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+**`eventSourced` workflows now ship on every DB backend.** The
 surface (grammar → `WorkflowIR.eventSourced` / `.appliers`) + emit-only/pure-fold
 discipline (A1) landed long ago; the **Hono runtime** was the reference, and the
-fan-out to .NET, Python, Java, and **elixir-vanilla** has since landed (see
-"Done — eventSourced workflow fan-out" below). An `eventSourced` workflow
+fan-out to .NET, Python, Java, and **elixir** (plain Ecto/Phoenix) has since landed
+(see "Done — eventSourced workflow fan-out" below). An `eventSourced` workflow
 persists as an append-only `<wf>_events` stream (reusing the aggregate event
 store's table shape + `eventToData`/`rowToEvent`), folds it through its
 `apply(...)` blocks on load, and the dispatch handlers append their own emitted
-events to the stream (gap-free) and re-publish for choreography. On the one
-remaining unsupported host — **elixir-ash** — an `eventSourced` workflow stays a
-**hard error** (`loom.event-sourced-workflow-unsupported`,
-`validateEventSourcedWorkflowStorage`, gated by `EVENT_SOURCING_WORKFLOW_BACKENDS`
-+ the foundation-aware elixir branch); the Ash foundation has no pure-ES fit, so
-the fix is `foundation: vanilla` (D-VANILLA-ES-HOME). Before the gate it silently
-misgenerated as a state-based saga with the appliers dropped.
+events to the stream (gap-free) and re-publish for choreography. (Historically the
+Ash foundation was the lone unsupported host — it had no pure-ES fit, so the fix
+was `foundation: vanilla`; with Ash removed that is now the only elixir path.)
+Before the gate landed, an ES workflow silently misgenerated as a state-based saga
+with the appliers dropped.
 
 Corrections from earlier matrix drift (verified against code): **elixir-vanilla
 dispatch already ships** (`index.ts` calls the foundation-agnostic
@@ -166,10 +176,11 @@ suppressed for ES workflows (no read-model row). Tests:
 
 ## Done — eventSourced workflow fan-out (dotnet / python / java / elixir-vanilla)
 
-The Hono runtime fanned out to every remaining DB backend except elixir-ash;
+The Hono runtime fanned out to every DB backend;
 `EVENT_SOURCING_WORKFLOW_BACKENDS` is now `{ node, dotnet, python, java }`, and
-the gate's foundation-aware elixir branch accepts `elixir + foundation: vanilla`
-(rejecting `elixir + ash`, which has no pure-ES fit — D-VANILLA-ES-HOME).  Each
+the elixir branch accepts `elixir` (plain Ecto/Phoenix — the only foundation now
+that Ash is removed; historically this was the `foundation: vanilla` route, with
+`ash` rejected for having no pure-ES fit — D-VANILLA-ES-HOME).  Each
 backend adapts its aggregate event-store machinery (fold/append repository over
 the `<wf>_events` table `MigrationsIR` already derives) + rebinds its dispatcher's
 persistence seam (fold-on-load / append-own-events):
@@ -209,8 +220,9 @@ from `src/ir/util/openapi-ids.ts`, so cross-backend OpenAPI parity holds by
 construction; no migration change (`<wf>_events` already emitted). Stateless
 (non-correlated) workflows still get no instance read surface. Tests:
 `test/ir/workflow-instance-shape.test.ts` (enrich) + the per-backend
-`*-workflow-instances` / ES-workflow generator suites. (`elixir+ash` stays out
-of scope — no pure-ES fit.)
+`*-workflow-instances` / ES-workflow generator suites. (Historically `elixir+ash`
+was out of scope — no pure-ES fit; with Ash removed, elixir = plain Ecto/Phoenix
+is in scope.)
 
 ## Next slices (recommended order)
 

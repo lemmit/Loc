@@ -14,8 +14,8 @@ require non-sensitive arguments).
 `encryptedAtRest` governs **persistence**: how the column is stored in
 the database, what key encrypts it, what searches are still possible
 against it. It is a *storage layer* concern (it lives in the EF model
-attribute, the Ash data-layer config, or a column-level encryption
-wrapper).
+attribute, an Ecto field type / changeset cast, or a column-level
+encryption wrapper).
 
 The two are orthogonal:
 
@@ -54,9 +54,9 @@ Open considerations for the eventual proposal:
   encrypted fields need a compile-time error or a documented
   blind-index escape hatch.
 - **Backend support matrix** — EF Core has column-level encryption via
-  value converters; Ash has `Ash.DataLayer.encrypted_attribute`;
-  Postgres `pgcrypto` for raw SQL; Hono/Drizzle has no first-class
-  story today.
+  value converters; Elixir/Ecto via a custom `Ecto.Type` (e.g. Cloak)
+  or `pgcrypto`; Postgres `pgcrypto` for raw SQL; Hono/Drizzle has no
+  first-class story today.
 - **Test fixtures** — generated seed data must round-trip through the
   encryption layer.
 

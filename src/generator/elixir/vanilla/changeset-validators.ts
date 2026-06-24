@@ -6,7 +6,7 @@ import {
 import { snake } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------
-// Shared Ecto-changeset validator rendering for the vanilla foundation — the
+// Shared Ecto-changeset validator rendering — the
 // leaf both `changeset-emit.ts` (aggregate field invariants) and
 // `valueobject-emit.ts` (value-object invariants) import, so the two never form
 // a cycle.  Translates the same `singleFieldConstraints` patterns the Zod /

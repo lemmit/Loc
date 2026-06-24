@@ -168,13 +168,14 @@ PATCH-style command.
   representation. The deserialised command record carries the
   per-field discriminated record (`some(T)` / `none` in DSL terms;
   emitted as PascalCase sealed records per .NET convention).
-- **Phoenix / Ash**: Phoenix params are a plain `map`; absent keys
+- **Phoenix**: Phoenix params are a plain `map`; absent keys
   are absent in the map (no nil-vs-missing ambiguity per Elixir
   semantics). The action coerces to `{:some, value}` / `:none`
-  before passing to the Ash command handler. (Or — see the Phoenix
-  lowering note in `exception-less.md` — Ash idiom uses `nil` for
-  the runtime representation; the `command` keyword's "omitted →
-  none" rule applies the same way regardless.)
+  before passing to the command handler. The `command` keyword's "omitted →
+  none" rule applies the same way regardless of the runtime nil/option
+  representation. **(Superseded 2026: the Ash foundation was removed; `platform:
+  elixir` is plain Ecto/Phoenix only and `foundation: ash` is now a validation
+  error — the original Ash-command-handler detail no longer reflects emitted output.)**
 
 ## Migration from `Optional<T>`
 

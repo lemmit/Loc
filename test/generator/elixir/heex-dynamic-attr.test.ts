@@ -52,11 +52,11 @@ describe("heex dynamic attribute seam", () => {
   });
 
   it("scaffolded workflow-instances list links via a `{…}` navigate expression", async () => {
-    // dispatch.ddd scaffolds an OrderFulfillment instances list whose rows
+    // vanilla-dispatch.ddd scaffolds an OrderFulfillment instances list whose rows
     // link to the instance detail by the (non-id) correlation field — a
     // string-concat route, the exact shape that broke pre-#1367.
     const src = readFileSync(
-      join(repoRoot, "test", "e2e", "fixtures", "elixir-ash-build", "dispatch.ddd"),
+      join(repoRoot, "test", "e2e", "fixtures", "elixir-vanilla-build", "vanilla-dispatch.ddd"),
       "utf8",
     );
     const files = await generateSystemFiles(src);

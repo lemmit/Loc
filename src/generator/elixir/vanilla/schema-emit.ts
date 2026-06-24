@@ -63,8 +63,8 @@ export function emitVanillaSchemas(
         : renderSchema(appModule, ctxModule, agg, enumsByName, schemaPrefix, ctx, sys),
     );
     // Each entity part (`entity Line { … }`) becomes an Ecto `embedded_schema`
-    // module the aggregate `embeds_many`/`embeds_one`s — the vanilla analogue of
-    // the Ash embedded resource.  Stored inline as the parent's jsonb column.
+    // module the aggregate `embeds_many`/`embeds_one`s, stored inline as the
+    // parent's jsonb column.
     for (const part of agg.parts) {
       out.set(
         `lib/${appSnake}/${ctxSnake}/${snake(part.name)}.ex`,
@@ -108,8 +108,8 @@ function renderPartSchema(
   const castEmbeds = (part.contains ?? [])
     .map((c) => `    |> cast_embed(:${snake(c.name)})`)
     .join("\n");
-  // Wire shape: id, scalar fields, then containment names (mirrors the Ash
-  // embedded resource's `@derive Jason.Encoder` atom list).
+  // Wire shape: id, scalar fields, then containment names (the
+  // `@derive Jason.Encoder` atom list).
   const wireAtoms = [
     ":id",
     ...part.fields
@@ -187,7 +187,7 @@ function renderSchema(
   const fieldLines = [...declaredLines, ...auditTsLines, ...provLines].join("\n");
   // Entity containments (`contains items: Item[]`) → `embeds_many`/`embeds_one`
   // over the part's `embedded_schema` module (emitted above), stored inline in
-  // one jsonb column — the vanilla analogue of the Ash embedded resource.
+  // one jsonb column.
   // Operation bodies append the part struct + `put_embed` (`context-emit.ts`).
   const containLines = agg.contains.map((c) => embedLine(appModule, ctxModule, c)).join("\n");
   // Value-object collections (`charges: Money[]`) → `has_many` onto the child
@@ -286,7 +286,7 @@ function renderEctoDefault(e: ExprIR): string | null {
   }
 }
 
-function mapTypeToEcto(t: TypeIR, enumsByName: Map<string, EnumIR>): string | null {
+export function mapTypeToEcto(t: TypeIR, enumsByName: Map<string, EnumIR>): string | null {
   switch (t.kind) {
     case "primitive": {
       switch (t.name) {
@@ -323,8 +323,8 @@ function mapTypeToEcto(t: TypeIR, enumsByName: Map<string, EnumIR>): string | nu
     }
     case "valueobject":
       // VO → `:map` (JSONB).  Simplest path that satisfies wire-shape
-      // parity: the JSON column holds the same object shape Ash's
-      // embedded resource emits.  A richer `embeds_one`-backed path
+      // parity: the JSON column holds the value object's own field shape.
+      // A richer `embeds_one`-backed path
       // (with its own embedded schema module) can replace this later
       // when typed queries on inner fields are needed.
       return ":map";

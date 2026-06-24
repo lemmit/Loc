@@ -9,9 +9,8 @@ import { parseString } from "../../_helpers/parse.js";
 // T2.c — operation `or`-union returns on the elixir vanilla foundation
 // (exception-less.md A3).  `operation reserve(): Order or NotFound` produces a
 // tagged result the controller translates to HTTP: success → 200, error variant
-// → RFC-7807 ProblemDetails at the variant's mapped status.  Foundation-aware:
-// accepted on `vanilla` (any returning op) and on `ash` for *return-dominant*
-// ops (DEBT-03 — a generic action).
+// → RFC-7807 ProblemDetails at the variant's mapped status.  Any returning op
+// is accepted on vanilla (the only foundation).
 // ---------------------------------------------------------------------------
 
 const source = (foundation: string) => `
@@ -46,14 +45,9 @@ async function diagnostics(foundation: string) {
   return validateLoomModel(enrichLoomModel(lowerModel(model)));
 }
 
-describe("vanilla — T2.c operation-return gate (foundation-aware)", () => {
+describe("vanilla — T2.c operation-return gate", () => {
   it("accepts an `or`-union operation return on foundation: vanilla", async () => {
     const diags = await diagnostics("vanilla");
-    expect(diags.find((d) => d.code === RET_GATE)).toBeUndefined();
-  });
-
-  it("now accepts the same return-dominant op on foundation: ash (DEBT-03 — generic action)", async () => {
-    const diags = await diagnostics("ash");
     expect(diags.find((d) => d.code === RET_GATE)).toBeUndefined();
   });
 });

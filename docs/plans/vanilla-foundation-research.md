@@ -1,9 +1,18 @@
 # Vanilla Phoenix foundation — research notes (Phase A grounding)
 
+> Status: **historical (de-Ash effort landed, 2026).** Steps 1–4 of the de-Ash
+> effort have landed — the Ash foundation is **removed**: `platform: elixir` now
+> generates Phoenix LiveView on plain Ecto/Phoenix, `foundation: vanilla` is the
+> default and only valid value, and `foundation: ash` is a validation error (the
+> `foundation:` knob stays). These notes are retained as the implementation record:
+> the "current `foundation: ash` emitters" they sweep were the **pre-removal**
+> starting point the vanilla emit was ported from, and the ash byte-targets below
+> were the parity oracle the port matched before Ash was deleted.
+>
 > Companion to [`vanilla-foundation-tdd-plan.md`](./vanilla-foundation-tdd-plan.md).
-> Distilled from three read-only sweeps of the current `foundation: ash`
-> emitters; these are the **verified byte-exact targets** the Phase A parity /
-> structure tests assert against. Source files cited inline.
+> Distilled from three read-only sweeps of the (then-current) `foundation: ash`
+> emitters; these were the **verified byte-exact targets** the Phase A parity /
+> structure tests asserted against. Source files cited inline.
 
 ## 1. Error → ProblemDetails contract (slices 1–4)
 

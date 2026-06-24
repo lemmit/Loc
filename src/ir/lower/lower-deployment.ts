@@ -3,12 +3,7 @@ import { descriptorFor } from "../../platform/metadata.js";
 import { defaultsFor } from "../../platform/resolve-adapters.js";
 import { applicationDslToAdapter } from "../../util/platform-axes.js";
 import type { DeployableIR, Platform, UiParamBindingIR } from "../types/loom-ir.js";
-import {
-  foundationAdapterOverride,
-  greenfieldAxisDefaults,
-  qualifyDesign,
-  qualifyPlatform,
-} from "./lower-platform.js";
+import { greenfieldAxisDefaults, qualifyDesign, qualifyPlatform } from "./lower-platform.js";
 
 export function lowerDeployable(d: Deployable): DeployableIR {
   const { family: platform, ref: platformRef } = qualifyPlatform(d.platform);
@@ -26,7 +21,7 @@ export function lowerDeployable(d: Deployable): DeployableIR {
   // this deployable — keeping the IR honest about which deployables
   // mount a frontend.  `react`/`static` always render React (TSX
   // packs).  `phoenixLiveView` is fullstack and always renders HEEx
-  // against the `ashPhoenix` pack.  `dotnet` is dual-mode: it renders
+  // against the `coreComponents` pack.  `dotnet` is dual-mode: it renders
   // an embedded React SPA when (and only when) the deployable declares
   // `ui:`; backend-only dotnet drops the field.  Other platforms
   // (`hono`) silently drop `design:` and the validator already warns.
@@ -65,7 +60,7 @@ export function lowerDeployable(d: Deployable): DeployableIR {
   // `ui X { framework: svelte }` + `ui: X` would silently lower as the
   // platform default.  Computed before `design` so the pack default can
   // branch on it (a phoenix host embedding react needs a tsx pack, not
-  // ashPhoenix).
+  // coreComponents).
   const boundUi = d.uiSugar?.ref?.ref ?? d.uiCompose?.ref?.ref ?? d.uiBlock?.ref?.ref;
   const uiFramework =
     d.uiBlock?.framework ??
@@ -89,7 +84,7 @@ export function lowerDeployable(d: Deployable): DeployableIR {
   //  - svelte frontends render Svelte → `shadcnSvelte`;
   //  - vue frontends render Vue → `vuetify`;
   //  - angular frontends render Angular → `angularMaterial`;
-  //  - phoenixLiveView renders HEEx → `ashPhoenix`, UNLESS it embeds a
+  //  - phoenixLiveView renders HEEx → `coreComponents`, UNLESS it embeds a
   //    `framework: react` ui (D-PHOENIX-SURFACE), in which case the SPA
   //    needs a tsx pack → `mantine`;
   //  - backends without a `ui:` mount carry no design.
@@ -115,7 +110,7 @@ export function lowerDeployable(d: Deployable): DeployableIR {
                 ? "shadcnSvelte"
                 : uiFramework === "angular"
                   ? "angularMaterial"
-                  : "ashPhoenix",
+                  : "coreComponents",
         )
       : (platform === "dotnet" || platform === "java") && uiName
         ? qualifyDesign(
@@ -154,21 +149,18 @@ export function lowerDeployable(d: Deployable): DeployableIR {
     adapterDefaults !== undefined
       ? (() => {
           const gf = greenfieldAxisDefaults(platform);
-          // The foundation selects which adapter-axis defaults apply: the
-          // platform `adapterDefaults` describe its DEFAULT foundation (elixir
-          // → ash), so a non-default foundation (`vanilla`) overrides the
-          // omitted-knob default for the axes it implies (D-REALIZATION-AXES;
-          // realization-axes-alignment.md).
+          // Each adapter-backed axis takes its default from the platform's
+          // live adapter menu (`adapterDefaults`); `foundation` is the lone
+          // greenfield axis (D-REALIZATION-AXES; realization-axes-alignment.md).
           const foundation = d.foundation ?? gf.foundation;
-          const fdn = foundationAdapterOverride(platform, foundation);
           return {
             foundation,
             // Store the resolved adapter key (`serviceLayer` → `layered`)
             // so the future codegen passes it straight to `resolveStyle`.
             application: d.application
               ? applicationDslToAdapter(d.application)
-              : (fdn.style ?? adapterDefaults.style),
-            persistence: d.persistence ?? fdn.persistence ?? adapterDefaults.persistence.state,
+              : adapterDefaults.style,
+            persistence: d.persistence ?? adapterDefaults.persistence.state,
             directoryLayout: d.directoryLayout ?? adapterDefaults.layout,
             transport: d.transport ?? adapterDefaults.transport,
             runtime: d.runtime ?? adapterDefaults.runtime,

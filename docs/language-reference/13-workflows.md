@@ -6,7 +6,7 @@ Context-level orchestration: a `workflow` loads or creates several aggregates, c
 
 A workflow shares its context's namespace (a workflow named like an aggregate / event / repository is a `loom.workflow-name-collision`). Bodies reuse the operation [statement vocabulary](06-behavior-and-statements.md) but the validator narrows it to the orchestration subset: factory-`let`, repo-`let`, op-call, `precondition` / `requires`, `emit`, plus the workflow-only `for` / `if let`. Mutation forms (`:=` / `+=` / `-=`) are rejected in a workflow body (they belong in an aggregate op) — except inside an `eventSourced` workflow's `apply` fold.
 
-> **Output sourcing.** Every tab below is excerpted from a single generated tree: `generate system` over a `Sales` context with one deployable per backend (`node` / `dotnet` / `python` / `java`). The handlers are deterministic string output from each backend's workflow builder — no Elixir tab on the per-feature blocks here because the Phoenix sample wasn't in this generation run (see the honest-gap notes), but its shape is documented in [`../workflow.md`](../workflow.md) §"Phoenix LiveView".
+> **Output sourcing.** Every tab below is excerpted from a single generated tree: `generate system` over a `Sales` context with one deployable per backend (`node` / `dotnet` / `python` / `java`). The handlers are deterministic string output from each backend's workflow builder — no Elixir tab on the per-feature blocks here because the Phoenix LiveView sample wasn't in this generation run (see the honest-gap notes), but its shape is documented in [`../workflow.md`](../workflow.md) §"Phoenix LiveView".
 
 ## `workflow` & state
 

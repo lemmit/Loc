@@ -1,5 +1,7 @@
 # Implementation Plan: Storage and Platform Config Redesign
 
+> **(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain Ecto/Phoenix only; `foundation: ash` is now a validation error.)** Phase 12 (Phoenix adapter seams — wrapping Ash as `ash`/`ash-postgres` and adding `ash-commanded` for ES) describes work against a foundation that no longer ships; vanilla Ecto/Phoenix is the sole elixir foundation.
+
 **Companion to:** [`storage-and-platform-config.md`](./storage-and-platform-config.md)
 **Audience:** Implementing agent / maintainer.
 **Operating principles:**

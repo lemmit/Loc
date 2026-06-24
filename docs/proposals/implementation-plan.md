@@ -2,6 +2,8 @@
 
 > **[2026-06-20 status audit]** The 2026-06-03 refresh is itself stale: `errors[]`, reified criteria, TPH, and `or`-unions are now on FIVE backends, not 'three'/'four' (`system-checks.ts:~1230`, `structural-checks.ts:~414`).
 
+> **(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain Ecto/Phoenix only; `foundation: ash` is now a validation error.)** The "Phoenix / Ash" emission notes below describe the removed Ash foundation; the Phoenix backend now emits plain Ecto/Phoenix.
+
 > Status: implementation plan. Operationalises three sibling
 > proposals into one delivery stream:
 >
@@ -254,7 +256,7 @@ Exhaustiveness check in `match`.
   - TS: discriminated union of tagged objects with `kind` literal
     (both forms lower identically).
   - .NET: sealed-record hierarchy with `[JsonDerivedType]`.
-  - Phoenix: tagged unions via Ash's `tagged_unions` feature.
+  - Phoenix: tagged unions (plain Ecto/Phoenix).
 - Tests: parsing (both forms); exhaustiveness; per-backend emission
   tests asserting both forms produce identical lowered shapes.
 
@@ -314,7 +316,7 @@ concrete-discriminator column.
 - Backends:
   - TS / Drizzle: shared base table; CTE for type-discrimination.
   - .NET / EF: TPH built-in; `[Discriminator]`.
-  - Phoenix / Ash: shared table; resource-level filter.
+  - Phoenix: shared table; row-level filter (plain Ecto/Phoenix).
 - Validator: `Party id` references across concrete variants resolve
   correctly; `loom.cross-strategy-ref` checks.
 
@@ -641,7 +643,7 @@ Resolves D23. Full spec: [`criterion.md`](./criterion.md).
   EntityGraph (uses path syntax from `load-specifications.md`).
 - TS / Drizzle: typed query builder.
 - .NET / EF Core: IQueryable chain.
-- Phoenix / Ash: Ash query DSL.
+- Phoenix: Ecto query DSL (plain Ecto/Phoenix).
 - UI form-generator: auto-derives `<select>` options by executing
   the criterion against the repository at binding sites; React
   form-generator integration.

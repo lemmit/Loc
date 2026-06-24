@@ -73,10 +73,13 @@ describe("phoenix renderExpr — literals", () => {
     expect(renderExpr({ kind: "unary", op: "-", operand: litInt("3") }, ctx)).toBe("-3");
   });
 
-  it("renders money/decimal natively inside an Ash expr() (no Decimal.* — Ash lowers to the data layer)", () => {
-    // Negative money literal in a calculation/filter expr.
+  it("renders money/decimal natively inside an Ecto query filter (no Decimal.* — data-layer native)", () => {
+    // Negative money literal in a `where` filter expr (filterArgs context).
     expect(
-      renderExpr({ kind: "unary", op: "-", operand: litMoney("1.0") }, { ...ctx, ashExpr: true }),
+      renderExpr(
+        { kind: "unary", op: "-", operand: litMoney("1.0") },
+        { ...ctx, filterArgs: true },
+      ),
     ).toBe("-1.0");
   });
 });
@@ -99,8 +102,10 @@ describe("phoenix renderExpr — receivers", () => {
     expect(renderExpr(thisProp("customerName"), ctx)).toBe("record.customer_name");
   });
 
-  it("renders enum-value refs as Elixir atoms", () => {
-    expect(renderExpr({ kind: "ref", name: "Active", refKind: "enum-value" }, ctx)).toBe(":active");
+  it("renders enum-value refs as the stored string (vanilla Ecto :string column)", () => {
+    expect(renderExpr({ kind: "ref", name: "Active", refKind: "enum-value" }, ctx)).toBe(
+      '"active"',
+    );
   });
 
   it("renders current-user refs verbatim", () => {
@@ -458,10 +463,11 @@ describe("phoenix renderExpr — member, method-call, call, new, list, lambda", 
     ).toBe("%MyApp.Money{3}");
   });
 
-  it("renders a value-object constructor with named struct fields (snake) when argNames are present", () => {
+  it("renders a value-object constructor with named map fields (snake) when argNames are present", () => {
     // Real lowered IR carries the VO's field order in `argNames`, so the
-    // struct is built with named fields — `%Mod.VO{positional}` is invalid
-    // Elixir.  Names are snake-cased to match Ash attributes.
+    // value is built with named fields.  Vanilla stores value objects as plain
+    // JSON maps (no `%Ctx.VO{}` struct module is emitted), so the constructor
+    // builds a map; names are snake-cased to match the Ecto column names.
     expect(
       renderExpr(
         {
@@ -473,7 +479,7 @@ describe("phoenix renderExpr — member, method-call, call, new, list, lambda", 
         },
         ctx,
       ),
-    ).toBe('%MyApp.Money{amount: Decimal.new("9.99"), currency_code: "USD"}');
+    ).toBe('%{amount: Decimal.new("9.99"), currency_code: "USD"}');
   });
 
   it("renders entity-part constructor (kind: new) with snake field keys", () => {

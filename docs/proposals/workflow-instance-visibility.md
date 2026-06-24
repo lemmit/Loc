@@ -119,9 +119,10 @@ table the migration already created:
   `<Ctx>WorkflowsController` (or a dedicated `<Wf>InstancesController`),
   reading the EF-mapped `<Workflow>State` entity. The state POCO + EF
   config already exist (`dotnet/workflow-state-emit.ts`).
-- **Phoenix** — an Ash read action (`read :instances`, `read :instance`)
-  or a thin controller over the saga-state `Ecto.Schema`, depending on
-  foundation.
+- **Phoenix** — a thin controller over the saga-state `Ecto.Schema`.
+  _(The Ash-foundation alternative — an Ash `read :instances` / `read
+  :instance` action — was removed in 2026: `platform: elixir` is plain
+  Ecto/Phoenix only; `foundation: ash` is now a validation error.)_
 
 This is the bulk of the work, but each is a direct analogue of the
 aggregate `getById` / `findAll` route the same file already knows how to

@@ -1,6 +1,6 @@
 # Plan — Type-system feature migration & cross-backend debt clearance
 
-> **[2026-06-20 status audit]** Substantially shipped (no longer just 'in-flight design note') — payload/command/query/response/error + named unions + option/or carriers + criterion + abstract/extends are in grammar/IR/validators/docs; `<Agg>Wire` enrichment + the `ExprTarget` unification landed. Remaining: strict-parity phase + the DBT register (esp. Phoenix provenance — note: provenance has since shipped on elixir-vanilla #1400).
+> **[2026-06-20 status audit]** Substantially shipped (no longer just 'in-flight design note') — payload/command/query/response/error + named unions + option/or carriers + criterion + abstract/extends are in grammar/IR/validators/docs; `<Agg>Wire` enrichment + the `ExprTarget` unification landed. Remaining: strict-parity phase + the DBT register (esp. Phoenix provenance — note: provenance has since shipped on the elixir backend #1400). (NB: the Ash foundation has since been removed — `platform: elixir` is plain Ecto/Phoenix only; references below to an "Ash"/"vanilla" foundation split are historical.)
 
 > Status: in-flight design note. Scopes how the type-system family of
 > proposals (`docs/proposals/type-system-overview.md` and its five
@@ -242,9 +242,9 @@ cost and owner, rather than silently re-greening.
 
 | ID | Feature | Hono | .NET | Phoenix | React | Cleared by |
 |---|---|---|---|---|---|---|
-| DBT-1 | **`provenanced` runtime** (trace capture + history) | ✓ full (`routes-builder.ts:80`, `render-stmt.ts:107`, `repository-save-builder.ts:160`) | ✓ full (`dotnet/render-stmt.ts` capture, `emit/provenance.ts`, `emit/repository.ts` flush, `dto-mapping.ts` wire) | ✗ parsed, no-op (`generators.md:38`) | n/a | Ash trace runtime remains; Hono+.NET parity is wire-shape-compatible (`ProvLineage` Web-default JSON) |
-| DBT-2 | **`where`-clause finds** | ✓ `lowerToDrizzle` over the queryable subset — comparisons, `&&`/`||`, `!`, bare-bool, VO sub-columns, `currentUser`, enum values, `refColl.contains` (`repository-find-builder.ts`); validator-gated by `firstNonQueryableNode` (#760) | ✓ full LINQ `.Where(…)` | ✓ Ash `expr` | ⚠ hook-only (deferred → DBT-4) | **Hono/.NET/Phoenix cleared.** Only the React list-page filter mode remains — tracked as DBT-4 |
-| DBT-3 | **`X id[]` reference ordering** | ✓ `ordinal` column | ✓ `ordinal` column | ✗ unordered / set semantics (`generators.md:751`) | display-only | Ash `ordinal` ordering, or ratify set semantics as the contract |
+| DBT-1 | **`provenanced` runtime** (trace capture + history) | ✓ full (`routes-builder.ts:80`, `render-stmt.ts:107`, `repository-save-builder.ts:160`) | ✓ full (`dotnet/render-stmt.ts` capture, `emit/provenance.ts`, `emit/repository.ts` flush, `dto-mapping.ts` wire) | ✗ parsed, no-op (`generators.md:38`) | n/a | (since shipped on the elixir backend #1400); Hono+.NET parity is wire-shape-compatible (`ProvLineage` Web-default JSON) |
+| DBT-2 | **`where`-clause finds** | ✓ `lowerToDrizzle` over the queryable subset — comparisons, `&&`/`||`, `!`, bare-bool, VO sub-columns, `currentUser`, enum values, `refColl.contains` (`repository-find-builder.ts`); validator-gated by `firstNonQueryableNode` (#760) | ✓ full LINQ `.Where(…)` | ✓ Ecto `where` | ⚠ hook-only (deferred → DBT-4) | **Hono/.NET/Phoenix cleared.** Only the React list-page filter mode remains — tracked as DBT-4 |
+| DBT-3 | **`X id[]` reference ordering** | ✓ `ordinal` column | ✓ `ordinal` column | ✗ unordered / set semantics (`generators.md:751`) | display-only | Elixir `ordinal` ordering, or ratify set semantics as the contract |
 | DBT-4 | **React list-page filter mode** | n/a | n/a | n/a | ✗ deferred; v1 emits hook only (`generators.md:43`; `body-walker.ts:658` `unsupported expr` fallback) | Implement filter-mode walker |
 | DBT-5 | **Page `requires <pred>` guard** | n/a | n/a | ⚠ v0 stub: bind-only (`generators.md:624`) | n/a | Full guard in `handle_params/3` |
 
@@ -322,7 +322,7 @@ migration-safety and debt work onto its phases.
 |---|---|---|
 | D-prov-wire | Expose current provenance lineage on the read wire as `ProvLineage option managed`? | **Defer**; off by default until DBT-1 closes, then opt-in. |
 | D-crud-payload | When P2 lands, default `crudish` to a `command`-payload param, or keep positional with payload behind a flag? | Flag first; flip default only post-parity. |
-| D-idarr-order | Ratify `X id[]` as unordered set semantics (close DBT-3 by spec), or implement Ash ordering? | Open — needs a wire-contract call. |
+| D-idarr-order | Ratify `X id[]` as unordered set semantics (close DBT-3 by spec), or implement Ecto ordering? | Open — needs a wire-contract call. |
 
 ## 10. Cross-references
 

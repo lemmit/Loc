@@ -460,7 +460,7 @@ Language:
 
 Parity (must match, or wire shape diverges):
 - TS/Hono backend — `src/platform/hono/...` + `src/generator/ts/`.
-- Phoenix/Ash — `src/generator/phoenix-live-view/` (Ash has first-class multitenancy; map to it).
+- Phoenix — `src/generator/phoenix-live-view/` (plain Ecto/Phoenix; scope queries by tenant column. The Ash foundation, which had first-class multitenancy, was removed in 2026 — `platform: elixir` is plain Ecto/Phoenix only and `foundation: ash` is now a validation error).
 
 React: **no isolation work needed** — the frontend already refetches through gated HTTP
 endpoints, so tenant scoping is enforced server-side. Query keys are unaffected.

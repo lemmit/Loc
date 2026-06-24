@@ -3,8 +3,8 @@
 //
 // "Style" is the request-pipeline shape — `cqrs` (one handler per
 // command via MediatR / a tiny dispatch table), `layered` (a service
-// class per aggregate calling repositories directly), `ash` (Phoenix's
-// Ash framework's action surface), …  One adapter per style each
+// class per aggregate calling repositories directly), …  One adapter
+// per style each
 // platform supports.  Decoupled from `PersistenceAdapter` because the
 // same persistence library composes with multiple styles.
 // ---------------------------------------------------------------------------

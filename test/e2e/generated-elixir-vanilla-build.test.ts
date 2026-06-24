@@ -65,8 +65,7 @@ function runMixTest(projDir: string, mirror: HexMirror | undefined): void {
 // CI shards one fixture per matrix cell (see elixir-vanilla-build.yml) so a cold
 // dep compile fits the per-cell timeout and reseeds its own cache.
 // `LOOM_PHOENIX_VANILLA_BUILD_CASE=<fixture>.ddd` selects that single fixture;
-// unset (local `npm run test:phoenix-vanilla`) builds them all.  Mirrors the Ash
-// gate's LOOM_PHOENIX_BUILD_CASE (generated-elixir-ash-build.test.ts).
+// unset (local `npm run test:phoenix-vanilla`) builds them all.
 function pickCases<T extends { name: string }>(all: T[]): T[] {
   const only = process.env.LOOM_PHOENIX_VANILLA_BUILD_CASE;
   if (!only) return all;
@@ -92,119 +91,16 @@ describe.skipIf(!ENABLED)(
     afterAll(() => {
       mirror?.stop();
     });
-    it.each(
-      pickCases([
-        { name: "vanilla-min.ddd", deployable: "api" },
-        { name: "vanilla-channels.ddd", deployable: "api" },
-        // Event sourcing (T2.b) + operation `or`-union returns (T2.c) — compile the
-        // from-scratch ES + producer-translation Elixir, not just the structure tests.
-        { name: "vanilla-eventlog.ddd", deployable: "api" },
-        { name: "vanilla-returns.ddd", deployable: "api" },
-        // Returning-op body statements (T2.c tail) — precondition/requires raise
-        // guards, `assign` struct-update, `emit` PubSub broadcast, fall-through
-        // success serialised to a wire map.
-        { name: "vanilla-returns-body.ddd", deployable: "api" },
-        // State-based named-operation BODY emission — a non-returning
-        // `operation reprice(qty, price) { precondition …; total := … }` renders
-        // its guards + `field := value` struct-updates and persists the assigned
-        // columns via put_change (not a param cast).
-        { name: "vanilla-op-body.ddd", deployable: "api" },
-        // Provenance runtime (DEBT-06) — a `provenanced` field's co-located
-        // `<field>_provenance` jsonb column, inline lineage capture at each
-        // named-op write site, and the transactional `provenance_records` flush
-        // (the `<App>.Provenance` SDK + the Json Ecto type + the migration).
-        { name: "vanilla-provenance.ddd", deployable: "api" },
-        // DEBT-32 — nested entity parts on a shape(embedded) vanilla aggregate:
-        // `contains lines: Line[]` → `embeds_many` over a part `embedded_schema`
-        // module; `lines += Line{…}` appends + `put_embed`s.  Compiles the
-        // embedded-schema part + put_embed persist.
-        { name: "vanilla-embed-parts.ddd", deployable: "api" },
-        // shape(document) (DEBT-07) — the `(id, data, version)` jsonb table, a
-        // schemaless-changeset validated fold, and the document CRUD repository
-        // (the relational `Map.from_struct` serialize swapped for a data-merge).
-        { name: "vanilla-document.ddd", deployable: "api" },
-        // ES applier folds over value-object / enum fields (P4.3): an inline VO
-        // constructor renders to a plain map on vanilla — compile that path.
-        { name: "vanilla-vo-fold.ddd", deployable: "api" },
-        // Per-field changeset validators (T2.i) — validate_number/length/format.
-        { name: "vanilla-invariants.ddd", deployable: "api" },
-        // Event-sourced append → Dispatcher fan-out (an ES event a workflow saga
-        // consumes) — compile the `<Ctx>.Dispatcher.dispatch/1` call in append.
-        { name: "vanilla-es-dispatch.ddd", deployable: "api" },
-        // Event-sourced WORKFLOW (A2-S5b): `<Wf>State` fold struct + `<wf>_events`
-        // schema + fold + stream IO + fold-on-load / append-own-events handlers.
-        { name: "vanilla-eventsourced-workflow.ddd", deployable: "api" },
-        // Custom-find HTTP surface — list / single / param-less GET actions.
-        { name: "vanilla-finds.ddd", deployable: "api" },
-        // Union-returning find — tagged success + problem_variant absence.
-        { name: "vanilla-union-find.ddd", deployable: "api" },
-        // Capability `filter` AND-ed into every Ecto read (list/find_by_id/find/
-        // retrieval/view) — plain Ecto has no Ash base_filter, so the conjoined
-        // `from(... where: ...)` reads must compile (and not silently drop the filter).
-        { name: "vanilla-capability-filter.ddd", deployable: "api" },
-        // `ignoring <Cap>` / `ignoring *` filter-bypass (named-filter-bypass.md
-        // §11, Slice 2): a read OMITS the bypassed capability's `where:`
-        // predicate.  Compiles the per-find dropped conjuncts, the bypassed
-        // view, and the gated `where(query, [record], ...)` retrieval stages an
-        // inline `Repo.findAll(...) ignoring …` skips via `ignore_filters` /
-        // `ignore_all_filters` opts.
-        { name: "vanilla-filter-bypass.ddd", deployable: "api" },
-        // Principal (tenancy) `filter this.tenantId == currentUser.tenantId` — the
-        // request actor is threaded from `conn.assigns.current_user` (Auth plug)
-        // into every read and pinned (`^(current_user && current_user.tenant_id)`).
-        // Compiles the threaded repository/context/controller/retrieval/view + the
-        // auth plug spliced into the router.
-        { name: "vanilla-tenancy.ddd", deployable: "api" },
-        // DEBT-02 Slice A — a PRINCIPAL-referencing capability filter on a
-        // `shape(embedded)` aggregate: the root scalars are real columns, so it
-        // reuses the relational-principal path — `record.tenant_id ==
-        // ^(current_user && current_user.tenant_id)` threaded through every read,
-        // with `current_user` from `conn.assigns` (Auth plug).  Previously gated
-        // by `loom.context-filter-unsupported`.
-        { name: "embedded-tenancy.ddd", deployable: "api" },
-        // Plain (non-event-sourced) workflow saga: the `<Wf>` GenServer-free
-        // Ecto-state instance + correlation row + create/continuation handlers
-        // compiled on the vanilla foundation.
-        { name: "vanilla-workflows.ddd", deployable: "api" },
-        // Workflow own-state COMPOUND mutation (`+=`/`-=`) on the vanilla
-        // foundation: the saga create + continuation handlers persist each
-        // compound write as a `Repo.update!(Ecto.Changeset.change(state,
-        // %{field: <state.field +|- value>}))` — int `state.attempts + 1` and
-        // money `Decimal.add(state.accrued, Decimal.new("9.99"))`.  The money
-        // path's `Decimal.add/sub` (vs an uncompilable-at-runtime native `+`)
-        // is the real bar for the compound own-state arithmetic.
-        { name: "vanilla-workflow-compound.ddd", deployable: "api" },
-        // Nested control flow in workflow bodies: `for-each` / `if-let` /
-        // `repo-run` nested inside a `for-each` body or an `if-let` branch
-        // (the for-each validator only inspects op-calls, so the nesting is
-        // valid input).  Before the recursion fix these dropped a `# TODO`
-        // (uncompilable); now each lowers as a `<-` with-clause.
-        { name: "vanilla-nested-flow.ddd", deployable: "api" },
-        // Lifecycle stamps (`with auditable`) — the audit columns are applied via
-        // `Ecto.Changeset.put_change` on the changeset before `Repo.insert`/
-        // `Repo.update`; `currentUser` resolves to the principal id off the
-        // threaded `current_user` map.  Compiles the stamped insert/update seam +
-        // the threaded context delegate + controller.
-        { name: "vanilla-auditable.ddd", deployable: "api" },
-        // Per-action `audited` audit-record emission (audit-and-logging.md) — the
-        // `<App>.Audit` sink (Record schema + Json Ecto type + transactional
-        // `record/2`), the late `audit_records` migration, and the forced
-        // `Repo.transaction` wrap on an audited operation (`<op>_<agg>` body),
-        // create (before:nil/after=wire), and destroy (before=wire/after:nil).
-        // Compiles the transactional audit tail against real vanilla Ecto/Phoenix.
-        { name: "vanilla-audited.ddd", deployable: "api" },
-        // Domain `test "..."` blocks → ExUnit over the pure domain core: this
-        // fixture emits `test/` files, so the harness also runs `mix test`
-        // (DB-free) on top of the prod compile.  Pins the test-emission parity
-        // and the F6 field-default fix.
-        { name: "vanilla-domain-tests.ddd", deployable: "api" },
-        // Value-object COLLECTION (`Money[]`) persisted as id-less child tables
-        // (`has_many` + `cast_assoc`, replace-on-update) alongside a single VO
-        // field (`total: Money`, stays jsonb) and a VO invariant (`amount >= 0`)
-        // enforced on both the single VO and every array element.
-        { name: "vanilla-value-collections.ddd", deployable: "api" },
-      ]),
-    )("$name → mix compile --warnings-as-errors", ({ name, deployable }) => {
+    // Enumerate the fixtures dynamically from the directory — the same set the
+    // `elixir-vanilla-build.yml` matrix derives via `ls`, so the two never
+    // drift (a fixture added/removed under elixir-vanilla-build/ needs no edit
+    // here). Every `.ddd` in the dir is a mix-compile target.
+    const allFixtures = fs
+      .readdirSync(fixturesDir)
+      .filter((f) => f.endsWith(".ddd"))
+      .sort()
+      .map((name) => ({ name }));
+    it.each(pickCases(allFixtures))("$name → mix compile --warnings-as-errors", ({ name }) => {
       const fixturePath = path.join(fixturesDir, name);
       const baseOutDir = process.env.LOOM_PHOENIX_OUT_DIR;
       const outDir = baseOutDir
@@ -213,33 +109,45 @@ describe.skipIf(!ENABLED)(
       fs.mkdirSync(outDir, { recursive: true });
 
       try {
-        // The vanilla orchestrator emits to `<deployable>/`, not
-        // `phoenix_app/`.  Read the deployable slug per fixture.
-        const projDir = path.join(outDir, "out", deployable);
-        if (!fs.existsSync(path.join(projDir, "mix.exs"))) {
-          execSync(`node ${cli} generate system ${fixturePath} -o ${outDir}/out`, {
+        const genRoot = path.join(outDir, "out");
+        // The vanilla orchestrator emits one project per deployable under
+        // `out/<deployable>/`; the deployable slug varies per fixture (`api`,
+        // `phoenixApp`, …), so discover the elixir project(s) by globbing for
+        // `mix.exs` rather than hardcoding the slug.
+        const mixProjects = (): string[] =>
+          fs.existsSync(genRoot)
+            ? fs
+                .readdirSync(genRoot)
+                .map((d) => path.join(genRoot, d))
+                .filter((d) => fs.existsSync(path.join(d, "mix.exs")))
+            : [];
+        if (mixProjects().length === 0) {
+          execSync(`node ${cli} generate system ${fixturePath} -o ${genRoot}`, {
             stdio: "inherit",
             cwd: repoRoot,
           });
         }
-        expect(fs.existsSync(path.join(projDir, "mix.exs"))).toBe(true);
+        const projDirs = mixProjects();
+        expect(projDirs.length).toBeGreaterThan(0);
 
-        // Vanilla mix.exs must have zero Ash deps — re-asserting at
-        // the e2e level on top of the unit assertion.
-        const mix = fs.readFileSync(path.join(projDir, "mix.exs"), "utf8");
-        expect(mix).not.toContain(":ash,");
-        expect(mix).not.toContain(":ash_postgres,");
-        expect(mix).not.toContain(":ash_phoenix,");
+        for (const projDir of projDirs) {
+          // Vanilla mix.exs must have zero Ash deps — re-asserting at the e2e
+          // level on top of the unit assertion.
+          const mix = fs.readFileSync(path.join(projDir, "mix.exs"), "utf8");
+          expect(mix).not.toContain(":ash,");
+          expect(mix).not.toContain(":ash_postgres,");
+          expect(mix).not.toContain(":ash_phoenix,");
 
-        // mix deps.get + compile inside the elixir image (cold-cache fits the
-        // 600s exec budget; the headroom absorbs transient hex slowness).
-        // Routed through the loopback hex mirror when LOOM_HEX_MIRROR=1.
-        runMixCompile(projDir, mirror);
+          // mix deps.get + compile inside the elixir image (cold-cache fits the
+          // 600s exec budget; the headroom absorbs transient hex slowness).
+          // Routed through the loopback hex mirror when LOOM_HEX_MIRROR=1.
+          runMixCompile(projDir, mirror);
 
-        // If the fixture's aggregates declared domain `test "..."` blocks, the
-        // emitter wrote an ExUnit suite (+ test_helper.exs) — run it (DB-free).
-        if (fs.existsSync(path.join(projDir, "test", "test_helper.exs"))) {
-          runMixTest(projDir, mirror);
+          // If the fixture's aggregates declared domain `test "..."` blocks, the
+          // emitter wrote an ExUnit suite (+ test_helper.exs) — run it (DB-free).
+          if (fs.existsSync(path.join(projDir, "test", "test_helper.exs"))) {
+            runMixTest(projDir, mirror);
+          }
         }
       } finally {
         if (!baseOutDir) {

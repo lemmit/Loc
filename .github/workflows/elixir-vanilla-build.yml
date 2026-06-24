@@ -18,8 +18,8 @@ name: Elixir / Vanilla build verification
 # exists).  Sharding keeps a cold cache self-healing — see the job
 # comment below.
 #
-# Sibling of `elixir-ash-build.yml` (the Ash-foundation gate), and
-# sharded the same way (#1367): the old single job compiled all ~14
+# The Elixir-foundation compile gate, sharded (#1367): the old single
+# job compiled all ~14
 # fixtures sequentially behind one shared cache, so a fully-cold run
 # (after the 7-day cache eviction) couldn't finish in the timeout, got
 # cancelled, and never reseeded the cache — staying red until a
@@ -78,7 +78,7 @@ jobs:
             | xargs -n1 basename | sed 's/\.ddd$//' | jq -R . | jq -cs .)
           echo "matrix={\"fixture\":$fixtures}" >> "$GITHUB_OUTPUT"
 
-  # One job PER fixture (mirrors elixir-ash-build.yml's sharding, #1367).  A
+  # One job PER fixture (sharded, #1367).  A
   # fully cold cell is ONE fixture (~2-3min) — it always completes within the
   # timeout and reseeds its own per-fixture cache, so a cold cache self-heals.
   build-generated-elixir-vanilla:
@@ -105,8 +105,7 @@ jobs:
 
       # Pre-generate THIS fixture into a stable path so we can hash the
       # emitted mix.exs for the cache key.  Vanilla fixtures emit to
-      # `<deployable>/` (e.g. `api/`), not `phoenix_app/` as the Ash
-      # matrix does — so the cache globs `*/out/*/`.
+      # `<deployable>/` (e.g. `api/`) — so the cache globs `*/out/*/`.
       - name: Pre-generate fixture (for cache key)
         run: |
           mkdir -p "/tmp/ci/vanilla/${{ matrix.fixture }}/out"

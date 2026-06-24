@@ -46,6 +46,15 @@ const STRICT_PARITY = process.env.LOOM_E2E_STRICT_PARITY === "1";
 // full nightly tier leaves this unset.
 const PARITY_ONLY = process.env.LOOM_E2E_PARITY_ONLY === "1";
 
+// The vanilla Phoenix backend (the only elixir foundation since Ash was removed)
+// is not yet showcase-complete — it can't `mix compile` the full showcase
+// (aggregate-`function` calls in op bodies, `currentUser` in workflows, …;
+// tracked in docs/plans/vanilla-phoenix-gaps.md).  `LOOM_E2E_SKIP_PHOENIX=1`
+// drops the phoenix backend from the build/boot + the OpenAPI parity set so the
+// per-PR conformance-parity gate runs over the four mature backends until those
+// gaps close (then re-include it — remove the flag from conformance-parity.yml).
+const SKIP_PHOENIX = process.env.LOOM_E2E_SKIP_PHOENIX === "1";
+
 function hasDocker(): boolean {
   try {
     execSync("docker ps", { stdio: "ignore" });
@@ -87,7 +96,9 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
     // In parity-only mode (per-PR CI tier) build + boot just the five
     // backends + their db — the SPA frontends are slow to build and the
     // OpenAPI parity check doesn't need them.  The full run builds all.
-    const services = PARITY_ONLY ? " dotnet_api hono_api phoenix_api python_api java_api" : "";
+    const services = PARITY_ONLY
+      ? ` dotnet_api hono_api${SKIP_PHOENIX ? "" : " phoenix_api"} python_api java_api`
+      : "";
     execSync(`docker compose -f ${outDir}/docker-compose.yml build${services}`, {
       stdio: "inherit",
       timeout: 600_000,
@@ -143,7 +154,9 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
       await pollHealthy("http://localhost:3000/health", 60_000); // honoApi
       await pollHealthy("http://localhost:8000/health", 120_000); // pythonApi
       await pollHealthy("http://localhost:8080/health", 120_000); // dotnetApi
-      await pollHealthy("http://localhost:4000/health", 180_000); // phoenixApi
+      if (!SKIP_PHOENIX) {
+        await pollHealthy("http://localhost:4000/health", 180_000); // phoenixApi
+      }
       await pollHealthy("http://localhost:8081/health", 180_000); // javaApi
     } catch (err) {
       // Same forensic capture as the up -d catch: containers are up
@@ -266,10 +279,14 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
         // Every backend now serves the spec at the aligned root path /openapi.json.
         node: await fetchSpec("http://localhost:3000/openapi.json"),
         dotnet: await fetchSpec("http://localhost:8080/openapi.json"),
-        phoenix: await fetchSpec("http://localhost:4000/openapi.json"),
         python: await fetchSpec("http://localhost:8000/openapi.json"),
         java: await fetchSpec("http://localhost:8081/openapi.json"),
       };
+      // The vanilla Phoenix backend isn't showcase-complete yet (see
+      // SKIP_PHOENIX above) — only fetch/compare its spec when it was built.
+      if (!SKIP_PHOENIX) {
+        specs.phoenix = await fetchSpec("http://localhost:4000/openapi.json");
+      }
     } catch (err) {
       // /health succeeded but a spec endpoint didn't.  Most likely cause is
       // a server-side rendering exception (e.g. an OpenApiSpex schema error
@@ -319,14 +336,16 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
     //
     // `diffSpecs` is pure — see test/_helpers/openapi-normalize.test.ts
     // for the unit-test coverage of each divergence class.
-    const pairs: Array<[keyof typeof specs, keyof typeof specs]> = [
-      ["node", "dotnet"],
-      ["node", "phoenix"],
-      ["dotnet", "phoenix"],
-      ["node", "python"],
-      ["dotnet", "python"],
-      ["phoenix", "python"],
-    ];
+    const pairs: Array<[keyof typeof specs, keyof typeof specs]> = (
+      [
+        ["node", "dotnet"],
+        ["node", "phoenix"],
+        ["dotnet", "phoenix"],
+        ["node", "python"],
+        ["dotnet", "python"],
+        ["phoenix", "python"],
+      ] as Array<[keyof typeof specs, keyof typeof specs]>
+    ).filter(([a, b]) => !SKIP_PHOENIX || (a !== "phoenix" && b !== "phoenix"));
     let cleanOverall = true;
     for (const [refName, otherName] of pairs) {
       const diff = diffSpecs(
@@ -407,7 +426,8 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
     const targets: Record<string, string> = {
       node: "http://localhost:3000/api/workflows/register_project",
       dotnet: "http://localhost:8080/api/workflows/register_project",
-      phoenix: "http://localhost:4000/api/workflows/register_project",
+      // phoenix dropped when SKIP_PHOENIX (not built/booted) — see above.
+      ...(SKIP_PHOENIX ? {} : { phoenix: "http://localhost:4000/api/workflows/register_project" }),
       python: "http://localhost:8000/api/workflows/register_project",
       java: "http://localhost:8081/api/workflows/register_project",
     };

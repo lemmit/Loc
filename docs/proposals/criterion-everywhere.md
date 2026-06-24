@@ -2,6 +2,8 @@
 
 > **[2026-06-20 status audit]** Stale internal cite: `firstNonQueryableNode` is re-exported from `validate.ts` but implemented under `src/ir/validate/checks/query-checks.ts` (orchestrator refactor). Shipped/supersession claims still accurate.
 
+> **(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain Ecto/Phoenix only and `foundation: ash` is now a validation error. References below to a Phoenix/Ash `base_filter` / "the actor `^actor(:id)`" describe the Ash foundation; the elixir backend now AND-s the same capability filters into each Ecto read site.)**
+
 > **Mechanism superseded by
 > [`reified-criteria.md`](./reified-criteria.md).** This doc's *inline*
 > approach (substitute the criterion body at each use-site; bind
@@ -184,7 +186,7 @@ to a `CASE`/`IN` set and is selectable when its arms are. Anything else
 > validatable.
 
 Reuse the *existing* find-filter translation as the oracle: a criterion
-is selectable iff `lowerToDrizzle` (and its `.NET` / Ash / JPQL peers)
+is selectable iff `lowerToDrizzle` (and its `.NET` / Ecto / JPQL peers)
 can lower its body. That check already exists for inline `find where`
 filters — selectability classification is running it over the
 **inlined** criterion body and surfacing the result as a diagnostic
@@ -213,7 +215,7 @@ backend already has the ambient accessor:
 | Hono / Drizzle | request context | closed-over runtime value: `eq(orders.ownerId, principal.id)` |
 | .NET / EF Core | `IHttpContextAccessor` / injected `ICurrentUser` | `.Where(x => x.OwnerId == _principal.Id)` |
 | Spring / JPA | `SecurityContextHolder` | `:currentUserId` named param |
-| Phoenix / Ash | the actor | `^actor(:id)` — first-class current-actor-in-filter |
+| Phoenix / Ecto | the current user passed into the context fn | `^current_user.id` pinned into the `Ecto.Query` |
 
 So `criterion OwnedByMe of Order = ownerId == currentUser.id` lowers to
 `WHERE owner_id = :currentUserId` with no DSL signature change. This is
@@ -284,7 +286,7 @@ This is validator + lowering + IR tagging. No grammar change.
 
 | Area | File(s) | Work |
 |---|---|---|
-| Selectability oracle | `src/ir/lower/lower-expr.ts` (+ the per-backend `lowerToDrizzle` / LINQ / Ash / JPQL lowerers) | Surface "can this body lower to a filter?" as a queryable boolean, reused by the validator instead of throwing internally |
+| Selectability oracle | `src/ir/lower/lower-expr.ts` (+ the per-backend `lowerToDrizzle` / LINQ / Ecto / JPQL lowerers) | Surface "can this body lower to a filter?" as a queryable boolean, reused by the validator instead of throwing internally |
 | Per-use-site check | `src/ir/validate/validate.ts` (or the relevant validator under `src/language/validators/`) | Emit `loom.criterion-not-selectable` when a non-selectable criterion lands in a `find` / `view` / `filter` position |
 | Principal/clock tagging | `src/ir/types/loom-ir.ts`, `src/ir/lower/lower-expr.ts` | `usesPrincipal` / `implicitParams` on the lowered filter; recognise `currentUser.<scalar>` and `now()` as bound params |
 | Backend accessor splice | `src/generator/<platform>/` find/filter emitters | Bind the principal/clock param via each backend's ambient accessor (table above) |

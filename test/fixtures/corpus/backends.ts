@@ -5,8 +5,9 @@
 // the value below to emit that feature on a given backend.  See
 // `docs/plans/global-test-coverage-plan.md` (Phase 0).
 
-/** Stable backend keys used by the manifest + coverage gate. */
-export const BACKENDS = ["node", "dotnet", "java", "python", "phoenix", "vanilla"] as const;
+/** Stable backend keys used by the manifest + coverage gate.  `vanilla` is the
+ *  sole elixir backend (plain Ecto/Phoenix — the Ash foundation was removed). */
+export const BACKENDS = ["node", "dotnet", "java", "python", "vanilla"] as const;
 export type Backend = (typeof BACKENDS)[number];
 
 /** The `platform:` clause each backend key lowers to in a deployable block. */
@@ -15,7 +16,6 @@ export const PLATFORM_CLAUSE: Record<Backend, string> = {
   dotnet: "dotnet",
   java: "java",
   python: "python",
-  phoenix: "elixir { foundation: ash }",
   vanilla: "elixir { foundation: vanilla }",
 };
 
@@ -25,6 +25,5 @@ export const BACKEND_LABEL: Record<Backend, string> = {
   dotnet: ".NET",
   java: "Java/Spring",
   python: "Python/FastAPI",
-  phoenix: "Phoenix/Ash",
-  vanilla: "vanilla Elixir",
+  vanilla: "Elixir (Phoenix/Ecto)",
 };

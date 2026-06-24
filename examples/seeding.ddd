@@ -4,7 +4,7 @@
 //   - `ddd generate dotnet` → Infrastructure/Persistence/Seed.cs (LOOM_DOTNET_BUILD)
 //
 // The Phoenix gate uses the system-wrapped twin at
-// test/e2e/fixtures/elixir-ash-build/seeding.ddd.
+// test/e2e/fixtures/elixir-vanilla-build/vanilla-seeding.ddd.
 //
 // The default/demo datasets are scalar + enum only (domain path, framework-
 // minted ids).  The `wired raw` dataset compile-checks the raw explicit-id

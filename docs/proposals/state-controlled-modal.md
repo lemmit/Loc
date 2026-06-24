@@ -88,4 +88,4 @@ are unaffected.
 Generated output verified structurally for all packs (state declaration +
 dialog/conditional binding + children render). Compile verification is the
 per-frontend build CI (`generated-react-build` / `-vue-build` / `-svelte-build`
-/ `elixir-ash-build`), as for any pack template — not run in this environment.
+/ the elixir-vanilla-* gates), as for any pack template — not run in this environment.

@@ -4,9 +4,8 @@ import { parseValid } from "../../_helpers/parse.js";
 
 // ---------------------------------------------------------------------------
 // Backend-host embedding for Vue (vue-frontend-plan.md Slice 8) — a
-// dotnet / java / phoenix deployable whose hosted `ui` declares
-// `framework: vue` embeds the Vue SPA exactly where it embeds the
-// React one (`ClientApp/` on dotnet/java, `assets/` on phoenix),
+// dotnet / java deployable whose hosted `ui` declares `framework: vue`
+// embeds the Vue SPA exactly where it embeds the React one (`ClientApp/`),
 // calling the host's same-origin `/api` surface.  `vue` is a
 // STATIC_BUNDLE_FRAMEWORK, so the serving wiring is identical.
 // ---------------------------------------------------------------------------
@@ -57,14 +56,5 @@ describe("vue embedding on backend hosts", () => {
     const out = await files(src("java"));
     expect(out.has("app/ClientApp/src/App.vue")).toBe(true);
     expect(out.get("app/ClientApp/src/api/config.ts")).toContain('?? "/api"');
-  });
-
-  it("phoenix host embeds the Vue SPA under assets/", async () => {
-    const out = await files(src("elixir"));
-    expect(out.has("app/assets/src/App.vue")).toBe(true);
-    expect(out.get("app/assets/src/api/config.ts")).toContain('?? "/api"');
-    // No LiveView page modules for the vue ui.
-    const liveFiles = [...out.keys()].filter((p) => p.includes("_live.ex"));
-    expect(liveFiles).toEqual([]);
   });
 });

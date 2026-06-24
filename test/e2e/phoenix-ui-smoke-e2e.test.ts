@@ -19,9 +19,9 @@ import { describe, expect, it } from "vitest";
 // Playwright smoke (every param-less LiveView route navigates + asserts its
 // URL) against http://localhost:<port>.  Proves the routes the generator wired
 // actually mount and render — the runtime regression class the `mix compile`
-// gate (generated-elixir-ash-build) is blind to.
+// gate (generated-elixir-vanilla-build) is blind to.
 //
-// Slow (~5-8min cold; hex deps + Ash compile + postgres) and requires docker
+// Slow (~5-8min cold; hex deps + Phoenix compile + postgres) and requires docker
 // (or LOOM_OBS_PG_URL) + mix on PATH + a Playwright chromium download.  Opt-in
 // via LOOM_PHOENIX_UI_E2E=1; shares the elixir-ash-obs-e2e.yml provisioning
 // (postgres service + erlef/setup-beam).  Mechanics mirror the proven

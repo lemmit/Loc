@@ -22,8 +22,8 @@ import { compilePack, type LoadedPack, type PackFormat, type PackManifest } from
 /** Names of the repo-root template directories that supply
  *  pack-agnostic Handlebars sources, keyed by pack format.  TSX packs
  *  (mantine, shadcn) consume the React/Vite/Docker scaffolds; HEEx
- *  packs (ashPhoenix) consume their own future `phoenix/` shared
- *  layer (empty in v0 — the ashPhoenix pack ships its shell files
+ *  packs (coreComponents) consume their own future `phoenix/` shared
+ *  layer (empty in v0 — the coreComponents pack ships its shell files
  *  directly).  Each directory is read flat — no nesting — and merged
  *  into a single shared-sources map keyed by logical name. */
 const SHARED_SOURCE_DIRS_TSX = ["vite", "api", "docker"] as const;

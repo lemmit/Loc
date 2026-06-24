@@ -9,9 +9,8 @@ Fixture count per backend build-gate (`test/e2e/fixtures/<backend>-build/`):
 | Backend | Fixtures | Status |
 |---|---|---|
 | Java / Spring | **25** | de-facto most complete |
-| Phoenix / Ash | 19 | broad |
+| Phoenix / Elixir | 15 | broad (plain Ecto/Phoenix — Ash foundation removed; the former ash row is gone) |
 | Python / FastAPI | 16 | broad |
-| vanilla Elixir | 15 | broad |
 | **TS / Hono** | **9** | **thin — and this is the *reference* backend** |
 | **.NET** | **6** | **thinnest first-class target** |
 
@@ -24,39 +23,41 @@ Two structural problems behind the numbers:
 
 ✓ = a fixture exercises it · ✗ = gap · — = N/A for that backend
 
-| Feature | Hono | .NET | Java | Python | Phoenix | vanilla |
-|---|:--:|:--:|:--:|:--:|:--:|:--:|
-| core domain (VO/event/enum/containment/finds) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| auth — OIDC | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |
-| auth — simple / `auth: ui` guard | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
-| event sourcing (log + appliers) | ✗ | ✓ | ✓ | ✓ | ✗ | ✓ |
-| ES → dispatcher fan-out | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ |
-| workflow / saga (plain) | ✗ | ✗ | ✓ | ✓ | ✓ | ✓ |
-| eventsourced workflow | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ |
-| outbox / durable channel | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
-| inheritance — TPH | ✗ | ✓ | ✓ | ✓ | ✓ | ✗ |
-| inheritance — TPC / polymorphic find | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
-| document (whole aggregate jsonb) | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ |
-| embedded (containment jsonb columns) | ✗ | ✗ | ✓ | ✓ | ✓ | ✗ |
-| capability / context filter | ✓ | ✗ | ✓ | ✗ | ✓ | ✓ |
-| tenancy filter (principal) | ✓ | ✗ | ✓ | ✗ | ✓ | ✓ |
-| tenancy through ops / reified | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ |
-| unions / operation-returns (exception-less) | ✓ | ✗ | ✓ | ✗ | ✓ | ✓ |
-| union find + absence (404) | ✗ | ✗ | ✓ | ✗ | ✓ | ✓ |
-| pagination (`paged`) | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ |
-| seeding | ✗ | ✗ | ✓ | ✓ | ✓ | ✗ |
-| state gate (`when` / `canCommand`) | ✗ | ✗ | ✓ | ✓ | ✓ | ✗ |
-| resources (S3 / queue / http client) | ✗ | ✗ | ✓ | ✓ | ✗ | ✗ |
-| extern operations | ✗ | ✗ | ✓ | ✓ | ✗ | ✗ |
-| stamps (audit / softDelete) | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ |
-| provenance (provenanced fields + snapshot) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| value collections (`Money[]`) | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ |
-| single containment (`_parent`) | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ |
-| views / read models | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| criterion (reusable predicate) | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ |
-| fullstack embed (SPA in backend) | ✗ | ✗ | ✓ | ✓ | ✓ | ✗ |
-| `byFeature` directory layout | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ |
-| alt persistence | mikroorm | dapper | — | — | — | — |
+| Feature | Hono | .NET | Java | Python | Phoenix |
+|---|:--:|:--:|:--:|:--:|:--:|
+| core domain (VO/event/enum/containment/finds) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| auth — OIDC | ✓ | ✓ | ✓ | ✓ | ✓ |
+| auth — simple / `auth: ui` guard | ✓ | ✗ | ✓ | ✓ | ✗ |
+| event sourcing (log + appliers) | ✗ | ✓ | ✓ | ✓ | ✓ |
+| ES → dispatcher fan-out | ✗ | ✗ | ✗ | ✗ | ✓ |
+| workflow / saga (plain) | ✗ | ✗ | ✓ | ✓ | ✓ |
+| eventsourced workflow | ✓ | ✓ | ✓ | ✓ | ✓ |
+| outbox / durable channel | ✗ | ✗ | ✗ | ✓ | ✗ |
+| inheritance — TPH | ✗ | ✓ | ✓ | ✓ | ✓ |
+| inheritance — TPC / polymorphic find | ✗ | ✗ | ✗ | ✓ | ✗ |
+| document (whole aggregate jsonb) | ✓ | ✗ | ✓ | ✓ | ✗ |
+| embedded (containment jsonb columns) | ✗ | ✗ | ✓ | ✓ | ✓ |
+| capability / context filter | ✓ | ✗ | ✓ | ✗ | ✓ |
+| tenancy filter (principal) | ✓ | ✗ | ✓ | ✗ | ✓ |
+| tenancy through ops / reified | ✗ | ✗ | ✓ | ✗ | ✓ |
+| unions / operation-returns (exception-less) | ✓ | ✗ | ✓ | ✗ | ✓ |
+| union find + absence (404) | ✗ | ✗ | ✓ | ✗ | ✓ |
+| pagination (`paged`) | ✗ | ✗ | ✓ | ✗ | ✓ |
+| seeding | ✗ | ✗ | ✓ | ✓ | ✓ |
+| state gate (`when` / `canCommand`) | ✗ | ✗ | ✓ | ✓ | ✓ |
+| resources (S3 / queue / http client) | ✗ | ✗ | ✓ | ✓ | ✗ |
+| extern operations | ✗ | ✗ | ✓ | ✓ | ✗ |
+| stamps (audit / softDelete) | ✗ | ✗ | ✓ | ✗ | ✗ |
+| provenance (provenanced fields + snapshot) | ✗ | ✗ | ✗ | ✗ | ✗ |
+| value collections (`Money[]`) | ✗ | ✗ | ✗ | ✗ | ✓ |
+| single containment (`_parent`) | ✗ | ✗ | ✓ | ✗ | ✗ |
+| views / read models | ✗ | ✗ | ✗ | ✗ | ✗ |
+| criterion (reusable predicate) | ✗ | ✗ | ✓ | ✗ | ✓ |
+| fullstack embed (SPA in backend) | ✗ | ✗ | ✓ | ✓ | ✓ |
+| `byFeature` directory layout | ✓ | ✓ | ✗ | ✗ | ✗ |
+| alt persistence | mikroorm | dapper | — | — | — |
+
+(The former separate `Phoenix`/`vanilla` columns are collapsed into one `Phoenix` column — Ash foundation removed; elixir is plain Ecto/Phoenix only. A ✓ reflects coverage on either former foundation.)
 
 **The white space is the work.** Hono and .NET are mostly-empty columns; `provenance`, `views`, and `value collections` are nearly-empty *rows* (gaps on every backend); TPC, outbox, and stamps are covered on a single backend each.
 
@@ -155,7 +156,7 @@ Drive the manifest to full per the support matrix, **prioritising the empty colu
 
 1. **Hono** → bring from 9 to parity: add document, embedded, tenancy, unions+absence, paged, seeding, `when`, resources, extern, stamps, fullstack, criterion, value-collections.
 2. **.NET** → bring from 6 to parity: same list (its column is the emptiest).
-3. **Fill the single-backend rows** so every backend that *supports* a feature has the corpus fixture: TPH on Hono, TPC beyond Python, outbox beyond Python, ES-dispatch beyond the Elixir pair, stamps beyond Java.
+3. **Fill the single-backend rows** so every backend that *supports* a feature has the corpus fixture: TPH on Hono, TPC beyond Python, outbox beyond Python, ES-dispatch beyond Elixir, stamps beyond Java.
 4. **Fill the near-empty rows on every backend:** `views` / read models (currently ✗ everywhere), `provenance` (✗ everywhere), `value collections` (Phoenix only today).
 
 Each addition = one corpus `.ddd` + a manifest row + the backend's existing compile gate picks it up automatically. CI sharding (`LOOM_*_BUILD_CASE`) already exists, so cost is bounded.

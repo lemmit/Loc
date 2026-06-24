@@ -1,16 +1,18 @@
-// Vanilla foundation render-expr seam (vanilla-foundation-tdd-plan.md, Slice 0;
-// vanilla-foundation-research.md §3). The shared Elixir expression renderer
-// diverges at two leaves under `foundation: "vanilla"` (plain Ecto, no Ash):
-// enum values render as stored strings (not Ash atoms), and a filter-bound
-// param is a bare Ecto pin `^name` (not the Ash read-action `^arg(:name)`).
-// One RenderCtx flag, not a separate target — the 17-arm dispatch is shared.
+// Vanilla foundation render-expr leaves (vanilla-foundation-tdd-plan.md, Slice 0;
+// vanilla-foundation-research.md §3). `platform: elixir` only emits the vanilla
+// foundation (plain Ecto, no Ash): enum values render as stored strings, and a
+// filter-bound param is a bare Ecto pin `^name`.
 
 import { describe, expect, it } from "vitest";
 import { type RenderCtx, renderExpr } from "../../../src/generator/elixir/render-expr.js";
 import type { ExprIR } from "../../../src/ir/types/loom-ir.js";
 
-const ash: RenderCtx = { thisName: "record", contextModule: "Acme.Sales", filterArgs: true };
-const vanilla: RenderCtx = { ...ash, foundation: "vanilla" };
+const ctx: RenderCtx = {
+  thisName: "record",
+  contextModule: "Acme.Sales",
+  filterArgs: true,
+  foundation: "vanilla",
+};
 
 const enumVal: ExprIR = { kind: "ref", name: "Confirmed", refKind: "enum-value" };
 const filterParam: ExprIR = { kind: "ref", name: "minTotal", refKind: "param" };
@@ -22,22 +24,15 @@ const filter: ExprIR = {
   right: enumVal,
 };
 
-describe("render-expr foundation seam", () => {
-  it("ash (default): enum → atom, filter param → ^arg(:name)", () => {
-    expect(renderExpr(enumVal, ash)).toBe(":confirmed");
-    expect(renderExpr(filterParam, ash)).toBe("^arg(:min_total)");
-    expect(renderExpr(filter, ash)).toBe("record.status == :confirmed");
+describe("render-expr vanilla leaves", () => {
+  it("enum → stored string, filter param → bare ^pin", () => {
+    expect(renderExpr(enumVal, ctx)).toBe('"confirmed"');
+    expect(renderExpr(filterParam, ctx)).toBe("^min_total");
+    expect(renderExpr(filter, ctx)).toBe('record.status == "confirmed"');
   });
 
-  it("vanilla: enum → stored string, filter param → bare ^pin", () => {
-    expect(renderExpr(enumVal, vanilla)).toBe('"confirmed"');
-    expect(renderExpr(filterParam, vanilla)).toBe("^min_total");
-    expect(renderExpr(filter, vanilla)).toBe('record.status == "confirmed"');
-  });
-
-  it("this-prop access is foundation-agnostic (record.<field> either way)", () => {
+  it("this-prop access renders record.<field>", () => {
     const prop: ExprIR = { kind: "ref", name: "shipState", refKind: "this-prop" };
-    expect(renderExpr(prop, ash)).toBe("record.ship_state");
-    expect(renderExpr(prop, vanilla)).toBe("record.ship_state");
+    expect(renderExpr(prop, ctx)).toBe("record.ship_state");
   });
 });

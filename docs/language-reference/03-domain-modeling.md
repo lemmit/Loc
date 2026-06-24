@@ -107,12 +107,13 @@ public record Money(BigDecimal amount, Currency currency) {}
 ```
 == elixir
 ```elixir
-# orders/money.ex — an embedded Ash resource
+# orders/money.ex — an embedded Ecto schema
 defmodule ApiElixir.Orders.Money do
-  use Ash.Resource, data_layer: :embedded
-  attributes do
-    attribute :amount, :decimal, allow_nil?: false
-    attribute :currency, ApiElixir.Orders.Currency, allow_nil?: false
+  use Ecto.Schema
+  @primary_key false
+  embedded_schema do
+    field :amount, :decimal
+    field :currency, ApiElixir.Orders.Currency
   end
 end
 ```
@@ -283,14 +284,15 @@ public enum Currency { USD, EUR, GBP }
 ```
 == elixir
 ```elixir
-# orders/currency.ex — Ash enum; members are downcased atoms on the wire
+# orders/currency.ex — Ecto.Enum; members are downcased atoms on the wire
 defmodule ApiElixir.Orders.Currency do
-  use Ash.Type.Enum, values: [:usd, :eur, :gbp]
+  use Ecto.Type
+  # backed by Ecto.Enum, values: [:usd, :eur, :gbp]
 end
 ```
 ::: end
 
-> **Casing divergence.** Node/dotnet/java keep the member name verbatim (`USD`); the Elixir/Ash backend lowercases members to atoms (`:usd`). Both round-trip consistently within a backend; the divergence is only visible if you compare wire payloads across backends.
+> **Casing divergence.** Node/dotnet/java keep the member name verbatim (`USD`); the Elixir backend lowercases members to atoms (`:usd`). Both round-trip consistently within a backend; the divergence is only visible if you compare wire payloads across backends.
 
 ## Fields (`Property`)
 

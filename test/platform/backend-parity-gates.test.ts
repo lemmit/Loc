@@ -34,10 +34,10 @@ import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import { generateSystems } from "../../src/system/index.js";
 import { parseString } from "../_helpers/parse.js";
 
-// The five domain (logic-running, persistence-owning) backends.  `elixir`
-// defaults to the `ash` foundation when written as `platform: elixir`, which
-// matches the gate-set membership encoded below (the vanilla foundation
-// un-gates several features and is out of scope for this guardrail).
+// The five domain (logic-running, persistence-owning) backends.  `elixir` has a
+// single foundation — vanilla (plain Phoenix+Ecto) — which emits capability
+// filters, provenance, audited operations, event sourcing, and TPH, so it is in
+// the `emits` set for every feature below.
 const DOMAIN_BACKENDS = ["node", "dotnet", "java", "python", "elixir"] as const;
 type Backend = (typeof DOMAIN_BACKENDS)[number];
 
@@ -156,9 +156,10 @@ system TPH {
 // ---------------------------------------------------------------------------
 // The FEATURES table.  `emits` mirrors the gate-set membership in
 // system-checks.ts (LIMITED_FAMILIES / PROVENANCE_BACKENDS /
-// AUDIT_OP_BACKENDS / EVENT_SOURCING_BACKENDS / TPH_CAPABLE).  `marker` strings
-// were verified empirically (present on every `emits` backend, absent on a
-// feature-free baseline).
+// AUDIT_OP_BACKENDS / EVENT_SOURCING_BACKENDS / TPH_CAPABLE) — all five domain
+// backends emit every feature below (the vanilla Elixir foundation included).
+// `marker` strings were verified empirically (present on every `emits` backend,
+// absent on a feature-free baseline).
 // ---------------------------------------------------------------------------
 
 const FEATURES: readonly Feature[] = [
@@ -175,48 +176,53 @@ const FEATURES: readonly Feature[] = [
       dotnet: "!x.Archived",
       java: '@SQLRestriction("not (archived)")',
       python: "not_(OrderRow.archived)",
-      elixir: "base_filter expr(not archived)",
+      // Vanilla Phoenix/Ecto folds the filter into each read's `where:` clause.
+      elixir: "not record.archived",
     },
   },
   {
     name: "provenance (`provenanced` field)",
     code: "loom.provenanced-backend-unsupported",
     ddd: provenanceDdd,
-    // PROVENANCE_BACKENDS = node/dotnet/java/python (elixir-ash gated).
-    emits: new Set<Backend>(["node", "dotnet", "java", "python"]),
+    // PROVENANCE_BACKENDS = node/dotnet/java/python/elixir (vanilla emits the
+    // provenance_records side table).
+    emits: new Set<Backend>(["node", "dotnet", "java", "python", "elixir"]),
     marker: {
       node: "provenance_records",
       dotnet: "provenance_records",
       java: "provenance_records",
       python: "provenance_records",
+      elixir: "provenance_records",
     },
   },
   {
     name: "audited operation (`operation … audited`)",
     code: "loom.audited-backend-unsupported",
     ddd: auditedDdd,
-    // AUDIT_OP_BACKENDS = node/dotnet/java/python (elixir-ash gated; elixir-vanilla
-    // un-gates it, but this row uses the default-foundation `platform: elixir`
-    // spelling = ash, like the provenance/event-sourcing rows above).
-    emits: new Set<Backend>(["node", "dotnet", "java", "python"]),
+    // AUDIT_OP_BACKENDS = node/dotnet/java/python/elixir (vanilla emits the
+    // audit_records side table).
+    emits: new Set<Backend>(["node", "dotnet", "java", "python", "elixir"]),
     marker: {
       node: "audit_records",
       dotnet: "audit_records",
       java: "audit_records",
       python: "audit_records",
+      elixir: "audit_records",
     },
   },
   {
     name: "event sourcing (`persistedAs(eventLog)`)",
     code: "loom.event-sourcing-backend-unsupported",
     ddd: eventSourcingDdd,
-    // EVENT_SOURCING_BACKENDS = node/dotnet/python/java (elixir-ash gated).
-    emits: new Set<Backend>(["node", "dotnet", "java", "python"]),
+    // EVENT_SOURCING_BACKENDS = node/dotnet/python/java/elixir (vanilla's Ecto
+    // fold-on-load data layer emits the account_events log table).
+    emits: new Set<Backend>(["node", "dotnet", "java", "python", "elixir"]),
     marker: {
       node: "account_events",
       dotnet: "account_events",
       java: "account_events",
       python: "account_events",
+      elixir: "account_events",
     },
   },
   {
@@ -227,8 +233,8 @@ const FEATURES: readonly Feature[] = [
     emits: new Set<Backend>(["node", "dotnet", "java", "python", "elixir"]),
     marker: {
       // node/dotnet/python: one shared `vehicles` table (TPH) vs per-concrete
-      // tables (TPC).  java: the JPA `@DiscriminatorValue`.  elixir(ash): the
-      // single `vehicles` migration table.
+      // tables (TPC).  java: the JPA `@DiscriminatorValue`.  elixir (vanilla):
+      // the single `vehicles` migration table.
       node: "CREATE TABLE fleet.vehicles",
       dotnet: "CREATE TABLE fleet.vehicles",
       python: "CREATE TABLE fleet.vehicles",
@@ -238,9 +244,9 @@ const FEATURES: readonly Feature[] = [
   },
 ];
 
-/** `platform:` clause for a backend.  `elixir` carries the default `ash`
- *  foundation explicitly so the source is unambiguous. */
-const platformClause = (b: Backend): string => (b === "elixir" ? "elixir { foundation: ash }" : b);
+/** `platform:` clause for a backend.  `elixir` has a single (vanilla)
+ *  foundation, so the bare keyword is unambiguous. */
+const platformClause = (b: Backend): string => b;
 
 /** True iff the validator gates the feature on this backend (an error carrying
  *  the feature's gate code). */

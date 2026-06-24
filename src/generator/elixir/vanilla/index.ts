@@ -1,9 +1,7 @@
 // ---------------------------------------------------------------------------
-// Vanilla Elixir orchestrator — `foundation: vanilla` emit subtree.
+// Elixir orchestrator — the elixir emit subtree.
 //
-// Plain Phoenix + Ecto (no Ash.Resource, no AshPhoenix.Form, no
-// AshPostgres).  Sibling of the Ash path under `../`; called from
-// `../index.ts` when `deployable.foundation === "vanilla"`.
+// Plain Phoenix + Ecto.  Called from `../index.ts`.
 //
 // Per docs/plans/vanilla-foundation-tdd-plan.md — built in TDD slices.
 //   Slice 0: shell.
@@ -14,20 +12,24 @@
 //   Later slices: policies, ProblemDetails parity, workflows + views, CI.
 // ---------------------------------------------------------------------------
 
+import type { PageNameCtx } from "../../../ir/util/page-kind.js";
 import {
   buildPhoenixResourceModules,
   emitPhoenixResourceFiles,
 } from "../adapters/resource-clients.js";
 import type { ApiRoute } from "../api-emit.js";
+import { toModulePrefix, toSnakeApp } from "../app-naming.js";
 import { actorIdKey, emitAuth } from "../auth-emit.js";
 import { emitDispatch, emitWorkflowStateSchemas } from "../dispatch-emit.js";
 import { emitDomainServices } from "../domain-service-emit.js";
 import type { GenerateElixirArgs } from "../index.js";
+import { emitLiveViewPages, type LiveRoute } from "../liveview-emit.js";
 import { emitMigrations } from "../migrations-emit.js";
 import { renderRelEnv, renderRelease, renderRelServer } from "../shell/config.js";
 import { renderDockerfile, renderDockerignore } from "../shell/project.js";
-import { toModulePrefix, toSnakeApp } from "../shell-emit.js";
+import { renderSidebarComponent } from "../sidebar-emit.js";
 import { emitAggregateTests, emitTestHelper } from "../tests-emit.js";
+import { renderThemeCss } from "../theme-emit.js";
 import { emitVanillaApiControllers } from "./api-emit.js";
 import { emitVanillaAudit } from "./audit-emit.js";
 import { emitVanillaChangesets } from "./changeset-emit.js";
@@ -62,8 +64,8 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   out.set(`lib/${appName}_web/problem_details.ex`, renderVanillaProblemDetailsModule(appModule));
 
   // Resource-adapter helper modules — `lib/<app>/resources/<source_type>.ex`.
-  // Foundation-agnostic (just plain Elixir helper fns); reused from the
-  // shared Phoenix adapter set.  Workflows' `resource-call` lowering
+  // Plain Elixir helper fns from the shared Phoenix adapter set.  Workflows'
+  // `resource-call` lowering
   // resolves `<resource>.verb(args)` against the per-resource module map.
   // Some legacy test paths construct a SystemIR without `dataSources`/`storages`
   // populated; guard the call so an under-shaped sys yields an empty resource
@@ -81,8 +83,8 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   const apiRoutes: ApiRoute[] = [];
   const allViews: VanillaViewRef[] = [];
   // The principal id field name a `currentUser` lifecycle stamp resolves to
-  // (`current_user.<idKey>`), defaulting to `id` when no `user {}` block — same
-  // derivation the Ash path threads into `renderStampChanges`.
+  // (`current_user.<idKey>`), defaulting to `id` when no `user {}` block —
+  // threaded into `renderStampChanges`.
   const principalIdKey = actorIdKey(sys.user);
   let hasDomainTests = false;
   for (const ctx of contexts) {
@@ -100,11 +102,10 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // Ecto schema + fold + event-store repository (D-VANILLA-ES-HOME).  The
     // state emitters above skip them; the context module + controllers branch.
     emitVanillaEventSourcedFiles(appModule, ctx, out);
-    emitVanillaContextModule(appModule, ctx, out);
+    emitVanillaContextModule(appModule, ctx, out, sys);
     // Domain services — stateless pure-calculator modules under
-    // `<App>.Domain.Services.*` (domain-services.md).  Identical to the Ash
-    // path: a domain service touches no persistence, so the module is
-    // byte-identical across foundations (the shared `../domain-service-emit`).
+    // `<App>.Domain.Services.*` (domain-services.md).  A domain service touches
+    // no persistence (the shared `../domain-service-emit`).
     emitDomainServices(appName, appModule, ctx, out);
     // Event struct modules — `lib/<app>/<ctx>/events/<event>.ex`.  The
     // workflow-execution `emit` lowering builds `%Context.Events.<Name>{...}`
@@ -114,7 +115,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     const { routes } = emitVanillaApiControllers(appName, appModule, ctx, out, sys);
     apiRoutes.push(...routes);
     // Views — per-context Ecto query modules; controller + routes collected
-    // project-wide (one `ViewsController` for all views, matching the ash path).
+    // project-wide (one `ViewsController` for all views).
     emitVanillaViewModules(appName, appModule, ctx, out);
     for (const view of ctx.views) allViews.push({ ctx, view });
     // Retrievals — per-context Ecto query modules at
@@ -135,9 +136,9 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     );
     // Channels-on-vanilla — the in-process Dispatcher fans the workflow's
     // `emit` (which lowers to `Phoenix.PubSub.broadcast`) into per-context
-    // channel handler modules.  The dispatcher code is foundation-agnostic
-    // (plain Elixir + `${App}.Repo` + `Phoenix.PubSub` + the vanilla context
-    // facade fns the handler bodies call into).  Saga state schemas are
+    // channel handler modules.  The dispatcher code is plain Elixir +
+    // `${App}.Repo` + `Phoenix.PubSub` + the context facade fns the handler
+    // bodies call into.  Saga state schemas are
     // emitted unconditionally for every correlation-bearing workflow so
     // `WorkflowInstancesController` (the deferred-Phoenix gap closer) has
     // the table to read from even on a command-only saga.
@@ -166,7 +167,56 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // command action (operation / create / destroy) (audit-and-logging.md).
   emitVanillaAudit(appName, appModule, contexts, out);
 
-  // Auth modules — the foundation-agnostic Auth plug (Bearer-JWT → `conn.assigns
+  // --- LiveView pages --------------------------------------------------------
+  // A deployable that mounts a HEEx `ui:` (not an embedded SPA) emits Phoenix
+  // LiveView pages over the plain-Ecto context API — `emitLiveViewPages` reads
+  // through the `list_<agg>s()` / `get_<agg>(id)` tuple-returning fetches.
+  // The collected `liveRoutes` are spliced into the
+  // router's `live_session` by `emitVanillaShellFiles` below.  An embedded-SPA
+  // (`framework: react|vue|svelte`) ui owns its own UI, so no LiveView pages.
+  const embedReact =
+    deployable.uiFramework === "react" ||
+    deployable.uiFramework === "vue" ||
+    deployable.uiFramework === "svelte";
+  const liveRoutes: LiveRoute[] = [];
+  let hasSidebar = false;
+  if (deployable.uiName && !embedReact) {
+    const { files: liveFiles, routes } = emitLiveViewPages({
+      contexts,
+      deployable,
+      sys,
+      appName,
+      appModule,
+      foundation: "vanilla",
+    });
+    for (const [path, content] of liveFiles) out.set(path, content);
+    liveRoutes.push(...routes);
+
+    // Sidebar + theme — the sidebar derivation + theme renderer.
+    const ui = sys.uis.find((u) => u.name === deployable.uiName);
+    if (ui) {
+      const nameCtx: PageNameCtx = {
+        aggregateNames: contexts.flatMap((c) => c.aggregates.map((a) => a.name)),
+        workflowNames: contexts.flatMap((c) => c.workflows.map((w) => w.name)),
+        viewNames: contexts.flatMap((c) => c.views.map((v) => v.name)),
+      };
+      out.set(
+        `lib/${appName}_web/components/sidebar.ex`,
+        renderSidebarComponent({
+          ui,
+          appName,
+          appModule,
+          nameCtx,
+          authEnabled: deployable.auth?.required === true,
+        }),
+      );
+      hasSidebar = true;
+      out.set("priv/static/assets/theme.css", renderThemeCss(sys.theme));
+    }
+  }
+  const hasLiveView = liveRoutes.length > 0 || hasSidebar;
+
+  // Auth modules — the Auth plug (Bearer-JWT → `conn.assigns
   // .current_user`), LiveAuth on_mount, and /auth controller.  Emitted when the
   // deployable requires auth — the request principal a tenancy (principal)
   // `filter` scopes reads by.  The plug + /auth scope are spliced into the
@@ -178,11 +228,13 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     appModule,
   });
   for (const [path, content] of authFiles) {
-    // Skip the LiveView `on_mount` hook — it imports `Phoenix.Component` /
-    // `Phoenix.LiveView`, which the vanilla foundation has no dep for (it's a
-    // JSON API with no live_session).  Dead code here, and it would break
-    // `mix compile --warnings-as-errors`.
-    if (path.endsWith("/live_auth.ex")) continue;
+    // The LiveView `on_mount` hook imports `Phoenix.Component` /
+    // `Phoenix.LiveView` — only available once the deployable mounts a HEEx
+    // `ui:` (which pulls in the `phoenix_live_view` dep + a `live_session`).
+    // A JSON-API-only deployable has no LiveView dep, so the hook would
+    // be dead code that breaks `mix compile --warnings-as-errors`; skip it
+    // there.  When LiveView IS emitted, keep it (the live_session can mount it).
+    if (path.endsWith("/live_auth.ex") && !hasLiveView) continue;
     out.set(path, content);
   }
 
@@ -197,19 +249,19 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     resourceEmission.hexDeps,
     authEnabled,
     !!sys.auth?.oidc,
+    liveRoutes,
+    hasSidebar,
   );
 
-  // Deployment + boot machinery — reused verbatim from the Ash shell because
-  // the Elixir release, Dockerfile, and Ecto migrations are foundation-neutral
-  // (plain Ecto runs the same generated migrations).  Without these the
-  // vanilla project isn't container/k8s-deployable: no image to build, and the
-  // per-backend database has no schema on first boot, so every query 500s.
-  // `rel/overlays/bin/server` evals `Release.migrate()` before starting, and
-  // config/prod.exs sets `server: true` so the released endpoint listens.
-  // The `vanilla` foundation tag tunes only the bundled `timestamps()` macro:
-  // when an audit capability supplies explicit `updated_at`, the vanilla Ecto
-  // schema drops `timestamps()` (it would collide), so the migration must too.
-  emitMigrations(appName, args.migrations ?? [], appModule, out, "vanilla");
+  // Deployment + boot machinery — the Elixir release, Dockerfile, and Ecto
+  // migrations.  Without these the project isn't container/k8s-deployable: no
+  // image to build, and the per-backend database has no schema on first boot,
+  // so every query 500s.  `rel/overlays/bin/server` evals `Release.migrate()`
+  // before starting, and config/prod.exs sets `server: true` so the released
+  // endpoint listens.  When an audit capability supplies explicit `updated_at`,
+  // the Ecto schema drops the bundled `timestamps()` macro (it would collide),
+  // so the migration must too.
+  emitMigrations(appName, args.migrations ?? [], appModule, out);
   out.set("Dockerfile", renderDockerfile(appName));
   out.set(".dockerignore", renderDockerignore());
   out.set("certs/.gitkeep", "");

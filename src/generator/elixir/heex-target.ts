@@ -55,7 +55,7 @@ export const heexTarget: WalkerTarget = {
 
   // --- API binding seam ---------------------------------------------------
 
-  /** Phoenix calls the Ash domain code interface directly — no hook
+  /** Phoenix calls the context module's public function directly — no hook
    *  hoisting.  Shape: `<App>.<Context>.<op>_<aggregate_snake>(args)`.
    *  Naming convention matches `heex-walker.ts:647-683` (codeIntfFnName).
    *  The `<App>.<Context>` prefix is not visible to the contract —
@@ -295,7 +295,7 @@ function defaultInitForHeex(type: TypeIR): string {
   return "nil";
 }
 
-/** Ash code interface fn name: `<op>_<aggregate_snake>!` (plural for
+/** Context module function name: `<op>_<aggregate_snake>!` (plural for
  *  list ops, singular otherwise).  Matches `renderApiCall` at
  *  `heex-walker.ts:693-712` byte-for-byte — same crude `<single>s`
  *  pluralisation, same `delete`/`destroy` aliasing, same `!` suffix

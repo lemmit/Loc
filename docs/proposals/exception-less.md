@@ -546,6 +546,13 @@ the producer surface is exercised only by **explicit** union returns today
 
 #### Why Phoenix is deferred
 
+> **(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain
+> Ecto/Phoenix only — `foundation: ash` is now a validation error. The Ash
+> update-action / generic-action blocker described below no longer applies;
+> union-returning operations ship on the vanilla foundation via a tagged
+> `{:ok, value} | {:error, tag, data}` tuple. The Ash design notes here are
+> retained as a historical record.)**
+
 On Phoenix, a Loom `operation` lowers to an **Ash `update` action** — its
 body runs inside `change fn changeset, _ctx -> … changeset end` and the
 action's result is the **resource record** (`%Order{}`). That model
@@ -910,7 +917,7 @@ Layered on top of upstream proposal's Phase 1–5:
 |---|---|---|
 | **A1** | `error` payload sugar keyword (no status clause — domain stays HTTP-blind). `none` unit type + `option` postfix sugar. Stdlib error payloads (`NotFound`, `ParseError`, `ApiError` variants, `ValidationError`) and stdlib `ProblemDetails` payload. Generator-side stdlib status defaults table. Validator enforces no-throw outside aggregate bodies. | Upstream Phase 1+3+4 |
 | **A2** | `?` propagation operator with error-marker dispatch. Scoping rules. Per-backend lowering. | A1 |
-| **A3** | API-surface `httpStatus <Error> <Code>` clause + per-api `errorStatuses` enrichment. Per-backend route emitter auto-generates ProblemDetails translation (status from api mapping or stdlib default; body auto-derived). Aggregate-invariant throws hit a global 500-ProblemDetails fallback per backend. **Status: shipped on Hono + .NET; Phoenix deferred** (the Ash update-action model can't return a union — see "Implementation status" above). The clause spelling is `httpStatus` (not `status`) to avoid colliding with the very common `status:` field name. | A1 |
+| **A3** | API-surface `httpStatus <Error> <Code>` clause + per-api `errorStatuses` enrichment. Per-backend route emitter auto-generates ProblemDetails translation (status from api mapping or stdlib default; body auto-derived). Aggregate-invariant throws hit a global 500-ProblemDetails fallback per backend. **Status: shipped on Hono + .NET; Phoenix originally deferred** (the historical Ash update-action model couldn't return a union — see "Implementation status" above; the Ash foundation has since been removed and union returns ship on vanilla elixir). The clause spelling is `httpStatus` (not `status`) to avoid colliding with the very common `status:` field name. | A1 |
 | **A4** | Re-shape find variants. `: X` → `X or NotFound`, `: X?` → `X option`. Migrate every example .ddd + every backend's route/repository emitter. **Single coordinated PR.** | A1, A3 |
 | **A5** | Parse intrinsics return `T or ParseError`. External API calls return `T or ApiError`. Macro-wrapped throwing helpers retired. | A1, A2 |
 | **A6** | `validate for X` (upstream Phase 5) returns `X or ValidationError[]`. Multi-error accumulation via `combine`. | A1, A2, upstream Phase 5 |
@@ -1239,6 +1246,7 @@ check) work unchanged because the spec stays JSON-shaped.
 - `src/language/ddd-validator.ts` — new diagnostics:
   `loom.throw-outside-domain`, `loom.unmapped-error-status`,
   `loom.propagate-bad-scope`, `loom.propagate-incompatible-error`.
-- #480 — Ash domain trace via `:telemetry`. `invariant_violated`
-  events stay sourced from aggregate-invariant throws (regime 1);
-  unaffected by this proposal.
+- #480 — Elixir domain trace via `:telemetry` (originally the Ash
+  foundation, now plain Ecto/Phoenix after Ash was removed).
+  `invariant_violated` events stay sourced from aggregate-invariant
+  throws (regime 1); unaffected by this proposal.

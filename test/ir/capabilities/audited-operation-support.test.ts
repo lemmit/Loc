@@ -57,17 +57,8 @@ describe("audited-operation capability validation", () => {
     expect(await auditErrors(sys("python"))).toEqual([]);
   });
 
-  it("rejects an audited operation on a Phoenix ASH deployable (no audit emission)", async () => {
-    // Bare `platform: elixir` defaults to foundation: ash — no audit fit.
-    const errs = await auditErrors(sys("elixir"));
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("audit-record emission");
-    // The diagnostic points at the foundation escape hatch.
-    expect(errs[0]).toContain("foundation: vanilla");
-  });
-
-  it("accepts an audited operation on an elixir-VANILLA deployable (audit runtime ported)", async () => {
-    const src = sys("elixir { foundation: vanilla }");
+  it("accepts an audited operation on an elixir (vanilla) deployable (audit runtime ported)", async () => {
+    const src = sys("elixir");
     expect(await auditErrors(src)).toEqual([]);
   });
 
@@ -120,16 +111,8 @@ describe("audited-lifecycle capability validation", () => {
     expect(await auditErrors(lifecycleSys("python"))).toEqual([]);
   });
 
-  it("rejects audited lifecycle actions on a Phoenix ASH deployable (no audit emission)", async () => {
-    // Bare `platform: elixir` defaults to foundation: ash — no audit fit.
-    const errs = await auditErrors(lifecycleSys("elixir"));
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("lifecycle action");
-    expect(errs[0]).toContain("foundation: vanilla");
-  });
-
-  it("accepts audited lifecycle actions on an elixir-VANILLA deployable (ported)", async () => {
-    const src = lifecycleSys("elixir { foundation: vanilla }");
+  it("accepts audited lifecycle actions on an elixir (vanilla) deployable (ported)", async () => {
+    const src = lifecycleSys("elixir");
     expect(await auditErrors(src)).toEqual([]);
   });
 

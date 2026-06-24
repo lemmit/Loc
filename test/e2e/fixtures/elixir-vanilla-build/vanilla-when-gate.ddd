@@ -1,0 +1,29 @@
+// `when` canCommand state gate (criterion.md, use site 2) on the vanilla (plain
+// Ecto) backend — a port of the former when fixture.  A `when`-gated operation
+// loads the record, evaluates the predicate (enum values), and 409s Disallowed
+// before mutating; it also auto-exposes the side-effect-free
+// `GET /orders/:id/can_cancel` companion returning `{ allowed }`.
+system WhenShop {
+  subdomain Sales {
+    context Orders {
+      enum OrderStatus { Draft, Shipped, Cancelled }
+      aggregate Order ids guid {
+        code: string
+        status: OrderStatus
+        operation cancel() when this.status != Shipped && this.status != Cancelled {
+          status := Cancelled
+        }
+      }
+    }
+  }
+  api OrdersApi from Sales
+  storage primary { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primary }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 4000
+  }
+}

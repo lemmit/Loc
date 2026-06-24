@@ -12,6 +12,8 @@
 > foundation-axis precedent). Sibling of [`go-backend.md`](./go-backend.md)
 > (new ecosystem / *reach*) — NestJS adds the enterprise tier of an
 > ecosystem Loom already serves (*depth*).
+>
+> **(Superseded 2026: the Ash foundation was removed.)** This proposal repeatedly cites Elixir's `ash` vs `vanilla` foundation split as the precedent for `foundation: nest`. That precedent now has only one valid Elixir value — `platform: elixir` resolves to `foundation: vanilla` (plain Ecto/Phoenix) and `foundation: ash` is a validation error. The `foundation:` knob and the "foundation branch inside one platform surface" mechanism still stand; read the Ash mentions below as the historical motivation, not a current second Elixir foundation.
 
 ## TL;DR
 

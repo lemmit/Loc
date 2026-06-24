@@ -1,0 +1,7 @@
+<%!-- primitive-card --%>
+<div class="card bg-base-100 shadow">
+  <div class="card-body">
+    <%= if assigns[:title] do %><h3 class="card-title"><%= @title %></h3><% end %>
+    <%= @inner_content %>
+  </div>
+</div>

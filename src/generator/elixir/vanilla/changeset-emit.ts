@@ -4,8 +4,7 @@
 //
 // Plain Ecto.Changeset cast/3 + validate_required.  Per-action
 // `change_<op>/2` helpers wrap the basic cast with the action's param
-// allow-list, mirroring what `with crudish` would expose on the Ash
-// path.  Per-field `validate_*` (length, format, …) deferred to a later
+// allow-list.  Per-field `validate_*` (length, format, …) deferred to a later
 // slice.  The constraints ARE available at the IR layer now —
 // `src/ir/validate/invariant-classify.ts`'s `singleFieldShape` yields
 // min/max/between/len-*/regex patterns from invariants (the same

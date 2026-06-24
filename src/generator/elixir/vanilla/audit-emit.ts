@@ -26,9 +26,8 @@
 // The per-action capture (the before/after wire snapshots either side of the
 // mutation + the `record/2` call) is wired by `context-emit.ts` (operation
 // update) + `api-emit.ts` / `repository-emit.ts` (create/destroy lifecycle);
-// this module owns the shared runtime + history table.  Like provenance, this
-// is a vanilla-only runtime — the Ash foundation has no audit fit and stays the
-// honest rejecter (validated by `loom.audited-backend-unsupported`).
+// this module owns the shared runtime + history table — the audit runtime for
+// the elixir backend.
 // ---------------------------------------------------------------------------
 
 import type { AggregateIR, BoundedContextIR } from "../../../ir/types/loom-ir.js";

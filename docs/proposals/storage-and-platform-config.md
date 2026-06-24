@@ -34,6 +34,16 @@
 >   axis vocabulary, gating matrix, and examples live in
 >   [`platform-realization-axes.md`](./platform-realization-axes.md).
 >
+> - **D-ASH-REMOVED (2026)** — the `foundation:` knob from
+>   D-REALIZATION-AXES survives, but the Ash foundation was removed:
+>   `platform: elixir` now generates Phoenix LiveView on plain
+>   Ecto/Phoenix only. `foundation:` resolves to `vanilla` (the
+>   default and only valid value) on elixir; `foundation: ash` is now
+>   a **validation error**. Wherever §4/§9/§10 list `ash` as a
+>   `style:` value or `ashPostgres`/`ashCommanded` as `persistence:`
+>   adapters for `phoenix`, read those as removed historical options —
+>   the only elixir foundation is vanilla.
+>
 > The §1 motivation, §2.1 invariants 1–3 and 5, §3.1 physical
 > storage grammar, and most of §3.4–§3.7 (per-aggregate persistence
 > strategy, event publish markers, deployable platform config,

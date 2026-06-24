@@ -1,5 +1,7 @@
 # Cross-stack static analysis — remaining slices
 
+> **(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain Ecto/Phoenix only; `foundation: ash` is now a validation error.)** The Phoenix references below to the Ash code-interface, `Ash.Error.t()` mapping, and "Ash v3 audit" describe generated output that no longer exists; the service-layer slice now wraps the plain Ecto context functions.
+
 > **[2026-06-20 status audit]** Slice 4 (workflow `returnType` enrichment) SHIPPED (`enrichments.ts`, consumed at `elixir/workflow-emit.ts`). Only three slices remain (format-CI, Credo, service-layer).
 
 > Status: **proposal**.  Follow-up to

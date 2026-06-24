@@ -1,0 +1,5 @@
+<%!-- primitive-code-block --%>
+{{#if hasTitle}}<div class="loom-code-block rounded-md border border-base-300 bg-base-200 overflow-hidden">
+  <div class="loom-code-block-title px-4 py-2 text-xs font-medium text-base-content/70 border-b border-base-300">{{title}}</div>
+  <pre class="p-4 overflow-x-auto text-sm"><code class="language-{{language}}">{{{source}}}</code></pre>
+</div>{{else}}<pre class="loom-code-block rounded-md border border-base-300 bg-base-200 p-4 overflow-x-auto text-sm"><code class="language-{{language}}">{{{source}}}</code></pre>{{/if}}

@@ -4,7 +4,7 @@
 > **Supersedes & consolidates:** `docs/proposals/policies-supplementary-note.md`
 > and the earlier `policies.txt` working notes (not checked in).
 > **Scope:** all domain-logic backends (.NET/EF Core, TypeScript/Hono,
-> Phoenix/Ash); React consumes the resulting wire shape only.
+> Phoenix on plain Ecto); React consumes the resulting wire shape only.
 > **⚠ Needs reconciliation with [`multi-tenancy-design-note.md`](./multi-tenancy-design-note.md).** See [§0](#0-reconciliation-needed-with-multi-tenancy-design-note) below.
 > **Companion:** [`offerability-can-query.md`](./offerability-can-query.md) — projecting the param-free slice of these gates into the pre-flight `can_<op>` query (the write-side analogue of this doc's field-capabilities projection).
 
@@ -291,7 +291,7 @@ local/inline binding. We reuse both rather than adding a `rule` keyword.
   bound in certain bodies), so this is the same mechanism, not a new construct.
 - Helpers **inline at lowering** into the clause `ExprIR`. This is **mandatory
   for `data {}` helpers**: a reachability clause must be SQL-translatable (EF
-  query filter / RLS / Ash filter), and you cannot call a host method inside
+  query filter / RLS / Ecto query filter), and you cannot call a host method inside
   those — so `isOwner()` expands to `currentUser.id == Order.ownerId` *in the
   WHERE*.
 - Collection lambdas (`.any`/`.all`/`.count`) are already in the expression
@@ -366,8 +366,8 @@ write: operation gate(currentUser, params, resource) ∩ tenant/edit scope ∩ f
 
 `deny` overrides. `data {}` **never sees call params** — params drive the query
 and the gate, which compose *with* the reachability floor (intersection). This
-keeps `data {}` implementable as an EF global query filter / Postgres RLS / Ash
-policy: a stable per-entity predicate parameterized only by session/user, so
+keeps `data {}` implementable as an EF global query filter / Postgres RLS / an
+Ecto query-scope predicate: a stable per-entity predicate parameterized only by session/user, so
 "can this user see this row?" has one stable answer.
 
 ---
@@ -424,8 +424,8 @@ Verified by exploration; cited so the proposal is concrete, not aspirational.
   `src/ir/validate.ts:606`), and per-backend EXISTS rendering:
   - .NET: `.Any(x => …)` subquery — `dotnet/render-expr.ts`, `find-emit.ts:36`.
   - Hono: Drizzle `exists(...)` subquery — `repository-builder.ts:847`.
-  - Phoenix/Ash: `Ash.Query.filter(exists(:assoc, …))` —
-    `phoenix-live-view/repository-emit.ts:49`.
+  - Phoenix/Ecto: an `Ecto.Query` `where exists(subquery)` clause —
+    `elixir/repository-emit.ts`.
 
 ### Enforcement seams per backend
 - **.NET/EF Core:** global query filter in `renderConfiguration`
@@ -436,9 +436,9 @@ Verified by exploration; cited so the proposal is concrete, not aspirational.
 - **TS/Hono:** row filter in `repository-builder.ts` (`lowerToDrizzle` →
   `.where()`); gate in route handlers (`templates/routes.tpl.ts`); mask in
   `toWireMethod`.
-- **Phoenix/Ash:** add `policies do … end`/`field_policy` to
-  `domain-emit.ts:renderAggregateResource` (not emitted today); filters in
-  `repository-emit.ts` read actions; `current_user` already threaded.
+- **Phoenix/Ecto:** apply the reachability predicate as an `Ecto.Query` scope
+  on every read in `repository-emit.ts`, and a guard in the context/command
+  modules (not emitted today); `current_user` already threaded.
 - **React:** consumes redacted wire shape + optional view `fieldCapabilities`.
 - **Platform contract:** `src/platform/surface.ts` (`emitProject`), registry
   `src/platform/registry.ts`.
@@ -453,7 +453,7 @@ Verified by exploration; cited so the proposal is concrete, not aspirational.
    `function`/`let` helpers → .NET set filter. Baseline = Strict Self.
 3. **Operation/view/workflow gates** → .NET handler pre-checks (403); relocate
    gating out of domain bodies.
-4. **TS/Hono + Phoenix/Ash parity** for phases 2–3.
+4. **TS/Hono + Phoenix/Ecto parity** for phases 2–3.
 5. **`exists <Aggregate>` quantifier** (reuse view resolution + new EXISTS
    rendering) for domain-relationship and `Share`-aggregate access.
 6. **Field rules** (mask/write) + partial-update gating + wire-spec/capabilities.

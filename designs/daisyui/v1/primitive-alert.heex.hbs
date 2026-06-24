@@ -1,0 +1,12 @@
+<%!-- primitive-alert --%>
+<div class={["alert",
+              case @color do
+                "red" -> "alert-error"
+                "yellow" -> "alert-warning"
+                "green" -> "alert-success"
+                _ -> "alert-info"
+              end]}
+     role="alert">
+  <%= if assigns[:title] do %><p class="font-medium"><%= @title %></p><% end %>
+  <p class="text-sm mt-1"><%= @message %></p>
+</div>

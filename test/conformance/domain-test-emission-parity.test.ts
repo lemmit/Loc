@@ -12,13 +12,9 @@
 //
 // This fast (no-docker) gate asserts, for an aggregate that declares `test`
 // blocks, that EVERY domain-logic backend emits a non-trivial test artefact —
-// AND pins the per-foundation pure-vs-skip classification so the two cannot
-// drift apart silently:
-//   * full port  (node / dotnet / java / python / elixir-vanilla) — every test
-//     is runnable; no skip marker in the emitted file.
-//   * pure-subset (elixir-ash) — the rejection tests run DB-free, but a
-//     happy-path post-operation STATE assertion is a visible `@tag :skip`
-//     (needs a persisted record), not a dropped assertion.
+// a full port where every declared test is runnable (no skip marker in the
+// emitted file): node / dotnet / java / python / elixir (vanilla — plain
+// Ecto/Phoenix, the only Elixir foundation).
 //
 // Frontends (react/vue/svelte/angular) run no domain logic and are n/a — they
 // are out of scope here by construction (no backend test emitter).
@@ -49,9 +45,8 @@ system S {
           let m = Money { amount: 1.0, currency: "USD" }
           expect(m.currency).toBe("USD")
         }
-        // A happy-path post-operation STATE assertion: the full-port foundations
-        // run it; the Ash subset emits it as @tag :skip (needs a persisted
-        // record) — this is the cell that keeps the pure-vs-skip pin honest.
+        // A happy-path post-operation STATE assertion — runnable on every
+        // full-port backend (no skip marker).
         test "confirming an open order" {
           let o = Order.create({ customer: "acme" })
           o.confirm()
@@ -75,9 +70,8 @@ system S {
 }
 
 /** Classification of the emitted suite:
- *  - "full"  — every declared test is runnable (no skip marker).
- *  - "subset" — at least one test is a visible skip (the Ash pure-subset). */
-type Shape = "full" | "subset";
+ *  - "full"  — every declared test is runnable (no skip marker). */
+type Shape = "full";
 
 interface Case {
   readonly platform: string;
@@ -91,18 +85,17 @@ const CASES: readonly Case[] = [
   { platform: "dotnet", file: /\/Orders\/OrderTests\.cs$/, shape: "full" },
   { platform: "java", file: /\/OrderTests\.java$/, shape: "full" },
   { platform: "python", file: /\/tests\/test_order\.py$/, shape: "full" },
-  // Ash — rejection tests run DB-free; the happy-path state test is @tag :skip.
-  { platform: "elixir", file: /\/test\/selling\/order_test\.exs$/, shape: "subset" },
-  // Vanilla — full port via the pure domain core; nothing skips.
+  // Elixir (vanilla — plain Ecto/Phoenix) — full port via the pure domain
+  // core; nothing skips.
   {
-    platform: "elixir { foundation: vanilla }",
+    platform: "elixir",
     file: /\/test\/selling\/order_test\.exs$/,
     shape: "full",
   },
 ];
 
-/** Skip markers across the five target languages. The "full" foundations emit
- *  none of these; the Ash subset emits `@tag :skip`. */
+/** Skip markers across the five target languages. The full-port backends emit
+ *  none of these. */
 const SKIP_MARKERS = [
   "@tag :skip", // ExUnit
   "it.skip", // vitest
@@ -147,17 +140,11 @@ describe('domain `test "…"` blocks — cross-backend emission parity', () => {
       );
       expect(mentions(content, "money builds"), `${platform}: missing second test`).toBe(true);
 
-      // Classification pin: the Ash subset carries `@tag :skip`; every full-port
-      // foundation carries no skip marker at all.
+      // Classification pin: every full-port backend carries no skip marker at
+      // all.
       const skips = SKIP_MARKERS.filter((m) => content.includes(m));
-      if (shape === "subset") {
-        expect(
-          content.includes("@tag :skip"),
-          `${platform}: pure-subset suite should carry @tag :skip`,
-        ).toBe(true);
-      } else {
-        expect(skips, `${platform}: full-port suite should carry no skip marker`).toEqual([]);
-      }
+      expect(shape, "only the full-port classification remains").toBe("full");
+      expect(skips, `${platform}: full-port suite should carry no skip marker`).toEqual([]);
     });
   }
 });

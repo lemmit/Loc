@@ -5,13 +5,13 @@ import { createDddServices } from "../../../src/language/ddd-module.js";
 import type { Model } from "../../../src/language/generated/ast.js";
 
 // ---------------------------------------------------------------------------
-// D-VANILLA-DEFAULT — warn-then-flip sequencing.  Before the actual
-// default flip lands in `lower-platform.ts:greenfieldAxisDefaults`,
-// emit a `loom.foundation-default-flipping` warning on every bare
-// `platform: elixir` (no explicit `foundation:`) for one release cycle.
-// Users who want to keep today's `ash` behaviour after the flip set
-// `foundation: ash` explicitly; users who want to opt in early set
-// `foundation: vanilla`.  See `docs/decisions.md#D-VANILLA-DEFAULT`.
+// D-VANILLA-DEFAULT — the default flip has LANDED.  A bare `platform: elixir`
+// (no explicit `foundation:`) now resolves to `vanilla` (plain Phoenix
+// LiveView on Ecto) in `lower-platform.ts:greenfieldAxisDefaults`; with the Ash
+// foundation removed, `vanilla` is the only foundation on elixir.  The
+// transitional `loom.foundation-default-flipping` warning that preceded the
+// flip is gone — omitting `foundation:` is no longer ambiguous, so it must NOT
+// warn.  See `docs/decisions.md#D-VANILLA-DEFAULT`.
 // ---------------------------------------------------------------------------
 
 async function parse(source: string) {
@@ -32,46 +32,22 @@ const sys = (platformClause: string) => `
   }
 `;
 
-describe("D-VANILLA-DEFAULT — warn-then-flip sequencing", () => {
-  it("warns on bare `platform: elixir` (no explicit `foundation:`)", async () => {
+describe("D-VANILLA-DEFAULT — flip landed, no transitional warning", () => {
+  it("does NOT warn on a bare elixir deployable (the flip has landed — default is vanilla)", async () => {
     const { errors, warnings } = await parse(sys("elixir"));
     expect(errors).toEqual([]);
-    expect(
-      warnings.some((w) =>
-        /'platform: elixir' without an explicit 'foundation:' will switch from 'ash' to 'vanilla'/.test(
-          w,
-        ),
-      ),
-    ).toBe(true);
+    expect(warnings.some((w) => /D-VANILLA-DEFAULT|foundation/.test(w))).toBe(false);
   });
 
-  it("warns on `platform: elixir { }` with a non-foundation axis but no `foundation:`", async () => {
-    // The realization-axes block is present (e.g. with `application:` set)
-    // but `foundation:` is omitted — same default-flip risk as bare elixir.
-    const { errors, warnings } = await parse(sys("elixir { application: ash }"));
+  it("does NOT warn on an elixir block with a non-foundation axis but no foundation:", async () => {
+    const { errors, warnings } = await parse(sys("elixir { application: serviceLayer }"));
     expect(errors).toEqual([]);
-    expect(warnings.some((w) => /D-VANILLA-DEFAULT/.test(w))).toBe(true);
+    expect(warnings.some((w) => /D-VANILLA-DEFAULT|foundation/.test(w))).toBe(false);
   });
 
-  it("does NOT warn when `foundation: ash` is explicit", async () => {
-    const { errors, warnings } = await parse(sys("elixir { foundation: ash }"));
-    expect(errors).toEqual([]);
-    expect(warnings.some((w) => /D-VANILLA-DEFAULT/.test(w))).toBe(false);
-  });
-
-  it("does NOT warn when `foundation: vanilla` is explicit", async () => {
+  it("does NOT warn when foundation: vanilla is explicit", async () => {
     const { errors, warnings } = await parse(sys("elixir { foundation: vanilla }"));
     expect(errors).toEqual([]);
-    expect(warnings.some((w) => /D-VANILLA-DEFAULT/.test(w))).toBe(false);
-  });
-
-  it("does NOT warn on other backend platforms (node / dotnet / java / python)", async () => {
-    for (const plat of ["node", "dotnet", "java", "python"]) {
-      const { warnings } = await parse(sys(plat));
-      expect(
-        warnings.some((w) => /D-VANILLA-DEFAULT/.test(w)),
-        `${plat} should NOT trigger the flip warning`,
-      ).toBe(false);
-    }
+    expect(warnings.some((w) => /D-VANILLA-DEFAULT|foundation/.test(w))).toBe(false);
   });
 });

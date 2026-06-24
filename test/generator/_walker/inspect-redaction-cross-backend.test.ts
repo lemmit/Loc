@@ -1,8 +1,12 @@
-// Cross-backend redaction acceptance — one DSL source, three host
+// Cross-backend redaction acceptance — one DSL source, two host
 // languages, one contract: a field tagged `sensitive(...)` MUST
 // render as the literal `<redacted>` inside the structural debug
-// form (`toString()` / `Inspect` / `def inspect/1`), and the
-// sensitive field's value access MUST NOT appear in that form.
+// form (`toString()` / `Inspect`), and the sensitive field's value
+// access MUST NOT appear in that form.
+//
+// (The Elixir backend — plain Phoenix+Ecto, the only foundation —
+// emits a plain Ecto schema and no structural inspect/redaction
+// form, so it is out of scope here.)
 //
 // PR #524 → #559 → #567 → #570 landed the redaction expression in
 // the IR + each backend's render-expr.  The per-backend tests pin
@@ -56,7 +60,6 @@ const REDACTION_SOURCE = `
     }
     deployable honoApi { platform: node, contexts: [People], port: 3000 }
     deployable dotnetApi { platform: dotnet, contexts: [People], port: 3001 }
-    deployable elixirApi { platform: elixir, contexts: [People], port: 4000 }
   }
 `;
 
@@ -109,47 +112,14 @@ describe("cross-backend inspect redaction — `sensitive(...)` renders as `<reda
     expect(personCs).toContain("public override string ToString() => Inspect;");
   });
 
-  it("Phoenix `def inspect/1`: redacts ssn + nested VO phone, never references field values", async () => {
-    const files = await generateSystemFiles(REDACTION_SOURCE);
-    const personEx = files.get("elixir_api/lib/elixir_api/people/person.ex")!;
-    expect(
-      personEx,
-      "Phoenix Person resource module missing — emission shape changed",
-    ).toBeDefined();
-
-    // Phoenix emits the inspect body on its own line (multi-line def).
-    const inspectBody = personEx
-      .split("\n")
-      .find((l) => l.includes("<redacted>") || l.includes("record.ssn"))!;
-    expect(inspectBody, "Phoenix inspect body line not found").toBeDefined();
-
-    expect(inspectBody).toContain('"<redacted>"');
-    expect(inspectBody).toContain('"ssn: "');
-    expect(inspectBody).not.toMatch(/\brecord\.ssn\b/);
-
-    expect(inspectBody).toContain('"phone: "');
-    // Phoenix uses snake_case for field accesses on Ash structs;
-    // VO field access on a stored map is `record.contact.phone`.
-    expect(inspectBody).not.toMatch(/\brecord\.contact\.phone\b/);
-    // Non-sensitive sibling reached normally.
-    expect(inspectBody).toMatch(/\brecord\.contact\.email\b/);
-
-    // Module function exists and is reachable as `Person.inspect/1`
-    // (not a `defimpl Inspect` protocol impl — would collide with
-    // Ash 3.x's auto-derived form).
-    expect(personEx).toMatch(/\bdef inspect\(record\) do\b/);
-    expect(personEx).not.toMatch(/\bdefimpl Inspect, for: /);
-  });
-
-  it("all three backends agree on the structural envelope: same field order, same labels", async () => {
+  it("both backends agree on the structural envelope: same field order, same labels", async () => {
     // Anti-drift gate: even if the redaction works on each backend
     // individually, the structural envelopes can desync (one backend
     // skips a field, another reorders).  Pin that the human-readable
-    // labels appear in the SAME ORDER across all three.
+    // labels appear in the SAME ORDER across both.
     const files = await generateSystemFiles(REDACTION_SOURCE);
     const ts = files.get("hono_api/domain/person.ts")!;
     const cs = files.get("dotnet_api/Domain/Persons/Person.cs")!;
-    const ex = files.get("elixir_api/lib/elixir_api/people/person.ex")!;
 
     const extractLabels = (source: string): string[] => {
       // Pull every `"<name>: "` literal from the inspect body — the
@@ -163,7 +133,6 @@ describe("cross-backend inspect redaction — `sensitive(...)` renders as `<reda
     const csLabels = extractLabels(
       cs.split("\n").find((l) => l.includes("public string Inspect"))!,
     );
-    const exLabels = extractLabels(ex.split("\n").find((l) => l.includes("<redacted>"))!);
 
     // Expected sequence: aggregate id, then declared fields in source
     // order, with the inlined VO's fields nested between `contact: `
@@ -171,6 +140,5 @@ describe("cross-backend inspect redaction — `sensitive(...)` renders as `<reda
     const expected = ["id", "fullName", "ssn", "contact", "email", "phone"];
     expect(tsLabels).toEqual(expected);
     expect(csLabels).toEqual(expected);
-    expect(exLabels).toEqual(expected);
   });
 });

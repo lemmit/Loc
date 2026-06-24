@@ -308,7 +308,7 @@ function containmentResponseType(t: TypeIR): string {
 /** Map each create-input field to a Pydantic `Field(...)` expression carrying
  *  the constraints implied by the aggregate's single-field invariants, so an
  *  invalid create is rejected by FastAPI at the request boundary with 422
- *  (matching Hono's zod chains / Phoenix's Ash validations) instead of
+ *  (matching Hono's zod chains / Phoenix's changeset validations) instead of
  *  reaching the domain and raising DomainError → 400.  Mirrors the wire-scope
  *  + classifier filtering Hono uses (`takeSingleFieldChain`); `&&` conjuncts
  *  on one field (e.g. `email.matches(r) && email.length <= 120`) become a

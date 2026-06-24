@@ -88,7 +88,8 @@ yet); 6c is the first to change real example output.
   (`mix compile --warnings-as-errors`) **and** the react-build matrix compile
   the embedded SPA. **Land 6c with PR CI subscribed** — this is where an
   Elixir/Ash compile error or a Vite/tsc error in the embedded bundle would
-  first surface, and neither is catchable locally.
+  first surface, and neither is catchable locally. (The Phoenix backend now emits
+  plain Ecto/Phoenix — the Ash foundation has been removed.)
 - Blast radius: the two existing Phoenix examples (`showcase.ddd`,
   `storefront-phoenix.ddd`) stay LiveView and are **untouched** (their UIs
   declare no `framework: react`), so their output does not move.
@@ -109,8 +110,9 @@ Phase 5 made `phoenix`/`liveview` *aliases* that canonicalise to the still-domin
 - Optional / can be deferred indefinitely: the aliases from phase 5 mean the
   new spelling already works for users **without** phase 7. Phase 7 is
   cosmetic-canonical cleanup, not a capability. Recommend deferring until the
-  Ecto-note domain-axis work (`ash`/`ecto`) lands, so the rename and the
-  domain modifier re-baseline the Phoenix fixtures **once**, together.
+  Ecto domain-axis work lands, so the rename and the domain modifier re-baseline
+  the Phoenix fixtures **once**, together. (The foundation axis has since resolved
+  to `ecto`/vanilla only — the Ash foundation is removed.)
 
 ## Sequencing & risk
 
@@ -149,4 +151,4 @@ Phase 5 made `phoenix`/`liveview` *aliases* that canonicalise to the still-domin
 3. **Does an embedded-react Phoenix still emit the HEEx/LiveView shell at
    all?** No — when `framework: react`, the deployable is a JSON API backend
    that happens to also serve a SPA; it should emit **no** LiveView pages
-   (S1 gate). The Ash domain + `/api` controllers + OpenAPI stay.
+   (S1 gate). The Ecto/Phoenix domain + `/api` controllers + OpenAPI stay.

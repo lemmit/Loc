@@ -198,7 +198,9 @@ package versions need to coordinate with the runtime TFM (`net8.0` vs
 `net9.0`) through the same `stacks/` mechanism that already governs
 the TS stack versions.
 
-### Phoenix / Ash — module-level only, no layer split
+### Phoenix — module-level only, no layer split
+
+**(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain Ecto/Phoenix only and `foundation: ash` is now a validation error. The Ash-specific reasoning below — resource/data-layer fusion, "Ash is the ORM" — no longer reflects emitted output; the layer-split conclusion should be re-derived against plain Ecto/Phoenix schemas + contexts.)**
 
 An Ash `Resource` fuses domain attributes, the `postgres do … end`
 data-layer block, validations, and API actions into one module

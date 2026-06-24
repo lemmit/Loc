@@ -384,7 +384,7 @@ function workflowRoute(
     `async def ${snake(wf.name)}_workflow(${sig}) -> Response:`,
     ...(usesUser ? ["    current_user: User = request.state.current_user"] : []),
     // Workflow narrative — `workflow_started` at the route entry; shared catalog
-    // identity (field `workflow`) with the Phoenix-Ash reference + every backend.
+    // identity (field `workflow`) across every backend.
     `    log("${LogEvents.workflowStarted.level}", "${LogEvents.workflowStarted.event}", workflow=${JSON.stringify(wf.name)})`,
   ];
   // A `transactional(<level>)` workflow (or its state dataSource's

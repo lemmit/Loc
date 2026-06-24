@@ -696,7 +696,7 @@ function renderHandler(
   // Workflow lifecycle narrative (workflow_started / workflow_completed) — the
   // command handler always logs both, so inject the catalog logger
   // (`renderDotnetLogCall` assumes a `_log` ILogger field).  Shared catalog
-  // identity (field `workflow`) with the Phoenix-Ash reference + every backend.
+  // identity (field `workflow`) across every backend.
   fields.push(`    private readonly ILogger<${handlerName}> _log;`);
   ctorParamPairs.push(`ILogger<${handlerName}> log`);
   ctorAssigns.push("_log = log");

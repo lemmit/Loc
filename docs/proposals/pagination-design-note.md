@@ -1,7 +1,7 @@
 # Pagination — design note for the implementing agent
 
 > Status: **SHIPPED (offset paging on all four backends).** Functional paged
-> finds emit across Hono/Drizzle, .NET (CQRS+EF), Phoenix/Ash (offset), and
+> finds emit across Hono/Drizzle, .NET (CQRS+EF), Phoenix (offset), and
 > React, all returning the `Paged<T>` envelope (`items`, `page`, `pageSize`,
 > `total`, `totalPages`); landed as the payload P3b slice (#898 React, #916
 > .NET, #925 Phoenix) with a cross-backend wire-parity gate at P3 closeout
@@ -74,8 +74,9 @@ Language / IR:
 
 Parity:
 - TS/Hono — `src/platform/hono/...` + `src/generator/ts/`: same `Paged<T>` shape and clamps.
-- Phoenix/Ash — `src/generator/phoenix-live-view/`: Ash has first-class pagination
-  (`offset`/`keyset`) — map to `offset` for v1.
+- Phoenix — `src/generator/phoenix-live-view/`: offset paging via Ecto `limit`/`offset`.
+  (At the time of writing this targeted Ash's first-class pagination; the Ash foundation was
+  removed in 2026 and `platform: elixir` now emits plain Ecto/Phoenix.)
 
 React (`src/generator/react/api-builder.ts`):
 - Generate paged hooks (e.g. `useAll<Plural>(page, pageSize)` / a `…Paged` variant) consuming

@@ -13,7 +13,7 @@ covers it → a 🔴 SILENT correctness gap (bucket c). PR #1501's note is live,
 stale.
 
 This is **node-only**: .NET (`HasQueryFilter`), Java (`@FilterDef
-autoEnabled`), and Elixir/Ash (`base_filter`) apply the filter globally;
+autoEnabled`), and Elixir (a scoped Ecto query applied in the repo) apply the filter globally;
 Python's `runMethod` already threads the predicate. Node is the outlier — it
 splices the capability predicate per-read-site and the retrieval site is the one
 that forgot.

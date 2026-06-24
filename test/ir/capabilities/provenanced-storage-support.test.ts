@@ -1,10 +1,9 @@
 // Tier-0 honest-gate guard.  The provenance runtime (the lineage SDK +
 // co-located `<field>_provenance` column + the provenance_records flush) is
-// emitted on the Hono (node), .NET (dotnet) and elixir-**vanilla** backends; on
-// the Ash foundation (or react) a `provenanced` field would silently behave
-// like a plain field, dropping the trail it promises.  The validator rejects
-// that mismatch with loom.provenanced-backend-unsupported rather than emitting
-// a footgun.  elixir is foundation-shaped: vanilla un-gates, ash stays gated.
+// emitted on the Hono (node), .NET (dotnet) and elixir (vanilla) backends; on
+// react a `provenanced` field would silently behave like a plain field,
+// dropping the trail it promises.  The validator rejects that mismatch with
+// loom.provenanced-backend-unsupported rather than emitting a footgun.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../../src/ir/enrich/enrichments.js";
@@ -38,26 +37,6 @@ system Shop {
 `;
 }
 
-// elixir is foundation-shaped — `platform: elixir { foundation: <f> }`.
-function elixirSys(foundation: string): string {
-  return `
-system Shop {
-  subdomain Core {
-    context Ordering {
-      aggregate Order ids guid {
-        total: int provenanced
-        operation bump() { total := total + 1 }
-      }
-      repository Orders for Order { }
-    }
-  }
-  storage pg { type: postgres }
-  resource ordersState { for: Ordering, kind: state, use: pg }
-  deployable api { platform: elixir { foundation: ${foundation} }, contexts: [Ordering], dataSources: [ordersState], port: 4000 }
-}
-`;
-}
-
 describe("provenanced-field storage capability validation", () => {
   it("accepts a provenanced field on a Hono (node) deployable", async () => {
     expect(await provErrors(sys("node"))).toEqual([]);
@@ -75,20 +54,8 @@ describe("provenanced-field storage capability validation", () => {
     expect(await provErrors(sys("python"))).toEqual([]);
   });
 
-  it("rejects a provenanced field on a Phoenix deployable (defaults to ash — no runtime)", async () => {
-    const errs = await provErrors(sys("elixir"));
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("provenance runtime");
-  });
-
-  it("accepts a provenanced field on an elixir foundation: vanilla deployable (DEBT-06)", async () => {
-    expect(await provErrors(elixirSys("vanilla"))).toEqual([]);
-  });
-
-  it("rejects a provenanced field on an elixir foundation: ash deployable (no runtime)", async () => {
-    const errs = await provErrors(elixirSys("ash"));
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("foundation: vanilla");
+  it("accepts a provenanced field on an elixir (vanilla) deployable (DEBT-06)", async () => {
+    expect(await provErrors(sys("elixir"))).toEqual([]);
   });
 
   it("accepts a provenanced context co-hosted on hono + dotnet (both capable)", async () => {
@@ -110,28 +77,5 @@ system Shop {
 }
 `;
     expect(await provErrors(src)).toEqual([]);
-  });
-
-  it("rejects when a provenanced context is co-hosted on hono + phoenix (mismatch)", async () => {
-    const src = `
-system Shop {
-  subdomain Core {
-    context Ordering {
-      aggregate Order ids guid {
-        total: int provenanced
-        operation bump() { total := total + 1 }
-      }
-      repository Orders for Order { }
-    }
-  }
-  storage pg { type: postgres }
-  resource ordersState { for: Ordering, kind: state, use: pg }
-  deployable honoApi { platform: node, contexts: [Ordering], dataSources: [ordersState], port: 3000 }
-  deployable phx { platform: elixir, contexts: [Ordering], dataSources: [ordersState], port: 8080 }
-}
-`;
-    const errs = await provErrors(src);
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("elixir");
   });
 });

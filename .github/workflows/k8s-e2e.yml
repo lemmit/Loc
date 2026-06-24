@@ -6,7 +6,7 @@ name: Kubernetes cluster e2e (kind)
 # wires up, the backend reaches its database (`/ready` → 200), and a real
 # read + write round-trip persists through it.  See docs/kubernetes.md.
 #
-# Fanned across every backend (hono / dotnet / python / java / phoenix-ash from
+# Fanned across every backend (hono / dotnet / python / java from
 # the shared k8s-smoke.ddd, plus phoenix-vanilla from tasks-vanilla.ddd): one
 # matrix cell per backend installs just that workload (the chart's
 # per-deployable `enabled` toggle), so each cell builds a single image in
@@ -45,7 +45,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # One backend deployable per cell.  The five standard backends share
+        # One backend deployable per cell.  The four standard backends share
         # the auth-free k8s-smoke.ddd (Widget CRUD); the vanilla-Elixir
         # foundation has its own example (tasks-vanilla.ddd, Task CRUD).
         include:
@@ -53,7 +53,6 @@ jobs:
           - { label: dotnet,          backend: dotnet-api,  ddd: scripts/k8s-e2e/k8s-smoke.ddd,     fixture: scripts/k8s-e2e/k8s-smoke.smoke.json }
           - { label: python,          backend: python-api,  ddd: scripts/k8s-e2e/k8s-smoke.ddd,     fixture: scripts/k8s-e2e/k8s-smoke.smoke.json }
           - { label: java,            backend: java-api,    ddd: scripts/k8s-e2e/k8s-smoke.ddd,     fixture: scripts/k8s-e2e/k8s-smoke.smoke.json }
-          - { label: phoenix-ash,     backend: phoenix-api, ddd: scripts/k8s-e2e/k8s-smoke.ddd,     fixture: scripts/k8s-e2e/k8s-smoke.smoke.json }
           - { label: phoenix-vanilla, backend: api,         ddd: examples/tasks-vanilla.ddd,        fixture: scripts/k8s-e2e/tasks-vanilla.smoke.json }
     name: k8s-smoke (${{ matrix.label }})
     steps:

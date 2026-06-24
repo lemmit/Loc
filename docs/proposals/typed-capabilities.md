@@ -112,8 +112,8 @@ used for the `ExprTarget`/`WalkerTarget` extractions).
 ## Backend emission (non-normative note)
 
 A typed capability has a natural per-backend representation a string tag lacks: a
-**marker interface** (C# `interface ISoftDeletable`, a TS brand, an Ash
-extension). That enables idiomatic emission — e.g. an EF `OnModelCreating` loop
+**marker interface** (C# `interface ISoftDeletable`, a TS brand, an Ecto
+schema-module convention). That enables idiomatic emission — e.g. an EF `OnModelCreating` loop
 over entities implementing the marker, instead of N hand-written `HasQueryFilter`
 calls:
 
@@ -133,8 +133,8 @@ Two EF realities, captured so the IR stays backend-neutral:
    filters relaxes this.)
 
 This is a **codegen choice over the same `contextFilters` IR**; the capability
-model never dictates it. Drizzle (WHERE splice) and Ash (`base_filter`) have
-their own faithful emission. (How shared code is emitted when one capability is
+model never dictates it. Drizzle (WHERE splice) and Ecto (a shared
+`where`-clause helper) have their own faithful emission. (How shared code is emitted when one capability is
 reused across many aggregates is open question #1.)
 
 ## What becomes a capability vs stays a macro

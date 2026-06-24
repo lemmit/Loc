@@ -27,7 +27,6 @@ import {
 } from "./checks/structural-checks.js";
 import {
   backendPlatformsHostingEachContext,
-  elixirFoundationsHostingEachContext,
   validateAuditedOperationSupport,
   validateAuth,
   validateAuthUiFramework,
@@ -155,9 +154,6 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   // Which backend (needsDb) platforms host each context — drives the TPH
   // storage gate (sharedTable is implemented for Hono only, v1).
   const backendPlatformsByContext = backendPlatformsHostingEachContext(loom);
-  // Per-context elixir foundations — drives the (foundation-shaped) event-
-  // sourcing gate: ES ships on the vanilla foundation, not ash (D-VANILLA-ES-HOME).
-  const elixirFoundationsByContext = elixirFoundationsHostingEachContext(loom);
   // Per-context checks apply uniformly whether the context is
   // bundled in a system's modules or sits at the top level.
   for (const c of allContexts(loom)) {
@@ -181,45 +177,23 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
       backendPlatformsByContext.get(c.name) ?? new Set(),
     );
     validateUnionsUnimplemented(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
-    validateUnionFindShapes(
-      c,
-      diags,
-      backendPlatformsByContext.get(c.name) ?? new Set(),
-      elixirFoundationsByContext.get(c.name) ?? new Set(),
-    );
+    validateUnionFindShapes(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateWhenGateSupport(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateOperationReturnsUnimplemented(
       c,
       diags,
       backendPlatformsByContext.get(c.name) ?? new Set(),
-      elixirFoundationsByContext.get(c.name) ?? new Set(),
     );
     validateUnmappedErrorStatuses(c, diags);
     validateInheritanceStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
-    validateEventSourcedStorage(
-      c,
-      diags,
-      backendPlatformsByContext.get(c.name) ?? new Set(),
-      elixirFoundationsByContext.get(c.name) ?? new Set(),
-    );
+    validateEventSourcedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateEventSourcedWorkflowStorage(
       c,
       diags,
       backendPlatformsByContext.get(c.name) ?? new Set(),
-      elixirFoundationsByContext.get(c.name) ?? new Set(),
     );
-    validateProvenancedStorage(
-      c,
-      diags,
-      backendPlatformsByContext.get(c.name) ?? new Set(),
-      elixirFoundationsByContext.get(c.name) ?? new Set(),
-    );
-    validateAuditedOperationSupport(
-      c,
-      diags,
-      backendPlatformsByContext.get(c.name) ?? new Set(),
-      elixirFoundationsByContext.get(c.name) ?? new Set(),
-    );
+    validateProvenancedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
+    validateAuditedOperationSupport(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
   }
   validateExprIntegrity(loom, diags);
   validateUiBodies(loom, diags);

@@ -4,7 +4,7 @@ Identity and access for a Loom system: the system-scope `user` JWT claim shape, 
 
 > **Grammar:** `UserBlock`, `AuthBlock`, `OidcConfig`, `ClaimsMap`, `PermissionsBlock`, `RequiresStmt`, `RequiresProp`, `Sensitive` · **Validators:** `loom.auth-without-user`, `loom.duplicate-user-block`, `loom.user-duplicate-field`, `loom.duplicate-permission`, `loom.unknown-permission`, `loom.currentuser-not-in-request-scope`, `loom.default-deny-ungated`, `loom.view-gate-not-current-user`, `loom.workflow-currentuser-find`, `loom.auth-unknown-provider`, `loom.auth-missing-issuer`, `loom.auth-unknown-claim-field` · **Docs:** [`../auth.md`](../auth.md)
 
-All five backends emit auth files. The middleware, verifier seam, `requires`→403 mapping, and `permissions.<name>` lowering are structurally identical across them — the divergence is host-language syntax and, for Elixir/Ash, the topology (a policy check module instead of an inline throw). The frontends consume only the session probe; their `auth: ui` page gate is covered in [UI pages](15-ui-pages-structure.md) and [`../auth.md`](../auth.md#ui-gate--page--requires-expr-).
+All five backends emit auth files. The middleware, verifier seam, `requires`→403 mapping, and `permissions.<name>` lowering are structurally identical across them — the divergence is host-language syntax and, for Elixir, the topology (a plug/guard in the context boundary instead of an inline throw). The frontends consume only the session probe; their `auth: ui` page gate is covered in [UI pages](15-ui-pages-structure.md) and [`../auth.md`](../auth.md#ui-gate--page--requires-expr-).
 
 The single example below threads every feature; each section excerpts the line it produces.
 
@@ -361,20 +361,20 @@ def close(self, current_user: User) -> None:
 ```
 == elixir
 ```elixir
-# The Ash backend lowers `requires` to a policy check module on the action,
-# NOT an inline throw — Ash.Policy.Authorizer returns 403 when no policy passes.
-defmodule ApiElixir.Support.Ticket.Checks.Close do
-  use Ash.Policy.SimpleCheck
-  def match?(nil, _context, _opts), do: false
-  def match?(actor, _context, _opts) do
-    current_user = actor
-    current_user.role == "agent" or Enum.member?(current_user.permissions, "support.ticketsClose")
+# The Elixir backend lowers `requires` to an authorization guard in the context
+# boundary — the guard returns {:error, :forbidden} (→ 403) when no clause passes.
+defp authorize_close(current_user) do
+  if current_user.role == "agent" or
+       Enum.member?(current_user.permissions, "support.ticketsClose") do
+    :ok
+  else
+    {:error, :forbidden}
   end
 end
-# … on the resource:
-policies do
-  policy action(:close) do
-    authorize_if ApiElixir.Support.Ticket.Checks.Close
+# … on the context function:
+def close(id, current_user) do
+  with :ok <- authorize_close(current_user) do
+    # … perform the update
   end
 end
 ```
@@ -418,9 +418,9 @@ const result = await repo.mine(currentUser);
 ```
 == elixir
 ```elixir
-# Ash read action with a currentUser-bound filter — current_user is the action actor
-read :mine do
-  filter expr(record.assignee == current_user.id)
+# Ecto query function with a currentUser-bound filter — current_user is threaded in
+def mine(current_user) do
+  Repo.all(from t in Ticket, where: t.assignee == ^current_user.id)
 end
 ```
 ::: end

@@ -164,20 +164,9 @@ describe("realization axes — R3 style ↔ directoryLayout compatibility", () =
 });
 
 describe("realization axes — R4 foundation owns layers", () => {
-  it("rejects `foundation: ash` + `application:` on elixir (Ash supplies it)", async () => {
-    const { errors } = await parse(sys("elixir { foundation: ash, application: serviceLayer }"));
-    expect(
-      errors.some((e) =>
-        /foundation: ash.*owns the application layer.*remove 'application:'/i.test(e),
-      ),
-    ).toBe(true);
-  });
-
-  it("rejects `foundation: ash` + `transport:` on elixir", async () => {
-    const { errors } = await parse(sys("elixir { foundation: ash, transport: phoenix }"));
-    expect(errors.some((e) => /foundation: ash.*owns the transport layer/i.test(e))).toBe(true);
-  });
-
+  // The Ash foundation was removed: `foundation: ash` is now rejected outright
+  // as an out-of-menu value (elixir is `vanilla`-only), so the old R4 axis-
+  // ownership cases ("ash owns the application/transport layer") are obsolete.
   it("`foundation: vanilla` owns nothing — no R4 error", async () => {
     const { errors } = await parse(sys("dotnet { foundation: vanilla, application: cqrs }"));
     expect(errors).toEqual([]);
@@ -202,11 +191,13 @@ describe("realization axes — foundation: vanilla on elixir is accepted (Slice 
     expect(errors.some((e) => /Unknown platform 'phoenix'/.test(e))).toBe(true);
   });
 
-  it("does NOT fire on elixir with `foundation: ash` (current emit path)", async () => {
+  it("rejects the removed `foundation: ash` outright (elixir is vanilla-only)", async () => {
     const { errors } = await parse(sys("elixir { foundation: ash }"));
-    expect(errors.some((e) => /foundation: vanilla.*reserved.*not yet implemented/i.test(e))).toBe(
-      false,
-    );
+    expect(
+      errors.some((e) =>
+        /foundation: ash.*is not available on platform 'elixir'.*'vanilla'/.test(e),
+      ),
+    ).toBe(true);
   });
 
   it("`foundation: vanilla` is accepted on non-phoenix platforms (the existing default)", async () => {
@@ -224,15 +215,6 @@ describe("realization axes — foundation: vanilla on elixir is accepted (Slice 
 // platform default, so a cross pair is rejected either way.
 // ---------------------------------------------------------------------------
 describe("realization axes — R6 foundation ↔ persistence/application compatibility", () => {
-  it("rejects `foundation: ash` + `persistence: ecto` (ash wants its own data layer)", async () => {
-    const { errors } = await parse(sys("elixir { foundation: ash, persistence: ecto }"));
-    expect(
-      errors.some((e) =>
-        /persistence: ecto.*incompatible with 'foundation: ash'.*'ashPostgres'/.test(e),
-      ),
-    ).toBe(true);
-  });
-
   it("rejects `foundation: vanilla` + `persistence: ashPostgres` (plain Ecto only)", async () => {
     const { errors } = await parse(sys("elixir { foundation: vanilla, persistence: ashPostgres }"));
     expect(
@@ -242,11 +224,23 @@ describe("realization axes — R6 foundation ↔ persistence/application compati
     ).toBe(true);
   });
 
-  it("rejects `persistence: ecto` with NO foundation on elixir (defaults to ash)", async () => {
+  it("accepts `persistence: ecto` with NO foundation on elixir (defaults to vanilla)", async () => {
+    // Post D-VANILLA-DEFAULT the omitted-foundation default is vanilla, whose
+    // data layer IS ecto — so the aligned pair needs no explicit `foundation:`.
     const { errors } = await parse(sys("elixir { persistence: ecto }"));
+    expect(errors).toEqual([]);
+  });
+
+  it("rejects `persistence: ashPostgres` with NO foundation on elixir (defaults to vanilla)", async () => {
+    // The mirror: the default vanilla foundation does NOT admit Ash's framework
+    // data layer — and the Ash foundation was removed, so `ashPostgres` is no
+    // longer reachable at all on elixir.
+    const { errors } = await parse(sys("elixir { persistence: ashPostgres }"));
     expect(
       errors.some((e) =>
-        /persistence: ecto.*incompatible with 'foundation: ash'.*default on 'elixir'/.test(e),
+        /persistence: ashPostgres.*incompatible with 'foundation: vanilla'.*default on 'elixir'/.test(
+          e,
+        ),
       ),
     ).toBe(true);
   });
@@ -283,7 +277,6 @@ describe("realization axes — R6 foundation ↔ persistence/application compati
   });
 
   it("no R6 error for a foundation without an explicit data layer", async () => {
-    expect((await parse(sys("elixir { foundation: ash }"))).errors).toEqual([]);
     expect((await parse(sys("elixir { foundation: vanilla }"))).errors).toEqual([]);
     expect((await parse(sys("elixir"))).errors).toEqual([]);
   });
