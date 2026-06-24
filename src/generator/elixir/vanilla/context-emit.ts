@@ -144,12 +144,31 @@ function renderContextModule(
   @doc "Blank-or-seeded Ecto changeset for the ${aggPascal} create/operation forms."
   def change_${aggSnake}(record_or_struct \\\\ %${facadeMod}.${aggPascal}{}, attrs \\\\ %{}),
     do: ${changesetMod}.base_changeset(record_or_struct, attrs)`;
+    // A `destroy` action (e.g. from `with crudish`) lets a detail page host a
+    // `DestroyForm(of: <Agg>)`, whose hoisted `handle_event` calls
+    // `<Ctx>.destroy_<agg>!(id)` directly (a `byId` ActionBinding — see
+    // `heex-primitives.ts`).  Emit that bang fn: load the record by id (raising
+    // if missing), hard-delete it (`Repo.delete!`), returning the deleted struct.
+    // Mirror the LiveView's emit condition on the aggregate IR — it has a
+    // `destroy` action.
+    const hasDestroy = (agg.destroys ?? []).length > 0;
+    const getArgs = principal ? "id, current_user" : "id";
+    const destroyFacade = hasDestroy
+      ? `\n
+  @doc "Hard-delete a ${aggPascal} by id (DestroyForm seam) — raises if not found."
+  def destroy_${aggSnake}!(${getArgs}) do
+    case get_${aggSnake}(${getArgs}) do
+      {:ok, record} -> ${appModule}.Repo.delete!(record)
+      {:error, _} -> raise Ecto.NoResultsError, queryable: ${facadeMod}.${aggPascal}
+    end
+  end`
+      : "";
     return `  # ${aggPascal}
   defdelegate list_${aggSnake}s(${principal ? "current_user \\\\ nil" : ""}), to: ${repoMod}, as: :list
   defdelegate get_${aggSnake}(id${actorArg}), to: ${repoMod}, as: :find_by_id
   defdelegate create_${aggSnake}(attrs${stampActorArg}), to: ${repoMod}, as: :insert
   defdelegate update_${aggSnake}(record, attrs${stampActorArg}), to: ${repoMod}, as: :update
-  defdelegate delete_${aggSnake}(record), to: ${repoMod}, as: :delete${changeFacade}
+  defdelegate delete_${aggSnake}(record), to: ${repoMod}, as: :delete${changeFacade}${destroyFacade}
 ${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}`;
   });
 

@@ -13,4 +13,3 @@ picks it up.
 | Fixture | Gap (tracked in `docs/plans/vanilla-phoenix-gaps.md`) |
 |---|---|
 | `vanilla-auth-op-gate.ddd` | An operation `requires`/`when` guard referencing `currentUser` renders `current_user.role` in the context function, but `current_user` is not threaded into that function (the auditable create/update path threads `current_user \\ nil`; named operations don't yet). |
-| `vanilla-destroy-form.ddd` | The destroy-form path references `<Ctx>.destroy_<agg>!/1`, but the context module doesn't emit that bang destroy function. |
