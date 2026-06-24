@@ -1,7 +1,22 @@
 # Execution-context backbone — scope frames
 
-> Status: proposal. Not in `ddd.langium`. This is mostly a
-> compiler/runtime mechanism with a small surface; it is the shared
+> Status: **PARTIAL** — the runtime backbone is **emitted on all five
+> backends** (2026-06-24 code-verified; the architecture carrier doc,
+> [`../architecture/request-context.md`](../architecture/request-context.md),
+> pins **D-CTX-SHAPE** and confirms the same). By design there is **no
+> `ddd.langium` surface** — context boundaries are emitted structurally
+> from constructs Loom already has, not annotated (see § Surface). What
+> ships today: the ambient id-triad carrier
+> (`correlationId`/`scopeId`/`parentId`) with root/child frame chaining
+> and enter/exit scope discipline — `.NET` (`AsyncLocal<RequestContext>`,
+> `OpenRoot`/`OpenChild`, `Enter`/restore), Java (`ExecutionContextFilter`
+> at the HTTP edge), node/Hono (`reqCtx` threaded through routes +
+> workflow dispatch), Elixir (`RequestContext` in the shell runtime),
+> Python (`ContextVar`). What remains: exposing the build-flag surface
+> below as **user-facing** options (today derived internally from field
+> presence, not a CLI/build switch), the fuller scope-event genealogy
+> (`operationId` ships on audit records; `nodeId`/`kind`/`timestamp` do
+> not), and the open `scopeId`-semantics decision. This is the shared
 > substrate beneath [provenance](./provenance.md),
 > [audit](./audit-and-logging.md), and logging.
 

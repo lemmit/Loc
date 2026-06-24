@@ -34,7 +34,7 @@ hours of re-verification — that is the failure mode this rewrite fixes.
 
 ---
 
-## Current state on `origin/main` (2026-06-10, condensed; refreshed 2026-06-21 against #1496)
+## Current state on `origin/main` (2026-06-10, condensed; refreshed 2026-06-21 against #1496; spot-refresh 2026-06-24 — Tier-4 #1 execution-context + #4 domain-services found shipped, corrected below)
 
 The ten-phase pipeline, five DB/backends (node/Hono, .NET, Java/Spring
 Boot, Python/FastAPI, elixir — plain Ecto/Phoenix, the `vanilla`
@@ -141,14 +141,32 @@ elixir items form one coherent track (a→e order).
 | T3.19 | **Seeding tail** — imperative (workflow-shaped) body, per-row natural-key upsert, create-shape validation. | | [database-seeding](./database-seeding.md) |
 | T3.20 | **Inheritance I4** — per-concrete storage override / mixed strategy (needs the UNION-ALL read; gated in `validators/inheritance.ts:~137`), polymorphic `<Base> id` refs + `find all <Base>` over TPC. | | [aggregate-inheritance](./aggregate-inheritance.md) |
 
-## Tier 4 — unstarted families (code-verified: no grammar/IR/emit artifacts)
+## Tier 4 — mostly-unstarted families (code-verified)
 
-Ordered by the dependency spine, not by size.
+Ordered by the dependency spine, not by size. Most carry no
+grammar/IR/emit artifacts; the exceptions already shipped are annotated
+inline (#1 execution-context backbone, #9 typed-capabilities, #10
+java-backend).
 
 1. **execution-context** (Tier-0 backbone) — compiler-emitted scope
-   frames (`correlationId`/`scopeId`/`parentId`). **Lands before any
-   governance tier**; audit promotion (T3.13), provenance parity
-   (T2.k), and authorization all reference it.
+   frames (`correlationId`/`scopeId`/`parentId`). **(No longer a Tier-4
+   unstarted item — the runtime backbone is now SHIPPED across all five
+   backends; 2026-06-24 code-verified.)** The id-triad carrier + root/child
+   frame chaining + enter/exit scope discipline ship on `.NET`
+   (`dotnet/emit/request-context.ts` — `AsyncLocal<RequestContext>`,
+   `OpenRoot`/`OpenChild`, `Enter`/restore), Java
+   (`java/emit/request-context.ts` `ExecutionContextFilter`), node/Hono
+   (`hono/v4/routes-builder.ts` + `workflow-builder.ts` thread `reqCtx`),
+   Elixir (`elixir/shell/runtime.ts` `RequestContext`), and Python
+   (`python/emit/provenance.ts` `ContextVar`); pinned **D-CTX-SHAPE**,
+   [`../architecture/request-context.md`](../architecture/request-context.md)
+   ("emitted on all five backends"). audit promotion (T3.13), provenance
+   parity (T2.k), and authorization consume it. **PARTIAL tail**: the
+   build-flag surface as **user-facing** options
+   (`emitContextBoundaries`/`emitProvenance`/`emitTracing` are derived
+   internally today, not exposed), the fuller scope-event genealogy
+   (`operationId` ships on audit records; `nodeId`/`kind`/`timestamp` do
+   not), and the open `scopeId`-semantics decision.
 2. **multi-tenancy** — design **refined 2026-06-17** (R1–R5; pinned
    **D-TENANCY-SCOPE / -REGISTRY / -DEFAULT / -HIERARCHY**): `tenancy by
    user.tenantId of Organization`; **two-value** scope (`with tenantOwned`
@@ -168,7 +186,14 @@ Ordered by the dependency spine, not by size.
    deferred tail.
 4. **domain-services** (`domainService`, design pinned #1058 —
    `DomainServiceIR`, `callKind: "domain-service"`, Shape A pure
-   calculator first).
+   calculator first). **(No longer a Tier-4 unstarted item — Shape A
+   (v1) is SHIPPED across all five backends; 2026-06-24 code-verified:
+   grammar `DomainService` rule, `DomainServiceIR` + `OperationIR.mutating`,
+   phase-⑦ no-infra gates (`loom.domain-service-no-{emit,mutation,repo,
+   workflow-start}`, `checks/domain-service-checks.ts`), `domain-service-emit.ts`
+   on node/dotnet/java/python/elixir, and parse/lower/validate/per-backend
+   emit tests. PARTIAL tail: Shape B (coordinator + persistence contract)
+   = Phase 2, Shape C deferred.)**
 5. **loom-forms** (typed-action `CreateForm`/`OperationForm`/
    `DestroyForm` binding — fixes the form/API create-contract layering
    bug; lifecycle Phase 1 prereq is done) + **lifecycle-operations
