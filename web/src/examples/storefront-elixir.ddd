@@ -81,7 +81,7 @@ system StorefrontPhoenix {
         }
       }
 
-      aggregate Order with crudish {
+      aggregate Order shape(embedded) with crudish {
         customerId: Customer id
         status: OrderStatus
         placedAt: datetime
