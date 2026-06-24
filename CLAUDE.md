@@ -41,6 +41,8 @@ Parallel agents collide. The defence is the same one humans use: **announce inte
 
 The package name in `package.json` is `loc-ddd-dsl`; the CLI binary is `ddd`; the working name everywhere in docs and code is "Loom".
 
+> **History — the Elixir backend was once Ash-based.** `platform: elixir` originally generated on the **Ash Framework** (an `ash`/`ashPostgres` *foundation*, selected via a `foundation:` knob). Ash didn't work out for Loom's codegen model and was **removed** in favour of plain Phoenix LiveView on Ecto (the `vanilla` foundation, now the only one — `foundation: ash` is a hard validation error). Expect to find historical Ash mentions in `docs/plans`, `docs/audits`, and `docs/proposals` (kept as the migration record, not as current behavior); the gaps the removal left in the vanilla backend are tracked in [`docs/plans/vanilla-phoenix-gaps.md`](docs/plans/vanilla-phoenix-gaps.md). **Note:** `ashPhoenix` is the name of a HEEx **design pack**, *not* the removed Ash foundation — it ships and is unrelated.
+
 ## Build & test commands
 
 ```bash
