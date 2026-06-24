@@ -97,17 +97,35 @@ coverage was dropped (so the test can be restored alongside the fix).
 - **To close:** add `mix format --check` + Dialyzer cases against the generated
   vanilla project and wire matching npm scripts / CI legs.
 
-## 8. Aggregate-inheritance polymorphic reader (`find all <Base>`)
+## 8. Aggregate-inheritance shared-table (TPH) wiring — **CLOSED**
 
-- **Ash:** emitted a polymorphic `list_<base>!` reader over the shared-table
-  resource for `find all <Base>`.
-- **Vanilla today:** emits per-aggregate Ecto schemas + a context façade with
-  per-aggregate `defdelegate`s; the polymorphic `find all <Base>` reader over the
-  shared TPH table is **not confirmed wired**.
-- **Touched in:** `test/language/parsing/aggregate-inheritance.test.ts` (Phoenix
-  case retargeted to the vanilla façade shape).
-- **To close:** verify (and emit, if missing) the polymorphic shared-table reader
-  for `find all <Base>` on vanilla; restore a polymorphic-read assertion.
+- **The bug (runtime 500, compiled green):** for `inheritanceUsing(sharedTable)`
+  the migration correctly created ONE shared `parties` table (`kind`
+  discriminator + every subtype's columns), but the generated Ecto schemas
+  pointed a concrete at `schema "customers"` / `schema "vendors"` — tables the
+  migration never creates — so every read 500'd with "relation customers does
+  not exist" (invisible to `mix compile`).  The abstract base also emitted a full
+  CRUD repo/changeset/controller over degenerate base structs (no `kind`, no
+  polymorphic hydration).
+- **Fixed (vanilla elixir backend only):**
+  - A TPH **concrete** schema now points at the SHARED base table and carries
+    `kind`; its repository filters every read by `kind == "<Concrete>"` and
+    stamps `kind` on insert (`src/generator/elixir/vanilla/schema-emit.ts`,
+    `repository-emit.ts`).
+  - The TPH **base** schema declares the column union + `kind`; a read-only
+    polymorphic reader (`list`/`find_by_id` over the shared table) backs
+    `find all <Base>`.
+  - Abstract bases (TPH and TPC) emit a read-only surface — no changeset, no
+    write seam, read-only controller (`changeset-emit.ts`, `context-emit.ts`,
+    `api-emit.ts`).
+  - TPC (`ownTable`) concrete output is unchanged; the TPC base reader now
+    delegates to the concrete repos instead of querying a phantom base table.
+  - Centralised in `src/generator/elixir/vanilla/inheritance-emit.ts` (wraps the
+    platform-neutral `ir/util/inheritance.ts` predicates).
+- **Test:** `test/generator/elixir/vanilla-inheritance.test.ts` asserts the
+  subtype schema uses the shared table + `kind`, the repo's `kind` filtering +
+  insert stamp, the base polymorphic reader, the read-only controller, and the
+  unchanged TPC concrete.
 
 ## 9. Operation `requires`/`when` guard referencing `currentUser`
 

@@ -29,6 +29,7 @@ import {
 } from "./capability-filter.js";
 import { isVanillaDocAgg, renderDocRepository } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
+import { isAbstractBase, isTphBase, tpcConcretesOf, tphKind } from "./inheritance-emit.js";
 import {
   containsRefCollField,
   hasRefColls,
@@ -48,6 +49,7 @@ export function emitVanillaRepositories(
   principalIdKey = "id",
 ): void {
   const ctxModule = upperFirst(ctx.name);
+  const pool = ctx.aggregates;
   for (const agg of ctx.aggregates) {
     // Event-sourced aggregates get an event-store repository from
     // `eventsourced-emit.ts` (load+fold reads, append writes) instead.
@@ -56,12 +58,15 @@ export function emitVanillaRepositories(
     const ctxSnake = snake(ctx.name);
     const appSnake = appModule.replace(/([A-Z])/g, (_, c, i) => (i ? "_" : "") + c.toLowerCase());
     const repo = (ctx.repositories ?? []).find((r) => r.aggregateName === agg.name);
-    out.set(
-      `lib/${appSnake}/${ctxSnake}/${aggSnake}_repository.ex`,
-      isVanillaDocAgg(agg, ctx, sys)
+    // An abstract inheritance base is never instantiated — it gets a READ-ONLY
+    // polymorphic reader (`find all <Base>`), not the CRUD seam.  TPH reads the
+    // shared table + dispatches on `kind`; TPC delegates to the concrete repos.
+    const content = isAbstractBase(agg)
+      ? renderBaseReader(appModule, ctxModule, agg, pool)
+      : isVanillaDocAgg(agg, ctx, sys)
         ? renderDocRepository(appModule, ctxModule, agg)
-        : renderRepository(appModule, ctxModule, agg, repo, principalIdKey, ctx),
-    );
+        : renderRepository(appModule, ctxModule, agg, repo, principalIdKey, ctx, pool);
+    out.set(`lib/${appSnake}/${ctxSnake}/${aggSnake}_repository.ex`, content);
   }
 }
 
@@ -91,10 +96,19 @@ function renderRepository(
   repo: RepositoryIR | undefined,
   principalIdKey: string,
   ctx?: BoundedContextIR,
+  pool: readonly AggregateIR[] = ctx?.aggregates ?? [agg],
 ): string {
   const aggModule = `${appModule}.${ctxModule}.${upperFirst(agg.name)}`;
   const repoMod = `${aggModule}Repository`;
   const contextModule = `${appModule}.${ctxModule}`;
+  // TPH (`sharedTable`) concrete: every row lives in the shared base table
+  // (`parties`) discriminated by `kind`, so the schema points there.  Reads MUST
+  // filter `record.kind == "<Concrete>"` (else `Repo.all(Customer)` would also
+  // return vendors), and inserts MUST stamp `kind` so the row is routable.  This
+  // is the runtime half of the §8 fix — the schema change alone would read every
+  // subtype's rows back as the wrong struct.
+  const kind = tphKind(agg, pool);
+  const kindFilter = kind ? `record.kind == ${JSON.stringify(kind)}` : null;
 
   // Value-object collections (`charges: Money[]`) are `has_many` associations —
   // preloaded on every read so the wire shape materialises (an unloaded
@@ -132,6 +146,17 @@ function renderRepository(
   // callers (workflows) compiling and fail-closed (a nil actor scopes to no rows).
   const principal = aggregateUsesPrincipalContextFilter(agg);
   const cap = vanillaCapabilityFilter(agg, contextModule, { actor: principal });
+  // The effective read filter — the capability filter AND the TPH `kind`
+  // discriminator (for a concrete sharing the base table).  A non-TPH aggregate
+  // keeps `capEff === cap` so its output stays byte-identical.
+  const capEff = combineWhere(kindFilter, cap);
+  // On insert, a TPH concrete stamps its `kind` discriminator (the migration's
+  // NOT-NULL text column) so the shared-table row is routable back to this
+  // subtype.  `kind` isn't a cast field (it's not a declared aggregate column),
+  // so `put_change` it onto the changeset directly.
+  const kindStamp = kind
+    ? `\n    |> Ecto.Changeset.put_change(:kind, ${JSON.stringify(kind)})`
+    : "";
   // Reference collections (`X id[]` → `many_to_many`) need `import Ecto.Query`
   // for the id-list resolution (`from(t in Target, where: t.id in ^ids)`) and
   // `Repo.preload(...)` on every read so the serializer sees the loaded ids.
@@ -142,7 +167,7 @@ function renderRepository(
   const preloadRels = [...valueCollectionRels, ...preloadList(agg)];
   const preload = preloadRels.length > 0 ? ` |> Repo.preload([${preloadRels.join(", ")}])` : "";
   const findFns = finds.map((f) =>
-    renderFindFn(f, agg, aggModule, contextModule, principal, preload),
+    renderFindFn(f, agg, aggModule, contextModule, principal, preload, kindFilter),
   );
   const findBlock = findFns.length > 0 ? `\n\n${findFns.join("\n\n")}\n` : "";
 
@@ -159,7 +184,7 @@ function renderRepository(
   // custom find OR a capability filter (which turns `list`/`find_by_id` into
   // `from(...)` reads) OR a reference collection (id-list resolution).  Omit it
   // otherwise to keep plain repositories byte-identical to before.
-  const ectoImport = finds.length > 0 || cap || refColls ? `\n  import Ecto.Query` : "";
+  const ectoImport = finds.length > 0 || capEff || refColls ? `\n  import Ecto.Query` : "";
   // The threaded actor parameter (principal filters only).
   const actorParam = principal ? "current_user \\\\ nil" : "";
   const listHead = principal ? `def list(${actorParam}) do` : "def list do";
@@ -171,8 +196,9 @@ function renderRepository(
   // and reference-collection many_to_many associations come back loaded (and
   // ordinal-ordered, for value collections) in one round-trip.
   const listBody =
-    (cap ? `from(record in ${aggModule}, where: ${cap}) |> Repo.all()` : `Repo.all(${aggModule})`) +
-    preload;
+    (capEff
+      ? `from(record in ${aggModule}, where: ${capEff}) |> Repo.all()`
+      : `Repo.all(${aggModule})`) + preload;
   const findByIdHead = principal
     ? `def find_by_id(id, ${actorParam}) when is_binary(id) do`
     : "def find_by_id(id) when is_binary(id) do";
@@ -182,8 +208,8 @@ function renderRepository(
   // `find_by_id`: `Repo.get` can't carry the capability `where`, so a scoped
   // read becomes a `from(... where: id and cap) |> Repo.one()` (a soft-deleted
   // / out-of-scope row then reads as `:not_found`, matching every other backend).
-  const findByIdBody = cap
-    ? `case Repo.one(from(record in ${aggModule}, where: record.id == ^id and (${cap}))) do`
+  const findByIdBody = capEff
+    ? `case Repo.one(from(record in ${aggModule}, where: record.id == ^id and (${capEff}))) do`
     : `case Repo.get(${aggModule}, id) do`;
   // Preload the reference-collection relationships on the loaded row so the
   // serializer projects them to id arrays.
@@ -209,7 +235,7 @@ defmodule ${repoMod} do
 
   @spec insert(map()${hasStamps && stampPrincipal ? ", map() | nil" : ""}) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
   def insert(attrs${stampActorParam}) when is_map(attrs) do
-    ${aggModule}Changeset.base_changeset(attrs)${insertStamps}${insertPutAssoc}
+    ${aggModule}Changeset.base_changeset(attrs)${kindStamp}${insertStamps}${insertPutAssoc}
     |> Repo.insert()
   end
 
@@ -250,14 +276,23 @@ function renderFindFn(
   contextModule: string,
   principal: boolean,
   preload: string,
+  /** The TPH `record.kind == "<Concrete>"` discriminator predicate, or null for
+   *  a non-TPH-concrete aggregate.  A custom find over a shared table must scope
+   *  to this subtype's rows just like `list`/`find_by_id` do. */
+  kindFilter: string | null = null,
 ): string {
   // The capability filter for THIS find — recomputed with the find's own
   // `ignoring` clause so a bypassed capability's `where:` predicate is omitted
-  // from this finder only (other reads keep the full conjunction).
-  const cap = vanillaCapabilityFilter(agg, contextModule, {
-    actor: principal,
-    bypass: { bypassAll: f.bypassAll, bypassCaps: f.bypassCaps },
-  });
+  // from this finder only (other reads keep the full conjunction).  The TPH
+  // `kind` discriminator is never bypassable (it's a physical-table fact, not a
+  // capability), so it ANDs in unconditionally.
+  const cap = combineWhere(
+    kindFilter,
+    vanillaCapabilityFilter(agg, contextModule, {
+      actor: principal,
+      bypass: { bypassAll: f.bypassAll, bypassCaps: f.bypassCaps },
+    }),
+  );
   const fnName = snake(f.name);
   const argNames = f.params.map((p) => snake(p.name));
   // A principal-filtered aggregate threads the request actor into the find too
@@ -334,4 +369,110 @@ function renderFindFn(
     query = ${query}
     {:ok, ${fetchCall}}
   end`;
+}
+
+/** Read-only polymorphic reader for an abstract inheritance base — the read
+ *  home for `find all <Base>` / dereferencing a polymorphic `<Base> id`
+ *  (inheritance.md).  An abstract base is never instantiated, so it carries NO
+ *  write seam (insert/update/delete); only `list` + `find_by_id`.
+ *
+ *    - TPH (`sharedTable`): the whole hierarchy lives in ONE table the base
+ *      schema points at, with a `kind` discriminator column.  `list`/`find_by_id`
+ *      read that table directly — each row deserialises into the base struct
+ *      carrying its `kind` + every subtype's columns (the union schema), so the
+ *      serialised wire shape is the tagged polymorphic record.
+ *    - TPC (`ownTable`): the base has NO table — each concrete is standalone.
+ *      So the reader DELEGATES to the per-concrete repositories and unions the
+ *      results (mirrors the TS `buildTpcBaseReaderFile`): `list` concatenates
+ *      each concrete's `list`, `find_by_id` tries each concrete in turn. */
+function renderBaseReader(
+  appModule: string,
+  ctxModule: string,
+  base: AggregateIR,
+  pool: readonly AggregateIR[],
+): string {
+  const aggModule = `${appModule}.${ctxModule}.${upperFirst(base.name)}`;
+  const repoMod = `${aggModule}Repository`;
+
+  if (isTphBase(base, pool)) {
+    // TPH: read the shared base table directly; each row is a base struct
+    // carrying `kind` + the union columns.
+    return `# Auto-generated.
+defmodule ${repoMod} do
+  @moduledoc "Read-only polymorphic reader for the abstract ${upperFirst(base.name)} hierarchy (TPH / sharedTable)."
+  alias ${appModule}.Repo
+
+  @spec list() :: {:ok, [${aggModule}.t()]} | {:error, term()}
+  def list do
+    {:ok, Repo.all(${aggModule})}
+  end
+
+  @spec find_by_id(binary()) :: {:ok, ${aggModule}.t()} | {:error, :not_found}
+  def find_by_id(id) when is_binary(id) do
+    case Repo.get(${aggModule}, id) do
+      nil -> {:error, :not_found}
+      record -> {:ok, record}
+    end
+  end
+end
+`;
+  }
+
+  // TPC: delegate to each concrete repository and union the results.  Each
+  // concrete loads its own full tree (the per-concrete `list`/`find_by_id`),
+  // then the reader concatenates `list`s and tries each `find_by_id` in turn.
+  const concretes = tpcConcretesOf(base, pool);
+  const concreteRepos = concretes.map(
+    (c) => `${appModule}.${ctxModule}.${upperFirst(c.name)}Repository`,
+  );
+  const concreteList = concreteRepos.map((r) => `      ${r}`).join(",\n");
+  const listBody =
+    concreteRepos.length > 0
+      ? `Enum.reduce_while(
+      [
+${concreteList}
+      ],
+      {:ok, []},
+      fn repo, {:ok, acc} ->
+        case repo.list() do
+          {:ok, rows} -> {:cont, {:ok, acc ++ rows}}
+          {:error, _} = err -> {:halt, err}
+        end
+      end
+    )`
+      : "{:ok, []}";
+  const findBody =
+    concreteRepos.length > 0
+      ? `Enum.reduce_while(
+      [
+${concreteList}
+      ],
+      {:error, :not_found},
+      fn repo, _acc ->
+        case repo.find_by_id(id) do
+          {:ok, record} -> {:halt, {:ok, record}}
+          {:error, :not_found} -> {:cont, {:error, :not_found}}
+        end
+      end
+    )`
+      : "{:error, :not_found}";
+
+  // A TPC base has NO schema module (no table), so there's no `${upperFirst(base.name)}.t()`
+  // type to reference — the reader's specs use the union of the concrete structs
+  // (`struct()`), which every concrete repository returns.
+  return `# Auto-generated.
+defmodule ${repoMod} do
+  @moduledoc "Read-only polymorphic reader for the abstract ${upperFirst(base.name)} hierarchy (TPC / ownTable) — delegates to the concrete repositories."
+
+  @spec list() :: {:ok, [struct()]} | {:error, term()}
+  def list do
+    ${listBody}
+  end
+
+  @spec find_by_id(binary()) :: {:ok, struct()} | {:error, :not_found}
+  def find_by_id(id) when is_binary(id) do
+    ${findBody}
+  end
+end
+`;
 }

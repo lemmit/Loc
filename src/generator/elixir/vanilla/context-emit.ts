@@ -30,6 +30,7 @@ import {
   renderEnsureHelper,
   renderEsContextBlock,
 } from "./eventsourced-emit.js";
+import { isAbstractBase } from "./inheritance-emit.js";
 import {
   isReturningOperation,
   persistPutBodies,
@@ -85,6 +86,17 @@ function renderContextModule(
     const aggPascal = upperFirst(agg.name);
     const aggSnake = snake(agg.name);
     const repoMod = `${facadeMod}.${aggPascal}Repository`;
+    // An abstract inheritance base is never instantiated — its façade is
+    // READ-ONLY: `list_<base>s` / `get_<base>` over the polymorphic reader, no
+    // create/update/delete/change defdelegates (there is no changeset / write
+    // seam to delegate to).  Emitting them would reference functions the
+    // read-only base repository never defines.
+    if (isAbstractBase(agg)) {
+      return `  # ${aggPascal} (abstract base — read-only polymorphic reader)
+  defdelegate list_${aggSnake}s(), to: ${repoMod}, as: :list
+  defdelegate get_${aggSnake}(id), to: ${repoMod}, as: :find_by_id
+`;
+    }
     // A principal (tenancy) filter threads the request actor through the read
     // seam, so the defdelegates that front a scoped read (`list`/`get` + custom
     // finds) carry the matching `current_user \\ nil` arity.  Non-principal

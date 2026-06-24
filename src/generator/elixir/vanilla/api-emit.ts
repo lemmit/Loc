@@ -30,6 +30,7 @@ import { CRUD_RESERVED_NAMES } from "./context-emit.js";
 import { isVanillaDocAgg, renderDocSerialize } from "./document-emit.js";
 import { isEventSourced, renderEsController } from "./eventsourced-emit.js";
 import { aggregateHasUnionFind, findRoutes, renderFindActions } from "./find-controller.js";
+import { isAbstractBase } from "./inheritance-emit.js";
 import {
   aggregateHasReturningOp,
   isReturningOperation,
@@ -83,6 +84,7 @@ export function emitVanillaApiControllers(
             memberOps,
             ctx,
             isVanillaDocAgg(agg, ctx, sys),
+            isAbstractBase(agg),
           ),
     );
 
@@ -156,6 +158,11 @@ function renderController(
   memberOps: readonly OperationIR[],
   ctx: BoundedContextIR,
   isDoc = false,
+  /** Abstract inheritance base — never instantiated, so the controller is
+   *  READ-ONLY (index + show over the polymorphic reader; no create/update/
+   *  delete actions, which would call write-seam context fns the read-only base
+   *  context never defines). */
+  readOnly = false,
 ): string {
   const aggPascal = upperFirst(agg.name);
   const facadeMod = `${appModule}.${ctxModule}`;
@@ -368,6 +375,31 @@ ${cuBind}    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id${getActor}),
     end
   end`;
 
+  // The mutating actions (create / update / delete).  An abstract inheritance
+  // base is read-only — it emits none of these (no write-seam context fns to
+  // call).  Concrete / plain aggregates emit the full set, as before.
+  const updateAction = `  def update(conn, %{"id" => id} = params) do
+    attrs = Map.drop(params, ["id"])
+${cuBind}${updateCuBind}
+    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id${getActor}),
+         {:ok, updated} <- ${ctxModule}.update_${aggSnake}(record, attrs${updateActor}) do
+      json(conn, serialize(updated))
+    else
+      {:error, :not_found} ->
+        ProblemDetails.not_found_response(conn, "${aggPascal}", id)
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        ProblemDetails.validation_error_response(conn, changeset)
+    end
+  end`;
+  const writeActions = readOnly
+    ? ""
+    : `${createAction}
+
+${updateAction}
+
+${deleteAction}`;
+
   return `# Auto-generated.
 defmodule ${appModule}Web.${aggPascal}Controller do
   use ${appModule}Web, :controller
@@ -391,24 +423,7 @@ ${cuBind}    case ${ctxModule}.get_${aggSnake}(id${getActor}) do
     end
   end
 
-${createAction}
-
-  def update(conn, %{"id" => id} = params) do
-    attrs = Map.drop(params, ["id"])
-${cuBind}${updateCuBind}
-    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id${getActor}),
-         {:ok, updated} <- ${ctxModule}.update_${aggSnake}(record, attrs${updateActor}) do
-      json(conn, serialize(updated))
-    else
-      {:error, :not_found} ->
-        ProblemDetails.not_found_response(conn, "${aggPascal}", id)
-
-      {:error, %Ecto.Changeset{} = changeset} ->
-        ProblemDetails.validation_error_response(conn, changeset)
-    end
-  end
-
-${deleteAction}
+${writeActions}
 ${findActions}
 ${opActions}
 ${problemVariant}

@@ -23,6 +23,7 @@ import { snake, upperFirst } from "../../../util/naming.js";
 import { ectoValidator, voHasConstraints } from "./changeset-validators.js";
 import { isVanillaDocAgg, renderDocChangeset } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
+import { isAbstractBase } from "./inheritance-emit.js";
 import { isRefCollField, refCollFieldNames } from "./ref-collection-emit.js";
 import { valueCollectionsWithVo } from "./value-collection-schema-emit.js";
 
@@ -54,6 +55,11 @@ export function emitVanillaChangesets(
   for (const agg of ctx.aggregates) {
     // Event-sourced aggregates mutate via emit+fold, not Ecto changesets.
     if (isEventSourced(agg)) continue;
+    // An abstract inheritance base is never instantiated — it has no write seam
+    // (insert/update/delete) and so no changeset.  Its concrete subtypes carry
+    // their own.  Emitting one would reference a `%Base{}` struct the read-only
+    // base schema (or, for TPC, no schema at all) doesn't back as a writable row.
+    if (isAbstractBase(agg)) continue;
     const aggSnake = snake(agg.name);
     const ctxSnake = snake(ctx.name);
     const appSnake = appModule.replace(/([A-Z])/g, (_, c, i) => (i ? "_" : "") + c.toLowerCase());

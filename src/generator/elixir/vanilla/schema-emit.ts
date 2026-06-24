@@ -23,10 +23,17 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { resolveDataSourceConfig } from "../../../ir/util/resolve-datasource.js";
 import { isValueCollectionType } from "../../../ir/util/value-collections.js";
-import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { snake, upperFirst } from "../../../util/naming.js";
 import { isVanillaDocAgg, renderDocSchema } from "./document-emit.js";
 import { renderAggregatePureCore } from "./domain-core-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
+import {
+  isTpcBase,
+  isTphBase,
+  isTphConcrete,
+  tphBaseUnionFields,
+  vanillaTableName,
+} from "./inheritance-emit.js";
 import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
 import { isRefCollField, manyToManyLine, refCollFields } from "./ref-collection-emit.js";
 import { valueCollectionModule, valueCollectionsWithVo } from "./value-collection-schema-emit.js";
@@ -41,10 +48,17 @@ export function emitVanillaSchemas(
   // Per-context enum-lookup table so the schema can pull each enum's
   // values list for the Ecto.Enum constraint.
   const enumsByName = new Map(ctx.enums.map((e) => [e.name, e]));
+  const pool = ctx.aggregates;
   for (const agg of ctx.aggregates) {
     // Event-sourced aggregates have no state table — `eventsourced-emit.ts`
     // emits a plain in-memory struct for `<agg>.ex` instead.
     if (isEventSourced(agg)) continue;
+    // A TPC (`ownTable`) abstract base owns NO physical table (each concrete is
+    // standalone) — the migration emits no `<base>s` table for it, so an Ecto
+    // schema over that phantom table would 500 on read.  The polymorphic
+    // `find all <Base>` reader (repository-emit) delegates to the concrete
+    // repos instead, so the base needs no schema at all.
+    if (isTpcBase(agg, pool)) continue;
     const aggSnake = snake(agg.name);
     const ctxSnake = snake(ctx.name);
     const appSnake = appModule.replace(/([A-Z])/g, (_, c, i) => (i ? "_" : "") + c.toLowerCase());
@@ -60,7 +74,7 @@ export function emitVanillaSchemas(
       `lib/${appSnake}/${ctxSnake}/${aggSnake}.ex`,
       isVanillaDocAgg(agg, ctx, sys)
         ? renderDocSchema(appModule, ctxModule, agg, schemaPrefix)
-        : renderSchema(appModule, ctxModule, agg, enumsByName, schemaPrefix, ctx, sys),
+        : renderSchema(appModule, ctxModule, agg, enumsByName, schemaPrefix, ctx, sys, pool),
     );
     // Each entity part (`entity Line { … }`) becomes an Ecto `embedded_schema`
     // module the aggregate `embeds_many`/`embeds_one`s, stored inline as the
@@ -149,14 +163,31 @@ function renderSchema(
   schemaPrefix?: string,
   ctx?: BoundedContextIR,
   sys?: SystemIR,
+  pool: readonly AggregateIR[] = ctx?.aggregates ?? [agg],
 ): string {
   const moduleName = `${appModule}.${ctxModule}.${upperFirst(agg.name)}`;
-  const tableName = snake(plural(agg.name));
+  // Aggregate-inheritance (inheritance.md): a TPH (`sharedTable`) base OR
+  // concrete points at ONE shared table named for the abstract base (the
+  // migration names it `plural(snake(base.name))`), NOT the aggregate's own
+  // pluralised name.  `vanillaTableName` resolves a concrete to its base.
+  // Pointing a TPH concrete's schema at `customers` (a table the migration
+  // never creates) is exactly the §8 runtime 500.
+  const tableName = vanillaTableName(agg, pool);
+  // TPH base/concrete carry the `kind` discriminator (a real text column the
+  // shared migration adds).  The concrete filters reads by it + stamps it on
+  // insert (repository-emit); the base reads it to hydrate per subtype.
+  const isTph = isTphBase(agg, pool) || isTphConcrete(agg, pool);
+  const kindLine = isTph ? "    field :kind, :string" : "";
+  // The schema's declared fields.  A TPH BASE must declare the UNION of every
+  // subtype's columns (its own + each concrete's own) so the polymorphic reader
+  // can SELECT them off the shared table; a concrete already carries its merged
+  // `[...base, ...own]` fields from enrichment.
+  const schemaFields = isTphBase(agg, pool) ? tphBaseUnionFields(agg, pool) : agg.fields;
   // `X id[]` reference collections are NOT stored columns — they live in join
   // tables and are wired below as `many_to_many` relationships.  Drop them from
   // the plain `field` lines (the migration emits no such column, so a
   // `{:array, :binary_id}` field would query a phantom column → runtime 500).
-  const declaredLines = agg.fields
+  const declaredLines = schemaFields
     .filter((f) => !isRefCollField(f))
     .map((f) => renderFieldLine(f, enumsByName))
     .filter(Boolean);
@@ -207,7 +238,14 @@ function renderSchema(
   // when an explicit `updated_at` audit field is present (it would collide).
   const timestampsLine = hasUpdatedAt ? "" : "    timestamps(type: :utc_datetime)";
   const refCollBlock = refCollLines.join("\n");
-  const schemaBody = [fieldLines, refCollBlock, containLines, valueCollectionLines, timestampsLine]
+  const schemaBody = [
+    kindLine,
+    fieldLines,
+    refCollBlock,
+    containLines,
+    valueCollectionLines,
+    timestampsLine,
+  ]
     .filter(Boolean)
     .join("\n");
   const prefixLine = schemaPrefix ? `  @schema_prefix ${JSON.stringify(schemaPrefix)}\n` : "";
