@@ -245,6 +245,7 @@ fable-elmish target last (it consumes all of them).
 | [`pagination-design-note.md`](./pagination-design-note.md) | SHIPPED (offset paging, all 4 backends — #898/#916/#925, #933 wire-parity gate); `unpaged` opt-out + page-aware hooks remain | `Paged<T>` response envelope; offset/limit defaults; `unpaged` opt-out for small reference lists. Phase 4.2. |
 | [`i18n-strings.md`](./i18n-strings.md) | PROPOSED | String composition: template literals, ICU, concatenation ban in user-visible slots. Closes `i18n.md` open question #4. Companion — must read with `i18n.md`. |
 | [`i18n.md`](./i18n.md) | PROPOSED | First-class i18n: ICU catalogs, content-hash keys, named `text { }` entries, `ddd i18n sync` three-way merge, per-backend adapters. 7-phase build, ~4 weeks. Phase 4.1. |
+| [`accessibility.md`](./accessibility.md) | PROPOSED | First-class a11y: WCAG 2.2 AA **by construction**. A per-primitive `a11y` contract on the walker registry (role/name/keyboard/heading-level) is the SSOT; the walker emits correct ARIA + label association + landmarks + live regions + focus management, derived from the closed primitive set — always-on default, not a knob. Tiny explicit surface (`alt:`/`decorative`/`label:`) for the underivable; `loom.a11y-*` fail-fast gates; `generated-a11y.yml` axe-core gate across every example × pack. Sibling of `i18n.md` (same derive-from-closed-set thesis). 5-phase build. |
 
 ### Quality / tooling
 
