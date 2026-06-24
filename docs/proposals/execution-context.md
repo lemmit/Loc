@@ -1,24 +1,32 @@
 # Execution-context backbone — scope frames
 
-> Status: **PARTIAL** — the runtime backbone is **emitted on all five
-> backends** (2026-06-24 code-verified; the architecture carrier doc,
+> Status: **PARTIAL — two-tier** (2026-06-24 code-verified; full matrix in
+> [`../audits/execution-context-parity-2026-06-24.md`](../audits/execution-context-parity-2026-06-24.md);
+> the architecture carrier doc,
 > [`../architecture/request-context.md`](../architecture/request-context.md),
-> pins **D-CTX-SHAPE** and confirms the same). By design there is **no
-> `ddd.langium` surface** — context boundaries are emitted structurally
-> from constructs Loom already has, not annotated (see § Surface). What
-> ships today: the ambient id-triad carrier
-> (`correlationId`/`scopeId`/`parentId`) with root/child frame chaining
-> and enter/exit scope discipline — `.NET` (`AsyncLocal<RequestContext>`,
-> `OpenRoot`/`OpenChild`, `Enter`/restore), Java (`ExecutionContextFilter`
-> at the HTTP edge), node/Hono (`reqCtx` threaded through routes +
-> workflow dispatch), Elixir (`RequestContext` in the shell runtime),
-> Python (`ContextVar`). What remains: exposing the build-flag surface
-> below as **user-facing** options (today derived internally from field
-> presence, not a CLI/build switch), the fuller scope-event genealogy
-> (`operationId` ships on audit records; `nodeId`/`kind`/`timestamp` do
-> not), and the open `scopeId`-semantics decision. This is the shared
-> substrate beneath [provenance](./provenance.md),
-> [audit](./audit-and-logging.md), and logging.
+> pins **D-CTX-SHAPE**). By design there is **no `ddd.langium` surface** —
+> context boundaries are emitted structurally from constructs Loom already
+> has, not annotated (see § Surface). The **carrier + root frame + id-triad
+> (`correlationId`/`scopeId`/`parentId`) + governance consumers (audit /
+> provenance / logging) ship on all five backends** — `.NET`
+> (`AsyncLocal<RequestContext>`), node/Hono (`AsyncLocalStorage`), Java
+> (`ExecutionContextFilter` / MDC), Elixir (`RequestContext` Plug /
+> `Logger.metadata`), Python (`ContextVar` / `ObservabilityMiddleware`).
+> But the **full discipline — per-dispatch child frames + `parentId`
+> chaining + enter/exit push-restore — ships on .NET + node only**
+> (`OpenChild`/`Enter`-restore; `runInChildContext`). On **Java, Elixir,
+> Python** the per-dispatch child frame is **deferred**: a single root
+> `scopeId` per request, `parentId` always null, the id-triad carried and
+> stamped onto audit/provenance rows but never nested (so the call tree is
+> not reconstructable from the governance tables). What remains: (1) child
+> frames + chaining on those three backends (the headline gap) + their
+> parallel-branch frame copying; (2) exposing the build-flag surface below
+> as **user-facing** options (today derived internally from field presence,
+> not a CLI/build switch); (3) the scope-event genealogy (`operationId`
+> ships on audit records; `nodeId`/`kind`/`timestamp` do not); and (4) the
+> open `scopeId`-semantics decision. This is the shared substrate beneath
+> [provenance](./provenance.md), [audit](./audit-and-logging.md), and
+> logging.
 
 ## Problem
 

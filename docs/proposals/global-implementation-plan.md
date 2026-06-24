@@ -150,23 +150,28 @@ java-backend).
 
 1. **execution-context** (Tier-0 backbone) — compiler-emitted scope
    frames (`correlationId`/`scopeId`/`parentId`). **(No longer a Tier-4
-   unstarted item — the runtime backbone is now SHIPPED across all five
-   backends; 2026-06-24 code-verified.)** The id-triad carrier + root/child
-   frame chaining + enter/exit scope discipline ship on `.NET`
-   (`dotnet/emit/request-context.ts` — `AsyncLocal<RequestContext>`,
-   `OpenRoot`/`OpenChild`, `Enter`/restore), Java
-   (`java/emit/request-context.ts` `ExecutionContextFilter`), node/Hono
-   (`hono/v4/routes-builder.ts` + `workflow-builder.ts` thread `reqCtx`),
-   Elixir (`elixir/shell/runtime.ts` `RequestContext`), and Python
-   (`python/emit/provenance.ts` `ContextVar`); pinned **D-CTX-SHAPE**,
-   [`../architecture/request-context.md`](../architecture/request-context.md)
-   ("emitted on all five backends"). audit promotion (T3.13), provenance
-   parity (T2.k), and authorization consume it. **PARTIAL tail**: the
-   build-flag surface as **user-facing** options
+   unstarted item — PARTIAL, two-tier; 2026-06-24 code-verified, full
+   matrix in [`../audits/execution-context-parity-2026-06-24.md`](../audits/execution-context-parity-2026-06-24.md).)**
+   The **carrier + root frame + id-triad + governance consumers (audit /
+   provenance / log) ship on all five backends** — `.NET`
+   (`AsyncLocal<RequestContext>`), node/Hono (`AsyncLocalStorage`), Java
+   (`ExecutionContextFilter` / MDC), Elixir (`RequestContext` Plug /
+   `Logger.metadata`), Python (`ContextVar` / `ObservabilityMiddleware`);
+   pinned **D-CTX-SHAPE**,
+   [`../architecture/request-context.md`](../architecture/request-context.md).
+   The **full discipline — per-dispatch child frames + `parentId` chaining
+   + enter/exit push-restore — ships on .NET + node only**
+   (`OpenChild`/`Enter`-restore; `runInChildContext`). Java/Elixir/Python
+   carry the request-stable tier + a single root `scopeId` with `parentId`
+   null and per-dispatch nesting **deferred**. audit promotion (T3.13),
+   provenance parity (T2.k), and authorization consume it. **PARTIAL tail**:
+   (a) per-dispatch child frames + chaining on Java/Elixir/Python (the
+   headline gap) + their parallel-branch frame copying; (b) the build-flag
+   surface as **user-facing** options
    (`emitContextBoundaries`/`emitProvenance`/`emitTracing` are derived
-   internally today, not exposed), the fuller scope-event genealogy
-   (`operationId` ships on audit records; `nodeId`/`kind`/`timestamp` do
-   not), and the open `scopeId`-semantics decision.
+   internally today, not exposed); (c) the scope-event genealogy
+   (`operationId` on audit only; `nodeId`/`kind`/`timestamp` nowhere); and
+   (d) the open `scopeId`-semantics decision.
 2. **multi-tenancy** — design **refined 2026-06-17** (R1–R5; pinned
    **D-TENANCY-SCOPE / -REGISTRY / -DEFAULT / -HIERARCHY**): `tenancy by
    user.tenantId of Organization`; **two-value** scope (`with tenantOwned`
