@@ -159,7 +159,11 @@ export function buildPyDocumentRepositoryFile(
   );
 }
 
-function findMethod(agg: EnrichedAggregateIR, find: FindIR, _ctx: EnrichedBoundedContextIR): string {
+function findMethod(
+  agg: EnrichedAggregateIR,
+  find: FindIR,
+  _ctx: EnrichedBoundedContextIR,
+): string {
   // Document finds evaluate in-memory over the rehydrated aggregates —
   // the JSONB blob isn't queryable per-field the way a relational table
   // is.  `where` predicates re-render against a domain instance (`x`),

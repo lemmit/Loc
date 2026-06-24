@@ -138,9 +138,7 @@ system Shop {
     // all(): bare predicate.
     expect(repo).toContain("select(CartRow).where(not_(CartRow.archived))");
     // find_by_id: switched off the `session.get` PK fast-path to a filtered select.
-    expect(repo).toContain(
-      "select(CartRow).where(and_(CartRow.id == id, not_(CartRow.archived)))",
-    );
+    expect(repo).toContain("select(CartRow).where(and_(CartRow.id == id, not_(CartRow.archived)))");
     // find_many_by_ids: in_() AND-ed with the filter.
     expect(repo).toContain(
       "select(CartRow).where(and_(CartRow.id.in_(list(ids)), not_(CartRow.archived)))",
@@ -201,9 +199,7 @@ system Shop {
     expect(repo).toBeDefined();
     // No filter → find_by_id keeps the cheap primary-key get, no capability where.
     expect(repo).toContain("row = await self._session.get(CartRow, id)");
-    expect(repo).toContain(
-      "rows = (await self._session.execute(select(CartRow))).scalars().all()",
-    );
+    expect(repo).toContain("rows = (await self._session.execute(select(CartRow))).scalars().all()");
     expect(repo).not.toContain("and_(");
     expect(repo).not.toContain("not_(");
   });

@@ -261,14 +261,19 @@ system Shop {
 
   it("accepts a NON-PRINCIPAL filter on a python embedded aggregate (DEBT-02 tail)", async () => {
     expect(
-      await honoFilterErrors(sys("python", { shape: "embedded", filter: "filter !this.isDeleted" })),
+      await honoFilterErrors(
+        sys("python", { shape: "embedded", filter: "filter !this.isDeleted" }),
+      ),
     ).toEqual([]);
   });
 
   it("accepts a PRINCIPAL filter on a python embedded aggregate (DEBT-02 tail — require_current_user() SQL where)", async () => {
     expect(
       await honoFilterErrors(
-        sys("python", { shape: "embedded", filter: "filter this.tenantId == currentUser.tenantId" }),
+        sys("python", {
+          shape: "embedded",
+          filter: "filter this.tenantId == currentUser.tenantId",
+        }),
       ),
     ).toEqual([]);
   });
