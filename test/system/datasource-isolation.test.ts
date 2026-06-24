@@ -179,9 +179,57 @@ describe("resource isolationLevel — end-to-end emit", () => {
     expect(wf, "bump_credit.ex emitted").toBeDefined();
     const body = files.get(wf!)!;
     // The vanilla foundation runs the body inside plain Ecto's
-    // `Repo.transaction/1` — there is no Ash data layer to carry the
-    // resource's isolationLevel as a transaction opt.
-    expect(body).toMatch(/Repo\.transaction\(fn -> commit_result\(run_inner\(params\)\) end\)/);
+    // `Repo.transaction/1`.  Ecto has no `isolation_level:` opt, so the
+    // resolved level (here the dataSource's `repeatableRead`) is set with a
+    // `SET TRANSACTION ISOLATION LEVEL …` query as the first statement inside
+    // the transaction fn.
+    expect(body).toMatch(/Repo\.transaction\(fn ->/);
+    expect(body).toMatch(/Repo\.query!\("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"\)/);
+    expect(body).toMatch(/commit_result\(run_inner\(params\)\)/);
+    // No Ash-style keyword opt.
     expect(body).not.toMatch(/isolation_level:/);
+  });
+
+  it("Phoenix (vanilla) transactional workflow omits the SET line when no isolation level resolves", async () => {
+    const files = await emit(`
+      system Sys {
+        subdomain M {
+          context C {
+            aggregate Customer {
+              name: string
+              derived display: string = name
+              creditLimit: decimal
+              operation addCredit(amount: decimal) {
+                precondition amount > 0
+                creditLimit := creditLimit + amount
+              }
+            }
+            repository Customers for Customer { }
+            workflow bumpCredit transactional {
+      create(customerId: Customer id, amount: decimal) {
+              let c = Customers.getById(customerId)
+              c.addCredit(amount)
+            }
+    }
+          }
+        }
+        api CApi from C
+        ui Admin with scaffold(subdomains: [M]) { }
+        storage pg { type: postgres }
+        resource cState {
+          for: C, kind: state, use: pg
+        }
+        deployable phoenixApp {
+          platform: elixir { foundation: vanilla }, contexts: [C], dataSources: [cState],
+          serves: CApi, ui: Admin, port: 4000
+        }
+      }
+    `);
+    const wf = [...files.keys()].find((k) => k.endsWith("bump_credit.ex"));
+    expect(wf, "bump_credit.ex emitted").toBeDefined();
+    const body = files.get(wf!)!;
+    // No isolation set anywhere → byte-identical to the original bare wrap.
+    expect(body).toMatch(/Repo\.transaction\(fn -> commit_result\(run_inner\(params\)\) end\)/);
+    expect(body).not.toMatch(/SET TRANSACTION ISOLATION LEVEL/);
   });
 });

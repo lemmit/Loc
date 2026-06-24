@@ -132,7 +132,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // Body lowering covers every WorkflowStmtIR kind; the optional
     // `Repo.transaction` wrap is driven by `wf.transactional`.
     apiRoutes.push(
-      ...emitVanillaWorkflowExecution(appName, appModule, ctx, out, resourceModules).routes,
+      ...emitVanillaWorkflowExecution(appName, appModule, ctx, out, resourceModules, sys).routes,
     );
     // Channels-on-vanilla — the in-process Dispatcher fans the workflow's
     // `emit` (which lowers to `Phoenix.PubSub.broadcast`) into per-context

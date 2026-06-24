@@ -67,11 +67,14 @@
 import {
   type BoundedContextIR,
   type ExprIR,
+  type IsolationLevel,
   type StmtIR,
+  type SystemIR,
   type WorkflowIR,
   type WorkflowStmtIR,
   workflowEmitsCommandRoute,
 } from "../../../ir/types/loom-ir.js";
+import { resolveWorkflowIsolation } from "../../../ir/util/resolve-datasource.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import type { ApiRoute } from "../api-emit.js";
@@ -87,6 +90,7 @@ export function emitVanillaWorkflowExecution(
   ctx: BoundedContextIR,
   out: Map<string, string>,
   resourceModules: Map<string, string> = new Map(),
+  sys?: SystemIR,
 ): VanillaWorkflowExecResult {
   if (ctx.workflows.length === 0) return { routes: [] };
 
@@ -102,7 +106,7 @@ export function emitVanillaWorkflowExecution(
     const wfSnake = snake(wf.name);
     out.set(
       `lib/${appSnake}/${ctxSnake}/workflows/${wfSnake}.ex`,
-      renderWorkflowModule(appModule, ctxModule, wf, resourceModules),
+      renderWorkflowModule(appModule, ctxModule, wf, resourceModules, ctx, sys),
     );
   }
 
@@ -1043,17 +1047,39 @@ ${doBody}
     end`;
 }
 
+/** SQL-92 isolation-level name for a DSL level — Ecto has no `isolation_level:`
+ *  option, so the level is set with `SET TRANSACTION ISOLATION LEVEL <NAME>`
+ *  as the first statement inside the `Repo.transaction/1` fn. */
+function elixirIsolationSql(level: IsolationLevel): string {
+  switch (level) {
+    case "readUncommitted":
+      return "READ UNCOMMITTED";
+    case "readCommitted":
+      return "READ COMMITTED";
+    case "repeatableRead":
+      return "REPEATABLE READ";
+    case "serializable":
+      return "SERIALIZABLE";
+  }
+}
+
 function renderWorkflowModule(
   appModule: string,
   ctxModule: string,
   wf: WorkflowIR,
   resourceModules: Map<string, string>,
+  ctx?: BoundedContextIR,
+  sys?: SystemIR,
 ): string {
   const wfPascal = upperFirst(wf.name);
   const moduleName = `${appModule}.${ctxModule}.Workflows.${wfPascal}`;
   const contextModuleFq = `${appModule}.${ctxModule}`;
   const repoMod = `${appModule}.Repo`;
   const transactional = !!wf.transactional;
+  // Resolved transaction isolation (workflow override → state-dataSource
+  // default → undefined).  Only meaningful on the transactional path.
+  const isolation =
+    transactional && ctx && sys ? resolveWorkflowIsolation(wf, ctx, sys) : wf.isolation;
 
   const renderCtx: RenderCtx = {
     thisName: "record",
@@ -1098,6 +1124,13 @@ function renderWorkflowModule(
     : "";
 
   if (transactional) {
+    // Ecto has no `isolation_level:` option, so when an isolation level
+    // resolves we set it as the FIRST statement inside the transaction fn.
+    // Omitted entirely otherwise (connection default applies) — byte-identical
+    // to the no-isolation output.
+    const txnBody = isolation
+      ? `\n      Repo.query!("SET TRANSACTION ISOLATION LEVEL ${elixirIsolationSql(isolation)}")\n      commit_result(run_inner(params))\n    `
+      : ` commit_result(run_inner(params)) `;
     return `# Auto-generated.
 defmodule ${moduleName} do
   @moduledoc """
@@ -1109,7 +1142,7 @@ defmodule ${moduleName} do
 
   @spec run(map()) :: {:ok, term()} | {:error, term()}
   def run(params) when is_map(params) do
-    Repo.transaction(fn -> commit_result(run_inner(params)) end)
+    Repo.transaction(fn ->${txnBody}end)
   end
 
   # Public (not defp): Elixir 1.18 narrows a private fn's parameter to
