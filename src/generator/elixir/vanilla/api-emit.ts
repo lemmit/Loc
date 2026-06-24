@@ -23,6 +23,7 @@ import type {
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import type { ApiRoute } from "../api-emit.js";
+import { opUsesCurrentUser } from "../domain/predicates.js";
 import { auditRecordCall, createAuditMeta, destroyAuditMeta } from "./audit-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 import { CRUD_RESERVED_NAMES } from "./context-emit.js";
@@ -214,17 +215,27 @@ function renderController(
         return renderReturningOpControllerAction(ctxModule, agg, op, ctx);
       }
       const opSnake = snake(op.name);
+      // An op whose guard/body references `currentUser` needs `current_user`
+      // threaded into the context call (the context fn carries the matching
+      // `current_user \\ nil` arity).  Bind it off `conn.assigns` here unless
+      // the read-filter `cuBind` already did.
+      const opActor = opUsesCurrentUser(op);
+      const opCuBind =
+        principal || !opActor
+          ? cuBind
+          : "    current_user = Map.get(conn.assigns, :current_user)\n";
+      const opCallActor = opActor ? ", current_user" : "";
       return `
   def ${opSnake}(conn, %{"id" => id} = params) do
     attrs = Map.drop(params, ["id"])
-${cuBind}    ${renderPhoenixLogCall("operationInvoked", [
+${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
         { name: "aggregate", valueExpr: `"${aggPascal}"` },
         { name: "op", valueExpr: `"${op.name}"` },
         { name: "id", valueExpr: "id" },
       ])}
 
     with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id${getActor}),
-         {:ok, _updated} <- ${ctxModule}.${opSnake}_${aggSnake}(record, attrs) do
+         {:ok, _updated} <- ${ctxModule}.${opSnake}_${aggSnake}(record, attrs${opCallActor}) do
       send_resp(conn, 204, "")
     else
       {:error, :not_found} ->

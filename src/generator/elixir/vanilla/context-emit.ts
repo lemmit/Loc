@@ -18,7 +18,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { snake, upperFirst } from "../../../util/naming.js";
-import { stmtUsesParam } from "../domain/predicates.js";
+import { opUsesCurrentUser, stmtUsesParam } from "../domain/predicates.js";
 import type { RenderCtx } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
@@ -379,7 +379,7 @@ ${txTail.join("\n")}
   return `  @doc "Named operation \`${op.name}\` on \`${aggPascal}\` — runs the body, persists the assigned fields."
   @spec ${opSnake}_${aggSnake}(${aggModule}.t(), map()) ::
           {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t() | term()}
-  def ${opSnake}_${aggSnake}(%${aggModule}{} = record, params) when is_map(params) do
+  def ${opSnake}_${aggSnake}(%${aggModule}{} = record, params${opUsesCurrentUser(op) ? ", current_user \\\\ nil" : ""}) when is_map(params) do
 ${preludeBlock}${persist}
   end`;
 }

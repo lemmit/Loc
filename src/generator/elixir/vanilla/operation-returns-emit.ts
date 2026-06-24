@@ -25,6 +25,7 @@ import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
+import { opUsesCurrentUser } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
 import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
@@ -235,7 +236,7 @@ export function renderReturningOpFunction(
   return `  @doc "Returning operation \`${op.name}\` on \`${aggPascal}\` (exception-less)."
   @spec ${opSnake}_${aggSnake}(${aggModule}.t(), map()) ::
           {:ok, term()} | {:error, binary(), map()} | {:error, Ecto.Changeset.t()}
-  def ${opSnake}_${aggSnake}(%${aggModule}{} = record, params) when is_map(params) do
+  def ${opSnake}_${aggSnake}(%${aggModule}{} = record, params${opUsesCurrentUser(op) ? ", current_user \\\\ nil" : ""}) when is_map(params) do
 ${body}
   end`;
 }
@@ -492,17 +493,23 @@ export function renderReturningOpControllerAction(
         ]
       : []),
   ].join("\n\n");
+  // An op whose guard/body references `currentUser` needs `current_user`
+  // threaded into the context call (the context fn carries the matching
+  // `current_user \\ nil` arity); bind it off `conn.assigns`.
+  const opActor = opUsesCurrentUser(op);
+  const opCuBind = opActor ? "    current_user = Map.get(conn.assigns, :current_user)\n" : "";
+  const opCallActor = opActor ? ", current_user" : "";
   return `
   def ${opSnake}(conn, %{"id" => id} = params) do
     attrs = Map.drop(params, ["id"])
-    ${renderPhoenixLogCall("operationInvoked", [
-      { name: "aggregate", valueExpr: `"${aggPascal}"` },
-      { name: "op", valueExpr: `"${op.name}"` },
-      { name: "id", valueExpr: "id" },
-    ])}
+${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
+    { name: "aggregate", valueExpr: `"${aggPascal}"` },
+    { name: "op", valueExpr: `"${op.name}"` },
+    { name: "id", valueExpr: "id" },
+  ])}
 
     with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id) do
-      ${resultFn}(conn, ${ctxModule}.${opSnake}_${aggSnake}(record, attrs))
+      ${resultFn}(conn, ${ctxModule}.${opSnake}_${aggSnake}(record, attrs${opCallActor}))
     else
       {:error, :not_found} ->
         ProblemDetails.not_found_response(conn, "${aggPascal}", id)
