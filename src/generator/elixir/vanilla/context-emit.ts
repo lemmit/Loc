@@ -9,6 +9,11 @@
 // calls in the workflow body).
 // ---------------------------------------------------------------------------
 
+import {
+  PAGED_DEFAULT_PAGE,
+  PAGED_DEFAULT_PAGE_SIZE,
+  pagedReturn,
+} from "../../../ir/stdlib/generics.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -126,7 +131,17 @@ function renderContextModule(
     const findLines = customFindsOf(repo).map((f) => {
       const findSnake = snake(f.name);
       const baseArgs = f.params.map((p) => snake(p.name));
-      const findArgs = [...baseArgs, ...(principal ? ["current_user \\\\ nil"] : [])].join(", ");
+      // A `paged` find carries the same `page`/`page_size` arity (with defaults)
+      // the repository fn declares, so the defdelegate matches and the
+      // controller's paged call routes through.
+      const pageArgs = pagedReturn(f.returnType)
+        ? [`page \\\\ ${PAGED_DEFAULT_PAGE}`, `page_size \\\\ ${PAGED_DEFAULT_PAGE_SIZE}`]
+        : [];
+      const findArgs = [
+        ...baseArgs,
+        ...pageArgs,
+        ...(principal ? ["current_user \\\\ nil"] : []),
+      ].join(", ");
       return `  defdelegate ${findSnake}_${aggSnake}(${findArgs}), to: ${repoMod}, as: :${findSnake}`;
     });
     const findBlock = findLines.length > 0 ? `\n${findLines.join("\n")}\n` : "";
