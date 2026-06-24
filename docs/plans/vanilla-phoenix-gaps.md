@@ -19,14 +19,14 @@ on the vanilla backend later — this file is the tracked list.
 
 | # | Gap | Verdict | Size | Priority |
 |---|---|---|:---:|---|
-| §8 | TPH shared-table inheritance | **REAL — runtime 500 bug** | M–L | **1 (correctness)** |
+| §8 | TPH shared-table inheritance | **CLOSED** (#1573) — was a runtime 500 bug | M–L | done |
 | §11a | Workflow `currentUser` threading | REAL | M | 2 (parity) |
 | §11b | Aggregate-`function` call emit + qualify | REAL | M | 2 (parity) |
 | §11c | Nested relational entity parts | honest validator gate | L | 2 (parity, blocks showcase-on-elixir) |
 | §1 | Paged wire envelope | REAL | M | 3 |
-| §10 | Destroy-form bang `destroy_X!/1` | REAL | S | 3 |
+| §10 | Destroy-form bang `destroy_X!/1` | **CLOSED** (#1575) | S | done |
 | §3 | `sensitive(...)` inspect-redaction | REAL | S | 3 |
-| §5 | Workflow `isolationLevel` | REAL | S–M | 3 |
+| §5 | Workflow `isolationLevel` | **CLOSED** (#1574) | S–M | done |
 | §6 | SPA embed under Phoenix host | **REAL — react path also unwired** | L | 4 |
 | §7 | `mix format` / Dialyzer CI gates | REAL (output fails `mix format`) | M (+defer Dialyzer) | 4 |
 | §9 | Op-level `currentUser` guard | **CLOSED** (#1568) | — | done |
@@ -110,23 +110,21 @@ Restoring the 5-backend `conformance-parity` gate (removing
   `where`-output assertion (`join_row.id == ^…`) to
   `test/generator/elixir/vanilla-ref-collection.test.ts`.
 
-## 5. Workflow `isolationLevel` transaction option
+## 5. Workflow `isolationLevel` transaction option — **CLOSED** (#1574)
 
-- **Status (REAL, size S–M):** the vanilla transaction is emitted as bare
+- **Was (REAL, size S–M):** the vanilla transaction was emitted as bare
   `Repo.transaction(fn -> commit_result(run_inner(params)) end)` — the
-  `isolationLevel` knob is a no-op. The IR carries it (`wf.isolation` +
-  `resolveWorkflowIsolation`), and `test/system/datasource-isolation.test.ts`
-  currently *pins* the bare shape.
-- **Emitter to change:** `src/generator/elixir/vanilla/workflow-execution-emit.ts`
-  (transactional ~`:1110-1112`, non-transactional ~`:1137-1138`). Ecto has no
-  `isolation_level:` option — emit an explicit
-  `Repo.query!("SET TRANSACTION ISOLATION LEVEL <LEVEL>")` as the first statement
-  inside the transaction fn (map levels SQL-92-style, mirroring
-  `dotnet/workflow-emit.ts` `csIsolationLevel`; omit when unset).
-- **Plumbing:** `renderWorkflowModule` must receive `ctx`/`sys` to pick up the
-  dataSource-level default (it has `wf.isolation` but not the dataSource today).
-- **To close:** retarget the Phoenix assertion in `datasource-isolation.test.ts`
-  to expect the `SET TRANSACTION ISOLATION LEVEL …` line.
+  `isolationLevel` knob was a no-op.
+- **Fixed:** `src/generator/elixir/vanilla/workflow-execution-emit.ts` now resolves
+  `resolveWorkflowIsolation(wf, ctx, sys)` and, when a level resolves, injects
+  `Repo.query!("SET TRANSACTION ISOLATION LEVEL <NAME>")` as the first statement
+  inside the `Repo.transaction(fn -> … end)` fn (Ecto has no `isolation_level:`
+  option). A new `elixirIsolationSql` helper maps the four DSL levels to SQL-92
+  names; output is byte-identical to before when no level resolves. `ctx`/`sys`
+  threaded into `renderWorkflowModule`.
+- **Test:** `test/system/datasource-isolation.test.ts` asserts the
+  `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ` line for the `repeatableRead`
+  dataSource and the bare wrap (no SET) when unset.
 
 ## 6. Vue / Svelte SPA embedding under a Phoenix host
 
@@ -212,17 +210,19 @@ Restoring the 5-backend `conformance-parity` gate (removing
   `pending/vanilla-auth-op-gate.ddd` can be moved back up to re-gate it.
 - **Workflow-level remains** — see §11a (same concept, separate emitter).
 
-## 10. Destroy-form bang destroy function (`destroy_<agg>!/1`)
+## 10. Destroy-form bang destroy function (`destroy_<agg>!/1`) — **CLOSED** (#1575)
 
-- **Status (REAL, size S):** the destroy-form LiveView calls
-  `<Ctx>.destroy_<agg>!(id)` (`liveview-emit.ts`), but the context module emits
-  only non-bang `delete_<agg>`/`get_<agg>` defdelegates
-  (`src/generator/elixir/vanilla/context-emit.ts` ~`:135-141`) — no
-  `destroy_<agg>!/1`, so `mix compile --warnings-as-errors` fails
-  ("undefined or private").
-- **To close:** emit `def destroy_<agg>!(id)` (load + `Repo.delete!`) on the
-  context module for aggregates with a destroy form; move
-  `pending/vanilla-destroy-form.ddd` back up to re-gate it.
+- **Was (REAL, size S):** the destroy-form LiveView calls
+  `<Ctx>.destroy_<agg>!(id)` (`liveview-emit.ts`), but the context module emitted
+  only non-bang `delete_<agg>`/`get_<agg>` defdelegates — no `destroy_<agg>!/1`,
+  so `mix compile --warnings-as-errors` failed ("undefined or private").
+- **Fixed:** `src/generator/elixir/vanilla/context-emit.ts` now emits
+  `def destroy_<agg>!(id)` (load via the existing `get_<agg>` seam, then
+  `Repo.delete!`, raising `Ecto.NoResultsError` if not found; threads
+  `current_user` for principal-filtered aggregates) for any aggregate with a
+  `destroy` action.
+- **Test:** `test/generator/elixir/vanilla-destroy-form.test.ts`;
+  `vanilla-destroy-form.ddd` moved out of `pending/` to re-gate `mix compile`.
 
 ## 11. Full-showcase compile → 5-backend parity restoration
 
