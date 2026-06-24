@@ -18,18 +18,18 @@
 > **[2026-06-24 refresh]** Widened from the old four-column
 > (node/dotnet/phoenix/react) matrix to the current five-backend world, and the
 > debt list re-grounded against fresh `main`. **Most of the old register has
-> drained:** TPH (all five), event sourcing, `shape(document)`, provenance,
-> per-op + lifecycle `audited`, `ignoring` filter-bypass, and `X id[]` reference
-> collections are now uniform across the backends (elixir reaching them via its
-> **vanilla** foundation). On the frontend, the `Section`/`Sticky` codegen crash
-> is fixed and `primeng`/`spartanNg` shipped, so the only residue there is pack
-> breadth. The standing backend debt is now narrow: **python filter depth**,
-> **event-sourced workflows on elixir**, and the **minimal alternate adapters**.
+> drained:** TPH (all five), event sourcing (aggregates *and* workflows),
+> `shape(document)`, provenance, per-op + lifecycle `audited`, `ignoring`
+> filter-bypass, and `X id[]` reference collections are now uniform across the
+> backends (elixir reaching them via its **vanilla** foundation). On the
+> frontend, the `Section`/`Sticky` codegen crash is fixed and `primeng`/`spartanNg`
+> shipped, so the only residue there is pack breadth. The standing backend debt
+> is now narrow: **python filter depth** and the **minimal alternate adapters**.
 
 **A note on the elixir·ash foundation.** Elixir ships two foundations —
 `ash` (default) and `vanilla` (Ecto). Several features are gated on `ash` but
-emit on `vanilla` (event-sourced storage, `shape(document)`, provenance, per-op
-audit). Per the foundation-routing contract (`docs/platforms.md`, #1496), a
+emit on `vanilla` (event-sourced storage, event-sourced **workflows**,
+`shape(document)`, provenance, per-op audit). Per the foundation-routing contract (`docs/platforms.md`, #1496), a
 feature ash can't idiomatically emit is reached by routing the deployable to
 `vanilla` — that is the **intended end state, not debt to close on ash**. So
 this register treats elixir as a single backend whose reference foundation is
@@ -48,7 +48,7 @@ cell notes otherwise.
 | Feature | node | dotnet | java | python | elixir | Gate · source of truth |
 |---|:---:|:---:|:---:|:---:|:---:|---|
 | Event-sourced storage `persistedAs(eventLog)` | ✓ | ✓ | ✓ | ✓ | ✓ vanilla / ✗ ash† | `EVENT_SOURCING_BACKENDS` · system-checks.ts:1913 |
-| Event-sourced **workflow** (saga appliers) | ✓ | ✓ | ✓ | ✓ | ✗ | `EVENT_SOURCING_WORKFLOW_BACKENDS` · system-checks.ts:2014 |
+| Event-sourced **workflow** (saga appliers) | ✓ | ✓ | ✓ | ✓ | ✓ vanilla / ✗ ash† | `EVENT_SOURCING_WORKFLOW_BACKENDS` + elixir-vanilla branch · system-checks.ts:2014,2027 |
 | TPH inheritance `inheritanceUsing(sharedTable)` | ✓ | ✓ | ✓ | ✓ | ✓ | `TPH_CAPABLE` · system-checks.ts:1862 |
 | TPC inheritance `inheritanceUsing(ownTable)` | ✓ | ✓ | ✓ | ✓ | ✓ | (universal) |
 | `shape(document)` persistence | ✓ | ✓ | ✓ | ✓ | ✓ vanilla / ✗ ash† | `PLATFORM_SAVING_SHAPES` · platform-axes.ts:40 |
@@ -65,7 +65,11 @@ cell notes otherwise.
 | `X id[]` reference collections | ✓ | ✓ | ✓ | ✓ | ✓ | not gated — emitted + boot-verified on all 5 |
 
 † **Foundation-fit, not debt** — ash routes to `vanilla` for these (see the note
-above). The single ✗ shared by *both* foundations is event-sourced **workflows**.
+above). Every daggered feature — including event-sourced **workflows** (the
+`<wf>_events` stream + fold-on-load handlers, shipped on `elixir·vanilla` and
+gated on `elixir·ash`, exactly like event-sourced *storage*) — is reached on
+elixir via the vanilla foundation; bare `platform: elixir` defaults to ash and
+stays gated. No feature in this matrix is gated on *both* foundations.
 
 **The standing backend debt (after ignoring ash foundation-fit):**
 
@@ -74,11 +78,7 @@ above). The single ✗ shared by *both* foundations is event-sourced **workflows
    closed the silent-gap hole — the non-principal relational case now emits). The
    principled fix is to lower the predicate into the SQLAlchemy reads.
    ([multi-tenancy-design-note](./multi-tenancy-design-note.md), DEBT-02.)
-2. **Event-sourced workflows on elixir** — saga appliers are gated on **both**
-   elixir foundations (`EVENT_SOURCING_WORKFLOW_BACKENDS` omits elixir); the
-   emitters key off `correlationField` and would misgenerate a state-based saga.
-   ([workflow-and-applier](./workflow-and-applier.md).)
-3. **Non-relational filters** — `python` off entirely; `elixir` covers embedded
+2. **Non-relational filters** — `python` off entirely; `elixir` covers embedded
    but not document; principal-on-non-relational stays gated everywhere.
    ([multi-tenancy-design-note](./multi-tenancy-design-note.md), DEBT-02.)
 
@@ -153,11 +153,9 @@ Ordered by blast radius — how many real models the gap blocks today:
    remaining backend gap: a python-hosted aggregate can't express tenancy/
    soft-delete scoping or filter a document/embedded shape. Fail-fast today, so
    it's a capability gap, not a correctness hole. ([multi-tenancy-design-note](./multi-tenancy-design-note.md).)
-2. **Event-sourced workflows on elixir** — the one feature gated on *both* elixir
-   foundations. ([workflow-and-applier](./workflow-and-applier.md).)
-3. **Frontend pack breadth** — ship more Vue/Svelte pack families to match
+2. **Frontend pack breadth** — ship more Vue/Svelte pack families to match
    React's depth; not a correctness item. ([design-packs](../design-packs.md).)
-4. **Alternate adapters** — promote `dapper`/`mikroorm` past minimal-v1, or
+3. **Alternate adapters** — promote `dapper`/`mikroorm` past minimal-v1, or
    formally freeze their scope; implement or remove the `marten`/`cqrs`/`layered`
    stubs. ([platform-realization-axes](./platform-realization-axes.md).)
 
