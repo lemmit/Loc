@@ -34,6 +34,14 @@ describe("python workflows", () => {
     expect(wf).toContain(
       '@router.post("/rename_customer", status_code=204, operation_id="renameCustomerWorkflow", responses={400: {"model": ProblemDetails, "description": "Bad Request"}, 422: {"model": ProblemDetails, "description": "Unprocessable Entity"}})',
     );
+    // The route runs in a child execution-context frame under the request root
+    // (parent_id chaining), so its audit/provenance rows are distinguishable
+    // from a direct operation's. The decorator sits below @router.post (closest
+    // to the def) so FastAPI registers the wrapped handler.
+    expect(wf).toMatch(
+      /@router\.post\([^\n]*\n@in_child_context\nasync def rename_customer_workflow/,
+    );
+    expect(wf).toContain("from app.obs.log import in_child_context, log");
     expect(wf).toContain("customer_id = CustomerId(body.customerId)");
     expect(wf).toContain("customers = CustomerRepository(session, NoopDomainEventDispatcher())");
     expect(wf).toContain("c = await customers.get_by_id(customer_id)");

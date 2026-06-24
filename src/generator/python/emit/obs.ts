@@ -34,15 +34,18 @@ keys.  The \`request_id\` field is the current request's correlation id,
 read from the ambient RequestContext carrier below.
 """
 
+import functools
 import json
 import logging
 import os
 import sys
 import uuid
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, ParamSpec, TypeVar
 
 TRACE = 5  # below DEBUG — the catalog's domain-trace level
 logging.addLevelName(TRACE, "TRACE")
@@ -136,6 +139,48 @@ def reset_context(token: Token[RequestContext | None]) -> None:
     request_context_var.reset(token)
 
 
+@contextmanager
+def child_context() -> Iterator[None]:
+    """Open a CHILD execution-context frame under the current one for the
+    duration of the block, restoring the parent on exit
+    (architecture/request-context.md, per-dispatch boundary seam).  The child
+    inherits the request-stable tier (correlation id, actor, locale, start
+    time) but mints a fresh \`scope_id\` whose \`parent_id\` chains to the
+    caller's \`scope_id\` — so audit / provenance rows and log lines emitted
+    inside record their call-structure position (a workflow's lineage is
+    distinguishable from a direct operation's).  Outside any request (no
+    current frame) it is a no-op, so non-request callers pay nothing."""
+    parent = request_context_var.get()
+    if parent is None:
+        yield
+        return
+    token = request_context_var.set(
+        replace(parent, scope_id=new_id(), parent_id=parent.scope_id)
+    )
+    try:
+        yield
+    finally:
+        request_context_var.reset(token)
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def in_child_context(fn: Callable[_P, Awaitable[_R]]) -> Callable[_P, Awaitable[_R]]:
+    """Decorator: run an async dispatch boundary (a workflow route handler or
+    an event reactor) inside a \`child_context()\` frame.  \`functools.wraps\`
+    preserves the wrapped signature so FastAPI's dependency injection still
+    resolves the route's parameters."""
+
+    @functools.wraps(fn)
+    async def _wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        with child_context():
+            return await fn(*args, **kwargs)
+
+    return _wrapped
+
+
 class CatalogFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         body: dict[str, Any] = {
@@ -152,6 +197,9 @@ class CatalogFormatter(logging.Formatter):
         sid = scope_id()
         if sid is not None:
             body["scope_id"] = sid
+        pid = parent_id()
+        if pid is not None:
+            body["parent_id"] = pid
         aid = actor_id()
         if aid is not None:
             body["actor_id"] = aid
