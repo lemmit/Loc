@@ -154,7 +154,9 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
       await pollHealthy("http://localhost:3000/health", 60_000); // honoApi
       await pollHealthy("http://localhost:8000/health", 120_000); // pythonApi
       await pollHealthy("http://localhost:8080/health", 120_000); // dotnetApi
-      await pollHealthy("http://localhost:4000/health", 180_000); // phoenixApi
+      if (!SKIP_PHOENIX) {
+        await pollHealthy("http://localhost:4000/health", 180_000); // phoenixApi
+      }
       await pollHealthy("http://localhost:8081/health", 180_000); // javaApi
     } catch (err) {
       // Same forensic capture as the up -d catch: containers are up
@@ -424,7 +426,8 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
     const targets: Record<string, string> = {
       node: "http://localhost:3000/api/workflows/register_project",
       dotnet: "http://localhost:8080/api/workflows/register_project",
-      phoenix: "http://localhost:4000/api/workflows/register_project",
+      // phoenix dropped when SKIP_PHOENIX (not built/booted) — see above.
+      ...(SKIP_PHOENIX ? {} : { phoenix: "http://localhost:4000/api/workflows/register_project" }),
       python: "http://localhost:8000/api/workflows/register_project",
       java: "http://localhost:8081/api/workflows/register_project",
     };
