@@ -15,7 +15,11 @@
 > capability `filter`, and provenanced/non-stamp managed fields (the full adapter
 > sub-matrix lives in `docs/proposals/platform-parity-debt.md`). The
 > backend-level audit/provenance gate *sets* are unchanged from 2026-06-23; the
-> `system-checks.ts` line numbers below were re-synced (they shifted ~+13).
+> `system-checks.ts` line numbers below were re-synced (they shifted ~+13). Also
+> folded in: **python capability `filter` reached parity with node/java** — the
+> principal relational case (#1549) and **both `shape(embedded)` cases** (DEBT-02
+> tail) now emit; only `shape(document)` filters stay gated (see F1/§4). The
+> earlier matrix rows that marked python principal-relational as ✗ were stale.
 
 > **[2026-06-23 refresh, code-verified against `main` @ `b598dba`]** Folded in
 > since the 2026-06-22 pass: **per-operation `audited` shipped on Java + Python**
@@ -92,8 +96,8 @@ Legend: ✓ implemented · ✗ gated (validator error) · ⚠ partial · 🔴 **
 | `when` canCommand gate + `can_<op>` query | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_WHEN_BACKENDS` · structural-checks.ts:484 |
 | Exception-less returns (`op(): X or NotFound`) | ✓ | ✓ | ✓ | ✓ | ⚠ return-dominant only | ✓ | `SUPPORTED_RETURN_BACKENDS` · structural-checks.ts:518 |
 | Non-principal capability `filter` (relational) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `LIMITED_FAMILIES` · system-checks.ts:1006 |
-| Principal capability `filter` (`currentUser`/tenancy, relational) | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | `supportsPrincipalFilter` · system-checks.ts:1021 |
-| Capability `filter` on non-relational shape (doc/embedded) | ✓ | ✓ | ✓ | ✗ | ⚠ embedded only | ⚠ embedded only | `supportsPrincipalNonRelationalFilter` · system-checks.ts:1067 |
+| Principal capability `filter` (`currentUser`/tenancy, relational) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `supportsPrincipalFilter` · system-checks.ts:1021 |
+| Capability `filter` on non-relational shape (doc/embedded) | ✓ | ✓ | ✓ | ⚠ embedded only | ⚠ embedded only | ⚠ embedded only | `supportsNonRelationalFilter` · system-checks.ts:1051 |
 | `ignoring <Cap>` filter-bypass | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `FILTER_BYPASS_FAMILIES` / `bypassSupported` · system-checks.ts:1199 |
 | Provenanced fields (runtime trace) | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | `PROVENANCE_BACKENDS` · system-checks.ts:2063 |
 | Per-operation `audited` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | `AUDIT_OP_BACKENDS` (+ elixir·vanilla) · system-checks.ts:2124 |
@@ -138,19 +142,26 @@ so the validator no longer treats it as fully capable. The split is precise:
   EF's `HasQueryFilter`). The grep that flagged the gap now hits:
   `grep -rn contextFilters src/generator/python/` returns
   `find-predicate.ts` (no longer zero matches).
-- **Principal filters (W1b — `currentUser`/tenancy)** — still **gated** on python.
-  `supportsPrincipalFilter` (`system-checks.ts:1021`) returns true only for
-  node/elixir/java; python falls through to `false`, so a principal-referencing
-  filter on a python aggregate is a hard `loom.*` error, not a silent no-op.
-- **Non-relational-shape filters (doc/embedded)** — still **gated** on python.
-  `supportsNonRelationalFilter` (`system-checks.ts:1044`) admits node (doc+embedded),
-  java (doc+embedded), elixir (embedded) — python is absent, so it errors.
+- **Principal filters (`currentUser`/tenancy, relational)** — now **shipped** on
+  python (#1549, DEBT-02). `supportsPrincipalFilter` (`system-checks.ts:1021`)
+  returns true for node/elixir/java/**python**; the predicate renders
+  `require_current_user().<claim>` against the ambient `ContextVar[User | None]`
+  accessor, AND-ed into every root read (no read-method parameter).
+- **`shape(embedded)` filters** — now **shipped** on python (DEBT-02 tail). An
+  embedded aggregate's root scalars are real columns, so the predicate AND-s into
+  the embedded SQL reads exactly like the relational path
+  (`repository-embedded-builder.ts`). `supportsNonRelationalFilter`
+  (`system-checks.ts:1051`) admits node/java (doc+embedded), elixir/**python**
+  (embedded).
+- **`shape(document)` filters** — still **gated** on python (and elixir): the blob
+  is one JSONB column, not per-field queryable, so it needs in-app filtering
+  (node/java do it; not built on python). The last filter gap.
 
 **Net:** the correctness hole the original finding described (a python aggregate's
-reads with no WHERE scoping) is closed — the only un-emitted cases (principal,
-non-relational) now fail fast at validation rather than silently emitting an
-unscoped backend. python is no longer a 🔴; it's ✓ for the non-principal relational
-case and ✗ (honest gate) for the rest.
+reads with no WHERE scoping) is closed, and python's filter surface now matches
+node/java for relational + embedded (non-principal AND principal). Only
+`shape(document)` filters remain an honest gate. python is ✓ for everything
+except `document`.
 
 <details><summary>Original finding (pre-#1481, superseded)</summary>
 
@@ -267,14 +278,16 @@ defer to vanilla (DEBT-03).
 
 ### 4. Capability filters
 
-`LIMITED_FAMILIES = {node, elixir, java, python}` (system-checks.ts:1004). Principal
+`LIMITED_FAMILIES = {node, elixir, java, python}` (system-checks.ts:1006). Principal
 (`currentUser`) filters on relational aggregates are wired on node, elixir (both
-foundations), java, and dotnet (EF `HasQueryFilter`, ungated). Non-relational-shape
-filters: node + java (document + embedded), elixir (embedded only); principal +
-non-relational stays gated everywhere. **dotnet** is ungated because it genuinely
-supports the full surface; **python** now emits the non-principal relational case
-(W1a — `contextFilterPredicate` in `find-predicate.ts`, AND-ed into every root read)
-and gates principal (W1b) + non-relational filters — see **F1** (resolved #1481).
+foundations), java, **python** (#1549), and dotnet (EF `HasQueryFilter`, ungated).
+Non-relational-shape filters: node + java (document + embedded), elixir + **python**
+(embedded only); principal-on-`document` stays gated everywhere. **dotnet** is
+ungated because it genuinely supports the full surface; **python** now emits the
+non-principal relational case (W1a), the principal relational case (#1549), AND
+both `shape(embedded)` cases (DEBT-02 tail — `repository-embedded-builder.ts` threads
+the same `contextFilterPredicate`). Only `shape(document)` filters remain gated on
+python — see **F1**.
 
 **`ignoring <Cap>` filter-bypass** (#1501): a read may carry an `ignoring *` /
 `ignoring <Cap>` clause that drops a specific capability filter from that read.
