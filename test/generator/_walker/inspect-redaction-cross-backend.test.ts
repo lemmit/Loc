@@ -1,18 +1,19 @@
-// Cross-backend redaction acceptance — one DSL source, two host
+// Cross-backend redaction acceptance — one DSL source, three host
 // languages, one contract: a field tagged `sensitive(...)` MUST
 // render as the literal `<redacted>` inside the structural debug
 // form (`toString()` / `Inspect`), and the sensitive field's value
 // access MUST NOT appear in that form.
 //
-// (The Elixir backend — plain Phoenix+Ecto, the only foundation —
-// emits a plain Ecto schema and no structural inspect/redaction
-// form, so it is out of scope here.)
+// The Elixir backend (plain Phoenix+Ecto, the only foundation) honours
+// the contract via the `Inspect` protocol: `schema-emit.ts` appends a
+// `defimpl Inspect, for: <Module>` rendering the IR's synthesized
+// `inspect` derived member through ELIXIR_TARGET (vanilla-phoenix-gaps §3).
 //
 // PR #524 → #559 → #567 → #570 landed the redaction expression in
 // the IR + each backend's render-expr.  The per-backend tests pin
 // shape locally:
 //   - test/language/display-inspect-derived.test.ts  (IR walk)
-//   - test/generator/elixir-pipeline.test.ts (Phoenix)
+//   - test/generator/elixir/vanilla-inspect-redaction.test.ts (Phoenix)
 //   - .NET / TS rely on the IR walk + the entity emitter loop.
 //
 // What this file adds is the *acceptance gate*: a single source-of-
@@ -58,8 +59,18 @@ const REDACTION_SOURCE = `
         repository People for Person { }
       }
     }
+    api PeopleApi from M
+    storage primary { type: postgres }
+    resource peopleState { for: People, kind: state, use: primary }
     deployable honoApi { platform: node, contexts: [People], port: 3000 }
     deployable dotnetApi { platform: dotnet, contexts: [People], port: 3001 }
+    deployable elixirApi {
+      platform: elixir { foundation: vanilla }
+      contexts: [People]
+      dataSources: [peopleState]
+      serves: PeopleApi
+      port: 3002
+    }
   }
 `;
 
@@ -112,7 +123,64 @@ describe("cross-backend inspect redaction — `sensitive(...)` renders as `<reda
     expect(personCs).toContain("public override string ToString() => Inspect;");
   });
 
-  it("both backends agree on the structural envelope: same field order, same labels", async () => {
+  it("Elixir vanilla Inspect impl: redacts ssn + nested VO phone, never references field values", async () => {
+    const files = await generateSystemFiles(REDACTION_SOURCE);
+    const personEx = files.get("elixir_api/lib/elixir_api/people/person.ex")!;
+    expect(personEx, "Elixir Person.ex missing — system emission shape changed").toBeDefined();
+
+    // The `defimpl Inspect, for: ...Person` block must be emitted (the
+    // sensitive-field leak guard — vanilla-phoenix-gaps §3).
+    expect(personEx).toContain("defimpl Inspect, for: ElixirApi.People.Person do");
+
+    const inspectLine = personEx.split("\n").find((l) => l.includes("string("))!;
+    expect(inspectLine, "Elixir Inspect body not emitted on Person").toBeDefined();
+
+    // Top-level sensitive field: ssn → "<redacted>", no `record.ssn`.
+    expect(inspectLine).toContain('"<redacted>"');
+    expect(inspectLine).toContain('"ssn: "');
+    expect(inspectLine).not.toMatch(/\brecord\.ssn\b/);
+
+    // Nested VO sensitive field: contact.phone → "<redacted>", no
+    // `record.contact.phone` access.
+    expect(inspectLine).toContain('"phone: "');
+    expect(inspectLine).not.toMatch(/record\.contact\.phone\b/);
+
+    // Non-sensitive VO sibling is reached normally.
+    expect(inspectLine).toMatch(/record\.contact\.email\b/);
+    // Non-sensitive top-level field reached normally (snake_cased).
+    expect(inspectLine).toMatch(/record\.full_name\b/);
+  });
+
+  it("an aggregate with no sensitive field emits NO Elixir Inspect impl", async () => {
+    // Byte-identical-to-before guard: the impl appears ONLY for aggregates
+    // carrying a sensitive leaf.
+    const NO_SENSITIVE = `
+      system Plain {
+        subdomain M {
+          context People {
+            aggregate Person { fullName: string }
+            repository People for Person { }
+          }
+        }
+        api PeopleApi from M
+        storage primary { type: postgres }
+        resource peopleState { for: People, kind: state, use: primary }
+        deployable elixirApi {
+          platform: elixir { foundation: vanilla }
+          contexts: [People]
+          dataSources: [peopleState]
+          serves: PeopleApi
+          port: 4000
+        }
+      }
+    `;
+    const files = await generateSystemFiles(NO_SENSITIVE);
+    const personEx = files.get("elixir_api/lib/elixir_api/people/person.ex")!;
+    expect(personEx).toBeDefined();
+    expect(personEx).not.toContain("defimpl Inspect");
+  });
+
+  it("all three backends agree on the structural envelope: same field order, same labels", async () => {
     // Anti-drift gate: even if the redaction works on each backend
     // individually, the structural envelopes can desync (one backend
     // skips a field, another reorders).  Pin that the human-readable
@@ -120,6 +188,7 @@ describe("cross-backend inspect redaction — `sensitive(...)` renders as `<reda
     const files = await generateSystemFiles(REDACTION_SOURCE);
     const ts = files.get("hono_api/domain/person.ts")!;
     const cs = files.get("dotnet_api/Domain/Persons/Person.cs")!;
+    const ex = files.get("elixir_api/lib/elixir_api/people/person.ex")!;
 
     const extractLabels = (source: string): string[] => {
       // Pull every `"<name>: "` literal from the inspect body — the
@@ -133,12 +202,16 @@ describe("cross-backend inspect redaction — `sensitive(...)` renders as `<reda
     const csLabels = extractLabels(
       cs.split("\n").find((l) => l.includes("public string Inspect"))!,
     );
+    const exLabels = extractLabels(ex.split("\n").find((l) => l.includes("string("))!);
 
     // Expected sequence: aggregate id, then declared fields in source
     // order, with the inlined VO's fields nested between `contact: `
-    // and the next aggregate-level slot.
+    // and the next aggregate-level slot.  Labels are the declared field
+    // names (NOT host-cased) on every backend, since the inspect literal
+    // is built from the IR field name.
     const expected = ["id", "fullName", "ssn", "contact", "email", "phone"];
     expect(tsLabels).toEqual(expected);
     expect(csLabels).toEqual(expected);
+    expect(exLabels).toEqual(expected);
   });
 });

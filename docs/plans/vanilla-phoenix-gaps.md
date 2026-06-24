@@ -25,7 +25,7 @@ on the vanilla backend later — this file is the tracked list.
 | §11c | Nested relational entity parts | honest validator gate | L | 2 (parity, blocks showcase-on-elixir) |
 | §1 | Paged wire envelope | REAL | M | 3 |
 | §10 | Destroy-form bang `destroy_X!/1` | **CLOSED** (#1575) | S | done |
-| §3 | `sensitive(...)` inspect-redaction | REAL | S | 3 |
+| §3 | `sensitive(...)` inspect-redaction | **CLOSED** | S | done |
 | §5 | Workflow `isolationLevel` | **CLOSED** (#1574) | S–M | done |
 | §6 | SPA embed under Phoenix host | **REAL — react path also unwired** | L | 4 |
 | §7 | `mix format` / Dialyzer CI gates | REAL (output fails `mix format`) | M (+defer Dialyzer) | 4 |
@@ -76,22 +76,30 @@ Restoring the 5-backend `conformance-parity` gate (removing
   controller `:type`-tags the success body); the per-variant-struct framing is an
   Ash artifact and is retracted here.
 
-## 3. `sensitive(...)` inspect-redaction
+## 3. `sensitive(...)` inspect-redaction — **CLOSED**
 
-- **Status (REAL, size S — IR groundwork already done):** the generated Ecto
-  schema is plain (`field :ssn, :string`); no `defimpl Inspect` / `def inspect`
-  anywhere — the `sensitive(...)` tag is a no-op on elixir.
-- **IR already synthesizes the fix:** `src/ir/enrich/enrichments.ts`
+- **Was (REAL, size S — IR groundwork already done):** the generated Ecto
+  schema was plain (`field :ssn, :string`); no `defimpl Inspect` / `def inspect`
+  anywhere — the `sensitive(...)` tag was a no-op on elixir.
+- **IR already synthesized the fix:** `src/ir/enrich/enrichments.ts`
   (`synthesizeInspect`) puts a `derived inspect: string` on every
   `EnrichedAggregateIR`, with sensitive leaves replaced by the literal
   `"<redacted>"` (the same member TS/.NET emit — see
   `src/generator/typescript/emit/aggregate.ts`).
-- **Emitter to change:** `src/generator/elixir/vanilla/schema-emit.ts`
-  `renderSchema` — append a `defimpl Inspect, for: <Module>` rendering the IR's
-  synthesized `inspect` expression via the existing `ELIXIR_TARGET`
-  (`render-expr.ts`); gate on any field carrying `f.sensitivity?.length`.
-- **To close:** restore the Phoenix case + elixir leg in
-  `test/generator/_walker/inspect-redaction-cross-backend.test.ts`.
+- **Fixed (vanilla elixir backend only):** a new
+  `src/generator/elixir/vanilla/inspect-emit.ts` (`renderInspectImpl`) renders
+  the IR's synthesized `inspect` expression through `ELIXIR_TARGET`
+  (`render-expr.ts`, receiver bound as `record`) into a
+  `defimpl Inspect, for: <Module> do … string(<expr>) … end` block;
+  `schema-emit.ts` appends it after the schema module.  Gated on
+  `aggHasSensitiveLeaf` (any top-level field OR embedded-VO field carrying
+  `f.sensitivity?.length`) — an aggregate with no sensitive field emits NO
+  impl, byte-identical to before.
+- **Test:** `test/generator/elixir/vanilla-inspect-redaction.test.ts` (focused)
+  + the restored elixir leg in
+  `test/generator/_walker/inspect-redaction-cross-backend.test.ts` (the
+  cross-backend acceptance gate now asserts all three backends — TS/.NET/Elixir
+  — share the redaction contract and structural envelope).
 
 ## 4. `contains`-in-`where` membership predicate (ref-collection) — *closed*
 
