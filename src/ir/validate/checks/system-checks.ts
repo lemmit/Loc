@@ -2002,15 +2002,17 @@ export function validateEventSourcedStorage(
 // state via appliers — the saga analogue of a `persistedAs(eventLog)`
 // aggregate (emit-only handlers + pure `apply` folds, no mutable state table).
 // The surface (grammar → `WorkflowIR.eventSourced` / `.appliers`) and the
-// emit-only / pure-fold discipline (A1) have landed; the **Hono (node) backend
-// now emits the event-sourced workflow runtime** (per-correlation `<wf>_events`
-// stream, fold-on-load, emit→append-own-event dispatch).  The other backends
-// don't yet, so an `eventSourced` workflow hosted by them stays gated —
-// otherwise it silently misgenerates as a state-based saga (the saga emitters
-// key off `correlationField` alone, emit a mutable `<Wf>State` row + dispatcher,
-// and drop the appliers entirely).  A parsed-but-unemitted feature is a footgun,
-// so it fails fast — exactly like the event-sourced *aggregate* storage gate,
-// and the supported set grows per backend (mirroring `EVENT_SOURCING_BACKENDS`).
+// emit-only / pure-fold discipline (A1) have landed, and the **node, .NET,
+// Python, Java, and elixir-vanilla backends all emit the event-sourced workflow
+// runtime** (per-correlation `<wf>_events` stream, fold-on-load,
+// emit→append-own-event dispatch).  A backend that doesn't (today only the
+// elixir *ash* foundation — see `elixirEsCapable` below) keeps an `eventSourced`
+// workflow gated — otherwise it silently misgenerates as a state-based saga (the
+// saga emitters key off `correlationField` alone, emit a mutable `<Wf>State` row
+// + dispatcher, and drop the appliers entirely).  A parsed-but-unemitted feature
+// is a footgun, so it fails fast — exactly like the event-sourced *aggregate*
+// storage gate, and the supported set grows per backend (mirroring
+// `EVENT_SOURCING_BACKENDS`; elixir is added via the foundation-shaped branch).
 const EVENT_SOURCING_WORKFLOW_BACKENDS = new Set(["node", "dotnet", "python", "java"]);
 export function validateEventSourcedWorkflowStorage(
   ctx: BoundedContextIR,
