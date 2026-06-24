@@ -116,7 +116,7 @@ sort guarantees the parent is created first even though `pipelines` sorts before
 
 **Value objects → flattened columns.** A `price: Money` field destructures into
 `price_amount`, `price_currency` (recursively for nested VOs), each tagged with a
-`voGroup` so Phoenix/Ash can regroup them into a single `:map`. Relational
+`voGroup` so Phoenix/Ecto can regroup them into a single `:map`. Relational
 backends emit the columns as-is.
 
 **Reference collections → join tables.** A `X id[]` field never produces a column.
@@ -169,7 +169,7 @@ references. `undefined` means the unqualified `public` schema.
 translates one `MigrationStep` to Postgres DDL. It is **shared by the TS, .NET,
 Python, and Java backends** — calling the same renderer means a migration written
 by any of them is bit-for-bit equivalent SQL. Phoenix is the exception: it stays
-in Ecto DSL (its output is Elixir, not SQL) so AshPostgres + `ecto.migrate` keep
+in Ecto DSL (its output is Elixir, not SQL) so `ecto.migrate` keeps
 working, and translates `MigrationStep` itself in
 [`elixir/migrations-emit.ts`](../src/generator/elixir/migrations-emit.ts).
 
@@ -182,7 +182,7 @@ seed SQL is bit-identical cross-backend).
 |---|---|---|
 | Hono / Drizzle | `db/migrations/<tag>.sql` + `meta/_journal.json` | `migrate()` from `drizzle-orm/node-postgres/migrator` (also `npm run db:migrate`) |
 | .NET / EF Core | `Migrations/<slug>.cs` (`migrationBuilder.Sql(...)`) | `Database.Migrate()` → `__EFMigrationsHistory` |
-| Phoenix / Ecto | `priv/repo/migrations/<ts>_create_<table>.exs` | `ecto.migrate` (Ash or vanilla foundation) |
+| Phoenix / Ecto | `priv/repo/migrations/<ts>_create_<table>.exs` | `ecto.migrate` |
 | Java / Spring | `src/main/resources/db/migration/V<v>.<n>__<Mod>_<Name>.sql` | Flyway |
 | Python / FastAPI | `migrations/<tag>.sql` | `run_migrations()` from the FastAPI lifespan; `__loom_migrations` tracking table |
 

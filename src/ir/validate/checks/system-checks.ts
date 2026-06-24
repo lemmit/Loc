@@ -455,15 +455,11 @@ export function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[
     if (!platformOwnsBackend(dep.platform)) continue;
     const base = platformSavingShapes(dep.platform);
     if (!base) continue;
-    // Foundation-shaped on elixir: the `vanilla` foundation emits the opaque
-    // `(id, data, version)` document table + a schemaless-changeset validated
-    // fold, so it supports `document` on top of the platform's relational /
-    // embedded set.  The `ash` foundation has no idiomatic document fit and
-    // stays gated (PLATFORM_SAVING_SHAPES omits it).
+    // elixir (plain Ecto) emits the opaque `(id, data, version)` document table
+    // + a schemaless-changeset validated fold, so it supports `document` on top
+    // of the platform's relational / embedded set.
     const supported =
-      dep.platform === "elixir" && dep.foundation === "vanilla"
-        ? ([...base, "document"] as readonly SavingShape[])
-        : base;
+      dep.platform === "elixir" ? ([...base, "document"] as readonly SavingShape[]) : base;
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
@@ -503,7 +499,7 @@ export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnosti
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
 
   for (const dep of sys.deployables) {
-    if (dep.platform !== "elixir" || dep.foundation !== "vanilla") continue;
+    if (dep.platform !== "elixir") continue;
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
@@ -524,7 +520,7 @@ export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnosti
           severity: "error",
           code: "loom.vanilla-document-unsupported",
           message:
-            `aggregate '${ctxName}.${agg.name}' is shape(document) on foundation: vanilla, which ` +
+            `aggregate '${ctxName}.${agg.name}' is shape(document) on elixir, which ` +
             `emits the CRUD surface only in v1, but declares ${bits.join(" and ")}. ` +
             `Drop them, host this aggregate on a backend with full document support ` +
             `(node / dotnet / python / java), or use shape(relational) / shape(embedded).`,
@@ -540,7 +536,7 @@ export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnosti
 // today).  A `filter <expr>` capability installs at the query layer on
 // every read.  On .NET it rides EF Core's `HasQueryFilter` (global,
 // DI-resolved) — no restriction.  Hono AND-s the predicate into each
-// Drizzle read site; Phoenix emits an Ash `base_filter`.  Two cases are
+// Drizzle read site; Phoenix AND-s it into each Ecto read.  Two cases are
 // not yet wired on either and would otherwise emit silently-wrong query
 // behaviour (a soft-delete / tenancy-isolation footgun), so reject them
 // with a clear error instead:
@@ -548,7 +544,7 @@ export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnosti
 //   1. Principal-referencing filters (`this.tenantId ==
 //      currentUser.tenantId`).  Binding the request principal into the
 //      always-on read path is deferred (Hono: thread through findById +
-//      callers; Phoenix: an actor-bound base_filter) — see
+//      callers; Phoenix: an actor-bound Ecto `where:`) — see
 //      docs/proposals/criterion-everywhere.md.
 //   2. Non-relational shapes (`shape(document)` / `shape(embedded)`).
 //      Fields live inside a jsonb column, so `this.isDeleted` is not a
@@ -813,21 +809,17 @@ export function validatePythonStampSupport(sys: SystemIR, diags: LoomDiagnostic[
   }
 }
 
-// Lifecycle stamps on the elixir backend.  BOTH foundations now APPLY stamps.
-// **Ash** (the default for `platform: elixir`): each `contextStamps` rule becomes
-// an Ash `change fn ... end, on: [:create|:update]` block in the resource that
-// `force_change_attribute`s the audit columns.  **Vanilla** (plain Ecto): each
+// Lifecycle stamps on the elixir backend (plain Ecto): each `contextStamps`
 // rule `put_change`s the audit columns onto the changeset right before
 // `Repo.insert`/`Repo.update`, threaded through `create_<agg>`/`update_<agg>`.
-// In both, a non-principal value renders directly (`now()` → `DateTime.utc_now()`),
-// and a `currentUser` value resolves to the principal id read from the threaded
-// actor (Ash: `context.actor.<idKey>`; vanilla: `current_user.<idKey>`), the
-// analogue of java `currentUser.id()` / .NET `RequestContext...CurrentUser`).
-// Two cases stay fail-fast (never a silent drop) on BOTH foundations, mirroring
-// `validateJavaStampSupport` / `validateDotnetStampSupport`: a principal-
-// referencing stamp on a deployable WITHOUT auth (no request actor to thread),
-// and stamps on an event-sourced aggregate (state is folded from events, not
-// field-stamped — vanilla event-sourcing exists, so this gate matters here too).
+// A non-principal value renders directly (`now()` → `DateTime.utc_now()`), and a
+// `currentUser` value resolves to the principal id read from the threaded actor
+// (`current_user.<idKey>`), the analogue of java `currentUser.id()` / .NET
+// `RequestContext...CurrentUser`).  Two cases stay fail-fast (never a silent
+// drop), mirroring `validateJavaStampSupport` / `validateDotnetStampSupport`: a
+// principal-referencing stamp on a deployable WITHOUT auth (no request actor to
+// thread), and stamps on an event-sourced aggregate (state is folded from
+// events, not field-stamped).
 export function validateElixirStampSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
@@ -851,7 +843,7 @@ export function validateElixirStampSupport(sys: SystemIR, diags: LoomDiagnostic[
               `Deployable '${dep.name}' (platform elixir) hosts aggregate '${ctxName}.${agg.name}' ` +
               `with a lifecycle stamp that references currentUser (e.g. \`createdBy := currentUser\` ` +
               `from \`with audit\`), but the deployable has no auth — there is no request-scoped ` +
-              `principal (Ash actor) to stamp from. Add 'auth: required' (and a system 'user {}' block), ` +
+              `principal (request actor) to stamp from. Add 'auth: required' (and a system 'user {}' block), ` +
               `or use non-principal stamps (e.g. \`stamp onCreate { createdAt := now() }\`).`,
             source: `${sys.name}/${dep.name}`,
             code: "loom.elixir-stamp-unsupported",
@@ -935,8 +927,7 @@ export function validateJavaContainmentSupport(sys: SystemIR, diags: LoomDiagnos
 }
 
 // ---------------------------------------------------------------------------
-// Vanilla (plain Ecto) foundation: nested entity parts on a RELATIONAL-shaped
-// aggregate are not persisted.
+// Nested entity parts on a RELATIONAL-shaped elixir aggregate are not persisted.
 //
 // On a `shape(embedded)` aggregate, `contains <part>: <Part>[]` now persists:
 // the part becomes an Ecto `embedded_schema` module the root `embeds_many`s
@@ -947,15 +938,14 @@ export function validateJavaContainmentSupport(sys: SystemIR, diags: LoomDiagnos
 // migration emits a child table, not an inline column) — that relational
 // nested-entity emit is NOT wired, so the inline `embeds_many` would mismatch
 // the child-table migration.  Reject relational containments loudly: point at
-// `shape(embedded)` (now supported), the Ash foundation, or a value-object
-// remodel.  Mirrors `validateJavaContainmentSupport` / `validateDapperSupport`.
-// (The Ash foundation — the default for `platform: elixir` — is unaffected.)
+// `shape(embedded)` (now supported) or a value-object remodel.  Mirrors
+// `validateJavaContainmentSupport` / `validateDapperSupport`.
 // ---------------------------------------------------------------------------
 export function validateVanillaContainmentSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
   for (const dep of sys.deployables) {
-    if (platformFamily(dep.platform) !== "elixir" || dep.foundation !== "vanilla") continue;
+    if (platformFamily(dep.platform) !== "elixir") continue;
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
@@ -972,13 +962,12 @@ export function validateVanillaContainmentSupport(sys: SystemIR, diags: LoomDiag
         diags.push({
           severity: "error",
           message:
-            `Deployable '${dep.name}' (platform ${dep.platform}, foundation: vanilla) hosts ` +
+            `Deployable '${dep.name}' (platform ${dep.platform}) hosts ` +
             `aggregate '${ctxName}.${agg.name}' which contains nested entity parts (e.g. '${part}') ` +
-            `on a relational shape — the vanilla (plain Ecto) foundation only persists nested parts ` +
+            `on a relational shape — the elixir (plain Ecto) backend only persists nested parts ` +
             `on a 'shape(embedded)' aggregate (inline 'embeds_many'); the relational child-table ` +
-            `emit is not wired. Add 'shape(embedded)' to the aggregate, host this context on ` +
-            `'foundation: ash' (which maps parts to relationships), model the part as a value ` +
-            `object, or use another backend.`,
+            `emit is not wired. Add 'shape(embedded)' to the aggregate, model the part as a value ` +
+            `object, or host this context on another backend.`,
           source: `${sys.name}/${dep.name}`,
           code: "loom.vanilla-containment-unsupported",
         });
@@ -1011,14 +1000,13 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // every root read (the SQLAlchemy analogue of node's `requireCurrentUser()`).
   // node renders the
   // predicate against the ambient `requireCurrentUser()` accessor inside every
-  // root read (the Drizzle analogue of .NET's `HasQueryFilter`).  elixir wires
-  // it on BOTH foundations: **Ash** (`base_filter expr(... == ^actor(:field))` +
-  // `actor: current_user`) and **vanilla** Ecto (the predicate AND-ed into each
-  // read as `^(current_user && current_user.f)`).  **java** AND-s a SpEL-
-  // principal JPQL clause (`:#{@currentUserAccessor.user()?.f()}`) into every
-  // find/retrieval/view + the scoped `findAll`/`findById` overrides (the static
-  // `@SQLRestriction` still carries the non-principal filters).
-  const supportsPrincipalFilter = (family: string, _foundation: string | undefined): boolean => {
+  // root read (the Drizzle analogue of .NET's `HasQueryFilter`).  elixir (plain
+  // Ecto) AND-s the predicate into each read as `^(current_user &&
+  // current_user.f)`.  **java** AND-s a SpEL-principal JPQL clause
+  // (`:#{@currentUserAccessor.user()?.f()}`) into every find/retrieval/view +
+  // the scoped `findAll`/`findById` overrides (the static `@SQLRestriction`
+  // still carries the non-principal filters).
+  const supportsPrincipalFilter = (family: string): boolean => {
     if (family === "node") return true;
     if (family === "elixir") return true;
     if (family === "java") return true;
@@ -1041,10 +1029,9 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // so the static non-principal predicate rides Hibernate's `@SQLRestriction`
   // exactly like the relational path (`emit/entity.ts`).  elixir handles
   // `embedded` (its only non-relational shape — `document` is unsupported there,
-  // gated by `validateSavingShapeSupport`): an embedded Ash resource's root
-  // attributes are real columns, so the predicate rides the same `base_filter`
-  // the relational path emits (`domain-emit.ts` renders it per-aggregate
-  // regardless of shape).  .NET handles all shapes (it's not in
+  // gated by `validateSavingShapeSupport`): an embedded aggregate's root
+  // scalars are real columns, so the predicate AND-s into the Ecto read exactly
+  // like the relational path.  .NET handles all shapes (it's not in
   // LIMITED_FAMILIES).  A PRINCIPAL filter on a non-relational shape stays gated
   // everywhere for now (the actor + json intersection isn't wired) — hence the
   // `!usesPrincipal` condition at the call site.
@@ -1056,9 +1043,9 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // actor + non-relational intersection).  An `embedded` aggregate's root
   // scalars are real columns, so node/elixir/java reuse their relational
   // principal path (node weaves `requireCurrentUser()` into the embedded SQL
-  // read; elixir's `base_filter expr(... == ^actor(:f))` renders per-aggregate
-  // regardless of shape; java AND-s the SpEL-principal clause into the embedded
-  // scoped reads).  A `document` aggregate filters IN-APP over the rehydrated
+  // read; elixir AND-s the `current_user` predicate into the embedded Ecto
+  // read; java AND-s the SpEL-principal clause into the embedded scoped reads).
+  // A `document` aggregate filters IN-APP over the rehydrated
   // doc, so a principal predicate there evaluates the actor in-app (Slice B):
   // node binds `requireCurrentUser()` into the in-app predicate; java injects
   // the `CurrentUserAccessor` bean and binds it before the `.stream().filter`.
@@ -1086,7 +1073,7 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
         // `supportsPrincipalNonRelationalFilter`.
         const principalSupportedHere = nonRelational
           ? supportsPrincipalNonRelationalFilter(fam, shape)
-          : supportsPrincipalFilter(fam, dep.foundation);
+          : supportsPrincipalFilter(fam);
         // The shape itself must be wired (any filter); then, if the filter is
         // principal-referencing, that intersection must be wired too.
         const nonRelationalUnsupported = nonRelational && !supportsNonRelationalFilter(fam, shape);
@@ -1141,7 +1128,7 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
             `Host this aggregate on a .NET deployable${
               nonRelationalUnsupported
                 ? ""
-                : " (or a node / elixir-Ash deployable, which wire tenancy filters)"
+                : " (or a node / elixir deployable, which wire tenancy filters)"
             }, or remove the unsupported capability filter. ` +
             `Non-principal filters on relational aggregates (e.g. 'filter !this.isDeleted') are emitted.`,
           source: `${sys.name}/${dep.name}`,
@@ -1171,9 +1158,8 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
 //       filter is a likely authoring mistake.
 //   loom.filter-bypass-unsupported — the read is served by a deployable whose
 //       backend family is NOT in the supported set.  Honored by dotnet (EF
-//       `IgnoreQueryFilters`), node (Drizzle), elixir on BOTH foundations
-//       (vanilla Ecto omits the `where:`; Ash uses the §11.6 base_filter→per-read
-//       triage), java (§11.6 @SQLRestriction→bypassable @Filter triage,
+//       `IgnoreQueryFilters`), node (Drizzle), elixir (plain Ecto omits the
+//       bypassed `where:`), java (§11.6 @SQLRestriction→bypassable @Filter triage,
 //       disabled per-read via the Hibernate Session), and python (SQLAlchemy
 //       has no global filter, so each read AND-s its predicates explicitly —
 //       a bypassing find/view/inline-run simply OMITS the named conjunct).
@@ -1183,11 +1169,8 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
 
 /** Backend families that honor an `ignoring` filter-bypass clause.  `dotnet`
  *  (EF `IgnoreQueryFilters`, Slice 1), `node` (Drizzle — omits the bypassed
- *  conjunct from the `and(...)` chain, Slice 2), `elixir` (Slice 2 vanilla Ecto
- *  omits the bypassed `where:`; Slice 3 Ash uses the §11.6 "pay for what you
- *  use" triage — a bypassed capability leaves the always-on `base_filter` and is
- *  applied per-read instead, omitted on the reads that `ignoring` it; both
- *  foundations), and `java` (§11.6 hybrid — a bypassed capability leaves the
+ *  conjunct from the `and(...)` chain, Slice 2), `elixir` (plain Ecto omits the
+ *  bypassed `where:`), and `java` (§11.6 hybrid — a bypassed capability leaves the
  *  always-on `@SQLRestriction` for a bypassable Hibernate named `@Filter`, which
  *  a bypassing read disables via `session.disableFilter`/`enableFilter`;
  *  principal filters omit the JPQL conjunct; document repos re-apply promoted
@@ -1200,10 +1183,8 @@ const FILTER_BYPASS_FAMILIES = new Set(["dotnet", "node", "elixir", "java", "pyt
 
 /** Whether `dep`'s backend honors `ignoring` filter-bypass.  A backend must
  *  not pass this gate while still silently filtering — a family is supported
- *  only once its emitter actually OMITS the bypassed predicate.  Elixir honors
- *  it on both foundations: `vanilla` (plain Ecto) omits the bypassed `where:`;
- *  `ash` triages each capability per §11.6 (promoted out of `base_filter`,
- *  applied per-read minus the reads that bypass it). */
+ *  only once its emitter actually OMITS the bypassed predicate.  Elixir (plain
+ *  Ecto) omits the bypassed `where:` on the reads that `ignoring` it. */
 function bypassSupported(dep: { platform: string; foundation?: string }): boolean {
   const fam = platformFamily(dep.platform);
   if (!fam) return false;
@@ -1312,13 +1293,11 @@ export function validateFilterBypassSupport(sys: SystemIR, diags: LoomDiagnostic
             severity: "error",
             code: "loom.filter-bypass-unsupported",
             message:
-              `Deployable '${dep.name}' (platform ${dep.platform}${
-                dep.platform === "elixir" ? ` foundation ${dep.foundation ?? "ash"}` : ""
-              }) serves ${read.site} on ` +
+              `Deployable '${dep.name}' (platform ${dep.platform}) serves ${read.site} on ` +
               `aggregate '${ctxName}.${read.aggName}' with an 'ignoring' filter-bypass clause, but ` +
               `this backend does not honor capability-filter bypass yet — the honoring backends are ` +
-              `dotnet (EF 'IgnoreQueryFilters'), node (Drizzle), and elixir (both the vanilla Ecto and ` +
-              `Ash foundations). Host this read on a supported backend, or remove the 'ignoring' clause.`,
+              `dotnet (EF 'IgnoreQueryFilters'), node (Drizzle), and elixir (Ecto). Host this read ` +
+              `on a supported backend, or remove the 'ignoring' clause.`,
             source: `${sys.name}/${dep.name}`,
           });
           continue;
@@ -1758,8 +1737,7 @@ function coverageGapReason(kind: string, ctx: BoundedContextIR): string | undefi
 // but no current emitter consumes.
 //
 // At time of writing, three knobs route through to generated code:
-//   - `schema`       — EF Core ToTable, Drizzle pgSchema, AshPostgres
-//                      `postgres.schema`
+//   - `schema`       — EF Core ToTable, Drizzle pgSchema, Ecto schema prefix
 //   - `tablePrefix`  — same three emitters (table-name prefix)
 //
 // The other six knobs validate against the kind/storage compatibility
@@ -1778,7 +1756,7 @@ function coverageGapReason(kind: string, ctx: BoundedContextIR): string | undefi
 //
 // `isolationLevel` used to be on this list; it now flows through
 // `resolveWorkflowIsolation` into the .NET BeginTransactionAsync and
-// Phoenix `Ash.transaction` opts when a workflow in the context is
+// Phoenix `Repo.transaction` opts when a workflow in the context is
 // transactional and doesn't carry its own per-workflow isolation.
 //
 // We surface this as a warning at IR-validate time so the author sees
@@ -1821,8 +1799,8 @@ const UNWIRED_KNOBS: readonly UnwiredKnob[] = [
 // `sharedTable` (TPH) is implemented on all three DB backends: Hono/Drizzle
 // (hand-rolled shared table + `kind` discriminator, per-concrete columns
 // nullable, repos filter/stamp `kind`), .NET/EF Core (native
-// `HasDiscriminator`), and Phoenix/Ash (shared-table multi-resource +
-// `base_filter` on `kind`). So a TPH hierarchy is allowed iff its context is
+// `HasDiscriminator`), and Phoenix (plain Ecto shared table + a `kind`
+// discriminator column). So a TPH hierarchy is allowed iff its context is
 // hosted by at least one of those backends; otherwise it's an error (not a
 // warning) — there is no implemented emission target.
 // `sharedTable` is the omitted-modifier
@@ -1857,8 +1835,8 @@ export function validateInheritanceStorage(
 ): void {
   const byName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
   // TPH storage emission ships on Hono (Drizzle shared table + `kind`), .NET
-  // (EF Core native `HasDiscriminator`), and Phoenix (Ash shared-table
-  // multi-resource + `base_filter` on `kind`).
+  // (EF Core native `HasDiscriminator`), and Phoenix (plain Ecto shared table
+  // + a `kind` discriminator column).
   const TPH_CAPABLE = new Set(["node", "dotnet", "elixir", "python", "java"]);
   const hostedByCapable = [...backendPlatforms].some((p) => TPH_CAPABLE.has(p));
   for (const agg of ctx.aggregates) {
@@ -1903,95 +1881,34 @@ export function validateInheritanceStorage(
 // aggregate would silently fall back to state persistence, losing the event
 // log — an error, not a silent downgrade. Mirrors the TPH storage gate.
 //
-// For Phoenix specifically the gap is foundation-shaped, not platform-shaped:
-// Phoenix itself is domain-layer-agnostic, but `foundation: ash` (today's
-// only Phoenix foundation) doesn't have a pure-ES fit (AshEvents is hybrid,
-// AshCommanded is heavy, custom Ash.DataLayer is ~months). The planned
-// `foundation: vanilla` (D-VANILLA-PHOENIX-FOUNDATION + D-VANILLA-ES-HOME)
-// will host pure ES on Phoenix; until it ships the diagnostic names the Ash
-// foundation as the constraint and points at the proposal.
-const EVENT_SOURCING_BACKENDS = new Set(["node", "dotnet", "python", "java"]);
-
-/** Per-context set of foundations of the elixir deployables hosting it
- *  (`"ash"` / `"vanilla"`).  Event sourcing on elixir is foundation-shaped,
- *  not platform-shaped (D-VANILLA-ES-HOME): the `vanilla` foundation hosts a
- *  pure-ES data layer (per-aggregate stream + fold-on-load), while `ash` has
- *  no pure-ES fit and stays gated.  `validateEventSourcedStorage` consumes
- *  this to tell `elixir+vanilla` (supported) from `elixir+ash` (rejected). */
-export function elixirFoundationsHostingEachContext(
-  loom: EnrichedLoomModel,
-): Map<string, Set<string>> {
-  const out = new Map<string, Set<string>>();
-  for (const sys of loom.systems) {
-    for (const d of sys.deployables) {
-      if (d.platform !== "elixir") continue;
-      const foundation = d.foundation ?? "ash";
-      for (const cn of d.contextNames) {
-        const set = out.get(cn) ?? new Set<string>();
-        set.add(foundation);
-        out.set(cn, set);
-      }
-    }
-  }
-  return out;
-}
+// Phoenix (plain Ecto/Phoenix) hosts pure ES via the per-aggregate stream +
+// fold-on-load data layer (D-VANILLA-ES-HOME), so elixir is ES-capable.
+const EVENT_SOURCING_BACKENDS = new Set(["node", "dotnet", "python", "java", "elixir"]);
 
 export function validateEventSourcedStorage(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
   backendPlatforms: Set<string>,
-  elixirFoundations: Set<string> = new Set(),
 ): void {
-  // elixir hosts ES only on the vanilla foundation (D-VANILLA-ES-HOME); the
-  // Ash foundation has no pure-ES fit, so an `elixir` host counts as ES-capable
-  // for this context iff every elixir deployable hosting it uses `vanilla`.
-  const elixirEsCapable =
-    elixirFoundations.size > 0 && [...elixirFoundations].every((f) => f === "vanilla");
-  const isEsCapable = (p: string): boolean =>
-    EVENT_SOURCING_BACKENDS.has(p) || (p === "elixir" && elixirEsCapable);
-  // Every hosting backend must implement event sourcing; flag the ones that
-  // don't (e.g. an Ash-foundation Phoenix deployable hosting the context).
-  const unsupported = [...backendPlatforms].filter((p) => !isEsCapable(p));
+  // Every hosting backend must implement event sourcing; flag any that don't.
+  const unsupported = [...backendPlatforms].filter((p) => !EVENT_SOURCING_BACKENDS.has(p));
   const anyBackend = backendPlatforms.size > 0;
-  const includesElixir = unsupported.includes("elixir");
   for (const agg of ctx.aggregates) {
     if (agg.persistedAs !== "eventLog") continue;
     if (anyBackend && unsupported.length === 0) continue;
-    const message = includesElixir
-      ? // Phoenix-specific: name the Ash-foundation constraint, point at the
-        // planned vanilla foundation (D-VANILLA-ES-HOME) and the cross-backend
-        // escape (host the context on node / dotnet).
-        `aggregate '${agg.name}' is persistedAs(eventLog), which requires a pure-ES data ` +
-        `layer (per-aggregate stream, fold-on-load, no state table). This is an ` +
-        `Ash-foundation limitation, not a Phoenix-platform limitation — Phoenix itself ` +
-        `is domain-layer-agnostic, but foundation: ash (today's only Phoenix foundation) ` +
-        `has no pure-ES fit: AshEvents is hybrid (keeps the state table), AshCommanded ` +
-        `couples to Commanded's infrastructure, and a custom Ash.DataLayer over event ` +
-        `streams effectively re-implements AshCommanded. Three escapes: ` +
-        `(1) host event-sourced aggregates on a node / dotnet deployable (same .ddd ` +
-        `source — they share the cross-backend ES contract); ` +
-        `(2) drop persistedAs(eventLog) to use state persistence on Phoenix; ` +
-        `(3) switch this deployable to foundation: vanilla on Phoenix, which ` +
-        `hosts pure ES (per-aggregate stream + fold-on-load) — see ` +
-        `proposals/vanilla-phoenix-foundation.md (D-VANILLA-PHOENIX-FOUNDATION + ` +
-        `D-VANILLA-ES-HOME). Tracked in workflow-and-applier.md (appliers A2).`
-      : // Generic non-Phoenix unsupported backend (or no backend at all).
-        (() => {
-          const hostNote =
-            unsupported.length > 0
-              ? `it is hosted by ${unsupported.join(", ")}, where event-sourced persistence is not implemented`
-              : "no event-sourcing-capable (node / dotnet) backend deployable hosts this context";
-          return (
-            `aggregate '${agg.name}' is persistedAs(eventLog), but event-sourced storage emission ` +
-            `is implemented for the Hono (node) and .NET (dotnet) backends only — ${hostNote}. ` +
-            `Host the context on a node / dotnet deployable, or drop persistedAs(eventLog) to use ` +
-            `state persistence (all backends). Tracked in workflow-and-applier.md (appliers A2).`
-          );
-        })();
+    const hostNote =
+      unsupported.length > 0
+        ? `it is hosted by ${unsupported.join(", ")}, where event-sourced persistence is not implemented`
+        : "no event-sourcing-capable (node / dotnet / java / python / elixir) backend deployable hosts this context";
     diags.push({
       severity: "error",
       code: "loom.event-sourcing-backend-unsupported",
-      message,
+      message:
+        `aggregate '${agg.name}' is persistedAs(eventLog), but event-sourced storage emission ` +
+        `is implemented for the Hono (node), .NET (dotnet), Java (java), Python (python) and elixir ` +
+        `backends — ${hostNote}. Host the context on a supported deployable, or drop ` +
+        `persistedAs(eventLog) to use state persistence (all backends). ` +
+        `Tracked in workflow-and-applier.md (appliers A2).`,
       source: `${ctx.name}/${agg.name}`,
     });
   }
@@ -2003,34 +1920,23 @@ export function validateEventSourcedStorage(
 // aggregate (emit-only handlers + pure `apply` folds, no mutable state table).
 // The surface (grammar → `WorkflowIR.eventSourced` / `.appliers`) and the
 // emit-only / pure-fold discipline (A1) have landed, and the **node, .NET,
-// Python, Java, and elixir-vanilla backends all emit the event-sourced workflow
+// Python, Java, and elixir backends all emit the event-sourced workflow
 // runtime** (per-correlation `<wf>_events` stream, fold-on-load,
-// emit→append-own-event dispatch).  A backend that doesn't (today only the
-// elixir *ash* foundation — see `elixirEsCapable` below) keeps an `eventSourced`
-// workflow gated — otherwise it silently misgenerates as a state-based saga (the
-// saga emitters key off `correlationField` alone, emit a mutable `<Wf>State` row
-// + dispatcher, and drop the appliers entirely).  A parsed-but-unemitted feature
-// is a footgun, so it fails fast — exactly like the event-sourced *aggregate*
-// storage gate, and the supported set grows per backend (mirroring
-// `EVENT_SOURCING_BACKENDS`; elixir is added via the foundation-shaped branch).
-const EVENT_SOURCING_WORKFLOW_BACKENDS = new Set(["node", "dotnet", "python", "java"]);
+// emit→append-own-event dispatch).  A backend that doesn't keeps an
+// `eventSourced` workflow gated — otherwise it silently misgenerates as a
+// state-based saga (the saga emitters key off `correlationField` alone, emit a
+// mutable `<Wf>State` row + dispatcher, and drop the appliers entirely).  A
+// parsed-but-unemitted feature is a footgun, so it fails fast — exactly like the
+// event-sourced *aggregate* storage gate.
+const EVENT_SOURCING_WORKFLOW_BACKENDS = new Set(["node", "dotnet", "python", "java", "elixir"]);
 export function validateEventSourcedWorkflowStorage(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
   backendPlatforms: Set<string>,
-  elixirFoundations: Set<string> = new Set(),
 ): void {
-  // elixir hosts event-sourced workflows only on the vanilla foundation
-  // (D-VANILLA-ES-HOME) — the Ash foundation has no pure-ES fit, exactly like
-  // event-sourced aggregates (`validateEventSourcedStorage`).
-  const elixirEsCapable =
-    elixirFoundations.size > 0 && [...elixirFoundations].every((f) => f === "vanilla");
-  const isEsCapable = (p: string): boolean =>
-    EVENT_SOURCING_WORKFLOW_BACKENDS.has(p) || (p === "elixir" && elixirEsCapable);
-  const unsupported = [...backendPlatforms].filter((p) => !isEsCapable(p));
+  const unsupported = [...backendPlatforms].filter((p) => !EVENT_SOURCING_WORKFLOW_BACKENDS.has(p));
   if (unsupported.length === 0) return;
   const hosts = unsupported.sort().join(", ");
-  const includesElixir = unsupported.includes("elixir");
   for (const wf of ctx.workflows) {
     if (!wf.eventSourced) continue;
     diags.push({
@@ -2040,14 +1946,10 @@ export function validateEventSourcedWorkflowStorage(
         `workflow '${wf.name}' is eventSourced, but event-sourced workflow storage ` +
         `(a per-correlation event stream folded through its apply(...) blocks) is ` +
         `implemented on the Hono (node), .NET (dotnet), Python (FastAPI), Java (Spring) ` +
-        `and elixir-vanilla backends — this context is also hosted by ${hosts}. ` +
-        (includesElixir
-          ? `On Phoenix this is a foundation constraint: the Ash foundation has no pure-ES ` +
-            `fit, so switch the deployable to foundation: vanilla (D-VANILLA-ES-HOME). Otherwise host `
-          : `Host `) +
+        `and elixir backends — this context is also hosted by ${hosts}. Host ` +
         `the context on a supported deployable, drop the eventSourced modifier ` +
         `to use a state-based saga (a persisted correlation-state row, supported on ` +
-        `node / dotnet / java / python / elixir-vanilla), or move the event-fold logic ` +
+        `node / dotnet / java / python / elixir), or move the event-fold logic ` +
         `into an event-sourced aggregate (persistedAs(eventLog)). ` +
         `Tracked in workflow-and-applier.md (A2-S5b).`,
       source: `${ctx.name}/${wf.name}`,
@@ -2055,40 +1957,28 @@ export function validateEventSourcedWorkflowStorage(
   }
 }
 
-// the Hono (`node`) and .NET (`dotnet`) backends, plus elixir on the **vanilla**
-// foundation — the lineage SDK + co-located `<field>_provenance` column + the
-// `provenance_records` flush.  On a backend that doesn't (the Ash foundation, or
-// react) a `provenanced` field silently behaves like a plain field, dropping the
-// audit trail it promises — an error, not a silent no-op.  Mirrors the
-// event-sourcing storage gate (foundation-shaped on elixir; a parsed-but-
-// unemitted feature is a footgun, so it fails fast).
-const PROVENANCE_BACKENDS = new Set(["node", "dotnet", "java", "python"]);
+// the Hono (`node`), .NET (`dotnet`), Java (`java`), Python (`python`) and
+// elixir backends — the lineage SDK + co-located `<field>_provenance` column +
+// the `provenance_records` flush.  On a backend that doesn't (e.g. react) a
+// `provenanced` field silently behaves like a plain field, dropping the audit
+// trail it promises — an error, not a silent no-op.  Mirrors the event-sourcing
+// storage gate (a parsed-but-unemitted feature is a footgun, so it fails fast).
+const PROVENANCE_BACKENDS = new Set(["node", "dotnet", "java", "python", "elixir"]);
 export function validateProvenancedStorage(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
   backendPlatforms: Set<string>,
-  elixirFoundations: Set<string> = new Set(),
 ): void {
-  // elixir hosts the provenance runtime only on the vanilla foundation
-  // (D-VANILLA-ES-HOME-shaped) — the Ash foundation has no co-located-column /
-  // process-buffer fit, exactly like event-sourced storage.  An `elixir` host
-  // counts as provenance-capable iff every elixir deployable hosting it uses
-  // `vanilla`.
-  const elixirProvCapable =
-    elixirFoundations.size > 0 && [...elixirFoundations].every((f) => f === "vanilla");
-  const isProvCapable = (p: string): boolean =>
-    PROVENANCE_BACKENDS.has(p) || (p === "elixir" && elixirProvCapable);
-  const unsupported = [...backendPlatforms].filter((p) => !isProvCapable(p));
+  const unsupported = [...backendPlatforms].filter((p) => !PROVENANCE_BACKENDS.has(p));
   const anyBackend = backendPlatforms.size > 0;
   for (const agg of ctx.aggregates) {
     const provFields = agg.fields.filter((f) => f.provenanced);
     if (provFields.length === 0) continue;
     if (anyBackend && unsupported.length === 0) continue;
-    const includesElixir = unsupported.includes("elixir");
     const hostNote =
       unsupported.length > 0
         ? `it is hosted by ${unsupported.join(", ")}, where the provenance runtime is not emitted`
-        : "no provenance-capable (node / dotnet / java / python / elixir-vanilla) backend deployable hosts this context";
+        : "no provenance-capable (node / dotnet / java / python / elixir) backend deployable hosts this context";
     const names = provFields.map((f) => f.name).join(", ");
     diags.push({
       severity: "error",
@@ -2096,12 +1986,8 @@ export function validateProvenancedStorage(
       message:
         `aggregate '${agg.name}' has provenanced field(s) ${names}, but the provenance runtime ` +
         `(trace capture + history) is emitted for the Hono (node), .NET (dotnet), Java (java), ` +
-        `Python (python) and elixir-vanilla backends only — ${hostNote}. ` +
-        (includesElixir
-          ? `On Phoenix this is a foundation constraint: the Ash foundation has no provenance fit, ` +
-            `so switch the deployable to foundation: vanilla. Otherwise host `
-          : `Host `) +
-        `the context on a node / dotnet / java / python / elixir-vanilla deployable, or drop the 'provenanced' ` +
+        `Python (python) and elixir backends only — ${hostNote}. Host ` +
+        `the context on a node / dotnet / java / python / elixir deployable, or drop the 'provenanced' ` +
         `modifier to use a plain field (all backends). Tracked in provenance.md / ` +
         `type-system-feature-migration.md (DBT-1).`,
       source: `${ctx.name}/${agg.name}`,
@@ -2116,34 +2002,23 @@ export function validateProvenancedStorage(
 // the operation's save transaction.  Audited LIFECYCLE actions
 // (`audited create` / `destroy`) ship on the same set — the create/destroy
 // handlers stage the audit row (before:null/after=wire on create;
-// before=wire/after:null on destroy) in the lifecycle transaction.  Phoenix on
-// the **Ash** foundation stays uninstrumented for both (no audit fit), so
-// hosting an `audited` action there would silently record nothing — that
-// mismatch is an error, not a silent no-op.  Foundation-shaped exactly like the
-// provenance gate above (D-VANILLA-ES-HOME-shaped).  (This gates the
-// per-operation `audited` flag only; the `with audit` capability macro emits
+// before=wire/after:null on destroy) in the lifecycle transaction.  Hosting an
+// `audited` action on a backend that doesn't emit the runtime would silently
+// record nothing — that mismatch is an error, not a silent no-op.  (This gates
+// the per-operation `audited` flag only; the `with audit` capability macro emits
 // stamping rules via `contextStamps`, a separate concern.)
-const AUDIT_OP_BACKENDS = new Set(["node", "dotnet", "java", "python"]);
-const AUDIT_LIFECYCLE_BACKENDS = new Set(["node", "dotnet", "java", "python"]);
+const AUDIT_OP_BACKENDS = new Set(["node", "dotnet", "java", "python", "elixir"]);
+const AUDIT_LIFECYCLE_BACKENDS = new Set(["node", "dotnet", "java", "python", "elixir"]);
 export function validateAuditedOperationSupport(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
   backendPlatforms: Set<string>,
-  elixirFoundations: Set<string> = new Set(),
 ): void {
-  // elixir hosts audit-record emission only on the vanilla foundation
-  // (D-VANILLA-ES-HOME-shaped) — the Ash foundation has no audit fit, exactly
-  // like provenance/event-sourced storage.  An `elixir` host counts as
-  // audit-capable iff every elixir deployable hosting it uses `vanilla`.
-  const elixirAuditCapable =
-    elixirFoundations.size > 0 && [...elixirFoundations].every((f) => f === "vanilla");
-  const isAuditCapable = (p: string): boolean =>
-    AUDIT_OP_BACKENDS.has(p) || (p === "elixir" && elixirAuditCapable);
-  const isLifecycleCapable = (p: string): boolean =>
-    AUDIT_LIFECYCLE_BACKENDS.has(p) || (p === "elixir" && elixirAuditCapable);
   const anyBackend = backendPlatforms.size > 0;
-  const opUnsupported = [...backendPlatforms].filter((p) => !isAuditCapable(p));
-  const lifecycleUnsupported = [...backendPlatforms].filter((p) => !isLifecycleCapable(p));
+  const opUnsupported = [...backendPlatforms].filter((p) => !AUDIT_OP_BACKENDS.has(p));
+  const lifecycleUnsupported = [...backendPlatforms].filter(
+    (p) => !AUDIT_LIFECYCLE_BACKENDS.has(p),
+  );
   const push = (
     agg: BoundedContextIR["aggregates"][number],
     kind: "operation" | "lifecycle action",
@@ -2151,7 +2026,6 @@ export function validateAuditedOperationSupport(
     unsupported: string[],
     capable: string,
   ): void => {
-    const includesElixir = unsupported.includes("elixir");
     const hostNote =
       unsupported.length > 0
         ? `it is hosted by ${unsupported.join(", ")}, where audit-record emission is not implemented`
@@ -2162,17 +2036,12 @@ export function validateAuditedOperationSupport(
       message:
         `aggregate '${agg.name}' has 'audited' ${kind}(s) ${names.join(", ")}, but per-operation ` +
         `audit-record emission for ${kind}s is implemented for the ${capable} backend(s) only — ${hostNote}. ` +
-        (includesElixir
-          ? `On Phoenix this is a foundation constraint: the Ash foundation has no audit fit, ` +
-            `so switch the deployable to foundation: vanilla. Otherwise host `
-          : `Host `) +
-        `the context on a capable deployable, or drop the 'audited' modifier (all backends). ` +
+        `Host the context on a capable deployable, or drop the 'audited' modifier (all backends). ` +
         `Tracked in audit-and-logging.md.`,
       source: `${ctx.name}/${agg.name}`,
     });
   };
-  const capableLabel =
-    "Hono (node) / .NET (dotnet) / Java (java) / Python (python) / elixir-vanilla";
+  const capableLabel = "Hono (node) / .NET (dotnet) / Java (java) / Python (python) / elixir";
   for (const agg of ctx.aggregates) {
     const auditedOps = agg.operations.filter((o) => o.audited);
     if (auditedOps.length > 0 && (!anyBackend || opUnsupported.length > 0)) {

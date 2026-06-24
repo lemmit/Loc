@@ -562,7 +562,7 @@ describe("page metamodel — IR shape", () => {
         system Acme {
           subdomain M { context C { } }
           ui Admin { framework: phoenixLiveView }
-          deployable app { platform: elixir { foundation: ash }, contexts: [C], hosts: Admin, port: 4000 }
+          deployable app { platform: elixir, contexts: [C], hosts: Admin, port: 4000 }
         }
       `);
       const d = deployableByName(loom, "app");
@@ -577,7 +577,7 @@ describe("page metamodel — IR shape", () => {
           subdomain M { context C { } }
           ui Web { framework: react }
           ui Admin { framework: phoenixLiveView }
-          deployable app { platform: elixir { foundation: ash }, contexts: [C], hosts: [Web, Admin], port: 4000 }
+          deployable app { platform: elixir, contexts: [C], hosts: [Web, Admin], port: 4000 }
         }
       `);
       expect(deployableByName(loom, "app").hostedUiNames).toEqual(["Web", "Admin"]);
@@ -609,7 +609,7 @@ describe("page metamodel — IR shape", () => {
         system Acme {
           subdomain M { context C { } }
           ui Admin { framework: phoenixLiveView }
-          deployable app { platform: elixir { foundation: ash }, contexts: [C], hosts: Admin, port: 4000 }
+          deployable app { platform: elixir, contexts: [C], hosts: Admin, port: 4000 }
         }
       `);
       expect(deployableByName(loom, "app").uiFramework).toBe("phoenixLiveView");
@@ -621,7 +621,7 @@ describe("page metamodel — IR shape", () => {
           subdomain M { context C { } }
           ui Web { framework: react }
           ui Admin { framework: phoenixLiveView }
-          deployable app { platform: elixir { foundation: ash }, contexts: [C], hosts: [Web, Admin], port: 4000 }
+          deployable app { platform: elixir, contexts: [C], hosts: [Web, Admin], port: 4000 }
         }
       `);
       expect(deployableByName(loom, "app").hostedUiNames).toEqual(["Web", "Admin"]);

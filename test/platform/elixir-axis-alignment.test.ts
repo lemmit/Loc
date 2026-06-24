@@ -1,11 +1,9 @@
 // Realization-axes alignment (docs/plans/realization-axes-alignment.md) — the
-// elixir backend exposes BOTH data layers on the persistence axis
-// (`ashPostgres` for the Ash foundation, `ecto` for the vanilla foundation)
-// and BOTH real pipeline styles on the application axis (`ash`, `layered` —
-// the latter being plain Phoenix's controller → context → repository shape,
-// DSL `serviceLayer`), so Ecto is a
-// first-class adapter exactly like `ashPostgres` — symmetric with dotnet
-// (`efcore`/`dapper`) and node (`drizzle`/`mikroorm`).
+// elixir backend exposes the plain Ecto/Phoenix data layer (`ecto`) on the
+// persistence axis and the `layered` pipeline style (plain Phoenix's
+// controller → context → repository shape, DSL `serviceLayer`) on the
+// application axis.  The Ash foundation was removed, so `ashPostgres` / `ash`
+// are no longer on the menu.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -15,16 +13,17 @@ import {
 } from "../../src/platform/resolve-adapters.js";
 
 describe("elixir realization-axes alignment", () => {
-  it("persistence axis lists ashPostgres AND ecto (both real, no stubs)", () => {
+  it("persistence axis lists ecto only (no ash data layer)", () => {
     const names = availableAdapterNames("elixir", "persistence");
-    expect(names).toContain("ashPostgres");
     expect(names).toContain("ecto");
+    expect(names).not.toContain("ashPostgres");
+    expect(names).not.toContain("ashSqlite");
   });
 
-  it("application/style axis lists ash AND layered (vanilla is a foundation, not a style)", () => {
+  it("application/style axis lists layered only (vanilla is a foundation, not a style)", () => {
     const names = availableAdapterNames("elixir", "style");
-    expect(names).toContain("ash");
     expect(names).toContain("layered");
+    expect(names).not.toContain("ash");
     expect(names).not.toContain("vanilla");
   });
 
@@ -36,31 +35,19 @@ describe("elixir realization-axes alignment", () => {
     expect(ecto.supports("postgres", "state", "state")).toBe(true);
   });
 
-  it("ecto hosts eventLog too — it's the vanilla foundation's ES adapter (DEBT-20)", () => {
+  it("ecto hosts eventLog too — it's the elixir backend's ES adapter (DEBT-20)", () => {
     const ecto = resolvePersistence("elixir", "ecto", "eventLog");
     expect(ecto.name).toBe("ecto");
     expect(ecto.supportedStrategies).toContain("eventLog");
-    // The vanilla foundation emits the full event-sourced store; ecto is its
+    // The elixir backend emits the full event-sourced store; ecto is its
     // persistence adapter, so it must advertise `eventLog` on postgres.
     expect(ecto.supports("postgres", "eventLog", "eventLog")).toBe(true);
-    // ashPostgres (Ash) stays state-only — Ash has no ES path.
-    expect(
-      resolvePersistence("elixir", "ashPostgres").supports("postgres", "eventLog", "eventLog"),
-    ).toBe(false);
   });
 
-  it("resolves the layered (plain-Phoenix) style adapter; its DI block is empty (no ash_domains)", () => {
-    // `foundation: vanilla` selects the `layered` style (DSL `serviceLayer`),
-    // NOT a style named after the foundation.
+  it("resolves the layered (plain-Phoenix) style adapter; its DI block is empty", () => {
     const layered = resolveStyle("elixir", "layered");
     expect(layered.name).toBe("layered");
-    // Plain Phoenix needs no domain registration — contrast ash's ash_domains.
+    // Plain Phoenix needs no domain registration.
     expect(layered.emitDi({ contexts: [], deployable: { name: "api" } } as never)).toEqual([]);
-  });
-
-  it("ashPostgres stays a distinct, postgres-only adapter (per-DB Ash data layer)", () => {
-    const ash = resolvePersistence("elixir", "ashPostgres");
-    expect(ash.name).toBe("ashPostgres");
-    expect(ash.supports("postgres", "state", "state")).toBe(true);
   });
 });

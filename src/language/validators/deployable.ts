@@ -57,7 +57,7 @@ export function checkDeployable(
 ): void {
   // Page-metamodel UI binding rules (3, 4, 4b).
   // Rule 3:  only platforms that mount a UI admit `ui:` — `react`,
-  //          `static`, and `elixir` (fullstack Ash + Phoenix).
+  //          `static`, and `elixir` (fullstack Phoenix LiveView).
   // Rule 4:  every `static` deployable must declare `ui:` (otherwise
   //          it has nothing to serve).
   // Rule 4b: every `react` deployable must declare `ui:`.  The
@@ -332,12 +332,11 @@ export function checkDeployableRealizationAxes(d: Deployable, accept: Validation
     { name: "runtime", value: d.runtime },
   ];
 
-  // D-VANILLA-DEFAULT — the default flip has landed.  A bare `platform:
-  // elixir` (no explicit `foundation:`) now resolves to `vanilla` (plain
-  // Phoenix LiveView on Ecto) via `lower-platform.ts:greenfieldAxisDefaults`;
-  // `foundation: ash` is the explicit opt-in.  The transitional
-  // `loom.foundation-default-flipping` warning that preceded the flip is
-  // gone — omitting `foundation:` is no longer ambiguous.
+  // `platform: elixir` generates `vanilla` (plain Phoenix LiveView on Ecto),
+  // the only foundation — the Ash foundation was removed.  A bare `platform:
+  // elixir` (no explicit `foundation:`) resolves to `vanilla` via
+  // `lower-platform.ts:greenfieldAxisDefaults`; an explicit `foundation: ash`
+  // is rejected by R1 below as an out-of-menu value.
 
   // R1 — every set axis value must be in its platform menu.
   for (const { name, value } of axes) {
@@ -381,12 +380,11 @@ export function checkDeployableRealizationAxes(d: Deployable, accept: Validation
 
   // R6 — `persistence:` / `application:` must be compatible with the
   // foundation (docs/plans/realization-axes-alignment.md).  A named
-  // foundation admits only its framework family (`ash` ⇒ `ashPostgres`);
-  // `vanilla` admits the non-framework libraries (`ecto`).  The effective
-  // foundation is the explicit value or the platform default, so
-  // `persistence: ecto` without a foundation on elixir (which defaults to
-  // `ash`) is caught too.  Owned axes (R4) are skipped to avoid a double
-  // diagnostic.
+  // foundation admits only its framework family; `vanilla` admits the
+  // non-framework libraries (`ecto`).  The effective foundation is the
+  // explicit value or the platform default.  Owned axes (R4) are skipped to
+  // avoid a double diagnostic.  (No named foundation ships today — the rule
+  // stays active for `abp`/`nestjs` when they're wired.)
   const effectiveFoundation = d.foundation ?? defaultFoundationFor(family);
   if (effectiveFoundation != null) {
     const owned = FOUNDATION_OWNED_AXES[effectiveFoundation] ?? [];

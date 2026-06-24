@@ -12,6 +12,8 @@
 
 > **[2026-06-20 status audit]** Beyond 'pinned' — the six-axis `platform { … }` block has SHIPPED across grammar (`ddd.langium:~180`), IR (`loom-ir.ts:~2226`), validator R1/R3/R4/R6 (`deployable.ts:~317`), and generators (`elixir/index.ts`, `java/adapters/by-layer-layout.ts`). Only R2/R7 + the node-actor `runtime:` menu remain; the IR comment 'no generator consumes them yet' is also stale.
 
+> **(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain Ecto/Phoenix only; `foundation: ash` is now a validation error.)** The `foundation:` knob still exists, but on phoenix/elixir it resolves to `vanilla` only — `vanilla` is the default and the sole valid value, and `ash` (plus the `ashPostgres`/`ashSqlite` persistence flavors) is rejected. The Ash prose below is retained as design history; read the phoenix rows/examples through this correction.
+
 ## 0. The question this answers
 
 `platform: dotnet` today bundles EF Core + MediatR-CQRS + minimal API + xUnit
@@ -194,11 +196,13 @@ today's output (`storage-and-platform-config.md:881`).
 |---|---|---|---|---|---|---|
 | `dotnet` | `vanilla`* · `abp` | `cqrs`* · `serviceLayer` · `flat` | `efcore`* · `dapper` · `marten` | `byLayer`* · `byFeature` | `minimalApi`* · `controllers` | `transactional`* · `orleans` · `akka` |
 | `node` (hono) | `vanilla`* · `nestjs` | `cqrs`* · `serviceLayer` · `flat` | `drizzle`* (+1 ES-capable, TBD) | `byLayer`* · `byFeature` | `hono`* (fixed) | `transactional`* (fixed) |
-| `phoenix` | `ash`* · `vanilla` | `serviceLayer`* · `flat` · `cqrs` (vanilla only) | `ashPostgres`*/`ashSqlite` (ash) · `ecto` (vanilla) | `byFeature`* · `byLayer` | `phoenixRouter`* (fixed) | `transactional`* · `genserver` |
+| `phoenix` | `vanilla`* (fixed — `ash` removed) | `serviceLayer`* · `flat` · `cqrs` | `ecto`* | `byFeature`* · `byLayer` | `phoenixRouter`* (fixed) | `transactional`* · `genserver` |
 
-`*` = default. `phoenix` defaults to `foundation: ash` (matches today's
-`phoenixLiveView` after desugar — D-PHOENIX-SURFACE open-item 2, PINNED, now
-expressed on `foundation:` instead of `persistence:`).
+`*` = default. `phoenix` defaults to `foundation: vanilla` — plain Ecto/Phoenix.
+(The Ash foundation was removed in 2026; `foundation: ash` and the
+`ashPostgres`/`ashSqlite` flavors are now validation errors. The original row read
+`ash`* · `vanilla` with `ashPostgres`*/`ashSqlite` as the default persistence —
+kept here only as design history.)
 
 ## 7. Cross-axis gating rules + validator codes
 
@@ -381,7 +385,9 @@ deployable api {
 ```
 
 **7 — Phoenix, plain Ecto (non-Ash).** `foundation: vanilla` opens the
-application axis; default `foundation` on bare `platform: phoenix` would be `ash`.
+application axis; it is now the default *and only* `foundation` on `platform:
+phoenix` (the Ash default was removed in 2026 — `foundation: ash` is a validation
+error).
 
 ```ddd
 deployable web {
@@ -395,8 +401,12 @@ deployable web {
 }
 ```
 
-**8 — Phoenix, Ash on SQLite.** The combination the old "fold into `persistence:`"
-mechanism could not express — `foundation:` keeps the data layer pickable.
+**8 — Phoenix, Ash on SQLite.** *(Superseded 2026: the Ash foundation was
+removed; this combination is no longer valid — `foundation: ash` and
+`persistence: ashSqlite` are validation errors. Retained as design history of
+what the two-axis split was meant to express.)* The combination the old "fold
+into `persistence:`" mechanism could not express — `foundation:` keeps the data
+layer pickable.
 
 ```ddd
 deployable web {

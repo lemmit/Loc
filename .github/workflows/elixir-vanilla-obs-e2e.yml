@@ -6,14 +6,13 @@ name: Elixir / Vanilla runtime e2e (observability)
 #   server_starting → server_listening → request_start → request_end →
 #   server_shutdown → server_drained
 #
-# Vanilla mirror of `elixir-ash-obs-e2e.yml`.  Catches drift the unit
+# The Elixir observability runtime e2e gate.  Catches drift the unit
 # tests miss — e.g. the shared `renderApplication` / `renderTelemetry` /
 # `renderLogFormatter` not playing nice with the vanilla shell wiring
 # (Repo, PubSub, RequestContext Plug, :logger formatter config).
 #
 # Triggers `push: main` + manual dispatch only — NOT per-PR.  Cold path
-# (~3-5min) is lighter than the Ash mirror (no AshPostgres / no
-# ResourceGenerator) so a 10min cap is comfortable.
+# is ~3-5min, so a 10min cap is comfortable.
 on:
   push:
     branches: [main]
@@ -50,11 +49,10 @@ jobs:
       github.event_name != 'pull_request' ||
       github.event.label.name == 'run-e2e'
     # Cold path: hex deps + plain Phoenix compile + postgres pull is
-    # ~3-5min (no AshPostgres in the dep set).  10min is comfortable.
+    # ~3-5min (plain Ecto dep set).  10min is comfortable.
     timeout-minutes: 10
     # Service container — pre-starts postgres on the host network with a
-    # built-in healthcheck before any step runs.  Same approach as the
-    # Ash sibling workflow.
+    # built-in healthcheck before any step runs.
     services:
       postgres:
         image: postgres:18-alpine
@@ -76,8 +74,7 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      # erlef/setup-beam — same version pins as the Ash mirror so the
-      # dep set resolves identically.
+      # erlef/setup-beam — pinned so the dep set resolves deterministically.
       - uses: erlef/setup-beam@v1
         with:
           otp-version: '27.3'

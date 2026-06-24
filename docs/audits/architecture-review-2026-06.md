@@ -1,5 +1,7 @@
 # Architecture review — multi-target growth (2026-06)
 
+> **(Superseded 2026: the Ash foundation was removed — `platform: elixir` is plain Ecto/Phoenix only, `foundation: ash` is now a validation error. References below to the Ash code interface / Ash `read` actions are historical.)**
+
 A snapshot-in-time review of the toolchain after the platform roster grew to
 **5 backends** (Hono/node, .NET, Elixir, Python/FastAPI, Java/Spring) and
 **3 frontends** (React, Vue, Svelte). The pipeline architecture itself is

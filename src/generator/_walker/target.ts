@@ -216,7 +216,7 @@ export interface WalkerTarget {
    *  the contract returns only the var because that's the IR-node-
    *  level emission.
    *
-   *  HEEx emits the direct Ash code-interface call
+   *  HEEx emits the direct context-function call
    *  (`create_customer!(args)`).  LiveView doesn't hoist; every IR
    *  site invokes the function in-place.  The walker prepends the
    *  `<App>.<Handle>.` module prefix at the call site after

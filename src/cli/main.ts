@@ -548,7 +548,7 @@ async function runNew(name: string, options: NewOptions): Promise<void> {
     fail(`unknown --design "${options.design}". Valid: ${DESIGN_PACKS.join(" | ")}.`);
   }
   if (design === "coreComponents" && platform !== "elixir") {
-    fail("--design coreComponents requires --platform elixir (it is the Ash/Phoenix LiveView UI).");
+    fail("--design coreComponents requires --platform elixir (it is the Phoenix LiveView UI).");
   }
 
   const outDir = path.resolve(options.out ?? name);

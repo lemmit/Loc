@@ -54,7 +54,7 @@ system Shop {
   api SalesApi from Sales
   storage primary { type: postgres }
   resource sellingState { for: Selling, kind: state, use: primary }
-  deployable ashApi { platform: elixir { foundation: ash } contexts: [Selling] dataSources: [sellingState] serves: SalesApi port: 4000 }
+  deployable ashApi { platform: elixir { foundation: vanilla } contexts: [Selling] dataSources: [sellingState] serves: SalesApi port: 4000 }
   deployable vanApi { platform: elixir { foundation: vanilla } contexts: [Selling] dataSources: [sellingState] serves: SalesApi port: 4001 }
 }
 `;
@@ -121,40 +121,5 @@ describe("elixir domain `test` → ExUnit emission", () => {
     const cs = findFile(files, /van_api\/lib\/van_api\/selling\/order_changeset\.ex$/);
     expect(cs).toContain("|> validate_vo(:price, &VanApi.Selling.Money.new/1)");
     expect(cs).toContain("defp validate_vo(changeset, field, new_fun) do");
-  });
-
-  it("ash: runs the rejection subset DB-free, skips only the happy-path state test (Rec3)", async () => {
-    const files = await generateSystemFiles(FIXTURE);
-    const src = findFile(files, /ash_api\/test\/selling\/order_test\.exs$/);
-
-    // The in-memory value-object field read runs against the embedded struct.
-    expect(src).toContain(
-      'm = %AshApi.Selling.Money{amount: Decimal.new("10.5"), currency: "USD"}',
-    );
-    expect(src).toContain('assert m.currency == "USD"');
-
-    // Create-invariant rejection → a changeset-build `valid?` check (no DB).
-    expect(src).toContain(
-      'refute Ash.Changeset.for_create(AshApi.Selling.Order, :create, %{customer: ""',
-    );
-    // Value-object construction invariant → the embedded resource's create changeset.
-    // The negative money literal renders `Decimal.negate(Decimal.new("1.0"))`:
-    // a `Decimal` struct can't be negated with the native `-` (`:erlang.-/1`
-    // raises on it).
-    expect(src).toContain(
-      'refute Ash.Changeset.for_create(AshApi.Selling.Money, :create, %{amount: Decimal.negate(Decimal.new("1.0")), currency: "USD"}).valid?',
-    );
-    // Precondition rejection → an in-memory record + a `for_update` valid? check.
-    expect(src).toContain('o = %AshApi.Selling.Order{customer: "acme", status: "confirmed"');
-    expect(src).toContain("refute Ash.Changeset.for_update(o, :confirm, %{}).valid?");
-
-    // Only the happy-path post-operation STATE assertion still skips (needs a DB).
-    expect(src.split("@tag :skip").length - 1).toBe(1);
-    // The raw aggregate-core / instance-op call shapes never leak — rejections
-    // route through the Ash changeset API, not a `.create`/`.confirm` method.
-    expect(src).not.toContain(".confirm(");
-    expect(src).not.toContain("Order.create(");
-
-    expect(findFile(files, /ash_api\/test\/test_helper\.exs$/).trim()).toBe("ExUnit.start()");
   });
 });

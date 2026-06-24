@@ -23,7 +23,7 @@ import {
 // Expression renderer for the Phoenix LiveView / Elixir backend.
 //
 // Mirrors the shape of the other backends: consumes fully-resolved Loom
-// ExprIR.  Output is idiomatic Elixir 1.16 / Ash 3.x.  The 17-arm dispatch +
+// ExprIR.  Output is idiomatic Elixir 1.16.  The 17-arm dispatch +
 // recursion live in `../_expr/target.ts`; this file is the Elixir leaf table
 // (`ELIXIR_TARGET`) plus the thin `renderExpr` entry point.
 //
@@ -69,28 +69,20 @@ export interface RenderCtx {
    *  A `resource-op` call renders `<Module>.<resource>_<verb>(args)`.
    *  Unset outside workflow rendering — a resource-op there throws. */
   resourceModules?: Map<string, string>;
-  /** When true, the expression renders inside an Ash read-action
-   *  `filter expr(...)`, where a read-action argument must be referenced
-   *  as `^arg(:name)` (not a bare identifier).  Set for retrieval / find
-   *  `where` predicates that bind declared parameters.  Off everywhere
-   *  else (op / derived / invariant bodies use plain locals). */
+  /** When true, the expression renders inside an Ecto query filter
+   *  (`from ... where: ...`), where a declared parameter is pinned as
+   *  `^name` and money/decimal lower via native operators/literals (NOT the
+   *  Elixir `Decimal.*` struct API, which is invalid inside a query fragment).
+   *  Set for retrieval / find `where` predicates that bind declared
+   *  parameters.  Off everywhere else (op / derived / invariant bodies use
+   *  plain locals + the in-memory `Decimal.*` API). */
   filterArgs?: boolean;
-  /** When true, the expression renders inside an Ash `expr()` macro — an Ash
-   *  `calculate … expr(…)` calculation body (the filter sibling sets
-   *  `filterArgs` instead).  In that context money/decimal lower to the data
-   *  layer via native operators/literals, NOT the Elixir `Decimal.*` struct API
-   *  (which Ash rejects: "Invalid reference! Decimal.new").  `renderExpr` selects
-   *  the data-layer-native target when `ashExpr || filterArgs`. */
-  ashExpr?: boolean;
-  /** Foundation the expression is rendered for (workflow-instance-views.md /
-   *  D-PHOENIX-FOUNDATION-STRATEGY).  Defaults to `"ash"` (back-compat).
-   *  Under `"vanilla"` (plain Ecto/Phoenix, no Ash) two leaf renderings
-   *  diverge: an `enum-value` is the stored **string** (`"confirmed"`) not an
-   *  Ash atom (`:confirmed`), and a `filterArgs` param is a bare Ecto pin
-   *  (`^name`) not the Ash read-action binding (`^arg(:name)`).  The shared
-   *  17-arm `ExprIR.kind` dispatch is unchanged — only these leaves branch.
-   *  See `docs/plans/vanilla-foundation-research.md` §3. */
-  foundation?: "ash" | "vanilla";
+  /** Foundation the expression is rendered for.  `platform: elixir` only ever
+   *  emits the vanilla foundation (plain Ecto/Phoenix), so this is always
+   *  `"vanilla"`; the field is retained so the many vanilla call sites that
+   *  pass `foundation: "vanilla"` keep type-checking, but it no longer
+   *  selects a code path. */
+  foundation?: "vanilla";
   /** Renders the aggregate-`id` expression (`{kind:"id"}`) as this bare
    *  local instead of `<thisName>.id`.  Set by the event-sourced create
    *  command runner, where the new aggregate id is a freshly generated
@@ -171,31 +163,31 @@ const ELIXIR_TARGET: ExprTarget<RenderCtx> = {
   list: (elements) => `[${elements.join(", ")}]`,
 };
 
-// Ash `expr()` rendering target — for calculations (`calculate … expr(…)`) and
-// read-action filters (`filter expr(…)`).  Inside an Ash `expr(...)` macro a
-// money/decimal value is NOT an Elixir `Decimal` struct: Ash lowers `>` / `+` /
-// bare numerals straight to the data layer (Postgres `numeric`), so the
-// `Decimal.add` / `Decimal.compare` / `Decimal.new` forms the native op-body
-// path emits are *rejected* there ("Invalid reference! Decimal.new").  This
-// target overrides exactly the three decimal-sensitive leaves to emit the
-// native operator / bare literal; everything else is shared with ELIXIR_TARGET.
-const ELIXIR_ASH_EXPR_TARGET: ExprTarget<RenderCtx> = {
+// Query-filter rendering target — for predicates rendered inside an Ecto
+// `from ... where: ...` fragment (`filterArgs: true`).  Inside a query fragment
+// a money/decimal value is NOT an Elixir `Decimal` struct: the operators (`>` /
+// `+`) and bare numerals lower straight to the Postgres `numeric` column, so
+// the `Decimal.add` / `Decimal.compare` / `Decimal.new` struct forms the native
+// op-body path emits are invalid there.  This target overrides exactly the
+// three decimal-sensitive leaves to emit the native operator / bare literal;
+// everything else is shared with ELIXIR_TARGET.
+const ELIXIR_FILTER_TARGET: ExprTarget<RenderCtx> = {
   ...ELIXIR_TARGET,
-  literal: (lit, value) => renderLiteral(lit, value, /* ashExpr */ true),
-  unary: (op, operand, e) => renderUnary(op, operand, e, /* ashExpr */ true),
-  binary: (l, r, e) => renderBinary(l, r, e, /* ashExpr */ true),
-  convert: (value, e) => renderElixirConvert(e.target, e.from, value, /* ashExpr */ true),
+  literal: (lit, value) => renderLiteral(lit, value, /* inFilter */ true),
+  unary: (op, operand, e) => renderUnary(op, operand, e, /* inFilter */ true),
+  binary: (l, r, e) => renderBinary(l, r, e, /* inFilter */ true),
+  convert: (value, e) => renderElixirConvert(e.target, e.from, value, /* inFilter */ true),
 };
 
 export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
-  // `filterArgs` (read-action filters) and `ashExpr` (calculations) both render
-  // inside an Ash `expr()` macro, where money/decimal are data-layer-native.
-  const target = ctx.ashExpr || ctx.filterArgs ? ELIXIR_ASH_EXPR_TARGET : ELIXIR_TARGET;
+  // `filterArgs` renders inside an Ecto query filter, where money/decimal are
+  // data-layer-native (the Postgres column) rather than `Decimal` structs.
+  const target = ctx.filterArgs ? ELIXIR_FILTER_TARGET : ELIXIR_TARGET;
   return renderExprWith(e, target, ctx);
 }
 
 /**
- * Render an explicit conversion expression for the Phoenix/Ash
+ * Render an explicit conversion expression for the Phoenix/Elixir
  * backend.  Both `money` and `decimal` are `Decimal` structs here, so the
  * two are interchangeable on either side of a coercion:
  *   string(x: int|long|bool)            → `to_string(x)`
@@ -210,12 +202,12 @@ function renderElixirConvert(
   target: string,
   from: string | undefined,
   v: string,
-  // Inside an Ash `expr()` macro money/decimal are data-layer-native, not
+  // Inside an Ecto query filter money/decimal are data-layer-native, not
   // `Decimal` structs, so the `Decimal.*` coercions are invalid — treat them as
-  // plain numerics (the pre-Decimal-struct behaviour).
-  ashExpr = false,
+  // plain numerics.
+  inFilter = false,
 ): string {
-  const decimalStruct = (name: string | undefined) => !ashExpr && isDecimalStruct(name);
+  const decimalStruct = (name: string | undefined) => !inFilter && isDecimalStruct(name);
   if (target === "string") {
     if (decimalStruct(from)) return `Decimal.to_string(${v})`;
     return `to_string(${v})`;
@@ -239,17 +231,17 @@ function renderElixirConvert(
 // Literals
 // ---------------------------------------------------------------------------
 
-function renderLiteral(lit: string, value: string, ashExpr = false): string {
+function renderLiteral(lit: string, value: string, inFilter = false): string {
   if (lit === "string") return JSON.stringify(value);
   if (lit === "null") return "nil";
   if (lit === "bool") return value === "true" ? "true" : "false";
   if (lit === "now") return "DateTime.utc_now()";
   // Both decimal and money literals are `Decimal` structs on Elixir; wrap the
   // source numeral as a string so `Decimal.new` keeps full precision.  Inside an
-  // Ash `expr()` macro, however, a numeral is data-layer-native (`Decimal.new`
-  // is rejected there) — emit it bare.
+  // Ecto query filter, however, a numeral is data-layer-native (`Decimal.new`
+  // is invalid there) — emit it bare.
   if (lit === "decimal" || lit === "money") {
-    return ashExpr ? value : `Decimal.new(${JSON.stringify(value)})`;
+    return inFilter ? value : `Decimal.new(${JSON.stringify(value)})`;
   }
   // int
   return value;
@@ -264,13 +256,12 @@ function renderRef(e: RefExpr, ctx: RenderCtx): string {
     case "param":
       // Dispatch handlers rename the bound event param to `event`.
       if (ctx.paramRenames?.[e.name]) return ctx.paramRenames[e.name];
-      // Inside an Ash read-action `filter expr(...)`, a declared argument
-      // is bound via `^arg(:name)`; everywhere else a param is a plain
-      // local.  (`let`/`lambda` are always locals — never read-action args.)
-      // Vanilla Ecto pins a plain local (`^name`); Ash binds a read-action
-      // argument (`^arg(:name)`).
+      // Inside an Ecto query filter (`from ... where: ...`), a declared
+      // argument is pinned as a plain local (`^name`); everywhere else a
+      // param is a bare local.  (`let`/`lambda` are always locals.)
       if (ctx.filterArgs) {
-        return ctx.foundation === "vanilla" ? `^${snake(e.name)}` : `^arg(:${snake(e.name)})`;
+        // Ecto query filter — pin the bound local.
+        return `^${snake(e.name)}`;
       }
       return snake(e.name);
     case "let":
@@ -283,9 +274,9 @@ function renderRef(e: RefExpr, ctx: RenderCtx): string {
     case "helper-fn":
       return snake(e.name);
     case "enum-value":
-      // Ash enum values are atoms (`:confirmed`); a vanilla Ecto `:string`
-      // column stores the value as a string (`"confirmed"`).
-      return ctx.foundation === "vanilla" ? `"${snake(e.name)}"` : `:${snake(e.name)}`;
+      // A vanilla Ecto `:string` column stores the enum value as a string
+      // (`"confirmed"`).
+      return `"${snake(e.name)}"`;
     case "current-user":
       return "current_user";
     default:
@@ -413,7 +404,7 @@ function renderCollectionOp(recv: string, name: string, args: string[]): string 
 function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
   switch (e.callKind) {
     case "value-object-ctor": {
-      // Embedded Ash resource / struct constructor.  Elixir structs require
+      // Embedded value-object constructor.  Elixir structs require
       // *named* fields, so use the (lowering-populated) field names rather
       // than positional args.  Falls back to positional for hand-built IR
       // that carries no names (kept total).
@@ -424,9 +415,7 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
         // struct module is emitted — so an inline VO constructor (e.g. in an
         // event-sourced applier fold) builds a map; `%Ctx.VO{…}` would
         // reference an undefined struct and fail `mix compile`.
-        return ctx.foundation === "vanilla"
-          ? `%{${namedFields}}`
-          : `%${ctx.contextModule}.${upperFirst(e.name)}{${namedFields}}`;
+        return `%{${namedFields}}`;
       }
       return `%${ctx.contextModule}.${upperFirst(e.name)}{${args.join(", ")}}`;
     }
@@ -459,7 +448,7 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
     }
     case "domain-service": {
       // `Shop.Domain.Services.Pricing.quote(cart, customer)` — a plain
-      // stateless module (no GenServer / Ash resource), fully qualified
+      // stateless module (no GenServer, no state), fully qualified
       // under the app's `Domain.Services` namespace.  The app prefix is the
       // first segment of `contextModule` (`MyApp.Sales` → `MyApp`).
       const ref = e.serviceRef!;
@@ -475,9 +464,8 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
 
 function renderNew(fields: { name: string; value: string }[], e: NewExpr, ctx: RenderCtx): string {
   const body = fields.map((f) => `${snake(f.name)}: ${f.value}`).join(", ");
-  // The part is a struct on both foundations: an embedded Ash resource on Ash,
-  // an Ecto `embedded_schema` on vanilla (`%Ctx.Part{}`) — see schema-emit's
-  // `embeds_many`.
+  // The part is an Ecto `embedded_schema` struct (`%Ctx.Part{}`) — see
+  // schema-emit's `embeds_many`.
   return `%${ctx.contextModule}.${upperFirst(e.partName)}{${body}}`;
 }
 
@@ -485,13 +473,13 @@ function renderNew(fields: { name: string; value: string }[], e: NewExpr, ctx: R
 // Unary
 // ---------------------------------------------------------------------------
 
-function renderUnary(op: "-" | "!", operand: string, e: UnaryExpr, ashExpr = false): string {
+function renderUnary(op: "-" | "!", operand: string, e: UnaryExpr, inFilter = false): string {
   if (op === "!") return `not ${operand}`;
   // Negating a money/decimal `Decimal` struct: native `-` is `:erlang.-/1`,
   // which raises on a `Decimal` ("bad argument in arithmetic").  Use
   // `Decimal.negate/1` in native Elixir (op-bodies / emitted ExUnit tests);
-  // inside an Ash `expr()` money/decimal are data-layer-native, so plain `-`.
-  if (!ashExpr && isDecimalOperand(e.operand)) return `Decimal.negate(${operand})`;
+  // inside an Ecto query filter money/decimal are data-layer-native, so plain `-`.
+  if (!inFilter && isDecimalOperand(e.operand)) return `Decimal.negate(${operand})`;
   return `-${operand}`;
 }
 
@@ -579,12 +567,12 @@ function isStringType(e: ExprIR): boolean {
   return false;
 }
 
-function renderBinary(l: string, r: string, e: BinaryExpr, ashExpr = false): string {
+function renderBinary(l: string, r: string, e: BinaryExpr, inFilter = false): string {
   // `x == null` / `x != null` → `is_nil(x)` / `not is_nil(x)`.  Comparing
   // against `nil` with `==`/`!=` is an Elixir footgun: the compiler warns
   // ("Comparing values with nil will always return false. Use is_nil/1
-  // instead."), so `--warnings-as-errors` fails on it, and Ash `expr(...)`
-  // wants `is_nil/1` too.
+  // instead."), so `--warnings-as-errors` fails on it, and an Ecto query
+  // filter wants `is_nil/1` too.
   if (e.op === "==" || e.op === "!=") {
     const leftNull = e.left.kind === "literal" && e.left.lit === "null";
     const rightNull = e.right.kind === "literal" && e.right.lit === "null";
@@ -602,10 +590,10 @@ function renderBinary(l: string, r: string, e: BinaryExpr, ashExpr = false): str
   // accepted by the `Decimal.*` functions as-is (they coerce integers); a
   // `decimal`/`money` literal is already wrapped in `Decimal.new(...)`, so
   // no extra boxing is needed here.
-  // Inside an Ash `expr()` macro money/decimal lower to the data layer via the
+  // Inside an Ecto query filter money/decimal lower to the data layer via the
   // native operators — `Decimal.compare`/`Decimal.add` are invalid there — so
   // only the native op-body path dispatches through `Decimal.*`.
-  if (!ashExpr && e.leftType?.kind === "primitive" && isDecimalStruct(e.leftType.name)) {
+  if (!inFilter && e.leftType?.kind === "primitive" && isDecimalStruct(e.leftType.name)) {
     return renderDecimalBinary(e.op, l, r);
   }
   // Prefer the IR-level `leftType` over the AST-shape check: chained
@@ -656,75 +644,10 @@ function renderMatch(
 }
 
 // ---------------------------------------------------------------------------
-// Type rendering (used by domain-emit for attribute type mapping)
-// ---------------------------------------------------------------------------
-
-export function renderAshType(t: TypeIR, contextModule: string): string {
-  switch (t.kind) {
-    // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
-    case "primitive":
-      switch (t.name) {
-        case "int":
-          return ":integer";
-        case "long":
-          return ":integer";
-        case "decimal":
-          return ":decimal";
-        case "money":
-          // Ash + Ecto :decimal is the canonical precise type;
-          // Decimal serialises as string via Jason by default — matches
-          // the wire-spec without extra config.  Arithmetic on these
-          // values dispatches through `Decimal.add/2` in `renderBinary`.
-          return ":decimal";
-        case "string":
-          return ":string";
-        case "bool":
-          return ":boolean";
-        case "datetime":
-          return ":utc_datetime";
-        case "guid":
-          return ":uuid";
-        case "json":
-          return ":map";
-      }
-    case "id":
-      return ":uuid";
-    case "enum":
-      return `${contextModule}.${upperFirst(t.name)}`;
-    case "valueobject":
-      return `${contextModule}.${upperFirst(t.name)}`;
-    case "entity":
-      return `${contextModule}.${upperFirst(t.name)}`;
-    case "array":
-      return `{:array, ${renderAshType(t.element, contextModule)}}`;
-    case "optional":
-      return renderAshType(t.inner, contextModule);
-    case "action":
-    case "slot":
-      throw new Error("renderAshType: 'slot' type is UI-only and should not reach the backend.");
-    case "genericInstance":
-      // Transport-only carrier (paged/envelope) — never a stored Ash
-      // attribute (the controller wraps the page envelope as a plain map).
-      // Defensive `:map` keeps the renderer total.
-      return ":map";
-    case "union":
-    case "none":
-      // Discriminated unions (`A or B`, `T option`) are transport-only and
-      // P4d-gated; never a stored Ash attribute.  Defensive `:map` keeps the
-      // renderer total (mirrors the generic-carrier arm).
-      return ":map";
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Elixir typespec rendering — distinct from `renderAshType` above, which
-// emits *Ash attribute types* (`:string`, `:integer`).  This emits real
+// Elixir typespec rendering — emits real
 // Elixir typespec syntax (`String.t()`, `integer()`, `Foo.t() | nil`) for
 // `@spec` / `@type` annotations on event modules, value-object modules,
-// and the hand-written `def`s in context-emit / domain-emit.  Ash v3
-// auto-generates typespecs for resource modules, so we don't emit on
-// the resource itself — only on the surface that the macro layer
-// doesn't cover.
+// and the hand-written `def`s in the context module.
 //
 // Optionals lower to `T | nil` (Elixir's nullable convention).  Arrays
 // lower to `[T]`.  Enums and value-object/entity types reference their
@@ -739,12 +662,7 @@ export function renderAshType(t: TypeIR, contextModule: string): string {
 // threaded through yet).
 // ---------------------------------------------------------------------------
 
-export function renderTypespec(
-  t: TypeIR,
-  contextModule: string,
-  typesModule?: string,
-  foundation: "ash" | "vanilla" = "ash",
-): string {
+export function renderTypespec(t: TypeIR, contextModule: string, typesModule?: string): string {
   switch (t.kind) {
     // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
     case "primitive":
@@ -764,28 +682,28 @@ export function renderTypespec(
         case "datetime":
           return typesModule ? `${typesModule}.timestamp()` : "DateTime.t()";
         case "guid":
-          // Ash represents UUIDs as plain binary strings on the struct.
+          // UUIDs are plain binary strings on the struct.
           return "String.t()";
         case "json":
           return "map()";
       }
     case "id":
-      // IDs flow as UUID strings on the struct (Ash :uuid → String.t()).
+      // IDs flow as UUID strings on the struct (`:uuid` → String.t()).
       return typesModule ? `${typesModule}.id()` : "String.t()";
     case "enum":
-      // Ash enums are `Ash.Type.Enum` modules (`.t()`); vanilla has no enum
-      // module — the value is stored as its string, so the spec is `String.t()`.
-      return foundation === "vanilla" ? "String.t()" : `${contextModule}.${upperFirst(t.name)}.t()`;
+      // Vanilla has no enum module — the value is stored as its string, so the
+      // spec is `String.t()`.
+      return "String.t()";
     case "valueobject":
-      // Ash emits an embedded resource module (`.t()`); vanilla stores value
-      // objects as plain JSON maps — no module exists, so the spec is `map()`.
-      return foundation === "vanilla" ? "map()" : `${contextModule}.${upperFirst(t.name)}.t()`;
+      // Vanilla stores value objects as plain JSON maps — no module exists, so
+      // the spec is `map()`.
+      return "map()";
     case "entity":
       return `${contextModule}.${upperFirst(t.name)}.t()`;
     case "array":
-      return `[${renderTypespec(t.element, contextModule, typesModule, foundation)}]`;
+      return `[${renderTypespec(t.element, contextModule, typesModule)}]`;
     case "optional":
-      return `${renderTypespec(t.inner, contextModule, typesModule, foundation)} | nil`;
+      return `${renderTypespec(t.inner, contextModule, typesModule)} | nil`;
     case "action":
     case "slot":
       throw new Error("renderTypespec: 'slot' type is UI-only and should not reach the backend.");

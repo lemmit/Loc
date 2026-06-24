@@ -1,0 +1,28 @@
+// Paged finds on the vanilla (plain Ecto) Phoenix backend — port of
+// the former paged fixture to `foundation: vanilla`.  Exercises the
+// generic-carrier `paged` envelope (offset/limit read action + controller
+// page/pageSize → wire envelope) under `mix compile --warnings-as-errors`.
+system PagedShop {
+  subdomain Sales {
+    context Orders {
+      aggregate Order ids guid {
+        code: string
+        region: string
+      }
+      repository Orders for Order {
+        find recent(): Order paged
+        find inRegion(region: string): Order paged where this.region == region
+      }
+    }
+  }
+  api OrdersApi from Sales
+  storage primary { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primary }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 4000
+  }
+}

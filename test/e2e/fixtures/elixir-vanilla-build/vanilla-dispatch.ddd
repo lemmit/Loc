@@ -1,0 +1,67 @@
+// In-process event dispatch (channels.md) for the Phoenix backend, with
+// persisted correlation.  Mirrors test/fixtures/dispatch-sample.ddd (the
+// shared Hono / .NET dispatch fixture): OrderPlaced STARTS the
+// OrderFulfillment saga instance (a `create` allocating the correlation
+// row) which emits ShipmentRequested; that event routes back to the SAME
+// instance via an `on(...) by s.order` continuation.  The vanilla (plain
+// Ecto) build gate compiles the emitted dispatcher + reactor handlers + saga
+// Ecto schema under `mix compile --warnings-as-errors`.
+system FulfillmentSys {
+  subdomain Fulfillment {
+    context Fulfillment {
+      aggregate Order {
+        customerId: string
+        derived display: string = customerId
+        status: string
+        total: int
+      }
+      repository Orders for Order { }
+
+      aggregate Shipment {
+        orderRef: Order id
+        derived display: string = status
+        status: string
+        operation markTracked() { status := "Tracked" }
+      }
+      repository Shipments for Shipment { }
+
+      event OrderPlaced { order: Order id, at: datetime }
+      event ShipmentRequested { shipment: Shipment id, order: Order id, at: datetime }
+
+      channel Lifecycle {
+        carries: OrderPlaced, ShipmentRequested
+        delivery: broadcast
+        retention: ephemeral
+      }
+
+      workflow OrderFulfillment {
+        orderId: Order id          // correlation field — one instance per order
+        attempts: int              // saga state — exercises typed allocate defaults
+
+        // Starter: allocates the instance, requests a shipment.
+        create(p: OrderPlaced) by p.order {
+          let ship = Shipment.create({ orderRef: p.order, status: "Pending" })
+          emit ShipmentRequested { shipment: ship.id, order: p.order, at: now() }
+        }
+
+        // Continuation: routes to the started instance by order; marks shipment.
+        on(s: ShipmentRequested) by s.order {
+          let ship = Shipments.getById(s.shipment)
+          ship.markTracked()
+        }
+      }
+    }
+  }
+  api FulfillmentApi from Fulfillment
+  ui FulfillmentAdmin with scaffold(subdomains: [Fulfillment]) { }
+  storage primary { type: postgres }
+  resource fulfillmentState { for: Fulfillment, kind: state, use: primary }
+  deployable phoenixApp {
+    platform: elixir { foundation: vanilla }
+    contexts: [Fulfillment]
+    dataSources: [fulfillmentState]
+    serves: FulfillmentApi
+    ui: FulfillmentAdmin
+    port: 4000
+  }
+}

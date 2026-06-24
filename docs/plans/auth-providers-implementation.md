@@ -507,7 +507,7 @@ build workflows. Sequenced after the two headline backends; can be parallelised.
 > pulls `{:jose, "~> 1.11"}` + `:inets`/`:ssl` only under OIDC; the dev-stub
 > path stays byte-identical. Adds the `/auth/me` probe (`AuthController`, piped
 > through `:api`) for the `auth: ui` guard. **Compilation is CI-verified** (the
-> `auth-oidc.ddd` phoenix-build fixture in the `elixir-ash-build` gate) — there
+> `auth-oidc.ddd` phoenix-build fixture in the `elixir-vanilla-build` gate) — there
 > is no local Elixir toolchain in the dev sandbox. Generator wiring pinned by
 > `test/generator/elixir/auth-oidc-emit.test.ts`.
 >

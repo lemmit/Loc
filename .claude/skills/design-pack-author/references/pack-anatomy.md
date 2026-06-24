@@ -147,7 +147,7 @@ at compile time). Several primitives the JSX walker emits as templates
 HEEx walker (`src/generator/elixir/heex-walker.ts`) and so are deliberately
 exempt from the heex required set — this is the documented exemption pattern.
 
-**Build gate:** `elixir-ash-build.yml`, `LOOM_PHOENIX_BUILD=1 npm run test:phoenix`
+**Build gate:** `elixir-vanilla-build.yml`, `npm run test:phoenix`
 (docker; see CLAUDE.md Docker section, `LOOM_HEX_MIRROR=1` if behind a
 TLS-fingerprint proxy).
 

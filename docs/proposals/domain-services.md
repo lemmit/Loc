@@ -371,7 +371,7 @@ vocabulary, only a new owner of familiar shapes.
 |---|---|
 | **TS / Hono** | `src/generator/typescript/emit/domain-service.ts` emits `src/domain/services/<name>.ts` as an exported namespace of pure functions. `TS_TARGET.callKind["domain-service"]` → `${Service}.${op}(...args)`. |
 | **.NET / EF** | `src/generator/dotnet/emit/DomainService.cs.ts` emits `Domain/Services/<Name>.cs` as `public static class <Name>`. `CS_TARGET` gets the same arm. No constructor (no repo injection — the absence is the layering, made physical). |
-| **Phoenix** (Ash or Vanilla) | `src/generator/elixir/domain-service-emit.ts` emits `defmodule App.Domain.Services.<Name>` — plain stateless module, no GenServer, no Ash resource. `ELIXIR_TARGET` gets the same arm. |
+| **Phoenix** | `src/generator/elixir/domain-service-emit.ts` emits `defmodule App.Domain.Services.<Name>` — plain stateless module, no GenServer. `ELIXIR_TARGET` gets the same arm. |
 | **React** | None. The frontend doesn't run domain logic. |
 
 Byte-identical-output gate extends per `_expr/target.ts` convention

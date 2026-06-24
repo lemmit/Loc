@@ -689,6 +689,8 @@ sections (superseded by `lifecycle-url-style.md`); `ApiIR.urlStyle`,
 
 ## D-PHOENIX-SURFACE — the decomposed Phoenix platform surface
 
+> **Superseded (2026): the Ash foundation was removed.** `platform: elixir` is plain Ecto/Phoenix only; `foundation: ash` is now a validation error and `vanilla` is the default and only valid value. The Ash-vs-vanilla reasoning below is historical.
+
 **Status:** PINNED — **amended by D-ELIXIR-PLATFORM** (the canonical platform
 name renamed `phoenix` → `elixir`). The *decomposition* conclusions of this
 decision (one platform for the language ecosystem; UI framework axis on `ui`;
@@ -809,6 +811,8 @@ no `apiOnly`, `framework:` is UI-only, default domain = Ash).
 
 ## D-REALIZATION-AXES — the deployable platform-config axes (and the `foundation:` amendment)
 
+> **Superseded (2026): the Ash foundation was removed.** `platform: elixir` is plain Ecto/Phoenix only; `foundation: ash` is now a validation error and `vanilla` is the default and only valid value. The Ash-vs-vanilla reasoning below is historical.
+
 **Status:** PINNED. (Amends **D-PHOENIX-SURFACE**'s domain-axis mechanism;
 depends on **D-ADAPTER-HOME** and **D-STORAGE-SPLIT**. Full matrix, gating rules,
 and examples in `proposals/platform-realization-axes.md`.)
@@ -828,7 +832,7 @@ menu+default exposed off the backend's `PlatformSurface` (D-ADAPTER-HOME); a bar
 
 | Axis | Realizes | Values (dotnet shown; menu is per-platform) | Default |
 |---|---|---|---|
-| `foundation:` | opinionated domain/app framework, or none | `vanilla` · `abp` (phoenix: `ash` · `vanilla`; node: `vanilla` · `nestjs`) | `vanilla` (phoenix: `ash`) |
+| `foundation:` | opinionated domain/app framework, or none | `vanilla` · `abp` (phoenix/elixir: `vanilla` only — `ash` removed; node: `vanilla` · `nestjs`) | `vanilla` (phoenix/elixir: `vanilla`) |
 | `application:` | application-layer orchestration topology | `flat` · `serviceLayer` · `cqrs` | `cqrs` |
 | `persistence:` | data-access library only | `efcore` · `dapper` · `marten` | `efcore` |
 | `directoryLayout:` | source-tree organization | `byLayer` · `byFeature` | `byLayer` |
@@ -881,6 +885,8 @@ deployable grammar; `DeployableIR`; `checkDeployable`; each backend's
 ---
 
 ## D-VANILLA-PHOENIX-FOUNDATION — `foundation: vanilla` is added to the Elixir foundation menu
+
+> **Superseded (2026): the Ash foundation was removed.** `platform: elixir` is plain Ecto/Phoenix only; `foundation: ash` is now a validation error and `vanilla` is the default and only valid value. The Ash-vs-vanilla reasoning below is historical.
 
 **Status:** PINNED — **amended by D-ELIXIR-PLATFORM** (the foundation menu lives
 on `platform: elixir` after the rename; "Phoenix menu" wording below refers to
@@ -937,6 +943,8 @@ strict-parity conformance gate. **Depends on D-REALIZATION-AXES**;
 
 ## D-VANILLA-ES-HOME — pure event sourcing on Elixir lands only under `foundation: vanilla`
 
+> **Superseded (2026): the Ash foundation was removed.** `platform: elixir` is plain Ecto/Phoenix only; `foundation: ash` is now a validation error and `vanilla` is the default and only valid value. The Ash-vs-vanilla reasoning below is historical.
+
 **Status:** PINNED — **amended by D-ELIXIR-PLATFORM** (the gap lives on
 `platform: elixir` after the rename; the Ash-foundation-vs-Phoenix-platform
 distinction in this decision's body is unchanged — the constraint is the
@@ -990,6 +998,8 @@ shared `<agg>_events` shape extends to the Ecto migrations renderer in P4).
 
 ## D-PHOENIX-FOUNDATION-ROUTING — Phoenix feature parity is reached by routing to `vanilla`, not by investing in Ash
 
+> **Superseded (2026): the Ash foundation was removed.** `platform: elixir` is plain Ecto/Phoenix only; `foundation: ash` is now a validation error and `vanilla` is the default and only valid value. The Ash-vs-vanilla reasoning below is historical.
+
 **Status:** PINNED — ratified 2026-06 (backend feature-parity plan, W4).
 Generalises **D-VANILLA-ES-HOME** from event sourcing to *every* feature with
 no idiomatic Ash fit; **depends on D-VANILLA-PHOENIX-FOUNDATION**.
@@ -1030,6 +1040,8 @@ decision ratifies their finality).
 ---
 
 ## D-NO-MIXED-FOUNDATION — one foundation per deployable; per-aggregate override not added
+
+> **Superseded (2026): the Ash foundation was removed.** `platform: elixir` is plain Ecto/Phoenix only; `foundation: ash` is now a validation error and `vanilla` is the default and only valid value. The Ash-vs-vanilla reasoning below is historical.
 
 **Status:** PINNED — **amended by D-ELIXIR-PLATFORM** (substance unchanged;
 `platform: phoenix` references in the body now read `platform: elixir`
@@ -1078,6 +1090,8 @@ needed beyond today's per-deployable `foundation:` typing.
 ---
 
 ## D-VANILLA-DEFAULT — vanilla becomes Elixir default after stabilisation, not on first ship
+
+> **Superseded (2026): the Ash foundation was removed.** `platform: elixir` is plain Ecto/Phoenix only; `foundation: ash` is now a validation error and `vanilla` is the default and only valid value. The Ash-vs-vanilla reasoning below is historical.
 
 **Status:** PINNED — **amended by D-ELIXIR-PLATFORM** (the default-flip target
 is `platform: elixir` after the rename; sequencing and rationale unchanged).
@@ -1687,6 +1701,8 @@ in-browser transports) and §7 item 6; the new `agent-tools-and-mcp.md` is the
 detailed spec; the future playground-chat slice builds on this seam.
 
 ## D-PHOENIX-FOUNDATION-STRATEGY — vanilla is the home for everything that fights Ash; Ash stays for the CRUD sweet spot, feature-frozen at the boundary, not deprecated
+
+> **Superseded (2026): the Ash foundation was removed.** `platform: elixir` is plain Ecto/Phoenix only; `foundation: ash` is now a validation error and `vanilla` is the default and only valid value. The Ash-vs-vanilla reasoning below is historical.
 
 **Status:** PINNED. (Go-forward stance over **D-VANILLA-PHOENIX-FOUNDATION** /
 **D-VANILLA-ES-HOME** / **D-VANILLA-DEFAULT**, prompted by a third Ash-fit

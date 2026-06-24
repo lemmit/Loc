@@ -1,10 +1,11 @@
-// Create-gate — Phoenix/Ash + frontend scaffold (DEBT-09).
+// Create-gate — Phoenix/vanilla + frontend scaffold (DEBT-09).
 //
 // A non-constructible aggregate (`!isConstructible`: no `create` /`crudish`,
 // and an invariant the create input can't satisfy) used to keep its create
-// surface on Phoenix (Ash defaults to all-CRUD) and on the frontends (the
-// scaffold always emitted a `<Agg>New` page + a list "New" button).  Both
-// now suppress it, matching the Hono/.NET backends (create-gate.test.ts).
+// surface on Phoenix and on the frontends (the scaffold always emitted a
+// `<Agg>New` page + a list "New" button).  Both now suppress it, matching the
+// Hono/.NET backends (create-gate.test.ts): on vanilla Phoenix only a
+// constructible aggregate's changeset carries a `change_create/1`.
 //
 // `Product` (crudish) is constructible and keeps its create surface;
 // `Ledger` (managed `balance` + `invariant balance >= 0`, built only via its
@@ -39,7 +40,7 @@ system Demo {
   } }
   api ShopApi from Shop
   ui Admin with scaffold(subdomains: [Shop]) { }
-  deployable app { platform: elixir { foundation: ash }, contexts: [Catalog], serves: ShopApi, ui: Admin, port: 4000 }
+  deployable app { platform: elixir, contexts: [Catalog], serves: ShopApi, ui: Admin, port: 4000 }
 }`;
 
 const has = (files: Map<string, string>, re: RegExp): boolean =>
@@ -64,12 +65,14 @@ describe("create gate — frontend scaffold (DEBT-09)", () => {
   });
 });
 
-describe("create gate — Phoenix/Ash (DEBT-09)", () => {
-  it("emits a :create action for the constructible aggregate only", async () => {
+describe("create gate — Phoenix/vanilla (DEBT-09)", () => {
+  it("emits a change_create changeset for the constructible aggregate only", async () => {
     const files = await generateSystemFiles(phoenixSys);
-    expect(file(files, /product\.ex$/)).toContain("create :create do");
-    expect(file(files, /ledger\.ex$/)).not.toContain("create :create do");
-    // Ledger's own mutating action survives.
-    expect(file(files, /ledger\.ex$/)).toMatch(/:adjust/);
+    // The constructible aggregate's changeset carries the create builder …
+    expect(file(files, /product_changeset\.ex$/)).toContain("def change_create");
+    // … the non-constructible one does not.
+    expect(file(files, /ledger_changeset\.ex$/)).not.toContain("def change_create");
+    // Ledger's own mutating operation survives as a context handler.
+    expect(file(files, /catalog\.ex$/)).toMatch(/def adjust_ledger\(/);
   });
 });

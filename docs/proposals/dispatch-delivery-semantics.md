@@ -59,7 +59,7 @@ This is the honest characterisation a reader of the generated code needs:
 
 1. **No crash durability.** The dispatch runs *after* the aggregate save
    (Hono drains at repository-save; .NET after `SaveChangesAsync`/commit;
-   Phoenix after the `Ash.transaction`). A process crash in the window
+   Phoenix after the `Ecto.Repo` transaction commit). A process crash in the window
    between *commit* and *reactor completion* loses the event with no
    record that it was owed. The saga that should have started never does.
 2. **Partial choreography.** A chain `OrderPlaced → ShipmentRequested →
@@ -125,7 +125,7 @@ This makes property #3 safe and is the contract any external broker
 |---|---|---|---|
 | **Hono** | a Drizzle `outbox` pgTable, inserted in the same `db.transaction` as the save | a polling worker (or `LISTEN/NOTIFY`) calling `createInProcessDispatcher(db).dispatch` | a column on the workflow-state row, checked in the handler preamble |
 | **.NET** | an EF `OutboxMessage` entity saved with the aggregate in one `SaveChangesAsync` | a `BackgroundService` draining undispatched rows through `IDomainEventDispatcher` | a property on `<Workflow>State`, checked before the body |
-| **Phoenix** | an Ecto `outbox` schema inserted in the `Ash.transaction` | an **Oban** worker (the idiomatic durable queue) draining to `<Ctx>.Dispatcher.dispatch/1` — also fixes the *unsupervised, runs-in-caller-process* wart (property #4) | a field on `<Wf>State`, matched in `handle/1` |
+| **Phoenix** | an Ecto `outbox` schema inserted in the same `Ecto.Repo` transaction as the save | an **Oban** worker (the idiomatic durable queue) draining to `<Ctx>.Dispatcher.dispatch/1` — also fixes the *unsupervised, runs-in-caller-process* wart (property #4) | a field on `<Wf>State`, matched in `handle/1` |
 
 The emitted **shapes don't change** — the outbox sits *under* the existing
 `emit`/dispatch seam, and the saga-state row already exists. This is an

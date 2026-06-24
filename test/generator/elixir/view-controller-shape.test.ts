@@ -51,7 +51,7 @@ system S {
   storage primary { type: postgres }
   resource salesState { for: Sales, kind: state, use: primary }
   deployable api {
-    platform: elixir { foundation: ash }
+    platform: elixir { foundation: vanilla }
     contexts: [Sales]
     dataSources: [salesState]
     serves: SalesApi
@@ -77,10 +77,10 @@ describe("phoenix (ash) — ViewsController agrees with view run/1 return shape"
     const fullForm = files.get("api/lib/api/sales/views/order_summary.ex");
     expect(shorthand, "shorthand view module").toBeDefined();
     expect(fullForm, "full-form view module").toBeDefined();
-    // Bare list: ends in Ash.read!()/Enum.map, never wrapped in an {:ok, _} tuple.
-    expect(shorthand).toContain("Ash.read!()");
+    // Bare list: ends in Repo.all()/Enum.map, never wrapped in an {:ok, _} tuple.
+    expect(shorthand).toContain("Repo.all()");
     expect(shorthand).not.toContain("{:ok,");
-    expect(fullForm).toContain("Ash.read!()");
+    expect(fullForm).toContain("Repo.all()");
     expect(fullForm).not.toContain("{:ok,");
   });
 
@@ -94,10 +94,15 @@ describe("phoenix (ash) — ViewsController agrees with view run/1 return shape"
     expect(ctrl).toContain(".run(current_user)");
   });
 
-  it("only shorthand actions call Map.from_struct/1 (full-form already returns maps)", async () => {
+  it("a shared serialize/1 handles structs (shorthand) and maps (full-form) uniformly", async () => {
     const files = await generateSystemFiles(SYSTEM);
     const ctrl = files.get("api/lib/api_web/controllers/views_controller.ex")!;
-    expect(action(ctrl, "active_orders")).toContain("Map.from_struct(");
-    expect(action(ctrl, "order_summary")).not.toContain("Map.from_struct(");
+    // Both actions delegate row projection to the shared `serialize/1` helper.
+    expect(action(ctrl, "active_orders")).toContain("Enum.map(&serialize/1)");
+    expect(action(ctrl, "order_summary")).toContain("Enum.map(&serialize/1)");
+    // serialize/1 strips a struct (shorthand view) to a plain map via
+    // Map.from_struct; a plain map (full-form view) passes straight through.
+    expect(ctrl).toContain("Map.from_struct()");
+    expect(ctrl).toContain("defp serialize(record) when is_map(record), do: record");
   });
 });

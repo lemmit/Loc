@@ -5,7 +5,7 @@ describes a **system** of bounded contexts — aggregates, value objects,
 events, repositories, workflows, views, APIs, storage, and UI — and the
 toolchain compiles it into a runnable multi-project tree wired together
 as one `docker compose` stack. Five backends (TypeScript/Hono,
-.NET/ASP.NET, Phoenix/Ash, Python/FastAPI, Java/Spring Boot) and four
+.NET/ASP.NET, Phoenix LiveView, Python/FastAPI, Java/Spring Boot) and four
 frontends (React, Vue, Svelte, Angular) consume the same source.
 
 This reference documents **the language surface**, feature by feature.

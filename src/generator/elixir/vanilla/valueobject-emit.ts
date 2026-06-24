@@ -3,10 +3,10 @@ import { snake, upperFirst } from "../../../util/naming.js";
 import { voConstraintLines, voEctoType, voHasConstraints } from "./changeset-validators.js";
 
 // ---------------------------------------------------------------------------
-// Validating value-object constructor for the vanilla (Ecto/Phoenix) foundation
+// Validating value-object constructor (Ecto/Phoenix)
 // — F5 in docs/audits/test-parity-generated-backends.md.
 //
-// A vanilla value object is stored as a plain `:map` (JSONB) for wire-shape
+// A value object is stored as a plain `:map` (JSONB) for wire-shape
 // parity, so its `invariant`s were enforced nowhere — a bad VO (e.g. a negative
 // `Money`) persisted silently.  For every VO that declares a single-field
 // invariant we now emit a module with a schemaless changeset that runs those
@@ -23,7 +23,7 @@ import { voConstraintLines, voEctoType, voHasConstraints } from "./changeset-val
 // the wire shape and migrations are unchanged.
 // ---------------------------------------------------------------------------
 
-/** Fully-qualified module name for a value object on the vanilla foundation. */
+/** Fully-qualified module name for a value object. */
 export function voModule(appModule: string, ctx: BoundedContextIR, vo: ValueObjectIR): string {
   return `${appModule}.${upperFirst(ctx.name)}.${upperFirst(vo.name)}`;
 }

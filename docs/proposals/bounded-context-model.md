@@ -233,7 +233,7 @@ Per-platform; lives in `src/platform/registry.ts` alongside the existing `family
 | .NET | Dapper | Dapper, EF Core, Marten (same Postgres) | Dapper takes a connection; trivially compatible. |
 | TS / Hono | Drizzle | Drizzle, raw `pg` (same Postgres) | Shared `pg.Client` with `BEGIN`/`COMMIT`. |
 | TS / Hono | Drizzle | EventStoreDB | **no** (different infra) |
-| Phoenix | Ash + Ecto | Ash + Ecto (same Postgres) | Ash uses Ecto under the hood; one repo per BC. |
+| Phoenix | Ecto | Ecto (same Postgres) | One Ecto repo per BC. |
 | (cross-runtime, any) | (any) | (none across .NET / TS / Phoenix processes) | Different processes; never. |
 
 Same-runtime + same-physical-instance is the necessary and sufficient condition for co-transactability. Cross-process or cross-instance is always async.
@@ -252,7 +252,7 @@ The Dapper-as-power-play positioning is unique to code generation. Hand-coding t
 
 TS / Hono: **Drizzle** as the default — typed-SQL-builder, no ORM magic, similar position to Dapper on the .NET side.
 
-Phoenix: **Ash** as the only framework choice; per the existing platform.
+Phoenix: **plain Ecto** as the only framework choice; per the existing platform (the Ash foundation was removed — `foundation: ash` is now a validation error).
 
 ### Per-aggregate storage — the per-aggregate proposals' work survives, as a future override
 
@@ -581,11 +581,11 @@ export interface StorageIR {
 - Aggregates lower to typed table declarations + query builders.
 - `transactional` workflows touching multiple BCs sharing the same Postgres connection: shared `Client` with explicit `BEGIN` / `COMMIT`.
 
-### Phoenix / Ash
+### Phoenix / Ecto
 
-- One `Ash.Domain` per BC.
-- Aggregates as Ash resources; lifecycle maps to Ash actions (`:create`, `:update`, `:destroy`).
-- Workflows as Reactor or Ash custom actions.
+- One Phoenix context module + `Ecto.Repo` per BC.
+- Aggregates as `Ecto.Schema` modules; lifecycle maps to `Ecto.Changeset`-backed context functions (create / update / delete).
+- Workflows as plain context functions / `Ecto.Multi` transactions.
 
 ## Backward compatibility
 
@@ -695,7 +695,7 @@ For quick scanning, the load-bearing decisions this proposal commits to:
 | BC ↔ deployable | Exactly one deployable hosts each BC. Many BCs per deployable. |
 | Subdomain ↔ deployable | A subdomain can span many deployables (via its contexts). |
 | Storage granularity | Per-BC default. Per-aggregate override deferred to v2. |
-| Framework granularity | Per-BC. EF default / Marten cool kid / Dapper power play on .NET; Drizzle on TS; Ash on Phoenix. |
+| Framework granularity | Per-BC. EF default / Marten cool kid / Dapper power play on .NET; Drizzle on TS; Ecto on Phoenix. |
 | Storage instance binding | On the deployable. Environment-specific. |
 | Framework choice binding | On the context. Domain-specific. |
 | Transactional feasibility | Deployable + storage + framework-compat chain; validator-enforced. |

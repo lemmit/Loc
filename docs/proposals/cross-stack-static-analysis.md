@@ -2,6 +2,8 @@
 
 > **[2026-06-20 status audit]** C# nullable-reference annotations + the .NET analyzer gate have SHIPPED (`dotnet/emit/program.ts` `Nullable`/`AnalysisLevel`, gated by `dotnet build /warnaserror`). Only repo-content/markdown lint remains in 'Remaining'.
 
+> **(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain Ecto/Phoenix only and `foundation: ash` is now a validation error. The `@spec` emission below still applies to the vanilla Ecto backend, but the "Ash-specific specing discipline", "Ash error mapping", and "Note on Ash v3" subsections describe Ash internals that no longer exist — the macro-noise problem they reason about goes away on plain Ecto, so the Dialyzer deferral against Ash is moot.)**
+
 > Status: **PARTIAL.** The Phoenix arm has largely landed: the generator now
 > emits Elixir `@spec`s on event/VO modules + polymorphic readers (#902), on
 > `view` module `def run/1` (#906), on `workflow` `def run/2` (#911), plus a
@@ -182,7 +184,7 @@ Layer by cost/benefit:
 | 1 | `mix format --check-formatted` | trivial | ship |
 | 2 | `mix credo` (default profile) | low; some churn first run | ship |
 | 3 | Generator-emitted `@spec` on every public function | one-time emitter work in `*-emit.ts` | **ship now, independent of Dialyzer** |
-| 4 | Dialyxir / Dialyzer + PLT cache | slow first PLT (5–15 min), ~30 s incremental, macro-noisy against Ash | **ship after vanilla Ecto backend lands** |
+| 4 | Dialyxir / Dialyzer + PLT cache | slow first PLT (5–15 min), ~30 s incremental (the Ash macro-noise that deferred this is gone — elixir is plain Ecto now) | **revisit on the vanilla Ecto backend** |
 | 5 | Elixir 1.18+ built-in gradual type system | none extra once toolchain ships it | adopt automatically when stable |
 
 ### Why `@spec` is unconditional
@@ -396,10 +398,10 @@ input. At that point Dialyzer is the right gate, not a deferral.
 
 Concrete sequencing:
 
-- **Now** — tiers 1–3 on both Ash and (future) Ecto backends.
-- **With Ecto backend** — tier 4 (Dialyzer) gated initially on the Ecto
-  output only, via `LOOM_PHOENIX_DIALYZER=1`. Ash output excluded
-  from the gate until macro noise is empirically tractable.
+- **Now** — tiers 1–3 on the elixir (plain Ecto) backend.
+- **Tier 4 (Dialyzer)** gated on the Ecto output via
+  `LOOM_PHOENIX_DIALYZER=1`. (The Ash-macro-noise that previously forced
+  excluding Ash output is moot — the Ash foundation was removed.)
 - **When 1.18 type system stabilizes** — tier 5 supersedes parts of
   tier 4; reassess.
 
@@ -521,6 +523,6 @@ Every analyzer flip surfaces existing generator sloppiness, and that
 *is* the value — but the first PR of each ladder is a
 generator-cleanup PR, not a CI-config PR. The cost is one-time and
 front-loaded; the benefit compounds (every future emitter change stays
-clean by construction). The only place to be conservative is Dialyzer
-against Ash — defer it until Ecto lands and the macro-noise problem
-goes away.
+clean by construction). The Dialyzer caution that once applied to Ash is
+moot — the Ash foundation was removed, so the macro-noise problem is gone
+and the elixir backend is plain Ecto only.

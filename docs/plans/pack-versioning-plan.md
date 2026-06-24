@@ -216,7 +216,7 @@ Inline string bumps:
 | --- | --- | --- |
 | Hono | `src/generator/typescript/index.ts:204-216` | hono ^4.6→^4.12; drizzle-orm ^0.36→^0.45; drizzle-kit latest; @hono/zod-openapi same-major; pg latest; zod ^4 |
 | .NET | `src/generator/dotnet/emit/program.ts:325-360` | Defer past 2026-11 (.NET 8 LTS). Then 8.0.10→10.0.x with FluentValidation 11.10→12.1, MediatR 2.1.7→14.1 |
-| Phoenix | `src/generator/phoenix-live-view/index.ts:609` | ✅ **done in Phase 1.5** — phoenix `~> 1.7`→`~> 1.8`; postgrex `">= 0.0.0"`→`~> 0.20`; ash `~> 3.0`→`~> 3.24` |
+| Phoenix | `src/generator/phoenix-live-view/index.ts:609` | ✅ **done in Phase 1.5** — phoenix `~> 1.7`→`~> 1.8`; postgrex `">= 0.0.0"`→`~> 0.20` (superseded: the backend's `ash ~> 3.x` dep was dropped — Ash foundation removed 2026; the generated backend is plain Ecto/Phoenix) |
 
 Wire each into a centralised `BACKEND_PINS` const per generator so deps management is one diff in one place.
 
@@ -258,7 +258,7 @@ Once a new pack version has been live for a release cycle:
 
 **Phase 2:**
 - `LOOM_TS_BUILD=1` runs full `tsc --noEmit` against emitted Hono projects with the new drizzle/zod versions.
-- `LOOM_PHOENIX_BUILD=1 npx vitest run test/generated-phoenix-build.test.ts` runs `mix compile --warnings-as-errors` against Ash 3.24 / Phoenix 1.8 in the Elixir docker image.
+- `LOOM_PHOENIX_BUILD=1 npx vitest run test/generated-phoenix-build.test.ts` runs `mix compile --warnings-as-errors` against Phoenix 1.8 (plain Ecto/Phoenix — Ash foundation removed) in the Elixir docker image.
 
 ## Lessons learned (Phase 0 + 1.2)
 

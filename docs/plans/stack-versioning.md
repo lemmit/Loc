@@ -184,9 +184,13 @@ stacks/
   hono@v4/     (Hono 4.x backend stack — drizzle 0.45, @hono/zod-openapi, etc.)
   dotnet@v8/   (.NET 8 LTS backend stack — EF Core 8, MediatR 2, FluentValidation 11)
   dotnet@v10/  (.NET 10 backend stack — post-2026-11 follow-up)
-  phoenix@v1/  (Phoenix 1.7 + Ash 3.0)
-  phoenix@v2/  (Phoenix 1.8 + Ash 3.24)
+  phoenix@v1/  (Phoenix 1.7 — plain Ecto/Phoenix)
+  phoenix@v2/  (Phoenix 1.8 — plain Ecto/Phoenix)
 ```
+
+> (Superseded: the Ash foundation was removed in 2026 — these Phoenix
+> backend stacks were originally pinned to Ash 3.x; the generated backend
+> is now plain Ecto/Phoenix.)
 
 Backend stack templates carry the equivalent of `package-json` (or
 `csproj`, or `mix.exs`) per platform. The dep version literals

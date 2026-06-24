@@ -65,8 +65,7 @@ function runMixTest(projDir: string, mirror: HexMirror | undefined): void {
 // CI shards one fixture per matrix cell (see elixir-vanilla-build.yml) so a cold
 // dep compile fits the per-cell timeout and reseeds its own cache.
 // `LOOM_PHOENIX_VANILLA_BUILD_CASE=<fixture>.ddd` selects that single fixture;
-// unset (local `npm run test:phoenix-vanilla`) builds them all.  Mirrors the Ash
-// gate's LOOM_PHOENIX_BUILD_CASE (generated-elixir-ash-build.test.ts).
+// unset (local `npm run test:phoenix-vanilla`) builds them all.
 function pickCases<T extends { name: string }>(all: T[]): T[] {
   const only = process.env.LOOM_PHOENIX_VANILLA_BUILD_CASE;
   if (!only) return all;

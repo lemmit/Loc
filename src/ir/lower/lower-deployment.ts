@@ -3,12 +3,7 @@ import { descriptorFor } from "../../platform/metadata.js";
 import { defaultsFor } from "../../platform/resolve-adapters.js";
 import { applicationDslToAdapter } from "../../util/platform-axes.js";
 import type { DeployableIR, Platform, UiParamBindingIR } from "../types/loom-ir.js";
-import {
-  foundationAdapterOverride,
-  greenfieldAxisDefaults,
-  qualifyDesign,
-  qualifyPlatform,
-} from "./lower-platform.js";
+import { greenfieldAxisDefaults, qualifyDesign, qualifyPlatform } from "./lower-platform.js";
 
 export function lowerDeployable(d: Deployable): DeployableIR {
   const { family: platform, ref: platformRef } = qualifyPlatform(d.platform);
@@ -154,23 +149,18 @@ export function lowerDeployable(d: Deployable): DeployableIR {
     adapterDefaults !== undefined
       ? (() => {
           const gf = greenfieldAxisDefaults(platform);
-          // The foundation selects which adapter-axis defaults apply.  Elixir's
-          // platform `adapterDefaults` encode the ASH data layer + style, but
-          // post D-VANILLA-DEFAULT the default foundation is `vanilla`, so the
-          // omitted-knob (and explicit-`vanilla`) path overrides `style` /
-          // `persistence` to `layered` / `ecto`; an explicit `foundation: ash`
-          // gets the base values (D-REALIZATION-AXES;
-          // realization-axes-alignment.md).
+          // Each adapter-backed axis takes its default from the platform's
+          // live adapter menu (`adapterDefaults`); `foundation` is the lone
+          // greenfield axis (D-REALIZATION-AXES; realization-axes-alignment.md).
           const foundation = d.foundation ?? gf.foundation;
-          const fdn = foundationAdapterOverride(platform, foundation);
           return {
             foundation,
             // Store the resolved adapter key (`serviceLayer` → `layered`)
             // so the future codegen passes it straight to `resolveStyle`.
             application: d.application
               ? applicationDslToAdapter(d.application)
-              : (fdn.style ?? adapterDefaults.style),
-            persistence: d.persistence ?? fdn.persistence ?? adapterDefaults.persistence.state,
+              : adapterDefaults.style,
+            persistence: d.persistence ?? adapterDefaults.persistence.state,
             directoryLayout: d.directoryLayout ?? adapterDefaults.layout,
             transport: d.transport ?? adapterDefaults.transport,
             runtime: d.runtime ?? adapterDefaults.runtime,

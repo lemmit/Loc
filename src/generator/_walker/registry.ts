@@ -375,7 +375,7 @@ export const WALKER_PRIMITIVES: Record<string, PrimitiveDef> = {
     heex: renderFormHeex,
   },
   // Confirmation-only destroy form (loom-forms.md).  HEEx renders a
-  // confirm-delete `<.button>` wired to the aggregate's Ash destroy action
+  // confirm-delete `<.button>` wired to the aggregate's delete context function
   // (renderDestroyForm); the create/op/workflow form shapes use renderFormHeex.
   DestroyForm: {
     group: "layout",

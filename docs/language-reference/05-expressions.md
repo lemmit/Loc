@@ -115,7 +115,7 @@ calculate :qty_label, :string, expr("qty=" <> to_string(record.qty))
 
 ## Money arithmetic (closed)
 
-Money is the headline divergence axis. The DSL `money` type maps to a precise-decimal host type, and the backends split: **.NET and Python** use native operators (their decimal type overloads them precisely); **TypeScript and Java** route through a method/library call because their decimal type does *not* do precise math under `+`/`*`. **Elixir is context-dependent**: in native code — operation and invariant bodies that run in the BEAM — it routes through the `Decimal` library (`Decimal.mult` / `Decimal.add` / `Decimal.compare`), but inside an Ash `expr()` (derived calculations and `find` filters, which is where the examples below emit) it uses the **native operators**, because Ash lowers `expr()` to the data layer where the `Decimal.*` struct API is invalid.
+Money is the headline divergence axis. The DSL `money` type maps to a precise-decimal host type, and the backends split: **.NET and Python** use native operators (their decimal type overloads them precisely); **TypeScript and Java** route through a method/library call because their decimal type does *not* do precise math under `+`/`*`. **Elixir is context-dependent**: in native code — operation and invariant bodies that run in the BEAM — it routes through the `Decimal` library (`Decimal.mult` / `Decimal.add` / `Decimal.compare`), but inside an Ecto query fragment (derived calculations and `find` filters, which is where the examples below emit) it uses the **native operators**, because Ecto lowers the fragment to SQL at the data layer where the `Decimal.*` struct API is invalid.
 
 ```ddd
 aggregate Order {
@@ -157,10 +157,10 @@ def total(self) -> Decimal: return self._subtotal + self.tax
 ```
 == elixir
 ```elixir
-# In an Ash expr() (derived calc / find) the operators are native — Ash
-# lowers them to the data layer.  A native op-body would use Decimal.mult/add.
-calculate :tax, :decimal, expr(record.subtotal * record.tax_rate)
-calculate :total, :decimal, expr(record.subtotal + record.tax)
+# A derived calc lowers to a plain function over the struct; money arithmetic
+# uses Decimal.mult/add. (In an Ecto query fragment the operators are native.)
+def tax(record),   do: Decimal.mult(record.subtotal, record.tax_rate)
+def total(record), do: Decimal.add(record.subtotal, record.tax)
 ```
 ::: end
 
@@ -185,12 +185,12 @@ self._subtotal > Decimal("100.00")
 ```
 == elixir
 ```elixir
-# Ash expr() (derived/find): native operator + bare literal
-expr(record.subtotal > 100.00)
+# Ecto query fragment (find): native operator + bare literal
+dynamic([r], r.subtotal > 100.00)
 ```
 ::: end
 
-Java division emits `divide(r, MathContext.DECIMAL128)` (a bare `BigDecimal.divide` throws on non-terminating expansions); the `==`/`!=`/`<`… set maps to `compareTo(...) </==/> 0`. For Elixir this depends on context: inside an Ash `expr()` ordering is the native operator (above), but a native op/invariant body maps it to `Decimal.compare(...) == :gt` (and `in [:lt, :eq]` for `<=`).
+Java division emits `divide(r, MathContext.DECIMAL128)` (a bare `BigDecimal.divide` throws on non-terminating expansions); the `==`/`!=`/`<`… set maps to `compareTo(...) </==/> 0`. For Elixir this depends on context: inside an Ecto query fragment ordering is the native operator (above), but a native op/invariant body maps it to `Decimal.compare(...) == :gt` (and `in [:lt, :eq]` for `<=`).
 
 ## Comparison, logical & unary
 
@@ -392,10 +392,10 @@ public async Task<List<Product>> TaggedWith(TagId t, CancellationToken cancellat
 ```
 == elixir
 ```elixir
-# Ash filter: exists over the auto-generated many_to_many relationship
-read :tagged_with do
-  argument :t, :uuid
-  filter expr(exists(tags_through, id == ^arg(:t)))
+# Ecto query: exists over the many_to_many join table
+def tagged_with(t) do
+  from p in Product,
+    where: fragment("EXISTS (SELECT 1 FROM product_tags pt WHERE pt.product_id = ? AND pt.tag_id = ?)", p.id, ^t)
 end
 ```
 ::: end
@@ -463,4 +463,4 @@ Three identifiers resolve specially in expression position, plus the implicit `t
 
 ---
 
-Filters in repository `find` clauses, criteria, and views are this same expression language under a different validator lens (they must be *queryable* — translatable to SQL/Ash). See [`../criterion.md`](../criterion.md) for the predicate-specification surface and the queryability rules; [Statements](06-behavior-and-statements.md) for the `:=` / `+=` / `let` / `emit` forms that expressions appear inside.
+Filters in repository `find` clauses, criteria, and views are this same expression language under a different validator lens (they must be *queryable* — translatable to SQL/Ecto). See [`../criterion.md`](../criterion.md) for the predicate-specification surface and the queryability rules; [Statements](06-behavior-and-statements.md) for the `:=` / `+=` / `let` / `emit` forms that expressions appear inside.

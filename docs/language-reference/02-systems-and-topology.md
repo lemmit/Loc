@@ -252,7 +252,7 @@ api_python/
 api_elixir/
   mix.exs  config/  rel/
   lib/
-    api_elixir/orders/                  # Ash resources / domain
+    api_elixir/orders/                  # Ecto schemas / domain
     api_elixir_web/{api,api/schemas,components,controllers}/
   priv/repo/migrations/  priv/static/  certs/
 ```
@@ -320,7 +320,7 @@ The backend families and what they generate (registered in `src/platform/registr
 | `dotnet` | ASP.NET + EF Core + Mediator (CQRS) | 8080 | postgres |
 | `java` | Spring Boot + Spring Data JPA | 8080 | postgres |
 | `python` | FastAPI + SQLAlchemy 2 (async) | 8000 | postgres |
-| `elixir` | Phoenix + Ash (or vanilla Ecto) — fullstack | 4000 | postgres |
+| `elixir` | Phoenix LiveView + Ecto — fullstack | 4000 | postgres |
 
 These are the only spellings — the legacy aliases (`hono` → `node`, `fastapi` → `python`, `phoenix`/`phoenixLiveView` → `elixir`) were **retired**; writing them now fails validation as an unknown platform. A backend may pin a `family@version` via the `STRING` alternative — `platform: "node@v4"` selects the zod-3 / TS-5 Hono package (`platform: node` resolves to the default version). `elixir` is dual-natured: it owns a database **and** mounts a `ui:` (Phoenix LiveView), so it is the one *fullstack* platform; `dotnet` and `java` are backend-only but embed a React SPA when the deployable declares `ui:`.
 
@@ -388,13 +388,13 @@ deployable apiDotnet {
 
 The six axes (grammar order): `foundation`, `application`, `persistence`, `directoryLayout`, `transport`, `runtime`. The bare `platform: dotnet` form is unchanged — the block is additive and every axis is optional, defaulting to the platform's primary value. Axis *values* are validated against a per-platform menu (`src/language/validators/data/platform-rules.ts`), not the grammar:
 
-- **`foundation`** — the opinionated framework that owns higher layers. `elixir` admits `ash` | `vanilla` (Ash 3.x vs plain Ecto/Phoenix); every other backend is `vanilla` only. A named foundation (`ash`) *owns* the `application` + `transport` axes — setting an owned axis alongside it is an error (`loom.platform-knob-owned-by-foundation`).
+- **`foundation`** — the opinionated framework that owns higher layers. `elixir` admits `vanilla` only (plain Ecto/Phoenix); `foundation: ash` is now a validation error. Every other backend is `vanilla` only.
 - **`application`** — architectural style (e.g. `flat` → `serviceLayer` → `cqrs`), resolved against the backend's live style-adapter menu.
-- **`persistence`** — data layer (`ash` admits `ashPostgres` / `ashSqlite`; `vanilla` admits `ecto`; each backend lists its own).
+- **`persistence`** — data layer (`vanilla` admits `ecto`; each backend lists its own).
 - **`directoryLayout`** — `byLayer` vs `byFeature` on-disk shape; must be one the chosen `application` style supports (`loom.platform-knob-foundation-mismatch` / the R3 layout check otherwise).
 - **`transport`** / **`runtime`** — adapter-backed HTTP-surface / runtime axes.
 
-Frontends carry **no** axes (empty menu — any axis written on a `react`/`vue`/… deployable is rejected). One migration note surfaced by the validator: `platform: elixir` with no explicit `foundation:` currently defaults to `ash` but warns (`loom.foundation-default-flipping`) that the default will switch to `vanilla` — set `foundation: ash` to pin today's behaviour.
+Frontends carry **no** axes (empty menu — any axis written on a `react`/`vue`/… deployable is rejected). `platform: elixir` resolves `foundation:` to `vanilla` (plain Ecto/Phoenix) — the default and only valid value; `foundation: ash` is rejected as a validation error.
 
 No generated tab here — the axes select *which* emitter subtree runs (e.g. `byFeature` vs `byLayer` reorganises the directory tree shown under [`deployable`](#deployable)); the divergence is structural across whole projects, not a single excerptable line.
 

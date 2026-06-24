@@ -250,7 +250,7 @@ There is no separate `db:generate` / `dotnet ef migrations add` step
 |---|---|---|
 | Hono (Drizzle) | `<deployable>/db/migrations/<ts>_<name>.sql` + `db/migrations/meta/_journal.json` | `drizzle-orm/node-postgres/migrator`'s `migrate()` called from `index.ts` at startup; `npm run db:migrate` also wired for out-of-band runs. |
 | .NET (EF Core) | `<deployable>/Infrastructure/Persistence/Migrations/<Ts>_<Name>.cs` with `b.Sql(...)` raw-SQL `Up` / `Down` bodies | `db.Database.Migrate()` in `Program.cs` at startup (idempotent — EF's `__EFMigrationsHistory` table tracks what's been applied). |
-| Phoenix (Ash/Ecto) | `<deployable>/priv/repo/migrations/<ts>_<name>.exs` Ecto migrations | `mix ecto.migrate` from the entrypoint script; `mix ecto.setup` on first boot. |
+| Phoenix (Ecto) | `<deployable>/priv/repo/migrations/<ts>_<name>.exs` Ecto migrations | `mix ecto.migrate` from the entrypoint script; `mix ecto.setup` on first boot. |
 | Python (SQLAlchemy) | `<deployable>/migrations/<version>_<module>_<name>.sql` raw-SQL files | `run_migrations()` from the FastAPI lifespan applies pending files in order, tracking applied tags in a `__loom_migrations` table (the Drizzle-runtime-migrator pattern). |
 | Java (Spring/Flyway) | `<deployable>/src/main/resources/db/migration/V<version>.<n>__<Module>_<Name>.sql` Flyway scripts | Flyway runs them on Spring Boot startup (tracked in `flyway_schema_history`). |
 
@@ -420,7 +420,7 @@ on the host:
 |---|---|---|
 | `test:java` | JDK 21 + Gradle | host (no container) |
 | `test:dotnet` | .NET SDK 8 | host (no container) |
-| `test:phoenix` / `test:phoenix-vanilla` | `mix` (Elixir/Ash) | **`hexpm/elixir` container** |
+| `test:phoenix` | `mix` (Elixir/Ecto) | **`hexpm/elixir` container** |
 | `test:python` | `uv` + ruff + mypy + pytest | host |
 
 A managed remote/sandbox environment usually ships the Docker **client**

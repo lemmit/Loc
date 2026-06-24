@@ -1,5 +1,7 @@
 # Generated-code review — June 2026 (all platforms)
 
+> **(Superseded 2026: the Ash foundation was removed — `platform: elixir` is plain Ecto/Phoenix only, `foundation: ash` is now a validation error. Phoenix findings below that reference Ash `expr`/resource semantics are historical.)**
+
 > Snapshot-in-time audit. A full review of generated output across all 5
 > backends + 3 frontends (driven from `examples/showcase.ddd`,
 > `vue-showcase.ddd`, `svelte-shop.ddd`). Each finding is dispositioned below so

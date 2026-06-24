@@ -2,7 +2,7 @@
 
 Two cross-cutting runtime concerns the compiler wires in for you — no DSL keyword for the first, one stored-field modifier for the second. **Observability**: every backend emits the same machine-parseable JSON log envelope, drawn from one platform-neutral event catalog, so a `jq` query written once works against any deployable. **Provenance**: mark a stored field `provenanced` and every assignment to it becomes an immutable rule snapshot, with a per-write runtime trace the backend persists so a computed value can be explained long after the fact. Reach for this chapter when you need a uniform log stream across a polyglot stack, or value-lineage you can audit.
 
-> **Grammar:** `provenanced` property modifier (observability is emitter-level, no surface syntax) · **Validators:** `provenanced` rejected on `derived` properties; rejected on Ash-hosted aggregates · **Docs:** [`../observability.md`](../observability.md), [`../provenance.md`](../provenance.md)
+> **Grammar:** `provenanced` property modifier (observability is emitter-level, no surface syntax) · **Validators:** `provenanced` rejected on `derived` properties · **Docs:** [`../observability.md`](../observability.md), [`../provenance.md`](../provenance.md)
 
 ## The catalog envelope
 
@@ -87,7 +87,7 @@ aggregate Order ids guid with crudish {
 }
 ```
 
-The grammar admits `provenanced` on any stored property; it is a compile error on a `derived` property (its value is recomputed, not assigned). Provenance has a runtime on **node**, **dotnet**, **java**, **python**, and **elixir on the `vanilla` foundation**; **elixir on `ash`** and **react** parse the keyword but emit no trace code (snapshot capture still runs for the whole system) — on Ash the validator rejects the field outright, the same as event-sourced storage. Honest gap, by design: declare the field once and only a runtime-capable deployable exercises it.
+The grammar admits `provenanced` on any stored property; it is a compile error on a `derived` property (its value is recomputed, not assigned). Provenance has a runtime on **node**, **dotnet**, **java**, **python**, and **elixir** (plain Ecto/Phoenix); **react** parses the keyword but emits no trace code (snapshot capture still runs for the whole system). Honest gap, by design: declare the field once and only a runtime-capable deployable exercises it.
 
 ### Per-backend trace emission
 
@@ -159,7 +159,7 @@ await db.transaction(async (tx) => {
 ```
 == elixir
 ```elixir
-# foundation: vanilla only — Phoenix + Ecto, no Ash.
+# Phoenix + Ecto (the only Elixir foundation).
 # lib/<app>/<ctx>.ex — total := qty * price - discount, captured:
 loom_prov_inputs_1 = [%{path: "qty", value: qty}, %{path: "price", value: price}, %{path: "discount", value: record.discount}]
 record = %{record | total: qty * price - record.discount}
@@ -167,7 +167,6 @@ loom_lineage_1 = %{snapshot_id: "13d60464", target: %{type: "Order", field: "tot
 record = %{record | total_provenance: loom_lineage_1}
 _ = MyApp.Provenance.record(loom_lineage_1)
 # …then save + MyApp.Provenance.flush(MyApp.Repo) inside one Repo.transaction.
-# foundation: ash → no-op at runtime (validator rejects the field on Ash).
 ```
 ::: end
 

@@ -4,10 +4,11 @@
 
 > Status: **SHIPPED**. [`aggregate-inheritance.md`](./aggregate-inheritance.md)
 > **I2** — TPH (`sharedTable`) storage on the **.NET / EF Core** backend.
-> Phoenix/Ash TPH has since shipped too (see
+> Phoenix TPH has since shipped too (see
 > [`phoenix-tph-emission.md`](./phoenix-tph-emission.md)) — TPH is now
 > live on all three DB backends (`TPH_CAPABLE = {node, dotnet, elixir}`
 > in `src/ir/validate/checks/system-checks.ts`).
+> **(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain Ecto/Phoenix only, so elixir TPH is the vanilla Ecto emission; `foundation: ash` is now a validation error.)**
 >
 > Prereq (PR #975): the TPH/TPC predicates are consolidated in the
 > platform-neutral `src/ir/util/inheritance.ts`, so the .NET generator
@@ -136,4 +137,4 @@ id, the controller route param, and the response DTO all name the shared
 `PartyId`. That threading is the bulk of the remaining work; it's
 mechanical but wide, and `dotnet build /warnaserror` is the gate.
 
-Phoenix/Ash TPH (Ash polymorphic embedding) is a separate, later slice.
+Phoenix TPH is a separate, later slice. **(Superseded 2026: the Ash foundation was removed; the elixir TPH that shipped is the plain-Ecto emission — `foundation: ash` is now a validation error.)**

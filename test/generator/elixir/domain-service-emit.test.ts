@@ -42,8 +42,7 @@ system Orders {
   storage primary { type: postgres }
   resource ordersState { for: Pricing, kind: state, use: primary }
   deployable shop {
-    platform: elixir { foundation: ash }
-    foundation: ${foundation}
+    platform: elixir { foundation: ${foundation} }
     contexts: [Pricing]
     dataSources: [ordersState]
     serves: OrdersApi
@@ -61,7 +60,7 @@ function bySuffix(f: Map<string, string>, suffix: string): string {
 
 describe("phoenix generator — domainService (domain-services.md)", () => {
   it("emits a plain stateless module — no Ash.Resource / GenServer / state", async () => {
-    const files = await generateSystemFiles(srcFor("ash"));
+    const files = await generateSystemFiles(srcFor("vanilla"));
     const svc = bySuffix(files, "domain/services/quotes.ex");
     // App prefix = toModulePrefix(toSnakeApp("shop")) = "Shop".
     expect(svc).toContain("defmodule Shop.Domain.Services.Quotes do");
@@ -71,7 +70,7 @@ describe("phoenix generator — domainService (domain-services.md)", () => {
   });
 
   it("emits one `def` per operation with an `@spec`", async () => {
-    const files = await generateSystemFiles(srcFor("ash"));
+    const files = await generateSystemFiles(srcFor("vanilla"));
     const svc = bySuffix(files, "domain/services/quotes.ex");
     // The signature spec carries each param type + the return type.
     expect(svc).toContain(
@@ -90,7 +89,7 @@ describe("phoenix generator — domainService (domain-services.md)", () => {
   });
 
   it("renders an `or`-union return as the tagged-tuple convention", async () => {
-    const files = await generateSystemFiles(srcFor("ash"));
+    const files = await generateSystemFiles(srcFor("vanilla"));
     const svc = bySuffix(files, "domain/services/quotes.ex");
     // Union return → `{:ok, value}` for the success arm (the spec is the
     // transport-only `map()` carrier).
@@ -100,11 +99,11 @@ describe("phoenix generator — domainService (domain-services.md)", () => {
   });
 
   it("the emitted module path matches the call-site qualification", async () => {
-    const files = await generateSystemFiles(srcFor("ash"));
-    // The call site in Cart.reprice renders the fully-qualified module — the
-    // SAME `<App>.Domain.Services.<Name>` the declaration emits, so the call
-    // resolves at compile time.
-    const cart = bySuffix(files, "pricing/cart.ex");
+    const files = await generateSystemFiles(srcFor("vanilla"));
+    // The call site in Cart.reprice (the context module's named-op function)
+    // renders the fully-qualified module — the SAME `<App>.Domain.Services.
+    // <Name>` the declaration emits, so the call resolves at compile time.
+    const cart = bySuffix(files, "shop/pricing.ex");
     expect(cart).toContain("Shop.Domain.Services.Quotes.quote(");
     const svc = bySuffix(files, "domain/services/quotes.ex");
     expect(svc).toContain("defmodule Shop.Domain.Services.Quotes do");

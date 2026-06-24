@@ -7,7 +7,7 @@ name: .NET build verification
 # configuration that fails at model build, Mediator handler signature
 # drift, FluentValidation analyzer warnings, etc.).
 #
-# Mirrors `elixir-ash-build.yml` (Phoenix → Ash 3.x) and `test:tsc`
+# Mirrors `elixir-vanilla-build.yml` (Phoenix → mix compile) and `test:tsc`
 # (TS → tsc + tsup).  Until this lands, the .NET emitter has no
 # real compile gate — it ships TODO-styled C# that the test suite
 # happily green-lights but that breaks at first run.

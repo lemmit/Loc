@@ -17,6 +17,8 @@
 > `routeSlug` is a per-action `OperationIR` field. Read
 > `lifecycle-url-style.md` for the shipped Phase-2 design; treat the
 > api-shape details below as historical.
+>
+> **(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain Ecto/Phoenix only; `foundation: ash` is now a validation error.)** This proposal cites Ash both as prior art (a design influence on the typed-action model — kept as history) and as the live Phoenix emission target. The Phoenix backend no longer emits Ash resources/actions; the kind-tag → action mapping below now lowers onto plain Ecto/Phoenix.
 
 ## Problem statement
 
@@ -113,7 +115,7 @@ The URL itself encodes the layering — creation under `/services/`, instance be
 
 ### Ash Framework (Elixir/Phoenix)
 
-Ash is the Phoenix backend Loom already generates code for (`src/generator/phoenix-live-view/`, `designs/ashPhoenix/`, `LOOM_PHOENIX_BUILD=1` CI). It is explicitly "DDD-shaped" and resource-centric, with the most actively-developed answer to the same question.
+Ash was the Phoenix backend Loom generated code for at the time of writing (`src/generator/phoenix-live-view/`, the `ashPhoenix` HEEx design pack under `designs/ashPhoenix/`, `LOOM_PHOENIX_BUILD=1` CI). **(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain Ecto/Phoenix only; `foundation: ash` is now a validation error. Ash remains relevant here only as the prior-art design influence below.)** It is explicitly "DDD-shaped" and resource-centric, with the most actively-developed answer to the same question.
 
 **Ash's answer: typed actions on the resource.**
 
@@ -509,9 +511,9 @@ Body shape comes from the action's params (resolved + typed), not from `aggregat
 
 Same pattern using ASP.NET attribute routing: `[HttpPost]`, `[HttpDelete]`, route templates derived from `routeSlug`.
 
-#### Phoenix / Ash (`src/generator/phoenix-live-view/`)
+#### Phoenix (`src/generator/phoenix-live-view/`)
 
-Loom's kind tag maps 1:1 to Ash action types:
+**(Superseded 2026: the Ash foundation was removed; this section described the Ash emission, which no longer exists. The Phoenix backend now emits plain Ecto/Phoenix.)** Loom's kind tag mapped 1:1 to Ash action types:
 
 | Loom kind | Ash action type |
 |---|---|
@@ -519,7 +521,7 @@ Loom's kind tag maps 1:1 to Ash action types:
 | `mutate` (operation) | `update` |
 | `destroy` | `destroy` |
 
-`AshJsonApi` route emission uses the same urlStyle setting — Ash supports custom routes via the `route :post, "/:id/slug", :action_name` mechanism.
+`AshJsonApi` route emission used the same urlStyle setting — Ash supports custom routes via the `route :post, "/:id/slug", :action_name` mechanism.
 
 #### React (`src/generator/react/`)
 
@@ -622,7 +624,7 @@ The canonical (unnamed) form is at most one per kind per aggregate.
 
 ### D10 — Persistence is framework-owned, not body-owned
 
-The body of any lifecycle action is purely behavioural — it mutates `this`. It does not call any persistence primitive. The framework infers the persistence operation from the kind tag (`create` → INSERT, `mutate` → UPDATE, `destroy` → DELETE). This is what makes the body platform-neutral: the same body emits TypeORM, EF Core, Ash changesets, and Phoenix Ecto without modification.
+The body of any lifecycle action is purely behavioural — it mutates `this`. It does not call any persistence primitive. The framework infers the persistence operation from the kind tag (`create` → INSERT, `mutate` → UPDATE, `destroy` → DELETE). This is what makes the body platform-neutral: the same body emits TypeORM, EF Core, and Phoenix Ecto without modification. (At the time of writing the Phoenix target was Ash changesets; the Ash foundation was removed in 2026 and `platform: elixir` now emits plain Ecto/Phoenix.)
 
 ## Open items
 
@@ -684,7 +686,7 @@ A possible implementation sequence (~5 phases, each shippable independently):
 
 - TS/Hono: kind-based verb selection in route emitter.
 - .NET: kind-based attribute selection.
-- Phoenix: kind tag → Ash action type mapping.
+- Phoenix: kind tag → Ecto/Phoenix lifecycle mapping (was Ash action types; Ash foundation removed 2026).
 - React API client: per-action methods with correct verb + URL.
 - Remove field-walking from API generators; switch to action-param walking.
 

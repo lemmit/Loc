@@ -4,7 +4,10 @@
 
 > Status: **PARTIAL.** Surface + IR + lowering + validation shipped (#794);
 > emission shipped on **all four backends** — .NET `Run<Name>Async` + workflow
-> `foreach` (#810), Hono `run<Name>` (#952), Phoenix/Ash read action (#955).
+> `foreach` (#810), Hono `run<Name>` (#952), Phoenix Ecto context query (#955).
+> *(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain
+> Ecto/Phoenix only and `foundation: ash` is a validation error — the Phoenix
+> retrieval now emits a plain Ecto query, not an Ash read action.)*
 > Remaining: the explicit `loads:` load-plan (gated
 > `loom.retrieval-loads-unsupported` — retrievals load the whole aggregate;
 > no backend consumes a load plan yet). Adds one source
@@ -232,7 +235,7 @@ A `retrieval` is what each backend renders as its native query bundle:
 | **Hono / Drizzle** | a pre-shaped query builder — `db.select().from(t).where(spec).orderBy(…).limit(?).offset(?)` with the eager-load joins/`findManyByIds` batch the `loadPlan` implies; `page` spliced from the `run` arg |
 | **.NET / EF Core** | an Ardalis-style `Specification<T>` object holding `Query.Where(crit.ToExpression())` + `OrderBy` + `Include(…)`; `page` applied as `Skip/Take` from the `run` call |
 | **JPA / Spring** | a `Specification<T>` (the predicate) executed via `findAll(spec, Pageable)`; `sort` → `Sort`, `page` → `PageRequest`, `loads` → `@BatchSize` on owned collections + `@EntityGraph` for cross-aggregate to-one expansion (see `load-specifications.md`; **not** a hand-rolled CriteriaBuilder fragment) |
-| **Phoenix / Ash** | a read action / `Ash.Query` composed with the actor; `sort`/`loads`/page as query options |
+| **Phoenix / Ecto** | a composable `Ecto.Query` built in the context module; `sort`/`loads`/page as query options. *(Superseded 2026: the Ash foundation was removed — the original row read "a read action / `Ash.Query` composed with the actor".)* |
 
 The framework word (`Specification<T>`, `Criteria`, `FluentQuery`) stays
 **generated-code-local**. Loom's upward name is `retrieval`.

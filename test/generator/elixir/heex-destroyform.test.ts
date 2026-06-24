@@ -29,7 +29,7 @@ system Shop {
     }
   }
   deployable phoenixApp {
-    platform: elixir { foundation: ash }, contexts: [Sales], serves: ShopApi,
+    platform: elixir { foundation: vanilla }, contexts: [Sales], serves: ShopApi,
     ui: ShopUi, port: 4000
   }
 }

@@ -2,7 +2,7 @@
 
 > Status: **SHIPPED** — all slices landed (see the progress table). This is the executable
 > slice plan for adding Python as the fourth domain-logic backend (after
-> Hono, .NET, Elixir/Ash). It instantiates the
+> Hono, .NET, Elixir/Phoenix). It instantiates the
 > [`platform-expansion-roadmap.md`](platform-expansion-roadmap.md) Phase E
 > sketch and follows the shape of
 > [`docs/proposals/java-backend.md`](../proposals/java-backend.md). Slices

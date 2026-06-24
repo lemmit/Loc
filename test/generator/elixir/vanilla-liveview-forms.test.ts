@@ -111,22 +111,3 @@ describe("vanilla — change_<agg> facade (2-B)", () => {
     );
   });
 });
-
-describe("ash LiveView forms — byte-identical guard", () => {
-  it("the explicit `foundation: ash` path keeps the AshPhoenix.Form lifecycle", async () => {
-    const ashSource = SOURCE.replace(
-      "platform: elixir { foundation: vanilla }",
-      "platform: elixir { foundation: ash }",
-    );
-    const fs = await generateSystemFiles(ashSource);
-    const create = get(fs, "/live/customer_new_live.ex");
-    const detail = get(fs, "/live/customer_detail_live.ex");
-    expect(create).toContain("AshPhoenix.Form.for_create(PhoenixApp.Sales.Customer, :create)");
-    expect(create).not.toContain("change_customer");
-    expect(detail).toContain("AshPhoenix.Form.validate");
-    expect(detail).toContain("AshPhoenix.Form.submit");
-    expect(detail).toContain("AshPhoenix.Form.for_update");
-    // No vanilla create-submit handler on the ash path.
-    expect(create).not.toContain('handle_event("save_customer"');
-  });
-});

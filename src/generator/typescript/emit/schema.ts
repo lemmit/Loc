@@ -410,7 +410,7 @@ function collectColumnRefs(e: ExprIR, out: Set<string>): void {
  *  scalar / `X id` fields stay queryable columns (like the relational
  *  root), but each containment folds into a single jsonb column and
  *  reference collections into a jsonb id-array column.  No part tables,
- *  no join tables.  Mirrors the EF owned-`.ToJson()` / Ash embedded
+ *  no join tables.  Mirrors the EF owned-`.ToJson()` / Phoenix embedded
  *  shape and the shared embedded migration table. */
 function emitEmbeddedTable(
   agg: AggregateIR,

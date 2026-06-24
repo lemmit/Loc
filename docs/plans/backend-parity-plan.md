@@ -3,8 +3,17 @@
 **Status:** proposed · **Opened:** 2026-06-21 · **Audit:**
 [`audits/backend-feature-parity-2026-06.md`](../audits/backend-feature-parity-2026-06.md)
 
+> **Update (2026):** the Ash foundation has been **removed**. `platform: elixir`
+> now generates Phoenix LiveView on **plain Ecto/Phoenix** (the vanilla foundation
+> only); `foundation: vanilla` is the default and only valid value, and
+> `foundation: ash` is a validation error (the `foundation:` knob stays). The
+> "foundation routing vs Ash emission" fork below is therefore **moot** — there is
+> no Ash backend to route around; every Phoenix feature targets vanilla. The
+> ash-vs-vanilla framing is retained as the historical record of how parity was
+> reached before Ash was deleted.
+
 A sequenced plan to bring the five domain-logic backends (node/Hono, .NET, Java/
-Spring, Python/FastAPI, Phoenix·ash + Phoenix·vanilla) to **full feature parity**,
+Spring, Python/FastAPI, Phoenix on plain Ecto/Phoenix) to **full feature parity**,
 grounded in the validator gate sets that are the source of truth for what each
 backend emits today.
 
@@ -18,12 +27,13 @@ Two legitimate end states per (feature × backend):
 1. **Emitted** — the backend produces working code, verified by its `LOOM_*`
    build/e2e gate.
 2. **Gated** — the validator rejects the combination with an actionable
-   `loom.*` diagnostic (a reviewed decision, e.g. "no idiomatic Ash fit").
+   `loom.*` diagnostic (a reviewed decision).
 
 "Parity" does **not** require every backend to emit every feature — it requires
-that the gap is *explicit and safe*. Elixir's foundation split (`ash`/`vanilla`)
-is the canonical case: some features are reached by routing to `vanilla`, not by
-forcing an un-idiomatic Ash emission.
+that the gap is *explicit and safe*. (Historically Elixir had a foundation split
+`ash`/`vanilla` where some features were reached by routing to `vanilla` rather
+than forcing an un-idiomatic Ash emission; with Ash removed, vanilla is the only
+elixir foundation and there is nothing to route around.)
 
 ## How this plan uses our custom skills
 
@@ -36,7 +46,7 @@ right-sized per its "Tailoring to the feature kind" guidance:
 | Flip a gate (turn a silent gap into a fail-fast error) | **Validate-only feature** | audit → IR-validate + negative test (skip simulator) |
 | Port an emitter a sibling backend already has | **Codegen gap-fill** | audit → confirm analog → 1 developer + 1 generator test + build gate |
 | Add cross-cutting runtime (provenance/audit) to a backend | **Codegen gap-fill** (disjoint buckets — one developer per backend, parallel) | audit → develop → test |
-| Foundation routing vs new emission (elixir·ash) | **Full** — has a user-owned design fork | audit → review → **simulate + sign-off** → develop |
+| Phoenix (elixir) emission gap-fill | **Codegen gap-fill** (Ash removed — no foundation fork remains) | audit → confirm analog → develop → test |
 
 Skill mechanics to apply throughout:
 - **Phase 1 state audit on fresh `main` first, every time** — `main` moves fast;
@@ -46,9 +56,9 @@ Skill mechanics to apply throughout:
   disjoint file trees (`src/generator/java/` vs `src/generator/python/`), so spawn
   one `feature-developer` per backend **in a single turn** (the gap-closure
   pattern).
-- **Simulation gate only where there's a real shape decision** — the elixir·ash
-  workstream (W4) has a genuine fork; run the `feature-simulator` and get user
-  sign-off. The gate-flip and emitter-port workstreams skip it.
+- **Simulation gate only where there's a real shape decision.** (W4's original
+  ash-vs-vanilla fork is now moot — Ash is removed — so no simulator gate is
+  needed there.) The gate-flip and emitter-port workstreams skip it.
 - **Final pass** — run `npm test` + the touched `LOOM_*` build gates, then the
   **`/code-review`** (or **`/simplify`**) skill over the diff, and **`/verify`**
   for a runtime spot-check on at least one backend. Report actual results.
@@ -57,8 +67,8 @@ Skill mechanics to apply throughout:
 
 Per backend compile gates to run locally (see `CLAUDE.md` → Docker): Java
 `gradle … bootJar` (host), .NET `dotnet build /warnaserror` (sdk container),
-Python `uv sync + ruff + mypy + pytest` (host), Phoenix `mix compile
---warnings-as-errors` (elixir container, `LOOM_HEX_MIRROR=1`).
+Python `uv sync + ruff + mypy + pytest` (host), Phoenix (plain Ecto/Phoenix)
+`mix compile --warnings-as-errors` (elixir container, `LOOM_HEX_MIRROR=1`).
 
 ---
 
@@ -151,50 +161,31 @@ rather than a static count.
 
 ---
 
-## Workstream W4 — Elixir foundation gaps *(RESOLVED by routing — no Ash investment)*
+## Workstream W4 — Elixir foundation gaps *(RESOLVED — Ash removed)*
 
-**Status (2026-06):** ✅ resolved. The fork below was decided **(a) foundation
-routing** and ratified as
-[D-PHOENIX-FOUNDATION-ROUTING](../decisions.md) — the Ash-side investment is
-out of scope. No compiler work was needed: every routed feature already emits
-on `foundation: vanilla` and fails fast on `ash` on fresh `main` (the
-"genuine emission gap" the original plan called out — **ES workflows on
-vanilla** — had already shipped: `src/generator/elixir/vanilla/workflow-eventsourced-emit.ts`
-+ `vanilla-eventsourced-workflow.ddd` under the `elixir-vanilla-build.yml`
-gate). W4 landed as documentation: the *Phoenix foundations* routing table in
-[`platforms.md`](../platforms.md), the `elixir·ash`/`vanilla` columns of the
-[`generators.md`](../generators.md) matrix, and the decision record. The
-historical fork analysis is kept below for context.
+**Status (2026):** ✅ resolved, and the foundation fork it described is now
+**moot**: the Ash foundation has been **removed**. The features below were all
+historically "gated on `ash`, emitted on `vanilla`"; with Ash gone, vanilla is the
+only elixir foundation and every one of these emits on it. There is nothing to
+route around — `foundation: ash` is now a validation error.
 
-**Gaps (foundation-shaped):**
-- ES aggregate storage gated on `ash` (`vanilla` emits it).
-- `shape(document)` gated on `ash` (`vanilla` emits it).
-- Provenance gated on `ash` (`vanilla` emits it).
-- Return-dominant-only ops on `ash` (DEBT-03 — mutate-then-return / guarded
-  bodies defer to vanilla).
-- **ES *workflows* (saga appliers) gated on BOTH foundations**
-  (`EVENT_SOURCING_WORKFLOW_BACKENDS` omits elixir, `system-checks.ts:1765`).
+**Formerly foundation-shaped gaps (all now emit on the only elixir foundation):**
+- ES aggregate storage — emits on plain Ecto/Phoenix.
+- `shape(document)` — emits on plain Ecto/Phoenix.
+- Provenance — emits on plain Ecto/Phoenix.
+- Return-dominant ops (DEBT-03 — mutate-then-return / guarded bodies).
+- ES *workflows* (saga appliers) — emits via
+  `src/generator/elixir/vanilla/workflow-eventsourced-emit.ts` +
+  `vanilla-eventsourced-workflow.ddd` under the `elixir-vanilla-build.yml` gate.
 
-**The fork (decide before building — `AskUserQuestion` in skill Phase 2/3):**
-Is "full parity" for these reached by **(a) foundation routing** — document the
-contract as "use `foundation: vanilla` for ES/document/provenance on Phoenix," and
-treat the ash gates as the deliberate, final answer — or **(b) Ash emission** —
-invest in an Ash-idiomatic fit (AshEvents/AshCommanded for ES, an Ash `:map`
-document, an Ash provenance extension)? The audit and prior decisions lean (a)
-("no idiomatic Ash fit"); (b) is months of work per the ES note.
+The original "(a) foundation routing vs (b) Ash emission" fork is **closed by
+removal**: there is no Ash backend, so (b) is gone and (a) is simply "the elixir
+backend." W4 lives on only as documentation of the final elixir feature set in
+[`platforms.md`](../platforms.md) and the [`generators.md`](../generators.md)
+matrix.
 
-- **If (a):** W4 is mostly docs + one targeted slice: **ES workflows on
-  `vanilla`** (a genuine emission gap — appliers + a per-aggregate stream saga
-  instead of the state-based saga the emitters currently key off
-  `correlationField` for). Add `elixir` to `EVENT_SOURCING_WORKFLOW_BACKENDS` for
-  vanilla only.
-- **If (b):** full skill run per feature with the simulator gate, since the Ash
-  shape is novel.
-
-**Skill:** full workflow — this is the one workstream with a real design decision;
-run `state-auditor` → `feature-reviewer` → **`feature-simulator` + user sign-off**
-before any compiler code. Ref: `proposals/workflow-and-applier.md`,
-`elixir-eventsourcing-vanilla-plan.md`, `phoenix-tph-emission.md`.
+**Skill:** none remaining — no design decision left now that Ash is removed. Ref:
+`elixir-eventsourcing-vanilla-plan.md`.
 
 ---
 
@@ -225,14 +216,14 @@ W0 (gate F1, hours)
  └─ W1 (python filters)         ┐
 W2 (provenance: java ∥ python)  ├─ independent, can run in parallel turns
 W3 (audit ops + lifecycle)      ┘
-W4 (elixir fork — decide first, then build)
+W4 (elixir — RESOLVED by Ash removal; docs only)
 W5 (guardrail + docs — after W1–W3 settle the gate sets)
 ```
 
 W0 is immediate and unblocks nothing else — do it first to close the correctness
 hole. W1–W3 are independent codegen-gap-fills (disjoint backend trees) and can be
-fanned out. W4 needs the foundation-routing decision before any code. W5 lands
-last so the meta-test reflects the final gate sets.
+fanned out. W4 is resolved by the Ash removal (docs only). W5 lands last so the
+meta-test reflects the final gate sets.
 
 ## Out of scope (not "backend parity")
 

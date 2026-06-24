@@ -17,8 +17,9 @@ Status: **mostly shipped; one niche variant dropped.**
   shape: Hono's `<Base>Repository.findAll()`, .NET's read-only
   `<Base>Repository : I<Base>Repository` (abstract C# base class + concrete
   inheritance; EF excludes the base via `modelBuilder.Ignore<Base>()` so each
-  concrete maps standalone), and Phoenix's `list_<bases>!/0` on the context
-  Ash.Domain (the union of the concrete `list_<concrete>!` reads). `Base id`
+  concrete maps standalone), and Phoenix's `list_<bases>/0` on the context
+  (the union of the concrete `list_<concrete>` reads; plain Ecto/Phoenix now that
+  the Ash foundation is removed). `Base id`
   refs under TPC stay rejected (ambiguous FK), so the readers expose `findAll`
   only — there is no polymorphic `findById` target.
 - **UNION-ALL `find all <Base>` over a MIXED hierarchy (Pattern 3 — a

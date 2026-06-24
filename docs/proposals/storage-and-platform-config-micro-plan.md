@@ -1,5 +1,7 @@
 # Foundation Plan: Storage + Platform Config Skeleton
 
+> **(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain Ecto/Phoenix only; `foundation: ash` is now a validation error.)** The Phoenix F7 adapter-seam work below (wrapping the Ash emitter as `ashPostgres`/`ash` and stubbing `ashCommanded`/`contexts`), and the `style: ash` menu value, describe options that no longer exist — vanilla Ecto/Phoenix is the sole elixir foundation.
+
 **Companion to:** [`storage-and-platform-config.md`](./storage-and-platform-config.md) (the RFC) and [`storage-and-platform-config-plan.md`](./storage-and-platform-config-plan.md) (the full implementation plan).
 **Audience:** Implementing agent. After this lands, multiple agents can pick up parallel work streams.
 

@@ -10,7 +10,7 @@
 // default is applied at the wire boundary when the client omits it, so the
 // field drops out of the request's required-set.  Each backend renders the
 // default in its native slot: Hono zod `.default(…)`, .NET record `= …`,
-// Phoenix Ash `default: …`.  The domain factory signature is unchanged —
+// Phoenix Ecto `field ... default: ...`.  The domain factory signature is unchanged —
 // the create input still names every field (see `wireCreateDefault`).
 
 import { describe, expect, it } from "vitest";
@@ -35,7 +35,7 @@ system Demo {
   resource catalogState { for: Catalog, kind: state, use: primarySql }
   deployable honoApi    { platform: node           contexts: [Catalog] dataSources: [catalogState] serves: ShopApi port: 3000 }
   deployable dotnetApi  { platform: dotnet         contexts: [Catalog] dataSources: [catalogState] serves: ShopApi port: 8080 }
-  deployable phoenixApi { platform: elixir { foundation: ash } contexts: [Catalog] dataSources: [catalogState] serves: ShopApi port: 4000 }
+  deployable phoenixApi { platform: elixir contexts: [Catalog] dataSources: [catalogState] serves: ShopApi port: 4000 }
 }
 `;
 
@@ -83,12 +83,13 @@ describe("defaulted aggregate — parameterized create (invariant gate)", () => 
     expect(domain).toMatch(/public static Counter Create\(int count, string label\)/);
   });
 
-  it("Phoenix: defaulted fields carry an Ash `default:` so they are optional input", async () => {
+  it("Phoenix: defaulted fields carry an Ecto `default:` so they are optional input", async () => {
     const files = await generateSystemFiles(FIXTURE);
-    const resource = findFile(files, /counter\.ex$/i)!;
-    // Ash applies the default on create when the attribute is omitted, so the
-    // field drops from the required-set — mirroring the Hono/.NET wire shape.
-    expect(resource).toMatch(/attribute :count, :integer, allow_nil\?: false, default: 0/);
-    expect(resource).toMatch(/attribute :label, :string, allow_nil\?: false, default: "untitled"/);
+    const schema = findFile(files, /counter\.ex$/i)!;
+    // Ecto applies the schema default when the field is omitted from the
+    // changeset, so it drops from the required-set — mirroring the Hono/.NET
+    // wire shape.
+    expect(schema).toMatch(/field :count, :integer, default: 0/);
+    expect(schema).toMatch(/field :label, :string, default: "untitled"/);
   });
 });

@@ -246,14 +246,13 @@ Two tiers:
   generated chart — so a CI cell needs only those three vars. Heavier (it
   builds container images), so it is **not** per-PR — the `k8s-e2e.yml`
   workflow **fans it across every backend** as a matrix (one cell per backend,
-  in parallel): hono / dotnet / python / java / phoenix-Ash over the dedicated,
+  in parallel): hono / dotnet / python / java over the dedicated,
   auth-free `scripts/k8s-e2e/k8s-smoke.ddd` (a trivial `Widget` CRUD), plus
-  phoenix-**vanilla** over `examples/tasks-vanilla.ddd`. Runs nightly, on the
+  phoenix over `examples/tasks-vanilla.ddd`. Runs nightly, on the
   `e2e-k8s` PR label, or by manual dispatch. Run locally with
-  `kind create cluster && npm run test:k8s-e2e`. (Making the vanilla-Elixir
-  foundation deployable at all — a Dockerfile, a release that runs
-  `Ecto.Migrator` at boot, and `server: true` — is part of the generator; the
-  Ash path already had it.)
+  `kind create cluster && npm run test:k8s-e2e`. (Making the Elixir deployable
+  deployable at all — a Dockerfile, a release that runs `Ecto.Migrator` at boot,
+  and `server: true` — is part of the generator.)
 
 ## Implementation
 

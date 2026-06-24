@@ -1,7 +1,6 @@
 // ---------------------------------------------------------------------------
 // Vanilla custom-find HTTP surface — `GET /<plural>/<find>` per repository
-// `find`, matching the Ash path (`elixir/api-emit.ts`) so the same `.ddd`
-// yields the same OpenAPI on either foundation.  The context already exposes a
+// `find`.  The context already exposes a
 // `<find>_<agg>` delegate (for workflow `repo-let`); this adds the route +
 // controller action that calls it and serialises the result.
 //

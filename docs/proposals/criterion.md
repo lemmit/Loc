@@ -732,7 +732,7 @@ queries, and projections.
   populate `<select>` elements. Caching strategy + revalidation
   rules need to be decided (per-render? per-session? on-demand?).
 - **Per-backend `Repo.findAll` emission.** TS / Drizzle, .NET / EF Core,
-  Phoenix / Ash each need the generic `list(criterion, sort, page,
+  Phoenix / Ecto each need the generic `list(criterion, sort, page,
   loads)` translation. Existing find emission machinery extends.
 - **Sort and Page literal syntax in the grammar.** `[name asc,
   createdAt desc]` for Sort; `{ offset, limit }` for Page. New
@@ -789,7 +789,7 @@ stable).
   page → LIMIT/OFFSET; loads → JOINs / SELECT-includes / EntityGraph.
 - TS / Drizzle: typed query builder.
 - .NET / EF Core: IQueryable chain.
-- Phoenix / Ash: query DSL.
+- Phoenix / Ecto: `Ecto.Query` DSL.
 - UI form-generator: auto-derives options from criterion's predicate
   + repository at the binding site.
 
@@ -874,7 +874,7 @@ or after the find-variant re-shape.
   translation.
 - `src/generator/dotnet/`: criterion → EF Core IQueryable;
   Sort/Page/loads translation.
-- `src/generator/phoenix/`: criterion → Ash query DSL;
+- `src/generator/elixir/`: criterion → `Ecto.Query` DSL;
   Sort/Page/loads translation.
 - UI: React form-generator reads criterion metadata; populates
   `<select>` from predicate-query results.

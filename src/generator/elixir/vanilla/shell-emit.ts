@@ -1,15 +1,14 @@
 // ---------------------------------------------------------------------------
-// Vanilla shell renderers — plain Phoenix + Ecto skeleton.  No Ash deps,
-// no AshPhoenix, no AshPostgres.  Slice 0 of vanilla-foundation-tdd-plan.md:
-// emit a minimal project that `mix compile --warnings-as-errors` accepts.
+// Shell renderers — plain Phoenix + Ecto skeleton.  Slice 0 of
+// vanilla-foundation-tdd-plan.md: emit a minimal project that
+// `mix compile --warnings-as-errors` accepts.
 // Slice 1: router now accepts per-aggregate routes spliced into /api.
-// Observability port (parity with the Ash shell): the foundation-
-// agnostic `renderApplication` / `renderLogFormatter` / `renderTelemetry`
-// in `../shell/runtime.ts` + `../telemetry-emit.ts` are now wired through
-// here so vanilla emits the same cross-backend log-event catalog
-// (`server_starting` / `_listening` / `_shutdown` / `_drained` +
+// Observability: `renderApplication` / `renderLogFormatter` /
+// `renderTelemetry` in `../shell/runtime.ts` + `../telemetry-emit.ts` are
+// wired through here so the backend emits the same cross-backend log-event
+// catalog (`server_starting` / `_listening` / `_shutdown` / `_drained` +
 // `request_start` / `_end`) over the same JSON-per-line envelope as the
-// Ash, Hono, .NET, Java, and Python backends.
+// Hono, .NET, Java, and Python backends.
 // ---------------------------------------------------------------------------
 
 import { AUTH_BASE_PATH } from "../../../util/api-base.js";
@@ -56,9 +55,8 @@ export function emitVanillaShellFiles(
   // `server_drained` events at the supervisor boundary.  Its children
   // list references `${appModule}.Repo`, `Phoenix.PubSub`,
   // `${appModule}.Telemetry`, `${appModule}Web.Endpoint` — vanilla
-  // emits each of those (Telemetry is now at lib/<app>/telemetry.ex,
-  // not lib/<app>_web/telemetry.ex, matching the Ash convention so a
-  // single `renderApplication` works for both foundations).
+  // emits each of those (Telemetry is at lib/<app>/telemetry.ex,
+  // not lib/<app>_web/telemetry.ex).
   out.set(`lib/${appName}/application.ex`, renderApplication(appName, appModule));
   out.set(`lib/${appName}/repo.ex`, renderVanillaRepo(appName, appModule));
   // Cross-backend log envelope — `<App>.LogFormatter` renders one JSON
@@ -68,11 +66,11 @@ export function emitVanillaShellFiles(
   out.set(`lib/${appName}/log_formatter.ex`, renderLogFormatter(appModule));
   // Catalog `:telemetry` translator — attaches to Phoenix endpoint
   // events and emits `request_start` / `request_end` over the JSON
-  // envelope.  `emitTrace: false` keeps the Ash domain-trace handlers
-  // off vanilla (they reference `[:ash, …]` events vanilla never raises).
-  out.set(`lib/${appName}/telemetry.ex`, renderTelemetry({ appName, appModule, emitTrace: false }));
+  // envelope.  `emitTrace: false` omits domain-trace handlers that would
+  // reference `[:ash, …]` telemetry events the plain backend never raises.
+  out.set(`lib/${appName}/telemetry.ex`, renderTelemetry({ appName, appModule }));
   // Ambient execution-context carrier (Logger.metadata) — the Plug is mounted
-  // in the endpoint after Plug.RequestId; shared with the ash foundation.
+  // in the endpoint after Plug.RequestId.
   out.set(`lib/${appName}/request_context.ex`, renderRequestContext(appModule));
   out.set(`lib/${appName}_web.ex`, renderVanillaWebModule(appName, appModule, hasLiveView));
   out.set(`lib/${appName}_web/endpoint.ex`, renderVanillaEndpoint(appName, appModule, hasLiveView));
@@ -82,9 +80,8 @@ export function emitVanillaShellFiles(
   );
   // LiveView spine files — only when a HEEx `ui:` is mounted.  The
   // CoreComponents library + layouts (module + root/app HEEx) + the Nav
-  // on_mount hook are all foundation-neutral, so they reuse the shared Ash
-  // shell renderers verbatim.  Omitted on a JSON-API-only deployable (no
-  // LiveView dep to support them).
+  // on_mount hook reuse the shared shell renderers.  Omitted on a
+  // JSON-API-only deployable (no LiveView dep to support them).
   if (hasLiveView) {
     out.set(`lib/${appName}_web/components/core_components.ex`, renderCoreComponents(appModule));
     out.set(`lib/${appName}_web/components/layouts.ex`, renderLayouts(appName, appModule));
@@ -116,20 +113,18 @@ function renderVanillaMixExs(
 ): string {
   // LiveView dep — only when the deployable mounts a HEEx `ui:`.
   // `phoenix_html` is already in the base set; LiveView adds
-  // `phoenix_live_view` (the `~H`/`live` runtime).  Pinned to the same
-  // `~> 1.0` the Ash shell uses (shell/project.ts:68).
+  // `phoenix_live_view` (the `~H`/`live` runtime).  Pinned to `~> 1.0`.
   const liveViewDep = hasLiveView ? `,\n      {:phoenix_live_view, "~> 1.0"}` : "";
   // Resource-adapter hex deps (s3 → ex_aws_s3, rabbitmq → amqp, restApi →
   // req) ride alongside the core Phoenix/Ecto set.  Sorted for stable output.
-  // Values already include the surrounding `"…"` (matching the Ash
-  // precedent in `shell/project.ts:renderMixExs`).
+  // Values already include the surrounding `"…"`.
   const extraBlock = Object.keys(extraHexDeps)
     .sort()
     .map((k) => `,\n      {:${k}, ${extraHexDeps[k]}}`)
     .join("");
   // The generated Auth plug verifies the Bearer JWT with JOSE and fetches the
   // issuer's JWKS over the built-in `:httpc` (`:inets`/`:ssl`) — added only when
-  // an `auth { oidc }` block is present, mirroring the Ash `renderMixExs`.
+  // an `auth { oidc }` block is present.
   const oidcDep = oidc ? `,\n      {:jose, "~> 1.11"}` : "";
   const oidcApps = oidc ? ", :inets, :ssl" : "";
   return `# Auto-generated.
@@ -415,7 +410,6 @@ ${liveLines}
     : "";
   // Auth plug in the :api pipeline — populates `conn.assigns.current_user` from
   // the Bearer JWT so principal (tenancy) filters can scope reads by the actor.
-  // Mirrors the Ash router (`shell/runtime.ts`).
   const authApiPlug = authEnabled ? `\n    plug ${appModule}Web.Auth` : "";
   // `/api/auth/me` session probe (+ OIDC login/callback/logout handshake when an
   // `auth { oidc }` block is present).  Piped through :api so the Auth plug
@@ -465,9 +459,8 @@ defmodule ${appModule}Web.HealthController do
   use ${appModule}Web, :controller
 
   @moduledoc """
-  Liveness and readiness probes — parity with the Ash foundation and the other
-  backends, and with the k8s chart, which probes /health for liveness and
-  /ready for readiness.
+  Liveness and readiness probes — parity with the other backends and with
+  the k8s chart, which probes /health for liveness and /ready for readiness.
 
   GET /health — cheap liveness check; always 200 while the BEAM is running.
   GET /ready  — DB-aware readiness check; 503 when the database is unreachable.

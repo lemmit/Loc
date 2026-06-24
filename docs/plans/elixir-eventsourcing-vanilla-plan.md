@@ -1,9 +1,19 @@
-# Event sourcing on the Elixir **vanilla** foundation (T2.b / D-VANILLA-ES-HOME)
+# Event sourcing on the Elixir foundation (T2.b / D-VANILLA-ES-HOME)
 
-> **Status:** PLAN — code-verified against `origin/main` 2026-06-15. Expands the
+> **Status:** LANDED / superseded (de-Ash effort, 2026). The slices below shipped
+> (P4.0–P4.2 done), and the **Ash foundation has since been removed entirely**:
+> `platform: elixir` now generates Phoenix LiveView on **plain Ecto/Phoenix**,
+> `foundation: vanilla` is the default and only valid value, and `foundation: ash`
+> is a validation error. The foundation-aware ES gate this plan introduced (accept
+> `elixir+vanilla`, reject `elixir+ash`) collapses accordingly: there is no Ash
+> elixir host to reject, so ES on elixir is simply ES on the only elixir foundation.
+> Retained as the implementation record; the ash-vs-vanilla discrimination it
+> describes was the pre-removal state.
+>
+> Code-verified against `origin/main` 2026-06-15. Expands the
 > one-paragraph "(Later) P4" stub in
 > [`vanilla-foundation-tdd-plan.md`](./vanilla-foundation-tdd-plan.md) into the
-> concrete, ordered, CI-gated slices T2.b needs. Owning proposals:
+> concrete, ordered, CI-gated slices T2.b needed. Owning proposals:
 > [`vanilla-phoenix-foundation`](../proposals/vanilla-phoenix-foundation.md)
 > (D-VANILLA-ES-HOME) and [`workflow-and-applier`](../proposals/workflow-and-applier.md)
 > (appliers A2). The global plan's near-term #2.

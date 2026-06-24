@@ -208,6 +208,14 @@ code.
 
 ## 6. The Phoenix keystone — where this note and the Ecto note meet
 
+> **(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain
+> Ecto/Phoenix only and `foundation: ash` is now a validation error. The "Domain
+> layer: Ash vs Ecto" axis below has therefore collapsed to a single point — Ecto
+> (vanilla) — so the `(ash|ecto)` / `domain axis: ash` annotations in this section
+> are historical. The framework-axis decomposition this note actually owns
+> (LiveView vs embedded React) is unaffected. Note: `design: ashPhoenix` below is
+> a HEEx **design pack**, not the Ash foundation — it stays.)**
+
 Phoenix is the test case that *validates* the whole decomposition, because
 `phoenixLiveView` is the most-fused keyword in the system: it froze **two** axes
 plus the host into a single point.

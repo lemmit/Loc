@@ -1,6 +1,6 @@
 // Workflow own-state COMPOUND mutation (`field += value` / `field -= value`)
 // on the VANILLA (Ecto, non-Ash) Phoenix foundation — the sibling of
-// test/e2e/fixtures/elixir-ash-build/workflow-compound-assign.ddd.  The saga
+// the former workflow-compound-assign fixture.  The saga
 // dispatcher's create + continuation handlers persist each compound write as a
 // `Repo.update!(Ecto.Changeset.change(state, %{field: <state.field +|- value>}))`,
 // type-correct per operand: int → `state.attempts + 1`, money →

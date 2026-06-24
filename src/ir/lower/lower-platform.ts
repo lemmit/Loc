@@ -28,9 +28,8 @@ export function qualifyDesign(raw: string | undefined, fallback: BuiltinPackFami
   return parsed ? parsed.qualified : value;
 }
 
-/** Default values for the three greenfield realization axes
- *  (D-REALIZATION-AXES) — the axes with no adapter infra yet, so each has
- *  a single current value per platform.  Only `foundation` remains greenfield;
+/** Default values for the greenfield realization axes (D-REALIZATION-AXES) —
+ *  the axes with no adapter infra yet.  Only `foundation` remains greenfield;
  *  `application`/`persistence`/`directoryLayout`/`transport`/`runtime` source
  *  their defaults from the live adapter menu (`defaultsFor`) — `transport` and
  *  `runtime` joined them when promoted to adapter axes
@@ -41,11 +40,9 @@ export function greenfieldAxisDefaults(platform: Platform): {
 } {
   void platform;
   return {
-    // Every backend — elixir included — defaults to `vanilla` (no
-    // framework).  The elixir flip from `ash` to `vanilla` landed per
-    // D-VANILLA-DEFAULT: `platform: elixir` with no explicit `foundation:`
-    // now generates plain Phoenix LiveView on Ecto.  An explicit
-    // `foundation: ash` opts back into the Ash data layer + action surface.
+    // Every backend defaults to `vanilla` (no framework foundation).  For
+    // elixir this means `platform: elixir` generates plain Phoenix LiveView on
+    // Ecto — the only foundation it supports.
     foundation: "vanilla",
   };
 }
@@ -59,27 +56,6 @@ export function greenfieldAxisDefaults(platform: Platform): {
  *  source: `family` equals the bareword, so all `platform === "…"`
  *  logic is unchanged; `platformRef` is additive (dispatch keys
  *  on `platform`). */
-
-/** Per-foundation overrides of the adapter-axis defaults
- *  (D-REALIZATION-AXES; docs/plans/realization-axes-alignment.md).
- *
- *  Elixir's `adapterDefaults()` encode the ASH data layer + style
- *  (`ashPostgres` / `ash`), but post D-VANILLA-DEFAULT the default foundation
- *  is `vanilla`, which implies its own data layer + application style even
- *  though `vanilla` *owns* no axis (FOUNDATION_OWNED_AXES) — so the
- *  omitted-knob (and explicit-`vanilla`) path overrides them: `elixir` +
- *  `vanilla` ⇒ plain Ecto + the `layered` style (DSL `serviceLayer`: plain
- *  Phoenix's controller → context → repository pipeline).  An explicit
- *  `foundation: ash` returns `{}` and resolves the base `ash` defaults. */
-export function foundationAdapterOverride(
-  platform: Platform,
-  foundation: string | undefined,
-): { style?: string; persistence?: string } {
-  if (platform === "elixir" && foundation === "vanilla") {
-    return { style: "layered", persistence: "ecto" };
-  }
-  return {};
-}
 
 export function qualifyPlatform(raw: string | undefined): {
   family: Platform;

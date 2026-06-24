@@ -1,0 +1,60 @@
+// DestroyForm + rich page form fields on the vanilla (plain Ecto) LiveView
+// backend — a port of the former destroy-form fixture.  A detail page hosts a
+// `DestroyForm(of: Widget)` (delete `<.button>` + hoisted `destroy_widget`
+// handle_event + `~p"/widgets"` post-delete nav) plus the full field-primitive
+// set (Field/NumberField/PasswordField/MultilineField/SelectField/Toggle/Tabs).
+// `with crudish` gives Widget the canonical `destroy` action DestroyForm calls.
+system DestroyDemo {
+  subdomain Catalog {
+    context Inventory {
+      aggregate Widget with crudish {
+        name: string
+      }
+    }
+  }
+
+  api InventoryApi from Catalog
+  storage primary { type: postgres }
+  resource invState { for: Inventory, kind: state, use: primary }
+
+  ui Admin {
+    page Widgets {
+      route: "/widgets"
+      body: Stack { Heading { "Widgets" } }
+    }
+    page WidgetDetail(id: Widget id) {
+      route: "/widgets/:id"
+      state {
+        draft: string = ""
+        count: int = 0
+        pw: string = ""
+        notes: string = ""
+        region: string = "EU"
+        active: bool = false
+      }
+      body: Stack {
+        Heading { "Widget" },
+        Field("Name", bind: draft),
+        NumberField("Count", bind: count),
+        PasswordField("Secret", bind: pw),
+        MultilineField("Notes", bind: notes),
+        SelectField("Region", bind: region, options: ["EU", "US"]),
+        Toggle("Active", bind: active),
+        Tabs {
+          Tab("Overview", Text { "the overview" }),
+          Tab("Settings", Stack { Text { "the settings" } })
+        },
+        DestroyForm(of: Widget)
+      }
+    }
+  }
+
+  deployable phoenixApp {
+    platform: elixir { foundation: vanilla }
+    contexts: [Inventory]
+    dataSources: [invState]
+    serves: InventoryApi
+    ui: Admin
+    port: 4000
+  }
+}

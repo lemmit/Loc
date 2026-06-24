@@ -279,8 +279,8 @@ function collectContextsFor(
   // Concretes always stay; the per-aggregate emit loop skips abstract bases
   // for repo/routes regardless, so a kept TPH base only contributes its table.
   // TPH storage is implemented on Hono (Drizzle shared table), .NET (EF Core
-  // `HasDiscriminator`), Phoenix (Ash shared-table multi-resource +
-  // `base_filter` on `kind`), Python, and Java (JPA SINGLE_TABLE); all keep
+  // `HasDiscriminator`), Phoenix (Ecto shared table with a `kind` discriminator
+  // column), Python, and Java (JPA SINGLE_TABLE); all keep
   // the base so it can own the shared table.
   const isTphCapable =
     d.platform === "node" ||
@@ -295,7 +295,7 @@ function collectContextsFor(
   // per-aggregate emit loop skips abstract aggregates), but so the base-reader
   // pass can see it and emit `find all <Base>`: Hono delegates to the concrete
   // Drizzle repositories, .NET to the concrete EF repositories (returning the
-  // abstract-base union type), Phoenix to the concrete Ash reads.  Frontend
+  // abstract-base union type), Phoenix to the concrete Ecto reads.  Frontend
   // platforms never host a context, so they never reach here.
   const keepsForBaseReader = (a: { isAbstract?: boolean; inheritanceUsing?: string }) =>
     !!a.isAbstract && a.inheritanceUsing === "ownTable";

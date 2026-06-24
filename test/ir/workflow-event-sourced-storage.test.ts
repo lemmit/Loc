@@ -42,19 +42,8 @@ const mkVanilla = (eventSourced: boolean): string =>
 
 describe("event-sourced workflow storage gate", () => {
   // The Hono (node) + .NET (dotnet) + Python (FastAPI) + Java (Spring) backends
-  // and elixir-vanilla now emit the event-sourced workflow runtime, so the gate
-  // does NOT fire there; the rest stay gated.  The Ash foundation has no
-  // pure-ES fit → still gated (post D-VANILLA-DEFAULT ash is the explicit
-  // opt-in; the bare default is now vanilla, the ES home — tested below).
-  it("errors when an eventSourced workflow is hosted by elixir + foundation: ash", async () => {
-    const diags = await diagnose(mk("elixir { foundation: ash }", true));
-    const gate = diags.find((d) => d.code === "loom.event-sourced-workflow-unsupported");
-    expect(gate, "expected the ES-workflow gate to fire on the Ash foundation").toBeDefined();
-    expect(gate?.severity).toBe("error");
-    expect(gate?.message).toContain("Tally");
-    expect(gate?.message).toContain("eventSourced");
-  });
-
+  // and elixir (vanilla) now emit the event-sourced workflow runtime, so the
+  // gate does NOT fire there.
   for (const plat of ["node", "dotnet", "python", "java"]) {
     it(`is supported on ${plat} — no gate error`, async () => {
       const diags = await diagnose(mk(plat, true));

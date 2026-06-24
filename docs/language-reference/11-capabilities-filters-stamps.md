@@ -81,13 +81,13 @@ Optional<Order> findById(@Param("id") OrderId id);
 
 > **Python — honest gap.** A *principal-referencing* filter on a Python deployable fails fast with `loom.context-filter-unsupported`:
 > `Deployable 'apiPython' (platform python) hosts aggregate 'Sales.Order' with a 'filter' capability predicate that references currentUser … principal-referencing capability filters are not yet wired on the python backend.`
-> Non-principal filters on relational aggregates (e.g. `filter !this.isDeleted`, below) **are** emitted on Python. Host a tenancy-filtered aggregate on a `.NET` / `node` / `java` / `elixir-Ash` deployable.
+> Non-principal filters on relational aggregates (e.g. `filter !this.isDeleted`, below) **are** emitted on Python. Host a tenancy-filtered aggregate on a `.NET` / `node` / `java` / `elixir` deployable.
 
 > **Deferred intersection.** One shape stays gated by `loom.context-filter-unsupported` on the query-layer backends (node / java / phoenix): a principal predicate on a **non-relational** (`shape(document)` / `shape(embedded)`) aggregate — binding the request actor *and* reaching into a jsonb column on the always-on read path. **.NET handles it** (EF's `HasQueryFilter` resolves the principal and queries jsonb transparently — the one backend with no deferred filter cases). See [`../capabilities.md`](../capabilities.md#deferred-cases).
 
 ### Reifying a named `criterion`
 
-A filter that is *exactly* one named [`criterion`](../criterion.md) (`filter NotDeleted`) **reifies** instead of inlining: Hono calls the module-level `<name>Criterion` predicate fn and Phoenix references an Ash boolean calculation (`base_filter expr(active)`), deduped with any find/retrieval consumers of the same criterion. Behaviour-identical to the inline form; only the code organisation differs.
+A filter that is *exactly* one named [`criterion`](../criterion.md) (`filter NotDeleted`) **reifies** instead of inlining: Hono calls the module-level `<name>Criterion` predicate fn and Phoenix references a shared Ecto query fragment (a `<name>_criterion/0` dynamic), deduped with any find/retrieval consumers of the same criterion. Behaviour-identical to the inline form; only the code organisation differs.
 
 ## `stamp onCreate|onUpdate { … }` — lifecycle assignments
 
@@ -230,8 +230,8 @@ rows = (await self._session.execute(select(ItemRow).where(not_(ItemRow.is_delete
 ```
 == elixir
 ```elixir
-# lib/<app>/inventory/item.ex — Ash base_filter inside resource do … end
-base_filter expr(not is_deleted)
+# lib/<app>/inventory.ex — Ecto where clause threaded onto every read
+from(i in Item, where: not i.is_deleted)
 ```
 ::: end
 
@@ -279,22 +279,20 @@ def _stamp_on_update(self, current_user: User) -> None:
 ```
 == elixir
 ```elixir
-# lib/<app>/inventory/item.ex — Ash changes block; principal read off the threaded actor
-changes do
-  change fn changeset, context ->
-      current_user = context.actor
-      changeset
-      |> Ash.Changeset.force_change_attribute(:created_at, DateTime.utc_now())
-      |> Ash.Changeset.force_change_attribute(:created_by, current_user.id)
-    end,
-    on: [:create]
-  change fn changeset, context ->
-      current_user = context.actor
-      changeset
-      |> Ash.Changeset.force_change_attribute(:updated_at, DateTime.utc_now())
-      |> Ash.Changeset.force_change_attribute(:updated_by, current_user.id)
-    end,
-    on: [:create, :update]   # onUpdate also fires on insert → NOT-NULL updated_* filled
+# lib/<app>/inventory.ex — Ecto changeset stamps; principal read off the threaded actor
+def stamp_on_create(changeset, current_user) do
+  changeset
+  |> Ecto.Changeset.put_change(:created_at, DateTime.utc_now())
+  |> Ecto.Changeset.put_change(:created_by, current_user.id)
+  # onUpdate also fires on insert → NOT-NULL updated_* filled
+  |> Ecto.Changeset.put_change(:updated_at, DateTime.utc_now())
+  |> Ecto.Changeset.put_change(:updated_by, current_user.id)
+end
+
+def stamp_on_update(changeset, current_user) do
+  changeset
+  |> Ecto.Changeset.put_change(:updated_at, DateTime.utc_now())
+  |> Ecto.Changeset.put_change(:updated_by, current_user.id)
 end
 ```
 ::: end

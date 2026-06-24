@@ -72,7 +72,7 @@ system DevPlatform {
 
             event ProjectArchived { project: Project id, at: datetime }
 
-            aggregate Project ids guid with crudish {
+            aggregate Project ids guid shape(embedded) with crudish {
                 name: string
                 description: string?
                 visibility: Visibility
@@ -475,7 +475,7 @@ system DevPlatform {
     }
 
     deployable phoenixApi {
-        platform: elixir { foundation: ash }
+        platform: elixir { foundation: vanilla }
         contexts: [Catalog, Builds, People]
         dataSources: [catalogState, buildsState, peopleState]
         serves: ProjectsApi, DeliveryApi, AccountsApi

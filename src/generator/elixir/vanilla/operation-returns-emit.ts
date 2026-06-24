@@ -8,8 +8,8 @@
 // Vanilla's natural carrier is a tagged tuple — the context function returns
 // `{:ok, value} | {:error, <tag>, data_map}`, and the controller `case`s on it.
 // No per-variant struct module is needed (the data rides as a plain map, the
-// same RFC-7807 §3.2 extension shape the other backends emit).  `foundation:
-// ash` stays gated; only `vanilla` un-gates (`validateOperationReturnsUnimplemented`).
+// same RFC-7807 §3.2 extension shape the other backends emit).  The elixir
+// backend emits these un-gated (`validateOperationReturnsUnimplemented`).
 // ---------------------------------------------------------------------------
 
 import { variantTag } from "../../../ir/stdlib/unions.js";
@@ -349,8 +349,7 @@ export function renderReturningStmt(
       return `    _ = ${renderExpr(s.expr, rc)}`;
     case "call": {
       // `f(args)` — a bare call to a domain `function` / private-operation.
-      // The vanilla schema module does NOT emit aggregate `function` helpers
-      // (unlike the Ash resource, which exposes them as `def <name>(record,…)`),
+      // The schema module does NOT emit aggregate `function` helpers,
       // so there is no callable target here.  A bare call discards its result
       // anyway (the value form rides `let`/`assign` instead), so this lowers to
       // a no-op that still threads `record` — keeping the body compilable under

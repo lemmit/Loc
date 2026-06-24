@@ -1,0 +1,68 @@
+// Ref collections (`X id[]`) + collection mutation + `.contains` on the vanilla
+// (plain Ecto) backend — a port of the former roster fixture.  Exercises
+// `Pokemon id[]` association fields, `+=`/`-=` collection mutation in operations,
+// a `.contains(arg)` find filter, an owned `contains badges: Badge[]`
+// containment, a reified criterion + retrieval, and a workflow `for` loop over a
+// paged repository run.
+system Roster {
+  subdomain Roster {
+    context Roster {
+      aggregate Pokemon {
+        species: string
+        derived display: string = species
+        level: int
+        invariant level >= 1
+        invariant level <= 100
+      }
+      aggregate Trainer {
+        name: string
+        derived display: string = name
+        party: Pokemon id[]
+        caught: Pokemon id[]
+        verified: bool
+        contains badges: Badge[]
+        entity Badge {
+          name: string
+        }
+        invariant party.count <= 6
+        operation verify() { verified := true }
+        operation addToParty(pokemon: Pokemon id) {
+          precondition party.count < 6
+          party += pokemon
+          caught += pokemon
+        }
+        operation removeFromParty(pokemon: Pokemon id) {
+          precondition party.count > 0
+          party -= pokemon
+        }
+      }
+      repository Trainers for Trainer {
+        find holdingInParty(pokemon: Pokemon id): Trainer[]
+            where this.party.contains(pokemon)
+      }
+      criterion NamedLike(needle: string) of Trainer = name == needle
+      retrieval ByName(needle: string) of Trainer {
+        where: NamedLike(needle)
+        sort:  [name asc]
+      }
+      workflow verifyByName {
+        create(needle: string) {
+          let matched = Trainers.run(ByName(needle), page: { offset: 0, limit: 100 })
+          for t in matched {
+            t.verify()
+          }
+        }
+      }
+    }
+  }
+  api RosterApi from Roster
+  storage primary { type: postgres }
+  resource rosterState { for: Roster, kind: state, use: primary }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Roster]
+    dataSources: [rosterState]
+    serves: RosterApi
+    port: 4000
+  }
+}

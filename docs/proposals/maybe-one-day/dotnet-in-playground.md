@@ -655,7 +655,7 @@ the unblocking ingredient.
    critical path. Could be a "phase 6" if the Dapper path proves
    the architecture and someone wants the next jump in fidelity.
 6. **Phoenix.** This proposal is .NET-specific, but the same playground
-   question applies to Phoenix (Elixir/Ash). The BEAM in browser is
+   question applies to Phoenix (plain Ecto/Phoenix on Elixir). The BEAM in browser is
    experimental at best today (lumen/atomvm). Far less mature than
    Blazor WASM. Probably stays inert in the playground for the
    foreseeable future.

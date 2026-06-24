@@ -43,7 +43,7 @@ const FIXTURE_SOURCE = `system PhoenixShop {
   api StoreApi from Store
 
   deployable shopBackend {
-    platform: elixir { foundation: ash },
+    platform: elixir { foundation: vanilla },
     contexts: [Store],
     serves: StoreApi,
     port: 4000

@@ -1243,14 +1243,17 @@ errors across the whole tree) without needing deps. It does **not** catch
 `--warnings-as-errors` traps (unused alias/var, undefined refs) or Ash
 semantics — so write the emitters defensively (fully-qualified module refs so
 no unused `alias`; underscore statically-unused vars; `require Logger` only
-where a `Logger` macro is used) and treat the **`build-generated-elixir-ash` CI
-job as the authoritative gate**. On #1020 the local syntax pass + careful
+where a `Logger` macro is used) and treat the **elixir-vanilla compile CI
+job as the authoritative gate**. (The Ash foundation has since been removed;
+`platform: elixir` compiles against plain Ecto/Phoenix.) On #1020 the local syntax pass + careful
 emission got it green on the first CI compile.
 
 Lesson: in this sandbox, curl ≠ Erlang/httpc for outbound TLS. Don't assume a
 toolchain that "has network" can fetch — check the *specific* client.
 
 ## Ash's action model keeps not fitting Loom's imperative persistence — the saga state is deliberately Ecto, not Ash
+
+**(Superseded 2026: the "open product question" below was resolved by removing the Ash foundation entirely — `platform: elixir` now generates plain Ecto/Phoenix only, and `foundation: ash` is a validation error. The friction log is kept for the historical rationale.)**
 
 Recurring theme, now with a third data point. Loom's Phoenix backend models
 **aggregates** as full `Ash.Resource` (AshPostgres data layer), but several
@@ -1416,7 +1419,8 @@ toolchain or runs in a container:
   (matches the `net10.0` target); `dotnet restore` + `dotnet build /warnaserror`
   are clean. NuGet sails through the egress proxy.
 - **Phoenix/Elixir** — `mix deps.get && mix compile --warnings-as-errors` in the
-  `hexpm/elixir` image, against real Ash 3.x.
+  `hexpm/elixir` image, against the vanilla Ecto/Phoenix dep set. (The Ash
+  foundation was removed; `platform: elixir` now generates plain Ecto/Phoenix.)
 
 ### The gotcha: egress proxies that allowlist by TLS fingerprint
 

@@ -22,9 +22,9 @@
 | **`extern-component-escape-hatch.md`** | **Tier 1 React SHIPPED (PR #802) — consumes `wireShape`-derived props interface today** | **Real conflict — see Action below** |
 | `extern-function-hook-escape-hatch.md` | PROPOSED | Hypothetical until shipped |
 | `channels.md` | Slice 1 surface + IRs shipped (#797); `DomainEventDispatcher` is the in-process emit path (Hono #970, .NET #1012, Phoenix #1020 — all shipped) | Handler `emit` syntax inherits today's path; transparent |
-| `criterion.md` | Core shipped; filter-capability targeting on Hono/Drizzle (#760) + Phoenix/Ash (#762) shipped | queryHandler scaffold coordinates with existing API |
+| `criterion.md` | Core shipped; filter-capability targeting on Hono/Drizzle (#760) + Phoenix (#762) shipped | queryHandler scaffold coordinates with existing API |
 | `reified-criteria.md` | Retrieval + find criteria reified on all 4 backends (#890/#901/#910/#926/#936/#943/#952/#955/#963/#964) | queryHandler bodies dispatch through existing `Repo.run`/`Repo.findAll(criterion)` |
-| `retrieval.md` | Surface + IR + lowering + validation shipped (#794); `Run<Name>Async` shipped on .NET (#810), Hono (#952), Phoenix/Ash (#955) | queryHandler scaffolds target `Repo.run(R(args), page?)` — known API |
+| `retrieval.md` | Surface + IR + lowering + validation shipped (#794); `Run<Name>Async` shipped on .NET (#810), Hono (#952), Phoenix (#955) | queryHandler scaffolds target `Repo.run(R(args), page?)` — known API |
 | `validation-error-extension.md` | Hono (#782) + .NET (#829) shipped | RFC 7807 `errors[]` is response-shape only; no friction |
 | `frontend-acl.md` | Phases 1+2 shipped (#769) | Form catch blocks don't touch wireShape |
 | `loom-forms.md` | PROPOSED | Aligns with my proposal (both: operation params IS input shape) |
@@ -46,7 +46,7 @@ Migration is straightforward but not free: switch the props emitter from `wireSh
 
 **2. Backend DTO emitters on all four platforms are shipped and consume `wireShape`.**
 
-The proposal's Migration story Phase 1 treats DTO emitter migration as a single bullet, but each backend (Hono in `src/generator/typescript/`, .NET in `src/generator/dotnet/dto-mapping.ts`, Elixir/Ash in `src/generator/elixir/`, React Zod in `src/generator/react/api-builder.ts`) has its own emitters with their own conformance tests.
+The proposal's Migration story Phase 1 treats DTO emitter migration as a single bullet, but each backend (Hono in `src/generator/typescript/`, .NET in `src/generator/dotnet/dto-mapping.ts`, Elixir in `src/generator/elixir/`, React Zod in `src/generator/react/api-builder.ts`) has its own emitters with their own conformance tests.
 
 **Action**: Phase 1 itemises as four independent slices (one per backend) so each can ship and be CI-gated independently. The cross-backend wire parity tests (`test/generator/{hono,dotnet}/*-wire-conformance.test.ts`) gate the migration: emitted output must match pre-migration byte-for-byte for the macro-form `api X from Subdomain` case (no unfolded contracts in test).
 

@@ -1,8 +1,7 @@
 // ---------------------------------------------------------------------------
 // Vanilla foundation — `retrieval` emission (retrieval.md).
 //
-// On `foundation: vanilla` a retrieval is a plain Ecto query module — no
-// Ash read action, no `Ash.Query.filter`.  One module per retrieval at
+// A retrieval is a plain Ecto query module.  One module per retrieval at
 // `lib/<app>/<ctx>/retrievals/<retrieval>.ex`:
 //
 //     defmodule <App>.<Ctx>.Retrievals.<Name> do
@@ -22,9 +21,9 @@
 // `Context.run_<ret>_<agg>(args..., page: [limit:, offset:])`.
 //
 // The `where` predicate uses `filterArgs: true` + `foundation: "vanilla"`
-// so a declared retrieval param renders as Ecto's `^name` pin form (not
-// Ash's `^arg(:name)` read-action binding), and an `enum-value` is the
-// stored string column (`"confirmed"`), not an atom (`:confirmed`).
+// so a declared retrieval param renders as Ecto's `^name` pin form, and an
+// `enum-value` is the stored string column (`"confirmed"`), not an atom
+// (`:confirmed`).
 // Mirrors the established vanilla `view-emit.ts` shape.
 // ---------------------------------------------------------------------------
 

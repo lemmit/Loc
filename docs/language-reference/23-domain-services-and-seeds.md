@@ -66,7 +66,7 @@ def line_total(unit: Money, qty: int) -> float:
 ```
 == elixir
 ```elixir
-# lib/<app>/domain/services/pricing.ex — plain module, no `use Ash.Resource`
+# lib/<app>/domain/services/pricing.ex — plain module, no persistence wiring
 defmodule ApiElixir.Domain.Services.Pricing do
   @moduledoc false
 
@@ -76,7 +76,7 @@ defmodule ApiElixir.Domain.Services.Pricing do
   end
 end
 ```
-The Elixir module is foundation-agnostic — byte-identical for the Ash and vanilla backends, since it touches no persistence. An unused parameter is discarded as `_ = name` so `mix compile --warnings-as-errors` stays clean.
+The Elixir module touches no persistence, so it is independent of the data layer. An unused parameter is discarded as `_ = name` so `mix compile --warnings-as-errors` stays clean.
 ::: end
 
 All five declaration emitters ship today. The frontends consume only the wire shape and never run domain logic, so they emit nothing here — there is no `frontend` group.

@@ -10,8 +10,8 @@ import { parseString } from "../../_helpers/parse.js";
 // event sourcing on the elixir vanilla foundation (D-VANILLA-ES-HOME).
 //
 // Two halves:
-//   1. the foundation-aware gate — `persistedAs(eventLog)` is accepted on
-//      `foundation: vanilla` but still rejected on `foundation: ash`;
+//   1. the gate — `persistedAs(eventLog)` is accepted on `foundation: vanilla`
+//      (the only elixir foundation since Ash was removed);
 //   2. the emit — in-memory struct + event-log Ecto schema + fold +
 //      event-store repository + emit/append/fold command runners + ES
 //      controller (per-op endpoints, atom-error mapping).
@@ -59,15 +59,10 @@ async function diagnostics(foundation: string) {
 
 const ES_GATE = "loom.event-sourcing-backend-unsupported";
 
-describe("vanilla — Slice P4.1 event-sourcing gate (foundation-aware)", () => {
+describe("vanilla — Slice P4.1 event-sourcing gate", () => {
   it("accepts persistedAs(eventLog) on foundation: vanilla", async () => {
     const diags = await diagnostics("vanilla");
     expect(diags.find((d) => d.code === ES_GATE)).toBeUndefined();
-  });
-
-  it("still rejects persistedAs(eventLog) on foundation: ash", async () => {
-    const diags = await diagnostics("ash");
-    expect(diags.find((d) => d.code === ES_GATE)).toBeDefined();
   });
 });
 

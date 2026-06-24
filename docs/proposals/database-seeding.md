@@ -3,7 +3,9 @@
 > Status: **PARTIAL** — Phase 1 (declarative `seed` surface → `SeedIR` →
 > lowering + validators, #803) **and all three per-backend emitters**
 > shipped: Hono/Drizzle `db/seed.ts` (Phase 2, #804), .NET/EF `Seed.cs`
-> (Phase 3a, #805), Phoenix/Ash `seeds.exs` (Phase 3b, #806), CI build
+> (Phase 3a, #805), Phoenix `seeds.exs` (Phase 3b, #806; see note below — the
+> Ash create-action seed idiom it shipped against was removed with the Ash
+> foundation, the elixir seeder now goes through plain `Ecto.Changeset`), CI build
 > gates compiling the generated seeders (#808), and `D-SEED-XREF`
 > explicit-id cross-references (#828). The `__loom_seed` ship-once
 > marker (D-SEED-IDEMPOTENCY) and the `raw` direct-INSERT path are
@@ -84,7 +86,7 @@ Laravel seeders. Loom should have **one** declaration that compiles to
 
 Because that re-introduces the exact problem Loom exists to remove:
 per-backend hand-authored code that drifts. A seed row written against
-Drizzle and a seed row written against Ash must describe the *same*
+Drizzle and a seed row written against Ecto must describe the *same*
 domain fact, validated *once*, ordered *once*, and made idempotent
 *once*. That is precisely the `MigrationsIR` value proposition applied
 to data instead of schema.
@@ -97,12 +99,12 @@ to data instead of schema.
 |---|---|---|---|
 | Drizzle / Hono | `db/seed.ts`, run via `npm run db:seed` | `onConflictDoNothing` / `onConflictDoUpdate` on a natural key | no — raw insert |
 | EF Core / .NET | `HasData(...)` (migration-bound) **or** a runtime `ISeeder` | PK identity (HasData) / `AnyAsync()` guard (seeder) | optional |
-| Ash / Phoenix | `priv/repo/seeds.exs`, run via `mix run` / `mix ecto.setup` | `Ash.Changeset.for_create` + `upsert?: true` on an identity | yes — Ash actions |
+| Ecto / Phoenix | `priv/repo/seeds.exs`, run via `mix run` / `mix ecto.setup` | `Repo.insert` with `on_conflict:` + `conflict_target:` on an identity | optional — through the context `create` |
 
 Two tensions fall out, and they become the two requested decisions:
 
 - **D-SEED-PATH.** EF `HasData` and Drizzle inserts go *straight to
-  tables*; Ash goes *through actions* (enforcing changesets). Loom must
+  tables*; the domain path goes *through the context `create`* (enforcing changesets). Loom must
   pick a default. **Recommendation: through the domain `create`** — the
   aggregate's `canonicalCreate` already encodes the invariants, and a
   seed that violates an invariant is a bug we want caught. A `seed raw`
@@ -351,12 +353,12 @@ a migration on every data edit). The seeder:
 - **raw path** → `context.Set<T>().AddRange(...)` guarded by the
   dataset marker.
 
-### 6.3 Phoenix / Ash
+### 6.3 Phoenix / Ecto
 
 `priv/repo/seeds.exs`, wired into `mix ecto.setup`.
 
-- **domain path** → `Ash.create!/2` per row (the changeset enforces the
-  resource's validations — Ash's native seed idiom).
+- **domain path** → the context `create/1` per row (the `Ecto.Changeset`
+  enforces the schema's validations).
 - **raw path** → `Repo.insert_all/3`, marker-guarded.
 
 ### 6.4 React / static
@@ -475,7 +477,7 @@ DB for local dev, but the v1 deliverable is **emission**, not a runner.
    `__loom_seed` marker (ADO `ExecuteScalar`), `LOOM_SEED` gating, and a
    `Seed.RunSeeds(…)` boot call after `Database.Migrate()`. **Phoenix ✅
    Done** (`src/generator/phoenix-live-view/seeds-emit.ts`):
-   `priv/repo/seeds.exs` going through the Ash create code interface
+   `priv/repo/seeds.exs` going through the context create function
    (`<Ctx>.create_<agg>!(%{ … })`), ship-once `__loom_seed` marker (via
    `Ecto.Adapters.SQL`), `LOOM_SEED` gating, and a `run priv/repo/seeds.exs`
    step appended to the `ecto.setup` mix alias. This required first fixing

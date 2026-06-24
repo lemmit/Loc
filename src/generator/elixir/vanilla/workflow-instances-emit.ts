@@ -7,9 +7,8 @@
 // plain Ecto read:
 //
 //   - saga-state Ecto schema — reused verbatim from `dispatch-emit.ts`
-//     (`emitWorkflowStateSchemas`); it is already plain Ecto (off the Ash
-//     action surface) and agrees byte-for-byte with the saga table the
-//     migrations builder derives.
+//     (`emitWorkflowStateSchemas`); plain Ecto that agrees byte-for-byte
+//     with the saga table the migrations builder derives.
 //   - `<App>Web.WorkflowInstancesController` — `GET /workflows/<snake>/
 //     instances` (list) + `.../instances/:id` (by-id) reading that schema
 //     via `<App>.Repo.all` / `.get`, projecting the cross-backend
@@ -17,8 +16,7 @@
 //     id returns an RFC-7807 404 via the vanilla `ProblemDetails` module
 //     (slice 4).
 //
-// No `Ash.*` anywhere — this is the read-side analogue the visibility
-// proposal promised for the vanilla path.
+// This is the read-side analogue the visibility proposal promised.
 // ---------------------------------------------------------------------------
 
 import type { EnrichedBoundedContextIR, WorkflowIR } from "../../../ir/types/loom-ir.js";
@@ -36,7 +34,7 @@ export function emitVanillaWorkflowInstances(
   ctx: EnrichedBoundedContextIR,
   out: Map<string, string>,
 ): ApiRoute[] {
-  // Saga-state Ecto schemas — reused, foundation-agnostic.  Emitted for every
+  // Saga-state Ecto schemas — reused.  Emitted for every
   // correlation-bearing workflow (idempotent with the future vanilla dispatch
   // slice, same path / same content).
   emitWorkflowStateSchemas(appName, ctx, appModule, out);

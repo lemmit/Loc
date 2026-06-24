@@ -37,8 +37,9 @@ hours of re-verification — that is the failure mode this rewrite fixes.
 ## Current state on `origin/main` (2026-06-10, condensed; refreshed 2026-06-21 against #1496)
 
 The ten-phase pipeline, five DB/backends (node/Hono, .NET, Java/Spring
-Boot, Python/FastAPI, elixir — both `ash` and `vanilla` foundations),
-and four frontends (React, Vue, Svelte, Angular) are mature
+Boot, Python/FastAPI, elixir — plain Ecto/Phoenix, the `vanilla`
+foundation; the Ash foundation was removed and `foundation: ash` is now
+a validation error), and four frontends (React, Vue, Svelte, Angular) are mature
 (`src/platform/registry.ts`). Recent waves the older docs had not absorbed:
 
 - **Elixir platform rename** (#1043) — `platform: elixir` canonical;
@@ -95,6 +96,13 @@ runtime trap, silently degrades, or misleads.
 
 Per-backend completion of features that already ship somewhere. The
 elixir items form one coherent track (a→e order).
+
+> **(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain
+> Ecto/Phoenix only and `foundation: ash` is now a validation error. The elixir
+> rows below that describe `elixir+ash` as "still rejected / still gated" or a
+> live ash-vs-vanilla parity gap are historical — vanilla is now the sole elixir
+> foundation, so those gates are moot and the work that "shipped on vanilla" is
+> simply what elixir emits. The technical narratives are retained as a record.)**
 
 | # | Item | Where / gate | Owning proposal |
 |---|---|---|---|
@@ -268,8 +276,8 @@ Three loosely-coupled tracks (one agent each):
   gate (`conformance-parity.yml`) is the decisive check.
 - Elixir items: `mix compile --warnings-as-errors` runs in CI only
   (no local toolchain) — keep slices small, push often, treat
-  `elixir-ash-build.yml` / the vanilla fixture job as the acceptance
-  gate.
+  the elixir-vanilla-* gates as the acceptance gate (the Ash foundation
+  was removed; `platform: elixir` is plain Ecto/Phoenix only).
 - Gate removals (e.g. T2.b/T2.c widening a `*_BACKENDS` set): the
   negative validator test moves, it does not disappear — assert the
   remaining unsupported backends still fail fast.

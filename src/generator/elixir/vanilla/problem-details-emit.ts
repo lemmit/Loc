@@ -2,13 +2,11 @@
 // Vanilla ProblemDetails — `lib/<app>_web/problem_details.ex`.
 // Slice 4 of vanilla-foundation-tdd-plan.md (exception-less alignment).
 //
-// Mirrors the envelope shape of `../problem-details-emit.ts` (the Ash
-// helper) byte-for-byte — same `about:blank` type, same camelCased
-// JSON pointers in `errors[]`, same `Validation failed` title, same
-// `application/problem+json` content type, same `x-request-id`
-// header propagation — but takes `Ecto.Changeset` as the validation
-// input instead of `Ash.Error.Invalid`.  The frontend ACL's
-// `applyServerErrors` consumes either backend's output identically.
+// RFC-7807 envelope — `about:blank` type, camelCased JSON pointers in
+// `errors[]`, `Validation failed` title, `application/problem+json` content
+// type, `x-request-id` header propagation — taking an `Ecto.Changeset` as the
+// validation input.  Byte-for-byte identical to the other backends' envelope,
+// so the frontend ACL's `applyServerErrors` consumes it identically.
 // ---------------------------------------------------------------------------
 
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
@@ -17,9 +15,9 @@ export function renderVanillaProblemDetailsModule(appModule: string): string {
   return `# Auto-generated.  Do not edit by hand.
 defmodule ${appModule}Web.ProblemDetails do
   @moduledoc """
-  Shared RFC 7807 ProblemDetails responders for the vanilla
-  (Ecto-only, no Ash) backend.  Wire format matches the Ash variant
-  and Hono (#782) / .NET (#829) backends byte-for-byte:
+  Shared RFC 7807 ProblemDetails responders for the Ecto-based
+  backend.  Wire format matches the Hono (#782) / .NET (#829)
+  backends byte-for-byte:
   \`application/problem+json\` content type, \`about:blank\` type,
   \`x-request-id\` trace correlation on the response header (not in
   the body), and RFC 6901 JSON pointers inside the \`errors[]\`
@@ -177,8 +175,8 @@ defmodule ${appModule}Web.ProblemDetails do
     |> String.replace("/", "~1")
   end
 
-  # snake_case → camelCase (matches the Ash backend's
-  # JasonCamelCase.camelize_string/1 byte-for-byte).
+  # snake_case → camelCase (byte-for-byte the camelCase key
+  # convention every backend's wire JSON uses).
   defp camelize(str) do
     case String.split(str, "_") do
       [head] -> head

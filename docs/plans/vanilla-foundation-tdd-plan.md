@@ -1,12 +1,20 @@
 # Vanilla Phoenix foundation — TDD slice plan (P2)
 
-> In-flight plan for implementing `foundation: vanilla` (plain
-> Ecto/Phoenix, no Ash) — P2 of
+> Status: **landed / superseded (de-Ash effort, 2026).** Steps 1–4 of the de-Ash
+> effort have landed: the Ash foundation is **removed**. `foundation: vanilla`
+> (plain Ecto/Phoenix, no Ash) is now the **default and only valid** elixir
+> foundation; `foundation: ash` is a validation error (the `foundation:` knob
+> stays). This TDD plan delivered that vanilla emit subtree; the cross-backend
+> wire-parity tiers below used `foundation: ash` as the parity oracle **while both
+> foundations co-existed** — once Ash was deleted the parity target became the
+> other backends (Hono/.NET) directly. Retained as the implementation record.
+>
+> Plan-of-record for `foundation: vanilla` — P2 of
 > [`../proposals/vanilla-phoenix-foundation.md`](../proposals/vanilla-phoenix-foundation.md),
 > per decisions **D-VANILLA-PHOENIX-FOUNDATION** / **D-PHOENIX-FOUNDATION-STRATEGY**.
-> P0 (ES-on-ash diagnostic) and P1 (foundation-axis plumbing) already shipped
-> (#1032). This plan covers the **state-based** emit subtree first; ES-on-vanilla
-> (P4) is a follow-up slice on the same scaffolding.
+> P0 (ES-on-ash diagnostic) and P1 (foundation-axis plumbing) shipped (#1032). This
+> plan covered the **state-based** emit subtree first; ES-on-vanilla (P4) followed
+> on the same scaffolding.
 >
 > **Naming note:** the `platform: phoenix` → `platform: elixir` rename
 > (#1043) landed *after* this plan was first written. Workflow filenames

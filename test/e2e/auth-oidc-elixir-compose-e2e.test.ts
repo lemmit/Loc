@@ -28,9 +28,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..");
 const cli = path.join(repoRoot, "bin", "cli.js");
-// Reuse the elixir-ash-build OIDC fixture (single source of truth — it's the same
-// system the elixir-ash-build compile gate exercises).
-const fixture = path.join(here, "fixtures", "elixir-ash-build", "auth-oidc.ddd");
+// Reuse the elixir-vanilla-build OIDC fixture (single source of truth — it's the
+// same system the vanilla compile gate exercises).
+const fixture = path.join(here, "fixtures", "elixir-vanilla-build", "vanilla-auth-oidc.ddd");
 
 const ENABLED = process.env.LOOM_AUTH_E2E_PHOENIX === "1";
 

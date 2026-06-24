@@ -2,6 +2,8 @@
 
 > **[2026-06-20 status audit]** Backend count understated — TPC/TPH now on FIVE DB backends: `TPH_CAPABLE = {node, dotnet, elixir, python, java}` (`system-checks.ts:~1230`); Python `python/emit/schema.ts`, Java `java/emit/entity.ts` emit TPH.
 
+> **(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain Ecto/Phoenix only, and `foundation: ash` is now a validation error. The Phoenix/Ash emission details below — `Ash.Domain`, Ash shared-table multi-resource — describe output that no longer exists; the elixir backend now emits the equivalent over plain Ecto.)**
+
 > Status: **I1–I3 shipped** — surface, both storage strategies, and the
 > polymorphic read path.  This proposal is now reference-documented in
 > [`../inheritance.md`](../inheritance.md); the design discussion below is
@@ -83,7 +85,7 @@ Employee is-a Party" has three options in current Loom:
 
 1. **Copy `name`, `email`, `phone`, etc. into every concrete
    aggregate.** No DRY. Multiplied by every backend's emitted code
-   (TS interface, C# record, Ash resource, React form), every shared
+   (TS interface, C# record, Ecto schema, React form), every shared
    field becomes ~10-15 lines of duplicated emission per concrete.
 2. **Author a macro** (`with party` in `src/stdlib/party.macro.ts`)
    that injects the fields. Works, but each new shared pattern needs
@@ -410,14 +412,14 @@ overrides:
 |---|---|---|
 | .NET / EF Core | TPH native (`HasDiscriminator<TKey>("kind").HasValue<Customer>("customer")...`) | TPC native (`UseTpcMappingStrategy()`) |
 | Hono / Drizzle | hand-rolled discriminator column + tagged-union response type | trivial (separate tables, separate Drizzle schemas) |
-| Phoenix / Ash | embedded resources or polymorphic `belongs_to` with `tagged_unions` | trivial (separate Ash resources) |
+| Phoenix / Ecto | shared-table schema with a `kind` discriminator column | trivial (separate Ecto schemas + tables) |
 | React / TS | wire-shape carries `kind` discriminator (TS discriminated union) | wire-shape per concrete (no discriminator needed) |
 
 UNION ALL emission for `find all Party` on `own` storage:
 - **Drizzle**: `unionAll()` operator on per-concrete selects.
 - **EF Core**: `query1.Concat(query2)` on entity queryables produces
   `UNION ALL`.
-- **Ash / Ecto**: `Ecto.Query.union_all/2` on per-concrete schemas.
+- **Ecto**: `Ecto.Query.union_all/2` on per-concrete schemas.
 
 ## IR shape (sketch)
 

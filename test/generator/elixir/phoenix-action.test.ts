@@ -45,7 +45,7 @@ const SOURCE = `system MiniLiveView {
   }
 
   deployable phoenixApp {
-    platform: elixir { foundation: ash }
+    platform: elixir { foundation: vanilla }
     contexts: [Sales]
     serves: SalesApi
     ui: SalesAdmin { Sales: phoenixApp }
@@ -86,11 +86,5 @@ describe("Phoenix Action — instance-qualified operation button", () => {
     expect(live).toMatch(/put_flash\(:info, "Confirm succeeded"\)/);
     // then: navigate(Home) → push_navigate to Home's route.
     expect(live).toMatch(/push_navigate\(to: ~p"\/home"\)/);
-  });
-
-  it("defines the operation in the Ash code interface", async () => {
-    const files = await build();
-    const domain = files.get("phoenix_app/lib/phoenix_app/sales.ex")!;
-    expect(domain).toMatch(/define :confirm_customer, action: :confirm/);
   });
 });

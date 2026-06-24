@@ -741,7 +741,7 @@ Add the qualified name to `src/util/builtin-formats.ts`:
 ```ts
 export const BUILTIN_PACK_FORMATS = {
   // ... existing entries ...
-  "<family>@<vNew>": "tsx",  // or "heex" for ash-style packs
+  "<family>@<vNew>": "tsx",  // or "heex" for HEEx (Phoenix LiveView) packs
 } as const satisfies Record<string, "tsx" | "heex">;
 ```
 

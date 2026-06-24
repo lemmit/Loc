@@ -5,9 +5,9 @@
 // repository's aggregate + one absent variant (`none`, or an `error` payload
 // whose only permitted field is `resource: string`).  Anything else used to
 // produce runtime stubs (NotImplementedException on .NET, an untagged body on
-// Hono) and is now rejected at validate time — except on contexts hosted
-// exclusively by elixir backends, where the shipped P4d tagger keeps the old
-// laissez-faire behaviour (see the check's comment).
+// Hono) and is now rejected at validate time — including on elixir (vanilla)
+// contexts, which emit the absence producer (`find-controller.ts`) like
+// node/dotnet.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -83,10 +83,9 @@ describe("union finds — producer shape gate", () => {
     expect(msgs[0]).toContain("resource: string");
   });
 
-  it("exempts a context hosted exclusively by elixir + foundation: ash (shipped P4d tagger)", async () => {
-    expect(await codesFor(sysWith("elixir { foundation: ash }", "", "Order or Cancel"))).toEqual(
-      [],
-    );
+  it("enforces on an elixir (vanilla) context — vanilla emits the absence producer", async () => {
+    const msgs = await codesFor(sysWith("elixir", "", "Order or Cancel"));
+    expect(msgs).toHaveLength(1);
   });
 
   it("enforces on a node-hosted context", async () => {

@@ -1,0 +1,32 @@
+// User `component` invoked inside a QueryView `data:` lambda on the vanilla
+// (plain Ecto) LiveView backend — port of
+// the former component-in-queryview fixture.  The QueryView renders its
+// branches as a HEEx `<%= cond do %> … <% end %>`, and the `data:` arm invokes a
+// user component — which renders to a HEEx function-component tag that must NOT
+// be wrapped in `<%= %>`.
+system Shop {
+  subdomain Sales {
+    context Orders {
+      aggregate Order { status: string }
+      repository Orders for Order { }
+    }
+  }
+  storage primary { type: postgres }
+  resource st { for: Orders, kind: state, use: primary }
+  ui WebApp {
+    component OrderPanel(order: Order) {
+      body: Card { Heading { "Order" }, Text { order.status } }
+    }
+    page OrderDetail {
+      route: "/orders/:id"
+      body: QueryView {
+        of: Order.byId(id),
+        single: true,
+        loading: Loader {},
+        empty: Empty { "none" },
+        data: order => OrderPanel(order)
+      }
+    }
+  }
+  deployable phoenixApp { platform: elixir { foundation: vanilla } contexts: [Orders] dataSources: [st] ui: WebApp port: 4000 }
+}

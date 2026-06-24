@@ -19,20 +19,20 @@
 // ---------------------------------------------------------------------------
 
 import type { EmitCtx, EmittedArtifact, LayoutAdapter } from "../../_adapters/index.js";
-import { toModulePrefix, toSnakeApp } from "./ash-postgres-persistence.js";
+import { toModulePrefix, toSnakeApp } from "../app-naming.js";
 
 /** Categories every phoenix artifact carries.  Adding a new file kind
  *  = add a new arm here + the matching string at the emit site. */
 export type PhoenixArtifactCategory =
   // lib/<app>/ — app-level modules
   | "application" // lib/<app>/application.ex
-  | "repo" // lib/<app>/repo.ex (Ash repo — persistence adapter owns content; layout owns path)
+  | "repo" // lib/<app>/repo.ex (Ecto.Repo — persistence adapter owns content; layout owns path)
   | "telemetry" // lib/<app>/telemetry.ex
   | "log-formatter" // lib/<app>/log_formatter.ex
   | "jason-camel-case" // lib/<app>/jason_camel_case.ex
-  // lib/<app>/<context_snake>/ — per-context Ash domain
-  | "domain-module" // lib/<app>/<ctx>.ex (Ash.Domain)
-  | "ash-resource" // lib/<app>/<ctx>/<agg>.ex (root + part Ash.Resource)
+  // lib/<app>/<context_snake>/ — per-context bounded-context module
+  | "domain-module" // lib/<app>/<ctx>.ex (plain context module)
+  | "ash-resource" // lib/<app>/<ctx>/<agg>.ex (root + part Ecto schema)
   | "event-module" // lib/<app>/<ctx>/events/<event>.ex
   | "value-object-module" // lib/<app>/<ctx>/<vo>.ex
   | "enum-module" // lib/<app>/<ctx>/<enum>.ex

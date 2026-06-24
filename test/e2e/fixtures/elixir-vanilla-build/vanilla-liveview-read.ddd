@@ -1,0 +1,122 @@
+// Vanilla LiveView READ fixture — relocated from the former ash-build fixture dir (it was
+// already `foundation: vanilla` there; moved here so it survives the ash-build
+// directory deletion).  A read-only hand-authored `ui:` — QueryView list +
+// detail reads over plain aggregates, plus a `Heading`.  No Form/CreateForm/
+// OperationForm/DestroyForm, no scaffold.  Proves the vanilla LiveView spine
+// (live socket, browser pipeline, live_session, CoreComponents, layouts, Nav)
+// + the vanilla read pattern-matches compile under
+// `mix compile --warnings-as-errors`.  Also exercises `design: coreComponents`.
+system VanillaLiveViewRead {
+  subdomain Sales {
+    context Sales {
+      aggregate Customer {
+        name: string
+        email: string
+        invariant email.length > 0
+      }
+      repository Customers for Customer { }
+
+      aggregate Product {
+        sku: string
+        title: string
+        invariant sku.length > 0
+      }
+      repository Products for Product { }
+    }
+  }
+
+  api SalesApi from Sales
+  storage primary { type: postgres }
+  resource salesState { for: Sales, kind: state, use: primary }
+
+  ui SalesAdmin {
+    page Customers {
+      route: "/customers"
+      body: Stack {
+        Heading { "Customers" },
+        QueryView {
+          of:      Sales.Customer.all,
+          loading: Loader {},
+          error:   Alert { "Couldn't load customers" },
+          empty:   Empty { "No customers yet." },
+          data:    rows => Paper {
+            Table {
+              rows: rows,
+              Column { "ID",    o => IdLink { o.id, of: Customer } },
+              Column { "Name",  o => Text { o.name } },
+              Column { "Email", o => Text { o.email } }
+            }
+          }
+        }
+      }
+    }
+    page CustomerDetail(id: Customer id) {
+      route: "/customers/:id"
+      body: Stack {
+        Heading { "Customer" },
+        QueryView {
+          of:      Customer.byId(id),
+          single:  true,
+          loading: Loader {},
+          empty:   Empty { "Not found" },
+          data:    customer => Paper {
+            Stack {
+              Text { customer.name },
+              Text { customer.email }
+            }
+          }
+        }
+      }
+    }
+    page Products {
+      route: "/products"
+      body: Stack {
+        Heading { "Products" },
+        QueryView {
+          of:      Sales.Product.all,
+          loading: Loader {},
+          error:   Alert { "Couldn't load products" },
+          empty:   Empty { "No products yet." },
+          data:    rows => Paper {
+            Table {
+              rows: rows,
+              Column { "ID",    o => IdLink { o.id, of: Product } },
+              Column { "SKU",   o => Text { o.sku } },
+              Column { "Title", o => Text { o.title } }
+            }
+          }
+        }
+      }
+    }
+    page ProductDetail(id: Product id) {
+      route: "/products/:id"
+      body: Stack {
+        Heading { "Product" },
+        QueryView {
+          of:      Product.byId(id),
+          single:  true,
+          loading: Loader {},
+          empty:   Empty { "Not found" },
+          data:    product => Paper {
+            Stack {
+              Text { product.sku },
+              Text { product.title }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  deployable phoenixApp {
+    platform: elixir {
+      foundation: vanilla
+    }
+    design: coreComponents
+    contexts: [Sales]
+    dataSources: [salesState]
+    serves: SalesApi
+    ui: SalesAdmin
+    port: 4000
+  }
+}

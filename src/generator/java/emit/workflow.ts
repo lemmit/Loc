@@ -370,7 +370,7 @@ export function renderJavaWorkflows(
       `    public void ${lowerFirst(wf.name)}(${wf.params.length > 0 ? `${reqType} request` : ""}) {`,
       ...(usesUser && authed ? [`        var currentUser = currentUserAccessor.user();`] : []),
       // Workflow narrative — `workflow_started` at method entry; shared catalog
-      // identity (field `workflow`) with the Phoenix-Ash reference + every backend.
+      // identity (field `workflow`) across every backend.
       `        CatalogLog.event("workflow_started", "info", "workflow", ${JSON.stringify(wf.name)});`,
       ...paramLets,
       ...bodyLines,

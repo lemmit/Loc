@@ -1,13 +1,17 @@
 # LiveView on the vanilla (Ecto) foundation — de-Ash port plan
 
-Status: **in progress** on `claude/remove-ash-phoenix-2ocfua`. Slices 1–2 (design-pack
-rename + the two HEEx packs `coreComponents` / `daisyui`) are landed. This doc is the
-plan for **step 2 of the de-Ash effort**: make the `foundation: vanilla` Elixir backend
-emit Phoenix LiveView (today it emits a JSON API only; LiveView is Ash-only).
+Status: **landing/landed (2026)**. Steps 1–4 of the de-Ash effort are landing: the
+Ash foundation has been **removed**. `platform: elixir` now generates Phoenix LiveView
+on **plain Ecto/Phoenix** (the vanilla foundation); `foundation: vanilla` is the default
+and only valid value, and `foundation: ash` is now a **validation error** (the
+`foundation:` knob itself stays). The design-pack rename + the two HEEx packs
+`coreComponents` / `daisyui` are landed; this LiveView-on-vanilla port (step 2 of the
+effort) and the default-flip / Ash-generator deletion (steps 3–4) are landing as the
+markdown-docs scrub goes in.
 
-End state of the wider effort (for context): `platform: elixir` = Phoenix LiveView on
-plain Ecto, Ash deleted. Steps 3–4 (flip `foundation:` default ash→vanilla per
-D-VANILLA-DEFAULT; delete the Ash-only generators/adapters) follow this one.
+End state (now reality): `platform: elixir` = Phoenix LiveView on plain Ecto, Ash gone.
+The slice-by-slice plan below is retained as the implementation record of how the port
+landed; the historical "Ash-only" framing describes the pre-removal starting point.
 
 ## Why a port, not a rewrite
 

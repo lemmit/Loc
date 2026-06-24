@@ -2,6 +2,14 @@
 
 > **[2026-06-20 status audit]** Backend count understated — find/retrieval criteria now reify on FIVE domain backends incl. Java (`src/generator/java/emit/repository.ts:~50`); Python emits retrievals but is not yet reified.
 
+> **(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain
+> Ecto/Phoenix only; `foundation: ash` is now a validation error.)** Where the text
+> below says "Phoenix/Ash" and describes Ash-specific output (a `:boolean` Ash
+> calculation, `Ash.Query.filter`, the Ash `actor`, `base_filter`), read it as the
+> plain-Ecto/Phoenix backend: the criterion reifies to an Ecto query fragment /
+> module-level predicate composed into the context query, not an Ash calculation.
+> The Ash idiom is retained only as design history.
+
 > Status: **PARTIAL — retrieval *and* find criteria reified on all four
 > backends.** The Specification reframe landed first on the .NET/EF backend
 > in four slices: Slice 1a — emit `Criterion<T>` + `IsSatisfiedBy` (the

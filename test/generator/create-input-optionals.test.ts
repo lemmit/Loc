@@ -34,7 +34,7 @@ system Demo {
   api ProjectsApi from Projects
   deployable honoApi    { platform: node            contexts: [Catalog] serves: ProjectsApi port: 3000 }
   deployable dotnetApi  { platform: dotnet          contexts: [Catalog] serves: ProjectsApi port: 8080 }
-  deployable phoenixApi { platform: elixir { foundation: ash } contexts: [Catalog] serves: ProjectsApi port: 4000 }
+  deployable phoenixApi { platform: elixir contexts: [Catalog] serves: ProjectsApi port: 4000 }
 }
 `;
 
@@ -43,9 +43,9 @@ function findFile(files: Map<string, string>, pattern: RegExp): string | undefin
   return undefined;
 }
 
-/** Extract the `required: [...]` atom list from a rendered OpenApiSpex schema. */
+/** Extract the `@required_fields [...]` atom list from a vanilla Ecto changeset module. */
 function requiredAtoms(src: string): string[] {
-  const m = src.match(/required:\s*\[([^\]]*)\]/);
+  const m = src.match(/@required_fields\s*\[([^\]]*)\]/);
   if (!m || !m[1]!.trim()) return [];
   return m[1]!
     .split(",")
@@ -104,10 +104,13 @@ describe("create-input contract — optionals are included", () => {
     );
   });
 
-  it("Phoenix CreateProjectRequest marks optionals not-required", async () => {
+  it("Phoenix changeset marks optionals not-required", async () => {
     const files = await generateSystemFiles(FIXTURE);
-    const req = findFile(files, /create_project_request\.ex$|CreateProjectRequest\.ex$/i)!;
-    const required = requiredAtoms(req);
+    // The vanilla Ecto changeset's `@required_fields` is the canonical
+    // required-set: required scalars in, optionals (`description?`,
+    // `externalId?`) out — `validate_required` enforces it.
+    const cs = findFile(files, /project_changeset\.ex$/i)!;
+    const required = requiredAtoms(cs);
     expect(required).toContain("name");
     expect(required).toContain("budget");
     expect(required).not.toContain("description");

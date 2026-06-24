@@ -9,13 +9,13 @@ import { describe, expect, it } from "vitest";
 // ---------------------------------------------------------------------------
 // Phoenix-embeds-React — runtime end-to-end guard (D-PHOENIX-SURFACE).
 //
-// The mix-compile gate (test/e2e/generated-elixir-ash-build.test.ts +
-// elixir-ash-build.yml) proves the embedded-react Elixir side *compiles*.
+// The mix-compile gate (test/e2e/generated-elixir-vanilla-build.test.ts +
+// elixir-vanilla-build.yml) proves the embedded-react Elixir side *compiles*.
 // This guard proves it *runs*: boot the generated Phoenix backend, build
 // the embedded SPA into priv/static/app, then assert the two halves the
 // embed wiring is supposed to serve from one origin —
 //   - GET /app           → the SPA's index.html (Plug.Static + SpaController)
-//   - GET /api/<agg>      → the Ash JSON API (same origin, no CORS)
+//   - GET /api/<agg>      → the Phoenix JSON API (same origin, no CORS)
 //
 // Without this, an endpoint/router/Plug.Static misconfiguration (e.g. the
 // /app static mount pointing at the wrong priv path, or the SpaController
@@ -30,7 +30,7 @@ import { describe, expect, it } from "vitest";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..");
 const cli = path.join(repoRoot, "bin", "cli.js");
-const fixture = path.join(here, "fixtures", "elixir-ash-build", "elixir-embed-react.ddd");
+const fixture = path.join(here, "fixtures", "elixir-vanilla-build", "vanilla-embed-react.ddd");
 
 const ENABLED = process.env.LOOM_EMBED_E2E_PHOENIX === "1";
 

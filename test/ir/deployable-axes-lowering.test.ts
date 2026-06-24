@@ -52,9 +52,9 @@ describe("realization axes — lowering defaults", () => {
     // name — the legacy `phoenix` / `phoenixLiveView` platform aliases
     // were retired.  D-PHOENIX-TRANSPORT: `transport: phoenix` is the
     // canonical (and only) value — the `phoenixRouter` alias was retired.
-    // D-VANILLA-DEFAULT: the default foundation flipped from ash to vanilla,
-    // so a bare `platform: elixir` now lowers to plain Phoenix LiveView on
-    // Ecto (the `layered` style); `foundation: ash` is the explicit opt-in.
+    // D-VANILLA-DEFAULT: `platform: elixir` always emits vanilla (plain
+    // Phoenix LiveView on Ecto, the `layered` style); the Ash foundation
+    // was removed.
     const d = await lowerDeployable("elixir");
     expect(d.foundation).toBe("vanilla");
     expect(d.application).toBe("layered");
@@ -120,13 +120,6 @@ describe("realization axes — lowering defaults", () => {
     // Greenfield axes are unaffected by foundation today.
     expect(d.transport).toBe("phoenix");
     expect(d.runtime).toBe("transactional");
-  });
-
-  it("explicit `foundation: ash` opts back into ashPostgres / ash — the base adapter defaults", async () => {
-    const d = await lowerDeployable("elixir { foundation: ash }");
-    expect(d.foundation).toBe("ash");
-    expect(d.application).toBe("ash");
-    expect(d.persistence).toBe("ashPostgres");
   });
 
   it("an explicit persistence overrides even the foundation default", async () => {

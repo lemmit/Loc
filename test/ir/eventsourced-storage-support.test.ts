@@ -1,9 +1,9 @@
 // Event-sourced storage capability validator (appliers A2).  An
-// aggregate's `persistedAs(eventLog)` storage emission is implemented for
-// the Hono backend only (v1): the `<agg>_events` stream table + fold-on-load
-// repository.  Hosting an event-sourced aggregate on .NET / Phoenix — which
-// don't yet branch on `persistedAs` — would silently fall back to state
-// persistence, so the validator rejects it instead.
+// aggregate's `persistedAs(eventLog)` storage emission is implemented on the
+// Hono (node), .NET (dotnet) and elixir (vanilla) backends: the `<agg>_events`
+// stream table + fold-on-load repository.  Hosting an event-sourced aggregate
+// on a backend that doesn't branch on `persistedAs` would silently fall back
+// to state persistence, so the validator rejects it instead.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -48,26 +48,7 @@ describe("event-sourced storage capability validation", () => {
     expect(await esErrors(sys("dotnet"))).toEqual([]);
   });
 
-  it("rejects persistedAs(eventLog) on a Phoenix deployable with an Ash-foundation-specific diagnostic", async () => {
-    // Phoenix-specific diagnostic (P0 of vanilla-phoenix-foundation.md):
-    // names the Ash foundation as the constraint, distinguishes from a
-    // Phoenix-platform limitation, points at foundation: vanilla as the
-    // planned escape, and lists the today-actionable alternatives.
-    const errs = await esErrors(sys("elixir { foundation: ash }"));
-    expect(errs.length).toBe(1);
-    const msg = errs[0];
-    expect(msg).toContain("Account");
-    expect(msg).toContain("persistedAs(eventLog)");
-    // Names the foundation, not the platform, as the constraint.
-    expect(msg).toContain("Ash-foundation limitation");
-    expect(msg).toContain("not a Phoenix-platform limitation");
-    // Mentions why each Ash-foundation alternative was rejected.
-    expect(msg).toContain("AshEvents");
-    expect(msg).toContain("AshCommanded");
-    // Points at the proposal for the planned vanilla escape.
-    expect(msg).toContain("foundation: vanilla");
-    expect(msg).toContain("vanilla-phoenix-foundation.md");
-    // Lists the today-actionable escapes (host on node/dotnet; drop ES).
-    expect(msg).toContain("node / dotnet");
+  it("accepts persistedAs(eventLog) on an elixir (vanilla) deployable (ES home)", async () => {
+    expect(await esErrors(sys("elixir"))).toEqual([]);
   });
 });

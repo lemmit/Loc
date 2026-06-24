@@ -3,8 +3,9 @@
 // ORMs already query — Drizzle `price_amount`/`price_currency`, EF owned
 // types — so the canonical migration must match them, or the schema created
 // at boot won't line up with the ORM (a runtime mismatch the no-op-DB gates
-// mask).  Phoenix/Ash stores an embedded value object as one `:map`, so its
-// migration regroups the flattened columns back into a single column.
+// mask).  Phoenix (vanilla Ecto) stores an embedded value object as one
+// `:map`, so its migration regroups the flattened columns back into a single
+// column.
 
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../_helpers/index.js";
@@ -24,7 +25,7 @@ system TV {
   api SApi from S
   deployable h { platform: node            contexts: [C] serves: SApi port: 3000 }
   deployable d { platform: dotnet          contexts: [C] serves: SApi port: 8080 }
-  deployable p { platform: elixir { foundation: ash } contexts: [C] serves: SApi port: 4000 }
+  deployable p { platform: elixir { foundation: vanilla } contexts: [C] serves: SApi port: 4000 }
 }
 `;
 
@@ -33,7 +34,7 @@ function findFile(files: Map<string, string>, pattern: RegExp): string {
   throw new Error(`no generated file matched ${pattern}`);
 }
 
-describe("value-object migration — flatten into columns (relational) / :map (Ash)", () => {
+describe("value-object migration — flatten into columns (relational) / :map (Ecto)", () => {
   it("the Hono migration flattens the value object into columns, not one JSONB", async () => {
     const files = await generateSystemFiles(FIXTURE);
     const sql = findFile(files, /h\/db\/migrations\/.*\.sql$/);

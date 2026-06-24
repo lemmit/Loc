@@ -2,6 +2,8 @@
 
 **Snapshot date:** 2026-06-21
 
+ **(Superseded 2026: the Ash foundation was removed. `platform: elixir` now generates plain Ecto/Phoenix only — `foundation: ash` is a validation error and `vanilla` is the default and only valid value. The `elixir·ash` columns/rows below, and the foundation-split framing, are historical; on current `main` only the `elixir·vanilla` surface ships.)**
+
 > **[2026-06-24 refresh, code-verified against `main` @ `e779fcd`]** Two adapter
 > moves landed: **node `auditable` stamping relocated into the persistence layer**
 > on both node adapters — drizzle (#1554) and mikroorm (#1565) — reading the

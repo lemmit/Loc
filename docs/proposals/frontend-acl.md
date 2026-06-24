@@ -420,7 +420,7 @@ The `type: "server"` discriminator lets a pack (or a future code-review tool) st
 
 5. **Wizard machine integration.** A future `WizardForm { steps: [ A, B, C ] }` primitive composes per-step `CommandPayload<Step_i>`s into an immutable XState context. This proposal sets up the per-step contract; the wizard is a sister proposal once `loom-forms.md` Phase F3 lands.
 
-6. **Phoenix LiveView counterpart.** Ash + Ecto changesets already do State/Payload split via the changeset's "params vs attrs" duality and `Ash.Error.Invalid` already carries per-field error pointers. A sibling proposal can lift the *vocabulary* (Read Model / Payload / State) into the Phoenix generator; the *mechanism* will be Ecto-shaped, not Zod-shaped. Out of scope here.
+6. **Phoenix LiveView counterpart.** Ecto changesets already do State/Payload split via the changeset's "params vs attrs" duality and `Ecto.Changeset` already carries per-field error pointers. A sibling proposal can lift the *vocabulary* (Read Model / Payload / State) into the Phoenix generator; the *mechanism* will be Ecto-shaped, not Zod-shaped. Out of scope here. (`platform: elixir` is plain Ecto/Phoenix only — the Ash foundation was removed.)
 
 7. **Tests.** Per-pack walker fixtures for: (a) plain field, (b) nested VO, (c) `option` field, (d) 422 round-trip with `setError`, (e) FieldMap drift surfacing as TSC error. Pattern matches the existing `test/walker/walker-*.test.ts` shape — ~5 new tests.
 

@@ -448,19 +448,18 @@ system Sys {
     expect(get("Infrastructure/Persistence/AppDbContext.cs")).not.toMatch(/DbSet<Party>/);
   });
 
-  it("emits a Phoenix polymorphic reader: list_parties! on the domain module", async () => {
+  it("emits Ecto schemas for the TPC concretes on the vanilla foundation", async () => {
     const { files } = generateSystems(
-      await parseValid(TPC_TWO_CONCRETE("elixir { foundation: ash }", 4000)),
+      await parseValid(TPC_TWO_CONCRETE("elixir { foundation: vanilla }", 4000)),
     );
     const paths = [...files.keys()];
-    // Concrete subtypes emit Ash resources; the abstract base emits none.
+    // Concrete subtypes emit Ecto schemas, each carrying the merged base fields.
     expect(paths.some((p) => p.endsWith("parties/customer.ex"))).toBe(true);
     expect(paths.some((p) => p.endsWith("parties/supplier.ex"))).toBe(true);
-    expect(paths.some((p) => p.endsWith("parties/party.ex"))).toBe(false);
-    // The context domain module gains the polymorphic read function.
-    const domain = [...files.entries()].find(([p]) => p.endsWith("parties.ex"))?.[1] ?? "";
-    expect(domain).toMatch(/def list_parties!, do: list_customers!\(\) \+\+ list_suppliers!\(\)/);
-    expect(domain).toMatch(/def list_parties, do: \{:ok, list_parties!\(\)\}/);
+    // The context façade delegates the per-aggregate reads to each Repository.
+    const domain = [...files.entries()].find(([p]) => p.endsWith("/parties.ex"))?.[1] ?? "";
+    expect(domain).toMatch(/defdelegate list_customers\(\), to: Api\.Parties\.CustomerRepository/);
+    expect(domain).toMatch(/defdelegate list_suppliers\(\), to: Api\.Parties\.SupplierRepository/);
   });
 });
 

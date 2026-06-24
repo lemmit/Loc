@@ -9,15 +9,11 @@ be explained: "this 128.40 came from `reprice(qty=8, price=16)` via
 rule `<snapshotId>`".
 
 Provenance has a runtime on the **Hono (`node`)**, **.NET (`dotnet`)**,
-**Java (`java`)**, **Python (`python`)** and **elixir on the `vanilla`
-foundation** backends — each emits the co-located lineage column, per-write
+**Java (`java`)**, **Python (`python`)** and **elixir** (plain Ecto/Phoenix)
+backends — each emits the co-located lineage column, per-write
 trace capture, and the transactional `provenance_records` flush.  The
-remaining surfaces (elixir on the **`ash`** foundation, `react`) parse the
-keyword but emit no trace code; only the
-snapshot capture runs across all backends.  On Phoenix this is a *foundation*
-constraint — `foundation: vanilla` un-gates the runtime, `foundation: ash`
-stays gated (the validator rejects a provenanced field hosted on Ash, exactly
-like event-sourced storage).
+remaining surface (`react`) parses the keyword but emits no trace code; only the
+snapshot capture runs across all backends.
 
 ## Surface
 
@@ -157,9 +153,9 @@ frame explicitly, while a direct operation route runs in the root frame
 fresh root frame, so the row still records the write but with a
 correlation orphaned from the original request.
 
-## Generated runtime (elixir — `foundation: vanilla`)
+## Generated runtime (elixir)
 
-The vanilla foundation (plain Phoenix + Ecto, no Ash) emits the same shape
+The Elixir backend (plain Phoenix + Ecto) emits the same shape
 in Elixir's immutable idiom:
 
 - `lib/<app>/provenance.ex` — the `<App>.Provenance` SDK: a per-process trace
@@ -200,15 +196,15 @@ _ = MyApp.Provenance.record(loom_lineage_1)
 
 ## Other backends
 
-elixir on `foundation: ash` and `react` parse `provenanced` and treat it as a
+`react` parses `provenanced` and treats it as a
 no-op at runtime.  The snapshot capture still produces a file for the
-system as a whole; backends that don't implement the runtime half
+system as a whole; surfaces that don't implement the runtime half
 ignore it.
 
 This is intentional: provenance is opt-in at the deployable level
 without being opt-in at the language level — you can declare a
 `provenanced` field once and only a runtime-capable deployable
-(node/dotnet/java/python, or elixir-vanilla) will exercise it, while the
+(node/dotnet/java/python/elixir) will exercise it, while the
 others ignore the runtime half.
 
 ## Cross-references

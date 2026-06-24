@@ -65,7 +65,7 @@ templates it needs. Pin it first:
 | Vue 3 (SFC) | `vue` | `vue1` | `generated-vue-build` | `designs/vuetify/v3` (npm) or `designs/shadcnVue/v1` (source-copy) |
 | Svelte 5 / SvelteKit | `svelte` | `sv1` | `generated-svelte-build` | `designs/shadcnSvelte/v1` or `designs/flowbite/v1` |
 | Angular (standalone) | `angular` | `ng1` | `generated-angular-build` | `designs/angularMaterial/v1`, `primeng/v1`, `spartanNg/v1` |
-| Phoenix LiveView (HEEx) | `heex` | (none) | `elixir-ash-build` | `designs/ashPhoenix/v3` (the only HEEx pack) |
+| Phoenix LiveView (HEEx) | `heex` | (none) | `elixir-vanilla-build` | `designs/ashPhoenix/v3` (the only HEEx pack) |
 
 The **distribution model** is a second axis orthogonal to framework: *npm-package*
 (components imported from a dependency, e.g. mantine, vuetify, angularMaterial) vs

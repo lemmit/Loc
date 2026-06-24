@@ -20,7 +20,7 @@ system VA {
   }
   api SApi from S
   deployable api { platform: node            contexts: [C] serves: SApi port: 3000 }
-  deployable px  { platform: elixir { foundation: ash } contexts: [C] serves: SApi port: 4000 }
+  deployable px  { platform: elixir contexts: [C] serves: SApi port: 4000 }
 }
 `;
 
@@ -98,24 +98,24 @@ describe("value-object collection — migration (relational child table, all bac
     expect(orders).not.toMatch(/\{:array, :map\}/);
   });
 
-  it("the Phoenix Ash resource models the VO array as a child has_many, stripped from the wire", async () => {
+  it("the Phoenix Ecto schema models the VO array as a child has_many, stripped from the wire", async () => {
     const files = await generateSystemFiles(FIXTURE);
     const order = findFile(files, /px\/.*\/order\.ex$/);
-    // `has_many` onto the child resource, ordinal-ordered; managed via
-    // `manage_relationship`; the field is gone from the attributes block.
-    expect(order).toMatch(/has_many :charges, \S+\.OrderCharges do\s+sort ordinal: :asc/);
+    // `has_many` onto the child schema, ordinal-ordered (preload_order) and
+    // replace-on-save; the field is gone from the schema's own `field` block.
     expect(order).toMatch(
-      /change manage_relationship\(:charges, :charges, type: :direct_control\)/,
+      /has_many :charges, \S+\.OrderCharges, foreign_key: :order_id, on_replace: :delete, preload_order: \[asc: :ordinal\]/,
     );
-    expect(order).not.toMatch(/attribute :charges/);
-    // The child resource Jason-encodes ONLY the value object's own fields —
+    expect(order).not.toMatch(/field :charges/);
+    // The child schema Jason-encodes ONLY the value object's own fields —
     // synthetic id / parent FK / ordinal stripped, so the wire stays
     // `[{amount,currency},…]`.
     const child = findFile(files, /px\/.*\/order_charges\.ex$/);
-    expect(child).toMatch(/uuid_primary_key :id/);
-    expect(child).toMatch(/attribute :order_id, :uuid/);
-    expect(child).toMatch(/attribute :ordinal, :integer/);
-    expect(child).toMatch(/encode_struct\(value, \[:amount, :currency\], opts\)/);
+    expect(child).toMatch(/@derive \{Jason\.Encoder, only: \[:amount, :currency\]\}/);
+    expect(child).toMatch(
+      /belongs_to :order, \S+\.Order, foreign_key: :order_id, type: :binary_id/,
+    );
+    expect(child).toMatch(/field :ordinal, :integer/);
   });
 });
 

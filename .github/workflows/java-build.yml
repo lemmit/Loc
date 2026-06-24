@@ -8,7 +8,7 @@ name: Java build verification
 # signature drift, record/embeddable mismatches).
 #
 # Mirrors `dotnet-build.yml` (.NET → dotnet build /warnaserror) and
-# `elixir-ash-build.yml` (Phoenix → mix compile --warnings-as-errors).
+# `elixir-vanilla-build.yml` (Phoenix → mix compile --warnings-as-errors).
 #
 # Triggers:
 #   - PRs that touch the Java generator, the java platform module, or

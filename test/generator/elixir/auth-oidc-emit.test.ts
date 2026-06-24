@@ -15,7 +15,7 @@ import { generateSystems } from "../../../src/system/index.js";
 // :ssl into mix.exs.  Without an oidc block (auth: required only) the plug
 // stays the permissive dev stub — same out-of-the-box behaviour as the Hono /
 // .NET dev-stub verifiers.  Compilation of the emitted Elixir is covered by
-// the elixir-ash-build gate (the auth-oidc.ddd elixir-ash-build fixture); this
+// the elixir-vanilla-build gate (the vanilla-auth-oidc.ddd fixture); this
 // suite pins the generator-level wiring.
 // ---------------------------------------------------------------------------
 
@@ -62,7 +62,7 @@ function source(opts: { oidc: boolean }): string {
   resource ticketState { for: Tickets, kind: state, use: primary }
   api SupportApi from Support
   deployable api {
-    platform: elixir { foundation: ash }
+    platform: elixir { foundation: vanilla }
     contexts: [Tickets]
     serves: SupportApi
     dataSources: [ticketState]
@@ -171,26 +171,18 @@ describe("Phoenix OIDC verifier emission", () => {
 // pipeline) and the first dead-render raises with no `live_view:` salt.
 // ---------------------------------------------------------------------------
 describe("Phoenix LiveView dev-stub auth", () => {
-  it("dev stub: LiveAuth falls back to the same built-in admin the :api plug grants", async () => {
+  it("dev stub: the :api Auth plug falls back to the built-in admin", async () => {
     const files = await build(source({ oidc: false }));
     const auth = files.get("api/lib/api_web/auth.ex")!;
-    const live = files.get("api/lib/api_web/live_auth.ex")!;
-    // The plug exposes the built-in principal...
+    // The plug exposes the built-in principal (dev has no /auth/callback
+    // handshake to seed a real one).
     expect(auth).toContain("def dev_user, do: build_user(elem(verify_token(nil), 1))");
-    // ...and LiveAuth grants it when the browser session is empty (dev has no
-    // /auth/callback handshake to seed it) instead of redirecting to /login.
-    expect(live).toContain("{:ok, ApiWeb.Auth.dev_user()}");
-    expect(live).not.toContain("{:error, :unauthenticated}");
   });
 
-  it("oidc: LiveAuth stays strict — a missing session redirects to /login, no dev_user", async () => {
+  it("oidc: the :api Auth plug stays strict — no dev_user fallback", async () => {
     const files = await build(source({ oidc: true }));
     const auth = files.get("api/lib/api_web/auth.ex")!;
-    const live = files.get("api/lib/api_web/live_auth.ex")!;
     expect(auth).not.toContain("def dev_user");
-    expect(live).toContain("{:error, :unauthenticated}");
-    expect(live).not.toContain("dev_user");
-    expect(live).toContain('redirect(socket, to: "/login")');
   });
 
   it("emits the live_view dead-render signing salt in config.exs", async () => {

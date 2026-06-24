@@ -3,7 +3,7 @@
 //
 // One adapter per concrete persistence library each platform ships
 // (`efcore` and `dapper` on .NET; `drizzle` and `mikroorm` on Node;
-// `ash-postgres` on Phoenix; …).  The validator reads `supports(...)`
+// `ecto` on Phoenix; …).  The validator reads `supports(...)`
 // to enforce capability rules at the language layer; the orchestrator
 // calls the `emit*` methods to produce repositories / migrations /
 // outbox writers / connection setup.
@@ -43,7 +43,7 @@ export interface PersistenceAdapter {
    *  `["relational"]` only.  An adapter advertising `"embedded"` /
    *  `"document"` can host a `shape(embedded)` / `shape(document)`
    *  aggregate; the validator rejects a `shape(…)` the target backend
-   *  doesn't list (e.g. `document` on an Ash target). */
+   *  doesn't list. */
   readonly supportedShapes?: readonly SavingShape[];
   /** Per-binding capability check.  The validator calls this for
    *  every `dataSource X { for:, kind:, use: }` to reject obviously
@@ -69,7 +69,7 @@ export interface PersistenceAdapter {
   emitRepository(agg: AggregateIR, logical: DataSourceIR, ctx: EmitCtx): Lines;
   /** DDL / EF migration body for every aggregate the adapter hosts
    *  on the given physical stores.  Return `null` when the adapter
-   *  delegates schema management elsewhere (e.g. Ash auto-migrate). */
+   *  delegates schema management elsewhere. */
   emitMigrations(
     aggs: readonly AggregateIR[],
     physicalStores: readonly StorageIR[],

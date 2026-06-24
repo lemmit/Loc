@@ -181,7 +181,7 @@ errors.
 ## What's in the box
 
 **Four runtimes from one source.** Hono (TypeScript), ASP.NET Core
-(.NET), Phoenix LiveView (Elixir/Ash), React frontend.  Pick per
+(.NET), Phoenix LiveView (Elixir, plain Ecto/Phoenix), React frontend.  Pick per
 deployable.  Switch any time.  Identical API contracts; idiomatic
 per-runtime output.
 
@@ -242,7 +242,7 @@ src/
   generator/
     typescript/    # Hono backend (procedural emitters + builders)
     dotnet/        # ASP.NET Core + EF Core + Mediator backend
-    phoenix-live-view/   # Phoenix LiveView + Ash backend (HEEx walker)
+    phoenix-live-view/   # Phoenix LiveView backend (plain Ecto/Phoenix, HEEx walker)
     react/         # React frontend + walker target + page-object generator
     _packs/        # design-pack discovery + loader (Mantine/shadcn/MUI/Chakra/ashPhoenix)
     _walker/       # cross-framework walker registry + WalkerTarget contract
@@ -336,8 +336,8 @@ non-trivial changes.
   `dotnet build /warnaserror`, `mix compile --warnings-as-errors`).
 - **CI matrix** generates every example against every design pack and
   `tsc --noEmit`s the React output; .NET output is `dotnet build
-  /warnaserror`'d; Phoenix output is compiled against real Ash 3.x in
-  an Elixir docker image.
+  /warnaserror`'d; Phoenix output is compiled against plain Ecto/Phoenix
+  in an Elixir docker image.
 
 ## License
 

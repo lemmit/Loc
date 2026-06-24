@@ -212,7 +212,7 @@ describe.skipIf(!ENABLED)("auth UI-gate runtime smoke", () => {
 // generated Phoenix/Ash app and asserts the dead-render HTML over plain HTTP —
 // no browser, no Playwright.
 //
-// Boot path (the in-sandbox recipe, mirroring generated-elixir-ash-build):
+// Boot path (the in-sandbox recipe, mirroring generated-elixir-vanilla-build):
 //   docker (hexpm/elixir) + LOOM_HEX_MIRROR (hex.pm via the loopback TLS mirror)
 //   + a postgres:16 sidecar + `mix deps.get / ecto.create / ecto.migrate /
 //   phx.server` on :4000, then curl from the host (--network host).

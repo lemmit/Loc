@@ -117,6 +117,8 @@ Per-pack legacy table (kept for the per-dep latest-stable column):
 
 ### Phoenix LiveView (Elixir / Ash) — `src/generator/elixir/shell/project.ts:~67–93`
 
+**(Superseded 2026: the Ash foundation was removed; `platform: elixir` now generates plain Ecto/Phoenix only and `foundation: ash` is a validation error. The `ash` / `ash_postgres` / `ash_phoenix` dep rows below no longer ship.)**
+
 | package | pinned | latest | notes |
 | --- | --- | --- | --- |
 | `phoenix` | `~> 1.8` | 1.8 | on 1.8 |

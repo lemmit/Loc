@@ -11,7 +11,7 @@
 //     404.
 //
 // Full RFC 7807 ProblemDetails parity (envelope fields, errors[]
-// extension shape byte-identical to the Ash tower) lands in Slice 4.
+// extension shape byte-identical to the other backends) lands in Slice 4.
 // ---------------------------------------------------------------------------
 
 import type {
@@ -131,8 +131,8 @@ export function emitVanillaApiControllers(
       });
     }
     // Per-operation member endpoints — `POST /<plural>/:id/<op>`, one per
-    // public non-CRUD operation, matching the Ash path (`elixir/api-emit.ts`)
-    // and the node/dotnet/python/java backends.  The URL segment uses
+    // public non-CRUD operation, matching the node/dotnet/python/java
+    // backends.  The URL segment uses
     // `routeSlug` (D-URLSTYLE) while the action atom stays the op verb.
     for (const op of memberOps) {
       routes.push({
@@ -160,8 +160,8 @@ function renderController(
   const facadeMod = `${appModule}.${ctxModule}`;
 
   // Reference collections (`X id[]` → `many_to_many`) are projected to id arrays
-  // in the wire response (the Ash `calculate :party, {:array, :uuid}` analogue):
-  // each loaded relationship is mapped to its members' ids by `__ref_ids/1`.
+  // in the wire response: each loaded relationship is mapped to its members'
+  // ids by `__ref_ids/1`.
   const refCollSerLines = serializeRefCollLines(agg);
   const serializeRefColls = refCollSerLines.length > 0 ? `\n${refCollSerLines.join("\n")}` : "";
   const refIdsHelper =

@@ -17,7 +17,6 @@ import type {
   TypeIR,
 } from "../../types/loom-ir.js";
 import { allContexts } from "../../types/loom-ir.js";
-import { isAshReturningOpEmittable } from "../../util/operation-returns.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { walkExpr } from "./shared.js";
 
@@ -225,7 +224,7 @@ export function validateGenericInstancesUnimplemented(
   // emittable and the gate stays quiet.  React is a frontend, not a backend,
   // so it never appears here — its hooks consume whatever the backend serves.
   // `"node"` is the hono/TS backend's platform identity (realization axes);
-  // `"dotnet"` the EF/ASP.NET backend; `"elixir"` the Ash/Phoenix backend
+  // `"dotnet"` the EF/ASP.NET backend; `"elixir"` the Phoenix backend
   // (the legacy `phoenix` / `phoenixLiveView` platform aliases canonicalize
   // to `elixir` per D-ELIXIR-PLATFORM).  All four backends now emit
   // generic carriers.
@@ -321,30 +320,18 @@ function containsUnion(type: TypeIR): boolean {
  * shapes generated runtime stubs (`NotImplementedException` on .NET, an
  * untagged body on Hono).
  *
- * Backend scope: enforced for node/dotnet hosts and for the legacy
- * no-deployable path (`generate ts` / `generate dotnet`).  A context hosted
- * *exclusively* by elixir backends is exempt — Phoenix's P4d emission tags
- * whatever struct the single-get read yields (success-side only; absence
- * raises), and error payloads have no Elixir struct yet, so enforcing the
- * absence shape would regress the shipped tagger there.  The elixir producer
- * alignment is tracked in the global plan's elixir track.
+ * Backend scope: enforced for every backend host (node / dotnet / java /
+ * python / elixir) and for the legacy no-deployable path (`generate ts` /
+ * `generate dotnet`).  The elixir (plain Ecto/Phoenix) find-controller emits
+ * the absence producer, so it runs the same shape check as the others.
  */
 export function validateUnionFindShapes(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
   backendPlatforms: Set<string>,
-  elixirFoundations: Set<string> = new Set(),
 ): void {
-  // An elixir-only context is exempt only on the Ash foundation — Phoenix/Ash's
-  // P4d find tagger is success-side only (absence raises), so enforcing the
-  // absent shape would regress it.  The vanilla foundation DOES emit the
-  // absence producer (`find-controller.ts`), so it gets the shape check like
-  // node/dotnet.  Mixed/non-elixir hosts always run the check.
-  const elixirOnly =
-    backendPlatforms.size > 0 && [...backendPlatforms].every((p) => p === "elixir");
-  const allVanilla =
-    elixirFoundations.size > 0 && [...elixirFoundations].every((f) => f === "vanilla");
-  if (elixirOnly && !allVanilla) return;
+  // The elixir (plain Ecto) backend emits the absence producer
+  // (`find-controller.ts`), so every backend runs the union-find shape check.
   const supported = (find: FindIR, aggName: string): string | null => {
     const t = find.returnType;
     // (A named `payload Foo = A | B` reference in find-return position never
@@ -507,45 +494,21 @@ export function validateOperationReturnsUnimplemented(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],
   backendPlatforms: Set<string>,
-  elixirFoundations: Set<string> = new Set(),
 ): void {
   // Backends that emit the operation-return ProblemDetails translation today.
   // `"node"` is the Hono/TS backend (exception-less.md spike); python/java/dotnet
-  // followed.  Elixir emits it on the **vanilla** foundation for any returning
-  // op, and on the **ash** foundation for *return-dominant* ops (DEBT-03 — a
-  // generic action; mutation-then-return / guarded bodies stay deferred on ash).
-  // No backend (legacy single-context path) → emittable, gate stays quiet.
-  const SUPPORTED_RETURN_BACKENDS = new Set(["node", "dotnet", "python", "java"]);
+  // and elixir (plain Ecto/Phoenix) followed — every backend emits it for any
+  // returning op.  No backend (legacy single-context path) → emittable, gate
+  // stays quiet.
+  const SUPPORTED_RETURN_BACKENDS = new Set(["node", "dotnet", "python", "java", "elixir"]);
 
-  // Elixir capability is per-op: vanilla handles every returning op; ash handles
-  // return-dominant ops PLUS in-memory mutation (`assign`) and `precondition`/
-  // `requires` guards (DEBT-03).  So elixir can serve an op iff every foundation
-  // it runs under can — `vanilla` always, `ash` when the body is Ash-emittable
-  // (`emit` / `add` / `remove` still defer to vanilla).
-  const elixirCapableForOp = (op: OperationIR): boolean =>
-    elixirFoundations.size > 0 &&
-    [...elixirFoundations].every((f) => f === "vanilla" || isAshReturningOpEmittable(op));
-
-  const isCapable = (p: string, op: OperationIR): boolean =>
-    SUPPORTED_RETURN_BACKENDS.has(p) || (p === "elixir" && elixirCapableForOp(op));
+  const isCapable = (p: string): boolean => SUPPORTED_RETURN_BACKENDS.has(p);
 
   for (const agg of ctx.aggregates) {
     for (const op of agg.operations) {
       if (!op.returnType) continue;
-      const unsupported = [...backendPlatforms].filter((p) => !isCapable(p, op));
+      const unsupported = [...backendPlatforms].filter((p) => !isCapable(p));
       if (unsupported.length === 0) continue;
-      // An ash deployable that can't emit *this* op (a mutating/guarded body)
-      // gets a targeted hint; otherwise the generic "backend doesn't emit it"
-      // message.
-      const ashDeferred =
-        unsupported.includes("elixir") &&
-        elixirFoundations.has("ash") &&
-        !isAshReturningOpEmittable(op);
-      const ashNote = ashDeferred
-        ? ` On foundation: ash a returning op's body may use \`return\`/\`let\`, in-memory ` +
-          `\`field := value\` mutation, and \`precondition\`/\`requires\` guards; this op uses ` +
-          `\`emit\`/\`add\`/\`remove\` (or a bare expression), so host it on foundation: vanilla.`
-        : "";
       diags.push({
         severity: "error",
         code: "loom.operation-return-unsupported",
@@ -553,8 +516,7 @@ export function validateOperationReturnsUnimplemented(
           `operation '${agg.name}.${op.name}' declares an \`or\`-union return type, but the ` +
           `backend(s) serving this context (${unsupported.sort().join(", ")}) don't emit the ` +
           `producer-side route translation yet (exception-less.md). It's supported on: node, ` +
-          `dotnet, python, java, elixir on foundation: vanilla, and return-dominant ops on ` +
-          `foundation: ash.${ashNote}`,
+          `dotnet, python, java, elixir.`,
         source: `${ctx.name}/aggregate ${agg.name}.${op.name}`,
       });
     }

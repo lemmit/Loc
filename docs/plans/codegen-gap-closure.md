@@ -56,17 +56,19 @@ logic from there rather than designing fresh.
 
 ### R-PEROP · per-op style decomposition (F6d) — P3-internal, M each
 `emitEndpoint` / `emitHandlerOrService` throw `AdapterNotImplementedError` on the real
-`layered` styles (node/elixir/java) and elixir `ash`; those styles currently route everything
+`layered` styles (node/elixir/java); those styles currently route everything
 through `emitForAggregate`. Internal seam (not user-visible), kept active per scope decision.
+(The elixir `ash` style is gone — Ash foundation removed; elixir is plain Ecto/Phoenix now.)
 
-- Files: each backend's `adapters/*-style.ts` (node `platform/hono/v4/adapters/layered-style.ts`, elixir `generator/elixir/adapters/{ash,layered}-style.ts`, java `generator/java/adapters/layered-style.ts`)
+- Files: each backend's `adapters/*-style.ts` (node `platform/hono/v4/adapters/layered-style.ts`, elixir `generator/elixir/adapters/layered-style.ts`, java `generator/java/adapters/layered-style.ts`)
 - **Hint:** `dotnet/adapters/cqrs-style.ts:121-150` implements both methods fully — the reference
   for per-op extraction.
 - Sequencing: prerequisite for any future `R-STYLE` work, so land it before that bucket is undeferred.
 - Status: **still open** — `emitEndpoint` / `emitHandlerOrService` throw `AdapterNotImplementedError`
   on the real `layered` styles (`platform/hono/v4/adapters/layered-style.ts:67,75`,
-  `generator/elixir/adapters/layered-style.ts:45,49`) and elixir `ash`; those styles route through
-  `emitForAggregate`. Not user-visible, so low urgency.
+  `generator/elixir/adapters/layered-style.ts:45,49`); those styles route through
+  `emitForAggregate`. Not user-visible, so low urgency. (The elixir `ash` style is gone —
+  Ash foundation removed; elixir is plain Ecto/Phoenix now.)
 
 ### Deferred (P3 — reserved vocabulary, nothing breaks today)
 

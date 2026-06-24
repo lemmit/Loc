@@ -119,10 +119,11 @@ build with tracing disabled pays nothing.
     DI, elixir process dictionary, Java/Spring MVC `ThreadLocal`, Python
     `contextvars`) — a per-flow slot the runtime carries implicitly;
     `enterScope`/`exitScope` push/pop a child frame on it. Realisation is
-    **foundation-sensitive**: the frame-open seam differs under
-    `foundation: ash` (Ash action context) vs `vanilla` (`with`-block
-    step), and under the minimal node foundation (middleware) vs
-    `foundation: nest` (interceptor / `@nestjs/cqrs` handler). On the BEAM
+    **foundation-sensitive**: on elixir the frame-open seam is the
+    `vanilla` foundation's `with`-block step (the Ash foundation was
+    removed — `foundation: ash` is now a validation error), and on node it
+    differs under the minimal foundation (middleware) vs `foundation: nest`
+    (interceptor / `@nestjs/cqrs` handler). On the BEAM
     the child frame must be **copied explicitly into a spawned `Task`** —
     process state is not inherited across the fan-out.
   - **Explicit-threading** (**Go** `context.Context`; Java/Spring WebFlux

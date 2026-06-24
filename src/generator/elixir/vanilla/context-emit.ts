@@ -2,7 +2,7 @@
 // Vanilla context module — `lib/<app>/<ctx>.ex`.  Slices 1, 2, 5c of
 // vanilla-foundation-tdd-plan.md.
 //
-// Plain Elixir context module (no `use Ash.Domain`).  Façade that
+// Plain Elixir context module.  Façade that
 // re-exports the per-aggregate Repository functions plus named-
 // operation handlers (Slice 5c prerequisite — workflows on vanilla
 // need `<op>_<agg>(record, params)` for cross-aggregate operation
@@ -186,9 +186,9 @@ defmodule ${facadeMod} do
   @moduledoc """
   Plain context module for the ${ctx.name} bounded context.  Façade
   re-exporting per-aggregate Repository functions plus named-operation
-  handlers (Slice 5c prerequisite — workflows on vanilla need
+  handlers (workflows need
   \`<op>_<agg>(record, params)\` for cross-aggregate calls in the
-  workflow body).  Vanilla foundation (no Ash.Domain).
+  workflow body).  Plain Elixir context module.
   """${requireLogger}${refCollHelpers ? "\n  import Ecto.Query" : ""}
 
 ${blocks.join("\n")}${retrievalBlock}${ensureBlock}${refCollHelpers}end

@@ -14,14 +14,11 @@
 //   2. The walker records the target aggregate on
 //      `WalkResult.idOptionsBindings`; renderMount in liveview-emit.ts
 //      iterates these and emits one
-//      `socket |> assign(:<x_snake>_options, <Ctx>.list_<x_snake>s!() |> Enum.map(...))`
-//      per binding.
-//   3. When the target aggregate declares `derived display: string`,
-//      the option-list load uses `list_<x>!(load: [:display])` and
-//      maps each record to `{r.display, r.id}` — proper
-//      human-readable label.
-//      When NO display is declared (test below), falls back to the
-//      v0 id-as-label shape `{to_string(r.id), r.id}`.
+//      `socket |> assign(:<x_snake>_options, (case <Ctx>.list_<x_snake>s() do
+//        {:ok, items} -> items; _ -> [] end) |> Enum.map(...))` per binding.
+//   3. The option-list maps each record to the id-as-label shape
+//      `{to_string(r.id), r.id}` so the select stays functional (the right
+//      value flows through on submit).
 //   4. Non-id fields stay on their previous dispatch
 //      (anti-regression).
 //   5. Optional `X id?` still routes to select (the optional
@@ -55,7 +52,7 @@ const phoenixSystem = (orderField: string): string => `
       }
     }
     deployable phoenixApp {
-      platform: elixir { foundation: ash }, contexts: [C], serves: DemoApi,
+      platform: elixir { foundation: vanilla }, contexts: [C], serves: DemoApi,
       ui: DemoUi, port: 4000
     }
   }
@@ -91,12 +88,11 @@ describe("HEEx form — `X id` field renders as <.input type='select'>", () => {
   it("renderMount emits an option-load assign per target aggregate", async () => {
     const files = await generateSystemFiles(phoenixSystem("customerId: Customer id"));
     const heex = findNewOrderHeex(files);
-    // The mount stub assigns :<target>_options from the Ash code
-    // interface list-call.  Customer in this fixture has
-    // `derived display: string = name`, so the load includes
-    // `load: [:display]` and the option label is `r.display`.
+    // The mount stub assigns :<target>_options from the vanilla context
+    // `list_<x>s()` tuple-returning fetch (case-unwrapped to the list), mapped
+    // to `{label, id}` option tuples.
     expect(heex).toMatch(
-      /\|> assign\(:customer_options, [\w.]+\.list_customers!\(load: \[:display\]\) \|> Enum\.map\(fn r -> \{r\.display, r\.id\} end\)\)/,
+      /\|> assign\(:customer_options, \(case [\w.]+\.list_customers\(\) do \{:ok, items\} -> items; _ -> \[\] end\) \|> Enum\.map\(fn r -> \{to_string\(r\.id\), r\.id\} end\)\)/,
     );
   });
 
@@ -124,16 +120,16 @@ describe("HEEx form — `X id` field renders as <.input type='select'>", () => {
           page NewOrder { route: "/orders/new" body: CreateForm { of: Order } }
         }
         deployable phoenixApp {
-          platform: elixir { foundation: ash }, contexts: [C], serves: DemoApi,
+          platform: elixir { foundation: vanilla }, contexts: [C], serves: DemoApi,
           ui: DemoUi, port: 4000
         }
       }
     `);
     const heex = findNewOrderHeex(files);
-    // No load: [:display] in the list call, fallback {to_string, id}
-    // shape in the Enum.map.
+    // Fallback {to_string(id), id} shape in the Enum.map over the vanilla
+    // tuple-returning list fetch.
     expect(heex).toMatch(
-      /\|> assign\(:customer_options, [\w.]+\.list_customers!\(\) \|> Enum\.map\(fn r -> \{to_string\(r\.id\), r\.id\} end\)\)/,
+      /\|> assign\(:customer_options, \(case [\w.]+\.list_customers\(\) do \{:ok, items\} -> items; _ -> \[\] end\) \|> Enum\.map\(fn r -> \{to_string\(r\.id\), r\.id\} end\)\)/,
     );
   });
 
@@ -162,7 +158,7 @@ describe("HEEx form — `X id` field renders as <.input type='select'>", () => {
           }
         }
         deployable phoenixApp {
-          platform: elixir { foundation: ash }, contexts: [C], serves: DemoApi,
+          platform: elixir { foundation: vanilla }, contexts: [C], serves: DemoApi,
           ui: DemoUi, port: 4000
         }
       }

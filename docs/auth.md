@@ -222,7 +222,7 @@ without the data — use `where` to scope *which rows* come back, and
 intentionally-public escape that also satisfies default-deny.
 
 The 403 emission lands on **every backend** (Hono, .NET, Java, Python,
-Phoenix Ash + vanilla); the validation (currentUser-only, default-deny) is
+Phoenix LiveView); the validation (currentUser-only, default-deny) is
 platform-neutral.  See
 [Views → Authorization](views.md#authorization--the-requires-gate)
 for the full surface.

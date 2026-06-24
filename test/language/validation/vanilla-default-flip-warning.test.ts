@@ -7,11 +7,11 @@ import type { Model } from "../../../src/language/generated/ast.js";
 // ---------------------------------------------------------------------------
 // D-VANILLA-DEFAULT — the default flip has LANDED.  A bare `platform: elixir`
 // (no explicit `foundation:`) now resolves to `vanilla` (plain Phoenix
-// LiveView on Ecto) in `lower-platform.ts:greenfieldAxisDefaults`;
-// `foundation: ash` is the explicit opt-in.  The transitional
-// `loom.foundation-default-flipping` warning that preceded the flip is gone —
-// omitting `foundation:` is no longer ambiguous, so it must NOT warn.  See
-// `docs/decisions.md#D-VANILLA-DEFAULT`.
+// LiveView on Ecto) in `lower-platform.ts:greenfieldAxisDefaults`; with the Ash
+// foundation removed, `vanilla` is the only foundation on elixir.  The
+// transitional `loom.foundation-default-flipping` warning that preceded the
+// flip is gone — omitting `foundation:` is no longer ambiguous, so it must NOT
+// warn.  See `docs/decisions.md#D-VANILLA-DEFAULT`.
 // ---------------------------------------------------------------------------
 
 async function parse(source: string) {
@@ -41,12 +41,6 @@ describe("D-VANILLA-DEFAULT — flip landed, no transitional warning", () => {
 
   it("does NOT warn on an elixir block with a non-foundation axis but no foundation:", async () => {
     const { errors, warnings } = await parse(sys("elixir { application: serviceLayer }"));
-    expect(errors).toEqual([]);
-    expect(warnings.some((w) => /D-VANILLA-DEFAULT|foundation/.test(w))).toBe(false);
-  });
-
-  it("does NOT warn when foundation: ash is explicit", async () => {
-    const { errors, warnings } = await parse(sys("elixir { foundation: ash }"));
     expect(errors).toEqual([]);
     expect(warnings.some((w) => /D-VANILLA-DEFAULT|foundation/.test(w))).toBe(false);
   });

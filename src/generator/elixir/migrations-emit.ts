@@ -22,8 +22,8 @@ import { snake, upperFirst } from "../../util/naming.js";
 //   - Subsequent migrations: one .exs file containing every step, named
 //     `<MigrationsIR.version>_<snake(MigrationsIR.name)>.exs`.
 //
-// Stays in Ecto DSL (not raw SQL) so AshPostgres + ecto.migrate keep
-// working unchanged; the shared `src/generator/sql-pg.ts` helper is for
+// Stays in Ecto DSL (not raw SQL) so `ecto.migrate` keeps working
+// unchanged; the shared `src/generator/sql-pg.ts` helper is for
 // TS/.NET Postgres backends only.
 // ---------------------------------------------------------------------------
 
@@ -31,9 +31,9 @@ const BASE_TIMESTAMP = 20260101000000;
 
 /** Ecto option string for a table / index / reference that lives in a
  *  non-default Postgres schema — the owning bounded context's schema,
- *  carried on `TableShape.schema` (the Ash resource maps `table "x"` +
+ *  carried on `TableShape.schema` (the Ecto schema maps `table "x"` in
  *  `schema "catalog"`, so the migration must create `catalog.x` or the
- *  resource queries a relation that doesn't exist).  Empty for the
+ *  schema queries a relation that doesn't exist).  Empty for the
  *  default (`public`) schema, preserving the unqualified output. */
 function prefixOpt(schema: string | undefined): string {
   return schema ? `, prefix: ${JSON.stringify(schema)}` : "";
@@ -58,41 +58,19 @@ function schemaCreateLine(schema: string | undefined): string {
  *  than any realistic within-module span (`N*100 + joins`). */
 const MODULE_VERSION_STRIDE = 1_000_000;
 
-/** Which Phoenix foundation the migration is emitted for.  Only affects the
- *  bundled `timestamps()` macro: when an audit capability declares explicit
- *  `created_at`/`updated_at` columns, `ash` keeps the non-colliding auto
- *  `inserted_at` while `vanilla` drops `timestamps()` entirely — each mirroring
- *  its own schema emitter (`domain-emit.ts` / `vanilla/schema-emit.ts`).  See
- *  `timestampsMacro`. */
-type Foundation = "ash" | "vanilla";
-
-/** The `timestamps()` line a state-table migration appends — foundation- and
- *  column-aware so it matches the emitted schema (otherwise `ecto.migrate`
- *  fails with "column updated_at specified more than once").  An audit
- *  capability (`with audit` / `auditable`) declares explicit `created_at` /
+/** The `timestamps()` line a state-table migration appends — column-aware
+ *  so it matches the emitted schema (otherwise `ecto.migrate` fails with
+ *  "column updated_at specified more than once").  An audit capability
+ *  (`with audit` / `auditable`) declares explicit `created_at` /
  *  `updated_at` columns; the bundled `timestamps()` would add a SECOND
- *  `updated_at`.
- *   - vanilla: the Ecto schema drops `timestamps()` entirely when an
- *     `updated_at` field is present (`vanilla/schema-emit.ts`), so the
- *     migration must too — the audit columns are the only timestamps.
- *   - ash: the resource keeps `create_timestamp :inserted_at` alongside the
- *     audit `updated_at` (`domain-emit.ts`), so the migration keeps
- *     `inserted_at` but skips the colliding auto column(s) via
- *     `timestamps(updated_at: false)`.
- *  With no timestamp columns already present both foundations emit a plain
- *  `timestamps()`, so non-audit output stays byte-identical. */
-function timestampsMacro(table: TableShape, foundation: Foundation): string | null {
-  const hasInsertedAt = table.columns.some((c) => c.name === "inserted_at");
+ *  `updated_at`.  The Ecto schema drops `timestamps()` entirely when an
+ *  `updated_at` field is present (`vanilla/schema-emit.ts`), so the
+ *  migration must too — the audit columns are the only timestamps.  With
+ *  no `updated_at` column present the migration emits a plain
+ *  `timestamps()`, so non-audit output is unchanged. */
+function timestampsMacro(table: TableShape): string | null {
   const hasUpdatedAt = table.columns.some((c) => c.name === "updated_at");
-  if (foundation === "vanilla") {
-    return hasUpdatedAt ? null : "timestamps()";
-  }
-  if (!hasInsertedAt && !hasUpdatedAt) return "timestamps()";
-  const opts = [
-    ...(hasInsertedAt ? ["inserted_at: false"] : []),
-    ...(hasUpdatedAt ? ["updated_at: false"] : []),
-  ];
-  return opts.length === 2 ? null : `timestamps(${opts.join(", ")})`;
+  return hasUpdatedAt ? null : "timestamps()";
 }
 
 export function emitMigrations(
@@ -100,18 +78,15 @@ export function emitMigrations(
   migrations: MigrationsIR[],
   appModule: string,
   out: Map<string, string>,
-  /** Defaults to `ash` so the long-standing Ash call site stays unchanged;
-   *  the vanilla orchestrator passes `vanilla`. */
-  foundation: Foundation = "ash",
 ): void {
   let initialModuleIndex = 0;
   for (const m of migrations) {
     if (m.steps.length === 0) continue;
     if (m.baseline === null) {
-      emitInitial(m, appModule, out, initialModuleIndex * MODULE_VERSION_STRIDE, foundation);
+      emitInitial(m, appModule, out, initialModuleIndex * MODULE_VERSION_STRIDE);
       initialModuleIndex++;
     } else {
-      emitDelta(m, appModule, out, foundation);
+      emitDelta(m, appModule, out);
     }
   }
 }
@@ -124,7 +99,6 @@ function emitInitial(
    *  different modules don't collide in the shared dir.  See
    *  `MODULE_VERSION_STRIDE`. */
   baseOffset = 0,
-  foundation: Foundation = "ash",
 ): void {
   const base = BASE_TIMESTAMP + baseOffset;
   // Three classes of table, separated so timestamps preserve the
@@ -140,7 +114,7 @@ function emitInitial(
     (s): s is Extract<MigrationStep, { op: "createTable" }> => s.op === "createTable",
   );
   // Value-object array child tables (`charges: Money[]`) are now emitted as
-  // real id-less relational child tables on Phoenix too (both Ash and vanilla),
+  // real id-less relational child tables on Phoenix too,
   // not collapsed into an inline `{:array, :map}` column on the parent.  They
   // are FK-cascaded children of their owner aggregate — the same tier as a
   // containment part table — so they share the part block's create-ordering
@@ -156,7 +130,7 @@ function emitInitial(
 
   // Parents — base + i.
   for (let i = 0; i < parentTables.length; i++) {
-    writeInitialFile(parentTables[i]!, base + i, appModule, out, foundation);
+    writeInitialFile(parentTables[i]!, base + i, appModule, out);
   }
   // Parts (incl. value-collection children) — grouped by parent.
   const parentCount = parentTables.length;
@@ -169,7 +143,7 @@ function emitInitial(
       .sort((a, b) => a.name.localeCompare(b.name));
     for (let j = 0; j < partsOfThis.length; j++) {
       const ts = base + parentCount * 10 + i * 10 + (j + 1);
-      writeInitialFile(partsOfThis[j]!, ts, appModule, out, foundation);
+      writeInitialFile(partsOfThis[j]!, ts, appModule, out);
     }
   }
   // Join tables — placed above the part block so the references on
@@ -177,7 +151,7 @@ function emitInitial(
   const sortedJoins = [...joinTables].sort((a, b) => a.name.localeCompare(b.name));
   for (let k = 0; k < sortedJoins.length; k++) {
     const ts = base + parentCount * 100 + k;
-    writeInitialFile(sortedJoins[k]!, ts, appModule, out, foundation);
+    writeInitialFile(sortedJoins[k]!, ts, appModule, out);
   }
 }
 
@@ -186,7 +160,6 @@ function writeInitialFile(
   ts: number,
   appModule: string,
   out: Map<string, string>,
-  foundation: Foundation,
 ): void {
   const path = `priv/repo/migrations/${ts}_create_${table.name}.exs`;
   const migrationName = `Create${tableToPascal(table.name)}`;
@@ -195,8 +168,8 @@ function writeInitialFile(
     : isJoinTable(table)
       ? renderInitialJoinFile(table, migrationName, appModule)
       : isStateTable(table)
-        ? renderInitialStateFile(table, migrationName, appModule, foundation)
-        : renderInitialFile(table, migrationName, appModule, foundation);
+        ? renderInitialStateFile(table, migrationName, appModule)
+        : renderInitialFile(table, migrationName, appModule);
   out.set(path, body);
 }
 
@@ -213,7 +186,6 @@ function renderInitialStateFile(
   table: TableShape,
   migrationName: string,
   appModule: string,
-  foundation: Foundation,
 ): string {
   const pk = new Set(table.primaryKey);
   const prefix = prefixOpt(table.schema);
@@ -225,7 +197,7 @@ function renderInitialStateFile(
       }
       return "      " + renderEctoColumn(c, table);
     });
-  const ts = timestampsMacro(table, foundation);
+  const ts = timestampsMacro(table);
   if (ts) colLines.push(`      ${ts}`);
   return `defmodule ${appModule}.Repo.Migrations.${migrationName} do
   use Ecto.Migration
@@ -239,12 +211,7 @@ end
 `;
 }
 
-function renderInitialFile(
-  table: TableShape,
-  migrationName: string,
-  appModule: string,
-  foundation: Foundation,
-): string {
+function renderInitialFile(table: TableShape, migrationName: string, appModule: string): string {
   const idCol = table.columns.find((c) => c.name === "id");
   const pkType = idCol ? ectoPrimaryKeyType(idCol.type) : ":uuid";
   // The parent's value-collection stand-in column (`{:array, :map}`,
@@ -258,7 +225,7 @@ function renderInitialFile(
     `      add :id, ${pkType}, primary_key: true, null: false`,
     ...otherCols.map((c) => "      " + renderEctoColumn(c, table)),
   ];
-  const ts = timestampsMacro(table, foundation);
+  const ts = timestampsMacro(table);
   if (ts) colLines.push(`      ${ts}`);
   const prefix = prefixOpt(table.schema);
   const indexLines = table.indexes.map((i) => {
@@ -283,9 +250,8 @@ end
  *  Money[]` → `order_charges`).  Unlike the relational backends — whose
  *  child table is keyed by the composite `(parent_fk, ordinal)` in the
  *  shared MigrationsIR — the Phoenix child carries a SYNTHETIC `id` uuid
- *  primary key so it can be modelled as an Ash child resource
- *  (`uuid_primary_key`) / Ecto `has_many` whose rows are managed via
- *  `manage_relationship` / `cast_assoc` (both want row identity for the
+ *  primary key so it can be modelled as an Ecto `has_many` whose rows are
+ *  managed via `cast_assoc` (which wants row identity for the
  *  replace-on-update diff).  The synthetic id never reaches the wire — the
  *  child's Jason encoder projects only the value object's own fields, so
  *  the array stays `[{amount,currency},…]`, byte-identical with every other
@@ -297,7 +263,7 @@ function renderInitialValueCollectionFile(
 ): string {
   const prefix = prefixOpt(table.schema);
   // Synthetic uuid PK (NOT in the MigrationsIR composite PK — Phoenix adds
-  // it so the child has Ash/Ecto-managed row identity).
+  // it so the child has Ecto-managed row identity).
   const lines: string[] = ["      add :id, :uuid, primary_key: true, null: false"];
   for (const c of table.columns) {
     const defaultClause = c.default !== undefined ? `, default: ${c.default}` : "";
@@ -373,19 +339,14 @@ end
 `;
 }
 
-function emitDelta(
-  m: MigrationsIR,
-  appModule: string,
-  out: Map<string, string>,
-  foundation: Foundation,
-): void {
+function emitDelta(m: MigrationsIR, appModule: string, out: Map<string, string>): void {
   const path = `priv/repo/migrations/${m.version}_${snake(m.name)}.exs`;
-  out.set(path, renderDeltaFile(m, appModule, foundation));
+  out.set(path, renderDeltaFile(m, appModule));
 }
 
-function renderDeltaFile(m: MigrationsIR, appModule: string, foundation: Foundation): string {
+function renderDeltaFile(m: MigrationsIR, appModule: string): string {
   const migrationName = upperFirst(m.name);
-  const stepLines = m.steps.flatMap((s) => renderEctoStep(s, foundation));
+  const stepLines = m.steps.flatMap((s) => renderEctoStep(s));
   return `defmodule ${appModule}.Repo.Migrations.${migrationName} do
   use Ecto.Migration
 
@@ -396,10 +357,10 @@ end
 `;
 }
 
-function renderEctoStep(step: MigrationStep, foundation: Foundation): string[] {
+function renderEctoStep(step: MigrationStep): string[] {
   switch (step.op) {
     case "createTable":
-      return renderCreateTableInline(step.table, foundation);
+      return renderCreateTableInline(step.table);
     case "dropTable":
       return [`drop table(:${step.name})`];
     case "addColumn": {
@@ -437,7 +398,7 @@ function renderEctoStep(step: MigrationStep, foundation: Foundation): string[] {
   }
 }
 
-function renderCreateTableInline(table: TableShape, foundation: Foundation): string[] {
+function renderCreateTableInline(table: TableShape): string[] {
   const idCol = table.columns.find((c) => c.name === "id");
   const others = collapseVoGroups(
     table.columns.filter((c) => c.name !== "id" && !c.valueArrayChildTable),
@@ -450,7 +411,7 @@ function renderCreateTableInline(table: TableShape, foundation: Foundation): str
     lines.push(`  add :id, ${ectoPrimaryKeyType(idCol.type)}, primary_key: true, null: false`);
   }
   for (const c of others) lines.push("  " + renderEctoColumn(c, table));
-  const ts = timestampsMacro(table, foundation);
+  const ts = timestampsMacro(table);
   if (ts) lines.push(`  ${ts}`);
   lines.push("end");
   for (const idx of table.indexes) {
@@ -465,8 +426,8 @@ function renderCreateTableInline(table: TableShape, foundation: Foundation): str
  *  (`price_amount`, `price_currency`, both `voGroup: "price"`) back into a
  *  single `:map` column named for the group.  The canonical migration
  *  flattens value objects into columns (the relational/DDD shape the
- *  Drizzle / EF ORMs query); Ash stores an embedded value object as one
- *  `:map`, so Phoenix collapses each group here.  A group's `:map` is
+ *  Drizzle / EF ORMs query); the Phoenix Ecto schema stores an embedded
+ *  value object as one `:map`, so Phoenix collapses each group here.  A group's `:map` is
  *  nullable iff every leaf is (i.e. the value-object field itself was
  *  optional).  Columns without a `voGroup` pass through unchanged. */
 function collapseVoGroups(columns: readonly ColumnShape[]): ColumnShape[] {

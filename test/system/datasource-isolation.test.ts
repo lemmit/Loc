@@ -140,7 +140,7 @@ describe("resource isolationLevel — end-to-end emit", () => {
     expect(body).not.toMatch(/IsolationLevel/);
   });
 
-  it("Phoenix workflow picks up the resource isolationLevel via Ash.transaction opts", async () => {
+  it("Phoenix (vanilla) transactional workflow wraps the body in Repo.transaction/1", async () => {
     const files = await emit(`
       system Sys {
         subdomain M {
@@ -170,7 +170,7 @@ describe("resource isolationLevel — end-to-end emit", () => {
           for: C, kind: state, use: pg, isolationLevel: repeatableRead
         }
         deployable phoenixApp {
-          platform: elixir { foundation: ash }, contexts: [C], dataSources: [cState],
+          platform: elixir { foundation: vanilla }, contexts: [C], dataSources: [cState],
           serves: CApi, ui: Admin, port: 4000
         }
       }
@@ -178,6 +178,10 @@ describe("resource isolationLevel — end-to-end emit", () => {
     const wf = [...files.keys()].find((k) => k.endsWith("bump_credit.ex"));
     expect(wf, "bump_credit.ex emitted").toBeDefined();
     const body = files.get(wf!)!;
-    expect(body).toMatch(/isolation_level: :repeatable_read/);
+    // The vanilla foundation runs the body inside plain Ecto's
+    // `Repo.transaction/1` — there is no Ash data layer to carry the
+    // resource's isolationLevel as a transaction opt.
+    expect(body).toMatch(/Repo\.transaction\(fn -> commit_result\(run_inner\(params\)\) end\)/);
+    expect(body).not.toMatch(/isolation_level:/);
   });
 });

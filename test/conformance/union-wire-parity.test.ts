@@ -5,10 +5,16 @@
 // it from the single `unionMembers` resolver — but "identical by construction"
 // is exactly the invariant that drifts later without a test pinning it.  This
 // generates the same `find recent(): Order or NotFound` (the validator-pinned
-// absence shape, `loom.union-find-shape-unsupported`) for Hono, .NET, and
-// Phoenix and asserts each emits the same per-variant tagged shape: the `type`
+// absence shape, `loom.union-find-shape-unsupported`) for Hono and .NET and
+// asserts each emits the same per-variant tagged shape: the `type`
 // discriminator, the same variant tags (`Order`, `NotFound`), and the same
 // wire field keys under each tag.
+//
+// (The Elixir backend — plain Phoenix+Ecto, the only foundation — tags the
+// success variant inline by serializing the whole record + a `type:` member,
+// and rides the absent variant on a 404 ProblemDetails, pinned by
+// union-find-absence-parity.test.ts.  It carries no per-variant field-key
+// struct to compare here, so it is out of scope for this field-key parity.)
 //
 // Lives in the always-on `test` gate (no docker) — the discriminated-union
 // complement to `paged-wire-parity.test.ts`.
@@ -19,7 +25,7 @@ import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
 import { allContexts, type TypeIR } from "../../src/ir/types/loom-ir.js";
 import { lowerFirst } from "../../src/util/naming.js";
-import { generateDotnet, generateHono, generateSystemFiles } from "../_helpers/generate.js";
+import { generateDotnet, generateHono } from "../_helpers/generate.js";
 import { parseString, parseValid } from "../_helpers/parse.js";
 
 const CONTEXT = `
@@ -27,30 +33,6 @@ const CONTEXT = `
     aggregate Order ids guid { code: string  region: string }
     error NotFound { resource: string }
     repository Orders for Order { find recent(): Order or NotFound }
-  }
-`;
-
-const PHX_SYSTEM = `
-  system S {
-    subdomain Sales {
-      context Orders {
-        aggregate Order ids guid { code: string  region: string }
-        error NotFound { resource: string }
-        repository Orders for Order { find recent(): Order or NotFound }
-      }
-    }
-    api OrdersApi from Sales
-    ui A with scaffold(subdomains: [Sales]) { }
-    storage pg { type: postgres }
-    resource s { for: Orders, kind: state, use: pg }
-    deployable d {
-      platform: elixir { foundation: ash }
-      contexts: [Orders]
-      dataSources: [s]
-      serves: OrdersApi
-      ui: A
-      port: 4000
-    }
   }
 `;
 
@@ -105,22 +87,6 @@ async function dotnetShape(): Promise<Shape> {
   return out;
 }
 
-/** Phoenix: the controller's `tag_<union>/1` struct-pattern clauses. */
-async function phoenixShape(): Promise<Shape> {
-  const files = await generateSystemFiles(PHX_SYSTEM);
-  const key = [...files.keys()].find((k) => k.endsWith("controllers/orders_controller.ex"))!;
-  const ctrl = files.get(key)!;
-  const out: Shape = {};
-  for (const m of ctrl.matchAll(
-    /defp tag_order_or_not_found\(%[\w.]+\.(\w+)\{\} = v\), do: %\{([^}]*)\}/g,
-  )) {
-    const tag = m[1]!;
-    // Field pairs are `key: v.field`; the discriminator (`type: "Tag"`) has no `v.`.
-    out[tag] = [...m[2]!.matchAll(/(\w+): v\./g)].map((x) => x[1]!);
-  }
-  return out;
-}
-
 describe("discriminated unions — cross-backend wire parity (P4e)", () => {
   it("the canonical shape tags Order/NotFound with their wire fields", async () => {
     expect(await canonical()).toEqual({
@@ -137,18 +103,9 @@ describe("discriminated unions — cross-backend wire parity (P4e)", () => {
     expect(await dotnetShape()).toEqual(await canonical());
   });
 
-  it("Phoenix tags the success variant inline; the error variant rides a 404 (A4)", async () => {
-    // Under the find re-shape (A4) the `NotFound` error variant is not a 200
-    // tagged member on Phoenix — the error payload has no struct, and the absent
-    // case maps to a 404 ProblemDetails (pinned by union-find-absence-parity.
-    // test.ts).  The success variant tags identically to the other backends.
-    expect(await phoenixShape()).toEqual({ Order: (await canonical()).Order });
-  });
-
-  it("Hono and .NET agree on the full tagged-union wire; Phoenix matches on the success variant", async () => {
-    const [hono, dotnet, phoenix] = await Promise.all([honoShape(), dotnetShape(), phoenixShape()]);
+  it("Hono and .NET agree on the full tagged-union wire", async () => {
+    const [hono, dotnet] = await Promise.all([honoShape(), dotnetShape()]);
     expect(hono).toEqual(dotnet);
-    expect(phoenix).toEqual({ Order: hono.Order });
   });
 
   it("every backend uses the `type` discriminator", async () => {

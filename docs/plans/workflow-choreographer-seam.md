@@ -85,7 +85,7 @@ export interface WorkflowTarget<Ctx> {
   renderForEach(s, renderedBody: string[], ctx): string[];
 
   // Wrap the whole rendered body in the backend's transaction construct
-  // when wf.transactional — `db.transaction(tx => …)` / `Ash.transaction`
+  // when wf.transactional — `db.transaction(tx => …)` / `Repo.transaction`
   // / `BeginTransactionAsync` / declarative no-op for Spring @Transactional.
   wrapTransaction(wf: WorkflowIR, body: string[], ctx): string[];
 

@@ -10,6 +10,13 @@
 > [`decisions.md`](../decisions.md). It landed before the vanilla emit
 > subtree, which therefore lives at `src/generator/elixir/vanilla/` as
 > planned. The design discussion below is retained for rationale.
+>
+> **(Superseded 2026: the Ash foundation was later removed. `platform: elixir`
+> now generates Phoenix LiveView on PLAIN Ecto/Phoenix only; the `foundation:`
+> knob remains but resolves to `vanilla` only — `foundation: ash` is now a
+> validation error. This rename proposal predates that removal, so the
+> `foundation: ash` examples and the ash-owned-axis prose below are historical;
+> the platform/transport rename they document still stands.)**
 
 ## TL;DR
 
@@ -25,7 +32,7 @@ This proposal completes the rename pattern:
 
 ```
 platform: elixir              # the language-ecosystem (was: phoenix)
-  foundation: ash | vanilla
+  foundation: vanilla         # knob retained; `vanilla` is the only valid value (ash removed 2026)
   transport: phoenix          # the web framework (was: phoenixRouter)
   framework: liveview         # on the ui — unchanged
 ```

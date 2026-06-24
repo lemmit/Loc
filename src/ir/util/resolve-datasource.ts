@@ -60,8 +60,8 @@ export function resolveDataSourceForAggregate(
 
 /** Per-aggregate dataSource config after implicit defaults are folded
  *  in.  Returned by {@link resolveDataSourceConfig}; this is what every
- *  backend emitter (EF Core ToTable, Drizzle pgSchema, AshPostgres
- *  postgres-block) should consume — not the raw `DataSourceIR`.
+ *  backend emitter (EF Core ToTable, Drizzle pgSchema, Ecto
+ *  schema-prefix) should consume — not the raw `DataSourceIR`.
  *
  *  The defaulting rule that matters:
  *    - `schema:` omitted → defaults to `snake(context.name)`.  A

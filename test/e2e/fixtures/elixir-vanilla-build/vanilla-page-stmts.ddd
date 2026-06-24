@@ -1,0 +1,39 @@
+// LiveView page-statement coverage on the vanilla (plain Ecto) backend — port
+// of the former page-stmt-coverage fixture.  A custom page whose Button
+// handlers exercise the StmtIR kinds the HEEx hoisted-handler renderStmt must
+// emit: scalar `+=`/`-=` on a page-`state` field (→ assign arithmetic),
+// `precondition` (→ flash + halt), `requires` (→ forbidden flash).
+system PageStmtCoverage {
+  subdomain M {
+    context C {
+      aggregate Counter with crudish {
+        label: string
+      }
+      repository Counters for Counter { }
+    }
+  }
+  api CoverageApi from M
+  ui CoverageUi {
+    page Landing {
+      route: "/"
+      state { count: int = 0 }
+      body: Stack {
+        Heading { "Counter" },
+        Button { "inc", onClick: e => { count += 1 } },
+        Button { "dec", onClick: e => { count -= 1 } },
+        Button { "guard", onClick: e => { precondition count >= 0 } },
+        Button { "auth", onClick: e => { requires count > 0 } }
+      }
+    }
+  }
+  storage primary { type: postgres }
+  resource cState { for: C, kind: state, use: primary }
+  deployable phoenixApp {
+    platform: elixir { foundation: vanilla }
+    contexts: [C]
+    dataSources: [cState]
+    serves: CoverageApi
+    ui: CoverageUi
+    port: 4000
+  }
+}

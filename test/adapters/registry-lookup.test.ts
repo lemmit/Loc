@@ -38,8 +38,7 @@ describe("adapter registry — lookup", () => {
   // DEBT-20: a backend's *default* eventLog adapter must be REAL (it has to
   // actually emit an event-sourced store when an event-sourced aggregate omits
   // an explicit `persistence:`).  Guards against a default pointing back at a
-  // reserved stub (java→axon / dotnet→marten) or a state-only adapter
-  // (elixir→ashPostgres).
+  // reserved stub (java→axon / dotnet→marten) or a state-only adapter.
   it.each([
     "node",
     "dotnet",
@@ -62,8 +61,8 @@ describe("adapter registry — lookup", () => {
 
   it("exposes the elixir defaults", () => {
     const d = defaultsFor("elixir")!;
-    expect(d.persistence.state).toBe("ashPostgres");
-    expect(d.style).toBe("ash");
+    expect(d.persistence.state).toBe("ecto");
+    expect(d.style).toBe("layered");
     expect(d.layout).toBe("byFeature");
   });
 
@@ -147,13 +146,14 @@ describe("availableAdapterNames — real adapters only (D-REALIZATION-AXES R1 me
   });
 
   it("phoenix is 100% real", () => {
-    // realization-axes-alignment.md: both foundations' data layers + styles
-    // are first-class — ashPostgres/ecto on persistence, ash/layered on style
-    // (sorted).  `layered` is plain Phoenix's real pipeline shape (DSL
-    // `serviceLayer`); `vanilla` is a foundation, not a style.  Layout stays
-    // byFeature-only (byLayer is unidiomatic for Phoenix — deferred).
-    expect(availableAdapterNames("elixir", "persistence")).toEqual(["ashPostgres", "ecto"]);
-    expect(availableAdapterNames("elixir", "style")).toEqual(["ash", "layered"]);
+    // realization-axes-alignment.md: the plain Ecto/Phoenix data layer + style
+    // are first-class — `ecto` on persistence, `layered` on style.  `layered` is
+    // plain Phoenix's real pipeline shape (DSL `serviceLayer`); `vanilla` is a
+    // foundation, not a style.  Layout stays byFeature-only (byLayer is
+    // unidiomatic for Phoenix — deferred).  The Ash data layer / style were
+    // removed.
+    expect(availableAdapterNames("elixir", "persistence")).toEqual(["ecto"]);
+    expect(availableAdapterNames("elixir", "style")).toEqual(["layered"]);
     expect(availableAdapterNames("elixir", "layout")).toEqual(["byFeature"]);
   });
 

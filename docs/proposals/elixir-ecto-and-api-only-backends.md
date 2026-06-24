@@ -1,12 +1,21 @@
 # Elixir/Phoenix **Ecto** (non-Ash) backend, and **API-only** Phoenix variants
 
-> Status: **proposal / research**. Nothing here is implemented. This note
+> Status: **proposal / research** (historical). This note
 > sizes three related additions to the backend matrix — a non-Ash
 > Elixir/Phoenix/**Ecto** generator, plus **API-only** flavours of both the
-> existing Ash backend and the new Ecto one (a JSON surface consumed by the
+> Ash backend and the new Ecto one (a JSON surface consumed by the
 > React frontend) — grounds them in the current `PlatformSurface` /
 > adapter / conformance machinery, names the design decisions, and phases
 > the work.
+>
+> **(Superseded 2026: the Ash foundation was removed — `platform: elixir`
+> now generates Phoenix LiveView on PLAIN Ecto/Phoenix only. The "vanilla"
+> (Ecto) foundation in this note is the only foundation that ships;
+> `foundation: ash` is now a validation error. There is no longer an
+> Ash-vs-Ecto axis to model — the Ecto domain layer this note proposes is
+> what `platform: elixir` emits today. The `foundation:` grammar knob
+> remains but resolves to `vanilla` only. The "Ash today" columns and the
+> Ash-vs-Ecto modelling options below are retained as a design record.)**
 
 ## TL;DR
 

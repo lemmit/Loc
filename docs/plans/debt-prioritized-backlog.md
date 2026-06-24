@@ -1,5 +1,7 @@
 # Stubs, TODOs & Debt — Prioritized Backlog
 
+> **Status banner (2026-06):** The **Ash foundation has been REMOVED.** `platform: elixir` now generates Phoenix LiveView on PLAIN Ecto/Phoenix (the "vanilla" foundation) only. The `foundation:` knob stays, but `foundation: ash` is now a **validation error**; `vanilla` is the default and only valid value. Many entries below were written while the Ash foundation was live and still talk about an "elixir/ash" vs "elixir/vanilla" split, gates that "stay on ash", or building against "real Ash 3.x" — read those as historical: the single elixir backend is plain Ecto/Phoenix today, and any "(Ash defer)" / "gated on ash" cell now ships on that one elixir backend. The design pack named **ashPhoenix** (HEEx components) is unrelated and stays.
+
 **Created:** 2026-06-18 · **Status:** living backlog (work through top-down)
 
 A single ranked list of every reserved stub, parity gap, and `TODO`/`not yet`
@@ -33,15 +35,15 @@ an unreachable stub), DEBT-31 (sortBy dropped). Per-entry verdicts:
 |---|---|---|
 | 01 | ✅ DONE | tenancy filter on all 5 backends |
 | 02 | 🟡 OPEN (partial) | node + java + elixir non-relational `filter` ship (java/node both shapes; elixir `embedded` — its only non-rel shape); only **principal-on-non-relational** gated everywhere |
-| 03 | 🟡 OPEN (**narrowed**) | Ash union returns ship for return/let, **in-memory `assign` mutation, `precondition`/`requires` guards, and `emit`** (PubSub broadcast in the generic action); only **`add`/`remove`** bodies still gate to vanilla (manage_relationship needs a changeset) |
+| 03 | 🟡 OPEN (**narrowed**) | Elixir union returns ship for return/let, **in-memory `assign` mutation, `precondition`/`requires` guards, and `emit`** (PubSub broadcast); only **`add`/`remove`** bodies remain a follow-up. (Detail below is pre-Ash-removal — Ash foundation removed; single elixir backend is plain Ecto/Phoenix now.) |
 | 04 | ⚠️ RE-SCOPED | elixir audit-ops = real greenfield; lifecycle = vaporware (→16) |
 | 05 | ✅ DONE | `For` shipped; List/Detail removed |
-| 06 | ✅ DONE (vanilla) | Provenance runtime shipped on `foundation: vanilla` (#1400); gate now foundation-aware (`system-checks.ts:~1443`) — `elixir+vanilla` capable, only `ash` excluded. (Updated 2026-06-20; the earlier 🔴 contradicted this doc's own DEBT-06 detail block.) |
-| 07 | 🟢 DONE (vanilla, CRUD) | elixir-vanilla now emits `shape(document)` (#1403) — `(id, data, version)` jsonb + schemaless-changeset fold; ash still relational/embedded only |
+| 06 | ✅ DONE | Provenance runtime shipped on the elixir backend (#1400). (Was foundation-aware vanilla-only; Ash foundation removed, so it's just the elixir backend now.) |
+| 07 | 🟢 DONE (CRUD) | elixir emits `shape(document)` (#1403) — `(id, data, version)` jsonb + schemaless-changeset fold |
 | 08 | ✅/⚠️ | paged done; envelope deferred (no live use) |
 | 09–11 | ✅ DONE | this session |
 | 12 | ✅ mostly DONE | `requires` guard ships (handle_params); new-parts unreachable; verify_token niche |
-| 13 | 🔴 OPEN | elixir `Id[]` joins are set-only (Ash never populates `ordinal`) |
+| 13 | 🔴 OPEN | elixir `Id[]` joins are set-only (the elixir join never populates `ordinal`) |
 | 14 | 🔴 OPEN | java `hosts:` → `loom.java-fullstack-unsupported` |
 | 15 | 🔴 OPEN | java nested-part single containments → `loom.java-single-containment-unsupported` |
 | 16 | ⛔ BLOCKED | grammar has no `audited` slot on Create/Destroy |
@@ -61,8 +63,8 @@ an unreachable stub), DEBT-31 (sortBy dropped). Per-entry verdicts:
 | 30 | 🔴 OPEN (a/b/c), ❓ STALE (d) | seed create-validation / appliers / block-body-lambdas genuinely stubbed; **(d) "method-call hooks binding" — no such IR field found; likely a stale/mislabeled entry** |
 
 **Takeaway for picking work:** trust the backend-tier rows; with DEBT-06
-(provenance) and DEBT-07 (`shape(document)`) now landed on `foundation:
-vanilla`, the highest-value *real* items remaining are DEBT-03 (Ash union
+(provenance) and DEBT-07 (`shape(document)`) now landed on the elixir backend,
+the highest-value *real* items remaining are DEBT-03 (union
 `add`/`remove` bodies — `emit` now ships), DEBT-13 (elixir `Id[]` join `ordinal`), and
 DEBT-24 (principal criterion query-face). The frontend tier is essentially
 cleared.
@@ -70,7 +72,7 @@ cleared.
 ---
 
 Targets: **node** (Hono/TS) · **dotnet** (.NET/EF) · **elixir** (Phoenix
-Ash/vanilla) · **python** (FastAPI) · **java** (Spring Boot) · **react** /
+LiveView on plain Ecto/Phoenix) · **python** (FastAPI) · **java** (Spring Boot) · **react** /
 **vue** / **svelte** (frontends).
 
 ## How this is prioritized
@@ -106,14 +108,14 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 | **P0 — parity completion, common, tractable** |
 | DEBT-01 | ~~Principal-referencing capability `filter` (`currentUser` / tenancy)~~ **DONE** — all five backends (node, .NET, elixir Ash + vanilla, java) wire it, incl. java reified-criterion retrievals | ~~node, elixir, java~~ | 5 | L | `proposals/criterion-everywhere.md` · **fully landed on every backend** |
 | DEBT-02 | Non-relational (`shape(document/embedded)`) capability `filter` — **node (both shapes) + java (both shapes) + elixir (`embedded`) landed** (document → in-app over the rehydrated aggregate; embedded → root scalars are real columns, so SQL `where` / `@SQLRestriction` / Ash `base_filter`). elixir has no `document` shape (DEBT-07). Only follow-up: principal-on-non-relational (actor + json intersection, all backends) | ~~node, java, elixir~~ · principal-non-rel | 4 | M | — |
-| DEBT-03 | Operation `or`-union return (exception-less ProblemDetails) | elixir/ash | 4 | M | `exception-less.md` · **return-dominant + mutation(`assign`)/guard(`precondition`/`requires`)/`emit` landed**; only `add`/`remove` bodies gate to vanilla |
+| DEBT-03 | Operation `or`-union return (exception-less ProblemDetails) | elixir | 4 | M | `exception-less.md` · **return-dominant + mutation(`assign`)/guard(`precondition`/`requires`)/`emit` landed**; only `add`/`remove` bodies remain (detail below predates Ash-foundation removal) |
 | DEBT-04 | Audit runtime parity — **RE-SCOPED** (see detail): `audited` ops → **elixir greenfield Ash audit** (real); `audited` lifecycle → **vaporware** (no grammar slot → DEBT-16); `with audit` stamping → vanilla-foundation | elixir | 4 | L | `type-system-feature-migration.md` (DBT) |
 | DEBT-05 | React walker `List` / `Detail` / `For` primitives (comment-only today) — **DONE: `For` implemented (all 4 frontends + HEEx; now with an optional `empty:` arm); `List`/`Detail`/`MasterDetail` were inert duplicates of `scaffoldList`/`scaffoldDetails` and were REMOVED** ([D-NO-PAGE-ARCHETYPES](../decisions.md#d-no-page-archetypes)) | react (→ vue/svelte) | — | — | resolved |
 | **P1 — parity + frontend completeness** |
 | DEBT-06 | Provenanced fields (lineage SDK + trace capture) — **DONE on `foundation: vanilla`**: the `<App>.Provenance` SDK (process-buffer + transactional flush + `Json` Ecto type), co-located `<field>_provenance` column, inline named-op capture, and the `provenance_records` migration; gate un-blocks elixir-vanilla (ash stays gated, like ES storage). Ash foundation parity remains out of scope (no co-located-column fit). | elixir/vanilla | 3 | L | `provenance.md`, `type-system-feature-migration.md` DBT-1 |
 | DEBT-07 | `shape(document)` persistence — **DONE (CRUD) on `foundation: vanilla`**: the `(id, data, version)` jsonb table + a schemaless-changeset validated fold (cast + required + invariants, the relational `base_changeset` contract) + a data-merge serialize; gate un-blocks elixir-vanilla (ash stays gated). Custom finds + named ops on a document aggregate are gated (`loom.vanilla-document-unsupported`) as a v1 follow-up. | elixir/vanilla | 3 | M | — |
 | DEBT-08 | Generic carriers on the wire consumer — **`paged` DONE** (frontend hooks + DTO already ship); **`envelope` re-scoped**: not a frontend gap (backends disagree — Hono serves bare, .NET wraps `{id,ts,body}`) and *no live use case*, so deferred until a real event/message-transport need appears | ~~react, vue, svelte~~ (envelope: all backends) | 2 | M | `payload-transport-layer.md` P3b |
-| DEBT-09 | ~~Non-constructible aggregates (omit the create surface)~~ **DONE** — Phoenix/Ash drops the `:create` action; the frontend scaffold drops the `<Agg>New` page + list "New" button when `!isConstructible` | elixir, react, vue, svelte | 3 | M | — |
+| DEBT-09 | ~~Non-constructible aggregates (omit the create surface)~~ **DONE** — the Phoenix backend drops the create action; the frontend scaffold drops the `<Agg>New` page + list "New" button when `!isConstructible` | elixir, react, vue, svelte | 3 | M | — |
 | DEBT-10 | ~~Multi-segment / nested state mutation in page handlers~~ **DONE** — collection `+=`/`-=` now append/remove (was numeric `+`/`-` → broken list code); nested `:=` mutates in place on Vue/Svelte/Angular vs React's immutable spread | react, vue, svelte (+ angular) | 3 | M | — |
 | DEBT-11 | ~~Vue workflow forms~~ **DONE** — structural render + error mapping already shipped; the success-toast parity (React/Svelte gap) now lands too | vue | 3 | M | `vue-frontend-plan.md` |
 | DEBT-12 | Phoenix page DSL: `requires` guard, new-parts-in-body, `verify_token` | elixir | 2 | M | — |
@@ -206,7 +208,7 @@ Concise scope per item; full gate locations in the table above.
 - **DEBT-15 Java single part-containments** — map a part-declared `contains x: P` (non-collection) via the shadow-parent FK. `system-checks.ts:600`, `loom.java-single-containment-unsupported`.
 - **DEBT-16 Audited lifecycle (dotnet, java)** — `audited create`/`destroy` instrumentation.
 - **DEBT-17 / DEBT-18 MikroORM & Dapper v1 → full surface** — both reject the same set (retrieval bundles, seed, event-sourced, non-relational, inheritance, `Id[]` associations, nested parts, audit stamping, capability filters, provenanced, managed access) and throw on complex find predicates (`emit/mikroorm.ts:437`, `emit/dapper.ts:405`). Close incrementally toward the default-adapter surface.
-- **DEBT-19 TPH inheritance — DONE (stale):** `inheritanceUsing(sharedTable)` emission already ships on every DB backend — `validateInheritanceStorage`'s `TPH_CAPABLE = {node, dotnet, elixir, python, java}` accepts a TPH hierarchy on any of them (Hono Drizzle shared table + `kind` discriminator; .NET EF Core `HasDiscriminator`; Phoenix/Ash shared-table multi-resource + `base_filter` on `kind`). The "beyond node" framing was stale.
+- **DEBT-19 TPH inheritance — DONE (stale):** `inheritanceUsing(sharedTable)` emission already ships on every DB backend — `validateInheritanceStorage`'s `TPH_CAPABLE = {node, dotnet, elixir, python, java}` accepts a TPH hierarchy on any of them (Hono Drizzle shared table + `kind` discriminator; .NET EF Core `HasDiscriminator`; Phoenix shared-table multi-resource + filter on `kind`). The "beyond node" framing was stale.
 - **DEBT-20 ES adapter alignment — DONE:** the latent misalignment is fixed — every backend's `eventLog` **default** resolves to a real adapter that actually emits the store (java `axon`→`jpa`, dotnet `marten`→`efcore`, elixir `ashPostgres`→`ecto`; node already used `drizzle`), and elixir's `ecto` adapter now declares `["state","eventLog"]` to match the vanilla event-sourced emit it drives. A `registry-lookup` invariant pins "default eventLog adapter is real & advertises eventLog" so a default can't regress to a stub. The idiomatic event-store stubs (`marten`/`axon`/`jooq`) remain reserved under DEBT-23.
 
 ---

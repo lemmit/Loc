@@ -50,8 +50,8 @@ Concretely, the divergence axes are small and enumerable:
    (Elixir); identical 8-case dispatch (`count`/`sum`/`all`/`any`/
    `contains`/`where`/`first`/`firstOrNull`/default).
 5. **`refColl.contains(x)` membership** — omitted in TS (falls through to
-   the in-memory collection op), LINQ join-table `.Any(...)` in C#, Ash
-   `exists(rel, id == ^arg)` in Elixir.
+   the in-memory collection op), LINQ join-table `.Any(...)` in C#, an Ecto
+   join/subquery membership check in Elixir.
 6. **Regex** (`str.matches(p)`) — `/p/.test()` (TS) vs `Regex.IsMatch`
    (C#) vs `Regex.match?(~r/p/, ...)` (Elixir).
 7. **`ref` semantics** — TS keeps `this-prop`/`this-vo-prop`/
@@ -160,7 +160,7 @@ export interface ExprTarget {
   // --- ref-collection membership ------------------------------------------
   /** `this.<refColl>.contains(x)` → a join/subquery, or `undefined` to
    *  fall through to `renderCollectionOp` (TS: in-memory `.includes`).
-   *  C# emits the LINQ `.Any(...)`; Elixir emits Ash `exists(...)`. */
+   *  C# emits the LINQ `.Any(...)`; Elixir emits an Ecto join/subquery. */
   renderRefCollectionContains?(assoc: AssociationLowering): string | undefined;
 }
 ```

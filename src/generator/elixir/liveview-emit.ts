@@ -59,17 +59,12 @@ export function emitLiveViewPages(args: {
   sys: SystemIR;
   appName: string;
   appModule: string;
-  /** Persistence foundation of the host deployable.  Defaults to `"ash"`
-   *  (the Ash code-interface read shapes — `list_<agg>s!()` / `get_<agg>!()`
-   *  + `rescue Ash.Error.Query.NotFound`).  `"vanilla"` swaps the reads for
-   *  the plain-Ecto vanilla context API (`list_<agg>s()` → `{:ok, list}`,
-   *  `get_<agg>(id)` → `{:ok, record} | {:error, :not_found}`).  Only the
-   *  read emission branches; the form-lifecycle paths (Ash-only for now) are
-   *  unreachable on a read-only `ui`. */
-  foundation?: "ash" | "vanilla";
+  /** Persistence foundation of the host deployable.  Always `"vanilla"`
+   *  (plain Ecto/Phoenix LiveView — no Ash).  Kept on the options shape only
+   *  so the caller's `foundation: "vanilla"` still type-checks; ignored. */
+  foundation?: "vanilla";
 }): { files: Map<string, string>; routes: LiveRoute[] } {
   const { contexts, deployable, sys, appName, appModule } = args;
-  const foundation = args.foundation ?? "ash";
   const out = new Map<string, string>();
   const routes: LiveRoute[] = [];
 
@@ -107,8 +102,8 @@ export function emitLiveViewPages(args: {
   const aggregatesByName = new Map<string, AggregateIR>();
   const contextByAggName = new Map<string, BoundedContextIR>();
   // Module-qualified context name per aggregate, e.g.
-  // "PhoenixApp.Sales" — used by the LiveView mount stub to build
-  // `AshPhoenix.Form.for_create(PhoenixApp.Sales.Customer, :create)`.
+  // "PhoenixApp.Sales" — used by the LiveView mount stub to build the
+  // `change_<agg>(%PhoenixApp.Sales.Customer{})` create-form changeset.
   const contextModuleByAggName = new Map<string, string>();
   // Workspace-wide enum registry — threaded into the walker so
   // `CreateForm(of: Agg)` with enum-typed fields renders `<.input
@@ -200,7 +195,6 @@ export function emitLiveViewPages(args: {
       partContextModule,
       componentInfo,
       authEnabled,
-      foundation,
     });
     out.set(filePath, source);
     routes.push({ route: page.route, liveModule });
@@ -270,8 +264,8 @@ interface RenderArgs {
    *  (`<.inputs_for :let={…}>`) for VO-typed aggregate fields. */
   valueObjectsByName: ReadonlyMap<string, ValueObjectIR>;
   /** Module-qualified name of the bounded context an aggregate lives in,
-   *  keyed by aggregate PascalCase name.  Used to build the Ash
-   *  `for_create(<Ctx>.<Agg>, :create)` call in mount/3. */
+   *  keyed by aggregate PascalCase name.  Used to build the
+   *  `change_<agg>(%<Ctx>.<Agg>{})` create-form changeset in mount/3. */
   contextModuleByAggName: ReadonlyMap<string, string>;
   /** Module-qualified context keyed by entity-part name — qualifies a
    *  page-body `new Part { … }` struct literal (`%<Ctx>.<Part>{…}`). */
@@ -283,9 +277,6 @@ interface RenderArgs {
   /** True when the deployable runs `auth: required` — drives currentUser
    *  action-button gating in the page body (off ⇒ byte-identical). */
   authEnabled: boolean;
-  /** Persistence foundation — `"ash"` (default) emits the Ash code-interface
-   *  read shapes; `"vanilla"` emits the plain-Ecto vanilla context reads. */
-  foundation: "ash" | "vanilla";
 }
 
 interface ComponentActionInfo {
@@ -384,8 +375,7 @@ function gatherStoreHandlers(
 }
 
 /** A hoisted `Action` `handle_event` clause: load the instance by id,
- *  invoke the Ash action via the code interface, flash + optional
- *  navigate. */
+ *  invoke the context action, flash + optional navigate. */
 function buildActionHandlers(
   bindings: readonly ActionBinding[],
   contextModuleByAggName: ReadonlyMap<string, string>,
@@ -428,7 +418,6 @@ function renderLiveView(a: RenderArgs): string {
     partContextModule,
     componentInfo,
     authEnabled,
-    foundation,
   } = a;
   const webModule = `${appModule}Web`;
 
@@ -470,7 +459,6 @@ function renderLiveView(a: RenderArgs): string {
     walked.idOptionsBindings,
     contextModuleByAggName,
     aggregatesByName,
-    foundation,
     usedStores,
   );
   const handleParams = renderHandleParams(
@@ -480,7 +468,6 @@ function renderLiveView(a: RenderArgs): string {
     walked.queryBindings,
     walked.formBindings,
     contextModuleByAggName,
-    foundation,
   );
   const detailBaseRoute = page.route ? page.route.replace(/\/:[^/]+$/, "") : null;
   // Hoist `Action(...)` handlers from the page body + every component
@@ -496,23 +483,12 @@ function renderLiveView(a: RenderArgs): string {
   const storeHandlers = gatherStoreHandlers(walked.usedComponents, componentInfo);
   // The list route a create-form success navigates back to — the create
   // ("new") page route with the trailing `/new` segment stripped
-  // (`/customers/new` → `/customers`).  Vanilla only (the Ash path emits no
-  // create-submit handler, so this stays unused there → byte-identical).
+  // (`/customers/new` → `/customers`).
   const createSuccessRoute = page.route ? page.route.replace(/\/new$/, "") : null;
   const handleEventClauses =
     renderHandleEventClauses([...handlers, ...actionHandlers, ...storeHandlers]) +
-    renderCreateEventClauses(
-      walked.formBindings,
-      contextModuleByAggName,
-      createSuccessRoute,
-      foundation,
-    ) +
-    renderOperationEventClauses(
-      walked.formBindings,
-      detailBaseRoute,
-      contextModuleByAggName,
-      foundation,
-    );
+    renderCreateEventClauses(walked.formBindings, contextModuleByAggName, createSuccessRoute) +
+    renderOperationEventClauses(walked.formBindings, detailBaseRoute, contextModuleByAggName);
 
   return `# Auto-generated.
 defmodule ${liveModule} do
@@ -557,18 +533,9 @@ function renderMount(
    *  resolves at mount time. */
   idOptionsBindings: readonly string[],
   contextModuleByAggName: ReadonlyMap<string, string>,
-  /** Used by the option-list emission to detect targets that
-   *  declared `derived display: string = ...`.  When set, the
-   *  emitted assign loads the `:display` calculation via
-   *  `list_<x>!(load: [:display])` and uses it as the option label;
-   *  when absent, the assign falls back to the v0 shape with the
-   *  record's id as both label and value. */
-  aggregatesByName: ReadonlyMap<string, AggregateIR>,
-  /** Persistence foundation.  `"ash"` (default) emits the AshPhoenix.Form
-   *  create-form constructor + Ash bang-read option lists; `"vanilla"`
-   *  emits the plain-Ecto changeset facade (`change_<agg>`) + the
-   *  `{:ok, list}`-tuple option lists. */
-  foundation: "ash" | "vanilla",
+  /** Aggregate registry — kept for symmetry with the option-list emission
+   *  (the vanilla path reads the record id as the option label/value). */
+  _aggregatesByName: ReadonlyMap<string, AggregateIR>,
   /** Stores this page touches (Stage 5) — each gets one
    *  `|> assign(:<store_snake>, %<Store>{})` seeding the per-page store struct
    *  (defaults from the store module's `defstruct`).  The matching `alias` is
@@ -585,53 +552,34 @@ function renderMount(
   for (const storeName of usedStores) {
     assigns.push(`      |> assign(:${snake(storeName)}, %${upperFirst(storeName)}{})`);
   }
-  // Option-list loads for `X id` form fields.  When the target
-  // aggregate declares `derived display: string = ...` (always
-  // injected when the user opts in; absent otherwise), load the
-  // calculation alongside the read and use it as the human-readable
-  // option label.  Falls back to the id-as-label v0 shape when no
-  // display derives — the select stays structurally correct.
+  // Option-list loads for `X id` form fields.  The label is the record id
+  // (no `:display` calculation on the vanilla path).  The vanilla read
+  // returns `{:ok, list}`, so unwrap to a bare list before mapping.
   for (const aggName of idOptionsBindings) {
     const ctxModule = contextModuleByAggName.get(aggName);
     if (!ctxModule) continue;
     const aggSnake = snake(aggName);
-    const targetAgg = aggregatesByName.get(aggName);
-    const hasDisplay = targetAgg?.displayDerived !== undefined;
-    // Vanilla has no `:display` calculation (no Ash `load:`); the label is
-    // the record id.  The vanilla read returns `{:ok, list}`, so unwrap to a
-    // bare list before mapping.
-    const tupleFn =
-      hasDisplay && foundation === "ash"
-        ? `fn r -> {r.display, r.id} end`
-        : `fn r -> {to_string(r.id), r.id} end`;
-    const listCall =
-      foundation === "vanilla"
-        ? `(case ${ctxModule}.list_${aggSnake}s() do {:ok, items} -> items; _ -> [] end)`
-        : hasDisplay
-          ? `${ctxModule}.list_${aggSnake}s!(load: [:display])`
-          : `${ctxModule}.list_${aggSnake}s!()`;
+    const tupleFn = `fn r -> {to_string(r.id), r.id} end`;
+    const listCall = `(case ${ctxModule}.list_${aggSnake}s() do {:ok, items} -> items; _ -> [] end)`;
     assigns.push(`      |> assign(:${aggSnake}_options, ${listCall} |> Enum.map(${tupleFn}))`);
   }
   // @form assignment — one per CreateForm / WorkflowForm call in the page body.
-  // For aggregate-of: AshPhoenix.Form.for_create(<Ctx>.<Agg>, :create);
-  // for workflow-runs: a placeholder for_action (workflow-form
-  // resolution is wider and tracked separately).  Multiple forms on
-  // one page collapse to a single @form; pages with >1 form should
+  // For aggregate-of: a blank Ecto changeset off the schema struct via the
+  // `change_<agg>` context facade; for workflow-runs: a placeholder form
+  // (workflow-form resolution is wider and tracked separately).  Multiple
+  // forms on one page collapse to a single @form; pages with >1 form should
   // split into nested LiveComponents.
   for (const fb of formBindings) {
-    // Operation forms bind to a *loaded* record (`for_update`), so
-    // they're assigned in handle_params after @data loads — never
-    // in mount (no record here).  Skip.
+    // Operation forms bind to a *loaded* record, so they're assigned in
+    // handle_params after @data loads — never in mount (no record here).  Skip.
     if (fb.kind === "operation") continue;
     if (fb.kind === "aggregate") {
       const ctxModule = contextModuleByAggName.get(fb.name);
       if (!ctxModule) continue; // unresolved — validator catches; silent skip
-      // Vanilla: a blank Ecto changeset off the schema struct via the
-      // `change_<agg>` context facade.  Ash: the AshPhoenix.Form create form.
+      // A blank Ecto changeset off the schema struct via the `change_<agg>`
+      // context facade.
       assigns.push(
-        foundation === "vanilla"
-          ? `      |> assign(:form, ${ctxModule}.change_${snake(fb.name)}(%${ctxModule}.${upperFirst(fb.name)}{}) |> to_form())`
-          : `      |> assign(:form, AshPhoenix.Form.for_create(${ctxModule}.${upperFirst(fb.name)}, :create) |> to_form())`,
+        `      |> assign(:form, ${ctxModule}.change_${snake(fb.name)}(%${ctxModule}.${upperFirst(fb.name)}{}) |> to_form())`,
       );
       break; // single @form per page
     } else if (fb.kind === "workflow") {
@@ -664,7 +612,6 @@ function renderHandleParams(
   queryBindings: import("./heex-walker.js").QueryBinding[],
   formBindings: import("./heex-walker.js").FormBinding[],
   contextModuleByAggName: ReadonlyMap<string, string>,
-  foundation: "ash" | "vanilla",
 ): string {
   const paramAssigns: string[] = [];
   for (const p of page.params) {
@@ -674,11 +621,9 @@ function renderHandleParams(
   // QueryView record loading.  The scaffold detail/list page reads
   // @data / @items in its `cond`, but nothing populates them unless
   // we load here (handle_params runs after @id is bound from the
-  // route).  `single` → load one record via the `get_<agg>` code
-  // interface (bang variant raises Ash.Error.Query.NotFound for a
-  // missing id, which we map to the `:not_found` sentinel the
-  // 4-way cond renders as the `empty:` slot).  `list` → the
-  // collection via `list_<agg>s`.
+  // route).  `single` → load one record via `get_<agg>(id)`
+  // (`{:ok, record} | {:error, :not_found}`); `list` → the collection
+  // via `list_<agg>s()` (`{:ok, list}`).
   const loadBlocks: string[] = [];
   for (const qb of queryBindings) {
     const ctxModule = contextModuleByAggName.get(qb.aggregate);
@@ -686,74 +631,42 @@ function renderHandleParams(
     const aggSnake = snake(qb.aggregate);
     if (qb.kind === "single") {
       // Operation forms for this aggregate bind to the loaded record —
-      // assigned here, where `record` is in scope.  Ash: an
-      // `AshPhoenix.Form.for_update`.  Vanilla: a plain Ecto changeset
+      // assigned here, where `record` is in scope: a plain Ecto changeset
       // seeded from the loaded record via the `change_<agg>` facade.
       const opFbs = formBindings.filter(
         (fb) => fb.kind === "operation" && fb.name === qb.aggregate,
       );
-      const opAssigns =
-        foundation === "vanilla"
-          ? opFbs.map(
-              (fb) =>
-                `        |> assign(:${fb.op}_form, ${ctxModule}.change_${aggSnake}(record) |> to_form())`,
-            )
-          : opFbs.map(
-              (fb) =>
-                `        |> assign(:${fb.op}_form, AshPhoenix.Form.for_update(record, :${fb.op}, as: "${fb.op}") |> to_form())`,
-            );
-      if (foundation === "vanilla") {
-        // Vanilla read: `get_<agg>(id)` is a plain-Ecto fetch returning
-        // `{:ok, record} | {:error, :not_found}` (no exception to rescue).
-        // The `:not_found` / `:error` sentinels feed the same 4-way `cond`
-        // the Ash path's rescue arms produce.  Operation forms (seeded from
-        // the loaded `record`) are bound in the `{:ok, record}` arm.
-        const okArm =
-          opAssigns.length > 0
-            ? `        {:ok, record} ->
+      const opAssigns = opFbs.map(
+        (fb) =>
+          `        |> assign(:${fb.op}_form, ${ctxModule}.change_${aggSnake}(record) |> to_form())`,
+      );
+      // `get_<agg>(id)` is a plain-Ecto fetch returning
+      // `{:ok, record} | {:error, :not_found}`.  The `:not_found` / `:error`
+      // sentinels feed the 4-way `cond`.  Operation forms (seeded from the
+      // loaded `record`) are bound in the `{:ok, record}` arm.
+      const okArm =
+        opAssigns.length > 0
+          ? `        {:ok, record} ->
           socket
           |> assign(:${qb.assign}, record)
 ${opAssigns.map((a) => `  ${a}`).join("\n")}`
-            : `        {:ok, record} -> assign(socket, :${qb.assign}, record)`;
-        loadBlocks.push(
-          `    socket =
+          : `        {:ok, record} -> assign(socket, :${qb.assign}, record)`;
+      loadBlocks.push(
+        `    socket =
       case ${ctxModule}.get_${aggSnake}(socket.assigns.id) do
 ${okArm}
         {:error, :not_found} -> assign(socket, :${qb.assign}, :not_found)
         _ -> assign(socket, :${qb.assign}, :error)
       end`,
-        );
-      } else {
-        loadBlocks.push(
-          `    socket =
-      try do
-        record = ${ctxModule}.get_${aggSnake}!(socket.assigns.id)
-
-        socket
-        |> assign(:${qb.assign}, record)
-${opAssigns.length > 0 ? opAssigns.join("\n") + "\n" : ""}      rescue
-        Ash.Error.Query.NotFound -> assign(socket, :${qb.assign}, :not_found)
-        Ash.Error.Invalid -> assign(socket, :${qb.assign}, :error)
-      end`,
-        );
-      }
-    } else if (foundation === "vanilla") {
-      // Vanilla list read: `list_<agg>s()` returns `{:ok, list}` (the repo
-      // wraps `Repo.all/1`).  The `{:error, _}` arm maps to the `:error`
-      // sentinel the list `cond` renders as the error slot.
+      );
+    } else {
+      // List read: `list_<agg>s()` returns `{:ok, list}` (the repo wraps
+      // `Repo.all/1`).  The `{:error, _}` arm maps to the `:error` sentinel
+      // the list `cond` renders as the error slot.
       loadBlocks.push(
         `    socket =
       case ${ctxModule}.list_${aggSnake}s() do
         {:ok, items} -> assign(socket, :${qb.assign}, items)
-        _ -> assign(socket, :${qb.assign}, :error)
-      end`,
-      );
-    } else {
-      loadBlocks.push(
-        `    socket =
-      try do
-        assign(socket, :${qb.assign}, ${ctxModule}.list_${aggSnake}s!())
-      rescue
         _ -> assign(socket, :${qb.assign}, :error)
       end`,
       );
@@ -801,11 +714,10 @@ ${body}
   end`;
 }
 
-/** Per-operation `validate_<op>` / `submit_<op>` handle_event
- *  clauses.  Mirrors the AshPhoenix 3.x form lifecycle: validate
- *  on change, submit on submit; on success re-load the record into
- *  @data, rebuild the op form, flash, and push_patch back to the
- *  detail route (canonical re-load path).  One pair per
+/** Per-operation `validate_<op>` / `submit_<op>` handle_event clauses.  The
+ *  Ecto-changeset form lifecycle: validate on change, submit on submit; on
+ *  success re-load the record into @data, rebuild the op form, flash, and
+ *  push_patch back to the detail route (canonical re-load path).  One pair per
  *  `kind:"operation"` FormBinding. */
 function renderOperationEventClauses(
   formBindings: import("./heex-walker.js").FormBinding[],
@@ -813,12 +725,8 @@ function renderOperationEventClauses(
    *  e.g. "/customers" — used to push_patch back after submit. */
   detailBaseRoute: string | null,
   /** Module-qualified context per aggregate PascalCase name — resolves the
-   *  `<Ctx>.update_<agg>` / `<Ctx>.change_<agg>` calls on the vanilla path. */
+   *  `<Ctx>.update_<agg>` / `<Ctx>.change_<agg>` calls. */
   contextModuleByAggName: ReadonlyMap<string, string>,
-  /** Persistence foundation.  `"ash"` (default) keeps the AshPhoenix.Form
-   *  lifecycle byte-identical; `"vanilla"` emits the Ecto-changeset
-   *  validate-on-change + `update_<agg>` submit. */
-  foundation: "ash" | "vanilla",
 ): string {
   const ops = formBindings.filter((fb) => fb.kind === "operation");
   if (ops.length === 0) return "";
@@ -831,15 +739,14 @@ function renderOperationEventClauses(
         const reload = detailBaseRoute
           ? `\n         |> push_patch(to: ~p"${detailBaseRoute}/#{record.id}")`
           : "";
-        if (foundation === "vanilla") {
-          // Vanilla op-form lifecycle: validate builds a changeset off the
-          // CURRENT @data record with the incoming params + `action: :validate`
-          // (so the form shows errors); submit persists via `update_<agg>` and
-          // re-seeds the op form from the saved record.
-          const ctxModule = contextModuleByAggName.get(fb.name);
-          const aggSnake = snake(fb.name);
-          if (!ctxModule) return ""; // unresolved — validator catches upstream
-          return `  @impl true
+        // Op-form lifecycle: validate builds a changeset off the CURRENT @data
+        // record with the incoming params + `action: :validate` (so the form
+        // shows errors); submit persists via `update_<agg>` and re-seeds the op
+        // form from the saved record.
+        const ctxModule = contextModuleByAggName.get(fb.name);
+        const aggSnake = snake(fb.name);
+        if (!ctxModule) return ""; // unresolved — validator catches upstream
+        return `  @impl true
   def handle_event("validate_${op}", %{"${op}" => params}, socket) do
     changeset =
       socket.assigns.data
@@ -863,27 +770,6 @@ function renderOperationEventClauses(
         {:noreply, assign(socket, :${op}_form, to_form(changeset))}
     end
   end\n`;
-        }
-        return `  @impl true
-  def handle_event("validate_${op}", %{"${op}" => params}, socket) do
-    form = AshPhoenix.Form.validate(socket.assigns.${op}_form, params)
-    {:noreply, assign(socket, :${op}_form, form)}
-  end
-
-  @impl true
-  def handle_event("submit_${op}", %{"${op}" => params}, socket) do
-    case AshPhoenix.Form.submit(socket.assigns.${op}_form, params: params) do
-      {:ok, record} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "${human} succeeded")
-         |> assign(:data, record)
-         |> assign(:${op}_form, AshPhoenix.Form.for_update(record, :${op}, as: "${op}") |> to_form())${reload}}
-
-      {:error, form} ->
-        {:noreply, assign(socket, :${op}_form, form)}
-    end
-  end\n`;
       })
       .join("\n")
   );
@@ -891,20 +777,16 @@ function renderOperationEventClauses(
 
 /** Create-form (`CreateForm(of: Agg)`) submit handler — `save_<agg>`.  The
  *  scaffold "new" page's `<.simple_form phx-submit="save_<agg>">` needs a
- *  matching `handle_event` or the submit no-ops.  Vanilla-only: the Ash path
- *  emits no create-submit handler today (AshPhoenix.Form drives it
- *  client-side), so gating on `"vanilla"` keeps Ash output byte-identical.
- *  On success → flash + navigate to the list route; on a changeset error →
- *  re-assign the form so the inline errors render. */
+ *  matching `handle_event` or the submit no-ops.  On success → flash + navigate
+ *  to the list route; on a changeset error → re-assign the form so the inline
+ *  errors render. */
 function renderCreateEventClauses(
   formBindings: import("./heex-walker.js").FormBinding[],
   contextModuleByAggName: ReadonlyMap<string, string>,
   /** The create page's route with a trailing `/new` stripped
    *  (`/customers/new` → `/customers`), navigated to on success. */
   listRoute: string | null,
-  foundation: "ash" | "vanilla",
 ): string {
-  if (foundation !== "vanilla") return "";
   const creates = formBindings.filter((fb) => fb.kind === "aggregate");
   if (creates.length === 0) return "";
   const fb = creates[0]!; // single @form per page

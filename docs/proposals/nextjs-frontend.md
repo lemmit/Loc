@@ -14,6 +14,8 @@
 >   couples to `ash` or `vanilla`*. Deferred on ROI/sequencing, **not
 >   architecture**.
 >
+> **(Superseded 2026: the Ash foundation was removed.)** Where this proposal cites Elixir's `ash` vs `vanilla` foundations as the precedent for how a UI couples to a domain-owning foundation, note that `platform: elixir` now resolves to `foundation: vanilla` (plain Ecto/Phoenix) only — `foundation: ash` is a validation error. LiveView still couples to the (now single) Elixir foundation; read the `ash`/`vanilla` pairing below as historical.
+>
 > So there is **no `foundation: nextjs`** — that earlier framing conflated
 > the UI with the foundation. Both are gated behind
 > [`embedded-frontend-composition.md`](./embedded-frontend-composition.md)
@@ -113,7 +115,7 @@ vanilla foundation*. This is the role parallel that matters:
 
 | | Domain-owning **foundation** | Coupled in-process **server UI** | Wire-separated **client UI** |
 |---|---|---|---|
-| **Elixir** | `ash` / `vanilla` | **LiveView** | — |
+| **Elixir** | `vanilla` (plain Ecto/Phoenix; `ash` removed 2026) | **LiveView** | — |
 | **Node** | vanilla-node (Hono's domain) / `nest` | **full-stack Next.js** (RSC + server actions) | React / Vue / Svelte / Angular (+ Next, mode A) |
 
 Like LiveView — which couples to *either* Elixir foundation — Next's

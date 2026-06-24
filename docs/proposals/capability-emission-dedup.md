@@ -11,6 +11,12 @@
 > each propagated filter/stamp). The genuine win is **stamps**, not filters;
 > the genuine *risk* is a **stamp-timing semantic divergence that already exists
 > today** and must be pinned before any dedup ships.
+>
+> **(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain
+> Ecto/Phoenix only — vanilla is the only foundation — and `foundation: ash` is
+> now a validation error. The "Phoenix / Ash" rows below — `base_filter`,
+> single/anonymous policies, the slice-3 bypass work — describe a foundation that
+> no longer exists; only the "Phoenix / vanilla" path remains.)**
 
 ## 1. The question
 
@@ -457,7 +463,7 @@ scoping (you own that source); revisit only if a real need appears.
 | **4** | **Java** (`@SQLRestriction`→`@Filter` *only where bypassed* — §11.6 triage; `Session.disableFilter`/`enableFilter` at bypass sites) | `java/capability-filter.ts` (triage + `inlineRunBypassesByRetrieval`); `java/emit/entity.ts` (split `@SQLRestriction` ↔ `@FilterDef(autoEnabled)`/`@Filter`); `java/emit/repository.ts` (Session disable/enable wrap); `java/emit/view.ts` + `document-store.ts`; `java/index.ts` threads `promotedCaps` | `java-build` (`filter-bypass.ddd`) `gradle testClasses bootJar` | ✅ done |
 | **5** | **Python** (filter-emission already on `main`; bypass = omit conjunct, find+view+inline) | `python/find-predicate.ts` (`FilterBypass` + bypass-filtered `contextFilterPredicate`); `python/repository-builder.ts` (per-find/-view bake-in + `run_<retrieval>` union bypass) | `python-build` (`filter-bypass.ddd`) `ruff` + `mypy --strict` + `pytest` | ✅ done |
 
-All five DB backends (dotnet, node, elixir-vanilla + Ash, java, python) now honor
+All five DB backends (dotnet, node, elixir, java, python) now honor
 `ignoring`; `FILTER_BYPASS_FAMILIES = {dotnet, node, elixir, java, python}`. The
 `loom.filter-bypass-unsupported` fail-fast (mirrors `loom.context-filter-unsupported`)
 is now unreachable for backend deployables — kept as a guard for any future

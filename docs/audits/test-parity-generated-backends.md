@@ -1,5 +1,7 @@
 # Test parity across generated backends
 
+> **(Superseded 2026: the Ash foundation was removed — `platform: elixir` is plain Ecto/Phoenix only, `foundation: ash` is now a validation error. The `ash` test-emission rows/columns below (rejection subset, DB-free `@tag :skip`, the `elixir-ash-build` gate) are historical; only the `vanilla` full-port path ships today.)**
+
 > Status: **first pass — 2026-06-21; F1 partially closed (pure-subset
 > ExUnit shipped for Phoenix).** Empirical snapshot of what the `.ddd`
 > `test` / `test e2e` declarations actually emit on each of the five

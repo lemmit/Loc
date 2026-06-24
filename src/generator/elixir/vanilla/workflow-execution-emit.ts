@@ -3,8 +3,7 @@
 // `lib/<app>_web/controllers/workflows_controller.ex`.  Slice 5c of
 // vanilla-foundation-tdd-plan.md.
 //
-// On vanilla, workflows are plain Elixir modules — no Ash code
-// interface, no Ash.transaction.  A workflow becomes a module with
+// Workflows are plain Elixir modules.  A workflow becomes a module with
 // `run/1` returning `{:ok, _} | {:error, _}`; `transactional`
 // workflows wrap their body in `Repo.transaction/1`.  Cross-aggregate
 // operation calls (`<aggregate>.<op>(args)` in the workflow body)
@@ -31,9 +30,7 @@
 //                     bare side-effect call (Phase 4), rendered INSIDE
 //                     the with-chain's do-branch like `emit`.  The
 //                     adapter helper modules are emitted by the
-//                     orchestrator's `emitPhoenixResourceFiles` reuse
-//                     (foundation-agnostic; the same Phoenix adapter set
-//                     the Ash path uses).
+//                     orchestrator's `emitPhoenixResourceFiles` reuse.
 //   ✓ repo-run     → `{:ok, <name>} <- Context.run_<ret>_<agg>(args..., limit:, offset:)`
 //                     against the per-context retrieval defdelegate (the
 //                     vanilla retrieval `run/N` returns `{:ok, [_]}`).
@@ -293,8 +290,7 @@ function lowerStatement(
       // broadcast is skipped — listeners only see events for successful
       // workflows.  Inside `Repo.transaction(fn -> ...)` the broadcast
       // fires before commit; that matches the standard Phoenix pattern
-      // (a separate "after-commit" hook is out of scope for this slice
-      // and matches the Ash path's behaviour anyway).
+      // (a separate "after-commit" hook is out of scope for this slice).
       const fields = st.fields
         .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
         .join(", ");
@@ -334,8 +330,8 @@ function lowerStatement(
     case "repo-run": {
       // `let xs = Repo.run(<Retrieval>(args), page?)` →
       // `{:ok, xs} <- Context.run_<ret>_<agg>(args..., limit: N, offset: M)`.
-      // The vanilla retrieval `run/N` returns `{:ok, [aggregate]}` (no Ash
-      // page struct), so the bind is the bare list — consumed directly by
+      // The vanilla retrieval `run/N` returns `{:ok, [aggregate]}` (a bare
+      // list, no page struct), so the bind is consumed directly by
       // a subsequent `for-each`.  Pagination opts (`page: { offset: O, limit: L }`)
       // ride as a trailing keyword list, which Elixir parses positionally
       // into the retrieval's `opts \\ []` arg.
@@ -1069,8 +1065,8 @@ function renderWorkflowModule(
   // the success tail of the body by `assembleBody` (`workflow_completed`).  The
   // workflow name is a compile-time string literal, so it interpolates straight
   // into the `valueExpr` (no inline `case`/expr that would mis-parse as a
-  // keyword-arg value).  Shared catalog identity (field `workflow`) with the
-  // Phoenix-Ash reference + every backend.
+  // keyword-arg value).  Shared catalog identity (field `workflow`) with
+  // every backend.
   const startedCall = renderPhoenixLogCall("workflowStarted", [
     { name: "workflow", valueExpr: JSON.stringify(wf.name) },
   ]);
@@ -1105,7 +1101,7 @@ function renderWorkflowModule(
     return `# Auto-generated.
 defmodule ${moduleName} do
   @moduledoc """
-  Workflow \`${wf.name}\` — vanilla foundation (plain Elixir, no Ash).${transactionalDoc}
+  Workflow \`${wf.name}\` — plain Elixir.${transactionalDoc}
   """
 
   require Logger
@@ -1133,7 +1129,7 @@ end
   return `# Auto-generated.
 defmodule ${moduleName} do
   @moduledoc """
-  Workflow \`${wf.name}\` — vanilla foundation (plain Elixir, no Ash).
+  Workflow \`${wf.name}\` — plain Elixir.
   """
 
   require Logger${hasContextCall ? `${contextAlias}\n` : ""}

@@ -3,15 +3,13 @@
 //
 // `contextStamps` (from `stamp onCreate`/`onUpdate`, or the `with audit`/
 // `auditable` capability) become `Ecto.Changeset.put_change` pipe lines applied
-// to the changeset right before `Repo.insert` / `Repo.update` (the vanilla
-// analogue of the Ash `change fn ... force_change_attribute ... end` blocks in
-// `domain/actions.ts`).  In both backends a non-principal value renders directly
-// (`now()` → `DateTime.utc_now()`) and a bare `currentUser` value resolves to
-// the principal id read from the threaded actor — Ash: `context.actor.<idKey>`;
-// vanilla: `current_user.<idKey>` (the actor is the `conn.assigns.current_user`
+// to the changeset right before `Repo.insert` / `Repo.update`.  A non-principal
+// value renders directly (`now()` → `DateTime.utc_now()`) and a bare
+// `currentUser` value resolves to the principal id read from the threaded
+// actor as `current_user.<idKey>` (the actor is the `conn.assigns.current_user`
 // map the Auth plug populated, threaded through `create_<agg>`/`update_<agg>`).
 //
-// Like the Ash path, `onUpdate` stamps run on BOTH insert and update (so a
+// `onUpdate` stamps run on BOTH insert and update (so a
 // NOT-NULL `updated_at`/`updated_by` audit column is populated on the initial
 // insert, created == updated), while `onCreate` stamps run on insert only.
 //
@@ -57,7 +55,7 @@ function renderStampValue(value: ExprIR, ctx: RenderCtx, principalIdKey: string)
 
 /** The `Ecto.Changeset.put_change` pipe lines for the given lifecycle event(s),
  *  one per stamp assignment, at the requested indent.  `onUpdate` assignments
- *  are included on `insert` too (mirroring Ash `on: [:create, :update]`), so the
+ *  are included on `insert` too, so the
  *  caller passes `["create", "update"]` at an insert site and `["update"]` at an
  *  update site.  Returns "" when no matching stamp exists. */
 export function stampPutChanges(

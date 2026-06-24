@@ -37,7 +37,7 @@ Parallel agents collide. The defence is the same one humans use: **announce inte
 
 ## What this is
 
-**Loom** — a Langium-based DSL for Domain-Driven Design. A `.ddd` source describes a `system` of `module`s, `aggregate`s, `valueobject`s, `event`s, `repository`s, `api`s, `storage`s, `ui`s, and `deployable`s; the toolchain generates a runnable multi-project tree wired together as one `docker compose` stack. Five backends (TypeScript/Hono, .NET/ASP.NET+EF+Mediator, Phoenix LiveView/Ash, Python/FastAPI+SQLAlchemy, Java/Spring Boot+JPA) and four frontends (React/Vite+Mantine, Vue 3/Vite+Vuetify, Svelte/SvelteKit, Angular+Angular Material) are supported.
+**Loom** — a Langium-based DSL for Domain-Driven Design. A `.ddd` source describes a `system` of `module`s, `aggregate`s, `valueobject`s, `event`s, `repository`s, `api`s, `storage`s, `ui`s, and `deployable`s; the toolchain generates a runnable multi-project tree wired together as one `docker compose` stack. Five backends (TypeScript/Hono, .NET/ASP.NET+EF+Mediator, Phoenix LiveView on plain Ecto/Phoenix, Python/FastAPI+SQLAlchemy, Java/Spring Boot+JPA) and four frontends (React/Vite+Mantine, Vue 3/Vite+Vuetify, Svelte/SvelteKit, Angular+Angular Material) are supported.
 
 The package name in `package.json` is `loc-ddd-dsl`; the CLI binary is `ddd`; the working name everywhere in docs and code is "Loom".
 
@@ -78,7 +78,7 @@ npm run test:svelte-e2e   # LOOM_SVELTE_E2E=1 — the Svelte sibling of the abov
 npm run test:dotnet       # LOOM_DOTNET_BUILD=1 — `dotnet build /warnaserror` against generated .NET projects
 npm run test:java         # LOOM_JAVA_BUILD=1 — `gradle testClasses bootJar` against generated Spring Boot projects (JDK 21 + Gradle)
 npm run test:python       # LOOM_PYTHON_BUILD=1 — `uv sync` + `ruff check` + `mypy --strict` + `pytest` against generated FastAPI projects (uv)
-npm run test:phoenix      # LOOM_PHOENIX_BUILD=1 — `mix compile --warnings-as-errors` against real Ash 3.x in Elixir docker
+npm run test:phoenix      # LOOM_PHOENIX_VANILLA_BUILD=1 — `mix compile --warnings-as-errors` against plain Ecto/Phoenix in Elixir docker
 npm run test:obs          # LOOM_OBS_E2E=1 — boots generated Hono backend, asserts catalog envelope on stdout
 npm run test:obs-dotnet   # LOOM_OBS_E2E_DOTNET=1 — same for the .NET backend (postgres sidecar via docker)
 npm run test:obs-phoenix  # LOOM_OBS_E2E_PHOENIX=1 — same for the Phoenix backend (postgres sidecar via docker)
@@ -114,12 +114,12 @@ It does **not** persist — if `docker info` starts failing mid-session, just re
 
 - **Java** — `gradle testClasses bootJar` on the *host* (JDK 21 + Gradle present; no container needed).
 - **.NET** — host has no SDK, so build in the `mcr.microsoft.com/dotnet/sdk:10.0` container (matches the `net10.0` target): `dotnet restore` + `dotnet build /warnaserror` are clean.
-- **Phoenix/Elixir** — `mix deps.get && mix compile --warnings-as-errors` in the `hexpm/elixir` image, against real Ash 3.x.
+- **Phoenix/Elixir** — `mix deps.get && mix compile --warnings-as-errors` in the `hexpm/elixir` image, against plain Ecto/Phoenix.
 - **Python** — `uv sync` + ruff + mypy + pytest on the host.
 
 The fast recipe for spot-checking a backend by hand: `node bin/cli.js generate system <f.ddd> -o out`, then run that backend's compiler (host for Java/.NET/Python, `docker run … hexpm/elixir … 'mix deps.get && mix compile'` for Phoenix).
 
-**Egress proxy wrinkle (Elixir only):** some proxies allowlist by *TLS fingerprint* — system OpenSSL (curl/.NET/Gradle/Python `ssl`) passes, but Erlang/OTP's `:ssl` gets a bare HTTP 503, so `mix deps.get` can't reach hex.pm from the container. Set **`LOOM_HEX_MIRROR=1`** to route hex.pm through a loopback TLS-terminating mirror (`scripts/hex-mirror.py` via `test/e2e/support/hex-mirror.ts`) that re-originates with the accepted fingerprint — `LOOM_PHOENIX_BUILD=1 LOOM_HEX_MIRROR=1 npm run test:phoenix` then runs green. Needs `python3` + `openssl` and the privilege to bind `:443`. Unset, it's a no-op (CI runners have direct hex.pm access). Full write-up: [`docs/tools.md`](docs/tools.md) → "Compiling generated backends in Docker"; gotcha log in `experience_gathered.md` §14.
+**Egress proxy wrinkle (Elixir only):** some proxies allowlist by *TLS fingerprint* — system OpenSSL (curl/.NET/Gradle/Python `ssl`) passes, but Erlang/OTP's `:ssl` gets a bare HTTP 503, so `mix deps.get` can't reach hex.pm from the container. Set **`LOOM_HEX_MIRROR=1`** to route hex.pm through a loopback TLS-terminating mirror (`scripts/hex-mirror.py` via `test/e2e/support/hex-mirror.ts`) that re-originates with the accepted fingerprint — `LOOM_PHOENIX_VANILLA_BUILD=1 LOOM_HEX_MIRROR=1 npm run test:phoenix` then runs green. Needs `python3` + `openssl` and the privilege to bind `:443`. Unset, it's a no-op (CI runners have direct hex.pm access). Full write-up: [`docs/tools.md`](docs/tools.md) → "Compiling generated backends in Docker"; gotcha log in `experience_gathered.md` §14.
 
 ### CLI
 
@@ -268,7 +268,7 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 - `test.yml` — the fast vitest suite (the same one `npm test` runs), **sharded 4 ways** via `vitest --shard` (the suite is ~900s of evenly-spread CPU-bound work with no hot file, so it scales horizontally — not by optimising individual files). Each shard emits a `blob` report; the `coverage` job merges them (`vitest --merge-reports`) into one combined coverage summary. `biome ci` + `test:biome-gen` run in a separate `lint` job; `tests-passed` is the single roll-up status for branch protection — require it, not the per-shard `test (shard i/4)` checks, so the shard count can change without touching branch-protection rules. Locally, `npm run test:gen` / `test:lang` / `test:ir` scope to a subtree.
 - `langium-generated.yml` — guards that `npm run langium:generate` produces deterministic output (drift between `ddd.langium` and the committed types).
 - `k8s-build.yml` — `generate system --k8s` → `helm lint` + `helm template` | `kubeconform` (rendered chart + raw `k8s/`) against the k8s API schemas. Catches Helm/manifest emitter drift. See `docs/kubernetes.md`.
-- `k8s-e2e.yml` — heavier cluster smoke, **fanned across backends as a matrix** (one cell per backend, each installing just its workload via the chart's per-deployable `enabled` toggle): hono/dotnet/python/java/phoenix-Ash over `scripts/k8s-e2e/k8s-smoke.ddd` + phoenix-vanilla over `examples/tasks-vanilla.ddd`. Installs into a `kind` cluster (+ throwaway postgres named `db` so each backend's native default URL connects) and asserts the backend boots, reaches `/ready`, and real read (`findAll` `GET`) + write (`POST` a fixture body → `201` → read back) round-trips through the migrated DB. NOT per-PR — runs nightly, on the `e2e-k8s` PR label, or via manual dispatch. See `docs/kubernetes.md`.
+- `k8s-e2e.yml` — heavier cluster smoke, **fanned across backends as a matrix** (one cell per backend, each installing just its workload via the chart's per-deployable `enabled` toggle): hono/dotnet/python/java over `scripts/k8s-e2e/k8s-smoke.ddd` + phoenix (plain Ecto/Phoenix) over `examples/tasks-vanilla.ddd`. Installs into a `kind` cluster (+ throwaway postgres named `db` so each backend's native default URL connects) and asserts the backend boots, reaches `/ready`, and real read (`findAll` `GET`) + write (`POST` a fixture body → `201` → read back) round-trips through the migrated DB. NOT per-PR — runs nightly, on the `e2e-k8s` PR label, or via manual dispatch. See `docs/kubernetes.md`.
 - `pages.yml` — typecheck + smoke + build playground + deploy docs/playground to GitHub Pages (main only).
 - `generated-react-build.yml` — matrix `{example × pack}`, generates the React project, `npm install`, `tsc --noEmit`. Catches generator drift invisible to IR-level tests.
 - `generated-svelte-build.yml` — matrix `{example × svelte pack}`, generates the SvelteKit project, `npm install`, `svelte-check --fail-on-warnings`, `vite build`.
@@ -278,9 +278,8 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 - `dotnet-build.yml` — `dotnet build /warnaserror` against the .NET output.
 - `java-build.yml` — `gradle testClasses bootJar` (main + emitted JUnit sources) against the Java output.
 - `python-build.yml` — `uv sync` + `ruff check` + `mypy --strict` + `pytest` against the Python/FastAPI output.
-- `elixir-ash-build.yml` — `mix deps.get && mix compile --warnings-as-errors` against the real Ash 3.x dep set in an Elixir docker image.
-- `elixir-vanilla-build.yml` — same, against the vanilla Ecto/Phoenix (non-Ash) foundation.
-- `hono-obs-e2e.yml` / `dotnet-obs-e2e.yml` / `elixir-ash-obs-e2e.yml` / `java-obs-e2e.yml` / `python-obs-e2e.yml` — per-backend observability e2e (boots the generated backend, asserts the catalog envelope on stdout).
+- `elixir-vanilla-build.yml` — `mix deps.get && mix compile --warnings-as-errors` against the vanilla Ecto/Phoenix dep set in an Elixir docker image.
+- `hono-obs-e2e.yml` / `dotnet-obs-e2e.yml` / the elixir-vanilla obs gate / `java-obs-e2e.yml` / `python-obs-e2e.yml` — per-backend observability e2e (boots the generated backend, asserts the catalog envelope on stdout).
 - `generated-svelte-build.yml` — matrix `{example × svelte pack}`, generates the SvelteKit project and typechecks it (the Svelte analogue of `generated-react-build.yml`). Vue and Angular have their own `generated-{vue,angular}-build.yml`; all four JSX frontends now also carry a `generated-{react,vue,svelte,angular}-e2e.yml` runtime gate.
 - `playground-e2e.yml` — Playwright specs against the production-built playground (editor → generate → bundle → boot → preview).
 - `conformance-parity.yml` / `conformance-full.yml` — cross-backend OpenAPI / wire-shape parity (parity is the per-PR gate; full is the broader run). `conformance-full` (nightly / `run-conformance` label) is the only place the DSL-emitted behavioral `test e2e` suites run against a docker stack.

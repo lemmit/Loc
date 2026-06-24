@@ -77,13 +77,13 @@ envelope(T) → { id: string; ts: datetime; body: T }
 included so clients don't recompute it. A paged find auto-gains `page` /
 `pageSize` query controls (defaults `1` / `20`). The shape is the *uniform
 backend-exchange guarantee*: no backend serializes its framework-native paging
-type (EF, `Ash.Page.Offset`, …) — each maps to this one DTO.
+type (EF, Ecto `limit`/`offset`, …) — each maps to this one DTO.
 
 | Backend | `paged` emission |
 |---|---|
 | Hono / React | `z.object({ items: …, page, pageSize, total, totalPages })` |
 | .NET | `Paged<T>` record (`Domain.Common`); repo `CountAsync` + `Skip`/`Take` |
-| Phoenix / Ash | offset-pagination read action; controller maps `%Ash.Page.Offset{}` to the envelope |
+| Phoenix / Ecto | `limit`/`offset` query + a `count` query; controller maps the page to the envelope |
 | Python / FastAPI | `PagedResult[T]` |
 | Java / Spring | `Paged<T>` over Spring Data paging |
 
@@ -141,7 +141,7 @@ by construction:
 |---|---|
 | Hono / React | `z.discriminatedUnion("type", [ z.object({ type: z.literal("Order"), … }), … ])` |
 | .NET | `[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]` base + one `[JsonDerivedType(typeof(V), "Tag")]` record per variant |
-| Phoenix / Ash | controller `tag_<union>/1` — one struct-pattern clause per variant → `%{type: "Tag", …}` |
+| Phoenix / Ecto | controller `tag_<union>/1` — one struct-pattern clause per variant → `%{type: "Tag", …}` |
 | Java / Spring | `@JsonTypeInfo` / `@JsonSubTypes` sealed interface, one record per variant |
 | Python / FastAPI | `buildPyBaseUnionFile` — a tagged base + one model per variant |
 

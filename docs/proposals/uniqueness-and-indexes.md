@@ -18,8 +18,8 @@
 >   an extra performance one.
 > - Tenancy is already a domain `filter` (`filter this.tenantId ==
 >   currentUser.tenantId`) that every backend *reifies* into its storage
->   layer (EF `HasQueryFilter`, Drizzle AND-ed predicate, Ash
->   `base_filter`, JPA `@SQLRestriction`). **Uniqueness follows the exact
+>   layer (EF `HasQueryFilter`, Drizzle AND-ed predicate, Ecto
+>   `where`-clause helper, JPA `@SQLRestriction`). **Uniqueness follows the exact
 >   same seam** — declared high, enforced low, derived in between.
 
 ## TL;DR
@@ -168,9 +168,8 @@ derived from the same IR:
 | .NET/EF Core | insert + catch `DbUpdateException` → `PostgresException.SqlState == "23505"` → map by constraint name |
 | Java/Spring JPA | insert + catch `DataIntegrityViolationException` → map by constraint name |
 
-Phoenix/Ash gets this most idiomatically via an Ash `identity` (or
-`unique_constraint/3` on vanilla Ecto), which maps the constraint name to a
-changeset field automatically.
+Phoenix/Ecto gets this most idiomatically via `unique_constraint/3`, which maps
+the constraint name to a changeset field automatically.
 
 ```ts
 // Hono/Drizzle — the better, race-free path (no separate pre-read)

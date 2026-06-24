@@ -13,9 +13,8 @@
 //     end
 //   end
 //
-// NO `use Ash.Resource`, NO GenServer, no state — a domain service is
-// foundation-agnostic (the module is byte-identical for the Ash and vanilla
-// foundations, since it touches no persistence).  It mirrors how a pure
+// NO GenServer, no state — a domain service touches no persistence, so the
+// module is purely computational.  It mirrors how a pure
 // aggregate `function` already emits as a plain module `def` with an `@spec`
 // (domain-emit.ts `renderHelperFunctions`), but with NO `record`/`this` first
 // parameter — a domain service holds no aggregate identity.
@@ -45,9 +44,8 @@ import { snake, upperFirst } from "../../util/naming.js";
 import { type RenderCtx, renderExpr, renderTypespec } from "./render-expr.js";
 
 /** Emit `lib/<app>/domain/services/<name>.ex` for each `domainService` in the
- *  context.  Foundation-agnostic — called from BOTH the Ash and vanilla
- *  orchestrators with the same `(appName, appModule)` so the module path the
- *  ELIXIR_TARGET call leaf renders resolves under either foundation.
+ *  context.  Called with `(appName, appModule)` so the module path the
+ *  ELIXIR_TARGET call leaf renders resolves.
  *
  *  `appName` is the snake app (`toSnakeApp(deployable.name)`) for the file
  *  path; `appModule` is the module prefix (`toModulePrefix(appName)`) the call

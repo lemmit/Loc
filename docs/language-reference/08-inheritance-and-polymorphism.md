@@ -44,8 +44,8 @@ public abstract class Party
 ```
 == elixir
 ```elixir
-# lib/elixir_api/parties.ex — the base owns no Ash.Resource; only a
-# polymorphic read on the context domain (see `find all <Base>` below).
+# lib/elixir_api/parties.ex — the base owns no Ecto schema; only a
+# polymorphic read on the context module (see `find all <Base>` below).
 ```
 ::: end
 
@@ -178,29 +178,28 @@ public void Configure(EntityTypeBuilder<Customer> builder)
 
 ### Elixir — shared table + `base_filter` vs own table
 
-The Ash backend gives each concrete its own `Ash.Resource` either way; under TPH they point at the **same** `table` and self-filter on the discriminator via `base_filter`, under TPC each names its own table.
+The Elixir backend gives each concrete its own `Ecto.Schema` either way; under TPH they point at the **same** `table` and self-filter on the discriminator in the context query, under TPC each names its own table.
 
 ::: tabs inheritance
 == TPH
 ```elixir
-# lib/elixir_api/parties/customer.ex — shared table, discriminator filter
-postgres do
-  table "parties"
-  repo ElixirApi.Repo
-end
-resource do
-  base_filter expr(kind == "Customer")
-end
-attributes do
-  attribute :kind, :string, default: "Customer", allow_nil?: false
+# lib/elixir_api/parties/customer.ex — shared table, discriminator field
+defmodule ElixirApi.Parties.Customer do
+  use Ecto.Schema
+  schema "parties" do
+    field :kind, :string, default: "Customer"
+    # … reads self-filter on `where: c.kind == "Customer"`
+  end
 end
 ```
 == TPC
 ```elixir
 # lib/elixir_api/parties/customer.ex — its own table, no discriminator
-postgres do
-  table "customers"
-  repo ElixirApi.Repo
+defmodule ElixirApi.Parties.Customer do
+  use Ecto.Schema
+  schema "customers" do
+    # …
+  end
 end
 ```
 ::: end
@@ -311,7 +310,7 @@ The TPC readers therefore expose `findAll` only — no polymorphic `findById` ta
 
 ## Backend gating & validation
 
-Both strategies emit on **all five backends** (node/Hono, .NET, Phoenix/Ash, Python, Java). The one gate is a storage one: a `sharedTable` (TPH) hierarchy whose context is hosted on **no DB backend** is an IR-validate **error** (there is no emission target) — it names the offending platform and suggests either a DB-backend host or switching to `inheritanceUsing(ownTable)`.
+Both strategies emit on **all five backends** (node/Hono, .NET, Phoenix LiveView, Python, Java). The one gate is a storage one: a `sharedTable` (TPH) hierarchy whose context is hosted on **no DB backend** is an IR-validate **error** (there is no emission target) — it names the offending platform and suggests either a DB-backend host or switching to `inheritanceUsing(ownTable)`.
 
 | Code | Fires when |
 |---|---|

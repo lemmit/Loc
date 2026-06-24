@@ -2,6 +2,8 @@
 
 > **[2026-06-20 status audit]** Two sub-claims advanced: `or`-unions now emit on FIVE backends (`structural-checks.ts:~414`); the union-find producer path is no longer 'stubbed on .NET and Hono' (`dotnet/find-emit.ts:~35`, `typescript/repository-find-builder.ts:~398`).
 
+> **(Superseded 2026: the Ash foundation was removed; `platform: elixir` is plain Ecto/Phoenix only; `foundation: ash` is now a validation error.)** The "Phoenix / Ash" and "Ash resources/typespecs" mentions below describe the removed Ash foundation; the Phoenix backend now emits plain Ecto/Phoenix.
+
 > Status: **PARTIAL — most of P1–P4 shipped** (code-verified 2026-06-10):
 > **P1** — the `payload` umbrella with all six kinds
 > (`payload | event | command | query | response | error`) parses,
@@ -174,7 +176,7 @@ Two parallel type-system ladders, by design:
 **This is the design choice that makes generics tractable.** Adding
 generics to aggregates would require every backend to handle
 parameterized storage types (TS structural, C# nominal with reified
-generics, Ash typespecs, Drizzle schemas) — a much larger
+generics, Elixir typespecs, Drizzle schemas) — a much larger
 undertaking. Adding generics to payloads is mostly a wire-shape
 problem; backends already serialize uniformly. Scoping is the win.
 
@@ -535,7 +537,7 @@ ceremony.
 (serialized as a `kind` field on the wire by default — see open
 question on discriminator field name). Frontend TypeScript narrows
 on the discriminator naturally. C# emits using `JsonDerivedType`
-polymorphic JSON. Phoenix/Ash uses Ash's `tagged_unions` feature.
+polymorphic JSON. Phoenix uses a tagged map on the wire (plain Ecto/Phoenix).
 
 For HTTP operation returns specifically, the api surface translates
 error variants into RFC 7807 ProblemDetails responses (status code
@@ -611,8 +613,8 @@ parameterized storage types:
   needs per-instantiation tables (TPC-style for every generic
   param). Quickly becomes "how do we store `Wrapper<Customer>` vs
   `Wrapper<Order>`?"
-- Phoenix / Ash: Ash resources aren't designed for generic
-  parameterization at the resource level.
+- Phoenix: Elixir has no compile-time parametric polymorphism at the
+  struct/schema level.
 
 The cost is much higher AND the benefit is lower (aggregates rarely
 need generic shape; they're nominal state machines).
@@ -721,7 +723,7 @@ A1–A7 on top.
   - C# nominal: generate concrete per-instantiation records (no
     runtime generics on DTOs). Per generic + per instantiation = one
     emitted record class. Moderate work.
-  - Elixir / Ash: typespecs only (Elixir has no compile-time
+  - Elixir: typespecs only (Elixir has no compile-time
     parametric polymorphism). Easy.
   - React / TS frontend: gets generic types natively. Trivial.
 - **Aggregate-as-carrier projection.** Phase 3 must thread the

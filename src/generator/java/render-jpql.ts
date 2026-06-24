@@ -18,7 +18,7 @@ import type { ExprIR } from "../../ir/types/loom-ir.js";
 // generated `CurrentUserAccessor` bean — the JPA analogue of node's
 // `requireCurrentUser()`: `:#{@currentUserAccessor.user()?.<field>()}`.  The
 // null-safe `?.` keeps it fail-closed (no actor → null → `= NULL` → no rows),
-// mirroring the .NET / Ash / vanilla behaviour.
+// mirroring the .NET / Phoenix behaviour.
 // ---------------------------------------------------------------------------
 
 /** Spring bean name of the generated `CurrentUserAccessor` @Component. */
