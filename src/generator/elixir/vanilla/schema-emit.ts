@@ -34,6 +34,7 @@ import {
   tphBaseUnionFields,
   vanillaTableName,
 } from "./inheritance-emit.js";
+import { renderInspectImpl } from "./inspect-emit.js";
 import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
 import { isRefCollField, manyToManyLine, refCollFields } from "./ref-collection-emit.js";
 import { valueCollectionModule, valueCollectionsWithVo } from "./value-collection-schema-emit.js";
@@ -70,11 +71,18 @@ export function emitVanillaSchemas(
     const schemaPrefix = sys
       ? resolveDataSourceConfig(agg as EnrichedAggregateIR, ctx, sys)?.schema
       : undefined;
+    const schemaModule = isVanillaDocAgg(agg, ctx, sys)
+      ? renderDocSchema(appModule, ctxModule, agg, schemaPrefix)
+      : renderSchema(appModule, ctxModule, agg, enumsByName, schemaPrefix, ctx, sys, pool);
+    // Append the Inspect-protocol redaction impl (sensitive-field leak guard)
+    // after the schema module — emitted only for an aggregate carrying a
+    // sensitive leaf; `null` otherwise, so unaffected aggregates stay
+    // byte-identical.  Rendered from the IR's synthesized `inspect` member, so
+    // the redaction contract matches the TS/.NET backends exactly.
+    const inspectImpl = renderInspectImpl(appModule, ctxModule, agg as EnrichedAggregateIR, ctx);
     out.set(
       `lib/${appSnake}/${ctxSnake}/${aggSnake}.ex`,
-      isVanillaDocAgg(agg, ctx, sys)
-        ? renderDocSchema(appModule, ctxModule, agg, schemaPrefix)
-        : renderSchema(appModule, ctxModule, agg, enumsByName, schemaPrefix, ctx, sys, pool),
+      inspectImpl ? `${schemaModule}\n${inspectImpl}` : schemaModule,
     );
     // Each entity part (`entity Line { … }`) becomes an Ecto `embedded_schema`
     // module the aggregate `embeds_many`/`embeds_one`s, stored inline as the
