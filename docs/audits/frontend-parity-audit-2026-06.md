@@ -1,11 +1,22 @@
 # Frontend feature-parity audit
 
-> Status: **empirical pass — 2026-06-21.**  Covers the four registered
-> frontends (React, Vue, Svelte, Angular) plus the Phoenix LiveView
-> (HEEx) fullstack render path, and every shipped design pack.
+> Status: **empirical pass — 2026-06-21; refreshed 2026-06-24.**  Covers the
+> four registered frontends (React, Vue, Svelte, Angular) plus the Phoenix
+> LiveView (HEEx) fullstack render path, and every shipped design pack.
 > Supersedes `pack-equivalence-audit.md` (2026-05-11), which predates
 > the walker-primitive architecture, still calls Phoenix
 > "phoenix-live-view", and only covered the two React packs.
+
+> **[2026-06-24 refresh, code-verified against `main` @ `e779fcd`]** Three
+> facts moved since the 2026-06-21 pass: (1) the closed primitive library is
+> **52** (was 50 — `Section`/`Sticky` are now first-class registry entries);
+> (2) the **`store` UI primitive reached its 5th target** — Phoenix LiveView
+> (#1564), joining React/Vue/Svelte/Angular, lifting
+> `loom.store-on-liveview-unsupported`; and (3) **`primeng` and `spartanNg`
+> shipped** as full Angular packs (each a complete `designs/<pack>/v1/` tree) —
+> they are no longer grammar-reserved, so Angular now has **three** packs and
+> Finding 2 (pack breadth) is largely drained. `WalkerTarget` now has 17
+> required + 16 optional seams (the store seams added 4 optionals).
 
 This audit answers one question: **does the same `.ddd` page DSL produce
 an equivalent app on every frontend target and every design pack?**  It
@@ -56,8 +67,10 @@ primitive list to drift.
 
 ## 2. Walker-target seam parity
 
-`WalkerTarget` has **17 required** members and **12 optional** fork seams.
-All four JSX targets implement every required seam — full contract parity:
+`WalkerTarget` has **17 required** methods and **16 optional** fork seams (the
+4 store seams — `renderStoreFieldRead`/`renderStoreActionCall`/`renderStoreModule`
++ `renderNamedHandler` — are the newest optionals). All four JSX targets
+implement every required seam — full contract parity:
 
 | Seam group | Required seams | TSX | Vue | Svelte | Angular |
 |---|---|:--:|:--:|:--:|:--:|
@@ -104,8 +117,12 @@ pack templates.
 
 ## 3. Primitive coverage
 
-The closed library is **50 primitives** (`registry.ts`), each with a
-`tsx` renderer. **HEEx parity is complete** — `heex-parity.test.ts`'s
+The closed library is **52 primitives** (`registry.ts`) — 50 standalone layout
+primitives plus 2 nested-only (`Tab`, `Column`) — each with a `tsx` renderer.
+The `store` primitive (Zustand/Pinia/runes/Angular-signal store on the four JSX
+targets, LiveView struct module on Phoenix as of #1564) rides the `WalkerTarget`
+store seam rather than the primitive table. **HEEx parity is complete** —
+`heex-parity.test.ts`'s
 `KNOWN_HEEX_GAPS` is now **empty**: every TSX-rendered primitive has a
 HEEx renderer. This is a real improvement over the old audit, which
 listed several DECLINED/DEFERRED HEEx gaps.
@@ -199,13 +216,17 @@ must generate on its target** (or fail validation, never codegen).
 | `shadcnSvelte` | Svelte | v1 | sv1 | `svelte` |
 | `flowbite` | Svelte | v1 | sv1 | — |
 | `angularMaterial` | Angular | v1 | ng1 | `angular` |
+| `primeng` | Angular | v1 | ng1 | — |
+| `spartanNg` | Angular | v1 | ng1 | — |
 | `ashPhoenix` | Phoenix HEEx | v3 | — | `elixir` (forced) |
 
 **Pack-breadth asymmetry** (Finding 2, LOW): React has 4 families / 8
-versions; Vue and Svelte have 2 families each; Angular has 1.
-`primeng` and `spartanNg` are reserved in the grammar's `DesignPack` rule
-but **not shipped** — Angular users have a single pack today. This is a
-coverage/maturity gap, not a correctness bug.
+versions; Vue and Svelte have 2 families each; Angular now has **3**.
+`primeng` and `spartanNg` — previously grammar-reserved but unshipped —
+**now ship** as full `designs/<pack>/v1/` trees (52 files each, registered
+`angular`-format in `builtin-formats.ts`), so Angular pack breadth is no
+longer the gap it was. The remaining asymmetry (Vue/Svelte at 2 families) is
+a coverage/maturity item, not a correctness bug.
 
 Within a frontend, packs are equivalent at the systems level (same DDL →
 working app); they diverge only in design-system identity (the
@@ -268,7 +289,7 @@ by reusing the established sibling harness.
 | # | Severity | Finding | Recommended action |
 |---|---|---|---|
 | 1 | **HIGH** — ✅ FIXED | `Section`/`Sticky` passed validation but crashed Vue & Angular codegen (ungated, not in any `RequiredSet`, no `templates.has` guard) | **Done:** shipped the 6 templates (vuetify/shadcnVue/angularMaterial) + added both to `TSX_ONLY_PRIMITIVES`; the load-time gate now enforces them. "validates ⇒ generates" restored. |
-| 2 | LOW | Pack breadth uneven (React 4 families, Vue/Svelte 2, Angular 1; `primeng`/`spartanNg` reserved but unshipped) | Roadmap item — ship the reserved Angular packs; not a correctness bug. |
+| 2 | LOW — ✅ largely drained | Pack breadth uneven (React 4 families, Vue/Svelte 2). `primeng`/`spartanNg` **shipped** → Angular now has 3 packs. | Residual: ship more Vue/Svelte families; not a correctness bug. |
 | 3 | MEDIUM — ✅ FIXED | No runtime-e2e CI for generated React or Angular apps (Vue/Svelte had it) | **Done (landed on `main` independently):** Angular gate via #1474, React gate via #1476. All four frontends now have build + runtime-e2e gates. |
 | 4 | COSMETIC — ✅ FIXED | Stale "stubbed/deferred" comments in `angular/index.ts`, `target.ts`, `required-primitives.ts` contradicted the now-complete form seams | **Done:** refreshed the comments to describe the shipped Reactive-Form seams. |
 
@@ -278,6 +299,7 @@ cross-cutting feature set (forms, realtime, views, workflows, layouts,
 auth, e2e surface) is uniform, and HEEx primitive parity is now complete.
 Finding 1 (the one functional defect — a reproducible crash violating
 "validates ⇒ generates"), Finding 3 (runtime-e2e CI parity), and Finding 4
-(stale comments) are all **fixed**. Only Finding 2 remains — pack breadth
-(Angular ships one pack; `primeng`/`spartanNg` are grammar-reserved), a
-maturity/roadmap item, not a correctness bug.
+(stale comments) are all **fixed**, and Finding 2 has largely drained —
+`primeng`/`spartanNg` shipped, so Angular now has three packs. The only residue
+is Vue/Svelte pack breadth (2 families each), a maturity/roadmap item, not a
+correctness bug.

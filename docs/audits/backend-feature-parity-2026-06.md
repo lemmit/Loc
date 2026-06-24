@@ -2,6 +2,19 @@
 
 **Snapshot date:** 2026-06-21
 
+> **[2026-06-24 refresh, code-verified against `main` @ `e779fcd`]** Two adapter
+> moves landed: **node `auditable` stamping relocated into the persistence layer**
+> on both node adapters — drizzle (#1554) and mikroorm (#1565) — reading the
+> principal from the ambient `requestContext().actorId` and dropping the
+> operation-time `_stampOn` methods (`db/audit-stamp.ts`, `stampInsert`/
+> `stampUpdate`). As a result the **`mikroorm` adapter now SUPPORTS auditing**
+> (`validateMikroOrmSupport` no longer rejects `auditable`); it still rejects
+> non-relational shapes, inheritance, `X id[]` associations, nested parts, any
+> capability `filter`, and provenanced/non-stamp managed fields (the full adapter
+> sub-matrix lives in `docs/proposals/platform-parity-debt.md`). The
+> backend-level audit/provenance gate *sets* are unchanged from 2026-06-23; the
+> `system-checks.ts` line numbers below were re-synced (they shifted ~+13).
+
 > **[2026-06-23 refresh, code-verified against `main` @ `b598dba`]** Folded in
 > since the 2026-06-22 pass: **per-operation `audited` shipped on Java + Python**
 > (#1503/W3a — `AUDIT_OP_BACKENDS = {node, dotnet, java, python}`) and **audited
@@ -66,9 +79,9 @@ Legend: ✓ implemented · ✗ gated (validator error) · ⚠ partial · 🔴 **
 
 | Feature | node | dotnet | java | python | elixir·ash | elixir·vanilla | Gate (source of truth) |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|---|
-| Event-sourced storage `persistedAs(eventLog)` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | `EVENT_SOURCING_BACKENDS` · system-checks.ts:1900 |
-| Event-sourced **workflow** (saga appliers) | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | `EVENT_SOURCING_WORKFLOW_BACKENDS` · system-checks.ts:2001 |
-| TPH inheritance `inheritanceUsing(sharedTable)` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `TPH_CAPABLE` · system-checks.ts:1849 |
+| Event-sourced storage `persistedAs(eventLog)` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | `EVENT_SOURCING_BACKENDS` · system-checks.ts:1913 |
+| Event-sourced **workflow** (saga appliers) | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | `EVENT_SOURCING_WORKFLOW_BACKENDS` · system-checks.ts:2014 |
+| TPH inheritance `inheritanceUsing(sharedTable)` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `TPH_CAPABLE` · system-checks.ts:1862 |
 | TPC inheritance `inheritanceUsing(ownTable)` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | (universal) |
 | `shape(document)` persistence | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | `PLATFORM_SAVING_SHAPES` · platform-axes.ts:40 |
 | `shape(embedded)` persistence | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `PLATFORM_SAVING_SHAPES` · platform-axes.ts:40 |
@@ -80,9 +93,9 @@ Legend: ✓ implemented · ✗ gated (validator error) · ⚠ partial · 🔴 **
 | Principal capability `filter` (`currentUser`/tenancy, relational) | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | `supportsPrincipalFilter` · system-checks.ts:1021 |
 | Capability `filter` on non-relational shape (doc/embedded) | ✓ | ✓ | ✓ | ✗ | ⚠ embedded only | ⚠ embedded only | `supportsPrincipalNonRelationalFilter` · system-checks.ts:1067 |
 | `ignoring <Cap>` filter-bypass | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `FILTER_BYPASS_FAMILIES` / `bypassSupported` · system-checks.ts:1199 |
-| Provenanced fields (runtime trace) | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | `PROVENANCE_BACKENDS` · system-checks.ts:2050 |
-| Per-operation `audited` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | `AUDIT_OP_BACKENDS` (+ elixir·vanilla) · system-checks.ts:2111 |
-| Audited **lifecycle** (`audited create`/`destroy`) | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | `AUDIT_LIFECYCLE_BACKENDS` (+ elixir·vanilla) · system-checks.ts:2112 |
+| Provenanced fields (runtime trace) | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | `PROVENANCE_BACKENDS` · system-checks.ts:2063 |
+| Per-operation `audited` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | `AUDIT_OP_BACKENDS` (+ elixir·vanilla) · system-checks.ts:2124 |
+| Audited **lifecycle** (`audited create`/`destroy`) | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | `AUDIT_LIFECYCLE_BACKENDS` (+ elixir·vanilla) · system-checks.ts:2125 |
 | Audit/context stamping (`with audit` → `contextStamps`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | not gated (all reference it; runtime depth varies — see §6) |
 | `X id[]` reference collections (set) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | not gated — emitted + boot-verified on all 5 (see §7) |
 

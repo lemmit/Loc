@@ -7,11 +7,13 @@ marker found across the toolchain, so we can tackle them one at a time. Each
 item carries a stable ID (`DEBT-NN`), the target(s) affected, an impact/effort
 read, and a link to any existing plan.
 
-This is the **prioritized** companion to the empirical
-[`docs/audits/gated-features-inventory.md`](../audits/gated-features-inventory.md)
-(snapshot 2026-06-03 — predates the Java/Python/Vue/Svelte targets, so this doc
-supersedes its target lists). When a cited file disagrees with either doc, the
-**code wins**.
+This is the **prioritized** companion to the empirical backend/frontend audits —
+[`docs/audits/backend-feature-parity-2026-06.md`](../audits/backend-feature-parity-2026-06.md)
+and [`docs/audits/frontend-parity-audit-2026-06.md`](../audits/frontend-parity-audit-2026-06.md),
+which cover the full five-backend / five-frontend roster. (The older
+[`gated-features-inventory.md`](../audits/gated-features-inventory.md), snapshot
+2026-06-03, is superseded — it predates the Java/Python/Vue/Svelte/Angular
+targets.) When a cited file disagrees with any doc, the **code wins**.
 
 ---
 

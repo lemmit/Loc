@@ -1,47 +1,139 @@
 # Platform parity debt — the cross-backend gate inventory
 
 > **Status:** SUMMARY / debt register — no new surface; tracks existing gates.
-> **Role:** A single roll-up of every feature that works on some backends but
-> not others (node/Hono, dotnet/.NET, phoenix/LiveView, react). It exists so the
-> parity gaps that are otherwise scattered across per-feature proposals and
-> validator codes have one home to prioritise against. Each row links to the
-> proposal that owns the fix.
-> **Authoritative detail:** the code-verified, file-and-line snapshot lives in
-> [`../audits/gated-features-inventory.md`](../audits/gated-features-inventory.md).
-> When this précis and that audit disagree, the audit (and the cited code) wins.
+> **Role:** A single roll-up of every feature that works on some targets but
+> not others, across the **five backends** (node/Hono, dotnet/.NET, java/Spring,
+> python/FastAPI, elixir/Phoenix) and **five frontends** (React, Vue, Svelte,
+> Angular, Phoenix-HEEx). It exists so the parity gaps that are otherwise
+> scattered across per-feature proposals and validator codes have one home to
+> prioritise against. Each row links to the proposal that owns the fix.
+> **Authoritative detail:** the code-verified, file-and-line snapshots live in
+> [`../audits/backend-feature-parity-2026-06.md`](../audits/backend-feature-parity-2026-06.md)
+> (backends) and
+> [`../audits/frontend-parity-audit-2026-06.md`](../audits/frontend-parity-audit-2026-06.md)
+> (frontends). When this précis and those audits disagree, the audit (and the
+> cited code) wins. The older [`gated-features-inventory.md`](../audits/gated-features-inventory.md)
+> (2026-06-03) is **superseded** — it predates the java/python backends.
+
+> **[2026-06-24 refresh]** Widened from the old four-column
+> (node/dotnet/phoenix/react) matrix to the current five-backend world, and the
+> debt list re-grounded against fresh `main`. **Most of the old register has
+> drained:** TPH (all five), event sourcing, `shape(document)`, provenance,
+> per-op + lifecycle `audited`, `ignoring` filter-bypass, and `X id[]` reference
+> collections are now uniform across the backends (elixir reaching them via its
+> **vanilla** foundation). On the frontend, the `Section`/`Sticky` codegen crash
+> is fixed and `primeng`/`spartanNg` shipped, so the only residue there is pack
+> breadth. The standing backend debt is now narrow: **python filter depth**,
+> **event-sourced workflows on elixir**, and the **minimal alternate adapters**.
+
+**A note on the elixir·ash foundation.** Elixir ships two foundations —
+`ash` (default) and `vanilla` (Ecto). Several features are gated on `ash` but
+emit on `vanilla` (event-sourced storage, `shape(document)`, provenance, per-op
+audit). Per the foundation-routing contract (`docs/platforms.md`, #1496), a
+feature ash can't idiomatically emit is reached by routing the deployable to
+`vanilla` — that is the **intended end state, not debt to close on ash**. So
+this register treats elixir as a single backend whose reference foundation is
+`vanilla`; ash-only gates are footnoted as foundation-fit, not counted as
+parity debt. They are listed in the backend audit's §F3 for completeness.
 
 Legend: ✓ implemented · ✗ gated (fail-fast validator error) · ⚠ partial / stub · N/A.
 
-## The matrix at a glance
+## Backend matrix at a glance
 
-> **[2026-06-20 audit]** Two cells flipped since the last revision: **principal
-> `filter`** now ships on node + phoenix (✗→✓; DEBT-01, #1386 — relational shapes;
-> principal-on-non-relational stays gated) and **provenanced fields** now ship on
-> dotnet (✗→✓) and phoenix-vanilla (#1400 / DEBT-06; ash stays gated). Also note
-> this matrix predates the **java / python** backends and the **vue / svelte /
-> angular** frontends — those columns are not yet represented here; consult the
-> per-feature validator gates (`system-checks.ts`, `src/util/platform-axes.ts`)
-> for those five targets until the matrix is widened.
+Gate sets read from `src/ir/validate/checks/{system,structural}-checks.ts` and
+`src/util/platform-axes.ts` (line numbers re-synced 2026-06-24 — they drift, so
+re-derive before trusting a row). "elixir" = the `vanilla` foundation unless the
+cell notes otherwise.
 
-| Feature | node | dotnet | phoenix | react | Owning proposal |
-|---|:---:|:---:|:---:|:---:|---|
-| Event-sourced storage `persistedAs(eventLog)` | ✓ | ✓ | ✓ vanilla / ✗ ash | N/A | [workflow-and-applier](./workflow-and-applier.md) |
-| TPH inheritance `inheritanceUsing(sharedTable)` | ✓ | ✓ | ✓ | N/A | [aggregate-inheritance](./aggregate-inheritance.md) |
-| `shape(document)` persistence | ✓ | ✓ | ✗ | N/A | [document-and-json-hierarchies](./document-and-json-hierarchies.md) |
-| Principal `filter` (`currentUser`/tenancy) | ✓ | ✓ | ✓ | N/A | [multi-tenancy-design-note](./multi-tenancy-design-note.md) |
-| Provenanced fields (runtime trace) | ✓ | ✓ | ✓ vanilla / ✗ ash | N/A | [provenance](./provenance.md) |
-| Generic carriers (`paged<T>`) | ✓ | ✓ | ✓ | ✓ (#898) | [payload-transport-layer](./payload-transport-layer.md) |
-| Ordered `X id[]` collections | ✓ | ✓ | ✗ | display | [load-specifications](./load-specifications.md) |
-| Per-op `audited` flag | ✓ | ✗ gated | ✗ gated | N/A | [audit-and-logging](./audit-and-logging.md) |
-| Audit stamping (`with audit`) | ✓ | ⚠ | ⚠ | N/A | [audit-and-logging](./audit-and-logging.md) |
-| Non-constructible aggregates | ✓ | ✓ | ⚠ | ⚠ | [lifecycle-operations](./lifecycle-operations.md) |
-| React `where`/list-page filter | — | — | — | ⚠ | [retrieval](./retrieval.md) |
-| Page `requires <pred>` (Phoenix) | N/A | N/A | ✓ (guard enforced in `handle_params/3`, `liveview-emit.ts`) | N/A | [frontend-acl](./frontend-acl.md) |
+| Feature | node | dotnet | java | python | elixir | Gate · source of truth |
+|---|:---:|:---:|:---:|:---:|:---:|---|
+| Event-sourced storage `persistedAs(eventLog)` | ✓ | ✓ | ✓ | ✓ | ✓ vanilla / ✗ ash† | `EVENT_SOURCING_BACKENDS` · system-checks.ts:1913 |
+| Event-sourced **workflow** (saga appliers) | ✓ | ✓ | ✓ | ✓ | ✗ | `EVENT_SOURCING_WORKFLOW_BACKENDS` · system-checks.ts:2014 |
+| TPH inheritance `inheritanceUsing(sharedTable)` | ✓ | ✓ | ✓ | ✓ | ✓ | `TPH_CAPABLE` · system-checks.ts:1862 |
+| TPC inheritance `inheritanceUsing(ownTable)` | ✓ | ✓ | ✓ | ✓ | ✓ | (universal) |
+| `shape(document)` persistence | ✓ | ✓ | ✓ | ✓ | ✓ vanilla / ✗ ash† | `PLATFORM_SAVING_SHAPES` · platform-axes.ts:40 |
+| `shape(embedded)` persistence | ✓ | ✓ | ✓ | ✓ | ✓ | `PLATFORM_SAVING_SHAPES` · platform-axes.ts:40 |
+| Discriminated unions / generic carriers / `when` gate | ✓ | ✓ | ✓ | ✓ | ✓ | structural-checks.ts:414 / :232 / :484 |
+| Exception-less returns (`op(): X or NotFound`) | ✓ | ✓ | ✓ | ✓ | ✓ vanilla / ⚠ ash† | `SUPPORTED_RETURN_BACKENDS` · structural-checks.ts:518 |
+| Non-principal capability `filter` (relational) | ✓ | ✓ | ✓ | ✓ | ✓ | `LIMITED_FAMILIES` · system-checks.ts:1006 |
+| **Principal `filter`** (`currentUser`/tenancy, relational) | ✓ | ✓ | ✓ | **✗** | ✓ | `supportsPrincipalFilter` · system-checks.ts:1021 |
+| **Filter on non-relational shape** (doc/embedded) | ✓ | ✓ | ⚠ doc+embedded | **✗** | ⚠ embedded | `supportsNonRelationalFilter` · system-checks.ts:1051 |
+| `ignoring <Cap>` filter-bypass | ✓ | ✓ | ✓ | ✓ | ✓ | `FILTER_BYPASS_FAMILIES` · system-checks.ts:1199 |
+| Provenanced fields (runtime trace) | ✓ | ✓ | ✓ | ✓ | ✓ vanilla / ✗ ash† | `PROVENANCE_BACKENDS` · system-checks.ts:2063 |
+| Per-operation `audited` | ✓ | ✓ | ✓ | ✓ | ✓ vanilla / ✗ ash† | `AUDIT_OP_BACKENDS` · system-checks.ts:2124 |
+| Audited **lifecycle** (`audited create`/`destroy`) | ✓ | ✓ | ✓ | ✓ | ✓ vanilla / ✗ ash† | `AUDIT_LIFECYCLE_BACKENDS` · system-checks.ts:2125 |
+| `X id[]` reference collections | ✓ | ✓ | ✓ | ✓ | ✓ | not gated — emitted + boot-verified on all 5 |
 
-Adapter sub-matrix: `dapper` (dotnet) and `mikroorm` (node) are minimal-v1 and
-reject ~11 model features each; `marten` (dotnet), `style: cqrs` (node), and
-`style: layered` (dotnet) are reserved stubs. See
-[platform-realization-axes](./platform-realization-axes.md).
+† **Foundation-fit, not debt** — ash routes to `vanilla` for these (see the note
+above). The single ✗ shared by *both* foundations is event-sourced **workflows**.
+
+**The standing backend debt (after ignoring ash foundation-fit):**
+
+1. **Python filter depth** — principal `filter`s (`currentUser`/tenancy) and
+   non-relational-shape filters are gated on python (fail-fast, not silent; #1481
+   closed the silent-gap hole — the non-principal relational case now emits). The
+   principled fix is to lower the predicate into the SQLAlchemy reads.
+   ([multi-tenancy-design-note](./multi-tenancy-design-note.md), DEBT-02.)
+2. **Event-sourced workflows on elixir** — saga appliers are gated on **both**
+   elixir foundations (`EVENT_SOURCING_WORKFLOW_BACKENDS` omits elixir); the
+   emitters key off `correlationField` and would misgenerate a state-based saga.
+   ([workflow-and-applier](./workflow-and-applier.md).)
+3. **Non-relational filters** — `python` off entirely; `elixir` covers embedded
+   but not document; principal-on-non-relational stays gated everywhere.
+   ([multi-tenancy-design-note](./multi-tenancy-design-note.md), DEBT-02.)
+
+## Frontend matrix at a glance
+
+Five frontends; the four JSX/markup targets (React/Vue/Svelte/Angular) share one
+walker core, Phoenix-HEEx runs a parallel core off the same primitive table.
+Contract-level parity is **strong** — all 17 required `WalkerTarget` seams are
+implemented on all four JSX targets, HEEx primitive parity is complete
+(`KNOWN_HEEX_GAPS` empty), and the cross-cutting feature set (forms, realtime,
+views, workflows, layouts, auth, e2e surface) is uniform.
+
+| Concern | React | Vue | Svelte | Angular | Phoenix-HEEx |
+|---|:---:|:---:|:---:|:---:|:---:|
+| 52 walker primitives (incl. `Section`/`Sticky`) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `store` UI primitive (5th target #1564) | ✓ Zustand | ✓ Pinia | ✓ runes | ✓ signals | ✓ LiveView struct |
+| Build CI gate | ✓ | ✓ | ✓ | ✓ | (elixir build) |
+| Runtime-e2e CI gate | ✓ | ✓ | ✓ | ✓ | n/a |
+| Design-pack families | 4 (mantine/shadcn/mui/chakra) | 2 (vuetify/shadcnVue) | 2 (shadcnSvelte/flowbite) | 3 (angularMaterial/primeng/spartanNg) | 1 (ashPhoenix) |
+
+**The standing frontend debt:**
+
+1. **Pack breadth is uneven** (LOW, not a correctness bug) — React has 4 pack
+   families / 8 versions; Vue and Svelte have 2 each; Angular has 3
+   (`angularMaterial`, `primeng`, `spartanNg` — the latter two **shipped**, no
+   longer grammar-reserved). Within a frontend every pack is systems-equivalent;
+   they diverge only in design-system identity. ([design-packs](../design-packs.md).)
+2. **`store` persist/sync ladder** — the `store` primitive is v1 in-memory on all
+   five targets; `persist:`/`sync:` parse but stay validator-gated
+   (`loom.store-lifetime-unsupported`), and cross-store calls are gated on
+   LiveView only (`loom.store-cross-store-on-liveview-unsupported`).
+
+## Adapter sub-matrix
+
+Within a backend, persistence is pluggable. The minimal-v1 adapters reject a
+slice of model features (fail-fast, `loom.<adapter>-unsupported`):
+
+- **`mikroorm` (node)** — auditing is now **supported** (#1565, persist-time
+  stamping via `em.upsert` + `onConflictExcludeFields`; previously gated off).
+  Still rejects: `retrieval` query bundles, `seed` data, non-relational shapes
+  (doc/embedded), aggregate inheritance, `X id[]` associations, nested parts, any
+  capability `filter`, provenanced fields, non-stamp server-managed fields.
+  (`validateMikroOrmSupport`, system-checks.ts:1469.)
+- **`dapper` (dotnet)** — supports event sourcing, `retrieval` bundles, `X id[]`
+  associations, non-principal stamps/filters, access-modifier fields. Rejects:
+  `seed` data, workflow event subscriptions, non-relational shapes, aggregate
+  inheritance, nested parts, principal-referencing stamps/filters, provenanced
+  fields. (`validateDapperSupport`, system-checks.ts:1369.)
+- **`marten` (dotnet)**, **`style: cqrs` (node)**, **`style: layered` (dotnet)**
+  are reserved stubs. See [platform-realization-axes](./platform-realization-axes.md).
+
+The drizzle (node) and EF Core (dotnet) full-surface adapters are the reference;
+node's `auditable` stamping moved into the persistence layer on **both** adapters
+(#1554 drizzle, #1565 mikroorm — `db/audit-stamp.ts` reads the ambient
+`requestContext().actorId`, dropping the operation-time `_stampOn` methods).
 
 ## Reserved-but-unwired cross-cutting hooks
 
@@ -57,23 +149,20 @@ backend today** — designed boundaries with no implementation:
 
 Ordered by blast radius — how many real models the gap blocks today:
 
-1. **Phoenix backend depth** — `shape(document)`, ordered `X id[]`. Phoenix is the
-   backend furthest from parity. (TPH now closed — shared-table multi-resource +
-   `base_filter`, see [phoenix-tph-emission](./phoenix-tph-emission.md). Event
-   sourcing now closed on the **vanilla** foundation — #1205, D-VANILLA-ES-HOME;
-   only `foundation: ash` still rejects `persistedAs(eventLog)`. **Principal
-   `filter`s now ship on phoenix** too — DEBT-01, #1386 — so that's off this list.)
-2. ✅ **Provenance now IMPLEMENTED** (2026-06-20 audit) — node + dotnet +
-   elixir-vanilla emit the real lineage runtime (#1400 / DEBT-06; ash stays gated),
-   no longer "gated no-op, remaining work". The residue here is the per-operation
-   **`audited`** runtime (still `loom.audited-backend-unsupported` on dotnet/phoenix)
-   and `with audit` stamping parity.
-3. **React generative gaps** — generic carriers, list-page filters, non-
-   constructible create surface; each is a localised walker/emitter addition.
+1. **Python filter depth** — principal + non-relational filters. The widest
+   remaining backend gap: a python-hosted aggregate can't express tenancy/
+   soft-delete scoping or filter a document/embedded shape. Fail-fast today, so
+   it's a capability gap, not a correctness hole. ([multi-tenancy-design-note](./multi-tenancy-design-note.md).)
+2. **Event-sourced workflows on elixir** — the one feature gated on *both* elixir
+   foundations. ([workflow-and-applier](./workflow-and-applier.md).)
+3. **Frontend pack breadth** — ship more Vue/Svelte pack families to match
+   React's depth; not a correctness item. ([design-packs](../design-packs.md).)
 4. **Alternate adapters** — promote `dapper`/`mikroorm` past minimal-v1, or
-   formally freeze their scope; implement or remove the `marten`/`cqrs`/
-   `layered` stubs.
+   formally freeze their scope; implement or remove the `marten`/`cqrs`/`layered`
+   stubs. ([platform-realization-axes](./platform-realization-axes.md).)
 
 The hard rule the gates already enforce: an unsupported combination must **fail
 fast at validate time** (with a `loom.*-unsupported` code), never silently
-downgrade. Any new parity work inherits that contract.
+downgrade. The `test/platform/backend-parity-gates.test.ts` guardrail (#1493)
+mechanically forbids the silent-gap footgun — every (capability × backend) must
+be GATED or REALISED, never neither. Any new parity work inherits that contract.
