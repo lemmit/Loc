@@ -108,3 +108,27 @@ coverage was dropped (so the test can be restored alongside the fix).
   case retargeted to the vanilla façade shape).
 - **To close:** verify (and emit, if missing) the polymorphic shared-table reader
   for `find all <Base>` on vanilla; restore a polymorphic-read assertion.
+
+## 9. Operation `requires`/`when` guard referencing `currentUser`
+
+- **Symptom:** `mix compile` fails with `undefined variable "current_user"` —
+  an operation guard like `requires currentUser.role == "manager"` renders
+  `current_user.role` inside the context function (e.g. `confirm_<agg>/2`), but
+  `current_user` is not a parameter there.
+- **Vanilla today:** the auditable create/update path already threads
+  `current_user \\ nil` into its context functions (and the controller passes
+  `conn.assigns[:current_user]`); named operations with a principal-referencing
+  guard do **not** thread it, so the reference is undefined at compile time.
+- **Gated out:** `test/e2e/fixtures/elixir-vanilla-build/pending/vanilla-auth-op-gate.ddd`.
+- **To close:** thread `current_user` into the named-operation context function
+  (reusing the auditable mechanism) and have the controller pass
+  `conn.assigns[:current_user]`; move the fixture back up to re-gate it.
+
+## 10. Destroy-form bang destroy function (`destroy_<agg>!/1`)
+
+- **Symptom:** `mix compile` warns `<Ctx>.destroy_<agg>!/1 is undefined or
+  private` (a `--warnings-as-errors` failure) — the destroy-form path calls the
+  bang destroy function, but the context module never emits it.
+- **Gated out:** `test/e2e/fixtures/elixir-vanilla-build/pending/vanilla-destroy-form.ddd`.
+- **To close:** emit `def destroy_<agg>!/1` on the context module for aggregates
+  with a destroy form; move the fixture back up to re-gate it.
