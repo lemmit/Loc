@@ -16,22 +16,26 @@
 The **carrier + root frame + id-triad + governance consumers** ship on **all
 five backends**. The **full execution-context discipline** — per-dispatch
 **child frames**, real **`parentId` causal chaining**, and **enter/exit
-push-restore** — ships on **three of five** (.NET, node/Hono, **Python**¹). On
-Java and Elixir the per-dispatch child frame is **explicitly deferred**: a
-single root `scopeId` per request, `parentId` always null/nil, the id-triad
-carried and stamped onto audit/provenance rows but never nested.
+push-restore** — ships on **four of five** (.NET, node/Hono, **Python**¹,
+**Java**²). On Elixir alone the per-dispatch child frame is **explicitly
+deferred**: a single root `scopeId` per request, `parentId` always nil, the
+id-triad carried and stamped onto audit/provenance rows but never nested.
 
 > ¹ **Python drained 2026-06-24** (after this audit) — gap #1's first slice. A
 > `child_context()` contextmanager + an `in_child_context` decorator now wrap
 > every dispatch boundary (reactor handlers + the workflow route); `parent_id`
-> chains and the log formatter stamps it. The Python rows in the matrix below
-> read as the **pre-drain** snapshot; the per-backend Python detail notes the
-> change. Java + Elixir remain the open gap.
+> chains and the log formatter stamps it.
+> ² **Java drained 2026-06-24** — gap #1's second slice. A `RequestContext.openChild()`
+> returning an AutoCloseable `Frame` now wraps every dispatch boundary in a
+> try-with-resources block (the workflow service method + both `@EventListener`
+> reactor variants); `parent_id` chains into the audit/provenance rows. (The
+> Java/Python rows in the matrix below read as the **pre-drain** snapshot; the
+> per-backend detail notes the change.) Elixir remains the open gap.
 
 So "execution-context is emitted on all five backends" is true of the
 **carrier**, and overstated if read as "the full frame discipline runs
 everywhere." The honest line is: **carrier everywhere; full child-frame
-discipline on .NET + node + Python; request-stable + root-frame-only on Java /
+discipline on .NET + node + Python + Java; request-stable + root-frame-only on
 Elixir.**
 
 ## The matrix
@@ -65,11 +69,11 @@ the stamp should be added when child frames land.
 - Child frame: `runInChildContext` clones the parent with `scopeId: randomUUID()`, `parentId: parent.scopeId`, and re-enters via `requestContextStore.run(child, fn)` (`observability-builder.ts:140`). Called around workflow dispatch + reactor/provenance flush (`workflow-builder.ts:555`, `:1083`).
 - Consumers: audit/provenance rows read `reqCtx?.{correlationId,scopeId,parentId}` (`routes-builder.ts`); pino mixin auto-stamps `scope_id`/`actor_id` on every line.
 
-### Java — fields-only
-- Carrier: SLF4J `MDC` (ThreadLocal-backed) — `src/generator/java/emit/request-context.ts:26`.
-- Root: `ExecutionContextFilter extends OncePerRequestFilter`, `@Order(HIGHEST_PRECEDENCE)`, mints `scope_id`, `MDC.clear()` in finally (`request-context.ts:114`).
-- **`parentId` never written** — the filter sets `CORRELATION_ID`/`SCOPE_ID`/`LOCALE`/`STARTED_AT` only; `parentId()` reads an MDC slot nothing populates (`request-context.ts:52` comment: "no per-dispatch nesting yet"). Audit/provenance read it and get `null`.
-- Hazards: ThreadLocal leaks across `@Async`/pool boundaries; MVC-only (WebFlux would need Reactor `Context`).
+### Java — **FULL** (drained 2026-06-24; was fields-only)
+- Carrier: SLF4J `MDC` (ThreadLocal-backed) — `src/generator/java/emit/request-context.ts`.
+- Root: `ExecutionContextFilter extends OncePerRequestFilter`, `@Order(HIGHEST_PRECEDENCE)`, mints `scope_id`, `MDC.clear()` in finally.
+- **Child frames (NEW):** `RequestContext.openChild()` opens a child MDC frame (fresh `scope_id`, `parent_id ← parentScope`) and returns an AutoCloseable `Frame` whose `close()` (no checked throw) restores the parent — so a `try (var __frame = RequestContext.openChild())` block pops cleanly; a no-op outside a request. Wrapped around the workflow service method (`emit/workflow.ts`) and both reactor variants — plain `@EventListener` (`handlerFn`) and event-sourced (`esHandlerFn`) in `emit/dispatch.ts`. `parent_id` now chains into the audit/provenance rows (which already read `RequestContext.parentId()`).
+- Still open (smaller): the **log envelope** doesn't surface `scope_id`/`parent_id` (deferred — touches the cross-backend obs contract); parallel-branch frame copying across `@Async`/pool boundaries (ThreadLocal isn't inherited); MVC-only (WebFlux would need Reactor `Context`).
 
 ### Elixir (vanilla) — fields-only
 - Carrier: `Logger.metadata` stamped by a `RequestContext` Plug (`src/generator/elixir/shell/runtime.ts:173`).
@@ -86,16 +90,17 @@ the stamp should be added when child frames land.
 
 ## The genuine remaining gaps (what "PARTIAL" means)
 
-1. **Per-dispatch child frames + `parentId` chaining on Java / Elixir.**
-   (**Python: DONE 2026-06-24** — `child_context()` + `in_child_context`.) The
-   carrier is in place on both; what's missing is opening a child frame at each
-   boundary (operation / command-query dispatch / workflow step) and chaining
-   `parentId ← caller scopeId`. Today these two emit a flat request: every
-   audit/provenance row in one request shares the root `scopeId` and a null
+1. **Per-dispatch child frames + `parentId` chaining on Elixir.**
+   (**Python + Java: DONE 2026-06-24**.) The carrier is in place; what's missing
+   is opening a child frame at each boundary (operation / command-query dispatch
+   / workflow step) and chaining `parentId ← caller scopeId`. Today Elixir emits
+   a flat request: every audit/provenance row shares the root `scopeId` and a nil
    `parentId`, so the call tree is not reconstructable from the governance
-   tables. This is the headline remaining parity gap.
-   - Java seam: write `MDC.put(PARENT_ID, …)` + restore around dispatch.
-   - Elixir seam: a `with`-step child frame (push/restore `Logger.metadata`).
+   tables. This is the last backend on the headline parity gap.
+   - Elixir seam: a `with`-step child frame (push/restore `Logger.metadata`),
+     restored explicitly (the BEAM has no try-with-resources / decorator).
+   - Java seam (landed): `try (var __frame = RequestContext.openChild())` around
+     the workflow service method + both reactor variants.
    - Python seam (landed): `with child_context()` via the `in_child_context`
      decorator on reactor handlers + the workflow route.
 2. **Parallel/fan-out frame propagation** on the three ambient-but-not-copied
@@ -118,6 +123,6 @@ The execution-context backbone is **not** unstarted (the prior tracker claim)
 and **not** uniformly complete (a naive reading of "emitted on all five
 backends"). It is **`PARTIAL`, two-tier**: a fully-wired carrier + root frame +
 governance consumers on all five, with the distinguishing
-child-frame/chaining/enter-exit discipline live on **.NET, node, and Python**
-(Python drained 2026-06-24) and still **deferred** on **Java and Elixir**.
-Closing gap #1 on those last two is what would make the backbone uniform.
+child-frame/chaining/enter-exit discipline live on **.NET, node, Python, and
+Java** (Python + Java drained 2026-06-24) and still **deferred** on **Elixir**
+alone. Closing gap #1 on Elixir is the last step to a uniform backbone.

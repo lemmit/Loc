@@ -160,14 +160,15 @@ java-backend).
    pinned **D-CTX-SHAPE**,
    [`../architecture/request-context.md`](../architecture/request-context.md).
    The **full discipline — per-dispatch child frames + `parentId` chaining
-   + enter/exit push-restore — ships on .NET, node, and Python**
+   + enter/exit push-restore — ships on .NET, node, Python, and Java**
    (`OpenChild`/`Enter`-restore; `runInChildContext`; Python's
-   `in_child_context` decorator, drained 2026-06-24). Java/Elixir
-   carry the request-stable tier + a single root `scopeId` with `parentId`
-   null and per-dispatch nesting **deferred**. audit promotion (T3.13),
+   `in_child_context` decorator; Java's `RequestContext.openChild()`
+   try-with-resources `Frame` — Python + Java drained 2026-06-24). Elixir
+   alone carries the request-stable tier + a single root `scopeId` with `parentId`
+   nil and per-dispatch nesting **deferred**. audit promotion (T3.13),
    provenance parity (T2.k), and authorization consume it. **PARTIAL tail**:
-   (a) per-dispatch child frames + chaining on Java/Elixir (the
-   headline gap) + parallel-branch frame copying on the ambient backends; (b) the build-flag
+   (a) per-dispatch child frames + chaining on Elixir (the
+   last backend) + parallel-branch frame copying on the ambient backends; (b) the build-flag
    surface as **user-facing** options
    (`emitContextBoundaries`/`emitProvenance`/`emitTracing` are derived
    internally today, not exposed); (c) the scope-event genealogy

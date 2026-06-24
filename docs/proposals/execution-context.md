@@ -13,15 +13,16 @@
 > (`ExecutionContextFilter` / MDC), Elixir (`RequestContext` Plug /
 > `Logger.metadata`), Python (`ContextVar` / `ObservabilityMiddleware`).
 > But the **full discipline — per-dispatch child frames + `parentId`
-> chaining + enter/exit push-restore — ships on .NET, node, and Python**
-> (`OpenChild`/`Enter`-restore; `runInChildContext`; Python's
-> `in_child_context` decorator, drained 2026-06-24). On **Java and Elixir**
-> the per-dispatch child frame is still **deferred**: a single root
-> `scopeId` per request, `parentId` always null, the id-triad carried and
-> stamped onto audit/provenance rows but never nested (so the call tree is
-> not reconstructable from the governance tables). What remains: (1) child
-> frames + chaining on Java + Elixir (the headline gap) + parallel-branch
-> frame copying across the ambient backends; (2) exposing the build-flag surface below
+> chaining + enter/exit push-restore — ships on .NET, node, Python, and
+> Java** (`OpenChild`/`Enter`-restore; `runInChildContext`; Python's
+> `in_child_context` decorator; Java's `RequestContext.openChild()`
+> try-with-resources `Frame` — Python + Java drained 2026-06-24). On
+> **Elixir** alone the per-dispatch child frame is still **deferred**: a
+> single root `scopeId` per request, `parentId` always nil, the id-triad
+> carried and stamped onto audit/provenance rows but never nested (so the
+> call tree is not reconstructable from the governance tables). What
+> remains: (1) child frames + chaining on Elixir (the last backend) +
+> parallel-branch frame copying across the ambient backends; (2) exposing the build-flag surface below
 > as **user-facing** options (today derived internally from field presence,
 > not a CLI/build switch); (3) the scope-event genealogy (`operationId`
 > ships on audit records; `nodeId`/`kind`/`timestamp` do not); and (4) the
