@@ -57,9 +57,12 @@ irrelevant to tenancy), so the `tenancy by` design-note is unblocked though its
 surface stays greenfield;
 (c) fixed a stale `capabilities.md` contradiction ("Python does not yet
 consume capability filters") and stale "principal-on-non-relational gated
-everywhere" claims in the DEBT backlog/plans. Flagged: `system-checks.ts:1066`
-wires `document`-principal for node/Java, but the comment at `:1043-1044` says
-it "stays gated for document everywhere" — an internal contradiction to verify.)
+everywhere" claims in the DEBT backlog/plans; (d) parity-audited the
+node/Java `document`-principal path (generated `document-tenancy.ddd` → the
+node repo binds `requireCurrentUser()` and filters by `tenantId` in-app):
+**HONEST support, build-gated** — and corrected the stale code comment at
+`system-checks.ts:1042-1044` that claimed it "stays gated for document
+everywhere".)
 — this pass was **code-verified** (every status checked against the
 grammar / IR / emitters / validator gates, not against prior doc text)
 and reconciled the #1024–#1064 wave: the elixir platform rename
