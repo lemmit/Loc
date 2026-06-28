@@ -1,18 +1,24 @@
 # Domain services (`domainService`)
 
 A `domainService` is a stateless, named, context-level container of
-**non-mutating** `operation`s — the pure-calculator floor (v1 Shape A).
-Operations take aggregates / value objects / primitives **by value**,
-return a value or an `or`-union error, and may `throw` for the bug
-regime. They are **strict no-infra**: a domain service may not reach a
-repository, an `extern`, an `api`, a workflow, or `emit` an event, and it
-has no `this` to mutate.
-
+`operation`s that belong to the domain layer but to no single aggregate.
 It fills the gap between an aggregate `operation` (single-aggregate,
-mutates `this`) and a `workflow` (application orchestration, touches
-infrastructure): a **cross-aggregate domain calculation** that belongs to
-the domain layer but to no single aggregate. The design is pinned in
-[`proposals/domain-services.md`](proposals/domain-services.md).
+mutates `this`) and a `workflow` (application orchestration, owns the
+transaction and all outbound I/O): a **cross-aggregate domain
+calculation or decision**.
+
+> **What ships today vs. the revised direction.** The shipped construct
+> is the **pure-calculator floor (Shape A)** documented in this file:
+> operations take aggregates / value objects / primitives **by value**,
+> return a value or an `or`-union error, may `throw` for the bug regime,
+> and are **strict no-infra** — no repository, `extern`, `api`,
+> workflow-start, or `emit`, and no `this` to mutate. The **revised
+> design** (rev. 2 in [`proposals/domain-services.md`](proposals/domain-services.md))
+> widens this to the Vernon/hexagonal reading: a domain service **may
+> load through repository ports and mutate the aggregates it touches**,
+> with the application orchestrator keeping the single commit point.
+> That direction is pinned in the proposal but **not yet shipped**; the
+> rest of *this* page describes current behavior.
 
 ## Surface
 
@@ -86,3 +92,36 @@ behaviour could be an `operation` on that aggregate instead.
 Both the call rendering (the shared `ExprTarget.domainServiceCall` arm)
 and the declaration emitters ship on all five backends today
 (`src/generator/{typescript,dotnet,java,python,elixir}/…/domain-service*`).
+
+## Direction (revised — not yet shipped)
+
+The pinned next step ([`proposals/domain-services.md`](proposals/domain-services.md),
+rev. 2) classifies each operation into one of three **purity tiers** and
+widens what the upper two may do:
+
+| Tier | May… | Callable from |
+|---|---|---|
+| **pure** *(ships today)* | params only; branch, `let`, `match`, `throw` | anywhere |
+| **reading** | the above **+ load via repository ports** | application orchestrators only |
+| **mutating** | the above **+ mutate aggregates via their own operations** | application orchestrators only |
+
+`emit` / `extern` / `api` / workflow-start stay forbidden in **every**
+tier — that's the line that keeps a domain service from collapsing into a
+workflow (**domain service = read + compute + mutate-in-memory; workflow
+= that, plus commit, emit, extern, HTTP**).
+
+**Persistence is one neutral semantic, rendered idiomatically per
+backend.** The orchestrator opens a single unit-of-work / transaction
+scope; the service runs inside it; the orchestrator commits once. The
+`.ddd` is identical everywhere — only lowering + emission diverge:
+
+| Backend | Unit of work | How mutations reach the commit |
+|---|---|---|
+| .NET / EF, Java / JPA, Python / SQLAlchemy | ORM change-tracking | **implicit** — mutate in place; orchestrator's single `SaveChanges` / flush / `commit` |
+| Phoenix / Ecto | `Ecto.Multi` | **explicit** — service returns `Ecto.Changeset`(s); orchestrator runs `Repo.transaction/1` |
+| TS / Hono / Drizzle | `db.transaction` | **explicit** — service returns mutated aggregate state; orchestrator applies it in the transaction |
+
+A companion change lets `function` take a **pure block body**
+(`let` + branch + bug-regime `throw`) instead of only a single
+expression — staying non-queryable, so the
+`function` → `criterion` → `domainService` tiers stay crisp.

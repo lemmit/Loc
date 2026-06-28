@@ -1,431 +1,325 @@
-# Domain services — the missing third construct (pinned design)
+# Domain services — the missing third construct (pinned design, **rev. 2: Vernon camp**)
 
-> Status: **proposal — pinned axes, v1 scope = Shape A.** Supersedes
-> [`domain-service.md`](./domain-service.md) (the singular-form
-> options-menu draft from #1041): keeps that doc's six-axis framework
-> and three-shape vocabulary, but commits to a single answer on every
-> axis and adds the grammar / IR / validator / emission / test spec the
-> prior draft deferred. Companion to
+> Status: **proposal — revised pins.** v1 (Shape A, the pure-calculator
+> floor) **ships today**; this revision widens the construct to the
+> Vernon/hexagonal reading — a domain service **may load through
+> repository ports and mutate the aggregates it touches**, while the
+> application orchestrator keeps the single commit point. It supersedes
+> the rev-1 Evans-strict pins below (and the singular-form
+> [`domain-service.md`](./domain-service.md) options-menu draft from
+> #1041). Companion to
 > [`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md)
 > (the four-layer **domain / contract / application / api** map —
 > `domainService` is a *domain*-layer construct, called from the
-> *application*-layer orchestrators; see §"Layer placement" below),
-> [`workflow-and-applier.md`](./workflow-and-applier.md) (workflows
-> are one of three application-layer orchestrators),
-> [`lifecycle-operations.md`](./lifecycle-operations.md)
-> (aggregate-bound actions), [`criterion.md`](./criterion.md) (reusable
-> predicates — see Axis 5), [`failure-taxonomy.md`](./failure-taxonomy.md)
-> (error-placement; this proposal fills the row that doc left empty),
-> and [`policies-supplementary-note.md`](./policies-supplementary-note.md)
-> (which earmarks `policy` for authorization — see Axis 6).
+> *application*-layer orchestrators), [`workflow-and-applier.md`](./workflow-and-applier.md),
+> [`lifecycle-operations.md`](./lifecycle-operations.md),
+> [`criterion.md`](./criterion.md) (reusable predicates — the queryable
+> sibling), and [`failure-taxonomy.md`](./failure-taxonomy.md).
 
-## What changed vs. the superseded draft
+## What changed in rev. 2 (and why)
 
-The prior doc lays out the problem and the design space well — I'm not
-re-litigating any of that here, only pinning answers and adding spec.
+Rev. 1 pinned the **Evans-strict** reading: a domain service was a pure
+calculator — no repository, no mutation, the application orchestrator
+loaded everything and passed materialised aggregates in. That shipped as
+the v1 floor (Shape A) and stands as a valid *subset*. Rev. 2 widens it:
 
-| Axis | Prior lean | This proposal | Why |
+| Axis | Rev. 1 pin (shipped Shape A) | Rev. 2 pin | Why |
 |---|---|---|---|
-| 1 — mutation | A first, B fast-follow | **A in v1. B deferred to Phase 2 with explicit persistence contract.** | Confirmed. Shape B's mutation-by-reference + "who saves" contract deserves its own slice. |
-| 2 — callers | Derived from Axis 1 | **Confirmed.** Pure calculators (v1) are callable from operations *and* workflows. Coordinators (v2) workflow-only. | Falls out of Axis 1. |
-| 3 — infra strictness | 3a (strict) | **Confirmed.** No repo, no extern, no persistence. Hard error. | The slippery slope is real; (3b) collapses the construct into a short workflow. |
-| 4 — errors | Mirrors operation/workflow two-regime | **Confirmed.** `throw` for bugs, `or`-union return for expected domain failures. Per `failure-taxonomy.md`. | Not really a choice. |
-| 5 — criterion relationship | (5a) keep distinct, share the purity checker | **Confirmed**, with the rationale named: **criterion is queryable (inlines to SQL `where`); a domain service is not.** That's the line. | Surfacing the *why* makes the boundary teachable. |
-| 6 — naming | leans `service` + validator nudge | **`domainService`** (multi-word keyword). | See §"Naming" below — disagrees with prior lean, narrowly, on cultural-overload + collision grounds. |
+| **1 — mutation** | Forbidden (`no-mutation`) | **Allowed** — a domain service mutates aggregates via their own operations | The textbook `transfer(from, to, amount)` *is* a mutating domain service; forbidding it amputated the construct's reason to exist. |
+| **2 — repository access** | Hard error (`no-repo`) — orchestrator loads, passes in | **Allowed via the repository *port*** (the domain-owned interface), never the infra adapter | The Vernon/hexagonal reading. "Repos without infra concerns" = the service depends on `Orders` the abstraction; the infra layer supplies the implementation. |
+| **3 — who commits** | Application layer | **Application layer (unchanged)** | The one invariant rev. 2 keeps verbatim. The transaction boundary stays in the orchestrator. |
+| **4 — side effects** | `emit` / `extern` / `api` forbidden | **Still forbidden** | Outbound I/O and event-attribution remain application-/aggregate-bound. This is the line that keeps a domain service from collapsing into a workflow. |
+| **5 — callers** | Pure ⇒ callable anywhere | **Pure ⇒ anywhere; loading/mutating ⇒ application-orchestrator-only** | A loading/mutating service called from an aggregate operation would let one aggregate reach a repository (infra) or a *second* aggregate's mutable state — the boundary the construct exists to protect. |
+| **6 — errors** | `throw` (bug) / `or`-union (domain) | **Unchanged** | Per `failure-taxonomy.md`. Not a choice. |
 
-Two things the prior doc raised that this proposal adopts unchanged:
+The line that keeps a domain service distinct from a workflow survives,
+just redrawn:
 
-- **Anemic-domain guardrail** — validator *warning* on a
-  single-aggregate domain service (it could just be an `operation` on
-  that aggregate). The prior doc proposed this; I keep it. Domain
-  services are the most over-used tactical DDD pattern; the nudge keeps
-  people honest.
-- **Shape C as the eventual north star, not v1.** The dependency-footprint-
-  derives-the-layer move is the right *long-term* model, but adopting
-  it prematurely would erode the operation/workflow clarity the rest of
-  the language leans on. Recorded; not built.
+> **Domain service = read + compute + mutate-in-memory.
+> Workflow = that, plus commit, `emit`, `extern`, and HTTP.**
 
-## Layer placement (per `unfoldable-api-derivation.md`)
+The transaction boundary and *all* outbound I/O stay in the application
+layer. That is a teachable, enforceable boundary — and it is squarely
+within mainstream DDD (Vernon, *Implementing Domain-Driven Design*,
+ch. 7: domain services may depend on repository interfaces and operate on
+multiple aggregates; the application service owns the transaction).
 
-[`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md)
-pins Loom on a four-layer model: **domain / contract / application /
-api**, strictly one-directional. `domainService` is unambiguously a
-**domain-layer** construct, alongside `aggregate`, `repository`,
-`valueobject`, and `enum`. It is called from the **application
-layer**, which under that proposal has three orchestrator kinds:
+## The three purity tiers (the teachable core)
 
-| Application orchestrator | Shape | Calls a `domainService`? |
-|---|---|---|
-| `commandHandler` | single-aggregate, mutating, sync | Yes |
-| `queryHandler` | no mutation, sync | Yes (Shape A only — query handlers never persist) |
-| `workflow` | cross-aggregate or stateful, may be async | Yes |
+A `domainService` operation is classified — from its body, by the phase-⑦
+validator — into exactly one of three tiers. The tier decides who may
+call it and how it persists:
 
-The Evans-style load-protocol — *orchestrator loads → domain service
-receives materialised aggregates → orchestrator persists* — applies
-uniformly across all three. This proposal's running examples use
-`workflow` (the construct that exists today), but everywhere the
-text says "workflow loads" / "workflow persists," read "the
-application-layer orchestrator." Nothing in v1 changes when the new
-`commandHandler` / `queryHandler` declarations land.
-
-## The gap (recap for self-containedness)
-
-| Loom construct | DDD role | Layer | Touches |
+| Tier | Body may… | Callable from | Persistence |
 |---|---|---|---|
-| `function` (expr-bodied) | helper | domain (pure) | params only |
-| `criterion` | reusable predicate | domain (queryable) | params only |
-| `invariant` | aggregate-local rule | domain | `this` |
-| `operation` / `create` / `destroy` | aggregate behaviour | domain, **single-aggregate** | `this` (+ params) |
-| `workflow` / `commandHandler` / `queryHandler` | use-case orchestration | application | repos, externs, many aggregates, transactions |
-| **— missing —** | **domain service** | **domain, cross-aggregate** | domain objects passed in; **no infrastructure** |
+| **pure** | params only; branch, `let`, `match`, `throw`, call other pure services | **anywhere** (aggregate ops, views, workflows, other services) | none |
+| **reading** | the above **+ load via repository ports** | application orchestrators only | none (read-only) |
+| **mutating** | the above **+ call mutating operations on aggregates** | application orchestrators only | orchestrator's unit-of-work commits it (see below) |
 
-The textbook case is `transfer(from, to, amount)`: not `from`'s
-operation (touches `to`), not application orchestration (the rule
-"can't overdraw" is *domain*), and `InsufficientFunds` has no authored
-home today. The reusable-calculation case is `priceOrder(order,
-customer, catalog)`: branches, throws, can't fit `function`'s
-expression body. Both are what the new construct exists for.
+Still forbidden in **every** tier: `emit` an event, call an `extern`,
+call an `api`, or `start` a workflow / invoke a `commandHandler` /
+`queryHandler` (that last would invert the layer arrow — domain reaching
+application).
 
-## v1 scope: Shape A — the pure calculator floor
+`pure` is exactly the shipped Shape A. `reading` and `mutating` are the
+rev-2 widening.
 
-A `domainService` is a **module-level**, **stateless**, **named**
-container of one or more **non-mutating** `operation`s. The operations
-take domain objects (aggregates, value objects, criteria, primitives),
-return a value or an `or`-union error, and may throw for bug-regime
-violations. They cannot mutate the aggregates they receive.
+## Surface
 
 ```ddd
 module Sales {
-  domainService Pricing {
-
+  domainService Pricing {                                  // pure tier
     operation quote(cart: Cart, customer: Customer): Money {
       require cart.lines.count > 0  "cannot quote an empty cart"   // bug regime
       return cart.subtotal - customer.tier.discount(cart.subtotal)
     }
+  }
+}
 
-    operation applyCoupon(price: Money, coupon: Coupon): Money or CouponExpired {
-      if (coupon.isExpired)
-        return CouponExpired { code: coupon.code }
-      return price - coupon.discount
+module Banking {
+  domainService Transfer {                                 // mutating tier
+    operation run(fromId: AccountId, toId: AccountId, amount: Money)
+      : Transferred or InsufficientFunds {
+      require amount > Money.zero  "amount must be positive"
+      let from = Accounts.required(fromId)                 // load via PORT (reading)
+      let to   = Accounts.required(toId)
+      if (from.balance < amount)
+        return InsufficientFunds { account: fromId, shortfall: amount - from.balance }
+      from.withdraw(amount)                                // mutate via the aggregate's OWN op
+      to.deposit(amount)
+      return Transferred { from: fromId, to: toId, amount }
     }
   }
 }
 ```
 
-Callable from anywhere a pure expression is legal: aggregate
-operations, workflows, other domain services, view bodies. It's safe
-to put inside an aggregate `operation` because it cannot reach a *second*
-aggregate's mutable state — the v1 contract forbids mutation outright.
+- The DSL return type is the **domain result only** (`Transferred or
+  InsufficientFunds`). The *mutation set* — which aggregates were
+  touched — is carried by lowering, never by the author (see
+  "Persistence" — it materialises differently per backend, but the `.ddd`
+  is identical everywhere).
+- Cross-aggregate parameters are plain aggregate names (`cart: Cart`) — a
+  different grammar position from a containment partType, so the `X id`
+  cross-aggregate restriction is untouched.
+- No `private` / `extern` / `audited` / `when` modifiers (aggregate-op-only).
 
-### What v1 domain services **cannot** do (validator-enforced, phase ⑦)
+## Calling one
 
-| Forbidden | Diagnostic | Why |
-|---|---|---|
-| Call a repository (`findById`, `findAll`, `find where …`) | `loom.domain-service.no-repo` | Loading is the application's job (Evans, not Vernon). The orchestrator loads and passes in. |
-| Call an `extern` function | `loom.domain-service.no-extern` | I/O is application's job. |
-| Call an `api` (HTTP) endpoint | `loom.domain-service.no-api-call` | Same. |
-| `start` a workflow / call a `commandHandler` / `queryHandler` | `loom.domain-service.no-application-call` | Inverts the layer arrow — domain cannot reach application. |
-| `emit` an event | `loom.domain-service.no-emit` | Events are aggregate-bound or workflow-bound facts; a stateless service has no identity to attribute them to. |
-| **Mutate an aggregate parameter** | `loom.domain-service.no-mutation` | v1 is Shape A. Calling a mutating `operation` on a parameter (one declared without `private?`, or whose body writes to `this`) is a hard error. Phase 2 (Shape B) lifts this with a persistence contract. |
-| Declare fields | grammar-rejected | Stateless by definition. |
-
-What it **can** do that `function` cannot: branch, bind locals,
-`if`/`match`, throw domain errors, call other domain services, call
-**non-mutating** operations on parameters (read accessors,
-calculations).
-
-The "no-mutation" check needs the lowered IR's classification of
-operations as mutating vs read-only. That classification already exists
-implicitly (operations whose body writes to `this`); making it explicit
-on `OperationIR` is a small enabling change called out under
-"Lowering" below.
-
-### Errors
-
-Mirrors aggregate operations exactly, per `failure-taxonomy.md`:
-
-- **Bug regime** (`require`, invariant violation, impossible state):
-  `throw`. Maps to 500 at the edge.
-- **Expected domain failure**: return an `or`-union (`Money or
-  CouponExpired`). Same shape as operation/workflow handlers.
-
-No `Result<T, E>` wrappers; no new error machinery.
-
-### Invocation
-
-From an application-layer orchestrator (the common path — workflow
-today, `commandHandler` / `queryHandler` once
-[`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md)
-lands):
+A member call resolves the receiver to the `domainService` declaration
+and lowers to a `Call` with `callKind: "domain-service"` (carrying a
+structured `serviceRef: { service, op }`), so every backend renders a
+real call without re-resolving:
 
 ```ddd
-workflow PlaceOrder {
-  create(cmd: PlaceOrder) {
-    let customer = Customers.findById(cmd.customerId)
-    let cart     = Carts.findById(cmd.cartId)
-    let total    = Pricing.quote(cart, customer)             // ← service call
-    let final    = Pricing.applyCoupon(total, cmd.coupon)?   // ? propagates CouponExpired
-    let order    = Order.create(customer, cart, final)
-    Orders.save(order)
-  }
+workflow MoveMoney {
+  handle move(cmd: MoveMoney): Transferred or InsufficientFunds {
+    return Transfer.run(cmd.from, cmd.to, cmd.amount)   // orchestrator opens the UoW;
+  }                                                      // the single commit happens here
 }
 ```
 
-The shape is identical inside a `commandHandler` or `queryHandler`:
-the orchestrator loads, hands materialised aggregates to the domain
-service, the service decides/computes, the orchestrator persists (or
-returns, for queries).
-
-From an aggregate operation (also legal because v1 is pure):
+A **pure** service is also callable from an aggregate operation:
 
 ```ddd
 aggregate Order {
   operation reprice(catalog: PriceList) {
-    let amount = Pricing.recalculate(this, catalog)   // ← service call, returns value
+    let amount = Pricing.recalculate(this, catalog)   // pure ⇒ legal inside an aggregate
     this.total := amount
   }
 }
 ```
 
-## Phase 2 sketch: Shape B — coordinator (the `transfer` case)
+A **mutating** or **reading** service called from an aggregate operation
+is a hard error (`loom.domain-service.impure-call-from-aggregate`) — that
+is the caller restriction of tier-5.
 
-Not v1. Captured here so the v1 design is forward-compatible.
+## Persistence — one neutral semantic, idiomatic per backend
 
-A coordinator service may invoke mutating operations on the aggregates
-it receives; the **calling workflow persists** them. Sketch:
+This is the crux of rev. 2, and the answer to "use a unit-of-work, but
+let each backend stay idiomatic."
+
+**The neutral semantic Loom pins (backend-agnostic):**
+
+> The application orchestrator (`workflow` / `commandHandler`) establishes
+> a single **unit-of-work / transaction scope**. The domain service runs
+> *inside* that scope — loading through ports, mutating aggregates via
+> their own operations — and the orchestrator **commits the scope once**,
+> atomically. The domain service never commits.
+
+That is the only thing the DSL and IR commit to. **How the scope and its
+dirty set are realised is each `PlatformSurface`'s call** — exactly the
+way `MigrationsIR` is one neutral concept rendered idiomatically per
+backend, never a uniform emitted shim forced onto every target.
+
+Two rendering families fall out, by whether the backend's ORM tracks
+changes:
+
+| Backend | UoW mechanism | Mutation set reaches the commit by… | Emitted idiom |
+|---|---|---|---|
+| **.NET / EF Core** | `DbContext` change-tracking | **implicit** — tracked entities are dirty | service mutates in place; orchestrator `await db.SaveChangesAsync()` once |
+| **Java / Spring + JPA** | persistence context | **implicit** — managed entities flush at commit | `@Transactional` handler; flush on return |
+| **Python / SQLAlchemy** | `Session` unit-of-work | **implicit** — session tracks dirty | service mutates in place; orchestrator `session.commit()` |
+| **Elixir / Ecto** | `Ecto.Multi` (no change-tracking) | **explicit** — service returns **`Ecto.Changeset`(s)** | orchestrator composes them into one `Ecto.Multi`, runs `Repo.transaction/1` |
+| **TS / Hono / Drizzle** | `db.transaction` (no change-tracking) | **explicit** — service returns the mutated aggregate state | orchestrator applies it inside `db.transaction(async tx => …)` |
+
+The split is the natural one: the three ORM-with-identity-map backends
+(EF / JPA / SQLAlchemy) get a real **implicit** unit of work for free —
+the service mutates managed objects and the orchestrator's single
+commit/flush persists them, with the service returning only its domain
+result. The two explicit backends (Ecto, Drizzle) have no change tracker,
+so Loom **materialises the mutation set into the service's lowered
+return** and the orchestrator applies it within one transaction — and for
+Ecto that materialisation is precisely the idiomatic `Ecto.Changeset`
+composed into an `Ecto.Multi`, which is how a plain-Ecto/Phoenix context
+module is *supposed* to be written. Drizzle's is the mutated row values
+applied inside `db.transaction`.
+
+**The author never sees this.** The `.ddd` for `Transfer.run` is
+byte-identical across all five backends; the divergence lives entirely in
+lowering + the per-backend emitter, behind the `serviceRef` call seam.
+
+### What the IR needs to carry
+
+- `DomainServiceOperationIR.tier: "pure" | "reading" | "mutating"` —
+  classified during lowering from the body (calls a repo ⇒ at least
+  `reading`; calls a mutating aggregate op ⇒ `mutating`). Drives the
+  caller-restriction validator and the persistence-family branch.
+- `DomainServiceOperationIR.mutates: AggregateRef[]` — the mutation set
+  (which aggregate types the body mutates). Empty for `pure`/`reading`.
+  Consumed only by the **explicit** backends to shape the materialised
+  return; the **implicit** backends ignore it.
+- `OperationIR.mutating: bool` already exists (the rev-1 enabling change)
+  — reused to classify whether a call into an aggregate operation makes
+  the enclosing service `mutating`.
+
+No new `ExprIR.kind`; calls stay `Call { callKind: "domain-service" }`.
+
+## `function` — let it do a bit more (companion change)
+
+Today `FunctionDecl` is `function f(p): T = Expression` — a **single
+expression** (it already admits `match`/ternary, just not statements,
+`let`-bindings, or `throw`). Rev. 2 adds a **block body** so a function is
+no longer one-liner-only:
 
 ```ddd
-module Banking {
-  domainService Transfer {
-    operation run(from: Account, to: Account, amount: Money)
-      : Transferred or InsufficientFunds {
-      require amount > Money.zero  "amount must be positive"
-      if (from.balance < amount)
-        return InsufficientFunds { account: from.id, shortfall: amount - from.balance }
-      from.withdraw(amount)   // mutates each aggregate via its OWN operation
-      to.deposit(amount)
-      return Transferred { from: from.id, to: to.id, amount }
-    }
-  }
+function lineTotal(l: Line): Money = l.qty * l.price        // unchanged — expression form
 
-  workflow MoveMoney {
-    handle move(cmd: MoveMoney): Transferred or InsufficientFunds {
-      let from = Accounts.required(cmd.from)
-      let to   = Accounts.required(cmd.to)
-      let r    = Transfer.run(from, to, cmd.amount)
-      match r {
-        Transferred t       => { save from; save to; return t }
-        InsufficientFunds e => return e
-      }
-    }
-  }
+function shippingFor(cart: Cart, dest: Region): Money {     // new — block form
+  let weight = cart.lines.sum(l => l.item.weight)
+  if (dest.isDomestic) return weight * Rates.domestic
+  return weight * Rates.international + cart.customsSurcharge
 }
 ```
 
-The **persistence contract** Phase 2 must pin (the question the prior
-doc flagged and v1 sidesteps by forbidding mutation):
+Deliberate boundaries that keep `function` from swallowing
+`domainService`:
 
-1. **Explicit-save (sketched above)** — the workflow names which
-   aggregates to `save`. Clear; requires the workflow to know what the
-   service mutated.
-2. **Auto-save by signature** — mark mutated params (`from: Account
-   mut`); the workflow auto-`save`s them. Terser; introduces a new
-   parameter modifier.
+- A block-body `function` stays **pure** — params only, **no repository,
+  no mutation, no `emit`/`extern`/`api`** (it's a `function`, not a
+  service). `throw` / `require` for the bug regime is allowed (it only
+  makes the function partial, not impure).
+- **Inlinability is the trade.** The expression form (`= Expression`)
+  stays a candidate for SQL inlining the way a `criterion` is; a
+  **block-body function is not queryable** — once it branches and binds
+  locals it cannot lower into a `where`. The validator that lets a
+  `criterion`/expression `function` inline simply doesn't admit the block
+  form. This keeps the three-tier story crisp:
 
-This is a real decision, deserves its own slice, and gates Shape B
-landing. v1 doesn't need it resolved.
+  `function` (pure; expression form inlinable) → `criterion` (pure,
+  queryable predicate) → `domainService` (loads, decides, mutates).
 
-Phase 2 also lifts the "callers" rule (Axis 2a): coordinator services
-become **application-orchestrator-only** callers (workflow /
-`commandHandler`) — calling one from inside an aggregate operation
-would let an aggregate reach into a *different* aggregate's mutable
-state, which is exactly the boundary domain services exist to
-preserve. (`queryHandler` stays excluded — queries never mutate.)
+The alternative considered — full *imperative* statement bodies in
+`function` (assignment, loops) — is rejected: that erases the
+function/domainService line entirely and gives `function` powers no pure
+helper should have. "A bit more" means **let-bindings + branching +
+bug-regime throw in a block**, not statements.
 
-## Naming — why `domainService` (disagreeing narrowly with the prior lean)
+## Validation (`src/ir/validate/checks/domain-service-checks.ts`)
 
-The prior doc leans `service` with a validator nudge. I land elsewhere.
+Revised from the rev-1 set. **Dropped:** `loom.domain-service.no-repo`,
+`loom.domain-service.no-mutation` (both now legal). **Kept:**
 
-| Candidate | Verdict |
-|---|---|
-| `function` | Already a pure expression-bodied calculation. Overloading loses the "no statements, no throw" invariant of `function`. (Axis 6 in prior doc — same conclusion.) |
-| `policy` | Earmarked for authorization — see [`policies-supplementary-note.md`](./policies-supplementary-note.md). Also narrower than the concept needs. (Prior doc — same conclusion.) |
-| `service` | **Prior lean.** Two problems with shipping it. *(a)* The keyword `service` is already used at `ddd.langium:366` for `ServiceConnectionSource` in deployable blocks; Langium can context-disambiguate by position, but the cost is a non-trivial grammar that makes a casual reader stop and check which `service` they're looking at. *(b)* In 2026 the bare word is culturally overloaded — microservices, app services, service workers, k8s services, dependency-injection "services." A domain service is none of those. The prior doc's "validator nudge" is, essentially, an admission that readers will guess wrong without help. |
-| `domainService` | What this proposal picks. Multi-word-as-one-keyword is precedented (`valueobject`). Names the *layer* at the declaration site, which is half the point. No collision. The verbosity is the feature. |
-
-This is genuinely a coin-flip; I'd not block on it. If the consensus
-ends up being `service` + a `loom.service.naming-hint` validator, the
-rest of this proposal is unaffected — change one token in the grammar
-and one IR field name.
-
-## Anemic-domain validator warning
-
-Per the prior doc's open question #3: a `domainService` whose every
-operation takes exactly one aggregate parameter is a code smell — the
-behaviour could live on the aggregate itself. Validator emits
-`loom.domain-service.single-aggregate-warning`: *"This service operates
-on a single aggregate; consider declaring `operation <name>` on `<Agg>`
-instead."*
-
-Warning, not error — there are legitimate exceptions (a service whose
-parameter list is a single aggregate plus several value-object policies
-that you want grouped by service name rather than scattered on the
-aggregate). The nudge defaults users toward the cleaner placement.
-
-## Grammar additions (`src/language/ddd.langium`)
-
-```
-DomainService:
-    'domainService' name=ID '{'
-        operations+=DomainServiceOperation*
-    '}';
-
-DomainServiceOperation:
-    'operation' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')'
-    (':' returnType=TypeRef)?
-    ( '=' body=Expression                     // expression shorthand
-    | '{' stmts+=Statement* '}' );            // statement body
-```
-
-Module body rule gains `| domainServices+=DomainService`.
-
-Member-call resolution (`Pricing.quote(...)`) is already covered by the
-existing `MemberCall` rule; only the scope provider needs to know about
-the new declaration kind (see "Lowering" below).
-
-## IR additions (`src/ir/types/loom-ir.ts`)
-
-```ts
-export interface DomainServiceIR {
-  kind: "domainService";
-  name: string;
-  module: string;
-  operations: DomainServiceOperationIR[];
-}
-
-export interface DomainServiceOperationIR {
-  name: string;
-  params: ParamIR[];
-  returnType: TypeRefIR;        // void if absent
-  body: StmtIR[];                // expression shorthand lowers to `return expr`
-  throws: ErrorRefIR[];
-  mutating: false;               // v1 invariant; Phase 2 may flip
-}
-```
-
-`BoundedContextIR` (and `LoomModel`) gains `domainServices:
-DomainServiceIR[]`.
-
-A new `ExprIR.kind` is **not** required — domain-service calls are
-ordinary `Call` nodes with a new `callKind: "domain-service"`. Each
-backend's `ExprTarget` (`src/generator/_expr/target.ts`) adds one arm.
-
-**Enabling change:** `OperationIR` gains an explicit `mutating: bool`
-flag (already implicit in the IR — set to true iff the body writes to
-`this`). The "no-mutation" validator needs this surfaced; computing it
-on the fly inside the validator is fine for v1, but exposing it cleans
-up the eventual Phase 2 contract and is cheap.
-
-## Lowering (`src/ir/lower/`)
-
-A new sibling leaf `lower-domain-service.ts` per the per-declaration-
-kind split (`lower-platform`, `lower-requirements`, `lower-capabilities`,
-`lower-members`, …). Body lowering reuses `lower-stmt.ts` / `lower-expr.ts`
-unchanged.
-
-Call lowering: `MyService.opName(args)` resolves to `Call { callKind:
-"domain-service", target: { service, op }, args }` in `lower-expr.ts`.
-Resolution at lower time means backends never re-resolve (the
-architectural payoff for phase ⑤'s complexity, called out in
-`CLAUDE.md`).
-
-Scope provider (`src/language/ddd-scope.ts`) gains a clause exposing
-`DomainService` names at module scope, the same way `function` /
-`criterion` names are exposed.
-
-## Validation (`src/ir/validate/checks/`)
-
-A new check leaf `domain-service-checks.ts` enforces the layering
-invariant. Diagnostic codes match the table in §"What v1 cannot do":
-
-1. `loom.domain-service.no-repo`
+1. `loom.domain-service.no-emit`
 2. `loom.domain-service.no-extern`
 3. `loom.domain-service.no-api-call`
-4. `loom.domain-service.no-workflow-start`
-5. `loom.domain-service.no-emit`
-6. `loom.domain-service.no-mutation` — visiting the body, any `Call`
-   whose `callKind` is `"operation"` *and* whose resolved target
-   `OperationIR.mutating === true` is a hard error.
-7. `loom.domain-service.single-aggregate-warning` — soft warning.
+4. `loom.domain-service.no-application-call` — no `start` workflow /
+   `commandHandler` / `queryHandler` (the layer-arrow inversion)
 
-Existing checks (type checking, criterion typing, error-class
-resolution, all-paths-return for typed bodies) apply unchanged — they
-walk `StmtIR` and don't care about the enclosing construct.
+**New:**
+
+5. `loom.domain-service.impure-call-from-aggregate` — a `reading` or
+   `mutating` service invoked from an aggregate `operation` / `create` /
+   `destroy` / view body. (Pure services are exempt — they're callable
+   anywhere.)
+6. `loom.domain-service.single-aggregate-warning` — unchanged soft
+   anemic-domain nudge: every operation taking exactly one aggregate ⇒
+   "consider an `operation` on that aggregate instead."
 
 ## Per-backend emission
 
-Slots into existing `PlatformSurface`; no backend sees a new IR
-vocabulary, only a new owner of familiar shapes.
+Each backend already emits the **declaration** (a stateless module of
+functions) and the **call** (the shared `ExprTarget` `domain-service`
+arm) for the pure tier today. Rev. 2 adds the persistence wiring per the
+family table above:
 
-| Backend | Emission |
-|---|---|
-| **TS / Hono** | `src/generator/typescript/emit/domain-service.ts` emits `src/domain/services/<name>.ts` as an exported namespace of pure functions. `TS_TARGET.callKind["domain-service"]` → `${Service}.${op}(...args)`. |
-| **.NET / EF** | `src/generator/dotnet/emit/DomainService.cs.ts` emits `Domain/Services/<Name>.cs` as `public static class <Name>`. `CS_TARGET` gets the same arm. No constructor (no repo injection — the absence is the layering, made physical). |
-| **Phoenix** | `src/generator/elixir/domain-service-emit.ts` emits `defmodule App.Domain.Services.<Name>` — plain stateless module, no GenServer. `ELIXIR_TARGET` gets the same arm. |
-| **React** | None. The frontend doesn't run domain logic. |
+| Backend | Declaration home | Mutating-tier wiring |
+|---|---|---|
+| **TS / Hono** | `src/domain/services/<name>.ts` namespace | service returns mutated aggregate values; orchestrator applies in `db.transaction` |
+| **.NET / EF** | `Domain/Services/<Name>.cs` static class | mutate tracked entities in place; handler `SaveChangesAsync()` |
+| **Java / JPA** | static utility class | mutate managed entities; `@Transactional` flush |
+| **Python / SQLAlchemy** | bare module functions | mutate session-tracked objects; `session.commit()` |
+| **Phoenix / Ecto** | `App.Domain.Services.<Name>` module | service returns `Ecto.Changeset`(s); orchestrator composes `Ecto.Multi` + `Repo.transaction/1` |
 
-Byte-identical-output gate extends per `_expr/target.ts` convention
-(PR #843): a new fixture under `test/generator/_expr/domain-service-call.test.ts`
-pins each target's output for a fixed `Call` node.
+The repository **port** the `reading`/`mutating` tiers call is the same
+interface the orchestrators already use — no new injection surface on the
+implicit backends; on the explicit backends the port is the existing
+context/repo module.
 
-## Tests (per `CLAUDE.md` §"Adding a language feature")
+## Phasing
 
-| Suite | Gates |
-|---|---|
-| `test/language/parsing/domain-service.test.ts` | Grammar parses both body forms; rejects fields. |
-| `test/language/validators/domain-service.test.ts` | Negative tests for each of the six hard rules above + the soft warning. |
-| `test/ir/lower/domain-service.test.ts` | Structural lowering + call-site `callKind` resolution. |
-| `test/generator/typescript/emit-domain-service.test.ts` | Hono fixture. |
-| `test/generator/dotnet/emit-domain-service.test.ts` | .NET fixture. |
-| `test/generator/elixir/domain-service-emit.test.ts` | Phoenix fixture. |
-| `test/platform/pipeline-layering.test.ts` | Existing — must continue to pass. |
+1. **Shape A (pure)** — *shipped.* No change needed beyond the validator
+   rename (drop `no-repo`/`no-mutation` from the "always forbidden" list,
+   recast as the tier classifier).
+2. **`reading` tier** — repository-port access + the
+   `impure-call-from-aggregate` caller gate. No persistence wiring (read
+   only). Lands first; smallest blast radius.
+3. **`mutating` tier** — the persistence families. Ship the **implicit**
+   backends first (EF / JPA / SQLAlchemy: nearly free — they already
+   commit at the orchestrator). Then the **explicit** pair (Ecto
+   changeset+Multi, Drizzle return+transaction), which carry the
+   `mutates` materialisation.
+4. **`function` block body** — independent companion; can land any time.
 
-Plus one `LOOM_TS_BUILD=1` and one `LOOM_REACT_BUILD=1` run.
+## Open questions
 
-## Open questions (carried over + new)
-
-1. **Naming.** `domainService` vs `service` (Axis 6 — see §"Naming").
-   Coin-flip. Whichever wins, the rest of the proposal stands.
-2. **Phase 2 persistence contract.** Explicit-save (sketched) vs
-   auto-save-by-`mut`-marker. Gates Shape B landing.
-3. **`audited` modifier.** Aggregate operations and workflow handles
-   support `audited`. Should `domainService` operations? Probably yes
-   in v1.5 — cheap, same lowering as `operation audited`.
-4. **Macros.** Worth confirming whether `stdlib/` macros (audit,
-   softDelete, scaffold, crudish) want to emit domain services. Most
-   likely not; leave the macro API surface alone in v1.
-5. **Wire-shape relevance.** None. Domain services have no wire shape
-   and are not addressable from outside. The `.loom/` bundle gains
-   nothing.
-6. **Composition.** Can `domainService A` declare a `domainService B`
-   as a constructor-parameter for testability? v1 says no — they're
-   stateless, just call `B.op(...)` directly. Revisit if testing
-   patterns demand it.
+1. **Explicit-backend return materialisation.** For Drizzle, is the
+   mutated-aggregate return a full row value or a typed change-set? (Ecto
+   is settled — `Ecto.Changeset`.) Affects only the two explicit backends.
+2. **Nested transaction scopes.** If a `workflow` already opens a
+   transaction and calls a `mutating` service, the service must *join*
+   the ambient scope, not open its own. Implicit backends handle this
+   natively; the explicit pair needs the orchestrator to thread the
+   `tx` / `Multi` — pin the threading convention.
+3. **`audited` on service operations.** Still probably yes in a follow-up;
+   same lowering as `operation audited`.
+4. **Composition.** Stateless services just call `B.op(...)` directly; no
+   constructor injection in v1. Revisit only if testing demands it.
 
 ## Decision summary
 
-- **Adopt** the prior doc's six-axis framework. Pin axes 1, 2, 3, 4, 5
-  per the table at the top.
-- **Ship v1 = Shape A** (pure calculator, no mutation). Solves the
-  reusable-calculation case immediately; sidesteps the persistence
-  contract.
-- **Defer Shape B** (coordinator, mutates passed aggregates) to Phase
-  2; sketch its contract here so v1 is forward-compatible.
-- **Defer Shape C** (unified function family, layer-inferred) as the
-  north star; do not build.
-- **Name it `domainService`** (narrowly disagreeing with the prior
-  lean toward `service`).
-- **Reuse `Call` + `callKind: "domain-service"`**; no new `ExprIR.kind`.
-- **Surface `OperationIR.mutating`** as the enabling IR change for the
-  no-mutation validator (cleans up Phase 2 contract too).
-- **Add the anemic-domain warning** for single-aggregate services.
+- **Widen to the Vernon/hexagonal reading**: domain services may **load
+  via repository ports** and **mutate aggregates via their own
+  operations**; the application orchestrator keeps the **single commit
+  point**. `emit` / `extern` / `api` / workflow-start stay forbidden.
+- **Three tiers** — `pure` (callable anywhere) / `reading` / `mutating`
+  (application-orchestrator-only) — classified by the validator from the
+  body.
+- **Persistence is one neutral semantic** (orchestrator-owned UoW)
+  **rendered idiomatically per backend**: implicit change-tracking on
+  EF / JPA / SQLAlchemy; explicit materialisation on Ecto (`Ecto.Changeset`
+  + `Ecto.Multi`) and Drizzle (`db.transaction`). The `.ddd` is identical
+  everywhere.
+- **`function` gains a pure block body** (let + branch + bug-regime
+  throw), staying non-queryable; full imperative statements rejected.
+- Reuse `Call` + `callKind: "domain-service"`; add
+  `DomainServiceOperationIR.tier` + `.mutates`.
