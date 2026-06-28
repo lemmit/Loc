@@ -17,7 +17,10 @@ async function diags(body: string) {
     context Sales {
       event Quoted { at: datetime }
       aggregate Customer { tier: string }
-      aggregate Cart { subtotal: money }
+      aggregate Cart {
+        subtotal: money
+        operation clear() { subtotal := money("0") }
+      }
       repository Customers for Customer {
         find byTier(tier: string): Customer? where this.tier == tier
       }
@@ -150,6 +153,70 @@ describe("IR validator — domainService no-infra contract", () => {
     const w = d.find((x) => x.code === "loom.domain-service-single-aggregate");
     expect(w).toBeDefined();
     expect(w!.severity).toBe("warning");
+  });
+
+  // ── mutating tier (domain-services.md rev. 4, Slice 2) ──
+  // A `mutating` service mutates the aggregates the orchestrator PASSES IN, by
+  // calling a MUTATING operation on an aggregate PARAMETER (`cart.clear()`).
+  // The param-op call is a `method-call`, not an assign/add/remove STATEMENT, so
+  // it never trips `no-mutation`; the service stays orchestrator-only.
+
+  it("accepts a mutating-tier service calling a mutating op on an aggregate param", async () => {
+    const d = await diags(`
+      domainService CartReset {
+        operation reset(cart: Cart, other: Cart) {
+          cart.clear()
+          other.clear()
+        }
+      }
+    `);
+    expect(d.filter((x) => x.code.startsWith("loom.domain-service-")).map((x) => x.code)).toEqual(
+      [],
+    );
+  });
+
+  it("rejects a mutating-tier service called from an aggregate operation body", async () => {
+    // The mutating tier reaches beyond the aggregate boundary (it mutates other
+    // passed-in aggregates), so it must be orchestrated by the application layer.
+    const d = await diags(`
+      aggregate Account {
+        holder: string
+        operation rename(name: string) { holder := name }
+        operation wipe() {
+          AccountReset.reset(this)
+        }
+      }
+      domainService AccountReset {
+        operation reset(acct: Account) {
+          acct.rename("")
+        }
+      }
+    `);
+    expect(d.some((x) => x.code === "loom.domain-service-infra-call-from-aggregate")).toBe(true);
+  });
+
+  it("still rejects a repository WRITE inside a mutating-tier service", async () => {
+    const d = await diags(`
+      domainService CartReset {
+        operation reset(cart: Cart) {
+          cart.clear()
+          let r = Carts.save(cart)
+        }
+      }
+    `);
+    expect(d.some((x) => x.code === "loom.domain-service-no-repo-write")).toBe(true);
+  });
+
+  it("still rejects an emit inside a mutating-tier service", async () => {
+    const d = await diags(`
+      domainService CartReset {
+        operation reset(cart: Cart) {
+          cart.clear()
+          emit Quoted { at: now() }
+        }
+      }
+    `);
+    expect(d.some((x) => x.code === "loom.domain-service-no-emit")).toBe(true);
   });
 
   it("accepts a clean pure-calculator service (no diagnostics from this leaf)", async () => {

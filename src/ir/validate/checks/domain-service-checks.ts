@@ -9,18 +9,27 @@
 //   - `reading`  — runs READ-ONLY repository queries (`Accounts.byHolder(h)`,
 //                  `Repo.find/findAll/run`), lowered to a `repo-read` Call.
 //                  Reads are ALLOWED; writes / commits stay forbidden.
-//   - `mutating` — writes aggregate state / persistence.  Classified, but the
-//                  mutating EMISSION is a LATER slice, so this leaf still
-//                  REJECTS mutation via `loom.domain-service-no-mutation`.
+//   - `mutating` — mutates the aggregates the orchestrator PASSES IN, by
+//                  calling a MUTATING operation on an aggregate PARAMETER
+//                  (`src.withdraw(amount)`).  ALLOWED (Slice 2): a domain
+//                  service has no `this`, so the param-op call — a `method-call`
+//                  whose receiver is an aggregate param — is the legitimate
+//                  mutating mechanism; it never reaches the `no-mutation` gate
+//                  below (that fires only on a `this`-rooted assign/add/remove
+//                  STATEMENT, which has no `this` to write).  The orchestrator
+//                  (workflow) loads the params and owns the single commit.
 //
 // What this leaf enforces:
 //
 //   - `emit`                              → loom.domain-service-no-emit
 //   - `assign` / `add` / `remove`         → loom.domain-service-no-mutation
-//     (a domain service has no `this`; a `this`-rooted write is a hard error)
+//     (a domain service has no `this`; a `this`-rooted write is a hard error —
+//      this is STILL rejected.  Mutating a passed-in aggregate via its OWN
+//      operation, `param.op(...)`, is a `method-call`, not an assign/add/remove
+//      STATEMENT, so it is NOT caught here — that's the allowed mutating tier.)
 //   - a repository WRITE call (save/insert/update/delete/add/remove/commit)
 //                                         → loom.domain-service-no-repo-write
-//     (repository READS — find/findAll/run/named-find — are NOW ALLOWED:
+//     (repository READS — find/findAll/run/named-find — are ALLOWED:
 //      they lower to a `repo-read` Call and never reach this `method-call`
 //      gate, the `reading` tier)
 //   - a call whose receiver names a `workflow` in the context
@@ -33,8 +42,7 @@
 // Plus the anemic-domain WARNING when every operation takes exactly one
 // aggregate-typed parameter (loom.domain-service-single-aggregate).
 //
-// Parameter-operation-mutation (`from.withdraw(x)`) and `extern`/`api`-call
-// rejection ride a future target-resolution slice.
+// `extern`/`api`-call rejection rides a future target-resolution slice.
 // -------------------------------------------------------------------------
 
 import type {
@@ -48,7 +56,7 @@ import type {
   StmtIR,
   ViewIR,
 } from "../../types/loom-ir.js";
-import { classifyDomainServiceTier } from "../../util/domain-service-tier.js";
+import { aggregateOpResolver, classifyDomainServiceTier } from "../../util/domain-service-tier.js";
 import { isWriteMethod } from "../../util/repo-methods.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { walkExpr } from "./shared.js";
@@ -95,7 +103,7 @@ function checkOperationBody(
         diags.push({
           severity: "error",
           code: "loom.domain-service-no-mutation",
-          message: `${where}: '${stmt.target.segments.join(".")} ${assignVerb(stmt.kind)}' writes to aggregate state, but a domain service has no 'this' to mutate (the mutating tier's emission is not in this slice).  Return a value instead.`,
+          message: `${where}: '${stmt.target.segments.join(".")} ${assignVerb(stmt.kind)}' writes to aggregate state, but a domain service has no 'this' to mutate.  To mutate a passed-in aggregate, call its own operation (e.g. 'src.withdraw(amount)') — the mutating tier; or return a value instead.`,
           source,
         });
         break;
@@ -144,10 +152,14 @@ function checkOperationBody(
  *  `checkActionRequiresAwait`). */
 function checkInfraCallsFromAggregates(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
   // The set of NON-pure (reading/mutating) services in this context — only a
-  // call into one of these is gated.
+  // call into one of these is gated.  Resolving the tier needs the aggregate-op
+  // resolver so a `mutating` service (calls `param.op(...)` on a passed-in
+  // aggregate) is recognised as non-pure — otherwise it would be misclassified
+  // `pure` and wrongly admitted inside aggregate bodies.
+  const resolveAggOp = aggregateOpResolver(ctx);
   const nonPure = new Set<string>();
   for (const svc of ctx.domainServices) {
-    if (svc.operations.some((op) => classifyDomainServiceTier(op) !== "pure")) {
+    if (svc.operations.some((op) => classifyDomainServiceTier(op, resolveAggOp) !== "pure")) {
       nonPure.add(svc.name);
     }
   }
@@ -159,7 +171,7 @@ function checkInfraCallsFromAggregates(ctx: BoundedContextIR, diags: LoomDiagnos
     diags.push({
       severity: "error",
       code: "loom.domain-service-infra-call-from-aggregate",
-      message: `${where}: call to domain service '${ref.service}.${ref.op}(…)' runs infrastructure (a repository read/write), which the domain layer may not do from inside an aggregate operation or a view.  Move the call into the orchestrating workflow / command handler, which loads aggregates and owns the commit.`,
+      message: `${where}: call to domain service '${ref.service}.${ref.op}(…)' reaches beyond the aggregate boundary (a repository read, or mutating other passed-in aggregates), which the domain layer may not do from inside an aggregate operation or a view.  Move the call into the orchestrating workflow / command handler, which loads the aggregates and owns the commit.`,
       source,
     });
   };
