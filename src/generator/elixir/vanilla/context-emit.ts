@@ -35,6 +35,7 @@ import {
   renderEnsureHelper,
   renderEsContextBlock,
 } from "./eventsourced-emit.js";
+import { renderAggregateFunctions } from "./function-emit.js";
 import { isAbstractBase } from "./inheritance-emit.js";
 import {
   isReturningOperation,
@@ -178,13 +179,19 @@ function renderContextModule(
     end
   end`
       : "";
+    // Aggregate `function` members (§11b) — pure domain helpers callable from the
+    // op / precondition / derived bodies emitted above.  Each renders as a
+    // struct-guarded `def <fn>(%Agg{} = record, …)` so the lowered call site
+    // (`<fn>(record, …)`) resolves in THIS module.
+    const fnLines = renderAggregateFunctions(facadeMod, agg);
+    const functionBlock = fnLines.length > 0 ? `${fnLines.join("\n")}\n` : "";
     return `  # ${aggPascal}
   defdelegate list_${aggSnake}s(${principal ? "current_user \\\\ nil" : ""}), to: ${repoMod}, as: :list
   defdelegate get_${aggSnake}(id${actorArg}), to: ${repoMod}, as: :find_by_id
   defdelegate create_${aggSnake}(attrs${stampActorArg}), to: ${repoMod}, as: :insert
   defdelegate update_${aggSnake}(record, attrs${stampActorArg}), to: ${repoMod}, as: :update
   defdelegate delete_${aggSnake}(record), to: ${repoMod}, as: :delete${changeFacade}${destroyFacade}
-${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}`;
+${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}${functionBlock}`;
   });
 
   // Retrieval defdelegates — `run_<retrieval>_<agg>(args..., opts \\ [])`
