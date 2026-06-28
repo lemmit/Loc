@@ -224,11 +224,22 @@ construction; no migration change (`<wf>_events` already emitted). Stateless
 was out of scope — no pure-ES fit; with Ash removed, elixir = plain Ecto/Phoenix
 is in scope.)
 
+## Done — eventSourced-workflow instance _views_ (`view X = <Workflow> where …`)
+
+Now ships on all 5 backends. Each per-backend view emitter branches on
+`wf.eventSourced` and reads the fold-projected ES instance read-model (group-fold
+the `<wf>_events` stream + apply the view's `where` predicate in-memory) instead
+of the saga-state table that ES workflows don't have; the non-ES (state-based)
+view path is byte-identical. Emitters: `src/platform/hono/v4/view-routes-builder.ts`
+(`emitWorkflowViewRoute`), `src/generator/dotnet/view-emit.ts`
+(`renderWorkflowViewHandler`), `src/generator/elixir/vanilla/view-emit.ts`
+(`renderVanillaWorkflowView` → `<Wf>Stream.list_instances/0` + `Enum.filter`),
+`src/generator/python/views-builder.ts` (`workflowViewRoute`),
+`src/generator/java/emit/view.ts`. Tests: the ES-path assertions in each
+`*-workflow-view.test.ts`; build-gate coverage via the two ES-workflow views in
+`test/e2e/fixtures/elixir-vanilla-build/vanilla-eventsourced-workflow.ddd`.
+
 ## Next slices (recommended order)
 
-1. **eventSourced-workflow instance _views_ (`view X = <Workflow> where …`)** —
-   the view-over-workflow source already ships for state-based sagas; extend it to
-   read the ES instance read-model (fold-projected) now that ES workflows carry
-   `instanceWireShape`. Additive; the saga is fully functional without it.
-2. **Scaffold instance _pages_ for ES workflows** — the opt-in scaffold instance
-   list/detail pages (already available for state sagas) over the new ES read API.
+1. **Scaffold instance _pages_ for ES workflows** — the opt-in scaffold instance
+   list/detail pages (already available for state sagas) over the ES read API.
