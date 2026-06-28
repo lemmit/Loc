@@ -21,6 +21,7 @@ import {
   type Env,
   findDomainServiceByName,
   findFunctionInEnv,
+  findOperationInEnv,
   withLocal,
 } from "./lower-types.js";
 
@@ -112,8 +113,21 @@ export function lowerStatement(stmt: Statement, env: Env): { stmt: StmtIR; envAf
         }
         const fn = findFunctionInEnv(env, lv.head);
         const target: "function" | "private-operation" = fn ? "function" : "private-operation";
+        // Carry the target operation's resolved privacy (see the IR `call`
+        // node's `targetPrivate`) so backends render the self-call against the
+        // right def-site name.
+        const targetPrivate =
+          target === "private-operation"
+            ? (findOperationInEnv(env, lv.head)?.private ?? false)
+            : undefined;
         return {
-          stmt: { kind: "call", target, name: lv.head, args },
+          stmt: {
+            kind: "call",
+            target,
+            name: lv.head,
+            args,
+            ...(targetPrivate ? { targetPrivate } : {}),
+          },
           envAfter: env,
         };
       }

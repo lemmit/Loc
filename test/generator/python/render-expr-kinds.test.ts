@@ -225,12 +225,24 @@ describe("py renderPyExpr — calls / new / object / list", () => {
     ).toBe('Money(5, "USD")');
   });
 
-  it("function / private-operation calls render `_`-prefixed snake_case", () => {
+  it("function calls render `_`-prefixed; op calls follow the target's privacy", () => {
+    // A `function` is always a private method (`def _line_total`).
     expect(
       renderPyExpr({ kind: "call", callKind: "function", name: "lineTotal", args: [litInt("1")] }),
     ).toBe("self._line_total(1)");
+    // A public operation self-call has no underscore (`def reserve` ⇒ `self.reserve()`).
     expect(
       renderPyExpr({ kind: "call", callKind: "private-operation", name: "recalc", args: [] }),
+    ).toBe("self.recalc()");
+    // A `private operation` self-call keeps the underscore.
+    expect(
+      renderPyExpr({
+        kind: "call",
+        callKind: "private-operation",
+        name: "recalc",
+        args: [],
+        targetPrivate: true,
+      }),
     ).toBe("self._recalc()");
   });
 
@@ -409,10 +421,23 @@ describe("py renderPyStatements", () => {
     expect(out).toBe(`${I}__ev = Opened()\n${I}self._events.append(__ev)\n${I}self._apply(__ev)`);
   });
 
-  it("renders private-op calls and returns", () => {
+  it("renders op self-calls (public bare, private underscored) and returns", () => {
+    // A public operation self-call has no underscore (`def reserve` ⇒ `self.reserve()`).
     expect(
       renderPyStatements([
         { kind: "call", target: "private-operation", name: "recalcTotals", args: [] } as StmtIR,
+      ]),
+    ).toBe(`${I}self.recalc_totals()`);
+    // A `private operation` self-call keeps the underscore (`def _recalc` ⇒ `self._recalc()`).
+    expect(
+      renderPyStatements([
+        {
+          kind: "call",
+          target: "private-operation",
+          name: "recalcTotals",
+          args: [],
+          targetPrivate: true,
+        } as StmtIR,
       ]),
     ).toBe(`${I}self._recalc_totals()`);
     expect(renderPyStatements([{ kind: "return", value: litInt("1") } as StmtIR])).toBe(

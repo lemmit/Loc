@@ -2489,6 +2489,10 @@ export type StmtIR =
        *  store the `<Store>.<action>(…)` call dispatches to.  `name` is the
        *  action; backends bind the store action without re-resolving. */
       store?: string;
+      /** Populated when `target === "private-operation"` — the resolved privacy
+       *  of the target sibling operation (see the ExprIR `call` node's
+       *  `targetPrivate`).  Absent (⇒ public) for `function` and the rest. */
+      targetPrivate?: boolean;
     }
   /**
    * Bare expression-statement.  Used when a chained call like
@@ -2703,6 +2707,15 @@ export type ExprIR =
        *  Use the ordered `entries` shape (not a `Record`) so entry order
        *  survives the IR pipeline. */
       style?: StyleIR;
+      /** Populated when `callKind === "private-operation"` — the resolved
+       *  privacy of the target sibling operation.  An operation self-call
+       *  lowers to `private-operation` regardless of the operation's actual
+       *  `private` modifier, so backends that name public vs private
+       *  operations differently (Python: `def reserve` vs `def _reserve`)
+       *  must know which one the def-site emitted.  Absent (⇒ public) for
+       *  `function` calls (functions are always private) and every other
+       *  `callKind`. */
+      targetPrivate?: boolean;
     }
   | {
       /** A bare reference to a named page/component `action` in
