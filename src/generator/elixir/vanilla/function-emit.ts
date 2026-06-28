@@ -1,6 +1,6 @@
 import type { AggregateIR, FunctionIR } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
-import { exprUsesParam } from "../domain/predicates.js";
+import { exprUsesParam, exprUsesReceiver } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr, renderTypespec } from "../render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -62,10 +62,14 @@ function renderFunction(
   const params = fn.params.map((p) =>
     exprUsesParam(fn.body, p.name) ? snake(p.name) : `_${snake(p.name)}`,
   );
+  // Underscore-prefix the receiver when the body never reads it (e.g.
+  // `function noop()`), else the struct-guarded clause head trips
+  // `mix compile --warnings-as-errors` on an unused `record` binding.
+  const recv = exprUsesReceiver(fn.body) ? "record" : "_record";
   const sig =
     params.length > 0
-      ? `%${aggModule}{} = record, ${params.join(", ")}`
-      : `%${aggModule}{} = record`;
+      ? `%${aggModule}{} = ${recv}, ${params.join(", ")}`
+      : `%${aggModule}{} = ${recv}`;
   const ret = renderTypespec(fn.returnType, facadeMod);
   const specArgs = [
     `${aggModule}.t()`,

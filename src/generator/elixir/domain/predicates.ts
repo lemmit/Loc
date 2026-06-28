@@ -42,6 +42,21 @@ export function exprUsesParam(e: ExprIR | undefined, name: string): boolean {
   return walkExpr(e, (sub) => exprUsesParam(sub, name));
 }
 
+/** True when `e` references the aggregate receiver — a `this`/`this-prop`
+ *  access, the `id` accessor, or a receiver-prefixed `function` /
+ *  `private-operation` call (all of which render the `thisName` binding).
+ *  The vanilla function emitter uses this to underscore-prefix an unused
+ *  receiver, so a body that never touches the struct (e.g. `function noop()`)
+ *  doesn't trip `mix compile --warnings-as-errors` on an unused `record`. */
+export function exprUsesReceiver(e: ExprIR | undefined): boolean {
+  if (!e) return false;
+  if (e.kind === "this" || e.kind === "id") return true;
+  if (e.kind === "ref" && e.refKind === "this-prop") return true;
+  if (e.kind === "call" && (e.callKind === "function" || e.callKind === "private-operation"))
+    return true;
+  return walkExpr(e, exprUsesReceiver);
+}
+
 export function stmtUsesParam(s: StmtIR, name: string): boolean {
   switch (s.kind) {
     case "precondition":
