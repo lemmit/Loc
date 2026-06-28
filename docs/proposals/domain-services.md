@@ -122,18 +122,29 @@ target aggregates → domain service (optionally reads supporting data and)
 mutates them → orchestrator persists.**
 
 ```ddd
-workflow MoveMoney {
-  handle move(cmd: MoveMoney): Transferred or InsufficientFunds {
-    let from = Accounts.required(cmd.from)        // orchestrator LOADS the targets
-    let to   = Accounts.required(cmd.to)
-    let r    = Transfer.run(from, to, cmd.amount) // service reads fee + MUTATES from/to
-    match r {
-      Transferred t       => { save from; save to; return t }   // orchestrator PERSISTS
-      InsufficientFunds e => return e
-    }
-  }
+workflow MoveMoney transactional {
+  create(source: Account id, dest: Account id, amount: Money): Transferred or InsufficientFunds {
+    let src = Accounts.getById(source)            // orchestrator LOADS the targets
+    let dst = Accounts.getById(dest)
+    return Transfer.run(src, dst, amount)         // service MUTATES src,dst; union tail-propagates
+  }                                               // src,dst auto-saved at exit; edge maps the variant
 }
 ```
+
+> **Real consumption mechanism (verified against the grammar — there is
+> NO `?` operator and NO variant `match`).** The union is consumed by
+> **`return <service-call>` in tail position**: the edge maps the
+> error variant → RFC-7807 ProblemDetails (the exception-less track), the
+> success variant → 200/204. Persistence is **auto-save-at-exit**
+> (`savesAtExit`/`computeSaves` in `lower-workflow.ts`) — the orchestrator
+> doesn't write `save`. This works **without** mid-body variant
+> discrimination because the error variant (`InsufficientFunds`) is
+> returned *before* any mutation, so auto-saving the (unmutated)
+> aggregates is harmless and, under `transactional`, a domain-error result
+> rolls back. `match` over a union (`switch(x.type)`-style narrowing) is a
+> **deferred** language feature (`docs/payloads.md` → "What's deferred");
+> the mutating tier must **not** depend on it. (`from`/`to` are reserved
+> words — params are `source`/`dest`.)
 
 - A **pure** service is callable from anywhere, including an aggregate
   operation (it reaches no infrastructure):
