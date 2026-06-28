@@ -133,20 +133,18 @@ workflow MoveMoney transactional {
 }
 ```
 
-> **Real consumption mechanism (verified against the grammar — there is
-> NO `?` operator and NO variant `match`).** The union is consumed by
+> **Consumption mechanism.** The union is consumed by
 > **`return <service-call>` in tail position**: the edge maps the
 > error variant → RFC-7807 ProblemDetails (the exception-less track), the
 > success variant → 200/204. Persistence is **auto-save-at-exit**
 > (`savesAtExit`/`computeSaves` in `lower-workflow.ts`) — the orchestrator
-> doesn't write `save`. This works **without** mid-body variant
-> discrimination because the error variant (`InsufficientFunds`) is
-> returned *before* any mutation, so auto-saving the (unmutated)
-> aggregates is harmless and, under `transactional`, a domain-error result
-> rolls back. `match` over a union (`switch(x.type)`-style narrowing) is a
-> **deferred** language feature (`docs/payloads.md` → "What's deferred");
-> the mutating tier must **not** depend on it. (`from`/`to` are reserved
-> words — params are `source`/`dest`.)
+> doesn't write `save`. This is self-contained: the error variant
+> (`InsufficientFunds`) is returned *before* any mutation, so auto-saving
+> the (unmutated) aggregates is harmless and, under `transactional`, a
+> domain-error result rolls back — so the mutating tier needs **no special
+> union-consumption construct of its own** (it composes with whatever
+> union-discrimination the language offers, but requires none).
+> (`from`/`to` are reserved words — params are `source`/`dest`.)
 
 - A **pure** service is callable from anywhere, including an aggregate
   operation (it reaches no infrastructure):
