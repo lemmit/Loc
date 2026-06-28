@@ -190,12 +190,27 @@ const CS_TARGET: ExprTarget<CsRenderContext> = {
     }
     return out;
   },
-  // Variant-`match` (variant-match.md) — TODO(fan-out): render a C# switch
-  // expression `subject switch { Order o => <value>, _ => null }` with a REAL
-  // pattern binding (set `bindingRefText` to return the binding name).  The
-  // seam shape is final; the TS leaf is the reference impl.
-  matchVariant() {
-    throw new Error("variant-match: .NET backend not yet implemented (variant-match.md fan-out)");
+  // Variant-`match` (variant-match.md) — C# switch expression over the
+  // polymorphic Domain union.  Each variant's carrier is the record
+  // `${unionName}_${tag}` (the same `<name>_<Tag>` form a union return
+  // constructs), so `${Union}_${tag} b => …` binds the narrowed record and
+  // `b.Field` reads it.  A `_` discard arm always trails so a non-exhaustive
+  // match (validator *warns*, never errors) stays a total switch expression.
+  matchVariant(m) {
+    const arms = m.arms.map((a) => {
+      const carrier = `${m.unionName}_${a.tag}`;
+      const binder = a.binding ?? "_unused";
+      return `        ${carrier} ${binder} => ${a.value},`;
+    });
+    // C# can't prove a polymorphic switch exhaustive, so a discard arm is
+    // mandatory.  With an `else`, use it; without one, throw on the
+    // (validator-warned) unmatched variant rather than return `null` — which
+    // would trip nullable-reference-types under `/warnaserror` for a
+    // non-nullable return, and a missed variant *should* fail loudly.
+    const tail = `        _ => ${
+      m.otherwise ?? 'throw new System.InvalidOperationException("unmatched variant")'
+    },`;
+    return `${m.subject} switch\n    {\n${arms.join("\n")}\n${tail}\n    }`;
   },
   bindingRefText: (binding) => binding,
   // List literals are walker-config sugar (e.g. responsive Grid cols).  No
