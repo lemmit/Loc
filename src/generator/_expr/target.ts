@@ -1,4 +1,4 @@
-import { variantTag } from "../../ir/stdlib/unions.js";
+import { unionInstanceName, variantTag } from "../../ir/stdlib/unions.js";
 import type { ExprIR, LiteralKind } from "../../ir/types/loom-ir.js";
 
 // ---------------------------------------------------------------------------
@@ -91,6 +91,13 @@ export interface RenderedVariantMatch {
   arms: RenderedVariantArm[];
   /** The rendered `else => …` catch-all, or `undefined` when absent. */
   otherwise: string | undefined;
+  /** The union's instance name (`unionInstanceName(subjectType.variants)`),
+   *  e.g. `AOrNF`.  Nominally-typed backends (Java/.NET) build a variant's
+   *  concrete carrier type as `${unionName}_${tag}` for a native pattern
+   *  (`case AOrNF_A a -> …`); structural/dynamic backends (TS/Python/Elixir)
+   *  ignore it and dispatch on the `type` tag.  Empty when the subject type
+   *  did not resolve to a union (a validator error path). */
+  unionName: string;
 }
 
 /**
@@ -220,6 +227,10 @@ export function renderExprWith<Ctx extends ExprCtxBase>(
           subject,
           arms,
           otherwise: e.otherwise ? r(e.otherwise) : undefined,
+          unionName:
+            e.subjectType?.kind === "union"
+              ? unionInstanceName(e.subjectType.variants)
+              : "",
         });
       }
       return t.match(
