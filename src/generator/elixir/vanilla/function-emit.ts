@@ -5,7 +5,7 @@ import type {
   FunctionIR,
   StmtIR,
 } from "../../../ir/types/loom-ir.js";
-import { snake, upperFirst } from "../../../util/naming.js";
+import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 import { exprUsesParam, exprUsesReceiver } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr, renderTypespec } from "../render-expr.js";
 
@@ -67,7 +67,7 @@ function renderPureBlock(stmts: StmtIR[], rc: RenderCtx): string[] {
   for (const s of stmts) {
     switch (s.kind) {
       case "let":
-        lines.push(`    ${snake(s.name)} = ${renderExpr(s.expr, rc)}`);
+        lines.push(`    ${escapeElixirIdent(snake(s.name))} = ${renderExpr(s.expr, rc)}`);
         break;
       case "precondition":
         lines.push(

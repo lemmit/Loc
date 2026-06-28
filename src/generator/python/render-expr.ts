@@ -1,6 +1,6 @@
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
-import { snake, upperFirst } from "../../util/naming.js";
+import { escapePythonIdent, snake, upperFirst } from "../../util/naming.js";
 import {
   type CallExpr,
   type ExprTarget,
@@ -74,8 +74,9 @@ const PY_TARGET: ExprTarget<PyRenderContext> = {
     return `${snake(serviceRef.op)}(${args.join(", ")})`;
   },
   lambda(param, body) {
-    if (body !== undefined) return `lambda ${snake(param)}: ${body}`;
-    return `lambda ${snake(param)}: None  # block-body lambda — page metamodel territory`;
+    const p = escapePythonIdent(snake(param));
+    if (body !== undefined) return `lambda ${p}: ${body}`;
+    return `lambda ${p}: None  # block-body lambda — page metamodel territory`;
   },
   newPart: renderNew,
   // Bare object literals only appear in e2e contexts; in operation bodies
@@ -243,9 +244,12 @@ function renderLiteral(lit: LiteralKind, value: string): string {
 function renderRef(e: RefExpr, ctx: PyRenderContext): string {
   const fromOutside = ctx.thisName !== "self";
   switch (e.refKind) {
-    case "param":
     case "let":
     case "lambda":
+      // Locals introduced inside the body; escape keyword collisions so the
+      // use matches the (also-escaped) binding.
+      return escapePythonIdent(snake(e.name));
+    case "param":
       return snake(e.name);
     case "this-prop":
       // Wire DTO: the verbatim camelCase attribute.  Inside the aggregate

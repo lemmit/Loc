@@ -1,7 +1,7 @@
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type { EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
-import { upperFirst } from "../../util/naming.js";
+import { escapeCsharpIdent, upperFirst } from "../../util/naming.js";
 import {
   type CallExpr,
   type ExprTarget,
@@ -202,8 +202,9 @@ const CS_TARGET: ExprTarget<CsRenderContext> = {
     // Lambda body is now optional.  .NET render contexts shouldn't see block
     // bodies — those are React-emitter territory — but stay total to keep the
     // build happy.
-    if (body !== undefined) return `${param} => ${body}`;
-    return `${param} => { /* block-body lambda — not C#-renderable */ }`;
+    const p = escapeCsharpIdent(param);
+    if (body !== undefined) return `${p} => ${body}`;
+    return `${p} => { /* block-body lambda — not C#-renderable */ }`;
   },
   newPart: renderNew,
   // Bare object literals only appear in e2e contexts; in operation bodies
@@ -331,9 +332,12 @@ function renderLiteral(lit: string, value: string): string {
 
 function renderRef(e: RefExpr, ctx: CsRenderContext): string {
   switch (e.refKind) {
-    case "param":
     case "let":
     case "lambda":
+      // Locals introduced inside the body; escape keyword collisions so the
+      // use matches the (also-escaped) binding (`let base` → `@base`).
+      return escapeCsharpIdent(e.name);
+    case "param":
       return e.name;
     case "this-prop":
     case "this-vo-prop":

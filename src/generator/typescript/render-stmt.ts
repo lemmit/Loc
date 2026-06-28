@@ -1,4 +1,5 @@
 import type { ExprIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
+import { escapeTsIdent } from "../../util/naming.js";
 import { renderTsExpr } from "./render-expr.js";
 
 const INDENT = "    ";
@@ -51,7 +52,9 @@ function renderTsStatement(
       // ForbiddenError catch in the per-aggregate routes file.
       return `${INDENT}if (!(${renderTsExpr(s.expr)})) throw new ForbiddenError(${JSON.stringify(`Forbidden: ${s.source}`)});`;
     case "let":
-      return `${INDENT}const ${s.name} = ${renderTsExpr(s.expr)};`;
+      // `let`-names may collide with a JS reserved word; escape consistently
+      // with the matching `refKind: "let"` use sites (`let new` → `new_`).
+      return `${INDENT}const ${escapeTsIdent(s.name)} = ${renderTsExpr(s.expr)};`;
     case "assign": {
       const base = `${INDENT}${renderPath(s.target)} = ${renderTsExpr(s.value)};`;
       const wrapped = withTrace(base, s.prov, s.target, s.value, emitProvenance, index);

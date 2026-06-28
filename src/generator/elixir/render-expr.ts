@@ -6,7 +6,7 @@ import type {
   TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
-import { snake, upperFirst } from "../../util/naming.js";
+import { escapeElixirIdent, snake, upperFirst } from "../../util/naming.js";
 import {
   type BinaryExpr,
   type CallExpr,
@@ -166,8 +166,9 @@ const ELIXIR_TARGET: ExprTarget<RenderCtx> = {
   lambda(param, body) {
     // Single-expression lambda: `x => expr` → `fn x -> expr end`
     // Block-body lambdas are not renderable as an inline expression.
-    if (body !== undefined) return `fn ${param} -> ${body} end`;
-    return `fn ${param} -> # block-body-lambda end`;
+    const p = escapeElixirIdent(param);
+    if (body !== undefined) return `fn ${p} -> ${body} end`;
+    return `fn ${p} -> # block-body-lambda end`;
   },
   newPart: renderNew,
   // Bare object literals appear in e2e contexts; not expected in domain
@@ -318,7 +319,9 @@ function renderRef(e: RefExpr, ctx: RenderCtx): string {
       return snake(e.name);
     case "let":
     case "lambda":
-      return snake(e.name);
+      // Locals introduced inside the body; escape keyword collisions so the
+      // use matches the (also-escaped) binding (`let end` → `end_`).
+      return escapeElixirIdent(snake(e.name));
     case "this-prop":
     case "this-vo-prop":
     case "this-derived":

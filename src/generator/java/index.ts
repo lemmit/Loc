@@ -1,4 +1,5 @@
 import { enrichLoomModel } from "../../ir/enrich/enrichments.js";
+import { forCreateInput } from "../../ir/enrich/wire-projection.js";
 import { lowerModel } from "../../ir/lower/lower.js";
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type {
@@ -106,6 +107,7 @@ import {
 } from "./emit/unions.js";
 import { renderJavaValidators } from "./emit/validator.js";
 import { renderJavaViews, viewFindsFor } from "./emit/view.js";
+import { referencedValueObjects } from "./emit/wire.js";
 import { renderJavaWorkflows } from "./emit/workflow.js";
 import {
   esWorkflowStateClass,
@@ -375,6 +377,29 @@ function emitProjectFromContexts(
     }
     // Workflows + views — per-context controllers under /workflows and
     // /views, services in the shared application packages.
+    //
+    // VO → application-package map: a `<Vo>Request` record is emitted into
+    // the service package of every aggregate that references the VO (see
+    // `emitAggregate` → `renderDtoFiles`).  A VO-typed workflow param needs
+    // that record imported, so map each referenced VO to one such package
+    // (any works — the record content is identical across aggregates).
+    const voRequestPkg = new Map<string, string>();
+    for (const agg of ctx.aggregates) {
+      const voNames = new Set<string>();
+      referencedValueObjects(
+        forCreateInput(agg.fields).map((f) => f.type),
+        voNames,
+      );
+      for (const op of agg.operations) {
+        referencedValueObjects(
+          op.params.map((p) => p.type),
+          voNames,
+        );
+      }
+      for (const vo of voNames) {
+        if (!voRequestPkg.has(vo)) voRequestPkg.set(vo, pkgFor("service", agg.name));
+      }
+    }
     const workflowFiles = renderJavaWorkflows(
       ctx,
       {
@@ -386,6 +411,7 @@ function emitProjectFromContexts(
         entityPkgOf: (a) => pkgFor("entity", a),
         repoPkgOf: (a) => pkgFor("repository-interface", a),
         domainServicePkg: pkgFor("domain-service"),
+        voRequestPkgOf: (vo) => voRequestPkg.get(vo) ?? null,
       },
       authRequired,
       system?.sys,

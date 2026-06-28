@@ -5,7 +5,7 @@ import type {
   TestIR,
   TestStmtIR,
 } from "../../../ir/types/loom-ir.js";
-import { snake, upperFirst } from "../../../util/naming.js";
+import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Vanilla (Ecto/Phoenix) domain `test "..."` → runnable ExUnit, ported 1:1 from
@@ -104,7 +104,7 @@ function renderTest(t: TestIR, env: Env): string[] {
 function renderStmt(s: TestStmtIR, env: Env, used: Set<string>): string[] {
   switch (s.kind) {
     case "let": {
-      const name = used.has(s.name) ? snake(s.name) : `_${snake(s.name)}`;
+      const name = used.has(s.name) ? escapeElixirIdent(snake(s.name)) : `_${snake(s.name)}`;
       if (isCreate(s.expr)) {
         // A bound create is the happy path → bind the {:ok, _} struct.
         return [`{:ok, ${name}} = ${renderCreate(s.expr, env)}`];

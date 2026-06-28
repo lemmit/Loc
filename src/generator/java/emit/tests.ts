@@ -10,7 +10,7 @@ import type {
 import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { intrinsicMatcherSig } from "../../../util/intrinsic-matchers.js";
-import { upperFirst } from "../../../util/naming.js";
+import { escapeJavaIdent, upperFirst } from "../../../util/naming.js";
 import { collectJavaExprImports, collectJavaTypeImports, renderJavaExpr } from "../render-expr.js";
 import { stubUserValue } from "./auth.js";
 
@@ -214,7 +214,7 @@ function renderTestStmt(
     const expr =
       renderCreateCall(s.expr, ctx, imports) ??
       withTestUser(s.expr, render(s.expr, imports), state);
-    return [`        var ${s.name} = ${expr};`];
+    return [`        var ${escapeJavaIdent(s.name)} = ${expr};`];
   }
   if (s.kind === "call") {
     const args = s.args.map((a) => render(a, imports)).join(", ");

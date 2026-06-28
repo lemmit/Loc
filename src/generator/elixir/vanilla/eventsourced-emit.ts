@@ -36,7 +36,7 @@ import type {
   StmtIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
-import { snake, upperFirst } from "../../../util/naming.js";
+import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { aggregateHasUnionFind, renderFindActions } from "./find-controller.js";
@@ -206,7 +206,7 @@ function renderFoldStatements(stmts: StmtIR[], ctx: RenderCtx): string {
         case "assign":
           return `    state = %{state | ${snake(s.target.segments[0] ?? "")}: ${renderExpr(s.value, ctx)}}`;
         case "let":
-          return `    ${snake(s.name)} = ${renderExpr(s.expr, ctx)}`;
+          return `    ${escapeElixirIdent(snake(s.name))} = ${renderExpr(s.expr, ctx)}`;
         case "expression":
           return `    _ = ${renderExpr(s.expr, ctx)}`;
         default:
@@ -619,7 +619,7 @@ function renderCommandRunner(c: CommandCtx): string {
         clauses.push(`:ok <- ensure(${renderExpr(s.expr, exprCtx)}, :forbidden)`);
         break;
       case "let":
-        lets.push(`    ${snake(s.name)} = ${renderExpr(s.expr, exprCtx)}`);
+        lets.push(`    ${escapeElixirIdent(snake(s.name))} = ${renderExpr(s.expr, exprCtx)}`);
         break;
       case "emit": {
         const fields = s.fields
