@@ -2553,6 +2553,7 @@ export type CallKind =
   | "value-object-ctor" // calls a value-object constructor
   | "private-operation" // calls a private operation
   | "resource-op" // a verb call on an ambient resource handle (Phase 4)
+  | "repo-read" // a read-only repository query in a `reading` domain-service body (domain-services.md rev. 4)
   | "domain-service" // a member call on a `domainService` (domain-services.md)
   | "action" // a bare call to a SIBLING page/component `action` (Proposal A Stage 1)
   | "store-action" // a `<Store>.<action>(…)` call from a page/component/store body (Stage 5)
@@ -2645,6 +2646,22 @@ export type ExprIR =
        *  Structured (not overloaded onto flat `name`) so backends render
        *  the call without re-resolving the receiver. */
       serviceRef?: { service: string; op: string };
+      /** Populated when `callKind === "repo-read"` (domain-services.md rev. 4,
+       *  the `reading` tier) — a read-only repository query in a domain-service
+       *  operation body (`Accounts.byHolder(h)` / `Repo.find/findAll/run`).
+       *  Fully resolved at lowering time: `repo` is the repository name,
+       *  `aggregate` its target aggregate, `method` the find / retrieval method
+       *  to render against the generated repository, and `readKind` the recognised
+       *  shape (`named` declared find / `getById`, vs the criterion `find`/`findAll`
+       *  vs retrieval `run`).  Backends render a real call into the generated
+       *  repository without re-recognising the AST.  Per-backend EMISSION is a
+       *  later slice (this slice is the IR foundation only). */
+      repoRead?: {
+        repo: string;
+        aggregate: string;
+        method: string;
+        readKind: "named" | "find" | "findAll" | "run";
+      };
       /** Populated when `callKind === "store-action"` (Stage 5) — the resolved
        *  store + action a `<Store>.<action>(…)` call dispatches to.  Structured
        *  (not overloaded onto flat `name`) so backends bind the store action

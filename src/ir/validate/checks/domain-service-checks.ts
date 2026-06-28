@@ -1,40 +1,55 @@
 // -------------------------------------------------------------------------
-// Domain-service body checks — the strict no-infra contract
-// (domain-services.md, v1 Shape A, the resolvable floor).
+// Domain-service body checks — the no-infra contract, rev. 4 tiers.
+// (domain-services.md; the `reading` tier is Slice 1.)
 //
-// A `domainService` is a stateless container of NON-mutating, pure
-// calculator operations.  Their bodies reuse the aggregate-operation
-// `Statement` grammar, but the domain-service layer forbids any reach
-// into infrastructure or aggregate state.  This leaf enforces the
-// subset that is cleanly resolvable from the lowered IR:
+// A `domainService` operation falls into a tier DERIVED from its body
+// (`classifyDomainServiceTier` — never a stamped field):
+//
+//   - `pure`     — no infrastructure (the pure-calculator floor).
+//   - `reading`  — runs READ-ONLY repository queries (`Accounts.byHolder(h)`,
+//                  `Repo.find/findAll/run`), lowered to a `repo-read` Call.
+//                  Reads are ALLOWED; writes / commits stay forbidden.
+//   - `mutating` — writes aggregate state / persistence.  Classified, but the
+//                  mutating EMISSION is a LATER slice, so this leaf still
+//                  REJECTS mutation via `loom.domain-service-no-mutation`.
+//
+// What this leaf enforces:
 //
 //   - `emit`                              → loom.domain-service-no-emit
 //   - `assign` / `add` / `remove`         → loom.domain-service-no-mutation
 //     (a domain service has no `this`; a `this`-rooted write is a hard error)
-//   - a call whose receiver names a `repository` in the context
-//                                         → loom.domain-service-no-repo
+//   - a repository WRITE call (save/insert/update/delete/add/remove/commit)
+//                                         → loom.domain-service-no-repo-write
+//     (repository READS — find/findAll/run/named-find — are NOW ALLOWED:
+//      they lower to a `repo-read` Call and never reach this `method-call`
+//      gate, the `reading` tier)
 //   - a call whose receiver names a `workflow` in the context
 //                                         → loom.domain-service-no-workflow-start
+//   - a `reading`/`mutating` domain service called from an aggregate
+//     operation/create/destroy or a view body
+//                                         → loom.domain-service-infra-call-from-aggregate
+//     (pure services are exempt — they carry no infrastructure)
 //
 // Plus the anemic-domain WARNING when every operation takes exactly one
-// aggregate-typed parameter (loom.domain-service-single-aggregate) — the
-// behaviour could live on that aggregate instead.
+// aggregate-typed parameter (loom.domain-service-single-aggregate).
 //
-// Parameter-operation-mutation (`from.withdraw(x)`) is DEFERRED to Phase
-// 2 (Shape B) — it needs target-resolution of the method's callee, which
-// v1 does not attempt.  `extern` / `api`-call rejection rides the same
-// future target-resolution slice; the stable codes are reserved here for
-// when it lands.
+// Parameter-operation-mutation (`from.withdraw(x)`) and `extern`/`api`-call
+// rejection ride a future target-resolution slice.
 // -------------------------------------------------------------------------
 
 import type {
+  AggregateIR,
   BoundedContextIR,
   DomainServiceIR,
   DomainServiceOperationIR,
   ExprIR,
+  OperationIR,
   ParamIR,
   StmtIR,
+  ViewIR,
 } from "../../types/loom-ir.js";
+import { classifyDomainServiceTier } from "../../util/domain-service-tier.js";
+import { isWriteMethod } from "../../util/repo-methods.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { walkExpr } from "./shared.js";
 
@@ -47,6 +62,10 @@ export function validateDomainServices(ctx: BoundedContextIR, diags: LoomDiagnos
     }
     checkAnemic(ctx, svc, diags);
   }
+  // The infra-call gate is a cross-declaration check — it needs the set of
+  // NON-pure services, then a scan of every aggregate / view body for a call
+  // into one.  Run it once per context after the per-service checks.
+  checkInfraCallsFromAggregates(ctx, diags);
 }
 
 function checkOperationBody(
@@ -76,25 +95,34 @@ function checkOperationBody(
         diags.push({
           severity: "error",
           code: "loom.domain-service-no-mutation",
-          message: `${where}: '${stmt.target.segments.join(".")} ${assignVerb(stmt.kind)}' writes to aggregate state, but a domain service has no 'this' to mutate (v1 is the pure-calculator floor).  Return a value instead.`,
+          message: `${where}: '${stmt.target.segments.join(".")} ${assignVerb(stmt.kind)}' writes to aggregate state, but a domain service has no 'this' to mutate (the mutating tier's emission is not in this slice).  Return a value instead.`,
           source,
         });
         break;
     }
-    // Expression-level infra: a call whose receiver names a repository or
-    // workflow in this context.  Repository loads are the application's
-    // job (the orchestrator loads and passes materialised aggregates in);
-    // a domain service may not reach the application layer.
+    // Expression-level infra:
+    //   - a repository WRITE call (`Accounts.save(x)`) — a `method-call` whose
+    //     receiver names a repository and whose member is a write verb.  READS
+    //     are not seen here: a recognised repository read lowers to a `repo-read`
+    //     Call, not a `method-call`, so it never reaches this gate (the
+    //     `reading` tier).
+    //   - a call whose receiver names a `workflow` (starting the application
+    //     layer from the domain layer).
     forEachStmtExpr(stmt, (e) => {
       const recvName = callReceiverName(e);
       if (!recvName) return;
       if (repoNames.has(recvName)) {
-        diags.push({
-          severity: "error",
-          code: "loom.domain-service-no-repo",
-          message: `${where}: call on repository '${recvName}' is not allowed — loading is the application's job.  The orchestrator (workflow / command handler) loads and passes the aggregate in.`,
-          source,
-        });
+        // Only a WRITE method is rejected — reads are allowed (and have already
+        // been lowered to `repo-read` Calls, so a `method-call` on a repo here
+        // is either a write verb or an unknown one; gate on the write verbs).
+        if (e.kind === "method-call" && isWriteMethod(e.member)) {
+          diags.push({
+            severity: "error",
+            code: "loom.domain-service-no-repo-write",
+            message: `${where}: repository WRITE '${recvName}.${e.member}(…)' is not allowed — a domain service may run read-only queries (the 'reading' tier), but persistence writes (save/insert/update/delete/add/remove/commit) belong to the orchestrator (workflow / command handler).`,
+            source,
+          });
+        }
       } else if (workflowNames.has(recvName)) {
         diags.push({
           severity: "error",
@@ -105,6 +133,75 @@ function checkOperationBody(
       }
     });
   }
+}
+
+/** `loom.domain-service-infra-call-from-aggregate` — a `reading` (or
+ *  `mutating`) domain service runs infrastructure (a repository read / a write),
+ *  so it must be orchestrated by the application layer (workflow / command
+ *  handler), never called from inside an aggregate `operation`/`create`/`destroy`
+ *  body or a view body.  PURE services are exempt (no infrastructure).  The
+ *  closest analog is the UI mutating-command gate (`ui-checks.ts`
+ *  `checkActionRequiresAwait`). */
+function checkInfraCallsFromAggregates(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+  // The set of NON-pure (reading/mutating) services in this context — only a
+  // call into one of these is gated.
+  const nonPure = new Set<string>();
+  for (const svc of ctx.domainServices) {
+    if (svc.operations.some((op) => classifyDomainServiceTier(op) !== "pure")) {
+      nonPure.add(svc.name);
+    }
+  }
+  if (nonPure.size === 0) return;
+
+  const flag = (where: string, source: string, call: Extract<ExprIR, { kind: "call" }>): void => {
+    const ref = call.serviceRef;
+    if (!ref || !nonPure.has(ref.service)) return;
+    diags.push({
+      severity: "error",
+      code: "loom.domain-service-infra-call-from-aggregate",
+      message: `${where}: call to domain service '${ref.service}.${ref.op}(…)' runs infrastructure (a repository read/write), which the domain layer may not do from inside an aggregate operation or a view.  Move the call into the orchestrating workflow / command handler, which loads aggregates and owns the commit.`,
+      source,
+    });
+  };
+
+  for (const agg of ctx.aggregates) {
+    for (const op of [...agg.operations, ...(agg.creates ?? []), ...(agg.destroys ?? [])]) {
+      scanAggregateOp(ctx, agg, op, flag);
+    }
+  }
+  for (const view of ctx.views) {
+    scanView(ctx, view, flag);
+  }
+}
+
+function scanAggregateOp(
+  ctx: BoundedContextIR,
+  agg: AggregateIR,
+  op: OperationIR,
+  flag: (where: string, source: string, call: Extract<ExprIR, { kind: "call" }>) => void,
+): void {
+  const where = `aggregate '${agg.name}' operation '${op.name}'`;
+  const source = `${ctx.name}/${agg.name}.${op.name}`;
+  for (const stmt of op.statements) {
+    forEachStmtExpr(stmt, (e) => {
+      if (e.kind === "call" && e.callKind === "domain-service") flag(where, source, e);
+    });
+  }
+}
+
+function scanView(
+  ctx: BoundedContextIR,
+  view: ViewIR,
+  flag: (where: string, source: string, call: Extract<ExprIR, { kind: "call" }>) => void,
+): void {
+  const where = `view '${view.name}'`;
+  const source = `${ctx.name}/${view.name}`;
+  const visit = (e: ExprIR): void => {
+    if (e.kind === "call" && e.callKind === "domain-service") flag(where, source, e);
+  };
+  walkExpr(view.requires, visit);
+  walkExpr(view.filter, visit);
+  for (const bind of view.output?.binds ?? []) walkExpr(bind.expr, visit);
 }
 
 /** `loom.domain-service.single-aggregate` — soft warning when every
@@ -132,9 +229,9 @@ function assignVerb(kind: "assign" | "add" | "remove"): string {
   return kind === "assign" ? ":= ..." : kind === "add" ? "+= ..." : "-= ...";
 }
 
-/** When `e` is a `call`/`method-call` whose receiver is a bare `ref`,
- *  return that receiver's name (so a use of a repository / workflow by
- *  name can be detected); otherwise undefined. */
+/** When `e` is a `method-call` whose receiver is a bare `ref`, return that
+ *  receiver's name (so a use of a repository / workflow by name can be
+ *  detected); otherwise undefined. */
 function callReceiverName(e: ExprIR): string | undefined {
   if (e.kind === "method-call" && e.receiver.kind === "ref") return e.receiver.name;
   return undefined;

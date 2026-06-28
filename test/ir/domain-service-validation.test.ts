@@ -1,7 +1,9 @@
-// IR-validator coverage for the `domainService` no-infra contract
-// (domain-services.md, v1 Shape A).  Diagnostic codes:
+// IR-validator coverage for the `domainService` no-infra contract, rev. 4
+// tiers (domain-services.md; the `reading` tier is Slice 1).  Diagnostic codes:
 //   loom.domain-service-no-emit, loom.domain-service-no-mutation,
-//   loom.domain-service-no-repo, loom.domain-service-no-workflow-start,
+//   loom.domain-service-no-repo-write (recast from -no-repo: reads now allowed,
+//   writes still rejected), loom.domain-service-no-workflow-start,
+//   loom.domain-service-infra-call-from-aggregate, and the
 //   loom.domain-service-single-aggregate (warning).
 
 import { describe, expect, it } from "vitest";
@@ -16,7 +18,9 @@ async function diags(body: string) {
       event Quoted { at: datetime }
       aggregate Customer { tier: string }
       aggregate Cart { subtotal: money }
-      repository Customers for Customer { }
+      repository Customers for Customer {
+        find byTier(tier: string): Customer? where this.tier == tier
+      }
       repository Carts for Cart { }
       workflow Onboarding { create(c: Customer) { let z = 1 } }
       ${body}
@@ -39,16 +43,71 @@ describe("IR validator — domainService no-infra contract", () => {
     expect(d.some((x) => x.code === "loom.domain-service-no-emit")).toBe(true);
   });
 
-  it("rejects a repository call in a domain-service operation body", async () => {
+  it("allows a repository READ in a domain-service operation body (the reading tier)", async () => {
+    // rev. 4 `reading` tier: a read-only repository query is now legal — it
+    // lowers to a `repo-read` Call and no longer trips the repo gate.  Both the
+    // criterionless `findAll()` and a named find are reads.
+    const d = await diags(`
+      domainService Registration {
+        operation isTaken(holder: string): bool {
+          let found = Customers.byTier(holder)
+          return found == null
+        }
+      }
+    `);
+    expect(d.some((x) => x.code === "loom.domain-service-no-repo-write")).toBe(false);
+    expect(d.some((x) => x.code === "loom.domain-service-no-repo")).toBe(false);
+  });
+
+  it("rejects a repository WRITE in a domain-service operation body", async () => {
+    // Writes (save/insert/update/delete/add/remove/commit) stay forbidden — the
+    // orchestrator owns persistence.
     const d = await diags(`
       domainService Pricing {
         operation quote(cart: Cart, customer: Customer): money {
-          let all = Carts.findAll()
+          let r = Carts.save(cart)
           return cart.subtotal
         }
       }
     `);
-    expect(d.some((x) => x.code === "loom.domain-service-no-repo")).toBe(true);
+    expect(d.some((x) => x.code === "loom.domain-service-no-repo-write")).toBe(true);
+  });
+
+  it("rejects calling a reading domain service from an aggregate operation body", async () => {
+    // A `reading` service runs infrastructure, so it must be orchestrated by the
+    // application layer — never called from inside an aggregate operation.
+    const d = await diags(`
+      domainService Registration {
+        operation isTaken(holder: string): bool {
+          let found = Customers.byTier(holder)
+          return found == null
+        }
+      }
+      aggregate Account {
+        holder: string
+        operation rename(name: string) {
+          let taken = Registration.isTaken(name)
+        }
+      }
+    `);
+    expect(d.some((x) => x.code === "loom.domain-service-infra-call-from-aggregate")).toBe(true);
+  });
+
+  it("does NOT flag a PURE domain service called from an aggregate operation body", async () => {
+    // Pure services carry no infrastructure, so the infra-call gate exempts them.
+    const d = await diags(`
+      domainService Pricing {
+        operation surcharge(base: money): money { return base }
+      }
+      aggregate Account {
+        holder: string
+        balance: money
+        operation reprice() {
+          let q = Pricing.surcharge(balance)
+        }
+      }
+    `);
+    expect(d.some((x) => x.code === "loom.domain-service-infra-call-from-aggregate")).toBe(false);
   });
 
   it("rejects a write to aggregate state in a domain-service operation body", async () => {

@@ -426,6 +426,10 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
       return args.length > 0
         ? `${snake(e.name)}(${ctx.thisName}, ${args.join(", ")})`
         : `${snake(e.name)}(${ctx.thisName})`;
+    case "repo-read":
+    // Read-only repository query in a `reading` domain-service body
+    // (domain-services.md rev. 4).  Per-backend EMISSION is a LATER slice;
+    // plain-call fall-through keeps the exhaustive switch total for now.
     case "action":
     // Sibling action call (Proposal A Stage 1) — frontend-only; never lowered
     // into a backend domain expression.  Plain call keeps the switch total.

@@ -264,6 +264,10 @@ function renderCall(
       const ref = e.serviceRef!;
       return `${ref.service}.${lowerFirst(ref.op)}(${argList})`;
     }
+    case "repo-read":
+    // A read-only repository query in a `reading` domain-service body
+    // (domain-services.md rev. 4).  Per-backend EMISSION is a LATER slice; for
+    // now fall through to a plain call so the exhaustive switch stays total.
     case "action":
     // A sibling page/component action call (Proposal A Stage 1) — frontend-
     // only; never lowered into a backend domain expression.  Render as a plain

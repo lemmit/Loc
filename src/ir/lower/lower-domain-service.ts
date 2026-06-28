@@ -12,7 +12,8 @@
 //
 // This is a leaf module: it never imports `lower.ts` (the graph is
 // acyclic — the orchestrator imports this).
-import type { DomainService } from "../../language/generated/ast.js";
+import type { DomainService, Repository } from "../../language/generated/ast.js";
+import { isRepository } from "../../language/generated/ast.js";
 import type {
   DomainServiceIR,
   DomainServiceOperationIR,
@@ -23,9 +24,19 @@ import { lowerStatement } from "./lower-stmt.js";
 import { type Env, lowerType, withLocal } from "./lower-types.js";
 
 export function lowerDomainService(decl: DomainService, env: Env): DomainServiceIR {
+  // Index the enclosing context's repositories so a recognised repository READ
+  // in an operation body (`Accounts.byHolder(h)`) lowers to a resolved
+  // `repo-read` Call — the `reading` tier (domain-services.md rev. 4).  Empty
+  // when the context declares none; a write call then has nothing to resolve
+  // against and the validator's repo-write gate handles it off the AST shape.
+  const serviceRepos = new Map<string, Repository>();
+  for (const m of env.ctx?.members ?? []) {
+    if (isRepository(m)) serviceRepos.set(m.name, m);
+  }
+  const svcEnv: Env = { ...env, serviceRepos };
   return {
     name: decl.name,
-    operations: decl.operations.map((op) => lowerDomainServiceOperation(op, env)),
+    operations: decl.operations.map((op) => lowerDomainServiceOperation(op, svcEnv)),
   };
 }
 
@@ -34,6 +45,8 @@ function lowerDomainServiceOperation(
   env: Env,
 ): DomainServiceOperationIR {
   // Fresh local scope per operation — no `this`, no aggregate candidate.
+  // `serviceRepos` is threaded from the service env (it's context-scoped, not
+  // operation-scoped) so each operation body resolves repository reads.
   let inner: Env = { ...env, locals: new Map() };
   const params: ParamIR[] = [];
   for (const p of op.params) {

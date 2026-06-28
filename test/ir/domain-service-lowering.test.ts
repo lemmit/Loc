@@ -28,6 +28,22 @@ const SRC = `
   }
 `;
 
+// A `reading`-tier service: its body runs a read-only repository query, which
+// lowers to a resolved `repo-read` Call (domain-services.md rev. 4, Slice 1).
+const READING_SRC = `
+  context Banking {
+    aggregate Account { holder: string }
+    repository Accounts for Account {
+      find byHolder(holder: string): Account? where this.holder == holder
+    }
+    domainService Registration {
+      operation isTaken(holder: string): bool {
+        return Accounts.byHolder(holder) == null
+      }
+    }
+  }
+`;
+
 describe("lowering — domainService", () => {
   it("records domain services on the bounded-context IR", async () => {
     const loom = await buildLoomModel(SRC);
@@ -69,5 +85,32 @@ describe("lowering — domainService", () => {
       kind: "primitive",
       name: "money",
     });
+  });
+
+  it("lowers a repository READ in a reading-tier body to a repo-read Call", async () => {
+    const loom = await buildLoomModel(READING_SRC);
+    const ctx = allContexts(loom).find((c) => c.name === "Banking")!;
+    const reg = ctx.domainServices.find((s) => s.name === "Registration")!;
+    const op = reg.operations.find((o) => o.name === "isTaken")!;
+    // `return Accounts.byHolder(holder) == null` — the read is the LHS of the
+    // binary equality on the returned value.
+    const ret = op.body.find((s) => s.kind === "return")! as Extract<
+      (typeof op.body)[number],
+      { kind: "return" }
+    >;
+    const cmp = ret.value as Extract<ExprIR, { kind: "binary" }>;
+    expect(cmp.kind).toBe("binary");
+    const read = cmp.left as Extract<ExprIR, { kind: "call" }>;
+    expect(read.kind).toBe("call");
+    expect(read.callKind).toBe("repo-read");
+    // Fully resolved: the per-backend emitters render against this contract.
+    expect(read.repoRead).toEqual({
+      repo: "Accounts",
+      aggregate: "Account",
+      method: "byHolder",
+      readKind: "named",
+    });
+    expect(read.name).toBe("byHolder");
+    expect(read.args.length).toBe(1);
   });
 });
