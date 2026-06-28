@@ -25,7 +25,7 @@ import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
 import { allContexts, type TypeIR } from "../../src/ir/types/loom-ir.js";
 import { lowerFirst } from "../../src/util/naming.js";
-import { generateDotnet, generateHono } from "../_helpers/generate.js";
+import { generateDotnet, generateHono, generateSystemFiles } from "../_helpers/generate.js";
 import { parseString, parseValid } from "../_helpers/parse.js";
 
 const CONTEXT = `
@@ -34,6 +34,23 @@ const CONTEXT = `
     error NotFound { resource: string }
     repository Orders for Order { find recent(): Order or NotFound }
   }
+`;
+
+/** The same union find hosted on a vanilla-elixir deployable, for the Phoenix
+ *  `:type`-tag assertion (the elixir backend tags the success variant inline
+ *  rather than via a per-variant struct, so it needs a full system to emit). */
+const VANILLA_SYSTEM = `
+system UN {
+  subdomain Orders { context Orders {
+    aggregate Order ids guid with crudish { code: string  region: string }
+    error NotFound { resource: string }
+    repository Orders for Order { find recent(): Order or NotFound }
+  } }
+  api OApi from Orders
+  storage pg { type: postgres }
+  resource st { for: Orders, kind: state, use: pg }
+  deployable api { platform: elixir { foundation: vanilla } contexts: [Orders] dataSources: [st] serves: OApi port: 4000 }
+}
 `;
 
 /** variant tag → ordered wire field keys, expressed as a comparable object. */
@@ -116,5 +133,16 @@ describe("discriminated unions — cross-backend wire parity (P4e)", () => {
     )!;
     expect(honoSrc).toContain('z.discriminatedUnion("type"');
     expect(dotnetSrc).toContain('[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]');
+  });
+
+  it("vanilla Phoenix tags the success variant inline with the same `type` discriminator", async () => {
+    const files = await generateSystemFiles(VANILLA_SYSTEM);
+    const ctrlKey = [...files.keys()].find((k) => k.endsWith("order_controller.ex"))!;
+    const ctrl = files.get(ctrlKey)!;
+    // success body: the whole record serialized + a `:type` tag = byte-equivalent
+    // to Hono's `{ type, ...toWire }` / .NET's `[JsonPolymorphic("type")]`.
+    expect(ctrl).toContain('Map.put(serialize(record), :type, "Order")');
+    // absent variant rides a 404 ProblemDetails (no inline struct), not a 200 body.
+    expect(ctrl).toContain("problem_variant(conn, 404");
   });
 });

@@ -92,4 +92,15 @@ describe("vanilla `X id[]` reference collections", () => {
     expect(mig).toBeDefined();
     expect(files.get(mig!)!).not.toMatch(/add :party/);
   });
+
+  // §4: a `where this.party.contains(pokemon)` find short-circuits to a valid
+  // Ecto membership query — a `join: … in assoc(record, :party)` over the
+  // many_to_many with `where: join_row.id == ^arg` — NOT the dead Ash-shaped
+  // `exists(...)` arm in render-expr.ts (the filter never reaches it).
+  it("a contains-in-where find emits the assoc-join membership query", async () => {
+    const repo = file(await generateSystemFiles(SOURCE), "/roster/trainer_repository.ex");
+    expect(repo).toContain("def holding_in_party(pokemon)");
+    expect(repo).toContain("join: join_row in assoc(record, :party)");
+    expect(repo).toContain("where: join_row.id == ^pokemon");
+  });
 });
