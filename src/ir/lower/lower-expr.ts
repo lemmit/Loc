@@ -622,9 +622,7 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
         arms: [],
         variantArms: expr.varArms.map((arm) => {
           const varType = lowerAtom(arm.varType, env);
-          const armEnv = arm.binding
-            ? withLocal(env, arm.binding, "match-binding", varType)
-            : env;
+          const armEnv = arm.binding ? withLocal(env, arm.binding, "match-binding", varType) : env;
           return {
             varType,
             binding: arm.binding,

@@ -228,9 +228,7 @@ export function renderExprWith<Ctx extends ExprCtxBase>(
           arms,
           otherwise: e.otherwise ? r(e.otherwise) : undefined,
           unionName:
-            e.subjectType?.kind === "union"
-              ? unionInstanceName(e.subjectType.variants)
-              : "",
+            e.subjectType?.kind === "union" ? unionInstanceName(e.subjectType.variants) : "",
         });
       }
       return t.match(

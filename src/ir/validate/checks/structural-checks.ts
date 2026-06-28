@@ -6,6 +6,7 @@
 
 import { allPlatformDescriptors } from "../../../platform/metadata.js";
 import { isStdlibError } from "../../../util/error-defaults.js";
+import { typeKey, variantTag } from "../../stdlib/unions.js";
 import type {
   BoundedContextIR,
   EnrichedLoomModel,
@@ -16,7 +17,6 @@ import type {
   StmtIR,
   TypeIR,
 } from "../../types/loom-ir.js";
-import { typeKey, variantTag } from "../../stdlib/unions.js";
 import { allContexts } from "../../types/loom-ir.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { walkExpr } from "./shared.js";
@@ -968,7 +968,9 @@ export function validateVariantMatch(loom: EnrichedLoomModel, diags: LoomDiagnos
             code: "loom.match-non-exhaustive",
             message: `variant 'match' does not cover ${missingTags
               .map((t) => `'${t}'`)
-              .join(", ")} and has no 'else' arm — the expression is undefined for those variants. Add the missing arm(s) or an 'else => …'.`,
+              .join(
+                ", ",
+              )} and has no 'else' arm — the expression is undefined for those variants. Add the missing arm(s) or an 'else => …'.`,
             source,
           });
         }
