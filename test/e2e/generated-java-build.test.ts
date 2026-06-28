@@ -141,6 +141,11 @@ const FIXTURES: Array<[string, string]> = [
   // throws DisallowedException (→ 409) before mutating, and the controller
   // auto-exposes `GET /orders/{id}/can_cancel` → CanResponse { allowed }.
   ["test/e2e/fixtures/java-build/when.ddd", "when_api"],
+  // Workflow with a value-object param + a bare int money-literal in the
+  // factory-let: the workflow Request DTO + service import the VO's request
+  // record (cross-package) and emit the `to<Vo>` mapper; `threshold: 0`
+  // promotes to `new BigDecimal("0")` rather than a raw `int 0`.
+  ["test/e2e/fixtures/java-build/workflow-vo-param.ddd", "wallet_api"],
   // OIDC turnkey auth (D-AUTH-OIDC): the generated @Primary OidcUserVerifier
   // (Nimbus JWKS + dotted-path claim mapping), the AuthController /auth/*
   // handshake + /auth/me probe, and the BOM-managed nimbus-jose-jwt dep.

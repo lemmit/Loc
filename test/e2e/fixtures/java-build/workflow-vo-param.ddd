@@ -1,0 +1,49 @@
+// Java workflow with a value-object param + a bare int money-literal in the
+// workflow factory-let.  Two pre-existing gradle-compile defects this gate
+// would have caught:
+//
+//   1. The `topUp` workflow's Request DTO carries a `MoneyRequest` component
+//      (the `Money` VO's request record).  That record is emitted into the
+//      aggregate's application package, not `domain.valueobjects.*`, so the
+//      workflow Request DTO (in a different package) must IMPORT it — and the
+//      workflow service must both import it and emit the `to<Vo>` mapper.
+//   2. `threshold: 0` is a bare int literal flowing into a `decimal`
+//      create-input.  It must be promoted to the `BigDecimal` literal in the
+//      workflow factory-let (`new BigDecimal("0")`), not emitted as a raw
+//      `int 0` into a `BigDecimal` argument position.
+system WalletSys {
+  subdomain Banking {
+    context Wallet {
+      valueobject Money {
+        amount: decimal
+        currency: string
+        invariant amount >= 0
+      }
+
+      aggregate Account with crudish {
+        balance: Money
+        threshold: decimal = 0
+      }
+      repository Accounts for Account { }
+
+      // VO-typed param (amount: Money) + int money-literal (threshold: 0).
+      workflow topUp transactional {
+        create(amount: Money) {
+          precondition amount.amount > 0
+          let acct = Account.create({ balance: amount, threshold: 0 })
+        }
+      }
+    }
+  }
+
+  api WalletApi from Banking
+  storage pg { type: postgres }
+  resource walletState { for: Wallet, kind: state, use: pg }
+  deployable walletApi {
+    platform: java
+    contexts: [Wallet]
+    dataSources: [walletState]
+    serves: WalletApi
+    port: 8080
+  }
+}

@@ -420,10 +420,26 @@ function lowerWorkflowStatement(
     const factory = matchFactoryCall(expr, aggsByName);
     if (factory) {
       const repoName = repoForAgg.get(factory.aggName) ?? plural(factory.aggName);
-      const fields = factory.fields.map((f) => ({
-        name: f.name,
-        value: lowerExpr(f.value, env),
-      }));
+      // Per-field target type, so a bare numeric literal flowing into a
+      // money/decimal/long-typed create input is promoted to the precise
+      // typed literal (`threshold: 0` → `lit("decimal", "0")`) — the same
+      // contextual promotion the aggregate-create service and own-state
+      // `:=` paths already apply.  Without it Java emits a raw `int 0`
+      // into a `BigDecimal` create-input position and fails to compile.
+      const targetAgg = aggsByName.get(factory.aggName);
+      const fieldTypeOf = new Map<string, TypeIR>();
+      if (targetAgg) {
+        for (const m of targetAgg.members) {
+          if (isProperty(m)) fieldTypeOf.set(m.name, lowerType(m.type, env));
+        }
+      }
+      const fields = factory.fields.map((f) => {
+        const target = fieldTypeOf.get(f.name);
+        return {
+          name: f.name,
+          value: target ? lowerExprInContext(f.value, target, env) : lowerExpr(f.value, env),
+        };
+      });
       const aggType: TypeIR = { kind: "entity", name: factory.aggName };
       return {
         stmt: {
