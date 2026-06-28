@@ -246,10 +246,11 @@ export function renderSchema(
 }
 
 /** A many-to-many join table for an `T id[]` reference collection.
- * Two FK columns + an `ordinal` position so the collection's order
- * survives a round-trip, a composite primary key over (owner, target)
- * (so each pair is unique and the save upsert is idempotent), and an
- * index on the target FK for the reverse membership query. */
+ * Two FK columns, a composite primary key over (owner, target) — the
+ * pair IS the whole row, since `T id[]` is contractually a set (membership
+ * only, no order) — and an index on the target FK for the reverse
+ * membership query.  No `ordinal` column: deterministic read-back order is
+ * a read-time projection (ORDER BY the target FK id), not stored state. */
 function emitJoinTable(
   assoc: AssociationIR,
   options: { schema?: string; prefix?: string } = {},
@@ -264,7 +265,6 @@ function emitJoinTable(
   lines.push(`export const ${tableConst} = ${tableFactory}("${tableName}", {`);
   lines.push(`  ${ownerKey}: ${drizzleIdColumn(assoc.valueType, assoc.ownerFk)}.notNull(),`);
   lines.push(`  ${targetKey}: ${drizzleIdColumn(assoc.valueType, assoc.targetFk)}.notNull(),`);
-  lines.push(`  ordinal: integer("ordinal").notNull(),`);
   lines.push(`}, (table) => ({`);
   lines.push(
     `  ${tableConst}Pk: primaryKey({ columns: [table.${ownerKey}, table.${targetKey}] }),`,

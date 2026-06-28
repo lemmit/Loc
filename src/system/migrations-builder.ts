@@ -725,15 +725,14 @@ function tableForAssociation(assoc: AssociationIR, ownerModule: string): TableSh
     name: assoc.joinTable,
     ownerModule,
     columns: [
+      // `Id<T>[]` is contractually a set (membership only, no order): the
+      // composite PK below IS the whole row, so the join table carries no
+      // payload column.  Deterministic read-back order is a read-time
+      // projection (every backend ORDERs BY the target FK id), not a stored
+      // `ordinal`.  (The value-collection child table keeps its ordinal —
+      // there it is part of the PK; see `valueCollectionTableShape`.)
       { name: assoc.ownerFk, type: idType, nullable: false },
       { name: assoc.targetFk, type: idType, nullable: false },
-      // The wire contract for `Id<T>[]` is a set (composite PK above
-      // enforces uniqueness, iteration order is not promised).  Ordinal
-      // stays in the schema as a cross-backend column so TS/.NET can
-      // write it as a diff-sync byproduct; Phoenix leaves it at the
-      // default 0.  Nullable + defaulted so all three backends can
-      // INSERT without it.
-      { name: "ordinal", type: { kind: "int" }, nullable: true, default: "0" },
     ],
     primaryKey: [assoc.ownerFk, assoc.targetFk],
     foreignKeys: [

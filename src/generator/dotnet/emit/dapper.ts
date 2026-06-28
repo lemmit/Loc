@@ -338,10 +338,12 @@ export function renderDapperRepository(
   const mapBody = cols.map((c) => `            ${c.stateProp} = ${c.hydrate},`);
 
   // Reference collections (`X id[]` → AssociationIR, one join table each).
+  // `X id[]` is contractually a set (membership only, no order), so the join
+  // row is just its composite (owner, target) PK — no payload column.
   // Loads: a private LoadRefsAsync bulk-fills every root's list (ordered by
-  // ordinal); GetById funnels its single root through it too.  Saves:
-  // full-list replace — DELETE owner rows + re-INSERT with ordinals (EF
-  // diff-syncs; delete+insert is semantically identical for a full-list
+  // the target FK id for deterministic read-back); GetById funnels its single
+  // root through it too.  Saves: full-list replace — DELETE owner rows +
+  // re-INSERT (delete+insert is semantically identical for a full-list
   // replace and keeps the SQL trivial).  Deletes: join rows go first (the
   // Dapper schema emits no FK cascade).
   const associations = agg.associations ?? [];
@@ -357,7 +359,7 @@ export function renderDapperRepository(
           const targetCs = idTypes(a.valueType).cs;
           const prop = upperFirst(a.fieldName);
           return [
-            `        var __${a.fieldName}Rows = (await conn.QueryAsync<(${ownerCs} owner, ${targetCs} target)>(new CommandDefinition("SELECT ${a.ownerFk}, ${a.targetFk} FROM ${a.joinTable} WHERE ${a.ownerFk} = ANY(@ids) ORDER BY ${a.ownerFk}, ordinal", new { ids = __ids }, cancellationToken: cancellationToken))).ToList();`,
+            `        var __${a.fieldName}Rows = (await conn.QueryAsync<(${ownerCs} owner, ${targetCs} target)>(new CommandDefinition("SELECT ${a.ownerFk}, ${a.targetFk} FROM ${a.joinTable} WHERE ${a.ownerFk} = ANY(@ids) ORDER BY ${a.ownerFk}, ${a.targetFk}", new { ids = __ids }, cancellationToken: cancellationToken))).ToList();`,
             `        var __${a.fieldName}ByOwner = __${a.fieldName}Rows.GroupBy(t => t.owner).ToDictionary(g => g.Key, g => g.Select(t => new ${a.targetAgg}Id(t.target)).ToList());`,
             `        foreach (var __root in roots)`,
             `        {`,
@@ -372,9 +374,9 @@ export function renderDapperRepository(
     const prop = upperFirst(a.fieldName);
     return [
       `        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM ${a.joinTable} WHERE ${a.ownerFk} = @id", new { id = aggregate.Id.Value }, cancellationToken: cancellationToken));`,
-      `        for (var __i = 0; __i < aggregate.${prop}.Count; __i++)`,
+      `        foreach (var __t in aggregate.${prop})`,
       "        {",
-      `            await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${a.joinTable} (${a.ownerFk}, ${a.targetFk}, ordinal) VALUES (@o, @t, @i)", new { o = aggregate.Id.Value, t = aggregate.${prop}[__i].Value, i = __i }, cancellationToken: cancellationToken));`,
+      `            await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${a.joinTable} (${a.ownerFk}, ${a.targetFk}) VALUES (@o, @t)", new { o = aggregate.Id.Value, t = __t.Value }, cancellationToken: cancellationToken));`,
       "        }",
     ];
   });
@@ -770,13 +772,14 @@ export function renderDapperSchema(aggs: readonly EnrichedAggregateIR[], ns: str
       return `    ${c.col} ${c.sql}${pk}${nn}`;
     });
     const root = `CREATE TABLE IF NOT EXISTS ${tableOf(agg.name)} (\n${cols.join(",\n")}\n);`;
-    // One join table per reference collection (`X id[]`), ordinal-ordered.
+    // One join table per reference collection (`X id[]`).  `X id[]` is a set
+    // (membership only, no order): the composite (owner, target) PK is the
+    // whole row — no payload column.  Reads ORDER BY the target FK id.
     const joins = (agg.associations ?? []).map((a) =>
       [
         `CREATE TABLE IF NOT EXISTS ${a.joinTable} (`,
         `    ${a.ownerFk} ${idTypes(agg.idValueType).sql} not null,`,
         `    ${a.targetFk} ${idTypes(a.valueType).sql} not null,`,
-        "    ordinal integer not null,",
         `    primary key (${a.ownerFk}, ${a.targetFk})`,
         ");",
       ].join("\n"),

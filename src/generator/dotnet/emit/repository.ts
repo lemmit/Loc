@@ -423,7 +423,7 @@ function buildLoadByIdLines(associations: AssociationIR[]): string[] {
     const prop = upperFirst(a.fieldName);
     out.push(`            found.${prop} = await _db.${dbSet}`);
     out.push(`                .Where(j => j.${owner} == id)`);
-    out.push(`                .OrderBy(j => j.Ordinal)`);
+    out.push(`                .OrderBy(j => j.${target})`);
     out.push(`                .Select(j => j.${target})`);
     out.push(`                .ToListAsync(cancellationToken);`);
   }
@@ -459,7 +459,7 @@ function buildLoadManyByIdsLines(
     const targetType = `${a.targetAgg}Id`;
     out.push(`        var __${a.fieldName}Rows = await _db.${dbSet}`);
     out.push(`            .Where(j => ids.Contains(j.${owner}))`);
-    out.push(`            .OrderBy(j => j.${owner}).ThenBy(j => j.Ordinal)`);
+    out.push(`            .OrderBy(j => j.${owner}).ThenBy(j => j.${target})`);
     out.push(`            .Select(j => new { Owner = j.${owner}, Target = j.${target} })`);
     out.push(`            .ToListAsync(cancellationToken);`);
     out.push(`        var __${a.fieldName}ByOwner = __${a.fieldName}Rows`);
@@ -483,10 +483,9 @@ function buildLoadManyByIdsLines(
  * reference collection on the aggregate: load existing join rows,
  * compare against the current `aggregate.<Prop>` set, delete pairs
  * that are no longer present, and insert new ones.  Set semantics —
- * the wire contract for `Id<T>[]` doesn't promise order — but we
- * still write the ordinal column from the list index for a
- * deterministic per-backend value.  Mirrors the TS Drizzle save
- * diff-sync. */
+ * the wire contract for `Id<T>[]` is a set (membership only, no order),
+ * so the join row carries no payload: it's added if missing, left as-is
+ * otherwise.  Mirrors the TS Drizzle save diff-sync. */
 function buildSaveDiffSyncLines(associations: AssociationIR[]): string[] {
   if (associations.length === 0) return [];
   const out: string[] = [];
@@ -508,12 +507,12 @@ function buildSaveDiffSyncLines(associations: AssociationIR[]): string[] {
     out.push("        {");
     out.push(`            _db.${dbSet}.Remove(__stale);`);
     out.push("        }");
-    out.push(`        for (int __i = 0; __i < __current${cap}.Count; __i++)`);
+    out.push(`        foreach (var __tid in __current${cap})`);
     out.push("        {");
-    out.push(`            var __tid = __current${cap}[__i];`);
-    out.push(`            var __row = __existing${cap}.FirstOrDefault(x => x.${target} == __tid);`);
-    out.push("            if (__row != null) { __row.Ordinal = __i; }");
-    out.push(`            else { _db.${dbSet}.Add(new ${cls}(aggregate.Id, __tid, __i)); }`);
+    out.push(`            if (!__existing${cap}.Any(x => x.${target} == __tid))`);
+    out.push("            {");
+    out.push(`                _db.${dbSet}.Add(new ${cls}(aggregate.Id, __tid));`);
+    out.push("            }");
     out.push("        }");
   }
   return out;

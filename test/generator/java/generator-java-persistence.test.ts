@@ -92,12 +92,16 @@ describe("java generator — JPA mapping (S4)", () => {
     );
   });
 
-  it("maps reference collections onto the association join table with ordinal", async () => {
+  it("maps reference collections onto the association join table, ordered by the target FK id", async () => {
     const order = (await files()).get(`${ROOT}/features/orders/Order.java`)!;
     expect(order).toContain(
       '    @CollectionTable(name = "order_tag_ids", schema = "orders", joinColumns = @JoinColumn(name = "order_id"))',
     );
-    expect(order).toContain('    @OrderColumn(name = "ordinal")');
+    // `Tag id[]` is a set (membership only, no order): no `ordinal` column —
+    // @OrderBy (no argument) sorts by the element value (the target FK id),
+    // the same deterministic read-back projection every other backend applies.
+    expect(order).toContain("    @OrderBy");
+    expect(order).not.toContain('@OrderColumn(name = "ordinal")');
     expect(order).toContain(
       '    @AttributeOverride(name = "value", column = @Column(name = "tag_id"))',
     );
