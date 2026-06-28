@@ -28,6 +28,16 @@ import type { DomainServiceOperationIR, ExprIR, OperationIR, StmtIR } from "../t
 
 export type DomainServiceTier = "pure" | "reading" | "mutating";
 
+/** The resolvers `computeSaves` needs to derive the aggregate ARGS a called
+ *  `mutating` domain service writes (domain-services.md rev. 4, Slice 2): one to
+ *  find a service operation by `(service, op)`, one to decide whether an
+ *  aggregate op mutates its receiver ({@link aggregateOpResolver}).  Built once
+ *  per workflow from the context's lowered aggregates + domain services. */
+export interface SaveResolver {
+  resolveServiceOp: (service: string, op: string) => DomainServiceOperationIR | undefined;
+  resolveAggOp: AggregateOpResolver;
+}
+
 /** Resolve an aggregate operation by `(aggregateName, opName)` so the classifier
  *  can decide whether a `param.op(...)` call mutates its receiver.  Built from
  *  the enclosing `BoundedContextIR` at the call site
@@ -117,6 +127,40 @@ export function classifyDomainServiceTier(
     if (mutates) return "mutating";
   }
   return reads ? "reading" : "pure";
+}
+
+/** The aggregate PARAMETERS a `mutating` domain-service operation writes — the
+ *  names of the entity params on which the body calls a mutating aggregate
+ *  operation (`source.withdraw(amount)` ⇒ `{ "source" }`).  This is the precise
+ *  mutation set the orchestrator must persist: a workflow that passes its loaded
+ *  `s`/`d` aggregates into `Transfer.run(s, d, amount)` saves exactly the args
+ *  bound to these params (domain-services.md rev. 4, the `mutating` tier; the
+ *  orchestrator-owned commit).  Without a resolver the set is empty (the
+ *  classifier can't see aggregate ops — never a false positive).  Same param-op
+ *  recognition as {@link classifyDomainServiceTier}; a read-only arg is never
+ *  included. */
+export function mutatedParamNames(
+  op: DomainServiceOperationIR,
+  resolveAggOp: AggregateOpResolver,
+): Set<string> {
+  const aggregateParams = new Map<string, string>(); // paramName -> aggregateName
+  for (const p of op.params) {
+    if (p.type.kind === "entity") aggregateParams.set(p.name, p.type.name);
+  }
+  const mutated = new Set<string>();
+  for (const stmt of op.body) {
+    forEachStmtExpr(stmt, (e) => {
+      if (
+        e.kind === "method-call" &&
+        e.receiver.kind === "ref" &&
+        e.receiver.refKind === "param" &&
+        isParamOpMutation(e, aggregateParams, resolveAggOp)
+      ) {
+        mutated.add(e.receiver.name);
+      }
+    });
+  }
+  return mutated;
 }
 
 /** Is `e` a `param.op(args)` call that mutates a passed-in aggregate?  `param`

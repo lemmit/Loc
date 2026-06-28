@@ -1465,6 +1465,12 @@ function honoWorkflowStmtTarget(
     // Bare resource-op statement (`files.put(k, v)`).  `renderArg` renders
     // the call as `(await files$put(...))`; emit it as a statement (Phase 4).
     resourceCall: (st, indent) => [`${indent}${renderArg(st.call)};`],
+    // Bare `Transfer.run(src, dst, amount)` domain-service call
+    // (domain-services.md rev. 4, the `mutating` tier).  `renderArg` produces
+    // the backend call (read-port-aware; `(await …)` for a reading service);
+    // emit as a statement.  The mutated aggregate args persist via the
+    // workflow's exit-saves (`savesAtExit`), emitted after the body.
+    domainServiceCall: (st, indent) => [`${indent}${renderArg(st.call)};`],
   };
 }
 

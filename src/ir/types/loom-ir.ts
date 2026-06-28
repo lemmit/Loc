@@ -1247,6 +1247,24 @@ export type WorkflowStmtIR =
       call: ExprIR;
     }
   | {
+      // A bare orchestrator call into a `domainService` operation —
+      // `Transfer.run(src, dst, amount)` written as a workflow statement
+      // (domain-services.md rev. 4, the `mutating` tier).  Distinct from
+      // `op-call` (which targets an aggregate let-binding): a service call is
+      // NOT an aggregate operation, so it carries the resolved `service`/`op`
+      // and a render-ready `call` (a `callKind: "domain-service"` Call that
+      // rides each backend's `render-expr`).  The orchestrator owns
+      // persistence: a `mutating` service mutates the aggregate ARGS it is
+      // passed (their own ops), so those args become exit-save targets —
+      // derived in `computeSaves` (NOT stamped here), exactly as a `repo-let`
+      // that an `op-call` targets does.  The `let`-bound form
+      // (`let q = Pricing.quote(...)`) rides `expr-let` instead.
+      kind: "domain-service-call";
+      service: string;
+      op: string;
+      call: ExprIR;
+    }
+  | {
       // `if let <var> = Repo.find(<Criterion>) { then } else { else }`
       // (criterion.md, use site 3) — the workflow body's only option/null
       // handling construct.  Binds the lookup's first match to `var`
@@ -2926,6 +2944,7 @@ function workflowStmtUsesCurrentUser(s: WorkflowStmtIR): boolean {
         (s.elseBody ?? []).some(workflowStmtUsesCurrentUser)
       );
     case "resource-call":
+    case "domain-service-call":
       return exprUsesCurrentUser(s.call);
   }
 }

@@ -346,6 +346,7 @@ function forEachWorkflowStmtExpr(st: WorkflowStmtIR, visit: (e: ExprIR) => void)
       for (const inner of st.body) forEachWorkflowStmtExpr(inner, visit);
       return;
     case "resource-call":
+    case "domain-service-call":
       walkExpr(st.call, visit);
       return;
     case "if-let":

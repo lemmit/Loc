@@ -334,6 +334,23 @@ function lowerStatement(
       ];
     }
 
+    case "domain-service-call": {
+      // `Transfer.run(src, dst, amount)` — a bare orchestrator call into a
+      // `domainService` (domain-services.md rev. 4, the `mutating` tier).  The
+      // FULL mutating commit on Phoenix (the `with`-chain that rebuilds each
+      // mutated aggregate's changeset and `Repo.update`s it inside one
+      // `Repo.transact`) is a SEPARATE Elixir slice — the four non-Elixir
+      // backends land first.  Here we render the resolved service call as a
+      // side-effect line so generation stays sound (no `# TODO` crash); it does
+      // not yet persist the passed-in aggregates.  Tracked in the vanilla gap.
+      return [
+        {
+          kind: "emit",
+          text: `_ = ${renderExpr(st.call, renderCtx)}`,
+        },
+      ];
+    }
+
     case "repo-run": {
       // `let xs = Repo.run(<Retrieval>(args), page?)` →
       // `{:ok, xs} <- Context.run_<ret>_<agg>(args..., limit: N, offset: M)`.
@@ -685,6 +702,10 @@ function renderLoopBody(
         break;
       }
       case "resource-call":
+      // A `mutating` domain-service call inside a loop body — rendered as a
+      // best-effort side-effect line (the full Phoenix mutating commit is a
+      // separate Elixir slice; see the top-level `domain-service-call` arm).
+      case "domain-service-call":
         doLines.push(`_ = ${renderExpr(inner.call, renderCtx)}`);
         break;
       case "assign": {

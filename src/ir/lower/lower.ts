@@ -926,13 +926,21 @@ function lowerContext(
     else if (isPayloadDecl(m)) payloads.push(lowerPayload(m));
     else if (isAggregate(m)) aggregates.push(lowerAggregate(m, env, ctxCaps));
     else if (isRepository(m)) repositories.push(lowerRepository(m, user, modulePermissions));
-    else if (isWorkflow(m)) workflows.push(lowerWorkflow(m, env, ctx));
+    else if (isDomainService(m)) domainServices.push(lowerDomainService(m, env));
     else if (isView(m)) views.push(lowerView(m, env));
     else if (isCriterion(m)) criteria.push(lowerCriterion(m, env));
-    else if (isDomainService(m)) domainServices.push(lowerDomainService(m, env));
     else if (isChannel(m)) channels.push(lowerChannel(m));
     else if (isRetrieval(m)) retrievals.push(lowerRetrieval(m, env));
     else if (isSeed(m)) seeds.push(lowerSeed(m, env));
+  }
+  // Workflows lower in a SECOND pass so they can see the context's already-
+  // lowered `aggregates` + `domainServices` (domain-services.md rev. 4, the
+  // `mutating` tier): a workflow's exit-saves must include the aggregates a
+  // called `mutating` service writes (`computeSaves` derives WHICH args are
+  // mutated from the resolved service op + aggregate ops).  Aggregates and
+  // domain services never reference workflows, so deferring is safe.
+  for (const m of ctx.members) {
+    if (isWorkflow(m)) workflows.push(lowerWorkflow(m, env, ctx, { aggregates, domainServices }));
   }
   return {
     name: ctx.name,

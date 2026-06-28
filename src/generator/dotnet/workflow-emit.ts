@@ -939,7 +939,16 @@ function collectDereferencedLoads(stmts: readonly WorkflowStmtIR[]): Set<string>
   const names = new Set<string>();
   for (const st of stmts) {
     if (st.kind === "op-call") names.add(st.target);
-    else if (st.kind === "for-each") {
+    else if (st.kind === "domain-service-call") {
+      // A `mutating`/`reading` service call dereferences every aggregate ARG it
+      // is passed (the service operates on them), so a `getById` load passed
+      // into one is load-or-throw — guard it, or the non-null `Account` param
+      // is a CS8604 under nullable-reference types (domain-services.md rev. 4).
+      const args = st.call.kind === "call" ? st.call.args : [];
+      for (const a of args) {
+        if (a.kind === "ref") names.add(a.name);
+      }
+    } else if (st.kind === "for-each") {
       for (const n of collectDereferencedLoads(st.body)) names.add(n);
     }
   }
@@ -1208,6 +1217,13 @@ function csWorkflowStmtTarget(
     // 4c: bare resource-op statement (`files.put(k, v)`) → awaited async
     // helper call.
     resourceCall: (st, indent) => [`${indent}await ${renderArg(st.call)};`],
+    // Bare `Transfer.Run(src, dst, amount)` domain-service call
+    // (domain-services.md rev. 4, the `mutating` tier).  `renderArg` emits the
+    // static call (pure/mutating) or `(await _svc.OpAsync(...))` (reading) — the
+    // await wrapping is internal, so no `await` prefix here (mutating is a
+    // synchronous static call).  The mutated args are EF-tracked entities →
+    // they flush at the orchestrator's single `await db.SaveChangesAsync()`.
+    domainServiceCall: (st, indent) => [`${indent}${renderArg(st.call)};`],
   };
 }
 

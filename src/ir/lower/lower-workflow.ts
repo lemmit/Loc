@@ -32,8 +32,11 @@ import {
 } from "../../language/generated/ast.js";
 import { findVerb } from "../resource-verbs.js";
 import type {
+  AggregateIR,
   ApplyIR,
   CreateIR,
+  DomainServiceIR,
+  DomainServiceOperationIR,
   ExprIR,
   FieldIR,
   HandleIR,
@@ -47,10 +50,18 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../types/loom-ir.js";
+import { aggregateOpResolver, type SaveResolver } from "../util/domain-service-tier.js";
 import { resolveBypass } from "./lower-capabilities.js";
 import { inferExprType, lowerExpr, lowerExprInContext, pathType } from "./lower-expr.js";
 import { computeSaves, lowerApply, lowerField, plural } from "./lower-members.js";
-import { cstText, type Env, inWorkflow, lowerType, withLocal } from "./lower-types.js";
+import {
+  cstText,
+  type Env,
+  findDomainServiceByName,
+  inWorkflow,
+  lowerType,
+  withLocal,
+} from "./lower-types.js";
 import {
   matchFindAllCall,
   matchFindCall,
@@ -58,7 +69,12 @@ import {
   matchRetrievalRunCall,
 } from "./repo-read.js";
 
-export function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR {
+export function lowerWorkflow(
+  wf: Workflow,
+  env: Env,
+  ctx: BoundedContext,
+  lowered?: { aggregates: AggregateIR[]; domainServices: DomainServiceIR[] },
+): WorkflowIR {
   const aggsByName = new Map<string, Aggregate>();
   const reposByName = new Map<string, Repository>();
   const repoForAgg = new Map<string, string>(); // aggName -> repoName
@@ -70,6 +86,18 @@ export function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): Work
       if (target?.name) repoForAgg.set(target.name, m.name);
     }
   }
+  // Save-resolver (domain-services.md rev. 4, the `mutating` tier): lets
+  // `computeSaves` see WHICH aggregate args a called `mutating` service writes,
+  // so those args persist at workflow exit.  Built from the context's already-
+  // lowered aggregates + domain services (second-pass workflow lowering); absent
+  // for legacy callers (single-context generate paths that don't pass `lowered`)
+  // — then a domain-service call simply contributes no extra saves.
+  const saveResolver: SaveResolver | undefined = lowered
+    ? {
+        resolveAggOp: aggregateOpResolver({ aggregates: lowered.aggregates }),
+        resolveServiceOp: serviceOpResolver(lowered.domainServices),
+      }
+    : undefined;
   // A workflow is a state-bearing entity (workflow-and-applier.md A2-S5f): bind
   // `this` to it so every member body (create / handle / on / apply) resolves
   // bare names / `this.field` against the workflow's `Property` state fields.
@@ -85,11 +113,13 @@ export function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): Work
   const appliers: ApplyIR[] = wf.members.filter(isApply).map((a) => lowerApply(a, paramEnv));
   for (const m of wf.members) {
     if (isWorkflowCreateDecl(m)) {
-      creates.push(lowerWorkflowCreate(m, paramEnv, aggsByName, reposByName, repoForAgg));
+      creates.push(
+        lowerWorkflowCreate(m, paramEnv, aggsByName, reposByName, repoForAgg, saveResolver),
+      );
     } else if (isOnDecl(m)) {
-      subscriptions.push(lowerOn(m, paramEnv, aggsByName, reposByName, repoForAgg));
+      subscriptions.push(lowerOn(m, paramEnv, aggsByName, reposByName, repoForAgg, saveResolver));
     } else if (isHandleDecl(m)) {
-      handlers.push(lowerHandle(m, paramEnv, aggsByName, reposByName, repoForAgg));
+      handlers.push(lowerHandle(m, paramEnv, aggsByName, reposByName, repoForAgg, saveResolver));
     }
     // Property / Apply handled above.
   }
@@ -122,6 +152,15 @@ export function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): Work
   };
 }
 
+/** Build a `(service, op) → DomainServiceOperationIR` resolver over a context's
+ *  lowered domain services. */
+function serviceOpResolver(
+  services: readonly DomainServiceIR[],
+): (service: string, op: string) => DomainServiceOperationIR | undefined {
+  const byName = new Map(services.map((s) => [s.name, s]));
+  return (service, op) => byName.get(service)?.operations.find((o) => o.name === op);
+}
+
 // Lower a `create [name](params) [by <expr>] { … }` workflow starter
 // (workflow-and-applier.md A2-S5f).  Mirrors `lowerHandle`: params bind as
 // locals on the workflow `this`-env, the body lowers via
@@ -133,6 +172,7 @@ function lowerWorkflowCreate(
   aggsByName: Map<string, Aggregate>,
   reposByName: Map<string, Repository>,
   repoForAgg: Map<string, string>,
+  saveResolver?: SaveResolver,
 ): CreateIR {
   let inner = baseEnv;
   const params: ParamIR[] = [];
@@ -163,7 +203,7 @@ function lowerWorkflowCreate(
     params,
     ...(correlation ? { correlation } : {}),
     statements,
-    savesAtExit: computeSaves(statements, repoForAgg),
+    savesAtExit: computeSaves(statements, repoForAgg, undefined, saveResolver),
     ...(eventBinding ? { eventBinding } : {}),
     ...(eventRef ? { eventRef } : {}),
   };
@@ -179,6 +219,7 @@ function lowerHandle(
   aggsByName: Map<string, Aggregate>,
   reposByName: Map<string, Repository>,
   repoForAgg: Map<string, string>,
+  saveResolver?: SaveResolver,
 ): HandleIR {
   let inner = baseEnv;
   const params: ParamIR[] = [];
@@ -193,7 +234,12 @@ function lowerHandle(
     statements.push(lowered.stmt);
     inner = lowered.envAfter;
   }
-  return { name: h.name, params, statements, savesAtExit: computeSaves(statements, repoForAgg) };
+  return {
+    name: h.name,
+    params,
+    statements,
+    savesAtExit: computeSaves(statements, repoForAgg, undefined, saveResolver),
+  };
 }
 
 // Lower an `on(e: Event) { … }` reactor member to its IR (workflow-and-applier.md
@@ -209,6 +255,7 @@ function lowerOn(
   aggsByName: Map<string, Aggregate>,
   reposByName: Map<string, Repository>,
   repoForAgg: Map<string, string>,
+  saveResolver?: SaveResolver,
 ): OnIR {
   const eventName = o.event.ref?.name ?? o.event.$refText;
   const inner = withLocal(baseEnv, o.param, "param", { kind: "entity", name: eventName });
@@ -225,7 +272,7 @@ function lowerOn(
     param: o.param,
     ...(correlation ? { correlation } : {}),
     statements,
-    savesAtExit: computeSaves(statements, repoForAgg),
+    savesAtExit: computeSaves(statements, repoForAgg, undefined, saveResolver),
   };
 }
 
@@ -555,6 +602,37 @@ function lowerWorkflowStatement(
           },
           envAfter: env,
         };
+      }
+      // `Transfer.run(args)` — a bare orchestrator call into a `domainService`
+      // operation (domain-services.md rev. 4, the `mutating` tier).  Checked
+      // before the generic op-call path so a service name (not an in-scope
+      // local) isn't mistaken for an aggregate let-binding receiver.  Lowers to
+      // a `domain-service-call` carrying a render-ready `callKind:
+      // "domain-service"` Call (rides each backend's `render-expr`); the
+      // aggregate args a `mutating` service writes become exit-save targets,
+      // derived in `computeSaves`.  Mirrors the operation-body arm in
+      // `lower-stmt.ts`.
+      if (!env.locals.has(lv.head)) {
+        const svc = findDomainServiceByName(env, lv.head);
+        if (svc) {
+          const callArgs = (lv.args ?? []).map((a) => lowerExpr(a, env));
+          const op = lv.tail[0]!;
+          return {
+            stmt: {
+              kind: "domain-service-call",
+              service: svc.name,
+              op,
+              call: {
+                kind: "call",
+                callKind: "domain-service",
+                name: op,
+                args: callArgs,
+                serviceRef: { service: svc.name, op },
+              },
+            },
+            envAfter: env,
+          };
+        }
       }
       // `name.op(args)` — op-call on a let binding.
       const aggName = aggNameForLocal(env, lv.head);

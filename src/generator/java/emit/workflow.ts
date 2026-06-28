@@ -285,6 +285,16 @@ export function javaWorkflowStmtTarget(
       collectJavaExprImports(s.call, imports);
       return [`${indent}${renderJavaExpr(s.call, renderCtx)};`];
     },
+    // Bare `Transfer.run(src, dst, amount)` domain-service call
+    // (domain-services.md rev. 4, the `mutating` tier).  `renderJavaExpr` emits
+    // a static `Transfer.run(...)` (pure/mutating) or instance bean call
+    // (reading).  The mutated args are JPA-managed entities → dirty-checking
+    // flushes them at the `@Transactional` boundary (plus the explicit
+    // exit-`save` the workflow emits for new aggregates).
+    domainServiceCall: (s, indent) => {
+      collectJavaExprImports(s.call, imports);
+      return [`${indent}${renderJavaExpr(s.call, renderCtx)};`];
+    },
   };
 }
 
@@ -336,6 +346,36 @@ function readingServicesCalled(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): s
   return order;
 }
 
+/** The STATIC (pure / mutating) domain services a workflow calls — a
+ *  `callKind: "domain-service"` whose op declares NO read ports
+ *  (domain-services.md rev. 4).  Rendered as a static `Service.op(...)` call, so
+ *  the workflow file must import the service class (unlike a reading-tier call,
+ *  which is an injected bean).  De-duplicated by service name, first-call order. */
+function staticServicesCalled(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string[] {
+  const seen = new Set<string>();
+  const order: string[] = [];
+  const visit = (e: ExprIR | undefined): void => {
+    if (!e) return;
+    if (e.kind === "call" && e.callKind === "domain-service" && e.serviceRef) {
+      const svc = ctx.domainServices.find((s) => s.name === e.serviceRef!.service);
+      const op = svc?.operations.find((o) => o.name === e.serviceRef!.op);
+      if (svc && op && readPortsForOperation(op).length === 0 && !seen.has(svc.name)) {
+        seen.add(svc.name);
+        order.push(svc.name);
+      }
+    }
+    for (const c of exprChildren(e)) visit(c);
+  };
+  const walk = (stmts: WorkflowStmtIR[]): void => {
+    for (const s of stmts) {
+      for (const e of workflowStmtExprs(s)) visit(e);
+      if (s.kind === "for-each") walk(s.body);
+    }
+  };
+  walk(wf.statements);
+  return order;
+}
+
 /** Sub-expressions of a workflow statement that may contain a domain-service
  *  call (mirrors `workflowUsesCurrentUser`'s per-kind expr extraction). */
 function workflowStmtExprs(s: WorkflowStmtIR): (ExprIR | undefined)[] {
@@ -354,6 +394,7 @@ function workflowStmtExprs(s: WorkflowStmtIR): (ExprIR | undefined)[] {
     case "for-each":
       return [s.iterable];
     case "resource-call":
+    case "domain-service-call":
       return [s.call];
     default:
       return [];
@@ -414,12 +455,17 @@ export function renderJavaWorkflows(
   // `@Service` beans (domain-services.md rev. 4, Slice 1).  First-call order,
   // deduped across workflows.
   const readingSvcs = new Set<string>();
+  // STATIC (pure / mutating) domain services any command-workflow calls — a
+  // static `Service.op(...)` call whose CLASS the workflow file must import
+  // (domain-services.md rev. 4; the reading tier injects a bean instead).
+  const staticSvcs = new Set<string>();
   const methods: string[] = [];
 
   for (const wf of cmdWorkflows) {
     const usesUser = workflowUsesCurrentUser(wf);
     for (const agg of reposUsed(wf, ctx)) repoAggs.add(agg);
     for (const s of readingServicesCalled(wf, ctx)) readingSvcs.add(s);
+    for (const s of staticServicesCalled(wf, ctx)) staticSvcs.add(s);
     const reqType = `${upperFirst(wf.name)}Request`;
     // Request record over the workflow params (wire types in, parsed here).
     if (wf.params.length > 0) {
@@ -528,6 +574,12 @@ export function renderJavaWorkflows(
       // from the domain-services package when it differs from this one.
       ...(wctx.domainServicePkg && wctx.domainServicePkg !== wctx.pkg
         ? readingServices.map((s) => `import ${wctx.domainServicePkg}.${s};`)
+        : []),
+      // Static (pure / mutating) domain-service classes the workflow calls
+      // (`Transfer.run(...)`) — imported by class so the static reference
+      // resolves (domain-services.md rev. 4, the `mutating` tier).
+      ...(wctx.domainServicePkg && wctx.domainServicePkg !== wctx.pkg
+        ? [...staticSvcs].sort().map((s) => `import ${wctx.domainServicePkg}.${s};`)
         : []),
       // CatalogLog is always referenced now (workflow_started/completed on every
       // command-workflow method), not only when the body emits a domain event.

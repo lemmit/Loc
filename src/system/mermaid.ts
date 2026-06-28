@@ -343,6 +343,8 @@ function stepNode(id: string, s: WorkflowStmtIR): StepNode {
       const op = s.call.kind === "call" ? s.call.resourceOp : undefined;
       return { id, decl: `${id}["${label(`${op?.resourceName}.${op?.verb}()`)}"]` };
     }
+    case "domain-service-call":
+      return { id, decl: `${id}["${label(`${s.service}.${s.op}()`)}"]` };
   }
 }
 
@@ -525,6 +527,8 @@ function sequenceMessages(s: WorkflowStmtIR): string[] {
       const op = s.call.kind === "call" ? s.call.resourceOp : undefined;
       return [`  WF->>${op?.resourceName ?? "resource"}: ${op?.verb ?? "op"}()`];
     }
+    case "domain-service-call":
+      return [`  WF->>${s.service}: ${s.op}()`];
   }
 }
 

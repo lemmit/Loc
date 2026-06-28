@@ -775,5 +775,16 @@ export function pyWorkflowStmtTarget(
       const bare = rendered.startsWith("(await ") ? rendered.slice(1, -1) : rendered;
       return [`${i}${bare}`];
     },
+    // Bare `Transfer.run(src, dst, amount)` domain-service call
+    // (domain-services.md rev. 4, the `mutating` tier).  Renders the bare module
+    // function (`run(src, dst, amount)`); a reading service is `(await …)` —
+    // strip the wrapping parens so it's a statement, like `resourceCall`.  The
+    // mutated args persist via the workflow's exit-saves (`session` unit-of-work
+    // `commit()` at the route boundary).
+    domainServiceCall: (st, i) => {
+      const rendered = renderPyExpr(st.call, rctx);
+      const bare = rendered.startsWith("(await ") ? rendered.slice(1, -1) : rendered;
+      return [`${i}${bare}`];
+    },
   };
 }
