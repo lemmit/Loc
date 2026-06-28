@@ -980,7 +980,11 @@ describe(".NET generator", () => {
     );
     const files = generateDotnet(doc.parseResult.value as Model);
     const handler = files.get("Application/Workflows/TopUpHandler.cs")!;
-    expect(handler).toMatch(/private readonly T\.Infrastructure\.Persistence\.AppDbContext _db;/);
+    // `global::`-anchored so a deployable named `api` (root ns `Api`) doesn't
+    // mis-resolve the leading segment against the enclosing namespace.
+    expect(handler).toMatch(
+      /private readonly global::T\.Infrastructure\.Persistence\.AppDbContext _db;/,
+    );
     expect(handler).toMatch(
       /await using var tx = await _db\.Database\.BeginTransactionAsync\(cancellationToken\);/,
     );
