@@ -2,8 +2,10 @@ import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedBoundedContextIR,
   ExprIR,
+  FieldIR,
   IsolationLevel,
   SystemIR,
+  TypeIR,
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../../ir/types/loom-ir.js";
@@ -21,6 +23,7 @@ import { collectJavaExprImports, type JavaRenderContext, renderJavaExpr } from "
 import {
   collectWireImports,
   collectWireToDomainImports,
+  referencedValueObjects,
   wireJavaType,
   wireToDomain,
 } from "./wire.js";
@@ -64,6 +67,15 @@ export interface WorkflowCtx {
   /** category-resolved package lookups for cross-package imports. */
   entityPkgOf: (aggName: string) => string;
   repoPkgOf: (aggName: string) => string;
+  /** Package the `<Vo>Request` / `<Vo>Response` records for a value object
+   *  live in — they're emitted into the application (service) package of an
+   *  aggregate that references the VO (`dto.ts`).  A VO-typed workflow param
+   *  (`workflow X { create(amount: Money) }`) yields a `MoneyRequest`
+   *  component in the workflow Request record, which sits in a DIFFERENT
+   *  package, so it must be imported explicitly (the aggregate-create
+   *  Request DTO gets it for free by co-location).  Returns null when no
+   *  aggregate references the VO (shouldn't happen for a param-reachable VO). */
+  voRequestPkgOf?: (voName: string) => string | null;
   /** Package the `domainService` beans live in — a `reading`-tier service a
    *  workflow calls is constructor-injected (`@Service` bean), imported from
    *  here (domain-services.md rev. 4, Slice 1).  Optional; absent ⇒ no reading
@@ -302,6 +314,55 @@ export function repoField(aggName: string): string {
   return `${lowerFirst(plural(aggName))}Repository`;
 }
 
+/** Normalise the optional flag into the type (mirrors `dto.ts` / `service.ts`'s
+ *  `eff`) so the wire helpers see one canonical shape. */
+function effType(t: TypeIR, optional: boolean): TypeIR {
+  return optional && t.kind !== "optional" ? { kind: "optional", inner: t } : t;
+}
+
+/** `private static <Vo> to<Vo>(<Vo>Request request)` mappers for every value
+ *  object reachable (transitively) from a command-workflow's params — the
+ *  workflow-service twin of `service.ts`'s per-aggregate VO mappers, which a
+ *  VO-typed param's `wireToDomain` (`to<Vo>(request.x())`) call needs.  Returns
+ *  the body lines and accumulates the inbound-conversion imports. */
+function workflowVoMappers(
+  ctx: EnrichedBoundedContextIR,
+  workflows: readonly WorkflowIR[],
+  imports: Set<string>,
+): string[] {
+  const voLookup = new Map(ctx.valueObjects.map((v) => [v.name, v.fields] as const));
+  const collect = (t: TypeIR, into: Set<string>): void => {
+    if (t.kind === "valueobject") into.add(t.name);
+    else if (t.kind === "array") collect(t.element, into);
+    else if (t.kind === "optional") collect(t.inner, into);
+  };
+  const voNames = new Set<string>();
+  for (const wf of workflows) for (const p of wf.params) collect(p.type, voNames);
+  // Transitive closure — a VO field may itself be a VO.
+  const queue = [...voNames];
+  while (queue.length > 0) {
+    const vo = queue.pop()!;
+    for (const f of voLookup.get(vo) ?? []) {
+      const before = voNames.size;
+      collect(f.type, voNames);
+      if (voNames.size > before) for (const v of voNames) if (!queue.includes(v)) queue.push(v);
+    }
+  }
+  return [...voNames].sort().flatMap((vo) => {
+    const fields: readonly FieldIR[] = voLookup.get(vo) ?? [];
+    const args = fields
+      .map((f) => wireToDomain(effType(f.type, !!f.optional), `request.${f.name}()`))
+      .join(", ");
+    for (const f of fields) collectWireToDomainImports(f.type, imports);
+    return [
+      `    private static ${vo} to${vo}(${vo}Request request) {`,
+      `        return new ${vo}(${args});`,
+      `    }`,
+      ``,
+    ];
+  });
+}
+
 function renderCtxFor(ctx: EnrichedBoundedContextIR, wctx: WorkflowCtx): JavaRenderContext {
   // `serviceReading` makes a `domain-service` call render as an INSTANCE call
   // against the injected bean field when the called op is reading-tier
@@ -474,6 +535,18 @@ export function renderJavaWorkflows(
         collectWireImports(p.type, reqImports);
         return `${wireJavaType(p.type, "Request")} ${p.name}`;
       });
+      // A VO-typed param's `<Vo>Request` record lives in an aggregate's
+      // application package, not `domain.valueobjects.*` — import it
+      // explicitly (the aggregate-create Request DTO is co-located with its
+      // VO records, so it never needed this).  Dedup by import line.
+      const voNames = referencedValueObjects(
+        wf.params.map((p) => p.type),
+        new Set<string>(),
+      );
+      for (const vo of [...voNames].sort()) {
+        const voPkg = wctx.voRequestPkgOf?.(vo);
+        if (voPkg && voPkg !== wctx.pkg) reqImports.add(`${voPkg}.${vo}Request`);
+      }
       out.set(`${reqType}.java`, {
         category: "request-dto",
         content: lines(
@@ -527,6 +600,23 @@ export function renderJavaWorkflows(
     );
   }
   while (methods[methods.length - 1] === "") methods.pop();
+
+  // `to<Vo>(...)` mappers for VO-typed params (parity with the per-aggregate
+  // service).  Their `<Vo>Request` parameter type lives in an aggregate's
+  // application package → import it the same way the Request DTO does.
+  const voMappers = workflowVoMappers(ctx, cmdWorkflows, imports);
+  while (voMappers[voMappers.length - 1] === "") voMappers.pop();
+  const voReqNames = new Set<string>();
+  for (const wf of cmdWorkflows) {
+    referencedValueObjects(
+      wf.params.map((p) => p.type),
+      voReqNames,
+    );
+  }
+  for (const vo of [...voReqNames].sort()) {
+    const voPkg = wctx.voRequestPkgOf?.(vo);
+    if (voPkg && voPkg !== wctx.pkg) imports.add(`${voPkg}.${vo}Request`);
+  }
 
   const repoFields = [...repoAggs].sort();
   const anyUser = authed && cmdWorkflows.some(workflowUsesCurrentUser);
@@ -603,6 +693,7 @@ export function renderJavaWorkflows(
       `    }`,
       ``,
       ...methods,
+      ...(voMappers.length > 0 ? [``, ...voMappers] : []),
       `}`,
       ``,
     ),
