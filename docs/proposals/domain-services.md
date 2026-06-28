@@ -240,6 +240,31 @@ Drizzle samples do and is the pin.
 No `mutates`-set materialisation, no new `ExprIR.kind`; calls stay
 `Call { callKind: "domain-service" }`.
 
+## Criteria and retrievals — which tier
+
+The existing predicate/query vocabulary maps onto the tiers by the same
+rule (the predicate is pure; the repository access is what classifies):
+
+| Construct | What it is | Tier when used in a service |
+|---|---|---|
+| **`criterion`** used *inline as a boolean* (over a passed-in aggregate/value) | pure Specification predicate | **pure** — no infra |
+| **`criterion`** used to *drive a query* (`Repo.findAll(<Crit>)`, a `find … where <Crit>`) | the predicate is still pure; the `Repo.*` call is a read | **reading** — the query is the infra |
+| **`retrieval`** run via `Repo.run(R(args), page?)` | a named query bundle (`where` + `sort` + `loads`) | **reading** — it *is* a repository read |
+| `Repo.find` / `Repo.findAll` / `Repo.run` | the shipped read surface (today: workflow bodies) | **reading** — reused verbatim; no new query machinery |
+
+So a criterion never moves the tier on its own — only the `Repo.*` access
+does. The `reading` tier reuses the **already-shipped** `Repo.find /
+findAll / run` surface (it just becomes legal inside a `reading`/`mutating`
+service body, not only a workflow).
+
+> **Surface gap to pin:** applying a criterion to a **named service
+> parameter** (`HighValue` over an `order: Order` param, not an implicit
+> `this` / loaded candidate) needs criterion candidate-binding —
+> `criterion.md` lists `from <Criterion>(args)` parameter binding as *not
+> yet shipped*. The *semantics* are pure-tier-clean; the *syntax* for
+> "apply this criterion to that parameter inside a service body" is the
+> small thing to land alongside the `reading` tier.
+
 ## `function` — let it do a bit more (companion change)
 
 Today `FunctionDecl` is `function f(p): T = Expression` — a single
