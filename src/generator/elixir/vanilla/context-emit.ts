@@ -202,13 +202,24 @@ function renderContextModule(
     .map((op) => {
       const opSnake = snake(op.name);
       const gated = opUsesCurrentUser(op);
-      return `\n
-  @doc "Run the \`${op.name}\` operation on a loaded ${aggPascal}, raising on error (LiveView Action seam)."
-  def ${opSnake}_${aggSnake}!(record${gated ? ", current_user \\\\ nil" : ""}) do
-    case ${opSnake}_${aggSnake}(record, %{}${gated ? ", current_user" : ""}) do
+      const cuP = gated ? ", current_user \\\\ nil" : "";
+      const cuA = gated ? ", current_user" : "";
+      // A returning (exception-less) op raises on guard failure and yields its
+      // value (or a declared error tuple) directly — wrapping it in an
+      // `{:ok,_}/{:error,_}` case emits an error clause the body never matches
+      // ("the following clause will never match" → `--warnings-as-errors`).  Pass
+      // its result straight through.  A standard op returns `{:ok,_} | {:error,_}`,
+      // so unwrap and raise on error.
+      const body = isReturningOperation(op)
+        ? `    ${opSnake}_${aggSnake}(record, %{}${cuA})`
+        : `    case ${opSnake}_${aggSnake}(record, %{}${cuA}) do
       {:ok, result} -> result
       {:error, reason} -> raise "${op.name} failed: #{inspect(reason)}"
-    end
+    end`;
+      return `\n
+  @doc "Run the \`${op.name}\` operation on a loaded ${aggPascal} (LiveView Action seam)."
+  def ${opSnake}_${aggSnake}!(record${cuP}) do
+${body}
   end`;
     })
     .join("")}`
