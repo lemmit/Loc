@@ -301,5 +301,14 @@ export function walkExpr(e: ExprIR | undefined, visit: (e: ExprIR) => void): voi
     case "lambda":
       walkExpr(e.body, visit);
       break;
+    case "match":
+      walkExpr(e.subject, visit);
+      for (const a of e.arms) {
+        walkExpr(a.cond, visit);
+        walkExpr(a.value, visit);
+      }
+      for (const a of e.variantArms) walkExpr(a.value, visit);
+      walkExpr(e.otherwise, visit);
+      break;
   }
 }

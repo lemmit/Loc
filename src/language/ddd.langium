@@ -1874,17 +1874,52 @@ Expression:
 // expression is allowed (page bodies, derived properties, view
 // `bind` exprs, filter lambdas, function bodies, etc.).
 //
-// `match` only enters this rule when followed by `{` — bare
-// occurrences of `match` as an identifier remain free.  Validator
-// may warn on non-exhaustive matches that lack `else`.
+// `match` only enters this rule when followed by `{` or a `subject`
+// expression — bare occurrences of `match` as an identifier remain
+// free.  Two forms share one rule, disambiguated by `subject`
+// presence (variant-match.md):
+//   * boolean-arms  — `match { cond => value, … else => … }`
+//     (the original predicate-arms form; `subject` absent).
+//   * variant-match — `match SUBJECT { VariantType binding => value, … }`
+//     dispatches a `or`-union scrutinee by variant, optionally binding
+//     the matched variant to a name narrowed to that variant's type.
+// The `subject` is the disambiguator: present ⇒ arms parse as variant
+// arms (`varType ...`), absent ⇒ as boolean arms (`cond ...`).  This
+// resolves the `Type binding =>` vs `cond =>` ambiguity — a single
+// arm rule could not tell a bare-NameRef cond from a bare type atom.
+// Validator may warn on non-exhaustive matches that lack `else`.
 MatchExpr:
-    'match' '{'
-        (arms+=MatchArm (','? arms+=MatchArm)* ','?)?
-        ('else' '=>' elseExpr=Expression ','?)?
-    '}';
+    'match' (subject=MatchSubject '{'
+                 (varArms+=VariantArm (','? varArms+=VariantArm)* ','?)?
+                 ('else' '=>' elseExpr=Expression ','?)?
+             '}'
+           | '{'
+                 (arms+=MatchArm (','? arms+=MatchArm)* ','?)?
+                 ('else' '=>' elseExpr=Expression ','?)?
+             '}');
 
 MatchArm:
     cond=Expression '=>' value=Expression;
+
+// The variant-match scrutinee.  Reuses `ForIterable` (a `NameRef` plus
+// optional postfix suffixes) so a bare name (`outcome`) or a simple
+// member read (`wrapper.value`) parses — and crucially so a trailing
+// `{` opens the arm block instead of being swallowed as a `BuilderCall`
+// /ObjectLit (the same reason `if let … = ForIterable` uses it).  The
+// v1 "subject must be a simple ref / let-bound name, not a
+// side-effecting call" constraint is enforced by the validator
+// (`loom.match-subject-not-simple`), not the grammar, so a call subject
+// gets a friendly diagnostic rather than a raw parse error.
+MatchSubject infers Expression:
+    NameRef ({infer PostfixChain.head=current} suffixes+=PostfixSuffix+)?;
+
+// One variant-match arm: a union variant type, an optional binding
+// name (narrowed to the variant in the arm body), then the value.
+// `varType` reuses `TypeAtom` (the same atom shape a union variant is
+// declared with); `binding` is optional (`NotFound => x` is legal
+// alongside `NotFound n => x`).
+VariantArm:
+    varType=TypeAtom (binding=ID)? '=>' value=Expression;
 
 // Anonymous (inline, unnamed) retrieval literal — the call-site twin of a
 // declared `retrieval`, accepted by `Repo.run(...)` (criterion.md, use site 3).

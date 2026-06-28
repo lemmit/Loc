@@ -211,6 +211,13 @@ const JAVA_TARGET: ExprTarget<JavaRenderContext> = {
     }
     return out;
   },
+  // Variant-`match` (variant-match.md) — TODO(fan-out): render a Java 21 switch
+  // expression `switch (subject) { case Order o -> <value>; default -> null; }`
+  // with a REAL binding (`bindingRefText` returns the binding name).
+  matchVariant() {
+    throw new Error("variant-match: Java backend not yet implemented (variant-match.md fan-out)");
+  },
+  bindingRefText: (binding) => binding,
   list: (elements) => `List.of(${elements.join(", ")})`,
 };
 

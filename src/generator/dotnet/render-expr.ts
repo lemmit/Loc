@@ -190,6 +190,14 @@ const CS_TARGET: ExprTarget<CsRenderContext> = {
     }
     return out;
   },
+  // Variant-`match` (variant-match.md) — TODO(fan-out): render a C# switch
+  // expression `subject switch { Order o => <value>, _ => null }` with a REAL
+  // pattern binding (set `bindingRefText` to return the binding name).  The
+  // seam shape is final; the TS leaf is the reference impl.
+  matchVariant() {
+    throw new Error("variant-match: .NET backend not yet implemented (variant-match.md fan-out)");
+  },
+  bindingRefText: (binding) => binding,
   // List literals are walker-config sugar (e.g. responsive Grid cols).  No
   // .NET render context emits one today; keep total with an array initializer
   // fallback so unexpected uses produce valid C#.

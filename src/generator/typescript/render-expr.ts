@@ -34,6 +34,10 @@ import {
 export interface TsRenderContext {
   /** Rendered name for the implicit receiver (`this` by default). */
   thisName: string;
+  /** Active variant-`match` binding aliases (variant-match.md) — maps a
+   *  binding name to the text it renders as.  In TS a binding is an alias of
+   *  the scrutinee, so this maps e.g. `o` → `outcome`. */
+  matchBindings?: ReadonlyMap<string, string>;
 }
 
 const DEFAULT: TsRenderContext = { thisName: "this" };
@@ -77,6 +81,41 @@ const TS_TARGET: ExprTarget<TsRenderContext> = {
     }
     return out;
   },
+  // TS has no expression-level pattern `match`, so a variant-`match` lowers to
+  // an idiomatic discriminated-union conditional on the wire `type` tag
+  // (z.discriminatedUnion("type") on the wire side).  Right-fold to a chained
+  // ternary with the `else`/`undefined` tail; the binding is the scrutinee
+  // alias (already substituted in each arm's `value` via `ctx.matchBindings`),
+  // so no `const` is introduced.
+  matchVariant(m) {
+    // Right-fold the arms into a chained discriminated-union ternary.  With an
+    // explicit `else`, that is the tail.  Without one, an exhaustive variant
+    // match has no real fall-through, so the LAST arm becomes the unconditional
+    // tail (its `subject.type` test would be the only remaining variant) — this
+    // avoids a spurious `| undefined` widening of the result type.  A
+    // non-exhaustive match is a validator warning (loom.match-non-exhaustive);
+    // there is no runtime variant beyond the union, so folding the last arm as
+    // the else is the idiomatic, type-correct choice.
+    if (m.arms.length === 0) return m.otherwise ?? "undefined";
+    const armList = [...m.arms];
+    let out: string;
+    let rest: typeof armList;
+    if (m.otherwise !== undefined) {
+      out = m.otherwise;
+      rest = armList;
+    } else {
+      const last = armList[armList.length - 1]!;
+      out = last.value;
+      rest = armList.slice(0, -1);
+    }
+    for (const arm of [...rest].reverse()) {
+      out = `(${m.subject}.type === ${JSON.stringify(arm.tag)} ? ${arm.value} : ${out})`;
+    }
+    return out;
+  },
+  // In TS the binding is an alias of the scrutinee (no real bound variable in a
+  // ternary), so a match-binding ref renders as the subject text.
+  bindingRefText: (_binding, subject) => subject,
   // List literals are walker-config sugar (e.g. responsive Grid cols).  No
   // domain-expression position consumes one today; emit a TS array literal
   // so unexpected uses still compile.
@@ -136,6 +175,12 @@ function renderLiteral(lit: LiteralKind, value: string): string {
 function renderRef(e: RefExpr, ctx: TsRenderContext): string {
   const fromOutside = ctx.thisName !== "this";
   switch (e.refKind) {
+    case "match-binding":
+      // The narrowed variant binding of a variant-`match` arm.  TS has no
+      // expression-level pattern binding, so the binding is an alias of the
+      // scrutinee — render the subject text installed in `ctx.matchBindings`
+      // (falls back to the bare name if the side-channel is missing).
+      return ctx.matchBindings?.get(e.name) ?? e.name;
     case "param":
     case "let":
     case "lambda":

@@ -16,6 +16,7 @@ import type {
   StmtIR,
   TypeIR,
 } from "../../types/loom-ir.js";
+import { typeKey, variantTag } from "../../stdlib/unions.js";
 import { allContexts } from "../../types/loom-ir.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { walkExpr } from "./shared.js";
@@ -892,6 +893,118 @@ export function validateExprIntegrity(loom: EnrichedLoomModel, diags: LoomDiagno
       if (v.output) {
         for (const b of v.output.binds) walkExpr(b.expr, visit);
       }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Variant-`match` semantic checks (variant-match.md).  Run on the resolved IR
+// because they need the scrutinee's resolved union variant set:
+//   * loom.match-non-union-subject  (ERROR)   — scrutinee type isn't a union.
+//   * loom.match-unknown-variant    (ERROR)   — an arm names a type outside the
+//                                               subject's union variant set.
+//   * loom.match-duplicate-variant  (ERROR)   — same variant matched twice.
+//   * loom.match-non-exhaustive     (WARNING) — arms miss a variant and no else.
+// The AST validator owns the syntactic constraints (empty match,
+// subject-not-simple); these are the type-grounded ones.
+// ---------------------------------------------------------------------------
+export function validateVariantMatch(loom: EnrichedLoomModel, diags: LoomDiagnostic[]): void {
+  const visit =
+    (source: string) =>
+    (e: ExprIR): void => {
+      if (e.kind !== "match" || !e.subject) return;
+      const subjectType = e.subjectType;
+      // Non-union subject — the scrutinee must resolve to an `or`-union.
+      if (!subjectType || subjectType.kind !== "union") {
+        diags.push({
+          severity: "error",
+          code: "loom.match-non-union-subject",
+          message: `variant 'match' subject is not a union — its type is ${
+            subjectType ? typeKey(subjectType) : "unresolved"
+          }. A variant match discriminates an 'or'-union value by variant.`,
+          source,
+        });
+        return;
+      }
+      const variantKeys = new Set(subjectType.variants.map(typeKey));
+      const covered = new Set<string>();
+      for (const arm of e.variantArms) {
+        const key = typeKey(arm.varType);
+        // Unknown variant — the arm names a type outside the union's set.
+        if (!variantKeys.has(key)) {
+          diags.push({
+            severity: "error",
+            code: "loom.match-unknown-variant",
+            message: `variant 'match' arm names '${variantTag(arm.varType)}', which is not a variant of the subject union {${[
+              ...subjectType.variants.map(variantTag),
+            ].join(" | ")}}.`,
+            source,
+          });
+          continue;
+        }
+        // Duplicate variant — the same variant matched twice.
+        if (covered.has(key)) {
+          diags.push({
+            severity: "error",
+            code: "loom.match-duplicate-variant",
+            message: `variant 'match' matches '${variantTag(
+              arm.varType,
+            )}' more than once — each variant may appear in at most one arm.`,
+            source,
+          });
+          continue;
+        }
+        covered.add(key);
+      }
+      // Non-exhaustive — some variant is uncovered and there is no else.
+      if (!e.otherwise) {
+        const missing = [...variantKeys].filter((k) => !covered.has(k));
+        if (missing.length > 0) {
+          const missingTags = subjectType.variants
+            .filter((v) => missing.includes(typeKey(v)))
+            .map(variantTag);
+          diags.push({
+            severity: "warning",
+            code: "loom.match-non-exhaustive",
+            message: `variant 'match' does not cover ${missingTags
+              .map((t) => `'${t}'`)
+              .join(", ")} and has no 'else' arm — the expression is undefined for those variants. Add the missing arm(s) or an 'else => …'.`,
+            source,
+          });
+        }
+      }
+    };
+
+  for (const c of allContexts(loom)) {
+    for (const wf of c.workflows) {
+      const v = visit(`${c.name}/${wf.name}`);
+      for (const st of wf.statements) walkExprsInWorkflowStmt(st, v);
+    }
+    for (const agg of c.aggregates) {
+      for (const op of agg.operations) {
+        const v = visit(`${c.name}/${agg.name}/${op.name}`);
+        for (const st of op.statements) walkExprsInStmt(st, v);
+      }
+      for (const ap of agg.appliers ?? []) {
+        const v = visit(`${c.name}/${agg.name}/apply(${ap.event})`);
+        for (const st of ap.statements) walkExprsInStmt(st, v);
+      }
+      for (const inv of agg.invariants) {
+        const v = visit(`${c.name}/${agg.name}/invariant`);
+        walkExpr(inv.expr, v);
+        walkExpr(inv.guard, v);
+      }
+      for (const d of agg.derived ?? []) {
+        walkExpr(d.expr, visit(`${c.name}/${agg.name}/${d.name}`));
+      }
+      for (const fn of agg.functions ?? []) {
+        walkExpr(fn.body, visit(`${c.name}/${agg.name}/${fn.name}`));
+      }
+    }
+    for (const v of c.views) {
+      const vis = visit(`${c.name}/${v.name}`);
+      walkExpr(v.filter, vis);
+      if (v.output) for (const b of v.output.binds) walkExpr(b.expr, vis);
     }
   }
 }

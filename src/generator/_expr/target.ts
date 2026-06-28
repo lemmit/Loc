@@ -1,3 +1,4 @@
+import { variantTag } from "../../ir/stdlib/unions.js";
 import type { ExprIR, LiteralKind } from "../../ir/types/loom-ir.js";
 
 // ---------------------------------------------------------------------------
@@ -23,8 +24,20 @@ import type { ExprIR, LiteralKind } from "../../ir/types/loom-ir.js";
 // exhaustive switch makes both fail to type-check until done).
 // ---------------------------------------------------------------------------
 
-/** Minimum render context: every backend names the implicit receiver. */
-export type ExprCtxBase = { thisName: string };
+/**
+ * Minimum render context: every backend names the implicit receiver.
+ *
+ * `matchBindings` is the variant-`match` binding side-channel (variant-match.md):
+ * while `renderExprWith` recurses into a variant arm's `value`, it maps each
+ * in-scope binding name to the text that a `refKind: "match-binding"` ref to
+ * that name must render as.  A native-pattern backend (.NET / Java / Elixir /
+ * Python) sets the text to the binding identifier (it introduces a real bound
+ * variable); the TS backend, which has no expression-level pattern binding,
+ * sets it to the subject text (the binding is an *alias* of the scrutinee).
+ * The `ref` leaf reads this map for a match-binding ref instead of formatting
+ * the bare name.  Undefined / empty outside a variant arm.
+ */
+export type ExprCtxBase = { thisName: string; matchBindings?: ReadonlyMap<string, string> };
 
 export type RefExpr = Extract<ExprIR, { kind: "ref" }>;
 export type MemberExpr = Extract<ExprIR, { kind: "member" }>;
@@ -43,10 +56,41 @@ export interface RenderedField {
   value: string;
 }
 
-/** A `cond -> value` match arm with both sides already rendered. */
+/** A boolean-form `cond -> value` match arm with both sides already rendered. */
 export interface RenderedArm {
   cond: string;
   value: string;
+}
+
+/**
+ * A variant-form match arm with its `value` already rendered (variant-match.md).
+ * Each leaf formats its native discriminated-dispatch construct from these:
+ *   - `tag` — the wire discriminator value (`variantTag(varType)`), e.g. the
+ *     `subject.type === "<tag>"` comparand (TS) or the JSON `type` field.
+ *   - `variantTypeName` — the variant's source-level type name (e.g. `Order`),
+ *     for native pattern syntax (`Order o` / `%Order{}` / `case Order`).
+ *   - `binding` — the bound variable name, or `undefined` if the arm bound
+ *     none (`NotFound => x`).  Native backends emit a real binding; TS aliases
+ *     it to the subject (see `ExprCtxBase.matchBindings`), so `binding` may be
+ *     ignored by TS.
+ *   - `value` — the already-rendered arm body (rendered with the binding's
+ *     ref-text installed in `ctx.matchBindings`, so a reference to the binding
+ *     came out correct for this backend).
+ */
+export interface RenderedVariantArm {
+  tag: string;
+  variantTypeName: string;
+  binding: string | undefined;
+  value: string;
+}
+
+/** All of a variant-`match`'s rendered pieces handed to `ExprTarget.matchVariant`. */
+export interface RenderedVariantMatch {
+  /** The already-rendered scrutinee (a simple ref/let read — side-effect-free). */
+  subject: string;
+  arms: RenderedVariantArm[];
+  /** The rendered `else => …` catch-all, or `undefined` when absent. */
+  otherwise: string | undefined;
 }
 
 /**
@@ -75,8 +119,33 @@ export interface ExprTarget<Ctx extends ExprCtxBase> {
   binary(left: string, right: string, e: BinaryExpr): string;
   ternary(cond: string, then: string, otherwise: string): string;
   convert(value: string, e: ConvertExpr): string;
+  /** Boolean predicate-arms `match { cond => value }` — the original form,
+   *  unchanged.  Lowered to the backend's chained-conditional idiom. */
   match(arms: RenderedArm[], otherwise: string | undefined): string;
+  /** Variant-`match SUBJECT { Type binding => value }` (variant-match.md) —
+   *  the backend's native discriminated dispatch (TS discriminated-union
+   *  conditional on `subject.type`; C#/Java `switch` expression; Elixir `case`;
+   *  Python isinstance/match).  Arms arrive structured + pre-rendered so each
+   *  leaf formats natively without re-resolving the variant set. */
+  matchVariant(m: RenderedVariantMatch): string;
+  /** The text a `refKind: "match-binding"` ref to `binding` renders as inside
+   *  this arm's value.  Native-pattern backends return `binding` (a real bound
+   *  variable); the TS backend returns `subject` (the binding is an alias of
+   *  the scrutinee — TS has no expression-level pattern binding).  Called by
+   *  `renderExprWith` to populate `ctx.matchBindings` before recursing. */
+  bindingRefText(binding: string, subject: string): string;
   list(elements: string[]): string;
+}
+
+/** Source-level type name of a variant arm's `varType` — the comparand for a
+ *  native pattern (`Order o`, `%Order{}`, `case Order`).  Named carriers
+ *  (entity / value object / enum) expose their declared `name`; everything else
+ *  falls back to the wire tag (the v1 variant set is named carriers in
+ *  practice — see the `loom.match-unknown-variant` gate). */
+function variantTypeName(a: Extract<ExprIR, { kind: "match" }>["variantArms"][number]): string {
+  const t = a.varType;
+  if (t.kind === "entity" || t.kind === "valueobject" || t.kind === "enum") return t.name;
+  return variantTag(t);
 }
 
 /**
@@ -125,11 +194,39 @@ export function renderExprWith<Ctx extends ExprCtxBase>(
       return t.ternary(r(e.cond), r(e.then), r(e.otherwise));
     case "convert":
       return t.convert(r(e.value), e);
-    case "match":
+    case "match": {
+      // Variant form (variant-match.md) when a subject is present.
+      if (e.subject) {
+        const subject = r(e.subject);
+        const arms = e.variantArms.map((a) => {
+          // Install the binding side-channel before rendering this arm's
+          // value, so a `refKind: "match-binding"` ref to `a.binding`
+          // renders as the backend's binding text.  `bindingRefText`
+          // lets a backend swap the alias (TS → subject) for the real
+          // bound identifier (native backends → the binding name).
+          const bindingText = a.binding ? t.bindingRefText(a.binding, subject) : undefined;
+          const armCtx: Ctx =
+            a.binding && bindingText !== undefined
+              ? { ...ctx, matchBindings: new Map([[a.binding, bindingText]]) }
+              : ctx;
+          return {
+            tag: variantTag(a.varType),
+            variantTypeName: variantTypeName(a),
+            binding: a.binding,
+            value: renderExprWith(a.value, t, armCtx),
+          };
+        });
+        return t.matchVariant({
+          subject,
+          arms,
+          otherwise: e.otherwise ? r(e.otherwise) : undefined,
+        });
+      }
       return t.match(
         e.arms.map((a) => ({ cond: r(a.cond), value: r(a.value) })),
         e.otherwise ? r(e.otherwise) : undefined,
       );
+    }
     case "list":
       return t.list(e.elements.map(r));
     case "action-ref":

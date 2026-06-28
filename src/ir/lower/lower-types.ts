@@ -69,7 +69,7 @@ export interface Env {
    *  state-bearing entity (workflow-and-applier.md A2), so `this` / bare names
    *  resolve against its `Property` state fields. */
   workflow?: Workflow;
-  locals: Map<string, { kind: "param" | "let" | "lambda"; type: TypeIR }>;
+  locals: Map<string, { kind: "param" | "let" | "lambda" | "match-binding"; type: TypeIR }>;
   /** System-wide user-claim shape — the lowered `user { ... }` block.
    *  Threaded down by the lowering structure layer so every
    *  expression context (operation / workflow / view / test) can
@@ -138,7 +138,7 @@ export function newEnv(
 export function withLocal(
   env: Env,
   name: string,
-  kind: "param" | "let" | "lambda",
+  kind: "param" | "let" | "lambda" | "match-binding",
   type: TypeIR,
 ): Env {
   const next = new Map(env.locals);
@@ -172,6 +172,7 @@ export interface ScopeCandidate {
     | "param"
     | "let"
     | "lambda"
+    | "match-binding"
     | "property"
     | "derived"
     | "helper-fn"

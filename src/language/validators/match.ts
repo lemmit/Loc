@@ -4,8 +4,10 @@
 import { AstUtils, type ValidationAcceptor } from "langium";
 import { intrinsicMatcherSig } from "../../util/intrinsic-matchers.js";
 import {
+  type CallSuffix,
   type ExpectStmt,
   type Expression,
+  isCallSuffix,
   isExpectStmt,
   isIntLit,
   isMemberSuffix,
@@ -21,15 +23,36 @@ export function checkMatchExpressions(model: Model, accept: ValidationAcceptor):
   for (const node of AstUtils.streamAllContents(model)) {
     if (node.$type !== "MatchExpr") continue;
     const m = node as MatchExpr;
+    const isVariant = !!m.subject;
     // Empty match (no arms, no else) is structurally meaningless —
-    // grammar permits it, validator rejects.
-    if (m.arms.length === 0 && !m.elseExpr) {
+    // grammar permits it, validator rejects.  The variant form counts
+    // `varArms`; the boolean form counts `arms`.
+    const armCount = isVariant ? m.varArms.length : m.arms.length;
+    if (armCount === 0 && !m.elseExpr) {
       accept("error", `Empty 'match { }' — must declare at least one arm or an 'else' branch.`, {
         node: m,
       });
       continue;
     }
-    // Warn on non-exhaustive matches (no `else`).  An expression
+    if (isVariant) {
+      // v1 constraint (variant-match.md): the scrutinee must be a simple
+      // ref / let-bound name read — not a side-effecting call — so every
+      // arm can read it once without double-evaluation.  A call subject is
+      // a PostfixChain carrying a CallSuffix or a calling MemberSuffix.
+      if (subjectIsCall(m.subject!)) {
+        accept(
+          "error",
+          `A variant 'match' subject must be a simple reference or let-bound name — not a call. ` +
+            `Bind the result to a 'let' first, then match on that name (avoids double-evaluation).`,
+          { node: m, property: "subject", code: "loom.match-subject-not-simple" },
+        );
+      }
+      // Variant exhaustiveness / unknown-variant / duplicate-variant are
+      // checked in the IR validator, where the scrutinee's resolved union
+      // variant set is available (src/ir/validate/checks/structural-checks.ts).
+      continue;
+    }
+    // Warn on non-exhaustive boolean matches (no `else`).  An expression
     // without `else` returns undefined when no arm matches, which
     // is rarely intentional — for state-machine page bodies it
     // means "render nothing" which is usually a bug.  Promoted
@@ -43,6 +66,16 @@ export function checkMatchExpressions(model: Model, accept: ValidationAcceptor):
       );
     }
   }
+}
+
+/** True when a variant-match subject expression contains a call — a
+ *  `CallSuffix` (`f(...)`) or a calling `MemberSuffix` (`x.verb(...)`) in its
+ *  postfix chain.  A bare `NameRef` or a pure member read is "simple". */
+function subjectIsCall(subject: Expression): boolean {
+  if (!isPostfixChain(subject)) return false;
+  return subject.suffixes.some(
+    (s: CallSuffix | MemberSuffix) => isCallSuffix(s) || (isMemberSuffix(s) && s.call),
+  );
 }
 
 /** The compiler knows the intrinsic test-matcher surface, so it can

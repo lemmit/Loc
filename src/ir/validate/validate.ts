@@ -22,6 +22,7 @@ import {
   validateUnionFindShapes,
   validateUnionsUnimplemented,
   validateUnmappedErrorStatuses,
+  validateVariantMatch,
   validateWhenGateSupport,
   validateWorkspaceUniqueness,
 } from "./checks/structural-checks.js";
@@ -196,6 +197,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateAuditedOperationSupport(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
   }
   validateExprIntegrity(loom, diags);
+  validateVariantMatch(loom, diags);
   validateUiBodies(loom, diags);
   validateStores(loom, diags);
   return diags;

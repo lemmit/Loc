@@ -157,6 +157,13 @@ const ELIXIR_TARGET: ExprTarget<RenderCtx> = {
   ternary: (cond, then, otherwise) => `if ${cond}, do: ${then}, else: ${otherwise}`,
   convert: (value, e) => renderElixirConvert(e.target, e.from, value),
   match: renderMatch,
+  // Variant-`match` (variant-match.md) — TODO(fan-out): render `case subject do
+  // %Order{} = o -> <value> end` with a REAL binding (`bindingRefText` returns
+  // the binding name).
+  matchVariant() {
+    throw new Error("variant-match: Elixir backend not yet implemented (variant-match.md fan-out)");
+  },
+  bindingRefText: (binding) => binding,
   // List literals are walker-config sugar (e.g. responsive Grid cols); no
   // domain-expression position consumes one today, but keep total with an
   // Elixir-list emit so unexpected uses still compile.

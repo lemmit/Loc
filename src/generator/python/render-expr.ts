@@ -83,6 +83,13 @@ const PY_TARGET: ExprTarget<PyRenderContext> = {
     }
     return out;
   },
+  // Variant-`match` (variant-match.md) — TODO(fan-out): render an
+  // isinstance-conditional in expression position (or match/case in statement
+  // position); `bindingRefText` returns the binding name for a real bound var.
+  matchVariant() {
+    throw new Error("variant-match: Python backend not yet implemented (variant-match.md fan-out)");
+  },
+  bindingRefText: (binding) => binding,
   list: (elements) => `[${elements.join(", ")}]`,
 };
 
