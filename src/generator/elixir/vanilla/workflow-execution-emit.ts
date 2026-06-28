@@ -77,6 +77,7 @@ import {
   workflowEmitsCommandRoute,
   workflowUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
+import { classifyDomainServiceTier } from "../../../ir/util/domain-service-tier.js";
 import { resolveWorkflowIsolation } from "../../../ir/util/resolve-datasource.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
@@ -516,6 +517,20 @@ function opCallSource(
 function lookupOp(ctx: BoundedContextIR, aggName: string, opName: string): OperationIR | undefined {
   const agg = ctx.aggregates.find((a) => a.name === aggName);
   return agg?.operations.find((o) => o.name === opName);
+}
+
+/** Resolve the tier of a `domainService.<op>` referenced in a workflow body
+ *  (domain-services.md rev. 4).  Threaded onto the workflow render context so a
+ *  `reading` service call renders as a context fn (decision B); a `pure` call
+ *  (or an unresolvable ref) keeps the `Domain.Services` module shape. */
+function lookupServiceTier(
+  ctx: BoundedContextIR,
+  service: string,
+  opName: string,
+): "pure" | "reading" | "mutating" | undefined {
+  const svc = (ctx.domainServices ?? []).find((s) => s.name === service);
+  const op = svc?.operations.find((o) => o.name === opName);
+  return op ? classifyDomainServiceTier(op) : undefined;
 }
 
 /** True when this op-call targets a `currentUser`-gated operation — its context
@@ -1136,6 +1151,20 @@ function renderWorkflowModule(
     contextModule: contextModuleFq,
     foundation: "vanilla",
     resourceModules,
+    // Domain-service call wiring (domain-services.md rev. 4, Slice 1; Elixir
+    // decision B).  A workflow that calls a `reading`-tier service (e.g.
+    // `precondition Registration.isEmailAvailable(holder)`) renders it as a
+    // CONTEXT FUNCTION on this context module — `<Context>.is_email_available(…)`
+    // — with NO read-port handle (the ambient `Repo` is free).  `readingServiceModule`
+    // is the fully-qualified context module, rewritten to the `Context` alias
+    // by the same `replaceAll` that aliases the rest of the body.  A `pure`
+    // service call falls through to the `Domain.Services` module shape
+    // (byte-identical).  `ctx` is undefined only on legacy/test paths — then no
+    // tier is resolved and every call stays the pure module shape.
+    domainServiceTier: ctx
+      ? (service, opName) => lookupServiceTier(ctx, service, opName)
+      : undefined,
+    readingServiceModule: contextModuleFq,
   };
   // Workflow lifecycle narrative — `workflow_started` at run entry, woven into
   // the success tail of the body by `assembleBody` (`workflow_completed`).  The

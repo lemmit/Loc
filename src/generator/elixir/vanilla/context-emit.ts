@@ -24,6 +24,7 @@ import type {
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { opUsesCurrentUser, stmtUsesParam } from "../domain/predicates.js";
+import { renderReadingServiceContextFns } from "../domain-service-emit.js";
 import type { RenderCtx } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
@@ -234,6 +235,18 @@ ${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}${functi
   // unused.
   const requireLogger = contextEmitsEvent(ctx) ? "\n  require Logger" : "";
 
+  // Reading-tier domain services (domain-services.md rev. 4, Slice 1; Elixir
+  // decision B — ambient `Repo`).  A single-context `reading` service op lowers
+  // to a CONTEXT FUNCTION on THIS module (not a `Domain.Services` module), so
+  // its body's repo reads resolve against the ambient `Repo` via the
+  // context-facade find fns above.  Empty for a pure-only / service-free
+  // context (byte-identical to before).
+  const readingServiceFns = renderReadingServiceContextFns(ctx, facadeMod, `${appModule}.Types`);
+  const readingServiceBlock =
+    readingServiceFns.length > 0
+      ? `\n  # Reading-tier domain services (ambient Repo) — domain-services.md rev. 4\n${readingServiceFns.join("\n\n")}\n`
+      : "";
+
   return `# Auto-generated.
 defmodule ${facadeMod} do
   @moduledoc """
@@ -244,7 +257,7 @@ defmodule ${facadeMod} do
   workflow body).  Plain Elixir context module.
   """${requireLogger}${refCollHelpers ? "\n  import Ecto.Query" : ""}
 
-${blocks.join("\n")}${retrievalBlock}${ensureBlock}${refCollHelpers}end
+${blocks.join("\n")}${retrievalBlock}${readingServiceBlock}${ensureBlock}${refCollHelpers}end
 `;
 }
 

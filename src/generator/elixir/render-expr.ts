@@ -104,6 +104,25 @@ export interface RenderCtx {
    *  `s`.  A param whose name is a key here renders as the mapped value
    *  (so `s.order` → `event.order`); other refs are unaffected. */
   paramRenames?: Record<string, string>;
+  /** Tier resolver for a `reading`-tier domain-service CALL (domain-services.md
+   *  rev. 4, Slice 1; Elixir decision B — ambient `Repo`).  On the
+   *  Elixir/vanilla backend a `reading` service op lowers to a CONTEXT FUNCTION
+   *  on its aggregate's context module (so it has the ambient `Repo`), NOT a
+   *  standalone `<App>.Domain.Services.<Name>` module — the latter is reserved
+   *  for `pure` ops (byte-identical) and the out-of-scope cross-context case.
+   *  When set, the `domain-service` call arm consults this to pick the call
+   *  shape WITHOUT re-deriving the tier from the operation body.  Returns the
+   *  tier, or undefined when the renderer has no domain-service index (unit
+   *  tests / paths that never call a service) → falls back to the pure module
+   *  shape, so a non-workflow render context is byte-identical to before. */
+  domainServiceTier?: (service: string, op: string) => "pure" | "reading" | "mutating" | undefined;
+  /** Fully-qualified context module (`Api.Accounts`) a single-context
+   *  `reading` service fn is emitted onto, used to render the CALL site
+   *  (`Api.Accounts.is_email_available(holder)`).  Threaded by the workflow
+   *  emitter (which renders the call) alongside {@link domainServiceTier}; the
+   *  reading fn itself is emitted INTO this module by `domain-service-emit.ts`.
+   *  Defaults to `contextModule` when unset. */
+  readingServiceModule?: string;
 }
 
 const DEFAULT: RenderCtx = { thisName: "record", contextModule: "MyApp" };
@@ -184,6 +203,18 @@ export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
   // data-layer-native (the Postgres column) rather than `Decimal` structs.
   const target = ctx.filterArgs ? ELIXIR_FILTER_TARGET : ELIXIR_TARGET;
   return renderExprWith(e, target, ctx);
+}
+
+/** The context-facade find fn that fronts a repository read in a `reading`
+ *  domain-service body (domain-services.md rev. 4, Slice 1; Elixir decision B —
+ *  ambient `Repo`).  Mirrors the workflow `repo-let` lowering exactly
+ *  (`workflow-execution-emit.ts`): the built-in `getById` maps to the
+ *  `get_<agg>/1` (`find_by_id`) facade; a custom find maps to the per-find
+ *  `<method>_<agg>` defdelegate.  Both are emitted by `context-emit.ts`, so a
+ *  reading service rendered as a context fn (which has the ambient `Repo`)
+ *  resolves them as bare same-module calls. */
+export function contextFindFnFor(method: string, aggregate: string): string {
+  return method === "getById" ? `get_${snake(aggregate)}` : `${snake(method)}_${snake(aggregate)}`;
 }
 
 /**
@@ -426,10 +457,22 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
       return args.length > 0
         ? `${snake(e.name)}(${ctx.thisName}, ${args.join(", ")})`
         : `${snake(e.name)}(${ctx.thisName})`;
-    case "repo-read":
-    // Read-only repository query in a `reading` domain-service body
-    // (domain-services.md rev. 4).  Per-backend EMISSION is a LATER slice;
-    // plain-call fall-through keeps the exhaustive switch total for now.
+    case "repo-read": {
+      // Read-only repository query in a `reading` domain-service body
+      // (domain-services.md rev. 4, Slice 1; Elixir decision B — ambient
+      // `Repo`).  The reading op is emitted as a CONTEXT FUNCTION (it has the
+      // ambient `Repo`), so a repo read renders against the SAME context-facade
+      // find fn the workflow `repo-let` lowering calls: `getById` → `get_<agg>`,
+      // a custom find → `<method>_<agg>` (the `defdelegate`s emitted by
+      // `context-emit.ts` → `repository-emit.ts:renderFindFn`).  Those return
+      // `{:ok, value | nil} | {:error, :not_found}`; unwrap to the bare
+      // value-or-nil so it composes in any expression position (e.g.
+      // `is_nil((case ... end))` for `== null`).  No re-recognition — the
+      // `repoRead` is fully resolved at lowering.
+      const read = e.repoRead!;
+      const fn = contextFindFnFor(read.method, read.aggregate);
+      return `(case ${fn}(${args.join(", ")}) do\n      {:ok, value} -> value\n      _ -> nil\n    end)`;
+    }
     case "action":
     // Sibling action call (Proposal A Stage 1) — frontend-only; never lowered
     // into a backend domain expression.  Plain call keeps the switch total.
@@ -451,11 +494,25 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
       return `${mod}.${snake(op.resourceName)}_${snake(op.verb)}(${args.join(", ")})`;
     }
     case "domain-service": {
-      // `Shop.Domain.Services.Pricing.quote(cart, customer)` — a plain
-      // stateless module (no GenServer, no state), fully qualified
-      // under the app's `Domain.Services` namespace.  The app prefix is the
-      // first segment of `contextModule` (`MyApp.Sales` → `MyApp`).
+      // Two shapes, decided by the operation's TIER (domain-services.md rev. 4,
+      // Slice 1; Elixir decision B):
+      //
+      //   - `pure` (or no tier resolver) → `Shop.Domain.Services.Pricing.quote(…)`,
+      //     a plain stateless module fully qualified under the app's
+      //     `Domain.Services` namespace.  The app prefix is the first segment of
+      //     `contextModule` (`MyApp.Sales` → `MyApp`).  BYTE-IDENTICAL to before.
+      //
+      //   - `reading` (single-context) → `Api.Accounts.is_email_available(holder)`,
+      //     a CONTEXT FUNCTION on the aggregate's context module (so it has the
+      //     ambient `Repo` — no handle to thread, unlike the param/inject backends).
+      //     The fn is emitted onto that module by `domain-service-emit.ts`; the
+      //     CALL just names it on `readingServiceModule` (the context module).
       const ref = e.serviceRef!;
+      const tier = ctx.domainServiceTier?.(ref.service, ref.op);
+      if (tier === "reading") {
+        const mod = ctx.readingServiceModule ?? ctx.contextModule;
+        return `${mod}.${snake(ref.op)}(${args.join(", ")})`;
+      }
       const app = ctx.contextModule.split(".")[0] ?? ctx.contextModule;
       return `${app}.Domain.Services.${upperFirst(ref.service)}.${snake(ref.op)}(${args.join(", ")})`;
     }

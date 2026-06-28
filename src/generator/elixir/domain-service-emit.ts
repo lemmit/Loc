@@ -40,8 +40,57 @@ import type {
   DomainServiceOperationIR,
   StmtIR,
 } from "../../ir/types/loom-ir.js";
+import { readPortsForOperation } from "../../ir/util/domain-service-read-ports.js";
+import { classifyDomainServiceTier } from "../../ir/util/domain-service-tier.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { type RenderCtx, renderExpr, renderTypespec } from "./render-expr.js";
+
+// ---------------------------------------------------------------------------
+// Tier-driven placement (domain-services.md rev. 4, Slice 1; Elixir decision B)
+//
+// Elixir is the structural OUTLIER among the five backends.  Where the others
+// thread a read-port HANDLE (param / injected repo) into a service that stays a
+// standalone unit, Elixir has the ambient `Repo` for free — so the divergence is
+// PLACEMENT, not a handle:
+//
+//   - a `pure` op stays a standalone `<App>.Domain.Services.<Name>` module fn
+//     (byte-identical to the pre-rev.4 shell), AND
+//   - a single-context `reading` op lowers to a CONTEXT FUNCTION on its
+//     aggregate's context module (`Api.Accounts.is_email_available/1`), so the
+//     body's repo reads resolve against the ambient `Repo` via the existing
+//     context-facade find fns.
+//
+// `placeReadingAsContextFn` is the single predicate both sides share: this
+// emitter SKIPS a reading op from the `Domain.Services` module (and skips the
+// whole module when every op is reading), and `context-emit.ts` ADDS the reading
+// op as a context fn via `renderReadingServiceContextFn`.  A reading op whose
+// read-ports span MORE THAN ONE context is OUT OF SCOPE for Slice 1 — it would
+// need a standalone module taking explicit `Repo`/context args; we keep it in
+// the `Domain.Services` module (so it still emits *something*) and flag it with a
+// `# loom.domain-service-multi-context-reading` note rather than crashing.
+// ---------------------------------------------------------------------------
+
+/** True when a reading op's read-ports all resolve to ONE context (this
+ *  service's own) — the single-context case Slice 1 emits as a context fn.  A
+ *  port whose repository is not declared in `ctx` means the read spans another
+ *  context (out of scope) — then we keep the standalone module form. */
+export function readingIsSingleContext(
+  op: DomainServiceOperationIR,
+  ctx: BoundedContextIR,
+): boolean {
+  const localRepos = new Set(ctx.repositories.map((r) => r.name));
+  return readPortsForOperation(op).every((p) => localRepos.has(p.repo));
+}
+
+/** Does this op lower to a context FUNCTION (single-context `reading`) rather
+ *  than a `Domain.Services` module fn?  Pure ops → false (module).  Reading ops
+ *  spanning >1 context → false (kept in the module, flagged — out of scope). */
+export function placeReadingAsContextFn(
+  op: DomainServiceOperationIR,
+  ctx: BoundedContextIR,
+): boolean {
+  return classifyDomainServiceTier(op) === "reading" && readingIsSingleContext(op, ctx);
+}
 
 /** Emit `lib/<app>/domain/services/<name>.ex` for each `domainService` in the
  *  context.  Called with `(appName, appModule)` so the module path the
@@ -62,20 +111,47 @@ export function emitDomainServices(
   // return types name siblings of that context.
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
   for (const svc of ctx.domainServices ?? []) {
+    // Ops emitted as context fns (single-context `reading`) are NOT in this
+    // module — `context-emit.ts` hosts them.  A module whose every op is a
+    // context fn (a service with only reading ops) emits NO file at all.
+    const moduleOps = svc.operations.filter((op) => !placeReadingAsContextFn(op, ctx));
+    if (moduleOps.length === 0) continue;
     const path = `lib/${appName}/domain/services/${snake(svc.name)}.ex`;
-    out.set(path, renderDomainServiceModule(svc, ctx, appModule, contextModule));
+    out.set(path, renderDomainServiceModule(svc, moduleOps, ctx, appModule, contextModule));
   }
+}
+
+/** Render the single-context `reading`-tier operations of the context's domain
+ *  services as CONTEXT FUNCTIONS (Elixir decision B — ambient `Repo`).  Called
+ *  by `context-emit.ts`, which splices the returned blocks into the context
+ *  module so the body's repo reads resolve against the ambient `Repo` via the
+ *  sibling context-facade find fns.  Returns `[]` when no reading op qualifies
+ *  (so a pure-only / workflow-only context module is byte-identical). */
+export function renderReadingServiceContextFns(
+  ctx: BoundedContextIR,
+  contextModule: string,
+  typesModule: string,
+): string[] {
+  const blocks: string[] = [];
+  for (const svc of ctx.domainServices ?? []) {
+    for (const op of svc.operations) {
+      if (!placeReadingAsContextFn(op, ctx)) continue;
+      blocks.push(renderReadingServiceContextFn(svc, op, ctx, contextModule, typesModule));
+    }
+  }
+  return blocks;
 }
 
 function renderDomainServiceModule(
   svc: DomainServiceIR,
+  moduleOps: DomainServiceOperationIR[],
   ctx: BoundedContextIR,
   appModule: string,
   contextModule: string,
 ): string {
   const moduleName = `${appModule}.Domain.Services.${upperFirst(svc.name)}`;
   const typesModule = `${appModule}.Types`;
-  const ops = svc.operations.map((op) => renderOperation(op, ctx, contextModule, typesModule));
+  const ops = moduleOps.map((op) => renderOperation(op, ctx, contextModule, typesModule));
   return `# Auto-generated — stateless pure-calculator domain service (domain-services.md).
 defmodule ${moduleName} do
   @moduledoc false
@@ -85,18 +161,57 @@ end
 `;
 }
 
+/** A single-context `reading`-tier op rendered as a CONTEXT FUNCTION: identical
+ *  to the pure module-fn shape (`@spec` + `def <op>(params) do … end`), but its
+ *  body's `repo-read` arms render against the ambient `Repo` via the sibling
+ *  context-facade find fns (`get_<agg>` / `<find>_<agg>`).  4-space indented to
+ *  sit inside the context module's `defmodule`. */
+function renderReadingServiceContextFn(
+  svc: DomainServiceIR,
+  op: DomainServiceOperationIR,
+  ctx: BoundedContextIR,
+  contextModule: string,
+  typesModule: string,
+): string {
+  // The render context carries `readingServiceModule` so any NESTED
+  // domain-service call inside this reading body resolves to a sibling context
+  // fn (same module), and `domainServiceTier` so the `repo-read`/`domain-service`
+  // arms pick the context-fn shape.  `repo-read` arms render bare sibling
+  // calls (`get_account(id)`) since this fn lives ON the context module.
+  const inner = renderOperation(op, ctx, contextModule, typesModule, {
+    readingServiceModule: contextModule,
+    domainServiceTier: (service, opName) =>
+      service === svc.name && opName === op.name ? "reading" : undefined,
+  });
+  return `  @doc "Reading-tier domain service \`${svc.name}.${op.name}\` (ambient Repo — domain-services.md rev. 4)."
+${inner}`;
+}
+
 function renderOperation(
   op: DomainServiceOperationIR,
   ctx: BoundedContextIR,
   contextModule: string,
   typesModule: string,
+  /** Extra render-context flags — set when this op is rendered as a
+   *  single-context `reading` CONTEXT FUNCTION (ambient `Repo`), so its
+   *  `repo-read` / nested `domain-service` arms pick the context-fn shape. */
+  ctxOverride?: Pick<RenderCtx, "readingServiceModule" | "domainServiceTier">,
 ): string {
   // No `this` — every reference resolves against the bare parameters.
   const renderCtx: RenderCtx = {
     thisName: "record",
     contextModule,
     typesModule,
+    ...ctxOverride,
   };
+  // Out-of-scope guard: a `reading` op whose read-ports span MORE THAN ONE
+  // context can't be a single-context fn, so it stays in the `Domain.Services`
+  // module — but the module has no ambient `Repo`/context to resolve its repo
+  // reads.  Slice 1 does not emit that shape; flag it (a reviewed limitation,
+  // not a crash) and emit a guard `raise` rather than a body that references a
+  // non-existent context fn.
+  const multiContextReading =
+    classifyDomainServiceTier(op) === "reading" && !readingIsSingleContext(op, ctx);
   const fnName = snake(op.name);
   const paramNames = op.params.map((p) => snake(p.name));
 
@@ -124,6 +239,22 @@ function renderOperation(
   const discards = paramNames
     .filter((n) => !new RegExp(`"${n}"`).test(bodyText))
     .map((n) => `    _ = ${n}`);
+
+  if (multiContextReading) {
+    // OUT OF SCOPE (Slice 1): a cross-context reading service.  Emit a guard
+    // raise + a visible flag note rather than a body whose repo reads name
+    // context fns that don't exist in this module.
+    const allDiscards = paramNames.map((n) => `    _ = ${n}`);
+    return `${specLine}
+  # loom.domain-service-multi-context-reading: '${op.name}' reads repositories
+  # across more than one context — out of scope for domain-services rev. 4 Slice 1
+  # (single-context reading only).  A cross-context reading service needs a
+  # standalone module taking explicit Repo/context args; not emitted here.
+  def ${fnName}(${paramNames.join(", ")}) do
+${allDiscards.join("\n")}
+    raise "domain service '${op.name}': cross-context reading not yet supported (domain-services.md rev. 4 Slice 1)"
+  end`;
+  }
 
   const bodyLines = op.body.map((s) => renderStatement(s, ctx, renderCtx, isUnion));
 
