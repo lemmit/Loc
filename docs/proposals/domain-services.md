@@ -227,18 +227,21 @@ Drizzle samples do and is the pin.
 
 ### What the IR needs to carry
 
-- `DomainServiceOperationIR.tier: "pure" | "reading" | "mutating"` —
-  classified during lowering: calls a mutating op on an aggregate param ⇒
-  `mutating`; else does a repository **read** ⇒ `reading`; else `pure`.
-  Drives the caller gate (reading/mutating ⇒ orchestrator-only), the
-  emission shape (read handle on the upper two), and the orchestrator's
-  `save`-emission for mutated parameters.
-- `OperationIR.mutating: bool` already exists — reused to classify
-  whether a call into an aggregate operation makes the enclosing service
-  `mutating`, and to drive the orchestrator's `save` for mutated params.
+- **No stamped `tier` field — derive it** (CLAUDE.md "derive, don't
+  stamp"). A pure helper `classifyDomainServiceTier(op)` in
+  `src/ir/util/` (mirroring `classifyPage` in `page-kind.ts`) returns
+  `"pure" | "reading" | "mutating"` from the body: calls a mutating op on
+  an aggregate param ⇒ `mutating`; else does a repository **read** ⇒
+  `reading`; else `pure`. One shared classifier consumed by **both** the
+  validator (caller gate, `no-repo-write`) and the emitters (read-handle
+  shape, orchestrator `save`-emission) — so there's no cache to
+  invalidate at the construction site that forgets to set it.
+- `OperationIR.mutating: bool` — the classifier reuses the same
+  this-/param-write detection the validator already walks
+  (`domain-service-checks.ts`'s `forEachStmtExpr` + `callReceiverName`).
 
-No `mutates`-set materialisation, no new `ExprIR.kind`; calls stay
-`Call { callKind: "domain-service" }`.
+No `tier` IR field, no `mutates`-set materialisation, no new
+`ExprIR.kind`; calls stay `Call { callKind: "domain-service" }`.
 
 ## Criteria and retrievals — which tier
 
@@ -427,6 +430,9 @@ Vernon was always the *writing*, which rev. 4 still forbids. Headlines:
   returned to diff.
 - **Multi-aggregate writes** use one transaction / multiple saves.
 - **`function` gains a pure block body** (let + branch + bug-regime
-  throw), staying non-queryable.
-- Reuse `Call` + `callKind: "domain-service"`; the only new IR field is
-  `DomainServiceOperationIR.tier`.
+  throw), staying non-queryable. `FunctionIR.body` becomes
+  `ExprIR | StmtIR[]` (a variant, not a replacement — the expression form
+  stays SQL-inlinable).
+- Reuse `Call` + `callKind: "domain-service"`. **No new IR field** — the
+  tier is derived on demand via `classifyDomainServiceTier(op)`, not
+  stamped.
