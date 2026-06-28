@@ -69,6 +69,12 @@ const FIXTURES: Array<[string, string]> = [
   // + `findAll(spec.and(tenantScope(...)))` (the JpaSpecificationExecutor path
   // the @Query overrides don't cover).
   ["test/e2e/fixtures/java-build/tenancy-reified.ddd", "api1"],
+  // DEBT-24 — a PRINCIPAL criterion used directly in a find/retrieval `where`.
+  // java does not reify a principal criterion into a `Criteria` factory; it
+  // routes to the inline JPA `@Query` binding the principal via the ambient
+  // `@currentUserAccessor.user()?.tenantId()` SpEL (the .NET/Hono sibling case,
+  // already correct on java) — a regression guard for the one-principal-source.
+  ["test/e2e/fixtures/java-build/tenancy-retrieval.ddd", "api1"],
   // TPH (sharedTable) inheritance: JPA SINGLE_TABLE + @DiscriminatorColumn
   // on the abstract base, @DiscriminatorValue per concrete, shared <Base>Id.
   ["corpus:tph", CORPUS_DEPLOYABLE],

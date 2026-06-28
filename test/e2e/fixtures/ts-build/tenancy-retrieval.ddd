@@ -1,0 +1,45 @@
+// DEBT-24 — a PRINCIPAL-referencing `criterion` reified into the Hono
+// find/retrieval query-face.  A `criterion` whose body reads `currentUser`,
+// used by a `find` and a `retrieval`, reifies into a module-level
+// `<name>Criterion` predicate fn.  That fn is module-scoped — it has no
+// `currentUser` parameter — so before the fix it emitted an unbound
+// `currentUser` reference and the generated repository failed `tsc`.  Now the
+// fn resolves the principal through the ambient `requireCurrentUser()` accessor
+// (the same one the capability-`filter` query-face uses), so the backend has
+// one principal source and the repository type-checks.  This cell compiles the
+// emitted repository + the requireCurrentUser import under `tsc --noEmit`.
+system Tenancy {
+  user { id: guid  tenantId: string }
+
+  subdomain Core {
+    context Ledger {
+      aggregate Account ids guid {
+        tenantId: string
+        balance: int
+      }
+      repository Accounts for Account {
+        find mine(): Account[] where MyTenant
+      }
+
+      criterion MyTenant of Account = tenantId == currentUser.tenantId
+
+      retrieval MineRich(min: int) of Account {
+        where: MyTenant
+        sort:  [balance desc]
+      }
+    }
+  }
+
+  api LedgerApi from Core
+  storage pg { type: postgres }
+  resource ledgerState { for: Ledger, kind: state, use: pg }
+
+  deployable api {
+    platform: node
+    contexts: [Ledger]
+    dataSources: [ledgerState]
+    serves: LedgerApi
+    auth: required
+    port: 4000
+  }
+}

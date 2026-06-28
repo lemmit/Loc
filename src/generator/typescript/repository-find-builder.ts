@@ -26,7 +26,7 @@ import type {
   RetrievalIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
-import { findUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser, findUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { discriminatorValue, tableOwnerName } from "../../ir/util/inheritance.js";
 import { valueCollectionsFor } from "../../ir/util/value-collections.js";
 import { indent, lines } from "../../util/code-builder.js";
@@ -100,13 +100,26 @@ export function repoTableName(agg: EnrichedAggregateIR, ctx: BoundedContextIR): 
 export { criterionFnName, reifiableCriterion, renderCriterionArg };
 
 /** `const <name>Criterion = (params) => <drizzle predicate>;` — the criterion's
- *  own body (its parameters in scope), lowered against the candidate table. */
+ *  own body (its parameters in scope), lowered against the candidate table.
+ *
+ *  The fn is module-level, so a `currentUser.<field>` reference (a tenancy
+ *  criterion used by a find/retrieval) has no `currentUser` in scope — binding
+ *  it to the bare name emits an unbound reference that fails `tsc`. Resolve it
+ *  through the ambient `requireCurrentUser()` accessor instead — the same one
+ *  the capability-`filter` query-face uses — so the backend has one principal
+ *  source and the fn compiles (the Drizzle analogue of the .NET reified spec
+ *  reading `RequestContext.Current!.CurrentUser!`). */
 export function renderCriterionFn(
   c: CriterionIR,
   tableName: string,
   ctx: EnrichedBoundedContextIR,
 ): string {
-  const lowered = lowerToDrizzle(c.body, tableName, ctx)!;
+  const lowered = lowerToDrizzle(
+    c.body,
+    tableName,
+    ctx,
+    exprUsesCurrentUser(c.body) ? { principalAccessor: "requireCurrentUser()" } : undefined,
+  )!;
   const params = c.params.map((p) => `${p.name}: ${tsTypeForReturn(p.type)}`).join(", ");
   return `const ${criterionFnName(c.name)} = (${params}) => ${lowered.expr};`;
 }

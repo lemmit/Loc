@@ -17,8 +17,13 @@
 import type { BoundedContextIR, EnrichedAggregateIR, RetrievalIR } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { plural, upperFirst } from "../../util/naming.js";
-import { canEmitToExpressionFor } from "./criteria-emit.js";
-import { collectCsExprUsings, renderCsExpr, renderCsType } from "./render-expr.js";
+import { canEmitToExpressionFor, refsCurrentUser } from "./criteria-emit.js";
+import {
+  AMBIENT_CURRENT_USER,
+  collectCsExprUsings,
+  renderCsExpr,
+  renderCsType,
+} from "./render-expr.js";
 
 /** The C# class name for a retrieval's Ardalis specification. */
 export function specClassName(retrievalName: string): string {
@@ -73,11 +78,21 @@ function renderSpec(
   ns: string,
 ): string {
   const reified = !!(r.criterionRef && canEmitToExpressionFor(r.criterionRef.name, ctx, agg.name));
+  // A retrieval whose `where` references the principal (`currentUser.<field>`,
+  // e.g. a tenancy criterion) is built once inside the `Specification<T>`
+  // constructor — a static position with no request-scoped `currentUser` local.
+  // Resolve it through the same ambient accessor the EF query-filter capability
+  // filters use (`AMBIENT_CURRENT_USER`), so the principal has one source on the
+  // whole backend; without this the inlined predicate names an unbound
+  // `currentUser` and the spec fails to compile (CS0103). The reified branch
+  // never hits this — `canEmitToExpressionFor` excludes principal criteria, so
+  // they fall to the inline path here, where the binding lives.
+  const refsPrincipal = !reified && refsCurrentUser(r.where);
   const wherePredicate = reified
     ? `new ${upperFirst(r.criterionRef!.name)}Criterion(${r
         .criterionRef!.args.map((a) => renderCsExpr(a, { thisName: "x", agg }))
         .join(", ")}).ToExpression()`
-    : `x => ${renderCsExpr(r.where, { thisName: "x", agg })}`;
+    : `x => ${renderCsExpr(r.where, { thisName: "x", agg, currentUserExpr: refsPrincipal ? AMBIENT_CURRENT_USER : undefined })}`;
 
   const usings = new Set<string>([
     "Ardalis.Specification",
@@ -86,6 +101,9 @@ function renderSpec(
     `${ns}.Domain.Ids`,
   ]);
   if (reified) usings.add(`${ns}.Domain.Criteria`);
+  // The ambient accessor (`RequestContext`) lives in `<ns>.Domain.Common`;
+  // import it only when the predicate actually resolves the principal.
+  if (refsPrincipal) usings.add(`${ns}.Domain.Common`);
   for (const u of collectCsExprUsings(r.where)) usings.add(u);
 
   const ctorParams = r.params.map((p) => `${renderCsType(p.type)} ${p.name}`).join(", ");

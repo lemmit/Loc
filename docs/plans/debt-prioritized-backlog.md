@@ -54,7 +54,7 @@ an unreachable stub), DEBT-31 (sortBy dropped). Per-entry verdicts:
 | 21 | 🟡 OPEN (partial) | one real app-`style:` per backend (dotnet=cqrs, node/java=layered); rest reserved stubs |
 | 22 | 🟡 OPEN (partial) | one real `transport:` per backend (node=hono, dotnet=controllers); express/fastify/minimalApi stubbed |
 | 23 | 🔴 OPEN | marten/axon/jooq all `AdapterNotImplementedError` stubs |
-| 24 | 🟡 OPEN (**narrowed**) | criterion reification ships on java/dotnet/node/elixir (python non-reifying *by design*); only **principal-binding in the criterion query-face** is deferred |
+| 24 | 🟡 OPEN (**narrowed further**) | criterion reification ships on java/dotnet/node/elixir (python non-reifying *by design*). **.NET + Hono reified find/retrieval principal query-faces now bind the ambient principal** (.NET `RequestContext.Current!.CurrentUser!`, Hono `requireCurrentUser()`) — fixed a latent compile break on both where a `currentUser` criterion reified to an unbound `currentUser` (.NET CS0103 in the `Specification<T>` ctor; Hono `tsc` in the module-level `<name>Criterion` fn). **java + python audited + already correct** (inline query binds the ambient principal — java `@Query` SpEL, python `require_current_user()`), so the compile-bug residue is drained across every reifying backend. Remaining (lower-value cleanup): reifying a principal criterion into a `Criterion<T>`/named *object*, retiring `usesUser` find-threading, and **adding criterion reification to Phoenix** (it doesn't reify today — Ash path removed) |
 | 25 | 🔴 OPEN | worker/orleans/genserver all stubs |
 | 26 | 🟡 OPEN (**narrowed**) | instance **visibility** ships on all 5 backends; the **execution/persistence epic** (choreographer seam) remains |
 | 27 | 🔴 OPEN | 5 `PlatformSurface` hooks (authGate/auditInit/compliance/tenancy/i18n) are optional no-ops, zero impls (tenancy+audit landed via *other* paths) |
@@ -65,9 +65,14 @@ an unreachable stub), DEBT-31 (sortBy dropped). Per-entry verdicts:
 **Takeaway for picking work:** trust the backend-tier rows; with DEBT-06
 (provenance) and DEBT-07 (`shape(document)`) now landed on the elixir backend,
 the highest-value *real* items remaining are DEBT-03 (union
-`add`/`remove` bodies — `emit` now ships), DEBT-13 (elixir `Id[]` join `ordinal`), and
-DEBT-24 (principal criterion query-face). The frontend tier is essentially
-cleared.
+`add`/`remove` bodies — `emit` now ships) and DEBT-13 (elixir `Id[]` join `ordinal`).
+DEBT-24's compile-bug residue is drained across every reifying backend: .NET +
+Hono now bind the ambient principal in the reified find/retrieval query-face
+(latent compile breaks fixed), and java + python were audited as already correct
+(inline query binds the ambient principal). Its remaining residue
+(`Criterion<T>`-object reification of principal criteria, `usesUser` retirement,
+adding criterion reification to Phoenix) is lower-value cleanup. The frontend
+tier is essentially cleared.
 
 ---
 
