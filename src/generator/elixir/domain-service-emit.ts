@@ -38,10 +38,14 @@ import type {
   BoundedContextIR,
   DomainServiceIR,
   DomainServiceOperationIR,
+  ExprIR,
   StmtIR,
 } from "../../ir/types/loom-ir.js";
 import { readPortsForOperation } from "../../ir/util/domain-service-read-ports.js";
-import { classifyDomainServiceTier } from "../../ir/util/domain-service-tier.js";
+import {
+  aggregateOpResolver,
+  classifyDomainServiceTier,
+} from "../../ir/util/domain-service-tier.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { type RenderCtx, renderExpr, renderTypespec } from "./render-expr.js";
 
@@ -92,6 +96,180 @@ export function placeReadingAsContextFn(
   return classifyDomainServiceTier(op) === "reading" && readingIsSingleContext(op, ctx);
 }
 
+/** Does this op emit NO standalone unit at all (a `mutating` op — Elixir
+ *  decision B / sim §2.5)?  On Elixir a `mutating` service is pure sugar for the
+ *  `with`-chain of context mutating-fn calls the calling workflow already owns —
+ *  there is nothing for a service module to "hold" (Ecto structs are immutable;
+ *  the mutation+persist seam IS the context fn, inside the workflow's
+ *  `Repo.transaction`).  So unlike the other four backends, no `Domain.Services`
+ *  module fn is emitted for the mutating tier — the call site
+ *  (`workflow-execution-emit.ts`) inlines it into the with-chain. */
+export function placeMutatingInline(op: DomainServiceOperationIR, ctx: BoundedContextIR): boolean {
+  return classifyDomainServiceTier(op, aggregateOpResolver(ctx)) === "mutating";
+}
+
+// ---------------------------------------------------------------------------
+// Mutating-tier inlining (domain-services.md rev. 4, Slice 3 — Elixir vanilla).
+//
+// A `mutating` `Transfer.run(s, d, amount)` call in a workflow body lowers to
+// the `with`-chain of the SERVICE BODY's param-op calls, each rebound through
+// its aggregate's context mutating fn (which builds the changeset + Repo.update
+// via `persist_change`).  The service is sugar — there is no service module/fn
+// (sim §2.5): the orchestrator's existing `Repo.transaction` is the atomic,
+// persisted commit.
+//
+// `Transfer.run` body: `source.withdraw(amount); dest.deposit(amount)`
+//   call:  Transfer.run(s, d, amount)   (positional args [s, d, amount])
+//   →   {:ok, s} <- Context.withdraw_account(s, %{arg0: amount}),
+//       {:ok, d} <- Context.deposit_account(d, %{arg0: amount})
+//
+// Each clause REBINDS the workflow-local var bound to the mutated param's
+// position (`s`/`d`) to the struct the context fn returns, threading the
+// immutable Ecto struct down the chain (CLAUDE.md: liveness via the returned
+// struct).  This is byte-for-byte the SAME clause shape an INLINE op-call
+// (`s.withdraw(amount)`) produces in `workflow-execution-emit.ts`, so the
+// mutating service really is the inline form expanded.
+// ---------------------------------------------------------------------------
+
+/** One inlined with-clause from a `mutating` service call: the rendered
+ *  `{:ok, <bind>} <- Context.<op>_<agg>(<bind>, %{...})` text plus the bind
+ *  name it rebinds (the workflow-local aggregate var). */
+export interface InlinedServiceClause {
+  text: string;
+  /** The var this clause rebinds (set only when a later clause threads it);
+   *  `undefined` when the clause discards its result (`{:ok, _}`). */
+  bindName?: string;
+}
+
+/** Expand a `mutating` domain-service call into the with-chain of its body's
+ *  param-op calls, routed through each mutated aggregate arg's context mutating
+ *  fn (sim §2.5).  Returns one clause per mutating `param.op(args)` in service-
+ *  body order; an empty array means the op is not mutating (caller falls back).
+ *
+ *  `callArgs` are the workflow call's positional argument expressions
+ *  (`Transfer.run(s, d, amount)` → `[s, d, amount]`), aligned to `op.params`.
+ *  The op's own arg expressions are rendered after substituting the service-op
+ *  parameter refs with the workflow call args, so `amount` (a service param)
+ *  resolves to the workflow's `amount` binding.  `contextModule` is the alias
+ *  the workflow uses (`Context`); `renderArg` renders a substituted ExprIR in
+ *  the workflow's scope. */
+export function inlineMutatingServiceCall(
+  op: DomainServiceOperationIR,
+  callArgs: ExprIR[],
+  ctx: BoundedContextIR,
+  contextModule: string,
+  renderArg: (e: ExprIR) => string,
+): InlinedServiceClause[] {
+  const resolveAggOp = aggregateOpResolver(ctx);
+  // Map each service-op parameter name to the workflow's call-arg ExprIR.
+  const subst = new Map<string, ExprIR>();
+  op.params.forEach((p, i) => {
+    const arg = callArgs[i];
+    if (arg) subst.set(p.name, arg);
+  });
+  // Aggregate-typed params → their aggregate name (the mutation targets).
+  const aggParams = new Map<string, string>();
+  for (const p of op.params) {
+    if (p.type.kind === "entity") aggParams.set(p.name, p.type.name);
+  }
+
+  // First pass: collect the mutating param-op calls in body order, with the
+  // param they target (so a later mutation of the SAME param can decide whether
+  // the earlier clause must thread its rebound struct).
+  const muts: { paramName: string; member: string; aggName: string; args: ExprIR[] }[] = [];
+  for (const stmt of op.body) {
+    // Only `expression`-statement param-op calls are mutating markers — a
+    // `let`/`return` of a method-call is a value form, not a bare mutation.
+    if (stmt.kind !== "expression") continue;
+    const e = stmt.expr;
+    if (e.kind !== "method-call") continue;
+    if (e.receiver.kind !== "ref" || e.receiver.refKind !== "param") continue;
+    const aggName = aggParams.get(e.receiver.name);
+    if (!aggName) continue;
+    const target = resolveAggOp(aggName, e.member);
+    if (
+      !target?.statements.some(
+        (s) => s.kind === "assign" || s.kind === "add" || s.kind === "remove",
+      )
+    ) {
+      continue;
+    }
+    // The mutated param must be bound to a bare workflow-local ref (a repo-let /
+    // let / loop binding) to be the rebind target.
+    const callArg = subst.get(e.receiver.name);
+    if (callArg?.kind !== "ref") continue;
+    muts.push({ paramName: e.receiver.name, member: e.member, aggName, args: e.args });
+  }
+
+  const clauses: InlinedServiceClause[] = [];
+  muts.forEach((m, i) => {
+    const bind = snake((subst.get(m.paramName) as Extract<ExprIR, { kind: "ref" }>).name);
+    // Render the op's args in the workflow scope: substitute service-op param
+    // refs with the workflow call args first, then render — `arg0: <amount>`,
+    // matching the inline op-call shape (`%{arg0: ...}`).
+    const argFields = m.args
+      .map((a, j) => `arg${j}: ${renderArg(substituteRefs(a, subst))}`)
+      .join(", ");
+    const fnName = `${snake(m.member)}_${snake(m.aggName)}`;
+    // Rebind to the var name ONLY when a LATER op in the same chain mutates the
+    // same param — then the next clause must see the threaded (immutable Ecto)
+    // struct.  Otherwise discard with `{:ok, _}`: the struct is already
+    // persisted (Repo.update inside the context fn), and a rebind no one reads
+    // trips `--warnings-as-errors` ("variable is unused; use ^ to match").  The
+    // workflow result still falls back to the last *load* bind (`d`), which is
+    // valid since the loads are unchanged.
+    const reusedLater = muts.slice(i + 1).some((n) => n.paramName === m.paramName);
+    const lhs = reusedLater ? bind : "_";
+    clauses.push({
+      text: `{:ok, ${lhs}} <- ${contextModule}.${fnName}(${bind}, %{${argFields}})`,
+      bindName: reusedLater ? bind : undefined,
+    });
+  });
+  return clauses;
+}
+
+/** Substitute bare `param`-kind refs in `e` with the mapped ExprIR (the
+ *  workflow call arg).  Structural — recurses through the expr forms a
+ *  param-op argument can take.  A ref with no substitution is left as-is. */
+function substituteRefs(e: ExprIR, subst: ReadonlyMap<string, ExprIR>): ExprIR {
+  switch (e.kind) {
+    case "ref":
+      return e.refKind === "param" && subst.has(e.name) ? subst.get(e.name)! : e;
+    case "member":
+      return { ...e, receiver: substituteRefs(e.receiver, subst) };
+    case "method-call":
+      return {
+        ...e,
+        receiver: substituteRefs(e.receiver, subst),
+        args: e.args.map((a) => substituteRefs(a, subst)),
+      };
+    case "binary":
+      return { ...e, left: substituteRefs(e.left, subst), right: substituteRefs(e.right, subst) };
+    case "unary":
+      return { ...e, operand: substituteRefs(e.operand, subst) };
+    case "paren":
+      return { ...e, inner: substituteRefs(e.inner, subst) };
+    case "ternary":
+      return {
+        ...e,
+        cond: substituteRefs(e.cond, subst),
+        // biome-ignore lint/suspicious/noThenProperty: `then` is the IR ternary's branch field, not a thenable.
+        then: substituteRefs(e.then, subst),
+        otherwise: substituteRefs(e.otherwise, subst),
+      };
+    case "call":
+      return { ...e, args: e.args.map((a) => substituteRefs(a, subst)) };
+    case "new":
+    case "object":
+      return {
+        ...e,
+        fields: e.fields.map((f) => ({ ...f, value: substituteRefs(f.value, subst) })),
+      };
+    default:
+      return e;
+  }
+}
+
 /** Emit `lib/<app>/domain/services/<name>.ex` for each `domainService` in the
  *  context.  Called with `(appName, appModule)` so the module path the
  *  ELIXIR_TARGET call leaf renders resolves.
@@ -112,9 +290,13 @@ export function emitDomainServices(
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
   for (const svc of ctx.domainServices ?? []) {
     // Ops emitted as context fns (single-context `reading`) are NOT in this
-    // module — `context-emit.ts` hosts them.  A module whose every op is a
-    // context fn (a service with only reading ops) emits NO file at all.
-    const moduleOps = svc.operations.filter((op) => !placeReadingAsContextFn(op, ctx));
+    // module — `context-emit.ts` hosts them.  `mutating` ops emit NO unit at
+    // all — they inline into the calling workflow's with-chain (decision B,
+    // sim §2.5).  A module whose every op is a context fn / inlined mutation
+    // (a service with only reading / mutating ops) emits NO file at all.
+    const moduleOps = svc.operations.filter(
+      (op) => !placeReadingAsContextFn(op, ctx) && !placeMutatingInline(op, ctx),
+    );
     if (moduleOps.length === 0) continue;
     const path = `lib/${appName}/domain/services/${snake(svc.name)}.ex`;
     out.set(path, renderDomainServiceModule(svc, moduleOps, ctx, appModule, contextModule));

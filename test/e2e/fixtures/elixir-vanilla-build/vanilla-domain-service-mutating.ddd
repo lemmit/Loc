@@ -1,0 +1,70 @@
+// `mutating`-tier domainService on the VANILLA (plain Ecto/Phoenix, non-Ash)
+// foundation — domain-services.md rev. 4, Slice 3 (the Elixir structural
+// outlier).
+//
+// A `mutating` service mutates the aggregate ARGS the orchestrating workflow
+// passes in (their own ops).  On Elixir it is pure SUGAR for the `with`-chain
+// of context mutating-fn calls — there is NO separate `Domain.Services` module
+// (sim §2.5).  `Transfer.run(s, d, amount)` inlines to
+//   `{:ok, s} <- Context.withdraw_account(s, %{arg0: amount}),
+//    {:ok, d} <- Context.deposit_account(d, %{arg0: amount})`
+// inside the workflow's `Repo.transaction` — persistence happens INSIDE each
+// context fn (changeset + Repo.update via persist_change), atomic via the
+// single transaction; each clause rebinds the mutated arg to the returned
+// (immutable Ecto) struct.  `FeeQuote` (a sibling PURE op) must still emit its
+// standalone `Domain.Services.FeeQuote` module (no regression).
+//
+// Decisive check that the inlined with-chain + the skipped service module
+// compile under `mix compile --warnings-as-errors` (the elixir-vanilla-build
+// gate).  Params are `source`/`dest` (the slice convention — `from`/`to` are
+// reserved).
+system MutatingSvc {
+  subdomain Accounts {
+    context Accounts {
+      valueobject Money {
+        amount: decimal
+        currency: string
+        invariant amount >= 0
+      }
+      aggregate Account ids guid with crudish {
+        holder: string
+        balance: Money
+        operation withdraw(amount: Money) {
+          balance := Money { amount: balance.amount - amount.amount, currency: balance.currency }
+        }
+        operation deposit(amount: Money) {
+          balance := Money { amount: balance.amount + amount.amount, currency: balance.currency }
+        }
+      }
+      repository Accounts for Account { }
+      domainService Transfer {
+        operation run(source: Account, dest: Account, amount: Money) {
+          source.withdraw(amount)
+          dest.deposit(amount)
+        }
+      }
+      domainService FeeQuote {
+        operation forAmount(amount: Money): Money {
+          return Money { amount: amount.amount, currency: amount.currency }
+        }
+      }
+      workflow MoveMoney transactional {
+        create(src: Account id, dst: Account id, amount: Money) {
+          let s = Accounts.getById(src)
+          let d = Accounts.getById(dst)
+          Transfer.run(s, d, amount)
+        }
+      }
+    }
+  }
+  api AccountsApi from Accounts
+  storage primary { type: postgres }
+  resource accountsState { for: Accounts, kind: state, use: primary }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Accounts]
+    dataSources: [accountsState]
+    serves: AccountsApi
+    port: 4000
+  }
+}

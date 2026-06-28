@@ -82,6 +82,7 @@ import { resolveWorkflowIsolation } from "../../../ir/util/resolve-datasource.js
 import { snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import type { ApiRoute } from "../api-emit.js";
+import { inlineMutatingServiceCall } from "../domain-service-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 
 export interface VanillaWorkflowExecResult {
@@ -335,14 +336,27 @@ function lowerStatement(
     }
 
     case "domain-service-call": {
-      // `Transfer.run(src, dst, amount)` — a bare orchestrator call into a
-      // `domainService` (domain-services.md rev. 4, the `mutating` tier).  The
-      // FULL mutating commit on Phoenix (the `with`-chain that rebuilds each
-      // mutated aggregate's changeset and `Repo.update`s it inside one
-      // `Repo.transact`) is a SEPARATE Elixir slice — the four non-Elixir
-      // backends land first.  Here we render the resolved service call as a
-      // side-effect line so generation stays sound (no `# TODO` crash); it does
-      // not yet persist the passed-in aggregates.  Tracked in the vanilla gap.
+      // `Transfer.run(s, d, amount)` — a bare orchestrator call into a
+      // `mutating` `domainService` (domain-services.md rev. 4, Slice 3).  On
+      // Elixir a mutating service is pure SUGAR for the `with`-chain of its
+      // body's param-op calls, each routed through its aggregate's context
+      // mutating fn (changeset + `Repo.update` via `persist_change`) — there is
+      // no separate service unit (sim §2.5).  The atomic, persisted commit is
+      // the workflow's existing `Repo.transaction`; each clause rebinds the
+      // mutated arg to the struct the context fn returns (immutable-struct
+      // threading).  The clauses are byte-identical to an INLINE `s.withdraw(…)`
+      // op-call — the mutating service IS the inline form expanded.
+      const clauses = resolveInlinedServiceClauses(st, renderCtx, contextModule, ctx);
+      if (clauses.length > 0) {
+        return clauses.map((c) => ({
+          kind: "with-clause",
+          text: c.text,
+          bindName: c.bindName,
+        }));
+      }
+      // No resolvable mutating shape (legacy/test path with no ctx index, or a
+      // service whose body the classifier can't read) — keep the sound
+      // side-effect line so generation never crashes.
       return [
         {
           kind: "emit",
@@ -529,6 +543,28 @@ function opCallSource(
   return `${contextModule}.${snake(st.op)}_${snake(st.aggName)}(${snake(st.target)}, %{${argFields}}${actor})`;
 }
 
+/** Resolve a `mutating` `domain-service-call` to its inlined with-clauses
+ *  (domain-services.md rev. 4, Slice 3).  Looks the service op up in `ctx`,
+ *  then delegates to `inlineMutatingServiceCall`, which expands the body's
+ *  param-op calls into context mutating-fn with-clauses.  Returns `[]` when
+ *  `ctx` is absent (legacy/test path) or the op isn't resolvable/mutating — the
+ *  caller then keeps the sound side-effect fallback. */
+function resolveInlinedServiceClauses(
+  st: Extract<WorkflowStmtIR, { kind: "domain-service-call" }>,
+  renderCtx: RenderCtx,
+  contextModule: string,
+  ctx?: BoundedContextIR,
+): { text: string; bindName?: string }[] {
+  if (!ctx) return [];
+  const svc = (ctx.domainServices ?? []).find((s) => s.name === st.service);
+  const op = svc?.operations.find((o) => o.name === st.op);
+  if (!op) return [];
+  const callArgs = st.call.kind === "call" ? st.call.args : [];
+  return inlineMutatingServiceCall(op, callArgs, ctx, contextModule, (e) =>
+    renderExpr(e, renderCtx),
+  );
+}
+
 /** Look up an operation by aggregate + op name in the context's aggregate
  *  index — mirrors the Hono workflow builder's `lookupOp`. */
 function lookupOp(ctx: BoundedContextIR, aggName: string, opName: string): OperationIR | undefined {
@@ -701,11 +737,20 @@ function renderLoopBody(
         );
         break;
       }
+      case "domain-service-call": {
+        // A `mutating` domain-service call inside a loop body — inline the same
+        // with-chain of context mutating-fn clauses the top-level arm emits, so
+        // each mutated arg persists (and a failed clause halts the reduce).
+        // Falls back to the sound side-effect line when unresolvable.
+        const inlined = resolveInlinedServiceClauses(inner, renderCtx, contextModule, ctx);
+        if (inlined.length > 0) {
+          for (const c of inlined) clauses.push(c.text);
+        } else {
+          doLines.push(`_ = ${renderExpr(inner.call, renderCtx)}`);
+        }
+        break;
+      }
       case "resource-call":
-      // A `mutating` domain-service call inside a loop body — rendered as a
-      // best-effort side-effect line (the full Phoenix mutating commit is a
-      // separate Elixir slice; see the top-level `domain-service-call` arm).
-      case "domain-service-call":
         doLines.push(`_ = ${renderExpr(inner.call, renderCtx)}`);
         break;
       case "assign": {
@@ -1030,6 +1075,14 @@ function collectWorkflowStmtParamRefs(st: WorkflowStmtIR, acc: Set<string>): voi
       return;
     case "resource-call":
       collectParamRefs(st.call, acc);
+      return;
+    case "domain-service-call":
+      // A `mutating` `Transfer.run(s, d, amount)` references the workflow's
+      // create-params through its call args (`amount`); they must be
+      // destructured off `run/1` so the inlined with-chain's `%{arg0: amount}`
+      // resolves.  Without this the bound binding is undefined (the pre-Slice-3
+      // placeholder bug).
+      if (st.call.kind === "call") for (const a of st.call.args) collectParamRefs(a, acc);
       return;
     case "repo-run":
       for (const a of st.retrievalArgs) collectParamRefs(a, acc);
