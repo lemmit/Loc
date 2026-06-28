@@ -5,11 +5,11 @@
 //     (`items += Item{…}`) appends + `put_embed`s (DEBT-32).
 //   * RELATIONAL (default shape, §11c) — each part is a child TABLE the root
 //     `has_many`s + `cast_assoc`s, preloaded on read (the value-object
-//     collection pattern).  CORE slice: persist + read.  An in-operation
-//     containment mutation (`items += Item{…}`) stays gated — the relational
-//     `put_assoc` op-mutation path is the §11c follow-up
-//     (`loom.vanilla-containment-mutation-unsupported`).
-// A `shape(document)` aggregate still can't carry nested parts at all.
+//     collection pattern); an in-operation containment mutation
+//     (`items += Item{…}`) `put_assoc`s the mutated has_many.
+// Both shapes now host create + read + in-op mutation, so the only remaining
+// gate is part-in-part nesting (no backing migration) and `shape(document)`
+// containments (folded into one opaque JSON column).
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -71,23 +71,12 @@ describe("vanilla containment support gate", () => {
   });
 
   it("accepts a non-mutating entity containment on a RELATIONAL vanilla aggregate (§11c — has_many)", async () => {
-    const source = sys("elixir { foundation: vanilla }", { contains: true });
-    expect(await containmentErrors(source)).toEqual([]);
     expect(
-      await containmentErrors(source, "loom.vanilla-containment-mutation-unsupported"),
+      await containmentErrors(sys("elixir { foundation: vanilla }", { contains: true })),
     ).toEqual([]);
   });
 
-  it("still gates an in-op containment MUTATION on a relational vanilla aggregate (§11c follow-up)", async () => {
-    const errs = await containmentErrors(
-      sys("elixir { foundation: vanilla }", { contains: true, mutates: true }),
-      "loom.vanilla-containment-mutation-unsupported",
-    );
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("Order");
-    expect(errs[0]).toContain("items");
-    expect(errs[0]).toContain("shape(embedded)");
-    // The plain unsupported gate does NOT also fire for this case.
+  it("accepts an in-op containment MUTATION on a relational vanilla aggregate (§11c follow-up — put_assoc)", async () => {
     expect(
       await containmentErrors(
         sys("elixir { foundation: vanilla }", { contains: true, mutates: true }),

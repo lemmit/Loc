@@ -126,6 +126,16 @@ export interface RenderCtx {
    *  reading fn itself is emitted INTO this module by `domain-service-emit.ts`.
    *  Defaults to `contextModule` when unset. */
   readingServiceModule?: string;
+  /** Snake-cased names of the aggregate's RELATIONAL containment fields (§11c).
+   *  When a collection `add`/`remove` targets one of these, the body binds the
+   *  mutated list to a LOCAL (leaving `record.<field>` as the loaded `has_many`)
+   *  so the persist tail's `put_assoc(:<field>, <local>)` diffs against the
+   *  ORIGINAL loaded children — pre-mutating `record.<field>` would make Ecto
+   *  diff the new list against itself and insert nothing.  Mirrors the
+   *  reference-collection (`X id[]`) id-list-local pattern.  Empty/unset on an
+   *  embedded aggregate (its containments stay the in-place `record` rebind +
+   *  `put_embed`). */
+  relationalContainments?: ReadonlySet<string>;
 }
 
 const DEFAULT: RenderCtx = { thisName: "record", contextModule: "MyApp" };

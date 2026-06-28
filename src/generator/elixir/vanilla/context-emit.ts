@@ -46,6 +46,7 @@ import {
 } from "./operation-returns-emit.js";
 import { refCollFieldNames } from "./ref-collection-emit.js";
 import { customFindsOf } from "./repository-emit.js";
+import { usesRelationalContainments } from "./schema-emit.js";
 import { stampUsesPrincipal } from "./stamp-emit.js";
 
 /** Operation names whose `<op>_<agg>` collide with the CRUD
@@ -123,8 +124,8 @@ function renderContextModule(
       .filter((op) => !CRUD_RESERVED_NAMES.has(op.name))
       .map((op) =>
         isReturningOperation(op)
-          ? renderReturningOpFunction(facadeMod, ctx, agg, op)
-          : renderNamedOpFunction(facadeMod, ctx, agg, aggPascal, aggSnake, op),
+          ? renderReturningOpFunction(facadeMod, ctx, agg, op, sys)
+          : renderNamedOpFunction(facadeMod, ctx, agg, aggPascal, aggSnake, op, sys),
       );
     // Custom-find defdelegates — `<find>_<agg>(args...)` routes to the
     // repository fn emitted by `customFindsOf`.  Workflow `repo-let`
@@ -383,6 +384,7 @@ function renderNamedOpFunction(
   aggPascal: string,
   aggSnake: string,
   op: OperationIR,
+  sys?: SystemIR,
 ): string {
   const opSnake = snake(op.name);
   const aggModule = `${facadeMod}.${aggPascal}`;
@@ -407,6 +409,11 @@ function renderNamedOpFunction(
     // collection (`X id[]`) add/remove and normalise to id lists (the persist
     // then `put_assoc`s the resolved structs instead of `put_change`).
     agg: agg as EnrichedAggregateIR,
+    // Relational containment fields → body local-binds the mutated child list
+    // (§11c), so the persist `put_assoc`s a list diffed against the loaded assoc.
+    relationalContainments: usesRelationalContainments(agg, ctx, sys)
+      ? new Set(agg.contains.map((c) => snake(c.name)))
+      : undefined,
   };
 
   // The `before` wire snapshot — taken from the ORIGINAL `record` before the
@@ -438,6 +445,7 @@ function renderNamedOpFunction(
     agg,
     facadeMod.split(".")[0]!,
     facadeMod.split(".").slice(1).join("."),
+    usesRelationalContainments(agg, ctx, sys),
   );
   const putBlock = putBodies.map((b) => `\n    |> ${b}`).join("");
   const putBlock6 = putBodies.map((b) => `\n      |> ${b}`).join("");

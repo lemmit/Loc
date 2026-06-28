@@ -21,6 +21,7 @@ import type {
   OperationIR,
   ProvSite,
   StmtIR,
+  SystemIR,
 } from "../../../ir/types/loom-ir.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
@@ -31,6 +32,26 @@ import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
 import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
 import { isRefCollFieldName, refCollTargetModule } from "./ref-collection-emit.js";
+import { usesRelationalContainments } from "./schema-emit.js";
+
+/** Does any add/remove statement mutate a RELATIONAL containment field (§11c)?
+ *  Such a mutation must round-trip the DB via `put_assoc` (the has_many replace)
+ *  rather than the in-memory wire projection. */
+function mutatesRelationalContainment(
+  op: OperationIR,
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+  sys?: SystemIR,
+): boolean {
+  if (!usesRelationalContainments(agg, ctx, sys)) return false;
+  const containNames = new Set(agg.contains.map((c) => snake(c.name)));
+  return op.statements.some(
+    (s) =>
+      (s.kind === "add" || s.kind === "remove") &&
+      s.collection &&
+      containNames.has(snake(s.target.segments[0] ?? "")),
+  );
+}
 
 /** The wire field list a returning op's success branch serialises `record`
  *  into — the same ordered `wireShape` the find/CRUD controllers expose, so the
@@ -51,6 +72,11 @@ export function persistPutBodies(
   agg: AggregateIR,
   appModule: string,
   ctxModule: string,
+  /** True when the aggregate's containments persist RELATIONALLY (child tables,
+   *  §11c) — a mutated containment then round-trips via `put_assoc` (the
+   *  has_many replace) rather than the embedded `put_embed`.  Defaults to the
+   *  embedded path so existing callers stay byte-identical. */
+  relationalContainment = false,
 ): string[] {
   const containNames = new Set(agg.contains.map((c) => snake(c.name)));
   const assignedFields: string[] = [];
@@ -66,12 +92,23 @@ export function persistPutBodies(
   const provColumns = assignedFields.filter((f) => provNames.has(f)).map((f) => provColumn(f));
   return [
     ...assignedFields.map((f) => {
-      // A containment (`embeds_many`/`embeds_one`) round-trips via `put_embed`; a
-      // reference collection (`X id[]` → `many_to_many`) resolves its mutated id
-      // list back to target structs and `put_assoc`s them (the schema's
-      // `on_replace: :delete` rewrites the join rows); plain scalar columns (incl.
-      // the provenance backing columns) via `put_change`.
-      if (containNames.has(f)) return `Ecto.Changeset.put_embed(:${f}, record.${f})`;
+      // A containment round-trips via `put_embed` (embedded jsonb) or, on a
+      // relational aggregate (§11c), `put_assoc` (the has_many child table — the
+      // body appended/dropped a part struct on the preloaded assoc; `put_assoc`
+      // + the schema's `on_replace: :delete` insert the new child / delete the
+      // removed one, keeping the rest).  A reference collection (`X id[]` →
+      // `many_to_many`) resolves its mutated id list back to target structs and
+      // `put_assoc`s them; plain scalar columns (incl. the provenance backing
+      // columns) via `put_change`.
+      if (containNames.has(f)) {
+        // Relational: the body bound a LOCAL `${f}` holding the mutated child
+        // list (it left `record.${f}` as the loaded assoc so `put_assoc` diffs
+        // against the original children + `on_replace: :delete` removes drops).
+        // Embedded: the body rebinds `record.${f}` in place → `put_embed`.
+        return relationalContainment
+          ? `Ecto.Changeset.put_assoc(:${f}, ${f})`
+          : `Ecto.Changeset.put_embed(:${f}, record.${f})`;
+      }
       const targetMod = refCollTargetModule(appModule, ctxModule, agg, f);
       if (targetMod) {
         // The body bound a local `<field>` holding the new id list (it left
@@ -128,6 +165,7 @@ export function renderReturningOpFunction(
   ctx: BoundedContextIR,
   agg: AggregateIR,
   op: OperationIR,
+  sys?: SystemIR,
 ): string {
   const aggPascal = upperFirst(agg.name);
   const aggModule = `${facadeMod}.${aggPascal}`;
@@ -156,6 +194,11 @@ export function renderReturningOpFunction(
     // Without it the add/remove falls through to the containment-jsonb branch,
     // silently miscompiling the join-table mutation.
     agg: agg as EnrichedAggregateIR,
+    // Relational containment fields → body local-binds the mutated child list
+    // (§11c), so the persist `put_assoc`s a list diffed against the loaded assoc.
+    relationalContainments: usesRelationalContainments(agg, ctx, sys)
+      ? new Set(agg.contains.map((c) => snake(c.name)))
+      : undefined,
   };
 
   // The `params` arg is always referenced by the `when is_map(params)` guard,
@@ -194,6 +237,13 @@ export function renderReturningOpFunction(
       s.collection &&
       isRefCollFieldName(agg, snake(s.target.segments[0] ?? "")),
   );
+  // A relational containment (§11c) mutation must persist too — `put_assoc` the
+  // mutated has_many.  Folded into the same DB-round-trip success branch as the
+  // ref-coll case so a returning op mutating a containment doesn't fall through
+  // to the in-memory projection (silent data loss).
+  const relationalContainment = usesRelationalContainments(agg, ctx, sys);
+  const mutatesContainment = mutatesRelationalContainment(op, agg, ctx, sys);
+  const mutatesPersistedColl = mutatesRefColl || mutatesContainment;
   // The wire map the success branch returns — the same ordered `wireShape` the
   // CRUD controllers expose, projected off the SAVED struct so it reflects the
   // persisted state (no struct leaks `__meta__`/`__struct__` onto the wire).  A
@@ -217,7 +267,13 @@ export function renderReturningOpFunction(
     // ONE transaction so the derived rows commit atomically with the state
     // change.  A persist failure rolls back to `{:error, changeset}` (the
     // controller's `_result/2` gains a matching validation clause).
-    const putBodies = persistPutBodies(op, agg, appModule, facadeMod.split(".").slice(1).join("."));
+    const putBodies = persistPutBodies(
+      op,
+      agg,
+      appModule,
+      facadeMod.split(".").slice(1).join("."),
+      relationalContainment,
+    );
     const putBlock6 = putBodies.map((b) => `\n      |> ${b}`).join("");
     const txTail: string[] = [];
     if (hasProv) txTail.push(`          ${appModule}.Provenance.flush(${appModule}.Repo)`);
@@ -251,13 +307,20 @@ export function renderReturningOpFunction(
       `      end`,
       `    end)`,
     ];
-  } else if (hasSuccessPath && mutatesRefColl) {
-    // Reference-collection mutation (`X id[]` add/remove → a `many_to_many` join
-    // table): the body bound an id-list local, so persist it via a `put_assoc`
-    // changeset and return the saved wire.  No provenance/audit → no transaction
-    // is needed (a single state write); a validation failure surfaces as
-    // `{:error, changeset}` (the controller's `_result/2` validation clause).
-    const putBodies = persistPutBodies(op, agg, appModule, facadeMod.split(".").slice(1).join("."));
+  } else if (hasSuccessPath && mutatesPersistedColl) {
+    // A collection mutation that edits a separate table — a `many_to_many` join
+    // (`X id[]`) or a relational containment (§11c, `has_many` child table):
+    // persist via a `put_assoc` changeset and return the saved wire.  No
+    // provenance/audit → no transaction is needed (a single state write); a
+    // validation failure surfaces as `{:error, changeset}` (the controller's
+    // `_result/2` validation clause).
+    const putBodies = persistPutBodies(
+      op,
+      agg,
+      appModule,
+      facadeMod.split(".").slice(1).join("."),
+      relationalContainment,
+    );
     const putBlock = putBodies.map((b) => `\n      |> ${b}`).join("");
     tailLines = [
       `    changeset =`,
@@ -364,6 +427,14 @@ export function renderReturningStmt(
       if (s.collection && rc.agg && isRefCollFieldName(rc.agg, field)) {
         return `    ${field} = __ref_id_list(record.${field}) ++ [${value}]`;
       }
+      // A RELATIONAL containment (§11c, `has_many` child table): bind the new
+      // child list to a LOCAL — leaving `record.${field}` as the ORIGINAL loaded
+      // assoc — so the persist tail's `put_assoc(:${field}, ${field})` diffs the
+      // put list against the loaded children (pre-mutating `record.${field}`
+      // would make Ecto diff the new list against itself → insert nothing).
+      if (s.collection && rc.relationalContainments?.has(field)) {
+        return `    ${field} = (record.${field} || []) ++ [${value}]`;
+      }
       return s.collection
         ? `    record = %{record | ${field}: (record.${field} || []) ++ [${value}]}`
         : `    record = %{record | ${field}: record.${field} + ${value}}`;
@@ -374,6 +445,12 @@ export function renderReturningStmt(
       const value = renderExpr(s.value, rc);
       if (s.collection && rc.agg && isRefCollFieldName(rc.agg, field)) {
         return `    ${field} = List.delete(__ref_id_list(record.${field}), ${value})`;
+      }
+      // Relational containment (§11c) — local-bind the trimmed list (leaving
+      // `record.${field}` loaded), so `put_assoc` + `on_replace: :delete` deletes
+      // the dropped child against the original loaded set.
+      if (s.collection && rc.relationalContainments?.has(field)) {
+        return `    ${field} = List.delete(record.${field} || [], ${value})`;
       }
       return s.collection
         ? `    record = %{record | ${field}: List.delete(record.${field} || [], ${value})}`

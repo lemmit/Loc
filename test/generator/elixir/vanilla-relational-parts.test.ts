@@ -95,3 +95,54 @@ describe("vanilla relational entity parts (§11c)", () => {
     expect(mig).toContain("timestamps()");
   });
 });
+
+// ---------------------------------------------------------------------------
+// §11c follow-up — in-operation MUTATION of a relational containment.
+// `pipelines += Pipeline{…}` appends the part struct to the preloaded has_many
+// and the named-op persist tail `put_assoc`s the mutated collection (the
+// relational analog of the embedded path's `put_embed`).
+// ---------------------------------------------------------------------------
+
+const MUTATE_SOURCE = `
+system RelMut {
+  subdomain Core {
+    context Catalog {
+      aggregate Project ids guid {
+        name: string
+        active: bool
+        contains pipelines: Pipeline[]
+        entity Pipeline { label: string  runCount: int }
+        operation addPipeline(label: string) {
+          pipelines += Pipeline { label: label, runCount: 0 }
+        }
+      }
+      repository Projects for Project { }
+    }
+  }
+  api CatalogApi from Core
+  storage pg { type: postgres }
+  resource projectState { for: Catalog, kind: state, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Catalog]
+    dataSources: [projectState]
+    serves: CatalogApi
+    port: 4000
+  }
+}
+`;
+
+describe("vanilla relational containment op-mutation (§11c follow-up)", () => {
+  it("the named op local-binds the mutated child list and put_assocs it (not put_embed, not record-rebind)", async () => {
+    const ctx = file(await generateSystemFiles(MUTATE_SOURCE), "/catalog.ex");
+    // Local-bind the new child list (NOT `record = %{record | pipelines: …}`) so
+    // the persist diffs the put list against the ORIGINAL loaded `has_many`.
+    expect(ctx).toContain(
+      "pipelines = (record.pipelines || []) ++ [%Api.Catalog.Pipeline{label: label, run_count: 0}]",
+    );
+    expect(ctx).not.toContain("record = %{record | pipelines:");
+    // Persist put_assocs the LOCAL (not `record.pipelines`).
+    expect(ctx).toContain("|> Ecto.Changeset.put_assoc(:pipelines, pipelines)");
+    expect(ctx).not.toContain("put_embed(:pipelines");
+  });
+});

@@ -1,0 +1,39 @@
+// §11c follow-up — in-operation MUTATION of a relational nested entity part on a
+// vanilla aggregate.  `pipelines += Pipeline{…}` appends a child struct to the
+// preloaded `has_many` and the named-op persist tail `put_assoc`s the mutated
+// collection (the relational analog of the embedded path's `put_embed`; the
+// schema's `on_replace: :delete` inserts the new child / deletes a removed one).
+// Mirrors the showcase `Catalog.Project.addPipeline`.  Compiles against plain
+// Ecto under `mix compile --warnings-as-errors`.
+system VanillaRelationalPartsMutate {
+  subdomain Core {
+    context Catalog {
+      aggregate Project ids guid {
+        name: string
+        active: bool
+        contains pipelines: Pipeline[]
+        entity Pipeline {
+          label: string
+          runCount: int
+          invariant runCount >= 0
+        }
+        derived pipelineCount: int = pipelines.count
+        operation addPipeline(label: string) {
+          pipelines += Pipeline { label: label, runCount: 0 }
+        }
+        invariant name.length > 0
+      }
+      repository Projects for Project { }
+    }
+  }
+  api CatalogApi from Core
+  storage pg { type: postgres }
+  resource projectState { for: Catalog, kind: state, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Catalog]
+    dataSources: [projectState]
+    serves: CatalogApi
+    port: 4000
+  }
+}
