@@ -20,9 +20,9 @@ on the vanilla backend later — this file is the tracked list.
 | # | Gap | Verdict | Size | Priority |
 |---|---|---|:---:|---|
 | §8 | TPH shared-table inheritance | **CLOSED** (#1573) — was a runtime 500 bug | M–L | done |
-| §11a | Workflow `currentUser` threading | REAL | M | 2 (parity) |
-| §11b | Aggregate-`function` call emit + qualify | REAL | M | 2 (parity) |
-| §11c | Nested relational entity parts | honest validator gate | L | 2 (parity, blocks showcase-on-elixir) |
+| §11a | Workflow `currentUser` threading | **CLOSED** (#1579) | M | done |
+| §11b | Aggregate-`function` call emit + qualify | **CLOSED** (#1581) | M | done |
+| §11c | Nested relational entity parts | honest validator gate (**OPEN** — blocks showcase flip) | L | 2 (parity) |
 | §1 | Paged wire envelope | **CLOSED** (#1578) | M | done |
 | §10 | Destroy-form bang `destroy_X!/1` | **CLOSED** (#1575) | S | done |
 | §3 | `sensitive(...)` inspect-redaction | **CLOSED** | S | done |
@@ -33,10 +33,12 @@ on the vanilla backend later — this file is the tracked list.
 | §2 | Union per-variant struct tagging | **effectively CLOSED** (doc mis-framed) | S | doc/test only |
 | §4 | `contains`-in-`where` membership | **CLOSED** (doc stale) | S | dead-code cleanup only |
 | §12 | `shape(document)` + custom ops/finds | honest validator gate | M | 3 (untracked find) |
+| §13 | LiveView operation-action bang fns | REAL (mix-compile fails) | S–M | 3 (sibling of §10) |
 
 Restoring the 5-backend `conformance-parity` gate (removing
 `LOOM_E2E_SKIP_PHOENIX=1` and re-adding the elixir deployable to
-`examples/showcase.ddd`) requires §11a + §11b + §11c.
+`examples/showcase.ddd`) now requires only **§11c** — §11a (#1579) and §11b
+(#1581) have shipped.
 
 ---
 
@@ -242,26 +244,26 @@ runs over node/.NET/Java/Python. Re-adding elixir + restoring the phoenix parity
 legs requires the three sub-gaps below (all independent codegen fixes; (c) is the
 heavy one).
 
-### 11a. Workflow-level `currentUser` threading — REAL (M)
+### 11a. Workflow-level `currentUser` threading — **CLOSED** (#1579)
 
-- Workflow `run(params)`/`run_inner(params)` carry no `current_user`, so a
-  `requires currentUser.role == …` guard renders an **unbound `current_user`**
-  (`workflow-execution-emit.ts` ~`:1110-1112`, `:1137-1138`, `:1156-1157`). Every
-  other backend already threads it via `workflowUsesCurrentUser(wf)` /
-  `callsUserGatedOp` (`loom-ir.ts`; Hono/.NET/Python/Java workflow builders) —
-  vanilla is the only one missing it. The fix must also pass `current_user`
-  through to the op calls the workflow makes (else the op guard raises at runtime).
+- Was: a workflow `run(params)`/`run_inner(params)` carried no `current_user`, so
+  a `requires currentUser.role == …` guard rendered an **unbound `current_user`**
+  → `mix compile --warnings-as-errors` failure. Fixed in
+  `workflow-execution-emit.ts`: `current_user \\ nil` is threaded into the
+  workflow fn (and passed through to the gated op calls it makes) when the
+  workflow names `currentUser` or calls a `currentUser`-gated op; the controller
+  binds it off `conn.assigns`. No-actor workflows are byte-identical.
+  Compile-gated fixture `vanilla-workflow-auth.ddd`.
 
-### 11b. Aggregate-`function` call emit + qualification — REAL (M)
+### 11b. Aggregate-`function` call emit + qualification — **CLOSED** (#1581)
 
-- A `function passed(): bool = …` used in an op `precondition passed()` renders a
-  bare `passed(record)` in the context module — but `function`s are **never
-  emitted on vanilla** (`domain-core-emit.ts` `renderAggregatePureCore` iterates
-  `agg.operations` only, and only runs when `agg.tests.length > 0`), *and* the
-  call is rendered unqualified (`render-expr.ts` `callKind: "function"`).
-- **Fix:** emit `agg.functions` on the domain-core/schema module (unconditionally
-  when referenced, not test-gated) **and** qualify the `"function"` call to that
-  module (cf. TS `this.passed()`).
+- Was: a `function passed(): bool = …` was **never emitted on vanilla**, so a
+  call to it failed to compile. Fixed: new `function-emit.ts`
+  (`renderAggregateFunctions`) emits each `function` member on the domain module
+  (struct-guarded clause head; receiver underscore-prefixed when the body doesn't
+  read it, so an argless `function noop()` doesn't trip `--warnings-as-errors`),
+  and the `callKind: "function"` call site is qualified. Compile-gated fixture
+  `vanilla-functions.ddd`.
 
 ### 11c. Nested relational entity parts — honest validator gate (L)
 
@@ -301,3 +303,33 @@ pairs, and the 403 runtime-authorization target).
   named-operation / custom-find surface for `shape(document)` aggregates on
   vanilla (the CRUD path already exists), then narrow the gate to drop the
   `customOps` / `customFinds` guard.
+
+## 13. LiveView operation-action bang functions (`<op>_<agg>!/1` + `get_<agg>!/1`) — REAL (S–M)
+
+- **Status (REAL — `mix compile --warnings-as-errors` fails; surfaced 2026-06-28
+  un-pending `vanilla-auth-op-gate.ddd`):** a LiveView `Detail` page with an
+  `Action { c.<op> }` button on a **non-destroy operation** emits a
+  `handle_event/3` that calls bang context functions:
+  ```elixir
+  def handle_event("confirm_customer", %{"id" => id}, socket) do
+    record = PhoenixApp.Sales.get_customer!(id)     # ← undefined
+    PhoenixApp.Sales.confirm_customer!(record)      # ← undefined
+    {:noreply, socket |> put_flash(:info, "Confirm succeeded")}
+  end
+  ```
+  but the context module emits only the non-bang `get_<agg>(id)` (`{:ok|:error}`)
+  and `<op>_<agg>(record, params)` — no `get_<agg>!/1` and no `<op>_<agg>!/1`.
+  Compile fails with *"`PhoenixApp.Sales.get_customer!/1` / `confirm_customer!/1`
+  is undefined or private."*
+- **Sibling of §10:** #1575 added `destroy_<agg>!/1` for `DestroyForm`, but scoped
+  the fix to destroy only — the LiveView mount uses non-bang `get_<agg>`, so the
+  bang getter wasn't needed *then*. Operation-action buttons need both the bang
+  getter and a bang per targeted operation.
+- **To close (feature work):** in `src/generator/elixir/vanilla/context-emit.ts`
+  emit `def get_<agg>!(id)` (load-or-raise) and `def <op>_<agg>!(record)` (run the
+  op, raise on `{:error, …}`; thread `current_user` for `currentUser`-gated ops)
+  for any operation targeted by a LiveView `Action`. Mirror the §10 `destroy_<agg>!/1`
+  shape. Then move `pending/vanilla-auth-op-gate.ddd` back into the compile gate.
+- The op-level `currentUser` threading the fixture was originally pending for
+  (§9) *did* ship in #1568 — this is a distinct, later-surfaced gap; the fixture's
+  old pending-README description was stale.
