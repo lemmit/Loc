@@ -180,6 +180,51 @@ function renderContextModule(
     end
   end`
       : "";
+    // §13: a LiveView `Action { c.<op> }` button on a NON-destroy operation
+    // hoists a `handle_event` that calls `<Ctx>.get_<agg>!(id)` then
+    // `<Ctx>.<op>_<agg>!(record)` (`liveview-emit.ts` ~`:396-397`) — bang seams
+    // the non-bang op/getter don't provide, so without them `mix compile
+    // --warnings-as-errors` fails on the undefined calls.  Emit them for any
+    // aggregate carrying operations: a load-or-raise getter (arity-1 `id`, the
+    // exact call-site arity — the non-bang `get_<agg>` takes `current_user \\ nil`
+    // so this resolves for principal aggregates too) and, per operation, an
+    // arity-1 bang that runs the op (empty params) and raises on `{:error, _}`.
+    const bangOps = (agg.operations ?? []).filter((op) => !CRUD_RESERVED_NAMES.has(op.name));
+    const opBangFacade =
+      bangOps.length > 0
+        ? `\n
+  @doc "Load a ${aggPascal} by id or raise (LiveView Action seam)."
+  def get_${aggSnake}!(id) do
+    case get_${aggSnake}(id) do
+      {:ok, record} -> record
+      {:error, _} -> raise Ecto.NoResultsError, queryable: ${facadeMod}.${aggPascal}
+    end
+  end${bangOps
+    .map((op) => {
+      const opSnake = snake(op.name);
+      const gated = opUsesCurrentUser(op);
+      const cuP = gated ? ", current_user \\\\ nil" : "";
+      const cuA = gated ? ", current_user" : "";
+      // A returning (exception-less) op raises on guard failure and yields its
+      // value (or a declared error tuple) directly — wrapping it in an
+      // `{:ok,_}/{:error,_}` case emits an error clause the body never matches
+      // ("the following clause will never match" → `--warnings-as-errors`).  Pass
+      // its result straight through.  A standard op returns `{:ok,_} | {:error,_}`,
+      // so unwrap and raise on error.
+      const body = isReturningOperation(op)
+        ? `    ${opSnake}_${aggSnake}(record, %{}${cuA})`
+        : `    case ${opSnake}_${aggSnake}(record, %{}${cuA}) do
+      {:ok, result} -> result
+      {:error, reason} -> raise "${op.name} failed: #{inspect(reason)}"
+    end`;
+      return `\n
+  @doc "Run the \`${op.name}\` operation on a loaded ${aggPascal} (LiveView Action seam)."
+  def ${opSnake}_${aggSnake}!(record${cuP}) do
+${body}
+  end`;
+    })
+    .join("")}`
+        : "";
     // Aggregate `function` members (§11b) — pure domain helpers callable from the
     // op / precondition / derived bodies emitted above.  Each renders as a
     // struct-guarded `def <fn>(%Agg{} = record, …)` so the lowered call site
@@ -191,7 +236,7 @@ function renderContextModule(
   defdelegate get_${aggSnake}(id${actorArg}), to: ${repoMod}, as: :find_by_id
   defdelegate create_${aggSnake}(attrs${stampActorArg}), to: ${repoMod}, as: :insert
   defdelegate update_${aggSnake}(record, attrs${stampActorArg}), to: ${repoMod}, as: :update
-  defdelegate delete_${aggSnake}(record), to: ${repoMod}, as: :delete${changeFacade}${destroyFacade}
+  defdelegate delete_${aggSnake}(record), to: ${repoMod}, as: :delete${changeFacade}${destroyFacade}${opBangFacade}
 ${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}${functionBlock}`;
   });
 

@@ -137,7 +137,9 @@ describe("vanilla exception-less returning op — collection mutations + call", 
 
   it("renders add/remove collection mutations and a bare call (no # TODO)", async () => {
     const ctx = await fileEndingIn(SRC, "/orders.ex");
-    const start = ctx.indexOf("tag_with_order");
+    // the NON-bang op def — `def tag_with_order(` won't match the §13
+    // `def tag_with_order!(` LiveView-action bang that now precedes it.
+    const start = ctx.indexOf("def tag_with_order(");
     const fn = ctx.slice(start, start + 900);
     // `tags += t` / `tags -= t` collection rebinds.
     expect(fn).toMatch(/record = %\{record \| tags: \(record\.tags \|\| \[\]\) \+\+ \[t\]\}/);
