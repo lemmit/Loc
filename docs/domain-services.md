@@ -13,16 +13,19 @@ calculation or decision**.
 > return a value or an `or`-union error, may `throw` for the bug regime,
 > and are **strict no-infra** — no repository, `extern`, `api`,
 > workflow-start, or `emit`, and no `this` to mutate. The **revised
-> design** (rev. 3 in [`proposals/domain-services.md`](proposals/domain-services.md))
-> adds **mutation** — a domain service may mutate the aggregates the
-> orchestrator **passes in**, via their own operations — while keeping
-> the service **pure of infrastructure** (still no repository, no commit:
-> loading and the single commit stay in the application orchestrator).
-> A five-backend idiom audit walked back an interim "load via repository
-> ports" idea: by canonical DDD that's application-layer work, and it
-> can't stay stateless on EF/JPA/SQLAlchemy. That direction is pinned in
-> the proposal but **not yet shipped**; the rest of *this* page describes
-> current behavior.
+> design** (rev. 4 in [`proposals/domain-services.md`](proposals/domain-services.md))
+> pins a **three-tier** model: **pure** (today's behavior), **read-only**
+> (may query supporting data through a repository — never writes), and
+> **mutating** (may mutate the aggregates the orchestrator **passes in**,
+> via their own operations). In every tier the application orchestrator
+> owns the single commit; the service never writes to a repository and
+> never commits. A five-backend idiom audit walked back an interim "load
+> *and write* via repository ports" idea (by canonical DDD that's
+> application-layer work) but kept read-only access — a query dirties
+> nothing, so it has no commit problem, and a repository-reading domain
+> service is canonical (uniqueness checks, policy lookups). That
+> direction is pinned but **not yet shipped**; the rest of *this* page
+> describes current behavior.
 
 ## Surface
 
@@ -100,18 +103,21 @@ and the declaration emitters ship on all five backends today
 ## Direction (revised — not yet shipped)
 
 The pinned next step ([`proposals/domain-services.md`](proposals/domain-services.md),
-rev. 3) adds a second tier — the service stays pure of infrastructure but
-may **mutate the aggregates the orchestrator passes in**:
+rev. 4) pins a three-tier capability ladder (`mutating` ⊇ `reading` ⊇
+`pure`):
 
 | Tier | May… | Callable from |
 |---|---|---|
 | **pure** *(ships today)* | params only; branch, `let`, `match`, `throw` | anywhere |
+| **reading** | the above **+ read-only repository queries** (look up supporting data) | application orchestrators only |
 | **mutating** | the above **+ call mutating operations on the aggregates passed in** | application orchestrators only |
 
-Loading via a repository, `emit`, `extern`, `api`, and workflow-start
-stay forbidden in **both** tiers. Loading and the single commit live in
-the application orchestrator (**orchestrator loads → service mutates the
-passed-in aggregates → orchestrator persists**). That's the line that
+A repository **write** / commit, `emit`, `extern`, `api`, and
+workflow-start stay forbidden in **every** tier. Reading supporting data
+is the only infrastructure a service may touch (and only in the upper two
+tiers); writing the *target* aggregates and the single commit live in the
+application orchestrator (**orchestrator loads → service reads + mutates
+the passed-in aggregates → orchestrator persists**). That's the line that
 keeps a domain service from collapsing into a workflow.
 
 **Persistence is orchestrator-owned, rendered idiomatically per backend.**
