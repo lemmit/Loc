@@ -52,8 +52,8 @@ cell notes otherwise.
 | Discriminated unions / generic carriers / `when` gate | ✓ | ✓ | ✓ | ✓ | ✓ | structural-checks.ts:414 / :232 / :484 |
 | Exception-less returns (`op(): X or NotFound`) | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_RETURN_BACKENDS` · structural-checks.ts:518 |
 | Non-principal capability `filter` (relational) | ✓ | ✓ | ✓ | ✓ | ✓ | `LIMITED_FAMILIES` · system-checks.ts:1006 |
-| **Principal `filter`** (`currentUser`/tenancy, relational) | ✓ | ✓ | ✓ | **✗** | ✓ | `supportsPrincipalFilter` · system-checks.ts:1021 |
-| **Filter on non-relational shape** (doc/embedded) | ✓ | ✓ | ⚠ doc+embedded | **✗** | ⚠ embedded | `supportsNonRelationalFilter` · system-checks.ts:1051 |
+| Principal `filter` (`currentUser`/tenancy, relational) | ✓ | ✓ | ✓ | ✓ | ✓ | `supportsPrincipalFilter` · system-checks.ts:1021 |
+| **Filter on non-relational shape** (doc/embedded) | ✓ | ✓ | ⚠ doc+embedded | ⚠ embedded | ⚠ embedded | `supportsNonRelationalFilter` · system-checks.ts:1051 |
 | `ignoring <Cap>` filter-bypass | ✓ | ✓ | ✓ | ✓ | ✓ | `FILTER_BYPASS_FAMILIES` · system-checks.ts:1199 |
 | Provenanced fields (runtime trace) | ✓ | ✓ | ✓ | ✓ | ✓ | `PROVENANCE_BACKENDS` · system-checks.ts:2063 |
 | Per-operation `audited` | ✓ | ✓ | ✓ | ✓ | ✓ | `AUDIT_OP_BACKENDS` · system-checks.ts:2124 |
@@ -65,14 +65,26 @@ foundation (the only elixir foundation since Ash was removed).
 
 **The standing backend debt:**
 
-1. **Python filter depth** — principal `filter`s (`currentUser`/tenancy) and
-   non-relational-shape filters are gated on python (fail-fast, not silent; #1481
-   closed the silent-gap hole — the non-principal relational case now emits). The
-   principled fix is to lower the predicate into the SQLAlchemy reads.
-   ([multi-tenancy-design-note](./multi-tenancy-design-note.md), DEBT-02.)
-2. **Non-relational filters** — `python` off entirely; `elixir` covers embedded
-   but not document; principal-on-non-relational stays gated everywhere.
-   ([multi-tenancy-design-note](./multi-tenancy-design-note.md), DEBT-02.)
+1. **`shape(document)` filters** — a capability `filter` on a `document`
+   aggregate is gated on python and elixir (the blob is one JSONB column, not
+   per-field queryable, so it needs in-app filtering — node/java do it via
+   `.stream().filter`; elixir has no `document` shape at all). Principal filters
+   on `document` stay gated everywhere (the actor + json intersection isn't
+   wired). ([multi-tenancy-design-note](./multi-tenancy-design-note.md), DEBT-02.)
+2. **Minimal alternate adapters** — `dapper` (dotnet) / `mikroorm` (node) reject
+   a slice of model features; the `marten`/`cqrs`/`layered` stubs are unwired.
+   See the adapter sub-matrix below. ([platform-realization-axes](./platform-realization-axes.md).)
+
+> **Python filter depth is now CLOSED** (DEBT-02). The non-principal relational
+> case (#1481/W1a), the **principal** relational case (#1549), and **both
+> `shape(embedded)` cases** (#1571) all emit — python's filter surface now
+> matches node/java for relational + embedded. `contextFilterPredicate`
+> (`src/generator/python/find-predicate.ts`) AND-s the predicate into every root
+> read; principal predicates render `require_current_user().<claim>` against the
+> ambient `ContextVar` accessor. Only `shape(document)` remains (item 1 above).
+> **Event-sourced workflows on elixir** also drained — they ship on
+> `elixir·vanilla` (gated on ash, foundation-fit), so no feature in this matrix
+> is gated on *both* elixir foundations.
 
 ## Frontend matrix at a glance
 
@@ -141,10 +153,10 @@ backend today** — designed boundaries with no implementation:
 
 Ordered by blast radius — how many real models the gap blocks today:
 
-1. **Python filter depth** — principal + non-relational filters. The widest
-   remaining backend gap: a python-hosted aggregate can't express tenancy/
-   soft-delete scoping or filter a document/embedded shape. Fail-fast today, so
-   it's a capability gap, not a correctness hole. ([multi-tenancy-design-note](./multi-tenancy-design-note.md).)
+1. **`shape(document)` filters** — wire the in-app filtering path on python (and,
+   if ever needed, elixir) so a `document` aggregate can carry a capability
+   `filter`; node/java already do. The narrowest remaining filter gap now that
+   relational + embedded are done. ([multi-tenancy-design-note](./multi-tenancy-design-note.md).)
 2. **Frontend pack breadth** — ship more Vue/Svelte pack families to match
    React's depth; not a correctness item. ([design-packs](../design-packs.md).)
 3. **Alternate adapters** — promote `dapper`/`mikroorm` past minimal-v1, or

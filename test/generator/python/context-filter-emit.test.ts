@@ -101,3 +101,106 @@ system Shop {
     expect(repo).not.toContain("not_(");
   });
 });
+
+// ---------------------------------------------------------------------------
+// shape(embedded) capability filters (DEBT-02 tail).  An embedded aggregate's
+// root scalars are real columns, so the predicate AND-s into the embedded SQL
+// reads exactly like the relational path — `repository-embedded-builder.ts`
+// threads the SAME `contextFilterPredicate`.  Both the non-principal and the
+// principal (`require_current_user()`) cases are wired; only `shape(document)`
+// stays gated (in-app filtering, not built).
+// ---------------------------------------------------------------------------
+
+const EMBED_REPO = "api/app/db/repositories/cart_repository.py";
+
+describe("python generator — capability filter on shape(embedded)", () => {
+  it("AND-s a NON-PRINCIPAL filter into every embedded root read", async () => {
+    const repo = (
+      await build(`
+system Shop {
+  subdomain Sales {
+    context Sales {
+      aggregate Cart shape(embedded) {
+        total: int
+        archived: bool
+        filter !this.archived
+      }
+    }
+  }
+  api SalesApi from Sales
+  storage pg { type: postgres }
+  resource salesState { for: Sales, kind: state, use: pg }
+  deployable api { platform: python, contexts: [Sales], dataSources: [salesState], serves: SalesApi, port: 4000 }
+}
+`)
+    ).get(EMBED_REPO)!;
+    expect(repo).toBeDefined();
+    // all(): bare predicate.
+    expect(repo).toContain("select(CartRow).where(not_(CartRow.archived))");
+    // find_by_id: switched off the `session.get` PK fast-path to a filtered select.
+    expect(repo).toContain("select(CartRow).where(and_(CartRow.id == id, not_(CartRow.archived)))");
+    // find_many_by_ids: in_() AND-ed with the filter.
+    expect(repo).toContain(
+      "select(CartRow).where(and_(CartRow.id.in_(list(ids)), not_(CartRow.archived)))",
+    );
+    expect(repo).toContain("from sqlalchemy import and_, not_, select");
+  });
+
+  it("renders a PRINCIPAL filter against require_current_user() on an embedded aggregate", async () => {
+    const repo = (
+      await build(`
+system Shop {
+  user { id: string  tenantId: string }
+  subdomain Sales {
+    context Sales {
+      aggregate Cart shape(embedded) {
+        total: int
+        tenantId: string
+        filter this.tenantId == currentUser.tenantId
+      }
+    }
+  }
+  api SalesApi from Sales
+  storage pg { type: postgres }
+  resource salesState { for: Sales, kind: state, use: pg }
+  deployable api { platform: python, contexts: [Sales], dataSources: [salesState], serves: SalesApi, auth: required, port: 4000 }
+}
+`)
+    ).get(EMBED_REPO)!;
+    expect(repo).toBeDefined();
+    // The principal claim renders against the ambient accessor — no read-method param.
+    expect(repo).toContain("(CartRow.tenant_id == require_current_user().tenant_id)");
+    expect(repo).toContain("from app.auth.user import require_current_user");
+    // AND-ed into the id-scoped find_by_id read.
+    expect(repo).toContain(
+      "select(CartRow).where(and_(CartRow.id == id, (CartRow.tenant_id == require_current_user().tenant_id)))",
+    );
+  });
+
+  it("keeps the embedded no-filter path byte-identical (session.get fast-path)", async () => {
+    const repo = (
+      await build(`
+system Shop {
+  subdomain Sales {
+    context Sales {
+      aggregate Cart shape(embedded) {
+        total: int
+        archived: bool
+      }
+    }
+  }
+  api SalesApi from Sales
+  storage pg { type: postgres }
+  resource salesState { for: Sales, kind: state, use: pg }
+  deployable api { platform: python, contexts: [Sales], dataSources: [salesState], serves: SalesApi, port: 4000 }
+}
+`)
+    ).get(EMBED_REPO)!;
+    expect(repo).toBeDefined();
+    // No filter → find_by_id keeps the cheap primary-key get, no capability where.
+    expect(repo).toContain("row = await self._session.get(CartRow, id)");
+    expect(repo).toContain("rows = (await self._session.execute(select(CartRow))).scalars().all()");
+    expect(repo).not.toContain("and_(");
+    expect(repo).not.toContain("not_(");
+  });
+});

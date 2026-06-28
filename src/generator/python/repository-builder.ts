@@ -73,7 +73,7 @@ export function emittableFinds(repo: RepositoryIR | undefined): FindIR[] {
  *  it references neither symbol.  `User` is needed for a per-find currentUser
  *  param; `require_current_user` is the ambient accessor a principal capability
  *  filter weaves into every root read (DEBT-02). */
-function authUserImport(needsUser: boolean, needsAccessor: boolean): string | null {
+export function authUserImport(needsUser: boolean, needsAccessor: boolean): string | null {
   const names = [needsUser ? "User" : null, needsAccessor ? "require_current_user" : null]
     .filter((n): n is string => n != null)
     .sort();
@@ -387,7 +387,7 @@ function conventionPredicate(agg: EnrichedAggregateIR, find: FindIR): PyPredicat
  *  empty when no term applies.  When more than one term is present they're
  *  AND-ed via `and_(...)` (NOT double-wrapped — every term contributes one
  *  conjunct). */
-function rootWhere(
+export function rootWhere(
   pred: PyPredicate | null,
   root: string,
   kind: string | undefined,

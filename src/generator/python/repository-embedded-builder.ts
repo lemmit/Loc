@@ -8,13 +8,16 @@ import type {
 import { findUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
+import { aggUsesPrincipalContextFilter, contextFilterPredicate } from "./find-predicate.js";
 import { isRefCollectionField, isValueCollectionField, rowClassName } from "./py-columns.js";
 import {
+  authUserImport,
   emittableFinds,
   hydrateField,
   partWireMethod,
   persistField,
   relationalFindMethod,
+  rootWhere,
   toWireMethod,
 } from "./repository-builder.js";
 import { entityFromDoc, entityToDoc } from "./repository-document-builder.js";
@@ -41,6 +44,15 @@ export function buildPyEmbeddedRepositoryFile(
   const row = rowClassName(agg.name);
   const parts: EnrichedEntityPartIR[] = agg.parts;
   const findUser = emittableFinds(repo).some(findUsesCurrentUser);
+  // An embedded aggregate's root scalars are real columns, so a capability
+  // `filter` AND-s into every root read exactly like the relational path
+  // (DEBT-02 tail).  Non-principal AND principal predicates are wired — the
+  // latter renders `current_user.<claim>` against the ambient
+  // `require_current_user()` accessor (`contextFilterPredicate` is shape-agnostic).
+  // `document` shapes never reach here (gated by `validateContextFilterSupport`).
+  // Null when the aggregate has no capability filter — emission stays
+  // byte-identical (`rootWhere(null, …)` → no `.where(...)`).
+  const filterPred = contextFilterPredicate(agg, ctx);
 
   const body = lines(
     `class ${agg.name}Repository:`,
@@ -49,7 +61,14 @@ export function buildPyEmbeddedRepositoryFile(
     "        self._events = events",
     "",
     `    async def find_by_id(self, id: ${agg.name}Id) -> ${agg.name} | None:`,
-    `        row = await self._session.get(${row}, id)`,
+    filterPred
+      ? `        row = (await self._session.execute(select(${row})${rootWhere(
+          { expr: `${row}.id == id`, ops: new Set() },
+          row,
+          undefined,
+          filterPred,
+        )})).scalars().first()`
+      : `        row = await self._session.get(${row}, id)`,
     "        if row is None:",
     "            return None",
     "        return await self._hydrate(row)",
@@ -62,12 +81,17 @@ export function buildPyEmbeddedRepositoryFile(
     "        return found",
     "",
     `    async def all(self) -> list[${agg.name}]:`,
-    `        rows = (await self._session.execute(select(${row}))).scalars().all()`,
+    `        rows = (await self._session.execute(select(${row})${rootWhere(null, row, undefined, filterPred)})).scalars().all()`,
     "        return [await self._hydrate(row) for row in rows]",
-    ...emittableFinds(repo).flatMap((f) => ["", relationalFindMethod(agg, f, ctx)]),
+    ...emittableFinds(repo).flatMap((f) => ["", relationalFindMethod(agg, f, ctx, filterPred)]),
     "",
     `    async def find_many_by_ids(self, ids: list[${agg.name}Id]) -> list[${agg.name}]:`,
-    `        rows = (await self._session.execute(select(${row}).where(${row}.id.in_(list(ids))))).scalars().all()`,
+    `        rows = (await self._session.execute(select(${row})${rootWhere(
+      { expr: `${row}.id.in_(list(ids))`, ops: new Set() },
+      row,
+      undefined,
+      filterPred,
+    )})).scalars().all()`,
     "        return [await self._hydrate(row) for row in rows]",
     "",
     saveMethod(agg, ctx),
@@ -104,7 +128,10 @@ export function buildPyEmbeddedRepositoryFile(
     .filter(refersTo)
     .sort();
   const domainNames = [agg.name, ...parts.map((p) => p.name)].filter(refersTo);
-  const saNames = ["insert", "select"].filter(refersTo);
+  // `and_`/`or_`/`not_` ride in when a capability filter lowers to them; `func`
+  // for a paged find's count; `select` for the reads + membership EXISTS.
+  // (`insert` is the separate `sqlalchemy.dialects.postgresql` import below.)
+  const saNames = ["and_", "func", "not_", "or_", "select"].filter(refersTo);
 
   return lines(
     `"""${agg.name} embedded repository (shape(embedded)).  Auto-generated."""`,
@@ -114,11 +141,13 @@ export function buildPyEmbeddedRepositoryFile(
     refersTo("datetime") || refersTo("Decimal") ? "" : null,
     refersTo("cast") ? "from typing import cast" : null,
     "",
-    saNames.includes("select") ? "from sqlalchemy import select" : null,
+    saNames.length > 0 ? `from sqlalchemy import ${saNames.join(", ")}` : null,
     refersTo("insert") ? "from sqlalchemy.dialects.postgresql import insert" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "",
-    findUser ? "from app.auth.user import User" : null,
+    // `User` for a per-find `where` principal param; `require_current_user` for
+    // an always-on principal capability filter (DEBT-02 tail) — one sorted import.
+    authUserImport(findUser, aggUsesPrincipalContextFilter(agg)),
     `from app.db.schema import ${row}`,
     "from app.domain.errors import AggregateNotFoundError",
     refersTo("DomainEvent")
