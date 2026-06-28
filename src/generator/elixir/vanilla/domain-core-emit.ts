@@ -1,12 +1,13 @@
 import type {
   AggregateIR,
   BoundedContextIR,
+  FunctionIR,
   OperationIR,
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
-import { stmtUsesParam } from "../domain/predicates.js";
-import type { RenderCtx } from "../render-expr.js";
+import { exprUsesParam, stmtUsesParam } from "../domain/predicates.js";
+import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { isVanillaDocAgg } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 import { isReturningOperation, renderReturningStmt } from "./operation-returns-emit.js";
@@ -77,7 +78,35 @@ export function renderAggregatePureCore(
   for (const op of agg.operations) {
     out.push("", ...renderPureOp(appModule, ctxModule, ctx, op));
   }
+  // Aggregate `function` members (§11b) — pure helpers the op bodies above may
+  // call (`precondition passed()` / a bare `passed()` statement).  The pure core
+  // lives ON the aggregate's schema module, so emit the functions here too (the
+  // context-facade copy lives in `context-emit.ts`); a `<fn>(record, …)` call
+  // then resolves in whichever module the body renders into.  The struct guard
+  // is `%__MODULE__{}` — this IS the aggregate's own schema module.
+  for (const fn of agg.functions ?? []) {
+    out.push("", ...renderPureFunction(`${appModule}.${ctxModule}`, fn));
+  }
   return out;
+}
+
+/** One `function` member as a `def <fn>(%__MODULE__{} = record, …)` on the
+ *  aggregate schema module — the pure-core sibling of `function-emit.ts`'s
+ *  context-facade copy. */
+function renderPureFunction(facadeMod: string, fn: FunctionIR): string[] {
+  const fnSnake = snake(fn.name);
+  const rc: RenderCtx = { thisName: "record", contextModule: facadeMod, foundation: "vanilla" };
+  const params = fn.params.map((p) =>
+    exprUsesParam(fn.body, p.name) ? snake(p.name) : `_${snake(p.name)}`,
+  );
+  const sig =
+    params.length > 0 ? `%__MODULE__{} = record, ${params.join(", ")}` : `%__MODULE__{} = record`;
+  return [
+    `  @doc "Pure domain function \`${fn.name}\`."`,
+    `  def ${fnSnake}(${sig}) do`,
+    `    ${renderExpr(fn.body, rc)}`,
+    "  end",
+  ];
 }
 
 function renderPureOp(

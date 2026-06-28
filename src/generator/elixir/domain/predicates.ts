@@ -36,7 +36,7 @@ export function opUsesCurrentUser(op: { statements: readonly StmtIR[] }): boolea
   return op.statements.some(stmtUsesCurrentUser);
 }
 
-function exprUsesParam(e: ExprIR | undefined, name: string): boolean {
+export function exprUsesParam(e: ExprIR | undefined, name: string): boolean {
   if (!e) return false;
   if (e.kind === "ref" && e.refKind === "param" && e.name === name) return true;
   return walkExpr(e, (sub) => exprUsesParam(sub, name));

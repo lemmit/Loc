@@ -144,10 +144,12 @@ describe("vanilla exception-less returning op — collection mutations + call", 
     expect(fn).toMatch(/record = %\{record \| tags: List\.delete\(record\.tags \|\| \[\], t\)\}/);
     // `total += 1` scalar arithmetic.
     expect(fn).toMatch(/record = %\{record \| total: record\.total \+ 1\}/);
-    // `recompute()` bare call → discarding no-op (vanilla emits no
-    // aggregate-function helpers); compiles, no undefined-function reference.
-    expect(fn).toMatch(/_ = nil {2}# vanilla: bare call to 'recompute'/);
+    // `recompute()` bare call → a real call to the emitted aggregate
+    // `function` (§11b), discarding the result (`_ = recompute(record)`).
+    expect(fn).toMatch(/_ = recompute\(record\)/);
     expect(fn).not.toContain("# TODO(exception-less)");
+    // …and that callable target IS emitted on this module, so the call resolves.
+    expect(ctx).toMatch(/def recompute\(%Api\.Orders\.Order\{\} = record\) do/);
   });
 });
 

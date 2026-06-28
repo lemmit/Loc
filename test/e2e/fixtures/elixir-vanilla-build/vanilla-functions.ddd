@@ -1,0 +1,56 @@
+// Aggregate `function` members on the vanilla foundation — the compile gate for
+// gap §11b (docs/plans/vanilla-phoenix-gaps.md).
+//
+// `function passed(): bool = …` and `function bonus(extra): int = …` are pure
+// domain helpers.  Before §11b they were emitted NOWHERE on vanilla and the call
+// site rendered an unqualified `passed(record)` → `mix compile` failed on the
+// undefined reference.  The fix emits `def passed(%Order{} = record, …)` on the
+// context-facade module AND (test-gated) the pure-core schema module, so both
+// the persist-path op body and the in-memory ExUnit core resolve the call.
+//
+// The op `approve` calls `passed()` in a `precondition` (facade-module path);
+// the domain `test` blocks call `passed()` / `bonus(...)` through the pure core
+// (schema-module path), so `mix compile --warnings-as-errors` AND `mix test`
+// both exercise the emit.
+system Shop {
+  subdomain Sales {
+    context Ordering {
+      aggregate Order ids guid {
+        total: int = 0
+        status: string = "open"
+
+        function passed(): bool = total > 100
+        function bonus(extra: int): int = total + extra
+
+        operation approve() {
+          precondition passed()
+          status := "approved"
+        }
+
+        test "passed is true above the threshold" {
+          let o = Order.create({ total: 150 })
+          expect(o.passed()).toBe(true)
+        }
+        test "passed is false at or below the threshold" {
+          let o = Order.create({ total: 100 })
+          expect(o.passed()).toBe(false)
+        }
+        test "bonus adds the extra to the total" {
+          let o = Order.create({ total: 10 })
+          expect(o.bonus(5)).toBe(15)
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api OrderingApi from Sales
+  storage pg { type: postgres }
+  resource orderingState { for: Ordering, kind: state, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Ordering]
+    dataSources: [orderingState]
+    serves: OrderingApi
+    port: 4000
+  }
+}

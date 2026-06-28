@@ -349,17 +349,25 @@ export function renderReturningStmt(
     case "expression":
       return `    _ = ${renderExpr(s.expr, rc)}`;
     case "call": {
-      // `f(args)` — a bare call to a domain `function` / private-operation.
-      // The schema module does NOT emit aggregate `function` helpers,
-      // so there is no callable target here.  A bare call discards its result
-      // anyway (the value form rides `let`/`assign` instead), so this lowers to
-      // a no-op that still threads `record` — keeping the body compilable under
-      // `--warnings-as-errors` without referencing an undefined function.  The
-      // argument expressions are evaluated for their (pure) side-effect-free
-      // value and discarded.
       const args = s.args.map((a) => renderExpr(a, rc));
+      if (s.target === "function") {
+        // `f(args)` — a bare call to an aggregate `function` (§11b).  Those are
+        // now emitted (`function-emit.ts` on the context-facade module, the pure
+        // core on the schema module — whichever module this body renders into),
+        // taking the aggregate struct as the first arg, so the call resolves.
+        // The result is discarded (a bare call is a statement); bind to `_`.
+        const call =
+          args.length > 0
+            ? `${snake(s.name)}(${rc.thisName}, ${args.join(", ")})`
+            : `${snake(s.name)}(${rc.thisName})`;
+        return `    _ = ${call}`;
+      }
+      // A `private-operation` target has no vanilla helper (private ops are not
+      // emitted on vanilla), and a bare call discards its result anyway, so it
+      // lowers to a no-op that still threads `record` — keeping the body
+      // compilable under `--warnings-as-errors` without an undefined reference.
       const argTuple = args.length ? `{${args.join(", ")}}` : "nil";
-      return `    _ = ${argTuple}  # vanilla: bare call to '${s.name}' (no aggregate-function target); record unchanged`;
+      return `    _ = ${argTuple}  # vanilla: bare call to '${s.name}' (no callable target); record unchanged`;
     }
   }
 }
