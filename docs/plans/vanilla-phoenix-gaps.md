@@ -32,6 +32,7 @@ on the vanilla backend later — this file is the tracked list.
 | §9 | Op-level `currentUser` guard | **CLOSED** (#1568) | — | done |
 | §2 | Union per-variant struct tagging | **effectively CLOSED** (doc mis-framed) | S | doc/test only |
 | §4 | `contains`-in-`where` membership | **CLOSED** (doc stale) | S | dead-code cleanup only |
+| §12 | `shape(document)` + custom ops/finds | honest validator gate | M | 3 (untracked find) |
 
 Restoring the 5-backend `conformance-parity` gate (removing
 `LOOM_E2E_SKIP_PHOENIX=1` and re-adding the elixir deployable to
@@ -278,3 +279,24 @@ Land 11a + 11b + 11c, re-add the elixir deployable to `examples/showcase.ddd`,
 remove `LOOM_E2E_SKIP_PHOENIX` from `conformance-parity.yml`, and restore the
 phoenix legs of the `e2e.test.ts` parity cross-check (the spec-fetch, the diff
 pairs, and the 403 runtime-authorization target).
+
+## 12. `shape(document)` aggregate with custom operations / finds — honest validator gate (M)
+
+- **Status (REAL — honest gate, surfaced by the 2026-06-28 Ash-parity re-audit):**
+  a `shape(document)` aggregate on elixir emits the **CRUD surface only**; if it
+  *also* declares a named `operation` or a custom `find`, validation rejects it
+  with `loom.vanilla-document-unsupported`
+  (`src/ir/validate/checks/system-checks.ts` ~`:521`, message: "shape(document)
+  on elixir … emits the CRUD surface only in v1"). node / .NET / Python / Java
+  host the full document surface (ops + finds); elixir is the only backend gated
+  here. Safe (it fails fast at validate time, never mis-emits) but a real
+  capability gap.
+- **Not an Ash regression** — the Ash-era Phoenix backend was relational-focused,
+  so document-shape custom ops/finds almost certainly never worked there either.
+  This is a standing backend gap, not something the vanilla migration dropped;
+  it's tracked here because the Ash-parity re-audit found it and the rest of this
+  doc didn't list it.
+- **To close (feature work, outside the current gap-drain campaign):** emit the
+  named-operation / custom-find surface for `shape(document)` aggregates on
+  vanilla (the CRUD path already exists), then narrow the gate to drop the
+  `customOps` / `customFinds` guard.
