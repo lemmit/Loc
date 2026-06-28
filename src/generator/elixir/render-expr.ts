@@ -48,6 +48,9 @@ export interface RenderCtx {
   thisName: string;
   /** Module prefix for the current bounded context, e.g. `"MyApp.Sales"`. */
   contextModule: string;
+  /** Variant-`match` binding side-channel (variant-match.md) — maps a bound
+   *  name to its `case`-clause pattern variable while rendering an arm value. */
+  matchBindings?: ReadonlyMap<string, string>;
   /** Shared `<App>.Types` module — emitted once per app by the
    *  orchestrator (index.ts).  When set, `renderTypespec` lowers
    *  `id` → `<typesModule>.id()` and primitive `datetime` →
@@ -157,13 +160,24 @@ const ELIXIR_TARGET: ExprTarget<RenderCtx> = {
   ternary: (cond, then, otherwise) => `if ${cond}, do: ${then}, else: ${otherwise}`,
   convert: (value, e) => renderElixirConvert(e.target, e.from, value),
   match: renderMatch,
-  // Variant-`match` (variant-match.md) — TODO(fan-out): render `case subject do
-  // %Order{} = o -> <value> end` with a REAL binding (`bindingRefText` returns
-  // the binding name).
-  matchVariant() {
-    throw new Error("variant-match: Elixir backend not yet implemented (variant-match.md fan-out)");
+  // Variant-`match` (variant-match.md) — a `case` over the union result's
+  // asymmetric tagged tuple (operation-returns-emit): the success variant is
+  // `{:ok, value}`, an error is `{:error, "<tag>", fields}`.  Each arm binds a
+  // real pattern variable (or `_` when it bound none); `else` becomes a `_`
+  // catch-all.  A field read off the binding is a plain `.field` (struct/map
+  // access) — see renderRef's match-binding arm.
+  matchVariant(m) {
+    const clauses = m.arms.map((a) => {
+      const binder = a.binding ? snake(a.binding) : "_";
+      const pattern = a.isError
+        ? `{:error, ${JSON.stringify(a.tag)}, ${binder}}`
+        : `{:ok, ${binder}}`;
+      return `      ${pattern} -> ${a.value}`;
+    });
+    if (m.otherwise !== undefined) clauses.push(`      _ -> ${m.otherwise}`);
+    return `case ${m.subject} do\n${clauses.join("\n")}\n    end`;
   },
-  bindingRefText: (binding) => binding,
+  bindingRefText: (binding) => snake(binding),
   // List literals are walker-config sugar (e.g. responsive Grid cols); no
   // domain-expression position consumes one today, but keep total with an
   // Elixir-list emit so unexpected uses still compile.
@@ -286,6 +300,10 @@ function renderRef(e: RefExpr, ctx: RenderCtx): string {
       return `"${snake(e.name)}"`;
     case "current-user":
       return "current_user";
+    case "match-binding":
+      // Variant-`match` (variant-match.md): the `case`-clause pattern variable
+      // bound for this arm (success `{:ok, b}` / error `{:error, tag, b}`).
+      return ctx.matchBindings?.get(e.name) ?? snake(e.name);
     default:
       // `refKind === "unknown"` is intentional for some positions
       // (e2e test bodies, member-chain receivers like `Order.byId(...)`

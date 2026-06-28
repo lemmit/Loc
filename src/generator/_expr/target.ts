@@ -82,6 +82,10 @@ export interface RenderedVariantArm {
   variantTypeName: string;
   binding: string | undefined;
   value: string;
+  /** True when this variant is an `error` payload.  Only the Elixir backend's
+   *  asymmetric `{:ok,…}` / `{:error, tag, …}` tuple `case` reads it; the other
+   *  backends tag every variant uniformly and ignore it. */
+  isError: boolean;
 }
 
 /** All of a variant-`match`'s rendered pieces handed to `ExprTarget.matchVariant`. */
@@ -221,6 +225,7 @@ export function renderExprWith<Ctx extends ExprCtxBase>(
             variantTypeName: variantTypeName(a),
             binding: a.binding,
             value: renderExprWith(a.value, t, armCtx),
+            isError: a.isError ?? false,
           };
         });
         return t.matchVariant({

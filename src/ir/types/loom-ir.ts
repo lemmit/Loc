@@ -2785,6 +2785,14 @@ export type ExprIR =
         varType: TypeIR;
         binding?: string;
         value: ExprIR;
+        /** True when this variant is an `error` payload.  Most backends tag
+         *  every variant uniformly by `type` and ignore this, but the Elixir
+         *  vanilla backend represents a union result as an asymmetric tagged
+         *  tuple — `{:ok, value}` for the success variant vs `{:error, tag,
+         *  fields}` for an error — so its `case` clause shape depends on it.
+         *  Derived at lowering from the enclosing context's payload kinds
+         *  (the generators have no context to re-derive it). */
+        isError?: boolean;
       }[];
     };
 

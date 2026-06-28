@@ -44,6 +44,7 @@ import {
   isObjectLit,
   isOperation,
   isParenExpr,
+  isPayloadDecl,
   isPostfixChain,
   isPrimitiveConversion,
   isProperty,
@@ -56,6 +57,7 @@ import {
 import { isCollectionOp } from "../../util/collection-ops.js";
 import { isIntrinsicMatcher } from "../../util/intrinsic-matchers.js";
 import { findVerb, type ResourceVerbDef } from "../resource-verbs.js";
+import { variantTag } from "../stdlib/unions.js";
 import type {
   ExprIR,
   IdValueType,
@@ -515,6 +517,22 @@ function applySuffixToRecv(
 // `?` propagation helpers (exception-less.md A2).
 // ---------------------------------------------------------------------------
 
+/** True when `tag` names an `error` payload visible from the lowering context
+ *  — walking the context → subdomain → system → model container chain so a
+ *  context-local *and* an ambient root-level `error` both classify.  Drives the
+ *  per-variant-arm `isError` stamp the Elixir backend's `{:ok,…}`/`{:error,…}`
+ *  tuple `case` depends on (variant-match.md). */
+function isErrorVariantTag(tag: string, env: Env): boolean {
+  let node: { members?: readonly unknown[]; $container?: unknown } | undefined = env.ctx;
+  while (node) {
+    if (node.members?.some((m) => isPayloadDecl(m) && m.name === tag && m.kind === "error")) {
+      return true;
+    }
+    node = node.$container as { members?: readonly unknown[]; $container?: unknown } | undefined;
+  }
+  return false;
+}
+
 export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
   if (!expr) return lit("null", "null");
   if (isStringLit(expr)) return lit("string", expr.value);
@@ -627,6 +645,11 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
             varType,
             binding: arm.binding,
             value: lowerExpr(arm.value, armEnv),
+            // Error-vs-success classification for the asymmetric Elixir tuple
+            // representation (variant-match.md).  An error payload in the
+            // enclosing context tags as `{:error, …}`; everything else is the
+            // `{:ok, …}` success carrier.  Other backends ignore this.
+            isError: isErrorVariantTag(variantTag(varType), env),
           };
         }),
         otherwise: expr.elseExpr ? lowerExpr(expr.elseExpr, env) : undefined,
