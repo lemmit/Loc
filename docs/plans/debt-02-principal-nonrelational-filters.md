@@ -1,6 +1,6 @@
 # Plan — DEBT-02 principal-referencing filters on non-relational aggregates
 
-**Created:** 2026-06-22 · **Status:** in progress (claim PR open)
+**Created:** 2026-06-22 · **Status:** ✅ SHIPPED for `embedded` (code-verified 2026-06-28 — `supportsPrincipalNonRelationalFilter` in `src/ir/validate/checks/system-checks.ts:1066` accepts the principal × `embedded` intersection on node/Java/elixir/**python** (#1571) and .NET (all shapes); gate-verified by `embedded-tenancy.ddd`). The `document`-principal case is murkier: the function wires it for node/Java (`:1069`), but the comment at `:1043-1044` says "document … stays gated everywhere" — an internal contradiction that needs parity verification of the node/Java `document` path. python/elixir `document`-principal stays off (python doesn't filter the blob in-app; elixir has no `document` shape).
 
 Closes the last remaining slice of **DEBT-02** from
 [`debt-prioritized-backlog.md`](./debt-prioritized-backlog.md): a capability

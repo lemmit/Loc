@@ -1,9 +1,29 @@
 # Multi-tenancy — design note for the implementing agent
 
-> Status: **design agreed, not yet implemented.** This note captures the decisions
-> reached so the implementer doesn't re-litigate them. It is a prerequisite for the
-> real-time cache-invalidation ("magic caching") feature, which routes per-tenant and
-> reuses the tenant-claim plumbing built here.
+> Status: **design agreed; the first-class surface is not yet implemented, but its
+> substrate is now COMPLETE** (2026-06-28 code-verified). The proposed
+> `tenancy by … of Organization` surface is genuinely greenfield — there is no
+> `tenant`/`tenancy`/`tenantRegistry`/`crossTenant` in `src/language/ddd.langium` or
+> `src/ir/types/loom-ir.ts`. **What this design builds on, however, has fully landed:**
+> the principal-referencing capability-filter pipeline (`filter this.tenantId ==
+> currentUser.tenantId`, AND-ed into every generated read) now ships on **all five
+> backends** — DEBT-01 (relational principal, all 5) and DEBT-02 (the principal ×
+> `shape(embedded)` intersection on all five, #1571) are drained
+> (`supportsPrincipalFilter` / `supportsPrincipalNonRelationalFilter` in
+> `system-checks.ts`; `tenancy-filter.ddd` / `embedded-tenancy.ddd` gate it). The
+> only filter residue is a `shape(document)` predicate on python — irrelevant to
+> tenancy, whose `tenantId` is a scalar on a real column, never inside a jsonb blob.
+> So this
+> note's foundational premise — "Loom's capability-filter pipeline already provides
+> the universal, can't-be-forgotten predicate injection" (R-section below) — is no
+> longer aspirational; it is verified. **Multi-tenancy is therefore unblocked:** the
+> remaining work is purely the first-class surface (auto-injection so the filter
+> can't be *forgotten* on an aggregate, the `of Organization` registry, and the
+> derived `tenantId ≡ Organization.id` type link), not the predicate-injection
+> machinery. This note captures the decisions reached so the implementer doesn't
+> re-litigate them. It is also a prerequisite for the real-time cache-invalidation
+> ("magic caching") feature, which routes per-tenant and reuses the tenant-claim
+> plumbing built here.
 
 ---
 

@@ -45,6 +45,21 @@ and corrected across README + plan + proposal header —
 emitted on all five backends) and `domain-services` PROPOSED → **PARTIAL**
 (Shape A v1 shipped on all five backends, grammar + IR + phase-⑦ gates +
 per-backend emitters + tests).)
+(spot-refresh **2026-06-28**: (a) `execution-context` PARTIAL → **runtime
+backbone COMPLETE on all 5 backends** — the per-dispatch child-frame /
+`parentId`-chaining discipline drained on Python/Java/Elixir this session,
+joining .NET/node; (b) **multi-tenancy substrate verified COMPLETE** — the
+principal/tenancy capability-filter pipeline ships on all 5 backends
+(DEBT-01 + DEBT-02 drained: `supportsPrincipalFilter('python')` true,
+`supportsPrincipalNonRelationalFilter` wires the principal×`embedded` case on
+all 5 incl. python via #1571; only a python `shape(document)` filter remains,
+irrelevant to tenancy), so the `tenancy by` design-note is unblocked though its
+surface stays greenfield;
+(c) fixed a stale `capabilities.md` contradiction ("Python does not yet
+consume capability filters") and stale "principal-on-non-relational gated
+everywhere" claims in the DEBT backlog/plans. Flagged: `system-checks.ts:1066`
+wires `document`-principal for node/Java, but the comment at `:1043-1044` says
+it "stays gated for document everywhere" — an internal contradiction to verify.)
 — this pass was **code-verified** (every status checked against the
 grammar / IR / emitters / validator gates, not against prior doc text)
 and reconciled the #1024–#1064 wave: the elixir platform rename
@@ -237,7 +252,7 @@ fable-elmish target last (it consumes all of them).
 | Doc | Status | Core addition |
 |---|---|---|
 | [`authorization.md`](./authorization.md) | PROPOSED | `DataKey` hierarchical scoping; `policy { data { … } operations { … } fields { … } }` reachability, operation/view/workflow gates, field masking. Pinned per D-POLICY-STYLE over the function-style alternative. Phases 1–4 in Phase 3.2; phases 5–7 (`exists`, field rules, `implies`) in Phase 5. |
-| [`multi-tenancy-design-note.md`](./multi-tenancy-design-note.md) | PROPOSED — refined 2026-06-17 (R1–R5) | `tenancy by user.tenantId of Organization` (declaration + cardinality/cross-link verification). **Two-value** scope axis `with tenantOwned` / `crossTenant` (no silent default — unmarked = unscoped + an explicit-stance lint, recommend error; **`platform` scope dropped** — admin-only cross-tenant = `crossTenant` + authz). Registry = `implements "tenantRegistry"` capability providing immutable `parent` + `dataKey`; **reparent out of scope**. `tenantId` + `dataKey` stamped from the token at create (so `deep` is migration-free); depth `local`/`deep`/`global` is a per-role authz access level (Dynamics-grounded); `deep` = direct prefix scan. Runtime gate **T2.j**. Cross-refs [`typed-capabilities.md`](./typed-capabilities.md) + [`authorization.md`](./authorization.md) §2. |
+| [`multi-tenancy-design-note.md`](./multi-tenancy-design-note.md) | PROPOSED (surface) — **substrate COMPLETE** (2026-06-28 code-verified): the principal/tenancy capability-filter pipeline ships on all 5 backends (DEBT-01 + DEBT-02 drained), so the design is unblocked; the first-class `tenancy by` surface is the only greenfield part. Refined 2026-06-17 (R1–R5) | `tenancy by user.tenantId of Organization` (declaration + cardinality/cross-link verification). **Two-value** scope axis `with tenantOwned` / `crossTenant` (no silent default — unmarked = unscoped + an explicit-stance lint, recommend error; **`platform` scope dropped** — admin-only cross-tenant = `crossTenant` + authz). Registry = `implements "tenantRegistry"` capability providing immutable `parent` + `dataKey`; **reparent out of scope**. `tenantId` + `dataKey` stamped from the token at create (so `deep` is migration-free); depth `local`/`deep`/`global` is a per-role authz access level (Dynamics-grounded); `deep` = direct prefix scan. Runtime gate **T2.j**. Cross-refs [`typed-capabilities.md`](./typed-capabilities.md) + [`authorization.md`](./authorization.md) §2. |
 
 ### On-ramp & day-one runtime
 
