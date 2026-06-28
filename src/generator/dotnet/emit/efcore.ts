@@ -12,7 +12,7 @@ import { isTphBase, ownFieldsOf } from "../../../ir/util/inheritance.js";
 import { isValueCollectionType, valueCollectionsFor } from "../../../ir/util/value-collections.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
-import { renderCsExpr } from "../render-expr.js";
+import { AMBIENT_CURRENT_USER, renderCsExpr } from "../render-expr.js";
 import {
   esEventDbSet,
   esEventRecordClass,
@@ -358,14 +358,13 @@ export function renderConfiguration(
   // principal.  An EF query filter is a STATIC lambda built once in
   // `OnModelCreating`, so it cannot close over a request-scoped `currentUser`
   // local the way an operation body can — resolve it through the same ambient
-  // accessor the read side uses (`RequestContext.Current!.CurrentUser!`), so
-  // the whole backend resolves `currentUser` one way.
-  const AMBIENT_USER = "RequestContext.Current!.CurrentUser!";
+  // accessor the read side uses (`AMBIENT_CURRENT_USER`), so the whole backend
+  // resolves `currentUser` one way (shared with the reified retrieval spec).
   const filterLines = tph
     ? []
     : (agg.contextFilters ?? []).map(
         (predicate, i) =>
-          `        builder.HasQueryFilter(${JSON.stringify(filterNames[i])}, x => ${renderCsExpr(predicate, { thisName: "x", currentUserExpr: AMBIENT_USER })});`,
+          `        builder.HasQueryFilter(${JSON.stringify(filterNames[i])}, x => ${renderCsExpr(predicate, { thisName: "x", currentUserExpr: AMBIENT_CURRENT_USER })});`,
       );
   // The ambient accessor lives in `<ns>.Domain.Common` (RequestContext); only
   // import it when a filter actually references the principal.

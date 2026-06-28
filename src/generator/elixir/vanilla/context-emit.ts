@@ -9,6 +9,11 @@
 // calls in the workflow body).
 // ---------------------------------------------------------------------------
 
+import {
+  PAGED_DEFAULT_PAGE,
+  PAGED_DEFAULT_PAGE_SIZE,
+  pagedReturn,
+} from "../../../ir/stdlib/generics.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -19,6 +24,7 @@ import type {
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { opUsesCurrentUser, stmtUsesParam } from "../domain/predicates.js";
+import { renderReadingServiceContextFns } from "../domain-service-emit.js";
 import type { RenderCtx } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
@@ -30,6 +36,7 @@ import {
   renderEnsureHelper,
   renderEsContextBlock,
 } from "./eventsourced-emit.js";
+import { renderAggregateFunctions } from "./function-emit.js";
 import { isAbstractBase } from "./inheritance-emit.js";
 import {
   isReturningOperation,
@@ -126,7 +133,17 @@ function renderContextModule(
     const findLines = customFindsOf(repo).map((f) => {
       const findSnake = snake(f.name);
       const baseArgs = f.params.map((p) => snake(p.name));
-      const findArgs = [...baseArgs, ...(principal ? ["current_user \\\\ nil"] : [])].join(", ");
+      // A `paged` find carries the same `page`/`page_size` arity (with defaults)
+      // the repository fn declares, so the defdelegate matches and the
+      // controller's paged call routes through.
+      const pageArgs = pagedReturn(f.returnType)
+        ? [`page \\\\ ${PAGED_DEFAULT_PAGE}`, `page_size \\\\ ${PAGED_DEFAULT_PAGE_SIZE}`]
+        : [];
+      const findArgs = [
+        ...baseArgs,
+        ...pageArgs,
+        ...(principal ? ["current_user \\\\ nil"] : []),
+      ].join(", ");
       return `  defdelegate ${findSnake}_${aggSnake}(${findArgs}), to: ${repoMod}, as: :${findSnake}`;
     });
     const findBlock = findLines.length > 0 ? `\n${findLines.join("\n")}\n` : "";
@@ -163,13 +180,64 @@ function renderContextModule(
     end
   end`
       : "";
+    // §13: a LiveView `Action { c.<op> }` button on a NON-destroy operation
+    // hoists a `handle_event` that calls `<Ctx>.get_<agg>!(id)` then
+    // `<Ctx>.<op>_<agg>!(record)` (`liveview-emit.ts` ~`:396-397`) — bang seams
+    // the non-bang op/getter don't provide, so without them `mix compile
+    // --warnings-as-errors` fails on the undefined calls.  Emit them for any
+    // aggregate carrying operations: a load-or-raise getter (arity-1 `id`, the
+    // exact call-site arity — the non-bang `get_<agg>` takes `current_user \\ nil`
+    // so this resolves for principal aggregates too) and, per operation, an
+    // arity-1 bang that runs the op (empty params) and raises on `{:error, _}`.
+    const bangOps = (agg.operations ?? []).filter((op) => !CRUD_RESERVED_NAMES.has(op.name));
+    const opBangFacade =
+      bangOps.length > 0
+        ? `\n
+  @doc "Load a ${aggPascal} by id or raise (LiveView Action seam)."
+  def get_${aggSnake}!(id) do
+    case get_${aggSnake}(id) do
+      {:ok, record} -> record
+      {:error, _} -> raise Ecto.NoResultsError, queryable: ${facadeMod}.${aggPascal}
+    end
+  end${bangOps
+    .map((op) => {
+      const opSnake = snake(op.name);
+      const gated = opUsesCurrentUser(op);
+      const cuP = gated ? ", current_user \\\\ nil" : "";
+      const cuA = gated ? ", current_user" : "";
+      // A returning (exception-less) op raises on guard failure and yields its
+      // value (or a declared error tuple) directly — wrapping it in an
+      // `{:ok,_}/{:error,_}` case emits an error clause the body never matches
+      // ("the following clause will never match" → `--warnings-as-errors`).  Pass
+      // its result straight through.  A standard op returns `{:ok,_} | {:error,_}`,
+      // so unwrap and raise on error.
+      const body = isReturningOperation(op)
+        ? `    ${opSnake}_${aggSnake}(record, %{}${cuA})`
+        : `    case ${opSnake}_${aggSnake}(record, %{}${cuA}) do
+      {:ok, result} -> result
+      {:error, reason} -> raise "${op.name} failed: #{inspect(reason)}"
+    end`;
+      return `\n
+  @doc "Run the \`${op.name}\` operation on a loaded ${aggPascal} (LiveView Action seam)."
+  def ${opSnake}_${aggSnake}!(record${cuP}) do
+${body}
+  end`;
+    })
+    .join("")}`
+        : "";
+    // Aggregate `function` members (§11b) — pure domain helpers callable from the
+    // op / precondition / derived bodies emitted above.  Each renders as a
+    // struct-guarded `def <fn>(%Agg{} = record, …)` so the lowered call site
+    // (`<fn>(record, …)`) resolves in THIS module.
+    const fnLines = renderAggregateFunctions(facadeMod, agg);
+    const functionBlock = fnLines.length > 0 ? `${fnLines.join("\n")}\n` : "";
     return `  # ${aggPascal}
   defdelegate list_${aggSnake}s(${principal ? "current_user \\\\ nil" : ""}), to: ${repoMod}, as: :list
   defdelegate get_${aggSnake}(id${actorArg}), to: ${repoMod}, as: :find_by_id
   defdelegate create_${aggSnake}(attrs${stampActorArg}), to: ${repoMod}, as: :insert
   defdelegate update_${aggSnake}(record, attrs${stampActorArg}), to: ${repoMod}, as: :update
-  defdelegate delete_${aggSnake}(record), to: ${repoMod}, as: :delete${changeFacade}${destroyFacade}
-${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}`;
+  defdelegate delete_${aggSnake}(record), to: ${repoMod}, as: :delete${changeFacade}${destroyFacade}${opBangFacade}
+${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}${functionBlock}`;
   });
 
   // Retrieval defdelegates — `run_<retrieval>_<agg>(args..., opts \\ [])`
@@ -212,6 +280,18 @@ ${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}`;
   // unused.
   const requireLogger = contextEmitsEvent(ctx) ? "\n  require Logger" : "";
 
+  // Reading-tier domain services (domain-services.md rev. 4, Slice 1; Elixir
+  // decision B — ambient `Repo`).  A single-context `reading` service op lowers
+  // to a CONTEXT FUNCTION on THIS module (not a `Domain.Services` module), so
+  // its body's repo reads resolve against the ambient `Repo` via the
+  // context-facade find fns above.  Empty for a pure-only / service-free
+  // context (byte-identical to before).
+  const readingServiceFns = renderReadingServiceContextFns(ctx, facadeMod, `${appModule}.Types`);
+  const readingServiceBlock =
+    readingServiceFns.length > 0
+      ? `\n  # Reading-tier domain services (ambient Repo) — domain-services.md rev. 4\n${readingServiceFns.join("\n\n")}\n`
+      : "";
+
   return `# Auto-generated.
 defmodule ${facadeMod} do
   @moduledoc """
@@ -222,7 +302,7 @@ defmodule ${facadeMod} do
   workflow body).  Plain Elixir context module.
   """${requireLogger}${refCollHelpers ? "\n  import Ecto.Query" : ""}
 
-${blocks.join("\n")}${retrievalBlock}${ensureBlock}${refCollHelpers}end
+${blocks.join("\n")}${retrievalBlock}${readingServiceBlock}${ensureBlock}${refCollHelpers}end
 `;
 }
 

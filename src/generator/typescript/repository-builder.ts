@@ -246,7 +246,11 @@ export function buildRepositoryFile(
     usedDrizzleOps.length > 0 && `import { ${usedDrizzleOps.join(", ")} } from "drizzle-orm";`,
     `import * as schema from "../schema";`,
     repoUsesUser && `import type { User } from "../../auth/user-types";`,
-    usesPrincipalFilter && `import { requireCurrentUser } from "../../auth/middleware";`,
+    // …or a reified criterion fn (a tenancy `criterion` used by a
+    // find/retrieval) binds the principal through the same accessor — detected
+    // from the scanned body, which includes the criterion fns (line above).
+    (usesPrincipalFilter || /\brequireCurrentUser\(/.test(bodyScan)) &&
+      `import { requireCurrentUser } from "../../auth/middleware";`,
     // Persist-time audit stamping helper — pulled in only when this aggregate's
     // `save()` stamps (audited).  Stamps the audit columns from the ambient
     // request principal at the upsert (db/audit-stamp.ts).

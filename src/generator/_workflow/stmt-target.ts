@@ -42,6 +42,12 @@ export interface WorkflowStmtTarget {
   repoRun(st: ByKind<"repo-run">, indent: string): string[];
   opCall(st: ByKind<"op-call">, indent: string): string[];
   resourceCall(st: ByKind<"resource-call">, indent: string): string[];
+  /** `Transfer.run(src, dst, amount)` — a bare orchestrator call into a
+   *  `domainService` operation (domain-services.md rev. 4, the `mutating`
+   *  tier).  Renders `st.call` (a `callKind: "domain-service"` Call) as a
+   *  statement; the aggregates it mutates persist via the workflow's exit-saves
+   *  (`savesAtExit`), not here. */
+  domainServiceCall(st: ByKind<"domain-service-call">, indent: string): string[];
 
   /** `for-each`: `renderedBody` is the loop body already rendered at
    *  `indent + indentUnit` by the spine; the target wraps it in the backend's
@@ -111,5 +117,7 @@ function renderWorkflowStmt(
       );
     case "resource-call":
       return target.resourceCall(st, indent);
+    case "domain-service-call":
+      return target.domainServiceCall(st, indent);
   }
 }

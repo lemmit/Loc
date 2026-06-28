@@ -648,6 +648,20 @@ or not.
   — model it as an explicit ordinal field on a dedicated child
   aggregate, not on a `X id[]` field.  Lesson: don't let the natural
   ordering of one backend become an accidental contract.
+  - **Update (assoc-join ordinal dropped entirely):** the "harmless on
+    TS/.NET" ordinal was later **removed from every backend's `X id[]`
+    association join** (schema/migration column, write stamp, and read
+    `ORDER BY ordinal`). The only thing it bought was a deterministic
+    read-back order, and `ORDER BY <target_fk>` gives the same without a
+    column or stamp — content-addressed (backends agree even across
+    out-of-order/partial writes) and without falsely implying insertion
+    order matters. All five backends now read the join `ORDER BY` the
+    **target FK id** (Elixir via `many_to_many preload_order: [asc: :id]`).
+    PR #1580 (Elixir insertion-order) was closed won't-do for the same
+    reason; DEBT-13 is de-scoped. **Value-object collections keep their
+    `ordinal`** — there it's part of the `(parent_id, ordinal)` PK and the
+    only way to store an ordered, identity-less list. See
+    `docs/proposals/reference-collection-set-semantics.md`.
 - **Only `primaryKey` import is conditional.**  Adding `primaryKey` to the
   Drizzle import line unconditionally drifted every existing schema's
   byte-for-byte fixture.  Gate the import on "context has ≥1 join table"

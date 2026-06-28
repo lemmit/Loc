@@ -162,11 +162,11 @@ function findFunction(ast: Model, owner: string, fn: string): FunctionDecl | nul
 
 /** The function's body expression, verbatim from source. */
 export function functionBody(ast: Model, owner: string, fn: string): string | null {
-  return findFunction(ast, owner, fn)?.body.$cstNode?.text ?? null;
+  return findFunction(ast, owner, fn)?.body?.$cstNode?.text ?? null;
 }
 
 export function editFunctionBody(source: string, owner: string, fn: string, text: string): string | null {
-  const cst = findFunction(parseDdd(source).ast, owner, fn)?.body.$cstNode;
+  const cst = findFunction(parseDdd(source).ast, owner, fn)?.body?.$cstNode;
   if (!cst) return null;
   return ifParses(applyEdits(source, [{ offset: cst.offset, end: cst.end, newText: text.trim() }]));
 }

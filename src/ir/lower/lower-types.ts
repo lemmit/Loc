@@ -11,6 +11,7 @@ import type {
   Model,
   Operation,
   PayloadDecl,
+  Repository,
   TypeAtom,
   TypeRef,
   ValueObject,
@@ -124,6 +125,14 @@ export interface Env {
     string,
     { fields: Map<string, TypeIR>; actions: Map<string, { paramType?: TypeIR }> }
   >;
+  /** Repositories visible to a `domainService` operation body, keyed by name
+   *  (domain-services.md rev. 4, the `reading` tier).  Set ONLY while lowering
+   *  a domain-service operation, so a recognised repository READ
+   *  (`Accounts.byHolder(h)` / `Repo.find/findAll/run`) lowers to a fully
+   *  resolved `repo-read` Call (`callKind: "repo-read"`) instead of an
+   *  unresolved `method-call`.  Undefined everywhere else — workflow bodies
+   *  recognise repo reads through their own statement lowerer, never this. */
+  serviceRepos?: Map<string, Repository>;
 }
 
 export function newEnv(

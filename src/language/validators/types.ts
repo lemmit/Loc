@@ -18,7 +18,16 @@ import type {
   PrimitiveConversion,
   Property,
 } from "../generated/ast.js";
-import { isBinaryChain, isDerivedProp, isMemberSuffix, isPostfixChain } from "../generated/ast.js";
+import {
+  isBinaryChain,
+  isDerivedProp,
+  isLetStmt,
+  isMemberSuffix,
+  isPostfixChain,
+  isPreconditionStmt,
+  isRequiresStmt,
+  isReturnStmt,
+} from "../generated/ast.js";
 import {
   absentRecordMember,
   arithmeticResult,
@@ -27,6 +36,7 @@ import {
   type Env,
   envForNode,
   isAssignable,
+  makeEnv,
   resolveTypeRef,
   T,
   typeAfterSuffix,
@@ -423,15 +433,77 @@ export function checkFunction(
 ): void {
   const env = part ? envForPart(agg, part, fn) : envForAggregate(agg, fn);
   const declared = resolveTypeRef(fn.returnType);
-  const actual = typeOf(fn.body, env);
-  if (declared.kind !== "unknown" && actual.kind !== "unknown" && !isAssignable(actual, declared)) {
+
+  // Expression form (`= Expression`) — the single, inlinable body.  Unchanged.
+  if (fn.body) {
+    const actual = typeOf(fn.body, env);
+    if (
+      declared.kind !== "unknown" &&
+      actual.kind !== "unknown" &&
+      !isAssignable(actual, declared)
+    ) {
+      accept(
+        "error",
+        `Function '${fn.name}' returns '${typeToString(actual)}' but is declared to return '${typeToString(declared)}'.`,
+        { node: fn, property: "body" },
+      );
+    }
+    warnSensitivityDrop(actual, declared, accept, { node: fn, property: "body" });
+    return;
+  }
+
+  // Block form (`{ Statement* }`, domain-services.md rev. 4) — a pure helper
+  // with `let`-bindings + `return`/bug-regime statements.  Type-check the
+  // pure statement subset (env threading for lets) and validate each
+  // `return`'s value against the declared return type.  Side-effecting
+  // statements (`assign`/`+=`/`emit`/op-calls) are caught by the IR-layer
+  // purity gate (`loom.function-block-impure`); here we only need the
+  // expression/return typing so an ill-typed pure body is rejected early.
+  let blockEnv: Env = env;
+  let sawReturn = false;
+  for (const stmt of fn.block) {
+    if (isLetStmt(stmt)) {
+      const t = typeOf(stmt.expr, blockEnv);
+      const next = new Map<string, { type: DddType; origin: AstNode }>();
+      next.set(stmt.name, { type: t, origin: stmt });
+      blockEnv = makeEnv(blockEnv, next);
+      continue;
+    }
+    if (isPreconditionStmt(stmt) || isRequiresStmt(stmt)) {
+      const t = typeOf(stmt.expr, blockEnv);
+      if (t.kind !== "primitive" || t.name !== "bool") {
+        accept(
+          "error",
+          `'${isRequiresStmt(stmt) ? "requires" : "precondition"}' must be of type 'bool', got '${typeToString(t)}'.`,
+          { node: stmt, property: "expr" },
+        );
+      }
+      continue;
+    }
+    if (isReturnStmt(stmt)) {
+      sawReturn = true;
+      const actual = typeOf(stmt.value, blockEnv);
+      if (
+        declared.kind !== "unknown" &&
+        actual.kind !== "unknown" &&
+        !isAssignable(actual, declared)
+      ) {
+        accept(
+          "error",
+          `Function '${fn.name}' returns '${typeToString(actual)}' but is declared to return '${typeToString(declared)}'.`,
+          { node: stmt, property: "value" },
+        );
+      }
+      warnSensitivityDrop(actual, declared, accept, { node: stmt, property: "value" });
+    }
+  }
+  if (!sawReturn) {
     accept(
       "error",
-      `Function '${fn.name}' returns '${typeToString(actual)}' but is declared to return '${typeToString(declared)}'.`,
-      { node: fn, property: "body" },
+      `Block-body function '${fn.name}' must 'return' a value of type '${typeToString(declared)}'.`,
+      { node: fn, property: "name", code: "loom.function-block-no-return" },
     );
   }
-  warnSensitivityDrop(actual, declared, accept, { node: fn, property: "body" });
 }
 
 // Re-export DddType so consumers don't have to chase the type-system

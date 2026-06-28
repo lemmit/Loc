@@ -12,6 +12,7 @@ import {
   renderJavaExpr,
   renderJavaType,
 } from "../render-expr.js";
+import { collectJavaStmtImports, renderJavaStatements } from "../render-stmt.js";
 
 export function renderJavaEnum(e: EnumIR, basePkg: string): string {
   const valueLines = e.values.map((v, i) => `    ${v}${i < e.values.length - 1 ? "," : ""}`);
@@ -37,7 +38,8 @@ export function renderJavaValueObject(vo: ValueObjectIR, basePkg: string): strin
     collectJavaTypeImports(d.type, javaImports);
   }
   for (const fn of vo.functions) {
-    collectJavaExprImports(fn.body, javaImports);
+    if ("expr" in fn.body) collectJavaExprImports(fn.body.expr, javaImports);
+    else collectJavaStmtImports(fn.body.stmts, javaImports);
     collectJavaTypeImports(fn.returnType, javaImports);
     for (const p of fn.params) collectJavaTypeImports(p.type, javaImports);
   }
@@ -62,12 +64,12 @@ export function renderJavaValueObject(vo: ValueObjectIR, basePkg: string): strin
   ]);
   const fnLines = vo.functions.flatMap((fn) => {
     const fnParams = fn.params.map((p) => `${renderJavaType(p.type)} ${p.name}`).join(", ");
-    return [
-      `    private ${renderJavaType(fn.returnType)} ${fn.name}(${fnParams}) {`,
-      `        return ${renderJavaExpr(fn.body, methodCtx)};`,
-      `    }`,
-      ``,
-    ];
+    const open = `    private ${renderJavaType(fn.returnType)} ${fn.name}(${fnParams}) {`;
+    const bodyLine =
+      "expr" in fn.body
+        ? `        return ${renderJavaExpr(fn.body.expr, methodCtx)};`
+        : renderJavaStatements(fn.body.stmts, methodCtx);
+    return [open, bodyLine, `    }`, ``];
   });
 
   const body = [...derivedLines, ...fnLines];

@@ -142,12 +142,16 @@ function renderCriterion(c: CriterionIR, candidate: string, ns: string): string 
 
 // --- tiny ExprIR ref walk (mirrors collectCsExprUsings in render-expr.ts) --
 
-function refsCurrentUser(e: ExprIR): boolean {
+export function refsCurrentUser(e: ExprIR): boolean {
   // `currentUser` is the magic principal identifier. With a `user { … }`
   // block it lowers to `refKind: "current-user"`; without one it falls
   // through to an `unknown` ref still *named* `currentUser` (the lowering's
   // own guard, lower-expr.ts). Match both — either way `IsSatisfiedBy` has
-  // no `currentUser` in scope, so it must wait for the factory slice.
+  // no `currentUser` in scope, so a principal criterion is excluded from
+  // `Criterion<T>` reification. The reified-retrieval spec consumes the SAME
+  // predicate to decide when to bind the ambient principal in its inline
+  // `where` (spec-emit.ts), so the skip-here / bind-there decisions stay
+  // coupled — a criterion this excludes always gets its principal bound there.
   return anyRef(e, (r) => r.refKind === "current-user" || r.name === "currentUser");
 }
 

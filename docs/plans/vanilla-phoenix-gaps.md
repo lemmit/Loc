@@ -20,10 +20,10 @@ on the vanilla backend later — this file is the tracked list.
 | # | Gap | Verdict | Size | Priority |
 |---|---|---|:---:|---|
 | §8 | TPH shared-table inheritance | **CLOSED** (#1573) — was a runtime 500 bug | M–L | done |
-| §11a | Workflow `currentUser` threading | REAL | M | 2 (parity) |
-| §11b | Aggregate-`function` call emit + qualify | REAL | M | 2 (parity) |
-| §11c | Nested relational entity parts | honest validator gate | L | 2 (parity, blocks showcase-on-elixir) |
-| §1 | Paged wire envelope | REAL | M | 3 |
+| §11a | Workflow `currentUser` threading | **CLOSED** (#1579) | M | done |
+| §11b | Aggregate-`function` call emit + qualify | **CLOSED** (#1581) | M | done |
+| §11c | Nested relational entity parts | honest validator gate (**OPEN** — blocks showcase flip) | L | 2 (parity) |
+| §1 | Paged wire envelope | **CLOSED** (#1578) | M | done |
 | §10 | Destroy-form bang `destroy_X!/1` | **CLOSED** (#1575) | S | done |
 | §3 | `sensitive(...)` inspect-redaction | **CLOSED** | S | done |
 | §5 | Workflow `isolationLevel` | **CLOSED** (#1574) | S–M | done |
@@ -32,32 +32,36 @@ on the vanilla backend later — this file is the tracked list.
 | §9 | Op-level `currentUser` guard | **CLOSED** (#1568) | — | done |
 | §2 | Union per-variant struct tagging | **effectively CLOSED** (doc mis-framed) | S | doc/test only |
 | §4 | `contains`-in-`where` membership | **CLOSED** (doc stale) | S | dead-code cleanup only |
+| §12 | `shape(document)` + custom ops/finds | honest validator gate | M | 3 (untracked find) |
+| §13 | LiveView operation-action bang fns | **CLOSED** | S–M | done |
 
 Restoring the 5-backend `conformance-parity` gate (removing
 `LOOM_E2E_SKIP_PHOENIX=1` and re-adding the elixir deployable to
-`examples/showcase.ddd`) requires §11a + §11b + §11c.
+`examples/showcase.ddd`) now requires only **§11c** — §11a (#1579) and §11b
+(#1581) have shipped.
 
 ---
 
-## 1. Paged wire envelope (`find ... paged`)
+## 1. Paged wire envelope (`find ... paged`) — **CLOSED** (#1578)
 
-- **Status (REAL, size M):** the paged find returns a **bare serialized array**
-  and applies **no `limit`/`offset` at all** — it ignores the `paged` carrier
-  entirely (worse than first documented). The auto `index`/`all` action emits a
-  partial `%{items: …}` (no `page`/`pageSize`/`total`/`totalPages`).
-- **Ash:** returned the `{ items, page, pageSize, total, totalPages }` paged
-  envelope, matching the cross-backend `Paged<T>` wire shape (1-based page).
-- **Target / reference:** Hono `routes-builder.ts` (`c.json({ ...result, items })`);
-  .NET `emit/repository.ts` (`totalPages = ceil(total/pageSize)`).
-- **Emitters to change:** `src/generator/elixir/vanilla/repository-emit.ts`
-  `renderFindFn` (accept `page`/`page_size`, apply `limit`/`offset`, run a
-  `Repo.aggregate(:count)` for `total`, return the envelope) +
-  `src/generator/elixir/vanilla/find-controller.ts` `renderFindActions` (read
-  `page`/`pageSize` params, emit the envelope map). Detect via
-  `find.returnType.kind === "genericInstance" && ctor === "paged"`.
-- **To close:** restore the Phoenix leg in
-  `test/conformance/paged-wire-parity.test.ts`; the `vanilla-paged.ddd` fixture
-  is already in the `mix compile` gate.
+- **Was (REAL, size M):** the paged find returned a **bare serialized array** and
+  applied **no `limit`/`offset`** — it ignored the `paged` carrier entirely.
+- **Fixed (vanilla elixir backend only):**
+  - `src/generator/elixir/vanilla/repository-emit.ts` `renderFindFn` — a paged
+    find threads `page`/`page_size` (1-based defaults `1`/`20`), runs
+    `Repo.aggregate(query, :count, :id)` for `total`, applies
+    `limit(^page_size)`/`offset(^offset)`, and returns the
+    `%{items, page, pageSize, total, totalPages}` envelope (atom keys →
+    canonical camelCase JSON via Jason). Detected via
+    `find.returnType.kind === "genericInstance" && ctor === "paged"`.
+  - `src/generator/elixir/vanilla/find-controller.ts` reads `page`/`pageSize`
+    query params (via a `page_param/3` coercion helper) and serialises the
+    envelope `items`; `context-emit.ts` carries the matching defdelegate arity.
+  - Non-paged finds are byte-identical.
+- **Test:** `test/generator/elixir/vanilla-paged-envelope.test.ts`; restored the
+  Elixir leg of `test/conformance/paged-wire-parity.test.ts` (back to a
+  3-backend parity gate). Compiles green under `mix compile` (`vanilla-paged.ddd`
+  fixture).
 
 ## 2. Discriminated-union per-variant struct tagging — *effectively closed*
 
@@ -240,26 +244,26 @@ runs over node/.NET/Java/Python. Re-adding elixir + restoring the phoenix parity
 legs requires the three sub-gaps below (all independent codegen fixes; (c) is the
 heavy one).
 
-### 11a. Workflow-level `currentUser` threading — REAL (M)
+### 11a. Workflow-level `currentUser` threading — **CLOSED** (#1579)
 
-- Workflow `run(params)`/`run_inner(params)` carry no `current_user`, so a
-  `requires currentUser.role == …` guard renders an **unbound `current_user`**
-  (`workflow-execution-emit.ts` ~`:1110-1112`, `:1137-1138`, `:1156-1157`). Every
-  other backend already threads it via `workflowUsesCurrentUser(wf)` /
-  `callsUserGatedOp` (`loom-ir.ts`; Hono/.NET/Python/Java workflow builders) —
-  vanilla is the only one missing it. The fix must also pass `current_user`
-  through to the op calls the workflow makes (else the op guard raises at runtime).
+- Was: a workflow `run(params)`/`run_inner(params)` carried no `current_user`, so
+  a `requires currentUser.role == …` guard rendered an **unbound `current_user`**
+  → `mix compile --warnings-as-errors` failure. Fixed in
+  `workflow-execution-emit.ts`: `current_user \\ nil` is threaded into the
+  workflow fn (and passed through to the gated op calls it makes) when the
+  workflow names `currentUser` or calls a `currentUser`-gated op; the controller
+  binds it off `conn.assigns`. No-actor workflows are byte-identical.
+  Compile-gated fixture `vanilla-workflow-auth.ddd`.
 
-### 11b. Aggregate-`function` call emit + qualification — REAL (M)
+### 11b. Aggregate-`function` call emit + qualification — **CLOSED** (#1581)
 
-- A `function passed(): bool = …` used in an op `precondition passed()` renders a
-  bare `passed(record)` in the context module — but `function`s are **never
-  emitted on vanilla** (`domain-core-emit.ts` `renderAggregatePureCore` iterates
-  `agg.operations` only, and only runs when `agg.tests.length > 0`), *and* the
-  call is rendered unqualified (`render-expr.ts` `callKind: "function"`).
-- **Fix:** emit `agg.functions` on the domain-core/schema module (unconditionally
-  when referenced, not test-gated) **and** qualify the `"function"` call to that
-  module (cf. TS `this.passed()`).
+- Was: a `function passed(): bool = …` was **never emitted on vanilla**, so a
+  call to it failed to compile. Fixed: new `function-emit.ts`
+  (`renderAggregateFunctions`) emits each `function` member on the domain module
+  (struct-guarded clause head; receiver underscore-prefixed when the body doesn't
+  read it, so an argless `function noop()` doesn't trip `--warnings-as-errors`),
+  and the `callKind: "function"` call site is qualified. Compile-gated fixture
+  `vanilla-functions.ddd`.
 
 ### 11c. Nested relational entity parts — honest validator gate (L)
 
@@ -278,3 +282,54 @@ Land 11a + 11b + 11c, re-add the elixir deployable to `examples/showcase.ddd`,
 remove `LOOM_E2E_SKIP_PHOENIX` from `conformance-parity.yml`, and restore the
 phoenix legs of the `e2e.test.ts` parity cross-check (the spec-fetch, the diff
 pairs, and the 403 runtime-authorization target).
+
+## 12. `shape(document)` aggregate with custom operations / finds — honest validator gate (M)
+
+- **Status (REAL — honest gate, surfaced by the 2026-06-28 Ash-parity re-audit):**
+  a `shape(document)` aggregate on elixir emits the **CRUD surface only**; if it
+  *also* declares a named `operation` or a custom `find`, validation rejects it
+  with `loom.vanilla-document-unsupported`
+  (`src/ir/validate/checks/system-checks.ts` ~`:521`, message: "shape(document)
+  on elixir … emits the CRUD surface only in v1"). node / .NET / Python / Java
+  host the full document surface (ops + finds); elixir is the only backend gated
+  here. Safe (it fails fast at validate time, never mis-emits) but a real
+  capability gap.
+- **Not an Ash regression** — the Ash-era Phoenix backend was relational-focused,
+  so document-shape custom ops/finds almost certainly never worked there either.
+  This is a standing backend gap, not something the vanilla migration dropped;
+  it's tracked here because the Ash-parity re-audit found it and the rest of this
+  doc didn't list it.
+- **To close (feature work, outside the current gap-drain campaign):** emit the
+  named-operation / custom-find surface for `shape(document)` aggregates on
+  vanilla (the CRUD path already exists), then narrow the gate to drop the
+  `customOps` / `customFinds` guard.
+
+## 13. LiveView operation-action bang functions (`<op>_<agg>!/1` + `get_<agg>!/1`) — **CLOSED**
+
+- **Was (REAL — `mix compile --warnings-as-errors` failed; surfaced 2026-06-28
+  un-pending `vanilla-auth-op-gate.ddd`):** a LiveView `Detail` page with an
+  `Action { c.<op> }` button on a **non-destroy operation** emits a
+  `handle_event/3` that calls bang context functions
+  (`record = <Ctx>.get_<agg>!(id)` then `<Ctx>.<op>_<agg>!(record)`), but the
+  context emitted only the non-bang `get_<agg>(id)` (`{:ok|:error}`) and
+  `<op>_<agg>(record, params)` → compile failed with *"`get_customer!/1` /
+  `confirm_customer!/1` is undefined."*  Sibling of §10 (which added only
+  `destroy_<agg>!/1`).
+- **Fixed (`src/generator/elixir/vanilla/context-emit.ts`):** for any aggregate
+  carrying operations, emit `def get_<agg>!(id)` (load-or-raise; arity-1 — the
+  exact call-site arity, and the non-bang getter's `current_user \\ nil` default
+  makes it resolve for principal aggregates too) and, per operation,
+  `def <op>_<agg>!(record)` that runs the op with empty params and raises on
+  `{:error, _}`. A `currentUser`-gated op's bang takes `record, current_user \\ nil`
+  and threads it through (the arity-1 call site uses the default). Aggregates with
+  no operations are byte-identical.
+- **Test:** `test/generator/elixir/vanilla-op-action-bang.test.ts`;
+  `vanilla-auth-op-gate.ddd` promoted out of `pending/` — **verified green** under
+  `mix compile --warnings-as-errors` (hex mirror).
+- **Known follow-on (runtime, not compile):** the LiveView `handle_event` calls the
+  gated bang as `<op>_<agg>!(record)` (arity-1), so `current_user` defaults to
+  `nil` there — the action-button auth gate isn't actor-threaded from
+  `socket.assigns` yet. The HTTP/controller path (the primary API auth) already
+  threads it (#1568). Threading the actor through the LiveView action is a small
+  follow-up (`liveview-emit.ts` ~`:397` → pass `socket.assigns[:current_user]` for
+  gated ops).

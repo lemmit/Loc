@@ -931,7 +931,13 @@ function printInvariant(node: Invariant): string {
 
 function printFunctionDecl(node: FunctionDecl): string {
   const params = node.params.map(printParameter).join(", ");
-  return `function ${node.name}(${params}): ${printTypeRef(node.returnType)} = ${printExpr(node.body)}`;
+  const head = `function ${node.name}(${params}): ${printTypeRef(node.returnType)}`;
+  // Block form (domain-services.md rev. 4) prints as `head { stmts }`; the
+  // expression form keeps the `= expr` single-line shape.
+  if (node.body === undefined) {
+    return block(head, node.block.map(printStmt));
+  }
+  return `${head} = ${printExpr(node.body)}`;
 }
 
 function printOperation(node: Operation): string {

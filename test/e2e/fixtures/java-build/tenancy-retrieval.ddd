@@ -1,0 +1,46 @@
+// DEBT-24 — a PRINCIPAL-referencing `criterion` used directly in a `find` /
+// `retrieval` `where` on java.  Unlike `tenancy-reified.ddd` (a NON-principal
+// criterion + a separate `tenantScope` capability-filter graft), here the
+// criterion body itself reads `currentUser` — and java does NOT reify a
+// principal criterion into a `Criteria` Specification factory (`emit/criteria.ts`
+// returns null for a `currentUser` body).  It routes to the inline JPA `@Query`
+// path, which binds the principal through the ambient `currentUserAccessor`
+// bean via a SpEL reference:
+//   @Query("select e from Account e where e.tenantId = :#{@currentUserAccessor.user()?.tenantId()}")
+// This is the .NET/Hono sibling case (DEBT-24); java already binds it correctly
+// (no unbound reference), so this is a regression guard that the principal stays
+// one ambient source — it compiles under `gradle testClasses bootJar`.
+system JavaTenancyRetrieval {
+  user { id: guid  tenantId: string }
+
+  subdomain Core {
+    context Ledger {
+      aggregate Account ids guid {
+        tenantId: string
+        balance: int
+      }
+      repository Accounts for Account {
+        find mine(): Account[] where MyTenant
+      }
+
+      criterion MyTenant of Account = tenantId == currentUser.tenantId
+
+      retrieval MineRich(min: int) of Account {
+        where: MyTenant
+        sort:  [balance desc]
+      }
+    }
+  }
+
+  api LedgerApi from Core
+  storage primary { type: postgres }
+  resource ledgerState { for: Ledger, kind: state, use: primary }
+  deployable api1 {
+    platform: java
+    contexts: [Ledger]
+    dataSources: [ledgerState]
+    serves: LedgerApi
+    port: 8081
+    auth: required
+  }
+}

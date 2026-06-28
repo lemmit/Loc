@@ -27,3 +27,4 @@ docs/_site/
 !.claude/skills/
 .claude/settings.local.json
 .claude/worktrees/
+scratchpad/

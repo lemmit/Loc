@@ -38,6 +38,15 @@ export interface TsRenderContext {
    *  binding name to the text it renders as.  In TS a binding is an alias of
    *  the scrutinee, so this maps e.g. `o` → `outcome`. */
   matchBindings?: ReadonlyMap<string, string>;
+  /** Read-port handle expressions to PREPEND to a `domain-service` call's
+   *  arguments (domain-services.md rev. 4, Slice 1 — the `reading` tier).  A
+   *  `reading` service operation takes one read-port parameter per repository
+   *  it reads; the orchestrating caller (a `workflow`) supplies the matching
+   *  handle here, keyed by `<service>.<op>`.  Returns `[]` (or is absent) for a
+   *  PURE service call, which therefore stays byte-identical.  Only the
+   *  workflow path wires this — aggregate-op render contexts leave it undefined
+   *  (and the validator forbids them calling a non-pure service anyway). */
+  readPortArgs?: (service: string, op: string) => string[];
 }
 
 const DEFAULT: TsRenderContext = { thisName: "this" };
@@ -305,9 +314,33 @@ function renderCall(
       return `(await ${op.resourceName}$${op.verb}(${argList}))`;
     }
     case "domain-service": {
-      // `Pricing.quote(cart, customer)` — generated TS service namespace.
+      // `Pricing.quote(cart, customer)` — generated TS service namespace.  A
+      // `reading`-tier service op takes read-port handle(s) AHEAD of the user
+      // args; the orchestrating caller supplies them via `ctx.readPortArgs`
+      // (domain-services.md rev. 4).  A PURE service has no ports → no prepend,
+      // no `await` → byte-identical.  A reading op is `async` (it awaits its
+      // repo reads), so its call is `(await Service.op(handle, …))` — wrapped in
+      // parens so it composes in any expression position (a precondition, a
+      // comparison) exactly like a `repo-read`.
       const ref = e.serviceRef!;
-      return `${ref.service}.${lowerFirst(ref.op)}(${argList})`;
+      const ports = ctx.readPortArgs?.(ref.service, ref.op) ?? [];
+      const all = [...ports, ...args].join(", ");
+      const call = `${ref.service}.${lowerFirst(ref.op)}(${all})`;
+      return ports.length > 0 ? `(await ${call})` : call;
+    }
+    case "repo-read": {
+      // A read-only repository query in a `reading` domain-service body
+      // (domain-services.md rev. 4, Slice 1).  Renders against the THREADED
+      // read-port handle — `lowerFirst(repo)` (`Accounts` → `accounts`), the
+      // param the service declaration takes and the orchestrating workflow
+      // supplies — exactly the var the workflow's own repo reads use
+      // (`await accounts.byHolder(holder)`).  `await`-wrapped in parens so it
+      // composes in any expression position (`(await …) == null`).  The method
+      // is the resolved repo method (`byHolder` / `getById` for a named find,
+      // `find`/`findAll`/`run` for the criterion / retrieval forms) — no
+      // re-recognition.
+      const read = e.repoRead!;
+      return `(await ${lowerFirst(read.repo)}.${read.method}(${argList}))`;
     }
     case "action":
     // A sibling page/component action call (Proposal A Stage 1) — frontend-

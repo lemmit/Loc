@@ -65,6 +65,26 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
   app.openapi(
     createRoute({
       method: "get",
+      path: "/by_email",
+      tags: ["customers"],
+      operationId: "byEmailCustomer",
+      request: { query: ByEmailQuery },
+      responses: {
+        200: { description: "OK", content: { "application/json": { schema: CustomerResponse } } },
+        404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },
+      },
+    }),
+    async (c) => {
+      const params = c.req.valid("query");
+      const result = await repo.byEmail(params.email);
+      if (result == null) throw new AggregateNotFoundError("not_found");
+      return c.json(repo.toWire(result) as z.infer<typeof CustomerResponse>, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "get",
       path: "/{id}",
       tags: ["customers"],
       operationId: "getCustomerById",
@@ -151,26 +171,6 @@ export function customerRoutes(repo: CustomerRepository): OpenAPIHono {
     async (c) => {
       const result = await repo.all();
       return c.json(result.map((r) => repo.toWire(r)) as z.infer<typeof CustomerResponse>[], 200);
-    },
-  );
-
-  app.openapi(
-    createRoute({
-      method: "get",
-      path: "/by_email",
-      tags: ["customers"],
-      operationId: "byEmailCustomer",
-      request: { query: ByEmailQuery },
-      responses: {
-        200: { description: "OK", content: { "application/json": { schema: CustomerResponse } } },
-        404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },
-      },
-    }),
-    async (c) => {
-      const params = c.req.valid("query");
-      const result = await repo.byEmail(params.email);
-      if (result == null) throw new AggregateNotFoundError("not_found");
-      return c.json(repo.toWire(result) as z.infer<typeof CustomerResponse>, 200);
     },
   );
 

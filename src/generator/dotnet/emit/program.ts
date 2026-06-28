@@ -1,4 +1,5 @@
 import type { BoundedContextIR } from "../../../ir/types/loom-ir.js";
+import { readPortsForOperation } from "../../../ir/util/domain-service-read-ports.js";
 import { isTphBase } from "../../../ir/util/inheritance.js";
 import { AUTH_BASE_PATH } from "../../../util/api-base.js";
 import { plural, upperFirst } from "../../../util/naming.js";
@@ -129,11 +130,26 @@ using (var seedScope = app.Services.CreateScope())
     )
     .join("\n");
 
+  // Reading-tier domain services (domain-services.md rev. 4, Slice 1): a
+  // `reading` service is a DI'd `sealed class` (it injects an
+  // I<Aggregate>Repository per read-port), so it must be registered as a scoped
+  // service the orchestrating workflow handler can inject.  A `pure` service is
+  // a static class — nothing to register.  Leading newline keeps Program.cs
+  // byte-identical when no reading service is present.
+  const readingServiceRegistrations = (ctx.domainServices ?? [])
+    .filter((svc) => svc.operations.some((op) => readPortsForOperation(op).length > 0))
+    .map((svc) => `builder.Services.AddScoped<${ns}.Domain.Services.${upperFirst(svc.name)}>();`);
+  const readingServicesDi =
+    readingServiceRegistrations.length > 0
+      ? `\n// Reading-tier domain services — DI'd read facades (domain-services.md rev. 4).\n${readingServiceRegistrations.join("\n")}`
+      : "";
+
   // Per-operation audit (audit-and-logging.md): the audited command handlers
   // depend on IAuditWriter to stage audit rows onto the request-scoped unit of
   // work (the same AppDbContext the repository saves through).
   // Leading newline so an empty audit registration leaves Program.cs
-  // byte-identical (the template emits `${repoRegistrations}${auditDi}`).
+  // byte-identical (the template emits
+  // `${repoRegistrations}${readingServicesDi}${auditDi}`).
   const auditDi = options?.hasAudit
     ? `\n// Per-operation audit — stages audit_records onto the request unit of work.\nbuilder.Services.AddScoped<${ns}.Application.Common.IAuditWriter, ${ns}.Infrastructure.Persistence.AuditWriter>();`
     : "";
@@ -356,7 +372,7 @@ builder.Services.AddScoped(
 }
 ${dispatcherRegistration}
 
-${repoRegistrations}${auditDi}
+${repoRegistrations}${readingServicesDi}${auditDi}
 ${authDi}
 ${externScan}
 

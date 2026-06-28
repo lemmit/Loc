@@ -12,6 +12,11 @@
 // `context-emit.ts` so a workflow's `repo-let` lowering can call it.
 // ---------------------------------------------------------------------------
 
+import {
+  PAGED_DEFAULT_PAGE,
+  PAGED_DEFAULT_PAGE_SIZE,
+  pagedReturn,
+} from "../../../ir/stdlib/generics.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -294,10 +299,22 @@ function renderFindFn(
   );
   const fnName = snake(f.name);
   const argNames = f.params.map((p) => snake(p.name));
+  // A `paged` find (`find recent(): Order paged`) returns the cross-backend
+  // paged WIRE ENVELOPE — `%{items, page, page_size, total, total_pages}` — not a
+  // bare list.  It threads `page` / `page_size` (1-based, with the shared
+  // defaults) into the function, applies `limit`/`offset` to the Ecto query, and
+  // runs a separate `Repo.aggregate(:count)` for `total`.  The atom keys
+  // serialise (Jason) to the canonical camelCase JSON keys at the controller.
+  const paged = pagedReturn(f.returnType);
+  const pageArgs = paged
+    ? [`page \\\\ ${PAGED_DEFAULT_PAGE}`, `page_size \\\\ ${PAGED_DEFAULT_PAGE_SIZE}`]
+    : [];
   // A principal-filtered aggregate threads the request actor into the find too
   // (the `cap` references `current_user`).  `\\ nil` keeps the workflow callers
   // compiling + fail-closed.
-  const argList = [...argNames, ...(principal ? ["current_user \\\\ nil"] : [])].join(", ");
+  const argList = [...argNames, ...pageArgs, ...(principal ? ["current_user \\\\ nil"] : [])].join(
+    ", ",
+  );
   const single = isSingleReturn(f.returnType);
 
   const renderCtx: RenderCtx = {
@@ -352,10 +369,16 @@ function renderFindFn(
   whereExpr = combineWhere(whereExpr || null, cap) ?? "";
 
   const fetchCall = (single ? `Repo.one(query)` : `Repo.all(query)`) + preload;
-  const specTail = single
-    ? `{:ok, ${aggModule}.t() | nil} | {:error, term()}`
-    : `{:ok, [${aggModule}.t()]} | {:error, term()}`;
-  const specArgs = [...argNames.map(() => "term()"), ...(principal ? ["map() | nil"] : [])];
+  const specTail = paged
+    ? `{:ok, map()} | {:error, term()}`
+    : single
+      ? `{:ok, ${aggModule}.t() | nil} | {:error, term()}`
+      : `{:ok, [${aggModule}.t()]} | {:error, term()}`;
+  const specArgs = [
+    ...argNames.map(() => "term()"),
+    ...(paged ? ["pos_integer()", "pos_integer()"] : []),
+    ...(principal ? ["map() | nil"] : []),
+  ];
   const spec = `  @spec ${fnName}(${specArgs.join(", ")}) :: ${specTail}`;
   // A find with neither a `where` clause nor convention params (e.g. an
   // unfiltered `find recent(): Order`) has an empty predicate — emit a bare
@@ -363,6 +386,31 @@ function renderFindFn(
   const query = whereExpr
     ? `from(record in ${aggModule}, where: ${whereExpr})`
     : `from(record in ${aggModule})`;
+
+  if (paged) {
+    // Paged WIRE ENVELOPE: count the unpaged query for `total`, then re-run it
+    // with `limit`/`offset` for the page slice.  `total_pages` ceil-divides.
+    // Keys are atoms so the controller serialises them to the canonical
+    // `items/page/pageSize/total/totalPages` JSON (camelCase) every other
+    // backend emits.
+    return `${spec}
+  def ${fnName}(${argList}) do
+    query = ${query}
+    total = Repo.aggregate(query, :count, :id)
+    offset = (page - 1) * page_size
+    items = query |> limit(^page_size) |> offset(^offset) |> Repo.all()${preload}
+
+    {:ok,
+     %{
+       items: items,
+       page: page,
+       pageSize: page_size,
+       total: total,
+       totalPages: if(page_size > 0, do: ceil(total / page_size), else: 0)
+     }}
+  end`;
+  }
+
   return `${spec}
   def ${fnName}(${argList}) do
     query = ${query}

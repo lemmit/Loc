@@ -476,7 +476,7 @@ export function isAreaMember(item: unknown): item is AreaMember {
 }
 
 export interface AssignOrCallStmt extends langium.AstNode {
-    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | StampDecl | TestBlock | TestE2E | UiNotification | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | StampDecl | TestBlock | TestE2E | UiNotification | WorkflowCreateDecl;
     readonly $type: 'AssignOrCallStmt';
     op?: '+=' | '-=' | ':=';
     target: LValue;
@@ -1179,7 +1179,7 @@ export function isEmitField(item: unknown): item is EmitField {
 }
 
 export interface EmitStmt extends langium.AstNode {
-    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | TestBlock | TestE2E | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | TestBlock | TestE2E | WorkflowCreateDecl;
     readonly $type: 'EmitStmt';
     event: langium.Reference<EventDecl>;
     fields: Array<EmitField>;
@@ -1379,7 +1379,7 @@ export function isFindDecl(item: unknown): item is FindDecl {
 }
 
 export interface ForStmt extends langium.AstNode {
-    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | WorkflowCreateDecl;
     readonly $type: 'ForStmt';
     body: Array<Statement>;
     iterable: Expression;
@@ -1406,7 +1406,8 @@ export function isFramework(item: unknown): item is Framework {
 export interface FunctionDecl extends langium.AstNode {
     readonly $container: Aggregate | EntityPart | ValueObject;
     readonly $type: 'FunctionDecl';
-    body: Expression;
+    block: Array<Statement>;
+    body?: Expression;
     name: string;
     params: Array<Parameter>;
     returnType: TypeRef;
@@ -1414,6 +1415,7 @@ export interface FunctionDecl extends langium.AstNode {
 
 export const FunctionDecl = {
     $type: 'FunctionDecl',
+    block: 'block',
     body: 'body',
     name: 'name',
     params: 'params',
@@ -1484,7 +1486,7 @@ export function isIdType(item: unknown): item is IdType {
 }
 
 export interface IfLetStmt extends langium.AstNode {
-    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | WorkflowCreateDecl;
     readonly $type: 'IfLetStmt';
     elseBody: Array<Statement>;
     source: Expression;
@@ -1693,7 +1695,7 @@ export function isLayoutSlotName(item: unknown): item is LayoutSlotName {
 }
 
 export interface LetStmt extends langium.AstNode {
-    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | TestBlock | TestE2E | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | TestBlock | TestE2E | WorkflowCreateDecl;
     readonly $type: 'LetStmt';
     expr: Expression;
     name: string;
@@ -2504,7 +2506,7 @@ export function isPostfixSuffix(item: unknown): item is PostfixSuffix {
 }
 
 export interface PreconditionStmt extends langium.AstNode {
-    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | TestBlock | TestE2E | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | TestBlock | TestE2E | WorkflowCreateDecl;
     readonly $type: 'PreconditionStmt';
     expr: Expression;
 }
@@ -2666,7 +2668,7 @@ export function isRequiresProp(item: unknown): item is RequiresProp {
 }
 
 export interface RequiresStmt extends langium.AstNode {
-    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | WorkflowCreateDecl;
     readonly $type: 'RequiresStmt';
     expr: Expression;
 }
@@ -2766,7 +2768,7 @@ export function isRetrievalLiteral(item: unknown): item is RetrievalLiteral {
 }
 
 export interface ReturnStmt extends langium.AstNode {
-    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | OnDecl | Operation | WorkflowCreateDecl;
     readonly $type: 'ReturnStmt';
     value: Expression;
 }
@@ -4894,8 +4896,14 @@ export class DddAstReflection extends langium.AbstractAstReflection {
         FunctionDecl: {
             name: FunctionDecl.$type,
             properties: {
+                block: {
+                    name: FunctionDecl.block,
+                    defaultValue: [],
+                    optional: true
+                },
                 body: {
-                    name: FunctionDecl.body
+                    name: FunctionDecl.body,
+                    optional: true
                 },
                 name: {
                     name: FunctionDecl.name

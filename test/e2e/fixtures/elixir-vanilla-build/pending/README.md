@@ -10,6 +10,6 @@ Move a fixture back up to the parent directory once its gap is closed (and it
 mix-compiles) — no workflow or test edit is needed; the dynamic enumeration
 picks it up.
 
-| Fixture | Gap (tracked in `docs/plans/vanilla-phoenix-gaps.md`) |
-|---|---|
-| `vanilla-auth-op-gate.ddd` | An operation `requires`/`when` guard referencing `currentUser` renders `current_user.role` in the context function, but `current_user` is not threaded into that function (the auditable create/update path threads `current_user \\ nil`; named operations don't yet). |
+_None currently pending_ — `vanilla-auth-op-gate.ddd` was promoted back to the
+gate once §13 (LiveView operation-action bang functions) shipped. Add a row here
+when a new fixture exercises a gap that doesn't yet `mix compile`.

@@ -980,7 +980,11 @@ describe(".NET generator", () => {
     );
     const files = generateDotnet(doc.parseResult.value as Model);
     const handler = files.get("Application/Workflows/TopUpHandler.cs")!;
-    expect(handler).toMatch(/private readonly T\.Infrastructure\.Persistence\.AppDbContext _db;/);
+    // `global::`-anchored so a deployable named `api` (root ns `Api`) doesn't
+    // mis-resolve the leading segment against the enclosing namespace.
+    expect(handler).toMatch(
+      /private readonly global::T\.Infrastructure\.Persistence\.AppDbContext _db;/,
+    );
     expect(handler).toMatch(
       /await using var tx = await _db\.Database\.BeginTransactionAsync\(cancellationToken\);/,
     );
@@ -2090,7 +2094,9 @@ describe(".NET generator", () => {
       expect(tp).toMatch(/public sealed class TrainerParty/);
       expect(tp).toMatch(/public TrainerId TrainerId \{ get; set; \}/);
       expect(tp).toMatch(/public PokemonId PokemonId \{ get; set; \}/);
-      expect(tp).toMatch(/public int Ordinal \{ get; set; \}/);
+      // `Id<T>[]` is a set (membership only, no order): the composite
+      // (owner, target) PK is the whole row — no Ordinal payload property.
+      expect(tp).not.toMatch(/Ordinal/);
       expect(files.has("Infrastructure/Persistence/JoinTables/TrainerCaught.cs")).toBe(true);
       // EF configuration: composite PK + index on target FK + HasConversion on both ids.
       const cfg = files.get(
@@ -2134,27 +2140,26 @@ describe(".NET generator", () => {
       expect(trainer).toMatch(/public List<PokemonId> Caught \{ get; internal set; \}/);
     });
 
-    it("repository GetByIdAsync hydrates ref collections in ordinal order", async () => {
+    it("repository GetByIdAsync hydrates ref collections ordered by the target FK id", async () => {
       const model = await buildModel("examples/roster.ddd");
       const files = generateDotnet(model);
       const repo = files.get("Infrastructure/Repositories/TrainerRepository.cs")!;
       expect(repo).toMatch(
-        /found\.Party = await _db\.TrainerParties\s+\.Where\(j => j\.TrainerId == id\)\s+\.OrderBy\(j => j\.Ordinal\)\s+\.Select\(j => j\.PokemonId\)\s+\.ToListAsync\(cancellationToken\);/,
+        /found\.Party = await _db\.TrainerParties\s+\.Where\(j => j\.TrainerId == id\)\s+\.OrderBy\(j => j\.PokemonId\)\s+\.Select\(j => j\.PokemonId\)\s+\.ToListAsync\(cancellationToken\);/,
       );
       expect(repo).toMatch(/found\.Caught = await _db\.TrainerCaughts/);
     });
 
-    it("repository SaveAsync diff-syncs join rows with ordinal updates", async () => {
+    it("repository SaveAsync diff-syncs join rows by membership (no ordinal)", async () => {
       const model = await buildModel("examples/roster.ddd");
       const files = generateDotnet(model);
       const repo = files.get("Infrastructure/Repositories/TrainerRepository.cs")!;
       // Delete removed pairs.
       expect(repo).toMatch(/_db\.TrainerParties\.Remove\(__stale\)/);
-      // Upsert with ordinal: existing row → update Ordinal; new pair → Add row.
-      expect(repo).toMatch(/if \(__row != null\) \{ __row\.Ordinal = __i; \}/);
-      expect(repo).toMatch(
-        /_db\.TrainerParties\.Add\(new TrainerParty\(aggregate\.Id, __tid, __i\)\)/,
-      );
+      // Set semantics: add the pair only when absent; no Ordinal anywhere.
+      expect(repo).not.toMatch(/Ordinal/);
+      expect(repo).toMatch(/if \(!__existingParty\.Any\(x => x\.PokemonId == __tid\)\)/);
+      expect(repo).toMatch(/_db\.TrainerParties\.Add\(new TrainerParty\(aggregate\.Id, __tid\)\)/);
     });
 
     it("lowers `this.<refColl>.contains(param)` to a join-table subquery", async () => {

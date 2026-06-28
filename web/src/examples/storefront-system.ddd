@@ -231,6 +231,18 @@ system StorefrontSystem {
     expect(read.sku).toBe("WIDGET-1")
   }
 
+  // Static named find (`GET /customers/by_email`) must NOT be shadowed by
+  // the `GET /customers/{id}` param route (whose id is uuid-validated): a
+  // request to /by_email is reachable and returns the matching customer,
+  // not a 422 from the /{id} uuid check.  Regression guard for the
+  // route-registration-order bug.
+  test e2e "find a customer by its static by_email route" against api {
+    let cust = api.customers.create({ name: "Email Lookup", email: "lookup@acme.test" })
+    let found = api.customers.byEmail({ email: "lookup@acme.test" })
+    expect(found.id).toBe(cust.id)
+    expect(found.name).toBe("Email Lookup")
+  }
+
   test e2e "top up a wallet then check out an order" against api verifies TC-002 {
     let cust = api.customers.create({ name: "Buyer", email: "buyer@acme.test" })
     let prod = api.products.create({ sku: "WIDGET-2", price: { amount: 5.00, currency: "USD" } })

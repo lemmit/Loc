@@ -285,6 +285,48 @@ describe.skipIf(!ENABLED)(
       }
     }, 600_000);
 
+    // DEBT-24 — a principal-referencing `criterion` used in a reified
+    // `retrieval` query-face.  The retrieval's `Specification<T>` ctor is a
+    // static position with no `currentUser` local, so `currentUser.<field>`
+    // must resolve through the ambient accessor (`RequestContext.Current!.
+    // CurrentUser!`) the capability filters already use — without it the
+    // generated `MineRichSpec` names an unbound `currentUser` and fails to
+    // compile (CS0103).  This cell is the regression guard for that bug.
+    it("system principal `criterion` in a `retrieval` (dotnet) — spec binds the ambient principal under /warnaserror", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-tenancy-retrieval-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/dotnet-build/tenancy-retrieval.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        // The spec binds the ambient principal (not an unbound `currentUser`).
+        const spec = fs.readFileSync(
+          path.join(proj, "Domain", "Accounts", "MineRichSpec.cs"),
+          "utf8",
+        );
+        expect(spec).toContain("RequestContext.Current!.CurrentUser!.TenantId");
+        expect(spec).not.toMatch(/Where\(x => x\.TenantId == currentUser\./);
+        execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });
+        execSync(`dotnet build --no-restore --nologo /warnaserror`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        const binDir = path.join(proj, "bin", "Debug", "net10.0");
+        const builtDlls = fs.existsSync(binDir)
+          ? fs.readdirSync(binDir).filter((f) => f.endsWith(".dll"))
+          : [];
+        expect(builtDlls.length, "expected at least one built .dll").toBeGreaterThan(0);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 600_000);
+
     // The "tech showcase" system (`examples/showcase.ddd`) exercises the whole
     // language surface across multiple contexts, but it's multi-context — the
     // single-context `generate dotnet` cases above can't reach it, and no other

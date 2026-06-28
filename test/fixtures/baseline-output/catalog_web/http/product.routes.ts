@@ -67,6 +67,26 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
   app.openapi(
     createRoute({
       method: "get",
+      path: "/by_sku",
+      tags: ["products"],
+      operationId: "bySkuProduct",
+      request: { query: BySkuQuery },
+      responses: {
+        200: { description: "OK", content: { "application/json": { schema: ProductResponse } } },
+        404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },
+      },
+    }),
+    async (c) => {
+      const params = c.req.valid("query");
+      const result = await repo.bySku(params.sku);
+      if (result == null) throw new AggregateNotFoundError("not_found");
+      return c.json(repo.toWire(result) as z.infer<typeof ProductResponse>, 200);
+    },
+  );
+
+  app.openapi(
+    createRoute({
+      method: "get",
       path: "/{id}",
       tags: ["products"],
       operationId: "getProductById",
@@ -153,26 +173,6 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
     async (c) => {
       const result = await repo.all();
       return c.json(result.map((r) => repo.toWire(r)) as z.infer<typeof ProductResponse>[], 200);
-    },
-  );
-
-  app.openapi(
-    createRoute({
-      method: "get",
-      path: "/by_sku",
-      tags: ["products"],
-      operationId: "bySkuProduct",
-      request: { query: BySkuQuery },
-      responses: {
-        200: { description: "OK", content: { "application/json": { schema: ProductResponse } } },
-        404: { description: "Not Found", content: { "application/problem+json": { schema: ProblemDetails } } },
-      },
-    }),
-    async (c) => {
-      const params = c.req.valid("query");
-      const result = await repo.bySku(params.sku);
-      if (result == null) throw new AggregateNotFoundError("not_found");
-      return c.json(repo.toWire(result) as z.infer<typeof ProductResponse>, 200);
     },
   );
 

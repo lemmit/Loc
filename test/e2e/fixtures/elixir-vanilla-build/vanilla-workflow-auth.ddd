@@ -1,0 +1,61 @@
+// §11a (vanilla-phoenix-gaps.md) — workflow-level `currentUser` threading.
+//
+// A workflow whose guard/body references `currentUser`, plus one that calls a
+// `currentUser`-gated op without naming `currentUser` itself.  Both must thread
+// `current_user \\ nil` into the generated workflow fn (and pass it through the
+// op call) so the rendered bare token `current_user` binds — otherwise
+// `mix compile --warnings-as-errors` fails with "undefined variable
+// current_user".  Gated by elixir-vanilla-build.yml.
+system Sales {
+  user {
+    id: string
+    role: string
+  }
+
+  subdomain Sales {
+    context Sales {
+      aggregate Order {
+        total: int
+        status: string
+
+        // currentUser-gated op — its context fn takes a trailing
+        // `current_user \\ nil` arg (op-level §9 / #1568).
+        operation confirm() {
+          requires currentUser.role == "manager"
+          status := "confirmed"
+        }
+      }
+      repository Orders for Order { }
+
+      // Guard references currentUser → run/run_inner thread current_user.
+      workflow approveOrder transactional {
+        create(orderId: Order id) {
+          requires currentUser.role == "manager"
+          let o = Orders.getById(orderId)
+          o.confirm()
+        }
+      }
+
+      // Body never names currentUser but calls the gated `confirm` op → must
+      // still thread current_user so the op call resolves at runtime.
+      workflow autoConfirm transactional {
+        create(orderId: Order id) {
+          let o = Orders.getById(orderId)
+          o.confirm()
+        }
+      }
+    }
+  }
+
+  api SalesApi from Sales
+  storage primary { type: postgres }
+  resource salesState { for: Sales, kind: state, use: primary }
+  deployable phoenixApp {
+    platform: elixir { foundation: vanilla }
+    contexts: [Sales]
+    dataSources: [salesState]
+    serves: SalesApi
+    port: 4000
+    auth: required
+  }
+}

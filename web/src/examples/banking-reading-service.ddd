@@ -1,0 +1,72 @@
+// Domain-services rev.4 Slice 1 — the `reading` tier on TS / Hono (trailblazer).
+//
+// `Registration.isEmailAvailable` is a READING-tier domainService: it runs a
+// read-only repository query (`Accounts.byHolder`), so its generated declaration
+// takes a read-port handle (`accounts: AccountRepository`) that the orchestrating
+// `RegisterAccount` workflow constructs and supplies.  `FeeQuote` is a PURE
+// service (no handle — byte-identical to the pre-rev.4 shell).
+//
+// The api e2e block exercises the `byHolder` find the reading service calls,
+// on PGlite, proving the read mechanics return the right answer at runtime.
+// (The workflow→service handle wiring is proven by the per-PR TS compile gate;
+// the api e2e DSL has no workflow accessor.)
+system Banking {
+
+  subdomain Accounts {
+    context Accounts {
+
+      valueobject Money {
+        amount: decimal
+        currency: string
+        invariant amount >= 0
+      }
+
+      aggregate Account ids guid with crudish {
+        holder: string
+        balance: Money
+      }
+
+      repository Accounts for Account {
+        find byHolder(holder: string): Account? where this.holder == holder
+      }
+
+      // ── reading tier ── read-only repo query, orchestrated by a workflow.
+      domainService Registration {
+        operation isEmailAvailable(holder: string): bool {
+          return Accounts.byHolder(holder) == null
+        }
+      }
+
+      // ── pure tier ── no infrastructure; stays byte-identical.
+      domainService FeeQuote {
+        operation forAmount(amount: Money): Money {
+          return Money { amount: amount.amount, currency: amount.currency }
+        }
+      }
+
+      workflow RegisterAccount transactional {
+        create(holder: string, balance: Money) {
+          precondition Registration.isEmailAvailable(holder)
+          let acct = Account.create({ holder: holder, balance: balance })
+        }
+      }
+    }
+  }
+
+  storage primary { type: postgres }
+  resource accountsState { for: Accounts, kind: state, use: primary }
+  deployable api {
+    platform: node
+    contexts: [Accounts]
+    dataSources: [accountsState]
+    port: 3000
+  }
+
+  // api e2e (Hono → vitest + fetch).  Seeds an account, then reads it back via
+  // the `byHolder` find the reading service uses — runtime proof on PGlite.
+  test e2e "byHolder returns the account the reading service would find" against api {
+    let a = api.accounts.create({ holder: "alice", balance: { amount: 100, currency: "USD" } })
+    let found = api.accounts.byHolder({ holder: "alice" })
+    expect(found.holder).toBe("alice")
+  }
+}

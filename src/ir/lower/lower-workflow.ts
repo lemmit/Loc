@@ -6,7 +6,6 @@ import type {
   LoadPath,
   OnDecl,
   Repository,
-  SortItem,
   Statement,
   Workflow,
   WorkflowCreateDecl,
@@ -15,7 +14,6 @@ import {
   isAggregate,
   isApply,
   isAssignOrCallStmt,
-  isCallSuffix,
   isEmitStmt,
   isForStmt,
   isHandleDecl,
@@ -30,13 +28,15 @@ import {
   isProperty,
   isRepository,
   isRequiresStmt,
-  isRetrievalLiteral,
   isWorkflowCreateDecl,
 } from "../../language/generated/ast.js";
 import { findVerb } from "../resource-verbs.js";
 import type {
+  AggregateIR,
   ApplyIR,
   CreateIR,
+  DomainServiceIR,
+  DomainServiceOperationIR,
   ExprIR,
   FieldIR,
   HandleIR,
@@ -50,12 +50,31 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../types/loom-ir.js";
+import { aggregateOpResolver, type SaveResolver } from "../util/domain-service-tier.js";
 import { resolveBypass } from "./lower-capabilities.js";
 import { inferExprType, lowerExpr, lowerExprInContext, pathType } from "./lower-expr.js";
 import { computeSaves, lowerApply, lowerField, plural } from "./lower-members.js";
-import { cstText, type Env, inWorkflow, lowerType, withLocal } from "./lower-types.js";
+import {
+  cstText,
+  type Env,
+  findDomainServiceByName,
+  inWorkflow,
+  lowerType,
+  withLocal,
+} from "./lower-types.js";
+import {
+  matchFindAllCall,
+  matchFindCall,
+  matchRepoCall,
+  matchRetrievalRunCall,
+} from "./repo-read.js";
 
-export function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): WorkflowIR {
+export function lowerWorkflow(
+  wf: Workflow,
+  env: Env,
+  ctx: BoundedContext,
+  lowered?: { aggregates: AggregateIR[]; domainServices: DomainServiceIR[] },
+): WorkflowIR {
   const aggsByName = new Map<string, Aggregate>();
   const reposByName = new Map<string, Repository>();
   const repoForAgg = new Map<string, string>(); // aggName -> repoName
@@ -67,6 +86,18 @@ export function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): Work
       if (target?.name) repoForAgg.set(target.name, m.name);
     }
   }
+  // Save-resolver (domain-services.md rev. 4, the `mutating` tier): lets
+  // `computeSaves` see WHICH aggregate args a called `mutating` service writes,
+  // so those args persist at workflow exit.  Built from the context's already-
+  // lowered aggregates + domain services (second-pass workflow lowering); absent
+  // for legacy callers (single-context generate paths that don't pass `lowered`)
+  // — then a domain-service call simply contributes no extra saves.
+  const saveResolver: SaveResolver | undefined = lowered
+    ? {
+        resolveAggOp: aggregateOpResolver({ aggregates: lowered.aggregates }),
+        resolveServiceOp: serviceOpResolver(lowered.domainServices),
+      }
+    : undefined;
   // A workflow is a state-bearing entity (workflow-and-applier.md A2-S5f): bind
   // `this` to it so every member body (create / handle / on / apply) resolves
   // bare names / `this.field` against the workflow's `Property` state fields.
@@ -82,11 +113,13 @@ export function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): Work
   const appliers: ApplyIR[] = wf.members.filter(isApply).map((a) => lowerApply(a, paramEnv));
   for (const m of wf.members) {
     if (isWorkflowCreateDecl(m)) {
-      creates.push(lowerWorkflowCreate(m, paramEnv, aggsByName, reposByName, repoForAgg));
+      creates.push(
+        lowerWorkflowCreate(m, paramEnv, aggsByName, reposByName, repoForAgg, saveResolver),
+      );
     } else if (isOnDecl(m)) {
-      subscriptions.push(lowerOn(m, paramEnv, aggsByName, reposByName, repoForAgg));
+      subscriptions.push(lowerOn(m, paramEnv, aggsByName, reposByName, repoForAgg, saveResolver));
     } else if (isHandleDecl(m)) {
-      handlers.push(lowerHandle(m, paramEnv, aggsByName, reposByName, repoForAgg));
+      handlers.push(lowerHandle(m, paramEnv, aggsByName, reposByName, repoForAgg, saveResolver));
     }
     // Property / Apply handled above.
   }
@@ -119,6 +152,15 @@ export function lowerWorkflow(wf: Workflow, env: Env, ctx: BoundedContext): Work
   };
 }
 
+/** Build a `(service, op) → DomainServiceOperationIR` resolver over a context's
+ *  lowered domain services. */
+function serviceOpResolver(
+  services: readonly DomainServiceIR[],
+): (service: string, op: string) => DomainServiceOperationIR | undefined {
+  const byName = new Map(services.map((s) => [s.name, s]));
+  return (service, op) => byName.get(service)?.operations.find((o) => o.name === op);
+}
+
 // Lower a `create [name](params) [by <expr>] { … }` workflow starter
 // (workflow-and-applier.md A2-S5f).  Mirrors `lowerHandle`: params bind as
 // locals on the workflow `this`-env, the body lowers via
@@ -130,6 +172,7 @@ function lowerWorkflowCreate(
   aggsByName: Map<string, Aggregate>,
   reposByName: Map<string, Repository>,
   repoForAgg: Map<string, string>,
+  saveResolver?: SaveResolver,
 ): CreateIR {
   let inner = baseEnv;
   const params: ParamIR[] = [];
@@ -160,7 +203,7 @@ function lowerWorkflowCreate(
     params,
     ...(correlation ? { correlation } : {}),
     statements,
-    savesAtExit: computeSaves(statements, repoForAgg),
+    savesAtExit: computeSaves(statements, repoForAgg, undefined, saveResolver),
     ...(eventBinding ? { eventBinding } : {}),
     ...(eventRef ? { eventRef } : {}),
   };
@@ -176,6 +219,7 @@ function lowerHandle(
   aggsByName: Map<string, Aggregate>,
   reposByName: Map<string, Repository>,
   repoForAgg: Map<string, string>,
+  saveResolver?: SaveResolver,
 ): HandleIR {
   let inner = baseEnv;
   const params: ParamIR[] = [];
@@ -190,7 +234,12 @@ function lowerHandle(
     statements.push(lowered.stmt);
     inner = lowered.envAfter;
   }
-  return { name: h.name, params, statements, savesAtExit: computeSaves(statements, repoForAgg) };
+  return {
+    name: h.name,
+    params,
+    statements,
+    savesAtExit: computeSaves(statements, repoForAgg, undefined, saveResolver),
+  };
 }
 
 // Lower an `on(e: Event) { … }` reactor member to its IR (workflow-and-applier.md
@@ -206,6 +255,7 @@ function lowerOn(
   aggsByName: Map<string, Aggregate>,
   reposByName: Map<string, Repository>,
   repoForAgg: Map<string, string>,
+  saveResolver?: SaveResolver,
 ): OnIR {
   const eventName = o.event.ref?.name ?? o.event.$refText;
   const inner = withLocal(baseEnv, o.param, "param", { kind: "entity", name: eventName });
@@ -222,7 +272,7 @@ function lowerOn(
     param: o.param,
     ...(correlation ? { correlation } : {}),
     statements,
-    savesAtExit: computeSaves(statements, repoForAgg),
+    savesAtExit: computeSaves(statements, repoForAgg, undefined, saveResolver),
   };
 }
 
@@ -553,6 +603,37 @@ function lowerWorkflowStatement(
           envAfter: env,
         };
       }
+      // `Transfer.run(args)` — a bare orchestrator call into a `domainService`
+      // operation (domain-services.md rev. 4, the `mutating` tier).  Checked
+      // before the generic op-call path so a service name (not an in-scope
+      // local) isn't mistaken for an aggregate let-binding receiver.  Lowers to
+      // a `domain-service-call` carrying a render-ready `callKind:
+      // "domain-service"` Call (rides each backend's `render-expr`); the
+      // aggregate args a `mutating` service writes become exit-save targets,
+      // derived in `computeSaves`.  Mirrors the operation-body arm in
+      // `lower-stmt.ts`.
+      if (!env.locals.has(lv.head)) {
+        const svc = findDomainServiceByName(env, lv.head);
+        if (svc) {
+          const callArgs = (lv.args ?? []).map((a) => lowerExpr(a, env));
+          const op = lv.tail[0]!;
+          return {
+            stmt: {
+              kind: "domain-service-call",
+              service: svc.name,
+              op,
+              call: {
+                kind: "call",
+                callKind: "domain-service",
+                name: op,
+                args: callArgs,
+                serviceRef: { service: svc.name, op },
+              },
+            },
+            envAfter: env,
+          };
+        }
+      }
       // `name.op(args)` — op-call on a let binding.
       const aggName = aggNameForLocal(env, lv.head);
       const args = (lv.args ?? []).map((a) => lowerExpr(a, env));
@@ -696,53 +777,6 @@ function matchFactoryCall(
   };
 }
 
-interface RepoMatch {
-  repo: Repository;
-  method: string;
-  args: Expression[];
-}
-
-function matchRepoCall(
-  expr: Expression | undefined,
-  reposByName: Map<string, Repository>,
-): RepoMatch | undefined {
-  if (!expr || !isPostfixChain(expr)) return undefined;
-  // Repo-call shape: `<NameRef>.<method>(args)` — exactly one
-  // MemberSuffix with a call payload.
-  if (expr.suffixes.length !== 1) return undefined;
-  const s = expr.suffixes[0]!;
-  if (!isMemberSuffix(s) || !s.call) return undefined;
-  const recv = expr.head;
-  if (!isNameRef(recv)) return undefined;
-  const repo = reposByName.get(recv.name);
-  if (!repo) return undefined;
-  // Peel CallArg wrappers — repo finds are positional.
-  return {
-    repo,
-    method: s.member,
-    args: (s.args ?? []).map((a) => a.value),
-  };
-}
-
-interface RetrievalRunMatch {
-  repo: Repository;
-  retrievalName: string;
-  retrievalArgs: Expression[];
-  /** Set when the run target was an anonymous retrieval literal
-   *  (`retrieval { where: <Criterion> sort: … loads: … }`) rather than a named
-   *  retrieval reference.  Lowers to a `synthCriterion` repo-run + shaping,
-   *  riding the same enrich path as `findAll`. */
-  anon?: {
-    criterionName: string;
-    criterionArgs: Expression[];
-    sort: SortItem[];
-    loads: LoadPath[];
-  };
-  /** The `page:` object-literal argument's fields, if supplied. */
-  pageOffset?: Expression;
-  pageLimit?: Expression;
-}
-
 /** Lower a structural `LoadPath` AST node (`lines[].product`) to its
  *  candidate-rooted segment list (a leading `this` is already stripped by the
  *  grammar) — the workflow-side twin of `lowerLoadPath` in lower.ts. */
@@ -759,180 +793,4 @@ function shapeSignature(sort: SortTermIR[], loads: LoadSegmentIR[][]): string {
   let h = 5381;
   for (let i = 0; i < canon.length; i++) h = (h * 33) ^ canon.charCodeAt(i);
   return (h >>> 0).toString(36);
-}
-
-/** A criterion reference expression — a bare `Name` (parameterless) or
- *  `Name(args)`.  Shared by the `findAll` arg and the anonymous-retrieval
- *  `where:`. */
-function criterionRefFromExpr(ref: Expression): { name: string; args: Expression[] } | undefined {
-  if (isNameRef(ref)) return { name: ref.name, args: [] };
-  if (isPostfixChain(ref) && isNameRef(ref.head) && ref.suffixes.length === 1) {
-    const rs = ref.suffixes[0]!;
-    if (!isCallSuffix(rs)) return undefined;
-    return { name: ref.head.name, args: (rs.args ?? []).map((a) => a.value) };
-  }
-  return undefined;
-}
-
-/** Recognise `<Repo>.run(<RetrievalRef>(args), page?)`.  The first
- *  positional arg is itself a call (the retrieval reference); an optional
- *  named `page:` arg carries an object literal `{ offset?, limit? }`. */
-function matchRetrievalRunCall(
-  expr: Expression | undefined,
-  reposByName: Map<string, Repository>,
-): RetrievalRunMatch | undefined {
-  if (!expr || !isPostfixChain(expr)) return undefined;
-  if (expr.suffixes.length !== 1) return undefined;
-  const s = expr.suffixes[0]!;
-  if (!isMemberSuffix(s) || !s.call || s.member !== "run") return undefined;
-  const recv = expr.head;
-  if (!isNameRef(recv)) return undefined;
-  const repo = reposByName.get(recv.name);
-  if (!repo) return undefined;
-  const callArgs = s.args ?? [];
-  // First positional arg = the retrieval reference `Name(args)`.
-  const refArg = callArgs.find((a) => !a.name);
-  if (!refArg) return undefined;
-  const ref = refArg.value;
-  // `page:` is shared by the named and anonymous forms.
-  const readPage = (): { pageOffset?: Expression; pageLimit?: Expression } => {
-    const pageArg = callArgs.find((a) => a.name === "page");
-    const out: { pageOffset?: Expression; pageLimit?: Expression } = {};
-    if (pageArg && isObjectLit(pageArg.value)) {
-      for (const f of pageArg.value.fields) {
-        if (f.name === "offset") out.pageOffset = f.value;
-        else if (f.name === "limit") out.pageLimit = f.value;
-      }
-    }
-    return out;
-  };
-  // Anonymous retrieval literal — `run(retrieval { where: <Criterion> sort: …
-  // loads: … })`.  The `where` must be a criterion reference (this release);
-  // a non-criterion `where` is rejected by the language validator, so a miss
-  // here just declines the match.
-  if (isRetrievalLiteral(ref)) {
-    const critRef = criterionRefFromExpr(ref.where);
-    if (!critRef) return undefined;
-    return {
-      repo,
-      retrievalName: "",
-      retrievalArgs: [],
-      anon: {
-        criterionName: critRef.name,
-        criterionArgs: critRef.args,
-        sort: ref.sort,
-        loads: ref.loads,
-      },
-      ...readPage(),
-    };
-  }
-  // Bare `Name` (parameterless retrieval).
-  if (isNameRef(ref)) {
-    return { repo, retrievalName: ref.name, retrievalArgs: [] };
-  }
-  // `Name(args)` — a NameRef head + a single CallSuffix.
-  if (!isPostfixChain(ref) || !isNameRef(ref.head) || ref.suffixes.length !== 1) {
-    return undefined;
-  }
-  const rs = ref.suffixes[0]!;
-  if (!isCallSuffix(rs)) return undefined;
-  const retrievalName = ref.head.name;
-  const retrievalArgs: Expression[] = (rs.args ?? []).map((a) => a.value);
-  // Optional `page:` named arg — an object literal with offset / limit.
-  const pageArg = callArgs.find((a) => a.name === "page");
-  let pageOffset: Expression | undefined;
-  let pageLimit: Expression | undefined;
-  if (pageArg && isObjectLit(pageArg.value)) {
-    for (const f of pageArg.value.fields) {
-      if (f.name === "offset") pageOffset = f.value;
-      else if (f.name === "limit") pageLimit = f.value;
-    }
-  }
-  return { repo, retrievalName, retrievalArgs, pageOffset, pageLimit };
-}
-
-interface FindMatch {
-  repo: Repository;
-  criterionName: string;
-  criterionArgs: Expression[];
-}
-
-/** Recognise `<Repo>.find(<CriterionRef>)` — the single-result sibling of
- *  `findAll` (criterion.md, use site 3), the source of an `if let`.  No
- *  `page:` (a single result isn't paginated); the only arg is a criterion
- *  reference (bare `Name` or `Name(args)`).  Declines (→ `undefined`) on any
- *  other shape, so the `if let` lowering records an empty criterion name and
- *  the validator surfaces `loom.iflet-bad-source`. */
-function matchFindCall(
-  expr: Expression | undefined,
-  reposByName: Map<string, Repository>,
-): FindMatch | undefined {
-  if (!expr || !isPostfixChain(expr) || expr.suffixes.length !== 1) return undefined;
-  const s = expr.suffixes[0]!;
-  if (!isMemberSuffix(s) || !s.call || s.member !== "find") return undefined;
-  const recv = expr.head;
-  if (!isNameRef(recv)) return undefined;
-  const repo = reposByName.get(recv.name);
-  if (!repo) return undefined;
-  const refArg = (s.args ?? []).find((a) => !a.name);
-  if (!refArg) return undefined;
-  const critRef = criterionRefFromExpr(refArg.value);
-  if (!critRef) return undefined;
-  return { repo, criterionName: critRef.name, criterionArgs: critRef.args };
-}
-
-interface FindAllMatch {
-  repo: Repository;
-  /** The referenced criterion name. */
-  criterionName: string;
-  /** Lowered-later argument expressions of `Criterion(args)`. */
-  criterionArgs: Expression[];
-  pageOffset?: Expression;
-  pageLimit?: Expression;
-}
-
-/** Recognise `<Repo>.findAll(<CriterionRef>, page?)` (criterion.md, use
- *  site 3).  The first positional arg is a criterion reference — a bare
- *  `Name` (parameterless) or `Name(args)` — and an optional named `page:`
- *  arg carries `{ offset?, limit? }`.  Structurally the mirror of
- *  `matchRetrievalRunCall`; only the method name (`findAll`) and the ref's
- *  meaning (criterion, not retrieval) differ. */
-function matchFindAllCall(
-  expr: Expression | undefined,
-  reposByName: Map<string, Repository>,
-): FindAllMatch | undefined {
-  if (!expr || !isPostfixChain(expr)) return undefined;
-  if (expr.suffixes.length !== 1) return undefined;
-  const s = expr.suffixes[0]!;
-  if (!isMemberSuffix(s) || !s.call || s.member !== "findAll") return undefined;
-  const recv = expr.head;
-  if (!isNameRef(recv)) return undefined;
-  const repo = reposByName.get(recv.name);
-  if (!repo) return undefined;
-  const callArgs = s.args ?? [];
-  const refArg = callArgs.find((a) => !a.name);
-  if (!refArg) return undefined;
-  const ref = refArg.value;
-  let criterionName: string;
-  let criterionArgs: Expression[] = [];
-  if (isNameRef(ref)) {
-    criterionName = ref.name;
-  } else if (isPostfixChain(ref) && isNameRef(ref.head) && ref.suffixes.length === 1) {
-    const rs = ref.suffixes[0]!;
-    if (!isCallSuffix(rs)) return undefined;
-    criterionName = ref.head.name;
-    criterionArgs = (rs.args ?? []).map((a) => a.value);
-  } else {
-    return undefined;
-  }
-  const pageArg = callArgs.find((a) => a.name === "page");
-  let pageOffset: Expression | undefined;
-  let pageLimit: Expression | undefined;
-  if (pageArg && isObjectLit(pageArg.value)) {
-    for (const f of pageArg.value.fields) {
-      if (f.name === "offset") pageOffset = f.value;
-      else if (f.name === "limit") pageLimit = f.value;
-    }
-  }
-  return { repo, criterionName, criterionArgs, pageOffset, pageLimit };
 }

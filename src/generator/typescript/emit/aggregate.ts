@@ -345,9 +345,15 @@ function renderEntity(
     getters.push(`  [Symbol.for("nodejs.util.inspect.custom")](): string { return this.inspect; }`);
   }
 
-  const fns = e.functions.map((fn) => {
+  const fns = e.functions.flatMap((fn) => {
     const params = fn.params.map((p) => `${p.name}: ${renderTsType(p.type)}`).join(", ");
-    return `  private ${lowerFirst(fn.name)}(${params}): ${renderTsType(fn.returnType)} { return ${renderTsExpr(fn.body)}; }`;
+    const head = `  private ${lowerFirst(fn.name)}(${params}): ${renderTsType(fn.returnType)}`;
+    // Expression form stays the single-line `{ return expr; }` (byte-identical);
+    // block form (domain-services.md rev. 4) emits its lowered statements.
+    if ("expr" in fn.body) {
+      return [`${head} { return ${renderTsExpr(fn.body.expr)}; }`];
+    }
+    return [`${head} {`, renderTsStatements(fn.body.stmts), `  }`];
   });
 
   // For extern: setters per declared property, plus `raiseEvent` on the

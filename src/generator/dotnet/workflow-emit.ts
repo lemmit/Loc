@@ -11,6 +11,7 @@ import {
   workflowUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
 import { durableEventTypes } from "../../ir/util/channels.js";
+import { readPortsForOperation } from "../../ir/util/domain-service-read-ports.js";
 import { errorStatuses } from "../../ir/util/openapi-errors.js";
 import {
   camelId,
@@ -18,8 +19,9 @@ import {
   opWorkflowInstanceById,
   opWorkflowInstances,
 } from "../../ir/util/openapi-ids.js";
+import { collectReachableTypes } from "../../ir/util/reachable-types.js";
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
-import { plural, snake, upperFirst } from "../../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { renderDotnetLogCall } from "../_obs/render-dotnet.js";
 import { renderWorkflowStmts, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
 import { dotnetResourceAdapterFor, resourceClassName } from "./adapters/resource-clients.js";
@@ -34,6 +36,7 @@ import {
   wireType,
 } from "./dto-mapping.js";
 import { bypassedFilterNames } from "./emit/efcore.js";
+import type { CsRenderContext } from "./render-expr.js";
 import { collectCsExprUsings, renderCsExpr, renderCsType } from "./render-expr.js";
 import { esCorrIdClass, esEventDbSet, esEventRecordClass } from "./workflow-eventsourced-emit.js";
 import {
@@ -128,7 +131,53 @@ export function emitWorkflows(
       `Api/${ctx.name}WorkflowsController.cs`,
       renderController(ctx, ns, commandWfs, options?.routePrefix),
     );
+    // A command-workflow whose param is a value object surfaces a
+    // `<Vo>Request` in its Request DTO (`record FooRequest(MoneyRequest …)`).
+    // The per-aggregate request emitter only emits `<Vo>Request` for VOs
+    // reachable from an AGGREGATE's surface (`valueObjectsUsedBy`) — a VO that
+    // appears only as a workflow param has no such emission, so the Request
+    // DTO references an undefined `MoneyRequest` (CS0246).  Emit the VO request
+    // records the workflow params need into the `Application.Workflows`
+    // namespace (the Request DTOs' own namespace, so they resolve unqualified),
+    // mirroring the aggregate-create `<Vo>Request` shape.
+    const voRequests = renderWorkflowValueObjectRequests(commandWfs, ctx, ns);
+    if (voRequests) out.set("Application/Workflows/WorkflowRequests.cs", voRequests);
   }
+}
+
+/** Emit the `<Vo>Request` records that this context's command-workflows'
+ *  value-object params reference (transitively through nested VOs), into the
+ *  shared `Application.Workflows` namespace.  Mirrors the per-aggregate VO
+ *  request shape (`cqrs/dtos.ts`) but keyed off workflow params rather than an
+ *  aggregate surface.  Returns `undefined` when no workflow param is a VO. */
+function renderWorkflowValueObjectRequests(
+  commandWfs: readonly WorkflowIR[],
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+): string | undefined {
+  const seeds = function* (): Generator<import("../../ir/types/loom-ir.js").TypeIR> {
+    for (const wf of commandWfs) for (const p of wf.params) yield p.type;
+  };
+  const { valueObjects } = collectReachableTypes(seeds(), ctx.valueObjects);
+  if (valueObjects.size === 0) return undefined;
+  const recs = ctx.valueObjects
+    .filter((v) => valueObjects.has(v.name))
+    .map((vo) => {
+      const params = vo.fields
+        .map((f) => dtoParam(wireType(f.type, ctx, "request"), upperFirst(f.name), "request"))
+        .join(", ");
+      return `public sealed record ${vo.name}Request(${params});\n`;
+    })
+    .join("\n");
+  return `// Auto-generated.
+using System;
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using ${ns}.Domain.Enums;
+
+namespace ${ns}.Application.Workflows;
+
+${recs}`;
 }
 
 /** A workflow exposes an HTTP command POST when its facade (the primary
@@ -684,8 +733,14 @@ function renderHandler(
     ctorAssigns.push("_events = events");
   }
   if (wf.transactional) {
-    fields.push(`    private readonly ${ns}.Infrastructure.Persistence.AppDbContext _db;`);
-    ctorParamPairs.push(`${ns}.Infrastructure.Persistence.AppDbContext db`);
+    // `global::`-anchor the AppDbContext reference: a deployable named `api`
+    // makes `ns === "Api"`, and a bare `Api.Infrastructure...` inside
+    // `Api.Application.Workflows` mis-resolves the leading `Api` against the
+    // enclosing `Api.Application` namespace (CS0234 — "does not exist in the
+    // namespace 'Api.Api'").  Mirrors the persisted-saga handler + the
+    // migrations DbContext attribute (emit/migrations.ts).
+    fields.push(`    private readonly global::${ns}.Infrastructure.Persistence.AppDbContext _db;`);
+    ctorParamPairs.push(`global::${ns}.Infrastructure.Persistence.AppDbContext db`);
     ctorAssigns.push("_db = db");
   }
   if (usesUser) {
@@ -742,6 +797,22 @@ function renderHandler(
     for (const aggName of auditAggs) usings.add(`${ns}.Application.${plural(aggName)}.Responses`);
   }
 
+  // Reading-tier domain-service calls (domain-services.md rev. 4, Slice 1): a
+  // `reading` service is a DI'd `sealed class`, so the orchestrating workflow
+  // INJECTS it (`_registration`) and calls through the instance —
+  // `await _registration.IsEmailAvailableAsync(...)` — rather than the static
+  // `Registration.IsEmailAvailable(...)` a pure service emits.  The container
+  // threads the service's own read-repository, so the workflow injects only the
+  // service, NOT that repo (the .NET divergence from the TS read-port arg).
+  const readingServices = collectReadingServices(wf, ctx);
+  for (const svcName of readingServices) {
+    fields.push(`    private readonly ${upperFirst(svcName)} _${lowerFirst(svcName)};`);
+    ctorParamPairs.push(`${upperFirst(svcName)} ${lowerFirst(svcName)}`);
+    ctorAssigns.push(`_${lowerFirst(svcName)} = ${lowerFirst(svcName)}`);
+  }
+  if (readingServices.size > 0) usings.add(`${ns}.Domain.Services`);
+  const readingCall = workflowReadingServiceCallResolver(ctx);
+
   // Statement rendering.
   const stmtLines: string[] = [];
   if (usage.hasEmit) {
@@ -770,7 +841,7 @@ function renderHandler(
     // through the renderer.  The cmd-param rewrite only renames refs, so
     // the `matches` shape collectCsExprUsings keys off is unchanged.
     collectCsExprUsings(e, usings, ns);
-    return renderExprWithCmdParams(e, paramNames, resourceClasses);
+    return renderExprWithCmdParams(e, paramNames, resourceClasses, readingCall);
   };
 
   // Guard exactly the getById loads this command handler later dereferences
@@ -921,7 +992,16 @@ function collectDereferencedLoads(stmts: readonly WorkflowStmtIR[]): Set<string>
   const names = new Set<string>();
   for (const st of stmts) {
     if (st.kind === "op-call") names.add(st.target);
-    else if (st.kind === "for-each") {
+    else if (st.kind === "domain-service-call") {
+      // A `mutating`/`reading` service call dereferences every aggregate ARG it
+      // is passed (the service operates on them), so a `getById` load passed
+      // into one is load-or-throw — guard it, or the non-null `Account` param
+      // is a CS8604 under nullable-reference types (domain-services.md rev. 4).
+      const args = st.call.kind === "call" ? st.call.args : [];
+      for (const a of args) {
+        if (a.kind === "ref") names.add(a.name);
+      }
+    } else if (st.kind === "for-each") {
       for (const n of collectDereferencedLoads(st.body)) names.add(n);
     }
   }
@@ -1190,6 +1270,13 @@ function csWorkflowStmtTarget(
     // 4c: bare resource-op statement (`files.put(k, v)`) → awaited async
     // helper call.
     resourceCall: (st, indent) => [`${indent}await ${renderArg(st.call)};`],
+    // Bare `Transfer.Run(src, dst, amount)` domain-service call
+    // (domain-services.md rev. 4, the `mutating` tier).  `renderArg` emits the
+    // static call (pure/mutating) or `(await _svc.OpAsync(...))` (reading) — the
+    // await wrapping is internal, so no `await` prefix here (mutating is a
+    // synchronous static call).  The mutated args are EF-tracked entities →
+    // they flush at the orchestrator's single `await db.SaveChangesAsync()`.
+    domainServiceCall: (st, indent) => [`${indent}${renderArg(st.call)};`],
   };
 }
 
@@ -1245,13 +1332,114 @@ function renderExprWithCmdParams(
   e: ExprIR,
   paramNames: Set<string>,
   resourceClasses?: Map<string, string>,
+  /** Reading-tier domain-service call resolver (domain-services.md rev. 4):
+   *  routes a `reading` service call through its injected `_<service>` field +
+   *  async method; undefined (or returning undefined) leaves a PURE call as the
+   *  static `Service.Op(...)` (byte-identical). */
+  domainServiceReadingCall?: CsRenderContext["domainServiceReadingCall"],
 ): string {
   const rewritten = rewriteExprRefs(e, (r) =>
     r.refKind === "param" && paramNames.has(r.name)
       ? { ...r, name: `command.${upperFirst(r.name)}`, refKind: "let" }
       : undefined,
   );
-  return renderCsExpr(rewritten, { thisName: "this", resourceClasses });
+  return renderCsExpr(rewritten, { thisName: "this", resourceClasses, domainServiceReadingCall });
+}
+
+/** The distinct `reading`-tier domain SERVICES a workflow body calls
+ *  (domain-services.md rev. 4, Slice 1) — the services the handler must inject.
+ *  A service is `reading` when a called operation consumes at least one
+ *  read-port; a PURE-only service is excluded (its calls stay the static shape,
+ *  needing no injection).  De-duplicated by service name. */
+function collectReadingServices(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): Set<string> {
+  const out = new Set<string>();
+  const visit = (e: ExprIR): void => {
+    if (e.kind === "call" && e.callKind === "domain-service" && e.serviceRef) {
+      const svc = ctx.domainServices?.find((s) => s.name === e.serviceRef!.service);
+      const op = svc?.operations.find((o) => o.name === e.serviceRef!.op);
+      if (op && readPortsForOperation(op).length > 0) out.add(e.serviceRef.service);
+    }
+    for (const c of exprChildrenForServiceScan(e)) visit(c);
+  };
+  const walk = (stmts: readonly WorkflowStmtIR[]): void => {
+    for (const st of stmts) {
+      for (const e of workflowStmtExprsForServiceScan(st)) visit(e);
+      if (st.kind === "for-each") walk(st.body);
+      else if (st.kind === "if-let") {
+        walk(st.thenBody);
+        walk(st.elseBody ?? []);
+      }
+    }
+  };
+  walk(wf.statements);
+  return out;
+}
+
+/** Resolver handed to the workflow render context: maps a `reading`-tier
+ *  `<service>.<op>` call to its injected receiver (`_<service>`) + async method
+ *  (`<Op>Async`).  Returns undefined for a PURE op, so the `domain-service`
+ *  render arm keeps the static `Service.Op(...)` shape (byte-identical). */
+function workflowReadingServiceCallResolver(
+  ctx: EnrichedBoundedContextIR,
+): NonNullable<CsRenderContext["domainServiceReadingCall"]> {
+  return (service, op) => {
+    const svc = ctx.domainServices?.find((s) => s.name === service);
+    const operation = svc?.operations.find((o) => o.name === op);
+    if (!operation || readPortsForOperation(operation).length === 0) return undefined;
+    return { receiver: `_${lowerFirst(service)}`, method: `${upperFirst(op)}Async` };
+  };
+}
+
+/** The expressions a workflow statement directly carries — for the reading-service
+ *  scan (the per-kind nesting is handled by `collectReadingServices`'s spine). */
+function workflowStmtExprsForServiceScan(st: WorkflowStmtIR): ExprIR[] {
+  switch (st.kind) {
+    case "expr-let":
+    case "precondition":
+    case "requires":
+      return [st.expr];
+    case "resource-call":
+      return [st.call];
+    case "op-call":
+    case "repo-let":
+      return st.args;
+    case "factory-let":
+    case "emit":
+      return st.fields.map((f) => f.value);
+    case "for-each":
+      return [st.iterable];
+    case "if-let":
+      return st.retrievalArgs;
+    default:
+      return [];
+  }
+}
+
+/** Direct sub-expressions of an ExprIR (for the reading-service call scan). */
+function exprChildrenForServiceScan(e: ExprIR): ExprIR[] {
+  switch (e.kind) {
+    case "method-call":
+      return [e.receiver, ...e.args];
+    case "member":
+      return [e.receiver];
+    case "binary":
+      return [e.left, e.right];
+    case "ternary":
+      return [e.cond, e.then, e.otherwise];
+    case "unary":
+      return [e.operand];
+    case "paren":
+      return [e.inner];
+    case "call":
+      return e.args;
+    case "new":
+    case "object":
+      return e.fields.map((f) => f.value);
+    case "lambda":
+      return e.body ? [e.body] : [];
+    default:
+      return [];
+  }
 }
 
 // Render an ExprIR for an in-process event handler: rewrite the single bound

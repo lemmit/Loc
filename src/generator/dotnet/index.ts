@@ -896,9 +896,9 @@ function emitAggregate(
         }),
       );
       // One file per reference-collection association: the join entity
-      // class + its EF Core configuration (composite PK, ordinal, FK
-      // converters).  Skipped for embedded (reference collections fold
-      // into a JSONB column) and when the aggregate has no `Id<T>[]` fields.
+      // class + its EF Core configuration (composite PK, FK converters).
+      // Skipped for embedded (reference collections fold into a JSONB
+      // column) and when the aggregate has no `Id<T>[]` fields.
       if (!isEmbedded) {
         for (const assoc of agg.associations) {
           const cls = joinEntityName(assoc);

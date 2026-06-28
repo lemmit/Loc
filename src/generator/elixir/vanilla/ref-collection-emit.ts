@@ -96,6 +96,12 @@ function targetModule(appModule: string, ctxModule: string, assoc: AssociationIR
  *  join_keys and `on_replace: :delete` so a `put_assoc` REPLACES the prior set
  *  (set semantics for `Id<T>[]`).
  *
+ *  `preload_order: [asc: :id]` makes the preloaded list deterministic by
+ *  ordering on the TARGET row's `:id` — the same read-time projection every
+ *  other backend applies (ORDER BY the target FK id).  `Id<T>[]` is a set
+ *  (membership only, no order), so the join table stores no `ordinal`; the
+ *  stable read-back is derived from the target id, not stored state.
+ *
  *  `join_through:` is the BARE table name even when the owner lives in a
  *  non-public Postgres schema: Ecto applies the owner schema's `@schema_prefix`
  *  to a string join_through at query time, so qualifying it here would
@@ -107,7 +113,7 @@ export function manyToManyLine(appModule: string, ctxModule: string, rc: RefColl
   const rel = snake(rc.field.name);
   const target = targetModule(appModule, ctxModule, rc.assoc);
   const through = JSON.stringify(rc.assoc.joinTable);
-  return `    many_to_many :${rel}, ${target}, join_through: ${through}, join_keys: [${rc.assoc.ownerFk}: :id, ${rc.assoc.targetFk}: :id], on_replace: :delete`;
+  return `    many_to_many :${rel}, ${target}, join_through: ${through}, join_keys: [${rc.assoc.ownerFk}: :id, ${rc.assoc.targetFk}: :id], on_replace: :delete, preload_order: [asc: :id]`;
 }
 
 /** The preload list for an aggregate's reads — `[:party, :caught]` — so every

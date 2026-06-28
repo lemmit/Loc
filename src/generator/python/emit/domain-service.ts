@@ -36,6 +36,10 @@ import type {
   TypeIR,
   WorkflowStmtIR,
 } from "../../../ir/types/loom-ir.js";
+import {
+  type ReadPort,
+  readPortsForOperation,
+} from "../../../ir/util/domain-service-read-ports.js";
 import { lines } from "../../../util/code-builder.js";
 import { snake } from "../../../util/naming.js";
 import { emptyPyTypeImports, visitPyTypeImports } from "../py-type-imports.js";
@@ -114,6 +118,16 @@ function renderService(svc: DomainServiceIR, ctx: BoundedContextIR): string {
   const idImports = [...types.idNames].sort().map((n) => `${n}Id`);
   const voEnumNames = [...types.voNames, ...types.enumNames].sort();
 
+  // Read-port repository classes (domain-services.md rev. 4, Slice 1): a
+  // `reading`-tier op takes an `<Aggregate>Repository` handle param, so THIS
+  // service's module imports that class for the annotation.  Scoped to the
+  // service's own operations (Python emits one module per service, unlike the
+  // single TS `services.ts`), so a PURE-only service's module stays import-free.
+  // De-duplicated by aggregate, sorted for deterministic output.
+  const readPortRepos = collectReadPortRepos(svc).sort((a, b) =>
+    a.aggregate.localeCompare(b.aggregate),
+  );
+
   const header = lines(
     `"""${svc.name} domain service — stateless pure calculator (domain-services.md).`,
     "",
@@ -130,19 +144,49 @@ function renderService(svc: DomainServiceIR, ctx: BoundedContextIR): string {
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
       : null,
     ...[...aggNames].sort().map((n) => `from app.domain.${snake(n)} import ${n}`),
+    ...readPortRepos.map(
+      (p) =>
+        `from app.db.repositories.${snake(p.aggregate)}_repository import ${p.aggregate}Repository`,
+    ),
   );
 
   return `${header}\n\n\n${body}\n`;
 }
 
 function renderOperation(op: DomainServiceOperationIR): string {
-  const params = op.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`).join(", ");
+  // Read-port parameters (domain-services.md rev. 4, Slice 1): a `reading`-tier
+  // op takes one repository handle per repo it reads, AHEAD of the user params —
+  // `accounts: AccountRepository` — exactly the handle the body's `repo-read`
+  // arms render against (`await accounts.by_holder(holder)`) and the
+  // orchestrating workflow supplies.  A PURE op has no ports, so its declaration
+  // is unchanged (byte-identical).  Each read-port read awaits the repo method,
+  // so a reading op is `async def` (the orchestrator awaits the call at its site).
+  const ports = readPortsForOperation(op);
+  const portParams = ports.map((p) => `${snake(p.repo)}: ${p.aggregate}Repository`);
+  const userParams = op.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`);
+  const params = [...portParams, ...userParams].join(", ");
+  const isReading = ports.length > 0;
+  const kw = isReading ? "async def" : "def";
   const ret = op.returnType ? renderPyOperationReturnType(op.returnType) : "None";
   const body = renderPyStatements(op.body, "    ");
   return lines(
-    `def ${snake(op.name)}(${params}) -> ${ret}:`,
+    `${kw} ${snake(op.name)}(${params}) -> ${ret}:`,
     ...(body.length > 0 ? [body] : ["    pass"]),
   );
+}
+
+/** The distinct read-port repositories (`<Aggregate>Repository` classes) a
+ *  service's reading-tier operations read — drives its module's repository-class
+ *  import surface.  De-duplicated by aggregate.  A pure service reads none, so
+ *  its module imports no repository. */
+function collectReadPortRepos(svc: DomainServiceIR): ReadPort[] {
+  const byAgg = new Map<string, ReadPort>();
+  for (const op of svc.operations) {
+    for (const p of readPortsForOperation(op)) {
+      if (!byAgg.has(p.aggregate)) byAgg.set(p.aggregate, p);
+    }
+  }
+  return [...byAgg.values()];
 }
 
 /** Exception-less `or`-union returns carry the tagged dict the statement
@@ -302,6 +346,7 @@ function forEachWorkflowStmtExpr(st: WorkflowStmtIR, visit: (e: ExprIR) => void)
       for (const inner of st.body) forEachWorkflowStmtExpr(inner, visit);
       return;
     case "resource-call":
+    case "domain-service-call":
       walkExpr(st.call, visit);
       return;
     case "if-let":

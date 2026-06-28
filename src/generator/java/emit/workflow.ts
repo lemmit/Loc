@@ -12,11 +12,12 @@ import {
   operationUsesCurrentUser,
   workflowEmitsCommandRoute,
 } from "../../../ir/types/loom-ir.js";
+import { readPortsForOperation } from "../../../ir/util/domain-service-read-ports.js";
 import { resolveWorkflowIsolation } from "../../../ir/util/resolve-datasource.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { renderWorkflowStmts, type WorkflowStmtTarget } from "../../_workflow/stmt-target.js";
-import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
+import { collectJavaExprImports, type JavaRenderContext, renderJavaExpr } from "../render-expr.js";
 import {
   collectWireImports,
   collectWireToDomainImports,
@@ -63,6 +64,11 @@ export interface WorkflowCtx {
   /** category-resolved package lookups for cross-package imports. */
   entityPkgOf: (aggName: string) => string;
   repoPkgOf: (aggName: string) => string;
+  /** Package the `domainService` beans live in — a `reading`-tier service a
+   *  workflow calls is constructor-injected (`@Service` bean), imported from
+   *  here (domain-services.md rev. 4, Slice 1).  Optional; absent ⇒ no reading
+   *  service is injected (pure-only / legacy callers). */
+  domainServicePkg?: string;
 }
 
 const baseRenderCtx = { thisName: "this" };
@@ -128,7 +134,7 @@ export function reposUsed(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string
 export function javaWorkflowStmtTarget(
   ctx: EnrichedBoundedContextIR,
   imports: Set<string>,
-  renderCtx: typeof baseRenderCtx & { resourceClasses?: Map<string, string> } = baseRenderCtx,
+  renderCtx: JavaRenderContext = baseRenderCtx,
   /** When set, `emit` appends the constructed event to this list var (the
    *  saga dispatcher re-publishes it after saves) instead of logging it
    *  (the command-workflow facade behaviour).  Omitted ⇒ log, byte-identical. */
@@ -279,6 +285,16 @@ export function javaWorkflowStmtTarget(
       collectJavaExprImports(s.call, imports);
       return [`${indent}${renderJavaExpr(s.call, renderCtx)};`];
     },
+    // Bare `Transfer.run(src, dst, amount)` domain-service call
+    // (domain-services.md rev. 4, the `mutating` tier).  `renderJavaExpr` emits
+    // a static `Transfer.run(...)` (pure/mutating) or instance bean call
+    // (reading).  The mutated args are JPA-managed entities → dirty-checking
+    // flushes them at the `@Transactional` boundary (plus the explicit
+    // exit-`save` the workflow emits for new aggregates).
+    domainServiceCall: (s, indent) => {
+      collectJavaExprImports(s.call, imports);
+      return [`${indent}${renderJavaExpr(s.call, renderCtx)};`];
+    },
   };
 }
 
@@ -286,12 +302,130 @@ export function repoField(aggName: string): string {
   return `${lowerFirst(plural(aggName))}Repository`;
 }
 
-function renderCtxFor(
-  wctx: WorkflowCtx,
-): typeof baseRenderCtx & { resourceClasses?: Map<string, string> } {
+function renderCtxFor(ctx: EnrichedBoundedContextIR, wctx: WorkflowCtx): JavaRenderContext {
+  // `serviceReading` makes a `domain-service` call render as an INSTANCE call
+  // against the injected bean field when the called op is reading-tier
+  // (domain-services.md rev. 4) — a pure-service call resolves to `false` and
+  // stays a static call, byte-identical.
+  const serviceReading = (service: string, op: string): boolean => {
+    const svc = ctx.domainServices.find((s) => s.name === service);
+    const operation = svc?.operations.find((o) => o.name === op);
+    return operation ? readPortsForOperation(operation).length > 0 : false;
+  };
   return wctx.resourceClasses?.size
-    ? { ...baseRenderCtx, resourceClasses: wctx.resourceClasses }
-    : baseRenderCtx;
+    ? { ...baseRenderCtx, serviceReading, resourceClasses: wctx.resourceClasses }
+    : { ...baseRenderCtx, serviceReading };
+}
+
+/** The reading-tier domain services a workflow calls in its body — each is a
+ *  `@Service` bean the workflow constructor-injects (domain-services.md rev. 4,
+ *  Slice 1).  De-duplicated by service name, in first-call order; a PURE service
+ *  call is a static call (no injection), so it never appears here. */
+function readingServicesCalled(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string[] {
+  const seen = new Set<string>();
+  const order: string[] = [];
+  const visit = (e: ExprIR | undefined): void => {
+    if (!e) return;
+    if (e.kind === "call" && e.callKind === "domain-service" && e.serviceRef) {
+      const svc = ctx.domainServices.find((s) => s.name === e.serviceRef!.service);
+      const op = svc?.operations.find((o) => o.name === e.serviceRef!.op);
+      if (svc && op && readPortsForOperation(op).length > 0 && !seen.has(svc.name)) {
+        seen.add(svc.name);
+        order.push(svc.name);
+      }
+    }
+    for (const c of exprChildren(e)) visit(c);
+  };
+  const walk = (stmts: WorkflowStmtIR[]): void => {
+    for (const s of stmts) {
+      for (const e of workflowStmtExprs(s)) visit(e);
+      if (s.kind === "for-each") walk(s.body);
+    }
+  };
+  walk(wf.statements);
+  return order;
+}
+
+/** The STATIC (pure / mutating) domain services a workflow calls — a
+ *  `callKind: "domain-service"` whose op declares NO read ports
+ *  (domain-services.md rev. 4).  Rendered as a static `Service.op(...)` call, so
+ *  the workflow file must import the service class (unlike a reading-tier call,
+ *  which is an injected bean).  De-duplicated by service name, first-call order. */
+function staticServicesCalled(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string[] {
+  const seen = new Set<string>();
+  const order: string[] = [];
+  const visit = (e: ExprIR | undefined): void => {
+    if (!e) return;
+    if (e.kind === "call" && e.callKind === "domain-service" && e.serviceRef) {
+      const svc = ctx.domainServices.find((s) => s.name === e.serviceRef!.service);
+      const op = svc?.operations.find((o) => o.name === e.serviceRef!.op);
+      if (svc && op && readPortsForOperation(op).length === 0 && !seen.has(svc.name)) {
+        seen.add(svc.name);
+        order.push(svc.name);
+      }
+    }
+    for (const c of exprChildren(e)) visit(c);
+  };
+  const walk = (stmts: WorkflowStmtIR[]): void => {
+    for (const s of stmts) {
+      for (const e of workflowStmtExprs(s)) visit(e);
+      if (s.kind === "for-each") walk(s.body);
+    }
+  };
+  walk(wf.statements);
+  return order;
+}
+
+/** Sub-expressions of a workflow statement that may contain a domain-service
+ *  call (mirrors `workflowUsesCurrentUser`'s per-kind expr extraction). */
+function workflowStmtExprs(s: WorkflowStmtIR): (ExprIR | undefined)[] {
+  switch (s.kind) {
+    case "precondition":
+    case "requires":
+      return [s.expr];
+    case "emit":
+    case "factory-let":
+      return s.fields.map((f) => f.value);
+    case "repo-let":
+    case "op-call":
+      return s.args;
+    case "expr-let":
+      return [s.expr];
+    case "for-each":
+      return [s.iterable];
+    case "resource-call":
+    case "domain-service-call":
+      return [s.call];
+    default:
+      return [];
+  }
+}
+
+/** Direct sub-expressions of an ExprIR (for the domain-service-call walk). */
+function exprChildren(e: ExprIR): (ExprIR | undefined)[] {
+  switch (e.kind) {
+    case "method-call":
+      return [e.receiver, ...e.args];
+    case "member":
+      return [e.receiver];
+    case "binary":
+      return [e.left, e.right];
+    case "ternary":
+      return [e.cond, e.then, e.otherwise];
+    case "unary":
+      return [e.operand];
+    case "paren":
+      return [e.inner];
+    case "call":
+      return e.args;
+    case "new":
+    case "object":
+      return e.fields.map((f) => f.value);
+    case "lambda":
+      return [e.body];
+    default:
+      return [];
+  }
 }
 
 export function renderJavaWorkflows(
@@ -317,11 +451,21 @@ export function renderJavaWorkflows(
   // the `import …Isolation;` and the per-method `@Transactional(isolation = …)`.
   let usesIsolation = false;
   const repoAggs = new Set<string>();
+  // Reading-tier domain services any command-workflow calls — injected as
+  // `@Service` beans (domain-services.md rev. 4, Slice 1).  First-call order,
+  // deduped across workflows.
+  const readingSvcs = new Set<string>();
+  // STATIC (pure / mutating) domain services any command-workflow calls — a
+  // static `Service.op(...)` call whose CLASS the workflow file must import
+  // (domain-services.md rev. 4; the reading tier injects a bean instead).
+  const staticSvcs = new Set<string>();
   const methods: string[] = [];
 
   for (const wf of cmdWorkflows) {
     const usesUser = workflowUsesCurrentUser(wf);
     for (const agg of reposUsed(wf, ctx)) repoAggs.add(agg);
+    for (const s of readingServicesCalled(wf, ctx)) readingSvcs.add(s);
+    for (const s of staticServicesCalled(wf, ctx)) staticSvcs.add(s);
     const reqType = `${upperFirst(wf.name)}Request`;
     // Request record over the workflow params (wire types in, parsed here).
     if (wf.params.length > 0) {
@@ -353,7 +497,7 @@ export function renderJavaWorkflows(
     });
     const bodyLines = renderWorkflowStmts(
       wf.statements,
-      javaWorkflowStmtTarget(ctx, imports, renderCtxFor(wctx)),
+      javaWorkflowStmtTarget(ctx, imports, renderCtxFor(ctx, wctx)),
       "        ",
     );
     const saves = wf.savesAtExit.map((s) => `        ${repoField(s.aggName)}.save(${s.name});`);
@@ -392,8 +536,13 @@ export function renderJavaWorkflows(
     return walk(wf.statements);
   });
   const serviceName = `${ctx.name}Workflows`;
+  // Injected reading-tier service beans (domain-services.md rev. 4): field name
+  // `lowerFirst(service)` — the SAME var the `domain-service` call arm renders
+  // an instance call against (`registration.isEmailAvailable(...)`).
+  const readingServices = [...readingSvcs].sort();
   const ctorParams = [
     ...repoFields.map((a) => `${a}Repository ${repoField(a)}`),
+    ...readingServices.map((s) => `${s} ${lowerFirst(s)}`),
     ...(anyUser ? [`CurrentUserAccessor currentUserAccessor`] : []),
   ].join(", ");
   out.set(`${serviceName}.java`, {
@@ -421,6 +570,17 @@ export function renderJavaWorkflows(
         ? `import ${wctx.resourcesPkg}.*;`
         : null,
       hasEmit ? `import ${wctx.basePkg}.domain.events.*;` : null,
+      // Reading-tier domain-service beans the workflow injects (rev. 4) — import
+      // from the domain-services package when it differs from this one.
+      ...(wctx.domainServicePkg && wctx.domainServicePkg !== wctx.pkg
+        ? readingServices.map((s) => `import ${wctx.domainServicePkg}.${s};`)
+        : []),
+      // Static (pure / mutating) domain-service classes the workflow calls
+      // (`Transfer.run(...)`) — imported by class so the static reference
+      // resolves (domain-services.md rev. 4, the `mutating` tier).
+      ...(wctx.domainServicePkg && wctx.domainServicePkg !== wctx.pkg
+        ? [...staticSvcs].sort().map((s) => `import ${wctx.domainServicePkg}.${s};`)
+        : []),
       // CatalogLog is always referenced now (workflow_started/completed on every
       // command-workflow method), not only when the body emits a domain event.
       `import ${wctx.basePkg}.config.CatalogLog;`,
@@ -433,10 +593,12 @@ export function renderJavaWorkflows(
       `@Transactional`,
       `public class ${serviceName} {`,
       ...repoFields.map((a) => `    private final ${a}Repository ${repoField(a)};`),
+      ...readingServices.map((s) => `    private final ${s} ${lowerFirst(s)};`),
       anyUser ? `    private final CurrentUserAccessor currentUserAccessor;` : null,
       ``,
       `    public ${serviceName}(${ctorParams}) {`,
       ...repoFields.map((a) => `        this.${repoField(a)} = ${repoField(a)};`),
+      ...readingServices.map((s) => `        this.${lowerFirst(s)} = ${lowerFirst(s)};`),
       anyUser ? `        this.currentUserAccessor = currentUserAccessor;` : null,
       `    }`,
       ``,

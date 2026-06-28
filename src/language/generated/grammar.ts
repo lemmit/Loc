@@ -11573,20 +11573,56 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             }
           },
           {
-            "$type": "Keyword",
-            "value": "="
-          },
-          {
-            "$type": "Assignment",
-            "feature": "body",
-            "operator": "=",
-            "terminal": {
-              "$type": "RuleCall",
-              "rule": {
-                "$ref": "#/rules@177"
+            "$type": "Alternatives",
+            "elements": [
+              {
+                "$type": "Group",
+                "elements": [
+                  {
+                    "$type": "Keyword",
+                    "value": "="
+                  },
+                  {
+                    "$type": "Assignment",
+                    "feature": "body",
+                    "operator": "=",
+                    "terminal": {
+                      "$type": "RuleCall",
+                      "rule": {
+                        "$ref": "#/rules@177"
+                      },
+                      "arguments": []
+                    }
+                  }
+                ]
               },
-              "arguments": []
-            }
+              {
+                "$type": "Group",
+                "elements": [
+                  {
+                    "$type": "Keyword",
+                    "value": "{"
+                  },
+                  {
+                    "$type": "Assignment",
+                    "feature": "block",
+                    "operator": "+=",
+                    "terminal": {
+                      "$type": "RuleCall",
+                      "rule": {
+                        "$ref": "#/rules@164"
+                      },
+                      "arguments": []
+                    },
+                    "cardinality": "*"
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": "}"
+                  }
+                ]
+              }
+            ]
           }
         ]
       },

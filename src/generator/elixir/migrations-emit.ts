@@ -296,10 +296,11 @@ end
 
 /** Render a many-to-many join-table migration.  Composite PK on the
  *  two FK columns, both `primary_key: true` (this is what enforces the
- *  set-semantics contract for `Id<T>[]`); an `ordinal :integer` column
- *  is included for cross-backend schema parity even though the wire
- *  contract is unordered; no `timestamps()` (join rows are pure
- *  relationship records). */
+ *  set-semantics contract for `Id<T>[]` — the pair IS the whole row, no
+ *  payload column); no `timestamps()` (join rows are pure relationship
+ *  records).  Deterministic read-back order is a read-time projection
+ *  (the `many_to_many` preloads `order_by: [asc: :id]` on the target),
+ *  not a stored `ordinal`. */
 function renderInitialJoinFile(
   table: TableShape,
   migrationName: string,

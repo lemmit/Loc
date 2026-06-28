@@ -11,6 +11,11 @@
 // same edge translation the exception-less operation routes emit.
 // ---------------------------------------------------------------------------
 
+import {
+  PAGED_DEFAULT_PAGE,
+  PAGED_DEFAULT_PAGE_SIZE,
+  pagedReturn,
+} from "../../../ir/stdlib/generics.js";
 import { variantTag } from "../../../ir/stdlib/unions.js";
 import type { AggregateIR, BoundedContextIR, FindIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
@@ -98,14 +103,38 @@ export function renderFindActions(
   const cuLine = principal ? "    current_user = Map.get(conn.assigns, :current_user)\n" : "";
   const actions = httpFindsOf(ctx, agg).map((f) => {
     const findSnake = snake(f.name);
-    // A param-less find never reads `params` — bind `_params` so it doesn't
-    // trip the unused-variable check.
-    const paramArg = f.params.length > 0 ? "params" : "_params";
+    const paged = pagedReturn(f.returnType);
+    // A find that reads NO params (param-less and non-paged) binds `_params` so
+    // it doesn't trip the unused-variable check; a paged find always reads
+    // `page`/`pageSize` off `params`.
+    const paramArg = f.params.length > 0 || paged ? "params" : "_params";
     const argReads = [
       ...f.params.map((p) => `params[${JSON.stringify(p.name)}]`),
+      // Paged: 1-based `page`/`pageSize` query controls, defaulted + coerced to
+      // integers (Phoenix delivers query params as strings).  Matches the
+      // shared cross-backend defaults.
+      ...(paged
+        ? [
+            `page_param(params, "page", ${PAGED_DEFAULT_PAGE})`,
+            `page_param(params, "pageSize", ${PAGED_DEFAULT_PAGE_SIZE})`,
+          ]
+        : []),
       ...(principal ? ["current_user"] : []),
     ].join(", ");
     const call = `${ctxModule}.${findSnake}_${aggSnake}(${argReads})`;
+
+    if (paged) {
+      // The repository already returns the `%{items, page, pageSize, total,
+      // totalPages}` envelope (atom keys) — only `items` needs per-record
+      // serialisation; the scalar counters pass straight through to the
+      // canonical camelCase JSON.
+      return `
+  def ${findSnake}(conn, ${paramArg}) do
+${cuLine}    with {:ok, result} <- ${call} do
+      json(conn, %{result | items: Enum.map(result.items, &serialize/1)})
+    end
+  end`;
+    }
 
     const absent = absentSpec(agg, f.returnType, ctx);
     if (absent) {
@@ -142,5 +171,24 @@ ${cuLine}    with {:ok, records} <- ${call} do
     end
   end`;
   });
-  return actions.join("\n");
+  // A `page_param/3` coercion helper — once per controller — backs every paged
+  // find's `page`/`pageSize` query reads (Phoenix delivers params as strings; a
+  // missing/blank/non-integer param falls back to the shared default).
+  const hasPaged = httpFindsOf(ctx, agg).some((f) => pagedReturn(f.returnType));
+  const pageParamHelper = hasPaged
+    ? `
+  defp page_param(params, key, default) do
+    case params[key] do
+      v when is_integer(v) -> v
+      v when is_binary(v) ->
+        case Integer.parse(v) do
+          {n, _} when n >= 1 -> n
+          _ -> default
+        end
+
+      _ -> default
+    end
+  end`
+    : "";
+  return actions.join("\n") + pageParamHelper;
 }

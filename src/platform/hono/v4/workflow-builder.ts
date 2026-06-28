@@ -18,6 +18,10 @@ import {
 } from "../../../ir/types/loom-ir.js";
 import { durableEventTypes } from "../../../ir/util/channels.js";
 import {
+  type ReadPort,
+  readPortsForOperation,
+} from "../../../ir/util/domain-service-read-ports.js";
+import {
   camelId,
   opOperation,
   opWorkflow,
@@ -352,6 +356,17 @@ export function buildWorkflowsFile(
   if (voEnumReferenced.length > 0) {
     imports.push(`import { ${voEnumReferenced.join(", ")} } from "../domain/value-objects";`);
   }
+  // Domain-service namespaces a workflow body calls (`Registration.…`,
+  // `Pricing.…`) — imported from the generated `domain/services.ts`.  Filtered
+  // to those actually referenced in the body text (a pure-service call already
+  // rendered as `Service.op(…)` will match; a reading-service call renders
+  // `(await Service.op(handle, …))` which also matches).
+  const servicesReferenced = ctx.domainServices
+    .map((s) => s.name)
+    .filter((n) => new RegExp(`\\b${n}\\.\\w`).test(bodyStr));
+  if (servicesReferenced.length > 0) {
+    imports.push(`import { ${servicesReferenced.sort().join(", ")} } from "../domain/services";`);
+  }
   // Resource-op verb helpers (Phase 4): `<resource>$<verb>` exported by
   // the client module at `../resources/<sourceType>`.  Group the
   // imports by sourceType module; one named import per (resource, verb)
@@ -521,8 +536,11 @@ function emitWorkflowRoute(
   }
   // Repos used by this workflow.  Construct on the request `db` for
   // non-transactional; deferred construction inside the tx callback
-  // for transactional.
-  const reposNeeded = collectReposForWorkflow(wf);
+  // for transactional.  Includes the read-port repos any `reading`-tier
+  // domain-service call needs (domain-services.md rev. 4): the workflow
+  // constructs `new <Agg>Repository(...)` for them so the service is handed a
+  // live handle even when the workflow body never reads that repo itself.
+  const reposNeeded = mergeReadPortRepos(collectReposForWorkflow(wf), wf, ctx);
   const hasEmit = wf.statements.some((st) => st.kind === "emit");
   if (hasEmit) {
     out.push(`    const workflowEvents: Events.DomainEvent[] = [];`);
@@ -1265,7 +1283,15 @@ function honoWorkflowStmtTarget(
    *  row for an inline `audited` op-call (the reactor path passes none). */
   audit?: { dbHandle: string; repoVarByAgg: Map<string, string> },
 ): WorkflowStmtTarget {
-  const renderArg = (e: ExprIR): string => renderExprWithParams(e, paramExprs, thisName);
+  // Read-port wiring (domain-services.md rev. 4, Slice 1): a `reading`-tier
+  // domain-service call is supplied its repository handle(s) ahead of the user
+  // args.  The handle var is `lowerFirst(repo)` — the SAME var the workflow
+  // constructs for that repo (`collectReposForWorkflow` includes service ports),
+  // so a service reading `Accounts` is passed the workflow's `accounts` repo.
+  // PURE services resolve to `[]` → byte-identical.
+  const readPortArgs = workflowReadPortResolver(ctx);
+  const renderArg = (e: ExprIR): string =>
+    renderExprWithParams(e, paramExprs, thisName, readPortArgs);
   // Unique suffix per in-body audit capture so multiple audited op-calls in one
   // workflow don't collide on the before/after temp-var names.
   let auditSeq = 0;
@@ -1439,6 +1465,12 @@ function honoWorkflowStmtTarget(
     // Bare resource-op statement (`files.put(k, v)`).  `renderArg` renders
     // the call as `(await files$put(...))`; emit it as a statement (Phase 4).
     resourceCall: (st, indent) => [`${indent}${renderArg(st.call)};`],
+    // Bare `Transfer.run(src, dst, amount)` domain-service call
+    // (domain-services.md rev. 4, the `mutating` tier).  `renderArg` produces
+    // the backend call (read-port-aware; `(await …)` for a reading service);
+    // emit as a statement.  The mutated aggregate args persist via the
+    // workflow's exit-saves (`savesAtExit`), emitted after the body.
+    domainServiceCall: (st, indent) => [`${indent}${renderArg(st.call)};`],
   };
 }
 
@@ -1454,6 +1486,10 @@ function renderExprWithParams(
   e: ExprIR,
   paramExprs: Map<string, string>,
   thisName = "this",
+  /** Resolver for the read-port handle args a `reading`-tier domain-service
+   *  call takes (domain-services.md rev. 4); threaded onto the TS render
+   *  context.  Undefined ⇒ no prepend (pure-service / non-workflow callers). */
+  readPortArgs?: (service: string, op: string) => string[],
 ): string {
   // Workflow params are local consts now; ExprIR `ref` nodes for them
   // already carry refKind="param" and the bare name.  renderTsExpr
@@ -1465,7 +1501,130 @@ function renderExprWithParams(
   // dispatcher handler passes the loaded state-row local so
   // `this.<field>` renders as `state.field` (persisted correlation).
   void paramExprs;
-  return renderTsExpr(e, { thisName });
+  return renderTsExpr(e, { thisName, readPortArgs });
+}
+
+/** Build the read-port resolver for a workflow's `reading`-tier domain-service
+ *  calls (domain-services.md rev. 4, Slice 1).  Given a `<service>.<op>` call,
+ *  returns the repository handle var names (`lowerFirst(repo)`) to prepend — the
+ *  read-ports the service operation consumes (derived from its body), in order.
+ *  A pure service op has no ports, so the resolver returns `[]` and the call
+ *  renders byte-identically. */
+function workflowReadPortResolver(
+  ctx: BoundedContextIR,
+): (service: string, op: string) => string[] {
+  return (service, op) => {
+    const svc = ctx.domainServices.find((s) => s.name === service);
+    const operation = svc?.operations.find((o) => o.name === op);
+    if (!operation) return [];
+    return readPortsForOperation(operation).map((p) => lowerFirst(p.repo));
+  };
+}
+
+/** Every read-port a workflow's `reading`-tier domain-service calls require —
+ *  the repository handles those services read, so the workflow constructs them
+ *  (`new <Aggregate>Repository(tx, events)`) even when its own body never reads
+ *  that repository directly.  De-duplicated by repository name across all
+ *  service calls in the body. */
+function collectServiceReadPorts(wf: WorkflowIR, ctx: BoundedContextIR): ReadPort[] {
+  const byRepo = new Map<string, ReadPort>();
+  const visit = (e: ExprIR): void => {
+    if (e.kind === "call" && e.callKind === "domain-service" && e.serviceRef) {
+      const svc = ctx.domainServices.find((s) => s.name === e.serviceRef!.service);
+      const operation = svc?.operations.find((o) => o.name === e.serviceRef!.op);
+      if (operation) {
+        for (const p of readPortsForOperation(operation)) {
+          if (!byRepo.has(p.repo)) byRepo.set(p.repo, p);
+        }
+      }
+    }
+    for (const c of exprChildren(e)) visit(c);
+  };
+  const walkStmts = (stmts: WorkflowStmtIR[]): void => {
+    for (const st of stmts) {
+      for (const e of workflowStmtExprs(st)) visit(e);
+      if (st.kind === "for-each") walkStmts(st.body);
+      else if (st.kind === "if-let") {
+        walkStmts(st.thenBody);
+        walkStmts(st.elseBody ?? []);
+      }
+    }
+  };
+  walkStmts(wf.statements);
+  return [...byRepo.values()];
+}
+
+/** Merge a workflow's directly-used repos with the read-port repos its
+ *  `reading`-tier domain-service calls require, de-duplicated by repository
+ *  name (a repo the workflow already constructs is not added twice).  Service
+ *  ports append after the workflow's own repos so a port-only project stays a
+ *  pure extension. */
+function mergeReadPortRepos(
+  own: { repoName: string; aggName: string }[],
+  wf: WorkflowIR,
+  ctx: BoundedContextIR,
+): { repoName: string; aggName: string }[] {
+  const seen = new Set(own.map((r) => r.repoName));
+  const out = [...own];
+  for (const port of collectServiceReadPorts(wf, ctx)) {
+    if (seen.has(port.repo)) continue;
+    seen.add(port.repo);
+    out.push({ repoName: port.repo, aggName: port.aggregate });
+  }
+  return out;
+}
+
+/** The expressions a workflow statement directly carries (one level — the
+ *  per-kind nesting is handled by `collectServiceReadPorts`'s spine walk). */
+function workflowStmtExprs(st: WorkflowStmtIR): ExprIR[] {
+  switch (st.kind) {
+    case "expr-let":
+      return [st.expr];
+    case "precondition":
+    case "requires":
+      return [st.expr];
+    case "resource-call":
+      return [st.call];
+    case "op-call":
+    case "repo-let":
+      return st.args;
+    case "factory-let":
+    case "emit":
+      return st.fields.map((f) => f.value);
+    case "for-each":
+      return [st.iterable];
+    case "if-let":
+      return st.retrievalArgs;
+    default:
+      return [];
+  }
+}
+
+/** Direct sub-expressions of an ExprIR (for the read-port call scan). */
+function exprChildren(e: ExprIR): ExprIR[] {
+  switch (e.kind) {
+    case "method-call":
+      return [e.receiver, ...e.args];
+    case "member":
+      return [e.receiver];
+    case "binary":
+      return [e.left, e.right];
+    case "ternary":
+      return [e.cond, e.then, e.otherwise];
+    case "unary":
+      return [e.operand];
+    case "paren":
+      return [e.inner];
+    case "call":
+      return e.args;
+    case "new":
+    case "object":
+      return e.fields.map((f) => f.value);
+    case "lambda":
+      return e.body ? [e.body] : [];
+    default:
+      return [];
+  }
 }
 
 function collectReposForWorkflow(wf: WorkflowIR): {

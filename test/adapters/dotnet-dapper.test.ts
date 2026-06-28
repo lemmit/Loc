@@ -125,10 +125,12 @@ system D {
   });
 });
 
-// Reference collections (`X id[]`) on Dapper: one ordinal-ordered join table
-// per association (DbSchema), bulk-loaded on every read via LoadRefsAsync,
-// full-list-replaced on save (DELETE + re-INSERT — semantically identical to
-// EF's diff-sync for a full-list replace).
+// Reference collections (`X id[]`) on Dapper: one join table per association
+// (DbSchema), a set (membership only, no order) keyed by its composite
+// (owner, target) PK — reads ORDER BY the target FK id for deterministic
+// read-back — bulk-loaded on every read via LoadRefsAsync, full-list-replaced
+// on save (DELETE + re-INSERT — semantically identical to EF's diff-sync for a
+// full-list replace).
 describe("dapper reference-collection associations", () => {
   const SRC = `
 system D {
@@ -158,17 +160,16 @@ system D {
     expect(files.get("api/Infrastructure/Persistence/DbSchema.cs")).toContain(
       "CREATE TABLE IF NOT EXISTS order_tags",
     );
-    // Reads funnel through the ordinal-ordered bulk loader.
+    // Reads funnel through the bulk loader, ordered by the target FK id.
     expect(repo).toContain(
-      "SELECT order_id, tag_id FROM order_tags WHERE order_id = ANY(@ids) ORDER BY order_id, ordinal",
+      "SELECT order_id, tag_id FROM order_tags WHERE order_id = ANY(@ids) ORDER BY order_id, tag_id",
     );
     expect(repo).toContain("await LoadRefsAsync(conn, __one, cancellationToken);"); // GetById
     expect(repo).toContain("await LoadRefsAsync(conn, __roots, cancellationToken);"); // findAll
-    // Save replaces the full list with ordinals.
+    // Save replaces the full list (set semantics — no ordinal column).
     expect(repo).toContain('DELETE FROM order_tags WHERE order_id = @id"');
-    expect(repo).toContain(
-      "INSERT INTO order_tags (order_id, tag_id, ordinal) VALUES (@o, @t, @i)",
-    );
+    expect(repo).toContain("INSERT INTO order_tags (order_id, tag_id) VALUES (@o, @t)");
+    expect(repo).not.toContain("ordinal");
   });
 
   it("accepts managed-access fields (wire-projection concern, no gate)", async () => {

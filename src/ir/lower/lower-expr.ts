@@ -88,6 +88,7 @@ import {
   USER_SHAPE_NAME,
   withLocal,
 } from "./lower-types.js";
+import { matchRepoRead } from "./repo-read.js";
 
 /** Synthetic entity name used to type the `currentUser` magic
  *  identifier.  Member access on the user shape resolves through
@@ -251,6 +252,34 @@ function lowerBinaryChain(chain: BinaryChain, env: Env): ExprIR {
  *  suffix together form a magic pattern: `permissions.<name>` (rewrites
  *  to a string literal) and `Aggregate.create(...)` (factory call). */
 function lowerPostfixChain(chain: PostfixChain, env: Env): ExprIR {
+  // Probe: a repository READ in a `reading` domain-service body
+  // (domain-services.md rev. 4) — `Accounts.byHolder(h)` /
+  // `Accounts.find/findAll/run(...)`.  Fires only when `env.serviceRepos` is
+  // set (i.e. we are lowering a domain-service operation) and the whole chain
+  // matches a recognised repository read.  Lowers to a fully-resolved
+  // `repo-read` Call so a backend renders a real repository call without
+  // re-recognising the AST.  A repository WRITE does NOT match here (it falls
+  // through to the generic method-call and the validator's repo-write gate).
+  if (env.serviceRepos) {
+    const read = matchRepoRead(chain, env.serviceRepos);
+    if (read) {
+      const aggName = read.repo.aggregate?.ref?.name ?? "Unknown";
+      const args = read.args.map((a) => lowerExpr(a, env));
+      const callIR: ExprIR = {
+        kind: "call",
+        callKind: "repo-read",
+        name: read.method,
+        args,
+        repoRead: {
+          repo: read.repo.name,
+          aggregate: aggName,
+          method: read.method,
+          readKind: read.kind,
+        },
+      };
+      return callIR;
+    }
+  }
   // Probe: `permissions.<name>` — first suffix is a non-call MemberSuffix
   // and the head is a `NameRef("permissions")`, and the enclosing
   // module declared a permissions catalogue.  Rewrites to a plain

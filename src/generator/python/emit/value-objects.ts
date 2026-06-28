@@ -1,8 +1,30 @@
-import type { BoundedContextIR, EnumIR, ValueObjectIR } from "../../../ir/types/loom-ir.js";
+import type { BoundedContextIR, EnumIR, StmtIR, ValueObjectIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { snake } from "../../../util/naming.js";
 import { emptyPyTypeImports, visitPyTypeImports } from "../py-type-imports.js";
 import { collectPyExprImports, renderPyExpr, renderPyType } from "../render-expr.js";
+import { renderPyStatements } from "../render-stmt.js";
+
+/** Import collection over a pure block-body function statement's expressions
+ *  (a block `function` only ever carries let / precondition / requires /
+ *  return / expression — the impure kinds are rejected by the IR purity
+ *  gate, so this need not cover assign / emit / add / remove). */
+function collectBlockStmtExprImports(st: StmtIR, into: Set<string>): void {
+  switch (st.kind) {
+    case "precondition":
+    case "requires":
+    case "let":
+    case "expression":
+      collectPyExprImports(st.expr, into);
+      return;
+    case "return":
+      collectPyExprImports(st.value, into);
+      return;
+    case "call":
+      for (const a of st.args) collectPyExprImports(a, into);
+      return;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // `app/domain/value_objects.py` — enums as `StrEnum` subclasses (member
@@ -28,7 +50,8 @@ export function renderPyEnumsAndValueObjects(ctx: BoundedContextIR): string {
     for (const fn of v.functions) {
       visitPyTypeImports(fn.returnType, types);
       for (const p of fn.params) visitPyTypeImports(p.type, types);
-      collectPyExprImports(fn.body, exprImports);
+      if ("expr" in fn.body) collectPyExprImports(fn.body.expr, exprImports);
+      else for (const st of fn.body.stmts) collectBlockStmtExprImports(st, exprImports);
     }
     for (const inv of v.invariants) {
       collectPyExprImports(inv.expr, exprImports);
@@ -82,11 +105,12 @@ function renderPyValueObject(v: ValueObjectIR): string[] {
   ]);
   const fns = v.functions.flatMap((fn) => {
     const fnParams = ["self", ...fn.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`)];
-    return [
-      "",
-      `    def ${snake(fn.name)}(${fnParams.join(", ")}) -> ${renderPyType(fn.returnType)}:`,
-      `        return ${renderPyExpr(fn.body, VO_CTX)}`,
-    ];
+    const head = `    def ${snake(fn.name)}(${fnParams.join(", ")}) -> ${renderPyType(fn.returnType)}:`;
+    const body =
+      "expr" in fn.body
+        ? `        return ${renderPyExpr(fn.body.expr, VO_CTX)}`
+        : renderPyStatements(fn.body.stmts);
+    return ["", head, body];
   });
   return [
     "",

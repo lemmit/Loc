@@ -233,7 +233,7 @@ export function slotExpr(ast: Model, slot: ExprSlot): Expression | null {
   const members = membersOf(owner);
   if (slot.kind === "function") {
     const fn = members.find((m): m is FunctionDecl => m.$type === "FunctionDecl" && (m as FunctionDecl).name === slot.name);
-    return fn ? (fn as FunctionDecl).body : null;
+    return fn ? ((fn as FunctionDecl).body ?? null) : null;
   }
   if (slot.kind === "derived") {
     const d = members.find((m): m is DerivedProp => m.$type === "DerivedProp" && (m as DerivedProp).name === slot.name);

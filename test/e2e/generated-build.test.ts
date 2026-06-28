@@ -276,6 +276,42 @@ describe.skipIf(!ENABLED)(
       }
     }, 300_000);
 
+    // DEBT-24: a PRINCIPAL-referencing `criterion` reified into the
+    // find/retrieval query-face.  The reified `<name>Criterion` fn is
+    // module-scoped, so `currentUser.<field>` must bind through the ambient
+    // `requireCurrentUser()` accessor — otherwise the fn names an unbound
+    // `currentUser` and the repository fails `tsc`.  This cell is the
+    // regression guard for that bug.
+    it("system principal `criterion` in a find/retrieval — generated project type-checks", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-tenancy-retrieval-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/ts-build/tenancy-retrieval.ddd -o ${outDir}`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const proj = path.join(outDir, "api");
+        const repo = fs.readFileSync(
+          path.join(proj, "db", "repositories", "account-repository.ts"),
+          "utf8",
+        );
+        // The criterion fn binds the ambient principal — no unbound `currentUser`.
+        expect(repo).toMatch(/requireCurrentUser\(\)\.tenantId/);
+        expect(repo).not.toMatch(/eq\(schema\.accounts\.tenantId, currentUser\./);
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 120_000 });
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
+
     // DEBT-02 Slice A: a PRINCIPAL-referencing capability filter on a
     // `shape(embedded)` aggregate.  The embedded aggregate's root scalars are
     // real columns, so it reuses the relational-principal path — the embedded

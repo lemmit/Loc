@@ -30,6 +30,10 @@ import type {
   TypeIR,
   ValueObjectIR,
 } from "../../../ir/types/loom-ir.js";
+import {
+  type ReadPort,
+  readPortsForOperation,
+} from "../../../ir/util/domain-service-read-ports.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst } from "../../../util/naming.js";
 import { renderTsType } from "../render-expr.js";
@@ -72,6 +76,13 @@ export function renderDomainServices(ctx: BoundedContextIR): string | undefined 
   const usedAggs = [...aggNames].filter(referenced).sort();
   const usesMoney = /\bDecimal\b/.test(scanBody) || /money/.test([...sigTypeNames].join(" "));
   const usesIds = /\bIds\.\w/.test(scanBody) || sigCarriesId(ctx);
+  // Read-port repository classes (domain-services.md rev. 4): a `reading`-tier
+  // op takes a `<Aggregate>Repository` handle, imported as a VALUE type from the
+  // generated repository module (the param annotation is a type position, but
+  // the class is exported as a value, so a plain `import type` keeps it).
+  const readPortRepos = collectReadPortRepos(ctx).sort((a, b) =>
+    a.aggregate.localeCompare(b.aggregate),
+  );
 
   return (
     lines(
@@ -83,6 +94,10 @@ export function renderDomainServices(ctx: BoundedContextIR): string | undefined 
         ? `import { ${usedVoOrEnum.join(", ")} } from "./value-objects";`
         : null,
       ...usedAggs.map((n) => `import type { ${n} } from "./${lowerFirst(n)}";`),
+      ...readPortRepos.map(
+        (p) =>
+          `import type { ${p.aggregate}Repository } from "../db/repositories/${lowerFirst(p.aggregate)}-repository";`,
+      ),
       "",
       body,
     ) + "\n"
@@ -99,13 +114,38 @@ function renderService(svc: DomainServiceIR, ctx: BoundedContextIR): string {
 }
 
 function renderOperation(op: DomainServiceOperationIR, ctx: BoundedContextIR): string {
-  const params = op.params.map((p) => `${p.name}: ${renderTsType(p.type)}`).join(", ");
-  const ret = op.returnType ? `: ${renderOperationReturnType(op.returnType, ctx)}` : "";
-  return lines(
-    `export function ${lowerFirst(op.name)}(${params})${ret} {`,
-    renderTsStatements(op.body),
-    "}",
-  );
+  // Read-port parameters (domain-services.md rev. 4, Slice 1): a `reading`-tier
+  // op takes one repository handle per repo it reads, AHEAD of the user params —
+  // `accounts: AccountRepository` — exactly the handle the body's `repo-read`
+  // arms render against (`await accounts.byHolder(holder)`) and the orchestrating
+  // workflow supplies.  A PURE op has no ports, so its declaration is unchanged
+  // (byte-identical).  Each read-port repository read makes the operation `async`
+  // (the repo methods are awaited), and its return type is wrapped in a Promise.
+  const ports = readPortsForOperation(op);
+  const portParams = ports.map((p) => `${lowerFirst(p.repo)}: ${p.aggregate}Repository`);
+  const userParams = op.params.map((p) => `${p.name}: ${renderTsType(p.type)}`);
+  const params = [...portParams, ...userParams].join(", ");
+  const isReading = ports.length > 0;
+  const kw = isReading ? "export async function" : "export function";
+  const ret = op.returnType
+    ? `: ${isReading ? `Promise<${renderOperationReturnType(op.returnType, ctx)}>` : renderOperationReturnType(op.returnType, ctx)}`
+    : "";
+  return lines(`${kw} ${lowerFirst(op.name)}(${params})${ret} {`, renderTsStatements(op.body), "}");
+}
+
+/** The distinct read-port repositories (`<Aggregate>Repository` classes) every
+ *  reading-tier operation in a context's domain services reads — drives the
+ *  repository-class import surface.  De-duplicated by aggregate. */
+function collectReadPortRepos(ctx: BoundedContextIR): ReadPort[] {
+  const byAgg = new Map<string, ReadPort>();
+  for (const svc of ctx.domainServices) {
+    for (const op of svc.operations) {
+      for (const p of readPortsForOperation(op)) {
+        if (!byAgg.has(p.aggregate)) byAgg.set(p.aggregate, p);
+      }
+    }
+  }
+  return [...byAgg.values()];
 }
 
 /** Collect every named type (enum / valueobject / entity / id targetName)
