@@ -155,10 +155,15 @@ export function jpaFieldAnnotations(
         `java jpa: no AssociationIR for reference collection '${owner.name}.${f.name}' — enrichment derives one per aggregate-level Id[] field.`,
       );
     }
+    // `Target id[]` is contractually a set (membership only, no order), so
+    // the join table carries no `ordinal` column — the composite (owner,
+    // target) PK is the whole row.  Deterministic read-back order is a
+    // read-time projection: `@OrderBy` (no argument) sorts by the element
+    // value, i.e. the target FK id — matching every other backend.
     return [
       `    @ElementCollection(fetch = FetchType.EAGER)`,
       `    @CollectionTable(name = "${assoc.joinTable}"${schemaAttr(opts.schema)}, joinColumns = @JoinColumn(name = "${assoc.ownerFk}"))`,
-      `    @OrderColumn(name = "ordinal")`,
+      `    @OrderBy`,
       `    @AttributeOverride(name = "value", column = @Column(name = "${assoc.targetFk}"))`,
     ];
   }

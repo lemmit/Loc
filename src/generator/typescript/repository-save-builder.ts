@@ -63,9 +63,10 @@ function saveTxBody(agg: EnrichedAggregateIR, ctx: BoundedContextIR, emitTrace: 
   });
   // Diff-sync each reference collection's join table: delete pairs the
   // aggregate no longer holds, insert the new ones (idempotent via the
-  // composite PK).  Set semantics — the wire contract for `Id<T>[]`
-  // doesn't promise order — but we still write the ordinal column from
-  // the field's index so it's something deterministic per backend.
+  // composite PK).  Set semantics — the wire contract for `Id<T>[]` is a
+  // set (membership only, no order), so the join row carries no payload:
+  // the composite PK is the whole row.  Deterministic read-back order is a
+  // read-time projection (ORDER BY the target FK id), not a stored column.
   const assocBlocks = associationsOf(agg).flatMap((assoc) => {
     const joinConst = joinTableConstName(assoc);
     const ownerCol = joinColumnName(assoc.ownerFk);
@@ -81,9 +82,9 @@ function saveTxBody(agg: EnrichedAggregateIR, ctx: BoundedContextIR, emitTrace: 
       `      if (toDelete${cap}.length > 0) {`,
       `        await tx.delete(schema.${joinConst}).where(and(eq(schema.${joinConst}.${ownerCol}, aggregate.id), inArray(schema.${joinConst}.${targetCol}, toDelete${cap})));`,
       `      }`,
-      `      for (let i = 0; i < current${cap}.length; i++) {`,
-      `        const row = { ${ownerCol}: aggregate.id as string, ${targetCol}: current${cap}[i]!, ordinal: i };`,
-      `        await tx.insert(schema.${joinConst}).values(row).onConflictDoUpdate({ target: [schema.${joinConst}.${ownerCol}, schema.${joinConst}.${targetCol}], set: { ordinal: i } });`,
+      `      for (const t of current${cap}) {`,
+      `        const row = { ${ownerCol}: aggregate.id as string, ${targetCol}: t };`,
+      `        await tx.insert(schema.${joinConst}).values(row).onConflictDoNothing({ target: [schema.${joinConst}.${ownerCol}, schema.${joinConst}.${targetCol}] });`,
       `      }`,
     ];
   });

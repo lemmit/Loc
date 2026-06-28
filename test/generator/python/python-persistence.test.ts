@@ -9,8 +9,8 @@ import { parseString } from "../../_helpers/index.js";
 // Python backend — SQLAlchemy persistence + repositories (plan S6).
 // Table/column/index naming mirrors the Drizzle schema (snake columns,
 // plural tables, `<parent>_id` FK behind the parent_id attribute, join
-// tables with composite PK + ordinal + reverse index) so every backend
-// shares one Postgres DDL.
+// tables with composite PK + reverse index) so every backend shares one
+// Postgres DDL.
 // ---------------------------------------------------------------------------
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -55,14 +55,21 @@ describe("python schema emission", () => {
     expect(schema).toContain("    unit_price_currency: Mapped[str] = mapped_column(Text)");
   });
 
-  it("ref collections emit a join table with composite PK + ordinal + reverse index", async () => {
+  it("ref collections emit a join table with composite PK + reverse index (set semantics, no ordinal)", async () => {
     const files = await build();
     const schema = files.get("api/app/db/schema.py")!;
     expect(schema).toContain("class OrderWatchersRow(Base):");
     expect(schema).toContain('    __tablename__ = "order_watchers"');
     expect(schema).toContain('PrimaryKeyConstraint("order_id", "customer_id")');
     expect(schema).toContain('Index("order_watchers_customer_id_idx", "customer_id")');
-    expect(schema).toContain("    ordinal: Mapped[int] = mapped_column(Integer)");
+    // `Id<T>[]` is a set (membership only, no order): the composite PK is the
+    // whole join row, so it carries NO ordinal column.  Scope the check to the
+    // join model body (the VO-collection child table keeps its own ordinal).
+    const joinModel = schema.slice(
+      schema.indexOf("class OrderWatchersRow(Base):"),
+      schema.indexOf("class ", schema.indexOf("class OrderWatchersRow(Base):") + 1),
+    );
+    expect(joinModel).not.toContain("ordinal");
   });
 });
 
@@ -85,8 +92,8 @@ describe("python repository emission", () => {
     expect(repo).toContain(
       "unit_price=Money(float(row.unit_price_amount), row.unit_price_currency),",
     );
-    // Ref collection loads join rows ordinal-ordered and brands ids.
-    expect(repo).toContain(".order_by(OrderWatchersRow.ordinal)");
+    // Ref collection loads join rows ordered by the target FK id and brands ids.
+    expect(repo).toContain(".order_by(OrderWatchersRow.customer_id)");
     expect(repo).toContain("watchers=[CustomerId(__r.customer_id) for __r in watchers_rows],");
   });
 
@@ -98,7 +105,9 @@ describe("python repository emission", () => {
     );
     expect(repo).toContain("lines_stale = [__id for __id in lines_existing");
     expect(repo).toContain("delete(OrderLineRow).where(OrderLineRow.id.in_(lines_stale))");
-    expect(repo).toContain('pair = {"order_id": aggregate.id, "customer_id": __t, "ordinal": __i}');
+    // Set semantics: the join row is just its (owner, target) PK — no ordinal.
+    expect(repo).toContain('pair = {"order_id": aggregate.id, "customer_id": __t}');
+    expect(repo).toContain("insert(OrderWatchersRow).values(**pair).on_conflict_do_nothing(");
     expect(repo).toContain("for event in aggregate.pull_events():");
     expect(repo).toContain("await self._events.dispatch(event)");
     expect(repo).toContain("await self._session.flush()");

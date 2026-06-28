@@ -7,16 +7,18 @@ import { plural } from "../../../util/naming.js";
 //
 // One C# class + one IEntityTypeConfiguration<JoinEntity> per
 // AssociationIR.  The class is a thin row with two strongly-typed Id
-// columns + an Ordinal int.  EF tracks it as a plain entity (not a
-// navigation target from either aggregate); the repository explicitly
-// queries/writes it, mirroring how the TS/Hono generator persists the
-// join table via Drizzle.
+// columns — the composite (owner, target) PK IS the whole row, since
+// `Id<T>[]` is contractually a set (membership only, no order).  EF tracks
+// it as a plain entity (not a navigation target from either aggregate);
+// the repository explicitly queries/writes it, mirroring how the TS/Hono
+// generator persists the join table via Drizzle.  Deterministic read-back
+// order is a read-time projection (ORDER BY the target FK id), not a stored
+// `Ordinal` column.
 //
 // Naming:
 //   joinTable    = "trainer_party"      → class TrainerParty, DbSet TrainerParties
 //   ownerFk      = "trainer_id"         → property TrainerId (type TrainerId)
 //   targetFk     = "pokemon_id"         → property PokemonId (type PokemonId)
-//   ordinal      = "Ordinal"            (always)
 // Self-referential collections collapse to ownerFk="owner_id"/targetFk="target_id"
 // in enrichment; the property names follow.
 // ---------------------------------------------------------------------------
@@ -55,15 +57,13 @@ export function renderJoinEntity(assoc: AssociationIR, ns: string): string {
       "{",
       `    public ${ownerType} ${ownerProp} { get; set; }`,
       `    public ${targetType} ${targetProp} { get; set; }`,
-      `    public int Ordinal { get; set; }`,
       "",
       `    private ${className}() { ${ownerProp} = default!; ${targetProp} = default!; }`,
       "",
-      `    public ${className}(${ownerType} ${camelize(ownerProp)}, ${targetType} ${camelize(targetProp)}, int ordinal)`,
+      `    public ${className}(${ownerType} ${camelize(ownerProp)}, ${targetType} ${camelize(targetProp)})`,
       "    {",
       `        ${ownerProp} = ${camelize(ownerProp)};`,
       `        ${targetProp} = ${camelize(targetProp)};`,
-      `        Ordinal = ordinal;`,
       "    }",
       "}",
     ) + "\n"
@@ -95,7 +95,6 @@ export function renderJoinEntityConfiguration(assoc: AssociationIR, ns: string):
       `        builder.HasIndex(x => x.${targetProp});`,
       `        builder.Property(x => x.${ownerProp}).HasConversion(v => v.Value, v => new ${assoc.ownerAgg}Id(v));`,
       `        builder.Property(x => x.${targetProp}).HasConversion(v => v.Value, v => new ${assoc.targetAgg}Id(v));`,
-      `        builder.Property(x => x.Ordinal).IsRequired();`,
       "    }",
       "}",
     ) + "\n"

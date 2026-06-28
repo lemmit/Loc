@@ -34,8 +34,8 @@ import { provColumn } from "./provenance.js";
 // column / index naming mirrors the Drizzle schema exactly (snake_case
 // columns, `snake(plural(name))` tables, part FK column
 // `<parent>_id` behind the `parent_id` attribute, join tables
-// `snake(owner)_snake(field)` with composite PK + ordinal + reverse
-// index) so every backend reads/writes the same shared Postgres DDL.
+// `snake(owner)_snake(field)` with composite PK + reverse index) so
+// every backend reads/writes the same shared Postgres DDL.
 //
 // Deferred shapes (guarded out, landing with their slices): TPH/TPC
 // inheritance (S13), event-log + document + embedded persistence
@@ -463,8 +463,11 @@ function renderValueCollectionModel(
   );
 }
 
-/** Many-to-many join table for a `T id[]` reference collection — two
- *  FK columns + ordinal, composite PK, reverse-membership index. */
+/** Many-to-many join table for a `T id[]` reference collection — two FK
+ *  columns, composite PK, reverse-membership index.  `T id[]` is a set
+ *  (membership only, no order): the composite (owner, target) PK is the whole
+ *  row, no payload column.  Deterministic read-back order is a read-time
+ *  projection (ORDER BY the target FK id), not a stored `ordinal`. */
 function renderJoinModel(assoc: AssociationIR, schema?: string, prefix?: string): string {
   const tableName = `${prefix ?? ""}${assoc.joinTable}`;
   return lines(
@@ -478,6 +481,5 @@ function renderJoinModel(assoc: AssociationIR, schema?: string, prefix?: string)
     "",
     `    ${assoc.ownerFk}: Mapped[str] = mapped_column(Uuid(as_uuid=False))`,
     `    ${assoc.targetFk}: Mapped[str] = mapped_column(Uuid(as_uuid=False))`,
-    "    ordinal: Mapped[int] = mapped_column(Integer)",
   );
 }

@@ -38,7 +38,7 @@ export function associationMapLines(
     const rows = `${assoc.fieldName}JoinRows`;
     const map = `${assoc.fieldName}ByOwner`;
     return [
-      `${indent}const ${rows} = await ${dbExpr}.select({ o: schema.${joinConst}.${ownerCol}, t: schema.${joinConst}.${targetCol} }).from(schema.${joinConst}).where(inArray(schema.${joinConst}.${ownerCol}, rootIds)).orderBy(schema.${joinConst}.${ownerCol}, schema.${joinConst}.ordinal);`,
+      `${indent}const ${rows} = await ${dbExpr}.select({ o: schema.${joinConst}.${ownerCol}, t: schema.${joinConst}.${targetCol} }).from(schema.${joinConst}).where(inArray(schema.${joinConst}.${ownerCol}, rootIds)).orderBy(schema.${joinConst}.${ownerCol}, schema.${joinConst}.${targetCol});`,
       `${indent}const ${map} = new Map<string, Ids.${assoc.targetAgg}Id[]>();`,
       `${indent}for (const r of ${rows}) {`,
       `${indent}  const list = ${map}.get(r.o) ?? [];`,

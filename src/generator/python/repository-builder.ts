@@ -53,7 +53,7 @@ import { renderPyType } from "./render-expr.js";
 //   - `get_by_id(id)` raises AggregateNotFoundError on missing
 //   - `save(agg)` upserts the root row, diff-syncs each contained
 //     collection (insert new / update existing / delete removed) AND
-//     each reference-collection join table (ordinal-carrying), drains
+//     each reference-collection join table (set semantics, no ordinal), drains
 //     events through the dispatcher, commits
 //   - `all()` loads + hydrates every root
 //   - `delete(id)` — only when the aggregate declares a canonical destroy
@@ -631,7 +631,7 @@ function hydrateMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR):
       "        ).scalars().all()",
     );
   }
-  // …and reference-collection join rows (ordinal-ordered).
+  // …and reference-collection join rows (ordered by the target FK id).
   for (const f of agg.fields.filter(isRefCollectionField)) {
     const assoc = assocFor(agg, f.name);
     if (!assoc) continue;
@@ -642,7 +642,7 @@ function hydrateMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR):
       "            await self._session.execute(",
       `                select(${joinRow})`,
       `                .where(${joinRow}.${assoc.ownerFk} == row.id)`,
-      `                .order_by(${joinRow}.ordinal)`,
+      `                .order_by(${joinRow}.${assoc.targetFk})`,
       "            )",
       "        ).scalars().all()",
     );
@@ -941,11 +941,11 @@ function syncJoinTable(assoc: AssociationIR, f: FieldIR, aggVar: string): string
     `                    ${joinRow}.${assoc.ownerFk} == ${aggVar}.id, ${joinRow}.${assoc.targetFk}.in_(${v}_stale)`,
     "                )",
     "            )",
-    `        for __i, __t in enumerate(${v}_current):`,
-    `            pair = {"${assoc.ownerFk}": ${aggVar}.id, "${assoc.targetFk}": __t, "ordinal": __i}`,
+    `        for __t in ${v}_current:`,
+    `            pair = {"${assoc.ownerFk}": ${aggVar}.id, "${assoc.targetFk}": __t}`,
     "            await self._session.execute(",
-    `                insert(${joinRow}).values(**pair).on_conflict_do_update(`,
-    `                    index_elements=["${assoc.ownerFk}", "${assoc.targetFk}"], set_={"ordinal": __i}`,
+    `                insert(${joinRow}).values(**pair).on_conflict_do_nothing(`,
+    `                    index_elements=["${assoc.ownerFk}", "${assoc.targetFk}"]`,
     "                )",
     "            )",
   ];
