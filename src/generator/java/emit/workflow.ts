@@ -566,14 +566,14 @@ export function renderJavaWorkflows(
     }
     const paramLets = wf.params.map((p) => {
       collectWireToDomainImports(p.type, imports);
-      return `        var ${p.name} = ${wireToDomain(p.type, `request.${p.name}()`)};`;
+      return `            var ${p.name} = ${wireToDomain(p.type, `request.${p.name}()`)};`;
     });
     const bodyLines = renderWorkflowStmts(
       wf.statements,
       javaWorkflowStmtTarget(ctx, imports, renderCtxFor(ctx, wctx)),
-      "        ",
+      "            ",
     );
-    const saves = wf.savesAtExit.map((s) => `        ${repoField(s.aggName)}.save(${s.name});`);
+    const saves = wf.savesAtExit.map((s) => `            ${repoField(s.aggName)}.save(${s.name});`);
     // The service carries a class-level `@Transactional`; a workflow that pins
     // an isolation level (`transactional(<level>)`, or its state dataSource's
     // `isolationLevel:`) overrides it per-method — parity with the .NET
@@ -585,16 +585,21 @@ export function renderJavaWorkflows(
         ? [`    @Transactional(isolation = Isolation.${javaIsolation(isolation)})`]
         : []),
       `    public void ${lowerFirst(wf.name)}(${wf.params.length > 0 ? `${reqType} request` : ""}) {`,
-      ...(usesUser && authed ? [`        var currentUser = currentUserAccessor.user();`] : []),
+      // A workflow is a per-dispatch boundary: run it in a child execution frame
+      // (fresh scope_id, parent_id ← the request's root scope) so its audit /
+      // provenance rows record their call-structure position.
+      `        try (var __frame = RequestContext.openChild()) {`,
+      ...(usesUser && authed ? [`            var currentUser = currentUserAccessor.user();`] : []),
       // Workflow narrative — `workflow_started` at method entry; shared catalog
       // identity (field `workflow`) across every backend.
-      `        CatalogLog.event("workflow_started", "info", "workflow", ${JSON.stringify(wf.name)});`,
+      `            CatalogLog.event("workflow_started", "info", "workflow", ${JSON.stringify(wf.name)});`,
       ...paramLets,
       ...bodyLines,
       ...saves,
       // `workflow_completed` on the success tail — a thrown guard / domain
       // exception short-circuits before reaching here.
-      `        CatalogLog.event("workflow_completed", "info", "workflow", ${JSON.stringify(wf.name)});`,
+      `            CatalogLog.event("workflow_completed", "info", "workflow", ${JSON.stringify(wf.name)});`,
+      `        }`,
       `    }`,
       ``,
     );
@@ -674,6 +679,9 @@ export function renderJavaWorkflows(
       // CatalogLog is always referenced now (workflow_started/completed on every
       // command-workflow method), not only when the body emits a domain event.
       `import ${wctx.basePkg}.config.CatalogLog;`,
+      // RequestContext.openChild() opens the per-dispatch child frame on every
+      // command-workflow method.
+      `import ${wctx.basePkg}.config.RequestContext;`,
       `import ${wctx.basePkg}.domain.common.*;`,
       `import ${wctx.basePkg}.domain.enums.*;`,
       `import ${wctx.basePkg}.domain.ids.*;`,

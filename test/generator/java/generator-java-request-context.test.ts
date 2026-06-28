@@ -81,6 +81,23 @@ describe("Java execution-context carrier", () => {
     expect(filter).toContain("MDC.clear();");
   });
 
+  it("emits the per-dispatch child-frame seam (openChild → parent_id chaining)", async () => {
+    const rc = get(await generateSystemFiles(SYSTEM("")), "/config/RequestContext.java");
+    // openChild() opens a child frame: fresh scope_id, parent_id <- the caller's
+    // scope_id, returned as an AutoCloseable Frame restored on close (try-with-
+    // resources). A no-op outside a request (no current scope).
+    expect(rc).toContain("public static Frame openChild() {");
+    expect(rc).toContain("var parentScope = MDC.get(SCOPE_ID);");
+    expect(rc).toContain("MDC.put(SCOPE_ID, newId());");
+    expect(rc).toContain("MDC.put(PARENT_ID, parentScope);");
+    expect(rc).toContain("return new Frame(parentScope, prevParent);");
+    // The restore handle: close() pops back to the parent frame, no checked throw.
+    expect(rc).toContain("public static final class Frame implements AutoCloseable {");
+    expect(rc).toContain("public void close() {");
+    expect(rc).toContain("MDC.put(SCOPE_ID, parentScope);");
+    expect(rc).toContain("MDC.remove(PARENT_ID);");
+  });
+
   it("CatalogLog stamps the MDC carrier ids onto every log line", async () => {
     // Log-line enrichment: the catalog writer reads the ambient frame from MDC
     // so request_id / scope_id / actor_id ride every line emitted in a request,

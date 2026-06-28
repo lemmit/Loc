@@ -1307,7 +1307,12 @@ defmodule ${moduleName} do
 
   @spec run(map()${needsUser ? ", term()" : ""}) :: {:ok, term()} | {:error, term()}
   def run(params${userParam}) when is_map(params) do
-    Repo.transaction(fn ->${txnBody}end)
+    # A workflow is a per-dispatch boundary: run it in a child execution frame
+    # (parent_id <- the request's root scope) so its audit / provenance rows
+    # record their call-structure position.
+    ${appModule}.RequestContext.with_child_frame(fn ->
+      Repo.transaction(fn ->${txnBody}end)
+    end)
   end
 
   # Public (not defp): Elixir 1.18 narrows a private fn's parameter to
@@ -1334,7 +1339,12 @@ defmodule ${moduleName} do
 
   @spec run(map()${needsUser ? ", term()" : ""}) :: {:ok, term()} | {:error, term()}
   def run(params${userParam}) when is_map(params) do
+    # A workflow is a per-dispatch boundary: run it in a child execution frame
+    # (parent_id <- the request's root scope) so its audit / provenance rows
+    # record their call-structure position.
+    ${appModule}.RequestContext.with_child_frame(fn ->
 ${finalBody}
+    end)
   end
 end
 `;

@@ -191,10 +191,10 @@ defmodule ${appModule}.RequestContext do
     correlation_id = resolve_correlation_id(conn)
 
     # Frame-local tier: the root frame for this request gets a fresh scope id
-    # and no parent (parity with .NET's OpenRoot / Hono's root frame).  The
-    # BEAM has no per-dispatch Mediator pipeline, so there is no child-frame
-    # nesting yet — parent_id stays nil; a future per-dispatch slice would
-    # chain it.  scope_id rides every log line, so causality is greppable.
+    # and no parent (parity with .NET's OpenRoot / Hono's root frame).  Each
+    # per-dispatch boundary (a workflow run, an event reactor) then opens a
+    # child frame via \`with_child_frame/1\`, chaining parent_id to the caller's
+    # scope.  scope_id rides every log line, so causality is greppable.
     Logger.metadata(
       correlation_id: correlation_id,
       scope_id: generate_id(),
@@ -234,7 +234,7 @@ defmodule ${appModule}.RequestContext do
   @doc "The id of the current execution frame (the root frame for a request)."
   def scope_id, do: Logger.metadata()[:scope_id]
 
-  @doc "The parent frame's id, or nil at the root frame (no per-dispatch nesting yet)."
+  @doc "The parent frame's id, or nil at the root frame."
   def parent_id, do: Logger.metadata()[:parent_id]
 
   @doc "The authenticated principal's id, or nil before auth has run (or when the deployable carries no auth).  Only the id is carried here, not the whole principal; the full principal lives on conn.assigns.current_user."
@@ -245,6 +245,32 @@ defmodule ${appModule}.RequestContext do
 
   @doc "Epoch milliseconds at request start, or nil outside a request."
   def started_at, do: Logger.metadata()[:started_at]
+
+  @doc """
+  Run \`fun\` inside a CHILD execution frame: a fresh scope_id whose parent_id
+  chains to the caller's scope_id, restored on return (a per-dispatch boundary —
+  a workflow, an event reactor — opens one so its audit / provenance rows record
+  their call-structure position).  Outside a request (no current frame) \`fun\`
+  runs unframed, so non-request callers pay nothing.  \`Logger.metadata\` is
+  process-local, so the frame never leaks across a spawned Task — a fan-out
+  branch that needs it must copy it explicitly.
+  """
+  def with_child_frame(fun) when is_function(fun, 0) do
+    case Logger.metadata()[:scope_id] do
+      nil ->
+        fun.()
+
+      parent_scope ->
+        prev_parent = Logger.metadata()[:parent_id]
+        Logger.metadata(scope_id: generate_id(), parent_id: parent_scope)
+
+        try do
+          fun.()
+        after
+          Logger.metadata(scope_id: parent_scope, parent_id: prev_parent)
+        end
+    end
+  end
 end
 `;
 }

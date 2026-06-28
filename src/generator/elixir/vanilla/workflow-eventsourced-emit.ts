@@ -347,6 +347,9 @@ function bodyUsesState(statements: WorkflowStmtIR[]): boolean {
  *  dispatched `events` list (unlike the state path's inline re-dispatch). */
 export function renderEsWorkflowHandler(contextModule: string, sub: EsSub): string {
   const wf = sub.workflow;
+  // contextModule is `<appModule>.<Context>`; strip the context segment for the
+  // RequestContext module path.
+  const appModule = contextModule.replace(/\.[^.]+$/, "");
   const corr = wf.correlationField as string;
   const verb = sub.trigger === "on" ? "On" : "Start";
   const handlerMod = `${contextModule}.Workflows.${upperFirst(wf.name)}.${verb}${upperFirst(sub.event)}`;
@@ -445,7 +448,11 @@ defmodule ${handlerMod} do
   @moduledoc "${sub.trigger === "on" ? "Reactor" : "Starter"} for ${upperFirst(sub.event)} → ${upperFirst(wf.name)} (event-sourced)."
 
 ${requireLogger}  def handle(%${contextModule}.Events.${upperFirst(sub.event)}{} = event) do
+    # A reactor is a per-dispatch boundary: child execution frame (parent_id <-
+    # the dispatching request's scope).
+    ${appModule}.RequestContext.with_child_frame(fn ->
 ${inner}
+    end)
   end
 ${ensureHelper}end
 `;

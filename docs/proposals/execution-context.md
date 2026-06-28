@@ -1,9 +1,32 @@
 # Execution-context backbone — scope frames
 
-> Status: proposal. Not in `ddd.langium`. This is mostly a
-> compiler/runtime mechanism with a small surface; it is the shared
-> substrate beneath [provenance](./provenance.md),
-> [audit](./audit-and-logging.md), and logging.
+> Status: **runtime backbone COMPLETE across all five backends** (2026-06-24
+> code-verified; full matrix in
+> [`../audits/execution-context-parity-2026-06-24.md`](../audits/execution-context-parity-2026-06-24.md);
+> the architecture carrier doc,
+> [`../architecture/request-context.md`](../architecture/request-context.md),
+> pins **D-CTX-SHAPE**). By design there is **no `ddd.langium` surface** —
+> context boundaries are emitted structurally from constructs Loom already
+> has, not annotated (see § Surface). The **carrier + root frame + id-triad
+> (`correlationId`/`scopeId`/`parentId`) + governance consumers (audit /
+> provenance / logging) AND the full per-dispatch discipline — child frames +
+> `parentId` chaining + enter/exit push-restore — now ship on all five
+> backends**: `.NET` (`AsyncLocal`; `OpenChild`/`Enter`-restore), node/Hono
+> (`AsyncLocalStorage`; `runInChildContext`), Python (`ContextVar`;
+> `child_context`/`in_child_context`), Java (MDC; `openChild()`
+> try-with-resources `Frame`), Elixir (`Logger.metadata`; `with_child_frame/1`
+> push + `after`-restore). The three fields-only backends (Python, Java,
+> Elixir) were drained 2026-06-24, so every dispatch boundary (workflow run +
+> reactor handlers) now opens a child frame whose `parentId` chains to the
+> caller's scope. What remains is **not** per-backend parity but the
+> cross-cutting tail: (1) exposing the build-flag surface below as
+> **user-facing** options (today derived internally from field presence, not a
+> CLI/build switch); (2) the scope-event genealogy (`operationId` ships on
+> audit records; `nodeId`/`kind`/`timestamp` do not); (3) parallel-branch frame
+> copying across the ambient backends; and (4) the open `scopeId`-semantics
+> decision. This is the shared substrate beneath
+> [provenance](./provenance.md), [audit](./audit-and-logging.md), and
+> logging.
 
 ## Problem
 

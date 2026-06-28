@@ -1112,8 +1112,10 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // shape stays gated — the blob is one JSONB column, not per-field queryable, so
   // it needs in-app filtering (not built; matches elixir, which has no `document`
   // shape).  .NET handles all shapes (it's not in LIMITED_FAMILIES).  A PRINCIPAL
-  // filter on a non-relational shape stays gated for `document` everywhere (the
-  // actor + json intersection isn't wired) — hence the per-shape arms below.
+  // filter on a `document` shape is wired on node/Java (DEBT-02 Slice B — the
+  // actor binds into the in-app predicate; see `supportsPrincipalNonRelationalFilter`
+  // below and the `document-tenancy.ddd` ts-/java-build fixtures); it stays gated
+  // only for python (blob not filtered in-app) and elixir (no `document` shape).
   const supportsNonRelationalFilter = (family: string, shp: string): boolean =>
     (family === "node" && (shp === "document" || shp === "embedded")) ||
     (family === "java" && (shp === "document" || shp === "embedded")) ||

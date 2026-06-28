@@ -1,6 +1,6 @@
 # Plan — DEBT-02 python relational principal capability filters
 
-**Created:** 2026-06-22 · **Status:** in progress (claim PR open)
+**Created:** 2026-06-22 · **Status:** ✅ SHIPPED (code-verified 2026-06-28 — `supportsPrincipalFilter('python')` returns `true` in `src/ir/validate/checks/system-checks.ts:1011`; `contextFilterPredicate` keeps `currentUser` predicates and renders them against the ambient `require_current_user()`; the `tenancy-filter.ddd` python-build fixture gates it. The `shape(embedded)` principal case also later landed (#1571 — `supportsPrincipalNonRelationalFilter` now includes python for `embedded`); only python's `shape(document)` stays gated.)
 
 The last-backend parity gap on **principal-referencing** (`currentUser`, tenancy)
 capability filters: node / dotnet / elixir / java all wire a

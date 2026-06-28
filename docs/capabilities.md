@@ -72,13 +72,19 @@ context Sales {
 
 ### Backend emission
 
-The wired-filter backends — .NET, Hono, Java, and Phoenix — reify
-non-principal, relational filters.  (Python does not yet consume
-capability `filter`s.)  Principal-referencing predicates (tenancy) and
-non-relational shapes have **since landed on the query-layer backends
-too** (DEBT-01 / DEBT-02) — only their *intersection*, a principal
-predicate on a non-relational aggregate, stays gated.  See *Deferred
-cases* below.
+All five backends — .NET, Hono, Java, Phoenix, and Python — reify
+relational capability filters, both non-principal and principal-referencing
+(tenancy).  Principal predicates and non-relational shapes have **since
+landed** (DEBT-01 / DEBT-02): Python's relational principal case landed
+(`supportsPrincipalFilter` now returns `true` for it, `system-checks.ts`) and
+Python's `shape(embedded)` filters landed too (#1571 —
+`supportsNonRelationalFilter`/`supportsPrincipalNonRelationalFilter` now
+include `python` for `embedded`).  Principal filters on non-relational shapes
+ship on node/Java (`document` + `embedded`), elixir + Python (`embedded`), and
+.NET (all shapes).  What stays gated is narrow: **a capability filter on a
+`shape(document)` aggregate hosted on Python** (Python wires relational +
+`embedded` only; `document` is a single jsonb blob it doesn't filter in-app) —
+and elixir has no `document` shape at all.  See *Deferred cases* below.
 
 - **.NET / EF Core 10** — every aggregate that has any propagated
   `contextFilters` gets one **named** `b.HasQueryFilter("<Name>", x => …)`
@@ -134,22 +140,28 @@ criterion as a first-class, reusable predicate.
 
 ### Deferred cases
 
-One filter shape remains gated by the IR validator
+One narrow case remains gated by the IR validator
 (`validateContextFilterSupport`, code `loom.context-filter-unsupported`):
 
-- **A principal-referencing predicate on a non-relational aggregate**
-  (a tenancy `filter … == currentUser.tenantId` on a `shape(document)`
-  / `shape(embedded)` aggregate).  Each half ships on its own — a
-  principal predicate on a *relational* aggregate (DEBT-01), and a
-  *non-principal* predicate on a non-relational one (DEBT-02) — but
-  their intersection (binding the request actor *and* reaching into a
-  jsonb column on the always-on read path) isn't wired on the
-  query-layer backends yet.  **.NET** handles it (EF Core's
-  `HasQueryFilter` resolves the DI-scoped principal and queries jsonb
-  transparently — the one backend with no deferred cases).
+- **A capability filter on a `shape(document)` aggregate hosted on
+  Python.**  Python wires relational + `shape(embedded)` filters
+  (principal and non-principal, DEBT-01/DEBT-02, #1571) but does not
+  filter a `document` blob in-app, so `supportsNonRelationalFilter` /
+  `supportsPrincipalNonRelationalFilter` (`system-checks.ts`) include
+  `python` for `embedded` only.  (Elixir has no `document` shape at all,
+  so the case can't arise there.)
 
-Host such an aggregate on a `.NET` deployable, or hand-write the
-predicate inside individual `repository find` bodies, in the meantime.
+Everything else now ships (per the validator gate): a **principal**
+predicate on a *relational* aggregate on all five backends (DEBT-01); a
+**non-principal** predicate on a *non-relational* aggregate on node/Java
+(`document` + `embedded`), elixir + Python (`embedded`), and .NET (all);
+and **the principal × non-relational intersection** on node/Java
+(`document` + `embedded`), elixir + Python (`embedded`), and .NET —
+`supportsPrincipalNonRelationalFilter` accepts it, and the `embedded` case
+is gate-verified by `embedded-tenancy.ddd` in the Java build corpus.  Host
+a `document` aggregate that needs a
+filter on any non-Python backend, or hand-write the predicate inside
+individual `repository find` bodies, in the meantime.
 
 ## `stamp <event> { … }`
 

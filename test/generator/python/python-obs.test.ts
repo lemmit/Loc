@@ -80,6 +80,34 @@ describe("python observability", () => {
     expect(mw).toContain('locale=request.headers.get("accept-language") or "en"');
   });
 
+  it("emits the per-dispatch child-frame seam (parent_id chaining)", async () => {
+    const files = await build(FIXTURE);
+    const log = files.get("api/app/obs/log.py")!;
+    // The carrier carries the parent_id tier + an accessor for it.
+    expect(log).toContain("    parent_id: str | None = None");
+    expect(log).toContain("def parent_id() -> str | None:");
+    // child_context() opens a child frame: fresh scope_id, parent_id <- the
+    // caller's scope_id, restored on exit; a no-op outside any request.
+    expect(log).toContain("def child_context() -> Iterator[None]:");
+    expect(log).toContain("replace(parent, scope_id=new_id(), parent_id=parent.scope_id)");
+    // The in_child_context decorator wraps an async dispatch boundary in it.
+    expect(log).toContain(
+      "def in_child_context(fn: Callable[_P, Awaitable[_R]]) -> Callable[_P, Awaitable[_R]]:",
+    );
+    expect(log).toContain("with child_context():");
+    // The log formatter stamps parent_id onto every line of the child frame.
+    expect(log).toContain("pid = parent_id()");
+    expect(log).toContain('body["parent_id"] = pid');
+  });
+
+  it("the dispatcher's reactor handlers open a child frame", async () => {
+    const files = await build(SAGA);
+    const dispatch = files.get("api/app/dispatch.py")!;
+    // Every reactor handler carries the decorator directly above its def, so it
+    // runs in a child execution-context frame under the dispatching request.
+    expect(dispatch).toMatch(/@in_child_context\nasync def _order_fulfillment_/);
+  });
+
   it("lifespan brackets the lifecycle; obs middleware mounts outermost", async () => {
     const files = await build(FIXTURE);
     const main = files.get("api/app/main.py")!;
@@ -113,7 +141,7 @@ describe("python observability", () => {
   it("the dispatcher's drop path logs event_unrouted on the catalog stream", async () => {
     const files = await build(SAGA);
     const dispatch = files.get("api/app/dispatch.py")!;
-    expect(dispatch).toContain("from app.obs.log import log");
+    expect(dispatch).toContain("from app.obs.log import in_child_context, log");
     expect(dispatch).toContain(
       'log("warn", "event_unrouted", workflow="OrderFulfillment", event_type="ShipmentRequested", key=__key)',
     );

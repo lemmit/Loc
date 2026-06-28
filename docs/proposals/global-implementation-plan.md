@@ -34,7 +34,7 @@ hours of re-verification — that is the failure mode this rewrite fixes.
 
 ---
 
-## Current state on `origin/main` (2026-06-10, condensed; refreshed 2026-06-21 against #1496)
+## Current state on `origin/main` (2026-06-10, condensed; refreshed 2026-06-21 against #1496; spot-refresh 2026-06-24 — Tier-4 #1 execution-context + #4 domain-services found shipped, corrected below)
 
 The ten-phase pipeline, five DB/backends (node/Hono, .NET, Java/Spring
 Boot, Python/FastAPI, elixir — plain Ecto/Phoenix, the `vanilla`
@@ -114,7 +114,7 @@ elixir items form one coherent track (a→e order).
 | T2.g | **Reified-criteria tail** — capability-`filter` reification: **Hono shipped** (`contextFilterRefs` in the IR; the repo calls the module-level criterion fn) and **Phoenix/Ash shipped** (`renderBaseFilter` references an Ash boolean calculation — `base_filter expr(active)` / `expr(in_region(region: …))` — deduped with find/retrieval consumers via `reifiedCriteriaFor`; build-gated by `criterion-filter.ddd`). The principal/tenancy constructor factory (`currentUser.<field>` as ctor arg — gates T2.j, **excluded from the current run per maintainer**) and ambient (`of bool`) criteria (`src/generator/dotnet/criteria-emit.ts:~64-70`) remain. | ~~elixir~~ principal factory | [reified-criteria](./reified-criteria.md) |
 | T2.h | **`shape(document)` on elixir** — `PLATFORM_SAVING_SHAPES` allows `relational`+`embedded` only (`src/util/platform-axes.ts:~127`). | elixir | [document-and-json-hierarchies](./document-and-json-hierarchies.md) |
 | T2.i | **IR field-constraint metadata** — ✅ **SHIPPED** (#1214). The shared `singleFieldConstraints` classifier (`src/ir/validate/invariant-classify.ts` → min/max/between/len-*/regex), already consumed by Zod / .NET FluentValidation / the Java validator, is now consumed by elixir's `vanilla/changeset-emit.ts` too — numeric bounds → `validate_number`, length → `validate_length`, regex → `validate_format` on `base_changeset` (no-invariant aggregates stay byte-identical). A FieldIR *data* carrier would duplicate the classifier without new capability — only add it if a consumer needs constraints away from invariant context. | ~~elixir~~ done | [vanilla-phoenix-foundation](./vanilla-phoenix-foundation.md) §validators |
-| T2.j | **Principal-referencing context filters on node/elixir/java** — ✅ **DONE** (2026-06-20 audit; DEBT-01, #1386). `supportsPrincipalFilter` (`system-checks.ts:~714`) now returns true for node, elixir (both foundations), and java — principal/tenancy `filter`s ship on all five backends for **relational** shapes. Remaining: **principal-on-non-relational** (`supportsNonRelationalFilter`, `system-checks.ts:~737`) and the principal/tenancy constructor *factory* (excluded per maintainer). Still the first build slice of multi-tenancy (the `tenantOwned` filter is principal-referencing; D-TENANCY-*). | ~~node, elixir, java~~ principal-non-rel | [multi-tenancy-design-note](./multi-tenancy-design-note.md) |
+| T2.j | **Principal-referencing context filters** — ✅ **DONE** (2026-06-28 re-verified; DEBT-01 #1386 + DEBT-02 #1571). `supportsPrincipalFilter` (`system-checks.ts:1011`) returns true for node, elixir, java, **and python** (.NET is unrestricted — not in `LIMITED_FAMILIES`), so principal/tenancy `filter`s ship on **all five** backends for relational shapes. **The principal × `embedded` intersection also landed on all five** (`supportsPrincipalNonRelationalFilter`, `system-checks.ts:1066` — node/Java/elixir/python `embedded`, node/Java `document`, .NET all; `embedded` gate-verified by `embedded-tenancy.ddd`). The principal × `document` intersection ships on node/Java too — parity-audited 2026-06-28 (generated `document-tenancy.ddd` emits a node repo that binds `requireCurrentUser()` and filters by `tenantId` in-app; build-gated by `ts-build`/`java-build/document-tenancy.ddd`). Only remaining gap: a `filter` on a python `shape(document)` aggregate (python wires relational + `embedded`, not `document`; elixir has no `document` shape). The principal/tenancy constructor *factory* (criterion query-face, T2.g) stays excluded per maintainer. Still the first build slice of multi-tenancy (the `tenantOwned` filter is principal-referencing; D-TENANCY-*). | ~~node, elixir, java, python, principal-emb~~ · python-`document` | [multi-tenancy-design-note](./multi-tenancy-design-note.md) |
 | T2.k | **Provenance + audit runtimes on dotnet/elixir** — **Provenance ✅ DONE** for dotnet *and* elixir-vanilla (2026-06-20 audit; #1400 / DEBT-06). The provenance gate is now foundation-aware (`system-checks.ts:~1443`): `elixir + vanilla` is provenance-capable (lineage SDK + co-located `<field>_provenance` column + transactional `provenance_records` flush); only `foundation: ash` stays gated. **Audit-op runtime is the residue** — `AUDIT_OP_BACKENDS = {node, dotnet}`; elixir audited operations + audited lifecycle actions remain node/.NET-only. | ~~dotnet~~, elixir audit | [provenance](./provenance.md), [audit-and-logging](./audit-and-logging.md) |
 
 ## Tier 3 — partially-shipped families (the bigger remainders)
@@ -141,14 +141,37 @@ elixir items form one coherent track (a→e order).
 | T3.19 | **Seeding tail** — imperative (workflow-shaped) body, per-row natural-key upsert, create-shape validation. | | [database-seeding](./database-seeding.md) |
 | T3.20 | **Inheritance I4** — per-concrete storage override / mixed strategy (needs the UNION-ALL read; gated in `validators/inheritance.ts:~137`), polymorphic `<Base> id` refs + `find all <Base>` over TPC. | | [aggregate-inheritance](./aggregate-inheritance.md) |
 
-## Tier 4 — unstarted families (code-verified: no grammar/IR/emit artifacts)
+## Tier 4 — mostly-unstarted families (code-verified)
 
-Ordered by the dependency spine, not by size.
+Ordered by the dependency spine, not by size. Most carry no
+grammar/IR/emit artifacts; the exceptions already shipped are annotated
+inline (#1 execution-context backbone, #9 typed-capabilities, #10
+java-backend).
 
 1. **execution-context** (Tier-0 backbone) — compiler-emitted scope
-   frames (`correlationId`/`scopeId`/`parentId`). **Lands before any
-   governance tier**; audit promotion (T3.13), provenance parity
-   (T2.k), and authorization all reference it.
+   frames (`correlationId`/`scopeId`/`parentId`). **(No longer a Tier-4
+   unstarted item — runtime backbone COMPLETE on all 5 backends;
+   2026-06-24 code-verified, full matrix in
+   [`../audits/execution-context-parity-2026-06-24.md`](../audits/execution-context-parity-2026-06-24.md).)**
+   The **carrier + root frame + id-triad + governance consumers (audit /
+   provenance / log) AND the full per-dispatch discipline (child frames +
+   `parentId` chaining + enter/exit push-restore) now ship on all five
+   backends** — `.NET` (`AsyncLocal`; `OpenChild`/`Enter`), node/Hono
+   (`AsyncLocalStorage`; `runInChildContext`), Python (`ContextVar`;
+   `child_context`/`in_child_context`), Java (MDC; `openChild()` `Frame`),
+   Elixir (`Logger.metadata`; `with_child_frame/1`); pinned **D-CTX-SHAPE**,
+   [`../architecture/request-context.md`](../architecture/request-context.md).
+   The three fields-only backends (Python, Java, Elixir) were drained
+   2026-06-24, so every dispatch boundary (workflow run + reactor handlers)
+   opens a child frame whose `parentId` chains to the caller's scope. audit
+   promotion (T3.13), provenance parity (T2.k), and authorization consume it.
+   **Remaining tail** (cross-cutting, no longer per-backend parity):
+   (a) parallel-branch frame copying on the ambient backends; (b) the build-flag
+   surface as **user-facing** options
+   (`emitContextBoundaries`/`emitProvenance`/`emitTracing` are derived
+   internally today, not exposed); (c) the scope-event genealogy
+   (`operationId` on audit only; `nodeId`/`kind`/`timestamp` nowhere); and
+   (d) the open `scopeId`-semantics decision.
 2. **multi-tenancy** — design **refined 2026-06-17** (R1–R5; pinned
    **D-TENANCY-SCOPE / -REGISTRY / -DEFAULT / -HIERARCHY**): `tenancy by
    user.tenantId of Organization`; **two-value** scope (`with tenantOwned`
@@ -168,7 +191,14 @@ Ordered by the dependency spine, not by size.
    deferred tail.
 4. **domain-services** (`domainService`, design pinned #1058 —
    `DomainServiceIR`, `callKind: "domain-service"`, Shape A pure
-   calculator first).
+   calculator first). **(No longer a Tier-4 unstarted item — Shape A
+   (v1) is SHIPPED across all five backends; 2026-06-24 code-verified:
+   grammar `DomainService` rule, `DomainServiceIR` + `OperationIR.mutating`,
+   phase-⑦ no-infra gates (`loom.domain-service-no-{emit,mutation,repo,
+   workflow-start}`, `checks/domain-service-checks.ts`), `domain-service-emit.ts`
+   on node/dotnet/java/python/elixir, and parse/lower/validate/per-backend
+   emit tests. PARTIAL tail: Shape B (coordinator + persistence contract)
+   = Phase 2, Shape C deferred.)**
 5. **loom-forms** (typed-action `CreateForm`/`OperationForm`/
    `DestroyForm` binding — fixes the form/API create-contract layering
    bug; lifecycle Phase 1 prereq is done) + **lifecycle-operations

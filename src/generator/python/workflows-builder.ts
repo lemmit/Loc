@@ -162,7 +162,7 @@ export function buildPyWorkflowsFile(
     "from app.db.engine import get_session",
     // Command-workflow routes always log the lifecycle narrative; observable-
     // only contexts (no command route) emit no `log(...)` call, so gate on wfs.
-    wfs.length > 0 ? "from app.obs.log import log" : null,
+    wfs.length > 0 ? "from app.obs.log import in_child_context, log" : null,
     ...resourceImports,
     ...repoAggs.map((n) => `from app.db.repositories.${snake(n)}_repository import ${n}Repository`),
     (() => {
@@ -490,6 +490,9 @@ function workflowRoute(
   ].join(", ");
   const out: string[] = [
     `@router.post("/${snake(wf.name)}", status_code=204, operation_id="${camelId(opWorkflow(wf.name))}"${errorResponsesKwarg("workflow", workflowIsGuarded(wf))})`,
+    // A route-invoked workflow runs in a child frame under the request root, so
+    // its audit / provenance rows are distinguishable from a direct operation's.
+    "@in_child_context",
     `async def ${snake(wf.name)}_workflow(${sig}) -> Response:`,
     ...(usesUser ? ["    current_user: User = request.state.current_user"] : []),
     // Workflow narrative — `workflow_started` at the route entry; shared catalog

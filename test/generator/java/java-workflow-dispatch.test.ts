@@ -48,6 +48,13 @@ describe("java saga dispatcher", () => {
       "private final OrderFulfillmentStateRepository orderFulfillmentStateRepository;",
     );
     expect(d).toContain("@EventListener");
+    // Each reactor is a per-dispatch boundary: its body runs in a child
+    // execution frame (parent_id <- the dispatching request's scope).
+    expect(d).toContain("import ");
+    expect(d).toContain(".config.RequestContext;");
+    expect(d).toMatch(
+      /public void onOrderFulfillmentStartOrderPlaced\(OrderPlaced p\) \{\n\s*try \(var __frame = RequestContext\.openChild\(\)\) \{/,
+    );
   });
 
   it("event-triggered create handler loads-or-allocates the saga row", async () => {

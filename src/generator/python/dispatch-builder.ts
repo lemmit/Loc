@@ -200,7 +200,9 @@ export function buildPyDispatchFile(ctx: EnrichedBoundedContextIR, sys?: SystemI
     idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
     ...factoryAggs.map((n) => `from app.domain.${snake(n)} import ${n}`),
     ...resourceImports,
-    refersTo("log") ? "from app.obs.log import log" : null,
+    refersTo("log")
+      ? "from app.obs.log import in_child_context, log"
+      : "from app.obs.log import in_child_context",
     voEnumNames.length > 0
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
       : null,
@@ -324,7 +326,11 @@ function handlerFn(
     return esHandlerFn(fn, wf, sub, correlation, statements, saves, hasOutbox);
   }
   const param = snake(sub.param);
+  // A reactor is a per-dispatch boundary: run it in a child execution-context
+  // frame (fresh scope_id, parent_id ← the dispatching request's scope) so its
+  // audit / provenance rows record their call-structure position.
   const out: string[] = [
+    "@in_child_context",
     `async def ${fn}(`,
     `    session: AsyncSession, events: "InProcessDispatcher", ${param}: ${sub.event}`,
     ") -> None:",
@@ -422,6 +428,7 @@ function esHandlerFn(
   );
   const usesState = bodyLines.some((l) => /\bstate\b/.test(l));
   const out: string[] = [
+    "@in_child_context",
     `async def ${fn}(`,
     `    session: AsyncSession, events: "InProcessDispatcher", ${param}: ${sub.event}`,
     ") -> None:",

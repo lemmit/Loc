@@ -63,9 +63,11 @@ system FulfillmentSys {
 
   api FulfillmentApi from Fulfillment
   storage pg { type: postgres }
+  resource fulfillmentState { for: Fulfillment, kind: state, use: pg }
   deployable api {
     platform: java
     contexts: [Fulfillment]
+    dataSources: [fulfillmentState]
     serves: FulfillmentApi
     port: 8080
   }

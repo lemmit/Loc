@@ -383,7 +383,12 @@ defmodule ${handlerModule(contextModule, sub)} do
   @moduledoc "${sub.trigger === "on" ? "Reactor" : "Starter"} for ${upperFirst(sub.event)} → ${upperFirst(wf.name)}."
 
 ${requireLogger}  def handle(%${contextModule}.Events.${upperFirst(sub.event)}{} = event) do
+    # A reactor is a per-dispatch boundary: run it in a child execution frame
+    # (parent_id <- the dispatching request's scope) so its audit / provenance
+    # rows record their call-structure position.
+    ${appModule}.RequestContext.with_child_frame(fn ->
 ${inner}
+    end)
   end
 end
 `;

@@ -1605,3 +1605,48 @@ collision-free spelling or defer the surface. The heavy per-backend gates
 (elixir/dotnet/java generate-and-compile) are where this surfaces — a narrow
 grammar diff's fast tests can stay green while a generated-backend example with
 the now-reserved identifier fails to parse downstream.
+
+## 17. A long docs/parity audit's base rots *under it* — re-verify cited code right before commit (2026-06-28)
+
+§"Stacked refactor PRs" covers a base that's stale *when you branch*. This is the
+sharper sibling: a base that goes stale **during** a single long audit, where the
+deliverable is *prose asserting what the code does* — so when the code moves
+mid-task, your half-written edits silently become **wrong**, not just behind.
+
+**What happened.** A docs status-refresh of the tenancy/capability-filter claims
+synced `main` at start (`740b823`), read `system-checks.ts`
+(`supportsNonRelationalFilter` omitted python), and wrote edits asserting *"python
+wires relational filters only / no non-relational filters."* By push time `main`
+was `d2b8e70` — **#1571 had landed python `shape(embedded)` filters mid-session** —
+so every "python relational-only" edit was now false. It was caught **only** by a
+rebase conflict in `platform-parity-debt.md`, which `main` had *also* refreshed
+(#1549/#1571), partly duplicating the work. Without that overlapping-file collision
+the wrong claims would have shipped green.
+
+**Lessons.**
+
+- **For an audit that treats code as ground truth (status-refresh, parity-auditor),
+  re-fetch `main` and re-read the *cited lines* right before committing — not just
+  at session start.** "The code wins, every time" has a time axis: the code that
+  wins is the code at commit time. A claim verified against an hour-old base is a
+  claim against behaviour that may no longer exist.
+- **A rebase conflict is a *lucky* detector, not the design.** It only fired because
+  `main` happened to touch the same file. Don't rely on it — the disjoint-file case
+  (your audit edits a doc `main` didn't touch, but cites code `main` *did* change)
+  drifts silently, exactly as the stacked-refactor §warns for code.
+- **Check whether `main` already did your audit.** Parallel agents refresh the same
+  trackers; before a docs/parity sweep, `git log origin/main` the target files +
+  `list_pull_requests` — #1549/#1571 had already flipped the same cells.
+
+### Sub-gotcha: `git reset --hard origin/main` **on a feature branch** discards your branch commits
+
+A skill's "orient on fresh main" step literally says `git fetch origin main && git
+reset --hard origin/main`. That is safe on a throwaway/clean checkout but
+**destructive when you're on a feature branch carrying commits** — it moves the
+branch ref to `origin/main`, dropping your work from the local branch and working
+tree. Hit live this session at finalize time (commits `af888fa`/`e215079` vanished
+locally). **Recovery:** they were pushed, so `git reset --hard
+origin/<feature-branch>` restored them (the reflog `HEAD@{1}` also pins the tip).
+**Prevention:** when you only need to *compare* against main on a feature branch,
+`git fetch origin main -q` and diff/log against `origin/main` — don't `reset --hard`
+to it. Reserve the hard reset for when you genuinely want to discard local state.
