@@ -71,7 +71,10 @@ describe("workflow lifecycle log events — emitted on every backend (S3)", () =
 
   it("Python logs both lifecycle events via the log() facade", async () => {
     const wf = await fileEndingWith("platform: python", "workflows_routes.py");
-    expect(wf).toContain("from app.obs.log import log");
+    // The router imports the `log` facade; execution-context dispatch also pulls in
+    // `in_child_context` from the same module (`from app.obs.log import in_child_context, log`),
+    // so match the `log` import without pinning the co-import set.
+    expect(wf).toMatch(/from app\.obs\.log import [^\n]*\blog\b/);
     expect(wf).toContain('log("info", "workflow_started", workflow="shipOrder")');
     expect(wf).toContain('log("info", "workflow_completed", workflow="shipOrder")');
   });
