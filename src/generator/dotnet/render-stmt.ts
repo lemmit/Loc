@@ -1,5 +1,5 @@
 import type { ExprIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
-import { upperFirst } from "../../util/naming.js";
+import { escapeCsharpIdent, upperFirst } from "../../util/naming.js";
 import type { CsRenderContext } from "./render-expr.js";
 import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
 
@@ -84,7 +84,9 @@ function renderCsStatement(
       // DomainExceptionFilter mapping ForbiddenException → 403).
       return `${INDENT}if (!(${renderCsExpr(s.expr, ctx)})) throw new ForbiddenException(${JSON.stringify(`Forbidden: ${s.source}`)});`;
     case "let":
-      return `${INDENT}var ${s.name} = ${renderCsExpr(s.expr, ctx)};`;
+      // `let`-names may collide with a C# keyword (`let base = …` → `var
+      // @base`); the same escape applies at every `refKind: "let"` use site.
+      return `${INDENT}var ${escapeCsharpIdent(s.name)} = ${renderCsExpr(s.expr, ctx)};`;
     case "assign": {
       const base = `${INDENT}${renderPath(s.target)} = ${renderCsExpr(s.value, ctx)};`;
       const traced = withValueComputed(base, s.target, traceCtx);

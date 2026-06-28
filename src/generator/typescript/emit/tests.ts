@@ -8,7 +8,7 @@ import {
   type TestStmtIR,
   type TypeIR,
 } from "../../../ir/types/loom-ir.js";
-import { lowerFirst } from "../../../util/naming.js";
+import { escapeTsIdent, lowerFirst } from "../../../util/naming.js";
 import { renderTsExpr } from "../render-expr.js";
 
 // A currentUser-gated operation's method signature picks up a trailing
@@ -197,7 +197,7 @@ function renderTestStmt(s: TestStmtIR, ctx: BoundedContextIR): string {
     return `  expect(() => { ${renderTestExpr(s.expr, ctx)}; }).toThrow();`;
   }
   if (s.kind === "let") {
-    return `  const ${s.name} = ${renderTestExpr(s.expr, ctx)};`;
+    return `  const ${escapeTsIdent(s.name)} = ${renderTestExpr(s.expr, ctx)};`;
   }
   if (s.kind === "call") {
     // Only pure-function calls reach here (validator-rejected

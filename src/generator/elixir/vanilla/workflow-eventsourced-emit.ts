@@ -27,7 +27,7 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../../ir/types/loom-ir.js";
-import { snake, upperFirst } from "../../../util/naming.js";
+import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 
@@ -127,7 +127,8 @@ function renderFoldModule(contextModule: string, wf: WorkflowIR): string {
         if (s.kind === "assign") {
           return `    state = %{state | ${snake(s.target.segments[0] ?? "")}: ${renderExpr(s.value, renderCtx)}}`;
         }
-        if (s.kind === "let") return `    ${snake(s.name)} = ${renderExpr(s.expr, renderCtx)}`;
+        if (s.kind === "let")
+          return `    ${escapeElixirIdent(snake(s.name))} = ${renderExpr(s.expr, renderCtx)}`;
         if (s.kind === "expression") return `    _ = ${renderExpr(s.expr, renderCtx)}`;
         return `    # unsupported applier statement: ${s.kind}`;
       })

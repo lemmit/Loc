@@ -8,7 +8,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { intrinsicMatcherSig } from "../../../util/intrinsic-matchers.js";
-import { upperFirst } from "../../../util/naming.js";
+import { escapeCsharpIdent, upperFirst } from "../../../util/naming.js";
 import { renderCsExpr } from "../render-expr.js";
 
 // A currentUser-gated operation's method signature picks up a trailing
@@ -181,7 +181,7 @@ function renderTestStmt(s: TestStmtIR, ctx: BoundedContextIR): string {
   }
   if (s.kind === "let") {
     const expr = renderTestExpr(s.expr, ctx);
-    return `    var ${s.name} = ${expr};`;
+    return `    var ${escapeCsharpIdent(s.name)} = ${expr};`;
   }
   if (s.kind === "call") {
     const args = s.args.map((a) => renderCsExpr(a)).join(", ");

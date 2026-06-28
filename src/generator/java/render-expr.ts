@@ -1,6 +1,6 @@
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type { EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
-import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
+import { escapeJavaIdent, lowerFirst, plural, upperFirst } from "../../util/naming.js";
 import {
   type BinaryExpr,
   type CallExpr,
@@ -210,8 +210,9 @@ const JAVA_TARGET: ExprTarget<JavaRenderContext> = {
     return `${upperFirst(serviceRef.service)}.${lowerFirst(serviceRef.op)}(${args.join(", ")})`;
   },
   lambda(param, body) {
-    if (body !== undefined) return `${param} -> ${body}`;
-    return `${param} -> { /* block-body lambda — not Java-renderable */ }`;
+    const p = escapeJavaIdent(param);
+    if (body !== undefined) return `${p} -> ${body}`;
+    return `${p} -> { /* block-body lambda — not Java-renderable */ }`;
   },
   newPart: renderNew,
   // Bare object literals only appear in e2e / walker contexts; keep total
@@ -250,9 +251,12 @@ function renderLiteral(lit: string, value: string): string {
 
 function renderRef(e: RefExpr, ctx: JavaRenderContext): string {
   switch (e.refKind) {
-    case "param":
     case "let":
     case "lambda":
+      // Locals introduced inside the body; escape keyword collisions so the
+      // use matches the (also-escaped) binding (`let class` → `class_`).
+      return escapeJavaIdent(e.name);
+    case "param":
       return e.name;
     case "this-prop":
     case "this-vo-prop":

@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { humanize, indent, lowerFirst, plural, snake, upperFirst } from "../../src/util/naming.js";
+import {
+  escapeCsharpIdent,
+  escapeElixirIdent,
+  escapeJavaIdent,
+  escapePythonIdent,
+  escapeTsIdent,
+  humanize,
+  indent,
+  lowerFirst,
+  plural,
+  snake,
+  upperFirst,
+} from "../../src/util/naming.js";
 
 describe("naming — upperFirst / lowerFirst", () => {
   it("upper/lower-cases only the first character, leaving the rest intact", () => {
@@ -78,5 +90,43 @@ describe("naming — indent", () => {
 
   it("honours a custom unit", () => {
     expect(indent("a", 1, "\t")).toBe("\ta");
+  });
+});
+
+describe("naming — target-language keyword escaping", () => {
+  it("C# escapes keywords with the verbatim prefix, passes non-keywords through", () => {
+    expect(escapeCsharpIdent("base")).toBe("@base");
+    expect(escapeCsharpIdent("class")).toBe("@class");
+    expect(escapeCsharpIdent("end")).toBe("end"); // not a C# keyword
+    expect(escapeCsharpIdent("order")).toBe("order");
+  });
+
+  it("TS escapes keywords with a trailing underscore, passes non-keywords through", () => {
+    expect(escapeTsIdent("class")).toBe("class_");
+    expect(escapeTsIdent("new")).toBe("new_");
+    expect(escapeTsIdent("base")).toBe("base"); // not a TS reserved word
+    expect(escapeTsIdent("end")).toBe("end");
+    expect(escapeTsIdent("order")).toBe("order");
+  });
+
+  it("Java escapes keywords with a trailing underscore, passes non-keywords through", () => {
+    expect(escapeJavaIdent("class")).toBe("class_");
+    expect(escapeJavaIdent("final")).toBe("final_");
+    expect(escapeJavaIdent("base")).toBe("base"); // not a Java keyword
+    expect(escapeJavaIdent("order")).toBe("order");
+  });
+
+  it("Python escapes keywords with a trailing underscore, passes non-keywords through", () => {
+    expect(escapePythonIdent("class")).toBe("class_");
+    expect(escapePythonIdent("def")).toBe("def_");
+    expect(escapePythonIdent("base")).toBe("base"); // not a Python keyword
+    expect(escapePythonIdent("order")).toBe("order");
+  });
+
+  it("Elixir escapes keywords with a trailing underscore, passes non-keywords through", () => {
+    expect(escapeElixirIdent("end")).toBe("end_");
+    expect(escapeElixirIdent("fn")).toBe("fn_");
+    expect(escapeElixirIdent("class")).toBe("class"); // not an Elixir keyword
+    expect(escapeElixirIdent("order")).toBe("order");
   });
 });

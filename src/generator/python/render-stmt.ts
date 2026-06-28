@@ -1,5 +1,5 @@
 import type { ExprIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
-import { snake } from "../../util/naming.js";
+import { escapePythonIdent, snake } from "../../util/naming.js";
 import { renderPyExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -193,7 +193,9 @@ function renderPyStatement(
         `${sub}raise ForbiddenError(${JSON.stringify(`Forbidden: ${s.source}`)})`,
       ].join("\n");
     case "let":
-      return `${i}${snake(s.name)} = ${renderPyExpr(s.expr)}`;
+      // `let`-names may collide with a Python keyword; escape the snake-cased
+      // form consistently with the `refKind: "let"` use sites.
+      return `${i}${escapePythonIdent(snake(s.name))} = ${renderPyExpr(s.expr)}`;
     case "assign": {
       let base = `${i}${renderPath(s.target)} = ${renderPyExpr(s.value)}`;
       // `value_computed` trace after a single-segment field assign (nested
