@@ -33,6 +33,7 @@ on the vanilla backend later — this file is the tracked list.
 | §2 | Union per-variant struct tagging | **effectively CLOSED** (doc mis-framed) | S | doc/test only |
 | §4 | `contains`-in-`where` membership | **CLOSED** (doc stale) | S | dead-code cleanup only |
 | §12 | `shape(document)` + custom ops/finds | honest validator gate | M | 3 (untracked find) |
+| §13 | LiveView operation-action bang fns | REAL (mix-compile fails) | S–M | 3 (sibling of §10) |
 
 Restoring the 5-backend `conformance-parity` gate (removing
 `LOOM_E2E_SKIP_PHOENIX=1` and re-adding the elixir deployable to
@@ -302,3 +303,33 @@ pairs, and the 403 runtime-authorization target).
   named-operation / custom-find surface for `shape(document)` aggregates on
   vanilla (the CRUD path already exists), then narrow the gate to drop the
   `customOps` / `customFinds` guard.
+
+## 13. LiveView operation-action bang functions (`<op>_<agg>!/1` + `get_<agg>!/1`) — REAL (S–M)
+
+- **Status (REAL — `mix compile --warnings-as-errors` fails; surfaced 2026-06-28
+  un-pending `vanilla-auth-op-gate.ddd`):** a LiveView `Detail` page with an
+  `Action { c.<op> }` button on a **non-destroy operation** emits a
+  `handle_event/3` that calls bang context functions:
+  ```elixir
+  def handle_event("confirm_customer", %{"id" => id}, socket) do
+    record = PhoenixApp.Sales.get_customer!(id)     # ← undefined
+    PhoenixApp.Sales.confirm_customer!(record)      # ← undefined
+    {:noreply, socket |> put_flash(:info, "Confirm succeeded")}
+  end
+  ```
+  but the context module emits only the non-bang `get_<agg>(id)` (`{:ok|:error}`)
+  and `<op>_<agg>(record, params)` — no `get_<agg>!/1` and no `<op>_<agg>!/1`.
+  Compile fails with *"`PhoenixApp.Sales.get_customer!/1` / `confirm_customer!/1`
+  is undefined or private."*
+- **Sibling of §10:** #1575 added `destroy_<agg>!/1` for `DestroyForm`, but scoped
+  the fix to destroy only — the LiveView mount uses non-bang `get_<agg>`, so the
+  bang getter wasn't needed *then*. Operation-action buttons need both the bang
+  getter and a bang per targeted operation.
+- **To close (feature work):** in `src/generator/elixir/vanilla/context-emit.ts`
+  emit `def get_<agg>!(id)` (load-or-raise) and `def <op>_<agg>!(record)` (run the
+  op, raise on `{:error, …}`; thread `current_user` for `currentUser`-gated ops)
+  for any operation targeted by a LiveView `Action`. Mirror the §10 `destroy_<agg>!/1`
+  shape. Then move `pending/vanilla-auth-op-gate.ddd` back into the compile gate.
+- The op-level `currentUser` threading the fixture was originally pending for
+  (§9) *did* ship in #1568 — this is a distinct, later-surfaced gap; the fixture's
+  old pending-README description was stale.
