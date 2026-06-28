@@ -69,6 +69,31 @@ export interface CsRenderContext {
    *  the read side already uses — one currentUser resolution for the whole
    *  backend.  Unset everywhere a `currentUser` local is actually in scope. */
   currentUserExpr?: string;
+  /** Read-port handle resolver for a `reading`-tier domain-service body
+   *  (domain-services.md rev. 4, Slice 1).  A `repo-read` Call
+   *  (`Accounts.byHolder(holder)`, lowered to `callKind: "repo-read"`) renders
+   *  against the repository the service has INJECTED — on .NET / EF a `reading`
+   *  service is a DI'd `sealed class` whose ctor takes one `I<Aggregate>Repository`
+   *  per read-port, stored as `_<repo>`.  Given the `repoRead.repo` name
+   *  (`Accounts`), this returns the field expression to read through
+   *  (`_accounts`).  Only the service-body render context sets it; unset
+   *  everywhere else (a `repo-read` reaching a non-service context is a
+   *  validator-caught bug). */
+  repoReadHandle?: (repo: string) => string;
+  /** Injected-service call resolver for a `reading`-tier domain-service call
+   *  (domain-services.md rev. 4, Slice 1).  On .NET a `reading` service is a
+   *  DI'd `sealed class`, so the orchestrating workflow injects it (`_registration`)
+   *  and the call site is `await _registration.IsEmailAvailableAsync(holder, ct)` —
+   *  NOT the static `Registration.IsEmailAvailable(holder)` a PURE service emits.
+   *  Given the resolved `{ service, op }`, this returns the injected receiver +
+   *  the async method name when the op is reading (so the `domain-service` arm
+   *  awaits it and passes `cancellationToken`), or `undefined` for a PURE op
+   *  (which then stays byte-identical, rendering the static `Service.Op(args)`).
+   *  Only the workflow-handler render context sets it. */
+  domainServiceReadingCall?: (
+    service: string,
+    op: string,
+  ) => { receiver: string; method: string } | undefined;
 }
 
 /** The ambient request-scoped principal accessor on the .NET read side. Every
@@ -430,10 +455,43 @@ function renderCall(args: string[], e: CallExpr, ctx: CsRenderContext): string {
       return `${cls}.${upperFirst(op.resourceName)}_${upperFirst(op.verb)}(${argList})`;
     }
     case "domain-service": {
-      // `Pricing.Quote(cart, customer)` — the generated .NET service is a
-      // `public static class` (operation name PascalCased).
+      // A domain-service member call.  A PURE service is a `public static class`,
+      // so the call is the static `Pricing.Quote(cart, customer)` (op name
+      // PascalCased).  A `reading`-tier service (domain-services.md rev. 4) is a
+      // DI'd `sealed class` the orchestrating workflow has INJECTED, so the call
+      // routes through the injected receiver and awaits the async method —
+      // `await _registration.IsEmailAvailableAsync(holder, cancellationToken)`.
+      // `ctx.domainServiceReadingCall` returns the receiver + async method name
+      // for a reading op, or undefined for a pure op (→ the static call, which
+      // stays byte-identical).  Only the workflow-handler context sets the
+      // resolver; everywhere else a pure call is the only shape that can appear.
       const ref = e.serviceRef!;
+      const reading = ctx.domainServiceReadingCall?.(ref.service, ref.op);
+      if (reading) {
+        const ctArg = argList.length > 0 ? `${argList}, cancellationToken` : "cancellationToken";
+        return `(await ${reading.receiver}.${reading.method}(${ctArg}))`;
+      }
       return `${upperFirst(ref.service)}.${upperFirst(ref.op)}(${argList})`;
+    }
+    case "repo-read": {
+      // A read-only repository query in a `reading` domain-service body
+      // (domain-services.md rev. 4, Slice 1).  Renders against the INJECTED
+      // repository the service holds — `ctx.repoReadHandle(repo)` resolves the
+      // field (`Accounts` → `_accounts`), and the method is the resolved repo
+      // method (the .NET method name shape, no re-recognition).  `await`-wrapped
+      // in parens so it composes in any expression position (`(await …) == null`,
+      // a precondition).  Awaiting plus the `cancellationToken` pass-through makes
+      // the enclosing service method async (the declaration emitter wraps the
+      // return in Task<…> when ports are present).  Defensive fall-through to a
+      // static-shaped call if no handle is wired (validator-unreachable).
+      const read = e.repoRead!;
+      const handle = ctx.repoReadHandle?.(read.repo);
+      if (handle) {
+        const method = csRepoReadMethod(read.method, read.readKind);
+        const ctArg = argList.length > 0 ? `${argList}, cancellationToken` : "cancellationToken";
+        return `(await ${handle}.${method}(${ctArg}))`;
+      }
+      return `${upperFirst(e.name)}(${argList})`;
     }
     case "action":
     // Sibling action call (Proposal A Stage 1) — frontend-only; never lowered
@@ -443,6 +501,26 @@ function renderCall(args: string[], e: CallExpr, ctx: CsRenderContext): string {
     case "free":
       return `${upperFirst(e.name)}(${argList})`;
   }
+}
+
+/** The .NET repository method name a `repo-read` (`callKind: "repo-read"`) in a
+ *  `reading` domain-service body resolves to (domain-services.md rev. 4, Slice 1).
+ *  Mirrors the names the repository emitter generates:
+ *   - a named `getById` read → `GetByIdAsync` (the built-in load-or-null, which
+ *     carries the `Async` suffix, like the workflow `repoLet`);
+ *   - the auto-`findAll` (`readKind: "findAll"`) → `All` (the enriched find named
+ *     `all`, PascalCased — no `Async` suffix, like every declared find);
+ *   - any other named declared `find` (`byHolder`, …) → `<UpperFirst>` (declared
+ *     finds get no `Async` suffix — `Task<Account?> ByHolder(...)`).
+ *  The `find`/`run` criterion/retrieval forms are not part of the reading-tier
+ *  Slice-1 surface (the validator-admitted bodies use named finds); they fall
+ *  back to the PascalCased verb so the switch stays total. */
+function csRepoReadMethod(method: string, readKind: string): string {
+  if (readKind === "named") {
+    return method === "getById" ? "GetByIdAsync" : upperFirst(method);
+  }
+  if (readKind === "findAll") return "All";
+  return upperFirst(method);
 }
 
 function renderNew(

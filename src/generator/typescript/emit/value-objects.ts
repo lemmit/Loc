@@ -2,6 +2,7 @@ import type { BoundedContextIR, EnumIR, ValueObjectIR } from "../../../ir/types/
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst } from "../../../util/naming.js";
 import { renderTsExpr, renderTsType } from "../render-expr.js";
+import { renderTsStatements } from "../render-stmt.js";
 
 // ---------------------------------------------------------------------------
 // Enums + value objects emitted into one file.  Enums become
@@ -47,12 +48,16 @@ function renderValueObject(v: ValueObjectIR): string[] {
   const derived = v.derived.map(
     (d) => `  get ${d.name}(): ${renderTsType(d.type)} { return ${renderTsExpr(d.expr)}; }`,
   );
-  const fns = v.functions.map((fn) => {
+  const fns = v.functions.flatMap((fn) => {
     const params = fn.params.map((p) => `${p.name}: ${renderTsType(p.type)}`).join(", ");
     // Value-object functions are part of the VO's public surface — they're
     // invoked across aggregate boundaries (e.g. `probability.asFraction()`
     // from an aggregate's derived field), so they cannot be `private`.
-    return `  ${lowerFirst(fn.name)}(${params}): ${renderTsType(fn.returnType)} { return ${renderTsExpr(fn.body)}; }`;
+    const head = `  ${lowerFirst(fn.name)}(${params}): ${renderTsType(fn.returnType)}`;
+    if ("expr" in fn.body) {
+      return [`${head} { return ${renderTsExpr(fn.body.expr)}; }`];
+    }
+    return [`${head} {`, renderTsStatements(fn.body.stmts), `  }`];
   });
   return [
     `export class ${v.name} {`,

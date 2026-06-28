@@ -34,6 +34,7 @@ import type {
   DerivedIR,
   EntityPartIR,
   FieldIR,
+  FunctionBodyIR,
   FunctionIR,
   IdValueType,
   InvariantIR,
@@ -44,6 +45,7 @@ import type {
   TypeIR,
   WorkflowStmtIR,
 } from "../types/loom-ir.js";
+import { mutatedParamNames, type SaveResolver } from "../util/domain-service-tier.js";
 import { lowerExpr, lowerExprInContext } from "./lower-expr.js";
 import { lowerStatement } from "./lower-stmt.js";
 import { cstText, type Env, inPart, lowerType, withLocal } from "./lower-types.js";
@@ -196,11 +198,27 @@ export function lowerFunction(f: FunctionDecl, env: Env): FunctionIR {
     params.push({ name: p.name, type: t });
     inner = withLocal(inner, p.name, "param", t);
   }
+  // Body variant — expression form (`= Expression`) stays exactly as it was
+  // (inlinable); block form (`{ Statement* }`) lowers via lowerStatement,
+  // threading the let-binding env exactly like an operation body.
+  let body: FunctionBodyIR;
+  if (f.body !== undefined) {
+    body = { expr: lowerExpr(f.body, inner) };
+  } else {
+    const stmts: StmtIR[] = [];
+    let bodyEnv = inner;
+    for (const s of f.block) {
+      const result = lowerStatement(s, bodyEnv);
+      stmts.push(result.stmt);
+      bodyEnv = result.envAfter;
+    }
+    body = { stmts };
+  }
   return {
     name: f.name,
     params,
     returnType: lowerType(f.returnType),
-    body: lowerExpr(f.body, inner),
+    body,
   };
 }
 
@@ -343,20 +361,46 @@ export function computeSaves(
   statements: WorkflowStmtIR[],
   repoForAgg: Map<string, string>,
   loopVar?: { name: string; aggName: string; repoName: string },
+  saveResolver?: SaveResolver,
 ): SaveEntry[] {
   const opCallTargets = new Set<string>();
+  // The aggregate-arg names a called `mutating` domain service writes
+  // (domain-services.md rev. 4, Slice 2).  `Transfer.run(s, d, amount)` mutates
+  // its `source`/`dest` params (their own ops) → the workflow-local vars bound
+  // to those positions (`s`/`d`) must persist at exit, exactly as a repo-let an
+  // `op-call` targets does.  Derived from the resolved service op + aggregate
+  // ops; read-only args (`amount`) never land here.  Without a resolver (legacy
+  // single-context generate paths) this stays empty — saves are unchanged.
+  const serviceMutated = new Set<string>();
   for (const st of statements) {
     if (st.kind === "op-call") opCallTargets.add(st.target);
+    else if (st.kind === "domain-service-call" && saveResolver) {
+      const op = saveResolver.resolveServiceOp(st.service, st.op);
+      if (!op) continue;
+      const mutated = mutatedParamNames(op, saveResolver.resolveAggOp);
+      if (mutated.size === 0) continue;
+      // Map the mutated PARAM positions to the call's ARG expressions; an arg
+      // that is a bare ref to a workflow-local aggregate var (a `repo-let` /
+      // `let` / loop binding) is the persistence target.
+      const args = st.call.kind === "call" ? st.call.args : [];
+      op.params.forEach((p, i) => {
+        const arg = args[i];
+        if (mutated.has(p.name) && arg?.kind === "ref") serviceMutated.add(arg.name);
+      });
+    }
   }
   const saves: SaveEntry[] = [];
-  if (loopVar && opCallTargets.has(loopVar.name)) {
+  if (loopVar && (opCallTargets.has(loopVar.name) || serviceMutated.has(loopVar.name))) {
     saves.push({ name: loopVar.name, aggName: loopVar.aggName, repoName: loopVar.repoName });
   }
   for (const st of statements) {
     if (st.kind === "factory-let") {
       const repoName = repoForAgg.get(st.aggName) ?? plural(st.aggName);
       saves.push({ name: st.name, aggName: st.aggName, repoName });
-    } else if (st.kind === "repo-let" && opCallTargets.has(st.name)) {
+    } else if (
+      st.kind === "repo-let" &&
+      (opCallTargets.has(st.name) || serviceMutated.has(st.name))
+    ) {
       saves.push({ name: st.name, aggName: st.aggName, repoName: st.repoName });
     }
   }

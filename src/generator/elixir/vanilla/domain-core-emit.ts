@@ -6,10 +6,11 @@ import type {
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
-import { exprUsesParam, stmtUsesParam } from "../domain/predicates.js";
-import { type RenderCtx, renderExpr } from "../render-expr.js";
+import { stmtUsesParam } from "../domain/predicates.js";
+import type { RenderCtx } from "../render-expr.js";
 import { isVanillaDocAgg } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
+import { bodyUsesParam, renderFunctionBodyLines } from "./function-emit.js";
 import { isReturningOperation, renderReturningStmt } from "./operation-returns-emit.js";
 
 // ---------------------------------------------------------------------------
@@ -97,14 +98,14 @@ function renderPureFunction(facadeMod: string, fn: FunctionIR): string[] {
   const fnSnake = snake(fn.name);
   const rc: RenderCtx = { thisName: "record", contextModule: facadeMod, foundation: "vanilla" };
   const params = fn.params.map((p) =>
-    exprUsesParam(fn.body, p.name) ? snake(p.name) : `_${snake(p.name)}`,
+    bodyUsesParam(fn.body, p.name) ? snake(p.name) : `_${snake(p.name)}`,
   );
   const sig =
     params.length > 0 ? `%__MODULE__{} = record, ${params.join(", ")}` : `%__MODULE__{} = record`;
   return [
     `  @doc "Pure domain function \`${fn.name}\`."`,
     `  def ${fnSnake}(${sig}) do`,
-    `    ${renderExpr(fn.body, rc)}`,
+    ...renderFunctionBodyLines(fn.body, rc),
     "  end",
   ];
 }

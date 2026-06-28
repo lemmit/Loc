@@ -11,6 +11,7 @@ import {
   workflowIsGuarded,
   workflowUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
+import { type ReadPort, readPortsForOperation } from "../../ir/util/domain-service-read-ports.js";
 import {
   camelId,
   opWorkflow,
@@ -119,7 +120,14 @@ export function buildPyWorkflowsFile(
 
   const scan = body.replace(/"(?:\\.|[^"\\])*"/g, '""');
   const refersTo = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(scan);
-  const repoAggs = [...new Set(wfs.flatMap((wf) => reposFor(wf).map((r) => r.aggName)))].sort();
+  // Includes the read-port repos a `reading`-tier domain-service call needs
+  // (domain-services.md rev. 4, Slice 1): the route constructs them, so the
+  // file must import their classes even when the workflow body never reads them.
+  const repoAggs = [
+    ...new Set(
+      wfs.flatMap((wf) => mergeReadPortRepos(reposFor(wf), wf, ctx).map((r) => r.aggName)),
+    ),
+  ].sort();
   const eventNames = [
     ...new Set(wfs.flatMap((wf) => collectEmits(wf.statements).map((e) => e.eventName))),
   ].sort();
@@ -282,6 +290,107 @@ function reposFor(wf: WorkflowIR): RepoNeed[] {
   return [...out.values()];
 }
 
+// --- read-port wiring (domain-services.md rev. 4, Slice 1) -----------------
+//
+// A `reading`-tier domain-service operation declares one read-port repository
+// parameter per repo it reads; the orchestrating workflow constructs each
+// repo handle and passes it ahead of the user args.  Both the call-site
+// prepend (`workflowReadPortResolver`) and the repo construction
+// (`mergeReadPortRepos`) consume the SAME shared `readPortsForOperation`
+// derivation, so they stay in lockstep.  A PURE service call has zero ports →
+// no handle, no `await` → byte-identical.
+
+/** Build the read-port resolver for a workflow's `reading`-tier domain-service
+ *  calls.  Given a `<service>.<op>` call, returns the repository handle var
+ *  names (`snake(repo)` — the var the workflow constructs) to prepend, in
+ *  first-read order.  A pure service op has no ports → `[]` → byte-identical. */
+function workflowReadPortResolver(
+  ctx: EnrichedBoundedContextIR,
+): (service: string, op: string) => string[] {
+  return (service, op) => {
+    const svc = ctx.domainServices.find((s) => s.name === service);
+    const operation = svc?.operations.find((o) => o.name === op);
+    if (!operation) return [];
+    return readPortsForOperation(operation).map((p) => snake(p.repo));
+  };
+}
+
+/** Every read-port a workflow's `reading`-tier domain-service calls require —
+ *  the repositories those services read, so the workflow constructs them even
+ *  when its own body never reads that repository directly.  De-duplicated by
+ *  repository name across all service calls in the body. */
+function collectServiceReadPorts(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): ReadPort[] {
+  const byRepo = new Map<string, ReadPort>();
+  const visit = (e: ExprIR | undefined): void =>
+    walkExpr(e, (n) => {
+      if (n.kind === "call" && n.callKind === "domain-service" && n.serviceRef) {
+        const svc = ctx.domainServices.find((s) => s.name === n.serviceRef!.service);
+        const operation = svc?.operations.find((o) => o.name === n.serviceRef!.op);
+        if (operation) {
+          for (const p of readPortsForOperation(operation)) {
+            if (!byRepo.has(p.repo)) byRepo.set(p.repo, p);
+          }
+        }
+      }
+    });
+  const walkStmts = (stmts: WorkflowStmtIR[]): void => {
+    for (const st of stmts) {
+      switch (st.kind) {
+        case "precondition":
+        case "requires":
+        case "expr-let":
+          visit(st.expr);
+          break;
+        case "emit":
+        case "factory-let":
+          for (const f of st.fields) visit(f.value);
+          break;
+        case "repo-let":
+        case "op-call":
+          for (const a of st.args) visit(a);
+          break;
+        case "repo-run":
+          for (const a of st.retrievalArgs) visit(a);
+          break;
+        case "resource-call":
+          visit(st.call);
+          break;
+        case "for-each":
+          visit(st.iterable);
+          walkStmts(st.body);
+          break;
+        case "if-let":
+          for (const a of st.retrievalArgs) visit(a);
+          walkStmts(st.thenBody);
+          if (st.elseBody) walkStmts(st.elseBody);
+          break;
+      }
+    }
+  };
+  walkStmts(wf.statements);
+  return [...byRepo.values()];
+}
+
+/** Merge a workflow's directly-used repos with the read-port repos its
+ *  `reading`-tier domain-service calls require, de-duplicated by repository
+ *  name (a repo the workflow already constructs is not added twice).  Service
+ *  ports append after the workflow's own repos so a port-only project stays a
+ *  pure extension. */
+function mergeReadPortRepos(
+  own: RepoNeed[],
+  wf: WorkflowIR,
+  ctx: EnrichedBoundedContextIR,
+): RepoNeed[] {
+  const seen = new Set(own.map((r) => r.repoName));
+  const out = [...own];
+  for (const port of collectServiceReadPorts(wf, ctx)) {
+    if (seen.has(port.repo)) continue;
+    seen.add(port.repo);
+    out.push({ repoName: port.repo, aggName: port.aggregate });
+  }
+  return out;
+}
+
 /** Names of `let` bindings referenced anywhere in the workflow body.  An
  *  `expr-let` whose name is absent here is dead — Python's ruff rejects the
  *  unused local (F841), so the emitter drops the binding and keeps the (still
@@ -401,7 +510,13 @@ function workflowRoute(
   for (const p of wf.params) {
     out.push(`    ${snake(p.name)} = ${pyWireToDomain(`body.${p.name}`, p.type, ctx)}`);
   }
-  const repos = reposFor(wf);
+  // Read-port repos (domain-services.md rev. 4, Slice 1): a `reading`-tier
+  // domain-service call the workflow makes needs a live repository handle, so
+  // the workflow constructs `<Agg>Repository(session, …)` for those repos even
+  // when its own body never reads them — `mergeReadPortRepos` folds the service
+  // ports into the workflow's repo set, de-duplicated by repo name.  A pure
+  // service call adds no ports → byte-identical.
+  const repos = mergeReadPortRepos(reposFor(wf), wf, ctx);
   for (const r of repos) {
     out.push(`    ${snake(r.repoName)} = ${r.aggName}Repository(session, ${dispatcherExpr})`);
   }
@@ -410,7 +525,15 @@ function workflowRoute(
   out.push(
     ...renderWorkflowStmts(
       wf.statements,
-      pyWorkflowStmtTarget(undefined, ctx, collectUsedLetNames(wf.statements)),
+      // Thread the read-port resolver so a `reading`-tier domain-service call in
+      // the body is supplied its repository handle(s) ahead of the user args
+      // (domain-services.md rev. 4, Slice 1).  PURE service calls resolve to
+      // `[]` → byte-identical.
+      pyWorkflowStmtTarget(
+        { thisName: "self", readPortArgs: workflowReadPortResolver(ctx) },
+        ctx,
+        collectUsedLetNames(wf.statements),
+      ),
       "    ",
     ),
   );
@@ -648,6 +771,17 @@ export function pyWorkflowStmtTarget(
     // Bare `<resource>.<verb>(...)` statement — render-expr wraps the
     // resource-op in `(await …)`; a bare statement drops the parens.
     resourceCall: (st, i) => {
+      const rendered = renderPyExpr(st.call, rctx);
+      const bare = rendered.startsWith("(await ") ? rendered.slice(1, -1) : rendered;
+      return [`${i}${bare}`];
+    },
+    // Bare `Transfer.run(src, dst, amount)` domain-service call
+    // (domain-services.md rev. 4, the `mutating` tier).  Renders the bare module
+    // function (`run(src, dst, amount)`); a reading service is `(await …)` —
+    // strip the wrapping parens so it's a statement, like `resourceCall`.  The
+    // mutated args persist via the workflow's exit-saves (`session` unit-of-work
+    // `commit()` at the route boundary).
+    domainServiceCall: (st, i) => {
       const rendered = renderPyExpr(st.call, rctx);
       const bare = rendered.startsWith("(await ") ? rendered.slice(1, -1) : rendered;
       return [`${i}${bare}`];

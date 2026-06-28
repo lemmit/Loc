@@ -1,431 +1,458 @@
-# Domain services — the missing third construct (pinned design)
+# Domain services — the missing third construct (pinned design, **rev. 4: three tiers — pure / read-only / mutating**)
 
-> Status: **proposal — pinned axes, v1 scope = Shape A.** Supersedes
-> [`domain-service.md`](./domain-service.md) (the singular-form
-> options-menu draft from #1041): keeps that doc's six-axis framework
-> and three-shape vocabulary, but commits to a single answer on every
-> axis and adds the grammar / IR / validator / emission / test spec the
-> prior draft deferred. Companion to
-> [`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md)
-> (the four-layer **domain / contract / application / api** map —
-> `domainService` is a *domain*-layer construct, called from the
-> *application*-layer orchestrators; see §"Layer placement" below),
-> [`workflow-and-applier.md`](./workflow-and-applier.md) (workflows
-> are one of three application-layer orchestrators),
-> [`lifecycle-operations.md`](./lifecycle-operations.md)
-> (aggregate-bound actions), [`criterion.md`](./criterion.md) (reusable
-> predicates — see Axis 5), [`failure-taxonomy.md`](./failure-taxonomy.md)
-> (error-placement; this proposal fills the row that doc left empty),
-> and [`policies-supplementary-note.md`](./policies-supplementary-note.md)
-> (which earmarks `policy` for authorization — see Axis 6).
+> Status: **SHIPPED** (rev. 4, research-grounded). All three tiers land on
+> all five backends — see [`../domain-services.md`](../domain-services.md)
+> for the reference. A domain service is **pure**, **read-only** (may
+> query supporting data through a repository, never writes), or
+> **mutating** (may mutate the aggregates the orchestrator passes in,
+> never loads). In every tier the **application orchestrator** (`workflow`;
+> `commandHandler` / Phoenix context where applicable) owns the single
+> commit; the service never writes to a repository and never commits. The
+> `function` block-body companion shipped alongside. This doc is kept as
+> the design record + the five-backend idiom audit.
+>
+> Rev. 4 restores a `reading` tier that rev. 3 had folded away — but
+> **restricted to reads**. The distinction that makes this safe: a query
+> creates no dirty state, so the "who commits?" problem that sank the
+> earlier read-*write* idea never arises. This is the Vernon read-only
+> middle (a domain service that holds a repository to *look something up*
+> — uniqueness checks, policy/reference lookups — is canonical; the
+> contentious half was always the writing). Companion to
+> [`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md),
+> [`workflow-and-applier.md`](./workflow-and-applier.md),
+> [`lifecycle-operations.md`](./lifecycle-operations.md),
+> [`criterion.md`](./criterion.md), and
+> [`failure-taxonomy.md`](./failure-taxonomy.md).
 
-## What changed vs. the superseded draft
+## Revision history (what each pin got right / wrong)
 
-The prior doc lays out the problem and the design space well — I'm not
-re-litigating any of that here, only pinning answers and adding spec.
-
-| Axis | Prior lean | This proposal | Why |
-|---|---|---|---|
-| 1 — mutation | A first, B fast-follow | **A in v1. B deferred to Phase 2 with explicit persistence contract.** | Confirmed. Shape B's mutation-by-reference + "who saves" contract deserves its own slice. |
-| 2 — callers | Derived from Axis 1 | **Confirmed.** Pure calculators (v1) are callable from operations *and* workflows. Coordinators (v2) workflow-only. | Falls out of Axis 1. |
-| 3 — infra strictness | 3a (strict) | **Confirmed.** No repo, no extern, no persistence. Hard error. | The slippery slope is real; (3b) collapses the construct into a short workflow. |
-| 4 — errors | Mirrors operation/workflow two-regime | **Confirmed.** `throw` for bugs, `or`-union return for expected domain failures. Per `failure-taxonomy.md`. | Not really a choice. |
-| 5 — criterion relationship | (5a) keep distinct, share the purity checker | **Confirmed**, with the rationale named: **criterion is queryable (inlines to SQL `where`); a domain service is not.** That's the line. | Surfacing the *why* makes the boundary teachable. |
-| 6 — naming | leans `service` + validator nudge | **`domainService`** (multi-word keyword). | See §"Naming" below — disagrees with prior lean, narrowly, on cultural-overload + collision grounds. |
-
-Two things the prior doc raised that this proposal adopts unchanged:
-
-- **Anemic-domain guardrail** — validator *warning* on a
-  single-aggregate domain service (it could just be an `operation` on
-  that aggregate). The prior doc proposed this; I keep it. Domain
-  services are the most over-used tactical DDD pattern; the nudge keeps
-  people honest.
-- **Shape C as the eventual north star, not v1.** The dependency-footprint-
-  derives-the-layer move is the right *long-term* model, but adopting
-  it prematurely would erode the operation/workflow clarity the rest of
-  the language leans on. Recorded; not built.
-
-## Layer placement (per `unfoldable-api-derivation.md`)
-
-[`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md)
-pins Loom on a four-layer model: **domain / contract / application /
-api**, strictly one-directional. `domainService` is unambiguously a
-**domain-layer** construct, alongside `aggregate`, `repository`,
-`valueobject`, and `enum`. It is called from the **application
-layer**, which under that proposal has three orchestrator kinds:
-
-| Application orchestrator | Shape | Calls a `domainService`? |
+| Rev. | Pin | Outcome |
 |---|---|---|
-| `commandHandler` | single-aggregate, mutating, sync | Yes |
-| `queryHandler` | no mutation, sync | Yes (Shape A only — query handlers never persist) |
-| `workflow` | cross-aggregate or stateful, may be async | Yes |
+| **1** | Evans-strict: pure only; no repo, no mutation; orchestrator passes everything in. | Shipped as Shape A. Correct but narrow — couldn't express the mutating `transfer`. |
+| **2** | Vernon-wide: service may **load via repository ports** *and* mutate. | Walked back. A five-backend audit found a load-**and-commit** service is, by Evans/Vernon/Cosmic-Python, the *application* layer, and can't stay stateless on the change-tracking backends. |
+| **3** | Pure + **mutating** (pass-in only); no repo at all. | Right about mutation (pass-in is idiomatic everywhere) but threw out the baby with the bathwater — it dropped *read-only* repo access, which has no commit problem and is canonical. |
+| **4** *(this)* | **pure / read-only / mutating.** Read-only repo queries allowed; writes/commits never (orchestrator's job); mutation is pass-in. | The principled split: the tier line is *what kind of I/O*, not guilt-by-association. |
 
-The Evans-style load-protocol — *orchestrator loads → domain service
-receives materialised aggregates → orchestrator persists* — applies
-uniformly across all three. This proposal's running examples use
-`workflow` (the construct that exists today), but everywhere the
-text says "workflow loads" / "workflow persists," read "the
-application-layer orchestrator." Nothing in v1 changes when the new
-`commandHandler` / `queryHandler` declarations land.
+The load-bearing realisation behind rev. 4: the two objections to
+repo-in-service were **(a)** persistence ambiguity ("who commits the
+writes?") and **(b)** broken statelessness ("a service that touches the
+DB can't be a zero-dependency static"). A **read-only** capability
+eliminates (a) entirely — a query dirties nothing, so the orchestrator
+stays the sole writer/committer — and softens (b), because a read
+**does not need to share the orchestrator's transaction**, so the tight
+coupling that forced the write version into a DI'd bean is gone (the read
+just needs *a* read handle, which on Elixir is the ambient `Repo` module —
+free).
 
-## The gap (recap for self-containedness)
+## The three tiers
 
-| Loom construct | DDD role | Layer | Touches |
+A domain-service operation is classified — from its body, by the phase-⑦
+validator — into a capability ladder (`mutating` ⊇ `reading` ⊇ `pure`):
+
+| Tier | Body may… | Callable from | Touches infra? |
 |---|---|---|---|
-| `function` (expr-bodied) | helper | domain (pure) | params only |
-| `criterion` | reusable predicate | domain (queryable) | params only |
-| `invariant` | aggregate-local rule | domain | `this` |
-| `operation` / `create` / `destroy` | aggregate behaviour | domain, **single-aggregate** | `this` (+ params) |
-| `workflow` / `commandHandler` / `queryHandler` | use-case orchestration | application | repos, externs, many aggregates, transactions |
-| **— missing —** | **domain service** | **domain, cross-aggregate** | domain objects passed in; **no infrastructure** |
+| **pure** *(Shape A — ships today)* | params only; branch, `let`, `match`, `throw`, call other pure services | **anywhere** (aggregate ops, views, workflows, services) | no |
+| **reading** | the above **+ read-only repository queries** (look up supporting data) | **application orchestrators only** | read-only |
+| **mutating** *(Shape B)* | the above **+ call mutating operations on the aggregates passed in** | **application orchestrators only** | read-only (writes are the orchestrator's) |
 
-The textbook case is `transfer(from, to, amount)`: not `from`'s
-operation (touches `to`), not application orchestration (the rule
-"can't overdraw" is *domain*), and `InsufficientFunds` has no authored
-home today. The reusable-calculation case is `priceOrder(order,
-customer, catalog)`: branches, throws, can't fit `function`'s
-expression body. Both are what the new construct exists for.
+Forbidden in **every** tier: a repository **write** (`save` / `insert` /
+`update` / `delete`) or any commit, `emit` an event, call an `extern`,
+call an `api`, or `start` a workflow / invoke a `commandHandler` /
+`queryHandler`. **Writing and all outbound I/O live in the application
+layer.** Reading supporting data is the only infrastructure a service may
+touch, and only in the `reading`/`mutating` tiers.
 
-## v1 scope: Shape A — the pure calculator floor
+The retained one-line boundary:
 
-A `domainService` is a **module-level**, **stateless**, **named**
-container of one or more **non-mutating** `operation`s. The operations
-take domain objects (aggregates, value objects, criteria, primitives),
-return a value or an `or`-union error, and may throw for bug-regime
-violations. They cannot mutate the aggregates they receive.
+> **Domain service = (optionally read supporting data), compute / decide /
+> mutate-the-passed-in-aggregates, return a result. Application
+> orchestrator = load the target aggregates, call the service, persist.
+> Workflow = the orchestrator, plus `emit` / `extern` / `api`.**
+
+## Surface
 
 ```ddd
 module Sales {
   domainService Pricing {
-
+    // pure tier — params only
     operation quote(cart: Cart, customer: Customer): Money {
-      require cart.lines.count > 0  "cannot quote an empty cart"   // bug regime
+      require cart.lines.count > 0  "cannot quote an empty cart"
       return cart.subtotal - customer.tier.discount(cart.subtotal)
     }
+  }
 
-    operation applyCoupon(price: Money, coupon: Coupon): Money or CouponExpired {
-      if (coupon.isExpired)
-        return CouponExpired { code: coupon.code }
-      return price - coupon.discount
+  domainService Registration {
+    // reading tier — read-only repository query, no writes
+    operation isEmailAvailable(email: Email): bool {
+      return Customers.findByEmail(email) == null      // look-up, no mutation
     }
   }
 }
-```
 
-Callable from anywhere a pure expression is legal: aggregate
-operations, workflows, other domain services, view bodies. It's safe
-to put inside an aggregate `operation` because it cannot reach a *second*
-aggregate's mutable state — the v1 contract forbids mutation outright.
-
-### What v1 domain services **cannot** do (validator-enforced, phase ⑦)
-
-| Forbidden | Diagnostic | Why |
-|---|---|---|
-| Call a repository (`findById`, `findAll`, `find where …`) | `loom.domain-service.no-repo` | Loading is the application's job (Evans, not Vernon). The orchestrator loads and passes in. |
-| Call an `extern` function | `loom.domain-service.no-extern` | I/O is application's job. |
-| Call an `api` (HTTP) endpoint | `loom.domain-service.no-api-call` | Same. |
-| `start` a workflow / call a `commandHandler` / `queryHandler` | `loom.domain-service.no-application-call` | Inverts the layer arrow — domain cannot reach application. |
-| `emit` an event | `loom.domain-service.no-emit` | Events are aggregate-bound or workflow-bound facts; a stateless service has no identity to attribute them to. |
-| **Mutate an aggregate parameter** | `loom.domain-service.no-mutation` | v1 is Shape A. Calling a mutating `operation` on a parameter (one declared without `private?`, or whose body writes to `this`) is a hard error. Phase 2 (Shape B) lifts this with a persistence contract. |
-| Declare fields | grammar-rejected | Stateless by definition. |
-
-What it **can** do that `function` cannot: branch, bind locals,
-`if`/`match`, throw domain errors, call other domain services, call
-**non-mutating** operations on parameters (read accessors,
-calculations).
-
-The "no-mutation" check needs the lowered IR's classification of
-operations as mutating vs read-only. That classification already exists
-implicitly (operations whose body writes to `this`); making it explicit
-on `OperationIR` is a small enabling change called out under
-"Lowering" below.
-
-### Errors
-
-Mirrors aggregate operations exactly, per `failure-taxonomy.md`:
-
-- **Bug regime** (`require`, invariant violation, impossible state):
-  `throw`. Maps to 500 at the edge.
-- **Expected domain failure**: return an `or`-union (`Money or
-  CouponExpired`). Same shape as operation/workflow handlers.
-
-No `Result<T, E>` wrappers; no new error machinery.
-
-### Invocation
-
-From an application-layer orchestrator (the common path — workflow
-today, `commandHandler` / `queryHandler` once
-[`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md)
-lands):
-
-```ddd
-workflow PlaceOrder {
-  create(cmd: PlaceOrder) {
-    let customer = Customers.findById(cmd.customerId)
-    let cart     = Carts.findById(cmd.cartId)
-    let total    = Pricing.quote(cart, customer)             // ← service call
-    let final    = Pricing.applyCoupon(total, cmd.coupon)?   // ? propagates CouponExpired
-    let order    = Order.create(customer, cart, final)
-    Orders.save(order)
-  }
-}
-```
-
-The shape is identical inside a `commandHandler` or `queryHandler`:
-the orchestrator loads, hands materialised aggregates to the domain
-service, the service decides/computes, the orchestrator persists (or
-returns, for queries).
-
-From an aggregate operation (also legal because v1 is pure):
-
-```ddd
-aggregate Order {
-  operation reprice(catalog: PriceList) {
-    let amount = Pricing.recalculate(this, catalog)   // ← service call, returns value
-    this.total := amount
-  }
-}
-```
-
-## Phase 2 sketch: Shape B — coordinator (the `transfer` case)
-
-Not v1. Captured here so the v1 design is forward-compatible.
-
-A coordinator service may invoke mutating operations on the aggregates
-it receives; the **calling workflow persists** them. Sketch:
-
-```ddd
 module Banking {
   domainService Transfer {
+    // mutating tier — mutates the PASSED-IN aggregates; may also read
     operation run(from: Account, to: Account, amount: Money)
       : Transferred or InsufficientFunds {
       require amount > Money.zero  "amount must be positive"
-      if (from.balance < amount)
-        return InsufficientFunds { account: from.id, shortfall: amount - from.balance }
-      from.withdraw(amount)   // mutates each aggregate via its OWN operation
-      to.deposit(amount)
+      let fee = FeeSchedule.current().forTier(from.tier)    // (reading, supporting data)
+      if (from.balance < amount + fee)
+        return InsufficientFunds { account: from.id, shortfall: amount + fee - from.balance }
+      from.withdraw(amount + fee)                            // mutate a PASSED-IN aggregate
+      to.deposit(amount)                                     // via its own operation
       return Transferred { from: from.id, to: to.id, amount }
     }
   }
+}
+```
 
-  workflow MoveMoney {
-    handle move(cmd: MoveMoney): Transferred or InsufficientFunds {
-      let from = Accounts.required(cmd.from)
-      let to   = Accounts.required(cmd.to)
-      let r    = Transfer.run(from, to, cmd.amount)
-      match r {
-        Transferred t       => { save from; save to; return t }
-        InsufficientFunds e => return e
-      }
+- A `mutating`/`reading` service may **read** supporting data via a
+  repository (`Customers.findByEmail`, `FeeSchedule.current`) but never
+  writes — and a `mutating` service takes the aggregates it mutates as
+  **materialised parameters** (`from: Account`), which the orchestrator
+  loaded and will persist.
+- The return type is the **domain result**. The mutation set is implicit:
+  exactly the aggregate parameters the body mutated, which the
+  orchestrator already references. Nothing is returned for the caller to
+  "diff."
+- No `private` / `extern` / `audited` / `when` modifiers (aggregate-op-only).
+
+## Calling one — the orchestrator load-protocol
+
+The uniform protocol across every backend: **orchestrator loads the
+target aggregates → domain service (optionally reads supporting data and)
+mutates them → orchestrator persists.**
+
+```ddd
+workflow MoveMoney transactional {
+  create(source: Account id, dest: Account id, amount: Money): Transferred or InsufficientFunds {
+    let src = Accounts.getById(source)            // orchestrator LOADS the targets
+    let dst = Accounts.getById(dest)
+    return Transfer.run(src, dst, amount)         // service MUTATES src,dst; union tail-propagates
+  }                                               // src,dst auto-saved at exit; edge maps the variant
+}
+```
+
+> **Real consumption mechanism (verified against the grammar — there is
+> NO `?` operator and NO variant `match`).** The union is consumed by
+> **`return <service-call>` in tail position**: the edge maps the
+> error variant → RFC-7807 ProblemDetails (the exception-less track), the
+> success variant → 200/204. Persistence is **auto-save-at-exit**
+> (`savesAtExit`/`computeSaves` in `lower-workflow.ts`) — the orchestrator
+> doesn't write `save`. This works **without** mid-body variant
+> discrimination because the error variant (`InsufficientFunds`) is
+> returned *before* any mutation, so auto-saving the (unmutated)
+> aggregates is harmless and, under `transactional`, a domain-error result
+> rolls back. `match` over a union (`switch(x.type)`-style narrowing) is a
+> **deferred** language feature (`docs/payloads.md` → "What's deferred");
+> the mutating tier must **not** depend on it. (`from`/`to` are reserved
+> words — params are `source`/`dest`.)
+
+- A **pure** service is callable from anywhere, including an aggregate
+  operation (it reaches no infrastructure):
+
+  ```ddd
+  aggregate Order {
+    operation reprice(catalog: PriceList) {
+      let amount = Pricing.recalculate(this, catalog)   // pure ⇒ legal inside an aggregate
+      this.total := amount
     }
   }
+  ```
+
+- A **reading** or **mutating** service called from an aggregate
+  operation / view is a hard error
+  (`loom.domain-service.infra-call-from-aggregate`) — an aggregate must
+  not reach infrastructure, even transitively through a service. Only an
+  application orchestrator (which has loaded the targets and owns the
+  commit) may call them.
+
+## Persistence — orchestrator-owned, idiomatic per backend
+
+Reads dirty nothing, so persistence concerns only the `mutating` tier,
+and the neutral semantic is unchanged from rev. 3:
+
+> The application orchestrator establishes one **transaction / unit-of-work
+> scope**, loads the target aggregates, calls the (pure / reading /
+> mutating) domain service, and **commits the scope once**. The service
+> never writes and never commits.
+
+Because the mutation set is **exactly the aggregates the orchestrator
+passed in and still references**, "what to persist" is never in doubt.
+Each `PlatformSurface` renders the commit idiomatically:
+
+| Backend | Unit of work | How the mutated aggregates persist |
+|---|---|---|
+| **.NET / EF Core** | `DbContext` change-tracking (scoped) | passed-in entities are tracked → mutate in place → orchestrator `await db.SaveChangesAsync()` once |
+| **Java / Spring + JPA** | persistence context | passed-in entities are managed → dirty-checking flushes at the `@Transactional` boundary (**+ explicit `repository.save(...)` for any *newly created* aggregate**) |
+| **Python / SQLAlchemy** | `Session` unit of work | passed-in objects are session-tracked → orchestrator `session.commit()` once |
+| **Elixir / Ecto** | `Repo.transact/2` + `with` | orchestrator (a context fn) builds changesets inline, `Repo.update`s each inside one transaction |
+| **TS / Hono / Drizzle** | `db.transaction(async tx => …)` | no change-tracking → orchestrator calls **`repository.save(aggregate, tx)`** per passed-in aggregate inside the transaction |
+
+(The audit was explicit: "return the mutated object" is **not** a
+persistence strategy on a non-tracked ORM — the caller wouldn't know what
+to `UPDATE`. The orchestrator, which holds the references, does the
+explicit write.)
+
+### Reading: the read-handle cost (the honest part)
+
+A read-only query needs *a* read handle, so the `reading`/`mutating`
+tiers are **not** zero-dependency statics on the OO backends — but the
+read needs no transaction-sharing with the orchestrator, so the cost is
+small and the coupling loose:
+
+| Backend | Read shape inside the service | Cost |
+|---|---|---|
+| **Elixir / Ecto** | a context fn calling `Repo.get` / a query directly | **free** — `Repo` is a module, no injection; this is what contexts already do |
+| **.NET / EF** | `AsNoTracking()` read via an injected read repo / `DbContext` | a DI'd service (or a read-port parameter) |
+| **Java / JPA** | injected repo; `@Transactional(readOnly = true)` on the caller | a DI'd `@Service` bean (the `readOnly=true` flag is itself an idiom) |
+| **Python / SQLAlchemy** | read via a `session` / read-port passed in | param-passed (Cosmic-Python calls this the service layer; Vernon calls it a fine domain service) |
+| **TS / Hono / Drizzle** | `db.select(...)` via a read-port argument | a read-port parameter |
+
+So the emission rule is: **pure → stateless static / module function
+(no dependency, callable anywhere); reading / mutating → the declaration
+gains a read handle** — an injected read-only repository on EF/JPA, a
+read-port parameter on Drizzle/SQLAlchemy, the ambient `Repo` module on
+Elixir. The mutation never needs a handle (it's on the passed-in
+aggregate); only the read does.
+
+### Read-your-own-writes (deferred edge case)
+
+If a `reading` query must observe the orchestrator's *own uncommitted*
+writes (it loaded and mutated `from`, then the service re-queries `from`),
+the read must share the orchestrator's session/transaction — and the
+tight coupling returns. **Default the `reading` tier to *independent
+supporting data*** (price lists, tax tables, uniqueness checks — the
+common case) and treat shared-transaction reads as a later, sharper
+problem, not v1.
+
+### Multi-aggregate transactions (the `transfer` case)
+
+One transaction, two saves — the orchestrator loads both accounts, the
+service mutates both, one commit persists both. This is what EF / Spring /
+Drizzle samples do and is the pin.
+
+> *Orthodoxy note:* the strict Cosmic-Python line is "one aggregate per
+> unit of work; bridge to the second via a domain event." Loom pins the
+> **pragmatic single-transaction** form for aggregates that must change
+> atomically, and treats the event-driven form as the explicit-async
+> alternative (workflows + `emit`), not the default.
+
+### What the IR needs to carry
+
+- **No stamped `tier` field — derive it** (CLAUDE.md "derive, don't
+  stamp"). A pure helper `classifyDomainServiceTier(op)` in
+  `src/ir/util/` (mirroring `classifyPage` in `page-kind.ts`) returns
+  `"pure" | "reading" | "mutating"` from the body: calls a mutating op on
+  an aggregate param ⇒ `mutating`; else does a repository **read** ⇒
+  `reading`; else `pure`. One shared classifier consumed by **both** the
+  validator (caller gate, `no-repo-write`) and the emitters (read-handle
+  shape, orchestrator `save`-emission) — so there's no cache to
+  invalidate at the construction site that forgets to set it.
+- `OperationIR.mutating: bool` — the classifier reuses the same
+  this-/param-write detection the validator already walks
+  (`domain-service-checks.ts`'s `forEachStmtExpr` + `callReceiverName`).
+
+No `tier` IR field, no `mutates`-set materialisation, no new
+`ExprIR.kind`; calls stay `Call { callKind: "domain-service" }`.
+
+## Criteria and retrievals — which tier
+
+The existing predicate/query vocabulary maps onto the tiers by the same
+rule (the predicate is pure; the repository access is what classifies):
+
+| Construct | What it is | Tier when used in a service |
+|---|---|---|
+| **`criterion`** used *inline as a boolean* (over a passed-in aggregate/value) | pure Specification predicate | **pure** — no infra |
+| **`criterion`** used to *drive a query* (`Repo.findAll(<Crit>)`, a `find … where <Crit>`) | the predicate is still pure; the `Repo.*` call is a read | **reading** — the query is the infra |
+| **`retrieval`** run via `Repo.run(R(args), page?)` | a named query bundle (`where` + `sort` + `loads`) | **reading** — it *is* a repository read |
+| `Repo.find` / `Repo.findAll` / `Repo.run` | the shipped read surface (today: workflow bodies) | **reading** — reused verbatim; no new query machinery |
+
+So a criterion never moves the tier on its own — only the `Repo.*` access
+does. The `reading` tier reuses the **already-shipped** `Repo.find /
+findAll / run` surface (it just becomes legal inside a `reading`/`mutating`
+service body, not only a workflow).
+
+> **Surface gap to pin:** applying a criterion to a **named service
+> parameter** (`HighValue` over an `order: Order` param, not an implicit
+> `this` / loaded candidate) needs criterion candidate-binding —
+> `criterion.md` lists `from <Criterion>(args)` parameter binding as *not
+> yet shipped*. The *semantics* are pure-tier-clean; the *syntax* for
+> "apply this criterion to that parameter inside a service body" is the
+> small thing to land alongside the `reading` tier.
+
+## `function` — let it do a bit more (companion change)
+
+Today `FunctionDecl` is `function f(p): T = Expression` — a single
+expression (it already admits `match`/ternary, just not statements,
+`let`-bindings, or `throw`). Rev. 4 adds a **pure block body**:
+
+```ddd
+function lineTotal(l: Line): Money = l.qty * l.price        // unchanged — expression form
+
+function shippingFor(cart: Cart, dest: Region): Money {     // new — block form
+  let weight = cart.lines.sum(l => l.item.weight)
+  if (dest.isDomestic) return weight * Rates.domestic
+  return weight * Rates.international + cart.customsSurcharge
 }
 ```
 
-The **persistence contract** Phase 2 must pin (the question the prior
-doc flagged and v1 sidesteps by forbidding mutation):
+A block-body `function` stays **pure** — params only, no repository (not
+even a read), no mutation, no `emit`/`extern`/`api`; `throw` / `require`
+(bug regime) allowed. The expression form stays SQL-inlinable like a
+`criterion`; the **block form is not queryable**. This keeps the ladder
+crisp: `function` (pure; expression form inlinable) → `criterion` (pure,
+queryable predicate) → `domainService` (reads, decides, mutates passed-in
+aggregates). Full imperative statement bodies (assignment, loops) are
+rejected.
 
-1. **Explicit-save (sketched above)** — the workflow names which
-   aggregates to `save`. Clear; requires the workflow to know what the
-   service mutated.
-2. **Auto-save by signature** — mark mutated params (`from: Account
-   mut`); the workflow auto-`save`s them. Terser; introduces a new
-   parameter modifier.
+## Validation (`src/ir/validate/checks/domain-service-checks.ts`)
 
-This is a real decision, deserves its own slice, and gates Shape B
-landing. v1 doesn't need it resolved.
+**Kept:** `no-emit`, `no-extern`, `no-api-call`, `no-application-call`
+(no workflow-start / handler call). **Revised / new:**
 
-Phase 2 also lifts the "callers" rule (Axis 2a): coordinator services
-become **application-orchestrator-only** callers (workflow /
-`commandHandler`) — calling one from inside an aggregate operation
-would let an aggregate reach into a *different* aggregate's mutable
-state, which is exactly the boundary domain services exist to
-preserve. (`queryHandler` stays excluded — queries never mutate.)
+- `loom.domain-service.no-repo-write` — a domain service may not perform a
+  repository **write** (`save`/`insert`/`update`/`delete`) or commit, in
+  any tier. Reads are allowed (they classify the op as `reading`); writes
+  are the orchestrator's job. *(Replaces rev. 3's blanket `no-repo`,
+  which over-forbade reads.)*
+- `loom.domain-service.infra-call-from-aggregate` — a `reading` or
+  `mutating` service invoked from an aggregate `operation` / `create` /
+  `destroy` / view body. Pure services exempt.
+- `loom.domain-service.single-aggregate-warning` — unchanged soft anemic
+  nudge.
 
-## Naming — why `domainService` (disagreeing narrowly with the prior lean)
-
-The prior doc leans `service` with a validator nudge. I land elsewhere.
-
-| Candidate | Verdict |
-|---|---|
-| `function` | Already a pure expression-bodied calculation. Overloading loses the "no statements, no throw" invariant of `function`. (Axis 6 in prior doc — same conclusion.) |
-| `policy` | Earmarked for authorization — see [`policies-supplementary-note.md`](./policies-supplementary-note.md). Also narrower than the concept needs. (Prior doc — same conclusion.) |
-| `service` | **Prior lean.** Two problems with shipping it. *(a)* The keyword `service` is already used at `ddd.langium:366` for `ServiceConnectionSource` in deployable blocks; Langium can context-disambiguate by position, but the cost is a non-trivial grammar that makes a casual reader stop and check which `service` they're looking at. *(b)* In 2026 the bare word is culturally overloaded — microservices, app services, service workers, k8s services, dependency-injection "services." A domain service is none of those. The prior doc's "validator nudge" is, essentially, an admission that readers will guess wrong without help. |
-| `domainService` | What this proposal picks. Multi-word-as-one-keyword is precedented (`valueobject`). Names the *layer* at the declaration site, which is half the point. No collision. The verbosity is the feature. |
-
-This is genuinely a coin-flip; I'd not block on it. If the consensus
-ends up being `service` + a `loom.service.naming-hint` validator, the
-rest of this proposal is unaffected — change one token in the grammar
-and one IR field name.
-
-## Anemic-domain validator warning
-
-Per the prior doc's open question #3: a `domainService` whose every
-operation takes exactly one aggregate parameter is a code smell — the
-behaviour could live on the aggregate itself. Validator emits
-`loom.domain-service.single-aggregate-warning`: *"This service operates
-on a single aggregate; consider declaring `operation <name>` on `<Agg>`
-instead."*
-
-Warning, not error — there are legitimate exceptions (a service whose
-parameter list is a single aggregate plus several value-object policies
-that you want grouped by service name rather than scattered on the
-aggregate). The nudge defaults users toward the cleaner placement.
-
-## Grammar additions (`src/language/ddd.langium`)
-
-```
-DomainService:
-    'domainService' name=ID '{'
-        operations+=DomainServiceOperation*
-    '}';
-
-DomainServiceOperation:
-    'operation' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')'
-    (':' returnType=TypeRef)?
-    ( '=' body=Expression                     // expression shorthand
-    | '{' stmts+=Statement* '}' );            // statement body
-```
-
-Module body rule gains `| domainServices+=DomainService`.
-
-Member-call resolution (`Pricing.quote(...)`) is already covered by the
-existing `MemberCall` rule; only the scope provider needs to know about
-the new declaration kind (see "Lowering" below).
-
-## IR additions (`src/ir/types/loom-ir.ts`)
-
-```ts
-export interface DomainServiceIR {
-  kind: "domainService";
-  name: string;
-  module: string;
-  operations: DomainServiceOperationIR[];
-}
-
-export interface DomainServiceOperationIR {
-  name: string;
-  params: ParamIR[];
-  returnType: TypeRefIR;        // void if absent
-  body: StmtIR[];                // expression shorthand lowers to `return expr`
-  throws: ErrorRefIR[];
-  mutating: false;               // v1 invariant; Phase 2 may flip
-}
-```
-
-`BoundedContextIR` (and `LoomModel`) gains `domainServices:
-DomainServiceIR[]`.
-
-A new `ExprIR.kind` is **not** required — domain-service calls are
-ordinary `Call` nodes with a new `callKind: "domain-service"`. Each
-backend's `ExprTarget` (`src/generator/_expr/target.ts`) adds one arm.
-
-**Enabling change:** `OperationIR` gains an explicit `mutating: bool`
-flag (already implicit in the IR — set to true iff the body writes to
-`this`). The "no-mutation" validator needs this surfaced; computing it
-on the fly inside the validator is fine for v1, but exposing it cleans
-up the eventual Phase 2 contract and is cheap.
-
-## Lowering (`src/ir/lower/`)
-
-A new sibling leaf `lower-domain-service.ts` per the per-declaration-
-kind split (`lower-platform`, `lower-requirements`, `lower-capabilities`,
-`lower-members`, …). Body lowering reuses `lower-stmt.ts` / `lower-expr.ts`
-unchanged.
-
-Call lowering: `MyService.opName(args)` resolves to `Call { callKind:
-"domain-service", target: { service, op }, args }` in `lower-expr.ts`.
-Resolution at lower time means backends never re-resolve (the
-architectural payoff for phase ⑤'s complexity, called out in
-`CLAUDE.md`).
-
-Scope provider (`src/language/ddd-scope.ts`) gains a clause exposing
-`DomainService` names at module scope, the same way `function` /
-`criterion` names are exposed.
-
-## Validation (`src/ir/validate/checks/`)
-
-A new check leaf `domain-service-checks.ts` enforces the layering
-invariant. Diagnostic codes match the table in §"What v1 cannot do":
-
-1. `loom.domain-service.no-repo`
-2. `loom.domain-service.no-extern`
-3. `loom.domain-service.no-api-call`
-4. `loom.domain-service.no-workflow-start`
-5. `loom.domain-service.no-emit`
-6. `loom.domain-service.no-mutation` — visiting the body, any `Call`
-   whose `callKind` is `"operation"` *and* whose resolved target
-   `OperationIR.mutating === true` is a hard error.
-7. `loom.domain-service.single-aggregate-warning` — soft warning.
-
-Existing checks (type checking, criterion typing, error-class
-resolution, all-paths-return for typed bodies) apply unchanged — they
-walk `StmtIR` and don't care about the enclosing construct.
+The rev-1 `no-mutation` rule stays dropped (mutation of passed-in
+aggregates is legal in the `mutating` tier).
 
 ## Per-backend emission
 
-Slots into existing `PlatformSurface`; no backend sees a new IR
-vocabulary, only a new owner of familiar shapes.
+The **call** is the shared `ExprTarget` `domain-service` arm everywhere.
+The **declaration** and the **orchestrator** persistence vary by tier and
+backend:
 
-| Backend | Emission |
-|---|---|
-| **TS / Hono** | `src/generator/typescript/emit/domain-service.ts` emits `src/domain/services/<name>.ts` as an exported namespace of pure functions. `TS_TARGET.callKind["domain-service"]` → `${Service}.${op}(...args)`. |
-| **.NET / EF** | `src/generator/dotnet/emit/DomainService.cs.ts` emits `Domain/Services/<Name>.cs` as `public static class <Name>`. `CS_TARGET` gets the same arm. No constructor (no repo injection — the absence is the layering, made physical). |
-| **Phoenix** | `src/generator/elixir/domain-service-emit.ts` emits `defmodule App.Domain.Services.<Name>` — plain stateless module, no GenServer. `ELIXIR_TARGET` gets the same arm. |
-| **React** | None. The frontend doesn't run domain logic. |
+| Backend | Pure declaration | Reading/mutating declaration | Orchestrator after a mutating call |
+|---|---|---|---|
+| **TS / Hono** | `src/domain/services/<name>.ts` namespace of pure fns | same, with a read-port arg | `repository.save(param, tx)` per mutated param in `db.transaction` |
+| **.NET / EF** | `Domain/Services/<Name>.cs` `static class` | injected read repo (`AsNoTracking`) — DI'd service | one `SaveChangesAsync()` |
+| **Java / JPA** | `static` utility class | `@Service` bean with injected repo | `@Transactional` flush; explicit `save` for new aggregates |
+| **Python / SQLAlchemy** | bare module functions | functions taking a `session`/read-port | one `session.commit()` |
+| **Phoenix / Ecto** | a context function | a context function calling `Repo` reads directly | inline changeset + `Repo.update` inside `Repo.transact` |
 
-Byte-identical-output gate extends per `_expr/target.ts` convention
-(PR #843): a new fixture under `test/generator/_expr/domain-service-call.test.ts`
-pins each target's output for a fixed `Call` node.
+> **Elixir shape note (from the audit):** in plain-Ecto Phoenix the
+> **context is the domain service + the repository**. A single-context
+> service lowers to a *context function*, not a separate `Services`
+> module; a standalone module is warranted only for *cross-context*
+> orchestration. **Never wrap `Ecto.Repo` in a "repository port"** — the
+> context calls `Repo` directly; tests isolate with `Ecto.Sandbox`.
 
-## Tests (per `CLAUDE.md` §"Adding a language feature")
+## Phasing
 
-| Suite | Gates |
-|---|---|
-| `test/language/parsing/domain-service.test.ts` | Grammar parses both body forms; rejects fields. |
-| `test/language/validators/domain-service.test.ts` | Negative tests for each of the six hard rules above + the soft warning. |
-| `test/ir/lower/domain-service.test.ts` | Structural lowering + call-site `callKind` resolution. |
-| `test/generator/typescript/emit-domain-service.test.ts` | Hono fixture. |
-| `test/generator/dotnet/emit-domain-service.test.ts` | .NET fixture. |
-| `test/generator/elixir/domain-service-emit.test.ts` | Phoenix fixture. |
-| `test/platform/pipeline-layering.test.ts` | Existing — must continue to pass. |
+1. **Shape A (pure)** — *shipped.* Recast the validator around the
+   three-tier model (the new `no-repo-write` replaces the blanket
+   `no-repo`).
+2. **`reading` tier** — read-only repository access + the
+   `infra-call-from-aggregate` caller gate + the read-handle emission
+   (injected read repo on EF/JPA, read-port arg on Drizzle/Python, direct
+   `Repo` on Elixir). No persistence wiring (read-only). Smallest blast
+   radius; lands first.
+3. **`mutating` tier** — the orchestrator `save`-emission for mutated
+   parameters. Ship the **change-tracking** backends first (EF / JPA /
+   SQLAlchemy: nearly free), then the **explicit** pair (Drizzle
+   `repo.save(_, tx)`, Ecto inline-changeset + `Repo.transact`).
+4. **`function` block body** — independent companion; any time. **SHIPPED:**
+   grammar (`= Expression | { Statement* }`), `FunctionIR.body: ExprIR |
+   StmtIR[]` variant (expression form byte-identical), block lowering via
+   `lowerStatement`, AST type-check of the pure block subset
+   (`loom.function-block-no-return`), the IR purity gate
+   (`loom.function-block-impure`) + inherited non-queryability
+   (`loom.find-where-not-queryable`), printer, and statement-body rendering on
+   all five backends (TS/.NET/Java/Python/Elixir).
 
-Plus one `LOOM_TS_BUILD=1` and one `LOOM_REACT_BUILD=1` run.
+## Research findings (five-backend idiom audit)
 
-## Open questions (carried over + new)
+The pins are grounded in primary-source research per backend. The
+read-only middle in particular is well-supported: a domain service that
+**holds a repository to look something up** (uniqueness, policy/reference
+data) is canonical — Vernon's own IDDD `AuthenticationService` is exactly
+that (a repository-using domain-service *bean*); the contentious half of
+Vernon was always the *writing*, which rev. 4 still forbids. Headlines:
 
-1. **Naming.** `domainService` vs `service` (Axis 6 — see §"Naming").
-   Coin-flip. Whichever wins, the rest of the proposal stands.
-2. **Phase 2 persistence contract.** Explicit-save (sketched) vs
-   auto-save-by-`mut`-marker. Gates Shape B landing.
-3. **`audited` modifier.** Aggregate operations and workflow handles
-   support `audited`. Should `domainService` operations? Probably yes
-   in v1.5 — cheap, same lowering as `operation audited`.
-4. **Macros.** Worth confirming whether `stdlib/` macros (audit,
-   softDelete, scaffold, crudish) want to emit domain services. Most
-   likely not; leave the macro API surface alone in v1.
-5. **Wire-shape relevance.** None. Domain services have no wire shape
-   and are not addressable from outside. The `.loom/` bundle gains
-   nothing.
-6. **Composition.** Can `domainService A` declare a `domainService B`
-   as a constructor-parameter for testability? v1 says no — they're
-   stateless, just call `B.op(...)` directly. Revisit if testing
-   patterns demand it.
+- **Canonical line is at *writes*, not reads.** Evans/Vernon: a pure
+  domain service receives materialised aggregates; a repository-holding
+  one is still a domain service (as an injected bean) when it *reads* to
+  decide. Cosmic Python (ch. 4) draws its stricter line at any
+  repository/session use ("that's the service layer") — Loom follows
+  Vernon for read-only, and notes the Cosmic-Python disagreement.
+- **.NET / EF** — a repo-touching service can't be `static` (EF tracking
+  needs the scoped `DbContext`); make it a DI'd service. Reads use
+  `AsNoTracking`. Pure services may be static. ([MS Learn — app layer](https://learn.microsoft.com/en-us/dotnet/architecture/microservices/microservice-ddd-cqrs-patterns/microservice-application-layer-implementation-web-api),
+  [EF Core persistence](https://learn.microsoft.com/en-us/dotnet/architecture/microservices/microservice-ddd-cqrs-patterns/infrastructure-persistence-layer-implementation-entity-framework-core),
+  [DI guidelines](https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection/guidelines))
+- **Java / Spring + JPA** — repo-loading service is a `@Service` bean;
+  `@Transactional(readOnly = true)` is the idiom for read-only;
+  dirty-checking flushes managed entities at commit; **new** aggregates
+  still need explicit `save`. ([Drotbohm — DDD & Spring](http://static.odrotbohm.de/lectures/ddd-and-spring/),
+  [Vernon IDDD AuthenticationService](https://github.com/VaughnVernon/IDDD_Samples/blob/master/iddd_identityaccess/src/main/java/com/saasovation/identityaccess/domain/model/identity/AuthenticationService.java),
+  [Baeldung — dirty checking](https://www.baeldung.com/java-hibernate-entity-dirty-check))
+- **Python / SQLAlchemy** — Cosmic Python: the loading thing takes the
+  UoW/session **as an explicit argument**; application owns `commit()`.
+  ([Ch. 4 — Service Layer](https://github.com/cosmicpython/book/blob/master/chapter_04_service_layer.asciidoc),
+  [Ch. 6 — Unit of Work](https://github.com/cosmicpython/book/blob/master/chapter_06_uow.asciidoc))
+- **Elixir / Ecto** — the Phoenix **context** is the domain service +
+  repository; read directly via `Repo`; standalone service module only
+  for cross-context ops; **wrapping `Ecto.Repo` is an anti-pattern**;
+  prefer `Repo.transact` + `with` over `Ecto.Multi` for static pipelines.
+  ([Jurić — core module](https://medium.com/very-big-things/towards-maintainable-elixir-the-anatomy-of-a-core-module-b7372009ca6d),
+  [Konidas — against Ecto.Multi](https://tomkonidas.com/repo-transact/),
+  [ElixirForum — Repo outside contexts](https://elixirforum.com/t/using-repo-functions-outside-of-context-modules-anti-pattern/50314))
+- **TS / Drizzle** — no change-tracking, so the orchestrator persists via
+  `repository.save(entity, tx)` inside `db.transaction`, `tx` threaded as
+  an argument (no DI container needed); reads are `db.select` via a read
+  port. ([Drizzle transactions](https://orm.drizzle.team/docs/transactions),
+  [Sentry — atomic repositories in TS](https://blog.sentry.io/atomic-repositories-in-clean-architecture-and-typescript/),
+  [Stemmler — persisting aggregates](https://khalilstemmler.com/articles/typescript-domain-driven-design/aggregate-design-persistence/))
+
+## Open questions
+
+1. **Read-port shape vs. ambient handle.** For EF/JPA/SQLAlchemy/Drizzle,
+   is the read exposed as an injected read-only repository / explicit
+   read-port parameter, or an ambient request-scoped accessor (like the
+   Python `ContextVar` already used for the current principal)? Lean
+   read-port parameter for explicitness; ambient for the actor-style case.
+2. **Drizzle `save` shape.** Full-row `UPDATE … SET` from `wireShape`
+   (simple, deterministic) vs. existence-check create-or-update. Lean
+   full-row.
+3. **Read-your-own-writes.** Deferred (see above) — pin whether a
+   `reading` query ever needs the orchestrator's session.
+4. **`audited` on service operations.** Probably yes in a follow-up.
+5. **Elixir single- vs cross-context classification.** Context-function
+   vs standalone-module decided from the operation's parameter modules
+   (single context ⇒ context fn).
 
 ## Decision summary
 
-- **Adopt** the prior doc's six-axis framework. Pin axes 1, 2, 3, 4, 5
-  per the table at the top.
-- **Ship v1 = Shape A** (pure calculator, no mutation). Solves the
-  reusable-calculation case immediately; sidesteps the persistence
-  contract.
-- **Defer Shape B** (coordinator, mutates passed aggregates) to Phase
-  2; sketch its contract here so v1 is forward-compatible.
-- **Defer Shape C** (unified function family, layer-inferred) as the
-  north star; do not build.
-- **Name it `domainService`** (narrowly disagreeing with the prior
-  lean toward `service`).
-- **Reuse `Call` + `callKind: "domain-service"`**; no new `ExprIR.kind`.
-- **Surface `OperationIR.mutating`** as the enabling IR change for the
-  no-mutation validator (cleans up Phase 2 contract too).
-- **Add the anemic-domain warning** for single-aggregate services.
+- **Three tiers** — `pure` (no infra, callable anywhere), `reading`
+  (read-only repository queries, application-orchestrator-only),
+  `mutating` (mutates the aggregates the orchestrator **passes in**,
+  application-orchestrator-only). The tier line is *what kind of I/O*.
+- **Writes and commits are never the service's** — `no-repo-write` in
+  every tier; loading the *target* aggregates and the single commit live
+  in the application orchestrator.
+- **Read-only is the Vernon middle**: it has no commit problem and is
+  canonical; its only cost is a read handle (a DI'd read repo on EF/JPA,
+  a read-port arg on Drizzle/Python, the ambient `Repo` module on Elixir
+  — free).
+- **Persistence is orchestrator-owned, rendered idiomatically per
+  backend**: implicit change-tracking on EF / JPA / SQLAlchemy; explicit
+  `repository.save(_, tx)` on Drizzle and inline-changeset + `Repo.transact`
+  on Ecto. The mutation set is the passed-in aggregates; nothing is
+  returned to diff.
+- **Multi-aggregate writes** use one transaction / multiple saves.
+- **`function` gains a pure block body** (let + branch + bug-regime
+  throw), staying non-queryable. `FunctionIR.body` becomes
+  `ExprIR | StmtIR[]` (a variant, not a replacement — the expression form
+  stays SQL-inlinable).
+- Reuse `Call` + `callKind: "domain-service"`. **No new IR field** — the
+  tier is derived on demand via `classifyDomainServiceTier(op)`, not
+  stamped.

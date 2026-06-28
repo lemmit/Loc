@@ -8,7 +8,7 @@ import {
   isReturnStmt,
 } from "../../language/generated/ast.js";
 import { typeKey, variantTag as unionVariantTag } from "../stdlib/unions.js";
-import type { ExprIR, PathIR, StmtIR } from "../types/loom-ir.js";
+import type { ExprIR, PathIR, StmtIR, TypeIR } from "../types/loom-ir.js";
 import {
   inferExprType,
   lowerExpr,
@@ -16,7 +16,13 @@ import {
   pathType,
   provSiteFor,
 } from "./lower-expr.js";
-import { cstText, type Env, findFunctionInEnv, withLocal } from "./lower-types.js";
+import {
+  cstText,
+  type Env,
+  findDomainServiceByName,
+  findFunctionInEnv,
+  withLocal,
+} from "./lower-types.js";
 
 export function lowerStatement(stmt: Statement, env: Env): { stmt: StmtIR; envAfter: Env } {
   if (isPreconditionStmt(stmt)) {
@@ -123,19 +129,60 @@ export function lowerStatement(stmt: Statement, env: Env): { stmt: StmtIR; envAf
           envAfter: env,
         };
       }
-      // `a.b.c(args)` — chained call (e.g. `api.orders.addLine(...)`
-      // in an e2e body).  Synthesise a method-call expression and
-      // wrap as an expression-statement.
+      // `Pricing.quote(args)` — a domain-service member call written as a
+      // STATEMENT (`Penalty.charge(this, amount)`).  Mirrors the expression-path
+      // domain-service arm so it lowers to a `call` with `callKind:
+      // "domain-service"` + the structured `serviceRef` — backends emit a real
+      // call without re-resolving, and the `infra-call-from-aggregate` validator
+      // gate (which scans for `callKind === "domain-service"`) can see a
+      // reading/mutating service reached from inside an aggregate body.  Checked
+      // before the generic chained-call path so a service name isn't mistaken
+      // for an aggregate-local receiver.
+      if (lv.call && lv.tail.length === 1 && !env.locals.has(lv.head)) {
+        const svc = findDomainServiceByName(env, lv.head);
+        if (svc) {
+          const args = (lv.args ?? []).map((a) => lowerExpr(a, env));
+          const expr: ExprIR = {
+            kind: "call",
+            callKind: "domain-service",
+            name: lv.tail[0]!,
+            args,
+            serviceRef: { service: svc.name, op: lv.tail[0]! },
+          };
+          return { stmt: { kind: "expression", expr }, envAfter: env };
+        }
+      }
+      // `a.b.c(args)` — chained call.  Two shapes share this path:
+      //   - an e2e body chain (`api.orders.addLine(...)`) whose head is not an
+      //     in-scope local — receiver stays an `unknown` ref / string types, as
+      //     before;
+      //   - a `param.op(args)` call on an in-scope aggregate-typed LOCAL
+      //     (`src.withdraw(amount)` — the domain-services.md rev. 4 mutating
+      //     tier).  When the head names a local, RESOLVE it so the receiver
+      //     carries its real `refKind` (`param`/`let`) and entity type — the IR
+      //     stays fully resolved (architecture invariant: backends never
+      //     re-resolve), and the domain-service tier classifier can see that the
+      //     call targets a mutating op on a passed-in aggregate.
       if (lv.call && lv.tail.length > 0) {
-        let recv: ExprIR = { kind: "ref", name: lv.head, refKind: "unknown" };
+        const headLocal = env.locals.get(lv.head);
+        const stringType: TypeIR = { kind: "primitive", name: "string" };
+        let recv: ExprIR = headLocal
+          ? { kind: "ref", name: lv.head, refKind: headLocal.kind, type: headLocal.type }
+          : { kind: "ref", name: lv.head, refKind: "unknown" };
+        // The receiver type entering the final call: the head local's type when
+        // the call is directly on the head (`src.withdraw(...)` — the common
+        // `param.op()` shape, single tail); intermediate members in a longer
+        // chain (e2e `api.orders.addLine`) stay string-typed as before.
+        let recvType: TypeIR = headLocal?.type ?? stringType;
         for (let i = 0; i < lv.tail.length - 1; i++) {
           recv = {
             kind: "member",
             receiver: recv,
             member: lv.tail[i]!,
-            receiverType: { kind: "primitive", name: "string" },
-            memberType: { kind: "primitive", name: "string" },
+            receiverType: recvType,
+            memberType: stringType,
           };
+          recvType = stringType;
         }
         const lastMember = lv.tail[lv.tail.length - 1]!;
         const args = (lv.args ?? []).map((a) => lowerExpr(a, env));
@@ -144,7 +191,7 @@ export function lowerStatement(stmt: Statement, env: Env): { stmt: StmtIR; envAf
           receiver: recv,
           member: lastMember,
           args,
-          receiverType: { kind: "primitive", name: "string" },
+          receiverType: recvType,
           isCollectionOp: false,
         };
         return { stmt: { kind: "expression", expr }, envAfter: env };

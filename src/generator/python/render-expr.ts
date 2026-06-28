@@ -46,6 +46,15 @@ export interface PyRenderContext {
    *  boundaries (`probability.as_fraction()`), so their internal
    *  spelling must match the public method name. */
   fnPrefix?: string;
+  /** Read-port handle expressions to PREPEND to a `domain-service` call's
+   *  arguments (domain-services.md rev. 4, Slice 1 — the `reading` tier).  A
+   *  `reading` service operation takes one read-port parameter per repository
+   *  it reads; the orchestrating caller (a `workflow`) supplies the matching
+   *  repo handle here, keyed by `<service>.<op>`.  Returns `[]` (or is absent)
+   *  for a PURE service call, which therefore stays byte-identical.  Only the
+   *  workflow path wires this — aggregate-op render contexts leave it undefined
+   *  (and the validator forbids them calling a non-pure service anyway). */
+  readPortArgs?: (service: string, op: string) => string[];
 }
 
 const DEFAULT: PyRenderContext = { thisName: "self" };
@@ -311,10 +320,34 @@ function renderCall(args: string[], e: CallExpr, ctx: PyRenderContext): string {
       return `(await ${snake(op.resourceName)}_${snake(op.verb)}(${argList}))`;
     }
     case "domain-service": {
-      // `quote(cart, customer)` — the generated Python service module
-      // exports bare module-level functions (snake-cased), imported by name.
+      // `quote(cart, customer)` — the generated Python service module exports
+      // bare module-level functions (snake-cased), imported by name.  A
+      // `reading`-tier service op takes read-port handle(s) AHEAD of the user
+      // args; the orchestrating caller supplies them via `ctx.readPortArgs`
+      // (domain-services.md rev. 4, Slice 1).  A PURE service has no ports →
+      // no prepend, no `await` → byte-identical.  A reading op is `async` (it
+      // awaits its repo reads), so its call is `(await op(handle, …))` —
+      // parenthesised so it composes in any expression position (a precondition,
+      // a comparison), exactly like a `repo-read`.
       const ref = e.serviceRef!;
-      return `${snake(ref.op)}(${argList})`;
+      const ports = ctx.readPortArgs?.(ref.service, ref.op) ?? [];
+      const all = [...ports, ...args].join(", ");
+      const call = `${snake(ref.op)}(${all})`;
+      return ports.length > 0 ? `(await ${call})` : call;
+    }
+    case "repo-read": {
+      // A read-only repository query in a `reading` domain-service body
+      // (domain-services.md rev. 4, Slice 1).  Renders against the THREADED
+      // read-port handle — `snake(repo)` (`Accounts` → `accounts`), the param
+      // the service declaration takes and the orchestrating workflow supplies —
+      // exactly the var the workflow's own repo reads use
+      // (`await accounts.by_holder(holder)`).  `await`-wrapped in parens so it
+      // composes in any expression position (`(await …) is None`).  The method
+      // is the resolved repo method, snake-cased to the generated Python repo's
+      // method name (`byHolder` → `by_holder`, `getById` → `get_by_id`) — no
+      // re-recognition.
+      const read = e.repoRead!;
+      return `(await ${snake(read.repo)}.${snake(read.method)}(${argList}))`;
     }
     case "action":
     // Sibling action call (Proposal A Stage 1) — frontend-only; never lowered

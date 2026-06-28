@@ -385,6 +385,7 @@ function emitProjectFromContexts(
         resourcesPkg: pkgFor("resource-client"),
         entityPkgOf: (a) => pkgFor("entity", a),
         repoPkgOf: (a) => pkgFor("repository-interface", a),
+        domainServicePkg: pkgFor("domain-service"),
       },
       authRequired,
       system?.sys,
@@ -482,8 +483,12 @@ function emitProjectFromContexts(
     // of `public static` methods in `<base>.domain.services` (the
     // `<Agg>Criteria` envelope); `or`-union returns reuse the shipped
     // exception-less sealed-union machinery.
-    for (const file of renderJavaDomainServices(ctx, pkgFor("domain-service"), basePkg, (a) =>
-      pkgFor("entity", a),
+    for (const file of renderJavaDomainServices(
+      ctx,
+      pkgFor("domain-service"),
+      basePkg,
+      (a) => pkgFor("entity", a),
+      (a) => pkgFor("repository-interface", a),
     )) {
       place(file.name, "domain-service", file.content);
     }

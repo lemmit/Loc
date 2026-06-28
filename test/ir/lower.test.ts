@@ -42,8 +42,12 @@ describe("lowering — name resolution metadata", () => {
   it("resolves a `this-prop` reference and an `enum-value` reference in a function body", async () => {
     const order = await orderAggregate();
     const fn = order.functions.find((f) => f.name === "isMutable")!;
-    expect(fn.body.kind).toBe("binary");
-    const body = fn.body as Extract<ExprIR, { kind: "binary" }>;
+    // Expression form lowers to the `{ expr }` body variant (domain-services.md
+    // rev. 4 — the block form lowers to `{ stmts }`).
+    expect("expr" in fn.body).toBe(true);
+    const expr = (fn.body as { expr: ExprIR }).expr;
+    expect(expr.kind).toBe("binary");
+    const body = expr as Extract<ExprIR, { kind: "binary" }>;
     expect(body.op).toBe("==");
     expect(asRef(body.left).refKind).toBe("this-prop");
     expect(asRef(body.left).name).toBe("status");

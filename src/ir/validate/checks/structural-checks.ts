@@ -947,6 +947,113 @@ function walkExprsInStmt(
     case "call":
       for (const a of s.args) walkExpr(a, visit);
       break;
+    case "return":
+      walkExpr(s.value, visit);
+      break;
+  }
+}
+
+/** Flag every expression in a function body — the expression form walks the
+ *  single body expression, the block form walks every statement's exprs.
+ *  Lets the currentUser / permission passes treat both body variants
+ *  uniformly. */
+function flagFunctionBody(
+  location: string,
+  fn: FunctionIR,
+  flag: (location: string, expr: ExprIR | undefined) => void,
+): void {
+  if ("expr" in fn.body) {
+    flag(location, fn.body.expr);
+  } else {
+    for (const s of fn.body.stmts) walkExprsInStmt(s, (e) => flag(location, e));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Block-body `function` purity + non-queryability (domain-services.md rev. 4).
+//
+// A block-body `function` ( `{ Statement* }` ) stays PURE — it is a helper over
+// its parameters, exactly like the expression form, just with `let`-bindings
+// and `return`/bug-regime (`precondition`/`requires`) statements.  It may NOT:
+//   - mutate (`:=` / `+=` / `-=`)         → loom.function-block-impure
+//   - `emit` an event                     → loom.function-block-impure
+//   - call an operation / repository read / domain service / extern / workflow
+//     / page action (anything other than another pure `function` or a
+//     value-object constructor) → loom.function-block-impure
+//
+// The expression form is left entirely alone (it can already only express a
+// pure expression), so its inlinability is unaffected.  A block-body function
+// is also NOT queryable — but because a function CALL already lowers to a
+// `call` ExprIR that `firstNonQueryableNode` rejects in any `where` /
+// `criterion` / view-filter position (`loom.find-where-not-queryable` etc.),
+// the block form inherits non-queryability with no extra gate; only the
+// purity contract is new here.
+// ---------------------------------------------------------------------------
+
+/** Call kinds a pure function block may invoke — another pure `function` or a
+ *  value-object constructor.  Every other kind reaches infrastructure or the
+ *  mutating layer and is rejected. */
+const PURE_FUNCTION_CALL_KINDS: ReadonlySet<string> = new Set(["function", "value-object-ctor"]);
+
+export function validateFunctionBlockBodies(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+  const check = (owner: string, fn: FunctionIR): void => {
+    if ("expr" in fn.body) return; // expression form is pure by construction
+    const where = `function '${fn.name}' on ${owner}`;
+    const source = `${ctx.name}/${owner}.function[${fn.name}]`;
+    const push = (message: string): void => {
+      diags.push({ severity: "error", code: "loom.function-block-impure", message, source });
+    };
+    for (const stmt of fn.body.stmts) {
+      // Statement-level impurity — a `this`-rooted write, an `emit`, or a bare
+      // call statement to something other than a pure function.
+      switch (stmt.kind) {
+        case "assign":
+        case "add":
+        case "remove":
+          push(
+            `${where}: '${stmt.target.segments.join(".")}' is mutated, but a 'function' is a PURE helper over its parameters — it may not write aggregate state.  Move the mutation into an 'operation' (which owns 'this'), or return a value instead.`,
+          );
+          break;
+        case "emit":
+          push(
+            `${where}: 'emit ${stmt.eventName}' is not allowed — a 'function' is pure (no side effects).  Emit the event from the 'operation' that decides it.`,
+          );
+          break;
+        case "call":
+          // A bare call STATEMENT (`bump()`) — only a pure `function` call is
+          // allowed; an operation / action / store-action call mutates.
+          if (stmt.target !== "function") {
+            push(
+              `${where}: call to '${stmt.name}' (${stmt.target}) is not allowed in a pure block-body 'function' — it invokes a mutating operation/action.  Call a pure 'function', or move the logic into an 'operation'.`,
+            );
+          }
+          break;
+      }
+      // Expression-level impurity — any call that is not to a pure function or
+      // a value-object constructor (operation / repo read / domain service /
+      // resource op / workflow start / page action / extern / api / free).
+      walkExprsInStmt(stmt, (e) => {
+        if (e.kind === "call" && !PURE_FUNCTION_CALL_KINDS.has(e.callKind)) {
+          push(
+            `${where}: call to '${e.name}' (${e.callKind}) reaches beyond the pure subset — a block-body 'function' may only call other pure 'function's (no operations, repository reads, domain services, externs, or workflow starts).  Move the side-effecting logic into an 'operation' or a 'domainService'.`,
+          );
+        }
+        if (e.kind === "method-call") {
+          push(
+            `${where}: method call '${e.member}(…)' on a receiver is not allowed in a pure block-body 'function' — call a pure 'function' instead, or move the logic into an 'operation'.`,
+          );
+        }
+      });
+    }
+  };
+  for (const agg of ctx.aggregates) {
+    for (const fn of agg.functions) check(agg.name, fn);
+    for (const part of agg.parts) {
+      for (const fn of part.functions) check(part.name, fn);
+    }
+  }
+  for (const vo of ctx.valueObjects) {
+    for (const fn of vo.functions) check(vo.name, fn);
   }
 }
 
@@ -974,19 +1081,20 @@ export function validateCurrentUserScope(ctx: BoundedContextIR, diags: LoomDiagn
     for (const inv of agg.invariants) flag(`${agg.name}.invariant`, inv.expr);
     for (const inv of agg.invariants) flag(`${agg.name}.invariant`, inv.guard);
     for (const d of agg.derived) flag(`${agg.name}.derived[${d.name}]`, d.expr);
-    for (const fn of agg.functions) flag(`${agg.name}.function[${fn.name}]`, fn.body);
+    for (const fn of agg.functions) flagFunctionBody(`${agg.name}.function[${fn.name}]`, fn, flag);
     for (const part of agg.parts) {
       for (const inv of part.invariants) flag(`${part.name}.invariant`, inv.expr);
       for (const inv of part.invariants) flag(`${part.name}.invariant`, inv.guard);
       for (const d of part.derived) flag(`${part.name}.derived[${d.name}]`, d.expr);
-      for (const fn of part.functions) flag(`${part.name}.function[${fn.name}]`, fn.body);
+      for (const fn of part.functions)
+        flagFunctionBody(`${part.name}.function[${fn.name}]`, fn, flag);
     }
   }
   for (const vo of ctx.valueObjects) {
     for (const inv of vo.invariants) flag(`${vo.name}.invariant`, inv.expr);
     for (const inv of vo.invariants) flag(`${vo.name}.invariant`, inv.guard);
     for (const d of vo.derived) flag(`${vo.name}.derived[${d.name}]`, d.expr);
-    for (const fn of vo.functions) flag(`${vo.name}.function[${fn.name}]`, fn.body);
+    for (const fn of vo.functions) flagFunctionBody(`${vo.name}.function[${fn.name}]`, fn, flag);
   }
   // Repository find filters and view filters DO get to use currentUser
   // (row-level visibility); the renderer threads the user through as a
@@ -1041,7 +1149,7 @@ export function validatePermissionRefs(ctx: BoundedContextIR, diags: LoomDiagnos
       flag(`${agg.name}.invariant`, inv.guard);
     }
     for (const d of agg.derived) flag(`${agg.name}.derived[${d.name}]`, d.expr);
-    for (const fn of agg.functions) flag(`${agg.name}.function[${fn.name}]`, fn.body);
+    for (const fn of agg.functions) flagFunctionBody(`${agg.name}.function[${fn.name}]`, fn, flag);
     for (const op of agg.operations) {
       for (const s of op.statements) {
         flagStmt(`${agg.name}.operation[${op.name}]`, s, flag);
@@ -1058,7 +1166,8 @@ export function validatePermissionRefs(ctx: BoundedContextIR, diags: LoomDiagnos
         flag(`${part.name}.invariant`, inv.guard);
       }
       for (const d of part.derived) flag(`${part.name}.derived[${d.name}]`, d.expr);
-      for (const fn of part.functions) flag(`${part.name}.function[${fn.name}]`, fn.body);
+      for (const fn of part.functions)
+        flagFunctionBody(`${part.name}.function[${fn.name}]`, fn, flag);
     }
   }
   for (const vo of ctx.valueObjects) {
@@ -1067,7 +1176,7 @@ export function validatePermissionRefs(ctx: BoundedContextIR, diags: LoomDiagnos
       flag(`${vo.name}.invariant`, inv.guard);
     }
     for (const d of vo.derived) flag(`${vo.name}.derived[${d.name}]`, d.expr);
-    for (const fn of vo.functions) flag(`${vo.name}.function[${fn.name}]`, fn.body);
+    for (const fn of vo.functions) flagFunctionBody(`${vo.name}.function[${fn.name}]`, fn, flag);
   }
   for (const repo of ctx.repositories) {
     for (const f of repo.finds) {

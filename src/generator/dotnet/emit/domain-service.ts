@@ -30,11 +30,51 @@ import type {
   EnrichedBoundedContextIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
+import {
+  type ReadPort,
+  readPortsForOperation,
+} from "../../../ir/util/domain-service-read-ports.js";
 import { lines } from "../../../util/code-builder.js";
-import { plural, upperFirst } from "../../../util/naming.js";
+import { lowerFirst, plural, upperFirst } from "../../../util/naming.js";
 import { type UnionMember, unionMembers } from "../../_payload/union-wire.js";
+import type { CsRenderContext } from "../render-expr.js";
 import { renderCsType } from "../render-expr.js";
 import { collectCsStmtUsings, renderCsStatements } from "../render-stmt.js";
+
+/** The injected-repository field name for a read-port (`Accounts` → `_accounts`).
+ *  Mirrors the workflow handler's repo-field convention so the call sites read
+ *  the same — `_<lowerFirst(repo)>`. */
+function portFieldName(repo: string): string {
+  return `_${lowerFirst(repo)}`;
+}
+
+/** The distinct read-ports a domain SERVICE consumes across all its operations,
+ *  in first-read order, de-duplicated by repository.  A service is `reading`
+ *  (a DI'd `sealed class`) exactly when this is non-empty; a `pure` service has
+ *  no ports and stays a `public static class` (byte-identical). */
+function serviceReadPorts(svc: DomainServiceIR): ReadPort[] {
+  const byRepo = new Map<string, ReadPort>();
+  for (const op of svc.operations) {
+    for (const p of readPortsForOperation(op)) {
+      if (!byRepo.has(p.repo)) byRepo.set(p.repo, p);
+    }
+  }
+  return [...byRepo.values()];
+}
+
+/** Render context for a domain-service operation body.  A `reading` op carries a
+ *  `repoReadHandle` so a `repo-read` Call renders against the service's injected
+ *  `_<repo>` field; a pure op leaves it unset (no `repo-read` can appear). */
+function serviceRenderContext(
+  reading: boolean,
+  returnUnion: CsRenderContext["returnUnion"],
+): CsRenderContext {
+  const base: CsRenderContext = returnUnion
+    ? { thisName: "this", returnUnion }
+    : { thisName: "this" };
+  if (!reading) return base;
+  return { ...base, repoReadHandle: portFieldName };
+}
 
 /** Emit `Domain/Services/<Name>.cs` per domain service in the context, plus
  *  the pure Domain union record files for any `or`-union operation returns. */
@@ -78,16 +118,67 @@ function renderDomainService(
     if (op.returnType) addAggregateNamespaces(op.returnType, ctx, ns, usings);
   }
 
+  // Read-ports (domain-services.md rev. 4, Slice 1): a `reading`-tier service
+  // reads repositories, so on .NET / EF it CANNOT stay a static class (the read
+  // needs the scoped repository, hence the scoped DbContext).  It becomes a DI'd
+  // `sealed class` with one constructor-injected `I<Aggregate>Repository` per
+  // distinct read-port.  A `pure` service has no ports → stays `public static
+  // class` (byte-identical).  The injected interfaces live under the aggregate's
+  // `Domain.<Plural>` namespace.
+  const ports = serviceReadPorts(svc);
+  const reading = ports.length > 0;
+  for (const p of ports) usings.add(`${ns}.Domain.${plural(p.aggregate)}`);
+
+  const header = reading
+    ? lines(
+        "// Auto-generated — reading-tier domain service (domain-services.md rev. 4).",
+        "// Orchestrator-only read facade: one injected I<Aggregate>Repository per",
+        "// read-port; reads route through the scoped repository (AsNoTracking).",
+      )
+    : lines(
+        "// Auto-generated — domain service (domain-services.md). Stateless pure",
+        "// calculators: no constructor, no repository injection.",
+      );
+
+  if (!reading) {
+    return lines(
+      header,
+      ...[...usings].sort().map((u) => `using ${u};`),
+      "",
+      `namespace ${ns}.Domain.Services;`,
+      "",
+      `public static class ${upperFirst(svc.name)}`,
+      "{",
+      ...svc.operations.map((op) => renderOperation(op, ctx, false)),
+      "}",
+    );
+  }
+
+  // The DI'd reading service: ctor-injected repository fields + a constructor.
+  usings.add("System.Threading");
+  usings.add("System.Threading.Tasks");
+  const fields = ports.map(
+    (p) => `    private readonly I${p.aggregate}Repository ${portFieldName(p.repo)};`,
+  );
+  const ctorParams = ports.map((p) => `I${p.aggregate}Repository ${lowerFirst(p.repo)}`).join(", ");
+  const ctorAssigns = ports
+    .map((p) => `${portFieldName(p.repo)} = ${lowerFirst(p.repo)}`)
+    .join("; ");
   return lines(
-    "// Auto-generated — domain service (domain-services.md). Stateless pure",
-    "// calculators: no constructor, no repository injection.",
+    header,
     ...[...usings].sort().map((u) => `using ${u};`),
     "",
     `namespace ${ns}.Domain.Services;`,
     "",
-    `public static class ${upperFirst(svc.name)}`,
+    `public sealed class ${upperFirst(svc.name)}`,
     "{",
-    ...svc.operations.map((op) => renderOperation(op, ctx)),
+    ...fields,
+    `    public ${upperFirst(svc.name)}(${ctorParams})`,
+    "    {",
+    `        ${ctorAssigns};`,
+    "    }",
+    "",
+    ...svc.operations.map((op) => renderOperation(op, ctx, true)),
     "}",
   );
 }
@@ -123,9 +214,27 @@ function addAggregateNamespaces(
   }
 }
 
-function renderOperation(op: DomainServiceOperationIR, ctx: BoundedContextIR): string {
-  const params = op.params.map((p) => `${renderCsType(p.type)} ${p.name}`).join(", ");
-  const retType = op.returnType ? renderCsType(op.returnType) : "void";
+/** Render one operation.  In a `pure` (static) service every op is `public
+ *  static`.  In a `reading` (sealed) service an op is an instance method; if THIS
+ *  op reads a repository (has read-ports) it becomes `async Task<…>` with a
+ *  trailing `CancellationToken cancellationToken = default`, and its `repo-read`
+ *  Calls render against the injected `_<repo>` fields (domain-services.md rev. 4,
+ *  Slice 1).  A non-reading op inside a reading service stays a synchronous
+ *  instance method. */
+function renderOperation(
+  op: DomainServiceOperationIR,
+  ctx: BoundedContextIR,
+  serviceIsReading: boolean,
+): string {
+  const opReads = readPortsForOperation(op).length > 0;
+  const userParams = op.params.map((p) => `${renderCsType(p.type)} ${p.name}`);
+  const params = (
+    opReads ? [...userParams, "CancellationToken cancellationToken = default"] : userParams
+  ).join(", ");
+  const baseRet = op.returnType ? renderCsType(op.returnType) : "void";
+  // A reading op awaits its repo reads → `async Task<T>` (or `async Task` for a
+  // void return).  Pure ops keep the bare return type.
+  const retType = opReads ? (op.returnType ? `Task<${baseRet}>` : "Task") : baseRet;
   // An `or`-union return threads the Domain union name + variant order so a
   // tagged `return { … }` constructs the right `<Union>_<Tag>(...)` record.
   const returnUnion =
@@ -135,17 +244,15 @@ function renderOperation(op: DomainServiceOperationIR, ctx: BoundedContextIR): s
           members: unionMembers(op.returnType.variants, ctx) as UnionMember[],
         }
       : undefined;
-  const body = renderCsStatements(
-    op.body,
-    returnUnion ? { thisName: "this", returnUnion } : { thisName: "this" },
-  );
-  return lines(
-    `    public static ${retType} ${upperFirst(op.name)}(${params})`,
-    "    {",
-    body,
-    "    }",
-    "",
-  );
+  const body = renderCsStatements(op.body, serviceRenderContext(opReads, returnUnion));
+  // Pure service → `public static`; reading service → instance method (the read
+  // op also carries `async`).
+  const modifiers = serviceIsReading ? (opReads ? "public async" : "public") : "public static";
+  // A reading op is awaited at the call site (`await _svc.<Op>Async(...)`), so it
+  // carries the .NET `Async` suffix — matching the call-site resolver in
+  // workflow-emit.ts (`${upperFirst(op)}Async`).  Pure ops keep the bare name.
+  const methodName = opReads ? `${upperFirst(op.name)}Async` : upperFirst(op.name);
+  return lines(`    ${modifiers} ${retType} ${methodName}(${params})`, "    {", body, "    }", "");
 }
 
 /** Pure Domain union record files for a service's `or`-union operation returns.

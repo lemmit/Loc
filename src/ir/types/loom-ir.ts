@@ -314,11 +314,20 @@ export interface InvariantIR {
   scope?: "server-only";
 }
 
+/** A pure helper over its parameters (domain-services.md).  The body is a
+ *  variant — NOT a replacement — so the inlinable expression path is
+ *  untouched:
+ *    - `{ expr }`  — expression form (`= Expression`); SQL-inlinable.
+ *    - `{ stmts }` — block form (rev. 4); `let` + branch + bug-regime
+ *                    `throw`/`require`, still PURE.  NOT queryable.
+ *  Backends discriminate on `"expr" in body`. */
+export type FunctionBodyIR = { expr: ExprIR } | { stmts: StmtIR[] };
+
 export interface FunctionIR {
   name: string;
   params: ParamIR[];
   returnType: TypeIR;
-  body: ExprIR;
+  body: FunctionBodyIR;
 }
 
 /** Lifecycle kind of an aggregate action (lifecycle-operations.md).
@@ -1244,6 +1253,24 @@ export type WorkflowStmtIR =
       // (Phase 4).  The `let`-bound form (`let x = files.get(k)`) rides
       // `expr-let` instead.  `call` is the lowered `resource-op` call IR.
       kind: "resource-call";
+      call: ExprIR;
+    }
+  | {
+      // A bare orchestrator call into a `domainService` operation —
+      // `Transfer.run(src, dst, amount)` written as a workflow statement
+      // (domain-services.md rev. 4, the `mutating` tier).  Distinct from
+      // `op-call` (which targets an aggregate let-binding): a service call is
+      // NOT an aggregate operation, so it carries the resolved `service`/`op`
+      // and a render-ready `call` (a `callKind: "domain-service"` Call that
+      // rides each backend's `render-expr`).  The orchestrator owns
+      // persistence: a `mutating` service mutates the aggregate ARGS it is
+      // passed (their own ops), so those args become exit-save targets —
+      // derived in `computeSaves` (NOT stamped here), exactly as a `repo-let`
+      // that an `op-call` targets does.  The `let`-bound form
+      // (`let q = Pricing.quote(...)`) rides `expr-let` instead.
+      kind: "domain-service-call";
+      service: string;
+      op: string;
       call: ExprIR;
     }
   | {
@@ -2553,6 +2580,7 @@ export type CallKind =
   | "value-object-ctor" // calls a value-object constructor
   | "private-operation" // calls a private operation
   | "resource-op" // a verb call on an ambient resource handle (Phase 4)
+  | "repo-read" // a read-only repository query in a `reading` domain-service body (domain-services.md rev. 4)
   | "domain-service" // a member call on a `domainService` (domain-services.md)
   | "action" // a bare call to a SIBLING page/component `action` (Proposal A Stage 1)
   | "store-action" // a `<Store>.<action>(…)` call from a page/component/store body (Stage 5)
@@ -2645,6 +2673,22 @@ export type ExprIR =
        *  Structured (not overloaded onto flat `name`) so backends render
        *  the call without re-resolving the receiver. */
       serviceRef?: { service: string; op: string };
+      /** Populated when `callKind === "repo-read"` (domain-services.md rev. 4,
+       *  the `reading` tier) — a read-only repository query in a domain-service
+       *  operation body (`Accounts.byHolder(h)` / `Repo.find/findAll/run`).
+       *  Fully resolved at lowering time: `repo` is the repository name,
+       *  `aggregate` its target aggregate, `method` the find / retrieval method
+       *  to render against the generated repository, and `readKind` the recognised
+       *  shape (`named` declared find / `getById`, vs the criterion `find`/`findAll`
+       *  vs retrieval `run`).  Backends render a real call into the generated
+       *  repository without re-recognising the AST.  Per-backend EMISSION is a
+       *  later slice (this slice is the IR foundation only). */
+      repoRead?: {
+        repo: string;
+        aggregate: string;
+        method: string;
+        readKind: "named" | "find" | "findAll" | "run";
+      };
       /** Populated when `callKind === "store-action"` (Stage 5) — the resolved
        *  store + action a `<Store>.<action>(…)` call dispatches to.  Structured
        *  (not overloaded onto flat `name`) so backends bind the store action
@@ -2909,6 +2953,7 @@ function workflowStmtUsesCurrentUser(s: WorkflowStmtIR): boolean {
         (s.elseBody ?? []).some(workflowStmtUsesCurrentUser)
       );
     case "resource-call":
+    case "domain-service-call":
       return exprUsesCurrentUser(s.call);
   }
 }
@@ -3042,11 +3087,17 @@ function stmtUsesMoney(s: StmtIR): boolean {
   }
 }
 
+/** True when a function's body (expression or block form) touches money. */
+export function functionBodyUsesMoney(body: FunctionBodyIR): boolean {
+  return "expr" in body ? exprUsesMoney(body.expr) : body.stmts.some(stmtUsesMoney);
+}
+
 function partUsesMoney(p: EntityPartIR): boolean {
   if (p.fields.some((f) => typeUsesMoney(f.type))) return true;
   if (p.derived.some((d) => typeUsesMoney(d.type) || exprUsesMoney(d.expr))) return true;
   if (p.invariants.some((iv) => exprUsesMoney(iv.expr))) return true;
-  if (p.functions.some((fn) => typeUsesMoney(fn.returnType) || exprUsesMoney(fn.body))) return true;
+  if (p.functions.some((fn) => typeUsesMoney(fn.returnType) || functionBodyUsesMoney(fn.body)))
+    return true;
   return false;
 }
 
@@ -3062,7 +3113,8 @@ export function aggregateUsesMoney(a: AggregateIR): boolean {
     )
   )
     return true;
-  if (a.functions.some((fn) => typeUsesMoney(fn.returnType) || exprUsesMoney(fn.body))) return true;
+  if (a.functions.some((fn) => typeUsesMoney(fn.returnType) || functionBodyUsesMoney(fn.body)))
+    return true;
   if (a.parts.some(partUsesMoney)) return true;
   return false;
 }
@@ -3072,7 +3124,7 @@ export function valueObjectUsesMoney(vo: ValueObjectIR): boolean {
   if (vo.fields.some((f) => typeUsesMoney(f.type))) return true;
   if (vo.derived.some((d) => typeUsesMoney(d.type) || exprUsesMoney(d.expr))) return true;
   if (vo.invariants.some((iv) => exprUsesMoney(iv.expr))) return true;
-  if (vo.functions.some((fn) => typeUsesMoney(fn.returnType) || exprUsesMoney(fn.body)))
+  if (vo.functions.some((fn) => typeUsesMoney(fn.returnType) || functionBodyUsesMoney(fn.body)))
     return true;
   return false;
 }
