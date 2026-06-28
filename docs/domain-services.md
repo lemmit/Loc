@@ -13,12 +13,16 @@ calculation or decision**.
 > return a value or an `or`-union error, may `throw` for the bug regime,
 > and are **strict no-infra** — no repository, `extern`, `api`,
 > workflow-start, or `emit`, and no `this` to mutate. The **revised
-> design** (rev. 2 in [`proposals/domain-services.md`](proposals/domain-services.md))
-> widens this to the Vernon/hexagonal reading: a domain service **may
-> load through repository ports and mutate the aggregates it touches**,
-> with the application orchestrator keeping the single commit point.
-> That direction is pinned in the proposal but **not yet shipped**; the
-> rest of *this* page describes current behavior.
+> design** (rev. 3 in [`proposals/domain-services.md`](proposals/domain-services.md))
+> adds **mutation** — a domain service may mutate the aggregates the
+> orchestrator **passes in**, via their own operations — while keeping
+> the service **pure of infrastructure** (still no repository, no commit:
+> loading and the single commit stay in the application orchestrator).
+> A five-backend idiom audit walked back an interim "load via repository
+> ports" idea: by canonical DDD that's application-layer work, and it
+> can't stay stateless on EF/JPA/SQLAlchemy. That direction is pinned in
+> the proposal but **not yet shipped**; the rest of *this* page describes
+> current behavior.
 
 ## Surface
 
@@ -96,32 +100,37 @@ and the declaration emitters ship on all five backends today
 ## Direction (revised — not yet shipped)
 
 The pinned next step ([`proposals/domain-services.md`](proposals/domain-services.md),
-rev. 2) classifies each operation into one of three **purity tiers** and
-widens what the upper two may do:
+rev. 3) adds a second tier — the service stays pure of infrastructure but
+may **mutate the aggregates the orchestrator passes in**:
 
 | Tier | May… | Callable from |
 |---|---|---|
 | **pure** *(ships today)* | params only; branch, `let`, `match`, `throw` | anywhere |
-| **reading** | the above **+ load via repository ports** | application orchestrators only |
-| **mutating** | the above **+ mutate aggregates via their own operations** | application orchestrators only |
+| **mutating** | the above **+ call mutating operations on the aggregates passed in** | application orchestrators only |
 
-`emit` / `extern` / `api` / workflow-start stay forbidden in **every**
-tier — that's the line that keeps a domain service from collapsing into a
-workflow (**domain service = read + compute + mutate-in-memory; workflow
-= that, plus commit, emit, extern, HTTP**).
+Loading via a repository, `emit`, `extern`, `api`, and workflow-start
+stay forbidden in **both** tiers. Loading and the single commit live in
+the application orchestrator (**orchestrator loads → service mutates the
+passed-in aggregates → orchestrator persists**). That's the line that
+keeps a domain service from collapsing into a workflow.
 
-**Persistence is one neutral semantic, rendered idiomatically per
-backend.** The orchestrator opens a single unit-of-work / transaction
-scope; the service runs inside it; the orchestrator commits once. The
-`.ddd` is identical everywhere — only lowering + emission diverge:
+**Persistence is orchestrator-owned, rendered idiomatically per backend.**
+The orchestrator opens one transaction, loads the aggregates, calls the
+service, and commits once. The mutation set is exactly the passed-in
+aggregates (the orchestrator already holds them), so nothing is returned
+for the caller to diff. The `.ddd` is identical everywhere:
 
-| Backend | Unit of work | How mutations reach the commit |
+| Backend | Unit of work | How the mutated aggregates persist |
 |---|---|---|
-| .NET / EF, Java / JPA, Python / SQLAlchemy | ORM change-tracking | **implicit** — mutate in place; orchestrator's single `SaveChanges` / flush / `commit` |
-| Phoenix / Ecto | `Ecto.Multi` | **explicit** — service returns `Ecto.Changeset`(s); orchestrator runs `Repo.transaction/1` |
-| TS / Hono / Drizzle | `db.transaction` | **explicit** — service returns mutated aggregate state; orchestrator applies it in the transaction |
+| .NET / EF, Java / JPA, Python / SQLAlchemy | ORM change-tracking | **implicit** — passed-in entities are tracked; mutate in place; orchestrator's single `SaveChanges` / flush / `commit` (JPA: explicit `save` for *new* aggregates) |
+| Phoenix / Ecto | `Repo.transact` + `with` | orchestrator (a context fn) builds inline changesets and `Repo.update`s each in one transaction |
+| TS / Hono / Drizzle | `db.transaction` | no change-tracking → orchestrator calls `repository.save(aggregate, tx)` per mutated aggregate |
 
 A companion change lets `function` take a **pure block body**
 (`let` + branch + bug-regime `throw`) instead of only a single
 expression — staying non-queryable, so the
 `function` → `criterion` → `domainService` tiers stay crisp.
+
+This direction is grounded in a five-backend idiom audit (EF Core,
+Spring/JPA, SQLAlchemy/Cosmic-Python, Ecto/Phoenix, Drizzle) — see the
+proposal's "Research findings" section for the per-backend citations.
