@@ -19,6 +19,7 @@ import {
   opWorkflowInstanceById,
   opWorkflowInstances,
 } from "../../ir/util/openapi-ids.js";
+import { collectReachableTypes } from "../../ir/util/reachable-types.js";
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { renderDotnetLogCall } from "../_obs/render-dotnet.js";
@@ -130,7 +131,53 @@ export function emitWorkflows(
       `Api/${ctx.name}WorkflowsController.cs`,
       renderController(ctx, ns, commandWfs, options?.routePrefix),
     );
+    // A command-workflow whose param is a value object surfaces a
+    // `<Vo>Request` in its Request DTO (`record FooRequest(MoneyRequest …)`).
+    // The per-aggregate request emitter only emits `<Vo>Request` for VOs
+    // reachable from an AGGREGATE's surface (`valueObjectsUsedBy`) — a VO that
+    // appears only as a workflow param has no such emission, so the Request
+    // DTO references an undefined `MoneyRequest` (CS0246).  Emit the VO request
+    // records the workflow params need into the `Application.Workflows`
+    // namespace (the Request DTOs' own namespace, so they resolve unqualified),
+    // mirroring the aggregate-create `<Vo>Request` shape.
+    const voRequests = renderWorkflowValueObjectRequests(commandWfs, ctx, ns);
+    if (voRequests) out.set("Application/Workflows/WorkflowRequests.cs", voRequests);
   }
+}
+
+/** Emit the `<Vo>Request` records that this context's command-workflows'
+ *  value-object params reference (transitively through nested VOs), into the
+ *  shared `Application.Workflows` namespace.  Mirrors the per-aggregate VO
+ *  request shape (`cqrs/dtos.ts`) but keyed off workflow params rather than an
+ *  aggregate surface.  Returns `undefined` when no workflow param is a VO. */
+function renderWorkflowValueObjectRequests(
+  commandWfs: readonly WorkflowIR[],
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+): string | undefined {
+  const seeds = function* (): Generator<import("../../ir/types/loom-ir.js").TypeIR> {
+    for (const wf of commandWfs) for (const p of wf.params) yield p.type;
+  };
+  const { valueObjects } = collectReachableTypes(seeds(), ctx.valueObjects);
+  if (valueObjects.size === 0) return undefined;
+  const recs = ctx.valueObjects
+    .filter((v) => valueObjects.has(v.name))
+    .map((vo) => {
+      const params = vo.fields
+        .map((f) => dtoParam(wireType(f.type, ctx, "request"), upperFirst(f.name), "request"))
+        .join(", ");
+      return `public sealed record ${vo.name}Request(${params});\n`;
+    })
+    .join("\n");
+  return `// Auto-generated.
+using System;
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using ${ns}.Domain.Enums;
+
+namespace ${ns}.Application.Workflows;
+
+${recs}`;
 }
 
 /** A workflow exposes an HTTP command POST when its facade (the primary
@@ -686,8 +733,14 @@ function renderHandler(
     ctorAssigns.push("_events = events");
   }
   if (wf.transactional) {
-    fields.push(`    private readonly ${ns}.Infrastructure.Persistence.AppDbContext _db;`);
-    ctorParamPairs.push(`${ns}.Infrastructure.Persistence.AppDbContext db`);
+    // `global::`-anchor the AppDbContext reference: a deployable named `api`
+    // makes `ns === "Api"`, and a bare `Api.Infrastructure...` inside
+    // `Api.Application.Workflows` mis-resolves the leading `Api` against the
+    // enclosing `Api.Application` namespace (CS0234 — "does not exist in the
+    // namespace 'Api.Api'").  Mirrors the persisted-saga handler + the
+    // migrations DbContext attribute (emit/migrations.ts).
+    fields.push(`    private readonly global::${ns}.Infrastructure.Persistence.AppDbContext _db;`);
+    ctorParamPairs.push(`global::${ns}.Infrastructure.Persistence.AppDbContext db`);
     ctorAssigns.push("_db = db");
   }
   if (usesUser) {
