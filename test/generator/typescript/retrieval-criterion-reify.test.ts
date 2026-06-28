@@ -6,7 +6,7 @@
 // conformance parity is unaffected; only the code organisation differs.
 
 import { describe, expect, it } from "vitest";
-import { generateHono } from "../../_helpers/generate.js";
+import { generateHono, generateSystemFiles } from "../../_helpers/generate.js";
 import { parseString } from "../../_helpers/parse.js";
 
 const SRC = `
@@ -32,5 +32,57 @@ describe("typescript generator — reified criteria (retrieval)", () => {
     // The reified call is the only `where` form for this retrieval — no inline
     // duplicate of the predicate leaked through.
     expect(repo).not.toMatch(/\.where\(eq\(schema\.customers\.region, rgn\)\)/);
+  });
+});
+
+// DEBT-24 — a criterion whose body references the principal (`currentUser`)
+// reifies into the SAME module-level fn, but the fn is module-scoped and has no
+// `currentUser` parameter, so binding it to the bare name emits an unbound
+// reference that fails `tsc`.  The fn must resolve the principal through the
+// ambient `requireCurrentUser()` accessor (the same one the capability-`filter`
+// query-face uses).  Full system: the `user { }` shape makes `currentUser`
+// lower to a `current-user` ref.
+const PRINCIPAL_SYS = `
+system Tenancy {
+  user { id: guid  tenantId: string }
+  subdomain Core {
+    context Ledger {
+      aggregate Account ids guid {
+        tenantId: string
+        balance: int
+      }
+      repository Accounts for Account { }
+      criterion MyTenant of Account = tenantId == currentUser.tenantId
+      retrieval MineRich(min: int) of Account { where: MyTenant sort: [balance desc] }
+    }
+  }
+  api LedgerApi from Core
+  storage primary { type: postgres }
+  resource ledgerState { for: Ledger, kind: state, use: primary }
+  deployable api {
+    platform: node
+    contexts: [Ledger]
+    dataSources: [ledgerState]
+    serves: LedgerApi
+    port: 4000
+    auth: required
+  }
+}`;
+
+describe("typescript generator — reified criteria principal binding (DEBT-24)", () => {
+  it("binds currentUser through requireCurrentUser() in the criterion fn", async () => {
+    const files = await generateSystemFiles(PRINCIPAL_SYS);
+    const repo = [...files.entries()].find(([k]) =>
+      k.endsWith("/db/repositories/account-repository.ts"),
+    )?.[1];
+    expect(repo).toBeDefined();
+    // The module-level fn binds the ambient principal — no unbound `currentUser`.
+    expect(repo!).toMatch(
+      /const myTenantCriterion = \(\) => eq\(schema\.accounts\.tenantId, requireCurrentUser\(\)\.tenantId\);/,
+    );
+    expect(repo!).not.toMatch(/eq\(schema\.accounts\.tenantId, currentUser\.tenantId\)/);
+    // The accessor is imported, and both the find and the retrieval consume the fn.
+    expect(repo!).toMatch(/import \{ requireCurrentUser \} from "\.\.\/\.\.\/auth\/middleware";/);
+    expect(repo!).toMatch(/\.where\(myTenantCriterion\(\)\)/);
   });
 });
