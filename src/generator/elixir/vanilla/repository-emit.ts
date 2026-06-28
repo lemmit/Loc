@@ -33,6 +33,7 @@ import { isAbstractBase, isTphBase, tpcConcretesOf, tphKind } from "./inheritanc
 import {
   containsRefCollField,
   hasRefColls,
+  ordinalStampLines,
   preloadList,
   putAssocLines,
   refCollRepoHelpers,
@@ -178,7 +179,21 @@ function renderRepository(
   const insertPutAssoc = refAssocLines.length > 0 ? `\n${refAssocLines.join("\n")}` : "";
   const updatePutAssoc = insertPutAssoc;
   const updatePreload = refColls ? ` |> Repo.preload([${preloadList(agg).join(", ")}])` : "";
-  const refHelpers = refColls ? `\n${refCollRepoHelpers(appModule)}\n` : "";
+  const refHelpers = refColls ? `\n${refCollRepoHelpers(appModule, agg)}\n` : "";
+  // DEBT-13: the ordinal-stamp pass run after the owner row persists.  `put_assoc`
+  // wrote the join rows but at ordinal=0; these `update_all`s set each row's
+  // ordinal from the id-list index so the collection round-trips in insertion
+  // order.  Wrapped in a transaction so membership + ordering commit atomically.
+  const stampLines = ordinalStampLines(agg, "          ");
+  // `insert`/`update` bodies.  Without ref collections they stay BYTE-IDENTICAL
+  // to the previous pipe form.  With ref collections the persist + ordinal stamp
+  // run in one `Repo.transaction` (membership and ordering commit atomically);
+  // the inner block re-binds the persisted struct as `record` so the stamp pass
+  // (which the helper expects under that name) sees the owner id.
+  const insertPipe = `    ${aggModule}Changeset.base_changeset(attrs)${kindStamp}${insertStamps}${insertPutAssoc}\n    |> Repo.insert()`;
+  const updatePipe = `    record${updatePreload}\n    |> ${aggModule}Changeset.base_changeset(attrs)${updateStamps}${updatePutAssoc}\n    |> Repo.update()`;
+  const insertBody = refColls ? wrapPersistWithOrdinalStamp(insertPipe, stampLines) : insertPipe;
+  const updateBody = refColls ? wrapPersistWithOrdinalStamp(updatePipe, stampLines) : updatePipe;
   // `import Ecto.Query` is required for `from(...)` — needed when there's a
   // custom find OR a capability filter (which turns `list`/`find_by_id` into
   // `from(...)` reads) OR a reference collection (id-list resolution).  Omit it
@@ -234,15 +249,12 @@ defmodule ${repoMod} do
 
   @spec insert(map()${hasStamps && stampPrincipal ? ", map() | nil" : ""}) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
   def insert(attrs${stampActorParam}) when is_map(attrs) do
-    ${aggModule}Changeset.base_changeset(attrs)${kindStamp}${insertStamps}${insertPutAssoc}
-    |> Repo.insert()
+${insertBody}
   end
 
   @spec update(${aggModule}.t(), map()${hasStamps && stampPrincipal ? ", map() | nil" : ""}) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
   def update(%${aggModule}{} = record, attrs${stampActorParam}) when is_map(attrs) do
-    record${updatePreload}
-    |> ${aggModule}Changeset.base_changeset(attrs)${updateStamps}${updatePutAssoc}
-    |> Repo.update()
+${updateBody}
   end
 
   @spec delete(${aggModule}.t()) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
@@ -257,6 +269,29 @@ defmodule ${repoMod} do
     Repo.update(changeset)
   end${findBlock}${refHelpers || "\n"}end
 `;
+}
+
+/** Wrap a persist pipe (`… |> Repo.insert()` / `… |> Repo.update()`, which
+ *  returns `{:ok, struct} | {:error, changeset}`) in a `Repo.transaction` that
+ *  also runs the DEBT-13 ordinal-stamp pass.  On persist success the inner
+ *  block re-binds the saved struct as `record` (the name the stamp helper
+ *  expects), runs each stamp `update_all`, and returns the struct; on persist
+ *  failure it `Repo.rollback`s the changeset so the whole unit aborts.  The
+ *  outer `Repo.transaction` returns `{:ok, struct} | {:error, changeset}`,
+ *  preserving the caller contract of the bare insert/update. */
+function wrapPersistWithOrdinalStamp(persistPipe: string, stampLines: string[]): string {
+  return `    Repo.transaction(fn ->
+      case (
+${persistPipe.replace(/^/gm, "    ")}
+      ) do
+        {:ok, record} ->
+${stampLines.join("\n")}
+          record
+
+        {:error, changeset} ->
+          Repo.rollback(changeset)
+      end
+    end)`;
 }
 
 /** One custom-find function — a parameterised Ecto query under the

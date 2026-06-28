@@ -36,7 +36,12 @@ import {
 } from "./inheritance-emit.js";
 import { renderInspectImpl } from "./inspect-emit.js";
 import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
-import { isRefCollField, manyToManyLine, refCollFields } from "./ref-collection-emit.js";
+import {
+  isRefCollField,
+  manyToManyLine,
+  refCollFields,
+  refCollOrderHelper,
+} from "./ref-collection-emit.js";
 import { valueCollectionModule, valueCollectionsWithVo } from "./value-collection-schema-emit.js";
 
 export function emitVanillaSchemas(
@@ -265,18 +270,27 @@ function renderSchema(
     ctx && agg.tests.length > 0 ? renderAggregatePureCore(appModule, ctx, agg, sys) : [];
   const pureCoreBlock = pureCore.length > 0 ? `\n${pureCore.join("\n")}\n` : "";
 
+  // Reference collections (`X id[]`) order their `many_to_many` preload by the
+  // join `ordinal` column via `preload_order: {__MODULE__, :__ref_coll_order, []}`
+  // (DEBT-13).  The helper builds a `dynamic/2` over the join binding, so the
+  // schema needs `import Ecto.Query`; both are emitted only when the schema owns
+  // a reference collection, keeping every other schema byte-identical.
+  const hasRefColl = refCollFields(agg).length > 0;
+  const ectoQueryImport = hasRefColl ? "  import Ecto.Query\n\n" : "";
+  const refCollOrderBlock = hasRefColl ? `\n${refCollOrderHelper()}\n` : "";
+
   return `# Auto-generated.
 defmodule ${moduleName} do
   @moduledoc false
   use Ecto.Schema
-
+${ectoQueryImport}
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 ${prefixLine}
   schema "${tableName}" do
 ${schemaBody}
   end
-${pureCoreBlock}end
+${refCollOrderBlock}${pureCoreBlock}end
 `;
 }
 

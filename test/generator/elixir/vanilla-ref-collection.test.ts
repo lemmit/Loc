@@ -92,4 +92,33 @@ describe("vanilla `X id[]` reference collections", () => {
     expect(mig).toBeDefined();
     expect(files.get(mig!)!).not.toMatch(/add :party/);
   });
+
+  // DEBT-13: the collection round-trips in declaration/insertion order, matching
+  // node (which writes `ordinal` from the field index and `orderBy`s it on read).
+  // Order is preserved by (a) ordering the preload by the join `ordinal`, and
+  // (b) stamping that ordinal from the incoming id-list index after persist.
+  it("the read preloads in join-`ordinal` order (preload_order over the join binding)", async () => {
+    const trainer = file(await generateSystemFiles(SOURCE), "/roster/trainer.ex");
+    // the many_to_many orders its preload by the join column via an MFA helper
+    expect(trainer).toContain("preload_order: {__MODULE__, :__ref_coll_order, []}");
+    // the helper pins the LAST (join) binding's ordinal — needs `import Ecto.Query`
+    expect(trainer).toContain("import Ecto.Query");
+    expect(trainer).toMatch(
+      /def __ref_coll_order, do: \[asc: dynamic\(\[_assoc, join\], join\.ordinal\)\]/,
+    );
+  });
+
+  it("the write stamps the join `ordinal` from the id-list index after persist", async () => {
+    const repo = file(await generateSystemFiles(SOURCE), "/roster/trainer_repository.ex");
+    // persist + stamp run atomically in one transaction
+    expect(repo).toContain("Repo.transaction(fn ->");
+    // the post-persist stamp pass is invoked for the `party` field
+    expect(repo).toContain("__stamp_ref_ordinal_party(record, attrs)");
+    // ...and it update_all's the join row's ordinal from the enumerated index,
+    // scoped to the owner+target join row, in the owner schema's prefix.
+    expect(repo).toContain("|> Enum.with_index()");
+    expect(repo).toMatch(/set: \[ordinal: idx\]/);
+    expect(repo).toMatch(/from\(j in "trainer_party",[\s\S]*j\.trainer_id == \^owner_id/);
+    expect(repo).toContain("prefix: prefix");
+  });
 });

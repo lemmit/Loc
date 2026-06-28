@@ -92,9 +92,16 @@ function targetModule(appModule: string, ctxModule: string, assoc: AssociationIR
 }
 
 /** The `many_to_many` schema line for one ref-collection field — a plain
- *  Ecto join_through with explicit
- *  join_keys and `on_replace: :delete` so a `put_assoc` REPLACES the prior set
- *  (set semantics for `Id<T>[]`).
+ *  Ecto join_through with explicit join_keys and `on_replace: :delete`.
+ *
+ *  The collection round-trips in DECLARATION/INSERTION ORDER (DEBT-13): the
+ *  join table carries an `ordinal` column (the migration emits it), the write
+ *  seam stamps it from the incoming id-list index (see `refCollRepoHelpers`),
+ *  and the preload is ordered by it here via `preload_order`.  `preload_order`
+ *  reaches the JOIN column through an MFA returning a `dynamic/2` over the
+ *  `[assoc, join]` bindings (Ecto orders the bindings so the join is LAST) —
+ *  the shared `__ref_coll_order/0` helper this schema also emits.  This matches
+ *  node, which writes `ordinal` from the field index and `orderBy`s it on read.
  *
  *  `join_through:` is the BARE table name even when the owner lives in a
  *  non-public Postgres schema: Ecto applies the owner schema's `@schema_prefix`
@@ -107,7 +114,25 @@ export function manyToManyLine(appModule: string, ctxModule: string, rc: RefColl
   const rel = snake(rc.field.name);
   const target = targetModule(appModule, ctxModule, rc.assoc);
   const through = JSON.stringify(rc.assoc.joinTable);
-  return `    many_to_many :${rel}, ${target}, join_through: ${through}, join_keys: [${rc.assoc.ownerFk}: :id, ${rc.assoc.targetFk}: :id], on_replace: :delete`;
+  return `    many_to_many :${rel}, ${target}, join_through: ${through}, join_keys: [${rc.assoc.ownerFk}: :id, ${rc.assoc.targetFk}: :id], on_replace: :delete, preload_order: {__MODULE__, :__ref_coll_order, []}`;
+}
+
+/** The `__ref_coll_order/0` MFA helper a schema emits when it owns any
+ *  reference collection — returns the `preload_order` term that orders a
+ *  `many_to_many` preload by the JOIN table's `ordinal` column.  Ecto orders
+ *  the bindings `[assoc, join]`, so the join is the *last* binding; `dynamic`
+ *  pins it without naming the join schema (the string `join_through` has no
+ *  module).  Field-agnostic — every ref collection on the schema shares it.
+ *  Requires `import Ecto.Query` (added to the schema when ref collections
+ *  exist). */
+export function refCollOrderHelper(): string {
+  return `
+  # preload_order for every \`X id[]\` reference collection on this schema:
+  # order the join preload by the join table's \`ordinal\` column so the
+  # collection round-trips in insertion order (DEBT-13).  The join binding is
+  # last (\`[_assoc, join]\`).
+  @doc false
+  def __ref_coll_order, do: [asc: dynamic([_assoc, join], join.ordinal)]`;
 }
 
 /** The preload list for an aggregate's reads — `[:party, :caught]` — so every
@@ -167,7 +192,14 @@ export function preloadSuffix(agg: AggregateIR): string {
 /** Pipe lines that wire each ref-collection into a changeset via `put_assoc`,
  *  resolving the incoming `attrs["party"]` id list to target structs first.
  *  Appended after `base_changeset(attrs)` on the insert/update path.  Returns
- *  `[]` when the aggregate has no reference collections. */
+ *  `[]` when the aggregate has no reference collections.
+ *
+ *  `put_assoc` establishes membership + cleans up dropped rows
+ *  (`on_replace: :delete`) and — crucially — does so *prefix-aware* (the
+ *  schema's `@schema_prefix` flows through the association), so the join rows
+ *  land in the owner's Postgres schema.  It cannot set the `ordinal` column,
+ *  though, so a SECOND pass stamps it from the id-list index (see
+ *  `ordinalStampLines` / `refCollRepoHelpers`). */
 export function putAssocLines(
   appModule: string,
   ctxModule: string,
@@ -181,11 +213,80 @@ export function putAssocLines(
   });
 }
 
+/** Lines that stamp the join-table `ordinal` from the incoming id-list index,
+ *  run AFTER the owner row persists (the join rows already exist, written by
+ *  `put_assoc`).  `put_assoc` leaves every row at the column default (0), so
+ *  without this the collection reads back in arbitrary order — this is the
+ *  DEBT-13 fix that brings elixir to node parity.  One `__stamp_ref_ordinal_*`
+ *  call per ref-collection field, over the persisted `record`.  The join-table
+ *  name + FK column atoms are baked into the per-field helper at codegen (an
+ *  Ecto `from` query macro can't take a runtime string source), so each field
+ *  gets its own helper clause.  `[]` when the aggregate has no ref collections. */
+export function ordinalStampLines(agg: AggregateIR, indent: string): string[] {
+  return refCollFields(agg).map((rc) => {
+    const name = snake(rc.field.name);
+    return `${indent}__stamp_ref_ordinal_${name}(record, attrs)`;
+  });
+}
+
 /** The shared private helpers a repository emits when it has ref collections:
- *  `__put_ref_coll/4` (resolve an id list to target structs, then `put_assoc`)
- *  and `__ref_ids/1` is on the controller, not here.  Only emitted when used,
- *  so it never sits unused under `--warnings-as-errors`. */
-export function refCollRepoHelpers(appModule: string): string {
+ *
+ *  - `__put_ref_coll/4` — resolve an id list to target structs and `put_assoc`
+ *    them (membership + prefix-aware join-row writes + `on_replace` cleanup).
+ *  - `__stamp_ref_ordinal_<field>/2` (one per ref-collection field) — the
+ *    DEBT-13 order-preservation pass: re-read the incoming id list and
+ *    `Repo.update_all` each join row's `ordinal` to its list index so the
+ *    `many_to_many` preload (ordered by `ordinal`, see the schema's
+ *    `__ref_coll_order/0`) round-trips the collection in insertion order,
+ *    matching node.  The join table name + FK column atoms are LITERALS baked in
+ *    here (Ecto's `from` query macro requires a literal/compile-time source —
+ *    a runtime string can't be pinned).  Prefix-correct via the owner schema's
+ *    `__schema__(:prefix)` (the join table lives in the owner's schema).  An
+ *    absent key leaves ordinals untouched (a partial update didn't replace the
+ *    set).
+ *
+ *  `__ref_ids/1` is on the controller, not here.  Only emitted when used, so it
+ *  never sits unused under `--warnings-as-errors`. */
+export function refCollRepoHelpers(appModule: string, agg: AggregateIR): string {
+  const stampClauses = refCollFields(agg)
+    .map((rc) => {
+      const name = snake(rc.field.name);
+      const joinTable = JSON.stringify(rc.assoc.joinTable);
+      const ownerFk = rc.assoc.ownerFk;
+      const targetFk = rc.assoc.targetFk;
+      return `
+  # DEBT-13: \`put_assoc\` wrote the \`${name}\` join rows but left \`ordinal\` at the
+  # column default (0).  Stamp each row's ordinal from the incoming id list's
+  # index so the preload (ordered by \`ordinal\`) round-trips in insertion order.
+  defp __stamp_ref_ordinal_${name}(record, attrs) do
+    case __fetch_ref(attrs, ${JSON.stringify(name)}) do
+      :absent ->
+        :ok
+
+      {:ok, ids} ->
+        prefix = record.__struct__.__schema__(:prefix)
+        owner_id = record.id
+
+        ids
+        |> List.wrap()
+        |> Enum.map(&to_string/1)
+        |> Enum.with_index()
+        |> Enum.each(fn {target_id, idx} ->
+          ${appModule}.Repo.update_all(
+            from(j in ${joinTable},
+              where: j.${ownerFk} == ^owner_id and j.${targetFk} == ^target_id
+            ),
+            [set: [ordinal: idx]],
+            prefix: prefix
+          )
+        end)
+
+        :ok
+    end
+  end`;
+    })
+    .join("\n");
+
   return `
   # Resolve a reference-collection id list (\`attrs[key]\`) to target structs and
   # \`put_assoc\` them onto the changeset.  A missing/blank key leaves the existing
@@ -210,5 +311,6 @@ export function refCollRepoHelpers(appModule: string): string {
       Map.has_key?(attrs, String.to_atom(key)) -> {:ok, Map.get(attrs, String.to_atom(key)) || []}
       true -> :absent
     end
-  end`;
+  end
+${stampClauses}`;
 }
