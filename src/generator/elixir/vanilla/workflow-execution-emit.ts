@@ -1262,10 +1262,6 @@ function renderWorkflowModule(
   // that references no actor renders byte-identically to before (no extra arg).
   const needsUser = ctx ? workflowNeedsCurrentUser(wf, ctx) : workflowUsesCurrentUser(wf);
   const userParam = needsUser ? ", current_user \\\\ nil" : "";
-  // OTP app module (leading segment of the FQ context module) — prefixes the
-  // `RequestContext.with_child_frame/1` call that wraps each workflow's `run/1`
-  // (the per-dispatch child execution frame).
-  const appModule = contextModuleFq.split(".")[0]!;
   const hasContextCall = lines.some((l) => l.kind === "with-clause");
   const contextAlias = hasContextCall ? `\n  alias ${contextModuleFq}, as: Context` : "";
   // Rewrite the body's fully-qualified context module to the `Context`
