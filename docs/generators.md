@@ -925,8 +925,7 @@ collection ops with type-directed `sum` reduction.
 **Not yet implemented — every gap fails fast at validate time** (never a
 silent downgrade): the reserved `axon` event-store adapter and `jooq`
 persistence adapter (both `stubAdapter` — the default JPA persistence
-*does* emit `persistedAs(eventLog)`), part-declared (nested) single
-containments (`loom.java-single-containment-unsupported`), `hosts:` UI
+*does* emit `persistedAs(eventLog)`), `hosts:` UI
 hosting (`loom.java-fullstack-unsupported` — the `ui:` embedded-SPA
 mount is implemented), resource-op clients, a **principal-referencing
 capability filter on a non-relational aggregate**

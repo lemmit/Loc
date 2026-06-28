@@ -51,6 +51,11 @@ const FIXTURES: Array<[string, string]> = [
   // Exception-less operation returns: sealed domain union + Jackson
   // polymorphic wire DTO + controller ProblemDetail translation.
   ["test/e2e/fixtures/java-build/operation-returns.ddd", "ru_api"],
+  // DEBT-15 / nested-parts: a part inside a part — Shipment contains a single
+  // Label + a collection of Stickers.  Each nested part FKs to its DIRECT parent
+  // (shipment_id), so the @OneToOne/@OneToMany join column matches the Flyway
+  // DDL (was gated / boot-broken).  Verified end-to-end on Postgres.
+  ["test/e2e/fixtures/java-build/nested-parts.ddd", "api"],
   // Capability filters: @SQLRestriction from the non-principal filter
   // predicate (softDelete pattern).
   ["test/e2e/fixtures/java-build/context-filter.ddd", "cf_api"],

@@ -126,7 +126,16 @@ dropped.
 - Pure + unit-tested. Confirm **elixir is unaffected** (relational nesting gated;
   embedded is jsonb) so the shared-migration change below never reaches it.
 
-### Phase 1 — additive schema + Java (the keystone PR)
+### Phase 1 — Java + direct-parent migration ✅ DONE
+> Landed: nested parts (single **and** collection) FK to their direct parent on
+> java; gate removed; boot-verified on Postgres (Flyway migrate → SQL-insert a
+> two-level graph → GET nests correctly). Because **no existing `.ddd` uses
+> part-in-part nesting**, the shared `tableForPart` change is inert for all
+> current output (root-level parts resolve to the root, byte-identical) — so the
+> additive-nullable dance below was unnecessary; the change went in directly.
+> `single → UNIQUE` was deferred to a follow-up (it's a constraint refinement,
+> not the structural fix). Original plan text kept below for the record.
+
 - `src/system/migrations-builder.ts` `tableForPart`: also emit the **direct-parent
   FK** (`labels.shipment_id`) **in addition to** the existing root FK, with a
   `UNIQUE` when the containment is single. Additive ⇒ node/python/.NET ignore the

@@ -24,6 +24,7 @@ import type {
   TableShape,
 } from "../ir/types/migrations-ir.js";
 import { durableEventTypes } from "../ir/util/channels.js";
+import { directParentOf } from "../ir/util/containment-parent.js";
 import {
   isTphBase,
   isTphConcrete,
@@ -672,8 +673,16 @@ function tableForPart(
   ownerName: string = parent.name,
 ): TableShape {
   const tableName = plural(snake(part.name));
-  const parentTable = plural(snake(ownerName));
-  const parentFk = `${snake(ownerName)}_id`;
+  // A NESTED part (declared inside a sibling part — `Shipment contains label`)
+  // FKs to that sibling's table, not the aggregate root, so a collection nested
+  // below the root keeps its hierarchy instead of flattening every level onto
+  // the root (lossy: `labels.order_id` can't say which shipment owns a label).
+  // A root-level part resolves to `ownerName` (the root / TPH base), so existing
+  // single-level output is byte-identical.
+  const dp = directParentOf(parent, part.name);
+  const fkOwnerName = dp?.nested ? dp.name : ownerName;
+  const parentTable = plural(snake(fkOwnerName));
+  const parentFk = `${snake(fkOwnerName)}_id`;
   const columns: ColumnShape[] = [
     { name: "id", type: idColumnType(parent.idValueType), nullable: false },
     { name: parentFk, type: idColumnType(parent.idValueType), nullable: false },

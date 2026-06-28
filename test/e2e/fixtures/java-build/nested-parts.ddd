@@ -1,0 +1,43 @@
+// DEBT-15 / nested-parts-alignment — a part contained inside another part on
+// java.  `Shipment` (a part of `Order`) itself contains a single `Label` and a
+// collection of `Sticker`s.  Each nested part FKs to its DIRECT parent
+// (`labels.shipment_id`, `stickers.shipment_id`), NOT the aggregate root — so
+// the JPA `@OneToOne`/`@OneToMany` join column matches the Flyway DDL and a
+// collection nested below the root keeps its hierarchy (the old "FK everything
+// to the root" convention is lossy for that case).
+//
+// Was gated `loom.java-single-containment-unsupported` (single) / boot-broken
+// (collection: JPA wanted `shipment_id`, the DDL only emitted `order_id`).
+// Verified end-to-end against real Postgres: Flyway migrate, SQL-insert a
+// two-level graph, GET → JPA nests `label` + `stickers` under the right
+// `shipment`.  Compiles under `gradle testClasses bootJar` (the java-build gate).
+system NestedParts {
+  subdomain D {
+    context Shop {
+      aggregate Order {
+        code: string
+        contains shipment: Shipment
+        entity Shipment {
+          carrier: string
+          // single part-in-part
+          contains label: Label
+          // collection part-in-part
+          contains stickers: Sticker[]
+        }
+        entity Label { zpl: string }
+        entity Sticker { text: string }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api A from D
+  storage primary { type: postgres }
+  resource st { for: Shop, kind: state, use: primary }
+  deployable api {
+    platform: java
+    contexts: [Shop]
+    dataSources: [st]
+    serves: A
+    port: 8081
+  }
+}

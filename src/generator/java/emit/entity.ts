@@ -145,14 +145,20 @@ export interface JavaEntityOptions {
     schema?: string;
     /** Parts: the parent-FK column (`<snake(owner)>_id`). */
     parentFkColumn?: string;
+    /** Parts: the DIRECT parent entity's name (the aggregate root for a
+     *  root-level part, the sibling part for a nested one).  Types the
+     *  read-only `parentId` mirror + the collection `_create` factory's
+     *  parent-id arg.  Defaults to the root name, so root-level output is
+     *  unchanged. */
+    parentEntityName?: string;
     /** The aggregate that physically owns the parent table (differs from
      *  the root name for TPH concretes) — names containment FK columns. */
     containmentOwnerName?: string;
-    /** Parts that are the target of a root-level *single* containment:
-     *  the root entity class.  The part then carries the hidden owning
-     *  `_parent` @OneToOne (JPA has no unidirectional one-to-one with
-     *  the FK on the part table) and its `_create` factory takes the
-     *  parent entity instead of the parent id. */
+    /** Parts that are the target of a *single* containment: the declaring
+     *  entity class (the root, or a sibling part for a nested single).  The
+     *  part then carries the hidden owning `_parent` @OneToOne (JPA has no
+     *  unidirectional one-to-one with the FK on the part table) and its
+     *  `_create` factory takes the parent entity instead of the parent id. */
     oneToOneParentOf?: string;
     /** `shape(embedded)`: containments + reference collections fold
      *  into jsonb columns (no part / join tables); the Hibernate JSON
@@ -292,7 +298,7 @@ export function renderJavaEntity(
     if (persistence?.parentFkColumn) {
       fieldLines.push(...jpaParentIdAnnotations(persistence.parentFkColumn));
     }
-    fieldLines.push(`    ${rootName}Id parentId;`);
+    fieldLines.push(`    ${persistence?.parentEntityName ?? rootName}Id parentId;`);
   }
   for (const f of entity.fields) {
     if (superType?.fieldNames.has(f.name)) continue;
@@ -341,9 +347,9 @@ export function renderJavaEntity(
       }
       fieldLines.push(`    List<${c.partName}> ${c.name} = new ArrayList<>();`);
     } else {
-      // Inverse side of the part's hidden owning `_parent` @OneToOne
-      // (part-declared single containments stay gated upstream:
-      // loom.java-single-containment-unsupported).
+      // Inverse side of the part's hidden owning `_parent` @OneToOne — emitted
+      // for the declaring entity whether it's the root or a sibling part (a
+      // nested part's owning side FKs to this entity's table via `directParentOf`).
       if (persistence) fieldLines.push(...jpaSingleContainmentAnnotations());
       fieldLines.push(`    ${c.partName} ${c.name};`);
     }
@@ -385,7 +391,7 @@ export function renderJavaEntity(
     accessorLines.push("");
   };
   if (!superType?.sharesIdentity) accessor(idClass, "id");
-  if (!isRoot) accessor(`${rootName}Id`, "parentId");
+  if (!isRoot) accessor(`${persistence?.parentEntityName ?? rootName}Id`, "parentId");
   for (const f of entity.fields) {
     if (superType?.fieldNames.has(f.name)) continue;
     if (isRefCollection(f.type)) {
@@ -638,7 +644,9 @@ export function renderJavaEntity(
   const partFactoryLines: string[] = !isRoot
     ? [
         `    public static ${entity.name} _create(${[
-          oneToOneParent ? `${oneToOneParent} parent` : `${rootName}Id parentId`,
+          oneToOneParent
+            ? `${oneToOneParent} parent`
+            : `${persistence?.parentEntityName ?? rootName}Id parentId`,
           ...entity.fields.map((f) => `${renderJavaType(f.type)} ${f.name}`),
         ].join(", ")}) {`,
         `        var p = new ${entity.name}();`,

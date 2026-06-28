@@ -900,28 +900,11 @@ export function validateJavaContainmentSupport(sys: SystemIR, diags: LoomDiagnos
           }
         }
       }
-      for (const agg of ctx.aggregates) {
-        // Root-level single containments are mapped (the part carries a
-        // hidden owning `_parent` @OneToOne); only *part-declared* single
-        // containments stay gated — their parent is another part, and the
-        // part factory / renderNew seam only threads the root entity.
-        for (const owner of agg.parts) {
-          for (const c of owner.contains) {
-            if (c.collection) continue;
-            diags.push({
-              severity: "error",
-              message:
-                `Deployable '${dep.name}' (platform java) hosts aggregate '${ctxName}.${agg.name}' ` +
-                `whose nested part '${owner.name}' declares a single containment 'contains ${c.name}: ${c.partName}' — ` +
-                `part-declared single (non-collection) containments are not yet mapped on the java backend. ` +
-                `Use a collection containment ('contains ${c.name}: ${c.partName}[]'), fold the part's ` +
-                `fields into a value object, or host the context on a node / dotnet deployable.`,
-              source: `${sys.name}/${dep.name}`,
-              code: "loom.java-single-containment-unsupported",
-            });
-          }
-        }
-      }
+      // Nested part-in-part containments (single AND collection) now map on
+      // java: a part FKs to its DIRECT parent (`directParentOf`, shared with
+      // migrations-builder), so the `@OneToOne`/`@OneToMany` join column matches
+      // the Flyway DDL and a collection nested below the root keeps its
+      // hierarchy.  (Was: `loom.java-single-containment-unsupported`.)
     }
   }
 }
