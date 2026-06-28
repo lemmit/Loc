@@ -506,6 +506,21 @@ export function buildRoutesFile(
     lines.push("");
   }
 
+  // Named find queries with STATIC paths (`find byHolder(...)` → GET
+  // /by_holder) must register BEFORE the `GET /{id}` param route: Hono
+  // matches in registration order, and `@hono/zod-openapi` validates the
+  // `/{id}` param as `z.string().uuid()`, so a static segment registered
+  // after `/{id}` is shadowed — `GET /by_holder` would match `/{id}` first
+  // and 422 on the non-UUID segment.  The auto-`all` find stays at the root
+  // (`GET /`, no conflict) and is emitted with the rest below.
+  if (repo) {
+    for (const find of repo.finds) {
+      if (find.name === "all") continue;
+      lines.push(...emitFindRoute(agg, find, ctx, emitTrace).map((l) => `  ${l}`));
+      lines.push("");
+    }
+  }
+
   // Get by id.
   lines.push(`  app.openapi(`);
   lines.push(`    createRoute({`);
@@ -656,9 +671,12 @@ export function buildRoutesFile(
     lines.push("");
   }
 
-  // Find queries (including the auto-included `all`).
+  // The auto-included `all` find (`GET /`, root path — no conflict with
+  // `/{id}`).  Named static-path finds were emitted ABOVE, before the
+  // `GET /{id}` param route, so they win Hono's registration-order match.
   if (repo) {
     for (const find of repo.finds) {
+      if (find.name !== "all") continue;
       lines.push(...emitFindRoute(agg, find, ctx, emitTrace).map((l) => `  ${l}`));
       lines.push("");
     }
