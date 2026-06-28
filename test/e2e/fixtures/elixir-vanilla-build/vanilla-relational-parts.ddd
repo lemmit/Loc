@@ -1,0 +1,40 @@
+// §11c — nested entity parts on a RELATIONAL (default-shape) vanilla aggregate.
+// `contains pipelines: Pipeline[]` persists as a child TABLE (`pipelines`): the
+// part schema is table-backed (`schema "pipelines"`) with a `belongs_to` back to
+// its owner (the `project_id` FK the shared child-table migration emits), the
+// root `has_many`s + `cast_assoc`s it, and every read `Repo.preload`s it.  This
+// is the vanilla analogue of the value-object collection `has_many` path.  The
+// CORE slice persists + reads the nested parts; an in-operation containment
+// mutation (`pipelines += …`) stays validator-gated (the relational `put_assoc`
+// op-mutation path is the §11c follow-up).  Compiles against plain Ecto under
+// `mix compile --warnings-as-errors`.
+system VanillaRelationalParts {
+  subdomain Core {
+    context Catalog {
+      aggregate Project ids guid {
+        name: string
+        active: bool
+        contains pipelines: Pipeline[]
+        entity Pipeline {
+          label: string
+          runCount: int
+          invariant runCount >= 0
+        }
+        invariant name.length > 0
+      }
+      repository Projects for Project {
+        find byName(n: string): Project[] where this.name == n
+      }
+    }
+  }
+  api CatalogApi from Core
+  storage pg { type: postgres }
+  resource projectState { for: Catalog, kind: state, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Catalog]
+    dataSources: [projectState]
+    serves: CatalogApi
+    port: 4000
+  }
+}
