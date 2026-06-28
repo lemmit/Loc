@@ -11,6 +11,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
+import { directParentOf } from "../../ir/util/containment-parent.js";
 import { isTpcBase, isTphBase, tableOwnerName } from "../../ir/util/inheritance.js";
 import { effectiveSavingShape, resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import type { Model } from "../../language/generated/ast.js";
@@ -741,6 +742,12 @@ function emitAggregate(
   // for shared-table concretes) names containment / part FK columns.
   const ownerName = tableOwnerName(agg, ctx.aggregates);
   for (const part of agg.parts) {
+    // A nested part (declared inside a sibling part) FKs to that sibling's
+    // table; a root-level part keeps the root / TPH-base owner.  Shared source
+    // of truth with `migrations-builder.ts` so the JPA join column and the
+    // Flyway DDL agree.
+    const dp = directParentOf(agg, part.name);
+    const fkOwner = dp?.nested ? dp.name : ownerName;
     place(
       `${part.name}.java`,
       "entity",
@@ -755,12 +762,12 @@ function emitAggregate(
             : {
                 tableName: plural(snake(part.name)),
                 schema,
-                parentFkColumn: `${snake(ownerName)}_id`,
-                oneToOneParentOf: agg.contains.some(
-                  (c) => !c.collection && c.partName === part.name,
-                )
-                  ? agg.name
-                  : undefined,
+                // `_parent` @OneToOne (single only) + the `parentId` mirror both
+                // reference the DIRECT parent, so JPA navigates the real
+                // hierarchy and the join column matches the Flyway DDL.
+                parentFkColumn: `${snake(fkOwner)}_id`,
+                parentEntityName: dp?.nested ? dp.name : undefined,
+                oneToOneParentOf: dp?.single ? dp.name : undefined,
                 voLookup,
               },
       }),

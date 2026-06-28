@@ -68,7 +68,7 @@ describe("java generator — single containment (root-declared)", () => {
     );
   });
 
-  it("still gates part-declared single containments", async () => {
+  it("maps a part-declared (nested) single containment to the sibling part's table", async () => {
     const nested = SRC.replace(
       "entity Shipment { carrier: string  trackingCode: string }",
       `entity Shipment {
@@ -79,10 +79,31 @@ describe("java generator — single containment (root-declared)", () => {
         entity Label { zpl: string }`,
     );
     const loom = await buildLoomModel(nested);
-    const errors = validateLoomModel(loom).filter(
-      (d) => d.code === "loom.java-single-containment-unsupported",
+    // No longer gated — a nested part FKs to its DIRECT parent (the sibling
+    // part), so the JPA join column matches the Flyway DDL (DEBT-15).
+    expect(
+      validateLoomModel(loom).some((d) => d.code === "loom.java-single-containment-unsupported"),
+    ).toBe(false);
+
+    const files = await generateSystemFiles(nested);
+    const label = [...files.entries()].find(([k]) => k.endsWith("/Label.java"))?.[1];
+    expect(label).toBeDefined();
+    // Owning side + read-only mirror reference the DIRECT parent (Shipment), not
+    // the root (Order) — and the `_create` factory takes the Shipment instance.
+    expect(label!).toMatch(/@JoinColumn\(name = "shipment_id", nullable = false\)/);
+    expect(label!).toMatch(/Shipment _parent;/);
+    expect(label!).toMatch(/ShipmentId parentId;/);
+    expect(label!).toMatch(/public ShipmentId parentId\(\)/);
+    expect(label!).toMatch(/public static Label _create\(Shipment parent,/);
+    expect(label!).not.toMatch(/OrderId parentId/);
+
+    // The migration FKs the labels table to shipments, not orders.
+    const ddl = [...files.entries()]
+      .filter(([k]) => k.endsWith(".sql"))
+      .map(([, v]) => v)
+      .join("\n");
+    expect(ddl).toMatch(
+      /CREATE TABLE shop\.labels[\s\S]*?shipment_id UUID NOT NULL[\s\S]*?REFERENCES shop\.shipments/,
     );
-    expect(errors.length).toBeGreaterThan(0);
-    expect(errors[0]!.message).toContain("nested part 'Shipment'");
   });
 });
