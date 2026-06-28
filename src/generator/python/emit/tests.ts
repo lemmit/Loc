@@ -8,7 +8,7 @@ import {
   type TestStmtIR,
   type TypeIR,
 } from "../../../ir/types/loom-ir.js";
-import { snake } from "../../../util/naming.js";
+import { escapePythonIdent, snake } from "../../../util/naming.js";
 import { renderPyExpr } from "../render-expr.js";
 
 // A currentUser-gated operation's method signature picks up a trailing
@@ -246,7 +246,7 @@ function renderTestStmt(
     return ["    with pytest.raises(Exception):", `        ${renderTestExpr(s.expr, ctx, lets)}`];
   }
   if (s.kind === "let") {
-    return [`    ${snake(s.name)} = ${renderTestExpr(s.expr, ctx, lets)}`];
+    return [`    ${escapePythonIdent(snake(s.name))} = ${renderTestExpr(s.expr, ctx, lets)}`];
   }
   if (s.kind === "call") {
     const args = s.args.map((a) => renderTestExpr(a, ctx, lets)).join(", ");

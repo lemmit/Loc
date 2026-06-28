@@ -46,7 +46,7 @@ import {
   aggregateOpResolver,
   classifyDomainServiceTier,
 } from "../../ir/util/domain-service-tier.js";
-import { snake, upperFirst } from "../../util/naming.js";
+import { escapeElixirIdent, snake, upperFirst } from "../../util/naming.js";
 import { type RenderCtx, renderExpr, renderTypespec } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -465,7 +465,7 @@ function renderStatement(
 ): string {
   switch (s.kind) {
     case "let":
-      return `    ${snake(s.name)} = ${renderExpr(s.expr, rc)}`;
+      return `    ${escapeElixirIdent(snake(s.name))} = ${renderExpr(s.expr, rc)}`;
     case "precondition":
       // Bug-shaped guard → raise (the same `ArgumentError` shape the aggregate
       // operation body emits in render-stmt.ts).

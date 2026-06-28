@@ -1,4 +1,5 @@
 import type { ExprIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
+import { escapeJavaIdent } from "../../util/naming.js";
 import { collectJavaExprImports, type JavaRenderContext, renderJavaExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -78,7 +79,9 @@ function renderJavaStatement(
       // controller advice.
       return `${INDENT}if (!(${renderJavaExpr(s.expr, ctx)})) throw new ForbiddenException(${JSON.stringify(`Forbidden: ${s.source}`)});`;
     case "let":
-      return `${INDENT}var ${s.name} = ${renderJavaExpr(s.expr, ctx)};`;
+      // `let`-names may collide with a Java keyword; escape consistently with
+      // the matching `refKind: "let"` use sites (`let class` → `class_`).
+      return `${INDENT}var ${escapeJavaIdent(s.name)} = ${renderJavaExpr(s.expr, ctx)};`;
     case "assign": {
       const base = `${INDENT}${renderPath(s.target)} = ${renderJavaExpr(s.value, ctx)};`;
       return withProvCapture(

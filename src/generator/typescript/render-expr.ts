@@ -1,7 +1,7 @@
 import { genericShape } from "../../ir/stdlib/generics.js";
 import { variantTag } from "../../ir/stdlib/unions.js";
 import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
-import { lowerFirst } from "../../util/naming.js";
+import { escapeTsIdent, lowerFirst } from "../../util/naming.js";
 import {
   type ExprTarget,
   type MemberExpr,
@@ -67,8 +67,9 @@ const TS_TARGET: ExprTarget<TsRenderContext> = {
     // Lambda body is now optional (block-body lambdas land for page event
     // handlers).  TS render contexts shouldn't see block bodies — those are
     // React-emitter territory — but stay total to keep the build happy.
-    if (body !== undefined) return `(${param}) => ${body}`;
-    return `(${param}) => { /* block-body lambda — page metamodel territory, not TS-renderable */ }`;
+    const p = escapeTsIdent(param);
+    if (body !== undefined) return `(${p}) => ${body}`;
+    return `(${p}) => { /* block-body lambda — page metamodel territory, not TS-renderable */ }`;
   },
   newPart: renderNew,
   object: (fields) => `({ ${fields.map((f) => `${f.name}: ${f.value}`).join(", ")} })`,
@@ -145,9 +146,12 @@ function renderLiteral(lit: LiteralKind, value: string): string {
 function renderRef(e: RefExpr, ctx: TsRenderContext): string {
   const fromOutside = ctx.thisName !== "this";
   switch (e.refKind) {
-    case "param":
     case "let":
     case "lambda":
+      // Locals introduced inside the body; escape keyword collisions so the
+      // use matches the (also-escaped) binding (`let new` → `new_`).
+      return escapeTsIdent(e.name);
+    case "param":
       return e.name;
     case "this-prop":
       // Inside the aggregate class: read the private backing field.

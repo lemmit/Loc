@@ -45,6 +45,324 @@ export function humanize(input: string): string {
   return words.map((w) => (w.length === 0 ? w : w[0]!.toUpperCase() + w.slice(1))).join(" ");
 }
 
+// ---------------------------------------------------------------------------
+// Target-language keyword escaping for emitted local identifiers.
+//
+// A Loom `let`-binding may be named after a reserved word in a target
+// language — `let base = …` is legal Loom but `base` is a C# keyword, so
+// `var base = …` fails to compile.  Each backend renders the *same* local
+// name at the binding AND every `refKind: "let"` use; routing both through the
+// matching `escape<Lang>Ident` keeps the rename consistent.
+//
+// Only names that actually collide with a reserved word are rewritten — a
+// non-keyword name passes through byte-identically (no churn for the common
+// case).  This is a cross-layer naming concern (the generators are the
+// consumers), so it lives here alongside the other casing helpers.
+// ---------------------------------------------------------------------------
+
+/** C# reserved keywords.  Escaped with the verbatim-identifier prefix
+ *  (`@base`), the idiomatic C# escape. */
+const CSHARP_KEYWORDS = new Set([
+  "abstract",
+  "as",
+  "base",
+  "bool",
+  "break",
+  "byte",
+  "case",
+  "catch",
+  "char",
+  "checked",
+  "class",
+  "const",
+  "continue",
+  "decimal",
+  "default",
+  "delegate",
+  "do",
+  "double",
+  "else",
+  "enum",
+  "event",
+  "explicit",
+  "extern",
+  "false",
+  "finally",
+  "fixed",
+  "float",
+  "for",
+  "foreach",
+  "goto",
+  "if",
+  "implicit",
+  "in",
+  "int",
+  "interface",
+  "internal",
+  "is",
+  "lock",
+  "long",
+  "namespace",
+  "new",
+  "null",
+  "object",
+  "operator",
+  "out",
+  "override",
+  "params",
+  "private",
+  "protected",
+  "public",
+  "readonly",
+  "ref",
+  "return",
+  "sbyte",
+  "sealed",
+  "short",
+  "sizeof",
+  "stackalloc",
+  "static",
+  "string",
+  "struct",
+  "switch",
+  "this",
+  "throw",
+  "true",
+  "try",
+  "typeof",
+  "uint",
+  "ulong",
+  "unchecked",
+  "unsafe",
+  "ushort",
+  "using",
+  "virtual",
+  "void",
+  "volatile",
+  "while",
+]);
+
+/** TypeScript / JavaScript reserved words (the strict-mode + module set that
+ *  cannot be a binding name).  Escaped with a trailing underscore. */
+const TS_KEYWORDS = new Set([
+  "break",
+  "case",
+  "catch",
+  "class",
+  "const",
+  "continue",
+  "debugger",
+  "default",
+  "delete",
+  "do",
+  "else",
+  "enum",
+  "export",
+  "extends",
+  "false",
+  "finally",
+  "for",
+  "function",
+  "if",
+  "import",
+  "in",
+  "instanceof",
+  "new",
+  "null",
+  "return",
+  "super",
+  "switch",
+  "this",
+  "throw",
+  "true",
+  "try",
+  "typeof",
+  "var",
+  "void",
+  "while",
+  "with",
+  "yield",
+  "let",
+  "static",
+  "implements",
+  "interface",
+  "package",
+  "private",
+  "protected",
+  "public",
+  "await",
+]);
+
+/** Java reserved words.  Escaped with a trailing underscore. */
+const JAVA_KEYWORDS = new Set([
+  "abstract",
+  "assert",
+  "boolean",
+  "break",
+  "byte",
+  "case",
+  "catch",
+  "char",
+  "class",
+  "const",
+  "continue",
+  "default",
+  "do",
+  "double",
+  "else",
+  "enum",
+  "extends",
+  "final",
+  "finally",
+  "float",
+  "for",
+  "goto",
+  "if",
+  "implements",
+  "import",
+  "instanceof",
+  "int",
+  "interface",
+  "long",
+  "native",
+  "new",
+  "package",
+  "private",
+  "protected",
+  "public",
+  "return",
+  "short",
+  "static",
+  "strictfp",
+  "super",
+  "switch",
+  "synchronized",
+  "this",
+  "throw",
+  "throws",
+  "transient",
+  "try",
+  "void",
+  "volatile",
+  "while",
+  "var",
+  "true",
+  "false",
+  "null",
+]);
+
+/** Python keywords + soft keywords unsafe as a plain binding.  Escaped with a
+ *  trailing underscore. */
+const PYTHON_KEYWORDS = new Set([
+  "False",
+  "None",
+  "True",
+  "and",
+  "as",
+  "assert",
+  "async",
+  "await",
+  "break",
+  "class",
+  "continue",
+  "def",
+  "del",
+  "elif",
+  "else",
+  "except",
+  "finally",
+  "for",
+  "from",
+  "global",
+  "if",
+  "import",
+  "in",
+  "is",
+  "lambda",
+  "nonlocal",
+  "not",
+  "or",
+  "pass",
+  "raise",
+  "return",
+  "try",
+  "while",
+  "with",
+  "yield",
+  "match",
+  "case",
+]);
+
+/** Elixir reserved words / special forms unsafe as a plain variable binding.
+ *  Escaped with a trailing underscore. */
+const ELIXIR_KEYWORDS = new Set([
+  "true",
+  "false",
+  "nil",
+  "when",
+  "and",
+  "or",
+  "not",
+  "in",
+  "fn",
+  "do",
+  "end",
+  "catch",
+  "rescue",
+  "after",
+  "else",
+  "def",
+  "defp",
+  "defmodule",
+  "if",
+  "unless",
+  "case",
+  "cond",
+  "with",
+  "for",
+  "receive",
+  "try",
+  "raise",
+  "import",
+  "alias",
+  "require",
+  "use",
+  "quote",
+  "unquote",
+]);
+
+/** Escape a local identifier that collides with a C# keyword using the
+ *  verbatim-identifier prefix (`base` → `@base`); pass through otherwise. */
+export function escapeCsharpIdent(name: string): string {
+  return CSHARP_KEYWORDS.has(name) ? `@${name}` : name;
+}
+
+/** Escape a local identifier that collides with a TS/JS reserved word with a
+ *  trailing underscore (`new` → `new_`); pass through otherwise. */
+export function escapeTsIdent(name: string): string {
+  return TS_KEYWORDS.has(name) ? `${name}_` : name;
+}
+
+/** Escape a local identifier that collides with a Java reserved word with a
+ *  trailing underscore (`class` → `class_`); pass through otherwise. */
+export function escapeJavaIdent(name: string): string {
+  return JAVA_KEYWORDS.has(name) ? `${name}_` : name;
+}
+
+/** Escape a (already snake_cased) local identifier that collides with a
+ *  Python keyword with a trailing underscore (`class` → `class_`); pass
+ *  through otherwise. */
+export function escapePythonIdent(name: string): string {
+  return PYTHON_KEYWORDS.has(name) ? `${name}_` : name;
+}
+
+/** Escape a (already snake_cased) local identifier that collides with an
+ *  Elixir reserved word with a trailing underscore (`end` → `end_`); pass
+ *  through otherwise. */
+export function escapeElixirIdent(name: string): string {
+  return ELIXIR_KEYWORDS.has(name) ? `${name}_` : name;
+}
+
 export function indent(text: string, level = 1, unit = "  "): string {
   const pad = unit.repeat(level);
   return text
