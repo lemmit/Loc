@@ -44,6 +44,7 @@ import {
   isObjectLit,
   isOperation,
   isParenExpr,
+  isPayloadDecl,
   isPostfixChain,
   isPrimitiveConversion,
   isProperty,
@@ -56,6 +57,7 @@ import {
 import { isCollectionOp } from "../../util/collection-ops.js";
 import { isIntrinsicMatcher } from "../../util/intrinsic-matchers.js";
 import { findVerb, type ResourceVerbDef } from "../resource-verbs.js";
+import { variantTag } from "../stdlib/unions.js";
 import type {
   ExprIR,
   IdValueType,
@@ -81,6 +83,7 @@ import {
   findValueObjectByName,
   findWorkflowByName,
   inAggregate,
+  lowerAtom,
   lowerType,
   USER_SHAPE_NAME,
   withLocal,
@@ -543,6 +546,22 @@ function applySuffixToRecv(
 // `?` propagation helpers (exception-less.md A2).
 // ---------------------------------------------------------------------------
 
+/** True when `tag` names an `error` payload visible from the lowering context
+ *  — walking the context → subdomain → system → model container chain so a
+ *  context-local *and* an ambient root-level `error` both classify.  Drives the
+ *  per-variant-arm `isError` stamp the Elixir backend's `{:ok,…}`/`{:error,…}`
+ *  tuple `case` depends on (variant-match.md). */
+function isErrorVariantTag(tag: string, env: Env): boolean {
+  let node: { members?: readonly unknown[]; $container?: unknown } | undefined = env.ctx;
+  while (node) {
+    if (node.members?.some((m) => isPayloadDecl(m) && m.name === tag && m.kind === "error")) {
+      return true;
+    }
+    node = node.$container as { members?: readonly unknown[]; $container?: unknown } | undefined;
+  }
+  return false;
+}
+
 export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
   if (!expr) return lit("null", "null");
   if (isStringLit(expr)) return lit("string", expr.value);
@@ -632,7 +651,40 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
     };
   }
   if (isMatchExpr(expr)) {
-    // Predicate-arms expression — lowering is mechanical: each arm
+    // Variant form (`match SUBJECT { VariantType binding => value }`,
+    // variant-match.md): subject present.  Lower the scrutinee once, read
+    // its resolved union TypeIR, and for each arm bind the (optional)
+    // binding name as a REAL narrowed local typed at the matched variant
+    // — the if-let / lambda-param narrowing analog.  A reference to the
+    // binding inside the arm value then resolves through the ordinary
+    // local path (`refKind: "match-binding"`, carrying the variant type),
+    // so member reads on it get full receiver/member types.
+    if (expr.subject) {
+      const subject = lowerExpr(expr.subject, env);
+      const subjectType = subject.kind === "ref" ? subject.type : undefined;
+      return {
+        kind: "match",
+        subject,
+        subjectType,
+        arms: [],
+        variantArms: expr.varArms.map((arm) => {
+          const varType = lowerAtom(arm.varType, env);
+          const armEnv = arm.binding ? withLocal(env, arm.binding, "match-binding", varType) : env;
+          return {
+            varType,
+            binding: arm.binding,
+            value: lowerExpr(arm.value, armEnv),
+            // Error-vs-success classification for the asymmetric Elixir tuple
+            // representation (variant-match.md).  An error payload in the
+            // enclosing context tags as `{:error, …}`; everything else is the
+            // `{:ok, …}` success carrier.  Other backends ignore this.
+            isError: isErrorVariantTag(variantTag(varType), env),
+          };
+        }),
+        otherwise: expr.elseExpr ? lowerExpr(expr.elseExpr, env) : undefined,
+      };
+    }
+    // Boolean predicate-arms form — lowering is mechanical: each arm
     // becomes a `{ cond, value }` pair, the optional `else => expr`
     // becomes the `otherwise` slot.  Type unification across arms /
     // soundness checks are left to the validator.
@@ -642,6 +694,7 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
         cond: lowerExpr(arm.cond, env),
         value: lowerExpr(arm.value, env),
       })),
+      variantArms: [],
       otherwise: expr.elseExpr ? lowerExpr(expr.elseExpr, env) : undefined,
     };
   }
@@ -1101,6 +1154,7 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
     // soundness across arms is a validator concern (warn / error if
     // arms disagree).
     if (expr.arms.length > 0) return inferExprType(expr.arms[0]!.value, env);
+    if (expr.varArms.length > 0) return inferExprType(expr.varArms[0]!.value, env);
     if (expr.elseExpr) return inferExprType(expr.elseExpr, env);
     // Empty match — degenerate, falls back to a string-typed
     // placeholder (same default ternary uses).  Validator reports

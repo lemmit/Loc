@@ -231,6 +231,24 @@ const JAVA_TARGET: ExprTarget<JavaRenderContext> = {
     }
     return out;
   },
+  // Variant-`match` (variant-match.md) — Java 21 switch expression over the
+  // sealed union interface.  Each variant's domain carrier is the record
+  // `${unionName}_${tag}` (java/emit/unions.ts), so a `case ${Union}_${tag} b`
+  // pattern binds the narrowed record; `b.field()` reads a component.  A
+  // `default` arm always trails so a non-exhaustive match (validator *warns*,
+  // never errors) still compiles against the sealed type.
+  matchVariant(m) {
+    const arms = m.arms.map((a) => {
+      const carrier = `${m.unionName}_${a.tag}`;
+      // A pattern needs a binder even when the arm bound none; `_` is the
+      // Java 21 unnamed pattern variable.
+      const binder = a.binding ?? "_";
+      return `      case ${carrier} ${binder} -> ${a.value};`;
+    });
+    const tail = `      default -> ${m.otherwise ?? "null"};`;
+    return `switch (${m.subject}) {\n${arms.join("\n")}\n${tail}\n    }`;
+  },
+  bindingRefText: (binding) => binding,
   list: (elements) => `List.of(${elements.join(", ")})`,
 };
 

@@ -33,6 +33,9 @@ import {
 export interface PyRenderContext {
   /** Rendered name for the implicit receiver (`self` by default). */
   thisName: string;
+  /** Variant-`match` binding side-channel (variant-match.md) — maps a bound
+   *  name to the scrutinee text it aliases inside an arm's value. */
+  matchBindings?: ReadonlyMap<string, string>;
   /** Render `this`-family field refs as the VERBATIM (camelCase) wire name
    *  off `thisName` — `self.commitSha` — instead of the snake_case domain
    *  spelling.  Set when rendering a predicate against a request DTO (the
@@ -93,6 +96,32 @@ const PY_TARGET: ExprTarget<PyRenderContext> = {
     }
     return out;
   },
+  // Variant-`match` (variant-match.md) — Python has no expression-level
+  // pattern match, so (like TS) fold to a chained conditional on the union's
+  // `type` discriminator (`subject["type"] == "<tag>"`).  The binding is an
+  // alias of the scrutinee dict (`bindingRefText` returns the subject), and a
+  // field read off it subscripts (see renderMember).  With no `else`, an
+  // exhaustive variant match folds the last arm as the tail (no spurious None).
+  matchVariant(m) {
+    if (m.arms.length === 0) return m.otherwise ?? "None";
+    const arms = [...m.arms];
+    let out: string;
+    let rest: typeof arms;
+    if (m.otherwise !== undefined) {
+      out = m.otherwise;
+      rest = arms;
+    } else {
+      out = arms[arms.length - 1]!.value;
+      rest = arms.slice(0, -1);
+    }
+    for (const arm of [...rest].reverse()) {
+      out = `(${arm.value} if ${m.subject}["type"] == ${JSON.stringify(arm.tag)} else ${out})`;
+    }
+    return out;
+  },
+  // No real bound variable in a conditional expression — the binding aliases
+  // the scrutinee dict (the subject text).
+  bindingRefText: (_binding, subject) => subject,
   list: (elements) => `[${elements.join(", ")}]`,
 };
 
@@ -236,6 +265,11 @@ function renderRef(e: RefExpr, ctx: PyRenderContext): string {
       return `${ctx.thisName}.${ctx.fnPrefix ?? "_"}${snake(e.name)}`;
     case "enum-value":
       return `${e.enumName}.${e.name}`;
+    case "match-binding":
+      // Variant-`match` binding (variant-match.md): Python has no
+      // expression-level pattern binding, so the bound name is an alias of the
+      // scrutinee dict — render the subject text installed in `ctx.matchBindings`.
+      return ctx.matchBindings?.get(e.name) ?? snake(e.name);
     case "current-user":
       return "current_user";
     default:
@@ -247,6 +281,15 @@ function renderRef(e: RefExpr, ctx: PyRenderContext): string {
 }
 
 function renderMember(recv: string, e: MemberExpr): string {
+  // Variant-`match` binding (variant-match.md): a union result is the tagged
+  // dict `{"type": tag, **fields}` (see render-stmt's union return), so a field
+  // read off the bound variant is a subscript, not an attribute.  The key is
+  // the verbatim field name the value dict was built with.  `dict[str, object]`
+  // subscripting yields `object`, so cast to the resolved member type to keep
+  // `mypy --strict` happy.
+  if (e.receiver.kind === "ref" && e.receiver.refKind === "match-binding") {
+    return `cast(${renderPyType(e.memberType)}, ${recv}[${JSON.stringify(e.member)}])`;
+  }
   // Collection / string sizes go through the `len` builtin.
   if (e.receiverType.kind === "array" && (e.member === "count" || e.member === "length")) {
     return `len(${recv})`;

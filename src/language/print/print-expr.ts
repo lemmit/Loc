@@ -156,6 +156,16 @@ function printLambda(node: Extract<Expression, { $type: "Lambda" }>): string {
 }
 
 function printMatch(node: Extract<Expression, { $type: "MatchExpr" }>): string {
+  // Variant form (variant-match.md): a subject present ⇒ the arms are
+  // `VariantType binding => value` rows over `node.varArms`.
+  if (node.subject) {
+    const arms = node.varArms.map((arm) => {
+      const bind = arm.binding ? ` ${arm.binding}` : "";
+      return `${printTypeAtomLite(arm.varType)}${bind} => ${printExpr(arm.value)}`;
+    });
+    if (node.elseExpr) arms.push(`else => ${printExpr(node.elseExpr)}`);
+    return `match ${printExpr(node.subject)} {\n${arms.join(",\n")}\n}`;
+  }
   const arms = node.arms.map((arm) => `${printExpr(arm.cond)} => ${printExpr(arm.value)}`);
   if (node.elseExpr) arms.push(`else => ${printExpr(node.elseExpr)}`);
   // Comma-separate arms: without separators a match-arm value expression
@@ -163,4 +173,39 @@ function printMatch(node: Extract<Expression, { $type: "MatchExpr" }>): string {
   // by `(visibility == ...)` parses as a call), so the printed form would
   // not round-trip.  The grammar accepts an optional comma between arms.
   return `match {\n${arms.join(",\n")}\n}`;
+}
+
+/** Minimal `TypeAtom` printer for a variant-match arm's type — inlined here
+ *  (rather than imported from print-structural) to avoid an import cycle.
+ *  Variant atoms are named carriers / id refs / primitives plus the postfix
+ *  ctor / array / optional markers, which is all a union variant may be. */
+function printTypeAtomLite(node: import("../generated/ast.js").TypeAtom): string {
+  const base = node.base;
+  let s: string;
+  switch (base.$type) {
+    case "PrimitiveType":
+      s = base.name;
+      break;
+    case "SlotType":
+      s = "slot";
+      break;
+    case "ActionType":
+      s = "action";
+      break;
+    case "SelfType":
+      s = "Self id";
+      break;
+    case "IdType":
+      s = `${base.target.$refText} id`;
+      break;
+    case "NamedType":
+      s = base.target.$refText;
+      break;
+    default:
+      s = "";
+  }
+  for (const c of node.ctors ?? []) s = `${s} ${c}`;
+  if (node.array) s = `${s}[]`;
+  if (node.optional) s = `${s}?`;
+  return s;
 }

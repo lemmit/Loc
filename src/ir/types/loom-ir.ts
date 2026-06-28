@@ -2573,6 +2573,7 @@ export type RefKind =
   | "current-user" // magic identifier — system's `user` block shape
   | "resource" // ambient resource handle — `files`, `jobs`, … (Phase 4)
   | "store-field" // a `<Store>.<field>` read from a page/component/store body (Stage 5)
+  | "match-binding" // the narrowed variant binding of a variant-`match` arm (variant-match.md)
   | "unknown";
 
 export type CallKind =
@@ -2798,8 +2799,45 @@ export type ExprIR =
    */
   | {
       kind: "match";
+      /**
+       * Boolean-form arms (`match { cond => value }`).  Present for the
+       * predicate-arms form; empty for the variant form.
+       */
       arms: { cond: ExprIR; value: ExprIR }[];
       otherwise?: ExprIR;
+      /**
+       * Variant-match scrutinee (variant-match.md) — the `or`-union value
+       * being discriminated.  `undefined` for the boolean form.  Lowered
+       * to a `ref` ExprIR (the v1 constraint restricts it to a simple
+       * ref / let-bound name, so it is side-effect-free and may be read
+       * once by every arm).  `subjectType` is its resolved union TypeIR,
+       * carried so backends never re-resolve the variant set.
+       */
+      subject?: ExprIR;
+      subjectType?: TypeIR;
+      /**
+       * Variant-form arms.  Each names a union variant by its resolved
+       * `varType` TypeIR (the wire tag is `variantTag(varType)` — derived,
+       * not stored), optionally binds the narrowed variant value to
+       * `binding`, and returns `value`.  Inside `value`, a reference to
+       * `binding` lowers to a `ref` with `refKind: "match-binding"` typed
+       * at `varType` (the if-let / lambda-param narrowing analog), so
+       * member reads on it resolve with full receiver/member types.
+       * Empty for the boolean form.
+       */
+      variantArms: {
+        varType: TypeIR;
+        binding?: string;
+        value: ExprIR;
+        /** True when this variant is an `error` payload.  Most backends tag
+         *  every variant uniformly by `type` and ignore this, but the Elixir
+         *  vanilla backend represents a union result as an asymmetric tagged
+         *  tuple — `{:ok, value}` for the success variant vs `{:error, tag,
+         *  fields}` for an error — so its `case` clause shape depends on it.
+         *  Derived at lowering from the enclosing context's payload kinds
+         *  (the generators have no context to re-derive it). */
+        isError?: boolean;
+      }[];
     };
 
 // Convenience constructors used by the lowering layer.

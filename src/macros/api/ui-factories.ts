@@ -161,7 +161,10 @@ export function matchExpr(
     _setContainer(value, arm, "value");
     return arm;
   });
-  const node = _tag(mkMatchExpr({ $type: "MatchExpr", arms: armNodes, elseExpr }), origin);
+  const node = _tag(
+    mkMatchExpr({ $type: "MatchExpr", arms: armNodes, varArms: [], elseExpr }),
+    origin,
+  );
   armNodes.forEach((a, i) => {
     _setContainer(a, node, "arms", i);
   });
