@@ -60,15 +60,53 @@ This is already live, two ways:
 
 | Platform | Mechanism | Link column | How nesting is reassembled |
 |---|---|---|---|
-| **node** (Drizzle) | child table per part, **hand-written assembly** | `parentId` → **root** (`order_id`) | repo loads children `where parentId = <rootId>`, builds the object graph in code (`shipmentByParent.get(root.id)`) |
-| **python** (SQLAlchemy) | child table per part, **hand-written assembly** | `parent_id` → **root** | same — `where ShipmentRow.parent_id == aggregate.id` |
+| **node** (Drizzle) | child table per part, **hand-written assembly** | `parentId` → **root** (`order_id`) | only the ROOT's direct `contains` are loaded, keyed off `root.id`; **nested parts are never loaded** |
+| **python** (SQLAlchemy) | child table per part, **hand-written assembly** | `parent_id` → **root** | same — only `where ShipmentRow.parent_id == aggregate.id`, one level deep |
 | **.NET** (EF Core) | EF **owned types** (`OwnsOne` / `OwnsMany`) | EF shadow FK → **root** today | EF auto-loads + materializes the owned graph; no hand-written assembly |
-| **Java** (JPA / Hibernate) | JPA relations (`@OneToOne` / `@OneToMany`, `mappedBy = "_parent"`) | wants **direct parent** (`shipment_id`) | Hibernate navigates the relationship |
+| **Java** (JPA / Hibernate) | JPA relations (`@OneToOne` / `@OneToMany`, `mappedBy = "_parent"`) | **direct parent** (`shipment_id`) ✅ Phase 1 | Hibernate navigates the relationship |
 | **elixir** | relational nesting **gated** (DEBT-32); `shape(embedded)` → **jsonb** | n/a | the whole part subtree is one inline `jsonb` column — no FK, no assembly |
 
-The conflict in one line: **the shared migration speaks "point-to-root"; Java's
-ORM speaks "point-to-direct-parent"; and "point-to-root" silently loses the
-hierarchy for any collection nested below the root.**
+The conflict in one line: **the shared migration now speaks "point-to-direct-
+parent" (Phase 1) and Java's ORM agrees; but node/python/.NET still emit their OWN
+ORM schema pointing "to-root", and never reassemble the nested level at all.**
+
+### ⚠️ What Phase-2 scoping actually found (the framing above was too optimistic)
+
+The original plan assumed node/python merely need their existing child-assembly
+**re-keyed** from root-id to direct-parent-id. Generating the
+`Order → Shipment → {Label, Sticker[]}` fixture on each backend showed the gap is
+much larger — part-in-part containment is **substantially unimplemented**, not
+just mis-keyed:
+
+- **node** — `save()` persists **only the root row**. A *single* containment is
+  dropped entirely on write (`saveTxBody`: `if (!c.collection) return []`), so even
+  one-level single containment never reaches the DB. `findById` *reads* a
+  root-level containment but never recurses, so nested parts are never loaded —
+  `Shipment._create({…})` is emitted without `label`/`stickers` while `toWire`
+  dereferences `root.shipment!.label!`. It wouldn't typecheck if any example
+  exercised it.
+- **python** — better than node (it diff-syncs + loads a *single* root-level
+  containment), but `_hydrate_shipment` **hard-codes** `label=None, stickers=[]`;
+  the generated `_hydrate_label` / `_hydrate_sticker` helpers are **dead code**,
+  nested parts are never saved, and `parent_id` is mis-branded to the **root** id
+  type for nested rows (`OrderId`, should be `ShipmentId`).
+- **both** — their hand-rolled ORM schema still FKs nested parts to `order_id`,
+  while the shared `MigrationsIR` SQL (Phase 1) now emits `shipment_id`. The two
+  **disagree**, but only for the part-in-part shape, which **zero examples use**,
+  so no real generated project is broken today.
+
+So "full alignment" on node/python is really **"build single + nested part-
+containment persistence from near-scratch"** per backend — domain `_create`
+threading, own-schema FK to direct parent, recursive read assembly, save diff-sync
+of the nested level, and a boot round-trip — a large feature for a shape nothing
+generates.
+
+**Decision (2026-06-28):** the merged Java Phase 1 (#1596) — which removed the real
+validator gate (`loom.java-single-containment-unsupported`) and fixed the real
+boot-break — is the DEBT-15 **deliverable**. Phases 2–5 below stay **deferred
+follow-up**, re-scoped from "re-key the assembly" to "implement part-containment
+persistence on node/python/.NET". Tracked, not abandoned; pick them up only when an
+actual `.ddd` needs part-in-part nesting on a non-Java backend.
 
 ## Target design
 
@@ -150,15 +188,29 @@ dropped.
   nest), `gradle bootJar` + a real Postgres — Flyway migrate, create a nested
   graph, read it back, assert the right labels land under the right shipment.
 
-### Phases 2–4 — node, .NET, python (one PR each, independent)
+### Phases 2–4 — node, .NET, python (one PR each, independent) — ⛔ DEFERRED, RE-SCOPED
+> **Not "re-key the assembly" — "build part-containment persistence."** Scoping
+> (see the ⚠️ section above) showed node never saves single containments and
+> never loads nested parts, and python hard-codes the nested level empty. So each
+> backend's PR is a real feature, not the tweak this bullet list implies. Kept
+> below as the *direction*, but the work is larger than written. Deferred until an
+> actual `.ddd` needs part-in-part nesting on a non-Java backend.
+
 For each backend, in any order:
-- switch the **read assembly** to group children by their **direct-parent** id
-  (node/python: the `where parentId = …` + `*ByParent` maps in the repository
-  builders; .NET: nest the `OwnsOne`/`OwnsMany` config so the shadow FK is the
-  direct parent);
-- switch the **write path** to populate the direct-parent FK;
+- **node** — make `saveTxBody` persist single containments (not just collections),
+  recurse into each part's own `contains`, and load the nested level into per-
+  direct-parent maps the hydrate consumes; brand nested `parentId` to the direct
+  parent's id type;
+- **python** — call the already-emitted `_hydrate_label`/`_hydrate_sticker` from
+  `_hydrate_shipment` (load by `parent_id == shipment.id`), save the nested level,
+  fix the `OrderId`→`ShipmentId` mis-brand;
+- **.NET** — nest the `OwnsOne`/`OwnsMany` config so the shadow FK is the direct
+  parent;
+- all: switch the **own ORM schema** FK + **write path** to the direct parent
+  (via `directParentOf`), so it matches the Phase-1 `MigrationsIR` SQL;
 - gate: that backend's build gate **+ a real boot + two-level-nesting round-trip**
-  (compile gates are blind to FK/constraint mismatches).
+  (compile gates are blind to FK/constraint mismatches *and* to the never-loaded
+  nested level).
 
 ### Phase 5 — cleanup (small PR)
 - Drop the now-redundant root FK from non-root part tables (a root-level part's
