@@ -1,13 +1,15 @@
 # Domain services — the missing third construct (pinned design, **rev. 4: three tiers — pure / read-only / mutating**)
 
-> Status: **proposal — revised pins, research-grounded.** v1 (Shape A,
-> the pure-calculator floor) **ships today**. This revision pins a
-> **three-tier** model: a domain service is **pure**, **read-only**
-> (may query supporting data through a repository, never writes), or
+> Status: **SHIPPED** (rev. 4, research-grounded). All three tiers land on
+> all five backends — see [`../domain-services.md`](../domain-services.md)
+> for the reference. A domain service is **pure**, **read-only** (may
+> query supporting data through a repository, never writes), or
 > **mutating** (may mutate the aggregates the orchestrator passes in,
-> never loads). In every tier the **application orchestrator**
-> (`workflow` / `commandHandler` / Phoenix context) owns the single
-> commit; the service never writes to a repository and never commits.
+> never loads). In every tier the **application orchestrator** (`workflow`;
+> `commandHandler` / Phoenix context where applicable) owns the single
+> commit; the service never writes to a repository and never commits. The
+> `function` block-body companion shipped alongside. This doc is kept as
+> the design record + the five-backend idiom audit.
 >
 > Rev. 4 restores a `reading` tier that rev. 3 had folded away — but
 > **restricted to reads**. The distinction that makes this safe: a query
