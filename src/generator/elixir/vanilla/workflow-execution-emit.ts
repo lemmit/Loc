@@ -68,11 +68,14 @@ import {
   type BoundedContextIR,
   type ExprIR,
   type IsolationLevel,
+  type OperationIR,
+  operationUsesCurrentUser,
   type StmtIR,
   type SystemIR,
   type WorkflowIR,
   type WorkflowStmtIR,
   workflowEmitsCommandRoute,
+  workflowUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
 import { resolveWorkflowIsolation } from "../../../ir/util/resolve-datasource.js";
 import { snake, upperFirst } from "../../../util/naming.js";
@@ -112,7 +115,7 @@ export function emitVanillaWorkflowExecution(
 
   out.set(
     `lib/${appName}_web/controllers/workflows_controller.ex`,
-    renderWorkflowsController(appModule, ctxModule, commandWorkflows),
+    renderWorkflowsController(appModule, ctxModule, commandWorkflows, ctx),
   );
 
   for (const wf of commandWorkflows) {
@@ -148,10 +151,11 @@ function lowerStatements(
   stmts: WorkflowStmtIR[],
   contextModule: string,
   renderCtx: RenderCtx,
+  ctx?: BoundedContextIR,
 ): BodyLine[] {
   const lines: BodyLine[] = [];
   for (const st of stmts) {
-    lines.push(...lowerStatement(st, contextModule, renderCtx));
+    lines.push(...lowerStatement(st, contextModule, renderCtx, ctx));
   }
   return lines;
 }
@@ -160,6 +164,7 @@ function lowerStatement(
   st: WorkflowStmtIR,
   contextModule: string,
   renderCtx: RenderCtx,
+  ctx?: BoundedContextIR,
 ): BodyLine[] {
   switch (st.kind) {
     case "factory-let": {
@@ -182,12 +187,9 @@ function lowerStatement(
     case "op-call": {
       // `order.confirm(args)` →
       // `{:ok, _} <- Context.confirm_order(order, %{args...})`
-      const argFields = st.args
-        .map((arg, i) => `arg${i}: ${renderExpr(arg, renderCtx)}`)
-        .join(", ");
-      const target = snake(st.target);
-      const action = `${snake(st.op)}_${snake(st.aggName)}`;
-      const call = `${contextModule}.${action}(${target}, %{${argFields}})`;
+      // A `currentUser`-gated op takes a trailing `current_user` arg —
+      // `opCallSource` threads the in-scope binding when `ctx` resolves it.
+      const call = opCallSource(st, renderCtx, contextModule, ctx);
       return [
         {
           kind: "with-clause",
@@ -383,7 +385,7 @@ function lowerStatement(
       // the body iterates for effect without naming the row (e.g. a nested
       // find/loop keyed off a workflow param rather than the element).
       const loopVar = bindUsedLater(st.var, st.body) ? snake(st.var) : `_${snake(st.var)}`;
-      const bodyLines = renderLoopBody(st.body, renderCtx, contextModule);
+      const bodyLines = renderLoopBody(st.body, renderCtx, contextModule, ctx);
       // Multi-line clause: assembleBody indents the FIRST line at the
       // with-chain's column; subsequent lines keep their authored
       // indentation, so bake in the leading spaces (11 spaces aligns each
@@ -437,7 +439,7 @@ function lowerStatement(
                 `:ok <- (if ${renderExpr(inner.expr, renderCtx)}, do: :ok, else: {:error, :forbidden})`,
               );
             } else if (inner.kind === "op-call") {
-              clauses.push(`{:ok, _} <- ${opCallSource(inner, renderCtx, contextModule)}`);
+              clauses.push(`{:ok, _} <- ${opCallSource(inner, renderCtx, contextModule, ctx)}`);
             } else if (inner.kind === "factory-let") {
               const fields = inner.fields
                 .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
@@ -452,10 +454,10 @@ function lowerStatement(
             } else if (NESTED_FLOW_KINDS.has(inner.kind)) {
               // Nested loop / if-let / repo bind — reuse `lowerStatement` so it
               // lowers to a `<-` clause that threads {:error, _} up this branch.
-              pushNestedFlow(inner, contextModule, renderCtx, clauses, tail);
+              pushNestedFlow(inner, contextModule, renderCtx, clauses, tail, ctx);
             } else {
               // emit / resource-call — pure side-effects, run in the do-branch.
-              tail.push(...renderBranchStmt(inner, renderCtx, contextModule));
+              tail.push(...renderBranchStmt(inner, renderCtx, contextModule, [], ctx));
             }
           }
           return [
@@ -468,7 +470,7 @@ function lowerStatement(
           ];
         }
         const stmtLines = body.flatMap((inner, i) =>
-          renderBranchStmt(inner, renderCtx, contextModule, body.slice(i + 1)),
+          renderBranchStmt(inner, renderCtx, contextModule, body.slice(i + 1), ctx),
         );
         return [...stmtLines, `{:ok, ${present}}`];
       };
@@ -490,14 +492,59 @@ function lowerStatement(
   }
 }
 
-/** A single op-call as the threaded `op_<agg>(target, %{...})` call source. */
+/** A single op-call as the threaded `op_<agg>(target, %{...})` call source.
+ *  When the called operation's guard/body references `currentUser`, the
+ *  context function carries a trailing `current_user \\ nil` arity (emitted by
+ *  `context-emit.ts` / `operation-returns-emit.ts`); thread the workflow's
+ *  in-scope `current_user` binding through so the op guard resolves at runtime
+ *  rather than raising on an unbound `current_user`.  `ctx` is undefined only on
+ *  legacy/test call paths with no aggregate index — then no actor is threaded
+ *  (byte-identical to the pre-fix output). */
 function opCallSource(
   st: Extract<WorkflowStmtIR, { kind: "op-call" }>,
   renderCtx: RenderCtx,
   contextModule: string,
+  ctx?: BoundedContextIR,
 ): string {
   const argFields = st.args.map((arg, i) => `arg${i}: ${renderExpr(arg, renderCtx)}`).join(", ");
-  return `${contextModule}.${snake(st.op)}_${snake(st.aggName)}(${snake(st.target)}, %{${argFields}})`;
+  const actor = ctx && opCallThreadsUser(st, ctx) ? ", current_user" : "";
+  return `${contextModule}.${snake(st.op)}_${snake(st.aggName)}(${snake(st.target)}, %{${argFields}}${actor})`;
+}
+
+/** Look up an operation by aggregate + op name in the context's aggregate
+ *  index — mirrors the Hono workflow builder's `lookupOp`. */
+function lookupOp(ctx: BoundedContextIR, aggName: string, opName: string): OperationIR | undefined {
+  const agg = ctx.aggregates.find((a) => a.name === aggName);
+  return agg?.operations.find((o) => o.name === opName);
+}
+
+/** True when this op-call targets a `currentUser`-gated operation — its context
+ *  function takes the trailing `current_user` arg, so the call must pass it. */
+function opCallThreadsUser(
+  st: Extract<WorkflowStmtIR, { kind: "op-call" }>,
+  ctx: BoundedContextIR,
+): boolean {
+  const op = lookupOp(ctx, st.aggName, st.op);
+  return !!op && operationUsesCurrentUser(op);
+}
+
+/** True when the workflow body itself names `currentUser`, OR it calls a
+ *  `currentUser`-gated operation (whose context fn takes the trailing actor).
+ *  Either way the workflow function must thread `current_user \\ nil` so the
+ *  binding is in scope for the rendered guard / op-call.  Recurses into
+ *  `for-each` / `if-let` bodies. */
+function workflowNeedsCurrentUser(wf: WorkflowIR, ctx: BoundedContextIR): boolean {
+  return workflowUsesCurrentUser(wf) || stmtsCallUserGatedOp(wf.statements, ctx);
+}
+
+function stmtsCallUserGatedOp(sts: WorkflowStmtIR[], ctx: BoundedContextIR): boolean {
+  return sts.some((s) => {
+    if (s.kind === "op-call") return opCallThreadsUser(s, ctx);
+    if (s.kind === "for-each") return stmtsCallUserGatedOp(s.body, ctx);
+    if (s.kind === "if-let")
+      return stmtsCallUserGatedOp(s.thenBody, ctx) || stmtsCallUserGatedOp(s.elseBody ?? [], ctx);
+    return false;
+  });
 }
 
 /** Statement kinds that are themselves fallible control flow / repo binds —
@@ -524,9 +571,10 @@ function pushNestedFlow(
   renderCtx: RenderCtx,
   clauses: string[],
   sideEffects: string[],
+  ctx?: BoundedContextIR,
 ): string | undefined {
   let bind: string | undefined;
-  for (const bl of lowerStatement(inner, contextModule, renderCtx)) {
+  for (const bl of lowerStatement(inner, contextModule, renderCtx, ctx)) {
     if (bl.kind === "with-clause") {
       clauses.push(bl.text);
       if (bl.bindName) bind = bl.bindName;
@@ -551,11 +599,12 @@ function renderLoopBody(
   body: WorkflowStmtIR[],
   renderCtx: RenderCtx,
   contextModule: string,
+  ctx?: BoundedContextIR,
 ): string[] {
   // Fast path: a lone op-call keeps the original byte-for-byte shape.
   if (body.length === 1 && body[0]!.kind === "op-call") {
     return [
-      `case ${opCallSource(body[0]!, renderCtx, contextModule)} do`,
+      `case ${opCallSource(body[0]!, renderCtx, contextModule, ctx)} do`,
       `  {:ok, updated} -> {:cont, {:ok, updated}}`,
       `  err -> {:halt, err}`,
       `end`,
@@ -578,7 +627,7 @@ function renderLoopBody(
     switch (inner.kind) {
       case "op-call": {
         lastBind = "loop_updated";
-        clauses.push(`{:ok, ${lastBind}} <- ${opCallSource(inner, renderCtx, contextModule)}`);
+        clauses.push(`{:ok, ${lastBind}} <- ${opCallSource(inner, renderCtx, contextModule, ctx)}`);
         break;
       }
       case "factory-let": {
@@ -642,7 +691,7 @@ function renderLoopBody(
         // already lowers each to a `<-` with-clause threading {:error, _}.
         // Slotting them as clauses in this iteration's with-chain means a
         // nested failure short-circuits to {:halt, err} just like a flat op.
-        const b = pushNestedFlow(inner, contextModule, renderCtx, clauses, doLines);
+        const b = pushNestedFlow(inner, contextModule, renderCtx, clauses, doLines, ctx);
         if (b) lastBind = b;
         break;
       }
@@ -787,10 +836,11 @@ function renderBranchStmt(
   renderCtx: RenderCtx,
   contextModule: string,
   rest: WorkflowStmtIR[] = [],
+  ctx?: BoundedContextIR,
 ): string[] {
   switch (st.kind) {
     case "op-call":
-      return [opCallSource(st, renderCtx, contextModule)];
+      return [opCallSource(st, renderCtx, contextModule, ctx)];
     case "factory-let": {
       const fields = st.fields
         .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
@@ -1099,8 +1149,16 @@ function renderWorkflowModule(
   const completedCall = renderPhoenixLogCall("workflowCompleted", [
     { name: "workflow", valueExpr: JSON.stringify(wf.name) },
   ]);
-  const lines = lowerStatements(wf.statements ?? [], contextModuleFq, renderCtx);
+  const lines = lowerStatements(wf.statements ?? [], contextModuleFq, renderCtx, ctx);
   const body = assembleBody(lines, completedCall);
+  // A workflow that names `currentUser` in a guard/body — or calls a
+  // `currentUser`-gated op — threads `current_user \\ nil` into `run/1`
+  // (and `run_inner` on the transactional path) so the rendered bare token
+  // `current_user` (and the trailing op-call actor) bind.  The
+  // `WorkflowsController` passes `conn.assigns[:current_user]`.  A workflow
+  // that references no actor renders byte-identically to before (no extra arg).
+  const needsUser = ctx ? workflowNeedsCurrentUser(wf, ctx) : workflowUsesCurrentUser(wf);
+  const userParam = needsUser ? ", current_user \\\\ nil" : "";
   const hasContextCall = lines.some((l) => l.kind === "with-clause");
   const contextAlias = hasContextCall ? `\n  alias ${contextModuleFq}, as: Context` : "";
   // Rewrite the body's fully-qualified context module to the `Context`
@@ -1128,9 +1186,13 @@ function renderWorkflowModule(
     // resolves we set it as the FIRST statement inside the transaction fn.
     // Omitted entirely otherwise (connection default applies) — byte-identical
     // to the no-isolation output.
+    // `run_inner` carries `current_user` only when the body references it; `run`
+    // always passes it through the transaction fn so the binding stays in scope.
+    const innerArgs = needsUser ? "params, current_user" : "params";
+    const innerParam = needsUser ? "params, current_user" : "params";
     const txnBody = isolation
-      ? `\n      Repo.query!("SET TRANSACTION ISOLATION LEVEL ${elixirIsolationSql(isolation)}")\n      commit_result(run_inner(params))\n    `
-      : ` commit_result(run_inner(params)) `;
+      ? `\n      Repo.query!("SET TRANSACTION ISOLATION LEVEL ${elixirIsolationSql(isolation)}")\n      commit_result(run_inner(${innerArgs}))\n    `
+      : ` commit_result(run_inner(${innerArgs})) `;
     return `# Auto-generated.
 defmodule ${moduleName} do
   @moduledoc """
@@ -1140,8 +1202,8 @@ defmodule ${moduleName} do
   require Logger
   alias ${repoMod}${contextAlias}
 
-  @spec run(map()) :: {:ok, term()} | {:error, term()}
-  def run(params) when is_map(params) do
+  @spec run(map()${needsUser ? ", term()" : ""}) :: {:ok, term()} | {:error, term()}
+  def run(params${userParam}) when is_map(params) do
     Repo.transaction(fn ->${txnBody}end)
   end
 
@@ -1152,7 +1214,7 @@ defmodule ${moduleName} do
   def commit_result({:ok, result}), do: result
   def commit_result({:error, reason}), do: Repo.rollback(reason)
 
-  defp run_inner(params) when is_map(params) do
+  defp run_inner(${innerParam}) when is_map(params) do
 ${finalBody}
   end
 end
@@ -1167,8 +1229,8 @@ defmodule ${moduleName} do
 
   require Logger${hasContextCall ? `${contextAlias}\n` : ""}
 
-  @spec run(map()) :: {:ok, term()} | {:error, term()}
-  def run(params) when is_map(params) do
+  @spec run(map()${needsUser ? ", term()" : ""}) :: {:ok, term()} | {:error, term()}
+  def run(params${userParam}) when is_map(params) do
 ${finalBody}
   end
 end
@@ -1179,6 +1241,7 @@ function renderWorkflowsController(
   appModule: string,
   ctxModule: string,
   workflows: WorkflowIR[],
+  ctx?: BoundedContextIR,
 ): string {
   const webModule = `${appModule}Web`;
 
@@ -1186,6 +1249,17 @@ function renderWorkflowsController(
     .map((wf) => {
       const wfSnake = snake(wf.name);
       const wfMod = `${appModule}.${ctxModule}.Workflows.${upperFirst(wf.name)}`;
+      // When the workflow threads `current_user` (it names `currentUser` or
+      // calls a `currentUser`-gated op), bind it off `conn.assigns` and pass it
+      // through — mirrors the per-op controller action (api-emit.ts).  Otherwise
+      // the action is byte-identical to before.
+      const needsUser = ctx ? workflowNeedsCurrentUser(wf, ctx) : workflowUsesCurrentUser(wf);
+      if (needsUser) {
+        return `  def ${wfSnake}(conn, params) do
+    current_user = Map.get(conn.assigns, :current_user)
+    respond(conn, ${wfMod}.run(params, current_user))
+  end`;
+      }
       return `  def ${wfSnake}(conn, params) do
     respond(conn, ${wfMod}.run(params))
   end`;
