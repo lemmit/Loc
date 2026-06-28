@@ -106,7 +106,10 @@ export function renderPyAggregate(
   const exprImports = new Set<string>();
   for (const s of shapes) {
     for (const d of s.derived) collectPyExprImports(d.expr, exprImports);
-    for (const fn of s.functions) collectPyExprImports(fn.body, exprImports);
+    for (const fn of s.functions) {
+      if ("expr" in fn.body) collectPyExprImports(fn.body.expr, exprImports);
+      else for (const st of fn.body.stmts) collectStmtExprImports(st, exprImports);
+    }
     for (const inv of s.invariants) {
       collectPyExprImports(inv.expr, exprImports);
       if (inv.guard) collectPyExprImports(inv.guard, exprImports);
@@ -410,11 +413,14 @@ function renderEntity(
 
   const fns = e.functions.flatMap((fn) => {
     const params = ["self", ...fn.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`)];
-    return [
-      "",
-      `    def _${snake(fn.name)}(${params.join(", ")}) -> ${renderPyType(fn.returnType)}:`,
-      `        return ${renderPyExpr(fn.body)}`,
-    ];
+    const head = `    def _${snake(fn.name)}(${params.join(", ")}) -> ${renderPyType(fn.returnType)}:`;
+    // Expression form keeps the single `return expr` line (byte-identical);
+    // block form (domain-services.md rev. 4) emits its lowered statements.
+    const body =
+      "expr" in fn.body
+        ? `        return ${renderPyExpr(fn.body.expr)}`
+        : renderPyStatements(fn.body.stmts);
+    return ["", head, body];
   });
 
   const ops = e.operations.flatMap((op) => {

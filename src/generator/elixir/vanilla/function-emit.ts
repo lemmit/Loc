@@ -1,7 +1,98 @@
-import type { AggregateIR, FunctionIR } from "../../../ir/types/loom-ir.js";
+import type {
+  AggregateIR,
+  ExprIR,
+  FunctionBodyIR,
+  FunctionIR,
+  StmtIR,
+} from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { exprUsesParam, exprUsesReceiver } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr, renderTypespec } from "../render-expr.js";
+
+// ---------------------------------------------------------------------------
+// Body-variant helpers (domain-services.md rev. 4 — `function` block body).
+//
+// The expression form (`= Expression`) renders byte-identically to before;
+// the block form (`{ Statement* }`) is a PURE Elixir function — `let x = …`
+// becomes a binding, `precondition`/`requires` become bug-/auth-regime raises,
+// and the final `return`/expression supplies the bare value the function
+// yields.  No `{:ok, …}` tuple wrapping: a `function` returns its value
+// directly (unlike a returning `operation`).
+// ---------------------------------------------------------------------------
+
+/** Every expression a function body reaches into — the single body expr, or
+ *  every statement's expressions in the block form.  Lets the
+ *  param-/receiver-/money-usage predicates treat both variants uniformly. */
+function bodyExprs(body: FunctionBodyIR): ExprIR[] {
+  if ("expr" in body) return [body.expr];
+  const out: ExprIR[] = [];
+  for (const s of body.stmts) {
+    switch (s.kind) {
+      case "precondition":
+      case "requires":
+      case "let":
+      case "expression":
+        out.push(s.expr);
+        break;
+      case "return":
+        out.push(s.value);
+        break;
+      case "call":
+        out.push(...s.args);
+        break;
+    }
+  }
+  return out;
+}
+
+export function bodyUsesParam(body: FunctionBodyIR, name: string): boolean {
+  return bodyExprs(body).some((e) => exprUsesParam(e, name));
+}
+
+export function bodyUsesReceiver(body: FunctionBodyIR): boolean {
+  return bodyExprs(body).some((e) => exprUsesReceiver(e));
+}
+
+/** The body lines for a function — the single trailing-value line for the
+ *  expression form, or the rendered pure block for the block form. */
+export function renderFunctionBodyLines(body: FunctionBodyIR, rc: RenderCtx): string[] {
+  return "expr" in body ? [`    ${renderExpr(body.expr, rc)}`] : renderPureBlock(body.stmts, rc);
+}
+
+/** Render a pure block-body function as Elixir: binding/guard lines followed
+ *  by a trailing bare value (the last `return`'s value, or the final
+ *  expression).  Each line is two-space indented under the `def … do`. */
+function renderPureBlock(stmts: StmtIR[], rc: RenderCtx): string[] {
+  const lines: string[] = [];
+  for (const s of stmts) {
+    switch (s.kind) {
+      case "let":
+        lines.push(`    ${snake(s.name)} = ${renderExpr(s.expr, rc)}`);
+        break;
+      case "precondition":
+        lines.push(
+          `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Precondition failed: ${s.source}`)})`,
+        );
+        break;
+      case "requires":
+        lines.push(
+          `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Forbidden: ${s.source}`)})`,
+        );
+        break;
+      case "return":
+        // A `function` yields its value directly (no `{:ok, …}` wrap).  The
+        // last statement's value is the function's result; an earlier `return`
+        // simply binds the value as the trailing expression of that point —
+        // pure bodies don't branch, so the final return wins.
+        lines.push(`    ${renderExpr(s.value, rc)}`);
+        break;
+      case "expression":
+        lines.push(`    ${renderExpr(s.expr, rc)}`);
+        break;
+    }
+  }
+  return lines;
+}
 
 // ---------------------------------------------------------------------------
 // Aggregate `function` members (vanilla Ecto/Phoenix backend) — gap §11b.
@@ -60,12 +151,12 @@ function renderFunction(
   // struct.  Underscore-prefix a param the body never reads so an unused binding
   // never trips `mix compile --warnings-as-errors`.
   const params = fn.params.map((p) =>
-    exprUsesParam(fn.body, p.name) ? snake(p.name) : `_${snake(p.name)}`,
+    bodyUsesParam(fn.body, p.name) ? snake(p.name) : `_${snake(p.name)}`,
   );
   // Underscore-prefix the receiver when the body never reads it (e.g.
   // `function noop()`), else the struct-guarded clause head trips
   // `mix compile --warnings-as-errors` on an unused `record` binding.
-  const recv = exprUsesReceiver(fn.body) ? "record" : "_record";
+  const recv = bodyUsesReceiver(fn.body) ? "record" : "_record";
   const sig =
     params.length > 0
       ? `%${aggModule}{} = ${recv}, ${params.join(", ")}`
@@ -76,11 +167,14 @@ function renderFunction(
     ...fn.params.map((p) => renderTypespec(p.type, facadeMod)),
   ].join(", ");
   const aggLeaf = aggModule.split(".").pop() ?? aggModule;
+  // Expression form keeps its single trailing-value line (byte-identical);
+  // block form (rev. 4) renders its pure statements.
+  const bodyLines = renderFunctionBodyLines(fn.body, rc);
   return [
     `  @doc "Pure domain function \`${fn.name}\` on \`${aggLeaf}\`."`,
     `  @spec ${fnSnake}(${specArgs}) :: ${ret}`,
     `  def ${fnSnake}(${sig}) do`,
-    `    ${renderExpr(fn.body, rc)}`,
+    ...bodyLines,
     "  end",
   ];
 }

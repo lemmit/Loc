@@ -24,6 +24,15 @@ system FnDemo {
         function passed(): bool = total > 100
         function bonus(extra: int): int = total + extra
 
+        // Block-body form (domain-services.md rev. 4) — pure: let + precondition
+        // + return.  Renders as binding/guard lines then a trailing bare value
+        // (no {:ok, …} tuple — a function yields its value directly).
+        function shippingFor(extra: int): int {
+          let base = total + extra
+          precondition base >= 0
+          return base
+        }
+
         operation approve() {
           precondition passed()
           status := "approved"
@@ -77,6 +86,17 @@ describe("vanilla aggregate `function` emit (gap §11b)", () => {
     // `precondition passed()` renders `passed(record)` — resolving to the
     // module-level def above (the §11b call-site qualification).
     expect(ctx).toMatch(/if not \(passed\(record\)\)/);
+  });
+
+  it("emits a block-body function as binding/guard lines + a trailing bare value", async () => {
+    const ctx = await contextModule();
+    expect(ctx).toMatch(/def shipping_for\(%Api\.Ordering\.Order\{\} = record, extra\) do/);
+    // `let base = …` → an Elixir binding.
+    expect(ctx).toContain("base = record.total + extra");
+    // `precondition` → a bug-regime raise guard.
+    expect(ctx).toMatch(/if not \(base >= 0\), do: raise\(ArgumentError/);
+    // `return base` yields the bare value — NOT wrapped in `{:ok, …}`.
+    expect(ctx).not.toContain("{:ok, base}");
   });
 
   it("does not emit any function defs for an aggregate without `function` members", async () => {

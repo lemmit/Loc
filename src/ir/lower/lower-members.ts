@@ -34,6 +34,7 @@ import type {
   DerivedIR,
   EntityPartIR,
   FieldIR,
+  FunctionBodyIR,
   FunctionIR,
   IdValueType,
   InvariantIR,
@@ -197,11 +198,27 @@ export function lowerFunction(f: FunctionDecl, env: Env): FunctionIR {
     params.push({ name: p.name, type: t });
     inner = withLocal(inner, p.name, "param", t);
   }
+  // Body variant — expression form (`= Expression`) stays exactly as it was
+  // (inlinable); block form (`{ Statement* }`) lowers via lowerStatement,
+  // threading the let-binding env exactly like an operation body.
+  let body: FunctionBodyIR;
+  if (f.body !== undefined) {
+    body = { expr: lowerExpr(f.body, inner) };
+  } else {
+    const stmts: StmtIR[] = [];
+    let bodyEnv = inner;
+    for (const s of f.block) {
+      const result = lowerStatement(s, bodyEnv);
+      stmts.push(result.stmt);
+      bodyEnv = result.envAfter;
+    }
+    body = { stmts };
+  }
   return {
     name: f.name,
     params,
     returnType: lowerType(f.returnType),
-    body: lowerExpr(f.body, inner),
+    body,
   };
 }
 

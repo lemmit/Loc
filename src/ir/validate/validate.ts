@@ -16,6 +16,7 @@ import {
   validateExprIntegrity,
   validateExternOperations,
   validateFindNameCollisions,
+  validateFunctionBlockBodies,
   validateGenericInstancesUnimplemented,
   validateOperationReturnsUnimplemented,
   validatePermissionRefs,
@@ -164,6 +165,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateFindNameCollisions(c, diags);
     validateAggregateTestBodies(c, diags);
     validateDomainServices(c, diags);
+    validateFunctionBlockBodies(c, diags);
     validateExternOperations(c, diags);
     validateStampReadsBeforeFlush(c, diags);
     validateEventSourcedDiscipline(c, diags);

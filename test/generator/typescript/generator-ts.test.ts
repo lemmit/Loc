@@ -108,6 +108,48 @@ describe("typescript generator", () => {
     expect(tests).not.toMatch(/order\.lines\.count/);
   });
 
+  it("emits a block-body function as a statement method (let → const, return)", async () => {
+    // domain-services.md rev. 4 — a `function` may have a pure block body
+    // (`{ let … precondition … return … }`) alongside the unchanged
+    // expression form (`= Expression`, which stays a single-line method).
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(
+      `
+      context Shop {
+        aggregate Cart {
+          weight: decimal
+          surcharge: decimal
+          rate: decimal
+          domestic: bool
+          function lineTotal(): decimal = weight * rate
+          function shippingFor(extra: decimal): decimal {
+            let base = weight * rate
+            precondition base >= 0
+            return (domestic ? base : base + surcharge) + extra
+          }
+          operation touch() { precondition lineTotal() >= 0 }
+        }
+        repository Carts for Cart { }
+      }
+      `,
+      { validation: true },
+    );
+    expect((doc.diagnostics ?? []).filter((d) => d.severity === 1)).toEqual([]);
+    const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
+    const cart = files.get("domain/cart.ts")!;
+    // Expression form stays the single-line `{ return expr; }` shape.
+    expect(cart).toMatch(
+      /private lineTotal\(\): number \{ return this\._weight \* this\._rate; \}/,
+    );
+    // Block form emits its lowered statements.
+    expect(cart).toMatch(/private shippingFor\(extra: number\): number \{/);
+    expect(cart).toMatch(/const base = this\._weight \* this\._rate;/);
+    expect(cart).toMatch(/if \(!\(base >= 0\)\) throw new DomainError/);
+    expect(cart).toMatch(/return \(this\._domestic \? base : base \+ this\._surcharge\) \+ extra;/);
+  });
+
   it("emits Dockerfile + .dockerignore", async () => {
     const model = await buildModel("examples/sales.ddd");
     const files = generateTypeScript(model, HONO_V4_PINS);

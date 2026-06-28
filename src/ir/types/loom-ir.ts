@@ -314,11 +314,20 @@ export interface InvariantIR {
   scope?: "server-only";
 }
 
+/** A pure helper over its parameters (domain-services.md).  The body is a
+ *  variant — NOT a replacement — so the inlinable expression path is
+ *  untouched:
+ *    - `{ expr }`  — expression form (`= Expression`); SQL-inlinable.
+ *    - `{ stmts }` — block form (rev. 4); `let` + branch + bug-regime
+ *                    `throw`/`require`, still PURE.  NOT queryable.
+ *  Backends discriminate on `"expr" in body`. */
+export type FunctionBodyIR = { expr: ExprIR } | { stmts: StmtIR[] };
+
 export interface FunctionIR {
   name: string;
   params: ParamIR[];
   returnType: TypeIR;
-  body: ExprIR;
+  body: FunctionBodyIR;
 }
 
 /** Lifecycle kind of an aggregate action (lifecycle-operations.md).
@@ -3078,11 +3087,17 @@ function stmtUsesMoney(s: StmtIR): boolean {
   }
 }
 
+/** True when a function's body (expression or block form) touches money. */
+export function functionBodyUsesMoney(body: FunctionBodyIR): boolean {
+  return "expr" in body ? exprUsesMoney(body.expr) : body.stmts.some(stmtUsesMoney);
+}
+
 function partUsesMoney(p: EntityPartIR): boolean {
   if (p.fields.some((f) => typeUsesMoney(f.type))) return true;
   if (p.derived.some((d) => typeUsesMoney(d.type) || exprUsesMoney(d.expr))) return true;
   if (p.invariants.some((iv) => exprUsesMoney(iv.expr))) return true;
-  if (p.functions.some((fn) => typeUsesMoney(fn.returnType) || exprUsesMoney(fn.body))) return true;
+  if (p.functions.some((fn) => typeUsesMoney(fn.returnType) || functionBodyUsesMoney(fn.body)))
+    return true;
   return false;
 }
 
@@ -3098,7 +3113,8 @@ export function aggregateUsesMoney(a: AggregateIR): boolean {
     )
   )
     return true;
-  if (a.functions.some((fn) => typeUsesMoney(fn.returnType) || exprUsesMoney(fn.body))) return true;
+  if (a.functions.some((fn) => typeUsesMoney(fn.returnType) || functionBodyUsesMoney(fn.body)))
+    return true;
   if (a.parts.some(partUsesMoney)) return true;
   return false;
 }
@@ -3108,7 +3124,7 @@ export function valueObjectUsesMoney(vo: ValueObjectIR): boolean {
   if (vo.fields.some((f) => typeUsesMoney(f.type))) return true;
   if (vo.derived.some((d) => typeUsesMoney(d.type) || exprUsesMoney(d.expr))) return true;
   if (vo.invariants.some((iv) => exprUsesMoney(iv.expr))) return true;
-  if (vo.functions.some((fn) => typeUsesMoney(fn.returnType) || exprUsesMoney(fn.body)))
+  if (vo.functions.some((fn) => typeUsesMoney(fn.returnType) || functionBodyUsesMoney(fn.body)))
     return true;
   return false;
 }

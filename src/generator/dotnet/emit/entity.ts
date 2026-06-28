@@ -127,7 +127,10 @@ export function renderEntity(
   // only what its own expressions actually use.
   const usings = new Set<string>();
   for (const d of entity.derived) collectCsExprUsings(d.expr, usings, ns);
-  for (const fn of entity.functions) collectCsExprUsings(fn.body, usings, ns);
+  for (const fn of entity.functions) {
+    if ("expr" in fn.body) collectCsExprUsings(fn.body.expr, usings, ns);
+    else collectCsStmtUsings(fn.body.stmts, usings, ns);
+  }
   for (const inv of entity.invariants) {
     collectCsExprUsings(inv.expr, usings, ns);
     if (inv.guard) collectCsExprUsings(inv.guard, usings, ns);
@@ -260,9 +263,17 @@ export function renderEntity(
   if (isRoot && entity.derived.some((d) => d.name === "inspect")) {
     derivedLines.push("    public override string ToString() => Inspect;");
   }
-  const fnLines = entity.functions.map((fn) => {
+  const fnLines = entity.functions.flatMap((fn) => {
     const params = fn.params.map((p) => `${renderCsType(p.type)} ${p.name}`).join(", ");
-    return `    private ${renderCsType(fn.returnType)} ${upperFirst(fn.name)}(${params}) => ${renderCsExpr(fn.body, renderCtx)};`;
+    const head = `    private ${renderCsType(fn.returnType)} ${upperFirst(fn.name)}(${params})`;
+    // Expression form keeps the expression-bodied `=> expr;` shape
+    // (byte-identical); block form (domain-services.md rev. 4) emits a
+    // statement body whose `return`s carry the value out.
+    if ("expr" in fn.body) {
+      return [`${head} => ${renderCsExpr(fn.body.expr, renderCtx)};`];
+    }
+    const body = renderCsStatements(fn.body.stmts, renderCtx);
+    return [head, "    {", ...(body.length > 0 ? [body] : []), "    }"];
   });
 
   const opLines: string[] = [];

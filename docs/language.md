@@ -307,7 +307,8 @@ Inside an aggregate or an `entity` part:
 | `derived display: string = Expression` | **Reserved** — declares the aggregate's user-facing label.  When present, `string(aggregate)` and implicit `"x " + aggregate` compile to a member access on this derived; React Select pickers use it for option text.  Without it, those expressions are compile errors. |
 | `derived inspect: string = Expression` | **Reserved** — declares the aggregate's developer-facing debug form.  Auto-generated when omitted (structural form, sensitive fields shown as `<redacted>`).  Backends emit it as `ToString()` / `[util.inspect.custom]` / `Inspect` so debugger watches, exceptions, and logger output get a useful representation. |
 | `invariant Expression [when Expression]` | `bool` predicate; checked after every mutation. Optional `when` is a guard. |
-| `function name(params): TypeRef = Expression` | Pure helper; callable from any expression in the same aggregate. |
+| `function name(params): TypeRef = Expression` | Pure helper (expression form); callable from any expression in the same aggregate. Stays SQL-inlinable like a `criterion`. |
+| `function name(params): TypeRef { … }` | Pure helper (block form); `let` + branch (ternary/`match`) + bug-regime `precondition`/`requires`, ending in `return`. Still **pure** — no mutation, no `emit`, no repository / operation / domain-service / extern call. **Not queryable** (a block-form call is rejected in a `where` / `criterion` / view filter). |
 | `operation name(params) { … }` | Public mutating method (root only). |
 | `private operation name(params) { … }` | Mutating method, only callable from within the same aggregate root. |
 | `operation name(params) extern { precondition … }` | Public op whose business decision lives in user code; body must contain only `precondition` statements. See `extern.md`. |

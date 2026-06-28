@@ -197,7 +197,8 @@ export function renderJavaEntity(
     collectJavaTypeImports(d.type, javaImports);
   }
   for (const fn of entity.functions) {
-    collectJavaExprImports(fn.body, javaImports);
+    if ("expr" in fn.body) collectJavaExprImports(fn.body.expr, javaImports);
+    else collectJavaStmtImports(fn.body.stmts, javaImports);
     collectJavaTypeImports(fn.returnType, javaImports);
     for (const p of fn.params) collectJavaTypeImports(p.type, javaImports);
   }
@@ -237,7 +238,11 @@ export function renderJavaEntity(
     appliers.some((ap) => ap.statements.some(stmtCallsDomainService)) ||
     (esCreate ? esCreate.statements.some(stmtCallsDomainService) : false) ||
     entity.derived.some((d) => exprCallsDomainService(d.expr)) ||
-    entity.functions.some((fn) => exprCallsDomainService(fn.body)) ||
+    entity.functions.some((fn) =>
+      "expr" in fn.body
+        ? exprCallsDomainService(fn.body.expr)
+        : fn.body.stmts.some(stmtCallsDomainService),
+    ) ||
     entity.invariants.some(
       (inv) => exprCallsDomainService(inv.expr) || exprCallsDomainService(inv.guard),
     );
@@ -425,12 +430,14 @@ export function renderJavaEntity(
   }
   const fnLines = entity.functions.flatMap((fn) => {
     const params = fn.params.map((p) => `${renderJavaType(p.type)} ${p.name}`).join(", ");
-    return [
-      `    private ${renderJavaType(fn.returnType)} ${fn.name}(${params}) {`,
-      `        return ${renderJavaExpr(fn.body, renderCtx)};`,
-      `    }`,
-      ``,
-    ];
+    const open = `    private ${renderJavaType(fn.returnType)} ${fn.name}(${params}) {`;
+    // Expression form keeps its single `return expr;`; block form
+    // (domain-services.md rev. 4) emits its lowered statements.
+    const bodyLine =
+      "expr" in fn.body
+        ? `        return ${renderJavaExpr(fn.body.expr, renderCtx)};`
+        : renderJavaStatements(fn.body.stmts, renderCtx);
+    return [open, bodyLine, `    }`, ``];
   });
 
   // --- operations ------------------------------------------------------------

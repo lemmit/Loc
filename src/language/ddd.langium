@@ -1470,8 +1470,18 @@ DerivedProp:
 Invariant:
     (serverOnly?='private')? 'invariant' expr=Expression ('when' guard=Expression)?;
 
+// A pure helper over its parameters (domain-services.md).  Two body forms:
+//   `= Expression`        — expression form; SQL-inlinable like a `criterion`.
+//   `{ Statement* }`      — block form (rev. 4); `let` + branch + bug-regime
+//                           `throw`/`require`, still PURE (no repo, no
+//                           mutation, no `emit`/`extern`).  The block form is
+//                           NOT queryable.  `'='` vs `'{'` is the discriminator
+//                           (distinct tokens — the AST stays non-recursive).
 FunctionDecl:
-    'function' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' ':' returnType=TypeRef '=' body=Expression;
+    'function' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' ':' returnType=TypeRef
+        ( '=' body=Expression
+        | '{' block+=Statement* '}'
+        );
 
 // `when Expr` — the canCommand state gate (criterion.md, use site 2): the
 // route evaluates the predicate against the loaded aggregate before the

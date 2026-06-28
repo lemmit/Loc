@@ -358,7 +358,14 @@ backend:
    parameters. Ship the **change-tracking** backends first (EF / JPA /
    SQLAlchemy: nearly free), then the **explicit** pair (Drizzle
    `repo.save(_, tx)`, Ecto inline-changeset + `Repo.transact`).
-4. **`function` block body** — independent companion; any time.
+4. **`function` block body** — independent companion; any time. **SHIPPED:**
+   grammar (`= Expression | { Statement* }`), `FunctionIR.body: ExprIR |
+   StmtIR[]` variant (expression form byte-identical), block lowering via
+   `lowerStatement`, AST type-check of the pure block subset
+   (`loom.function-block-no-return`), the IR purity gate
+   (`loom.function-block-impure`) + inherited non-queryability
+   (`loom.find-where-not-queryable`), printer, and statement-body rendering on
+   all five backends (TS/.NET/Java/Python/Elixir).
 
 ## Research findings (five-backend idiom audit)
 
