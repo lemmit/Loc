@@ -260,3 +260,70 @@ a rename/removal, distilled from #1441/#1438/#1443).
   (#1397/#1401/#1404/#1409/#1411/#1418/#1420/#1429/#1432/#1433/#1445 — every
   frontend + Phoenix). The same feature, ported one target at a time, is the dominant
   delivery unit here.
+
+---
+
+# Round 3 — single-session finds (2026-06-28, tenancy docs-refresh + parity-verify session)
+
+No new skill cleared the bar this session. Two **skill-body patch** candidates
+(propose-only — diffs for human review) and one rejected new-skill idea. Both
+patches are *n=1* (one session) but each removes a concretely-cited friction and is
+low-risk/additive to the skill prose.
+
+## Patch A — `status-refresh`: re-verify cited code *right before commit*, not only at start
+
+**Cited friction (this session).** A tenancy/capability-filter status-refresh synced
+`main` at start (`740b823`), read `system-checks.ts`, and wrote edits asserting
+*"python wires relational filters only."* By push time `main` was `d2b8e70` and
+**#1571 had landed python `shape(embedded)` filters mid-session** — the edits were
+now false, caught only by a lucky rebase conflict (full write-up:
+`experience_gathered.md` §17). The skill's "orient on fresh `main`" section frames
+the sync as a **step-zero** action; it doesn't say to re-derive the cited lines
+again at commit time, which is exactly when a long audit's base has drifted.
+
+**Proposed diff (`status-refresh/SKILL.md`, "Before anything: orient on fresh main" section):**
+add a closing sentence —
+> **Re-verify at commit time, not just at start.** For a long audit, `git fetch
+> origin main -q` and re-read the *cited lines* again right before you commit — the
+> deliverable is prose about code, and a busy `main` can move the code under you
+> mid-session (a claim verified against an hour-old base is a claim about behaviour
+> that may no longer exist). Also `git log origin/main -- <target docs>` first:
+> parallel agents refresh the same trackers, and `main` may have already done your
+> sweep.
+
+**Status:** seen once this session — needs a second sighting to build, but the patch
+is safe to land now (additive caution, matches CLAUDE.md's "stale base lies twice").
+
+## Patch B — orient step `git reset --hard origin/main` is destructive on a feature branch
+
+**Cited friction (this session).** Following the literal orient command `git fetch
+origin main && git reset --hard origin/main` **while on a feature branch carrying
+pushed commits** (`af888fa`/`e215079`) dropped them from the local branch + working
+tree at finalize time. Recoverable (`git reset --hard origin/<feature-branch>`; the
+reflog pinned the tip), but a sharp edge. This command appears in **`status-refresh`,
+`parity-auditor`, and `session-finalizer`** orient sections. `session-finalizer` is
+the worst case: it runs at *session end*, when feature-branch commits always exist.
+
+**Proposed diff (all three skills' orient blocks):** qualify the command —
+> ```bash
+> git fetch origin main -q       # fetch only
+> # On a throwaway/clean checkout you can `git reset --hard origin/main`.
+> # On a feature branch with commits you want to KEEP, do NOT reset to origin/main —
+> # it discards them. Compare instead: `git log/diff origin/main`, or rebase the
+> # branch onto it (`git rebase origin/main`).
+> ```
+
+**Status:** n=1 but a genuine foot-gun in shipped skill prose; the fix is a
+clarifying comment, no behaviour change. Recommend landing.
+
+## Rejected new-skill idea
+
+- **"parity-verdict-via-fixture+CLI-repro" helper** — the method that resolved the
+  document-principal HONEST/silent question (find a compile-gated `*-tenancy.ddd`
+  build fixture → `node bin/cli.js generate system <fixture> -o /tmp/out` → grep the
+  emitted repo for the woven construct). **Rejected:** this *is* `parity-auditor`
+  Step 3 already, verbatim. The session confirms the skill works; no new skill, no
+  patch. (Positive signal worth recording: `status-refresh` correctly refused to fix
+  the stale *code* comment it found — flagged it, stayed docs-only — and handed it to
+  `parity-auditor`, which verified then fixed. The docs-only / flag-don't-fix
+  boundary worked exactly as designed.)
