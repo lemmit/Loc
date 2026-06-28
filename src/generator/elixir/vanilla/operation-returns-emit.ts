@@ -16,6 +16,7 @@ import { variantTag } from "../../../ir/stdlib/unions.js";
 import type {
   AggregateIR,
   BoundedContextIR,
+  EnrichedAggregateIR,
   ExprIR,
   OperationIR,
   ProvSite,
@@ -148,6 +149,13 @@ export function renderReturningOpFunction(
     contextModule: facadeMod,
     foundation: "vanilla",
     captureProvenance: hasProv,
+    // The enriched aggregate, so the body renderer detects a reference-collection
+    // (`X id[]` → `many_to_many`) add/remove and normalises it to an id-list local
+    // (the persist tail then `put_assoc`s the resolved structs) — parity with the
+    // non-returning `renderNamedOpFunction` path, which sets the same field.
+    // Without it the add/remove falls through to the containment-jsonb branch,
+    // silently miscompiling the join-table mutation.
+    agg: agg as EnrichedAggregateIR,
   };
 
   // The `params` arg is always referenced by the `when is_map(params)` guard,
@@ -175,12 +183,31 @@ export function renderReturningOpFunction(
     op.returnType?.kind === "union" &&
     op.returnType.variants.some((v) => v.kind === "entity" && v.name === agg.name);
   const hasSuccessPath = !lastIsReturn && succeedsWithAggregate;
+  // Did the body add/remove a reference collection (`X id[]` → `many_to_many`)?
+  // That mutation edits a join table, so the success path MUST round-trip the DB
+  // (a `put_assoc` changeset) rather than return the in-memory projection — and
+  // it guarantees the context's `__ref_id_list`/`__resolve_refs` helpers are
+  // emitted (`contextUsesRefCollOp`), so the wire projection below can call them.
+  const mutatesRefColl = op.statements.some(
+    (s) =>
+      (s.kind === "add" || s.kind === "remove") &&
+      s.collection &&
+      isRefCollFieldName(agg, snake(s.target.segments[0] ?? "")),
+  );
   // The wire map the success branch returns — the same ordered `wireShape` the
   // CRUD controllers expose, projected off the SAVED struct so it reflects the
-  // persisted state (no struct leaks `__meta__`/`__struct__` onto the wire).
-  const wireMap = (recordVar: string): string =>
+  // persisted state (no struct leaks `__meta__`/`__struct__` onto the wire).  A
+  // reference-collection field projects to its id list (`__ref_id_list/1`, the
+  // CRUD controller's `__ref_ids` analogue) so the wire carries ids, not the
+  // loaded `many_to_many` structs — but only when the op mutated a ref coll,
+  // which is exactly when that context helper is emitted.
+  const wireMap = (recordVar: string, projectRefColls: boolean): string =>
     `%{${wireFieldsOf(agg)
-      .map((f) => `${f}: ${recordVar}.${f}`)
+      .map((f) =>
+        projectRefColls && isRefCollFieldName(agg, f)
+          ? `${f}: __ref_id_list(${recordVar}.${f})`
+          : `${f}: ${recordVar}.${f}`,
+      )
       .join(", ")}}`;
 
   let tailLines: string[];
@@ -217,17 +244,36 @@ export function renderReturningOpFunction(
       `      case ${repoMod}.persist_change(changeset) do`,
       `        {:ok, saved} ->`,
       ...txTail,
-      `          ${wireMap("saved")}`,
+      `          ${wireMap("saved", mutatesRefColl)}`,
       ``,
       `        {:error, reason} ->`,
       `          ${appModule}.Repo.rollback(reason)`,
       `      end`,
       `    end)`,
     ];
+  } else if (hasSuccessPath && mutatesRefColl) {
+    // Reference-collection mutation (`X id[]` add/remove → a `many_to_many` join
+    // table): the body bound an id-list local, so persist it via a `put_assoc`
+    // changeset and return the saved wire.  No provenance/audit → no transaction
+    // is needed (a single state write); a validation failure surfaces as
+    // `{:error, changeset}` (the controller's `_result/2` validation clause).
+    const putBodies = persistPutBodies(op, agg, appModule, facadeMod.split(".").slice(1).join("."));
+    const putBlock = putBodies.map((b) => `\n      |> ${b}`).join("");
+    tailLines = [
+      `    changeset =`,
+      `      record`,
+      `      |> Ecto.Changeset.change(%{})${putBlock}`,
+      ``,
+      `    case ${repoMod}.persist_change(changeset) do`,
+      `      {:ok, saved} -> {:ok, ${wireMap("saved", true)}}`,
+      `      {:error, changeset} -> {:error, changeset}`,
+      `    end`,
+    ];
   } else if (hasSuccessPath) {
-    // Unaudited / non-provenanced success: the in-memory wire projection (no DB
-    // round-trip — byte-identical to the pre-audit emission).
-    tailLines = [`    {:ok, ${wireMap("record")}}`];
+    // Unaudited / non-provenanced success with no ref-collection mutation: the
+    // in-memory wire projection (no DB round-trip — byte-identical to the
+    // pre-audit emission for `assign`-only / scalar-arithmetic bodies).
+    tailLines = [`    {:ok, ${wireMap("record", false)}}`];
   } else {
     tailLines = [];
   }

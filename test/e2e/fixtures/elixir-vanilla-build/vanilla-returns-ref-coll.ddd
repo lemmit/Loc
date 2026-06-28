@@ -1,0 +1,55 @@
+// DEBT-03 (vanilla) — a reference-collection (`X id[]` → `many_to_many`)
+// `add`/`remove` inside an `or`-union *returning* operation.  The returning-op
+// emitter previously omitted the enriched aggregate from its render context, so
+// `members += t` fell through to the containment-jsonb branch and the success
+// tail returned an in-memory projection with NO join-table write — a silent
+// miscompile (`mix compile` passed; the row never persisted / structs leaked on
+// the wire).  Now the returning op mirrors the non-returning path: it binds the
+// id-list local, persists via a `put_assoc` changeset (`persist_change`), and
+// projects the ref-collection field to ids (`__ref_id_list/1`) on the success
+// wire — matching `vanilla-ref-collections.ddd`'s non-returning `addToParty`.
+// Compiled by build-generated-elixir-vanilla under `mix compile
+// --warnings-as-errors` (the bound id-list local is now USED by `put_assoc`, so
+// a half-fix — set agg but don't persist — would trip the unused-var gate).
+system Club {
+  subdomain Core {
+    context Membership {
+      error Full { reason: string }
+
+      aggregate Tag {
+        label: string
+      }
+
+      aggregate Team {
+        name: string
+        members: Tag id[]
+
+        // add into a ref collection, returning the team or a Full error.
+        operation enroll(t: Tag id): Team or Full {
+          precondition members.count < 5
+          members += t
+        }
+        // remove from a ref collection.
+        operation drop(t: Tag id): Team or Full {
+          precondition members.count > 0
+          members -= t
+        }
+      }
+
+      repository Teams for Team { }
+      repository Tags for Tag { }
+    }
+  }
+
+  api ClubApi from Core
+  storage pg { type: postgres }
+  resource st { for: Membership, kind: state, use: pg }
+
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Membership]
+    dataSources: [st]
+    serves: ClubApi
+    port: 4000
+  }
+}
