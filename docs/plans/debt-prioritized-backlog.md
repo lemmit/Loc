@@ -54,7 +54,7 @@ an unreachable stub), DEBT-31 (sortBy dropped). Per-entry verdicts:
 | 21 | 🟡 OPEN (partial) | one real app-`style:` per backend (dotnet=cqrs, node/java=layered); rest reserved stubs |
 | 22 | 🟡 OPEN (partial) | one real `transport:` per backend (node=hono, dotnet=controllers); express/fastify/minimalApi stubbed |
 | 23 | 🔴 OPEN | marten/axon/jooq all `AdapterNotImplementedError` stubs |
-| 24 | 🟡 OPEN (**narrowed**) | criterion reification ships on java/dotnet/node/elixir (python non-reifying *by design*); only **principal-binding in the criterion query-face** is deferred |
+| 24 | 🟡 OPEN (**narrowed further**) | criterion reification ships on java/dotnet/node/elixir (python non-reifying *by design*). **.NET reified-retrieval principal query-face now binds the ambient principal** (`RequestContext.Current!.CurrentUser!`) — fixed a latent CS0103 where a `currentUser` criterion in a `retrieval` emitted an unbound `currentUser` in the `Specification<T>` ctor. Remaining: reifying a principal criterion into a `Criterion<T>` *object*, retiring `usesUser` find-threading, and the Hono/Phoenix query-faces |
 | 25 | 🔴 OPEN | worker/orleans/genserver all stubs |
 | 26 | 🟡 OPEN (**narrowed**) | instance **visibility** ships on all 5 backends; the **execution/persistence epic** (choreographer seam) remains |
 | 27 | 🔴 OPEN | 5 `PlatformSurface` hooks (authGate/auditInit/compliance/tenancy/i18n) are optional no-ops, zero impls (tenancy+audit landed via *other* paths) |
@@ -65,9 +65,11 @@ an unreachable stub), DEBT-31 (sortBy dropped). Per-entry verdicts:
 **Takeaway for picking work:** trust the backend-tier rows; with DEBT-06
 (provenance) and DEBT-07 (`shape(document)`) now landed on the elixir backend,
 the highest-value *real* items remaining are DEBT-03 (union
-`add`/`remove` bodies — `emit` now ships), DEBT-13 (elixir `Id[]` join `ordinal`), and
-DEBT-24 (principal criterion query-face). The frontend tier is essentially
-cleared.
+`add`/`remove` bodies — `emit` now ships) and DEBT-13 (elixir `Id[]` join `ordinal`).
+DEBT-24's .NET reified-retrieval principal query-face now binds the ambient
+principal (the latent CS0103 there is fixed); its residue (`Criterion<T>`-object
+reification of principal criteria, `usesUser` retirement, Hono/Phoenix) is
+lower-value cleanup. The frontend tier is essentially cleared.
 
 ---
 

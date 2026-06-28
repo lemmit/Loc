@@ -1,0 +1,44 @@
+// DEBT-24 — a PRINCIPAL-referencing `criterion` in the reified retrieval
+// query-face on .NET.  A `retrieval` whose `where:` references `currentUser`
+// builds its predicate once inside the `Specification<T>` constructor — a
+// STATIC position with no request-scoped `currentUser` local.  Before the fix
+// the inlined predicate named an unbound `currentUser` and `MineRichSpec`
+// failed to compile (CS0103); now it resolves the principal through the same
+// ambient accessor the EF `HasQueryFilter` capability filters use
+// (`RequestContext.Current!.CurrentUser!`), so the backend has one principal
+// source.  This cell compiles the generated spec under `dotnet build
+// /warnaserror` — the regression guard for the bug.
+system DotnetTenancyRetrieval {
+  user { id: guid  tenantId: string }
+
+  subdomain Core {
+    context Ledger {
+      aggregate Account ids guid {
+        tenantId: string
+        balance: int
+      }
+      repository Accounts for Account { }
+
+      // The criterion body reads the principal (tenancy scoping).
+      criterion MyTenant of Account = tenantId == currentUser.tenantId
+
+      // `where:` references currentUser → built inside the spec ctor.
+      retrieval MineRich(min: int) of Account {
+        where: MyTenant
+        sort:  [balance desc]
+      }
+    }
+  }
+
+  api LedgerApi from Core
+  storage primary { type: postgres }
+  resource ledgerState { for: Ledger, kind: state, use: primary }
+  deployable api {
+    platform: dotnet
+    contexts: [Ledger]
+    dataSources: [ledgerState]
+    serves: LedgerApi
+    port: 8081
+    auth: required
+  }
+}

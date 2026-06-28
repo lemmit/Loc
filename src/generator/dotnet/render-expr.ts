@@ -71,6 +71,15 @@ export interface CsRenderContext {
   currentUserExpr?: string;
 }
 
+/** The ambient request-scoped principal accessor on the .NET read side. Every
+ *  static-position `currentUser` query predicate — the EF `HasQueryFilter`
+ *  capability filters AND the reified retrieval `Specification<T>` `where` —
+ *  resolves the principal through this one expression, so the backend has a
+ *  single principal source (the `currentUser`-is-an-ambient-operand reframe of
+ *  `reified-criteria.md`). Pass it as `currentUserExpr` when rendering a
+ *  predicate that has no in-scope `currentUser` local. */
+export const AMBIENT_CURRENT_USER = "RequestContext.Current!.CurrentUser!";
+
 const DEFAULT: CsRenderContext = { thisName: "this" };
 
 /** Namespaces a rendered domain expression reaches into beyond the SDK's
