@@ -93,8 +93,7 @@ The protocol is uniform — *orchestrator loads → service reads/mutates the
 passed-in aggregates → orchestrator persists*. The `or`-union result is
 consumed by **`return`-in-tail-position** (the edge maps the error
 variant → RFC-7807 ProblemDetails); persistence is the workflow's
-**auto-save-at-exit** of the mutated args — no `?` operator, no variant
-`match` (both unshipped):
+**auto-save-at-exit** of the mutated args:
 
 ```ddd
 workflow MoveMoney transactional {
