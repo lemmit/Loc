@@ -1,6 +1,6 @@
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type { EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
-import { lowerFirst, upperFirst } from "../../util/naming.js";
+import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
 import {
   type BinaryExpr,
   type CallExpr,
@@ -60,6 +60,25 @@ export interface JavaRenderContext {
    *  aggregate read from OUTSIDE its package (view binds in the views
    *  service) — package-private fields are unreachable there. */
   accessorProps?: boolean;
+  /** Tier resolver for a `domain-service` call (domain-services.md rev. 4,
+   *  Slice 1 — the `reading` tier).  Returns `true` when `<service>.<op>` is a
+   *  READING-tier operation (it runs read-only repository queries, so on Java it
+   *  is a `@Service` bean), in which case the call renders as an INSTANCE call
+   *  against the injected field (`registration.isEmailAvailable(holder)`).  A
+   *  PURE op (no ports) returns `false`/absent → the call stays STATIC
+   *  (`Registration.forAmount(amount)`), byte-identical to the pre-rev.4 shell.
+   *  Only the workflow render path wires this; aggregate-op contexts leave it
+   *  undefined (and the validator forbids them calling a non-pure service). */
+  serviceReading?: (service: string, op: string) => boolean;
+}
+
+/** The injected repository field a Java `@Service` references for an aggregate
+ *  (domain-services.md rev. 4): `lowerFirst(plural(<Aggregate>)) + "Repository"`
+ *  — the SAME field name the workflow `@Service` and dispatcher already use
+ *  (`Account` → `accountsRepository`), so a `reading` service's `repo-read` arm
+ *  and the orchestrating workflow agree on the handle without sharing state. */
+export function javaRepoField(aggName: string): string {
+  return `${lowerFirst(plural(aggName))}Repository`;
 }
 
 const DEFAULT: JavaRenderContext = { thisName: "this" };
@@ -397,15 +416,33 @@ function renderCall(args: string[], e: CallExpr, ctx: JavaRenderContext): string
       return `${cls}.${op.resourceName}${upperFirst(op.verb)}(${argList})`;
     }
     case "domain-service": {
-      // `Pricing.quote(cart, customer)` — generated static utility class
-      // (class name PascalCased, method name camelCased per Java convention).
+      // A `domainService` operation call (domain-services.md).  TIER decides the
+      // call shape on Java (rev. 4, Slice 1):
+      //  - PURE op → STATIC call into the generated utility class
+      //    (`Pricing.quote(cart, customer)`); byte-identical to pre-rev.4.
+      //  - READING op → INSTANCE call against the injected `@Service` bean field
+      //    (`registration.isEmailAvailable(holder)`).  The field name is
+      //    `lowerFirst(service)` — the same var the orchestrating workflow
+      //    constructor-injects.  No read-port args are threaded on Java (the
+      //    bean holds its own injected repositories), so the user `argList` is
+      //    passed verbatim — the read handle lives on the bean, not the call.
       const ref = e.serviceRef!;
-      return `${upperFirst(ref.service)}.${lowerFirst(ref.op)}(${argList})`;
+      const reading = ctx.serviceReading?.(ref.service, ref.op) ?? false;
+      return reading
+        ? `${lowerFirst(ref.service)}.${lowerFirst(ref.op)}(${argList})`
+        : `${upperFirst(ref.service)}.${lowerFirst(ref.op)}(${argList})`;
     }
-    case "repo-read":
-    // Read-only repository query in a `reading` domain-service body
-    // (domain-services.md rev. 4).  Per-backend EMISSION is a LATER slice;
-    // plain-call fall-through keeps the exhaustive switch total for now.
+    case "repo-read": {
+      // A read-only repository query in a `reading` domain-service body
+      // (domain-services.md rev. 4, Slice 1).  Renders an INSTANCE call against
+      // the bean's injected repository field — `accountsRepository.byHolder(holder)`
+      // — mirroring how the workflow `@Service` reads repos (`getById`/named
+      // finds).  `method` is the resolved repository method (the declared find,
+      // or `getById`/`findAll`/`run…` for the criterion / retrieval shapes), so
+      // no AST re-recognition is needed here.
+      const read = e.repoRead!;
+      return `${javaRepoField(read.aggregate)}.${read.method}(${argList})`;
+    }
     case "action":
     // Sibling action call (Proposal A Stage 1) — frontend-only; never lowered
     // into a backend domain expression.  Plain call keeps the switch total.
