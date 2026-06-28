@@ -23,7 +23,7 @@ on the vanilla backend later — this file is the tracked list.
 | §11a | Workflow `currentUser` threading | REAL | M | 2 (parity) |
 | §11b | Aggregate-`function` call emit + qualify | REAL | M | 2 (parity) |
 | §11c | Nested relational entity parts | honest validator gate | L | 2 (parity, blocks showcase-on-elixir) |
-| §1 | Paged wire envelope | REAL | M | 3 |
+| §1 | Paged wire envelope | **CLOSED** (#1578) | M | done |
 | §10 | Destroy-form bang `destroy_X!/1` | **CLOSED** (#1575) | S | done |
 | §3 | `sensitive(...)` inspect-redaction | **CLOSED** | S | done |
 | §5 | Workflow `isolationLevel` | **CLOSED** (#1574) | S–M | done |
@@ -40,25 +40,26 @@ Restoring the 5-backend `conformance-parity` gate (removing
 
 ---
 
-## 1. Paged wire envelope (`find ... paged`)
+## 1. Paged wire envelope (`find ... paged`) — **CLOSED** (#1578)
 
-- **Status (REAL, size M):** the paged find returns a **bare serialized array**
-  and applies **no `limit`/`offset` at all** — it ignores the `paged` carrier
-  entirely (worse than first documented). The auto `index`/`all` action emits a
-  partial `%{items: …}` (no `page`/`pageSize`/`total`/`totalPages`).
-- **Ash:** returned the `{ items, page, pageSize, total, totalPages }` paged
-  envelope, matching the cross-backend `Paged<T>` wire shape (1-based page).
-- **Target / reference:** Hono `routes-builder.ts` (`c.json({ ...result, items })`);
-  .NET `emit/repository.ts` (`totalPages = ceil(total/pageSize)`).
-- **Emitters to change:** `src/generator/elixir/vanilla/repository-emit.ts`
-  `renderFindFn` (accept `page`/`page_size`, apply `limit`/`offset`, run a
-  `Repo.aggregate(:count)` for `total`, return the envelope) +
-  `src/generator/elixir/vanilla/find-controller.ts` `renderFindActions` (read
-  `page`/`pageSize` params, emit the envelope map). Detect via
-  `find.returnType.kind === "genericInstance" && ctor === "paged"`.
-- **To close:** restore the Phoenix leg in
-  `test/conformance/paged-wire-parity.test.ts`; the `vanilla-paged.ddd` fixture
-  is already in the `mix compile` gate.
+- **Was (REAL, size M):** the paged find returned a **bare serialized array** and
+  applied **no `limit`/`offset`** — it ignored the `paged` carrier entirely.
+- **Fixed (vanilla elixir backend only):**
+  - `src/generator/elixir/vanilla/repository-emit.ts` `renderFindFn` — a paged
+    find threads `page`/`page_size` (1-based defaults `1`/`20`), runs
+    `Repo.aggregate(query, :count, :id)` for `total`, applies
+    `limit(^page_size)`/`offset(^offset)`, and returns the
+    `%{items, page, pageSize, total, totalPages}` envelope (atom keys →
+    canonical camelCase JSON via Jason). Detected via
+    `find.returnType.kind === "genericInstance" && ctor === "paged"`.
+  - `src/generator/elixir/vanilla/find-controller.ts` reads `page`/`pageSize`
+    query params (via a `page_param/3` coercion helper) and serialises the
+    envelope `items`; `context-emit.ts` carries the matching defdelegate arity.
+  - Non-paged finds are byte-identical.
+- **Test:** `test/generator/elixir/vanilla-paged-envelope.test.ts`; restored the
+  Elixir leg of `test/conformance/paged-wire-parity.test.ts` (back to a
+  3-backend parity gate). Compiles green under `mix compile` (`vanilla-paged.ddd`
+  fixture).
 
 ## 2. Discriminated-union per-variant struct tagging — *effectively closed*
 
