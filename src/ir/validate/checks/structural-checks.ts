@@ -1051,6 +1051,7 @@ function walkExprsInStmt(
     case "expression":
       walkExpr(s.expr, visit);
       break;
+    case "return":
     case "assign":
     case "add":
     case "remove":
