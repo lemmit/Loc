@@ -42,6 +42,7 @@ import {
   putAssocLines,
   refCollRepoHelpers,
 } from "./ref-collection-emit.js";
+import { usesRelationalContainments } from "./schema-emit.js";
 import { aggregateHasStamps, stampPutChanges, stampUsesPrincipal } from "./stamp-emit.js";
 import { valueCollectionsWithVo } from "./value-collection-schema-emit.js";
 
@@ -69,7 +70,7 @@ export function emitVanillaRepositories(
       ? renderBaseReader(appModule, ctxModule, agg, pool)
       : isVanillaDocAgg(agg, ctx, sys)
         ? renderDocRepository(appModule, ctxModule, agg)
-        : renderRepository(appModule, ctxModule, agg, repo, principalIdKey, ctx, pool);
+        : renderRepository(appModule, ctxModule, agg, repo, principalIdKey, ctx, pool, sys);
     out.set(`lib/${appSnake}/${ctxSnake}/${aggSnake}_repository.ex`, content);
   }
 }
@@ -101,6 +102,7 @@ function renderRepository(
   principalIdKey: string,
   ctx?: BoundedContextIR,
   pool: readonly AggregateIR[] = ctx?.aggregates ?? [agg],
+  sys?: SystemIR,
 ): string {
   const aggModule = `${appModule}.${ctxModule}.${upperFirst(agg.name)}`;
   const repoMod = `${aggModule}Repository`;
@@ -121,6 +123,16 @@ function renderRepository(
   const valueCollectionRels = ctx
     ? valueCollectionsWithVo(agg, ctx).map((v) => `:${snake(v.vc.fieldName)}`)
     : [];
+
+  // Relational entity-part containments (§11c) are `has_many`/`has_one`
+  // associations — preloaded on every read so the wire shape materialises (an
+  // unloaded association serialises as `%Ecto.Association.NotLoaded{}`, which
+  // Jason can't encode → 500).  Empty on an embedded aggregate (the parts fold
+  // into the jsonb column and load with the row).
+  const containmentRels =
+    ctx && usesRelationalContainments(agg, ctx, sys)
+      ? agg.contains.map((c) => `:${snake(c.name)}`)
+      : [];
 
   // Lifecycle stamps (`with audit`/`auditable`, `stamp onCreate/onUpdate`) →
   // `put_change` pipe lines on the changeset right before the Repo write.  A
@@ -168,7 +180,7 @@ function renderRepository(
   // Reads preload BOTH the value-collection `has_many` and the reference-collection
   // `many_to_many` relationships in one round-trip, so the serializer materialises
   // every wire field (an unloaded assoc serialises as `%Ecto.Association.NotLoaded{}`).
-  const preloadRels = [...valueCollectionRels, ...preloadList(agg)];
+  const preloadRels = [...valueCollectionRels, ...containmentRels, ...preloadList(agg)];
   const preload = preloadRels.length > 0 ? ` |> Repo.preload([${preloadRels.join(", ")}])` : "";
   const findFns = finds.map((f) =>
     renderFindFn(f, agg, aggModule, contextModule, principal, preload, kindFilter),
@@ -182,7 +194,13 @@ function renderRepository(
   const refAssocLines = putAssocLines(appModule, ctxModule, agg, "    ");
   const insertPutAssoc = refAssocLines.length > 0 ? `\n${refAssocLines.join("\n")}` : "";
   const updatePutAssoc = insertPutAssoc;
-  const updatePreload = refColls ? ` |> Repo.preload([${preloadList(agg).join(", ")}])` : "";
+  // The update path preloads the existing reference-collection AND relational
+  // containment associations before `base_changeset` so `cast_assoc` /
+  // `put_assoc` can replace them cleanly (`cast_assoc` on an unloaded assoc
+  // raises; `on_replace: :delete` needs the prior rows to diff against).
+  const updatePreloadRels = [...(refColls ? preloadList(agg) : []), ...containmentRels];
+  const updatePreload =
+    updatePreloadRels.length > 0 ? ` |> Repo.preload([${updatePreloadRels.join(", ")}])` : "";
   const refHelpers = refColls ? `\n${refCollRepoHelpers(appModule)}\n` : "";
   // `import Ecto.Query` is required for `from(...)` — needed when there's a
   // custom find OR a capability filter (which turns `list`/`find_by_id` into

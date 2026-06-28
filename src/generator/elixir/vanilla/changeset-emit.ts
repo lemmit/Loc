@@ -25,6 +25,7 @@ import { isVanillaDocAgg, renderDocChangeset } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 import { isAbstractBase } from "./inheritance-emit.js";
 import { isRefCollField, refCollFieldNames } from "./ref-collection-emit.js";
+import { usesRelationalContainments } from "./schema-emit.js";
 import { valueCollectionsWithVo } from "./value-collection-schema-emit.js";
 
 interface AggField {
@@ -67,7 +68,7 @@ export function emitVanillaChangesets(
       `lib/${appSnake}/${ctxSnake}/${aggSnake}_changeset.ex`,
       isVanillaDocAgg(agg, ctx, sys)
         ? renderDocChangeset(appModule, ctxModule, agg)
-        : renderChangeset(appModule, ctxModule, agg, ctx),
+        : renderChangeset(appModule, ctxModule, agg, ctx, sys),
     );
   }
 }
@@ -77,6 +78,7 @@ function renderChangeset(
   ctxModule: string,
   agg: AggregateIR,
   ctx: BoundedContextIR,
+  sys?: SystemIR,
 ): string {
   const aggPascal = upperFirst(agg.name);
   const aggModule = `${appModule}.${ctxModule}.${aggPascal}`;
@@ -115,11 +117,21 @@ function renderChangeset(
     .map((c) => ectoValidator(snake(c.field), c.pattern));
   const validatorBlock = validatorLines.length > 0 ? `\n${validatorLines.join("\n")}` : "";
 
-  // Containments (`embeds_many`/`embeds_one`) round-trip via `cast_embed` — and
-  // crucially it forces the embed into the INSERT (an untouched `embeds_many`
-  // writes NULL, violating the `null: false` jsonb column the shared migration
-  // emits).  Each delegates to the part module's `changeset/2`.
-  const castEmbedLines = agg.contains.map((c) => `    |> cast_embed(:${snake(c.name)})`).join("\n");
+  // Containments round-trip via `cast_embed` (embedded jsonb) or `cast_assoc`
+  // (relational child table, §11c — `on_replace: :delete` gives
+  // replace-on-update, mirroring the value-object collection path).  `cast_embed`
+  // forces the embed into the INSERT (an untouched `embeds_many` writes NULL,
+  // violating the `null: false` jsonb column); `cast_assoc` casts each child via
+  // the part module's `changeset/2`.
+  const relationalContainment = usesRelationalContainments(agg, ctx, sys);
+  const castEmbedLines = agg.contains
+    .map((c) => {
+      const f = snake(c.name);
+      if (!relationalContainment) return `    |> cast_embed(:${f})`;
+      const partMod = `${appModule}.${ctxModule}.${upperFirst(c.partName)}`;
+      return `    |> cast_assoc(:${f}, with: &${partMod}.changeset/2)`;
+    })
+    .join("\n");
   const castEmbedBlock = castEmbedLines.length > 0 ? `\n${castEmbedLines}` : "";
 
   // Value-object collections (`charges: Money[]`) round-trip via `cast_assoc`
