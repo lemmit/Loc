@@ -21,9 +21,12 @@ import type {
   SystemIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
-import { resolveDataSourceConfig } from "../../../ir/util/resolve-datasource.js";
+import {
+  effectiveSavingShape,
+  resolveDataSourceConfig,
+} from "../../../ir/util/resolve-datasource.js";
 import { isValueCollectionType } from "../../../ir/util/value-collections.js";
-import { snake, upperFirst } from "../../../util/naming.js";
+import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { isVanillaDocAgg, renderDocSchema } from "./document-emit.js";
 import { renderAggregatePureCore } from "./domain-core-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
@@ -38,6 +41,22 @@ import { renderInspectImpl } from "./inspect-emit.js";
 import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
 import { isRefCollField, manyToManyLine, refCollFields } from "./ref-collection-emit.js";
 import { valueCollectionModule, valueCollectionsWithVo } from "./value-collection-schema-emit.js";
+
+/** An aggregate's nested entity-part containments are persisted RELATIONALLY
+ *  (each part a child table the root `has_many`s + `cast_assoc`s, §11c) rather
+ *  than folded inline as `embeds_many` jsonb — true only for a relational-shaped
+ *  aggregate.  `shape(embedded)` keeps the inline-embed path; `shape(document)`
+ *  is routed to `document-emit` before this is consulted.  Without `sys` the
+ *  effective shape defaults to `relational` (the IR default). */
+export function usesRelationalContainments(
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+  sys?: SystemIR,
+): boolean {
+  if (agg.contains.length === 0) return false;
+  const resolved = sys ? resolveDataSourceConfig(agg as EnrichedAggregateIR, ctx, sys) : undefined;
+  return effectiveSavingShape(agg as EnrichedAggregateIR, resolved) === "relational";
+}
 
 export function emitVanillaSchemas(
   appModule: string,
@@ -84,45 +103,82 @@ export function emitVanillaSchemas(
       `lib/${appSnake}/${ctxSnake}/${aggSnake}.ex`,
       inspectImpl ? `${schemaModule}\n${inspectImpl}` : schemaModule,
     );
-    // Each entity part (`entity Line { … }`) becomes an Ecto `embedded_schema`
-    // module the aggregate `embeds_many`/`embeds_one`s, stored inline as the
-    // parent's jsonb column.
+    // Each entity part (`entity Line { … }`) becomes either an `embedded_schema`
+    // module the aggregate `embeds_many`/`embeds_one`s (stored inline as the
+    // parent's jsonb column) on an `shape(embedded)` aggregate, OR a real
+    // table-backed schema with a `belongs_to` back to its owner on a relational
+    // aggregate (§11c — the runtime side of the child-table migration).
+    const relational = usesRelationalContainments(agg, ctx, sys);
     for (const part of agg.parts) {
       out.set(
         `lib/${appSnake}/${ctxSnake}/${snake(part.name)}.ex`,
-        renderPartSchema(appModule, ctxModule, part, enumsByName),
+        renderPartSchema(appModule, ctxModule, part, enumsByName, relational),
       );
     }
   }
 }
 
-/** Embed line for one containment — `embeds_many :lines, App.Ctx.Line` for a
- *  collection, `embeds_one` otherwise. */
-function embedLine(appModule: string, ctxModule: string, c: ContainmentIR): string {
+/** Schema line for one containment.  On an embedded aggregate the part folds
+ *  inline (`embeds_many`/`embeds_one`); on a relational aggregate (§11c) it is a
+ *  child table the root `has_many`s/`has_one`s with `on_replace: :delete` so
+ *  `cast_assoc` gives replace-on-update semantics (mirroring the value-object
+ *  collection `has_many`).  The FK is `<owner>_id` — the exact column the shared
+ *  child-table migration emits (`migrations-builder.ts` `tableForPart`). */
+function containmentLine(
+  appModule: string,
+  ctxModule: string,
+  c: ContainmentIR,
+  ownerName: string,
+  relational: boolean,
+): string {
   const partMod = `${appModule}.${ctxModule}.${upperFirst(c.partName)}`;
+  if (relational) {
+    const fk = `${snake(ownerName)}_id`;
+    const rel = c.collection ? "has_many" : "has_one";
+    return `    ${rel} :${snake(c.name)}, ${partMod}, foreign_key: :${fk}, on_replace: :delete`;
+  }
   return c.collection
     ? `    embeds_many :${snake(c.name)}, ${partMod}`
     : `    embeds_one :${snake(c.name)}, ${partMod}`;
 }
 
-/** An entity part as an Ecto `embedded_schema` — scalar fields + nested embeds,
- *  a Jason encoder over the wire atoms, and a `cast/3` changeset (used by the
- *  parent's `cast_embed` when present). */
+/** An entity part as an Ecto schema.  On an embedded owner it is an
+ *  `embedded_schema` the parent `cast_embed`s/`embeds_*`s (one jsonb column); on
+ *  a relational owner (§11c) it is a real `schema "<plural(part)>"` table the
+ *  parent `has_many`s/`cast_assoc`s, carrying a `belongs_to` back to its owner
+ *  (the `<owner>_id` FK the shared child-table migration emits).  The wire shape
+ *  — `@derive {Jason.Encoder, only: …}` — is identical either way (id + scalar
+ *  fields + containments); the synthetic owner FK / `belongs_to` are stripped. */
 function renderPartSchema(
   appModule: string,
   ctxModule: string,
   part: EntityPartIR,
   enumsByName: Map<string, EnumIR>,
+  relational = false,
 ): string {
   const moduleName = `${appModule}.${ctxModule}.${upperFirst(part.name)}`;
   const fieldLines = part.fields
     .map((f) => renderFieldLine(f, enumsByName))
     .filter(Boolean)
     .join("\n");
+  // Nested part-in-part containments stay inline embeds even on a relational
+  // owner (the relational gate rejects them; this keeps embedded output intact).
   const containLines = (part.contains ?? [])
-    .map((c) => embedLine(appModule, ctxModule, c))
+    .map((c) => containmentLine(appModule, ctxModule, c, part.name, false))
     .join("\n");
-  const schemaBody = [fieldLines, containLines].filter(Boolean).join("\n");
+  // Relational: the parent association — `belongs_to :<owner>, <OwnerMod>` with
+  // the migration's `<owner>_id` FK.  Stripped from the wire by `@derive only`.
+  // The child table carries `timestamps()` (the shared `tableForPart` migration
+  // emits NOT-NULL `inserted_at`/`updated_at`), so the schema must auto-stamp
+  // them on insert — `:utc_datetime` mirrors the owner aggregate's convention.
+  // (`@derive only` keeps them off the wire.)
+  const belongsToLine = relational
+    ? `    belongs_to :${snake(part.parentName)}, ${appModule}.${ctxModule}.${upperFirst(part.parentName)}, foreign_key: :${snake(part.parentName)}_id, type: :binary_id`
+    : "";
+  const timestampsLine = relational ? "    timestamps(type: :utc_datetime)" : "";
+  const schemaBody = [fieldLines, containLines, belongsToLine, timestampsLine]
+    .filter(Boolean)
+    .join("\n");
   // Cast list: scalar columns only (nested embeds round-trip via `cast_embed`).
   const castCols = part.fields
     .filter((f) => !SYSTEM_FIELDS.has(f.name) && mapTypeToEcto(f.type, enumsByName))
@@ -140,6 +196,11 @@ function renderPartSchema(
     ...(part.contains ?? []).map((c) => `:${snake(c.name)}`),
   ].join(", ");
   const castBlock = castEmbeds ? `\n${castEmbeds}` : "";
+  // Relational parts live in a real table (`@foreign_key_type` for the
+  // `belongs_to`); embedded parts stay an `embedded_schema`.
+  const schemaDecl = relational
+    ? `  @foreign_key_type :binary_id\n  @derive {Jason.Encoder, only: [${wireAtoms}]}\n  schema "${plural(snake(part.name))}" do`
+    : `  @derive {Jason.Encoder, only: [${wireAtoms}]}\n  embedded_schema do`;
   return `# Auto-generated.
 defmodule ${moduleName} do
   @moduledoc false
@@ -147,8 +208,7 @@ defmodule ${moduleName} do
   import Ecto.Changeset
 
   @primary_key {:id, :binary_id, autogenerate: true}
-  @derive {Jason.Encoder, only: [${wireAtoms}]}
-  embedded_schema do
+${schemaDecl}
 ${schemaBody}
   end
 
@@ -225,10 +285,14 @@ function renderSchema(
   ];
   const fieldLines = [...declaredLines, ...auditTsLines, ...provLines].join("\n");
   // Entity containments (`contains items: Item[]`) → `embeds_many`/`embeds_one`
-  // over the part's `embedded_schema` module (emitted above), stored inline in
-  // one jsonb column.
-  // Operation bodies append the part struct + `put_embed` (`context-emit.ts`).
-  const containLines = agg.contains.map((c) => embedLine(appModule, ctxModule, c)).join("\n");
+  // over the part's `embedded_schema` module on an embedded aggregate (stored
+  // inline in one jsonb column), or `has_many`/`has_one` onto the part's
+  // table-backed schema on a relational aggregate (§11c).
+  // Embedded-op bodies append the part struct + `put_embed` (`context-emit.ts`).
+  const relational = ctx ? usesRelationalContainments(agg, ctx, sys) : false;
+  const containLines = agg.contains
+    .map((c) => containmentLine(appModule, ctxModule, c, agg.name, relational))
+    .join("\n");
   // Value-object collections (`charges: Money[]`) → `has_many` onto the child
   // schema owning the id-less child table, `preload_order` by `:ordinal` so the
   // array round-trips in declared order; `on_replace: :delete` gives the

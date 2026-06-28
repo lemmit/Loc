@@ -22,7 +22,7 @@ on the vanilla backend later — this file is the tracked list.
 | §8 | TPH shared-table inheritance | **CLOSED** (#1573) — was a runtime 500 bug | M–L | done |
 | §11a | Workflow `currentUser` threading | **CLOSED** (#1579) | M | done |
 | §11b | Aggregate-`function` call emit + qualify | **CLOSED** (#1581) | M | done |
-| §11c | Nested relational entity parts | honest validator gate (**OPEN** — blocks showcase flip) | L | 2 (parity) |
+| §11c | Nested relational entity parts | **PARTIAL** — persist+preload wired; op-mutation (`+=`) still gated (follow-up) | L | 2 (parity) |
 | §1 | Paged wire envelope | **CLOSED** (#1578) | M | done |
 | §10 | Destroy-form bang `destroy_X!/1` | **CLOSED** (#1575) | S | done |
 | §3 | `sensitive(...)` inspect-redaction | **CLOSED** | S | done |
@@ -37,8 +37,11 @@ on the vanilla backend later — this file is the tracked list.
 
 Restoring the 5-backend `conformance-parity` gate (removing
 `LOOM_E2E_SKIP_PHOENIX=1` and re-adding the elixir deployable to
-`examples/showcase.ddd`) now requires only **§11c** — §11a (#1579) and §11b
-(#1581) have shipped.
+`examples/showcase.ddd`) now requires only the **§11c follow-up** — §11a (#1579),
+§11b (#1581), and the §11c **core** (relational persist + preload) have shipped.
+What remains is the §11c `put_assoc` op-mutation slice (showcase `Project` calls
+`pipelines += Pipeline{…}` in an op), still gated by
+`loom.vanilla-containment-mutation-unsupported`.
 
 ---
 
@@ -265,16 +268,50 @@ heavy one).
   and the `callKind: "function"` call site is qualified. Compile-gated fixture
   `vanilla-functions.ddd`.
 
-### 11c. Nested relational entity parts — honest validator gate (L)
+### 11c. Nested relational entity parts — **PARTIAL** (persist + read wired; op-mutation gated)
 
-- An aggregate with a nested `entity` part on a *relational* shape (e.g. showcase
-  `Catalog.Project contains entity Pipeline`) trips an honest validator error on
-  elixir — the relational child-table emit is not wired. This **blocks generating
-  showcase-on-elixir** before any compile step. Options: implement relational
-  child-table emit on vanilla (schema-emit + migrations), or reshape the showcase
-  aggregate (`shape(embedded)` / value-object remodel). Note `shape(embedded)`
-  carries its own cross-backend caveats (see git history — it broke .NET EF for a
-  strongly-typed contained id), so the principled fix is the relational emit.
+**Core slice landed.** An aggregate with a nested `entity` part on the *relational*
+(default) shape now persists + reads on vanilla — the runtime side of the
+child-table migration that was already emitted:
+
+- **Schema** (`src/generator/elixir/vanilla/schema-emit.ts`): a relational owner
+  `has_many`s/`has_one`s the part (`foreign_key: :<owner>_id, on_replace: :delete`)
+  instead of `embeds_many`/`embeds_one`; the part is emitted as a **table-backed**
+  `schema "<plural(part)>"` with `belongs_to :<owner>, …, foreign_key: :<owner>_id`
+  + `timestamps(type: :utc_datetime)` (the migration's NOT-NULL `inserted_at`/
+  `updated_at`), instead of an `embedded_schema`. Gated on
+  `effectiveSavingShape === "relational"` via the new exported
+  `usesRelationalContainments(agg, ctx, sys)`; `shape(embedded)` keeps the inline
+  `embeds_many` path byte-identical.
+- **Changeset** (`changeset-emit.ts`): `cast_assoc(:<part>, with: &<PartMod>.changeset/2)`
+  instead of `cast_embed` (replace-on-update via `on_replace: :delete`).
+- **Repository** (`repository-emit.ts`): the relational containment is added to the
+  read preload list (so the `has_many` materialises on the wire — an unloaded assoc
+  is `%Ecto.Association.NotLoaded{}`, which Jason can't encode → 500), and the
+  update path preloads it before `cast_assoc`.
+
+This mirrors the value-object collection (`charges: Money[]`) `has_many` pattern
+already in-tree.
+
+**Still gated (the §11c follow-up):**
+
+1. **In-operation containment mutation** (`pipelines += Pipeline{…}` / `-=`) — the
+   relational `put_assoc` op-mutation analog of the embedded path's `put_embed` is
+   not wired. New code `loom.vanilla-containment-mutation-unsupported`.
+2. **Part-in-part nesting** (a part that itself declares `contains`) on a relational
+   owner — the shared `tableForPart` migration emits no child table for a part's own
+   containments, so there's no backing storage. Stays `loom.vanilla-containment-unsupported`.
+   (`shape(document)` containments stay gated too.)
+
+**Showcase flip is still blocked** by (1): showcase `Catalog.Project` has
+`operation addPipeline(label) { pipelines += Pipeline{…} }`. Re-adding elixir to
+`examples/showcase.ddd` + dropping `LOOM_E2E_SKIP_PHOENIX` needs the `put_assoc`
+op-mutation slice (or a showcase reshape).
+
+- **Verify:** `test/generator/elixir/vanilla-relational-parts.test.ts` (schema /
+  changeset / repo / migration shape) + the compile-gated fixture
+  `test/e2e/fixtures/elixir-vanilla-build/vanilla-relational-parts.ddd`
+  (`mix compile --warnings-as-errors`).
 
 ### To restore the gate
 

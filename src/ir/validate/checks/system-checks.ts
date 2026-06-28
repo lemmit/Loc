@@ -27,6 +27,7 @@ import type {
   EnrichedLoomModel,
   EnrichedSystemIR,
   ExprIR,
+  OperationIR,
   SavingShape,
   SubdomainIR,
   SystemIR,
@@ -927,20 +928,51 @@ export function validateJavaContainmentSupport(sys: SystemIR, diags: LoomDiagnos
 }
 
 // ---------------------------------------------------------------------------
-// Nested entity parts on a RELATIONAL-shaped elixir aggregate are not persisted.
+// Nested entity parts on an elixir aggregate.
 //
-// On a `shape(embedded)` aggregate, `contains <part>: <Part>[]` now persists:
-// the part becomes an Ecto `embedded_schema` module the root `embeds_many`s
-// (one jsonb column — the same column the shared migration emits for the
-// embedded shape), and a containment-mutating op (`items += Item{…}`) appends
-// the struct + `put_embed`s it (DEBT-32).  But a RELATIONAL-shaped aggregate's
-// containments would need child tables + `has_many` + `cast_assoc` (the shape's
-// migration emits a child table, not an inline column) — that relational
-// nested-entity emit is NOT wired, so the inline `embeds_many` would mismatch
-// the child-table migration.  Reject relational containments loudly: point at
-// `shape(embedded)` (now supported) or a value-object remodel.  Mirrors
-// `validateJavaContainmentSupport` / `validateDapperSupport`.
+// On a `shape(embedded)` aggregate, `contains <part>: <Part>[]` persists inline:
+// the part becomes an Ecto `embedded_schema` module the root `embeds_many`s (one
+// jsonb column — the same column the shared migration emits for the embedded
+// shape), and a containment-mutating op (`items += Item{…}`) appends the struct
+// + `put_embed`s it (DEBT-32).
+//
+// On a RELATIONAL aggregate the part is persisted as a child TABLE (§11c): the
+// part schema is table-backed with a `belongs_to` to its owner, the root
+// `has_many`s + `cast_assoc`s it, and reads `Repo.preload` it — matching the
+// child-table the shared migration already emits.  Two cases still lack an emit
+// and stay gated:
+//
+//   1. A named operation that MUTATES the containment (`pipelines += Pipeline{…}`
+//      / `-=`) — the relational `put_assoc` op-mutation path is the §11c
+//      follow-up; the embedded path's `put_embed` has no relational analog yet.
+//   2. A part that itself declares `contains` (part-in-part nesting) — the
+//      shared migration emits no child table for a part's own containments on a
+//      relational owner, so there is no backing storage.
+//
+// Mirrors `validateJavaContainmentSupport` / `validateDapperSupport`.
 // ---------------------------------------------------------------------------
+
+/** All mutate/create/destroy operation bodies on an aggregate. */
+function allOperationsOf(agg: AggregateIR): OperationIR[] {
+  return [...agg.operations, ...(agg.creates ?? []), ...(agg.destroys ?? [])];
+}
+
+/** The containment field names an aggregate's operations mutate via `+=`/`-=`
+ *  (collection add/remove targeting a `contains` field). */
+function mutatedContainments(agg: AggregateIR): Set<string> {
+  const containNames = new Set(agg.contains.map((c) => c.name));
+  const out = new Set<string>();
+  for (const op of allOperationsOf(agg)) {
+    for (const s of op.statements) {
+      if ((s.kind === "add" || s.kind === "remove") && s.collection) {
+        const target = s.target.segments[0];
+        if (target && containNames.has(target)) out.add(target);
+      }
+    }
+  }
+  return out;
+}
+
 export function validateVanillaContainmentSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
@@ -954,23 +986,63 @@ export function validateVanillaContainmentSupport(sys: SystemIR, diags: LoomDiag
         // parts.  (Value objects are plain fields, not `contains`, so they're
         // unaffected.)
         if ((agg.contains ?? []).length === 0 && (agg.parts ?? []).length === 0) continue;
-        // `shape(embedded)` containments are now wired (inline `embeds_many`).
         const enriched = agg as EnrichedAggregateIR;
         const shape = effectiveSavingShape(enriched, resolveDataSourceConfig(enriched, ctx, sys));
+        // `shape(embedded)` containments are wired (inline `embeds_many`).
         if (shape === "embedded") continue;
-        const part = agg.contains[0]?.partName ?? agg.parts[0]?.name ?? "Part";
-        diags.push({
-          severity: "error",
-          message:
-            `Deployable '${dep.name}' (platform ${dep.platform}) hosts ` +
-            `aggregate '${ctxName}.${agg.name}' which contains nested entity parts (e.g. '${part}') ` +
-            `on a relational shape — the elixir (plain Ecto) backend only persists nested parts ` +
-            `on a 'shape(embedded)' aggregate (inline 'embeds_many'); the relational child-table ` +
-            `emit is not wired. Add 'shape(embedded)' to the aggregate, model the part as a value ` +
-            `object, or host this context on another backend.`,
-          source: `${sys.name}/${dep.name}`,
-          code: "loom.vanilla-containment-unsupported",
-        });
+        // `shape(document)` folds the whole aggregate into one JSON column — its
+        // containments have no relational/embedded emit; keep them gated.
+        if (shape === "document") {
+          const part = agg.contains[0]?.partName ?? agg.parts[0]?.name ?? "Part";
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform ${dep.platform}) hosts ` +
+              `aggregate '${ctxName}.${agg.name}' which contains nested entity parts (e.g. '${part}') ` +
+              `on a 'shape(document)' aggregate — nested parts are not persisted on a document shape. ` +
+              `Use the default relational shape (child tables) or 'shape(embedded)' (inline jsonb), ` +
+              `model the part as a value object, or host this context on another backend.`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.vanilla-containment-unsupported",
+          });
+          continue;
+        }
+        // Relational (§11c): persisted as child tables — allowed, EXCEPT the two
+        // not-yet-wired cases below.
+        const mutated = mutatedContainments(agg);
+        if (mutated.size > 0) {
+          const field = [...mutated][0];
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform ${dep.platform}) hosts ` +
+              `aggregate '${ctxName}.${agg.name}' whose operation mutates the relational ` +
+              `containment '${field}' (e.g. '${field} += …' / '${field} -= …') — the relational ` +
+              `containment 'put_assoc' op-mutation path is not yet wired on the elixir (plain Ecto) ` +
+              `backend (§11c follow-up). The persist + preload machinery IS wired, so create/read ` +
+              `of the nested parts works; only the in-op mutation is gated. Add 'shape(embedded)' to ` +
+              `the aggregate (where '${field} += …' lowers to 'put_embed'), drop the mutating ` +
+              `operation, or host this context on another backend.`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.vanilla-containment-mutation-unsupported",
+          });
+          continue;
+        }
+        const nestedPart = (agg.parts ?? []).find((p) => (p.contains ?? []).length > 0);
+        if (nestedPart) {
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform ${dep.platform}) hosts ` +
+              `aggregate '${ctxName}.${agg.name}' whose entity part '${nestedPart.name}' itself ` +
+              `declares 'contains' (part-in-part nesting) on a relational shape — the shared ` +
+              `migration emits no child table for a part's own containments, so there is no backing ` +
+              `storage. Add 'shape(embedded)' to the aggregate (the whole part graph folds into one ` +
+              `jsonb column), flatten the nesting, or host this context on another backend.`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.vanilla-containment-unsupported",
+          });
+        }
       }
     }
   }
