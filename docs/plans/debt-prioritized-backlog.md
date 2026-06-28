@@ -43,7 +43,7 @@ an unreachable stub), DEBT-31 (sortBy dropped). Per-entry verdicts:
 | 08 | ✅/⚠️ | paged done; envelope deferred (no live use) |
 | 09–11 | ✅ DONE | this session |
 | 12 | ✅ mostly DONE | `requires` guard ships (handle_params); new-parts unreachable; verify_token niche |
-| 13 | 🔴 OPEN | elixir `Id[]` joins are set-only (the elixir join never populates `ordinal`) |
+| 13 | 🟢 DONE (read+write order) | elixir `X id[]` now round-trips in order — the join migration's `ordinal` column is stamped on write (`Repo.update_all` from id-list index) + ordered on read (`preload_order` → join `ordinal`); matches node (#1580). Follow-up: named-op incremental `+=`/`-=` ordinal stamping (membership preserved, ordering deferred) |
 | 14 | 🔴 OPEN | java `hosts:` → `loom.java-fullstack-unsupported` |
 | 15 | 🔴 OPEN | java nested-part single containments → `loom.java-single-containment-unsupported` |
 | 16 | ⛔ BLOCKED | grammar has no `audited` slot on Create/Destroy |
@@ -65,9 +65,9 @@ an unreachable stub), DEBT-31 (sortBy dropped). Per-entry verdicts:
 **Takeaway for picking work:** trust the backend-tier rows; with DEBT-06
 (provenance) and DEBT-07 (`shape(document)`) now landed on the elixir backend,
 the highest-value *real* items remaining are DEBT-03 (union
-`add`/`remove` bodies — `emit` now ships), DEBT-13 (elixir `Id[]` join `ordinal`), and
-DEBT-24 (principal criterion query-face). The frontend tier is essentially
-cleared.
+`add`/`remove` bodies — `emit` now ships) and DEBT-24 (principal criterion
+query-face); DEBT-13 (elixir `X id[]` ordinal) landed via #1580. The frontend
+tier is essentially cleared.
 
 ---
 
@@ -119,7 +119,7 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 | DEBT-10 | ~~Multi-segment / nested state mutation in page handlers~~ **DONE** — collection `+=`/`-=` now append/remove (was numeric `+`/`-` → broken list code); nested `:=` mutates in place on Vue/Svelte/Angular vs React's immutable spread | react, vue, svelte (+ angular) | 3 | M | — |
 | DEBT-11 | ~~Vue workflow forms~~ **DONE** — structural render + error mapping already shipped; the success-toast parity (React/Svelte gap) now lands too | vue | 3 | M | `vue-frontend-plan.md` |
 | DEBT-12 | Phoenix page DSL: `requires` guard, new-parts-in-body, `verify_token` | elixir | 2 | M | — |
-| DEBT-13 | Ordered `X id[]` reference collections | elixir (set-only), frontends (editor) | 2 | M | `experience_gathered.md` §8.4 |
+| DEBT-13 | ~~Ordered `X id[]` reference collections~~ **DONE (elixir read+write order, #1580)** — `ordinal` stamped on write + ordered on read, parity with node; named-op incremental `+=`/`-=` ordinal is the lone follow-up. Frontend ordered-editor still open | ~~elixir (set-only)~~, frontends (editor) | 2 | M | `experience_gathered.md` §8.4 |
 | **P2 — backend structural gaps + minimal-v1 adapter completion** |
 | DEBT-14 | `hosts:` separate React bundle (only embedded `ui:` works) | java | 3 | L | `java-backend-implementation.md` |
 | DEBT-15 | Part-declared single (non-collection) containments | java | 2 | M | `java-backend-implementation.md` |
@@ -197,7 +197,7 @@ Concise scope per item; full gate locations in the table above.
 - **DEBT-10 Nested state mutation (frontends) — DONE:** two fixes in `walker-core.ts` `emitStmt`/`stateWrite`. (1) **Collection `+=`/`-=`** — `parent.items += x` was rendered as numeric `items + x` (broken: `[] - v` → `NaN`); now type-driven append/remove (`[...items, x]` / `items.filter(e => e !== x)`), the signal carried on the `add`/`remove` IR (`collection` flag from the lowered target type). (2) **Nested `:=`** — `addr.zip := v` keeps React's immutable spread but now diverges per target via a new `renderNestedStateWrite` seam: Vue refs / Svelte `$state` / Angular signals mutate in their native idiom (in-place for Vue/Svelte, `set` for Angular signals).
 - **DEBT-11 Vue workflow forms — DONE:** the structural workflow form (fields, typed defaults, submit, navigate) and server/validation error mapping (`useLoomForm` → inline field + `__global` alert) were already shipped; the remaining React/Svelte gap was the **success toast**. The Vue packs' `form-default-onsubmit` now `pushToast(...)`s on completion, and the toast queue + app-shell host are gated on `realtime || forms` (`vue/index.ts` `hasToastHost`) so a form-only project still mounts a host.
 - **DEBT-12 Phoenix page DSL:** `requires` guard (v0 bind-only → full `handle_params/3`), new-parts-in-body stub, `verify_token/1` auth helper.
-- **DEBT-13 Ordered ref collections:** Ash `manage_relationship` ordinal injection + a first-class ordered editor on frontends.
+- **DEBT-13 Ordered ref collections — DONE (elixir read+write order, #1580):** the vanilla join now stamps the migration's `ordinal` column on write (a per-field `__stamp_ref_ordinal_<field>/2` `Repo.update_all` to the id-list index, inside the persist transaction) and orders on read (`preload_order` → `[asc: dynamic([_assoc, join], join.ordinal)]`), so a `Foo id[]` collection round-trips in declaration order, matching node. Remaining: the named-op incremental `+=`/`-=` path (still `put_assoc`, membership-only — append-order needs max-ordinal tracking) and a first-class ordered editor on the frontends.
 - **DEBT-31 Inline collection ops on Phoenix/HEEx — DONE:** expression-position lambda callbacks (`xs.filter(o => …)`, `.map`) render on the JS frontends via the shared `emitExpr` (native `Array.prototype` methods). HEEx's parallel engine (`heex-walker-core.ts`) used to hoist the callback into a `handle_event` clause and emit an invalid `recv.filter(event_N)` chain — because `filter`/`map` aren't in the shared `isCollectionOp` catalogue. `renderMethodCall` now routes a `filter`/`map`/`select` method-call with a lambda arg to `renderCollectionOp` (whose `Enum.filter/2` / `Enum.map/2` arms already existed but were unreachable). **`sortBy` was dropped:** it's not a native JS array method and has no runtime helper, so it's broken on the JS frontends too (`xs.sortBy(...)` → a non-existent method) — there's no parity target to mirror. A real `sortBy` is a separate cross-frontend feature (JS runtime helper + `Enum.sort_by/2` + catalogue/type-system entry).
 
 ---
