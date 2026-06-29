@@ -82,7 +82,7 @@ Everything else re-confirmed accurate. Per-entry verdicts:
 | 25 | 🔴 OPEN | worker/orleans/genserver all stubs |
 | 26 | 🟡 OPEN (**narrowed further, 2026-06-28**) | instance **visibility** ships on all 5; the persisted workflow-state **row IS emitted** on java/.NET/elixir-vanilla and the IR fields (`stateFields`/`correlationField`/`instanceWireShape`) **are consumed** — remaining = step-execution **choreography** + node/python persistence (not "no backend consumes the fields") |
 | 27 | 🔴 OPEN | 5 `PlatformSurface` hooks (authGate/auditInit/compliance/tenancy/i18n) are optional no-ops, zero impls (tenancy+audit landed via *other* paths) |
-| 28 | 🟡 OPEN (partial) | `loads:` lowered but **unconsumed** by every backend (hardcoded full-load); `find all` pagination grammar-gated |
+| 28 | 🟡 OPEN (**re-scoped 2026-06-29**) | The original framing was stale. Pagination is **NOT grammar-gated** — it's a deliberate call-site design: a `paged`-return surface (`find x(): T paged` → `Paged<T>`) **already ships** on Hono/EF/Phoenix/React, plus a retrieval call-site `page` arg (`Repo.run(R(args), page?)`). The only real pagination gap is that the **auto-generated implicit `find all()` is unbounded** (`T[]`, no limit). `loads:` is lowered but a **deliberate no-op** on node/.NET (owned containments are part of the parity-enforced `wireShape`, so `loads:` can't narrow them — documented at `repository-find-builder.ts` / `dotnet/emit/repository.ts`); the genuinely-unconsumed part is **cross-aggregate eager-fetch** (`self.lines[].product`), an explicit v2 hydration concern |
 | 29 | 🔴 OPEN | views are single-source only (no joins, no per-view params) — grammar-level |
 | 30 | 🔴 OPEN (a/b/c), ❓ STALE (d) | seed create-validation / appliers / block-body-lambdas genuinely stubbed; **(d) "method-call hooks binding" — no such IR field found; likely a stale/mislabeled entry** |
 
@@ -169,7 +169,7 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 | **P4 — epics & universal "not yet anywhere" (design-first)** |
 | DEBT-26 | **Workflow execution & persistence** (persisted row, IR fields unconsumed) | all backends | 4 | XL | `workflow-choreographer-seam.md`, `workflow.md` |
 | DEBT-27 | `PlatformSurface` reserved hooks (authGate, auditInit, compliance, tenancy, i18n) | all backends | 3 | XL | `proposals/*` (per hook) |
-| DEBT-28 | `loads:` eager-load specs + pagination on `find all` | all backends | 2 | L | — |
+| DEBT-28 | `loads:` eager-load specs + pagination on `find all` — **re-scoped 2026-06-29**: pagination already ships (`paged`-return + retrieval call-site `page`); real gaps are (a) the implicit `find all()` is unbounded, (b) `loads:` cross-aggregate eager-fetch (v2). `loads:` on owned containments is a *deliberate* no-op (wireShape parity) | all backends | 2 | L | `proposals/pagination-design-note.md` |
 | DEBT-29 | Joined view sources + per-view parameters not emitted | all backends | 2 | M | `views.md` |
 | DEBT-30 | Misc IR-consumed-nowhere: seed create-shape validation, side-effecting-call metadata, block-body lambdas in e2e, method-call hooks binding | varies | 1 | S–M | — |
 | DEBT-31 | ~~Inline collection-op lambdas on Phoenix/HEEx~~ **DONE** — `filter`/`map` now route to `Enum.filter/2`/`Enum.map/2` (was: lambda hoisted to a `handle_event`, invalid `recv.filter(…)` chain). `sortBy` dropped from scope — it's a non-native JS method with no runtime helper, so it's unsupported on the JS frontends too (no parity target) | elixir | 2 | M | — |
@@ -291,12 +291,31 @@ lands that concern's adapter for that backend. DEBT-01 (tenancy filter) and
 DEBT-04 (audit) overlap these — coordinate so we don't build the same plumbing twice.
 
 ### DEBT-28–30 · Universal "not yet anywhere"
-Not platform-gated — bounded language gaps: `loads:` eager-load specs + `find
-all(skip, take)` pagination (DEBT-28); joined view sources / per-view params
-(DEBT-29); and the small IR-consumed-nowhere tail (DEBT-30): seed create-shape
-validation (`typescript/emit/seed.ts:20`), side-effecting-call metadata
-(`loom-ir.ts:343`), block-body lambdas in UI e2e tests (`ui-e2e-render.ts`),
-method-call hooks binding in page handlers (`walker-core.ts:1021`).
+Not platform-gated — bounded language gaps.
+
+**DEBT-28 (re-scoped 2026-06-29 after a fresh-`main` audit):** the "`find
+all(skip, take)` pagination grammar-gated" framing was **stale**. Pagination is
+a *deliberate* call-site design (`ddd.langium` documents it), and two surfaces
+already ship: the `paged` return type (`find x(): T paged` → `Paged<T>`, on
+Hono/EF/Phoenix + React hooks, per `proposals/pagination-design-note.md`) and a
+retrieval call-site `page` arg (`Repo.run(R(args), page?)`). The one real
+remaining pagination gap is that the **auto-synthesised implicit `find all()`
+is unbounded** (`ensureFindAll` in `enrich/enrichments.ts` emits `all(): T[]`
+with no `page`) — bounding it is a list-endpoint wire/design change across all 5
+backends + the frontend list hooks. For `loads:`: it lowers to `loadPlan` but is
+a **deliberate no-op** on node/.NET (owned containments are part of the
+parity-enforced `wireShape`, so an explicit `loads:` can neither widen nor narrow
+them — see the documented comments in `repository-find-builder.ts` /
+`dotnet/emit/repository.ts`; java/python don't emit retrievals yet). The
+genuinely-unconsumed slice is **cross-aggregate eager-fetch**
+(`self.lines[].product`), an explicit v2 hydration concern.
+
+**DEBT-29 / DEBT-30:** joined view sources / per-view params (DEBT-29); and the
+small IR-consumed-nowhere tail (DEBT-30): seed create-shape validation
+(`typescript/emit/seed.ts:20`), side-effecting-call metadata (`loom-ir.ts:343`),
+block-body lambdas in UI e2e tests (`ui-e2e-render.ts`), method-call hooks
+binding in page handlers (`walker-core.ts:1021` — **likely stale/mislabeled**, no
+such IR field found).
 
 ---
 
