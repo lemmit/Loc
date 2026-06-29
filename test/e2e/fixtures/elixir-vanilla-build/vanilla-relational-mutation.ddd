@@ -1,0 +1,39 @@
+// §11c follow-up — in-operation mutation of a RELATIONAL containment on a
+// vanilla (plain Ecto/Phoenix) aggregate.  `contains lines: Line[]` persists as
+// a child TABLE (`lines`): the part schema is table-backed (`schema "lines"`)
+// with a `belongs_to` back to its owner (the `order_id` FK the shared
+// child-table migration emits), the root `has_many`s + `cast_assoc`s it, and
+// every read `Repo.preload`s it.  The `addLine` operation's body
+// (`lines += Line { … }`) appends the part STRUCT (`%Shop.Line{…}`) to the
+// threaded record and the persist tail `put_assoc`s the mutated list — the
+// schema's `on_replace: :delete` rewrites the child rows.  This is the relational
+// analogue of the embedded `put_embed` path (`vanilla-embed-parts.ddd`).
+// Compiles against plain Ecto under `mix compile --warnings-as-errors`; a real
+// Postgres round-trip persists the child row with the correct `order_id` FK.
+system VanillaRelationalMutation {
+  subdomain Core {
+    context Shop {
+      aggregate Order ids guid {
+        code: string
+        contains lines: Line[]
+        entity Line { sku: string }
+        operation addLine(sku: string) {
+          lines += Line { sku: sku }
+        }
+      }
+      repository Orders for Order {
+        find byCode(c: string): Order[] where this.code == c
+      }
+    }
+  }
+  api CatalogApi from Core
+  storage pg { type: postgres }
+  resource orderState { for: Shop, kind: state, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Shop]
+    dataSources: [orderState]
+    serves: CatalogApi
+    port: 4000
+  }
+}

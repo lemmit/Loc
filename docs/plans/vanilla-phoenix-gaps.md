@@ -22,7 +22,7 @@ on the vanilla backend later — this file is the tracked list.
 | §8 | TPH shared-table inheritance | **CLOSED** (#1573) — was a runtime 500 bug | M–L | done |
 | §11a | Workflow `currentUser` threading | **CLOSED** (#1579) | M | done |
 | §11b | Aggregate-`function` call emit + qualify | **CLOSED** (#1581) | M | done |
-| §11c | Nested relational entity parts | **PARTIAL** — persist+preload wired; op-mutation (`+=`) still gated (follow-up) | L | 2 (parity) |
+| §11c | Nested relational entity parts | **CLOSED** — persist + preload + op-mutation (`+=`/`-=` via `put_assoc`) wired | L | done |
 | §1 | Paged wire envelope | **CLOSED** (#1578) | M | done |
 | §10 | Destroy-form bang `destroy_X!/1` | **CLOSED** (#1575) | S | done |
 | §3 | `sensitive(...)` inspect-redaction | **CLOSED** | S | done |
@@ -37,11 +37,13 @@ on the vanilla backend later — this file is the tracked list.
 
 Restoring the 5-backend `conformance-parity` gate (removing
 `LOOM_E2E_SKIP_PHOENIX=1` and re-adding the elixir deployable to
-`examples/showcase.ddd`) now requires only the **§11c follow-up** — §11a (#1579),
-§11b (#1581), and the §11c **core** (relational persist + preload) have shipped.
-What remains is the §11c `put_assoc` op-mutation slice (showcase `Project` calls
-`pipelines += Pipeline{…}` in an op), still gated by
-`loom.vanilla-containment-mutation-unsupported`.
+`examples/showcase.ddd`) — §11a (#1579), §11b (#1581), the §11c **core**
+(relational persist + preload), AND the §11c **follow-up** (`put_assoc`
+op-mutation, `pipelines += Pipeline{…}`) have all shipped.  The follow-up persists
+the mutated child list via `put_assoc(:f, __put_assoc_parts(record.f))` — the
+context helper normalises the part-struct list to `put_assoc`-ready maps (a bare
+struct with a nil PK is silently NOT inserted by `put_assoc`; boot-verified).  The
+`loom.vanilla-containment-mutation-unsupported` gate is retired.
 
 ---
 
@@ -268,7 +270,7 @@ heavy one).
   and the `callKind: "function"` call site is qualified. Compile-gated fixture
   `vanilla-functions.ddd`.
 
-### 11c. Nested relational entity parts — **PARTIAL** (persist + read wired; op-mutation gated)
+### 11c. Nested relational entity parts — **CLOSED** (persist + read + op-mutation wired)
 
 **Core slice landed.** An aggregate with a nested `entity` part on the *relational*
 (default) shape now persists + reads on vanilla — the runtime side of the
@@ -293,25 +295,37 @@ child-table migration that was already emitted:
 This mirrors the value-object collection (`charges: Money[]`) `has_many` pattern
 already in-tree.
 
-**Still gated (the §11c follow-up):**
+**Follow-up landed (op-mutation).** An operation that mutates a relational
+containment (`pipelines += Pipeline{…}` / `-=`) now persists via
+`put_assoc(:<part>, __put_assoc_parts(record.<part>))` in the op's persist tail
+(`operation-returns-emit.ts` `persistPutBodies`, branched on the new
+`relationalContainments` set the caller derives from `usesRelationalContainments`).
+The `__put_assoc_parts/1` context helper (`context-emit.ts`, gated by
+`contextMutatesRelationalContainment`) normalises the mutated part-struct list to
+`put_assoc`-ready **maps** — a bare part struct with a nil PK is silently NOT
+inserted by `put_assoc` (Ecto reads a struct as an already-persisted row → empty
+changeset; **boot-verified** against real Postgres), whereas a map without `id`
+inserts and one with `id` is kept/updated.  `loom.vanilla-containment-mutation-unsupported`
+is retired.  Embedded (`put_embed`) output stays byte-identical.
 
-1. **In-operation containment mutation** (`pipelines += Pipeline{…}` / `-=`) — the
-   relational `put_assoc` op-mutation analog of the embedded path's `put_embed` is
-   not wired. New code `loom.vanilla-containment-mutation-unsupported`.
-2. **Part-in-part nesting** (a part that itself declares `contains`) on a relational
+**Still gated:**
+
+1. **Part-in-part nesting** (a part that itself declares `contains`) on a relational
    owner — the shared `tableForPart` migration emits no child table for a part's own
    containments, so there's no backing storage. Stays `loom.vanilla-containment-unsupported`.
    (`shape(document)` containments stay gated too.)
 
-**Showcase flip is still blocked** by (1): showcase `Catalog.Project` has
-`operation addPipeline(label) { pipelines += Pipeline{…} }`. Re-adding elixir to
-`examples/showcase.ddd` + dropping `LOOM_E2E_SKIP_PHOENIX` needs the `put_assoc`
-op-mutation slice (or a showcase reshape).
+**Showcase flip** — showcase `Catalog.Project`'s `operation addPipeline(label) {
+pipelines += Pipeline{…} }` now compiles + persists on vanilla; re-adding elixir to
+`examples/showcase.ddd` + dropping `LOOM_E2E_SKIP_PHOENIX` is unblocked by this slice.
 
 - **Verify:** `test/generator/elixir/vanilla-relational-parts.test.ts` (schema /
-  changeset / repo / migration shape) + the compile-gated fixture
-  `test/e2e/fixtures/elixir-vanilla-build/vanilla-relational-parts.ddd`
-  (`mix compile --warnings-as-errors`).
+  changeset / repo / migration shape + the op-mutation `put_assoc(__put_assoc_parts)`
+  body) + the compile-gated fixtures
+  `test/e2e/fixtures/elixir-vanilla-build/vanilla-relational-parts.ddd` (persist +
+  read) and `…/vanilla-relational-mutation.ddd` (op-mutation `+=` →
+  `mix compile --warnings-as-errors`; boot-verified child-row round-trip against
+  real Postgres).
 
 ### To restore the gate
 

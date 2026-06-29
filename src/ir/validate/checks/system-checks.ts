@@ -27,7 +27,6 @@ import type {
   EnrichedLoomModel,
   EnrichedSystemIR,
   ExprIR,
-  OperationIR,
   SavingShape,
   SubdomainIR,
   SystemIR,
@@ -922,39 +921,18 @@ export function validateJavaContainmentSupport(sys: SystemIR, diags: LoomDiagnos
 // On a RELATIONAL aggregate the part is persisted as a child TABLE (§11c): the
 // part schema is table-backed with a `belongs_to` to its owner, the root
 // `has_many`s + `cast_assoc`s it, and reads `Repo.preload` it — matching the
-// child-table the shared migration already emits.  Two cases still lack an emit
-// and stay gated:
+// child-table the shared migration already emits.  In-operation mutation
+// (`pipelines += Pipeline{…}` / `-=`) is now wired too: the persist tail
+// `put_assoc`s the mutated part-struct list (the schema's `on_replace: :delete`
+// rewrites the child rows) — see `persistPutBodies` (operation-returns-emit).
+// ONE case still lacks an emit and stays gated:
 //
-//   1. A named operation that MUTATES the containment (`pipelines += Pipeline{…}`
-//      / `-=`) — the relational `put_assoc` op-mutation path is the §11c
-//      follow-up; the embedded path's `put_embed` has no relational analog yet.
-//   2. A part that itself declares `contains` (part-in-part nesting) — the
-//      shared migration emits no child table for a part's own containments on a
-//      relational owner, so there is no backing storage.
+//   - A part that itself declares `contains` (part-in-part nesting) — the
+//     shared migration emits no child table for a part's own containments on a
+//     relational owner, so there is no backing storage.
 //
 // Mirrors `validateJavaContainmentSupport` / `validateDapperSupport`.
 // ---------------------------------------------------------------------------
-
-/** All mutate/create/destroy operation bodies on an aggregate. */
-function allOperationsOf(agg: AggregateIR): OperationIR[] {
-  return [...agg.operations, ...(agg.creates ?? []), ...(agg.destroys ?? [])];
-}
-
-/** The containment field names an aggregate's operations mutate via `+=`/`-=`
- *  (collection add/remove targeting a `contains` field). */
-function mutatedContainments(agg: AggregateIR): Set<string> {
-  const containNames = new Set(agg.contains.map((c) => c.name));
-  const out = new Set<string>();
-  for (const op of allOperationsOf(agg)) {
-    for (const s of op.statements) {
-      if ((s.kind === "add" || s.kind === "remove") && s.collection) {
-        const target = s.target.segments[0];
-        if (target && containNames.has(target)) out.add(target);
-      }
-    }
-  }
-  return out;
-}
 
 export function validateVanillaContainmentSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
@@ -990,27 +968,12 @@ export function validateVanillaContainmentSupport(sys: SystemIR, diags: LoomDiag
           });
           continue;
         }
-        // Relational (§11c): persisted as child tables — allowed, EXCEPT the two
-        // not-yet-wired cases below.
-        const mutated = mutatedContainments(agg);
-        if (mutated.size > 0) {
-          const field = [...mutated][0];
-          diags.push({
-            severity: "error",
-            message:
-              `Deployable '${dep.name}' (platform ${dep.platform}) hosts ` +
-              `aggregate '${ctxName}.${agg.name}' whose operation mutates the relational ` +
-              `containment '${field}' (e.g. '${field} += …' / '${field} -= …') — the relational ` +
-              `containment 'put_assoc' op-mutation path is not yet wired on the elixir (plain Ecto) ` +
-              `backend (§11c follow-up). The persist + preload machinery IS wired, so create/read ` +
-              `of the nested parts works; only the in-op mutation is gated. Add 'shape(embedded)' to ` +
-              `the aggregate (where '${field} += …' lowers to 'put_embed'), drop the mutating ` +
-              `operation, or host this context on another backend.`,
-            source: `${sys.name}/${dep.name}`,
-            code: "loom.vanilla-containment-mutation-unsupported",
-          });
-          continue;
-        }
+        // Relational (§11c): persisted as child tables — allowed, INCLUDING
+        // in-operation mutation (`pipelines += Pipeline{…}` / `-=`).  The persist
+        // tail `put_assoc`s the mutated part-struct list (the schema's
+        // `on_replace: :delete` rewrites the child rows); see
+        // `persistPutBodies` (operation-returns-emit) and `renderReturningStmt`'s
+        // add/remove arms.  The ONE remaining not-yet-wired case is below.
         const nestedPart = (agg.parts ?? []).find((p) => (p.contains ?? []).length > 0);
         if (nestedPart) {
           diags.push({

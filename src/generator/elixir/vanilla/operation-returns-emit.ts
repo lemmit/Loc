@@ -42,15 +42,27 @@ function wireFieldsOf(agg: AggregateIR): string[] {
 /** The `Ecto.Changeset` put bodies that persist the columns an operation body
  *  assigned (deduped, declaration order) onto the threaded `record` — shared by
  *  the named-op persist tail (`context-emit.ts`) and the returning-op persist
- *  tail here.  A containment (`embeds_many`/`embeds_one`) round-trips via
- *  `put_embed`; scalar columns (incl. the co-located `<field>_provenance`
- *  backing columns the body assigned) via `put_change`.  Each is a real schema
- *  column on the mutated `record`, so `put_change`/`put_embed` is safe. */
+ *  tail here.  An EMBEDDED containment (`embeds_many`/`embeds_one`) round-trips
+ *  via `put_embed`; a RELATIONAL containment (`has_many`/`has_one` child table,
+ *  §11c) round-trips via `put_assoc` — the schema's `on_replace: :delete` rewrites
+ *  the child rows, and the body already rebound `record.<field>` to the mutated
+ *  list of part STRUCTS (`renderNew` emits `%Ctx.Part{…}`, mixed with the
+ *  preloaded structs), which `put_assoc` accepts.  Scalar columns (incl. the
+ *  co-located `<field>_provenance` backing columns the body assigned) via
+ *  `put_change`.  Each is a real schema column on the mutated `record`, so
+ *  `put_change`/`put_embed`/`put_assoc` is safe.
+ *
+ *  `relationalContainments` is the set of (snake-cased) containment field names
+ *  this aggregate persists as child tables rather than inline jsonb — computed
+ *  once by the caller via `usesRelationalContainments`, so the embedded-vs-
+ *  relational shape decision is NOT duplicated here (it stays the single
+ *  schema-emit predicate). */
 export function persistPutBodies(
   op: OperationIR,
   agg: AggregateIR,
   appModule: string,
   ctxModule: string,
+  relationalContainments: ReadonlySet<string> = new Set(),
 ): string[] {
   const containNames = new Set(agg.contains.map((c) => snake(c.name)));
   const assignedFields: string[] = [];
@@ -66,12 +78,27 @@ export function persistPutBodies(
   const provColumns = assignedFields.filter((f) => provNames.has(f)).map((f) => provColumn(f));
   return [
     ...assignedFields.map((f) => {
-      // A containment (`embeds_many`/`embeds_one`) round-trips via `put_embed`; a
+      // An EMBEDDED containment (`embeds_many`/`embeds_one`) round-trips via
+      // `put_embed`; a RELATIONAL containment (`has_many`/`has_one` child table,
+      // §11c) via `put_assoc` (the schema's `on_replace: :delete` rewrites the
+      // child rows — `record.<field>` already holds the mutated part structs); a
       // reference collection (`X id[]` → `many_to_many`) resolves its mutated id
       // list back to target structs and `put_assoc`s them (the schema's
       // `on_replace: :delete` rewrites the join rows); plain scalar columns (incl.
       // the provenance backing columns) via `put_change`.
-      if (containNames.has(f)) return `Ecto.Changeset.put_embed(:${f}, record.${f})`;
+      if (containNames.has(f)) {
+        // RELATIONAL: `put_assoc` over the mutated child list, NORMALISED to
+        // put_assoc-ready maps by `__put_assoc_parts/1` (the context helper).
+        // A bare part STRUCT with a nil PK is NOT inserted by `put_assoc`
+        // (Ecto treats a struct as an already-persisted row → empty changeset,
+        // verified by boot — the child row silently never persists); a plain map
+        // WITH `id` is kept/updated, WITHOUT `id` is inserted.  The helper drops
+        // the struct's `__meta__` / timestamps / unloaded `belongs_to` / nil
+        // fields so existing rows keep their PK and new ones insert cleanly.
+        return relationalContainments.has(f)
+          ? `Ecto.Changeset.put_assoc(:${f}, __put_assoc_parts(record.${f}))`
+          : `Ecto.Changeset.put_embed(:${f}, record.${f})`;
+      }
       const targetMod = refCollTargetModule(appModule, ctxModule, agg, f);
       if (targetMod) {
         // The body bound a local `<field>` holding the new id list (it left
@@ -128,6 +155,10 @@ export function renderReturningOpFunction(
   ctx: BoundedContextIR,
   agg: AggregateIR,
   op: OperationIR,
+  /** Containment fields this aggregate persists as child tables (relational
+   *  §11c) — those `put_assoc` rather than `put_embed`.  Caller computes via
+   *  `usesRelationalContainments`; empty (the default) keeps embedded output. */
+  relationalContainments: ReadonlySet<string> = new Set(),
 ): string {
   const aggPascal = upperFirst(agg.name);
   const aggModule = `${facadeMod}.${aggPascal}`;
@@ -217,7 +248,13 @@ export function renderReturningOpFunction(
     // ONE transaction so the derived rows commit atomically with the state
     // change.  A persist failure rolls back to `{:error, changeset}` (the
     // controller's `_result/2` gains a matching validation clause).
-    const putBodies = persistPutBodies(op, agg, appModule, facadeMod.split(".").slice(1).join("."));
+    const putBodies = persistPutBodies(
+      op,
+      agg,
+      appModule,
+      facadeMod.split(".").slice(1).join("."),
+      relationalContainments,
+    );
     const putBlock6 = putBodies.map((b) => `\n      |> ${b}`).join("");
     const txTail: string[] = [];
     if (hasProv) txTail.push(`          ${appModule}.Provenance.flush(${appModule}.Repo)`);
@@ -257,7 +294,13 @@ export function renderReturningOpFunction(
     // changeset and return the saved wire.  No provenance/audit → no transaction
     // is needed (a single state write); a validation failure surfaces as
     // `{:error, changeset}` (the controller's `_result/2` validation clause).
-    const putBodies = persistPutBodies(op, agg, appModule, facadeMod.split(".").slice(1).join("."));
+    const putBodies = persistPutBodies(
+      op,
+      agg,
+      appModule,
+      facadeMod.split(".").slice(1).join("."),
+      relationalContainments,
+    );
     const putBlock = putBodies.map((b) => `\n      |> ${b}`).join("");
     tailLines = [
       `    changeset =`,

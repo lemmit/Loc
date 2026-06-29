@@ -46,6 +46,7 @@ import {
 } from "./operation-returns-emit.js";
 import { refCollFieldNames } from "./ref-collection-emit.js";
 import { customFindsOf } from "./repository-emit.js";
+import { usesRelationalContainments } from "./schema-emit.js";
 import { stampUsesPrincipal } from "./stamp-emit.js";
 
 /** Operation names whose `<op>_<agg>` collide with the CRUD
@@ -119,12 +120,28 @@ function renderContextModule(
     // notably `update`/`destroy` from `with crudish` would redefine
     // `update_<agg>/2`/`delete_<agg>/1` otherwise.  The CRUD seam
     // already provides those names.
+    // Containment fields this aggregate persists as child tables (relational
+    // §11c, not inline `embeds_*` jsonb) — an op that mutates one `put_assoc`s
+    // it (vs `put_embed` for an embedded containment).  Computed ONCE here off
+    // the single schema-emit shape predicate so the persist tail never re-derives
+    // the embedded-vs-relational decision.
+    const relationalContainments = usesRelationalContainments(agg, ctx, sys)
+      ? new Set(agg.contains.map((c) => snake(c.name)))
+      : new Set<string>();
     const opBlocks = (agg.operations ?? [])
       .filter((op) => !CRUD_RESERVED_NAMES.has(op.name))
       .map((op) =>
         isReturningOperation(op)
-          ? renderReturningOpFunction(facadeMod, ctx, agg, op)
-          : renderNamedOpFunction(facadeMod, ctx, agg, aggPascal, aggSnake, op),
+          ? renderReturningOpFunction(facadeMod, ctx, agg, op, relationalContainments)
+          : renderNamedOpFunction(
+              facadeMod,
+              ctx,
+              agg,
+              aggPascal,
+              aggSnake,
+              op,
+              relationalContainments,
+            ),
       );
     // Custom-find defdelegates — `<find>_<agg>(args...)` routes to the
     // repository fn emitted by `customFindsOf`.  Workflow `repo-let`
@@ -274,6 +291,15 @@ ${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}${functi
     ? `\n${renderContextRefCollHelpers(appModule)}\n`
     : "";
 
+  // Shared relational-containment helper — emitted once per context module when
+  // ANY named operation mutates a RELATIONAL containment (`lines += Line{…}` on a
+  // `has_many` child-table aggregate, §11c).  `__put_assoc_parts/1` normalises the
+  // mutated part-struct list to `put_assoc`-ready maps (the persist tail calls it);
+  // see its emit for why a bare struct doesn't insert.
+  const putAssocPartsHelper = contextMutatesRelationalContainment(ctx, sys)
+    ? `\n${renderPutAssocPartsHelper()}\n`
+    : "";
+
   // A named-/returning-op body that `emit`s a domain event renders a catalog
   // `event_dispatched` line (`renderReturningStmt` "emit" arm) — that needs
   // `require Logger` in this host module.  Gate it so the require never sits
@@ -302,7 +328,7 @@ defmodule ${facadeMod} do
   workflow body).  Plain Elixir context module.
   """${requireLogger}${refCollHelpers ? "\n  import Ecto.Query" : ""}
 
-${blocks.join("\n")}${retrievalBlock}${readingServiceBlock}${ensureBlock}${refCollHelpers}end
+${blocks.join("\n")}${retrievalBlock}${readingServiceBlock}${ensureBlock}${refCollHelpers}${putAssocPartsHelper}end
 `;
 }
 
@@ -339,6 +365,70 @@ function contextUsesRefCollOp(ctx: BoundedContextIR): boolean {
         ),
     );
   });
+}
+
+/** Does any non-CRUD named operation in the context mutate a RELATIONAL
+ *  containment (`lines += Line{…}` / `-=` on a `has_many` child-table aggregate,
+ *  §11c)?  Gates the shared `__put_assoc_parts/1` helper emission — relational
+ *  containments persist via `put_assoc(..., __put_assoc_parts(record.f))`. */
+function contextMutatesRelationalContainment(ctx: BoundedContextIR, sys?: SystemIR): boolean {
+  return ctx.aggregates.some((agg) => {
+    if (isEventSourced(agg)) return false;
+    if (!usesRelationalContainments(agg, ctx, sys)) return false;
+    const containNames = new Set(agg.contains.map((c) => snake(c.name)));
+    if (containNames.size === 0) return false;
+    return (agg.operations ?? []).some(
+      (op) =>
+        !CRUD_RESERVED_NAMES.has(op.name) &&
+        op.statements.some(
+          (s) =>
+            (s.kind === "add" || s.kind === "remove") &&
+            s.collection &&
+            containNames.has(snake(s.target.segments[0] ?? "")),
+        ),
+    );
+  });
+}
+
+/** The private helper a context module emits when a named op mutates a RELATIONAL
+ *  containment.  Normalises the mutated part-struct list to `put_assoc`-ready
+ *  maps: a bare part STRUCT with a nil PK is NOT inserted by `put_assoc` (Ecto
+ *  reads a struct as an already-persisted row and produces an empty changeset —
+ *  the child row silently never persists), whereas a plain map WITHOUT an `id`
+ *  inserts and one WITH an `id` is kept/updated.  Dropping `__meta__` /
+ *  timestamps / the unloaded `belongs_to` / nil fields keeps existing rows on
+ *  their PK and lets new ones insert cleanly (`on_replace: :delete` rewrites). */
+function renderPutAssocPartsHelper(): string {
+  // The sole call site passes `record.<field>` AFTER the op body rebound it to
+  // `(record.<field> || []) ++ [<new part struct>]` — always a concrete list —
+  // so a single `is_list` clause covers every call (a `%Ecto.Association.NotLoaded{}`
+  // / catch-all clause is provably unreachable and trips `--warnings-as-errors`
+  // with "this clause is never used").  Per-element it still tolerates the three
+  // forms a mutated list can hold: an already-built changeset, a part struct, or
+  // a bare map.
+  return `  # Normalise a relational-containment value (a \`has_many\` of part structs,
+  # mixing loaded existing rows with freshly-built ones) to \`put_assoc\`-ready
+  # maps — a bare struct with a nil PK would NOT be inserted by \`put_assoc\`
+  # (Ecto reads a struct as an already-persisted row → empty changeset), but a
+  # map WITHOUT \`id\` inserts and one WITH \`id\` is kept/updated.
+  defp __put_assoc_parts(list) when is_list(list) do
+    Enum.map(list, fn
+      %Ecto.Changeset{} = cs ->
+        cs
+
+      %{__struct__: _} = part ->
+        part
+        |> Map.from_struct()
+        |> Map.drop([:__meta__, :inserted_at, :updated_at])
+        |> Enum.reject(fn {_k, v} ->
+          match?(%Ecto.Association.NotLoaded{}, v) or is_nil(v)
+        end)
+        |> Map.new()
+
+      other ->
+        other
+    end)
+  end`;
 }
 
 /** The two private helpers a context module emits when a named op mutates a
@@ -383,6 +473,9 @@ function renderNamedOpFunction(
   aggPascal: string,
   aggSnake: string,
   op: OperationIR,
+  /** Containment fields persisted as child tables (relational §11c) — these
+   *  `put_assoc` rather than `put_embed`.  Empty = embedded output (default). */
+  relationalContainments: ReadonlySet<string> = new Set(),
 ): string {
   const opSnake = snake(op.name);
   const aggModule = `${facadeMod}.${aggPascal}`;
@@ -438,6 +531,7 @@ function renderNamedOpFunction(
     agg,
     facadeMod.split(".")[0]!,
     facadeMod.split(".").slice(1).join("."),
+    relationalContainments,
   );
   const putBlock = putBodies.map((b) => `\n    |> ${b}`).join("");
   const putBlock6 = putBodies.map((b) => `\n      |> ${b}`).join("");
