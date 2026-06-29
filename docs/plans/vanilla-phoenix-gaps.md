@@ -352,19 +352,43 @@ is retired.  Embedded (`put_embed`) output stays byte-identical.
   **boot-verified green at runtime** (`mix test`, 1 passed: admin actor → guard
   passes → `status := "cancelled"` → assert).
 
-**Showcase flip** — with 11a–11e closed, the full showcase **compiles** on elixir
-and the `requires currentUser` op-call domain tests run. Re-adding elixir to
-`examples/showcase.ddd` + dropping `LOOM_E2E_SKIP_PHOENIX` is **compile-unblocked**.
-Remaining before the flip lands:
-1. The heavy verification that the elixir showcase serves a **parity-matching
-   OpenAPI** (the conformance-parity gate diffs the wire + boots the stack — it
-   does **not** run domain `mix test`).
-2. *Separately* (NOT flip-blocking): the showcase's own domain `mix test` still
-   has **further** elixir test-emit gaps beyond 11e (staging the showcase as a
-   vanilla-build fixture surfaces a remaining `mix test` failure). Because the
-   conformance-parity flip never runs domain `mix test` on the showcase, these
-   don't gate the flip; they're a follow-up toward "showcase fully green under
-   `mix test` on elixir" and would need their own enumerate-and-fix pass.
+**Showcase flip** — with 11a–11e closed, the full showcase **compiles + boots +
+migrates** on elixir. The flip was ATTEMPTED (PR #1612, re-add elixir + drop
+`LOOM_E2E_SKIP_PHOENIX`) and the `conformance-parity` job gave a definitive answer:
+the elixir showcase **boots cleanly** (Ecto migrate OK, `/health` → 200) but the
+parity diff **cannot run for phoenix** — see the two real, still-open gaps below.
+PR #1612 was closed (not merged); the flip stays blocked.
+
+### §11f. Phoenix emits no OpenAPI spec (`/openapi.json` → 404) — **OPEN, the flip's real blocker** (M–L)
+
+- The parity gate fetches each backend's `/openapi.json` and diffs them. On phoenix,
+  `GET /openapi.json` → **404 `Phoenix.Router.NoRouteError`** — the elixir backend
+  generates **no OpenAPI spec document and no route to serve it**. (The generated
+  `auth.ex` even *bypasses* `/openapi.json` from auth — the intent is there — but
+  nothing emits the route or the spec.) node/.NET/python/java all serve it (FastAPI
+  auto-generates, .NET Swashbuckle, Hono's openapi, etc.); elixir never had it,
+  which is partly *why* it was excluded from parity originally.
+- **This is a new codegen feature, not a §11a–e compile fix:** emit an OpenAPI 3
+  document from the IR (the same `wireShape` / route set the other backends expose)
+  + a `GET /openapi.json` controller/route on the phoenix backend. Until it ships,
+  phoenix structurally cannot participate in the OpenAPI-parity diff, so the flip
+  cannot land. Emitter home: `src/generator/elixir/vanilla/` (a new `openapi-emit.ts`
+  + a route in `api-emit.ts`/the router).
+
+### §11g. Phoenix workflow-controller action name (the e2e runtime leg) — **OPEN / likely stale test target** (S)
+
+- `e2e.test.ts`'s phoenix runtime-trigger target is hardcoded
+  `POST /api/workflows/register_project`, which 500s
+  (`WorkflowsController.register_project/2 is undefined` — the showcase actually
+  emits `promote_to_production`). Likely just a stale/wrong test target rather than
+  a codegen gap; reconcile the e2e target with the showcase's actual workflow when
+  restoring the phoenix legs. Moot until §11f lands.
+
+*Separately* (NOT flip-blocking): the showcase's own domain `mix test` still has
+**further** elixir test-emit gaps beyond 11e (staging the showcase as a vanilla-build
+fixture surfaces a remaining `mix test` failure). The conformance-parity gate never
+runs domain `mix test` on the showcase, so it doesn't gate the flip; it's a follow-up
+toward "showcase fully green under `mix test` on elixir".
 
 - **Verify:** `test/generator/elixir/vanilla-relational-parts.test.ts` (schema /
   changeset / repo / migration shape + the op-mutation `put_assoc(__put_assoc_parts)`
