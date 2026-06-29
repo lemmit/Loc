@@ -86,6 +86,47 @@ describe("vanilla LiveView operation-action bang seams (§13)", () => {
     expect(ctx).toMatch(/\{:error, reason\} -> raise/);
   });
 
+  // §11c follow-up — the PURE domain core (aggregate schema module, emitted only
+  // when the aggregate carries `test` blocks) must thread the actor for a
+  // `requires currentUser.<…>` op, or `current_user` is unbound and
+  // `mix compile --warnings-as-errors` fails (the showcase 5-backend-parity blocker).
+  it("threads current_user into the PURE-CORE op fn for a `requires currentUser` op", async () => {
+    const SRC = `
+system PC {
+  subdomain Sales { context Sales {
+    aggregate Customer {
+      name: string
+      status: string
+      operation confirm() {
+        requires currentUser.role == "manager"
+        status := "confirmed"
+      }
+      test "a fresh customer can be built" {
+        let c = Customer.create({ name: "acme" })
+        expect(c.name).toBe("acme")
+      }
+    }
+    repository Customers for Customer { }
+  } }
+  user { id: string  role: string }
+  api PApi from Sales
+  storage pg { type: postgres }
+  resource st { for: Sales, kind: state, use: pg }
+  deployable api { platform: elixir { foundation: vanilla } contexts: [Sales] dataSources: [st] serves: PApi port: 4000 auth: required }
+}
+`;
+    const files = await generateSystemFiles(SRC);
+    const key = [...files.keys()].find((k) => k.endsWith("/customer.ex"));
+    expect(key, "aggregate schema module not emitted").toBeDefined();
+    const core = files.get(key!)!;
+    // The pure-core op binds the actor (default nil so the inlined context caller
+    // and any 2-arg test call site still resolve), and the guard reads it.
+    expect(core).toMatch(
+      /def confirm\(%__MODULE__\{\} = record, _params, current_user \\\\ nil\) do/,
+    );
+    expect(core).toContain('current_user.role == "manager"');
+  });
+
   it("an aggregate with NO operations emits no op-action bangs (byte-identical)", async () => {
     const SRC = `
 system S2 {

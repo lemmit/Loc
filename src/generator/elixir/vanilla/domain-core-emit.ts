@@ -6,7 +6,7 @@ import type {
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
-import { stmtUsesParam } from "../domain/predicates.js";
+import { opUsesCurrentUser, stmtUsesParam } from "../domain/predicates.js";
 import type { RenderCtx } from "../render-expr.js";
 import { isVanillaDocAgg } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
@@ -139,9 +139,14 @@ function renderPureOp(
   // A void op returns the mutated struct; a value-returning op's `return`
   // statement is already the body's tail value (renderReturningStmt emits it).
   const tail = isReturningOperation(op) ? [] : ["    record"];
+  // A `requires currentUser.<…>` (or any `currentUser` reference) in the body
+  // renders `current_user.<…>`, so the pure-core fn must accept the actor — same
+  // `current_user \\ nil` arity the context wrapper carries (context-emit.ts).
+  // Without this the var is unbound → `mix compile --warnings-as-errors` fails.
+  const actorArg = opUsesCurrentUser(op) ? ", current_user \\\\ nil" : "";
   return [
     `  @doc "Pure domain core of \`${op.name}\` — preconditions + in-memory mutation (no persistence)."`,
-    `  def ${opSnake}(%__MODULE__{} = record, ${paramsArg})${guard} do`,
+    `  def ${opSnake}(%__MODULE__{} = record, ${paramsArg}${actorArg})${guard} do`,
     ...paramBinds,
     ...bodyLines,
     ...tail,

@@ -315,9 +315,37 @@ is retired.  Embedded (`put_embed`) output stays byte-identical.
    containments, so there's no backing storage. Stays `loom.vanilla-containment-unsupported`.
    (`shape(document)` containments stay gated too.)
 
-**Showcase flip** — showcase `Catalog.Project`'s `operation addPipeline(label) {
-pipelines += Pipeline{…} }` now compiles + persists on vanilla; re-adding elixir to
-`examples/showcase.ddd` + dropping `LOOM_E2E_SKIP_PHOENIX` is unblocked by this slice.
+### 11d. Pure-domain-core `requires currentUser` threading — **CLOSED**
+
+- Was: a `requires currentUser.<…>` (or any `currentUser` reference) on an
+  **aggregate operation** renders `current_user.role` in the **pure domain-core**
+  fn (the aggregate schema module, emitted by `domain-core-emit.ts` only when the
+  aggregate carries `test` blocks — `schema-emit.ts`: `agg.tests.length > 0`).
+  That fn was `def <op>(record, params)` with no actor → `undefined variable
+  "current_user"` → `mix compile --warnings-as-errors` failure. §11a (#1579) fixed
+  the **context** wrapper + **workflow** paths but left the pure core out — caught
+  only when the showcase (`Catalog.Project.rename/archive`, both tested + guarded)
+  was compiled on elixir.
+- Fixed: `domain-core-emit.ts` `renderPureOp` appends `, current_user \\ nil` to
+  the op `def` when `opUsesCurrentUser(op)` (the helper already in
+  `domain/predicates.js`, already used by context-emit) — mirroring the context
+  wrapper's arity. Regression: `vanilla-op-action-bang.test.ts` (pure-core
+  signature) + the compile-gated fixture
+  `vanilla-op-principal-guard.ddd` (a tested aggregate with a `requires
+  currentUser` op → `mix compile`; boot-verified green via the
+  `generated-elixir-vanilla-build` harness).
+
+**Showcase flip** — with 11a/11b/11c **and 11d** closed, the full showcase now
+**compiles** on elixir (verified: the harness progresses past compile into
+`mix test`). Re-adding elixir to `examples/showcase.ddd` + dropping
+`LOOM_E2E_SKIP_PHOENIX` is **compile-unblocked**. Two things remain before the
+flip lands: (1) the heavy verification that the elixir showcase serves a
+**parity-matching OpenAPI** (the conformance-parity gate diffs the wire, not just
+compile); (2) a *separate, non-flip-blocking* test-emit gap — a generated domain
+`test` that **calls** a `requires currentUser` op runs the pure core with a nil
+actor (`nil.role` raises), so the showcase's own `mix test` fails (the
+conformance-parity gate doesn't run domain `mix test`, so it doesn't block the
+flip, but it's a real test-emit actor-threading follow-up).
 
 - **Verify:** `test/generator/elixir/vanilla-relational-parts.test.ts` (schema /
   changeset / repo / migration shape + the op-mutation `put_assoc(__put_assoc_parts)`
