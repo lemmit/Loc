@@ -6,8 +6,9 @@
 // connection wiring compile against the real @mikro-orm/* types.
 //
 // Exercises the supported v1 surface: scalar (string/int/bool/datetime), enum,
-// value-object, single id-ref, optional fields, plus scalar / enum / id-ref
-// find predicates.
+// value-object, single id-ref, optional fields, scalar / enum / id-ref find
+// predicates, plus a context `retrieval` query bundle (where + sort + call-site
+// page → a `run<Name>` repository method, DEBT-17).
 
 system MikroNode {
   api OrdersApi from Sales
@@ -42,6 +43,14 @@ system MikroNode {
       repository Orders for Order {
         find byCustomer(customerId: Customer id): Order[] where this.customerId == customerId
         find byQuantity(quantity: int): Order[] where this.quantity >= quantity
+      }
+
+      // Named query bundle (retrieval.md) → a `runBulkOrders(min, page?)`
+      // repository method on MikroORM (DEBT-17): where (enum + scalar compare)
+      // + sort + call-site page.
+      retrieval BulkOrders(min: int) of Order {
+        where: this.status == Status.Confirmed && this.quantity >= min
+        sort: [placedAt desc]
       }
     }
   }

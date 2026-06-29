@@ -24,7 +24,10 @@
 //
 // SCOPE (v1, validator-gated in `ir/validate/validate.ts`): relational shape,
 // flat aggregates with scalar / enum / value-object / single id-ref fields,
-// CRUD + simple finds. Everything else is rejected at validate time.
+// CRUD + simple finds + context `retrieval` query bundles (where / sort /
+// call-site page — DEBT-17). Everything else is rejected at validate time; a
+// find / retrieval predicate outside the MikroORM FilterQuery subset emits a
+// runtime-throwing stub (mirrors the .NET Dapper v1 path).
 // ---------------------------------------------------------------------------
 
 import type {
@@ -34,11 +37,12 @@ import type {
   ExprIR,
   FieldIR,
   RepositoryIR,
+  RetrievalIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
-import { lowerFirst, plural, snake } from "../../../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import {
   deserializeField,
   docFieldType,
@@ -480,6 +484,50 @@ export function renderMikroRepository(
     );
   });
 
+  // Context `retrieval` query bundles targeting this aggregate (retrieval.md) —
+  // emitted as `run<Name>(...)` methods, the MikroORM analogue of the drizzle
+  // `runMethod` (DEBT-17).  The `where` lowers through the same `whereToMikroFilter`
+  // oracle a find uses (so the same subset is supported; an out-of-subset
+  // predicate emits a runtime-throwing stub).  `sort` → `em.find` `orderBy`, and
+  // a call-site `page` → `limit`/`offset` (never part of the declaration —
+  // mirrors the drizzle path).  MikroORM aggregates are flat (the validator gates
+  // parts/associations/non-relational off this adapter), so the hydrate is the
+  // same flat `hydrateRootExpr` the finds use — no bulk-load of containments.
+  const retrievalMethods = (ctx.retrievals ?? [])
+    .filter(
+      (r): r is RetrievalIR => r.targetType.kind === "entity" && r.targetType.name === agg.name,
+    )
+    .map((r) => {
+      const methodName = `run${upperFirst(r.name)}`;
+      const baseParams = r.params.map((p) => `${p.name}: ${tsParamType(p.type)}`);
+      const params = [...baseParams, "page?: { offset?: number; limit?: number }"].join(", ");
+      let filter: string;
+      try {
+        filter = whereToMikroFilter(r.where);
+      } catch {
+        return lines(
+          `  async ${methodName}(${params}): Promise<${agg.name}[]> {`,
+          `    throw new Error("mikroorm v1: this retrieval's predicate is not yet supported");`,
+          `  }`,
+        );
+      }
+      // `sort` → MikroORM `orderBy`.  Only the first path segment (a direct
+      // column) is used in v1 — nested / collection sort paths are gated by
+      // validateRetrievals, same as the drizzle path.
+      const orderBy =
+        r.sort.length > 0
+          ? `, orderBy: { ${r.sort.map((s) => `${s.path[0]!.name}: "${s.direction}"`).join(", ")} }`
+          : "";
+      return lines(
+        `  async ${methodName}(${params}): Promise<${agg.name}[]> {`,
+        `    const em = this.em.fork();`,
+        `    const rows = await em.find(${row}, ${filter}, { limit: page?.limit, offset: page?.offset${orderBy} });`,
+        dbg(r.name, "rows.length"),
+        `    return rows.map((row) => ${hydrate("row")});`,
+        `  }`,
+      );
+    });
+
   const deleteMethod = agg.canonicalDestroy
     ? lines(
         `  async delete(id: Ids.${agg.name}Id): Promise<void> {`,
@@ -533,6 +581,7 @@ export function renderMikroRepository(
     deleteMethod ? "" : null,
     deleteMethod || null,
     ...findMethods.flatMap((m) => ["", m]),
+    ...retrievalMethods.flatMap((m) => ["", m]),
     "",
     toWireMethod(agg, ctx),
     `}`,
