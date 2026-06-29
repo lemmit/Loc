@@ -1,0 +1,57 @@
+// DEBT-02 tail (complete) — capability `filter` on a shape(document) PYTHON
+// aggregate.  A document aggregate persists as ONE jsonb (id, data, version)
+// blob, which isn't per-field queryable, so the capability predicate is
+// evaluated IN-APP over the REHYDRATED domain instance (a list-comprehension
+// filter in `repository-document-builder.ts`), the SQLAlchemy analogue of
+// node's `documentCapabilityBody` `.filter(...)` — NOT a SQL `where` like the
+// relational / embedded paths.  This fixture exercises BOTH wired cases on one
+// document aggregate:
+//   - a NON-PRINCIPAL filter (`filter !this.archived`) → `not x.archived`
+//   - a PRINCIPAL filter (`filter this.tenantId == currentUser.tenantId`) →
+//     `current_user.tenant_id`, with `current_user = require_current_user()`
+//     bound once before each read (the ambient ContextVar accessor; no read-
+//     method parameter — `auth: required` emits the accessor).
+//
+// A custom find (`find popular`) reads a RAW load and AND-s the (bypass-aware)
+// capability predicate with its own `where`, so the principal scoping holds on
+// every read path.  Decisive check that the document reads + the principal
+// accessor stay ruff- and mypy --strict-clean under the python-build gate.
+system DocTenancy {
+  user { id: guid  tenantId: string }
+
+  subdomain Cms {
+    context Cms {
+      aggregate Article shape(document) {
+        tenantId: string
+        title: string
+        viewCount: int
+        archived: bool
+        contains sections: Section[]
+        entity Section { heading: string  body: string }
+        // Always-on row scoping: hide archived articles AND restrict to the
+        // requesting principal's tenant.
+        filter !this.archived
+        filter this.tenantId == currentUser.tenantId
+        operation addSection(heading: string, body: string) {
+          sections += Section { heading: heading, body: body }
+        }
+        operation bump() { viewCount := viewCount + 1 }
+      }
+      repository Articles for Article {
+        find popular(min: int): Article[] where this.viewCount >= min
+      }
+    }
+  }
+
+  api CmsApi from Cms
+  storage primary { type: postgres }
+  resource cmsState { for: Cms, kind: state, use: primary }
+  deployable api {
+    platform: python
+    contexts: [Cms]
+    dataSources: [cmsState]
+    serves: CmsApi
+    port: 8083
+    auth: required
+  }
+}

@@ -220,9 +220,10 @@ describe("python capability-filter support guard (W1a)", () => {
   // analogue of node's `requireCurrentUser()` weave).  DEBT-02 tail then wired
   // the `shape(embedded)` case (both non-principal and principal): an embedded
   // aggregate's root scalars are real columns, so `contextFilterPredicate` AND-s
-  // into the embedded SQL reads exactly like the relational path.  The only
-  // remaining gated case is `shape(document)` (the blob is one JSONB column, not
-  // per-field queryable — needs in-app filtering, not built; matches elixir).  A
+  // into the embedded SQL reads exactly like the relational path.  DEBT-02 tail
+  // is now COMPLETE: `shape(document)` is wired too — the blob is one JSONB
+  // column, so the predicate is evaluated IN-APP over the rehydrated instance
+  // (`documentCapabilityBody` → a list-comprehension filter), mirroring node.  A
   // principal filter still requires `auth: required` (no principal otherwise).
 
   it("accepts a NON-PRINCIPAL relational filter (W1a — now emitted)", async () => {
@@ -278,12 +279,25 @@ system Shop {
     ).toEqual([]);
   });
 
-  it("still gates a non-relational (document) shape filter", async () => {
-    const errs = await honoFilterErrors(
-      sys("python", { shape: "document", filter: "filter !this.isDeleted" }),
-    );
-    expect(errs).toHaveLength(1);
-    expect(errs[0]).toContain("python");
-    expect(errs[0]).toContain("shape(document)");
+  it("accepts a NON-PRINCIPAL filter on a python document aggregate (DEBT-02 tail complete — in-app filter)", async () => {
+    // The jsonb blob isn't per-field queryable, so the predicate is evaluated
+    // IN-APP over the rehydrated instance (`documentCapabilityBody` →
+    // list-comprehension filter), mirroring node.
+    expect(
+      await honoFilterErrors(
+        sys("python", { shape: "document", filter: "filter !this.isDeleted" }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("accepts a PRINCIPAL filter on a python document aggregate (DEBT-02 tail complete)", async () => {
+    expect(
+      await honoFilterErrors(
+        sys("python", {
+          shape: "document",
+          filter: "filter this.tenantId == currentUser.tenantId",
+        }),
+      ),
+    ).toEqual([]);
   });
 });
