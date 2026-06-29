@@ -87,6 +87,14 @@ import { type RenderCtx, renderExpr } from "../render-expr.js";
 
 export interface VanillaWorkflowExecResult {
   routes: ApiRoute[];
+  /** This context's command-triggered workflows (those that emit a POST
+   *  `/workflows/<name>` route).  Collected project-wide by the orchestrator so
+   *  the single deployable-level `WorkflowsController` can aggregate every hosted
+   *  context's actions — the HTTP surface is per-DEPLOYABLE, not per-context, so
+   *  a deployable serving N contexts must emit ONE controller (writing one
+   *  `workflows_controller.ex` per context to a fixed path clobbers all but the
+   *  last).  Empty when the context has no command workflows. */
+  commandWorkflows: WorkflowIR[];
 }
 
 export function emitVanillaWorkflowExecution(
@@ -97,7 +105,7 @@ export function emitVanillaWorkflowExecution(
   resourceModules: Map<string, string> = new Map(),
   sys?: SystemIR,
 ): VanillaWorkflowExecResult {
-  if (ctx.workflows.length === 0) return { routes: [] };
+  if (ctx.workflows.length === 0) return { routes: [], commandWorkflows: [] };
 
   const ctxModule = upperFirst(ctx.name);
   const ctxSnake = snake(ctx.name);
@@ -105,8 +113,14 @@ export function emitVanillaWorkflowExecution(
   const routes: ApiRoute[] = [];
 
   const commandWorkflows = ctx.workflows.filter(workflowEmitsCommandRoute);
-  if (commandWorkflows.length === 0) return { routes: [] };
+  if (commandWorkflows.length === 0) return { routes: [], commandWorkflows: [] };
 
+  // Per-workflow `run/1` modules are context-namespaced
+  // (`<App>.<Ctx>.Workflows.<Wf>`), so they never collide across contexts.  The
+  // single `WorkflowsController` that fronts them is a DEPLOYABLE-level artifact,
+  // though — emitted ONCE by the orchestrator (`emitVanillaWorkflowsController`)
+  // over every hosted context's `commandWorkflows`, so a multi-context deployable
+  // gets one controller with all actions rather than per-context overwrites.
   for (const wf of commandWorkflows) {
     const wfSnake = snake(wf.name);
     out.set(
@@ -114,11 +128,6 @@ export function emitVanillaWorkflowExecution(
       renderWorkflowModule(appModule, ctxModule, wf, resourceModules, ctx, sys),
     );
   }
-
-  out.set(
-    `lib/${appName}_web/controllers/workflows_controller.ex`,
-    renderWorkflowsController(appModule, ctxModule, commandWorkflows, ctx),
-  );
 
   for (const wf of commandWorkflows) {
     routes.push({
@@ -129,7 +138,32 @@ export function emitVanillaWorkflowExecution(
     });
   }
 
-  return { routes };
+  return { routes, commandWorkflows };
+}
+
+/** One context's command workflows, paired with the context (for resolving the
+ *  per-workflow module FQ name + the `currentUser` threading decision). */
+export interface WorkflowControllerGroup {
+  ctx: BoundedContextIR;
+  workflows: WorkflowIR[];
+}
+
+/** Emit the single deployable-level `WorkflowsController` aggregating the command
+ *  workflows of every context the deployable hosts.  Called ONCE by the
+ *  orchestrator after the per-context loop (the sibling of
+ *  `emitVanillaViewsController`).  No-op when no context has a command workflow. */
+export function emitVanillaWorkflowsController(
+  appName: string,
+  appModule: string,
+  groups: WorkflowControllerGroup[],
+  out: Map<string, string>,
+): void {
+  const nonEmpty = groups.filter((g) => g.workflows.length > 0);
+  if (nonEmpty.length === 0) return;
+  out.set(
+    `lib/${appName}_web/controllers/workflows_controller.ex`,
+    renderWorkflowsController(appModule, nonEmpty),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1350,34 +1384,38 @@ end
 `;
 }
 
-function renderWorkflowsController(
-  appModule: string,
-  ctxModule: string,
-  workflows: WorkflowIR[],
-  ctx?: BoundedContextIR,
-): string {
+function renderWorkflowsController(appModule: string, groups: WorkflowControllerGroup[]): string {
   const webModule = `${appModule}Web`;
 
-  const actions = workflows
-    .map((wf) => {
-      const wfSnake = snake(wf.name);
-      const wfMod = `${appModule}.${ctxModule}.Workflows.${upperFirst(wf.name)}`;
-      // When the workflow threads `current_user` (it names `currentUser` or
-      // calls a `currentUser`-gated op), bind it off `conn.assigns` and pass it
-      // through — mirrors the per-op controller action (api-emit.ts).  Otherwise
-      // the action is byte-identical to before.
-      const needsUser = ctx ? workflowNeedsCurrentUser(wf, ctx) : workflowUsesCurrentUser(wf);
-      if (needsUser) {
-        return `  def ${wfSnake}(conn, params) do
+  // One action per command workflow across ALL hosted contexts.  Each action
+  // routes to its own context-namespaced `<App>.<Ctx>.Workflows.<Wf>` module, so
+  // workflows from different contexts coexist in this single controller (the HTTP
+  // surface is per-deployable).  `currentUser` threading is decided per workflow
+  // against its OWN context.
+  const actions = groups
+    .flatMap((g) => {
+      const ctxModule = upperFirst(g.ctx.name);
+      return g.workflows.map((wf) => {
+        const wfSnake = snake(wf.name);
+        const wfMod = `${appModule}.${ctxModule}.Workflows.${upperFirst(wf.name)}`;
+        // When the workflow threads `current_user` (it names `currentUser` or
+        // calls a `currentUser`-gated op), bind it off `conn.assigns` and pass it
+        // through — mirrors the per-op controller action (api-emit.ts).
+        const needsUser = workflowNeedsCurrentUser(wf, g.ctx);
+        if (needsUser) {
+          return `  def ${wfSnake}(conn, params) do
     current_user = Map.get(conn.assigns, :current_user)
     respond(conn, ${wfMod}.run(params, current_user))
   end`;
-      }
-      return `  def ${wfSnake}(conn, params) do
+        }
+        return `  def ${wfSnake}(conn, params) do
     respond(conn, ${wfMod}.run(params))
   end`;
+      });
     })
     .join("\n\n");
+
+  const ctxList = groups.map((g) => upperFirst(g.ctx.name)).join(", ");
 
   return `# Auto-generated.
 defmodule ${webModule}.WorkflowsController do
@@ -1385,8 +1423,8 @@ defmodule ${webModule}.WorkflowsController do
   alias ${webModule}.ProblemDetails
 
   @moduledoc """
-  HTTP entry points for command-triggered workflows in the
-  ${ctxModule} context.
+  HTTP entry points for command-triggered workflows
+  (${ctxList}).
   """
 
 ${actions}

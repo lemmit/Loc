@@ -1,0 +1,50 @@
+// A deployable hosting TWO contexts, each with its own command-triggered
+// workflow.  The HTTP surface is per-DEPLOYABLE, so both workflows' actions must
+// land in ONE `workflows_controller.ex` (emitting it per-context to a fixed path
+// clobbered all but the last → the routed action was undefined → runtime 500).
+// Each workflow stays context-local (no cross-context reach); the controller
+// just composes the deployable's contexts.  Compiles under
+// `mix compile --warnings-as-errors`.
+system VanillaMultiCtxWf {
+  subdomain Sales {
+    context Orders {
+      aggregate Order ids guid {
+        code: string
+        active: bool
+      }
+      repository Orders for Order { }
+      workflow placeOrder {
+        create(code: string) {
+          precondition code.length > 0
+          let o = Order.create({ code: code, active: true })
+        }
+      }
+    }
+  }
+  subdomain Delivery {
+    context Shipments {
+      aggregate Shipment ids guid {
+        tracking: string
+      }
+      repository Shipments for Shipment { }
+      workflow scheduleShipment {
+        create(tracking: string) {
+          precondition tracking.length > 0
+          let s = Shipment.create({ tracking: tracking })
+        }
+      }
+    }
+  }
+  api SalesApi from Sales
+  api DeliveryApi from Delivery
+  storage pg { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: pg }
+  resource shipmentsState { for: Shipments, kind: state, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Orders, Shipments]
+    dataSources: [ordersState, shipmentsState]
+    serves: SalesApi, DeliveryApi
+    port: 4000
+  }
+}
