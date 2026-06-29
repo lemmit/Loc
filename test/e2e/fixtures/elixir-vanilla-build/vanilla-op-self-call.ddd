@@ -1,0 +1,56 @@
+// In-class operation→operation self-call in `return` tail position on
+// `foundation: vanilla`.  Every operation compiles to a context function
+// `<op>_<agg>(record, params)` returning a tagged `{:ok,_} | {:error,_}` tuple,
+// so a sibling-op self-call in `return` position is PASSED THROUGH unchanged
+// (the enclosing op returns the same shape — re-wrapping would double-tag):
+//   - `summarize` → `reserve_a(record, %{})`   (a public sibling op),
+//   - `viaHelper` → `helper_a(record, %{})`    (a PRIVATE sibling op — still
+//     emitted as a context fn, just without a controller route),
+//   - a `function` self-call stays the bare `is_draft(record)` (pure, arity 1).
+// Non-tail op-calls (`let x = reserve()`, `reserve() + "!"`) are rejected by
+// `loom.vanilla-op-call-position`, so only the tail form reaches codegen.
+// Compiled by build-generated-elixir-vanilla so the generated context module
+// passes `mix compile --warnings-as-errors`.
+system Catalog {
+  subdomain Core {
+    context Items {
+      aggregate Item with crudish {
+        code: string
+        status: string
+
+        function isDraft(): bool = status == "draft"
+
+        // A private operation: emitted as `helper_a/2`, no controller route.
+        private operation helper(): string {
+          return code
+        }
+        operation reserve(): string {
+          return code
+        }
+        // Tail self-call to a public sibling op (→ `reserve_a(record, %{})`),
+        // guarded by a `function` self-call (→ `is_draft(record)`).
+        operation summarize(): string {
+          precondition isDraft()
+          return reserve()
+        }
+        // Tail self-call to a PRIVATE sibling op (→ `helper_a(record, %{})`).
+        operation viaHelper(): string {
+          return helper()
+        }
+      }
+      repository Items for Item { }
+    }
+  }
+
+  api CatalogApi from Core
+  storage pg { type: postgres }
+  resource itemState { for: Items, kind: state, use: pg }
+
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Items]
+    dataSources: [itemState]
+    serves: CatalogApi
+    port: 4000
+  }
+}

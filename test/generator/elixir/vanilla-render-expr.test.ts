@@ -35,4 +35,40 @@ describe("render-expr vanilla leaves", () => {
     const prop: ExprIR = { kind: "ref", name: "shipState", refKind: "this-prop" };
     expect(renderExpr(prop, ctx)).toBe("record.ship_state");
   });
+
+  // An operation self-call resolves to the sibling op's context fn
+  // `<op>_<agg>(record, params)` (arity 2, tagged-tuple result); a `function`
+  // self-call stays the bare arity-1 `is_draft(record)`.  The op ctx needs `agg`
+  // so the `_<agg>` suffix resolves.
+  const opCtx: RenderCtx = {
+    thisName: "record",
+    contextModule: "Acme.Sales",
+    foundation: "vanilla",
+    // biome-ignore lint/suspicious/noExplicitAny: only `.name` is read by the call seam
+    agg: { name: "Item" } as any,
+  };
+
+  it("operation self-call → <op>_<agg>(record, %{}); named args → string-keyed map", () => {
+    const noArg: ExprIR = {
+      kind: "call",
+      callKind: "private-operation",
+      name: "reserve",
+      args: [],
+    };
+    expect(renderExpr(noArg, opCtx)).toBe("reserve_item(record, %{})");
+
+    const withArgs: ExprIR = {
+      kind: "call",
+      callKind: "private-operation",
+      name: "adjust",
+      args: [{ kind: "literal", lit: "int", value: "5" }],
+      argNames: ["delta"],
+    };
+    expect(renderExpr(withArgs, opCtx)).toBe('adjust_item(record, %{"delta" => 5})');
+  });
+
+  it("function self-call stays the bare arity-1 name", () => {
+    const fn: ExprIR = { kind: "call", callKind: "function", name: "isDraft", args: [] };
+    expect(renderExpr(fn, opCtx)).toBe("is_draft(record)");
+  });
 });

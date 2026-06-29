@@ -122,6 +122,20 @@ export function aggregateHasReturningOp(agg: AggregateIR): boolean {
   return agg.operations.some((op) => op.visibility === "public" && isReturningOperation(op));
 }
 
+/** Does any PUBLIC returning op on this aggregate declare an ERROR variant?
+ *  Only then does the controller emit a `problem_variant/5` *call* — a returning
+ *  op with an error-free return (a scalar like `: string`, or a success-only
+ *  union) takes the `{:ok, …}` path exclusively.  Gating the shared
+ *  `problem_variant/5` responder on this (not merely "has a returning op")
+ *  keeps it from being emitted-but-unused, which trips
+ *  `mix compile --warnings-as-errors`. */
+export function aggregateHasReturningOpError(agg: AggregateIR, ctx: BoundedContextIR): boolean {
+  return agg.operations.some(
+    (op) =>
+      op.visibility === "public" && isReturningOperation(op) && errorVariantsOf(op, ctx).length > 0,
+  );
+}
+
 /** A return variant is an *error* iff it names a `kind: "error"` payload in
  *  this context; the other (success) variant is the aggregate itself. */
 function isErrorTag(tag: string, ctx: BoundedContextIR): boolean {
@@ -358,6 +372,16 @@ export function renderReturningStmt(
 ): string {
   switch (s.kind) {
     case "return": {
+      // A tail sibling-operation self-call (`return reserve()`) passes its
+      // tagged tuple through UNCHANGED — the callee's context fn already returns
+      // `{:ok,_} | {:error,_}`, the same shape this op returns, so wrapping it in
+      // another `{:ok, …}` would double-tag.  (`render-expr.ts` renders the call
+      // as `<op>_<agg>(record, params)`; non-tail op-calls are rejected up front
+      // by `loom.vanilla-op-call-position`, so an op-call only ever reaches here
+      // as the whole return value.)
+      if (s.value.kind === "call" && s.value.callKind === "private-operation") {
+        return `    ${renderExpr(s.value, rc)}`;
+      }
       const value = renderExpr(s.value, rc);
       if (s.variantTag && isErrorTag(s.variantTag, ctx)) {
         // Error variant → `{:error, "<tag>", <fields-map>}`.  A record value

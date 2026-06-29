@@ -38,6 +38,7 @@ import {
   validateDataSourceUnwiredKnobs,
   validateDefaultDeny,
   validateDotnetStampSupport,
+  validateElixirOpSelfCallPosition,
   validateElixirStampSupport,
   validateEventSourcedStorage,
   validateEventSourcedWorkflowStorage,
@@ -120,6 +121,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateDataSourceCoverage(sys, diags);
     validateSavingShapeSupport(sys, diags);
     validateVanillaDocumentScope(sys, diags);
+    validateElixirOpSelfCallPosition(sys, diags);
     validateContextFilterSupport(sys, diags);
     validateFilterBypassSupport(sys, diags);
     validateJavaContainmentSupport(sys, diags);

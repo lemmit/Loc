@@ -106,4 +106,33 @@ system P {
     const ctl = f.get([...f.keys()].find((k) => k.endsWith("/controllers/task_controller.ex"))!)!;
     expect(ctl).not.toContain("defp problem_variant");
   });
+
+  it("does not emit the unused problem_variant helper for an error-free returning op", async () => {
+    // A returning op with a scalar (non-union) return takes the `{:ok, …}` path
+    // exclusively — it never calls `problem_variant/5`, so emitting the helper
+    // would be an unused `defp` that trips `mix compile --warnings-as-errors`.
+    const scalar = `
+system P {
+  subdomain Core {
+    context Tasks {
+      aggregate Task with crudish {
+        title: string
+        operation describe(): string { return title }
+      }
+      repository Tasks for Task { }
+    }
+  }
+  api A from Core
+  storage pg { type: postgres }
+  resource st { for: Tasks, kind: state, use: pg }
+  deployable api { platform: elixir { foundation: vanilla } contexts: [Tasks] dataSources: [st] serves: A port: 4000 }
+}
+`;
+    const f = await generateSystemFiles(scalar);
+    const ctl = f.get([...f.keys()].find((k) => k.endsWith("/controllers/task_controller.ex"))!)!;
+    // the returning op IS emitted (its result dispatch + {:ok, …} clause)...
+    expect(ctl).toContain("describe_task_result(conn, {:ok, success})");
+    // ...but the error-variant responder is NOT (no error variant calls it).
+    expect(ctl).not.toContain("defp problem_variant");
+  });
 });

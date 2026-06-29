@@ -32,7 +32,7 @@ import { isEventSourced, renderEsController } from "./eventsourced-emit.js";
 import { aggregateHasUnionFind, findRoutes, renderFindActions } from "./find-controller.js";
 import { isAbstractBase } from "./inheritance-emit.js";
 import {
-  aggregateHasReturningOp,
+  aggregateHasReturningOpError,
   isReturningOperation,
   renderProblemVariantHelper,
   renderReturningOpControllerAction,
@@ -255,11 +255,12 @@ ${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
     })
     .join("\n");
 
-  // Shared error-variant responder, emitted once when the aggregate has any
-  // returning op or a union find (else it'd be an unused private fn under
-  // --warnings-as-errors).
+  // Shared error-variant responder, emitted once when the aggregate has a
+  // returning op WITH an error variant or a union find (else it'd be an unused
+  // private fn under --warnings-as-errors — a returning op with a scalar /
+  // success-only return never calls it).
   const problemVariant =
-    aggregateHasReturningOp(agg) || aggregateHasUnionFind(ctx, agg)
+    aggregateHasReturningOpError(agg, ctx) || aggregateHasUnionFind(ctx, agg)
       ? `\n${renderProblemVariantHelper()}\n`
       : "";
 

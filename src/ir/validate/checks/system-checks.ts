@@ -27,7 +27,9 @@ import type {
   EnrichedLoomModel,
   EnrichedSystemIR,
   ExprIR,
+  OperationIR,
   SavingShape,
+  StmtIR,
   SubdomainIR,
   SystemIR,
   TypeIR,
@@ -46,6 +48,7 @@ import {
   resolveDataSourceConfig,
 } from "../../util/resolve-datasource.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
+import { walkExpr } from "./shared.js";
 import { validateE2ETest } from "./test-checks.js";
 
 // ---------------------------------------------------------------------------
@@ -526,6 +529,92 @@ export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnosti
             `(node / dotnet / python / java), or use shape(relational) / shape(embedded).`,
           source: `${sys.name}/${dep.name}`,
         });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// In-class operation→operation self-call position on elixir (vanilla).
+//
+// An aggregate operation compiles to a context function `<op>_<agg>(record,
+// params)` that returns a tagged `{:ok,_} | {:error,_}` tuple (exception-less.md
+// — the same carrier the controller `case`s on).  A sibling-operation self-call
+// can therefore only be PASSED THROUGH as the whole `return` value (the enclosing
+// op returns the same tagged shape) — it cannot be composed into a larger
+// expression or bound with `let`, because a tuple has no implicit unwrap in
+// Elixir.  The other backends model an operation as a plain method returning its
+// value directly, so they compose freely; on vanilla the non-tail case would
+// silently emit a tuple into arithmetic / a struct field, so reject it up front.
+// (A `function` self-call is unrestricted — functions are pure, arity-1, and
+// return their value directly.)  Mirrors `loom.vanilla-document-unsupported`.
+// ---------------------------------------------------------------------------
+
+/** Is this expression a sibling-operation self-call (vs a pure `function` /
+ *  value-object ctor / repo read)?  Operations — public and private — lower to
+ *  the `private-operation` callKind. */
+function isOperationSelfCall(e: ExprIR): e is ExprIR & { kind: "call" } {
+  return e.kind === "call" && e.callKind === "private-operation";
+}
+
+/** Visit every expression a statement roots — the value-bearing arms only
+ *  (mirrors the lowering's statement shapes); a bare `call` statement is itself
+ *  a no-op op-call on vanilla and is handled there, so its receiver is not an
+ *  expression to flag. */
+function eachStmtExpr(s: StmtIR, visit: (e: ExprIR) => void): void {
+  switch (s.kind) {
+    case "precondition":
+    case "requires":
+    case "let":
+    case "expression":
+      walkExpr(s.expr, visit);
+      break;
+    case "return":
+    case "assign":
+    case "add":
+    case "remove":
+      walkExpr(s.value, visit);
+      break;
+    case "emit":
+      for (const f of s.fields) walkExpr(f.value, visit);
+      break;
+  }
+}
+
+export function validateElixirOpSelfCallPosition(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+
+  for (const dep of sys.deployables) {
+    if (dep.platform !== "elixir") continue;
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+      for (const agg of ctx.aggregates) {
+        for (const op of agg.operations as OperationIR[]) {
+          for (const s of op.statements) {
+            // The single allowed site: an op-call that IS the whole value of a
+            // `return` (tail passthrough).  Every other occurrence is rejected.
+            const allowed =
+              s.kind === "return" && isOperationSelfCall(s.value) ? s.value : undefined;
+            eachStmtExpr(s, (e) => {
+              if (e === allowed || !isOperationSelfCall(e)) return;
+              diags.push({
+                severity: "error",
+                code: "loom.vanilla-op-call-position",
+                message:
+                  `operation '${ctxName}.${agg.name}.${op.name}' calls sibling operation ` +
+                  `'${e.name}' outside 'return' tail position, which the elixir backend can't ` +
+                  `lower — an operation compiles to a context function returning a tagged ` +
+                  `{:ok,_}|{:error,_} tuple, so its result can only be passed through as the ` +
+                  `whole 'return' value, not composed into a larger expression or bound with ` +
+                  `'let'. Use a bare 'return ${e.name}(...)', or host this context on a backend ` +
+                  `with full support (node / dotnet / python / java).`,
+                source: `${sys.name}/${dep.name}`,
+              });
+            });
+          }
+        }
       }
     }
   }
