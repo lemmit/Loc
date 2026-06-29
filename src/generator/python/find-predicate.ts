@@ -264,3 +264,40 @@ export function contextFilterPredicate(
 export function aggUsesPrincipalContextFilter(agg: EnrichedAggregateIR): boolean {
   return (agg.contextFilters ?? []).some(exprUsesCurrentUser);
 }
+
+// ---------------------------------------------------------------------------
+// IN-APP capability filter for a `shape(document)` aggregate (DEBT-02 tail).
+//
+// A document aggregate persists as ONE jsonb blob, which isn't per-field
+// queryable, so its repository filters the REHYDRATED domain instances in-app
+// (the SQLAlchemy analogue of node's `documentCapabilityBody` `.filter(...)`),
+// instead of AND-ing a SQL `where` like the relational / embedded paths above.
+// ---------------------------------------------------------------------------
+
+/** Render an aggregate's capability filters as a single Python boolean
+ *  expression over the rehydrated instance bound to `varName` — `this.<field>`
+ *  → `<varName>.<field>` (the public getter), and a principal `currentUser.x`
+ *  → `current_user.x`.  The caller binds `current_user = require_current_user()`
+ *  once before the predicate when `usesPrincipal` is true (the ambient
+ *  ContextVar accessor — no read-method parameter, mirroring node's
+ *  `requireCurrentUser()` weave).  Multiple filters conjoin with ` and `.
+ *
+ *  `bypass` (a read's `ignoring` clause) drops the named capability-origin
+ *  filters exactly like the relational `contextFilterPredicate`.  Returns null
+ *  when no filter survives (no capability filter, or all bypassed) — emission
+ *  then stays byte-identical to the pre-DEBT-02 document repository. */
+export function documentCapabilityBody(
+  agg: EnrichedAggregateIR,
+  varName: string,
+  bypass?: FilterBypass,
+): { expr: string; usesPrincipal: boolean } | null {
+  const kept = (agg.contextFilters ?? [])
+    .map((predicate, i) => ({ predicate, origin: agg.contextFilterOrigins?.[i] }))
+    .filter((e) => !isFilterBypassed(e.origin, bypass));
+  if (kept.length === 0) return null;
+  const expr = kept
+    .map(({ predicate }) => `(${renderPyExpr(predicate, { thisName: varName })})`)
+    .join(" and ");
+  const usesPrincipal = kept.some(({ predicate }) => exprUsesCurrentUser(predicate));
+  return { expr, usesPrincipal };
+}

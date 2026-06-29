@@ -11,10 +11,15 @@ import type {
 import { findUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
-import { lowerToSqlAlchemy } from "./find-predicate.js";
+import {
+  aggUsesPrincipalContextFilter,
+  documentCapabilityBody,
+  lowerToSqlAlchemy,
+} from "./find-predicate.js";
 import { rowClassName } from "./py-columns.js";
 import { renderPyExpr, renderPyType } from "./render-expr.js";
 import {
+  authUserImport,
   emittableFinds,
   findExecutedLine,
   partWireMethod,
@@ -46,6 +51,20 @@ export function buildPyDocumentRepositoryFile(
   const row = rowClassName(agg.name);
   const parts: EnrichedEntityPartIR[] = agg.parts;
   const findUser = emittableFinds(repo).some(findUsesCurrentUser);
+  // Capability `filter` on a document aggregate (DEBT-02 tail): the jsonb blob
+  // isn't per-field queryable, so the predicate is evaluated IN-APP over the
+  // rehydrated instance, mirroring node's `documentCapabilityBody` `.filter`.
+  // `capRec`/`capX` differ only in the bound variable name (`rec` for the
+  // single-row `find_by_id`, `x` for the list comprehensions).  Null when the
+  // aggregate has no capability filter — every read stays byte-identical to the
+  // pre-DEBT-02 document repository.  A principal-referencing predicate renders
+  // `current_user.<claim>`, with `current_user = require_current_user()` bound
+  // once before the read (the ambient accessor — no read-method parameter).
+  const capRec = documentCapabilityBody(agg, "rec");
+  const capX = documentCapabilityBody(agg, "x");
+  const usesPrincipal = aggUsesPrincipalContextFilter(agg);
+  const principalBind = usesPrincipal ? ["        current_user = require_current_user()"] : [];
+  const fromDoc = `_${snake(agg.name)}_from_doc`;
 
   const body = lines(
     `class ${agg.name}Repository:`,
@@ -57,7 +76,15 @@ export function buildPyDocumentRepositoryFile(
     `        row = await self._session.get(${row}, id)`,
     "        if row is None:",
     "            return None",
-    `        return _${snake(agg.name)}_from_doc(row.data)`,
+    ...(capRec
+      ? [
+          ...principalBind,
+          `        rec = ${fromDoc}(row.data)`,
+          `        if not (${capRec.expr}):`,
+          "            return None",
+          "        return rec",
+        ]
+      : [`        return ${fromDoc}(row.data)`]),
     "",
     `    async def get_by_id(self, id: ${agg.name}Id) -> ${agg.name}:`,
     "        found = await self.find_by_id(id)",
@@ -68,12 +95,22 @@ export function buildPyDocumentRepositoryFile(
     "",
     `    async def all(self) -> list[${agg.name}]:`,
     `        rows = (await self._session.execute(select(${row}))).scalars().all()`,
-    `        return [_${snake(agg.name)}_from_doc(r.data) for r in rows]`,
+    ...(capX
+      ? [
+          ...principalBind,
+          `        return [x for x in (${fromDoc}(r.data) for r in rows) if (${capX.expr})]`,
+        ]
+      : [`        return [${fromDoc}(r.data) for r in rows]`]),
     "",
     `    async def find_many_by_ids(self, ids: list[${agg.name}Id]) -> list[${agg.name}]:`,
     `        rows = (await self._session.execute(select(${row}).where(${row}.id.in_(list(ids))))).scalars().all()`,
-    `        return [_${snake(agg.name)}_from_doc(r.data) for r in rows]`,
-    ...emittableFinds(repo).flatMap((f) => ["", findMethod(agg, f, ctx)]),
+    ...(capX
+      ? [
+          ...principalBind,
+          `        return [x for x in (${fromDoc}(r.data) for r in rows) if (${capX.expr})]`,
+        ]
+      : [`        return [${fromDoc}(r.data) for r in rows]`]),
+    ...emittableFinds(repo).flatMap((f) => ["", findMethod(agg, f, ctx, capX != null)]),
     "",
     `    async def save(self, aggregate: ${agg.name}) -> None:`,
     `        data = _${snake(agg.name)}_to_doc(aggregate)`,
@@ -134,7 +171,9 @@ export function buildPyDocumentRepositoryFile(
     "from sqlalchemy import select",
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "",
-    findUser ? "from app.auth.user import User" : null,
+    // `User` for a per-find `where` principal param; `require_current_user` for
+    // an always-on principal capability filter (DEBT-02 tail) — one sorted import.
+    authUserImport(findUser, usesPrincipal),
     `from app.db.schema import ${row}`,
     "from app.domain.errors import AggregateNotFoundError",
     refersTo("DomainEvent")
@@ -163,6 +202,7 @@ function findMethod(
   agg: EnrichedAggregateIR,
   find: FindIR,
   _ctx: EnrichedBoundedContextIR,
+  aggHasCapFilter: boolean,
 ): string {
   // Document finds evaluate in-memory over the rehydrated aggregates —
   // the JSONB blob isn't queryable per-field the way a relational table
@@ -179,8 +219,51 @@ function findMethod(
   const isList = find.returnType.kind === "array";
   const isOptional = find.returnType.kind === "optional";
   const ret = isList ? `list[${agg.name}]` : isOptional ? `${agg.name} | None` : agg.name;
+
+  // When the aggregate carries a capability `filter` (DEBT-02 tail), a find
+  // must apply the capability predicate too — but it reads a RAW load (not the
+  // already-filtered `all()`) so an `ignoring` clause on the find can drop the
+  // named capability conjunct.  Both the (bypass-adjusted) capability predicate
+  // and the find's own `where` are AND-ed inline over `x`.  Without a capability
+  // filter the find stays byte-identical: it reuses `self.all()` and the
+  // `(lambda)(x)` form.
+  let out: string[];
+  if (aggHasCapFilter) {
+    const cap = documentCapabilityBody(agg, "x", {
+      bypassAll: find.bypassAll,
+      bypassCaps: find.bypassCaps,
+    });
+    // Bind the ambient principal only when this find's surviving capability
+    // predicate references it AND the find doesn't already take `current_user`
+    // as a `where` param (mirrors node's `&& !usesUser`).
+    const bindPrincipal = cap?.usesPrincipal && !usesUser;
+    const findCond = find.filter
+      ? renderPyExpr(find.filter, { thisName: "x" })
+      : conventionInline(agg, find);
+    const conds = [cap?.expr, findCond].filter((c): c is string => c != null).map((c) => `(${c})`);
+    const filtered = conds.length > 0 ? `[x for x in items if ${conds.join(" and ")}]` : "items";
+    out = [
+      `    async def ${snake(find.name)}(${sig}) -> ${ret}:`,
+      `        rows = (await self._session.execute(select(${rowClassName(agg.name)}))).scalars().all()`,
+      ...(bindPrincipal ? ["        current_user = require_current_user()"] : []),
+      `        items = [_${snake(agg.name)}_from_doc(r.data) for r in rows]`,
+    ];
+    if (isList) {
+      out.push(`        result = ${filtered}`);
+      out.push(findExecutedLine(agg, find.name, "len(result)"));
+      out.push("        return result");
+    } else {
+      out.push(`        matches = ${filtered}`);
+      out.push(findExecutedLine(agg, find.name, "len(matches)"));
+      out.push(
+        isOptional ? "        return matches[0] if matches else None" : "        return matches[0]",
+      );
+    }
+    return out.join("\n");
+  }
+
   const filtered = pred ? `[x for x in items if (${pred})(x)]` : "items";
-  const out = [
+  out = [
     `    async def ${snake(find.name)}(${sig}) -> ${ret}:`,
     "        items = await self.all()",
   ];
@@ -199,6 +282,14 @@ function findMethod(
 }
 
 function conventionPredicate(agg: EnrichedAggregateIR, find: FindIR): string | undefined {
+  const inline = conventionInline(agg, find);
+  return inline ? `lambda x: ${inline}` : undefined;
+}
+
+/** The convention-find clause (param-name → matching-field equality) WITHOUT
+ *  the `lambda x:` wrapper — used inline by the capability-scoped find path,
+ *  where the find condition is AND-ed with the capability predicate over `x`. */
+function conventionInline(agg: EnrichedAggregateIR, find: FindIR): string | undefined {
   const clauses: string[] = [];
   for (const p of find.params) {
     const matched = agg.fields.find(
@@ -206,7 +297,7 @@ function conventionPredicate(agg: EnrichedAggregateIR, find: FindIR): string | u
     );
     if (matched) clauses.push(`x.${snake(matched.name)} == ${snake(p.name)}`);
   }
-  return clauses.length > 0 ? `lambda x: ${clauses.join(" and ")}` : undefined;
+  return clauses.length > 0 ? clauses.join(" and ") : undefined;
 }
 
 // --- (de)serialisers --------------------------------------------------------

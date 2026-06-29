@@ -75,6 +75,10 @@ const CASES: Array<[fixture: string, project: string, flags?: string]> = [
   ["test/e2e/fixtures/python-build/resources.ddd", "api"],
   // shape(document): one jsonb (id, data, version) blob + in-memory finds.
   ["test/e2e/fixtures/python-build/document.ddd", "api"],
+  // shape(document) + capability filter (DEBT-02 tail complete): non-principal
+  // AND principal (`require_current_user()`) predicates evaluated IN-APP over the
+  // rehydrated docs (list-comprehension filter), ruff + mypy --strict clean.
+  ["test/e2e/fixtures/python-build/document-tenancy.ddd", "api"],
   // shape(embedded): queryable root row + one jsonb column per containment
   // / ref-collection; SQL finds over root columns.
   ["test/e2e/fixtures/python-build/embedded.ddd", "api"],
