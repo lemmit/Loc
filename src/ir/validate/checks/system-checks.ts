@@ -1503,8 +1503,11 @@ export function validateMikroOrmSupport(sys: SystemIR, diags: LoomDiagnostic[]):
     for (const ctxName of dep.contextNames) {
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
-      if ((ctx.retrievals ?? []).length > 0)
-        reject(`context '${ctxName}'`, "declares 'retrieval' query bundles (not yet on MikroORM)");
+      // Context `retrieval` query bundles ARE supported (DEBT-17): emitted as
+      // `run<Name>` methods, the MikroORM analogue of the drizzle `runMethod`.
+      // A retrieval whose `where` falls outside the MikroORM FilterQuery subset
+      // emits a runtime-throwing stub at codegen (same as a find predicate), so
+      // there's no validate-time gate here — mirrors the .NET Dapper v1 path.
       if ((ctx.seeds ?? []).length > 0)
         reject(
           `context '${ctxName}'`,

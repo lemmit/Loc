@@ -128,6 +128,77 @@ system D {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Context `retrieval` query bundles on mikroorm (DEBT-17) — emitted as
+// `run<Name>` repository methods, the MikroORM analogue of the drizzle
+// `runMethod`: `where` → FilterQuery, `sort` → `orderBy`, call-site `page` →
+// `limit`/`offset`.  An out-of-subset predicate emits a runtime-throwing stub
+// (mirrors the find path / the .NET Dapper v1 retrieval path).
+// ---------------------------------------------------------------------------
+describe("mikroorm — context retrievals (DEBT-17)", () => {
+  const RETRIEVAL_SRC = `system M {
+  api A from S
+  subdomain S {
+    context O {
+      enum Status { Draft, Confirmed }
+      aggregate Order with crudish {
+        customer: string
+        status:   Status
+        quantity: int
+        placedAt: datetime
+        active:   bool
+      }
+      repository Orders for Order { }
+      retrieval BulkOrders(min: int) of Order {
+        where: this.status == Status.Confirmed && this.quantity >= min
+        sort: [placedAt desc]
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource s { for: O, kind: state, use: pg }
+  deployable api { platform: node { persistence: mikroorm }  contexts: [O]  dataSources: [s]  serves: A  port: 8080 }
+}`;
+
+  it("no longer trips loom.mikroorm-unsupported for a retrieval", async () => {
+    const { errors } = await emit(RETRIEVAL_SRC);
+    expect(errors).toEqual([]);
+  });
+
+  it("emits a run<Name>(..., page?) method with where + orderBy + limit/offset", async () => {
+    const { files } = await emit(RETRIEVAL_SRC);
+    const repo = files.get("api/db/repositories/order-repository.ts")!;
+    expect(repo).toContain(
+      "async runBulkOrders(min: number, page?: { offset?: number; limit?: number }): Promise<Order[]>",
+    );
+    // where → FilterQuery (enum value + scalar $gte), page → limit/offset,
+    // sort → orderBy.
+    expect(repo).toContain(
+      'await em.find(OrderRow, { status: "Confirmed", quantity: { $gte: min } }, ' +
+        '{ limit: page?.limit, offset: page?.offset, orderBy: { placedAt: "desc" } });',
+    );
+    // Reuses the shared flat hydration seam (no bulk-load of containments).
+    expect(repo).toContain("Order._create({");
+  });
+
+  it("cleanly rejects an out-of-subset retrieval predicate (loom.find-predicate-unsupported)", async () => {
+    // A bare boolean column (`this.active`) is a valid retrieval `where`
+    // generally, but it's outside the MikroORM FilterQuery comparison subset.
+    // `validateFindPredicateAdapterSupport` already iterates retrievals, so it's
+    // rejected at validate time (not a runtime stub) — better than the Dapper
+    // path.  (The emitter still carries a defensive try/catch stub, mirroring
+    // the find path, in case the two subset notions ever diverge.)
+    const src = RETRIEVAL_SRC.replace(
+      "where: this.status == Status.Confirmed && this.quantity >= min",
+      "where: this.active",
+    ).replace("BulkOrders(min: int)", "Active()");
+    const { errors } = await emit(src);
+    expect(
+      errors.some((e) => /persistence: mikroorm/.test(e) && /cannot lower to SQL/.test(e)),
+    ).toBe(true);
+  });
+});
+
 describe("mikroorm capability gating (loom.mikroorm-unsupported)", () => {
   const rejects = async (body: string, needle: RegExp) => {
     const { errors } = await emit(sys("mikroorm", body));
