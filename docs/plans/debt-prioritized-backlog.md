@@ -19,7 +19,7 @@ targets.) When a cited file disagrees with any doc, the **code wins**.
 
 ---
 
-## Code-verified audit pass (2026-06-19)
+## Code-verified audit pass (2026-06-19, re-verified 2026-06-28)
 
 Every open entry was checked **against the actual validator gates / generator
 emitters** (not the prose). Headline: the **backend & adapter tier (DEBT-02,
@@ -27,26 +27,50 @@ emitters** (not the prose). Headline: the **backend & adapter tier (DEBT-02,
 genuinely gated (`loom.*-unsupported`) or stubbed (`AdapterNotImplementedError`).
 The **stale/over-stated entries were the frontend & "aspirational completeness"
 ones** — corrected this session: DEBT-08 (paged done, envelope no-live-use),
-DEBT-19 (TPH ships on all 5 backends), DEBT-04 lifecycle (vaporware → DEBT-16
-grammar-blocked), DEBT-12 (`requires` guard already ships; new-parts-in-body is
-an unreachable stub), DEBT-31 (sortBy dropped). Per-entry verdicts:
+DEBT-19 (TPH ships on all 5 backends), DEBT-31 (sortBy dropped).
+
+**2026-06-28 swarm re-verification** (every row re-checked against fresh `main`)
+found the backlog now stale on the **audit/lifecycle pair** — both have landed
+since the 2026-06-19 pass:
+- **DEBT-04 → DONE.** Audited operations *and* audited lifecycle now ship on
+  **all 5 backends**: `AUDIT_OP_BACKENDS === AUDIT_LIFECYCLE_BACKENDS ===
+  {node, dotnet, java, python, elixir}` (`system-checks.ts`). The grammar *does*
+  carry an `audited` slot on **both** `Create` and `Destroy`
+  (`ddd.langium:1505,1516` — `(audited?='audited')?`), `lowerCreate`/`lowerDestroy`
+  *read* it (`lower-members.ts:266,282` — `c.audited ?? false`, not hardcoded),
+  and node *emits the lifecycle audit row* (`routes-builder.ts:455,597` —
+  `tx.insert(schema.auditRecords)` for create+destroy, before:null/after=wire and
+  vice-versa). The old "lifecycle = vaporware / node gate aspirational" finding
+  was itself stale (likely written against pre-#1503 code).
+- **DEBT-16 → DONE** (was "⛔ BLOCKED on grammar"). The grammar block it was
+  waiting on never existed on fresh `main` — same `audited` slot + lowering +
+  all-5-backend emission as DEBT-04.
+- **DEBT-26** is *over-stated*, not wrong: the persisted workflow-state **row IS
+  emitted** on java/.NET/elixir-vanilla (`workflow-state-emit.ts` /
+  `workflow-instances-emit.ts`) and the IR fields (`stateFields`,
+  `correlationField`, `instanceWireShape`) *are* consumed — the genuine remainder
+  is the step-execution **choreography** + node/python persistence.
+- **DEBT-12** new-parts-in-body is **shipped** (`renderNew` in
+  `heex-walker-core.ts`), not "an unreachable stub".
+
+Everything else re-confirmed accurate. Per-entry verdicts:
 
 | ID | Verified | Note |
 |---|---|---|
 | 01 | ✅ DONE | tenancy filter on all 5 backends |
 | 02 | 🟢 mostly DONE (2026-06-28 re-verified) | Relational `filter`s ship on all 5 (principal + non-principal; **python's relational principal landed** — `supportsPrincipalFilter('python')` true). `shape(embedded)` `filter`s ship on node/java/elixir/.NET **and now python** (#1571), incl. the principal×embedded intersection (`supportsPrincipalNonRelationalFilter`; gate-verified by `embedded-tenancy.ddd`). The principal × `document` intersection also ships on node/java (verified 2026-06-28: the emitted node repo binds `requireCurrentUser()` and weaves `rec.tenantId === currentUser.tenantId` into every document read; build-gated by `ts-build/document-tenancy.ddd` + `java-build/document-tenancy.ddd`). Only remaining gap: a `filter` on a **`shape(document)`** aggregate on python (its jsonb blob isn't filtered in-app; elixir has no `document` shape). |
 | 03 | 🟢 **DONE** | Elixir (vanilla) union returns ship for return/let, in-memory `assign` mutation, `precondition`/`requires` guards, `emit` (PubSub) — **and now ref-collection (`X id[]` → `many_to_many`) `add`/`remove`**: the returning-op emitter was missing the enriched `agg` in its render context, so `members += t` silently miscompiled (containment-jsonb branch + no join-table write). Now it mirrors the non-returning path — binds the id-list local, persists via a `put_assoc` changeset, projects the wire to ids (`__ref_id_list/1`). The backlog's old "validator hint / `manage_relationship` / generic-action bridge" detail was **stale Ash fiction** (no such gate ever existed). |
-| 04 | ⚠️ RE-SCOPED | elixir audit-ops = real greenfield; lifecycle = vaporware (→16) |
+| 04 | ✅ DONE (2026-06-28 re-verified) | audited **ops + lifecycle** ship on all 5 backends; grammar has the `audited` slot on Create/Destroy, lowering reads it; node emits the lifecycle audit row. Old "vaporware/aspirational" finding was stale |
 | 05 | ✅ DONE | `For` shipped; List/Detail removed |
 | 06 | ✅ DONE | Provenance runtime shipped on the elixir backend (#1400). (Was foundation-aware vanilla-only; Ash foundation removed, so it's just the elixir backend now.) |
 | 07 | 🟢 DONE (CRUD) | elixir emits `shape(document)` (#1403) — `(id, data, version)` jsonb + schemaless-changeset fold |
 | 08 | ✅/⚠️ | paged done; envelope deferred (no live use) |
 | 09–11 | ✅ DONE | this session |
-| 12 | ✅ mostly DONE | `requires` guard ships (handle_params); new-parts unreachable; verify_token niche |
+| 12 | ✅ mostly DONE | `requires` guard ships (handle_params); new-parts-in-body **ships** (`renderNew`, not a stub — 2026-06-28); verify_token niche |
 | 13 | ⛔ WON'T-DO (de-scoped, #1588) | `X id[]` is contractually a **set**; ordering is a read-time projection (`position`/`rank` field + `sort:`), not join storage — see the DEBT-13 row. #1580 closed won't-do; #1590 then dropped the questionable join `ordinal` from all backends |
 | 14 | 🔴 OPEN | java `hosts:` → `loom.java-fullstack-unsupported` |
 | 15 | 🟢 **DONE (java)** | nested part-in-part containments (single **and** the silently-boot-broken collection case) now map on java: a part FKs to its DIRECT parent (`directParentOf`, shared with migrations-builder), so the `@OneToOne`/`@OneToMany` join column matches the Flyway DDL. Gate `loom.java-single-containment-unsupported` removed; boot-verified on Postgres. This is **Phase 1 of `nested-parts-alignment.md`** — node/.NET/python still flatten nested FKs to the root (lossy for a collection nested below the root); their realignment is Phases 2–4 |
-| 16 | ⛔ BLOCKED | grammar has no `audited` slot on Create/Destroy |
+| 16 | ✅ DONE (2026-06-28 re-verified) | the grammar "block" never existed on fresh `main` — Create/Destroy carry the `audited` slot, lowering reads it, all 5 backends emit the lifecycle audit row (merged into DEBT-04) |
 | 17 | 🟡 OPEN (partial) | MikroORM real adapter, v1-minimal (retrievals/assoc/inheritance stubbed) |
 | 18 | 🟡 OPEN (partial, **narrowed**) | Dapper **retrievals now ship**; only out-of-subset predicates stub (`NotImplementedException`) |
 | 19 | ✅ DONE | TPH on all 5 DB backends |
@@ -56,7 +80,7 @@ an unreachable stub), DEBT-31 (sortBy dropped). Per-entry verdicts:
 | 23 | 🔴 OPEN | marten/axon/jooq all `AdapterNotImplementedError` stubs |
 | 24 | 🟡 OPEN (**narrowed further**) | criterion reification ships on java/dotnet/node/elixir (python non-reifying *by design*). **.NET + Hono reified find/retrieval principal query-faces now bind the ambient principal** (.NET `RequestContext.Current!.CurrentUser!`, Hono `requireCurrentUser()`) — fixed a latent compile break on both where a `currentUser` criterion reified to an unbound `currentUser` (.NET CS0103 in the `Specification<T>` ctor; Hono `tsc` in the module-level `<name>Criterion` fn). **java + python audited + already correct** (inline query binds the ambient principal — java `@Query` SpEL, python `require_current_user()`), so the compile-bug residue is drained across every reifying backend. Remaining (lower-value cleanup): reifying a principal criterion into a `Criterion<T>`/named *object*, retiring `usesUser` find-threading, and **adding criterion reification to Phoenix** (it doesn't reify today — Ash path removed) |
 | 25 | 🔴 OPEN | worker/orleans/genserver all stubs |
-| 26 | 🟡 OPEN (**narrowed**) | instance **visibility** ships on all 5 backends; the **execution/persistence epic** (choreographer seam) remains |
+| 26 | 🟡 OPEN (**narrowed further, 2026-06-28**) | instance **visibility** ships on all 5; the persisted workflow-state **row IS emitted** on java/.NET/elixir-vanilla and the IR fields (`stateFields`/`correlationField`/`instanceWireShape`) **are consumed** — remaining = step-execution **choreography** + node/python persistence (not "no backend consumes the fields") |
 | 27 | 🔴 OPEN | 5 `PlatformSurface` hooks (authGate/auditInit/compliance/tenancy/i18n) are optional no-ops, zero impls (tenancy+audit landed via *other* paths) |
 | 28 | 🟡 OPEN (partial) | `loads:` lowered but **unconsumed** by every backend (hardcoded full-load); `find all` pagination grammar-gated |
 | 29 | 🔴 OPEN | views are single-source only (no joins, no per-view params) — grammar-level |
@@ -64,9 +88,11 @@ an unreachable stub), DEBT-31 (sortBy dropped). Per-entry verdicts:
 
 **Takeaway for picking work:** trust the backend-tier rows; with DEBT-06
 (provenance) and DEBT-07 (`shape(document)`) now landed on the elixir backend,
-with DEBT-03 (union `add`/`remove` bodies) now **done** on vanilla, and DEBT-13
-**de-scoped as a non-feature** (see its row), the backend tier is essentially
-drained of tractable parity wins.
+with DEBT-03 (union `add`/`remove` bodies) now **done** on vanilla, with DEBT-04
++ DEBT-16 (audit ops **and** lifecycle) now **done on all 5 backends** (2026-06-28
+re-verification — the grammar block and the "vaporware" framing were both stale),
+and DEBT-13 **de-scoped as a non-feature** (see its row), the backend tier is
+essentially drained of tractable parity wins.
 DEBT-24's compile-bug residue is drained across every reifying backend: .NET +
 Hono now bind the ambient principal in the reified find/retrieval query-face
 (latent compile breaks fixed), and java + python were audited as already correct
@@ -115,7 +141,7 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 | DEBT-01 | ~~Principal-referencing capability `filter` (`currentUser` / tenancy)~~ **DONE** — all five backends (node, .NET, elixir Ash + vanilla, java) wire it, incl. java reified-criterion retrievals | ~~node, elixir, java~~ | 5 | L | `proposals/criterion-everywhere.md` · **fully landed on every backend** |
 | DEBT-02 | Non-relational (`shape(document/embedded)`) capability `filter` — **node (both shapes) + java (both shapes) + elixir (`embedded`) landed** (document → in-app over the rehydrated aggregate; embedded → root scalars are real columns, so SQL `where` / `@SQLRestriction`). elixir has no `document` shape (DEBT-07). **principal-on-`embedded` now landed too** (`supportsPrincipalNonRelationalFilter`: node/java/elixir/python `embedded`, node/java `document`, .NET all; `embedded` gate-verified by `embedded-tenancy.ddd`). Remaining: a `filter` on a python `shape(document)` aggregate (python wires relational + `embedded`, not `document`). | ~~node, java, elixir~~ · ~~principal-emb~~ · python-`document` | 4 | M | — |
 | DEBT-03 | ~~Operation `or`-union return (exception-less ProblemDetails)~~ **DONE** | ~~elixir~~ | 4 | M | `exception-less.md` · return-dominant + `assign`/`precondition`/`requires`/`emit` **and ref-coll `add`/`remove`** all land on vanilla (the `add`/`remove` was a silent miscompile — missing `agg` in the returning-op render ctx — now persists via `put_assoc`, mirroring the non-returning path) |
-| DEBT-04 | Audit runtime parity — **RE-SCOPED** (see detail): `audited` ops → **elixir greenfield Ash audit** (real); `audited` lifecycle → **vaporware** (no grammar slot → DEBT-16); `with audit` stamping → vanilla-foundation | elixir | 4 | L | `type-system-feature-migration.md` (DBT) |
+| DEBT-04 | ~~Audit runtime parity~~ **DONE (2026-06-28 re-verified)** — audited **operations and lifecycle** (`create`/`destroy`) ship on all 5 backends. Grammar carries the `audited` slot on Create/Destroy (`ddd.langium:1505,1516`), lowering reads it (`lower-members.ts:266,282`), `AUDIT_OP_BACKENDS === AUDIT_LIFECYCLE_BACKENDS === {node,dotnet,java,python,elixir}`, and node emits the lifecycle audit row (`routes-builder.ts:455,597`). The earlier "vaporware / aspirational gate" finding was stale. `with audit` stamping ships via `contextStamps` (a separate, landed concern). | ~~elixir~~ | 4 | L | `type-system-feature-migration.md` (DBT) |
 | DEBT-05 | React walker `List` / `Detail` / `For` primitives (comment-only today) — **DONE: `For` implemented (all 4 frontends + HEEx; now with an optional `empty:` arm); `List`/`Detail`/`MasterDetail` were inert duplicates of `scaffoldList`/`scaffoldDetails` and were REMOVED** ([D-NO-PAGE-ARCHETYPES](../decisions.md#d-no-page-archetypes)) | react (→ vue/svelte) | — | — | resolved |
 | **P1 — parity + frontend completeness** |
 | DEBT-06 | Provenanced fields (lineage SDK + trace capture) — **DONE on `foundation: vanilla`**: the `<App>.Provenance` SDK (process-buffer + transactional flush + `Json` Ecto type), co-located `<field>_provenance` column, inline named-op capture, and the `provenance_records` migration; gate un-blocks elixir-vanilla (ash stays gated, like ES storage). Ash foundation parity remains out of scope (no co-located-column fit). | elixir/vanilla | 3 | L | `provenance.md`, `type-system-feature-migration.md` DBT-1 |
@@ -129,7 +155,7 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 | **P2 — backend structural gaps + minimal-v1 adapter completion** |
 | DEBT-14 | `hosts:` separate React bundle (only embedded `ui:` works) | java | 3 | L | `java-backend-implementation.md` |
 | DEBT-15 | Part-declared single (non-collection) containments — 🟢 **DONE (java, #1596)**; node/python/.NET part-containment build-out **deferred follow-up** (see note) | java ✅ / node, python, dotnet ⛔ | 2 | M | `nested-parts-alignment.md` |
-| DEBT-16 | Audited *lifecycle* actions (`audited create`/`destroy`) — **blocked on grammar**: `Create`/`Destroy` have no `audited` slot (lowering hardcodes `audited: false`); needs the grammar surface before any backend instrumentation. Also no backend emits it today (node's gate is aspirational) | grammar, then dotnet, java, node | 2 | M | — |
+| DEBT-16 | ~~Audited *lifecycle* actions (`audited create`/`destroy`)~~ **DONE (2026-06-28 re-verified)** — the "no grammar slot" block never existed on fresh `main`: `Create`/`Destroy` carry `(audited?='audited')?` (`ddd.langium:1505,1516`), lowering reads it (not hardcoded `false`), and all 5 backends emit the lifecycle audit row. Folded into DEBT-04. | ~~grammar, dotnet, java, node~~ | 2 | M | — |
 | DEBT-17 | MikroORM v1 → full surface (retrieval, assoc, inheritance, filters, …) | node | 3 | L | `retrieval-implementation.md` |
 | DEBT-18 | Dapper v1 → full surface (find/retrieval predicate + same set) | dotnet | 2 | L | — |
 | DEBT-19 | ~~TPH inheritance (`inheritanceUsing(sharedTable)`)~~ **DONE (stale entry)** — the validator's `TPH_CAPABLE` set is `{node, dotnet, elixir, python, java}` (all DB backends), so a TPH hierarchy is accepted on every backend; emission ships (Hono shared table + `kind`, .NET EF `HasDiscriminator`, Ash shared-table + `base_filter`). Verified 2026-06-19 | ~~dotnet, elixir, python, java~~ | 3 | L | `tph-unionall-and-contains.md` |
@@ -177,13 +203,13 @@ decompose first). Impact: 1 (niche) – 5 (core promise).
 - **Slice 3 (landed):** `emit` — renders the same `Phoenix.PubSub.broadcast(%Ctx.Events.Name{…})` the regular Ash op body / workflow emits (no persistence, so it fits the in-memory run fn; the per-context Dispatcher consumes it). Fixture `operation-returns-emit.ddd`.
 - **Follow-up — DONE on vanilla (the slices above are Ash-era history):** `add`/`remove` of a ref-collection (`X id[]` → `many_to_many`) inside a returning op. There was **no validator gate** (the "targeted hint / `manage_relationship` / generic-action bridge" framing was Ash-era fiction — none of it survived the Ash removal); it was a **silent miscompile** on vanilla: `renderReturningOpFunction` (`src/generator/elixir/vanilla/operation-returns-emit.ts`) omitted the enriched `agg` from its render context (which the non-returning `renderNamedOpFunction` sets), so `members += t` fell through to the containment-jsonb branch and the success tail returned an in-memory projection with no join-table write. Fix: thread `agg`, persist the success tail via a `put_assoc` changeset + `persist_change` when the body mutates a ref-collection, and project the ref-coll wire field through `__ref_id_list/1` — byte-mirroring the non-returning path. Fixture `test/e2e/fixtures/elixir-vanilla-build/vanilla-returns-ref-coll.ddd` (compiles under `mix compile --warnings-as-errors`).
 
-### DEBT-04 · Audit runtime parity — RE-SCOPED (investigated 2026-06-19)
-- **Where:** `validateAuditedOperationSupport` (`AUDIT_OP_BACKENDS = {node, dotnet}`, `AUDIT_LIFECYCLE_BACKENDS = {node}`).
-- **Finding — the entry conflated three things, one of which is vaporware:**
-  1. **`audited` operations** (`operation foo() audited`) — REAL and reachable (grammar has the `audited` slot on `Operation`). Runtime ships on node + dotnet (audit-record append in the save transaction). **elixir is the genuine gap** — the Ash backend emits *no* audit runtime, so audited ops are validation-gated off elixir. Closing it is a **greenfield Ash audit-record implementation** (`audit_records` resource/table + an Ash change capturing actor + before/after, staged in the action's transaction) — mirroring node/.NET from scratch (~L).
-  2. **`audited` lifecycle** (`audited create`/`destroy`) — **VAPORWARE.** The grammar's `Create`/`Destroy` rules have *no `audited` slot*; `lowerCreate`/`lowerDestroy` hardcode `audited: false` ("no grammar slot"); no macro sets it; and **node doesn't actually emit lifecycle audit rows either** (its routes-builder only instruments operations — the `AUDIT_LIFECYCLE_BACKENDS = {node}` gate is aspirational). So no `.ddd` program can express it and no backend honours it. Making it real needs a **grammar** addition first — that belongs to **DEBT-16**, and DEBT-16 is itself blocked on the grammar slot.
-  3. **`with audit` stamping** (`contextStamps` — audit fields stamped onCreate/onUpdate) — a *separate* capability; gated only on the **vanilla (Ecto) elixir foundation** (`system-checks.ts` `reject(…, "uses audit stamping")`). Smaller piece.
-- **Recommendation:** split this entry — lifecycle → DEBT-16 (grammar-first); operations → an elixir-greenfield ticket; stamping → vanilla-foundation. A `.NET`-lifecycle slice was prototyped and **discarded** as dead code (instrumentation for an unexpressible feature).
+### DEBT-04 · Audit runtime parity — DONE (re-verified 2026-06-28)
+- **Where:** `validateAuditedOperationSupport` — `AUDIT_OP_BACKENDS === AUDIT_LIFECYCLE_BACKENDS === {node, dotnet, java, python, elixir}` (`src/ir/validate/checks/system-checks.ts`).
+- **History:** the 2026-06-19 pass recorded this as RE-SCOPED, splitting it into "elixir-greenfield audit ops", "vaporware lifecycle (→ DEBT-16, grammar-blocked)", and "vanilla stamping". The 2026-06-28 swarm re-verification against fresh `main` found **all three have landed** — the "vaporware/grammar-blocked" framing was already stale (likely pre-#1503):
+  1. **`audited` operations** (`operation foo() audited`) — ships on all 5 backends (audit-record append in the save transaction). elixir is no longer the gap (`src/generator/elixir/vanilla/audit-emit.ts`).
+  2. **`audited` lifecycle** (`audited create`/`destroy`) — **REAL, not vaporware.** The grammar carries the slot on *both* `Create` and `Destroy` (`ddd.langium:1505,1516` — `(audited?='audited')?`); `lowerCreate`/`lowerDestroy` read it (`lower-members.ts:266,282` — `c.audited ?? false`/`d.audited ?? false`, **not** hardcoded); and node **emits the lifecycle audit row** in one transaction with the save (`src/platform/hono/v4/routes-builder.ts:455` create with `before:null`/`after`=wire; `:597` destroy with `before`=wire/`after:null`). elixir vanilla emits it too (`audit-emit.ts` lists `create(...) audited` / `destroy audited`).
+  3. **`with audit` stamping** (`contextStamps`) — ships via `contextStamps` (a separate, landed concern).
+- **Net:** DEBT-04 (and DEBT-16, which was waiting on the non-existent grammar block) are **DONE**.
 
 ### DEBT-05 · React walker `List` / `Detail` / `For` primitives — DONE
 - **Was:** `List`/`Detail`/`MasterDetail`/`For` were registered + source-admissible but rendered only as `// X: not supported by the React walker yet` — common page primitives silently degrading to comments.
@@ -212,7 +238,7 @@ Concise scope per item; full gate locations in the table above.
 
 - **DEBT-14 Java `hosts:`** — host a separately-declared react deployable's bundle (only embedded `ui:` works today). `system-checks.ts:491`, `loom.java-fullstack-unsupported`.
 - **DEBT-15 Java nested part-containments — DONE (java).** A nested part (`Shipment contains label: Label`, single or collection) now FKs to its **direct parent** (`labels.shipment_id`), not the aggregate root — via `directParentOf` (`src/ir/util/containment-parent.ts`), shared by `migrations-builder.ts` and the java emitter so the JPA join column and the Flyway DDL agree. Boot-verified end-to-end on Postgres (Flyway migrate → SQL-insert a two-level graph → GET nests `label`+`stickers` under the right `shipment`). The gate (`loom.java-single-containment-unsupported`) is gone. **This is Phase 1 of [`nested-parts-alignment.md`](nested-parts-alignment.md)** and the DEBT-15 **deliverable**. Phase-2 scoping then found the cross-backend "alignment" is far larger than the plan implied: node never saves single containments and never loads nested parts; python hard-codes the nested level empty (`label=None, stickers=[]`, with `_hydrate_*` helpers as dead code). So node/python/.NET part-containment is **substantially unimplemented**, not merely mis-FK'd — building it out is a real per-backend feature, **deferred** (no example uses part-in-part nesting on a non-Java backend, so nothing real is broken). Re-scoped details + decision in `nested-parts-alignment.md`.
-- **DEBT-16 Audited lifecycle (dotnet, java)** — `audited create`/`destroy` instrumentation.
+- **DEBT-16 Audited lifecycle — DONE (re-verified 2026-06-28):** `audited create`/`destroy` instrumentation ships on all 5 backends; the grammar slot it was "blocked" on exists (`ddd.langium:1505,1516`) and lowering reads it. Folded into DEBT-04.
 - **DEBT-17 / DEBT-18 MikroORM & Dapper v1 → full surface** — both reject the same set (retrieval bundles, seed, event-sourced, non-relational, inheritance, `Id[]` associations, nested parts, audit stamping, capability filters, provenanced, managed access) and throw on complex find predicates (`emit/mikroorm.ts:437`, `emit/dapper.ts:405`). Close incrementally toward the default-adapter surface.
 - **DEBT-19 TPH inheritance — DONE (stale):** `inheritanceUsing(sharedTable)` emission already ships on every DB backend — `validateInheritanceStorage`'s `TPH_CAPABLE = {node, dotnet, elixir, python, java}` accepts a TPH hierarchy on any of them (Hono Drizzle shared table + `kind` discriminator; .NET EF Core `HasDiscriminator`; Phoenix shared-table multi-resource + filter on `kind`). The "beyond node" framing was stale.
 - **DEBT-20 ES adapter alignment — DONE:** the latent misalignment is fixed — every backend's `eventLog` **default** resolves to a real adapter that actually emits the store (java `axon`→`jpa`, dotnet `marten`→`efcore`, elixir `ashPostgres`→`ecto`; node already used `drizzle`), and elixir's `ecto` adapter now declares `["state","eventLog"]` to match the vanilla event-sourced emit it drives. A `registry-lookup` invariant pins "default eventLog adapter is real & advertises eventLog" so a default can't regress to a stub. The idiomatic event-store stubs (`marten`/`axon`/`jooq`) remain reserved under DEBT-23.
@@ -243,12 +269,17 @@ Full stub inventory:
 ## P4 — epics & universal gaps (design-first)
 
 ### DEBT-26 · Workflow execution & persistence — strategic epic
-The largest cross-cutting unfinished area. `workflow` blocks parse and partially
-lower (elixir/vanilla has `workflow-execution-emit.ts`), but the IR carries
-fields **no backend consumes** — a persisted workflow-state row is never emitted
-(`src/ir/types/loom-ir.ts:917,925`), and frontend workflow forms are open
+The largest cross-cutting unfinished area, but **narrower than the original
+framing** (re-verified 2026-06-28): `workflow` blocks parse and lower, instance
+**visibility** ships on all 5 backends, and the persisted workflow-state **row IS
+emitted** on java/.NET/elixir-vanilla (`workflow-state-emit.ts` /
+`workflow-instances-emit.ts`), with the IR fields (`stateFields`,
+`correlationField`, `instanceWireShape`) **consumed** by those emitters — the old
+"IR carries fields no backend consumes / row never emitted" note was stale. The
+genuine remainder is the **step-execution choreography** (the choreographer seam)
+plus **persistence on node/python**, and frontend workflow forms are open
 (DEBT-11). **Recommend a design spike** (`workflow-choreographer-seam.md`) to
-decompose into: (a) persisted workflow row + repository, (b) per-backend step
+decompose into: (a) node/python persisted-row parity, (b) per-backend step
 execution, (c) frontend workflow forms, before scheduling slices.
 
 ### DEBT-27 · PlatformSurface reserved hooks
@@ -278,7 +309,7 @@ none require a design spike):
 2. ~~**DEBT-05** — React `List`/`Detail`/`For` primitives~~ — **done**: `For` implemented (all 4 frontends + HEEx, with an optional `empty:` arm); `List`/`Detail`/`MasterDetail` removed as inert duplicates ([D-NO-PAGE-ARCHETYPES](../decisions.md#d-no-page-archetypes)).
 3. **DEBT-01** — principal-referencing filters on node (then elixir, java) — highest demand.
 4. **DEBT-02** — non-relational filters (rides on DEBT-01's plumbing).
-5. **DEBT-04** — audit runtime parity (dotnet first, then elixir).
+5. ~~**DEBT-04** — audit runtime parity~~ — **DONE** (ops + lifecycle ship on all 5 backends; re-verified 2026-06-28).
 
 When we pick one up, spin its row into a focused slice plan under `docs/plans/`
 and link it back here.
