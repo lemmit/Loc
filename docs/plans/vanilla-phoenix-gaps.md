@@ -352,19 +352,23 @@ is retired.  Embedded (`put_embed`) output stays byte-identical.
   **boot-verified green at runtime** (`mix test`, 1 passed: admin actor → guard
   passes → `status := "cancelled"` → assert).
 
-**Showcase flip** — with 11a–11e closed, the full showcase **compiles** on elixir
-and the `requires currentUser` op-call domain tests run. Re-adding elixir to
-`examples/showcase.ddd` + dropping `LOOM_E2E_SKIP_PHOENIX` is **compile-unblocked**.
-Remaining before the flip lands:
-1. The heavy verification that the elixir showcase serves a **parity-matching
-   OpenAPI** (the conformance-parity gate diffs the wire + boots the stack — it
-   does **not** run domain `mix test`).
-2. *Separately* (NOT flip-blocking): the showcase's own domain `mix test` still
-   has **further** elixir test-emit gaps beyond 11e (staging the showcase as a
-   vanilla-build fixture surfaces a remaining `mix test` failure). Because the
-   conformance-parity flip never runs domain `mix test` on the showcase, these
-   don't gate the flip; they're a follow-up toward "showcase fully green under
-   `mix test` on elixir" and would need their own enumerate-and-fix pass.
+**Showcase flip — DONE (pending the PR's conformance-parity CI).** With 11a–11e
+closed, `examples/showcase.ddd` carries the elixir `phoenixApi` deployable again and
+`LOOM_E2E_SKIP_PHOENIX` is dropped from `conformance-parity.yml`, so the per-PR
+OpenAPI-parity gate boots + diffs **all five backends** (the `e2e.test.ts` legs were
+already phoenix-aware behind `!SKIP_PHOENIX`; the env stays as a local opt-out).
+
+The authoritative verification is the conformance-parity job itself (it boots the
+docker-compose stack incl. phoenix on :4000 and diffs every backend's
+`/openapi.json`) — a full 5-backend boot is impractical to run reliably outside CI,
+so the flip PR leans on that job: it merges only if parity is green, and a
+phoenix-specific divergence surfaces in the job's diff output as the next slice.
+
+*Separately* (NOT parity-blocking): the showcase's own domain `mix test` still has
+**further** elixir test-emit gaps beyond 11e (staging the showcase as a
+vanilla-build fixture surfaces a remaining `mix test` failure). The conformance-parity
+gate never runs domain `mix test` on the showcase, so it doesn't gate the flip; it's
+a follow-up toward "showcase fully green under `mix test` on elixir".
 
 - **Verify:** `test/generator/elixir/vanilla-relational-parts.test.ts` (schema /
   changeset / repo / migration shape + the op-mutation `put_assoc(__put_assoc_parts)`
