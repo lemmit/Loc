@@ -1,0 +1,46 @@
+// §11c follow-up regression — a `requires currentUser.<…>` guard on an AGGREGATE
+// operation must compile on vanilla.  The guard renders `current_user.role` in the
+// PURE domain-core module (domain-core-emit.ts), which is emitted only when the
+// aggregate carries `test` blocks (schema-emit.ts: `agg.tests.length > 0`).  That
+// pure-core op fn must accept the actor (`current_user \\ nil`, mirroring the
+// context wrapper) or `mix compile --warnings-as-errors` fails with "undefined
+// variable current_user".  This is the gap that blocked the showcase 5-backend-
+// parity flip (showcase Catalog.Project.rename/archive, which carry tests + a
+// `requires currentUser` guard).
+system OpGuard {
+  user { id: string  role: string }
+  subdomain Sales {
+    context Selling {
+      aggregate Order ids guid {
+        customer: string
+        status: string = "open"
+        invariant customer.length > 0
+        // The guarded op — `currentUser` renders into the pure domain core.
+        operation cancel(reason: string) {
+          requires currentUser.role == "admin"
+          status := "cancelled"
+        }
+        // A `test` block forces the pure-domain-core emission (where the gap lives).
+        test "a fresh order takes its defaults" {
+          let o = Order.create({ customer: "acme" })
+          expect(o.status).toBe("open")
+        }
+        test "blank customer is rejected" {
+          expect(Order.create({ customer: "" })).toThrow()
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api A from Sales
+  storage primary { type: postgres }
+  resource st { for: Selling, kind: state, use: primary }
+  deployable api {
+    platform: elixir
+    contexts: [Selling]
+    dataSources: [st]
+    serves: A
+    port: 4000
+    auth: required
+  }
+}
