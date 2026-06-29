@@ -236,9 +236,11 @@ function renderPyStatement(
     }
     case "call": {
       const args = s.args.map((a) => renderPyExpr(a)).join(", ");
-      // Both call targets (`function` / `private-operation`) render as
-      // the `_`-prefixed private method — see render-expr.ts's header.
-      return `${i}self._${snake(s.name)}(${args})`;
+      // A `function` is always a private method (`def _is_draft`); an operation
+      // is a public method (`def reserve`) unless declared `private`.  So only
+      // prefix `_` for a function or an actually-private operation.
+      const prefix = s.target === "private-operation" && !s.targetPrivate ? "" : "_";
+      return `${i}self.${prefix}${snake(s.name)}(${args})`;
     }
     case "expression":
       return `${i}${renderPyExpr(s.expr)}`;

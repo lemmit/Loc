@@ -479,12 +479,24 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
       return `%${ctx.contextModule}.${upperFirst(e.name)}{${args.join(", ")}}`;
     }
     case "function":
-    case "private-operation":
-      // Receiver-prefixed call.  Skip the trailing comma when the user
-      // function has no params — `passed(changeset, )` is invalid Elixir.
+    case "private-operation": {
+      // Receiver-prefixed call.  Skip the trailing comma when the callee has no
+      // params — `passed(changeset, )` is invalid Elixir.  An aggregate
+      // `function` is emitted as `is_draft(record)` (bare name).
+      //
+      // NOTE: a sibling-OPERATION self-call in expression position is NOT yet
+      // supported on vanilla — the operation's context fn is
+      // `<op>_<agg>(record, params)` (arity 2, returning a tagged
+      // `{:ok,_} | {:error,_}` tuple), not a pure-value arity-1 callable, and a
+      // `private operation` isn't emitted on vanilla at all.  Lowering this to a
+      // value needs params threading + tagged-tuple unwrapping (a real feature
+      // gap, tracked separately; works on node/dotnet/java/python).  The
+      // bare-statement op-call path already no-ops in `operation-returns-emit.ts`.
+      const fnName = snake(e.name);
       return args.length > 0
-        ? `${snake(e.name)}(${ctx.thisName}, ${args.join(", ")})`
-        : `${snake(e.name)}(${ctx.thisName})`;
+        ? `${fnName}(${ctx.thisName}, ${args.join(", ")})`
+        : `${fnName}(${ctx.thisName})`;
+    }
     case "repo-read": {
       // Read-only repository query in a `reading` domain-service body
       // (domain-services.md rev. 4, Slice 1; Elixir decision B — ambient

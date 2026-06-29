@@ -358,8 +358,15 @@ function renderCall(args: string[], e: CallExpr, ctx: PyRenderContext): string {
     case "value-object-ctor":
       return `${e.name}(${argList})`;
     case "function":
-    case "private-operation":
+      // Helper functions are always emitted as private methods (`def _is_draft`).
       return `${ctx.thisName}.${ctx.fnPrefix ?? "_"}${snake(e.name)}(${argList})`;
+    case "private-operation": {
+      // Operations are emitted as PUBLIC methods (`def reserve`) unless declared
+      // `private` (`def _reserve`) — so a sibling-operation self-call only gets
+      // the `_` prefix when the target is actually private.
+      const prefix = e.targetPrivate ? (ctx.fnPrefix ?? "_") : "";
+      return `${ctx.thisName}.${prefix}${snake(e.name)}(${argList})`;
+    }
     case "resource-op": {
       // Resource adapters land with the extern/auth slice (S16); the
       // call shape mirrors TS's awaited helper.

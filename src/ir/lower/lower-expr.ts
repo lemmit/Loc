@@ -363,6 +363,13 @@ function applySuffixToRecv(
         args,
         ...(named ? { argNames } : {}),
         ...(styleHoist.style ? { style: styleHoist.style } : {}),
+        // An operation self-call lowers to `private-operation` regardless of the
+        // target's `private` modifier; carry the resolved privacy so backends
+        // that name public vs private operations differently render the call
+        // against the right def-site name (Python `self.reserve` vs `self._reserve`).
+        ...(callKind === "private-operation"
+          ? { targetPrivate: findOperationInEnv(env, recv.name)?.private ?? false }
+          : {}),
       };
       // Result type best-effort — a function returns its declared type, an
       // operation returns its declared return type (an `or`-union for an
