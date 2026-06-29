@@ -107,6 +107,41 @@ describe("elixir domain `test` → ExUnit emission", () => {
     expect(findFile(files, /van_api\/test\/test_helper\.exs$/).trim()).toBe("ExUnit.start()");
   });
 
+  it("vanilla: threads a synthetic actor into a currentUser-gated op call in a test", async () => {
+    // §11d follow-up — the pure-core gated op carries `current_user \\ nil`; the
+    // ExUnit test must pass a privileged actor so the `requires currentUser` guard
+    // runs (not `nil.role`).  Mirror of node's TEST_ACTOR.
+    const SRC = `
+system G {
+  user { id: string  role: string }
+  subdomain Sales { context Selling {
+    aggregate Order ids guid {
+      customer: string
+      status: string = "open"
+      operation cancel(reason: string) {
+        requires currentUser.role == "admin"
+        status := "cancelled"
+      }
+      test "an admin can cancel" {
+        let o = Order.create({ customer: "acme" })
+        o.cancel("done")
+        expect(o.status).toBe("cancelled")
+      }
+    }
+    repository Orders for Order { }
+  } }
+  api GApi from Sales
+  storage pg { type: postgres }
+  resource st { for: Selling, kind: state, use: pg }
+  deployable api { platform: elixir { foundation: vanilla } contexts: [Selling] dataSources: [st] serves: GApi port: 4000 auth: required }
+}
+`;
+    const src = findFile(await generateSystemFiles(SRC), /api\/test\/selling\/order_test\.exs$/);
+    expect(src).toContain(
+      'Api.Selling.Order.cancel(o, %{"reason" => "done"}, %{id: "00000000-0000-0000-0000-000000000000", role: "admin", permissions: ["*"]})',
+    );
+  });
+
   it("vanilla: emits a validating value-object constructor + enforces it in base_changeset (F5)", async () => {
     const files = await generateSystemFiles(FIXTURE);
     // The VO module runs its invariant in a schemaless changeset.

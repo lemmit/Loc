@@ -335,17 +335,36 @@ is retired.  Embedded (`put_embed`) output stays byte-identical.
   currentUser` op → `mix compile`; boot-verified green via the
   `generated-elixir-vanilla-build` harness).
 
-**Showcase flip** — with 11a/11b/11c **and 11d** closed, the full showcase now
-**compiles** on elixir (verified: the harness progresses past compile into
-`mix test`). Re-adding elixir to `examples/showcase.ddd` + dropping
-`LOOM_E2E_SKIP_PHOENIX` is **compile-unblocked**. Two things remain before the
-flip lands: (1) the heavy verification that the elixir showcase serves a
-**parity-matching OpenAPI** (the conformance-parity gate diffs the wire, not just
-compile); (2) a *separate, non-flip-blocking* test-emit gap — a generated domain
-`test` that **calls** a `requires currentUser` op runs the pure core with a nil
-actor (`nil.role` raises), so the showcase's own `mix test` fails (the
-conformance-parity gate doesn't run domain `mix test`, so it doesn't block the
-flip, but it's a real test-emit actor-threading follow-up).
+### 11e. Domain-test actor threading for a `requires currentUser` op call — **CLOSED**
+
+- Was: a generated domain `test` that **calls** a `requires currentUser` op
+  (`expect(p.rename("")).toThrow()` / `o.cancel(...)`) lowered to
+  `<Agg>.<op>(record, params)` — no actor — so the pure-core guard (§11d) read a
+  nil `current_user` (`nil.role` → `BadMapError`, not the `ArgumentError` a
+  `requires` raises). The test mis-fails at `mix test`.
+- Fixed: `tests-emit.ts` `renderOp` threads a synthetic privileged actor
+  (`TEST_ACTOR` = `%{id: "00…0", role: "admin", permissions: ["*"]}`) as the
+  trailing arg when `opUsesCurrentUser(op)` — the parity sibling of node's
+  `TEST_ACTOR` (`emit/tests.ts`). Elixir `.field` access works on a plain map, so
+  no `%User{}` struct is needed; ungated ops stay byte-identical. Regression:
+  `exunit-tests-emit.test.ts` (threads the actor) + the `vanilla-op-principal-guard.ddd`
+  fixture gained an "an admin can cancel" test that **calls** the guarded op —
+  **boot-verified green at runtime** (`mix test`, 1 passed: admin actor → guard
+  passes → `status := "cancelled"` → assert).
+
+**Showcase flip** — with 11a–11e closed, the full showcase **compiles** on elixir
+and the `requires currentUser` op-call domain tests run. Re-adding elixir to
+`examples/showcase.ddd` + dropping `LOOM_E2E_SKIP_PHOENIX` is **compile-unblocked**.
+Remaining before the flip lands:
+1. The heavy verification that the elixir showcase serves a **parity-matching
+   OpenAPI** (the conformance-parity gate diffs the wire + boots the stack — it
+   does **not** run domain `mix test`).
+2. *Separately* (NOT flip-blocking): the showcase's own domain `mix test` still
+   has **further** elixir test-emit gaps beyond 11e (staging the showcase as a
+   vanilla-build fixture surfaces a remaining `mix test` failure). Because the
+   conformance-parity flip never runs domain `mix test` on the showcase, these
+   don't gate the flip; they're a follow-up toward "showcase fully green under
+   `mix test` on elixir" and would need their own enumerate-and-fix pass.
 
 - **Verify:** `test/generator/elixir/vanilla-relational-parts.test.ts` (schema /
   changeset / repo / migration shape + the op-mutation `put_assoc(__put_assoc_parts)`
