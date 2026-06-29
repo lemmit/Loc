@@ -6,6 +6,7 @@ import type {
   TestStmtIR,
 } from "../../../ir/types/loom-ir.js";
 import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
+import { opUsesCurrentUser } from "../domain/predicates.js";
 
 // ---------------------------------------------------------------------------
 // Vanilla (Ecto/Phoenix) domain `test "..."` → runnable ExUnit, ported 1:1 from
@@ -60,6 +61,16 @@ const MONEY_CMP: Record<string, string> = {
   toBeLessThan: "== :lt",
   toBeLessThanOrEqual: "in [:lt, :eq]",
 };
+
+// A synthetic privileged actor threaded into a currentUser-gated op call in a
+// domain test (the pure-core fn gained a trailing `current_user \\ nil` arg —
+// §11d).  A bare test block has no auth context, so without this the guard reads
+// a nil actor (`nil.role` → BadMapError, not the ArgumentError a `requires`
+// raises) and the test mis-fails.  Mirror of node's `TEST_ACTOR` (emit/tests.ts):
+// a map satisfying the common guard fields (role/permissions/id) — Elixir `.field`
+// access works on a plain map, so no `%User{}` struct is needed.
+const TEST_ACTOR =
+  '%{id: "00000000-0000-0000-0000-000000000000", role: "admin", permissions: ["*"]}';
 
 const SKIP_BODY = [
   "  # Skipped on vanilla Elixir: this test constructs/validates a value object",
@@ -304,7 +315,11 @@ function renderOp(e: ExprIR, env: Env): string {
   const params = e.args
     .map((a, i) => `${JSON.stringify(op.params[i]?.name ?? `arg${i}`)} => ${vtExpr(a, env)}`)
     .join(", ");
-  return `${env.aggMod}.${snake(op.name)}(${recv}, %{${params}})`;
+  // A currentUser-gated op's pure-core fn carries a trailing `current_user`
+  // (§11d); thread a synthetic privileged actor so the guard runs (parity with
+  // node's test emitter).  Ungated ops are byte-identical.
+  const actor = opUsesCurrentUser(op) ? `, ${TEST_ACTOR}` : "";
+  return `${env.aggMod}.${snake(op.name)}(${recv}, %{${params}}${actor})`;
 }
 
 // ---------------------------------------------------------------------------

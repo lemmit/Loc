@@ -28,6 +28,15 @@ system OpGuard {
         test "blank customer is rejected" {
           expect(Order.create({ customer: "" })).toThrow()
         }
+        // Calls the guarded op — the emitted ExUnit test must thread a synthetic
+        // privileged actor so the `requires currentUser.role == "admin"` guard
+        // runs (not `nil.role`).  Exercises §11d (pure-core binds the actor) AND
+        // the test-emit actor threading together, at RUNTIME (mix test).
+        test "an admin can cancel an order" {
+          let o = Order.create({ customer: "acme" })
+          o.cancel("done")
+          expect(o.status).toBe("cancelled")
+        }
       }
       repository Orders for Order { }
     }
