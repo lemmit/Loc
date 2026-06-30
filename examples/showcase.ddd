@@ -283,6 +283,12 @@ system DevPlatform {
               }
             }
 
+            // Seed (Seed + SeedRow) — dataset rows materialised at migrate time.
+            seed default {
+                Project { name: "Seeded Alpha", visibility: Public, active: true, sequence: 0, budget: 0.0, createdAt: "2024-01-01T00:00:00Z" }
+                Project { name: "Seeded Beta",  visibility: Internal, active: false, sequence: 1, budget: 10.0, createdAt: "2024-01-02T00:00:00Z" }
+            }
+
             // View — shorthand form.
             view ActiveProjects = Project where active == true
 
