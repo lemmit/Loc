@@ -161,7 +161,8 @@ defmodule ${appModule}.MixProject do
       {:postgrex, "~> 0.20"},
       {:phoenix_html, "~> 4.1"},
       {:jason, "~> 1.4"},
-      {:plug_cowboy, "~> 2.6"}${liveViewDep}${extraBlock}${oidcDep}
+      {:plug_cowboy, "~> 2.6"},
+      {:open_api_spex, "~> 3.0"}${liveViewDep}${extraBlock}${oidcDep}
     ]
   end
 
@@ -365,9 +366,31 @@ function renderVanillaRouter(
   oidc: boolean,
   liveRoutes: LiveRoute[] = [],
 ): string {
-  const routeLines = apiRoutes
+  // Routes prefixed with `!root:` (e.g. the OpenAPI spec endpoint) sit OUTSIDE
+  // the `/api` scope so they're served at the router root (cross-backend
+  // alignment: every backend serves `/openapi.json`).  They still pipe through
+  // `:api` for JSON content negotiation — the Auth plug there already bypasses
+  // `/openapi.json`, so they stay reachable without a token.  Bare paths splice
+  // into `scope "/api"` as before.
+  const rootApiRoutes = apiRoutes.filter((r) => r.path.startsWith("!root:"));
+  const scopedApiRoutes = apiRoutes.filter((r) => !r.path.startsWith("!root:"));
+  const routeLines = scopedApiRoutes
     .map((r) => `    ${r.method} "${r.path}", ${r.controller}, ${r.action}`)
     .join("\n");
+  const rootApiLines = rootApiRoutes
+    .map((r) => {
+      const path = r.path.slice("!root:".length);
+      return `    ${r.method} "${path}", ${appModule}Web.${r.controller}, ${r.action}`;
+    })
+    .join("\n");
+  const rootApiScope = rootApiLines
+    ? `
+  scope "/" do
+    pipe_through :api
+${rootApiLines}
+  end
+`
+    : "";
   // LiveView spine: a `:browser` pipeline (session + live-flash + root
   // layout + CSRF/secure headers) and a `live_session :default` wrapping
   // the live routes so the `${appModule}Web.Nav` on_mount hook assigns
@@ -444,7 +467,7 @@ ${browserPipeline}
   scope "/ready" do
     get "/", ${appModule}Web.HealthController, :readiness
   end
-${liveScope}${authScope}
+${rootApiScope}${liveScope}${authScope}
   scope "/api", ${appModule}Web do
     pipe_through :api
 ${routeLines}

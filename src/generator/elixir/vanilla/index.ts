@@ -36,6 +36,7 @@ import { emitVanillaChangesets } from "./changeset-emit.js";
 import { emitVanillaContextModule } from "./context-emit.js";
 import { emitVanillaEventModules } from "./events-emit.js";
 import { emitVanillaEventSourcedFiles } from "./eventsourced-emit.js";
+import { emitOpenApiSpec } from "./openapi-emit.js";
 import { renderVanillaProblemDetailsModule } from "./problem-details-emit.js";
 import { emitVanillaProvenance } from "./provenance-emit.js";
 import { emitVanillaRepositories } from "./repository-emit.js";
@@ -154,6 +155,22 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   }
   if (hasDomainTests) emitTestHelper(out);
   apiRoutes.push(...emitVanillaViewsController(appName, appModule, allViews, out));
+
+  // --- OpenAPI spec ----------------------------------------------------------
+  // Emits the <Api>Spec module, per-aggregate/workflow/view schema modules, and
+  // the OpenapiController, plus a `!root:/openapi.json` route entry spliced into
+  // the router ROOT (not under /api) so the spec sits at /openapi.json on every
+  // backend — joining the 5-backend conformance-parity diff.  The generated
+  // Auth plug already bypasses /openapi.json so it serves without a token.
+  const { files: openApiFiles, routes: openApiRoutes } = emitOpenApiSpec({
+    contexts,
+    deployable,
+    sys,
+    appName,
+    appModule,
+  });
+  for (const [path, content] of openApiFiles) out.set(path, content);
+  apiRoutes.push(...openApiRoutes);
 
   // Provenance runtime — the `<App>.Provenance` SDK (trace buffer + history
   // flush + the `Json` Ecto type + `Record` schema) plus the migration that
