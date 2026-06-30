@@ -353,36 +353,31 @@ is retired.  Embedded (`put_embed`) output stays byte-identical.
   passes → `status := "cancelled"` → assert).
 
 **Showcase flip** — with 11a–11e closed, the full showcase **compiles + boots +
-migrates** on elixir. The flip was ATTEMPTED (PR #1612, re-add elixir + drop
-`LOOM_E2E_SKIP_PHOENIX`) and the `conformance-parity` job gave a definitive answer:
-the elixir showcase **boots cleanly** (Ecto migrate OK, `/health` → 200) but the
-parity diff **cannot run for phoenix** — see the two real, still-open gaps below.
-PR #1612 was closed (not merged); the flip stays blocked.
+migrates** on elixir. A first flip attempt (PR #1612, closed) surfaced two more real
+gaps via the `conformance-parity` job — **both now CLOSED** (§11f, §11g below) — so
+the flip is **re-attempted** (re-add elixir + drop `LOOM_E2E_SKIP_PHOENIX`); the
+authoritative 5-backend parity match is verified by the flip PR's own
+`conformance-parity` job.
 
-### §11f. Phoenix emits no OpenAPI spec (`/openapi.json` → 404) — **OPEN, the flip's real blocker** (M–L)
+### §11f. Phoenix emits no OpenAPI spec (`/openapi.json` → 404) — **CLOSED** (#1615)
 
-- The parity gate fetches each backend's `/openapi.json` and diffs them. On phoenix,
-  `GET /openapi.json` → **404 `Phoenix.Router.NoRouteError`** — the elixir backend
-  generates **no OpenAPI spec document and no route to serve it**. (The generated
-  `auth.ex` even *bypasses* `/openapi.json` from auth — the intent is there — but
-  nothing emits the route or the spec.) node/.NET/python/java all serve it (FastAPI
-  auto-generates, .NET Swashbuckle, Hono's openapi, etc.); elixir never had it,
-  which is partly *why* it was excluded from parity originally.
-- **This is a new codegen feature, not a §11a–e compile fix:** emit an OpenAPI 3
-  document from the IR (the same `wireShape` / route set the other backends expose)
-  + a `GET /openapi.json` controller/route on the phoenix backend. Until it ships,
-  phoenix structurally cannot participate in the OpenAPI-parity diff, so the flip
-  cannot land. Emitter home: `src/generator/elixir/vanilla/` (a new `openapi-emit.ts`
-  + a route in `api-emit.ts`/the router).
+- Was: `GET /openapi.json` → **404** — the elixir backend emitted no OpenAPI document
+  or route, so it couldn't join the OpenAPI-parity diff.
+- Fixed: **recovered** the `OpenApiSpex`-based, IR-driven emitter deleted in #1568
+  (mislabeled Ash-coupled; it isn't — 99% reusable verbatim) as
+  `src/generator/elixir/vanilla/openapi-emit.ts`, wired the `emitOpenApiSpec` call +
+  the `{:open_api_spex, "~> 3.0"}` dep + a root `GET /openapi.json` route.
+  Boot-verified: phoenix serves the spec → **200** (openapi/paths/components).
 
-### §11g. Phoenix workflow-controller action name (the e2e runtime leg) — **OPEN / likely stale test target** (S)
+### §11g. WorkflowsController collided across contexts (→ runtime 500) — **CLOSED** (#1610)
 
-- `e2e.test.ts`'s phoenix runtime-trigger target is hardcoded
-  `POST /api/workflows/register_project`, which 500s
-  (`WorkflowsController.register_project/2 is undefined` — the showcase actually
-  emits `promote_to_production`). Likely just a stale/wrong test target rather than
-  a codegen gap; reconcile the e2e target with the showcase's actual workflow when
-  restoring the phoenix legs. Moot until §11f lands.
+- Was NOT a stale test target: `registerProject` is a real showcase workflow whose
+  router route dispatched to an **undefined action** because the controller was
+  emitted **once per context** at a fixed path → later contexts overwrote earlier
+  ones (`register_project` lost to `promote_to_production`). Runtime 500.
+- Fixed (#1610): emit **one deployable-level WorkflowsController** across all hosted
+  contexts, each action dispatching to its own context's `Workflows.<Name>` module.
+  (A parallel duplicate fix of mine was dropped on rebase — #1610 landed first.)
 
 *Separately* (NOT flip-blocking): the showcase's own domain `mix test` still has
 **further** elixir test-emit gaps beyond 11e (staging the showcase as a vanilla-build
