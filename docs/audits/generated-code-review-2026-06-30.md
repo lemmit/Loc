@@ -153,14 +153,13 @@ These are real observations but not correctness defects; each carries a verdict.
   generated project compiles (`gradle testClasses`), and no inline
   `Pattern.compile(...).matcher(...)` remains in the emitted tree. Test:
   `regex-pattern-hoist.test.ts`.
-- **Hono / Python — `decimal` carried as JS `number` / `float`**
-  (`Number(row.budget)` / `float(row.budget)`): precision-lossy for money.
-  *Verdict: architectural, out of scope.* This is the backends' general `decimal`
-  handling; a precise-decimal story (big.js / `Decimal`) is a cross-backend
-  design change, not a review-pass edit.
-- **Hono / Python — N+1 on find-by-field** (`byName` → `findById` re-fetch;
-  `_hydrate` per row): *Verdict: by-design.* Consistent "load the full
-  aggregate" pattern; functional, not a correctness defect.
+- **Hono / Python — N+1 on find-by-field** (`byName` selects the root by name,
+  then calls `findById(row.id)` which re-fetches the root + preloads children):
+  *Verdict: deliberate DRY trade-off, not fixed.* The only real cost is one
+  redundant root re-fetch; the find reuses the canonical `findById` hydration so
+  every read materialises the same wire shape. Inlining hydration into each
+  find-by-field would duplicate that logic across the Hono + Python repository
+  builders for marginal gain. Left as-is by design.
 
 ---
 
@@ -185,6 +184,13 @@ was verified against `examples/showcase.ddd`:
 - **Python `await session.connection(execution_options={isolation_level})`
   result discarded**: the option is applied to the session's transaction
   connection as a side effect; discarding the return is fine.
+- **Hono / Python — `decimal` carried as JS `number` / Python `float`**
+  (`Number(row.budget)` / `float(row.budget)`): *documented, intentional* — not a
+  bug. `docs/language.md` (§"`money` — precise decimal, distinct from `decimal`")
+  defines `decimal` as the lossy JSON-`number` type and `money` as the precise
+  one (TS → `decimal.js`, Python → `Decimal`, .NET/Java → `decimal`/`BigDecimal`,
+  `string` on the wire). Use `money` for exact values; `decimal` is lossy by
+  design. "Fixing" it would regress the documented semantics + wire contract.
 
 ---
 
