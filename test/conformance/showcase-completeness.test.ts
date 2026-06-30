@@ -22,13 +22,14 @@ import { extractErrors } from "../_helpers/parse.js";
 //      abstract union supertypes (which are never emitted as a `$type`).
 //   2. Every React walker UI primitive — `STDLIB_LAYOUT_COMPONENTS`.
 //
-// PHASE 1 = REPORT-ONLY.  The guard logs what's still uncovered but does NOT
-// fail the build — the showcase is built out iteratively.  Flip `HARD_GATE`
-// to `true` once coverage is complete to make missing coverage a hard error
-// (the assertions are already written below, just gated).
+// HARD GATE (enabled).  The showcase now exercises every instantiable AST
+// kind and every walker primitive, so missing coverage is a hard error — a
+// new grammar rule / walker primitive must be added to showcase.ddd (or, if
+// genuinely unreachable from `.ddd`, to ALLOWLIST with a reason).  The handful
+// of unreachable kinds are allowlisted below.
 // ---------------------------------------------------------------------------
 
-const HARD_GATE = false;
+const HARD_GATE = true;
 
 const SHOWCASE = "examples/showcase.ddd";
 
@@ -73,7 +74,20 @@ const UNION_SUPERTYPES = new Set<string>([...abstractSupertypes(), ...REFERENCE_
  * as the first guard runs reveal genuinely uncoverable kinds.
  */
 const ALLOWLIST = new Set<string>([
-  // "UiBlockBinding", // legacy ui-block binding, superseded by UiComposeBinding — confirm before enabling
+  // No stdlib macro declares a `string` / `int` parameter, and macros cannot
+  // be defined in `.ddd` source — so these two macro-argument kinds are
+  // unreachable from ANY `.ddd` fixture (only `bool` / `ref` / `refList`
+  // macro params exist: crudish(updateOnly:), scaffold(subdomains:),
+  // scaffoldView(of:), all exercised in showcase.ddd). Unreachable by
+  // construction, not a coverage gap.
+  "MacroArgString",
+  "MacroArgInt",
+  // showcase.ddd is the single-file cross-generator conformance fixture; an
+  // `import` would make it a multi-file project (a second partial file in
+  // examples/ that standalone-generate matrices would choke on, plus the
+  // isolated `build([showcase])` here wouldn't resolve it). Multi-file imports
+  // are covered by web/src/examples/multifile-*.ddd instead.
+  "ImportStmt",
 ]);
 
 async function buildShowcase(): Promise<LangiumDocument<Model>> {

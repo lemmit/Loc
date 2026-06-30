@@ -1,5 +1,11 @@
 # Plan — drive `examples/showcase.ddd` to 100% feature coverage
 
+> **DONE (2026-06-30).** All 161 instantiable AST kinds + all 48 walker
+> primitives covered; `HARD_GATE = true`. `MacroArgString`/`MacroArgInt`/
+> `ImportStmt` allowlisted (unreachable from a single-file `.ddd` fixture).
+> Bugs found are logged in [`../audits/showcase-coverage-bugs.md`](../audits/showcase-coverage-bugs.md).
+
+
 Tracking PR: #1623 · branch `claude/showcase-parity-ci-0qtvxc` · bug log:
 [`docs/audits/showcase-coverage-bugs.md`](../audits/showcase-coverage-bugs.md).
 

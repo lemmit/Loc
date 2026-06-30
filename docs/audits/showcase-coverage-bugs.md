@@ -1,5 +1,15 @@
 # Showcase coverage campaign — bug report
 
+> **Status: COMPLETE.** `examples/showcase.ddd` now exercises **all 161
+> instantiable AST kinds + all 48 walker primitives**; the completeness guard
+> runs with `HARD_GATE = true`. Three kinds are allowlisted as unreachable from
+> a `.ddd` fixture (`MacroArgString`, `MacroArgInt` — no stdlib macro declares
+> string/int params; `ImportStmt` — single-file fixture, covered by
+> `multifile-*.ddd`). Bugs below are surfaced-not-fixed per campaign policy.
+> **Product bugs to fix: BUG-003, BUG-004, BUG-005** (BUG-006 already in flight
+> as #1622; BUG-001/002 were test-infra and fixed here).
+
+
 Running list of bugs surfaced while driving `examples/showcase.ddd` to 100%
 language-feature coverage (see PR #1623 / branch `claude/showcase-parity-ci-0qtvxc`).
 
