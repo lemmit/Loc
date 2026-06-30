@@ -1,8 +1,11 @@
-import { hasCreate } from "../../../ir/enrich/wire-projection.js";
+import { forApiRead, hasCreate } from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
+  EnumIR,
   RepositoryIR,
+  TypeIR,
+  WireField,
 } from "../../../ir/types/loom-ir.js";
 import {
   operationIsGuarded,
@@ -76,9 +79,46 @@ interface WrapperComponent {
   element: string;
 }
 
+/** A named string-enum component the other backends publish (`Visibility`,
+ *  `BuildState`) but springdoc inlines as a bare `String` — registered as a
+ *  `StringSchema` carrying the value list. */
+interface EnumComponent {
+  name: string;
+  values: string[];
+}
+
+/** A `<field-name> → <enum-component>` retarget: any plain-string property
+ *  named `<property>` across the whole document is repointed at the named
+ *  enum `$ref` (springdoc renders an enum-typed field as bare `String`). */
+interface EnumProp {
+  property: string;
+  enumName: string;
+}
+
+/** An empty-object request body to attach to a param-less public operation —
+ *  the other backends emit a named `{}` request schema (`ArchiveProjectRequest`)
+ *  and bind it as the op's `requestBody`; springdoc emits none for a no-body
+ *  op. */
+interface EmptyRequest {
+  path: string;
+  schema: string;
+}
+
 interface Contract {
   routes: RouteContract[];
   wrappers: WrapperComponent[];
+  /** Referenced string-enum components (other backends name them; springdoc
+   *  inlines them as `String`). */
+  enums: EnumComponent[];
+  /** Unambiguous field-name → enum-component retargets. */
+  enumProps: EnumProp[];
+  /** Empty-object request bodies for param-less public operations. */
+  emptyRequests: EmptyRequest[];
+  /** `schema name → required-field list` — the non-optional field set per
+   *  DTO/wire component, matching what the other backends mark required.
+   *  Required lists are alphabetically sorted (the other backends' specs
+   *  carry them sorted; the parity diff compares the set, not the order). */
+  required: { schema: string; fields: string[] }[];
 }
 
 /** Build the per-route OpenAPI contract from the IR, walking the same route
@@ -89,8 +129,36 @@ export function buildJavaOpenApiContract(
 ): Contract {
   const routes: RouteContract[] = [];
   const wrappers = new Map<string, string>();
+  // schema-name → required-field set (collected as a set, sorted at the end).
+  const required = new Map<string, string[]>();
+  const emptyRequests: EmptyRequest[] = [];
+  // enum-name → values, for enums actually referenced by an enum-typed field.
+  const referencedEnums = new Map<string, string[]>();
+  // field-name → set of enum-names it maps to (ambiguous names are dropped).
+  const enumFieldTargets = new Map<string, Set<string>>();
+  const allEnums = new Map<string, EnumIR>();
+
+  const setRequired = (schema: string, fields: string[]): void => {
+    required.set(schema, [...fields].sort());
+  };
+  /** Note every enum a type references (peeling array/optional), so the
+   *  customizer registers exactly the enums the other backends name. */
+  const noteEnumRefs = (t: TypeIR | undefined, fieldName?: string): void => {
+    const name = enumNameOf(t);
+    if (!name) return;
+    referencedEnums.set(name, allEnums.get(name)?.values ?? []);
+    if (fieldName) {
+      const set = enumFieldTargets.get(fieldName) ?? new Set<string>();
+      set.add(name);
+      enumFieldTargets.set(fieldName, set);
+    }
+  };
 
   const err = (statuses: number[]): RouteError[] => statuses.map((status) => ({ status }));
+
+  // Index every declared enum (root + per-context) so a referenced one can be
+  // resolved to its value list.
+  for (const e of [...contexts.flatMap((c) => c.enums ?? [])]) allEnums.set(e.name, e);
 
   for (const ctx of contexts) {
     const repoByAgg = new Map<string, RepositoryIR | undefined>(
@@ -102,9 +170,50 @@ export function buildJavaOpenApiContract(
       const route = `${routePrefix}/${snake(plural(agg.name))}`;
       const repo = repoByAgg.get(agg.name);
 
+      // Required-field sets — the non-optional field set per emitted DTO/wire
+      // component, matching what the other backends mark required (springdoc
+      // marks nothing required).  The rules mirror the Hono zod emitter:
+      //   - response (<Agg>Response / <Part>Response): forApiRead(wireShape)
+      //     fields that aren't optional (id is always present → required);
+      //   - create request (Create<Agg>Request): the createInput contract's
+      //     `requiredInput` set (already folds bool/default/optional → omit);
+      //   - op / workflow request (<Op><Agg>Request, <Wf>Request): params that
+      //     are neither optional-typed nor a bare body-bool (→ default false);
+      //   - create response (Create<Agg>Response): just `{ id }`.
+      const apiRead = forApiRead(agg.wireShape ?? []);
+      for (const w of apiRead) noteEnumRefs(w.type, w.name);
+      setRequired(`${agg.name}Response`, requiredWireFields(apiRead));
+      for (const part of agg.parts) {
+        const partRead = forApiRead(part.wireShape ?? []);
+        for (const w of partRead) noteEnumRefs(w.type, w.name);
+        setRequired(`${part.name}Response`, requiredWireFields(partRead));
+      }
+
       // POST /<plural>  (create) → 400, 422
       if (hasCreate(agg) || isEsConstructible(agg)) {
         routes.push({ method: "post", path: route, errors: err(errorStatuses("create")) });
+        const createInput = agg.createInput ?? [];
+        for (const c of createInput) noteEnumRefs(c.field.type, c.field.name);
+        setRequired(
+          `Create${agg.name}Request`,
+          createInput.filter((c) => c.requiredInput).map((c) => c.field.name),
+        );
+        setRequired(`Create${agg.name}Response`, ["id"]);
+      }
+
+      // Per-public-operation requests (Create-shaped op DTOs incl. crudish
+      // `update`).  Param-less public ops get an empty-object request body the
+      // other backends name + attach (springdoc emits none).
+      for (const op of agg.operations) {
+        if (op.visibility !== "public") continue;
+        for (const p of op.params) noteEnumRefs(p.type, p.name);
+        const reqName = `${upperFirst(op.name)}${agg.name}Request`;
+        if (op.params.length === 0) {
+          emptyRequests.push({ path: `${route}/{id}/${snake(op.name)}`, schema: reqName });
+          setRequired(reqName, []);
+        } else {
+          setRequired(reqName, requiredParams(op.params));
+        }
       }
 
       // GET /<plural>/{id} (getById) → 404
@@ -196,7 +305,14 @@ export function buildJavaOpenApiContract(
       let wrapper: string;
       if (view.output) {
         wrapper = `${upperFirst(view.name)}Response`;
-        wrappers.set(wrapper, `${upperFirst(view.name)}Row`);
+        const rowName = `${upperFirst(view.name)}Row`;
+        wrappers.set(wrapper, rowName);
+        // Full-form view Row — required = the non-optional declared fields.
+        for (const f of view.output.fields) noteEnumRefs(f.type, f.name);
+        setRequired(
+          rowName,
+          view.output.fields.filter((f) => !isOptionalType(f.type)).map((f) => f.name),
+        );
       } else if (view.source.kind === "aggregate") {
         const aggName = view.source.name;
         wrapper = `${aggName}ListResponse`;
@@ -217,13 +333,65 @@ export function buildJavaOpenApiContract(
         path: `${routePrefix}/workflows/${snake(wf.name)}`,
         errors: err(errorStatuses("workflow", workflowIsGuarded(wf))),
       });
+      // <Wf>Request — required = command params (same op-param rule).
+      for (const p of wf.params) noteEnumRefs(p.type, p.name);
+      setRequired(`${upperFirst(wf.name)}Request`, requiredParams(wf.params));
     }
   }
+
+  // Unambiguous field-name → enum retargets only: a field name mapping to
+  // exactly one enum across the whole model (skip ambiguous names for safety).
+  const enumProps: EnumProp[] = [...enumFieldTargets.entries()]
+    .filter(([, names]) => names.size === 1)
+    .map(([property, names]) => ({ property, enumName: [...names][0]! }))
+    .sort((a, b) => a.property.localeCompare(b.property));
 
   return {
     routes,
     wrappers: [...wrappers.entries()].map(([wrapper, element]) => ({ wrapper, element })),
+    enums: [...referencedEnums.entries()]
+      .map(([name, values]) => ({ name, values }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    enumProps,
+    emptyRequests,
+    required: [...required.entries()]
+      .map(([schema, fields]) => ({ schema, fields }))
+      .sort((a, b) => a.schema.localeCompare(b.schema)),
   };
+}
+
+/** The required-field list for a response/wire component: the id row (always
+ *  present → required) plus every non-optional declared/containment/derived
+ *  field.  Mirrors the Hono response zod (`z.string()` for id; `.nullish()`
+ *  only for optional fields). */
+function requiredWireFields(fields: readonly WireField[]): string[] {
+  return fields.filter((w) => w.source === "id" || !w.optional).map((w) => w.name);
+}
+
+/** Required params for a request DTO: those neither optional-typed nor a bare
+ *  body-bool (a non-nullable bool defaults to `false` when omitted, so the
+ *  other backends drop it from `required` — see Hono `zodFor`). */
+function requiredParams(params: readonly { name: string; type: TypeIR }[]): string[] {
+  return params.filter((p) => !isOptionalType(p.type) && !isBareBool(p.type)).map((p) => p.name);
+}
+
+function isOptionalType(t: TypeIR): boolean {
+  return t.kind === "optional";
+}
+
+function isBareBool(t: TypeIR): boolean {
+  const base = t.kind === "optional" ? t.inner : t;
+  return base.kind === "primitive" && base.name === "bool";
+}
+
+/** The enum name a type references, peeling array/optional wrappers; undefined
+ *  when the type is not (ultimately) an enum. */
+function enumNameOf(t: TypeIR | undefined): string | undefined {
+  if (!t) return undefined;
+  if (t.kind === "enum") return t.name;
+  if (t.kind === "optional") return enumNameOf(t.inner);
+  if (t.kind === "array") return enumNameOf(t.element);
+  return undefined;
 }
 
 /** Event-sourced aggregates are constructible via `create` even when field
@@ -249,6 +417,20 @@ export function renderJavaOpenApiCustomizer(basePkg: string, contract: Contract)
   const wrapperLiterals = contract.wrappers.map(
     (w) => `        new Wrapper(${JSON.stringify(w.wrapper)}, ${JSON.stringify(w.element)}),`,
   );
+  const enumLiterals = contract.enums.map((e) => {
+    const vals = e.values.map((v) => JSON.stringify(v)).join(", ");
+    return `        new EnumComponent(${JSON.stringify(e.name)}, List.of(${vals})),`;
+  });
+  const enumPropLiterals = contract.enumProps.map(
+    (p) => `        new EnumProp(${JSON.stringify(p.property)}, ${JSON.stringify(p.enumName)}),`,
+  );
+  const emptyRequestLiterals = contract.emptyRequests.map(
+    (e) => `        new EmptyRequest(${JSON.stringify(e.path)}, ${JSON.stringify(e.schema)}),`,
+  );
+  const requiredLiterals = contract.required.map((r) => {
+    const fields = r.fields.map((f) => JSON.stringify(f)).join(", ");
+    return `        new RequiredSet(${JSON.stringify(r.schema)}, List.of(${fields})),`;
+  });
 
   // Title table for the RFC 7807 problem responses (matches problemTitle()).
   const allStatuses = new Set<number>();
@@ -277,6 +459,7 @@ export function renderJavaOpenApiCustomizer(basePkg: string, contract: Contract)
     `import io.swagger.v3.oas.models.media.ObjectSchema;`,
     `import io.swagger.v3.oas.models.media.Schema;`,
     `import io.swagger.v3.oas.models.media.StringSchema;`,
+    `import io.swagger.v3.oas.models.parameters.RequestBody;`,
     `import io.swagger.v3.oas.models.responses.ApiResponse;`,
     `import io.swagger.v3.oas.models.responses.ApiResponses;`,
     ``,
@@ -296,9 +479,29 @@ export function renderJavaOpenApiCustomizer(basePkg: string, contract: Contract)
     ``,
     `    private record Route(String method, String path, String wrapper, int[] statuses) {}`,
     `    private record Wrapper(String name, String element) {}`,
+    `    private record EnumComponent(String name, List<String> values) {}`,
+    `    private record EnumProp(String property, String enumName) {}`,
+    `    private record EmptyRequest(String path, String schema) {}`,
+    `    private record RequiredSet(String schema, List<String> fields) {}`,
     ``,
     `    private static final List<Wrapper> WRAPPERS = List.of(`,
     ...(wrapperLiterals.length > 0 ? trimTrailingComma(wrapperLiterals) : []),
+    `    );`,
+    ``,
+    `    private static final List<EnumComponent> ENUMS = List.of(`,
+    ...(enumLiterals.length > 0 ? trimTrailingComma(enumLiterals) : []),
+    `    );`,
+    ``,
+    `    private static final List<EnumProp> ENUM_PROPS = List.of(`,
+    ...(enumPropLiterals.length > 0 ? trimTrailingComma(enumPropLiterals) : []),
+    `    );`,
+    ``,
+    `    private static final List<EmptyRequest> EMPTY_REQUESTS = List.of(`,
+    ...(emptyRequestLiterals.length > 0 ? trimTrailingComma(emptyRequestLiterals) : []),
+    `    );`,
+    ``,
+    `    private static final List<RequiredSet> REQUIRED = List.of(`,
+    ...(requiredLiterals.length > 0 ? trimTrailingComma(requiredLiterals) : []),
     `    );`,
     ``,
     `    private static final List<Route> ROUTES = List.of(`,
@@ -310,6 +513,7 @@ export function renderJavaOpenApiCustomizer(basePkg: string, contract: Contract)
     `        return openApi -> {`,
     `            ensureProblemSchema(openApi);`,
     `            registerWrappers(openApi);`,
+    `            registerEnums(openApi);`,
     `            for (Route route : ROUTES) {`,
     `                PathItem item = openApi.getPaths() == null ? null : openApi.getPaths().get(route.path());`,
     `                if (item == null) continue;`,
@@ -318,6 +522,9 @@ export function renderJavaOpenApiCustomizer(basePkg: string, contract: Contract)
     `                normalizeSuccess(op, route.wrapper());`,
     `                addErrors(op, route.statuses());`,
     `            }`,
+    `            attachEmptyRequests(openApi);`,
+    `            retargetEnumProps(openApi);`,
+    `            applyRequired(openApi);`,
     `        };`,
     `    }`,
     ``,
@@ -374,6 +581,80 @@ export function renderJavaOpenApiCustomizer(basePkg: string, contract: Contract)
     `            ArraySchema arr = new ArraySchema();`,
     `            arr.setItems(new Schema<>().$ref("#/components/schemas/" + w.element()));`,
     `            components.addSchemas(w.name(), arr);`,
+    `        }`,
+    `    }`,
+    ``,
+    `    /** Register the named string-enum components the other backends publish`,
+    `     *  (springdoc inlines an enum-typed field as a bare String). */`,
+    `    private static void registerEnums(OpenAPI openApi) {`,
+    `        Components components = openApi.getComponents();`,
+    `        if (components == null) return;`,
+    `        for (EnumComponent e : ENUMS) {`,
+    `            if (components.getSchemas() != null && components.getSchemas().containsKey(e.name())) continue;`,
+    `            StringSchema schema = new StringSchema();`,
+    `            for (String v : e.values()) schema.addEnumItem(v);`,
+    `            components.addSchemas(e.name(), schema);`,
+    `        }`,
+    `    }`,
+    ``,
+    `    /** Retarget every plain-string property whose name maps unambiguously to`,
+    `     *  an enum onto that enum's $ref — across every component schema (the`,
+    `     *  other backends reference the named enum, not a bare string). */`,
+    `    private static void retargetEnumProps(OpenAPI openApi) {`,
+    `        Components components = openApi.getComponents();`,
+    `        if (components == null || components.getSchemas() == null) return;`,
+    `        Map<String, String> byProp = new java.util.HashMap<>();`,
+    `        for (EnumProp p : ENUM_PROPS) byProp.put(p.property(), p.enumName());`,
+    `        for (Schema<?> schema : components.getSchemas().values()) {`,
+    `            Map<String, Schema> props = schema.getProperties();`,
+    `            if (props == null) continue;`,
+    `            for (Map.Entry<String, Schema> pe : props.entrySet()) {`,
+    `                String enumName = byProp.get(pe.getKey());`,
+    `                if (enumName == null) continue;`,
+    `                Schema<?> prop = pe.getValue();`,
+    `                // Only retarget a currently-plain string-shaped property (the`,
+    `                // springdoc inline-enum form — type string, possibly carrying`,
+    `                // an inline enum list); leave a collection / already-ref'd /`,
+    `                // non-string property untouched.`,
+    `                if (prop == null || prop.get$ref() != null) continue;`,
+    `                boolean stringShaped = "string".equals(prop.getType())`,
+    `                    || (prop.getEnum() != null && !prop.getEnum().isEmpty());`,
+    `                if (!stringShaped) continue;`,
+    `                pe.setValue(new Schema<>().$ref("#/components/schemas/" + enumName));`,
+    `            }`,
+    `        }`,
+    `    }`,
+    ``,
+    `    /** Attach an empty-object request body to each param-less public op the`,
+    `     *  other backends give a named ` + "`{}`" + ` request schema (springdoc emits`,
+    `     *  none for a no-body operation). */`,
+    `    private static void attachEmptyRequests(OpenAPI openApi) {`,
+    `        Components components = openApi.getComponents();`,
+    `        if (components == null) return;`,
+    `        for (EmptyRequest e : EMPTY_REQUESTS) {`,
+    `            if (components.getSchemas() == null || !components.getSchemas().containsKey(e.schema())) {`,
+    `                components.addSchemas(e.schema(), new ObjectSchema());`,
+    `            }`,
+    `            PathItem item = openApi.getPaths() == null ? null : openApi.getPaths().get(e.path());`,
+    `            if (item == null || item.getPost() == null) continue;`,
+    `            Operation op = item.getPost();`,
+    `            if (op.getRequestBody() != null) continue;`,
+    `            Content content = new Content();`,
+    `            content.addMediaType(JSON, new MediaType()`,
+    `                .schema(new Schema<>().$ref("#/components/schemas/" + e.schema())));`,
+    `            op.setRequestBody(new RequestBody().content(content));`,
+    `        }`,
+    `    }`,
+    ``,
+    `    /** Mark each component's non-optional fields required, matching the other`,
+    `     *  backends (springdoc marks nothing required). */`,
+    `    private static void applyRequired(OpenAPI openApi) {`,
+    `        Components components = openApi.getComponents();`,
+    `        if (components == null || components.getSchemas() == null) return;`,
+    `        for (RequiredSet r : REQUIRED) {`,
+    `            Schema<?> schema = components.getSchemas().get(r.schema());`,
+    `            if (schema == null || r.fields().isEmpty()) continue;`,
+    `            schema.setRequired(List.copyOf(r.fields()));`,
     `        }`,
     `    }`,
     ``,

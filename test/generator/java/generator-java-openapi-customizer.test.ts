@@ -145,3 +145,56 @@ describe("java OpenApiCustomizer — RFC 7807 error responses", () => {
     expect(c).toContain('new Route("get", "/api/orders/by_code", null, new int[] {404})');
   });
 });
+
+describe("java OpenApiCustomizer — named string-enum components", () => {
+  it("registers a referenced enum as a named StringSchema component", async () => {
+    const c = await customizer();
+    // Status is referenced by Order.status → emitted as a named component.
+    expect(c).toContain('new EnumComponent("Status", List.of("pending", "confirmed"))');
+    expect(c).toContain("private static void registerEnums(OpenAPI openApi) {");
+    expect(c).toContain("for (String v : e.values()) schema.addEnumItem(v);");
+  });
+
+  it("retargets the enum-typed property onto the named enum $ref", async () => {
+    const c = await customizer();
+    // status (the unambiguous enum field) is retargeted across every schema.
+    expect(c).toContain('new EnumProp("status", "Status")');
+    expect(c).toContain("private static void retargetEnumProps(OpenAPI openApi) {");
+    expect(c).toContain('pe.setValue(new Schema<>().$ref("#/components/schemas/" + enumName));');
+  });
+});
+
+describe("java OpenApiCustomizer — empty request bodies for param-less ops", () => {
+  it("names + attaches an empty-object request body per param-less public op", async () => {
+    const c = await customizer();
+    // confirm() and archive() take no params → named {} request body.
+    expect(c).toContain('new EmptyRequest("/api/orders/{id}/confirm", "ConfirmOrderRequest")');
+    expect(c).toContain('new EmptyRequest("/api/orders/{id}/archive", "ArchiveOrderRequest")');
+    expect(c).toContain("private static void attachEmptyRequests(OpenAPI openApi) {");
+    expect(c).toContain("op.setRequestBody(new RequestBody().content(content));");
+  });
+});
+
+describe("java OpenApiCustomizer — required-field sets", () => {
+  it("marks a response's non-optional fields required (id always present)", async () => {
+    const c = await customizer();
+    expect(c).toContain(
+      'new RequiredSet("OrderResponse", List.of("code", "id", "status", "total"))',
+    );
+    expect(c).toContain("private static void applyRequired(OpenAPI openApi) {");
+    expect(c).toContain("schema.setRequired(List.copyOf(r.fields()));");
+  });
+
+  it("marks a create request's required-input fields, and `{ id }` on the response", async () => {
+    const c = await customizer();
+    expect(c).toContain(
+      'new RequiredSet("CreateOrderRequest", List.of("code", "status", "total"))',
+    );
+    expect(c).toContain('new RequiredSet("CreateOrderResponse", List.of("id"))');
+  });
+
+  it("marks a workflow command request's required params", async () => {
+    const c = await customizer();
+    expect(c).toContain('new RequiredSet("PlaceOrderRequest", List.of("code"))');
+  });
+});
