@@ -52,6 +52,18 @@ system DevPlatform {
         permissions: string[]
     }
 
+    // Capability (filter + stamp) — the typed cross-cutting concern, applied
+    // to an aggregate via the explicit `implements` member (ImplementsDecl);
+    // `with` is the sugar twin. Adds `createdByRole`, a read filter, and an
+    // onCreate stamp to every implementor.
+    capability ownerStamped {
+        createdByRole: string
+        // SelfType — `Self id` resolves to the implementor's own id type.
+        supersededBy: Self id?
+        filter this.createdByRole == currentUser.role
+        stamp onCreate { createdByRole := currentUser.role }
+    }
+
     // -----------------------------------------------------------------
     // Projects module — registry of projects + their build pipelines.
     // -----------------------------------------------------------------
@@ -313,10 +325,14 @@ system DevPlatform {
             aggregate Engineer with crudish {
                 handle: string
                   check handle.length >= 3 && handle.length <= 32
-                email: string
+                // SensitivityClause — PII tagging on a field.
+                email: string sensitive(pii)
                   check email.matches("^[^@]+@[^@]+\\.[^@]+$") && email.length <= 120
                 level: int check level >= 1 && level <= 10
                 onCall: bool
+
+                // ImplementsDecl — explicit capability application.
+                implements ownerStamped
 
                 invariant handle != email
                 private invariant handle.matches("^[a-z][a-z0-9_]*$")
