@@ -41,12 +41,30 @@ check_staleness || true
 # completes, so if Biome and the generated Langium sources are already present
 # there is nothing to do. `src/language/generated/` is gitignored and produced
 # by the `prepare` lifecycle, so its presence is the real "ready" signal.
-if [ -x node_modules/.bin/biome ] && [ -d src/language/generated ]; then
+#
+# But "files present" is NOT the same as "deps match the lockfile": a cached
+# node_modules layer survives a `package-lock.json` bump, so a previously-cached
+# install (e.g. Langium 3.x) can satisfy the file checks while the repo has since
+# moved to ~4.3.0 — and the build/tests then explode on API mismatches
+# (`this.getAllTypes is not a function`). Pin the readiness signal to a hash of
+# the lockfile so any dependency bump forces a fresh, deterministic `npm ci`.
+DEPS_STAMP="node_modules/.loom-deps-lockhash"
+lock_hash() {
+  { sha256sum package-lock.json 2>/dev/null || shasum -a 256 package-lock.json 2>/dev/null; } \
+    | awk '{print $1}'
+}
+WANT_HASH="$(lock_hash || true)"
+if [ -x node_modules/.bin/biome ] && [ -d src/language/generated ] \
+  && [ -n "$WANT_HASH" ] && [ "$(cat "$DEPS_STAMP" 2>/dev/null || true)" = "$WANT_HASH" ]; then
   exit 0
 fi
 
-# `npm install` runs the `prepare` lifecycle (langium:generate + build +
-# build:web), which produces src/language/generated/ — required before tsc,
-# vitest, or the Biome gate can run. `install` (vs `ci`) reuses the cached
-# node_modules layer when present.
-npm install
+# Lockfile changed (or first provision): `npm ci` installs exactly what
+# package-lock.json pins (vs `install`, which may keep a stale cached version
+# that satisfies the semver range), then runs the `prepare` lifecycle
+# (langium:generate + build), which produces src/language/generated/ — required
+# before tsc, vitest, or the Biome gate can run.
+npm ci
+
+# Record the lockfile hash so the next session early-exits only while deps match.
+[ -n "$WANT_HASH" ] && printf '%s' "$WANT_HASH" > "$DEPS_STAMP" || true
