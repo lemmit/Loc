@@ -612,6 +612,45 @@ system DevPlatform {
             body: Stack { Heading { "Active Projects", level: 2 }, QueryView { of: Views.ActiveProjects, loading: Skeleton { count: 5 }, error: Alert { "Couldn't load active projects" }, empty: Empty { "No rows." }, data: rows => Paper { Table { Column { "Name", o => Text { o.name } }, Column { "Description", o => Text { o.description } }, Column { "Visibility", o => EnumBadge { o.visibility } }, Column { "Active", o => Text { o.active ? "Yes" : "No" } }, Column { "Sequence", o => Text { o.sequence } }, Column { "External Id", o => Text { o.externalId } }, Column { "Budget", o => Text { o.budget } }, Column { "Created At", o => DateDisplay { o.createdAt } }, rows: rows, striped: true, highlight: true, sticky: true, keyExpr: "idx" } } }, testid: "view-active_projects" }
         }
 
+        // Kitchen-sink page — the remaining walker primitives + the page
+        // metadata props (description / ogImage / canonical) + `layout:`.
+        page Kitchen {
+            route: "/kitchen"
+            title: "Kitchen sink"
+            description: "Every remaining primitive on one page"
+            ogImage: "/og-kitchen.png"
+            canonical: "https://console.example.com/kitchen"
+            layout: ConsoleFrame
+            state {
+                notes: string = ""
+                vis: string = "Private"
+            }
+            body: Stack {
+                Section {
+                    heading: "Inline",
+                    body: Stack {
+                        Bold { "bold" },
+                        Italic { "italic" },
+                        InlineCode { "code" },
+                        CodeBlock { "const x = 1" },
+                        Icon { name: "star" }
+                    }
+                },
+                MultilineField { "Notes", bind: notes },
+                SelectField { "Visibility", bind: vis, options: ["Private", "Public"] },
+                DestroyForm { of: Project },
+                WorkflowForm { runs: registerProject },
+                QueryView {
+                    of: Projects.Project.all,
+                    single: true,
+                    loading: Skeleton { count: 1 },
+                    error: Alert { "err" },
+                    empty: Empty { "none" },
+                    data: row => OperationForm { row.rename }
+                }
+            }
+        }
+
         // UI-level sidebar menu — internal link + external link.
         menu {
             section "Platform" {
