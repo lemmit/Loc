@@ -492,6 +492,21 @@ system DevPlatform {
         auth: required
     }
 
+    // Plain Ecto/Phoenix LiveView (the only elixir foundation since Ash was
+    // removed).  Re-added to the 5-backend parity set now that the vanilla gaps
+    // that blocked the full showcase are closed — nested relational containments
+    // + op-mutation (§11c), the multi-context WorkflowsController (#1610), and the
+    // IR-derived OpenAPI spec endpoint (§11f, #1615).  Compose service
+    // `phoenix_api`, :4000.
+    deployable phoenixApi {
+        platform: elixir { foundation: vanilla }
+        contexts: [Catalog, Builds, People]
+        dataSources: [catalogState, buildsState, peopleState]
+        serves: ProjectsApi, DeliveryApi, AccountsApi
+        port: 4000
+        auth: required
+    }
+
     // ----- Frontend deployables: all three ui-binding forms -----
 
     // Compose-block binding form.

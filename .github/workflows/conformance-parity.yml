@@ -83,16 +83,19 @@ jobs:
         run: npm run build
 
       # ubuntu-latest ships Docker + the compose plugin; no setup needed.
-      - name: Run OpenAPI parity (mature backends only)
+      - name: Run OpenAPI parity (all five backends)
         env:
           LOOM_E2E: '1'
           LOOM_E2E_PARITY_ONLY: '1'
           # The vanilla Phoenix backend (the only elixir foundation since Ash was
-          # removed) isn't showcase-complete yet — it can't `mix compile` the full
-          # showcase (gaps tracked in docs/plans/vanilla-phoenix-gaps.md). Skip it
-          # here so parity runs over node/.NET/Java/Python; remove this flag (and
-          # restore the phoenix legs) once the vanilla gaps close.
-          LOOM_E2E_SKIP_PHOENIX: '1'
+          # removed) now compiles + boots + serves an IR-derived OpenAPI spec for
+          # the full showcase — the vanilla gaps that blocked it are closed
+          # (docs/plans/vanilla-phoenix-gaps.md): nested relational containments +
+          # op-mutation (§11c), the multi-context WorkflowsController (#1610), and
+          # the OpenAPI spec endpoint (§11f, #1615).  Re-added to the parity set:
+          # the `phoenixApi` deployable ships in examples/showcase.ddd and the
+          # phoenix legs of e2e.test.ts fire again now that LOOM_E2E_SKIP_PHOENIX
+          # is gone.
           # Strict mode: every divergence the harness logs becomes a hard
           # `expect(...).toBe(...)` assertion (see test/e2e/e2e.test.ts).
           # Gate flipped to strict after PRs A → C closed the three
