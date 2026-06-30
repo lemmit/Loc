@@ -43,6 +43,36 @@ plus a 2-entry residual (`LValue`, `NamedType`). The honest target is now
 
 ---
 
+### BUG-003 — scalar return-typed operation diverges 3 ways across backends — **S2**
+
+Slice S3. Added `operation describe(): string { return name + " #" + string(sequence) }`
+to `Catalog.Project`. `generate system` succeeds on all 5 backends, but the
+emitted HTTP contract for a **scalar** (non-union) return-typed operation splits:
+
+| Backend | Status | Returns the value? | OpenAPI response |
+|---|---|---|---|
+| Hono (node) | **200** | yes (`c.json(result)`) | **mistyped as `ProjectResponse`** — it returns a bare `string` |
+| Phoenix (elixir) | **200** | yes (`json(conn, success)`) | success schema |
+| .NET | **204** | no — `await _mediator.Send(cmd); return NoContent();` | 204 |
+| Python | **204** | no — `found.describe()` result discarded | 204 |
+| Java | **204** | no — `void describeProject(...)`, `@ResponseStatus(NO_CONTENT)` | 204 |
+
+Two defects in one: (a) **3-way parity divergence** — only 2/5 honor a scalar
+operation return (200+body) while 3/5 discard it (204); the strict
+`conformance-parity` gate will fail on this op. (b) **Hono mistypes** its 200
+response schema as the aggregate's `ProjectResponse` when the value is a
+`string`. (.NET's exception-less-returns work, `operation-return-dotnet.ddd`,
+only covers the *union* return form `X or NotFound` → 200; the scalar-return
+form was apparently never reconciled across backends.)
+
+Fix direction (for later): pick one contract for scalar returns (likely
+200 + a typed scalar/wrapper response) and make all 5 emit it, or gate the
+scalar-return form if 204-discard is intended. Until fixed, `describe()` keeps
+the showcase's `conformance-parity` red — kept deliberately as the ReturnStmt
+coverage vehicle.
+
+---
+
 ## Pending verification (need `conformance-full` / per-backend boot)
 
 - The behavioural backfill (operation + find routes) is being exercised
