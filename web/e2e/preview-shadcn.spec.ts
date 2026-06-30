@@ -18,6 +18,7 @@
 import { expect, test } from "@playwright/test";
 import {
   browserCanReachNetwork,
+  fatalConsoleErrors,
   selectExample,
   waitForPlaygroundReady,
 } from "./_helpers";
@@ -123,11 +124,6 @@ test("editor → shadcn-design system → preview boots", async ({ page }) => {
   });
 
   // Same noise filter as runtime.spec.ts.
-  const fatal = consoleErrors.filter(
-    (m) =>
-      !/Fetch failed \(503\)/.test(m) &&
-      !/passive event listener/i.test(m) &&
-      !/Using direct eval/i.test(m),
-  );
+  const fatal = fatalConsoleErrors(consoleErrors);
   expect(fatal, "browser console errors during shadcn preview run").toEqual([]);
 });

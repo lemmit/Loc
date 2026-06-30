@@ -33,6 +33,59 @@ export async function waitForPlaygroundReady(page: Page): Promise<void> {
   await expect(page.getByText(/^0 errors$/)).toBeVisible({ timeout: 30_000 });
 }
 
+// Console / page-error messages that are known, non-fatal noise — they
+// signal neither a broken generated bundle nor a broken editor.  ONE
+// allow-list shared by every console-asserting e2e spec.  These filters
+// were copy-pasted inline across the specs and DRIFTED: `editor.spec`
+// learned to suppress the @codingame/monaco-vscode-api init rejections
+// while the six preview-runtime gates never did, so every nightly
+// Playground-e2e run went red on host noise the editor smoke already
+// treated as expected.  Centralising kills that drift class.
+//
+// Two families:
+//   1. Host playground noise that fires regardless of the preview iframe:
+//      - @codingame/monaco-vscode-api lightweight EditorService-mode init
+//        rejections.  The playground runs the api without a views service
+//        (loom-services.ts); registering the `ddd` grammar extension makes
+//        monaco's contribution processing touch the views registry, so it
+//        logs `getViewContainersByLocation is not supported` and a service
+//        whose `.startup` is missing.  Editor + LSP work regardless; a
+//        views-service-override to silence them at the source was tried and
+//        *breaks* the editor, so they're the intended lightweight-mode
+//        trade-off.  Each surfaces twice — a console "Unhandled promise
+//        rejection:" and a window "pageerror:".
+//      - The build worker's correctness-preserving respawn (build/client.ts)
+//        rejects any in-flight RPC with "Build worker respawned; retry the
+//        operation."; it's recovered transparently and is host plumbing,
+//        not an iframe runtime error.
+//      - esbuild-wasm's direct-eval advisory (PGlite loader), Chrome's
+//        passive-listener advisory, vite HMR dynamic-import failures.
+//   2. Transient registry / CDN failures while the in-browser bundler
+//      fetches deps under load (npm 50x, CORP) — not a bundle defect.
+//
+// Anchored (with an optional "console: " capture prefix that some specs
+// prepend) so a real error that merely *contains* the noise text mid-stack
+// can't hide behind an entry.
+export const KNOWN_CONSOLE_NOISE: RegExp[] = [
+  /Fetch failed \(50[34]\)/,
+  /Cross-Origin-Resource-Policy/i,
+  /Using direct eval/i,
+  /passive event listener/i,
+  /Failed to fetch dynamically imported module/i,
+  /^(?:console: )?Unhandled promise rejection: TypeError: .*\bstartup is not a function\b/,
+  /^pageerror: .*\bstartup is not a function\b/,
+  /^(?:console: )?Unhandled promise rejection: Error: Unsupported: .*getViewContainersByLocation is not supported/,
+  /^pageerror: Unsupported: .*getViewContainersByLocation is not supported/,
+  /^(?:console: )?Unhandled promise rejection: Error: Build worker respawned; retry the operation/,
+  /^pageerror: Build worker respawned; retry the operation/,
+];
+
+// Drop the known-noise entries from a captured console/page-error list,
+// returning only messages that signal a genuinely broken bundle or editor.
+export function fatalConsoleErrors(messages: string[]): string[] {
+  return messages.filter((m) => !KNOWN_CONSOLE_NOISE.some((re) => re.test(m)));
+}
+
 // Open a specific example.  Examples are now starting points for
 // workspaces (not a destructive "replace active" dropdown), so this
 // creates a NEW workspace seeded from `label` via the WorkspaceSwitcher
