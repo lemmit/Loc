@@ -492,6 +492,15 @@ system DevPlatform {
         auth: required
     }
 
+    deployable phoenixApi {
+        platform: elixir
+        contexts: [Catalog, Builds, People]
+        dataSources: [catalogState, buildsState, peopleState]
+        serves: ProjectsApi, DeliveryApi, AccountsApi
+        port: 4000
+        auth: required
+    }
+
     // ----- Frontend deployables: all three ui-binding forms -----
 
     // Compose-block binding form.

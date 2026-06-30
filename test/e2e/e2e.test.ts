@@ -46,13 +46,14 @@ const STRICT_PARITY = process.env.LOOM_E2E_STRICT_PARITY === "1";
 // full nightly tier leaves this unset.
 const PARITY_ONLY = process.env.LOOM_E2E_PARITY_ONLY === "1";
 
-// The vanilla Phoenix backend (the only elixir foundation since Ash was removed)
-// is not yet showcase-complete — it can't `mix compile` the full showcase
-// (aggregate-`function` calls in op bodies, `currentUser` in workflows, …;
-// tracked in docs/plans/vanilla-phoenix-gaps.md).  `LOOM_E2E_SKIP_PHOENIX=1`
-// drops the phoenix backend from the build/boot + the OpenAPI parity set so the
-// per-PR conformance-parity gate runs over the four mature backends until those
-// gaps close (then re-include it — remove the flag from conformance-parity.yml).
+// Phoenix is now part of the 5-backend showcase parity set: the vanilla gaps that
+// kept it out (aggregate-`function` calls, `currentUser` threading through the pure
+// core + guarded-op domain tests, relational nested-part persistence, OpenAPI-spec
+// emission, and the project-wide WorkflowsController — vanilla-phoenix-gaps.md
+// §11a–g) are closed, and `examples/showcase.ddd` carries the elixir `phoenixApi`
+// deployable again.  `LOOM_E2E_SKIP_PHOENIX=1` remains as a local opt-out (e.g. a
+// fast run that skips the slowest backend); it is NOT set in conformance-parity.yml,
+// so the per-PR gate includes phoenix by default.
 const SKIP_PHOENIX = process.env.LOOM_E2E_SKIP_PHOENIX === "1";
 
 function hasDocker(): boolean {
