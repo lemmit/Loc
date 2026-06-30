@@ -51,7 +51,11 @@ import {
   type VanillaViewRef,
 } from "./view-emit.js";
 import { emitVanillaEsWorkflowFiles } from "./workflow-eventsourced-emit.js";
-import { emitVanillaWorkflowExecution } from "./workflow-execution-emit.js";
+import {
+  emitVanillaWorkflowExecution,
+  emitVanillaWorkflowsController,
+  type WorkflowControllerGroup,
+} from "./workflow-execution-emit.js";
 import { emitVanillaWorkflowInstances } from "./workflow-instances-emit.js";
 
 export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<string, string> {
@@ -83,6 +87,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // controllers.  Changeset before Repository so the latter can alias it.
   const apiRoutes: ApiRoute[] = [];
   const allViews: VanillaViewRef[] = [];
+  const workflowGroups: WorkflowControllerGroup[] = [];
   // The principal id field name a `currentUser` lifecycle stamp resolves to
   // (`current_user.<idKey>`), defaulting to `id` when no `user {}` block —
   // threaded into `renderStampChanges`.
@@ -132,9 +137,15 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // a project-wide `WorkflowsController` + POST /workflows/<name> routes.
     // Body lowering covers every WorkflowStmtIR kind; the optional
     // `Repo.transaction` wrap is driven by `wf.transactional`.
-    apiRoutes.push(
-      ...emitVanillaWorkflowExecution(appName, appModule, ctx, out, resourceModules, sys).routes,
-    );
+    const wfExec = emitVanillaWorkflowExecution(appName, appModule, ctx, out, resourceModules, sys);
+    apiRoutes.push(...wfExec.routes);
+    // Collect this context's command workflows; the single deployable-level
+    // `WorkflowsController` aggregating every hosted context is emitted ONCE
+    // after the loop (sibling of `emitVanillaViewsController` — one controller
+    // per app, not per context).
+    if (wfExec.commandWorkflows.length > 0) {
+      workflowGroups.push({ ctx, workflows: wfExec.commandWorkflows });
+    }
     // Channels-on-vanilla — the in-process Dispatcher fans the workflow's
     // `emit` (which lowers to `Phoenix.PubSub.broadcast`) into per-context
     // channel handler modules.  The dispatcher code is plain Elixir +
@@ -155,6 +166,9 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   }
   if (hasDomainTests) emitTestHelper(out);
   apiRoutes.push(...emitVanillaViewsController(appName, appModule, allViews, out));
+  // One deployable-level WorkflowsController over every hosted context's command
+  // workflows (the per-context emit above intentionally does NOT write it).
+  emitVanillaWorkflowsController(appName, appModule, workflowGroups, out);
 
   // --- OpenAPI spec ----------------------------------------------------------
   // Emits the <Api>Spec module, per-aggregate/workflow/view schema modules, and
