@@ -416,6 +416,15 @@ export function scaffoldInstanceList(wf: Workflow): Expression {
     { name: "striped", value: boolLit(true) },
     { name: "highlight", value: boolLit(true) },
     { name: "sticky", value: boolLit(true) },
+    // ES-workflow instances carry no `id` (they're keyed by the
+    // correlation field, the stream key), so the Table's default
+    // `row.id` React key would not type-check.  Key on the correlation
+    // field — unique per instance and already the row testid — falling
+    // back to the row index if a workflow somehow lacks one.
+    {
+      name: "keyExpr",
+      value: stringLit(corrName ? `row.${corrName}` : "idx"),
+    },
     {
       name: "rowTestid",
       value: lambda(
