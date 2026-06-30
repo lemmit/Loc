@@ -414,8 +414,19 @@ system DevPlatform {
     api DeliveryApi from Delivery
     api AccountsApi from Accounts
 
-    storage primarySql { type: postgres }
-    storage hotCache    { type: redis }
+    // Connection sources (all four variants) + a vendor config map covering
+    // the three ConfigValue types (string / int / bool).
+    storage primarySql {
+        type: postgres
+        connection: env("DATABASE_URL")
+        config: { poolSize: 10, ssl: true, region: "eu-west-1" }
+    }
+    storage hotCache {
+        type: redis
+        connection: literal("redis://cache:6379")
+    }
+    storage searchIndex { type: elastic, connection: service(esCluster) }
+    storage eventBus    { type: kafka,   connection: secret(kafkaUrl) }
 
     // ----- UI 1: rich explicit pages (covers walker primitives) -----
     ui Console {
