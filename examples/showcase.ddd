@@ -64,6 +64,24 @@ system DevPlatform {
         stamp onCreate { createdByRole := currentUser.role }
     }
 
+    // Auth config — OIDC handshake + claims mapping. Covers AuthBlock,
+    // OidcConfig, LiteralAuthValue + EnvAuthValue, ClaimsMap, ClaimEntry.
+    auth {
+        provider: keycloak
+        oidc {
+            issuer: "https://idp.example.com"
+            clientId: "loom-console"
+            clientSecret: env("OIDC_CLIENT_SECRET")
+            audience: "loom-api"
+            scopes: ["openid", "profile"]
+        }
+        sessions: jwt
+        claims: {
+            role: "realm_access.role",
+            permissions: "realm_access.roles"
+        }
+    }
+
     // -----------------------------------------------------------------
     // Projects module — registry of projects + their build pipelines.
     // -----------------------------------------------------------------
