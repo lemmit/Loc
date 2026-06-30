@@ -20,7 +20,7 @@ import {
 } from "../../../ir/util/openapi-errors.js";
 import { lines } from "../../../util/code-builder.js";
 import { defaultErrorStatus } from "../../../util/error-defaults.js";
-import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { findUnionSpec } from "../../_payload/union-wire.js";
 import { declaredFinds, isPagedFind } from "./repository.js";
 import { returnUnionSpec } from "./unions.js";
@@ -70,6 +70,11 @@ interface RouteContract {
   listWrapper?: string;
   /** RFC 7807 error responses, ascending by status. */
   errors: RouteError[];
+  /** operationId override — the canonical id the other backends emit, when
+   *  springdoc's controller-derived default diverges (workflow command routes
+   *  carry a `Workflow` suffix, view routes a `View` suffix).  Undefined for
+   *  aggregate-op routes, whose springdoc default already matches node. */
+  operationId?: string;
 }
 
 /** element-schema → array-wrapper component name, registered as
@@ -322,7 +327,15 @@ export function buildJavaOpenApiContract(
         wrapper = `${upperFirst(view.name)}Response`;
         wrappers.set(wrapper, `${upperFirst(view.name)}Row`);
       }
-      routes.push({ method: "get", path: viewPath, listWrapper: wrapper, errors: [] });
+      // View route operationId carries a `View` suffix on the other backends
+      // (`activeProjectsView`); springdoc derives the bare method name.
+      routes.push({
+        method: "get",
+        path: viewPath,
+        listWrapper: wrapper,
+        errors: [],
+        operationId: `${lowerFirst(view.name)}View`,
+      });
     }
 
     // Workflows — POST /workflows/<snake(name)>.
@@ -332,6 +345,9 @@ export function buildJavaOpenApiContract(
         method: "post",
         path: `${routePrefix}/workflows/${snake(wf.name)}`,
         errors: err(errorStatuses("workflow", workflowIsGuarded(wf))),
+        // Workflow command operationId carries a `Workflow` suffix on the other
+        // backends (`registerProjectWorkflow`); springdoc derives the bare name.
+        operationId: `${lowerFirst(wf.name)}Workflow`,
       });
       // <Wf>Request — required = command params (same op-param rule).
       for (const p of wf.params) noteEnumRefs(p.type, p.name);
@@ -412,7 +428,8 @@ export function renderJavaOpenApiCustomizer(basePkg: string, contract: Contract)
     const statusList = r.errors.map((e) => String(e.status)).join(", ");
     const statusArr = `new int[] {${statusList}}`;
     const wrapperArg = r.listWrapper ? JSON.stringify(r.listWrapper) : "null";
-    return `        new Route(${JSON.stringify(r.method)}, ${JSON.stringify(r.path)}, ${wrapperArg}, ${statusArr}),`;
+    const opIdArg = r.operationId ? JSON.stringify(r.operationId) : "null";
+    return `        new Route(${JSON.stringify(r.method)}, ${JSON.stringify(r.path)}, ${wrapperArg}, ${statusArr}, ${opIdArg}),`;
   });
   const wrapperLiterals = contract.wrappers.map(
     (w) => `        new Wrapper(${JSON.stringify(w.wrapper)}, ${JSON.stringify(w.element)}),`,
@@ -455,6 +472,7 @@ export function renderJavaOpenApiCustomizer(basePkg: string, contract: Contract)
     `import io.swagger.v3.oas.models.PathItem;`,
     `import io.swagger.v3.oas.models.media.ArraySchema;`,
     `import io.swagger.v3.oas.models.media.Content;`,
+    `import io.swagger.v3.oas.models.media.IntegerSchema;`,
     `import io.swagger.v3.oas.models.media.MediaType;`,
     `import io.swagger.v3.oas.models.media.ObjectSchema;`,
     `import io.swagger.v3.oas.models.media.Schema;`,
@@ -477,7 +495,7 @@ export function renderJavaOpenApiCustomizer(basePkg: string, contract: Contract)
     `    private static final String PROBLEM_JSON = ${JSON.stringify(PROBLEM_JSON)};`,
     `    private static final String PROBLEM_SCHEMA = ${JSON.stringify(PROBLEM_SCHEMA)};`,
     ``,
-    `    private record Route(String method, String path, String wrapper, int[] statuses) {}`,
+    `    private record Route(String method, String path, String wrapper, int[] statuses, String operationId) {}`,
     `    private record Wrapper(String name, String element) {}`,
     `    private record EnumComponent(String name, List<String> values) {}`,
     `    private record EnumProp(String property, String enumName) {}`,
@@ -521,6 +539,7 @@ export function renderJavaOpenApiCustomizer(basePkg: string, contract: Contract)
     `                if (op == null) continue;`,
     `                normalizeSuccess(op, route.wrapper());`,
     `                addErrors(op, route.statuses());`,
+    `                if (route.operationId() != null) op.setOperationId(route.operationId());`,
     `            }`,
     `            attachEmptyRequests(openApi);`,
     `            retargetEnumProps(openApi);`,
@@ -672,7 +691,7 @@ export function renderJavaOpenApiCustomizer(basePkg: string, contract: Contract)
     `        ObjectSchema problem = new ObjectSchema();`,
     `        problem.addProperty("type", new StringSchema());`,
     `        problem.addProperty("title", new StringSchema());`,
-    `        problem.addProperty("status", new Schema<>().type("integer").format("int32"));`,
+    `        problem.addProperty("status", new IntegerSchema().format("int32"));`,
     `        problem.addProperty("detail", new StringSchema());`,
     `        problem.addProperty("instance", new StringSchema());`,
     `        ObjectSchema errorItem = new ObjectSchema();`,

@@ -82,16 +82,17 @@ describe("java OpenApiCustomizer — list/view array wrappers", () => {
   it("retargets the auto-findAll GET to its named list wrapper", async () => {
     const c = await customizer();
     // GET /<plural> → array wrapper, no error responses.
-    expect(c).toContain('new Route("get", "/api/orders", "OrderListResponse", new int[] {})');
+    expect(c).toContain('new Route("get", "/api/orders", "OrderListResponse", new int[] {}, null)');
   });
 
   it("retargets a `T[]` find + a shorthand view to the list wrapper", async () => {
     const c = await customizer();
     expect(c).toContain(
-      'new Route("get", "/api/orders/active", "OrderListResponse", new int[] {})',
+      'new Route("get", "/api/orders/active", "OrderListResponse", new int[] {}, null)',
     );
+    // The view route also carries a `View`-suffixed operationId.
     expect(c).toContain(
-      'new Route("get", "/api/views/confirmed_orders", "OrderListResponse", new int[] {})',
+      'new Route("get", "/api/views/confirmed_orders", "OrderListResponse", new int[] {}, "confirmed_ordersView")',
     );
   });
 
@@ -114,35 +115,37 @@ describe("java OpenApiCustomizer — RFC 7807 error responses", () => {
 
   it("create → 400, 422", async () => {
     const c = await customizer();
-    expect(c).toContain('new Route("post", "/api/orders", null, new int[] {400, 422})');
+    expect(c).toContain('new Route("post", "/api/orders", null, new int[] {400, 422}, null)');
   });
 
   it("getById → 404; destroy → 404, 409", async () => {
     const c = await customizer();
-    expect(c).toContain('new Route("get", "/api/orders/{id}", null, new int[] {404})');
-    expect(c).toContain('new Route("delete", "/api/orders/{id}", null, new int[] {404, 409})');
+    expect(c).toContain('new Route("get", "/api/orders/{id}", null, new int[] {404}, null)');
+    expect(c).toContain(
+      'new Route("delete", "/api/orders/{id}", null, new int[] {404, 409}, null)',
+    );
   });
 
   it("plain operation → 400, 404, 422; a guarded operation adds 403", async () => {
     const c = await customizer();
     expect(c).toContain(
-      'new Route("post", "/api/orders/{id}/confirm", null, new int[] {400, 404, 422})',
+      'new Route("post", "/api/orders/{id}/confirm", null, new int[] {400, 404, 422}, null)',
     );
     expect(c).toContain(
-      'new Route("post", "/api/orders/{id}/archive", null, new int[] {400, 403, 404, 422})',
+      'new Route("post", "/api/orders/{id}/archive", null, new int[] {400, 403, 404, 422}, null)',
     );
   });
 
   it("a guarded workflow → 400, 403, 422", async () => {
     const c = await customizer();
     expect(c).toContain(
-      'new Route("post", "/api/workflows/place_order", null, new int[] {400, 403, 422})',
+      'new Route("post", "/api/workflows/place_order", null, new int[] {400, 403, 422}, "placeOrderWorkflow")',
     );
   });
 
   it("an optional find → 404", async () => {
     const c = await customizer();
-    expect(c).toContain('new Route("get", "/api/orders/by_code", null, new int[] {404})');
+    expect(c).toContain('new Route("get", "/api/orders/by_code", null, new int[] {404}, null)');
   });
 });
 
@@ -196,5 +199,37 @@ describe("java OpenApiCustomizer — required-field sets", () => {
   it("marks a workflow command request's required params", async () => {
     const c = await customizer();
     expect(c).toContain('new RequiredSet("PlaceOrderRequest", List.of("code"))');
+  });
+});
+
+describe("java OpenApiCustomizer — ProblemDetails.status integer type", () => {
+  it("emits status as a typed IntegerSchema so the spec serializes type: integer", async () => {
+    const c = await customizer();
+    // The bare Schema<>().type("integer") doesn't serialize a `type` in this
+    // swagger-models version; the IntegerSchema subclass does.
+    expect(c).toContain("import io.swagger.v3.oas.models.media.IntegerSchema;");
+    expect(c).toContain('problem.addProperty("status", new IntegerSchema().format("int32"));');
+  });
+});
+
+describe("java OpenApiCustomizer — operationId overrides", () => {
+  it("suffixes a workflow command operationId with `Workflow`", async () => {
+    const c = await customizer();
+    // placeOrder workflow → registerProject-style suffix.
+    expect(c).toContain('"placeOrderWorkflow"');
+    expect(c).toContain("if (route.operationId() != null) op.setOperationId(route.operationId());");
+  });
+
+  it("suffixes a view operationId with `View`", async () => {
+    const c = await customizer();
+    expect(c).toContain('"confirmed_ordersView"');
+  });
+
+  it("leaves aggregate-op routes with a null operationId (springdoc default matches node)", async () => {
+    const c = await customizer();
+    // The rename/confirm aggregate ops carry no operationId override.
+    expect(c).toContain(
+      'new Route("post", "/api/orders/{id}/confirm", null, new int[] {400, 404, 422}, null)',
+    );
   });
 });
