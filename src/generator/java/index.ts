@@ -70,6 +70,10 @@ import {
   renderRequestCatalogFilter,
 } from "./emit/observability.js";
 import {
+  buildJavaOpenApiContract,
+  renderJavaOpenApiCustomizer,
+} from "./emit/openapi-customizer.js";
+import {
   renderApplication,
   renderApplicationYml,
   renderDockerfile,
@@ -606,6 +610,15 @@ function emitProjectFromContexts(
     mainSourcePath(`${basePkg}.api`, "HealthController.java"),
     renderHealthController(basePkg),
   );
+  // springdoc OpenApiCustomizer — align the emitted /openapi.json with the
+  // other backends' contract (success bodies under application/json + named
+  // <Agg>ListResponse array wrappers; RFC 7807 ProblemDetails error responses
+  // under application/problem+json).  Skipped when there's no API surface.
+  const openApiContract = buildJavaOpenApiContract(contexts, routePrefix);
+  const openApiCustomizer = renderJavaOpenApiCustomizer(basePkg, openApiContract);
+  if (openApiCustomizer) {
+    place("OpenApiContractCustomizer.java", "config", openApiCustomizer);
+  }
   // SvelteKit's adapter-static writes `build/`; Vite SPAs write `dist/`.
   const spaOutDir = system?.deployable.uiFramework === "svelte" ? "build" : "dist";
   out.set("Dockerfile", renderDockerfile({ embeddedSpa: hasEmbeddedSpa, spaOutDir }));
