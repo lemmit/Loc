@@ -139,13 +139,24 @@ defmodule ${appModule}Web.ProblemDetails do
   defp render_changeset_error({field, {msg, opts}}) do
     interpolated =
       Enum.reduce(opts, msg, fn {key, value}, acc ->
-        String.replace(acc, "%{#{key}}", to_string(value))
+        String.replace(acc, "%{#{key}}", error_opt_to_string(value))
       end)
 
     %{pointer: pointer_of([field]), message: interpolated}
   end
 
   defp render_changeset_error(_), do: nil
+
+  # Interpolate an Ecto error opt value into the message.  Enum.reduce above
+  # evaluates this for EVERY opt (even ones whose placeholder isn't in the
+  # message), and a cast/cast_assoc failure carries composite-type opts
+  # (type: {:array, :string}, type: {:parameterized, ...}) that don't implement
+  # String.Chars — a bare to_string/1 on the tuple raises Protocol.UndefinedError,
+  # turning a 422 into a 500.  Stringify binaries / atoms / numbers directly;
+  # inspect anything else.
+  defp error_opt_to_string(value) when is_binary(value), do: value
+  defp error_opt_to_string(value) when is_atom(value) or is_number(value), do: to_string(value)
+  defp error_opt_to_string(value), do: inspect(value)
 
   # Build an RFC 6901 JSON pointer from a list of path segments.
   # Each atom segment is camelCased (matching the JsonCamelCase wire

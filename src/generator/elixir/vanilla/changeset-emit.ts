@@ -275,6 +275,25 @@ ${keyAliasPairs.join(",\n")}
     .filter(Boolean)
     .join("\n\n");
 
+  // Wire bodies arrive camelCase (the cross-backend contract; the OpenAPI spec
+  // declares camelCase properties), but Ecto casts the SNAKE-cased column atoms
+  // (`:commit_sha`).  `cast/3` matches keys verbatim, so a multi-word field
+  // (`"commitSha"`) would silently drop → `validate_required` → spurious 422.
+  // Normalise the TOP-LEVEL string keys to snake (`Macro.underscore`) before any
+  // cast; values are left untouched so nested value-object / containment jsonb
+  // payloads keep their own (camelCase) shape.  Idempotent on already-snake keys.
+  const keyNormalizeHelper = `
+
+  # Snake-case the top-level wire keys so camelCase bodies cast cleanly.
+  defp __normalize_keys(attrs) when is_map(attrs) do
+    Map.new(attrs, fn
+      {k, v} when is_binary(k) -> {Macro.underscore(k), v}
+      {k, v} -> {k, v}
+    end)
+  end
+
+  defp __normalize_keys(attrs), do: attrs`;
+
   return `# Auto-generated.
 defmodule ${changesetMod} do
   @moduledoc false
@@ -286,10 +305,11 @@ defmodule ${changesetMod} do
 
   @doc "Default cast/3 helper applied by every per-action changeset below."
   def base_changeset(struct \\\\ %${aggPascal}{}, attrs) do
+    attrs = __normalize_keys(attrs)
     ${valueCollections.length > 0 ? "attrs = prepare_vc_attrs(attrs)\n\n    " : ""}struct
     |> cast(attrs, @all_fields)
     |> validate_required(@required_fields)${validatorBlock}${castEmbedBlock}${castAssocBlock}${voBlock}
-  end${voHelper}${normalizeHelper}${ordinalHelper}
+  end${keyNormalizeHelper}${voHelper}${normalizeHelper}${ordinalHelper}
 
 ${actionHelpers}
 end
