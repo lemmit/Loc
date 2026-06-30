@@ -2,9 +2,8 @@
 
 The conformance harness is the cross-backend gate that catches generator
 drift across backends. Five backends boot (Hono / .NET / Phoenix /
-Python / Java); the parity diff compares four of them (Hono / .NET /
-Phoenix / Python) — Java is booted and health-checked but excluded from
-the diff pairs. One DSL source describes one contract; the backends emit
+Python / Java) and **all five are diffed** — the parity check compares
+every pair (10 pairs = 5 choose 2). One DSL source describes one contract; the backends emit
 OpenAPI specs whose **wire surface is structurally identical** — same
 operations, operationIds, component
 schema names, field names, required sets, enum value-sets, response
@@ -51,14 +50,23 @@ the docker-compose fetch.
 
 ### All-pairs diff
 
-The harness compares **every pair** of the four diffed backends
+The harness compares **every pair** of the five diffed backends
 (`hono ↔ dotnet`, `hono ↔ phoenix`, `dotnet ↔ phoenix`, `hono ↔ python`,
-`dotnet ↔ python`, `phoenix ↔ python` — six pairs) rather than only
+`dotnet ↔ python`, `phoenix ↔ python`, `hono ↔ java`, `dotnet ↔ java`,
+`python ↔ java`, `phoenix ↔ java` — ten pairs) rather than only
 checking each against a single reference. The non-Hono pairs catch
 symmetric drift — two non-Hono backends shipping a contract change in
 lockstep, leaving Hono behind. Without them, the reference-diffs would
 each report "X drifts from Hono" without making the joint relationship
 explicit.
+
+Java's spec is springdoc-inferred and is brought to structural parity by a
+data-driven `OpenApiContractCustomizer` (`src/generator/java/emit/openapi-customizer.ts`)
+that edits the document to match the other four backends — named array
+wrappers, RFC 7807 error responses, named enum components, empty
+request-body schemas for param-less ops, per-component `required` sets,
+and the `Workflow`/`View` operationId suffixes. Each diff dimension is
+strict-asserted for Java like every other backend.
 
 ---
 
@@ -150,12 +158,16 @@ with the tracking issue and removed once the generator work lands:
 
 ### Strict gating
 
-All six pairs over the four diffed backends (`hono↔dotnet`, `hono↔phoenix`,
-`dotnet↔phoenix`, `hono↔python`, `dotnet↔python`, `phoenix↔python`) hard-fail
+All ten pairs over the five diffed backends (`hono↔dotnet`, `hono↔phoenix`,
+`dotnet↔phoenix`, `hono↔python`, `dotnet↔python`, `phoenix↔python`,
+`hono↔java`, `dotnet↔java`, `python↔java`, `phoenix↔java`) hard-fail
 under `LOOM_E2E_STRICT_PARITY=1` (the `conformance-parity.yml` job). #707
 brought .NET byte-identical with Hono; #716 brought Phoenix in line (named
 enum schemas, `{id}` create response, bare-array views, request-bool
-optionality), so the gate is strict for every pair.
+optionality); #1618 added Java to the diff and closed its spec gaps via the
+`OpenApiContractCustomizer` (response cardinality, RFC 7807 errors, enum
+components, required sets, operationId suffixes), so the gate is strict for
+every pair.
 
 ---
 

@@ -901,7 +901,7 @@ Per deployable it emits:
 | Domain | typed-id records (`@Embeddable`, `newId()`), enums (DSL-cased constants — the wire), VO records running invariants in the compact constructor, event records implementing a `DomainEvent` marker (jMolecules-annotated), aggregate/part classes with package-private fields + record-style accessors, `create(...)` factory, `pullEvents()`, positional part `_create` factories |
 | Persistence | JPA annotations mirroring the shared `MigrationsIR` schema (`@EmbeddedId` typed ids, flattened-VO `@AttributeOverride`s, unidirectional `@OneToMany` containments with `nullable = false` join columns, `@ElementCollection` join tables for `X id[]` + value collections, `@MappedSuperclass` TPC bases); repository triple — domain port (`save`/`findById`/`getById`/`findAll`/`delete` + declared finds), Spring Data interface with `@Query` JPQL finds, `@Repository` impl mapping misses to 404 |
 | Migrations | `MigrationsIR` → Flyway `db/migration/V<ts>.<n>__*.sql` via the shared Postgres-SQL renderer |
-| API | `@RestController` per aggregate (`POST /` 201 `{id}`+Location, `GET /{id}`, `GET /`, `POST /{id}/<op_snake>` 204, `GET /<find_snake>`, `DELETE /{id}`), DTO records in `wireShape` order (money/datetime as strings), wire validators from the shared invariant classifier → 422 RFC 7807 with `errors[]`, `@RestControllerAdvice` (400/403/404/422/500 problem+json), springdoc `/openapi.json` |
+| API | `@RestController` per aggregate (`POST /` 201 `{id}`+Location, `GET /{id}`, `GET /`, `POST /{id}/<op_snake>` 204, `GET /<find_snake>`, `DELETE /{id}`), DTO records in `wireShape` order (money/datetime as strings), wire validators from the shared invariant classifier → 422 RFC 7807 with `errors[]`, `@RestControllerAdvice` (400/403/404/422/500 problem+json), springdoc `/openapi.json` brought to cross-backend parity by an `OpenApiContractCustomizer` (named `<Agg>ListResponse`/`<View>Response` array wrappers, RFC 7807 error responses, named enum components, empty request bodies for param-less ops, per-component `required` sets, `Workflow`/`View` operationId suffixes) |
 | Auth | `auth: required` + `user {}` → typed `User` record, `UserVerifier` boundary + accept-all dev stub, 401 filter, ThreadLocal accessor; `currentUser` threads into ops as a trailing parameter |
 | Workflows / views | `POST /workflows/<snake>` via a per-context `@Service` (loops over `Repo.run(...)` retrievals incl. the call-site `page:` tuple, workflow-level `emit` logging the `domain_event` envelope); `GET /views/<snake>` (shorthand reuses `<Agg>Response`; full form gets a `<View>Row` from bind expressions) |
 | Retrievals / criteria | reified criteria → `<Agg>Criteria` `Specification<T>` factories (java consumes `CriterionIR` directly — the first backend to); `run<Name>` port methods: an exact-criterion-ref retrieval rides `JpaSpecificationExecutor.findAll(spec, Sort)`, composed `where`s fall back to `@Query` JPQL with `order by`; paged runs via the `OffsetLimitPageRequest` Pageable |
@@ -980,7 +980,8 @@ member folding.
 
 Conformance: a `pythonApi` deployable ships in `examples/showcase.ddd`
 and the e2e OpenAPI cross-check compares it pairwise against Hono /
-.NET / Phoenix (strict in `conformance-parity.yml`).
+.NET / Phoenix / Java (all five backends are diffed — strict in
+`conformance-parity.yml`).
 
 Resource verb clients (`objectStore` → boto3, `queue` → aio-pika,
 `api` → httpx) are emitted under `app/resources/<sourceType>.py`;

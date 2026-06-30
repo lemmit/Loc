@@ -1650,3 +1650,47 @@ origin/<feature-branch>` restored them (the reflog `HEAD@{1}` also pins the tip)
 **Prevention:** when you only need to *compare* against main on a feature branch,
 `git fetch origin main -q` and diff/log against `origin/main` — don't `reset --hard`
 to it. Reserve the hard reset for when you genuinely want to discard local state.
+
+## 18. Bringing Java into the OpenAPI parity gate — read the *whole* strict-assert list, and the springdoc-customizer pattern (2026-06-30)
+
+`#1618` added Java to the conformance-parity diff (it had been booted but never
+diffed since `#1530` — the "ten pairs (5 choose 2)" comment shipped without the
+Java pairs). Surfacing it exposed three layers of Java-spec drift, fixed via a
+data-driven springdoc `OpenApiContractCustomizer` (`src/generator/java/emit/openapi-customizer.ts`):
+response cardinality + RFC 7807 errors, then schema fidelity (named enum
+components, empty request-body schemas for param-less ops, per-component
+`required` sets = non-optional wire fields), then `ProblemDetails.status`
+typing + `Workflow`/`View` operationId suffixes.
+
+Gotchas worth keeping:
+
+- **A document-filter, not new Java types.** Java represents enum fields as bare
+  `String` and emits no body for param-less ops, so springdoc's *inferred* spec
+  structurally diverges from the hand-built node/.NET/Phoenix/Python specs. The fix
+  is a post-hoc `OpenApiCustomizer` that edits the `OpenAPI` model (bake a per-route/
+  per-schema contract off the same IR the controllers walk, then register/retarget/
+  set on the document) — the established "spec-alignment layer" here, *not* a change
+  to the actual Java records. Mirrors .NET's document-filter approach.
+
+- **The strict gate asserts EVERY diffSpecs dimension, not a subset.** Under
+  `LOOM_E2E_STRICT_PARITY=1`, `test/e2e/e2e.test.ts` `expect(...).toEqual([])`s all
+  ~16 `ParityDiff` arrays (the `isCleanDiff` set), including `propertyTypeDiffs`,
+  `requestBodyDiffs`, and `operationIdDiffs`. A subagent mislabeled two of those as
+  "non-asserted" and reported "8 dims clean" — they were real gating diffs that
+  would have failed CI once the stack booted. **Lesson:** when verifying against a
+  gate, verify against the gate's *own* clean predicate (`isCleanDiff` here), not a
+  hand-picked subset. `vitest` stops at the first failing `expect` in the pair loop,
+  so an early-dimension failure (`onlySchemasRef`) *hides* the later ones — fixing it
+  just reveals the next, so drive to the full clean set, not the first green.
+
+- **Parity is effectively transitive through a common reference.** The agent only
+  boot-verified node↔java, but node↔{dotnet,python,phoenix} were already clean, so
+  java-matches-node ⇒ java matches all four. Verifying one well-chosen pair against
+  the reference backend is enough when the others already agree with it.
+
+- **The compose-boot gate flakes on Docker Hub.** A red `parity` run mid-series was
+  a base-image-pull `i/o timeout` (`registry-1.docker.io` dial timeout), not code —
+  the failed `docker compose build` then cascades to `ECONNREFUSED` on every
+  backend port. Distinguish that from a real `diffSpecs` assertion (`X drift
+  (node ↔ java)`) before "fixing" anything. The session token can't `rerun`/
+  `workflow_dispatch` (403), so re-trigger by pushing the next real commit.
