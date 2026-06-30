@@ -104,6 +104,9 @@ system DevPlatform {
             event ProjectArchivedRecorded { project: Project id, count: int }
             event ArchivalReset { project: Project id }
 
+            // Channel — the event-transport contract carrying a context's events.
+            channel ProjectEvents { carries: ProjectArchived }
+
             // Payload family (PayloadDecl record forms) — the four sugar
             // keywords carry intent over the same record shape.
             command RenameProjectCmd  { newName: string }
@@ -348,9 +351,13 @@ system DevPlatform {
                 // backend-unsupported gates the mismatch).  The `provenanced`
                 // modifier is demonstrated in examples/provenance.ddd (hono-only).
                 total: int
+                cost: money?
                 startedAt: datetime
 
                 invariant commitSha.length > 0
+
+                // MoneyLit — `money("…")` constructor literal.
+                derived costFloor: money = money("0.00")
 
                 function passed(): bool = buildState == Passed
 
@@ -410,7 +417,10 @@ system DevPlatform {
     // -----------------------------------------------------------------
     // Layered architecture: api / storage / ui / deployable.
     // -----------------------------------------------------------------
-    api ProjectsApi from Projects
+    // ApiStatus — per-error HTTP status mapping in an api contract block.
+    api ProjectsApi from Projects {
+        httpStatus ProjectNotFound 404
+    }
     api DeliveryApi from Delivery
     api AccountsApi from Accounts
 
@@ -428,11 +438,47 @@ system DevPlatform {
     storage searchIndex { type: elastic, connection: service(esCluster) }
     storage eventBus    { type: kafka,   connection: secret(kafkaUrl) }
 
+    // ChannelSource — physical binding of a channel to a transport storage.
+    channelSource projectBus { for: ProjectEvents, use: hotCache }
+
+    // Layout — header/main/footer slots; the header exercises the Sticky
+    // primitive. Covers Layout, LayoutNamedSlot, LayoutMainSlot, Sticky.
+    layout ConsoleFrame {
+        header {
+            Sticky {
+                top: "0",
+                Container { Heading { "DevPlatform", level: 3 } }
+            }
+        }
+        main
+        footer {
+            Container { Text { "© DevPlatform" } }
+        }
+    }
+
     // ----- UI 1: rich explicit pages (covers walker primitives) -----
     ui Console {
         api Projects: ProjectsApi
         api Delivery: DeliveryApi
         api Accounts: AccountsApi
+
+        // Client-side store (Store + ActionDecl).
+        store DraftBox {
+            state { count: int = 0 }
+            action bump() { count := count + 1 }
+        }
+
+        // Live channel param + notification (UiChannelParam + UiNotification).
+        channel Live: Catalog.ProjectEvents
+        on Live.ProjectArchived(e) { toast("A project was archived") }
+
+        // Extern UI function (UiFunction).
+        function initials(name: string): string extern from "./helpers"
+
+        // Component with slot + action params (SlotType + ActionType).
+        component Panel(head: slot, onPick: action(Project)) {
+            body: Stack { Slot { "head" }, Button { "Pick" } }
+        }
 
         // Project list — Stack / Breadcrumbs / Anchor / Text / Toolbar /
         // Heading / Button / QueryView / Skeleton / Alert / Empty / Paper /
