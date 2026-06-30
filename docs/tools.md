@@ -608,11 +608,11 @@ The opt-in `LOOM_E2E_CA_DIR` environment variable (used by
 ### Cross-platform OpenAPI parity check
 
 When the same subdomain is hosted on more than one deployable across
-different platforms (Hono, .NET, Phoenix, Python — Java is booted and
-health-checked but excluded from the diff pairs), the e2e additionally
-diffs their OpenAPI specs across every backend pair to catch generator
-drift. Each backend self-describes via its framework-native OpenAPI
-emitter:
+different platforms (Hono, .NET, Phoenix, Python, Java — all five are
+diffed), the e2e additionally diffs their OpenAPI specs across every
+backend pair to catch generator drift. Each backend self-describes via
+its framework-native OpenAPI emitter (Java's springdoc spec is brought
+to parity by an `OpenApiContractCustomizer` document filter):
 
 Every backend serves the spec at the **aligned** path `/openapi.json` (root):
 
@@ -632,9 +632,10 @@ stays available regardless.
 The check fetches each diffed backend's spec, runs
 `diffSpecs(ref, other) → ParityDiff` (pure helper in
 `test/_helpers/openapi-normalize.ts`) for every backend pair over the
-four diffed backends — six pairs (`hono ↔ dotnet`, `hono ↔ phoenix`,
+five diffed backends — ten pairs (`hono ↔ dotnet`, `hono ↔ phoenix`,
 `dotnet ↔ phoenix`, `hono ↔ python`, `dotnet ↔ python`,
-`phoenix ↔ python`) — and reports any divergence across the dimensions:
+`phoenix ↔ python`, `hono ↔ java`, `dotnet ↔ java`, `python ↔ java`,
+`phoenix ↔ java`) — and reports any divergence across the dimensions:
 ops sets, response cardinality, schemas sets, per-schema
 field/required-set drift, per-property type/format, path-param types,
 query params, request- and response-body schema refs, operationIds,
