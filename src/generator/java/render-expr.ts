@@ -70,6 +70,12 @@ export interface JavaRenderContext {
    *  Only the workflow render path wires this; aggregate-op contexts leave it
    *  undefined (and the validator forbids them calling a non-pure service). */
   serviceReading?: (service: string, op: string) => boolean;
+  /** Regex-literal → static-field name map for hoisted `string.matches("…")`
+   *  patterns (so a `private static final Pattern` is reused instead of a fresh
+   *  `Pattern.compile(...)` on every evaluation).  Set by the entity / validator
+   *  emitters from `collectJavaRegexLiterals`; absent ⇒ inline compile (the
+   *  byte-identical default, kept for contexts that don't hoist). */
+  regexFields?: ReadonlyMap<string, string>;
 }
 
 /** The injected repository field a Java `@Service` references for an aggregate
@@ -157,6 +163,87 @@ export function collectJavaExprImports(e: ExprIR, into: Set<string> = new Set())
       // this | id | ref — leaves with no sub-expressions.
       return into;
   }
+}
+
+/** Collect the STRING-LITERAL regex patterns used by `string.matches("…")`
+ *  anywhere in `e` (dynamic-arg matches can't be hoisted, so they're skipped).
+ *  The entity / validator emitters use this to hoist each distinct pattern into
+ *  a `private static final Pattern` field instead of recompiling per evaluation.
+ *  Mirrors the traversal of `collectJavaExprImports`. */
+export function collectJavaRegexLiterals(e: ExprIR, into: Set<string> = new Set()): Set<string> {
+  const visit = (x: ExprIR): void => void collectJavaRegexLiterals(x, into);
+  switch (e.kind) {
+    case "method-call":
+      if (isStringMatches(e) && e.args[0]?.kind === "literal" && e.args[0].lit === "string") {
+        into.add(e.args[0].value);
+      }
+      visit(e.receiver);
+      for (const a of e.args) visit(a);
+      break;
+    case "member":
+      visit(e.receiver);
+      break;
+    case "binary":
+      visit(e.left);
+      visit(e.right);
+      break;
+    case "unary":
+      visit(e.operand);
+      break;
+    case "paren":
+      visit(e.inner);
+      break;
+    case "ternary":
+      visit(e.cond);
+      visit(e.then);
+      visit(e.otherwise);
+      break;
+    case "call":
+      for (const a of e.args) visit(a);
+      break;
+    case "lambda":
+      if (e.body) visit(e.body);
+      break;
+    case "new":
+    case "object":
+      for (const f of e.fields) visit(f.value);
+      break;
+    case "convert":
+      visit(e.value);
+      break;
+    case "match":
+      for (const arm of e.arms) {
+        visit(arm.cond);
+        visit(arm.value);
+      }
+      if (e.otherwise) visit(e.otherwise);
+      break;
+    case "list":
+      for (const el of e.elements) visit(el);
+      break;
+    default:
+      break;
+  }
+  return into;
+}
+
+/** Build `private static final Pattern …` declarations + a pattern→field-name
+ *  map for a set of regex literals.  Field names are deterministic by first-seen
+ *  order (`MATCHES_PATTERN_<i>`); `decls` are bare statements (no indent) so each
+ *  caller indents to its class body.  Returns empty when there are no patterns. */
+export function buildJavaRegexFields(patterns: Iterable<string>): {
+  fields: ReadonlyMap<string, string>;
+  decls: string[];
+} {
+  const fields = new Map<string, string>();
+  const decls: string[] = [];
+  for (const p of patterns) {
+    if (fields.has(p)) continue;
+    const name = `MATCHES_PATTERN_${fields.size}`;
+    fields.set(p, name);
+    decls.push(`private static final Pattern ${name} = Pattern.compile(${JSON.stringify(p)});`);
+  }
+  return { fields, decls };
 }
 
 function isStringMatches(e: MethodCallExpr): boolean {
@@ -334,7 +421,14 @@ function renderMethodCall(
   // string, but Loom's matches is find-anywhere (C# Regex.IsMatch / JS
   // RegExp.test semantics), so render through Pattern…find().
   if (isStringMatches(e)) {
-    return `Pattern.compile(${args[0]}).matcher(${recv}).find()`;
+    const arg0 = e.args[0];
+    const field =
+      arg0?.kind === "literal" && arg0.lit === "string"
+        ? ctx.regexFields?.get(arg0.value)
+        : undefined;
+    return field
+      ? `${field}.matcher(${recv}).find()`
+      : `Pattern.compile(${args[0]}).matcher(${recv}).find()`;
   }
   return `${recv}.${e.member}(${args.join(", ")})`;
 }

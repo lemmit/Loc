@@ -7,7 +7,9 @@
 import type { EnumIR, ValueObjectIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import {
+  buildJavaRegexFields,
   collectJavaExprImports,
+  collectJavaRegexLiterals,
   collectJavaTypeImports,
   renderJavaExpr,
   renderJavaType,
@@ -44,10 +46,26 @@ export function renderJavaValueObject(vo: ValueObjectIR, basePkg: string): strin
     for (const p of fn.params) collectJavaTypeImports(p.type, javaImports);
   }
 
+  // Hoist `string.matches("…")` regex literals (invariants / derived / pure
+  // expr-functions) into `private static final Pattern` fields so the compact
+  // constructor — which runs on every construction AND Hibernate hydration —
+  // reuses the compiled pattern instead of recompiling it.
+  const regexLiterals = new Set<string>();
+  for (const inv of vo.invariants) {
+    collectJavaRegexLiterals(inv.expr, regexLiterals);
+    if (inv.guard) collectJavaRegexLiterals(inv.guard, regexLiterals);
+  }
+  for (const d of vo.derived) collectJavaRegexLiterals(d.expr, regexLiterals);
+  for (const fn of vo.functions) {
+    if ("expr" in fn.body) collectJavaRegexLiterals(fn.body.expr, regexLiterals);
+  }
+  const regex = buildJavaRegexFields(regexLiterals);
+  if (regex.decls.length > 0) javaImports.add("java.util.regex.Pattern");
+
   // Compact-constructor scope: parameters by bare name.
-  const ctorCtx = { thisName: "this", bareProps: true };
+  const ctorCtx = { thisName: "this", bareProps: true, regexFields: regex.fields };
   // Method scope (derived / functions): accessors + fields are available.
-  const methodCtx = { thisName: "this" };
+  const methodCtx = { thisName: "this", regexFields: regex.fields };
 
   const params = vo.fields.map((f) => `${renderJavaType(f.type)} ${f.name}`).join(", ");
   const invariantLines = vo.invariants.map((inv) => {
@@ -93,6 +111,8 @@ export function renderJavaValueObject(vo: ValueObjectIR, basePkg: string): strin
     `@Embeddable`,
     `@ValueObject`,
     `public record ${vo.name}(${params}) {`,
+    regex.decls.length > 0 ? regex.decls.map((d) => `    ${d}`) : null,
+    regex.decls.length > 0 ? `` : null,
     vo.invariants.length > 0 ? `    public ${vo.name} {` : null,
     vo.invariants.length > 0 ? invariantLines : null,
     vo.invariants.length > 0 ? `    }` : null,

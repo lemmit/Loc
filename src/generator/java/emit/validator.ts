@@ -10,6 +10,7 @@ import {
 import { lines } from "../../../util/code-builder.js";
 import {
   collectJavaExprImports,
+  collectJavaRegexLiterals,
   collectJavaTypeImports,
   renderJavaExpr,
   renderJavaType,
@@ -66,9 +67,12 @@ export function renderJavaValidators(
   }
 
   const imports = new Set<string>(["java.util.ArrayList", "java.util.List"]);
+  // Hoist each distinct single-field regex into a `private static final Pattern`
+  // field (reused across calls) instead of recompiling on every validation.
+  const regexFields = new Map<string, string>();
   const methods: string[] = [];
   for (const spec of specs) {
-    const body = methodBody(spec, imports);
+    const body = methodBody(spec, imports, regexFields);
     if (body === null) continue;
     const params = spec.params
       .map((p) => {
@@ -80,6 +84,17 @@ export function renderJavaValidators(
   }
   if (methods.length === 0) return null;
   while (methods[methods.length - 1] === "") methods.pop();
+
+  const patternFields =
+    regexFields.size > 0
+      ? [
+          ...[...regexFields].map(
+            ([pat, name]) =>
+              `    private static final Pattern ${name} = Pattern.compile(${JSON.stringify(pat)});`,
+          ),
+          ``,
+        ]
+      : [];
 
   return lines(
     `package ${pkg};`,
@@ -94,6 +109,7 @@ export function renderJavaValidators(
     `/** Wire-boundary validation (422) — same coverage as the other`,
     ` *  backends' FluentValidation / Zod rules (shared classifier). */`,
     `public final class ${agg.name}Validators {`,
+    ...patternFields,
     `    private ${agg.name}Validators() {`,
     `    }`,
     ``,
@@ -105,7 +121,11 @@ export function renderJavaValidators(
 
 /** The check lines for one method, or null when no invariant translates
  *  (the method is omitted entirely — callers skip the call). */
-function methodBody(spec: MethodSpec, imports: Set<string>): string[] | null {
+function methodBody(
+  spec: MethodSpec,
+  imports: Set<string>,
+  regexFields: Map<string, string>,
+): string[] | null {
   const ctx: ClassifyContext = { available: spec.available };
   const checks: string[] = [];
   const typeOf = (field: string): TypeIR | undefined =>
@@ -116,7 +136,14 @@ function methodBody(spec: MethodSpec, imports: Set<string>): string[] | null {
     const single = singleFieldShape(inv);
     if (single && spec.available.has(single.field)) {
       checks.push(
-        ...patternCheck(single.field, single.pattern, typeOf(single.field), inv.source, imports),
+        ...patternCheck(
+          single.field,
+          single.pattern,
+          typeOf(single.field),
+          inv.source,
+          imports,
+          regexFields,
+        ),
       );
       continue;
     }
@@ -125,7 +152,15 @@ function methodBody(spec: MethodSpec, imports: Set<string>): string[] | null {
     // method's parameter names.
     const path = pickErrorPath(inv) ?? spec.params[0]?.name ?? "";
     collectJavaExprImports(inv.expr, imports);
-    const predicate = renderJavaExpr(inv.expr, { thisName: "this", bareProps: true });
+    // Hoist any regex literals in this compound/generic predicate too (the
+    // single-field `case "regex"` above only covers bare `x.matches(r)`).
+    for (const p of collectJavaRegexLiterals(inv.expr)) {
+      if (!regexFields.has(p)) {
+        regexFields.set(p, `MATCHES_PATTERN_${regexFields.size}`);
+        imports.add("java.util.regex.Pattern");
+      }
+    }
+    const predicate = renderJavaExpr(inv.expr, { thisName: "this", bareProps: true, regexFields });
     checks.push(
       `        if (!(${predicate})) errors.add(WireValidationException.error("/${path}", ${JSON.stringify(`Invariant violated: ${inv.source}`)}));`,
     );
@@ -144,6 +179,7 @@ function patternCheck(
   type: TypeIR | undefined,
   source: string,
   imports: Set<string>,
+  regexFields: Map<string, string>,
 ): string[] {
   const moneyLike =
     type?.kind === "primitive" && (type.name === "money" || type.name === "decimal");
@@ -168,9 +204,15 @@ function patternCheck(
       return [fail(`${field}.length() == ${pattern.n}`)];
     case "len-range":
       return [fail(`${field}.length() >= ${pattern.lo} && ${field}.length() <= ${pattern.hi}`)];
-    case "regex":
+    case "regex": {
       imports.add("java.util.regex.Pattern");
-      return [fail(`Pattern.compile(${JSON.stringify(pattern.pattern)}).matcher(${field}).find()`)];
+      let name = regexFields.get(pattern.pattern);
+      if (!name) {
+        name = `MATCHES_PATTERN_${regexFields.size}`;
+        regexFields.set(pattern.pattern, name);
+      }
+      return [fail(`${name}.matcher(${field}).find()`)];
+    }
   }
 }
 

@@ -141,14 +141,18 @@ not a review-pass edit. **Recommended as the next slice.**
 
 These are real observations but not correctness defects; each carries a verdict.
 
-- **Java — `Pattern.compile` inline in `_assertInvariants()` / validators**
-  (`render-expr.ts:337`, `emit/validator.ts:173`): handle/email regexes recompile
-  on every create/update. *Verdict: deferred, not fixed.* The idiomatic fix
-  (hoist to `private static final Pattern` fields) requires a regex→field
-  registry threaded through the render context into **both** the domain entity
-  emitter and the wire-validator emitter, changing `Engineer.java` /
-  `EngineerValidators.java` snapshots and the conformance gate — disproportionate
-  churn/risk for a perf-only nit. Recommended as a focused follow-up if desired.
+- **Java — `Pattern.compile` inline in invariants / validators — FIXED.**
+  `string.matches("…")` regexes recompiled on every create/update. Now hoisted
+  into reusable `private static final Pattern MATCHES_PATTERN_<i>` fields across
+  all three emitters that render domain regexes — the aggregate class
+  (`emit/entity.ts`), the value-object record (`emit/enums-vos.ts`), and the wire
+  validator (`emit/validator.ts`) — via `collectJavaRegexLiterals` +
+  `buildJavaRegexFields` and a `regexFields` map on `JavaRenderContext`. The
+  matches arm falls back to inline `Pattern.compile` when no map is supplied
+  (so the leaf-level `render-expr-kinds` test is unchanged). Verified: the
+  generated project compiles (`gradle testClasses`), and no inline
+  `Pattern.compile(...).matcher(...)` remains in the emitted tree. Test:
+  `regex-pattern-hoist.test.ts`.
 - **Hono / Python — `decimal` carried as JS `number` / `float`**
   (`Number(row.budget)` / `float(row.budget)`): precision-lossy for money.
   *Verdict: architectural, out of scope.* This is the backends' general `decimal`
