@@ -10,6 +10,7 @@
 import { expect, test } from "@playwright/test";
 import {
   browserCanReachNetwork,
+  dumpPreviewDiagnostics,
   fatalConsoleErrors,
   waitForPlaygroundReady,
 } from "./_helpers";
@@ -71,9 +72,14 @@ test("mui@v7 preview boots without runtime errors", async ({ page }) => {
     await expect(page.getByTestId("preview-region")).toBeVisible();
   const iframe = page.frameLocator('[data-testid="preview-iframe"]');
 
-  await expect(iframe.getByText(/Home|Catalog|Sales|Customers/i).first()).toBeVisible({
-    timeout: 60_000,
-  });
+  try {
+    await expect(iframe.getByText(/Home|Catalog|Sales|Customers/i).first()).toBeVisible({
+      timeout: 60_000,
+    });
+  } catch (e) {
+    await dumpPreviewDiagnostics(page, errors, "mui-v7");
+    throw e;
+  }
 
   const fatal = fatalConsoleErrors(errors);
   expect(fatal, "iframe runtime errors during mui@v7 mount").toEqual([]);

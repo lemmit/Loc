@@ -86,6 +86,37 @@ export function fatalConsoleErrors(messages: string[]): string[] {
   return messages.filter((m) => !KNOWN_CONSOLE_NOISE.some((re) => re.test(m)));
 }
 
+// On a preview-render failure, dump what the in-browser bundle actually
+// produced.  The nightly job log otherwise shows only the bare
+// `getByText(...).toBeVisible` timeout — never WHY the generated app didn't
+// mount.  Surfaces two things the trace artifact would otherwise be the only
+// source of:
+//   1. the RAW captured console/page errors (UNfiltered — the real iframe
+//      React crash hides among the host noise `fatalConsoleErrors`
+//      allow-lists, so we print everything here);
+//   2. the preview iframe's own `<body>` HTML — an error-boundary message or
+//      an empty root tells us mount-vs-blank at a glance.
+// Best-effort: never throws (callers rethrow the original assertion error).
+export async function dumpPreviewDiagnostics(
+  page: Page,
+  captured: string[],
+  label: string,
+): Promise<void> {
+  console.log(
+    `[${label}] preview iframe did not render — ${captured.length} captured console/page error(s):`,
+  );
+  for (const m of captured) console.log(`  ${m.slice(0, 400)}`);
+  try {
+    const body = await page
+      .frameLocator('[data-testid="preview-iframe"]')
+      .locator("body")
+      .innerHTML({ timeout: 5_000 });
+    console.log(`[${label}] preview iframe <body> (first 2000 chars):\n${body.slice(0, 2000)}`);
+  } catch (e) {
+    console.log(`[${label}] could not read preview iframe <body>: ${(e as Error).message}`);
+  }
+}
+
 // Open a specific example.  Examples are now starting points for
 // workspaces (not a destructive "replace active" dropdown), so this
 // creates a NEW workspace seeded from `label` via the WorkspaceSwitcher
