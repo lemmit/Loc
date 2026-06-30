@@ -327,13 +327,14 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
       expect(collectOps(spec).size, `${name} emits at least one operation`).toBeGreaterThan(0);
     }
 
-    // Compare each pair of backends.  Ten pairs total (5 choose 2) — node↔dotnet,
-    // node↔phoenix, dotnet↔phoenix.  The third pair catches drift
-    // where two non-node backends diverge from each other in a way
-    // that's NOT a node divergence (e.g., both Phoenix and .NET
-    // shipping a contract change the node backend hasn't picked up yet).  Without
-    // the direct pair we'd see two "ref drift" reports that don't
-    // make their joint relationship explicit.
+    // Compare every pair of backends — the full 10 (5 choose 2: node, dotnet,
+    // python, phoenix, java).  The all-pairs (not just node-vs-each) form catches
+    // drift where two NON-node backends diverge from each other in a way that's
+    // NOT a node divergence (e.g. both Phoenix and .NET shipping a contract change
+    // the node backend hasn't picked up yet).  Java was historically spec-fetched +
+    // sanity-checked but NEVER diffed (an oversight from #1530, which added java's
+    // fetch + this "ten pairs" comment but not the java pairs); now wired in so the
+    // gate is a genuine 5-way contract check, not 4-way.
     //
     // `diffSpecs` is pure — see test/_helpers/openapi-normalize.test.ts
     // for the unit-test coverage of each divergence class.
@@ -345,6 +346,10 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
         ["node", "python"],
         ["dotnet", "python"],
         ["phoenix", "python"],
+        ["node", "java"],
+        ["dotnet", "java"],
+        ["python", "java"],
+        ["phoenix", "java"],
       ] as Array<[keyof typeof specs, keyof typeof specs]>
     ).filter(([a, b]) => !SKIP_PHOENIX || (a !== "phoenix" && b !== "phoenix"));
     let cleanOverall = true;
