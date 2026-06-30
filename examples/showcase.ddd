@@ -105,6 +105,14 @@ system DevPlatform {
                 sort:  [name asc, sequence desc]
             }
 
+            // Domain service (read-only tier) — a repo query orchestrated
+            // without mutation/commit (DomainService + DomainServiceOperation).
+            domainService ProjectQueries {
+                operation nameTaken(name: string): bool {
+                    return Projects.byName(name) != null
+                }
+            }
+
             aggregate Project ids guid with crudish {
                 name: string
                 description: string?
