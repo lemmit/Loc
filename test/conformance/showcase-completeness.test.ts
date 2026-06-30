@@ -78,16 +78,18 @@ async function buildShowcase(): Promise<LangiumDocument<Model>> {
   return doc as LangiumDocument<Model>;
 }
 
-/** Names of every primitive/component invoked anywhere in the model — the
- *  callee identifier of a call expression (the walker dispatches on these).
- *  Collected loosely at AST level: a call's callee resolves to a name ref,
- *  so we gather every `NameRef`/`IdRef` name plus call-target names. */
+/** Names of every walker primitive / component invoked anywhere in the model.
+ *  A UI element invocation (`Avatar { "P" }`, `Tabs { … }`) parses as a
+ *  `BuilderCall` whose `type` IS the primitive name — that is what the walker
+ *  dispatches on, so coverage must read `BuilderCall.type`.  (We also collect
+ *  every `name` string for decls/components referenced by bare name.)  An
+ *  earlier version collected only `node.name`, which `BuilderCall` does not
+ *  carry — so it reported every primitive as uncovered even when used. */
 function invokedNames(model: Model): Set<string> {
   const names = new Set<string>();
   for (const node of AstUtils.streamAst(model)) {
-    const n = node as { $type: string; name?: unknown };
-    // NameRef / IdRef carry a string `name`; collect it. The walker
-    // primitives surface as call callees, which are name refs.
+    const n = node as { $type: string; name?: unknown; type?: unknown };
+    if (n.$type === "BuilderCall" && typeof n.type === "string") names.add(n.type);
     if (typeof n.name === "string") names.add(n.name);
   }
   return names;
