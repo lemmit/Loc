@@ -83,6 +83,16 @@ system DevPlatform {
             // the reusable twin of an inline `A or B`.
             payload ProjectOutcome = ProjectCard | ProjectNotFound
 
+            // Query cluster — reusable predicate + named retrieval bundle.
+            // (Explicit `loads:` is intentionally omitted: it's gated at IR
+            // validation, loom.retrieval-loads-unsupported.)
+            criterion ActiveNamed(needle: string) of Project = this.active == true && this.name == needle
+
+            retrieval ByActiveName(needle: string) of Project {
+                where: ActiveNamed(needle)
+                sort:  [name asc, sequence desc]
+            }
+
             aggregate Project ids guid with crudish {
                 name: string
                 description: string?
@@ -209,6 +219,17 @@ system DevPlatform {
                       Project p => p.name,
                       ProjectNotFound => "not found"
                   }
+              }
+            }
+
+            // ForStmt + Repo.run (named retrieval) + RetrievalLiteral (inline).
+            workflow scanProjects {
+              create(needle: string) {
+                  let matched = Projects.run(ByActiveName(needle), page: { offset: 0, limit: 100 })
+                  for p in matched {
+                      p.addPipeline("scan")
+                  }
+                  let adhoc = Projects.run(retrieval { where: ActiveNamed(needle) sort: [sequence desc] })
               }
             }
 
