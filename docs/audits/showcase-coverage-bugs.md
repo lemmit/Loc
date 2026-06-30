@@ -28,8 +28,23 @@ the true figure was **36/48**. Without this fix "100% primitive coverage" is
 unmeasurable. Fixed here (the detector now reads `BuilderCall.type`) because
 it's the measurement the campaign depends on; logged for the record.
 
+### BUG-002 — coverage guard's union-exclusion list was incomplete → HARD_GATE unreachable — **S4 (fixed in this PR)**
+
+`UNION_SUPERTYPES` (the set of abstract grammar unions excluded from the
+"every kind appears" check) was hand-maintained and had rotted: it was missing
+**11** real abstract unions — `ConfigValue, ConnectionSource, AuthConfigValue,
+MacroArgValue, StoreDecl, AreaMember, CapabilityMember, WorkflowMember,
+LayoutSlot, ViewSource, PostfixSuffix`. These can never appear as a concrete
+`$type`, so they were permanently "uncovered" — meaning `HARD_GATE = true`
+could **never** pass no matter how complete the showcase got. Fixed by deriving
+the abstract set from `reflection.getAllSubTypes` (auto-catches future unions)
+plus a 2-entry residual (`LValue`, `NamedType`). The honest target is now
+**64/164** instantiable AST kinds uncovered (was reported 75/175).
+
 ---
 
 ## Pending verification (need `conformance-full` / per-backend boot)
 
-_None yet — populated as new features land and the behavioural leg runs._
+- The behavioural backfill (operation + find routes) is being exercised
+  cross-backend by the `run-conformance` run on PR #1623. Any divergence it
+  reports lands here.

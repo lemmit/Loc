@@ -36,28 +36,35 @@ const SHOWCASE = "examples/showcase.ddd";
  * Abstract union supertypes in the grammar — declared as `X: A | B | ...`,
  * never instantiated, so they never appear as a concrete `node.$type`.
  * They must be excluded from the "every kind appears" check or it can never
- * pass.  Derived from `src/language/ddd.langium` union rules.
+ * pass.
+ *
+ * DERIVED, not hand-maintained: a type is an abstract supertype iff
+ * `reflection.getAllSubTypes(t)` lists a member other than `t` itself (the
+ * call always includes `t`).  The previous hand-list rotted — it was missing
+ * 11 real unions (ConfigValue, ConnectionSource, AuthConfigValue,
+ * MacroArgValue, StoreDecl, AreaMember, CapabilityMember, WorkflowMember,
+ * LayoutSlot, ViewSource, PostfixSuffix), so those were "required" yet can
+ * never appear as a concrete `$type`, making HARD_GATE permanently
+ * unreachable (BUG-002).  Deriving it means new grammar unions are excluded
+ * automatically.
  */
-const UNION_SUPERTYPES = new Set<string>([
-  "AggregateMember",
-  "BaseType",
-  "ComponentDecl",
-  "ContextMember",
-  "EntityPartMember",
-  "Expression",
-  "LiteralExpr",
-  "LValue",
-  "ModelMember",
-  "NamedDecl",
-  "NamedType",
-  "PageProp",
-  "Statement",
-  "SystemMember",
-  "Targetable",
-  "TestStatement",
-  "UiMember",
-  "ValueObjectMember",
-]);
+function abstractSupertypes(): Set<string> {
+  const s = new Set<string>();
+  for (const t of reflection.getAllTypes()) {
+    if (reflection.getAllSubTypes(t).some((x) => x !== t)) s.add(t);
+  }
+  return s;
+}
+
+/**
+ * Reference-only concrete interfaces that the parser never emits as a `$type`
+ * (they exist solely as cross-reference / property types, and reflection
+ * exposes no subtypes for them so the derivation above can't catch them).
+ * Kept as a tiny explicit residual.
+ */
+const REFERENCE_ONLY = new Set<string>(["LValue", "NamedType"]);
+
+const UNION_SUPERTYPES = new Set<string>([...abstractSupertypes(), ...REFERENCE_ONLY]);
 
 /**
  * Concrete AST kinds intentionally excluded from the coverage requirement —
