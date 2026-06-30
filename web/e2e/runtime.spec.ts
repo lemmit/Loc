@@ -12,6 +12,7 @@
 import { expect, test } from "@playwright/test";
 import {
   browserCanReachNetwork,
+  fatalConsoleErrors,
   selectExample,
   waitForPlaygroundReady,
 } from "./_helpers";
@@ -147,11 +148,6 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
   // (Monaco workers, PGlite WASM loader, etc.).  Allow npm registry
   // transient 503s the bundler retries through, and PGlite's
   // direct-eval warnings that have no functional impact.
-  const fatal = consoleErrors.filter(
-    (m) =>
-      !/Fetch failed \(503\)/.test(m) &&
-      !/passive event listener/i.test(m) &&
-      !/Using direct eval/i.test(m),
-  );
+  const fatal = fatalConsoleErrors(consoleErrors);
   expect(fatal, "browser console errors during full run").toEqual([]);
 });

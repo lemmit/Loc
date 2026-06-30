@@ -14,7 +14,11 @@
 // - any pageerror surfaced by React-19 rendering the storybook tree
 
 import { expect, test } from "@playwright/test";
-import { browserCanReachNetwork, waitForPlaygroundReady } from "./_helpers";
+import {
+  browserCanReachNetwork,
+  fatalConsoleErrors,
+  waitForPlaygroundReady,
+} from "./_helpers";
 
 // #1242 (fixed): the bundle toast asserted "…KB…" but the Hono bundle is
 // MB-scale, so the KB-only regex never matched.  The matcher is now
@@ -98,16 +102,6 @@ test("mantine@v9 preview boots without runtime errors", async ({ page }) => {
   // Pageerror-level surfaces both.  We also reject any unexpected
   // console.error — Mantine 9 + React 19 shouldn't emit any at
   // steady state on a happy-path mount.
-  const fatal = errors.filter((m) => {
-    // Suppress the well-known noise that's not related to our bundle:
-    //   - 503/504 transients from the npm registry under load
-    //   - "Using direct eval" warnings from esbuild-wasm
-    //   - cross-origin postMessage chatter from the SW handshake
-    return (
-      !/Fetch failed \(50[34]\)/.test(m) &&
-      !/Using direct eval/i.test(m) &&
-      !/Cross-Origin-Resource-Policy/i.test(m)
-    );
-  });
+  const fatal = fatalConsoleErrors(errors);
   expect(fatal, "iframe runtime errors during mantine@v9 mount").toEqual([]);
 });
