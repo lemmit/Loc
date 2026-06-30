@@ -32,7 +32,11 @@ describe("render-expr vanilla leaves", () => {
     expect(renderExpr(filter, ctx)).toBe('record.status == "Confirmed"');
     // In-memory context (no filterArgs): the loaded Ecto.Enum field is the
     // declared-case atom, so the comparison literal is `:"Confirmed"`.
-    const memCtx: RenderCtx = { thisName: "record", contextModule: "Acme.Sales", foundation: "vanilla" };
+    const memCtx: RenderCtx = {
+      thisName: "record",
+      contextModule: "Acme.Sales",
+      foundation: "vanilla",
+    };
     expect(renderExpr(enumVal, memCtx)).toBe(':"Confirmed"');
     expect(renderExpr(filter, memCtx)).toBe('record.status == :"Confirmed"');
   });
