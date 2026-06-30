@@ -408,6 +408,14 @@ system DevPlatform {
                 derived display: string = handle
             }
 
+            // MacroArgBool — `crudish(updateOnly: true)` composes with
+            // softDeletable (which owns the create/destroy lifecycle).
+            aggregate Squad ids guid with crudish(updateOnly: true), softDeletable {
+                name: string
+                invariant name.length > 0
+                derived display: string = name
+            }
+
             repository Engineers for Engineer {
                 find byHandle(handle: string): Engineer? where this.handle == handle
             }
@@ -677,7 +685,9 @@ system DevPlatform {
     }
 
     // ----- UI 3: scaffold-only (sugar binding target, no api params) -----
-    ui Admin with scaffold(subdomains: [Accounts]) {
+    // `scaffoldView(of: …)` adds a single-ref macro arg (MacroArgRef) alongside
+    // the refList `scaffold(subdomains:)`.
+    ui Admin with scaffold(subdomains: [Accounts]), scaffoldView(of: ActiveProjects) {
     }
 
     // ----- DataSources: per-(context, kind) bindings to physical storages -----
