@@ -102,9 +102,11 @@ describe("phoenix renderExpr — receivers", () => {
     expect(renderExpr(thisProp("customerName"), ctx)).toBe("record.customer_name");
   });
 
-  it("renders enum-value refs as the stored string (vanilla Ecto :string column)", () => {
+  it("renders enum-value refs as the declared-case atom in-memory (loaded Ecto.Enum field)", () => {
+    // No `filterArgs` here → in-memory context → the declared-case atom (matches
+    // the loaded Ecto.Enum struct field).  A query context renders the string.
     expect(renderExpr({ kind: "ref", name: "Active", refKind: "enum-value" }, ctx)).toBe(
-      '"active"',
+      ':"Active"',
     );
   });
 

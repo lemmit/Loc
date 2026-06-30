@@ -428,7 +428,13 @@ export function mapTypeToEcto(t: TypeIR, enumsByName: Map<string, EnumIR>): stri
     case "enum": {
       const en = enumsByName.get(t.name);
       if (!en) return ":string";
-      const values = en.values.map((v) => `:${snake(v)}`).join(", ");
+      // Ecto.Enum values use the DECLARED casing (quoted atoms `:"Passed"`), not
+      // snake — the cross-backend wire contract (and the OpenAPI spec) carries the
+      // declared value, so casting `"Passed"` must succeed and the dumped/loaded
+      // value must round-trip as `"Passed"` (Jason encodes the atom back to the
+      // declared string).  Snake-casing here made the field reject every wire
+      // value → 422 "is invalid".
+      const values = en.values.map((v) => `:${JSON.stringify(v)}`).join(", ");
       return `Ecto.Enum, values: [${values}]`;
     }
     case "valueobject":

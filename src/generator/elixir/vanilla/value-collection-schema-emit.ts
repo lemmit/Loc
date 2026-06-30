@@ -106,7 +106,8 @@ function ectoFieldType(
     case "enum": {
       const en = enumsByName.get(t.name);
       if (!en) return ":string";
-      return `Ecto.Enum, values: [${en.values.map((v) => `:${snake(v)}`).join(", ")}]`;
+      // Declared-case quoted atoms (`:"Passed"`) — see schema-emit's mapTypeToEcto.
+      return `Ecto.Enum, values: [${en.values.map((v) => `:${JSON.stringify(v)}`).join(", ")}]`;
     }
     case "optional":
       return ectoFieldType(t.inner, enumsByName);

@@ -329,9 +329,18 @@ function renderRef(e: RefExpr, ctx: RenderCtx): string {
     case "helper-fn":
       return snake(e.name);
     case "enum-value":
-      // A vanilla Ecto `:string` column stores the enum value as a string
-      // (`"confirmed"`).
-      return `"${snake(e.name)}"`;
+      // Enum values use the DECLARED casing (never snake — the wire contract +
+      // every other backend keep it), but the FORM depends on context:
+      //   * In an Ecto query (`filterArgs`) — `from(r in X, where: r.status ==
+      //     <here>)` — the comparison is against the dumped TEXT column, and Ecto
+      //     does NOT cast an inline literal through the `Ecto.Enum` type, so emit
+      //     the declared STRING (`"Confirmed"`) to match the stored value.
+      //   * In-memory (derived / op / invariant / match / `Enum.filter`) the
+      //     loaded struct field IS the declared-case ATOM, so emit `:"Confirmed"`
+      //     (a string would never equal it — that's why a `match (visibility ==
+      //     Public)` silently took the wrong branch before).
+      // Jason encodes the atom back to the declared string on the wire either way.
+      return ctx.filterArgs ? JSON.stringify(e.name) : `:${JSON.stringify(e.name)}`;
     case "current-user":
       return "current_user";
     case "match-binding":
