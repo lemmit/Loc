@@ -71,6 +71,38 @@ scalar-return form if 204-discard is intended. Until fixed, `describe()` keeps
 the showcase's `conformance-parity` red — kept deliberately as the ReturnStmt
 coverage vehicle.
 
+### BUG-004 — union-find absence error mandates field `resource`, which is a reserved keyword → unreadable — **S3**
+
+Slice S4. A union-returning find (`find locate(name): Project or ProjectNotFound`)
+**requires** its error payload to carry exactly `resource: string` (validator:
+"an absence-mapped error may only carry `resource: string`"). But `resource` is
+a reserved keyword (the `resource <name> { for:… }` datasource decl), so a
+postfix access `e.resource` inside a `match` arm fails to **parse**
+(`Expecting one of [by, handle, id, …]`). Net effect: the mandated field is
+*write-only* — the framework fills it, but domain code (a `VariantArm` match)
+can never read it. Either the mandated field should be renamable, or keyword
+field names must be accessible via postfix (LooseName in member position).
+Worked around in the showcase by not binding the field (`ProjectNotFound =>
+"not found"`).
+
+### BUG-005 — union-returning find: OpenAPI response typed only on .NET + Hono — **S2**
+
+Slice S4. `find locate(...): Project or ProjectNotFound` generates on all 5
+backends (no crash), but the success response is typed inconsistently:
+
+| Backend | `/projects/locate` 200 response |
+|---|---|
+| .NET | `ProducesResponseType(typeof(ProjectOrProjectNotFound), 200)` ✓ |
+| Hono | `200 … schema: ProjectOrProjectNotFound` ✓ |
+| Python | `@router.get(..., response_model=None)` — **untyped**, no union schema |
+| Java | `Route("get", ".../locate", null, {500}, null)` — **no 200 success schema**, only 500 |
+| Phoenix | route + controller emitted; spec response TBD |
+
+The discriminated-union wire shape is a .NET/Hono feature
+(`union-dotnet.ddd`); Python and Java emit the route but drop the typed union
+response → the strict `conformance-parity` response/schema diff fails. Kept as
+the union-find / TypeAtom coverage vehicle.
+
 ---
 
 ## Pending verification (need `conformance-full` / per-backend boot)

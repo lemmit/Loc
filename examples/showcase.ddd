@@ -72,6 +72,17 @@ system DevPlatform {
 
             event ProjectArchived { project: Project id, at: datetime }
 
+            // Payload family (PayloadDecl record forms) — the four sugar
+            // keywords carry intent over the same record shape.
+            command RenameProjectCmd  { newName: string }
+            query   ProjectsByVis     { visibility: Visibility }
+            response ProjectCard      { projectId: Project id, name: string, visibility: Visibility }
+            error   ProjectNotFound   { resource: string }
+
+            // Named-union payload (PayloadDecl union form + TypeAtom arms) —
+            // the reusable twin of an inline `A or B`.
+            payload ProjectOutcome = ProjectCard | ProjectNotFound
+
             aggregate Project ids guid with crudish {
                 name: string
                 description: string?
@@ -168,6 +179,9 @@ system DevPlatform {
             repository Projects for Project {
                 find byName(name: string): Project? where this.name == name
                 find active(): Project[] where this.active == true
+                // Union-returning find (absence → the error variant) — the
+                // subject a VariantArm `match` narrows.
+                find locate(name: string): Project or ProjectNotFound where this.name == name
             }
 
             // Non-transactional workflow.
@@ -184,6 +198,17 @@ system DevPlatform {
                       createdAt: now()
                   })
                   proj.addPipeline("default")
+              }
+            }
+
+            // VariantArm — narrow a union-returning find via `match`.
+            workflow resolveProject {
+              create(name: string) {
+                  let outcome = Projects.locate(name)
+                  let label = match outcome {
+                      Project p => p.name,
+                      ProjectNotFound => "not found"
+                  }
               }
             }
 
