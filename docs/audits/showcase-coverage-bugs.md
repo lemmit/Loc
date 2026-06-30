@@ -105,8 +105,34 @@ the union-find / TypeAtom coverage vehicle.
 
 ---
 
-## Pending verification (need `conformance-full` / per-backend boot)
+## Verified via `conformance-full` (run #71, commit c8900c6)
 
-- The behavioural backfill (operation + find routes) is being exercised
-  cross-backend by the `run-conformance` run on PR #1623. Any divergence it
-  reports lands here.
+That run (the behavioural-backfill state) boots all 5 backends. Results:
+
+- ✅ **all 5 backends build + boot + serve `/health`**.
+- ✅ **5-way OpenAPI parity passes** ("all five backends agree across all ten
+  pairs: ops / cardinality / schemas / fields / required").
+- ✅ Playwright UI suite passes; ✅ runtime-403 authz passes.
+- ❌ behavioural DSL e2e: **7 failures, all on `phoenix_api` only** — every
+  one a `422 "is invalid"` on an **enum** field (`POST /api/projects` →
+  `/visibility`, `POST /api/builds` → `/buildState`).
+
+### BUG-006 (pre-existing, already in flight as PR #1622) — Phoenix rejects declared-case enum values — **S2**
+
+This is **not a campaign regression** — it's the known vanilla-Phoenix enum
+casing bug: `Ecto.Enum` snake-cases its values so the wire value `"Public"` /
+`"Passed"` can't `cast`, returning 422. PR **#1622** ("fix(elixir): emit enum
+values in declared casing so wire values cast") fixes exactly these two
+pointers. My behavioural backfill (and the pre-existing happy-path creates,
+which conformance-full replays against *every* backend) just hit the same
+broken path on Phoenix. No action here — tracked by #1622.
+
+> Note: this run predates the S3–S9 features. The **current** milestone
+> additionally fails `conformance-parity` on BUG-003 (scalar return op) and
+> BUG-005 (union-find response typing) — both deliberate coverage vehicles.
+
+## Pending verification
+
+- A fresh `conformance-full` on the S3–S9 milestone would re-confirm the above
+  plus BUG-003/005 (parity) — i.e. only known issues. Worth re-running after
+  those are fixed, not before.
