@@ -16,6 +16,7 @@
 import { expect, test } from "@playwright/test";
 import {
   browserCanReachNetwork,
+  dumpPreviewDiagnostics,
   fatalConsoleErrors,
   waitForPlaygroundReady,
 } from "./_helpers";
@@ -91,9 +92,14 @@ test("mantine@v9 preview boots without runtime errors", async ({ page }) => {
   // First content render — wait for *any* aggregate label to appear.
   // The storybook example emits a Catalog / Sales / CustomerMgmt
   // module structure; "Home" is the shared landing page.
-  await expect(iframe.getByText(/Home|Catalog|Sales|Customers/i).first()).toBeVisible({
-    timeout: 60_000,
-  });
+  try {
+    await expect(iframe.getByText(/Home|Catalog|Sales|Customers/i).first()).toBeVisible({
+      timeout: 60_000,
+    });
+  } catch (e) {
+    await dumpPreviewDiagnostics(page, errors, "mantine-v9");
+    throw e;
+  }
 
   // Now the gate: no runtime errors during render.  The two
   // failure modes we explicitly watch for:
