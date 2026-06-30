@@ -95,7 +95,7 @@ describe("vanilla foundation — view emit (Ecto, no Ash.Query)", () => {
     // atom through Ecto.Enum.  (In-memory comparisons render the atom instead.)
     expect(src).toContain("from(record in Acme.Sales.Order");
     expect(src).toContain('record.status == "Confirmed"');
-    expect(src).not.toContain(':"Confirmed"');
+    expect(src).not.toContain(":Confirmed");
     expect(src).not.toContain('"confirmed"');
     expect(src).toContain("|> Repo.all()");
   });

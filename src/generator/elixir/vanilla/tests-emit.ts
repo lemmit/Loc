@@ -205,10 +205,11 @@ function vtExpr(e: ExprIR, env: Env): string {
     case "literal":
       return renderLiteral(e.lit, e.value);
     case "ref":
-      // An enum value is the DECLARED-case atom (`:"Public"`) — matches the
+      // An enum value is the DECLARED-case atom (`:Public`) — matches the
       // `Ecto.Enum` field's loaded form for assertions AND casts cleanly when
-      // passed in a create-attrs map.  Locals are snake names.
-      return e.refKind === "enum-value" ? `:${JSON.stringify(e.name)}` : snake(e.name);
+      // passed in a create-attrs map.  Locals are snake names.  (Value names are
+      // grammar identifiers, so the atom is never quoted — `:"Public"` would warn.)
+      return e.refKind === "enum-value" ? `:${e.name}` : snake(e.name);
     case "member": {
       const recv = vtExpr(e.receiver, env);
       if (e.receiverType.kind === "array" && (e.member === "count" || e.member === "length")) {

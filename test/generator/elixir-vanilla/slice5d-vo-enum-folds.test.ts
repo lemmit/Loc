@@ -55,7 +55,8 @@ describe("vanilla — ES applier folds over VO / enum fields (P4.3)", () => {
     expect(fold).not.toContain("%Api.Accounts.Money{");
     // enum value → the declared-case atom (the in-memory fold builds the struct
     // whose Ecto.Enum field is the atom; serialization dumps it back to "active").
-    expect(fold).toContain('status: :"active"');
+    // Unquoted — value names are identifiers; `:"active"` would warn under -Werror.
+    expect(fold).toContain("status: :active");
     // a VO copied straight off the event still threads through unchanged.
     expect(fold).toContain("balance: e.m");
   });

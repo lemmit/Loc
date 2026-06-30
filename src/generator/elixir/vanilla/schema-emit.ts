@@ -434,7 +434,9 @@ export function mapTypeToEcto(t: TypeIR, enumsByName: Map<string, EnumIR>): stri
       // value must round-trip as `"Passed"` (Jason encodes the atom back to the
       // declared string).  Snake-casing here made the field reject every wire
       // value → 422 "is invalid".
-      const values = en.values.map((v) => `:${JSON.stringify(v)}`).join(", ");
+      // Value names are grammar identifiers → valid unquoted atoms; `:"Passed"`
+      // would trip Elixir's "quotes not required" warning under -Werror.
+      const values = en.values.map((v) => `:${v}`).join(", ");
       return `Ecto.Enum, values: [${values}]`;
     }
     case "valueobject":

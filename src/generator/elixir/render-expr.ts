@@ -336,11 +336,13 @@ function renderRef(e: RefExpr, ctx: RenderCtx): string {
       //     does NOT cast an inline literal through the `Ecto.Enum` type, so emit
       //     the declared STRING (`"Confirmed"`) to match the stored value.
       //   * In-memory (derived / op / invariant / match / `Enum.filter`) the
-      //     loaded struct field IS the declared-case ATOM, so emit `:"Confirmed"`
+      //     loaded struct field IS the declared-case ATOM, so emit `:Confirmed`
       //     (a string would never equal it — that's why a `match (visibility ==
-      //     Public)` silently took the wrong branch before).
+      //     Public)` silently took the wrong branch before). Enum value names are
+      //     grammar identifiers, so the atom never needs quoting (`:"Confirmed"`
+      //     would trip Elixir's "quotes not required" warning under -Werror).
       // Jason encodes the atom back to the declared string on the wire either way.
-      return ctx.filterArgs ? JSON.stringify(e.name) : `:${JSON.stringify(e.name)}`;
+      return ctx.filterArgs ? JSON.stringify(e.name) : `:${e.name}`;
     case "current-user":
       return "current_user";
     case "match-binding":
