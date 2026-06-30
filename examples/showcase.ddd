@@ -83,6 +83,8 @@ system DevPlatform {
             }
 
             event ProjectArchived { project: Project id, at: datetime }
+            event ProjectArchivedRecorded { project: Project id, count: int }
+            event ArchivalReset { project: Project id }
 
             // Payload family (PayloadDecl record forms) — the four sugar
             // keywords carry intent over the same record shape.
@@ -250,6 +252,34 @@ system DevPlatform {
                       p.addPipeline("scan")
                   }
                   let adhoc = Projects.run(retrieval { where: ActiveNamed(needle) sort: [sequence desc] })
+              }
+            }
+
+            // Event-sourced saga — OnDecl + Apply + create-by-correlation.
+            workflow ArchivalTracker eventSourced {
+                project: Project id      // correlation field → stream key
+                archivedCount: int       // folded state
+
+                create(e: ProjectArchived) by e.project {
+                    emit ProjectArchivedRecorded { project: e.project, count: 1 }
+                }
+                on(e: ProjectArchived) by e.project {
+                    emit ProjectArchivedRecorded { project: e.project, count: 1 }
+                }
+                apply(rec: ProjectArchivedRecorded) { archivedCount := archivedCount + rec.count }
+                apply(r: ArchivalReset) { archivedCount := 0 }
+                // HandleDecl — a command handler on the saga (emits, folds in apply).
+                handle reset() { emit ArchivalReset { project: project } }
+            }
+
+            // IfLetStmt — single-row criterion lookup; bound only in `then`.
+            workflow touchActive {
+              create(needle: string) {
+                  if let p = Projects.find(ActiveNamed(needle)) {
+                      p.addPipeline("found")
+                  } else {
+                      precondition needle.length > 0
+                  }
               }
             }
 
