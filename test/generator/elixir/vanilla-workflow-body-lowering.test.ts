@@ -27,6 +27,10 @@ system Tasks {
         operation markDone() {
           done := true
         }
+
+        operation toggle(flag: bool) {
+          done := flag
+        }
       }
       repository Tasks for Task { }
 
@@ -34,6 +38,7 @@ system Tasks {
         create() {
           let t = Task.create({ title: "Untitled", done: false })
           t.markDone()
+          t.toggle(false)
         }
       }
     }
@@ -76,6 +81,18 @@ describe("vanilla — workflow body lowering (factory-let + op-call)", () => {
       [...files.keys()].find((k) => k.endsWith("/workflows/create_and_complete.ex"))!,
     )!;
     expect(wf).toContain("{:ok, _} <- Context.mark_done_task(t, %{})");
+  });
+
+  it("keys an op-call's params map by the called op's REAL param name as a string key", async () => {
+    // Regression: positional atom keys (`%{arg0: ...}`) silently resolved to
+    // `nil` in the facade's `Map.get(params, "flag")` read.  The key must be the
+    // operation's declared parameter name as a STRING key.
+    const files = await generateSystemFiles(SOURCE);
+    const wf = files.get(
+      [...files.keys()].find((k) => k.endsWith("/workflows/create_and_complete.ex"))!,
+    )!;
+    expect(wf).toContain('{:ok, _} <- Context.toggle_task(t, %{"flag" => false})');
+    expect(wf).not.toContain("arg0:");
   });
 
   it("the with-chain returns {:ok, <last-bound>} on success", async () => {

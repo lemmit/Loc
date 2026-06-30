@@ -31,6 +31,16 @@ import { classifyPage, type PageNameCtx } from "../../ir/util/page-kind.js";
 import { plural, snake } from "../../util/naming.js";
 import { renderGateExpr } from "./gate-expr.js";
 
+/** A page's declared `title:` as a plain string, usable as a default menu
+ *  label (`link ProjectNew` → "New project", not "ProjectNew").  Only a
+ *  string-literal title qualifies — a title that interpolates state/data refs
+ *  is a render-time expression, not a static label, so those fall through to
+ *  the page name. */
+function pageTitleLabel(p: PageIR): string | undefined {
+  const t = p.title;
+  return t && t.kind === "literal" && t.lit === "string" ? t.value : undefined;
+}
+
 /** A single sidebar nav entry — framework-neutral data the React and
  *  Svelte app shells both render (React: NavLink; Svelte: <a>).
  *  Moved here from react/templating/view-models.ts with the menu
@@ -129,7 +139,7 @@ export function deriveSidebarFromUi(
     sections.push({
       label: sectionLabel,
       entries: pages.map((p): NavEntryVM => {
-        const label = readMenuMetaString(p, "label") ?? p.name;
+        const label = readMenuMetaString(p, "label") ?? pageTitleLabel(p) ?? p.name;
         const tIdAndActive = testIdAndActive(p, nameCtx);
         return {
           to: p.route ?? "",
@@ -178,7 +188,7 @@ function navEntryForLink(
   // page's menuMeta `label` and finally to the page name.
   const overrideLabel = stringPropOf(link.props, "label");
   const metaLabel = readMenuMetaString(page, "label");
-  const label = overrideLabel ?? metaLabel ?? page.name;
+  const label = overrideLabel ?? metaLabel ?? pageTitleLabel(page) ?? page.name;
   // Identify well-known page kinds via `classifyPage` so testid
   // and active-route semantics match main's hardcoded conventions.
   const tIdAndActive = testIdAndActive(page, nameCtx);

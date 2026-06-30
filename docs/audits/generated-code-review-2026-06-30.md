@@ -3,107 +3,190 @@
 A read-through of the **generated output** (not the emitters in the abstract) for
 every backend and frontend, looking for code that is *clearly out of place* —
 real logic bugs, dropped declarations, leaked placeholders — rather than style.
-(Companion to the earlier `generated-code-review-2026-06.md`; this is a fresh
-fresh-`main` snapshot on the date above.)
+(Companion to the earlier `generated-code-review-2026-06.md`.)
 
-**Method:** `generate system examples/showcase.ddd` (exercises all 5 backends +
-3 frontend packs) into a scratch tree, then one focused reviewer per target
-comparing generated source against the `.ddd` spec and the emitter. Spot-checks
-of the event-sourcing / inheritance / persistence-shapes systems as well.
+**Method.** Two passes. (1) `generate system examples/showcase.ddd` (all 5
+backends + 3 frontend packs), one reviewer per target against the spec + emitter.
+(2) A second, deeper pass reviewing **each generated project standalone** — as a
+hand-written repo a senior engineer inherited, judged on its own merits — across
+`showcase`, `store-showcase`, `banking-system`, `pokemon-world`, `inheritance`,
+`event-sourcing`, and `persistence-shapes`.
 
-**Headline:** `.NET` and `Java` output is clean. **Two genuine bugs, both
-Elixir-only and both compile-clean** (so `elixir-vanilla-build` / `mix compile`
-cannot catch them — they are silent runtime defects). Plus two minor
-consistency nits.
-
----
-
-## 🔴 BUG-1 · Enum comparisons are always-false in Elixir domain code
-
-- **Where (output):** `phoenix_api/lib/phoenix_api/builds.ex` — `passed/1`:
-  ```elixir
-  def passed(%Build{} = record), do: record.build_state == "passed"
-  ```
-- **Where (root cause):** `src/generator/elixir/render-expr.ts:331` renders an
-  `enum-value` ref as a **string** literal (`"passed"`).
-- **Why it's wrong:** the schema emits the column as
-  `Ecto.Enum, values: [:queued, :running, :passed, :failed]`
-  (`src/generator/elixir/vanilla/schema-emit.ts:432`), so a **loaded** field is
-  the **atom** `:passed`. `:passed == "passed"` is always `false`. Therefore
-  `Build.passed()` is permanently false and `Build.promote`'s
-  `precondition passed()` can **never** succeed on the Elixir backend.
-- **Stale rationale:** the renderer comment and the pinning test
-  (`test/generator/elixir/phoenix-render-expr.test.ts:105`) assume a plain
-  `:string` column. The schema later moved to `Ecto.Enum` (schema-emit "Slice 3")
-  but `render-expr.ts` and the test did not follow. It still *happens* to work
-  inside Ecto `where:` queries (Ecto casts the literal against the field type),
-  which is why the regression went unnoticed — only the **in-memory** comparison
-  path is broken.
-- **Fix is context-sensitive (not a one-line flip):**
-  - **relational** aggregates (`Ecto.Enum`) → must render the atom `:passed`;
-  - **document**-shaped aggregates rehydrate the enum from jsonb as a **string**
-    (`src/generator/elixir/vanilla/document-emit.ts:56` casts enum as plain
-    `:string`) → must keep the string;
-  - inside an Ecto `where:` either form works, but the atom is idiomatic.
-  The renderer needs to know the storage shape (relational vs document) and/or
-  query-vs-in-memory context. `store-emit.ts:180` already renders the atom form
-  (`:#{nm}`), so the two emitters currently disagree.
-- **Blast radius:** any pure domain function / operation body that compares an
-  enum field on a relational aggregate. `Build.promote` is the showcase example;
-  the bug is general.
-
-## 🔴 BUG-2 · Workflow-invoked operation args are silently dropped (Elixir)
-
-- **Where (output):**
-  - `phoenix_api/lib/phoenix_api/catalog/workflows/register_project.ex:22`
-    ```elixir
-    {:ok, _} <- Context.add_pipeline_project(proj, %{arg0: "default"}) do
-    ```
-  - `phoenix_api/lib/phoenix_api/builds/workflows/promote_to_production.ex:39`
-    ```elixir
-    {:ok, _} <- Context.promote_build(b, %{arg0: "production"}, current_user) do
-    ```
-- **Where (root cause):** `src/generator/elixir/dispatch-emit.ts:599` and
-  `src/generator/elixir/domain-service-emit.ts:211` build the op-call param map
-  with **positional atom keys** (`arg${i}:`).
-- **Why it's wrong:** the op facade reads params by **real name as string key**:
-  `catalog.ex:115` → `label = Map.get(params, "label")`,
-  `builds.ex:53` → `env = Map.get(params, "env")`. So
-  `Map.get(%{arg0: "default"}, "label")` is `nil`: every workflow-driven
-  operation call passes `nil` for **all** of its arguments (a double mismatch —
-  wrong name *and* atom-vs-string key).
-- **Scope:** Elixir-only. hono / java / python / .NET emit workflow op-calls
-  correctly (no `arg0` anywhere in their output).
-- **Fix:** emit the called operation's actual parameter names as **string** keys
-  (`%{"label" => ...}`), mirroring the controller path the facade was written
-  for. Gate with a fixture compiled under `mix compile --warnings-as-errors`
-  that drives a workflow op-call.
+**Headline.** Five genuine bugs found (four fixed here; one delegated). `.NET`
+and `Java` domain output is sound. Most second-pass "findings" were **faithful
+translations of the source** (a reviewer with no spec mistakes them for bugs) —
+catalogued below so they're not re-reported. One real **systemic** gap (update
+wire-validation, all 5 backends) is documented as a dedicated follow-up slice
+because fixing it on one backend would break cross-backend OpenAPI parity.
 
 ---
 
-## 🟡 Minor / consistency
+## Confirmed bugs
 
-- **Python — Update DTOs lack wire validators.** `CreateXRequest` Pydantic
-  models carry `Field(...)` constraints + `@model_validator`, but
-  `UpdateXRequest` (e.g. `python_api/app/http/project_routes.py`
-  UpdateProjectRequest) do not, so an invalid PUT fails at the domain floor (400)
-  instead of the wire (422) like create does. Cross-backend consistency
-  question — may be by-design.
-- **React menu — label falls back to page *name*, not *title*.**
-  `src/generator/_frontend/menu-emitter.ts:181`:
-  `overrideLabel ?? metaLabel ?? page.name` skips `page.title`, so `link ProjectNew`
-  (no explicit label) renders `"ProjectNew"` instead of its declared
-  `title: "New project"`. Adding `?? page.title` before `?? page.name` would be a
-  sensible default.
+| ID | Area | Status |
+|---|---|---|
+| BUG-1 | Elixir enum-value renders as string, not atom | delegated (other agent) |
+| BUG-2 | Elixir workflow op-call args mis-keyed (`arg0`) | **FIXED** |
+| BUG-3 | Walker drops lambda/loop refs in text position | **FIXED** |
+| BUG-4 | Phoenix `insert` lacks assoc preload → 500 on create | **FIXED** |
+| BUG-5 | Elixir custom-find repo-let op-call → `<op>_unknown` fn | **FIXED** (defense-in-depth; validator-gated in prod) |
+| SYS-1 | Update-path lacks wire validators (all 5 backends) | documented — needs a dedicated multi-backend slice |
 
-## Discarded (false positives)
+### 🔴 BUG-1 · Enum comparisons are always-false in Elixir domain code — *delegated*
 
-- **Phoenix "duplicate timestamps":** the migration *does* emit `timestamps()`
-  alongside the domain `created_at` column, matching the schema — consistent.
-- **React `key={idx}`:** the source explicitly sets `keyExpr: "idx"` on that
-  Table; index-keying is the author's request, not an emitter error.
-- **React unused `useParams()`:** the showcase `ProjectDetail` page genuinely
-  never references `id` (all literal values), so the discarded call is dead but
-  not wrong.
-- **.NET, Java:** end-to-end traces of operations / workflows / events / views /
-  DTOs / JPA+Flyway columns found nothing out of place.
+`src/generator/elixir/render-expr.ts:331` renders an `enum-value` ref as a
+**string** (`"passed"`), but `schema-emit.ts:432` emits `Ecto.Enum` columns whose
+loaded value is the **atom** `:passed`. So `record.build_state == "passed"` is
+always false → `Build.passed()` is permanently false and `Build.promote`'s
+`precondition passed()` can never succeed. The fix is context-sensitive
+(relational ⇒ atom; document jsonb ⇒ string) and overturns a deliberately-pinned
+test (`phoenix-render-expr.test.ts:105`). **Owned by a separate agent** per the
+work split; left untouched here.
+
+### 🔴 BUG-2 · Workflow-invoked operation args silently dropped (Elixir) — FIXED
+
+The workflow emitters keyed the op-call params map by **positional atom keys**
+(`%{arg0: "default"}`), but the context-facade op function reads them by **real
+name as string key** (`Map.get(params, "label")`) — so every workflow-driven
+operation received `nil` for all arguments.
+
+- Root cause: `dispatch-emit.ts`, `vanilla/workflow-execution-emit.ts`,
+  `domain-service-emit.ts` all built `arg<i>:` fields.
+- Fix: a shared `opCallParamFields(argTexts, op)` helper (in
+  `workflow-execution-emit.ts`) keyed by the resolved op's real parameter names
+  as **string** keys (`%{"label" => "default"}`), mirroring `tests-emit.ts`
+  (which was already correct). All three producers resolve the op via `lookupOp`
+  / `resolveAggOp`.
+- Tests: `vanilla-workflow-body-lowering.test.ts` (new bare-named-param case),
+  `domain-service-mutating.test.ts` (updated). Gated by the existing
+  `elixir-vanilla-build` fixtures (`vanilla-relational-parts`,
+  `vanilla-domain-service-mutating`, `vanilla-multi-context-workflows`).
+
+### 🔴 BUG-3 · Walker drops lambda/loop refs in text position — FIXED
+
+`For { each: Cart.lines, line => Card { line } }` rendered the bare loop ref
+`line` (used as the Card title) as `<Title>{/* ref: line */}</Title>` — a blank
+card. `renderTextContent` (`_walker/walker-core.ts`) resolved param/state/derived
+refs but was **missing the `lambdaParams` lookup** that the markup-child handler
+(`emitExpr`) already had — so any lambda/loop-bound ref in **text position**
+(Card/Heading/Text/Stat title) degraded to a comment.
+
+- Fix: added the `lambdaParams` resolution to `renderTextContent`, mirroring
+  `emitExpr`. Now `{line}` renders.
+- Affects every JSX/markup frontend (shared walker core). Test:
+  `walker-for.test.ts` (new bare-ref-in-text-position case).
+
+### 🔴 BUG-4 · Phoenix `insert` lacks assoc preload → 500 on create — FIXED
+
+For an aggregate with a containment (`contains pipelines: Pipeline[]` → a
+`has_many`), `base_changeset` does `cast_assoc(:pipelines)`, but a create payload
+without a `pipelines` key leaves the association `%Ecto.Association.NotLoaded{}`.
+The vanilla repository's `insert/1` (unlike `update`/`find`, which preload) never
+preloaded, so `serialize` (`Map.from_struct`) handed Jason a `NotLoaded` struct →
+**500 on POST create** for any containment aggregate.
+
+- Root cause: `vanilla/repository-emit.ts` — `insert` omitted the read-path
+  preload.
+- Fix: preload the inserted record's associations on the `{:ok, _}` branch
+  (`|> case do {:ok, record} -> {:ok, record |> Repo.preload([...])} …`), reusing
+  the same association list the reads use; emitted only when the aggregate has
+  associations (no-assoc aggregates stay byte-identical).
+- Test: `vanilla-relational-parts.test.ts` (extended). Gated by
+  `vanilla-relational-parts.ddd` under `elixir-vanilla-build`.
+
+### 🔴 BUG-5 · Elixir custom-find repo-let op-call → wrong context fn — FIXED
+
+Surfaced while hardening BUG-2. An op-call on a variable bound by a **custom**
+find (`let i = Items.byLabel(wanted)` then `i.markFound()`) resolved the
+receiver's aggregate to `"Unknown"` — because `aggNameForLocal`
+(`lower-workflow.ts`) didn't unwrap the find's declared optional return type
+(`Item?`) — and emitted a call to a non-existent `Context.mark_found_unknown/2`.
+
+- In **validated** generation this is unreachable: the IR validator rejects a
+  nullable/array custom-find repo-let (`'…' returns a nullable; use getById`), so
+  only `getById` (a bare entity) survives. It bit only the **unvalidated**
+  codegen path (a unit test). The fix is defense-in-depth, not a shipped defect.
+- Fixes: `aggNameForLocal` now unwraps `optional`/`array` to the inner entity;
+  and `opCallParamFields` was **hardened** as part of BUG-2 — no args ⇒ `%{}`;
+  args with an unresolved op now **throw** (loud) instead of silently re-emitting
+  positional `arg<i>` keys (which would resurrect BUG-2). The throw cannot fire
+  in validated generation.
+- Test: `vanilla-workflow-repo-let.test.ts` (asserts `mark_found_item`, never
+  `_unknown`).
+
+### 🟠 SYS-1 · Update-path lacks wire validators (all 5 backends) — documented
+
+`CreateXRequest` DTOs carry the field constraints + mirrorable-invariant
+validators (so invalid create → **422** at the wire); the `UpdateXRequest`
+counterparts carry **none**, so an invalid update is caught only at the domain
+floor (**400**, or a 500 where the domain raises differently). Confirmed
+independently on **Hono, .NET, Java, Python** (and the same shape on Elixir).
+
+Example (Hono `engineer.routes.ts`): `CreateEngineerRequest` has
+`handle: z.string().min(3).max(32)` + `.refine(handle != email)` + the email
+regex; `UpdateEngineerRequest` has bare `z.string()` and no `.refine`.
+
+**Why it is not fixed in this pass:** the request schema is part of the
+cross-backend **OpenAPI/error contract** that `conformance-parity` gates. Adding
+update validators to one backend changes that backend's spec and **breaks
+parity** — the exact divergence we want to avoid. It must land on all 5 backends
+together, each through its own validation mechanism (zod `.refine` / FluentValidation /
+Bean Validation / Pydantic validators), with a decision on whether update should
+surface 422 like create. That is a dedicated parity slice (own PR + heavy gates),
+not a review-pass edit. **Recommended as the next slice.**
+
+---
+
+## Minor items (disposition)
+
+These are real observations but not correctness defects; each carries a verdict.
+
+- **Java — `Pattern.compile` inline in `_assertInvariants()` / validators**
+  (`render-expr.ts:337`, `emit/validator.ts:173`): handle/email regexes recompile
+  on every create/update. *Verdict: deferred, not fixed.* The idiomatic fix
+  (hoist to `private static final Pattern` fields) requires a regex→field
+  registry threaded through the render context into **both** the domain entity
+  emitter and the wire-validator emitter, changing `Engineer.java` /
+  `EngineerValidators.java` snapshots and the conformance gate — disproportionate
+  churn/risk for a perf-only nit. Recommended as a focused follow-up if desired.
+- **Hono / Python — `decimal` carried as JS `number` / `float`**
+  (`Number(row.budget)` / `float(row.budget)`): precision-lossy for money.
+  *Verdict: architectural, out of scope.* This is the backends' general `decimal`
+  handling; a precise-decimal story (big.js / `Decimal`) is a cross-backend
+  design change, not a review-pass edit.
+- **Hono / Python — N+1 on find-by-field** (`byName` → `findById` re-fetch;
+  `_hydrate` per row): *Verdict: by-design.* Consistent "load the full
+  aggregate" pattern; functional, not a correctness defect.
+
+---
+
+## Catalogued false positives (faithful to source — do not re-report)
+
+Second-pass reviewers had no spec, so they flagged faithful translations. Each
+was verified against `examples/showcase.ddd`:
+
+- **`headline` returns "active"/"archived" for `Private`** (.NET/Java/Python):
+  the source `match` else-arm is literally `else => (active ? "active" : "archived")`.
+- **`displayLabel` ends in `"x"`** (Hono/Python): source is literally
+  `label + " #" + "x"` (literal coverage).
+- **`touch()` is dead code**: it's a declared `private operation`.
+- **Java `pipelines.size() >= 0` always true**: faithful to the tautological
+  source invariant `pipelines.count >= 0` (author's literal-coverage choice).
+- **`useParams()` result unused** (console_web ProjectDetail): that page renders
+  only literals/state and never references `id` — the call is dead but harmless;
+  the walker *does* destructure when the id is used (engineer detail).
+- **`Table key={idx}`**: the source explicitly sets `keyExpr: "idx"`.
+- **Phoenix `created_at` field + `timestamps()`**: the migration emits both —
+  consistent.
+- **Python `await session.connection(execution_options={isolation_level})`
+  result discarded**: the option is applied to the session's transaction
+  connection as a side effect; discarding the return is fine.
+
+---
+
+## Verified sound
+
+`.NET` and `Java` domain layers (operations, workflows, events, views, DTOs, JPA
++ Flyway columns, auth filter/ThreadLocal cleanup, `@Transactional` discipline,
+`BigDecimal` for money, enum-as-string) were traced end-to-end with no genuine
+defects beyond SYS-1 and the minor items above.

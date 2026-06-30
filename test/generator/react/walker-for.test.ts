@@ -48,6 +48,19 @@ describe("walker primitive — For (list comprehension)", () => {
     expect(tsx).toMatch(/<Title order=\{2\}[^>]*>\{\("row " \+ n\)\}<\/Title>/);
   });
 
+  it("resolves a BARE loop-bound ref in text position (not a `/* ref */` comment)", async () => {
+    // Regression: a bare item ref used as a Card/Heading title went through
+    // `renderTextContent`, which lacked the `lambdaParams` lookup and degraded
+    // the value to an unresolved-ref comment — so the row rendered blank.
+    const card = await emit(`Stack { For { each: ["a", "b"], item => Card { item } } }`);
+    expect(card).toMatch(/<Title order=\{3\}[^>]*>\{item\}<\/Title>/);
+    expect(card).not.toContain("/* ref: item */");
+
+    const heading = await emit(`Stack { For { each: ["a", "b"], item => Heading { item } } }`);
+    expect(heading).toMatch(/<Title order=\{2\}[^>]*>\{item\}<\/Title>/);
+    expect(heading).not.toContain("/* ref: item */");
+  });
+
   it("accepts the `render:` named-lambda surface for the item renderer", async () => {
     const tsx = await emit(`Stack { For { each: [1, 2], render: r => Heading { "x" } } }`);
     expect(tsx).toMatch(/\[1, 2\]\.map\(\(r, rIdx\) =>/);

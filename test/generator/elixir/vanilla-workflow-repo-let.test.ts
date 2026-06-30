@@ -145,5 +145,10 @@ describe("vanilla — workflow body lowering (repo-let / custom find routes thro
     expect(wf).toContain("{:ok, i} <- Context.by_label_item(wanted)");
     expect(wf).toContain(`%{"wanted" => wanted} = params`);
     expect(wf).not.toContain("# TODO: lower workflow statement kind 'repo-let'");
+    // The op-call on the custom-find binding `i` must route to the right
+    // aggregate's context fn — not `mark_found_unknown` (the optional return
+    // type `Item?` must unwrap to `Item` for receiver resolution).
+    expect(wf).toContain("{:ok, _} <- Context.mark_found_item(i, %{})");
+    expect(wf).not.toContain("_unknown(");
   });
 });
