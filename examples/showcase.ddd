@@ -551,6 +551,59 @@ system DevPlatform {
         expect(rows.length).toBeGreaterThanOrEqual(0)
     }
 
+    // ----- Behavioural coverage: operations + finds (cross-backend) -----
+    // The happy-path creates above only exercised `create`/`getById`.  The
+    // blocks below drive the operation routes (`POST /<plural>/{id}/<op>`) and
+    // the find routes (`GET /<plural>/<find>?…`) so `conformance-full` proves
+    // the SAME runtime behaviour across every backend serving the module —
+    // not just that the OpenAPI shapes match (the structural parity gate).
+    // These add no new API surface, so the per-PR spec-diff is unaffected.
+
+    // Operation route: `promote` runs its body (`total := total + 1`) + emits.
+    test e2e "promoting a passing build increments its total" against dotnetApi {
+        let b = api.builds.create({ commitSha: "deadbee", buildState: "Passed", total: 0, startedAt: "2024-01-01T00:00:00Z" })
+        api.builds.promote(b, { env: "production" })
+        let read = api.builds.getById(b)
+        expect(read.total).toBe(1)
+    }
+
+    // Operation route: `rename` mutates a field through a precondition gate.
+    test e2e "renaming a project updates its name" against honoApi {
+        let p = api.projects.create({ name: "Atlas", visibility: "Public", active: true, sequence: 1, externalId: "00000000-0000-0000-0000-000000000000", budget: 100.0, createdAt: "2024-01-01T00:00:00Z" })
+        api.projects.rename(p, { newName: "Orion" })
+        let read = api.projects.getById(p)
+        expect(read.name).toBe("Orion")
+    }
+
+    // Find route (nullable single): `byName` returns the created project.
+    test e2e "finding a project by name returns it" against honoApi {
+        let p = api.projects.create({ name: "Findable", visibility: "Public", active: true, sequence: 2, externalId: "00000000-0000-0000-0000-000000000000", budget: 0.0, createdAt: "2024-01-01T00:00:00Z" })
+        let found = api.projects.byName({ name: "Findable" })
+        expect(found.name).toBe("Findable")
+    }
+
+    // Find route (nullable single): `bySha` on the Delivery module.
+    test e2e "finding a build by commit sha returns it" against honoApi {
+        let b = api.builds.create({ commitSha: "sha9999", buildState: "Queued", total: 0, startedAt: "2024-01-01T00:00:00Z" })
+        let found = api.builds.bySha({ commitSha: "sha9999" })
+        expect(found.commitSha).toBe("sha9999")
+    }
+
+    // Find route on Accounts — the only behavioural coverage of that module
+    // beyond its negative-path checks below.
+    test e2e "finding an engineer by handle returns it" against honoApi {
+        let e = api.engineers.create({ handle: "linus", email: "linus@example.com", level: 7, onCall: true })
+        let found = api.engineers.byHandle({ handle: "linus" })
+        expect(found.handle).toBe("linus")
+    }
+
+    // Find route (collection): `active()` returns a non-empty set after a create.
+    test e2e "listing active projects returns a non-empty set" against dotnetApi {
+        let p = api.projects.create({ name: "Live", visibility: "Internal", active: true, sequence: 3, externalId: "00000000-0000-0000-0000-000000000000", budget: 0.0, createdAt: "2024-01-01T00:00:00Z" })
+        let list = api.projects.active()
+        expect(list.length).toBeGreaterThanOrEqual(1)
+    }
+
     // ----- Negative-path conformance (cross-backend) -------------------
     // These replay against every backend serving the referenced module
     // (Hono / .NET / Phoenix).  `expect(<call>).toThrow()` asserts a non-2xx
