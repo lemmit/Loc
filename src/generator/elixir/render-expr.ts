@@ -460,6 +460,21 @@ function renderCollectionOp(recv: string, name: string, args: string[]): string 
 // Calls
 // ---------------------------------------------------------------------------
 
+/** The `params` map argument for an operation self-call.  An operation's
+ *  context fn takes a string-keyed map it unpacks via `Map.get(params, "x")`
+ *  (see the `paramReads` binding in `operation-returns-emit.ts`), so a no-arg
+ *  self-call passes `%{}` and a named-arg call builds the matching string-keyed
+ *  map.  Positional args without names can't be mapped to the keyed contract,
+ *  so they fall back to `%{}` (unreachable for real op-calls, kept total). */
+function opParamsArg(e: CallExpr, args: string[]): string {
+  if (args.length === 0) return "%{}";
+  const names = e.argNames;
+  if (names && names.length === args.length && names.every((n) => n)) {
+    return `%{${names.map((n, i) => `${JSON.stringify(n)} => ${args[i]}`).join(", ")}}`;
+  }
+  return "%{}";
+}
+
 function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
   switch (e.callKind) {
     case "value-object-ctor": {
@@ -479,23 +494,27 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
       return `%${ctx.contextModule}.${upperFirst(e.name)}{${args.join(", ")}}`;
     }
     case "function":
-    case "private-operation": {
-      // Receiver-prefixed call.  Skip the trailing comma when the callee has no
-      // params — `passed(changeset, )` is invalid Elixir.  An aggregate
-      // `function` is emitted as `is_draft(record)` (bare name).
-      //
-      // NOTE: a sibling-OPERATION self-call in expression position is NOT yet
-      // supported on vanilla — the operation's context fn is
-      // `<op>_<agg>(record, params)` (arity 2, returning a tagged
-      // `{:ok,_} | {:error,_}` tuple), not a pure-value arity-1 callable, and a
-      // `private operation` isn't emitted on vanilla at all.  Lowering this to a
-      // value needs params threading + tagged-tuple unwrapping (a real feature
-      // gap, tracked separately; works on node/dotnet/java/python).  The
-      // bare-statement op-call path already no-ops in `operation-returns-emit.ts`.
-      const fnName = snake(e.name);
+      // Pure aggregate `function`: emitted as `is_draft(record)` (bare name,
+      // arity 1 + the declared params), returning its value directly.  Skip the
+      // trailing comma when it has no params — `passed(changeset, )` is invalid
+      // Elixir.
       return args.length > 0
-        ? `${fnName}(${ctx.thisName}, ${args.join(", ")})`
-        : `${fnName}(${ctx.thisName})`;
+        ? `${snake(e.name)}(${ctx.thisName}, ${args.join(", ")})`
+        : `${snake(e.name)}(${ctx.thisName})`;
+    case "private-operation": {
+      // Sibling-OPERATION self-call → the operation's context function
+      // `<op>_<agg>(record, params)` (arity 2; every op — public OR private — is
+      // emitted as one, only the controller route is public-gated).  It returns
+      // a tagged `{:ok,_} | {:error,_}` tuple, so it is only valid in `return`
+      // tail position — where the returning-op emitter passes it through WITHOUT
+      // re-wrapping (see `operation-returns-emit.ts`).  Any other position is
+      // rejected up front by `loom.vanilla-op-call-position`, so this never
+      // renders a tuple into a composing expression.
+      //
+      // A no-arg self-call passes an empty params map; a self-call with named
+      // args builds the string-keyed map the callee unpacks via `Map.get/2`.
+      const fnName = ctx.agg ? `${snake(e.name)}_${snake(ctx.agg.name)}` : snake(e.name);
+      return `${fnName}(${ctx.thisName}, ${opParamsArg(e, args)})`;
     }
     case "repo-read": {
       // Read-only repository query in a `reading` domain-service body
