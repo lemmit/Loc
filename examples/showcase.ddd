@@ -167,13 +167,6 @@ system DevPlatform {
                 // PrimitiveConversion — `string(<non-string>)` coercion.
                 derived seqLabel: string = "seq-" + string(sequence)
 
-                // ReturnStmt — block-bodied operation with an explicit return
-                // (scalar, non-union; the union return form is .NET-only —
-                // exercised in examples/operation-return-dotnet.ddd, not here).
-                operation describe(): string {
-                    return name + " #" + string(sequence)
-                }
-
                 function isActive(): bool = active == true
 
                 function badge(): string = !active ? "off" : "on"

@@ -178,3 +178,54 @@ describe("operation returns — platform-aware emission gate (exception-less spi
     expect(diags.some((d) => d.code === "loom.operation-return-unsupported")).toBe(false);
   });
 });
+
+describe("operation returns — scalar (non-union) return gate (BUG-003)", () => {
+  const scalarSys = (ret: string): string => `
+    system Shop {
+      subdomain Sales {
+        context Shop {
+          aggregate Order ids guid {
+            code: string
+            operation describe(): ${ret} { return code }
+            derived display: string = code
+          }
+        }
+      }
+      storage pg { type: postgres }
+      resource shopState { for: Shop, kind: state, use: pg }
+      deployable api { platform: node, contexts: [Shop], dataSources: [shopState], port: 4000 }
+    }`;
+
+  const scalarDiags = async (ret: string): Promise<string[]> => {
+    const { model } = await parseString(scalarSys(ret), { validate: false });
+    return validateLoomModel(enrichLoomModel(lowerModel(model)))
+      .filter((d) => d.code === "loom.operation-return-scalar-unsupported")
+      .map((d) => d.message);
+  };
+
+  it("gates a bare scalar operation return (no cross-backend wire contract)", async () => {
+    expect(await scalarDiags("string")).toHaveLength(1);
+  });
+
+  it("does NOT gate an `or`-union operation return (the supported form)", async () => {
+    const { model } = await parseString(
+      `system Shop {
+        subdomain Sales {
+          context Shop {
+            error NotFound { resource: string }
+            aggregate Order ids guid {
+              code: string
+              operation lookup(): string or NotFound { return code }
+            }
+          }
+        }
+        storage pg { type: postgres }
+        resource shopState { for: Shop, kind: state, use: pg }
+        deployable api { platform: node, contexts: [Shop], dataSources: [shopState], port: 4000 }
+      }`,
+      { validate: false },
+    );
+    const diags = validateLoomModel(enrichLoomModel(lowerModel(model)));
+    expect(diags.some((d) => d.code === "loom.operation-return-scalar-unsupported")).toBe(false);
+  });
+});

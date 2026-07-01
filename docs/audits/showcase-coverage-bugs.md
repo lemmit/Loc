@@ -75,11 +75,19 @@ response schema as the aggregate's `ProjectResponse` when the value is a
 only covers the *union* return form `X or NotFound` → 200; the scalar-return
 form was apparently never reconciled across backends.)
 
-Fix direction (for later): pick one contract for scalar returns (likely
-200 + a typed scalar/wrapper response) and make all 5 emit it, or gate the
-scalar-return form if 204-discard is intended. Until fixed, `describe()` keeps
-the showcase's `conformance-parity` red — kept deliberately as the ReturnStmt
-coverage vehicle.
+**FIXED (gated).** Scalar-return aggregate operations are not part of any
+shipped design — the exception-less surface is `or`-unions only (docs say plain
+operations are 204), and the *only* scalar-return aggregate op in the whole
+corpus was the showcase's synthetic `describe()`. So rather than invent a wire
+contract, the divergence is closed the same way `validateUnionFindShapes` gates
+unsupported find shapes: a new IR-validate gate
+(`loom.operation-return-scalar-unsupported`, `structural-checks.ts`) rejects a
+non-`or`-union operation return type, pointing authors to a
+`function`/`domainService`/query or an `or`-union. `describe()` was removed from
+the showcase (ReturnStmt stays covered by the S7 domain-service op; the
+`string(...)` PrimitiveConversion stays covered by the `seqLabel` derived).
+Negative tests in `test/ir/operation-returns.test.ts`. If a 200+typed-body
+contract is wanted later, that's an additive feature (un-gate + emit).
 
 ### BUG-004 — union-find absence error mandates field `resource`, which is a reserved keyword → unreadable — **S3**
 
