@@ -155,10 +155,15 @@ success → returned directly; 2+ → a `oneOf` of the successes, which IR
 validation currently rejects for finds). So a single-success union find is
 wire-identical to `<Agg>?` / `<Agg> option`: **200 = `<Agg>Response`, error →
 its status, no tagged component.** Implemented across all five backends + the
-react/vue/svelte client (Elixir already did it); every backend now emits the
-same `200: <Agg>Response` + error-status shape as a plain single find, so the
-union find parity-matches by construction. Per-backend generator tests
-rewritten + green; build + lint clean.
+react/vue/svelte client — Hono, .NET, Python, and Java dropped the tagged
+component; **Elixir dropped its `Map.put(serialize(record), :type, …)` success
+tag** (it had been tagging the success body, the fifth divergent shape). Every
+backend now emits the same `200: <Agg>Response` + error-status shape as a plain
+single find, so the union find parity-matches by construction. A new always-on
+cross-backend gate (`test/conformance/union-wire-parity.test.ts`) pins the
+convergence across all five; per-backend generator tests rewritten; full fast
+suite + build + lint green. Shipped-behaviour docs updated
+(`docs/payloads.md` §3/§5, `docs/generators.md`).
 
 > **Verification note:** the fix is unit-verified on every backend and
 > parity-correct by construction (identical `200` `$ref` + no union component
