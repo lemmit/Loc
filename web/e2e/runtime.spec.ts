@@ -66,7 +66,18 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
 
   await test.step("GET /products → 200 []", async () => {
     await page.getByTestId("btn-send").click();
-    await expect(page.getByTestId("resp-status")).toContainText("200", { timeout: 30_000 });
+    try {
+      await expect(page.getByTestId("resp-status")).toContainText("200", { timeout: 30_000 });
+    } catch (e) {
+      // The dispatch resolves the status badge but never to "200" in CI —
+      // surface what it *did* return (status + body) so the next run shows
+      // whether the in-browser Hono/PGlite backend errored, 404'd, or hung.
+      const status = await page.getByTestId("resp-status").innerText().catch(() => "<none>");
+      const body = await page.getByTestId("resp-body").innerText().catch(() => "<none>");
+      console.log(`[runtime] GET /products did not return 200 — resp-status="${status}" resp-body=${body.slice(0, 400)}`);
+      console.log(`[runtime] captured console/page errors:\n${consoleErrors.map((m) => "  " + m.slice(0, 300)).join("\n")}`);
+      throw e;
+    }
     await expect(page.getByTestId("resp-body")).toHaveText(/^\[\]$/);
   });
 

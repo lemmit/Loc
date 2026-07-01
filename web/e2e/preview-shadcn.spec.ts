@@ -52,12 +52,22 @@ test("editor → shadcn-design system → preview boots", async ({ page }) => {
     // behaviour and avoids depending on `monaco-editor` being on
     // `window` (it isn't — the playground imports it as an ES
     // module so the bundler can tree-shake).
+    // Focus the editor's text surface (`.view-lines`), not the outer
+    // container — on slow CI the workspace-switch overlay from
+    // `selectExample` can still be dismissing and eat a click on the
+    // `.monaco-editor` chrome, leaving the editor unfocused so `Ctrl+F`
+    // never opens the find widget (→ a silent 45s `fill` timeout).
     const editor = page.locator(".monaco-editor").first();
-    await editor.click();
+    await expect(editor).toBeVisible();
+    await editor.locator(".view-lines").click();
     await page.keyboard.press("Control+f");
     const findInput = page
       .locator(".monaco-editor .find-widget .find-part textarea, .monaco-editor .find-widget .find-part input")
       .first();
+    // Wait for the widget to actually open before typing — turns a 45s
+    // "input not fillable" timeout into a clear "find widget never opened"
+    // signal and gives the widget time to mount on a slow runner.
+    await expect(findInput).toBeVisible({ timeout: 15_000 });
     await findInput.fill("port: 3001");
     await page.keyboard.press("Enter");
     await page.keyboard.press("Escape");
