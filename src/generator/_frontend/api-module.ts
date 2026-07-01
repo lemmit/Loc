@@ -28,12 +28,6 @@ import {
 import { collectReachableTypes } from "../../ir/util/reachable-types.js";
 import type { ClassifyContext, SingleFieldPattern } from "../../ir/validate/invariant-classify.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
-import {
-  discriminatedUnionZod,
-  type UnionMemberField,
-  unionMemberObjects,
-  unionMembers,
-} from "../_payload/union-wire.js";
 import { chainSingleFieldNative, refineClauseFor, takeSingleFieldChain } from "../zod-refine.js";
 
 // ---------------------------------------------------------------------------
@@ -197,19 +191,11 @@ export function buildApiModule(
       lines.push(`export type ${paged.name} = z.infer<typeof ${paged.name}>;`);
     }
   }
-  // Discriminated-union response DTOs (P4b) — one `z.discriminatedUnion` per
-  // distinct union find return (anonymous `A or B` or a named `payload = …`
-  // reference).  Each variant carries the `type` discriminator + its wire
-  // fields; the frontend narrows on `.type`.
-  {
-    const unionSeen = new Set<string>();
-    for (const find of repo?.finds ?? []) {
-      const u = unionForFind(find.returnType, ctx);
-      if (!u || unionSeen.has(u.name)) continue;
-      unionSeen.add(u.name);
-      lines.push(...emitUnionSchema(u.name, u.variants, ctx));
-    }
-  }
+  // Single-success union finds emit no discriminated-union DTO: the client
+  // parses the success variant's `<Agg>Response` at 200, with the error/absent
+  // variant surfaced as a thrown non-2xx (exception-less.md §4).  A tagged
+  // `oneOf` DTO would only be needed for a genuine multi-success union (none
+  // exist today; gated at IR validation).
   lines.push("");
 
   // ---------------------------------------------------------------------
@@ -301,17 +287,18 @@ export function buildApiModule(
       if (find.name === "all") continue;
       const findSnake = snake(find.name);
       const paged = pagedReturn(find.returnType);
-      const union = unionForFind(find.returnType, ctx);
       const isList = find.returnType.kind === "array";
+      // A single-success union find (`Agg or Err`) returns the success variant
+      // directly at 200 — the error/absent variant is a thrown non-2xx — so the
+      // client parses `<Agg>Response`, identical to a plain find (mirrors the
+      // backend route; exception-less.md §4).
       const responseSchema = paged
         ? paged.name
-        : union
-          ? union.name
-          : isList
-            ? `${agg.name}ListResponse`
-            : find.returnType.kind === "optional"
-              ? `${agg.name}Response.nullable()`
-              : `${agg.name}Response`;
+        : isList
+          ? `${agg.name}ListResponse`
+          : find.returnType.kind === "optional"
+            ? `${agg.name}Response.nullable()`
+            : `${agg.name}Response`;
       // Paged finds accept the caller-facing input shape (page/pageSize
       // optional via their wire defaults); other finds have no input/output
       // divergence, so the plain (z.infer) Query type is precise.
@@ -566,35 +553,6 @@ function zodForRequest(t: TypeIR): string {
 export function zodForResponse(t: TypeIR, optional: boolean): string {
   const z = zodForResponseInner(t);
   return optional ? `${z}.nullish()` : z;
-}
-
-/** A find whose return type is a discriminated union — either an inline `A or
- *  B` (`union` TypeIR) or a reference to a named `payload Foo = …` (resolved to
- *  an `entity` marker backed by a union `PayloadIR`).  Returns the schema name
- *  + variants, or null. */
-function unionForFind(
-  t: TypeIR,
-  ctx: BoundedContextIR,
-): { name: string; variants: TypeIR[] } | null {
-  if (t.kind === "union") return { name: unionInstanceName(t.variants), variants: t.variants };
-  if (t.kind === "entity") {
-    const p = ctx.payloads.find((pl) => pl.name === t.name && pl.variants);
-    if (p?.variants) return { name: p.name, variants: p.variants };
-  }
-  return null;
-}
-
-/** Emit `export const <Name>Schema = z.discriminatedUnion("type", […])` + its
- *  inferred type.  Record variants flatten their wire fields; scalars wrap a
- *  `value`; `none` is bare. */
-function emitUnionSchema(name: string, variants: TypeIR[], ctx: BoundedContextIR): string[] {
-  const fieldZod = (f: UnionMemberField): string =>
-    f.isId ? "z.string()" : zodForResponse(f.type, f.optional);
-  const members = unionMemberObjects(unionMembers(variants, ctx), fieldZod, zodForResponseInner);
-  return [
-    `export const ${name} = ${discriminatedUnionZod(members)};`,
-    `export type ${name} = z.infer<typeof ${name}>;`,
-  ];
 }
 
 function zodForResponseInner(t: TypeIR): string {
