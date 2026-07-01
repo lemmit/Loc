@@ -25,10 +25,21 @@ const filter: ExprIR = {
 };
 
 describe("render-expr vanilla leaves", () => {
-  it("enum → stored string, filter param → bare ^pin", () => {
-    expect(renderExpr(enumVal, ctx)).toBe('"confirmed"');
+  it("enum → declared string in a filter (query) context, atom in-memory; filter param → bare ^pin", () => {
+    // Query context (filterArgs): dumped DECLARED string, matching the text column.
+    expect(renderExpr(enumVal, ctx)).toBe('"Confirmed"');
     expect(renderExpr(filterParam, ctx)).toBe("^min_total");
-    expect(renderExpr(filter, ctx)).toBe('record.status == "confirmed"');
+    expect(renderExpr(filter, ctx)).toBe('record.status == "Confirmed"');
+    // In-memory context (no filterArgs): the loaded Ecto.Enum field is the
+    // declared-case atom, so the comparison literal is `:Confirmed` (unquoted —
+    // value names are identifiers; `:"Confirmed"` would warn under -Werror).
+    const memCtx: RenderCtx = {
+      thisName: "record",
+      contextModule: "Acme.Sales",
+      foundation: "vanilla",
+    };
+    expect(renderExpr(enumVal, memCtx)).toBe(":Confirmed");
+    expect(renderExpr(filter, memCtx)).toBe("record.status == :Confirmed");
   });
 
   it("this-prop access renders record.<field>", () => {

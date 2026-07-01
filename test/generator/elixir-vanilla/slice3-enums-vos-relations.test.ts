@@ -58,8 +58,10 @@ describe("vanilla — Slice 3 enums + VOs + relationships in schema-emit", () =>
   it("emits an enum field as `Ecto.Enum, values: [...]`", async () => {
     const files = await generateSystemFiles(RICH_SOURCE);
     const schema = files.get([...files.keys()].find((k) => k.endsWith("/storefront/order.ex"))!)!;
+    // Enum values use the DECLARED casing (unquoted atoms), matching the wire
+    // contract — not snake — so the column casts/round-trips "Pending" etc.
     expect(schema).toMatch(
-      /field :status, Ecto\.Enum, values: \[:pending, :confirmed, :shipped, :cancelled\]/,
+      /field :status, Ecto\.Enum, values: \[:Pending, :Confirmed, :Shipped, :Cancelled\]/,
     );
   });
 

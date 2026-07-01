@@ -133,9 +133,14 @@ function renderVanillaWorkflowView(
     preamble = "";
   } else {
     const stateMod = stateModule(contextModule, wf);
+    // The Ecto `where` is a QUERY context — enum literals must render as the
+    // dumped declared STRING (Ecto won't cast an inline atom through Ecto.Enum),
+    // so flag `filterArgs`.  The ES branch above stays in-memory (`Enum.filter`),
+    // where the loaded field is the declared-case atom.
+    const queryCtx: RenderCtx = { ...renderCtx, filterArgs: true };
     query =
       (view.filter
-        ? `    from(record in ${stateMod}, where: ${renderExpr(view.filter, renderCtx)})
+        ? `    from(record in ${stateMod}, where: ${renderExpr(view.filter, queryCtx)})
     |> Repo.all()`
         : `    Repo.all(${stateMod})`) + "\n";
     preamble = `  import Ecto.Query
@@ -229,7 +234,10 @@ function buildShorthandBody(
   ctx: RenderCtx,
   cap: string | null,
 ): string {
-  const where = combineWhere(view.filter ? renderExpr(view.filter, ctx) : null, cap);
+  // The `where` is an Ecto QUERY context — enum literals render as the dumped
+  // declared string (`filterArgs`); the in-memory `ctx` is for projections.
+  const queryCtx: RenderCtx = { ...ctx, filterArgs: true };
+  const where = combineWhere(view.filter ? renderExpr(view.filter, queryCtx) : null, cap);
   if (!where) {
     return `    Repo.all(${aggModule})`;
   }
@@ -250,7 +258,10 @@ function buildFullFormBody(
   const output = view.output!;
   const lines: string[] = [];
 
-  const where = combineWhere(view.filter ? renderExpr(view.filter, ctx) : null, cap);
+  // `where` is the Ecto QUERY (enum → dumped declared string via `filterArgs`);
+  // the `bind` projections below stay in-memory (`ctx`, enum → declared atom).
+  const queryCtx: RenderCtx = { ...ctx, filterArgs: true };
+  const where = combineWhere(view.filter ? renderExpr(view.filter, queryCtx) : null, cap);
   if (where) {
     lines.push(`    from(record in ${aggModule}, where: ${where})`);
     lines.push(`    |> Repo.all()`);

@@ -4,9 +4,9 @@
 // On `foundation: vanilla` a `view` lowers to a plain Ecto query (no
 // `Ash.Query`): `from(record in <Agg>, where: <filter>) |> Repo.all()` for
 // the shorthand form, and a `Repo.all |> Enum.map` projection for the full
-// form.  The enum-value / filter divergence is handled by render-expr's
-// `foundation: "vanilla"` flag (slice 0): `status == Confirmed` renders as
-// `record.status == "confirmed"` (string column), not `:confirmed` atoms.
+// form.  The enum-value / filter divergence is handled by render-expr: in a
+// query (`filterArgs`) `status == Confirmed` renders as the dumped DECLARED
+// string `record.status == "Confirmed"` (text column), not an atom.
 //
 // A single project-wide `ViewsController` exposes `GET /api/views/<snake>`
 // per view, mirroring the ash path's route shape.
@@ -88,12 +88,15 @@ describe("vanilla foundation — view emit (Ecto, no Ash.Query)", () => {
     expect(src).not.toContain("require Ash");
   });
 
-  it("renders the filter against string columns (vanilla enum), not atoms", () => {
+  it("renders the filter against string columns with the DECLARED enum casing (query context)", () => {
     const src = emitModule(shorthand);
-    // from(record in Acme.Sales.Order, where: record.status == "confirmed")
+    // An Ecto `where` is a query context: the enum literal is the dumped DECLARED
+    // string ("Confirmed"), matching the stored text — Ecto won't cast an inline
+    // atom through Ecto.Enum.  (In-memory comparisons render the atom instead.)
     expect(src).toContain("from(record in Acme.Sales.Order");
-    expect(src).toContain('record.status == "confirmed"');
-    expect(src).not.toContain(":confirmed");
+    expect(src).toContain('record.status == "Confirmed"');
+    expect(src).not.toContain(":Confirmed");
+    expect(src).not.toContain('"confirmed"');
     expect(src).toContain("|> Repo.all()");
   });
 
@@ -155,7 +158,7 @@ describe("vanilla foundation — view emit (Ecto, no Ash.Query)", () => {
     expect(viewModule, "view module not emitted").toBeDefined();
     expect(viewsController, "ViewsController not emitted").toBeDefined();
     expect(files.get(viewModule!)!).toContain("import Ecto.Query");
-    expect(files.get(viewModule!)!).toContain('record.status == "confirmed"');
+    expect(files.get(viewModule!)!).toContain('record.status == "Confirmed"');
     expect(files.get(viewModule!)!).not.toContain("Ash");
     expect(files.get(router!)!).toContain("/views/active_orders");
   });
