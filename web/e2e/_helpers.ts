@@ -121,7 +121,7 @@ export async function dumpPreviewDiagnostics(
   try {
     const target = page
       .frameLocator('[data-testid="preview-iframe"]')
-      .getByText(/Home|Catalog|Sales|Customers/i);
+      .getByText(/Welcome/i);
     const total = await target.count();
     let visible = 0;
     for (let i = 0; i < total; i++) {

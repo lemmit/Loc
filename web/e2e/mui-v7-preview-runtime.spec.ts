@@ -73,7 +73,7 @@ test("mui@v7 preview boots without runtime errors", async ({ page }) => {
   const iframe = page.frameLocator('[data-testid="preview-iframe"]');
 
   try {
-    await expect(iframe.getByText(/Home|Catalog|Sales|Customers/i).first()).toBeVisible({
+    await expect(iframe.getByText(/Welcome/i).first()).toBeVisible({
       timeout: 60_000,
     });
   } catch (e) {

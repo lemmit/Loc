@@ -89,11 +89,13 @@ test("mantine@v9 preview boots without runtime errors", async ({ page }) => {
     await expect(page.getByTestId("preview-region")).toBeVisible();
   const iframe = page.frameLocator('[data-testid="preview-iframe"]');
 
-  // First content render — wait for *any* aggregate label to appear.
-  // The storybook example emits a Catalog / Sales / CustomerMgmt
-  // module structure; "Home" is the shared landing page.
+  // First content render — wait for the scaffold Home dashboard's "Welcome"
+  // heading (`scaffoldHome`, pack-independent).  The earlier `/Catalog/`-style
+  // matcher targeted an aggregate's nav link, which the drawer-based packs
+  // (mui/shadcn/chakra) keep in a collapsed sidebar — present in the DOM but
+  // not visible — so it timed out despite a fully-rendered landing page.
   try {
-    await expect(iframe.getByText(/Home|Catalog|Sales|Customers/i).first()).toBeVisible({
+    await expect(iframe.getByText(/Welcome/i).first()).toBeVisible({
       timeout: 60_000,
     });
   } catch (e) {
