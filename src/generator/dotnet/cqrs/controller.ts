@@ -171,23 +171,20 @@ export function emitController(
         .map((op) => buildOperationSpec(agg, op, ctx, ns)),
       finds: (repo?.finds ?? []).map((find) => {
         const paged = pagedReturn(find.returnType);
-        // Discriminated-union find return (P4c): the controller returns the
-        // polymorphic base record directly (no agg-derived wrapper).
-        const unionType =
-          find.returnType.kind === "union"
-            ? unionInstanceName(find.returnType.variants)
-            : undefined;
-        // Producer-side absence translation (validator-pinned shape): the
-        // absent variant record maps to its HTTP edge — `none` rides the
-        // optional-find 404, an `error` payload becomes ProblemDetails at its
-        // mapped status (api `httpStatus` override or the stdlib default).
-        const spec =
-          find.returnType.kind === "union" ? findUnionSpec(find.returnType, agg.name, ctx) : null;
+        // A single-success union find returns the SUCCESS variant's
+        // `<Agg>Response` directly at 200 (exception-less.md §4); the
+        // query/handler yield it as an optional twin (`<Agg>Response?`).
+        const isUnion = find.returnType.kind === "union";
+        // Producer-side absence translation (validator-pinned shape): a null
+        // result maps to its HTTP edge — `none` rides the optional-find 404, an
+        // `error` payload becomes ProblemDetails at its mapped status (api
+        // `httpStatus` override or the stdlib default).  The error variant is
+        // NEVER part of the 200 schema.
+        const spec = isUnion ? findUnionSpec(find.returnType, agg.name, ctx) : null;
         const unionAbsent = spec
           ? spec.absent.kind === "none"
-            ? ({ record: `${spec.name}_${spec.absent.tag}`, kind: "none" } as const)
+            ? ({ kind: "none" } as const)
             : ({
-                record: `${spec.name}_${spec.absent.tag}`,
                 kind: "error",
                 status:
                   ctx.errorStatusOverrides?.[spec.absent.tag] ??
@@ -204,7 +201,7 @@ export function emitController(
           unionAbsent,
           name: find.name,
           isRoot: find.name === "all",
-          responseType: unionType,
+          responseType: isUnion ? `${agg.name}Response` : undefined,
           queryRouteParams: [
             ...find.params.map((p) => {
               // A required find param must bind required so Swashbuckle emits
@@ -228,7 +225,7 @@ export function emitController(
           ].join(", "),
           returnShape: (paged
             ? "paged"
-            : unionType
+            : isUnion
               ? "union"
               : find.returnType.kind === "array"
                 ? "list"

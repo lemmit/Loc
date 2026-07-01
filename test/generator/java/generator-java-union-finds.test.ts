@@ -1,16 +1,13 @@
 // ---------------------------------------------------------------------------
-// Java backend — discriminated unions in find positions (P4c producer
-// side; java joined SUPPORTED_UNION_BACKENDS).  A union find
-// (`Order or NotFound` / `Order option`) reaches the repository and
-// service as its OPTIONAL TWIN (single nullable row — the Domain layer
-// never names the Response union); the controller owns the
-// translation: found → 200 with the tagged wire record (the pinned
-// flat `type` discriminator), absent → bare 404 (`none`) or an
-// RFC-7807 ProblemDetail at the error's mapped status with the
-// `resource` extension when the error payload declares one.
-// Boot-verified end-to-end against Postgres via
-// test/e2e/fixtures/java-build/union-finds.ddd — byte-matching the
-// Hono wire ({"type":"Order",...} / problem with resource / bare 404).
+// Java backend — single-success union finds (`Order or NotFound` / `Order
+// option`).  Per exception-less.md §4 the 200 body is the SUCCESS variant
+// DIRECTLY (`<Agg>Response`) — never a tagged `oneOf` component (an error
+// variant belongs at its status, not in a 200 schema) — so a union find is
+// wire-identical to `<Agg>?` / `<Agg> option`.  The repository/service see the
+// optional twin (single nullable row); the controller returns the
+// `<Agg>Response` directly on 200 and translates absence → bare 404 (`none`)
+// or an RFC-7807 ProblemDetail at the error's mapped status (with the
+// `resource` extension when the error payload declares one).
 // ---------------------------------------------------------------------------
 
 import { readFileSync } from "node:fs";
@@ -43,12 +40,9 @@ describe("java generator — union finds", () => {
     expect(svc).toContain("    public OrderResponse byCode(String code) {");
   });
 
-  it("emits the Jackson-polymorphic wire union (no domain union — finds never name it)", async () => {
+  it("emits NO tagged wire union for a single-success find (success is <Agg>Response)", async () => {
     const files_ = await files();
-    const wire = files_.get(`${ROOT}/features/orders/OrderOrNotFoundResponse.java`)!;
-    expect(wire).toContain(
-      '@JsonSubTypes.Type(value = OrderOrNotFoundResponse_Order.class, name = "Order")',
-    );
+    expect(files_.has(`${ROOT}/features/orders/OrderOrNotFoundResponse.java`)).toBe(false);
     expect(files_.has(`${ROOT}/features/orders/OrderOrNotFound.java`)).toBe(false);
   });
 
@@ -57,9 +51,8 @@ describe("java generator — union finds", () => {
     expect(c).toContain("public ResponseEntity<?> byCodeOrder(@RequestParam String code) {");
     expect(c).toContain("var problem = ProblemDetail.forStatus(404);");
     expect(c).toContain('problem.setProperty("resource", "Order");');
-    expect(c).toContain(
-      "return ResponseEntity.ok((OrderOrNotFoundResponse) new OrderOrNotFoundResponse_Order(r.id(), r.code()));",
-    );
+    // Found → the success variant directly (untagged), not a wrapped union.
+    expect(c).toContain("return ResponseEntity.ok(r);");
   });
 
   it("`none` absence → the bare optional-find 404", async () => {

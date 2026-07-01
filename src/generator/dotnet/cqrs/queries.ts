@@ -1,5 +1,4 @@
 import { pagedReturn } from "../../../ir/stdlib/generics.js";
-import { unionInstanceName } from "../../../ir/stdlib/unions.js";
 import type {
   AggregateIR,
   EnrichedAggregateIR,
@@ -10,8 +9,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { upperFirst } from "../../../util/naming.js";
-import { findUnionSpec } from "../../_payload/union-wire.js";
-import { projectEntityArgs, projectEntityExpr } from "../dto-mapping.js";
+import { projectEntityExpr } from "../dto-mapping.js";
 import { renderQuery, renderQueryHandler } from "../emit.js";
 import { renderCsExpr, renderCsType } from "../render-expr.js";
 
@@ -181,29 +179,17 @@ function buildFindHandlerBody(
     );
   }
   if (find.returnType.kind === "union") {
-    // Discriminated-union return (P4c, producer side): the Domain repository
-    // emits the find as its optional twin (`Agg?` — see find-emit.ts
-    // `unionFindAsOptionalTwin`), and the handler owns the union mapping:
-    // a found row projects into the tagged success variant record; absence
-    // becomes the absent variant (the `none` unit, or the error payload —
-    // `resource` filled with the aggregate name when declared).  The shape is
-    // validator-pinned (`loom.union-find-shape-unsupported`), so the spec
-    // always resolves here.
-    const spec = findUnionSpec(find.returnType, agg.name, ctx);
-    if (!spec) {
-      throw new Error(
-        `internal: union find '${find.name}' on '${agg.name}' passed validation but has no ` +
-          `producer spec — validator/emitter drift (loom.union-find-shape-unsupported).`,
-      );
-    }
-    const absent =
-      spec.absent.kind === "none"
-        ? `new ${spec.name}_${spec.absent.tag}()`
-        : `new ${spec.name}_${spec.absent.tag}(${spec.absent.hasResource ? JSON.stringify(agg.name) : ""})`;
+    // A single-success union find (`Agg or Err`) is handled exactly like an
+    // optional find: the repository returns the optional twin (`Agg?`) and the
+    // handler projects a found row into `<Agg>Response` or returns null.  The
+    // 200 body is the SUCCESS variant DIRECTLY (exception-less.md §4) — the
+    // error/absent variant is a status response the CONTROLLER emits (Problem
+    // at its mapped status, or a 404 for `none`), never part of the 200 schema —
+    // so no tagged union DTO is produced.  (Multi-success unions, which would
+    // need a `oneOf`, are rejected for finds at IR validation.)
     return (
       `        var domain = await _repo.${upperFirst(find.name)}(${callArgs});\n` +
-      `        if (domain is null) return ${absent};\n` +
-      `        return new ${spec.name}_${spec.successTag}(${projectEntityArgs("domain", agg, ctx, { unionVariant: true })});\n`
+      `        return domain is null ? null : ${projectEntityExpr("domain", agg, ctx)};\n`
     );
   }
   if (find.returnType.kind === "array") {
@@ -229,9 +215,10 @@ function renderResponseReturnType(t: TypeIR, agg: AggregateIR): string {
     // The wire-side paged envelope wraps the response DTO (P3b).
     return `Paged<${agg.name}Response>`;
   }
-  // Discriminated union → the polymorphic base record (P4c); the repo returns
-  // the response union directly (no domain→response projection in the handler).
-  if (t.kind === "union") return unionInstanceName(t.variants);
+  // A single-success union find returns the SUCCESS variant's `<Agg>Response`
+  // (nullable — absence is the error/`none` variant the controller maps to a
+  // status), identical to an optional find (exception-less.md §4).
+  if (t.kind === "union") return `${agg.name}Response?`;
   if (t.kind === "array") {
     return `IReadOnlyList<${agg.name}Response>`;
   }
