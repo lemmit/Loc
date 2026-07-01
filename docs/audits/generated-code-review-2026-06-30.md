@@ -153,13 +153,23 @@ These are real observations but not correctness defects; each carries a verdict.
   generated project compiles (`gradle testClasses`), and no inline
   `Pattern.compile(...).matcher(...)` remains in the emitted tree. Test:
   `regex-pattern-hoist.test.ts`.
-- **Hono / Python — N+1 on find-by-field** (`byName` selects the root by name,
-  then calls `findById(row.id)` which re-fetches the root + preloads children):
-  *Verdict: deliberate DRY trade-off, not fixed.* The only real cost is one
-  redundant root re-fetch; the find reuses the canonical `findById` hydration so
-  every read materialises the same wire shape. Inlining hydration into each
-  find-by-field would duplicate that logic across the Hono + Python repository
-  builders for marginal gain. Left as-is by design.
+- **Hono — single-result find re-fetched via `findById` — FIXED.** `byName`
+  selected the root row, then threw it away and re-ran `findById(row.id)` (a
+  redundant root round-trip on every find-by-field call). Not a trade-off — the
+  array/paged branches in the same file already hydrate straight from `rootRows`.
+  Now the single-result branch mirrors them (bulk-load children off the row in
+  hand → `hydrateRootForFindAllExpr`), dropping the extra query (and the tiny
+  race window between the two selects). `repository-find-builder.ts`; baseline
+  fixture re-captured; regenerated project `tsc --noEmit`s clean. Test:
+  `single-find-hydrate.test.ts`.
+- **Python — list finds N+1 on children — OPEN (real, follow-up).** `all()` and
+  array finds do `[await self._hydrate(row) for row in rows]`, and `_hydrate`
+  runs one child `SELECT … WHERE parent_id == row.id` per row → N+1 (1000 rows ⇒
+  ~1001 queries). This is a genuine N+1 (worse than the Hono redundant-fetch),
+  but the fix needs a bulk-load path built in the Python repository emitter
+  (load children by `parent_id IN (ids)`, group by parent, hydrate from the map
+  across ~6 list-emitting sites) — a bounded feature, not a review-pass edit.
+  Recommended as a focused follow-up.
 
 ---
 

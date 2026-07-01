@@ -430,7 +430,18 @@ export function findQueryMethod(
   // `Agg option`, validator-pinned to the absence shape) is the optional
   // single-row select — the route maps `null` to the absent variant
   // (ProblemDetails / 404) and tags the found row on the wire.
+  // Single-row hydrate from the row we already selected — mirrors the array /
+  // paged branches (bulk-load children off `rootRows`, then
+  // `hydrateRootForFindAllExpr`).  Earlier this re-fetched the SAME root via
+  // `findById(rootRows[0].id)`, a redundant round-trip on every find-by-field
+  // call; hydrating the row in hand drops that query (and closes the tiny race
+  // window where the row could vanish between the two selects).
   const optional = find.returnType.kind === "optional" || find.returnType.kind === "union";
+  const eagerContains = eagerContainsOf(agg);
+  const needsIdsLocal =
+    eagerContains.length > 0 ||
+    associationsOf(agg).length > 0 ||
+    valueCollectionsFor(agg).length > 0;
   return lines(
     optional
       ? `  async ${find.name}(${params}): Promise<${agg.name} | null> {`
@@ -447,8 +458,12 @@ export function findQueryMethod(
         // AggregateNotFoundError is logged at the route's onError seam
         // (`not_found` warn) so we don't double-log the same fact.
         `    if (rootRows.length === 0) throw new AggregateNotFoundError("not found");`,
-    `    const result = await this.findById(rootRows[0]!.id as Ids.${agg.name}Id) as ${agg.name}${optional ? " | null" : ""};`,
-    `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: result == null ? 0 : 1`)}`,
+    needsIdsLocal && `    const rootIds = rootRows.map((r) => r.id);`,
+    ...bulkLoadContainmentLines(eagerContains, agg, ctx),
+    associationMapLines(agg, "this.db", "    "),
+    ...bulkLoadValueCollectionLines(agg, ctx),
+    `    const result = ${hydrateRootForFindAllExpr(agg, "rootRows[0]!", ctx)};`,
+    `    ${renderHonoStoreLogCall("findExecuted", `aggregate: "${agg.name}", find: "${find.name}", rows: 1`)}`,
     `    return result;`,
     `  }`,
   );
