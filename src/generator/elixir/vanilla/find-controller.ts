@@ -138,7 +138,11 @@ ${cuLine}    with {:ok, result} <- ${call} do
 
     const absent = absentSpec(agg, f.returnType, ctx);
     if (absent) {
-      // Union find — translate the `nil` absent case, tag the found record.
+      // Union find — translate the `nil` absent case; the found record is the
+      // SUCCESS variant returned directly (untagged) at 200, matching the
+      // emitted spec (`<Agg>Response`) and every other backend
+      // (exception-less.md §4).  The error/absent variant is a status response,
+      // never a tagged 200 body.
       const absentArm =
         absent.kind === "none"
           ? `        problem_variant(conn, 404, "about:blank", "Not Found", %{})`
@@ -150,7 +154,7 @@ ${cuLine}    case ${call} do
 ${absentArm}
 
       {:ok, record} ->
-        json(conn, Map.put(serialize(record), :type, ${JSON.stringify(aggPascal)}))
+        json(conn, serialize(record))
     end
   end`;
     }
