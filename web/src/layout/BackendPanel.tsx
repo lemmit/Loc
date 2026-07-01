@@ -185,7 +185,7 @@ export function BackendBody({ ctx }: Props): JSX.Element {
               size="xs"
               value={reqPath}
               onChange={(e) => setReqPath(e.currentTarget.value)}
-              placeholder="/products"
+              placeholder="/api/products"
               style={{ flex: isDesktop ? 1 : "1 1 100%" }}
               styles={mobileInputStyles}
               data-testid="req-path"

@@ -86,7 +86,11 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
     // Selecting the create operation flips method → POST and reveals
     // the body editor with a Generate-example affordance.
     await page.getByTestId("req-endpoint").click();
-    await page.getByRole("option", { name: "POST /products", exact: true }).click();
+    // Tolerant of the `/api` route prefix the generated backend mounts under
+    // (the option label is verb + the OpenAPI path); selecting it sets `reqPath`
+    // to whatever concrete path the picker carries, so the dispatch below hits
+    // the real route regardless of the prefix.
+    await page.getByRole("option", { name: /^POST \/(api\/)?products$/ }).click();
     await expect(page.getByTestId("req-method")).toContainText("POST");
     await expect(page.getByTestId("btn-gen-example")).toBeVisible();
   });

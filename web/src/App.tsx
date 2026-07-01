@@ -241,7 +241,10 @@ export default function App(): JSX.Element {
   const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [reqMethod, setReqMethod] = useState<string>("GET");
-  const [reqPath, setReqPath] = useState<string>("/products");
+  // Generated backends mount domain routes under `/api` (`app.route("/api/products", …)`),
+  // matching the frontend client's `API_BASE_URL` (= `/api`).  The HTTP-console
+  // default must include that prefix or the first dispatch 404s.
+  const [reqPath, setReqPath] = useState<string>("/api/products");
   const [reqBody, setReqBody] = useState<string>("");
   const [openApiSpec, setOpenApiSpec] = useState<OpenApiDoc | null>(null);
   const [apiEndpoints, setApiEndpoints] = useState<ApiEndpoint[]>([]);
