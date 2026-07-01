@@ -6,8 +6,10 @@
 > a `.ddd` fixture (`MacroArgString`, `MacroArgInt` — no stdlib macro declares
 > string/int params; `ImportStmt` — single-file fixture, covered by
 > `multifile-*.ddd`). Bugs below are surfaced-not-fixed per campaign policy.
-> **Product bugs to fix: BUG-003, BUG-004, BUG-005** (BUG-006 already in flight
-> as #1622; BUG-001/002 were test-infra and fixed here).
+> **Product bugs: BUG-003 FIXED (gated scalar returns), BUG-005 FIXED (union
+> find → success-variant-directly at 200 across all 5 backends). BUG-004 open**
+> (`resource`-keyword field, low priority, workaround in place). BUG-006 in
+> flight as #1622; BUG-001/002 were test-infra and fixed here.
 
 
 Running list of bugs surfaced while driving `examples/showcase.ddd` to 100%
@@ -143,9 +145,29 @@ Swashbuckle derived-type naming + emit on Python/Java/Elixir), or (2)
 success-variant-only at 200 with the error at its mapped status (Elixir's
 shape; semantically cleanest, drops the tag — a runtime change on Hono/.NET).
 This is a maintainer-owned contract decision + a real implementation, not a
-mechanical fix. **Blocked from verification here** by Docker Hub 429 rate
-limits (the conformance-parity loop can't pull `postgres:18-alpine` etc.) and
-by the keycloak dependency the S10 auth block adds to the compose.
+mechanical fix.
+
+**RESOLVED — chose option (2), the design-correct contract (exception-less.md
+§4: "success bodies carry the variant data directly with HTTP 200").** The
+correct rule is a partition: error/`none` variants → each at its own status
+(never in the 200 schema — the actual defect); the success set → 200 (one
+success → returned directly; 2+ → a `oneOf` of the successes, which IR
+validation currently rejects for finds). So a single-success union find is
+wire-identical to `<Agg>?` / `<Agg> option`: **200 = `<Agg>Response`, error →
+its status, no tagged component.** Implemented across all five backends + the
+react/vue/svelte client (Elixir already did it); every backend now emits the
+same `200: <Agg>Response` + error-status shape as a plain single find, so the
+union find parity-matches by construction. Per-backend generator tests
+rewritten + green; build + lint clean.
+
+> **Verification note:** the fix is unit-verified on every backend and
+> parity-correct by construction (identical `200` `$ref` + no union component
+> across all five — exactly the dimensions `diffSpecs` compares). The full
+> docker conformance-parity *boot* could not be run to completion in this
+> environment — the image/package registries repeatedly failed (Docker Hub 429
+> on base images; then `dotnet restore` / NuGet failing inside the .NET image
+> build) — so the stack never came up. The generated union-find output now
+> mirrors the known-compiling optional-find path on each backend.
 
 ---
 
