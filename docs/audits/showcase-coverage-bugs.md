@@ -121,6 +121,32 @@ The discriminated-union wire shape is a .NET/Hono feature
 response → the strict `conformance-parity` response/schema diff fails. Kept as
 the union-find / TypeAtom coverage vehicle.
 
+**Deeper finding (investigation for the fix):** it is NOT a 2-backend
+catch-up. The union-find `200` response has **four different shapes** across the
+five backends — the discriminated-union wire contract was never defined
+cross-backend (unions had never been in the parity fixture, so the five never
+had to agree):
+
+| Backend | `/projects/locate` 200 schema |
+|---|---|
+| Hono | `ProjectOrProjectNotFound` — one `oneOf` component (discriminator `type`) |
+| .NET | `ProjectOrProjectNotFound` — via **3** Swashbuckle components (`+_Project`, `+_ProjectNotFound`) |
+| Elixir | `ProjectResponse` — success variant only, no union component |
+| Python | `response_model=None` — untyped |
+| Java | null schema |
+
+`schemaNames` set-equality + `responseBodyDiffs` are both strict-asserted, so
+even .NET-vs-Hono diverges (Swashbuckle's 3 named components vs zod's 1).
+Converging all five needs a **design decision on the union-find `200`
+contract** — either (1) a tagged `oneOf` union component (normalize .NET's
+Swashbuckle derived-type naming + emit on Python/Java/Elixir), or (2)
+success-variant-only at 200 with the error at its mapped status (Elixir's
+shape; semantically cleanest, drops the tag — a runtime change on Hono/.NET).
+This is a maintainer-owned contract decision + a real implementation, not a
+mechanical fix. **Blocked from verification here** by Docker Hub 429 rate
+limits (the conformance-parity loop can't pull `postgres:18-alpine` etc.) and
+by the keycloak dependency the S10 auth block adds to the compose.
+
 ---
 
 ## Verified via `conformance-full` (run #71, commit c8900c6)
