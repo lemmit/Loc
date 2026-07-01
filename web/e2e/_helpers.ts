@@ -106,12 +106,34 @@ export async function dumpPreviewDiagnostics(
     `[${label}] preview iframe did not render — ${captured.length} captured console/page error(s):`,
   );
   for (const m of captured) console.log(`  ${m.slice(0, 400)}`);
+  const body = page.frameLocator('[data-testid="preview-iframe"]').locator("body");
+  // Visible innerText is the decisive signal: it tells us whether the app
+  // actually rendered content (and, if the target nav/landing text is present
+  // at all, whether it's merely off-screen / in a collapsed drawer vs absent).
   try {
-    const body = await page
+    const text = await body.innerText({ timeout: 5_000 });
+    console.log(`[${label}] preview iframe innerText (first 1500 chars):\n${text.slice(0, 1500)}`);
+  } catch (e) {
+    console.log(`[${label}] could not read preview iframe innerText: ${(e as Error).message}`);
+  }
+  // Does the gate's target text exist in the DOM at all, and is any match
+  // visible?  Distinguishes "not rendered" from "rendered but not visible".
+  try {
+    const target = page
       .frameLocator('[data-testid="preview-iframe"]')
-      .locator("body")
-      .innerHTML({ timeout: 5_000 });
-    console.log(`[${label}] preview iframe <body> (first 2000 chars):\n${body.slice(0, 2000)}`);
+      .getByText(/Home|Catalog|Sales|Customers/i);
+    const total = await target.count();
+    let visible = 0;
+    for (let i = 0; i < total; i++) {
+      if (await target.nth(i).isVisible().catch(() => false)) visible++;
+    }
+    console.log(`[${label}] target-text matches: ${total} in DOM, ${visible} visible`);
+  } catch (e) {
+    console.log(`[${label}] could not probe target text: ${(e as Error).message}`);
+  }
+  try {
+    const html = await body.innerHTML({ timeout: 5_000 });
+    console.log(`[${label}] preview iframe <body> (first 2000 chars):\n${html.slice(0, 2000)}`);
   } catch (e) {
     console.log(`[${label}] could not read preview iframe <body>: ${(e as Error).message}`);
   }
