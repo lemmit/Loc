@@ -66,6 +66,9 @@
     "test:svelte-build": "LOOM_SVELTE_BUILD=1 vitest run test/e2e/generated-svelte-build.test.ts",
     "test:svelte-e2e": "LOOM_SVELTE_E2E=1 vitest run test/e2e/generated-svelte-e2e.test.ts"
   },
+  "overrides": {
+    "hono": ">=4.12.26"
+  },
   "dependencies": {
     "chalk": "~5.6.0",
     "chevrotain": "~12.0.0",
