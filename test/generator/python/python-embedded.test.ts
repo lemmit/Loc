@@ -74,4 +74,15 @@ describe("python shape(embedded)", () => {
     expect(repo).toContain("select(OrderRow).where((OrderRow.customer == name))");
     expect(repo).toContain("return [await self._hydrate(row) for row in rows]");
   });
+
+  it("list finds stay on per-row _hydrate — embedded repo emits no _hydrate_many", async () => {
+    const files = await build();
+    const repo = files.get("api/app/db/repositories/order_repository.py")!;
+    // The embedded repo loads the whole aggregate from one jsonb column, so
+    // there is no per-row child SELECT to batch — it reuses the shared find
+    // emitters but must never route them through the relational `_hydrate_many`
+    // (which it doesn't define). Every list read stays on the comprehension.
+    expect(repo).not.toContain("_hydrate_many");
+    expect(repo).toContain("items = [await self._hydrate(row) for row in rows]");
+  });
 });

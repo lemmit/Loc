@@ -292,6 +292,7 @@ export function relationalFindMethod(
   find: FindIR,
   ctx: EnrichedBoundedContextIR,
   filterPred: PyPredicate | null = null,
+  bulkHydrate = true,
 ): string {
   const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
   const kind = discriminatorValue(agg, ctx.aggregates);
@@ -329,7 +330,7 @@ export function relationalFindMethod(
       `        rows = (`,
       `            await self._session.execute(select(${root})${where}.limit(page_size).offset(offset))`,
       "        ).scalars().all()",
-      `        items = ${hydrateListExpr(agg)}`,
+      `        items = ${hydrateListExpr(agg, bulkHydrate)}`,
       findExecutedLine(agg, find.name, "total"),
       "        return PagedResult(items=items, page=page, page_size=page_size, total=total, total_pages=total_pages)",
     );
@@ -339,7 +340,7 @@ export function relationalFindMethod(
     return lines(
       `    async def ${snake(find.name)}(${sig}) -> list[${agg.name}]:`,
       `        rows = (await self._session.execute(select(${root})${where})).scalars().all()`,
-      `        items = ${hydrateListExpr(agg)}`,
+      `        items = ${hydrateListExpr(agg, bulkHydrate)}`,
       findExecutedLine(agg, find.name, "len(items)"),
       "        return items",
     );
@@ -621,9 +622,15 @@ function hasChildCollections(agg: EnrichedAggregateIR): boolean {
 /** How a list-returning method hydrates its `rows`: aggregates with child
  *  collections route through the bulk `_hydrate_many` (one `WHERE … IN` per
  *  child type instead of one SELECT per row); scalar-only aggregates keep the
- *  per-row comprehension (no N+1 to avoid). */
-function hydrateListExpr(agg: EnrichedAggregateIR): string {
-  return hasChildCollections(agg)
+ *  per-row comprehension (no N+1 to avoid).
+ *
+ *  `bulkHydrate` gates whether the batch path exists at all: it does for the
+ *  relational repository, but NOT for the embedded/document repositories, which
+ *  reuse the shared find emitters yet load the whole aggregate from a single
+ *  jsonb column (no per-row child SELECT → no `_hydrate_many` emitted).  Those
+ *  callers pass `false` so the find methods stay on the per-row comprehension. */
+function hydrateListExpr(agg: EnrichedAggregateIR, bulkHydrate = true): string {
+  return bulkHydrate && hasChildCollections(agg)
     ? "await self._hydrate_many(rows)"
     : "[await self._hydrate(row) for row in rows]";
 }
