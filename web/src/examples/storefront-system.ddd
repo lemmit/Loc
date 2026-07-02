@@ -12,8 +12,9 @@
 // This is the Hono + React variant: it boots in the playground's
 // runtime worker (PGlite) and previews the generated React SPA in the
 // iframe.  `storefront-dotnet.ddd` and `storefront-elixir.ddd` lower
-// the same domain onto .NET (EF Core + Mediator) and Elixir (Ash +
-// Reactor) — pick all three from the dropdown to diff the backends.
+// the same domain onto .NET (EF Core + Mediator) and Elixir (Phoenix
+// LiveView on plain Ecto) — pick all three from the dropdown to diff
+// the backends.
 
 // ---------------------------------------------------------------------------
 // Traceability (see docs/traceability.md): requirement ─► solution

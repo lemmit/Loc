@@ -1,11 +1,12 @@
 // Storefront on Phoenix LiveView — the same domain as
 // `storefront-system.ddd` (Hono + React) and `storefront-dotnet.ddd`
-// (.NET), deployed as a single Elixir/Ash + Phoenix LiveView service.
+// (.NET), deployed as a single Elixir + Phoenix LiveView service on
+// plain Ecto (the `vanilla` foundation).
 //
 // Diff target alongside the other two storefront examples: see how
 // the identical aggregate tree (Order → OrderLine), Money
 // value-object and transactional `checkout` saga lower onto
-// Ash.Resource + a Reactor saga.
+// Ecto schemas + a `Repo.transaction`-wrapped context function.
 //
 // Files-only in the playground (BEAM doesn't boot in-browser).
 
@@ -129,7 +130,7 @@ system StorefrontPhoenix {
       }
       repository Orders for Order { }
 
-      // Ash lowers `transactional` workflows to a Reactor saga, so a
+      // A `transactional` workflow lowers to a `Repo.transaction`, so a
       // failing precondition rolls both the order creation and the
       // wallet debit back.
       workflow checkout transactional {
