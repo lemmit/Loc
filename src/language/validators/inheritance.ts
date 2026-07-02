@@ -150,6 +150,50 @@ export function checkInheritance(model: Model, accept: ValidationAcceptor): void
     // emit/schema.ts + migrations-builder.ts `tableForPart`.)
   }
 
+  // Rule 1b — `extends` CYCLES (full-review remediation §B7).  Rule 1 catches
+  // only direct self-extension (`A extends A`).  A mutual or longer cycle
+  // (`A extends B extends A`) validates clean today and silently truncates
+  // inheritance — the enrichment merge (`enrichments.ts`) walks the chain with
+  // a visited-set and simply stops when it loops back, so the fields beyond the
+  // cycle are never merged and no diagnostic is raised.  Detect the cycle here
+  // and report it once, naming every aggregate in the loop.
+  const reportedCycles = new Set<string>();
+  for (const start of aggregates) {
+    const path: Aggregate[] = [];
+    const onPath = new Set<Aggregate>();
+    let cur: Aggregate | undefined = start;
+    while (cur) {
+      if (onPath.has(cur)) {
+        // Re-entered a node already on the path → the tail from `cur` onward
+        // is the cycle.  A length-1 cycle is self-extension (Rule 1's
+        // `loom.extends-self`); leave that to Rule 1 and only report cycles of
+        // two or more distinct aggregates here.
+        const cycle = path.slice(path.indexOf(cur));
+        if (cycle.length >= 2) {
+          const key = cycle
+            .map((a) => a.name)
+            .sort()
+            .join(" ");
+          if (!reportedCycles.has(key)) {
+            reportedCycles.add(key);
+            const names = cycle.map((a) => a.name);
+            accept(
+              "error",
+              `Aggregate '${names[0]}' is part of an 'extends' cycle: ` +
+                `${[...names, names[0]].join(" → ")}. Inheritance must form a chain, not a loop — ` +
+                `break the cycle so one abstract base sits at the top.`,
+              { node: cycle[0], property: "superType", code: "loom.extends-cycle" },
+            );
+          }
+        }
+        break;
+      }
+      onPath.add(cur);
+      path.push(cur);
+      cur = cur.superType?.ref;
+    }
+  }
+
   // Rule 5 — an abstract aggregate has no repository of its own; repositories
   // belong to concrete subtypes.  (An unresolved target is the linker's
   // problem; we only flag a resolved-but-abstract one.)

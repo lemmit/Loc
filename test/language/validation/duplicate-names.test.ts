@@ -1,0 +1,174 @@
+// Duplicate-name validator family (full-review remediation §B4, audit
+// finding 10).  The grammar admits sibling declarations sharing a name; the
+// last silently won and the earlier ones vanished (a duplicate `aggregate
+// Order` dropped the first's fields; `total: money` + `total: string`
+// retyped the field; duplicate params / event fields / VO fields / enum
+// values all passed).  These gates close the class — see
+// `src/language/validators/duplicates.ts`.
+
+import { describe, expect, it } from "vitest";
+import { parseString } from "../../_helpers/index.js";
+
+const parse = (source: string) => parseString(source);
+
+describe("validator: duplicate names — negatives", () => {
+  it("flags a duplicate aggregate name within a context (loom.duplicate-context-type)", async () => {
+    const { errors } = await parse(`
+      system S { subdomain M { context C {
+        aggregate Order { total: money  code: string }
+        aggregate Order { name: string }
+      } } }
+    `);
+    expect(
+      errors.some((e) => /Duplicate declaration 'Order' in context 'C'/.test(e)),
+      errors.join("\n"),
+    ).toBe(true);
+  });
+
+  it("flags a value-object / event / enum sharing a name with an aggregate in one context", async () => {
+    const { errors } = await parse(`
+      system S { subdomain M { context C {
+        aggregate Thing { a: int }
+        valueobject Thing { b: int }
+        event Thing { c: int }
+        enum Thing { X }
+      } } }
+    `);
+    // Three later declarations collide with the first `Thing`.
+    const hits = errors.filter((e) => /Duplicate declaration 'Thing' in context 'C'/.test(e));
+    expect(hits.length, errors.join("\n")).toBe(3);
+  });
+
+  it("flags a duplicate property name within an aggregate (loom.duplicate-field)", async () => {
+    const { errors } = await parse(`
+      system S { subdomain M { context C {
+        aggregate Order { total: money  total: string }
+      } } }
+    `);
+    expect(
+      errors.some((e) => /Duplicate field 'total' in aggregate 'Order'/.test(e)),
+      errors.join("\n"),
+    ).toBe(true);
+  });
+
+  it("flags a containment colliding with a property (shared field namespace)", async () => {
+    const { errors } = await parse(`
+      system S { subdomain M { context C {
+        aggregate Order {
+          lines: int
+          entity Line { a: int }
+          contains lines: Line[]
+        }
+      } } }
+    `);
+    expect(
+      errors.some((e) => /Duplicate field 'lines' in aggregate 'Order'/.test(e)),
+      errors.join("\n"),
+    ).toBe(true);
+  });
+
+  it("flags a duplicate value-object field", async () => {
+    const { errors } = await parse(`
+      system S { subdomain M { context C {
+        valueobject V { a: int  a: string }
+      } } }
+    `);
+    expect(
+      errors.some((e) => /Duplicate field 'a' in value object 'V'/.test(e)),
+      errors.join("\n"),
+    ).toBe(true);
+  });
+
+  it("flags a duplicate event field", async () => {
+    const { errors } = await parse(`
+      system S { subdomain M { context C {
+        event E { at: datetime  at: int }
+      } } }
+    `);
+    expect(
+      errors.some((e) => /Duplicate field 'at' in event 'E'/.test(e)),
+      errors.join("\n"),
+    ).toBe(true);
+  });
+
+  it("flags a duplicate operation parameter (loom.duplicate-parameter)", async () => {
+    const { errors } = await parse(`
+      system S { subdomain M { context C {
+        aggregate Order { total: money  operation foo(x: int, x: string) { } }
+      } } }
+    `);
+    expect(
+      errors.some((e) => /Duplicate parameter 'x' in operation 'foo'/.test(e)),
+      errors.join("\n"),
+    ).toBe(true);
+  });
+
+  it("flags a duplicate function parameter", async () => {
+    const { errors } = await parse(`
+      system S { subdomain M { context C {
+        aggregate Order { total: money  function f(y: int, y: int): int = 0 }
+      } } }
+    `);
+    expect(
+      errors.some((e) => /Duplicate parameter 'y' in function 'f'/.test(e)),
+      errors.join("\n"),
+    ).toBe(true);
+  });
+
+  it("flags a duplicate create parameter", async () => {
+    const { errors } = await parse(`
+      system S { subdomain M { context C {
+        aggregate Order { total: money  create(z: int, z: int) { } }
+      } } }
+    `);
+    expect(
+      errors.some((e) => /Duplicate parameter 'z' in create/.test(e)),
+      errors.join("\n"),
+    ).toBe(true);
+  });
+
+  it("flags a duplicate enum value (loom.duplicate-enum-value)", async () => {
+    const { errors } = await parse(`
+      system S { subdomain M { context C {
+        enum Color { Red, Green, Red }
+      } } }
+    `);
+    expect(
+      errors.some((e) => /Duplicate value 'Red' in enum 'Color'/.test(e)),
+      errors.join("\n"),
+    ).toBe(true);
+  });
+});
+
+describe("validator: duplicate names — positives", () => {
+  it("allows the same aggregate name in different contexts", async () => {
+    const { errors } = await parse(`
+      system S { subdomain M {
+        context C1 { aggregate Order { total: money } }
+        context C2 { aggregate Order { name: string } }
+      } }
+    `);
+    expect(
+      errors.some((e) => /Duplicate declaration 'Order'/.test(e)),
+      errors.join("\n"),
+    ).toBe(false);
+  });
+
+  it("allows distinct field / param / value names", async () => {
+    const { errors } = await parse(`
+      system S { subdomain M { context C {
+        enum Color { Red, Green, Blue }
+        aggregate Order {
+          total: money
+          code: string
+          derived label: string = code
+          operation foo(x: int, y: string) { }
+        }
+      } } }
+    `);
+    expect(
+      errors.some((e) => /Duplicate (field|parameter|value|declaration)/.test(e)),
+      errors.join("\n"),
+    ).toBe(false);
+  });
+});

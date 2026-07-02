@@ -26,6 +26,7 @@ import {
   isEntityPart,
   isFunctionDecl,
   isHandleDecl,
+  isIdType,
   isInvariant,
   isOnDecl,
   isOperation,
@@ -164,6 +165,58 @@ export function checkTypeReferences(model: Model, accept: ValidationAcceptor): v
         );
       }
     }
+  }
+}
+
+// Cross-aggregate entity-part reference ambiguity (full-review remediation
+// §B8, audit finding under "Language & macros").
+//
+// `DddScopeComputation` exports every entity part to the document's GLOBAL
+// scope by its bare name (ddd-scope.ts).  When two aggregates each declare an
+// `entity Line`, an `X id` link written `l: Line id` resolves to whichever
+// part the index happened to order first — silently, with no diagnostic — so
+// the FK points at an arbitrary one of the two.
+//
+// This flags the ambiguity at the REFERENCE site (`IdType.target`), which is
+// the one position that resolves entity parts through the un-scoped global
+// map.  It cannot false-positive on same-aggregate references:
+//   • `Containment.partType` is scoped to `localParts(aggregate)` (never
+//     global), so a containment naming a local part is unambiguous.
+//   • `NamedType.target` resolves entity parts only within the enclosing
+//     aggregate (`localTypeScope`), so a bare-name field type is unambiguous.
+// Only the `X id` form reaches the global scope, and we report only when the
+// resolved target's bare name is shared by 2+ entity parts in the document —
+// a single same-named part (even if it's a local one) is never flagged.
+export function checkAmbiguousPartRefs(model: Model, accept: ValidationAcceptor): void {
+  // Index every entity part by bare name → the aggregates that own one.
+  const ownersByName = new Map<string, Set<string>>();
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (!isEntityPart(node)) continue;
+    const owner = AstUtils.getContainerOfType(node, isAggregate);
+    const bucket = ownersByName.get(node.name) ?? new Set<string>();
+    bucket.add(owner?.name ?? "<anonymous>");
+    ownersByName.set(node.name, bucket);
+  }
+
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (!isIdType(node)) continue;
+    const target = node.target?.ref;
+    if (!target || !isEntityPart(target)) continue;
+    const owners = ownersByName.get(target.name);
+    // 2+ distinct owning aggregates → the bare `X id` link is ambiguous.
+    if (!owners || owners.size < 2) continue;
+    const names = [...owners].sort();
+    const list =
+      names.length === 2
+        ? `aggregates '${names[0]}' and '${names[1]}'`
+        : `aggregates ${names.map((n) => `'${n}'`).join(", ")}`;
+    accept(
+      "error",
+      `Ambiguous entity-part reference '${target.name} id' — '${target.name}' is declared in ${list}. ` +
+        `Entity parts are aggregate-local; reference the owning aggregate's root instead (e.g. '${names[0]} id'), ` +
+        `or rename one of the parts so the link is unambiguous.`,
+      { node, property: "target", code: "loom.ambiguous-part-ref" },
+    );
   }
 }
 

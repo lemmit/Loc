@@ -20,6 +20,7 @@ export {
   checkDeployableServes,
   checkDeployableUiCompose,
 } from "./deployable.js";
+export { checkDuplicateNames } from "./duplicates.js";
 export { checkGenericCarriers, checkSelfType } from "./generics.js";
 export { checkInheritance } from "./inheritance.js";
 export { checkMacroExpansion } from "./macros.js";
@@ -43,6 +44,7 @@ export {
 export {
   checkActionTypePosition,
   checkAggregate,
+  checkAmbiguousPartRefs,
   checkContainment,
   checkContext,
   checkEntityPart,

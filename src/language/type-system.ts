@@ -816,8 +816,10 @@ export function absentRecordMember(recvType: DddType, name: string): string | un
 /** True iff `name` is declared anywhere in an aggregate's `extends` chain.
  *  A concrete aggregate inherits the abstract base's fields / operations, so
  *  the membership check (`absentRecordMember`) must walk `superType` — without
- *  it, `this.<inheritedField>` on a subtype is a false positive.  Cycle-guarded
- *  (the inheritance validator reports `extends` cycles separately). */
+ *  it, `this.<inheritedField>` on a subtype is a false positive.  The local
+ *  `seen` set below guards against an infinite loop on a malformed `extends`
+ *  cycle; the cycle itself is reported separately as `loom.extends-cycle` by
+ *  the inheritance validator (`validators/inheritance.ts`, Rule 1b). */
 function aggregateChainHasMember(agg: Aggregate, name: string): boolean {
   const seen = new Set<Aggregate>();
   let cur: Aggregate | undefined = agg;

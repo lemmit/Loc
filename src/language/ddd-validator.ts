@@ -27,6 +27,7 @@ import type {
 } from "./generated/ast.js";
 import {
   checkActionTypePosition,
+  checkAmbiguousPartRefs,
   checkAuthBlock,
   checkBinaryOperands,
   checkBindableInputArgs,
@@ -37,6 +38,7 @@ import {
   checkCriteria,
   checkDataSource,
   checkDeployable,
+  checkDuplicateNames,
   checkExpectMatcher,
   checkGenericCarriers,
   checkInheritance,
@@ -191,6 +193,16 @@ export class DddValidator {
     // Type-position references: bare aggregate name (must be `X id`),
     // and cross-aggregate entity-part name (must go through the root).
     guard("type-references", model, () => checkTypeReferences(model, accept));
+    // Duplicate-name family (finding 10): sibling aggregate / value-object /
+    // event / enum names per context; property / derived / containment field
+    // names per aggregate / value-object / event; operation / function /
+    // create / destroy param names; enum values.  Without it a duplicate
+    // silently replaces / retypes the first.
+    guard("duplicate-names", model, () => checkDuplicateNames(model, accept));
+    // Ambiguous entity-part `X id` link: two aggregates declaring an
+    // `entity <Name>` make a bare `Name id` resolve to an arbitrary one via
+    // the global scope — report the ambiguity at the reference site.
+    guard("ambiguous-part-ref", model, () => checkAmbiguousPartRefs(model, accept));
     // Aggregate-inheritance surface (aggregate-inheritance.md, I1):
     // `extends` may only target an `abstract` base; abstract bases have no
     // repository and declare no lifecycle actions; `inheritanceUsing(…)` is
@@ -266,12 +278,39 @@ export class DddValidator {
     // Channel + channelSource: key-field existence and the channel<->storage
     // transport compatibility matrix (channels.md, Slice 1).
     guard("channels", model, () => checkChannels(model, accept));
+    // Implicit composition (finding 23): when the project has exactly one
+    // `system { }`, the deployment-shape members written at file top level
+    // fold into it (implicit-system-composition.md).  They must run through
+    // the SAME per-System check family as their nested siblings — otherwise a
+    // `platform: react` deployable with no `ui:` (say) errors nested and
+    // passes top-level.  Bare top-level `context` keeps its legacy loose
+    // meaning and is checked by the `BoundedContext` arm below, so it is
+    // excluded from the fold (folding it would double-check it).
+    const FOLDABLE_TOP_LEVEL: ReadonlySet<string> = new Set([
+      "Deployable",
+      "Ui",
+      "ThemeBlock",
+      "AuthBlock",
+      "Api",
+      "Storage",
+      "Resource",
+      "Layout",
+      "Subdomain",
+    ]);
+    const systemNodes = model.members.filter((mm) => mm.$type === "System");
+    const topLevelFoldable =
+      systemNodes.length === 1
+        ? model.members.filter((mm) => FOLDABLE_TOP_LEVEL.has(mm.$type))
+        : [];
     for (const m of model.members) {
       if (m.$type === "BoundedContext") {
         guard("context", m, () => checkContext(m, accept));
       } else if (m.$type === "System") {
-        const deployables = m.members.filter((sm) => sm.$type === "Deployable");
-        const themeBlocks = m.members.filter((sm) => sm.$type === "ThemeBlock") as ThemeBlock[];
+        // The system's own members plus the top-level members that compose
+        // into it (empty unless this is the project's single system).
+        const sysMembers = [...m.members, ...topLevelFoldable];
+        const deployables = sysMembers.filter((sm) => sm.$type === "Deployable");
+        const themeBlocks = sysMembers.filter((sm) => sm.$type === "ThemeBlock") as ThemeBlock[];
         if (themeBlocks.length > 1) {
           for (const tb of themeBlocks.slice(1)) {
             accept(
@@ -284,7 +323,7 @@ export class DddValidator {
         for (const tb of themeBlocks) guard("theme", tb, () => checkTheme(tb, accept));
         // Auth block (D-AUTH-OIDC).  At most one `auth { … }` per
         // system; flag the extras, semantic-check the first.
-        const authBlocks = m.members.filter((sm) => sm.$type === "AuthBlock") as AuthBlock[];
+        const authBlocks = sysMembers.filter((sm) => sm.$type === "AuthBlock") as AuthBlock[];
         if (authBlocks.length > 1) {
           for (const ab of authBlocks.slice(1)) {
             accept(
@@ -299,7 +338,7 @@ export class DddValidator {
         // ui checks can see siblings (name uniqueness across uis), and
         // so per-deployable checks can cross-reference the system's
         // ui inventory.
-        const uis = m.members.filter((sm) => sm.$type === "Ui") as Ui[];
+        const uis = sysMembers.filter((sm) => sm.$type === "Ui") as Ui[];
         const uiNamesSeen = new Map<string, Ui>();
         for (const ui of uis) {
           const prior = uiNamesSeen.get(ui.name);
@@ -319,7 +358,7 @@ export class DddValidator {
         // Api declaration checks.
         //   - Names unique within the system (`api SalesApi from …` declared twice).
         //   - Source module cross-ref must resolve.
-        const apis = m.members.filter((sm) => sm.$type === "Api") as Api[];
+        const apis = sysMembers.filter((sm) => sm.$type === "Api") as Api[];
         const apiNamesSeen = new Map<string, Api>();
         for (const api of apis) {
           const prior = apiNamesSeen.get(api.name);
@@ -367,7 +406,7 @@ export class DddValidator {
         //   - Type is one of the v0 enum values (parser ensures shape;
         //     this is a structural sanity-check + future hook for
         //     cross-platform constraints).
-        const storages = m.members.filter((sm) => sm.$type === "Storage") as Storage[];
+        const storages = sysMembers.filter((sm) => sm.$type === "Storage") as Storage[];
         const storageNamesSeen = new Map<string, Storage>();
         for (const s of storages) {
           const prior = storageNamesSeen.get(s.name);
@@ -391,7 +430,7 @@ export class DddValidator {
         //   - storage-shaped knobs (schema, tablePrefix, keyPrefix)
         //     match the resolved storage's type.
         // See `src/language/validators/datasource.ts`.
-        const dataSources = m.members.filter((sm) => sm.$type === "Resource") as Resource[];
+        const dataSources = sysMembers.filter((sm) => sm.$type === "Resource") as Resource[];
         const dataSourceNamesSeen = new Map<string, Resource>();
         for (const ds of dataSources) {
           const prior = dataSourceNamesSeen.get(ds.name);
@@ -407,7 +446,7 @@ export class DddValidator {
           guard("datasource", ds, () => checkDataSource(ds, accept));
         }
 
-        for (const sm of m.members) {
+        for (const sm of sysMembers) {
           if (sm.$type === "Subdomain") {
             for (const ctx of sm.contexts) guard("context", ctx, () => checkContext(ctx, accept));
           } else if (sm.$type === "BoundedContext") {
