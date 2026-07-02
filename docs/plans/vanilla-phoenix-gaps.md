@@ -34,6 +34,7 @@ on the vanilla backend later — this file is the tracked list.
 | §4 | `contains`-in-`where` membership | **CLOSED** (doc stale) | S | dead-code cleanup only |
 | §12 | `shape(document)` + custom ops/finds | honest validator gate | M | 3 (untracked find) |
 | §13 | LiveView operation-action bang fns | **CLOSED** | S–M | done |
+| §14 | Success-response wire shape (snake_case keys + leaked Ecto timestamps) | **REAL — runtime wire divergence, boot-found** | M–L | 1 |
 
 Restoring the 5-backend `conformance-parity` gate (removing
 `LOOM_E2E_SKIP_PHOENIX=1` and re-adding the elixir deployable to
@@ -450,3 +451,43 @@ pairs, and the 403 runtime-authorization target).
   threads it (#1568). Threading the actor through the LiveView action is a small
   follow-up (`liveview-emit.ts` ~`:397` → pass `socket.assigns[:current_user]` for
   gated ops).
+
+## 14. Success-response wire shape — snake_case keys + leaked Ecto timestamps (M–L, boot-found)
+
+- **Status (REAL, runtime-only — invisible to every per-PR gate):** the vanilla
+  success-path `serialize/1` (`record |> Map.from_struct() |> Map.drop([:__meta__,
+  :__struct__])`, emitted by `api-emit.ts` and mirrored in `view-emit.ts`,
+  `eventsourced-emit.ts`, `document-emit.ts`, `context-emit.ts`, `audit-emit.ts`,
+  `workflow-execution-emit.ts`) dumps the raw Ecto struct. Two divergences from the
+  canonical cross-backend wire the other four backends (Hono / .NET / Java / Python)
+  emit:
+  1. **snake_case keys.** A multi-word field ships `commit_sha` / `build_state` /
+     `started_at`, but Hono emits `commitSha` / `buildState` / `startedAt`. Single-word
+     fields (`name`, `visibility`) coincidentally match, which is why it looked fine.
+  2. **Leaked `inserted_at` / `updated_at`.** `Map.from_struct` includes Ecto's
+     auto-`timestamps()` columns, which are **not** in the aggregate's `wireShape` and
+     no other backend emits. (Distinct from a *declared* `createdAt`/`updatedAt`, which
+     maps to `created_at`/`updated_at` and *is* wire.)
+- **Why it's invisible per-PR:** the OpenAPI **spec** emitter declares camelCase
+  (`projects_api_spec.ex:commitSha`), so `conformance-parity`'s schema-diff passes —
+  a spec/runtime mismatch. `paged-wire-parity.test.ts` only diffs the *envelope* keys
+  (`items/page/pageSize/total/totalPages`, hand-written camelCase atoms), never the
+  inner item field keys. And Elixir isn't booted per-PR (behavioral-e2e is node-only;
+  cross-backend runtime is nightly `conformance-full`). Found only by booting the
+  showcase Phoenix backend on real Postgres and reading a create response.
+- **Why it's not a one-line camelize pass:** nested child structs carry their own
+  wire allow-list — `pipeline.ex` has `@derive {Jason.Encoder, only: [:id, :label,
+  :run_count]}` — so a generic recursive `Map.from_struct` flatten would *leak*
+  `project_id` / the `belongs_to` assoc / timestamps the allow-list deliberately
+  hides. The correct fix is a **`wireShape`-driven serializer** (the shape every
+  other backend already emits from): project exactly the enriched `agg.wireShape`
+  fields, camelCased, recursing into value-object embeds and relational containments
+  by *their* wire shapes, with `DateTime`/`Decimal`/`Date` scalars passed through for
+  Jason. This threads `wireShape` into the serialize emitters and replaces the
+  `Map.from_struct` dump at all ~7 sites (plus the ref-collection id-array projection,
+  which already exists and stays). Rebaselines the elixir generator snapshot tests and
+  needs a boot + `conformance-full` re-verify.
+- **Blast radius:** every vanilla success response of an aggregate with a multi-word
+  field or any aggregate at all (timestamp leak is universal). High user-visible
+  impact (a shared frontend talking to a phoenix backend gets the wrong keys), which
+  is why this is priority 1 despite being newly found.
