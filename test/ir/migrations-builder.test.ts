@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import type { SchemaSnapshot } from "../../src/ir/types/migrations-ir.js";
 import {
   BASE_TIMESTAMP,
@@ -6,7 +9,13 @@ import {
   diffSchema,
   schemaFromModule,
 } from "../../src/system/migrations-builder.js";
-import { memorySnapshotStore } from "../../src/system/snapshot.js";
+import {
+  fsSnapshotStore,
+  memorySnapshotStore,
+  SnapshotReadError,
+  serializeSnapshot,
+  snapshotRelPath,
+} from "../../src/system/snapshot.js";
 import { buildLoomModel } from "../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
@@ -355,6 +364,77 @@ system Twin {
 `);
     const out = buildMigrations(loom.systems[0]!, memorySnapshotStore());
     expect(out.map((m) => m.module)).toEqual(["A"]);
+  });
+});
+
+describe("fsSnapshotStore", () => {
+  const tmpDirs: string[] = [];
+  const mkTmp = (): string => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-snap-"));
+    tmpDirs.push(dir);
+    return dir;
+  };
+  const writeSnapshot = (root: string, module: string, contents: string): string => {
+    const filePath = path.join(root, snapshotRelPath(module));
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, contents);
+    return filePath;
+  };
+
+  afterEach(() => {
+    for (const dir of tmpDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("returns null when no snapshot file exists (first run)", () => {
+    const root = mkTmp();
+    expect(fsSnapshotStore(root).read("Sales")).toBeNull();
+  });
+
+  it("reads back a well-formed snapshot", async () => {
+    const { module } = await loadShop();
+    const snap: SchemaSnapshot = { ...schemaFromModule(module), lastVersion: BASE_TIMESTAMP };
+    const root = mkTmp();
+    writeSnapshot(root, "Sales", serializeSnapshot(snap));
+    const read = fsSnapshotStore(root).read("Sales");
+    expect(read?.lastVersion).toBe(BASE_TIMESTAMP);
+    expect(read?.tables.map((t) => t.name)).toEqual(snap.tables.map((t) => t.name));
+  });
+
+  it("throws SnapshotReadError naming the file when the snapshot is corrupt", () => {
+    const root = mkTmp();
+    const filePath = writeSnapshot(root, "Sales", '{"tables": [ {"name": "orders"'); // truncated
+    expect(() => fsSnapshotStore(root).read("Sales")).toThrow(SnapshotReadError);
+    try {
+      fsSnapshotStore(root).read("Sales");
+      expect.unreachable("expected a SnapshotReadError");
+    } catch (err) {
+      expect(err).toBeInstanceOf(SnapshotReadError);
+      const e = err as SnapshotReadError;
+      expect(e.filePath).toBe(filePath);
+      expect(e.message).toContain(filePath);
+      expect(e.message).toMatch(/corrupt|truncat/i);
+      expect(e.message).toMatch(/restore it from version control|re-baseline/i);
+    }
+  });
+});
+
+describe("buildMigrations — corrupt snapshot never re-baselines", () => {
+  const tmpDirs: string[] = [];
+  afterEach(() => {
+    for (const dir of tmpDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("throws instead of emitting an Initial migration for a corrupt snapshot", async () => {
+    const { sys } = await loadShop();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "loom-snap-"));
+    tmpDirs.push(root);
+    const filePath = path.join(root, snapshotRelPath("Sales"));
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, "}}} not json {{{"); // corrupted (e.g. interrupted write)
+
+    // Must NOT be interpreted as a fresh output dir → NO "Initial" migration.
+    expect(() => buildMigrations(sys, fsSnapshotStore(root))).toThrow(SnapshotReadError);
+    expect(() => buildMigrations(sys, fsSnapshotStore(root))).toThrow(filePath);
   });
 });
 

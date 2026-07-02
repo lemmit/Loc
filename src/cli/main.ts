@@ -23,7 +23,7 @@ import { generateTypeScript } from "../platform/hono/v4/emit.js";
 import { BACKEND_PINS as HONO_V4_PINS } from "../platform/hono/v4/pins.js";
 import { generateSystemsFromLoom } from "../system/index.js";
 import { captureSnapshots } from "../system/loomsnap.js";
-import { fsSnapshotStore } from "../system/snapshot.js";
+import { fsSnapshotStore, SnapshotReadError } from "../system/snapshot.js";
 import {
   renderVerdictGraph,
   renderVerificationJson,
@@ -375,11 +375,25 @@ async function runGenerate(
     // migration; existing snapshots ⇒ delta migration when the source
     // moves.  See `src/system/migrations-builder.ts` for the diff
     // builder + `docs/generators.md` § Migrations for the pipeline.
-    files = generateSystemsFromLoom(loom, {
-      emitTrace: options.emitTrace,
-      emitKubernetes: options.emitKubernetes,
-      snapshots: fsSnapshotStore(outDir),
-    }).files;
+    try {
+      files = generateSystemsFromLoom(loom, {
+        emitTrace: options.emitTrace,
+        emitKubernetes: options.emitKubernetes,
+        snapshots: fsSnapshotStore(outDir),
+      }).files;
+    } catch (err) {
+      // A corrupted/truncated migration snapshot is a recoverable operator
+      // problem, not a compiler crash — report it as a clean CLI failure
+      // (with the recovery hint from the error message), matching how the
+      // other fatal generation errors above surface.  Re-throw anything else
+      // for the top-level handler to print.
+      if (err instanceof SnapshotReadError) {
+        console.error(`${file}: ${err.message}`);
+        if (!options.continueOnError) process.exit(1);
+        return { hadError: true };
+      }
+      throw err;
+    }
     if (files.size === 0) {
       console.error(
         `No \`system\` block declared in ${file}.  Use \`generate ts\` or \`generate dotnet\` for legacy single-deployable sources.`,
