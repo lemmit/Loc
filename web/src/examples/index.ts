@@ -330,7 +330,7 @@ export const examples: LoomExample[] = [
     label: "Storefront · fullstack Phoenix LiveView",
     source: storefrontElixirSource,
     blurb:
-      "The Storefront domain on Elixir/Ash — aggregates lower to Ash.Resource, the `checkout` saga to a Reactor, views to Ash.Query. Files-only in the playground (BEAM, not Node).",
+      "The Storefront domain on Phoenix LiveView — aggregates lower to Ecto schemas + context functions, the `checkout` saga to a `Repo.transaction`, views to Ecto queries. Files-only in the playground (BEAM, not Node).",
   },
   {
     id: "dotnet-backend",
