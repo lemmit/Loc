@@ -139,4 +139,40 @@ describe("vanilla — Slice P4.2 event-sourcing emit", () => {
     expect(router).not.toContain('patch "/accounts/:id"');
     expect(router).not.toContain('delete "/accounts/:id"');
   });
+
+  it("§14: ES controller serialize projects camelCase wire keys (not a raw snake struct dump)", async () => {
+    const esCamel = `
+system L {
+  subdomain Core {
+    context Accounts {
+      event Opened { account: Account id, owner: string }
+      aggregate Account ids guid persistedAs(eventLog) {
+        owner: string
+        currentBalance: int
+        create open(owner: string) { emit Opened { account: id, owner: owner } }
+        apply(e: Opened) { owner := e.owner  currentBalance := 0 }
+      }
+      repository Accounts for Account { }
+    }
+  }
+  api A from Core
+  storage pg { type: postgres }
+  resource log { for: Accounts, kind: eventLog, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Accounts]
+    dataSources: [log]
+    serves: A
+    port: 4000
+  }
+}
+`;
+    const f = await generateSystemFiles(esCamel);
+    const ctl = get(f, "/controllers/account_controller.ex");
+    // wireShape-driven serialize: camelCase JSON key, snake struct-field read.
+    expect(ctl).toContain('"currentBalance" => record.current_balance');
+    expect(ctl).toContain('"owner" => record.owner');
+    // NOT the old raw dump.
+    expect(ctl).not.toContain("|> Map.from_struct()");
+  });
 });

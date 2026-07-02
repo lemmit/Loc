@@ -454,9 +454,24 @@ pairs, and the 403 runtime-authorization target).
   follow-up (`liveview-emit.ts` ~`:397` → pass `socket.assigns[:current_user]` for
   gated ops).
 
-## 14. Success-response wire shape — snake_case keys + leaked Ecto timestamps (M–L, boot-found)
+## 14. Success-response wire shape — snake_case keys + leaked Ecto timestamps
 
-- **Status (REAL, runtime-only — invisible to every per-PR gate):** the vanilla
+- **Aggregate REST controller — FIXED (#1628):** `wireShape`-driven `serialize/1`
+  (`wire-serialize.ts`) — camelCase keys, no timestamp leak, nested part/VO helpers.
+- **Event-sourced controller — FIXED (this branch):** the ES controller reuses
+  `renderWireSerialize(agg, ctx)` — the folded struct's fields are exactly
+  `snake(wireShape.name)`, so the projection lines up. Gated to skip ref-collection
+  ES aggregates (the `__ref_ids/1` Ecto-assoc helper doesn't fit an in-memory fold).
+- **Still open — view / audit / workflow-instance / context serialize sites:** these
+  share a single `serialize/1` across records that are NOT aggregates (a view row, an
+  audit record, a workflow instance), so `renderWireSerialize` (aggregate-`wireShape`
+  driven) doesn't apply. They need either a per-record projection or a **generic
+  camelize helper** — camelize map keys, pass `DateTime`/`Decimal` through, drop
+  Ecto `__meta__`/`inserted_at`/`updated_at`. Lower traffic than the two REST paths
+  above; tracked here for a follow-up.
+
+### Original report (REAL, runtime-only — invisible to every per-PR gate):
+- the vanilla
   success-path `serialize/1` (`record |> Map.from_struct() |> Map.drop([:__meta__,
   :__struct__])`, emitted by `api-emit.ts` and mirrored in `view-emit.ts`,
   `eventsourced-emit.ts`, `document-emit.ts`, `context-emit.ts`, `audit-emit.ts`,
