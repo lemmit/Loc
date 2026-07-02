@@ -20,11 +20,13 @@
 // Cross-row references use explicit ids per D-SEED-XREF (an `@handle`
 // indirection was considered and not adopted).
 
+import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   SeedRowIR,
 } from "../../../ir/types/loom-ir.js";
+import { peelNullable } from "../../../ir/types/wire-types.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../../util/naming.js";
 import { renderSeedRowInsert } from "../../sql-pg.js";
@@ -122,13 +124,28 @@ function renderDatasetFn(
   );
 }
 
-/** Positional `Create(…)` args, ordered by the aggregate's required-field
- *  declaration order (the factory's parameter order). */
+/** Positional `Create(…)` args, matching the factory's parameter order.
+ *  The factory params are `forCreateInput(agg.fields)` (see the entity emitter:
+ *  every create-input field, INCLUDING optionals, in declaration order — only
+ *  managed/token/internal fields are dropped).  So we iterate that same
+ *  projection and default an omitted optional field to `null`; a seed that
+ *  supplies only the required subset (the common case) still lines up. */
 function renderArgs(row: SeedRowIR, agg: EnrichedAggregateIR): string {
   const byName = new Map(row.fields.map((f) => [f.name, f.value]));
-  const order = agg.fields.filter((f) => !f.optional).map((f) => f.name);
-  const args = order.filter((n) => byName.has(n)).map((n) => renderCsExpr(byName.get(n)!));
-  return args.join(", ");
+  return forCreateInput(agg.fields)
+    .map((f) => {
+      const v = byName.get(f.name);
+      if (v === undefined) return "null";
+      const rendered = renderCsExpr(v);
+      // `Create(...)` is domain-typed, but a `datetime` field's seed value is a
+      // string literal in the DSL — coerce it to `DateTime` the same way the
+      // command path does, else `Argument N: string → DateTime` (CS1503).
+      return peelNullable(f.type).kind === "primitive" &&
+        (peelNullable(f.type) as { name?: string }).name === "datetime"
+        ? `DateTime.Parse(${rendered}, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal)`
+        : rendered;
+    })
+    .join(", ");
 }
 
 function repoVar(agg: string): string {
@@ -156,10 +173,13 @@ function renderSeedFile(
   const scan = body.replace(/"(?:\\.|[^"\\])*"/g, '""');
   const usesVo = ctx.valueObjects.some((v) => new RegExp(`\\b${v.name}\\b`).test(scan));
   const usesEnum = ctx.enums.some((e) => new RegExp(`\\b${e.name}\\b`).test(scan));
+  // A datetime seed value coerces via `DateTime.Parse(…, CultureInfo, …)`.
+  const usesGlobalization = body.includes("DateTime.Parse(");
 
   const usings = lines(
     "using System;",
     "using System.Collections.Generic;",
+    usesGlobalization && "using System.Globalization;",
     "using System.Linq;",
     "using System.Threading;",
     "using System.Threading.Tasks;",

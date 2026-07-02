@@ -167,6 +167,28 @@ export function dtoParam(
   return `${attr}${csType} ${name}`;
 }
 
+/** True iff the wire (request-DTO) C# type for `t` is a value type — so a
+ *  nullable of it is `Nullable<T>` and must be unwrapped with `.Value`, not the
+ *  null-forgiving `!`.  Ids cross as `Guid`, enums as the enum type, and the
+ *  numeric / bool / guid / json primitives are value types; money / datetime /
+ *  string cross as `string`, and value objects / entities / collections are
+ *  reference types (see `CS_WIRE_PRIMITIVE`). */
+function wireIsCsValueType(t: TypeIR): boolean {
+  const info = wireTypeInfo(t, "request");
+  if (info.isCollection) return false;
+  switch (info.refKind) {
+    case "id":
+    case "enum":
+      return true;
+    case "primitive":
+      return (
+        info.primitive !== "money" && info.primitive !== "string" && info.primitive !== "datetime"
+      );
+    default:
+      return false;
+  }
+}
+
 /** Map a wire-shaped expression to a domain-typed argument for a command. */
 export function wireToCommandArgument(
   expr: string,
@@ -175,7 +197,15 @@ export function wireToCommandArgument(
 ): string {
   const info = wireTypeInfo(t, "request");
   if (info.isNullable) {
-    return `(${expr} is null ? null : ${wireToCommandArgument(`${expr}!`, peelNullable(t), ctx)})`;
+    // Unwrap the nullable before recursing.  A nullable *value* type on the
+    // wire (`Guid?` for an id, `int?`/`bool?`, an enum, …) must be unwrapped
+    // with `.Value` — the null-forgiving `!` does NOT strip `Nullable<T>`, so
+    // `new FooId(x!)` would still be handed a `Guid?` and fail to compile.
+    // A nullable *reference* type (string, value object, entity — and money /
+    // datetime, which cross the wire as string) uses `!`.
+    const inner = peelNullable(t);
+    const unwrapped = wireIsCsValueType(inner) ? `${expr}.Value` : `${expr}!`;
+    return `(${expr} is null ? null : ${wireToCommandArgument(unwrapped, inner, ctx)})`;
   }
   if (info.isCollection) {
     return `${expr}.Select(__e => ${wireToCommandArgument("__e", peelCollection(t), ctx)}).ToList()`;

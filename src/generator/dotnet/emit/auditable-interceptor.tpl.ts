@@ -1,7 +1,8 @@
 import type { AggregateIR, ContextStampIR, ExprIR } from "../../../ir/types/loom-ir.js";
+import { walkExpr } from "../../../ir/validate/checks/shared.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
-import { renderCsExpr } from "../render-expr.js";
+import { AMBIENT_CURRENT_USER, renderCsExpr } from "../render-expr.js";
 
 // EF Core SaveChangesInterceptor that stamps fields on lifecycle
 // events.  Driven by a per-entity-type stamp registry generated
@@ -63,7 +64,7 @@ export function renderAuditableInterceptor(
   const usesPrincipal =
     !!actorIdProp &&
     stamping.some(({ rules }) =>
-      rules.some((r) => r.assignments.some((a) => isCurrentUserRef(a.value))),
+      rules.some((r) => r.assignments.some((a) => valueRefsCurrentUser(a.value))),
     );
   const principalUsings = usesPrincipal ? [`using ${ns}.Domain.Common;`, `using ${ns}.Auth;`] : [];
 
@@ -126,6 +127,18 @@ function isCurrentUserRef(value: ExprIR): boolean {
   return value.kind === "ref" && value.refKind === "current-user";
 }
 
+/** True iff `value` references the principal ANYWHERE — a bare `currentUser`
+ *  or a member access like `currentUser.role`.  A shallow `isCurrentUserRef`
+ *  misses the member-access form, which would drop the RequestContext / Auth
+ *  usings and emit an unresolved `currentUser`. */
+function valueRefsCurrentUser(value: ExprIR): boolean {
+  let found = false;
+  walkExpr(value, (e) => {
+    if (e.kind === "ref" && e.refKind === "current-user") found = true;
+  });
+  return found;
+}
+
 /** Switch arm for one aggregate's stamping rules.  Body assigns per-event
  * fields on the matched entity through EF's metadata accessor via the
  * compile-checked lambda overload (`ctx.Entry(e).Property(x => x.Field)
@@ -146,8 +159,12 @@ function renderArm(
 
   const renderValue = (value: ExprIR): string =>
     isCurrentUserRef(value) && actorIdProp
-      ? `RequestContext.Current!.CurrentUser!.${actorIdProp}`
-      : renderCsExpr(value, { thisName: argName });
+      ? // Bare `createdBy := currentUser` stamps the actor's ID.
+        `RequestContext.Current!.CurrentUser!.${actorIdProp}`
+      : // Any other value (incl. `currentUser.role`) renders through the shared
+        // expr machinery; a `currentUser` ref inside it resolves to the ambient
+        // principal accessor, so `currentUser.role` → `…CurrentUser!.Role`.
+        renderCsExpr(value, { thisName: argName, currentUserExpr: AMBIENT_CURRENT_USER });
   // EF metadata write through the compile-checked lambda: keeps the stamped
   // property `private set` (the CLR setter is never invoked) yet binds the
   // write to a real property name at build time.

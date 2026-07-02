@@ -282,6 +282,12 @@ function analyseStmts(
       } else if (st.kind === "for-each") {
         for (const sv of st.savesPerIteration) repos.set(sv.repoName, sv.aggName);
         walk(st.body);
+      } else if (st.kind === "if-let") {
+        repos.set(st.repoName, st.aggName);
+        for (const sv of st.savesInThen) repos.set(sv.repoName, sv.aggName);
+        for (const sv of st.savesInElse) repos.set(sv.repoName, sv.aggName);
+        walk(st.thenBody);
+        walk(st.elseBody ?? []);
       } else if (st.kind === "op-call") {
         const agg = aggsByName.get(st.aggName);
         const op = agg?.operations.find((o) => o.name === st.op);
@@ -636,6 +642,15 @@ function analyseWorkflow(wf: WorkflowIR, aggsByName: Map<string, AggregateIR>): 
       } else if (st.kind === "for-each") {
         for (const sv of st.savesPerIteration) repos.set(sv.repoName, sv.aggName);
         walk(st.body);
+      } else if (st.kind === "if-let") {
+        // The criterion `find` + each branch's created/mutated aggregates all
+        // need `_<repo>` injected; recurse both bodies (bug: an if-let-only repo
+        // use, like `touchActive`, otherwise emitted an unbound `_projects`).
+        repos.set(st.repoName, st.aggName);
+        for (const sv of st.savesInThen) repos.set(sv.repoName, sv.aggName);
+        for (const sv of st.savesInElse) repos.set(sv.repoName, sv.aggName);
+        walk(st.thenBody);
+        walk(st.elseBody ?? []);
       } else if (st.kind === "op-call") {
         const agg = aggsByName.get(st.aggName);
         const op = agg?.operations.find((o) => o.name === st.op);
