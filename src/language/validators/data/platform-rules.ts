@@ -295,6 +295,16 @@ export function resolveStyleLayoutCompat(
   applicationDsl: string | undefined,
   layout: string | undefined,
 ): { style: string; layout: string; supported: readonly string[]; ok: boolean } | undefined {
+  // Guard the unresolved-platform case FIRST.  `adaptersFor(family)` derefs
+  // the surface `platformFor(family)` returns, which is `undefined` for a
+  // name that isn't a known backend family (a typo'd quoted `platform:`) — so
+  // reaching `adaptersFor` would throw a TypeError and, since the whole
+  // document validation is one function, wipe every diagnostic for the file.
+  // Only backend families carry style/layout adapters, so stay quiet for
+  // anything else: an unknown platform already draws its own diagnostic from
+  // `checkDeployablePlatform` (deployable.ts), and a frontend legitimately has
+  // no style/layout axes to check.
+  if (parseBuiltinPlatformRef(family) == null) return undefined;
   const adapters = adaptersFor(family);
   const defaults = defaultsFor(family);
   if (!adapters || !defaults) return undefined;

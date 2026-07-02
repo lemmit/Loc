@@ -58,6 +58,38 @@ describe("realization axes — grammar admits the block", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Regression (B5): an unrecognized (typo'd) quoted `platform:` used to CRASH
+// validation.  R3's `resolveStyleLayoutCompat(family, …)` called
+// `adaptersFor(family)`, which derefs the surface `platformFor(family)`
+// returns — `undefined` for a name that isn't a known backend family — throwing
+// a TypeError.  Because the whole document is validated in one function, that
+// throw wiped EVERY diagnostic for the file (surfacing only "An error occurred
+// during validation: Cannot read properties of undefined (reading 'adapters')").
+// The guard now returns quietly for a non-backend family, leaving
+// `checkDeployablePlatform`'s own unknown-platform diagnostic to stand.
+// ---------------------------------------------------------------------------
+describe("unknown quoted platform — no validator crash (B5)", () => {
+  it("an unknown quoted platform yields the unknown-platform diagnostic, not a crash", async () => {
+    const { errors } = await parse(sys('"totallybogus"'));
+    expect(errors.some((e) => /An error occurred during validation/.test(e))).toBe(false);
+    expect(errors.some((e) => /Unknown platform 'totallybogus'/.test(e))).toBe(true);
+  });
+
+  it("other unrelated errors in the same document still surface (crash used to wipe them)", async () => {
+    const { errors } = await parse(`
+      system S {
+        subdomain M { context C { } }
+        deployable api { platform: "totallybogus", contexts: [C], port: 3000 }
+        theme { primary: "red" }
+      }
+    `);
+    expect(errors.some((e) => /An error occurred during validation/.test(e))).toBe(false);
+    expect(errors.some((e) => /Unknown platform 'totallybogus'/.test(e))).toBe(true);
+    expect(errors.some((e) => /theme 'primary' must be a CSS hex color/.test(e))).toBe(true);
+  });
+});
+
 describe("realization axes — R1 out-of-menu", () => {
   it("accepts `persistence: dapper` on dotnet (real since Phase 5c)", async () => {
     // The R1 menu now lists dapper as a real adapter; feature-level gating

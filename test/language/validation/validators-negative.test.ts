@@ -137,4 +137,42 @@ describe("validators (negative) — match / matches()", () => {
     `);
     expect(errors.some((e) => /'matches' takes exactly one argument/.test(e))).toBe(true);
   });
+
+  // Regression (B5): Langium's STRING terminal STRIPS the delimiters, so a
+  // `matches` pattern beginning with an (escaped) quote arrives as a literal
+  // `"` — a regex char, not a JSON delimiter.  The old code ran `JSON.parse`
+  // on any raw starting with `"`, which (a) threw an uncaught SyntaxError on a
+  // quote-leading pattern and (b) silently JSON-unescaped, regex-checking the
+  // WRONG string.  Since validation is one document-level function, that throw
+  // wiped every diagnostic for the file.
+  const wrap = (invariant: string) =>
+    `context T {\n  aggregate A {\n    email: string\n    ${invariant}\n  }\n}`;
+
+  it("validates a quote-leading pattern without crashing (no uncaught SyntaxError)", async () => {
+    // Pattern text is `"[A-Z]` — a literal quote then a char class: a VALID
+    // regex.  The old JSON.parse('"[A-Z]') threw and killed all diagnostics.
+    const { errors } = await parse(wrap(String.raw`invariant email.matches("\"[A-Z]")`));
+    expect(errors.some((e) => /An error occurred during validation/.test(e))).toBe(false);
+    expect(errors.some((e) => /not a valid regular expression/.test(e))).toBe(false);
+    expect(errors).toEqual([]);
+  });
+
+  it("still errors on an actually-invalid regex", async () => {
+    // `[A-Z` — unterminated character class.
+    const { errors } = await parse(wrap(`invariant email.matches("[A-Z")`));
+    expect(errors.some((e) => /An error occurred during validation/.test(e))).toBe(false);
+    expect(errors.some((e) => /'matches' pattern is not a valid regular expression/.test(e))).toBe(
+      true,
+    );
+  });
+
+  it("checks an escaped-quote pattern as-written, not JSON-unescaped", async () => {
+    // Pattern text is `"\d"` — a valid regex (literal quote, digit class,
+    // literal quote).  The old code would JSON.parse('"\\d"') → but `\d` is an
+    // INVALID JSON escape, so it threw; checking the raw string (as-written)
+    // is the correct behaviour and validates cleanly.
+    const { errors } = await parse(wrap(String.raw`invariant email.matches("\"\\d\"")`));
+    expect(errors.some((e) => /An error occurred during validation/.test(e))).toBe(false);
+    expect(errors).toEqual([]);
+  });
 });

@@ -187,9 +187,11 @@ export function checkMatchesCalls(model: Model, accept: ValidationAcceptor): voi
       );
       continue;
     }
-    const raw = (arg as StringLit).value as string;
-    // The grammar's STRING terminal carries the surrounding quotes.
-    const pattern = raw.startsWith('"') ? JSON.parse(raw) : raw;
+    // Langium's STRING terminal strips the surrounding quotes, so `raw` IS
+    // the pattern text as written (a leading `"` is a literal regex char, not
+    // a delimiter — no JSON.parse: it would throw on `matches("[A-Z])` and
+    // silently unescape `\"a\"` into the WRONG pattern).
+    const pattern = (arg as StringLit).value as string;
     try {
       new RegExp(pattern);
     } catch (err) {
