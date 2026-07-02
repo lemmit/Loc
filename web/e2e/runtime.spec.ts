@@ -91,7 +91,9 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
     // to whatever concrete path the picker carries, so the dispatch below hits
     // the real route regardless of the prefix.
     await page.getByRole("option", { name: /^POST \/(api\/)?products$/ }).click();
-    await expect(page.getByTestId("req-method")).toContainText("POST");
+    // `req-method` is a readonly Mantine <input> — its verb lives in `value`,
+    // not text content, so assert on the value (toContainText reads "").
+    await expect(page.getByTestId("req-method")).toHaveValue("POST");
     await expect(page.getByTestId("btn-gen-example")).toBeVisible();
   });
 

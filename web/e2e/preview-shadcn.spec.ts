@@ -88,14 +88,13 @@ test("shadcn design pack → generate → bundle → boot → preview boots", as
     await expect(iframe.getByText(/Welcome/i).first()).toBeVisible({
       timeout: 60_000,
     });
-    // Now prove it's *shadcn*, not Mantine: shadcn's app-shell wraps
-    // the layout in Tailwind utility classes (`min-h-screen flex …`).
-    // Mantine uses its own AppShell component that emits no Tailwind
-    // utilities.  Asserting on a Tailwind class directly catches
-    // silent fallback-to-Mantine — e.g. if the lowerer ever defaulted
-    // an unknown `design:` to `"mantine"` instead of erroring.
-    const root = iframe.locator("body > div").first();
-    await expect(root).toHaveClass(/min-h-screen/);
+    // Now prove it's *shadcn*, not Mantine: shadcn's app-shell wraps the
+    // layout in a Tailwind `min-h-screen` container (nested under `#root`,
+    // not the `#root` div itself).  Mantine's AppShell emits no such Tailwind
+    // utility, so the element's mere presence catches a silent
+    // fallback-to-Mantine — e.g. if the lowerer ever defaulted an unknown
+    // `design:` to `"mantine"` instead of erroring.
+    await expect(iframe.locator(".min-h-screen").first()).toBeVisible({ timeout: 10_000 });
   });
 
   // Same noise filter as runtime.spec.ts.
