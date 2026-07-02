@@ -1,13 +1,13 @@
 // Storefront on fullstack .NET — the same domain as
 // `storefront-system.ddd` (Hono + React) and `storefront-elixir.ddd`
-// (Elixir/Ash), deployed as a single .NET service that hosts the
+// (Phoenix LiveView), deployed as a single .NET service that hosts the
 // React SPA from wwwroot/.
 //
 // Three-way diff target: pick this, `storefront-system`, and
 // `storefront-elixir` from the dropdown to compare how the identical
 // aggregate tree (Order → OrderLine), Money value-object and
 // transactional `checkout` saga lower across Drizzle + Hono, EF Core +
-// Mediator (.NET), and Ash + Reactor (Elixir).
+// Mediator (.NET), and Phoenix LiveView on plain Ecto (Elixir).
 //
 // Files-only in the playground (.NET doesn't boot in-browser).
 

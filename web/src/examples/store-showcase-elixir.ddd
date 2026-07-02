@@ -1,6 +1,6 @@
 // Store showcase on Phoenix LiveView — the elixir twin of store-showcase.ddd
 // (named-actions-and-stores.md §3, Stage 5).  Exercises the `store` surface on
-// a `platform: elixir` (phoenixLiveView) deployable so the Elixir/Ash compile
+// a `platform: elixir` (phoenixLiveView) deployable so the Elixir compile
 // gate validates the per-LiveView-process store projection:
 //
 //   - a top-level `store Cart { state { … } action … }` → a dedicated
