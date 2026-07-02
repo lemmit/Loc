@@ -6,8 +6,8 @@
 {{/each}}{{rowIndent}}</Tr>
 {{headIndent}}</Thead>
 {{headIndent}}<Tbody>
-{{rowIndent}}{ {{{rowsExpr}}}.map(({{rowVar}}) => (
-{{cellIndent}}<Tr key={ {{rowVar}}.id }{{#if hasRowTestid}} data-testid={ {{{rowTestid}}} }{{/if}}{{#if hasOnRowClick}} onClick={() => {{{onRowClick}}} } style=\{{ cursor: "pointer" }}{{/if}}>
+{{rowIndent}}{ {{{rowsExpr}}}.map(({{rowVar}}{{#if usesIdx}}, idx{{/if}}) => (
+{{cellIndent}}<Tr key={ {{{keyExpr}}} }{{#if hasRowTestid}} data-testid={ {{{rowTestid}}} }{{/if}}{{#if hasOnRowClick}} onClick={() => {{{onRowClick}}} } style=\{{ cursor: "pointer" }}{{/if}}>
 {{#each columns}}{{../cellIndent}}<Td>{{{this.cellJsx}}}</Td>
 {{/each}}{{cellIndent}}</Tr>
 {{rowIndent}})) }
