@@ -54,6 +54,7 @@ import {
   checkSelfType,
   checkSlotMemberAccess,
   checkSlotTypePosition,
+  checkTernaryExprs,
   checkTheme,
   checkTopLevelDomainComposition,
   checkTraceability,
@@ -230,6 +231,12 @@ export class DddValidator {
     // pattern in `checkDerived` etc. — see the function's header
     // for the full rationale.
     guard("binary-operands", model, () => checkBinaryOperands(model, accept));
+    // Ternary expressions (`cond ? a : b`): the condition must be `bool` and
+    // the two branches must join (one assignable to the other, or a shared
+    // numeric / optional / null supertype).  Without this a `string`
+    // condition or two incompatible branches typecheck silently — `typeOf`
+    // returns the join with no way to reject the ill-formed shape.
+    guard("ternary-exprs", model, () => checkTernaryExprs(model, accept));
     // Slot member access: `heading.foo` on a `(heading: slot)` param
     // is meaningless — slots are opaque JSX, no addressable fields.
     // Emits a precise diagnostic at the member position instead of

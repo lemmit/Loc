@@ -17,6 +17,7 @@ import type {
   PostfixChain,
   PrimitiveConversion,
   Property,
+  TernaryExpr,
 } from "../generated/ast.js";
 import {
   isBinaryChain,
@@ -27,6 +28,7 @@ import {
   isPreconditionStmt,
   isRequiresStmt,
   isReturnStmt,
+  isTernaryExpr,
 } from "../generated/ast.js";
 import {
   absentRecordMember,
@@ -39,6 +41,7 @@ import {
   makeEnv,
   resolveTypeRef,
   T,
+  ternaryJoin,
   typeAfterSuffix,
   typeOf,
   typeToString,
@@ -252,6 +255,57 @@ export function checkSingleBinaryOperands(chain: BinaryChain, accept: Validation
     }
     lt = result;
     leftExprForPromotion = undefined;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Ternary expression check (`cond ? a : b`).
+//
+// `typeOf(TernaryExpr)` returns the JOIN of the two branches, but — like the
+// binary-operand class above — it can't *reject* an ill-formed ternary on its
+// own: a non-bool condition and two branches that share no supertype both
+// produce a type silently (the then-branch), and every downstream gate then
+// suppresses on `unknown` or accepts the fallback.  This pass makes both
+// illegal shapes explicit:
+//
+//   • Condition — must be `bool` (`s ? 1 : 2` with a `string` `s` is a bug).
+//   • Branches  — must join: one branch's type assignable to the other, or a
+//     shared numeric / optional / null supertype (`ternaryJoin`).  `f ? 1 :
+//     "oops"` (int vs string) has no join and is rejected.
+//
+// Cascade suppression: skips the condition report when the condition already
+// typed `unknown`, and the branch report when either branch did — an upstream
+// checker (unknown name / member) has already reported those.
+// ---------------------------------------------------------------------------
+export function checkTernaryExprs(model: Model, accept: ValidationAcceptor): void {
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (!isTernaryExpr(node)) continue;
+    checkSingleTernary(node as TernaryExpr, accept);
+  }
+}
+
+export function checkSingleTernary(node: TernaryExpr, accept: ValidationAcceptor): void {
+  const env = envForNode(node);
+  const condT = typeOf(node.cond, env);
+  if (condT.kind !== "unknown" && !(condT.kind === "primitive" && condT.name === "bool")) {
+    accept("error", `Ternary condition must be of type 'bool', got '${typeToString(condT)}'.`, {
+      node,
+      property: "cond",
+      code: "loom.ternary-condition",
+    });
+  }
+  const thenT = typeOf(node.thenExpr, env);
+  const elseT = typeOf(node.elseExpr, env);
+  // Cascade suppression — a branch that failed to resolve is already reported.
+  if (thenT.kind === "unknown" || elseT.kind === "unknown") return;
+  if (ternaryJoin(thenT, elseT) === undefined) {
+    accept(
+      "error",
+      `Ternary branches have incompatible types: then-branch is '${typeToString(thenT)}', ` +
+        `else-branch is '${typeToString(elseT)}'.  One branch's type must be assignable to ` +
+        `the other (both numeric, an optional and its inner, or a null literal against an optional).`,
+      { node, property: "elseExpr", code: "loom.ternary-branches" },
+    );
   }
 }
 

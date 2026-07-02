@@ -60,7 +60,9 @@ export {
   checkPropertyCheck,
   checkSingleBinaryOperands,
   checkSinglePrimitiveConversion,
+  checkSingleTernary,
   checkSlotMemberAccess,
+  checkTernaryExprs,
   checkUnknownMemberAccess,
 } from "./types.js";
 export {

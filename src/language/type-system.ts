@@ -330,6 +330,38 @@ export function comparable(a: DddType, b: DddType): boolean {
   return false;
 }
 
+/**
+ * Join of a ternary's two branch types (`cond ? a : b`) — the value the
+ * whole expression produces.  Uses the existing `isAssignable` lattice
+ * (numeric widening `int → long → decimal`, optional-wrapping `T → T?`,
+ * `never`/`null` as the bottom type) rather than inventing a new one:
+ *
+ *   - if one branch is assignable to the other, the target (the more
+ *     general side) is the join — `cond ? int : long` ⇒ `long`,
+ *     `cond ? T : T?` ⇒ `T?`;
+ *   - the `null` literal (`never?` / `never`) joins with any `T` into
+ *     `T?` — `cond ? null : order` ⇒ `Order?`;
+ *   - otherwise the branches share no supertype (`cond ? int : string`)
+ *     and the join is `undefined` — the ternary validator reports it.
+ *
+ * Sensitivity is NOT merged here (a structural join); callers attach the
+ * union of both branches' tags with `withTags` so a value chosen from
+ * either branch stays as tainted as either was.
+ */
+export function ternaryJoin(a: DddType, b: DddType): DddType | undefined {
+  if (a.kind === "unknown" || b.kind === "unknown") return T.unknown;
+  if (isAssignable(a, b)) return b;
+  if (isAssignable(b, a)) return a;
+  // The `null` literal types as `never?` (see the `isNullLit` arm of
+  // `typeOf`); a bare `never` is the same bottom.  Either joins with a
+  // non-optional branch by wrapping it into an optional.
+  const isNullish = (t: DddType): boolean =>
+    t.kind === "never" || (t.kind === "optional" && t.inner.kind === "never");
+  if (isNullish(a)) return b.kind === "optional" ? b : T.opt(b);
+  if (isNullish(b)) return a.kind === "optional" ? a : T.opt(a);
+  return undefined;
+}
+
 /** True iff `value` carries sensitivity tags that `target` does not.
  * The validator uses this to emit a warning at flow boundaries
  * (assignments, emits, derived expressions, function returns) where
@@ -454,11 +486,16 @@ export function typeOf(expr: Expression | undefined, env: Env): DddType {
     return acc;
   }
   if (isTernaryExpr(expr)) {
-    // Union the branches' sensitivity — the chosen value could come from
-    // either, so the resulting value is as tainted as either branch is.
+    // The value is the JOIN of the two branches (the more general of the
+    // two) — `cond ? int : long` is `long`, `cond ? T : null` is `T?`.
+    // When the branches share no supertype the join falls back to the
+    // then-branch (the validator reports the mismatch separately).
+    // Sensitivity is unioned either way — the chosen value could come from
+    // either branch, so the result is as tainted as either branch is.
     const thenT = typeOf(expr.thenExpr, env);
     const elseT = typeOf(expr.elseExpr, env);
-    return withTags(thenT, elseT.sensitivity);
+    const join = ternaryJoin(thenT, elseT) ?? thenT;
+    return withTags(join, mergeTags(thenT.sensitivity, elseT.sensitivity));
   }
   if (isLambda(expr)) {
     // Lambda type is contextual; without a target type it's unknown.
@@ -972,17 +1009,49 @@ export function makeEnv(
   };
 }
 
-export function collectLetBindings(
+// Re-entrancy guard for let-type inference.  Computing a let's initializer
+// type can, for an exotic initializer (a collection-op lambda whose element
+// type resolves via `envForNode`), recurse back into `envForNode` for a node
+// inside the SAME body — which re-enters this inference.  The guard bounds a
+// self- / mutual-cycle to `T.unknown` for the let currently in flight so the
+// walk always terminates.
+const lettingInFlight = new Set<import("./generated/ast.js").LetStmt>();
+
+/**
+ * Bind each `let` in `stmts` to the type of its initializer, threaded
+ * sequentially through `bindings` so a later let — and every downstream
+ * operand check that reads these bindings via `envForNode` — sees the
+ * precise types of the params, members, and earlier lets already bound.
+ * Mutates `bindings` in place.
+ *
+ * This computes the SAME type `checkStatement` (validators/statements.ts)
+ * derives when it threads an operation body, unifying the two env builders:
+ * previously `envForNode` bound every let to `T.unknown`, which silently
+ * disengaged every operand check on a `let` operand (`let s = "hi"
+ * requires s > 5` produced no diagnostic because `s` typed as `unknown`).
+ */
+function addTypedLets(
+  bindings: Map<string, { type: DddType; origin: AstNode }>,
   stmts: import("./generated/ast.js").Statement[],
-): Map<string, { type: DddType; origin: AstNode }> {
-  const m = new Map<string, { type: DddType; origin: AstNode }>();
+  ctx: { aggregate?: Aggregate; part?: EntityPart; valueObject?: ValueObject },
+): void {
+  // `env` reads `bindings` live (makeEnv closes over the map by reference),
+  // so each let is typed against everything bound so far — params, members,
+  // and the lets that lexically precede it.
+  const env = makeEnv(undefined, bindings, ctx);
   for (const s of stmts) {
-    if (isLetStmt(s)) {
-      // Type inferred from the expression at the point of binding.
-      m.set(s.name, { type: T.unknown, origin: s });
+    if (!isLetStmt(s)) continue;
+    let t: DddType = T.unknown;
+    if (!lettingInFlight.has(s)) {
+      lettingInFlight.add(s);
+      try {
+        t = typeOf(s.expr, env);
+      } finally {
+        lettingInFlight.delete(s);
+      }
     }
+    bindings.set(s.name, { type: t, origin: s });
   }
-  return m;
 }
 
 // ---------------------------------------------------------------------------
@@ -1146,31 +1215,39 @@ export function envForNode(node: AstNode): Env {
   for (const p of params) bindings.set(p.name, { type: paramType(p), origin: p });
 
   // 3. let-bindings from the enclosing executable body (operation / workflow
-  //    create / handle / on reactor).
+  //    create / handle / on reactor).  Typed sequentially against the members
+  //    + params already bound (so a let sees earlier lets / params) — the
+  //    same type `checkStatement` computes when threading the body.
+  const letCtx = {
+    aggregate: agg ?? undefined,
+    part: part ?? undefined,
+    valueObject: vo ?? undefined,
+  };
   if (op) {
-    for (const [name, b] of collectLetBindings(op.body)) bindings.set(name, b);
+    addTypedLets(bindings, op.body, letCtx);
   } else if (create) {
-    for (const [name, b] of collectLetBindings(create.body)) bindings.set(name, b);
+    addTypedLets(bindings, create.body, letCtx);
   } else if (handle) {
-    for (const [name, b] of collectLetBindings(handle.body)) bindings.set(name, b);
+    addTypedLets(bindings, handle.body, letCtx);
   }
   // An `on(e: Event) { … }` reactor / `apply(e: Event) { … }` fold bind their
   // event instance as a typed `payload` local (these params are a LooseName +
   // event cross-ref, not a `Parameter`, so they're bound here rather than via
   // the param list).  Without this the binding types as `unknown` and every
-  // field-level check on `e.field` is silently suppressed.
+  // field-level check on `e.field` is silently suppressed.  The event param is
+  // bound BEFORE the lets so a let initializer can read `e.field`.
   const on = AstUtils.getContainerOfType(node, isOnDecl);
   if (on) {
     if (on.event?.ref)
       bindings.set(on.param, { type: { kind: "payload", ref: on.event.ref }, origin: on });
-    for (const [name, b] of collectLetBindings(on.body)) bindings.set(name, b);
+    addTypedLets(bindings, on.body, letCtx);
   }
   const apply = AstUtils.getContainerOfType(node, isApply);
   if (apply) {
     if (apply.event?.ref) {
       bindings.set(apply.param, { type: { kind: "payload", ref: apply.event.ref }, origin: apply });
     }
-    for (const [name, b] of collectLetBindings(apply.body)) bindings.set(name, b);
+    addTypedLets(bindings, apply.body, letCtx);
   }
 
   // 4. Lambda params — a lambda used as a collection-op arg binds its param to
