@@ -36,7 +36,7 @@ on the vanilla backend later — this file is the tracked list.
 | §13 | LiveView operation-action bang fns | **CLOSED** | S–M | done |
 | §14 | Success-response wire shape (snake_case keys + leaked Ecto timestamps) | **FIX in #1628** — wireShape-driven serializer, boot-verified | M–L | done |
 | — | Ecto migration `default: now()`/`gen_random_uuid()` not `fragment(...)` | **FIX in #1628** — event-store table wouldn't compile; boot-blocker | S | done |
-| §15 | Inbound nested-containment camelCase key normalization | **REAL — runtime, boot-found** | M | 2 |
+| §15 | Inbound nested-containment camelCase key normalization | **FIXED** — every nested changeset snakes its own keys | M | done |
 
 Restoring the 5-backend `conformance-parity` gate (removing
 `LOOM_E2E_SKIP_PHOENIX=1` and re-adding the elixir deployable to
@@ -494,9 +494,27 @@ pairs, and the 403 runtime-authorization target).
   impact (a shared frontend talking to a phoenix backend gets the wrong keys), which
   is why this is priority 1 despite being newly found.
 
-## 15. Inbound nested-containment camelCase key normalization (M, boot-found)
+## 15. Inbound nested-containment camelCase key normalization — **FIXED**
 
-- **Status (REAL, runtime-only — boot-found while verifying §14):** the vanilla
+- **Fixed (compositional):** the aggregate `base_changeset` already snaked its
+  top-level keys, but `cast_assoc`/`cast_embed` recurse into a nested changeset
+  (the entity part's / value-collection's own `changeset/2`) with the sub-map
+  still camelCase. Rather than deep-recurse the top-level normalizer (which would
+  wrongly snake plain `json`/`map` jsonb columns), **every** generated changeset
+  now snakes its OWN top-level keys via a shared `__normalize_keys/1`
+  (`src/generator/elixir/vanilla/key-normalize.ts`), so each level of the Ecto
+  recursion casts cleanly. Applied to the aggregate, entity-part
+  (`schema-emit.ts`), and value-object-collection (`value-collection-schema-emit.ts`)
+  changesets. Boot-verified: `POST /api/projects {"pipelines":[{"runCount":3}]}`
+  now 201s and round-trips `"runCount":3`.
+- **Not covered (separate, murkier):** standalone value-object schemaless
+  validation (`valueobject-emit.ts`) casts `snake(@types)` keys but stores the VO
+  as a verbatim `:map` — so validation and storage would disagree on casing if
+  normalized there. Left as-is (the demonstrated §15 bug is the relational
+  child path).
+
+### Original report (REAL, runtime-only — boot-found while verifying §14):
+- the vanilla
   request-key normalization (#1620, `Macro.underscore` camelCase→snake before
   `Ecto.cast`) runs on the TOP-LEVEL attrs only. A create body whose **nested
   containment items** use the canonical camelCase wire keys —

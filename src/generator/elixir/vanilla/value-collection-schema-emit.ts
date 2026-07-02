@@ -8,6 +8,7 @@ import { type ValueCollectionIR, valueCollectionsFor } from "../../../ir/util/va
 import { singleFieldConstraints } from "../../../ir/validate/invariant-classify.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { ectoValidator } from "./changeset-validators.js";
+import { NORMALIZE_KEYS_DEFP } from "./key-normalize.js";
 
 // ---------------------------------------------------------------------------
 // Vanilla (Ecto) value-object COLLECTION child schema (`charges: Money[]`).
@@ -171,9 +172,13 @@ ${voFieldLines.join("\n")}
 
   @doc false
   def changeset(struct, attrs) do
+    attrs = __normalize_keys(attrs)
+
     struct
     |> cast(attrs, [${castCols}])${requiredBlock}${validatorBlock}
   end
+
+${NORMALIZE_KEYS_DEFP}
 end
 `;
 }

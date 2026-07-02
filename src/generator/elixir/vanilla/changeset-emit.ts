@@ -24,6 +24,7 @@ import { ectoValidator, voHasConstraints } from "./changeset-validators.js";
 import { isVanillaDocAgg, renderDocChangeset } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 import { isAbstractBase } from "./inheritance-emit.js";
+import { NORMALIZE_KEYS_DEFP } from "./key-normalize.js";
 import { managedTimestampNames } from "./managed-timestamps.js";
 import { isRefCollField, refCollFieldNames } from "./ref-collection-emit.js";
 import { usesRelationalContainments } from "./schema-emit.js";
@@ -279,24 +280,11 @@ ${keyAliasPairs.join(",\n")}
     .filter(Boolean)
     .join("\n\n");
 
-  // Wire bodies arrive camelCase (the cross-backend contract; the OpenAPI spec
-  // declares camelCase properties), but Ecto casts the SNAKE-cased column atoms
-  // (`:commit_sha`).  `cast/3` matches keys verbatim, so a multi-word field
-  // (`"commitSha"`) would silently drop → `validate_required` → spurious 422.
-  // Normalise the TOP-LEVEL string keys to snake (`Macro.underscore`) before any
-  // cast; values are left untouched so nested value-object / containment jsonb
-  // payloads keep their own (camelCase) shape.  Idempotent on already-snake keys.
-  const keyNormalizeHelper = `
-
-  # Snake-case the top-level wire keys so camelCase bodies cast cleanly.
-  defp __normalize_keys(attrs) when is_map(attrs) do
-    Map.new(attrs, fn
-      {k, v} when is_binary(k) -> {Macro.underscore(k), v}
-      {k, v} -> {k, v}
-    end)
-  end
-
-  defp __normalize_keys(attrs), do: attrs`;
+  // Wire bodies arrive camelCase (the cross-backend contract); Ecto casts the
+  // SNAKE-cased column atoms verbatim, so the top-level keys are snaked before any
+  // cast (§15).  Nested `cast_assoc`/`cast_embed` children snake their own keys in
+  // their own changesets (`key-normalize.ts`).
+  const keyNormalizeHelper = `\n\n${NORMALIZE_KEYS_DEFP}`;
 
   return `# Auto-generated.
 defmodule ${changesetMod} do

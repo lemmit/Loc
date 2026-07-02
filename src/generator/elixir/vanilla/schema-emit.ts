@@ -38,6 +38,7 @@ import {
   vanillaTableName,
 } from "./inheritance-emit.js";
 import { renderInspectImpl } from "./inspect-emit.js";
+import { NORMALIZE_KEYS_DEFP } from "./key-normalize.js";
 import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
 import { isRefCollField, manyToManyLine, refCollFields } from "./ref-collection-emit.js";
 import { valueCollectionModule, valueCollectionsWithVo } from "./value-collection-schema-emit.js";
@@ -214,9 +215,13 @@ ${schemaBody}
 
   @doc false
   def changeset(struct, attrs) do
+    attrs = __normalize_keys(attrs)
+
     struct
     |> cast(attrs, [${castCols.join(", ")}])${castBlock}
   end
+
+${NORMALIZE_KEYS_DEFP}
 end
 `;
 }
