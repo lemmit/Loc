@@ -109,7 +109,18 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
       JSON.stringify({ sku: "PW-1", price: { amount: 9.99, currency: "USD" } }),
     );
     await page.getByTestId("btn-send").click();
-    await expect(page.getByTestId("resp-status")).toContainText("201", { timeout: 30_000 });
+    try {
+      await expect(page.getByTestId("resp-status")).toContainText("201", { timeout: 30_000 });
+    } catch (e) {
+      // The create dispatch reaches the backend but doesn't 201 in CI — dump
+      // the actual status + body (a 500 would carry the server error/stack)
+      // and any console errors, so the next run shows the real cause.
+      const status = await page.getByTestId("resp-status").innerText().catch(() => "<none>");
+      const respBody = await page.getByTestId("resp-body").innerText().catch(() => "<none>");
+      console.log(`[runtime] POST create did not return 201 — resp-status="${status}" resp-body=${respBody.slice(0, 800)}`);
+      console.log(`[runtime] captured console/page errors:\n${consoleErrors.map((m) => "  " + m.slice(0, 300)).join("\n")}`);
+      throw e;
+    }
     await expect(page.getByTestId("resp-body")).toContainText(/"id":\s*".+"/);
   });
 
