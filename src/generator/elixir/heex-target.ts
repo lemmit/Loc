@@ -24,6 +24,7 @@
 
 import type { TypeIR } from "../../ir/types/loom-ir.js";
 import type { ApiCallSite, RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
+import { escapeHeexText } from "./heex-walker-core.js";
 
 export const heexTarget: WalkerTarget = {
   framework: "phoenixLiveView",
@@ -199,11 +200,13 @@ export const heexTarget: WalkerTarget = {
     return ` style="${css}"`;
   },
 
-  /** HEEx text escaping — entity-escape the HTML-significant
-   *  punctuation.  (HEEx interpolation is `<%= %>`/`{ }`-free in text
-   *  position, but `<` / `&` still open tags / entities.) */
+  /** HEEx text escaping.  Delegates to the LIVE funnel the parallel
+   *  heex-walker uses (`escapeHeexText`) so the contract-tested seam and
+   *  the code path that actually renders can never disagree on escaping
+   *  — the exact divergence audit finding 13 flagged (a standalone copy
+   *  here would silently drift from `renderChild`/`renderInTemplate`). */
   escapeText(text: string): string {
-    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return escapeHeexText(text);
   },
 };
 

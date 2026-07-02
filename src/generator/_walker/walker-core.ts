@@ -1433,17 +1433,23 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
       // reads as the plain member chain (the state root is in scope).
       const seg = stmt.target.segments;
       if (ctx.stateNames.has(seg[0]!)) {
-        // Single-segment current-value reads delegate to the target
-        // (position-aware — HEEx/Vue diverge in handler position);
-        // a nested target reads the plain member chain.  TSX-identical
-        // either way (its handler-position read IS the bare name).
+        // Current-value read for the compound assignment.  The ROOT
+        // segment always goes through the target's state-read seam
+        // (position-aware — Angular reads a signal via a call `count()`,
+        // HEEx/Vue diverge in handler position); a nested target then
+        // appends the member tail onto the seam's root read.  Emitting
+        // the plain `order.shipping.count` chain for a nested Angular
+        // target referenced the signal OBJECT instead of its value —
+        // it must be `order().shipping.count` (audit finding B22).
+        // React/Vue/Svelte reads are the bare name, so the tail-append
+        // is byte-identical there.
         const root = seg[0]!;
         const stateRef = {
           field: { name: root, type: { kind: "primitive" as const, name: "string" as const } },
           name: root,
         };
-        const read =
-          seg.length === 1 ? ctx.target.renderStateRead(stateRef, "handler") : seg.join(".");
+        const rootRead = ctx.target.renderStateRead(stateRef, "handler");
+        const read = seg.length === 1 ? rootRead : [rootRead, ...seg.slice(1)].join(".");
         const rhs = emitExpr(stmt.value, ctx);
         // Collection target → append / remove-by-value (immutable; the
         // JS frontends share this and the per-target state-write seam
