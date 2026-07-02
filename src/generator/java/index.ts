@@ -18,7 +18,7 @@ import type { Model } from "../../language/generated/ast.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
-import { findUnionSpec, unionMembers } from "../_payload/union-wire.js";
+import { unionMembers } from "../_payload/union-wire.js";
 import { generateReactForContexts } from "../react/index.js";
 import { generateSvelteForContexts } from "../svelte/index.js";
 import { generateVueForContexts } from "../vue/index.js";
@@ -935,26 +935,12 @@ function emitAggregate(
       place(f.name, "response-dto", f.content, agg.name);
     }
   }
-  // Union finds (`Order or NotFound` / `Order option`) need only the
-  // wire twin — the repository/service see the optional twin, the
-  // controller builds the tagged record (no domain union exists).
-  for (const f of repo?.finds ?? []) {
-    const spec = findUnionSpec(f.returnType, agg.name, ctx);
-    if (!spec || emittedUnionNames.has(spec.name)) continue;
-    emittedUnionNames.add(spec.name);
-    const wireSpec = {
-      name: spec.name,
-      members: unionMembers(spec.variants, ctx),
-      arms: [],
-    };
-    for (const file of renderJavaUnionWireFiles(
-      wireSpec,
-      pkgFor("response-dto", agg.name),
-      basePkg,
-    )) {
-      place(file.name, "response-dto", file.content, agg.name);
-    }
-  }
+  // Single-success union finds (`Order or NotFound` / `Order option`) emit no
+  // tagged wire DTO: the service returns the success variant's `<Agg>Response`
+  // and the controller returns it directly at 200, with the error/absent
+  // variant at its own status (exception-less.md §4).  A tagged union DTO is
+  // needed only for a genuine multi-success union, which IR validation rejects
+  // for finds.
   for (const op of agg.operations.filter((o) => o.extern)) {
     place(
       `${upperFirst(op.name)}${agg.name}Handler.java`,

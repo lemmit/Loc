@@ -367,10 +367,12 @@ export function buildRoutesFile(
   // client's schema byte-for-byte (both derive from `unionMembers`).
   {
     const unionSeen = new Set<string>();
-    // Union return shapes come from two sites: repository find returns and
-    // exception-less operation returns (`operation foo(): X or NotFound`).
+    // Tagged discriminated-union DTOs are emitted only for exception-less
+    // operation returns (`operation foo(): X or NotFound`).  Union FINDS no
+    // longer use one — a single-success find returns `<Agg>Response` directly
+    // at 200 with the error/absent variant at its own status (exception-less.md
+    // §4), so there is no tagged component to declare.
     const unionReturns = [
-      ...(repo?.finds ?? []).map((f) => unionForFind(f.returnType, ctx)),
       ...agg.operations.flatMap((op) => (op.returnType ? [unionForFind(op.returnType, ctx)] : [])),
     ];
     for (const u of unionReturns) {
@@ -1194,15 +1196,18 @@ function emitFindRoute(
   const aggSlug = snake(plural(agg.name));
   const findSnake = snake(find.name);
   const paged = pagedReturn(find.returnType);
-  const union = unionForFind(find.returnType, ctx);
   const isList = find.returnType.kind === "array";
+  // A union find's 200 body is the SUCCESS variant directly (the aggregate),
+  // not a tagged `oneOf` component — the error/absent variant is a separate
+  // status response (below), never part of the 200 schema (exception-less.md
+  // §4: "success bodies carry the variant data directly with HTTP 200").  So
+  // a single-success union find shares the plain `<Agg>Response` 200 shape
+  // with `<Agg>?` / `<Agg> option`.
   const responseSchema = paged
     ? paged.name
-    : union
-      ? union.name
-      : isList
-        ? `${agg.name}ListResponse`
-        : `${agg.name}Response`;
+    : isList
+      ? `${agg.name}ListResponse`
+      : `${agg.name}Response`;
   // A paged find always carries a query (page/pageSize), even with no
   // declared params.
   const hasQuery = find.params.length > 0 || !!paged;
@@ -1289,12 +1294,10 @@ function emitFindRoute(
       );
       out.push(`    }`);
     }
-    // Found → the tagged success variant (`{ type: "<Agg>", …wire }`) — the
-    // discriminated-union 200 schema both Hono's zod DTO and the React client
-    // pin (P4b).
-    out.push(
-      `    return c.json({ type: ${JSON.stringify(unionSpec.successTag)}, ...(repo.toWire(result) as Record<string, unknown>) } as z.infer<typeof ${unionSpec.name}>, 200);`,
-    );
+    // Found → the success variant directly (untagged).  A single-success
+    // union find carries no discriminator: the 200 body is `<Agg>Response`,
+    // identical to `<Agg>?` / `<Agg> option` (exception-less.md §4).
+    out.push(`    return c.json(repo.toWire(result) as z.infer<typeof ${agg.name}Response>, 200);`);
   } else if (isList) {
     // Array responses skip wire_out — `Object.keys` over an array
     // returns positional indices, which aren't a useful shape signal.

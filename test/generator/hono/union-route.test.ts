@@ -1,13 +1,12 @@
-// Hono route coverage for discriminated-union finds (payload-transport-layer.md,
-// P4b — TS/Hono slice).  A `find x(): Agg or Err` emits a `z.discriminatedUnion`
-// response DTO (each variant tagged on `type` + carrying its wire fields) and
-// wires it as the find route's 200 response schema — byte-identical to the
-// React client's schema (both derive from `unionMembers`).  Producer side
-// (post the `loom.union-find-shape-unsupported` shape pinning): the repository
-// method is the optional single-row select; the route tags a found row
-// (`{ type: "<Agg>", …wire }`) and translates absence to an RFC-7807
-// ProblemDetails at the absent variant's mapped status — the same edge
-// translation the exception-less operation routes use.
+// Hono route coverage for single-success union finds (`find x(): Agg or Err`).
+// Per exception-less.md §4 ("success bodies carry the variant data directly
+// with HTTP 200"), the correct wire is: the 200 body is the SUCCESS variant
+// directly (`<Agg>Response`) — no tagged `oneOf` component — and the
+// error/absent variant is a separate status response (RFC-7807 ProblemDetails
+// at its mapped status).  A single-success union find is therefore wire-
+// identical to `<Agg>?` / `<Agg> option`; the discriminated-union component
+// survives only for genuine multi-success unions (none exist today).  The
+// repository method is the optional single-row select.
 
 import { describe, expect, it } from "vitest";
 import { generateHono } from "../../_helpers/generate.js";
@@ -30,17 +29,17 @@ async function routes(): Promise<string> {
 }
 
 describe("hono routes — discriminated-union finds (P4b)", () => {
-  it("emits a z.discriminatedUnion('type', …) DTO with both variants tagged", async () => {
+  it("does NOT emit a tagged union DTO for a single-success find", async () => {
     const r = await routes();
-    expect(r).toContain('export const OrderOrNotFound = z.discriminatedUnion("type", [');
-    expect(r).toContain('z.object({ type: z.literal("Order"), id: z.string(), code: z.string() })');
-    expect(r).toContain('z.object({ type: z.literal("NotFound"), resource: z.string() })');
-    expect(r).toContain('.openapi("OrderOrNotFound")');
+    // The error variant belongs at its status, not in a 200 union component,
+    // so a single-success union find declares no `oneOf` component at all.
+    expect(r).not.toContain("OrderOrNotFound");
+    expect(r).not.toContain("z.discriminatedUnion");
   });
 
-  it("wires the union DTO as the find route's 200 response schema", async () => {
+  it("wires the success variant (<Agg>Response) as the find route's 200 schema", async () => {
     const r = await routes();
-    expect(r).toMatch(/content: \{ "application\/json": \{ schema: OrderOrNotFound \} \} \},/);
+    expect(r).toMatch(/content: \{ "application\/json": \{ schema: OrderResponse \} \} \},/);
   });
 
   it("declares the absent variant's ProblemDetails status on the route", async () => {
@@ -50,10 +49,10 @@ describe("hono routes — discriminated-union finds (P4b)", () => {
     );
   });
 
-  it("tags a found row with the success variant on 200", async () => {
+  it("returns the found row directly (untagged) on 200", async () => {
     const r = await routes();
     expect(r).toContain(
-      'return c.json({ type: "Order", ...(repo.toWire(result) as Record<string, unknown>) } as z.infer<typeof OrderOrNotFound>, 200);',
+      "return c.json(repo.toWire(result) as z.infer<typeof OrderResponse>, 200);",
     );
   });
 

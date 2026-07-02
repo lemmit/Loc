@@ -22,13 +22,14 @@ import { extractErrors } from "../_helpers/parse.js";
 //      abstract union supertypes (which are never emitted as a `$type`).
 //   2. Every React walker UI primitive — `STDLIB_LAYOUT_COMPONENTS`.
 //
-// PHASE 1 = REPORT-ONLY.  The guard logs what's still uncovered but does NOT
-// fail the build — the showcase is built out iteratively.  Flip `HARD_GATE`
-// to `true` once coverage is complete to make missing coverage a hard error
-// (the assertions are already written below, just gated).
+// HARD GATE (enabled).  The showcase now exercises every instantiable AST
+// kind and every walker primitive, so missing coverage is a hard error — a
+// new grammar rule / walker primitive must be added to showcase.ddd (or, if
+// genuinely unreachable from `.ddd`, to ALLOWLIST with a reason).  The handful
+// of unreachable kinds are allowlisted below.
 // ---------------------------------------------------------------------------
 
-const HARD_GATE = false;
+const HARD_GATE = true;
 
 const SHOWCASE = "examples/showcase.ddd";
 
@@ -36,28 +37,35 @@ const SHOWCASE = "examples/showcase.ddd";
  * Abstract union supertypes in the grammar — declared as `X: A | B | ...`,
  * never instantiated, so they never appear as a concrete `node.$type`.
  * They must be excluded from the "every kind appears" check or it can never
- * pass.  Derived from `src/language/ddd.langium` union rules.
+ * pass.
+ *
+ * DERIVED, not hand-maintained: a type is an abstract supertype iff
+ * `reflection.getAllSubTypes(t)` lists a member other than `t` itself (the
+ * call always includes `t`).  The previous hand-list rotted — it was missing
+ * 11 real unions (ConfigValue, ConnectionSource, AuthConfigValue,
+ * MacroArgValue, StoreDecl, AreaMember, CapabilityMember, WorkflowMember,
+ * LayoutSlot, ViewSource, PostfixSuffix), so those were "required" yet can
+ * never appear as a concrete `$type`, making HARD_GATE permanently
+ * unreachable (BUG-002).  Deriving it means new grammar unions are excluded
+ * automatically.
  */
-const UNION_SUPERTYPES = new Set<string>([
-  "AggregateMember",
-  "BaseType",
-  "ComponentDecl",
-  "ContextMember",
-  "EntityPartMember",
-  "Expression",
-  "LiteralExpr",
-  "LValue",
-  "ModelMember",
-  "NamedDecl",
-  "NamedType",
-  "PageProp",
-  "Statement",
-  "SystemMember",
-  "Targetable",
-  "TestStatement",
-  "UiMember",
-  "ValueObjectMember",
-]);
+function abstractSupertypes(): Set<string> {
+  const s = new Set<string>();
+  for (const t of reflection.getAllTypes()) {
+    if (reflection.getAllSubTypes(t).some((x) => x !== t)) s.add(t);
+  }
+  return s;
+}
+
+/**
+ * Reference-only concrete interfaces that the parser never emits as a `$type`
+ * (they exist solely as cross-reference / property types, and reflection
+ * exposes no subtypes for them so the derivation above can't catch them).
+ * Kept as a tiny explicit residual.
+ */
+const REFERENCE_ONLY = new Set<string>(["LValue", "NamedType"]);
+
+const UNION_SUPERTYPES = new Set<string>([...abstractSupertypes(), ...REFERENCE_ONLY]);
 
 /**
  * Concrete AST kinds intentionally excluded from the coverage requirement —
@@ -66,7 +74,20 @@ const UNION_SUPERTYPES = new Set<string>([
  * as the first guard runs reveal genuinely uncoverable kinds.
  */
 const ALLOWLIST = new Set<string>([
-  // "UiBlockBinding", // legacy ui-block binding, superseded by UiComposeBinding — confirm before enabling
+  // No stdlib macro declares a `string` / `int` parameter, and macros cannot
+  // be defined in `.ddd` source — so these two macro-argument kinds are
+  // unreachable from ANY `.ddd` fixture (only `bool` / `ref` / `refList`
+  // macro params exist: crudish(updateOnly:), scaffold(subdomains:),
+  // scaffoldView(of:), all exercised in showcase.ddd). Unreachable by
+  // construction, not a coverage gap.
+  "MacroArgString",
+  "MacroArgInt",
+  // showcase.ddd is the single-file cross-generator conformance fixture; an
+  // `import` would make it a multi-file project (a second partial file in
+  // examples/ that standalone-generate matrices would choke on, plus the
+  // isolated `build([showcase])` here wouldn't resolve it). Multi-file imports
+  // are covered by web/src/examples/multifile-*.ddd instead.
+  "ImportStmt",
 ]);
 
 async function buildShowcase(): Promise<LangiumDocument<Model>> {
@@ -78,16 +99,18 @@ async function buildShowcase(): Promise<LangiumDocument<Model>> {
   return doc as LangiumDocument<Model>;
 }
 
-/** Names of every primitive/component invoked anywhere in the model — the
- *  callee identifier of a call expression (the walker dispatches on these).
- *  Collected loosely at AST level: a call's callee resolves to a name ref,
- *  so we gather every `NameRef`/`IdRef` name plus call-target names. */
+/** Names of every walker primitive / component invoked anywhere in the model.
+ *  A UI element invocation (`Avatar { "P" }`, `Tabs { … }`) parses as a
+ *  `BuilderCall` whose `type` IS the primitive name — that is what the walker
+ *  dispatches on, so coverage must read `BuilderCall.type`.  (We also collect
+ *  every `name` string for decls/components referenced by bare name.)  An
+ *  earlier version collected only `node.name`, which `BuilderCall` does not
+ *  carry — so it reported every primitive as uncovered even when used. */
 function invokedNames(model: Model): Set<string> {
   const names = new Set<string>();
   for (const node of AstUtils.streamAst(model)) {
-    const n = node as { $type: string; name?: unknown };
-    // NameRef / IdRef carry a string `name`; collect it. The walker
-    // primitives surface as call callees, which are name refs.
+    const n = node as { $type: string; name?: unknown; type?: unknown };
+    if (n.$type === "BuilderCall" && typeof n.type === "string") names.add(n.type);
     if (typeof n.name === "string") names.add(n.name);
   }
   return names;

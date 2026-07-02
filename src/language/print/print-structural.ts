@@ -320,8 +320,12 @@ function printAuthBlock(node: AuthBlock): string {
   }
   if (node.sessions) items.push(`sessions: ${node.sessions}`);
   if (node.claims) {
+    // ClaimsMap entries are comma-separated in the grammar (`(',' entry)*`),
+    // so join with `,\n` — a bare newline fails to re-parse with 2+ claims.
     const entries = node.claims.entries.map((e) => `${e.field}: ${quote(e.path)}`);
-    items.push(entries.length === 0 ? "claims: {}" : `claims: {\n${indent(entries.join("\n"))}\n}`);
+    items.push(
+      entries.length === 0 ? "claims: {}" : `claims: {\n${indent(entries.join(",\n"))}\n}`,
+    );
   }
   if (node.enforcement) items.push(`enforcement: ${node.enforcement}`);
   return block("auth", items);
@@ -404,7 +408,11 @@ function printConnectionSource(node: import("../generated/ast.js").ConnectionSou
 }
 
 function printApi(node: Api): string {
-  return `api ${node.name} from ${node.source.$refText}`;
+  const head = `api ${node.name} from ${node.source.$refText}`;
+  const items: string[] = [];
+  if (node.urlStyle) items.push(`urlStyle: ${node.urlStyle}`);
+  for (const s of node.statuses ?? []) items.push(`httpStatus ${s.error} ${s.code}`);
+  return items.length === 0 ? head : block(head, items);
 }
 
 function printDeployable(node: Deployable): string {

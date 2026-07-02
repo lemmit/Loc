@@ -83,17 +83,16 @@ export interface ControllerShape {
      * cross-platform contract check to pass. */
     returnShape: "list" | "optional" | "single" | "paged" | "union";
     /** Explicit response type name, set only for `returnShape: "union"` — the
-     *  polymorphic base record (P4c).  Other shapes derive their type from the
-     *  aggregate name. */
+     *  success variant's `<Agg>Response` (exception-less.md §4).  Other shapes
+     *  derive their type from the aggregate name. */
     responseType?: string;
-    /** Union-find absence translation (P4c producer side, validator-pinned
-     *  shape): the absent variant record + its HTTP edge — `none` maps to the
-     *  optional-find 404, an `error` payload to ProblemDetails at its mapped
-     *  status. */
+    /** Union-find absence translation (validator-pinned shape): a null result's
+     *  HTTP edge — `none` maps to the optional-find 404, an `error` payload to
+     *  ProblemDetails at its mapped status.  The error variant is never part of
+     *  the 200 schema. */
     unionAbsent?:
-      | { record: string; kind: "none" }
+      | { kind: "none" }
       | {
-          record: string;
           kind: "error";
           status: number;
           title: string;
@@ -201,7 +200,10 @@ export function renderController(
         ? ["        return result is null ? NotFound() : Ok(result);"]
         : ua
           ? [
-              `        if (result is ${ua.record})`,
+              // Union find: the handler yields the success `<Agg>Response` or
+              // null; a null maps to the absent variant's status (exception-less
+              // §4), a value returns the success variant directly at 200.
+              "        if (result is null)",
               ...absentReturnLines(ua),
               "        return Ok(result);",
             ]

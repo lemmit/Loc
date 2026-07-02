@@ -68,6 +68,12 @@ interface RouteContract {
    *  list/view GET; otherwise undefined (the 2xx body keeps its inferred
    *  component, only its media type is normalized to application/json). */
   listWrapper?: string;
+  /** Named scalar component the 2xx body should `$ref` — used when springdoc
+   *  can't infer the success schema (a union find's controller returns
+   *  `ResponseEntity<?>`), so we pin `<Agg>Response` explicitly.  Shares the
+   *  runtime `wrapper` slot with `listWrapper` (both just `$ref` a component);
+   *  at most one is set. */
+  successRef?: string;
   /** RFC 7807 error responses, ascending by status. */
   errors: RouteError[];
   /** operationId override — the canonical id the other backends emit, when
@@ -282,7 +288,15 @@ export function buildJavaOpenApiContract(
               ? 404
               : (ctx.errorStatusOverrides?.[spec.absent.tag] ??
                 defaultErrorStatus(spec.absent.tag));
-          routes.push({ method: "get", path: findPath, errors: err([status]) });
+          // 200 is the SUCCESS variant directly (`<Agg>Response`); the union
+          // controller returns `ResponseEntity<?>` so springdoc infers nothing,
+          // hence the explicit ref.  Error/absent variant → `status`.
+          routes.push({
+            method: "get",
+            path: findPath,
+            successRef: `${agg.name}Response`,
+            errors: err([status]),
+          });
           continue;
         }
         if (isPagedFind(f)) {
@@ -427,7 +441,8 @@ export function renderJavaOpenApiCustomizer(basePkg: string, contract: Contract)
   const routeLiterals = contract.routes.map((r) => {
     const statusList = r.errors.map((e) => String(e.status)).join(", ");
     const statusArr = `new int[] {${statusList}}`;
-    const wrapperArg = r.listWrapper ? JSON.stringify(r.listWrapper) : "null";
+    const wrapperRef = r.listWrapper ?? r.successRef;
+    const wrapperArg = wrapperRef ? JSON.stringify(wrapperRef) : "null";
     const opIdArg = r.operationId ? JSON.stringify(r.operationId) : "null";
     return `        new Route(${JSON.stringify(r.method)}, ${JSON.stringify(r.path)}, ${wrapperArg}, ${statusArr}, ${opIdArg}),`;
   });

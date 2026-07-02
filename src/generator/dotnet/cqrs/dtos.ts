@@ -96,7 +96,7 @@ export function emitResponseDtos(
  *  Both wire the same tagged DTO, so they share one emission path. */
 function aggregateUnionReturns(
   agg: AggregateIR,
-  repo: RepositoryIR | undefined,
+  _repo: RepositoryIR | undefined,
 ): { name: string; variants: import("../../../ir/types/loom-ir.js").TypeIR[] }[] {
   const out: { name: string; variants: import("../../../ir/types/loom-ir.js").TypeIR[] }[] = [];
   const seen = new Set<string>();
@@ -106,8 +106,10 @@ function aggregateUnionReturns(
     seen.add(name);
     out.push({ name, variants });
   };
-  for (const find of repo?.finds ?? [])
-    if (find.returnType.kind === "union") add(find.returnType.variants);
+  // Only exception-less OPERATION returns need a tagged union DTO.  A union
+  // FIND returns the success variant's `<Agg>Response` directly at 200 (the
+  // error/absent variant is a status response), so it names no union DTO
+  // (exception-less.md §4).
   for (const op of agg.operations) if (op.returnType?.kind === "union") add(op.returnType.variants);
   return out;
 }

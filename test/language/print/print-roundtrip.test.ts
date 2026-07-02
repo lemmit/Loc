@@ -97,6 +97,10 @@ describe("print-expr round-trip", () => {
       continue;
     }
 
+    // Each outer expression is spliced back and the WHOLE document re-parsed,
+    // so a large corpus file (showcase.ddd, driven to 100% feature coverage) is
+    // O(exprs × full-reparse) — comfortably past the 30s default on slower CI
+    // runners. Give it a generous ceiling; correctness, not speed, is the gate.
     it(`round-trips every expression in ${rel}`, () => {
       const normOrig = norm(original.value);
 
@@ -114,6 +118,6 @@ describe("print-expr round-trip", () => {
         expect(re.parserErrors, `printed expression must parse:\n${printed}`).toEqual([]);
         expect(norm(re.value), `printed expression must round-trip:\n${printed}`).toEqual(normOrig);
       }
-    });
+    }, 120_000);
   }
 });

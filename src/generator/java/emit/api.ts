@@ -152,17 +152,17 @@ export function renderJavaController(
     const declared = f.params.map((p) => `@RequestParam ${renderJavaType(p.type)} ${p.name}`);
     const params = declared.join(", ");
     const args = f.params.map((p) => p.name).join(", ");
-    // Union find (`Order or NotFound` / `Order option`): the service
-    // returns the optional twin's `<Agg>Response`; this route owns the
-    // union translation — found → 200 tagged wire record, absent →
-    // bare 404 (`none`) or RFC-7807 ProblemDetail at the error's
-    // mapped status (with the `resource` extension when declared).
+    // Union find (`Order or NotFound` / `Order option`): the service returns
+    // the success variant's `<Agg>Response` (or null).  Per exception-less.md
+    // §4 the 200 body is that success variant DIRECTLY — never a tagged union
+    // component (an error variant belongs at its status, not in a 200 schema) —
+    // so found → 200 `<Agg>Response`, absent → bare 404 (`none`) or an RFC-7807
+    // ProblemDetail at the error's mapped status (with the `resource` extension
+    // when declared).  Wire-identical to `<Agg>?` / `<Agg> option`.
     const spec = ctx.boundedContext
       ? findUnionSpec(f.returnType, agg.name, ctx.boundedContext)
       : null;
     if (spec) {
-      const successCtorArgs = (agg.wireShape ?? []).map((w) => `r.${w.name}()`).join(", ");
-      const successRecord = `${spec.name}Response_${spec.successTag}`;
       const absent =
         spec.absent.kind === "none"
           ? [`            return ResponseEntity.notFound().build();`]
@@ -189,7 +189,7 @@ export function renderJavaController(
         `        if (r == null) {`,
         ...absent,
         `        }`,
-        `        return ResponseEntity.ok((${spec.name}Response) new ${successRecord}(${successCtorArgs}));`,
+        `        return ResponseEntity.ok(r);`,
         `    }`,
         ``,
       ];

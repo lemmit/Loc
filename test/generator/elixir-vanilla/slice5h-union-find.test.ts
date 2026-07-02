@@ -10,8 +10,10 @@ import { parseString } from "../../_helpers/parse.js";
 // producer).  `find locate(...): Order or NotFound` is a single-get whose `nil`
 // is the absent variant: NotFound (an error payload with `resource`) → an
 // RFC-7807 ProblemDetails at its status carrying `resource: "Order"`, a found
-// record → the tagged `%{type: "Order", …}` wire.  `foundation: vanilla` now
-// runs the union-find shape check (the elixir exemption is Ash-only).
+// record → the SUCCESS variant returned directly (untagged) at 200 —
+// wire-identical to `Order?` and every other backend (exception-less.md §4,
+// the BUG-005 fix).  `foundation: vanilla` now runs the union-find shape check
+// (the elixir exemption is Ash-only).
 // ---------------------------------------------------------------------------
 
 const source = (foundation: string) => `
@@ -37,7 +39,7 @@ const get = (m: Map<string, string>, suffix: string) =>
   m.get([...m.keys()].find((k) => k.endsWith(suffix))!)!;
 
 describe("vanilla — union-find absence producer", () => {
-  it("translates the absent variant and tags the found record", async () => {
+  it("translates the absent variant and returns the found record untagged", async () => {
     const f = await generateSystemFiles(source("vanilla"));
     const ctl = get(f, "/controllers/order_controller.ex");
     expect(ctl).toContain("def locate(conn, params) do");
@@ -45,8 +47,9 @@ describe("vanilla — union-find absence producer", () => {
     expect(ctl).toContain(
       'problem_variant(conn, 404, "/errors/not-found", "Not Found", %{resource: "Order"})',
     );
-    // found → tagged success wire
-    expect(ctl).toContain('json(conn, Map.put(serialize(record), :type, "Order"))');
+    // found → success variant returned directly, untagged (no `:type`)
+    expect(ctl).toContain("json(conn, serialize(record))");
+    expect(ctl).not.toContain("Map.put(serialize(record), :type");
     expect(ctl).toContain("defp problem_variant(conn, status, type, title, data) do");
     // route mounted
     expect(get(f, "/router.ex")).toContain('get "/orders/locate", OrderController, :locate');

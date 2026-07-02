@@ -508,6 +508,14 @@ export function validateOperationReturnsUnimplemented(
   for (const agg of ctx.aggregates) {
     for (const op of agg.operations) {
       if (!op.returnType) continue;
+      // NOTE: a bare *scalar* operation return (`operation describe(): string`)
+      // is NOT gated. It compiles on every backend (the op-self-call build
+      // fixtures rely on it) even though its HTTP wire contract diverges
+      // (200-with-body on node/elixir vs 204-discard on dotnet/python/java) —
+      // BUG-003, tracked in docs/audits/showcase-coverage-bugs.md, not closed
+      // by rejecting the feature. Only the `or`-union backend-support gate below
+      // applies here.
+      if (op.returnType.kind !== "union") continue;
       const unsupported = [...backendPlatforms].filter((p) => !isCapable(p));
       if (unsupported.length === 0) continue;
       diags.push({

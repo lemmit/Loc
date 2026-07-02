@@ -887,6 +887,16 @@ function findRoute(
   const unionSpec = findUnionSpec(find.returnType, agg.name, ctx);
   if (unionSpec) {
     const sig = [...params, "request: Request", "session: SessionDep"].join(", ");
+    // The absent variant's HTTP status: `none` rides the AggregateNotFoundError
+    // → 404 handler; an `error` payload becomes a ProblemDetails at its mapped
+    // status.  Declared on the OpenAPI route so the error response is typed
+    // (was missing) and the 200 is the SUCCESS variant directly — never a
+    // tagged union (exception-less.md §4).
+    const absentStatus =
+      unionSpec.absent.kind === "none"
+        ? 404
+        : (ctx.errorStatusOverrides?.[unionSpec.absent.tag] ??
+          defaultErrorStatus(unionSpec.absent.tag));
     const absent =
       unionSpec.absent.kind === "none"
         ? [
@@ -895,27 +905,27 @@ function findRoute(
           ]
         : (() => {
             const tag = unionSpec.absent.tag;
-            const st = ctx.errorStatusOverrides?.[tag] ?? defaultErrorStatus(tag);
             const resourceExt = unionSpec.absent.hasResource
               ? `"resource": ${JSON.stringify(agg.name)}, `
               : "";
             return [
               `    if (found := await repo.${findSnake}(${args})) is None:`,
               "        return JSONResponse(",
-              `            {${resourceExt}"type": ${JSON.stringify(errorTypeUri(tag))}, "title": ${JSON.stringify(errorTitle(tag))}, "status": ${st}, "detail": ${JSON.stringify(errorTitle(tag))}, "instance": request.url.path},`,
-              `            status_code=${st},`,
+              `            {${resourceExt}"type": ${JSON.stringify(errorTypeUri(tag))}, "title": ${JSON.stringify(errorTitle(tag))}, "status": ${absentStatus}, "detail": ${JSON.stringify(errorTitle(tag))}, "instance": request.url.path},`,
+              `            status_code=${absentStatus},`,
               '            media_type="application/problem+json",',
               "        )",
             ];
           })();
     return lines(
-      `@router.get("/${findSnake}", response_model=None, operation_id="${opId}")`,
+      `@router.get("/${findSnake}", response_model=${agg.name}Response, operation_id="${opId}", responses={${absentStatus}: {"model": ProblemDetails, "description": ${JSON.stringify(problemTitle(absentStatus))}}})`,
       `async def ${findSnake}_${snake(plural(agg.name))}(${sig}) -> dict[str, object] | JSONResponse:`,
       userBind,
       "    repo = _repo(session)",
       ...absent,
-      // Found → the tagged success variant ({type: "<Agg>", …wire}).
-      `    return {"type": ${JSON.stringify(unionSpec.successTag)}, **repo.to_wire(found)}`,
+      // Found → the success variant directly (untagged); a single-success union
+      // find is wire-identical to `<Agg>?` / `<Agg> option`.
+      `    return repo.to_wire(found)`,
     );
   }
   const paged = pagedReturn(find.returnType);

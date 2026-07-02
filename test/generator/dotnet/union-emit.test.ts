@@ -1,16 +1,12 @@
-// .NET generator coverage for discriminated-union finds
-// (payload-transport-layer.md, P4c — .NET slice).  A `find x(): Agg or Err`
-// emits a `[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]` base
-// record with one `[JsonDerivedType]` per variant, so System.Text.Json
-// serializes `{ "type": "Tag", …fields }` — byte-identical to the TS/Hono
-// `z.discriminatedUnion("type", …)`.  Producer side (post the
-// `loom.union-find-shape-unsupported` shape pinning): the Domain repository
-// emits the find as its optional twin (`Agg?`), the query handler maps a
-// found row to the tagged success variant and absence to the error variant
-// (`resource` filled with the aggregate name), and the controller translates
-// the absent variant to ProblemDetails at its mapped status.  The generated
-// project compiles under `dotnet build /warnaserror`
-// (examples/union-dotnet.ddd in the build-generated-dotnet matrix).
+// .NET generator coverage for single-success union finds (`find x(): Agg or
+// Err`).  Per exception-less.md §4 the 200 body is the SUCCESS variant
+// DIRECTLY (`<Agg>Response`) — never a tagged `oneOf`/JsonPolymorphic
+// component (an error variant belongs at its status, not in a 200 schema) — so
+// a union find is CQRS-identical to an optional find: the Domain repository
+// returns the optional twin (`Agg?`), the query/handler yield `<Agg>Response?`,
+// and the controller returns it directly at 200 or maps a null result to the
+// error/absent variant's status (ProblemDetails / 404).  No union DTO is
+// emitted.  Compiles under `dotnet build /warnaserror`.
 
 import { describe, expect, it } from "vitest";
 import { generateDotnet } from "../../_helpers/generate.js";
@@ -35,38 +31,27 @@ function find(map: Map<string, string>, suffix: string): string {
 }
 
 describe("dotnet generator — discriminated-union finds (P4c)", () => {
-  it("emits a JsonPolymorphic base record with a JsonDerivedType per variant", async () => {
-    const dto = find(await files(), "Responses/OrderOrNotFound.cs");
-    expect(dto).toContain('[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]');
-    expect(dto).toContain('[JsonDerivedType(typeof(OrderOrNotFound_Order), "Order")]');
-    expect(dto).toContain('[JsonDerivedType(typeof(OrderOrNotFound_NotFound), "NotFound")]');
-    expect(dto).toContain("public abstract record OrderOrNotFound;");
-    expect(dto).toContain("using System.Text.Json.Serialization;");
-  });
-
-  it("each variant record flattens its wire fields alongside the discriminator", async () => {
-    const dto = find(await files(), "Responses/OrderOrNotFound.cs");
-    expect(dto).toContain(
-      "public sealed record OrderOrNotFound_Order([property: Required] Guid Id, [property: Required] string Code) : OrderOrNotFound;",
-    );
-    expect(dto).toContain(
-      "public sealed record OrderOrNotFound_NotFound([property: Required] string Resource) : OrderOrNotFound;",
-    );
-  });
-
-  it("the query + controller return the polymorphic base type", async () => {
+  it("emits NO JsonPolymorphic union DTO for a single-success find", async () => {
     const map = await files();
-    expect(find(map, "Queries/RecentQuery.cs")).toContain("IQuery<OrderOrNotFound>");
-    const ctrl = find(map, "OrdersController.cs");
-    expect(ctrl).toContain("Task<ActionResult<OrderOrNotFound>>");
+    expect([...map.keys()].some((k) => k.endsWith("Responses/OrderOrNotFound.cs"))).toBe(false);
+    // No response file mentions the tagged union base anywhere.
+    for (const [k, v] of map) if (k.endsWith(".cs")) expect(v).not.toContain("OrderOrNotFound");
   });
 
-  it("the handler maps the repository's optional twin onto the union variants", async () => {
+  it("the query + controller return the success variant's <Agg>Response", async () => {
+    const map = await files();
+    expect(find(map, "Queries/RecentQuery.cs")).toContain("IQuery<OrderResponse?>");
+    const ctrl = find(map, "OrdersController.cs");
+    expect(ctrl).toContain("Task<ActionResult<OrderResponse>>");
+    expect(ctrl).toContain("[ProducesResponseType(typeof(OrderResponse), 200)]");
+  });
+
+  it("the handler maps the repository's optional twin to <Agg>Response? (optional-style)", async () => {
     const handler = find(await files(), "Queries/RecentHandler.cs");
     expect(handler).not.toContain("NotImplementedException");
     expect(handler).toContain("var domain = await _repo.Recent(cancellationToken);");
-    expect(handler).toContain('if (domain is null) return new OrderOrNotFound_NotFound("Order");');
-    expect(handler).toContain("return new OrderOrNotFound_Order(domain.Id.Value, domain.Code);");
+    expect(handler).toContain("return domain is null ? null :");
+    expect(handler).not.toContain("OrderOrNotFound");
   });
 
   it("the Domain repository emits the find as its optional twin", async () => {
@@ -77,9 +62,9 @@ describe("dotnet generator — discriminated-union finds (P4c)", () => {
     expect(find(map, "Repositories/OrderRepository.cs")).not.toContain("OrderOrNotFound");
   });
 
-  it("the controller translates the absent variant to ProblemDetails at its status, with the resource extension", async () => {
+  it("the controller maps a null result to ProblemDetails at its status, with the resource extension", async () => {
     const ctrl = find(await files(), "OrdersController.cs");
-    expect(ctrl).toContain("if (result is OrderOrNotFound_NotFound)");
+    expect(ctrl).toContain("if (result is null)");
     // The error payload declares `resource`, so the absent arm builds an
     // explicit ProblemDetails (the bare `Problem(...)` helper has no slot for
     // extension members) and serializes the aggregate name at the body root.

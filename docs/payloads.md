@@ -94,13 +94,17 @@ type (EF, Ecto `limit`/`offset`, …) — each maps to this one DTO.
 A union is a value that is **one of several distinct variants**, tagged on the
 wire so a consumer can branch. Two surfaces, one IR shape:
 
-**Anonymous `or`** — inline in any type position, no declaration:
+**Anonymous `or`** — inline in a payload field or an exception-less operation
+return, no declaration:
 
 ```
-repository Orders for Order {
-  find recent(): Order or Cancel
+aggregate Order ids guid {
+  operation locate(): Order or NotFound { … }   # tagged Order | NotFound wire
 }
 ```
+
+(A **repository find** is the one union position that does *not* produce this
+tagged wire — see [Union finds](#union-finds--the-untagged-exception) below.)
 
 **Named `payload Foo = A | B`** — declared up front, reusable, identity by name:
 
@@ -120,7 +124,9 @@ find findByCode(code: string): Order option       # Order or none
 
 `T option` is sugar for the 2-variant union `union[T, none]` — it flows through
 the same union machinery. (`option` is distinct from `T?`/`optional`, which is
-a nullable field rather than a tagged variant.)
+a nullable field rather than a tagged variant.) As a **find** return, `option`
+takes the untagged find path below — `findByCode` responds `200 OrderResponse`
+or `404`, not a tagged `{ type: "none" }` body.
 
 ### The tagged wire
 
@@ -133,9 +139,10 @@ data:
 - a **scalar variant** (primitive / `id`) carries a single `value` field;
 - the **`none`** unit is bare: `{ "type": "none" }`.
 
-The variant **tag** is the variant type's name (`Order`, `Cancel`, `none`, …).
+The variant **tag** is the variant type's name (`Order`, `NotFound`, `none`, …).
 All five backends derive this shape from one resolver, so the wire is identical
-by construction:
+by construction. This tagged form is emitted for **payload fields** and
+**exception-less operation returns** — *not* repository finds (next):
 
 | Backend | union emission |
 |---|---|
@@ -144,6 +151,33 @@ by construction:
 | Phoenix / Ecto | controller `tag_<union>/1` — one struct-pattern clause per variant → `%{type: "Tag", …}` |
 | Java / Spring | `@JsonTypeInfo` / `@JsonSubTypes` sealed interface, one record per variant |
 | Python / FastAPI | `buildPyBaseUnionFile` — a tagged base + one model per variant |
+
+### Union finds — the untagged exception
+
+A **repository find** may return a union, but only in the constrained
+*absence* shape — exactly two variants, the repository's own aggregate plus one
+absent variant (`none` or an `error` payload carrying at most `resource:
+string`). Anything else is rejected (`loom.union-find-shape-unsupported`):
+
+```
+find recent(): Order or NotFound      # NotFound is an `error { resource: string }`
+find findByCode(code: string): Order option   # sugar for `Order or none`
+```
+
+This is **not** the tagged wire above. A single-success union find is
+wire-identical to `Order?` / `Order option`: the success variant is returned
+**directly** as `OrderResponse` at `200`, and the absent variant rides its own
+status — an `error` payload → its mapped RFC-7807 ProblemDetails status
+(`resource` filled with the aggregate name), `none` → `404`. There is no `type`
+discriminator and no union component in the OpenAPI schema. All five backends
+agree by construction (the wire matches a plain optional find); the tagged
+`oneOf` survives only for operation returns and payload fields.
+
+> **Why the split.** A find's absent case is an *edge* (the row wasn't there),
+> not a domain-modelled alternative the producer chose — so it belongs at a
+> status code, exactly like an optional find's miss. An operation return is
+> producer-selected variant data, so it carries the tag. (Rationale:
+> [`proposals/exception-less.md`](proposals/exception-less.md) §4.)
 
 ### Precedence
 
@@ -157,9 +191,9 @@ A or B[]               ≡  A or (B[])
 ### Position
 
 An **inline `or`** union (like a carrier) is a transport shape — it may appear
-only as a repository find return type or a payload field
-(`loom.union-position`). A **named** union is referenced by its name and so is
-unaffected.
+only as a repository find return type, a payload field, or an operation /
+domain-service-operation return (`loom.union-position`). A **named** union is
+referenced by its name and so is unaffected.
 
 ---
 
@@ -169,7 +203,8 @@ unaffected.
 |---|---|
 | `loom.union-duplicate-variant` | A repeated variant (`string or string`, `payload F = A \| A`) — the discriminator must be unambiguous. |
 | `loom.union-variant-not-carrier` | A `slot` variant — every variant must be a carrier type. |
-| `loom.union-position` | An inline `or` union outside a find return / payload field. |
+| `loom.union-position` | An inline `or` union outside a find return / payload field / operation return. |
+| `loom.union-find-shape-unsupported` | A union find that isn't the absence shape `Agg or <error>` / `Agg option` (exactly the aggregate + one `none`/`error{resource}` variant). |
 | `loom.generic-arg-not-carrier` | A non-carrier or nested carrier argument to `paged` / `envelope`. |
 | `loom.generic-position` | A generic carrier outside a transport position. |
 | `loom.generic-carrier-unsupported` / `loom.union-unsupported` | A carrier / union served by a backend that doesn't emit it yet — a platform-aware gate. All five backends now emit both, so these are dormant safety nets for a future backend. |
@@ -178,22 +213,25 @@ unaffected.
 
 ## 5. Producer-side boundary
 
-A union's *wire contract* — its DTO/schema and the tagged serialization — is
-fully generated. **Selecting which variant a given call yields** (e.g. a `find`
-that returns `Order` in one case and `Cancel` in another) is producer-side
-domain logic. Today a union-returning find emits the schema + a serialization
-seam but leaves the variant selection to a generated stub the developer fills
-(a throwing handler/method on each backend). First-class typed *operation
-returns* (`placeOrder(): OrderId or NotFound`) and their RFC-7807 ProblemDetails
-translation are the
-[`exception-less`](proposals/exception-less.md) track that P3 + P4 unblock.
+A union's *wire contract* — its DTO/schema and the serialization — is fully
+generated on every backend. The two surfaces differ in who selects the variant:
+
+- **Union finds** are fully implemented, no stub: the framework derives the
+  selection from the row's presence (found → the success variant at `200`;
+  absent → the `none`/`error` variant at its status). That's why they're
+  constrained to the absence shape and render untagged (see [Union finds](#union-finds--the-untagged-exception)).
+- **Exception-less operation returns** (`placeOrder(): OrderId or NotFound`) are
+  producer-selected: the domain body returns the variant it chose, which the
+  backend maps to the tagged wire (success) or an RFC-7807 ProblemDetails
+  (error). Shipped across all five backends (rationale:
+  [`proposals/exception-less.md`](proposals/exception-less.md)).
 
 ## What's deferred
 
 - **`match` over a union** with exhaustiveness checking + per-backend narrowing
   (`switch(x.type)` / C# pattern match / Elixir `case`) — the consumer side.
-- **Operation returns** of unions (exception-less) and **`option` PATCH**
-  semantics ([`partial-update`](proposals/partial-update.md)).
+- **`option` PATCH** semantics ([`partial-update`](proposals/partial-update.md)).
+  (Exception-less **operation returns** of unions have shipped — see §5.)
 - **User-declared generic payloads** beyond the blessed `paged` / `envelope` /
   `option` set.
 - **Multi-arg generics** and row polymorphism over payloads.

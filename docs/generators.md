@@ -934,7 +934,8 @@ actor + jsonb intersection is deferred), and provenance/audited (gated —
 no runtime emitted; the node and .NET backends do implement these).  See
 `docs/plans/java-backend-implementation.md` for the execution record.
 
-Discriminated unions (find / payload positions), `shape(document)` /
+Discriminated unions (payload fields / operation returns; union *finds* take
+the untagged optional-style path — see `payloads.md`), `shape(document)` /
 `shape(embedded)` persistence, event-sourced (`persistedAs(eventLog)`)
 JPA streams, and non-principal capability filters on those non-relational
 shapes are all **implemented** (java is in `SUPPORTED_UNION_BACKENDS`
@@ -964,7 +965,7 @@ Per deployable it emits:
 | Domain | `NewType`-branded str ids, `StrEnum`s, VO classes with invariant ctors, frozen-dataclass events + dispatcher protocol, aggregate/part classes (private state, `@property` accessors, `create` factory, `pull_events()`) |
 | Persistence | `app/db/schema.py` SQLAlchemy models (`Mapped[...]`, dataSource-routed `__table_args__` schema, `Uuid(as_uuid=False)` ids, flattened VO columns, join tables), per-aggregate repositories (`find_by_id`/`get_by_id`/`all`/declared finds/`save` diff-sync/`to_wire` from `wireShape`), `where` clauses lowered to SQLAlchemy predicates incl. correlated-EXISTS `contains` |
 | Migrations | `MigrationsIR` → `migrations/*.sql` via the shared Postgres-SQL renderer + `app/db/migrate.py`, a `__loom_migrations`-tracked boot-time runner (also `python -m app.db.migrate`) |
-| API | APIRouter per aggregate (`POST /` 201 `{id}`, `GET /`, `GET /{id}`, `POST /{id}/<op_snake>` 204, `GET /<find_snake>`, `DELETE /{id}` with 409), Pydantic wire DTOs in `wireShape` order, named `<Agg>ListResponse` array components, paged carriers, discriminated-union finds/returns, RFC 7807 handlers (+ §3.2 `errors[]` on 422), the shared per-route error matrix re-keyed to `application/problem+json` by an `install_openapi` post-processor |
+| API | APIRouter per aggregate (`POST /` 201 `{id}`, `GET /`, `GET /{id}`, `POST /{id}/<op_snake>` 204, `GET /<find_snake>`, `DELETE /{id}` with 409), Pydantic wire DTOs in `wireShape` order, named `<Agg>ListResponse` array components, paged carriers, discriminated-union operation returns (union finds are untagged, optional-style), RFC 7807 handlers (+ §3.2 `errors[]` on 422), the shared per-route error matrix re-keyed to `application/problem+json` by an `install_openapi` post-processor |
 | Inheritance / ES | TPC + TPH (`kind`-scoped shared table, base readers), `persistedAs(eventLog)` append-only stream + applier folds |
 | Sagas | `app/dispatch.py` in-process dispatcher when a channel routes a subscribed event — `create(e) by …` load-or-allocates the persisted correlation row, `on(e) by …` routes or drops + logs `event_unrouted`; handler emits re-enter |
 | Auth | `auth: required` + `user {}` → `app/auth/` (frozen `User` dataclass, verifier registry, middleware with the cross-backend bypass list) + a dev-stub verifier registered in `main.py`; `current_user` threads into ops/finds/workflows as a trailing parameter |
