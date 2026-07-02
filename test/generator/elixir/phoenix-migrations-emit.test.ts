@@ -273,8 +273,18 @@ describe("phoenix migrations-emit — SQL-expression column defaults", () => {
             ownerModule: "Sales",
             columns: [
               { name: "id", type: { kind: "uuid" }, nullable: false },
-              { name: "occurred_at", type: { kind: "datetime" }, nullable: false, default: "now()" },
-              { name: "token", type: { kind: "uuid" }, nullable: false, default: "gen_random_uuid()" },
+              {
+                name: "occurred_at",
+                type: { kind: "datetime" },
+                nullable: false,
+                default: "now()",
+              },
+              {
+                name: "token",
+                type: { kind: "uuid" },
+                nullable: false,
+                default: "gen_random_uuid()",
+              },
               { name: "attempts", type: { kind: "int" }, nullable: false, default: "0" },
             ],
             primaryKey: ["id"],
