@@ -72,8 +72,8 @@ describe("typescript migrations emitter", () => {
     // modules doesn't collide every module's "Initial" onto one file.
     expect(out.has("db/migrations/20260101000000_sales_initial.sql")).toBe(true);
     const sql = out.get("db/migrations/20260101000000_sales_initial.sql")!;
-    expect(sql).toMatch(/CREATE TABLE orders \(/);
-    expect(sql).toMatch(/PRIMARY KEY \(id\)/);
+    expect(sql).toMatch(/CREATE TABLE "orders" \(/);
+    expect(sql).toMatch(/PRIMARY KEY \("id"\)/);
     // Drizzle splits on the sentinel — both statements need to be
     // visible as separate chunks.
     expect(sql).toContain("--> statement-breakpoint");

@@ -555,10 +555,10 @@ system Sys {
     const { files } = generateSystems(await parseValid(TPH));
     const sql = [...files.entries()].find(([p]) => /db\/migrations\/.*\.sql$/.test(p))?.[1] ?? "";
     // The Parties context lands in its own `parties` Postgres schema.
-    expect(sql).toMatch(/CREATE TABLE parties\.parties \(/);
-    expect(sql).toMatch(/kind TEXT NOT NULL/);
-    expect(sql).toMatch(/credit_limit DECIMAL NULL/);
-    expect(sql).toMatch(/tax_id TEXT NULL/);
+    expect(sql).toMatch(/CREATE TABLE "parties"\."parties" \(/);
+    expect(sql).toMatch(/"kind" TEXT NOT NULL/);
+    expect(sql).toMatch(/"credit_limit" DECIMAL NULL/);
+    expect(sql).toMatch(/"tax_id" TEXT NULL/);
     expect(sql).not.toMatch(/CREATE TABLE customers/);
     expect(sql).not.toMatch(/CREATE TABLE suppliers/);
   });
@@ -664,7 +664,7 @@ system Sys {
     expect(repo).toMatch(/from\(schema\.addresses\).+parentId/s);
     // The migration FKs `addresses` to the shared `parties` table.
     const sql = [...files.entries()].find(([p]) => /db\/migrations\/.*\.sql$/.test(p))?.[1] ?? "";
-    expect(sql).toMatch(/CREATE TABLE parties\.addresses/);
-    expect(sql).toMatch(/FOREIGN KEY \(party_id\) REFERENCES parties\.parties/);
+    expect(sql).toMatch(/CREATE TABLE "parties"\."addresses"/);
+    expect(sql).toMatch(/FOREIGN KEY \("party_id"\) REFERENCES "parties"\."parties"/);
   });
 });

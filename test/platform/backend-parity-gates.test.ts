@@ -235,9 +235,10 @@ const FEATURES: readonly Feature[] = [
       // node/dotnet/python: one shared `vehicles` table (TPH) vs per-concrete
       // tables (TPC).  java: the JPA `@DiscriminatorValue`.  elixir (vanilla):
       // the single `vehicles` migration table.
-      node: "CREATE TABLE fleet.vehicles",
-      dotnet: "CREATE TABLE fleet.vehicles",
-      python: "CREATE TABLE fleet.vehicles",
+      node: 'CREATE TABLE "fleet"."vehicles"',
+      // .NET wraps the SQL in a C# `@"..."` verbatim literal, doubling each `"`.
+      dotnet: 'CREATE TABLE ""fleet"".""vehicles""',
+      python: 'CREATE TABLE "fleet"."vehicles"',
       java: "@DiscriminatorValue",
       elixir: "create table(:vehicles",
     },

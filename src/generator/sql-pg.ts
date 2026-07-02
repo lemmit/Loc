@@ -131,12 +131,15 @@ export function renderPgType(t: ColumnType): string {
   }
 }
 
-/** Lowercase identifier passthrough.  The migration builder already
- *  snake-cases everything, so the produced names are valid bare
- *  identifiers in Postgres.  Reserved-name edge cases (`user`, `order`,
- *  …) would need double-quoting; no current fixture exercises them. */
+/** Double-quoted identifier — the same quote-always spelling the seed path
+ *  (`qIdent`) uses, so DDL and DML agree.  Postgres folds an unquoted
+ *  identifier to lowercase and the migration builder already snake-cases
+ *  everything to lowercase, so `"orders"` references the same relation as a
+ *  bare `orders` — quoting is a no-op for the common case but makes a
+ *  reserved-word column (`order`, `user`, `end`) or any `.ddd`-sourced name
+ *  safe instead of a syntax error. */
 function ident(name: string): string {
-  return name;
+  return qIdent(name);
 }
 
 // ---------------------------------------------------------------------------
@@ -166,9 +169,11 @@ export function renderSeedRowInsert(
 }
 
 /** Double-quoted identifier — matches the lowercase tables the migrations
- *  create and is safe for reserved words (`order`, `user`). */
+ *  create and is safe for reserved words (`order`, `user`).  An embedded `"`
+ *  is doubled per the Postgres quoting rule, so a `.ddd`-sourced name can't
+ *  break out of the quotes. */
 function qIdent(name: string): string {
-  return `"${name}"`;
+  return `"${name.replace(/"/g, '""')}"`;
 }
 
 /** An ExprIR seed value as a Postgres SQL literal.  Scalars / enum values /

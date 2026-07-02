@@ -35,7 +35,7 @@ describe("python migrations", () => {
     );
     expect(sqlPath, "initial migration missing").toBeTruthy();
     const sql = files.get(sqlPath!)!;
-    expect(sql).toContain("CREATE TABLE sales.orders (");
+    expect(sql).toContain('CREATE TABLE "sales"."orders" (');
     expect(sql).toContain("--> statement-breakpoint");
     // Every chunk is a single statement (asyncpg constraint).
     for (const chunk of sql.split("--> statement-breakpoint")) {

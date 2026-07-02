@@ -67,14 +67,14 @@ describe("value-object collection — migration (relational child table, all bac
   it("the Hono migration creates the child table and drops the parent column", async () => {
     const files = await generateSystemFiles(FIXTURE);
     const sql = findFile(files, /api\/db\/migrations\/.*\.sql$/);
-    expect(sql).toMatch(/CREATE TABLE order_charges \(/);
-    expect(sql).toMatch(/amount\s+DECIMAL/i);
-    expect(sql).toMatch(/PRIMARY KEY \(order_id, ordinal\)/);
+    expect(sql).toMatch(/CREATE TABLE "order_charges" \(/);
+    expect(sql).toMatch(/"amount"\s+DECIMAL/i);
+    expect(sql).toMatch(/PRIMARY KEY \("order_id", "ordinal"\)/);
     // The parent table carries no `charges` column — the data is in the
     // child.  Bound the slice to the `orders` CREATE statement: FK
     // ordering now emits the parent before its `order_charges` child, so
     // slicing to end-of-file would wrongly pull in the child table.
-    const ordersStart = sql.indexOf("CREATE TABLE orders");
+    const ordersStart = sql.indexOf('CREATE TABLE "orders"');
     const ordersTable = sql.slice(ordersStart, sql.indexOf(");", ordersStart));
     expect(ordersTable).not.toMatch(/charges/);
   });
