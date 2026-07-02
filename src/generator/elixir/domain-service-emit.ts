@@ -48,6 +48,7 @@ import {
 } from "../../ir/util/domain-service-tier.js";
 import { escapeElixirIdent, snake, upperFirst } from "../../util/naming.js";
 import { type RenderCtx, renderExpr, renderTypespec } from "./render-expr.js";
+import { opCallParamFields } from "./vanilla/workflow-execution-emit.js";
 
 // ---------------------------------------------------------------------------
 // Tier-driven placement (domain-services.md rev. 4, Slice 1; Elixir decision B)
@@ -205,11 +206,13 @@ export function inlineMutatingServiceCall(
   muts.forEach((m, i) => {
     const bind = snake((subst.get(m.paramName) as Extract<ExprIR, { kind: "ref" }>).name);
     // Render the op's args in the workflow scope: substitute service-op param
-    // refs with the workflow call args first, then render — `arg0: <amount>`,
-    // matching the inline op-call shape (`%{arg0: ...}`).
-    const argFields = m.args
-      .map((a, j) => `arg${j}: ${renderArg(substituteRefs(a, subst))}`)
-      .join(", ");
+    // refs with the workflow call args first, then render.  Key the params map
+    // by the called op's REAL parameter names as string keys (`"amount" => …`)
+    // — matching the inline op-call shape and the facade's
+    // `Map.get(params, "<name>")` reads.
+    const calledOp = resolveAggOp(m.aggName, m.member);
+    const argTexts = m.args.map((a) => renderArg(substituteRefs(a, subst)));
+    const argFields = opCallParamFields(argTexts, calledOp, `${m.aggName}.${m.member}`);
     const fnName = `${snake(m.member)}_${snake(m.aggName)}`;
     // Rebind to the var name ONLY when a LATER op in the same chain mutates the
     // same param — then the next clause must see the threaded (immutable Ecto)

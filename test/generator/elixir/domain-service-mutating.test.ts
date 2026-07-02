@@ -96,15 +96,17 @@ describe("phoenix vanilla — mutating-tier domainService (domain-services.md re
 
     // The two loaded aggregate args route to their context mutating fns, in
     // service-body order — byte-identical to an INLINE `s.withdraw(amount)`
-    // op-call (`{:ok, _} <- Context.<op>_<agg>(<arg>, %{arg0: ...})`).  Each
-    // discards (`{:ok, _}`) since neither arg is read again (already persisted
-    // inside the context fn); the result falls back to the load bind `d`.
-    expect(wf).toContain("{:ok, _} <- Context.withdraw_account(s, %{arg0: amount})");
-    expect(wf).toContain("{:ok, _} <- Context.deposit_account(d, %{arg0: amount})");
+    // op-call (`{:ok, _} <- Context.<op>_<agg>(<arg>, %{"<param>" => ...})`).
+    // The params map is keyed by the called op's REAL parameter name as a
+    // string key (`"amount"`), matching the facade's `Map.get(params, "amount")`
+    // read.  Each discards (`{:ok, _}`) since neither arg is read again (already
+    // persisted inside the context fn); the result falls back to the load bind `d`.
+    expect(wf).toContain('{:ok, _} <- Context.withdraw_account(s, %{"amount" => amount})');
+    expect(wf).toContain('{:ok, _} <- Context.deposit_account(d, %{"amount" => amount})');
 
     // The clauses sit inside the same with-chain as the loads (one Repo.transaction).
     expect(wf).toMatch(
-      /with \{:ok, s\} <- Context\.get_account\(src\),\s*\{:ok, d\} <- Context\.get_account\(dst\),\s*\{:ok, _\} <- Context\.withdraw_account\(s, %\{arg0: amount\}\),\s*\{:ok, _\} <- Context\.deposit_account\(d, %\{arg0: amount\}\) do/,
+      /with \{:ok, s\} <- Context\.get_account\(src\),\s*\{:ok, d\} <- Context\.get_account\(dst\),\s*\{:ok, _\} <- Context\.withdraw_account\(s, %\{"amount" => amount\}\),\s*\{:ok, _\} <- Context\.deposit_account\(d, %\{"amount" => amount\}\) do/,
     );
 
     // The atomic, persisted commit is the workflow's Repo.transaction.

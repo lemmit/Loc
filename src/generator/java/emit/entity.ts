@@ -14,7 +14,9 @@ import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { UnionMember } from "../../_payload/union-wire.js";
 import { promotedFilters, sqlRestrictionFilters } from "../capability-filter.js";
 import {
+  buildJavaRegexFields,
   collectJavaExprImports,
+  collectJavaRegexLiterals,
   collectJavaTypeImports,
   type JavaRenderContext,
   renderJavaExpr,
@@ -231,10 +233,26 @@ export function renderJavaEntity(
     javaImports.add("java.util.ArrayList");
   }
 
+  // Hoist `string.matches("…")` regex literals (invariants / derived / pure
+  // expr-functions — the per-create/update hot path) into reusable
+  // `private static final Pattern` fields instead of recompiling on every
+  // evaluation.  Statement-body matches keep the inline-compile default.
+  const regexLiterals = new Set<string>();
+  for (const inv of entity.invariants) {
+    collectJavaRegexLiterals(inv.expr, regexLiterals);
+    if (inv.guard) collectJavaRegexLiterals(inv.guard, regexLiterals);
+  }
+  for (const d of entity.derived) collectJavaRegexLiterals(d.expr, regexLiterals);
+  for (const fn of entity.functions) {
+    if ("expr" in fn.body) collectJavaRegexLiterals(fn.body.expr, regexLiterals);
+  }
+  const regex = buildJavaRegexFields(regexLiterals);
+
   const renderCtx: JavaRenderContext = {
     thisName: "this",
     agg: isAgg(entity) ? entity : undefined,
     eventFields: options.eventFields,
+    regexFields: regex.fields,
   };
   const anyOpUsesCurrentUser = operations.some(operationUsesCurrentUser);
   // A body that calls a domain service (`Pricing.quote(...)`) needs the
@@ -286,6 +304,11 @@ export function renderJavaEntity(
   // --- fields --------------------------------------------------------------
   const persistence = options.persistence;
   const fieldLines: string[] = [];
+  // Hoisted regex patterns first (static finals, compiled once).
+  if (regex.decls.length > 0) {
+    javaImports.add("java.util.regex.Pattern");
+    for (const d of regex.decls) fieldLines.push(`    ${d}`);
+  }
   if (!superType?.sharesIdentity) {
     if (persistence) fieldLines.push(...jpaIdAnnotations());
     fieldLines.push(`    ${idClass} id;`);

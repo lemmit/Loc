@@ -83,7 +83,13 @@ export function buildPyEmbeddedRepositoryFile(
     `    async def all(self) -> list[${agg.name}]:`,
     `        rows = (await self._session.execute(select(${row})${rootWhere(null, row, undefined, filterPred)})).scalars().all()`,
     "        return [await self._hydrate(row) for row in rows]",
-    ...emittableFinds(repo).flatMap((f) => ["", relationalFindMethod(agg, f, ctx, filterPred)]),
+    // `false`: the embedded repo loads the whole aggregate from one jsonb column
+    // (no per-row child SELECT), so it emits no `_hydrate_many` — find methods
+    // must stay on the per-row `_hydrate` comprehension.
+    ...emittableFinds(repo).flatMap((f) => [
+      "",
+      relationalFindMethod(agg, f, ctx, filterPred, false),
+    ]),
     "",
     `    async def find_many_by_ids(self, ids: list[${agg.name}Id]) -> list[${agg.name}]:`,
     `        rows = (await self._session.execute(select(${row})${rootWhere(

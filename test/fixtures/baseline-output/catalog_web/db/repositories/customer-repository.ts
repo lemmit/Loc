@@ -77,8 +77,8 @@ export class CustomerRepository {
       requestLog().debug({ event: "find_executed", aggregate: "Customer", find: "byEmail", rows: 0 });
       return null;
     }
-    const result = await this.findById(rootRows[0]!.id as Ids.CustomerId) as Customer | null;
-    requestLog().debug({ event: "find_executed", aggregate: "Customer", find: "byEmail", rows: result == null ? 0 : 1 });
+    const result = Customer._create({ id: Ids.CustomerId(rootRows[0]!.id), username: rootRows[0]!.username, email: rootRows[0]!.email, age: rootRows[0]!.age });
+    requestLog().debug({ event: "find_executed", aggregate: "Customer", find: "byEmail", rows: 1 });
     return result;
   }
 

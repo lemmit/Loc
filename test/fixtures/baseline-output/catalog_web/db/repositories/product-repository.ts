@@ -78,8 +78,8 @@ export class ProductRepository {
       requestLog().debug({ event: "find_executed", aggregate: "Product", find: "bySku", rows: 0 });
       return null;
     }
-    const result = await this.findById(rootRows[0]!.id as Ids.ProductId) as Product | null;
-    requestLog().debug({ event: "find_executed", aggregate: "Product", find: "bySku", rows: result == null ? 0 : 1 });
+    const result = Product._create({ id: Ids.ProductId(rootRows[0]!.id), sku: rootRows[0]!.sku, price: new Money(Number(rootRows[0]!.price_amount), rootRows[0]!.price_currency) });
+    requestLog().debug({ event: "find_executed", aggregate: "Product", find: "bySku", rows: 1 });
     return result;
   }
 

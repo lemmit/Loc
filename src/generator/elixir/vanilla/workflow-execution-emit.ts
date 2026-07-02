@@ -572,7 +572,9 @@ function opCallSource(
   contextModule: string,
   ctx?: BoundedContextIR,
 ): string {
-  const argFields = st.args.map((arg, i) => `arg${i}: ${renderExpr(arg, renderCtx)}`).join(", ");
+  const argTexts = st.args.map((arg) => renderExpr(arg, renderCtx));
+  const op = ctx ? lookupOp(ctx, st.aggName, st.op) : undefined;
+  const argFields = opCallParamFields(argTexts, op, `${st.aggName}.${st.op}`);
   const actor = ctx && opCallThreadsUser(st, ctx) ? ", current_user" : "";
   return `${contextModule}.${snake(st.op)}_${snake(st.aggName)}(${snake(st.target)}, %{${argFields}}${actor})`;
 }
@@ -601,9 +603,40 @@ function resolveInlinedServiceClauses(
 
 /** Look up an operation by aggregate + op name in the context's aggregate
  *  index — mirrors the Hono workflow builder's `lookupOp`. */
-function lookupOp(ctx: BoundedContextIR, aggName: string, opName: string): OperationIR | undefined {
+export function lookupOp(
+  ctx: BoundedContextIR,
+  aggName: string,
+  opName: string,
+): OperationIR | undefined {
   const agg = ctx.aggregates.find((a) => a.name === aggName);
   return agg?.operations.find((o) => o.name === opName);
+}
+
+/** Render the `params`-map fields for an `op-call` keyed by the called
+ *  operation's REAL parameter names as STRING keys (`"label" => value`).  The
+ *  context-facade op function reads them with `Map.get(params, "<name>")`
+ *  (`context-emit.ts` / `domain-core-emit.ts` / `operation-returns-emit.ts`), so
+ *  positional atom keys (`arg0:`) would silently resolve to `nil` (the BUG-2
+ *  regression).  The op MUST be resolved — every real op-call targets a
+ *  validated operation in the threaded context, so an unresolved op is a
+ *  generator invariant violation, not a tolerable fallback: fail loudly with
+ *  the offending name rather than re-emit positional keys.  `label` is the
+ *  `<Agg>.<op>` the call targets, for the error message. */
+export function opCallParamFields(
+  argTexts: string[],
+  op: OperationIR | undefined,
+  label: string,
+): string {
+  // No args ⇒ `%{}`; the op need not resolve since there is nothing to key.
+  if (argTexts.length === 0) return "";
+  if (!op) {
+    throw new Error(
+      `elixir op-call to unresolved operation '${label}': cannot key the params map by ` +
+        `parameter name (positional keys would mis-resolve in the op facade). This is a ` +
+        `generator bug — the op-call should reference a validated aggregate operation.`,
+    );
+  }
+  return argTexts.map((t, i) => `${JSON.stringify(op.params[i]!.name)} => ${t}`).join(", ");
 }
 
 /** Resolve the tier of a `domainService.<op>` referenced in a workflow body

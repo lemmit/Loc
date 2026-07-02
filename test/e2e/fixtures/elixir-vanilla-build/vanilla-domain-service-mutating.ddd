@@ -6,8 +6,8 @@
 // passes in (their own ops).  On Elixir it is pure SUGAR for the `with`-chain
 // of context mutating-fn calls — there is NO separate `Domain.Services` module
 // (sim §2.5).  `Transfer.run(s, d, amount)` inlines to
-//   `{:ok, s} <- Context.withdraw_account(s, %{arg0: amount}),
-//    {:ok, d} <- Context.deposit_account(d, %{arg0: amount})`
+//   `{:ok, s} <- Context.withdraw_account(s, %{"amount" => amount}),
+//    {:ok, d} <- Context.deposit_account(d, %{"amount" => amount})`
 // inside the workflow's `Repo.transaction` — persistence happens INSIDE each
 // context fn (changeset + Repo.update via persist_change), atomic via the
 // single transaction; each clause rebinds the mutated arg to the returned

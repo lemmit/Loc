@@ -97,6 +97,34 @@ describe("python repository emission", () => {
     expect(repo).toContain("watchers=[CustomerId(__r.customer_id) for __r in watchers_rows],");
   });
 
+  it("list reads bulk-hydrate through _hydrate_many (no per-row N+1 child SELECT)", async () => {
+    const files = await build();
+    const repo = files.get("api/app/db/repositories/order_repository.py")!;
+    // Every list-returning read routes through the batch hydrator instead of a
+    // per-row `[await self._hydrate(row) …]` comprehension.
+    expect(repo).toContain("async def all(self) -> list[Order]:");
+    expect(repo).toContain("        return await self._hydrate_many(rows)");
+    expect(repo).not.toContain("[await self._hydrate(row) for row in rows]");
+    // The batch hydrator loads each child collection ONCE with `<fk> IN
+    // (root_ids)` and groups by parent, rather than one SELECT per root row.
+    expect(repo).toContain(
+      "async def _hydrate_many(self, rows: Sequence[OrderRow]) -> list[Order]:",
+    );
+    expect(repo).toContain("from collections.abc import Sequence");
+    expect(repo).toContain("        root_ids = [row.id for row in rows]");
+    // Contained parts: one bulk SELECT grouped by parent_id.
+    expect(repo).toContain("select(OrderLineRow).where(OrderLineRow.parent_id.in_(root_ids))");
+    expect(repo).toContain("lines_by_parent: dict[object, list[OrderLineRow]] = {}");
+    expect(repo).toContain("lines_by_parent.setdefault(__lines.parent_id, []).append(__lines)");
+    // Ref-collection join rows: one bulk SELECT grouped by the owner FK,
+    // preserving the target-FK order_by within each group.
+    expect(repo).toContain(".where(OrderWatchersRow.order_id.in_(root_ids))");
+    expect(repo).toContain(".order_by(OrderWatchersRow.customer_id)");
+    // Each root then slices its children out of the grouped maps.
+    expect(repo).toContain("            lines_rows = lines_by_parent.get(row.id, [])");
+    expect(repo).toContain("            watchers_rows = watchers_by_parent.get(row.id, [])");
+  });
+
   it("save upserts the root, diff-syncs parts and join tables, drains events", async () => {
     const files = await build();
     const repo = files.get("api/app/db/repositories/order_repository.py")!;

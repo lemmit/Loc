@@ -13,6 +13,7 @@ import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 import { buildPhoenixResourceModules } from "./adapters/resource-clients.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
 import { renderEsWorkflowHandler } from "./vanilla/workflow-eventsourced-emit.js";
+import { lookupOp, opCallParamFields } from "./vanilla/workflow-execution-emit.js";
 
 // ---------------------------------------------------------------------------
 // In-process event dispatch for Phoenix LiveView (channels.md).
@@ -555,7 +556,7 @@ function renderBody(
 
 function renderStmt(
   st: WorkflowStmtIR,
-  _ctx: EnrichedBoundedContextIR,
+  ctx: EnrichedBoundedContextIR,
   renderCtx: RenderCtx,
   contextModule: string,
 ): BodyLine[] {
@@ -596,7 +597,9 @@ function renderStmt(
       // (key shape `arg<i>:` for positional args, `%{}` for none).
       const action = `${snake(st.op)}_${snake(st.aggName)}`;
       const target = snake(st.target);
-      const fields = st.args.map((arg, i) => `arg${i}: ${renderExpr(arg, renderCtx)}`).join(", ");
+      const op = lookupOp(ctx, st.aggName, st.op);
+      const argTexts = st.args.map((arg) => renderExpr(arg, renderCtx));
+      const fields = opCallParamFields(argTexts, op, `${st.aggName}.${st.op}`);
       const call = `${contextModule}.${action}(${target}, %{${fields}})`;
       return [{ kind: "with-clause", text: `{:ok, _} <- ${call}` }];
     }

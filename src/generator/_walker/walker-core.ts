@@ -1694,6 +1694,15 @@ export function renderTextContent(expr: ExprIR, ctx: WalkContext): string | unde
     return JSON.stringify(expr.value);
   }
   if (expr.kind === "ref") {
+    // A lambda/loop-bound ref (the `x` of `For { each: xs, x => Card { x } }`,
+    // a `rows => …` item) resolves to its emitted iteration variable — the same
+    // resolution `emitExpr` does in markup-child position.  Without this a
+    // loop-bound ref in TEXT position (a Card/Heading/Text title) falls through
+    // to the unresolved-ref comment below and the value renders blank.
+    {
+      const jsName = ctx.lambdaParams.get(expr.name);
+      if (jsName) return ctx.target.renderInterpolation(jsName);
+    }
     // `<Store>.<field>` read in text position (Stage 5) — record the use and
     // interpolate the bound local (the shell hoists the store selector).
     if (expr.refKind === "store-field" && expr.storeName) {

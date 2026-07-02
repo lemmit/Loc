@@ -756,8 +756,17 @@ function lowerWorkflowStatement(
 function aggNameForLocal(env: Env, name: string): string | undefined {
   const local = env.locals.get(name);
   if (!local) return undefined;
-  if (local.type.kind === "entity") return local.type.name;
-  return undefined;
+  // Unwrap optional/array wrappers: a CUSTOM-find repo-let binds the find's
+  // declared return type (`byLabel(): Item?` → `optional<Item>`), but the
+  // with-chain unwraps the `{:ok, i}` so the body receiver is the bare
+  // aggregate.  Without unwrapping, `i.markFound()` resolves to "Unknown" and
+  // the op-call emits a call to a non-existent `mark_found_unknown` context fn
+  // (getById already binds a bare entity, so only custom finds were affected).
+  let t: TypeIR = local.type;
+  while (t.kind === "optional" || t.kind === "array") {
+    t = t.kind === "optional" ? t.inner : t.element;
+  }
+  return t.kind === "entity" ? t.name : undefined;
 }
 
 interface FactoryMatch {

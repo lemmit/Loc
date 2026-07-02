@@ -109,6 +109,28 @@ describe("menu emitter", () => {
     expect(sidebar[0]!.entries[0]!.label).toBe("All Orders");
   });
 
+  it("falls back to the page's string `title:` (not its name) when no label is given", async () => {
+    const loom = await buildLoom(`
+      system S {
+        ui WebApp {
+          page ProjectNew { route: "/projects/new", title: "New project", body: f() }
+          page Bare { route: "/bare", body: f() }
+          menu {
+            section "Main" {
+              link ProjectNew,
+              link Bare
+            }
+          }
+        }
+      }
+    `);
+    const entries = deriveSidebarFromUi(uiOf(loom, "WebApp"), nameCtxOf(loom))![0]!.entries;
+    // `link ProjectNew` (no label) → the human title, not the PascalCase name.
+    expect(entries[0]!.label).toBe("New project");
+    // A page with no `title:` still falls back to its name.
+    expect(entries[1]!.label).toBe("Bare");
+  });
+
   it("emits external links with sentinel `__external:<url>` to value", async () => {
     const loom = await buildLoom(`
       system S {
