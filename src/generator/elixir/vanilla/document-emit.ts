@@ -34,8 +34,7 @@ import {
   singleFieldConstraints,
 } from "../../../ir/validate/invariant-classify.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
-
-const SYSTEM_FIELDS = new Set(["id", "createdAt", "updatedAt"]);
+import { managedTimestampNames } from "./managed-timestamps.js";
 
 /** True iff the aggregate's effective saving shape is `document` (binding-aware,
  *  matching the migration + validator).  `sys` may be absent in a few legacy
@@ -46,10 +45,13 @@ export function isVanillaDocAgg(agg: AggregateIR, ctx: BoundedContextIR, sys?: S
   return isDocumentShaped(enriched, resolved);
 }
 
-/** The aggregate's stored document fields (declared fields minus the system
- *  trio), snake-cased — the schemaless-changeset cast/required allow-list. */
+/** The aggregate's stored document fields (declared fields minus `id` and any
+ *  server-managed `createdAt`/`updatedAt` stamp/audit column), snake-cased — the
+ *  schemaless-changeset cast/required allow-list.  A plain declared timestamp
+ *  field stays in (cast like any column). */
 function docFields(agg: AggregateIR): FieldIR[] {
-  return agg.fields.filter((f) => !SYSTEM_FIELDS.has(f.name));
+  const managedTs = managedTimestampNames(agg);
+  return agg.fields.filter((f) => f.name !== "id" && !managedTs.has(f.name));
 }
 
 /** Ecto type atom for a schemaless `cast/3` types map.  Simpler than the
