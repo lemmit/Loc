@@ -131,7 +131,7 @@ describe(".NET showcase compile regressions (conformance-parity breakers)", () =
     // container before it ever serves /openapi.json.
     const cfg = find(await build(), "Configurations/ProjectConfiguration.cs");
     expect(cfg).toContain(
-      'builder.Property(x => x.Parent).HasConversion(v => v.Value.Value, v => new ProjectId(v)).HasColumnName("parent");',
+      'builder.Property(x => x.Parent).HasConversion(v => v!.Value.Value, v => new ProjectId(v)).HasColumnName("parent");',
     );
   });
 

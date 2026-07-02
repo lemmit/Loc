@@ -656,10 +656,12 @@ function fieldConfigLines(
   const scalarInner = f.type.kind === "optional" ? f.type.inner : f.type;
   if (scalarInner.kind === "id") {
     // EF never passes null into a value converter, so reading through
-    // `Nullable<T>.Value` in the optional shape is safe.
+    // `Nullable<T>.Value` in the optional shape is safe — but the compiler
+    // can't see that, so the null-forgiving `!` keeps CS8629 quiet under
+    // /warnaserror.
     const conv =
       f.type.kind === "optional"
-        ? `.HasConversion(v => v.Value.Value, v => new ${scalarInner.targetName}Id(v))`
+        ? `.HasConversion(v => v!.Value.Value, v => new ${scalarInner.targetName}Id(v))`
         : `.HasConversion(v => v.Value, v => new ${scalarInner.targetName}Id(v))`;
     return [`${indent}${builder}.Property(x => x.${upperFirst(f.name)})${conv}${colName};`];
   }
