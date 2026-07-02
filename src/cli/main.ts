@@ -363,7 +363,9 @@ async function runGenerate(
     if (!options.continueOnError) process.exit(1);
     return { hadError: true };
   }
-  if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+  // Directory creation is deferred to the write loop below (and guarded by
+  // `!options.dryRun`) so a `--dry-run` touches nothing on disk — not even
+  // `mkdir`-ing the output dir.
 
   let files: Map<string, string>;
   if (target === "system") {
@@ -404,25 +406,35 @@ async function runGenerate(
     const content = files.get(relPath)!;
     const normalised = relPath.split(path.sep).join("/");
     const ignored = ig.ignores(normalised);
+    const full = path.join(outDir, relPath);
+    // Classify exactly as the real writer does so a dry run's tallies
+    // match the run it previews: an up-to-date file is `unchanged`, not
+    // a would-write.  `fileContentMatches` returns false for a missing
+    // file (fresh output dir ⇒ everything is a write).
+    const wouldChange = !ignored && !fileContentMatches(full, content);
     if (options.dryRun) {
       const sizeKb = (Buffer.byteLength(content, "utf8") / 1024).toFixed(1);
-      const status = ignored ? "  skip (.loomignore)" : "  write              ";
+      const status = ignored
+        ? "  skip (.loomignore)"
+        : wouldChange
+          ? "  write              "
+          : "  unchanged          ";
       console.log(`${status}  ${relPath}  (${sizeKb} KB)`);
       if (ignored) skippedByIgnore++;
-      else written++;
+      else if (wouldChange) written++;
+      else unchanged++;
       continue;
     }
     if (ignored) {
       skippedByIgnore++;
       continue;
     }
-    const full = path.join(outDir, relPath);
     // Incremental write: only touch files whose content actually
     // changed.  Downstream watchers (Vite, `dotnet watch`) react to
     // mtimes, so skipping unchanged writes turns a regen of an N-file
     // project where the user touched one aggregate into a precise
     // reload signal instead of a full project bounce.
-    if (fileContentMatches(full, content)) {
+    if (!wouldChange) {
       unchanged++;
       continue;
     }
@@ -615,6 +627,20 @@ interface VerifyOptions {
 /** `ddd verify` — join a test-results file onto the requirements graph,
  *  emit the verification artifacts, and gate the exit code. */
 async function runVerify(file: string, options: VerifyOptions): Promise<void> {
+  // Validate `--min` up front: `Number("90%")` / `Number("abc")` is NaN and
+  // `actual < NaN` is always false, so a typo'd threshold would silently pass
+  // the gate.  Reject non-numeric or out-of-[0,100] values before any work.
+  let minPct: number | undefined;
+  if (options.min !== undefined) {
+    minPct = Number(options.min);
+    if (!Number.isFinite(minPct) || minPct < 0 || minPct > 100) {
+      console.error(
+        `Invalid --min "${options.min}": expected a number between 0 and 100 (e.g. --min 90).`,
+      );
+      process.exit(2);
+    }
+  }
+
   const result = await parseFile(file);
   if (result.errorCount > 0) {
     printDiagnostics(result);
@@ -679,8 +705,7 @@ async function runVerify(file: string, options: VerifyOptions): Promise<void> {
     failed = true;
     reason = `${s.total - s.verified} requirement(s) not verified (--require-all)`;
   }
-  if (options.min !== undefined) {
-    const minPct = Number(options.min);
+  if (minPct !== undefined) {
     const actual = s.total === 0 ? 100 : (s.verified / s.total) * 100;
     if (actual < minPct) {
       failed = true;
