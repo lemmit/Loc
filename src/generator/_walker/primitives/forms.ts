@@ -125,9 +125,12 @@ export function emitDestroyForm(
   if (!ctx.actionMutations.some((m) => m.localVar === localVar)) {
     ctx.actionMutations.push({ localVar, hookName, aggCamel: lowerFirst(agg.name), idExpr: "" });
   }
-  // The confirm handler reads the route `id` — mark it used so the shell
-  // emits the `useParams` destructure (same param the detail pages bind).
+  // The confirm handler reads the route `id` — mark it used AND flag the route
+  // id so the shell both imports `useParams` and types the `<{ id: string }>`
+  // destructure (same param the detail pages bind). Marking it used without
+  // `usesRouteId` emitted `const { id } = useParams()` with no import / no type.
   ctx.usedParams.add("id");
+  ctx.usesRouteId = true;
   // After a successful delete the record is gone, so the default `then:`
   // navigates to the aggregate's list route (loom-forms.md §submission).
   const thenArg = namedArgValue(call, "then");

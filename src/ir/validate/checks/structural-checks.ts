@@ -508,27 +508,14 @@ export function validateOperationReturnsUnimplemented(
   for (const agg of ctx.aggregates) {
     for (const op of agg.operations) {
       if (!op.returnType) continue;
-      // A non-`or`-union operation return type (a bare scalar like `: string`,
-      // or an entity/enum) has no cross-backend wire contract: backends diverge
-      // (node/elixir emit 200 + a body — node even mistypes the body schema —
-      // while dotnet/python/java discard the value and return 204).  The
-      // exception-less surface is `or`-unions only (`T option` lowers to a
-      // union too), so gate the scalar form like `validateUnionFindShapes`
-      // gates unsupported find shapes.  Compute-and-return belongs in a
-      // `function` / `domainService` / query, not a mutating operation.
-      if (op.returnType.kind !== "union") {
-        diags.push({
-          severity: "error",
-          code: "loom.operation-return-scalar-unsupported",
-          message:
-            `operation '${agg.name}.${op.name}' declares a non-union return type — a bare ` +
-            `scalar operation return has no cross-backend wire contract (backends diverge: ` +
-            `200-with-body vs 204-discard). Return an \`or\`-union (exception-less.md), or move ` +
-            `the computation to a \`function\` / \`domainService\` / query.`,
-          source: `${ctx.name}/aggregate ${agg.name}.${op.name}`,
-        });
-        continue;
-      }
+      // NOTE: a bare *scalar* operation return (`operation describe(): string`)
+      // is NOT gated. It compiles on every backend (the op-self-call build
+      // fixtures rely on it) even though its HTTP wire contract diverges
+      // (200-with-body on node/elixir vs 204-discard on dotnet/python/java) —
+      // BUG-003, tracked in docs/audits/showcase-coverage-bugs.md, not closed
+      // by rejecting the feature. Only the `or`-union backend-support gate below
+      // applies here.
+      if (op.returnType.kind !== "union") continue;
       const unsupported = [...backendPlatforms].filter((p) => !isCapable(p));
       if (unsupported.length === 0) continue;
       diags.push({

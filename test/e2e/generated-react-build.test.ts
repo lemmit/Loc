@@ -74,6 +74,41 @@ function injectDesign(src: string, qualified: string): string {
   return src.replace(singleLine, `$1, design: "${qualified}"$2}`);
 }
 
+/** Materialise stub impls for any frontend `function … extern from "<path>"`
+ *  the generated project references. Loom emits the typed signature + a
+ *  conformance shim (`src/lib/<name>.ts`) but never the impl module — that's
+ *  user-owned by design (extern-function-hook-escape-hatch.md §3). A
+ *  generated-only tree therefore has a dangling import, so we write the exact
+ *  file a real user would (a conforming stub) before type-checking. Idempotent;
+ *  a no-op for the (majority) examples with no frontend externs. */
+function stubFrontendExterns(projectDir: string): void {
+  const libDir = path.join(projectDir, "src", "lib");
+  if (!fs.existsSync(libDir)) return;
+  // Shim shape: `import { <name> as _impl } from "<relative-path>";`
+  const importRe = /import\s*\{\s*(\w+)\s+as\s+_impl\s*\}\s*from\s*"([^"]+)"/;
+  for (const ent of fs.readdirSync(libDir)) {
+    if (!ent.endsWith(".ts")) continue;
+    const shim = fs.readFileSync(path.join(libDir, ent), "utf-8");
+    if (!shim.includes("AUTO-GENERATED shim")) continue;
+    const m = importRe.exec(shim);
+    if (!m) continue;
+    const [, name, spec] = m;
+    const target = `${path.resolve(libDir, spec)}.ts`;
+    if (fs.existsSync(target)) continue;
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    // A zero-arg `any`-returning function is assignable to any generated
+    // signature, so the shim's `const <name>: <Name>Fn = _impl` conformance
+    // annotation still type-checks.
+    fs.writeFileSync(
+      target,
+      `// Test stub for a user-owned extern impl (not part of codegen output).\n` +
+        `export function ${name}(): any {\n` +
+        `  throw new Error("extern test stub: ${name}");\n` +
+        `}\n`,
+    );
+  }
+}
+
 interface PackSpec {
   family: "mantine" | "shadcn" | "mui" | "chakra";
   version: string;
@@ -153,6 +188,9 @@ describe.skipIf(!ENABLED)(
             `Expected React project at ${projectDir} after generating ${ddd} (pack=${pack})`,
           );
         }
+        // Frontend `function … extern from` impls are user-owned and never
+        // generated; stub them so the generated-only tree type-checks.
+        stubFrontendExterns(projectDir);
         execSync(`npm install --silent --no-audit --no-fund`, {
           cwd: projectDir,
           stdio: "inherit",

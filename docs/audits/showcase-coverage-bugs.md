@@ -6,10 +6,12 @@
 > a `.ddd` fixture (`MacroArgString`, `MacroArgInt` — no stdlib macro declares
 > string/int params; `ImportStmt` — single-file fixture, covered by
 > `multifile-*.ddd`). Bugs below are surfaced-not-fixed per campaign policy.
-> **Product bugs: BUG-003 FIXED (gated scalar returns), BUG-005 FIXED (union
-> find → success-variant-directly at 200 across all 5 backends). BUG-004 open**
-> (`resource`-keyword field, low priority, workaround in place). BUG-006 in
-> flight as #1622; BUG-001/002 were test-infra and fixed here.
+> **Product bugs: BUG-003 OPEN** (scalar-return op HTTP divergence — an earlier
+> gate was **reverted** because it broke the shipped op-self-call feature; see
+> below). **BUG-005 FIXED** (union find → success-variant-directly at 200 across
+> all 5 backends). **BUG-004 open** (`resource`-keyword field, low priority,
+> workaround in place). BUG-006 in flight as #1622; BUG-001/002 were test-infra
+> and fixed here.
 
 
 Running list of bugs surfaced while driving `examples/showcase.ddd` to 100%
@@ -77,19 +79,23 @@ response schema as the aggregate's `ProjectResponse` when the value is a
 only covers the *union* return form `X or NotFound` → 200; the scalar-return
 form was apparently never reconciled across backends.)
 
-**FIXED (gated).** Scalar-return aggregate operations are not part of any
-shipped design — the exception-less surface is `or`-unions only (docs say plain
-operations are 204), and the *only* scalar-return aggregate op in the whole
-corpus was the showcase's synthetic `describe()`. So rather than invent a wire
-contract, the divergence is closed the same way `validateUnionFindShapes` gates
-unsupported find shapes: a new IR-validate gate
-(`loom.operation-return-scalar-unsupported`, `structural-checks.ts`) rejects a
-non-`or`-union operation return type, pointing authors to a
-`function`/`domainService`/query or an `or`-union. `describe()` was removed from
-the showcase (ReturnStmt stays covered by the S7 domain-service op; the
-`string(...)` PrimitiveConversion stays covered by the `seqLabel` derived).
-Negative tests in `test/ir/operation-returns.test.ts`. If a 200+typed-body
-contract is wanted later, that's an additive feature (un-gate + emit).
+**OPEN — an attempted gate was REVERTED.** The first fix assumed scalar-return
+aggregate operations "aren't part of any shipped design" and added an IR-validate
+gate (`loom.operation-return-scalar-unsupported`) rejecting non-`or`-union
+operation returns. **That premise was wrong.** `test/e2e/fixtures/elixir-vanilla-build/vanilla-op-self-call.ddd`
+is a build fixture whose whole point is scalar-return aggregate operations
+(`operation reserve(): string`, `summarize`, `viaHelper`) that compile and
+self-call across backends — the gate rejected all four and turned the
+`elixir-vanilla-build` leg red. Scalar returns are a shipped, tested feature; the
+divergence is the *HTTP wire contract* (200-with-body vs 204-discard), not the
+feature's existence. The gate was removed (`structural-checks.ts` now only runs
+the `or`-union backend-support check); `test/ir/operation-returns.test.ts` now
+guards that scalar returns stay valid. The showcase's synthetic `describe()` had
+been removed with the gate and stays removed — it added nothing beyond the
+`domainService` op's `ReturnStmt` coverage, and re-adding it would re-trip
+`conformance-parity` on the still-open divergence. **BUG-003 remains open**: the
+real fix is to converge the scalar-return HTTP contract across all five backends
+(all-200-with-body or all-204), which is additive feature work, not a gate.
 
 ### BUG-004 — union-find absence error mandates field `resource`, which is a reserved keyword → unreadable — **S3**
 

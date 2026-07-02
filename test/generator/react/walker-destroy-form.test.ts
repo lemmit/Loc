@@ -35,7 +35,9 @@ describe("DestroyForm — canonical destroy confirmation", () => {
     const files = await generateSystemFiles(sys(`DestroyForm { of: Order }`));
     const page = files.get("web/src/pages/order_admin.tsx")!;
     expect(page).toContain('import { useDeleteOrder } from "../api/order";');
-    expect(page).toContain("const { id } = useParams();");
+    // DestroyForm reads the route id, so the shell imports + types useParams.
+    expect(page).toContain('import { useParams, useNavigate } from "react-router";');
+    expect(page).toContain("const { id } = useParams<{ id: string }>();");
     expect(page).toContain("const deleteOrder = useDeleteOrder();");
     expect(page).toContain(
       'if (window.confirm("Delete this order?")) void deleteOrder.mutateAsync(id ?? "").then(() => { navigate("/orders"); });',

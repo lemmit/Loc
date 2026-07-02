@@ -179,7 +179,13 @@ describe("operation returns — platform-aware emission gate (exception-less spi
   });
 });
 
-describe("operation returns — scalar (non-union) return gate (BUG-003)", () => {
+describe("operation returns — scalar (non-union) returns stay valid (BUG-003 not gated)", () => {
+  // A bare scalar operation return (`operation describe(): string`) compiles on
+  // every backend (the op-self-call build fixtures depend on it). Its HTTP wire
+  // contract diverges (200-with-body vs 204-discard) — BUG-003 — but that is a
+  // real gap to converge, NOT a reason to reject the feature: an earlier gate
+  // (`loom.operation-return-scalar-unsupported`) did exactly that and broke the
+  // shipped op-self-call pattern. This guards that scalar returns stay valid.
   const scalarSys = (ret: string): string => `
     system Shop {
       subdomain Sales {
@@ -196,15 +202,12 @@ describe("operation returns — scalar (non-union) return gate (BUG-003)", () =>
       deployable api { platform: node, contexts: [Shop], dataSources: [shopState], port: 4000 }
     }`;
 
-  const scalarDiags = async (ret: string): Promise<string[]> => {
-    const { model } = await parseString(scalarSys(ret), { validate: false });
-    return validateLoomModel(enrichLoomModel(lowerModel(model)))
-      .filter((d) => d.code === "loom.operation-return-scalar-unsupported")
-      .map((d) => d.message);
-  };
-
-  it("gates a bare scalar operation return (no cross-backend wire contract)", async () => {
-    expect(await scalarDiags("string")).toHaveLength(1);
+  it("does NOT reject a bare scalar operation return", async () => {
+    const { model } = await parseString(scalarSys("string"), { validate: false });
+    const diags = validateLoomModel(enrichLoomModel(lowerModel(model)));
+    expect(diags.some((d) => d.code === "loom.operation-return-scalar-unsupported")).toBe(false);
+    // No new IR error is introduced for the scalar return.
+    expect(diags.filter((d) => d.severity === "error")).toHaveLength(0);
   });
 
   it("does NOT gate an `or`-union operation return (the supported form)", async () => {
