@@ -24,6 +24,7 @@ import { ectoValidator, voHasConstraints } from "./changeset-validators.js";
 import { isVanillaDocAgg, renderDocChangeset } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 import { isAbstractBase } from "./inheritance-emit.js";
+import { managedTimestampNames } from "./managed-timestamps.js";
 import { isRefCollField, refCollFieldNames } from "./ref-collection-emit.js";
 import { usesRelationalContainments } from "./schema-emit.js";
 import { valueCollectionsWithVo } from "./value-collection-schema-emit.js";
@@ -34,8 +35,6 @@ interface AggField {
   optional?: boolean;
   access?: string;
 }
-
-const SYSTEM_FIELDS = new Set(["id", "createdAt", "updatedAt"]);
 
 /** A lifecycle-managed field (audit `createdBy`/`updatedBy`, etc.) is never cast
  *  from client attrs nor `validate_required`d — the server owns its value and
@@ -92,10 +91,15 @@ function renderChangeset(
   // `validate_required` on a relationship is meaningless.  They're wired via
   // `put_assoc` on the create/update path (repository-emit), so drop them too.
   const vcFieldNames = new Set(valueCollectionsWithVo(agg, ctx).map((v) => v.vc.fieldName));
+  // `createdAt`/`updatedAt` stay out of the cast ONLY when they are actually
+  // server-managed (a `stamp` target or `access: managed`); a plain declared
+  // timestamp field is cast + validated like any column (see managed-timestamps).
+  const managedTs = managedTimestampNames(agg);
   const allFields = (agg.fields as AggField[]).filter(
     (f) =>
-      !SYSTEM_FIELDS.has(f.name) &&
+      f.name !== "id" &&
       !isManaged(f) &&
+      !managedTs.has(f.name) &&
       !vcFieldNames.has(f.name) &&
       !isRefCollField(f),
   );
