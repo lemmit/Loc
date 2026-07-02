@@ -6,7 +6,12 @@
 // See `src/language/validators/index.ts` for the barrel of
 // per-theme entry points.
 
-import type { ValidationAcceptor, ValidationChecks } from "langium";
+import {
+  type AstNode,
+  isOperationCancelled,
+  type ValidationAcceptor,
+  type ValidationChecks,
+} from "langium";
 import type { DddServices } from "./ddd-module.js";
 import type {
   Api,
@@ -58,6 +63,49 @@ import {
   checkUnknownMemberAccess,
 } from "./validators/index.js";
 
+/** Collapse whitespace/newlines so an error message stays one line
+ *  inside a diagnostic. */
+function oneLine(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Per-theme fault-isolation guard (remediation finding 21).
+ *
+ * Runs a single themed check family (`fn`).  On a thrown error it:
+ *   1. converts the throw into ONE `error` diagnostic on `node` naming the
+ *      failed family and noting that the remaining checks still ran, and
+ *   2. logs the full stack via `console.error` for debugging.
+ * Then it returns so the dispatcher proceeds with the next family — one
+ * crash costs one check family, not every diagnostic for the document.
+ *
+ * `console.error` is used bare (no Node-only APIs) so the validator stays
+ * browser-safe for `src/api/` and the playground (EmptyFileSystem path).
+ *
+ * Langium's own cancellation signal (`OperationCancelled`) is re-thrown
+ * untouched so validation cancellation continues to propagate — the guard
+ * only swallows genuine check faults, never control-flow exceptions.
+ */
+export function runChecked(
+  name: string,
+  node: AstNode,
+  accept: ValidationAcceptor,
+  fn: () => void,
+): void {
+  try {
+    fn();
+  } catch (err) {
+    if (isOperationCancelled(err)) throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    accept(
+      "error",
+      `Validator check '${name}' crashed and was skipped; the remaining checks still ran. (${oneLine(message)})`,
+      { node, code: "loom.validator-check-crashed" },
+    );
+    console.error(`[loom] validator check '${name}' threw:`, err);
+  }
+}
+
 export class DddValidator {
   /** Langium services — held so per-theme checks can reach the
    *  workspace-wide index (cross-document name resolution for
@@ -73,97 +121,105 @@ export class DddValidator {
    *  monolith — model-level passes first (macro diagnostics, then
    *  match / matcher / builder / traceability / type references /
    *  binary operands / primitive conversions), then a structural
-   *  walk per top-level member that delegates to the themed checks. */
+   *  walk per top-level member that delegates to the themed checks.
+   *
+   *  Every themed `check*` invocation runs inside `runChecked` so a
+   *  throw in one family is isolated to a single diagnostic and the
+   *  remaining families still run (finding 21). */
   check(model: Model, accept: ValidationAcceptor): void {
+    const guard = (name: string, node: AstNode, fn: () => void): void =>
+      runChecked(name, node, accept, fn);
     // Macro-expansion diagnostics — drained from the side channel
     // populated by `src/macros/expander.ts` during the pre-link
     // pass.  Surfaced here so unknown macros, bad args, and
     // composition collisions show up alongside other validator
     // diagnostics rather than in a separate diagnostic pipeline.
-    checkMacroExpansion(model, accept, this.services);
+    guard("macro-expansion", model, () => checkMacroExpansion(model, accept, this.services));
     // Validate every `string.matches(regex)` call's
     // argument is a string literal that compiles as a RegExp.
     // Walks the entire AST so the rule applies in invariants,
     // preconditions, derived bodies, function bodies, and guards
     // alike — anywhere the operator can appear.
-    checkMatchesCalls(model, accept);
+    guard("matches-calls", model, () => checkMatchesCalls(model, accept));
     // An anonymous retrieval literal's `where:` must be a criterion reference
     // (criterion.md, use site 3).
-    checkRetrievalLiteral(model, accept);
+    guard("retrieval-literal", model, () => checkRetrievalLiteral(model, accept));
     // Test-assertion matchers (`toBe`/`toHaveText`/…) are a known builtin
     // surface — enforce their fixed argument arity.
-    checkMatcherArity(model, accept);
+    guard("matcher-arity", model, () => checkMatcherArity(model, accept));
     // Assertions are method-based: every `expect(...)` must end in a matcher
     // (no bare boolean), and `toThrow`'s optional status arg is e2e-only.
-    checkExpectMatcher(model, accept);
+    guard("expect-matcher", model, () => checkExpectMatcher(model, accept));
     // Match expressions: warn on a missing `else` arm.
     // Type-checking arm conditions is best-effort here (the lowering's
     // type system is the source of truth); structural checks run
     // unconditionally.
-    checkMatchExpressions(model, accept);
+    guard("match-expressions", model, () => checkMatchExpressions(model, accept));
     // v2 hard cut: reject pre-v2 surfaces that have a builder-call replacement.
     // `Money(10, "USD")` → `Money { amount: 10, currency: "USD" }`,
     // `OrderLine(...)` (entity part) → `OrderLine { ... }`.
-    checkLegacyConstructorCalls(model, accept);
+    guard("legacy-constructor-calls", model, () => checkLegacyConstructorCalls(model, accept));
     // BuilderCall.type is a bare string (not a Langium cross-reference),
     // so typos like `Mony { ... }` pass parsing & linking silently.  The
     // validator resolves the type name against the available builder
     // targets (VO / EntityPart / user-component / walker primitive) and
     // errors on misses.
-    checkBuilderCallType(model, accept, this.services);
+    guard("builder-call-type", model, () => checkBuilderCallType(model, accept, this.services));
     // A bindable input (`Field`/`Toggle`/…) wires to page state via `bind:`;
     // `value:` is silently ignored by the walker — warn and suggest `bind:`.
-    checkBindableInputArgs(model, accept);
+    guard("bindable-input-args", model, () => checkBindableInputArgs(model, accept));
     // Project composition: a top-level `subdomain` (declared outside any
     // `system { }`) folds into the project's single system — enforce that
     // exactly one system exists across the import graph.  See
     // docs/proposals/implicit-system-composition.md.
-    checkTopLevelDomainComposition(model, accept, this.services);
+    guard("top-level-domain-composition", model, () =>
+      checkTopLevelDomainComposition(model, accept, this.services),
+    );
     // A composed project (single system) admits at most one `user` / `theme`
     // block, wherever in the import graph they're written.
-    checkProjectSingletons(model, accept, this.services);
+    guard("project-singletons", model, () => checkProjectSingletons(model, accept, this.services));
     // `component` declarations: enforce the extern↔body exclusivity the
     // grammar admits but can't constrain (extern ⇒ no body; normal ⇒ body).
-    checkComponent(model, accept);
+    guard("component", model, () => checkComponent(model, accept));
     // Traceability artifacts.  The grammar admits a
     // permissive requirement prop-bag and any code cross-reference;
     // semantic constraints (allowed keys / enum values / required
     // props / parent acyclicity) are enforced here.
-    checkTraceability(model, accept);
+    guard("traceability", model, () => checkTraceability(model, accept));
     // Type-position references: bare aggregate name (must be `X id`),
     // and cross-aggregate entity-part name (must go through the root).
-    checkTypeReferences(model, accept);
+    guard("type-references", model, () => checkTypeReferences(model, accept));
     // Aggregate-inheritance surface (aggregate-inheritance.md, I1):
     // `extends` may only target an `abstract` base; abstract bases have no
     // repository and declare no lifecycle actions; `inheritanceUsing(…)` is
     // only valid on a participant; and an event-sourced / document concrete
     // of a `sharedTable` base is forced to `ownTable` (D-ES-TPH).
-    checkInheritance(model, accept);
+    guard("inheritance", model, () => checkInheritance(model, accept));
     // Payload declarations (payload-transport-layer.md, P1): name
     // uniqueness within a context (and vs. value objects / events) and
     // distinct non-empty field names.
-    checkPayloads(model, accept);
+    guard("payloads", model, () => checkPayloads(model, accept));
     // Generic-carrier instantiation (payload-transport-layer.md, P3):
     // the single type argument of `paged` / `envelope` must be a carrier,
     // v1 admits only single-level (non-nested) instantiation, and a carrier
     // may appear only in a transport position (find return / payload field).
-    checkGenericCarriers(model, accept);
+    guard("generic-carriers", model, () => checkGenericCarriers(model, accept));
     // `Self id` (typed-capabilities.md) is only valid inside a `capability`.
-    checkSelfType(model, accept);
+    guard("self-type", model, () => checkSelfType(model, accept));
     // Discriminated unions (payload-transport-layer.md, P4): anonymous
     // `A or B` and named `payload Foo = A | B` variant sets must be distinct
     // (unambiguous wire discriminator) and carrier-typed (no `slot` variant).
-    checkUnions(model, accept);
+    guard("unions", model, () => checkUnions(model, accept));
     // Seed datasets (database-seeding.md): a seed may only populate
     // aggregates of its own context, and a record may not repeat a field.
-    checkSeeds(model, accept);
+    guard("seeds", model, () => checkSeeds(model, accept));
     // `slot` is a UI-only param marker (PR #632) — reject anywhere
     // outside a component's parameter list with a clear error rather
     // than letting the backend emitter throw at generate time.
-    checkSlotTypePosition(model, accept);
+    guard("slot-type-position", model, () => checkSlotTypePosition(model, accept));
     // `action` is `slot`'s function-valued sibling (Tier 2) — same
     // position rule, plus no nested UI-marker as the callback arg.
-    checkActionTypePosition(model, accept);
+    guard("action-type-position", model, () => checkActionTypePosition(model, accept));
     // Binary operand compatibility: every binary expression's
     // operands must agree with the operator's semantics.
     // Arithmetic uses `arithmeticResult` (numeric widening, closed
@@ -172,32 +228,32 @@ export class DddValidator {
     // logical requires bool.  Replaces the per-feature suppression
     // pattern in `checkDerived` etc. — see the function's header
     // for the full rationale.
-    checkBinaryOperands(model, accept);
+    guard("binary-operands", model, () => checkBinaryOperands(model, accept));
     // Slot member access: `heading.foo` on a `(heading: slot)` param
     // is meaningless — slots are opaque JSX, no addressable fields.
     // Emits a precise diagnostic at the member position instead of
     // letting the access cascade silently to `T.unknown`.
-    checkSlotMemberAccess(model, accept);
+    guard("slot-member-access", model, () => checkSlotMemberAccess(model, accept));
     // Unknown member access: `order.totl` on an aggregate / value object /
     // event / payload receiver where no such member exists.  Without it the
     // typo cascades to `T.unknown` and every operand check on it is
     // suppressed — so the mistake produces no diagnostic at all.
-    checkUnknownMemberAccess(model, accept);
+    guard("unknown-member-access", model, () => checkUnknownMemberAccess(model, accept));
     // Primitive conversion expressions (`string(x)`, `money(d)`):
     // restrict to the infallible (source, target) pairs.  Fallible
     // parses (`int("42")`) and narrowing (`int(longValue)`) are
     // deferred until we settle the failure model (`T?` vs throw);
     // an explicit error keeps the surface honest in the meantime.
-    checkPrimitiveConversions(model, accept);
+    guard("primitive-conversions", model, () => checkPrimitiveConversions(model, accept));
     // Criterion declarations + use sites: candidate-type support,
     // body purity, reference cycles, and call arity.
-    checkCriteria(model, accept);
+    guard("criteria", model, () => checkCriteria(model, accept));
     // Channel + channelSource: key-field existence and the channel<->storage
     // transport compatibility matrix (channels.md, Slice 1).
-    checkChannels(model, accept);
+    guard("channels", model, () => checkChannels(model, accept));
     for (const m of model.members) {
       if (m.$type === "BoundedContext") {
-        checkContext(m, accept);
+        guard("context", m, () => checkContext(m, accept));
       } else if (m.$type === "System") {
         const deployables = m.members.filter((sm) => sm.$type === "Deployable");
         const themeBlocks = m.members.filter((sm) => sm.$type === "ThemeBlock") as ThemeBlock[];
@@ -210,7 +266,7 @@ export class DddValidator {
             );
           }
         }
-        for (const tb of themeBlocks) checkTheme(tb, accept);
+        for (const tb of themeBlocks) guard("theme", tb, () => checkTheme(tb, accept));
         // Auth block (D-AUTH-OIDC).  At most one `auth { … }` per
         // system; flag the extras, semantic-check the first.
         const authBlocks = m.members.filter((sm) => sm.$type === "AuthBlock") as AuthBlock[];
@@ -223,7 +279,7 @@ export class DddValidator {
             );
           }
         }
-        for (const ab of authBlocks) checkAuthBlock(ab, m, accept);
+        for (const ab of authBlocks) guard("auth-block", ab, () => checkAuthBlock(ab, m, accept));
         // Page metamodel.  Collect ui blocks first so per-
         // ui checks can see siblings (name uniqueness across uis), and
         // so per-deployable checks can cross-reference the system's
@@ -333,20 +389,22 @@ export class DddValidator {
           } else {
             dataSourceNamesSeen.set(ds.name, ds);
           }
-          checkDataSource(ds, accept);
+          guard("datasource", ds, () => checkDataSource(ds, accept));
         }
 
         for (const sm of m.members) {
           if (sm.$type === "Subdomain") {
-            for (const ctx of sm.contexts) checkContext(ctx, accept);
+            for (const ctx of sm.contexts) guard("context", ctx, () => checkContext(ctx, accept));
           } else if (sm.$type === "BoundedContext") {
-            checkContext(sm, accept);
+            guard("context", sm, () => checkContext(sm, accept));
           } else if (sm.$type === "Deployable") {
-            checkDeployable(sm as Deployable, deployables as Deployable[], accept);
+            guard("deployable", sm, () =>
+              checkDeployable(sm as Deployable, deployables as Deployable[], accept),
+            );
           } else if (sm.$type === "Ui") {
-            checkUi(sm as Ui, m as System, accept);
+            guard("ui", sm, () => checkUi(sm as Ui, m as System, accept));
           } else if (sm.$type === "Layout") {
-            checkLayout(sm, accept);
+            guard("layout", sm, () => checkLayout(sm, accept));
           }
         }
       }
