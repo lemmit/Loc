@@ -9,6 +9,7 @@ import type {
   BoundedContextIR,
   ChannelIR,
   CodeRefKind,
+  ContextStampIR,
   CriterionIR,
   DataSourceKind,
   DeployableIR,
@@ -806,7 +807,7 @@ function enrichAggregate(
   urlStyle: "literal" | "resource" = "literal",
 ): EnrichedAggregateIR {
   const parts = agg.parts.map(enrichPart);
-  const fields = agg.fields.map(resolveFieldAccess);
+  const fields = promoteStampTargets(agg.fields.map(resolveFieldAccess), agg.contextStamps);
   // Synthesize a `derived inspect: string = <structural>` when the user
   // didn't declare one.  Always-present after enrichment so backends
   // can emit a `ToString()` / `Inspect` / `util.inspect.custom` hook
@@ -1099,6 +1100,27 @@ function enrichValueObject(vo: ValueObjectIR): EnrichedValueObjectIR {
 function resolveFieldAccess(f: FieldIR): FieldIR {
   if (f.access) return f;
   return { ...f, access: "editable", accessSource: "default" };
+}
+
+/** Fields written by a `stamp onCreate`/`onUpdate` are server-populated at
+ *  persist time (and overwritten there), so they must not be client-writable
+ *  create/update inputs — a mass-assignment surface.  Promote a stamp target
+ *  that's still create-writable (`editable`/`immutable`) to `managed`: dropped
+ *  from create/update input by `forCreateInput`/`forUpdateInput` yet kept in
+ *  reads (`forApiRead`/`forUiRead` include `managed`).  The `auditable` macro
+ *  already declares its columns `managed`; this closes the gap for a
+ *  hand-declared field targeted by a hand-written / capability `stamp`.  A
+ *  field the user already narrowed (`internal`/`secret`/`token`/`managed`) is
+ *  left untouched. */
+function promoteStampTargets(fields: FieldIR[], stamps: ContextStampIR[] | undefined): FieldIR[] {
+  if (!stamps || stamps.length === 0) return fields;
+  const targets = new Set(stamps.flatMap((s) => s.assignments.map((a) => a.field)));
+  if (targets.size === 0) return fields;
+  return fields.map((f) =>
+    targets.has(f.name) && (f.access === "editable" || f.access === "immutable")
+      ? { ...f, access: "managed", accessSource: "stamp" }
+      : f,
+  );
 }
 
 /** Every aggregate gets a repository with an implicit `find all():

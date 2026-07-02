@@ -1,5 +1,5 @@
-import { generateVueForContexts } from "../generator/vue/index.js";
 import { API_BASE_PATH } from "../util/api-base.js";
+import { dispatchFrontendProject } from "./frontend-dispatch.js";
 import {
   type ComposeServiceShape,
   type PlatformSurface,
@@ -36,7 +36,17 @@ const vuePlatform: PlatformSurface = {
   // repository class.  No find-name collisions are possible.
   reservedRepositoryFindNames: new Set(),
   emitProject({ contexts, sys, deployable, topLevelComponents }): Map<string, string> {
-    return generateVueForContexts(contexts, sys, deployable, { topLevelComponents });
+    // Frontend hosts dispatch by the UI's framework, not the platform keyword —
+    // a vue host can serve a `framework: react|svelte|angular` ui (any static
+    // bundle runs on a static host).  Previously vue had NO dispatch and
+    // silently emitted Vue for every framework (B19).  `vue` is the native
+    // fallback.
+    return dispatchFrontendProject(deployable.uiFramework, "vue", {
+      contexts,
+      sys,
+      deployable,
+      topLevelComponents,
+    });
   },
   composeService({ deployable, sys }): ComposeServiceShape {
     const target = sys.deployables.find((t) => t.name === deployable.targetName);

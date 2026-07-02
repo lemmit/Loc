@@ -240,7 +240,18 @@ export function descriptorFor(name: Platform): PlatformDescriptor {
   // frontend / unknown → the value itself (already a descriptor key).
   const parsed = parseBuiltinPlatformRef(name);
   const key = (parsed ? parsed.family : name) as Platform;
-  return PLATFORM_DESCRIPTORS[key];
+  const descriptor = PLATFORM_DESCRIPTORS[key];
+  if (!descriptor) {
+    // A typo'd / unknown `platform:` value — throw a descriptive error
+    // instead of returning `undefined` typed as a non-optional
+    // `PlatformDescriptor` (which crashes later with a bare `TypeError`),
+    // mirroring `resolvePlatformRef`'s unknown-platform guard.
+    throw new Error(
+      `Unknown platform "${name}". ` +
+        `Known platforms: ${Object.keys(PLATFORM_DESCRIPTORS).join(", ")}.`,
+    );
+  }
+  return descriptor;
 }
 
 /** Every platform's descriptor — replaces `allPlatforms()` for the

@@ -19,14 +19,16 @@
 // ---------------------------------------------------------------------------
 
 import type { ContextStampIR, EnrichedAggregateIR } from "../../../ir/types/loom-ir.js";
-import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { currentUserRefIsActorId, exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { renderTsExpr } from "../render-expr.js";
 
 /** A single stamp field and the save-site expression that fills it. */
 interface StampEntry {
   field: string;
-  /** `requestContext().actorId` for a `currentUser` value, else the rendered
+  /** `ctx.actorId` for the bare principal / `currentUser.id`; the declared
+   *  claim rendered against `requireCurrentUser()` for any other member
+   *  (`currentUser.role` → `requireCurrentUser().role`); else the rendered
    *  expression (e.g. `now()` → `new Date()`). */
   valueExpr: string;
 }
@@ -46,10 +48,24 @@ function entriesFor(
     .flatMap((s) => s.assignments)
     .map((a) => ({
       field: a.field,
-      // A `currentUser` value reads the ambient principal at save time; the
-      // request-scope guard (helper-level) keeps a system/seed save unstamped.
-      valueExpr: exprUsesCurrentUser(a.value) ? "ctx.actorId" : renderTsExpr(a.value),
+      valueExpr: stampValueExpr(a.value),
     }));
+}
+
+/** Render a stamp assignment's RHS for the persist-time helper.
+ *  - bare `currentUser` / `currentUser.id`  → `ctx.actorId` (the ambient who-slot);
+ *  - any other claim (`currentUser.role`)   → the declared attribute against the
+ *    typed principal accessor (`requireCurrentUser().role`), so a read filter
+ *    comparing the same claim matches the stamped row;
+ *  - non-principal value (`now()`)          → the plain rendered expression. */
+function stampValueExpr(value: Parameters<typeof renderTsExpr>[0]): string {
+  if (!exprUsesCurrentUser(value)) return renderTsExpr(value);
+  if (currentUserRefIsActorId(value)) return "ctx.actorId";
+  // A declared claim other than the id — materialise it against the typed
+  // request-scoped principal.  `requireCurrentUser()` mirrors the read-filter
+  // side (repository-find-predicate's `principalAccessor`), so stamp and filter
+  // read the identical claim.
+  return renderTsExpr(value, { thisName: "this", principalExpr: "requireCurrentUser()" });
 }
 
 /** The insert-branch field set: every create-event field plus every
@@ -88,6 +104,12 @@ export function renderAuditStampHelper(audited: EnrichedAggregateIR[]): string {
   // their on-disk values.
   const createOnly = [...insert.keys()].filter((f) => !update.has(f));
 
+  // A declared-claim stamp (`currentUser.role`) materialises against the typed
+  // principal accessor — import it only when some value actually uses it.
+  const needsPrincipal = [...insert.values(), ...update.values()].some((v) =>
+    v.includes("requireCurrentUser()"),
+  );
+
   // Each as a leading `, <field>: <value>` fragment so an empty set leaves the
   // spread (`{ ...row }`) clean — no dangling comma.
   const insertAssigns = [...insert.entries()].map(([f, v]) => `, ${f}: ${v}`).join("");
@@ -100,6 +122,7 @@ export function renderAuditStampHelper(audited: EnrichedAggregateIR[]): string {
   return lines(
     "// Auto-generated.  Do not edit by hand.",
     `import { requestContext } from "../obs/als";`,
+    needsPrincipal ? `import { requireCurrentUser } from "../auth/middleware";` : null,
     "",
     "// Stamp a freshly-inserted row's audit columns from the ambient request",
     "// principal.  A non-request save (seed / system) has no context, so the row",

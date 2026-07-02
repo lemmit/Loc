@@ -8,7 +8,11 @@ import type {
   StmtIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
-import { exprUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import {
+  currentUserRefIsActorId,
+  exprUsesCurrentUser,
+  operationUsesCurrentUser,
+} from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { UnionMember } from "../../_payload/union-wire.js";
@@ -283,11 +287,21 @@ export function renderJavaEntity(
   // without auth are gated upstream (loom.java-stamp-unsupported).  See §5b of
   // docs/plans/capability-stamp-dedup-simulation.md.
   const auditAnnotationFor = new Map<string, { annotation: string; createEvent: boolean }>();
+  // Declared-claim principal stamps (`createdByRole := currentUser.role`) the
+  // AuditorAware CAN'T fill — it returns the id.  These persist the declared
+  // attribute through a @PrePersist / @PreUpdate lifecycle hook that reads the
+  // request-scoped principal, so a read filter comparing the same claim matches
+  // the stamped row.
+  const principalAttrStamps: { field: string; value: ExprIR; createEvent: boolean }[] = [];
   if (isRoot && isAgg(entity)) {
     for (const rule of entity.contextStamps ?? []) {
       const createEvent = rule.event === "create";
       for (const a of rule.assignments) {
         const principal = exprUsesCurrentUser(a.value);
+        if (principal && !currentUserRefIsActorId(a.value)) {
+          principalAttrStamps.push({ field: a.field, value: a.value, createEvent });
+          continue;
+        }
         const annotation = principal
           ? createEvent
             ? "CreatedBy"
@@ -300,6 +314,7 @@ export function renderJavaEntity(
     }
   }
   const isAuditable = auditAnnotationFor.size > 0;
+  const hasPrincipalAttrStamps = principalAttrStamps.length > 0;
 
   // --- fields --------------------------------------------------------------
   const persistence = options.persistence;
@@ -691,10 +706,50 @@ export function renderJavaEntity(
       // fully-qualified on parts so neither import shadows the other.
       "@org.jmolecules.ddd.annotation.Entity";
 
+  // Declared-claim principal stamps ride JPA lifecycle hooks (the AuditorAware
+  // only fills the id): @PrePersist for create-event claims, @PreUpdate for
+  // update-event claims, each reading the request-scoped principal statically
+  // (an entity can't inject the CurrentUserAccessor bean).  A non-request save
+  // (seed / system) has a null principal and is left unstamped.
+  const principalStampHook = (
+    annotation: string,
+    method: string,
+    stamps: typeof principalAttrStamps,
+  ): string[] => {
+    if (stamps.length === 0) return [];
+    return [
+      `    @${annotation}`,
+      `    void ${method}() {`,
+      `        var currentUser = CurrentUserAccessor.current();`,
+      `        if (currentUser == null) {`,
+      `            return;`,
+      `        }`,
+      ...stamps.map((s) => `        this.${s.field} = ${renderJavaExpr(s.value, renderCtx)};`),
+      `    }`,
+      ``,
+    ];
+  };
+  const principalStampLines =
+    hasPrincipalAttrStamps && persistence
+      ? [
+          ...principalStampHook(
+            "PrePersist",
+            "_stampPrincipalOnCreate",
+            principalAttrStamps.filter((s) => s.createEvent),
+          ),
+          ...principalStampHook(
+            "PreUpdate",
+            "_stampPrincipalOnUpdate",
+            principalAttrStamps.filter((s) => !s.createEvent),
+          ),
+        ]
+      : [];
+
   const body = [
     ...derivedLines,
     ...fnLines,
     ...opLines,
+    ...principalStampLines,
     ...externHookLines,
     ...pullEventsLines,
     ...drainProvLines,
@@ -779,6 +834,9 @@ export function renderJavaEntity(
     `import ${basePkg}.domain.valueobjects.*;`,
     callsDomainService ? `import ${basePkg}.domain.services.*;` : null,
     anyOpUsesCurrentUser ? `import ${basePkg}.auth.User;` : null,
+    // Declared-claim principal stamps read the request-scoped principal
+    // statically inside their @PrePersist / @PreUpdate hooks.
+    hasPrincipalAttrStamps && persistence ? `import ${basePkg}.auth.CurrentUserAccessor;` : null,
     superType?.pkg && superType.pkg !== pkg ? `import ${superType.pkg}.${superType.name};` : null,
     ``,
     // TPH concretes (sharesIdentity) inherit the base's shared @Table —

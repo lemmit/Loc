@@ -79,11 +79,17 @@ export function lowerDeployable(d: Deployable): DeployableIR {
                 ? "react"
                 : undefined
       : undefined);
-  // Design pack default depends on what actually renders:
-  //  - react/static frontends + fullstack-dotnet render React → `mantine`;
-  //  - svelte frontends render Svelte → `shadcnSvelte`;
-  //  - vue frontends render Vue → `vuetify`;
-  //  - angular frontends render Angular → `angularMaterial`;
+  // Design pack default depends on what actually RENDERS — the ui's
+  // `framework:`, not the host platform keyword.  A static-asset host serves
+  // any static bundle (`STATIC_BUNDLE_FRAMEWORKS`), so a `platform: react` host
+  // of a `framework: svelte` ui must default to a svelte pack, not mantine —
+  // otherwise the svelte generator resolves a react pack and crashes.  This
+  // mirrors the elixir / dotnet-java branches below, which already key on
+  // `uiFramework`:
+  //  - react/static render React → `mantine`;
+  //  - svelte render Svelte → `shadcnSvelte`;
+  //  - vue render Vue → `vuetify`;
+  //  - angular render Angular → `angularMaterial`;
   //  - phoenixLiveView renders HEEx → `coreComponents`, UNLESS it embeds a
   //    `framework: react` ui (D-PHOENIX-SURFACE), in which case the SPA
   //    needs a tsx pack → `mantine`;
@@ -91,11 +97,11 @@ export function lowerDeployable(d: Deployable): DeployableIR {
   const design = descriptorFor(platform).isFrontend
     ? qualifyDesign(
         d.design,
-        platform === "svelte"
+        uiFramework === "svelte"
           ? "shadcnSvelte"
-          : platform === "vue"
+          : uiFramework === "vue"
             ? "vuetify"
-            : platform === "angular"
+            : uiFramework === "angular"
               ? "angularMaterial"
               : "mantine",
       )

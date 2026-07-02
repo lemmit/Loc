@@ -47,6 +47,13 @@ export interface TsRenderContext {
    *  workflow path wires this — aggregate-op render contexts leave it undefined
    *  (and the validator forbids them calling a non-pure service anyway). */
   readPortArgs?: (service: string, op: string) => string[];
+  /** Text a `current-user` ref renders as, overriding the default bare
+   *  `currentUser` parameter/local.  The persist-time audit-stamp helper (which
+   *  has no `currentUser` in scope) passes `requireCurrentUser()` so a declared
+   *  claim stamp (`createdByRole := currentUser.role`) materialises the real
+   *  attribute (`requireCurrentUser().role`) rather than collapsing to the
+   *  actor id. */
+  principalExpr?: string;
 }
 
 const DEFAULT: TsRenderContext = { thisName: "this" };
@@ -215,8 +222,10 @@ function renderRef(e: RefExpr, ctx: TsRenderContext): string {
       // Magic identifier for the system's user-claim shape — matches
       // the parameter / local that each per-request emitter
       // materialises (operation methods get a `currentUser: User`
-      // param, workflow + view-route handlers introduce a local).
-      return "currentUser";
+      // param, workflow + view-route handlers introduce a local).  A
+      // caller with no such binding (the persist-time stamp helper)
+      // overrides it via `principalExpr`.
+      return ctx.principalExpr ?? "currentUser";
     default:
       // `refKind === "unknown"` is intentional for some positions
       // (e2e test bodies, member-chain receivers like `Order.byId(...)`

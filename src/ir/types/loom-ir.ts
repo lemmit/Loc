@@ -190,7 +190,7 @@ export interface FieldIR {
   /** Where `access` came from.  Diagnostic-only: used by the validator
    * to phrase conflict messages and by the wire-spec diff to explain
    * the field's role.  Same nullability as `access`. */
-  accessSource?: "declared" | "default";
+  accessSource?: "declared" | "default" | "stamp";
   /** Lowered default-value expression from `field: T = <expr>`.  Present
    *  only on aggregate / entity-part / value-object fields that declared a
    *  default (events / views never lower one).  Fully-resolved like any
@@ -2911,6 +2911,25 @@ export function exprUsesCurrentUser(e: ExprIR | undefined): boolean {
     if (node.kind === "ref" && node.refKind === "current-user") found = true;
   });
   return found;
+}
+
+/** True when a `currentUser`-valued stamp RHS is the bare principal or its
+ *  `id` member — the "who" identity that a backend may collapse onto the
+ *  ambient actor id (Hono `ctx.actorId`, Java `@CreatedBy`/AuditorAware).  A
+ *  member access on any OTHER claim (`currentUser.role`, `currentUser.tenantId`)
+ *  returns false: those must persist the DECLARED attribute so a read filter
+ *  comparing the same claim (`this.createdByRole == currentUser.role`) matches
+ *  the stamped row. */
+export function currentUserRefIsActorId(e: ExprIR): boolean {
+  if (e.kind === "ref" && e.refKind === "current-user") return true;
+  if (
+    e.kind === "member" &&
+    e.member === "id" &&
+    e.receiver.kind === "ref" &&
+    e.receiver.refKind === "current-user"
+  )
+    return true;
+  return false;
 }
 
 /** True when the operation's body — preconditions, assignments,
