@@ -149,7 +149,7 @@ export function buildPyRepositoryFile(
     "",
     `    async def all(self) -> list[${agg.name}]:`,
     `        rows = (await self._session.execute(select(${root})${rootWhere(null, root, kind, filterPred)})).scalars().all()`,
-    "        return [await self._hydrate(row) for row in rows]",
+    `        return ${hydrateListExpr(agg)}`,
     ...emittableFinds(repo).flatMap((f) => ["", relationalFindMethod(agg, f, ctx, filterPred)]),
     "",
     `    async def find_many_by_ids(self, ids: list[${agg.name}Id]) -> list[${agg.name}]:`,
@@ -159,7 +159,7 @@ export function buildPyRepositoryFile(
       undefined,
       filterPred,
     )})).scalars().all()`,
-    "        return [await self._hydrate(row) for row in rows]",
+    `        return ${hydrateListExpr(agg)}`,
     ...aggregateViews(agg, ctx).flatMap((v) => ["", viewFindMethod(agg, v, ctx, filterPred)]),
     ...aggregateRetrievals(agg, ctx).flatMap((r) => [
       "",
@@ -170,6 +170,7 @@ export function buildPyRepositoryFile(
     agg.canonicalDestroy ? ["", deleteMethod(agg, ctx)] : null,
     "",
     hydrateMethod(agg, ctx),
+    hasChildCollections(agg) ? ["", hydrateManyMethod(agg, ctx)] : null,
     ...parts.flatMap((p) => ["", partHydrateMethod(p, agg, ctx)]),
     "",
     toWireMethod(agg, ctx),
@@ -232,10 +233,11 @@ export function buildPyRepositoryFile(
   return lines(
     `"""${agg.name} repository.  Auto-generated."""`,
     "",
+    refersTo("Sequence") ? "from collections.abc import Sequence" : null,
     hasProv || hasAudit ? "from datetime import UTC, datetime" : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
     hasProv || hasAudit ? "from uuid import uuid4" : null,
-    refersTo("Decimal") || hasProv || hasAudit ? "" : null,
+    refersTo("Sequence") || refersTo("Decimal") || hasProv || hasAudit ? "" : null,
     saNames.length > 0 ? `from sqlalchemy import ${saNames.join(", ")}` : null,
     refersTo("insert") ? "from sqlalchemy.dialects.postgresql import insert" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
@@ -327,7 +329,7 @@ export function relationalFindMethod(
       `        rows = (`,
       `            await self._session.execute(select(${root})${where}.limit(page_size).offset(offset))`,
       "        ).scalars().all()",
-      "        items = [await self._hydrate(row) for row in rows]",
+      `        items = ${hydrateListExpr(agg)}`,
       findExecutedLine(agg, find.name, "total"),
       "        return PagedResult(items=items, page=page, page_size=page_size, total=total, total_pages=total_pages)",
     );
@@ -337,7 +339,7 @@ export function relationalFindMethod(
     return lines(
       `    async def ${snake(find.name)}(${sig}) -> list[${agg.name}]:`,
       `        rows = (await self._session.execute(select(${root})${where})).scalars().all()`,
-      "        items = [await self._hydrate(row) for row in rows]",
+      `        items = ${hydrateListExpr(agg)}`,
       findExecutedLine(agg, find.name, "len(items)"),
       "        return items",
     );
@@ -485,7 +487,7 @@ function viewFindMethod(
   return lines(
     `    async def ${snake(view.name)}(self) -> list[${agg.name}]:`,
     `        rows = (await self._session.execute(select(${root})${where})).scalars().all()`,
-    "        items = [await self._hydrate(row) for row in rows]",
+    `        items = ${hydrateListExpr(agg)}`,
     findExecutedLine(agg, view.name, "len(items)"),
     "        return items",
   );
@@ -534,7 +536,7 @@ function runMethod(
     "        if limit is not None:",
     "            query = query.limit(limit)",
     "        rows = (await self._session.execute(query)).scalars().all()",
-    "        items = [await self._hydrate(row) for row in rows]",
+    `        items = ${hydrateListExpr(agg)}`,
     findExecutedLine(agg, `run_${snake(retrieval.name)}`, "len(items)"),
     "        return items",
   );
@@ -602,23 +604,122 @@ export function hydrateValueCollection(
   return `[${vc.voName}(${args}) for ${rowVar} in ${snake(vc.fieldName)}_rows]`;
 }
 
+/** True when the aggregate carries at least one child collection that
+ *  `_hydrate` would load with its own per-row SELECT (contained parts,
+ *  reference-collection join tables, or value-object collections).  Only
+ *  these aggregates suffer the list-hydration N+1, so only these get a
+ *  bulk `_hydrate_many`; a scalar-only aggregate's `_hydrate` touches the
+ *  DB zero extra times, so list sites stay on the plain comprehension. */
+function hasChildCollections(agg: EnrichedAggregateIR): boolean {
+  return (
+    agg.contains.length > 0 ||
+    agg.fields.some(isRefCollectionField) ||
+    valueCollectionsFor(agg).length > 0
+  );
+}
+
+/** How a list-returning method hydrates its `rows`: aggregates with child
+ *  collections route through the bulk `_hydrate_many` (one `WHERE … IN` per
+ *  child type instead of one SELECT per row); scalar-only aggregates keep the
+ *  per-row comprehension (no N+1 to avoid). */
+function hydrateListExpr(agg: EnrichedAggregateIR): string {
+  return hasChildCollections(agg)
+    ? "await self._hydrate_many(rows)"
+    : "[await self._hydrate(row) for row in rows]";
+}
+
+/** TPH assert-narrow lines: a concrete kind's OWN columns are nullable on the
+ *  shared table (only its rows populate them), so narrow them before hydration
+ *  or the non-optional domain fields don't type-check. */
+function tphAssertNarrow(
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+  ind: string,
+): string[] {
+  if (!discriminatorValue(agg, ctx.aggregates)) return [];
+  const base = baseOf(agg, ctx.aggregates);
+  const own = base ? ownFieldsOf(agg, base) : [];
+  const out: string[] = [];
+  for (const f of own) {
+    if (f.optional || f.type.kind === "optional") continue;
+    if (isRefCollectionField(f) || isValueCollectionField(f)) continue;
+    for (const col of columnsForFields([f], ctx)) {
+      out.push(`${ind}assert row.${col.attr} is not None`);
+    }
+  }
+  return out;
+}
+
+type ConstructSink = { kind: "return" } | { kind: "append"; into: string };
+
+/** Build the `<Agg>._create(...)` construction from `row` + the in-scope
+ *  `<collection>_rows` variables — the shared tail of `_hydrate` (one row) and
+ *  `_hydrate_many` (bulk).  `ind` is the leading indent; `sink` is whether the
+ *  built aggregate is returned or appended to a result list. */
+function buildAggConstruction(
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+  ind: string,
+  sink: ConstructSink,
+): string[] {
+  const kwargs: string[] = [`id=${agg.name}Id(row.id)`];
+  for (const f of agg.fields) {
+    if (isValueCollectionField(f)) {
+      const vc = valueCollectionsFor(agg).find((c) => c.fieldName === f.name);
+      if (vc) kwargs.push(`${snake(f.name)}=${hydrateValueCollection(vc, "__r", ctx)}`);
+      continue;
+    }
+    if (isRefCollectionField(f)) {
+      const assoc = assocFor(agg, f.name);
+      if (!assoc) continue;
+      kwargs.push(
+        `${snake(f.name)}=[${assoc.targetAgg}Id(__r.${assoc.targetFk}) for __r in ${snake(f.name)}_rows]`,
+      );
+      continue;
+    }
+    kwargs.push(`${snake(f.name)}=${hydrateField("row", f, ctx)}`);
+  }
+  for (const c of agg.contains) {
+    const v = snake(c.name);
+    const hydrateOne = `self._hydrate_${snake(c.partName)}`;
+    kwargs.push(
+      c.collection
+        ? `${v}=[${hydrateOne}(__r) for __r in ${v}_rows]`
+        : `${v}=(${hydrateOne}(${v}_rows[0]) if ${v}_rows else None)`,
+    );
+  }
+  const provFields = provenancedFieldsOf(agg);
+  // Fast path: a plain `return <Agg>._create(...)` when nothing needs the
+  // instance bound after construction (byte-identical to the pre-refactor
+  // single-row emission).
+  if (sink.kind === "return" && provFields.length === 0) {
+    return [
+      `${ind}return ${agg.name}._create(`,
+      ...kwargs.map((k) => `${ind}    ${k},`),
+      `${ind})`,
+    ];
+  }
+  const out: string[] = [`${ind}__agg = ${agg.name}._create(`];
+  out.push(...kwargs.map((k) => `${ind}    ${k},`));
+  out.push(`${ind})`);
+  // Restore co-located provenance lineage from the row's jsonb column — the
+  // full-state ctor doesn't take provenance, so set the backing fields after.
+  for (const f of provFields) {
+    const col = provColumn(f.name);
+    out.push(
+      `${ind}__agg._${col} = (`,
+      `${ind}    ProvLineage.from_wire(row.${col}) if row.${col} is not None else None`,
+      `${ind})`,
+    );
+  }
+  out.push(sink.kind === "return" ? `${ind}return __agg` : `${ind}${sink.into}.append(__agg)`);
+  return out;
+}
+
 function hydrateMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
   const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
   const out: string[] = [`    async def _hydrate(self, row: ${root}) -> ${agg.name}:`];
-  // TPH concrete: its OWN columns are nullable on the shared table (only
-  // rows of this kind populate them) — assert-narrow before hydration so
-  // the non-optional domain fields type-check.
-  if (discriminatorValue(agg, ctx.aggregates)) {
-    const base = baseOf(agg, ctx.aggregates);
-    const own = base ? ownFieldsOf(agg, base) : [];
-    for (const f of own) {
-      if (f.optional || f.type.kind === "optional") continue;
-      if (isRefCollectionField(f) || isValueCollectionField(f)) continue;
-      for (const col of columnsForFields([f], ctx)) {
-        out.push(`        assert row.${col.attr} is not None`);
-      }
-    }
-  }
+  out.push(...tphAssertNarrow(agg, ctx, "        "));
   // Load contained collections…
   for (const c of agg.contains) {
     const partRow = rowClassName(c.partName);
@@ -661,54 +762,93 @@ function hydrateMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR):
       "        ).scalars().all()",
     );
   }
-  const kwargs: string[] = [`id=${agg.name}Id(row.id)`];
-  for (const f of agg.fields) {
-    if (isValueCollectionField(f)) {
-      const vc = valueCollectionsFor(agg).find((c) => c.fieldName === f.name);
-      if (vc) kwargs.push(`${snake(f.name)}=${hydrateValueCollection(vc, "__r", ctx)}`);
-      continue;
-    }
-    if (isRefCollectionField(f)) {
-      const assoc = assocFor(agg, f.name);
-      if (!assoc) continue;
-      kwargs.push(
-        `${snake(f.name)}=[${assoc.targetAgg}Id(__r.${assoc.targetFk}) for __r in ${snake(f.name)}_rows]`,
-      );
-      continue;
-    }
-    kwargs.push(`${snake(f.name)}=${hydrateField("row", f, ctx)}`);
-  }
+  out.push(...buildAggConstruction(agg, ctx, "        ", { kind: "return" }));
+  return out.join("\n");
+}
+
+/** Bulk sibling of `_hydrate`: load every child collection for the whole `rows`
+ *  batch with one `WHERE <fk> IN (root_ids)` query per child type, group by
+ *  parent id, then construct each aggregate from its row + grouped children.
+ *  Turns the list-hydration cost from O(rows × child-types) SELECTs into
+ *  O(child-types).  Only emitted for aggregates with child collections. */
+function hydrateManyMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): string {
+  const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
+  const out: string[] = [
+    `    async def _hydrate_many(self, rows: Sequence[${root}]) -> list[${agg.name}]:`,
+    "        if not rows:",
+    "            return []",
+    "        root_ids = [row.id for row in rows]",
+  ];
+  // Bulk-load + group each contained collection by its parent id.
   for (const c of agg.contains) {
+    const partRow = rowClassName(c.partName);
     const v = snake(c.name);
-    const hydrateOne = `self._hydrate_${snake(c.partName)}`;
-    kwargs.push(
-      c.collection
-        ? `${v}=[${hydrateOne}(__r) for __r in ${v}_rows]`
-        : `${v}=(${hydrateOne}(${v}_rows[0]) if ${v}_rows else None)`,
+    out.push(
+      `        ${v}_all = (`,
+      "            await self._session.execute(",
+      `                select(${partRow}).where(${partRow}.parent_id.in_(root_ids))`,
+      "            )",
+      "        ).scalars().all()",
+      `        ${v}_by_parent: dict[object, list[${partRow}]] = {}`,
+      `        for __${v} in ${v}_all:`,
+      `            ${v}_by_parent.setdefault(__${v}.parent_id, []).append(__${v})`,
     );
   }
-  // Restore co-located provenance lineage from the row's jsonb column —
-  // bind the instance so the backing fields can be set after construction
-  // (the full-state ctor doesn't take provenance).
-  const provFields = provenancedFieldsOf(agg);
-  if (provFields.length > 0) {
-    out.push(`        __agg = ${agg.name}._create(`);
-    out.push(...kwargs.map((k) => `            ${k},`));
-    out.push("        )");
-    for (const f of provFields) {
-      const col = provColumn(f.name);
-      out.push(
-        `        __agg._${col} = (`,
-        `            ProvLineage.from_wire(row.${col}) if row.${col} is not None else None`,
-        "        )",
-      );
-    }
-    out.push("        return __agg");
-    return out.join("\n");
+  // …reference-collection join rows (ordered by the target FK id).
+  for (const f of agg.fields.filter(isRefCollectionField)) {
+    const assoc = assocFor(agg, f.name);
+    if (!assoc) continue;
+    const joinRow = joinRowClassName(assoc);
+    const v = snake(f.name);
+    out.push(
+      `        ${v}_all = (`,
+      "            await self._session.execute(",
+      `                select(${joinRow})`,
+      `                .where(${joinRow}.${assoc.ownerFk}.in_(root_ids))`,
+      `                .order_by(${joinRow}.${assoc.targetFk})`,
+      "            )",
+      "        ).scalars().all()",
+      `        ${v}_by_parent: dict[object, list[${joinRow}]] = {}`,
+      `        for __${v} in ${v}_all:`,
+      `            ${v}_by_parent.setdefault(__${v}.${assoc.ownerFk}, []).append(__${v})`,
+    );
   }
-  out.push(`        return ${agg.name}._create(`);
-  out.push(...kwargs.map((k) => `            ${k},`));
-  out.push("        )");
+  // …value-object-collection child rows (ordinal-ordered → VO list).
+  for (const vc of valueCollectionsFor(agg)) {
+    const vcRow = valueCollectionRowClassName(vc.childTable);
+    const v = snake(vc.fieldName);
+    out.push(
+      `        ${v}_all = (`,
+      "            await self._session.execute(",
+      `                select(${vcRow})`,
+      `                .where(${vcRow}.${vc.parentFk}.in_(root_ids))`,
+      `                .order_by(${vcRow}.ordinal)`,
+      "            )",
+      "        ).scalars().all()",
+      `        ${v}_by_parent: dict[object, list[${vcRow}]] = {}`,
+      `        for __${v} in ${v}_all:`,
+      `            ${v}_by_parent.setdefault(__${v}.${vc.parentFk}, []).append(__${v})`,
+    );
+  }
+  out.push(`        result: list[${agg.name}] = []`, "        for row in rows:");
+  out.push(...tphAssertNarrow(agg, ctx, "            "));
+  // Bind the same `<collection>_rows` locals `buildAggConstruction` expects,
+  // this time sliced from the grouped maps instead of a fresh per-row SELECT.
+  for (const c of agg.contains) {
+    const v = snake(c.name);
+    out.push(`            ${v}_rows = ${v}_by_parent.get(row.id, [])`);
+  }
+  for (const f of agg.fields.filter(isRefCollectionField)) {
+    if (!assocFor(agg, f.name)) continue;
+    const v = snake(f.name);
+    out.push(`            ${v}_rows = ${v}_by_parent.get(row.id, [])`);
+  }
+  for (const vc of valueCollectionsFor(agg)) {
+    const v = snake(vc.fieldName);
+    out.push(`            ${v}_rows = ${v}_by_parent.get(row.id, [])`);
+  }
+  out.push(...buildAggConstruction(agg, ctx, "            ", { kind: "append", into: "result" }));
+  out.push("        return result");
   return out.join("\n");
 }
 

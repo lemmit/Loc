@@ -162,14 +162,23 @@ These are real observations but not correctness defects; each carries a verdict.
   race window between the two selects). `repository-find-builder.ts`; baseline
   fixture re-captured; regenerated project `tsc --noEmit`s clean. Test:
   `single-find-hydrate.test.ts`.
-- **Python — list finds N+1 on children — OPEN (real, follow-up).** `all()` and
-  array finds do `[await self._hydrate(row) for row in rows]`, and `_hydrate`
+- **Python — list finds N+1 on children — FIXED.** `all()` and array/paged/view/
+  retrieval finds did `[await self._hydrate(row) for row in rows]`, and `_hydrate`
   runs one child `SELECT … WHERE parent_id == row.id` per row → N+1 (1000 rows ⇒
-  ~1001 queries). This is a genuine N+1 (worse than the Hono redundant-fetch),
-  but the fix needs a bulk-load path built in the Python repository emitter
-  (load children by `parent_id IN (ids)`, group by parent, hydrate from the map
-  across ~6 list-emitting sites) — a bounded feature, not a review-pass edit.
-  Recommended as a focused follow-up.
+  ~1001 queries). Added a bulk `_hydrate_many(rows)` to the relational repository
+  emitter: it loads each child collection ONCE with `<fk> IN (root_ids)`, groups
+  the rows by parent id, then constructs each aggregate from its row + the grouped
+  children — turning O(rows × child-types) child SELECTs into O(child-types). All
+  six list-emitting sites route through it; single finds keep the per-row
+  `_hydrate`. Only emitted for aggregates that actually have child collections
+  (`contains` / ref-collection / value-collection) — a scalar-only aggregate's
+  `_hydrate` touches the DB zero extra times, so those list sites stay on the
+  per-row comprehension (no churn, no N+1 to avoid). The row-construction tail is
+  now shared between `_hydrate` and `_hydrate_many` (`buildAggConstruction`), so
+  the single-row path is byte-identical. Verified: generated projects pass
+  `ruff check` + `mypy --strict` across containment, ref-collection, and
+  value-collection shapes. `repository-builder.ts`; test:
+  `python-persistence.test.ts` ("list reads bulk-hydrate through _hydrate_many").
 
 ---
 
