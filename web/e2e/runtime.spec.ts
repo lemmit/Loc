@@ -119,6 +119,15 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
       const respBody = await page.getByTestId("resp-body").innerText().catch(() => "<none>");
       console.log(`[runtime] POST create did not return 201 — resp-status="${status}" resp-body=${respBody.slice(0, 800)}`);
       console.log(`[runtime] captured console/page errors:\n${consoleErrors.map((m) => "  " + m.slice(0, 300)).join("\n")}`);
+      // The backend sanitizes the 500 body to "internal"; the real err.message
+      // is logged (`event: internal_error`) via the worker's pino → the
+      // console-tee routes it into the Backend Logs panel, not the page
+      // console.  Dump that panel to get the actual exception.
+      const backendLog = await page
+        .getByTestId("output-backend-log")
+        .textContent()
+        .catch(() => "<panel not found>");
+      console.log(`[runtime] backend log panel:\n${(backendLog ?? "").slice(0, 2500)}`);
       throw e;
     }
     await expect(page.getByTestId("resp-body")).toContainText(/"id":\s*".+"/);
