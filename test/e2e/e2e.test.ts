@@ -67,6 +67,30 @@ function hasDocker(): boolean {
 
 const RUN = ENABLED && hasDocker();
 
+/** `docker compose build` occasionally aborts mid-build on a transient
+ *  package-registry blip — pypi / npm / NuGet / hex / Docker Hub returning a
+ *  connect error while a Dockerfile fetches deps — which fails the whole run
+ *  before any backend even boots (empty `compose ps`, downstream ECONNREFUSED).
+ *  The build is idempotent and layer-cached, so retry it a few times with
+ *  exponential backoff before giving up — the same network-resilience pattern
+ *  the repo already uses for git ops. A real (deterministic) build break still
+ *  fails on the final attempt. */
+async function buildWithRetry(cmd: string, attempts = 3): Promise<void> {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      execSync(cmd, { stdio: "inherit", timeout: 600_000 });
+      return;
+    } catch (err) {
+      if (attempt === attempts) throw err;
+      const backoffMs = 10_000 * 2 ** (attempt - 1); // 10s, 20s
+      console.error(
+        `docker compose build failed (attempt ${attempt}/${attempts}) — retrying in ${backoffMs / 1000}s (likely a transient package-registry blip during dep fetch)`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
+  }
+}
+
 describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
   let outDir: string;
 
@@ -100,10 +124,7 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
     const services = PARITY_ONLY
       ? ` dotnet_api hono_api${SKIP_PHOENIX ? "" : " phoenix_api"} python_api java_api`
       : "";
-    execSync(`docker compose -f ${outDir}/docker-compose.yml build${services}`, {
-      stdio: "inherit",
-      timeout: 600_000,
-    });
+    await buildWithRetry(`docker compose -f ${outDir}/docker-compose.yml build${services}`);
     try {
       execSync(`docker compose -f ${outDir}/docker-compose.yml up -d${services}`, {
         stdio: "inherit",
