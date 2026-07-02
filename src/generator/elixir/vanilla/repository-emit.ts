@@ -194,6 +194,22 @@ function renderRepository(
   const refAssocLines = putAssocLines(appModule, ctxModule, agg, "    ");
   const insertPutAssoc = refAssocLines.length > 0 ? `\n${refAssocLines.join("\n")}` : "";
   const updatePutAssoc = insertPutAssoc;
+  // The insert result must preload the SAME wire-shape associations the reads do.
+  // `Repo.insert` returns the struct with any association the create body didn't
+  // touch still `%Ecto.Association.NotLoaded{}` — e.g. an empty containment (the
+  // reads preload it, `update` preloads it before its changeset, but a fresh
+  // insert never did) — and the serializer's `Map.from_struct` then hands that
+  // sentinel to Jason, which raises `cannot encode association … not loaded`.
+  // Preloading is idempotent: `Repo.preload` skips relationships already loaded
+  // by `put_assoc`/`cast_assoc`, so it only materialises the untouched ones.
+  const insertPipeline = `${aggModule}Changeset.base_changeset(attrs)${kindStamp}${insertStamps}${insertPutAssoc}
+    |> Repo.insert()`;
+  const insertBody = preload
+    ? `case ${insertPipeline} do
+      {:ok, record} -> {:ok, record${preload}}
+      error -> error
+    end`
+    : insertPipeline;
   // The update path preloads the existing reference-collection AND relational
   // containment associations before `base_changeset` so `cast_assoc` /
   // `put_assoc` can replace them cleanly (`cast_assoc` on an unloaded assoc
@@ -257,8 +273,7 @@ defmodule ${repoMod} do
 
   @spec insert(map()${hasStamps && stampPrincipal ? ", map() | nil" : ""}) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
   def insert(attrs${stampActorParam}) when is_map(attrs) do
-    ${aggModule}Changeset.base_changeset(attrs)${kindStamp}${insertStamps}${insertPutAssoc}
-    |> Repo.insert()
+    ${insertBody}
   end
 
   @spec update(${aggModule}.t(), map()${hasStamps && stampPrincipal ? ", map() | nil" : ""}) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}

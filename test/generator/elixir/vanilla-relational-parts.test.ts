@@ -88,6 +88,11 @@ describe("vanilla relational entity parts (§11c)", () => {
     expect(repo).toContain("record -> {:ok, record |> Repo.preload([:pipelines])}");
     // update preloads the existing assoc before cast_assoc.
     expect(repo).toContain("record |> Repo.preload([:pipelines])");
+    // insert preloads the containment on its RESULT: a create body that omits
+    // `pipelines` leaves the assoc `%Ecto.Association.NotLoaded{}` (cast_assoc
+    // doesn't touch an absent key), and the serializer's `Map.from_struct` would
+    // then hand that sentinel to Jason → `cannot encode association … not loaded`.
+    expect(repo).toContain("      {:ok, record} -> {:ok, record |> Repo.preload([:pipelines])}");
   });
 
   it("the child-table migration matches the schema (project_id FK → projects)", async () => {
