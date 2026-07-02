@@ -239,7 +239,7 @@ export class DddValidator {
     // event / payload receiver where no such member exists.  Without it the
     // typo cascades to `T.unknown` and every operand check on it is
     // suppressed — so the mistake produces no diagnostic at all.
-guard("unknown-member-access", model, () => checkUnknownMemberAccess(model, accept));
+    guard("unknown-member-access", model, () => checkUnknownMemberAccess(model, accept));
     // Unresolved bare-identifier heads (`total := amout`, `let x = amout`):
     // a `NameRef` is not a cross-reference, so an unresolvable head types as
     // `T.unknown` and every downstream gate suppresses on it — the finding-1
