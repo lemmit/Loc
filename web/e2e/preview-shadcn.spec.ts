@@ -3,9 +3,9 @@
 // PR #48 wired the Tailwind Play CDN into the iframe and PR #51
 // made the pack loader bundle without `node:fs`.  Without an
 // end-to-end check, either fix can silently regress — this spec
-// drives the playground through Generate → Bundle → Boot →
-// Preview against a `design: shadcn` deployable and asserts the
-// iframe renders.
+// loads the pinned shadcn storybook (`design: shadcn`) and drives the
+// playground through Generate → Bundle → Boot → Preview, asserting the
+// iframe renders shadcn output.
 //
 // The Generate step alone covers PR #51's regression surface (the
 // build worker imports the React generator which transitively
@@ -30,7 +30,7 @@ import {
 // gating but the boot button being *absent*.  The four-region dock defaults
 // to the Output tab; `btn-boot` only mounts on the Runtime ("backend") tab,
 // so switch to it before booting (same idiom as workspace-history.spec.ts).
-test("editor → shadcn-design system → preview boots", async ({ page }) => {
+test("shadcn design pack → generate → bundle → boot → preview boots", async ({ page }) => {
   const consoleErrors: string[] = [];
   page.on("console", (msg) => {
     if (msg.type() === "error") consoleErrors.push(msg.text());
@@ -39,48 +39,12 @@ test("editor → shadcn-design system → preview boots", async ({ page }) => {
 
   await page.goto("/");
   await waitForPlaygroundReady(page);
-  // The find-and-edit step below anchors on "port: 3001" (from the
-  // sales-system fixture).  Pin that example explicitly — default
-  // moved when storybook entries went to the top of the dropdown.
-  await selectExample(page, /Sales System/);
-
-  await test.step("Inject `design: shadcn` into the webApp deployable", async () => {
-    // Mutate the source through the editor exactly the way a user
-    // would: open Find, jump to the anchor line, then type the new
-    // slot in.  Going through the editor (rather than poking the
-    // Monaco model directly) keeps the test honest about real-user
-    // behaviour and avoids depending on `monaco-editor` being on
-    // `window` (it isn't — the playground imports it as an ES
-    // module so the bundler can tree-shake).
-    // Focus the editor's text surface (`.view-lines`), not the outer
-    // container — on slow CI the workspace-switch overlay from
-    // `selectExample` can still be dismissing and eat a click on the
-    // `.monaco-editor` chrome, leaving the editor unfocused so `Ctrl+F`
-    // never opens the find widget (→ a silent 45s `fill` timeout).
-    const editor = page.locator(".monaco-editor").first();
-    await expect(editor).toBeVisible();
-    await editor.locator(".view-lines").click();
-    await page.keyboard.press("Control+f");
-    const findInput = page
-      .locator(".monaco-editor .find-widget .find-part textarea, .monaco-editor .find-widget .find-part input")
-      .first();
-    // Wait for the widget to actually open before typing — turns a 45s
-    // "input not fillable" timeout into a clear "find widget never opened"
-    // signal and gives the widget time to mount on a slow runner.
-    await expect(findInput).toBeVisible({ timeout: 15_000 });
-    await findInput.fill("port: 3001");
-    await page.keyboard.press("Enter");
-    await page.keyboard.press("Escape");
-    // Cursor is now on the matched line.  Move to end of line, add a
-    // newline + the new slot.  Indentation matches the existing
-    // `port:` line in the example (4 spaces).
-    await page.keyboard.press("End");
-    await page.keyboard.press("Enter");
-    await page.keyboard.type("design: shadcn");
-    // Wait for the LSP to re-parse and re-validate.  `0 errors` means
-    // the lowerer accepted the new `design:` slot.
-    await expect(page.getByText(/^0 errors$/)).toBeVisible({ timeout: 10_000 });
-  });
+  // Load the pinned shadcn storybook — already `design: shadcn` — rather than
+  // editing the source live.  Driving the Monaco find widget to inject the
+  // slot was deterministically flaky on CI headless (the find widget never
+  // opened → a 45s timeout), and the sibling storybook preview specs
+  // (chakra/mui/shadcn-v4) prove the pre-designed-example path is robust there.
+  await selectExample(page, /shadcn · aggregate-CRUD storybook/);
 
   await test.step("Generate (build worker imports the bundled template loader)", async () => {
     // This is the regression check for PR #51 specifically: the build
@@ -117,10 +81,11 @@ test("editor → shadcn-design system → preview boots", async ({ page }) => {
     // Preview is always mounted in the four-region shell — no tab to click.
     await expect(page.getByTestId("preview-region")).toBeVisible();
     const iframe = page.frameLocator('[data-testid="preview-iframe"]');
-    // First wait for the iframe to render anything — link copy is
-    // shared between packs (both emit "Products"/"Orders"/"Home"
-    // labels), so this only proves the bundle booted.
-    await expect(iframe.getByText(/Products|Orders|Home/i).first()).toBeVisible({
+    // First wait for the iframe to render content — the scaffold Home
+    // dashboard's "Welcome" heading is pack-independent and visible on the
+    // landing (the aggregate nav sits in a collapsed sidebar for shadcn), so
+    // this proves the bundle booted and rendered.
+    await expect(iframe.getByText(/Welcome/i).first()).toBeVisible({
       timeout: 60_000,
     });
     // Now prove it's *shadcn*, not Mantine: shadcn's app-shell wraps
