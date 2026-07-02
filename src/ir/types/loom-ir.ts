@@ -24,6 +24,12 @@
 // platform-specific shape of the surrounding code.
 // ---------------------------------------------------------------------------
 
+// The `*UsesCurrentUser` helpers below traverse the IR via the one shared,
+// exhaustive child-walker (`src/ir/util/walk.ts`).  This is a value import from
+// `ir/types` → `ir/util`; the reverse edge (walk.ts → loom-ir.ts) is `import
+// type` only (erased at emit), so no runtime cycle forms.
+import { walkExprDeep, walkStmtExprsDeep, walkWorkflowStmtExprsDeep } from "../util/walk.js";
+
 export type IdValueType = "guid" | "int" | "long" | "string";
 
 export type PrimitiveName =
@@ -2900,35 +2906,11 @@ export function allAggregates(loom: LoomModel): AggregateIR[] {
 /** True when the expression tree contains at least one `current-user`
  *  ref (either bare `currentUser` or a member-access rooted in it). */
 export function exprUsesCurrentUser(e: ExprIR | undefined): boolean {
-  if (!e) return false;
-  if (e.kind === "ref" && e.refKind === "current-user") return true;
-  switch (e.kind) {
-    case "method-call":
-      if (exprUsesCurrentUser(e.receiver)) return true;
-      return e.args.some(exprUsesCurrentUser);
-    case "member":
-      return exprUsesCurrentUser(e.receiver);
-    case "binary":
-      return exprUsesCurrentUser(e.left) || exprUsesCurrentUser(e.right);
-    case "ternary":
-      return (
-        exprUsesCurrentUser(e.cond) ||
-        exprUsesCurrentUser(e.then) ||
-        exprUsesCurrentUser(e.otherwise)
-      );
-    case "unary":
-      return exprUsesCurrentUser(e.operand);
-    case "paren":
-      return exprUsesCurrentUser(e.inner);
-    case "call":
-      return e.args.some(exprUsesCurrentUser);
-    case "lambda":
-      return exprUsesCurrentUser(e.body);
-    case "new":
-    case "object":
-      return e.fields.some((f) => exprUsesCurrentUser(f.value));
-  }
-  return false;
+  let found = false;
+  walkExprDeep(e, (node) => {
+    if (node.kind === "ref" && node.refKind === "current-user") found = true;
+  });
+  return found;
 }
 
 /** True when the operation's body — preconditions, assignments,
@@ -2976,37 +2958,11 @@ export function workflowUsesCurrentUser(wf: WorkflowIR): boolean {
 }
 
 function workflowStmtUsesCurrentUser(s: WorkflowStmtIR): boolean {
-  switch (s.kind) {
-    case "precondition":
-    case "requires":
-    case "expr-let":
-      return exprUsesCurrentUser(s.expr);
-    case "assign":
-      return exprUsesCurrentUser(s.value);
-    case "emit":
-    case "factory-let":
-      return s.fields.some((f) => exprUsesCurrentUser(f.value));
-    case "repo-let":
-    case "op-call":
-      return s.args.some(exprUsesCurrentUser);
-    case "repo-run":
-      return (
-        s.retrievalArgs.some(exprUsesCurrentUser) ||
-        (s.page?.offset ? exprUsesCurrentUser(s.page.offset) : false) ||
-        (s.page?.limit ? exprUsesCurrentUser(s.page.limit) : false)
-      );
-    case "for-each":
-      return exprUsesCurrentUser(s.iterable) || s.body.some(workflowStmtUsesCurrentUser);
-    case "if-let":
-      return (
-        s.retrievalArgs.some(exprUsesCurrentUser) ||
-        s.thenBody.some(workflowStmtUsesCurrentUser) ||
-        (s.elseBody ?? []).some(workflowStmtUsesCurrentUser)
-      );
-    case "resource-call":
-    case "domain-service-call":
-      return exprUsesCurrentUser(s.call);
-  }
+  let found = false;
+  walkWorkflowStmtExprsDeep(s, (node) => {
+    if (node.kind === "ref" && node.refKind === "current-user") found = true;
+  });
+  return found;
 }
 
 /** True when the find's `where` filter references `currentUser`.
@@ -3052,24 +3008,11 @@ export function aggregateStampUsesPrincipal(agg: { contextStamps?: ContextStampI
 }
 
 function stmtUsesCurrentUser(s: StmtIR): boolean {
-  switch (s.kind) {
-    case "precondition":
-    case "requires":
-      return exprUsesCurrentUser(s.expr);
-    case "let":
-      return exprUsesCurrentUser(s.expr);
-    case "assign":
-    case "add":
-    case "remove":
-    case "return":
-      return exprUsesCurrentUser(s.value);
-    case "emit":
-      return s.fields.some((f) => exprUsesCurrentUser(f.value));
-    case "call":
-      return s.args.some(exprUsesCurrentUser);
-    case "expression":
-      return exprUsesCurrentUser(s.expr);
-  }
+  let found = false;
+  walkStmtExprsDeep(s, (node) => {
+    if (node.kind === "ref" && node.refKind === "current-user") found = true;
+  });
+  return found;
 }
 
 // ---------------------------------------------------------------------------

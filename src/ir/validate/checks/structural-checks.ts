@@ -13,11 +13,14 @@ import type {
   ExprIR,
   FindIR,
   FunctionIR,
-  OperationIR,
   StmtIR,
   TypeIR,
 } from "../../types/loom-ir.js";
 import { allContexts } from "../../types/loom-ir.js";
+import {
+  walkStmtExprsDeep as walkExprsInStmt,
+  walkWorkflowStmtExprsDeep as walkExprsInWorkflowStmt,
+} from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { walkExpr } from "./shared.js";
 
@@ -1018,61 +1021,6 @@ export function validateVariantMatch(loom: EnrichedLoomModel, diags: LoomDiagnos
       walkExpr(v.filter, vis);
       if (v.output) for (const b of v.output.binds) walkExpr(b.expr, vis);
     }
-  }
-}
-
-function walkExprsInWorkflowStmt(
-  s: import("../../types/loom-ir.js").WorkflowStmtIR,
-  visit: (e: ExprIR) => void,
-): void {
-  switch (s.kind) {
-    case "precondition":
-    case "requires":
-      walkExpr(s.expr, visit);
-      break;
-    case "emit":
-      for (const f of s.fields) walkExpr(f.value, visit);
-      break;
-    case "factory-let":
-      for (const f of s.fields) walkExpr(f.value, visit);
-      break;
-    case "repo-let":
-      for (const a of s.args) walkExpr(a, visit);
-      break;
-    case "expr-let":
-      walkExpr(s.expr, visit);
-      break;
-    case "op-call":
-      for (const a of s.args) walkExpr(a, visit);
-      break;
-    // Other WorkflowStmtIR shapes that carry no expression payload
-    // (savepoints, mark-as-failed, etc.) need no traversal.
-  }
-}
-
-function walkExprsInStmt(
-  s: import("../../types/loom-ir.js").StmtIR,
-  visit: (e: ExprIR) => void,
-): void {
-  switch (s.kind) {
-    case "precondition":
-    case "requires":
-    case "let":
-    case "expression":
-      walkExpr(s.expr, visit);
-      break;
-    case "return":
-    case "assign":
-    case "add":
-    case "remove":
-      walkExpr(s.value, visit);
-      break;
-    case "emit":
-      for (const f of s.fields) walkExpr(f.value, visit);
-      break;
-    case "call":
-      for (const a of s.args) walkExpr(a, visit);
-      break;
   }
 }
 

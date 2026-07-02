@@ -4,6 +4,7 @@
 // -------------------------------------------------------------------------
 
 import type { AggregateIR, BoundedContextIR, ExprIR } from "../../types/loom-ir.js";
+import { walkExprDeep } from "../../util/walk.js";
 
 /** True when `name` is a stored field, containment, or derived property
  *  of the aggregate — the set of members a `sort` / `loads` path may
@@ -265,50 +266,8 @@ export function firstNonQueryableNode(e: ExprIR): string | null {
   }
 }
 
-export function walkExpr(e: ExprIR | undefined, visit: (e: ExprIR) => void): void {
-  if (!e) return;
-  visit(e);
-  switch (e.kind) {
-    case "method-call":
-      walkExpr(e.receiver, visit);
-      for (const a of e.args) walkExpr(a, visit);
-      break;
-    case "member":
-      walkExpr(e.receiver, visit);
-      break;
-    case "binary":
-      walkExpr(e.left, visit);
-      walkExpr(e.right, visit);
-      break;
-    case "ternary":
-      walkExpr(e.cond, visit);
-      walkExpr(e.then, visit);
-      walkExpr(e.otherwise, visit);
-      break;
-    case "unary":
-      walkExpr(e.operand, visit);
-      break;
-    case "paren":
-      walkExpr(e.inner, visit);
-      break;
-    case "call":
-      for (const a of e.args) walkExpr(a, visit);
-      break;
-    case "new":
-    case "object":
-      for (const f of e.fields) walkExpr(f.value, visit);
-      break;
-    case "lambda":
-      walkExpr(e.body, visit);
-      break;
-    case "match":
-      walkExpr(e.subject, visit);
-      for (const a of e.arms) {
-        walkExpr(a.cond, visit);
-        walkExpr(a.value, visit);
-      }
-      for (const a of e.variantArms) walkExpr(a.value, visit);
-      walkExpr(e.otherwise, visit);
-      break;
-  }
-}
+/** Visit `e` and every sub-expression.  Thin alias over the shared, exhaustive
+ *  {@link walkExprDeep} (`src/ir/util/walk.ts`) — kept as a named re-export so
+ *  the many `checks/*` call sites need no churn.  The old hand-rolled copy here
+ *  missed `convert.value`, `list.elements`, and block-body lambda statements. */
+export const walkExpr = walkExprDeep;

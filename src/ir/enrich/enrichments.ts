@@ -251,9 +251,14 @@ function deriveNeeds(subdomains: EnrichedSubdomainIR[]): NeedIR[] {
       // a workflow body means the context requires the verb's capability
       // of its `(context, kind)` resource.  Union per kind so a context
       // using several verbs of one resource needs all their capabilities.
+      // Walks EVERY workflow body (creates / handlers / reactors) AND descends
+      // into `for-each` / `if-let` bodies via `allWorkflowStmts` — a nested
+      // `files.put` must still derive its capability need, else
+      // `validateNeedCapabilities` never sees it (audit finding: `deriveNeeds`
+      // walked only the primary top-level statement list).
       const byKind = new Map<DataSourceKind, Set<string>>();
       for (const wf of ctx.workflows) {
-        for (const st of wf.statements) {
+        for (const st of allWorkflowStmts(wf)) {
           const call =
             st.kind === "resource-call" ? st.call : st.kind === "expr-let" ? st.expr : undefined;
           if (call?.kind === "call" && call.callKind === "resource-op" && call.resourceOp) {
