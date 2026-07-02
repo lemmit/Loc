@@ -37,8 +37,9 @@ import {
   renderProblemVariantHelper,
   renderReturningOpControllerAction,
 } from "./operation-returns-emit.js";
-import { serializeRefCollLines } from "./ref-collection-emit.js";
+import { hasRefColls } from "./ref-collection-emit.js";
 import { stampUsesPrincipal } from "./stamp-emit.js";
+import { renderWireSerialize } from "./wire-serialize.js";
 
 /** Public operations that earn a dedicated `POST /<plural>/:id/<op>`
  *  member endpoint.  CRUD-verb-named ops (create/update/destroy/…) are
@@ -169,19 +170,16 @@ function renderController(
 
   // Reference collections (`X id[]` → `many_to_many`) are projected to id arrays
   // in the wire response: each loaded relationship is mapped to its members'
-  // ids by `__ref_ids/1`.
-  const refCollSerLines = serializeRefCollLines(agg);
-  const serializeRefColls = refCollSerLines.length > 0 ? `\n${refCollSerLines.join("\n")}` : "";
-  const refIdsHelper =
-    refCollSerLines.length > 0
-      ? `
+  // ids by `__ref_ids/1` (emitted directly by the wireShape-driven serializer).
+  const refIdsHelper = hasRefColls(agg)
+    ? `
 
   # Project a loaded \`many_to_many\` relationship to its members' ids (an
   # unloaded relationship serializes as an empty list).
   defp __ref_ids(%Ecto.Association.NotLoaded{}), do: []
   defp __ref_ids(records) when is_list(records), do: Enum.map(records, & &1.id)
   defp __ref_ids(_), do: []`
-      : "";
+    : "";
 
   // A principal (tenancy) `filter` scopes every read by the request actor, so the
   // controller pulls `current_user` off `conn.assigns` (set by the Auth plug,
@@ -431,11 +429,13 @@ ${problemVariant}
 ${
   isDoc
     ? renderDocSerialize()
-    : `  defp serialize(record) do
-    record
-    |> Map.from_struct()
-    |> Map.drop([:__meta__, :__struct__])${serializeRefColls}
-  end${refIdsHelper}`
+    : (
+        (): string => {
+          const { serialize, helpers } = renderWireSerialize(agg, ctx);
+          const nested = helpers.length > 0 ? `\n\n${helpers.join("\n\n")}` : "";
+          return `${serialize}${nested}${refIdsHelper}`;
+        }
+      )()
 }
 end
 `;
