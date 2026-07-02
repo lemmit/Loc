@@ -105,6 +105,10 @@ describe("vanilla shape(document) persistence (DEBT-07)", () => {
     expect(schema).toContain("field :reference, :string");
     expect(schema).not.toContain("field :data, :map");
     const ctrl = file(await generateSystemFiles(RELATIONAL), "/controllers/cart_controller.ex");
-    expect(ctrl).toContain("Map.from_struct()");
+    // The relational serializer projects from the aggregate's wireShape (the
+    // canonical cross-backend wire), NOT a raw `Map.from_struct` struct dump.
+    expect(ctrl).not.toContain("Map.from_struct()");
+    expect(ctrl).toContain('"reference" => record.reference');
+    expect(ctrl).toContain('"itemCount" => record.item_count');
   });
 });

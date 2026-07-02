@@ -1,0 +1,137 @@
+// ---------------------------------------------------------------------------
+// Vanilla (plain Ecto/Phoenix) aggregate REST-controller `serialize/1` —
+// the wireShape-driven success-path serializer.
+//
+// The legacy serializer dumped the raw Ecto struct:
+//
+//   record |> Map.from_struct() |> Map.drop([:__meta__, :__struct__])
+//
+// which diverged from the canonical cross-backend wire (Hono/.NET/Java/Python
+// all project from `wireShape` with the field name AS WRITTEN in the `.ddd`
+// source) in two ways:
+//   1. snake_case keys — a multi-word field shipped `commit_sha`/`build_state`
+//      instead of the canonical `commitSha`/`buildState`.
+//   2. leaked `inserted_at`/`updated_at` — `Map.from_struct` includes Ecto's
+//      auto-`timestamps()` columns, which are NOT in `wireShape` and no other
+//      backend emits.
+//
+// This module rebuilds `serialize/1` from the aggregate's enriched `wireShape`
+// (each `WireField.name` is the JSON key verbatim, already camelCase; the Ecto
+// column read resolves `snake(name)`), plus a set of nested private helper
+// serializers (`serialize_<part|vo>/1`) for contained entities / value objects
+// reachable through the wire shape.  Derived fields are skipped (vanilla never
+// projected them — they aren't Ecto columns).  Reference collections
+// (`X id[]`) keep the existing `__ref_ids/1` projection (helper emitted by
+// api-emit when the aggregate has ref-collection fields).
+// ---------------------------------------------------------------------------
+
+import type {
+  AggregateIR,
+  BoundedContextIR,
+  EnrichedAggregateIR,
+  TypeIR,
+  WireField,
+} from "../../../ir/types/loom-ir.js";
+import { snake } from "../../../util/naming.js";
+
+export interface WireSerializeResult {
+  /** The `serialize/1` function definition (module-indented). */
+  serialize: string;
+  /** Nested `serialize_<part|vo>/1` private helper defs, deduped by name,
+   *  in completion order.  Empty when the wire shape references no contained
+   *  entities / value objects. */
+  helpers: string[];
+}
+
+function unwrapOptional(t: TypeIR): TypeIR {
+  return t.kind === "optional" ? t.inner : t;
+}
+
+/** Build the wireShape-driven `serialize/1` + nested helper serializers for a
+ *  vanilla aggregate REST controller.  `agg` / `ctx` are the enriched IR nodes
+ *  (typed loosely so the call site in `api-emit.ts` — which holds the
+ *  non-enriched surface types — needs no cast); `wireShape` is always present
+ *  after enrichment. */
+export function renderWireSerialize(agg: AggregateIR, ctx: BoundedContextIR): WireSerializeResult {
+  const wireShape = (agg as EnrichedAggregateIR).wireShape ?? [];
+  const parts = new Map<string, WireField[]>(agg.parts.map((p) => [p.name, p.wireShape ?? []]));
+  const vos = new Map<string, WireField[]>(
+    ctx.valueObjects.map((v) => [v.name, v.wireShape ?? []]),
+  );
+
+  const helpers = new Map<string, string>();
+  const building = new Set<string>();
+
+  // Value expression for one wire field over the `record` var.  `source: "id"`
+  // and `source: "derived"` are handled by the caller (id → `record.id`,
+  // derived → skipped), so this only sees property / containment fields.
+  function valueExpr(wf: WireField): string {
+    const t = unwrapOptional(wf.type);
+    const col = `record.${snake(wf.name)}`;
+    switch (t.kind) {
+      case "valueobject":
+        ensureVoHelper(t.name);
+        return `serialize_${snake(t.name)}(${col})`;
+      case "entity":
+        ensurePartHelper(t.name);
+        return `serialize_${snake(t.name)}(${col})`;
+      case "array": {
+        const el = unwrapOptional(t.element);
+        if (el.kind === "id") return `__ref_ids(${col})`;
+        if (el.kind === "valueobject") {
+          ensureVoHelper(el.name);
+          return `Enum.map(${col} || [], &serialize_${snake(el.name)}/1)`;
+        }
+        if (el.kind === "entity") {
+          ensurePartHelper(el.name);
+          return `Enum.map(${col} || [], &serialize_${snake(el.name)}/1)`;
+        }
+        // Array of primitive / enum — Jason encodes the list of scalars.
+        return col;
+      }
+      default:
+        // primitive / enum / id / guid / datetime / decimal / money / bool /
+        // int / string / json — Jason handles DateTime/Decimal natively.
+        return col;
+    }
+  }
+
+  // Render a `%{ "<name>" => <expr>, ... }` map for a wire shape (order =
+  // wireShape order), skipping derived fields.  `baseIndent` is the indentation
+  // of the `%{` opener; entries are indented one step (2 spaces) further.
+  function renderMap(shape: WireField[], baseIndent: string): string {
+    const entries: string[] = [];
+    for (const wf of shape) {
+      if (wf.source === "derived") continue;
+      const ve = wf.source === "id" ? "record.id" : valueExpr(wf);
+      entries.push(`${baseIndent}  "${wf.name}" => ${ve}`);
+    }
+    if (entries.length === 0) return `${baseIndent}%{}`;
+    return `${baseIndent}%{\n${entries.join(",\n")}\n${baseIndent}}`;
+  }
+
+  function buildHelper(name: string, shape: WireField[]): void {
+    const hname = `serialize_${snake(name)}`;
+    if (helpers.has(hname) || building.has(hname)) return;
+    building.add(hname);
+    const body = renderMap(shape, "    ");
+    helpers.set(
+      hname,
+      `  defp ${hname}(nil), do: nil\n\n  defp ${hname}(record) do\n${body}\n  end`,
+    );
+    building.delete(hname);
+  }
+
+  function ensurePartHelper(name: string): void {
+    const shape = parts.get(name);
+    if (shape) buildHelper(name, shape);
+  }
+
+  function ensureVoHelper(name: string): void {
+    const shape = vos.get(name);
+    if (shape) buildHelper(name, shape);
+  }
+
+  const serialize = `  defp serialize(record) do\n${renderMap(wireShape, "    ")}\n  end`;
+  return { serialize, helpers: [...helpers.values()] };
+}

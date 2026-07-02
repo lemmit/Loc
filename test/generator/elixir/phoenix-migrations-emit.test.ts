@@ -252,6 +252,64 @@ describe("phoenix migrations-emit — delta path", () => {
   });
 });
 
+describe("phoenix migrations-emit — SQL-expression column defaults", () => {
+  // The shared MigrationsIR stores SQL defaults verbatim (`now()`,
+  // `gen_random_uuid()` — the event-store table). Valid bare in raw Postgres
+  // DDL (sql-pg.ts) but NOT in Ecto migration DSL: a bare `default: now()`
+  // is an undefined-function compile error (`mix ecto.migrate` won't compile).
+  // A SQL function call must be wrapped in `fragment("…")`; a plain literal
+  // stays bare.
+  it("wraps SQL-function defaults in fragment(...) and leaves literals bare", () => {
+    const ir: MigrationsIR = {
+      module: "Sales",
+      storageName: "",
+      baseline: null,
+      next: EMPTY_SNAP,
+      steps: [
+        {
+          op: "createTable",
+          table: {
+            name: "order_events",
+            ownerModule: "Sales",
+            columns: [
+              { name: "id", type: { kind: "uuid" }, nullable: false },
+              {
+                name: "occurred_at",
+                type: { kind: "datetime" },
+                nullable: false,
+                default: "now()",
+              },
+              {
+                name: "token",
+                type: { kind: "uuid" },
+                nullable: false,
+                default: "gen_random_uuid()",
+              },
+              { name: "attempts", type: { kind: "int" }, nullable: false, default: "0" },
+            ],
+            primaryKey: ["id"],
+            foreignKeys: [],
+            indexes: [],
+          },
+        },
+      ],
+      version: "20260101000000",
+      name: "Initial",
+    };
+    const out = new Map<string, string>();
+    emitMigrations("phoenix_app", [ir], APP_MODULE, out);
+    const body = [...out.values()].join("\n");
+    expect(body).toContain('default: fragment("now()")');
+    expect(body).toContain('default: fragment("gen_random_uuid()")');
+    // A bare SQL-function default is the compile-error bug — must NOT appear.
+    expect(body).not.toMatch(/default: now\(\)/);
+    expect(body).not.toMatch(/default: gen_random_uuid\(\)/);
+    // Numeric literal stays bare (no fragment).
+    expect(body).toContain("default: 0");
+    expect(body).not.toContain('fragment("0")');
+  });
+});
+
 describe("phoenix migrations-emit — multi-module initial versions are unique", () => {
   // A backend that serves >1 module writes all their initial migrations into
   // ONE priv/repo/migrations/ dir.  Each module's versions are allocated from
