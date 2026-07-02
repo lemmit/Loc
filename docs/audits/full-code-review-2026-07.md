@@ -1,0 +1,152 @@
+# Full code & solution review — July 2026
+
+**Scope:** the entire toolchain (`src/` — language, macros, IR, generators, platform, system, CLI/API/MCP/tools), the test/CI surface, and the solution architecture.
+**Method:** six parallel deep-review passes (language+macros, validators, IR, backend generators, frontends+walker, system/CLI/tooling, plus a cross-cutting solution/CI pass), each grounding claims by reading code and — for most high-severity findings — reproducing them empirically via `node bin/cli.js parse|generate` on crafted `.ddd` inputs. Baseline: `main` @ `9cec10d`, fast suite green (6,294 passed / 791 files, 768s).
+**Status of findings:** every finding below was verified in code; ones marked *(repro)* were additionally reproduced end-to-end against generated output.
+
+---
+
+## Verdict
+
+The architecture is real and the discipline is unusual: the ten-phase one-directional pipeline is test-enforced (with holes noted below), the `ExprTarget`/`WalkerTarget` seams genuinely centralize dispatch, `wireShape` is a real cross-backend contract, enrichment is pure and brand-typed, there is **no SQL injection anywhere**, and every guardrail failure the team has hit historically became a checked-in gate or skill. The fast suite is green and dense (6.3k tests).
+
+The weaknesses are equally systematic, and they cluster into **five root causes** rather than dozens of independent bugs:
+
+1. **Escaping/mangling of `.ddd`-sourced strings and identifiers into generated source is not centralized.** Elixir string literals interpolate `#{…}` unescaped (code injection), Elixir regex sigils splice raw patterns, HEEx text position is unescaped (breaks `mix compile`, executes `<%= %>`), HEEx literal attributes aren't quote-escaped, reserved-word field names emit bare on all five backends, SQL DDL identifiers are a passthrough. One "hostile identifiers and strings" fixture compiled per backend would have caught all of it.
+2. **Hand-copied traversals lag the IR.** ≥5 near-identical expression/statement walkers (validate/util/types) each miss different node kinds; `computeSaves`, `deriveNeeds`, and workflow validation walk only flat/primary statement lists. Consequences include silently-lost persistence and validation dead zones.
+3. **The "suppress on `unknown`" convention has a false premise.** Bare `NameRef`s have no upstream reporter, so a typo'd identifier produces zero diagnostics and emits verbatim into generated code.
+4. **Validation coverage is asymmetric across equally-legal syntactic forms.** Top-level composition members, root-level VOs, `create` params, `hosts:` mounts, and duplicate names all skip checks their sibling forms get.
+5. **The per-PR gate tier is thinnest exactly where the recent bug history lives**: runtime wire/persistence semantics on non-Hono backends. 22 of the last 50 commits are `fix:`, overwhelmingly Elixir wire-parity chases that compiled green and failed on round-trip.
+
+Nothing found suggests the "no backend IR" bet is wrong — but the cost has visibly moved from structure (solved) to **runtime semantics** (not yet contracted), and it grows linearly per backend.
+
+---
+
+## Highest-severity findings (cross-layer, ranked)
+
+### Silent wrong behavior in generated systems
+
+| # | Finding | Where |
+|---|---|---|
+| 1 | **Typo'd bare identifier → zero diagnostics → emitted verbatim.** `NameRef` is not a cross-reference; `typeOf` returns `unknown` and every downstream gate suppresses on `unknown` assuming an upstream reporter that doesn't exist. *(repro: `total := amout` validates clean, emits `this._total = amout;`)* | `src/language/validators/statements.ts:247`, `types.ts:191` |
+| 2 | **Workflow mutations of outer bindings inside `for-each`/`if-let` are never persisted.** `computeSaves` never descends into bodies for outer bindings. *(repro: `acct.charge(o.total)` in a loop — charge silently lost)* | `src/ir/lower/lower-members.ts:361-408` |
+| 3 | **Domain-service `findAll(Criterion)` drops the criterion** (returns all rows — data-exposure-grade) **and calls a nonexistent repo method.** *(repro)* | `src/ir/lower/repo-read.ts:277-292`, `src/ir/enrich/enrichments.ts:442` |
+| 4 | **Collection-op lambda params typed as a `string` placeholder** → wrong money code inside lambdas (`String(10.00)` concat, raw `>` instead of `.gt`). Falsifies "backends never re-resolve" inside lambdas. *(repro)* | `src/ir/lower/lower-expr.ts:631` |
+| 5 | **Multi-level `extends` silently drops grandparent fields**; migrations emit the column the domain layer never populates → every insert fails. `extends` cycles are also undetected and truncate inheritance. *(repro)* | `src/ir/enrich/enrichments.ts:333-341`; `src/language/validators/inheritance.ts:46-51` |
+| 6 | **Strict `>`/`<` invariant bounds folded to inclusive via `n±1`** — wrong for decimal/money: `weight > 0.5` becomes `z.coerce.number().min(1.5)`, rejecting valid input at the API boundary. *(repro)* | `src/ir/validate/invariant-classify.ts:437-458` |
+| 7 | **Ownership stamp persists the wrong principal attribute on Hono + Java** (`currentUser.role` stamp collapsed to actor id) — declared read filter never matches; per-backend auth divergence. | `src/generator/typescript/emit/audit-stamp.ts:51`, `src/generator/java/emit/entity.ts:290` |
+| 8 | **`isAssignable` accepts any `T?` → any `U?`** (`value.kind === "optional"` disjunct). `int? := string?` validates clean. *(repro)* | `src/language/type-system.ts:273` |
+| 9 | **Ternaries are completely unchecked** (condition needn't be bool; branches needn't agree). *(repro)* | `src/language/type-system.ts:442-448` |
+| 10 | **No duplicate-name checks for aggregates/properties/params/event fields** — duplicates silently replace/retype (a duplicate `aggregate Order` drops the first one's fields entirely). *(repro)* | `src/language/validators/structural.ts` (gap) |
+
+### Generated code that breaks or is exploitable
+
+| # | Finding | Where |
+|---|---|---|
+| 11 | **Elixir string literals emit `#{…}` unescaped** — `mix compile` break; arbitrary Elixir execution from a `.ddd` string literal. *(repro)* | `src/generator/elixir/render-expr.ts:288` (+ heex-walker-core, tests-emit) |
+| 12 | **Elixir `~r/…/` splices the raw pattern** — a `/` or `#{` in a `matches()` pattern breaks compilation/interpolates. *(repro)* | `src/generator/elixir/render-expr.ts:442`, `vanilla/changeset-validators.ts:36` |
+| 13 | **HEEx text position is unescaped** — JSX targets escape via `escapeText`; the parallel HEEx engine never calls it. `Heading { "<%= System.get_env() %>" }` executes at render time; a bare `<` breaks the tokenizer. HEEx literal attribute values also aren't quote-escaped. *(repro, cross-checked against React output)* | `src/generator/elixir/heex-walker-core.ts:1082-1088`, `heex-primitives.ts:42-45` |
+| 14 | **Reserved-word field/param names emit bare on all five backends** (`class`, `def`, `end`, `synchronized`…) — compile failure everywhere; the `escape<Lang>Ident` helpers exist but are wired only for `let`/`lambda` locals. *(repro)* | `src/util/naming.ts:336-364` + each backend's `render-expr.ts` |
+| 15 | **Unquoted SQL DDL identifiers** — a field named `user`/`order`/`end` emits broken `CREATE TABLE`; the seed path in the same file quotes correctly. | `src/generator/sql-pg.ts:134-140` |
+
+### Migrations & composition (deploy-time breakage)
+
+| # | Finding | Where |
+|---|---|---|
+| 16 | **Same aggregate name in two contexts derives one migration that creates the same table twice, in the wrong schema** — the canonical DDD scenario (`Sales.Order`/`Billing.Order`), zero diagnostics. *(repro)* | `src/system/migrations-builder.ts:394-427, 501-514` |
+| 17 | **Delta migrations are never schema-qualified** — only `createTable` carries `schema`; every ALTER/DROP on a schema-qualified system targets the wrong relation or fails. *(repro)* | `src/generator/sql-pg.ts:21-45`, `MigrationStep` (no schema field) |
+| 18 | **`dropTable` ignores FK ordering** (creates are Kahn-sorted, drops are alphabetical) → "cannot drop table" abort. *(repro)* | `src/system/migrations-builder.ts:402-407` |
+| 19 | **Adding a required field derives `ADD COLUMN … NOT NULL` with no default** (fails on any populated table); **renames diff to drop+add** (silent data destruction, no warning/gate). *(repro)* | `migrations-builder.ts:441-451` |
+| 20 | **No host-port or service-slug uniqueness validation** — two default-port deployables collide at `docker compose up`; case-variant deployable names silently merge into one output dir + duplicate compose keys; user port 8081 collides with hardcoded Keycloak. *(repro)* | `src/system/index.ts:332-392,653`, `src/ir/lower/lower-deployment.ts:183` |
+
+### Toolchain robustness
+
+| # | Finding | Where |
+|---|---|---|
+| 21 | **Any validator throw kills every diagnostic for the document** (one monolithic Model-level check) — and two crash paths were verified: unknown `platform:` string (`.adapters` on `undefined`) and a `matches()` pattern starting with `"` (`JSON.parse` outside the try, behind a comment that contradicts CLAUDE.md's own STRING-terminal note). *(both repro)* | `src/language/validators/data/platform-rules.ts:298`; `src/language/validators/match.ts:191-192` |
+| 22 | **Macro expansion is one-shot but LSP incremental rebuilds don't re-fire it** — cross-file macro refs that resolve late never expand, and drained diagnostics vanish on relink; correct for CLI, wrong in a live editor session. | `src/macros/expander.ts:102-127` vs Langium 4.3 `document-builder` |
+| 23 | **Top-level (implicit-composition) system members skip the entire per-System check family** — the same deployable errors nested in `system { }`, validates clean top-level. *(repro)* | `src/language/ddd-validator.ts:198-353` |
+| 24 | **IR validation walks only the primary create's flat statement list** — `handle`/`on` bodies and nested statements skip every body check; `walkExprsInWorkflowStmt` misses 6 of 13 stmt kinds. | `src/ir/validate/checks/workflow-checks.ts:157,375`, `structural-checks.ts:1024-1051` |
+
+---
+
+## Layer-by-layer notes (medium/low, condensed)
+
+### Language & macros
+- Let-bound locals typed `unknown` in `envForNode` → every expression-level check on a `let` operand silently disengages (`type-system.ts:961`, `validators/types.ts:113`).
+- Same-named entity parts across aggregates resolve by declaration order with no ambiguity diagnostic (`ddd-scope.ts:194`).
+- Runtime layering leak `language → platform → generator` via `platform-rules.ts` → `resolve-adapters.ts` → `_adapters` — invisible to the layering gate (direct edges only). Finding 21's crash is a direct consequence.
+- Stale hand-listed `PLATFORM_KEYWORDS`/`DESIGN_KEYWORDS` in `print-structural.ts:109-129` (missing python/vue/angular + current packs, still lists retired `phoenix`) — no completeness test, unlike `walker-stdlib.ts`.
+- Emit fields / function returns reject literal promotion that `:=`/defaults accept; workflow emit promotes but aggregate emit doesn't (`statements.ts:312`, `lower-stmt.ts:92` vs `lower-workflow.ts:440`).
+- `create`/`destroy` params escape the bare-aggregate type-position check; member-call statements (`total.bogus()`) bypass all validation; root-level VO legacy constructor calls slip the rejection.
+
+### IR
+- Shared expression walkers: `walkExpr` misses `convert`/`list` and lambda `block` bodies; `exprUsesCurrentUser` additionally misses `match` — five diverging copies (`checks/shared.ts:268`, `loom-ir.ts:2902`, `domain-service-read-ports.ts:74`, `domain-service-tier.ts:214`).
+- `wireShape` id row hardcodes `valueType: "guid"`, contradicting `ids int|long|string` — wire-spec.json disagrees with the DB and its own FK entries *(repro)* (`enrichments.ts:1174`).
+- `bool = true` create default silently dropped at the wire boundary — omitted field arrives `false` *(repro)* (`wire-projection.ts:161`).
+- Bare-name `Repo.run(Name, page: {...})` drops pagination (`repo-read.ts:213`).
+- `deriveNeeds` walks only primary top-level statements → capability checks silently skipped for nested `files.put` (`enrichments.ts:254`).
+- dotnet exempt from the principal-filter-needs-auth gate → NRE on every read for `user {}` without `auth: required` (`system-checks.ts:1104`).
+- "Derive, don't stamp" violations: `WorkflowIR.params/statements/savesAtExit` are stamped facades of `creates[0]` (root cause of the primary-only validation blindness); `canonicalCreate` stamped at two sites.
+- Bare `prices.sum` type-admitted but unrenderable (`this._prices.sum.plus(...)`) *(repro)*.
+
+### Backend generators & platform
+- Bundle-split boundary defeated transitively: `lower-deployment.ts`/`platform-rules.ts` → `resolve-adapters.ts` → `registry.ts` → **all five generators** in any client bundle; `metadata-boundary.test.ts` checks one hop deep.
+- Wildcard CORS default on every backend while a session cookie is also accepted — hardening gap in the runnable stack.
+- Phoenix `SECRET_KEY_BASE` is one hardcoded public constant across all generated apps (`src/platform/elixir.ts:78`) — forgeable session cookies unless manually rotated.
+- `fs-discovery.ts` never enforces the `core` semver gate its manifest promises; out-of-tree backends and malformed `loom` blocks are silently dropped.
+- Frontend host dispatch contradicts `hostableFrameworks`: a validator-legal `platform: react` host of a `framework: vue` ui silently emits a React project.
+- Stamp fields are required client-writable inputs in every create DTO (mass-assignment surface; currently overwritten at persist).
+- TS `asRegexLiteral` edge cases: `matches("")` renders `//` (a comment); trailing-backslash pattern breaks the literal.
+- `emitsCommandRoute`/`collectLeaves` copy-pasted across backends — IR-analysis predicates that belong in `src/ir/util/`.
+
+### Frontends & walker
+- Vue walker seams hard-throw on valid input when a rendered expression contains both quote kinds (`vue-target.ts:167,207,290`) — aborts generation for the whole system; `renderConditionalChild` has *no* guard and silently emits broken `v-if`.
+- `heex-parity.test.ts` measures registry **presence**, not behavior — it stays green while both renderers exist and disagree on escaping (which is exactly what shipped). Half of `heexTarget` is unreachable contract-completeness stubs that the conformance test validates while the live path diverges.
+- Angular compound state read on a nested target omits the signal call (`walker-core.ts:1445`).
+- `WalkResult` carries six Angular-specific `unknown[]` side-channels on the shared shape — a target-owned opaque sink would keep it framework-neutral.
+
+### System, CLI, tooling
+- Corrupted `.loom` snapshot silently treated as first run → re-baselined "Initial" migration against an existing DB (`snapshot.ts:26`).
+- `--dry-run` creates the output dir and overcounts ("would write 35" where a real run writes 0) (`cli/main.ts:366,407`).
+- `ddd verify --min 90%` → `NaN` comparison → gate silently passes (`cli/main.ts:682`).
+- `serviceSlug` re-implements a weaker `snake()` outside `naming.ts`, untested.
+- No containment guard on generated paths (`path.join(outDir, relPath)`) — not currently exploitable (grammar IDs), cheap defense-in-depth before out-of-tree packs become real.
+- The MCP/tools/api stack itself is exemplary (pure, transport-neutral, throws → tool errors, zero tool logic in the server).
+
+### Solution / CI / health
+- **Per-PR runtime-behavior coverage:** behavioral round-trips run per-PR only for Hono over a 2-system corpus; everything else is nightly or label-gated. The commit log is the proof (the serial Elixir wire-parity fix series #1620–#1628, all compile-green/round-trip-red).
+- **Elixir has the narrowest per-PR compile gate of any backend** (`elixir-vanilla-build.yml` path filter excludes `src/ir/**`, `_expr/**`, even `elixir/render-expr.ts`; `corpus-build.yml` has no elixir leg) — the weakest gate on the most volatile target.
+- **Layering tests have structural blind spots:** `IMPORT_RE` misses side-effect/dynamic imports; `src/macros/` and `src/platform/**` scanned by no layering test; generator files checked only against `system` (an existing `generator → language` value import passes silently: `walker-core.ts:66` → `walker-stdlib.js`); the sibling-edge fence is 13 pinned exceptions deep (backend→react fullstack embeds — composition happening below `system/`).
+- **`npm audit` high-severity is the toolchain's own MCP wrapper** (`ddd-mcp → @modelcontextprotocol/sdk → @hono/node-server → hono@4.12.23`, path-traversal GHSA-wwfh-h76j-fc44 et al.). Generated apps are *not* affected (hono pinned ^4.12.26 in `pins.ts`). `npm audit fix`-able.
+- **CLAUDE.md drift** in a repo where CLAUDE.md is load-bearing for parallel agents: duplicate `designs/` and `api/, vite/, docker/` table rows; `src/platform/hono/v5/` + `packages/backend-hono-v5` exist but are undocumented; "three JSX targets" vs the workflows section's (correct) four.
+- Fixture strategy (1.7 MB / 303 committed files) workable but rubber-stamp-prone on 100-file regen diffs; `npm test` exclude list triplicated by hand in package.json; direct `chevrotain` pin duplicates Langium's and can silently diverge.
+
+---
+
+## What's genuinely good
+
+- Layering enforced by tests with empty exception lists and vacuous-pass guards; branded `EnrichedLoomModel` makes "forgot a phase" a compile error.
+- `ExprTarget` / `WalkerTarget` seams at the right altitude: 17-arm dispatch written once; adding a backend = writing leaf tables. `wireShape` as the single ordered DTO contract is the architectural payoff, realized.
+- **No SQL injection anywhere** — all five backends parameterize; global auth middleware, EF global query filters, real JWT verification (JWKS, issuer/audience/expiry, `alg:none` rejected), sanitized 500s, `sensitive(pii)` redaction.
+- Exhaustiveness discipline: printer completeness tests, walker-stdlib completeness, print round-trip gates, per-`ExprIR.kind` arm tests per backend, diagnostic-code registry test.
+- Every past guardrail failure became a checked-in gate or skill (heex-parity freeze, pre-push merge-tree hook, `generated-stack-verifier`); `experience_gathered.md` and PR-numbered test rationale make the codebase honestly auditable.
+- CI economics are engineered: 4-way sharding with a single roll-up status, path-filtered matrices, label-gated heavy tiers.
+
+---
+
+## Recommendations (ranked by leverage)
+
+1. **Close the escaping bug class at the seams, not per-site.** One escaper per target language for (a) string literals (Elixir: escape `#{` or use `~S`), (b) regex materialization, (c) HEEx text position (funnel through the existing-but-dead `escapeText`), (d) identifiers derived from `.ddd` names (route through the existing `escape<Lang>Ident` for *all* refKinds, not just locals), (e) SQL DDL idents (use the `qIdent` already in the file). Add one cross-backend "hostile inputs" fixture (fields named `class`/`end`, a `matches` pattern with `/"#{`, string literals with `"` `<` `#{`) that generates and compiles on every backend.
+2. **Fix the `unknown`-suppression premise:** add a bare-`NameRef` resolution check (or make it a Langium cross-reference) so a typo is a diagnostic, not emitted code. Then the sibling gates' suppression convention becomes sound.
+3. **One shared, exhaustively-`never`-checked IR child-walker** replacing the ≥5 hand copies, plus a property test ("every ExprIR/StmtIR kind's children are visited"). This retires findings 2, 24, the `walkExpr`/`currentUser` gaps, and `deriveNeeds` in one stroke, and prevents the next one.
+4. **Wrap each themed validator in its own try/catch** (or per-check dispatch) so one throw costs one check, not the document; fix the two known crash paths.
+5. **Migrations hardening:** schema on every `MigrationStep`; reverse-topological drops; qualify or reject duplicate table names across contexts (plus a duplicate-aggregate-name validator); guard NOT-NULL-add and rename-as-drop/add behind an explicit decision (destructive-change gate).
+6. **Uniqueness validators:** host ports, service slugs, duplicate declaration names (aggregate/property/param/event field), cross-aggregate part-name ambiguity.
+7. **Give Elixir per-PR parity teeth:** widen `elixir-vanilla-build.yml` path filters to `src/ir/**` + `src/generator/_expr/**` + all of `src/generator/elixir/`, add an elixir corpus-build leg, and start a "runtime semantics contract" (casing/casting/assoc-persistence/error-envelope) analogous to `wire-spec.json` — the recent fix-avalanche is what one backend drifting looks like.
+8. **Patch the layering gates' blind spots** (side-effect/dynamic imports, scan `platform/` + `macros/`, check generators against `language` too) and fix the two transitive leaks they'd then catch.
+9. Housekeeping: `npm audit fix` for the MCP hono CVE; de-duplicate the CLAUDE.md table rows and document hono v5; per-doc drift is load-bearing here.
+
+---
+
+*Generated as a snapshot-in-time audit; per repo convention (`docs/audits/`), treat as the state of `main` @ `9cec10d`, 2026-07-02 — parity claims rot fast.*
