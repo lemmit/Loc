@@ -61,6 +61,7 @@ import {
   checkUi,
   checkUnions,
   checkUnknownMemberAccess,
+  checkUnknownNameRefs,
 } from "./validators/index.js";
 
 /** Collapse whitespace/newlines so an error message stays one line
@@ -238,7 +239,14 @@ export class DddValidator {
     // event / payload receiver where no such member exists.  Without it the
     // typo cascades to `T.unknown` and every operand check on it is
     // suppressed — so the mistake produces no diagnostic at all.
-    guard("unknown-member-access", model, () => checkUnknownMemberAccess(model, accept));
+guard("unknown-member-access", model, () => checkUnknownMemberAccess(model, accept));
+    // Unresolved bare-identifier heads (`total := amout`, `let x = amout`):
+    // a `NameRef` is not a cross-reference, so an unresolvable head types as
+    // `T.unknown` and every downstream gate suppresses on it — the finding-1
+    // hole `checkUnknownMemberAccess` only closes for member *suffixes*.
+    // Restores the "`unknown` implies already-reported" invariant its
+    // siblings assume.  Needs `services` for cross-file / workspace names.
+    guard("unknown-name-refs", model, () => checkUnknownNameRefs(model, accept, this.services));
     // Primitive conversion expressions (`string(x)`, `money(d)`):
     // restrict to the infallible (source, target) pairs.  Fallible
     // parses (`int("42")`) and narrowing (`int(longValue)`) are

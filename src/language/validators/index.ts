@@ -29,6 +29,7 @@ export {
   checkMatcherArity,
   checkMatchesCalls,
 } from "./match.js";
+export { checkUnknownNameRefs } from "./names.js";
 export { checkPayloads } from "./payload.js";
 export { checkSeeds } from "./seed.js";
 export {

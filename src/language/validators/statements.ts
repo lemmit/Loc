@@ -309,7 +309,13 @@ export function checkEmit(stmt: EmitStmt, env: Env, accept: ValidationAcceptor):
       continue;
     }
     const actual = typeOf(f.value, env);
-    if (!isAssignable(actual, expected)) {
+    // Suppress on `unknown` like the sibling gates (`checkAssignOrCall`,
+    // `checkDerived`, …): an unresolvable value (e.g. a typo'd bare name)
+    // is reported once at its source by `checkUnknownNameRefs` /
+    // `checkUnknownMemberAccess`.  Without this guard `checkEmit` was the
+    // only typo catch in emit args, and it produced a second, misleading
+    // "expects X but got unknown" error (finding 1 / A2.2).
+    if (actual.kind !== "unknown" && !isAssignable(actual, expected)) {
       accept(
         "error",
         `Field '${f.name}' expects '${typeToString(expected)}' but got '${typeToString(actual)}'.`,
