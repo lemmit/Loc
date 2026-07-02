@@ -29,6 +29,19 @@ import { snake, upperFirst } from "../../util/naming.js";
 
 const BASE_TIMESTAMP = 20260101000000;
 
+/** Render a MigrationsIR column `default` into an Ecto `, default: …` clause.
+ *  The shared `MigrationsIR` stores SQL defaults verbatim (e.g. `now()`,
+ *  `gen_random_uuid()`) — valid bare in raw Postgres DDL (`sql-pg.ts`) but NOT
+ *  in Ecto migration DSL, where a SQL function call must be wrapped in
+ *  `fragment("…")` (a bare `default: now()` is an undefined-function compile
+ *  error).  A plain literal (number/boolean, e.g. `0`) stays bare. */
+function ectoDefaultClause(def: string | undefined): string {
+  if (def === undefined) return "";
+  // A SQL function-call default (`now()`, `gen_random_uuid()`) → fragment.
+  const isSqlExpr = /^[a-z_][a-z0-9_]*\s*\(.*\)$/i.test(def.trim());
+  return isSqlExpr ? `, default: fragment(${JSON.stringify(def)})` : `, default: ${def}`;
+}
+
 /** Ecto option string for a table / index / reference that lives in a
  *  non-default Postgres schema — the owning bounded context's schema,
  *  carried on `TableShape.schema` (the Ecto schema maps `table "x"` in
@@ -266,7 +279,7 @@ function renderInitialValueCollectionFile(
   // it so the child has Ecto-managed row identity).
   const lines: string[] = ["      add :id, :uuid, primary_key: true, null: false"];
   for (const c of table.columns) {
-    const defaultClause = c.default !== undefined ? `, default: ${c.default}` : "";
+    const defaultClause = ectoDefaultClause(c.default);
     const fk = table.foreignKeys.find((f) => f.column === c.name);
     if (fk) {
       const ref = `references(:${fk.refTable}${prefix}, type: ${ectoPrimaryKeyType(c.type)}, on_delete: :${fk.onDelete === "cascade" ? "delete_all" : "restrict"})`;
@@ -310,7 +323,7 @@ function renderInitialJoinFile(
   const prefix = prefixOpt(table.schema);
   const lines: string[] = [];
   for (const c of table.columns) {
-    const defaultClause = c.default !== undefined ? `, default: ${c.default}` : "";
+    const defaultClause = ectoDefaultClause(c.default);
     const fk = table.foreignKeys.find((f) => f.column === c.name);
     if (fk) {
       const ref = `references(:${fk.refTable}${prefix}, type: ${ectoPrimaryKeyType(c.type)}, on_delete: :${fk.onDelete === "cascade" ? "delete_all" : "restrict"})`;
@@ -448,7 +461,7 @@ function collapseVoGroups(columns: readonly ColumnShape[]): ColumnShape[] {
 }
 
 function renderEctoColumn(c: ColumnShape, table: TableShape): string {
-  const defaultClause = c.default !== undefined ? `, default: ${c.default}` : "";
+  const defaultClause = ectoDefaultClause(c.default);
   const fk = table.foreignKeys.find((f) => f.column === c.name);
   if (fk) {
     const ref = `references(:${fk.refTable}${prefixOpt(table.schema)}, type: ${ectoPrimaryKeyType(c.type)}, on_delete: :${fk.onDelete === "cascade" ? "delete_all" : "restrict"})`;

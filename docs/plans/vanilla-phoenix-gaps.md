@@ -34,7 +34,9 @@ on the vanilla backend later — this file is the tracked list.
 | §4 | `contains`-in-`where` membership | **CLOSED** (doc stale) | S | dead-code cleanup only |
 | §12 | `shape(document)` + custom ops/finds | honest validator gate | M | 3 (untracked find) |
 | §13 | LiveView operation-action bang fns | **CLOSED** | S–M | done |
-| §14 | Success-response wire shape (snake_case keys + leaked Ecto timestamps) | **REAL — runtime wire divergence, boot-found** | M–L | 1 |
+| §14 | Success-response wire shape (snake_case keys + leaked Ecto timestamps) | **FIX in #1628** — wireShape-driven serializer, boot-verified | M–L | done |
+| — | Ecto migration `default: now()`/`gen_random_uuid()` not `fragment(...)` | **FIX in #1628** — event-store table wouldn't compile; boot-blocker | S | done |
+| §15 | Inbound nested-containment camelCase key normalization | **REAL — runtime, boot-found** | M | 2 |
 
 Restoring the 5-backend `conformance-parity` gate (removing
 `LOOM_E2E_SKIP_PHOENIX=1` and re-adding the elixir deployable to
@@ -491,3 +493,24 @@ pairs, and the 403 runtime-authorization target).
   field or any aggregate at all (timestamp leak is universal). High user-visible
   impact (a shared frontend talking to a phoenix backend gets the wrong keys), which
   is why this is priority 1 despite being newly found.
+
+## 15. Inbound nested-containment camelCase key normalization (M, boot-found)
+
+- **Status (REAL, runtime-only — boot-found while verifying §14):** the vanilla
+  request-key normalization (#1620, `Macro.underscore` camelCase→snake before
+  `Ecto.cast`) runs on the TOP-LEVEL attrs only. A create body whose **nested
+  containment items** use the canonical camelCase wire keys —
+  `POST /api/projects {"name":"x","pipelines":[{"label":"l","runCount":3}]}` —
+  reaches `cast_assoc(:pipelines, ...)` with the raw `runCount` key, which the
+  child `cast(attrs, [:label, :run_count])` doesn't match, so `run_count` stays
+  unset → the child INSERT omits it → `23502 not_null_violation` (500). Sending
+  the snake key (`run_count`) round-trips fine, confirming it's a key-normalization
+  gap, not a persistence bug.
+- **Scope:** only bites containment/value-collection creates that carry nested
+  objects with multi-word fields. The showcase's own create smoke (empty
+  containment) never hit it; found by POSTing a populated `pipelines` list.
+- **Fix (M):** make the camelCase→snake normalization recurse into nested
+  maps/lists before `cast_assoc`/`cast_embed` (the inbound mirror of §14's
+  outbound wireShape serializer — the top-level normalizer is
+  `src/generator/elixir/vanilla/*` request-key underscore helper). Needs a boot +
+  nested-create round-trip to verify.
