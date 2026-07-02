@@ -270,7 +270,21 @@ export function isAssignable(value: DddType, target: DddType): boolean {
   if (typesEqual(value, target)) return true;
   if (value.kind === "any" || target.kind === "any") return true;
   if (target.kind === "optional") {
-    return value.kind === "never" || isAssignable(value, target.inner) || value.kind === "optional";
+    // `never` (the `null` literal) and any bare `T` that fits the inner
+    // type wrap into the optional.  An optional VALUE only fits when its
+    // OWN inner type is assignable to the target's inner — this is what
+    // keeps `int? := string?` an error while still admitting numeric
+    // widening through the optional (`int? → long?` composes with the
+    // primitive-widening arm below via the recursive inner check).  A
+    // `never`-typed inner is the bottom type (the `null` literal types as
+    // `never?` — see the `isNullLit` arm of `typeOf`), so `never? → U?`
+    // stays assignable regardless of `U`.
+    return (
+      value.kind === "never" ||
+      isAssignable(value, target.inner) ||
+      (value.kind === "optional" &&
+        (value.inner.kind === "never" || isAssignable(value.inner, target.inner)))
+    );
   }
   if (value.kind === "primitive" && target.kind === "primitive") {
     if (value.name === "int" && (target.name === "long" || target.name === "decimal")) return true;
