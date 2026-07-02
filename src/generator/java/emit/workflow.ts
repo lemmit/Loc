@@ -18,7 +18,11 @@ import { readPortsForOperation } from "../../../ir/util/domain-service-read-port
 import { resolveWorkflowIsolation } from "../../../ir/util/resolve-datasource.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
-import { renderWorkflowStmts, type WorkflowStmtTarget } from "../../_workflow/stmt-target.js";
+import {
+  collectUnionFindLets,
+  renderWorkflowStmts,
+  type WorkflowStmtTarget,
+} from "../../_workflow/stmt-target.js";
 import { collectJavaExprImports, type JavaRenderContext, renderJavaExpr } from "../render-expr.js";
 import {
   collectWireImports,
@@ -28,6 +32,36 @@ import {
   wireToDomain,
 } from "./wire.js";
 import { setterName } from "./workflow-state.js";
+
+/** Render a variant-`match` whose scrutinee is a UNION-FIND binding: the
+ *  repository returns the bare success aggregate (null on absence — no union
+ *  carrier records exist for finds), so the absence/error variant is
+ *  `case null` and the success variant is a total type pattern (which must
+ *  come last; Java 21 pattern switch, exhaustive without `default`). */
+function renderJavaOptionalTwinMatch(
+  m: Extract<ExprIR, { kind: "match" }>,
+  renderCtx: JavaRenderContext,
+): string {
+  // biome-ignore lint/style/noNonNullAssertion: guarded at the call site (subject ref present)
+  const subject = renderJavaExpr(m.subject!, renderCtx);
+  const success = m.variantArms.find((a) => !a.isError);
+  const error = m.variantArms.find((a) => a.isError);
+  const absent = error
+    ? renderJavaExpr(error.value, renderCtx)
+    : m.otherwise
+      ? renderJavaExpr(m.otherwise, renderCtx)
+      : "null";
+  const arms: string[] = [`      case null -> ${absent};`];
+  if (success) {
+    const t = success.varType;
+    const typeName = t.kind === "entity" || t.kind === "valueobject" ? t.name : "Object";
+    const binder = success.binding ?? `__${typeName.toLowerCase()}`;
+    arms.push(`      case ${typeName} ${binder} -> ${renderJavaExpr(success.value, renderCtx)};`);
+  } else if (m.otherwise) {
+    arms.push(`      default -> ${renderJavaExpr(m.otherwise, renderCtx)};`);
+  }
+  return `switch (${subject}) {\n${arms.join("\n")}\n    }`;
+}
 
 /** Spring `Isolation` enum member for a DSL isolation level. */
 function javaIsolation(level: IsolationLevel): string {
@@ -151,6 +185,13 @@ export function javaWorkflowStmtTarget(
    *  saga dispatcher re-publishes it after saves) instead of logging it
    *  (the command-workflow facade behaviour).  Omitted ⇒ log, byte-identical. */
   emitSink?: string,
+  /** Let-bound names whose RHS was a UNION-returning find.  The Java
+   *  repository emits such a find returning the bare success aggregate
+   *  (nullable on absence) and NO `<Union>_<Tag>` carrier records — so a
+   *  variant-`match` over one of these bindings renders a null-check switch,
+   *  not the carrier-pattern switch `matchVariant` emits for operation
+   *  unions (whose carriers DO exist). */
+  unionFindLets: ReadonlySet<string> = new Set(),
 ): WorkflowStmtTarget {
   return {
     indentUnit: "    ",
@@ -190,6 +231,16 @@ export function javaWorkflowStmtTarget(
     },
     exprLet: (s, indent) => {
       collectJavaExprImports(s.expr, imports);
+      // A variant-`match` over a UNION-FIND binding matches the nullable
+      // success aggregate — render `case null` + a total type pattern
+      // instead of the (non-existent) union carrier patterns.
+      if (
+        s.expr.kind === "match" &&
+        s.expr.subject?.kind === "ref" &&
+        unionFindLets.has(s.expr.subject.name)
+      ) {
+        return [`${indent}var ${s.name} = ${renderJavaOptionalTwinMatch(s.expr, renderCtx)};`];
+      }
       return [`${indent}var ${s.name} = ${renderJavaExpr(s.expr, renderCtx)};`];
     },
     // `field := value` — own-state mutation.  The persisted correlation row's
@@ -570,7 +621,13 @@ export function renderJavaWorkflows(
     });
     const bodyLines = renderWorkflowStmts(
       wf.statements,
-      javaWorkflowStmtTarget(ctx, imports, renderCtxFor(ctx, wctx)),
+      javaWorkflowStmtTarget(
+        ctx,
+        imports,
+        renderCtxFor(ctx, wctx),
+        undefined,
+        collectUnionFindLets(wf.statements),
+      ),
       "            ",
     );
     const saves = wf.savesAtExit.map((s) => `            ${repoField(s.aggName)}.save(${s.name});`);

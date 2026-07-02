@@ -60,11 +60,9 @@ export function renderAuditableInterceptor(
   // it a principal stamp is rejected upstream (loom.dotnet-stamp-unsupported);
   // the legacy single-context generator path has no auth wiring, so it falls
   // back to the plain expr render (unchanged) rather than a dangling reference.
-  const usesPrincipal =
-    !!actorIdProp &&
-    stamping.some(({ rules }) =>
-      rules.some((r) => r.assignments.some((a) => isCurrentUserRef(a.value))),
-    );
+  const usesPrincipal = stamping.some(({ rules }) =>
+    rules.some((r) => r.assignments.some((a) => referencesCurrentUser(a.value))),
+  );
   const principalUsings = usesPrincipal ? [`using ${ns}.Domain.Common;`, `using ${ns}.Auth;`] : [];
 
   return (
@@ -126,6 +124,39 @@ function isCurrentUserRef(value: ExprIR): boolean {
   return value.kind === "ref" && value.refKind === "current-user";
 }
 
+/** Deep check: does the stamp value reference `currentUser` ANYWHERE — bare
+ * (`createdBy := currentUser`) or through a member (`createdByRole :=
+ * currentUser.role`)?  The interceptor is static, so any such reference needs
+ * the ambient-principal wiring (usings + the arm-local `currentUser`). */
+function referencesCurrentUser(e: ExprIR): boolean {
+  if (isCurrentUserRef(e)) return true;
+  switch (e.kind) {
+    case "member":
+      return referencesCurrentUser(e.receiver);
+    case "method-call":
+      return referencesCurrentUser(e.receiver) || e.args.some(referencesCurrentUser);
+    case "call":
+      return e.args.some(referencesCurrentUser);
+    case "binary":
+      return referencesCurrentUser(e.left) || referencesCurrentUser(e.right);
+    case "unary":
+      return referencesCurrentUser(e.operand);
+    case "paren":
+      return referencesCurrentUser(e.inner);
+    case "ternary":
+      return (
+        referencesCurrentUser(e.cond) ||
+        referencesCurrentUser(e.then) ||
+        referencesCurrentUser(e.otherwise)
+      );
+    case "new":
+    case "object":
+      return e.fields.some((f) => referencesCurrentUser(f.value));
+    default:
+      return false;
+  }
+}
+
 /** Switch arm for one aggregate's stamping rules.  Body assigns per-event
  * fields on the matched entity through EF's metadata accessor via the
  * compile-checked lambda overload (`ctx.Entry(e).Property(x => x.Field)
@@ -156,7 +187,22 @@ function renderArm(
   const createAssigns = onCreate.map((a) => assign(a.field, a.value));
   const updateAssigns = onUpdate.map((a) => assign(a.field, a.value));
 
+  // A stamp value that reaches THROUGH the principal (`currentUser.role`)
+  // renders as an ordinary member read on a `currentUser` local — which a
+  // static interceptor doesn't have.  Materialise it from the ambient
+  // RequestContext inside the arm (braced: switch-section locals share the
+  // whole switch block's declaration space, so an unbraced `var currentUser`
+  // in two arms is CS0128).  The bare-ref case keeps its direct
+  // `RequestContext...<actorIdProp>` rendering and needs no local.
+  const needsUserLocal = [...onCreate, ...onUpdate].some(
+    (a) => referencesCurrentUser(a.value) && !(isCurrentUserRef(a.value) && actorIdProp),
+  );
+
   const arm = [`                case ${agg.name} ${argName}:`];
+  if (needsUserLocal) {
+    arm.push("                {");
+    arm.push("                    var currentUser = RequestContext.Current!.CurrentUser!;");
+  }
   if (createAssigns.length) {
     arm.push("                    if (entry.State == EntityState.Added)");
     arm.push("                    {");
@@ -172,5 +218,6 @@ function renderArm(
     arm.push("                    }");
   }
   arm.push("                    break;");
+  if (needsUserLocal) arm.push("                }");
   return arm.join("\n");
 }

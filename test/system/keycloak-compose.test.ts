@@ -40,6 +40,20 @@ system Helpdesk {
 const KEYCLOAK = `auth { provider: keycloak  oidc { issuer: env("OIDC_ISSUER")  clientId: env("OIDC_CLIENT_ID") } }`;
 
 describe("bundled dev Keycloak compose", () => {
+  it("steps the Keycloak host port past a deployable that claims 8081", async () => {
+    // A deployable pinned to keycloak's preferred host port (showcase's
+    // `javaApi { port: 8081 }`) used to produce TWO `8081:...` mappings in one
+    // compose — `docker compose up -d` failed with "Bind for 0.0.0.0:8081:
+    // port is already allocated" and the stack never booted (the
+    // conformance-parity ECONNREFUSED).  The bundled Keycloak must publish on
+    // the next free port, with the issuer moved consistently.
+    const src = system(KEYCLOAK).replace("port: 8080", "port: 8081");
+    const compose = (await filesFor(src)).get("docker-compose.yml")!;
+    expect(compose).toContain('- "8082:8080"');
+    expect(compose).toContain('OIDC_ISSUER: "http://host.docker.internal:8082/realms/helpdesk"');
+    expect(compose).toContain("KC_HOSTNAME: http://host.docker.internal:8082");
+  });
+
   it("adds the Keycloak service + realm import + OIDC env under a self-hosted auth block", async () => {
     const files = await filesFor(system(KEYCLOAK));
     const compose = files.get("docker-compose.yml")!;

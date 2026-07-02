@@ -19,7 +19,13 @@
 // D-SEED-XREF (an `@handle` indirection was considered and not adopted).
 // Not yet handled (later slices): create-shape validation.
 
-import type { EnrichedBoundedContextIR, ExprIR, SeedRowIR } from "../../../ir/types/loom-ir.js";
+import type {
+  EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
+  ExprIR,
+  SeedRowIR,
+  TypeIR,
+} from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../../util/naming.js";
 import { renderSeedRowInsert } from "../../sql-pg.js";
@@ -44,12 +50,16 @@ export function emitTypescriptSeeds(ctx: EnrichedBoundedContextIR, out: Map<stri
   // Only non-abstract aggregates have a `create` factory + repository.
   const seedable = new Set(ctx.aggregates.filter((a) => !a.isAbstract).map((a) => a.name));
 
+  const aggByName = new Map<string, EnrichedAggregateIR>(
+    ctx.aggregates.filter((a) => !a.isAbstract).map((a) => [a.name, a]),
+  );
+
   const fnBlocks: string[] = [];
   const callLines: string[] = [];
   for (const ds of datasets) {
     const entries = ds.entries.filter((e) => seedable.has(e.row.aggregate));
     if (entries.length === 0) continue;
-    fnBlocks.push(renderDatasetFn(ds.name, entries));
+    fnBlocks.push(renderDatasetFn(ds.name, entries, aggByName));
     callLines.push(`  await seed${upperFirst(ds.name)}(db, requested);`);
   }
   if (callLines.length === 0) return;
@@ -91,7 +101,11 @@ function usedAggregates(datasets: Dataset[], seedable: Set<string>): string[] {
 }
 
 /** Render one `async function seed<Dataset>(db, requested)`. */
-function renderDatasetFn(dataset: string, entries: Entry[]): string {
+function renderDatasetFn(
+  dataset: string,
+  entries: Entry[],
+  aggByName: Map<string, EnrichedAggregateIR>,
+): string {
   // One repository instance per distinct aggregate used on the domain path.
   const domainAggs = [...new Set(entries.filter((e) => !e.raw).map((e) => e.row.aggregate))];
   const repoDecls = domainAggs.map(
@@ -101,7 +115,7 @@ function renderDatasetFn(dataset: string, entries: Entry[]): string {
     e.raw
       ? // raw path (D-SEED-XREF): direct INSERT with explicit id + FK columns.
         `  await db.execute(sql.raw(${JSON.stringify(renderSeedRowInsert(e.row.aggregate, e.row.fields))}));`
-      : `  await ${repoVar(e.row.aggregate)}.save(${e.row.aggregate}.create(${renderInput(e.row)}));`,
+      : `  await ${repoVar(e.row.aggregate)}.save(${e.row.aggregate}.create(${renderInput(e.row, aggByName.get(e.row.aggregate))}));`,
   );
   return lines(
     `async function seed${upperFirst(dataset)}(db: Db, requested: Set<string>): Promise<void> {`,
@@ -116,15 +130,25 @@ function renderDatasetFn(dataset: string, entries: Entry[]): string {
 }
 
 /** `{ field: <expr>, … }` create-input literal from a seed row. */
-function renderInput(row: SeedRowIR): string {
+function renderInput(row: SeedRowIR, agg?: EnrichedAggregateIR): string {
   if (row.fields.length === 0) return "{}";
-  const entries = row.fields.map((f) => `${f.name}: ${renderField(f.value)}`);
+  const typeOf = new Map(agg?.fields.map((f) => [f.name, f.type]) ?? []);
+  const entries = row.fields.map((f) => `${f.name}: ${renderField(f.value, typeOf.get(f.name))}`);
   return `{ ${entries.join(", ")} }`;
 }
 
-function renderField(value: ExprIR): string {
+function renderField(value: ExprIR, fieldType?: TypeIR): string {
   // Seed expressions never reference `this` — the default render context
   // (literals / enum-value / value-object-ctor / money / now()) suffices.
+  // One coercion: a STRING literal for a `datetime` field must construct a
+  // real `Date` — the drizzle `timestamp` column mapper calls
+  // `.toISOString()` on the value, so a bare string CRASHES THE BOOT
+  // (`value.toISOString is not a function`) before the server ever listens.
+  let t = fieldType;
+  while (t?.kind === "optional") t = t.inner;
+  if (t?.kind === "primitive" && t.name === "datetime" && value.kind === "literal") {
+    return `new Date(${renderTsExpr(value)})`;
+  }
   return renderTsExpr(value);
 }
 
@@ -220,7 +244,15 @@ function renderSeedFile(
       "  }",
       "}",
       "",
-      "if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {",
+      // Direct-run guard (`npm run db:seed` → `tsx db/seed.ts`).  The URL
+      // equality alone MISFIRES inside the tsup bundle: db/seed.ts is bundled
+      // into dist/index.js, where `import.meta.url` IS the executed file, so
+      // the guard fired at import time and a second (unawaited) seeder RACED
+      // the app's own migrate+seed boot — the seed insert hit a not-yet-
+      // migrated schema and crashed the container (conformance-parity's
+      // ECONNREFUSED on :3000).  Also require the executed file to actually
+      // BE the seed module, which is never true for the bundle.
+      "if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href && /\\/seed\\.(ts|mts|js|mjs)$/.test(import.meta.url)) {",
       "  void main();",
       "}",
     ) + "\n"

@@ -23,7 +23,11 @@ import { collectReachableTypes } from "../../ir/util/reachable-types.js";
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { renderDotnetLogCall } from "../_obs/render-dotnet.js";
-import { renderWorkflowStmts, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
+import {
+  collectUnionFindLets,
+  renderWorkflowStmts,
+  type WorkflowStmtTarget,
+} from "../_workflow/stmt-target.js";
 import { dotnetResourceAdapterFor, resourceClassName } from "./adapters/resource-clients.js";
 import {
   collectWireUsings,
@@ -282,6 +286,14 @@ function analyseStmts(
       } else if (st.kind === "for-each") {
         for (const sv of st.savesPerIteration) repos.set(sv.repoName, sv.aggName);
         walk(st.body);
+      } else if (st.kind === "if-let") {
+        // The if-let arm runs the synthetic `findAllBy<Criterion>` retrieval
+        // through `_<repoName>` and each branch saves through its own repos —
+        // all of which must be DI-injected (CS0103 otherwise).
+        repos.set(st.repoName, st.aggName);
+        for (const sv of [...st.savesInThen, ...st.savesInElse]) repos.set(sv.repoName, sv.aggName);
+        walk(st.thenBody);
+        walk(st.elseBody ?? []);
       } else if (st.kind === "op-call") {
         const agg = aggsByName.get(st.aggName);
         const op = agg?.operations.find((o) => o.name === st.op);
@@ -369,6 +381,10 @@ function renderEventReactorHandler(
           ?.operations.find((x) => x.name === s.op);
         if (o?.audited && !o.extern) auditAggs.add(s.aggName);
       } else if (s.kind === "for-each") collectAuditAggs(s.body);
+      else if (s.kind === "if-let") {
+        collectAuditAggs(s.thenBody);
+        collectAuditAggs(s.elseBody ?? []);
+      }
     }
   };
   collectAuditAggs(statements);
@@ -505,7 +521,7 @@ function renderEventReactorHandler(
   stmtLines.push(
     ...renderWorkflowStmts(
       statements,
-      csWorkflowStmtTarget(ctx, renderArg, true, auditsOps),
+      csWorkflowStmtTarget(ctx, renderArg, true, auditsOps, collectUnionFindLets(statements)),
       INDENT,
     ),
   );
@@ -636,6 +652,13 @@ function analyseWorkflow(wf: WorkflowIR, aggsByName: Map<string, AggregateIR>): 
       } else if (st.kind === "for-each") {
         for (const sv of st.savesPerIteration) repos.set(sv.repoName, sv.aggName);
         walk(st.body);
+      } else if (st.kind === "if-let") {
+        // Same rule as analyseStmts: the retrieval + both branches' saves run
+        // through injected repos.
+        repos.set(st.repoName, st.aggName);
+        for (const sv of [...st.savesInThen, ...st.savesInElse]) repos.set(sv.repoName, sv.aggName);
+        walk(st.thenBody);
+        walk(st.elseBody ?? []);
       } else if (st.kind === "op-call") {
         const agg = aggsByName.get(st.aggName);
         const op = agg?.operations.find((o) => o.name === st.op);
@@ -781,6 +804,10 @@ function renderHandler(
           ?.operations.find((x) => x.name === s.op);
         if (o?.audited && !o.extern) auditAggs.add(s.aggName);
       } else if (s.kind === "for-each") collectAuditAggs(s.body);
+      else if (s.kind === "if-let") {
+        collectAuditAggs(s.thenBody);
+        collectAuditAggs(s.elseBody ?? []);
+      }
     }
   };
   collectAuditAggs(wf.statements);
@@ -850,7 +877,13 @@ function renderHandler(
   stmtLines.push(
     ...renderWorkflowStmts(
       wf.statements,
-      csWorkflowStmtTarget(ctx, renderArg, dereffedLoads, auditsOps),
+      csWorkflowStmtTarget(
+        ctx,
+        renderArg,
+        dereffedLoads,
+        auditsOps,
+        collectUnionFindLets(wf.statements),
+      ),
       INDENT,
     ),
   );
@@ -1003,6 +1036,9 @@ function collectDereferencedLoads(stmts: readonly WorkflowStmtIR[]): Set<string>
       }
     } else if (st.kind === "for-each") {
       for (const n of collectDereferencedLoads(st.body)) names.add(n);
+    } else if (st.kind === "if-let") {
+      for (const n of collectDereferencedLoads(st.thenBody)) names.add(n);
+      for (const n of collectDereferencedLoads(st.elseBody ?? [])) names.add(n);
     }
   }
   return names;
@@ -1023,6 +1059,13 @@ function csWorkflowStmtTarget(
    *  an AuditRecord via the handler's injected `_audit`; the reactor path
    *  leaves it false (no audit writer injected there). */
   audit = false,
+  /** Let-bound names whose RHS was a UNION-returning find (`find x(): Agg or
+   *  Err`).  The Domain repository lowers such a find to its OPTIONAL TWIN
+   *  (`Task<Agg?>`, find-emit.ts `unionFindAsOptionalTwin`) — no
+   *  `<Union>_<Tag>` carrier records exist — so a variant-`match` over one of
+   *  these bindings must render as a null-check switch, not the polymorphic
+   *  carrier-pattern switch `matchVariant` emits for operation unions. */
+  unionFindLets: ReadonlySet<string> = new Set(),
 ): WorkflowStmtTarget {
   // Unique suffix per in-body audit capture so multiple audited op-calls don't
   // collide on the before/after temp-var names.
@@ -1073,7 +1116,13 @@ function csWorkflowStmtTarget(
       const fieldName = `_${st.repoName.charAt(0).toLowerCase() + st.repoName.slice(1)}`;
       const argList = st.args.map(renderArg).join(", ");
       const callArgs = argList.length > 0 ? `${argList}, cancellationToken` : `cancellationToken`;
-      const call = `await ${fieldName}.${upperFirst(st.method)}Async(${callArgs})`;
+      // Method-name parity with the emitted I<Agg>Repository: the framework
+      // load is `GetByIdAsync`, but a USER-DECLARED find emits as its plain
+      // PascalCase name with NO `Async` suffix (`Task<Project?> Locate(...)`,
+      // see emit/repository.ts) — appending `Async` calls a method that
+      // doesn't exist (CS1061).
+      const methodName = st.method === "getById" ? "GetByIdAsync" : upperFirst(st.method);
+      const call = `await ${fieldName}.${methodName}(${callArgs})`;
       // `getById` is load-or-throw (Hono's returns non-null; the .NET
       // op-command handler guards the same way).  Guard the `Task<T?>` result
       // with `?? throw` whenever the loaded aggregate is dereferenced — a
@@ -1160,6 +1209,16 @@ function csWorkflowStmtTarget(
       return [callLine];
     },
     exprLet: (st, indent) => {
+      // A variant-`match` over a UNION-FIND binding matches an optional twin
+      // (`Agg?`) — render the null-check switch instead of the carrier-pattern
+      // switch (whose `<Union>_<Tag>` records are never emitted for finds).
+      if (
+        st.expr.kind === "match" &&
+        st.expr.subject?.kind === "ref" &&
+        unionFindLets.has(st.expr.subject.name)
+      ) {
+        return [`${indent}var ${st.name} = ${renderOptionalTwinMatch(st.expr, renderArg)};`];
+      }
       // `let x = files.get(k)` — a resource-op RHS is an async helper, so
       // await it; ordinary expr-lets render unchanged.
       const isResourceOp = st.expr.kind === "call" && st.expr.callKind === "resource-op";
@@ -1278,6 +1337,33 @@ function csWorkflowStmtTarget(
     // they flush at the orchestrator's single `await db.SaveChangesAsync()`.
     domainServiceCall: (st, indent) => [`${indent}${renderArg(st.call)};`],
   };
+}
+
+/** Render a variant-`match` whose scrutinee is a union-find OPTIONAL TWIN
+ *  (`Agg?`): the success variant is the non-null case (its binding binds the
+ *  narrowed row via a `{ } p` property pattern), the absence/error variant is
+ *  `null`.  Exhaustive over a nullable reference — no discard arm needed.
+ *  (An error-arm binding is not representable — the absent case carries no
+ *  value — but the mandated absence payload is write-only anyway, see
+ *  BUG-004 in docs/audits/showcase-coverage-bugs.md.) */
+function renderOptionalTwinMatch(
+  m: Extract<ExprIR, { kind: "match" }>,
+  renderArg: (e: ExprIR) => string,
+): string {
+  // biome-ignore lint/style/noNonNullAssertion: guarded at the call site (subject ref present)
+  const subject = renderArg(m.subject!);
+  const success = m.variantArms.find((a) => !a.isError);
+  const error = m.variantArms.find((a) => a.isError);
+  const cases: string[] = [];
+  if (success) {
+    const pattern = success.binding ? `{ } ${success.binding}` : "not null";
+    cases.push(`        ${pattern} => ${renderArg(success.value)},`);
+  } else if (m.otherwise) {
+    cases.push(`        not null => ${renderArg(m.otherwise)},`);
+  }
+  const absent = error ? renderArg(error.value) : m.otherwise ? renderArg(m.otherwise) : undefined;
+  if (absent !== undefined) cases.push(`        null => ${absent},`);
+  return `${subject} switch\n    {\n${cases.join("\n")}\n    }`;
 }
 
 /** Structural ExprIR rewrite: applies `onRef` to every leaf `ref` node

@@ -1,4 +1,10 @@
-import type { EnrichedBoundedContextIR, ExprIR, SeedRowIR } from "../../../ir/types/loom-ir.js";
+import type {
+  EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
+  ExprIR,
+  SeedRowIR,
+  TypeIR,
+} from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { renderSeedRowInsert } from "../../sql-pg.js";
@@ -45,13 +51,16 @@ export function buildPySeedFile(
 
   // Only non-abstract aggregates have a `create` factory + repository.
   const seedable = new Set(ctx.aggregates.filter((a) => !a.isAbstract).map((a) => a.name));
+  const aggByName = new Map<string, EnrichedAggregateIR>(
+    ctx.aggregates.filter((a) => !a.isAbstract).map((a) => [a.name, a]),
+  );
 
   const fnBlocks: string[] = [];
   const callLines: string[] = [];
   for (const ds of datasets) {
     const entries = ds.entries.filter((e) => seedable.has(e.row.aggregate));
     if (entries.length === 0) continue;
-    fnBlocks.push(renderDatasetFn(ds.name, entries, schemaFor));
+    fnBlocks.push(renderDatasetFn(ds.name, entries, schemaFor, aggByName));
     callLines.push(`        await _seed_${snake(ds.name)}(session, requested)`);
   }
   if (callLines.length === 0) return null;
@@ -164,6 +173,7 @@ function renderDatasetFn(
   dataset: string,
   entries: Entry[],
   schemaFor: (aggName: string) => string | undefined,
+  aggByName: Map<string, EnrichedAggregateIR>,
 ): string {
   const domainAggs = [...new Set(entries.filter((e) => !e.raw).map((e) => e.row.aggregate))];
   const repoDecls = domainAggs.map(
@@ -174,7 +184,7 @@ function renderDatasetFn(
       ? // raw path (D-SEED-XREF): driver-level INSERT with explicit ids,
         // schema-qualified to match the dataSource-routed table.
         `    await (await session.connection()).exec_driver_sql(${pyStr(qualifiedInsert(e.row, schemaFor(e.row.aggregate)))})`
-      : `    await ${snake(e.row.aggregate)}_repo.save(${e.row.aggregate}.create(${renderInput(e.row)}))`,
+      : `    await ${snake(e.row.aggregate)}_repo.save(${e.row.aggregate}.create(${renderInput(e.row, aggByName.get(e.row.aggregate))}))`,
   );
   return lines(
     `async def _seed_${snake(dataset)}(session: AsyncSession, requested: set[str]) -> None:`,
@@ -202,11 +212,24 @@ function qualifiedInsert(row: SeedRowIR, schema: string | undefined): string {
  *  expressions never reference `this`; the default render context
  *  (literals / enum values / value-object ctors / money / now())
  *  suffices. */
-function renderInput(row: SeedRowIR): string {
-  return row.fields.map((f) => `${snake(f.name)}=${renderField(f.value)}`).join(", ");
+function renderInput(row: SeedRowIR, agg?: EnrichedAggregateIR): string {
+  const typeOf = new Map(agg?.fields.map((f) => [f.name, f.type]) ?? []);
+  return row.fields
+    .map((f) => `${snake(f.name)}=${renderField(f.value, typeOf.get(f.name))}`)
+    .join(", ");
 }
 
-function renderField(value: ExprIR): string {
+function renderField(value: ExprIR, fieldType?: TypeIR): string {
+  // One coercion: a STRING literal for a `datetime` field must construct a
+  // real datetime — asyncpg rejects a bare str for a timestamptz bind
+  // ("expected a datetime.date or datetime.datetime instance") and the seed
+  // CRASHES THE BOOT before the server ever listens.  Python ≥ 3.11
+  // fromisoformat accepts the Z suffix.
+  let t = fieldType;
+  while (t?.kind === "optional") t = t.inner;
+  if (t?.kind === "primitive" && t.name === "datetime" && value.kind === "literal") {
+    return `datetime.fromisoformat(${renderPyExpr(value)})`;
+  }
   return renderPyExpr(value);
 }
 

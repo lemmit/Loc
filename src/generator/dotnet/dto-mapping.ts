@@ -175,7 +175,13 @@ export function wireToCommandArgument(
 ): string {
   const info = wireTypeInfo(t, "request");
   if (info.isNullable) {
-    return `(${expr} is null ? null : ${wireToCommandArgument(`${expr}!`, peelNullable(t), ctx)})`;
+    // The null-forgiving `!` only affects nullable REFERENCE types — a
+    // `Guid?` wire member (an optional id ref) stays `Guid?` under `!`, so
+    // the inner `new <Agg>Id(...)` ctor call fails CS1503.  Unwrap value-typed
+    // wires with `.Value` inside the non-null branch instead.
+    const peeled = peelNullable(t);
+    const unwrap = wireTypeInfo(peeled, "request").refKind === "id" ? `${expr}.Value` : `${expr}!`;
+    return `(${expr} is null ? null : ${wireToCommandArgument(unwrap, peeled, ctx)})`;
   }
   if (info.isCollection) {
     return `${expr}.Select(__e => ${wireToCommandArgument("__e", peelCollection(t), ctx)}).ToList()`;

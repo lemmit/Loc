@@ -222,6 +222,18 @@ export function renderDockerfile(
     ...spaStage,
     `FROM gradle:8-jdk${JAVA_VERSION} AS build`,
     `WORKDIR /src`,
+    // Optional proxy CAs — drop *.crt files into ./certs/ to make the build
+    // trust a TLS-intercepting proxy (the same escape hatch the other
+    // backends' Dockerfiles carry).  The JVM reads its OWN truststore, not
+    // the OS bundle, so each cert in each bundle is keytool-imported into
+    // the JDK cacerts.  The directory always exists (with a .gitkeep), so
+    // this is a no-op when no CAs are configured.
+    `COPY certs/ /tmp/loom-certs/`,
+    `RUN if ls /tmp/loom-certs/*.crt >/dev/null 2>&1; then \\`,
+    `      mkdir -p /tmp/loom-certs/split && \\`,
+    `      cat /tmp/loom-certs/*.crt | awk 'BEGIN{n=0} /-----BEGIN CERTIFICATE-----/{n++} {print > ("/tmp/loom-certs/split/c" n ".pem")}' && \\`,
+    `      for c in /tmp/loom-certs/split/c*.pem; do keytool -importcert -noprompt -cacerts -storepass changeit -alias "loom-$(basename "$c" .pem)" -file "$c" >/dev/null 2>&1 || true; done; \\`,
+    `    fi`,
     `COPY build.gradle.kts settings.gradle.kts ./`,
     // Resolve the dependency graph in its own layer so source edits
     // don't re-download the world.

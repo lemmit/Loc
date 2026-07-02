@@ -20,10 +20,13 @@
 // Cross-row references use explicit ids per D-SEED-XREF (an `@handle`
 // indirection was considered and not adopted).
 
+import { createInputFields, createOmissionValue } from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
+  ExprIR,
   SeedRowIR,
+  TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../../util/naming.js";
@@ -122,13 +125,37 @@ function renderDatasetFn(
   );
 }
 
-/** Positional `Create(…)` args, ordered by the aggregate's required-field
- *  declaration order (the factory's parameter order). */
+/** Positional `Create(…)` args in the factory's parameter order.  The .NET
+ *  `Create(...)` factory declares EVERY create-input field (`createInputFields`
+ *  — optionals included) as a required positional parameter, so a seed row
+ *  that names only a subset must still supply every position: provided values
+ *  render in place, omitted ones take their omission value (optional → null,
+ *  bare bool → false, `= default` → the default literal) — mirroring the
+ *  workflow `factoryLet` emission.  Filtering to the row's own non-optional
+ *  fields (the old shape) drops required positions → CS7036. */
 function renderArgs(row: SeedRowIR, agg: EnrichedAggregateIR): string {
   const byName = new Map(row.fields.map((f) => [f.name, f.value]));
-  const order = agg.fields.filter((f) => !f.optional).map((f) => f.name);
-  const args = order.filter((n) => byName.has(n)).map((n) => renderCsExpr(byName.get(n)!));
-  return args.join(", ");
+  return createInputFields(agg)
+    .map((f) => {
+      const provided = byName.get(f.name);
+      if (provided !== undefined) return renderSeedValue(provided, f.type);
+      const v = createOmissionValue(f);
+      return v.kind === "default" ? renderCsExpr(v.expr) : v.kind === "false" ? "false" : "null";
+    })
+    .join(", ");
+}
+
+/** A provided seed value, coerced to the factory's parameter type where the
+ *  DSL literal and the CLR type diverge: a STRING literal for a `datetime`
+ *  field parses to a UTC `DateTime` (the factory takes `DateTime`, not the
+ *  wire string — same coercion as `wireToCommandArgument`). */
+function renderSeedValue(value: ExprIR, fieldType: TypeIR): string {
+  let t = fieldType;
+  while (t.kind === "optional") t = t.inner;
+  if (t.kind === "primitive" && t.name === "datetime" && value.kind === "literal") {
+    return `DateTime.Parse(${renderCsExpr(value)}, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal)`;
+  }
+  return renderCsExpr(value);
 }
 
 function repoVar(agg: string): string {
@@ -160,6 +187,9 @@ function renderSeedFile(
   const usings = lines(
     "using System;",
     "using System.Collections.Generic;",
+    // The datetime seed-literal coercion (renderSeedValue) reaches into
+    // CultureInfo/DateTimeStyles — outside the emitted file's other usings.
+    body.includes("CultureInfo.") && "using System.Globalization;",
     "using System.Linq;",
     "using System.Threading;",
     "using System.Threading.Tasks;",

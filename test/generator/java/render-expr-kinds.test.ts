@@ -473,3 +473,47 @@ describe("java renderJavaStatements", () => {
     ).toBe(`        { var __ev = new Opened(); this._domainEvents.add(__ev); this._apply(__ev); }`);
   });
 });
+
+describe("java renderJavaExpr — variant-match switch", () => {
+  // `match outcome { Project p => …, ProjectNotFound => "not found" }` lowers to
+  // a Java 21 sealed-union switch expression.  A bound arm keeps its binder; an
+  // UNBOUND arm must still name a throwaway pattern variable — a bare `_`
+  // (unnamed variable) is a Java 21 *preview* feature and fails plain
+  // `javac`/`gradle bootJar` ("unnamed variables are a preview feature").
+  const variantMatch: ExprIR = {
+    kind: "match",
+    arms: [],
+    subject: { kind: "ref", name: "outcome", refKind: "let" },
+    subjectType: {
+      kind: "union",
+      variants: [
+        { kind: "entity", name: "Project" },
+        { kind: "entity", name: "ProjectNotFound" },
+      ],
+    },
+    variantArms: [
+      {
+        varType: { kind: "entity", name: "Project" },
+        binding: "p",
+        value: { kind: "ref", name: "p", refKind: "match-binding" },
+      },
+      {
+        varType: { kind: "entity", name: "ProjectNotFound" },
+        value: litStr("not found"),
+      },
+    ],
+    otherwise: litNull(),
+  };
+
+  it("binds a NAMED throwaway (not a bare `_`) for an unbound arm", () => {
+    const out = renderJavaExpr(variantMatch);
+    // The unbound `ProjectNotFound` arm must bind a real identifier, never `_`.
+    expect(out).toContain(
+      'case ProjectOrProjectNotFound_ProjectNotFound __projectnotfound -> "not found";',
+    );
+    // No bare unnamed pattern variable anywhere (` _ ->` is the preview form).
+    expect(out).not.toMatch(/case\s+\S+\s+_\s*->/);
+    // The bound arm keeps its declared binder.
+    expect(out).toContain("case ProjectOrProjectNotFound_Project p -> p;");
+  });
+});

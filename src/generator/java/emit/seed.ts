@@ -2,7 +2,9 @@ import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
+  ExprIR,
   SeedRowIR,
+  TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../../util/naming.js";
@@ -178,18 +180,22 @@ function renderArgs(row: SeedRowIR, agg: EnrichedAggregateIR, imports: Set<strin
       const v = byName.get(f.name);
       if (!v) return "null";
       collectJavaExprImports(v, imports);
-      const rendered = renderJavaExpr(v);
-      // A datetime field seeded with a string literal carries the ISO-8601
-      // text; `create(...)` takes an Instant, so parse at the boundary
-      // (same coercion as wireToDomain on the request path).
-      const t = f.type.kind === "optional" ? f.type.inner : f.type;
-      if (t.kind === "primitive" && t.name === "datetime" && v.kind === "literal") {
-        imports.add("java.time.Instant");
-        return `Instant.parse(${rendered})`;
-      }
-      return rendered;
+      return renderSeedValue(v, f.type, imports);
     })
     .join(", ");
+}
+
+/** A provided seed value, coerced where the DSL literal and the Java type
+ *  diverge: a STRING literal for a `datetime` field parses to an `Instant`
+ *  (the factory takes `Instant`, not the wire string). */
+function renderSeedValue(value: ExprIR, fieldType: TypeIR, imports: Set<string>): string {
+  let t = fieldType;
+  while (t.kind === "optional") t = t.inner;
+  if (t.kind === "primitive" && t.name === "datetime" && value.kind === "literal") {
+    imports.add("java.time.Instant");
+    return `Instant.parse(${renderJavaExpr(value)})`;
+  }
+  return renderJavaExpr(value);
 }
 
 function repoField(agg: string): string {

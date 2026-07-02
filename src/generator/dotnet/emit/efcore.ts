@@ -648,12 +648,22 @@ function fieldConfigLines(
   // embedded (`ToJson`) shape, where members are JSON keys, not columns.
   const col = snake(f.name);
   const colName = embedded ? "" : `.HasColumnName("${col}")`;
-  if (f.type.kind === "id") {
-    return [
-      `${indent}${builder}.Property(x => x.${upperFirst(f.name)}).HasConversion(v => v.Value, v => new ${f.type.targetName}Id(v))${colName};`,
-    ];
+  // Unwrap an optional for the id/enum conversion arms: a NULLABLE id ref
+  // (`supersededBy: Engineer id?`) is CLR `EngineerId?` (Nullable over the
+  // readonly record struct) — without an explicit conversion EF cannot map
+  // the type at all and the context THROWS AT BOOT ("property could not be
+  // mapped because the database provider does not support this type").
+  const scalarInner = f.type.kind === "optional" ? f.type.inner : f.type;
+  if (scalarInner.kind === "id") {
+    // EF never passes null into a value converter, so reading through
+    // `Nullable<T>.Value` in the optional shape is safe.
+    const conv =
+      f.type.kind === "optional"
+        ? `.HasConversion(v => v.Value.Value, v => new ${scalarInner.targetName}Id(v))`
+        : `.HasConversion(v => v.Value, v => new ${scalarInner.targetName}Id(v))`;
+    return [`${indent}${builder}.Property(x => x.${upperFirst(f.name)})${conv}${colName};`];
   }
-  if (f.type.kind === "enum") {
+  if (scalarInner.kind === "enum") {
     return [
       `${indent}${builder}.Property(x => x.${upperFirst(f.name)}).HasConversion<string>()${colName};`,
     ];
