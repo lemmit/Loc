@@ -1591,9 +1591,14 @@ function emitVariantMatch(
     // to build the request object.
     const routeId = ctx.target.renderRouteId?.() ?? "id";
     ctx.usesRouteId = true;
+    // The route id is `string | undefined` at the shell (React's
+    // `useParams` types it optional), but an instance-op hook takes a
+    // definite `string`.  Coerce with the same `id ?? ""` idiom the
+    // delete-button confirm handler uses — on a detail page the id is
+    // always present at runtime, so the fallback never fires.
     const hookUse = {
       ...ctx.target.buildHookUse(detected, (e) => emitExpr(e, ctx)),
-      argsRendered: [routeId],
+      argsRendered: [`${routeId} ?? ""`],
     };
     registerApiHook(hookUse, ctx);
     mutationVar = hookUse.varName;

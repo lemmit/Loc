@@ -68,7 +68,7 @@ describe("React variant-`match await` (MVU Stage 2)", () => {
     // The handler is async so it can `await`.
     expect(tsx).toContain("const submit = async () =>");
     // The mutation is hoisted off the route id and awaited.
-    expect(tsx).toContain("const orderPlaceOrder = usePlaceOrderOrder(id);");
+    expect(tsx).toContain('const orderPlaceOrder = usePlaceOrderOrder(id ?? "");');
     expect(tsx).toContain("result = await orderPlaceOrder.mutateAsync({});");
     // A caught ApiError is reified into the error variant (its `type` re-stamped
     // to the statically-known error tag — the backend overwrote it with the URI).

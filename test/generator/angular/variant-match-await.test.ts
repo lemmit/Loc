@@ -71,7 +71,7 @@ describe("Angular variant-`match await` (MVU Stage 2)", () => {
     expect(comp).toContain("async submit() {");
     // The mutation is hoisted off the route id as a class field and awaited via
     // `this.` (class-method scope).
-    expect(comp).toContain("readonly orderPlaceOrder = usePlaceOrderOrder(this.id);");
+    expect(comp).toContain('readonly orderPlaceOrder = usePlaceOrderOrder(this.id ?? "");');
     expect(comp).toContain("result = await this.orderPlaceOrder.mutateAsync({});");
     // A caught ApiError is reified into the error variant (its `type` re-stamped
     // to the statically-known error tag — the backend overwrote it with the URI).
