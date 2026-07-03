@@ -60,6 +60,32 @@ describe("built-in capability prelude (typed-capabilities.md Phase 3)", () => {
     expect(agg.contextFilters?.length).toBe(1);
   });
 
+  it("`with tenantOwned` splices the tenantId field + onCreate stamp + tenant filter", async () => {
+    const ir = await buildLoomModel(`
+      system D {
+        user { id: guid  tenantId: string }
+        subdomain M { context C {
+          aggregate Invoice with tenantOwned { number: string }
+        }}
+      }
+    `);
+    const agg = findAgg(ir, "Invoice");
+    // Field (internal access keeps it out of client create/update inputs):
+    const tenantId = agg.fields.find((f) => f.name === "tenantId")!;
+    expect(tenantId).toBeDefined();
+    expect(tenantId.access).toBe("internal");
+    expect(agg.wireShape.map((f) => f.name)).toContain("tenantId");
+    // Stamp: onCreate { tenantId := currentUser.tenantId }:
+    expect(agg.contextStamps?.length).toBe(1);
+    const stamp = agg.contextStamps![0]!;
+    expect(stamp.event).toBe("create");
+    expect(stamp.assignments.map((a) => a.field)).toEqual(["tenantId"]);
+    // Filter: this.tenantId == currentUser.tenantId:
+    expect(agg.contextFilters?.length).toBe(1);
+    // Capability provenance (drives the `ignoring tenantOwned` bypass surface):
+    expect(agg.contextFilterOrigins).toEqual(["tenantOwned"]);
+  });
+
   it("a user-declared `capability auditable` overrides the built-in", async () => {
     const ir = await buildLoomModel(`
       capability auditable { archived: bool }

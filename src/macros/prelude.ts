@@ -24,6 +24,7 @@
 import type { Capability, CapabilityMember } from "../language/generated/ast.js";
 import { PRINCIPAL_TYPE_NAME } from "../util/principal.js";
 import {
+  binaryExpr,
   contextFilter,
   contextStamp,
   field,
@@ -83,6 +84,35 @@ function buildSoftDeletable(): Capability {
   ] as CapabilityMember[]);
 }
 
+/** `capability tenantOwned { tenantId (internal) + onCreate stamp from the
+ * principal's claim + filter this.tenantId == currentUser.tenantId }` — the
+ * tenant-data marker of multi-tenancy Phase 1a
+ * (docs/plans/multi-tenancy-implementation.md, slice 1a.2).  Combines
+ * `auditable`'s principal-stamp shape with `softDeletable`'s filter shape:
+ * every read is scoped to the caller's tenant, every create is stamped with
+ * it, and `internal` keeps `tenantId` out of client create/update inputs.
+ *
+ * NOTE: the stamp/filter claim field is hardcoded `tenantId` here — the
+ * capability does NOT read the system's `tenancy by user.<claim>`
+ * declaration.  That the declared claim actually is `tenantId` (and that a
+ * `tenancy by` declaration exists at all) is verified by the slice-1a.3
+ * tenancy validators, not by this capability. */
+function buildTenantOwned(): Capability {
+  return capability("tenantOwned", [
+    field("tenantId", primType("string"), { access: "internal" }),
+    ...contextStamp({
+      onCreate: [{ field: "tenantId", value: memberAccess(nameRef("currentUser"), "tenantId") }],
+    }),
+    contextFilter(
+      binaryExpr(
+        memberAccess(thisRef(), "tenantId"),
+        "==",
+        memberAccess(nameRef("currentUser"), "tenantId"),
+      ),
+    ),
+  ] as CapabilityMember[]);
+}
+
 let _cache: Map<string, Capability> | undefined;
 
 /** The built-in capabilities, built once and cached for the process.  The
@@ -94,6 +124,7 @@ export function builtinCapabilities(): Map<string, Capability> {
     _cache = new Map([
       ["auditable", buildAuditable()],
       ["softDeletable", buildSoftDeletable()],
+      ["tenantOwned", buildTenantOwned()],
     ]);
   }
   return _cache;

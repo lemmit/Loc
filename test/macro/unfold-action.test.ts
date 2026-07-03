@@ -51,7 +51,11 @@ function offsetOf(text: string, pos: Position): number {
   return offset + pos.character;
 }
 
-async function unfold(source: string, macroNameInSource: string): Promise<string> {
+async function unfold(
+  source: string,
+  macroNameInSource: string,
+  titlePrefix = "Unfold macro",
+): Promise<string> {
   const result = await validate(source);
   const document = result.document;
   const pos = positionOf(source, macroNameInSource);
@@ -60,7 +64,7 @@ async function unfold(source: string, macroNameInSource: string): Promise<string
     range: { start: pos, end: pos },
     context: { diagnostics: [] },
   })) as CodeAction[];
-  const action = actions.find((a) => a.title.startsWith("Unfold macro"));
+  const action = actions.find((a) => a.title.startsWith(titlePrefix));
   if (!action) {
     throw new Error(`no unfold action; got: ${actions.map((a) => a.title).join(", ")}`);
   }
@@ -69,10 +73,11 @@ async function unfold(source: string, macroNameInSource: string): Promise<string
 }
 
 describe("unfold code action", () => {
-  // NOTE: `softDeletable`/`auditable` are now built-in capabilities (not macros).
-  // Unfold is a MACRO refactor (it expands a `with X(...)` macro call to its
-  // source), so it does not target capabilities at all.  `softDelete` (the
-  // operations) is still a macro and unfolds.  Clause order is
+  // NOTE: `softDeletable`/`auditable`/`tenantOwned` are built-in capabilities
+  // (not macros).  A `with <cap>` clause unfolds through the capability path
+  // (`Unfold capability '<name>'` — see the dedicated describe below), which
+  // splices the capability's member source; `softDelete` (the operations) is
+  // still a macro and unfolds as `Unfold macro`.  Clause order is
   // `softDelete, softDeletable` so the marker search lands on the standalone
   // `softDelete` and not the `softDelete` inside `softDeletable`.
 
@@ -228,6 +233,69 @@ context Sales with softDeleteByDefault {
     expect(result).toMatch(/operation restore/);
     // The capability application stays at the context:
     expect(result).toMatch(/implements softDeletable/);
+  });
+
+  it("unfolds `with tenantOwned` into the tenantId field + stamp + filter source", async () => {
+    // Capability unfold (multi-tenancy Phase 1a slice 1a.2, the anti-magic
+    // story): `with tenantOwned` materializes exactly what it attaches.
+    const source = `
+system D {
+  user { id: guid  tenantId: string }
+  subdomain M {
+    context Sales {
+      aggregate Invoice with tenantOwned {
+        number: string
+      }
+      repository Invoices for Invoice { }
+    }
+  }
+}
+`;
+    const unfolded = await unfold(source, "tenantOwned", "Unfold capability");
+    // The clause is gone; the members materialized as source:
+    expect(unfolded).not.toMatch(/with tenantOwned/);
+    expect(unfolded).toMatch(/tenantId: string internal/);
+    expect(unfolded).toMatch(/stamp onCreate \{/);
+    expect(unfolded).toMatch(/tenantId := currentUser\.tenantId/);
+    expect(unfolded).toMatch(/filter this\.tenantId == currentUser\.tenantId/);
+    // And the unfolded source re-parses cleanly:
+    const reparse = await validate(unfolded);
+    expect(reparse.diagnostics.filter((d) => d.severity === 1)).toEqual([]);
+  });
+
+  it("unfolds `with softDeletable` (capability path) and keeps sibling macro calls", async () => {
+    const source = `
+context Sales {
+  aggregate Order with softDelete, softDeletable {
+    subject: string
+  }
+  repository Orders for Order { }
+}
+`;
+    const unfolded = await unfold(source, "softDeletable", "Unfold capability");
+    expect(unfolded).toMatch(/with softDelete \{/);
+    expect(unfolded).not.toMatch(/softDeletable/);
+    expect(unfolded).toMatch(/isDeleted: bool internal/);
+    expect(unfolded).toMatch(/filter !this\.isDeleted/);
+    const reparse = await validate(unfolded);
+    expect(reparse.diagnostics.filter((d) => d.severity === 1)).toEqual([]);
+  });
+
+  it("a user-declared capability wins over the built-in in capability unfold", async () => {
+    // The declaration sits AFTER the usage so the marker search lands on the
+    // `with` clause's MacroCall (positionOf finds the first occurrence).
+    const source = `
+context Sales {
+  aggregate Order with tenantOwned {
+    subject: string
+  }
+  repository Orders for Order { }
+}
+capability tenantOwned { archived: bool }
+`;
+    const unfolded = await unfold(source, "tenantOwned", "Unfold capability");
+    expect(unfolded).toMatch(/archived: bool/);
+    expect(unfolded).not.toMatch(/tenantId/);
   });
 
   it("does not offer unfold when cursor isn't on a macro call", async () => {
