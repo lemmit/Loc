@@ -80,7 +80,9 @@ describe("vanilla shape(document) persistence (DEBT-07)", () => {
     );
     expect(repo).toContain("%Api.Carts.Cart{id: Ecto.UUID.generate(), data: data, version: 1}");
     // Update: merge over the current doc, re-validate, bump version.
-    expect(repo).toContain("Map.merge(record.data || %{}, stringify_keys(attrs))");
+    expect(repo).toContain(
+      "Map.merge(record.data || %{}, __normalize_keys(stringify_keys(attrs)))",
+    );
     expect(repo).toContain("change(%{data: data, version: record.version + 1})");
     // Same fn names as the relational repo (so context defdelegates are unchanged).
     expect(repo).toContain("def list do");
@@ -101,6 +103,20 @@ describe("vanilla shape(document) persistence (DEBT-07)", () => {
     // NOT the old raw-merge (snake keys) or a struct dump.
     expect(ctrl).not.toContain("Map.merge(%{id: record.id}, record.data");
     expect(ctrl).not.toContain("Map.from_struct()");
+  });
+
+  it("normalizes camelCase inbound keys to snake before the schemaless cast (§15)", async () => {
+    const repo = file(await generateSystemFiles(DOC), "/carts/cart_repository.ex");
+    // insert: raw params snaked before the changeset (a camelCase `itemCount`
+    // body casts into `:item_count` instead of silently dropping → 422).
+    expect(repo).toContain("attrs = __normalize_keys(attrs)");
+    // update: attrs snaked BEFORE the merge, so a camelCase field overwrites the
+    // stored snake key cleanly rather than landing beside it.
+    expect(repo).toContain(
+      "Map.merge(record.data || %{}, __normalize_keys(stringify_keys(attrs)))",
+    );
+    expect(repo).toContain("defp __normalize_keys(attrs) when is_map(attrs) do");
+    expect(repo).toContain("{k, v} when is_binary(k) -> {Macro.underscore(k), v}");
   });
 
   it("emits the canonical (id, data, version) document migration", async () => {

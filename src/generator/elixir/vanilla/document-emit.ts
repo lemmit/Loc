@@ -34,6 +34,7 @@ import {
   singleFieldConstraints,
 } from "../../../ir/validate/invariant-classify.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { NORMALIZE_KEYS_DEFP } from "./key-normalize.js";
 import { managedTimestampNames } from "./managed-timestamps.js";
 
 /** True iff the aggregate's effective saving shape is `document` (binding-aware,
@@ -217,6 +218,8 @@ defmodule ${repoMod} do
 
   @spec insert(map()) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
   def insert(attrs) when is_map(attrs) do
+    attrs = __normalize_keys(attrs)
+
     case Ecto.Changeset.apply_action(${changesetMod}.document_changeset(attrs), :insert) do
       {:ok, data} ->
         %${aggModule}{id: Ecto.UUID.generate(), data: data, version: 1}
@@ -229,9 +232,11 @@ defmodule ${repoMod} do
 
   @spec update(${aggModule}.t(), map()) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
   def update(%${aggModule}{} = record, attrs) when is_map(attrs) do
-    # Merge the incoming attrs over the current document (string keys, as the
-    # jsonb column round-trips), then re-validate the merged whole.
-    merged = Map.merge(record.data || %{}, stringify_keys(attrs))
+    # Merge the incoming attrs over the current document (snake-cased string
+    # keys, as the jsonb column round-trips), then re-validate the merged whole.
+    # Normalise camelCase wire keys to snake BEFORE the merge, so a camelCase
+    # field overwrites the stored snake key cleanly instead of landing beside it.
+    merged = Map.merge(record.data || %{}, __normalize_keys(stringify_keys(attrs)))
 
     case Ecto.Changeset.apply_action(${changesetMod}.document_changeset(merged), :update) do
       {:ok, data} ->
@@ -259,6 +264,8 @@ defmodule ${repoMod} do
   defp stringify_keys(map) do
     Map.new(map, fn {k, v} -> {to_string(k), v} end)
   end
+
+${NORMALIZE_KEYS_DEFP}
 end
 `;
 }

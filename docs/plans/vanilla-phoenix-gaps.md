@@ -479,12 +479,15 @@ pairs, and the 403 runtime-authorization target).
   projection or a **generic camelize helper** — camelize map keys, pass
   `DateTime`/`Decimal` through, drop Ecto `__meta__`/`inserted_at`/`updated_at`.
   Lower traffic than the REST paths above; tracked here for a follow-up.
-- **NEW (boot-found, §15-analog — document INBOUND camelCase):** the document
-  schemaless changeset (`document_changeset`, `document-emit.ts`) casts snake
-  `@all_fields` but does **not** run the `__normalize_keys` camelCase→snake pass the
-  relational path got in §15 (#1632). A canonical camelCase create body
-  (`{"itemCount":3}`) therefore leaves `item_count` unset → `validate_required` 422;
-  the snake key round-trips. Belongs with §15 (inbound), tracked for a follow-up.
+- **Document INBOUND camelCase — FIXED (this branch, §15-analog, boot-found):** the
+  document schemaless changeset casts snake `@all_fields` but never ran the §15
+  `__normalize_keys` camelCase→snake pass, so a canonical camelCase create
+  (`{"itemCount":3}`) left `item_count` unset → 422. Fixed at the repository
+  boundary (`renderDocRepository`): `insert` snakes attrs before the changeset, and
+  `update` snakes them BEFORE the `Map.merge` over the stored doc (so a camelCase
+  field overwrites the snake key cleanly instead of landing beside it). Both
+  directions boot-verified on real Postgres — camelCase create → 201, camelCase
+  PATCH → 200, all fields round-trip camelCase.
 
 ### Original report (REAL, runtime-only — invisible to every per-PR gate):
 - the vanilla
