@@ -9,6 +9,7 @@ import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   RepositoryIR,
+  TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
@@ -169,11 +170,36 @@ function renderDomainUnion(
       .map((f: UnionMemberField) => `${wireType(f.type, ctx, "response")} ${upperFirst(f.name)}`)
       .join(", ");
   };
+  // A containment field flattens to its `<Part>Response` wire record, which
+  // lives in the owning aggregate's Application Responses namespace — one
+  // using per owner referenced (the layers share a csproj, so this compiles;
+  // the controller maps these fields 1:1 into the Application union DTO).
+  const responseUsings = new Set<string>();
+  const visitEntityRefs = (t: TypeIR): void => {
+    if (t.kind === "array") {
+      visitEntityRefs(t.element);
+      return;
+    }
+    if (t.kind === "optional") {
+      visitEntityRefs(t.inner);
+      return;
+    }
+    if (t.kind !== "entity") return;
+    const owner = ctx.aggregates.find(
+      (a) => a.name === t.name || a.parts.some((p) => p.name === t.name),
+    );
+    if (owner) responseUsings.add(`using ${ns}.Application.${plural(owner.name)}.Responses;`);
+  };
+  for (const m of members) {
+    if (m.shape === "record") for (const f of m.fields) visitEntityRefs(f.type);
+    else if (m.shape === "scalar") visitEntityRefs(m.type);
+  }
   return lines(
     "// Auto-generated.",
     "using System;",
     "using System.Collections.Generic;",
     `using ${ns}.Domain.Enums;`,
+    ...[...responseUsings].sort(),
     "",
     `namespace ${ns}.Domain.${plural(agg.name)};`,
     "",

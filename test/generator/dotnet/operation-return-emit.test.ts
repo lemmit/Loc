@@ -73,4 +73,27 @@ describe("dotnet — exception-less operation returns (A3)", () => {
     );
     expect(c).toMatch(/\[ProducesResponseType\(typeof\(\S+\.OrderOrNotFound\), 200\)\]/);
   });
+
+  it("imports the owning aggregate's Responses namespace when a variant flattens a containment", async () => {
+    // A containment field surfaces as `<Part>Response` in the flattened
+    // variant record — without the Application Responses using the Domain
+    // union fails CS0246 (first hit by showcase's `reserve()` after #1638).
+    const src = `
+      context Shop {
+        error NotFound { resource: string }
+        aggregate Order ids guid {
+          code: string
+          contains lines: Line[]
+          entity Line { sku: string }
+          operation reserve(): Order or NotFound {
+            return NotFound { resource: code }
+          }
+        }
+      }
+    `;
+    const { model } = await parseString(src, { validate: false });
+    const u = find(await generateDotnet(model), "Domain/Orders/OrderOrNotFound.cs");
+    expect(u).toMatch(/using \S+\.Application\.Orders\.Responses;/);
+    expect(u).toContain("IReadOnlyList<LineResponse> Lines");
+  });
 });
