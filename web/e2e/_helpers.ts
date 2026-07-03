@@ -33,6 +33,112 @@ export async function waitForPlaygroundReady(page: Page): Promise<void> {
   await expect(page.getByText(/^0 errors$/)).toBeVisible({ timeout: 30_000 });
 }
 
+// Console / page-error messages that are known, non-fatal noise — they
+// signal neither a broken generated bundle nor a broken editor.  ONE
+// allow-list shared by every console-asserting e2e spec.  These filters
+// were copy-pasted inline across the specs and DRIFTED: `editor.spec`
+// learned to suppress the @codingame/monaco-vscode-api init rejections
+// while the six preview-runtime gates never did, so every nightly
+// Playground-e2e run went red on host noise the editor smoke already
+// treated as expected.  Centralising kills that drift class.
+//
+// Two families:
+//   1. Host playground noise that fires regardless of the preview iframe:
+//      - @codingame/monaco-vscode-api lightweight EditorService-mode init
+//        rejections.  The playground runs the api without a views service
+//        (loom-services.ts); registering the `ddd` grammar extension makes
+//        monaco's contribution processing touch the views registry, so it
+//        logs `getViewContainersByLocation is not supported` and a service
+//        whose `.startup` is missing.  Editor + LSP work regardless; a
+//        views-service-override to silence them at the source was tried and
+//        *breaks* the editor, so they're the intended lightweight-mode
+//        trade-off.  Each surfaces twice — a console "Unhandled promise
+//        rejection:" and a window "pageerror:".
+//      - The build worker's correctness-preserving respawn (build/client.ts)
+//        rejects any in-flight RPC with "Build worker respawned; retry the
+//        operation."; it's recovered transparently and is host plumbing,
+//        not an iframe runtime error.
+//      - esbuild-wasm's direct-eval advisory (PGlite loader), Chrome's
+//        passive-listener advisory, vite HMR dynamic-import failures.
+//   2. Transient registry / CDN failures while the in-browser bundler
+//      fetches deps under load (npm 50x, CORP) — not a bundle defect.
+//
+// Anchored (with an optional "console: " capture prefix that some specs
+// prepend) so a real error that merely *contains* the noise text mid-stack
+// can't hide behind an entry.
+export const KNOWN_CONSOLE_NOISE: RegExp[] = [
+  /Fetch failed \(50[34]\)/,
+  /Cross-Origin-Resource-Policy/i,
+  /Using direct eval/i,
+  /passive event listener/i,
+  /Failed to fetch dynamically imported module/i,
+  /^(?:console: )?Unhandled promise rejection: TypeError: .*\bstartup is not a function\b/,
+  /^pageerror: .*\bstartup is not a function\b/,
+  /^(?:console: )?Unhandled promise rejection: Error: Unsupported: .*getViewContainersByLocation is not supported/,
+  /^pageerror: Unsupported: .*getViewContainersByLocation is not supported/,
+  /^(?:console: )?Unhandled promise rejection: Error: Build worker respawned; retry the operation/,
+  /^pageerror: Build worker respawned; retry the operation/,
+];
+
+// Drop the known-noise entries from a captured console/page-error list,
+// returning only messages that signal a genuinely broken bundle or editor.
+export function fatalConsoleErrors(messages: string[]): string[] {
+  return messages.filter((m) => !KNOWN_CONSOLE_NOISE.some((re) => re.test(m)));
+}
+
+// On a preview-render failure, dump what the in-browser bundle actually
+// produced.  The nightly job log otherwise shows only the bare
+// `getByText(...).toBeVisible` timeout — never WHY the generated app didn't
+// mount.  Surfaces two things the trace artifact would otherwise be the only
+// source of:
+//   1. the RAW captured console/page errors (UNfiltered — the real iframe
+//      React crash hides among the host noise `fatalConsoleErrors`
+//      allow-lists, so we print everything here);
+//   2. the preview iframe's own `<body>` HTML — an error-boundary message or
+//      an empty root tells us mount-vs-blank at a glance.
+// Best-effort: never throws (callers rethrow the original assertion error).
+export async function dumpPreviewDiagnostics(
+  page: Page,
+  captured: string[],
+  label: string,
+): Promise<void> {
+  console.log(
+    `[${label}] preview iframe did not render — ${captured.length} captured console/page error(s):`,
+  );
+  for (const m of captured) console.log(`  ${m.slice(0, 400)}`);
+  const body = page.frameLocator('[data-testid="preview-iframe"]').locator("body");
+  // Visible innerText is the decisive signal: it tells us whether the app
+  // actually rendered content (and, if the target nav/landing text is present
+  // at all, whether it's merely off-screen / in a collapsed drawer vs absent).
+  try {
+    const text = await body.innerText({ timeout: 5_000 });
+    console.log(`[${label}] preview iframe innerText (first 1500 chars):\n${text.slice(0, 1500)}`);
+  } catch (e) {
+    console.log(`[${label}] could not read preview iframe innerText: ${(e as Error).message}`);
+  }
+  // Does the gate's target text exist in the DOM at all, and is any match
+  // visible?  Distinguishes "not rendered" from "rendered but not visible".
+  try {
+    const target = page
+      .frameLocator('[data-testid="preview-iframe"]')
+      .getByText(/Welcome/i);
+    const total = await target.count();
+    let visible = 0;
+    for (let i = 0; i < total; i++) {
+      if (await target.nth(i).isVisible().catch(() => false)) visible++;
+    }
+    console.log(`[${label}] target-text matches: ${total} in DOM, ${visible} visible`);
+  } catch (e) {
+    console.log(`[${label}] could not probe target text: ${(e as Error).message}`);
+  }
+  try {
+    const html = await body.innerHTML({ timeout: 5_000 });
+    console.log(`[${label}] preview iframe <body> (first 2000 chars):\n${html.slice(0, 2000)}`);
+  } catch (e) {
+    console.log(`[${label}] could not read preview iframe <body>: ${(e as Error).message}`);
+  }
+}
+
 // Open a specific example.  Examples are now starting points for
 // workspaces (not a destructive "replace active" dropdown), so this
 // creates a NEW workspace seeded from `label` via the WorkspaceSwitcher
@@ -46,18 +152,26 @@ export async function selectExample(page: Page, label: string | RegExp): Promise
   await page.getByTestId("workspace-new").click();
   await page.getByRole("textbox", { name: "Choose example" }).click();
   await page.getByRole("option", { name: label }).first().click();
-  // On slow CI runners Mantine's combobox portal briefly overlays the create
-  // button and the dialog re-renders mid-transition, so a single click lands on
-  // the closing overlay or a detached node and times out. Retry the click
-  // (re-finding the button each time) until the dialog actually closes —
-  // `workspace-create` is gone once the workspace is created.
-  const create = page.getByTestId("workspace-create");
-  await expect(async () => {
-    await create.click({ timeout: 10_000 });
-    await expect(create).toBeHidden({ timeout: 5_000 });
-  }).toPass({ timeout: 60_000 });
+  await clickWorkspaceCreate(page);
   // Re-wait for the LSP "0 errors" badge — the new workspace remounts
   // the editor and re-parses the source, so the badge momentarily
   // flickers to "—" before the new source validates.
   await expect(page.getByText(/^0 errors$/)).toBeVisible({ timeout: 30_000 });
+}
+
+// Click the "Create workspace" button in the new-workspace popover, robustly.
+//
+// Call this AFTER the example option has been chosen.  The create popover is
+// held open across the option pick by `closeOnClickOutside={false}` on the
+// Mantine Popover (see WorkspaceSwitcher.tsx) — that's what stops it
+// auto-dismissing when the portal'd example option is clicked.  This retry is
+// the belt-and-braces for any remaining transient (a click landing mid
+// re-render): re-find the button each attempt and stop once the popover
+// closes (`workspace-create` is absent once the workspace is created).
+export async function clickWorkspaceCreate(page: Page): Promise<void> {
+  const create = page.getByTestId("workspace-create");
+  await expect(async () => {
+    await create.click({ timeout: 5_000 });
+    await expect(create).toBeHidden({ timeout: 5_000 });
+  }).toPass({ timeout: 30_000 });
 }

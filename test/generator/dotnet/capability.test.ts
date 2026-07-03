@@ -123,6 +123,34 @@ describe(".NET generator: HasQueryFilter installs per-EntityConfiguration", () =
     expect(order).not.toMatch(/DeletedAt = Now\(\)/);
   });
 
+  it("maps a nullable strongly-typed id field with a HasValue-guarded value converter", async () => {
+    // Regression: a nullable id (`owner: User id?`, e.g. the `ownerStamped`
+    // capability's `supersededBy: Self id?`) is an `optional` wrapping the id,
+    // so it skipped the id-converter branch and got a bare `.HasColumnName`.
+    // EF then can't map `UserId?` ("could not be mapped because the database
+    // provider does not support this type") — it needs the converter.  The
+    // struct-nullable form guards on HasValue (no `?.` — expression trees
+    // reject it, CS8072).
+    const model = await modelFrom(`
+      context Sales {
+        aggregate User { name: string }
+        aggregate Order {
+          subject: string
+          owner: User id?
+        }
+        repository Orders for Order { }
+        repository Users for User { }
+      }
+    `);
+    const files = generateDotnet(model);
+    const cfg = files.get("Infrastructure/Persistence/Configurations/OrderConfiguration.cs")!;
+    expect(cfg).toContain(
+      'builder.Property(x => x.Owner).HasConversion(v => v.HasValue ? v.Value.Value : (Guid?)null, v => v.HasValue ? (UserId?)new UserId(v.Value) : (UserId?)null).HasColumnName("owner");',
+    );
+    // Not the bare, converter-less mapping that fails EF model validation.
+    expect(cfg).not.toMatch(/Property\(x => x\.Owner\)\.HasColumnName\("owner"\);/);
+  });
+
   it("does NOT install HasQueryFilter for non-softDeletable aggregates", async () => {
     const model = await modelFrom(aggregateOnly(""));
     const files = generateDotnet(model);

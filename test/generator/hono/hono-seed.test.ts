@@ -107,6 +107,31 @@ describe("Hono database seeding (Phase 2, domain path)", () => {
     expect(seed).not.toMatch(/addr:\s*\(?\{ line1:/);
   });
 
+  it("coerces a datetime field written as a string literal into new Date(...)", async () => {
+    // A `datetime` create field is spelled as a string literal in the seed
+    // (`createdAt: "2024-…Z"`), but `create({...})` and drizzle's timestamp
+    // column take a `Date` — so the emitter wraps it in `new Date(...)`.
+    const src = `system TimeSeed {
+      subdomain S { context C {
+        aggregate Log with crudish {
+          message: string
+          createdAt: datetime
+        }
+        repository Logs for Log { }
+        seed default {
+          Log { message: "hi", createdAt: "2024-01-01T00:00:00Z" }
+        }
+      }}
+      api A from S
+      deployable api { platform: node contexts: [C] serves: A port: 3000 }
+    }`;
+    const { model, errors } = await parseString(src);
+    if (errors.length) throw new Error(errors.join("\n"));
+    const seed = find(generateSystems(model).files, /\/db\/seed\.ts$/);
+    expect(seed).toContain('createdAt: new Date("2024-01-01T00:00:00Z")');
+    expect(seed).not.toContain('createdAt: "2024-01-01T00:00:00Z"');
+  });
+
   it("is ship-once per dataset via the __loom_seed marker (D-SEED-IDEMPOTENCY)", async () => {
     const files = await build();
     const seed = find(files, /\/db\/seed\.ts$/);
@@ -135,6 +160,19 @@ describe("Hono database seeding (Phase 2, domain path)", () => {
     expect(index).toContain("await runSeeds(db);");
     // Seeding runs after migrations.
     expect(index.indexOf("await migrate(")).toBeLessThan(index.indexOf("await runSeeds("));
+  });
+
+  it("self-run guard also checks the entry is a seed file (survives tsup bundling)", async () => {
+    // Regression: tsup bundles db/seed.ts INTO dist/index.js, so a bare
+    // `import.meta.url === pathToFileURL(argv[1]).href` guard is true when the
+    // app runs as `node dist/index.js` — the standalone `main()` then
+    // self-executes at import time, seeding WITHOUT migrations and racing the
+    // app's own migrate→seed (boot crash: `relation "…" does not exist`).  The
+    // guard must additionally require the process entry to be a seed file so it
+    // only fires under `tsx db/seed.ts`, never inside the bundled app.
+    const files = await build();
+    const seed = find(files, /\/db\/seed\.ts$/);
+    expect(seed).toContain("/[/\\\\]seed\\.[cm]?[jt]s$/.test(process.argv[1])");
   });
 
   it("omits seed wiring entirely when no seed block is declared", async () => {

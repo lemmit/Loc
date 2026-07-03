@@ -1,8 +1,15 @@
 // Cross-backend render pin for variant-`match` (variant-match.md).
 //
-// Constructs the lowered `match` ExprIR a `match outcome { A a => a.code,
-// NF n => n.detail }` over an `A or NF` union lowers to, and asserts each
-// backend renders its native discriminated-dispatch shape.  These are pure
+// A variant-`match` narrows a union-returning repository find, and every
+// backend represents that find as its OPTIONAL TWIN — the success aggregate,
+// with the error variant standing for absence (Hono/Python: a null/`type`
+// check; .NET/Java: a `null`/type-pattern switch; Elixir: an
+// `{:ok,…}`/`{:error,…}` tuple).  The `<Union>_<Variant>` carrier records are
+// NOT emitted for a find, so the match dispatches on the twin, and the error
+// arm carries no variant fields (there is no error object — the row is simply
+// absent).  This constructs the lowered `match` ExprIR that
+// `match outcome { A a => a.code, NF => "gone" }` over an `A or NF` find union
+// lowers to, and asserts each backend renders its native shape.  Pure
 // string-emission unit tests (no IO) — the lowest altitude that catches a
 // per-backend variant-match regression.  Mirrors render-expr-kinds.test.ts.
 
@@ -27,7 +34,10 @@ const fieldOf = (binding: string, field: string): ExprIR => ({
   memberType: STRING,
 });
 
-// `match outcome { A a => a.code, NF n => n.detail }` (NF is an `error`).
+const lit = (value: string): ExprIR => ({ kind: "literal", lit: "string", value });
+
+// `match outcome { A a => a.code, NF => "gone" }` — NF is the `error`
+// (absence) variant, so its arm binds nothing and reads no field.
 const MATCH: ExprIR = {
   kind: "match",
   arms: [],
@@ -35,60 +45,56 @@ const MATCH: ExprIR = {
   subjectType: { kind: "union", variants: [A, NF] },
   variantArms: [
     { varType: A, binding: "a", value: fieldOf("a", "code"), isError: false },
-    { varType: NF, binding: "n", value: fieldOf("n", "detail"), isError: true },
+    { varType: NF, binding: undefined, value: lit("gone"), isError: true },
   ],
   otherwise: undefined,
 };
 
 describe("variant-match — per-backend rendering", () => {
   it("TS: discriminated-union conditional, binding aliased to the scrutinee", () => {
-    expect(renderTsExpr(MATCH)).toBe('(outcome.type === "A" ? outcome.code : outcome.detail)');
+    expect(renderTsExpr(MATCH)).toBe('(outcome.type === "A" ? outcome.code : "gone")');
   });
 
   it("Python: conditional on the tagged dict, cast subscript reads", () => {
     expect(renderPyExpr(MATCH)).toBe(
-      '(cast(str, outcome["code"]) if outcome["type"] == "A" else cast(str, outcome["detail"]))',
+      '(cast(str, outcome["code"]) if outcome["type"] == "A" else "gone")',
     );
   });
 
-  it("Java: sealed-union switch expression with record-pattern bindings", () => {
+  it("Java: null/type-pattern switch over the optional twin", () => {
     const out = renderJavaExpr(MATCH);
     expect(out).toContain("switch (outcome)");
-    expect(out).toContain("case AOrNF_A a -> a.code();");
-    expect(out).toContain("case AOrNF_NF n -> n.detail();");
-    expect(out).toContain("default -> null;");
+    expect(out).toContain('case null -> "gone";');
+    expect(out).toContain("case A a -> a.code();");
+    // The find never emits the <Union>_<Variant> carriers.
+    expect(out).not.toContain("AOrNF_");
   });
 
-  it(".NET: switch expression with type patterns, throwing discard arm", () => {
+  it(".NET: null/type-pattern switch over the optional twin", () => {
     const out = renderCsExpr(MATCH);
     expect(out).toContain("outcome switch");
-    expect(out).toContain("AOrNF_A a => a.Code,");
-    expect(out).toContain("AOrNF_NF n => n.Detail,");
-    expect(out).toContain("_ => throw");
+    expect(out).toContain("A a => a.Code,");
+    expect(out).toContain('_ => "gone",');
+    expect(out).not.toContain("AOrNF_");
   });
 
   it("Elixir: case over the asymmetric {:ok,…}/{:error,tag,…} tuple", () => {
     const out = renderElixirExpr(MATCH, { thisName: "record", contextModule: "MyApp" });
     expect(out).toContain("case outcome do");
     expect(out).toContain("{:ok, a} -> a.code");
-    expect(out).toContain('{:error, "NF", n} -> n.detail');
+    expect(out).toContain('{:error, "NF", _} -> "gone"');
   });
 
-  it("Java: binderless arm gets a named throwaway binder, never `_` (preview-only on JDK 21)", () => {
+  it("Java: binderless success arm gets a named throwaway binder, never `_` (preview-only on JDK 21)", () => {
     const binderless: ExprIR = {
       ...MATCH,
       variantArms: [
-        {
-          varType: A,
-          binding: undefined,
-          value: { kind: "literal", lit: "string", value: "yes" },
-          isError: false,
-        },
-        { varType: NF, binding: "n", value: fieldOf("n", "detail"), isError: true },
+        { varType: A, binding: undefined, value: lit("yes"), isError: false },
+        { varType: NF, binding: undefined, value: lit("gone"), isError: true },
       ],
     };
     const out = renderJavaExpr(binderless);
-    expect(out).toContain('case AOrNF_A __unused -> "yes";');
-    expect(out).not.toMatch(/ _ ->/);
+    expect(out).toContain('case A __unused -> "yes";');
+    expect(out).not.toMatch(/case _ /);
   });
 });

@@ -40,6 +40,31 @@ describe("python seeding", () => {
     );
   });
 
+  it("coerces a datetime field written as a string literal via datetime.fromisoformat", async () => {
+    // A `datetime` create field is a string literal in the seed, but
+    // `create(...)` takes a `datetime` (mypy --strict rejects `str`) — the
+    // emitter wraps it in `datetime.fromisoformat(...)`.
+    const src = `system TimeSeed {
+      subdomain S { context C {
+        aggregate Log with crudish {
+          message: string
+          createdAt: datetime
+        }
+        repository Logs for Log { }
+        seed default {
+          Log { message: "hi", createdAt: "2024-01-01T00:00:00Z" }
+        }
+      }}
+      api A from S
+      deployable api { platform: python contexts: [C] serves: A port: 3000 }
+    }`;
+    const { model, errors } = await parseString(src);
+    if (errors.length) throw new Error(errors.join("\n"));
+    const seed = generateSystems(model).files.get("api/app/db/seed.py")!;
+    expect(seed).toContain('created_at=datetime.fromisoformat("2024-01-01T00:00:00Z")');
+    expect(seed).toContain("from datetime import");
+  });
+
   it("datasets are ship-once: marker table + LOOM_SEED gating", async () => {
     const files = await build();
     const seed = files.get("api/app/db/seed.py")!;

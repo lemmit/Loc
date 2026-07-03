@@ -29,9 +29,10 @@ import type { LoadedPack } from "../_packs/loader.js";
  *  than trust payloads for anything privileged. */
 export function renderRealtimeClient(
   eventTypes: readonly string[],
-  /** Exported base-URL symbol in the sibling `./config` module —
-   *  `API_BASE` on react projects, `API_BASE_URL` on SvelteKit. */
-  apiBaseSymbol = "API_BASE",
+  /** Exported base-URL symbol in the sibling `./config` module.  Every
+   *  frontend now emits `API_BASE_URL` (the shared `src/util/api-base.ts`
+   *  emitter), so all callers pass it explicitly; the default matches. */
+  apiBaseSymbol = "API_BASE_URL",
 ): string {
   const typeList = eventTypes.map((t) => JSON.stringify(t)).join(", ");
   return `// Auto-generated.  Do not edit by hand.

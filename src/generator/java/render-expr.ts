@@ -325,6 +325,21 @@ const JAVA_TARGET: ExprTarget<JavaRenderContext> = {
   // `default` arm always trails so a non-exhaustive match (validator *warns*,
   // never errors) still compiles against the sealed type.
   matchVariant(m) {
+    // A union-returning repository find reaches Java as its OPTIONAL TWIN (the
+    // success entity, nullable): exactly one non-error success variant plus
+    // error variant(s) that collapse to `null`.  The `<Union>_<Tag>` carrier
+    // records are never emitted for a find, so a workflow `match` over such a
+    // result switches on `null` vs the success type — `case null` for the
+    // absent/error variant, a total type pattern for the success (no `default`,
+    // which would be dominated).  A real polymorphic DU keeps the carrier form.
+    const successArms = m.arms.filter((a) => !a.isError);
+    const isOptionalTwin = successArms.length === 1 && m.arms.length > successArms.length;
+    if (isOptionalTwin) {
+      const success = successArms[0]!;
+      const binder = success.binding ?? "__unused";
+      const errorValue = m.arms.find((a) => a.isError)?.value ?? m.otherwise ?? "null";
+      return `switch (${m.subject}) {\n      case null -> ${errorValue};\n      case ${success.variantTypeName} ${binder} -> ${success.value};\n    }`;
+    }
     const arms = m.arms.map((a) => {
       const carrier = `${m.unionName}_${a.tag}`;
       // A pattern needs a binder even when the arm bound none.  NOT `_`:

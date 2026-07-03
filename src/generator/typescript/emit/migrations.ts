@@ -94,7 +94,14 @@ function renderJournal(migrations: MigrationsIR[]): string {
     entries.push({
       idx,
       version: "7",
-      when: versionToEpochMillis(row.version),
+      // `when` must be STRICTLY INCREASING across entries: drizzle's runtime
+      // migrator applies a migration only when `lastApplied.created_at < when`
+      // (strictly), so any two entries sharing a `when` collapse to one — the
+      // second is silently skipped, its tables never created.  Modules in one
+      // deployable share a version on their initial migration (all map to the
+      // same epoch millis), so add `idx` to break ties.  Since `rows` is sorted
+      // by version and `idx` increases by 1 per row, `base + idx` is monotonic.
+      when: versionToEpochMillis(row.version) + idx,
       tag: migrationTag(row.version, row.module, row.name),
       breakpoints: true,
     });
@@ -117,8 +124,9 @@ function renderJournal(migrations: MigrationsIR[]): string {
   );
 }
 
-/** Map a `YYYYMMDDHHMMSS` version slug to epoch millis.  Deterministic;
- *  Drizzle uses `when` only for ordering within a single journal load. */
+/** Map a `YYYYMMDDHHMMSS` version slug to epoch millis.  Deterministic; the
+ *  caller adds the entry index so colliding versions still yield distinct,
+ *  strictly-increasing `when` values (drizzle's migrator skips ties). */
 function versionToEpochMillis(version: string): number {
   if (version.length !== 14) return 0;
   const year = Number(version.slice(0, 4));

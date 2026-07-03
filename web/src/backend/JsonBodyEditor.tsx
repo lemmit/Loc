@@ -79,8 +79,20 @@ export function JsonBodyEditor(props: JsonBodyEditorProps): JSX.Element {
       onChangeRef.current(m.getValue());
       monaco.editor.setModelMarkers(m, MARKER_OWNER, syntaxMarkers(m));
     });
+
+    // Automation seam: lets e2e replace the body text atomically (fires
+    // onChange like a normal edit), without depending on select-all +
+    // insertText.  The playground's VS Code-based editor build doesn't wire
+    // Ctrl+A select-all for standalone editors, so keyboard-driven overwrite
+    // silently appends to the picker-prefilled example — two concatenated JSON
+    // objects → a malformed body.  `model.setValue` sidesteps that entirely.
+    // Harmless in production.
+    const automation = window as unknown as { __loomSetRequestBody?: (t: string) => void };
+    automation.__loomSetRequestBody = (text: string) => model?.setValue(text);
+
     return () => {
       sub.dispose();
+      delete (window as unknown as { __loomSetRequestBody?: unknown }).__loomSetRequestBody;
       editorRef.current = null;
       editor.dispose();
     };

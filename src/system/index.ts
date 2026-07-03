@@ -432,7 +432,7 @@ function renderDockerCompose(sys: SystemIR): string {
   // realm + seeded demo user, so `docker compose up` logs in out of the
   // box.  Production repoints OIDC_ISSUER at a real IdP.
   if (bundlesKeycloak(sys)) {
-    lines.push(...renderKeycloakService().map((l) => `  ${l}`));
+    lines.push(...renderKeycloakService(sys).map((l) => `  ${l}`));
     lines.push("");
   }
   for (const d of sys.deployables) {
@@ -462,8 +462,18 @@ function renderDockerCompose(sys: SystemIR): string {
 // (google / auth0 / …) use their own IdP and get no bundled service.
 // ---------------------------------------------------------------------------
 
-/** Host port the bundled Keycloak is published on (8080 is left for backends). */
-const KEYCLOAK_HOST_PORT = 8081;
+/** Host port the bundled Keycloak is published on.  Starts at 8081 (8080 is
+ *  left for backends) but skips any port a deployable already publishes: the
+ *  Java backend's default port is also 8081, so a system with auth + a Java
+ *  backend would otherwise map both services to host 8081 and `docker compose
+ *  up` fails to bind ("port is already allocated").  Scanning the deployable
+ *  ports keeps Keycloak on the first free port regardless of backend mix. */
+function keycloakHostPort(sys: SystemIR): number {
+  const used = new Set(sys.deployables.map((d) => d.port));
+  let port = 8081;
+  while (used.has(port)) port++;
+  return port;
+}
 
 function bundlesKeycloak(sys: SystemIR): boolean {
   const a = sys.auth;
@@ -475,16 +485,24 @@ function bundlesKeycloak(sys: SystemIR): boolean {
  *  The issuer uses `host.docker.internal` so the browser (redirects) and the
  *  backend (JWKS / token exchange) resolve the SAME issuer URL — avoiding the
  *  classic Docker localhost-vs-service-name issuer mismatch. */
-function keycloakConfig(sys: SystemIR): { realm: string; clientId: string; issuer: string } {
+function keycloakConfig(sys: SystemIR): {
+  realm: string;
+  clientId: string;
+  issuer: string;
+  hostPort: number;
+} {
   const realm = serviceSlug(sys.name) || "loom";
+  const hostPort = keycloakHostPort(sys);
   return {
     realm,
     clientId: `${realm}-app`,
-    issuer: `http://host.docker.internal:${KEYCLOAK_HOST_PORT}/realms/${realm}`,
+    issuer: `http://host.docker.internal:${hostPort}/realms/${realm}`,
+    hostPort,
   };
 }
 
-function renderKeycloakService(): string[] {
+function renderKeycloakService(sys: SystemIR): string[] {
+  const hostPort = keycloakHostPort(sys);
   return [
     "keycloak:",
     "  image: quay.io/keycloak/keycloak:26.0",
@@ -494,10 +512,10 @@ function renderKeycloakService(): string[] {
     "    KC_BOOTSTRAP_ADMIN_PASSWORD: admin",
     // KC_HOSTNAME pins the issuer/endpoint URLs Keycloak advertises in its
     // discovery doc to the host-reachable address (see keycloakConfig).
-    `    KC_HOSTNAME: http://host.docker.internal:${KEYCLOAK_HOST_PORT}`,
+    `    KC_HOSTNAME: http://host.docker.internal:${hostPort}`,
     '    KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"',
     "  ports:",
-    `    - "${KEYCLOAK_HOST_PORT}:8080"`,
+    `    - "${hostPort}:8080"`,
     "  volumes:",
     "    - ./keycloak:/opt/keycloak/data/import:ro",
     "  extra_hosts:",

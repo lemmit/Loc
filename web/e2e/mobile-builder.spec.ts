@@ -8,6 +8,7 @@
 // mobile), so we drive the example picker directly like mobile-run-cascade.
 
 import { type Page, expect, test } from "@playwright/test";
+import { clickWorkspaceCreate } from "./_helpers";
 
 test.use({ viewport: { width: 375, height: 812 } });
 
@@ -19,7 +20,7 @@ async function openExample(page: Page, label: RegExp): Promise<void> {
   await page.getByTestId("mobile-workspace-button").click();
   await page.getByRole("textbox", { name: "Choose example" }).click();
   await page.getByRole("option", { name: label }).first().click();
-  await page.getByTestId("workspace-create").click();
+  await clickWorkspaceCreate(page);
   await page.waitForTimeout(1500);
 }
 

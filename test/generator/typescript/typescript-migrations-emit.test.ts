@@ -164,5 +164,15 @@ describe("typescript migrations emitter", () => {
       "20260101000001_module_a_add_something",
       "20260101000002_module_b_add_something",
     ]);
+    // `when` must be STRICTLY increasing across entries — the two Initials
+    // share a version (same epoch millis).  Drizzle's runtime migrator applies
+    // a migration only when `lastApplied.created_at < when`, so a tie silently
+    // skips the second Initial (ModuleB's tables never get created).  The
+    // per-entry index breaks the tie.
+    const whens = journal.entries.map((e: { when: number }) => e.when);
+    expect(whens[1]).toBeGreaterThan(whens[0]);
+    for (let i = 1; i < whens.length; i++) {
+      expect(whens[i]).toBeGreaterThan(whens[i - 1]);
+    }
   });
 });

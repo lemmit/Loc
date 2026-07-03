@@ -4,12 +4,15 @@
 //
 // Per D-SEED-PATH the default path is **through the domain `Create`**: each
 // row becomes `await <agg>Repo.SaveAsync(<Agg>.Create(…), cancellationToken)`, so the
-// aggregate's invariants run.  Unlike the Hono `create({ … })` named object,
-// the C# `Create(…)` factory is **positional** in the aggregate's
-// required-field order, so a row's fields are ordered to match before being
-// rendered by the shared `renderCsExpr` (value objects → `new Money(…)`,
-// enums → `Tier.Free`, money → `1.0m`).  The repository is DI-resolved (its
-// ctor needs an ILogger), so it is fetched via `sp.GetRequiredService`.
+// aggregate's invariants run.  The C# `Create(…)` factory declares every
+// create-input field as a required parameter, but a seed row usually specifies
+// only a subset — so the call uses **named args** over the full create-input
+// set, supplying an omission value (optional → null, bare bool → false,
+// `= default` → the default literal) for anything the row leaves out.  Values
+// render through the shared `renderCsExpr` (value objects → `new Money(…)`,
+// enums → `Tier.Free`, money → `1.0m`), with `datetime` string literals
+// coerced to `DateTime`.  The repository is DI-resolved (its ctor needs an
+// ILogger), so it is fetched via `sp.GetRequiredService`.
 //
 // Per D-SEED-IDEMPOTENCY v1 is **ship-once per dataset**: a `__loom_seed`
 // marker table holds one row per applied dataset; a dataset whose marker is
@@ -20,10 +23,12 @@
 // Cross-row references use explicit ids per D-SEED-XREF (an `@handle`
 // indirection was considered and not adopted).
 
+import { createInputFields, createOmissionValue } from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   SeedRowIR,
+  TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../../util/naming.js";
@@ -122,13 +127,48 @@ function renderDatasetFn(
   );
 }
 
-/** Positional `Create(…)` args, ordered by the aggregate's required-field
- *  declaration order (the factory's parameter order). */
+/** Named `Create(…)` args over the aggregate's full create-input set (the
+ *  factory's parameters).  A seed row typically specifies only a subset, so
+ *  every create input the row omits is still supplied — provided fields from
+ *  the row, omitted ones via their omission value (optional → `null`, bare
+ *  bool → `false`, `= default` → the default literal).  Named args keep the
+ *  call order-free and cover every required parameter (else CS7036).  Mirrors
+ *  the workflow factory-let path in `workflow-emit.ts`. */
 function renderArgs(row: SeedRowIR, agg: EnrichedAggregateIR): string {
   const byName = new Map(row.fields.map((f) => [f.name, f.value]));
-  const order = agg.fields.filter((f) => !f.optional).map((f) => f.name);
-  const args = order.filter((n) => byName.has(n)).map((n) => renderCsExpr(byName.get(n)!));
+  const args = createInputFields(agg).map((f) => {
+    const provided = byName.get(f.name);
+    const value =
+      provided !== undefined
+        ? coerceSeedValue(f.type, renderCsExpr(provided))
+        : renderCsOmission(createOmissionValue(f));
+    return `${f.name}: ${value}`;
+  });
   return args.join(", ");
+}
+
+/** A seed row's `datetime` field is written as a string literal (`"2024-…Z"`),
+ *  but the `Create(...)` factory takes a `DateTime` — coerce it the same way
+ *  the request DTO mapping does (InvariantCulture, assume+adjust to UTC). */
+function coerceSeedValue(type: TypeIR, rendered: string): string {
+  const leaf = type.kind === "optional" ? type.inner : type;
+  if (leaf.kind === "primitive" && leaf.name === "datetime") {
+    return `DateTime.Parse(${rendered}, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal)`;
+  }
+  return rendered;
+}
+
+/** Render the omission value of a create-input field the seed row left unset
+ *  into the C# its named `Create(...)` argument passes. */
+function renderCsOmission(v: ReturnType<typeof createOmissionValue>): string {
+  switch (v.kind) {
+    case "default":
+      return renderCsExpr(v.expr);
+    case "false":
+      return "false";
+    case "null":
+      return "null";
+  }
 }
 
 function repoVar(agg: string): string {

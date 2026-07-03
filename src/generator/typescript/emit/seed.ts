@@ -19,7 +19,14 @@
 // D-SEED-XREF (an `@handle` indirection was considered and not adopted).
 // Not yet handled (later slices): create-shape validation.
 
-import type { EnrichedBoundedContextIR, ExprIR, SeedRowIR } from "../../../ir/types/loom-ir.js";
+import { createInputFields } from "../../../ir/enrich/wire-projection.js";
+import type {
+  EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
+  ExprIR,
+  SeedRowIR,
+  TypeIR,
+} from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../../util/naming.js";
 import { renderSeedRowInsert } from "../../sql-pg.js";
@@ -42,14 +49,16 @@ export function emitTypescriptSeeds(ctx: EnrichedBoundedContextIR, out: Map<stri
   if (datasets.length === 0) return;
 
   // Only non-abstract aggregates have a `create` factory + repository.
-  const seedable = new Set(ctx.aggregates.filter((a) => !a.isAbstract).map((a) => a.name));
+  const seedableAggs = ctx.aggregates.filter((a) => !a.isAbstract);
+  const seedable = new Set(seedableAggs.map((a) => a.name));
+  const aggByName = new Map<string, EnrichedAggregateIR>(seedableAggs.map((a) => [a.name, a]));
 
   const fnBlocks: string[] = [];
   const callLines: string[] = [];
   for (const ds of datasets) {
     const entries = ds.entries.filter((e) => seedable.has(e.row.aggregate));
     if (entries.length === 0) continue;
-    fnBlocks.push(renderDatasetFn(ds.name, entries));
+    fnBlocks.push(renderDatasetFn(ds.name, entries, aggByName));
     callLines.push(`  await seed${upperFirst(ds.name)}(db, requested);`);
   }
   if (callLines.length === 0) return;
@@ -91,7 +100,11 @@ function usedAggregates(datasets: Dataset[], seedable: Set<string>): string[] {
 }
 
 /** Render one `async function seed<Dataset>(db, requested)`. */
-function renderDatasetFn(dataset: string, entries: Entry[]): string {
+function renderDatasetFn(
+  dataset: string,
+  entries: Entry[],
+  aggByName: Map<string, EnrichedAggregateIR>,
+): string {
   // One repository instance per distinct aggregate used on the domain path.
   const domainAggs = [...new Set(entries.filter((e) => !e.raw).map((e) => e.row.aggregate))];
   const repoDecls = domainAggs.map(
@@ -101,7 +114,7 @@ function renderDatasetFn(dataset: string, entries: Entry[]): string {
     e.raw
       ? // raw path (D-SEED-XREF): direct INSERT with explicit id + FK columns.
         `  await db.execute(sql.raw(${JSON.stringify(renderSeedRowInsert(e.row.aggregate, e.row.fields))}));`
-      : `  await ${repoVar(e.row.aggregate)}.save(${e.row.aggregate}.create(${renderInput(e.row)}));`,
+      : `  await ${repoVar(e.row.aggregate)}.save(${e.row.aggregate}.create(${renderInput(e.row, aggByName.get(e.row.aggregate)!)}));`,
   );
   return lines(
     `async function seed${upperFirst(dataset)}(db: Db, requested: Set<string>): Promise<void> {`,
@@ -115,17 +128,35 @@ function renderDatasetFn(dataset: string, entries: Entry[]): string {
   );
 }
 
-/** `{ field: <expr>, … }` create-input literal from a seed row. */
-function renderInput(row: SeedRowIR): string {
+/** `{ field: <expr>, … }` create-input literal from a seed row.  Values render
+ *  through the default `renderTsExpr` context, except `datetime` fields — the
+ *  row writes them as string literals (`"2024-…Z"`) but the domain `create`
+ *  factory (and drizzle's timestamp column) take a `Date`, so those are coerced
+ *  to `new Date(…)`. */
+function renderInput(row: SeedRowIR, agg: EnrichedAggregateIR): string {
   if (row.fields.length === 0) return "{}";
-  const entries = row.fields.map((f) => `${f.name}: ${renderField(f.value)}`);
+  const typeByName = new Map(createInputFields(agg).map((f) => [f.name, f.type]));
+  const entries = row.fields.map(
+    (f) => `${f.name}: ${renderField(f.value, typeByName.get(f.name))}`,
+  );
   return `{ ${entries.join(", ")} }`;
 }
 
-function renderField(value: ExprIR): string {
+function renderField(value: ExprIR, type: TypeIR | undefined): string {
   // Seed expressions never reference `this` — the default render context
   // (literals / enum-value / value-object-ctor / money / now()) suffices.
-  return renderTsExpr(value);
+  return coerceSeedValue(type, renderTsExpr(value));
+}
+
+/** A seed row's `datetime` field is written as a string literal (`"2024-…Z"`),
+ *  but the `create({…})` factory takes a `Date` (drizzle's timestamp column
+ *  calls `.toISOString()` on it) — coerce it to `new Date(…)`. */
+function coerceSeedValue(type: TypeIR | undefined, rendered: string): string {
+  const leaf = type?.kind === "optional" ? type.inner : type;
+  if (leaf?.kind === "primitive" && leaf.name === "datetime") {
+    return `new Date(${rendered})`;
+  }
+  return rendered;
 }
 
 function repoVar(agg: string): string {
@@ -205,8 +236,13 @@ function renderSeedFile(
       "}",
       "",
       body,
-      "// When run directly (`npm run db:seed`) connect and seed; when imported by",
-      "// index.ts the exported `runSeeds(db)` is called against the live pool.",
+      "// When run directly (`npm run db:seed` = `tsx db/seed.ts`) connect and",
+      "// seed; when imported by index.ts the exported `runSeeds(db)` is called",
+      "// against the live pool AFTER migrations.  The self-run guard MUST also",
+      "// verify the entry is a seed file: tsup bundles this module into",
+      "// `dist/index.js`, so a bare `import.meta.url === argv[1]` check is true",
+      "// there too and would self-run `main()` (seeding without migrations,",
+      "// racing the app's own migrate→seed) on every boot.",
       "async function main(): Promise<void> {",
       "  if (!process.env.DATABASE_URL) {",
       '    throw new Error("DATABASE_URL is required to run seeds.");',
@@ -220,7 +256,11 @@ function renderSeedFile(
       "  }",
       "}",
       "",
-      "if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {",
+      "if (",
+      "  process.argv[1] &&",
+      "  import.meta.url === pathToFileURL(process.argv[1]).href &&",
+      "  /[/\\\\]seed\\.[cm]?[jt]s$/.test(process.argv[1])",
+      ") {",
       "  void main();",
       "}",
     ) + "\n"

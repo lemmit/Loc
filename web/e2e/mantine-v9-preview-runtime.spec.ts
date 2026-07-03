@@ -14,7 +14,13 @@
 // - any pageerror surfaced by React-19 rendering the storybook tree
 
 import { expect, test } from "@playwright/test";
-import { browserCanReachNetwork, waitForPlaygroundReady } from "./_helpers";
+import {
+  browserCanReachNetwork,
+  clickWorkspaceCreate,
+  dumpPreviewDiagnostics,
+  fatalConsoleErrors,
+  waitForPlaygroundReady,
+} from "./_helpers";
 
 // #1242 (fixed): the bundle toast asserted "…KB…" but the Hono bundle is
 // MB-scale, so the KB-only regex never matched.  The matcher is now
@@ -48,7 +54,7 @@ test("mantine@v9 preview boots without runtime errors", async ({ page }) => {
   await page.getByTestId("workspace-new").click();
   await page.getByRole("textbox", { name: /Choose example/i }).click();
   await page.getByRole("option", { name: /Mantine 9 · pinned storybook/ }).click();
-  await page.getByTestId("workspace-create").click();
+  await clickWorkspaceCreate(page);
 
   // Wait for auto-Generate to populate the file tree.
   await expect(page.getByText(/generated \d+ file\(s\)/)).toBeVisible({
@@ -84,12 +90,19 @@ test("mantine@v9 preview boots without runtime errors", async ({ page }) => {
     await expect(page.getByTestId("preview-region")).toBeVisible();
   const iframe = page.frameLocator('[data-testid="preview-iframe"]');
 
-  // First content render — wait for *any* aggregate label to appear.
-  // The storybook example emits a Catalog / Sales / CustomerMgmt
-  // module structure; "Home" is the shared landing page.
-  await expect(iframe.getByText(/Home|Catalog|Sales|Customers/i).first()).toBeVisible({
-    timeout: 60_000,
-  });
+  // First content render — wait for the scaffold Home dashboard's "Welcome"
+  // heading (`scaffoldHome`, pack-independent).  The earlier `/Catalog/`-style
+  // matcher targeted an aggregate's nav link, which the drawer-based packs
+  // (mui/shadcn/chakra) keep in a collapsed sidebar — present in the DOM but
+  // not visible — so it timed out despite a fully-rendered landing page.
+  try {
+    await expect(iframe.getByText(/Welcome/i).first()).toBeVisible({
+      timeout: 60_000,
+    });
+  } catch (e) {
+    await dumpPreviewDiagnostics(page, errors, "mantine-v9");
+    throw e;
+  }
 
   // Now the gate: no runtime errors during render.  The two
   // failure modes we explicitly watch for:
@@ -98,16 +111,6 @@ test("mantine@v9 preview boots without runtime errors", async ({ page }) => {
   // Pageerror-level surfaces both.  We also reject any unexpected
   // console.error — Mantine 9 + React 19 shouldn't emit any at
   // steady state on a happy-path mount.
-  const fatal = errors.filter((m) => {
-    // Suppress the well-known noise that's not related to our bundle:
-    //   - 503/504 transients from the npm registry under load
-    //   - "Using direct eval" warnings from esbuild-wasm
-    //   - cross-origin postMessage chatter from the SW handshake
-    return (
-      !/Fetch failed \(50[34]\)/.test(m) &&
-      !/Using direct eval/i.test(m) &&
-      !/Cross-Origin-Resource-Policy/i.test(m)
-    );
-  });
+  const fatal = fatalConsoleErrors(errors);
   expect(fatal, "iframe runtime errors during mantine@v9 mount").toEqual([]);
 });

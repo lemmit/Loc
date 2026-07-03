@@ -232,6 +232,23 @@ const CS_TARGET: ExprTarget<CsRenderContext> = {
   // `b.Field` reads it.  A `_` discard arm always trails so a non-exhaustive
   // match (validator *warns*, never errors) stays a total switch expression.
   matchVariant(m) {
+    const unmatched = 'throw new System.InvalidOperationException("unmatched variant")';
+    // A union-returning repository find reaches .NET as its OPTIONAL TWIN
+    // (`Agg?`, see `unionFindAsOptionalTwin`): exactly one non-error success
+    // variant (the aggregate) plus error variant(s) that collapse to the
+    // absent `null`.  The Domain layer never emits the `<Union>_<Tag>` carrier
+    // records for a find union, so a workflow `match` over such a result must
+    // switch on the twin natively — an `Agg pattern` arm for the success, `_`
+    // for absent — not the DU carriers.  A real polymorphic DU (2+ success
+    // variants, whose carrier records ARE emitted) keeps the carrier form.
+    const successArms = m.arms.filter((a) => !a.isError);
+    const isOptionalTwin = successArms.length === 1 && m.arms.length > successArms.length;
+    if (isOptionalTwin) {
+      const success = successArms[0]!;
+      const binder = success.binding ?? "_unused";
+      const errorValue = m.arms.find((a) => a.isError)?.value ?? m.otherwise ?? unmatched;
+      return `${m.subject} switch\n    {\n        ${success.variantTypeName} ${binder} => ${success.value},\n        _ => ${errorValue},\n    }`;
+    }
     const arms = m.arms.map((a) => {
       const carrier = `${m.unionName}_${a.tag}`;
       const binder = a.binding ?? "_unused";
@@ -242,9 +259,7 @@ const CS_TARGET: ExprTarget<CsRenderContext> = {
     // (validator-warned) unmatched variant rather than return `null` — which
     // would trip nullable-reference-types under `/warnaserror` for a
     // non-nullable return, and a missed variant *should* fail loudly.
-    const tail = `        _ => ${
-      m.otherwise ?? 'throw new System.InvalidOperationException("unmatched variant")'
-    },`;
+    const tail = `        _ => ${m.otherwise ?? unmatched},`;
     return `${m.subject} switch\n    {\n${arms.join("\n")}\n${tail}\n    }`;
   },
   bindingRefText: (binding) => binding,

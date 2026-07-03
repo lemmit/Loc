@@ -83,6 +83,12 @@ export function WorkspaceSwitcher({
         withinPortal
         width={300}
         trapFocus
+        // The "Start from" Select renders its options in a separate portal, so
+        // clicking one reads as a click *outside* this popover and would
+        // auto-dismiss it mid-selection — the create button then vanishes
+        // before it can be clicked (the dominant playground-e2e flake). Keep
+        // the popover open until an explicit Create / Escape closes it.
+        closeOnClickOutside={false}
       >
         <Popover.Target>
           <ActionIcon

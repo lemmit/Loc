@@ -12,6 +12,7 @@
 import { expect, test } from "@playwright/test";
 import {
   browserCanReachNetwork,
+  fatalConsoleErrors,
   selectExample,
   waitForPlaygroundReady,
 } from "./_helpers";
@@ -65,7 +66,18 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
 
   await test.step("GET /products → 200 []", async () => {
     await page.getByTestId("btn-send").click();
-    await expect(page.getByTestId("resp-status")).toContainText("200", { timeout: 30_000 });
+    try {
+      await expect(page.getByTestId("resp-status")).toContainText("200", { timeout: 30_000 });
+    } catch (e) {
+      // The dispatch resolves the status badge but never to "200" in CI —
+      // surface what it *did* return (status + body) so the next run shows
+      // whether the in-browser Hono/PGlite backend errored, 404'd, or hung.
+      const status = await page.getByTestId("resp-status").innerText().catch(() => "<none>");
+      const body = await page.getByTestId("resp-body").innerText().catch(() => "<none>");
+      console.log(`[runtime] GET /products did not return 200 — resp-status="${status}" resp-body=${body.slice(0, 400)}`);
+      console.log(`[runtime] captured console/page errors:\n${consoleErrors.map((m) => "  " + m.slice(0, 300)).join("\n")}`);
+      throw e;
+    }
     await expect(page.getByTestId("resp-body")).toHaveText(/^\[\]$/);
   });
 
@@ -74,24 +86,65 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
     // Selecting the create operation flips method → POST and reveals
     // the body editor with a Generate-example affordance.
     await page.getByTestId("req-endpoint").click();
-    await page.getByRole("option", { name: "POST /products", exact: true }).click();
-    await expect(page.getByTestId("req-method")).toContainText("POST");
+    // Tolerant of the `/api` route prefix the generated backend mounts under
+    // (the option label is verb + the OpenAPI path); selecting it sets `reqPath`
+    // to whatever concrete path the picker carries, so the dispatch below hits
+    // the real route regardless of the prefix.
+    await page.getByRole("option", { name: /^POST \/(api\/)?products$/ }).click();
+    // `req-method` is a readonly Mantine <input> — its verb lives in `value`,
+    // not text content, so assert on the value (toContainText reads "").
+    await expect(page.getByTestId("req-method")).toHaveValue("POST");
     await expect(page.getByTestId("btn-gen-example")).toBeVisible();
   });
 
   await test.step("POST /products → 201", async () => {
-    // req-body is now a Monaco editor (a div, not a textarea), so we
-    // set its content via select-all + insertText — keyboard.type would
-    // trip Monaco's auto-closing brackets/quotes and double them up.
+    // req-body is a Monaco editor (a div, not a textarea).  Set its content
+    // via the `__loomSetRequestBody` automation seam (model.setValue, fires
+    // onChange) rather than keystrokes: the picker prefilled a schema example,
+    // and the playground's VS Code-based editor build doesn't wire Ctrl+A
+    // select-all for standalone editors, so select-all+insertText silently
+    // *appended* the new object to the example → two concatenated JSON objects
+    // → "Malformed JSON in request body" (a deterministic 500).  setValue
+    // replaces atomically and sidesteps that.
     const body = page.getByTestId("req-body");
     await expect(body).toBeVisible();
-    await body.click();
-    await page.keyboard.press("ControlOrMeta+A");
-    await page.keyboard.insertText(
+    // Wait for the editor's automation seam to register (set in its mount
+    // effect, which can lag the container becoming visible).
+    await page.waitForFunction(
+      () => typeof (window as unknown as { __loomSetRequestBody?: unknown }).__loomSetRequestBody === "function",
+    );
+    await page.evaluate(
+      (json) =>
+        (window as unknown as { __loomSetRequestBody?: (t: string) => void }).__loomSetRequestBody?.(
+          json,
+        ),
       JSON.stringify({ sku: "PW-1", price: { amount: 9.99, currency: "USD" } }),
     );
+    // Confirm the model actually holds the new body (single-line compact JSON
+    // renders fully in Monaco's DOM) before dispatching.
+    await expect(body).toContainText('"sku"');
     await page.getByTestId("btn-send").click();
-    await expect(page.getByTestId("resp-status")).toContainText("201", { timeout: 30_000 });
+    try {
+      await expect(page.getByTestId("resp-status")).toContainText("201", { timeout: 30_000 });
+    } catch (e) {
+      // The create dispatch reaches the backend but doesn't 201 in CI — dump
+      // the actual status + body (a 500 would carry the server error/stack)
+      // and any console errors, so the next run shows the real cause.
+      const status = await page.getByTestId("resp-status").innerText().catch(() => "<none>");
+      const respBody = await page.getByTestId("resp-body").innerText().catch(() => "<none>");
+      console.log(`[runtime] POST create did not return 201 — resp-status="${status}" resp-body=${respBody.slice(0, 800)}`);
+      console.log(`[runtime] captured console/page errors:\n${consoleErrors.map((m) => "  " + m.slice(0, 300)).join("\n")}`);
+      // The backend sanitizes the 500 body to "internal"; the real err.message
+      // is logged (`event: internal_error`) via the worker's pino → the
+      // console-tee routes it into the Backend Logs panel, not the page
+      // console.  Dump that panel to get the actual exception.
+      const backendLog = await page
+        .getByTestId("output-backend-log")
+        .textContent()
+        .catch(() => "<panel not found>");
+      console.log(`[runtime] backend log panel:\n${(backendLog ?? "").slice(0, 2500)}`);
+      throw e;
+    }
     await expect(page.getByTestId("resp-body")).toContainText(/"id":\s*".+"/);
   });
 
@@ -147,11 +200,6 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
   // (Monaco workers, PGlite WASM loader, etc.).  Allow npm registry
   // transient 503s the bundler retries through, and PGlite's
   // direct-eval warnings that have no functional impact.
-  const fatal = consoleErrors.filter(
-    (m) =>
-      !/Fetch failed \(503\)/.test(m) &&
-      !/passive event listener/i.test(m) &&
-      !/Using direct eval/i.test(m),
-  );
+  const fatal = fatalConsoleErrors(consoleErrors);
   expect(fatal, "browser console errors during full run").toEqual([]);
 });

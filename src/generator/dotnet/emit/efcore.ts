@@ -648,12 +648,27 @@ function fieldConfigLines(
   // embedded (`ToJson`) shape, where members are JSON keys, not columns.
   const col = snake(f.name);
   const colName = embedded ? "" : `.HasColumnName("${col}")`;
-  if (f.type.kind === "id") {
-    return [
-      `${indent}${builder}.Property(x => x.${upperFirst(f.name)}).HasConversion(v => v.Value, v => new ${f.type.targetName}Id(v))${colName};`,
-    ];
+  // A nullable strongly-typed id / enum (`supersededBy: Self id?`) is an
+  // `optional` wrapping the id/enum — peel it so the value converter is still
+  // emitted.  Without a converter EF can't map `EngineerId?` (throws at model
+  // build: "could not be mapped because the database provider does not support
+  // this type").
+  const isOptional = f.type.kind === "optional";
+  const leaf = f.type.kind === "optional" ? f.type.inner : f.type;
+  if (leaf.kind === "id") {
+    const idType = `${leaf.targetName}Id`;
+    // The id is a `readonly record struct`, so `Id?` is `Nullable<Id>` and the
+    // plain inline lambdas bind `v` as the nullable type — `v.Value`/`new Id(v)`
+    // then don't type-check.  The optional form maps `Id?` ⇆ `Provider?`
+    // explicitly, guarding on `HasValue` (an expression-tree lambda can't use
+    // the `?.` null-propagating operator — CS8072).
+    const provider = idValueClrType(leaf.valueType);
+    const conv = isOptional
+      ? `.HasConversion(v => v.HasValue ? v.Value.Value : (${provider}?)null, v => v.HasValue ? (${idType}?)new ${idType}(v.Value) : (${idType}?)null)`
+      : `.HasConversion(v => v.Value, v => new ${idType}(v))`;
+    return [`${indent}${builder}.Property(x => x.${upperFirst(f.name)})${conv}${colName};`];
   }
-  if (f.type.kind === "enum") {
+  if (leaf.kind === "enum") {
     return [
       `${indent}${builder}.Property(x => x.${upperFirst(f.name)}).HasConversion<string>()${colName};`,
     ];

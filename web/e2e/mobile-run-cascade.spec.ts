@@ -12,7 +12,7 @@
 // assertion, same idiom as runtime.spec.ts.
 
 import { expect, test } from "@playwright/test";
-import { browserCanReachNetwork } from "./_helpers";
+import { browserCanReachNetwork, clickWorkspaceCreate } from "./_helpers";
 
 test("mobile Run kicks the pipeline and surfaces files", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -24,7 +24,7 @@ test("mobile Run kicks the pipeline and surfaces files", async ({ page }) => {
   await page.getByTestId("mobile-workspace-button").click();
   await page.getByRole("textbox", { name: "Choose example" }).click();
   await page.getByRole("option", { name: /Sales System/ }).click();
-  await page.getByTestId("workspace-create").click();
+  await clickWorkspaceCreate(page);
   // Auto-Generate fires ~800 ms after the source mirrors land — give
   // it a beat so the Files tab is already populated.
   await page.waitForTimeout(1500);

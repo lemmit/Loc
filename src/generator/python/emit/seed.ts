@@ -1,6 +1,13 @@
-import type { EnrichedBoundedContextIR, ExprIR, SeedRowIR } from "../../../ir/types/loom-ir.js";
+import { createInputFields } from "../../../ir/enrich/wire-projection.js";
+import type {
+  EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
+  ExprIR,
+  SeedRowIR,
+  TypeIR,
+} from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
-import { snake, upperFirst } from "../../../util/naming.js";
+import { snake } from "../../../util/naming.js";
 import { renderSeedRowInsert } from "../../sql-pg.js";
 import { renderPyExpr } from "../render-expr.js";
 
@@ -44,14 +51,16 @@ export function buildPySeedFile(
   if (datasets.length === 0) return null;
 
   // Only non-abstract aggregates have a `create` factory + repository.
-  const seedable = new Set(ctx.aggregates.filter((a) => !a.isAbstract).map((a) => a.name));
+  const seedableAggs = ctx.aggregates.filter((a) => !a.isAbstract);
+  const seedable = new Set(seedableAggs.map((a) => a.name));
+  const aggByName = new Map<string, EnrichedAggregateIR>(seedableAggs.map((a) => [a.name, a]));
 
   const fnBlocks: string[] = [];
   const callLines: string[] = [];
   for (const ds of datasets) {
     const entries = ds.entries.filter((e) => seedable.has(e.row.aggregate));
     if (entries.length === 0) continue;
-    fnBlocks.push(renderDatasetFn(ds.name, entries, schemaFor));
+    fnBlocks.push(renderDatasetFn(ds.name, entries, schemaFor, aggByName));
     callLines.push(`        await _seed_${snake(ds.name)}(session, requested)`);
   }
   if (callLines.length === 0) return null;
@@ -164,6 +173,7 @@ function renderDatasetFn(
   dataset: string,
   entries: Entry[],
   schemaFor: (aggName: string) => string | undefined,
+  aggByName: Map<string, EnrichedAggregateIR>,
 ): string {
   const domainAggs = [...new Set(entries.filter((e) => !e.raw).map((e) => e.row.aggregate))];
   const repoDecls = domainAggs.map(
@@ -174,7 +184,7 @@ function renderDatasetFn(
       ? // raw path (D-SEED-XREF): driver-level INSERT with explicit ids,
         // schema-qualified to match the dataSource-routed table.
         `    await (await session.connection()).exec_driver_sql(${pyStr(qualifiedInsert(e.row, schemaFor(e.row.aggregate)))})`
-      : `    await ${snake(e.row.aggregate)}_repo.save(${e.row.aggregate}.create(${renderInput(e.row)}))`,
+      : `    await ${snake(e.row.aggregate)}_repo.save(${e.row.aggregate}.create(${renderInput(e.row, aggByName.get(e.row.aggregate)!)}))`,
   );
   return lines(
     `async def _seed_${snake(dataset)}(session: AsyncSession, requested: set[str]) -> None:`,
@@ -201,13 +211,27 @@ function qualifiedInsert(row: SeedRowIR, schema: string | undefined): string {
 /** `field=<expr>, …` create-factory kwargs from a seed row.  Seed
  *  expressions never reference `this`; the default render context
  *  (literals / enum values / value-object ctors / money / now())
- *  suffices. */
-function renderInput(row: SeedRowIR): string {
-  return row.fields.map((f) => `${snake(f.name)}=${renderField(f.value)}`).join(", ");
+ *  suffices — except `datetime` fields, coerced below. */
+function renderInput(row: SeedRowIR, agg: EnrichedAggregateIR): string {
+  const typeByName = new Map(createInputFields(agg).map((f) => [f.name, f.type]));
+  return row.fields
+    .map((f) => `${snake(f.name)}=${renderField(f.value, typeByName.get(f.name))}`)
+    .join(", ");
 }
 
-function renderField(value: ExprIR): string {
-  return renderPyExpr(value);
+function renderField(value: ExprIR, type: TypeIR | undefined): string {
+  return coerceSeedValue(type, renderPyExpr(value));
+}
+
+/** A seed row's `datetime` field is written as a string literal (`"2024-…Z"`),
+ *  but the `create(...)` factory takes a `datetime` — coerce it via
+ *  `datetime.fromisoformat` (Python 3.11+ accepts the trailing `Z`). */
+function coerceSeedValue(type: TypeIR | undefined, rendered: string): string {
+  const leaf = type?.kind === "optional" ? type.inner : type;
+  if (leaf?.kind === "primitive" && leaf.name === "datetime") {
+    return `datetime.fromisoformat(${rendered})`;
+  }
+  return rendered;
 }
 
 function pyStr(s: string): string {

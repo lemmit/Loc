@@ -252,7 +252,7 @@ export function generateReactForContexts(
       ? [...new Set(contexts.flatMap((c) => [...realtimeEventTypes(c)]))].sort()
       : [];
   if (realtimeTypes.length > 0) {
-    out.set("src/api/realtime.ts", renderRealtimeClient(realtimeTypes));
+    out.set("src/api/realtime.ts", renderRealtimeClient(realtimeTypes, "API_BASE_URL"));
   }
   // Live-event handlers (`on <channel>.<Event>(e) { toast(…) }`) —
   // rendered as one renderless component App mounts at its root.
