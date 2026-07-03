@@ -1471,6 +1471,33 @@ that an identical `openssl`/curl request doesn't get is a fingerprint allowlist,
 not a network block. The fix is to re-originate through an accepted client, not
 to fight the CA.
 
+### Gradle hits the same wall — but only *inside* the container
+
+The generated Java Dockerfile's Gradle stage fails plugin/dependency
+resolution behind the same proxy: the in-container JVM's TLS fingerprint is
+rejected while the **host** Gradle (same repos, same proxy) resolves
+everything. No mirror needed here — the workaround is simpler than Elixir's:
+`gradle bootJar` on the host, copy the jar into the build context (mind
+`.dockerignore` — it excludes `build/`, so `cp build/libs/app.jar app.jar`
+first), and containerise it with a three-line `FROM eclipse-temurin:21-jre`
+Dockerfile. Recipe in `docs/tools.md` → "Java images behind a fingerprinting
+proxy". Sandbox-only; the shipped Dockerfile stays two-stage.
+
+### Recreating the bundled Keycloak rotates the realm keys
+
+Two traps when bouncing the dev IdP mid-session: (1) the realm import runs
+only on **container creation**, so `docker compose up -d keycloak` after a
+config edit silently keeps the old realm — use `--force-recreate`; (2) a
+recreated Keycloak generates **fresh realm signing keys**, so any backend
+that cached the old JWKS keeps 401-ing valid new tokens. That second trap is
+a *real production scenario* (IdP key rotation), not just a sandbox quirk —
+it's why every generated verifier must refetch the JWKS on a kid miss
+(rate-limited) instead of caching it forever. jose's `createRemoteJWKSet`
+(Hono), `PyJWKClient` (Python), and Nimbus's `JWKSourceBuilder` default
+source (Java) all do this out of the box; the hand-rolled Phoenix and .NET
+verifiers need it wired explicitly (kid-miss `:persistent_term` refresh /
+`ConfigurationManager.RequestRefresh()` + one retry).
+
 ## 15. Derive, don't stamp — and when you delete machinery, sweep its footprints
 
 This is the retro for the scaffold-page-kind cleanup (PRs #1408 → #1441). It

@@ -463,6 +463,39 @@ LOOM_PHOENIX_BUILD=1 LOOM_HEX_MIRROR=1 npx vitest run \
 Unset (the default, and every CI runner with direct hex.pm access) the
 flag is a no-op and the suite runs `docker run` exactly as before.
 
+### Java images behind a fingerprinting proxy — build the jar on the host
+
+The generated Java deployable's Dockerfile is a two-stage build whose first
+stage runs Gradle *inside* the `gradle` image.  Behind the same
+fingerprint-allowlisting proxy, that stage fails the way Erlang does: the
+in-container JVM's TLS fingerprint is rejected (bare 503 / connection reset
+resolving the Spring Boot plugin), while the **host** Gradle — same
+repositories, same proxy — resolves everything (pass the proxy to the JVM via
+`JAVA_TOOL_OPTIONS="-Dhttps.proxyHost=… -Dhttps.proxyPort=…"` if it isn't
+picked up from the environment).
+
+The recipe that works everywhere: **build the bootJar on the host, containerise
+only the jar.**
+
+```bash
+cd out/<java-deployable>
+gradle bootJar                                  # host JDK 21 + Gradle
+cp build/libs/app.jar app.jar                   # .dockerignore excludes build/,
+                                                # so copy the jar INTO the context
+cat > Dockerfile.local <<'EOF'
+FROM eclipse-temurin:21-jre
+WORKDIR /app
+COPY app.jar app.jar
+ENTRYPOINT ["java", "-jar", "app.jar"]
+EOF
+docker build -f Dockerfile.local -t <service> .
+```
+
+Point the service at the local image (edit the compose service's `image:` /
+drop its `build:`) and the rest of the stack boots normally.  This is a
+sandbox-only workaround, not a generator concern — CI runners and normal dev
+machines run the in-container Gradle stage as-is.
+
 ### Generated DSL-level e2e suite
 
 When the source declares `test e2e` blocks (see
