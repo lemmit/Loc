@@ -32,6 +32,9 @@ import {
   isValueObject,
   isWorkflow,
   type Model,
+  type PayloadDecl,
+  type Ui,
+  type UiApiParam,
   type UiChannelParam,
   type UiNotification,
 } from "./generated/ast.js";
@@ -59,6 +62,30 @@ export class DddScopeProvider extends DefaultScopeProvider {
     // a friendly "use 'X id'" diagnostic instead of "could not resolve").
     if (context.container.$type === "NamedType" && context.property === "target") {
       const localScope = this.localTypeScope(context);
+      // A `match await <api>.<Agg>.<op>() { … }` arm in a UI page/component
+      // action names union-variant types.  The success variant (an aggregate)
+      // resolves globally, but a context-local `error` variant does NOT — context
+      // payloads stay context-scoped (they are not globally exported, so they
+      // don't leak across contexts).  So when the arm sits in a UI union-variant
+      // position, add the payload/error decls of the bounded contexts the
+      // enclosing ui's `api X: Y` handles bind to — the page can only match errors
+      // from contexts it actually talks to.  Additive over `localScope`, so the
+      // `else` form and the success arm keep resolving exactly as before.
+      if (inUnionVariant(context.container)) {
+        const ui = AstUtils.getContainerOfType(context.container, isUi);
+        if (ui) {
+          const payloads = uiBoundContextPayloads(ui);
+          if (payloads.length > 0) {
+            const descs = payloads
+              .map((p) => {
+                const name = this.nameProvider.getName(p);
+                return name ? this.descriptions.createDescription(p, name) : undefined;
+              })
+              .filter((d): d is AstNodeDescription => d !== undefined);
+            return this.createScope(descs, localScope ?? super.getScope(context));
+          }
+        }
+      }
       if (localScope) return localScope;
     }
     // `IdType.target` (`X id`) shares the `NamedDecl` cross-ref type, which now
@@ -340,6 +367,25 @@ function inUnionVariant(namedType: AstNode | undefined): boolean {
   return (
     c.$type === "TypeRef" && ((c as { alternatives?: unknown[] }).alternatives?.length ?? 0) > 0
   );
+}
+
+/** Every payload/error decl reachable through a UI's `api X: Y` handles — each
+ *  `UiApiParam` resolves to its `Api`, whose `from <Subdomain>` source contains
+ *  the bounded contexts whose context-local `error`/`payload` types a `match
+ *  await` arm in this UI may name.  Used to widen the union-variant arm scope
+ *  without exporting context payloads globally (they must not leak across
+ *  contexts — see `collectExportedSymbols`). */
+function uiBoundContextPayloads(ui: Ui): PayloadDecl[] {
+  const out: PayloadDecl[] = [];
+  for (const m of ui.members) {
+    if (m.$type !== "UiApiParam") continue;
+    const subdomain = (m as UiApiParam).apiRef?.ref?.source?.ref;
+    if (!subdomain) continue;
+    for (const node of AstUtils.streamAllContents(subdomain)) {
+      if (isPayloadDecl(node)) out.push(node);
+    }
+  }
+  return out;
 }
 
 export function enclosingAggregate(node: AstNode | undefined): Aggregate | undefined {
