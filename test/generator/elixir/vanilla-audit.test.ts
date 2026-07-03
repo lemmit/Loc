@@ -290,8 +290,13 @@ describe("vanilla audit runtime (audit-and-logging.md)", () => {
 
   it("records the FLATTENED wire shape for a document-storage aggregate (serialize/1, not the struct dump)", async () => {
     const ctrl = file(await generateSystemFiles(DOC), "/cart_controller.ex");
-    // The doc agg's serialize/1 is the flattened wire shape (id merged over data).
-    expect(ctrl).toContain("Map.merge(%{id: record.id}, record.data || %{})");
+    // The doc agg's serialize/1 is the flattened wire shape — the wireShape
+    // projection (§14): each stored field keyed by its declared camelCase name,
+    // read from the snake `data` jsonb key.
+    expect(ctrl).toContain(
+      "data = Map.new(record.data || %{}, fn {k, v} -> {to_string(k), v} end)",
+    );
+    expect(ctrl).toContain('"reference" => Map.get(data, "reference")');
     // create audit `after` + destroy audit `before` route through serialize/1, so
     // they carry the flattened wire shape — NOT the nested `%{id:, data: …}` dump.
     expect(ctrl).toContain("after: serialize(record)");

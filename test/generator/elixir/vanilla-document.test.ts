@@ -87,9 +87,19 @@ describe("vanilla shape(document) persistence (DEBT-07)", () => {
     expect(repo).toContain("def find_by_id(id)");
   });
 
-  it("serializes by merging the document data over the id (not Map.from_struct)", async () => {
+  it("serializes the document via the camelCase wireShape projection (§14)", async () => {
     const ctrl = file(await generateSystemFiles(DOC), "/controllers/cart_controller.ex");
-    expect(ctrl).toContain("Map.merge(%{id: record.id}, record.data || %{})");
+    // wireShape-driven: each stored field keyed by its declared (camelCase)
+    // name, read from the snake-cased `data` jsonb key — a multi-word field
+    // ships `itemCount`, not the raw `item_count` the old merge leaked.
+    expect(ctrl).toContain(
+      "data = Map.new(record.data || %{}, fn {k, v} -> {to_string(k), v} end)",
+    );
+    expect(ctrl).toContain('"id" => record.id');
+    expect(ctrl).toContain('"itemCount" => Map.get(data, "item_count")');
+    expect(ctrl).toContain('"reference" => Map.get(data, "reference")');
+    // NOT the old raw-merge (snake keys) or a struct dump.
+    expect(ctrl).not.toContain("Map.merge(%{id: record.id}, record.data");
     expect(ctrl).not.toContain("Map.from_struct()");
   });
 

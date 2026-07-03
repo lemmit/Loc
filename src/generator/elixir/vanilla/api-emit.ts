@@ -428,7 +428,7 @@ ${opActions}
 ${problemVariant}
 ${
   isDoc
-    ? renderDocSerialize()
+    ? renderDocSerialize(agg)
     : (
         (): string => {
           const { serialize, helpers } = renderWireSerialize(agg, ctx);
