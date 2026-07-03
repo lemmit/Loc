@@ -458,17 +458,36 @@ pairs, and the 403 runtime-authorization target).
 
 - **Aggregate REST controller — FIXED (#1628):** `wireShape`-driven `serialize/1`
   (`wire-serialize.ts`) — camelCase keys, no timestamp leak, nested part/VO helpers.
-- **Event-sourced controller — FIXED (this branch):** the ES controller reuses
+- **Event-sourced controller — FIXED (#1633):** the ES controller reuses
   `renderWireSerialize(agg, ctx)` — the folded struct's fields are exactly
   `snake(wireShape.name)`, so the projection lines up. Gated to skip ref-collection
   ES aggregates (the `__ref_ids/1` Ecto-assoc helper doesn't fit an in-memory fold).
+- **Document-shaped aggregate REST controller — FIXED (this branch):** the doc
+  `serialize/1` was a bare `Map.merge(%{id: record.id}, record.data || %{})` that
+  shipped the stored `data` jsonb's snake keys (`item_count`). Replaced with the
+  wireShape projection (`renderDocSerialize(agg)`): each stored field keyed by its
+  declared camelCase name, read from the snake `data` key. **Boot-found regression
+  fixed in the same slice:** a freshly-inserted record carries the schemaless
+  changeset's ATOM-keyed applied map (`%{item_count: 3}`) while a DB-loaded record
+  carries the STRING-keyed jsonb map, so the projection first normalises `data`
+  keys to strings (`Map.new(…, to_string(k))`) — the create response now matches
+  the read response (`"itemCount":3`, both verified on real Postgres).
 - **Still open — view / audit / workflow-instance / context serialize sites:** these
   share a single `serialize/1` across records that are NOT aggregates (a view row, an
-  audit record, a workflow instance), so `renderWireSerialize` (aggregate-`wireShape`
-  driven) doesn't apply. They need either a per-record projection or a **generic
-  camelize helper** — camelize map keys, pass `DateTime`/`Decimal` through, drop
-  Ecto `__meta__`/`inserted_at`/`updated_at`. Lower traffic than the two REST paths
-  above; tracked here for a follow-up.
+  audit before/after snapshot, a workflow instance), so `renderWireSerialize`
+  (aggregate-`wireShape` driven) doesn't apply. They need either a per-record
+  projection or a **generic camelize helper** — camelize map keys, pass
+  `DateTime`/`Decimal` through, drop Ecto `__meta__`/`inserted_at`/`updated_at`.
+  Lower traffic than the REST paths above; tracked here for a follow-up.
+- **Document INBOUND camelCase — FIXED (this branch, §15-analog, boot-found):** the
+  document schemaless changeset casts snake `@all_fields` but never ran the §15
+  `__normalize_keys` camelCase→snake pass, so a canonical camelCase create
+  (`{"itemCount":3}`) left `item_count` unset → 422. Fixed at the repository
+  boundary (`renderDocRepository`): `insert` snakes attrs before the changeset, and
+  `update` snakes them BEFORE the `Map.merge` over the stored doc (so a camelCase
+  field overwrites the snake key cleanly instead of landing beside it). Both
+  directions boot-verified on real Postgres — camelCase create → 201, camelCase
+  PATCH → 200, all fields round-trip camelCase.
 
 ### Original report (REAL, runtime-only — invisible to every per-PR gate):
 - the vanilla

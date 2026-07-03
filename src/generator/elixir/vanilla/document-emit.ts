@@ -34,6 +34,7 @@ import {
   singleFieldConstraints,
 } from "../../../ir/validate/invariant-classify.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { NORMALIZE_KEYS_DEFP } from "./key-normalize.js";
 import { managedTimestampNames } from "./managed-timestamps.js";
 
 /** True iff the aggregate's effective saving shape is `document` (binding-aware,
@@ -217,6 +218,8 @@ defmodule ${repoMod} do
 
   @spec insert(map()) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
   def insert(attrs) when is_map(attrs) do
+    attrs = __normalize_keys(attrs)
+
     case Ecto.Changeset.apply_action(${changesetMod}.document_changeset(attrs), :insert) do
       {:ok, data} ->
         %${aggModule}{id: Ecto.UUID.generate(), data: data, version: 1}
@@ -229,9 +232,11 @@ defmodule ${repoMod} do
 
   @spec update(${aggModule}.t(), map()) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
   def update(%${aggModule}{} = record, attrs) when is_map(attrs) do
-    # Merge the incoming attrs over the current document (string keys, as the
-    # jsonb column round-trips), then re-validate the merged whole.
-    merged = Map.merge(record.data || %{}, stringify_keys(attrs))
+    # Merge the incoming attrs over the current document (snake-cased string
+    # keys, as the jsonb column round-trips), then re-validate the merged whole.
+    # Normalise camelCase wire keys to snake BEFORE the merge, so a camelCase
+    # field overwrites the stored snake key cleanly instead of landing beside it.
+    merged = Map.merge(record.data || %{}, __normalize_keys(stringify_keys(attrs)))
 
     case Ecto.Changeset.apply_action(${changesetMod}.document_changeset(merged), :update) do
       {:ok, data} ->
@@ -259,6 +264,8 @@ defmodule ${repoMod} do
   defp stringify_keys(map) do
     Map.new(map, fn {k, v} -> {to_string(k), v} end)
   end
+
+${NORMALIZE_KEYS_DEFP}
 end
 `;
 }
@@ -267,11 +274,31 @@ end
 // Controller serialize — merge the document `data` back over the id.
 // ---------------------------------------------------------------------------
 
-/** The document-shaped `serialize/1` body: the wire map is the stored `data`
- *  (snake-cased field keys, matching the relational `Map.from_struct` shape)
- *  merged under the row id.  (The relational path dumps the whole struct.) */
-export function renderDocSerialize(): string {
+/** The document-shaped `serialize/1` body — the wireShape-driven projection
+ *  (mirrors the relational serializer #1628 introduced).
+ *
+ *  The stored `data` jsonb is keyed by `snake(f.name)` (the schemaless
+ *  changeset casts `@all_fields = [:snake…]`), so a bare `Map.merge(%{id:},
+ *  data)` shipped snake_case keys (`commit_sha`) — diverging from the canonical
+ *  camelCase wire (`commitSha`) every other backend emits.  This projects each
+ *  stored field under its declared name (already camelCase) reading the
+ *  snake-cased `data` key, so the wire keys line up.  Emits exactly the fields
+ *  the changeset stores (`id` + `docFields`) — no derived / timestamp leak —
+ *  identical to the old merge except for the key casing. */
+export function renderDocSerialize(agg: AggregateIR): string {
+  const entries = [
+    `      "id" => record.id`,
+    ...docFields(agg).map((f) => `      "${f.name}" => Map.get(data, "${snake(f.name)}")`),
+  ];
+  // Normalise the `data` keys to strings first: a freshly-inserted record
+  // carries the schemaless changeset's ATOM-keyed applied map (`%{item_count:
+  // 3}`), while a DB-loaded record carries the STRING-keyed jsonb map — read
+  // both uniformly so the create response matches the read response.
   return `  defp serialize(record) do
-    Map.merge(%{id: record.id}, record.data || %{})
+    data = Map.new(record.data || %{}, fn {k, v} -> {to_string(k), v} end)
+
+    %{
+${entries.join(",\n")}
+    }
   end`;
 }

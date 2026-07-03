@@ -80,17 +80,43 @@ describe("vanilla shape(document) persistence (DEBT-07)", () => {
     );
     expect(repo).toContain("%Api.Carts.Cart{id: Ecto.UUID.generate(), data: data, version: 1}");
     // Update: merge over the current doc, re-validate, bump version.
-    expect(repo).toContain("Map.merge(record.data || %{}, stringify_keys(attrs))");
+    expect(repo).toContain(
+      "Map.merge(record.data || %{}, __normalize_keys(stringify_keys(attrs)))",
+    );
     expect(repo).toContain("change(%{data: data, version: record.version + 1})");
     // Same fn names as the relational repo (so context defdelegates are unchanged).
     expect(repo).toContain("def list do");
     expect(repo).toContain("def find_by_id(id)");
   });
 
-  it("serializes by merging the document data over the id (not Map.from_struct)", async () => {
+  it("serializes the document via the camelCase wireShape projection (§14)", async () => {
     const ctrl = file(await generateSystemFiles(DOC), "/controllers/cart_controller.ex");
-    expect(ctrl).toContain("Map.merge(%{id: record.id}, record.data || %{})");
+    // wireShape-driven: each stored field keyed by its declared (camelCase)
+    // name, read from the snake-cased `data` jsonb key — a multi-word field
+    // ships `itemCount`, not the raw `item_count` the old merge leaked.
+    expect(ctrl).toContain(
+      "data = Map.new(record.data || %{}, fn {k, v} -> {to_string(k), v} end)",
+    );
+    expect(ctrl).toContain('"id" => record.id');
+    expect(ctrl).toContain('"itemCount" => Map.get(data, "item_count")');
+    expect(ctrl).toContain('"reference" => Map.get(data, "reference")');
+    // NOT the old raw-merge (snake keys) or a struct dump.
+    expect(ctrl).not.toContain("Map.merge(%{id: record.id}, record.data");
     expect(ctrl).not.toContain("Map.from_struct()");
+  });
+
+  it("normalizes camelCase inbound keys to snake before the schemaless cast (§15)", async () => {
+    const repo = file(await generateSystemFiles(DOC), "/carts/cart_repository.ex");
+    // insert: raw params snaked before the changeset (a camelCase `itemCount`
+    // body casts into `:item_count` instead of silently dropping → 422).
+    expect(repo).toContain("attrs = __normalize_keys(attrs)");
+    // update: attrs snaked BEFORE the merge, so a camelCase field overwrites the
+    // stored snake key cleanly rather than landing beside it.
+    expect(repo).toContain(
+      "Map.merge(record.data || %{}, __normalize_keys(stringify_keys(attrs)))",
+    );
+    expect(repo).toContain("defp __normalize_keys(attrs) when is_map(attrs) do");
+    expect(repo).toContain("{k, v} when is_binary(k) -> {Macro.underscore(k), v}");
   });
 
   it("emits the canonical (id, data, version) document migration", async () => {
