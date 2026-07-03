@@ -1,63 +1,81 @@
-// HEEx parity pin — `match await op() { … }` (async-actions-and-effects.md
-// Stage 2).  The four JS frontends render the awaited variant-match as a
-// client-side async handler (await the mutation, reify the thrown error into the
-// error variant, `switch` on the union tag).  LiveView's async boundary is
-// server-side (`handle_event` → context call → `case` on the tagged tuple), a
-// genuinely different topology, so it is a scoped follow-up (see the pinned
-// decision in async-actions-and-effects.md §7 + the JS leaves).
+// HEEx `match await` (async-actions-and-effects.md Stage 2) — server-side render.
 //
-// This test FREEZES the current, reviewed behavior: the HEEx walker emits a
-// no-op parity-gap marker rather than silently miscompiling the awaited call.
-// It fails if a future change starts emitting something else for the seam
-// without a corresponding decision — the "pin" for the Phoenix gap.
+// The four JS frontends render an awaited variant-match as a client-side async
+// handler (await the mutation, reify the thrown error into the error variant,
+// `switch` on the union tag).  LiveView's async boundary is SERVER-SIDE: the
+// `handle_event` clause loads the route-id record, runs the aggregate's
+// returning-op context fn, and `case`s on the tagged Result tuple — the same
+// `{:ok, v}` / `{:error, "<tag>", data}` shape the returning-op controller action
+// produces (operation-returns-emit), re-shaped to a socket-piped `then/2` step.
+//
+// This test pins that emission.  (It replaces the earlier "reviewed parity gap"
+// no-op pin now that the server-side path is implemented.)
 
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/index.js";
 
-describe("HEEx `match await` (Stage 2) — reviewed parity gap", () => {
-  it("emits a no-op parity-gap marker for an awaited variant-match, not a miscompile", async () => {
-    const files = await generateSystemFiles(`
-      error Failed { reason: string }
-      system Demo {
-        subdomain S { context C {
-          aggregate Order { code: string
-            operation placeOrder(): Order or Failed { return Failed { reason: code } }
-          }
-        } }
-        api CApi from C
-        ui Web {
-          api C: CApi
-          page P {
-            route: "/p"
-            state { message: string = "" }
-            action submit() {
-              match await C.Order.placeOrder() {
-                Order o  => { message := o.code }
-                Failed f => { message := f.reason }
-              }
-            }
-            body: Stack { Button { "Go", onClick: submit } }
-          }
-        }
-        storage primary { type: postgres }
-        resource cState { for: C, kind: state, use: primary }
-        deployable phoenixApp {
-          platform: elixir { foundation: vanilla }
-          contexts: [C]
-          dataSources: [cState]
-          serves: CApi
-          ui: Web { C: phoenixApp }
-          port: 4000
-        }
+const SOURCE = `
+  error Failed { reason: string }
+  system Demo {
+    subdomain S { context C {
+      aggregate Order { code: string
+        operation confirm(): Order or Failed { return Failed { reason: code } }
       }
-    `);
-    const src = files.get("phoenix_app/lib/phoenix_app_web/live/p_live.ex");
-    expect(src, "p_live.ex not emitted").toBeDefined();
-    // The awaited variant-match is a reviewed HEEx parity gap: a no-op marker,
-    // NOT a client-side `switch`/`await`/`mutateAsync` (which would be invalid
-    // Elixir), and NOT a silent drop.
-    expect(src!).toContain("match await: LiveView server-side async not yet emitted");
+    } }
+    api CApi from C
+    ui Web {
+      api C: CApi
+      page Detail {
+        route: "/orders/:id"
+        state { message: string = "" }
+        action submit() {
+          match await C.Order.confirm() {
+            Order o  => { message := o.code }
+            Failed f => { message := f.reason }
+          }
+        }
+        body: Stack { Button { "Go", onClick: submit } }
+      }
+    }
+    storage primary { type: postgres }
+    resource cState { for: C, kind: state, use: primary }
+    deployable phoenixApp {
+      platform: elixir { foundation: vanilla }
+      contexts: [C]
+      dataSources: [cState]
+      serves: CApi
+      ui: Web { C: phoenixApp }
+      port: 4000
+    }
+  }
+`;
+
+describe("HEEx `match await` (Stage 2) — server-side variant-match", () => {
+  it("emits a socket-piped `then` step: load record, run op via apply, case on the tuple", async () => {
+    const files = await generateSystemFiles(SOURCE);
+    const src = files.get("phoenix_app/lib/phoenix_app_web/live/detail_live.ex");
+    expect(src, "detail_live.ex not emitted").toBeDefined();
+
+    // Server-side envelope, not a client-side await/switch (which would be
+    // invalid Elixir) and not the old reviewed no-op marker.
     expect(src!).not.toContain("mutateAsync");
     expect(src!).not.toContain("switch (");
+    expect(src!).not.toContain("LiveView server-side async not yet emitted");
+
+    // Load the route-id record from the aggregate's context, then run the op.
+    expect(src!).toContain("case PhoenixApp.C.get_order(socket.assigns.id) do");
+    // The op is dispatched through `apply/3` so Elixir 1.18's type checker can't
+    // narrow an always-rejecting op's result and flag the `{:ok, _}` arm unused.
+    expect(src!).toContain("case apply(PhoenixApp.C, :confirm_order, [record, %{}]) do");
+    // Success variant → `{:ok, binder}`, the arm body threads socket assigns.
+    expect(src!).toContain("{:ok, o} ->");
+    expect(src!).toContain("|> assign(:message, o.code)");
+    // Error variant → `{:error, "<tag>", binder}` (re-classified from the union;
+    // the aggregate's own type is the success variant, everything else an error).
+    expect(src!).toContain('{:error, "Failed", f} ->');
+    expect(src!).toContain("|> assign(:message, f.reason)");
+    // A missing record flashes rather than crashing the LiveView.
+    expect(src!).toContain("{:error, :not_found} ->");
+    expect(src!).toContain("put_flash(socket, :error,");
   });
 });

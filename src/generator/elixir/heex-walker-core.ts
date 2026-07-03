@@ -41,6 +41,7 @@
 // hoisting, LiveView reads inline.
 // ---------------------------------------------------------------------------
 
+import { variantTag } from "../../ir/stdlib/unions.js";
 import type {
   AggregateIR,
   EnumIR,
@@ -232,6 +233,13 @@ export interface WalkContext {
    *  (`%PhoenixApp.Sales.Line{…}`).  Empty when the orchestrator hasn't
    *  threaded it; the `new` arm then falls back to `appModule`. */
   partContextModule: ReadonlyMap<string, string>;
+  /** Aggregate PascalCase name → module-qualified context (e.g. `Order` →
+   *  `PhoenixApp.Sales`).  Lets an awaited `match await <api>.<Agg>.<op>(…)`
+   *  action body (async-actions-and-effects.md Stage 2) qualify the server-side
+   *  returning-op context call (`<Ctx>.<op>_<agg>(record, params)`) + the
+   *  route-id record load (`<Ctx>.get_<agg>(id)`).  Empty ⇒ falls back to
+   *  `appModule` (still valid Elixir; only awaited variant-match consumes it). */
+  contextModuleByAggName: ReadonlyMap<string, string>;
   /** Optional variable remappings — maps a source ref name to the LiveView
    *  assign name it should resolve to.  Used by QueryView to map lambda
    *  parameter names (e.g. "rows") to their assign names (e.g. "items"). */
@@ -286,6 +294,10 @@ export function walkBodyToHeex(
    *  `new Part { … }` qualifies like the domain emitter.  Empty default
    *  ⇒ the `new` arm falls back to `appModule`. */
   partContextModule: ReadonlyMap<string, string> = new Map(),
+  /** Aggregate PascalCase name → module-qualified context, for the awaited
+   *  `match await` server-side op call (Stage 2).  Empty default ⇒ falls back
+   *  to `appModule`. */
+  contextModuleByAggName: ReadonlyMap<string, string> = new Map(),
 ): WalkResult {
   const stateNames = new Set<string>(page.state.map((f) => snake(f.name)));
   const stateFields = new Map<string, StateFieldIR>(page.state.map((f) => [snake(f.name), f]));
@@ -321,6 +333,7 @@ export function walkBodyToHeex(
     instanceTypes,
     authEnabled,
     partContextModule,
+    contextModuleByAggName,
   };
 
   // Hoist named page `action`s (named-actions-and-stores.md, Proposal A
@@ -1286,13 +1299,127 @@ function renderStmt(stmt: StmtIR, ctx: WalkContext): string {
       return `|> tap(fn _ -> ${e} end)`;
     }
     case "variant-match":
-      // `match await op() { … }` (async-actions-and-effects.md Stage 2).  On
-      // LiveView the async boundary is server-side (`handle_event` → context
-      // call → `case` on the tagged tuple), not the client-side await the JS
-      // frontends emit — a separate Phoenix follow-up (see heex-parity.test.ts).
-      // Emit a reviewed no-op marker rather than mis-render it.
-      return `|> tap(fn _ -> :ok end) # match await: LiveView server-side async not yet emitted (HEEx parity gap, Stage 2)`;
+      // `match await <api>.<Agg>.<op>(args) { … }` (async-actions-and-effects.md
+      // Stage 2).  On LiveView the async boundary is server-side, not the
+      // client-side await the JS frontends emit: load the route-id record, run
+      // the aggregate's returning-op context fn, and `case` on its tagged Result
+      // tuple — the SAME `{:ok, v}` / `{:error, "<tag>", data}` shape the
+      // returning-op controller action produces (operation-returns-emit), here
+      // re-shaped to a socket-piped `then/2` step so each arm threads assigns.
+      return renderVariantMatchStmt(stmt, ctx);
   }
+}
+
+// ---------------------------------------------------------------------------
+// `match await` (Stage 2) — server-side effect-form variant match.
+// ---------------------------------------------------------------------------
+
+/** Extract `{aggregate, operation, args}` from an awaited variant-match subject.
+ *  Handles both the api-param-prefixed form (`<api>.<Agg>.<op>(args)`, Pattern
+ *  B/A) and the bare-aggregate form (`<Agg>.<op>(args)`, Pattern E/D) — for the
+ *  awaited match the aggregate name is all we need (the api handle only selected
+ *  the bounded context, which `contextModuleByAggName` already resolves). */
+function detectAwaitedOp(
+  subject: ExprIR,
+): { aggName: string; opName: string; args: ExprIR[] } | null {
+  if (subject.kind === "method-call") {
+    const recv = subject.receiver;
+    if (recv.kind === "member" && recv.receiver.kind === "ref") {
+      return { aggName: recv.member, opName: subject.member, args: subject.args };
+    }
+    if (recv.kind === "ref") {
+      return { aggName: recv.name, opName: subject.member, args: subject.args };
+    }
+  }
+  if (subject.kind === "member") {
+    const recv = subject.receiver;
+    if (recv.kind === "member" && recv.receiver.kind === "ref") {
+      return { aggName: recv.member, opName: subject.member, args: [] };
+    }
+    if (recv.kind === "ref") {
+      return { aggName: recv.name, opName: subject.member, args: [] };
+    }
+  }
+  return null;
+}
+
+/** Render an awaited `match await <op>() { … }` as a socket-piped `then/2` step.
+ *  Mirrors the returning-op controller action (operation-returns-emit): load the
+ *  route-id record, run the op's context fn, `case` on the `{:ok, v}` /
+ *  `{:error, "<tag>", data}` tuple.  Each arm is a socket pipe-chain; `else` and
+ *  any unmatched outcome (`{:error, %Ecto.Changeset{}}`) fall through to the
+ *  socket unchanged, keeping the `case` total.
+ *
+ *  The op is dispatched through `apply/3` on purpose: Elixir 1.18's type checker
+ *  narrows a direct cross-module call's result to the op body's inferred variants
+ *  and would flag the `{:ok, _}` arm as unreachable for an always-rejecting op
+ *  (the exact pitfall the controller sidesteps with a public `_result/2` helper —
+ *  operation-returns-emit §"unused clause").  `apply/3` returns `term()`, so
+ *  every arm stays reachable under `--warnings-as-errors`. */
+function renderVariantMatchStmt(
+  stmt: Extract<StmtIR, { kind: "variant-match" }>,
+  ctx: WalkContext,
+): string {
+  const detected = detectAwaitedOp(stmt.subject);
+  if (!detected) {
+    return `|> tap(fn _ -> :ok end) # match await: unrecognised subject (HEEx parity gap, Stage 2)`;
+  }
+  const { aggName, opName, args } = detected;
+  const agg = ctx.aggregatesByName.get(aggName);
+  const ctxModule = ctx.contextModuleByAggName.get(aggName) ?? ctx.appModule;
+  const aggSnake = snake(aggName);
+  const opSnake = snake(opName);
+  const op = agg?.operations.find((o) => o.name === opName);
+  const hctx: WalkContext = { ...ctx, position: "handler" };
+  // op params → string-keyed attrs map (mirrors the controller's
+  // `attrs = Map.drop(params, ["id"])`, string keys from the JSON body).
+  const params = op?.params ?? [];
+  const attrs =
+    params.length === 0
+      ? "%{}"
+      : `%{${params
+          .map(
+            (p, i) =>
+              `${JSON.stringify(snake(p.name))} => ${args[i] ? renderExpr(args[i]!, hctx) : "nil"}`,
+          )
+          .join(", ")}}`;
+  // One `case` clause per arm; the arm body is a socket pipe-chain (empty ⇒ bare
+  // `socket`).  `binder`/`snake(binding)` match render-expr's `match-binding`
+  // fallback so `o.code` inside the arm resolves to the bound clause var.
+  const armClause = (pattern: string, body: readonly StmtIR[]): string => {
+    const steps = body.map((s) => renderStmt(s, hctx));
+    const piped = steps.length ? ["socket", ...steps].join("\n              ") : "socket";
+    return `            ${pattern} ->\n              ${piped}`;
+  };
+  // Classify the error variant.  The lowered `arm.isError` hint is unreliable
+  // from a UI body (a context-local `error` type doesn't resolve in the page's
+  // lowering env — same caveat the JS walker documents), so treat the success
+  // variant as the aggregate's own type and any other tag as an error.  Honour a
+  // `true` hint too, for the case where lowering DID resolve it.
+  const clauses = stmt.arms.map((arm) => {
+    const tag = variantTag(arm.varType);
+    const isError = arm.isError === true || tag !== aggName;
+    const binder = arm.binding ? snake(arm.binding) : "_";
+    const pattern = isError ? `{:error, ${JSON.stringify(tag)}, ${binder}}` : `{:ok, ${binder}}`;
+    return armClause(pattern, arm.body);
+  });
+  // Catch-all keeps the inner `case` total (unmatched error variants + the
+  // audited-op `{:error, %Ecto.Changeset{}}`): run the `else` body if present,
+  // else thread the socket through unchanged.
+  clauses.push(armClause("_", stmt.elseBody ?? []));
+  const notFoundMsg = JSON.stringify(`${upperFirst(aggName)} not found`);
+  return [
+    `|> then(fn socket ->`,
+    `        case ${ctxModule}.get_${aggSnake}(socket.assigns.id) do`,
+    `          {:ok, record} ->`,
+    `            case apply(${ctxModule}, :${opSnake}_${aggSnake}, [record, ${attrs}]) do`,
+    ...clauses,
+    `            end`,
+    `          {:error, :not_found} ->`,
+    `            put_flash(socket, :error, ${notFoundMsg})`,
+    `        end`,
+    `      end)`,
+  ].join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -1347,6 +1474,7 @@ function renderRequiresGuardAt(
     usedStores: new Set(),
     position,
     partContextModule: new Map(),
+    contextModuleByAggName: new Map(),
   };
   return renderExpr(page.requires, ctx);
 }

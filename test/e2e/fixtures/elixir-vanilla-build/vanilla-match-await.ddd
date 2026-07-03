@@ -1,0 +1,48 @@
+// MVU Stage 2 `match await` on the vanilla (plain Ecto/Phoenix) backend
+// (async-actions-and-effects.md).  A detail-page `action` awaits a union-
+// returning aggregate operation and `case`s on the tagged Result server-side:
+// the emitted LiveView `handle_event` loads the route-id record via
+// `get_<agg>/1`, runs the op through `apply/3` (so Elixir 1.18's type checker
+// can't narrow an always-rejecting op's result and flag the `{:ok, _}` arm),
+// and threads socket assigns per variant.  This fixture forces that emission
+// through `mix compile --warnings-as-errors`.
+system MatchAwait {
+  subdomain Sales {
+    context Orders {
+      error Rejected { reason: string }
+      aggregate Order with crudish {
+        code: string
+        operation confirm(): Order or Rejected { return Rejected { reason: code } }
+      }
+      repository OrderRepo for Order { }
+    }
+  }
+  api OrdersApi from Sales
+  ui Console {
+    api Orders: OrdersApi
+    page OrderDetail {
+      route: "/orders/:id"
+      state { message: string = "" }
+      action confirmNow() {
+        match await Orders.Order.confirm() {
+          Order o => { message := o.code }
+          else    => { message := "could not confirm order" }
+        }
+      }
+      body: Stack {
+        Heading { "Order" },
+        Button { "Confirm", onClick: confirmNow }
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource orderState { for: Orders, kind: state, use: pg }
+  deployable phoenixApp {
+    platform: elixir { foundation: vanilla }
+    contexts: [Orders]
+    dataSources: [orderState]
+    serves: OrdersApi
+    ui: Console { Orders: phoenixApp }
+    port: 4000
+  }
+}

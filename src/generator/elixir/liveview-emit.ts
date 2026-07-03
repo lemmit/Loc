@@ -158,6 +158,7 @@ export function emitLiveViewPages(args: {
       valueObjectsByName,
       authEnabled,
       partContextModule,
+      contextModuleByAggName,
     );
     componentInfo.set(c.name, {
       actionBindings: w.actionBindings,
@@ -243,6 +244,7 @@ export function emitLiveViewPages(args: {
         enumsByName,
         valueObjectsByName,
         partContextModule,
+        contextModuleByAggName,
         authEnabled,
       }),
     );
@@ -436,6 +438,7 @@ function renderLiveView(a: RenderArgs): string {
     valueObjectsByName,
     authEnabled,
     partContextModule,
+    contextModuleByAggName,
   );
   const heex = walked.heex;
   const handlers: HandleEventClause[] = walked.handlers;
@@ -855,6 +858,9 @@ function renderUiComponents(args: {
   /** Entity-part name → module-qualified context, so a component-body
    *  `new Part { … }` qualifies as `%<Ctx>.<Part>{…}`. */
   partContextModule: ReadonlyMap<string, string>;
+  /** Aggregate PascalCase name → module-qualified context — threaded through to
+   *  the walker for an awaited `match await` in a component action (Stage 2). */
+  contextModuleByAggName: ReadonlyMap<string, string>;
   /** True when the host deployable runs `auth: required` — drives
    *  currentUser action-button gating inside component bodies. */
   authEnabled: boolean;
@@ -866,6 +872,7 @@ function renderUiComponents(args: {
     enumsByName,
     valueObjectsByName,
     partContextModule,
+    contextModuleByAggName,
     authEnabled,
   } = args;
   const webModule = `${appModule}Web`;
@@ -887,6 +894,7 @@ function renderUiComponents(args: {
       valueObjectsByName,
       authEnabled,
       partContextModule,
+      contextModuleByAggName,
     );
     const attrLines = c.params
       .map((p) => `  attr :${snake(p.name)}, ${attrType(p.type)}, required: true`)
