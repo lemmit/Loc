@@ -166,22 +166,6 @@ function renderDomainUnion(
   const memberParams = (m: (typeof members)[number]): string => {
     if (m.shape === "none") return "";
     if (m.shape === "scalar") return `${wireType(m.type, ctx, "response")} Value`;
-    // An AGGREGATE success variant holds the domain aggregate itself: its
-    // wire projection references Application Response types (a containment
-    // becomes `<Part>Response`) which the Domain layer must not see — the
-    // controller projects `Value` onto the Application DTO at the edge
-    // (buildReturnUnionSpec → projectEntityArgs).  Surfaced by showcase's
-    // `reserve(): Project or ProjectNotFound` (Project contains pipelines):
-    // the wire-field form emitted `IReadOnlyList<PipelineResponse>` into
-    // Domain and failed CS0246.
-    const varAgg = ctx.aggregates.find((a) => a.name === m.tag);
-    if (varAgg) {
-      const typeName =
-        varAgg.name === agg.name
-          ? varAgg.name
-          : `${ns}.Domain.${plural(varAgg.name)}.${varAgg.name}`;
-      return `${typeName} Value`;
-    }
     return m.fields
       .map((f: UnionMemberField) => `${wireType(f.type, ctx, "response")} ${upperFirst(f.name)}`)
       .join(", ");

@@ -18,6 +18,7 @@
 import { forApiRead } from "../../ir/enrich/wire-projection.js";
 import { unionInstanceName, variantTag } from "../../ir/stdlib/unions.js";
 import type { BoundedContextIR, TypeIR, WireField } from "../../ir/types/loom-ir.js";
+import { peelCollection, peelNullable, wireTypeInfo } from "../../ir/types/wire-types.js";
 
 /** A normalized field contributed by a record-shaped union variant. */
 export interface UnionMemberField {
@@ -154,4 +155,60 @@ export function unionMemberObjects(
  *  rendered member object literals.  Shared by every Zod-emitting backend. */
 export function discriminatedUnionZod(memberObjects: string[]): string {
   return `z.discriminatedUnion("type", [${memberObjects.join(", ")}])`;
+}
+
+/** Raw JSON-schema for a tagged union — one `oneOf` arm per variant: the
+ *  `type` discriminator literal plus the variant's wire fields.  Consumed by
+ *  the backends whose OpenAPI layer can't express the union through its
+ *  native response-model types without publishing extra per-variant
+ *  components (FastAPI's install_openapi post-processor, the springdoc
+ *  customizer's baked union components).  Structural kinds only — the parity
+ *  diff folds formats and does not descend into oneOf arms. */
+export function unionJsonSchema(variants: TypeIR[], ctx: BoundedContextIR): unknown {
+  const arms = unionMembers(variants, ctx).map((m) => {
+    const props: Record<string, unknown> = { type: { type: "string", enum: [m.tag] } };
+    const required = ["type"];
+    if (m.shape === "scalar") {
+      props.value = jsonSchemaType(m.type);
+      required.push("value");
+    } else if (m.shape === "record") {
+      for (const f of m.fields) {
+        props[f.name] = jsonSchemaType(f.type);
+        if (!f.optional) required.push(f.name);
+      }
+    }
+    return { type: "object", properties: props, required };
+  });
+  return { oneOf: arms };
+}
+
+/** Compact TypeIR → JSON-schema fragment for the union arms above.
+ *  Enums / VOs / entities inline as their structural type. */
+function jsonSchemaType(t: TypeIR): unknown {
+  const info = wireTypeInfo(t, "response");
+  if (info.isNullable) return jsonSchemaType(peelNullable(t));
+  if (info.isCollection) return { type: "array", items: jsonSchemaType(peelCollection(t)) };
+  switch (info.refKind) {
+    case "primitive":
+      switch (info.primitive) {
+        case "int":
+        case "long":
+          return { type: "integer" };
+        case "decimal":
+          return { type: "number" };
+        case "bool":
+          return { type: "boolean" };
+        case "json":
+          return { type: "object" };
+        default:
+          // string / guid / datetime / money — all cross as strings.
+          return { type: "string" };
+      }
+    case "id":
+      return { type: "string" };
+    case "enum":
+      return { type: "string" };
+    default:
+      return { type: "object" };
+  }
 }

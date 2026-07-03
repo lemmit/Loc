@@ -9,6 +9,7 @@ import type {
   RepositoryIR,
   SystemIR,
 } from "../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import { directParentOf } from "../../ir/util/containment-parent.js";
 import { isTpcBase, isTphBase, tableOwnerName } from "../../ir/util/inheritance.js";
@@ -54,11 +55,7 @@ import { renderJavaDispatcher } from "./emit/dispatch.js";
 import { renderJavaDocumentRepositoryImpl } from "./emit/document-store.js";
 import { renderJavaDomainServices } from "./emit/domain-service.js";
 import { renderDtoFiles } from "./emit/dto.js";
-import {
-  renderJavaAbstractBaseEntity,
-  renderJavaEntity,
-  stampValueIsAuditorFillable,
-} from "./emit/entity.js";
+import { renderJavaAbstractBaseEntity, renderJavaEntity } from "./emit/entity.js";
 import { renderJavaEnum, renderJavaValueObject } from "./emit/enums-vos.js";
 import { renderJavaEventSourcedRepositoryImpl } from "./emit/event-store.js";
 import { renderJavaEvent } from "./emit/events.js";
@@ -337,14 +334,8 @@ function emitProjectFromContexts(
   const hasAuditable = auditableAggregates.length > 0;
   if (hasAuditable) {
     place("Auditable.java", "domain-common", renderAuditableInterface(basePkg));
-    // The AuditorAware bean is wired only when a stamp actually rides the
-    // auditor path (bare principal / principal id → @CreatedBy /
-    // @LastModifiedBy).  Claim-valued stamps (`createdByRole :=
-    // currentUser.role`) are service-applied and never read the auditor.
-    const stampsUseAuditor = auditableAggregates.some((a) =>
-      (a.contextStamps ?? []).some((r) =>
-        r.assignments.some((x) => stampValueIsAuditorFillable(x.value)),
-      ),
+    const stampsUsePrincipal = auditableAggregates.some((a) =>
+      (a.contextStamps ?? []).some((r) => r.assignments.some((x) => exprUsesCurrentUser(x.value))),
     );
     place(
       "JpaAuditingConfig.java",
@@ -352,7 +343,7 @@ function emitProjectFromContexts(
       renderJpaAuditingConfig(
         basePkg,
         system?.sys.user?.fields ?? [],
-        stampsUseAuditor && authRequired,
+        stampsUsePrincipal && authRequired,
       ),
     );
   }

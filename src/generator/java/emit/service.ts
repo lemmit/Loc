@@ -11,7 +11,6 @@ import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../../util/naming.js";
 import { javaValueTypeForId, renderJavaExpr, renderJavaType } from "../render-expr.js";
-import { claimStampAssignments } from "./entity.js";
 import { declaredFinds, isPagedFind, unionFindAsOptionalTwin } from "./repository.js";
 import { returnUnionSpec } from "./unions.js";
 import { aggHasCreateWireValidator, renderJavaValidators } from "./validator.js";
@@ -79,15 +78,6 @@ export function renderJavaService(
   // JpaAuditingConfig's AuditorAware<UUID> supplies the principal for
   // @CreatedBy / @LastModifiedBy, so the service no longer threads currentUser
   // for stamping.  See §5c of docs/plans/capability-stamp-dedup-simulation.md.
-  // EXCEPTION — claim-valued stamps (`createdByRole := currentUser.role`):
-  // the auditor supplies only the principal ID, so those are stamped HERE,
-  // from the declared expression, via the entity's `_stampClaimsOn*` hooks —
-  // after construction / mutation and before save, so the server value wins
-  // over anything the request carried.
-  const createClaimStamps =
-    ctx.authed && agg.persistedAs !== "eventLog" ? claimStampAssignments(agg, "create") : [];
-  const updateClaimStamps =
-    ctx.authed && agg.persistedAs !== "eventLog" ? claimStampAssignments(agg, "update") : [];
   // Audited lifecycle (audit-and-logging.md): the route-driving create / the
   // canonical destroy stage an audit_records row in the SAME @Transactional
   // method as the save / delete.  The route-driving create is the ES `create`
@@ -127,9 +117,6 @@ export function renderJavaService(
             ? `        ${agg.name}Validators.create(${createArgs});`
             : null,
           `        var aggregate = ${agg.name}.create(${createArgs});`,
-          createClaimStamps.length > 0
-            ? `        aggregate._stampClaimsOnCreate(currentUserAccessor.user());`
-            : null,
           `        repository.save(aggregate);`,
           ...createAuditLines,
           `        publishEvents(aggregate);`,
@@ -236,12 +223,7 @@ export function renderJavaService(
   // system even when no operation otherwise uses the current user, so the
   // accessor must be injected whenever audit + auth are both present — not only
   // when `anyOpUsesUser`, or the audit call references an uninjected field.
-  // Claim-valued lifecycle stamps read the principal through the accessor too.
-  const needsUserAccessor =
-    anyOpUsesUser ||
-    (anyAudited && !!ctx.authed) ||
-    createClaimStamps.length > 0 ||
-    updateClaimStamps.length > 0;
+  const needsUserAccessor = anyOpUsesUser || (anyAudited && !!ctx.authed);
   const unionReturnNames = new Set<string>();
   const opLines = agg.operations
     .filter((op) => op.visibility === "public")
@@ -278,9 +260,6 @@ export function renderJavaService(
           `            throw new ExternHandlerException("${op.name}", "${agg.name}", e);`,
           `        }`,
           `        aggregate._assertInvariants();`,
-          updateClaimStamps.length > 0
-            ? `        aggregate._stampClaimsOnUpdate(currentUserAccessor.user());`
-            : null,
           `        repository.save(aggregate);`,
           `        publishEvents(aggregate);`,
           `    }`,
@@ -312,9 +291,6 @@ export function renderJavaService(
         spec
           ? `        var result = aggregate.${op.name}(${args});`
           : `        aggregate.${op.name}(${args});`,
-        updateClaimStamps.length > 0
-          ? `        aggregate._stampClaimsOnUpdate(currentUserAccessor.user());`
-          : null,
         `        repository.save(aggregate);`,
         audited ? `        var __after = ${agg.name}Response.from(aggregate);` : null,
         audited ? `        auditRecords.save(new AuditRecord(` : null,

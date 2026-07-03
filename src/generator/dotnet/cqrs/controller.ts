@@ -14,7 +14,6 @@ import { findUnionSpec, unionMembers } from "../../_payload/union-wire.js";
 import {
   collectWireUsings,
   csIdValueClrType,
-  projectEntityArgs,
   wireToCommandArgument,
   wireType,
 } from "../dto-mapping.js";
@@ -95,20 +94,12 @@ function buildReturnUnionSpec(
   };
   const arms: ReturnUnionArm[] = members.map((m, i) => {
     const status = ctx.errorStatusOverrides?.[m.tag] ?? defaultErrorStatus(m.tag);
-    // An AGGREGATE success variant's Domain record holds the aggregate
-    // itself (`(Project Value)` — see cqrs/dtos.ts renderDomainUnion), so
-    // the controller projects it onto the Application DTO's wire params
-    // here (same forApiRead(wireShape) walk both sides, provenance params
-    // suppressed to match the variant record).
-    const varAgg = ctx.aggregates.find((a) => a.name === m.tag);
     const ctorArgs =
       m.shape === "none"
         ? []
         : m.shape === "scalar"
           ? ["v.Value"]
-          : varAgg
-            ? [projectEntityArgs("v.Value", varAgg, ctx, { unionVariant: true })]
-            : m.fields.map((f) => `v.${upperFirst(f.name)}`);
+          : m.fields.map((f) => `v.${upperFirst(f.name)}`);
     return {
       tag: m.tag,
       isError: isError(i),

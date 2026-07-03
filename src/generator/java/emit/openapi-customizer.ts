@@ -1,4 +1,5 @@
 import { forApiRead, hasCreate } from "../../../ir/enrich/wire-projection.js";
+import { unionInstanceName } from "../../../ir/stdlib/unions.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
@@ -21,7 +22,7 @@ import {
 import { lines } from "../../../util/code-builder.js";
 import { defaultErrorStatus } from "../../../util/error-defaults.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
-import { findUnionSpec } from "../../_payload/union-wire.js";
+import { findUnionSpec, unionJsonSchema } from "../../_payload/union-wire.js";
 import { declaredFinds, isPagedFind } from "./repository.js";
 import { returnUnionSpec } from "./unions.js";
 
@@ -118,6 +119,10 @@ interface EmptyRequest {
 interface Contract {
   routes: RouteContract[];
   wrappers: WrapperComponent[];
+  /** Operation-return union components — name + raw oneOf JSON schema,
+   *  registered via Json.mapper at customize time (springdoc never sees the
+   *  union: the controller returns `ResponseEntity<?>`). */
+  unions: { name: string; schemaJson: string }[];
   /** Referenced string-enum components (other backends name them; springdoc
    *  inlines them as `String`). */
   enums: EnumComponent[];
@@ -140,6 +145,9 @@ export function buildJavaOpenApiContract(
 ): Contract {
   const routes: RouteContract[] = [];
   const wrappers = new Map<string, string>();
+  // Operation-return union components — name → raw oneOf JSON (parsed by the
+  // emitted customizer via Json.mapper), see the op union branch below.
+  const unions = new Map<string, string>();
   // schema-name → required-field set (collected as a set, sorted at the end).
   const required = new Map<string, string[]>();
   const emptyRequests: EmptyRequest[] = [];
@@ -249,15 +257,21 @@ export function buildJavaOpenApiContract(
         if (op.visibility !== "public") continue;
         const opPath = `${route}/{id}/${snake(op.name)}`;
         const spec = ctx ? returnUnionSpec(op, ctx) : undefined;
-        if (spec) {
-          // Exception-less return union: success 200 + each error variant's
-          // mapped ProblemDetails status (no universal 400/404/422 base).
-          const statuses = new Set<number>();
+        if (spec && op.returnType?.kind === "union") {
+          // Exception-less return union: 200 carries the tagged union DTO
+          // (the controller returns `ResponseEntity<?>`, so springdoc infers
+          // nothing — pin the component + `$ref` explicitly, like union
+          // finds pin `<Agg>Response`).  Errors = the standard operation
+          // matrix ∪ each error variant's mapped status, matching
+          // Hono / .NET (showcase's `reserve` surfaced both gaps live).
+          const unionName = unionInstanceName(op.returnType.variants);
+          unions.set(unionName, JSON.stringify(unionJsonSchema(op.returnType.variants, ctx)));
+          const statuses = new Set<number>(errorStatuses("operation", operationIsGuarded(op)));
           for (const a of spec.arms) if (a.isError) statuses.add(a.status);
-          if (operationIsGuarded(op)) statuses.add(403);
           routes.push({
             method: "post",
             path: opPath,
+            successRef: unionName,
             errors: err([...statuses].sort((x, y) => x - y)),
           });
         } else {
@@ -403,6 +417,9 @@ export function buildJavaOpenApiContract(
   return {
     routes,
     wrappers: [...wrappers.entries()].map(([wrapper, element]) => ({ wrapper, element })),
+    unions: [...unions.entries()]
+      .map(([name, schemaJson]) => ({ name, schemaJson }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
     enums: [...referencedEnums.entries()]
       .map(([name, values]) => ({ name, values }))
       .sort((a, b) => a.name.localeCompare(b.name)),
@@ -473,6 +490,10 @@ export function renderJavaOpenApiCustomizer(basePkg: string, contract: Contract)
   const wrapperLiterals = contract.wrappers.map(
     (w) => `        new Wrapper(${JSON.stringify(w.wrapper)}, ${JSON.stringify(w.element)}),`,
   );
+  const unionLiterals = contract.unions.map(
+    (u) =>
+      `        new UnionComponent(${JSON.stringify(u.name)}, ${JSON.stringify(u.schemaJson)}),`,
+  );
   const enumLiterals = contract.enums.map((e) => {
     const vals = e.values.map((v) => JSON.stringify(v)).join(", ");
     return `        new EnumComponent(${JSON.stringify(e.name)}, List.of(${vals})),`;
@@ -540,6 +561,7 @@ export function renderJavaOpenApiCustomizer(basePkg: string, contract: Contract)
     `    private record EnumProp(String property, String enumName) {}`,
     `    private record EmptyRequest(String path, String schema) {}`,
     `    private record RequiredSet(String schema, List<String> fields) {}`,
+    `    private record UnionComponent(String name, String schemaJson) {}`,
     ``,
     `    private static final List<Wrapper> WRAPPERS = List.of(`,
     ...(wrapperLiterals.length > 0 ? trimTrailingComma(wrapperLiterals) : []),
@@ -561,6 +583,10 @@ export function renderJavaOpenApiCustomizer(basePkg: string, contract: Contract)
     ...(requiredLiterals.length > 0 ? trimTrailingComma(requiredLiterals) : []),
     `    );`,
     ``,
+    `    private static final List<UnionComponent> UNIONS = List.of(`,
+    ...(unionLiterals.length > 0 ? trimTrailingComma(unionLiterals) : []),
+    `    );`,
+    ``,
     `    private static final List<Route> ROUTES = List.of(`,
     ...trimTrailingComma(routeLiterals),
     `    );`,
@@ -571,6 +597,7 @@ export function renderJavaOpenApiCustomizer(basePkg: string, contract: Contract)
     `            ensureProblemSchema(openApi);`,
     `            registerWrappers(openApi);`,
     `            registerEnums(openApi);`,
+    `            registerUnions(openApi);`,
     `            for (Route route : ROUTES) {`,
     `                PathItem item = openApi.getPaths() == null ? null : openApi.getPaths().get(route.path());`,
     `                if (item == null) continue;`,
@@ -599,8 +626,10 @@ export function renderJavaOpenApiCustomizer(basePkg: string, contract: Contract)
     `            MediaType media = content.get("*/*");`,
     `            if (media == null) media = content.get(JSON);`,
     `            if (media == null) {`,
-    `                // No body content (e.g. 204): nothing to normalize.`,
-    `                continue;`,
+    `                // No body content: nothing to normalize — unless a component`,
+    `                // is pinned (a union op's 200), in which case create it.`,
+    `                if (wrapper == null) continue;`,
+    `                media = new MediaType();`,
     `            }`,
     `            if (wrapper != null) {`,
     `                media.setSchema(new Schema<>().$ref("#/components/schemas/" + wrapper));`,
@@ -639,6 +668,24 @@ export function renderJavaOpenApiCustomizer(basePkg: string, contract: Contract)
     `            ArraySchema arr = new ArraySchema();`,
     `            arr.setItems(new Schema<>().$ref("#/components/schemas/" + w.element()));`,
     `            components.addSchemas(w.name(), arr);`,
+    `        }`,
+    `    }`,
+    ``,
+    `    /** Register the operation-return union components (raw oneOf JSON —`,
+    `     *  springdoc never sees the union: the controller returns`,
+    `     *  ResponseEntity<?>).  Parsed via swagger-core's Json mapper. */`,
+    `    private static void registerUnions(OpenAPI openApi) {`,
+    `        Components components = openApi.getComponents();`,
+    `        if (components == null) return;`,
+    `        for (UnionComponent u : UNIONS) {`,
+    `            if (components.getSchemas() != null && components.getSchemas().containsKey(u.name())) continue;`,
+    `            try {`,
+    `                Schema<?> schema = io.swagger.v3.core.util.Json.mapper().readValue(u.schemaJson(), Schema.class);`,
+    `                components.addSchemas(u.name(), schema);`,
+    `            } catch (com.fasterxml.jackson.core.JsonProcessingException e) {`,
+    `                // Baked at generation time — unreachable for valid output.`,
+    `                throw new IllegalStateException("invalid baked union schema for " + u.name(), e);`,
+    `            }`,
     `        }`,
     `    }`,
     ``,
