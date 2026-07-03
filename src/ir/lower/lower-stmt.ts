@@ -3,6 +3,7 @@ import {
   isAssignOrCallStmt,
   isEmitStmt,
   isLetStmt,
+  isMatchStmt,
   isPreconditionStmt,
   isRequiresStmt,
   isReturnStmt,
@@ -11,6 +12,7 @@ import { typeKey, variantTag as unionVariantTag } from "../stdlib/unions.js";
 import type { ExprIR, PathIR, StmtIR, TypeIR } from "../types/loom-ir.js";
 import {
   inferExprType,
+  isErrorVariantTag,
   lowerExpr,
   lowerExprInContext,
   pathType,
@@ -22,8 +24,23 @@ import {
   findDomainServiceByName,
   findFunctionInEnv,
   findOperationInEnv,
+  lowerAtom,
   withLocal,
 } from "./lower-types.js";
+
+/** Lower a block of statements, threading the env so a `let` binds for the
+ *  statements after it.  Used for match-arm / else bodies (Stage 2); the
+ *  post-block env is discarded (a block scope doesn't leak outward). */
+export function lowerStatements(stmts: readonly Statement[], env: Env): StmtIR[] {
+  const out: StmtIR[] = [];
+  let scope = env;
+  for (const s of stmts) {
+    const lowered = lowerStatement(s, scope);
+    out.push(lowered.stmt);
+    scope = lowered.envAfter;
+  }
+  return out;
+}
 
 export function lowerStatement(stmt: Statement, env: Env): { stmt: StmtIR; envAfter: Env } {
   if (isPreconditionStmt(stmt)) {
@@ -56,6 +73,35 @@ export function lowerStatement(stmt: Statement, env: Env): { stmt: StmtIR; envAf
     return {
       stmt: { kind: "let", name: stmt.name, expr, type: t },
       envAfter: next,
+    };
+  }
+  if (isMatchStmt(stmt)) {
+    // Effect-form variant match (async-actions-and-effects.md Stage 2).  Lower
+    // the subject once (an `await <call>` becomes a call ExprIR with
+    // `awaited: true`); resolve its `or`-union type for the variant set; lower
+    // each arm's statement block, binding the (optional) narrowed variant value
+    // as a real local (`match-binding`) so member reads inside the arm resolve.
+    const subject = lowerExpr(stmt.subject, env);
+    const subjectType = subject.kind === "ref" ? subject.type : inferExprType(stmt.subject, env);
+    const arms = stmt.varArms.map((arm) => {
+      const varType = lowerAtom(arm.varType, env);
+      const armEnv = arm.binding ? withLocal(env, arm.binding, "match-binding", varType) : env;
+      return {
+        varType,
+        binding: arm.binding,
+        body: lowerStatements(arm.body, armEnv),
+        isError: isErrorVariantTag(unionVariantTag(varType), env),
+      };
+    });
+    return {
+      stmt: {
+        kind: "variant-match",
+        subject,
+        subjectType,
+        arms,
+        ...(stmt.elseBody.length > 0 ? { elseBody: lowerStatements(stmt.elseBody, env) } : {}),
+      },
+      envAfter: env,
     };
   }
   if (isReturnStmt(stmt)) {

@@ -2501,6 +2501,33 @@ export type StmtIR =
    */
   | { kind: "expression"; expr: ExprIR }
   /**
+   * Effect-form variant `match` (async-actions-and-effects.md Stage 2) — a
+   * `match SUBJECT { Variant b => <stmts> }` used for its side effects, where
+   * each arm runs a statement block rather than yielding a value (the statement
+   * twin of the `match` ExprIR).  Emitted for `match await op() { … }` in a
+   * frontend action body: the `subject` is the awaited remote call (a
+   * `call`/`method-call` ExprIR with `awaited: true`) whose `or`-union result is
+   * discriminated; the frontend walker renders the async envelope (await the
+   * mutation, reify the thrown error into the error variant) + a discriminant
+   * switch.  Gated to frontend action/component bodies — backends never receive
+   * it (a backend render-stmt hits its default arm).
+   */
+  | {
+      kind: "variant-match";
+      subject: ExprIR;
+      /** Resolved `or`-union TypeIR of the subject — the variant set. */
+      subjectType?: TypeIR;
+      arms: {
+        varType: TypeIR;
+        binding?: string;
+        body: StmtIR[];
+        /** True when this variant is an `error` payload (see the match ExprIR's
+         *  `variantArms[].isError`). */
+        isError?: boolean;
+      }[];
+      elseBody?: StmtIR[];
+    }
+  /**
    * `return <expr>` — an operation's designed-in outcome
    * (exception-less.md).  `value` produces the operation's declared
    * `or`-union return; the route translator maps an `error`-variant result
@@ -2653,6 +2680,12 @@ export type ExprIR =
        *  written with a name; absent for fully-positional calls (the
        *  vast majority — keeps IR compact for v22-shaped code). */
       argNames?: (string | undefined)[];
+      /** `await`-marked (async-actions-and-effects.md Stage 2) — set when this
+       *  method-call was written as a `match await <call>()` subject.  The
+       *  frontend walker emits the async envelope (await the mutation, reify
+       *  the thrown error into the union) around a variant-match on the
+       *  result; every other consumer ignores it. */
+      awaited?: boolean;
     }
   | {
       kind: "call";
@@ -2661,6 +2694,10 @@ export type ExprIR =
       args: ExprIR[];
       /** Same shape as `method-call.argNames` — see above. */
       argNames?: (string | undefined)[];
+      /** `await`-marked (async-actions-and-effects.md Stage 2) — see the
+       *  `method-call` node's `awaited`.  Set when the call was the subject of a
+       *  `match await <call>()`; drives the frontend async-await envelope. */
+      awaited?: boolean;
       /** Populated when `callKind === "resource-op"` (Phase 4) — the
        *  resolved resource binding, verb, the capability it requires,
        *  and the access interface (default from
@@ -3069,6 +3106,12 @@ function stmtUsesCurrentUser(s: StmtIR): boolean {
       return s.args.some(exprUsesCurrentUser);
     case "expression":
       return exprUsesCurrentUser(s.expr);
+    case "variant-match":
+      return (
+        exprUsesCurrentUser(s.subject) ||
+        s.arms.some((a) => a.body.some(stmtUsesCurrentUser)) ||
+        (s.elseBody ?? []).some(stmtUsesCurrentUser)
+      );
   }
 }
 
@@ -3135,6 +3178,12 @@ function stmtUsesMoney(s: StmtIR): boolean {
       return s.fields.some((f) => exprUsesMoney(f.value));
     case "call":
       return s.args.some(exprUsesMoney);
+    case "variant-match":
+      return (
+        exprUsesMoney(s.subject) ||
+        s.arms.some((a) => a.body.some(stmtUsesMoney)) ||
+        (s.elseBody ?? []).some(stmtUsesMoney)
+      );
   }
 }
 

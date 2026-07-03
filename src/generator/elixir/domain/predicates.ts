@@ -28,6 +28,12 @@ export function stmtUsesCurrentUser(s: StmtIR): boolean {
       return s.fields.some((f) => exprUsesCurrentUser(f.value));
     case "call":
       return s.args.some(exprUsesCurrentUser);
+    case "variant-match":
+      return (
+        exprUsesCurrentUser(s.subject) ||
+        s.arms.some((a) => a.body.some(stmtUsesCurrentUser)) ||
+        (s.elseBody ?? []).some(stmtUsesCurrentUser)
+      );
   }
 }
 
@@ -73,6 +79,12 @@ export function stmtUsesParam(s: StmtIR, name: string): boolean {
       return s.fields.some((f) => exprUsesParam(f.value, name));
     case "call":
       return s.args.some((a) => exprUsesParam(a, name));
+    case "variant-match":
+      return (
+        exprUsesParam(s.subject, name) ||
+        s.arms.some((a) => a.body.some((st) => stmtUsesParam(st, name))) ||
+        (s.elseBody ?? []).some((st) => stmtUsesParam(st, name))
+      );
   }
 }
 

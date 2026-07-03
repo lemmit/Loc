@@ -258,6 +258,11 @@ function renderPyStatement(
             : `{"type": ${tag}, **${v}}`;
       return `${i}return ${tagged}`;
     }
+    case "variant-match":
+      // Frontend-only effect statement (Stage 2) — gated to action bodies.
+      throw new Error(
+        "variant-match statement is frontend-only; it must not reach the Python backend",
+      );
   }
 }
 

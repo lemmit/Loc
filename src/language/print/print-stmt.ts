@@ -1,5 +1,5 @@
 import type { LValue, Statement } from "../generated/ast.js";
-import { printExpr, registerStatementPrinter } from "./print-expr.js";
+import { printExpr, printTypeAtomLite, registerStatementPrinter } from "./print-expr.js";
 
 // ---------------------------------------------------------------------------
 // AST → `.ddd` source printer for statements (lambda block bodies;
@@ -36,6 +36,20 @@ export function printStmt(node: Statement): string {
     }
     case "ReturnStmt":
       return `return ${printExpr(node.value)}`;
+    case "MatchStmt": {
+      // Effect-form match statement (Stage 2).  Subject prints via the
+      // expression printer (an `await <call>` subject renders `await …`); each
+      // arm's statement body prints as an inline `{ … }` block.
+      const armText = (stmts: Statement[]): string =>
+        `{ ${stmts.map((s) => printStmt(s)).join("; ")} }`;
+      const arms = node.varArms.map(
+        (a) =>
+          `${printTypeAtomLite(a.varType)}${a.binding ? ` ${a.binding}` : ""} => ${armText(a.body)}`,
+      );
+      const parts = [...arms];
+      if (node.elseBody.length > 0) parts.push(`else => ${armText(node.elseBody)}`);
+      return `match ${printExpr(node.subject)} {\n${parts.map((p) => `  ${p}`).join("\n")}\n}`;
+    }
     default: {
       const exhaustive: never = node;
       throw new Error(`printStmt: unhandled node ${(exhaustive as { $type: string }).$type}`);

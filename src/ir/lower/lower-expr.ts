@@ -20,6 +20,7 @@ import type {
 } from "../../language/generated/ast.js";
 import {
   isAggregate,
+  isAwaitExpr,
   isBinaryChain,
   isBoolLit,
   isBuilderCall,
@@ -558,7 +559,7 @@ function applySuffixToRecv(
  *  context-local *and* an ambient root-level `error` both classify.  Drives the
  *  per-variant-arm `isError` stamp the Elixir backend's `{:ok,…}`/`{:error,…}`
  *  tuple `case` depends on (variant-match.md). */
-function isErrorVariantTag(tag: string, env: Env): boolean {
+export function isErrorVariantTag(tag: string, env: Env): boolean {
   let node: { members?: readonly unknown[]; $container?: unknown } | undefined = env.ctx;
   while (node) {
     if (node.members?.some((m) => isPayloadDecl(m) && m.name === tag && m.kind === "error")) {
@@ -607,6 +608,17 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
   if (isNowExpr(expr)) return lit("now", "now");
   if (isThisRef(expr)) return { kind: "this" };
   if (isIdRef(expr)) return { kind: "id" };
+  if (isAwaitExpr(expr)) {
+    // `await <call>` (async-actions-and-effects.md Stage 2) — lower the inner
+    // remote call and mark it `awaited`, so the frontend walker wraps its
+    // variant-match in the async envelope.  A spurious `await` on a non-call is
+    // returned unmarked; the validator (`loom.spurious-effect-marker`) flags it.
+    const inner = lowerExpr(expr.inner, env);
+    if (inner.kind === "call" || inner.kind === "method-call") {
+      return { ...inner, awaited: true };
+    }
+    return inner;
+  }
   if (isParenExpr(expr)) return { kind: "paren", inner: lowerExpr(expr.inner, env) };
   if (isUnaryExpr(expr)) {
     return {
@@ -668,7 +680,11 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
     // so member reads on it get full receiver/member types.
     if (expr.subject) {
       const subject = lowerExpr(expr.subject, env);
-      const subjectType = subject.kind === "ref" ? subject.type : undefined;
+      // A plain ref subject carries its own resolved type; an `await <call>`
+      // subject (Stage 2) is a call whose type is the op's `or`-union return —
+      // resolve it via `inferExprType` so the variant-arm set is available for
+      // exhaustiveness checks and backends never re-resolve.
+      const subjectType = subject.kind === "ref" ? subject.type : inferExprType(expr.subject, env);
       return {
         kind: "match",
         subject,
@@ -1124,6 +1140,7 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
     return { kind: "primitive", name: "string" };
   }
   if (isParenExpr(expr)) return inferExprType(expr.inner, env);
+  if (isAwaitExpr(expr)) return inferExprType(expr.inner, env);
   if (isUnaryExpr(expr)) {
     if (expr.op === "!") return { kind: "primitive", name: "bool" };
     return inferExprType(expr.operand, env);

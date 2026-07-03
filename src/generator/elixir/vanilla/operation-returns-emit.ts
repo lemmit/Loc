@@ -482,6 +482,11 @@ export function renderReturningStmt(
       const argTuple = args.length ? `{${args.join(", ")}}` : "nil";
       return `    _ = ${argTuple}  # vanilla: bare call to '${s.name}' (no callable target); record unchanged`;
     }
+    case "variant-match":
+      // Frontend-only effect statement (Stage 2) — gated to action bodies.
+      throw new Error(
+        "variant-match statement is frontend-only; it must not reach the vanilla Elixir backend",
+      );
   }
 }
 

@@ -135,6 +135,11 @@ function renderJavaStatement(
       });
       return `${INDENT}return new ${variant}(${args.join(", ")});`;
     }
+    case "variant-match":
+      // Frontend-only effect statement (Stage 2) — gated to action bodies.
+      throw new Error(
+        "variant-match statement is frontend-only; it must not reach the Java backend",
+      );
   }
 }
 
