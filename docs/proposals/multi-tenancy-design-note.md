@@ -5,7 +5,9 @@
 > explicit-stance lint, and the registry/claim verification checks shipped per
 > [`docs/plans/multi-tenancy-implementation.md`](../plans/multi-tenancy-implementation.md)
 > (user-facing doc: [`docs/tenancy.md`](../tenancy.md)). Deferred: registry
-> self-scope + bootstrap (1b), `tenant_id` index (blocked on
+> self-scope + bootstrap (1b), registry/claim cross-reference hygiene (R6, 1b —
+> the `registry`/`claim` bindings ship as bare `ID`s, not Langium cross-refs),
+> `tenant_id` index (blocked on
 > uniqueness-and-indexes), and ALL hierarchy machinery — `tenantRegistry`,
 > `parent`, `dataKey`, `deep`/`global` (Phase 2; R5's "dataKey from day one"
 > was found unimplementable — no session-enrichment source for `orgPath`, no
@@ -387,6 +389,68 @@ maintain *precisely because* `parent` is immutable (the path never changes). Two
 materialized-path footguns Loom owns so users never see them: a path **delimiter**
 (so `org_a` doesn't prefix-match `org_ab`) and a **`text_pattern_ops`/C-collation
 index** (so `LIKE 'x%'` actually uses the index).
+
+### R6. Grammar hygiene — cross-reference the registry and claim (Phase 1b)
+
+> Added 2026-07-03 from a grammar review. This does **not** reopen R1 (the
+> registry stays a *system-level* fact named in `tenancy by …`, not a
+> per-aggregate marker). It records a narrower point R1 never weighed: how the
+> two names in that line are *bound*.
+
+As shipped in Phase 1a, `TenancyDecl` binds both names as bare `ID`s resolved
+by a validator, not as Langium cross-references:
+
+```langium
+TenancyDecl:
+    'tenancy' 'by' 'user' '.' claim=ID 'of' registry=ID;
+```
+
+This makes it the **least-Loomish reference in the grammar**. Every other
+"which aggregate" link is a cross-reference and gets IDE navigation, rename, and
+find-refs for free — `repository … for [Aggregate:ID]`, `api … from
+[Subdomain:ID]`, `channel carries [EventDecl:ID]`, `SeedRow`, `View` sources.
+`of Organization` names an aggregate exactly like those, but as a magic string:
+cmd-click does nothing, rename doesn't propagate, and a typo surfaces as a
+generic validator error at the whole declaration rather than at the reference.
+
+**The fix is fully compatible with R1's three benefits** (checkable
+`tenantId ≡ Organization.id` link, structural "exactly one registry", no
+aggregate marker) — none of them requires the bare-`ID` form. Upgrade the
+bindings to references:
+
+```langium
+// registry — a real Aggregate cross-reference (drops the manual existence check):
+registry=[Aggregate:ID]
+
+// claim — scope it to the system's `user { }` fields (needs a small
+// ddd-scope.ts addition to expose UserField in this position only, the same
+// targeted-scoping trick that keeps EventDecl/PayloadDecl visible only in
+// workflow create/handle params):
+claim=[UserField:UserFieldName]
+```
+
+Resulting surface is **byte-identical** to what ships today —
+`tenancy by user.tenantId of Organization` — so no source migration; the change
+is entirely in tooling quality (navigation, rename, sharper diagnostics) plus
+deleting the now-redundant existence checks.
+
+- **The `user.` prefix is a keep/drop knob.** Keeping it (`by user.tenantId`)
+  preserves the "this is a user claim" reading; dropping it (`by tenantId`, with
+  the same `[UserField]` cross-ref) is terser and still unambiguous. Recommend
+  **keep** — it matches the docs and reads well; the cross-ref is the win, not
+  the token count.
+- **The per-aggregate `tenantRegistry` header flag was reconsidered and still
+  rejected** (mirroring `crossTenant` / `abstract` on the aggregate header).
+  Recording it here so it isn't re-proposed: R1's argument stands — the registry
+  is self-keyed, has no `TenantId` column, and there is exactly one, so its
+  identity is a system-level fact, not a per-aggregate axis value. Marking it on
+  the aggregate would re-conflate the two roles R1 separated. The grammar-hygiene
+  goal is met *within* R1's model by the cross-reference above, not by moving the
+  registry back onto the aggregate.
+
+This is a **Phase 1b grammar-hygiene item** (sits with "registry self-scope +
+bootstrap", already deferred to 1b). Pure tooling upgrade, no behaviour change —
+safe to land independently of the hierarchy work.
 
 ---
 
