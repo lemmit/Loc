@@ -1423,9 +1423,16 @@ function renderVariantMatchStmt(
   const clauses = stmt.arms.map((arm) => {
     const tag = variantTag(arm.varType);
     const isError = arm.isError === true || tag !== aggName;
-    const binder = arm.binding ? snake(arm.binding) : "_";
+    const steps = arm.body.map((s) => renderStmt(s, hctx));
+    // Elixir's `--warnings-as-errors` rejects a bound-but-unused pattern var, so
+    // prefix the binder with `_` when the arm body never references it (e.g.
+    // `Blocked _b -> assign(:message, "blocked")`).
+    const raw = arm.binding ? snake(arm.binding) : "_";
+    const used = arm.binding ? steps.some((st) => new RegExp(`\\b${raw}\\b`).test(st)) : false;
+    const binder = arm.binding && !used ? `_${raw}` : raw;
     const pattern = isError ? `{:error, ${JSON.stringify(tag)}, ${binder}}` : `{:ok, ${binder}}`;
-    return armClause(pattern, arm.body);
+    const piped = steps.length ? ["socket", ...steps].join("\n              ") : "socket";
+    return `            ${pattern} ->\n              ${piped}`;
   });
   // Catch-all keeps the inner `case` total (unmatched error variants + the
   // audited-op `{:error, %Ecto.Changeset{}}`): run the `else` body if present,

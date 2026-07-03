@@ -78,4 +78,51 @@ describe("HEEx `match await` (Stage 2) — server-side variant-match", () => {
     expect(src!).toContain("{:error, :not_found} ->");
     expect(src!).toContain("put_flash(socket, :error,");
   });
+
+  it('emits one `{:error, "<tag>", …}` clause per named error variant', async () => {
+    const files = await generateSystemFiles(`
+      error Failed { reason: string }
+      error Declined { code: int }
+      system Demo {
+        subdomain S { context C {
+          aggregate Order { code: string
+            operation confirm(): Order or Failed or Declined { return Failed { reason: code } }
+          }
+        } }
+        api CApi from C
+        ui Web {
+          api C: CApi
+          page Detail {
+            route: "/orders/:id"
+            state { message: string = "" }
+            action submit() {
+              match await C.Order.confirm() {
+                Order o    => { message := o.code }
+                Failed f   => { message := f.reason }
+                Declined d => { message := "declined" }
+              }
+            }
+            body: Stack { Button { "Go", onClick: submit } }
+          }
+        }
+        storage primary { type: postgres }
+        resource cState { for: C, kind: state, use: primary }
+        deployable phoenixApp {
+          platform: elixir { foundation: vanilla }
+          contexts: [C]
+          dataSources: [cState]
+          serves: CApi
+          ui: Web { C: phoenixApp }
+          port: 4000
+        }
+      }
+    `);
+    const src = files.get("phoenix_app/lib/phoenix_app_web/live/detail_live.ex")!;
+    expect(src).toContain('{:error, "Failed", f} ->');
+    // `Declined d` binds `d` but the arm body never uses it — Elixir's
+    // `--warnings-as-errors` would reject a bound-but-unused var, so it is
+    // rendered `_d`.
+    expect(src).toContain('{:error, "Declined", _d} ->');
+    expect(src).toContain("{:ok, o} ->");
+  });
 });

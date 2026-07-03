@@ -5,14 +5,17 @@
 // `get_<agg>/1`, runs the op through `apply/3` (so Elixir 1.18's type checker
 // can't narrow an always-rejecting op's result and flag the `{:ok, _}` arm),
 // and threads socket assigns per variant.  This fixture forces that emission
-// through `mix compile --warnings-as-errors`.
+// through `mix compile --warnings-as-errors`.  The arms NAME both context-local
+// error variants (the scope-provider widening in ddd-scope.ts makes that legal
+// in a UI match-await arm) so the multi-error server-side `case` compiles.
 system MatchAwait {
   subdomain Sales {
     context Orders {
       error Rejected { reason: string }
+      error Blocked { code: int }
       aggregate Order with crudish {
         code: string
-        operation confirm(): Order or Rejected { return Rejected { reason: code } }
+        operation confirm(): Order or Rejected or Blocked { return Rejected { reason: code } }
       }
       repository OrderRepo for Order { }
     }
@@ -25,8 +28,9 @@ system MatchAwait {
       state { message: string = "" }
       action confirmNow() {
         match await Orders.Order.confirm() {
-          Order o => { message := o.code }
-          else    => { message := "could not confirm order" }
+          Order o    => { message := o.code }
+          Rejected r => { message := r.reason }
+          Blocked b  => { message := "blocked" }
         }
       }
       body: Stack {

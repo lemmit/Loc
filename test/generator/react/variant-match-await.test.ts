@@ -106,3 +106,75 @@ describe("React variant-`match await` (MVU Stage 2)", () => {
     );
   });
 });
+
+// Multi-error reification (async-actions-and-effects.md Stage 2 — error side).
+// A union with TWO error variants, both declared CONTEXT-LOCAL (so the arm-scope
+// widening in ddd-scope.ts is exercised alongside the reify).  The reify must map
+// the caught ProblemDetails `type` URI back to the matching tag, not blindly
+// re-stamp one.
+const MULTI = `
+  system Shop {
+    api SalesApi from Sales
+    subdomain Sales {
+      context Ordering {
+        error Failed { reason: string }
+        error Declined { code: int }
+        aggregate Order ids guid {
+          name: string
+          operation confirm(): Order or Failed or Declined {
+            return Failed { reason: name }
+          }
+        }
+        repository Orders for Order { }
+      }
+    }
+    storage primarySql { type: postgres }
+    resource orderingState { for: Ordering, kind: state, use: primarySql }
+    ui Web {
+      api Sales: SalesApi
+      page OrderDetail {
+        route: "/orders/:id"
+        state { message: string = "" }
+        action submit() {
+          match await Sales.Order.confirm() {
+            Order o    => { message := o.name }
+            Failed f   => { message := f.reason }
+            Declined d => { message := "declined" }
+          }
+        }
+        body: Stack { Button { "Go", onClick: submit } }
+      }
+    }
+    deployable api {
+      platform: node
+      contexts: [Ordering]
+      dataSources: [orderingState]
+      serves: SalesApi
+      port: 3000
+    }
+    deployable web {
+      platform: react
+      targets: api
+      ui: Web { Sales: api }
+      port: 3001
+    }
+  }
+`;
+
+describe("React variant-`match await` — multiple error variants", () => {
+  it("maps the caught ProblemDetails `type` URI back to the matching error tag", async () => {
+    const files = await generateSystemFiles(MULTI);
+    const tsx = files.get("web/src/pages/order_detail.tsx")!;
+    expect(tsx).toBeDefined();
+
+    // The reify inspects the ProblemDetails `type` URI and selects the tag — NOT
+    // a single blind re-stamp — so both error arms route correctly.
+    expect(tsx).toContain("const __t = (e.body as Record<string, unknown>)?.type;");
+    expect(tsx).toContain('const __tag = __t === "/errors/failed" ? "Failed" : "Declined";');
+    expect(tsx).toContain("type: __tag } as ConfirmOrderResponse;");
+    // Every variant (success + both errors) gets a switch case.
+    expect(tsx).toContain('case "Order": {');
+    expect(tsx).toContain('case "Failed": {');
+    expect(tsx).toContain('case "Declined": {');
+  });
+});
