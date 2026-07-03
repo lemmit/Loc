@@ -73,6 +73,12 @@ describe("vanilla relational entity parts (§11c)", () => {
     // The child table carries NOT-NULL timestamps in the migration → auto-stamp.
     expect(pipeline).toContain("timestamps(type: :utc_datetime)");
     expect(pipeline).toContain("cast(attrs, [:label, :run_count])");
+    // §15: the part changeset snakes ITS OWN top-level keys, so a `cast_assoc`
+    // nested body with camelCase keys (`{"runCount": 3}`) casts cleanly instead of
+    // dropping `run_count` → not-null violation.
+    expect(pipeline).toContain("attrs = __normalize_keys(attrs)");
+    expect(pipeline).toContain("defp __normalize_keys(attrs) when is_map(attrs) do");
+    expect(pipeline).toContain("{k, v} when is_binary(k) -> {Macro.underscore(k), v}");
   });
 
   it("base_changeset cast_assocs the containment (replace-on-update via on_replace)", async () => {
