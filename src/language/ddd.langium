@@ -297,7 +297,7 @@ UiBlockBinding:
 // Frameworks the `ui:` mount lowers against.  `react` renders TSX
 // against a design pack (`mantine`/`shadcn`); `phoenixLiveView`
 // renders HEEx against the `coreComponents` pack as part of a fullstack
-// Elixir/Ash deployable.  (The `liveview` framework alias was RETIRED —
+// Elixir deployable (plain Ecto/Phoenix).  (The `liveview` framework alias was RETIRED —
 // `phoenixLiveView` is the only spelling, mirroring the retired platform
 // aliases.)  Future values (`blazor-wasm`, `blazor-server`, …) extend
 // this enum when their codegen backends land.  `svelte` renders Svelte 5
@@ -1463,7 +1463,13 @@ Property:
         // position so a pre-existing field named `tenancy` / `crossTenant`
         // keeps parsing.  Hard only in the `TenancyDecl` head / `Aggregate`
         // header flag slot.
-        | 'tenancy' | 'crossTenant')
+        | 'tenancy' | 'crossTenant'
+        // Capability source-surface keywords — soft in property position so an
+        // aggregate / VO / event field named `filter` / `stamp` / `implements`
+        // parses (already soft in `StateFieldName` / `MemberName` /
+        // `NameRefIdent`).  Hard only at aggregate / context member position
+        // (`FilterDecl` / `StampDecl` / `ImplementsDecl`).
+        | 'filter' | 'stamp' | 'implements')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -1676,6 +1682,12 @@ LooseName returns string:
     // `Repo.findAll`).  Admit it here so user code can still name a field /
     // parameter `ignoring`.
     | 'ignoring'
+    // Capability source-surface keywords (`FilterDecl` / `StampDecl` /
+    // `ImplementsDecl`) are hard only at aggregate / context member position;
+    // admit them here so a field / parameter / call-arg named `filter` /
+    // `stamp` / `implements` parses (matches their admission in
+    // `StateFieldName` / `MemberName` / `NameRefIdent`).
+    | 'filter' | 'stamp' | 'implements'
     // Tenancy keywords (multi-tenancy Phase 1a) admitted as soft so user
     // code can still name a field / parameter `tenancy` / `crossTenant`.
     // `tenancy` is hard only at the head of the `TenancyDecl` SystemMember;

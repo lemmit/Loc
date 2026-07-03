@@ -11215,6 +11215,18 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 {
                   "$type": "Keyword",
                   "value": "crossTenant"
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "filter"
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "stamp"
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "implements"
                 }
               ]
             }
@@ -12590,6 +12602,18 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "ignoring"
+          },
+          {
+            "$type": "Keyword",
+            "value": "filter"
+          },
+          {
+            "$type": "Keyword",
+            "value": "stamp"
+          },
+          {
+            "$type": "Keyword",
+            "value": "implements"
           },
           {
             "$type": "Keyword",
