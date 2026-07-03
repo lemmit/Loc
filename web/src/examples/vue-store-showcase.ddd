@@ -53,6 +53,22 @@ system VueStoreShowcase {
       }
     }
 
+    // Lifetime ladder (frontend-state-management.md §3.1) — `persist:` picks
+    // where the state lives, so the build matrix tsc-validates the persisted +
+    // URL-synced emit paths.  URL-synced state is scalar-only.
+    store Filters persist: url {
+      state {
+        term: string = ""
+        pageNo: int = 0
+      }
+      action setTerm(q: string) { term := q }
+      action setPage(n: int) { pageNo := n }
+    }
+    store Draft persist: local {
+      state { note: string = "" }
+      action write(t: string) { note := t }
+    }
+
     // A component also reads the store (dotted) and calls a store action from
     // its own action — store wiring works uniformly for pages AND components.
     component CartSummary() {
@@ -80,7 +96,11 @@ system VueStoreShowcase {
 
     page Home {
       route: "/"
-      body: Heading { "Store showcase", level: 1 }
+      body: Stack {
+        Heading { "Store showcase", level: 1 },
+        Heading { Filters.term, level: 3 },
+        Heading { Draft.note, level: 3 }
+      }
     }
   }
 
