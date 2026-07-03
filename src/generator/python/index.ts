@@ -797,6 +797,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 
 from app.domain.errors import (
     AggregateNotFoundError,
@@ -927,6 +928,22 @@ def install_error_handlers(app: FastAPI) -> None:
     async def _domain(request: Request, err: DomainError) -> JSONResponse:
         log("warn", "domain_error", message=str(err), status=400)
         return problem(request, 400, "Bad Request", str(err))
+
+    @app.exception_handler(IntegrityError)
+    async def _integrity(request: Request, err: IntegrityError) -> JSONResponse:
+        # A Postgres unique_violation (SQLSTATE 23505) — e.g. a \`unique (...)\`
+        # domain invariant breaching its derived DB unique index — maps to a
+        # friendly 409 Conflict instead of a raw 500.  Other integrity breaches
+        # (FK/check) are conflicts too, so they share the 409.  asyncpg exposes
+        # \`.sqlstate\` on the driver error SQLAlchemy wraps in \`.orig\`.
+        sqlstate = getattr(getattr(err, "orig", None), "sqlstate", None)
+        if sqlstate == "23505":
+            log("warn", "disallowed", message=str(err), status=409)
+            return problem(
+                request, 409, "Conflict", "A resource with these values already exists."
+            )
+        log("warn", "disallowed", message=str(err), status=409)
+        return problem(request, 409, "Conflict", "The request conflicts with the current state.")
 
     @app.exception_handler(AggregateNotFoundError)
     async def _not_found(request: Request, err: AggregateNotFoundError) -> JSONResponse:

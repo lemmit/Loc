@@ -44,8 +44,38 @@ defmodule ${appModule}Web.ProblemDetails do
   @doc """
   Send a 422 ProblemDetails response carrying the §3.2 \`errors[]\`
   extension built from an \`Ecto.Changeset\` errors map.
+
+  A changeset carrying a \`unique_constraint\` error (a breached \`unique (...)\`
+  domain invariant — the DB unique index raised 23505, which
+  \`Ecto.Changeset.unique_constraint/3\` converted into a changeset error tagged
+  \`constraint: :unique\`) is a CONFLICT, not a validation failure: it responds
+  409 instead of 422 (cross-backend parity with the Hono 23505 → 409 mapping).
   """
   def validation_error_response(conn, %Ecto.Changeset{} = changeset) do
+    if unique_conflict?(changeset) do
+      problem_response(
+        conn,
+        409,
+        "Conflict",
+        "A record with these values already exists."
+      )
+    else
+      validation_failed_response(conn, changeset)
+    end
+  end
+
+  # A unique-constraint violation surfaces as a changeset error whose opts carry
+  # \`constraint: :unique\` (added by \`Ecto.Changeset.unique_constraint/3\` when the
+  # DB reports 23505).  Validation errors never carry that tag, so its presence
+  # unambiguously distinguishes a 409 Conflict from a 422 validation failure.
+  defp unique_conflict?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn
+      {_field, {_msg, opts}} -> Keyword.get(opts, :constraint) == :unique
+      _ -> false
+    end)
+  end
+
+  defp validation_failed_response(conn, %Ecto.Changeset{} = changeset) do
     ${renderPhoenixLogCall("domainError", [
       { name: "message", valueExpr: `"Validation failed"` },
       { name: "status", valueExpr: "422" },

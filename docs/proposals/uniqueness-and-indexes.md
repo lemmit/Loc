@@ -1,11 +1,17 @@
 # Uniqueness & indexes — a domain `unique` invariant, an infra index
 
-> Status: **PROPOSED** — not yet adopted. No grammar, IR, or emitter
-> changes have landed. This doc scopes a Loomish, DDD-clean way to express
-> database-level **uniqueness** and **indexes**, and is explicit about how
-> each is *enforced* (the DB), *scoped* (tenancy), and *derived* (the
-> compiler), so the design survives contact with multi-tenancy,
-> soft-delete, and concurrency.
+> Status: **SLICE 1 LANDED** — the `unique (...)` domain invariant ships:
+> grammar member, `UniqueKeyIR`, the derived DB unique index (deterministic
+> `<table>_<cols>_uq` name, partial `WHERE is_deleted = false` under
+> `softDeletable`) across every DB backend, the per-backend 23505 → 409
+> conflict mapping, and the validators (`loom.unique-unknown-field`,
+> `-duplicate-column`, `-collection-field`, `-valueobject-field`,
+> `-on-event-sourced`, `-missing-tenant-scope`). Slice 2 (auto-derived finder
+> indexes + the `resource index:` escape hatch) is still open. This doc scopes
+> a Loomish, DDD-clean way to express database-level **uniqueness** and
+> **indexes**, and is explicit about how each is *enforced* (the DB),
+> *scoped* (tenancy), and *derived* (the compiler), so the design survives
+> contact with multi-tenancy, soft-delete, and concurrency.
 >
 > **What already exists** (the machinery is mostly built — only the surface
 > and the plumbing are missing):

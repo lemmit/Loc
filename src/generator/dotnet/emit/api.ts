@@ -477,8 +477,20 @@ function renderCmdConstructorBody(args: string[], indent: string): string[] {
   return args.map((a, i) => `${indent}${a}${i < args.length - 1 ? "," : ""}`);
 }
 
-export function renderExceptionFilter(ns: string, options?: { usesValidators?: boolean }): string {
+export function renderExceptionFilter(
+  ns: string,
+  options?: { usesValidators?: boolean; usingDapper?: boolean },
+): string {
   const usesValidators = !!options?.usesValidators;
+  // Persistence selection (D-REALIZATION-AXES): the EF adapter surfaces a
+  // Postgres unique-violation wrapped in `Microsoft.EntityFrameworkCore.
+  // DbUpdateException`; the Dapper adapter throws the bare
+  // `Npgsql.PostgresException`.  The unwrapped-Npgsql arm covers both driver
+  // levels, but the `DbUpdateException` wrapper clause is only emitted for the
+  // EF adapter — under `persistence: dapper`, `Microsoft.EntityFrameworkCore`
+  // isn't referenced (see the caveat at ~api.ts:119), so naming that type would
+  // be a CS0246.
+  const usingDapper = !!options?.usingDapper;
   // `Activity.Current` is referenced unconditionally below; the
   // `using System.Diagnostics;` is therefore part of the file's
   // baseline imports rather than something we'd derive from the body.
@@ -574,6 +586,27 @@ public sealed class DomainExceptionFilter : IExceptionFilter
               { name: "status", valueExpr: "409" },
             ])}
             context.Result = Problem(context, 409, "Disallowed", dx.Message, trace_id);
+            context.ExceptionHandled = true;
+            return;
+        }
+        // Postgres unique_violation (SQLSTATE 23505) — a \`unique (...)\` domain
+        // invariant's DB index rejected the write.  Map it to 409 Conflict so a
+        // uniqueness breach reads as a friendly conflict rather than a generic
+        // 500.  The bare \`Npgsql.PostgresException\` is the Dapper adapter path;
+        // the EF adapter wraps it in a \`DbUpdateException\`.
+        if (context.Exception is Npgsql.PostgresException { SqlState: "23505" }${
+          usingDapper
+            ? ""
+            : `
+            || (context.Exception is Microsoft.EntityFrameworkCore.DbUpdateException due
+                && due.InnerException is Npgsql.PostgresException { SqlState: "23505" })`
+        })
+        {
+            ${renderDotnetLogCall("disallowed", [
+              { name: "message", valueExpr: `"A resource with these values already exists."` },
+              { name: "status", valueExpr: "409" },
+            ])}
+            context.Result = Problem(context, 409, "Conflict", "A resource with these values already exists.", trace_id);
             context.ExceptionHandled = true;
             return;
         }

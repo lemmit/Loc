@@ -426,7 +426,10 @@ function emitProjectFromContexts(
   // before the exception filter render so its FluentValidation
   // arm is gated on the same flag.
   const usesValidators = merged.aggregates.some(hasAnyWireValidator);
-  out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns, { usesValidators }));
+  out.set(
+    "Api/DomainExceptionFilter.cs",
+    renderExceptionFilter(ns, { usesValidators, usingDapper }),
+  );
   out.set("Api/ProblemDetailsResponsesFilter.cs", renderProblemDetailsFilter(ns));
   out.set(
     "Api/ListResponseWrapperFilter.cs",

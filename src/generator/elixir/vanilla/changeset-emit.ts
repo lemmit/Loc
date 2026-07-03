@@ -19,7 +19,7 @@ import type {
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
 import { singleFieldConstraints } from "../../../ir/validate/invariant-classify.js";
-import { snake, upperFirst } from "../../../util/naming.js";
+import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { ectoValidator, voHasConstraints } from "./changeset-validators.js";
 import { isVanillaDocAgg, renderDocChangeset } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
@@ -260,6 +260,24 @@ ${keyAliasPairs.join(",\n")}
   end`
       : "";
 
+  // `unique (...)` domain invariants (D-UNIQUE-DOMAIN) — one
+  // `unique_constraint/3` per key, tied to the SAME deterministic index name
+  // the migration emits (`<table>_<cols>_uq`, `uniqueIndexName` in
+  // migrations-builder; recomputed locally so the generator layer never imports
+  // upward from `system/`).  This turns the DB unique-violation (which would
+  // otherwise raise `Ecto.ConstraintError` → 500) into a `{:error, changeset}`
+  // carrying a `constraint: :unique` error, which `ProblemDetails` then renders
+  // as 409 Conflict (cross-backend parity with the Hono 23505 → 409 mapping).
+  // The error attaches to the first column of a composite key (Ecto ties a
+  // multi-column `unique_constraint` to the index by `name:`, not by field).
+  const uniqueTable = plural(snake(agg.name));
+  const uniqueLines = (agg.uniqueKeys ?? []).map((uk) => {
+    const cols = uk.columns.map((c) => snake(c));
+    const name = `${uniqueTable}_${cols.join("_")}_uq`;
+    return `    |> unique_constraint(:${cols[0]}, name: ${JSON.stringify(name)})`;
+  });
+  const uniqueBlock = uniqueLines.length > 0 ? `\n${uniqueLines.join("\n")}` : "";
+
   // Per-action changeset helpers — create + destroy.  Named OPERATIONS no
   // longer get a `change_<op>` helper: their `<op>_<agg>` context fn renders the
   // body and `put_change`s the assigned columns directly (context-emit).  The
@@ -300,7 +318,7 @@ defmodule ${changesetMod} do
     attrs = __normalize_keys(attrs)
     ${valueCollections.length > 0 ? "attrs = prepare_vc_attrs(attrs)\n\n    " : ""}struct
     |> cast(attrs, @all_fields)
-    |> validate_required(@required_fields)${validatorBlock}${castEmbedBlock}${castAssocBlock}${voBlock}
+    |> validate_required(@required_fields)${validatorBlock}${castEmbedBlock}${castAssocBlock}${voBlock}${uniqueBlock}
   end${keyNormalizeHelper}${voHelper}${normalizeHelper}${ordinalHelper}
 
 ${actionHelpers}
