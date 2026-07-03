@@ -40,7 +40,8 @@ describe("unique (...) → Postgres unique index DDL", () => {
     const files = await generateSystemFiles(
       nodeSystem(`aggregate Customer { email: string  name: string  unique (email) }`),
     );
-    expect(sqlOf(files)).toContain("CREATE UNIQUE INDEX customers_email_uq");
+    // Identifiers are quote-always in the DDL (audit A1); assert quote-agnostically.
+    expect(sqlOf(files)).toMatch(/CREATE UNIQUE INDEX "?customers_email_uq"?/);
   });
 
   it("derives a composite UNIQUE INDEX over the listed columns in order", async () => {
@@ -49,8 +50,10 @@ describe("unique (...) → Postgres unique index DDL", () => {
         `aggregate Customer { tenantId: string  email: string  unique (tenantId, email) }`,
       ),
     );
-    expect(sqlOf(files)).toContain("CREATE UNIQUE INDEX customers_tenant_id_email_uq");
-    expect(sqlOf(files)).toMatch(/customers_tenant_id_email_uq ON \S+ \(tenant_id, email\)/);
+    expect(sqlOf(files)).toMatch(/CREATE UNIQUE INDEX "?customers_tenant_id_email_uq"?/);
+    expect(sqlOf(files)).toMatch(
+      /customers_tenant_id_email_uq"? ON \S+ \("?tenant_id"?, "?email"?\)/,
+    );
   });
 
   it("makes the index PARTIAL under softDeletable (re-create after soft-delete)", async () => {
@@ -60,7 +63,7 @@ describe("unique (...) → Postgres unique index DDL", () => {
       ),
     );
     expect(sqlOf(files)).toMatch(
-      /CREATE UNIQUE INDEX customers_email_uq ON \S+ \(email\) WHERE is_deleted = false;/,
+      /CREATE UNIQUE INDEX "?customers_email_uq"? ON \S+ \("?email"?\) WHERE is_deleted = false;/,
     );
   });
 

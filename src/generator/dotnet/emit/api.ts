@@ -479,9 +479,13 @@ function renderCmdConstructorBody(args: string[], indent: string): string[] {
 
 export function renderExceptionFilter(
   ns: string,
-  options?: { usesValidators?: boolean; usingDapper?: boolean },
+  options?: { usesValidators?: boolean; usingDapper?: boolean; hasUniqueKeys?: boolean },
 ): string {
   const usesValidators = !!options?.usesValidators;
+  // A project with no `unique (...)` key emits no 23505 → 409 arm, so a model
+  // without uniqueness is byte-identical to before the feature (the proposal's
+  // strict-additivity guarantee — only a `unique` index can raise 23505).
+  const hasUniqueKeys = !!options?.hasUniqueKeys;
   // Persistence selection (D-REALIZATION-AXES): the EF adapter surfaces a
   // Postgres unique-violation wrapped in `Microsoft.EntityFrameworkCore.
   // DbUpdateException`; the Dapper adapter throws the bare
@@ -497,6 +501,29 @@ export function renderExceptionFilter(
   // Confined to this file — adding `System.Diagnostics` project-wide
   // would expose `Activity` (a common DDD entity name) to every
   // generated source file.
+  // Postgres unique_violation (SQLSTATE 23505) → 409 Conflict — a `unique (...)`
+  // domain invariant's DB index rejected the write.  The bare
+  // `Npgsql.PostgresException` is the Dapper path; the EF adapter wraps it in a
+  // `DbUpdateException`.  Emitted only when the project declares a `unique` key.
+  const uniqueConflictArm = hasUniqueKeys
+    ? `
+        if (context.Exception is Npgsql.PostgresException { SqlState: "23505" }${
+          usingDapper
+            ? ""
+            : `
+            || (context.Exception is Microsoft.EntityFrameworkCore.DbUpdateException due
+                && due.InnerException is Npgsql.PostgresException { SqlState: "23505" })`
+        })
+        {
+            ${renderDotnetLogCall("disallowed", [
+              { name: "message", valueExpr: `"A resource with these values already exists."` },
+              { name: "status", valueExpr: "409" },
+            ])}
+            context.Result = Problem(context, 409, "Conflict", "A resource with these values already exists.", trace_id);
+            context.ExceptionHandled = true;
+            return;
+        }`
+    : "";
   return `// Auto-generated.${usesValidators ? "\nusing System.Collections.Generic;\nusing System.Linq;\nusing System.Text.Json;" : ""}
 using System.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
@@ -588,28 +615,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             context.Result = Problem(context, 409, "Disallowed", dx.Message, trace_id);
             context.ExceptionHandled = true;
             return;
-        }
-        // Postgres unique_violation (SQLSTATE 23505) — a \`unique (...)\` domain
-        // invariant's DB index rejected the write.  Map it to 409 Conflict so a
-        // uniqueness breach reads as a friendly conflict rather than a generic
-        // 500.  The bare \`Npgsql.PostgresException\` is the Dapper adapter path;
-        // the EF adapter wraps it in a \`DbUpdateException\`.
-        if (context.Exception is Npgsql.PostgresException { SqlState: "23505" }${
-          usingDapper
-            ? ""
-            : `
-            || (context.Exception is Microsoft.EntityFrameworkCore.DbUpdateException due
-                && due.InnerException is Npgsql.PostgresException { SqlState: "23505" })`
-        })
-        {
-            ${renderDotnetLogCall("disallowed", [
-              { name: "message", valueExpr: `"A resource with these values already exists."` },
-              { name: "status", valueExpr: "409" },
-            ])}
-            context.Result = Problem(context, 409, "Conflict", "A resource with these values already exists.", trace_id);
-            context.ExceptionHandled = true;
-            return;
-        }
+        }${uniqueConflictArm}
         if (context.Exception is DomainException de)
         {
             ${renderDotnetLogCall("domainError", [
