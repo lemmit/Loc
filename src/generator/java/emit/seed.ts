@@ -178,7 +178,16 @@ function renderArgs(row: SeedRowIR, agg: EnrichedAggregateIR, imports: Set<strin
       const v = byName.get(f.name);
       if (!v) return "null";
       collectJavaExprImports(v, imports);
-      return renderJavaExpr(v);
+      const rendered = renderJavaExpr(v);
+      // A datetime field seeded with a string literal carries the ISO-8601
+      // text; `create(...)` takes an Instant, so parse at the boundary
+      // (same coercion as wireToDomain on the request path).
+      const t = f.type.kind === "optional" ? f.type.inner : f.type;
+      if (t.kind === "primitive" && t.name === "datetime" && v.kind === "literal") {
+        imports.add("java.time.Instant");
+        return `Instant.parse(${rendered})`;
+      }
+      return rendered;
     })
     .join(", ");
 }

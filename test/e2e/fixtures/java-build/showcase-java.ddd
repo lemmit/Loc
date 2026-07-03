@@ -1,13 +1,19 @@
-// showcase.ddd — the Loom "tech showcase" conformance fixture.
+// showcase-java.ddd — the java-build twin of examples/showcase.ddd.
 //
-// A single coherent platform-engineering / DevTools-SaaS system that
-// exercises EVERY language feature so the cross-generator harness has one
-// example touching the whole surface.  Domain: a developer platform that
-// manages projects, build pipelines, deployments, and the engineers who
-// operate them.
+// Tracks the tech-showcase fixture 1:1 EXCEPT ONE construct: the
+// `resolveProject` workflow (a variant-`match` over a repository union
+// find).  Repo union finds surface as the nullable optional twin on
+// java/.NET (exception-less.md §4), but `matchVariant` renders a sealed
+// switch over `<Union>_<Tag>` carrier records that are only emitted for
+// domainService returns — so the arm patterns reference types that don't
+// exist and `gradle compileJava` fails (P0 in
+// docs/audits/generated-code-ddd-review-2026-07.md).  When that fix
+// lands, DELETE this fixture and point the java-build gate at
+// examples/showcase.ddd directly (its `javaApi` deployable already
+// builds and boots in conformance-parity).
 //
-// Parses + validates with zero errors; warnings (provenance / match
-// exhaustiveness) are acceptable.
+// Regenerate by copying examples/showcase.ddd and removing the
+// `resolveProject` workflow block.
 
 // ---------------------------------------------------------------------------
 // Traceability artifacts (sit above the model).
@@ -52,6 +58,36 @@ system DevPlatform {
         permissions: string[]
     }
 
+    // Capability (filter + stamp) — the typed cross-cutting concern, applied
+    // to an aggregate via the explicit `implements` member (ImplementsDecl);
+    // `with` is the sugar twin. Adds `createdByRole`, a read filter, and an
+    // onCreate stamp to every implementor.
+    capability ownerStamped {
+        createdByRole: string
+        // SelfType — `Self id` resolves to the implementor's own id type.
+        supersededBy: Self id?
+        filter this.createdByRole == currentUser.role
+        stamp onCreate { createdByRole := currentUser.role }
+    }
+
+    // Auth config — OIDC handshake + claims mapping. Covers AuthBlock,
+    // OidcConfig, LiteralAuthValue + EnvAuthValue, ClaimsMap, ClaimEntry.
+    auth {
+        provider: keycloak
+        oidc {
+            issuer: "https://idp.example.com"
+            clientId: "loom-console"
+            clientSecret: env("OIDC_CLIENT_SECRET")
+            audience: "loom-api"
+            scopes: ["openid", "profile"]
+        }
+        sessions: jwt
+        claims: {
+            role: "realm_access.role",
+            permissions: "realm_access.roles"
+        }
+    }
+
     // -----------------------------------------------------------------
     // Projects module — registry of projects + their build pipelines.
     // -----------------------------------------------------------------
@@ -71,8 +107,42 @@ system DevPlatform {
             }
 
             event ProjectArchived { project: Project id, at: datetime }
+            event ProjectArchivedRecorded { project: Project id, count: int }
+            event ArchivalReset { project: Project id }
 
-            aggregate Project ids guid shape(embedded) with crudish {
+            // Channel — the event-transport contract carrying a context's events.
+            channel ProjectEvents { carries: ProjectArchived }
+
+            // Payload family (PayloadDecl record forms) — the four sugar
+            // keywords carry intent over the same record shape.
+            command RenameProjectCmd  { newName: string }
+            query   ProjectsByVis     { visibility: Visibility }
+            response ProjectCard      { projectId: Project id, name: string, visibility: Visibility }
+            error   ProjectNotFound   { resource: string }
+
+            // Named-union payload (PayloadDecl union form + TypeAtom arms) —
+            // the reusable twin of an inline `A or B`.
+            payload ProjectOutcome = ProjectCard | ProjectNotFound
+
+            // Query cluster — reusable predicate + named retrieval bundle.
+            // (Explicit `loads:` is intentionally omitted: it's gated at IR
+            // validation, loom.retrieval-loads-unsupported.)
+            criterion ActiveNamed(needle: string) of Project = this.active == true && this.name == needle
+
+            retrieval ByActiveName(needle: string) of Project {
+                where: ActiveNamed(needle)
+                sort:  [name asc, sequence desc]
+            }
+
+            // Domain service (read-only tier) — a repo query orchestrated
+            // without mutation/commit (DomainService + DomainServiceOperation).
+            domainService ProjectQueries {
+                operation nameTaken(name: string): bool {
+                    return Projects.byName(name) != null
+                }
+            }
+
+            aggregate Project ids guid with crudish {
                 name: string
                 description: string?
                 visibility: Visibility
@@ -99,6 +169,9 @@ system DevPlatform {
                 // DecLit + NullLit literal coverage.
                 derived overBudget: bool = budget > 100.0
                 derived hasDescription: bool = description != null
+
+                // PrimitiveConversion — `string(<non-string>)` coercion.
+                derived seqLabel: string = "seq-" + string(sequence)
 
                 function isActive(): bool = active == true
 
@@ -158,6 +231,9 @@ system DevPlatform {
             repository Projects for Project {
                 find byName(name: string): Project? where this.name == name
                 find active(): Project[] where this.active == true
+                // Union-returning find (absence → the error variant) — the
+                // subject a VariantArm `match` narrows.
+                find locate(name: string): Project or ProjectNotFound where this.name == name
             }
 
             // Non-transactional workflow.
@@ -175,6 +251,51 @@ system DevPlatform {
                   })
                   proj.addPipeline("default")
               }
+            }
+
+            // ForStmt + Repo.run (named retrieval) + RetrievalLiteral (inline).
+            workflow scanProjects {
+              create(needle: string) {
+                  let matched = Projects.run(ByActiveName(needle), page: { offset: 0, limit: 100 })
+                  for p in matched {
+                      p.addPipeline("scan")
+                  }
+                  let adhoc = Projects.run(retrieval { where: ActiveNamed(needle) sort: [sequence desc] })
+              }
+            }
+
+            // Event-sourced saga — OnDecl + Apply + create-by-correlation.
+            workflow ArchivalTracker eventSourced {
+                project: Project id      // correlation field → stream key
+                archivedCount: int       // folded state
+
+                create(e: ProjectArchived) by e.project {
+                    emit ProjectArchivedRecorded { project: e.project, count: 1 }
+                }
+                on(e: ProjectArchived) by e.project {
+                    emit ProjectArchivedRecorded { project: e.project, count: 1 }
+                }
+                apply(rec: ProjectArchivedRecorded) { archivedCount := archivedCount + rec.count }
+                apply(r: ArchivalReset) { archivedCount := 0 }
+                // HandleDecl — a command handler on the saga (emits, folds in apply).
+                handle reset() { emit ArchivalReset { project: project } }
+            }
+
+            // IfLetStmt — single-row criterion lookup; bound only in `then`.
+            workflow touchActive {
+              create(needle: string) {
+                  if let p = Projects.find(ActiveNamed(needle)) {
+                      p.addPipeline("found")
+                  } else {
+                      precondition needle.length > 0
+                  }
+              }
+            }
+
+            // Seed (Seed + SeedRow) — dataset rows materialised at migrate time.
+            seed default {
+                Project { name: "Seeded Alpha", visibility: Public, active: true, sequence: 0, budget: 0.0, createdAt: "2024-01-01T00:00:00Z" }
+                Project { name: "Seeded Beta",  visibility: Internal, active: false, sequence: 1, budget: 10.0, createdAt: "2024-01-02T00:00:00Z" }
             }
 
             // View — shorthand form.
@@ -218,9 +339,13 @@ system DevPlatform {
                 // backend-unsupported gates the mismatch).  The `provenanced`
                 // modifier is demonstrated in examples/provenance.ddd (hono-only).
                 total: int
+                cost: money?
                 startedAt: datetime
 
                 invariant commitSha.length > 0
+
+                // MoneyLit — `money("…")` constructor literal.
+                derived costFloor: money = money("0.00")
 
                 function passed(): bool = buildState == Passed
 
@@ -257,14 +382,26 @@ system DevPlatform {
             aggregate Engineer with crudish {
                 handle: string
                   check handle.length >= 3 && handle.length <= 32
-                email: string
+                // SensitivityClause — PII tagging on a field.
+                email: string sensitive(pii)
                   check email.matches("^[^@]+@[^@]+\\.[^@]+$") && email.length <= 120
                 level: int check level >= 1 && level <= 10
                 onCall: bool
 
+                // ImplementsDecl — explicit capability application.
+                implements ownerStamped
+
                 invariant handle != email
                 private invariant handle.matches("^[a-z][a-z0-9_]*$")
                 derived display: string = handle
+            }
+
+            // MacroArgBool — `crudish(updateOnly: true)` composes with
+            // softDeletable (which owns the create/destroy lifecycle).
+            aggregate Squad ids guid with crudish(updateOnly: true), softDeletable {
+                name: string
+                invariant name.length > 0
+                derived display: string = name
             }
 
             repository Engineers for Engineer {
@@ -276,18 +413,68 @@ system DevPlatform {
     // -----------------------------------------------------------------
     // Layered architecture: api / storage / ui / deployable.
     // -----------------------------------------------------------------
-    api ProjectsApi from Projects
+    // ApiStatus — per-error HTTP status mapping in an api contract block.
+    api ProjectsApi from Projects {
+        httpStatus ProjectNotFound 404
+    }
     api DeliveryApi from Delivery
     api AccountsApi from Accounts
 
-    storage primarySql { type: postgres }
-    storage hotCache    { type: redis }
+    // Connection sources (all four variants) + a vendor config map covering
+    // the three ConfigValue types (string / int / bool).
+    storage primarySql {
+        type: postgres
+        connection: env("DATABASE_URL")
+        config: { poolSize: 10, ssl: true, region: "eu-west-1" }
+    }
+    storage hotCache {
+        type: redis
+        connection: literal("redis://cache:6379")
+    }
+    storage searchIndex { type: elastic, connection: service(esCluster) }
+    storage eventBus    { type: kafka,   connection: secret(kafkaUrl) }
+
+    // ChannelSource — physical binding of a channel to a transport storage.
+    channelSource projectBus { for: ProjectEvents, use: hotCache }
+
+    // Layout — header/main/footer slots; the header exercises the Sticky
+    // primitive. Covers Layout, LayoutNamedSlot, LayoutMainSlot, Sticky.
+    layout ConsoleFrame {
+        header {
+            Sticky {
+                top: "0",
+                Container { Heading { "DevPlatform", level: 3 } }
+            }
+        }
+        main
+        footer {
+            Container { Text { "© DevPlatform" } }
+        }
+    }
 
     // ----- UI 1: rich explicit pages (covers walker primitives) -----
     ui Console {
         api Projects: ProjectsApi
         api Delivery: DeliveryApi
         api Accounts: AccountsApi
+
+        // Client-side store (Store + ActionDecl).
+        store DraftBox {
+            state { count: int = 0 }
+            action bump() { count := count + 1 }
+        }
+
+        // Live channel param + notification (UiChannelParam + UiNotification).
+        channel Live: Catalog.ProjectEvents
+        on Live.ProjectArchived(e) { toast("A project was archived") }
+
+        // Extern UI function (UiFunction).
+        function initials(name: string): string extern from "./helpers"
+
+        // Component with slot + action params (SlotType + ActionType).
+        component Panel(head: slot, onPick: action(Project)) {
+            body: Stack { Slot { "head" }, Button { "Pick" } }
+        }
 
         // Project list — Stack / Breadcrumbs / Anchor / Text / Toolbar /
         // Heading / Button / QueryView / Skeleton / Alert / Empty / Paper /
@@ -359,6 +546,7 @@ system DevPlatform {
             }
             body: Container {
                 Grid {
+                    cols: [2, 1],
                     Group {
                         Avatar { "P" },
                         Image { "/logo.png" },
@@ -377,10 +565,10 @@ system DevPlatform {
                         },
                         Card {
                             Stack {
-                                Field { "Name", value: draftName },
-                                NumberField { "Level", value: level },
+                                Field { "Name", bind: draftName },
+                                NumberField { "Level", bind: level },
                                 PasswordField { "Token" },
-                                Toggle { "Editing", value: editing },
+                                Toggle { "Editing", bind: editing },
                                 Anchor { "Docs", to: "/docs" },
                                 Button { "Save", to: "/projects" }
                             }
@@ -405,6 +593,58 @@ system DevPlatform {
                 hovered: bool = false
             }
             body: Stack { Badge { label }, Slot { "extra" } }
+        }
+
+        // Active-projects view page — the inlined view-list body (the tree the
+        // scaffold view-list builder emits) gives the "browse projects via the
+        // console UI" e2e a
+        // real route + view-list page-object to drive.  Route/testids line up
+        // with the generated `ActiveProjectsViewPage.goto()` (`/views/<snake>`,
+        // `view-active_projects`), so the UI spec resolves its import and the
+        // Playwright navigation lands on a rendered page rather than a 404.
+        page ActiveProjectsView {
+            route: "/views/active_projects"
+            title: "Active projects"
+            body: Stack { Heading { "Active Projects", level: 2 }, QueryView { of: Views.ActiveProjects, loading: Skeleton { count: 5 }, error: Alert { "Couldn't load active projects" }, empty: Empty { "No rows." }, data: rows => Paper { Table { Column { "Name", o => Text { o.name } }, Column { "Description", o => Text { o.description } }, Column { "Visibility", o => EnumBadge { o.visibility } }, Column { "Active", o => Text { o.active ? "Yes" : "No" } }, Column { "Sequence", o => Text { o.sequence } }, Column { "External Id", o => Text { o.externalId } }, Column { "Budget", o => Text { o.budget } }, Column { "Created At", o => DateDisplay { o.createdAt } }, rows: rows, striped: true, highlight: true, sticky: true, keyExpr: "idx" } } }, testid: "view-active_projects" }
+        }
+
+        // Kitchen-sink page — the remaining walker primitives + the page
+        // metadata props (description / ogImage / canonical) + `layout:`.
+        page Kitchen {
+            route: "/kitchen"
+            title: "Kitchen sink"
+            description: "Every remaining primitive on one page"
+            ogImage: "/og-kitchen.png"
+            canonical: "https://console.example.com/kitchen"
+            layout: ConsoleFrame
+            state {
+                notes: string = ""
+                vis: string = "Private"
+            }
+            body: Stack {
+                Section {
+                    heading: "Inline",
+                    body: Stack {
+                        Bold { "bold" },
+                        Italic { "italic" },
+                        InlineCode { "code" },
+                        CodeBlock { "const x = 1" },
+                        Icon { name: "star" }
+                    }
+                },
+                MultilineField { "Notes", bind: notes },
+                SelectField { "Visibility", bind: vis, options: ["Private", "Public"] },
+                DestroyForm { of: Project },
+                WorkflowForm { runs: registerProject },
+                QueryView {
+                    of: Projects.Project.all,
+                    single: true,
+                    loading: Skeleton { count: 1 },
+                    error: Alert { "err" },
+                    empty: Empty { "none" },
+                    data: row => OperationForm { row.rename }
+                }
+            }
         }
 
         // UI-level sidebar menu — internal link + external link.
@@ -433,7 +673,9 @@ system DevPlatform {
     }
 
     // ----- UI 3: scaffold-only (sugar binding target, no api params) -----
-    ui Admin with scaffold(subdomains: [Accounts]) {
+    // `scaffoldView(of: …)` adds a single-ref macro arg (MacroArgRef) alongside
+    // the refList `scaffold(subdomains:)`.
+    ui Admin with scaffold(subdomains: [Accounts]), scaffoldView(of: ActiveProjects) {
     }
 
     // ----- DataSources: per-(context, kind) bindings to physical storages -----
@@ -444,7 +686,7 @@ system DevPlatform {
 
     // ----- Backend deployables (same contexts for OpenAPI parity) -----
     deployable dotnetApi {
-        platform: java
+        platform: dotnet
         contexts: [Catalog, Builds, People]
         dataSources: [catalogState, catalogCache, buildsState, peopleState]
         serves: ProjectsApi, DeliveryApi, AccountsApi
@@ -461,8 +703,26 @@ system DevPlatform {
         auth: required
     }
 
+    deployable pythonApi {
+        platform: python
+        contexts: [Catalog, Builds, People]
+        dataSources: [catalogState, buildsState, peopleState]
+        serves: ProjectsApi, DeliveryApi, AccountsApi
+        port: 8000
+        auth: required
+    }
+
+    deployable javaApi {
+        platform: java
+        contexts: [Catalog, Builds, People]
+        dataSources: [catalogState, buildsState, peopleState]
+        serves: ProjectsApi, DeliveryApi, AccountsApi
+        port: 8081
+        auth: required
+    }
+
     deployable phoenixApi {
-        platform: elixir { foundation: vanilla }
+        platform: elixir
         contexts: [Catalog, Builds, People]
         dataSources: [catalogState, buildsState, peopleState]
         serves: ProjectsApi, DeliveryApi, AccountsApi
@@ -520,6 +780,59 @@ system DevPlatform {
         expect(rows.length).toBeGreaterThanOrEqual(0)
     }
 
+    // ----- Behavioural coverage: operations + finds (cross-backend) -----
+    // The happy-path creates above only exercised `create`/`getById`.  The
+    // blocks below drive the operation routes (`POST /<plural>/{id}/<op>`) and
+    // the find routes (`GET /<plural>/<find>?…`) so `conformance-full` proves
+    // the SAME runtime behaviour across every backend serving the module —
+    // not just that the OpenAPI shapes match (the structural parity gate).
+    // These add no new API surface, so the per-PR spec-diff is unaffected.
+
+    // Operation route: `promote` runs its body (`total := total + 1`) + emits.
+    test e2e "promoting a passing build increments its total" against dotnetApi {
+        let b = api.builds.create({ commitSha: "deadbee", buildState: "Passed", total: 0, startedAt: "2024-01-01T00:00:00Z" })
+        api.builds.promote(b, { env: "production" })
+        let read = api.builds.getById(b)
+        expect(read.total).toBe(1)
+    }
+
+    // Operation route: `rename` mutates a field through a precondition gate.
+    test e2e "renaming a project updates its name" against honoApi {
+        let p = api.projects.create({ name: "Atlas", visibility: "Public", active: true, sequence: 1, externalId: "00000000-0000-0000-0000-000000000000", budget: 100.0, createdAt: "2024-01-01T00:00:00Z" })
+        api.projects.rename(p, { newName: "Orion" })
+        let read = api.projects.getById(p)
+        expect(read.name).toBe("Orion")
+    }
+
+    // Find route (nullable single): `byName` returns the created project.
+    test e2e "finding a project by name returns it" against honoApi {
+        let p = api.projects.create({ name: "Findable", visibility: "Public", active: true, sequence: 2, externalId: "00000000-0000-0000-0000-000000000000", budget: 0.0, createdAt: "2024-01-01T00:00:00Z" })
+        let found = api.projects.byName({ name: "Findable" })
+        expect(found.name).toBe("Findable")
+    }
+
+    // Find route (nullable single): `bySha` on the Delivery module.
+    test e2e "finding a build by commit sha returns it" against honoApi {
+        let b = api.builds.create({ commitSha: "sha9999", buildState: "Queued", total: 0, startedAt: "2024-01-01T00:00:00Z" })
+        let found = api.builds.bySha({ commitSha: "sha9999" })
+        expect(found.commitSha).toBe("sha9999")
+    }
+
+    // Find route on Accounts — the only behavioural coverage of that module
+    // beyond its negative-path checks below.
+    test e2e "finding an engineer by handle returns it" against honoApi {
+        let e = api.engineers.create({ handle: "linus", email: "linus@example.com", level: 7, onCall: true })
+        let found = api.engineers.byHandle({ handle: "linus" })
+        expect(found.handle).toBe("linus")
+    }
+
+    // Find route (collection): `active()` returns a non-empty set after a create.
+    test e2e "listing active projects returns a non-empty set" against dotnetApi {
+        let p = api.projects.create({ name: "Live", visibility: "Internal", active: true, sequence: 3, externalId: "00000000-0000-0000-0000-000000000000", budget: 0.0, createdAt: "2024-01-01T00:00:00Z" })
+        let list = api.projects.active()
+        expect(list.length).toBeGreaterThanOrEqual(1)
+    }
+
     // ----- Negative-path conformance (cross-backend) -------------------
     // These replay against every backend serving the referenced module
     // (Hono / .NET / Phoenix).  `expect(<call>).toThrow()` asserts a non-2xx
@@ -527,19 +840,27 @@ system DevPlatform {
     // the exact status, so each block asserts "every backend rejects the same
     // bad input with the SAME status" at runtime — the behavioral complement
     // to the static `errorResponseDiffs` OpenAPI parity gate.  Status contract
-    // (identical across all three backends): an `invariant` / `check`
-    // violation surfaces as a DomainError → 400; a missing aggregate → 404.
-    // Payloads mirror the happy-path creates above so the *only* reason to
-    // fail is the one field under test.
+    // (identical across all three backends) — the two-tier error model from
+    // `docs/proposals/validation-error-extension.md` (SHIPPED):
+    //   • a *field-mirrorable* `invariant` / `check` (each case below is a
+    //     single-field rule) is caught at the WIRE validator and surfaces as a
+    //     ValidationError → 422 (Unprocessable Entity, the stdlib default in
+    //     `src/util/error-defaults.ts`) with a per-field `errors[]` pointer;
+    //   • an aggregate-level `DomainError` that reaches the domain floor (a
+    //     cross-field or `@server-only` invariant with no per-field path)
+    //     surfaces as 400 — this is by design, not a gap;
+    //   • a missing aggregate → 404.
+    // Every payload mirrors the happy-path creates above so the *only* reason to
+    // fail is the one field under test (keeping each case on the 422 wire path).
 
-    // 400 — invariant `name.length > 0` (Catalog.Project) must reject.
+    // 422 — invariant `name.length > 0` (Catalog.Project) must reject.
     test e2e "creating a project with an empty name is rejected" against dotnetApi {
-        expect(api.projects.create({ name: "", visibility: "Public", active: true, sequence: 1, externalId: "00000000-0000-0000-0000-000000000000", budget: 100.0, createdAt: "2024-01-01T00:00:00Z" })).toThrow(400)
+        expect(api.projects.create({ name: "", visibility: "Public", active: true, sequence: 1, externalId: "00000000-0000-0000-0000-000000000000", budget: 100.0, createdAt: "2024-01-01T00:00:00Z" })).toThrow(422)
     }
 
-    // 400 — invariant `commitSha.length > 0` (Builds.Build) must reject.
+    // 422 — invariant `commitSha.length > 0` (Builds.Build) must reject.
     test e2e "creating a build with an empty commitSha is rejected" against honoApi {
-        expect(api.builds.create({ commitSha: "", buildState: "Passed", total: 0, startedAt: "2024-01-01T00:00:00Z" })).toThrow(400)
+        expect(api.builds.create({ commitSha: "", buildState: "Passed", total: 0, startedAt: "2024-01-01T00:00:00Z" })).toThrow(422)
     }
 
     // 404 — reading an id that was never created must error, not 200.
@@ -547,8 +868,8 @@ system DevPlatform {
         expect(api.projects.getById("ffffffff-ffff-ffff-ffff-ffffffffffff")).toThrow(404)
     }
 
-    // 400 — inline field `check` constraints (People.Engineer) lower to
-    // invariants, so they reject through the same DomainError → 400 path as
+    // 422 — inline field `check` constraints (People.Engineer) lower to
+    // invariants, so they reject through the same ValidationError → 422 path as
     // the block `invariant`s above — but via a distinct mechanism (inline
     // `check`) on a module (Accounts) that otherwise has no e2e coverage.
     // Each payload is valid except the single field under test, so the
@@ -556,12 +877,12 @@ system DevPlatform {
 
     // level out of range: `check level >= 1 && level <= 10`.
     test e2e "registering an engineer with an out-of-range level is rejected" against honoApi {
-        expect(api.engineers.create({ handle: "ada", email: "ada@example.com", level: 0, onCall: false })).toThrow(400)
+        expect(api.engineers.create({ handle: "ada", email: "ada@example.com", level: 0, onCall: false })).toThrow(422)
     }
 
     // malformed email: `check email.matches("^[^@]+@[^@]+\\.[^@]+$")`.
-    test e2e "registering an engineer with a malformed email is rejected" against phoenixApi {
-        expect(api.engineers.create({ handle: "grace", email: "not-an-email", level: 5, onCall: false })).toThrow(400)
+    test e2e "registering an engineer with a malformed email is rejected" against honoApi {
+        expect(api.engineers.create({ handle: "grace", email: "not-an-email", level: 5, onCall: false })).toThrow(422)
     }
 }
 
