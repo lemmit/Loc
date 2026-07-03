@@ -11,9 +11,11 @@
 > lowering (`store-field`/`store-action` resolution), the encapsulation +
 > acyclic-composition validators (`store-checks.ts`), and Zustand/Pinia/Svelte/
 > Angular + LiveView emission are live. **The lifetime ladder is NOT shipped:**
-> v1 is in-memory only; `persist: local|session` / `sync: url` are
+> v1 is in-memory only; `persist: local|session|url` is
 > grammar-reserved and rejected (`loom.store-lifetime-unsupported`) — that
-> ladder is the remaining work this note owns. Named actions over store state
+> ladder is the remaining work this note owns. **Surface pinned 2026-07-03: one
+> keyword `persist:` with values `memory|local|session|url` (the `url` tier was
+> formerly the separate `sync: url`; see §3.1).** Named actions over store state
 > shipped alongside (Proposal A Stage 1). Supersedes the externally-drafted
 > "State Management DSL for Loom" (`state` / `store` / `machine` →
 > TypeScript / Zustand / XState). This revision keeps the one good idea in that
@@ -143,10 +145,27 @@ Store:
     '}';
 
 // Lifetime modifier (default = in-memory; see §4). Additive — bare `store`
-// keeps the in-memory contract.
+// keeps the in-memory contract. ONE keyword, four homes for the state.
 StoreLifetime:
-    'persist' ':' ('local' | 'session') | 'sync' ':' 'url';
+    'persist' ':' ('memory' | 'local' | 'session' | 'url');
 ```
+
+> **[2026-07-03 pinned] One keyword `persist:`, not `persist:` + `sync:`.**
+> Earlier drafts spelled the URL tier `sync: url` (a second keyword) on the
+> theory that reflecting state into the URL is *synchronisation*, not
+> *persistence*. Collapsed to a single `persist: memory | local | session |
+> url` because the reserved IR is already **one** `lifetime` enum (§3.2) — the
+> rungs are mutually exclusive, so a store has exactly one home, which a single
+> keyword expresses naturally and without an IR restructure. **Accepted trade:**
+> a store cannot be *both* session-durable and URL-shareable at once (they're
+> one axis). **Honest caveat the drop papers over:** `local`/`session` are
+> private, one-way durability, whereas `url` is **bidirectional and shared** —
+> the URL can change *underneath* the store (back/forward, a hand-edited or
+> pasted address) and those changes flow back in, so the generated code
+> re-decodes on every URL change (the untrusted-input decoder is derived from
+> the store's typed fields; §4.1). If a real "URL-shareable **and**
+> session-fallback" case ever appears, revisit with an orthogonal second axis
+> then — not speculatively.
 
 `StateField` (`name=ID ':' type=TypeRef ('=' init=Expression)?`) and `:=`/`+=`/`-=`
 writes are reused unchanged. One production, one `UiMember` arm, one optional
@@ -205,7 +224,7 @@ reload — it is navigation.**
 | page `state {}` | ❌ remounts fresh | ❌ | ❌ |
 | `store` (in-memory, **default**) | ✅ | ❌ | ❌ |
 | `store … persist: local` | ✅ | ✅ (localStorage) | ❌ |
-| `store … sync: url` | ✅ | ✅ (URL) | ✅ |
+| `store … persist: url` | ✅ | ✅ (URL) | ✅ |
 
 Concretely: CustomerList has `state { query }`. Click a row → CustomerDetail →
 Back: the list **remounted**, so `query` is empty — the search is lost. With
@@ -213,15 +232,15 @@ Back: the list **remounted**, so `query` is empty — the search is lost. With
 *That* — surviving navigation — is the entire reason `store` exists over
 `state`, and it's the most common client-state need (carts, filters, wizard
 progress, selection). In-memory dies on reload; that's a feature of its tier, and
-`persist` / `sync: url` are simply **longer lifetimes you opt into**, not rival
+`persist: local` / `persist: url` are simply **longer lifetimes you opt into**, not rival
 definitions of `store`.
 
 So the ladder reads top to bottom as monotonically increasing lifetime:
 
 - **`state`** — one page mount.
 - **`store`** — the session (survives navigation; the Zustand sweet spot).
-- **`store … persist`** — survives reload (localStorage / `sessionStorage`).
-- **`store … sync: url`** — survives reload *and* is shareable/deep-linkable.
+- **`store … persist: local|session`** — survives reload (localStorage / `sessionStorage`).
+- **`store … persist: url`** — survives reload *and* is shareable/deep-linkable (bidirectional: the URL can change underneath the store).
 
 ### 4.1 Per-frontend lowering, per tier
 
@@ -233,7 +252,7 @@ clean, idiomatic mechanism, which is why LiveView is first-class there (§5).
 |---|---|---|---|---|---|
 | `store` (in-memory) | Zustand `create()` | `reactive()` singleton | module-level `$state` rune | `providedIn:'root'` signal service | ETS row / session process keyed by **ephemeral tab id** (§5) |
 | `… persist` | Zustand `persist` middleware | reactive + `localStorage` sync | rune module + `localStorage` sync | signal service + `localStorage` sync | holder keyed by **persistent session cookie**, or DB-backed (§5) |
-| `… sync: url` | `useSearchParams` (typed) | Router `route.query` + `replace` | `$page.url.searchParams` + `goto` | `ActivatedRoute.queryParams` + `navigate` | **`handle_params/3` + `push_patch`** (idiomatic) |
+| `… persist: url` | `useSearchParams` (typed) | Router `route.query` + `replace` | `$page.url.searchParams` + `goto` | `ActivatedRoute.queryParams` + `navigate` | **`handle_params/3` + `push_patch`** (idiomatic) |
 
 ### 4.2 Surface form — bare vs dotted
 
@@ -302,7 +321,7 @@ out. LiveView *does* have an answer for each tier — it just forces the questio
 *which lifetime you mean*, because it has no client singleton (each LiveView is a
 process, and `push_navigate` destroys `socket.assigns`).
 
-### 5.1 `sync: url` — the primary, idiomatic path
+### 5.1 `persist: url` — the primary, idiomatic path
 
 For serializable view state (filters, pagination, selection ids, current tab) —
 which is the overwhelming common case — the idiomatic LiveView lowering is the
@@ -321,8 +340,8 @@ end
 This survives navigation natively (the state is in the URL, not a doomed
 process), is deep-linkable, needs zero added runtime, and re-derives the view on
 every change — LiveView as designed. It is *better* than an SPA singleton for
-view state, and it maps exactly to the `sync: url` tier on the SPA frontends.
-**Recommendation: ship `sync: url` first on LiveView; it covers the motivating
+view state, and it maps exactly to the `persist: url` tier on the SPA frontends.
+**Recommendation: ship `persist: url` first on LiveView; it covers the motivating
 use cases.**
 
 ### 5.2 In-memory tier — ETS+TTL (preferred) or a session process
@@ -386,7 +405,7 @@ delegated to the construct that already owns it. Identity/config (current_user,
 locale, theme) is `live_session` + `on_mount` + session — auth/i18n's job, not
 `store`'s.
 
-**LiveView recommendation:** ship `sync: url` first (idiomatic, no infra); gate
+**LiveView recommendation:** ship `persist: url` first (idiomatic, no infra); gate
 the in-memory tier (ETS+TTL) behind a concrete `framework: liveview` example that
 actually needs non-serializable session-lived state; route shared-live to
 `channel`.
@@ -442,7 +461,7 @@ example needing enforced client-side transition legality.
 | Colon = ownership marker | **Reframed** — dotted `store.field` vs bare `state` field, via the existing scope provider |
 | `_` wildcard transition | **Deferred** with `flow` |
 | Flat over nested | **Preserved** — `ui` members are flat; stores shared by name |
-| Progressive commitment | **Preserved & sharpened** — the lifetime ladder: `state` → `store` → `store persist` → `store sync:url` |
+| Progressive commitment | **Preserved & sharpened** — the lifetime ladder: `state` → `store` → `store persist: local` → `store persist: url` |
 | Async via `*_SUCCESS`/`*_ERROR` | **Rejected for now** — TanStack Query owns async lifecycle |
 
 ---
@@ -452,10 +471,10 @@ example needing enforced client-side transition legality.
 - **`persist: session` vs `persist: local`.** `sessionStorage` (per-tab, dies on
   tab close) vs `localStorage` (cross-tab, persistent) — both are admissible
   modifiers; v0 could ship only `local` and add `session` later.
-- **URL serialisation limits.** `sync: url` carries small serializable scalars
-  only; the validator rejects non-serializable fields under `sync: url`
+- **URL serialisation limits.** `persist: url` carries small serializable scalars
+  only; the validator rejects non-serializable fields under `persist: url`
   (`loom.store-field-not-url-serializable`) with a hint toward `persist`/in-memory.
-- **LiveView in-memory tier.** Gated behind a real example (§5.2); `sync: url`
+- **LiveView in-memory tier.** Gated behind a real example (§5.2); `persist: url`
   ships first.
 - **SSR target.** A future `nextjs-frontend` needs the per-request-provider
   lowering of the in-memory tier (§4.4).
@@ -473,11 +492,11 @@ not by which library it maps to but by **lifetime**. The single keyword worth
 adding is **`store`** — the page-local `state {}` block lifted to `ui` scope, an
 in-memory shared reactive container by default (Zustand on React, native
 reactivity elsewhere), with two opt-in modifiers that extend its lifetime:
-`persist` (survives reload) and `sync: url` (survives reload + shareable). The
+`persist` (survives reload) and `persist: url` (survives reload + shareable). The
 distinguishing property over `state` is **surviving navigation**, not surviving
 reload. Every tier lowers through the existing `WalkerTarget` seam to each
 frontend's idiom — and LiveView, far from being rejected, is *first-class* on the
-`sync: url` tier (`handle_params/3`) and served by an ETS/session-holder on the
+`persist: url` tier (`handle_params/3`) and served by an ETS/session-holder on the
 in-memory tier, with shared-live state delegated to the existing `channel`
 construct. Cost: one grammar production, one optional modifier, one IR node — no
 violation of Loom's server-first, framework-neutral, domain-logic-free frontend
