@@ -35,8 +35,15 @@ import type {
 import { snake } from "../../../util/naming.js";
 
 export interface WireSerializeResult {
-  /** The `serialize/1` function definition (module-indented). */
+  /** The `serialize/1` function definition (module-indented) — an untyped
+   *  `defp serialize(record)` head, used by the single-aggregate REST/ES
+   *  controllers. */
   serialize: string;
+  /** Just the `%{ … }` wire-map body (indented for a function body), for a
+   *  caller that needs its own function head — e.g. the ViewsController, which
+   *  dispatches per aggregate with a struct-typed head
+   *  (`defp serialize(%Agg{} = record)`). */
+  body: string;
   /** Nested `serialize_<part|vo>/1` private helper defs, deduped by name,
    *  in completion order.  Empty when the wire shape references no contained
    *  entities / value objects. */
@@ -132,6 +139,7 @@ export function renderWireSerialize(agg: AggregateIR, ctx: BoundedContextIR): Wi
     if (shape) buildHelper(name, shape);
   }
 
-  const serialize = `  defp serialize(record) do\n${renderMap(wireShape, "    ")}\n  end`;
-  return { serialize, helpers: [...helpers.values()] };
+  const body = renderMap(wireShape, "    ");
+  const serialize = `  defp serialize(record) do\n${body}\n  end`;
+  return { serialize, body, helpers: [...helpers.values()] };
 }

@@ -82,6 +82,10 @@ describe("phoenix (ash) — ViewsController agrees with view run/1 return shape"
     expect(shorthand).not.toContain("{:ok,");
     expect(fullForm).toContain("Repo.all()");
     expect(fullForm).not.toContain("{:ok,");
+    // Full-form binds project under their declared camelCase name (an atom map
+    // key Jason encodes verbatim — `:orderId` → "orderId"), the canonical wire.
+    expect(fullForm).toContain("orderId: record.id");
+    expect(fullForm).not.toContain("order_id:");
   });
 
   it("controller binds run/1 directly — no {:ok, records} tuple match (CaseClauseError)", async () => {
@@ -100,9 +104,12 @@ describe("phoenix (ash) — ViewsController agrees with view run/1 return shape"
     // Both actions delegate row projection to the shared `serialize/1` helper.
     expect(action(ctrl, "active_orders")).toContain("Enum.map(&serialize/1)");
     expect(action(ctrl, "order_summary")).toContain("Enum.map(&serialize/1)");
-    // serialize/1 strips a struct (shorthand view) to a plain map via
-    // Map.from_struct; a plain map (full-form view) passes straight through.
-    expect(ctrl).toContain("Map.from_struct()");
+    // serialize/1 projects a struct (shorthand view) through the aggregate's
+    // wireShape — camelCase keys (`customerId`), no `Map.from_struct` snake dump
+    // / timestamp leak; a plain map (full-form view) passes straight through.
+    expect(ctrl).toContain("defp serialize(%Api.Sales.Order{} = record) do");
+    expect(ctrl).toContain('"customerId" => record.customer_id');
+    expect(ctrl).not.toContain("Map.from_struct()");
     expect(ctrl).toContain("defp serialize(record) when is_map(record), do: record");
   });
 });

@@ -462,7 +462,7 @@ pairs, and the 403 runtime-authorization target).
   `renderWireSerialize(agg, ctx)` — the folded struct's fields are exactly
   `snake(wireShape.name)`, so the projection lines up. Gated to skip ref-collection
   ES aggregates (the `__ref_ids/1` Ecto-assoc helper doesn't fit an in-memory fold).
-- **Document-shaped aggregate REST controller — FIXED (this branch):** the doc
+- **Document-shaped aggregate REST controller — FIXED (#1636):** the doc
   `serialize/1` was a bare `Map.merge(%{id: record.id}, record.data || %{})` that
   shipped the stored `data` jsonb's snake keys (`item_count`). Replaced with the
   wireShape projection (`renderDocSerialize(agg)`): each stored field keyed by its
@@ -472,13 +472,22 @@ pairs, and the 403 runtime-authorization target).
   carries the STRING-keyed jsonb map, so the projection first normalises `data`
   keys to strings (`Map.new(…, to_string(k))`) — the create response now matches
   the read response (`"itemCount":3`, both verified on real Postgres).
-- **Still open — view / audit / workflow-instance / context serialize sites:** these
-  share a single `serialize/1` across records that are NOT aggregates (a view row, an
-  audit before/after snapshot, a workflow instance), so `renderWireSerialize`
-  (aggregate-`wireShape` driven) doesn't apply. They need either a per-record
-  projection or a **generic camelize helper** — camelize map keys, pass
-  `DateTime`/`Decimal` through, drop Ecto `__meta__`/`inserted_at`/`updated_at`.
-  Lower traffic than the REST paths above; tracked here for a follow-up.
+- **View serialize (both forms) — FIXED (this branch):** the `ViewsController`
+  `serialize/1` dumped shorthand aggregate structs via `Map.from_struct` (snake keys
+  + leaked `inserted_at`/`updated_at`), and full-form views projected their bind map
+  keyed by `snake(bind.name)` (a multi-word bind shipped `project_id`). Now:
+  shorthand views dispatch per aggregate through `renderWireSerialize` (a
+  struct-typed `serialize(%Agg{})` clause reusing the REST serializer + its nested
+  helpers, deduped across aggregates, with `__ref_ids/1` emitted when needed);
+  full-form views project under the declared camelCase name (`:projectId`, matching
+  the already-correct workflow-sourced view projection). Both forms boot-verified on
+  real Postgres — `customerId`/`orderId` camelCase, no timestamp leak.
+- **Still open — audit + workflow-instance serialize sites:** the audit before/after
+  snapshot (`wireSnapshot`, internal jsonb — not a wire response) and the
+  `WorkflowsController` result `serialize/1` (heterogeneous non-aggregate result
+  shapes — a saga instance or a produced value) still `Map.from_struct`. Lowest
+  traffic / least wire-visible of the set; need a per-record projection or a generic
+  camelize helper. Tracked for a follow-up.
 - **Document INBOUND camelCase — FIXED (this branch, §15-analog, boot-found):** the
   document schemaless changeset casts snake `@all_fields` but never ran the §15
   `__normalize_keys` camelCase→snake pass, so a canonical camelCase create
