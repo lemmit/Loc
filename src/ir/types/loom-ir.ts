@@ -585,6 +585,14 @@ export interface AggregateIR {
    * `abstract aggregate` base — never instantiated, no repository, emits no
    * table of its own.  Omitted (≡ false) for ordinary/concrete aggregates. */
   isAbstract?: boolean;
+  /** Tenancy header flag (multi-tenancy Phase 1a).  `true` for an
+   * `aggregate X crossTenant { … }` — shared reference data that opts out
+   * of the tenant filter under a `tenancy by` system.  Omitted (≡ false)
+   * when not declared.  The aggregate's tenancy *stance* (owned / cross /
+   * unmarked / registry) is classified on demand by the phase-⑦ tenancy
+   * checks from this flag + capabilities + `SystemIR.tenancy` — never
+   * stamped here (derive-don't-stamp). */
+  crossTenant?: boolean;
   /** Name of the `abstract` base this aggregate `extends`, if any.  Always
    * resolves to an abstract aggregate (enforced by the validator).  Field
    * inheritance into the concrete's `wireShape` is an I2 concern; in I1 this
@@ -1652,6 +1660,13 @@ export interface SystemIR {
    *  `user { ... }` block (validator enforces).  Drives the generated
    *  OIDC verifier + `/auth/*` handshake on opted-in deployables. */
   auth?: AuthIR;
+  /** Optional system-wide tenancy declaration (multi-tenancy Phase 1a).
+   *  Populated when the source declares `tenancy by user.<claim> of
+   *  <Registry>` at system scope.  At most one per system (validator
+   *  enforces).  Claim-exists / registry-exists / stance checks are the
+   *  phase-④/⑦ tenancy validators' job — this carries the declared
+   *  facts only. */
+  tenancy?: TenancyIR;
   /** Optional system-wide visual-identity tokens.  Populated when the
    *  source declares a `theme { ... }` block at system scope.  Each
    *  React deployable consumes the same ThemeIR; the platform's
@@ -1855,6 +1870,20 @@ export interface AuthIR {
    *  per-`requires` opt-in; `denyByDefault` forces every reachable
    *  command on an `auth: required` deployable to declare a gate. */
   enforcement: "denyByDefault" | "opt";
+}
+
+/** System-level tenancy declaration (multi-tenancy Phase 1a —
+ *  docs/plans/multi-tenancy-implementation.md).  Lowered from
+ *  `tenancy by user.<claimField> of <registryName>`: `claimField` names
+ *  the `user { … }` claim that partitions the data; `registryName` the
+ *  aggregate acting as the tenant registry.  Both are plain names here —
+ *  existence/singularity verification is the tenancy validators' job
+ *  (slice 1a.3), and an aggregate's tenancy *stance* is derived on
+ *  demand from `crossTenant` + capabilities (derive-don't-stamp), never
+ *  stored on the IR. */
+export interface TenancyIR {
+  claimField: string;
+  registryName: string;
 }
 
 /** End-to-end test that targets a running deployable. */

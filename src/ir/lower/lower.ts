@@ -78,6 +78,7 @@ import {
   isStorage,
   isSubdomain,
   isSystem,
+  isTenancyDecl,
   isTestBlock,
   isTestCase,
   isTestE2E,
@@ -128,6 +129,7 @@ import type {
   StorageKind,
   SubdomainIR,
   SystemIR,
+  TenancyIR,
   TestCaseIR,
   TestE2EIR,
   TestIR,
@@ -393,6 +395,7 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
   let user: UserIR | undefined;
   let theme: ThemeIR | undefined;
   let auth: AuthIR | undefined;
+  let tenancy: TenancyIR | undefined;
   for (const m of members) {
     if (isUserBlock(m)) {
       user = {
@@ -409,6 +412,12 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
       // system (validator enforces; last wins if the parser accepts
       // more).  Provider-preset resolution lives in `lowerAuth`.
       auth = lowerAuth(m);
+    } else if (isTenancyDecl(m)) {
+      // System-level tenancy declaration (multi-tenancy Phase 1a).  At
+      // most one per system (validator enforces; last wins if the parser
+      // accepts more).  Claim / registry are plain names here — the
+      // tenancy validators (slice 1a.3) verify they exist.
+      tenancy = { claimField: m.claim, registryName: m.registry };
     } else if (isThemeBlock(m)) {
       // Theme props are name/value pairs; we lower into a typed
       // partial.  Validation (known names, hex colours, radius
@@ -580,6 +589,7 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
     e2eTests,
     user,
     auth,
+    tenancy,
     theme,
     uis,
     apis,
@@ -1240,6 +1250,7 @@ function lowerAggregate(
     savingShape: (agg.shape as import("../types/loom-ir.js").SavingShape | undefined) ?? undefined,
     appliers: appliers.length > 0 ? appliers : undefined,
     isAbstract: agg.isAbstract ? true : undefined,
+    crossTenant: agg.crossTenant ? true : undefined,
     extendsAggregate: agg.superType?.ref?.name ?? agg.superType?.$refText ?? undefined,
     inheritanceUsing:
       (agg.inheritanceUsing as import("../types/loom-ir.js").InheritanceLayout | undefined) ??
