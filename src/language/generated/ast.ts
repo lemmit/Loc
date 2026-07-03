@@ -295,6 +295,7 @@ export type DddKeywordNames =
     | "ttl"
     | "type"
     | "ui"
+    | "unique"
     | "urlStyle"
     | "use"
     | "user"
@@ -386,7 +387,7 @@ export function isAggregate(item: unknown): item is Aggregate {
     return reflection.isInstance(item, Aggregate.$type);
 }
 
-export type AggregateMember = Apply | Containment | Create | DerivedProp | Destroy | EntityPart | FilterDecl | FunctionDecl | ImplementsDecl | Invariant | Operation | Property | StampDecl | TestBlock;
+export type AggregateMember = Apply | Containment | Create | DerivedProp | Destroy | EntityPart | FilterDecl | FunctionDecl | ImplementsDecl | Invariant | Operation | Property | StampDecl | TestBlock | Unique;
 
 export const AggregateMember = {
     $type: 'AggregateMember'
@@ -3633,6 +3634,21 @@ export function isUnaryExpr(item: unknown): item is UnaryExpr {
     return reflection.isInstance(item, UnaryExpr.$type);
 }
 
+export interface Unique extends langium.AstNode {
+    readonly $container: Aggregate;
+    readonly $type: 'Unique';
+    columns: Array<LooseName>;
+}
+
+export const Unique = {
+    $type: 'Unique',
+    columns: 'columns'
+} as const;
+
+export function isUnique(item: unknown): item is Unique {
+    return reflection.isInstance(item, Unique.$type);
+}
+
 export interface UserBlock extends langium.AstNode {
     readonly $container: Model | System;
     readonly $type: 'UserBlock';
@@ -4030,6 +4046,7 @@ export type DddAstType = {
     UiParamBinding: UiParamBinding
     UiSugarBinding: UiSugarBinding
     UnaryExpr: UnaryExpr
+    Unique: Unique
     UserBlock: UserBlock
     UserField: UserField
     ValueObject: ValueObject
@@ -6718,6 +6735,16 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 }
             },
             superTypes: [Expression.$type]
+        },
+        Unique: {
+            name: Unique.$type,
+            properties: {
+                columns: {
+                    name: Unique.columns,
+                    defaultValue: []
+                }
+            },
+            superTypes: [AggregateMember.$type]
         },
         UserBlock: {
             name: UserBlock.$type,

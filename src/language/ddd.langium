@@ -948,7 +948,7 @@ MacroArgValue:
     | {infer MacroArgRefList} '[' (refs+=ID (',' refs+=ID)*)? ']';
 
 AggregateMember:
-    Containment | DerivedProp | Invariant | FunctionDecl | Operation | Create | Destroy | EntityPart | TestBlock | Property
+    Containment | DerivedProp | Invariant | Unique | FunctionDecl | Operation | Create | Destroy | EntityPart | TestBlock | Property
     | FilterDecl | StampDecl | ImplementsDecl | Apply;
 
 // ---- capability source surface ----------------------------------
@@ -1504,6 +1504,17 @@ DerivedProp:
 // uniqueness checks, internal-only consistency rules).
 Invariant:
     (serverOnly?='private')? 'invariant' expr=Expression ('when' guard=Expression)?;
+
+// A uniqueness invariant (uniqueness-and-indexes.md, D-UNIQUE-DOMAIN).
+// `unique (a, b)` declares a natural-key / identity rule — no two rows may
+// share the listed tuple.  It is a set-level invariant (it structurally
+// cannot run in the per-instance `AssertInvariants()` floor), so the
+// compiler DERIVES its enforcement: a DB unique index (partial under
+// `softDeletable`) plus a per-backend 23505 → 409 conflict mapping.  Columns
+// are bare aggregate field names (flat list, not cross-refs — the validator
+// resolves them against the aggregate's fields with a did-you-mean hint).
+Unique:
+    'unique' '(' columns+=LooseName (',' columns+=LooseName)* ')';
 
 // A pure helper over its parameters (domain-services.md).  Two body forms:
 //   `= Expression`        — expression form; SQL-inlinable like a `criterion`.

@@ -133,6 +133,26 @@ export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
             source: `${ctx.name}/${agg.name}`,
           });
         }
+
+        // Tenant-scope lint (uniqueness-and-indexes.md §5): a `unique (...)`
+        // on a tenant-owned aggregate that omits the tenant discriminator
+        // (`tenantId`) is a global unique — it blocks legitimate cross-tenant
+        // duplicates.  Almost always the author meant `unique (tenantId, …)`.
+        if (stance === "tenantOwned") {
+          for (const uk of agg.uniqueKeys ?? []) {
+            if (!uk.columns.includes("tenantId")) {
+              diags.push({
+                severity: "warning",
+                code: "loom.unique-missing-tenant-scope",
+                message:
+                  `\`${uk.source}\` on tenant-owned aggregate '${agg.name}' omits the tenant ` +
+                  `discriminator — this is a GLOBAL unique across all tenants. Did you mean ` +
+                  `\`unique (tenantId, ${uk.columns.join(", ")})\`?`,
+                source: `${ctx.name}/${agg.name}`,
+              });
+            }
+          }
+        }
       }
     }
   }

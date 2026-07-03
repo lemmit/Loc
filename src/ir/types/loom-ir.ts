@@ -320,6 +320,18 @@ export interface InvariantIR {
   scope?: "server-only";
 }
 
+/** A uniqueness invariant declared via `unique (a, b)` on the aggregate
+ *  (uniqueness-and-indexes.md, D-UNIQUE-DOMAIN).  A set-level natural-key
+ *  rule — no two rows may share the `columns` tuple.  The compiler DERIVES
+ *  its enforcement (never runs it in the per-instance invariant floor): a DB
+ *  unique index (partial under `softDeletable`) named deterministically so a
+ *  23505 violation can be mapped back to a field → 409.  `columns` are
+ *  aggregate field names, validated to exist. */
+export interface UniqueKeyIR {
+  columns: string[];
+  source: string;
+}
+
 /** A pure helper over its parameters (domain-services.md).  The body is a
  *  variant — NOT a replacement — so the inlinable expression path is
  *  untouched:
@@ -469,6 +481,12 @@ export interface AggregateIR {
   contains: ContainmentIR[];
   derived: DerivedIR[];
   invariants: InvariantIR[];
+  /** Uniqueness invariants declared via `unique (...)`
+   * (uniqueness-and-indexes.md).  Populated by lowering; omitted when the
+   * aggregate declares none.  The migrations builder derives a DB unique
+   * index (partial under `softDeletable`) from each entry; backends derive
+   * the constraint-name → field map for the 23505 → 409 conflict mapping. */
+  uniqueKeys?: UniqueKeyIR[];
   functions: FunctionIR[];
   /** Mutate-kind actions only (the legacy `operation` keyword).
    * `create` / `destroy` actions are intentionally NOT here — they live

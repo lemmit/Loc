@@ -58,6 +58,14 @@ export interface IndexShape {
   table: string;
   columns: string[];
   unique: boolean;
+  /** Partial-index predicate — the raw Postgres boolean expression that
+   *  follows `WHERE` (`is_deleted = false`).  Set on a `unique (...)` index
+   *  derived for a `softDeletable` aggregate so re-creating a row whose
+   *  predecessor was soft-deleted is allowed (uniqueness-and-indexes.md §7).
+   *  Absent on ordinary FK / performance indexes — they are unconditional.
+   *  The SQL renderer (`sql-pg.ts`) appends `WHERE <predicate>`; the Ecto
+   *  emitter passes it as the `where:` index option. */
+  predicate?: string;
 }
 
 export interface TableShape {

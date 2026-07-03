@@ -20,6 +20,7 @@ import type {
   Parameter,
   Property,
   Statement,
+  Unique,
 } from "../../language/generated/ast.js";
 import {
   isContainment,
@@ -47,6 +48,7 @@ import type {
   ParamIR,
   StmtIR,
   TypeIR,
+  UniqueKeyIR,
   WorkflowStmtIR,
 } from "../types/loom-ir.js";
 import { mutatedParamNames, type SaveResolver } from "../util/domain-service-tier.js";
@@ -174,6 +176,14 @@ export function lowerInvariant(i: Invariant, env: Env): InvariantIR {
     // domain-layer `AssertInvariants()` floor still enforces it.
     scope: i.serverOnly ? "server-only" : undefined,
   };
+}
+
+/** Lower a `unique (a, b)` declaration to its columns + source snippet.
+ *  Pure structural copy — the enforcement (DB unique index + 23505 → 409
+ *  mapping) is derived downstream (migrations builder + backends), never
+ *  here (uniqueness-and-indexes.md, D-UNIQUE-DOMAIN). */
+export function lowerUnique(u: Unique): UniqueKeyIR {
+  return { columns: [...u.columns], source: `unique (${u.columns.join(", ")})` };
 }
 
 /** Synthesise an InvariantIR from an inline `field: T check <expr>`
