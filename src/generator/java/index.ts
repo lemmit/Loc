@@ -623,6 +623,9 @@ function emitProjectFromContexts(
   const spaOutDir = system?.deployable.uiFramework === "svelte" ? "build" : "dist";
   out.set("Dockerfile", renderDockerfile({ embeddedSpa: hasEmbeddedSpa, spaOutDir }));
   out.set(".dockerignore", renderDockerignore({ embeddedSpa: hasEmbeddedSpa, spaOutDir }));
+  // Proxy-CA escape hatch (see the Dockerfile's COPY certs/) — mirrors
+  // every other backend so the dir always exists for the docker build.
+  out.set("certs/.gitkeep", "");
 
   // Fullstack: the same-origin SPA host (resource handler + index.html
   // fallback) and the embedded React project under ClientApp/.

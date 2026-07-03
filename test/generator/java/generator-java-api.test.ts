@@ -106,6 +106,37 @@ describe("java generator — DTO records (S5)", () => {
     expect(dto).toContain("value.lineItems().stream().map(LineItemResponse::from).toList()");
   });
 
+  it("response record excludes internal + secret fields (forApiRead parity)", async () => {
+    // softDeletable's `isDeleted` is `internal`, `apiKey` is `secret` — no
+    // backend serves either on a read; the record must decide visibility
+    // exactly like Hono's zod response / .NET's DTO (caught live by
+    // conformance-parity as `SquadResponse: only-java=[isDeleted]`).
+    const src = `
+system S {
+  subdomain Core {
+    context C {
+      aggregate Squad with crudish, softDeletable {
+        name: string
+        apiKey: string secret
+      }
+      repository Squads for Squad { }
+    }
+  }
+  api A from Core
+  storage pg { type: postgres }
+  resource cs { for: C, kind: state, use: pg }
+  deployable api { platform: java contexts: [C] serves: A dataSources: [cs] port: 8080 }
+}`;
+    const out = await generateSystemFiles(src);
+    const key = [...out.keys()].find((k) => k.endsWith("SquadResponse.java"))!;
+    const dto = out.get(key)!;
+    expect(dto).not.toContain("isDeleted");
+    expect(dto).not.toContain("apiKey");
+    // managed (deletedAt) and declared fields stay on the wire.
+    expect(dto).toContain("deletedAt");
+    expect(dto).toContain("String name");
+  });
+
   it("create request takes wire types; the service parses them to domain values", async () => {
     const files_ = await files();
     const req = files_.get(`${ROOT}/features/orders/CreateOrderRequest.java`)!;

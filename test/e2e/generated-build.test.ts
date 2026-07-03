@@ -211,6 +211,37 @@ describe.skipIf(!ENABLED)(
       }
     }, 300_000);
 
+    // The "tech showcase" system (`examples/showcase.ddd`) exercises the whole
+    // language surface; its `hono_api` deployable is the reference backend.
+    // Mirrors the dotnet gate's showcase cell — this is what catches a
+    // lowering-/renderer-level break (e.g. the union-find variant-match) that
+    // the narrower fixtures never exercise (S3 of
+    // docs/audits/generated-code-ddd-review-2026-07.md).
+    it("system showcase (hono) — multi-context backend type-checks + bundles", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-showcase-"));
+      try {
+        execSync(`node ${cli} generate system examples/showcase.ddd -o ${outDir}`, {
+          stdio: "inherit",
+          cwd: repoRoot,
+        });
+        const proj = path.join(outDir, "hono_api");
+        execSync(`npm install --silent --no-audit --no-fund`, {
+          cwd: proj,
+          stdio: "inherit",
+          timeout: 180_000,
+        });
+        execSync(`npx tsc --noEmit`, { cwd: proj, stdio: "inherit", timeout: 120_000 });
+        execSync(`npm run build`, { cwd: proj, stdio: "inherit", timeout: 60_000 });
+        expect(fs.existsSync(path.join(proj, "dist", "index.js"))).toBe(true);
+      } finally {
+        try {
+          fs.rmSync(outDir, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 300_000);
+
     it("system OIDC auth (verifier + /auth/* handshake) — generated project type-checks + bundles", () => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-oidc-"));
       try {

@@ -1212,6 +1212,13 @@ function wireValue(
   if (t.kind === "primitive" && t.name === "datetime") {
     return optional ? `(None if ${expr} is None else iso(${expr}))` : `iso(${expr})`;
   }
+  if (t.kind === "primitive" && t.name === "money") {
+    // Money crosses the wire as its canonical decimal STRING on every
+    // backend (Hono `.toString()`, .NET/Java `ToString`, Phoenix
+    // `{type: string, format: decimal}`); a bare Decimal would JSON-encode
+    // as a number and diverge both the payload and the OpenAPI type.
+    return optional ? `(None if ${expr} is None else str(${expr}))` : `str(${expr})`;
+  }
   if (t.kind === "valueobject") {
     const vo = ctx.valueObjects.find((v) => v.name === t.name);
     if (!vo) return expr;

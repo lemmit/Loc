@@ -92,6 +92,34 @@ system Helpdesk {
     expect(new Set(hostPorts).size).toBe(hostPorts.length);
   });
 
+  it("injects a declared literal audience into access tokens via a protocol mapper", async () => {
+    // The generated verifiers VALIDATE the declared `audience:` (jose
+    // `jwtVerify({ audience })`, .NET `ValidateAudience`) — Keycloak's
+    // default `aud` is `account`, so without a mapper every token from the
+    // bundled dev realm 401s (caught live by the parity 403 test).
+    const files = await filesFor(
+      system(
+        `auth { provider: keycloak  oidc { issuer: env("OIDC_ISSUER")  clientId: env("OIDC_CLIENT_ID")  audience: "helpdesk-api" } }`,
+      ),
+    );
+    const realm = JSON.parse(files.get("keycloak/realm.json")!) as {
+      clients: { protocolMappers?: { protocolMapper: string; config: Record<string, string> }[] }[];
+    };
+    const mappers = realm.clients[0]!.protocolMappers ?? [];
+    expect(mappers).toHaveLength(1);
+    expect(mappers[0]!.protocolMapper).toBe("oidc-audience-mapper");
+    expect(mappers[0]!.config["included.custom.audience"]).toBe("helpdesk-api");
+    expect(mappers[0]!.config["access.token.claim"]).toBe("true");
+  });
+
+  it("emits no audience mapper when the auth block declares none", async () => {
+    const files = await filesFor(system(KEYCLOAK));
+    const realm = JSON.parse(files.get("keycloak/realm.json")!) as {
+      clients: { protocolMappers?: unknown[] }[];
+    };
+    expect(realm.clients[0]!.protocolMappers).toBeUndefined();
+  });
+
   it("does not bundle Keycloak for a hosted provider (google)", async () => {
     const files = await filesFor(
       system(`auth { provider: google  oidc { clientId: env("OIDC_CLIENT_ID") } }`),

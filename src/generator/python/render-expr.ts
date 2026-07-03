@@ -122,6 +122,9 @@ const PY_TARGET: ExprTarget<PyRenderContext> = {
   // No real bound variable in a conditional expression — the binding aliases
   // the scrutinee dict (the subject text).
   bindingRefText: (_binding, subject) => subject,
+  // Union-find repos return `Agg | None` (payloads.md §Union finds); `is not
+  // None` keeps the emit clean under ruff's default E711 gate.
+  absenceCheck: (subject) => `${subject} is not None`,
   list: (elements) => `[${elements.join(", ")}]`,
 };
 

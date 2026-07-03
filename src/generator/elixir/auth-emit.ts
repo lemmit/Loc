@@ -113,7 +113,7 @@ function renderAuthPlug(
   const idKey = actorIdKey(user);
   // OIDC verifier vs dev stub.  The OIDC path additionally needs the JWKS
   // discovery/verification helpers; the dev stub needs none.
-  const verifierSection = auth ? renderOidcVerifier() : renderDevStubVerifier();
+  const verifierSection = auth ? renderOidcVerifier(auth) : renderDevStubVerifier();
   const verifierDoc = auth
     ? "validates the inbound JWT against the issuer's JWKS (D-AUTH-OIDC)"
     : "is a permissive DEV STUB — replace verify_token/1 for production";
@@ -263,14 +263,36 @@ end
 // dev works out of the box (the inverse of the .NET RequireHttps gotcha).
 // ---------------------------------------------------------------------------
 
-function renderOidcVerifier(): string {
+function renderOidcVerifier(auth: AuthIR): string {
+  // The OIDC_ISSUER env override wins; the DECLARED value is the fallback
+  // (12-factor, same contract as every other backend's verifier).
+  // Audience parity: when the auth block declares an `audience:`, the token's
+  // `aud` must carry it — the other four backends validate it, and a verifier
+  // that skips the check accepts tokens the rest of the system rejects.
+  const audCheck = auth.oidc.audience
+    ? `
+
+    aud_ok =
+      case audience() do
+        "" -> true
+        expected -> Map.get(claims, "aud") |> List.wrap() |> Enum.member?(expected)
+      end`
+    : "";
+  const audOkTerm = auth.oidc.audience ? " and aud_ok" : "";
+  const audienceFn = auth.oidc.audience
+    ? `
+  defp audience, do: ${envOrDeclared("OIDC_AUDIENCE", auth.oidc.audience)}
+`
+    : "";
   return `  # ---------------------------------------------------------------------------
   # OIDC token verification (D-AUTH-OIDC).
   # ---------------------------------------------------------------------------
 
   # Trailing-slash-trimmed issuer, read at runtime (NOT a module attribute —
-  # that would bake the empty compile-time env into the release).
-  defp issuer, do: System.get_env("OIDC_ISSUER", "") |> String.trim_trailing("/")
+  # that would bake the empty compile-time env into the release).  The env
+  # override wins; the declared \`issuer:\` is the fallback (12-factor).
+  defp issuer, do: (${envOrDeclared("OIDC_ISSUER", auth.oidc.issuer)}) |> String.trim_trailing("/")
+${audienceFn}
 
   defp verify_token(nil), do: {:error, :no_token}
 
@@ -314,20 +336,28 @@ function renderOidcVerifier(): string {
       case Map.get(claims, "exp") do
         exp when is_integer(exp) -> exp > now
         _ -> false
-      end
+      end${audCheck}
 
-    if iss_ok and exp_ok, do: :ok, else: :error
+    if iss_ok and exp_ok${audOkTerm}, do: :ok, else: :error
   end
 
   # The issuer's JWKS keys, discovered via the OIDC discovery document and
-  # cached in :persistent_term (lazy, no supervised process).  An empty list
-  # on fetch failure → every verify rejects (401), never a 500.
+  # cached in :persistent_term (lazy, no supervised process).  Only a
+  # NON-EMPTY key set is cached: a failed fetch returns [] for this request
+  # (verify rejects with 401, never a 500) and the next request retries —
+  # caching the empty list would poison every later verify with a permanent
+  # 401 (e.g. one request racing the IdP's boot/realm import).
   defp jwks do
     case :persistent_term.get({__MODULE__, :jwks}, nil) do
       nil ->
-        keys = fetch_jwks()
-        :persistent_term.put({__MODULE__, :jwks}, keys)
-        keys
+        case fetch_jwks() do
+          [] ->
+            []
+
+          keys ->
+            :persistent_term.put({__MODULE__, :jwks}, keys)
+            keys
+        end
 
       keys ->
         keys
@@ -430,6 +460,19 @@ function elixirAuthValue(v: AuthValueIR | undefined, fallback = '""'): string {
   return `System.get_env(${JSON.stringify(v.env)}, "")`;
 }
 
+/** `System.get_env(<canonical var>, <declared>)` — the deploy env overrides
+ *  the declared auth value (12-factor; the generated compose repoints
+ *  OIDC_ISSUER / OIDC_CLIENT_ID at the bundled dev Keycloak).  A declared
+ *  env-kind value reading the same var stays a single read; a custom var
+ *  becomes the fallback read. */
+function envOrDeclared(envVar: string, v: AuthValueIR | undefined): string {
+  if (v?.kind === "env" && v.env !== envVar) {
+    return `System.get_env(${JSON.stringify(envVar)}) || System.get_env(${JSON.stringify(v.env)}, "")`;
+  }
+  const fallback = v?.kind === "literal" ? JSON.stringify(v.value) : '""';
+  return `System.get_env(${JSON.stringify(envVar)}, ${fallback})`;
+}
+
 // ---------------------------------------------------------------------------
 // AuthController — GET /auth/me session probe (always), plus the OIDC redirect
 // handshake (/auth/login|callback|logout) when an `auth { oidc }` block is
@@ -463,8 +506,11 @@ end
 `;
   }
 
-  const issuerExpr = elixirAuthValue(auth.oidc.issuer);
-  const clientIdExpr = elixirAuthValue(auth.oidc.clientId);
+  // Env override first (12-factor) — same contract as the verifier's
+  // issuer/0: the generated compose repoints OIDC_ISSUER / OIDC_CLIENT_ID
+  // at the bundled dev Keycloak.
+  const issuerExpr = envOrDeclared("OIDC_ISSUER", auth.oidc.issuer);
+  const clientIdExpr = envOrDeclared("OIDC_CLIENT_ID", auth.oidc.clientId);
   // A public client has no secret: default to the env read (nil when unset) so
   // base_form/1 omits client_secret rather than sending an empty one.
   const clientSecretExpr = auth.oidc.clientSecret

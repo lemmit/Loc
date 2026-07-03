@@ -23,6 +23,8 @@ on:
     branches: [main]
     paths:
       - 'src/generator/dotnet/**'
+      - 'src/generator/_expr/**'
+      - 'src/ir/**'
       - 'src/platform/dotnet.ts'
       - 'src/platform/dotnet/**'
       - 'examples/**'
@@ -33,6 +35,8 @@ on:
   pull_request:
     paths:
       - 'src/generator/dotnet/**'
+      - 'src/generator/_expr/**'
+      - 'src/ir/**'
       - 'src/platform/dotnet.ts'
       - 'src/platform/dotnet/**'
       - 'examples/**'

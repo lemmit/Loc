@@ -685,14 +685,37 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
       // resolve it via `inferExprType` so the variant-arm set is available for
       // exhaustiveness checks and backends never re-resolve.
       const subjectType = subject.kind === "ref" ? subject.type : inferExprType(expr.subject, env);
+      // A subject bound to a repository union find carries the absence
+      // runtime shape (bare aggregate-or-absent), not the tagged wire —
+      // stamp it so backends render a presence check instead of a
+      // discriminator probe (payloads.md §Union finds).  Only lowering
+      // knows the find origin; renderers must never re-derive this.
+      const absenceSubject =
+        subject.kind === "ref" && env.locals.get(subject.name)?.absenceUnion === true;
       return {
         kind: "match",
         subject,
         subjectType,
+        ...(absenceSubject ? { subjectShape: "absence" as const } : {}),
         arms: [],
         variantArms: expr.varArms.map((arm) => {
           const varType = lowerAtom(arm.varType, env);
-          const armEnv = arm.binding ? withLocal(env, arm.binding, "match-binding", varType) : env;
+          // Absence subject: the binding is an alias of the subject itself,
+          // narrowed to the matched variant — lower references to it as a
+          // subject ref typed at `varType` (Env.refAliases), so backends see
+          // an ordinary local read (no tagged-carrier binding exists at
+          // runtime).  Tagged subject: the ordinary match-binding local.
+          const armEnv = !arm.binding
+            ? env
+            : absenceSubject && subject.kind === "ref"
+              ? {
+                  ...env,
+                  refAliases: new Map([
+                    ...(env.refAliases ?? []),
+                    [arm.binding, { ...subject, type: varType }],
+                  ]),
+                }
+              : withLocal(env, arm.binding, "match-binding", varType);
           return {
             varType,
             binding: arm.binding,
@@ -962,6 +985,13 @@ function resolveNameRef(name: string, env: Env): ExprIR {
       type: { kind: "entity", name: RESOURCE_HANDLE_SHAPE },
     };
   }
+  // Absence-match binding alias (Env.refAliases) — the binding is the
+  // narrowed subject itself, so the ref lowers to the aliased subject ref.
+  // Checked before locals so the binding shadows a same-named outer local
+  // (ordinary binding scoping), after `currentUser`/resources so those stay
+  // unshadowable.
+  const alias = env.refAliases?.get(name);
+  if (alias) return alias;
   const local = env.locals.get(name);
   if (local) {
     const refKind = local.kind;
@@ -1304,6 +1334,11 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
     // Criterion-parameter substitution — type of the bound argument.
     const arg = env.criterionArgs?.get(expr.name);
     if (arg) return "type" in arg && arg.type ? arg.type : { kind: "primitive", name: "string" };
+    // Absence-match binding alias — type of the narrowed subject ref.
+    const alias = env.refAliases?.get(expr.name);
+    if (alias) {
+      return "type" in alias && alias.type ? alias.type : { kind: "primitive", name: "string" };
+    }
     // Parameterless criterion reference types as a boolean predicate.
     const crit = findCriterionInEnv(env, expr.name);
     if (crit && crit.params.length === 0) return { kind: "primitive", name: "bool" };

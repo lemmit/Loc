@@ -36,8 +36,23 @@ describe(".NET workflow instance read endpoints", () => {
     const dto = files.get("Application/Workflows/OrderFulfillmentInstanceResponse.cs") ?? "";
     expect(dto).toContain("public sealed record OrderFulfillmentInstanceResponse(");
     // Correlation id crosses as Guid (the .NET wire-id divergence); attempts int.
-    expect(dto).toMatch(/Guid OrderId/);
-    expect(dto).toMatch(/int Attempts/);
+    // Non-nullable components carry `[property: Required]` so the OpenAPI
+    // required-set matches Hono/Python (which require every non-optional
+    // instance field) — see dto-mapping.ts.
+    expect(dto).toMatch(/\[property: Required\] Guid OrderId/);
+    expect(dto).toMatch(/\[property: Required\] int Attempts/);
+    expect(dto).toContain("using System.ComponentModel.DataAnnotations;");
+  });
+
+  it("registers the named <Wf>InstanceListResponse wrapper pair", async () => {
+    // Swashbuckle inlines `IEnumerable<T>`; the document filter promotes the
+    // list response to the named carrier the other backends emit
+    // (`<Wf>InstanceListResponse` — Hono z.array().openapi(), Python RootModel).
+    const files = await generate("test/fixtures/dispatch-sample.ddd");
+    const filter = files.get("Api/ListResponseWrapperFilter.cs") ?? "";
+    expect(filter).toContain(
+      '("OrderFulfillmentInstanceResponse", "OrderFulfillmentInstanceListResponse"),',
+    );
   });
 
   it("emits a controller with GET list + GET by-id over the saga DbSet", async () => {

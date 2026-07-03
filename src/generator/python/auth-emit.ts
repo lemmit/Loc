@@ -341,8 +341,17 @@ function renderBuildUserKwargs(user: UserIR, auth: AuthIR): string {
 }
 
 function renderOidcModule(user: UserIR, auth: AuthIR): string {
-  const issuerExpr = pyAuthValue(auth.oidc.issuer);
-  const clientIdExpr = pyAuthValue(auth.oidc.clientId);
+  // Env override first (12-factor): the generated compose repoints
+  // OIDC_ISSUER at the bundled dev Keycloak, so a literal issuer must not
+  // be baked un-overridably — with it baked, every token from the bundled
+  // IdP fails `iss` validation (401, caught live by the parity 403 test).
+  // A declared env-kind value reading the same var stays a single read.
+  const pyEnvOverridable = (envVar: string, v: AuthValueIR | undefined): string =>
+    v?.kind === "env" && v.env === envVar
+      ? pyAuthValue(v)
+      : `os.environ.get(${JSON.stringify(envVar)}) or ${pyAuthValue(v)}`;
+  const issuerExpr = pyEnvOverridable("OIDC_ISSUER", auth.oidc.issuer);
+  const clientIdExpr = pyEnvOverridable("OIDC_CLIENT_ID", auth.oidc.clientId);
   // A public client has no secret: default to the env read (None when unset)
   // so the token exchange omits client_secret rather than sending "".
   const clientSecretExpr = auth.oidc.clientSecret
@@ -373,7 +382,7 @@ from app.auth.user import User
 from app.auth.verifier import register_user_verifier
 
 _SCOPES = ${JSON.stringify(scopes)}
-_AUDIENCE = os.environ.get("OIDC_AUDIENCE")
+_AUDIENCE = ${auth.oidc.audience ? pyEnvOverridable("OIDC_AUDIENCE", auth.oidc.audience) : 'os.environ.get("OIDC_AUDIENCE")'}
 
 
 def _issuer() -> str:

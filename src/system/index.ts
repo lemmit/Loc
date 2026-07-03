@@ -529,6 +529,29 @@ function renderKeycloakService(sys: SystemIR): string[] {
  *  it on first boot. */
 function renderKeycloakRealm(sys: SystemIR): string {
   const { realm, clientId } = keycloakConfig(sys);
+  // When the auth block declares a literal `audience:`, the generated
+  // verifiers VALIDATE it (jose `jwtVerify({ audience })`, .NET
+  // `ValidateAudience`, ...) — so the dev realm must mint tokens that
+  // carry it, or every password-grant/redirect token 401s out of the
+  // box (Keycloak's default `aud` is `account`).  An audience protocol
+  // mapper on the client injects the declared value into access tokens.
+  const audience = sys.auth?.oidc.audience;
+  const audienceMappers =
+    audience?.kind === "literal"
+      ? [
+          {
+            name: "loom-declared-audience",
+            protocol: "openid-connect",
+            protocolMapper: "oidc-audience-mapper",
+            consentRequired: false,
+            config: {
+              "included.custom.audience": audience.value,
+              "access.token.claim": "true",
+              "id.token.claim": "false",
+            },
+          },
+        ]
+      : [];
   const doc = {
     realm,
     enabled: true,
@@ -545,6 +568,7 @@ function renderKeycloakRealm(sys: SystemIR): string {
         directAccessGrantsEnabled: true,
         redirectUris: ["http://localhost:*", "http://127.0.0.1:*"],
         webOrigins: ["*"],
+        ...(audienceMappers.length > 0 ? { protocolMappers: audienceMappers } : {}),
       },
     ],
     users: [

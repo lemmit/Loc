@@ -1,4 +1,5 @@
 import { pagedReturn } from "../../ir/stdlib/generics.js";
+import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type {
   DeployableIR,
   EnrichedAggregateIR,
@@ -10,7 +11,8 @@ import { durableEventTypes } from "../../ir/util/channels.js";
 import { effectiveSavingShape, resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
-import { snake } from "../../util/naming.js";
+import { plural, snake } from "../../util/naming.js";
+import { unionJsonSchema } from "../_payload/union-wire.js";
 import { generateReactForContexts } from "../react/index.js";
 import { actorIdAttr, emitPyAuthFiles, renderPyStubUserKwargs } from "./auth-emit.js";
 import {
@@ -251,7 +253,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   if (dispatchFile != null) out.set("app/dispatch.py", dispatchFile);
 
   out.set("app/http/__init__.py", "");
-  out.set("app/http/problem.py", PROBLEM_PY);
+  out.set("app/http/problem.py", renderProblemPy(collectOpUnions([merged])));
   out.set("app/http/wire_models.py", renderPyWireModels(merged));
   const viewsFile = buildPyViewsFile(merged, hasDispatch);
   if (viewsFile != null) out.set("app/http/views_routes.py", viewsFile);
@@ -727,11 +729,50 @@ def iso(dt: datetime) -> str:
     return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
 `;
 
+/** One exception-less op-return union to surface in the OpenAPI spec:
+ *  the POST path it answers on, the component name, and the raw oneOf
+ *  JSON schema (built by `collectOpUnions`). */
+interface PyOpUnion {
+  path: string;
+  name: string;
+  schema: unknown;
+}
+
+/** Operation-return unions across the deployable's contexts — the tagged
+ *  wire union each exception-less op's 200 carries.  The route handler
+ *  already returns the tagged dict; the spec side injects the component +
+ *  200 in `install_openapi` (a pydantic Union response_model would
+ *  register per-variant components no other backend publishes). */
+function collectOpUnions(contexts: readonly EnrichedBoundedContextIR[]): PyOpUnion[] {
+  const seen = new Set<string>();
+  const out: PyOpUnion[] = [];
+  for (const ctx of contexts) {
+    for (const agg of ctx.aggregates) {
+      for (const op of agg.operations) {
+        if (op.visibility !== "public" || op.returnType?.kind !== "union") continue;
+        const name = unionInstanceName(op.returnType.variants);
+        const path = `${API_BASE_PATH}/${snake(plural(agg.name))}/{id}/${snake(op.routeSlug ?? op.name)}`;
+        if (seen.has(`${path}|${name}`)) continue;
+        seen.add(`${path}|${name}`);
+        out.push({ path, name, schema: unionJsonSchema(op.returnType.variants, ctx) });
+      }
+    }
+  }
+  return out;
+}
+
 // RFC 7807 problem responder + exception handlers — DomainError → 400,
 // ForbiddenError → 403, AggregateNotFoundError → 404, and FastAPI's
 // RequestValidationError → 422 with the §3.2 `errors[]` extension
 // (RFC 6901 pointers), matching the other backends' ProblemDetails.
-const PROBLEM_PY = `"""RFC 7807 problem responses + exception handlers.  Auto-generated."""
+function renderProblemPy(opUnions: PyOpUnion[]): string {
+  // JSON literals are valid Python for the value kinds used here (strings,
+  // arrays, objects — no booleans/nulls cross).
+  const responsesDict = JSON.stringify(Object.fromEntries(opUnions.map((u) => [u.path, u.name])));
+  const componentsDict = JSON.stringify(
+    Object.fromEntries(opUnions.map((u) => [u.name, u.schema])),
+  );
+  return `"""RFC 7807 problem responses + exception handlers.  Auto-generated."""
 
 from typing import Any, cast
 
@@ -761,6 +802,12 @@ class ProblemDetails(BaseModel):
     detail: str | None = None
     instance: str | None = None
     errors: list[dict[str, str]] | None = None
+
+
+# Exception-less op-return unions (path → tagged-union component name, and
+# the raw oneOf components) — injected into the spec by install_openapi.
+_OP_UNION_RESPONSES: dict[str, str] = ${responsesDict}
+_OP_UNION_COMPONENTS: dict[str, Any] = ${componentsDict}
 
 
 def install_openapi(app: FastAPI) -> None:
@@ -795,6 +842,23 @@ def install_openapi(app: FastAPI) -> None:
         components = cast(dict[str, Any], schema.get("components", {})).get("schemas", {})
         components.pop("HTTPValidationError", None)
         components.pop("ValidationError", None)
+        # Exception-less operation-return unions: the route handler returns
+        # the tagged dict (no pydantic response_model — a Union model would
+        # register per-variant components no other backend publishes), so the
+        # 200 + the named oneOf component are wired here for parity with
+        # Hono's discriminatedUnion / .NET's Application union DTO.
+        for path, union_name in _OP_UNION_RESPONSES.items():
+            post_op = cast(dict[str, Any], schema.get("paths", {})).get(path, {}).get("post")
+            if isinstance(post_op, dict):
+                cast(dict[str, Any], post_op.setdefault("responses", {}))["200"] = {
+                    "description": "OK",
+                    "content": {
+                        "application/json": {
+                            "schema": {"$ref": "#/components/schemas/" + union_name}
+                        }
+                    },
+                }
+        components.update(_OP_UNION_COMPONENTS)
         app.openapi_schema = schema
         return schema
 
@@ -871,6 +935,7 @@ def install_error_handlers(app: FastAPI) -> None:
         log("error", "internal_error", error=str(err), status=500)
         return problem(request, 500, "Internal Server Error", "An unexpected error occurred.")
 `;
+}
 
 // Shared paged-result carrier (P3b) — the domain-side mirror of the
 // wire `<Arg>Paged` payload, generic over the item type (PEP 695).

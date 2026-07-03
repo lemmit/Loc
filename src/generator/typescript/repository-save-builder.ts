@@ -224,12 +224,29 @@ function projectValueEntries(
   }
   if (t.kind === "primitive") {
     if (t.name === "decimal") {
-      return [{ fieldName, expr: `String(${valueExpr})` }];
+      // An optional decimal is `number | null` on the domain object —
+      // `String(null)` would persist the literal string "null".
+      return [
+        {
+          fieldName,
+          expr: optional
+            ? `${valueExpr} === null ? null : String(${valueExpr})`
+            : `String(${valueExpr})`,
+        },
+      ];
     }
     if (t.name === "money") {
       // Persist as a precise-decimal string — decimal.js's `.toString()`
-      // returns the canonical form `numeric(19, 4)` accepts.
-      return [{ fieldName, expr: `${valueExpr}.toString()` }];
+      // returns the canonical form `numeric(19, 4)` accepts.  An optional
+      // money is `Decimal | null`, so guard the deref (tsc-strict).
+      return [
+        {
+          fieldName,
+          expr: optional
+            ? `${valueExpr} === null ? null : ${valueExpr}.toString()`
+            : `${valueExpr}.toString()`,
+        },
+      ];
     }
     return [{ fieldName, expr: valueExpr }];
   }

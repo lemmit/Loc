@@ -160,4 +160,21 @@ describe("python repository emission", () => {
     );
     expect(repo).toContain("def _wire_order_line(self, e: OrderLine) -> dict[str, object]:");
   });
+
+  it("to_wire stringifies bare money fields (canonical decimal-string wire)", async () => {
+    // Money crosses as its decimal STRING on every backend (Hono
+    // `.toString()`, .NET/Java `ToString`, Phoenix `string:decimal`); a bare
+    // Decimal would JSON-encode as a number and diverge both the payload and
+    // the OpenAPI property type (caught live by conformance-parity as
+    // `BuildResponse.cost: python=number, others=string`).
+    const files = await build();
+    const repo = files.get("api/app/db/repositories/order_repository.py")!;
+    expect(repo).toContain('"unitBudget": str(root.unit_budget),');
+    // Request side: the wire string re-parses into Decimal for the domain
+    // (the money-typed find param crosses as `str` and converts at the call).
+    const routes = files.get("api/app/http/order_routes.py")!;
+    expect(routes).toContain("unitBudget: str");
+    expect(routes).toContain("async def cheaper_than_orders(limit: str, session: SessionDep)");
+    expect(routes).toContain("await repo.cheaper_than(Decimal(limit))");
+  });
 });

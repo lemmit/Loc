@@ -198,6 +198,9 @@ const ELIXIR_TARGET: ExprTarget<RenderCtx> = {
     return `case ${m.subject} do\n${clauses.join("\n")}\n    end`;
   },
   bindingRefText: (binding) => snake(binding),
+  // Union-find repos yield `record | nil` once the facade's `{:ok, _}`
+  // carrier is unwrapped (payloads.md §Union finds).
+  absenceCheck: (subject) => `${subject} != nil`,
   // List literals are walker-config sugar (e.g. responsive Grid cols); no
   // domain-expression position consumes one today, but keep total with an
   // Elixir-list emit so unexpected uses still compile.

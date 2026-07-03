@@ -263,6 +263,8 @@ const CS_TARGET: ExprTarget<CsRenderContext> = {
     return `${m.subject} switch\n    {\n${arms.join("\n")}\n${tail}\n    }`;
   },
   bindingRefText: (binding) => binding,
+  // Union-find repos return `Agg?` (payloads.md §Union finds).
+  absenceCheck: (subject) => `${subject} is not null`,
   // List literals are walker-config sugar (e.g. responsive Grid cols).  No
   // .NET render context emits one today; keep total with an array initializer
   // fallback so unexpected uses produce valid C#.

@@ -2895,6 +2895,20 @@ export type ExprIR =
       subject?: ExprIR;
       subjectType?: TypeIR;
       /**
+       * Runtime carrier shape of the variant subject.  `"absence"` when the
+       * subject is the result of a repository **union find** — those are
+       * validator-constrained to the absence shape (`Agg or <error>` /
+       * `Agg option`, payloads.md §Union finds) and their runtime value is
+       * the bare aggregate-or-absent (`Project | null` / `Project?` /
+       * `record | nil`), never the tagged wire carrier.  Backends must
+       * render the match as a presence check (success arm on present,
+       * error/`none` arm on absent), not a discriminator probe.  Stamped at
+       * lowering (the only layer that knows the subject's find origin);
+       * `undefined` means the subject is a genuinely tagged union value
+       * (operation returns, payload values).
+       */
+      subjectShape?: "absence";
+      /**
        * Variant-form arms.  Each names a union variant by its resolved
        * `varType` TypeIR (the wire tag is `variantTag(varType)` — derived,
        * not stored), optionally binds the narrowed variant value to

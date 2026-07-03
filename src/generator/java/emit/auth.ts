@@ -260,6 +260,16 @@ function javaAuthValue(v: AuthValueIR | undefined, fallback = "null"): string {
   return v.kind === "literal" ? JSON.stringify(v.value) : `System.getenv(${JSON.stringify(v.env)})`;
 }
 
+/** `env-var ?? declared` as a Java expression — the canonical deploy-env
+ *  var overrides the declared auth value (12-factor; the generated compose
+ *  repoints OIDC_ISSUER / OIDC_CLIENT_ID at the bundled dev Keycloak; a
+ *  baked literal issuer 401s every bundled-IdP token).  A declared env-kind
+ *  value reading the same var stays a single read. */
+function envOr(envVar: string, v: AuthValueIR | undefined): string {
+  if (v?.kind === "env" && v.env === envVar) return javaAuthValue(v);
+  return `(System.getenv(${JSON.stringify(envVar)}) != null ? System.getenv(${JSON.stringify(envVar)}) : ${javaAuthValue(v)})`;
+}
+
 /** The IdP claim path projected onto a given user field — explicit `claims:`
  *  mapping wins; `id` defaults to `sub`, others read their own name. */
 function claimPathFor(field: string, auth: AuthIR): string {
@@ -296,9 +306,13 @@ function renderOidcVerifier(fields: FieldIR[], auth: AuthIR, pkg: string): strin
         f.type.element.name === "string");
     if (!mappableString) collectAuthImports(f.type, imports);
   }
-  const issuerExpr = javaAuthValue(auth.oidc.issuer);
+  // Env override first (12-factor): the generated compose repoints
+  // OIDC_ISSUER at the bundled dev Keycloak, so a literal issuer must not
+  // be baked un-overridably — with it baked, every token from the bundled
+  // IdP fails `iss` validation (401, caught live by the parity 403 test).
+  const issuerExpr = envOr("OIDC_ISSUER", auth.oidc.issuer);
   const audienceExpr = auth.oidc.audience
-    ? javaAuthValue(auth.oidc.audience)
+    ? envOr("OIDC_AUDIENCE", auth.oidc.audience)
     : `System.getenv("OIDC_AUDIENCE")`;
   const args = fields.map((f) => `                ${javaClaimRead(f, auth)}`).join(",\n");
   return lines(
@@ -555,8 +569,9 @@ function renderAuthController(pkg: string, auth: AuthIR | undefined): string {
 }
 
 function renderHandshakeMethods(auth: AuthIR): string[] {
-  const issuerExpr = javaAuthValue(auth.oidc.issuer);
-  const clientIdExpr = javaAuthValue(auth.oidc.clientId);
+  // Env override first — same contract as the verifier's ISSUER above.
+  const issuerExpr = envOr("OIDC_ISSUER", auth.oidc.issuer);
+  const clientIdExpr = envOr("OIDC_CLIENT_ID", auth.oidc.clientId);
   // A public client has no secret: leave it nullable so the token request
   // omits client_secret when unset.
   const clientSecretExpr = auth.oidc.clientSecret

@@ -238,10 +238,15 @@ system DevPlatform {
                 find locate(name: string): Project or ProjectNotFound where this.name == name
             }
 
-            // Non-transactional workflow.
+            // Non-transactional workflow.  The guard references the module
+            // permission catalogue (permissions.manageProjects → the runtime
+            // string "Projects.manageProjects"), so a real OIDC token whose
+            // realm roles lack the permission is DENIED with 403 — the
+            // conformance-parity runtime-authorization test exercises this
+            // with the bundled Keycloak's demo user (roles: user/agent).
             workflow registerProject {
               create(name: string, visibility: Visibility) {
-                requires currentUser.permissions.length > 0
+                requires currentUser.permissions.contains(permissions.manageProjects)
                   precondition name.length > 0
                   let proj = Project.create({
                       name: name,

@@ -15,6 +15,7 @@ import {
 import { wireShapeFor } from "../../../ir/enrich/enrichments.js";
 import {
   createInputFields,
+  forApiRead,
   hasCreate,
   wireCreateDefault,
 } from "../../../ir/enrich/wire-projection.js";
@@ -1353,7 +1354,10 @@ function emitResponseDtoSchema(
   // emitter (.NET DTO, React Zod, Hono toWire serializer).  Enriched
   // brand flows in via `PlatformSurface.emitProject(contexts:
   // EnrichedBoundedContextIR[])` so no local cast is needed.
-  const fields = wireShapeFor(ent);
+  // forApiRead: `internal`/`secret` fields never reach a read response —
+  // toWire projects through the same filter, and the schema must decide
+  // visibility identically or the OpenAPI spec drifts from the wire.
+  const fields = forApiRead(wireShapeFor(ent));
   void ctx;
   void isAgg;
   for (const wf of fields) {

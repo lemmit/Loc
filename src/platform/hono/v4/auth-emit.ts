@@ -62,6 +62,17 @@ function authValueExpr(v: AuthValueIR | undefined, fallback = '""'): string {
   return `${access} ?? ""`;
 }
 
+/** `process.env.<canonical var> ?? <declared>` — the deploy environment
+ *  overrides the declared auth value (12-factor: the generated compose
+ *  repoints OIDC_ISSUER / OIDC_CLIENT_ID at the bundled dev Keycloak, so a
+ *  literal must not be baked un-overridably — with it baked, every token
+ *  from the bundled IdP fails `iss` validation).  A declared env-kind value
+ *  reading the same var stays a single read. */
+function envOverridableExpr(envVar: string, v: AuthValueIR | undefined): string {
+  if (v?.kind === "env" && v.env === envVar) return authValueExpr(v);
+  return `process.env.${envVar} ?? ${authValueExpr(v)}`;
+}
+
 /** The IdP claim path projected onto a given `user { … }` field.  An
  *  explicit `claims:` mapping wins; otherwise `id` defaults to the
  *  standard `sub` claim and every other field reads its own name. */
@@ -217,11 +228,13 @@ export function requireCurrentUser(): User {
 // ---------------------------------------------------------------------------
 
 function renderOidcVerifier(user: UserIR, auth: AuthIR): string {
-  const issuerExpr = authValueExpr(auth.oidc.issuer);
+  // Deploy env overrides the declared value — see envOverridableExpr (the
+  // 401-from-the-bundled-IdP failure mode caught live by the parity 403 test).
+  const issuerExpr = envOverridableExpr("OIDC_ISSUER", auth.oidc.issuer);
   // Audience is optional — only emit the const + the verify option when
   // configured, so the generated code carries no always-falsy constant.
   const audienceConst = auth.oidc.audience
-    ? `\nconst AUDIENCE = ${authValueExpr(auth.oidc.audience)};`
+    ? `\nconst AUDIENCE = ${envOverridableExpr("OIDC_AUDIENCE", auth.oidc.audience)};`
     : "";
   const verifyOptions = auth.oidc.audience
     ? "{ issuer: ISSUER, audience: AUDIENCE }"
@@ -242,6 +255,10 @@ const ISSUER = ${issuerExpr};${audienceConst}
 
 // Lazily discover the issuer's JWKS endpoint via the OIDC discovery
 // document, then cache a remote JWK set (jose refreshes + caches keys).
+// Only a SUCCESSFUL discovery is cached: a failed fetch resets the slot so
+// the next request retries — caching the rejected promise would poison
+// every later verify with a permanent 401 (e.g. one request racing the
+// IdP's boot/realm import; caught live by the parity 403 test).
 let jwksPromise: Promise<ReturnType<typeof createRemoteJWKSet>> | null = null;
 async function getJwks(): Promise<ReturnType<typeof createRemoteJWKSet>> {
   if (!jwksPromise) {
@@ -252,6 +269,9 @@ async function getJwks(): Promise<ReturnType<typeof createRemoteJWKSet>> {
       const doc = (await res.json()) as { jwks_uri: string };
       return createRemoteJWKSet(new URL(doc.jwks_uri));
     })();
+    jwksPromise.catch(() => {
+      jwksPromise = null;
+    });
   }
   return jwksPromise;
 }
@@ -339,8 +359,10 @@ ${meRoute}
 `;
   }
 
-  const issuerExpr = authValueExpr(auth.oidc.issuer);
-  const clientIdExpr = authValueExpr(auth.oidc.clientId);
+  // Env override first (12-factor) — same contract as the verifier's ISSUER:
+  // the generated compose repoints OIDC_ISSUER at the bundled dev Keycloak.
+  const issuerExpr = envOverridableExpr("OIDC_ISSUER", auth.oidc.issuer);
+  const clientIdExpr = envOverridableExpr("OIDC_CLIENT_ID", auth.oidc.clientId);
   // A client secret is only present for confidential clients; omit the
   // const + the token-request line entirely for public (PKCE-less) ones
   // so the generated code carries no always-falsy constant.

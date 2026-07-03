@@ -98,3 +98,60 @@ describe("variant-match — per-backend rendering", () => {
     expect(out).not.toMatch(/case _ /);
   });
 });
+
+// A match over a repository union-FIND result (`subjectShape: "absence"`,
+// payloads.md §Union finds): the runtime value is the bare
+// aggregate-or-absent, so every backend renders a presence check — never a
+// discriminator probe / native type switch.  Post-lowering, the success
+// binding is already an alias of the subject (a plain `let` ref narrowed to
+// the variant), so the arm value below reads off `outcome` directly.
+const SUBJECT_A: ExprIR = { kind: "ref", name: "outcome", refKind: "let", type: A };
+const ABSENCE_MATCH: ExprIR = {
+  kind: "match",
+  arms: [],
+  subject: { kind: "ref", name: "outcome", refKind: "let" },
+  subjectType: { kind: "union", variants: [A, NF] },
+  subjectShape: "absence",
+  variantArms: [
+    {
+      varType: A,
+      binding: "a",
+      value: {
+        kind: "member",
+        receiver: SUBJECT_A,
+        member: "code",
+        receiverType: A,
+        memberType: STRING,
+      },
+      isError: false,
+    },
+    { varType: NF, value: { kind: "literal", lit: "string", value: "missing" }, isError: true },
+  ],
+  otherwise: undefined,
+};
+
+describe("variant-match over a union find (absence shape) — per-backend rendering", () => {
+  it("TS: null check, no `.type` probe", () => {
+    expect(renderTsExpr(ABSENCE_MATCH)).toBe('outcome !== null ? outcome.code : "missing"');
+  });
+
+  it("Python: `is not None` (E711-clean), attribute read, no cast/subscript", () => {
+    expect(renderPyExpr(ABSENCE_MATCH)).toBe(
+      '(outcome.code if outcome is not None else "missing")',
+    );
+  });
+
+  it("Java: null check, no sealed-union switch (no carrier types exist for finds)", () => {
+    expect(renderJavaExpr(ABSENCE_MATCH)).toBe('outcome != null ? outcome.code() : "missing"');
+  });
+
+  it(".NET: `is not null` ternary, no switch over wrapper records", () => {
+    expect(renderCsExpr(ABSENCE_MATCH)).toBe('outcome is not null ? outcome.Code : "missing"');
+  });
+
+  it("Elixir: nil check, no {:ok,…} tuple case (the facade tuple is already unwrapped)", () => {
+    expect(renderElixirExpr(ABSENCE_MATCH, { thisName: "record", contextModule: "MyApp" })).toBe(
+      'if outcome != nil, do: outcome.code, else: "missing"',
+    );
+  });
+});

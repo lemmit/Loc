@@ -85,6 +85,20 @@ describe("hono OIDC turnkey auth — codegen", () => {
     expect(oidc).toContain("export function registerOidcVerifier()");
   });
 
+  it("makes a LITERAL issuer/audience env-overridable (bundled-Keycloak repoint)", async () => {
+    // The generated compose repoints OIDC_ISSUER at the bundled dev
+    // Keycloak — a baked literal would 401 every bundled-IdP token
+    // (caught live by the parity 403 test).
+    const literal = OIDC.replace(
+      'issuer: env("OIDC_ISSUER")',
+      'issuer: "https://idp.example.com"\n      audience: "my-api"',
+    );
+    const files = await generateSystemFiles(literal);
+    const oidc = findFile(files, /auth\/oidc\.ts$/);
+    expect(oidc).toContain('const ISSUER = process.env.OIDC_ISSUER ?? "https://idp.example.com";');
+    expect(oidc).toContain('const AUDIENCE = process.env.OIDC_AUDIENCE ?? "my-api";');
+  });
+
   it("emits the /auth/login|callback|logout handshake", async () => {
     const files = await generateSystemFiles(OIDC);
     const hs = findFile(files, /auth\/handshake\.ts$/);

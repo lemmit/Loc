@@ -107,29 +107,34 @@ describe("Hono database seeding (Phase 2, domain path)", () => {
     expect(seed).not.toMatch(/addr:\s*\(?\{ line1:/);
   });
 
-  it("coerces a datetime field written as a string literal into new Date(...)", async () => {
-    // A `datetime` create field is spelled as a string literal in the seed
-    // (`createdAt: "2024-…Z"`), but `create({...})` and drizzle's timestamp
-    // column take a `Date` — so the emitter wraps it in `new Date(...)`.
-    const src = `system TimeSeed {
-      subdomain S { context C {
-        aggregate Log with crudish {
-          message: string
-          createdAt: datetime
+  it("coerces a datetime-typed seed literal with new Date(...)", async () => {
+    // `Product.create` takes `createdAt: Date`; a bare string literal fails
+    // `tsc --strict`, so the seed wraps datetime-typed literals in a Date ctor.
+    const src = `system S {
+      subdomain Shop {
+        context C {
+          aggregate Event with crudish {
+            title: string
+            startsAt: datetime
+            endsAt: datetime?
+          }
+          repository Events for Event { }
+          seed default {
+            Event { title: "Kickoff", startsAt: "2024-01-01T00:00:00Z", endsAt: "2024-01-02T00:00:00Z" }
+          }
         }
-        repository Logs for Log { }
-        seed default {
-          Log { message: "hi", createdAt: "2024-01-01T00:00:00Z" }
-        }
-      }}
-      api A from S
+      }
+      api A from Shop
       deployable api { platform: node contexts: [C] serves: A port: 3000 }
     }`;
     const { model, errors } = await parseString(src);
     if (errors.length) throw new Error(errors.join("\n"));
     const seed = find(generateSystems(model).files, /\/db\/seed\.ts$/);
-    expect(seed).toContain('createdAt: new Date("2024-01-01T00:00:00Z")');
-    expect(seed).not.toContain('createdAt: "2024-01-01T00:00:00Z"');
+    expect(seed).toContain('startsAt: new Date("2024-01-01T00:00:00Z")');
+    // Optional datetimes coerce too (the create param is `Date | null`).
+    expect(seed).toContain('endsAt: new Date("2024-01-02T00:00:00Z")');
+    // Non-datetime strings stay plain literals.
+    expect(seed).toContain('title: "Kickoff"');
   });
 
   it("is ship-once per dataset via the __loom_seed marker (D-SEED-IDEMPOTENCY)", async () => {
@@ -152,7 +157,7 @@ describe("Hono database seeding (Phase 2, domain path)", () => {
   it("wires the seeder into package.json and index.ts boot", async () => {
     const files = await build();
     const pkg = JSON.parse(find(files, /\/package\.json$/));
-    expect(pkg.scripts["db:seed"]).toBe("tsx db/seed.ts");
+    expect(pkg.scripts["db:seed"]).toBe("tsx db/seed-cli.ts");
 
     // The project-root index.ts (not http/index.ts).
     const index = find(files, /(^|\/)index\.ts$/, (k) => !/\/http\//.test(k));
@@ -162,17 +167,20 @@ describe("Hono database seeding (Phase 2, domain path)", () => {
     expect(index.indexOf("await migrate(")).toBeLessThan(index.indexOf("await runSeeds("));
   });
 
-  it("self-run guard also checks the entry is a seed file (survives tsup bundling)", async () => {
-    // Regression: tsup bundles db/seed.ts INTO dist/index.js, so a bare
-    // `import.meta.url === pathToFileURL(argv[1]).href` guard is true when the
-    // app runs as `node dist/index.js` — the standalone `main()` then
-    // self-executes at import time, seeding WITHOUT migrations and racing the
-    // app's own migrate→seed (boot crash: `relation "…" does not exist`).  The
-    // guard must additionally require the process entry to be a seed file so it
-    // only fires under `tsx db/seed.ts`, never inside the bundled app.
+  it("keeps db/seed.ts a pure module — the CLI entry lives in db/seed-cli.ts", async () => {
+    // A run-directly guard INSIDE the importable module misfires once tsup
+    // bundles seed.ts into dist/index.js (there `import.meta.url` IS the
+    // entrypoint), seeding at module load BEFORE the top-level migrate —
+    // first boot then dies on `relation ... does not exist` (caught live by
+    // conformance-parity).  The self-executing entry must stay in its own,
+    // never-imported file.
     const files = await build();
     const seed = find(files, /\/db\/seed\.ts$/);
-    expect(seed).toContain("/[/\\\\]seed\\.[cm]?[jt]s$/.test(process.argv[1])");
+    expect(seed).not.toContain("import.meta.url");
+    expect(seed).not.toContain("void main()");
+    const cli = find(files, /\/db\/seed-cli\.ts$/);
+    expect(cli).toContain('import { runSeeds } from "./seed"');
+    expect(cli).toContain("void main();");
   });
 
   it("omits seed wiring entirely when no seed block is declared", async () => {

@@ -56,6 +56,16 @@ function csAuthValue(v: AuthValueIR | undefined, fallback = '""'): string {
     : `Environment.GetEnvironmentVariable(${JSON.stringify(v.env)}) ?? ""`;
 }
 
+/** `env-var ?? declared` — the canonical deploy-env var overrides the
+ *  declared auth value (12-factor: the generated compose repoints
+ *  OIDC_ISSUER / OIDC_CLIENT_ID at the bundled dev Keycloak; a baked
+ *  literal issuer 401s every bundled-IdP token).  A declared env-kind
+ *  value reading the same var stays a single read. */
+function csEnvOverridable(envVar: string, v: AuthValueIR | undefined): string {
+  if (v?.kind === "env" && v.env === envVar) return csAuthValue(v);
+  return `Environment.GetEnvironmentVariable(${JSON.stringify(envVar)}) ?? ${csAuthValue(v)}`;
+}
+
 /** The IdP claim path projected onto a given user field — explicit
  *  `claims:` mapping wins; `id` defaults to `sub`, others read their name. */
 function claimPathFor(field: string, auth: AuthIR): string {
@@ -84,13 +94,15 @@ function csClaimRead(f: FieldIR, auth: AuthIR): string {
 }
 
 function renderOidcVerifier(user: UserIR, auth: AuthIR, ns: string): string {
-  const issuerExpr = csAuthValue(auth.oidc.issuer);
+  // Deploy env overrides the declared value — see csEnvOverridable (the
+  // 401-from-the-bundled-IdP failure mode caught live by the parity 403 test).
+  const issuerExpr = csEnvOverridable("OIDC_ISSUER", auth.oidc.issuer);
   // Audience is optional: an explicit `audience:` validates that value;
   // otherwise default to the OIDC_AUDIENCE env var (null when unset → audience
   // validation is skipped).  An env read (not a literal null) keeps CA1805 /
   // CA5404 / CA1508 quiet.
   const audienceExpr = auth.oidc.audience
-    ? csAuthValue(auth.oidc.audience)
+    ? csEnvOverridable("OIDC_AUDIENCE", auth.oidc.audience)
     : 'Environment.GetEnvironmentVariable("OIDC_AUDIENCE")';
   const args = user.fields.map((f) => csClaimRead(f, auth)).join(",\n            ");
   return `// Auto-generated.
@@ -248,8 +260,10 @@ public sealed class OidcUserVerifier : IUserVerifier
 // ---------------------------------------------------------------------------
 
 function renderHandshake(auth: AuthIR, ns: string): string {
-  const issuerExpr = csAuthValue(auth.oidc.issuer);
-  const clientIdExpr = csAuthValue(auth.oidc.clientId);
+  // Env override first (12-factor) — same contract as the verifier's Issuer:
+  // the generated compose repoints OIDC_ISSUER at the bundled dev Keycloak.
+  const issuerExpr = csEnvOverridable("OIDC_ISSUER", auth.oidc.issuer);
+  const clientIdExpr = csEnvOverridable("OIDC_CLIENT_ID", auth.oidc.clientId);
   // The secret is nullable (a public client has none): no `?? ""` so an
   // unset env stays null and the token request omits client_secret.  Default
   // to the OIDC_CLIENT_SECRET env var (an env read, not a literal null, so

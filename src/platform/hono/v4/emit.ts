@@ -743,8 +743,11 @@ function projectPackageJson(
           test: "vitest run",
           ...dbScripts,
           // First-boot seed runner (database-seeding.md) — emitted only when
-          // the model declares a `seed` block, else `db/seed.ts` doesn't exist.
-          ...(opts.hasSeeds ? { "db:seed": "tsx db/seed.ts" } : {}),
+          // the model declares a `seed` block, else `db/seed-cli.ts` doesn't
+          // exist.  A separate CLI file: the importable db/seed.ts must carry
+          // no self-executing entry (a run-directly guard misfires once tsup
+          // bundles it into dist/index.js, seeding before migrations).
+          ...(opts.hasSeeds ? { "db:seed": "tsx db/seed-cli.ts" } : {}),
         },
         dependencies: {
           ...dependencies,

@@ -1,4 +1,4 @@
-import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
+import { forApiRead, forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
   EnrichedEntityPartIR,
@@ -228,7 +228,10 @@ function voRecord(
   };
 }
 
-/** Response record over an entity's wireShape (aggregate root or part). */
+/** Response record over an entity's wireShape (aggregate root or part).
+ *  `forApiRead` drops `internal`/`secret` fields — an internal field
+ *  (softDeletable's `isDeleted`) never crosses a read response on any
+ *  backend, so the DTO must not carry it either (SquadResponse parity). */
 function wireRecord(
   entity: EnrichedAggregateIR | EnrichedEntityPartIR,
   recordName: string,
@@ -236,7 +239,7 @@ function wireRecord(
   basePkg: string,
   entityImport?: string,
 ): DtoFile {
-  const shape = entity.wireShape ?? [];
+  const shape = forApiRead(entity.wireShape ?? []);
   const imports = new Set<string>();
   const components = shape.map((w) => {
     const t = wireFieldType(w);
