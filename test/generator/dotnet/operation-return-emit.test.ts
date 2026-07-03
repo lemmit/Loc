@@ -37,6 +37,13 @@ describe("dotnet — exception-less operation returns (A3)", () => {
   it("emits a pure Domain union (no serialization attributes)", async () => {
     const u = find(await files(), "Domain/Orders/OrderOrNotFound.cs");
     expect(u).toContain("public abstract record OrderOrNotFound;");
+    // The aggregate success variant holds the DOMAIN aggregate itself — a
+    // wire-field projection would reference Application Response types
+    // (a containment becomes `<Part>Response`, CS0246 from Domain; caught
+    // by showcase's `reserve(): Project or ProjectNotFound`).
+    expect(u).toContain(
+      "public sealed record OrderOrNotFound_Order(Order Value) : OrderOrNotFound;",
+    );
     expect(u).toContain(
       "public sealed record OrderOrNotFound_NotFound(string Resource) : OrderOrNotFound;",
     );
@@ -66,10 +73,12 @@ describe("dotnet — exception-less operation returns (A3)", () => {
     expect(c).toContain(
       'return Problem(statusCode: 404, title: "Not Found", type: "/errors/not-found", detail: "Not Found");',
     );
-    // success variant → 200 wrapped in the App wire DTO (cast to the base).
+    // success variant → 200 wrapped in the App wire DTO (cast to the base);
+    // the Domain variant holds the aggregate, so the controller projects
+    // `v.Value` onto the wire params (forApiRead(wireShape) walk).
     expect(c).toMatch(/case \S+\.OrderOrNotFound_Order v:/);
     expect(c).toMatch(
-      /return Ok\(\(\S+\.OrderOrNotFound\)new \S+\.OrderOrNotFound_Order\(v\.Id, v\.Code\)\);/,
+      /return Ok\(\(\S+\.OrderOrNotFound\)new \S+\.OrderOrNotFound_Order\(v\.Value\.Id\.Value, v\.Value\.Code\)\);/,
     );
     expect(c).toMatch(/\[ProducesResponseType\(typeof\(\S+\.OrderOrNotFound\), 200\)\]/);
   });
