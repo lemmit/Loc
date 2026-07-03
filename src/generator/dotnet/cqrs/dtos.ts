@@ -10,6 +10,7 @@ import type {
   EnrichedBoundedContextIR,
   RepositoryIR,
 } from "../../../ir/types/loom-ir.js";
+import { wireTypeInfo } from "../../../ir/types/wire-types.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { type UnionMemberField, unionMembers } from "../../_payload/union-wire.js";
@@ -169,11 +170,30 @@ function renderDomainUnion(
       .map((f: UnionMemberField) => `${wireType(f.type, ctx, "response")} ${upperFirst(f.name)}`)
       .join(", ");
   };
+  // A variant field whose wire type is a nested DTO (`<Part>Response` for a
+  // containment, `<VO>Response` for a value object) resolves in the host
+  // aggregate's Application Responses namespace — the controller copies these
+  // fields 1:1 into the Application union DTO, so the Domain record must carry
+  // the same wire types.  Emit the using only when such a field exists; a
+  // scalar-only union keeps Domain free of the Application edge.  (The
+  // wire-typed field IS a known Domain→Application layering wart — tracked in
+  // docs/audits/generated-code-ddd-review-2026-07.md; the compile break it
+  // caused surfaced via the showcase `reserve` op, #1638.)
+  const usesWireDto = (t: UnionMemberField["type"]): boolean => {
+    const kind = wireTypeInfo(t, "response").refKind;
+    return kind === "entity" || kind === "valueObject";
+  };
+  const needsResponsesUsing = members.some(
+    (m) =>
+      (m.shape === "scalar" && usesWireDto(m.type)) ||
+      (m.shape === "record" && m.fields.some((f: UnionMemberField) => usesWireDto(f.type))),
+  );
   return lines(
     "// Auto-generated.",
     "using System;",
     "using System.Collections.Generic;",
     `using ${ns}.Domain.Enums;`,
+    ...(needsResponsesUsing ? [`using ${ns}.Application.${plural(agg.name)}.Responses;`] : []),
     "",
     `namespace ${ns}.Domain.${plural(agg.name)};`,
     "",
