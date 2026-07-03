@@ -509,7 +509,7 @@ describe("java renderJavaExpr — variant-match switch", () => {
     const out = renderJavaExpr(variantMatch);
     // The unbound `ProjectNotFound` arm must bind a real identifier, never `_`.
     expect(out).toContain(
-      'case ProjectOrProjectNotFound_ProjectNotFound __projectnotfound -> "not found";',
+      'case ProjectOrProjectNotFound_ProjectNotFound __unused -> "not found";',
     );
     // No bare unnamed pattern variable anywhere (` _ ->` is the preview form).
     expect(out).not.toMatch(/case\s+\S+\s+_\s*->/);
