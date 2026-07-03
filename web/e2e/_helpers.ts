@@ -159,27 +159,19 @@ export async function selectExample(page: Page, label: string | RegExp): Promise
   await expect(page.getByText(/^0 errors$/)).toBeVisible({ timeout: 30_000 });
 }
 
-// Click the "Create workspace" button in the new-workspace dialog, robustly.
+// Click the "Create workspace" button in the new-workspace popover, robustly.
 //
-// Call this AFTER the example option has been chosen.  On slow CI runners the
-// Mantine combobox portal that just closed can briefly overlay the Create
-// button, and the dialog re-renders mid-transition — so a single click lands
-// on the closing overlay or a node that's already been detached ("element was
-// detached from the DOM, retrying" → a hard timeout).  This was the dominant
-// flake across the builder/preview specs.  Two guards: first wait for the
-// option listbox to actually unmount (the overlay is gone), then retry the
-// click — re-finding the button each attempt — until the dialog closes
-// (`workspace-create` is absent once the workspace is created).
+// Call this AFTER the example option has been chosen.  The create popover is
+// held open across the option pick by `closeOnClickOutside={false}` on the
+// Mantine Popover (see WorkspaceSwitcher.tsx) — that's what stops it
+// auto-dismissing when the portal'd example option is clicked.  This retry is
+// the belt-and-braces for any remaining transient (a click landing mid
+// re-render): re-find the button each attempt and stop once the popover
+// closes (`workspace-create` is absent once the workspace is created).
 export async function clickWorkspaceCreate(page: Page): Promise<void> {
-  // Best-effort: the dropdown normally unmounts as soon as an option is
-  // picked, but on a slow render it lingers a beat.  Don't hard-fail if it
-  // never reports zero — the retry loop below is the real guard.
-  await expect(page.getByRole("option"))
-    .toHaveCount(0, { timeout: 10_000 })
-    .catch(() => {});
   const create = page.getByTestId("workspace-create");
   await expect(async () => {
-    await create.click({ timeout: 10_000 });
+    await create.click({ timeout: 5_000 });
     await expect(create).toBeHidden({ timeout: 5_000 });
-  }).toPass({ timeout: 60_000 });
+  }).toPass({ timeout: 30_000 });
 }
