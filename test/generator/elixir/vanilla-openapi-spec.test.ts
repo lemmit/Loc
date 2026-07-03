@@ -95,6 +95,54 @@ describe("vanilla OpenAPI spec (§11f)", () => {
   });
 });
 
+describe("vanilla OpenAPI spec — operation-return unions", () => {
+  it("answers 200 with the tagged union DTO (not 204) and registers the schema", async () => {
+    // `operation reserve(): Order or NotFound` — the exception-less union
+    // 200 (exception-less.md), matching Hono's discriminatedUnion / .NET's
+    // Application union DTO (surfaced by showcase's reserve op as
+    // `schemas only on node: ['ProjectOrProjectNotFound']` in parity).
+    const src = `
+system Shop {
+  subdomain Sales {
+    context Orders {
+      error NotFound { resource: string }
+      aggregate Order ids guid {
+        code: string
+        operation reserve(): Order or NotFound {
+          return NotFound { resource: code }
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api OrdersApi from Sales
+  storage primary { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primary }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 4000
+  }
+}`;
+    const files = await generateSystemFiles(src);
+    const specKey = [...files.keys()].find((k) => k.endsWith("_spec.ex") && k.includes("/api/"));
+    const spec = files.get(specKey!)!;
+    const start = spec.indexOf('"/orders/{id}/reserve"');
+    expect(start, "reserve path present").toBeGreaterThanOrEqual(0);
+    const reserve = spec.slice(start, start + 1200);
+    expect(reserve).toContain("200 => %OpenApiSpex.Response{");
+    expect(reserve).toContain("Schemas.OrderOrNotFound");
+    expect(reserve).not.toContain("204 =>");
+    const union = file(files, "order_or_not_found.ex");
+    expect(union).toContain('title: "OrderOrNotFound"');
+    expect(union).toContain("oneOf: [");
+    expect(union).toContain('type: %OpenApiSpex.Schema{type: :string, enum: ["Order"]}');
+    expect(union).toContain('type: %OpenApiSpex.Schema{type: :string, enum: ["NotFound"]}');
+  });
+});
+
 describe("vanilla OpenAPI spec — union finds", () => {
   it("declares the absent variant's ProblemDetails status on a union find", async () => {
     // `find locate(...): Order or OrderNotFound` — absence translates to the

@@ -48,9 +48,10 @@ import {
   opWorkflowInstanceById,
   opWorkflowInstances,
 } from "../../../ir/util/openapi-ids.js";
+import { unionInstanceName } from "../../../ir/stdlib/unions.js";
 import { defaultErrorStatus } from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
-import { findUnionSpec } from "../../_payload/union-wire.js";
+import { findUnionSpec, unionMembers } from "../../_payload/union-wire.js";
 import type { ApiRoute } from "../api-emit.js";
 
 // ---------------------------------------------------------------------------
@@ -235,6 +236,24 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
       );
     }
     void ctx;
+  }
+
+  // Operation-return union DTOs (`operation reserve(): Project or
+  // ProjectNotFound`) — the tagged wire union the op's 200 carries,
+  // matching Hono's discriminatedUnion / .NET's Application union DTO.
+  // De-duplicated by instance name (one union can back several ops).
+  const emittedOpUnions = new Set<string>();
+  for (const { ctx, agg } of allAggregates) {
+    for (const op of agg.operations.filter((o) => o.visibility === "public")) {
+      if (op.returnType?.kind !== "union") continue;
+      const unionName = unionInstanceName(op.returnType.variants);
+      if (emittedOpUnions.has(unionName)) continue;
+      emittedOpUnions.add(unionName);
+      files.set(
+        `${schemaDir}/${snake(unionName)}.ex`,
+        renderOperationUnionSchema(unionName, op.returnType.variants, ctx, webModule),
+      );
+    }
   }
 
   // CanResponse `{ allowed }` — the side-effect-free `can_<op>` companion of a
@@ -560,7 +579,18 @@ function renderApiSpec(
             }
           },
           responses: %{
-            204 => %OpenApiSpex.Response{description: "No Content"}${errorResponseEntries("operation", schemasModule, operationIsGuarded(op))}${
+            ${
+              // An exception-less union-returning op answers 200 with the
+              // tagged union DTO (exception-less.md) — matching Hono's
+              // discriminatedUnion / .NET's [ProducesResponseType(union)];
+              // a void op stays 204 No Content.
+              op.returnType?.kind === "union"
+                ? `200 => %OpenApiSpex.Response{
+              description: "OK",
+              content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${schemasModule}.${unionInstanceName(op.returnType.variants)}}}
+            }`
+                : `204 => %OpenApiSpex.Response{description: "No Content"}`
+            }${errorResponseEntries("operation", schemasModule, operationIsGuarded(op))}${
               op.when
                 ? `,
             409 => %OpenApiSpex.Response{
@@ -1062,6 +1092,70 @@ function renderWorkflowRequestSchema(
     }),
   );
   return renderSchemaModule(moduleName, schemaName, fields, `${webModule}.Api.Schemas`, true);
+}
+
+/** Operation-return union DTO — the tagged wire union an exception-less
+ *  op's 200 carries (`operation reserve(): Project or ProjectNotFound`).
+ *  One `oneOf` arm per variant: the `type` discriminator literal plus the
+ *  variant's wire fields (`unionMembers` — the same member specs Hono's
+ *  discriminatedUnion and .NET's Application union DTO render), so the
+ *  spec's component set + response bodies agree across backends. */
+function renderOperationUnionSchema(
+  unionName: string,
+  variants: TypeIR[],
+  ctx: EnrichedBoundedContextIR,
+  webModule: string,
+): string {
+  const schemasModule = `${webModule}.Api.Schemas`;
+  const members = unionMembers(variants, ctx);
+  const arms = members.map((m) => {
+    const tagProp = `        type: %OpenApiSpex.Schema{type: :string, enum: ["${m.tag}"]}`;
+    if (m.shape === "none") {
+      return `      %OpenApiSpex.Schema{
+        type: :object,
+        properties: %{
+${tagProp}
+        },
+        required: [:type]
+      }`;
+    }
+    if (m.shape === "scalar") {
+      return `      %OpenApiSpex.Schema{
+        type: :object,
+        properties: %{
+${tagProp},
+        value: ${openApiType(m.type, schemasModule)}
+        },
+        required: [:type, :value]
+      }`;
+    }
+    const { propsLines, requiredAtoms } = renderProperties(
+      m.fields.map((f) => ({ name: f.name, type: f.type, optional: f.optional })),
+      schemasModule,
+    );
+    const indented = propsLines.map((l) => `  ${l}`);
+    return `      %OpenApiSpex.Schema{
+        type: :object,
+        properties: %{
+${[tagProp, ...indented].join(",\n")}
+        },
+        required: [${[":type", ...requiredAtoms].join(", ")}]
+      }`;
+  });
+  return `# Auto-generated.
+defmodule ${schemasModule}.${unionName} do
+  @moduledoc "OpenApiSpex schema for #{__MODULE__}."
+
+  require OpenApiSpex
+
+  OpenApiSpex.schema(%{
+    title: "${unionName}",
+    oneOf: [
+${arms.join(",\n")}
+    ]
+  })
+end
+`;
 }
 
 /** Observable-workflow instance response — the `instanceWireShape`
