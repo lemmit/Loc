@@ -18,11 +18,13 @@ capability softDeletable {
 aggregate Order with softDeletable { subject: string }   // gains the field + filter
 ```
 
-`softDeletable` and `auditable` ship **built in** (the toolchain prelude,
-`src/macros/prelude.ts`) — available by name with nothing declared. The
-`softDelete()`/`restore()` operations stay in the `softDelete` macro
-(operations aren't part of a pure-mixin capability): `with softDeletable,
-softDelete`.
+`softDeletable`, `auditable`, and `tenantOwned` ship **built in** (the
+toolchain prelude, `src/macros/prelude.ts`) — available by name with nothing
+declared. The `softDelete()`/`restore()` operations stay in the `softDelete`
+macro (operations aren't part of a pure-mixin capability): `with softDeletable,
+softDelete`. `tenantOwned` (tenant column + claim stamp + tenant read filter)
+additionally requires a system-level `tenancy by` declaration — see
+[`tenancy.md`](tenancy.md).
 
 ## Surface
 
