@@ -415,8 +415,9 @@ export function buildJavaOpenApiContract(
     //     array; retarget it like the aggregate list wrappers);
     //   - GET /workflows/<slug>/instances/{id} → 404 error response;
     //   - `<Wf>InstanceResponse` required set (springdoc marks nothing).
-    // The `{id}` path param is a plain `String` on the controller, so it lands
-    // as `{type: string}` (no `uuid` format) matching Hono.
+    // The `{id}` path param binds `UUID` on the controller for guid
+    // correlation ids, so springdoc emits `{type: string, format: uuid}`
+    // matching Hono's `z.string().uuid()` (non-guid ids stay `String`).
     for (const wf of ctx.workflows) {
       if (!wf.instanceWireShape) continue;
       const slug = snake(wf.name);

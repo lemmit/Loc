@@ -135,6 +135,12 @@ function renderInstancesController(
     const slug = snake(wf.name);
     const corr = corrWireField(wf);
     const idJava = javaValueTypeForId(idValueType(corr));
+    // A guid correlation id binds `@PathVariable UUID` so springdoc emits
+    // `{type: string, format: uuid}` — matching Hono's `z.string().uuid()`,
+    // .NET's `Guid id`, and Python/Phoenix on the parity gate's path-param
+    // dimension.  Non-guid ids keep the String bind + explicit parse.
+    const paramJava = idJava === "UUID" ? "UUID" : "String";
+    const idExpr = idJava === "UUID" ? "id" : idFromString("id", idJava);
     const shape = wf.instanceWireShape ?? [];
     const proj = (rowVar: string): string =>
       shape.map((f) => domainToWire(f.type, `${rowVar}.${f.name}()`)).join(", ");
@@ -168,14 +174,14 @@ function renderInstancesController(
         `    }`,
         ``,
         `    @GetMapping("/${slug}/instances/{id}")`,
-        `    public ResponseEntity<${T}> ${camelId(opWorkflowInstanceById(wf.name))}(@PathVariable String id) {`,
-        `        var __sid = id;`,
+        `    public ResponseEntity<${T}> ${camelId(opWorkflowInstanceById(wf.name))}(@PathVariable ${paramJava} id) {`,
+        `        var __sid = ${idJava === "UUID" ? "id.toString()" : "id"};`,
         `        var __rows = jdbc.queryForList(`,
         `            "select type, data from ${table} where stream_id = ? order by version", __sid);`,
         `        if (__rows.isEmpty()) return ResponseEntity.notFound().build();`,
         `        var __loaded = new ArrayList<DomainEvent>();`,
         `        for (var __r : __rows) __loaded.add(${cls}._rowToEvent((String) __r.get("type"), String.valueOf(__r.get("data"))));`,
-        `        var x = ${cls}._fromEvents(new ${corrId}(${idFromString("id", idJava)}), __loaded);`,
+        `        var x = ${cls}._fromEvents(new ${corrId}(${idExpr}), __loaded);`,
         `        return ResponseEntity.ok(new ${T}(${proj("x")}));`,
         `    }`,
         ``,
@@ -192,8 +198,8 @@ function renderInstancesController(
         `    }`,
         ``,
         `    @GetMapping("/${slug}/instances/{id}")`,
-        `    public ResponseEntity<${T}> ${camelId(opWorkflowInstanceById(wf.name))}(@PathVariable String id) {`,
-        `        return ${repo}.findById(new ${idClass}(${idFromString("id", idJava)}))`,
+        `    public ResponseEntity<${T}> ${camelId(opWorkflowInstanceById(wf.name))}(@PathVariable ${paramJava} id) {`,
+        `        return ${repo}.findById(new ${idClass}(${idExpr}))`,
         `            .map(x -> ResponseEntity.ok(new ${T}(${proj("x")})))`,
         `            .orElse(ResponseEntity.notFound().build());`,
         `    }`,
