@@ -6,7 +6,15 @@
 > ("Proposal A"); treat the two as one feature split by concern. Async effects in
 > those actions: [`async-actions-and-effects.md`](async-actions-and-effects.md).
 >
-> Status: **proposal** (unadopted). Supersedes the externally-drafted
+> Status: **PARTIAL — the `store` container SHIPPED in-memory** (2026-07
+> code-verified). Grammar `Store`/`StoreDecl` + `use <Store>`, `StoreIR`,
+> lowering (`store-field`/`store-action` resolution), the encapsulation +
+> acyclic-composition validators (`store-checks.ts`), and Zustand/Pinia/Svelte/
+> Angular + LiveView emission are live. **The lifetime ladder is NOT shipped:**
+> v1 is in-memory only; `persist: local|session` / `sync: url` are
+> grammar-reserved and rejected (`loom.store-lifetime-unsupported`) — that
+> ladder is the remaining work this note owns. Named actions over store state
+> shipped alongside (Proposal A Stage 1). Supersedes the externally-drafted
 > "State Management DSL for Loom" (`state` / `store` / `machine` →
 > TypeScript / Zustand / XState). This revision keeps the one good idea in that
 > draft (`store`), rejects the two that fight Loom's architecture (`state`

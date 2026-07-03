@@ -1,7 +1,20 @@
 # Named actions (and stores) — first-class page transitions
 
-> Status: **PROPOSED (design note) — core decisions ratified.** Nothing is
-> implemented. This note argues for giving page/component event handlers
+> Status: **PARTIAL — Stage 1 (named sync actions) + Stage 5 (`store`) SHIPPED**
+> (2026-07 code-verified against `main`). The store-less page/component `action`
+> surface (grammar `ActionDecl`, `ActionIR`, lowering with `onSubmit: <name>` →
+> typed `action-ref` resolution, the purity + payload-conformance validators
+> `loom.action-payload-mismatch`/`loom.unresolved-action-ref`, and the
+> `event_N`-gensym-replacing hoist on all four JS frontends + Phoenix HEEx) is
+> live, with per-target `named-actions.test.ts`. `store` (Stage 5) shipped too —
+> **in-memory only**; the `persist:`/`sync:` lifetimes remain grammar-reserved and
+> gated (`loom.store-lifetime-unsupported`, owned by
+> [`frontend-state-management.md`](frontend-state-management.md)). **Remaining:
+> Stages 2–4** (`await`/`match`, retire `Action {}` `then:`, `async` composition)
+> — the async surface in [`async-actions-and-effects.md`](async-actions-and-effects.md),
+> still unstarted and actively gated by `loom.action-requires-await` (an action
+> body currently cannot inline a remote mutating command). Core decisions §8 are
+> ratified. This note argues for giving page/component event handlers
 > *names* — turning today's anonymous handler lambdas into declared, typed
 > `action`s whose purity is an **enforced invariant** (not the authoring
 > mental model) — and for an optional `store` declaration that bundles shared
