@@ -2699,6 +2699,19 @@ export type ExprIR =
         aggregate: string;
         method: string;
         readKind: "named" | "find" | "findAll" | "run";
+        /** The retrieval a criterion / retrieval read runs against — mirrors the
+         *  workflow `repo-run` path.  For `find`/`findAll` it is the synthesized
+         *  `findAllBy<Criterion>` (materialised by `synthesizeFindAllRetrievals`
+         *  from the criterion); for `run` it is the referenced retrieval name.
+         *  Absent for `named` reads (a declared `find`/`getById`).  Backends
+         *  render their retrieval-method name (`run<Name>`) from it so the
+         *  emitted call hits a real method that APPLIES the criterion, rather
+         *  than dropping it and calling the whole-table `findAll`/`all`. */
+        retrievalName?: string;
+        /** The criterion a `find`/`findAll` read filters by — drives the enrich
+         *  pass's synthesis of the `retrievalName` retrieval (same criterion the
+         *  workflow `synthCriterion` names).  Absent for `run`/`named`. */
+        synthCriterion?: { name: string };
       };
       /** Populated when `callKind === "store-action"` (Stage 5) — the resolved
        *  store + action a `<Store>.<action>(…)` call dispatches to.  Structured

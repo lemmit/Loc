@@ -1,7 +1,7 @@
 import { genericShape } from "../../ir/stdlib/generics.js";
 import { variantTag } from "../../ir/stdlib/unions.js";
 import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
-import { escapeTsIdent, lowerFirst } from "../../util/naming.js";
+import { escapeTsIdent, lowerFirst, upperFirst } from "../../util/naming.js";
 import {
   type ExprTarget,
   type MemberExpr,
@@ -348,12 +348,20 @@ function renderCall(
       // param the service declaration takes and the orchestrating workflow
       // supplies — exactly the var the workflow's own repo reads use
       // (`await accounts.byHolder(holder)`).  `await`-wrapped in parens so it
-      // composes in any expression position (`(await …) == null`).  The method
-      // is the resolved repo method (`byHolder` / `getById` for a named find,
-      // `find`/`findAll`/`run` for the criterion / retrieval forms) — no
-      // re-recognition.
+      // composes in any expression position (`(await …) == null`).  For a
+      // `named` read the method is the declared find (`byHolder` / `getById`).
+      // A criterion / retrieval read (`find`/`findAll`/`run`) renders against
+      // the synthesized retrieval method (`run<RetrievalName>`), exactly as the
+      // workflow `repo-run` does — so the criterion actually filters the query
+      // instead of being dropped for the whole-table read.  A single-result
+      // `find` takes the first row (`[0] ?? null`), mirroring the if-let render.
       const read = e.repoRead!;
-      return `(await ${lowerFirst(read.repo)}.${read.method}(${argList}))`;
+      const handle = lowerFirst(read.repo);
+      if (read.readKind !== "named" && read.retrievalName) {
+        const call = `${handle}.run${upperFirst(read.retrievalName)}(${argList})`;
+        return read.readKind === "find" ? `(await ${call})[0] ?? null` : `(await ${call})`;
+      }
+      return `(await ${handle}.${read.method}(${argList}))`;
     }
     case "action":
     // A sibling page/component action call (Proposal A Stage 1) — frontend-

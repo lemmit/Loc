@@ -14,6 +14,7 @@ import type {
   DataSourceKind,
   DeployableIR,
   DerivedIR,
+  DomainServiceIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   EnrichedEntityPartIR,
@@ -28,6 +29,7 @@ import type {
   FieldIR,
   FindIR,
   GenericCtorName,
+  LoadPlanIR,
   LoomInterface,
   LoomModel,
   NeedIR,
@@ -36,6 +38,8 @@ import type {
   RawLoomModel,
   RepositoryIR,
   RetrievalIR,
+  SortTermIR,
+  StmtIR,
   SystemIR,
   TraceabilityIR,
   TypeIR,
@@ -44,6 +48,7 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../types/loom-ir.js";
+import { walkStmtExprsDeep } from "../util/walk.js";
 import { buildCreateInput } from "./wire-projection.js";
 
 // ---------------------------------------------------------------------------
@@ -398,7 +403,12 @@ export function enrichContext(
   // criterion.md, use site 3: materialise the synthetic retrievals that back
   // the `Repo.findAll(<Criterion>)` calls lowered into this context's
   // workflows, so they ride the existing retrieval pipeline on every backend.
-  const retrievals = synthesizeFindAllRetrievals(ctx.retrievals, workflows, ctx.criteria);
+  const retrievals = synthesizeFindAllRetrievals(
+    ctx.retrievals,
+    workflows,
+    ctx.criteria,
+    ctx.domainServices,
+  );
   return {
     ...ctx,
     valueObjects,
@@ -449,57 +459,98 @@ function synthesizeFindAllRetrievals(
   existing: RetrievalIR[] | undefined,
   workflows: WorkflowIR[],
   criteria: CriterionIR[] | undefined,
+  domainServices: DomainServiceIR[] | undefined,
 ): RetrievalIR[] {
   const base = existing ?? [];
   const crits = criteria ?? [];
   const out = [...base];
   const seen = new Set(base.map((r) => r.name));
+  // One materialisation step, shared by the workflow and domain-service scans:
+  // build the `findAllBy<Criterion>` RetrievalIR from `{name, retrievalName,
+  // sort?, loadPlan?}`, deduped by retrieval name so many call sites (and both
+  // scan kinds) share one retrieval.
+  const materialise = (synth: {
+    name: string;
+    retrievalName: string;
+    sort?: SortTermIR[];
+    loadPlan?: LoadPlanIR;
+  }): void => {
+    if (!synth.retrievalName || seen.has(synth.retrievalName)) return;
+    const crit = crits.find((c) => c.name === synth.name);
+    if (!crit) return; // a missing criterion is reported by the IR validator
+    seen.add(synth.retrievalName);
+    out.push({
+      name: synth.retrievalName,
+      params: crit.params,
+      targetType: crit.targetType,
+      where: crit.body,
+      criterionRef: {
+        name: crit.name,
+        args: crit.params.map(
+          (p): ExprIR => ({ kind: "ref", name: p.name, refKind: "param", type: p.type }),
+        ),
+      },
+      // `sort:` / `loads:` shaping from an anonymous retrieval (criterion.md
+      // use site 3); the retrieval emitters apply `.orderBy(...)` + the load
+      // shape.  Default to no sort / whole-load for a bare `findAll` / `find`.
+      sort: synth.sort ?? [],
+      loadPlan: synth.loadPlan ?? { kind: "whole" },
+    });
+  };
   for (const wf of workflows) {
     for (const st of allWorkflowStmts(wf)) {
       // Both `Repo.findAll(<Criterion>)` (repo-run) and the `if let` /
       // `Repo.find(<Criterion>)` (if-let) source ride a `findAllBy<Criterion>`
       // retrieval; an `if let` carries no sort/loads (single-result, takes the
       // first row).  Collect the criterion + shaping from whichever shape.
-      const synth =
-        st.kind === "repo-run" && st.synthCriterion
-          ? {
-              name: st.synthCriterion.name,
-              retrievalName: st.retrievalName,
-              sort: st.synthSort,
-              loadPlan: st.synthLoadPlan,
-            }
-          : st.kind === "if-let" && st.synthCriterion.name
-            ? {
-                name: st.synthCriterion.name,
-                retrievalName: st.retrievalName,
-                sort: undefined,
-                loadPlan: undefined,
-              }
-            : undefined;
-      if (!synth || seen.has(synth.retrievalName)) continue;
-      const crit = crits.find((c) => c.name === synth.name);
-      if (!crit) continue; // a missing criterion is reported by the IR validator
-      seen.add(synth.retrievalName);
-      out.push({
-        name: synth.retrievalName,
-        params: crit.params,
-        targetType: crit.targetType,
-        where: crit.body,
-        criterionRef: {
-          name: crit.name,
-          args: crit.params.map(
-            (p): ExprIR => ({ kind: "ref", name: p.name, refKind: "param", type: p.type }),
-          ),
-        },
-        // `sort:` / `loads:` shaping from an anonymous retrieval (criterion.md
-        // use site 3); the retrieval emitters apply `.orderBy(...)` + the load
-        // shape.  Default to no sort / whole-load for a bare `findAll` / `find`.
-        sort: synth.sort ?? [],
-        loadPlan: synth.loadPlan ?? { kind: "whole" },
-      });
+      if (st.kind === "repo-run" && st.synthCriterion) {
+        materialise({
+          name: st.synthCriterion.name,
+          retrievalName: st.retrievalName,
+          sort: st.synthSort,
+          loadPlan: st.synthLoadPlan,
+        });
+      } else if (st.kind === "if-let" && st.synthCriterion.name) {
+        materialise({ name: st.synthCriterion.name, retrievalName: st.retrievalName });
+      }
+    }
+  }
+  // Domain-service `reading`-tier bodies ride the SAME synthetic retrievals: a
+  // `Repo.findAll(<Criterion>)` in a `domainService` operation lowers to a
+  // `repo-read` Call carrying `synthCriterion` + `retrievalName` (mirror of the
+  // workflow `repo-run`).  Walk every operation body so the retrieval the read
+  // renders against actually exists on the generated repository — without this
+  // the criterion is dropped and the read hits the whole-table `findAll`.
+  for (const svc of domainServices ?? []) {
+    for (const op of svc.operations) {
+      for (const stmt of op.body) {
+        collectRepoReadCriteria(stmt, materialise);
+      }
     }
   }
   return out;
+}
+
+/** Walk an operation-body statement's expressions and materialise the synthetic
+ *  retrieval behind every `repo-read` Call that carries a `synthCriterion`
+ *  (`Repo.findAll(<Criterion>)` in a `domainService` reading op). */
+function collectRepoReadCriteria(
+  stmt: StmtIR,
+  materialise: (synth: { name: string; retrievalName: string }) => void,
+): void {
+  walkStmtExprsDeep(stmt, (e) => {
+    if (
+      e.kind === "call" &&
+      e.callKind === "repo-read" &&
+      e.repoRead?.synthCriterion &&
+      e.repoRead.retrievalName
+    ) {
+      materialise({
+        name: e.repoRead.synthCriterion.name,
+        retrievalName: e.repoRead.retrievalName,
+      });
+    }
+  });
 }
 
 /** Attach `returnType` (the tail-position success type) to a workflow, idempotently. */

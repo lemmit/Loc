@@ -398,10 +398,21 @@ function renderCall(args: string[], e: CallExpr, ctx: PyRenderContext): string {
       // (`await accounts.by_holder(holder)`).  `await`-wrapped in parens so it
       // composes in any expression position (`(await …) is None`).  The method
       // is the resolved repo method, snake-cased to the generated Python repo's
-      // method name (`byHolder` → `by_holder`, `getById` → `get_by_id`) — no
-      // re-recognition.
+      // method name (`byHolder` → `by_holder`, `getById` → `get_by_id`).  A
+      // criterion / retrieval read (`find`/`findAll`/`run`) renders against the
+      // synthesized `run_<retrieval>` method (the same one the workflow
+      // `repo-run` uses) so the criterion actually filters the query instead of
+      // dropping to the whole-table `find_all`; a single-result `find` takes the
+      // first row.
       const read = e.repoRead!;
-      return `(await ${snake(read.repo)}.${snake(read.method)}(${argList}))`;
+      const handle = snake(read.repo);
+      if (read.readKind !== "named" && read.retrievalName) {
+        const call = `${handle}.run_${snake(read.retrievalName)}(${argList})`;
+        return read.readKind === "find"
+          ? `((lambda __r: __r[0] if __r else None)(await ${call}))`
+          : `(await ${call})`;
+      }
+      return `(await ${handle}.${snake(read.method)}(${argList}))`;
     }
     case "action":
     // Sibling action call (Proposal A Stage 1) — frontend-only; never lowered

@@ -556,9 +556,18 @@ function renderCall(args: string[], e: CallExpr, ctx: JavaRenderContext): string
       // — mirroring how the workflow `@Service` reads repos (`getById`/named
       // finds).  `method` is the resolved repository method (the declared find,
       // or `getById`/`findAll`/`run…` for the criterion / retrieval shapes), so
-      // no AST re-recognition is needed here.
+      // no AST re-recognition is needed here.  A criterion / retrieval read
+      // (`find`/`findAll`/`run`) renders against the synthesized `run<Retrieval>`
+      // method (the same one the workflow `repo-run` uses), so the criterion
+      // actually filters the query instead of dropping to the whole-table
+      // `findAll`.  A single-result `find` takes the first row.
       const read = e.repoRead!;
-      return `${javaRepoField(read.aggregate)}.${read.method}(${argList})`;
+      const field = javaRepoField(read.aggregate);
+      if (read.readKind !== "named" && read.retrievalName) {
+        const call = `${field}.run${upperFirst(read.retrievalName)}(${argList})`;
+        return read.readKind === "find" ? `${call}.stream().findFirst().orElse(null)` : call;
+      }
+      return `${field}.${read.method}(${argList})`;
     }
     case "action":
     // Sibling action call (Proposal A Stage 1) — frontend-only; never lowered
