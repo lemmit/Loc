@@ -64,8 +64,8 @@ import type {
   UiApiParamIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
-import { WALKER_LAYOUT_PRIMITIVES } from "../../util/walker-primitive-names.js";
 import { errorTypeUri } from "../../util/error-defaults.js";
+import { WALKER_LAYOUT_PRIMITIVES } from "../../util/walker-primitive-names.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { tryDetectApiHook } from "./api-hook-detector.js";
 import { registerApiHook } from "./api-hook-register.js";
