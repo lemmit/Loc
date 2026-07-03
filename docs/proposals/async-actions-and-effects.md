@@ -10,12 +10,18 @@
 > (React/Vue/Svelte/Angular) — the union-returning mutation hook now returns the
 > parsed union. A bare (unmarked) remote mutating call in an action body is a
 > **warning** `loom.missing-effect-marker` (was the hard `loom.action-requires-await`),
-> the lint-first ramp (§7 step 1). **HEEx is a pinned follow-up** — LiveView's
-> server-side async (`handle_event` → `case` on the tagged tuple) diverges, so the
-> Phoenix walker emits a reviewed no-op parity-gap marker (frozen by
-> `test/generator/elixir/heex-variant-match-await.test.ts`). **Remaining:** the
-> `await`-required flip (step 2), `spawn` / `onError` / `attempt {}` sugar (step 3),
-> `async`-keyword composition (step 4), and multi-error-variant reification. Split
+> the lint-first ramp (§7 step 1). **HEEx now renders server-side** — the Phoenix
+> LiveView `handle_event` loads the route-id record (`get_<agg>/1`), runs the
+> aggregate's returning-op context fn (dispatched through `apply/3` so Elixir
+> 1.18's type checker can't narrow an always-rejecting op's result and flag the
+> `{:ok, _}` arm), and `case`s on the tagged `{:ok, v}` / `{:error, "<tag>", data}`
+> tuple — the same shape the returning-op controller produces — threading socket
+> assigns per variant; the success variant is the aggregate's own type, so the
+> error variant is re-classified from the tag (the lowered `isError` hint is
+> unreliable from a UI body). Compiled by the `vanilla-match-await` fixture under
+> `mix compile --warnings-as-errors`. **Remaining:** the `await`-required flip
+> (step 2), `spawn` / `onError` / `attempt {}` sugar (step 3), `async`-keyword
+> composition (step 4), and multi-error-variant reification. Split
 > out of [`named-actions-and-stores.md`](named-actions-and-stores.md) ("Proposal A")
 > because the async surface **changes call semantics** (a remote call must be
 > marked) — it depends on Proposal A, Stage 1.
