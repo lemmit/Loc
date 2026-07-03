@@ -90,10 +90,12 @@ alignment slices (#1061–#1064).
 > any backend), **`provenance` "Python/Java remain" → SHIPPED on all five**
 > (`PROVENANCE_BACKENDS`), and **`audit-and-logging`** rescoped ("Hono-only"
 > was stale — ships on all five; the real gap is the `audited(...)` argument
-> form). Verified-still-open ready-now slices: `unpaged` opt-out (greenfield),
-> the `unique (...)` domain invariant (surface missing, IR/SQL substrate
-> ready), and the `store` `persist:`/`sync:` lifetime ladder (IR enum + gate
-> reserved).
+> form). Verified-still-open ready-now slices: the `unique (...)` domain
+> invariant (surface missing, IR/SQL substrate ready) and the `store`
+> `persist:`/`sync:` lifetime ladder (IR enum + gate reserved). The `unpaged`
+> opt-out was investigated and **closed as moot** — paging is opt-IN via the
+> `paged` return carrier, so unpaged is already the default (see the
+> `pagination-design-note` row).
 
 ## Every proposal in this directory
 
@@ -283,7 +285,7 @@ fable-elmish target last (it consumes all of them).
 
 | Doc | Status | Core addition |
 |---|---|---|
-| [`pagination-design-note.md`](./pagination-design-note.md) | SHIPPED (offset paging, all 4 backends — #898/#916/#925, #933 wire-parity gate); `unpaged` opt-out + page-aware hooks remain | `Paged<T>` response envelope; offset/limit defaults; `unpaged` opt-out for small reference lists. Phase 4.2. |
+| [`pagination-design-note.md`](./pagination-design-note.md) | SHIPPED (offset paging, all 5 backends — #898/#916/#925, #933 wire-parity gate). **`unpaged` opt-out CLOSED as moot** (2026-07-03 code-verified): paging is opt-IN via the `paged` return carrier, so unpaged is already the default (implicit `find all()` → bare `T[]`, `enrichments.ts` `ensureFindAll`). A standalone `unpaged` keyword would mark the existing default; the genuine tail is DEBT-28 (implicit `find all()` unbounded → a paged-by-default flip, breaking, tracked separately). Page-aware hooks remain | `Paged<T>` opt-in response envelope; offset/limit defaults. Phase 4.2. |
 | [`i18n-strings.md`](./i18n-strings.md) | PROPOSED | String composition: template literals, ICU, concatenation ban in user-visible slots. Closes `i18n.md` open question #4. Companion — must read with `i18n.md`. |
 | [`i18n.md`](./i18n.md) | PROPOSED | First-class i18n: ICU catalogs, content-hash keys, named `text { }` entries, `ddd i18n sync` three-way merge, per-backend adapters. 7-phase build, ~4 weeks. Phase 4.1. |
 | [`accessibility.md`](./accessibility.md) | PROPOSED | First-class a11y: WCAG 2.2 AA **by construction**. A per-primitive `a11y` contract on the walker registry (role/name/keyboard/heading-level) is the SSOT; the walker emits correct ARIA + label association + landmarks + live regions + focus management, derived from the closed primitive set — always-on default, not a knob. Tiny explicit surface (`alt:`/`decorative`/`label:`) for the underivable; `loom.a11y-*` fail-fast gates; `generated-a11y.yml` axe-core gate across every example × pack. Sibling of `i18n.md` (same derive-from-closed-set thesis). 5-phase build. |

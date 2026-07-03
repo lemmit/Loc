@@ -5,14 +5,29 @@
 > React, all returning the `Paged<T>` envelope (`items`, `page`, `pageSize`,
 > `total`, `totalPages`); landed as the payload P3b slice (#898 React, #916
 > .NET, #925 Phoenix) with a cross-backend wire-parity gate at P3 closeout
-> (#933). Emitters: `src/generator/typescript/repository-find-builder.ts`,
-> `src/generator/dotnet/cqrs/queries.ts` + `emit/common.ts`,
-> `src/generator/phoenix-live-view/{repository,api}-emit.ts`,
-> `src/generator/react/api-builder.ts` (all gated on `pagedReturn`). Remaining:
-> the `unpaged` opt-out + page-aware React hooks beyond the schema. Companion to
-> `multi-tenancy-design-note.md`. Pagination is a prerequisite *only in spirit* for the
-> real-time cache-invalidation feature — see "Relationship to the caching feature" at the
-> bottom for why it barely matters to the core mechanism.
+> (#933). Emitters (all gated on `pagedReturn`, `src/ir/stdlib/generics.ts`):
+> `src/generator/typescript/repository-find-builder.ts` +
+> `src/platform/hono/v4/routes-builder.ts`, `src/generator/dotnet/cqrs/queries.ts`,
+> `src/generator/java/emit/repository.ts`, `src/generator/python/repository-builder.ts`,
+> `src/generator/elixir/vanilla/repository-emit.ts`, and the frontend hooks in
+> `src/generator/_frontend/api-module.ts` + `src/generator/svelte/api-builder.ts`.
+>
+> **[2026-07-03 code-verified — the `unpaged` tail is CLOSED as moot; see
+> Decision 3 below.]** The shipped model is the **inverse** of this note's
+> "paged by default" framing: paging is **opt-IN** via the `paged` return-type
+> carrier (`find recent(): Order paged` → `Paged<T>`), and every finder without
+> the carrier — **including the implicit auto-`find all()`, which
+> `enrichments.ts` synthesizes as a bare `T[]`** — already returns an unpaged
+> array through the existing `array` branch in all five backends + React/Vue/
+> Svelte. So a standalone `unpaged` keyword would mark what is already the
+> default: **there is no default pagination to opt out of.** The only genuine
+> remaining gap is DEBT-28's (the implicit `find all()` is *unbounded*);
+> closing it means **flipping the implicit findAll to paged-by-default** — a
+> breaking change to every generated list endpoint, tracked separately, not an
+> `unpaged` keyword. Companion to `multi-tenancy-design-note.md`. Pagination is
+> a prerequisite *only in spirit* for the real-time cache-invalidation feature
+> — see "Relationship to the caching feature" at the bottom for why it barely
+> matters to the core mechanism.
 
 ## Goal
 
@@ -47,6 +62,19 @@ plus enough metadata to drive a paged UI, across all backends.
    ```
 
    (Symmetry with the tenancy markers: a positive default + a named exception, same philosophy.)
+
+   > **⚠️ [2026-07-03] This decision was NOT implemented as written — it was
+   > inverted.** What shipped is **opt-IN paging** via the `paged` return
+   > carrier, with **unpaged as the default** (the implicit `find all()`
+   > synthesizes a bare `T[]` at `enrichments.ts` `ensureFindAll`, and every
+   > carrier-less finder rides the existing `array` branch). Consequently a
+   > standalone `unpaged` keyword is **moot** (it marks the existing default),
+   > and the `unpaged` tail is closed as a non-feature. Realising *this*
+   > decision's fail-safe intent would require flipping the implicit
+   > `find all()` to paged-by-default — a **breaking change** to every
+   > generated list endpoint (all 5 backends' auto-findAll + 4 frontend list
+   > hooks + every example fixture + conformance/wire-spec parity), which is a
+   > separate, deliberate call, not this note's `unpaged` opt-out.
 
 4. **Defaults (keep the surface to one keyword):**
    - `pageSize` default **50**, hard max **200** (clamp server-side; reject/ clamp larger).
