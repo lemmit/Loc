@@ -214,7 +214,13 @@ function encodeFieldToParam(field: StateFieldIR): string {
   if (t.kind === "primitive" && t.name === "bool") {
     return `if (${ref}) p.set(${key}, "true"); else p.delete(${key});`;
   }
-  return `if (${ref} !== undefined && ${ref} !== "" && ${ref} !== null) p.set(${key}, String(${ref})); else p.delete(${key});`;
+  if (t.kind === "primitive" && (t.name === "int" || t.name === "long" || t.name === "decimal")) {
+    // A number always serialises — `0` is a real value, not "empty".  (A
+    // `!== ""` guard here would be a `number`-vs-`string` TS2367 comparison.)
+    return `p.set(${key}, String(${ref}));`;
+  }
+  // string / id / enum — drop the param when empty so the URL stays clean.
+  return `if (${ref} !== "") p.set(${key}, ${ref}); else p.delete(${key});`;
 }
 
 /** Render the full Vue `reactive()` store module for a `StoreIR`, honouring its

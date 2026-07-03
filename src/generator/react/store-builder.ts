@@ -19,9 +19,15 @@
 //     clear: () => set(() => ({ lines: [] })),
 //   }));
 //
-// This module is React-only.  The fan-out frontends (Vue/Svelte/Angular) wire
-// their own store-module emitters; their `WalkerTarget.renderStoreModule`
-// throws loudly until ported (the IR validator already gates LiveView).
+// This module is React-only.  The other frontends (Vue/Svelte/Angular) wire
+// their own store-module emitters with the same lifetime ladder; LiveView is
+// memory-only (gated by `loom.store-lifetime-liveview-unsupported`).
+//
+// The `lifetime` ladder (frontend-state-management.md §3.1): `memory` (default)
+// is the plain `create(...)` below; `persistLocal`/`persistSession` wrap it in
+// the Zustand `persist` middleware over `localStorage`/`sessionStorage`; `url`
+// makes the query string the source of truth via a typed untrusted-input
+// decoder + `history.replaceState` mirror + `popstate` re-decode.
 // ---------------------------------------------------------------------------
 
 import type { ActionIR, StateFieldIR, StoreIR, TypeIR } from "../../ir/types/loom-ir.js";
@@ -210,7 +216,13 @@ function encodeFieldToParam(field: StateFieldIR): string {
   if (t.kind === "primitive" && t.name === "bool") {
     return `if (${ref}) p.set(${key}, "true"); else p.delete(${key});`;
   }
-  return `if (${ref} !== undefined && ${ref} !== "" && ${ref} !== null) p.set(${key}, String(${ref})); else p.delete(${key});`;
+  if (t.kind === "primitive" && (t.name === "int" || t.name === "long" || t.name === "decimal")) {
+    // A number always serialises — `0` is a real value, not "empty".  (A
+    // `!== ""` guard here would be a `number`-vs-`string` TS2367 comparison.)
+    return `p.set(${key}, String(${ref}));`;
+  }
+  // string / id / enum — drop the param when empty so the URL stays clean.
+  return `if (${ref} !== "") p.set(${key}, ${ref}); else p.delete(${key});`;
 }
 
 /** Render the full Zustand store module for a `StoreIR`, honouring its

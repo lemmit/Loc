@@ -229,7 +229,13 @@ function encodeFieldToParam(field: StateFieldIR): string {
   if (t.kind === "primitive" && t.name === "bool") {
     return `if (${ref}) p.set(${key}, "true"); else p.delete(${key});`;
   }
-  return `if (${ref} !== undefined && ${ref} !== "" && ${ref} !== null) p.set(${key}, String(${ref})); else p.delete(${key});`;
+  if (t.kind === "primitive" && (t.name === "int" || t.name === "long" || t.name === "decimal")) {
+    // A number always serialises — `0` is a real value, not "empty".  (A
+    // `!== ""` guard here would be a `number`-vs-`string` TS2367 comparison.)
+    return `p.set(${key}, String(${ref}));`;
+  }
+  // string / id / enum — drop the param when empty so the URL stays clean.
+  return `if (${ref} !== "") p.set(${key}, ${ref}); else p.delete(${key});`;
 }
 
 /** Render the full Svelte runes store module for a `StoreIR`, honouring its
@@ -255,7 +261,14 @@ export function renderSvelteStoreModule(store: StoreIR): string {
   const stateTypeLiteral = `{ ${store.state.map((f) => `${f.name}: ${storeFieldTsType(f.type)}`).join("; ")} }`;
 
   if (store.lifetime === "url") {
-    return renderUrlStoreModule(store, storeVar, fieldNames, stateTypeName, stateTypeLiteral, needsDecimal);
+    return renderUrlStoreModule(
+      store,
+      storeVar,
+      fieldNames,
+      stateTypeName,
+      stateTypeLiteral,
+      needsDecimal,
+    );
   }
 
   if (store.lifetime === "persistLocal" || store.lifetime === "persistSession") {

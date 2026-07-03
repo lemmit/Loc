@@ -105,3 +105,39 @@ describe("Angular store emission", () => {
     expect(comp).toContain("{{ this.cart.count() }}");
   });
 });
+
+// Lifetime ladder (frontend-state-management.md §3.1) — `persist:` tiers over
+// the `providedIn:"root"` signal service.  Parity with React/Vue/Svelte.
+describe("Angular store lifetime ladder", () => {
+  const FILT = (life: string) => `
+    store Filt ${life} {
+      state { category: string = ""  pageNo: int = 0  minPrice: money = 0.00 }
+      action setPage(p: int) { pageNo := p }
+    }
+    page P { route: "/p" body: Heading { Filt.pageNo, level: 1 } }`;
+  const mod = async (life: string) =>
+    (await angularFiles(FILT(life))).get("web/src/app/stores/filt.store.ts")!;
+
+  it("persist: local hydrates in the constructor + writes back via effect() to localStorage", async () => {
+    const m = await mod("persist: local");
+    expect(m).toContain('localStorage.getItem("loom.store.Filt")');
+    expect(m).toContain('localStorage.setItem("loom.store.Filt"');
+    expect(m).toContain("effect(()");
+    expect(m).toContain("new Decimal"); // money revival
+  });
+
+  it("persist: session backs storage with sessionStorage", async () => {
+    const m = await mod("persist: session");
+    expect(m).toContain('sessionStorage.getItem("loom.store.Filt")');
+    expect(m).toContain('sessionStorage.setItem("loom.store.Filt"');
+  });
+
+  it("persist: url syncs to the query string with a typed decoder (parity with React)", async () => {
+    const m = await mod("persist: url");
+    expect(m).toContain("decodeFromUrl()");
+    expect(m).toContain('this.category.set(p.get("category") ?? "")');
+    expect(m).toContain('Number.isFinite(Number(p.get("pageNo")))');
+    expect(m).toContain("window.history.replaceState(null");
+    expect(m).toContain('window.addEventListener("popstate"');
+  });
+});
