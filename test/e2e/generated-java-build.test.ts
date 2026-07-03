@@ -33,11 +33,13 @@ const FIXTURES: Array<[string, string]> = [
   // collections, derived sums over BigDecimal, declared finds → @Query JPQL,
   // Flyway migration emission.
   ["test/e2e/fixtures/java-build/domain.ddd", "shop_api"],
-  // The full showcase surface on java (tracks examples/showcase.ddd minus
-  // one construct — see the fixture header): auth (user block + requires),
-  // extern operations, workflows, views, finds, value objects, money
-  // option/derived, capability stamps, softDelete, seeding, event sourcing.
-  ["test/e2e/fixtures/java-build/showcase-java.ddd", "java_api"],
+  // The full showcase surface on java, straight from the conformance
+  // fixture (no fork — the showcase-java.ddd twin was retired once the
+  // union-find variant-match rendered on the optional twin, #1631): auth
+  // (user block + requires), extern operations, workflows incl.
+  // variant-match, views, finds, value objects, money option/derived,
+  // capability stamps, softDelete, seeding, event sourcing.
+  ["examples/showcase.ddd", "java_api"],
   // Paged finds: Paged<T> envelope, Spring Data Pageable count derivation.
   ["test/e2e/fixtures/java-build/paged.ddd", "paged_api"],
   // Retrievals + reified criteria: Specification factories, the
