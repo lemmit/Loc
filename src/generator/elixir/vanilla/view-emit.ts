@@ -39,6 +39,8 @@ import {
   combineWhere,
   vanillaCapabilityFilter,
 } from "./capability-filter.js";
+import { hasRefColls } from "./ref-collection-emit.js";
+import { renderWireSerialize } from "./wire-serialize.js";
 
 /** One project-wide view, paired with its owning context (for module-path
  *  resolution in the controller). */
@@ -279,7 +281,11 @@ function buildFullFormBody(
   lines.push(`      %{`);
   output.binds.forEach((bind, i) => {
     const tail = i === output.binds.length - 1 ? "" : ",";
-    lines.push(`        ${snake(bind.name)}: ${renderExpr(bind.expr, ctx)}${tail}`);
+    // Key by the bind's declared (camelCase) name — the canonical wire key an
+    // atom map encodes verbatim (`:projectId` → "projectId"), matching the
+    // workflow-sourced view projection and every other backend.  (Was
+    // `snake(bind.name)` → a multi-word bind shipped `project_id`.)
+    lines.push(`        ${bind.name}: ${renderExpr(bind.expr, ctx)}${tail}`);
   });
   lines.push(`      }`);
   lines.push(`    end)`);
@@ -333,6 +339,48 @@ export function emitVanillaViewsController(
   const webModule = `${appModule}Web`;
   const actions = views.map(({ ctx, view }) => renderViewAction(ctx, view, appModule)).join("\n\n");
 
+  // Shorthand aggregate views (`view X = Agg where …`) return the aggregate's
+  // STRUCTS, so `serialize/1` must project each through that aggregate's
+  // `wireShape` (camelCase keys, no timestamp leak) — the same canonical wire
+  // the REST controller emits (#1628), not a raw `Map.from_struct` snake dump.
+  // Full-form + workflow-sourced views already project a camelCase-keyed MAP in
+  // their view module, handled by the `is_map` clause below.
+  const structClauses: string[] = [];
+  const helperByName = new Map<string, string>();
+  const seenAgg = new Set<string>();
+  let needsRefIds = false;
+  for (const { ctx, view } of views) {
+    if (view.output) continue; // full-form → map
+    const agg = ctx.aggregates.find((a) => a.name === view.source.name);
+    if (!agg) continue; // workflow-sourced (→ map) or non-aggregate source
+    const aggModule = `${appModule}.${upperFirst(ctx.name)}.${upperFirst(agg.name)}`;
+    if (seenAgg.has(aggModule)) continue;
+    seenAgg.add(aggModule);
+    if (hasRefColls(agg)) needsRefIds = true;
+    const { body, helpers } = renderWireSerialize(agg, ctx);
+    structClauses.push(`  defp serialize(%${aggModule}{} = record) do\n${body}\n  end`);
+    for (const h of helpers) {
+      const name = h.match(/defp (serialize_\w+)\(/)?.[1] ?? h;
+      if (!helperByName.has(name)) helperByName.set(name, h);
+    }
+  }
+  // `__ref_ids/1` backs an `X id[]` field's wire projection — the wireShape body
+  // above calls it, so emit it once when any shorthand aggregate has one (the
+  // same helper the REST controller defines).
+  const refIdsHelper = needsRefIds
+    ? `  # Project a loaded \`many_to_many\` relationship to its members' ids (an
+  # unloaded relationship serializes as an empty list).
+  defp __ref_ids(%Ecto.Association.NotLoaded{}), do: []
+  defp __ref_ids(records) when is_list(records), do: Enum.map(records, & &1.id)
+  defp __ref_ids(_), do: []`
+    : null;
+  const serializeClauses = [
+    ...structClauses,
+    "  defp serialize(record) when is_map(record), do: record",
+    ...helperByName.values(),
+    ...(refIdsHelper ? [refIdsHelper] : []),
+  ].join("\n\n");
+
   out.set(
     `lib/${appName}_web/controllers/views_controller.ex`,
     `# Auto-generated.
@@ -347,13 +395,7 @@ defmodule ${webModule}.ViewsController do
 
 ${actions}
 
-  defp serialize(%{__struct__: _} = record) do
-    record
-    |> Map.from_struct()
-    |> Map.drop([:__meta__, :__struct__])
-  end
-
-  defp serialize(record) when is_map(record), do: record
+${serializeClauses}
 end
 `,
   );
