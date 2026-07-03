@@ -77,6 +77,34 @@ describe("python generator — lifecycle stamps", () => {
     expect(routes).toMatch(/found\._stamp_on_update\(current_user\)\n\s*await repo\.save\(found\)/);
   });
 
+  it("a CLAIM-valued principal stamp assigns the claim off the threaded principal", async () => {
+    // `tenantId := currentUser.tenantId` — the stamp is the CLAIM
+    // (`current_user.tenant_id`, via the shared expression renderer), never
+    // collapsed to the principal id attribute.
+    const claim = `
+  system TS {
+    user { id: guid  tenantId: string }
+    subdomain D { context Ledger {
+      stamp onCreate { tenantId := currentUser.tenantId }
+      aggregate Account ids guid {
+        tenantId: string internal
+        balance: int
+        filter this.tenantId == currentUser.tenantId
+      }
+      repository Accounts for Account { }
+    }}
+    api A from D
+    storage primary { type: postgres }
+    resource st { for: Ledger, kind: state, use: primary }
+    deployable api { platform: python, contexts: [Ledger], dataSources: [st], serves: A, port: 8081, auth: required }
+  }
+`;
+    const domain = (await generateSystemFiles(claim)).get("api/app/domain/account.py")!;
+    expect(domain).toContain("    def _stamp_on_create(self, current_user: User) -> None:");
+    expect(domain).toContain("        self._tenant_id = current_user.tenant_id");
+    expect(domain).not.toContain("self._tenant_id = current_user.id");
+  });
+
   it("gates a currentUser stamp on a deployable WITHOUT auth fail-fast", async () => {
     const loom = await buildLoomModel(`
       system PS {

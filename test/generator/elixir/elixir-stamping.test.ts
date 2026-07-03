@@ -135,6 +135,38 @@ describe("elixir/vanilla generator — lifecycle stamps", () => {
     expect(mig.match(/:updated_at/g)?.length).toBe(1);
   });
 
+  it("a CLAIM-valued principal stamp put_changes the claim, nil-safe like the bare case", async () => {
+    // `tenantId := currentUser.tenantId` — the stamp is the CLAIM read off the
+    // threaded actor (`current_user.tenant_id`), never the actor id, and it
+    // carries the same nil-guard as the bare-`currentUser` case so an internal
+    // caller that didn't thread an actor stamps nil instead of raising.
+    const claim = `system TS {
+      user { id: guid  tenantId: string }
+      subdomain D { context Ledger {
+        stamp onCreate { tenantId := currentUser.tenantId }
+        aggregate Account ids guid {
+          tenantId: string internal
+          balance: int
+          filter this.tenantId == currentUser.tenantId
+        }
+        repository Accounts for Account { }
+      }}
+      api A from D
+      storage primary { type: postgres }
+      resource st { for: Ledger, kind: state, use: primary }
+      deployable api1 { platform: elixir { foundation: vanilla }, contexts: [Ledger], dataSources: [st], serves: A, port: 8081, auth: required }
+    }`;
+    const repo = (await generateSystemFiles(claim)).get(
+      "api1/lib/api1/ledger/account_repository.ex",
+    )!;
+    expect(repo).toContain(
+      "|> Ecto.Changeset.put_change(:tenant_id, current_user && current_user.tenant_id)",
+    );
+    // Not the actor id, and not the unguarded raw member access.
+    expect(repo).not.toContain("put_change(:tenant_id, current_user.tenant_id)");
+    expect(repo).not.toContain("put_change(:tenant_id, current_user && current_user.id)");
+  });
+
   it("gates a currentUser stamp on a vanilla deployable WITHOUT auth fail-fast", async () => {
     const noAuth = VANILLA_PRINCIPAL.replace(", auth: required", "");
     const loom = await buildLoomModel(noAuth);

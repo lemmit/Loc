@@ -106,6 +106,43 @@ describe(".NET lifecycle stamping (AuditableInterceptor)", () => {
     expect(entity).toMatch(/public string Code \{ get; private set; \}/);
   });
 
+  it("a CLAIM-valued principal stamp renders the claim off the ambient accessor", async () => {
+    // `tenantId := currentUser.tenantId` — the interceptor has no
+    // request-scoped `currentUser` local, so the member access must resolve
+    // through the SAME ambient accessor the read-side query filter uses
+    // (`RequestContext.Current!.CurrentUser!`), never an unbound identifier.
+    const claim = `
+system TS {
+  user { id: guid  tenantId: string }
+  subdomain D {
+    context Ledger {
+      stamp onCreate { tenantId := currentUser.tenantId }
+      aggregate Account ids guid {
+        tenantId: string internal
+        balance: int
+        filter this.tenantId == currentUser.tenantId
+      }
+      repository Accounts for Account { }
+    }
+  }
+  api A from D
+  storage primary { type: postgres }
+  resource st { for: Ledger, kind: state, use: primary }
+  deployable api { platform: dotnet, contexts: [Ledger], dataSources: [st], serves: A, port: 8081, auth: required }
+}
+`;
+    const files = generateSystems(await build(claim)).files;
+    const src = files.get("api/Infrastructure/Persistence/AuditableInterceptor.cs")!;
+    expect(src).toMatch(
+      /ctx\.Entry\(e\)\.Property\(x => x\.TenantId\)\.CurrentValue = RequestContext\.Current!\.CurrentUser!\.TenantId;/,
+    );
+    // The ambient-accessor usings ride a claim-only stamp too.
+    expect(src).toMatch(/using Api\.Domain\.Common;/);
+    expect(src).toMatch(/using Api\.Auth;/);
+    // No unbound `currentUser` identifier (the pre-fix, uncompilable emit).
+    expect(src).not.toMatch(/= currentUser\./);
+  });
+
   it("gates a currentUser stamp on a dotnet deployable WITHOUT auth fail-fast", async () => {
     const noAuth = SOURCE.replace(
       ", serves: A, port: 8081, auth: required }",

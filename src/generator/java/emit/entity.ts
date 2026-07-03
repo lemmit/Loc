@@ -282,12 +282,29 @@ export function renderJavaEntity(
   // (set once, on INSERT).  Event-sourced aggregates and principal stamps
   // without auth are gated upstream (loom.java-stamp-unsupported).  See §5b of
   // docs/plans/capability-stamp-dedup-simulation.md.
+  // A CLAIM-valued principal stamp (`tenantId := currentUser.tenantId`) cannot
+  // ride @CreatedBy/@LastModifiedBy — the AuditorAware<UUID> bean injects the
+  // actor ID, not the claim (a String claim column would get the actor guid,
+  // and the tenancy read filter would never match a stamped row).  Those
+  // assignments are triaged out of the annotation path into explicit
+  // @PrePersist/@PreUpdate lifecycle hooks reading the ambient principal off
+  // CurrentUserAccessor (the same holder the repository's SpEL principal
+  // filter resolves through), null-safe so a non-request (seed / system) save
+  // stays unstamped.  Bare `currentUser` keeps the annotation path unchanged.
   const auditAnnotationFor = new Map<string, { annotation: string; createEvent: boolean }>();
+  const claimStampColumnFor = new Map<string, { createEvent: boolean }>();
+  const claimStamps: { field: string; value: ExprIR; createEvent: boolean }[] = [];
   if (isRoot && isAgg(entity)) {
     for (const rule of entity.contextStamps ?? []) {
       const createEvent = rule.event === "create";
       for (const a of rule.assignments) {
         const principal = exprUsesCurrentUser(a.value);
+        const bare = a.value.kind === "ref" && a.value.refKind === "current-user";
+        if (principal && !bare) {
+          claimStampColumnFor.set(a.field, { createEvent });
+          claimStamps.push({ field: a.field, value: a.value, createEvent });
+          continue;
+        }
         const annotation = principal
           ? createEvent
             ? "CreatedBy"
@@ -335,6 +352,20 @@ export function renderJavaEntity(
       if (persistence) {
         fieldLines.push(
           `    @Column(name = "${snake(f.name)}"${audit.createEvent ? ", updatable = false" : ""})`,
+        );
+      }
+      fieldLines.push(`    ${renderJavaType(f.type)} ${f.name};`);
+      continue;
+    }
+    const claimColumn = claimStampColumnFor.get(f.name);
+    if (claimColumn) {
+      // Claim-stamped field: filled by the @PrePersist/@PreUpdate hook (no
+      // Spring auditing annotation); the @Column keeps the explicit snake_case
+      // binding (`updatable = false` on create-event columns, set once on
+      // INSERT — same column semantics as the annotation path).
+      if (persistence) {
+        fieldLines.push(
+          `    @Column(name = "${snake(f.name)}"${claimColumn.createEvent ? ", updatable = false" : ""})`,
         );
       }
       fieldLines.push(`    ${renderJavaType(f.type)} ${f.name};`);
@@ -691,10 +722,46 @@ export function renderJavaEntity(
       // fully-qualified on parts so neither import shadows the other.
       "@org.jmolecules.ddd.annotation.Entity";
 
+  // Claim-valued principal stamps → explicit JPA lifecycle callbacks.  The
+  // @PrePersist arm applies create + update assignments (a fresh row is both
+  // created and current, matching the @LastModified* fill-on-insert semantics
+  // and the node insert branch); the @PreUpdate arm re-applies only the
+  // update-event ones.  The principal is read statically off
+  // CurrentUserAccessor (entity callbacks can't inject beans) and a
+  // principal-less save (seed / system) returns unstamped — the write-side
+  // analogue of the repository filter's null-safe SpEL accessor.
+  const claimStampHookLines: string[] = [];
+  if (persistence && claimStamps.length > 0) {
+    const claimAssign = (s: { field: string; value: ExprIR }): string =>
+      `        this.${s.field} = ${renderJavaExpr(s.value, renderCtx)};`;
+    const updateClaims = claimStamps.filter((s) => !s.createEvent);
+    claimStampHookLines.push(
+      `    @PrePersist`,
+      `    void _stampOnCreate() {`,
+      `        var currentUser = CurrentUserAccessor.currentOrNull();`,
+      `        if (currentUser == null) return;`,
+      ...claimStamps.map(claimAssign),
+      `    }`,
+      ``,
+    );
+    if (updateClaims.length > 0) {
+      claimStampHookLines.push(
+        `    @PreUpdate`,
+        `    void _stampOnUpdate() {`,
+        `        var currentUser = CurrentUserAccessor.currentOrNull();`,
+        `        if (currentUser == null) return;`,
+        ...updateClaims.map(claimAssign),
+        `    }`,
+        ``,
+      );
+    }
+  }
+
   const body = [
     ...derivedLines,
     ...fnLines,
     ...opLines,
+    ...claimStampHookLines,
     ...externHookLines,
     ...pullEventsLines,
     ...drainProvLines,
@@ -779,6 +846,9 @@ export function renderJavaEntity(
     `import ${basePkg}.domain.valueobjects.*;`,
     callsDomainService ? `import ${basePkg}.domain.services.*;` : null,
     anyOpUsesCurrentUser ? `import ${basePkg}.auth.User;` : null,
+    // Claim-valued stamps read the ambient principal statically off the
+    // request-scoped holder (the same one the SpEL principal filter uses).
+    claimStampHookLines.length > 0 ? `import ${basePkg}.auth.CurrentUserAccessor;` : null,
     superType?.pkg && superType.pkg !== pkg ? `import ${superType.pkg}.${superType.name};` : null,
     ``,
     // TPH concretes (sharesIdentity) inherit the base's shared @Table —

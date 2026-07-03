@@ -82,6 +82,48 @@ describe("java generator — lifecycle stamps (persist-time JPA auditing)", () =
     expect(svc).not.toContain("aggregate._stampOnCreate");
   });
 
+  it("a CLAIM-valued principal stamp emits a @PrePersist hook, not @CreatedBy", async () => {
+    // `tenantId := currentUser.tenantId` cannot ride @CreatedBy — the
+    // AuditorAware<UUID> bean injects the actor ID, not the claim (the tenancy
+    // read filter would never match a stamped row).  It becomes an explicit
+    // JPA lifecycle callback reading the ambient principal off the same
+    // holder the repository's SpEL principal filter resolves through,
+    // null-safe so a non-request (seed / system) save stays unstamped.
+    const claim = `system TS {
+      user { id: guid  tenantId: string }
+      subdomain D { context Ledger {
+        stamp onCreate { tenantId := currentUser.tenantId }
+        aggregate Account ids guid {
+          tenantId: string internal
+          balance: int
+          filter this.tenantId == currentUser.tenantId
+        }
+        repository Accounts for Account { }
+      }}
+      api A from D
+      storage primary { type: postgres }
+      resource st { for: Ledger, kind: state, use: primary }
+      deployable api1 { platform: java, contexts: [Ledger], dataSources: [st], serves: A, port: 8081, auth: required }
+    }`;
+    const files = await generateSystemFiles(claim);
+    const entity = files.get(`${ROOT}/features/accounts/Account.java`)!;
+    // NOT the Spring auditing annotation path (that would stamp the actor id).
+    expect(entity).not.toContain("@CreatedBy");
+    expect(entity).not.toContain("@LastModifiedBy");
+    // The column keeps the set-once create-event semantics.
+    expect(entity).toContain('    @Column(name = "tenant_id", updatable = false)');
+    // The lifecycle hook reads the claim off the ambient principal, null-safe.
+    expect(entity).toContain("import com.loom.api1.auth.CurrentUserAccessor;");
+    expect(entity).toContain("    @PrePersist");
+    expect(entity).toContain("    void _stampOnCreate() {");
+    expect(entity).toContain("        var currentUser = CurrentUserAccessor.currentOrNull();");
+    expect(entity).toContain("        if (currentUser == null) return;");
+    expect(entity).toContain("        this.tenantId = currentUser.tenantId();");
+    // The static accessor the hook reads through exists on the holder.
+    const accessor = files.get(`${ROOT}/auth/CurrentUserAccessor.java`)!;
+    expect(accessor).toContain("public static User currentOrNull() {");
+  });
+
   it("gates a currentUser stamp on a deployable WITHOUT auth fail-fast", async () => {
     // stamps.ddd's deployable has no `auth: required` — a currentUser
     // stamp there has no request-scoped principal to stamp from.
