@@ -61,6 +61,37 @@ describe("bundled dev Keycloak compose", () => {
     expect(realm.users[0]!.username).toBe("demo");
   });
 
+  it("moves Keycloak off a host port a deployable already publishes (no bind collision)", async () => {
+    // Regression: Keycloak defaulted to host 8081, which is also the Java
+    // backend's default port — a system with auth + a deployable on 8081 mapped
+    // both services to 8081 and `docker compose up` failed ("port is already
+    // allocated").  Keycloak must skip used ports; here it lands on 8082.
+    const src = `
+system Helpdesk {
+  user { id: string role: string }
+  ${KEYCLOAK}
+  subdomain Support {
+    context Tickets {
+      aggregate Ticket { open: bool  operation close() { requires currentUser.role == "agent"  open := false } }
+      repository Tickets for Ticket { }
+    }
+  }
+  storage primary { type: postgres }
+  resource st { for: Tickets, kind: state, use: primary }
+  api SApi from Support
+  deployable api { platform: java contexts: [Tickets] serves: SApi dataSources: [st] port: 8081 auth: required }
+}`;
+    const compose = (await filesFor(src)).get("docker-compose.yml")!;
+    // Keycloak relocated to 8082; the Java backend keeps 8081.
+    expect(compose).toContain('- "8082:8080"');
+    expect(compose).toContain("KC_HOSTNAME: http://host.docker.internal:8082");
+    expect(compose).toContain('OIDC_ISSUER: "http://host.docker.internal:8082/realms/helpdesk"');
+    expect(compose).toContain('- "8081:8080"'); // java_api's own mapping
+    // No host port is published by two services.
+    const hostPorts = [...compose.matchAll(/- "(\d+):\d+"/g)].map((m) => m[1]);
+    expect(new Set(hostPorts).size).toBe(hostPorts.length);
+  });
+
   it("does not bundle Keycloak for a hosted provider (google)", async () => {
     const files = await filesFor(
       system(`auth { provider: google  oidc { clientId: env("OIDC_CLIENT_ID") } }`),
