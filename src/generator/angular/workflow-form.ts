@@ -11,6 +11,7 @@ import {
   fieldInput,
   formButton,
 } from "./form-fields.js";
+import { angularSink } from "./walker/sink.js";
 
 // ---------------------------------------------------------------------------
 // Angular `WorkflowForm(runs: <Wf>)` renderer — the workflow-command form,
@@ -100,8 +101,7 @@ export function renderAngularWorkflowForm(
     controls: fields.map((f) => ({ name: f.name, init: controlInit(f.type) })),
     idTargets: collectIdTargets(fields, bc, ctx),
   };
-  ctx.angularWorkflowForms ??= [];
-  (ctx.angularWorkflowForms as AngularWorkflowFormSpec[]).push(spec);
+  angularSink(ctx).workflowForms.push(spec);
 
   return [
     `<form [formGroup]="${formVar}" (ngSubmit)="${submitMethod}()" data-testid="${ns}">`,

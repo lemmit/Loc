@@ -89,6 +89,16 @@ describe("Phoenix OIDC verifier emission", () => {
     expect(auth!).toContain("/.well-known/openid-configuration");
   });
 
+  it("never caches a failed JWKS fetch (IdP-not-up-yet must not brick auth)", async () => {
+    const files = await build(source({ oidc: true }));
+    const auth = files.get("api/lib/api_web/auth.ex")!;
+    // A failed discovery yields [] — reject THIS request, but do not
+    // persist the empty list: a request racing the dev Keycloak's boot
+    // would otherwise pin every later verify to 401 until restart.
+    expect(auth).toContain("case fetch_jwks() do");
+    expect(auth).toMatch(/\[\] ->\n\s+\[\]/);
+  });
+
   it("maps claims onto the user shape via dotted paths (id ← sub)", async () => {
     const files = await build(source({ oidc: true }));
     const auth = files.get("api/lib/api_web/auth.ex")!;

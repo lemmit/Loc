@@ -68,7 +68,10 @@ describe("python views", () => {
     expect(views).toContain("    orderId: str");
     expect(views).toContain("    budget: str");
     expect(views).toContain('"orderId": r.id,');
-    expect(views).toContain('"budget": str(r.unit_budget),');
+    // Money rides the wire as a precise-decimal string via `money_str`
+    // (parity with node/java/dotnet/elixir; never bare `str()` — no exponent).
+    expect(views).toContain('"budget": money_str(r.unit_budget),');
+    expect(views).toContain("from app.db.wire import money_str");
     expect(views).toContain('"lineCount": len(r.lines),');
     const main = files.get("api/app/main.py")!;
     expect(main).toContain("from app.http.views_routes import router as views_router");

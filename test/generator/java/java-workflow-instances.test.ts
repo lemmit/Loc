@@ -70,9 +70,11 @@ describe("java workflow instance read endpoints", () => {
     // By id — 404 via Optional.orElse(notFound).
     expect(ctrl).toContain('@GetMapping("/order_fulfillment/instances/{id}")');
     expect(ctrl).toContain(
-      "public ResponseEntity<OrderFulfillmentInstanceResponse> getOrderFulfillmentInstanceById(@PathVariable UUID id) {",
+      "public ResponseEntity<OrderFulfillmentInstanceResponse> getOrderFulfillmentInstanceById(@PathVariable String id) {",
     );
-    expect(ctrl).toContain("orderFulfillmentStateRepository.findById(new OrderId(id))");
+    expect(ctrl).toContain(
+      "orderFulfillmentStateRepository.findById(new OrderId(UUID.fromString(id)))",
+    );
     expect(ctrl).toContain(".orElse(ResponseEntity.notFound().build());");
     expect(ctrl).toContain("import java.util.UUID;");
   });
@@ -152,10 +154,12 @@ describe("java event-sourced workflow instance read endpoints", () => {
     const ctrl = find(await gen(ES), "OWorkflowInstancesController.java");
     expect(ctrl).toContain('@GetMapping("/tally/instances/{id}")');
     expect(ctrl).toContain(
-      "public ResponseEntity<TallyInstanceResponse> getTallyInstanceById(@PathVariable UUID id) {",
+      "public ResponseEntity<TallyInstanceResponse> getTallyInstanceById(@PathVariable String id) {",
     );
     expect(ctrl).toContain("if (__rows.isEmpty()) return ResponseEntity.notFound().build();");
-    expect(ctrl).toContain("var x = TallyState._fromEvents(new OrderId(id), __loaded);");
+    expect(ctrl).toContain(
+      "var x = TallyState._fromEvents(new OrderId(UUID.fromString(id)), __loaded);",
+    );
   });
 
   it("the <Wf>State fold class exposes record-style accessors for the projection", async () => {

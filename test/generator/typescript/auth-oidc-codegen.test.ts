@@ -99,6 +99,16 @@ describe("hono OIDC turnkey auth — codegen", () => {
     expect(oidc).toContain('const AUDIENCE = process.env.OIDC_AUDIENCE ?? "my-api";');
   });
 
+  it("never caches a failed JWKS discovery (IdP-not-up-yet must not brick auth)", async () => {
+    const files = await generateSystemFiles(OIDC);
+    const oidc = findFile(files, /auth\/oidc\.ts$/);
+    // A rejected discovery promise clears the cache so the next request
+    // retries — a request racing the dev Keycloak's boot would otherwise
+    // pin every later verify to 401 until restart.
+    expect(oidc).toContain("jwksPromise.catch(() => {");
+    expect(oidc).toContain("jwksPromise = null;");
+  });
+
   it("emits the /auth/login|callback|logout handshake", async () => {
     const files = await generateSystemFiles(OIDC);
     const hs = findFile(files, /auth\/handshake\.ts$/);

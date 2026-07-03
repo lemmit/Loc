@@ -14,7 +14,7 @@
 // `.value`.
 // ---------------------------------------------------------------------------
 
-import type { ExprIR, StateFieldIR, TypeIR } from "../../../ir/types/loom-ir.js";
+import type { ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import type { DetectedApiCall } from "../../_walker/api-hook-detector.js";
 import {
   defaultInitForJs,
@@ -34,6 +34,41 @@ import type {
   VariantMatchSpec,
   WalkerTarget,
 } from "../../_walker/target.js";
+
+/** Attribute-quote a rendered JS/binding expression for a Vue directive
+ *  value (`:key`, `v-if`, `v-for`, `v-else-if`, testid, …).  Vue decodes
+ *  HTML entities in attribute values BEFORE compiling the expression, so
+ *  an expression carrying BOTH quote kinds is ESCAPED (the delimiter char
+ *  → its entity) rather than rejected — every valid `.ddd` expression
+ *  renders (React/Svelte emit these fine, so Vue must too; a hard throw
+ *  aborted the whole system's Vue codegen — audit finding B21).
+ *
+ *  `prefer` picks the delimiter when the expression is quote-free or the
+ *  preferred quote is absent, so callers stay byte-identical to their old
+ *  hand-rolled quote selection:
+ *    - `'"'` (default) — double-quote first (renderAttrBinding / v-for /
+ *      match predicate): JS string literals render double-quoted, so a
+ *      `"`-bearing expression binds single-quoted; a both-quote expression
+ *      escapes `"`→`&quot;` under a `"` delimiter.
+ *    - `"'"` — single-quote first (renderConditionalChild): the condition
+ *      commonly carries double-quoted JS string literals
+ *      (`role === "manager"`), so a single delimiter keeps them intact; a
+ *      both-quote condition escapes `'`→`&#39;` under a `'` delimiter.
+ *
+ *  `&` is entity-escaped first in the both-quote branch so a literal `&`
+ *  in the expression can't combine with the injected entity. */
+function quoteAttrExpr(expr: string, prefer: '"' | "'" = '"'): string {
+  const hasDouble = expr.includes('"');
+  const hasSingle = expr.includes("'");
+  if (prefer === '"') {
+    if (!hasDouble) return `"${expr}"`;
+    if (!hasSingle) return `'${expr}'`;
+    return `"${expr.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"`;
+  }
+  if (!hasSingle) return `'${expr}'`;
+  if (!hasDouble) return `"${expr}"`;
+  return `'${expr.replace(/&/g, "&amp;").replace(/'/g, "&#39;")}'`;
+}
 
 /** Vue-flavoured `WalkerTarget`.  Stateless and pure — no walker
  *  context is captured; every method takes the data it needs.
@@ -156,7 +191,8 @@ export const vueTarget: WalkerTarget = {
   /** Child-position match — a structural `<template v-if>` /
    *  `v-else-if` / `v-else` chain (Vue template expressions cannot
    *  evaluate to markup, so the TSX brace-wrapped ternary has no
-   *  analogue).  Predicate attrs quote-collision-safe like
+   *  analogue).  Predicate attrs are quote-collision-safe via
+   *  `quoteAttrExpr` (escapes rather than throws), like
    *  renderAttrBinding. */
   renderMatchChild(
     arms: ReadonlyArray<{ predicate: string; value: string }>,
@@ -165,18 +201,11 @@ export const vueTarget: WalkerTarget = {
   ): string {
     const pad = "  ".repeat(depth);
     const inner = "  ".repeat(depth + 1);
-    const quoteCond = (cond: string): string => {
-      if (!cond.includes('"')) return `"${cond}"`;
-      if (!cond.includes("'")) return `'${cond}'`;
-      throw new Error(
-        `vueTarget.renderMatchChild: match predicate mixes single and double quotes — cannot be attribute-quoted: ${cond}`,
-      );
-    };
     const blocks: string[] = [];
     arms.forEach((arm, i) => {
       const directive = i === 0 ? "v-if" : "v-else-if";
       blocks.push(
-        `<template ${directive}=${quoteCond(arm.predicate)}>\n${inner}${arm.value}\n${pad}</template>`,
+        `<template ${directive}=${quoteAttrExpr(arm.predicate)}>\n${inner}${arm.value}\n${pad}</template>`,
       );
     });
     if (elseArm !== undefined) {
@@ -191,8 +220,9 @@ export const vueTarget: WalkerTarget = {
    *  The non-rendering `<template>` carries `v-for` + the required
    *  `:key` without introducing a wrapper element.  The index binding
    *  is emitted only when referenced.  The `v-for` expression is
-   *  attribute-quoted, so the collection expression must not collide
-   *  with the chosen quote (same constraint as `renderAttrBinding`). */
+   *  attribute-quoted via `quoteAttrExpr` (escapes a both-quote
+   *  collision rather than throwing — same constraint as
+   *  `renderAttrBinding`). */
   renderForEach(
     coll: string,
     itemVar: string,
@@ -205,19 +235,12 @@ export const vueTarget: WalkerTarget = {
     const usesIdx = referencesIdent(keyExpr, indexVar) || referencesIdent(body, indexVar);
     const binding = usesIdx ? `(${itemVar}, ${indexVar})` : itemVar;
     const forExpr = `${binding} in ${coll}`;
-    const quoteFor = (expr: string): string => {
-      if (!expr.includes('"')) return `"${expr}"`;
-      if (!expr.includes("'")) return `'${expr}'`;
-      throw new Error(
-        `vueTarget.renderForEach: v-for expression mixes single and double quotes — cannot be attribute-quoted: ${expr}`,
-      );
-    };
     const pad = "  ".repeat(depth);
     const inner = "  ".repeat(depth + 1);
     // `renderAttrBinding` returns the `:key` attr with a leading space.
     const keyAttr = vueTarget.renderAttrBinding("key", keyExpr);
     const forLines = [
-      `<template v-for=${quoteFor(forExpr)}${keyAttr}>`,
+      `<template v-for=${quoteAttrExpr(forExpr)}${keyAttr}>`,
       `${inner}${body}`,
       `${pad}</template>`,
     ];
@@ -228,7 +251,7 @@ export const vueTarget: WalkerTarget = {
     // simple `each:` refs.
     return [
       ...forLines,
-      `${pad}<template v-if=${quoteFor(`!${coll}.length`)}>`,
+      `${pad}<template v-if=${quoteAttrExpr(`!${coll}.length`)}>`,
       `${inner}${emptyBody}`,
       `${pad}</template>`,
     ].join("\n");
@@ -284,16 +307,12 @@ export const vueTarget: WalkerTarget = {
    *  The expression is quoted, so pick the quote character the
    *  rendered JS doesn't use: JS string literals render double-quoted
    *  (JSON.stringify), so a `"`-bearing expression binds single-
-   *  quoted.  An expression carrying BOTH quote kinds can't be
-   *  attribute-quoted at all — fail loud rather than emit a template
-   *  that won't compile (handler hoisting is the structural fix,
-   *  tracked for the forms/handlers slice). */
+   *  quoted.  An expression carrying BOTH quote kinds is entity-
+   *  escaped (`"`→`&quot;`) under a double-quote delimiter — Vue
+   *  decodes the entity before compiling the binding, so the template
+   *  stays well-formed and every valid `.ddd` expression renders. */
   renderAttrBinding(name: string, jsExpr: string): string {
-    if (!jsExpr.includes('"')) return ` :${name}="${jsExpr}"`;
-    if (!jsExpr.includes("'")) return ` :${name}='${jsExpr}'`;
-    throw new Error(
-      `vueTarget.renderAttrBinding: expression for ':${name}' mixes single and double quotes — cannot be attribute-quoted. Simplify the expression (e.g. avoid apostrophes inside string literals used in bindings).`,
-    );
+    return ` :${name}=${quoteAttrExpr(jsExpr)}`;
   },
 
   /** `<template v-if>` / `<template v-else>` block pair.  Vue
@@ -303,12 +322,14 @@ export const vueTarget: WalkerTarget = {
    *  `{#if}` blocks.  The `v-if` is SINGLE-quoted (like `renderStyleAttr`
    *  below) because the rendered condition can carry double-quoted JS
    *  string literals (`currentUser.role === "manager"`); a double-quoted
-   *  attribute would terminate at the first inner `"`. */
+   *  attribute would terminate at the first inner `"`.  A condition that
+   *  ALSO carries an apostrophe is entity-escaped (`'`→`&#39;`) via
+   *  `quoteAttrExpr` rather than silently emitting a broken `v-if`. */
   renderConditionalChild(cond: string, thenS: string, elseS: string, depth: number): string {
     const pad = "  ".repeat(depth);
     const inner = "  ".repeat(depth + 1);
     return [
-      `<template v-if='${cond}'>`,
+      `<template v-if=${quoteAttrExpr(cond, "'")}>`,
       `${inner}${thenS}`,
       `${pad}</template>`,
       `${pad}<template v-else>`,

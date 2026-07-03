@@ -54,7 +54,6 @@ export function buildPySeedFile(
   const seedableAggs = ctx.aggregates.filter((a) => !a.isAbstract);
   const seedable = new Set(seedableAggs.map((a) => a.name));
   const aggByName = new Map<string, EnrichedAggregateIR>(seedableAggs.map((a) => [a.name, a]));
-
   const fnBlocks: string[] = [];
   const callLines: string[] = [];
   for (const ds of datasets) {

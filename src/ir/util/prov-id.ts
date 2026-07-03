@@ -66,21 +66,6 @@ export function hasAnyProvSite(sys: SystemIR): boolean {
   return false;
 }
 
-/** Same predicate over a bare context list (legacy single-deployable
- *  mode + the per-deployable TS emit path). */
-export function contextsHaveProvSite(
-  contexts: { aggregates: { operations: { statements: StmtIR[] }[] }[] }[],
-): boolean {
-  for (const ctx of contexts) {
-    for (const agg of ctx.aggregates) {
-      for (const op of agg.operations) {
-        if (op.statements.some(stmtHasProv)) return true;
-      }
-    }
-  }
-  return false;
-}
-
 /** True iff any aggregate (root or part) declares a `provenanced` field.
  *  Drives the persistence *machinery* — the lineage types, co-located
  *  `<field>_provenance` columns, repo projections, and wire DTO — which

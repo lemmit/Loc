@@ -38,8 +38,8 @@ describe("value-object migration — flatten into columns (relational) / :map (E
   it("the Hono migration flattens the value object into columns, not one JSONB", async () => {
     const files = await generateSystemFiles(FIXTURE);
     const sql = findFile(files, /h\/db\/migrations\/.*\.sql$/);
-    expect(sql).toMatch(/price_amount\s+DECIMAL/i);
-    expect(sql).toMatch(/price_currency\s+TEXT/i);
+    expect(sql).toMatch(/"price_amount"\s+DECIMAL/i);
+    expect(sql).toMatch(/"price_currency"\s+TEXT/i);
     // No single json column for the value object.
     expect(sql).not.toMatch(/\bprice\s+JSONB\b/i);
   });
@@ -60,7 +60,8 @@ describe("value-object migration — flatten into columns (relational) / :map (E
     expect(cfg).toMatch(/\.HasColumnName\("price_amount"\)/);
     expect(cfg).toMatch(/\.HasColumnName\("price_currency"\)/);
     const migration = findFile(files, /d\/Migrations\/.*\.cs$/);
-    expect(migration).toMatch(/price_amount\s+DECIMAL/i);
+    // Inside the C# verbatim @"..." literal the SQL's double quotes are doubled.
+    expect(migration).toMatch(/""price_amount""\s+DECIMAL/i);
   });
 
   it("the Phoenix migration regroups the columns back into a single :map", async () => {

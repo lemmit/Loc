@@ -210,9 +210,11 @@ export function matchRetrievalRunCall(
       ...readPage(),
     };
   }
-  // Bare `Name` (parameterless retrieval).
+  // Bare `Name` (parameterless retrieval) — still honours a sibling `page:`
+  // arg (`Repo.run(Recent, page: { limit: 20 })`), like the anonymous and
+  // `Name(args)` branches.
   if (isNameRef(ref)) {
-    return { repo, retrievalName: ref.name, retrievalArgs: [] };
+    return { repo, retrievalName: ref.name, retrievalArgs: [], ...readPage() };
   }
   // `Name(args)` — a NameRef head + a single CallSuffix.
   if (!isPostfixChain(ref) || !isNameRef(ref.head) || ref.suffixes.length !== 1) {
@@ -265,6 +267,14 @@ export interface RepoReadMatch {
   /** Positional argument expressions (criterion / find args), lowered by the
    *  caller in its own scope. */
   args: Expression[];
+  /** For `find`/`findAll` — the referenced criterion name.  The read FILTERS by
+   *  this criterion; without carrying it the criterion is silently dropped and
+   *  the read returns every row (data-exposure).  Drives the synthesis of the
+   *  `findAllBy<Criterion>` retrieval the backend renders. */
+  criterionName?: string;
+  /** For `run` — the referenced (named) retrieval.  Empty for an anonymous
+   *  retrieval literal, whose predicate rides `criterionName` instead. */
+  retrievalName?: string;
 }
 
 /** Recognise ANY repository read in an expression position, collapsing the four
@@ -279,12 +289,34 @@ export function matchRepoRead(
   reposByName: Map<string, Repository>,
 ): RepoReadMatch | undefined {
   const find = matchFindCall(expr, reposByName);
-  if (find) return { kind: "find", repo: find.repo, method: "find", args: find.criterionArgs };
+  if (find)
+    return {
+      kind: "find",
+      repo: find.repo,
+      method: "find",
+      args: find.criterionArgs,
+      criterionName: find.criterionName,
+    };
   const findAll = matchFindAllCall(expr, reposByName);
   if (findAll)
-    return { kind: "findAll", repo: findAll.repo, method: "findAll", args: findAll.criterionArgs };
+    return {
+      kind: "findAll",
+      repo: findAll.repo,
+      method: "findAll",
+      args: findAll.criterionArgs,
+      criterionName: findAll.criterionName,
+    };
   const run = matchRetrievalRunCall(expr, reposByName);
-  if (run) return { kind: "run", repo: run.repo, method: "run", args: run.retrievalArgs };
+  if (run)
+    return {
+      kind: "run",
+      repo: run.repo,
+      method: "run",
+      args: run.anon ? run.anon.criterionArgs : run.retrievalArgs,
+      ...(run.anon
+        ? { criterionName: run.anon.criterionName }
+        : { retrievalName: run.retrievalName }),
+    };
   const repo = matchRepoCall(expr, reposByName);
   if (repo && isReadMethod(repo.method))
     return { kind: "named", repo: repo.repo, method: repo.method, args: repo.args };

@@ -30,6 +30,7 @@ import {
 } from "../../../ir/util/openapi-ids.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
+import { emitsCommandRoute } from "../../../ir/util/workflow-command-route.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { emitWireSchema, wireToDomainExpr, zodFor, zodForResponse } from "./routes-builder.js";
 import {
@@ -620,17 +621,6 @@ function emitWorkflowRoute(
   out.push(`  },`);
   out.push(`);`);
   return out;
-}
-
-/** True when the workflow has an HTTP command surface (a POST route).  Mirrors
- *  lowering's facade-`primary` selection: a command-triggered unnamed create,
- *  else the first create.  A workflow whose facade is event-triggered is
- *  invoked only by the dispatcher (no route); a create-less reactor-only
- *  workflow keeps today's empty route (byte-identical). */
-function emitsCommandRoute(wf: WorkflowIR): boolean {
-  const facade =
-    wf.creates.find((c) => c.name === null && c.triggerKind === "command") ?? wf.creates[0];
-  return !facade || facade.triggerKind === "command";
 }
 
 /** The instance-response Zod DTO + its list carrier for an observable

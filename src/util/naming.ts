@@ -363,6 +363,36 @@ export function escapeElixirIdent(name: string): string {
   return ELIXIR_KEYWORDS.has(name) ? `${name}_` : name;
 }
 
+// ---------------------------------------------------------------------------
+// Target-language string / regex materialization for `.ddd`-sourced values.
+//
+// A string literal or regex pattern written in `.ddd` source is spliced into
+// generated target source.  Most backends can re-quote with `JSON.stringify`
+// (C#/Java/Python/TS double-quoted string literals do NOT interpolate `{`), but
+// Elixir does: a double-quoted string interpolates `#{…}` and a `~r/…/` regex
+// sigil both interpolates `#{…}` AND ends at an unescaped `/`.  Left raw, a
+// pattern like `"hi#{System.cmd(...)}"` executes at compile time and a `/`
+// closes the sigil early — an injection / compile-break class.  These helpers
+// are the single funnel every Elixir emit site shares so the escaping can't
+// drift one renderer at a time.
+// ---------------------------------------------------------------------------
+
+/** A safe Elixir double-quoted string literal for a `.ddd`-sourced value.
+ *  `JSON.stringify` handles `"` / `\` / control chars; the extra pass escapes
+ *  `#{` → `\#{` so Elixir string interpolation can't fire (`"a#{x}"` would
+ *  otherwise interpolate `x`).  Elixir reads `\#` as a literal `#`. */
+export function elixirString(value: string): string {
+  return JSON.stringify(value).replace(/#\{/g, "\\#{");
+}
+
+/** Escape a `.ddd`-sourced regex pattern for embedding in an Elixir `~r/…/`
+ *  sigil.  A raw `/` closes the sigil and a raw `#{` interpolates; escaping
+ *  both (`\/`, `\#{`) keeps the pattern a literal regex.  Regex backslashes
+ *  (`\d`, `\w`) are already meaningful and pass through untouched. */
+export function elixirRegexBody(pattern: string): string {
+  return pattern.replace(/#\{/g, "\\#{").replace(/\//g, "\\/");
+}
+
 export function indent(text: string, level = 1, unit = "  "): string {
   const pad = unit.repeat(level);
   return text

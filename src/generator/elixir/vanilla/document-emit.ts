@@ -33,7 +33,7 @@ import {
   type SingleFieldPattern,
   singleFieldConstraints,
 } from "../../../ir/validate/invariant-classify.js";
-import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { elixirRegexBody, plural, snake, upperFirst } from "../../../util/naming.js";
 import { NORMALIZE_KEYS_DEFP } from "./key-normalize.js";
 import { managedTimestampNames } from "./managed-timestamps.js";
 
@@ -148,7 +148,7 @@ function ectoValidator(field: string, p: SingleFieldPattern): string {
     case "len-range":
       return `    |> validate_length(:${field}, min: ${p.lo}, max: ${p.hi})`;
     case "regex":
-      return `    |> validate_format(:${field}, ~r/${p.pattern}/)`;
+      return `    |> validate_format(:${field}, ~r/${elixirRegexBody(p.pattern)}/)`;
   }
 }
 

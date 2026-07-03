@@ -32,7 +32,11 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { LoomBackendManifest } from "./manifest.js";
+import {
+  coreRangeSatisfies,
+  type LoomBackendManifest,
+  PLATFORM_SURFACE_CONTRACT,
+} from "./manifest.js";
 import type { DiscoveredBackend } from "./registry.js";
 import { defaultBuiltInBackends, setBackendSource } from "./registry.js";
 
@@ -50,26 +54,50 @@ async function readPackageJsonSafe(dir: string): Promise<RawPackageJson | null> 
   }
 }
 
-/** Coerce an arbitrary `loom` field into a typed manifest, or
- *  `null` if it doesn't look like a backend manifest.  Mirrors the
- *  shape of `LoomBackendManifest` from `manifest.ts` — keep the
- *  field set in lockstep with that interface. */
-function asBackendManifest(loom: unknown): LoomBackendManifest | null {
-  if (typeof loom !== "object" || loom === null) return null;
+/** One-line discovery warning on stderr.  A malformed manifest, an unknown
+ *  family/version, or a core-version mismatch is a package-author mistake the
+ *  adopter must see — never a silent skip (which is how a mis-pinned backend
+ *  used to vanish with no explanation). */
+function warnDiscovery(pkg: string, message: string): void {
+  console.warn(`loom: backend discovery skipped '${pkg}' — ${message}`);
+}
+
+/** Classification of a package's `loom` field:
+ *   - `notLoom`   — no `loom` block, or one not describing a backend (a
+ *                   `core` / `mcp-server` / future design-pack block): skip
+ *                   quietly, it isn't ours to warn about.
+ *   - `malformed` — a `kind: "backend"` block missing required string
+ *                   fields: warn, it's a broken backend manifest.
+ *   - `backend`   — a well-formed backend manifest. */
+type ManifestClass =
+  | { kind: "notLoom" }
+  | { kind: "malformed"; reason: string }
+  | { kind: "backend"; manifest: LoomBackendManifest };
+
+/** Classify an arbitrary `loom` field.  Mirrors the shape of
+ *  `LoomBackendManifest` from `manifest.ts` — keep the field set in lockstep
+ *  with that interface. */
+function classifyManifest(loom: unknown): ManifestClass {
+  if (typeof loom !== "object" || loom === null) return { kind: "notLoom" };
   const m = loom as Record<string, unknown>;
-  if (m.kind !== "backend") return null;
-  if (
-    typeof m.family !== "string" ||
-    typeof m.loomVersion !== "string" ||
-    typeof m.core !== "string"
-  ) {
-    return null;
+  if (m.kind !== "backend") return { kind: "notLoom" };
+  const missing = (["family", "loomVersion", "core"] as const).filter(
+    (k) => typeof m[k] !== "string",
+  );
+  if (missing.length > 0) {
+    return {
+      kind: "malformed",
+      reason: `backend manifest missing/invalid field(s): ${missing.join(", ")}`,
+    };
   }
   return {
     kind: "backend",
-    family: m.family,
-    loomVersion: m.loomVersion,
-    core: m.core,
+    manifest: {
+      kind: "backend",
+      family: m.family as string,
+      loomVersion: m.loomVersion as string,
+      core: m.core as string,
+    },
   };
 }
 
@@ -116,15 +144,37 @@ export async function discoverBackendsFs(rootDir: string): Promise<DiscoveredBac
   for await (const pkgDir of walkInstalledPackages(nm)) {
     const pkg = await readPackageJsonSafe(pkgDir);
     if (!pkg) continue;
-    const manifest = asBackendManifest(pkg.loom);
-    if (!manifest) continue;
+    const pkgName = pkg.name ?? path.basename(pkgDir);
+    const cls = classifyManifest(pkg.loom);
+    if (cls.kind === "notLoom") continue;
+    if (cls.kind === "malformed") {
+      warnDiscovery(pkgName, cls.reason);
+      continue;
+    }
+    const { manifest } = cls;
+    // Core-contract gate: the manifest's `core` semver range must admit the
+    // running `PlatformSurface` contract version, else this package was built
+    // against a different ABI — refuse it loudly instead of pairing it with a
+    // possibly-incompatible in-tree surface.
+    if (!coreRangeSatisfies(manifest.core, PLATFORM_SURFACE_CONTRACT)) {
+      warnDiscovery(
+        pkgName,
+        `its loom.core range '${manifest.core}' does not satisfy the running core contract ${PLATFORM_SURFACE_CONTRACT}`,
+      );
+      continue;
+    }
     const match = inTree.find(
       (b) =>
         b.manifest.family === manifest.family && b.manifest.loomVersion === manifest.loomVersion,
     );
     if (!match) {
-      // Discovered manifest with no matching in-tree code: silently
-      // skip so unknown installed packages don't break resolution.
+      // Discovered a well-formed backend manifest with no matching in-tree
+      // code (unknown family / version) — warn rather than vanish, so a typo
+      // or an unpackaged family surfaces to the adopter.
+      warnDiscovery(
+        pkgName,
+        `unknown backend family/version '${manifest.family}@${manifest.loomVersion}' — no in-tree surface pairs with it`,
+      );
       continue;
     }
     out.push({ manifest, surface: match.surface });

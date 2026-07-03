@@ -226,7 +226,7 @@ function expandHost(
   kind: "aggregate" | "ui" | "context",
   doc: LangiumDocument,
   inv: Inventory,
-  buildRef: BuildRef | undefined,
+  buildRef: BuildRef,
 ): void {
   const wc = host.withClause;
   if (wc) {
@@ -263,7 +263,7 @@ function expandOneCall(
   hostKind: "aggregate" | "ui" | "context",
   doc: LangiumDocument,
   inv: Inventory,
-  buildRef: BuildRef | undefined,
+  buildRef: BuildRef,
 ): void {
   const name = call.name;
   if (!name) return;
@@ -410,11 +410,14 @@ function expandOneCall(
  * implementing aggregate(s)' `members[]`, indistinguishable from hand-written
  * ones.  Cloning (not aliasing) is required because the same capability is
  * implemented by many aggregates — one AST node can't live under N parents —
- * and each clone's cross-references are rebuilt via the Linker's
- * `buildReference` so they re-link in the Linked phase.  Lowering then reads the
- * spliced members structurally (`collectFilters`/`collectStamps` + standard
- * field lowering), so a capability and the equivalent hand-written
- * filter/stamp/field produce byte-identical IR.
+ * and each clone's cross-references are rebuilt as PLAIN `{ $refText }`
+ * references (via `buildCapabilityRef`), NOT the Linker's `buildReference`.
+ * These resolve leniently: lowering reads `$refText` directly and the linker
+ * never surfaces a "could not resolve" diagnostic — matching the field/filter/
+ * stamp macros these capabilities replace (see `buildCapabilityRef` above).
+ * Lowering then reads the spliced members structurally
+ * (`collectFilters`/`collectStamps` + standard field lowering), so a capability
+ * and the equivalent hand-written filter/stamp/field produce byte-identical IR.
  *
  * Scope (typed-capabilities.md):
  *   - aggregate `with` — splice into that aggregate.
@@ -430,7 +433,7 @@ function expandCapability(
   // `implements` ImplementsDecl) — used only as the diagnostic anchor.
   at: AstNode,
   doc: LangiumDocument,
-  buildRef: BuildRef | undefined,
+  buildRef: BuildRef,
 ): void {
   if (hostKind === "ui") {
     recordDiagnostic(doc, {
@@ -442,9 +445,6 @@ function expandCapability(
     });
     return;
   }
-  // Only reachable off the live build path, where `shared` (hence buildRef) is
-  // always present; guard defensively so the arg-resolution path is a no-op.
-  if (!buildRef) return;
   // One fresh clone-set per destination aggregate — a context `with` fans out
   // to every child aggregate; an aggregate `with` is the single-target case.
   const targets =

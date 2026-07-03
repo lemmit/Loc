@@ -19,6 +19,7 @@ import {
   opWorkflowInstances,
 } from "../../ir/util/openapi-ids.js";
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
+import { commandWorkflowsOf } from "../../ir/util/workflow-command-route.js";
 import { walkExpr } from "../../ir/validate/checks/shared.js";
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
@@ -26,6 +27,7 @@ import { LogEvents } from "../_obs/log-events.js";
 import { renderWorkflowStmts, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
 import { domainServiceImportLinesForWorkflow } from "./emit/domain-service.js";
 import { responsePyType } from "./emit/http-models.js";
+import { wireHelperImport } from "./py-type-imports.js";
 import { type PyRenderContext, renderPyExpr } from "./render-expr.js";
 import { resourceImportLines } from "./resource-clients.js";
 import {
@@ -62,15 +64,10 @@ import { esFns } from "./workflow-eventsourced-emit.js";
 // with the Hono / .NET / Elixir-vanilla instance reads.
 // ---------------------------------------------------------------------------
 
-function emitsCommandRoute(wf: WorkflowIR): boolean {
-  const facade =
-    wf.creates.find((c) => c.name === null && c.triggerKind === "command") ?? wf.creates[0];
-  return !facade || facade.triggerKind === "command";
-}
-
-export function commandWorkflowsOf(ctx: EnrichedBoundedContextIR): WorkflowIR[] {
-  return ctx.workflows.filter(emitsCommandRoute);
-}
+// `commandWorkflowsOf` / `emitsCommandRoute` now live in
+// `ir/util/workflow-command-route`; re-exported here so `python/index.ts`'s
+// import point is unchanged.
+export { commandWorkflowsOf };
 
 /** Observable workflows — correlation-bearing, state-table-backed sagas the
  *  enricher gave an `instanceWireShape` (workflow-instance-visibility.md).
@@ -194,7 +191,7 @@ export function buildPyWorkflowsFile(
       }
       return `from app.dispatch import ${[...names].sort().join(", ")}`;
     })(),
-    refersTo("iso") ? "from app.db.wire import iso" : null,
+    wireHelperImport(refersTo),
     hasDispatch && refersTo("make_dispatcher") ? "from app.dispatch import make_dispatcher" : null,
     (() => {
       const names = ["AggregateNotFoundError", "DomainError", "ForbiddenError"].filter(refersTo);
@@ -670,6 +667,12 @@ export function instanceFieldValue(rowVar: string, f: WireField): string {
     return f.optional || f.type.kind === "optional"
       ? `(None if ${attr} is None else iso(${attr}))`
       : `iso(${attr})`;
+  }
+  if (t.kind === "primitive" && t.name === "money") {
+    // Precise-decimal string on the wire (parity with the other backends).
+    return f.optional || f.type.kind === "optional"
+      ? `(None if ${attr} is None else money_str(${attr}))`
+      : `money_str(${attr})`;
   }
   return attr;
 }

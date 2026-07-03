@@ -64,7 +64,7 @@ import type {
   UiApiParamIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
-import { WALKER_LAYOUT_PRIMITIVES } from "../../language/walker-stdlib.js";
+import { WALKER_LAYOUT_PRIMITIVES } from "../../util/walker-primitive-names.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { tryDetectApiHook } from "./api-hook-detector.js";
 import { registerApiHook } from "./api-hook-register.js";
@@ -168,36 +168,14 @@ export interface WalkResult {
    *  imports, mutation hook, `defaultValues`, and the `onSubmit`
    *  handler that wraps the form's `<form onSubmit={…}>`. */
   formOfs: FormOfState[];
-  /** OPTIONAL Angular side-channel: per-`CreateForm` specs the Angular
-   *  target's `renderCreateForm` seam records (typed `AngularCreateFormSpec`
-   *  in the angular generator) so its page-shell can build the typed Reactive
-   *  `FormGroup` + submit wiring.  Framework-neutral `unknown[]` here — the
-   *  other frameworks never populate or read it. */
-  angularForms?: unknown[];
-  /** OPTIONAL Angular side-channel: per-`Action(inst.op)` specs the Angular
-   *  target's `renderAction` seam records so its page-shell can hoist the
-   *  `use<Op><Agg>()` mutation.  Framework-neutral `unknown[]`; ignored elsewhere. */
-  angularActions?: unknown[];
-  /** OPTIONAL Angular side-channel: per-`Modal` operation-dialog specs the
-   *  Angular target's `renderModal` seam records so its page-shell can build the
-   *  toggle signal, the op `FormGroup`, and the submit method.  `unknown[]`;
-   *  ignored by the other frameworks. */
-  angularModals?: unknown[];
-  /** OPTIONAL Angular side-channel: per-`WorkflowForm(runs:)` specs the Angular
-   *  target's `renderWorkflowForm` seam records so its page-shell can build the
-   *  typed Reactive `FormGroup` + the command-posting submit method.  `unknown[]`;
-   *  ignored by the other frameworks. */
-  angularWorkflowForms?: unknown[];
-  /** OPTIONAL Angular side-channel: per-standalone-`OperationForm` specs the
-   *  Angular target's `renderOperationForm` seam records so its page-shell can
-   *  build the typed Reactive `FormGroup` + the id-at-mutate submit method.
-   *  `unknown[]`; ignored by the other frameworks. */
-  angularOpForms?: unknown[];
-  /** OPTIONAL Angular side-channel: per-`DestroyForm` specs the Angular target's
-   *  `renderDestroyForm` seam records so its page-shell can hoist the
-   *  `useDelete<Agg>` mutation + emit the confirm-delete method.  `unknown[]`;
-   *  ignored by the other frameworks. */
-  angularDestroyForms?: unknown[];
+  /** OPTIONAL opaque per-target sink.  A target that needs to hand
+   *  richly-typed per-primitive metadata to its own page-shell parks it here
+   *  (typed `unknown` so the shared core stays framework-neutral) and casts it
+   *  back on the read side.  Today only the Angular target uses it — its
+   *  render seams accumulate the six per-primitive form/action spec lists into
+   *  an `AngularWalkerSink` (`angular/walker/sink.ts`), which the Angular
+   *  page-shell drains.  Other frameworks leave it `undefined`. */
+  sink?: unknown;
   /** Every static `testid:` literal encountered while
    *  walking the body, plus the synthesised testid bases the walker
    *  generates on the user's behalf (e.g. `<form-namespace>-input-
@@ -419,12 +397,13 @@ export function walkBody(
     workflowsByName,
     bcByWorkflow,
     formOfs: [],
-    angularForms: [],
-    angularActions: [],
-    angularModals: [],
-    angularWorkflowForms: [],
-    angularOpForms: [],
-    angularDestroyForms: [],
+    // Shared opaque per-target sink.  Created ONCE on the root context (an
+    // empty container the walker never inspects) so child contexts — built by
+    // `{ ...ctx }` spread — carry the same object reference; a target seam that
+    // fills it from a nested walk therefore lands in the sink the root's
+    // `WalkResult` returns.  Only the target knows the shape (Angular fills an
+    // `AngularWalkerSink`).
+    sink: {},
     actionMutations: [],
     collectedTestids: new Set(),
     usesCodeBlock: false,
@@ -448,12 +427,7 @@ export function walkBody(
     usesChildren: ctx.usesChildren,
     usedApiHooks: ctx.usedApiHooks,
     formOfs: ctx.formOfs,
-    angularForms: ctx.angularForms,
-    angularActions: ctx.angularActions,
-    angularModals: ctx.angularModals,
-    angularWorkflowForms: ctx.angularWorkflowForms,
-    angularOpForms: ctx.angularOpForms,
-    angularDestroyForms: ctx.angularDestroyForms,
+    sink: ctx.sink,
     actionMutations: ctx.actionMutations,
     collectedTestids: ctx.collectedTestids,
     usesCodeBlock: ctx.usesCodeBlock,
@@ -570,26 +544,11 @@ export interface Sink {
    *  emit `useForm` + mutation hook + `handleSubmit` wiring at
    *  function top. */
   formOfs: FormOfState[];
-  /** Angular `CreateForm` specs (see the WalkResult field).  Mutable sink the
-   *  `renderCreateForm` seam pushes into; `unknown[]` to keep the shared
-   *  walker framework-neutral.  Optional so the other frameworks' dummy
-   *  contexts (init-expr rendering) need not set it. */
-  angularForms?: unknown[];
-  /** Angular `Action` specs — mutable sink the `renderAction` seam pushes
-   *  into (see the WalkResult field). */
-  angularActions?: unknown[];
-  /** Angular `Modal` operation-dialog specs — mutable sink the `renderModal`
-   *  seam pushes into (see the WalkResult field). */
-  angularModals?: unknown[];
-  /** Angular `WorkflowForm` specs — mutable sink the `renderWorkflowForm` seam
-   *  pushes into (see the WalkResult field). */
-  angularWorkflowForms?: unknown[];
-  /** Angular standalone `OperationForm` specs — mutable sink the
-   *  `renderOperationForm` seam pushes into (see the WalkResult field). */
-  angularOpForms?: unknown[];
-  /** Angular `DestroyForm` specs — mutable sink the `renderDestroyForm` seam
-   *  pushes into (see the WalkResult field). */
-  angularDestroyForms?: unknown[];
+  /** OPTIONAL opaque per-target sink — the mutable write side of
+   *  `WalkResult.sink` (see there).  A render seam parks its own typed
+   *  accumulator here (Angular: `AngularWalkerSink`); `unknown` keeps the
+   *  shared walker framework-neutral. */
+  sink?: unknown;
   /** `Action(<instance>.<op>)` mutation wiring (see
    *  `ActionMutationState`). */
   actionMutations: ActionMutationState[];
@@ -1446,17 +1405,23 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
       // reads as the plain member chain (the state root is in scope).
       const seg = stmt.target.segments;
       if (ctx.stateNames.has(seg[0]!)) {
-        // Single-segment current-value reads delegate to the target
-        // (position-aware — HEEx/Vue diverge in handler position);
-        // a nested target reads the plain member chain.  TSX-identical
-        // either way (its handler-position read IS the bare name).
+        // Current-value read for the compound assignment.  The ROOT
+        // segment always goes through the target's state-read seam
+        // (position-aware — Angular reads a signal via a call `count()`,
+        // HEEx/Vue diverge in handler position); a nested target then
+        // appends the member tail onto the seam's root read.  Emitting
+        // the plain `order.shipping.count` chain for a nested Angular
+        // target referenced the signal OBJECT instead of its value —
+        // it must be `order().shipping.count` (audit finding B22).
+        // React/Vue/Svelte reads are the bare name, so the tail-append
+        // is byte-identical there.
         const root = seg[0]!;
         const stateRef = {
           field: { name: root, type: { kind: "primitive" as const, name: "string" as const } },
           name: root,
         };
-        const read =
-          seg.length === 1 ? ctx.target.renderStateRead(stateRef, "handler") : seg.join(".");
+        const rootRead = ctx.target.renderStateRead(stateRef, "handler");
+        const read = seg.length === 1 ? rootRead : [rootRead, ...seg.slice(1)].join(".");
         const rhs = emitExpr(stmt.value, ctx);
         // Collection target → append / remove-by-value (immutable; the
         // JS frontends share this and the per-target state-write seam

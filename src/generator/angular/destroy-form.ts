@@ -4,6 +4,7 @@ import { emitActionThen } from "../_walker/primitives/controls.js";
 import { namedArgValue, stringNamed } from "../_walker/shared/args.js";
 import type { WalkContext } from "../_walker/walker-core.js";
 import { addNg, formStyle } from "./form-fields.js";
+import { angularSink } from "./walker/sink.js";
 
 // ---------------------------------------------------------------------------
 // Angular `DestroyForm(of: <Agg>, then?: navigate(...))` renderer — the
@@ -100,8 +101,7 @@ export function renderAngularDestroyForm(
     importFrom,
     method: { name: methodName, confirmMsg, thenJs },
   };
-  ctx.angularDestroyForms ??= [];
-  const specs = ctx.angularDestroyForms as AngularDestroyFormSpec[];
+  const specs = angularSink(ctx).destroyForms;
   if (!specs.some((s) => s.localVar === localVar)) specs.push(spec);
 
   const btnAttr =

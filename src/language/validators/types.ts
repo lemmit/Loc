@@ -17,6 +17,7 @@ import type {
   PostfixChain,
   PrimitiveConversion,
   Property,
+  TernaryExpr,
 } from "../generated/ast.js";
 import {
   isBinaryChain,
@@ -27,6 +28,7 @@ import {
   isPreconditionStmt,
   isRequiresStmt,
   isReturnStmt,
+  isTernaryExpr,
 } from "../generated/ast.js";
 import {
   absentRecordMember,
@@ -39,6 +41,7 @@ import {
   makeEnv,
   resolveTypeRef,
   T,
+  ternaryJoin,
   typeAfterSuffix,
   typeOf,
   typeToString,
@@ -140,6 +143,18 @@ export function checkSlotMemberAccess(model: Model, accept: ValidationAcceptor):
  *  an `X id` resolving to one) and the member is definitively absent — never
  *  on arrays (collection ops), primitives (`.length`), magic identifiers, or
  *  any receiver that already typed as `unknown`. */
+/** Collection aggregations that fold the collection through a lambda and have
+ *  NO renderable bare form — `prices.sum` types as a value but emits a
+ *  non-existent `.sum` property on every backend.  The documented form is
+ *  `xs.sum(x => …)`.  `count` (→ `.length`) is the only bare collection
+ *  accessor any backend renders, so it stays legal (C11). */
+const BARE_REJECTED_COLLECTION_ACCESSORS: ReadonlySet<string> = new Set([
+  "sum",
+  "avg",
+  "min",
+  "max",
+]);
+
 export function checkUnknownMemberAccess(model: Model, accept: ValidationAcceptor): void {
   for (const node of AstUtils.streamAllContents(model)) {
     if (!isPostfixChain(node)) continue;
@@ -154,6 +169,20 @@ export function checkUnknownMemberAccess(model: Model, accept: ValidationAccepto
         // type (a value-object `expect(Money{…}).toThrow()` included), so the
         // matcher terminates the chain rather than reporting an unknown member.
         if (intrinsicMatcherSig(ms.member)) break;
+        // Bare collection aggregation (`prices.sum`, no lambda call) — admitted
+        // by the type system but unrenderable.  Reject with the lambda form (C11).
+        if (
+          recvType.kind === "array" &&
+          !ms.call &&
+          BARE_REJECTED_COLLECTION_ACCESSORS.has(ms.member)
+        ) {
+          accept(
+            "error",
+            `'${ms.member}' over a collection needs a lambda — write '<collection>.${ms.member}(x => …)'. A bare '.${ms.member}' has no renderable form.`,
+            { node: ms, property: "member", code: "loom.bare-collection-accessor" },
+          );
+          break;
+        }
         const record = absentRecordMember(recvType, ms.member);
         if (record) {
           accept("error", `'${ms.member}' is not a member of '${record}'.`, {
@@ -252,6 +281,57 @@ export function checkSingleBinaryOperands(chain: BinaryChain, accept: Validation
     }
     lt = result;
     leftExprForPromotion = undefined;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Ternary expression check (`cond ? a : b`).
+//
+// `typeOf(TernaryExpr)` returns the JOIN of the two branches, but — like the
+// binary-operand class above — it can't *reject* an ill-formed ternary on its
+// own: a non-bool condition and two branches that share no supertype both
+// produce a type silently (the then-branch), and every downstream gate then
+// suppresses on `unknown` or accepts the fallback.  This pass makes both
+// illegal shapes explicit:
+//
+//   • Condition — must be `bool` (`s ? 1 : 2` with a `string` `s` is a bug).
+//   • Branches  — must join: one branch's type assignable to the other, or a
+//     shared numeric / optional / null supertype (`ternaryJoin`).  `f ? 1 :
+//     "oops"` (int vs string) has no join and is rejected.
+//
+// Cascade suppression: skips the condition report when the condition already
+// typed `unknown`, and the branch report when either branch did — an upstream
+// checker (unknown name / member) has already reported those.
+// ---------------------------------------------------------------------------
+export function checkTernaryExprs(model: Model, accept: ValidationAcceptor): void {
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (!isTernaryExpr(node)) continue;
+    checkSingleTernary(node as TernaryExpr, accept);
+  }
+}
+
+export function checkSingleTernary(node: TernaryExpr, accept: ValidationAcceptor): void {
+  const env = envForNode(node);
+  const condT = typeOf(node.cond, env);
+  if (condT.kind !== "unknown" && !(condT.kind === "primitive" && condT.name === "bool")) {
+    accept("error", `Ternary condition must be of type 'bool', got '${typeToString(condT)}'.`, {
+      node,
+      property: "cond",
+      code: "loom.ternary-condition",
+    });
+  }
+  const thenT = typeOf(node.thenExpr, env);
+  const elseT = typeOf(node.elseExpr, env);
+  // Cascade suppression — a branch that failed to resolve is already reported.
+  if (thenT.kind === "unknown" || elseT.kind === "unknown") return;
+  if (ternaryJoin(thenT, elseT) === undefined) {
+    accept(
+      "error",
+      `Ternary branches have incompatible types: then-branch is '${typeToString(thenT)}', ` +
+        `else-branch is '${typeToString(elseT)}'.  One branch's type must be assignable to ` +
+        `the other (both numeric, an optional and its inner, or a null literal against an optional).`,
+      { node, property: "elseExpr", code: "loom.ternary-branches" },
+    );
   }
 }
 
@@ -434,13 +514,15 @@ export function checkFunction(
   const env = part ? envForPart(agg, part, fn) : envForAggregate(agg, fn);
   const declared = resolveTypeRef(fn.returnType);
 
-  // Expression form (`= Expression`) — the single, inlinable body.  Unchanged.
+  // Expression form (`= Expression`) — the single, inlinable body.  Admit
+  // literal promotion (`function fee(): money = 0`) as defaults / `:=` do (C1).
   if (fn.body) {
     const actual = typeOf(fn.body, env);
     if (
       declared.kind !== "unknown" &&
       actual.kind !== "unknown" &&
-      !isAssignable(actual, declared)
+      !isAssignable(actual, declared) &&
+      !canPromoteLiteralTo(fn.body, declared)
     ) {
       accept(
         "error",
@@ -486,7 +568,8 @@ export function checkFunction(
       if (
         declared.kind !== "unknown" &&
         actual.kind !== "unknown" &&
-        !isAssignable(actual, declared)
+        !isAssignable(actual, declared) &&
+        !canPromoteLiteralTo(stmt.value, declared)
       ) {
         accept(
           "error",

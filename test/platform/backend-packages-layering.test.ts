@@ -30,9 +30,12 @@ function tsFiles(dir: string): string[] {
   return out;
 }
 
-// Matches `from "…/platform/…"` and `import("…/platform/…")` in any
-// relative form (`../platform`, `../../platform`, …).
-const PLATFORM_IMPORT = /(?:from|import\()\s*["'][^"']*\/platform\/[^"']*["']/;
+// Matches a static `from "…/platform/…"`, a dynamic `import("…/platform/…")`,
+// and a side-effect `import "…/platform/…"` in any relative form
+// (`../platform`, `../../platform`, …) — so a shared→package edge can't hide
+// behind a side-effect or dynamic import.
+const PLATFORM_IMPORT =
+  /(?:from|import\()\s*["'][^"']*\/platform\/[^"']*["']|(?:^|[;\n])\s*import\s+["'][^"']*\/platform\/[^"']*["']/m;
 
 describe("backend-packages layering — no shared→package edges", () => {
   const files = tsFiles(generatorDir);

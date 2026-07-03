@@ -1,6 +1,5 @@
-import { generateReactForContexts } from "../generator/react/index.js";
-import { generateSvelteForContexts } from "../generator/svelte/index.js";
 import { API_BASE_PATH } from "../util/api-base.js";
+import { dispatchFrontendProject } from "./frontend-dispatch.js";
 import {
   type ComposeServiceShape,
   type PlatformSurface,
@@ -21,13 +20,15 @@ const reactPlatform: PlatformSurface = {
   // repository class.  No find-name collisions are possible.
   reservedRepositoryFindNames: new Set(),
   emitProject({ contexts, sys, deployable, topLevelComponents }): Map<string, string> {
-    // Frontend hosts dispatch by the UI's framework — a react/static
-    // host can serve a `framework: svelte` ui (any static bundle runs
-    // on a static host).
-    if (deployable.uiFramework === "svelte") {
-      return generateSvelteForContexts(contexts, sys, deployable, { topLevelComponents });
-    }
-    return generateReactForContexts(contexts, sys, deployable, { topLevelComponents });
+    // Frontend hosts dispatch by the UI's framework — a react/static host can
+    // serve a `framework: svelte|vue|angular` ui (any static bundle runs on a
+    // static host).  `react` is the native fallback for a ui-less mount.
+    return dispatchFrontendProject(deployable.uiFramework, "react", {
+      contexts,
+      sys,
+      deployable,
+      topLevelComponents,
+    });
   },
   composeService({ deployable, sys }): ComposeServiceShape {
     const target = sys.deployables.find((t) => t.name === deployable.targetName);

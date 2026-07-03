@@ -14,14 +14,14 @@
 // thing each platform is.
 
 import type { Platform, SavingShape } from "../../../ir/types/loom-ir.js";
-import { descriptorFor, parseBuiltinPlatformRef } from "../../../platform/metadata.js";
 import {
-  adaptersFor,
   allAdapterNames,
   availableAdapterNames,
   defaultsFor,
   hasAdapters,
-} from "../../../platform/resolve-adapters.js";
+  styleSupportedLayouts,
+} from "../../../platform/adapter-metadata.js";
+import { descriptorFor, parseBuiltinPlatformRef } from "../../../platform/metadata.js";
 import {
   BUILTIN_PACK_LATEST,
   type PackFormat,
@@ -295,15 +295,21 @@ export function resolveStyleLayoutCompat(
   applicationDsl: string | undefined,
   layout: string | undefined,
 ): { style: string; layout: string; supported: readonly string[]; ok: boolean } | undefined {
-  const adapters = adaptersFor(family);
+  // Guard the unresolved-platform case FIRST.  A name that isn't a known
+  // backend family (a typo'd quoted `platform:`) has no adapter metadata, so
+  // stay quiet: an unknown platform already draws its own diagnostic from
+  // `checkDeployablePlatform` (deployable.ts), and a frontend legitimately has
+  // no style/layout axes to check.  Reads pure adapter FACTS from
+  // `adapter-metadata.ts` (no live surface / generator import), so the
+  // validator no longer drags the backend generators into a client bundle.
+  if (parseBuiltinPlatformRef(family) == null) return undefined;
   const defaults = defaultsFor(family);
-  if (!adapters || !defaults) return undefined;
+  if (!defaults) return undefined;
   const styleKey = applicationDsl ? applicationDslToAdapter(applicationDsl) : defaults.style;
-  const style = adapters.styles[styleKey];
-  if (!style || !availableAdapterNames(family, "style").includes(styleKey)) return undefined;
+  const supported = styleSupportedLayouts(family, styleKey);
+  if (!supported || !availableAdapterNames(family, "style").includes(styleKey)) return undefined;
   const resolvedLayout = layout ?? defaults.layout;
   if (!availableAdapterNames(family, "layout").includes(resolvedLayout)) return undefined;
-  const supported = style.supportedLayouts as readonly string[];
   return {
     style: styleKey,
     layout: resolvedLayout,

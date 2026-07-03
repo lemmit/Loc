@@ -80,7 +80,7 @@ describe("dotnet migrations emitter", () => {
     expect(mig).toMatch(/using Microsoft\.EntityFrameworkCore\.Infrastructure;/);
     expect(mig).toMatch(/\[Migration\("20260101000000_Sales_Initial"\)\]/);
     expect(mig).toMatch(/public partial class M20260101000000_Sales_Initial : Migration/);
-    expect(mig).toMatch(/migrationBuilder\.Sql\(@"CREATE TABLE orders \(/);
+    expect(mig).toMatch(/migrationBuilder\.Sql\(@"CREATE TABLE ""orders"" \(/);
     expect(mig).toMatch(/protected override void Down\(MigrationBuilder migrationBuilder\)/);
   });
 
@@ -123,10 +123,10 @@ describe("dotnet migrations emitter", () => {
     // The context's schema is created first, then every relation is
     // schema-qualified so EF's `ToTable("pipelines","catalog")` mapping
     // finds the table it queries at runtime.
-    expect(mig).toContain("CREATE SCHEMA IF NOT EXISTS catalog;");
-    expect(mig).toContain("CREATE TABLE catalog.pipelines (");
-    expect(mig).toContain("REFERENCES catalog.projects");
-    expect(mig).toContain("ON catalog.pipelines (project_id)");
+    expect(mig).toContain('CREATE SCHEMA IF NOT EXISTS ""catalog"";');
+    expect(mig).toContain('CREATE TABLE ""catalog"".""pipelines"" (');
+    expect(mig).toContain('REFERENCES ""catalog"".""projects""');
+    expect(mig).toContain('ON ""catalog"".""pipelines"" (""project_id"")');
   });
 
   it("skips empty-step migrations entirely", () => {
@@ -182,7 +182,8 @@ describe("dotnet migrations emitter", () => {
     );
     const path = [...out.keys()].find((k) => k.endsWith(".cs") && !k.includes("Snapshot"))!;
     const body = out.get(path)!;
-    // Original `"` in identifier doubles to `""` inside @"...".
-    expect(body).toContain('DROP TABLE has""quote;');
+    // The identifier is `"`-quoted (embedded `"` doubled per Postgres) and
+    // then EACH `"` doubles again inside the C# `@"..."` verbatim literal.
+    expect(body).toContain('DROP TABLE ""has""""quote"";');
   });
 });

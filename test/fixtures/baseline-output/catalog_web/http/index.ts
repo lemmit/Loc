@@ -22,10 +22,32 @@ export function createApp(
   // inbound X-Request-Id header so callers can thread their
   // own id through.
   app.use("*", requestIdMiddleware);
-  // Permissive CORS so a generated React frontend on a different port
-  // can reach the API in dev compose.  Pin http/index.ts in
-  // .loomignore + tighten in production.
-  app.use("*", cors());
+  // CORS: the compose stack sets CORS_ORIGIN to the frontend origin(s) —
+  // a comma-separated allowlist.  When set, only those origins are
+  // allowed (with credentials, so the session cookie flows cross-origin).
+  // When unset, the fallback is permissive '*' ONLY for an auth-less
+  // system; an auth-bearing system denies cross-origin by default (a
+  // session cookie reflected against '*' is unsafe).  Pin http/index.ts
+  // in .loomignore to override.
+  const corsAllowlist = (process.env.CORS_ORIGIN ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const corsAllowAnyFallback = true;
+  app.use(
+    "*",
+    cors({
+      origin: (origin) =>
+        corsAllowlist.length > 0
+          ? corsAllowlist.includes(origin)
+            ? origin
+            : null
+          : corsAllowAnyFallback
+            ? origin || "*"
+            : null,
+      credentials: true,
+    }),
+  );
   // Liveness probe — cheap, no I/O.  K8s livenessProbe / docker-compose
   // healthcheck use this to decide "is the process alive?".  A DB blip
   // must NOT mark the pod not-alive (that restarts the container);

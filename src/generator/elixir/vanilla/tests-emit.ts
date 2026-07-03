@@ -5,7 +5,7 @@ import type {
   TestIR,
   TestStmtIR,
 } from "../../../ir/types/loom-ir.js";
-import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
+import { elixirString, escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 import { opUsesCurrentUser } from "../domain/predicates.js";
 
 // ---------------------------------------------------------------------------
@@ -104,11 +104,11 @@ function renderTest(t: TestIR, env: Env): string[] {
   try {
     const used = usedRefNames(t.statements);
     const lines = t.statements.flatMap((s) => renderStmt(s, env, used));
-    return [`test ${JSON.stringify(t.name)} do`, ...lines.map((l) => `  ${l}`), "end"];
+    return [`test ${elixirString(t.name)} do`, ...lines.map((l) => `  ${l}`), "end"];
   } catch {
     // Anything we can't faithfully lower (VO-construction invariants, VO
     // instance methods, exotic shapes) → a documented skip, never broken Elixir.
-    return ["@tag :skip", `test ${JSON.stringify(t.name)} do`, ...SKIP_BODY, "end"];
+    return ["@tag :skip", `test ${elixirString(t.name)} do`, ...SKIP_BODY, "end"];
   }
 }
 

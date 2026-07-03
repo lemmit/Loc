@@ -375,40 +375,53 @@ function renderEctoStep(step: MigrationStep): string[] {
   switch (step.op) {
     case "createTable":
       return renderCreateTableInline(step.table);
-    case "dropTable":
-      return [`drop table(:${step.name})`];
+    case "dropTable": {
+      const prefix = prefixOpt(step.schema);
+      return [`drop table(:${step.name}${prefix})`];
+    }
     case "addColumn": {
       const c = step.column;
+      const prefix = prefixOpt(step.schema);
       const decl = step.fk
-        ? `references(:${step.fk.refTable}, type: ${ectoPrimaryKeyType(c.type)}, on_delete: :${step.fk.onDelete === "cascade" ? "delete_all" : "restrict"})`
+        ? `references(:${step.fk.refTable}${prefix}, type: ${ectoPrimaryKeyType(c.type)}, on_delete: :${step.fk.onDelete === "cascade" ? "delete_all" : "restrict"})`
         : ectoColumnType(c.type);
       return [
-        `alter table(:${step.table}) do`,
+        `alter table(:${step.table}${prefix}) do`,
         `  add :${c.name}, ${decl}, null: ${c.nullable}`,
         `end`,
       ];
     }
     case "dropColumn":
-      return [`alter table(:${step.table}) do`, `  remove :${step.name}`, `end`];
+      return [
+        `alter table(:${step.table}${prefixOpt(step.schema)}) do`,
+        `  remove :${step.name}`,
+        `end`,
+      ];
+    case "renameColumn":
+      return [
+        `rename table(:${step.table}${prefixOpt(step.schema)}), :${step.from}, to: :${step.to}`,
+      ];
     case "alterColumnNullable":
       return [
-        `alter table(:${step.table}) do`,
+        `alter table(:${step.table}${prefixOpt(step.schema)}) do`,
         `  modify :${step.name}, ${ectoColumnType(step.type)}, null: ${step.nullable}`,
         `end`,
       ];
     case "alterColumnType":
       return [
-        `alter table(:${step.table}) do`,
+        `alter table(:${step.table}${prefixOpt(step.schema)}) do`,
         `  modify :${step.name}, ${ectoColumnType(step.to)}, from: ${ectoColumnType(step.from)}`,
         `end`,
       ];
     case "addIndex": {
       const cols = step.index.columns.map((n) => `:${n}`).join(", ");
       const unique = step.index.unique ? ", unique: true" : "";
-      return [`create index(:${step.index.table}, [${cols}]${unique})`];
+      return [`create index(:${step.index.table}, [${cols}]${unique}${prefixOpt(step.schema)})`];
     }
     case "dropIndex":
-      return [`drop index(:${step.table}, name: "${step.name}")`];
+      return [`drop index(:${step.table}, name: "${step.name}"${prefixOpt(step.schema)})`];
+    case "sqlComment":
+      return [`# ${step.comment}`];
   }
 }
 

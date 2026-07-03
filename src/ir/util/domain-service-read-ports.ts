@@ -14,7 +14,8 @@
 // the `aggregate` it serves (e.g. `Account`).  Ports are returned in
 // first-read order, de-duplicated by repository name, so a body that reads the
 // same repository twice declares one parameter and the caller passes one handle.
-import type { DomainServiceOperationIR, ExprIR, StmtIR } from "../types/loom-ir.js";
+import type { DomainServiceOperationIR, ExprIR } from "../types/loom-ir.js";
+import { walkStmtExprsDeep } from "./walk.js";
 
 /** One read-port a `reading` operation consumes — the repository it reads and
  *  the aggregate that repository serves. */
@@ -33,7 +34,7 @@ export interface ReadPort {
 export function readPortsForOperation(op: DomainServiceOperationIR): ReadPort[] {
   const byRepo = new Map<string, ReadPort>();
   for (const stmt of op.body) {
-    forEachStmtExpr(stmt, (e) => {
+    walkStmtExprsDeep(stmt, (e: ExprIR) => {
       if (e.kind === "call" && e.callKind === "repo-read" && e.repoRead) {
         const { repo, aggregate } = e.repoRead;
         if (!byRepo.has(repo)) byRepo.set(repo, { repo, aggregate });
@@ -41,71 +42,4 @@ export function readPortsForOperation(op: DomainServiceOperationIR): ReadPort[] 
     });
   }
   return [...byRepo.values()];
-}
-
-/** Visit every sub-expression reachable from a statement (read-port derivation
- *  only needs to find every `repo-read` Call anywhere in the body). */
-function forEachStmtExpr(stmt: StmtIR, visit: (e: ExprIR) => void): void {
-  switch (stmt.kind) {
-    case "precondition":
-    case "requires":
-    case "expression":
-    case "let":
-      walkExpr(stmt.expr, visit);
-      break;
-    case "assign":
-    case "add":
-    case "remove":
-      walkExpr(stmt.value, visit);
-      break;
-    case "emit":
-      for (const f of stmt.fields) walkExpr(f.value, visit);
-      break;
-    case "call":
-      for (const a of stmt.args) walkExpr(a, visit);
-      break;
-    case "return":
-      walkExpr(stmt.value, visit);
-      break;
-  }
-}
-
-/** Visit `e` and every sub-expression. */
-function walkExpr(e: ExprIR | undefined, visit: (e: ExprIR) => void): void {
-  if (!e) return;
-  visit(e);
-  switch (e.kind) {
-    case "method-call":
-      walkExpr(e.receiver, visit);
-      for (const a of e.args) walkExpr(a, visit);
-      break;
-    case "member":
-      walkExpr(e.receiver, visit);
-      break;
-    case "binary":
-      walkExpr(e.left, visit);
-      walkExpr(e.right, visit);
-      break;
-    case "ternary":
-      walkExpr(e.cond, visit);
-      walkExpr(e.then, visit);
-      walkExpr(e.otherwise, visit);
-      break;
-    case "unary":
-      walkExpr(e.operand, visit);
-      break;
-    case "paren":
-      walkExpr(e.inner, visit);
-      break;
-    case "call":
-      for (const a of e.args) walkExpr(a, visit);
-      break;
-    case "new":
-    case "object":
-      for (const f of e.fields) walkExpr(f.value, visit);
-      break;
-    case "lambda":
-      walkExpr(e.body, visit);
-      break;
-  }
 }

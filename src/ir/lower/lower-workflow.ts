@@ -52,7 +52,13 @@ import type {
 } from "../types/loom-ir.js";
 import { aggregateOpResolver, type SaveResolver } from "../util/domain-service-tier.js";
 import { resolveBypass } from "./lower-capabilities.js";
-import { inferExprType, lowerExpr, lowerExprInContext, pathType } from "./lower-expr.js";
+import {
+  inferExprType,
+  lowerEmitFields,
+  lowerExpr,
+  lowerExprInContext,
+  pathType,
+} from "./lower-expr.js";
 import { computeSaves, lowerApply, lowerField, plural } from "./lower-members.js";
 import {
   cstText,
@@ -314,10 +320,7 @@ function lowerWorkflowStatement(
       stmt: {
         kind: "emit",
         eventName: stmt.event?.ref?.name ?? "Unknown",
-        fields: stmt.fields.map((f) => ({
-          name: f.name,
-          value: lowerExpr(f.value, env),
-        })),
+        fields: lowerEmitFields(stmt.event?.ref, stmt.fields, env),
       },
       envAfter: env,
     };

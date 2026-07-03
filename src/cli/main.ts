@@ -23,7 +23,8 @@ import { generateTypeScript } from "../platform/hono/v4/emit.js";
 import { BACKEND_PINS as HONO_V4_PINS } from "../platform/hono/v4/pins.js";
 import { generateSystemsFromLoom } from "../system/index.js";
 import { captureSnapshots } from "../system/loomsnap.js";
-import { fsSnapshotStore } from "../system/snapshot.js";
+import { MigrationDestructiveError } from "../system/migrations-builder.js";
+import { fsSnapshotStore, SnapshotReadError } from "../system/snapshot.js";
 import {
   renderVerdictGraph,
   renderVerificationJson,
@@ -41,6 +42,7 @@ import {
   type StarterPlatform,
   type StarterTemplate,
 } from "./new-templates.js";
+import { escapesOutDir } from "./output-containment.js";
 
 interface ParseResult {
   model: Model;
@@ -289,6 +291,11 @@ interface RunOptions {
    * chart (`helm/`) and the raw manifests it renders to (`k8s/`) alongside
    * `docker-compose.yml`.  See docs/kubernetes.md. */
   emitKubernetes?: boolean;
+  /** `--allow-destructive` switch — permit destructive delta migrations
+   * (column/table drops, NOT-NULL adds without a default on an existing
+   * table).  Off by default: a destructive delta aborts the run with a
+   * `loom.migration-destructive` error.  See docs/migrations.md. */
+  allowDestructive?: boolean;
 }
 
 interface RunResult {
@@ -363,7 +370,9 @@ async function runGenerate(
     if (!options.continueOnError) process.exit(1);
     return { hadError: true };
   }
-  if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+  // Directory creation is deferred to the write loop below (and guarded by
+  // `!options.dryRun`) so a `--dry-run` touches nothing on disk — not even
+  // `mkdir`-ing the output dir.
 
   let files: Map<string, string>;
   if (target === "system") {
@@ -373,11 +382,27 @@ async function runGenerate(
     // migration; existing snapshots ⇒ delta migration when the source
     // moves.  See `src/system/migrations-builder.ts` for the diff
     // builder + `docs/generators.md` § Migrations for the pipeline.
-    files = generateSystemsFromLoom(loom, {
-      emitTrace: options.emitTrace,
-      emitKubernetes: options.emitKubernetes,
-      snapshots: fsSnapshotStore(outDir),
-    }).files;
+    try {
+      files = generateSystemsFromLoom(loom, {
+        emitTrace: options.emitTrace,
+        emitKubernetes: options.emitKubernetes,
+        snapshots: fsSnapshotStore(outDir),
+        allowDestructive: options.allowDestructive,
+      }).files;
+    } catch (err) {
+      // A corrupted/truncated migration snapshot, or a destructive delta
+      // without --allow-destructive, is a recoverable operator problem, not
+      // a compiler crash — report it as a clean CLI failure (with the
+      // recovery hint from the error message), matching how the other fatal
+      // generation errors above surface.  Re-throw anything else for the
+      // top-level handler to print.
+      if (err instanceof SnapshotReadError || err instanceof MigrationDestructiveError) {
+        console.error(`${file}: ${err.message}`);
+        if (!options.continueOnError) process.exit(1);
+        return { hadError: true };
+      }
+      throw err;
+    }
     if (files.size === 0) {
       console.error(
         `No \`system\` block declared in ${file}.  Use \`generate ts\` or \`generate dotnet\` for legacy single-deployable sources.`,
@@ -399,30 +424,52 @@ async function runGenerate(
   let written = 0;
   let unchanged = 0;
   let skippedByIgnore = 0;
+  const resolvedOut = path.resolve(outDir);
   const sortedPaths = [...files.keys()].sort();
   for (const relPath of sortedPaths) {
     const content = files.get(relPath)!;
+    // Output-path containment: every generated key must resolve to a path
+    // strictly inside the out dir.  An absolute key or one that climbs out
+    // via `..` would let a generator (in particular an untrusted, out-of-
+    // tree backend/design pack) write anywhere on disk — reject it loudly
+    // rather than honouring the escape.  Checked for dry-run and real runs
+    // alike, before any filesystem touch.
+    if (escapesOutDir(resolvedOut, relPath)) {
+      console.error(`Refusing to write '${relPath}': path escapes the output directory ${outDir}.`);
+      if (!options.continueOnError) process.exit(1);
+      return { hadError: true };
+    }
     const normalised = relPath.split(path.sep).join("/");
     const ignored = ig.ignores(normalised);
+    const full = path.join(outDir, relPath);
+    // Classify exactly as the real writer does so a dry run's tallies
+    // match the run it previews: an up-to-date file is `unchanged`, not
+    // a would-write.  `fileContentMatches` returns false for a missing
+    // file (fresh output dir ⇒ everything is a write).
+    const wouldChange = !ignored && !fileContentMatches(full, content);
     if (options.dryRun) {
       const sizeKb = (Buffer.byteLength(content, "utf8") / 1024).toFixed(1);
-      const status = ignored ? "  skip (.loomignore)" : "  write              ";
+      const status = ignored
+        ? "  skip (.loomignore)"
+        : wouldChange
+          ? "  write              "
+          : "  unchanged          ";
       console.log(`${status}  ${relPath}  (${sizeKb} KB)`);
       if (ignored) skippedByIgnore++;
-      else written++;
+      else if (wouldChange) written++;
+      else unchanged++;
       continue;
     }
     if (ignored) {
       skippedByIgnore++;
       continue;
     }
-    const full = path.join(outDir, relPath);
     // Incremental write: only touch files whose content actually
     // changed.  Downstream watchers (Vite, `dotnet watch`) react to
     // mtimes, so skipping unchanged writes turns a regen of an N-file
     // project where the user touched one aggregate into a precise
     // reload signal instead of a full project bounce.
-    if (fileContentMatches(full, content)) {
+    if (!wouldChange) {
       unchanged++;
       continue;
     }
@@ -615,6 +662,20 @@ interface VerifyOptions {
 /** `ddd verify` — join a test-results file onto the requirements graph,
  *  emit the verification artifacts, and gate the exit code. */
 async function runVerify(file: string, options: VerifyOptions): Promise<void> {
+  // Validate `--min` up front: `Number("90%")` / `Number("abc")` is NaN and
+  // `actual < NaN` is always false, so a typo'd threshold would silently pass
+  // the gate.  Reject non-numeric or out-of-[0,100] values before any work.
+  let minPct: number | undefined;
+  if (options.min !== undefined) {
+    minPct = Number(options.min);
+    if (!Number.isFinite(minPct) || minPct < 0 || minPct > 100) {
+      console.error(
+        `Invalid --min "${options.min}": expected a number between 0 and 100 (e.g. --min 90).`,
+      );
+      process.exit(2);
+    }
+  }
+
   const result = await parseFile(file);
   if (result.errorCount > 0) {
     printDiagnostics(result);
@@ -679,8 +740,7 @@ async function runVerify(file: string, options: VerifyOptions): Promise<void> {
     failed = true;
     reason = `${s.total - s.verified} requirement(s) not verified (--require-all)`;
   }
-  if (options.min !== undefined) {
-    const minPct = Number(options.min);
+  if (minPct !== undefined) {
     const actual = s.total === 0 ? 100 : (s.verified / s.total) * 100;
     if (actual < minPct) {
       failed = true;
@@ -789,6 +849,10 @@ generate
     "--k8s",
     "also emit a Helm chart (helm/) and raw manifests (k8s/) alongside docker-compose.yml; see docs/kubernetes.md",
   )
+  .option(
+    "--allow-destructive",
+    "permit destructive delta migrations (column/table drops, NOT-NULL adds without a default on an existing table); off by default a destructive delta aborts. See docs/migrations.md.",
+  )
   .action(
     async (
       file: string,
@@ -799,6 +863,7 @@ generate
         json?: boolean;
         trace?: boolean;
         k8s?: boolean;
+        allowDestructive?: boolean;
       },
     ) => {
       if (options.json) {
@@ -813,6 +878,7 @@ generate
         dryRun: options.dryRun,
         emitTrace: !!options.trace,
         emitKubernetes: !!options.k8s,
+        allowDestructive: !!options.allowDestructive,
       };
       await runGenerate("system", file, options.out, runOpts);
       if (options.watch) {

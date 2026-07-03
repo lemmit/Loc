@@ -68,6 +68,29 @@ export interface WorkflowStmtTarget {
   ): string[];
 }
 
+/** Let-bound names whose RHS was a UNION-returning find (`find x(): Agg or
+ *  Err`).  Per the union-find wire contract (exception-less.md §4 /
+ *  docs/payloads.md) the backends' Domain repositories lower such a find to
+ *  its OPTIONAL TWIN — the success aggregate, nullable on absence — and emit
+ *  NO union carrier types.  A variant-`match` over one of these bindings must
+ *  therefore render as a null-check, not a carrier-pattern dispatch; backends
+ *  consult this set in their `exprLet` arm. */
+export function collectUnionFindLets(stmts: readonly WorkflowStmtIR[]): Set<string> {
+  const out = new Set<string>();
+  const walk = (sts: readonly WorkflowStmtIR[]): void => {
+    for (const st of sts) {
+      if (st.kind === "repo-let" && st.returnType.kind === "union") out.add(st.name);
+      else if (st.kind === "for-each") walk(st.body);
+      else if (st.kind === "if-let") {
+        walk(st.thenBody);
+        walk(st.elseBody ?? []);
+      }
+    }
+  };
+  walk(stmts);
+  return out;
+}
+
 /** Render a workflow statement sequence at `indent`, dispatching each kind to
  *  the backend `target`. Owns the only `for-each` recursion. */
 export function renderWorkflowStmts(

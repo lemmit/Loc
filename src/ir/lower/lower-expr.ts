@@ -10,6 +10,7 @@ import type {
   EntityPartMember,
   EventDecl,
   Expression,
+  Lambda,
   MemberSuffix,
   PayloadDecl,
   PostfixChain,
@@ -266,6 +267,15 @@ function lowerPostfixChain(chain: PostfixChain, env: Env): ExprIR {
     if (read) {
       const aggName = read.repo.aggregate?.ref?.name ?? "Unknown";
       const args = read.args.map((a) => lowerExpr(a, env));
+      // Carry the criterion / retrieval identity through, mirroring the
+      // workflow `repo-run` path: a `find`/`findAll` (and an anonymous `run`)
+      // read rides a synthesized `findAllBy<Criterion>` retrieval (materialised
+      // by the enrich pass from the criterion body), a NAMED `run` read rides
+      // the referenced retrieval.  The backend renders THAT retrieval method, so
+      // the criterion actually filters the query instead of being dropped for a
+      // whole-table read.
+      const retrievalName =
+        read.retrievalName ?? (read.criterionName ? `findAllBy${read.criterionName}` : undefined);
       const callIR: ExprIR = {
         kind: "call",
         callKind: "repo-read",
@@ -276,6 +286,8 @@ function lowerPostfixChain(chain: PostfixChain, env: Env): ExprIR {
           aggregate: aggName,
           method: read.method,
           readKind: read.kind,
+          ...(retrievalName ? { retrievalName } : {}),
+          ...(read.criterionName ? { synthCriterion: { name: read.criterionName } } : {}),
         },
       };
       return callIR;
@@ -437,7 +449,15 @@ function applySuffixToRecv(
     };
   }
   if (ms.call) {
-    const args = ms.args.map((a) => lowerExpr(a.value, env));
+    // For a collection op (`any`/`filter`/`map`/`sum`/…) on an array
+    // receiver, lower a lambda arg with the receiver's ELEMENT type bound
+    // to its param — so `lines.any(l => l.price + 10.00 > total)` types `l`
+    // at the line element and its `.price` money member renders as Decimal
+    // arithmetic, not a `String(...)` concat on the placeholder type.
+    const collElem = isCollectionOp(ms.member) ? collectionElementType(recvType) : undefined;
+    const args = ms.args.map((a) =>
+      collElem && isLambda(a.value) ? lowerLambda(a.value, env, collElem) : lowerExpr(a.value, env),
+    );
     const argNames = ms.args.map((a) => a.name || undefined);
     // `Pricing.quote(args)` — a member call whose receiver resolves to a
     // `domainService` declaration lowers to a Call with `callKind:
@@ -570,6 +590,52 @@ export function isErrorVariantTag(tag: string, env: Env): boolean {
   return false;
 }
 
+/** Lower a lambda body, binding its parameter at `paramType` in a fresh
+ *  local scope.  `paramType` is the string placeholder for a bare lambda
+ *  and the receiver's ELEMENT type for a collection-op lambda arg
+ *  (`lines.any(l => l.price > total)` → `l` typed at the line element), so
+ *  member accesses and binaries inside the body get the right
+ *  receiver/member/left types — backends never re-resolve. */
+function lowerLambda(expr: Lambda, env: Env, paramType: TypeIR): ExprIR {
+  const inner = withLocal(env, expr.param, "lambda", paramType);
+  // Lambdas can carry either a single expression body
+  // (`x => expr`, the only v22 form) OR a brace-block of statements
+  // (`x => { stmt; stmt; … }`, new for page event handlers).  The
+  // grammar rule sets `body` xor `stmts`; we mirror that in the IR.
+  if (expr.body) {
+    return {
+      kind: "lambda",
+      param: expr.param,
+      body: lowerExpr(expr.body, inner),
+    };
+  }
+  // Block bodies thread the lambda-local env through each statement
+  // so a `let` in stmt N is visible in stmt N+1.  Statements inside
+  // a lambda block stay typed against the existing `Statement` /
+  // `StmtIR` rule — no new statement kinds needed.
+  const block: StmtIR[] = [];
+  let scopeEnv = inner;
+  for (const s of expr.stmts ?? []) {
+    const lowered = lowerStatement(s, scopeEnv);
+    block.push(lowered.stmt);
+    scopeEnv = lowered.envAfter;
+  }
+  return {
+    kind: "lambda",
+    param: expr.param,
+    block,
+  };
+}
+
+/** The element type of a collection receiver — unwrapping an outer
+ *  `optional` (`xs?.any(...)`) then reading the `array` element.  Returns
+ *  `undefined` for a non-collection receiver so the caller can fall back to
+ *  the plain lambda path. */
+function collectionElementType(t: TypeIR): TypeIR | undefined {
+  const unwrapped = t.kind === "optional" ? t.inner : t;
+  return unwrapped.kind === "array" ? unwrapped.element : undefined;
+}
+
 export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
   if (!expr) return lit("null", "null");
   if (isStringLit(expr)) return lit("string", expr.value);
@@ -640,34 +706,11 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
     };
   }
   if (isLambda(expr)) {
-    const inner = withLocal(env, expr.param, "lambda", { kind: "primitive", name: "string" });
-    // Lambdas can carry either a single expression body
-    // (`x => expr`, the only v22 form) OR a brace-block of statements
-    // (`x => { stmt; stmt; … }`, new for page event handlers).  The
-    // grammar rule sets `body` xor `stmts`; we mirror that in the IR.
-    if (expr.body) {
-      return {
-        kind: "lambda",
-        param: expr.param,
-        body: lowerExpr(expr.body, inner),
-      };
-    }
-    // Block bodies thread the lambda-local env through each statement
-    // so a `let` in stmt N is visible in stmt N+1.  Statements inside
-    // a lambda block stay typed against the existing `Statement` /
-    // `StmtIR` rule — no new statement kinds needed.
-    const block: StmtIR[] = [];
-    let scopeEnv = inner;
-    for (const s of expr.stmts ?? []) {
-      const lowered = lowerStatement(s, scopeEnv);
-      block.push(lowered.stmt);
-      scopeEnv = lowered.envAfter;
-    }
-    return {
-      kind: "lambda",
-      param: expr.param,
-      block,
-    };
+    // A bare lambda outside a collection-op call site has no known param
+    // type — the string placeholder matches the legacy behaviour.  The
+    // collection-op path lowers its lambda arg through `lowerLambda`
+    // directly with the receiver's element type (see `applySuffixToRecv`).
+    return lowerLambda(expr, env, { kind: "primitive", name: "string" });
   }
   if (isMatchExpr(expr)) {
     // Variant form (`match SUBJECT { VariantType binding => value }`,
@@ -1406,6 +1449,29 @@ export function lowerExprInContext(
     if (promoted) return promoted;
   }
   return lowerExpr(expr, env);
+}
+
+/** Lower an `emit E { f: <expr>, … }` field list, promoting a bare numeric
+ *  literal against the event field's declared type — the same contextual
+ *  promotion the aggregate-create service and `:=` paths apply.  Shared by
+ *  the aggregate (`lower-stmt.ts`) and workflow (`lower-workflow.ts`) emit
+ *  lowerers so both promote identically (C1). */
+export function lowerEmitFields(
+  ev: EventDecl | undefined,
+  fields: readonly { name: string; value: Expression }[],
+  env: Env,
+): { name: string; value: ExprIR }[] {
+  const fieldTypeOf = new Map<string, TypeIR>();
+  if (ev) {
+    for (const f of ev.fields) fieldTypeOf.set(f.name, lowerType(f.type, env));
+  }
+  return fields.map((f) => {
+    const target = fieldTypeOf.get(f.name);
+    return {
+      name: f.name,
+      value: target ? lowerExprInContext(f.value, target, env) : lowerExpr(f.value, env),
+    };
+  });
 }
 
 /** Detect a bare numeric literal AST node and rewrite it to the

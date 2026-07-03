@@ -112,6 +112,7 @@ project the .NET namespace and `.csproj` keep the capitalised form.
 | `-w, --watch` | every `generate` | Re-run the generator whenever the source `.ddd` file changes (see [Watch mode](#watch-mode) below). |
 | `--dry-run` | every `generate`, `snapshot` | List every path that would be written (plus any paths skipped via `.loomignore`).  Writes nothing. |
 | `--trace` | every `generate` | Emit trace-level domain instrumentation (`value_computed`, `precondition_evaluated`, …) into the generated project.  Off by default — see [`observability.md`](observability.md). |
+| `--allow-destructive` | `generate system` | Permit destructive delta migrations (column/table drops, and NOT-NULL column adds without a default on an existing table).  Off by default a destructive delta aborts with a `loom.migration-destructive` error — see [`migrations.md`](migrations.md) § Destructive changes. |
 
 `ddd parse` exits non-zero if the source has errors.  `ddd generate`
 runs validation first and refuses to emit if there are any errors.

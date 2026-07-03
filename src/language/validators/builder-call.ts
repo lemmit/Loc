@@ -62,14 +62,15 @@ export function checkLegacyConstructorCalls(model: Model, accept: ValidationAcce
     if (head.$type !== "NameRef") continue;
     const name = (head as NameRef).name;
     const ctx = AstUtils.getContainerOfType(node, isBoundedContext);
-    if (!ctx) continue;
-    for (const m of ctx.members) {
+    let reported = false;
+    for (const m of ctx?.members ?? []) {
       if (isValueObject(m) && m.name === name) {
         accept(
           "error",
           `v2 syntax: construct '${name}' with builder-call form '${name} { ... }', not '${name}(...)'.`,
           { node, code: "loom.legacy-vo-call" },
         );
+        reported = true;
         break;
       }
       if (isAggregate(m)) {
@@ -80,10 +81,33 @@ export function checkLegacyConstructorCalls(model: Model, accept: ValidationAcce
               `v2 syntax: construct entity part '${name}' with builder-call form '${name} { ... }', not '${name}(...)'.`,
               { node, code: "loom.legacy-part-call" },
             );
+            reported = true;
             break;
           }
         }
       }
+      if (reported) break;
+    }
+    if (reported) continue;
+    // Root-level VO / record payload (the ambient shared kernel — `valueobject`
+    // / `error`/`payload`/… at file scope).  `checkBuilderCallType` resolves
+    // these by bare name (cases 2b/2c), so their legacy `Name(...)` invocation
+    // must be rejected here too — otherwise a file-scope `valueobject Price`
+    // lets `Price(1)` pass validation and emit a class-called-as-function (C4).
+    if (model.members.some((m) => isValueObject(m) && m.name === name)) {
+      accept(
+        "error",
+        `v2 syntax: construct '${name}' with builder-call form '${name} { ... }', not '${name}(...)'.`,
+        { node, code: "loom.legacy-vo-call" },
+      );
+      continue;
+    }
+    if (model.members.some((m) => isPayloadDecl(m) && m.name === name && m.variants.length === 0)) {
+      accept(
+        "error",
+        `v2 syntax: construct '${name}' with builder-call form '${name} { ... }', not '${name}(...)'.`,
+        { node, code: "loom.legacy-vo-call" },
+      );
     }
   }
 }

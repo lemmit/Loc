@@ -83,4 +83,39 @@ describe("ddd verify", () => {
     const r = run(["verify", ddd, "--results", path.join(tmp, "nope.json")]);
     expect(r.status).toBe(2);
   });
+
+  it("rejects a non-numeric / out-of-range --min instead of silently passing", () => {
+    const results = writeResults("go works", "pass");
+    for (const bad of ["90%", "abc", "150", "-5"]) {
+      const r = run([
+        "verify",
+        ddd,
+        "--results",
+        results,
+        "--out",
+        path.join(tmp, "min"),
+        "--min",
+        bad,
+      ]);
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toMatch(/Invalid --min/);
+    }
+  });
+
+  it("accepts a valid numeric --min threshold", () => {
+    const results = writeResults("go works", "pass");
+    // Both requirements verified ⇒ 100% ≥ 90 ⇒ gate passes.
+    const r = run([
+      "verify",
+      ddd,
+      "--results",
+      results,
+      "--out",
+      path.join(tmp, "min-ok"),
+      "--min",
+      "90",
+    ]);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/Verified 2\/2 requirements/);
+  });
 });

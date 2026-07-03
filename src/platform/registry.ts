@@ -223,7 +223,18 @@ function resolvePlatformRef(ref: string): PlatformSurface {
     }
     return surface;
   }
-  return platforms[ref as Platform];
+  const surface = platforms[ref as Platform];
+  if (!surface) {
+    // A bareword that's neither a known frontend/backend platform nor a
+    // pinned backend version — a typo'd `platform:` ref.  Throw the same
+    // descriptive error the pinned-backend path gives instead of returning
+    // `undefined` typed as a non-optional `PlatformSurface` (which crashes
+    // later with a bare `TypeError` at the first surface access).
+    throw new Error(
+      `Unknown platform "${ref}". ` + `Known platforms: ${Object.keys(platforms).join(", ")}.`,
+    );
+  }
+  return surface;
 }
 
 export function platformFor(name: Platform): PlatformSurface {

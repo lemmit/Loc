@@ -12,6 +12,7 @@ import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { responsePyType } from "./emit/http-models.js";
 import { lowerWorkflowFilterToSqlAlchemy, type PyPredicate } from "./find-predicate.js";
+import { wireHelperImport } from "./py-type-imports.js";
 import { collectPyExprImports, renderPyExpr } from "./render-expr.js";
 import { esFns } from "./workflow-eventsourced-emit.js";
 import { instanceFieldValue } from "./workflows-builder.js";
@@ -155,7 +156,7 @@ export function buildPyViewsFile(
     ...repoAggs.map((n) => `from app.db.repositories.${snake(n)}_repository import ${n}Repository`),
     wfRows.length > 0 ? `from app.db.schema import ${wfRows.join(", ")}` : null,
     esLoadAll.length > 0 ? `from app.dispatch import ${esLoadAll.join(", ")}` : null,
-    refersTo("iso") ? "from app.db.wire import iso" : null,
+    wireHelperImport(refersTo),
     hasDispatch && refersTo("make_dispatcher") ? "from app.dispatch import make_dispatcher" : null,
     !hasDispatch && refersTo("NoopDomainEventDispatcher")
       ? "from app.domain.events import NoopDomainEventDispatcher"
@@ -308,7 +309,7 @@ function renderBind(
   pathToMap: Map<string, { mapVar: string; aggName: string }>,
 ): string {
   const rendered = renderBindWithFollows(expr, pathToMap);
-  if (type.kind === "primitive" && type.name === "money") return `str(${rendered})`;
+  if (type.kind === "primitive" && type.name === "money") return `money_str(${rendered})`;
   return rendered;
 }
 

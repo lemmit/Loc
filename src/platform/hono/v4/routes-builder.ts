@@ -268,9 +268,20 @@ export function buildRoutesFile(
           // `.default(...)` lands AFTER any `.min`/`.max` chain (a
           // `ZodDefault` has no `.min`).
           const d = f.default;
+          // A non-nullable bool's `.default(false)` normally comes from
+          // `zodFor` (the implicit bool rule).  When the field carries an
+          // EXPLICIT default we drop that baked-in `.default(false)` and let
+          // the declared literal drive the `.default(...)` below — otherwise a
+          // `bool = true` would emit `z.coerce.boolean().default(false).default(true)`.
+          const info = wireTypeInfo(f.type, "request");
+          const plainBool =
+            info.refKind === "primitive" &&
+            info.primitive === "bool" &&
+            !info.isNullable &&
+            !info.isCollection;
           return {
             name: f.name,
-            base: zodFor(f.type),
+            base: plainBool && d !== undefined ? "z.coerce.boolean()" : zodFor(f.type),
             default: d ? wireDefaultLiteral(f.type, d) : undefined,
           };
         }),

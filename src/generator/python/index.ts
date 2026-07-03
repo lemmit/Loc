@@ -584,10 +584,17 @@ function renderMain(
     // added BEFORE CORS to keep CORS outermost (auth after CORS — the
     // same ordering the Hono/.NET pipelines mount).
     authRequired ? "app.add_middleware(AuthMiddleware)" : null,
-    "# Permissive CORS for development — pin via .loomignore to tighten.",
+    "# CORS: the compose stack sets CORS_ORIGIN to the frontend origin(s) — a",
+    "# comma-separated allowlist.  When set, only those origins are allowed",
+    "# (with credentials, so the session cookie flows cross-origin).  When",
+    "# unset, the fallback is permissive '*' ONLY for an auth-less system; an",
+    "# auth-bearing system denies cross-origin by default.  Pin app/main.py in",
+    "# .loomignore to override.",
+    '_cors_allowlist = [o.strip() for o in os.environ.get("CORS_ORIGIN", "").split(",") if o.strip()]',
     "app.add_middleware(",
     "    CORSMiddleware,",
-    `    allow_origins=["*"],`,
+    `    allow_origins=_cors_allowlist or ${authRequired ? "[]" : '["*"]'},`,
+    "    allow_credentials=bool(_cors_allowlist),",
     `    allow_methods=["*"],`,
     `    allow_headers=["*"],`,
     ")",
@@ -722,11 +729,20 @@ __pycache__
 const WIRE_PY = `"""Wire-format helpers shared by repositories.  Auto-generated."""
 
 from datetime import UTC, datetime
+from decimal import Decimal
 
 
 def iso(dt: datetime) -> str:
     """ISO-8601 UTC with a Z suffix — wire parity with the other backends."""
     return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def money_str(amount: Decimal) -> str:
+    """Precise-decimal string with no exponent — wire parity with the other
+    backends (money travels as a string in both directions, matching Java's
+    \`toPlainString()\` / .NET's invariant decimal).  \`format(d, "f")\` avoids
+    the scientific notation bare \`str(Decimal)\` can emit (e.g. \`1E+2\`)."""
+    return format(amount, "f")
 `;
 
 /** One exception-less op-return union to surface in the OpenAPI spec:

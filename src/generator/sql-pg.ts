@@ -23,24 +23,33 @@ export function renderPgStep(step: MigrationStep): string {
     case "createTable":
       return renderCreateTable(step.table);
     case "dropTable":
-      return `DROP TABLE ${ident(step.name)};`;
+      return `DROP TABLE ${qualified(step.schema, step.name)};`;
     case "addColumn":
-      return renderAddColumn(step.table, step.column, step.fk);
+      return renderAddColumn(step.table, step.schema, step.column, step.fk);
     case "dropColumn":
-      return `ALTER TABLE ${ident(step.table)} DROP COLUMN ${ident(step.name)};`;
+      return `ALTER TABLE ${qualified(step.schema, step.table)} DROP COLUMN ${ident(step.name)};`;
+    case "renameColumn":
+      return (
+        `ALTER TABLE ${qualified(step.schema, step.table)} ` +
+        `RENAME COLUMN ${ident(step.from)} TO ${ident(step.to)};`
+      );
     case "alterColumnNullable":
-      return `ALTER TABLE ${ident(step.table)} ALTER COLUMN ${ident(step.name)} ${
+      return `ALTER TABLE ${qualified(step.schema, step.table)} ALTER COLUMN ${ident(step.name)} ${
         step.nullable ? "DROP NOT NULL" : "SET NOT NULL"
       };`;
     case "alterColumnType":
       return (
-        `ALTER TABLE ${ident(step.table)} ALTER COLUMN ${ident(step.name)} ` +
+        `ALTER TABLE ${qualified(step.schema, step.table)} ALTER COLUMN ${ident(step.name)} ` +
         `TYPE ${renderPgType(step.to)} USING ${ident(step.name)}::${renderPgType(step.to)};`
       );
     case "addIndex":
-      return renderAddIndex(step.index);
+      // The index carries no schema of its own; the step's `schema` is the
+      // owning table's schema (indexes live in the table's schema).
+      return renderAddIndex(step.index, step.schema);
     case "dropIndex":
-      return `DROP INDEX ${ident(step.name)};`;
+      return `DROP INDEX ${qualified(step.schema, step.name)};`;
+    case "sqlComment":
+      return `-- ${step.comment}`;
   }
 }
 
@@ -75,12 +84,19 @@ function qualified(schema: string | undefined, name: string): string {
   return schema ? `${ident(schema)}.${ident(name)}` : ident(name);
 }
 
-function renderAddColumn(table: string, column: ColumnShape, fk: FKShape | undefined): string {
-  let sql = `ALTER TABLE ${ident(table)} ADD COLUMN ${renderColumnDef(column)};`;
+function renderAddColumn(
+  table: string,
+  schema: string | undefined,
+  column: ColumnShape,
+  fk: FKShape | undefined,
+): string {
+  const t = qualified(schema, table);
+  let sql = `ALTER TABLE ${t} ADD COLUMN ${renderColumnDef(column)};`;
   if (fk) {
+    // FK targets live in the same schema as the referencing table.
     sql +=
-      `\nALTER TABLE ${ident(table)} ADD CONSTRAINT ${ident(table + "_" + column.name + "_fk")} ` +
-      `FOREIGN KEY (${ident(column.name)}) REFERENCES ${ident(fk.refTable)} ` +
+      `\nALTER TABLE ${t} ADD CONSTRAINT ${ident(table + "_" + column.name + "_fk")} ` +
+      `FOREIGN KEY (${ident(column.name)}) REFERENCES ${qualified(schema, fk.refTable)} ` +
       `ON DELETE ${fk.onDelete.toUpperCase()};`;
   }
   return sql;
@@ -131,12 +147,15 @@ export function renderPgType(t: ColumnType): string {
   }
 }
 
-/** Lowercase identifier passthrough.  The migration builder already
- *  snake-cases everything, so the produced names are valid bare
- *  identifiers in Postgres.  Reserved-name edge cases (`user`, `order`,
- *  …) would need double-quoting; no current fixture exercises them. */
+/** Double-quoted identifier — the same quote-always spelling the seed path
+ *  (`qIdent`) uses, so DDL and DML agree.  Postgres folds an unquoted
+ *  identifier to lowercase and the migration builder already snake-cases
+ *  everything to lowercase, so `"orders"` references the same relation as a
+ *  bare `orders` — quoting is a no-op for the common case but makes a
+ *  reserved-word column (`order`, `user`, `end`) or any `.ddd`-sourced name
+ *  safe instead of a syntax error. */
 function ident(name: string): string {
-  return name;
+  return qIdent(name);
 }
 
 // ---------------------------------------------------------------------------
@@ -166,9 +185,11 @@ export function renderSeedRowInsert(
 }
 
 /** Double-quoted identifier — matches the lowercase tables the migrations
- *  create and is safe for reserved words (`order`, `user`). */
+ *  create and is safe for reserved words (`order`, `user`).  An embedded `"`
+ *  is doubled per the Postgres quoting rule, so a `.ddd`-sourced name can't
+ *  break out of the quotes. */
 function qIdent(name: string): string {
-  return `"${name}"`;
+  return `"${name.replace(/"/g, '""')}"`;
 }
 
 /** An ExprIR seed value as a Postgres SQL literal.  Scalars / enum values /

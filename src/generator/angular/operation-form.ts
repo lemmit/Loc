@@ -11,6 +11,7 @@ import {
   fieldInput,
   formButton,
 } from "./form-fields.js";
+import { angularSink } from "./walker/sink.js";
 
 // ---------------------------------------------------------------------------
 // Angular standalone `OperationForm(...)` renderer — the operation-command
@@ -130,8 +131,7 @@ export function renderAngularOperationForm(
     controls: fields.map((f) => ({ name: f.name, init: controlInit(f.type) })),
     idTargets: bc ? collectIdTargets(fields, bc, ctx) : [],
   };
-  ctx.angularOpForms ??= [];
-  (ctx.angularOpForms as AngularOperationFormSpec[]).push(spec);
+  angularSink(ctx).opForms.push(spec);
 
   const inner = "  ".repeat(depth + 1);
   const close = "  ".repeat(depth);

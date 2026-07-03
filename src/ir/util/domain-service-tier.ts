@@ -24,7 +24,8 @@
 // fully-resolved marker of a read; a `method-call` on a param ref of entity
 // type, resolved to a mutating aggregate operation, is the mutation marker), so
 // it never re-recognises the AST.
-import type { DomainServiceOperationIR, ExprIR, OperationIR, StmtIR } from "../types/loom-ir.js";
+import type { DomainServiceOperationIR, ExprIR, OperationIR } from "../types/loom-ir.js";
+import { walkStmtExprsDeep } from "./walk.js";
 
 export type DomainServiceTier = "pure" | "reading" | "mutating";
 
@@ -111,7 +112,7 @@ export function classifyDomainServiceTier(
       return "mutating";
     }
     let mutates = false;
-    forEachStmtExpr(stmt, (e) => {
+    walkStmtExprsDeep(stmt, (e: ExprIR) => {
       // A `repo-read` Call anywhere in the body marks the operation `reading`.
       // (A repository WRITE has no dedicated callKind this slice — it is left
       // unresolved at lowering and caught by the validator's repo-write gate
@@ -149,7 +150,7 @@ export function mutatedParamNames(
   }
   const mutated = new Set<string>();
   for (const stmt of op.body) {
-    forEachStmtExpr(stmt, (e) => {
+    walkStmtExprsDeep(stmt, (e: ExprIR) => {
       if (
         e.kind === "method-call" &&
         e.receiver.kind === "ref" &&
@@ -178,74 +179,4 @@ function isParamOpMutation(
   if (!aggName) return false;
   const target = resolveAggOp(aggName, e.member);
   return target !== undefined && isMutatingOperation(target);
-}
-
-/** Visit every sub-expression reachable from a statement (the classifier only
- *  needs to find a `repo-read` Call or a mutating `param.op(...)` anywhere in
- *  the body). */
-function forEachStmtExpr(stmt: StmtIR, visit: (e: ExprIR) => void): void {
-  switch (stmt.kind) {
-    case "precondition":
-    case "requires":
-    case "expression":
-      walkExpr(stmt.expr, visit);
-      break;
-    case "let":
-      walkExpr(stmt.expr, visit);
-      break;
-    case "assign":
-    case "add":
-    case "remove":
-      walkExpr(stmt.value, visit);
-      break;
-    case "emit":
-      for (const f of stmt.fields) walkExpr(f.value, visit);
-      break;
-    case "call":
-      for (const a of stmt.args) walkExpr(a, visit);
-      break;
-    case "return":
-      walkExpr(stmt.value, visit);
-      break;
-  }
-}
-
-/** Visit `e` and every sub-expression. */
-function walkExpr(e: ExprIR | undefined, visit: (e: ExprIR) => void): void {
-  if (!e) return;
-  visit(e);
-  switch (e.kind) {
-    case "method-call":
-      walkExpr(e.receiver, visit);
-      for (const a of e.args) walkExpr(a, visit);
-      break;
-    case "member":
-      walkExpr(e.receiver, visit);
-      break;
-    case "binary":
-      walkExpr(e.left, visit);
-      walkExpr(e.right, visit);
-      break;
-    case "ternary":
-      walkExpr(e.cond, visit);
-      walkExpr(e.then, visit);
-      walkExpr(e.otherwise, visit);
-      break;
-    case "unary":
-      walkExpr(e.operand, visit);
-      break;
-    case "paren":
-      walkExpr(e.inner, visit);
-      break;
-    case "call":
-      for (const a of e.args) walkExpr(a, visit);
-      break;
-    case "new":
-    case "object":
-      for (const f of e.fields) walkExpr(f.value, visit);
-      break;
-    case "lambda":
-      walkExpr(e.body, visit);
-      break;
-  }
 }
