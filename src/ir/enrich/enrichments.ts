@@ -29,6 +29,7 @@ import type {
   FieldIR,
   FindIR,
   GenericCtorName,
+  IdValueType,
   LoadPlanIR,
   LoomInterface,
   LoomModel,
@@ -342,13 +343,43 @@ export function enrichContext(
   // hierarchy itself (table strategy, discriminator, polymorphic queries) is
   // not wired yet — see the `inheritance-storage-unwired` IR-validate warning.
   const byName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
+  // Walk the FULL transitive `extends` chain (Dog → Pet → Animal), merging
+  // every ancestor's declared fields — not just the direct base — so a
+  // grandparent's fields reach the concrete's wireShape / DTO and stay
+  // consistent with the TPH table that carries their columns.  Root-most
+  // fields come first (`[...grandbase, ...base, ...own]`); a nearer field
+  // shadows a like-named ancestor field.  `seen` guards a malformed cycle
+  // (a language-side `extends`-cycle validator may reject these upstream —
+  // this just keeps the walk finite if one slips through).
+  const mergedFieldsFor = (a: AggregateIR, seen: Set<string>): FieldIR[] => {
+    if (!a.extendsAggregate || seen.has(a.name)) return a.fields;
+    seen.add(a.name);
+    const base = byName.get(a.extendsAggregate);
+    if (!base) return a.fields;
+    const baseFields = mergedFieldsFor(base, seen);
+    const ownNames = new Set(a.fields.map((f) => f.name));
+    const inherited = baseFields.filter((f) => !ownNames.has(f.name));
+    return inherited.length > 0 ? [...inherited, ...a.fields] : a.fields;
+  };
+  // The id value-type is a hierarchy-wide fact: the TPH table (and the TPC
+  // polymorphic reader) key on the ROOT base's id type, so a concrete that
+  // didn't redeclare `ids` inherits the root's — otherwise a base declaring
+  // `ids int` yields an INTEGER table column but a concrete whose wire/Id
+  // defaults to `guid` (mismatch → every insert/read on the concrete breaks).
+  const rootIdValueTypeFor = (a: AggregateIR, seen: Set<string>): IdValueType => {
+    if (!a.extendsAggregate || seen.has(a.name)) return a.idValueType;
+    seen.add(a.name);
+    const base = byName.get(a.extendsAggregate);
+    return base ? rootIdValueTypeFor(base, seen) : a.idValueType;
+  };
   const withInheritance = ctx.aggregates.map((a) => {
     if (!a.extendsAggregate) return a;
-    const base = byName.get(a.extendsAggregate);
-    if (!base) return a;
-    const ownNames = new Set(a.fields.map((f) => f.name));
-    const inherited = base.fields.filter((f) => !ownNames.has(f.name));
-    return inherited.length > 0 ? { ...a, fields: [...inherited, ...a.fields] } : a;
+    const merged = mergedFieldsFor(a, new Set<string>());
+    const idValueType = rootIdValueTypeFor(a, new Set<string>());
+    const fieldsChanged = merged !== a.fields;
+    const idChanged = idValueType !== a.idValueType;
+    if (!fieldsChanged && !idChanged) return a;
+    return { ...a, fields: merged, idValueType };
   });
   const aggregates = withInheritance.map((a) => enrichAggregate(a, valueObjects, urlStyle));
   const repositories = ensureFindAll(aggregates, ctx.repositories);
@@ -1249,7 +1280,13 @@ function enrichDeployables(deployables: DeployableIR[]): DeployableIR[] {
 
 function wireFieldsForAggregate(agg: AggregateIR): WireField[] {
   const out: WireField[] = [
-    { name: "id", type: idTypeFor(agg.name), optional: false, source: "id", access: "token" },
+    {
+      name: "id",
+      type: idTypeFor(agg.name, agg.idValueType),
+      optional: false,
+      source: "id",
+      access: "token",
+    },
   ];
   for (const f of agg.fields) {
     out.push({
@@ -1289,7 +1326,13 @@ function wireFieldsForAggregate(agg: AggregateIR): WireField[] {
 
 function wireFieldsForPart(part: EntityPartIR): WireField[] {
   const out: WireField[] = [
-    { name: "id", type: idTypeFor(part.name), optional: false, source: "id", access: "token" },
+    {
+      name: "id",
+      type: idTypeFor(part.name, part.parentIdValueType),
+      optional: false,
+      source: "id",
+      access: "token",
+    },
   ];
   for (const f of part.fields) {
     out.push({
@@ -1499,8 +1542,8 @@ function computeTraceability(loom: LoomModel): TraceabilityIR {
   };
 }
 
-function idTypeFor(targetName: string): TypeIR {
-  return { kind: "id", targetName, valueType: "guid" };
+function idTypeFor(targetName: string, valueType: IdValueType = "guid"): TypeIR {
+  return { kind: "id", targetName, valueType };
 }
 
 function containmentTypeFor(partName: string, collection: boolean): TypeIR {

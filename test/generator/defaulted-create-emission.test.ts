@@ -93,3 +93,53 @@ describe("defaulted aggregate — parameterized create (invariant gate)", () => 
     expect(schema).toMatch(/field :label, :string, default: "untitled"/);
   });
 });
+
+// B14: a `bool = true` create default must reach the wire.  The previous
+// behaviour dropped EVERY bool default at the wire boundary and let each
+// backend's hardcoded bool rule apply `.default(false)`, so an omitted
+// `enabled` arrived `false` even though the source declared `= true`.  A
+// `bool = false` masks the bug (it agrees with the hardcoded false), so this
+// fixture asserts on `= true` (and a bare bool, which must STAY `false`).
+const BOOL_FIXTURE = `
+system Flags {
+  subdomain D {
+    context Settings {
+      aggregate Toggle {
+        label: string
+        enabled: bool = true
+        plain: bool
+      }
+      repository Toggles for Toggle { }
+    }
+  }
+  api SettingsApi from D
+  storage primarySql { type: postgres }
+  resource settingsState { for: Settings, kind: state, use: primarySql }
+  deployable honoApi   { platform: node   contexts: [Settings] dataSources: [settingsState] serves: SettingsApi port: 3000 }
+  deployable dotnetApi { platform: dotnet contexts: [Settings] dataSources: [settingsState] serves: SettingsApi port: 8080 }
+}
+`;
+
+describe("bool create default reaches the wire (B14)", () => {
+  it("Hono: `bool = true` emits `.default(true)`, a bare bool stays `.default(false)`", async () => {
+    const files = await generateSystemFiles(BOOL_FIXTURE);
+    const routes = findFile(files, /toggle\.routes\.ts$/i)!;
+    expect(routes).toMatch(/enabled:\s*z\.coerce\.boolean\(\)\.default\(true\)/);
+    // No stale `.default(false)` slipped in front of the real default.
+    expect(routes).not.toMatch(/enabled:\s*z\.coerce\.boolean\(\)\.default\(false\)/);
+    expect(routes).toMatch(/plain:\s*z\.coerce\.boolean\(\)\.default\(false\)/);
+  });
+
+  it(".NET: `bool = true` becomes a record default, sorted after required params", async () => {
+    const files = await generateSystemFiles(BOOL_FIXTURE);
+    const dto = findFile(files, /Toggles\/Requests\/ToggleRequests\.cs$/)!;
+    // The defaulted param must trail the required ones (C# CS1737), and carry
+    // the declared `= true` — not a silent `false`.
+    expect(dto).toMatch(/bool Enabled = true/);
+    expect(dto).not.toMatch(/bool Enabled = false/);
+    // Optional (defaulted) param comes last; `Label`/`Plain` precede it.
+    expect(dto).toMatch(
+      /record CreateToggleRequest\([\s\S]*string Label[\s\S]*bool Plain[\s\S]*bool Enabled = true\)/,
+    );
+  });
+});

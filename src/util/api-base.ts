@@ -33,3 +33,10 @@ export function apiRoutePrefix(): string {
  *  line up. Contrast the infra probes (`/health`, `/ready`), which are hit
  *  directly by Docker/k8s and stay at the root. */
 export const AUTH_BASE_PATH = `${API_BASE_PATH}/auth`;
+
+/** Host port the bundled dev Keycloak is published on in the generated
+ *  `docker-compose.yml` (`8081:8080`; 8080 is left free for backends).
+ *  Shared here so the system compose emitter AND the IR-level host-port
+ *  uniqueness validator agree on the reserved port a user deployable must
+ *  not collide with when auth is bundled. */
+export const KEYCLOAK_HOST_PORT = 8081;

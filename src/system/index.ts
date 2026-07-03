@@ -14,7 +14,8 @@ import type { MigrationsIR } from "../ir/types/migrations-ir.js";
 import type { Model } from "../language/generated/ast.js";
 import { platformFor } from "../platform/registry.js";
 import { hasAdapters, resolveLayout, resolveStyle } from "../platform/resolve-adapters.js";
-import { AUTH_BASE_PATH } from "../util/api-base.js";
+import { AUTH_BASE_PATH, KEYCLOAK_HOST_PORT } from "../util/api-base.js";
+import { snake } from "../util/naming.js";
 import { renderAsyncApi } from "./asyncapi.js";
 import { renderDataSourcesMd } from "./datasources.js";
 import { renderE2EFile } from "./e2e-render.js";
@@ -385,10 +386,13 @@ function migrationsForDeployable(
   return all.filter((m) => hostedSubdomains.has(m.module));
 }
 
-/** A docker-compose-safe slug: lowercase, no characters outside the
- * conservative `[a-z0-9_]` set. */
+/** A docker-compose-safe slug.  Delegates to `naming.snake` so slugging is
+ *  defined once and handles acronym boundaries correctly (`MyAPIServer →
+ *  my_api_server`, not `my_apiserver`) — the same normalisation the IR-level
+ *  service-slug uniqueness validator applies, so a case-variant collision the
+ *  validator rejects is exactly the one that would merge output dirs here. */
 function serviceSlug(name: string): string {
-  return name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+  return snake(name);
 }
 
 // ---------------------------------------------------------------------------

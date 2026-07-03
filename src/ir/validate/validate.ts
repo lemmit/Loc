@@ -32,6 +32,7 @@ import {
   validateAuditedOperationSupport,
   validateAuth,
   validateAuthUiFramework,
+  validateComposeUniqueness,
   validateContextFilterSupport,
   validateDapperSupport,
   validateDataSourceCoverage,
@@ -118,6 +119,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   validateEventChannelAmbiguous([...allContexts(loom)], diags);
   for (const sys of loom.systems) {
     validateSystem(sys, diags);
+    validateComposeUniqueness(sys, diags);
     validateDataSourceCoverage(sys, diags);
     validateSavingShapeSupport(sys, diags);
     validateVanillaDocumentScope(sys, diags);
