@@ -17,6 +17,7 @@ import {
   lowerToSqlAlchemy,
 } from "./find-predicate.js";
 import { rowClassName } from "./py-columns.js";
+import { wireHelperImport } from "./py-type-imports.js";
 import { renderPyExpr, renderPyType } from "./render-expr.js";
 import {
   authUserImport,
@@ -175,6 +176,7 @@ export function buildPyDocumentRepositoryFile(
     // an always-on principal capability filter (DEBT-02 tail) — one sorted import.
     authUserImport(findUser, usesPrincipal),
     `from app.db.schema import ${row}`,
+    wireHelperImport(refersTo),
     "from app.domain.errors import AggregateNotFoundError",
     refersTo("DomainEvent")
       ? "from app.domain.events import DomainEvent, DomainEventDispatcher"

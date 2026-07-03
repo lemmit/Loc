@@ -1,12 +1,29 @@
-import { describe, expect, it } from "vitest";
-import type { SchemaSnapshot } from "../../src/ir/types/migrations-ir.js";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { renderPgStep } from "../../src/generator/sql-pg.js";
+import type {
+  MigrationStep,
+  SchemaSnapshot,
+  TableShape,
+} from "../../src/ir/types/migrations-ir.js";
+import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import {
+  applyDestructivePolicy,
   BASE_TIMESTAMP,
   buildMigrations,
   diffSchema,
+  MigrationDestructiveError,
   schemaFromModule,
 } from "../../src/system/migrations-builder.js";
-import { memorySnapshotStore } from "../../src/system/snapshot.js";
+import {
+  fsSnapshotStore,
+  memorySnapshotStore,
+  SnapshotReadError,
+  serializeSnapshot,
+  snapshotRelPath,
+} from "../../src/system/snapshot.js";
 import { buildLoomModel } from "../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
@@ -338,7 +355,12 @@ describe("buildMigrations", () => {
       columns: t.columns.filter((c) => c.name !== "total"),
     }));
     const baseline: SchemaSnapshot = { ...stale, lastVersion: BASE_TIMESTAMP };
-    const out = buildMigrations(sys, memorySnapshotStore({ Sales: baseline }));
+    // Re-adding the non-optional `total` column is a NOT-NULL add on a
+    // pre-existing table → destructive; allow it so this test exercises only
+    // the version-bump behaviour.
+    const out = buildMigrations(sys, memorySnapshotStore({ Sales: baseline }), {
+      allowDestructive: true,
+    });
     expect(out[0]!.version).toBe(String(BigInt(BASE_TIMESTAMP) + 1n));
     expect(out[0]!.next.lastVersion).toBe(out[0]!.version);
     expect(out[0]!.name).not.toBe("Initial");
@@ -355,6 +377,77 @@ system Twin {
 `);
     const out = buildMigrations(loom.systems[0]!, memorySnapshotStore());
     expect(out.map((m) => m.module)).toEqual(["A"]);
+  });
+});
+
+describe("fsSnapshotStore", () => {
+  const tmpDirs: string[] = [];
+  const mkTmp = (): string => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-snap-"));
+    tmpDirs.push(dir);
+    return dir;
+  };
+  const writeSnapshot = (root: string, module: string, contents: string): string => {
+    const filePath = path.join(root, snapshotRelPath(module));
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, contents);
+    return filePath;
+  };
+
+  afterEach(() => {
+    for (const dir of tmpDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("returns null when no snapshot file exists (first run)", () => {
+    const root = mkTmp();
+    expect(fsSnapshotStore(root).read("Sales")).toBeNull();
+  });
+
+  it("reads back a well-formed snapshot", async () => {
+    const { module } = await loadShop();
+    const snap: SchemaSnapshot = { ...schemaFromModule(module), lastVersion: BASE_TIMESTAMP };
+    const root = mkTmp();
+    writeSnapshot(root, "Sales", serializeSnapshot(snap));
+    const read = fsSnapshotStore(root).read("Sales");
+    expect(read?.lastVersion).toBe(BASE_TIMESTAMP);
+    expect(read?.tables.map((t) => t.name)).toEqual(snap.tables.map((t) => t.name));
+  });
+
+  it("throws SnapshotReadError naming the file when the snapshot is corrupt", () => {
+    const root = mkTmp();
+    const filePath = writeSnapshot(root, "Sales", '{"tables": [ {"name": "orders"'); // truncated
+    expect(() => fsSnapshotStore(root).read("Sales")).toThrow(SnapshotReadError);
+    try {
+      fsSnapshotStore(root).read("Sales");
+      expect.unreachable("expected a SnapshotReadError");
+    } catch (err) {
+      expect(err).toBeInstanceOf(SnapshotReadError);
+      const e = err as SnapshotReadError;
+      expect(e.filePath).toBe(filePath);
+      expect(e.message).toContain(filePath);
+      expect(e.message).toMatch(/corrupt|truncat/i);
+      expect(e.message).toMatch(/restore it from version control|re-baseline/i);
+    }
+  });
+});
+
+describe("buildMigrations — corrupt snapshot never re-baselines", () => {
+  const tmpDirs: string[] = [];
+  afterEach(() => {
+    for (const dir of tmpDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("throws instead of emitting an Initial migration for a corrupt snapshot", async () => {
+    const { sys } = await loadShop();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "loom-snap-"));
+    tmpDirs.push(root);
+    const filePath = path.join(root, snapshotRelPath("Sales"));
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, "}}} not json {{{"); // corrupted (e.g. interrupted write)
+
+    // Must NOT be interpreted as a fresh output dir → NO "Initial" migration.
+    expect(() => buildMigrations(sys, fsSnapshotStore(root))).toThrow(SnapshotReadError);
+    expect(() => buildMigrations(sys, fsSnapshotStore(root))).toThrow(filePath);
   });
 });
 
@@ -504,5 +597,328 @@ system Shop {
     const carts = sales.next.tables.find((t) => t.name === "carts")!;
     // Binding override wins → document shape despite shape(relational) header.
     expect(carts.columns.map((c) => c.name)).toEqual(["id", "data", "version"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A8 hardening repros (audit findings 16–19): duplicate-table guard,
+// schema-qualified deltas, FK-ordered drops, destructive-change gate.
+// ---------------------------------------------------------------------------
+
+/** Minimal one-column TableShape helper for hand-built diff snapshots. */
+function tbl(
+  name: string,
+  columns: TableShape["columns"],
+  extra: Partial<TableShape> = {},
+): TableShape {
+  return {
+    name,
+    ownerModule: "M",
+    columns,
+    primaryKey: ["id"],
+    foreignKeys: [],
+    indexes: [],
+    ...extra,
+  };
+}
+
+describe("A8.4 — duplicate-table guard", () => {
+  it("errors when two same-named aggregates in sibling contexts map to one table", async () => {
+    const loom = await buildLoomModel(`
+system Shop {
+  subdomain Commerce {
+    context Sales {
+      aggregate Order ids guid { total: int }
+      repository SalesOrders for Order { }
+    }
+    context Billing {
+      aggregate Order ids guid { amount: int }
+      repository BillingOrders for Order { }
+    }
+  }
+  deployable api { platform: node, contexts: [Sales, Billing], port: 3000 }
+}
+`);
+    const diags = validateLoomModel(loom);
+    const dup = diags.filter((d) => d.code === "loom.duplicate-table");
+    expect(dup.length).toBeGreaterThan(0);
+    expect(dup[0]!.message).toContain("public.orders");
+  });
+
+  it("accepts the same shape once each context has its own dataSource schema", async () => {
+    const loom = await buildLoomModel(`
+system Shop {
+  subdomain Commerce {
+    context Sales {
+      aggregate Order ids guid { total: int }
+      repository SalesOrders for Order { }
+    }
+    context Billing {
+      aggregate Order ids guid { amount: int }
+      repository BillingOrders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource salesState { for: Sales, kind: state, use: pg, schema: "sales" }
+  resource billingState { for: Billing, kind: state, use: pg, schema: "billing" }
+  deployable api {
+    platform: node, contexts: [Sales, Billing],
+    dataSources: [salesState, billingState], port: 3000
+  }
+}
+`);
+    const diags = validateLoomModel(loom);
+    expect(diags.filter((d) => d.code === "loom.duplicate-table")).toEqual([]);
+    // And the migration derives two correctly-qualified `orders` relations,
+    // one per schema — the identity-based resolution (not name-only).
+    const migs = buildMigrations(loom.systems[0]!, memorySnapshotStore());
+    const commerce = migs.find((m) => m.module === "Commerce")!;
+    const orders = commerce.next.tables.filter((t) => t.name === "orders");
+    expect(orders.map((t) => t.schema).sort()).toEqual(["billing", "sales"]);
+  });
+});
+
+describe("A8.1 — schema-qualified ALTER / DROP deltas", () => {
+  it("carries the table schema onto alter/drop steps and renders it qualified", () => {
+    const prev = {
+      schemaVersion: 1 as const,
+      tables: [
+        tbl(
+          "orders",
+          [
+            { name: "id", type: { kind: "uuid" as const }, nullable: false },
+            { name: "total", type: { kind: "int" as const }, nullable: false },
+            { name: "legacy", type: { kind: "text" as const }, nullable: true },
+          ],
+          { schema: "sales" },
+        ),
+      ],
+    };
+    const next = {
+      schemaVersion: 1 as const,
+      tables: [
+        tbl(
+          "orders",
+          [
+            { name: "id", type: { kind: "uuid" as const }, nullable: false },
+            // total flips to nullable → alterColumnNullable; legacy dropped.
+            { name: "total", type: { kind: "int" as const }, nullable: true },
+          ],
+          { schema: "sales" },
+        ),
+      ],
+    };
+    const steps = diffSchema(prev, next);
+    const drop = steps.find((s) => s.op === "dropColumn")!;
+    const alter = steps.find((s) => s.op === "alterColumnNullable")!;
+    expect(drop).toMatchObject({ schema: "sales", table: "orders", name: "legacy" });
+    expect(alter).toMatchObject({ schema: "sales", table: "orders", name: "total" });
+    expect(renderPgStep(drop)).toBe('ALTER TABLE "sales"."orders" DROP COLUMN "legacy";');
+    expect(renderPgStep(alter)).toBe(
+      'ALTER TABLE "sales"."orders" ALTER COLUMN "total" DROP NOT NULL;',
+    );
+  });
+
+  it("reads an old unqualified snapshot as the same (now-qualified) table, not drop+create", () => {
+    // Baseline written before schema-qualification (no `schema` field); the
+    // current source resolves it into `sales`.  The diff must reconcile them
+    // as one table (a column add), NOT drop `public.orders` + create
+    // `sales.orders`.
+    const prev = {
+      schemaVersion: 1 as const,
+      tables: [tbl("orders", [{ name: "id", type: { kind: "uuid" as const }, nullable: false }])],
+    };
+    const next = {
+      schemaVersion: 1 as const,
+      tables: [
+        tbl(
+          "orders",
+          [
+            { name: "id", type: { kind: "uuid" as const }, nullable: false },
+            { name: "note", type: { kind: "text" as const }, nullable: true },
+          ],
+          { schema: "sales" },
+        ),
+      ],
+    };
+    const steps = diffSchema(prev, next);
+    expect(steps.some((s) => s.op === "dropTable")).toBe(false);
+    expect(steps.some((s) => s.op === "createTable")).toBe(false);
+    expect(steps.filter((s) => s.op === "addColumn")).toHaveLength(1);
+  });
+});
+
+describe("A8.2 — FK-ordered drops", () => {
+  it("drops a child table before the parent it FK-references", () => {
+    const prev = {
+      schemaVersion: 1 as const,
+      tables: [
+        tbl("orders", [{ name: "id", type: { kind: "uuid" as const }, nullable: false }]),
+        tbl(
+          "order_lines",
+          [
+            { name: "id", type: { kind: "uuid" as const }, nullable: false },
+            { name: "order_id", type: { kind: "uuid" as const }, nullable: false },
+          ],
+          {
+            foreignKeys: [{ column: "order_id", refTable: "orders", onDelete: "cascade" }],
+          },
+        ),
+      ],
+    };
+    const steps = diffSchema(prev, { schemaVersion: 1, tables: [] });
+    const drops = steps
+      .filter((s): s is Extract<MigrationStep, { op: "dropTable" }> => s.op === "dropTable")
+      .map((s) => s.name);
+    // Child first — otherwise "cannot drop table orders … order_lines depends on it".
+    expect(drops).toEqual(["order_lines", "orders"]);
+  });
+
+  it("emits column-level FK drops before the table drops they unblock", () => {
+    // `orders` survives but loses its FK column to `regions`; `regions` is
+    // dropped.  The dropColumn on orders must precede the dropTable on regions.
+    const prev = {
+      schemaVersion: 1 as const,
+      tables: [
+        tbl(
+          "orders",
+          [
+            { name: "id", type: { kind: "uuid" as const }, nullable: false },
+            { name: "region_id", type: { kind: "uuid" as const }, nullable: false },
+          ],
+          { foreignKeys: [{ column: "region_id", refTable: "regions", onDelete: "restrict" }] },
+        ),
+        tbl("regions", [{ name: "id", type: { kind: "uuid" as const }, nullable: false }]),
+      ],
+    };
+    const next = {
+      schemaVersion: 1 as const,
+      tables: [tbl("orders", [{ name: "id", type: { kind: "uuid" as const }, nullable: false }])],
+    };
+    const steps = applyDestructivePolicy(diffSchema(prev, next), prev, {
+      allowDestructive: true,
+      module: "M",
+    });
+    const dropColIdx = steps.findIndex((s) => s.op === "dropColumn" && s.name === "region_id");
+    const dropTblIdx = steps.findIndex((s) => s.op === "dropTable" && s.name === "regions");
+    expect(dropColIdx).toBeGreaterThanOrEqual(0);
+    expect(dropTblIdx).toBeGreaterThan(dropColIdx);
+  });
+});
+
+describe("A8.3 — destructive-change gate", () => {
+  const idCol = { name: "id", type: { kind: "uuid" as const }, nullable: false };
+
+  it("collapses a same-type drop+add on one table into a renameColumn", () => {
+    const prev = {
+      schemaVersion: 1 as const,
+      tables: [
+        tbl("users", [
+          idCol,
+          { name: "full_name", type: { kind: "text" as const }, nullable: false },
+        ]),
+      ],
+    };
+    const next = {
+      schemaVersion: 1 as const,
+      tables: [
+        tbl("users", [idCol, { name: "name", type: { kind: "text" as const }, nullable: false }]),
+      ],
+    };
+    const steps = applyDestructivePolicy(diffSchema(prev, next), prev, {
+      allowDestructive: false,
+      module: "M",
+    });
+    expect(steps).toEqual([
+      {
+        op: "renameColumn",
+        table: "users",
+        from: "full_name",
+        to: "name",
+        type: { kind: "text" },
+      },
+    ]);
+    expect(renderPgStep(steps[0]!)).toBe(
+      'ALTER TABLE "users" RENAME COLUMN "full_name" TO "name";',
+    );
+  });
+
+  it("does NOT collapse when the drop/add types differ (stays destructive)", () => {
+    const prev = {
+      schemaVersion: 1 as const,
+      tables: [
+        tbl("users", [idCol, { name: "age", type: { kind: "text" as const }, nullable: false }]),
+      ],
+    };
+    const next = {
+      schemaVersion: 1 as const,
+      tables: [
+        tbl("users", [idCol, { name: "years", type: { kind: "int" as const }, nullable: false }]),
+      ],
+    };
+    expect(() =>
+      applyDestructivePolicy(diffSchema(prev, next), prev, {
+        allowDestructive: false,
+        module: "M",
+      }),
+    ).toThrow(MigrationDestructiveError);
+  });
+
+  it("blocks a NOT-NULL add without a default on an existing table unless allowed", () => {
+    const prev = { schemaVersion: 1 as const, tables: [tbl("orders", [idCol])] };
+    const next = {
+      schemaVersion: 1 as const,
+      tables: [
+        tbl("orders", [
+          idCol,
+          { name: "status", type: { kind: "text" as const }, nullable: false },
+        ]),
+      ],
+    };
+    const raw = diffSchema(prev, next);
+    expect(() =>
+      applyDestructivePolicy(raw, prev, { allowDestructive: false, module: "M" }),
+    ).toThrow(/migration-destructive|destructive/i);
+  });
+
+  it("--allow-destructive rewrites the NOT-NULL add into add-nullable + backfill-TODO + SET NOT NULL", () => {
+    const prev = { schemaVersion: 1 as const, tables: [tbl("orders", [idCol])] };
+    const next = {
+      schemaVersion: 1 as const,
+      tables: [
+        tbl("orders", [
+          idCol,
+          { name: "status", type: { kind: "text" as const }, nullable: false },
+        ]),
+      ],
+    };
+    const steps = applyDestructivePolicy(diffSchema(prev, next), prev, {
+      allowDestructive: true,
+      module: "M",
+    });
+    expect(steps.map((s) => s.op)).toEqual(["addColumn", "sqlComment", "alterColumnNullable"]);
+    const add = steps[0]!;
+    expect(add.op === "addColumn" && add.column.nullable).toBe(true);
+    const setNotNull = steps[2]!;
+    expect(setNotNull.op === "alterColumnNullable" && setNotNull.nullable).toBe(false);
+    expect(renderPgStep(steps[1]!)).toMatch(/^-- TODO backfill orders\.status/);
+  });
+
+  it("exempts first-run (Initial) migrations — nothing pre-exists to destroy", () => {
+    const next = {
+      schemaVersion: 1 as const,
+      tables: [
+        tbl("orders", [
+          idCol,
+          { name: "status", type: { kind: "text" as const }, nullable: false },
+        ]),
+      ],
+    };
+    // baseline null → createTable carries the NOT-NULL column inline; no gate.
+    const steps = applyDestructivePolicy(diffSchema(null, next), null, {
+      allowDestructive: false,
+      module: "M",
+    });
+    expect(steps.every((s) => s.op === "createTable")).toBe(true);
   });
 });

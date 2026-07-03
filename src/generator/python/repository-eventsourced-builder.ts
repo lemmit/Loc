@@ -8,6 +8,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
+import { wireHelperImport } from "./py-type-imports.js";
 import { renderPyExpr } from "./render-expr.js";
 import { emittableFinds, findExecutedLine } from "./repository-builder.js";
 
@@ -120,7 +121,7 @@ export function buildPyEventSourcedRepositoryFile(
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "",
     `from app.db.schema import ${row}`,
-    refersTo("iso") ? "from app.db.wire import iso" : null,
+    wireHelperImport(refersTo),
     "from app.domain.errors import AggregateNotFoundError",
     `from app.domain.events import ${["DomainEvent", "DomainEventDispatcher", ...events.map((e) => e.name)].join(", ")}`,
     `from app.domain.ids import ${[...new Set([`${agg.name}Id`, ...idNamesOf(events)])].sort().join(", ")}`,
@@ -270,6 +271,11 @@ function toWireStub(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): st
     const inner = wf.type.kind === "optional" ? wf.type.inner : wf.type;
     if (inner.kind === "primitive" && inner.name === "datetime") {
       pairs.push(`"${wf.name}": iso(${access})`);
+      continue;
+    }
+    if (inner.kind === "primitive" && inner.name === "money") {
+      // Precise-decimal string on the wire (parity with the other backends).
+      pairs.push(`"${wf.name}": money_str(${access})`);
       continue;
     }
     if (inner.kind === "valueobject") {

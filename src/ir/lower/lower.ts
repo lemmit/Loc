@@ -90,6 +90,7 @@ import {
   isWorkflow,
 } from "../../language/generated/ast.js";
 import { descriptorFor } from "../../platform/metadata.js";
+import { plural, snake } from "../../util/naming.js";
 import { isConstructible } from "../enrich/wire-projection.js";
 import type {
   AggregateIR,
@@ -790,17 +791,7 @@ function snakeOnly(s: string): string {
 }
 
 function pluralSnake(s: string): string {
-  // tiny inline copy of util/naming → avoids the
-  // `import { plural, snake }` pulling more types than we need.
-  const snake = s
-    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
-    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
-    .toLowerCase();
-  if (snake.endsWith("y") && !/[aeiou]y$/.test(snake)) {
-    return snake.slice(0, -1) + "ies";
-  }
-  if (/(s|x|z|ch|sh)$/.test(snake)) return snake + "es";
-  return snake + "s";
+  return plural(snake(s));
 }
 
 function lowerTheme(block: ThemeBlock): ThemeIR {

@@ -405,6 +405,36 @@ export function buildJavaOpenApiContract(
       for (const p of wf.params) noteEnumRefs(p.type, p.name);
       setRequired(`${upperFirst(wf.name)}Request`, requiredParams(wf.params));
     }
+
+    // Observable workflows — read-only instance endpoints
+    // (workflow-instance-visibility.md).  Independent of the command route:
+    // an event-triggered-only saga still exposes its instances.  Bring the
+    // springdoc-inferred list/by-id ops to Hono's canonical shape:
+    //   - GET /workflows/<slug>/instances → named `<Wf>InstanceListResponse`
+    //     wrapper (springdoc inlines `List<<Wf>InstanceResponse>` as a bare
+    //     array; retarget it like the aggregate list wrappers);
+    //   - GET /workflows/<slug>/instances/{id} → 404 error response;
+    //   - `<Wf>InstanceResponse` required set (springdoc marks nothing).
+    // The `{id}` path param is a plain `String` on the controller, so it lands
+    // as `{type: string}` (no `uuid` format) matching Hono.
+    for (const wf of ctx.workflows) {
+      if (!wf.instanceWireShape) continue;
+      const slug = snake(wf.name);
+      const instancesPath = `${routePrefix}/workflows/${slug}/instances`;
+      const listWrapper = `${upperFirst(wf.name)}InstanceListResponse`;
+      wrappers.set(listWrapper, `${upperFirst(wf.name)}InstanceResponse`);
+      routes.push({ method: "get", path: instancesPath, listWrapper, errors: [] });
+      routes.push({
+        method: "get",
+        path: `${instancesPath}/{id}`,
+        errors: err(errorStatuses("getById")),
+      });
+      for (const w of wf.instanceWireShape) noteEnumRefs(w.type, w.name);
+      setRequired(
+        `${upperFirst(wf.name)}InstanceResponse`,
+        requiredWireFields(wf.instanceWireShape),
+      );
+    }
   }
 
   // Unambiguous field-name → enum retargets only: a field name mapping to

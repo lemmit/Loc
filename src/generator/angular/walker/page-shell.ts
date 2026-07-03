@@ -21,14 +21,9 @@ import {
   type WalkContext,
   type WalkResult,
 } from "../../_walker/walker-core.js";
-import type { AngularActionSpec } from "../action.js";
-import type { AngularCreateFormSpec } from "../create-form.js";
-import type { AngularDestroyFormSpec } from "../destroy-form.js";
-import type { AngularModalSpec } from "../modal.js";
-import type { AngularOperationFormSpec } from "../operation-form.js";
 import { storeClassName, storeFileSlug } from "../store-builder.js";
-import type { AngularWorkflowFormSpec } from "../workflow-form.js";
 import { angularTarget } from "./angular-target.js";
+import { angularSink } from "./sink.js";
 
 // ---------------------------------------------------------------------------
 // Angular page shell — assembles a generated standalone component around a
@@ -163,6 +158,9 @@ const FORMAT_HELPERS = [
 
 export function renderAngularPage(input: AngularPageShellInput): string {
   const { page, result, nameCtx } = input;
+  // The Angular render seams parked the per-primitive form/action specs on the
+  // walker's opaque `sink` slot; drain it here (empty when the body had none).
+  const sink = angularSink(result);
   const coreSymbols = new Set<string>(["Component"]);
   const routerSymbols = new Set<string>();
   const members: string[] = [];
@@ -341,7 +339,7 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   // `Modal` operation-dialog forms use `signal()` for their open/id state —
   // register the core import before the import lines are built (the spec block
   // that consumes them runs further down).
-  if ((result.angularModals?.length ?? 0) > 0) coreSymbols.add("signal");
+  if (sink.modals.length > 0) coreSymbols.add("signal");
 
   const imports: string[] = [
     `import { ${[...coreSymbols].sort().join(", ")} } from "@angular/core";`,
@@ -444,7 +442,7 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   // mutation, builds the typed Reactive `FormGroup`, and declares the submit
   // handler (`mutate` → navigate).  The form-shell imports (FormGroup /
   // ReactiveFormsModule / Mat modules / the api types) ride `result.imports`.
-  const angularForms = (result.angularForms ?? []) as AngularCreateFormSpec[];
+  const angularForms = sink.forms;
   for (const form of angularForms) {
     members.push(`  readonly ${form.mutationVar} = ${form.mutationFn}();`);
     const controls = form.controls
@@ -468,7 +466,7 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   // submit handler (`mutateAsync(getRawValue())` → navigate `/workflows`).  The
   // workflow command returns `void`, so the redirect is a fixed list route (no
   // `out.id`).
-  const angularWorkflowForms = (result.angularWorkflowForms ?? []) as AngularWorkflowFormSpec[];
+  const angularWorkflowForms = sink.workflowForms;
   for (const form of angularWorkflowForms) {
     members.push(`  readonly ${form.mutationVar} = ${form.mutationFn}();`);
     const controls = form.controls
@@ -492,7 +490,7 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   // handler (`mutateAsync({ id, input: getRawValue() })`).  The id expression
   // resolves in template scope (a bare route `id`, or `<param>.id`); it's
   // `this.`-prefixed here for the method body.
-  const angularOpForms = (result.angularOpForms ?? []) as AngularOperationFormSpec[];
+  const angularOpForms = sink.opForms;
   if (angularOpForms.length > 0) {
     // The `use<Op><Agg>` import rides `result.imports` (the renderer `addNg`s it),
     // emitted once by the generic import block below — no separate line here.
@@ -526,7 +524,7 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   // `angularDestroyForms`.  Each hoists `readonly <var> = useDelete<Agg>()` and a
   // confirm-delete method: `window.confirm` → `mutateAsync(id)` → the `then:`
   // redirect (default the aggregate's list route).
-  const angularDestroyForms = (result.angularDestroyForms ?? []) as AngularDestroyFormSpec[];
+  const angularDestroyForms = sink.destroyForms;
   if (angularDestroyForms.length > 0) {
     // The `useDelete<Agg>` import rides `result.imports` (the renderer `addNg`s
     // it), emitted once by the generic import block below.
@@ -549,7 +547,7 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   // use<Op><Agg>()` and a "dumb template" method the `(click)="on<Op><Agg>()"`
   // calls: it reads the record id with a `?.id` guard, awaits the mutation,
   // then runs the optional `then:` effect.
-  const angularActions = (result.angularActions ?? []) as AngularActionSpec[];
+  const angularActions = sink.actions;
   if (angularActions.length > 0) {
     const byPath = new Map<string, Set<string>>();
     for (const a of angularActions) {
@@ -580,7 +578,7 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   // `use<Op><Agg>()` mutation, the op `FormGroup`, and the submit method that
   // mutates (id from the signal) then closes.  The `use…` import + the field /
   // forms modules ride `result.imports`.
-  const angularModals = (result.angularModals ?? []) as AngularModalSpec[];
+  const angularModals = sink.modals;
   if (angularModals.length > 0) {
     coreSymbols.add("signal");
     for (const m of angularModals) {

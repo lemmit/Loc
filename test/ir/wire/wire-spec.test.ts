@@ -91,4 +91,38 @@ describe("wire-spec — primitive mappings", () => {
     expect(subtotal).toBeDefined();
     expect(subtotal!.type).toEqual({ kind: "primitive", name: "money" });
   });
+
+  // B13: the wireShape id row previously hardcoded `valueType: "guid"`, so an
+  // aggregate declared `ids int` produced an INTEGER migration column but a
+  // uuid wire id (and Java DTO id type).  The id row now carries the declared
+  // id value-type, and `jsonPropertyForType` maps it honestly.
+  it("id row carries the aggregate's declared id value-type (ids int → integer)", async () => {
+    const loom = await buildLoomModel(`
+      context Support {
+        aggregate Ticket ids int {
+          subject: string
+        }
+        repository Tickets for Ticket { }
+      }
+    `);
+    const ticket = allAggregates(loom).find((a) => a.name === "Ticket")!;
+    const idRow = ticket.wireShape!.find((f) => f.name === "id")!;
+    expect(idRow.type).toEqual({ kind: "id", targetName: "Ticket", valueType: "int" });
+    // The wire-spec JSON follows: integer, not the old uuid string.
+    expect(jsonPropertyForType(idRow.type)).toEqual({ type: "integer" });
+  });
+
+  it("id row stays guid → uuid when `ids` is not overridden", async () => {
+    const loom = await buildLoomModel(`
+      context Support {
+        aggregate Note {
+          body: string
+        }
+        repository Notes for Note { }
+      }
+    `);
+    const note = allAggregates(loom).find((a) => a.name === "Note")!;
+    const idRow = note.wireShape!.find((f) => f.name === "id")!;
+    expect(jsonPropertyForType(idRow.type)).toEqual({ type: "string", format: "uuid" });
+  });
 });

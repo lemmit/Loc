@@ -36,43 +36,43 @@ describe("java generator — exception-less operation returns", () => {
 
   it("emits the sealed domain union + variant records in the entity package", async () => {
     const files_ = await files();
-    const iface = files_.get(`${ROOT}/features/orders/stringOrNotFound.java`)!;
+    const iface = files_.get(`${ROOT}/features/orders/NotFoundOrstring.java`)!;
     expect(iface).toContain(
-      "public sealed interface stringOrNotFound permits stringOrNotFound_string, stringOrNotFound_NotFound {",
+      "public sealed interface NotFoundOrstring permits NotFoundOrstring_string, NotFoundOrstring_NotFound {",
     );
-    const err = files_.get(`${ROOT}/features/orders/stringOrNotFound_NotFound.java`)!;
+    const err = files_.get(`${ROOT}/features/orders/NotFoundOrstring_NotFound.java`)!;
     expect(err).toContain(
-      "public record stringOrNotFound_NotFound(String resource) implements stringOrNotFound {",
+      "public record NotFoundOrstring_NotFound(String resource) implements NotFoundOrstring {",
     );
-    const ok = files_.get(`${ROOT}/features/orders/stringOrNotFound_string.java`)!;
+    const ok = files_.get(`${ROOT}/features/orders/NotFoundOrstring_string.java`)!;
     expect(ok).toContain(
-      "public record stringOrNotFound_string(String value) implements stringOrNotFound {",
+      "public record NotFoundOrstring_string(String value) implements NotFoundOrstring {",
     );
   });
 
   it("renders the domain method returning tagged variant records", async () => {
     const entity = (await files()).get(`${ROOT}/features/orders/Order.java`)!;
-    expect(entity).toContain("public stringOrNotFound reject() {");
-    expect(entity).toContain("return new stringOrNotFound_NotFound(this.code);");
-    expect(entity).toContain("return new stringOrNotFound_string(this.code);");
+    expect(entity).toContain("public NotFoundOrstring reject() {");
+    expect(entity).toContain("return new NotFoundOrstring_NotFound(this.code);");
+    expect(entity).toContain("return new NotFoundOrstring_string(this.code);");
   });
 
   it("emits the Jackson-polymorphic wire union with the pinned `type` tag", async () => {
-    const wire = (await files()).get(`${ROOT}/features/orders/stringOrNotFoundResponse.java`)!;
+    const wire = (await files()).get(`${ROOT}/features/orders/NotFoundOrstringResponse.java`)!;
     expect(wire).toContain(
       '@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "type")',
     );
     expect(wire).toContain(
-      '@JsonSubTypes.Type(value = stringOrNotFoundResponse_string.class, name = "string")',
+      '@JsonSubTypes.Type(value = NotFoundOrstringResponse_string.class, name = "string")',
     );
     expect(wire).toContain(
-      '@JsonSubTypes.Type(value = stringOrNotFoundResponse_NotFound.class, name = "NotFound")',
+      '@JsonSubTypes.Type(value = NotFoundOrstringResponse_NotFound.class, name = "NotFound")',
     );
   });
 
   it("service threads the union through: capture, save, publish, return", async () => {
     const svc = (await files()).get(`${ROOT}/features/orders/OrderService.java`)!;
-    expect(svc).toContain("    public stringOrNotFound accept(OrderId id) {");
+    expect(svc).toContain("    public NotFoundOrstring accept(OrderId id) {");
     expect(svc).toContain("        var result = aggregate.accept();");
     expect(svc).toContain("        repository.save(aggregate);");
     expect(svc).toContain("        return result;");
@@ -83,7 +83,7 @@ describe("java generator — exception-less operation returns", () => {
     expect(c).toContain("public ResponseEntity<?> rejectOrder(@PathVariable UUID id) {");
     expect(c).toContain("return switch (result) {");
     expect(c).toContain(
-      "ResponseEntity.ok((stringOrNotFoundResponse) new stringOrNotFoundResponse_string(v.value()));",
+      "ResponseEntity.ok((NotFoundOrstringResponse) new NotFoundOrstringResponse_string(v.value()));",
     );
     expect(c).toContain("var problem = ProblemDetail.forStatus(404);");
     expect(c).toContain('problem.setTitle("Not Found");');

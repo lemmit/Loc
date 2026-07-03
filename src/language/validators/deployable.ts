@@ -5,18 +5,19 @@
 import type { ValidationAcceptor } from "langium";
 import type { Platform } from "../../ir/types/loom-ir.js";
 import {
+  backendPlatformNames,
   backendVersionsForFamily,
   descriptorFor,
+  frontendPlatformNames,
   isRegisteredBackendRef,
   parseBuiltinPlatformRef,
 } from "../../platform/metadata.js";
 import {
-  BUILTIN_PACK_LATEST,
   builtinVersionsForFamily,
   packFormatForBuiltin,
   parseBuiltinDesignRef,
 } from "../../util/builtin-formats.js";
-import type { Deployable } from "../generated/ast.js";
+import type { Deployable, Ui, UiComposeBinding } from "../generated/ast.js";
 import {
   builtinPackNamesForFormat,
   defaultFoundationFor,
@@ -33,8 +34,6 @@ import {
   realizationAxisMenu,
   resolveStyleLayoutCompat,
 } from "./data/platform-rules.js";
-
-void BUILTIN_PACK_LATEST;
 
 /** True iff this platform is a frontend-only deployable.  Consults the
  *  `PlatformDescriptor.isFrontend` flag via the client-safe metadata
@@ -220,7 +219,9 @@ export function checkDeployable(
     if (isFrontendPlatform(target.platform)) {
       accept(
         "error",
-        `Frontend deployable '${d.name}' cannot target another frontend ('${target.name}'). Pick a 'dotnet', 'node', or 'java' deployable.`,
+        `Frontend deployable '${d.name}' cannot target another frontend ('${target.name}'). Pick a backend deployable (${backendPlatformNames()
+          .map((n) => `'${n}'`)
+          .join(", ")}).`,
         { node: d, property: "targets" },
       );
     }
@@ -245,7 +246,9 @@ export function checkDeployable(
     if (d.targets) {
       accept(
         "error",
-        `'targets:' is only valid on a frontend deployable ('platform: react', 'svelte', 'vue', or 'static').`,
+        `'targets:' is only valid on a frontend deployable (${frontendPlatformNames()
+          .map((n) => `'${n}'`)
+          .join(", ")}).`,
         { node: d, property: "targets" },
       );
     }
@@ -546,7 +549,7 @@ export function checkDeployableDataSources(d: Deployable, accept: ValidationAcce
 
 /** `serves:` validations.
  *    - Only valid on platforms that own a backend (dotnet, node,
- *      java, elixir).  Frontend-only platforms (react, static)
+ *      java, elixir, python).  Frontend-only platforms (react, static)
  *      have no api surface to serve.
  *    - Each api ref must resolve.
  *    - No duplicate api names within one deployable's serves list. */
@@ -555,7 +558,9 @@ export function checkDeployableServes(d: Deployable, accept: ValidationAcceptor)
   if (!platformOwnsBackend(d.platform)) {
     accept(
       "error",
-      `'serves:' is only valid on a backend deployable (dotnet, node, java, elixir).  Got platform '${d.platform}'.`,
+      `'serves:' is only valid on a backend deployable (${backendPlatformNames()
+        .map((n) => `'${n}'`)
+        .join(", ")}).  Got platform '${d.platform}'.`,
       { node: d, property: "serves" },
     );
     return;
@@ -598,9 +603,27 @@ export function checkDeployableServes(d: Deployable, accept: ValidationAcceptor)
  *    - Every UI api param must have a matching binding (no
  *      param left unbound). */
 export function checkDeployableUiCompose(d: Deployable, accept: ValidationAcceptor): void {
-  const ui = d.uiSugar?.ref?.ref ?? d.uiCompose?.ref?.ref ?? d.uiBlock?.ref?.ref;
-  if (!ui) return;
+  // Legacy single-ui mount (`ui:` sugar / `compose` / block) carries its
+  // bindings in `d.uiCompose`.
+  const legacyUi = d.uiSugar?.ref?.ref ?? d.uiCompose?.ref?.ref ?? d.uiBlock?.ref?.ref;
+  if (legacyUi) checkUiApiBindings(d, legacyUi, d.uiCompose, accept);
+  // `hosts:`-mounted uis (D-PHOENIX-SURFACE) get the SAME api-binding
+  // validation (C7) — previously they escaped it entirely.  A `hosts:` mount
+  // carries no compose bindings, so a hosted ui that declares `api X: <Api>`
+  // params has nothing to fill them and is told to switch to the `ui: X {…}`
+  // compose form; a hosted ui with no api params validates clean.
+  for (const r of d.hosts ?? []) {
+    const ui = r.ref;
+    if (ui) checkUiApiBindings(d, ui, undefined, accept);
+  }
+}
 
+function checkUiApiBindings(
+  d: Deployable,
+  ui: Ui,
+  compose: UiComposeBinding | undefined,
+  accept: ValidationAcceptor,
+): void {
   // Collect declared UI api params (param name → required api name).
   const requiredParams = new Map<string, string>();
   for (const m of ui.members) {
@@ -611,7 +634,7 @@ export function checkDeployableUiCompose(d: Deployable, accept: ValidationAccept
 
   if (requiredParams.size === 0) {
     // UI has no api params — extra ui-compose bindings are pointless.
-    const bindings = d.uiCompose?.bindings ?? [];
+    const bindings = compose?.bindings ?? [];
     for (const b of bindings) {
       accept(
         "error",
@@ -623,7 +646,7 @@ export function checkDeployableUiCompose(d: Deployable, accept: ValidationAccept
   }
 
   // UI has api params → must use the compose-block form.
-  if (!d.uiCompose) {
+  if (!compose) {
     const paramList = [...requiredParams.entries()]
       .map(([n, a]) => `${n}: <backend serving ${a}>`)
       .join(", ");
@@ -635,7 +658,7 @@ export function checkDeployableUiCompose(d: Deployable, accept: ValidationAccept
     return;
   }
 
-  const bindings = d.uiCompose.bindings ?? [];
+  const bindings = compose.bindings ?? [];
   const seenNames = new Set<string>();
   const boundNames = new Set<string>();
   for (const b of bindings) {

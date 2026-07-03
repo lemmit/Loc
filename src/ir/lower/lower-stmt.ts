@@ -13,6 +13,7 @@ import type { ExprIR, PathIR, StmtIR, TypeIR } from "../types/loom-ir.js";
 import {
   inferExprType,
   isErrorVariantTag,
+  lowerEmitFields,
   lowerExpr,
   lowerExprInContext,
   pathType,
@@ -133,10 +134,7 @@ export function lowerStatement(stmt: Statement, env: Env): { stmt: StmtIR; envAf
       stmt: {
         kind: "emit",
         eventName: stmt.event?.ref?.name ?? "Unknown",
-        fields: stmt.fields.map((f) => ({
-          name: f.name,
-          value: lowerExpr(f.value, env),
-        })),
+        fields: lowerEmitFields(stmt.event?.ref, stmt.fields, env),
       },
       envAfter: env,
     };

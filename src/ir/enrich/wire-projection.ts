@@ -152,16 +152,33 @@ export function createOmissionValue(f: FieldIR): CreateOmissionValue {
 /** The explicit `= default` a create-input field carries onto the **wire**
  *  so the client may omit it (the default is applied at the wire boundary,
  *  dropping the field from the request's required-set).  Returns the
- *  default ExprIR for an explicitly-defaulted field, or `undefined` when
- *  the field has no `= default` or is a bare `bool` (bool optionality is
- *  owned by each backend's existing bool rule, not this one).  Backends
- *  render the result in their native default slot — Hono zod `.default(…)`,
- *  .NET record `= …`, Phoenix changeset default — so a defaulted field is
- *  optional input uniformly. */
+ *  default ExprIR for any explicitly-defaulted field — **including a
+ *  `bool = true`** — or `undefined` when the field has no `= default`.  A
+ *  *bare* `bool` (no explicit default) still returns `undefined`: its
+ *  implicit-false optionality is owned by each backend's existing bool rule.
+ *  Previously this dropped the default for *every* bool, so a declared
+ *  `bool = true` silently arrived `false` at the wire boundary (the backend's
+ *  hardcoded `.default(false)` won).  Backends render the result in their
+ *  native default slot — Hono zod `.default(…)`, .NET record `= …`, Phoenix
+ *  changeset default — so a defaulted field is optional input uniformly. */
 export function wireCreateDefault(f: FieldIR): ExprIR | undefined {
   if (f.default === undefined) return undefined;
   const base = f.type.kind === "optional" ? f.type.inner : f.type;
-  if (base.kind === "primitive" && base.name === "bool") return undefined;
+  const isBool = base.kind === "primitive" && base.name === "bool";
+  // A bare `bool` and an explicit `bool = false` are indistinguishable at
+  // runtime (both default to false, owned by each backend's implicit bool
+  // rule).  Returning `undefined` for a literal-`false` default keeps their
+  // emitted bytes identical; any OTHER bool default — notably `bool = true` —
+  // is a real declared value that must reach the wire, or the client's
+  // omission silently arrives `false`.
+  if (
+    isBool &&
+    f.default.kind === "literal" &&
+    f.default.lit === "bool" &&
+    f.default.value === "false"
+  ) {
+    return undefined;
+  }
   return f.default;
 }
 

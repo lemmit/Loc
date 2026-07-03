@@ -27,6 +27,7 @@ import { createInputFields, createOmissionValue } from "../../../ir/enrich/wire-
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
+  ExprIR,
   SeedRowIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
@@ -200,6 +201,9 @@ function renderSeedFile(
   const usings = lines(
     "using System;",
     "using System.Collections.Generic;",
+    // The datetime seed-literal coercion (renderSeedValue) reaches into
+    // CultureInfo/DateTimeStyles — outside the emitted file's other usings.
+    body.includes("CultureInfo.") && "using System.Globalization;",
     "using System.Linq;",
     "using System.Threading;",
     "using System.Threading.Tasks;",

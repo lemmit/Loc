@@ -1,7 +1,7 @@
 import { genericShape } from "../../ir/stdlib/generics.js";
 import { variantTag } from "../../ir/stdlib/unions.js";
 import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
-import { escapeTsIdent, lowerFirst } from "../../util/naming.js";
+import { escapeTsIdent, lowerFirst, upperFirst } from "../../util/naming.js";
 import {
   type ExprTarget,
   type MemberExpr,
@@ -47,6 +47,13 @@ export interface TsRenderContext {
    *  workflow path wires this — aggregate-op render contexts leave it undefined
    *  (and the validator forbids them calling a non-pure service anyway). */
   readPortArgs?: (service: string, op: string) => string[];
+  /** Text a `current-user` ref renders as, overriding the default bare
+   *  `currentUser` parameter/local.  The persist-time audit-stamp helper (which
+   *  has no `currentUser` in scope) passes `requireCurrentUser()` so a declared
+   *  claim stamp (`createdByRole := currentUser.role`) materialises the real
+   *  attribute (`requireCurrentUser().role`) rather than collapsing to the
+   *  actor id. */
+  principalExpr?: string;
 }
 
 const DEFAULT: TsRenderContext = { thisName: "this" };
@@ -217,8 +224,10 @@ function renderRef(e: RefExpr, ctx: TsRenderContext): string {
       // Magic identifier for the system's user-claim shape — matches
       // the parameter / local that each per-request emitter
       // materialises (operation methods get a `currentUser: User`
-      // param, workflow + view-route handlers introduce a local).
-      return "currentUser";
+      // param, workflow + view-route handlers introduce a local).  A
+      // caller with no such binding (the persist-time stamp helper)
+      // overrides it via `principalExpr`.
+      return ctx.principalExpr ?? "currentUser";
     default:
       // `refKind === "unknown"` is intentional for some positions
       // (e2e test bodies, member-chain receivers like `Order.byId(...)`
@@ -341,12 +350,20 @@ function renderCall(
       // param the service declaration takes and the orchestrating workflow
       // supplies — exactly the var the workflow's own repo reads use
       // (`await accounts.byHolder(holder)`).  `await`-wrapped in parens so it
-      // composes in any expression position (`(await …) == null`).  The method
-      // is the resolved repo method (`byHolder` / `getById` for a named find,
-      // `find`/`findAll`/`run` for the criterion / retrieval forms) — no
-      // re-recognition.
+      // composes in any expression position (`(await …) == null`).  For a
+      // `named` read the method is the declared find (`byHolder` / `getById`).
+      // A criterion / retrieval read (`find`/`findAll`/`run`) renders against
+      // the synthesized retrieval method (`run<RetrievalName>`), exactly as the
+      // workflow `repo-run` does — so the criterion actually filters the query
+      // instead of being dropped for the whole-table read.  A single-result
+      // `find` takes the first row (`[0] ?? null`), mirroring the if-let render.
       const read = e.repoRead!;
-      return `(await ${lowerFirst(read.repo)}.${read.method}(${argList}))`;
+      const handle = lowerFirst(read.repo);
+      if (read.readKind !== "named" && read.retrievalName) {
+        const call = `${handle}.run${upperFirst(read.retrievalName)}(${argList})`;
+        return read.readKind === "find" ? `(await ${call})[0] ?? null` : `(await ${call})`;
+      }
+      return `(await ${handle}.${read.method}(${argList}))`;
     }
     case "action":
     // A sibling page/component action call (Proposal A Stage 1) — frontend-
@@ -489,10 +506,19 @@ function renderUnionVariantTs(v: TypeIR): string {
   return `{ type: "${tag}"; value: ${renderTsType(v)} }`;
 }
 
-/** Convert a regex source string into a `/pattern/` literal.  Escapes
- *  the only character that's special inside a literal (the closing
- *  slash); the value's other backslashes are part of the regex source
- *  and pass through unchanged. */
+/** Convert a regex source string into a `/pattern/` literal.  Escapes the
+ *  closing slash (`/` → `\/`); the value's other backslashes are part of the
+ *  regex source and pass through unchanged.  Two edge cases can't sit in a
+ *  `/…/` literal and fall back to the `RegExp` constructor (a plain string
+ *  literal): an EMPTY pattern (bare `//` is a line comment) and a source that
+ *  ends in a dangling odd backslash or contains a newline (the trailing `\`
+ *  would escape our closing slash, breaking the file's parse). */
 function asRegexLiteral(source: string): string {
-  return `/${source.replace(/\//g, "\\/")}/`;
+  if (source === "") return 'new RegExp("")';
+  const escaped = source.replace(/\//g, "\\/");
+  const trailingBackslashes = /\\*$/.exec(escaped)?.[0].length ?? 0;
+  if (/[\n\r]/.test(escaped) || trailingBackslashes % 2 === 1) {
+    return `new RegExp(${JSON.stringify(source)})`;
+  }
+  return `/${escaped}/`;
 }

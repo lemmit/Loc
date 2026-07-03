@@ -10,7 +10,8 @@ import {
   platformSavingShapes,
 } from "../../../language/validators/data/platform-rules.js";
 import { descriptorFor } from "../../../platform/metadata.js";
-import { lowerFirst } from "../../../util/naming.js";
+import { KEYCLOAK_HOST_PORT } from "../../../util/api-base.js";
+import { lowerFirst, snake } from "../../../util/naming.js";
 import {
   capabilitiesFor,
   configSchemaFor,
@@ -346,6 +347,79 @@ export function validateSystem(sys: SystemIR, diags: LoomDiagnostic[]): void {
   for (const m of sys.subdomains) modulesByName.set(m.name, m);
   for (const t of sys.e2eTests) {
     validateE2ETest(t, sys, modulesByName, diags);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Compose uniqueness — the generated `docker-compose.yml` publishes each
+// deployable's `port` on the host and keys every service by its
+// `serviceSlug(name)` (= `naming.snake`), and — when auth is bundled — also
+// publishes Keycloak on `KEYCLOAK_HOST_PORT`.  Two deployables sharing a host
+// port (e.g. both defaulted to 3000, or a user port colliding with 8081) make
+// `docker compose up` abort with a port-in-use error; two deployables whose
+// names slug to the same key (`SalesApi2` / `salesApi2` → `sales_api2`)
+// silently merge into one output directory + one compose service.  Both are
+// deploy-time breakage the IR can catch here (finding 20 / B24).
+// ---------------------------------------------------------------------------
+
+/** Mirrors `bundlesKeycloak` in `src/system/index.ts`: the compose file bundles
+ *  a dev Keycloak (publishing `KEYCLOAK_HOST_PORT`) when the system declares an
+ *  `auth {}` block with the default / keycloak / custom provider. */
+function bundlesKeycloakHostPort(sys: SystemIR): boolean {
+  const a = sys.auth;
+  if (!a) return false;
+  return !a.provider || a.provider === "keycloak" || a.provider === "custom";
+}
+
+export function validateComposeUniqueness(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  // Host-port collisions across deployables (plus the bundled Keycloak port).
+  const ownersByPort = new Map<number, string[]>();
+  const addOwner = (port: number, owner: string): void => {
+    const list = ownersByPort.get(port);
+    if (list) list.push(owner);
+    else ownersByPort.set(port, [owner]);
+  };
+  for (const d of sys.deployables) addOwner(d.port, `deployable '${d.name}'`);
+  if (bundlesKeycloakHostPort(sys)) {
+    addOwner(KEYCLOAK_HOST_PORT, "the bundled Keycloak service");
+  }
+  for (const [port, owners] of ownersByPort) {
+    if (owners.length < 2) continue;
+    diags.push({
+      severity: "error",
+      code: "loom.duplicate-host-port",
+      message:
+        `Host port ${port} is published by more than one service (${owners.join(", ")}); ` +
+        `\`docker compose up\` would abort with a port-in-use error. Give each deployable a ` +
+        `distinct \`port:\`${
+          owners.some((o) => o.includes("Keycloak"))
+            ? ` (port ${KEYCLOAK_HOST_PORT} is reserved for the bundled Keycloak when auth is enabled)`
+            : ""
+        }.`,
+      source: sys.name,
+    });
+  }
+
+  // Service-slug collisions across deployables (case-variant names merge dirs).
+  const namesBySlug = new Map<string, string[]>();
+  for (const d of sys.deployables) {
+    const slug = snake(d.name);
+    const list = namesBySlug.get(slug);
+    if (list) list.push(d.name);
+    else namesBySlug.set(slug, [d.name]);
+  }
+  for (const [slug, names] of namesBySlug) {
+    if (names.length < 2) continue;
+    diags.push({
+      severity: "error",
+      code: "loom.duplicate-service-slug",
+      message:
+        `Deployables ${names.map((n) => `'${n}'`).join(", ")} all resolve to the same ` +
+        `docker-compose service slug '${slug}', so they would silently merge into one output ` +
+        `directory and one compose service. Rename them to distinct slugs (names must differ by ` +
+        `more than case / punctuation).`,
+      source: sys.name,
+    });
   }
 }
 
@@ -1101,7 +1175,13 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // python for `embedded` but not `document` — so it must be in this set for the
   // per-case logic below to reject that one shape (and accept the relational +
   // embedded cases, principal or not).
-  const LIMITED_FAMILIES = new Set(["node", "elixir", "java", "python"]);
+  // .NET is included NOT because it has an unwired shape (EF `HasQueryFilter`
+  // supports every case — the `supports*` predicates below all return true for
+  // it) but so the PRINCIPAL-filter-needs-auth gate reaches it: a `currentUser`
+  // filter compiles to `HasQueryFilter(... RequestContext.Current!.CurrentUser!
+  // ...)`, which NREs on every read when the deployable has no auth.  Excluding
+  // .NET here skipped that gate entirely (finding 20 / B16).
+  const LIMITED_FAMILIES = new Set(["node", "elixir", "java", "python", "dotnet"]);
   // Backends that now wire PRINCIPAL-referencing filters (`currentUser.x`) on
   // relational aggregates — node/elixir/java/python all do.  python renders the
   // predicate against the ambient `require_current_user()` accessor (a
@@ -1119,6 +1199,10 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
     if (family === "node") return true;
     if (family === "elixir") return true;
     if (family === "java") return true;
+    // .NET wires a principal relational filter via EF `HasQueryFilter`
+    // (`RequestContext.Current!.CurrentUser!.<claim>`); it's in LIMITED_FAMILIES
+    // only for the auth gate, so it must report as fully supported here.
+    if (family === "dotnet") return true;
     // python (DEBT-02 last-backend parity): a principal capability filter on a
     // RELATIONAL aggregate renders `current_user.<claim>` against an ambient
     // ContextVar accessor (`require_current_user()`) AND-ed into every root read
@@ -1157,7 +1241,9 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
     (family === "node" && (shp === "document" || shp === "embedded")) ||
     (family === "java" && (shp === "document" || shp === "embedded")) ||
     (family === "elixir" && shp === "embedded") ||
-    (family === "python" && (shp === "document" || shp === "embedded"));
+    (family === "python" && (shp === "document" || shp === "embedded")) ||
+    // .NET (EF) filters every shape; in LIMITED_FAMILIES only for the auth gate.
+    (family === "dotnet" && (shp === "document" || shp === "embedded"));
   // PRINCIPAL (`currentUser.x`) filter on a NON-relational shape (DEBT-02, the
   // actor + non-relational intersection).  An `embedded` aggregate's root
   // scalars are real columns, so node/elixir/java reuse their relational
@@ -1177,8 +1263,13 @@ export function validateContextFilterSupport(sys: SystemIR, diags: LoomDiagnosti
   // only for elixir (no `document` shape).
   const supportsPrincipalNonRelationalFilter = (family: string, shp: string): boolean =>
     (shp === "embedded" &&
-      (family === "node" || family === "elixir" || family === "java" || family === "python")) ||
-    (shp === "document" && (family === "node" || family === "java" || family === "python"));
+      (family === "node" ||
+        family === "elixir" ||
+        family === "java" ||
+        family === "python" ||
+        family === "dotnet")) ||
+    (shp === "document" &&
+      (family === "node" || family === "java" || family === "python" || family === "dotnet"));
 
   for (const dep of sys.deployables) {
     const fam = platformFamily(dep.platform);
@@ -1963,9 +2054,10 @@ export function validateInheritanceStorage(
 ): void {
   const byName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
   // TPH storage emission ships on Hono (Drizzle shared table + `kind`), .NET
-  // (EF Core native `HasDiscriminator`), and Phoenix (plain Ecto shared table
-  // + a `kind` discriminator column).
+  // (EF Core native `HasDiscriminator`), Phoenix (plain Ecto shared table + a
+  // `kind` discriminator column), Python (SQLAlchemy) and Java (Hibernate).
   const TPH_CAPABLE = new Set(["node", "dotnet", "elixir", "python", "java"]);
+  const tphList = [...TPH_CAPABLE].sort().join(", ");
   const hostedByCapable = [...backendPlatforms].some((p) => TPH_CAPABLE.has(p));
   for (const agg of ctx.aggregates) {
     if (!agg.isAbstract && !agg.extendsAggregate) continue;
@@ -1986,14 +2078,14 @@ export function validateInheritanceStorage(
     const hostNote =
       others.length > 0
         ? `it is hosted by ${others.join(", ")}, where TPH is not implemented`
-        : "no Hono, .NET, or Phoenix backend deployable hosts this context";
+        : `no TPH-capable (${tphList}) backend deployable hosts this context`;
     diags.push({
       severity: "error",
       code: "loom.tph-backend-unsupported",
       message:
         `aggregate '${agg.name}' (${role}) resolves to sharedTable (TPH) inheritance via ` +
-        `${how}, but TPH storage emission is implemented for the Hono, .NET, Phoenix, Python, and Java backends only — ` +
-        `${hostNote}. Host the context on a Hono, .NET, or Phoenix deployable, or declare ` +
+        `${how}, but TPH storage emission is implemented for the ${tphList} backends only — ` +
+        `${hostNote}. Host the context on one of those deployables, or declare ` +
         `'inheritanceUsing(ownTable)' to use the per-concrete (TPC) layout (all backends). ` +
         `Tracked in aggregate-inheritance.md I2/I3.`,
       source: `${ctx.name}/${agg.name}`,

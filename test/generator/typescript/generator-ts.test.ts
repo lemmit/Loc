@@ -559,7 +559,7 @@ describe("typescript generator", () => {
       // Order: requestIdMiddleware mounts BEFORE cors so every
       // downstream handler + onError sees the id.
       const reqIdIdx = httpIndex.indexOf("requestIdMiddleware");
-      const corsIdx = httpIndex.indexOf("cors()");
+      const corsIdx = httpIndex.indexOf("cors({");
       expect(reqIdIdx).toBeGreaterThan(-1);
       expect(corsIdx).toBeGreaterThan(-1);
       expect(reqIdIdx).toBeLessThan(corsIdx);
@@ -1536,7 +1536,7 @@ describe("typescript generator", () => {
       const httpIndex = files.get("http/index.ts")!;
       expect(httpIndex).toMatch(/app\.use\("\*", authMiddleware\);/);
       expect(httpIndex).toMatch(/assertUserVerifierRegistered\(\);/);
-      const cors = httpIndex.indexOf('app.use("*", cors())');
+      const cors = httpIndex.indexOf("cors({");
       const auth = httpIndex.indexOf('app.use("*", authMiddleware)');
       expect(cors).toBeGreaterThan(0);
       expect(auth).toBeGreaterThan(cors);

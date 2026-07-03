@@ -12,6 +12,7 @@ import {
   formButton,
   formStyle,
 } from "./form-fields.js";
+import { angularSink } from "./walker/sink.js";
 
 // ---------------------------------------------------------------------------
 // Angular `Modal { OperationForm(…), trigger: Button(…) }` renderer — the
@@ -154,8 +155,7 @@ export function renderAngularModal(
     controls: fields.map((f) => ({ name: f.name, init: controlInit(f.type) })),
     idTargets: bc ? collectIdTargets(fields, bc, ctx) : [],
   };
-  ctx.angularModals ??= [];
-  (ctx.angularModals as AngularModalSpec[]).push(spec);
+  angularSink(ctx).modals.push(spec);
 
   const inner = "  ".repeat(depth + 1);
   const deep = "  ".repeat(depth + 2);

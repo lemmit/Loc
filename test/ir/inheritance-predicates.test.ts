@@ -74,3 +74,39 @@ describe("inheritance predicates — TPC (ownTable)", () => {
     expect(tableOwnerName(customer, pool)).toBe("Customer");
   });
 });
+
+describe("inheritance predicates — multi-level TPH chain (B11)", () => {
+  it("merges the FULL transitive chain and keeps one root-owned table", async () => {
+    // Dog extends Pet extends Animal — every base is abstract (grammar
+    // requires it).  Before B11 the merge was single-level, so Dog lost the
+    // grandparent `name` from its wireShape while the TPH table still carried
+    // the column → every insert failed.
+    const { pool, byName } = await poolFor(`
+      context Reg {
+        abstract aggregate Animal ids int { name: string }
+        abstract aggregate Pet extends Animal { owner: string }
+        aggregate Dog extends Pet { breed: string }
+      }
+    `);
+    const dog = byName("Dog");
+
+    // Full transitive field merge: grandbase → base → own, in that order.
+    expect(dog.fields.map((f) => f.name)).toEqual(["name", "owner", "breed"]);
+    // wireShape carries id + every inherited + own field.
+    const wire = (dog as { wireShape: { name: string }[] }).wireShape;
+    expect(wire.map((w) => w.name)).toEqual(["id", "name", "owner", "breed"]);
+
+    // The whole hierarchy lives in ONE table at the ROOT — the intermediate
+    // abstract Pet owns none, and the concrete resolves to the root.
+    expect(tableOwnerName(dog, pool)).toBe("Animal");
+    expect(isTphBase(byName("Animal"), pool)).toBe(true);
+    expect(isTphBase(byName("Pet"), pool)).toBe(false);
+    expect(isTphConcrete(dog, pool)).toBe(true);
+    expect(tphConcretesOf(byName("Animal"), pool).map((a) => a.name)).toEqual(["Dog"]);
+
+    // The concrete inherits the ROOT's id value-type (Animal `ids int`), so its
+    // wire id matches the INTEGER table column instead of defaulting to guid.
+    const idRow = wire.find((w) => w.name === "id") as { type: { valueType: string } };
+    expect(idRow.type.valueType).toBe("int");
+  });
+});

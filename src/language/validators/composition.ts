@@ -9,7 +9,7 @@
 // A bare top-level `context` is intentionally NOT flagged here: with zero
 // systems it keeps its legacy single-deployable meaning (loose context).
 
-import type { AstNode, ValidationAcceptor } from "langium";
+import { type AstNode, AstUtils, type URI, UriUtils, type ValidationAcceptor } from "langium";
 import type { DddServices } from "../ddd-module.js";
 import type { Model } from "../generated/ast.js";
 import {
@@ -26,6 +26,64 @@ import {
   isUi,
   isUserBlock,
 } from "../generated/ast.js";
+
+/** URI strings of every document in the import-connected component of
+ *  `model`'s document — following `import "…"` edges in BOTH directions (a
+ *  `system` may live in a file that imports this one, or one this one imports).
+ *  Documents in an UNRELATED project (no import path connecting them) are
+ *  excluded, so two independent single-system projects loaded into the same
+ *  LSP workspace don't spuriously count each other's `system` (C12). */
+function importClosure(model: Model, services: DddServices): Set<string> {
+  const adj = new Map<string, Set<string>>();
+  const link = (a: string, b: string) => {
+    (adj.get(a) ?? adj.set(a, new Set()).get(a)!).add(b);
+    (adj.get(b) ?? adj.set(b, new Set()).get(b)!).add(a);
+  };
+  for (const doc of services.shared.workspace.LangiumDocuments.all) {
+    const root = doc.parseResult?.value as Model | undefined;
+    const fromKey = doc.uri.toString();
+    if (!adj.has(fromKey)) adj.set(fromKey, new Set());
+    for (const imp of root?.imports ?? []) {
+      if (!imp.path) continue;
+      let to: URI;
+      try {
+        to = UriUtils.resolvePath(UriUtils.dirname(doc.uri), imp.path);
+      } catch {
+        continue;
+      }
+      link(fromKey, to.toString());
+    }
+  }
+  const start = AstUtils.getDocument(model).uri.toString();
+  const seen = new Set<string>([start]);
+  const queue = [start];
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    for (const nb of adj.get(cur) ?? []) {
+      if (!seen.has(nb)) {
+        seen.add(nb);
+        queue.push(nb);
+      }
+    }
+  }
+  return seen;
+}
+
+/** The `Model` roots of every OTHER document that composes with `model` — its
+ *  import closure (C12).  Empty in the single-document path (`services`
+ *  absent), so unit-test callers keep the local-only count. */
+function composedRoots(model: Model, services: DddServices | undefined): Model[] {
+  if (!services) return [];
+  const closure = importClosure(model, services);
+  const out: Model[] = [];
+  for (const doc of services.shared.workspace.LangiumDocuments.all) {
+    const root = doc.parseResult?.value as Model | undefined;
+    if (!root || root === model) continue;
+    if (!closure.has(doc.uri.toString())) continue;
+    out.push(root);
+  }
+  return out;
+}
 
 /** The keyword a foldable top-level member reads as in source — used to
  *  phrase the diagnostic.  Returns undefined for a node that is not a
@@ -53,16 +111,14 @@ export function checkTopLevelDomainComposition(
   const foldable = model.members.filter((m) => foldableKeyword(m) !== undefined);
   if (foldable.length === 0) return;
 
-  // Count `system { }` blocks across the whole project (this document plus
-  // every other loaded document in the import graph).  Composition needs
-  // exactly one — it is the fold target.
+  // Count `system { }` blocks across the project's IMPORT CLOSURE (this
+  // document plus every other document reachable through `import` edges) —
+  // NOT every loaded document, which would fold in an unrelated project's
+  // system in a multi-project workspace (C12).  Composition needs exactly
+  // one — it is the fold target.
   let systemCount = model.members.filter(isSystem).length;
-  if (services) {
-    for (const doc of services.shared.workspace.LangiumDocuments.all) {
-      const root = doc.parseResult?.value as Model | undefined;
-      if (!root || root === model) continue;
-      systemCount += root.members.filter(isSystem).length;
-    }
+  for (const root of composedRoots(model, services)) {
+    systemCount += root.members.filter(isSystem).length;
   }
   if (systemCount === 1) return;
 
@@ -111,14 +167,11 @@ export function checkProjectSingletons(
   let systemCount = model.members.filter(isSystem).length;
   let userCount = localUser.length;
   let themeCount = localTheme.length;
-  if (services) {
-    for (const doc of services.shared.workspace.LangiumDocuments.all) {
-      const root = doc.parseResult?.value as Model | undefined;
-      if (!root || root === model) continue;
-      systemCount += root.members.filter(isSystem).length;
-      userCount += collectBlocks(root, isUserBlock).length;
-      themeCount += collectBlocks(root, isThemeBlock).length;
-    }
+  // Scope to the import closure, not every loaded document (C12).
+  for (const root of composedRoots(model, services)) {
+    systemCount += root.members.filter(isSystem).length;
+    userCount += collectBlocks(root, isUserBlock).length;
+    themeCount += collectBlocks(root, isThemeBlock).length;
   }
   if (systemCount !== 1) return;
 

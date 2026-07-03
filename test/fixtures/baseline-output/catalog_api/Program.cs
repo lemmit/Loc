@@ -104,13 +104,27 @@ builder.Services.AddControllers(opts =>
         new System.Text.Json.Serialization.JsonStringEnumConverter());
 });
 
-// Permissive CORS so a generated React frontend on a different port
-// can reach the API in dev compose.  Pin Program.cs in .loomignore +
-// tighten in production.
+// CORS: the compose stack sets CORS_ORIGIN to the frontend origin(s) — a
+// comma-separated allowlist (env vars are a Configuration source).  When set,
+// only those origins are allowed (with credentials, so the session cookie
+// flows cross-origin).  When unset, the fallback is permissive AllowAnyOrigin
+// ONLY for an auth-less system; an auth-bearing system configures no origins
+// (denies cross-origin) by default.  Pin Program.cs in .loomignore to tighten.
+var corsOrigins = (builder.Configuration["CORS_ORIGIN"] ?? "")
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 builder.Services.AddCors(opts =>
 {
     opts.AddDefaultPolicy(p =>
-        p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
+    {
+        if (corsOrigins.Length > 0)
+        {
+            p.WithOrigins(corsOrigins).AllowCredentials().AllowAnyHeader().AllowAnyMethod();
+        }
+        else
+        {
+            p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
+        }
+    });
 });
 
 // OpenAPI spec generation — Swashbuckle reflects over controllers and

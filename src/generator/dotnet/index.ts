@@ -575,6 +575,17 @@ function listWrapperPairs(
         });
       }
     }
+    // Observable workflows expose a named instance-list wrapper
+    // (`<Wf>InstanceResponse` → `<Wf>InstanceListResponse`), matching Hono's
+    // `z.array(...).openapi("<Wf>InstanceListResponse")` — otherwise Swashbuckle
+    // inlines the `IEnumerable<<Wf>InstanceResponse>` list body as a bare array.
+    for (const wf of ctx.workflows) {
+      if (!wf.instanceWireShape) continue;
+      pairs.push({
+        element: `${upperFirst(wf.name)}InstanceResponse`,
+        wrapper: `${upperFirst(wf.name)}InstanceListResponse`,
+      });
+    }
   }
   return pairs;
 }

@@ -421,26 +421,13 @@ export function checkPage(p: Page, ui: Ui, accept: ValidationAcceptor): void {
 }
 
 export function checkMenuBlock(block: MenuBlock, ui: Ui, accept: ValidationAcceptor): void {
-  // Rule 8 — every page-link in a menu block must reference a page
-  // in the SAME ui.  The grammar's `[Page:ID]` cross-reference
-  // resolves globally; we additionally check the resolved page's
-  // container.
-  const pagesInThisUi = new Set(
-    ui.members.filter((m) => m.$type === "Page").map((m) => (m as Page).name),
-  );
+  // Rule 8 — every page-link in a menu block must reference a page.
+  // The grammar's `[Page:ID]` cross-reference resolves through the
+  // default scope provider, already scoped to the surrounding ui, so
+  // the linker reports unresolved refs natively ("Could not resolve
+  // reference to Page named 'X'") — no custom validator message needed.
   for (const section of block.sections) {
     for (const link of section.links) {
-      // Page links use a Langium cross-reference now
-      // that scaffold expansion runs at the AST level.  The
-      // linker reports unresolved refs natively
-      // ("Could not resolve reference to Page named 'X'") — no
-      // custom validator message needed.  `pagesInThisUi` is no
-      // longer consulted here because cross-references are
-      // already scoped to the surrounding ui by the default
-      // scope provider.
-      void pagesInThisUi;
-      const targetName = link.page?.ref?.name ?? link.page?.$refText;
-      void targetName;
       // MenuLinkProp key names — only `label` / `order` recognised.
       const allowedLinkKeys = new Set(["label", "order"]);
       for (const prop of link.props ?? []) {

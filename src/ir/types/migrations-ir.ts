@@ -106,15 +106,48 @@ export interface MigrationHistoryEntry {
   name: string;
 }
 
+// Every delta step carries the Postgres `schema` of the relation it targets
+// (the owning bounded context's schema, from the same resolution `createTable`
+// uses).  `undefined` means the unqualified `public` schema.  Without this,
+// an ALTER/DROP on a schema-qualified system targets the wrong relation or
+// fails (audit finding 17).  `createTable` still carries its schema on the
+// nested `TableShape`, so it needs no separate field.
 export type MigrationStep =
   | { op: "createTable"; table: TableShape }
-  | { op: "dropTable"; name: string }
-  | { op: "addColumn"; table: string; column: ColumnShape; fk?: FKShape }
-  | { op: "dropColumn"; table: string; name: string }
-  | { op: "alterColumnNullable"; table: string; name: string; type: ColumnType; nullable: boolean }
-  | { op: "alterColumnType"; table: string; name: string; from: ColumnType; to: ColumnType }
-  | { op: "addIndex"; index: IndexShape }
-  | { op: "dropIndex"; table: string; name: string };
+  | { op: "dropTable"; name: string; schema?: string }
+  | { op: "addColumn"; table: string; schema?: string; column: ColumnShape; fk?: FKShape }
+  | { op: "dropColumn"; table: string; schema?: string; name: string }
+  | {
+      op: "renameColumn";
+      table: string;
+      schema?: string;
+      from: string;
+      to: string;
+      type: ColumnType;
+    }
+  | {
+      op: "alterColumnNullable";
+      table: string;
+      schema?: string;
+      name: string;
+      type: ColumnType;
+      nullable: boolean;
+    }
+  | {
+      op: "alterColumnType";
+      table: string;
+      schema?: string;
+      name: string;
+      from: ColumnType;
+      to: ColumnType;
+    }
+  | { op: "addIndex"; index: IndexShape; schema?: string }
+  | { op: "dropIndex"; table: string; schema?: string; name: string }
+  // A pass-through comment line (`-- …` in SQL, `# …` in Ecto).  Emitted by the
+  // destructive-change gate's NOT-NULL-add rewrite to mark the backfill the
+  // operator must perform between adding a nullable column and setting it NOT
+  // NULL.  Renders to a no-op comment on every backend.
+  | { op: "sqlComment"; comment: string };
 
 export interface MigrationsIR {
   /** Owning module name — `.loom/snapshots/<module>.snapshot.json` is keyed

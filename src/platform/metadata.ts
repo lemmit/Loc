@@ -240,7 +240,18 @@ export function descriptorFor(name: Platform): PlatformDescriptor {
   // frontend / unknown → the value itself (already a descriptor key).
   const parsed = parseBuiltinPlatformRef(name);
   const key = (parsed ? parsed.family : name) as Platform;
-  return PLATFORM_DESCRIPTORS[key];
+  const descriptor = PLATFORM_DESCRIPTORS[key];
+  if (!descriptor) {
+    // A typo'd / unknown `platform:` value — throw a descriptive error
+    // instead of returning `undefined` typed as a non-optional
+    // `PlatformDescriptor` (which crashes later with a bare `TypeError`),
+    // mirroring `resolvePlatformRef`'s unknown-platform guard.
+    throw new Error(
+      `Unknown platform "${name}". ` +
+        `Known platforms: ${Object.keys(PLATFORM_DESCRIPTORS).join(", ")}.`,
+    );
+  }
+  return descriptor;
 }
 
 /** Every platform's descriptor — replaces `allPlatforms()` for the
@@ -257,4 +268,25 @@ export function allPlatformDescriptors(): PlatformDescriptor[] {
     out.push(d);
   }
   return out;
+}
+
+/** Every platform keyword (as the grammar spells it) that owns a BACKEND —
+ *  `isFrontend: false` in the descriptor table.  Derived, not hand-listed, so
+ *  validator messages that enumerate backends can't drift (C15). Includes the
+ *  `static` alias iteration is skipped (frontend), so this yields the distinct
+ *  backend keywords: dotnet, node, elixir, python, java. */
+export function backendPlatformNames(): string[] {
+  return Object.entries(PLATFORM_DESCRIPTORS)
+    .filter(([, d]) => !d.isFrontend)
+    .map(([name]) => name)
+    .sort();
+}
+
+/** Every platform keyword that is a FRONTEND (`isFrontend: true`): react,
+ *  static, svelte, vue, angular.  Derived from the descriptor table (C15). */
+export function frontendPlatformNames(): string[] {
+  return Object.entries(PLATFORM_DESCRIPTORS)
+    .filter(([, d]) => d.isFrontend)
+    .map(([name]) => name)
+    .sort();
 }

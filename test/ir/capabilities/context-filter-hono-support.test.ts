@@ -110,6 +110,30 @@ system Shop {
     expect(errs[0]).toContain("auth: required");
   });
 
+  // B16: .NET was exempt from the principal-filter-needs-auth gate (excluded
+  // from LIMITED_FAMILIES), yet its EF `HasQueryFilter` renders
+  // `RequestContext.Current!.CurrentUser!.<claim>` → NRE on every read when the
+  // deployable has no auth.  The gate must reach .NET too.
+  it("requires 'auth: required' for a principal filter on dotnet (finding 20 / B16)", async () => {
+    const errs = await honoFilterErrors(
+      sys("dotnet", { filter: "filter this.tenantId == currentUser.tenantId" }).replace(
+        ", auth: required",
+        "",
+      ),
+    );
+    expect(errs.length).toBe(1);
+    expect(errs[0]).toContain("dotnet");
+    expect(errs[0]).toContain("auth: required");
+  });
+
+  it("accepts a principal filter on dotnet WITH auth (EF HasQueryFilter is fully wired)", async () => {
+    expect(
+      await honoFilterErrors(
+        sys("dotnet", { filter: "filter this.tenantId == currentUser.tenantId" }),
+      ),
+    ).toEqual([]);
+  });
+
   it("accepts a principal filter on a non-relational (document) hono aggregate (DEBT-02 Slice B — in-app actor eval)", async () => {
     // The document read binds the ambient principal fail-closed
     // (`const currentUser = requireCurrentUser();`) and AND-s the principal

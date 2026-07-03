@@ -24,6 +24,12 @@
 // platform-specific shape of the surrounding code.
 // ---------------------------------------------------------------------------
 
+// The `*UsesCurrentUser` helpers below traverse the IR via the one shared,
+// exhaustive child-walker (`src/ir/util/walk.ts`).  This is a value import from
+// `ir/types` → `ir/util`; the reverse edge (walk.ts → loom-ir.ts) is `import
+// type` only (erased at emit), so no runtime cycle forms.
+import { walkExprDeep, walkStmtExprsDeep, walkWorkflowStmtExprsDeep } from "../util/walk.js";
+
 export type IdValueType = "guid" | "int" | "long" | "string";
 
 export type PrimitiveName =
@@ -184,7 +190,7 @@ export interface FieldIR {
   /** Where `access` came from.  Diagnostic-only: used by the validator
    * to phrase conflict messages and by the wire-spec diff to explain
    * the field's role.  Same nullability as `access`. */
-  accessSource?: "declared" | "default";
+  accessSource?: "declared" | "default" | "stamp";
   /** Lowered default-value expression from `field: T = <expr>`.  Present
    *  only on aggregate / entity-part / value-object fields that declared a
    *  default (events / views never lower one).  Fully-resolved like any
@@ -2759,6 +2765,19 @@ export type ExprIR =
         aggregate: string;
         method: string;
         readKind: "named" | "find" | "findAll" | "run";
+        /** The retrieval a criterion / retrieval read runs against — mirrors the
+         *  workflow `repo-run` path.  For `find`/`findAll` it is the synthesized
+         *  `findAllBy<Criterion>` (materialised by `synthesizeFindAllRetrievals`
+         *  from the criterion); for `run` it is the referenced retrieval name.
+         *  Absent for `named` reads (a declared `find`/`getById`).  Backends
+         *  render their retrieval-method name (`run<Name>`) from it so the
+         *  emitted call hits a real method that APPLIES the criterion, rather
+         *  than dropping it and calling the whole-table `findAll`/`all`. */
+        retrievalName?: string;
+        /** The criterion a `find`/`findAll` read filters by — drives the enrich
+         *  pass's synthesis of the `retrievalName` retrieval (same criterion the
+         *  workflow `synthCriterion` names).  Absent for `run`/`named`. */
+        synthCriterion?: { name: string };
       };
       /** Populated when `callKind === "store-action"` (Stage 5) — the resolved
        *  store + action a `<Store>.<action>(…)` call dispatches to.  Structured
@@ -2980,34 +2999,29 @@ export function allAggregates(loom: LoomModel): AggregateIR[] {
 /** True when the expression tree contains at least one `current-user`
  *  ref (either bare `currentUser` or a member-access rooted in it). */
 export function exprUsesCurrentUser(e: ExprIR | undefined): boolean {
-  if (!e) return false;
+  let found = false;
+  walkExprDeep(e, (node) => {
+    if (node.kind === "ref" && node.refKind === "current-user") found = true;
+  });
+  return found;
+}
+
+/** True when a `currentUser`-valued stamp RHS is the bare principal or its
+ *  `id` member — the "who" identity that a backend may collapse onto the
+ *  ambient actor id (Hono `ctx.actorId`, Java `@CreatedBy`/AuditorAware).  A
+ *  member access on any OTHER claim (`currentUser.role`, `currentUser.tenantId`)
+ *  returns false: those must persist the DECLARED attribute so a read filter
+ *  comparing the same claim (`this.createdByRole == currentUser.role`) matches
+ *  the stamped row. */
+export function currentUserRefIsActorId(e: ExprIR): boolean {
   if (e.kind === "ref" && e.refKind === "current-user") return true;
-  switch (e.kind) {
-    case "method-call":
-      if (exprUsesCurrentUser(e.receiver)) return true;
-      return e.args.some(exprUsesCurrentUser);
-    case "member":
-      return exprUsesCurrentUser(e.receiver);
-    case "binary":
-      return exprUsesCurrentUser(e.left) || exprUsesCurrentUser(e.right);
-    case "ternary":
-      return (
-        exprUsesCurrentUser(e.cond) ||
-        exprUsesCurrentUser(e.then) ||
-        exprUsesCurrentUser(e.otherwise)
-      );
-    case "unary":
-      return exprUsesCurrentUser(e.operand);
-    case "paren":
-      return exprUsesCurrentUser(e.inner);
-    case "call":
-      return e.args.some(exprUsesCurrentUser);
-    case "lambda":
-      return exprUsesCurrentUser(e.body);
-    case "new":
-    case "object":
-      return e.fields.some((f) => exprUsesCurrentUser(f.value));
-  }
+  if (
+    e.kind === "member" &&
+    e.member === "id" &&
+    e.receiver.kind === "ref" &&
+    e.receiver.refKind === "current-user"
+  )
+    return true;
   return false;
 }
 
@@ -3056,37 +3070,11 @@ export function workflowUsesCurrentUser(wf: WorkflowIR): boolean {
 }
 
 function workflowStmtUsesCurrentUser(s: WorkflowStmtIR): boolean {
-  switch (s.kind) {
-    case "precondition":
-    case "requires":
-    case "expr-let":
-      return exprUsesCurrentUser(s.expr);
-    case "assign":
-      return exprUsesCurrentUser(s.value);
-    case "emit":
-    case "factory-let":
-      return s.fields.some((f) => exprUsesCurrentUser(f.value));
-    case "repo-let":
-    case "op-call":
-      return s.args.some(exprUsesCurrentUser);
-    case "repo-run":
-      return (
-        s.retrievalArgs.some(exprUsesCurrentUser) ||
-        (s.page?.offset ? exprUsesCurrentUser(s.page.offset) : false) ||
-        (s.page?.limit ? exprUsesCurrentUser(s.page.limit) : false)
-      );
-    case "for-each":
-      return exprUsesCurrentUser(s.iterable) || s.body.some(workflowStmtUsesCurrentUser);
-    case "if-let":
-      return (
-        s.retrievalArgs.some(exprUsesCurrentUser) ||
-        s.thenBody.some(workflowStmtUsesCurrentUser) ||
-        (s.elseBody ?? []).some(workflowStmtUsesCurrentUser)
-      );
-    case "resource-call":
-    case "domain-service-call":
-      return exprUsesCurrentUser(s.call);
-  }
+  let found = false;
+  walkWorkflowStmtExprsDeep(s, (node) => {
+    if (node.kind === "ref" && node.refKind === "current-user") found = true;
+  });
+  return found;
 }
 
 /** True when the find's `where` filter references `currentUser`.
@@ -3132,30 +3120,11 @@ export function aggregateStampUsesPrincipal(agg: { contextStamps?: ContextStampI
 }
 
 function stmtUsesCurrentUser(s: StmtIR): boolean {
-  switch (s.kind) {
-    case "precondition":
-    case "requires":
-      return exprUsesCurrentUser(s.expr);
-    case "let":
-      return exprUsesCurrentUser(s.expr);
-    case "assign":
-    case "add":
-    case "remove":
-    case "return":
-      return exprUsesCurrentUser(s.value);
-    case "emit":
-      return s.fields.some((f) => exprUsesCurrentUser(f.value));
-    case "call":
-      return s.args.some(exprUsesCurrentUser);
-    case "expression":
-      return exprUsesCurrentUser(s.expr);
-    case "variant-match":
-      return (
-        exprUsesCurrentUser(s.subject) ||
-        s.arms.some((a) => a.body.some(stmtUsesCurrentUser)) ||
-        (s.elseBody ?? []).some(stmtUsesCurrentUser)
-      );
-  }
+  let found = false;
+  walkStmtExprsDeep(s, (node) => {
+    if (node.kind === "ref" && node.refKind === "current-user") found = true;
+  });
+  return found;
 }
 
 // ---------------------------------------------------------------------------

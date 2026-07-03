@@ -35,6 +35,33 @@ describe("CLI", () => {
     fs.rmSync(tmp, { recursive: true });
   });
 
+  it("`--dry-run` over a fresh dir creates nothing on disk (not even the out dir)", () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dry2-"));
+    // Point at a not-yet-existing subdir so we can assert the dry run
+    // never mkdir'd it.
+    const out = path.join(base, "nested", "out");
+    const result = runCli(["generate", "ts", example, "-o", out, "--dry-run"]);
+    expect(result.status).toBe(0);
+    expect(fs.existsSync(out)).toBe(false);
+    expect(fs.existsSync(path.dirname(out))).toBe(false);
+    fs.rmSync(base, { recursive: true });
+  });
+
+  it("`--dry-run` over an up-to-date tree reports 0 would-writes (parity with a real run)", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dry-parity-"));
+    // Real run first, so the tree is up to date.
+    const real = runCli(["generate", "ts", example, "-o", tmp]);
+    expect(real.status).toBe(0);
+    expect(real.stdout).toMatch(/Wrote 31 file\(s\)/);
+
+    // A dry run over the up-to-date tree must classify everything as
+    // unchanged — 0 would-writes, matching what a real re-run does.
+    const dry = runCli(["generate", "ts", example, "-o", tmp, "--dry-run"]);
+    expect(dry.status).toBe(0);
+    expect(dry.stdout).toMatch(/Would write 0 file\(s\) in [^,]+, unchanged: 31/);
+    fs.rmSync(tmp, { recursive: true });
+  });
+
   it("`.loomignore` filters paths from the write set", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "loom-pin-"));
     fs.writeFileSync(path.join(tmp, ".loomignore"), "package.json\n/index.ts\n", "utf8");

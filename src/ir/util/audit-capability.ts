@@ -18,16 +18,7 @@
 // Platform-neutral and browser-safe — pure structural reads off the resolved
 // IR, no Node-only APIs.
 // -------------------------------------------------------------------------
-import type { AggregateIR, BoundedContextIR, OperationIR } from "../types/loom-ir.js";
-
-/** All audit-target command actions of an aggregate: audited operations ∪
- *  audited creates ∪ audited destroys.  Order is operations, then creates,
- *  then destroys (stable, for deterministic emission). */
-export function auditedTargets(agg: AggregateIR): OperationIR[] {
-  return [...agg.operations, ...(agg.creates ?? []), ...(agg.destroys ?? [])].filter(
-    (o) => o.audited,
-  );
-}
+import type { AggregateIR, BoundedContextIR } from "../types/loom-ir.js";
 
 /** True when the aggregate has at least one audited command action
  *  (operation, create, or destroy). */

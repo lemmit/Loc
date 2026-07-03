@@ -53,7 +53,7 @@ import type {
   UiIR,
   ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
-import { humanize, snake, upperFirst } from "../../util/naming.js";
+import { elixirString, humanize, snake, upperFirst } from "../../util/naming.js";
 import { tryRenderGate } from "../_frontend/gate-expr.js";
 import { WALKER_PRIMITIVES } from "../_walker/registry.js";
 import { heexTarget, renderHeexStoreActionCall, renderHeexStoreFieldRead } from "./heex-target.js";
@@ -452,8 +452,9 @@ export function renderExpr(expr: ExprIR, ctx: WalkContext): string {
 function renderLiteral(kind: string, value: string): string {
   switch (kind) {
     case "string":
-      // value already has source quoting stripped; re-quote for Elixir.
-      return JSON.stringify(value);
+      // value already has source quoting stripped; re-quote for Elixir,
+      // escaping `#{` so a `.ddd` string can't inject Elixir interpolation.
+      return elixirString(value);
     case "int":
       return value;
     case "decimal":
@@ -1080,6 +1081,26 @@ function isHEExCall(name: string, ctx: WalkContext): boolean {
   return ctx.ui.components.some((c) => c.name === name);
 }
 
+/** Escape a `.ddd`-sourced literal string sitting in HEEx TEXT position.
+ *  The HEEx tokenizer treats `<` as a tag opener and `<%= … %>` / `<% … %>`
+ *  as embedded Elixir, so an unescaped literal like `"<b>"` or `"<%= evil %>"`
+ *  breaks the template or executes code.  Entity-escaping `&` / `<` / `>`
+ *  neutralizes both (a `&lt;%= %>` is inert text).  This is the single funnel
+ *  every text-position emit site shares (renderChild / renderInTemplate + the
+ *  per-primitive label sites), so the escaping can't drift one renderer at a
+ *  time.  Mirrors `heexTarget.escapeText`, which delegates here. */
+export function escapeHeexText(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** Escape a `.ddd`-sourced literal string used as a quoted HEEx attribute
+ *  value (`attr="…"`).  `"` closes the attribute and `&` opens an entity, so
+ *  both are entity-escaped; the funnel that keeps literal `attrValue` /
+ *  `renderAttrValue` well-formed. */
+export function escapeHeexAttr(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+}
+
 export function renderChild(child: ExprIR, ctx: WalkContext): string {
   // If the child is itself a primitive call that returns HEEx markup,
   // render it directly without `<%= %>` wrapping.
@@ -1087,13 +1108,13 @@ export function renderChild(child: ExprIR, ctx: WalkContext): string {
     return renderExpr(child, ctx);
   }
   if (child.kind === "literal" && child.lit === "string") {
-    return child.value;
+    return escapeHeexText(child.value);
   }
   return `<%= ${renderExpr(child, { ...ctx, position: "template" })} %>`;
 }
 
 export function renderInTemplate(arg: ExprIR, ctx: WalkContext): string {
-  if (arg.kind === "literal" && arg.lit === "string") return arg.value;
+  if (arg.kind === "literal" && arg.lit === "string") return escapeHeexText(arg.value);
   // HEEx-generating calls should not be wrapped in <%= %>.
   if (arg.kind === "call" && isHEExCall(arg.name, ctx)) {
     return renderExpr(arg, ctx);
@@ -1102,11 +1123,14 @@ export function renderInTemplate(arg: ExprIR, ctx: WalkContext): string {
 }
 
 function renderAttrValue(arg: ExprIR, ctx: WalkContext, isStatic: boolean): string {
+  // Quote a literal attribute value with `"` / `&` entity-escaped so a
+  // `.ddd`-sourced value can't close the attribute or open an entity
+  // (`data-testid={"a\"b"}` would break the HEEx tokenizer).
   if (arg.kind === "literal" && arg.lit === "string") {
-    return JSON.stringify(arg.value);
+    return `"${escapeHeexAttr(arg.value)}"`;
   }
   if (isStatic && arg.kind === "literal") {
-    return JSON.stringify(arg.value);
+    return `"${escapeHeexAttr(arg.value)}"`;
   }
   return `{${renderExpr(arg, { ...ctx, position: "template" })}}`;
 }

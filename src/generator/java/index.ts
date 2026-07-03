@@ -622,6 +622,9 @@ function emitProjectFromContexts(
   // SvelteKit's adapter-static writes `build/`; Vite SPAs write `dist/`.
   const spaOutDir = system?.deployable.uiFramework === "svelte" ? "build" : "dist";
   out.set("Dockerfile", renderDockerfile({ embeddedSpa: hasEmbeddedSpa, spaOutDir }));
+  // Proxy-CA escape hatch (see renderDockerfile) — always present so the
+  // Dockerfile's `COPY certs/` never fails and CA injection has a target.
+  out.set("certs/.gitkeep", "");
   out.set(".dockerignore", renderDockerignore({ embeddedSpa: hasEmbeddedSpa, spaOutDir }));
   // Proxy-CA escape hatch (see the Dockerfile's COPY certs/) — mirrors
   // every other backend so the dir always exists for the docker build.

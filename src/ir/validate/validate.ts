@@ -12,6 +12,7 @@ import {
 import { validateStores } from "./checks/store-checks.js";
 import {
   validateCurrentUserScope,
+  validateDuplicateTables,
   validateEventSourcedDiscipline,
   validateExprIntegrity,
   validateExternOperations,
@@ -32,6 +33,7 @@ import {
   validateAuditedOperationSupport,
   validateAuth,
   validateAuthUiFramework,
+  validateComposeUniqueness,
   validateContextFilterSupport,
   validateDapperSupport,
   validateDataSourceCoverage,
@@ -119,6 +121,8 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   validateEventChannelAmbiguous([...allContexts(loom)], diags);
   for (const sys of loom.systems) {
     validateSystem(sys, diags);
+    validateComposeUniqueness(sys, diags);
+    validateDuplicateTables(sys, diags);
     validateDataSourceCoverage(sys, diags);
     validateSavingShapeSupport(sys, diags);
     validateVanillaDocumentScope(sys, diags);

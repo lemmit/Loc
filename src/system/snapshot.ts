@@ -17,20 +17,48 @@ import type { SchemaSnapshot } from "../ir/types/migrations-ir.js";
 
 export interface SnapshotStore {
   /** Returns the last-checked-in snapshot for `module`, or `null` when no
-   *  snapshot file exists (first run). */
+   *  snapshot file exists (first run).  Throws {@link SnapshotReadError} when
+   *  a snapshot file *is* present but cannot be read or parsed. */
   read(module: string): SchemaSnapshot | null;
+}
+
+/**
+ * Raised when a migration snapshot file exists on disk but cannot be read or
+ * parsed (corrupted / truncated JSON — e.g. an interrupted write, or a merge
+ * conflict left in the file).  This is deliberately NOT collapsed to `null`:
+ * a `null` snapshot means "first run" to `buildMigrations`, which then re-emits
+ * an "Initial" migration that re-CREATEs every table and resets the version /
+ * history chain — silently re-baselining against an existing database.  A
+ * corrupt snapshot must fail loudly instead so the operator can recover it.
+ */
+export class SnapshotReadError extends Error {
+  constructor(
+    readonly filePath: string,
+    readonly reason: unknown,
+  ) {
+    const detail = reason instanceof Error ? reason.message : String(reason);
+    super(
+      `migration snapshot at ${filePath} exists but could not be read (${detail}). ` +
+        "It is likely corrupted or truncated (e.g. an interrupted write or an " +
+        "unresolved merge conflict). Restore it from version control, or delete " +
+        "it deliberately to re-baseline the migration history from scratch.",
+    );
+    this.name = "SnapshotReadError";
+  }
 }
 
 export function fsSnapshotStore(root: string): SnapshotStore {
   return {
     read(module: string): SchemaSnapshot | null {
       const filePath = snapshotPath(root, module);
+      // Absent file ⇒ legitimately null (first run).  A file that is present
+      // but unreadable/unparseable is a corruption error, NOT a fresh dir.
       if (!fs.existsSync(filePath)) return null;
-      const raw = fs.readFileSync(filePath, "utf8");
       try {
+        const raw = fs.readFileSync(filePath, "utf8");
         return JSON.parse(raw) as SchemaSnapshot;
-      } catch {
-        return null;
+      } catch (err) {
+        throw new SnapshotReadError(filePath, err);
       }
     },
   };

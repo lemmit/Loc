@@ -65,9 +65,6 @@ export const GENERIC_SHAPES: Record<GenericCtorName, GenericShape> = {
   },
 };
 
-/** All blessed constructor names — the closed set the grammar admits. */
-export const GENERIC_CTOR_NAMES = Object.keys(GENERIC_SHAPES) as GenericCtorName[];
-
 /** Look up a blessed shape by constructor name. */
 export function genericShape(ctor: GenericCtorName): GenericShape {
   return GENERIC_SHAPES[ctor];

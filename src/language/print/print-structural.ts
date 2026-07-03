@@ -106,18 +106,25 @@ function quote(s: string): string {
   return JSON.stringify(s);
 }
 
-const PLATFORM_KEYWORDS = new Set([
+// These mirror the grammar's `Platform` / `DesignPack` datatype-rule keyword
+// alternatives (src/language/ddd.langium).  A keyword prints bare; anything
+// else came from the `STRING` alternative and re-quotes.  Kept honest by
+// `print-keyword-mirrors.test.ts`, which derives the expected sets straight
+// from the parsed grammar (the `walker-stdlib` pattern) — a stale entry here
+// (missing platform/pack, or a retired keyword) fails CI (C6).
+export const PLATFORM_KEYWORDS: ReadonlySet<string> = new Set([
   "dotnet",
   "node",
   "react",
+  "svelte",
+  "vue",
+  "angular",
   "static",
   "elixir",
-  "phoenix",
-  "phoenixLiveView",
+  "python",
   "java",
-  "svelte",
 ]);
-const DESIGN_KEYWORDS = new Set([
+export const DESIGN_KEYWORDS: ReadonlySet<string> = new Set([
   "mantine",
   "shadcn",
   "mui",
@@ -126,11 +133,16 @@ const DESIGN_KEYWORDS = new Set([
   "daisyui",
   "shadcnSvelte",
   "flowbite",
+  "vuetify",
+  "shadcnVue",
+  "angularMaterial",
+  "primeng",
+  "spartanNg",
 ]);
 
 /** Platform / DesignPack are `keyword | STRING` rules: print a known keyword
  *  bare, otherwise re-quote (the value came from the STRING alternative). */
-function enumOrString(value: string, keywords: Set<string>): string {
+function enumOrString(value: string, keywords: ReadonlySet<string>): string {
   return keywords.has(value) ? value : quote(value);
 }
 

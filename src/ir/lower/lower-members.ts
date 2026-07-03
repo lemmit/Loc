@@ -28,6 +28,10 @@ import {
   isInvariant,
   isProperty,
 } from "../../language/generated/ast.js";
+// Re-exported so this leaf and its `lower-workflow` sibling share the one
+// conservative plural rule set (`y→ies`, `s/x/z/ch/sh→es`, else `+s`) from
+// `util/naming` rather than a hand-copied twin.
+import { plural } from "../../util/naming.js";
 import type {
   ApplyIR,
   ContainmentIR,
@@ -350,13 +354,55 @@ function lowerActionBody(spec: ActionSpec, env: Env): OperationIR {
 
 type SaveEntry = { name: string; aggName: string; repoName: string };
 
+/** Recursively collect every op-call target + `mutating`-service-mutated
+ *  binding name reachable from a statement list, DESCENDING into `for-each`
+ *  and `if-let` bodies.  The descent is what makes an OUTER binding mutated
+ *  inside a loop body (`for o in orders { acct.charge(o.total) }`) still land
+ *  in the enclosing scope's saves — without it, `acct.charge` mutated a live
+ *  object that was never persisted (audit finding 2: silent data loss).  A
+ *  binding declared INSIDE the nested body is loop-local; it is saved by that
+ *  body's own `savesPerIteration` / `savesIn{Then,Else}`, and the caller here
+ *  only ever matches these targets against bindings declared at ITS level, so
+ *  the extra nested targets are harmless. */
+function collectMutationTargets(
+  statements: WorkflowStmtIR[],
+  saveResolver: SaveResolver | undefined,
+  opCallTargets: Set<string>,
+  serviceMutated: Set<string>,
+): void {
+  for (const st of statements) {
+    if (st.kind === "op-call") {
+      opCallTargets.add(st.target);
+    } else if (st.kind === "domain-service-call" && saveResolver) {
+      const op = saveResolver.resolveServiceOp(st.service, st.op);
+      if (!op) continue;
+      const mutated = mutatedParamNames(op, saveResolver.resolveAggOp);
+      if (mutated.size === 0) continue;
+      // Map the mutated PARAM positions to the call's ARG expressions; an arg
+      // that is a bare ref to a workflow-local aggregate var (a `repo-let` /
+      // `let` / loop binding) is the persistence target.
+      const args = st.call.kind === "call" ? st.call.args : [];
+      op.params.forEach((p, i) => {
+        const arg = args[i];
+        if (mutated.has(p.name) && arg?.kind === "ref") serviceMutated.add(arg.name);
+      });
+    } else if (st.kind === "for-each") {
+      collectMutationTargets(st.body, saveResolver, opCallTargets, serviceMutated);
+    } else if (st.kind === "if-let") {
+      collectMutationTargets(st.thenBody, saveResolver, opCallTargets, serviceMutated);
+      collectMutationTargets(st.elseBody ?? [], saveResolver, opCallTargets, serviceMutated);
+    }
+  }
+}
+
 /** Compute the bindings to save for a statement list (the dirtiness
- *  rule): every `factory-let` always, every `repo-let` only when a later
- *  op-call targets it.  When `loopVar` is supplied (a `for-each` body),
- *  the loop variable itself is saved if it is the target of any op-call
- *  in that body — the per-iteration save.  Top-level callers pass no
- *  loopVar; the result is the flat `savesAtExit` (byte-identical to the
- *  previous inline computation). */
+ *  rule): every `factory-let` always, every `repo-let` only when an
+ *  op-call (at this level OR nested in a `for-each`/`if-let` body) targets it.
+ *  When `loopVar` is supplied (a `for-each` body), the loop variable itself is
+ *  saved if it is the target of any op-call in that body — the per-iteration
+ *  save.  Top-level callers pass no loopVar; the result is the flat
+ *  `savesAtExit`.  Nested-body descent (via {@link collectMutationTargets}) is
+ *  what persists an outer binding mutated inside a loop (audit finding 2). */
 export function computeSaves(
   statements: WorkflowStmtIR[],
   repoForAgg: Map<string, string>,
@@ -372,23 +418,7 @@ export function computeSaves(
   // ops; read-only args (`amount`) never land here.  Without a resolver (legacy
   // single-context generate paths) this stays empty — saves are unchanged.
   const serviceMutated = new Set<string>();
-  for (const st of statements) {
-    if (st.kind === "op-call") opCallTargets.add(st.target);
-    else if (st.kind === "domain-service-call" && saveResolver) {
-      const op = saveResolver.resolveServiceOp(st.service, st.op);
-      if (!op) continue;
-      const mutated = mutatedParamNames(op, saveResolver.resolveAggOp);
-      if (mutated.size === 0) continue;
-      // Map the mutated PARAM positions to the call's ARG expressions; an arg
-      // that is a bare ref to a workflow-local aggregate var (a `repo-let` /
-      // `let` / loop binding) is the persistence target.
-      const args = st.call.kind === "call" ? st.call.args : [];
-      op.params.forEach((p, i) => {
-        const arg = args[i];
-        if (mutated.has(p.name) && arg?.kind === "ref") serviceMutated.add(arg.name);
-      });
-    }
-  }
+  collectMutationTargets(statements, saveResolver, opCallTargets, serviceMutated);
   const saves: SaveEntry[] = [];
   if (loopVar && (opCallTargets.has(loopVar.name) || serviceMutated.has(loopVar.name))) {
     saves.push({ name: loopVar.name, aggName: loopVar.aggName, repoName: loopVar.repoName });
@@ -407,8 +437,6 @@ export function computeSaves(
   return saves;
 }
 
-export function plural(s: string): string {
-  if (s.endsWith("y") && !/[aeiou]y$/.test(s)) return s.slice(0, -1) + "ies";
-  if (/(s|x|z|ch|sh)$/.test(s)) return s + "es";
-  return s + "s";
-}
+// `lower-workflow` imports `plural` from here; keep the name on this leaf's
+// public surface while the single implementation lives in `util/naming`.
+export { plural };

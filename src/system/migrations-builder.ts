@@ -2,6 +2,7 @@ import type {
   AggregateIR,
   AssociationIR,
   EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
   EnrichedSubdomainIR,
   EnrichedSystemIR,
   EntityPartIR,
@@ -71,18 +72,31 @@ export function schemaFromModule(
    *  per-projection `dataSource shape:` override is honoured (the schema
    *  stays consistent with the EF/Drizzle/Ecto emitters, which resolve
    *  the same way via `effectiveSavingShape`). */
-  shapeOf: (agg: EnrichedAggregateIR) => SavingShape = (agg) => effectiveSavingShape(agg),
+  shapeOf: (agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR) => SavingShape = (agg) =>
+    effectiveSavingShape(agg),
   /** Per-aggregate Postgres schema — the owning context's schema, from
    *  `resolveDataSourceConfig` (`buildMigrations` passes a binding-aware
    *  resolver; mirrors `shapeOf`).  Defaults to `() => undefined` so
    *  callers (and the many `schemaFromModule(module)` unit tests) that
    *  have no system to resolve against keep the legacy unqualified
    *  output.  Every table an aggregate produces is stamped with its
-   *  schema. */
-  schemaOf: (agg: EnrichedAggregateIR) => string | undefined = () => undefined,
+   *  schema.  The OWNING CONTEXT is passed in (not looked up by aggregate
+   *  name) so two same-named aggregates in different contexts
+   *  (`Sales.Order` / `Billing.Order`) each resolve their OWN schema
+   *  instead of both collapsing onto the first name-match (audit
+   *  finding 16). */
+  schemaOf: (agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR) => string | undefined = () =>
+    undefined,
 ): SchemaSnapshot {
   const tables: TableShape[] = [];
-  const pool = collectAggregates(module);
+  const aggPairs = collectAggregatePairs(module);
+  const pool = aggPairs.map((p) => p.agg);
+  // Owning context per aggregate INSTANCE (identity, not name) so the
+  // shape / schema resolvers target the right binding for same-named
+  // aggregates in sibling contexts.
+  const ctxByAgg = new Map<EnrichedAggregateIR, EnrichedBoundedContextIR>();
+  for (const { agg, ctx } of aggPairs) ctxByAgg.set(agg, ctx);
+  const ctxFor = (agg: EnrichedAggregateIR): EnrichedBoundedContextIR => ctxByAgg.get(agg)!;
   // Value-object field list lookup (by VO name), so a value-object field
   // can be flattened into the parent table's columns — the standard DDD
   // destructure, matching the Drizzle / EF ORMs.  The migration builder
@@ -123,7 +137,7 @@ export function schemaFromModule(
     if (agg.persistedAs === "eventLog") {
       return [eventLogTableForStream(snake(agg.name), module.name)];
     }
-    const shape = shapeOf(agg);
+    const shape = shapeOf(agg, ctxFor(agg));
     if (shape === "document") {
       return [documentTableForAggregate(agg, module.name)];
     }
@@ -159,7 +173,7 @@ export function schemaFromModule(
 
   for (const agg of pool) {
     const produced = tablesForOneAggregate(agg);
-    const schema = schemaOf(agg);
+    const schema = schemaOf(agg, ctxFor(agg));
     if (schema !== undefined) {
       for (const t of produced) t.schema = schema;
     }
@@ -274,25 +288,40 @@ function workflowStateTableShape(
  *  for the stuck nodes.  Only FKs whose target is also in this set
  *  constrain the order; references to already-existing tables (a prior
  *  migration, or another module) are treated as satisfied. */
+/** Schema-qualified table key.  Two tables named `orders` in different
+ *  Postgres schemas (`sales.orders` / `billing.orders`) are distinct
+ *  relations, so the diff must key by (schema, name) — keying by bare name
+ *  collapses them and produces the wrong delta (audit finding 16/17). */
+function qkey(schema: string | undefined, name: string): string {
+  return `${schema ?? ""} ${name}`;
+}
+
 function orderTablesByFkDependency(tables: TableShape[]): TableShape[] {
-  const present = new Set(tables.map((t) => t.name));
+  const present = new Set(tables.map((t) => qkey(t.schema, t.name)));
   const deps = new Map<string, Set<string>>();
   for (const t of tables) {
+    const self = qkey(t.schema, t.name);
     const s = new Set<string>();
+    // FK targets resolve within the referencing table's own schema (see
+    // `renderFkConstraint` in sql-pg.ts — the reference is qualified with
+    // the table's schema).
     for (const fk of t.foreignKeys) {
-      if (fk.refTable !== t.name && present.has(fk.refTable)) s.add(fk.refTable);
+      const dep = qkey(t.schema, fk.refTable);
+      if (dep !== self && present.has(dep)) s.add(dep);
     }
-    deps.set(t.name, s);
+    deps.set(self, s);
   }
   const remaining = [...tables].sort((a, b) => a.name.localeCompare(b.name));
   const emitted = new Set<string>();
   const order: TableShape[] = [];
   while (remaining.length > 0) {
-    let idx = remaining.findIndex((t) => [...deps.get(t.name)!].every((d) => emitted.has(d)));
+    let idx = remaining.findIndex((t) =>
+      [...deps.get(qkey(t.schema, t.name))!].every((d) => emitted.has(d)),
+    );
     if (idx === -1) idx = 0; // cycle — best effort, alphabetical
     const [t] = remaining.splice(idx, 1);
     order.push(t);
-    emitted.add(t.name);
+    emitted.add(qkey(t.schema, t.name));
   }
   return order;
 }
@@ -391,42 +420,97 @@ function eventLogTableForStream(snakeName: string, ownerModule: string): TableSh
   };
 }
 
-export function diffSchema(prev: SchemaSnapshot | null, next: SchemaSnapshot): MigrationStep[] {
-  const steps: MigrationStep[] = [];
-  const prevByName = new Map<string, TableShape>();
-  if (prev) for (const t of prev.tables) prevByName.set(t.name, t);
-  const nextByName = new Map<string, TableShape>();
-  for (const t of next.tables) nextByName.set(t.name, t);
-
-  // Drops first — in alphabetical order of the prev side.
-  if (prev) {
-    const dropTables = [...prev.tables]
-      .filter((t) => !nextByName.has(t.name))
-      .sort((a, b) => a.name.localeCompare(b.name));
-    for (const t of dropTables) steps.push({ op: "dropTable", name: t.name });
-  }
-
-  // Creates next — ordered so an FK target is created before the table
-  // that references it (a child part otherwise sorts before its parent
-  // and the inline `REFERENCES` fails).  FKs to tables already present
-  // on the prev side are satisfied by an earlier migration, so only the
-  // newly-created set constrains the order.
-  const createTables = orderTablesByFkDependency(
-    [...next.tables].filter((t) => !prevByName.has(t.name)),
-  );
-  for (const t of createTables) steps.push({ op: "createTable", table: t });
-
-  // Per-table column / index diffs for tables present on both sides.
-  for (const t of next.tables) {
-    const prevT = prevByName.get(t.name);
-    if (!prevT) continue;
-    diffTable(prevT, t, steps);
-  }
-
-  return steps;
+/** Match prev/next tables by schema-qualified key, with a graceful fallback
+ *  for OLD snapshots whose tables were written before schema-qualification:
+ *  a prev table with no `schema` matches a single same-bare-name next table,
+ *  so an existing `.loom` snapshot reads as "same table, now qualified"
+ *  instead of drop+recreate.  A corrupt file still errors upstream
+ *  (`fsSnapshotStore.read`); this only reconciles a legitimate format bump. */
+interface TableMatch {
+  pairs: [TableShape, TableShape][];
+  dropped: TableShape[];
+  created: TableShape[];
 }
 
-function diffTable(prev: TableShape, next: TableShape, steps: MigrationStep[]): void {
+function matchTables(prev: readonly TableShape[], next: readonly TableShape[]): TableMatch {
+  const nextByQ = new Map<string, TableShape>();
+  for (const t of next) nextByQ.set(qkey(t.schema, t.name), t);
+  const consumed = new Set<TableShape>();
+  const pairs: [TableShape, TableShape][] = [];
+  const dropped: TableShape[] = [];
+  for (const p of prev) {
+    let m = nextByQ.get(qkey(p.schema, p.name));
+    if (m && consumed.has(m)) m = undefined;
+    if (!m && p.schema === undefined) {
+      const candidates = next.filter((t) => t.name === p.name && !consumed.has(t));
+      if (candidates.length === 1) m = candidates[0];
+    }
+    if (m) {
+      consumed.add(m);
+      pairs.push([p, m]);
+    } else {
+      dropped.push(p);
+    }
+  }
+  const created = next.filter((t) => !consumed.has(t));
+  return { pairs, dropped, created };
+}
+
+interface DiffBuckets {
+  dropIndex: MigrationStep[];
+  dropColumn: MigrationStep[];
+  addColumn: MigrationStep[];
+  alter: MigrationStep[];
+  addIndex: MigrationStep[];
+}
+
+export function diffSchema(prev: SchemaSnapshot | null, next: SchemaSnapshot): MigrationStep[] {
+  const { pairs, dropped, created } = prev
+    ? matchTables(prev.tables, next.tables)
+    : {
+        pairs: [] as [TableShape, TableShape][],
+        dropped: [] as TableShape[],
+        created: next.tables,
+      };
+
+  const buckets: DiffBuckets = {
+    dropIndex: [],
+    dropColumn: [],
+    addColumn: [],
+    alter: [],
+    addIndex: [],
+  };
+  for (const [p, n] of pairs) diffTable(p, n, buckets);
+
+  // Drops in reverse-topological (child-first) order so a parent table is
+  // never dropped while a child still FK-references it (audit finding 18).
+  const dropTableSteps = orderTablesByFkDependency(dropped)
+    .reverse()
+    .map((t): MigrationStep => ({ op: "dropTable", name: t.name, schema: t.schema }));
+  // Creates in topological (parent-first) order so an inline `REFERENCES`
+  // never hits a relation that doesn't exist yet.
+  const createTableSteps = orderTablesByFkDependency(created).map(
+    (t): MigrationStep => ({ op: "createTable", table: t }),
+  );
+
+  // FK-safe global order:
+  //   drop indexes/columns (unblocks table drops) → drop tables (child-first)
+  //   → create tables (parent-first) → add columns (targets now exist)
+  //   → alter columns → add indexes.
+  return [
+    ...buckets.dropIndex,
+    ...buckets.dropColumn,
+    ...dropTableSteps,
+    ...createTableSteps,
+    ...buckets.addColumn,
+    ...buckets.alter,
+    ...buckets.addIndex,
+  ];
+}
+
+function diffTable(prev: TableShape, next: TableShape, buckets: DiffBuckets): void {
+  // ALTER/DROP steps target the table's CURRENT schema (where it now lives).
+  const schema = next.schema;
   const prevCols = new Map<string, ColumnShape>();
   for (const c of prev.columns) prevCols.set(c.name, c);
   const nextCols = new Map<string, ColumnShape>();
@@ -435,17 +519,17 @@ function diffTable(prev: TableShape, next: TableShape, steps: MigrationStep[]): 
   // Drops — iterate prev order so the op stream reads source-faithful.
   for (const c of prev.columns) {
     if (!nextCols.has(c.name)) {
-      steps.push({ op: "dropColumn", table: next.name, name: c.name });
+      buckets.dropColumn.push({ op: "dropColumn", table: next.name, schema, name: c.name });
     }
   }
   // Adds — iterate next order; attach FK if present.
   for (const c of next.columns) {
     if (!prevCols.has(c.name)) {
       const fk = next.foreignKeys.find((f) => f.column === c.name);
-      steps.push(
+      buckets.addColumn.push(
         fk
-          ? { op: "addColumn", table: next.name, column: c, fk }
-          : { op: "addColumn", table: next.name, column: c },
+          ? { op: "addColumn", table: next.name, schema, column: c, fk }
+          : { op: "addColumn", table: next.name, schema, column: c },
       );
     }
   }
@@ -454,18 +538,20 @@ function diffTable(prev: TableShape, next: TableShape, steps: MigrationStep[]): 
     const p = prevCols.get(c.name);
     if (!p) continue;
     if (p.nullable !== c.nullable) {
-      steps.push({
+      buckets.alter.push({
         op: "alterColumnNullable",
         table: next.name,
+        schema,
         name: c.name,
         type: c.type,
         nullable: c.nullable,
       });
     }
     if (!columnTypeEqual(p.type, c.type)) {
-      steps.push({
+      buckets.alter.push({
         op: "alterColumnType",
         table: next.name,
+        schema,
         name: c.name,
         from: p.type,
         to: c.type,
@@ -480,41 +566,230 @@ function diffTable(prev: TableShape, next: TableShape, steps: MigrationStep[]): 
   for (const i of next.indexes) nextIdx.set(i.name, i);
   for (const i of prev.indexes) {
     if (!nextIdx.has(i.name)) {
-      steps.push({ op: "dropIndex", table: next.name, name: i.name });
+      buckets.dropIndex.push({ op: "dropIndex", table: next.name, schema, name: i.name });
     }
   }
   for (const i of next.indexes) {
-    if (!prevIdx.has(i.name)) steps.push({ op: "addIndex", index: i });
+    if (!prevIdx.has(i.name)) buckets.addIndex.push({ op: "addIndex", index: i, schema });
   }
 }
 
-export function buildMigrations(sys: EnrichedSystemIR, snapshots: SnapshotStore): MigrationsIR[] {
+// ---------------------------------------------------------------------------
+// Destructive-change gate (audit finding 19).
+// ---------------------------------------------------------------------------
+
+/** Raised when a delta migration contains a destructive change and the
+ *  generate run did not pass `--allow-destructive`.  Destructive =
+ *  `dropColumn` / `dropTable` (irreversible data loss) or a NOT-NULL
+ *  column add without a default on a previously-existing table (fails on any
+ *  populated table).  First-run (Initial) migrations never raise this —
+ *  nothing pre-exists to destroy. */
+export class MigrationDestructiveError extends Error {
+  constructor(
+    readonly module: string,
+    readonly offending: readonly MigrationStep[],
+  ) {
+    super(
+      `migration for module "${module}" contains ${offending.length} destructive change(s):\n` +
+        offending.map((s) => `  - ${describeDestructive(s)}`).join("\n") +
+        `\nRe-run \`generate system\` with --allow-destructive to apply them. ` +
+        `Column/table drops are irreversible; a NOT NULL column add without a default fails ` +
+        `on a populated table — under --allow-destructive it is emitted as the safe ` +
+        `add-nullable / backfill-TODO / SET NOT NULL sequence instead.`,
+    );
+    this.name = "MigrationDestructiveError";
+  }
+}
+
+function describeDestructive(s: MigrationStep): string {
+  switch (s.op) {
+    case "dropTable":
+      return `DROP TABLE ${qualifiedName(s.schema, s.name)}`;
+    case "dropColumn":
+      return `DROP COLUMN ${qualifiedName(s.schema, s.table)}.${s.name}`;
+    case "addColumn":
+      return `ADD COLUMN ${qualifiedName(s.schema, s.table)}.${s.column.name} NOT NULL (no default)`;
+    default:
+      return s.op;
+  }
+}
+
+function qualifiedName(schema: string | undefined, name: string): string {
+  return schema ? `${schema}.${name}` : name;
+}
+
+/** True for a NOT-NULL column add without a default.  Because `diffTable`
+ *  only emits `addColumn` for tables present on BOTH sides (new tables carry
+ *  their columns inline via `createTable`), such an add always targets a
+ *  previously-existing table — the exact case that fails on populated data. */
+function isBlockingNotNullAdd(s: MigrationStep): boolean {
+  return s.op === "addColumn" && !s.column.nullable && s.column.default === undefined;
+}
+
+/** Classify the raw diff, collapse unambiguous renames, and enforce the
+ *  destructive-change policy.  Returns the final step list (possibly rewritten
+ *  for the `--allow-destructive` NOT-NULL path), or throws
+ *  {@link MigrationDestructiveError} when a destructive step remains and the
+ *  flag is off.  First-run (baseline null) migrations are returned untouched. */
+export function applyDestructivePolicy(
+  steps: MigrationStep[],
+  baseline: SchemaSnapshot | null,
+  opts: { allowDestructive: boolean; module: string },
+): MigrationStep[] {
+  if (baseline === null) return steps; // Initial migration — nothing pre-exists.
+
+  // Prev column-type lookup (for rename type-equality), qualified with a
+  // bare-name fallback mirroring `matchTables`.
+  const prevByQ = new Map<string, TableShape>();
+  const prevByBare = new Map<string, TableShape[]>();
+  for (const t of baseline.tables) {
+    prevByQ.set(qkey(t.schema, t.name), t);
+    const arr = prevByBare.get(t.name) ?? [];
+    arr.push(t);
+    prevByBare.set(t.name, arr);
+  }
+  const prevColType = (
+    schema: string | undefined,
+    table: string,
+    col: string,
+  ): ColumnType | undefined => {
+    let t = prevByQ.get(qkey(schema, table));
+    if (!t) {
+      const cands = prevByBare.get(table);
+      if (cands && cands.length === 1) t = cands[0];
+    }
+    return t?.columns.find((c) => c.name === col)?.type;
+  };
+
+  // Rename detection: a table with EXACTLY one dropColumn + one addColumn of
+  // identical type is an unambiguous rename → collapse to a single
+  // `renameColumn` (non-destructive).  Anything else stays drop+add and falls
+  // under the gate below.
+  const dropByTable = new Map<string, MigrationStep[]>();
+  const addByTable = new Map<string, MigrationStep[]>();
+  for (const s of steps) {
+    if (s.op === "dropColumn") {
+      const k = qkey(s.schema, s.table);
+      (dropByTable.get(k) ?? dropByTable.set(k, []).get(k)!).push(s);
+    } else if (s.op === "addColumn") {
+      const k = qkey(s.schema, s.table);
+      (addByTable.get(k) ?? addByTable.set(k, []).get(k)!).push(s);
+    }
+  }
+  const collapsed = new Set<MigrationStep>();
+  const renameFor = new Map<MigrationStep, MigrationStep>(); // addColumn step → renameColumn step
+  for (const [k, drops] of dropByTable) {
+    const adds = addByTable.get(k) ?? [];
+    if (drops.length !== 1 || adds.length !== 1) continue;
+    const d = drops[0]!;
+    const a = adds[0]!;
+    if (d.op !== "dropColumn" || a.op !== "addColumn") continue;
+    const dType = prevColType(d.schema, d.table, d.name);
+    if (!dType || !columnTypeEqual(dType, a.column.type)) continue;
+    collapsed.add(d);
+    collapsed.add(a);
+    renameFor.set(a, {
+      op: "renameColumn",
+      table: a.table,
+      schema: a.schema,
+      from: d.name,
+      to: a.column.name,
+      type: a.column.type,
+    });
+  }
+
+  // Rebuild the step list, dropping collapsed drop/add pairs and inserting the
+  // renameColumn where its addColumn was.
+  const afterRename: MigrationStep[] = [];
+  for (const s of steps) {
+    if (collapsed.has(s)) {
+      const rename = renameFor.get(s);
+      if (rename) afterRename.push(rename);
+      continue;
+    }
+    afterRename.push(s);
+  }
+
+  // Classify what remains.
+  const destructive = afterRename.filter(
+    (s) => s.op === "dropTable" || s.op === "dropColumn" || isBlockingNotNullAdd(s),
+  );
+  if (destructive.length > 0 && !opts.allowDestructive) {
+    throw new MigrationDestructiveError(opts.module, destructive);
+  }
+  if (destructive.length === 0) return afterRename;
+
+  // --allow-destructive: rewrite each blocking NOT-NULL add into the safe
+  // three-step sequence; drops pass through unchanged.
+  return afterRename.flatMap((s): MigrationStep[] => {
+    if (!isBlockingNotNullAdd(s) || s.op !== "addColumn") return [s];
+    const nullableCol: ColumnShape = { ...s.column, nullable: true };
+    const add: MigrationStep = s.fk
+      ? { op: "addColumn", table: s.table, schema: s.schema, column: nullableCol, fk: s.fk }
+      : { op: "addColumn", table: s.table, schema: s.schema, column: nullableCol };
+    return [
+      add,
+      {
+        op: "sqlComment",
+        comment: `TODO backfill ${qualifiedName(s.schema, s.table)}.${s.column.name} before it is set NOT NULL`,
+      },
+      {
+        op: "alterColumnNullable",
+        table: s.table,
+        schema: s.schema,
+        name: s.column.name,
+        type: s.column.type,
+        nullable: false,
+      },
+    ];
+  });
+}
+
+export interface BuildMigrationsOptions {
+  /** When true, destructive deltas (dropColumn / dropTable, and NOT-NULL
+   *  column adds without a default on a previously-existing table) are
+   *  ALLOWED — a NOT-NULL add is rewritten into the safe
+   *  add-nullable / backfill-TODO / SET NOT NULL sequence, and drops pass
+   *  through.  When false (the default), any such step raises a
+   *  {@link MigrationDestructiveError} naming the offending steps so the
+   *  operator makes the call deliberately (the CLI `--allow-destructive`
+   *  flag).  First-run (Initial) migrations are always exempt — nothing
+   *  pre-exists to destroy. */
+  allowDestructive?: boolean;
+}
+
+export function buildMigrations(
+  sys: EnrichedSystemIR,
+  snapshots: SnapshotStore,
+  options: BuildMigrationsOptions = {},
+): MigrationsIR[] {
+  const allowDestructive = options.allowDestructive ?? false;
   const out: MigrationsIR[] = [];
   for (const m of sys.subdomains) {
     if (!m.migrationsOwner) continue;
     // Binding-aware saving-shape resolver: resolve each aggregate's
     // effective shape via its (context, kind) dataSource binding so a
     // per-projection `shape:` override matches what the backend emitters
-    // produce.  Falls back to the aggregate header when the aggregate's
-    // owning context can't be located within the module.
-    const shapeOf = (agg: EnrichedAggregateIR): SavingShape => {
-      const ctx = m.contexts.find((c) => c.aggregates.some((a) => a.name === agg.name));
-      if (!ctx) return effectiveSavingShape(agg);
-      return effectiveSavingShape(agg, resolveDataSourceConfig(agg, ctx, sys));
-    };
+    // produce.  The owning context is passed in by IDENTITY from
+    // `schemaFromModule` (not looked up by aggregate name), so two
+    // same-named aggregates in sibling contexts resolve independently.
+    const shapeOf = (agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): SavingShape =>
+      effectiveSavingShape(agg, resolveDataSourceConfig(agg, ctx, sys));
     // Same binding-aware resolution for the Postgres schema each table
     // lands in — the owning context's schema (`snake(ctx.name)` default,
     // or the dataSource `schema:` override).  Matches what the EF /
     // Drizzle table mappings resolve, so the migration DDL creates the
     // exact schema-qualified relations the backends query at runtime.
-    const schemaOf = (agg: EnrichedAggregateIR): string | undefined => {
-      const ctx = m.contexts.find((c) => c.aggregates.some((a) => a.name === agg.name));
-      if (!ctx) return undefined;
-      return resolveDataSourceConfig(agg, ctx, sys)?.schema;
-    };
+    const schemaOf = (
+      agg: EnrichedAggregateIR,
+      ctx: EnrichedBoundedContextIR,
+    ): string | undefined => resolveDataSourceConfig(agg, ctx, sys)?.schema;
     const next = schemaFromModule(m, shapeOf, schemaOf);
     const baseline = snapshots.read(m.name);
-    const steps = diffSchema(baseline, next);
+    const steps = applyDestructivePolicy(diffSchema(baseline, next), baseline, {
+      allowDestructive,
+      module: m.name,
+    });
     const storageName = findPrimaryStorageBinding(sys, m, m.migrationsOwner) ?? "";
     const version =
       baseline === null
@@ -556,12 +831,21 @@ export function buildMigrations(sys: EnrichedSystemIR, snapshots: SnapshotStore)
 // schemaFromModule helpers
 // ---------------------------------------------------------------------------
 
-function collectAggregates(module: EnrichedSubdomainIR): EnrichedAggregateIR[] {
-  const acc: EnrichedAggregateIR[] = [];
+interface AggCtxPair {
+  agg: EnrichedAggregateIR;
+  ctx: EnrichedBoundedContextIR;
+}
+
+/** Every aggregate in the module paired with its OWNING context (identity),
+ *  contexts then aggregates in name order (deterministic).  The pairing is
+ *  what lets the schema/shape resolvers stay identity-based rather than
+ *  name-based (audit finding 16). */
+function collectAggregatePairs(module: EnrichedSubdomainIR): AggCtxPair[] {
+  const acc: AggCtxPair[] = [];
   const ctxs = [...module.contexts].sort((a, b) => a.name.localeCompare(b.name));
   for (const ctx of ctxs) {
     const aggs = [...ctx.aggregates].sort((a, b) => a.name.localeCompare(b.name));
-    for (const a of aggs) acc.push(a);
+    for (const agg of aggs) acc.push({ agg, ctx });
   }
   return acc;
 }

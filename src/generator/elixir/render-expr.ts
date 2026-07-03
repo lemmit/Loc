@@ -6,7 +6,13 @@ import type {
   TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
-import { escapeElixirIdent, snake, upperFirst } from "../../util/naming.js";
+import {
+  elixirRegexBody,
+  elixirString,
+  escapeElixirIdent,
+  snake,
+  upperFirst,
+} from "../../util/naming.js";
 import {
   type BinaryExpr,
   type CallExpr,
@@ -288,7 +294,7 @@ function renderElixirConvert(
 // ---------------------------------------------------------------------------
 
 function renderLiteral(lit: string, value: string, inFilter = false): string {
-  if (lit === "string") return JSON.stringify(value);
+  if (lit === "string") return elixirString(value);
   if (lit === "null") return "nil";
   if (lit === "bool") return value === "true" ? "true" : "false";
   if (lit === "now") return "DateTime.utc_now()";
@@ -438,10 +444,12 @@ function renderMethodCall(recv: string, args: string[], e: MethodCallExpr, ctx: 
     e.receiverType.name === "string" &&
     args.length === 1
   ) {
-    // Strip surrounding quotes from the pattern string arg if present,
-    // then embed as a sigil.
+    // A compile-time literal pattern embeds in a `~r/…/` sigil with `/` and
+    // `#{` escaped so it can't close the sigil early or interpolate (see
+    // elixirRegexBody).  A non-literal arg falls back to the rendered token.
     const raw = e.args[0];
-    const pat = raw?.kind === "literal" && raw.lit === "string" ? raw.value : args[0]!;
+    const pat =
+      raw?.kind === "literal" && raw.lit === "string" ? elixirRegexBody(raw.value) : args[0]!;
     return `Regex.match?(~r/${pat}/, ${recv})`;
   }
   return `${recv}.${snake(e.member)}(${args.join(", ")})`;
@@ -542,7 +550,20 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
       // value-or-nil so it composes in any expression position (e.g.
       // `is_nil((case ... end))` for `== null`).  No re-recognition — the
       // `repoRead` is fully resolved at lowering.
+      //
+      // A criterion / retrieval read (`find`/`findAll`/`run`) renders against the
+      // synthesized `run_<ret>_<agg>` retrieval fn (the same one the workflow
+      // `repo-run` uses), which returns `{:ok, [aggregate]}` — so the criterion
+      // actually filters the query instead of dropping to the whole-table find.
+      // `findAll`/`run` unwrap to the list; a single-result `find` takes the head.
       const read = e.repoRead!;
+      if (read.readKind !== "named" && read.retrievalName) {
+        const fn = `run_${snake(read.retrievalName)}_${snake(read.aggregate)}`;
+        const call = `${fn}(${args.join(", ")})`;
+        return read.readKind === "find"
+          ? `(case ${call} do\n      {:ok, [value | _]} -> value\n      _ -> nil\n    end)`
+          : `(case ${call} do\n      {:ok, value} -> value\n      _ -> []\n    end)`;
+      }
       const fn = contextFindFnFor(read.method, read.aggregate);
       return `(case ${fn}(${args.join(", ")}) do\n      {:ok, value} -> value\n      _ -> nil\n    end)`;
     }

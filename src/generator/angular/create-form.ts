@@ -11,6 +11,7 @@ import {
   fieldInput,
   formButton,
 } from "./form-fields.js";
+import { angularSink } from "./walker/sink.js";
 
 // ---------------------------------------------------------------------------
 // Angular `CreateForm(of: <Agg>)` renderer (angular-frontend-plan.md Slice 4b).
@@ -105,8 +106,7 @@ export function renderAngularCreateForm(
     controls: fields.map((f) => ({ name: f.name, init: controlInit(f.type) })),
     idTargets: collectIdTargets(fields, bc, ctx),
   };
-  ctx.angularForms ??= [];
-  ctx.angularForms.push(spec);
+  angularSink(ctx).forms.push(spec);
 
   return [
     `<form [formGroup]="${formVar}" (ngSubmit)="${submitMethod}()" data-testid="${ns}">`,

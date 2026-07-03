@@ -79,6 +79,13 @@ interface Import {
 
 // `import [type] (… ) from "x"` and re-exporting `export [type] … from "x"`.
 const IMPORT_RE = /(?:import|export)\s+(type\s+)?([^"';]*?)\s*from\s*["']([^"']+)["']/g;
+// Side-effect import: `import "x";` — no bindings, so it's a runtime edge.
+const SIDE_EFFECT_RE = /(?:^|[;\n])\s*import\s+["']([^"']+)["']/g;
+// Runtime dynamic import: `import("x")`.  The negative lookahead for a
+// trailing `.` excludes TypeScript's inline import-TYPE annotations
+// (`import("./ast.js").Foo`), which are pervasive here and carry no runtime
+// edge — only a genuine `await import("x")` / promise use is flagged.
+const DYNAMIC_RE = /\bimport\(\s*["']([^"']+)["']\s*\)(?!\s*\.)/g;
 
 function importsOf(src: string): Import[] {
   const out: Import[] = [];
@@ -97,6 +104,9 @@ function importsOf(src: string): Import[] {
     }
     out.push({ spec, typeOnly });
   }
+  // Side-effect + dynamic imports are always runtime (value) edges.
+  for (const m of src.matchAll(SIDE_EFFECT_RE)) out.push({ spec: m[1]!, typeOnly: false });
+  for (const m of src.matchAll(DYNAMIC_RE)) out.push({ spec: m[1]!, typeOnly: false });
   return out;
 }
 
@@ -135,11 +145,15 @@ describe("pipeline layering — value imports point one way", () => {
   const languageFiles = tsFiles(path.join(srcDir, "language"));
   const irFiles = tsFiles(path.join(srcDir, "ir"));
   const generatorFiles = tsFiles(path.join(srcDir, "generator"));
+  const macroFiles = tsFiles(path.join(srcDir, "macros"));
+  const platformFiles = tsFiles(path.join(srcDir, "platform"));
 
   it("scans a non-trivial number of files (guard against vacuous pass)", () => {
     expect(languageFiles.length).toBeGreaterThan(15);
     expect(irFiles.length).toBeGreaterThan(15);
     expect(generatorFiles.length).toBeGreaterThan(15);
+    expect(macroFiles.length).toBeGreaterThan(5);
+    expect(platformFiles.length).toBeGreaterThan(5);
   });
 
   it("language/ does not value-import from ir/, generator/ or system/ (beyond pinned edges)", () => {
@@ -164,6 +178,43 @@ describe("pipeline layering — value imports point one way", () => {
       "New value backward-edge from generator/ → system/. system/ composes generator " +
         "outputs — a shared helper consumed by generators belongs in generator/ (or util/), " +
         "not system/. Known pins live in ALLOWED.",
+    ).toEqual([]);
+  });
+
+  it("generator/ does not value-import from language/ (the compiler front-end)", () => {
+    // The shared IR vocabulary (`language/generated/ast.js`) is imported
+    // type-only by generators and is exempt; a RUNTIME symbol from `language/`
+    // in a generator is a backward edge (the audit found `walker-core.ts` →
+    // `walker-stdlib.js`, since relocated to `util/walker-primitive-names.ts`).
+    expect(
+      offenders(generatorFiles, ["language"]),
+      "New value backward-edge from generator/ → language/. A shared name set / helper " +
+        "consumed by both the validator and a generator belongs in util/, not language/. " +
+        "Type-only imports of the AST vocabulary are exempt.",
+    ).toEqual([]);
+  });
+
+  it("macros/ (phase ②) does not value-import from ir/, generator/ or system/", () => {
+    // The macro layer runs AST→AST at phase ②, upstream of lowering.  It may
+    // read `language/` (the AST it rewrites) but nothing downstream — a macro
+    // reaching into `ir/`/`generator/`/`system/` would invert the pipeline.
+    expect(
+      offenders(macroFiles, ["ir", "generator", "system"]),
+      "New value backward-edge from macros/. Macros run at phase ② (AST→AST) and may only " +
+        "depend on language/ + util/; downstream layers must not be imported upward.",
+    ).toEqual([]);
+  });
+
+  it("platform/ does not value-import from system/ (the terminal composition layer)", () => {
+    // Direction: platform surfaces delegate DOWN into generator/ (intended —
+    // `platform/dotnet.ts` → `generator/dotnet/…`), and are read from the
+    // front half only through the client-safe metadata leaves (guarded by
+    // metadata-boundary.test.ts).  What they must NOT do is reach UP into
+    // system/, which composes the surfaces — that would be a cycle.
+    expect(
+      offenders(platformFiles, ["system"]),
+      "New value backward-edge from platform/ → system/. system/ composes the platform " +
+        "surfaces; a surface must not import the composer.",
     ).toEqual([]);
   });
 

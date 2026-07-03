@@ -20,6 +20,7 @@ export {
   checkDeployableServes,
   checkDeployableUiCompose,
 } from "./deployable.js";
+export { checkDuplicateNames } from "./duplicates.js";
 export { checkGenericCarriers, checkSelfType } from "./generics.js";
 export { checkInheritance } from "./inheritance.js";
 export { checkMacroExpansion } from "./macros.js";
@@ -29,6 +30,7 @@ export {
   checkMatcherArity,
   checkMatchesCalls,
 } from "./match.js";
+export { checkUnknownNameRefs } from "./names.js";
 export { checkPayloads } from "./payload.js";
 export { checkSeeds } from "./seed.js";
 export {
@@ -42,6 +44,7 @@ export {
 export {
   checkActionTypePosition,
   checkAggregate,
+  checkAmbiguousPartRefs,
   checkContainment,
   checkContext,
   checkEntityPart,
@@ -60,7 +63,9 @@ export {
   checkPropertyCheck,
   checkSingleBinaryOperands,
   checkSinglePrimitiveConversion,
+  checkSingleTernary,
   checkSlotMemberAccess,
+  checkTernaryExprs,
   checkUnknownMemberAccess,
 } from "./types.js";
 export {

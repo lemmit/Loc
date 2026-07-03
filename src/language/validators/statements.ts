@@ -20,9 +20,11 @@ import {
   isCallSuffix,
   isDerivedProp,
   isEmitStmt,
+  isFunctionDecl,
   isLetStmt,
   isMemberSuffix,
   isNameRef,
+  isOperation,
   isPostfixChain,
   isPreconditionStmt,
   isRequiresStmt,
@@ -41,6 +43,7 @@ import {
   propertySensitivity,
   resolveTypeRef,
   stepInto,
+  stepIntoNode,
   T,
   typeOf,
   typeToString,
@@ -78,11 +81,7 @@ export function checkOperation(op: Operation, agg: Aggregate, accept: Validation
     const paramNames = new Set(op.params.map((p) => p.name));
     for (const node of AstUtils.streamAst(op.when)) {
       const name = (node as { $type: string; name?: string }).name;
-      if (
-        (node.$type === "NameRef" || node.$type === "ThisRef") &&
-        name !== undefined &&
-        paramNames.has(name)
-      ) {
+      if (node.$type === "NameRef" && name !== undefined && paramNames.has(name)) {
         accept(
           "error",
           `'when' on operation '${op.name}' references parameter '${name}' — a 'when' gate is a predicate over the aggregate's state only (its can-${op.name} query has no arguments). Move argument-aware checks into a 'precondition' in the body.`,
@@ -228,7 +227,7 @@ export function checkAssignOrCall(
 ): void {
   if (!stmt.op) {
     // Bare call statement
-    checkCallStmt(stmt, agg, op, accept);
+    checkCallStmt(stmt, agg, op, env, accept);
     return;
   }
   const targetType = lvalueType(stmt.target, agg, env, accept);
@@ -309,7 +308,20 @@ export function checkEmit(stmt: EmitStmt, env: Env, accept: ValidationAcceptor):
       continue;
     }
     const actual = typeOf(f.value, env);
-    if (!isAssignable(actual, expected)) {
+    // Suppress on `unknown` like the sibling gates (`checkAssignOrCall`,
+    // `checkDerived`, …): an unresolvable value (e.g. a typo'd bare name)
+    // is reported once at its source by `checkUnknownNameRefs` /
+    // `checkUnknownMemberAccess`.  Without this guard `checkEmit` was the
+    // only typo catch in emit args, and it produced a second, misleading
+    // "expects X but got unknown" error (finding 1 / A2.2).
+    // Admit literal promotion (`amount: 5` into a `money` field) exactly as
+    // `checkPropertyDefault` / `checkDerived` / `:=` do — otherwise emit args
+    // reject the same ergonomic numeric-literal forms defaults accept (C1).
+    if (
+      actual.kind !== "unknown" &&
+      !isAssignable(actual, expected) &&
+      !canPromoteLiteralTo(f.value, expected)
+    ) {
       accept(
         "error",
         `Field '${f.name}' expects '${typeToString(expected)}' but got '${typeToString(actual)}'.`,
@@ -332,6 +344,7 @@ export function checkCallStmt(
   stmt: AssignOrCallStmt,
   agg: Aggregate,
   op: ActionLike,
+  env: Env,
   accept: ValidationAcceptor,
 ): void {
   const lv = stmt.target;
@@ -349,13 +362,51 @@ export function checkCallStmt(
     accept("error", `Cannot resolve call to '${name}' from aggregate '${agg.name}'.`, {
       node: stmt,
     });
-  } else if (!lv.call) {
-    accept(
-      "error",
-      `Bare statement must be an assignment, collection mutation, or function/operation call.`,
-      { node: stmt },
-    );
+    return;
   }
+  if (lv.call) {
+    // Member-call statement (`recv.method(args)`, tail.length >= 1).  Neither
+    // branch above fired, so without this the chain skipped all validation and
+    // an unknown/non-callable member emitted doubly-broken code (C3).  Resolve
+    // the receiver through the data segments, then require the final segment to
+    // name a callable operation/function on that type.
+    const headSym = env.resolve(lv.head);
+    const recv0: DddType = headSym ? headSym.type : lookupRootMember(agg, lv.head);
+    // When the head isn't a value receiver (a param / let / aggregate member)
+    // it names a domain service, criterion, external, or other dotted-call
+    // form (`AccountReset.reset(this)`) whose resolution lives elsewhere —
+    // leave those to their own checks rather than mis-reporting the head.
+    if (recv0.kind === "unknown") return;
+    let recv: DddType = recv0;
+    for (let i = 0; i < lv.tail.length - 1; i++) {
+      recv = stepInto(recv, lv.tail[i]!);
+      if (recv.kind === "unknown") {
+        accept("error", `Cannot resolve member '${lv.tail[i]}'.`, { node: lv });
+        return;
+      }
+    }
+    const methodName = lv.tail[lv.tail.length - 1]!;
+    const memberNode = stepIntoNode(recv, methodName);
+    if (!memberNode) {
+      accept("error", `Cannot resolve member '${methodName}' on type '${typeToString(recv)}'.`, {
+        node: lv,
+      });
+      return;
+    }
+    if (!isOperation(memberNode) && !isFunctionDecl(memberNode)) {
+      accept(
+        "error",
+        `Member '${methodName}' is not callable — only operations and functions can be called.`,
+        { node: lv },
+      );
+    }
+    return;
+  }
+  accept(
+    "error",
+    `Bare statement must be an assignment, collection mutation, or function/operation call.`,
+    { node: stmt },
+  );
 }
 
 export function lvalueType(

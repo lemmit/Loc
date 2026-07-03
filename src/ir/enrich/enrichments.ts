@@ -9,10 +9,12 @@ import type {
   BoundedContextIR,
   ChannelIR,
   CodeRefKind,
+  ContextStampIR,
   CriterionIR,
   DataSourceKind,
   DeployableIR,
   DerivedIR,
+  DomainServiceIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   EnrichedEntityPartIR,
@@ -27,6 +29,8 @@ import type {
   FieldIR,
   FindIR,
   GenericCtorName,
+  IdValueType,
+  LoadPlanIR,
   LoomInterface,
   LoomModel,
   NeedIR,
@@ -35,6 +39,8 @@ import type {
   RawLoomModel,
   RepositoryIR,
   RetrievalIR,
+  SortTermIR,
+  StmtIR,
   SystemIR,
   TraceabilityIR,
   TypeIR,
@@ -43,6 +49,7 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../types/loom-ir.js";
+import { walkStmtExprsDeep } from "../util/walk.js";
 import { buildCreateInput } from "./wire-projection.js";
 
 // ---------------------------------------------------------------------------
@@ -251,9 +258,14 @@ function deriveNeeds(subdomains: EnrichedSubdomainIR[]): NeedIR[] {
       // a workflow body means the context requires the verb's capability
       // of its `(context, kind)` resource.  Union per kind so a context
       // using several verbs of one resource needs all their capabilities.
+      // Walks EVERY workflow body (creates / handlers / reactors) AND descends
+      // into `for-each` / `if-let` bodies via `allWorkflowStmts` — a nested
+      // `files.put` must still derive its capability need, else
+      // `validateNeedCapabilities` never sees it (audit finding: `deriveNeeds`
+      // walked only the primary top-level statement list).
       const byKind = new Map<DataSourceKind, Set<string>>();
       for (const wf of ctx.workflows) {
-        for (const st of wf.statements) {
+        for (const st of allWorkflowStmts(wf)) {
           const call =
             st.kind === "resource-call" ? st.call : st.kind === "expr-let" ? st.expr : undefined;
           if (call?.kind === "call" && call.callKind === "resource-op" && call.resourceOp) {
@@ -331,13 +343,43 @@ export function enrichContext(
   // hierarchy itself (table strategy, discriminator, polymorphic queries) is
   // not wired yet — see the `inheritance-storage-unwired` IR-validate warning.
   const byName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
+  // Walk the FULL transitive `extends` chain (Dog → Pet → Animal), merging
+  // every ancestor's declared fields — not just the direct base — so a
+  // grandparent's fields reach the concrete's wireShape / DTO and stay
+  // consistent with the TPH table that carries their columns.  Root-most
+  // fields come first (`[...grandbase, ...base, ...own]`); a nearer field
+  // shadows a like-named ancestor field.  `seen` guards a malformed cycle
+  // (a language-side `extends`-cycle validator may reject these upstream —
+  // this just keeps the walk finite if one slips through).
+  const mergedFieldsFor = (a: AggregateIR, seen: Set<string>): FieldIR[] => {
+    if (!a.extendsAggregate || seen.has(a.name)) return a.fields;
+    seen.add(a.name);
+    const base = byName.get(a.extendsAggregate);
+    if (!base) return a.fields;
+    const baseFields = mergedFieldsFor(base, seen);
+    const ownNames = new Set(a.fields.map((f) => f.name));
+    const inherited = baseFields.filter((f) => !ownNames.has(f.name));
+    return inherited.length > 0 ? [...inherited, ...a.fields] : a.fields;
+  };
+  // The id value-type is a hierarchy-wide fact: the TPH table (and the TPC
+  // polymorphic reader) key on the ROOT base's id type, so a concrete that
+  // didn't redeclare `ids` inherits the root's — otherwise a base declaring
+  // `ids int` yields an INTEGER table column but a concrete whose wire/Id
+  // defaults to `guid` (mismatch → every insert/read on the concrete breaks).
+  const rootIdValueTypeFor = (a: AggregateIR, seen: Set<string>): IdValueType => {
+    if (!a.extendsAggregate || seen.has(a.name)) return a.idValueType;
+    seen.add(a.name);
+    const base = byName.get(a.extendsAggregate);
+    return base ? rootIdValueTypeFor(base, seen) : a.idValueType;
+  };
   const withInheritance = ctx.aggregates.map((a) => {
     if (!a.extendsAggregate) return a;
-    const base = byName.get(a.extendsAggregate);
-    if (!base) return a;
-    const ownNames = new Set(a.fields.map((f) => f.name));
-    const inherited = base.fields.filter((f) => !ownNames.has(f.name));
-    return inherited.length > 0 ? { ...a, fields: [...inherited, ...a.fields] } : a;
+    const merged = mergedFieldsFor(a, new Set<string>());
+    const idValueType = rootIdValueTypeFor(a, new Set<string>());
+    const fieldsChanged = merged !== a.fields;
+    const idChanged = idValueType !== a.idValueType;
+    if (!fieldsChanged && !idChanged) return a;
+    return { ...a, fields: merged, idValueType };
   });
   const aggregates = withInheritance.map((a) => enrichAggregate(a, valueObjects, urlStyle));
   const repositories = ensureFindAll(aggregates, ctx.repositories);
@@ -392,7 +434,12 @@ export function enrichContext(
   // criterion.md, use site 3: materialise the synthetic retrievals that back
   // the `Repo.findAll(<Criterion>)` calls lowered into this context's
   // workflows, so they ride the existing retrieval pipeline on every backend.
-  const retrievals = synthesizeFindAllRetrievals(ctx.retrievals, workflows, ctx.criteria);
+  const retrievals = synthesizeFindAllRetrievals(
+    ctx.retrievals,
+    workflows,
+    ctx.criteria,
+    ctx.domainServices,
+  );
   return {
     ...ctx,
     valueObjects,
@@ -443,57 +490,98 @@ function synthesizeFindAllRetrievals(
   existing: RetrievalIR[] | undefined,
   workflows: WorkflowIR[],
   criteria: CriterionIR[] | undefined,
+  domainServices: DomainServiceIR[] | undefined,
 ): RetrievalIR[] {
   const base = existing ?? [];
   const crits = criteria ?? [];
   const out = [...base];
   const seen = new Set(base.map((r) => r.name));
+  // One materialisation step, shared by the workflow and domain-service scans:
+  // build the `findAllBy<Criterion>` RetrievalIR from `{name, retrievalName,
+  // sort?, loadPlan?}`, deduped by retrieval name so many call sites (and both
+  // scan kinds) share one retrieval.
+  const materialise = (synth: {
+    name: string;
+    retrievalName: string;
+    sort?: SortTermIR[];
+    loadPlan?: LoadPlanIR;
+  }): void => {
+    if (!synth.retrievalName || seen.has(synth.retrievalName)) return;
+    const crit = crits.find((c) => c.name === synth.name);
+    if (!crit) return; // a missing criterion is reported by the IR validator
+    seen.add(synth.retrievalName);
+    out.push({
+      name: synth.retrievalName,
+      params: crit.params,
+      targetType: crit.targetType,
+      where: crit.body,
+      criterionRef: {
+        name: crit.name,
+        args: crit.params.map(
+          (p): ExprIR => ({ kind: "ref", name: p.name, refKind: "param", type: p.type }),
+        ),
+      },
+      // `sort:` / `loads:` shaping from an anonymous retrieval (criterion.md
+      // use site 3); the retrieval emitters apply `.orderBy(...)` + the load
+      // shape.  Default to no sort / whole-load for a bare `findAll` / `find`.
+      sort: synth.sort ?? [],
+      loadPlan: synth.loadPlan ?? { kind: "whole" },
+    });
+  };
   for (const wf of workflows) {
     for (const st of allWorkflowStmts(wf)) {
       // Both `Repo.findAll(<Criterion>)` (repo-run) and the `if let` /
       // `Repo.find(<Criterion>)` (if-let) source ride a `findAllBy<Criterion>`
       // retrieval; an `if let` carries no sort/loads (single-result, takes the
       // first row).  Collect the criterion + shaping from whichever shape.
-      const synth =
-        st.kind === "repo-run" && st.synthCriterion
-          ? {
-              name: st.synthCriterion.name,
-              retrievalName: st.retrievalName,
-              sort: st.synthSort,
-              loadPlan: st.synthLoadPlan,
-            }
-          : st.kind === "if-let" && st.synthCriterion.name
-            ? {
-                name: st.synthCriterion.name,
-                retrievalName: st.retrievalName,
-                sort: undefined,
-                loadPlan: undefined,
-              }
-            : undefined;
-      if (!synth || seen.has(synth.retrievalName)) continue;
-      const crit = crits.find((c) => c.name === synth.name);
-      if (!crit) continue; // a missing criterion is reported by the IR validator
-      seen.add(synth.retrievalName);
-      out.push({
-        name: synth.retrievalName,
-        params: crit.params,
-        targetType: crit.targetType,
-        where: crit.body,
-        criterionRef: {
-          name: crit.name,
-          args: crit.params.map(
-            (p): ExprIR => ({ kind: "ref", name: p.name, refKind: "param", type: p.type }),
-          ),
-        },
-        // `sort:` / `loads:` shaping from an anonymous retrieval (criterion.md
-        // use site 3); the retrieval emitters apply `.orderBy(...)` + the load
-        // shape.  Default to no sort / whole-load for a bare `findAll` / `find`.
-        sort: synth.sort ?? [],
-        loadPlan: synth.loadPlan ?? { kind: "whole" },
-      });
+      if (st.kind === "repo-run" && st.synthCriterion) {
+        materialise({
+          name: st.synthCriterion.name,
+          retrievalName: st.retrievalName,
+          sort: st.synthSort,
+          loadPlan: st.synthLoadPlan,
+        });
+      } else if (st.kind === "if-let" && st.synthCriterion.name) {
+        materialise({ name: st.synthCriterion.name, retrievalName: st.retrievalName });
+      }
+    }
+  }
+  // Domain-service `reading`-tier bodies ride the SAME synthetic retrievals: a
+  // `Repo.findAll(<Criterion>)` in a `domainService` operation lowers to a
+  // `repo-read` Call carrying `synthCriterion` + `retrievalName` (mirror of the
+  // workflow `repo-run`).  Walk every operation body so the retrieval the read
+  // renders against actually exists on the generated repository — without this
+  // the criterion is dropped and the read hits the whole-table `findAll`.
+  for (const svc of domainServices ?? []) {
+    for (const op of svc.operations) {
+      for (const stmt of op.body) {
+        collectRepoReadCriteria(stmt, materialise);
+      }
     }
   }
   return out;
+}
+
+/** Walk an operation-body statement's expressions and materialise the synthetic
+ *  retrieval behind every `repo-read` Call that carries a `synthCriterion`
+ *  (`Repo.findAll(<Criterion>)` in a `domainService` reading op). */
+function collectRepoReadCriteria(
+  stmt: StmtIR,
+  materialise: (synth: { name: string; retrievalName: string }) => void,
+): void {
+  walkStmtExprsDeep(stmt, (e) => {
+    if (
+      e.kind === "call" &&
+      e.callKind === "repo-read" &&
+      e.repoRead?.synthCriterion &&
+      e.repoRead.retrievalName
+    ) {
+      materialise({
+        name: e.repoRead.synthCriterion.name,
+        retrievalName: e.repoRead.retrievalName,
+      });
+    }
+  });
 }
 
 /** Attach `returnType` (the tail-position success type) to a workflow, idempotently. */
@@ -801,7 +889,7 @@ function enrichAggregate(
   urlStyle: "literal" | "resource" = "literal",
 ): EnrichedAggregateIR {
   const parts = agg.parts.map(enrichPart);
-  const fields = agg.fields.map(resolveFieldAccess);
+  const fields = promoteStampTargets(agg.fields.map(resolveFieldAccess), agg.contextStamps);
   // Synthesize a `derived inspect: string = <structural>` when the user
   // didn't declare one.  Always-present after enrichment so backends
   // can emit a `ToString()` / `Inspect` / `util.inspect.custom` hook
@@ -1096,6 +1184,27 @@ function resolveFieldAccess(f: FieldIR): FieldIR {
   return { ...f, access: "editable", accessSource: "default" };
 }
 
+/** Fields written by a `stamp onCreate`/`onUpdate` are server-populated at
+ *  persist time (and overwritten there), so they must not be client-writable
+ *  create/update inputs — a mass-assignment surface.  Promote a stamp target
+ *  that's still create-writable (`editable`/`immutable`) to `managed`: dropped
+ *  from create/update input by `forCreateInput`/`forUpdateInput` yet kept in
+ *  reads (`forApiRead`/`forUiRead` include `managed`).  The `auditable` macro
+ *  already declares its columns `managed`; this closes the gap for a
+ *  hand-declared field targeted by a hand-written / capability `stamp`.  A
+ *  field the user already narrowed (`internal`/`secret`/`token`/`managed`) is
+ *  left untouched. */
+function promoteStampTargets(fields: FieldIR[], stamps: ContextStampIR[] | undefined): FieldIR[] {
+  if (!stamps || stamps.length === 0) return fields;
+  const targets = new Set(stamps.flatMap((s) => s.assignments.map((a) => a.field)));
+  if (targets.size === 0) return fields;
+  return fields.map((f) =>
+    targets.has(f.name) && (f.access === "editable" || f.access === "immutable")
+      ? { ...f, access: "managed", accessSource: "stamp" }
+      : f,
+  );
+}
+
 /** Every aggregate gets a repository with an implicit `find all():
  * T[]` query, mirroring how `findById` is implicit.  If the user
  * already declared a `find all(...)` of any shape, theirs wins. */
@@ -1171,7 +1280,13 @@ function enrichDeployables(deployables: DeployableIR[]): DeployableIR[] {
 
 function wireFieldsForAggregate(agg: AggregateIR): WireField[] {
   const out: WireField[] = [
-    { name: "id", type: idTypeFor(agg.name), optional: false, source: "id", access: "token" },
+    {
+      name: "id",
+      type: idTypeFor(agg.name, agg.idValueType),
+      optional: false,
+      source: "id",
+      access: "token",
+    },
   ];
   for (const f of agg.fields) {
     out.push({
@@ -1211,7 +1326,13 @@ function wireFieldsForAggregate(agg: AggregateIR): WireField[] {
 
 function wireFieldsForPart(part: EntityPartIR): WireField[] {
   const out: WireField[] = [
-    { name: "id", type: idTypeFor(part.name), optional: false, source: "id", access: "token" },
+    {
+      name: "id",
+      type: idTypeFor(part.name, part.parentIdValueType),
+      optional: false,
+      source: "id",
+      access: "token",
+    },
   ];
   for (const f of part.fields) {
     out.push({
@@ -1421,8 +1542,8 @@ function computeTraceability(loom: LoomModel): TraceabilityIR {
   };
 }
 
-function idTypeFor(targetName: string): TypeIR {
-  return { kind: "id", targetName, valueType: "guid" };
+function idTypeFor(targetName: string, valueType: IdValueType = "guid"): TypeIR {
+  return { kind: "id", targetName, valueType };
 }
 
 function containmentTypeFor(partName: string, collection: boolean): TypeIR {

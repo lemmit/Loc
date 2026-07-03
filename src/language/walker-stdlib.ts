@@ -1,95 +1,25 @@
 // ---------------------------------------------------------------------------
 // Walker stdlib registry — names that are admissible as BuilderCall types
 // in body / component-body position without resolving to a user-declared
-// type.  Lives in `language/` (not `generator/`) so the validator
-// can consume it without violating the one-directional layering rule
-// (`language/` knows nothing about `generator/`).
+// type.  The validator consumes these; keeping the surface here (a
+// `language/` module) means validator code imports its admissibility sets
+// without violating the one-directional layering rule (`language/` knows
+// nothing about `generator/`).
 //
-// Two sets:
-//   WALKER_LAYOUT_PRIMITIVES — top-level layout / formatter primitives
-//     (`Stack`, `Heading`, `Money` as a UI formatter, …) + the named-leaf
-//     form variants (`CreateForm`, `OperationForm`, `WorkflowForm`).
-//   WALKER_SUB_PRIMITIVES    — sub-elements that only appear nested inside
-//     a parent (`Tab` inside `Tabs`, `Column` inside `Table`).
+// The name sets themselves now live in `src/util/walker-primitive-names.ts`
+// (shared with the generator body-walker, which used to reach up into this
+// module — a `generator → language` value edge the hardened layering gate
+// forbids).  This file RE-EXPORTS them so the validator surface and the
+// completeness test (`walker-stdlib-completeness.test.ts`) are unchanged.
 //
-// These sets are DERIVED — the single source of truth is the
-// typed dispatch table at src/generator/_walker/registry.ts, which
-// holds the renderer functions for each target (React/TSX and
-// Phoenix/HEEx).  The layering rule forbids `language/` from
-// importing `generator/`, so the names below are hand-listed; a
-// completeness test (`test/language/walker-stdlib-completeness.test.ts`)
-// pins them mechanically against the registry, so drift surfaces as a
-// test failure rather than a runtime gap.  Adding a primitive: edit
-// the registry first, then add the name here when the test prompts.
+// The sets are DERIVED from the typed dispatch table at
+// src/generator/_walker/registry.ts; the completeness test pins them
+// mechanically.  Adding a primitive: edit the registry first, then add the
+// name in `walker-primitive-names.ts` when the test prompts.
 // ---------------------------------------------------------------------------
 
-export const WALKER_LAYOUT_PRIMITIVES: ReadonlySet<string> = new Set([
-  // Layout primitives.
-  "Stack",
-  "Group",
-  "Grid",
-  "Container",
-  "Tabs",
-  "Toolbar",
-  "Empty",
-  "Card",
-  "Paper",
-  "Breadcrumbs",
-  "KeyValueRow",
-  // Phase 6 — semantic anchor target + sticky-position wrapper.
-  "Section",
-  "Sticky",
-  // Inputs.  (`Switch` is deliberately absent: page-metamodel.md removed it —
-  // control-flow Switch is subsumed by `match`; the boolean input is Toggle.)
-  "Field",
-  "NumberField",
-  "PasswordField",
-  "Toggle",
-  "MultilineField",
-  "SelectField",
-  // Display.
-  "Loader",
-  "Anchor",
-  "Image",
-  "Avatar",
-  "Slot",
-  "Heading",
-  "Text",
-  "Bold",
-  "Italic",
-  "InlineCode",
-  "Button",
-  "Stat",
-  "Badge",
-  "Divider",
-  "Table",
-  "Money",
-  "DateDisplay",
-  "EnumBadge",
-  "IdLink",
-  "Skeleton",
-  "Alert",
-  "QueryView",
-  "Modal",
-  // Code rendering — syntax-highlighted via highlight.js CDN at runtime.
-  "CodeBlock",
-  // SVG icon — either a builtin name or a custom `svg:` literal.
-  "Icon",
-  // Named-leaf form variants (post-#512).
-  "CreateForm",
-  "OperationForm",
-  "WorkflowForm",
-  "DestroyForm",
-  // Action primitive — single-button operation invocation.
-  "Action",
-  // For-comprehension — list rendering with an item lambda.
-  "For",
-]);
-
-export const WALKER_SUB_PRIMITIVES: ReadonlySet<string> = new Set(["Tab", "Column"]);
-
-/** True when `name` is admissible as a v2 BuilderCall type without
- *  resolving to a user-declared type (VO, EntityPart, Component). */
-export function isWalkerPrimitive(name: string): boolean {
-  return WALKER_LAYOUT_PRIMITIVES.has(name) || WALKER_SUB_PRIMITIVES.has(name);
-}
+export {
+  isWalkerPrimitive,
+  WALKER_LAYOUT_PRIMITIVES,
+  WALKER_SUB_PRIMITIVES,
+} from "../util/walker-primitive-names.js";

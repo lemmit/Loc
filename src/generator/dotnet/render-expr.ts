@@ -531,6 +531,21 @@ function renderCall(args: string[], e: CallExpr, ctx: CsRenderContext): string {
       const read = e.repoRead!;
       const handle = ctx.repoReadHandle?.(read.repo);
       if (handle) {
+        // A criterion / retrieval read (`find`/`findAll`/`run`) renders against
+        // the synthesized `Run<RetrievalName>Async` retrieval method — the same
+        // one the workflow `repo-run` uses — so the criterion actually filters
+        // the query instead of dropping to the whole-table `All()`.  The token
+        // is passed NAMED (an optional `page` sits ahead of it), and a
+        // single-result `find` takes `.FirstOrDefault()`.
+        if (read.readKind !== "named" && read.retrievalName) {
+          const method = `Run${upperFirst(read.retrievalName)}Async`;
+          const callArgs =
+            argList.length > 0
+              ? `${argList}, cancellationToken: cancellationToken`
+              : "cancellationToken: cancellationToken";
+          const call = `${handle}.${method}(${callArgs})`;
+          return read.readKind === "find" ? `(await ${call}).FirstOrDefault()` : `(await ${call})`;
+        }
         const method = csRepoReadMethod(read.method, read.readKind);
         const ctArg = argList.length > 0 ? `${argList}, cancellationToken` : "cancellationToken";
         return `(await ${handle}.${method}(${ctArg}))`;

@@ -15,6 +15,8 @@
 import type { EnumIR, ExprIR, TypeIR, ValueObjectIR } from "../../ir/types/loom-ir.js";
 import { humanize, plural, snake } from "../../util/naming.js";
 import {
+  escapeHeexAttr,
+  escapeHeexText,
   indent,
   type PrimitiveSpec,
   renderChild,
@@ -41,7 +43,7 @@ import {
  *  can't reappear one renderer at a time. */
 export function attrValue(arg: ExprIR, ctx: WalkContext): string {
   return arg.kind === "literal"
-    ? `"${arg.value}"`
+    ? `"${escapeHeexAttr(arg.value)}"`
     : `{${renderExpr(arg, { ...ctx, position: "template" })}}`;
 }
 
@@ -128,7 +130,9 @@ export function renderModal(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCo
     const arg = expr.args[i]!;
     if (name === "title") {
       title =
-        arg.kind === "literal" ? arg.value : renderExpr(arg, { ...ctx, position: "template" });
+        arg.kind === "literal"
+          ? escapeHeexText(arg.value)
+          : renderExpr(arg, { ...ctx, position: "template" });
     } else if (name === "trigger") {
       triggerExpr = arg;
     } else if (name === "open") {
@@ -753,7 +757,7 @@ export function renderKeyValueRow(
   const positionals = expr.args.filter((_, i) => !expr.argNames?.[i]);
   const label =
     positionals[0]?.kind === "literal"
-      ? positionals[0].value
+      ? escapeHeexText(positionals[0].value)
       : positionals[0]
         ? renderInTemplate(positionals[0], ctx)
         : "Field";
@@ -1317,11 +1321,11 @@ export function renderCodeBlock(
   if (positional[0]?.kind === "literal") source = positional[0].value;
   const testidAttr = testid ? ` data-testid="${testid}"` : "";
   const langClass = language ? ` class="language-${language}"` : "";
-  const escaped = source.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const escaped = escapeHeexText(source);
   if (title) {
     return (
       `<div class="loom-code-block"${testidAttr}>\n` +
-      `  <div class="loom-code-block-title">${title}</div>\n` +
+      `  <div class="loom-code-block-title">${escapeHeexText(title)}</div>\n` +
       `  <pre><code${langClass}>${escaped}</code></pre>\n` +
       `</div>`
     );

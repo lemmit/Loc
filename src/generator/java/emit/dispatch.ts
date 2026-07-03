@@ -7,7 +7,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
-import { renderWorkflowStmts } from "../../_workflow/stmt-target.js";
+import { collectUnionFindLets, renderWorkflowStmts } from "../../_workflow/stmt-target.js";
 import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
 import { javaWorkflowStmtTarget, repoField, reposUsed } from "./workflow.js";
 import { esWorkflowStateClass, esWorkflowStreamTable } from "./workflow-eventsourced.js";
@@ -286,7 +286,13 @@ function renderHandler(
   body.push(
     ...renderWorkflowStmts(
       resolved.statements,
-      javaWorkflowStmtTarget(ctx, imports, renderCtx, hasEmit ? "__events" : undefined),
+      javaWorkflowStmtTarget(
+        ctx,
+        imports,
+        renderCtx,
+        hasEmit ? "__events" : undefined,
+        collectUnionFindLets(resolved.statements),
+      ),
       "        ",
     ),
   );
@@ -349,7 +355,13 @@ function renderEsHandler(
   // pure no-op, so we skip the stream load + fold (parity with the python port).
   const bodyLines = renderWorkflowStmts(
     resolved.statements,
-    javaWorkflowStmtTarget(ctx, imports, renderCtx, hasEmit ? "__events" : undefined),
+    javaWorkflowStmtTarget(
+      ctx,
+      imports,
+      renderCtx,
+      hasEmit ? "__events" : undefined,
+      collectUnionFindLets(resolved.statements),
+    ),
     "        ",
   );
   const usesState = bodyLines.some((l) => /\bstate\b/.test(l));

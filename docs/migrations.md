@@ -34,9 +34,16 @@ interface MigrationsIR {
 A `SchemaSnapshot` is an alphabetically-sorted list of `TableShape`s
 (`{ name, schema?, columns, primaryKey, foreignKeys, indexes }`). `MigrationStep`
 is a closed union of `createTable` / `dropTable` / `addColumn` / `dropColumn` /
-`alterColumnNullable` / `alterColumnType` / `addIndex` / `dropIndex`. Backends
-only translate steps to native syntax — they never re-derive the schema from the
-IR.
+`renameColumn` / `alterColumnNullable` / `alterColumnType` / `addIndex` /
+`dropIndex` / `sqlComment`. Backends only translate steps to native syntax — they
+never re-derive the schema from the IR.
+
+**Every delta step carries a `schema?`** — the owning bounded context's Postgres
+schema, exactly as `createTable` carries it on the nested `TableShape`. Without it
+an `ALTER`/`DROP`/`CREATE INDEX` on a schema-qualified system targets the wrong
+relation or fails (`ALTER TABLE "sales"."orders" …`, not a bare `orders`). The
+SQL renderer and the Ecto emitter both qualify the relation from the step's
+schema.
 
 ## Phase ⑨ derivation
 
@@ -53,9 +60,43 @@ IR.
    + 1n)`, starting from `BASE_TIMESTAMP = "20260101000000"`) and append to
    `migrationHistory`, then write it back to disk as the next baseline.
 
-`diffSchema` emits drops first, then creates **ordered by FK dependency** (Kahn's
-sort with an alphabetical tiebreak) so an inline `REFERENCES` never points at a
-not-yet-created table, then per-table column/index diffs.
+`diffSchema` emits an **FK-safe global order**: drop indexes/columns (which
+unblocks table drops) → drop tables in **reverse-topological (child-first)** order
+so a parent is never dropped while a child still references it → create tables in
+**topological (parent-first)** order (Kahn's sort with an alphabetical tiebreak) so
+an inline `REFERENCES` never points at a not-yet-created table → add columns (their
+FK targets now exist) → alter columns → add indexes. Tables are matched by
+schema-qualified name (`sales.orders` ≠ `billing.orders`); an old snapshot whose
+tables predate schema-qualification (no `schema` field) is reconciled by bare name
+against a single same-named next table, so a format bump reads as "same table, now
+qualified" rather than drop+recreate.
+
+Between the diff and the emitted steps, `applyDestructivePolicy` classifies the
+delta and enforces the **destructive-change gate** (see below).
+
+## Destructive changes — the `--allow-destructive` gate
+
+A delta can silently destroy data. `applyDestructivePolicy` classifies each step
+and, unless the generate run passes `--allow-destructive`, **aborts** with a
+`loom.migration-destructive` error naming the offending steps. First-run
+(`Initial`) migrations are always exempt — nothing pre-exists to destroy.
+
+- **Rename detection.** A table with *exactly one* `dropColumn` and *one*
+  `addColumn` **of identical type** is an unambiguous rename → the pair collapses
+  into a single non-destructive `renameColumn` (`ALTER TABLE … RENAME COLUMN a TO
+  b`). Any other drop/add mix stays drop+add and falls under the gate.
+- **Drops.** A `dropColumn` or `dropTable` that survives rename-collapse is
+  destructive → blocked unless `--allow-destructive`.
+- **Required-column adds.** A NOT-NULL `addColumn` with no default on a
+  previously-existing table fails on any populated table → blocked unless
+  `--allow-destructive`. Under the flag it is rewritten into the safe sequence:
+  add the column *nullable* → a `-- TODO backfill …` comment → `SET NOT NULL`
+  (`alterColumnNullable`). Fill in the backfill before applying to real data.
+
+```bash
+ddd generate system app.ddd -o out                       # aborts on a destructive delta
+ddd generate system app.ddd -o out --allow-destructive   # applies it (drops; NOT-NULL → 3-step)
+```
 
 ## `migrationsOwner` — one backend per module owns schema
 

@@ -5,6 +5,7 @@ import { emitActionThen } from "../_walker/primitives/controls.js";
 import { renderPrimitive } from "../_walker/render-primitive.js";
 import { namedArgValue, positionalArgs } from "../_walker/shared/args.js";
 import { emitExpr, styleAttr, testidAttr, type WalkContext } from "../_walker/walker-core.js";
+import { angularSink } from "./walker/sink.js";
 
 // ---------------------------------------------------------------------------
 // Angular `Action(inst.op)` renderer — a button that fires an aggregate
@@ -120,8 +121,7 @@ export function renderAngularAction(
     importFrom,
     method: { name: methodName, idAccess, thenJs },
   };
-  ctx.angularActions ??= [];
-  const specs = ctx.angularActions as AngularActionSpec[];
+  const specs = angularSink(ctx).actions;
   if (!specs.some((s) => s.localVar === localVar)) specs.push(spec);
 
   const button = renderPrimitive(ctx, "primitive-button", {

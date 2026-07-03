@@ -35,8 +35,15 @@ on:
   push:
     branches: [main]
     paths:
-      - 'src/generator/elixir/vanilla/**'
-      - 'src/generator/elixir/index.ts'
+      # Whole elixir generator subtree — render-expr.ts, domain/, heex-*,
+      # AND vanilla/ — not just vanilla/ + index.ts (audit A6.1: this was
+      # the narrowest backend gate, blind to its own render-expr/heex code).
+      - 'src/generator/elixir/**'
+      # Shared expression-renderer seam every domain-logic backend consumes.
+      - 'src/generator/_expr/**'
+      # Platform-neutral IR the elixir backend lowers from — an IR change
+      # can break the elixir emit while every string-assert unit test passes.
+      - 'src/ir/**'
       - 'src/platform/elixir.ts'
       - 'src/language/validators/deployable.ts'
       - 'test/e2e/fixtures/elixir-vanilla-build/**'
@@ -45,8 +52,9 @@ on:
       - '.github/workflows/elixir-vanilla-build.yml'
   pull_request:
     paths:
-      - 'src/generator/elixir/vanilla/**'
-      - 'src/generator/elixir/index.ts'
+      - 'src/generator/elixir/**'
+      - 'src/generator/_expr/**'
+      - 'src/ir/**'
       - 'src/platform/elixir.ts'
       - 'src/language/validators/deployable.ts'
       - 'test/e2e/fixtures/elixir-vanilla-build/**'

@@ -20,27 +20,27 @@ namespace Api.Migrations
     {
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.Sql(@"CREATE SCHEMA IF NOT EXISTS orders;
-CREATE TABLE orders.orders (
-  id UUID NOT NULL,
-  customer_id TEXT NOT NULL,
-  status TEXT NOT NULL,
-  placed_at TIMESTAMP WITH TIME ZONE NOT NULL,
-  PRIMARY KEY (id)
+            migrationBuilder.Sql(@"CREATE SCHEMA IF NOT EXISTS ""orders"";
+CREATE TABLE ""orders"".""orders"" (
+  ""id"" UUID NOT NULL,
+  ""customer_id"" TEXT NOT NULL,
+  ""status"" TEXT NOT NULL,
+  ""placed_at"" TIMESTAMP WITH TIME ZONE NOT NULL,
+  PRIMARY KEY (""id"")
 );
 
-CREATE SCHEMA IF NOT EXISTS orders;
-CREATE TABLE orders.order_lines (
-  id UUID NOT NULL,
-  order_id UUID NOT NULL,
-  product_id UUID NOT NULL,
-  quantity INTEGER NOT NULL,
-  PRIMARY KEY (id),
-  FOREIGN KEY (order_id) REFERENCES orders.orders ON DELETE CASCADE,
-  FOREIGN KEY (product_id) REFERENCES orders.products ON DELETE RESTRICT
+CREATE SCHEMA IF NOT EXISTS ""orders"";
+CREATE TABLE ""orders"".""order_lines"" (
+  ""id"" UUID NOT NULL,
+  ""order_id"" UUID NOT NULL,
+  ""product_id"" UUID NOT NULL,
+  ""quantity"" INTEGER NOT NULL,
+  PRIMARY KEY (""id""),
+  FOREIGN KEY (""order_id"") REFERENCES ""orders"".""orders"" ON DELETE CASCADE,
+  FOREIGN KEY (""product_id"") REFERENCES ""orders"".""products"" ON DELETE RESTRICT
 );
-CREATE INDEX order_lines_order_id_idx ON orders.order_lines (order_id);
-CREATE INDEX order_lines_product_id_idx ON orders.order_lines (product_id);");
+CREATE INDEX ""order_lines_order_id_idx"" ON ""orders"".""order_lines"" (""order_id"");
+CREATE INDEX ""order_lines_product_id_idx"" ON ""orders"".""order_lines"" (""product_id"");");
         }
 
         protected override void Down(MigrationBuilder migrationBuilder)

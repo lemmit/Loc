@@ -276,21 +276,33 @@ export function emitRequestDtos(
   // `hasCreate`: a non-constructible aggregate emits no CreateRequest.
   if (createInputOverride || hasCreate(agg)) {
     const requiredFields = createInputOverride ?? createInputFields(agg);
+    const rendered = requiredFields.map((f) => {
+      // Explicit `= default` → optional request field via a record default
+      // value, dropping its `[Required]` (see `wireCreateDefault`).  A
+      // `bool = true` now reaches here (was previously dropped), so the record
+      // can carry an optional param mid-list — invalid C# (CS1737: optional
+      // params must follow required ones).  STJ binds by JSON name and the
+      // controller reads `request.<Name>` by name, so reordering the RECORD's
+      // params is wire- and call-safe; sort the defaulted (optional) params
+      // after the required ones so the record always compiles.
+      const d = wireCreateDefault(f);
+      return {
+        hasDefault: d !== undefined,
+        s: dtoParam(
+          wireType(f.type, ctx, "request"),
+          upperFirst(f.name),
+          "request",
+          d ? renderCsExpr(d) : undefined,
+        ),
+      };
+    });
+    const ordered = [
+      ...rendered.filter((p) => !p.hasDefault),
+      ...rendered.filter((p) => p.hasDefault),
+    ];
     records.push({
       name: `Create${agg.name}Request`,
-      params: requiredFields
-        .map((f) => {
-          // Explicit `= default` → optional request field via a record
-          // default value, dropping its `[Required]` (see `wireCreateDefault`).
-          const d = wireCreateDefault(f);
-          return dtoParam(
-            wireType(f.type, ctx, "request"),
-            upperFirst(f.name),
-            "request",
-            d ? renderCsExpr(d) : undefined,
-          );
-        })
-        .join(", "),
+      params: ordered.map((p) => p.s).join(", "),
     });
   }
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {

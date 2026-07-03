@@ -561,9 +561,11 @@ describe("WalkerTarget — vueTarget (vue-frontend-plan.md)", () => {
     expect(vueTarget.renderAttrBinding("data-testid", '"row-" + id')).toBe(
       " :data-testid='\"row-\" + id'",
     );
-    // Both quote kinds present — fail loud rather than emit a
-    // template Vue can't parse.
-    expect(() => vueTarget.renderAttrBinding("x", `"a" + 'b'`)).toThrow(/mixes single and double/);
+    // Both quote kinds present — entity-escape the delimiter (`"`→`&quot;`)
+    // under a double-quote binding rather than throw and abort Vue codegen
+    // for the whole system (audit finding B21).  Vue decodes the entity
+    // before compiling, so the binding is well-formed.
+    expect(vueTarget.renderAttrBinding("x", `"a" + 'b'`)).toBe(` :x="&quot;a&quot; + 'b'"`);
   });
 });
 

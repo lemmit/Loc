@@ -69,7 +69,7 @@ system DevPlatform {
     auth {
         provider: keycloak
         oidc {
-            issuer: "https://idp.example.com"
+            issuer: env("OIDC_ISSUER")
             clientId: "loom-console"
             clientSecret: env("OIDC_CLIENT_SECRET")
             audience: "loom-api"
@@ -745,7 +745,7 @@ system DevPlatform {
         contexts: [Catalog, Builds, People]
         dataSources: [catalogState, buildsState, peopleState]
         serves: ProjectsApi, DeliveryApi, AccountsApi
-        port: 8081
+        port: 8082
         auth: required
     }
 

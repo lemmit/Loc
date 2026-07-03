@@ -103,7 +103,7 @@ describe("java generator — single containment (root-declared)", () => {
       .map(([, v]) => v)
       .join("\n");
     expect(ddl).toMatch(
-      /CREATE TABLE shop\.labels[\s\S]*?shipment_id UUID NOT NULL[\s\S]*?REFERENCES shop\.shipments/,
+      /CREATE TABLE "shop"\."labels"[\s\S]*?"shipment_id" UUID NOT NULL[\s\S]*?REFERENCES "shop"\."shipments"/,
     );
   });
 });

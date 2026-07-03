@@ -75,6 +75,12 @@ export interface GenerateSystemOptions {
    *  emits an "Initial" migration.  CLI wires `fsSnapshotStore(outDir)`;
    *  web playground wires its VFS-backed store. */
   snapshots?: SnapshotStore;
+  /** Allow destructive migration deltas (drops / narrowing type changes /
+   *  NOT-NULL column adds without a default on an existing table).  Off by
+   *  default: such a delta throws `MigrationDestructiveError` so the
+   *  operator applies it deliberately (the CLI `--allow-destructive`
+   *  flag).  See docs/migrations.md § Destructive changes. */
+  allowDestructive?: boolean;
 }
 
 export function generateSystems(model: Model, options: GenerateSystemOptions = {}): SystemEmission {
@@ -102,6 +108,7 @@ export function generateSystemsFromLoom(
       emitTrace: options.emitTrace,
       emitKubernetes: options.emitKubernetes,
       snapshots,
+      allowDestructive: options.allowDestructive,
     });
   }
   // Traceability artifacts — model-global (requirements may
@@ -118,7 +125,12 @@ function emitSystem(
   sys: EnrichedSystemIR,
   loom: EnrichedLoomModel,
   out: Map<string, string>,
-  options: { emitTrace?: boolean; emitKubernetes?: boolean; snapshots: SnapshotStore },
+  options: {
+    emitTrace?: boolean;
+    emitKubernetes?: boolean;
+    snapshots: SnapshotStore;
+    allowDestructive?: boolean;
+  },
 ): void {
   // Pre-compute a module-name → contexts lookup so a deployable can
   // collect its slice quickly.
@@ -130,7 +142,9 @@ function emitSystem(
   // a baseline to diff against.  Modules without an owner are skipped
   // by `buildMigrations` — `migrations` only carries entries for
   // modules where `module.migrationsOwner` is set.
-  const migrations = buildMigrations(sys, options.snapshots);
+  const migrations = buildMigrations(sys, options.snapshots, {
+    allowDestructive: options.allowDestructive,
+  });
   for (const m of migrations) {
     out.set(snapshotRelPath(m.module), serializeSnapshot(m.next));
   }
@@ -387,6 +401,14 @@ function migrationsForDeployable(
 
 /** A docker-compose-safe slug: lowercase, no characters outside the
  * conservative `[a-z0-9_]` set. */
+/** The browser origins the system's frontend deployables are served from
+ *  (compose host ports) — the CORS allowlist for every backend service. */
+function frontendOrigins(sys: SystemIR): string[] {
+  return sys.deployables
+    .filter((f) => platformFor(f.platform).isFrontend)
+    .map((f) => `http://localhost:${f.port}`);
+}
+
 function serviceSlug(name: string): string {
   return name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
 }
@@ -665,6 +687,18 @@ function renderDeployableService(d: DeployableIR, sys: SystemIR): string[] {
   }
   lines.push(`  environment:`);
   for (const [k, v] of shape.env) lines.push(`    ${k}: ${JSON.stringify(v)}`);
+  // CORS allowlist for a backend that a separate-origin frontend may call:
+  // pin it to the frontend origins the topology declares (the generator knows
+  // their host ports), so the backend restricts cross-origin access to exactly
+  // those instead of a wildcard.  Frontend-only deployables serve no API, so
+  // they get no allowlist; a system with no frontend leaves it unset (the
+  // backend then applies its own auth-aware fallback).
+  if (!platform.isFrontend) {
+    const origins = frontendOrigins(sys);
+    if (origins.length > 0) {
+      lines.push(`    CORS_ORIGIN: ${JSON.stringify(origins.join(","))}`);
+    }
+  }
   // Same-origin proxy target for a vite-served frontend.  Its bundle fetches
   // `/api` relative, and `vite preview` proxies that to the backend — but
   // inside the compose network the backend is its SERVICE name (not the

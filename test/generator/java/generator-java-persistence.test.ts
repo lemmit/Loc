@@ -178,9 +178,9 @@ describe("java generator — Flyway migrations (S4)", () => {
     const sql = files_.get(
       "shop_api/src/main/resources/db/migration/V20260101000000.1__Sales_Initial.sql",
     )!;
-    expect(sql).toContain("CREATE SCHEMA IF NOT EXISTS orders;");
-    expect(sql).toContain("CREATE TABLE orders.orders (");
-    expect(sql).toContain("CREATE TABLE orders.order_tag_ids (");
+    expect(sql).toContain('CREATE SCHEMA IF NOT EXISTS "orders";');
+    expect(sql).toContain('CREATE TABLE "orders"."orders" (');
+    expect(sql).toContain('CREATE TABLE "orders"."order_tag_ids" (');
     const build = files_.get("shop_api/build.gradle.kts")!;
     expect(build).toContain(
       'implementation("org.springframework.boot:spring-boot-starter-flyway")',

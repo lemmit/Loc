@@ -6,18 +6,27 @@
 
 import { allPlatformDescriptors } from "../../../platform/metadata.js";
 import { isStdlibError } from "../../../util/error-defaults.js";
+import { plural, snake } from "../../../util/naming.js";
 import { typeKey, variantTag } from "../../stdlib/unions.js";
 import type {
   BoundedContextIR,
+  EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
   EnrichedLoomModel,
+  EnrichedSystemIR,
   ExprIR,
   FindIR,
   FunctionIR,
-  OperationIR,
   StmtIR,
   TypeIR,
 } from "../../types/loom-ir.js";
 import { allContexts } from "../../types/loom-ir.js";
+import { isTphBase, isTphConcrete } from "../../util/inheritance.js";
+import { resolveDataSourceConfig } from "../../util/resolve-datasource.js";
+import {
+  walkStmtExprsDeep as walkExprsInStmt,
+  walkWorkflowStmtExprsDeep as walkExprsInWorkflowStmt,
+} from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { walkExpr } from "./shared.js";
 
@@ -126,6 +135,61 @@ export function validateWorkspaceUniqueness(
           message: `context '${c.name}' declares enum '${e.name}' that shadows the root-level declaration; rename one of them.`,
         });
       }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Duplicate physical-table guard (audit finding 16).  Two aggregates that
+// resolve to the SAME schema-qualified Postgres table (`sales.orders` /
+// `billing.orders` — the canonical `Sales.Order` / `Billing.Order` scenario,
+// OR two same-named aggregates with no dataSource schema, both defaulting to
+// `public.orders`) would have their `CREATE TABLE` emitted twice into one
+// module's migration and clobber each other at runtime.  Migrations are
+// derived per subdomain, so the collision that matters is within the whole
+// system's physical layout — report it here before generation.
+// ---------------------------------------------------------------------------
+
+/** True when `agg` owns its own root table (so a collision on its table name
+ *  is a real duplicate).  Abstract TPC bases own no table; TPH concretes
+ *  share their base's table by design (not a duplicate). */
+function ownsRootTable(agg: EnrichedAggregateIR, pool: readonly EnrichedAggregateIR[]): boolean {
+  if (isTphConcrete(agg, pool)) return false;
+  if (agg.isAbstract && !isTphBase(agg, pool)) return false;
+  return true;
+}
+
+export function validateDuplicateTables(sys: EnrichedSystemIR, diags: LoomDiagnostic[]): void {
+  const pairs: { agg: EnrichedAggregateIR; ctx: EnrichedBoundedContextIR }[] = [];
+  for (const sub of sys.subdomains) {
+    for (const ctx of sub.contexts) {
+      for (const agg of ctx.aggregates) pairs.push({ agg, ctx });
+    }
+  }
+  const pool = pairs.map((p) => p.agg);
+  const byTable = new Map<string, { agg: EnrichedAggregateIR; ctx: EnrichedBoundedContextIR }[]>();
+  for (const { agg, ctx } of pairs) {
+    if (!ownsRootTable(agg, pool)) continue;
+    const schema = resolveDataSourceConfig(agg, ctx, sys)?.schema;
+    const key = `${schema ?? "public"}.${plural(snake(agg.name))}`;
+    const group = byTable.get(key) ?? [];
+    group.push({ agg, ctx });
+    byTable.set(key, group);
+  }
+  for (const [key, group] of byTable) {
+    if (group.length < 2) continue;
+    const who = group.map((g) => `${g.ctx.name}.${g.agg.name}`).join(", ");
+    for (const { agg, ctx } of group) {
+      diags.push({
+        severity: "error",
+        code: "loom.duplicate-table",
+        source: `${sys.name}.${ctx.name}.${agg.name}`,
+        message:
+          `aggregates ${who} all map to the same database table \`${key}\` — ` +
+          `their migrations would create and clobber one relation. Give the ` +
+          `owning contexts distinct \`dataSource\` schemas (\`schema: "..."\`) so ` +
+          `each lands in its own Postgres schema, or rename one aggregate.`,
+      });
     }
   }
 }
@@ -1018,61 +1082,6 @@ export function validateVariantMatch(loom: EnrichedLoomModel, diags: LoomDiagnos
       walkExpr(v.filter, vis);
       if (v.output) for (const b of v.output.binds) walkExpr(b.expr, vis);
     }
-  }
-}
-
-function walkExprsInWorkflowStmt(
-  s: import("../../types/loom-ir.js").WorkflowStmtIR,
-  visit: (e: ExprIR) => void,
-): void {
-  switch (s.kind) {
-    case "precondition":
-    case "requires":
-      walkExpr(s.expr, visit);
-      break;
-    case "emit":
-      for (const f of s.fields) walkExpr(f.value, visit);
-      break;
-    case "factory-let":
-      for (const f of s.fields) walkExpr(f.value, visit);
-      break;
-    case "repo-let":
-      for (const a of s.args) walkExpr(a, visit);
-      break;
-    case "expr-let":
-      walkExpr(s.expr, visit);
-      break;
-    case "op-call":
-      for (const a of s.args) walkExpr(a, visit);
-      break;
-    // Other WorkflowStmtIR shapes that carry no expression payload
-    // (savepoints, mark-as-failed, etc.) need no traversal.
-  }
-}
-
-function walkExprsInStmt(
-  s: import("../../types/loom-ir.js").StmtIR,
-  visit: (e: ExprIR) => void,
-): void {
-  switch (s.kind) {
-    case "precondition":
-    case "requires":
-    case "let":
-    case "expression":
-      walkExpr(s.expr, visit);
-      break;
-    case "return":
-    case "assign":
-    case "add":
-    case "remove":
-      walkExpr(s.value, visit);
-      break;
-    case "emit":
-      for (const f of s.fields) walkExpr(f.value, visit);
-      break;
-    case "call":
-      for (const a of s.args) walkExpr(a, visit);
-      break;
   }
 }
 

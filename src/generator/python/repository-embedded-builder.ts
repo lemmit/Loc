@@ -10,6 +10,7 @@ import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { aggUsesPrincipalContextFilter, contextFilterPredicate } from "./find-predicate.js";
 import { isRefCollectionField, isValueCollectionField, rowClassName } from "./py-columns.js";
+import { wireHelperImport } from "./py-type-imports.js";
 import {
   authUserImport,
   emittableFinds,
@@ -155,6 +156,7 @@ export function buildPyEmbeddedRepositoryFile(
     // an always-on principal capability filter (DEBT-02 tail) — one sorted import.
     authUserImport(findUser, aggUsesPrincipalContextFilter(agg)),
     `from app.db.schema import ${row}`,
+    wireHelperImport(refersTo),
     "from app.domain.errors import AggregateNotFoundError",
     refersTo("DomainEvent")
       ? "from app.domain.events import DomainEvent, DomainEventDispatcher"
