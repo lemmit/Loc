@@ -106,6 +106,11 @@ function renderTsStatement(
             : `{ type: ${tag}, ...(${v}) }`;
       return `${INDENT}return ${tagged};`;
     }
+    case "variant-match":
+      // Frontend-only effect statement (`match await op() { … }`,
+      // async-actions-and-effects.md Stage 2) — gated to page/component action
+      // bodies, never lowered into a backend body.
+      throw new Error("variant-match statement is frontend-only; it must not reach the TS backend");
   }
 }
 

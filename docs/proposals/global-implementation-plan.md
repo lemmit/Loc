@@ -242,18 +242,31 @@ java-backend).
     synthesis**). **5 stages, each independently shippable** (authoritative table
     in A → "Rollout — the whole initiative"):
     **(1)** named *sync* actions — **non-breaking** (no call-semantics change),
-    the foundation; **(2)** `await` + `match` — explicit async marker over the
-    existing `Result`/`match` (lint→required ramp); **(3)** retire the
-    `Action {}` `then:` arg via a macro over a named action; **(4)** async action
-    composition (`async` keyword, required+checked); **(5)** `store` (defers
-    container/lifetime to frontend-state-management). Deferred/additive within:
-    `onError` sugar, `attempt { }` railway (→ F# `asyncResult` CE), `spawn`.
+    the foundation — ✅ **SHIPPED** (2026-07 code-verified: grammar `ActionDecl`,
+    `ActionIR`, lowering with `onSubmit: <name>` → typed `action-ref`, purity +
+    payload-conformance validators, `event_N`-gensym-replacing hoist on all four
+    JS frontends + HEEx, per-target `named-actions.test.ts`); **(2)** `await` +
+    `match` — explicit async marker over the existing `Result`/`match`
+    (lint→required ramp) — ✅ **first cut SHIPPED** (2026-07, frontend-only):
+    `AwaitExpr` + effect-form `MatchStmt` + `variant-match` IR + a
+    `renderVariantMatch` seam (await the mutation, reify the thrown ProblemDetails
+    into the error variant, `switch` on the union tag) on all four JS frontends;
+    bare remote call = `loom.missing-effect-marker` **warning** (replaced the hard
+    `loom.action-requires-await`); HEEx pinned as a follow-up. Remaining: the
+    `await`-required flip, `spawn`/`onError`/`attempt`, multi-error reification; **(3)** retire the `Action {}` `then:` arg via a macro over
+    a named action; **(4)** async action composition (`async` keyword,
+    required+checked); **(5)** `store` — ✅ **SHIPPED in-memory** (grammar/IR/
+    lowering + Zustand/Pinia/Svelte/Angular/LiveView emission; the `persist:`/
+    `sync:` lifetime ladder remains, gated `loom.store-lifetime-unsupported`).
+    Deferred/additive within: `onError` sugar, `attempt { }` railway (→ F#
+    `asyncResult` CE), `spawn`.
     **Dependencies:** none hard for Stage 1; **strengthens `loom-forms` (#5)** —
     `onSubmit:`/`rowAction:` bind to *named* actions instead of anonymous lambdas
     — so co-design or sequence Stage 1 with it; **C defers its backend half** to
     exception-less/failure-taxonomy (the T3.4 error family) and adds only the
     frontend error boundary + two-tier unification. A **Track-C frontend** item;
-    Stage 1 has no governance-spine dependency and can start anytime.
+    Stage 1 shipped; **Stage 2 (`await` + `match`) is the next slice** and has no
+    governance-spine dependency — it can start anytime.
 
 ## Coordinated single-PR moments (surviving set)
 
@@ -292,8 +305,9 @@ Three loosely-coupled tracks (one agent each):
 - **Track C (governance & product):** T2.i →
   execution-context → multi-tenancy → authorization; loom-forms +
   frontend remainders interleave. The **MVU family (T4 #11) Stage 1**
-  (named *sync* actions) is non-breaking and governance-independent — it can
-  interleave here anytime, ideally co-designed with loom-forms (`onSubmit:`→
+  (named *sync* actions) + **Stage 5 (`store`, in-memory)** have shipped;
+  **Stage 2 (`await` + `match`)** is the next governance-independent slice and
+  can interleave here anytime, ideally co-designed with loom-forms (`onSubmit:`→
   named action).
 
 ## Verification

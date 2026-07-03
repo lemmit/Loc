@@ -245,6 +245,7 @@ export function renderCustomLayoutPage(
   // `usesState` (tracked into `effectiveUsesState`) and resolves `setX`.
   let actionLines = "";
   let usesStateForActions = false;
+  let usesRouteIdForActions = false;
   if (actions.length > 0 && usedActions && usedActions.size > 0) {
     const actx: WalkContext = {
       target: tsxTarget,
@@ -263,7 +264,10 @@ export function renderCustomLayoutPage(
       userComponents: new Map(),
       usedUserComponents: new Set(),
       usesChildren: false,
-      apiParamNames: new Map(),
+      // An action body may await a remote op (`match await Sales.Order.op()` —
+      // async-actions-and-effects.md Stage 2), so the api-param handles must be
+      // in scope for `tryDetectApiHook` to recognise the mutation + hoist it.
+      apiParamNames: new Map(apiParams.map((p) => [p.name, p.apiName])),
       usedApiHooks,
       lambdaParams: new Map(),
       shellLocals: new Set(),
@@ -290,6 +294,9 @@ export function renderCustomLayoutPage(
         .join("\n")}\n`;
     }
     usesStateForActions = actx.usesState;
+    // An awaited op mutation hoists `use<Op><Agg>(id)` off the route id, so the
+    // shell must destructure `id` from `useParams` even if the body never did.
+    usesRouteIdForActions = actx.usesRouteId;
   }
   // Render the title expression through emitExpr
   // (sharing the body's tracking state so the shell destructures
@@ -342,6 +349,7 @@ export function renderCustomLayoutPage(
   }
   const effectiveUsesState =
     usesState || usesStateForTitle || usesStateForDerived || usesStateForActions;
+  const effectiveUsesRouteId = usesRouteId || usesRouteIdForActions;
 
   const mantineImport = renderImportLines(imports, srcImportPrefix);
   // One default-import line per user component
@@ -418,8 +426,8 @@ export function renderCustomLayoutPage(
   const hasParams = params.length > 0;
   // The magic route `id` (`byId(id)`) binds from `useParams` too, even when
   // the page declares no params — synthesize an `id: string` route param.
-  const routeIdParam = usesRouteId && !paramNames.has("id");
-  const needsUseParams = hasParams || usesRouteId;
+  const routeIdParam = effectiveUsesRouteId && !paramNames.has("id");
+  const needsUseParams = hasParams || effectiveUsesRouteId;
   const routerSpecifiers: string[] = [];
   if (needsUseParams) routerSpecifiers.push("useParams");
   if (usesNavigate || form.usesNavigate) routerSpecifiers.push("useNavigate");
@@ -455,7 +463,7 @@ export function renderCustomLayoutPage(
   if (routeIdParam) typeEntries.push("id: string");
   const paramsType = needsUseParams ? `<{ ${typeEntries.join("; ")} }>` : "";
   const usedSet = new Set([...usedParams]);
-  if (usesRouteId) usedSet.add("id");
+  if (effectiveUsesRouteId) usedSet.add("id");
   const used = [...usedSet].sort();
   const paramsLine =
     used.length > 0

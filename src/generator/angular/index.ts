@@ -179,6 +179,11 @@ export function generateAngularForContexts(
             pack,
             authUi,
             nameCtx: pageCtx,
+            apiParams: ui?.apiParams ?? [],
+            aggregatesByName: aggregatesIRByName,
+            bcByAggregate,
+            workflowsByName,
+            bcByWorkflow,
           });
     }
     out.set(`src/app/pages/${slug}.component.ts`, content);
@@ -270,7 +275,7 @@ export function generateAngularForContexts(
   for (const { agg } of aggregates) {
     out.set(
       `src/api/${lowerFirst(agg.name)}.ts`,
-      buildAngularApiModule(agg, repoByAggregate.get(agg.name)),
+      buildAngularApiModule(agg, repoByAggregate.get(agg.name), bcByAggregate.get(agg.name)),
     );
   }
   // Views / workflows API modules — the Angular-native sibling of the

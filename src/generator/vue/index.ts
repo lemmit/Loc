@@ -303,6 +303,11 @@ export function generateVueForContexts(
         externComponents: externComponentNames,
         authUi,
         stores: ui.stores,
+        // Stage 2 (`match await <op>()`): the detection context a page action
+        // needs to recognise + hoist an awaited op's vue-query mutation.
+        apiParams: ui.apiParams,
+        aggregatesByName: aggregatesIRByName,
+        bcByAggregate,
       }),
     );
   }

@@ -9,12 +9,14 @@ import type {
   StateFieldIR,
   StoreIR,
   TypeIR,
+  UiApiParamIR,
 } from "../../../ir/types/loom-ir.js";
 import { typeUsesMoney } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { renderGateExpr } from "../../_frontend/gate-expr.js";
 import type { ImportSpec, LoadedPack } from "../../_packs/loader.js";
 import { storeHookName, storeMemberLocal } from "../../_walker/js-target-helpers.js";
+import type { ApiHookUse } from "../../_walker/walker-core.js";
 import {
   closeUsedActions,
   emitExpr,
@@ -80,6 +82,18 @@ export interface VuePageShellInput {
    *  wiring needs to bind each used member (a field → reactive `computed`,
    *  an action → a bound callable).  Empty when the ui declares no stores. */
   stores?: readonly StoreIR[];
+  /** The ui's `api X: Y` bindings — the api-param handles a page action may
+   *  await (`match await Sales.Order.op()` — async-actions-and-effects.md
+   *  Stage 2).  Threaded into the action-handler walk so `tryDetectApiHook`
+   *  recognises the awaited op + hoists its vue-query mutation. */
+  apiParams?: readonly UiApiParamIR[];
+  /** Aggregates reachable from this UI's deployable — the awaited op's
+   *  aggregate is looked up here (its `operation` params build the request
+   *  payload; its `or`-union response type names the discriminated DTO). */
+  aggregatesByName?: ReadonlyMap<string, AggregateIR>;
+  /** Bounded-context map keyed by aggregate name — classifies the awaited
+   *  union's error variant (via the owning context's `error` payloads). */
+  bcByAggregate?: ReadonlyMap<string, BoundedContextIR>;
 }
 
 export function renderVuePage(input: VuePageShellInput): string {
@@ -121,21 +135,6 @@ export function renderVuePage(input: VuePageShellInput): string {
       if (state.idExpr.includes(p)) idExprParams.add(p);
     }
   }
-
-  // The magic route `id` (`byId(id)`) binds from `route.params.id` too, when
-  // the body referenced it and the route declares an `:id` segment.  (Unlike
-  // declared params, the `:id` segment isn't in `routeParams`, so check the
-  // route string.)
-  const routeHasId = /:id\b/.test(page.route ?? "");
-  const routeIdParam = result.usesRouteId && routeHasId ? ["id"] : [];
-  const usedParams = [
-    ...new Set([
-      ...[...result.usedParams].filter((p) => routeParams.includes(p)),
-      ...idExprParams,
-      ...routeIdParam,
-    ]),
-  ];
-  const needsRoute = usedParams.length > 0;
 
   // Api-composable hoists, deduped by var name; `reactive()` wrapper
   // per the header note.
@@ -185,8 +184,45 @@ export function renderVuePage(input: VuePageShellInput): string {
     stateNames,
     repointDerived,
     result.usedStores,
+    {
+      // An action may `match await Sales.Order.op()` (Stage 2) — thread the
+      // api-param handles + aggregate/context maps so the awaited op is detected
+      // and its vue-query mutation hoisted (registered into the shared
+      // `result.usedApiHooks`, drained by the hoist loop below).
+      apiParamNames: new Map((input.apiParams ?? []).map((p) => [p.name, p.apiName])),
+      aggregatesByName: input.aggregatesByName,
+      bcByAggregate: input.bcByAggregate,
+      usedApiHooks: result.usedApiHooks,
+    },
   );
   const actionLines = actionResult.lines;
+
+  // The magic route `id` (`byId(id)`) binds from `route.params.id` when the
+  // body — OR an action that awaited an instance op (Stage 2) — referenced it
+  // and the route declares an `:id` segment.  (Unlike declared params, the
+  // `:id` segment isn't in `routeParams`, so check the route string.)
+  const routeHasId = /:id\b/.test(page.route ?? "");
+  const usesRouteId = result.usesRouteId || actionResult.usesRouteId;
+  const routeIdParam = usesRouteId && routeHasId ? ["id"] : [];
+  const usedParams = [
+    ...new Set([
+      ...[...result.usedParams].filter((p) => routeParams.includes(p)),
+      ...idExprParams,
+      ...routeIdParam,
+    ]),
+  ];
+  const needsRoute = usedParams.length > 0;
+  // Reification imports the action walk resolved (`ApiError`, the op's union
+  // response type) — route them into the api-import block, which the shell
+  // emits (and depth-adjusts each `../api/*` key on drain).  `result.imports`
+  // is the walker's own sink and is filtered for relative specifiers, so these
+  // must land here instead.
+  for (const [from, names] of actionResult.imports) {
+    if (names.size === 0) continue;
+    const set = apiImports.get(from) ?? new Set<string>();
+    for (const n of names) set.add(n);
+    apiImports.set(from, set);
+  }
 
   // Store wiring (Stage 5) — computed AFTER the action/derived walks so a
   // store member referenced only from a handler body is recorded.  One hook
@@ -1191,6 +1227,22 @@ function buildDerivedLines(
  *  arrow needs the explicit `.value` deref/assign).  The negative-lookahead
  *  in `repointToScript` keeps already-`.value` refs from double-pointing, so
  *  a `step := step + 1` write renders `step.value = step.value + 1`. */
+/** Detection context an action body needs to lower a `variant-match`
+ *  (`match await <op>() { … }` — async-actions-and-effects.md Stage 2): the
+ *  api-param handles + aggregate/context maps `tryDetectApiHook` and the error-
+ *  variant classifier consult, plus the SHARED sinks the resolved mutation
+ *  hook + reification imports must land in (the page shell hoists the hook from
+ *  `usedApiHooks` and routes `imports` into its api-import block).  All optional
+ *  — a body with no awaited effect (the Stage-1 case, and every component body)
+ *  passes none and behaves exactly as before. */
+interface ActionWalkCtx {
+  apiParamNames?: Map<string, string>;
+  usedApiHooks?: Map<string, ApiHookUse>;
+  imports?: Map<string, Set<string>>;
+  aggregatesByName?: ReadonlyMap<string, AggregateIR>;
+  bcByAggregate?: ReadonlyMap<string, BoundedContextIR>;
+}
+
 function buildActionLines(
   actions: readonly ActionIR[],
   used: ReadonlySet<string>,
@@ -1199,9 +1251,21 @@ function buildActionLines(
   stateNames: ReadonlySet<string>,
   repointToScript: (s: string) => string,
   usedStores?: Map<string, Set<string>>,
-): { lines: string[]; usesState: boolean } {
+  ctxOpts: ActionWalkCtx = {},
+): {
+  lines: string[];
+  usesState: boolean;
+  usesRouteId: boolean;
+  imports: Map<string, Set<string>>;
+} {
   const lines: string[] = [];
   let usesState = false;
+  let usesRouteId = false;
+  // Shared across every action's handler walk: the mutation hooks a
+  // `variant-match` registers (the shell hoists them from here) and the
+  // reification imports (`ApiError`, the op's union response type) it needs.
+  const usedApiHooks = ctxOpts.usedApiHooks ?? new Map<string, ApiHookUse>();
+  const imports = ctxOpts.imports ?? new Map<string, Set<string>>();
   // Transitively include any sibling action a used action's body calls
   // (Proposal A Stage 1, Fix 1) so its handler emits too.
   const effectiveUsed = closeUsedActions(actions, used);
@@ -1210,7 +1274,7 @@ function buildActionLines(
     const param = action.params[0]?.name;
     const baseCtx: WalkContext = {
       target: vueTarget,
-      imports: new Map(),
+      imports,
       pack,
       paramNames,
       usedParams: new Set(),
@@ -1225,12 +1289,12 @@ function buildActionLines(
       userComponents: new Map(),
       usedUserComponents: new Set(),
       usesChildren: false,
-      apiParamNames: new Map(),
-      usedApiHooks: new Map(),
+      apiParamNames: ctxOpts.apiParamNames ?? new Map(),
+      usedApiHooks,
       lambdaParams: new Map(),
       shellLocals: new Set(),
-      aggregatesByName: new Map(),
-      bcByAggregate: new Map(),
+      aggregatesByName: ctxOpts.aggregatesByName ?? new Map(),
+      bcByAggregate: ctxOpts.bcByAggregate ?? new Map(),
       workflowsByName: new Map(),
       bcByWorkflow: new Map(),
       formOfs: [],
@@ -1247,9 +1311,14 @@ function buildActionLines(
       : baseCtx;
     const body = action.body.map((s) => repointToScript(emitStmt(s, handlerCtx))).join(" ");
     if (handlerCtx.usesState) usesState = true;
-    lines.push(`const ${action.name} = (${param ?? ""}) => { ${body} };`);
+    // An awaited op mutation hoists `use<Op><Agg>(id)` off the route id, so the
+    // shell must bind `id` from `route.params` even if the body never did.
+    if (handlerCtx.usesRouteId) usesRouteId = true;
+    // A body that awaits a remote effect (`variant-match`) must be `async`.
+    const isAsync = action.body.some((s) => s.kind === "variant-match");
+    lines.push(`const ${action.name} = ${isAsync ? "async " : ""}(${param ?? ""}) => { ${body} };`);
   }
-  return { lines, usesState };
+  return { lines, usesState, usesRouteId, imports };
 }
 
 /** True when a form state renders the pack's default-submit body — an

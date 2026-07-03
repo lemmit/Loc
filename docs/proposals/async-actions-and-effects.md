@@ -1,13 +1,24 @@
 # Async actions & effects — `await`, `spawn`, and failure
 
-> Status: **PROPOSED (design note).** Split out of
-> [`named-actions-and-stores.md`](named-actions-and-stores.md) ("Proposal A").
-> This note covers how an action body invokes **remote** effects — server
-> commands/queries that can succeed or fail: the explicit `await` / `spawn`
-> markers, success-by-sequencing (no `then`), `onError` failure arms, and
-> `async` action composition. It **depends on Proposal A, Stage 1** (named
-> actions give the markers a body to live in) and supplies the async-outcome
-> axis Proposal A deliberately leaves open. Nothing is implemented.
+> Status: **PARTIAL — Stage 2 first cut (`await` + `match`) SHIPPED** (2026-07,
+> frontend-only). `await <op>()` in an action body is now a match subject
+> (`match await placeOrder(draft) { Placed o => … Failed e => … }`): grammar
+> `AwaitExpr` + the effect-form `MatchStmt`, the `variant-match` StmtIR + `awaited`
+> marker, lowering, and a `renderVariantMatch` `WalkerTarget` seam rendering the
+> async envelope (await the mutation, **reify the thrown ProblemDetails error into
+> the error variant**, `switch` on the union tag) on **all four JS frontends**
+> (React/Vue/Svelte/Angular) — the union-returning mutation hook now returns the
+> parsed union. A bare (unmarked) remote mutating call in an action body is a
+> **warning** `loom.missing-effect-marker` (was the hard `loom.action-requires-await`),
+> the lint-first ramp (§7 step 1). **HEEx is a pinned follow-up** — LiveView's
+> server-side async (`handle_event` → `case` on the tagged tuple) diverges, so the
+> Phoenix walker emits a reviewed no-op parity-gap marker (frozen by
+> `test/generator/elixir/heex-variant-match-await.test.ts`). **Remaining:** the
+> `await`-required flip (step 2), `spawn` / `onError` / `attempt {}` sugar (step 3),
+> `async`-keyword composition (step 4), and multi-error-variant reification. Split
+> out of [`named-actions-and-stores.md`](named-actions-and-stores.md) ("Proposal A")
+> because the async surface **changes call semantics** (a remote call must be
+> marked) — it depends on Proposal A, Stage 1.
 >
 > **Related notes.** The `Result` model here builds on the shipped error family —
 > [`exception-less.md`](exception-less.md) (errors-as-data, per-error `httpStatus`)

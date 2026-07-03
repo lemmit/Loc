@@ -508,6 +508,7 @@ function renderStatement(
     case "add":
     case "remove":
     case "emit":
+    case "variant-match":
       return `    # unreachable: ${s.kind} rejected by the domain-service validator floor`;
   }
 }

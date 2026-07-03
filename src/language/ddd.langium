@@ -1434,7 +1434,11 @@ Property:
         // (`store Cart { … }`); soft in property position so a pre-existing
         // domain field named `store` (`Receipt { store: string }`,
         // persistence-shapes.ddd) keeps parsing (named-actions-and-stores.md §3).
-        | 'store')
+        | 'store'
+        // `await` is hard only as the match-subject marker
+        // (`match await op() { … }`, async-actions-and-effects.md Stage 2);
+        // soft in property position so a domain field named `await` parses.
+        | 'await')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -1560,6 +1564,10 @@ LooseName returns string:
     | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
     | 'design' | 'targets'
     | 'bind' | 'api'
+    // `await` is hard only as the `match await op()` subject marker
+    // (async-actions-and-effects.md Stage 2); soft everywhere else so a
+    // field / param named `await` keeps parsing.
+    | 'await'
     // `by` is a hard keyword only in the `on(...) by <expr>` reactor clause
     // (workflow-and-applier.md A2-S3); admit it as a soft keyword in
     // field / parameter / object-field / emit-field name position so
@@ -1751,7 +1759,29 @@ Statement:
   | ForStmt
   | IfLetStmt
   | ReturnStmt
+  // A `match SUBJECT { Variant b => <stmts> }` used for its EFFECTS — the
+  // statement form of the match, whose arms run statements (`state := …`,
+  // `navigate(…)`) rather than yield a value.  Introduced for
+  // `match await op() { … }` in a frontend action body
+  // (async-actions-and-effects.md Stage 2); keyword-led, so no ambiguity with
+  // `AssignOrCallStmt` (which starts with a NameRef).
+  | MatchStmt
   | AssignOrCallStmt;
+
+// The effect-form match (Stage 2).  Distinct from the value-yielding `MatchExpr`
+// (its arms are `=> Expression`): here each arm runs a statement block, so
+// state-writes and multi-statement bodies parse.  Reuses `MatchSubject` (so the
+// subject may be `await <call>`) and `TypeAtom` for the variant tag.  Arm bodies
+// are a braced block or a single unbraced statement (`{` unambiguously opens a
+// block — no statement starts with `{`).
+MatchStmt:
+    'match' subject=MatchSubject '{'
+        (varArms+=VariantStmtArm (','? varArms+=VariantStmtArm)* ','?)?
+        ('else' '=>' ('{' elseBody+=Statement* '}' | elseBody+=Statement) ','?)?
+    '}';
+
+VariantStmtArm:
+    varType=TypeAtom (binding=ID)? '=>' ('{' body+=Statement* '}' | body+=Statement);
 
 // `if let <var> = <source> { <then> } else { <else> }` — bind an optional
 // retrieval result (`Repo.find(<Criterion>)`, criterion.md use site 3) and
@@ -1920,7 +1950,18 @@ MatchArm:
 // side-effecting call" constraint is enforced by the validator
 // (`loom.match-subject-not-simple`), not the grammar, so a call subject
 // gets a friendly diagnostic rather than a raw parse error.
+//
+// EXCEPTION — an `await`-marked call (`match await placeOrder(draft) { … }`).
+// A frontend action may discriminate the `or`-union result of a remote op by
+// awaiting it in the subject position (async-actions-and-effects.md, Proposal B
+// Stage 2).  `await <scrutinee>` wraps it in an `AwaitExpr`; this is the only
+// place a call subject is admitted (bare, unmarked call subjects stay rejected).
+// `await` is a soft keyword (see `LooseName`) so a field named `await` parses.
 MatchSubject infers Expression:
+      {infer AwaitExpr} 'await' inner=MatchScrutinee
+    | MatchScrutinee;
+
+MatchScrutinee infers Expression:
     NameRef ({infer PostfixChain.head=current} suffixes+=PostfixSuffix+)?;
 
 // One variant-match arm: a union variant type, an optional binding

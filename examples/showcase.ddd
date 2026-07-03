@@ -201,6 +201,14 @@ system DevPlatform {
                     createdAt := now()
                 }
 
+                // Union-returning mutating operation (exception-less) — the
+                // subject a frontend `match await` statement narrows (Stage 2,
+                // async-actions-and-effects.md).  Always returns the error
+                // variant here; the success arm rides the declared union type.
+                operation reserve(): Project or ProjectNotFound {
+                    return ProjectNotFound { resource: name }
+                }
+
                 entity Pipeline {
                     label: string
                     runCount: int
@@ -549,6 +557,15 @@ system DevPlatform {
                 draftName: string = ""
                 level: int = 1
             }
+            // Named async action driving a `match await` over a union-returning
+            // remote op (Stage 2) — exercises AwaitExpr + MatchStmt +
+            // VariantStmtArm; each arm reduces the outcome to page state.
+            action reserveNow() {
+                match await Projects.Project.reserve() {
+                    Project p => { draftName := p.name }
+                    else      => { draftName := "unavailable" }
+                }
+            }
             body: Container {
                 Grid {
                     cols: [2, 1],
@@ -575,7 +592,8 @@ system DevPlatform {
                                 PasswordField { "Token" },
                                 Toggle { "Editing", bind: editing },
                                 Anchor { "Docs", to: "/docs" },
-                                Button { "Save", to: "/projects" }
+                                Button { "Save", to: "/projects" },
+                                Button { "Reserve", onClick: reserveNow }
                             }
                         }
                     }

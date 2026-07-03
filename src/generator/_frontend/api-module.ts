@@ -5,7 +5,7 @@ import {
   PAGED_DEFAULT_PAGE_SIZE,
   pagedReturn,
 } from "../../ir/stdlib/generics.js";
-import { unionInstanceName } from "../../ir/stdlib/unions.js";
+import { unionInstanceName, unionReturn, variantTag } from "../../ir/stdlib/unions.js";
 import {
   type AggregateIR,
   aggregateUsesMoney,
@@ -198,6 +198,27 @@ export function buildApiModule(
   // exist today; gated at IR validation).
   lines.push("");
 
+  // Union-returning OPERATION response DTOs (async-actions-and-effects.md
+  // Stage 2).  Unlike a union find, an `operation foo(): X or Err` serves the
+  // FULL tagged union at 200 (the domain method returns `{ type, … }`, the
+  // route `c.json(result, 200)`s it) — so a frontend action awaiting it and
+  // discriminating with `match` needs the discriminated-union TYPE.  The client
+  // never receives the error variant at 200 (it's intercepted into a
+  // ProblemDetails non-2xx and reified from the thrown `ApiError` at the call
+  // site), but the type carries every arm so the `switch (result.type)` narrows.
+  let emittedUnionResponse = false;
+  for (const op of agg.operations.filter((o) => o.visibility === "public")) {
+    if (!op.returnType) continue;
+    const u = unionReturn(op.returnType);
+    if (!u) continue;
+    lines.push(...emitOperationUnionResponse(op.name, agg, u.variants, ctx));
+    emittedUnionResponse = true;
+  }
+  // Only separate the union-response block from the Hooks section when one was
+  // actually emitted — an aggregate with no `or`-union op stays byte-identical
+  // to its pre-Stage-2 output (guards the baseline-fixture equivalence gate).
+  if (emittedUnionResponse) lines.push("");
+
   // ---------------------------------------------------------------------
   // Hooks
   // ---------------------------------------------------------------------
@@ -266,11 +287,20 @@ export function buildApiModule(
     // URL segment from routeSlug (D-URLSTYLE); the hook name + request
     // type stay keyed on op.name.
     const opSnake = snake(op.routeSlug ?? op.name);
+    const u = op.returnType ? unionReturn(op.returnType) : null;
     lines.push(`export function use${upperFirst(op.name)}${agg.name}(id: string) {`);
     lines.push(`  const qc = useQueryClient();`);
     lines.push(`  return useMutation({`);
     lines.push(`    mutationFn: async (input: ${upperFirst(op.name)}${agg.name}Request) => {`);
-    lines.push(`      await api.post(\`/${tag}/\${id}/${opSnake}\`, input);`);
+    if (u) {
+      // Union-returning op: parse + RETURN the tagged success variant so the
+      // awaiting action's `match` arm carries the payload (the error variant
+      // never reaches 200 — it's a thrown non-2xx reified at the call site).
+      lines.push(`      const r = await api.post(\`/${tag}/\${id}/${opSnake}\`, input);`);
+      lines.push(`      return ${upperFirst(op.name)}${agg.name}Response.parse(r);`);
+    } else {
+      lines.push(`      await api.post(\`/${tag}/\${id}/${opSnake}\`, input);`);
+    }
     lines.push(`    },`);
     lines.push(`    onSuccess: () => {`);
     lines.push(`      qc.invalidateQueries({ queryKey: ["${tag}", id] });`);
@@ -354,6 +384,48 @@ export function buildApiModule(
 // ---------------------------------------------------------------------------
 // Schema emission helpers
 // ---------------------------------------------------------------------------
+
+/** The `<Op><Agg>Response` discriminated-union DTO for a union-returning
+ *  operation (async-actions-and-effects.md Stage 2).  Each variant is tagged on
+ *  the wire `type` discriminator (the cross-backend P4 convention): a success
+ *  entity/value-object extends its response schema with the `type` literal; an
+ *  error payload becomes a `z.object` of its own fields (never parsed at 200 —
+ *  it exists so the arm binding + reification cast typecheck).  Emitted after
+ *  the aggregate's response schemas so `<Agg>Response.extend(…)` resolves. */
+export function emitOperationUnionResponse(
+  opName: string,
+  agg: AggregateIR,
+  variants: TypeIR[],
+  ctx: BoundedContextIR,
+): string[] {
+  const name = `${upperFirst(opName)}${agg.name}Response`;
+  const member = (v: TypeIR): string => {
+    const tag = variantTag(v);
+    const literal = `type: z.literal(${JSON.stringify(tag)})`;
+    if (v.kind === "entity") {
+      const payload = ctx.payloads.find((p) => p.name === v.name);
+      if (payload?.kind === "error") {
+        // Error variant — a `z.object` of the payload's own fields plus the tag.
+        const fields = payload.fields.map(
+          (f) => `${f.name}: ${zodForResponse(f.type, !!f.optional)}`,
+        );
+        return `z.object({ ${[literal, ...fields].join(", ")} })`;
+      }
+      // Success entity (typically the aggregate) — extend its response schema.
+      return `${v.name}Response.extend({ ${literal} })`;
+    }
+    if (v.kind === "valueobject") return `${v.name}Schema.extend({ ${literal} })`;
+    // Scalar / id / none variant — the tagged `{ type, value? }` carrier.
+    if (v.kind === "none") return `z.object({ ${literal} })`;
+    return `z.object({ ${literal}, value: ${zodForResponse(v, false)} })`;
+  };
+  return [
+    `export const ${name} = z.discriminatedUnion("type", [`,
+    ...variants.map((v) => `  ${member(v)},`),
+    `]);`,
+    `export type ${name} = z.infer<typeof ${name}>;`,
+  ];
+}
 
 function emitEnumSchema(e: EnumIR): string[] {
   const values = e.values.map((v) => `"${v}"`).join(", ");

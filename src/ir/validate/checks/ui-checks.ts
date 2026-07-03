@@ -128,8 +128,9 @@ interface BodyCheckCtx {
   /** True while walking inside an action body (Fix 4/5).  Drives the
    *  action-body call checks: a bare call that lowered to `private-operation`
    *  is an unresolved action reference here (no such backend op exists on a
-   *  frontend surface), and a remote/mutating op call needs an `await` marker
-   *  Proposal B hasn't shipped (`loom.action-requires-await`). */
+   *  frontend surface), and a BARE remote/mutating op call wants the `await`
+   *  effect marker (`loom.missing-effect-marker` — async-actions-and-effects.md
+   *  Stage 2; a `match await` subject is accepted). */
   inActionBody?: boolean;
 }
 
@@ -184,7 +185,7 @@ function checkBody(e: ExprIR | undefined, ctx: BodyCheckCtx, diags: LoomDiagnost
       checkMethodCallReceiver(e, ctx, diags);
       // Fix 5 — a remote/mutating backend command in action-body position
       // needs an `await` marker (Proposal B) that doesn't exist yet.
-      if (ctx.inActionBody) checkActionRequiresAwait(e, ctx, diags);
+      if (ctx.inActionBody) checkMissingEffectMarker(e, ctx, diags);
       checkBody(e.receiver, ctx, diags);
       for (const a of e.args) checkBody(a, ctx, diags);
       return;
@@ -270,6 +271,16 @@ function checkStmt(
         source: ctx.where,
       });
     }
+  }
+  // Effect-form variant-`match` (async-actions-and-effects.md Stage 2): walk the
+  // awaited subject (its `awaited` flag makes the effect-marker check accept it)
+  // and recurse each arm / else body so nested calls are still checked.
+  if (s.kind === "variant-match") {
+    const vm = s as unknown as Extract<StmtIR, { kind: "variant-match" }>;
+    checkBody(vm.subject, ctx, diags);
+    for (const arm of vm.arms) for (const b of arm.body) checkStmt(b, ctx, diags);
+    for (const b of vm.elseBody ?? []) checkStmt(b, ctx, diags);
+    return;
   }
   for (const key of ["expr", "value"] as const) {
     const v = s[key];
@@ -462,23 +473,30 @@ function checkMethodCallReceiver(
   });
 }
 
-/** Fix 5 — `loom.action-requires-await`.  An action body MUST NOT contain an
- *  inline call that lowers to a REMOTE, MUTATING backend command (a cross-
- *  aggregate `Sales.Order.confirm(o)` / `Order.confirm(o)` in action-body
- *  position): such an effect needs the `await` marker Proposal B will add, which
- *  doesn't exist yet.  CONSERVATIVE — only flags a `method-call` we can
- *  positively identify as an aggregate-rooted mutating command:
- *    Pattern E:  `Order.confirm(o)`            — `method-call(ref:<Aggregate>, op)`
- *    Pattern B:  `api.Order.confirm(o)`        — `method-call(member(ref:apiParam, agg), op)`
+/** `loom.missing-effect-marker` (async-actions-and-effects.md Stage 2, was
+ *  `loom.action-requires-await`).  A BARE (unmarked) call in action-body
+ *  position that lowers to a REMOTE, MUTATING backend command
+ *  (`Sales.Order.placeOrder(o)` / `Order.placeOrder(o)`) has an invisible async
+ *  boundary — it should be `await`-marked so its `Result` is handled by a
+ *  `match`.  Stage 2 makes this a WARNING (it becomes an error in Stage 2b once
+ *  the codemod has run); an `await`-marked call (the awaited subject of a
+ *  variant-`match`) is now ACCEPTED and skipped here.  CONSERVATIVE — only flags
+ *  a `method-call` we can positively identify as an aggregate-rooted mutating
+ *  command:
+ *    Pattern E:  `Order.placeOrder(o)`         — `method-call(ref:<Aggregate>, op)`
+ *    Pattern B:  `api.Order.placeOrder(o)`     — `method-call(member(ref:apiParam, agg), op)`
  *  whose `op` resolves to a public mutate-kind operation (or a create/destroy)
  *  on the aggregate.  Reads (`byId`, finders), sibling-action calls, pure
  *  helpers, and view-effects (`navigate`/`toast`) are deliberately NOT flagged
  *  (the await-floor boundary — see the report). */
-function checkActionRequiresAwait(
+function checkMissingEffectMarker(
   call: Extract<ExprIR, { kind: "method-call" }>,
   ctx: BodyCheckCtx,
   diags: LoomDiagnostic[],
 ): void {
+  // An `await`-marked call (the subject of a `match await <op>() { … }`) is the
+  // explicit, handled form — accept it (async-actions-and-effects.md Stage 2).
+  if (call.awaited) return;
   let aggName: string | undefined;
   // Pattern E: receiver is a bare aggregate ref.
   if (call.receiver.kind === "ref" && ctx.aggByName.has(call.receiver.name)) {
@@ -503,13 +521,13 @@ function checkActionRequiresAwait(
     (agg.destroys ?? []).some((o) => o.name === op);
   if (!isMutating) return;
   diags.push({
-    severity: "error",
-    code: "loom.action-requires-await",
+    severity: "warning",
+    code: "loom.missing-effect-marker",
     message:
       `${ctx.where}: action body calls \`${aggName}.${op}(…)\`, a remote mutating command on ` +
-      `aggregate '${aggName}'. A frontend action can't inline a remote effect yet — it needs an ` +
-      `\`await\` marker (Proposal B), which isn't available. Move the command to a form's \`onSubmit\` ` +
-      `(\`OperationForm\`/\`Form\`), or wait for the await marker.`,
+      `aggregate '${aggName}', with no effect marker — it has an invisible async boundary. Mark it ` +
+      `\`match await ${aggName}.${op}(…) { … }\` so its Result is handled (async-actions-and-effects.md ` +
+      `Stage 2). This is a warning during the Stage-2 ramp and becomes an error in Stage 2b.`,
     source: ctx.where,
   });
 }

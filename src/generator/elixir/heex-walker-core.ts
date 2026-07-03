@@ -1285,6 +1285,13 @@ function renderStmt(stmt: StmtIR, ctx: WalkContext): string {
       const e = renderExpr(stmt.value, { ...ctx, position: "handler" });
       return `|> tap(fn _ -> ${e} end)`;
     }
+    case "variant-match":
+      // `match await op() { … }` (async-actions-and-effects.md Stage 2).  On
+      // LiveView the async boundary is server-side (`handle_event` → context
+      // call → `case` on the tagged tuple), not the client-side await the JS
+      // frontends emit — a separate Phoenix follow-up (see heex-parity.test.ts).
+      // Emit a reviewed no-op marker rather than mis-render it.
+      return `|> tap(fn _ -> :ok end) # match await: LiveView server-side async not yet emitted (HEEx parity gap, Stage 2)`;
   }
 }
 

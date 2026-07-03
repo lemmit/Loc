@@ -40,6 +40,7 @@ import type {
   RenderPosition,
   StateRef,
   TargetHookUse,
+  VariantMatchSpec,
   WalkerTarget,
 } from "../../_walker/target.js";
 
@@ -331,5 +332,59 @@ export const tsxTarget: WalkerTarget = {
     renderedArgs: string,
   ): string {
     return `${ref.local}(${renderedArgs})`;
+  },
+
+  /** Render a `variant-match` (async-actions-and-effects.md Stage 2) as
+   *  React's async envelope: `await` the hoisted mutation (`mutateAsync`),
+   *  reify a caught `ApiError` into the union's error variant (its `type`
+   *  overwritten server-side by the ProblemDetails URI, re-stamped here to the
+   *  statically-known error tag), then a discriminant `switch (result.type)`
+   *  binding each arm's narrowed local.  walker-core resolved every piece —
+   *  this only assembles the TSX skeleton. */
+  renderVariantMatch(spec: VariantMatchSpec): string {
+    const resultType = spec.resultType ?? "{ type: string }";
+    const mutate = spec.mutationVar
+      ? `${spec.mutationVar}.mutateAsync(${spec.mutateArgs})`
+      : // Degenerate: no detected remote op (walker-core still delegates so the
+        // statement is never dropped) — leave a typed placeholder await.
+        `Promise.reject(new Error("no remote op for variant-match"))`;
+    const lines: string[] = [];
+    lines.push("{");
+    if (spec.errorTag !== undefined) {
+      // Reify the intercepted error variant: the backend maps it to an RFC-7807
+      // ProblemDetails whose `type` is the error URI, but the variant's own
+      // fields survive — so spread the body and re-stamp the known tag.
+      lines.push(`  let result: ${resultType};`);
+      lines.push(`  try {`);
+      lines.push(`    result = await ${mutate};`);
+      lines.push(`  } catch (e) {`);
+      lines.push(`    if (e instanceof ApiError) {`);
+      lines.push(
+        `      result = { ...(e.body as Record<string, unknown>), type: ${JSON.stringify(spec.errorTag)} } as ${resultType};`,
+      );
+      lines.push(`    } else {`);
+      lines.push(`      throw e;`);
+      lines.push(`    }`);
+      lines.push(`  }`);
+    } else {
+      lines.push(`  const result = await ${mutate};`);
+    }
+    lines.push(`  switch (result.type) {`);
+    for (const arm of spec.arms) {
+      lines.push(`    case ${JSON.stringify(arm.tag)}: {`);
+      if (arm.binding) lines.push(`      const ${arm.binding} = result;`);
+      for (const s of arm.body) lines.push(`      ${s}`);
+      lines.push(`      break;`);
+      lines.push(`    }`);
+    }
+    if (spec.elseBody) {
+      lines.push(`    default: {`);
+      for (const s of spec.elseBody) lines.push(`      ${s}`);
+      lines.push(`      break;`);
+      lines.push(`    }`);
+    }
+    lines.push(`  }`);
+    lines.push("}");
+    return lines.join("\n");
   },
 };

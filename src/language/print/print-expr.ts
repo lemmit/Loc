@@ -49,6 +49,8 @@ export function printExpr(node: Expression): string {
       return `(${printExpr(node.inner)})`;
     case "UnaryExpr":
       return `${node.op}${printExpr(node.operand)}`;
+    case "AwaitExpr":
+      return `await ${printExpr(node.inner)}`;
     case "BinaryChain":
       return printBinaryChain(node);
     case "TernaryExpr":
@@ -179,7 +181,7 @@ function printMatch(node: Extract<Expression, { $type: "MatchExpr" }>): string {
  *  (rather than imported from print-structural) to avoid an import cycle.
  *  Variant atoms are named carriers / id refs / primitives plus the postfix
  *  ctor / array / optional markers, which is all a union variant may be. */
-function printTypeAtomLite(node: import("../generated/ast.js").TypeAtom): string {
+export function printTypeAtomLite(node: import("../generated/ast.js").TypeAtom): string {
   const base = node.base;
   let s: string;
   switch (base.$type) {
