@@ -4,6 +4,7 @@ import {
   forApiRead,
   wireCreateDefault,
 } from "../../../ir/enrich/wire-projection.js";
+import { unionInstanceName } from "../../../ir/stdlib/unions.js";
 import type {
   AggregateIR,
   DeployableIR,
@@ -48,7 +49,6 @@ import {
   opWorkflowInstanceById,
   opWorkflowInstances,
 } from "../../../ir/util/openapi-ids.js";
-import { unionInstanceName } from "../../../ir/stdlib/unions.js";
 import { defaultErrorStatus } from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { findUnionSpec, unionMembers } from "../../_payload/union-wire.js";
