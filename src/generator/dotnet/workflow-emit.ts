@@ -282,6 +282,12 @@ function analyseStmts(
       } else if (st.kind === "for-each") {
         for (const sv of st.savesPerIteration) repos.set(sv.repoName, sv.aggName);
         walk(st.body);
+      } else if (st.kind === "if-let") {
+        repos.set(st.repoName, st.aggName);
+        for (const sv of st.savesInThen) repos.set(sv.repoName, sv.aggName);
+        for (const sv of st.savesInElse) repos.set(sv.repoName, sv.aggName);
+        walk(st.thenBody);
+        walk(st.elseBody ?? []);
       } else if (st.kind === "op-call") {
         const agg = aggsByName.get(st.aggName);
         const op = agg?.operations.find((o) => o.name === st.op);
@@ -636,6 +642,16 @@ function analyseWorkflow(wf: WorkflowIR, aggsByName: Map<string, AggregateIR>): 
       } else if (st.kind === "for-each") {
         for (const sv of st.savesPerIteration) repos.set(sv.repoName, sv.aggName);
         walk(st.body);
+      } else if (st.kind === "if-let") {
+        // The if-let single-row lookup dereferences its repo (`Run…Async`) and
+        // saves per branch — register the repo + its branch saves and recurse
+        // both branches, else the handler references `_<repo>` without
+        // injecting it (CS0103). Mirrors `collectReadingServices`.
+        repos.set(st.repoName, st.aggName);
+        for (const sv of st.savesInThen) repos.set(sv.repoName, sv.aggName);
+        for (const sv of st.savesInElse) repos.set(sv.repoName, sv.aggName);
+        walk(st.thenBody);
+        walk(st.elseBody ?? []);
       } else if (st.kind === "op-call") {
         const agg = aggsByName.get(st.aggName);
         const op = agg?.operations.find((o) => o.name === st.op);
@@ -1073,7 +1089,12 @@ function csWorkflowStmtTarget(
       const fieldName = `_${st.repoName.charAt(0).toLowerCase() + st.repoName.slice(1)}`;
       const argList = st.args.map(renderArg).join(", ");
       const callArgs = argList.length > 0 ? `${argList}, cancellationToken` : `cancellationToken`;
-      const call = `await ${fieldName}.${upperFirst(st.method)}Async(${callArgs})`;
+      // `getById` is the built-in load, emitted on the repo as `GetByIdAsync`.
+      // A user find (`locate`, `byHandle`) is emitted WITHOUT an `Async` suffix
+      // (matching the CQRS query handler's `_repo.<Find>(...)` call convention),
+      // so don't append one or the method won't resolve (CS1061).
+      const methodName = st.method === "getById" ? "GetByIdAsync" : upperFirst(st.method);
+      const call = `await ${fieldName}.${methodName}(${callArgs})`;
       // `getById` is load-or-throw (Hono's returns non-null; the .NET
       // op-command handler guards the same way).  Guard the `Task<T?>` result
       // with `?? throw` whenever the loaded aggregate is dereferenced — a

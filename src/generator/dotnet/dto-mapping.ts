@@ -175,7 +175,24 @@ export function wireToCommandArgument(
 ): string {
   const info = wireTypeInfo(t, "request");
   if (info.isNullable) {
-    return `(${expr} is null ? null : ${wireToCommandArgument(`${expr}!`, peelNullable(t), ctx)})`;
+    // C# doesn't narrow `T?` to `T` after the `is null` test, and the
+    // null-forgiving `!` only silences the warning — the value stays nullable.
+    // Value-type targets (an id ctor, an enum, a numeric primitive) need the
+    // non-nullable backing via `.Value`; reference-typed wires (string, VO,
+    // entity) and the string-encoded primitives (money/datetime) stay as `!`.
+    // On the .NET wire every id crosses as `Guid` (a value type), so a nullable
+    // id ref is always `Guid?` → `.Value`.
+    const innerT = peelNullable(t);
+    const inner = wireTypeInfo(innerT, "request");
+    const valueWire =
+      inner.refKind === "id" ||
+      inner.refKind === "enum" ||
+      (inner.refKind === "primitive" &&
+        inner.primitive !== "string" &&
+        inner.primitive !== "money" &&
+        inner.primitive !== "datetime");
+    const unwrap = valueWire ? `${expr}!.Value` : `${expr}!`;
+    return `(${expr} is null ? null : ${wireToCommandArgument(unwrap, innerT, ctx)})`;
   }
   if (info.isCollection) {
     return `${expr}.Select(__e => ${wireToCommandArgument("__e", peelCollection(t), ctx)}).ToList()`;

@@ -63,7 +63,7 @@ export function renderAuditableInterceptor(
   const usesPrincipal =
     !!actorIdProp &&
     stamping.some(({ rules }) =>
-      rules.some((r) => r.assignments.some((a) => isCurrentUserRef(a.value))),
+      rules.some((r) => r.assignments.some((a) => referencesCurrentUser(a.value))),
     );
   const principalUsings = usesPrincipal ? [`using ${ns}.Domain.Common;`, `using ${ns}.Auth;`] : [];
 
@@ -126,6 +126,21 @@ function isCurrentUserRef(value: ExprIR): boolean {
   return value.kind === "ref" && value.refKind === "current-user";
 }
 
+/** The claim name of a `currentUser.<claim>` stamp value (`createdByRole :=
+ * currentUser.role` → `"role"`), or null when the value isn't a member access
+ * over the ambient principal.  Rendered from `RequestContext.Current` like the
+ * bare-ref case — `currentUser` is not a local in the interceptor's scope. */
+function currentUserClaim(value: ExprIR): string | null {
+  return value.kind === "member" && isCurrentUserRef(value.receiver) ? value.member : null;
+}
+
+/** Whether a stamp value reaches into the ambient principal at all — the bare
+ * `currentUser` ref or a `currentUser.<claim>` member access.  Gates the
+ * `Domain.Common` / `Auth` usings. */
+function referencesCurrentUser(value: ExprIR): boolean {
+  return isCurrentUserRef(value) || currentUserClaim(value) !== null;
+}
+
 /** Switch arm for one aggregate's stamping rules.  Body assigns per-event
  * fields on the matched entity through EF's metadata accessor via the
  * compile-checked lambda overload (`ctx.Entry(e).Property(x => x.Field)
@@ -144,10 +159,18 @@ function renderArm(
   const onCreate = rules.find((r) => r.event === "create")?.assignments ?? [];
   const onUpdate = rules.find((r) => r.event === "update")?.assignments ?? [];
 
-  const renderValue = (value: ExprIR): string =>
-    isCurrentUserRef(value) && actorIdProp
-      ? `RequestContext.Current!.CurrentUser!.${actorIdProp}`
-      : renderCsExpr(value, { thisName: argName });
+  const renderValue = (value: ExprIR): string => {
+    if (isCurrentUserRef(value) && actorIdProp) {
+      return `RequestContext.Current!.CurrentUser!.${actorIdProp}`;
+    }
+    // `currentUser.<claim>` — read the claim off the ambient principal
+    // (PascalCase property on the CurrentUser record), not an undefined local.
+    const claim = currentUserClaim(value);
+    if (claim) {
+      return `RequestContext.Current!.CurrentUser!.${upperFirst(claim)}`;
+    }
+    return renderCsExpr(value, { thisName: argName });
+  };
   // EF metadata write through the compile-checked lambda: keeps the stamped
   // property `private set` (the CLR setter is never invoked) yet binds the
   // write to a real property name at build time.

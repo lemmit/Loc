@@ -50,13 +50,19 @@ function find(files: Map<string, string>, re: RegExp): string {
 }
 
 describe("dotnet database seeding (Phase 3a, domain path)", () => {
-  it("emits Seed.cs going through the positional Create + repository SaveAsync", async () => {
+  it("emits Seed.cs going through the named-arg Create + repository SaveAsync", async () => {
     const files = await build();
     const seed = find(files, /Infrastructure\/Persistence\/Seed\.cs$/);
 
-    // Through the domain Create (D-SEED-PATH); positional args in field order.
-    expect(seed).toContain('Product.Create("BASE-1", new Money(1.0m, "USD"), Tier.Free, 1)');
-    expect(seed).toContain('Product.Create("DEMO-1", new Money(9.99m, "USD"), Tier.Pro, 10)');
+    // Through the domain Create (D-SEED-PATH); named args over the full
+    // create-input set, so a row that omits optional fields still supplies
+    // every factory parameter.
+    expect(seed).toContain(
+      'Product.Create(sku: "BASE-1", price: new Money(1.0m, "USD"), tier: Tier.Free, stock: 1)',
+    );
+    expect(seed).toContain(
+      'Product.Create(sku: "DEMO-1", price: new Money(9.99m, "USD"), tier: Tier.Pro, stock: 10)',
+    );
     expect(seed).toContain("sp.GetRequiredService<IProductRepository>()");
     expect(seed).toContain("await productRepo.SaveAsync(");
 
@@ -104,7 +110,7 @@ describe("dotnet database seeding (Phase 3a, domain path)", () => {
     const files = generateDotnet(model);
     const seed = [...files].find(([k]) => /Seed\.cs$/.test(k))?.[1];
     expect(seed).toBeDefined();
-    expect(seed!).toContain('Widget.Create("Alpha", 1, Tier.Free)');
+    expect(seed!).toContain('Widget.Create(name: "Alpha", size: 1, tier: Tier.Free)');
   });
 
   it("omits the seeder entirely when no seed block is declared", async () => {
