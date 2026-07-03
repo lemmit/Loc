@@ -5,9 +5,9 @@
 > explicit-stance lint, and the registry/claim verification checks shipped per
 > [`docs/plans/multi-tenancy-implementation.md`](../plans/multi-tenancy-implementation.md)
 > (user-facing doc: [`docs/tenancy.md`](../tenancy.md)). Deferred: registry
-> self-scope + bootstrap (1b), registry/claim cross-reference hygiene (R6, 1b —
-> the `registry`/`claim` bindings ship as bare `ID`s, not Langium cross-refs),
-> `tenant_id` index (blocked on
+> self-scope + bootstrap (1b), the `registry`/`claim` cross-reference upgrade (1b
+> — they ship as bare `ID`s, not Langium cross-refs; see "Final recommendation"
+> decision 5), `tenant_id` index (blocked on
 > uniqueness-and-indexes), and ALL hierarchy machinery — `tenantRegistry`,
 > `parent`, `dataKey`, `deep`/`global` (Phase 2; R5's "dataKey from day one"
 > was found unimplementable — no session-enrichment source for `orgPath`, no
@@ -390,67 +390,124 @@ materialized-path footguns Loom owns so users never see them: a path **delimiter
 (so `org_a` doesn't prefix-match `org_ab`) and a **`text_pattern_ops`/C-collation
 index** (so `LIKE 'x%'` actually uses the index).
 
-### R6. Grammar hygiene — cross-reference the registry and claim (Phase 1b)
+## Final recommendation (2026-07-03) — the whole shape in one place
 
-> Added 2026-07-03 from a grammar review. This does **not** reopen R1 (the
-> registry stays a *system-level* fact named in `tenancy by …`, not a
-> per-aggregate marker). It records a narrower point R1 never weighed: how the
-> two names in that line are *bound*.
+> Written after Phase 1a shipped, as a capstone across R1–R5 and the original
+> "Decisions locked". Where a detail below and an earlier section agree, this is
+> just the summary; where the wording differs, **this section states the call to
+> ship**. Bottom line: **Phase 1a's design is sound — do not redesign it.** The
+> capability-filter substrate makes the tenant predicate impossible to forget,
+> which is the entire game. The recommendation is one small change from 1a, one
+> hard "no", and one naming settle.
 
-As shipped in Phase 1a, `TenancyDecl` binds both names as bare `ID`s resolved
-by a validator, not as Langium cross-references:
+### The model in one picture
 
-```langium
-TenancyDecl:
-    'tenancy' 'by' 'user' '.' claim=ID 'of' registry=ID;
+Three roles, each declared *where its truth lives* — never injected:
+
+```ddd
+system Store {
+  user { tenantId: guid }
+  tenancy by user.tenantId of Organization        // system-level: one registry, one claim
+
+  subdomain Sales { context Orders {
+    aggregate Organization { name: string }              // the registry — self-keyed, no tenant column
+    aggregate Invoice with tenantOwned { total: money }  // belongs to a tenant
+    aggregate Plan   crossTenant { name: string }        // shared across all tenants
+  }}
+}
 ```
 
-This makes it the **least-Loomish reference in the grammar**. Every other
-"which aggregate" link is a cross-reference and gets IDE navigation, rename, and
-find-refs for free — `repository … for [Aggregate:ID]`, `api … from
-[Subdomain:ID]`, `channel carries [EventDecl:ID]`, `SeedRow`, `View` sources.
-`of Organization` names an aggregate exactly like those, but as a magic string:
-cmd-click does nothing, rename doesn't propagate, and a typo surfaces as a
-generic validator error at the whole declaration rather than at the reference.
+Generated (Postgres) — and this is the point: the predicate **cannot be
+forgotten**, because it is AND-ed in by the capability pipeline, not hand-written
+per query:
 
-**The fix is fully compatible with R1's three benefits** (checkable
-`tenantId ≡ Organization.id` link, structural "exactly one registry", no
-aggregate marker) — none of them requires the bare-`ID` form. Upgrade the
-bindings to references:
-
-```langium
-// registry — a real Aggregate cross-reference (drops the manual existence check):
-registry=[Aggregate:ID]
-
-// claim — scope it to the system's `user { }` fields (needs a small
-// ddd-scope.ts addition to expose UserField in this position only, the same
-// targeted-scoping trick that keeps EventDecl/PayloadDecl visible only in
-// workflow create/handle params):
-claim=[UserField:UserFieldName]
+```sql
+create table invoices (
+  id uuid primary key,
+  tenant_id uuid not null references organizations(id),   -- stamped by tenantOwned
+  total numeric(19,4) not null
+);
+-- every read AND-ed with:  where tenant_id = $currentUser.tenantId
 ```
 
-Resulting surface is **byte-identical** to what ships today —
-`tenancy by user.tenantId of Organization` — so no source migration; the change
-is entirely in tooling quality (navigation, rename, sharper diagnostics) plus
-deleting the now-redundant existence checks.
+### The five decisions to ship
 
-- **The `user.` prefix is a keep/drop knob.** Keeping it (`by user.tenantId`)
-  preserves the "this is a user claim" reading; dropping it (`by tenantId`, with
-  the same `[UserField]` cross-ref) is terser and still unambiguous. Recommend
-  **keep** — it matches the docs and reads well; the cross-ref is the win, not
-  the token count.
-- **The per-aggregate `tenantRegistry` header flag was reconsidered and still
-  rejected** (mirroring `crossTenant` / `abstract` on the aggregate header).
-  Recording it here so it isn't re-proposed: R1's argument stands — the registry
-  is self-keyed, has no `TenantId` column, and there is exactly one, so its
-  identity is a system-level fact, not a per-aggregate axis value. Marking it on
-  the aggregate would re-conflate the two roles R1 separated. The grammar-hygiene
-  goal is met *within* R1's model by the cross-reference above, not by moving the
-  registry back onto the aggregate.
+1. **Registry named at system level, not marked on the aggregate** (R1). It is
+   self-keyed — its "tenant" *is* its own PK — so it has no `tenant_id` column
+   and the standard filter can't even be emitted against it. That makes
+   registry-ness a system fact (*there is exactly one*), not a per-aggregate axis
+   value. The `tenantRegistry`-header-flag alternative (mirroring `crossTenant` /
+   `abstract`) was reconsidered on 2026-07-03 and **still rejected** — marking it
+   on the aggregate re-conflates the two roles R1 deliberately separated. Do not
+   re-propose it.
 
-This is a **Phase 1b grammar-hygiene item** (sits with "registry self-scope +
-bootstrap", already deferred to 1b). Pure tooling upgrade, no behaviour change —
-safe to land independently of the hierarchy work.
+2. **Two per-aggregate values only — `tenantOwned` / `crossTenant`** (R2). Resist
+   a third "admin-only cross-tenant" scope: that is `crossTenant` + an
+   authorization deny-by-default policy. Tenancy answers *scope*; authorization
+   answers *who may read*. Keeping those orthogonal is what stops this feature
+   metastasizing (it is exactly why the original `platform` scope was dropped).
+
+3. **No silent default; explicit-stance lint at ERROR** (R3). Unmarked = unscoped
+   (no injected capability ⇒ no magic). Under a `tenancy by` system, every
+   unmarked aggregate is a hard build error with a one-keyword suggested fix.
+   Tenancy is a security boundary where the *common* case (data is tenant-owned)
+   is the dangerous default, so fail-closed is the only defensible severity.
+
+4. **`tenantId ≡ Organization.id` is a derived type link, not a written filter**
+   (R1). The registry's self-scope predicate (`Organization.id ==
+   currentUser.tenantId`) falls out of that identity — Phase 1b, together with
+   the claim-less signup bootstrap via the `ignoring` filter-bypass.
+
+5. **One change from what shipped: cross-reference the two bindings** (the sole
+   code delta this capstone asks for). As shipped, `TenancyDecl` binds both names
+   as bare `ID`s validated after the fact — the **least-Loomish reference in the
+   grammar** (every other "which aggregate" link is a cross-reference with
+   navigation/rename/find-refs):
+
+   ```langium
+   // shipped 1a:
+   'tenancy' 'by' 'user' '.' claim=ID 'of' registry=ID
+   // proposed 1b — byte-identical surface, real edges in the model:
+   'tenancy' 'by' 'user' '.' claim=[UserField:UserFieldName] 'of' registry=[Aggregate:ID]
+   ```
+
+   The `claim` cross-ref needs a small `ddd-scope.ts` addition to expose
+   `UserField` in that position only (the same targeted-scoping trick that keeps
+   `EventDecl`/`PayloadDecl` visible only in workflow `create`/`handle` params).
+   Surface is unchanged (`tenancy by user.tenantId of Organization`), so no source
+   migration — pure tooling win plus deleting the now-redundant existence checks.
+   Keep the `user.` prefix (it reads as "this is a user claim"; the cross-ref is
+   the win, not the token count).
+
+### The one hard "no" — do not stamp a placeholder `dataKey`
+
+Hierarchy (Phase 2 — `parent`, `dataKey` materialized path, `deep`/`global`
+levels) stays **blocked**, and the standing instruction is: do **not** stamp a
+day-one `dataKey := tenantId` placeholder. It is unimplementable correctly on
+today's substrate (no session source for `orgPath`; stamps can't express the
+registry's `parent.dataKey ‖ "." ‖ id` read), and a column that silently goes
+wrong the moment the first sub-org appears is **worse than none**. Because
+`parent` is immutable, enabling hierarchy later is a mechanical, derivable
+backfill migration — deferring costs nothing you can't recover. Gate Phase 2 on
+session enrichment + `authorization.md` landing the `local`/`deep`/`global`
+access ladder, exactly as planned in R5.
+
+### The one naming settle — keep `crossTenant`
+
+`tenantless` reads more truthfully for reference data ("a `Country` has no
+tenant") and avoids implying a cross-tenant *read grant*. Settle it anyway in
+favour of **`crossTenant`**: a shared vocabulary with `authorization.md` (which
+already uses the word) is worth more than the marginally better noun, and
+renaming later is cheap if it grates. Close the open question.
+
+### Phasing verdict
+
+- **1a — shipped, keep as-is.** Surface, `tenantOwned`, `crossTenant`,
+  explicit-stance error lint, registry/claim verification.
+- **1b — do soon.** Registry self-scope filter + claim-less `signUp` bootstrap
+  (decision 4); the cross-reference upgrade (decision 5); `tenant_id` index
+  (blocked on `uniqueness-and-indexes.md`).
+- **Phase 2 — stay blocked.** Hierarchy, per the hard "no" above.
 
 ---
 
