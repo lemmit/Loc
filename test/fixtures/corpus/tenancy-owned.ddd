@@ -1,0 +1,44 @@
+// First-class multi-tenancy (docs/tenancy.md): `tenancy by user.<claim> of
+// <Registry>` + the `tenantOwned` prelude capability (tenant column + claim
+// stamp + tenant read filter) + `crossTenant` stance marker.  The registry
+// (`Organization`) is named-and-verified only — no marker, no generated
+// behavior.  Sibling of tenancy-filter.ddd, which hand-writes the same
+// filter/stamp the capability provides.
+system TenantOwned {
+  user { id: guid  tenantId: string }
+
+  tenancy by user.tenantId of Organization
+
+  subdomain Core {
+    context Billing {
+      aggregate Invoice ids guid with tenantOwned {
+        number: string
+        amountDue: int
+      }
+      aggregate Plan ids guid crossTenant {
+        code: string
+        monthlyPrice: int
+      }
+      repository Invoices for Invoice {
+        find byNumber(n: string): Invoice[] where this.number == n
+      }
+    }
+    context Accounts {
+      aggregate Organization ids guid {
+        name: string
+      }
+    }
+  }
+  api BillingApi from Core
+  storage primary { type: postgres }
+  resource billingState { for: Billing, kind: state, use: primary }
+  resource accountsState { for: Accounts, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Billing, Accounts]
+    dataSources: [billingState, accountsState]
+    serves: BillingApi
+    port: 4000
+    auth: required
+  }
+}
