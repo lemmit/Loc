@@ -98,16 +98,31 @@ test("editor → generate → bundle → boot → dispatch", async ({ page }) =>
   });
 
   await test.step("POST /products → 201", async () => {
-    // req-body is now a Monaco editor (a div, not a textarea), so we
-    // set its content via select-all + insertText — keyboard.type would
-    // trip Monaco's auto-closing brackets/quotes and double them up.
+    // req-body is a Monaco editor (a div, not a textarea).  Set its content
+    // via the `__loomSetRequestBody` automation seam (model.setValue, fires
+    // onChange) rather than keystrokes: the picker prefilled a schema example,
+    // and the playground's VS Code-based editor build doesn't wire Ctrl+A
+    // select-all for standalone editors, so select-all+insertText silently
+    // *appended* the new object to the example → two concatenated JSON objects
+    // → "Malformed JSON in request body" (a deterministic 500).  setValue
+    // replaces atomically and sidesteps that.
     const body = page.getByTestId("req-body");
     await expect(body).toBeVisible();
-    await body.click();
-    await page.keyboard.press("ControlOrMeta+A");
-    await page.keyboard.insertText(
+    // Wait for the editor's automation seam to register (set in its mount
+    // effect, which can lag the container becoming visible).
+    await page.waitForFunction(
+      () => typeof (window as unknown as { __loomSetRequestBody?: unknown }).__loomSetRequestBody === "function",
+    );
+    await page.evaluate(
+      (json) =>
+        (window as unknown as { __loomSetRequestBody?: (t: string) => void }).__loomSetRequestBody?.(
+          json,
+        ),
       JSON.stringify({ sku: "PW-1", price: { amount: 9.99, currency: "USD" } }),
     );
+    // Confirm the model actually holds the new body (single-line compact JSON
+    // renders fully in Monaco's DOM) before dispatching.
+    await expect(body).toContainText('"sku"');
     await page.getByTestId("btn-send").click();
     try {
       await expect(page.getByTestId("resp-status")).toContainText("201", { timeout: 30_000 });
