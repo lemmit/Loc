@@ -72,6 +72,37 @@ const PRINCIPAL_SRC = `system PrincipalStamp {
 }
 `;
 
+// A CLAIM-valued principal stamp (`tenantId := currentUser.tenantId`) — the
+// tenancy write side.  Must stamp the CLAIM read off the ambient principal;
+// collapsing it to the actor id (`ctx.actorId`, a guid) would stamp a value
+// the tenancy read filter (`requireCurrentUser().tenantId`) never matches.
+const CLAIM_SRC = `system TenantStamp {
+  user { id: guid  tenantId: string }
+  subdomain D {
+    context Ledger {
+      stamp onCreate { tenantId := currentUser.tenantId }
+      aggregate Account ids guid {
+        tenantId: string internal
+        balance: int
+        filter this.tenantId == currentUser.tenantId
+      }
+      repository Accounts for Account { }
+    }
+  }
+  api A from D
+  storage primary { type: postgres }
+  resource st { for: Ledger, kind: state, use: primary }
+  deployable api1 {
+    platform: node
+    contexts: [Ledger]
+    dataSources: [st]
+    serves: A
+    port: 8081
+    auth: required
+  }
+}
+`;
+
 async function build(src: string): Promise<Map<string, string>> {
   const { model, errors } = await parseString(src);
   if (errors.length) throw new Error(`fixture has validation errors:\n${errors.join("\n")}`);
@@ -139,6 +170,27 @@ describe("Hono (node) generator — lifecycle stamps", () => {
     const routes = find(files, /order\.routes\.ts$/);
     expect(routes).not.toContain("_stampOnCreate");
     expect(routes).not.toContain('.get("currentUser")');
+  });
+
+  it("a CLAIM-valued principal stamp reads the claim off the ambient principal, not the actor id", async () => {
+    const helper = find(await build(CLAIM_SRC), /db\/audit-stamp\.ts$/);
+    // The full principal is bound from the ambient context (typed via the
+    // auth user shape) and a principal-less save stays unstamped.
+    expect(helper).toContain('import type { User } from "../auth/user-types";');
+    expect(helper).toContain("const currentUser = ctx.currentUser as User | null;");
+    expect(helper).toContain("if (!currentUser) return row;");
+    // The stamp is the CLAIM, not the actor id.
+    expect(helper).toContain("tenantId: currentUser.tenantId");
+    expect(helper).not.toContain("tenantId: ctx.actorId");
+  });
+
+  it("a BARE currentUser stamp keeps the actor-id shape (no principal binding)", async () => {
+    const helper = find(await build(PRINCIPAL_SRC), /db\/audit-stamp\.ts$/);
+    // Byte-identical to the pre-claim-fix output: actor id only, no full
+    // principal bind, no User import.
+    expect(helper).toContain("createdBy: ctx.actorId");
+    expect(helper).not.toContain("ctx.currentUser");
+    expect(helper).not.toContain("user-types");
   });
 
   it("gates a currentUser stamp on a deployable WITHOUT auth fail-fast", async () => {

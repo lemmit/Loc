@@ -42,7 +42,7 @@ System:
     '}';
 
 SystemMember:
-    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | AuthBlock | ThemeBlock | Ui | Api | Storage | Resource | ChannelSource | Layout | Capability;
+    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | AuthBlock | TenancyDecl | ThemeBlock | Ui | Api | Storage | Resource | ChannelSource | Layout | Capability;
 
 // System-level visual identity — design tokens consumed by every
 // React deployable in this system.  Tokens are intentionally
@@ -135,6 +135,20 @@ SessionMode returns string:
 
 Enforcement returns string:
     'denyByDefault' | 'opt';
+
+// System-level tenancy declaration (multi-tenancy Phase 1a — see
+// docs/plans/multi-tenancy-implementation.md).  Sibling to `user { … }`
+// and `auth { … }`: names WHICH user claim partitions the data
+// (`user.tenantId`) and WHICH aggregate is the tenant registry
+// (`of Organization`).  The `user.` prefix is fixed surface syntax, not
+// a general reference — `claim` must name a field of the system's
+// `user { … }` block and `registry` an aggregate in the system (both
+// verified by the phase-④/⑦ tenancy validators, not by scoping).  At
+// most one per system (validator enforces).
+//
+//   tenancy by user.tenantId of Organization
+TenancyDecl:
+    'tenancy' 'by' 'user' '.' claim=ID 'of' registry=ID;
 
 // E2E test against a running deployable.  The body reuses the per-
 // aggregate TestStatement vocabulary (let / expect / bare-call), but
@@ -849,7 +863,13 @@ ValueObjectMember:
 // amended by D-DOCUMENT-AXIS §4 — all aggregate config on the header),
 // alongside `persistedAs(…)` / `shape(…)`.
 Aggregate:
-    (isAbstract?='abstract')? 'aggregate' name=ID ('extends' superType=[Aggregate:ID])? ('ids' idKind=IdKind)? ('persistedAs' '(' persistedAs=TruthKind ')')? ('shape' '(' shape=SavingShape ')')? ('inheritanceUsing' '(' inheritanceUsing=InheritanceLayout ')')? withClause=WithClause? '{'
+    // `crossTenant` (multi-tenancy Phase 1a) is a header flag mirroring
+    // `isAbstract` — declares shared-reference data that opts out of the
+    // tenant filter under a `tenancy by` system.  Positioned after the
+    // `ids` clause, before the paren modifiers and the with-clause:
+    // `aggregate Plan crossTenant { … }`,
+    // `aggregate Invoice ids guid crossTenant with x { … }`.
+    (isAbstract?='abstract')? 'aggregate' name=ID ('extends' superType=[Aggregate:ID])? ('ids' idKind=IdKind)? (crossTenant?='crossTenant')? ('persistedAs' '(' persistedAs=TruthKind ')')? ('shape' '(' shape=SavingShape ')')? ('inheritanceUsing' '(' inheritanceUsing=InheritanceLayout ')')? withClause=WithClause? '{'
         members+=AggregateMember*
     '}';
 
@@ -1438,7 +1458,12 @@ Property:
         // `await` is hard only as the match-subject marker
         // (`match await op() { … }`, async-actions-and-effects.md Stage 2);
         // soft in property position so a domain field named `await` parses.
-        | 'await')
+        | 'await'
+        // Tenancy keywords (multi-tenancy Phase 1a) — soft in property
+        // position so a pre-existing field named `tenancy` / `crossTenant`
+        // keeps parsing.  Hard only in the `TenancyDecl` head / `Aggregate`
+        // header flag slot.
+        | 'tenancy' | 'crossTenant')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -1650,7 +1675,12 @@ LooseName returns string:
     // the `IgnoringClause` filter-bypass tail on a read (find / view / inline
     // `Repo.findAll`).  Admit it here so user code can still name a field /
     // parameter `ignoring`.
-    | 'ignoring';
+    | 'ignoring'
+    // Tenancy keywords (multi-tenancy Phase 1a) admitted as soft so user
+    // code can still name a field / parameter `tenancy` / `crossTenant`.
+    // `tenancy` is hard only at the head of the `TenancyDecl` SystemMember;
+    // `crossTenant` only in the `Aggregate` header flag slot.
+    | 'tenancy' | 'crossTenant';
 
 // A dotted page reference for `menu { link <Area>.<Page> }` — lets a menu link
 // disambiguate role-named scaffold pages (`List` / `New` / `Detail`) by their
@@ -1894,7 +1924,12 @@ LValueIdent returns string:
        // `store` soft in l-value position so an assignment target naming a
        // field `store` (`store := store`, persistence-shapes.ddd) parses —
        // hard only as the `Store` UI-member leading keyword (Stage 5).
-       | 'store';
+       | 'store'
+       // Tenancy keywords (multi-tenancy Phase 1a) soft in l-value position
+       // so an assignment target naming a field `tenancy` / `crossTenant`
+       // parses.  Hard only in the `TenancyDecl` head / `Aggregate` header
+       // flag slot.
+       | 'tenancy' | 'crossTenant';
 
 // ---------------------------------------------------------------------------
 // Expressions (precedence climbing, lowest to highest)
@@ -2101,7 +2136,12 @@ MemberName returns string:
        // `ignoring` (named-filter-bypass.md, §11) admitted after `.` so member
        // access on a field named `ignoring` keeps parsing.  Hard only in the
        // `IgnoringClause` read tail.
-       | 'ignoring';
+       | 'ignoring'
+       // Tenancy keywords (multi-tenancy Phase 1a) admitted after `.` so
+       // member access on a field named `tenancy` / `crossTenant` keeps
+       // parsing (`this.tenancy`).  Hard only in the `TenancyDecl` head /
+       // `Aggregate` header flag slot.
+       | 'tenancy' | 'crossTenant';
 
 // Lambdas accept either a single expression body (the only form
 // in v22) or a brace-wrapped block of statements.  Block bodies
@@ -2318,7 +2358,11 @@ NameRefIdent returns string:
        // `ignoring` (named-filter-bypass.md, §11) admitted as a bare NameRef so
        // an expression can read a field named `ignoring`.  Hard only in the
        // `IgnoringClause` read tail.
-       | 'ignoring';
+       | 'ignoring'
+       // Tenancy keywords (multi-tenancy Phase 1a) admitted as bare NameRefs
+       // so an expression can read a field named `tenancy` / `crossTenant`.
+       // Hard only in the `TenancyDecl` head / `Aggregate` header flag slot.
+       | 'tenancy' | 'crossTenant';
 
 // ---------------------------------------------------------------------------
 // Terminals

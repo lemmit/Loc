@@ -50,6 +50,17 @@ function renderStampValue(value: ExprIR, ctx: RenderCtx, principalIdKey: string)
   if (value.kind === "ref" && value.refKind === "current-user") {
     return `current_user && current_user.${principalIdKey}`;
   }
+  // A claim-valued principal stamp (`tenantId := currentUser.tenantId`) gets
+  // the same nil-safe guard as the bare-principal case: an internal caller
+  // that didn't thread an actor (the `\\ nil` default) stamps `nil` instead of
+  // raising on a `nil.<claim>` access.
+  if (
+    value.kind === "member" &&
+    value.receiver.kind === "ref" &&
+    value.receiver.refKind === "current-user"
+  ) {
+    return `current_user && current_user.${snake(value.member)}`;
+  }
   return renderExpr(value, ctx);
 }
 

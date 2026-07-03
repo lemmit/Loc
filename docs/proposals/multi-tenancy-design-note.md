@@ -1,7 +1,20 @@
 # Multi-tenancy — design note for the implementing agent
 
-> Status: **design agreed; the first-class surface is not yet implemented, but its
-> substrate is now COMPLETE** (2026-06-28 code-verified). The proposed
+> Status: **Phase 1a IMPLEMENTED (2026-07-03)** — `tenancy by user.<claim> of
+> <Registry>`, the `tenantOwned` prelude capability, `crossTenant`, the
+> explicit-stance lint, and the registry/claim verification checks shipped per
+> [`docs/plans/multi-tenancy-implementation.md`](../plans/multi-tenancy-implementation.md)
+> (user-facing doc: [`docs/tenancy.md`](../tenancy.md)). Deferred: registry
+> self-scope + bootstrap (1b), `tenant_id` index (blocked on
+> uniqueness-and-indexes), and ALL hierarchy machinery — `tenantRegistry`,
+> `parent`, `dataKey`, `deep`/`global` (Phase 2; R5's "dataKey from day one"
+> was found unimplementable — no session-enrichment source for `orgPath`, no
+> stamp-time registry read — so the plan defers it with a documented backfill
+> recipe). One substrate correction: claim-valued lifecycle stamps were broken
+> on node/java/dotnet (+ elixir nil-guard) and fixed as slice 1a.0.
+>
+> Original status (2026-06-28): design agreed; substrate COMPLETE, surface not
+> yet implemented. The proposed
 > `tenancy by … of Organization` surface is genuinely greenfield — there is no
 > `tenant`/`tenancy`/`tenantRegistry`/`crossTenant` in `src/language/ddd.langium` or
 > `src/ir/types/loom-ir.ts`. **What this design builds on, however, has fully landed:**

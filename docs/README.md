@@ -32,6 +32,7 @@ These cover a single language feature each.  Each one is self-contained.
 | [`extern.md`](extern.md) | `extern` operations and their per-backend handler registries. |
 | [`criterion.md`](criterion.md) | `criterion` — reusable named predicate specifications, shared across queries, validation, and permissions. |
 | [`capabilities.md`](capabilities.md) | `filter`, `stamp`, `implements` — cross-aggregate behaviours like soft-delete and audit. |
+| [`tenancy.md`](tenancy.md) | Multi-tenancy — `tenancy by user.<claim> of <Registry>`, the `tenantOwned` capability, `crossTenant`, and the explicit-stance rule. |
 | [`domain-services.md`](domain-services.md) | `domainService` — stateless cross-aggregate pure calculators, the no-infra contract, and per-backend emission. |
 | [`scaffold-macros.md`](scaffold-macros.md) | The `scaffold`, `crudish`, `audit`, and `softDelete` macros — what they expand to. |
 | [`provenance.md`](provenance.md) | `provenanced` field modifier, the `ddd snapshot` capture step, and the Hono runtime trace SDK. |

@@ -61,6 +61,7 @@ import {
   validateVanillaContainmentSupport,
   validateVanillaDocumentScope,
 } from "./checks/system-checks.js";
+import { validateTenancy } from "./checks/tenancy-checks.js";
 import { validateAggregateTestBodies } from "./checks/test-checks.js";
 import { validateUiBodies } from "./checks/ui-checks.js";
 import {
@@ -143,6 +144,9 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateDefaultDeny(sys, diags);
     validateAuth(sys, diags);
     validatePermissions(sys, diags);
+    // Tenancy (multi-tenancy Phase 1a): registry existence, the explicit-
+    // stance lint, marker-without-declaration, conflicting markers.
+    validateTenancy(sys, diags);
     // Scaffold expansion now runs at the AST level
     // (`src/language/ddd-scaffold-ast-expander.ts`).  Duplicate-page
     // detection happens through Langium's standard scope-walking

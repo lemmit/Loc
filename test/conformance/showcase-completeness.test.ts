@@ -88,6 +88,15 @@ const ALLOWLIST = new Set<string>([
   // isolated `build([showcase])` here wouldn't resolve it). Multi-file imports
   // are covered by web/src/examples/multifile-*.ddd instead.
   "ImportStmt",
+  // `tenancy by` is whole-system: it imposes the explicit-stance rule on EVERY
+  // aggregate (loom.tenancy-stance-unmarked is an error) and AND-s a per-tenant
+  // filter into every generated read — wiring it into showcase.ddd would
+  // change the semantics of every conformance dimension rather than add one.
+  // Tenancy is covered by its dedicated corpus fixtures
+  // (test/fixtures/corpus/tenancy-owned.ddd + tenancy-filter.ddd) instead.
+  // Tenancy-izing the showcase is a deliberate follow-up, not a drive-by
+  // (docs/plans/multi-tenancy-implementation.md).
+  "TenancyDecl",
 ]);
 
 async function buildShowcase(): Promise<LangiumDocument<Model>> {

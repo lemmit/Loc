@@ -28,19 +28,23 @@
 // structural printer roundtrip guarantees from the print-roundtrip
 // test, the unfolded output re-parses to a working program.
 
-import type { LangiumDocument } from "langium";
+import { AstUtils, type LangiumDocument } from "langium";
 import type { TextEdit } from "vscode-languageserver";
 import type { MacroDefinition, OriginToken } from "../../macros/api/define.js";
 import { _withOrigin } from "../../macros/api/factories.js";
 import { resolveMacroArgs } from "../../macros/expander.js";
+import { builtinCapabilities } from "../../macros/prelude.js";
 import { lookupMacro } from "../../macros/registry.js";
-import type {
-  Aggregate,
-  BoundedContext,
-  MacroCall,
-  Model,
-  Ui,
-  WithClause,
+import {
+  type Aggregate,
+  type BoundedContext,
+  type Capability,
+  isAggregate,
+  isCapability,
+  type MacroCall,
+  type Model,
+  type Ui,
+  type WithClause,
 } from "../generated/ast.js";
 import { printStructural } from "../print/index.js";
 
@@ -66,7 +70,11 @@ export function unfoldMacro(document: LangiumDocument, call: MacroCall): UnfoldR
   if (!hostKind) return undefined;
 
   const macro = lookupMacro(call.name);
-  if (!macro || macro.target !== hostKind) return undefined;
+  // No macro by this name — try a typed capability, mirroring the
+  // expander's resolution order (`expandOneCall`: macro wins on a name
+  // collision, capability is the fallback).
+  if (!macro) return unfoldCapability(document, call, host, hostKind);
+  if (macro.target !== hostKind) return undefined;
 
   const args = bindArgsForUnfold(document, macro, call);
   const origin: OriginToken = {
@@ -155,6 +163,68 @@ export function unfoldMacro(document: LangiumDocument, call: MacroCall): UnfoldR
   }
 
   return { title: `Unfold macro '${call.name}'`, edits };
+}
+
+/** Unfold a typed-capability application (`with tenantOwned` /
+ * `with auditable` — typed-capabilities.md) into its member source: the
+ * capability's fields / filter / stamp members are printed into the
+ * implementing aggregate's body and the name is removed from the `with`
+ * clause.  Mirrors the expander's `expandCapability` semantics:
+ *
+ *   - aggregate host — splice into that aggregate;
+ *   - context host — splice an independent copy into EVERY aggregate in
+ *     the context (the `*ByDefault` fan-out);
+ *   - ui host — never (a capability is a pure mixin, not a UI concern).
+ *
+ * Resolution mirrors the expander's inventory: a user-declared
+ * `capability <name>` in THIS document wins over the built-in prelude
+ * (`builtinCapabilities()`).  Deliberately minimal vs the expander:
+ * sibling-document capability declarations and the override-by-name
+ * member merge are not replicated here — the printed members land
+ * verbatim and any collision surfaces as an ordinary validator
+ * diagnostic on the unfolded source. */
+function unfoldCapability(
+  document: LangiumDocument,
+  call: MacroCall,
+  host: Aggregate | Ui | BoundedContext,
+  hostKind: "aggregate" | "ui" | "context",
+): UnfoldResult | undefined {
+  if (hostKind === "ui") return undefined;
+  const cap = resolveCapabilityForUnfold(document, call.name);
+  if (!cap) return undefined;
+  const members = [...(cap.members ?? [])];
+  if (members.length === 0) return undefined;
+  const targets: Aggregate[] =
+    hostKind === "aggregate"
+      ? [host as Aggregate]
+      : ((host as BoundedContext).members ?? []).filter(isAggregate);
+  if (targets.length === 0) return undefined;
+  const edits: TextEdit[] = [];
+  for (const target of targets) {
+    const insertEdit = buildInsertEdit(document, target, members);
+    if (insertEdit) edits.push(insertEdit);
+  }
+  if (edits.length === 0) return undefined;
+  const clauseEdit = buildHostClauseRewriteEdit(document, host, call, []);
+  if (clauseEdit) edits.push(clauseEdit);
+  return { title: `Unfold capability '${call.name}'`, edits };
+}
+
+/** Resolve a capability name the way the expander's inventory does:
+ * a `capability <name>` declared in this document wins; the built-in
+ * prelude (`auditable` / `softDeletable` / `tenantOwned`) is the
+ * fallback default. */
+function resolveCapabilityForUnfold(
+  document: LangiumDocument,
+  name: string,
+): Capability | undefined {
+  const model = document.parseResult?.value as Model | undefined;
+  if (model) {
+    for (const node of AstUtils.streamAllContents(model)) {
+      if (isCapability(node) && node.name === name) return node;
+    }
+  }
+  return builtinCapabilities().get(name);
 }
 
 /** Recording of a single `invokeMacro(...)` call made by the macro

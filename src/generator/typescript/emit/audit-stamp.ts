@@ -18,7 +18,7 @@
 // subset, e.g. timestamps only).
 // ---------------------------------------------------------------------------
 
-import type { ContextStampIR, EnrichedAggregateIR } from "../../../ir/types/loom-ir.js";
+import type { ContextStampIR, EnrichedAggregateIR, ExprIR } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { renderTsExpr } from "../render-expr.js";
@@ -26,9 +26,23 @@ import { renderTsExpr } from "../render-expr.js";
 /** A single stamp field and the save-site expression that fills it. */
 interface StampEntry {
   field: string;
-  /** `requestContext().actorId` for a `currentUser` value, else the rendered
-   *  expression (e.g. `now()` → `new Date()`). */
+  /** `ctx.actorId` for a bare `currentUser` value, `currentUser.<claim>` for a
+   *  claim-valued principal stamp (read off the ambient principal the helper
+   *  binds), else the rendered expression (e.g. `now()` → `new Date()`). */
   valueExpr: string;
+  /** True when the value reads a claim off the principal
+   *  (`currentUser.<member>`) — the helper must bind the full ambient
+   *  principal, not just the actor id. */
+  usesPrincipalClaim: boolean;
+}
+
+/** A bare `currentUser` stamp value (`createdBy := currentUser`) — the
+ *  principal-ID case, stamped from the ambient `ctx.actorId`.  A member
+ *  access (`tenantId := currentUser.tenantId`) is NOT bare: it must read
+ *  that claim off the full ambient principal instead (collapsing it to the
+ *  actor id stamps a guid the tenancy read filter never matches). */
+function isBareCurrentUserRef(value: ExprIR): boolean {
+  return value.kind === "ref" && value.refKind === "current-user";
 }
 
 /** True when the aggregate carries lifecycle stamps (`stamp onCreate`/`onUpdate`,
@@ -48,7 +62,11 @@ function entriesFor(
       field: a.field,
       // A `currentUser` value reads the ambient principal at save time; the
       // request-scope guard (helper-level) keeps a system/seed save unstamped.
-      valueExpr: exprUsesCurrentUser(a.value) ? "ctx.actorId" : renderTsExpr(a.value),
+      // Bare `currentUser` → the actor id; `currentUser.<claim>` → the claim
+      // read off the `currentUser` local the helper binds from the ambient
+      // context (renderTsExpr's `current-user` arm emits `currentUser`).
+      valueExpr: isBareCurrentUserRef(a.value) ? "ctx.actorId" : renderTsExpr(a.value),
+      usesPrincipalClaim: !isBareCurrentUserRef(a.value) && exprUsesCurrentUser(a.value),
     }));
 }
 
@@ -78,20 +96,30 @@ export function updateStampEntries(agg: EnrichedAggregateIR): StampEntry[] {
 export function renderAuditStampHelper(audited: EnrichedAggregateIR[]): string {
   // Union the field→value mappings across every audited aggregate; the
   // `auditable` macro makes these uniform, so the merged helper is shared.
-  const insert = new Map<string, string>();
-  for (const agg of audited)
-    for (const e of insertStampEntries(agg)) insert.set(e.field, e.valueExpr);
-  const update = new Map<string, string>();
-  for (const agg of audited)
-    for (const e of updateStampEntries(agg)) update.set(e.field, e.valueExpr);
+  const insert = new Map<string, StampEntry>();
+  for (const agg of audited) for (const e of insertStampEntries(agg)) insert.set(e.field, e);
+  const update = new Map<string, StampEntry>();
+  for (const agg of audited) for (const e of updateStampEntries(agg)) update.set(e.field, e);
   // The create-only fields stampUpdate must strip so the `set` leaves them on
   // their on-disk values.
   const createOnly = [...insert.keys()].filter((f) => !update.has(f));
 
+  // A claim-valued principal stamp (`tenantId := currentUser.tenantId`) needs
+  // the FULL ambient principal in scope (`currentUser.<claim>`), not just the
+  // actor id — bind it from the request context, and keep a principal-less
+  // save (seed / system, or a bypassed anonymous path) unstamped, mirroring
+  // the `if (!ctx) return row;` guard.
+  const insertNeedsPrincipal = [...insert.values()].some((e) => e.usesPrincipalClaim);
+  const updateNeedsPrincipal = [...update.values()].some((e) => e.usesPrincipalClaim);
+  const principalBinding = [
+    "  const currentUser = ctx.currentUser as User | null;",
+    "  if (!currentUser) return row;",
+  ];
+
   // Each as a leading `, <field>: <value>` fragment so an empty set leaves the
   // spread (`{ ...row }`) clean — no dangling comma.
-  const insertAssigns = [...insert.entries()].map(([f, v]) => `, ${f}: ${v}`).join("");
-  const updateAssigns = [...update.entries()].map(([f, v]) => `, ${f}: ${v}`).join("");
+  const insertAssigns = [...insert.entries()].map(([f, e]) => `, ${f}: ${e.valueExpr}`).join("");
+  const updateAssigns = [...update.entries()].map(([f, e]) => `, ${f}: ${e.valueExpr}`).join("");
   const stripBinding =
     createOnly.length > 0
       ? `const { ${createOnly.map((f) => `${f}: _${f}`).join(", ")}, ...rest } = row;`
@@ -100,6 +128,9 @@ export function renderAuditStampHelper(audited: EnrichedAggregateIR[]): string {
   return lines(
     "// Auto-generated.  Do not edit by hand.",
     `import { requestContext } from "../obs/als";`,
+    insertNeedsPrincipal || updateNeedsPrincipal
+      ? `import type { User } from "../auth/user-types";`
+      : null,
     "",
     "// Stamp a freshly-inserted row's audit columns from the ambient request",
     "// principal.  A non-request save (seed / system) has no context, so the row",
@@ -107,6 +138,7 @@ export function renderAuditStampHelper(audited: EnrichedAggregateIR[]): string {
     "export function stampInsert<T extends Record<string, unknown>>(row: T): T {",
     "  const ctx = requestContext();",
     "  if (!ctx) return row;",
+    ...(insertNeedsPrincipal ? principalBinding : []),
     `  return { ...row${insertAssigns} };`,
     "}",
     "",
@@ -115,6 +147,7 @@ export function renderAuditStampHelper(audited: EnrichedAggregateIR[]): string {
     "export function stampUpdate<T extends Record<string, unknown>>(row: T): Partial<T> {",
     "  const ctx = requestContext();",
     "  if (!ctx) return row;",
+    ...(updateNeedsPrincipal ? principalBinding : []),
     `  ${stripBinding}`,
     `  return { ...rest${updateAssigns} } as unknown as Partial<T>;`,
     "}",

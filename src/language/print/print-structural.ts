@@ -153,6 +153,8 @@ export function printStructural(node: AstNode): string {
       return printUserBlock(node as UserBlock);
     case "AuthBlock":
       return printAuthBlock(node as AuthBlock);
+    case "TenancyDecl":
+      return printTenancyDecl(node as import("../generated/ast.js").TenancyDecl);
     case "TestE2E":
       return printTestE2E(node as TestE2E);
     case "Ui":
@@ -329,6 +331,12 @@ function printAuthBlock(node: AuthBlock): string {
   }
   if (node.enforcement) items.push(`enforcement: ${node.enforcement}`);
   return block("auth", items);
+}
+
+function printTenancyDecl(node: import("../generated/ast.js").TenancyDecl): string {
+  // `tenancy by user.<claim> of <registry>` — the `user.` prefix is fixed
+  // surface syntax (multi-tenancy Phase 1a).
+  return `tenancy by user.${node.claim} of ${node.registry}`;
 }
 
 function printLayout(node: Layout): string {
@@ -669,11 +677,14 @@ function printValueObject(node: ValueObject): string {
 
 function printAggregate(node: Aggregate): string {
   // Header modifiers in grammar order (ddd.langium `Aggregate`):
-  //   [abstract] aggregate <name> [extends <Base>] [ids <kind>]
+  //   [abstract] aggregate <name> [extends <Base>] [ids <kind>] [crossTenant]
   //   [persistedAs(…)] [shape(…)] [inheritanceUsing(…)] [with …]
   const abstract = node.isAbstract ? "abstract " : "";
   const ext = node.superType ? ` extends ${node.superType.$refText}` : "";
   const ids = node.idKind ? ` ids ${node.idKind}` : "";
+  // `crossTenant` (multi-tenancy Phase 1a) sits after `ids`, before the
+  // paren modifiers — matches the grammar order.
+  const crossTenant = node.crossTenant ? " crossTenant" : "";
   // `persistedAs(…)` is a header modifier (between `ids` and `with`),
   // not a body member — matches the grammar order.
   const persistedAs = node.persistedAs ? ` persistedAs(${node.persistedAs})` : "";
@@ -682,7 +693,7 @@ function printAggregate(node: Aggregate): string {
     ? ` inheritanceUsing(${node.inheritanceUsing})`
     : "";
   return block(
-    `${abstract}aggregate ${node.name}${ext}${ids}${persistedAs}${shape}${inheritanceUsing}${printWithClause(node.withClause)}`,
+    `${abstract}aggregate ${node.name}${ext}${ids}${crossTenant}${persistedAs}${shape}${inheritanceUsing}${printWithClause(node.withClause)}`,
     node.members.map(printStructural),
   );
 }

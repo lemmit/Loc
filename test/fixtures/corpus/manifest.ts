@@ -50,6 +50,7 @@ export const CORPUS: readonly CorpusFeature[] = [
   { id: "outbox", title: "durable channel / transactional outbox + relay", doc: "workflow", backends: ALL },
   { id: "workflow-view", title: "workflow-sourced view over saga correlation state", doc: "workflow", backends: ALL },
   { id: "tenancy-filter", title: "principal-referencing (tenancy) capability filter", doc: "capabilities", backends: ALL },
+  { id: "tenancy-owned", title: "first-class tenancy — `tenancy by` + tenantOwned + crossTenant", doc: "tenancy", backends: ALL },
   { id: "stamps", title: "lifecycle stamps (audit timestamps via stamp blocks)", doc: "capabilities", backends: ALL },
   { id: "extern", title: "extern operations — preconditions gate a user handler", doc: "extern", backends: ALL },
   { id: "seeding", title: "seed datasets — default / demo / wired-raw", doc: "language", backends: ALL },

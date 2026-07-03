@@ -49,6 +49,7 @@ export {
   checkTypeReferences,
   checkValueObject,
 } from "./structural.js";
+export { checkTenancyDecls } from "./tenancy.js";
 export { checkTraceability } from "./traceability.js";
 export {
   checkBinaryOperands,
