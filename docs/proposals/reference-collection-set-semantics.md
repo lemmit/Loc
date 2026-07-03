@@ -1,7 +1,11 @@
 # Reference-collection set semantics — drop the stored association `ordinal`
 
-**Status: PROPOSED → adopting** (the cleanup it describes ships in the same
-change that adds this note).
+**Status: SHIPPED** (#1590; re-verified 2026-07-03). The `X id[]` association
+join table carries no `ordinal` on any backend — `tableForAssociation`
+(`src/system/migrations-builder.ts`) emits just `(ownerFk, targetFk)` as the
+whole-row composite PK, and every backend's ref-collection emitter documents
+the set semantics. Value-object collections correctly keep their `(parentFk,
+ordinal)` ordering. This file is retained as the design rationale.
 
 ## Principle
 

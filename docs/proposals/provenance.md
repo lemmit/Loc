@@ -1,12 +1,18 @@
 # Value provenance — `provenanced`
 
-> Status: **implemented (TypeScript/Hono v1)**. The keyword is in
-> `ddd.langium`; lowering, emission, the `ddd snapshot` capture command,
-> and the playground hook all ship. The original sketch attached
+> Status: **implemented on all five backends** (2026-07-03 audit). The
+> keyword is in `ddd.langium`; lowering, emission, the `ddd snapshot`
+> capture command, and the playground hook all ship. `provenanced` fields
+> emit the lineage SDK + co-located `<field>_provenance` column + the
+> `provenance_records` flush on **node/Hono, .NET, Java, Python, and
+> elixir-vanilla** (`PROVENANCE_BACKENDS` in `system-checks.ts`; real
+> emitters incl. `python/emit/provenance.ts` + `java/emit/provenance.ts`);
+> only non-runtime targets (e.g. react) are gated
+> (`loom.provenanced-backend-unsupported`). The original sketch attached
 > provenance to `derived` computed values; the implemented design instead
 > attaches it to **stored fields, instrumented per write-site**. The
-> derived-value variant, the `.provenance`/`.explain()` accessors, the
-> Explain service, and non-TS backends are **deferred** (see *Deferred*).
+> derived-value variant, the `.provenance`/`.explain()` accessors, and the
+> Explain service remain **deferred** (see *Deferred*).
 
 > **[2026-06-20 status audit]** Backend spread understated — provenance runtime now ships on TS/Hono, .NET (`dotnet/emit/provenance.ts`), AND elixir-vanilla (`elixir/vanilla/provenance-emit.ts`, #1400/DEBT-06). Only Python/Java + the Explain service / `.provenance` accessors remain deferred.
 

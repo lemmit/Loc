@@ -1,9 +1,18 @@
 # Audit & logging markers — `audited`, `logged`
 
-> Status: proposal. Not in `ddd.langium`. Builds on the
+> Status: PARTIAL. Builds on the
 > [execution-context backbone](./execution-context.md).
 
-> **[2026-06-20 status audit]** `audited` is a real operation modifier now (grammar `ddd.langium:~1383`, IR `loom-ir.ts:~324`, validator `validateAuditedOperationSupport`, emit on Hono + .NET `dotnet/emit/audit.ts`). Only `logged` remains a proposal.
+> **[2026-07-03 status audit]** `audited` (boolean) is a real modifier on
+> operations **and** lifecycle create/destroy, emitting on **all five
+> backends** — `AUDIT_OP_BACKENDS`/`AUDIT_LIFECYCLE_BACKENDS = {node,
+> dotnet, java, python, elixir}` in `system-checks.ts`, per-backend
+> `emit/audit.ts`, with who/what/when + before/after snapshots. The
+> earlier "Hono + .NET only" note was stale. **The real remaining slice is
+> the argument form `audited(actions | access | events | off)`** — a
+> grammar+IR change on the three `(audited?='audited')?` productions
+> (`ddd.langium:1496/1509/1520`), the prerequisite for the access-audit
+> mode. `logged` also remains a proposal.
 
 ## Problem
 
