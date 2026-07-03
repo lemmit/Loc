@@ -1557,6 +1557,17 @@ describe(".NET generator", () => {
       expect(csproj).toContain("Microsoft.IdentityModel.Protocols.OpenIdConnect");
     });
 
+    it("refreshes the cached OIDC configuration on a signing-key miss (IdP key rotation)", async () => {
+      const files = await emitForAuthSystem(SRC_OIDC);
+      const verifier = files.get("Auth/OidcUserVerifier.cs")!;
+      // An unknown signing key marks the cache stale (RequestRefresh is
+      // internally rate-limited by RefreshInterval) and re-validates once
+      // against fresh keys — rotation heals without a restart.
+      expect(verifier).toContain("result.Exception is SecurityTokenSignatureKeyNotFoundException");
+      expect(verifier).toContain("Configuration.RequestRefresh();");
+      expect(verifier).toContain("parameters.IssuerSigningKeys = configuration.SigningKeys;");
+    });
+
     it("emits + mounts the /auth/* redirect handshake and bypasses it under `auth { oidc }`", async () => {
       const files = await emitForAuthSystem(SRC_OIDC);
       const handshake = files.get("Auth/AuthHandshake.cs")!;
