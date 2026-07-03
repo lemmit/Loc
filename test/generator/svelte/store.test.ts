@@ -110,3 +110,40 @@ describe("Svelte store emission", () => {
     expect(page).toContain("const cartLines = $derived(cart.lines);");
   });
 });
+
+// Lifetime ladder (frontend-state-management.md §3.1) — `persist:` tiers over
+// the `$state` rune singleton.  Parity with the React/Vue tier tests.
+describe("Svelte store lifetime ladder", () => {
+  const FILT = (life: string) => `
+    store Filt ${life} {
+      state { category: string = ""  pageNo: int = 0  minPrice: money = 0.00 }
+      action setPage(p: int) { pageNo := p }
+    }
+    page P { route: "/p" body: Heading { Filt.pageNo, level: 1 } }`;
+  const mod = async (life: string) =>
+    (await svelteFiles(FILT(life))).get("web/src/lib/stores/filt.svelte.ts")!;
+
+  it("persist: local hydrates from + writes back to localStorage via $effect.root", async () => {
+    const m = await mod("persist: local");
+    expect(m).toContain('const STORAGE_KEY = "loom.store.Filt";');
+    expect(m).toContain("localStorage.getItem(STORAGE_KEY)");
+    expect(m).toContain("localStorage.setItem(STORAGE_KEY");
+    expect(m).toContain("$effect.root");
+    expect(m).toContain('["minPrice"].includes(key)'); // money reviver
+  });
+
+  it("persist: session backs storage with sessionStorage", async () => {
+    const m = await mod("persist: session");
+    expect(m).toContain("sessionStorage.getItem(STORAGE_KEY)");
+    expect(m).toContain("sessionStorage.setItem(STORAGE_KEY");
+  });
+
+  it("persist: url syncs to the query string with a typed decoder (parity with React)", async () => {
+    const m = await mod("persist: url");
+    expect(m).toContain("function decodeFromUrl()");
+    expect(m).toContain('category: p.get("category") ?? "",');
+    expect(m).toContain('Number.isFinite(Number(p.get("pageNo")))');
+    expect(m).toContain("window.history.replaceState(null");
+    expect(m).toContain('window.addEventListener("popstate"');
+  });
+});
