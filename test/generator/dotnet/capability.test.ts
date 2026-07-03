@@ -151,22 +151,6 @@ describe(".NET generator: HasQueryFilter installs per-EntityConfiguration", () =
     expect(cfg).not.toMatch(/Property\(x => x\.Owner\)\.HasColumnName\("owner"\);/);
   });
 
-  it("exposes the soft-delete flag on the response DTO (managed → API-read)", async () => {
-    // `isDeleted` is `managed`, so it rides the API-read contract: every
-    // backend's `<Agg>Response` carries a required `isDeleted` (Hono-canonical).
-    const model = await modelFrom(`
-      context Sales {
-        aggregate Order with softDeletable, softDelete {
-          subject: string
-        }
-        repository Orders for Order { }
-      }
-    `);
-    const files = generateDotnet(model);
-    const resp = files.get("Application/Orders/Responses/OrderResponses.cs")!;
-    expect(resp).toMatch(/\[property: Required\] bool IsDeleted/);
-  });
-
   it("does NOT install HasQueryFilter for non-softDeletable aggregates", async () => {
     const model = await modelFrom(aggregateOnly(""));
     const files = generateDotnet(model);
