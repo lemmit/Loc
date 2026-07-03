@@ -10,6 +10,7 @@
 import { expect, test } from "@playwright/test";
 import {
   browserCanReachNetwork,
+  clickWorkspaceCreate,
   dumpPreviewDiagnostics,
   fatalConsoleErrors,
   waitForPlaygroundReady,
@@ -42,7 +43,7 @@ test("mui@v7 preview boots without runtime errors", async ({ page }) => {
   await page.getByTestId("workspace-new").click();
   await page.getByRole("textbox", { name: /Choose example/i }).click();
   await page.getByRole("option", { name: /MUI v7 · aggregate-CRUD storybook/ }).click();
-  await page.getByTestId("workspace-create").click();
+  await clickWorkspaceCreate(page);
 
   await expect(page.getByText(/generated \d+ file\(s\)/)).toBeVisible({
     timeout: 30_000,

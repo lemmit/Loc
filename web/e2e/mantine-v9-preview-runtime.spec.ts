@@ -16,6 +16,7 @@
 import { expect, test } from "@playwright/test";
 import {
   browserCanReachNetwork,
+  clickWorkspaceCreate,
   dumpPreviewDiagnostics,
   fatalConsoleErrors,
   waitForPlaygroundReady,
@@ -53,7 +54,7 @@ test("mantine@v9 preview boots without runtime errors", async ({ page }) => {
   await page.getByTestId("workspace-new").click();
   await page.getByRole("textbox", { name: /Choose example/i }).click();
   await page.getByRole("option", { name: /Mantine 9 · pinned storybook/ }).click();
-  await page.getByTestId("workspace-create").click();
+  await clickWorkspaceCreate(page);
 
   // Wait for auto-Generate to populate the file tree.
   await expect(page.getByText(/generated \d+ file\(s\)/)).toBeVisible({

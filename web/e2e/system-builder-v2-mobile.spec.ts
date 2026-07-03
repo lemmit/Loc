@@ -5,6 +5,7 @@
 // panel from overflowing the small canvas.
 
 import { type Page, expect, test } from "@playwright/test";
+import { clickWorkspaceCreate } from "./_helpers";
 
 test.use({ viewport: { width: 390, height: 844 } });
 
@@ -18,7 +19,7 @@ async function pickExample(page: Page, label: RegExp): Promise<void> {
   await page.getByTestId("mobile-workspace-button").click({ timeout: 30_000 });
   await page.getByRole("textbox", { name: "Choose example" }).click({ timeout: 30_000 });
   await page.getByRole("option", { name: label }).first().click();
-  await page.getByTestId("workspace-create").click();
+  await clickWorkspaceCreate(page);
   // Brief settle while the source switches + the LSP re-parses.
   await page.waitForTimeout(1500);
 }

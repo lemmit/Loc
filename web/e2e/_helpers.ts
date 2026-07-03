@@ -152,18 +152,34 @@ export async function selectExample(page: Page, label: string | RegExp): Promise
   await page.getByTestId("workspace-new").click();
   await page.getByRole("textbox", { name: "Choose example" }).click();
   await page.getByRole("option", { name: label }).first().click();
-  // On slow CI runners Mantine's combobox portal briefly overlays the create
-  // button and the dialog re-renders mid-transition, so a single click lands on
-  // the closing overlay or a detached node and times out. Retry the click
-  // (re-finding the button each time) until the dialog actually closes —
-  // `workspace-create` is gone once the workspace is created.
+  await clickWorkspaceCreate(page);
+  // Re-wait for the LSP "0 errors" badge — the new workspace remounts
+  // the editor and re-parses the source, so the badge momentarily
+  // flickers to "—" before the new source validates.
+  await expect(page.getByText(/^0 errors$/)).toBeVisible({ timeout: 30_000 });
+}
+
+// Click the "Create workspace" button in the new-workspace dialog, robustly.
+//
+// Call this AFTER the example option has been chosen.  On slow CI runners the
+// Mantine combobox portal that just closed can briefly overlay the Create
+// button, and the dialog re-renders mid-transition — so a single click lands
+// on the closing overlay or a node that's already been detached ("element was
+// detached from the DOM, retrying" → a hard timeout).  This was the dominant
+// flake across the builder/preview specs.  Two guards: first wait for the
+// option listbox to actually unmount (the overlay is gone), then retry the
+// click — re-finding the button each attempt — until the dialog closes
+// (`workspace-create` is absent once the workspace is created).
+export async function clickWorkspaceCreate(page: Page): Promise<void> {
+  // Best-effort: the dropdown normally unmounts as soon as an option is
+  // picked, but on a slow render it lingers a beat.  Don't hard-fail if it
+  // never reports zero — the retry loop below is the real guard.
+  await expect(page.getByRole("option"))
+    .toHaveCount(0, { timeout: 10_000 })
+    .catch(() => {});
   const create = page.getByTestId("workspace-create");
   await expect(async () => {
     await create.click({ timeout: 10_000 });
     await expect(create).toBeHidden({ timeout: 5_000 });
   }).toPass({ timeout: 60_000 });
-  // Re-wait for the LSP "0 errors" badge — the new workspace remounts
-  // the editor and re-parses the source, so the badge momentarily
-  // flickers to "—" before the new source validates.
-  await expect(page.getByText(/^0 errors$/)).toBeVisible({ timeout: 30_000 });
 }

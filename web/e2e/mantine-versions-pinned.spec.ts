@@ -8,7 +8,7 @@
 // through worker generation, not just CLI smoke.
 
 import { expect, test } from "@playwright/test";
-import { waitForPlaygroundReady } from "./_helpers";
+import { clickWorkspaceCreate, waitForPlaygroundReady } from "./_helpers";
 
 test("playground dropdown lists both Mantine versions", async ({ page }) => {
   await page.goto("/");
@@ -38,7 +38,7 @@ test("pinned mantine@v9 storybook generates files end-to-end", async ({ page }) 
   await page.getByTestId("workspace-new").click();
   await page.getByRole("textbox", { name: /Choose example/i }).click();
   await page.getByRole("option", { name: /Mantine 9 · pinned storybook/ }).click();
-  await page.getByTestId("workspace-create").click();
+  await clickWorkspaceCreate(page);
 
   // Auto-Generate fires ~800ms after the example switch.  The footer
   // updates to "generated N file(s)" when the worker round-trips.
