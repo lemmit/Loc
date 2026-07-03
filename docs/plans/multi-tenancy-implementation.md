@@ -207,7 +207,13 @@ proposal status flip; fix the CLAUDE.md `src/macros/stdlib/audit/` drift.
 **1b (follow-up, separate PR):** registry self-scope filter
 (`Organization.id == currentUser.tenantId`) + claim-less `signUp` bootstrap via
 the `ignoring` filter-bypass; `tenant_id` index (blocked on the
-`uniqueness-and-indexes.md` surface).
+`uniqueness-and-indexes.md` surface); **cross-reference the `registry`/`claim`
+bindings** (`registry=[Aggregate:ID]`, `claim=[UserField:UserFieldName]`) — they
+ship as bare `ID`s today, the only un-Loomish reference in the grammar.
+Byte-identical surface, pure tooling win (navigation/rename/diagnostics). See the
+design-note **"Final recommendation"** section (decision 5) for the rationale and
+why it stays compatible with R1 (registry remains a system-level fact, not a
+per-aggregate marker).
 
 **Phase 2 (blocked — do not start):** `tenantRegistry` capability
 (`parent: Self id?` + managed `dataKey`), hierarchy + `deep`/`global` levels.
