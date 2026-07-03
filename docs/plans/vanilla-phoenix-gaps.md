@@ -14,6 +14,20 @@ on the vanilla backend later — this file is the tracked list.
 > first documented (two are live runtime/contract bugs, not just missing features).
 > Each entry carries a **Status** line with the audited verdict and the exact
 > emitter site to change.
+>
+> **Update 2026-07-03 — §14/§15 wire-parity sweep complete.** The
+> `wireShape`-driven serializer now covers every vanilla wire surface: relational
+> REST (#1628), event-sourced (#1633), document REST both directions (#1636),
+> and views in both shorthand + full form (#1639) — each boot-verified on real
+> Postgres (camelCase keys, no `inserted_at`/`updated_at` leak). Inbound camelCase
+> normalization (§15) covers the relational nested changesets (#1632) and the
+> document schemaless changeset (#1636). **Remaining §14 tail** (low wire-visibility,
+> deferred): the audit before/after snapshot (`wireSnapshot`, internal jsonb — not a
+> wire response) and the `WorkflowsController` result serializer (heterogeneous
+> non-aggregate result shapes — needs per-workflow result-type dispatch).
+> Independently spot-checked §7: generated Elixir is **not** `mix format`-clean
+> (long `Logger.info` calls, blank-line rules in `application.ex` and elsewhere) —
+> confirming it's a real multi-emitter M, still open.
 
 ## Status summary
 
@@ -34,9 +48,9 @@ on the vanilla backend later — this file is the tracked list.
 | §4 | `contains`-in-`where` membership | **CLOSED** (doc stale) | S | dead-code cleanup only |
 | §12 | `shape(document)` + custom ops/finds | honest validator gate | M | 3 (untracked find) |
 | §13 | LiveView operation-action bang fns | **CLOSED** | S–M | done |
-| §14 | Success-response wire shape (snake_case keys + leaked Ecto timestamps) | **FIX in #1628** — wireShape-driven serializer, boot-verified | M–L | done |
+| §14 | Success-response wire shape (snake_case keys + leaked Ecto timestamps) | **wireShape serializer swept across every wire surface** — relational REST (#1628), event-sourced (#1633), document (#1636), views both forms (#1639); all boot-verified. Only the audit snapshot (internal jsonb) + workflow-instance result (heterogeneous) remain | M–L | done (tail below) |
 | — | Ecto migration `default: now()`/`gen_random_uuid()` not `fragment(...)` | **FIX in #1628** — event-store table wouldn't compile; boot-blocker | S | done |
-| §15 | Inbound nested-containment camelCase key normalization | **FIXED** — every nested changeset snakes its own keys | M | done |
+| §15 | Inbound camelCase key normalization | **FIXED** — every relational nested changeset snakes its own keys (#1632); the document schemaless changeset snakes at the repository boundary, insert + update (#1636) | M | done |
 
 Restoring the 5-backend `conformance-parity` gate (removing
 `LOOM_E2E_SKIP_PHOENIX=1` and re-adding the elixir deployable to
@@ -472,7 +486,7 @@ pairs, and the 403 runtime-authorization target).
   carries the STRING-keyed jsonb map, so the projection first normalises `data`
   keys to strings (`Map.new(…, to_string(k))`) — the create response now matches
   the read response (`"itemCount":3`, both verified on real Postgres).
-- **View serialize (both forms) — FIXED (this branch):** the `ViewsController`
+- **View serialize (both forms) — FIXED (#1639):** the `ViewsController`
   `serialize/1` dumped shorthand aggregate structs via `Map.from_struct` (snake keys
   + leaked `inserted_at`/`updated_at`), and full-form views projected their bind map
   keyed by `snake(bind.name)` (a multi-word bind shipped `project_id`). Now:
@@ -488,7 +502,7 @@ pairs, and the 403 runtime-authorization target).
   shapes — a saga instance or a produced value) still `Map.from_struct`. Lowest
   traffic / least wire-visible of the set; need a per-record projection or a generic
   camelize helper. Tracked for a follow-up.
-- **Document INBOUND camelCase — FIXED (this branch, §15-analog, boot-found):** the
+- **Document INBOUND camelCase — FIXED (#1636, §15-analog, boot-found):** the
   document schemaless changeset casts snake `@all_fields` but never ran the §15
   `__normalize_keys` camelCase→snake pass, so a canonical camelCase create
   (`{"itemCount":3}`) left `item_count` unset → 422. Fixed at the repository
