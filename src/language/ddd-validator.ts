@@ -49,6 +49,7 @@ import {
   checkSelfType,
   checkSlotMemberAccess,
   checkSlotTypePosition,
+  checkTenancyDecls,
   checkTheme,
   checkTopLevelDomainComposition,
   checkTraceability,
@@ -224,6 +225,10 @@ export class DddValidator {
           }
         }
         for (const ab of authBlocks) checkAuthBlock(ab, m, accept);
+        // Tenancy declaration (multi-tenancy Phase 1a).  Duplicate +
+        // claim-exists checks; the registry/stance checks need the merged
+        // multi-file IR and live in the phase-⑦ tenancy checks.
+        checkTenancyDecls(m, accept);
         // Page metamodel.  Collect ui blocks first so per-
         // ui checks can see siblings (name uniqueness across uis), and
         // so per-deployable checks can cross-reference the system's

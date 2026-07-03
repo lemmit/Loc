@@ -83,6 +83,7 @@ aggregate Invoice {
 | `with tenantOwned` but no `tenancy by` in the system | `loom.tenant-owned-without-tenancy` | error |
 | `crossTenant` but no `tenancy by` | `loom.cross-tenant-without-tenancy` (intent declared, nothing to opt out of) | warning |
 | `aggregate X crossTenant with tenantOwned` | `loom.tenancy-conflicting-stance` | error |
+| the `of`-target itself marked `crossTenant` or `with tenantOwned` | `loom.tenancy-registry-marked` (the registry is self-keyed; neither marker fits) | error |
 
 The registry (`of`-target) is **exempt** from the stance lint — it is
 self-keyed; neither marker fits it (see the proposal's R1). In Phase 1a it gets
