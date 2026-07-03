@@ -107,6 +107,31 @@ describe("Hono database seeding (Phase 2, domain path)", () => {
     expect(seed).not.toMatch(/addr:\s*\(?\{ line1:/);
   });
 
+  it("coerces a datetime field written as a string literal into new Date(...)", async () => {
+    // A `datetime` create field is spelled as a string literal in the seed
+    // (`createdAt: "2024-…Z"`), but `create({...})` and drizzle's timestamp
+    // column take a `Date` — so the emitter wraps it in `new Date(...)`.
+    const src = `system TimeSeed {
+      subdomain S { context C {
+        aggregate Log with crudish {
+          message: string
+          createdAt: datetime
+        }
+        repository Logs for Log { }
+        seed default {
+          Log { message: "hi", createdAt: "2024-01-01T00:00:00Z" }
+        }
+      }}
+      api A from S
+      deployable api { platform: node contexts: [C] serves: A port: 3000 }
+    }`;
+    const { model, errors } = await parseString(src);
+    if (errors.length) throw new Error(errors.join("\n"));
+    const seed = find(generateSystems(model).files, /\/db\/seed\.ts$/);
+    expect(seed).toContain('createdAt: new Date("2024-01-01T00:00:00Z")');
+    expect(seed).not.toContain('createdAt: "2024-01-01T00:00:00Z"');
+  });
+
   it("is ship-once per dataset via the __loom_seed marker (D-SEED-IDEMPOTENCY)", async () => {
     const files = await build();
     const seed = find(files, /\/db\/seed\.ts$/);
