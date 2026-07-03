@@ -73,4 +73,22 @@ describe("variant-match — per-backend rendering", () => {
     expect(out).toContain("{:ok, a} -> a.code");
     expect(out).toContain('{:error, "NF", n} -> n.detail');
   });
+
+  it("Java: binderless arm gets a named throwaway binder, never `_` (preview-only on JDK 21)", () => {
+    const binderless: ExprIR = {
+      ...MATCH,
+      variantArms: [
+        {
+          varType: A,
+          binding: undefined,
+          value: { kind: "literal", lit: "string", value: "yes" },
+          isError: false,
+        },
+        { varType: NF, binding: "n", value: fieldOf("n", "detail"), isError: true },
+      ],
+    };
+    const out = renderJavaExpr(binderless);
+    expect(out).toContain('case AOrNF_A __unused -> "yes";');
+    expect(out).not.toMatch(/ _ ->/);
+  });
 });

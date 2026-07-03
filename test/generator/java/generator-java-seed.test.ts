@@ -60,4 +60,39 @@ describe("java generator — seed runner", () => {
     const paths = [...files.keys()].filter((k) => k.includes("SeedRunner"));
     expect(paths).toEqual([]);
   });
+
+  it("datetime seed literals parse to Instant at the create boundary", async () => {
+    const src = `
+      system Clock {
+        subdomain Core {
+          context Catalog {
+            aggregate Stamp {
+              label: string
+              at: datetime
+            }
+            repository Stamps for Stamp { }
+            seed default {
+              Stamp { label: "first", at: "2024-01-01T00:00:00Z" }
+            }
+          }
+        }
+        storage primary { type: postgres }
+        resource catalogState { for: Catalog, kind: state, use: primary }
+        deployable api {
+          platform: java
+          contexts: [Catalog]
+          dataSources: [catalogState]
+          port: 8080
+        }
+      }
+    `;
+    const files = await generateSystemFiles(src);
+    const s = files.get(
+      "api/src/main/java/com/loom/api/infrastructure/persistence/CatalogSeedRunner.java",
+    )!;
+    expect(s).toContain(
+      'stampsRepository.save(Stamp.create("first", Instant.parse("2024-01-01T00:00:00Z")));',
+    );
+    expect(s).toContain("import java.time.Instant;");
+  });
 });

@@ -327,9 +327,10 @@ const JAVA_TARGET: ExprTarget<JavaRenderContext> = {
   matchVariant(m) {
     const arms = m.arms.map((a) => {
       const carrier = `${m.unionName}_${a.tag}`;
-      // A pattern needs a binder even when the arm bound none; `_` is the
-      // Java 21 unnamed pattern variable.
-      const binder = a.binding ?? "_";
+      // A pattern needs a binder even when the arm bound none.  NOT `_`:
+      // unnamed pattern variables are preview-only on Java 21 (JEP 443;
+      // finalized in 22), so a bare `_` fails the generated JDK-21 build.
+      const binder = a.binding ?? "__unused";
       return `      case ${carrier} ${binder} -> ${a.value};`;
     });
     const tail = `      default -> ${m.otherwise ?? "null"};`;
