@@ -131,10 +131,27 @@ function lowerStore(s: Store, baseEnv: Env): StoreIR {
   const actionDecls = s.decls.filter((d): d is ActionDecl => d.$type === "ActionDecl");
   env = { ...env, actions: indexActions(actionDecls) };
   const actions = actionDecls.map((a) => lowerAction(a, env));
-  // v1: always in-memory — the lifetime ladder has no grammar surface yet
-  // (see the `Store` rule comment); the IR field + validator gate exist so the
-  // persistence follow-up only adds syntax.
-  return { name: s.name, lifetime: "memory", state, actions };
+  // Lifetime ladder (frontend-state-management.md §3.1): the optional
+  // `persist: <id>` clause names where the state lives.  The AST validator
+  // (`loom.store-lifetime-invalid`) rejects any value outside this set, so an
+  // unrecognised value here defaults to in-memory rather than crashing.
+  return { name: s.name, lifetime: lowerStoreLifetime(s.lifetime), state, actions };
+}
+
+/** Maps the grammar's `persist: <id>` identifier onto the `StoreIR.lifetime`
+ *  enum.  Absent clause (or an out-of-set value the validator already flagged)
+ *  → `"memory"`. */
+function lowerStoreLifetime(raw: string | undefined): StoreIR["lifetime"] {
+  switch (raw) {
+    case "local":
+      return "persistLocal";
+    case "session":
+      return "persistSession";
+    case "url":
+      return "url";
+    default:
+      return "memory";
+  }
 }
 
 // ---------------------------------------------------------------------------

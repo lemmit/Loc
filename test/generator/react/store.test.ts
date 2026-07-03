@@ -121,3 +121,53 @@ describe("React store emission", () => {
     expect(tsx).toContain("const cartLines = useCart((s) => s.lines);");
   });
 });
+
+// Lifetime ladder (frontend-state-management.md §3.1) — `persist:` picks where
+// the store's state lives.  The item shape is identical across tiers; only the
+// module wrapper (persist middleware / URL sync) changes.
+describe("React store lifetime ladder", () => {
+  const FILT = (life: string) => `
+    store Filt ${life} {
+      state { category: string = ""  pageNo: int = 0  minPrice: money = 0.00 }
+      action setPage(p: int) { pageNo := p }
+    }
+    page P { route: "/p" body: Heading { Filt.pageNo, level: 1 } }`;
+
+  it("persist: local wraps the store in the Zustand persist middleware over localStorage", async () => {
+    const mod = (await reactFiles(FILT("persist: local"))).get("web/src/stores/filt.ts")!;
+    expect(mod).toContain('import { persist, createJSONStorage } from "zustand/middleware";');
+    expect(mod).toContain("create<FiltState>()(");
+    expect(mod).toContain("persist(");
+    expect(mod).toContain('name: "loom.store.Filt",');
+    expect(mod).toContain("createJSONStorage(() => localStorage");
+    // money field is revived back into a Decimal on load.
+    expect(mod).toContain('["minPrice"].includes(key)');
+  });
+
+  it("persist: session backs the persist middleware with sessionStorage", async () => {
+    const mod = (await reactFiles(FILT("persist: session"))).get("web/src/stores/filt.ts")!;
+    expect(mod).toContain("createJSONStorage(() => sessionStorage");
+  });
+
+  it("persist: url syncs the store to the query string with a typed untrusted-input decoder", async () => {
+    const mod = (await reactFiles(FILT("persist: url"))).get("web/src/stores/filt.ts")!;
+    // Typed decode from the URL — each field coerced, defaulted on garbage.
+    expect(mod).toContain("function decodeFromUrl()");
+    expect(mod).toContain('category: p.get("category") ?? "",');
+    expect(mod).toContain('Number.isFinite(Number(p.get("pageNo")))');
+    expect(mod).toContain('p.get("minPrice")!.match(/^-?\\d+(\\.\\d+)?$/)');
+    // store → URL (replaceState) and URL → store (popstate) both wired.
+    expect(mod).toContain("window.history.replaceState(null");
+    expect(mod).toContain("useFilt.subscribe((s) => encodeToUrl(s));");
+    expect(mod).toContain('window.addEventListener("popstate"');
+    // seeded from the URL at creation.
+    expect(mod).toContain("...decodeFromUrl(),");
+  });
+
+  it("persist: memory (the default) is a plain create() with no persistence wrapper", async () => {
+    const mod = (await reactFiles(FILT("persist: memory"))).get("web/src/stores/filt.ts")!;
+    expect(mod).toContain("create<FiltState>((set) => ({");
+    expect(mod).not.toContain("zustand/middleware");
+    expect(mod).not.toContain("decodeFromUrl");
+  });
+});

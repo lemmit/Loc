@@ -10,6 +10,7 @@ import type {
   Model,
   NameRef,
   Page,
+  Store,
   System,
   ThemeBlock,
   Ui,
@@ -308,8 +309,26 @@ export function checkUi(ui: Ui, sys: System, accept: ValidationAcceptor): void {
     if (m.$type === "Page") checkPage(m, ui, accept);
     else if (m.$type === "MenuBlock") checkMenuBlock(m, ui, accept);
     else if (m.$type === "UiNotification") checkUiNotification(m, ui, accept);
+    else if (m.$type === "Store") checkStore(m, accept);
   }
   void sys;
+}
+
+/** Valid `persist: <value>` identifiers for the store lifetime ladder
+ *  (frontend-state-management.md §3.1).  The value is a plain `ID` in the
+ *  grammar (so `url`/`local`/`session` stay usable as field names), so its
+ *  membership is enforced here rather than by the parser. */
+const STORE_LIFETIMES = new Set(["memory", "local", "session", "url"]);
+
+export function checkStore(store: Store, accept: ValidationAcceptor): void {
+  if (store.lifetime != null && !STORE_LIFETIMES.has(store.lifetime)) {
+    accept(
+      "error",
+      `store '${store.name}': unknown lifetime '${store.lifetime}' — ` +
+        `\`persist:\` accepts ${[...STORE_LIFETIMES].join(" | ")}.`,
+      { node: store, property: "lifetime", code: "loom.store-lifetime-invalid" },
+    );
+  }
 }
 
 /** `on <param>.<Event>(e) { … }` live-event handler (channels.md Part I).

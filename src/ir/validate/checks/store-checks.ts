@@ -9,8 +9,10 @@
 //   loom.store-state-inline-write     — a page/component action writes a store
 //        field inline (`Cart.lines := …`); store state changes only inside
 //        store actions (§3.1, encapsulation).
-//   loom.store-lifetime-unsupported   — a store with a non-memory lifetime;
-//        v1 is in-memory only (the persist/sync ladder parses but is gated).
+//   (The former loom.store-lifetime-unsupported gate is retired — the
+//        `persist: memory|local|session|url` ladder now ships on every
+//        frontend; a bad value is caught at the AST tier as
+//        loom.store-lifetime-invalid, validators/ui.ts.)
 //   loom.store-cross-store-on-liveview-unsupported — a store action that calls
 //        a DIFFERENT store's action, on a `phoenixLiveView` deployable.  The
 //        LiveView projection seeds each used store as its OWN per-page assign
@@ -35,6 +37,19 @@ import type { LoomDiagnostic } from "./diagnostic.js";
 // `VIEW_EFFECT_BUILTINS` in ui-checks.ts (a store has no router/socket).
 const VIEW_EFFECT_BUILTINS = new Set<string>(["navigate", "toast"]);
 
+/** Render a `StoreIR.lifetime` enum back to its `persist:` source keyword for
+ *  diagnostics (`persistLocal` → `local`). */
+function lifetimeKeyword(lifetime: StoreIR["lifetime"]): string {
+  switch (lifetime) {
+    case "persistLocal":
+      return "local";
+    case "persistSession":
+      return "session";
+    default:
+      return lifetime; // "url" | "memory"
+  }
+}
+
 /** Walk a statement block, invoking `visit` on every nested statement
  *  (descending into block-body lambdas inside call/assign args). */
 function forEachStmt(stmts: readonly StmtIR[], visit: (s: StmtIR) => void): void {
@@ -58,16 +73,31 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
       for (const store of ui.stores) {
         const where = `store '${store.name}'`;
 
-        // loom.store-lifetime-unsupported — v1 is in-memory only.
-        if (store.lifetime !== "memory") {
-          diags.push({
-            severity: "error",
-            code: "loom.store-lifetime-unsupported",
-            message:
-              `${where}: lifetime '${store.lifetime}' is not supported yet — Loom v1 stores are ` +
-              `in-memory only (drop the \`persist:\`/\`sync:\` clause).`,
-            source: where,
-          });
+        // The lifetime ladder (`persist: memory|local|session|url`) now ships
+        // on every frontend, so the former `loom.store-lifetime-unsupported`
+        // gate is retired.  A malformed `persist:` value is rejected earlier at
+        // the AST tier (`loom.store-lifetime-invalid`, validators/ui.ts).
+
+        // loom.store-url-field-unsupported — a `persist: url` store reflects its
+        // fields into query params, which carry only scalars.  Arrays and nested
+        // entity/value-object fields have no faithful, round-trippable query
+        // encoding in v1, so reject them loudly rather than silently drop them
+        // from the sync (frontend-state-management.md §3.1).
+        if (store.lifetime === "url") {
+          for (const f of store.state) {
+            const k = f.type.kind;
+            if (k === "array" || k === "entity" || k === "valueobject") {
+              diags.push({
+                severity: "error",
+                code: "loom.store-url-field-unsupported",
+                message:
+                  `${where}: field '${f.name}' (${k}) cannot be URL-synced — ` +
+                  `\`persist: url\` fields must be scalar (string/number/bool/enum/id). ` +
+                  `Use \`persist: local\` for structural state.`,
+                source: where,
+              });
+            }
+          }
         }
 
         // loom.store-action-view-effect — a store action may not call a
@@ -190,7 +220,27 @@ export function validateStores(loom: EnrichedLoomModel, diags: LoomDiagnostic[])
         const isLiveView =
           dep.uiFramework === "phoenixLiveView" || ui?.framework === "phoenixLiveView";
         if (!isLiveView) continue;
+        // loom.store-lifetime-liveview-unsupported — the persistence tiers of
+        // the lifetime ladder don't map onto a server-rendered LiveView store:
+        // `local`/`session` are browser storage (no server-side equivalent),
+        // and `url` needs page-level `handle_params`/`push_patch` wiring the
+        // per-process struct module can't own.  v1 supports `memory` on
+        // LiveView; the rest ship on the SPA frontends (React/Vue/Svelte/
+        // Angular).  A LiveView store therefore stays in-memory.
         for (const store of stores) {
+          if (store.lifetime !== "memory") {
+            const where = `store '${store.name}'`;
+            diags.push({
+              severity: "error",
+              code: "loom.store-lifetime-liveview-unsupported",
+              message:
+                `${where}: \`persist: ${lifetimeKeyword(store.lifetime)}\` is not supported on the ` +
+                `phoenixLiveView frontend — a LiveView store is a server-side per-process struct ` +
+                `with no browser storage, and URL state is owned by the page's \`handle_params\`. ` +
+                `Use \`persist: memory\` here; the persistence tiers ship on the SPA frontends.`,
+              source: where,
+            });
+          }
           for (const action of store.actions) {
             forEachStmt(action.body, (s) => {
               if (

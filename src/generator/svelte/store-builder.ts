@@ -26,9 +26,9 @@
 // bare `clear` export.  See `svelte/walker/page-shell.ts` `renderStoreWiring`.
 // ---------------------------------------------------------------------------
 
-import type { ActionIR, StoreIR, TypeIR } from "../../ir/types/loom-ir.js";
+import type { ActionIR, StateFieldIR, StoreIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
-import { lowerFirst, snake } from "../../util/naming.js";
+import { lowerFirst, snake, upperFirst } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { defaultInitForJs } from "../_walker/js-target-helpers.js";
 import type { StateRef, WalkerTarget } from "../_walker/target.js";
@@ -174,7 +174,74 @@ function renderStoreActionExport(
   return `export const ${action.name} = (${paramSig}) => { ${stmts.join(" ")} };`;
 }
 
-/** Render the full Svelte runes store module for a `StoreIR`. */
+/** The set of money-typed **top-level** field names — the keys a persisted or
+ *  URL-synced store must revive back into `Decimal` (JSON/query strings carry
+ *  them as plain strings).  Nested money (inside an array/entity) is a
+ *  documented v1 limitation of the persisted/URL tiers.  Mirrors
+ *  `react/store-builder.ts` `moneyFieldNames`. */
+function moneyFieldNames(store: StoreIR): string[] {
+  return store.state
+    .filter((f) => f.type.kind === "primitive" && f.type.name === "money")
+    .map((f) => f.name);
+}
+
+/** A URL query param decodes as an untrusted string → the field's typed value,
+ *  defaulting on anything unparseable (frontend-state-management.md §3.1).  One
+ *  decode expression per field, read from a `URLSearchParams` named `p`.  Byte
+ *  identical to `react/store-builder.ts` `decodeFieldFromParam`. */
+function decodeFieldFromParam(field: StateFieldIR): string {
+  const key = JSON.stringify(field.name);
+  const t = field.type;
+  if (t.kind === "primitive") {
+    switch (t.name) {
+      case "int":
+      case "long":
+      case "decimal":
+        return `p.has(${key}) && Number.isFinite(Number(p.get(${key}))) ? Number(p.get(${key})) : ${storeFieldInit(t)}`;
+      case "money":
+        return `p.has(${key}) && p.get(${key})!.match(/^-?\\d+(\\.\\d+)?$/) ? new Decimal(p.get(${key})!) : ${storeFieldInit(t)}`;
+      case "bool":
+        return `p.get(${key}) === "true"`;
+      default:
+        return `p.get(${key}) ?? ${storeFieldInit(t)}`;
+    }
+  }
+  // ids/enums decode as bare strings (enum membership is not re-checked here;
+  // an off-set value is harmless client filter state, re-validated server-side).
+  if (t.kind === "id" || t.kind === "enum") return `p.get(${key}) ?? ${storeFieldInit(t)}`;
+  // Arrays / entities / anything structural are not URL-encodable in v1 — the
+  // validator (loom.store-url-field-unsupported) blocks them, so this is a
+  // defensive default only.
+  return storeFieldInit(t);
+}
+
+/** Serialise a field back into the query string (`p.set` / `p.delete`), keyed
+ *  by the field name; empty/default values are dropped so the URL stays clean.
+ *  Reads off `s` (the state slice arg) — byte identical to
+ *  `react/store-builder.ts` `encodeFieldToParam`. */
+function encodeFieldToParam(field: StateFieldIR): string {
+  const key = JSON.stringify(field.name);
+  const t = field.type;
+  const ref = `s.${field.name}`;
+  if (t.kind === "primitive" && t.name === "money") {
+    return `if (${ref} != null) p.set(${key}, ${ref}.toString()); else p.delete(${key});`;
+  }
+  if (t.kind === "primitive" && t.name === "bool") {
+    return `if (${ref}) p.set(${key}, "true"); else p.delete(${key});`;
+  }
+  return `if (${ref} !== undefined && ${ref} !== "" && ${ref} !== null) p.set(${key}, String(${ref})); else p.delete(${key});`;
+}
+
+/** Render the full Svelte runes store module for a `StoreIR`, honouring its
+ *  lifetime (frontend-state-management.md §3.1 — the Svelte sibling of
+ *  `react/store-builder.ts`):
+ *   - `memory`  → a plain module-singleton `$state` rune.
+ *   - `persistLocal` / `persistSession` → hydrate the rune from
+ *     `localStorage` / `sessionStorage` on init and mirror every change back
+ *     via a module-level `$effect.root` (money fields revived via a reviver).
+ *   - `url` → a router-agnostic bidirectional sync: seed from the query string
+ *     via a typed untrusted-input decoder, and mirror every change back with
+ *     `history.replaceState`, re-decoding on `popstate`. */
 export function renderSvelteStoreModule(store: StoreIR): string {
   const storeVar = storeVarName(store.name);
   const fieldNames = new Set(store.state.map((f) => f.name));
@@ -184,19 +251,172 @@ export function renderSvelteStoreModule(store: StoreIR): string {
     (f) => f.type.kind === "primitive" && f.type.name === "money",
   );
 
-  const stateType = `{ ${store.state.map((f) => `${f.name}: ${storeFieldTsType(f.type)}`).join("; ")} }`;
+  const stateTypeName = `${upperFirst(store.name)}State`;
+  const stateTypeLiteral = `{ ${store.state.map((f) => `${f.name}: ${storeFieldTsType(f.type)}`).join("; ")} }`;
+
+  if (store.lifetime === "url") {
+    return renderUrlStoreModule(store, storeVar, fieldNames, stateTypeName, stateTypeLiteral, needsDecimal);
+  }
+
+  if (store.lifetime === "persistLocal" || store.lifetime === "persistSession") {
+    return renderPersistStoreModule(
+      store,
+      storeVar,
+      fieldNames,
+      stateTypeName,
+      stateTypeLiteral,
+      needsDecimal,
+    );
+  }
+
   const stateEntries = store.state.map((f) => `  ${f.name}: ${storeFieldInit(f.type)},`);
 
   return lines(
     needsDecimal ? `import Decimal from "decimal.js";` : undefined,
     needsDecimal ? "" : undefined,
     `// Shared client-side state container generated from \`store ${store.name}\`.`,
-    `// In-memory (session-volatile) — Loom v1 stores carry no persistence.`,
+    `// In-memory (\`persist: memory\`, the default) — survives navigation, dies on reload.`,
     `// The \`$state\` rune makes this module singleton deeply reactive; the`,
     `// \`.svelte.ts\` filename is REQUIRED for runes to compile in a module.`,
-    `export const ${storeVar} = $state<${stateType}>({`,
+    `export const ${storeVar} = $state<${stateTypeLiteral}>({`,
     ...stateEntries,
     `});`,
+    "",
+    ...store.actions.map((a) => renderStoreActionExport(a, storeVar, fieldNames)),
+    "",
+  );
+}
+
+/** The `persistLocal` / `persistSession` lifetime: hydrate the rune from Web
+ *  Storage on init, and mirror every change back through a module-level
+ *  `$effect.root` (the only way to own a reactive effect outside a component —
+ *  a plain `.svelte.ts` singleton has no component effect scope). */
+function renderPersistStoreModule(
+  store: StoreIR,
+  storeVar: string,
+  fieldNames: ReadonlySet<string>,
+  stateTypeName: string,
+  stateTypeLiteral: string,
+  needsDecimal: boolean,
+): string {
+  const backing = store.lifetime === "persistLocal" ? "localStorage" : "sessionStorage";
+  const persistLabel = store.lifetime === "persistLocal" ? "local" : "session";
+  const survives =
+    store.lifetime === "persistLocal" ? "a browser restart" : "reload, cleared with the tab";
+  const moneyKeys = moneyFieldNames(store);
+
+  // Money fields serialise to strings in JSON; a keyed reviver reconstructs the
+  // `Decimal` on load (top-level money fields — nested money is a documented v1
+  // limitation of the persisted tier).
+  const parseLines = needsDecimal
+    ? [
+        `    // Money fields serialise to strings in JSON; a keyed reviver reconstructs`,
+        `    // the \`Decimal\` on load (top-level money fields — nested money is a`,
+        `    // documented v1 limitation of the persisted tier).`,
+        `    const parsed = JSON.parse(raw, (key, value) =>`,
+        `      ${JSON.stringify(moneyKeys)}.includes(key) && typeof value === "string"`,
+        `        ? new Decimal(value)`,
+        `        : value,`,
+        `    ) as Partial<${stateTypeName}>;`,
+        `    return { ...defaults, ...parsed };`,
+      ]
+    : [
+        `    const parsed = JSON.parse(raw) as Partial<${stateTypeName}>;`,
+        `    return { ...defaults, ...parsed };`,
+      ];
+
+  return lines(
+    needsDecimal ? `import Decimal from "decimal.js";` : undefined,
+    needsDecimal ? "" : undefined,
+    `// Shared client-side state container generated from \`store ${store.name}\`.`,
+    `// Persisted to ${backing} (\`persist: ${persistLabel}\`) — survives ${survives}.`,
+    `// The \`$state\` rune makes this module singleton deeply reactive; the`,
+    `// \`.svelte.ts\` filename is REQUIRED for runes to compile in a module.`,
+    `type ${stateTypeName} = ${stateTypeLiteral};`,
+    "",
+    `const STORAGE_KEY = ${JSON.stringify(`loom.store.${store.name}`)};`,
+    "",
+    `function loadInitial(): ${stateTypeName} {`,
+    `  const defaults: ${stateTypeName} = {`,
+    ...store.state.map((f) => `    ${f.name}: ${storeFieldInit(f.type)},`),
+    `  };`,
+    `  if (typeof ${backing} === "undefined") return defaults;`,
+    `  const raw = ${backing}.getItem(STORAGE_KEY);`,
+    `  if (raw === null) return defaults;`,
+    `  try {`,
+    ...parseLines,
+    `  } catch {`,
+    `    return defaults;`,
+    `  }`,
+    `}`,
+    "",
+    `export const ${storeVar} = $state<${stateTypeName}>(loadInitial());`,
+    "",
+    `// store → ${backing}: mirror every change back on write (a module-level`,
+    `// \`$effect.root\` owns the effect outside any component scope).`,
+    `$effect.root(() => {`,
+    `  $effect(() => {`,
+    `    if (typeof ${backing} !== "undefined") {`,
+    `      ${backing}.setItem(STORAGE_KEY, JSON.stringify(${storeVar}));`,
+    `    }`,
+    `  });`,
+    `});`,
+    "",
+    ...store.actions.map((a) => renderStoreActionExport(a, storeVar, fieldNames)),
+    "",
+  );
+}
+
+/** The `url` lifetime: the query string is the source of truth, decoded through
+ *  a typed untrusted-input decoder and mirrored back on every change.  Router
+ *  agnostic on purpose (matches React) — a module-level singleton cannot reach
+ *  SvelteKit's `$app/stores`/`goto`, so it drives `window.location` directly. */
+function renderUrlStoreModule(
+  store: StoreIR,
+  storeVar: string,
+  fieldNames: ReadonlySet<string>,
+  stateTypeName: string,
+  stateTypeLiteral: string,
+  needsDecimal: boolean,
+): string {
+  return lines(
+    needsDecimal ? `import Decimal from "decimal.js";` : undefined,
+    needsDecimal ? "" : undefined,
+    `// Shared client-side state container generated from \`store ${store.name}\`.`,
+    `// Synced to the URL query string (\`persist: url\`) — shareable, deep-linkable,`,
+    `// back/forward-navigable.  The URL is untrusted input: each field is decoded`,
+    `// through its declared type and defaulted on anything unparseable.`,
+    `// The \`$state\` rune makes this module singleton deeply reactive; the`,
+    `// \`.svelte.ts\` filename is REQUIRED for runes to compile in a module.`,
+    `type ${stateTypeName} = ${stateTypeLiteral};`,
+    "",
+    `function decodeFromUrl(): ${stateTypeName} {`,
+    `  const p = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);`,
+    `  return {`,
+    ...store.state.map((f) => `    ${f.name}: ${decodeFieldFromParam(f)},`),
+    `  };`,
+    `}`,
+    "",
+    `function encodeToUrl(s: ${stateTypeName}): void {`,
+    `  if (typeof window === "undefined") return;`,
+    `  const p = new URLSearchParams(window.location.search);`,
+    ...store.state.map((f) => `  ${encodeFieldToParam(f)}`),
+    `  const qs = p.toString();`,
+    `  window.history.replaceState(null, "", qs ? \`?\${qs}\` : window.location.pathname);`,
+    `}`,
+    "",
+    `export const ${storeVar} = $state<${stateTypeName}>(decodeFromUrl());`,
+    "",
+    `// store → URL: mirror every change back (replaceState, no history spam); a`,
+    `// module-level \`$effect.root\` owns the effect outside any component scope.`,
+    `$effect.root(() => {`,
+    `  $effect(() => encodeToUrl(${storeVar}));`,
+    `});`,
+    "",
+    `// URL → store: re-decode on back/forward and manual address edits.`,
+    `if (typeof window !== "undefined") {`,
+    `  window.addEventListener("popstate", () => Object.assign(${storeVar}, decodeFromUrl()));`,
+    `}`,
     "",
     ...store.actions.map((a) => renderStoreActionExport(a, storeVar, fieldNames)),
     "",

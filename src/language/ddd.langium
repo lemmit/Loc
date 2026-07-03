@@ -389,17 +389,17 @@ UiMember:
 // the per-page store dependency is DERIVED from the page's resolved refs at
 // emit time (derive-don't-stamp), never bound per-surface.
 //
-// v1 is **in-memory only**.  The `persist: local|session` / `sync: url`
-// lifetime ladder is intentionally NOT in the grammar yet: those words are
-// common identifiers (a `url` field, an `operation sync()`), and aggregate /
-// operation / event NAMES are plain `ID`, so admitting them as keywords would
-// break existing source the soft-keyword escape hatch can't reach without
-// touching every `name=ID`.  The IR carries a `lifetime` field (always
-// `"memory"` today) + a `loom.store-lifetime-unsupported` validator so the
-// follow-up that ships persistence only adds the surface syntax (with the
-// soft-keyword care that needs) — the semantics + gate already exist.
+// The **lifetime ladder** (frontend-state-management.md §3.1): an optional
+// `persist: memory|local|session|url` modifier picks where the store's state
+// lives (default = in-memory).  ONE new keyword `persist:`; the value is a
+// validated *identifier* (`StorePersist.value`), NOT a keyword, so `url` /
+// `local` / `session` / `memory` stay usable as ordinary field/aggregate names
+// everywhere — sidestepping the reserved-word breakage that literal value
+// keywords would cause.  The value ∈ {memory,local,session,url} is checked in
+// the AST validator (`loom.store-lifetime-invalid`); lowering maps it onto the
+// `StoreIR.lifetime` enum.
 Store:
-    'store' name=ID '{'
+    'store' name=ID ('persist' ':' lifetime=ID)? '{'
         decls+=StoreDecl*
     '}';
 
