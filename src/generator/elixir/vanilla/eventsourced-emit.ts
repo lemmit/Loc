@@ -41,6 +41,8 @@ import { contextHasDispatcher } from "../dispatch-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { aggregateHasUnionFind, renderFindActions } from "./find-controller.js";
 import { renderProblemVariantHelper } from "./operation-returns-emit.js";
+import { hasRefColls } from "./ref-collection-emit.js";
+import { renderWireSerialize } from "./wire-serialize.js";
 
 /** Truth-kind predicate — an aggregate whose persistence is its event log. */
 export function isEventSourced(agg: AggregateIR): boolean {
@@ -540,6 +542,22 @@ export function renderEsController(
     ? `\n${renderProblemVariantHelper()}\n`
     : "";
 
+  // §14: serialize the folded struct from the enriched `wireShape` (camelCase
+  // keys, matching the relational REST path + every other backend) instead of a
+  // raw `Map.from_struct` dump (snake_case).  The ES struct's fields are exactly
+  // `snake(wireShape.name)` (`structFields`), so `renderWireSerialize`'s
+  // `record.<snake>` reads line up.  A ref-collection field would need a
+  // `__ref_ids/1` helper whose Ecto-assoc semantics don't hold for the in-memory
+  // fold, so those (rare) aggregates keep the raw dump.
+  const wire = hasRefColls(agg) ? null : renderWireSerialize(agg, ctx);
+  const serializeBlock = wire
+    ? `${wire.serialize}${wire.helpers.length > 0 ? `\n\n${wire.helpers.join("\n\n")}` : ""}`
+    : `  defp serialize(record) do
+    record
+    |> Map.from_struct()
+    |> Map.drop([:__meta__, :__struct__])
+  end`;
+
   return `# Auto-generated.
 defmodule ${appModule}Web.${aggPascal}Controller do
   use ${appModule}Web, :controller
@@ -564,11 +582,7 @@ defmodule ${appModule}Web.${aggPascal}Controller do
 ${findActions}
 ${create}${opActions}
 ${commandError}${problemVariant}
-  defp serialize(record) do
-    record
-    |> Map.from_struct()
-    |> Map.drop([:__meta__, :__struct__])
-  end
+${serializeBlock}
 end
 `;
 }
