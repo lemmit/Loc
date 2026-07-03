@@ -222,6 +222,12 @@ export function renderDockerfile(
     ...spaStage,
     `FROM gradle:8-jdk${JAVA_VERSION} AS build`,
     `WORKDIR /src`,
+    `# Optional proxy CAs — drop *.crt files into ./certs/ to make Gradle`,
+    `# trust them.  The directory always exists (with a .gitkeep), so the`,
+    `# COPY is a no-op when no CAs are configured.  Gradle resolves over`,
+    `# the JDK's own truststore (not the OS bundle), so import there.`,
+    `COPY certs/ /tmp/loom-certs/`,
+    `RUN for c in /tmp/loom-certs/*.crt; do [ -f "$c" ] && keytool -importcert -noprompt -trustcacerts -cacerts -storepass changeit -alias "loom-$(basename "$c" .crt)" -file "$c"; done || true`,
     `COPY build.gradle.kts settings.gradle.kts ./`,
     // Resolve the dependency graph in its own layer so source edits
     // don't re-download the world.

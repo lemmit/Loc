@@ -38,7 +38,11 @@ function wireFieldType(
         case "decimal":
           return "float";
         case "money":
-          return dir === "request" ? "Decimal" : "float";
+          // Money crosses the wire as its canonical decimal STRING in both
+          // directions on every backend (Hono/.NET/Java/Phoenix) — the route
+          // handler re-parses it into Decimal for the domain
+          // (`pyWireToDomain`), and `to_wire` stringifies on the way out.
+          return "str";
         case "string":
         case "guid":
           return "str";

@@ -82,7 +82,10 @@ describe("Hono workflow instance routes", () => {
     expect(wf).toContain('path: "/order_fulfillment/instances",');
     expect(wf).toContain("const rows = await db.select().from(schema.orderFulfillments);");
     // By correlation id — 404 when absent, filtered on the correlation column.
+    // The param carries the uuid format every backend declares on `/{id}`
+    // (paramTypeDiffs parity — .NET `Guid id`, Java `UUID id`, Python Path()).
     expect(wf).toContain('path: "/order_fulfillment/instances/{id}",');
+    expect(wf).toContain("request: { params: z.object({ id: z.string().uuid() }) },");
     expect(wf).toMatch(/eq\(schema\.orderFulfillments\.orderId, id\)/);
     expect(wf).toContain('if (!row) throw new AggregateNotFoundError("not_found");');
     // Both are GETs tagged under workflows.

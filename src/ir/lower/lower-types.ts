@@ -70,13 +70,32 @@ export interface Env {
    *  state-bearing entity (workflow-and-applier.md A2), so `this` / bare names
    *  resolve against its `Property` state fields. */
   workflow?: Workflow;
-  locals: Map<string, { kind: "param" | "let" | "lambda" | "match-binding"; type: TypeIR }>;
+  locals: Map<
+    string,
+    {
+      kind: "param" | "let" | "lambda" | "match-binding";
+      type: TypeIR;
+      /** True when this local holds a repository union-find result — an
+       *  absence-shaped runtime value (bare aggregate-or-absent, never the
+       *  tagged wire; payloads.md §Union finds).  Read by the variant-match
+       *  lowering to stamp `subjectShape: "absence"` on matches over it. */
+      absenceUnion?: boolean;
+    }
+  >;
   /** System-wide user-claim shape — the lowered `user { ... }` block.
    *  Threaded down by the lowering structure layer so every
    *  expression context (operation / workflow / view / test) can
    *  resolve the magic `currentUser` identifier.  Undefined for
    *  systems / loose contexts that don't declare a user block. */
   user?: UserIR;
+  /** Bare-name → already-lowered-ExprIR substitutions for absence-shaped
+   *  variant-match bindings (loom-ir.ts `subjectShape`): the binding is an
+   *  alias of the (narrowed) subject on every backend — there is no separate
+   *  variant carrier to bind at runtime — so a reference to it lowers
+   *  directly to a subject ref typed at the matched variant.  Consulted in
+   *  `resolveNameRef` before the ordinary local lookup.  Undefined outside
+   *  an absence-match arm. */
+  refAliases?: Map<string, ExprIR>;
   /** Active criterion-parameter substitutions, set only while inlining
    *  a `criterion` body at a use site (see `inlineCriterion` in
    *  lower-expr.ts).  Maps each parameter name to the caller's already-
@@ -149,9 +168,10 @@ export function withLocal(
   name: string,
   kind: "param" | "let" | "lambda" | "match-binding",
   type: TypeIR,
+  opts?: { absenceUnion?: boolean },
 ): Env {
   const next = new Map(env.locals);
-  next.set(name, { kind, type });
+  next.set(name, { kind, type, ...(opts?.absenceUnion ? { absenceUnion: true } : {}) });
   return { ...env, locals: next };
 }
 

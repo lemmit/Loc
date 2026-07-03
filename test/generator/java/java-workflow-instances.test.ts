@@ -77,6 +77,27 @@ describe("java workflow instance read endpoints", () => {
     expect(ctrl).toContain("import java.util.UUID;");
   });
 
+  it("covers the instance routes in the OpenAPI contract customizer", async () => {
+    // springdoc inlines `List<T>` and declares no 404s — the customizer must
+    // register the named `<Wf>InstanceListResponse` wrapper, the byId 404,
+    // and the instance DTO's required set (every non-optional wire field),
+    // matching Hono / .NET / Python / Phoenix.
+    const c = find(await gen(SRC), "OpenApiContractCustomizer.java");
+    expect(c, "customizer not emitted").toBeDefined();
+    expect(c).toContain(
+      'new Wrapper("OrderFulfillmentInstanceListResponse", "OrderFulfillmentInstanceResponse")',
+    );
+    expect(c).toContain(
+      'new Route("get", "/api/workflows/order_fulfillment/instances", "OrderFulfillmentInstanceListResponse", new int[] {}, null)',
+    );
+    expect(c).toContain(
+      'new Route("get", "/api/workflows/order_fulfillment/instances/{id}", null, new int[] {404}, null)',
+    );
+    expect(c).toContain(
+      'new RequiredSet("OrderFulfillmentInstanceResponse", List.of("attempts", "orderId", "status"))',
+    );
+  });
+
   it("emits no instance surface for a workflow without a correlation field", async () => {
     const files = await gen(PLAIN);
     expect([...files.keys()].some((k) => k.endsWith("WorkflowInstancesController.java"))).toBe(

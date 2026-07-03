@@ -19,9 +19,8 @@
 // D-SEED-XREF (an `@handle` indirection was considered and not adopted).
 // Not yet handled (later slices): create-shape validation.
 
-import { createInputFields } from "../../../ir/enrich/wire-projection.js";
+import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import type {
-  EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   ExprIR,
   SeedRowIR,
@@ -49,16 +48,23 @@ export function emitTypescriptSeeds(ctx: EnrichedBoundedContextIR, out: Map<stri
   if (datasets.length === 0) return;
 
   // Only non-abstract aggregates have a `create` factory + repository.
-  const seedableAggs = ctx.aggregates.filter((a) => !a.isAbstract);
-  const seedable = new Set(seedableAggs.map((a) => a.name));
-  const aggByName = new Map<string, EnrichedAggregateIR>(seedableAggs.map((a) => [a.name, a]));
+  const seedable = new Set(ctx.aggregates.filter((a) => !a.isAbstract).map((a) => a.name));
+
+  // Create-input field types per aggregate, so a seed literal can coerce to
+  // its declared type (datetime string → `new Date(…)`).
+  const typesByAgg = new Map<string, Map<string, TypeIR>>(
+    ctx.aggregates.map((a) => [
+      a.name,
+      new Map(forCreateInput(a.fields).map((f) => [f.name, f.type] as const)),
+    ]),
+  );
 
   const fnBlocks: string[] = [];
   const callLines: string[] = [];
   for (const ds of datasets) {
     const entries = ds.entries.filter((e) => seedable.has(e.row.aggregate));
     if (entries.length === 0) continue;
-    fnBlocks.push(renderDatasetFn(ds.name, entries, aggByName));
+    fnBlocks.push(renderDatasetFn(ds.name, entries, typesByAgg));
     callLines.push(`  await seed${upperFirst(ds.name)}(db, requested);`);
   }
   if (callLines.length === 0) return;
@@ -69,6 +75,7 @@ export function emitTypescriptSeeds(ctx: EnrichedBoundedContextIR, out: Map<stri
     "db/seed.ts",
     renderSeedFile(body, callLines, usedAggregates(datasets, seedable), voEnumNames),
   );
+  out.set("db/seed-cli.ts", renderSeedCliFile());
 }
 
 /** Group every `SeedIR` row by dataset, preserving source order + path. */
@@ -103,7 +110,7 @@ function usedAggregates(datasets: Dataset[], seedable: Set<string>): string[] {
 function renderDatasetFn(
   dataset: string,
   entries: Entry[],
-  aggByName: Map<string, EnrichedAggregateIR>,
+  typesByAgg: Map<string, Map<string, TypeIR>>,
 ): string {
   // One repository instance per distinct aggregate used on the domain path.
   const domainAggs = [...new Set(entries.filter((e) => !e.raw).map((e) => e.row.aggregate))];
@@ -114,7 +121,7 @@ function renderDatasetFn(
     e.raw
       ? // raw path (D-SEED-XREF): direct INSERT with explicit id + FK columns.
         `  await db.execute(sql.raw(${JSON.stringify(renderSeedRowInsert(e.row.aggregate, e.row.fields))}));`
-      : `  await ${repoVar(e.row.aggregate)}.save(${e.row.aggregate}.create(${renderInput(e.row, aggByName.get(e.row.aggregate)!)}));`,
+      : `  await ${repoVar(e.row.aggregate)}.save(${e.row.aggregate}.create(${renderInput(e.row, typesByAgg.get(e.row.aggregate))}));`,
   );
   return lines(
     `async function seed${upperFirst(dataset)}(db: Db, requested: Set<string>): Promise<void> {`,
@@ -128,35 +135,28 @@ function renderDatasetFn(
   );
 }
 
-/** `{ field: <expr>, … }` create-input literal from a seed row.  Values render
- *  through the default `renderTsExpr` context, except `datetime` fields — the
- *  row writes them as string literals (`"2024-…Z"`) but the domain `create`
- *  factory (and drizzle's timestamp column) take a `Date`, so those are coerced
- *  to `new Date(…)`. */
-function renderInput(row: SeedRowIR, agg: EnrichedAggregateIR): string {
+/** `{ field: <expr>, … }` create-input literal from a seed row. */
+function renderInput(row: SeedRowIR, types: Map<string, TypeIR> | undefined): string {
   if (row.fields.length === 0) return "{}";
-  const typeByName = new Map(createInputFields(agg).map((f) => [f.name, f.type]));
-  const entries = row.fields.map(
-    (f) => `${f.name}: ${renderField(f.value, typeByName.get(f.name))}`,
-  );
+  const entries = row.fields.map((f) => `${f.name}: ${renderField(f.value, types?.get(f.name))}`);
   return `{ ${entries.join(", ")} }`;
 }
 
 function renderField(value: ExprIR, type: TypeIR | undefined): string {
   // Seed expressions never reference `this` — the default render context
   // (literals / enum-value / value-object-ctor / money / now()) suffices.
-  return coerceSeedValue(type, renderTsExpr(value));
-}
-
-/** A seed row's `datetime` field is written as a string literal (`"2024-…Z"`),
- *  but the `create({…})` factory takes a `Date` (drizzle's timestamp column
- *  calls `.toISOString()` on it) — coerce it to `new Date(…)`. */
-function coerceSeedValue(type: TypeIR | undefined, rendered: string): string {
-  const leaf = type?.kind === "optional" ? type.inner : type;
-  if (leaf?.kind === "primitive" && leaf.name === "datetime") {
-    return `new Date(${rendered})`;
+  // A datetime-typed string literal coerces through the Date ctor: the domain
+  // `create` takes `createdAt: Date`, not the ISO string.
+  const inner = type?.kind === "optional" ? type.inner : type;
+  if (
+    inner?.kind === "primitive" &&
+    inner.name === "datetime" &&
+    value.kind === "literal" &&
+    value.lit === "string"
+  ) {
+    return `new Date(${renderTsExpr(value)})`;
   }
-  return rendered;
+  return renderTsExpr(value);
 }
 
 function repoVar(agg: string): string {
@@ -186,9 +186,6 @@ function renderSeedFile(
     usesDecimal && `import Decimal from "decimal.js";`,
     `import { sql } from "drizzle-orm";`,
     `import type { NodePgDatabase } from "drizzle-orm/node-postgres";`,
-    `import { drizzle } from "drizzle-orm/node-postgres";`,
-    `import pg from "pg";`,
-    `import { pathToFileURL } from "node:url";`,
     `import * as schema from "./schema";`,
     `import { NoopDomainEventDispatcher } from "../domain/events";`,
     ...aggs.map((a) => `import { ${a} } from "../domain/${lowerFirst(a)}";`),
@@ -236,13 +233,28 @@ function renderSeedFile(
       "}",
       "",
       body,
-      "// When run directly (`npm run db:seed` = `tsx db/seed.ts`) connect and",
-      "// seed; when imported by index.ts the exported `runSeeds(db)` is called",
-      "// against the live pool AFTER migrations.  The self-run guard MUST also",
-      "// verify the entry is a seed file: tsup bundles this module into",
-      "// `dist/index.js`, so a bare `import.meta.url === argv[1]` check is true",
-      "// there too and would self-run `main()` (seeding without migrations,",
-      "// racing the app's own migrate→seed) on every boot.",
+    ) + "\n"
+  );
+}
+
+/** The standalone `npm run db:seed` entry, emitted as its OWN file so the
+ *  importable `db/seed.ts` module carries no self-executing code.  The
+ *  previous in-module `import.meta.url === pathToFileURL(process.argv[1])`
+ *  guard misfired once tsup bundled seed.ts into dist/index.js — there the
+ *  module's `import.meta.url` IS the entrypoint, so seeds ran at module
+ *  load, BEFORE the top-level migrate, and first boot died on
+ *  `relation ... does not exist` (caught live by conformance-parity). */
+function renderSeedCliFile(): string {
+  return (
+    lines(
+      "// Auto-generated.  Do not edit by hand.",
+      `import { drizzle } from "drizzle-orm/node-postgres";`,
+      `import pg from "pg";`,
+      `import * as schema from "./schema";`,
+      `import { runSeeds } from "./seed";`,
+      "",
+      "// Standalone seeding (`npm run db:seed`) — the server boot path calls",
+      "// the exported `runSeeds(db)` from index.ts instead, after migrations.",
       "async function main(): Promise<void> {",
       "  if (!process.env.DATABASE_URL) {",
       '    throw new Error("DATABASE_URL is required to run seeds.");',
@@ -256,13 +268,7 @@ function renderSeedFile(
       "  }",
       "}",
       "",
-      "if (",
-      "  process.argv[1] &&",
-      "  import.meta.url === pathToFileURL(process.argv[1]).href &&",
-      "  /[/\\\\]seed\\.[cm]?[jt]s$/.test(process.argv[1])",
-      ") {",
-      "  void main();",
-      "}",
+      "void main();",
     ) + "\n"
   );
 }

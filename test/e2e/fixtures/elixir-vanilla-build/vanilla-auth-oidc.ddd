@@ -15,6 +15,9 @@ system Helpdesk {
     oidc {
       issuer: env("OIDC_ISSUER")
       clientId: env("OIDC_CLIENT_ID")
+      // audience exercises the verifier's aud check (parity with the other
+      // backends' ValidateAudience) — compile-gated here.
+      audience: "vanilla-api"
     }
     claims: { roles: "realm_access.roles", email: "email" }
   }

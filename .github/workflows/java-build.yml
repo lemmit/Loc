@@ -21,6 +21,8 @@ on:
     branches: [main]
     paths:
       - 'src/generator/java/**'
+      - 'src/generator/_expr/**'
+      - 'src/ir/**'
       - 'src/platform/java.ts'
       - 'examples/**'
       - 'package.json'
@@ -30,6 +32,8 @@ on:
   pull_request:
     paths:
       - 'src/generator/java/**'
+      - 'src/generator/_expr/**'
+      - 'src/ir/**'
       - 'src/platform/java.ts'
       - 'examples/**'
       - 'package.json'

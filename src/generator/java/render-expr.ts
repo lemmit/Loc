@@ -352,6 +352,8 @@ const JAVA_TARGET: ExprTarget<JavaRenderContext> = {
     return `switch (${m.subject}) {\n${arms.join("\n")}\n${tail}\n    }`;
   },
   bindingRefText: (binding) => binding,
+  // Union-find repos return a nullable aggregate (payloads.md §Union finds).
+  absenceCheck: (subject) => `${subject} != null`,
   list: (elements) => `List.of(${elements.join(", ")})`,
 };
 

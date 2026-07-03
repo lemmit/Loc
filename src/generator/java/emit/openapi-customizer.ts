@@ -354,6 +354,30 @@ export function buildJavaOpenApiContract(
 
     // Workflows — POST /workflows/<snake(name)>.
     for (const wf of ctx.workflows) {
+      // Observable workflows (instanceWireShape) expose the two read-only
+      // instance routes regardless of whether a command POST exists (an
+      // event-triggered saga has no command route but is still observable).
+      // List → named `<Wf>InstanceListResponse` wrapper (Hono/Python name
+      // it; springdoc inlines `List<T>`); byId → 404 ProblemDetails; the
+      // instance DTO's required set = every non-optional wire field.
+      if (wf.instanceWireShape) {
+        const T = upperFirst(wf.name);
+        const instancesPath = `${routePrefix}/workflows/${snake(wf.name)}/instances`;
+        wrappers.set(`${T}InstanceListResponse`, `${T}InstanceResponse`);
+        routes.push({
+          method: "get",
+          path: instancesPath,
+          listWrapper: `${T}InstanceListResponse`,
+          errors: [],
+        });
+        routes.push({
+          method: "get",
+          path: `${instancesPath}/{id}`,
+          errors: err(errorStatuses("getById")),
+        });
+        for (const f of wf.instanceWireShape) noteEnumRefs(f.type, f.name);
+        setRequired(`${T}InstanceResponse`, requiredWireFields(wf.instanceWireShape));
+      }
       if (!workflowEmitsCommandRoute(wf)) continue;
       routes.push({
         method: "post",

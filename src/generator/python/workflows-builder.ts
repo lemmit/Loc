@@ -28,7 +28,12 @@ import { domainServiceImportLinesForWorkflow } from "./emit/domain-service.js";
 import { responsePyType } from "./emit/http-models.js";
 import { type PyRenderContext, renderPyExpr } from "./render-expr.js";
 import { resourceImportLines } from "./resource-clients.js";
-import { errorResponsesKwarg, pyWireToDomain, requestFieldDecl } from "./routes-builder.js";
+import {
+  errorResponsesKwarg,
+  ID_PARAM,
+  pyWireToDomain,
+  requestFieldDecl,
+} from "./routes-builder.js";
 import { esFns } from "./workflow-eventsourced-emit.js";
 
 // ---------------------------------------------------------------------------
@@ -148,6 +153,7 @@ export function buildPyWorkflowsFile(
     `from fastapi import ${[
       "APIRouter",
       "Depends",
+      refersTo("Path") ? "Path" : null,
       refersTo("Request") ? "Request" : null,
       refersTo("Response") ? "Response" : null,
     ]
@@ -282,6 +288,16 @@ function reposFor(wf: WorkflowIR): RepoNeed[] {
         for (const s of st.savesPerIteration) {
           out.set(s.repoName, { repoName: s.repoName, aggName: s.aggName });
         }
+      }
+      if (st.kind === "if-let") {
+        // The retrieval itself reads through the repo, and each branch carries
+        // its own saves (mirrors the Hono `collectReposFromStmts` walk).
+        out.set(st.repoName, { repoName: st.repoName, aggName: st.aggName });
+        for (const s of [...st.savesInThen, ...st.savesInElse]) {
+          out.set(s.repoName, { repoName: s.repoName, aggName: s.aggName });
+        }
+        visit(st.thenBody);
+        visit(st.elseBody ?? []);
       }
     }
   };
@@ -625,7 +641,7 @@ function instanceRoutes(wf: WorkflowIR): string {
   const byId = wf.eventSourced
     ? lines(
         `@router.get("/${slug}/instances/{id}", response_model=${T}InstanceResponse, operation_id="${camelId(opWorkflowInstanceById(wf.name))}"${errorResponsesKwarg("getById")})`,
-        `async def ${slug}_instance(id: str, session: SessionDep) -> dict[str, object]:`,
+        `async def ${slug}_instance(${ID_PARAM}, session: SessionDep) -> dict[str, object]:`,
         `    __stream = await ${fns.load}(session, id)`,
         "    if not __stream:",
         `        raise AggregateNotFoundError("not_found")`,
@@ -634,7 +650,7 @@ function instanceRoutes(wf: WorkflowIR): string {
       )
     : lines(
         `@router.get("/${slug}/instances/{id}", response_model=${T}InstanceResponse, operation_id="${camelId(opWorkflowInstanceById(wf.name))}"${errorResponsesKwarg("getById")})`,
-        `async def ${slug}_instance(id: str, session: SessionDep) -> dict[str, object]:`,
+        `async def ${slug}_instance(${ID_PARAM}, session: SessionDep) -> dict[str, object]:`,
         `    row = await session.get(${row}, id)`,
         "    if row is None:",
         `        raise AggregateNotFoundError("not_found")`,

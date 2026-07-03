@@ -1585,11 +1585,15 @@ function renderInstanceResponseDto(
   ctx: EnrichedBoundedContextIR,
   ns: string,
 ): string {
+  // dtoParam marks non-nullable components `[property: Required]` so the
+  // OpenAPI required-set matches Hono/Python (which require every
+  // non-optional instance field) — see dto-mapping.ts.
   const params = (wf.instanceWireShape ?? [])
-    .map((f) => `${wireType(f.type, ctx, "response")} ${upperFirst(f.name)}`)
+    .map((f) => dtoParam(wireType(f.type, ctx, "response"), upperFirst(f.name), "response"))
     .join(", ");
   return `// Auto-generated.
 using System;
+using System.ComponentModel.DataAnnotations;
 using ${ns}.Domain.ValueObjects;
 using ${ns}.Domain.Enums;
 

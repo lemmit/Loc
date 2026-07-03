@@ -80,8 +80,9 @@ describe("Phoenix OIDC verifier emission", () => {
     // Real verifier — signature check against the issuer's JWKS.
     expect(auth!).toContain("JOSE.JWT.verify_strict");
     // Issuer read at RUNTIME (a module attribute would freeze the empty
-    // compile-time env into the release).
-    expect(auth!).toContain('defp issuer, do: System.get_env("OIDC_ISSUER"');
+    // compile-time env into the release); the OIDC_ISSUER env override wins
+    // over the declared value (12-factor).
+    expect(auth!).toContain('defp issuer, do: (System.get_env("OIDC_ISSUER"');
     expect(auth!).not.toContain("DEV STUB");
     // JWKS discovered + cached, never re-resolved.
     expect(auth!).toContain(":persistent_term");

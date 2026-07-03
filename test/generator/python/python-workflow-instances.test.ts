@@ -101,8 +101,10 @@ describe("python workflow-instance endpoints", () => {
     expect(wf).toContain(
       '@router.get("/order_fulfillment/instances/{id}", response_model=OrderFulfillmentInstanceResponse, operation_id="getOrderFulfillmentInstanceById", responses={404: {"model": ProblemDetails, "description": "Not Found"}})',
     );
+    // Correlation-id param carries the uuid format every backend declares
+    // (paramTypeDiffs parity — same ID_PARAM the aggregate routes use).
     expect(wf).toContain(
-      "async def order_fulfillment_instance(id: str, session: SessionDep) -> dict[str, object]:",
+      'async def order_fulfillment_instance(id: Annotated[str, Path(json_schema_extra={"format": "uuid"})], session: SessionDep) -> dict[str, object]:',
     );
     expect(wf).toContain("row = await session.get(OrderFulfillmentRow, id)");
     expect(wf).toContain("if row is None:");

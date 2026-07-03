@@ -239,8 +239,10 @@ export function errorResponsesKwarg(kind: OpErrorKind, guarded = false): string 
 }
 
 /** `{id}` path-param annotation carrying the uuid format every backend
- *  declares (paramTypeDiffs parity). */
-const ID_PARAM = 'id: Annotated[str, Path(json_schema_extra={"format": "uuid"})]';
+ *  declares (paramTypeDiffs parity).  Shared with the workflow-instance
+ *  byId route (workflows-builder.ts), whose correlation-id param must
+ *  carry the same format. */
+export const ID_PARAM = 'id: Annotated[str, Path(json_schema_extra={"format": "uuid"})]';
 
 /** The domain error names this routes file actually references —
  *  extern dispatch re-raises the domain taxonomy and wraps everything
@@ -516,7 +518,9 @@ export function pyWireToDomain(expr: string, t: TypeIR, ctx: BoundedContextIR): 
       return inner === expr ? expr : `(${inner} if ${expr} is not None else None)`;
     }
     case "primitive":
-      if (t.name === "money") return expr;
+      // Money arrives as its canonical decimal string (`requestPyType` →
+      // `str`, wire parity with Hono/.NET); the domain works in Decimal.
+      if (t.name === "money") return `Decimal(${expr})`;
       return expr;
     default:
       return expr;

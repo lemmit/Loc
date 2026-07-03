@@ -417,17 +417,20 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
 
   // Runtime authorization parity — distinct from the OpenAPI parity above.
   // showcase's `registerProject` workflow guards on
-  // `currentUser.permissions.length > 0`; every backend's dev-stub auth
-  // verifier returns an admin user with EMPTY permissions, so an
-  // authenticated request must be DENIED with 403 on all five backends.
+  // `currentUser.permissions.contains(permissions.manageProjects)`.  Since
+  // #1623 showcase ships OIDC-only auth (no dev stub): the test mints a REAL
+  // token from the bundled Keycloak via password grant (demo/demo — the
+  // same fixture user auth-oidc-dotnet-e2e.test.ts exercises).  The demo
+  // user's realm roles (user/agent) map onto `currentUser.permissions` and
+  // do NOT contain "Projects.manageProjects", so every backend must DENY
+  // the verified, authenticated request with 403 — not 401 (verification
+  // failed), not 400/422 (validation), not 500 (a guard crash).
   //
   // Runs in parity-only mode too (the five backends are already booted).
   // History: Hono once 500'd (unbound currentUser, #759), Phoenix once
-  // 500'd (`.length` field access #759, then uncaught `throw` #771) — both
-  // fixed.  .NET still 500s despite correct-looking generated code; this
-  // test exists to (a) lock the contract once .NET is fixed and (b) dump
-  // each backend's response body + container logs on any non-403 so the
-  // real server-side error (e.g. the .NET stacktrace) surfaces in CI.
+  // 500'd (`.length` field access #759, then uncaught `throw` #771).  This
+  // test dumps each backend's response body + container logs on any non-403
+  // so the real server-side error surfaces in CI.
   it("cross-backend: a guarded workflow denies with 403 (runtime authorization)", async () => {
     const targets: Record<string, string> = {
       node: "http://localhost:3000/api/workflows/register_project",
@@ -437,6 +440,23 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
       python: "http://localhost:8000/api/workflows/register_project",
       java: "http://localhost:8081/api/workflows/register_project",
     };
+
+    // An unverifiable token must be rejected 401 by every backend's OIDC
+    // verifier BEFORE any guard runs — the verifier-parity half of this test.
+    for (const [name, url] of Object.entries(targets)) {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer e2e-stub-token",
+        },
+        body: JSON.stringify({ name: "Parity Test", visibility: "Public" }),
+      });
+      await r.text();
+      expect(r.status, `${name} must 401 an unverifiable bearer token`).toBe(401);
+    }
+
+    const token = await keycloakPasswordGrantToken(outDir);
     const statuses: Record<string, number> = {};
     const bodies: Record<string, string> = {};
     for (const [name, url] of Object.entries(targets)) {
@@ -444,7 +464,7 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          authorization: "Bearer e2e-stub-token",
+          authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ name: "Parity Test", visibility: "Public" }),
       });
@@ -476,6 +496,55 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
     }
   }, 60_000);
 });
+
+/** Mint a real access token from the bundled dev Keycloak via the password
+ *  grant (fixture user demo/demo, client `<realm>-app` — the realm import
+ *  the generator writes to <outDir>/keycloak/realm.json).  The Keycloak
+ *  HOST port is derived from the generated docker-compose.yml (the
+ *  generator picks the first free port ≥8081, so it shifts with the
+ *  deployable set — 8082 for showcase).  Retries while Keycloak finishes
+ *  its realm import: the backends' /health gate proves the container is
+ *  up, not that the token endpoint is serving yet. */
+async function keycloakPasswordGrantToken(outDir: string): Promise<string> {
+  const compose = fs.readFileSync(path.join(outDir, "docker-compose.yml"), "utf8");
+  const kcBlock = /(^|\n)\s{2}keycloak:\n([\s\S]*?)(\n\s{2}\S|$)/.exec(compose)?.[2] ?? "";
+  const port = /- "(\d+):8080"/.exec(kcBlock)?.[1];
+  if (!port) throw new Error("could not derive the keycloak host port from docker-compose.yml");
+  const realmJson = JSON.parse(
+    fs.readFileSync(path.join(outDir, "keycloak", "realm.json"), "utf8"),
+  ) as { realm: string };
+  const realm = realmJson.realm;
+  const body = new URLSearchParams({
+    grant_type: "password",
+    client_id: `${realm}-app`,
+    username: "demo",
+    password: "demo",
+    scope: "openid",
+  });
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 15; attempt++) {
+    try {
+      const r = await fetch(
+        `http://localhost:${port}/realms/${realm}/protocol/openid-connect/token`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body,
+        },
+      );
+      if (r.ok) {
+        const json = (await r.json()) as { access_token?: string };
+        if (json.access_token) return json.access_token;
+        throw new Error("token grant returned no access_token");
+      }
+      lastError = new Error(`token grant → ${r.status} ${await r.text()}`);
+    } catch (e) {
+      lastError = e;
+    }
+    await new Promise((res) => setTimeout(res, 2_000));
+  }
+  throw new Error(`keycloak token grant never succeeded: ${String(lastError)}`);
+}
 
 /** Capture compose ps + logs (and any extra context) to console.error and
  *  to /tmp/loom-e2e-diagnostics.log, which the parity workflow's

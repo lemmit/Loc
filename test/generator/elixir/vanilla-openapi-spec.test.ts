@@ -94,3 +94,108 @@ describe("vanilla OpenAPI spec (§11f)", () => {
     expect(openapiIdx).toBeLessThan(apiScopeIdx);
   });
 });
+
+describe("vanilla OpenAPI spec — union finds", () => {
+  it("declares the absent variant's ProblemDetails status on a union find", async () => {
+    // `find locate(...): Order or OrderNotFound` — absence translates to the
+    // error variant's mapped status (the api block's `httpStatus` override,
+    // as showcase.ddd maps ProjectNotFound), same as Hono's union-find route
+    // and Java's customizer; 200 stays <Agg>Response.
+    const src = `
+system Shop {
+  subdomain Sales {
+    context Orders {
+      error OrderNotFound { }
+      aggregate Order ids guid { code: string }
+      repository Orders for Order {
+        find locate(code: string): Order or OrderNotFound where this.code == code
+      }
+    }
+  }
+  api OrdersApi from Sales {
+    httpStatus OrderNotFound 404
+  }
+  storage primary { type: postgres }
+  resource ordersState { for: Orders, kind: state, use: primary }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Orders]
+    dataSources: [ordersState]
+    serves: OrdersApi
+    port: 4000
+  }
+}`;
+    const files = await generateSystemFiles(src);
+    const specKey = [...files.keys()].find((k) => k.endsWith("_spec.ex") && k.includes("/api/"));
+    const spec = files.get(specKey!)!;
+    const start = spec.indexOf('"/orders/locate"');
+    expect(start, "locate path present").toBeGreaterThanOrEqual(0);
+    const locate = spec.slice(start, start + 1200);
+    expect(locate).toContain("Schemas.OrderResponse");
+    expect(locate).toContain("404 => %OpenApiSpex.Response{");
+    expect(locate).toContain("Schemas.ProblemDetails");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Observable-workflow instance surface in the spec — the router already
+// serves GET /workflows/<slug>/instances[/{id}] (workflow-instances-emit.ts);
+// the spec must declare them + the <Wf>Instance[List]Response schemas, or
+// the parity diff reports the paths/schemas as only-on-node.
+// ---------------------------------------------------------------------------
+
+const SAGA_SOURCE = `
+system S {
+  subdomain O {
+    context O {
+      aggregate Order { status: string  operation place() { status := "P"  emit OrderPlaced { order: id } } }
+      repository Orders for Order { }
+      aggregate Shipment { orderRef: Order id  status: string  operation mark() { status := "T" } }
+      repository Shipments for Shipment { }
+      event OrderPlaced { order: Order id }
+      event ShipmentRequested { shipment: Shipment id, order: Order id }
+      channel L { carries: OrderPlaced, ShipmentRequested  delivery: broadcast  retention: ephemeral }
+      workflow OrderFulfillment { orderId: Order id  attempts: int
+        create(p: OrderPlaced) by p.order { let s = Shipment.create({ orderRef: p.order, status: "P" }) emit ShipmentRequested { shipment: s.id, order: p.order } }
+        on(s: ShipmentRequested) by s.order { let sh = Shipments.getById(s.shipment) sh.mark() } }
+    }
+  }
+  api A from O
+  storage pg { type: postgres }
+  resource oState { for: O, kind: state, use: pg }
+  deployable api { platform: elixir { foundation: vanilla } contexts: [O] dataSources: [oState] serves: A port: 4000 }
+}
+`;
+
+describe("vanilla OpenAPI spec — workflow instance routes", () => {
+  it("declares the instance list + byId paths with the shared operationIds", async () => {
+    const files = await generateSystemFiles(SAGA_SOURCE);
+    const specKey = [...files.keys()].find((k) => k.endsWith("_spec.ex") && k.includes("/api/"));
+    const spec = files.get(specKey!)!;
+    expect(spec).toContain('"/workflows/order_fulfillment/instances" => %OpenApiSpex.PathItem{');
+    expect(spec).toContain('operationId: "allOrderFulfillmentInstances"');
+    expect(spec).toContain(
+      '"/workflows/order_fulfillment/instances/{id}" => %OpenApiSpex.PathItem{',
+    );
+    expect(spec).toContain('operationId: "getOrderFulfillmentInstanceById"');
+    // Correlation-id param carries the uuid format every backend declares.
+    expect(spec).toContain(
+      "%OpenApiSpex.Parameter{name: :id, in: :path, required: true, schema: %OpenApiSpex.Schema{type: :string, format: :uuid}}",
+    );
+    // byId declares the shared 404 ProblemDetails.
+    expect(spec).toMatch(/instances\/\{id\}[\s\S]*?404 => %OpenApiSpex\.Response\{/);
+  });
+
+  it("emits the <Wf>InstanceResponse + named list-carrier schema modules", async () => {
+    const files = await generateSystemFiles(SAGA_SOURCE);
+    const resp = file(files, "order_fulfillment_instance_response.ex");
+    expect(resp).toContain('title: "OrderFulfillmentInstanceResponse"');
+    // Required = every non-optional wire field (matches Hono/Python/.NET/Java).
+    expect(resp).toContain("required: [:orderId, :attempts]");
+    const listResp = file(files, "order_fulfillment_instance_list_response.ex");
+    expect(listResp).toContain('title: "OrderFulfillmentInstanceListResponse"');
+    expect(listResp).toContain("type: :array");
+    expect(listResp).toContain("items: ");
+    expect(listResp).toContain("OrderFulfillmentInstanceResponse");
+  });
+});

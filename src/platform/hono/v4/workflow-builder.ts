@@ -711,7 +711,10 @@ function emitInstanceRoutes(wf: WorkflowIR): string[] {
   out.push(`    path: "/${slug}/instances/{id}",`);
   out.push(`    tags: ["workflows"],`);
   out.push(`    operationId: "${camelId(opWorkflowInstanceById(wf.name))}",`);
-  out.push(`    request: { params: z.object({ id: z.string() }) },`);
+  // uuid format on the correlation-id param — same as every aggregate
+  // `/{id}` route, so the parity gate's path-param dimension agrees with
+  // .NET (`Guid id`) / Java (`UUID id`) / Python (uuid-format Path()).
+  out.push(`    request: { params: z.object({ id: z.string().uuid() }) },`);
   out.push(`    responses: {`);
   out.push(
     `      200: { description: "OK", content: { "application/json": { schema: ${T}InstanceResponse } } },`,

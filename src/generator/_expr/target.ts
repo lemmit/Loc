@@ -145,6 +145,13 @@ export interface ExprTarget<Ctx extends ExprCtxBase> {
    *  the scrutinee — TS has no expression-level pattern binding).  Called by
    *  `renderExprWith` to populate `ctx.matchBindings` before recursing. */
   bindingRefText(binding: string, subject: string): string;
+  /** Presence test for an absence-shaped union-find subject
+   *  (`subjectShape: "absence"`, payloads.md §Union finds) — the runtime
+   *  value is the bare aggregate-or-absent, so the variant match renders as
+   *  `ternary(absenceCheck(subject), successArm, errorArm)`.  Must be the
+   *  backend's *lint-clean* nil test (Python `is not None`, C# `is not null`,
+   *  Elixir `!= nil`, TS `!== null`, Java `!= null`). */
+  absenceCheck(subject: string): string;
   list(elements: string[]): string;
 }
 
@@ -209,6 +216,30 @@ export function renderExprWith<Ctx extends ExprCtxBase>(
       // Variant form (variant-match.md) when a subject is present.
       if (e.subject) {
         const subject = r(e.subject);
+        // Absence-shaped subject (a repository union-find result,
+        // `subjectShape: "absence"`): the runtime value is the bare
+        // aggregate-or-absent — a discriminator probe / native type switch
+        // would test vocabulary that doesn't exist at runtime.  Render a
+        // presence check instead: success arm on present (its binding is an
+        // alias of the subject on EVERY backend — there is no separate
+        // variant carrier to bind), error/`none` arm (or `otherwise`) on
+        // absent.  The validator pins the shape to exactly one aggregate
+        // variant plus one error/`none` variant.
+        if (e.subjectShape === "absence") {
+          const isFailureArm = (a: (typeof e.variantArms)[number]) =>
+            a.isError === true || a.varType.kind === "none";
+          const successArm = e.variantArms.find((a) => !isFailureArm(a));
+          const failureArm = e.variantArms.find(isFailureArm);
+          // Arm bindings were aliased to the (narrowed) subject at lowering
+          // (Env.refAliases), so arm values render with the plain ctx.
+          const fallback = e.otherwise ? r(e.otherwise) : undefined;
+          // A missing side without an `otherwise` is a non-exhaustive match
+          // the validator already warns on; degrade to the subject text so
+          // the output stays well-formed.
+          const onPresent = successArm ? r(successArm.value) : (fallback ?? subject);
+          const onAbsent = failureArm ? r(failureArm.value) : (fallback ?? subject);
+          return t.ternary(t.absenceCheck(subject), onPresent, onAbsent);
+        }
         const arms = e.variantArms.map((a) => {
           // Install the binding side-channel before rendering this arm's
           // value, so a `refKind: "match-binding"` ref to `a.binding`

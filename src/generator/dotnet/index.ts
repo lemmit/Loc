@@ -556,6 +556,17 @@ function listWrapperPairs(
       if (agg.isAbstract) continue;
       pairs.push({ element: `${agg.name}Response`, wrapper: `${agg.name}ListResponse` });
     }
+    // Observable workflows expose GET /workflows/<wf>/instances, whose inline
+    // `array<InstanceResponse>` promotes to the named list carrier the other
+    // backends emit (`<Wf>InstanceListResponse` — Hono z.array().openapi(),
+    // Python RootModel).
+    for (const wf of ctx.workflows) {
+      if (!wf.instanceWireShape) continue;
+      pairs.push({
+        element: `${upperFirst(wf.name)}InstanceResponse`,
+        wrapper: `${upperFirst(wf.name)}InstanceListResponse`,
+      });
+    }
     for (const view of ctx.views) {
       if (view.output) {
         pairs.push({

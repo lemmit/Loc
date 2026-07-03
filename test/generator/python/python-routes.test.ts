@@ -38,7 +38,8 @@ describe("python wire DTOs", () => {
     const routes = files.get("api/app/http/order_routes.py")!;
     expect(routes).toContain("class OrderResponse(BaseModel):");
     expect(routes).toContain("    placedAt: str");
-    expect(routes).toContain("    unitBudget: float");
+    // Money crosses as its canonical decimal STRING (cross-backend wire).
+    expect(routes).toContain("    unitBudget: str");
     expect(routes).toContain("    watchers: list[str]");
     expect(routes).toContain("    lines: list[OrderLineResponse]");
     // Derived VO rides the response; domain VO + wire model coexist via alias.

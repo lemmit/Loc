@@ -576,7 +576,13 @@ function lowerWorkflowStatement(
           args,
           returnType,
         },
-        envAfter: withLocal(env, stmt.name, "let", localType),
+        // A union-returning find is validator-constrained to the absence
+        // shape (payloads.md §Union finds): its runtime value is the bare
+        // aggregate-or-absent, never the tagged wire.  Mark the local so a
+        // variant-`match` over it lowers to a presence check.
+        envAfter: withLocal(env, stmt.name, "let", localType, {
+          absenceUnion: returnType.kind === "union",
+        }),
         binding: { name: stmt.name, aggName, repoName: repo.name },
       };
     }
