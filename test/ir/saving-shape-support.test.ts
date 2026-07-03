@@ -123,12 +123,12 @@ system Shop {
     expect(await docScopeErrors(src)).toEqual([]);
   });
 
-  it("still rejects a RETURNING operation on a vanilla document aggregate", async () => {
+  it("accepts a RETURNING operation on a vanilla document aggregate", async () => {
     const src = `
 system Shop {
   subdomain Sales {
     context Shop {
-      payload TooMany { message: string }
+      error TooMany { message: string }
       aggregate Cart ids guid shape(document) with crudish {
         total: int
         operation bump(): Cart or TooMany {
@@ -144,12 +144,10 @@ system Shop {
   deployable api { platform: elixir { foundation: vanilla }, contexts: [Shop], dataSources: [shopState], port: 4000 }
 }
 `;
-    const errs = await docScopeErrors(src);
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("named operation(s) bump");
+    expect(await docScopeErrors(src)).toEqual([]);
   });
 
-  it("still rejects a value-object-subfield read in a document find predicate", async () => {
+  it("accepts a value-object-subfield read + function call on a vanilla document aggregate", async () => {
     const src = `
 system Shop {
   subdomain Sales {
@@ -157,6 +155,12 @@ system Shop {
       valueobject Money { amount: int  currency: string }
       aggregate Cart ids guid shape(document) with crudish {
         price: Money
+        total: int
+        function affordable(): bool = price.amount < 100
+        operation discount() {
+          precondition affordable()
+          total := total - price.amount
+        }
       }
       repository Carts for Cart {
         find pricey(): Cart[] where this.price.amount > 100
@@ -168,9 +172,75 @@ system Shop {
   deployable api { platform: elixir { foundation: vanilla }, contexts: [Shop], dataSources: [shopState], port: 4000 }
 }
 `;
+    expect(await docScopeErrors(src)).toEqual([]);
+  });
+
+  it("still rejects an AUDITED operation on a vanilla document aggregate", async () => {
+    const src = `
+system Shop {
+  subdomain Sales {
+    context Shop {
+      aggregate Cart ids guid shape(document) with crudish {
+        total: int
+        operation bump() audited { total := total + 1 }
+      }
+      repository Carts for Cart { }
+    }
+  }
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api { platform: elixir { foundation: vanilla }, contexts: [Shop], dataSources: [shopState], port: 4000 }
+}
+`;
     const errs = await docScopeErrors(src);
     expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("custom find(s) pricey");
+    expect(errs[0]).toContain("named operation(s) bump");
+  });
+
+  it("still rejects a DERIVED read in a document operation body", async () => {
+    const src = `
+system Shop {
+  subdomain Sales {
+    context Shop {
+      aggregate Cart ids guid shape(document) with crudish {
+        total: int
+        derived doubled: int = total * 2
+        operation sync() { total := doubled }
+      }
+      repository Carts for Cart { }
+    }
+  }
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api { platform: elixir { foundation: vanilla }, contexts: [Shop], dataSources: [shopState], port: 4000 }
+}
+`;
+    const errs = await docScopeErrors(src);
+    expect(errs.length).toBe(1);
+    expect(errs[0]).toContain("named operation(s) sync");
+  });
+
+  it("still rejects a PAGED custom find on a vanilla document aggregate", async () => {
+    const src = `
+system Shop {
+  subdomain Sales {
+    context Shop {
+      aggregate Cart ids guid shape(document) with crudish {
+        reference: string
+      }
+      repository Carts for Cart {
+        find recent(): Cart paged
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api { platform: elixir { foundation: vanilla }, contexts: [Shop], dataSources: [shopState], port: 4000 }
+}
+`;
+    const errs = await docScopeErrors(src);
+    expect(errs.length).toBe(1);
+    expect(errs[0]).toContain("custom find(s) recent");
   });
 
   it("accepts a CRUD-only vanilla document aggregate", async () => {

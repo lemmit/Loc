@@ -225,3 +225,76 @@ describe("vanilla shape(document) scalar finds + named ops (DEBT-07)", () => {
     expect(ctx).not.toContain("Ecto.Changeset.put_change(:item_count");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Non-scalar residual now emitted (DEBT-07 follow-up): value-object-subfield
+// reads, pure-function calls, and RETURNING (`: A or B`) operations.
+// ---------------------------------------------------------------------------
+const DOC_RICH = `
+system Carting {
+  subdomain Sales {
+    context Carts {
+      valueobject Money { amount: int  currency: string }
+      error AlreadyClosed { message: string }
+      aggregate Cart shape(document) with crudish {
+        subtotal: Money
+        itemCount: int
+        function isCheap(): bool = subtotal.amount < 100
+        operation discount() {
+          precondition isCheap()
+          precondition subtotal.amount >= 0
+          itemCount := itemCount + 1
+        }
+        operation tryClose(): Cart or AlreadyClosed {
+          return AlreadyClosed { message: "closed" }
+        }
+        operation bumpOrClose(): Cart or AlreadyClosed {
+          itemCount := itemCount + 1
+        }
+      }
+      repository Carts for Cart { }
+    }
+  }
+  api CartsApi from Sales
+  storage pg { type: postgres }
+  resource cartState { for: Carts, kind: state, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Carts]
+    dataSources: [cartState]
+    serves: CartsApi
+    port: 4000
+  }
+}
+`;
+
+describe("vanilla shape(document) non-scalar residual (DEBT-07 follow-up)", () => {
+  it("emits document functions over the data map + value-object-subfield reads", async () => {
+    const ctx = file(await generateSystemFiles(DOC_RICH), "/carts.ex");
+    // A pure function on a document aggregate takes the jsonb `data` map (guarded
+    // is_map), reading the value-object subfield by nested bracket-index.
+    expect(ctx).toContain("def is_cheap(data) when is_map(data) do");
+    expect(ctx).toContain('data["subtotal"]["amount"] < 100');
+    // The op guard calls the function passing the data map, and reads the VO sub-field.
+    expect(ctx).toContain("if not (is_cheap(data)), do: raise(ArgumentError");
+    expect(ctx).toContain('if not (data["subtotal"]["amount"] >= 0), do: raise(ArgumentError');
+  });
+
+  it("emits returning ops as tagged tuples (error variant + fall-through success wire)", async () => {
+    const ctx = file(await generateSystemFiles(DOC_RICH), "/carts.ex");
+    // An error-variant `return` → {:error, "<tag>", <map>}; `record` is unused
+    // (no data touched) so it's underscored to avoid a -Werror unused warning.
+    expect(ctx).toContain(
+      "def try_close_cart(%Api.Carts.Cart{} = _record, params) when is_map(params) do",
+    );
+    expect(ctx).toContain('{:error, "AlreadyClosed", %{message: "closed"}}');
+    // A fall-through success projects the in-memory wire off the mutated data —
+    // `id` + every stored document field (camelCase keys, matching serialize/1).
+    expect(ctx).toContain(
+      "def bump_or_close_cart(%Api.Carts.Cart{} = record, params) when is_map(params) do",
+    );
+    expect(ctx).toContain(
+      '{:ok, %{"id" => record.id, "subtotal" => data["subtotal"], "itemCount" => data["item_count"]}}',
+    );
+  });
+});

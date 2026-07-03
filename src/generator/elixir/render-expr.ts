@@ -401,10 +401,9 @@ function renderMember(recv: string, e: MemberExpr, ctx: RenderCtx): string {
   // Document shape (DEBT-07): an explicit top-level `this.<field>` read (as a
   // find `where` clause spells it) lowers to a member off the `this` node, not a
   // `this-prop` ref — project it out of the string-keyed jsonb `data` map by key,
-  // the same way `renderRef` does for the implicit-`this` op-body reads.  A
-  // NESTED read (`this.vo.sub`) is validate-gated on the document scalar path, so
-  // only the top-level field lands here.  The scalar `.length` / `.count`
-  // shorthands below still apply (their receiver already renders to the map key).
+  // the same way `renderRef` does for the implicit-`this` op-body reads.  The
+  // scalar `.length` / `.count` shorthands below still apply (their receiver
+  // already renders to the map key).
   if (ctx.docMap && e.receiver.kind === "this") {
     return `${ctx.docMap}[${JSON.stringify(snake(e.member))}]`;
   }
@@ -423,6 +422,14 @@ function renderMember(recv: string, e: MemberExpr, ctx: RenderCtx): string {
     e.member === "length"
   ) {
     return `String.length(${recv})`;
+  }
+  // Document shape (DEBT-07): a value-object SUB-field read (`this.money.amount`)
+  // reads out of a nested jsonb map, which round-trips as STRING keys — so bracket-
+  // index it (`data["money"]["amount"]`) rather than struct-dot it (`.amount`
+  // would `BadMapError` on the string-keyed map).  The receiver already rendered
+  // to the enclosing map projection.
+  if (ctx.docMap && e.receiverType.kind === "valueobject") {
+    return `${recv}[${JSON.stringify(snake(e.member))}]`;
   }
   return `${recv}.${snake(e.member)}`;
 }
@@ -548,14 +555,17 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
       }
       return `%${ctx.contextModule}.${upperFirst(e.name)}{${args.join(", ")}}`;
     }
-    case "function":
+    case "function": {
       // Pure aggregate `function`: emitted as `is_draft(record)` (bare name,
       // arity 1 + the declared params), returning its value directly.  Skip the
       // trailing comma when it has no params — `passed(changeset, )` is invalid
-      // Elixir.
+      // Elixir.  On the document path the function takes the jsonb `data` map (it
+      // reads fields out of it), so pass that instead of the struct receiver.
+      const recv = ctx.docMap ?? ctx.thisName;
       return args.length > 0
-        ? `${snake(e.name)}(${ctx.thisName}, ${args.join(", ")})`
-        : `${snake(e.name)}(${ctx.thisName})`;
+        ? `${snake(e.name)}(${recv}, ${args.join(", ")})`
+        : `${snake(e.name)}(${recv})`;
+    }
     case "private-operation": {
       // Sibling-OPERATION self-call → the operation's context function
       // `<op>_<agg>(record, params)` (arity 2; every op — public OR private — is

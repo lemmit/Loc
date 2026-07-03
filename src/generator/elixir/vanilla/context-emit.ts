@@ -28,7 +28,11 @@ import { renderReadingServiceContextFns } from "../domain-service-emit.js";
 import type { RenderCtx } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
-import { isVanillaDocAgg, renderDocNamedOpFunction } from "./document-emit.js";
+import {
+  isVanillaDocAgg,
+  renderDocNamedOpFunction,
+  renderDocReturningOpFunction,
+} from "./document-emit.js";
 import {
   customFindsOfAgg,
   esContextNeedsEnsure,
@@ -139,7 +143,9 @@ function renderContextModule(
       .filter((op) => !CRUD_RESERVED_NAMES.has(op.name))
       .map((op) =>
         isDoc
-          ? renderDocNamedOpFunction(facadeMod, op, agg)
+          ? isReturningOperation(op)
+            ? renderDocReturningOpFunction(facadeMod, op, agg, ctx)
+            : renderDocNamedOpFunction(facadeMod, op, agg, ctx)
           : isReturningOperation(op)
             ? renderReturningOpFunction(facadeMod, ctx, agg, op, relationalContainments)
             : renderNamedOpFunction(
@@ -254,7 +260,7 @@ ${body}
     // op / precondition / derived bodies emitted above.  Each renders as a
     // struct-guarded `def <fn>(%Agg{} = record, …)` so the lowered call site
     // (`<fn>(record, …)`) resolves in THIS module.
-    const fnLines = renderAggregateFunctions(facadeMod, agg);
+    const fnLines = renderAggregateFunctions(facadeMod, agg, isDoc);
     const functionBlock = fnLines.length > 0 ? `${fnLines.join("\n")}\n` : "";
     return `  # ${aggPascal}
   defdelegate list_${aggSnake}s(${principal ? "current_user \\\\ nil" : ""}), to: ${repoMod}, as: :list

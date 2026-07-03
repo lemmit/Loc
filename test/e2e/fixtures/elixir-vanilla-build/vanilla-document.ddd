@@ -19,6 +19,7 @@ system Carting {
       // through the jsonb blob.
       valueobject Money { amount: int  currency: string }
       enum CartStatus { open, checkedOut }
+      error AlreadyClosed { message: string }
 
       aggregate Cart shape(document) with crudish {
         reference: string
@@ -27,14 +28,27 @@ system Carting {
         itemCount: int
         invariant itemCount >= 0
 
-        // Scalar named operations (DEBT-07) — run over the jsonb `data` map.
+        // A pure function on a document aggregate compiles over the jsonb `data`
+        // map too (DEBT-07) — reads `data["status"]`, callable from op guards.
+        function isOpen(): bool = status == open
+
+        // Scalar named operations (DEBT-07) — run over the jsonb `data` map,
+        // including a function call and a value-object-subfield read.
         operation addItem() {
-          precondition itemCount >= 0
+          precondition isOpen()
+          precondition subtotal.amount >= 0
           itemCount := itemCount + 1
         }
         operation checkOut() {
           precondition status == open
           status := checkedOut
+        }
+
+        // A RETURNING op (exception-less `: A or B`, DEBT-07) — the tagged tuple
+        // the controller translates to HTTP; the fall-through success projects the
+        // in-memory wire, an error variant maps to RFC-7807.
+        operation tryCheckOut(): Cart or AlreadyClosed {
+          return AlreadyClosed { message: "cart already checked out" }
         }
       }
       // Scalar custom finds (DEBT-07) — in-memory filter over loaded rows.

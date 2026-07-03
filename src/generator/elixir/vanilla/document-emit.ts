@@ -14,10 +14,13 @@
 // storage differs.  Reads merge `data` back over the id (`serialize/1`); the
 // wire shape is identical to the relational path (snake-cased field keys).
 //
-// v1 scope: CRUD aggregates (`with crudish`).  Custom finds + named operations
-// on a document aggregate are gated at validate time
-// (`loom.vanilla-document-unsupported`) rather than misgenerated — see
-// `validateVanillaDocumentScope`.
+// Beyond CRUD, this module also emits custom finds (in-memory `Enum.filter` over
+// the `data` map), named + returning operations (body over the `data` map), and
+// document-mode pure functions — see the sections below.  The residual the
+// scalar document path can't express (audited/provenanced ops, collection
+// mutation, derived / dereferenced-entity / collection-method reads, paged/union
+// finds) is gated at validate time (`loom.vanilla-document-unsupported`) rather
+// than misgenerated — see `validateVanillaDocumentScope`.
 // ---------------------------------------------------------------------------
 
 import type {
@@ -36,7 +39,13 @@ import {
   type SingleFieldPattern,
   singleFieldConstraints,
 } from "../../../ir/validate/invariant-classify.js";
-import { elixirRegexBody, escapeElixirIdent, plural, snake, upperFirst } from "../../../util/naming.js";
+import {
+  elixirRegexBody,
+  escapeElixirIdent,
+  plural,
+  snake,
+  upperFirst,
+} from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import { opUsesCurrentUser, stmtUsesParam } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
@@ -353,11 +362,13 @@ function renderDocFindFn(f: FindIR, aggModule: string): string {
 // the whole mutated map through the document repository's own `update/2` (which
 // re-runs the schemaless changeset + bumps `version`).
 //
-// v1 scope (validate-gated in `validateVanillaDocumentScope`): scalar-shaped
-// bodies — `assign` / scalar `+=`/`-=` / `precondition` / `requires` / `let` /
-// `emit`.  Returning ops, audited/provenanced ops, collection mutation, and
-// value-object-subfield / derived / function-call reads stay gated (they need
-// the struct machinery the document path deliberately omits).
+// Scope (validate-gated in `validateVanillaDocumentScope`): scalar-shaped bodies
+// — `assign` / scalar `+=`/`-=` / `precondition` / `requires` / `let` / `emit`,
+// value-object-subfield reads, and pure-`function` calls.  A RETURNING op
+// (`: A or B`) is emitted too (the in-memory tagged tuple — parity with the
+// relational non-audited returning path).  Audited/provenanced ops, collection
+// mutation, and derived reads stay gated (they need the struct/transaction
+// machinery the document path deliberately omits).
 // ---------------------------------------------------------------------------
 
 /** `<op>_<agg>(record, params)` for a document aggregate — normalise the jsonb
@@ -367,12 +378,91 @@ export function renderDocNamedOpFunction(
   facadeMod: string,
   op: OperationIR,
   agg: AggregateIR,
+  ctx: BoundedContextIR,
 ): string {
   const opSnake = snake(op.name);
   const aggPascal = upperFirst(agg.name);
   const aggSnake = snake(agg.name);
   const aggModule = `${facadeMod}.${aggPascal}`;
   const repoMod = `${aggModule}Repository`;
+  // The persist tail (`update(record, data)`) always reads both `record` and the
+  // normalised `data`, so both are unconditionally bound + used here.
+  const { params, body } = docOpBodyLines(op, agg, facadeMod, ctx);
+  const prelude = [...params, DOC_DATA_BIND, ...body].join("\n");
+  const actorParam = opUsesCurrentUser(op) ? ", current_user \\\\ nil" : "";
+  return `  @doc "Named operation \`${op.name}\` on \`${aggPascal}\` (document shape) — runs the body over the jsonb data, then re-validates + persists."
+  @spec ${opSnake}_${aggSnake}(${aggModule}.t(), map()) ::
+          {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
+  def ${opSnake}_${aggSnake}(%${aggModule}{} = record, params${actorParam}) when is_map(params) do
+${prelude}
+    ${repoMod}.update(record, data)
+  end`;
+}
+
+/** `<op>_<agg>(record, params)` for a RETURNING (`: A or B`) document operation —
+ *  runs the body over the jsonb `data`, then returns the tagged result the
+ *  controller's `<op>_<agg>_result/2` translates to HTTP (success → 200 + wire,
+ *  error variant → RFC-7807 at its mapped status).  Mirrors the relational
+ *  non-audited returning path: the fall-through success returns the IN-MEMORY
+ *  wire projection off the mutated `data` (no DB round-trip). */
+export function renderDocReturningOpFunction(
+  facadeMod: string,
+  op: OperationIR,
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+): string {
+  const opSnake = snake(op.name);
+  const aggPascal = upperFirst(agg.name);
+  const aggSnake = snake(agg.name);
+  const aggModule = `${facadeMod}.${aggPascal}`;
+  const actorParam = opUsesCurrentUser(op) ? ", current_user \\\\ nil" : "";
+  // A body that doesn't end in an explicit `return` falls through to its
+  // aggregate success variant — the mutated `data`, projected to the wire shape
+  // (`id` + the stored document fields, camelCase keys, matching `serialize/1`).
+  const lastIsReturn = op.statements[op.statements.length - 1]?.kind === "return";
+  const succeedsWithAggregate =
+    op.returnType?.kind === "union" &&
+    op.returnType.variants.some((v) => v.kind === "entity" && v.name === agg.name);
+  const successTail =
+    !lastIsReturn && succeedsWithAggregate ? `\n    {:ok, ${docWireMap(agg)}}` : "";
+  const { params, body } = docOpBodyLines(op, agg, facadeMod, ctx);
+  // A returning op needn't touch `data` at all (e.g. a body that only guards +
+  // returns an error variant), so bind it only when the body or the success
+  // projection actually reads it — an unused `data` trips `--warnings-as-errors`.
+  const usesData =
+    body.some(referencesDataMap) || (successTail !== "" && docFields(agg).length > 0);
+  const dataBind = usesData ? [DOC_DATA_BIND] : [];
+  // `record` is read only by the `data` bind (`record.data`) and the success wire
+  // (`record.id`); underscore it when neither fires so the struct-guarded head
+  // doesn't warn on an unused binding.
+  const recv = usesData || successTail !== "" ? "record" : "_record";
+  const prelude = [...params, ...dataBind, ...body].join("\n");
+  return `  @doc "Returning operation \`${op.name}\` on \`${aggPascal}\` (document shape, exception-less)."
+  @spec ${opSnake}_${aggSnake}(${aggModule}.t(), map()) ::
+          {:ok, term()} | {:error, binary(), map()}
+  def ${opSnake}_${aggSnake}(%${aggModule}{} = ${recv}, params${actorParam}) when is_map(params) do
+${prelude}${successTail}
+  end`;
+}
+
+/** The `data` normaliser bind shared by both op-function shapes. */
+const DOC_DATA_BIND = `    data = Map.new(record.data || %{}, fn {k, v} -> {to_string(k), v} end)`;
+
+/** Heuristic: does a rendered body line read/write the `data` map?  Used to
+ *  decide whether the `data` bind is live (an unused bind trips `-Werror`). */
+function referencesDataMap(line: string): boolean {
+  return /\bdata\b/.test(line);
+}
+
+/** Bind the op's referenced params + render its body statements over the `data`
+ *  map — the shared core of both op-function shapes.  Does NOT emit the `data`
+ *  bind itself (the caller decides whether it's live). */
+function docOpBodyLines(
+  op: OperationIR,
+  agg: AggregateIR,
+  facadeMod: string,
+  ctx: BoundedContextIR,
+): { params: string[]; body: string[] } {
   const rc: RenderCtx = {
     thisName: "record",
     contextModule: facadeMod,
@@ -384,30 +474,36 @@ export function renderDocNamedOpFunction(
   // `--warnings-as-errors`); `params` itself is always read by the `is_map`
   // guard, so a param-less op never warns.
   const usedParams = op.params.filter((p) => op.statements.some((s) => stmtUsesParam(s, p.name)));
-  const paramBinds = usedParams.map(
+  const params = usedParams.map(
     (p) => `    ${snake(p.name)} = Map.get(params, ${JSON.stringify(p.name)})`,
   );
-  const bodyLines = op.statements.map((s) => renderDocOpStmt(s, rc));
-  const prelude = [
-    ...paramBinds,
-    `    data = Map.new(record.data || %{}, fn {k, v} -> {to_string(k), v} end)`,
-    ...bodyLines,
-  ].join("\n");
-  const actorParam = opUsesCurrentUser(op) ? ", current_user \\\\ nil" : "";
-  return `  @doc "Named operation \`${op.name}\` on \`${aggPascal}\` (document shape) — runs the body over the jsonb data, then re-validates + persists."
-  @spec ${opSnake}_${aggSnake}(${aggModule}.t(), map()) ::
-          {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
-  def ${opSnake}_${aggSnake}(%${aggModule}{} = record, params${actorParam}) when is_map(params) do
-${prelude}
-    ${repoMod}.update(record, data)
-  end`;
+  const body = op.statements.map((s) => renderDocOpStmt(s, rc, ctx));
+  return { params, body };
+}
+
+/** The success wire map a returning op projects off the mutated `data` — the
+ *  same `id` + stored-field shape (camelCase keys) the document `serialize/1`
+ *  emits, so the op response matches `GET /<plural>/:id`. */
+function docWireMap(agg: AggregateIR): string {
+  const entries = [
+    `"id" => record.id`,
+    ...docFields(agg).map(
+      (f) => `${JSON.stringify(f.name)} => data[${JSON.stringify(snake(f.name))}]`,
+    ),
+  ];
+  return `%{${entries.join(", ")}}`;
+}
+
+/** Is `tag` an error payload in this context (vs the aggregate success variant)? */
+function isDocErrorTag(tag: string, ctx: BoundedContextIR): boolean {
+  return ctx.payloads.some((p) => p.name === tag && p.kind === "error");
 }
 
 /** Render one statement of a document op body over the `data` map.  Only the
- *  scalar-shaped statement kinds the validator admits reach here; anything else
- *  is a construction bug (the gate let through a shape the document path can't
- *  emit) and throws rather than misgenerating. */
-function renderDocOpStmt(s: StmtIR, rc: RenderCtx): string {
+ *  statement kinds the validator admits reach here; anything else is a
+ *  construction bug (the gate let through a shape the document path can't emit)
+ *  and throws rather than misgenerating. */
+function renderDocOpStmt(s: StmtIR, rc: RenderCtx, ctx: BoundedContextIR): string {
   const key = (seg: string) => JSON.stringify(snake(seg));
   switch (s.kind) {
     case "precondition":
@@ -438,6 +534,17 @@ function renderDocOpStmt(s: StmtIR, rc: RenderCtx): string {
         { name: "aggregate", valueExpr: `"${upperFirst(rc.agg?.name ?? "")}"` },
       ]);
       return `    ${logCall}\n    Phoenix.PubSub.broadcast(${appModule}.PubSub, "events", ${struct})`;
+    }
+    case "return": {
+      // Returning op tail (exception-less): an error variant → `{:error, "<tag>",
+      // <fields-map>}`, the success variant → `{:ok, <value>}`.  A record/object
+      // value already renders to an Elixir map; wrap a bare scalar defensively.
+      const value = renderExpr(s.value, rc);
+      if (s.variantTag && isDocErrorTag(s.variantTag, ctx)) {
+        const data = s.value.kind === "object" ? value : `%{value: ${value}}`;
+        return `    {:error, ${JSON.stringify(s.variantTag)}, ${data}}`;
+      }
+      return `    {:ok, ${value}}`;
     }
     case "expression":
       return `    _ = ${renderExpr(s.expr, rc)}`;

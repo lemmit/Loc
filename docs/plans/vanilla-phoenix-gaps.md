@@ -424,27 +424,39 @@ pairs, and the 403 runtime-authorization target).
   named `operation` or a custom `find` on it was rejected wholesale with
   `loom.vanilla-document-unsupported`. node / .NET / Python / Java hosted the
   full document surface; elixir was the only backend gated here.
-- **Fixed — scalar ops + finds now emit** (`document-emit.ts`,
-  `context-emit.ts`, `repository-emit.ts`):
+- **Fixed — ops + finds now emit** (`document-emit.ts`, `context-emit.ts`,
+  `repository-emit.ts`, `function-emit.ts`):
   - **Custom finds** load the table and filter **in memory** (`Repo.all |>
     Enum.filter`), the predicate rendered against the normalised (string-keyed)
     jsonb `data` map via the shared `docMap` render mode (`this.<field>` →
-    `data["<snake>"]`; enums compared as their stored strings; money/decimal as
-    native JSON numbers, not `Decimal` structs). List finds yield every match; a
-    `Cart?` / union single-get yields `List.first/1`.
-  - **Named operations** run the body over a normalised copy of `data`
-    (`assign` → `Map.put`, scalar `+=`/`-=`, `precondition`/`requires`/`let`/
-    `emit`), then persist the whole mutated map through the document repo's own
-    `update/2` (re-runs the schemaless changeset + bumps `version`) — instead of
-    the relational struct-update + `put_change` path (there are no flat columns).
-- **Residual gate (still `loom.vanilla-document-unsupported`, now narrowed):** a
-  document op/find that needs the struct/list/tuple machinery the scalar path
-  omits — a **returning** op (`: A or B`), an **audited** / **provenanced** op,
-  **collection** mutation, a **value-object-subfield / derived / function** read,
-  or a **paged / union** find. These fail fast (honest) rather than mis-emit.
+    `data["<snake>"]`; a value-object subfield → `data["money"]["amount"]`; enums
+    compared as their stored strings; money/decimal as native JSON numbers, not
+    `Decimal` structs). List finds yield every match; a `Cart?` single-get yields
+    `List.first/1`.
+  - **Named operations** run the body over a normalised copy of `data` (`assign`
+    → `Map.put`, scalar `+=`/`-=`, guards, `let`, `emit`, value-object-subfield
+    reads, and pure-`function` calls), then persist the whole mutated map through
+    the document repo's own `update/2` (re-runs the schemaless changeset + bumps
+    `version`).
+  - **Pure `function`s** on a document aggregate compile over the `data` map too
+    (`def is_open(data) when is_map(data), do: data["status"] == "open"`) — both
+    for op-guard calls and to fix the latent CRUD-only case (a `record.<field>`
+    the `(id, data, version)` struct doesn't carry).
+  - **Returning ops** (`: A or B`) emit the tagged tuple the controller
+    translates to HTTP — an error variant → `{:error, "<tag>", …}`, the
+    fall-through success → the in-memory wire projection (parity with the
+    relational non-audited returning path, no DB round-trip).
+- **Residual gate (still `loom.vanilla-document-unsupported`, now small):** an
+  **audited** / **provenanced** op (needs the transactional struct-column
+  persist), **collection** mutation (a document's contained parts are gated
+  upstream by `loom.vanilla-containment-unsupported` anyway), a **derived** read
+  (not stored in `data`), a **dereferenced-entity** member (cross-aggregate
+  join), a collection **method** (`.sum`/`.filter`/`.contains`), or a **paged /
+  union** find. These fail fast (honest) rather than mis-emit.
 - **Verified:** `test/e2e/fixtures/elixir-vanilla-build/vanilla-document.ddd`
-  gained scalar ops + finds — green under `mix compile --warnings-as-errors`
-  (hex mirror). Unit coverage: `vanilla-document.test.ts` (emit) +
+  exercises scalar + value-object-subfield finds/ops, a document function, and a
+  returning op — green under `mix compile --warnings-as-errors` (hex mirror).
+  Unit coverage: `vanilla-document.test.ts` (emit) +
   `saving-shape-support.test.ts` (gate).
 
 ## 13. LiveView operation-action bang functions (`<op>_<agg>!/1` + `get_<agg>!/1`) — **CLOSED**
