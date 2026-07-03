@@ -1,6 +1,13 @@
 import { wireShapeFor } from "../../ir/enrich/enrichments.js";
 import { createInputFields, forApiRead } from "../../ir/enrich/wire-projection.js";
-import type { EnrichedAggregateIR, FindIR, RepositoryIR, TypeIR } from "../../ir/types/loom-ir.js";
+import { unionReturn, variantTag } from "../../ir/stdlib/unions.js";
+import type {
+  BoundedContextIR,
+  EnrichedAggregateIR,
+  FindIR,
+  RepositoryIR,
+  TypeIR,
+} from "../../ir/types/loom-ir.js";
 import { peelCollection, peelNullable, wireTypeInfo } from "../../ir/types/wire-types.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
@@ -66,8 +73,54 @@ function paramFinds(repo: RepositoryIR | undefined): FindIR[] {
   return (repo?.finds ?? []).filter((f) => f.name !== "all");
 }
 
+/** The `<Op><Agg>Response` discriminated-union alias for a union-returning
+ *  operation (async-actions-and-effects.md Stage 2) — the TS analogue of the
+ *  React api-module's zod discriminated union.  Each variant is tagged on the
+ *  wire `type` discriminator (the cross-backend P4 convention): a success
+ *  entity/value-object intersects its response interface with the tag literal;
+ *  an error payload becomes an object of its own fields plus the tag (never seen
+ *  at 200 — it exists so the reified-error cast + arm binding typecheck). */
+function unionResponseTypeName(opName: string, agg: EnrichedAggregateIR): string {
+  return `${upperFirst(opName)}${agg.name}Response`;
+}
+
+function emitAngularUnionResponseType(
+  opName: string,
+  agg: EnrichedAggregateIR,
+  variants: TypeIR[],
+  bc: BoundedContextIR | undefined,
+): string[] {
+  const name = unionResponseTypeName(opName, agg);
+  const member = (v: TypeIR): string => {
+    const lit = `type: ${JSON.stringify(variantTag(v))}`;
+    if (v.kind === "entity") {
+      const payload = bc?.payloads.find((p) => p.name === v.name);
+      if (payload?.kind === "error") {
+        // Error variant — an object type of the payload's own fields plus the tag.
+        const fields = payload.fields.map(
+          (f) => `${f.name}${f.optional ? "?" : ""}: ${wireTsType(f.type)}`,
+        );
+        return `{ ${[lit, ...fields].join("; ")} }`;
+      }
+      // Success entity (typically the aggregate) — intersect its response type.
+      return `(${v.name}Response & { ${lit} })`;
+    }
+    if (v.kind === "valueobject") return `(${v.name}Response & { ${lit} })`;
+    if (v.kind === "none") return `{ ${lit} }`;
+    // Scalar / id variant — the tagged `{ type, value }` carrier.
+    return `{ ${lit}; value: ${wireTsType(v)} }`;
+  };
+  const memberLines = variants.map((v) => `  | ${member(v)}`);
+  if (memberLines.length > 0) memberLines[memberLines.length - 1] += ";";
+  return [`export type ${name} =`, ...memberLines, ""];
+}
+
 /** Emit the `src/api/<agg>.ts` module for one aggregate. */
-export function buildAngularApiModule(agg: EnrichedAggregateIR, repo?: RepositoryIR): string {
+export function buildAngularApiModule(
+  agg: EnrichedAggregateIR,
+  repo?: RepositoryIR,
+  bc?: BoundedContextIR,
+): string {
   const single = agg.name;
   const serviceName = `${single}Service`;
   const responseName = `${single}Response`;
@@ -97,14 +150,49 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR, repo?: Repositor
     "}",
     "",
   ]);
-  const opMethods = ops.flatMap((op) => [
-    "",
-    `  ${op.name}(id: string, input: ${upperFirst(op.name)}${single}Request) {`,
-    `    return this.http.post<void>(\`\${API_BASE_URL}/${tag}/\${id}/${op.name}\`, input);`,
-    "  }",
-  ]);
+  const opMethods = ops.flatMap((op) => {
+    // A union-returning op (`operation foo(): X or Err`) serves the FULL tagged
+    // union at 200 — the service method types the response as the discriminated
+    // union so `mutateAsync` resolves the tagged variant; a plain op stays `void`.
+    const respType =
+      op.returnType && unionReturn(op.returnType) ? unionResponseTypeName(op.name, agg) : "void";
+    return [
+      "",
+      `  ${op.name}(id: string, input: ${upperFirst(op.name)}${single}Request) {`,
+      `    return this.http.post<${respType}>(\`\${API_BASE_URL}/${tag}/\${id}/${op.name}\`, input);`,
+      "  }",
+    ];
+  });
   const opFactories = ops.flatMap((op) => {
     const reqType = `${upperFirst(op.name)}${single}Request`;
+    const u = op.returnType ? unionReturn(op.returnType) : null;
+    if (u) {
+      // Union-returning op (async-actions-and-effects.md Stage 2): bind the record
+      // `id` at hook time (mirroring the React op-mutation shape the awaiting
+      // action's variant-match envelope expects) so `mutateAsync(input)` resolves
+      // the parsed tagged union.  The client never receives the error variant at
+      // 200 — it's intercepted into a non-2xx ProblemDetails and reified from the
+      // thrown `ApiError` at the call site — but the type carries every arm so the
+      // action's `switch (result.type)` narrows.
+      return [
+        `/** \`${op.name}\` union-returning operation mutation (TanStack \`injectMutation\`).`,
+        " *  `mutateAsync(input)` POSTs the payload and resolves with the tagged",
+        " *  success variant; on success it invalidates the affected record + the",
+        " *  collection so the cached reads refetch. */",
+        `export function use${upperFirst(op.name)}${single}(id: string) {`,
+        `  const service = inject(${serviceName});`,
+        "  const queryClient = inject(QueryClient);",
+        "  return injectMutation(() => ({",
+        `    mutationFn: (input: ${reqType}) => firstValueFrom(service.${op.name}(id, input)),`,
+        "    onSuccess: () =>",
+        `      queryClient`,
+        `        .invalidateQueries({ queryKey: ["${oneTag}", id] })`,
+        `        .then(() => queryClient.invalidateQueries({ queryKey: ["${tag}"] })),`,
+        "  }));",
+        "}",
+        "",
+      ];
+    }
     return [
       `/** \`${op.name}\` operation mutation (TanStack \`injectMutation\`).  Call`,
       " *  `mutateAsync({ id, input })` — the variables carry the record id, so an",
@@ -125,6 +213,12 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR, repo?: Repositor
       "}",
       "",
     ];
+  });
+  // Union-returning-operation response TYPES (emitted before the service so the
+  // service method + factory can reference them).
+  const opUnionTypes = ops.flatMap((op) => {
+    const u = op.returnType ? unionReturn(op.returnType) : null;
+    return u ? emitAngularUnionResponseType(op.name, agg, u.variants, bc) : [];
   });
 
   // Parameterised finds → a `GET /<tag>/<find>?<params>` service method each +
@@ -201,6 +295,7 @@ export function buildAngularApiModule(agg: EnrichedAggregateIR, repo?: Repositor
     "}",
     "",
     ...opRequests,
+    ...opUnionTypes,
     ...findQueryInterfaces,
     `@Injectable({ providedIn: "root" })`,
     `export class ${serviceName} {`,

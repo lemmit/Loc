@@ -149,7 +149,7 @@ function checkOperationBody(
  *  handler), never called from inside an aggregate `operation`/`create`/`destroy`
  *  body or a view body.  PURE services are exempt (no infrastructure).  The
  *  closest analog is the UI mutating-command gate (`ui-checks.ts`
- *  `checkActionRequiresAwait`). */
+ *  `checkMissingEffectMarker`). */
 function checkInfraCallsFromAggregates(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
   // The set of NON-pure (reading/mutating) services in this context — only a
   // call into one of these is gated.  Resolving the tier needs the aggregate-op

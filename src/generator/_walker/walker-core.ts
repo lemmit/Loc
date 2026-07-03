@@ -52,6 +52,7 @@
 //     uses to decide whether to dispatch to the walker.
 
 import { pagedReturn } from "../../ir/stdlib/generics.js";
+import { variantTag } from "../../ir/stdlib/unions.js";
 import type {
   ActionIR,
   AggregateIR,
@@ -67,7 +68,7 @@ import { WALKER_LAYOUT_PRIMITIVES } from "../../language/walker-stdlib.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { tryDetectApiHook } from "./api-hook-detector.js";
 import { registerApiHook } from "./api-hook-register.js";
-import { storeMemberLocal } from "./js-target-helpers.js";
+import { storeMemberLocal, upperFirstName } from "./js-target-helpers.js";
 import { emitUserComponent } from "./primitives/controls.js";
 import { WALKER_PRIMITIVES } from "./registry.js";
 import { describeReceiver, positionalArgs } from "./shared/args.js";
@@ -1062,12 +1063,24 @@ export function renderActionHandlers(
       ? { ...baseCtx, lambdaParams: extendLambdaParams(baseCtx, param, param) }
       : baseCtx;
     const bodyStmts = action.body.map((s) => emitStmt(s, handlerCtx));
+    // An action whose body awaits a remote effect (a `variant-match` over
+    // `await <op>()` — async-actions-and-effects.md Stage 2) must be `async` so
+    // the emitted body can `await`.
+    const isAsync = action.body.some(stmtIsAwaited);
+    const asyncKw = isAsync ? "async " : "";
     out.push(
-      baseCtx.target.renderNamedHandler?.(action.name, param, bodyStmts) ??
-        `const ${action.name} = (${param ?? ""}) => { ${bodyStmts.join(" ")} };`,
+      baseCtx.target.renderNamedHandler?.(action.name, param, bodyStmts, { async: isAsync }) ??
+        `const ${action.name} = ${asyncKw}(${param ?? ""}) => { ${bodyStmts.join(" ")} };`,
     );
   }
   return out.join("\n");
+}
+
+/** True when a statement (or a nested arm/else body) contains an awaited
+ *  effect — a `variant-match` (whose subject is `await <op>()`).  Drives the
+ *  `async` handler wrapper (async-actions-and-effects.md Stage 2). */
+function stmtIsAwaited(s: StmtIR): boolean {
+  return s.kind === "variant-match";
 }
 
 /** Money(value, currency?, decimals?, testid?).  Renders
@@ -1498,12 +1511,143 @@ export function emitStmt(stmt: StmtIR, ctx: WalkContext): string {
       const args = stmt.args.map((a) => emitExpr(a, ctx)).join(", ");
       return `${stmt.name}(${args});`;
     }
+    case "variant-match":
+      return emitVariantMatch(stmt, ctx);
     default:
       return unsupportedPageStmt(
         `statement '${stmt.kind}'`,
         "it has no meaning in a React page event handler",
       );
   }
+}
+
+/** OR the walk's mutable BOOLEAN Sink flags from a child context back into its
+ *  parent.  Needed when a child ctx was made by SPREAD (`{ ...ctx, lambdaParams }`)
+ *  — the spread snapshots the booleans by value, so a body write inside the
+ *  child (`usesState` from a `:=`, `usesNavigate` from a `navigate(…)`) would be
+ *  lost.  Object sinks (imports / usedApiHooks / usedParams / …) stay shared by
+ *  reference and need no copy-back. */
+function propagateSinkFlags(from: WalkContext, to: WalkContext): void {
+  to.usesState ||= from.usesState;
+  to.usesNavigate ||= from.usesNavigate;
+  to.usesRouteId ||= from.usesRouteId;
+  to.usesCurrentUser ||= from.usesCurrentUser;
+  to.usesRouterLink ||= from.usesRouterLink;
+  to.usesChildren ||= from.usesChildren;
+  to.usesCodeBlock ||= from.usesCodeBlock;
+  if (from.usesFragment) to.usesFragment = true;
+}
+
+/** Add a named import the page/component shell must emit (`from` module →
+ *  `name`).  A thin wrapper over `ctx.imports` (an `ImportMap`) so the
+ *  variant-match envelope can pull in `ApiError` + the op's union response
+ *  type without reaching for the primitive-layer `addImport` (which would form
+ *  a runtime import cycle back into this module). */
+function addPageImport(ctx: WalkContext, from: string, name: string): void {
+  let names = ctx.imports.get(from);
+  if (!names) {
+    names = new Set<string>();
+    ctx.imports.set(from, names);
+  }
+  names.add(name);
+}
+
+/** Emit a `variant-match` StmtIR (async-actions-and-effects.md Stage 2) — the
+ *  `match await <op>() { Variant b => … }` effect form in a frontend action
+ *  body.  walker-core does the FRAMEWORK-NEUTRAL work here — detect the awaited
+ *  subject's remote mutation (register its hook for hoisting; the op needs the
+ *  route `id`, its args become the request payload), classify the error variant
+ *  from the owning context's `error` payloads, and pre-render every arm body —
+ *  then delegates the framework-shaped skeleton (async try/catch + switch) to
+ *  `ctx.target.renderVariantMatch`.  A target that doesn't implement the seam
+ *  falls back to `unsupportedPageStmt` so the statement is never silently
+ *  dropped. */
+function emitVariantMatch(
+  stmt: Extract<StmtIR, { kind: "variant-match" }>,
+  ctx: WalkContext,
+): string {
+  if (!ctx.target.renderVariantMatch) {
+    return unsupportedPageStmt(
+      "statement 'variant-match'",
+      `the ${ctx.target.framework} frontend has no variant-match rendering yet ` +
+        `(async-actions-and-effects.md Stage 2)`,
+    );
+  }
+  // Detect the awaited remote op in the subject position (Pattern B/E:
+  // `Sales.Order.placeOrder(…)` / `Order.placeOrder(…)`).
+  const detected = tryDetectApiHook(stmt.subject, ctx);
+  let mutationVar = "";
+  let mutateArgs = "{}";
+  let bc: BoundedContextIR | undefined;
+  let resultType: string | undefined;
+  if (detected) {
+    bc = ctx.bcByAggregate.get(detected.aggregateName);
+    const agg = ctx.aggregatesByName.get(detected.aggregateName);
+    const op = agg?.operations.find((o) => o.name === detected.operation);
+    // An aggregate `operation` is an INSTANCE command — its hook takes the
+    // route `id` at hook time and the request payload at `mutateAsync` time.
+    // Hoist the hook with the route id (the shell binds `id` from the route
+    // params), and map the awaited call's positional args onto the op's params
+    // to build the request object.
+    const routeId = ctx.target.renderRouteId?.() ?? "id";
+    ctx.usesRouteId = true;
+    const hookUse = {
+      ...ctx.target.buildHookUse(detected, (e) => emitExpr(e, ctx)),
+      argsRendered: [routeId],
+    };
+    registerApiHook(hookUse, ctx);
+    mutationVar = hookUse.varName;
+    const params = op?.params ?? [];
+    mutateArgs =
+      params.length === 0
+        ? "{}"
+        : `{ ${params
+            .map(
+              (p, i) =>
+                `${p.name}: ${detected.args[i] ? emitExpr(detected.args[i]!, ctx) : "undefined"}`,
+            )
+            .join(", ")} }`;
+    if (agg && op) {
+      // The op's `or`-union response type — the discriminated union the
+      // api-module emits.  The action's `result` narrows on it, and the
+      // page-shell imports it alongside the hook.
+      resultType = `${upperFirstName(op.name)}${agg.name}Response`;
+      addPageImport(ctx, `${hookUse.importFrom}`, resultType);
+    }
+  }
+  // Classify the error variant (v1: at most one) via the owning context's
+  // `error` payloads — the lowered arm `isError` hint is unreliable from a UI
+  // body (its lowering env can't see the domain context), so the payload
+  // classification is authoritative; the hint is an OR-fallback.
+  const isErrorTag = (tag: string, hint: boolean | undefined): boolean =>
+    hint === true || !!bc?.payloads.some((p) => p.name === tag && p.kind === "error");
+
+  const arms = stmt.arms.map((arm) => {
+    const tag = variantTag(arm.varType);
+    // Bind the narrowed variant local so `o.code` resolves inside the arm.  The
+    // spread copies the parent Sink's BOOLEAN flags by value (object sinks —
+    // imports / usedApiHooks / usedParams — stay shared by reference), so any
+    // `usesState` / `usesNavigate` a body write flips must be OR'd back into the
+    // parent afterwards (else the shell skips the `useState` the setter needs).
+    const armCtx: WalkContext = arm.binding
+      ? { ...ctx, lambdaParams: extendLambdaParams(ctx, arm.binding, arm.binding) }
+      : ctx;
+    const body = arm.body.map((s) => emitStmt(s, armCtx));
+    if (armCtx !== ctx) propagateSinkFlags(armCtx, ctx);
+    return { tag, binding: arm.binding, body, isError: isErrorTag(tag, arm.isError) };
+  });
+  const errorArm = arms.find((a) => a.isError);
+  if (errorArm) addPageImport(ctx, "../api/client", "ApiError");
+  const elseBody = stmt.elseBody?.map((s) => emitStmt(s, ctx));
+
+  return ctx.target.renderVariantMatch({
+    mutationVar,
+    mutateArgs,
+    resultType,
+    arms: arms.map(({ tag, binding, body }) => ({ tag, binding, body })),
+    errorTag: errorArm?.tag,
+    elseBody,
+  });
 }
 
 /** A page event-handler statement the React walker can't lower.  We throw

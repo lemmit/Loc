@@ -41,7 +41,9 @@ import { storeMemberLocal } from "../../_walker/js-target-helpers.js";
 import { indentJsx } from "../../_walker/shared/args.js";
 import type {
   ActionMutationState,
+  ApiHookUse,
   FormOfState,
+  ImportMap,
   OperationFormState,
   WalkContext,
   WorkflowFormState,
@@ -275,6 +277,23 @@ export function renderSveltePage(
     paramNames,
     stateNames,
     usedStores,
+    // Share the page's api/import sinks + entity lookups so an action body that
+    // awaits a remote op (`match await Sales.Order.op()` — async-actions-and-
+    // effects.md Stage 2) detects the mutation, hoists `use<Op><Agg>(id)`, and
+    // lands the `ApiError` / union-type imports on THIS page.
+    {
+      imports,
+      usedApiHooks,
+      apiParams,
+      aggregatesByName,
+      bcByAggregate,
+      workflowsByName,
+      bcByWorkflow,
+      pageRoutes,
+      usedParams,
+      usesNavigate,
+      authUi,
+    },
   );
   const actionLines = actionResult.lines;
   // Store wiring (Stage 5) — import + `$derived` field bindings.  Computed AFTER
@@ -340,13 +359,14 @@ export function renderSveltePage(
   const actionWiring = renderActionMutations(actionMutations);
 
   const navigateImport =
-    usesNavigate || form.usesNavigate
+    usesNavigate || form.usesNavigate || actionResult.usesNavigate
       ? `  import { goto as navigate } from "$app/navigation";\n`
       : "";
   // Route params to bind: the declared/used ones plus the magic route `id`
-  // (`byId(id)`) when the body referenced it.
+  // (`byId(id)`) when the body — OR an awaited-op action handler (Stage 2, whose
+  // `use<Op><Agg>(id)` hook binds off the route id) — referenced it.
   const routeParamNames = new Set(usedParams);
-  if (usesRouteId) routeParamNames.add("id");
+  if (usesRouteId || actionResult.usesRouteId) routeParamNames.add("id");
   const pageStateImport = routeParamNames.size > 0 ? `  import { page } from "$app/state";\n` : "";
   // Used route params derive from the reactive `page.params` — bare
   // refs in the walked body (`{id}`) resolve against these locals.
@@ -826,6 +846,27 @@ function buildDerivedLines(
  *  reads/writes are bare names everywhere (no `.value` deref), so the shared
  *  `renderActionHandlers` default (`const <name> = (<p>?) => { … }`) is
  *  already correct — only referenced actions emit. */
+/** Shared page-level sinks + lookups an action-handler walk must see so an
+ *  awaited remote effect (`match await Sales.Order.op()` — async-actions-and-
+ *  effects.md Stage 2) in an action body resolves + hoists into the SAME shell
+ *  as the main body walk: the api-param handles (`apiParamNames`) let
+ *  `tryDetectApiHook` recognise the mutation, and sharing `imports` +
+ *  `usedApiHooks` by reference lands the `ApiError` / union-type imports and the
+ *  hoisted `use<Op><Agg>(id)` on the page (not a throwaway ctx). */
+interface ActionWalkShared {
+  imports: ImportMap;
+  usedApiHooks: Map<string, ApiHookUse>;
+  apiParams: ReadonlyArray<UiApiParamIR>;
+  aggregatesByName: ReadonlyMap<string, AggregateIR>;
+  bcByAggregate: ReadonlyMap<string, BoundedContextIR>;
+  workflowsByName: ReadonlyMap<string, WorkflowIR>;
+  bcByWorkflow: ReadonlyMap<string, BoundedContextIR>;
+  pageRoutes: ReadonlyMap<string, string>;
+  usedParams: Set<string>;
+  usesNavigate: boolean;
+  authUi: boolean;
+}
+
 function buildActionLines(
   actions: readonly ActionIR[],
   used: ReadonlySet<string>,
@@ -836,9 +877,25 @@ function buildActionLines(
    *  action body (`discard() { Cart.clear() }`) is recorded for the shell's
    *  store wiring (Stage 5). */
   usedStores?: Map<string, Set<string>>,
-): { lines: string; usesState: boolean } {
-  const ctx = dummyCtx(pack, paramNames, stateNames, new Set());
+  /** When present, the action walk shares the page's api/import sinks + entity
+   *  lookups so an awaited op (Stage 2) hoists into the same shell.  Omitted for
+   *  components (no api handles to await against). */
+  shared?: ActionWalkShared,
+): { lines: string; usesState: boolean; usesRouteId: boolean; usesNavigate: boolean } {
+  const ctx = dummyCtx(pack, paramNames, stateNames, shared?.usedParams ?? new Set());
   if (usedStores) ctx.usedStores = usedStores;
+  if (shared) {
+    ctx.imports = shared.imports;
+    ctx.usedApiHooks = shared.usedApiHooks;
+    ctx.apiParamNames = new Map(shared.apiParams.map((p) => [p.name, p.apiName]));
+    ctx.aggregatesByName = shared.aggregatesByName;
+    ctx.bcByAggregate = shared.bcByAggregate;
+    ctx.workflowsByName = shared.workflowsByName;
+    ctx.bcByWorkflow = shared.bcByWorkflow;
+    ctx.pageRoutes = shared.pageRoutes;
+    ctx.authUi = shared.authUi;
+    ctx.usesNavigate = shared.usesNavigate;
+  }
   const handlers = renderActionHandlers(actions, used, ctx);
   const lines = handlers
     ? `${handlers
@@ -846,7 +903,12 @@ function buildActionLines(
         .map((l) => `  ${l}`)
         .join("\n")}\n`
     : "";
-  return { lines, usesState: ctx.usesState };
+  return {
+    lines,
+    usesState: ctx.usesState,
+    usesRouteId: ctx.usesRouteId,
+    usesNavigate: ctx.usesNavigate,
+  };
 }
 
 function stateTypeAsTsString(type: TypeIR): string {

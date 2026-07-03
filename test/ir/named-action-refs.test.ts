@@ -6,8 +6,10 @@
 //  - Fix 3  `loom.unresolved-action-ref`: a handler-slot ref (`onRowClick:
 //           ghost`) or a bare body call matching no sibling action / function.
 //  - Fix 4  action bodies get the same IR checks (params in scope).
-//  - Fix 5  `loom.action-requires-await`: a remote mutating command inline in
-//           an action body.
+//  - Fix 5  `loom.missing-effect-marker` (async-actions-and-effects.md Stage 2,
+//           was `loom.action-requires-await`): a BARE remote mutating command
+//           inline in an action body WARNS (mark it `await`); an `await`-marked
+//           op (a `match await` subject) is accepted.
 //
 // IR diagnostics come from `validateLoomModel` over the lowered+enriched model
 // (the `buildLoomModel` helper asserts the AST is clean first).
@@ -28,7 +30,7 @@ async function actionDiags(source: string): Promise<string[]> {
   const loom = enrichLoomModel(lowerModel(model));
   return validateLoomModel(loom)
     .map((d) => d.code)
-    .filter((c) => c === "loom.unresolved-action-ref" || c === "loom.action-requires-await");
+    .filter((c) => c === "loom.unresolved-action-ref" || c === "loom.missing-effect-marker");
 }
 
 async function buildPage(source: string) {
@@ -208,35 +210,84 @@ describe("loom.unresolved-action-ref (Fix 3)", () => {
   });
 });
 
-describe("loom.action-requires-await (Fix 5)", () => {
-  it("fires on a remote mutating command inline in an action body (Pattern E `Order.confirm(o)`)", async () => {
-    const diags = await actionDiags(withApi(`action go(o: Order id) { Order.confirm(o) }`));
-    expect(diags).toContain("loom.action-requires-await");
+describe("loom.missing-effect-marker (async-actions-and-effects.md Stage 2)", () => {
+  it("WARNS on a bare remote mutating command inline in an action body (Pattern E `Order.confirm(o)`)", async () => {
+    const { model } = await parseString(withApi(`action go(o: Order id) { Order.confirm(o) }`));
+    const loom = enrichLoomModel(lowerModel(model));
+    const d = validateLoomModel(loom).find((x) => x.code === "loom.missing-effect-marker");
+    expect(d).toBeDefined();
+    // Stage 2 ramp: it's a WARNING, not an error (becomes an error in Stage 2b).
+    expect(d!.severity).toBe("warning");
   });
 
-  it("fires on the api-handle-rooted form (Pattern B `C.Order.confirm(o)`)", async () => {
+  it("WARNS on the api-handle-rooted form (Pattern B `C.Order.confirm(o)`)", async () => {
     const diags = await actionDiags(withApi(`action go(o: Order id) { C.Order.confirm(o) }`));
-    expect(diags).toContain("loom.action-requires-await");
+    expect(diags).toContain("loom.missing-effect-marker");
   });
 
-  it("does NOT fire on a repository finder call (`Order.active()` — a read)", async () => {
+  it("does NOT warn on a repository finder call (`Order.active()` — a read)", async () => {
     const diags = await actionDiags(withApi(`action go() { Order.active() }`));
-    expect(diags).not.toContain("loom.action-requires-await");
+    expect(diags).not.toContain("loom.missing-effect-marker");
   });
 
-  it("does NOT fire on a view-effect call (`navigate` / `toast`)", async () => {
+  it("does NOT warn on a view-effect call (`navigate` / `toast`)", async () => {
     const diags = await actionDiags(withApi(`action go() { navigate("/x") toast("hi") }`));
-    expect(diags).not.toContain("loom.action-requires-await");
+    expect(diags).not.toContain("loom.missing-effect-marker");
   });
 
-  it("does NOT fire on a sibling-action call (Fix 1, not a remote effect)", async () => {
+  it("does NOT warn on a sibling-action call (Fix 1, not a remote effect)", async () => {
     const diags = await actionDiags(
       withApi(`action go() { other() }  action other() { navigate("/y") }`),
     );
-    expect(diags).not.toContain("loom.action-requires-await");
+    expect(diags).not.toContain("loom.missing-effect-marker");
   });
 
-  it("does NOT fire on a PRIVATE operation (only public mutating ops require await)", async () => {
+  it("does NOT warn on an `await`-marked op (the explicit, handled form)", async () => {
+    // `match await C.Order.place() { … }` is the Stage-2 effect form — the
+    // awaited subject is ACCEPTED (no missing-effect-marker), unlike the bare
+    // `Order.place()` call above.
+    const diags = await actionDiags(`
+      error Failed { reason: string }
+      system Demo {
+        subdomain S {
+          context C {
+            aggregate Order ids guid {
+              code: string
+              operation place(): Order or Failed { return Failed { reason: code } }
+            }
+            repository Orders for Order {}
+          }
+        }
+        api CApi from S { httpStatus Failed 422 }
+        ui Web {
+          api C: CApi
+          page P {
+            route: "/orders/:id"
+            state { msg: string = "" }
+            action go() {
+              match await C.Order.place() {
+                Order o => { msg := o.code }
+                Failed f => { msg := f.reason }
+              }
+            }
+            body: Stack { Button { "Go", onClick: go } }
+          }
+        }
+        storage primary { type: postgres }
+        resource cState { for: C, kind: state, use: primary }
+        deployable api { platform: node, contexts: [C], dataSources: [cState], serves: CApi, port: 3000 }
+        deployable web {
+          platform: react
+          targets: api
+          ui: Web { C: api }
+          port: 3001
+        }
+      }
+    `);
+    expect(diags).not.toContain("loom.missing-effect-marker");
+  });
+
+  it("does NOT warn on a PRIVATE operation (only public mutating ops require a marker)", async () => {
     const diags = await actionDiags(`
       system Demo {
         subdomain S {
@@ -269,14 +320,14 @@ describe("loom.action-requires-await (Fix 5)", () => {
         }
       }
     `);
-    expect(diags).not.toContain("loom.action-requires-await");
+    expect(diags).not.toContain("loom.missing-effect-marker");
   });
 
   it("does not DOUBLE-fire with unresolved-action-ref on the same remote call site", async () => {
     // `Order.confirm(o)` is a method-call, so Fix 3's bare-call branch never
-    // applies — only the await diagnostic fires (the developer's no-overlap claim).
+    // applies — only the effect-marker warning fires (the developer's no-overlap claim).
     const diags = await actionDiags(withApi(`action go(o: Order id) { Order.confirm(o) }`));
-    expect(diags.filter((c) => c === "loom.action-requires-await")).toHaveLength(1);
+    expect(diags.filter((c) => c === "loom.missing-effect-marker")).toHaveLength(1);
     expect(diags).not.toContain("loom.unresolved-action-ref");
   });
 });

@@ -266,6 +266,13 @@ export function findAggregateInModule(mod: Subdomain, name: string): Aggregate |
  *  pointing at this aggregate. */
 export function listValidApiOperations(agg: Aggregate): string[] {
   const ops = new Set<string>(["all", "byId", "create", "update", "delete"]);
+  // Public `operation`s declared on the aggregate are exposed as api routes
+  // (each gets a `use<Op><Agg>` frontend hook) — so a UI body may call them
+  // off the api handle (`Sales.Order.placeOrder()`), including as the awaited
+  // subject of a variant-`match` (async-actions-and-effects.md Stage 2).
+  for (const m of agg.members ?? []) {
+    if (m.$type === "Operation" && !m.private) ops.add(m.name);
+  }
   const ctx = agg.$container;
   if (ctx?.$type === "BoundedContext") {
     for (const m of ctx.members ?? []) {

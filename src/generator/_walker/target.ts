@@ -122,6 +122,59 @@ export interface ApiCallSite {
   argsRendered?: readonly string[];
 }
 
+/** One discriminant arm of a `variant-match` (async-actions-and-effects.md
+ *  Stage 2).  The shared walker-core pre-renders each arm's body and resolves
+ *  its wire tag; the target only assembles the framework-shaped `case`. */
+export interface VariantMatchArm {
+  /** The variant's wire discriminator (`variantTag(varType)`) — the value the
+   *  discriminant `switch (result.type)` matches on (`"Order"`, `"Failed"`). */
+  tag: string;
+  /** The narrowed local the arm binds to the matched result
+   *  (`Placed o => …` → `o`), or undefined for an unbound arm.  React emits
+   *  `const <binding> = result;` at the top of the `case`. */
+  binding?: string;
+  /** The arm's already-rendered body statements (each `;`-terminated, via the
+   *  shared `emitStmt` — state writes / navigate / …). */
+  body: readonly string[];
+}
+
+/** Everything the shared walker-core resolves for a `variant-match` StmtIR —
+ *  the async envelope + discriminant `switch` a frontend action body needs to
+ *  handle the `or`-union Result of an awaited remote op
+ *  (async-actions-and-effects.md Stage 2).  The framework-neutral work
+ *  (detecting the awaited subject's mutation hook, classifying the error
+ *  variant, pre-rendering every arm body) lives in walker-core; the target
+ *  supplies only the framework-shaped skeleton. */
+export interface VariantMatchSpec {
+  /** The hoisted mutation-hook local (`orderPlaceOrder`) whose `mutateAsync`
+   *  runs the awaited op.  walker-core registered it for hoisting; empty string
+   *  when the subject was not a detected remote mutation (the target then has
+   *  no mutation to await — a degenerate case it may render as a comment). */
+  mutationVar: string;
+  /** Already-rendered arguments spliced into `<mutationVar>.mutateAsync(<args>)`
+   *  — the op's request payload built from the awaited call's args (or `{}`). */
+  mutateArgs: string;
+  /** The op's `or`-union response type name (`PlaceOrderOrderResponse`) — the
+   *  discriminated union the frontend api-module emits, which the page-shell has
+   *  been told to import.  A statically-typed target (TSX) annotates `result`
+   *  with it so the `switch` narrows each arm cleanly; undefined when the
+   *  subject wasn't a resolvable remote op (the target types `result` loosely). */
+  resultType?: string;
+  /** The discriminant arms, in source order. */
+  arms: readonly VariantMatchArm[];
+  /** The wire tag of the union's single error variant (v1 scope: at most one
+   *  error variant per union — multi-error is a documented follow-up).  Present
+   *  ⇒ the target reifies a caught `ApiError` into `{ ...body, type: <errorTag> }`
+   *  (the backend intercepts the error variant into an RFC-7807 ProblemDetails
+   *  whose `type` is overwritten with the error URI, so the tag is re-stamped as
+   *  a static literal).  Undefined ⇒ the union has no error variant, so there is
+   *  nothing to reify (the try/catch may be omitted). */
+  errorTag?: string;
+  /** Pre-rendered `else`-arm body statements (the `match … { … else => … }`
+   *  fallthrough), or undefined when the source had no `else`. */
+  elseBody?: readonly string[];
+}
+
 /** A framework-specific hook-use record produced by
  *  `WalkerTarget.buildHookUse`.  Carries the names + import path the
  *  page-shell needs to hoist the hook (TSX: a `const x = useY(args)`
@@ -506,12 +559,34 @@ export interface WalkerTarget {
    *  (`const <name> = (<param>?) => { <stmts> };`) — the omitted default — so
    *  a call site can bind the bare value.  Angular overrides to a class method
    *  (`<name>(<param>?) { <stmts> }`).  Returned verbatim as one or more
-   *  source lines spliced into the shell's declaration region. */
+   *  source lines spliced into the shell's declaration region.
+   *
+   *  `opts.async` is set when the body contains an awaited effect (a
+   *  `variant-match` over `await <op>()` — async-actions-and-effects.md
+   *  Stage 2); the JSX default then emits an `async` arrow so the body may
+   *  `await`.  A target that ignores it produces a synchronous handler
+   *  (correct for frameworks that don't await inline). */
   renderNamedHandler?(
     name: string,
     param: string | undefined,
     bodyStmts: readonly string[],
+    opts?: { async?: boolean },
   ): string;
+
+  /** OPTIONAL — render a `variant-match` StmtIR in action-body position
+   *  (async-actions-and-effects.md Stage 2): the async envelope that awaits an
+   *  `or`-union-returning remote op and a discriminant `switch` over its result.
+   *  The shared walker-core does the framework-neutral work — detect the awaited
+   *  subject's mutation hook (registered for hoisting via `buildHookUse` /
+   *  `registerApiHook`), classify the error variant, and pre-render every arm's
+   *  body — and hands the target a fully-resolved `VariantMatchSpec`.  The
+   *  target supplies ONLY the framework-shaped skeleton: React returns an async
+   *  `try/catch` (reifying a caught `ApiError` into the error variant) + a
+   *  `switch (result.type)` binding each arm's narrowed local; Angular would
+   *  emit a method with signal writes.  A target that omits this method makes
+   *  walker-core fall back to `unsupportedPageStmt` (fail-loud) — so the
+   *  `variant-match` can never be silently dropped on an un-ported frontend. */
+  renderVariantMatch?(spec: VariantMatchSpec): string;
 
   // --- Store seam (named-actions-and-stores.md §3, Stage 5) ---------------
   //

@@ -1,9 +1,13 @@
 import type {
   ActionIR,
+  AggregateIR,
+  BoundedContextIR,
   DerivedIR,
   ExprIR,
   PageIR,
   StateFieldIR,
+  UiApiParamIR,
+  WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import { type PageNameCtx, pageEmitName } from "../../../ir/util/page-kind.js";
 import { upperFirst } from "../../../util/naming.js";
@@ -54,6 +58,18 @@ export interface AngularPageShellInput {
   authUi?: boolean;
   /** Served decl names for the component's emitted identifier (slice 3c). */
   nameCtx: PageNameCtx;
+  /** The ui's api handles (`api Sales: SalesApi`) — needed so an action body
+   *  that awaits a remote op (`match await Sales.Order.op()`,
+   *  async-actions-and-effects.md Stage 2) can resolve the handle and hoist the
+   *  mutation.  Empty for pages whose actions never await. */
+  apiParams?: readonly UiApiParamIR[];
+  /** Aggregate / bounded-context lookups the action-body api-hook detection +
+   *  variant-match error-variant classification consult (same maps the main
+   *  body walk receives). */
+  aggregatesByName?: ReadonlyMap<string, AggregateIR>;
+  bcByAggregate?: ReadonlyMap<string, BoundedContextIR>;
+  workflowsByName?: ReadonlyMap<string, WorkflowIR>;
+  bcByWorkflow?: ReadonlyMap<string, BoundedContextIR>;
 }
 
 /** PascalCase component class name (`CustomerHome` → `CustomerHomeComponent`).
@@ -219,10 +235,28 @@ export function renderAngularPage(input: AngularPageShellInput): string {
     // Transitively include any sibling action a used action's body calls so its
     // method emits too.
     const effectiveUsed = closeUsedActions(actions, result.usedActions);
+    // An action body may `await` a remote op (`match await Sales.Order.op()` —
+    // async-actions-and-effects.md Stage 2).  The awaited-op detection + mutation
+    // hoist need the api handles + aggregate/BC lookups in scope, and the
+    // emitted imports (`ApiError`, the union response type) + hoisted hook must
+    // flow back to the shell — so SHARE the walk's object sinks (`imports`,
+    // `usedApiHooks`, `usedParams`) and POPULATE the lookups, rather than the
+    // isolated `derivedCtx` the Stage-1 named-action path used.
+    const actionApiParamNames = new Map((input.apiParams ?? []).map((p) => [p.name, p.apiName]));
     for (const action of actions) {
       if (!effectiveUsed.has(action.name)) continue;
       const param = action.params[0]?.name;
-      const baseCtx = derivedCtx(input.pack, paramNames, stateNames, derivedNames);
+      const baseCtx: WalkContext = {
+        ...derivedCtx(input.pack, paramNames, stateNames, derivedNames),
+        imports: result.imports,
+        usedApiHooks: result.usedApiHooks,
+        usedParams: result.usedParams,
+        apiParamNames: actionApiParamNames,
+        aggregatesByName: input.aggregatesByName ?? new Map(),
+        bcByAggregate: input.bcByAggregate ?? new Map(),
+        workflowsByName: input.workflowsByName ?? new Map(),
+        bcByWorkflow: input.bcByWorkflow ?? new Map(),
+      };
       const mctx: WalkContext = param
         ? { ...baseCtx, lambdaParams: extendLambdaParams(baseCtx, param, param) }
         : baseCtx;
@@ -231,7 +265,14 @@ export function renderAngularPage(input: AngularPageShellInput): string {
         return prefixSignalReadsWithThis(prefixWholeWordsWithThis(rendered, refNames), refNames);
       });
       if (mctx.usesState) actionUsesState = true;
-      actionMethods.push(`  ${action.name}(${param ?? ""}) { ${stmts.join(" ")} }`);
+      // Copy the by-value boolean sinks the spread snapshotted back into the
+      // shell's `result`: an awaited op sets `usesRouteId` (the shell must bind
+      // `id` off the route) and a `then:` navigate sets `usesNavigate`.
+      result.usesRouteId ||= mctx.usesRouteId;
+      result.usesNavigate ||= mctx.usesNavigate;
+      // A body containing a `variant-match` awaits, so the method must be `async`.
+      const asyncKw = action.body.some((s) => s.kind === "variant-match") ? "async " : "";
+      actionMethods.push(`  ${asyncKw}${action.name}(${param ?? ""}) { ${stmts.join(" ")} }`);
     }
   }
 
@@ -597,8 +638,14 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   for (const [from, names] of [...result.imports.entries()].sort(([a], [b]) =>
     a.localeCompare(b),
   )) {
+    // Pages sit two hops under `src/` (`src/app/pages/…`), so any pack-default
+    // `../api/…` path (e.g. the `ApiError` + union-response-type imports the
+    // shared variant-match envelope records) rewrites one level deeper.  The
+    // Angular renderers that add api imports directly already spell `../../api/`,
+    // so this only lifts the framework-neutral single-dot entries.
+    const rewritten = from.replace(/^\.\.\/api\//, "../../api/");
     const sorted = [...names].sort();
-    imports.push(`import { ${sorted.join(", ")} } from ${JSON.stringify(from)};`);
+    imports.push(`import { ${sorted.join(", ")} } from ${JSON.stringify(rewritten)};`);
     for (const n of sorted) {
       if (n.endsWith("Module")) componentImports.add(n);
     }

@@ -4,6 +4,7 @@ import {
   PAGED_DEFAULT_PAGE_SIZE,
   pagedReturn,
 } from "../../ir/stdlib/generics.js";
+import { unionReturn } from "../../ir/stdlib/unions.js";
 import {
   aggregateUsesMoney,
   type BoundedContextIR,
@@ -11,6 +12,7 @@ import {
   type RepositoryIR,
 } from "../../ir/types/loom-ir.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
+import { emitOperationUnionResponse } from "../_frontend/api-module.js";
 import {
   collectUsedTypes,
   emitEnumSchema,
@@ -137,6 +139,16 @@ export function buildSvelteApiModule(
       lines.push(...emitUnionSchema(u.name, u.variants, ctx));
     }
   }
+  // Union-returning OPERATION response DTOs (async-actions-and-effects.md
+  // Stage 2) — the full tagged union served at 200, which a frontend action
+  // awaiting the op discriminates with `match`.  Byte-identical to the shared
+  // (React/Vue) module's emission; the wire contract is framework-independent.
+  for (const op of agg.operations.filter((o) => o.visibility === "public")) {
+    if (!op.returnType) continue;
+    const u = unionReturn(op.returnType);
+    if (!u) continue;
+    lines.push(...emitOperationUnionResponse(op.name, agg, u.variants, ctx));
+  }
   lines.push("");
 
   // ---------------------------------------------------------------------
@@ -195,11 +207,20 @@ export function buildSvelteApiModule(
 
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
     const opSnake = snake(op.routeSlug ?? op.name);
+    const u = op.returnType ? unionReturn(op.returnType) : null;
     lines.push(`export function use${upperFirst(op.name)}${agg.name}(id: () => string) {`);
     lines.push(`  const qc = useQueryClient();`);
     lines.push(`  return createMutation(() => ({`);
     lines.push(`    mutationFn: async (input: ${upperFirst(op.name)}${agg.name}Request) => {`);
-    lines.push(`      await api.post(\`/${tag}/\${id()}/${opSnake}\`, input);`);
+    if (u) {
+      // Union-returning op: parse + RETURN the tagged success variant so the
+      // awaiting action's `match` arm carries the payload (the error variant
+      // never reaches 200 — it's a thrown non-2xx reified at the call site).
+      lines.push(`      const r = await api.post(\`/${tag}/\${id()}/${opSnake}\`, input);`);
+      lines.push(`      return ${upperFirst(op.name)}${agg.name}Response.parse(r);`);
+    } else {
+      lines.push(`      await api.post(\`/${tag}/\${id()}/${opSnake}\`, input);`);
+    }
     lines.push(`    },`);
     lines.push(`    onSuccess: () => {`);
     lines.push(`      qc.invalidateQueries({ queryKey: ["${tag}", id()] });`);
