@@ -162,6 +162,19 @@ describe("Hono database seeding (Phase 2, domain path)", () => {
     expect(index.indexOf("await migrate(")).toBeLessThan(index.indexOf("await runSeeds("));
   });
 
+  it("self-run guard also checks the entry is a seed file (survives tsup bundling)", async () => {
+    // Regression: tsup bundles db/seed.ts INTO dist/index.js, so a bare
+    // `import.meta.url === pathToFileURL(argv[1]).href` guard is true when the
+    // app runs as `node dist/index.js` — the standalone `main()` then
+    // self-executes at import time, seeding WITHOUT migrations and racing the
+    // app's own migrate→seed (boot crash: `relation "…" does not exist`).  The
+    // guard must additionally require the process entry to be a seed file so it
+    // only fires under `tsx db/seed.ts`, never inside the bundled app.
+    const files = await build();
+    const seed = find(files, /\/db\/seed\.ts$/);
+    expect(seed).toContain("/[/\\\\]seed\\.[cm]?[jt]s$/.test(process.argv[1])");
+  });
+
   it("omits seed wiring entirely when no seed block is declared", async () => {
     const noSeed = FIXTURE.replace(/seed default \{[\s\S]*?\n {6}\}\n/, "").replace(
       /seed demo \{[\s\S]*?\n {6}\}\n/,
