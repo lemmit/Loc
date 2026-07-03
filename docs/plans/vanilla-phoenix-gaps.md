@@ -46,7 +46,7 @@ on the vanilla backend later — this file is the tracked list.
 | §9 | Op-level `currentUser` guard | **CLOSED** (#1568) | — | done |
 | §2 | Union per-variant struct tagging | **effectively CLOSED** (doc mis-framed) | S | doc/test only |
 | §4 | `contains`-in-`where` membership | **CLOSED** (doc stale) | S | dead-code cleanup only |
-| §12 | `shape(document)` + custom ops/finds | honest validator gate | M | 3 (untracked find) |
+| §12 | `shape(document)` + custom ops/finds | **scalar ops + finds now emitted** (DEBT-07); gate narrowed to the non-scalar residual | M | done (residual below) |
 | §13 | LiveView operation-action bang fns | **CLOSED** | S–M | done |
 | §14 | Success-response wire shape (snake_case keys + leaked Ecto timestamps) | **wireShape serializer swept across every wire surface** — relational REST (#1628), event-sourced (#1633), document (#1636), views both forms (#1639); all boot-verified. Only the audit snapshot (internal jsonb) + workflow-instance result (heterogeneous) remain | M–L | done (tail below) |
 | — | Ecto migration `default: now()`/`gen_random_uuid()` not `fragment(...)` | **FIX in #1628** — event-store table wouldn't compile; boot-blocker | S | done |
@@ -417,26 +417,35 @@ remove `LOOM_E2E_SKIP_PHOENIX` from `conformance-parity.yml`, and restore the
 phoenix legs of the `e2e.test.ts` parity cross-check (the spec-fetch, the diff
 pairs, and the 403 runtime-authorization target).
 
-## 12. `shape(document)` aggregate with custom operations / finds — honest validator gate (M)
+## 12. `shape(document)` aggregate with custom operations / finds — **scalar surface CLOSED** (DEBT-07)
 
-- **Status (REAL — honest gate, surfaced by the 2026-06-28 Ash-parity re-audit):**
-  a `shape(document)` aggregate on elixir emits the **CRUD surface only**; if it
-  *also* declares a named `operation` or a custom `find`, validation rejects it
-  with `loom.vanilla-document-unsupported`
-  (`src/ir/validate/checks/system-checks.ts` ~`:521`, message: "shape(document)
-  on elixir … emits the CRUD surface only in v1"). node / .NET / Python / Java
-  host the full document surface (ops + finds); elixir is the only backend gated
-  here. Safe (it fails fast at validate time, never mis-emits) but a real
-  capability gap.
-- **Not an Ash regression** — the Ash-era Phoenix backend was relational-focused,
-  so document-shape custom ops/finds almost certainly never worked there either.
-  This is a standing backend gap, not something the vanilla migration dropped;
-  it's tracked here because the Ash-parity re-audit found it and the rest of this
-  doc didn't list it.
-- **To close (feature work, outside the current gap-drain campaign):** emit the
-  named-operation / custom-find surface for `shape(document)` aggregates on
-  vanilla (the CRUD path already exists), then narrow the gate to drop the
-  `customOps` / `customFinds` guard.
+- **Was (REAL — honest gate, surfaced by the 2026-06-28 Ash-parity re-audit):**
+  a `shape(document)` aggregate on elixir emitted the **CRUD surface only**; a
+  named `operation` or a custom `find` on it was rejected wholesale with
+  `loom.vanilla-document-unsupported`. node / .NET / Python / Java hosted the
+  full document surface; elixir was the only backend gated here.
+- **Fixed — scalar ops + finds now emit** (`document-emit.ts`,
+  `context-emit.ts`, `repository-emit.ts`):
+  - **Custom finds** load the table and filter **in memory** (`Repo.all |>
+    Enum.filter`), the predicate rendered against the normalised (string-keyed)
+    jsonb `data` map via the shared `docMap` render mode (`this.<field>` →
+    `data["<snake>"]`; enums compared as their stored strings; money/decimal as
+    native JSON numbers, not `Decimal` structs). List finds yield every match; a
+    `Cart?` / union single-get yields `List.first/1`.
+  - **Named operations** run the body over a normalised copy of `data`
+    (`assign` → `Map.put`, scalar `+=`/`-=`, `precondition`/`requires`/`let`/
+    `emit`), then persist the whole mutated map through the document repo's own
+    `update/2` (re-runs the schemaless changeset + bumps `version`) — instead of
+    the relational struct-update + `put_change` path (there are no flat columns).
+- **Residual gate (still `loom.vanilla-document-unsupported`, now narrowed):** a
+  document op/find that needs the struct/list/tuple machinery the scalar path
+  omits — a **returning** op (`: A or B`), an **audited** / **provenanced** op,
+  **collection** mutation, a **value-object-subfield / derived / function** read,
+  or a **paged / union** find. These fail fast (honest) rather than mis-emit.
+- **Verified:** `test/e2e/fixtures/elixir-vanilla-build/vanilla-document.ddd`
+  gained scalar ops + finds — green under `mix compile --warnings-as-errors`
+  (hex mirror). Unit coverage: `vanilla-document.test.ts` (emit) +
+  `saving-shape-support.test.ts` (gate).
 
 ## 13. LiveView operation-action bang functions (`<op>_<agg>!/1` + `get_<agg>!/1`) — **CLOSED**
 

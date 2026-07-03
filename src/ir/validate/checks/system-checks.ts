@@ -16,6 +16,7 @@ import {
   configSchemaFor,
   supportsSurfaceKind,
 } from "../../../util/source-types.js";
+import { pagedReturn } from "../../stdlib/generics.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -41,6 +42,7 @@ import {
   firstUnlowerableForAdapter,
   isFindPredicateAdapter,
 } from "../../util/find-predicate-capability.js";
+import { opHasProvSite } from "../../util/prov-id.js";
 import {
   dataSourceKindForAggregate,
   effectiveSavingShape,
@@ -545,17 +547,118 @@ export function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[
 }
 
 // ---------------------------------------------------------------------------
-// Vanilla `shape(document)` v1 scope (DEBT-07).  The vanilla document path
-// emits the CRUD surface (list / get / create / update / delete) over the
-// `(id, data, version)` jsonb row.  Custom finds (which would need an
-// in-memory rehydrate-and-filter path) and user-defined named operations
-// (which struct-update flattened columns the document schema doesn't have)
-// are NOT yet emitted — and the context module would otherwise emit a
-// defdelegate / named-op fn that references a non-existent repository
-// function.  Reject the combination with a clear error rather than
-// misgenerate, exactly like the saving-shape capability gate above.
+// Vanilla `shape(document)` scope (DEBT-07).  The vanilla document path emits the
+// CRUD surface (list / get / create / update / delete) over the `(id, data,
+// version)` jsonb row, PLUS — since DEBT-07 — SCALAR custom finds (in-memory
+// filter over the loaded rows) and SCALAR named operations (the body runs over
+// the normalised `data` map, then persists through the document repository's
+// `update/2`).  A document blob has no flattened struct columns, so a handful of
+// op/find shapes still need machinery the document path deliberately omits, and
+// those stay gated (an honest error rather than a mis-emit):
+//
+//   - a RETURNING op (`: A or B`), an AUDITED op, a PROVENANCED op — all persist
+//     a pre-built changeset over struct columns inside a forced transaction;
+//   - COLLECTION mutation (`items += …`) — a document's contained parts are gated
+//     separately (`loom.vanilla-containment-unsupported`) anyway;
+//   - a body/filter that reads a VALUE-OBJECT sub-field, a DERIVED, or calls a
+//     `function` / value-object constructor — these need the loaded struct / list
+//     the jsonb map can't reconstruct in-place;
+//   - a PAGED or UNION-returning custom find (the wire-envelope / tagged-result
+//     shapes the document find path doesn't build).
+//
+// Everything else — scalar `assign` / `+=` / `-=` / `precondition` / `requires`
+// / `let` / `emit`, and scalar/convention/`where`-clause finds — is emitted.
 // ---------------------------------------------------------------------------
 const VANILLA_DOC_CRUD_OPS = new Set(["create", "update", "delete", "destroy", "list", "get"]);
+
+/** A member/method RECEIVER whose value is a nested structure — a value object
+ *  or a collection.  Reading a sub-field or method off one needs the loaded
+ *  struct/list the document scalar path can't project out of the flat jsonb map
+ *  (`data["vo"].amount` would atom-access a string-keyed map).  An `entity`
+ *  receiver is NOT here: the top-level `this.<scalarField>` read (receiver `this`,
+ *  receiver-type the aggregate entity) renders as a plain `data["<snake>"]` key
+ *  read and is fully supported. */
+function isNonScalarRefType(t: TypeIR): boolean {
+  return t.kind === "valueobject" || t.kind === "array";
+}
+
+/** Does an expression reach a shape the vanilla document scalar path can't emit?
+ *  (A derived read, a value-object/entity/collection member or method, a
+ *  function / constructor / match / lambda — anything beyond scalar arithmetic
+ *  and whole-field reads over the `data` map.) */
+function docExprUnsupported(e: ExprIR): boolean {
+  switch (e.kind) {
+    case "ref":
+      // A `this-derived` read has no stored `data` key (derived aren't
+      // persisted); every other ref (this-prop / this-vo-prop whole read / param
+      // / let / enum-value / current-user) is a plain scalar/map read.
+      return e.refKind === "this-derived";
+    case "member":
+      return isNonScalarRefType(e.receiverType) || docExprUnsupported(e.receiver);
+    case "method-call":
+      return (
+        e.isCollectionOp ||
+        isNonScalarRefType(e.receiverType) ||
+        docExprUnsupported(e.receiver) ||
+        e.args.some(docExprUnsupported)
+      );
+    case "binary":
+      return docExprUnsupported(e.left) || docExprUnsupported(e.right);
+    case "unary":
+      return docExprUnsupported(e.operand);
+    case "paren":
+      return docExprUnsupported(e.inner);
+    case "ternary":
+      return (
+        docExprUnsupported(e.cond) || docExprUnsupported(e.then) || docExprUnsupported(e.otherwise)
+      );
+    case "convert":
+      return docExprUnsupported(e.value);
+    case "literal":
+    case "id":
+    case "this":
+      return false;
+    default:
+      // call / new / object / match / lambda / list / *-call — all need the
+      // struct / list / tuple machinery the document scalar path omits.
+      return true;
+  }
+}
+
+/** Does an operation statement fall outside the vanilla document scalar op
+ *  surface? */
+function docStmtUnsupported(s: StmtIR): boolean {
+  switch (s.kind) {
+    case "precondition":
+    case "requires":
+    case "let":
+    case "expression":
+      return docExprUnsupported(s.expr);
+    case "assign":
+      return docExprUnsupported(s.value);
+    case "add":
+    case "remove":
+      // Scalar compound arithmetic is fine; a real COLLECTION mutation is not.
+      return s.collection || docExprUnsupported(s.value);
+    case "emit":
+      return s.fields.some((f) => docExprUnsupported(f.value));
+    default:
+      // return / call / variant-match — need the returning-op / self-call /
+      // frontend machinery the scalar document path doesn't carry.
+      return true;
+  }
+}
+
+/** A user-defined document operation the scalar path can't emit. */
+function docOpUnsupported(op: OperationIR): boolean {
+  return (
+    op.returnType != null ||
+    op.audited === true ||
+    opHasProvSite(op) ||
+    op.statements.some(docStmtUnsupported)
+  );
+}
+
 export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
@@ -568,24 +671,38 @@ export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnosti
       for (const agg of ctx.aggregates) {
         const enriched = agg as EnrichedAggregateIR;
         if (!isDocumentShaped(enriched, resolveDataSourceConfig(enriched, ctx, sys))) continue;
-        const customFinds = (ctx.repositories ?? [])
-          .find((r) => r.aggregateName === agg.name)
-          ?.finds.filter((f) => f.name !== "all");
-        const customOps = agg.operations.filter((op) => !VANILLA_DOC_CRUD_OPS.has(op.name));
-        if ((customFinds?.length ?? 0) === 0 && customOps.length === 0) continue;
+        // A custom find is unsupported when it's paged / union-returning (wire
+        // envelopes the document find path doesn't build) or its predicate reads
+        // a non-scalar shape.
+        const badFinds = (
+          (ctx.repositories ?? []).find((r) => r.aggregateName === agg.name)?.finds ?? []
+        )
+          .filter((f) => f.name !== "all")
+          .filter(
+            (f) =>
+              pagedReturn(f.returnType) ||
+              f.returnType.kind === "union" ||
+              (f.filter != null && docExprUnsupported(f.filter)),
+          );
+        const badOps = agg.operations
+          .filter((op) => !VANILLA_DOC_CRUD_OPS.has(op.name))
+          .filter(docOpUnsupported);
+        if (badFinds.length === 0 && badOps.length === 0) continue;
         const bits: string[] = [];
-        if (customOps.length > 0)
-          bits.push(`named operation(s) ${customOps.map((o) => o.name).join(", ")}`);
-        if (customFinds && customFinds.length > 0)
-          bits.push(`custom find(s) ${customFinds.map((f) => f.name).join(", ")}`);
+        if (badOps.length > 0)
+          bits.push(`named operation(s) ${badOps.map((o) => o.name).join(", ")}`);
+        if (badFinds.length > 0)
+          bits.push(`custom find(s) ${badFinds.map((f) => f.name).join(", ")}`);
         diags.push({
           severity: "error",
           code: "loom.vanilla-document-unsupported",
           message:
-            `aggregate '${ctxName}.${agg.name}' is shape(document) on elixir, which ` +
-            `emits the CRUD surface only in v1, but declares ${bits.join(" and ")}. ` +
-            `Drop them, host this aggregate on a backend with full document support ` +
-            `(node / dotnet / python / java), or use shape(relational) / shape(embedded).`,
+            `aggregate '${ctxName}.${agg.name}' is shape(document) on elixir, which emits ` +
+            `scalar custom finds + named operations but not ${bits.join(" and ")} ` +
+            `(returning/audited/provenanced ops, collection mutation, value-object/derived/` +
+            `function reads, or paged/union finds). Simplify them to scalar form, host this ` +
+            `aggregate on a backend with full document support (node / dotnet / python / java), ` +
+            `or use shape(relational) / shape(embedded).`,
           source: `${sys.name}/${dep.name}`,
         });
       }

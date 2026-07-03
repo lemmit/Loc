@@ -74,7 +74,7 @@ system Shop {
   });
 });
 
-describe("vanilla shape(document) v1 CRUD-only scope (DEBT-07)", () => {
+describe("vanilla shape(document) scalar find/op scope (DEBT-07)", () => {
   async function docScopeErrors(source: string): Promise<string[]> {
     const { model } = await parseString(source, { validate: false });
     return validateLoomModel(enrichLoomModel(lowerModel(model)))
@@ -82,7 +82,7 @@ describe("vanilla shape(document) v1 CRUD-only scope (DEBT-07)", () => {
       .map((d) => d.message);
   }
 
-  it("rejects a custom find on a vanilla document aggregate", async () => {
+  it("accepts a scalar custom find on a vanilla document aggregate", async () => {
     const src = `
 system Shop {
   subdomain Sales {
@@ -100,12 +100,10 @@ system Shop {
   deployable api { platform: elixir { foundation: vanilla }, contexts: [Shop], dataSources: [shopState], port: 4000 }
 }
 `;
-    const errs = await docScopeErrors(src);
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("custom find(s) byReference");
+    expect(await docScopeErrors(src)).toEqual([]);
   });
 
-  it("rejects a user-defined named operation on a vanilla document aggregate", async () => {
+  it("accepts a scalar named operation on a vanilla document aggregate", async () => {
     const src = `
 system Shop {
   subdomain Sales {
@@ -122,9 +120,57 @@ system Shop {
   deployable api { platform: elixir { foundation: vanilla }, contexts: [Shop], dataSources: [shopState], port: 4000 }
 }
 `;
+    expect(await docScopeErrors(src)).toEqual([]);
+  });
+
+  it("still rejects a RETURNING operation on a vanilla document aggregate", async () => {
+    const src = `
+system Shop {
+  subdomain Sales {
+    context Shop {
+      payload TooMany { message: string }
+      aggregate Cart ids guid shape(document) with crudish {
+        total: int
+        operation bump(): Cart or TooMany {
+          precondition total < 10
+          total := total + 1
+        }
+      }
+      repository Carts for Cart { }
+    }
+  }
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api { platform: elixir { foundation: vanilla }, contexts: [Shop], dataSources: [shopState], port: 4000 }
+}
+`;
     const errs = await docScopeErrors(src);
     expect(errs.length).toBe(1);
     expect(errs[0]).toContain("named operation(s) bump");
+  });
+
+  it("still rejects a value-object-subfield read in a document find predicate", async () => {
+    const src = `
+system Shop {
+  subdomain Sales {
+    context Shop {
+      valueobject Money { amount: int  currency: string }
+      aggregate Cart ids guid shape(document) with crudish {
+        price: Money
+      }
+      repository Carts for Cart {
+        find pricey(): Cart[] where this.price.amount > 100
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api { platform: elixir { foundation: vanilla }, contexts: [Shop], dataSources: [shopState], port: 4000 }
+}
+`;
+    const errs = await docScopeErrors(src);
+    expect(errs.length).toBe(1);
+    expect(errs[0]).toContain("custom find(s) pricey");
   });
 
   it("accepts a CRUD-only vanilla document aggregate", async () => {

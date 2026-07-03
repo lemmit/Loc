@@ -138,3 +138,90 @@ describe("vanilla shape(document) persistence (DEBT-07)", () => {
     expect(ctrl).toContain('"itemCount" => record.item_count');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Scalar custom finds + named operations on a document aggregate (DEBT-07).
+// A document row has no flattened columns, so a find filters IN MEMORY over the
+// jsonb `data` map and a named op runs its body over that map, persisting via
+// the document repo's `update/2`.
+// ---------------------------------------------------------------------------
+const DOC_OPS = `
+system Carting {
+  subdomain Sales {
+    context Carts {
+      enum CartStatus { open, checkedOut }
+      aggregate Cart shape(document) with crudish {
+        reference: string
+        status: CartStatus
+        itemCount: int
+        invariant itemCount >= 0
+        operation addItem() {
+          precondition itemCount >= 0
+          itemCount := itemCount + 1
+        }
+        operation checkOut() {
+          precondition status == open
+          status := checkedOut
+        }
+      }
+      repository Carts for Cart {
+        find byReference(reference: string): Cart? where this.reference == reference
+        find checkedOutOnes(): Cart[] where this.status == checkedOut
+      }
+    }
+  }
+  api CartsApi from Sales
+  storage pg { type: postgres }
+  resource cartState { for: Carts, kind: state, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Carts]
+    dataSources: [cartState]
+    serves: CartsApi
+    port: 4000
+  }
+}
+`;
+
+describe("vanilla shape(document) scalar finds + named ops (DEBT-07)", () => {
+  it("emits in-memory custom finds that read the jsonb data map", async () => {
+    const repo = file(await generateSystemFiles(DOC_OPS), "/carts/cart_repository.ex");
+    // A list find returns every match; the predicate projects the field out of
+    // the normalised `data` map (not a struct column), enums compared as strings.
+    expect(repo).toContain("def checked_out_ones() do");
+    expect(repo).toContain("|> Repo.all()");
+    expect(repo).toContain("|> Enum.filter(fn record ->");
+    expect(repo).toContain("data = __doc_data(record)");
+    expect(repo).toContain('data["status"] == "checkedOut"');
+    expect(repo).toContain("{:ok, results}");
+    // A single-return find (`Cart?`) yields the first match (or nil).
+    expect(repo).toContain("def by_reference(reference) do");
+    expect(repo).toContain('data["reference"] == reference');
+    expect(repo).toContain("{:ok, List.first(results)}");
+    // The normaliser helper is emitted (gated on custom finds referencing it).
+    expect(repo).toContain(
+      "defp __doc_data(record), do: Map.new(record.data || %{}, fn {k, v} -> {to_string(k), v} end)",
+    );
+  });
+
+  it("emits scalar named-op context fns that run over the data map + persist via update/2", async () => {
+    const ctx = file(await generateSystemFiles(DOC_OPS), "/carts.ex");
+    // The op body normalises the jsonb, guards, and Map.put's the assigned field.
+    expect(ctx).toContain(
+      "def add_item_cart(%Api.Carts.Cart{} = record, params) when is_map(params) do",
+    );
+    expect(ctx).toContain("data = Map.new(record.data || %{}, fn {k, v} -> {to_string(k), v} end)");
+    expect(ctx).toContain('if not (data["item_count"] >= 0), do: raise(ArgumentError');
+    expect(ctx).toContain('data = Map.put(data, "item_count", data["item_count"] + 1)');
+    // Persist re-runs the schemaless changeset + bumps version via update/2.
+    expect(ctx).toContain("Api.Carts.CartRepository.update(record, data)");
+    // An enum assign uses the stored string form.
+    expect(ctx).toContain('data = Map.put(data, "status", "checkedOut")');
+    // The find defdelegates front the repository fns.
+    expect(ctx).toContain(
+      "defdelegate by_reference_cart(reference), to: Api.Carts.CartRepository, as: :by_reference",
+    );
+    // A document op must NOT use the relational struct-update / put_change path.
+    expect(ctx).not.toContain("Ecto.Changeset.put_change(:item_count");
+  });
+});

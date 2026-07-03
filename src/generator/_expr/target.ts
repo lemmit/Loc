@@ -114,7 +114,7 @@ export interface ExprTarget<Ctx extends ExprCtxBase> {
   literal(lit: LiteralKind, value: string): string;
   id(ctx: Ctx): string;
   ref(e: RefExpr, ctx: Ctx): string;
-  member(recv: string, e: MemberExpr): string;
+  member(recv: string, e: MemberExpr, ctx: Ctx): string;
   methodCall(recv: string, args: string[], e: MethodCallExpr, ctx: Ctx): string;
   call(args: string[], e: CallExpr, ctx: Ctx): string;
   /** Render a `callKind: "domain-service"` member call
@@ -187,7 +187,7 @@ export function renderExprWith<Ctx extends ExprCtxBase>(
     case "ref":
       return t.ref(e, ctx);
     case "member":
-      return t.member(r(e.receiver), e);
+      return t.member(r(e.receiver), e, ctx);
     case "method-call":
       return t.methodCall(r(e.receiver), e.args.map(r), e, ctx);
     case "call":

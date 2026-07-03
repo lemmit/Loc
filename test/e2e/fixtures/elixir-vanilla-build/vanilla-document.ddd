@@ -4,10 +4,13 @@
 // of flattened columns.  The write path validates the domain fields through a
 // SCHEMALESS Ecto changeset (cast + validate_required + invariant validators —
 // the same contract the relational `base_changeset` runs) and stores the
-// validated map; reads merge `data` back over the id.  v1 scope: CRUD.
+// validated map; reads merge `data` back over the id.  Scalar custom finds
+// (in-memory filter) and scalar named operations (body over the `data` map,
+// persisted via the document repo's `update/2`) are emitted too (DEBT-07).
 //
 // Compiled by build-generated-elixir-vanilla so the document schema, the
-// schemaless changeset, and the (id, data, version) repository actually pass
+// schemaless changeset, the (id, data, version) repository, the scalar finds,
+// and the scalar named-op context fns actually pass
 // `mix compile --warnings-as-errors` against plain Ecto.
 system Carting {
   subdomain Sales {
@@ -23,8 +26,22 @@ system Carting {
         subtotal: Money
         itemCount: int
         invariant itemCount >= 0
+
+        // Scalar named operations (DEBT-07) — run over the jsonb `data` map.
+        operation addItem() {
+          precondition itemCount >= 0
+          itemCount := itemCount + 1
+        }
+        operation checkOut() {
+          precondition status == open
+          status := checkedOut
+        }
       }
-      repository Carts for Cart { }
+      // Scalar custom finds (DEBT-07) — in-memory filter over loaded rows.
+      repository Carts for Cart {
+        find byReference(reference: string): Cart? where this.reference == reference
+        find checkedOutOnes(): Cart[] where this.status == checkedOut
+      }
     }
   }
   api CartsApi from Sales

@@ -69,7 +69,7 @@ export function emitVanillaRepositories(
     const content = isAbstractBase(agg)
       ? renderBaseReader(appModule, ctxModule, agg, pool)
       : isVanillaDocAgg(agg, ctx, sys)
-        ? renderDocRepository(appModule, ctxModule, agg)
+        ? renderDocRepository(appModule, ctxModule, agg, customFindsOf(repo))
         : renderRepository(appModule, ctxModule, agg, repo, principalIdKey, ctx, pool, sys);
     out.set(`lib/${appSnake}/${ctxSnake}/${aggSnake}_repository.ex`, content);
   }

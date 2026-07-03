@@ -132,6 +132,16 @@ export interface RenderCtx {
    *  reading fn itself is emitted INTO this module by `domain-service-emit.ts`.
    *  Defaults to `contextModule` when unset. */
   readingServiceModule?: string;
+  /** Document-shape rendering (DEBT-07).  A `shape(document)` aggregate persists
+   *  its whole tree as one string-keyed jsonb `data` map (no flattened struct
+   *  columns), so a `this.<field>` read must project out of that map, not off a
+   *  struct field.  When set to the map variable name (e.g. `"data"`), a
+   *  `this-prop` / `this-vo-prop` reference renders `<docMap>["<snake>"]` and an
+   *  `enum-value` renders its declared STRING (matching the jsonb-stored value)
+   *  rather than the loaded-struct atom.  Set only on the vanilla document
+   *  custom-find / named-operation body path; unset everywhere else (relational
+   *  bodies read the struct). */
+  docMap?: string;
 }
 
 const DEFAULT: RenderCtx = { thisName: "record", contextModule: "MyApp" };
@@ -232,7 +242,12 @@ const ELIXIR_FILTER_TARGET: ExprTarget<RenderCtx> = {
 export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
   // `filterArgs` renders inside an Ecto query filter, where money/decimal are
   // data-layer-native (the Postgres column) rather than `Decimal` structs.
-  const target = ctx.filterArgs ? ELIXIR_FILTER_TARGET : ELIXIR_TARGET;
+  // `docMap` (DEBT-07 document shape) reads its fields out of the string-keyed
+  // jsonb `data` map, whose money/decimal values are likewise plain JSON numbers
+  // — not `Decimal` structs — so it shares the native-operator filter target
+  // (params still render as plain locals: the `^`-pin lives in `renderRef`'s
+  // `filterArgs` arm, which `docMap` does NOT set).
+  const target = ctx.filterArgs || ctx.docMap ? ELIXIR_FILTER_TARGET : ELIXIR_TARGET;
   return renderExprWith(e, target, ctx);
 }
 
@@ -333,6 +348,10 @@ function renderRef(e: RefExpr, ctx: RenderCtx): string {
       return escapeElixirIdent(snake(e.name));
     case "this-prop":
     case "this-vo-prop":
+      // Document shape (DEBT-07): the field lives in the string-keyed jsonb
+      // `data` map, not a struct column — project it out by key.
+      if (ctx.docMap) return `${ctx.docMap}[${JSON.stringify(snake(e.name))}]`;
+      return `${ctx.thisName}.${snake(e.name)}`;
     case "this-derived":
       return `${ctx.thisName}.${snake(e.name)}`;
     case "helper-fn":
@@ -350,8 +369,12 @@ function renderRef(e: RefExpr, ctx: RenderCtx): string {
       //     Public)` silently took the wrong branch before). Enum value names are
       //     grammar identifiers, so the atom never needs quoting (`:"Confirmed"`
       //     would trip Elixir's "quotes not required" warning under -Werror).
+      //   * Document shape (`docMap`) — the enum is stored in the jsonb `data`
+      //     map as its declared STRING (the schemaless changeset casts it as
+      //     `:string`), so an in-memory `data["status"] == <here>` comparison
+      //     must use the string form too.
       // Jason encodes the atom back to the declared string on the wire either way.
-      return ctx.filterArgs ? JSON.stringify(e.name) : `:${e.name}`;
+      return ctx.filterArgs || ctx.docMap ? JSON.stringify(e.name) : `:${e.name}`;
     case "current-user":
       return "current_user";
     case "match-binding":
@@ -374,7 +397,17 @@ function renderRef(e: RefExpr, ctx: RenderCtx): string {
 // Member access
 // ---------------------------------------------------------------------------
 
-function renderMember(recv: string, e: MemberExpr): string {
+function renderMember(recv: string, e: MemberExpr, ctx: RenderCtx): string {
+  // Document shape (DEBT-07): an explicit top-level `this.<field>` read (as a
+  // find `where` clause spells it) lowers to a member off the `this` node, not a
+  // `this-prop` ref — project it out of the string-keyed jsonb `data` map by key,
+  // the same way `renderRef` does for the implicit-`this` op-body reads.  A
+  // NESTED read (`this.vo.sub`) is validate-gated on the document scalar path, so
+  // only the top-level field lands here.  The scalar `.length` / `.count`
+  // shorthands below still apply (their receiver already renders to the map key).
+  if (ctx.docMap && e.receiver.kind === "this") {
+    return `${ctx.docMap}[${JSON.stringify(snake(e.member))}]`;
+  }
   // Array/list size shorthand.  The DSL admits both `.count` and
   // `.length` on arrays (see the .NET renderer's matching comment);
   // both map to Elixir `Enum.count/1`.  Without the `.length` arm an

@@ -137,13 +137,16 @@ The document sub-case below is the one feature with a partial story:
 | Event-sourced storage `persistedAs(eventLog)` | ✓ emits | — |
 | Event-sourced **workflow** (saga appliers) | 🚫 gated | `loom.event-sourced-workflow-unsupported` |
 | Provenanced fields (runtime trace) | ✓ emits | — |
-| `shape(document)` aggregate | ✓ CRUD; custom finds/ops gated¹ | `loom.vanilla-document-unsupported` (sub-case) |
+| `shape(document)` aggregate | ✓ CRUD + scalar finds/ops; non-scalar residual gated¹ | `loom.vanilla-document-unsupported` (sub-case) |
 | `or`-union-returning op with `emit`/`add`/`remove` body | ✓ full bodies | — |
 | State persistence, unions, carriers, filters, stamping, inheritance | ✓ emits | — |
 
 ¹ `vanilla` emits the document CRUD surface (an `(id, data, version)` jsonb
-table); a document aggregate with **custom finds or named operations** is still
-gated there (v1 limitation) — host those on node/dotnet/python/java.
+table) plus **scalar custom finds** (in-memory `Enum.filter` over the `data`
+map) and **scalar named operations** (body over the `data` map → `update/2`,
+DEBT-07). Only the non-scalar residual stays gated — returning/audited/
+provenanced ops, collection mutation, value-object/derived/function reads, and
+paged/union finds; host those on node/dotnet/python/java.
 
 Every emitter is compiled against real Elixir/Ecto by
 `elixir-vanilla-build.yml` (one fixture per feature under

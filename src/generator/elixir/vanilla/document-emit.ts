@@ -25,6 +25,9 @@ import type {
   BoundedContextIR,
   EnrichedAggregateIR,
   FieldIR,
+  FindIR,
+  OperationIR,
+  StmtIR,
   SystemIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
@@ -33,7 +36,10 @@ import {
   type SingleFieldPattern,
   singleFieldConstraints,
 } from "../../../ir/validate/invariant-classify.js";
-import { elixirRegexBody, plural, snake, upperFirst } from "../../../util/naming.js";
+import { elixirRegexBody, escapeElixirIdent, plural, snake, upperFirst } from "../../../util/naming.js";
+import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
+import { opUsesCurrentUser, stmtUsesParam } from "../domain/predicates.js";
+import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { NORMALIZE_KEYS_DEFP } from "./key-normalize.js";
 import { managedTimestampNames } from "./managed-timestamps.js";
 
@@ -193,10 +199,26 @@ export function renderDocRepository(
   appModule: string,
   ctxModule: string,
   agg: AggregateIR,
+  finds: readonly FindIR[] = [],
 ): string {
   const aggModule = `${appModule}.${ctxModule}.${upperFirst(agg.name)}`;
   const repoMod = `${aggModule}Repository`;
   const changesetMod = `${aggModule}Changeset`;
+
+  // Custom finds (DEBT-07).  A document row keeps every field inside the opaque
+  // jsonb `data` blob, so a find can't push its predicate into an Ecto `where`
+  // over flattened columns — it loads the table and filters IN MEMORY, rendering
+  // the predicate against the normalised (string-keyed) `data` map via the
+  // shared `docMap` render mode.  `all` is dropped (the `list/0` CRUD seam
+  // already covers it).
+  const findFns = finds.filter((f) => f.name !== "all").map((f) => renderDocFindFn(f, aggModule));
+  const findBlock = findFns.length > 0 ? `\n\n${findFns.join("\n\n")}` : "";
+  // The `__doc_data/1` normaliser is only referenced by the custom-find filters,
+  // so gate it (an unused defp trips `mix compile --warnings-as-errors`).
+  const docDataHelper =
+    findFns.length > 0
+      ? `\n\n  defp __doc_data(record), do: Map.new(record.data || %{}, fn {k, v} -> {to_string(k), v} end)`
+      : "";
 
   return `# Auto-generated.
 defmodule ${repoMod} do
@@ -259,15 +281,171 @@ defmodule ${repoMod} do
           {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
   def persist_change(%Ecto.Changeset{data: %${aggModule}{}} = changeset) do
     Repo.update(changeset)
-  end
+  end${findBlock}
 
   defp stringify_keys(map) do
     Map.new(map, fn {k, v} -> {to_string(k), v} end)
-  end
+  end${docDataHelper}
 
 ${NORMALIZE_KEYS_DEFP}
 end
 `;
+}
+
+/** True iff the find's declared return type produces ZERO-OR-ONE record (an
+ *  optional / bare entity / union) rather than a list — mirrors the relational
+ *  `isSingleReturn` in `repository-emit.ts`. */
+function isDocSingleReturn(t: TypeIR): boolean {
+  return (
+    t.kind === "union" ||
+    t.kind === "entity" ||
+    (t.kind === "optional" && t.inner.kind === "entity")
+  );
+}
+
+/** One document custom-find function — an IN-MEMORY filter over the loaded rows.
+ *  The predicate renders against the normalised (string-keyed) `data` map through
+ *  the shared `docMap` render mode (`this.<field>` → `data["<snake>"]`, enums as
+ *  their stored strings, money/decimal as native JSON numbers).  A find with no
+ *  `where` clause falls back to the per-param convention predicate (`data["<p>"]
+ *  == <p>`), matching the relational convention-find shape.  Single-return finds
+ *  yield the first match (or `nil`); list finds yield every match. */
+function renderDocFindFn(f: FindIR, aggModule: string): string {
+  const fnName = snake(f.name);
+  const argNames = f.params.map((p) => snake(p.name));
+  const single = isDocSingleReturn(f.returnType);
+  const rc: RenderCtx = {
+    thisName: "record",
+    contextModule: "",
+    foundation: "vanilla",
+    docMap: "data",
+  };
+  const predicate = f.filter
+    ? renderExpr(f.filter, rc)
+    : argNames.length > 0
+      ? argNames.map((n) => `data[${JSON.stringify(n)}] == ${n}`).join(" and ")
+      : "true";
+  const specArgs = argNames.map(() => "term()").join(", ");
+  const specTail = single
+    ? `{:ok, ${aggModule}.t() | nil} | {:error, term()}`
+    : `{:ok, [${aggModule}.t()]} | {:error, term()}`;
+  const result = single ? "List.first(results)" : "results";
+  return `  @spec ${fnName}(${specArgs}) :: ${specTail}
+  def ${fnName}(${argNames.join(", ")}) do
+    results =
+      ${aggModule}
+      |> Repo.all()
+      |> Enum.filter(fn record ->
+        data = __doc_data(record)
+        ${predicate}
+      end)
+
+    {:ok, ${result}}
+  end`;
+}
+
+// ---------------------------------------------------------------------------
+// Named operations (DEBT-07) — the document counterpart of
+// `context-emit.ts:renderNamedOpFunction`.  A document aggregate has no
+// flattened columns, so an op body can't struct-update `record` and `put_change`
+// real columns; instead it works over a normalised copy of the jsonb `data` map
+// (`this.<field>` → `data["<snake>"]` via the `docMap` render mode), then persists
+// the whole mutated map through the document repository's own `update/2` (which
+// re-runs the schemaless changeset + bumps `version`).
+//
+// v1 scope (validate-gated in `validateVanillaDocumentScope`): scalar-shaped
+// bodies — `assign` / scalar `+=`/`-=` / `precondition` / `requires` / `let` /
+// `emit`.  Returning ops, audited/provenanced ops, collection mutation, and
+// value-object-subfield / derived / function-call reads stay gated (they need
+// the struct machinery the document path deliberately omits).
+// ---------------------------------------------------------------------------
+
+/** `<op>_<agg>(record, params)` for a document aggregate — normalise the jsonb
+ *  `data`, run the (scalar) op body against it, then persist via the document
+ *  repository's `update/2`. */
+export function renderDocNamedOpFunction(
+  facadeMod: string,
+  op: OperationIR,
+  agg: AggregateIR,
+): string {
+  const opSnake = snake(op.name);
+  const aggPascal = upperFirst(agg.name);
+  const aggSnake = snake(agg.name);
+  const aggModule = `${facadeMod}.${aggPascal}`;
+  const repoMod = `${aggModule}Repository`;
+  const rc: RenderCtx = {
+    thisName: "record",
+    contextModule: facadeMod,
+    foundation: "vanilla",
+    docMap: "data",
+    agg: agg as EnrichedAggregateIR,
+  };
+  // Bind only the params the body references (an unused binding trips
+  // `--warnings-as-errors`); `params` itself is always read by the `is_map`
+  // guard, so a param-less op never warns.
+  const usedParams = op.params.filter((p) => op.statements.some((s) => stmtUsesParam(s, p.name)));
+  const paramBinds = usedParams.map(
+    (p) => `    ${snake(p.name)} = Map.get(params, ${JSON.stringify(p.name)})`,
+  );
+  const bodyLines = op.statements.map((s) => renderDocOpStmt(s, rc));
+  const prelude = [
+    ...paramBinds,
+    `    data = Map.new(record.data || %{}, fn {k, v} -> {to_string(k), v} end)`,
+    ...bodyLines,
+  ].join("\n");
+  const actorParam = opUsesCurrentUser(op) ? ", current_user \\\\ nil" : "";
+  return `  @doc "Named operation \`${op.name}\` on \`${aggPascal}\` (document shape) — runs the body over the jsonb data, then re-validates + persists."
+  @spec ${opSnake}_${aggSnake}(${aggModule}.t(), map()) ::
+          {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
+  def ${opSnake}_${aggSnake}(%${aggModule}{} = record, params${actorParam}) when is_map(params) do
+${prelude}
+    ${repoMod}.update(record, data)
+  end`;
+}
+
+/** Render one statement of a document op body over the `data` map.  Only the
+ *  scalar-shaped statement kinds the validator admits reach here; anything else
+ *  is a construction bug (the gate let through a shape the document path can't
+ *  emit) and throws rather than misgenerating. */
+function renderDocOpStmt(s: StmtIR, rc: RenderCtx): string {
+  const key = (seg: string) => JSON.stringify(snake(seg));
+  switch (s.kind) {
+    case "precondition":
+      return `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Precondition failed: ${s.source}`)})`;
+    case "requires":
+      return `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Forbidden: ${s.source}`)})`;
+    case "assign": {
+      const field = key(s.target.segments[0] ?? "");
+      return `    data = Map.put(data, ${field}, ${renderExpr(s.value, rc)})`;
+    }
+    case "add": {
+      // Scalar compound `+=` only (collection add is validate-gated on document).
+      const field = key(s.target.segments[0] ?? "");
+      return `    data = Map.put(data, ${field}, data[${field}] + ${renderExpr(s.value, rc)})`;
+    }
+    case "remove": {
+      const field = key(s.target.segments[0] ?? "");
+      return `    data = Map.put(data, ${field}, data[${field}] - ${renderExpr(s.value, rc)})`;
+    }
+    case "let":
+      return `    ${escapeElixirIdent(snake(s.name))} = ${renderExpr(s.expr, rc)}`;
+    case "emit": {
+      const fields = s.fields.map((f) => `${snake(f.name)}: ${renderExpr(f.value, rc)}`).join(", ");
+      const appModule = rc.contextModule.split(".")[0]!;
+      const struct = `%${rc.contextModule}.Events.${upperFirst(s.eventName)}{${fields}}`;
+      const logCall = renderPhoenixLogCall("eventDispatched", [
+        { name: "event_type", valueExpr: `"${upperFirst(s.eventName)}"` },
+        { name: "aggregate", valueExpr: `"${upperFirst(rc.agg?.name ?? "")}"` },
+      ]);
+      return `    ${logCall}\n    Phoenix.PubSub.broadcast(${appModule}.PubSub, "events", ${struct})`;
+    }
+    case "expression":
+      return `    _ = ${renderExpr(s.expr, rc)}`;
+    default:
+      throw new Error(
+        `vanilla document op: unsupported statement kind '${s.kind}' reached the emitter (should be validate-gated by loom.vanilla-document-unsupported)`,
+      );
+  }
 }
 
 // ---------------------------------------------------------------------------
