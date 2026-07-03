@@ -6,16 +6,28 @@
 > ("Proposal A"); treat the two as one feature split by concern. Async effects in
 > those actions: [`async-actions-and-effects.md`](async-actions-and-effects.md).
 >
-> Status: **PARTIAL — the `store` container SHIPPED in-memory** (2026-07
-> code-verified). Grammar `Store`/`StoreDecl` + `use <Store>`, `StoreIR`,
-> lowering (`store-field`/`store-action` resolution), the encapsulation +
+> Status: **PARTIAL — `store` container + the lifetime ladder SHIPPED on the SPA
+> frontends** (2026-07 code-verified). Grammar `Store`/`StoreDecl` + `use <Store>`,
+> `StoreIR`, lowering (`store-field`/`store-action` resolution), the encapsulation +
 > acyclic-composition validators (`store-checks.ts`), and Zustand/Pinia/Svelte/
-> Angular + LiveView emission are live. **The lifetime ladder is NOT shipped:**
-> v1 is in-memory only; `persist: local|session|url` is
-> grammar-reserved and rejected (`loom.store-lifetime-unsupported`) — that
-> ladder is the remaining work this note owns. **Surface pinned 2026-07-03: one
-> keyword `persist:` with values `memory|local|session|url` (the `url` tier was
-> formerly the separate `sync: url`; see §3.1).** Named actions over store state
+> Angular + LiveView emission are live. **The lifetime ladder shipped on
+> React/Vue/Svelte/Angular** (`persist: memory|local|session|url`); LiveView is
+> memory-only (see below). The old note read:
+> **The lifetime ladder SHIPPED on the SPA frontends** (2026-07-03): one keyword
+> `persist: memory|local|session|url` (grammar `Store` rule + `lowerStore` →
+> `StoreIR.lifetime`). React/Vue/Svelte/Angular emit all four tiers —
+> `local`/`session` via each framework's storage idiom (Zustand `persist`
+> middleware / hand-rolled `watch`/`$effect`/`effect` write-back; money fields
+> revived to `Decimal`), `url` via a **router-agnostic** bidirectional sync (a
+> typed untrusted-input decoder seeds from the query string, `history.replaceState`
+> mirrors changes back, `popstate` re-decodes). **LiveView is memory-only** —
+> `local`/`session`/`url` are gated by `loom.store-lifetime-liveview-unsupported`
+> (a server-side struct has no browser storage; URL state is the page's
+> `handle_params`, out of v1 store scope). Two other gates: `loom.store-lifetime-invalid`
+> (bad `persist:` value) and `loom.store-url-field-unsupported` (a `url` store's
+> fields must be scalar). Remaining: LiveView `url` via `handle_params`/`push_patch`
+> (the §5 follow-up). Surface pinned to one keyword (the `url` tier was formerly
+> the separate `sync: url`; see §3.1). Named actions over store state
 > shipped alongside (Proposal A Stage 1). Supersedes the externally-drafted
 > "State Management DSL for Loom" (`state` / `store` / `machine` →
 > TypeScript / Zustand / XState). This revision keeps the one good idea in that
