@@ -26,11 +26,12 @@
   `requireCurrentUser().tenantId`, so created rows are invisible to every read.
   Java maps any principal stamp to `@CreatedBy`/`@LastModifiedBy`
   (`AuditorAware<UUID>` — the actor id again; `src/generator/java/emit/entity.ts` ~290).
-  **.NET is correct** (interceptor emits `currentUser.TenantId` — verified in real
-  output); **elixir** and **python** collapse only a *bare* `currentUser` ref and
-  render member accesses through the shared expr renderer (correct by
-  construction; needs a pin test). Same bug family as the `ownerStamped` finding
-  in the 2026-07 DDD review (PR #1631). Fixing it is slice **1a.0**.
+  Implementation found it worse than audited: **.NET was broken too** — the
+  interceptor emitted `currentUser.TenantId` with no `currentUser` binding in
+  scope (doesn't compile), and **elixir** claim stamps lacked the bare-path's
+  nil-guard. Only **python** was correct as-is. Same bug family as the
+  `ownerStamped` finding in the 2026-07 DDD review (PR #1631). Fixed as slice
+  **1a.0** (node, java, dotnet, elixir + pin tests on all five).
 
 ## 1. What you write (the Phase-1a surface)
 
