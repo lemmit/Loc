@@ -132,13 +132,12 @@ describe("Angular store lifetime ladder", () => {
     expect(m).toContain('sessionStorage.setItem("loom.store.Filt"');
   });
 
-  it("persist: url syncs to the query string with a typed decoder (parity with React)", async () => {
+  it("persist: url binds the native router with a typed decoder", async () => {
     const m = await mod("persist: url");
-    expect(m).toContain("decodeFromUrl()");
+    expect(m).toContain("this.route.queryParamMap.subscribe((p) => {");
     expect(m).toContain('this.category.set(p.get("category") ?? "")');
     expect(m).toContain('Number.isFinite(Number(p.get("pageNo")))');
-    expect(m).toContain("window.history.replaceState(null");
-    expect(m).toContain('window.addEventListener("popstate"');
+    expect(m).toContain("void this.router.navigate([], {");
   });
 });
 
@@ -156,5 +155,30 @@ describe("Angular store — money field init", () => {
       page P { route: "/p" body: Heading { Filt.category, level: 1 } }`)
     ).get("web/src/app/stores/filt.store.ts")!;
     expect(m).toContain('readonly minPrice = signal<Decimal>(new Decimal("0.00"));');
+  });
+});
+
+describe("Angular store — url tier uses the native router", () => {
+  it("binds ActivatedRoute.queryParamMap + Router.navigate (not window.location)", async () => {
+    const m = (
+      await angularFiles(`
+      store Filt persist: url {
+        state { term: string = ""  pageNo: int = 0  minPrice: money = 0.00 }
+        action setPage(p: int) { pageNo := p }
+      }
+      page P { route: "/p" body: Heading { Filt.pageNo, level: 1 } }`)
+    ).get("web/src/app/stores/filt.store.ts")!;
+    expect(m).toContain('import { ActivatedRoute, Router } from "@angular/router";');
+    expect(m).toContain("private readonly router = inject(Router);");
+    expect(m).toContain("private readonly route = inject(ActivatedRoute);");
+    expect(m).toContain("this.route.queryParamMap.subscribe((p) => {");
+    expect(m).toContain("void this.router.navigate([], {");
+    expect(m).toContain('queryParamsHandling: "merge",');
+    expect(m).toContain("replaceUrl: true,");
+    // money signal carries a Decimal-aware equality so the re-seed doesn't loop.
+    expect(m).toContain("{ equal: (a, b) => a.eq(b) }");
+    // no window.location / popstate residue.
+    expect(m).not.toContain("window.location");
+    expect(m).not.toContain("popstate");
   });
 });

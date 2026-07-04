@@ -202,6 +202,20 @@ const STORE: Case = {
             count := 0
           }
         }
+        // Lifetime ladder (frontend-state-management.md §3.1) — gates the
+        // native-router URL sync + the persist-middleware emit through ng build.
+        store Filters persist: url {
+          state {
+            term: string = ""
+            pageNo: int = 0
+          }
+          action setTerm(q: string) { term := q }
+          action setPage(n: int) { pageNo := n }
+        }
+        store Draft persist: local {
+          state { note: string = "" }
+          action write(t: string) { note := t }
+        }
         page CartPage {
           route: "/cart"
           state { confirming: bool = false }
@@ -217,7 +231,11 @@ const STORE: Case = {
         }
         page Home {
           route: "/"
-          body: Heading { "Store showcase", level: 1 }
+          body: Stack {
+            Heading { "Store showcase", level: 1 },
+            Heading { Filters.term, level: 3 },
+            Heading { Draft.note, level: 3 }
+          }
         }
       }
       storage primary { type: postgres }

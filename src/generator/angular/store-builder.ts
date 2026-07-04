@@ -252,42 +252,16 @@ function decodeFieldFromParam(field: StateFieldIR): string {
   return storeZeroForType(t);
 }
 
-/** Serialise a field back into the query string (`p.set` / `p.delete`), keyed
- *  by the field name; empty/default values are dropped so the URL stays clean.
- *  Reads the signal directly (`this.<f>()`) — the effect that calls the encoder
- *  reads the signal synchronously, so the write is tracked.
- *
- *  Runtime-equivalent to React's `encodeFieldToParam`, but SPLIT by type where
- *  React's uniform `s.<f> !== ""` guard would not typecheck under Angular's
- *  strict tsc: comparing a `number` field to `""` is TS2367 ("no overlap").  A
- *  number is never the empty string, so numbers always serialise — which is
- *  exactly React's runtime behaviour (a `0` is written, not dropped). */
-function encodeFieldToParamAngular(field: StateFieldIR): string {
-  const key = JSON.stringify(field.name);
-  const t = field.type;
-  const ref = `this.${field.name}()`;
-  if (t.kind === "primitive" && t.name === "money") {
-    return `if (${ref} != null) p.set(${key}, ${ref}.toString()); else p.delete(${key});`;
-  }
-  if (t.kind === "primitive" && t.name === "bool") {
-    return `if (${ref}) p.set(${key}, "true"); else p.delete(${key});`;
-  }
-  if (t.kind === "primitive" && (t.name === "int" || t.name === "long" || t.name === "decimal")) {
-    return `p.set(${key}, String(${ref}));`;
-  }
-  // string / id / enum — drop the empty-string default.
-  return `if (${ref} !== "") p.set(${key}, ${ref}); else p.delete(${key});`;
-}
-
 /** Render the full injectable signal-store module for a `StoreIR`, honouring
  *  its lifetime (frontend-state-management.md §3.1):
  *   - `memory`  → a plain `providedIn: "root"` signal service.
  *   - `persistLocal` / `persistSession` → hydrate the signals from
  *     `localStorage` / `sessionStorage` in the constructor and mirror every
  *     change back via an `effect` (money fields revived from string on load).
- *   - `url` → a router-agnostic bidirectional sync: seed the signals from the
- *     query string via a typed untrusted-input decoder, mirror every change
- *     back with `history.replaceState`, and re-decode on `popstate`. */
+ *   - `url` → a native-router bidirectional sync: seed + follow the signals off
+ *     `ActivatedRoute.queryParamMap` (every navigation, not just `popstate`)
+ *     via a typed untrusted-input decoder, and mirror each change back through
+ *     `Router.navigate(..., { queryParamsHandling: "merge", replaceUrl: true })`. */
 export function renderAngularStoreModule(store: StoreIR): string {
   const fieldNames = new Set(store.state.map((f) => f.name));
   const className = storeClassName(store.name);
@@ -390,53 +364,89 @@ function hydrateFieldLine(field: StateFieldIR): string {
   return `    if (${key} in parsed) this.${field.name}.set(parsed.${field.name} as ${storeFieldTsType(t)});`;
 }
 
-/** The `url` lifetime: the query string is the source of truth, decoded through
- *  a typed untrusted-input decoder and mirrored back on every change.  Kept
- *  router-agnostic (reads `window.location.search`, writes via
- *  `history.replaceState`) for parity with React — Angular services CAN inject
- *  `Router`/`ActivatedRoute`, but the window approach matches React exactly. */
+/** One `<field>: <value | null>` entry for the `Router.navigate` queryParams
+ *  object — the store→URL half of the `url` tier.  `null` drops the param
+ *  (`queryParamsHandling: "merge"` treats a null value as a delete), so the URL
+ *  stays clean.  Runtime-equivalent to `encodeFieldToParamAngular` but shaped as
+ *  an object entry rather than `URLSearchParams` mutations. */
+function encodeFieldToQueryParam(field: StateFieldIR): string {
+  const key = field.name;
+  const ref = `this.${field.name}()`;
+  const t = field.type;
+  if (t.kind === "primitive" && t.name === "money") {
+    return `${key}: ${ref} != null ? ${ref}.toString() : null,`;
+  }
+  if (t.kind === "primitive" && t.name === "bool") {
+    return `${key}: ${ref} ? "true" : null,`;
+  }
+  if (t.kind === "primitive" && (t.name === "int" || t.name === "long" || t.name === "decimal")) {
+    return `${key}: String(${ref}),`;
+  }
+  // string / id / enum — drop the empty-string default.
+  return `${key}: ${ref} !== "" ? ${ref} : null,`;
+}
+
+/** The `url` lifetime: the query string is the source of truth, bound through
+ *  Angular's own router.  `ActivatedRoute.queryParamMap` seeds the signals and
+ *  follows EVERY navigation (routerLink, back/forward, manual edit — not just
+ *  `popstate`); an `effect` mirrors each signal change back via
+ *  `Router.navigate([], { queryParamsHandling: "merge", replaceUrl: true })`.
+ *  Runs inside Angular's zone (change detection stays correct) and needs no
+ *  `window` fallback.  Money signals carry a `Decimal`-aware `equal` so a
+ *  re-seed with an equal value doesn't retrigger the effect (breaking the
+ *  navigate → queryParamMap → set → effect cycle). */
 function renderUrlStoreModule(
   store: StoreIR,
   className: string,
   needsDecimal: boolean,
-  fieldLines: string[],
+  _fieldLines: string[],
   methodLines: string[],
 ): string {
-  const decodeLines = store.state.map((f) => `    this.${f.name}.set(${decodeFieldFromParam(f)});`);
-  const encodeLines = store.state.map((f) => `    ${encodeFieldToParamAngular(f)}`);
+  const urlFieldLines = store.state.map((f) => {
+    const isMoney = f.type.kind === "primitive" && f.type.name === "money";
+    const equal = isMoney ? ", { equal: (a, b) => a.eq(b) }" : "";
+    return `  readonly ${f.name} = signal<${storeFieldTsType(f.type)}>(${storeFieldInit(f)}${equal});`;
+  });
+  const decodeLines = store.state.map(
+    (f) => `      this.${f.name}.set(${decodeFieldFromParam(f)});`,
+  );
+  const queryParamLines = store.state.map((f) => `          ${encodeFieldToQueryParam(f)}`);
 
   return lines(
-    `import { effect, Injectable, signal } from "@angular/core";`,
+    `import { effect, inject, Injectable, signal } from "@angular/core";`,
+    `import { ActivatedRoute, Router } from "@angular/router";`,
     needsDecimal ? `import Decimal from "decimal.js";` : undefined,
     "",
     `// Shared client-side state container generated from \`store ${store.name}\`.`,
     `// Synced to the URL query string (\`persist: url\`) — shareable, deep-linkable,`,
-    `// back/forward-navigable.  The URL is untrusted input: each field is decoded`,
-    `// through its declared type and defaulted on anything unparseable.`,
+    `// back/forward-navigable — through Angular's router.  The URL is untrusted`,
+    `// input: each field is decoded through its declared type and defaulted on`,
+    `// anything unparseable.`,
     `@Injectable({ providedIn: "root" })`,
     `export class ${className} {`,
-    ...fieldLines,
+    `  private readonly router = inject(Router);`,
+    `  private readonly route = inject(ActivatedRoute);`,
+    "",
+    ...urlFieldLines,
     "",
     `  constructor() {`,
-    `    this.decodeFromUrl();`,
-    `    if (typeof window !== "undefined") {`,
-    `      window.addEventListener("popstate", () => this.decodeFromUrl());`,
-    `    }`,
-    `    // store → URL: mirror every change back (replaceState, no history spam).`,
-    `    effect(() => this.encodeToUrl());`,
-    `  }`,
-    "",
-    `  private decodeFromUrl(): void {`,
-    `    const p = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);`,
+    `    // URL → store: seed synchronously, then follow every navigation`,
+    `    // (routerLink, back/forward, manual edit).  \`queryParamMap\` replays the`,
+    `    // current params on subscribe and emits on each change.`,
+    `    this.route.queryParamMap.subscribe((p) => {`,
     ...decodeLines,
-    `  }`,
-    "",
-    `  private encodeToUrl(): void {`,
-    `    if (typeof window === "undefined") return;`,
-    `    const p = new URLSearchParams(window.location.search);`,
-    ...encodeLines,
-    `    const qs = p.toString();`,
-    `    window.history.replaceState(null, "", qs ? \`?\${qs}\` : window.location.pathname);`,
+    `    });`,
+    `    // store → URL: mirror every change back (merge + replaceUrl — no history`,
+    `    // spam).  A no-op navigate to the same URL doesn't re-emit.`,
+    `    effect(() => {`,
+    `      void this.router.navigate([], {`,
+    `        queryParams: {`,
+    ...queryParamLines,
+    `        },`,
+    `        queryParamsHandling: "merge",`,
+    `        replaceUrl: true,`,
+    `      });`,
+    `    });`,
     `  }`,
     ...methodLines,
     `}`,
