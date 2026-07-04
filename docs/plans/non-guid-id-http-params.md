@@ -1,7 +1,10 @@
 # Non-guid ids at the HTTP boundary — param typing gaps
 
-**Status: in progress** — workflow-instance `{id}` params fixed across backends
-(this slice); aggregate `/{id}` params on Hono/Python still open (below).
+**Status:** workflow-instance `{id}` params derive from the correlation id value
+type on every backend (shipped). Aggregate-level non-guid ids are supported
+end-to-end on .NET / Java / Elixir; on **Hono / Python they are gated by a hard
+validator** (`loom.non-guid-aggregate-id-unsupported`) until the backends are
+filled in — an honest error instead of a silently-broken app (below).
 
 The grammar admits `aggregate X ids guid|int|long|string`, and the storage
 layer honours it everywhere (migrations `idColumnType`, Drizzle
@@ -10,29 +13,43 @@ HTTP layer does not:
 
 | Surface | .NET | Java | Hono | Python | Phoenix |
 |---|---|---|---|---|---|
-| aggregate `/{id}` param | ✅ `csIdValueClrType` | ✅ `javaValueTypeForId` | ❌ `z.string().uuid()` hardcoded | ❌ `ID_PARAM` uuid-format hardcoded | (spec emit unverified) |
-| workflow `/instances/{id}` param | ✅ this slice | ✅ this slice | ✅ this slice | ✅ this slice | ✅ already (`OPENAPI_ID_VALUE`) |
+| aggregate `/{id}` param | ✅ `csIdValueClrType` | ✅ `javaValueTypeForId` | ⛔ gated (validator) | ⛔ gated (validator) | ✅ `OPENAPI_ID_VALUE` |
+| aggregate id column + wire DTO | ✅ | ✅ | ⛔ gated (validator) | ⛔ gated (validator) | ✅ |
+| workflow `/instances/{id}` param | ✅ | ✅ | ✅ | ✅ | ✅ (`OPENAPI_ID_VALUE`) |
 
-## The open aggregate-level gap
+## The aggregate-level gap — gated, not silently broken
 
-For an `ids int` aggregate:
+A non-guid aggregate id (`ids int|long|string`) works end-to-end on **.NET /
+Java / Elixir** — verified by generating each: integer PK column, an int-typed
+id value class, an `integer` wire-DTO id field, and an `integer` `/{id}`
+path-param. On **Hono and Python it silently mis-emits a broken app**, in more
+places than just the param:
 
-- **Hono** validates every `/{id}`, `DELETE /{id}`, `POST /{id}/<op>`,
-  `GET /{id}/can_<op>` param as `z.string().uuid()`
-  (`src/platform/hono/v4/routes-builder.ts` — 5 sites), so a valid
-  `GET /tickets/42` fails request validation with **422 before the handler
-  runs**, while the same request succeeds on .NET/Java.  The fix must also
-  touch the handlers (`Ids.XId(id)` bind, drizzle `eq` on an integer column)
-  and re-check the static-route-shadowing comment (`find byHolder` ordering
-  relies on the uuid 422 today).
-- **Python** declares every id param as uuid-format string
-  (`routes-builder.ts` `ID_PARAM`), so the OpenAPI contract lies
-  (`string:uuid` vs the wire-spec's `integer`) and the str value binds into
-  an asyncpg integer column.
+- **Hono** — the branded `XId` type is hardcoded `string` (`randomUUID()`
+  minted into an `integer("id")` column on create), the Response/create-response
+  id field is `z.string()`, and every `/{id}`, `DELETE /{id}`,
+  `POST /{id}/<op>`, `GET /{id}/can_<op>` param is `z.string().uuid()` (a valid
+  `GET /tickets/42` → **422 before the handler runs**). 5 param sites in
+  `src/platform/hono/v4/routes-builder.ts` plus the id brand, the DTO id field,
+  `toWire`, and `findById`.
+- **Python** — the schema PK column is `Uuid(as_uuid=False)` regardless of
+  `idValueType` (so the *migration* is wrong, not just the HTTP layer), the
+  Response id is `str`, and the param is uuid-format `ID_PARAM`.
 
-Neither is exercised by the current conformance corpus (all examples use
-guid ids), so the parity gate stays green while the behaviour diverges —
-a silent gap in parity-auditor terms.
+Because the branded-id-is-`string` (Hono) and uuid-PK (Python) assumptions are
+baked deep into those backends, the real fix is a cross-cutting slice, not a
+param tweak — and nothing in the conformance corpus exercises it (all examples
+use guid ids), so the parity gate never caught it.
+
+**Interim resolution (shipped):** `validateNonGuidAggregateIdSupport`
+(`src/ir/validate/checks/system-checks.ts`) raises a hard
+`loom.non-guid-aggregate-id-unsupported` when a `node` / `python` deployable
+hosts an aggregate with a non-guid id — a diagnosed error pointing at the three
+supported backends, instead of a silently-broken app. The
+`platformSupportsNonGuidAggregateId` capability table
+(`src/language/validators/data/platform-rules.ts`) is the seam: filling in the
+Hono / Python emitters (per the parity rule below) and adding the family to that
+set lifts the gate.
 
 ## Parity rule (established by this slice)
 

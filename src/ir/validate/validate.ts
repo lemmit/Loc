@@ -54,6 +54,7 @@ import {
   validateMikroOrmSupport,
   validateNeedCapabilities,
   validateNodeStampSupport,
+  validateNonGuidAggregateIdSupport,
   validatePermissions,
   validateProvenancedStorage,
   validatePythonStampSupport,
@@ -128,6 +129,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateDuplicateTables(sys, diags);
     validateDataSourceCoverage(sys, diags);
     validateSavingShapeSupport(sys, diags);
+    validateNonGuidAggregateIdSupport(sys, diags);
     validateVanillaDocumentScope(sys, diags);
     validateElixirOpSelfCallPosition(sys, diags);
     validateContextFilterSupport(sys, diags);
