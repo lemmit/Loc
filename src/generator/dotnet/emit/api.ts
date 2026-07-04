@@ -545,7 +545,7 @@ export function renderExceptionFilter(
       ? `
         if (context.Exception is Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
         {
-            ${renderDotnetLogCall("disallowed", [
+            ${renderDotnetLogCall("conflict", [
               {
                 name: "message",
                 valueExpr: `"The resource was modified by another request; reload and retry."`,
