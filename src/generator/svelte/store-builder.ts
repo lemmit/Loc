@@ -245,9 +245,9 @@ function encodeFieldToParam(field: StateFieldIR): string {
  *   - `persistLocal` / `persistSession` → hydrate the rune from
  *     `localStorage` / `sessionStorage` on init and mirror every change back
  *     via a module-level `$effect.root` (money fields revived via a reviver).
- *   - `url` → a router-agnostic bidirectional sync: seed from the query string
- *     via a typed untrusted-input decoder, and mirror every change back with
- *     `history.replaceState`, re-decoding on `popstate`. */
+ *   - `url` → a native SvelteKit-router sync: seed + follow the reactive `page`
+ *     (`$app/state`) via a typed untrusted-input decoder, and mirror every
+ *     change back through `goto(..., { replaceState: true })`. */
 export function renderSvelteStoreModule(store: StoreIR): string {
   const storeVar = storeVarName(store.name);
   const fieldNames = new Set(store.state.map((f) => f.name));
@@ -380,10 +380,13 @@ function renderPersistStoreModule(
   );
 }
 
-/** The `url` lifetime: the query string is the source of truth, decoded through
- *  a typed untrusted-input decoder and mirrored back on every change.  Router
- *  agnostic on purpose (matches React) — a module-level singleton cannot reach
- *  SvelteKit's `$app/stores`/`goto`, so it drives `window.location` directly. */
+/** The `url` lifetime: the query string is the source of truth, bound through
+ *  SvelteKit's own router.  `page` (from `$app/state`) is reactive, so an
+ *  `$effect` reading `page.url` re-runs on EVERY navigation (links, `goto`,
+ *  back/forward) — no raw `popstate`, and no conflict with SvelteKit's history.
+ *  A second `$effect` mirrors each store change back with `goto(..., {
+ *  replaceState: true })`; a URL-diff guard breaks the page → store → URL
+ *  cycle.  All client-only (`browser`-guarded) — SSR renders the defaults. */
 function renderUrlStoreModule(
   store: StoreIR,
   storeVar: string,
@@ -393,42 +396,57 @@ function renderUrlStoreModule(
   needsDecimal: boolean,
 ): string {
   return lines(
+    `import { browser } from "$app/environment";`,
+    `import { goto } from "$app/navigation";`,
+    `import { page } from "$app/state";`,
     needsDecimal ? `import Decimal from "decimal.js";` : undefined,
-    needsDecimal ? "" : undefined,
+    "",
     `// Shared client-side state container generated from \`store ${store.name}\`.`,
     `// Synced to the URL query string (\`persist: url\`) — shareable, deep-linkable,`,
-    `// back/forward-navigable.  The URL is untrusted input: each field is decoded`,
-    `// through its declared type and defaulted on anything unparseable.`,
-    `// The \`$state\` rune makes this module singleton deeply reactive; the`,
-    `// \`.svelte.ts\` filename is REQUIRED for runes to compile in a module.`,
+    `// back/forward-navigable — through SvelteKit's router.  The URL is untrusted`,
+    `// input: each field is decoded through its declared type and defaulted on`,
+    `// anything unparseable.  The \`.svelte.ts\` filename is REQUIRED for the runes`,
+    `// below to compile in a module.`,
     `type ${stateTypeName} = ${stateTypeLiteral};`,
     "",
-    `function decodeFromUrl(): ${stateTypeName} {`,
-    `  const p = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);`,
+    `function decodeFrom(p: URLSearchParams): ${stateTypeName} {`,
     `  return {`,
     ...store.state.map((f) => `    ${f.name}: ${decodeFieldFromParam(f)},`),
     `  };`,
     `}`,
     "",
-    `function encodeToUrl(s: ${stateTypeName}): void {`,
-    `  if (typeof window === "undefined") return;`,
-    `  const p = new URLSearchParams(window.location.search);`,
+    `// Merge the store's fields into the CURRENT query string (preserving any`,
+    `// unrelated params) and return the serialised query.`,
+    `function toQuery(s: ${stateTypeName}): string {`,
+    `  const p = new URLSearchParams(browser ? window.location.search : "");`,
     ...store.state.map((f) => `  ${encodeFieldToParam(f)}`),
-    `  const qs = p.toString();`,
-    `  window.history.replaceState(null, "", qs ? \`?\${qs}\` : window.location.pathname);`,
+    `  return p.toString();`,
     `}`,
     "",
-    `export const ${storeVar} = $state<${stateTypeName}>(decodeFromUrl());`,
+    `export const ${storeVar} = $state<${stateTypeName}>(`,
+    `  decodeFrom(new URLSearchParams(browser ? window.location.search : "")),`,
+    `);`,
     "",
-    `// store → URL: mirror every change back (replaceState, no history spam); a`,
-    `// module-level \`$effect.root\` owns the effect outside any component scope.`,
-    `$effect.root(() => {`,
-    `  $effect(() => encodeToUrl(${storeVar}));`,
-    `});`,
-    "",
-    `// URL → store: re-decode on back/forward and manual address edits.`,
-    `if (typeof window !== "undefined") {`,
-    `  window.addEventListener("popstate", () => Object.assign(${storeVar}, decodeFromUrl()));`,
+    `if (browser) {`,
+    `  $effect.root(() => {`,
+    `    // URL → store: \`page.url\` is reactive, so this re-runs on every`,
+    `    // navigation — links, \`goto\`, back/forward, manual edits.`,
+    `    $effect(() => {`,
+    `      Object.assign(${storeVar}, decodeFrom(page.url.searchParams));`,
+    `    });`,
+    `    // store → URL: mirror each change back through SvelteKit's router. The`,
+    `    // URL-diff guard stops the page → store → URL cycle.`,
+    `    $effect(() => {`,
+    `      const qs = toQuery(${storeVar});`,
+    `      if (qs !== new URLSearchParams(window.location.search).toString()) {`,
+    `        goto(qs ? \`?\${qs}\` : window.location.pathname, {`,
+    `          replaceState: true,`,
+    `          keepFocus: true,`,
+    `          noScroll: true,`,
+    `        });`,
+    `      }`,
+    `    });`,
+    `  });`,
     `}`,
     "",
     ...store.actions.map((a) => renderStoreActionExport(a, storeVar, fieldNames)),

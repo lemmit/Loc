@@ -138,12 +138,18 @@ describe("Svelte store lifetime ladder", () => {
     expect(m).toContain("sessionStorage.setItem(STORAGE_KEY");
   });
 
-  it("persist: url syncs to the query string with a typed decoder (parity with React)", async () => {
+  it("persist: url binds SvelteKit's router (page + goto) with a typed decoder", async () => {
     const m = await mod("persist: url");
-    expect(m).toContain("function decodeFromUrl()");
+    expect(m).toContain('import { goto } from "$app/navigation";');
+    expect(m).toContain('import { page } from "$app/state";');
+    expect(m).toContain('import { browser } from "$app/environment";');
     expect(m).toContain('category: p.get("category") ?? "",');
     expect(m).toContain('Number.isFinite(Number(p.get("pageNo")))');
-    expect(m).toContain("window.history.replaceState(null");
-    expect(m).toContain('window.addEventListener("popstate"');
+    // URL → store via reactive `page.url`; store → URL via `goto(...replaceState)`.
+    expect(m).toContain("Object.assign(filt, decodeFrom(page.url.searchParams));");
+    expect(m).toContain("replaceState: true,");
+    // no raw window.history / popstate residue.
+    expect(m).not.toContain("window.history.replaceState");
+    expect(m).not.toContain("popstate");
   });
 });
