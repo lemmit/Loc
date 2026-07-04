@@ -66,8 +66,10 @@ describe("vanilla elixir — sensitive(...) Inspect redaction", () => {
     expect(line).toContain('"<redacted>"');
     expect(line).toContain('"phone: "');
     expect(line).not.toMatch(/record\.contact\.phone\b/);
-    // Non-sensitive VO sibling reached normally.
-    expect(line).toMatch(/record\.contact\.email\b/);
+    // Non-sensitive VO sibling reached normally — read via the key-type-agnostic
+    // VO-subfield fallback (a VO is a string- or atom-keyed map; #1660), not
+    // struct-dot (`record.contact.email` would KeyError on the string-keyed map).
+    expect(line).toContain('Map.get(record.contact, :email, Map.get(record.contact, "email"))');
   });
 
   it("emits NO Inspect impl when no field is sensitive (byte-identical to before)", async () => {
