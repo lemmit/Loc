@@ -338,7 +338,9 @@ describe("phoenix renderExpr — match", () => {
 });
 
 describe("phoenix renderExpr — member, method-call, call, new, list, lambda", () => {
-  it("renders member access as <recv>.<snake_member>", () => {
+  it("reads a value-object sub-field via a key-type-agnostic fallback (#1660 — a VO is a string- or atom-keyed map)", () => {
+    // `record.address.postal_code` (struct-dot) KeyErrors on a string-keyed jsonb
+    // VO map; the atom-then-string fallback is correct for map AND struct shapes.
     expect(
       renderExpr(
         {
@@ -350,7 +352,22 @@ describe("phoenix renderExpr — member, method-call, call, new, list, lambda", 
         },
         ctx,
       ),
-    ).toBe("record.address.postal_code");
+    ).toBe('Map.get(record.address, :postal_code, Map.get(record.address, "postal_code"))');
+  });
+
+  it("renders a non-VO member access as <recv>.<snake_member>", () => {
+    expect(
+      renderExpr(
+        {
+          kind: "member",
+          receiver: thisProp("order"),
+          member: "shippedAt",
+          receiverType: { kind: "entity", name: "Order" },
+          memberType: STRING,
+        },
+        ctx,
+      ),
+    ).toBe("record.order.shipped_at");
   });
 
   it("collapses string.length → String.length(...)", () => {

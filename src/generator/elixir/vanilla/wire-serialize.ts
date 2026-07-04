@@ -72,9 +72,21 @@ export function renderWireSerialize(agg: AggregateIR, ctx: BoundedContextIR): Wi
   // Value expression for one wire field over the `record` var.  `source: "id"`
   // and `source: "derived"` are handled by the caller (id → `record.id`,
   // derived → skipped), so this only sees property / containment fields.
-  function valueExpr(wf: WireField): string {
+  // Field access for a wire field over the `record` var.  Inside a VALUE-OBJECT
+  // serializer helper (`isVo`), `record` is the VO value, which at runtime may be
+  // a STRING-keyed jsonb map (a single VO field) OR an ATOM-keyed struct (a VO
+  // collection element / freshly-built ctor) — plain struct-dot `record.amount`
+  // crashes with `KeyError` on the string-keyed case (issue #1660).  Read via a
+  // key-type-agnostic fallback there (atom key, then string key).  Everywhere
+  // else `record` is a real struct → struct-dot stays (byte-identical output).
+  const fieldAccess = (name: string, isVo: boolean): string =>
+    isVo
+      ? `Map.get(record, :${snake(name)}, Map.get(record, ${JSON.stringify(snake(name))}))`
+      : `record.${snake(name)}`;
+
+  function valueExpr(wf: WireField, isVo: boolean): string {
     const t = unwrapOptional(wf.type);
-    const col = `record.${snake(wf.name)}`;
+    const col = fieldAccess(wf.name, isVo);
     switch (t.kind) {
       case "valueobject":
         ensureVoHelper(t.name);
@@ -104,24 +116,25 @@ export function renderWireSerialize(agg: AggregateIR, ctx: BoundedContextIR): Wi
   }
 
   // Render a `%{ "<name>" => <expr>, ... }` map for a wire shape (order =
-  // wireShape order), skipping derived fields.  `baseIndent` is the indentation
-  // of the `%{` opener; entries are indented one step (2 spaces) further.
-  function renderMap(shape: WireField[], baseIndent: string): string {
+  // wireShape order), skipping derived fields.  `isVo` = the map is a value
+  // object's own body (string/atom-key-agnostic field access).  `baseIndent` is
+  // the indentation of the `%{` opener; entries indent one step (2 spaces) more.
+  function renderMap(shape: WireField[], baseIndent: string, isVo: boolean): string {
     const entries: string[] = [];
     for (const wf of shape) {
       if (wf.source === "derived") continue;
-      const ve = wf.source === "id" ? "record.id" : valueExpr(wf);
+      const ve = wf.source === "id" ? "record.id" : valueExpr(wf, isVo);
       entries.push(`${baseIndent}  "${wf.name}" => ${ve}`);
     }
     if (entries.length === 0) return `${baseIndent}%{}`;
     return `${baseIndent}%{\n${entries.join(",\n")}\n${baseIndent}}`;
   }
 
-  function buildHelper(name: string, shape: WireField[]): void {
+  function buildHelper(name: string, shape: WireField[], isVo: boolean): void {
     const hname = `serialize_${snake(name)}`;
     if (helpers.has(hname) || building.has(hname)) return;
     building.add(hname);
-    const body = renderMap(shape, "    ");
+    const body = renderMap(shape, "    ", isVo);
     helpers.set(
       hname,
       `  defp ${hname}(nil), do: nil\n\n  defp ${hname}(record) do\n${body}\n  end`,
@@ -131,15 +144,15 @@ export function renderWireSerialize(agg: AggregateIR, ctx: BoundedContextIR): Wi
 
   function ensurePartHelper(name: string): void {
     const shape = parts.get(name);
-    if (shape) buildHelper(name, shape);
+    if (shape) buildHelper(name, shape, /* isVo */ false);
   }
 
   function ensureVoHelper(name: string): void {
     const shape = vos.get(name);
-    if (shape) buildHelper(name, shape);
+    if (shape) buildHelper(name, shape, /* isVo */ true);
   }
 
-  const body = renderMap(wireShape, "    ");
+  const body = renderMap(wireShape, "    ", /* isVo */ false);
   const serialize = `  defp serialize(record) do\n${body}\n  end`;
   return { serialize, body, helpers: [...helpers.values()] };
 }

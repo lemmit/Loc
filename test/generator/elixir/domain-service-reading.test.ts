@@ -118,7 +118,7 @@ defmodule Api.Domain.Services.FeeQuote do
 
   @spec for_amount(map()) :: map()
   def for_amount(amount) do
-    %{amount: amount.amount, currency: amount.currency}
+    %{amount: Map.get(amount, :amount, Map.get(amount, "amount")), currency: Map.get(amount, :currency, Map.get(amount, "currency"))}
   end
 end
 `);

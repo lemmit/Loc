@@ -272,12 +272,17 @@ describe("vanilla shape(document) non-scalar residual (DEBT-07 follow-up)", () =
   it("emits document functions over the data map + value-object-subfield reads", async () => {
     const ctx = file(await generateSystemFiles(DOC_RICH), "/carts.ex");
     // A pure function on a document aggregate takes the jsonb `data` map (guarded
-    // is_map), reading the value-object subfield by nested bracket-index.
+    // is_map), reading the value-object subfield via the key-type-agnostic
+    // fallback (a VO map may be string- or atom-keyed; #1660).
     expect(ctx).toContain("def is_cheap(data) when is_map(data) do");
-    expect(ctx).toContain('data["subtotal"]["amount"] < 100');
+    expect(ctx).toContain(
+      'Map.get(data["subtotal"], :amount, Map.get(data["subtotal"], "amount")) < 100',
+    );
     // The op guard calls the function passing the data map, and reads the VO sub-field.
     expect(ctx).toContain("if not (is_cheap(data)), do: raise(ArgumentError");
-    expect(ctx).toContain('if not (data["subtotal"]["amount"] >= 0), do: raise(ArgumentError');
+    expect(ctx).toContain(
+      'if not (Map.get(data["subtotal"], :amount, Map.get(data["subtotal"], "amount")) >= 0), do: raise(ArgumentError',
+    );
   });
 
   it("emits returning ops as tagged tuples (error variant + fall-through success wire)", async () => {

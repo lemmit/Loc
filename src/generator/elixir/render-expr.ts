@@ -423,13 +423,18 @@ function renderMember(recv: string, e: MemberExpr, ctx: RenderCtx): string {
   ) {
     return `String.length(${recv})`;
   }
-  // Document shape (DEBT-07): a value-object SUB-field read (`this.money.amount`)
-  // reads out of a nested jsonb map, which round-trips as STRING keys — so bracket-
-  // index it (`data["money"]["amount"]`) rather than struct-dot it (`.amount`
-  // would `BadMapError` on the string-keyed map).  The receiver already rendered
-  // to the enclosing map projection.
-  if (ctx.docMap && e.receiverType.kind === "valueobject") {
-    return `${recv}[${JSON.stringify(snake(e.member))}]`;
+  // Value-object SUB-field read (`this.money.amount`) — issue #1660.  A value
+  // object has THREE inconsistent runtime shapes on vanilla: a single VO field is
+  // a STRING-keyed jsonb map, a VO collection element is an ATOM-keyed child
+  // struct, and a freshly-built VO ctor is an ATOM-keyed map.  Struct-dot
+  // (`.amount`) crashes with `KeyError` on the string-keyed map; bracket
+  // (`["amount"]`) crashes on the struct.  Read via a key-type-agnostic fallback
+  // — atom key first, string key second — which is correct for all three (and
+  // fail-softs a nil optional VO to nil).  This is the elixir sibling of the
+  // typed-VO handling the other backends get for free.
+  if (e.receiverType.kind === "valueobject") {
+    const k = snake(e.member);
+    return `Map.get(${recv}, :${k}, Map.get(${recv}, ${JSON.stringify(k)}))`;
   }
   return `${recv}.${snake(e.member)}`;
 }
