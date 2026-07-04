@@ -1,5 +1,9 @@
-import type { SystemIR } from "../../types/loom-ir.js";
-import { classifyTenantStance, hasTenantOwned } from "../../util/tenant-stance.js";
+import type { SystemIR, TypeIR } from "../../types/loom-ir.js";
+import {
+  classifyTenantStance,
+  hasTenantOwned,
+  tenancyClaimBinding,
+} from "../../util/tenant-stance.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 
 // ---------------------------------------------------------------------------
@@ -32,6 +36,11 @@ import type { LoomDiagnostic } from "./diagnostic.js";
 // (`src/ir/util/tenant-stance.ts`) — never stamped on the IR.
 // ---------------------------------------------------------------------------
 
+/** Display name for the claim's declared type in the mismatch message. */
+function typeName(t: TypeIR): string {
+  return t.kind === "primitive" ? t.name : t.kind;
+}
+
 export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const tenancy = sys.tenancy;
 
@@ -49,6 +58,38 @@ export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
           `system '${sys.name}': tenancy registry '${tenancy.registryName}' does not name an ` +
           `aggregate in the system.  Declare 'aggregate ${tenancy.registryName} { ... }' or ` +
           `point 'of' at an existing aggregate.`,
+        source: `${sys.name}/tenancy`,
+      });
+    }
+
+    // The derived registry self-scope filter (Phase 1b, capstone decision 4)
+    // compares `<Registry>.id == currentUser.<claim>` — the `tenantId ≡
+    // <Registry>.id` identity — so the claim's declared type must bind
+    // against the registry's id value type: same-typed always works, and a
+    // `string` claim binds as a guid at each backend's accessor site
+    // (`tenancyClaimBinding`).  Anything else can't compare on any backend —
+    // reject with the fix spelled out rather than emitting a filter that
+    // never matches (or doesn't compile).
+    const registry = sys.subdomains
+      .flatMap((mod) => mod.contexts)
+      .flatMap((ctx) => ctx.aggregates)
+      .find((a) => a.name === tenancy.registryName);
+    const claimType = sys.user?.fields.find((f) => f.name === tenancy.claimField)?.type;
+    if (
+      registry &&
+      claimType &&
+      tenancyClaimBinding(registry.idValueType, claimType) === "mismatch"
+    ) {
+      diags.push({
+        severity: "error",
+        code: "loom.tenancy-claim-type-mismatch",
+        message:
+          `system '${sys.name}': tenancy claim 'user.${tenancy.claimField}' is typed ` +
+          `'${typeName(claimType)}' but registry '${registry.name}' has 'ids ${registry.idValueType}'. ` +
+          `The derived registry self-scope filter compares ${registry.name}.id to the claim, so ` +
+          `declare the claim as '${tenancy.claimField}: ${registry.idValueType}'` +
+          `${registry.idValueType === "guid" ? ` (or '${tenancy.claimField}: string', bound as a guid at the accessor site)` : ""}, ` +
+          `or change the registry's 'ids'.`,
         source: `${sys.name}/tenancy`,
       });
     }

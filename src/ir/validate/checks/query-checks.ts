@@ -111,7 +111,11 @@ export function validateQueryableWheres(ctx: BoundedContextIR, diags: LoomDiagno
         });
         continue;
       }
-      const unknown = firstUnknownColumnRef(predicate, agg, ctx);
+      // `this.id` is admitted: a capability filter is aggregate-rooted, and
+      // the key is a real stored column on every backend — the derived
+      // tenancy registry self-scope (`this.id == currentUser.<claim>`,
+      // Phase 1b) is exactly this shape.
+      const unknown = firstUnknownColumnRef(predicate, agg, ctx, { allowSelfId: true });
       if (unknown) {
         diags.push({
           severity: "error",

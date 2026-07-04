@@ -1,0 +1,58 @@
+// Multi-tenancy Phase 1b — the DERIVED registry self-scope filter on the
+// vanilla (plain Ecto) foundation.  `tenancy by user.tenantId of Organization`
+// makes enrichment append `this.id == currentUser.<claim>` to the registry's
+// capability filters (the author writes NO filter on Organization), which
+// AND-s `record.id == ^(current_user && current_user.tenant_id)` into every
+// registry read.  Ecto casts the pinned string claim against the binary_id
+// column; a nil actor pins `= NULL` → no rows (fail-closed).  The insert path
+// takes bare attrs (no stamp, no filter), so the claim-less signup bootstrap
+// compiles and stays open.
+//
+// This is the decisive check that the derived registry reads compile under
+// `mix compile --warnings-as-errors` (the elixir-vanilla-build gate).
+system TenancyRegistryShop {
+  user {
+    id: string
+    tenantId: string
+  }
+
+  auth {
+    provider: keycloak
+    oidc {
+      issuer: env("OIDC_ISSUER")
+      clientId: env("OIDC_CLIENT_ID")
+    }
+    claims: { tenantId: "tenant_id" }
+  }
+
+  tenancy by user.tenantId of Organization
+
+  subdomain Core {
+    context Accounts {
+      // The registry — no marker, no hand-written filter; the self-scope is
+      // derived from the `tenancy by` line.
+      aggregate Organization ids guid {
+        name: string
+      }
+      repository Organizations for Organization { }
+
+      aggregate Account ids guid with tenantOwned {
+        balance: int
+      }
+      repository Accounts for Account { }
+    }
+  }
+
+  storage primary { type: postgres }
+  resource accountsState { for: Accounts, kind: state, use: primary }
+
+  api CoreApi from Core
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Accounts]
+    serves: CoreApi
+    dataSources: [accountsState]
+    port: 4000
+    auth: required
+  }
+}

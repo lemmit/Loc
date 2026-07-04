@@ -30,6 +30,17 @@ export function firstUnknownColumnRef(
   // (workflow-instance-views.md).
   agg: Pick<AggregateIR, "fields" | "contains" | "derived">,
   ctx: BoundedContextIR,
+  opts?: {
+    /** Admit `this.id` (the aggregate's own key) as a known column.  Set by
+     *  the capability-filter selectability loop only: a filter predicate is
+     *  always AGGREGATE-rooted, where `id` is a real stored column on every
+     *  backend — the derived tenancy registry self-scope (`this.id ==
+     *  currentUser.<claim>`, Phase 1b) is the motivating shape.  Find /
+     *  view / retrieval `where`s keep the strict field-list check (a
+     *  workflow-instance view source has no `id` column, so admitting it
+     *  there would emit SQL against a missing column). */
+    allowSelfId?: boolean;
+  },
 ): string | null {
   switch (e.kind) {
     case "literal":
@@ -38,14 +49,18 @@ export function firstUnknownColumnRef(
     case "ref":
       return null;
     case "paren":
-      return firstUnknownColumnRef(e.inner, agg, ctx);
+      return firstUnknownColumnRef(e.inner, agg, ctx, opts);
     case "unary":
-      return firstUnknownColumnRef(e.operand, agg, ctx);
+      return firstUnknownColumnRef(e.operand, agg, ctx, opts);
     case "binary":
-      return firstUnknownColumnRef(e.left, agg, ctx) ?? firstUnknownColumnRef(e.right, agg, ctx);
+      return (
+        firstUnknownColumnRef(e.left, agg, ctx, opts) ??
+        firstUnknownColumnRef(e.right, agg, ctx, opts)
+      );
     case "member": {
       // `this.X` — direct column.  Verify X is on the aggregate.
       if (e.receiver.kind === "this") {
+        if (opts?.allowSelfId && e.member === "id" && e.memberType.kind === "id") return null;
         const fld = agg.fields.find((f) => f.name === e.member);
         if (fld) return null;
         const derived = agg.derived.find((d) => d.name === e.member);

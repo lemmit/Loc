@@ -20,6 +20,13 @@ import { describe, expect, it } from "vitest";
 //   GET  /api/invoices            as org-b         → 200, row ABSENT
 //   POST body smuggling tenantId  as org-b         → tenantId ignored (internal)
 //
+// Phase 1b adds the registry (derived self-scope + claim-less bootstrap):
+//
+//   POST /api/organizations       claim-less/foreign → 201 (creates unfiltered)
+//   GET  /api/organizations/:own  claim = own org id → 200 (tenantId ≡ Organization.id)
+//   GET  /api/organizations/:other                   → 404 (existence hidden)
+//   GET  /api/organizations       claim = own org id → exactly the own org
+//
 // This is the assertion the structural tiers can't make: the filter is pinned
 // per backend by generator tests and the stamp by the 1a.0 pin tests, but only
 // a boot proves the two agree end-to-end (the pre-1a.0 bug — stamp writes the
@@ -222,6 +229,50 @@ describe.skipIf(!ENABLED)(
         const { id: planId } = (await planCreate.json()) as { id: string };
         const planAsB = await fetch(`${base}/api/plans/${planId}`, { headers: claims("org-b") });
         expect(planAsB.status).toBe(200);
+
+        // --- registry self-scope + claim-less bootstrap (Phase 1b) ---
+        // Signup bootstrap: the registry's create is NOT filter-gated, so an
+        // authenticated principal whose token has NO usable tenant claim can
+        // create an org.  The dev-stub's built-in identity (no dev-claims
+        // header) carries `tenantId: "admin"` — a claim matching no org, i.e.
+        // the claim-less/foreign-claim signup token.
+        const orgACreate = await fetch(`${base}/api/organizations`, {
+          method: "POST",
+          headers: { "content-type": "application/json" }, // no dev-claims at all
+          body: JSON.stringify({ name: "Acme A" }),
+        });
+        expect(orgACreate.status, await orgACreate.clone().text()).toBe(201);
+        const { id: orgAId } = (await orgACreate.json()) as { id: string };
+        expect(orgAId).toBeTruthy();
+        // A FOREIGN tenant claim can't block a signup either.
+        const orgBCreate = await fetch(`${base}/api/organizations`, {
+          method: "POST",
+          headers: claims(orgAId),
+          body: JSON.stringify({ name: "Acme B" }),
+        });
+        expect(orgBCreate.status, await orgBCreate.clone().text()).toBe(201);
+        const { id: orgBId } = (await orgBCreate.json()) as { id: string };
+
+        // Round-trip: the signup-created org's id IS a valid tenantId claim —
+        // the `tenantId ≡ Organization.id` identity the derived self-scope
+        // filter encodes.  Reading your own org succeeds…
+        const ownOrg = await fetch(`${base}/api/organizations/${orgAId}`, {
+          headers: claims(orgAId),
+        });
+        expect(ownOrg.status, await ownOrg.clone().text()).toBe(200);
+        expect(((await ownOrg.json()) as { name: string }).name).toBe("Acme A");
+
+        // …reading ANOTHER org 404s (existence hidden, not 403)…
+        const foreignOrg = await fetch(`${base}/api/organizations/${orgBId}`, {
+          headers: claims(orgAId),
+        });
+        expect(foreignOrg.status).toBe(404);
+
+        // …and the list is scoped to exactly your own org.
+        const orgList = (await (
+          await fetch(`${base}/api/organizations`, { headers: claims(orgAId) })
+        ).json()) as Array<{ id: string }>;
+        expect(orgList.map((o) => o.id)).toEqual([orgAId]);
       } finally {
         if (child?.pid) {
           try {

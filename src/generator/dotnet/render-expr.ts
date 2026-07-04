@@ -212,7 +212,26 @@ const CS_TARGET: ExprTarget<CsRenderContext> = {
   object: (fields) =>
     `new { ${fields.map((f) => `${upperFirst(f.name)} = ${f.value}`).join(", ")} }`,
   unary: (op, operand) => `${op}${operand}`,
-  binary: (left, right, e) => `${left} ${e.op} ${right}`,
+  binary: (left, right, e) => {
+    // Self-id vs scalar comparison (`this.id == currentUser.<claim>` — the
+    // derived tenancy registry self-scope, Phase 1b).  The entity's `Id` is
+    // the strongly-typed `<Agg>Id` record struct, so a raw scalar operand
+    // must be lifted into it: same-typed claims wrap directly
+    // (`new OrgId(claim)`), a `string` claim against a guid id parses first
+    // (`new OrgId(Guid.Parse(claim))`).  Inside an EF query filter the
+    // wrapped side references no lambda parameter, so EF funcletizes it into
+    // a query parameter and translates the comparison through the id's
+    // `HasConversion` — exactly like `GetByIdAsync`'s `x.Id == id`.  Scoped
+    // to the aggregate's OWN key (`this.id`) so `<Agg>Id` is guaranteed to
+    // exist; id-typed reference FIELDS are untouched.
+    if (e.op === "==" || e.op === "!=") {
+      const liftedRight = liftScalarToSelfId(e.left, e.right, right);
+      if (liftedRight) return `${left} ${e.op} ${liftedRight}`;
+      const liftedLeft = liftScalarToSelfId(e.right, e.left, left);
+      if (liftedLeft) return `${liftedLeft} ${e.op} ${right}`;
+    }
+    return `${left} ${e.op} ${right}`;
+  },
   ternary: (cond, then, otherwise) => `${cond} ? ${then} : ${otherwise}`,
   convert: (value, e) => renderCsConvert(e.target, e.from, value),
   match(arms, otherwise) {
@@ -273,6 +292,48 @@ const CS_TARGET: ExprTarget<CsRenderContext> = {
 
 export function renderCsExpr(e: ExprIR, ctx: CsRenderContext = DEFAULT): string {
   return renderExprWith(e, CS_TARGET, ctx);
+}
+
+/** When `idSide` is the aggregate's own key (`this.id`, id-typed) and
+ *  `scalarSide` is a raw scalar of the id's value type — or a `string`
+ *  against a guid id — return the scalar's rendered text lifted into the
+ *  strongly-typed `<Agg>Id`; else null (no rewrite). */
+function liftScalarToSelfId(
+  idSide: ExprIR,
+  scalarSide: ExprIR,
+  renderedScalar: string,
+): string | null {
+  const idType = selfIdTypeOf(idSide);
+  if (!idType) return null;
+  const scalarType = staticScalarTypeOf(scalarSide);
+  if (!scalarType) return null;
+  if (scalarType === idType.valueType) return `new ${idType.targetName}Id(${renderedScalar})`;
+  if (idType.valueType === "guid" && scalarType === "string")
+    return `new ${idType.targetName}Id(Guid.Parse(${renderedScalar}))`;
+  return null;
+}
+
+/** The id TypeIR of a `this.id` member access (the aggregate's own key), or
+ *  null for any other shape. */
+function selfIdTypeOf(e: ExprIR): Extract<TypeIR, { kind: "id" }> | null {
+  if (e.kind === "paren") return selfIdTypeOf(e.inner);
+  if (
+    e.kind === "member" &&
+    e.receiver.kind === "this" &&
+    e.member === "id" &&
+    e.memberType.kind === "id"
+  ) {
+    return e.memberType;
+  }
+  return null;
+}
+
+/** The static primitive-type NAME of an expression, when statically known
+ *  and primitive (member → memberType, ref → declared type); else null. */
+function staticScalarTypeOf(e: ExprIR): string | null {
+  if (e.kind === "paren") return staticScalarTypeOf(e.inner);
+  const t = e.kind === "member" ? e.memberType : e.kind === "ref" ? e.type : undefined;
+  return t?.kind === "primitive" ? t.name : null;
 }
 
 /**
