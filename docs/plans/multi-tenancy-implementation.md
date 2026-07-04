@@ -1,6 +1,11 @@
 # Multi-tenancy — implementation plan (Phase 1a)
 
-> Status: **plan — awaiting sign-off on the surface below.** Derived from
+> Status: **Phase 1a SHIPPED (#1634); Phase 1b IN PROGRESS (claimed on this
+> branch)** — 1b = the registry self-scope filter + claim-less `signUp`
+> bootstrap (capstone decision 4) and the `claim`/`registry` cross-reference
+> upgrade (capstone decision 5). Original 1a plan text follows.
+>
+> Original status: plan — awaiting sign-off on the surface below. Derived from
 > [`docs/proposals/multi-tenancy-design-note.md`](../proposals/multi-tenancy-design-note.md)
 > (R1–R5 controlling) via a state audit + design review on `main` @ `bb043de`
 > (2026-07-03). Review verdict: **GO WITH CHANGES** — the changes are recorded
