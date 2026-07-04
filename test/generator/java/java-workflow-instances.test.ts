@@ -100,6 +100,21 @@ describe("java workflow instance read endpoints", () => {
     );
   });
 
+  it("binds a non-guid correlation id's value type on the byId param (ids int → int)", async () => {
+    // The correlation aggregate declares `ids int`, so the param binds `int`
+    // (springdoc emits `{type: integer}`, not the uuid format) and the id
+    // wraps without a parse (docs/plans/non-guid-id-http-params.md).
+    const src = SRC.replace(
+      "aggregate Order { status: string",
+      "aggregate Order ids int { status: string",
+    );
+    const ctrl = find(await gen(src), "OWorkflowInstancesController.java");
+    expect(ctrl).toContain(
+      "public ResponseEntity<OrderFulfillmentInstanceResponse> getOrderFulfillmentInstanceById(@PathVariable int id) {",
+    );
+    expect(ctrl).toContain("orderFulfillmentStateRepository.findById(new OrderId(id))");
+  });
+
   it("emits no instance surface for a workflow without a correlation field", async () => {
     const files = await gen(PLAIN);
     expect([...files.keys()].some((k) => k.endsWith("WorkflowInstancesController.java"))).toBe(
@@ -156,7 +171,7 @@ describe("java event-sourced workflow instance read endpoints", () => {
     expect(ctrl).toContain(
       "public ResponseEntity<TallyInstanceResponse> getTallyInstanceById(@PathVariable UUID id) {",
     );
-    expect(ctrl).toContain("var __sid = id.toString();");
+    expect(ctrl).toContain("var __sid = String.valueOf(id);");
     expect(ctrl).toContain("if (__rows.isEmpty()) return ResponseEntity.notFound().build();");
     expect(ctrl).toContain("var x = TallyState._fromEvents(new OrderId(id), __loaded);");
   });

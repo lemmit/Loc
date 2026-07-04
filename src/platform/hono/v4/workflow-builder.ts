@@ -31,6 +31,7 @@ import {
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
 import { emitsCommandRoute } from "../../../ir/util/workflow-command-route.js";
+import { workflowCorrIdValueType } from "../../../ir/util/workflow-instances.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { emitWireSchema, wireToDomainExpr, zodFor, zodForResponse } from "./routes-builder.js";
 import {
@@ -701,10 +702,20 @@ function emitInstanceRoutes(wf: WorkflowIR): string[] {
   out.push(`    path: "/${slug}/instances/{id}",`);
   out.push(`    tags: ["workflows"],`);
   out.push(`    operationId: "${camelId(opWorkflowInstanceById(wf.name))}",`);
-  // uuid format on the correlation-id param — same as every aggregate
-  // `/{id}` route, so the parity gate's path-param dimension agrees with
-  // .NET (`Guid id`) / Java (`UUID id`) / Python (uuid-format Path()).
-  out.push(`    request: { params: z.object({ id: z.string().uuid() }) },`);
+  // The param schema derives from the correlation id's value type — guid →
+  // uuid-format string, int/long → coerced integer, string → plain — so the
+  // parity gate's path-param dimension agrees with .NET / Java / Python /
+  // Phoenix by construction (docs/plans/non-guid-id-http-params.md).
+  const corrVt = workflowCorrIdValueType(wf);
+  const idParamZod =
+    corrVt === "guid"
+      ? "z.string().uuid()"
+      : corrVt === "string"
+        ? "z.string()"
+        : "z.coerce.number().int()";
+  // `load<T>Events` / `fold<T>` key streams as text; a numeric id stringifies.
+  const idAsKey = corrVt === "int" || corrVt === "long" ? "String(id)" : "id";
+  out.push(`    request: { params: z.object({ id: ${idParamZod} }) },`);
   out.push(`    responses: {`);
   out.push(
     `      200: { description: "OK", content: { "application/json": { schema: ${T}InstanceResponse } } },`,
@@ -719,9 +730,9 @@ function emitInstanceRoutes(wf: WorkflowIR): string[] {
   if (wf.eventSourced) {
     // Single-stream load + fold for the given correlation id; an empty stream
     // means no such instance.
-    out.push(`    const __stream = await ${helpers.load}(db, id);`);
+    out.push(`    const __stream = await ${helpers.load}(db, ${idAsKey});`);
     out.push(`    if (__stream.length === 0) throw new AggregateNotFoundError("not_found");`);
-    out.push(`    const row = ${helpers.fold}(id, __stream);`);
+    out.push(`    const row = ${helpers.fold}(${idAsKey}, __stream);`);
   } else {
     out.push(
       `    const rows = await db.select().from(${table}).where(eq(${table}.${corr}, id)).limit(1);`,

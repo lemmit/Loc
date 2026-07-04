@@ -21,6 +21,7 @@ import {
 } from "../../ir/util/openapi-ids.js";
 import { collectReachableTypes } from "../../ir/util/reachable-types.js";
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
+import { workflowCorrIdValueType } from "../../ir/util/workflow-instances.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { renderDotnetLogCall } from "../_obs/render-dotnet.js";
 import { renderWorkflowStmts, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
@@ -1639,13 +1640,18 @@ function renderInstancesController(
     // identical to the state path, so cross-backend OpenAPI parity holds.
     let listBody: string;
     let byIdBody: string;
+    // The `{id}` param binds the correlation id's CLR value type (Guid / int /
+    // long / string), so Swashbuckle emits the matching param schema — parity
+    // with Hono / Java / Python / Phoenix by construction
+    // (docs/plans/non-guid-id-http-params.md).
+    const corrClr = csIdValueClrType(workflowCorrIdValueType(wf));
     if (wf.eventSourced) {
       const eventSet = esEventDbSet(wf);
       const stateCls = workflowStateClass(wf);
       const corrId = esCorrIdClass(wf);
       listBody =
         `        var __rows = await _db.${eventSet}.AsNoTracking().OrderBy(e => e.StreamId).ThenBy(e => e.Version).ToListAsync();\n` +
-        `        var rows = __rows.GroupBy(e => e.StreamId).Select(g => ${stateCls}._FromEvents(new ${corrId}(Guid.Parse(g.Key)), g.Select(${stateCls}.RowToEvent).ToList()));\n` +
+        `        var rows = __rows.GroupBy(e => e.StreamId).Select(g => ${stateCls}._FromEvents(new ${corrId}(${csIdFromString("g.Key", corrClr)}), g.Select(${stateCls}.RowToEvent).ToList()));\n` +
         `        return Ok(rows.Select(x => new ${T}InstanceResponse(${proj("x")})));\n`;
       byIdBody =
         `        var __sid = id.ToString();\n` +
@@ -1673,7 +1679,7 @@ function renderInstancesController(
         `    [HttpGet("${slug}/instances/{id}")]\n` +
         `    [ProducesResponseType(typeof(${T}InstanceResponse), 200)]\n` +
         `    [ProducesResponseType(typeof(ProblemDetails), 404)]\n` +
-        `    public async Task<IActionResult> ${upperFirst(camelId(opWorkflowInstanceById(wf.name)))}(Guid id)\n` +
+        `    public async Task<IActionResult> ${upperFirst(camelId(opWorkflowInstanceById(wf.name)))}(${corrClr} id)\n` +
         `    {\n` +
         byIdBody +
         `    }\n`,
@@ -1705,4 +1711,20 @@ public sealed class ${className} : ControllerBase
 ${blocks.join("\n")}
 }
 `;
+}
+
+/** Convert a StreamId `string` back to the correlation id's CLR value type so
+ *  a folded ES instance can wrap it in `new <Corr>Id(...)` — the StreamId
+ *  column stores the id value's string form. */
+function csIdFromString(expr: string, clr: string): string {
+  switch (clr) {
+    case "Guid":
+      return `Guid.Parse(${expr})`;
+    case "int":
+      return `int.Parse(${expr})`;
+    case "long":
+      return `long.Parse(${expr})`;
+    default:
+      return expr;
+  }
 }
