@@ -1,6 +1,10 @@
 # Loom Authorization Model — DataKey, dataPolicy & Operation Policies
 
 > **Status:** Design proposal (no implementation yet).
+> **Build order:** the `DataKey` + directional-ladder half is sequenced in
+> [`docs/plans/multi-tenancy-phase2.md`](../plans/multi-tenancy-phase2.md) (P2.4),
+> which resolves §0 option A and corrects the shared assumption that `dataKey`
+> arrives as an IdP claim — it is *derived* per-request from the registry (P2.1).
 > **Supersedes & consolidates:** `docs/proposals/policies-supplementary-note.md`
 > and the earlier `policies.txt` working notes (not checked in).
 > **Scope:** all domain-logic backends (.NET/EF Core, TypeScript/Hono,

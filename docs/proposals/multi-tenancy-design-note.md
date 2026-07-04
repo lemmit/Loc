@@ -15,6 +15,15 @@
 > stamp-time registry read — so the plan defers it with a documented backfill
 > recipe). One substrate correction: claim-valued lifecycle stamps were broken
 > on node/java/dotnet (+ elixir nil-guard) and fixed as slice 1a.0.
+> **Phase 2 unblock plan (2026-07-04):**
+> [`docs/plans/multi-tenancy-phase2.md`](../plans/multi-tenancy-phase2.md) — folds
+> this note's R5 with [`authorization.md`](./authorization.md)'s `policy {}` +
+> `DataKey` ladder into one build order. Key finding: blockers A (session
+> `orgPath`) and C (stamp-time registry read) collapse to a single keystone — a
+> per-request-memoized computed principal value `currentUser.orgPath` — and
+> `dataKey` is a read-perf optimization, not a correctness requirement. The
+> capstone's hard "no" (no placeholder `dataKey`) stands: it is introduced only
+> once that real `orgPath` exists.
 >
 > Original status (2026-06-28): design agreed; substrate COMPLETE, surface not
 > yet implemented. The proposed

@@ -250,8 +250,14 @@ proposal status flip; fix the CLAUDE.md `src/macros/stdlib/audit/` drift.
   compatible with R1 (registry remains a system-level fact, not a
   per-aggregate marker).
 
-**Phase 2 (blocked — do not start):** `tenantRegistry` capability
-(`parent: Self id?` + managed `dataKey`), hierarchy + `deep`/`global` levels.
+**Phase 2 (unblock plan drafted — see
+[`multi-tenancy-phase2.md`](./multi-tenancy-phase2.md)):** `tenantRegistry`
+capability (`parent: Self id?` + managed `dataKey`), hierarchy + `deep`/`global`
+levels. The Phase 2 plan resolves the blocks below: the two hard ones (session
+`orgPath`, stamp-time registry read) collapse to a single keystone — a
+per-request-memoized computed principal value `currentUser.orgPath` — and the
+capstone's "no placeholder `dataKey`" rule is preserved (it is stamped only once
+the real `orgPath` exists). Original blocker analysis retained below.
 Blocked on session enrichment (`orgPath` is derived, not an IdP claim —
 `AuthIR.claims` is pure projection today) and on `authorization.md` (owns the
 access-level ladder). Contra the note's R5 letter ("dataKey from day one"):
