@@ -29,6 +29,7 @@ import {
   isTargetable,
   isUi,
   isUiChannelParam,
+  isUserBlock,
   isValueObject,
   isWorkflow,
   type Model,
@@ -119,6 +120,20 @@ export class DddScopeProvider extends DefaultScopeProvider {
       if (!ch) return EMPTY_SCOPE;
       const events = ch.carries.map((c) => c.ref).filter((e) => e !== undefined);
       return this.createScopeForNodes(events);
+    }
+    // `tenancy by user.<claim> of <Registry>` — the claim resolves against the
+    // enclosing system's `user { … }` block fields, and ONLY in that position
+    // (the same targeted-scoping trick that keeps EventDecl/PayloadDecl visible
+    // only in workflow create/handle params): user fields are not globally
+    // exported, so without this arm the cross-ref could never link — and with
+    // it a user-field name stays out of scope everywhere else.  The `registry`
+    // slot needs no arm: aggregates are exported to the global scope by bare
+    // name (collectExportedSymbols below), so the default provider resolves it.
+    if (context.container.$type === "TenancyDecl" && context.property === "claim") {
+      const system = AstUtils.getContainerOfType(context.container, isSystem);
+      const userBlock = system?.members.find(isUserBlock);
+      if (!userBlock) return EMPTY_SCOPE;
+      return this.createScopeForNodes(userBlock.fields);
     }
     // `menu { link Orders.List }` — a page link resolves within the enclosing
     // ui, by BOTH the page's bare name (`Home`, a unique top-level page) AND its

@@ -349,8 +349,9 @@ function printAuthBlock(node: AuthBlock): string {
 
 function printTenancyDecl(node: import("../generated/ast.js").TenancyDecl): string {
   // `tenancy by user.<claim> of <registry>` — the `user.` prefix is fixed
-  // surface syntax (multi-tenancy Phase 1a).
-  return `tenancy by user.${node.claim} of ${node.registry}`;
+  // surface syntax (multi-tenancy Phase 1a).  Both slots are cross-references
+  // (1b.1); print the source text like every other cross-ref printer arm.
+  return `tenancy by user.${node.claim.$refText} of ${node.registry.$refText}`;
 }
 
 function printLayout(node: Layout): string {

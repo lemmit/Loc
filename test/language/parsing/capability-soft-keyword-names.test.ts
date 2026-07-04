@@ -64,3 +64,26 @@ describe("filter / stamp / implements as ordinary identifiers", () => {
     ).toEqual(["filter", "implements", "stamp"]);
   });
 });
+
+describe("filter / stamp / implements as assignment targets (LValueIdent)", () => {
+  it("parse as `:=` targets inside an operation body", async () => {
+    const { doc } = await parseString(
+      `
+      system S {
+        subdomain D { context C {
+          aggregate Order {
+            filter: string
+            stamp: int
+            operation touch(s: string, n: int) {
+              filter := s
+              stamp := n
+            }
+          }
+        }}
+      }
+      `,
+      { validate: false },
+    );
+    expect(doc.parseResult.parserErrors).toEqual([]);
+  });
+});

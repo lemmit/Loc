@@ -43,7 +43,12 @@ import {
   refCollRepoHelpers,
 } from "./ref-collection-emit.js";
 import { usesRelationalContainments } from "./schema-emit.js";
-import { aggregateHasStamps, stampPutChanges, stampUsesPrincipal } from "./stamp-emit.js";
+import {
+  aggregateHasStamps,
+  stampPutChanges,
+  stampUsesPrincipal,
+  stampUsesPrincipalFor,
+} from "./stamp-emit.js";
 import { valueCollectionsWithVo } from "./value-collection-schema-emit.js";
 
 export function emitVanillaRepositories(
@@ -145,6 +150,14 @@ function renderRepository(
   const hasStamps = aggregateHasStamps(agg);
   const stampPrincipal = stampUsesPrincipal(agg);
   const stampActorParam = stampPrincipal ? ", current_user \\\\ nil" : "";
+  // The update seam keeps the same arity (callers thread the actor whenever
+  // ANY stamp is principal-valued) but only USES the actor when an
+  // `onUpdate` stamp reads it — an onCreate-only principal stamp (tenantOwned)
+  // would otherwise leave `current_user` unused and fail
+  // `mix compile --warnings-as-errors`.
+  const updateStampActorParam = stampPrincipal
+    ? `, ${stampUsesPrincipalFor(agg, ["update"]) ? "" : "_"}current_user \\\\ nil`
+    : "";
   const insertStamps = stampPutChanges(
     agg,
     ["create", "update"],
@@ -277,7 +290,7 @@ defmodule ${repoMod} do
   end
 
   @spec update(${aggModule}.t(), map()${hasStamps && stampPrincipal ? ", map() | nil" : ""}) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
-  def update(%${aggModule}{} = record, attrs${stampActorParam}) when is_map(attrs) do
+  def update(%${aggModule}{} = record, attrs${updateStampActorParam}) when is_map(attrs) do
     record${updatePreload}
     |> ${aggModule}Changeset.base_changeset(attrs)${updateStamps}${updatePutAssoc}
     |> Repo.update()

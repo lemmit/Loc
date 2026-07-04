@@ -1,4 +1,4 @@
-import type { ExprIR } from "../../ir/types/loom-ir.js";
+import type { ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
 
 // ---------------------------------------------------------------------------
 // Find-filter → JPQL renderer.  Spring Data derived method names can't
@@ -103,7 +103,55 @@ function renderBinary(e: Extract<ExprIR, { kind: "binary" }>, ctx: JpqlCtx): str
     return `${render(operand, ctx)} is ${e.op === "==" ? "" : "not "}null`;
   }
   const op = jpqlOp(e.op);
+  // Self-id vs principal-claim comparison (`this.id == currentUser.<claim>` —
+  // the derived tenancy registry self-scope, Phase 1b).  The entity key is an
+  // `@EmbeddedId` record (`OrganizationId(UUID value)`), so the comparison
+  // navigates into its component (`e.id.value`) and the SpEL principal side
+  // binds the claim AS the id's value type: a same-typed claim binds directly
+  // (Hibernate 6 rejects a String parameter against a UUID path), a `string`
+  // claim against a guid id converts in SpEL (`T(java.util.UUID).fromString`,
+  // null-guarded so a missing principal stays the fail-closed `= NULL`).
+  if (e.op === "==" || e.op === "!=") {
+    const idSide = selfIdTypeOf(e.left) ? e.left : selfIdTypeOf(e.right) ? e.right : null;
+    const other = idSide === e.left ? e.right : e.left;
+    const claim = principalClaimOf(other);
+    if (idSide && claim) {
+      const idType = selfIdTypeOf(idSide)!;
+      const idPath = `${ctx.alias}.id.value`;
+      const claimIsString = claim.type?.kind === "primitive" && claim.type.name === "string";
+      const spel =
+        idType.valueType === "guid" && claimIsString
+          ? `:#{@${CURRENT_USER_BEAN}.user() == null || @${CURRENT_USER_BEAN}.user().${claim.member}() == null ? null : T(java.util.UUID).fromString(@${CURRENT_USER_BEAN}.user().${claim.member}())}`
+          : `:#{@${CURRENT_USER_BEAN}.user()?.${claim.member}()}`;
+      return idSide === e.left ? `${idPath} ${op} ${spel}` : `${spel} ${op} ${idPath}`;
+    }
+  }
   return `${render(e.left, ctx)} ${op} ${render(e.right, ctx)}`;
+}
+
+/** The id TypeIR of a `this.id` member access (the aggregate's own key), or
+ *  null for any other shape. */
+function selfIdTypeOf(x: ExprIR): Extract<TypeIR, { kind: "id" }> | null {
+  if (x.kind === "paren") return selfIdTypeOf(x.inner);
+  if (
+    x.kind === "member" &&
+    x.receiver.kind === "this" &&
+    x.member === "id" &&
+    x.memberType.kind === "id"
+  ) {
+    return x.memberType;
+  }
+  return null;
+}
+
+/** A `currentUser.<claim>` member access — returns the claim member name and
+ *  its declared type, or null. */
+function principalClaimOf(x: ExprIR): { member: string; type: TypeIR | undefined } | null {
+  if (x.kind === "paren") return principalClaimOf(x.inner);
+  if (x.kind === "member" && x.receiver.kind === "ref" && x.receiver.refKind === "current-user") {
+    return { member: x.member, type: x.memberType };
+  }
+  return null;
 }
 
 function jpqlOp(op: string): string {

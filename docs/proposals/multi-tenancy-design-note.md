@@ -4,10 +4,11 @@
 > <Registry>`, the `tenantOwned` prelude capability, `crossTenant`, the
 > explicit-stance lint, and the registry/claim verification checks shipped per
 > [`docs/plans/multi-tenancy-implementation.md`](../plans/multi-tenancy-implementation.md)
-> (user-facing doc: [`docs/tenancy.md`](../tenancy.md)). Deferred: registry
-> self-scope + bootstrap (1b), the `registry`/`claim` cross-reference upgrade (1b
-> — they ship as bare `ID`s, not Langium cross-refs; see "Final recommendation"
-> decision 5), `tenant_id` index (blocked on
+> (user-facing doc: [`docs/tenancy.md`](../tenancy.md)). The `registry`/`claim`
+> cross-reference upgrade ("Final recommendation" decision 5) shipped as slice
+> 1b.1 (2026-07-04) — both bind as real Langium cross-refs now; the former
+> existence checks are linking errors. Deferred: registry
+> self-scope + bootstrap (1b), `tenant_id` index (blocked on
 > uniqueness-and-indexes), and ALL hierarchy machinery — `tenantRegistry`,
 > `parent`, `dataKey`, `deep`/`global` (Phase 2; R5's "dataKey from day one"
 > was found unimplementable — no session-enrichment source for `orgPath`, no

@@ -1,17 +1,22 @@
-import type { SystemIR } from "../../types/loom-ir.js";
-import { classifyTenantStance, hasTenantOwned } from "../../util/tenant-stance.js";
+import type { SystemIR, TypeIR } from "../../types/loom-ir.js";
+import {
+  classifyTenantStance,
+  hasTenantOwned,
+  tenancyClaimBinding,
+} from "../../util/tenant-stance.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 
 // ---------------------------------------------------------------------------
 // Tenancy checks (multi-tenancy Phase 1a, slice 1a.3 —
 // docs/plans/multi-tenancy-implementation.md §1).
 //
-// The AST-level tenancy rules (duplicate `tenancy by`, unknown claim field)
-// live in `src/language/validators/tenancy.ts`; this leaf owns everything
-// that needs the merged, fully-lowered model:
+// The AST-level tenancy rule (duplicate `tenancy by`) lives in
+// `src/language/validators/tenancy.ts`; claim / registry existence is the
+// LINKER's job since 1b.1 (both bindings are real cross-references — an
+// unknown name is a parse-level "Could not resolve reference …", not the
+// former `loom.tenancy-registry-unknown` / `loom.tenancy-unknown-claim`).
+// This leaf owns everything that needs the merged, fully-lowered model:
 //
-//   - the `of <Registry>` target must exist as an aggregate in the system
-//     (`loom.tenancy-registry-unknown`)
 //   - the explicit-stance lint: under a `tenancy by` system every
 //     row-persisting aggregate must pick a side — `with tenantOwned`
 //     (tenant data) or `crossTenant` (shared data)
@@ -32,23 +37,48 @@ import type { LoomDiagnostic } from "./diagnostic.js";
 // (`src/ir/util/tenant-stance.ts`) — never stamped on the IR.
 // ---------------------------------------------------------------------------
 
+/** Display name for the claim's declared type in the mismatch message. */
+function typeName(t: TypeIR): string {
+  return t.kind === "primitive" ? t.name : t.kind;
+}
+
 export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const tenancy = sys.tenancy;
 
-  // Registry existence — `of <Registry>` must name an aggregate somewhere
-  // in the system (any context of any subdomain).
+  // Registry existence is a LINKING concern since 1b.1 — `of <Registry>` is a
+  // real cross-reference (`registry=[Aggregate:ID]`), so an unknown name
+  // surfaces as a Langium "could not resolve" diagnostic at parse time; no IR
+  // re-check needed (an unresolved ref lowers with its `$refText`, and the
+  // lookups below simply find no aggregate and skip).
   if (tenancy) {
-    const registryExists = sys.subdomains.some((mod) =>
-      mod.contexts.some((ctx) => ctx.aggregates.some((a) => a.name === tenancy.registryName)),
-    );
-    if (!registryExists) {
+    // The derived registry self-scope filter (Phase 1b, capstone decision 4)
+    // compares `<Registry>.id == currentUser.<claim>` — the `tenantId ≡
+    // <Registry>.id` identity — so the claim's declared type must bind
+    // against the registry's id value type: same-typed always works, and a
+    // `string` claim binds as a guid at each backend's accessor site
+    // (`tenancyClaimBinding`).  Anything else can't compare on any backend —
+    // reject with the fix spelled out rather than emitting a filter that
+    // never matches (or doesn't compile).
+    const registry = sys.subdomains
+      .flatMap((mod) => mod.contexts)
+      .flatMap((ctx) => ctx.aggregates)
+      .find((a) => a.name === tenancy.registryName);
+    const claimType = sys.user?.fields.find((f) => f.name === tenancy.claimField)?.type;
+    if (
+      registry &&
+      claimType &&
+      tenancyClaimBinding(registry.idValueType, claimType) === "mismatch"
+    ) {
       diags.push({
         severity: "error",
-        code: "loom.tenancy-registry-unknown",
+        code: "loom.tenancy-claim-type-mismatch",
         message:
-          `system '${sys.name}': tenancy registry '${tenancy.registryName}' does not name an ` +
-          `aggregate in the system.  Declare 'aggregate ${tenancy.registryName} { ... }' or ` +
-          `point 'of' at an existing aggregate.`,
+          `system '${sys.name}': tenancy claim 'user.${tenancy.claimField}' is typed ` +
+          `'${typeName(claimType)}' but registry '${registry.name}' has 'ids ${registry.idValueType}'. ` +
+          `The derived registry self-scope filter compares ${registry.name}.id to the claim, so ` +
+          `declare the claim as '${tenancy.claimField}: ${registry.idValueType}'` +
+          `${registry.idValueType === "guid" ? ` (or '${tenancy.claimField}: string', bound as a guid at the accessor site)` : ""}, ` +
+          `or change the registry's 'ids'.`,
         source: `${sys.name}/tenancy`,
       });
     }

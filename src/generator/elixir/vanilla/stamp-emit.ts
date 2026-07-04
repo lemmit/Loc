@@ -39,6 +39,24 @@ export function stampUsesPrincipal(agg: AggregateIR): boolean {
   );
 }
 
+/** Does a stamp of one of the given lifecycle EVENTS reference the principal?
+ *  The update seam keeps the threaded actor's ARITY whenever any stamp is
+ *  principal-valued (callers are generated in lockstep), but an aggregate
+ *  whose only principal stamp is `onCreate` (e.g. `tenantOwned`'s
+ *  `tenantId := currentUser.tenantId`) never READS it there — the param is
+ *  then emitted underscored so `mix compile --warnings-as-errors` stays
+ *  green. */
+export function stampUsesPrincipalFor(
+  agg: AggregateIR,
+  events: readonly ("create" | "update")[],
+): boolean {
+  return (agg.contextStamps ?? []).some(
+    (r) =>
+      events.includes(r.event as "create" | "update") &&
+      r.assignments.some((a) => exprUsesCurrentUser(a.value)),
+  );
+}
+
 /** Render one stamp assignment's value.  A bare `currentUser` ref resolves to
  *  the principal id read off the threaded `current_user` map — nil-safe as
  *  `current_user && current_user.<idKey>`, so an internal caller that didn't

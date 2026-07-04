@@ -1,6 +1,12 @@
 # Multi-tenancy — implementation plan (Phase 1a)
 
-> Status: **plan — awaiting sign-off on the surface below.** Derived from
+> Status: **Phase 1a SHIPPED (#1634); Phase 1b.2 (registry self-scope filter
+> + claim-less bootstrap, capstone decision 4) BUILT on this branch** — see
+> the 1b section in §3 for what shipped and what remains (the
+> `claim`/`registry` cross-reference upgrade, decision 5, and the `tenant_id`
+> index). Original 1a plan text follows.
+>
+> Original status: plan — awaiting sign-off on the surface below. Derived from
 > [`docs/proposals/multi-tenancy-design-note.md`](../proposals/multi-tenancy-design-note.md)
 > (R1–R5 controlling) via a state audit + design review on `main` @ `bb043de`
 > (2026-07-03). Review verdict: **GO WITH CHANGES** — the changes are recorded
@@ -77,8 +83,8 @@ aggregate Invoice {
 | Source | Diagnostic | Severity |
 |---|---|---|
 | unmarked `aggregate Shipment { … }` under a `tenancy by` system | `loom.tenancy-stance-unmarked` — "aggregate 'Shipment' declares no tenancy stance; add `with tenantOwned` (tenant data) or `crossTenant` (shared data)" | **error** |
-| `tenancy by user.orgId of …` when `user {}` has no `orgId` | `loom.tenancy-unknown-claim` (mirrors `loom.auth-unknown-claim-field`) | error |
-| `of Organization` when no such aggregate exists | `loom.tenancy-registry-unknown` | error |
+| `tenancy by user.orgId of …` when `user {}` has no `orgId` | linking error — `Could not resolve reference to UserField named 'orgId'.` (real `[UserField:UserFieldName]` cross-reference since 1b.1; formerly `loom.tenancy-unknown-claim`) | error |
+| `of Organization` when no such aggregate exists | linking error — `Could not resolve reference to Aggregate named 'Organization'.` (real `[Aggregate:ID]` cross-reference since 1b.1; formerly `loom.tenancy-registry-unknown`) | error |
 | two `tenancy by` declarations | `loom.tenancy-duplicate` | error |
 | `with tenantOwned` but no `tenancy by` in the system | `loom.tenant-owned-without-tenancy` | error |
 | `crossTenant` but no `tenancy by` | `loom.cross-tenant-without-tenancy` (intent declared, nothing to opt out of) | warning |
@@ -204,16 +210,42 @@ fixture next to `tenancy-filter.ddd` (+ manifest row, conformance); the
 cross-tenant isolation e2e (§2); `docs/tenancy.md` + `docs/capabilities.md` +
 proposal status flip; fix the CLAUDE.md `src/macros/stdlib/audit/` drift.
 
-**1b (follow-up, separate PR):** registry self-scope filter
-(`Organization.id == currentUser.tenantId`) + claim-less `signUp` bootstrap via
-the `ignoring` filter-bypass; `tenant_id` index (blocked on the
-`uniqueness-and-indexes.md` surface); **cross-reference the `registry`/`claim`
-bindings** (`registry=[Aggregate:ID]`, `claim=[UserField:UserFieldName]`) — they
-ship as bare `ID`s today, the only un-Loomish reference in the grammar.
-Byte-identical surface, pure tooling win (navigation/rename/diagnostics). See the
-design-note **"Final recommendation"** section (decision 5) for the rationale and
-why it stays compatible with R1 (registry remains a system-level fact, not a
-per-aggregate marker).
+**1b (follow-up, separate PR):**
+
+- **1b.2 — SHIPPED: registry self-scope filter + claim-less bootstrap**
+  (capstone decision 4). Enrichment (`applyRegistrySelfScope` in
+  `src/ir/enrich/enrichments.ts`, the auto-`findAll` analog) derives
+  `this.id == currentUser.<claim>` onto the registry's `contextFilters`
+  (origin `tenancy` — `src/ir/util/tenant-stance.ts`), riding the shipped
+  5-backend principal-filter pipeline. The id-vs-claim type link is option C:
+  same-typed compares directly; a `string` claim against `ids guid` binds as
+  a guid at each backend's accessor site (pg text-param cast on
+  node/elixir/python; `new <Agg>Id(Guid.Parse(...))` in the .NET
+  `HasQueryFilter`; `e.id.value = :#{… T(java.util.UUID).fromString(…) …}`
+  null-guarded SpEL on java); anything else is
+  `loom.tenancy-claim-type-mismatch` (error). No `ignoring`-bypass needed for
+  bootstrap — filters never gate creates and the registry has no stamp, so
+  the claim-less/foreign-claim `POST /<registries>` works by construction
+  (proven per backend by the create-path pin tests + the extended
+  `test/e2e/tenancy-isolation.test.ts` runtime gate, which also asserts the
+  signup round-trip: create org → use its id as the claim → 200).
+  Compile-verified on all five: dotnet (`dotnet build /warnaserror`, sdk:10.0
+  container), java (`gradle testClasses`), python (`ruff` + `mypy --strict`),
+  node (generated-project `tsc --noEmit` + the runtime e2e), elixir
+  (`mix compile --warnings-as-errors` on the new
+  `vanilla-tenancy-registry.ddd` fixture — which also exposed and fixed a
+  pre-existing vanilla bug: an onCreate-only principal stamp left the update
+  seam's threaded `current_user` unused, failing `--warnings-as-errors`; the
+  param is now underscored when no `onUpdate` stamp reads it).
+- **Still open:** `tenant_id` index (blocked on the
+  `uniqueness-and-indexes.md` surface); **cross-reference the
+  `registry`/`claim` bindings** (`registry=[Aggregate:ID]`,
+  `claim=[UserField:UserFieldName]`) — they ship as bare `ID`s today, the
+  only un-Loomish reference in the grammar. Byte-identical surface, pure
+  tooling win (navigation/rename/diagnostics). See the design-note **"Final
+  recommendation"** section (decision 5) for the rationale and why it stays
+  compatible with R1 (registry remains a system-level fact, not a
+  per-aggregate marker).
 
 **Phase 2 (blocked — do not start):** `tenantRegistry` capability
 (`parent: Self id?` + managed `dataKey`), hierarchy + `deep`/`global` levels.

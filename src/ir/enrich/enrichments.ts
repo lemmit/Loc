@@ -49,6 +49,11 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../types/loom-ir.js";
+import {
+  buildRegistrySelfScopeFilter,
+  TENANCY_SELF_SCOPE_ORIGIN,
+  tenancyClaimBinding,
+} from "../util/tenant-stance.js";
 import { walkStmtExprsDeep } from "../util/walk.js";
 import { buildCreateInput } from "./wire-projection.js";
 
@@ -179,6 +184,10 @@ function enrichSystem(
       errorStatusOverrides: errorStatusesBySubdomain.get(m.name),
     })),
   }));
+  // Multi-tenancy Phase 1b (capstone decision 4): derive the registry's
+  // self-scope filter from the `tenancy by` declaration.  See
+  // `applyRegistrySelfScope` below.
+  const subdomainsScoped = subdomains.map((m) => applyRegistrySelfScope(m, sys));
   // Then propagate react deployables' context sets from their targets.
   // Done after subdomain enrichment so frontends see the same enriched
   // contexts every other consumer sees.
@@ -186,7 +195,7 @@ function enrichSystem(
   // Derive `migrationsOwner` per subdomain — the deployable responsible
   // for emitting schema migrations.  Runs last because it consults
   // the (now enriched) deployable list.  See `assignMigrationsOwner`.
-  const subdomainsWithOwner = subdomains.map((m) => assignMigrationsOwner(m, deployables));
+  const subdomainsWithOwner = subdomainsScoped.map((m) => assignMigrationsOwner(m, deployables));
   // Derive the implicit logical needs (RFC §3.3): one per (context,
   // required kind), read off how each context's aggregates persist.
   const needs = deriveNeeds(subdomainsWithOwner);
@@ -311,6 +320,70 @@ function assignMigrationsOwner(
   );
   if (owner) return { ...m, migrationsOwner: owner.name };
   return m;
+}
+
+// ---------------------------------------------------------------------------
+// Registry self-scope — multi-tenancy Phase 1b (capstone decision 4).
+//
+// Under `tenancy by user.<claim> of <Registry>`, the registry aggregate is
+// self-keyed: its "tenant" IS its own primary key (`tenantId ≡ <Registry>.id`).
+// Every read of the registry must therefore be scoped to the caller's own
+// org — `this.id == currentUser.<claim>` — a predicate the author never
+// writes; it falls out of the tenancy declaration as a DERIVED type link.
+//
+// Derived here (the auto-`findAll` analog: a synthesized addition in the one
+// pure pass) as an appended `contextFilters` entry with origin
+// `TENANCY_SELF_SCOPE_ORIGIN`, so it rides the exact capability-filter
+// pipeline `tenantOwned`'s filter uses on all five backends (drizzle read
+// conjunction / EF HasQueryFilter / JPQL SpEL principal / SQLAlchemy
+// conjunction / pinned Ecto `where:`).  Filters never gate creates, so the
+// claim-less signup bootstrap (`POST /<registries>` with no or a foreign
+// tenant claim) stays open by construction.
+//
+// The id-vs-claim type link is enforced by `tenancyClaimBinding`: same-typed
+// claims compare directly; a `string` claim against an `ids guid` registry is
+// bound as a guid at each backend's accessor site; anything else derives NO
+// filter here and errors in IR validation (`loom.tenancy-claim-type-mismatch`).
+//
+// Idempotent: the origin marker makes a second enrichment pass a no-op.
+// ---------------------------------------------------------------------------
+
+function applyRegistrySelfScope(m: EnrichedSubdomainIR, sys: SystemIR): EnrichedSubdomainIR {
+  const tenancy = sys.tenancy;
+  if (!tenancy) return m;
+  const claimType = sys.user?.fields.find((f) => f.name === tenancy.claimField)?.type;
+  // No user block / unknown claim → the AST validator already errors
+  // (`loom.tenancy-unknown-claim`); nothing to derive from.
+  if (!claimType) return m;
+  const hasRegistry = m.contexts.some((c) =>
+    c.aggregates.some((a) => a.name === tenancy.registryName),
+  );
+  if (!hasRegistry) return m;
+  return {
+    ...m,
+    contexts: m.contexts.map((ctx) => ({
+      ...ctx,
+      aggregates: ctx.aggregates.map((agg) => {
+        if (agg.name !== tenancy.registryName) return agg;
+        // Already scoped (second enrichment pass) — keep byte-identical.
+        if ((agg.contextFilterOrigins ?? []).includes(TENANCY_SELF_SCOPE_ORIGIN)) return agg;
+        // Incompatible claim type: derive nothing — IR validation rejects
+        // the model (`loom.tenancy-claim-type-mismatch`).
+        if (tenancyClaimBinding(agg.idValueType, claimType) === "mismatch") return agg;
+        const filters = agg.contextFilters ?? [];
+        const origins =
+          agg.contextFilterOrigins ?? filters.map((): string | undefined => undefined);
+        return {
+          ...agg,
+          contextFilters: [
+            ...filters,
+            buildRegistrySelfScopeFilter(agg, tenancy.claimField, claimType),
+          ],
+          contextFilterOrigins: [...origins, TENANCY_SELF_SCOPE_ORIGIN],
+        };
+      }),
+    })),
+  };
 }
 
 export function enrichContext(
