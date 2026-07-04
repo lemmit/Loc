@@ -83,7 +83,7 @@ describe("inheritance predicates — multi-level TPH chain (B11)", () => {
     // the column → every insert failed.
     const { pool, byName } = await poolFor(`
       context Reg {
-        abstract aggregate Animal ids int { name: string }
+        abstract aggregate Animal { name: string }
         abstract aggregate Pet extends Animal { owner: string }
         aggregate Dog extends Pet { breed: string }
       }
@@ -103,10 +103,5 @@ describe("inheritance predicates — multi-level TPH chain (B11)", () => {
     expect(isTphBase(byName("Pet"), pool)).toBe(false);
     expect(isTphConcrete(dog, pool)).toBe(true);
     expect(tphConcretesOf(byName("Animal"), pool).map((a) => a.name)).toEqual(["Dog"]);
-
-    // The concrete inherits the ROOT's id value-type (Animal `ids int`), so its
-    // wire id matches the INTEGER table column instead of defaulting to guid.
-    const idRow = wire.find((w) => w.name === "id") as { type: { valueType: string } };
-    expect(idRow.type.valueType).toBe("int");
   });
 });

@@ -93,19 +93,6 @@ describe("lowerType — id refs", () => {
     });
   });
 
-  it("inherits the target's `ids int` declaration", async () => {
-    const agg = await aggregate(
-      `aggregate A { orderRef: Order id }
-       aggregate Order ids int { name: string }`,
-      "A",
-    );
-    expect(fieldType(agg, "orderRef")).toEqual({
-      kind: "id",
-      targetName: "Order",
-      valueType: "int",
-    });
-  });
-
   it("lowers `T id[]` as an array of id", async () => {
     const agg = await aggregate(
       `aggregate A { friends: Customer id[] }

@@ -100,31 +100,11 @@ describe("Hono workflow instance routes", () => {
     expect(wf).not.toMatch(/InstanceListResponse/);
   });
 
-  it("derives the byId param schema from a non-guid correlation id (ids int → coerced integer)", async () => {
-    // The correlation aggregate declares `ids int`, so the `{id}` param must
-    // NOT claim the uuid format — it coerces to an integer, matching the
-    // int-typed saga-state column and the .NET/Java `int id` binds
-    // (docs/plans/non-guid-id-http-params.md).
-    const wf = await workflowsFromSrc(INT_SRC);
-    expect(wf).toContain("request: { params: z.object({ id: z.coerce.number().int() }) },");
-    expect(wf).not.toContain("z.string().uuid()");
-    expect(wf).toMatch(/eq\(schema\.tickerTallies\.ticketId, id\)/);
+  it("declares the byId param as a uuid (aggregate ids are always guid)", async () => {
+    const wf = await workflowsFile("test/fixtures/dispatch-sample.ddd");
+    expect(wf).toContain("request: { params: z.object({ id: z.string().uuid() }) },");
   });
 });
-
-// A state-based saga correlated to an `ids int` aggregate — the non-guid
-// path-param derivation case.
-const INT_SRC = `system S { subdomain O { context O {
-  aggregate Ticket ids int { status: string  operation open() { status := "O"  emit TicketOpened { ticket: id } } }
-  repository Tickets for Ticket { }
-  event TicketOpened { ticket: Ticket id }
-  channel L { carries: TicketOpened  delivery: broadcast  retention: ephemeral }
-  workflow TickerTally {
-    ticketId: Ticket id
-    seen: int
-    create(p: TicketOpened) by p.ticket { let t = Tickets.getById(p.ticket) }
-  }
-} } api A from O storage pg { type: postgres } deployable api { platform: node contexts: [O] serves: A port: 3000 } }`;
 
 // Event-sourced instance reads (workflow-and-applier.md A2-S5b): the route
 // paths + operationIds + DTOs are identical to the state path (cross-backend
@@ -170,16 +150,5 @@ describe("Hono event-sourced workflow instance routes", () => {
     expect(wf).toContain("orderId: z.string(),");
     expect(wf).toContain("total: z.number().int(),");
     expect(wf).toContain("const TallyInstanceListResponse = z.array(TallyInstanceResponse)");
-  });
-
-  it("stringifies a non-guid correlation id into the stream key (ids int)", async () => {
-    // The `{id}` param coerces to a number; `load<T>Events` / `fold<T>` key
-    // the stream as text, so the handler stringifies it back.
-    const wf = await workflowsFromSrc(
-      ES_SRC.replace("aggregate Order {", "aggregate Order ids int {"),
-    );
-    expect(wf).toContain("request: { params: z.object({ id: z.coerce.number().int() }) },");
-    expect(wf).toContain("const __stream = await loadTallyEvents(db, String(id));");
-    expect(wf).toContain("const row = foldTally(String(id), __stream);");
   });
 });

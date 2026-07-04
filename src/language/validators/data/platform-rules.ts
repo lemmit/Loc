@@ -103,24 +103,6 @@ export function platformSavingShapes(
   return fam ? PLATFORM_SAVING_SHAPES[fam as Platform] : undefined;
 }
 
-/** Backend families that emit a non-guid aggregate id (`ids int|long|string`)
- *  end-to-end — the PK column type, the id value class / brand, the wire
- *  DTO id field, and the `/{id}` path-param schema all follow `idValueType`.
- *  `dotnet` / `java` / `elixir` do; `node` (Hono) and `python` (FastAPI) still
- *  hardcode a guid/uuid assumption across the id brand, the Response id field,
- *  and the param (and Python's PK column), so a non-guid id silently mis-emits
- *  a broken app there.  Tracked in docs/plans/non-guid-id-http-params.md. */
-const NON_GUID_AGGREGATE_ID_FAMILIES: ReadonlySet<string> = new Set(["dotnet", "java", "elixir"]);
-
-/** True iff the given backend platform emits non-guid aggregate ids
- *  end-to-end.  Resolves a `family@version` pin to its family first;
- *  `false` for frontend / unknown platforms (they own no persistence and
- *  never resolve an aggregate id column). */
-export function platformSupportsNonGuidAggregateId(platform: string | undefined): boolean {
-  const fam = platformFamily(platform);
-  return fam != null && NON_GUID_AGGREGATE_ID_FAMILIES.has(fam);
-}
-
 /** Framework a deployable will render against, given its platform
  *  and whether it actually declares a `ui:` mount.  `hasUi` matters
  *  for platforms that are dual-mode: `dotnet` is backend-only without

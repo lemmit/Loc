@@ -8,7 +8,6 @@ import {
   platformFamily,
   platformOwnsBackend,
   platformSavingShapes,
-  platformSupportsNonGuidAggregateId,
 } from "../../../language/validators/data/platform-rules.js";
 import { descriptorFor } from "../../../platform/metadata.js";
 import { lowerFirst, snake } from "../../../util/naming.js";
@@ -541,47 +540,6 @@ export function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[
             `'${ctxName}.${agg.name}' with shape(${shape}), but that backend can only ` +
             `emit: ${supported.join(", ")}.  Use a supported shape, or host this ` +
             `aggregate on a deployable whose platform emits shape(${shape}).`,
-          source: `${sys.name}/${dep.name}`,
-        });
-      }
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Non-guid aggregate id support (docs/plans/non-guid-id-http-params.md).  The
-// grammar admits `aggregate X ids int|long|string`, and the .NET / Java /
-// Elixir backends honour it end-to-end (PK column type, id value class, wire
-// DTO id field, `/{id}` path-param schema all follow `idValueType`).  The Hono
-// (`node`) and Python (`fastapi`) backends still hardcode a guid/uuid
-// assumption — the id brand stays `string`, the Response id field stays
-// `z.string()` / `str`, the param stays uuid-format, and Python's PK column is
-// emitted as `Uuid` — so a non-guid id there mis-emits a broken app (a
-// randomUUID minted into an integer column, a `/tickets/42` that 422s).  Turn
-// that silent footgun into an honest error until the backends are filled in.
-// ---------------------------------------------------------------------------
-export function validateNonGuidAggregateIdSupport(sys: SystemIR, diags: LoomDiagnostic[]): void {
-  const ctxByName = new Map<string, BoundedContextIR>();
-  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
-
-  for (const dep of sys.deployables) {
-    if (!platformOwnsBackend(dep.platform)) continue;
-    if (platformSupportsNonGuidAggregateId(dep.platform)) continue;
-    for (const ctxName of dep.contextNames) {
-      const ctx = ctxByName.get(ctxName);
-      if (!ctx) continue;
-      for (const agg of ctx.aggregates) {
-        if (agg.idValueType === "guid") continue;
-        diags.push({
-          severity: "error",
-          code: "loom.non-guid-aggregate-id-unsupported",
-          message:
-            `Deployable '${dep.name}' (platform ${dep.platform}) hosts aggregate ` +
-            `'${ctxName}.${agg.name}' declared \`ids ${agg.idValueType}\`, but that backend ` +
-            `only emits guid aggregate ids today (the id column, wire DTO, and \`/{id}\` ` +
-            `param would silently mis-emit).  Use \`ids guid\` (the default), or host this ` +
-            `aggregate on a dotnet / java / elixir deployable.  Tracked in ` +
-            `docs/plans/non-guid-id-http-params.md.`,
           source: `${sys.name}/${dep.name}`,
         });
       }

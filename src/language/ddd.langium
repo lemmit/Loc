@@ -886,8 +886,13 @@ Aggregate:
         members+=AggregateMember*
     '}';
 
+// The only aggregate id kind Loom emits is `guid`.  `ids int|long|string`
+// were removed: no backend implemented id generation for a non-guid PK (the
+// create path minted a fresh id only for guid; a non-guid create collided on
+// the second insert), so the surface was a footgun.  `ids guid` stays a legal
+// (no-op) explicit spelling of the default.  See docs/plans/non-guid-id-http-params.md.
 IdKind returns string:
-    'guid' | 'int' | 'long' | 'string';
+    'guid';
 
 // D-RENAME (amended by D-DOCUMENT-AXIS §4): inheritance table layout — a
 // header paren modifier on aggregates participating in inheritance.

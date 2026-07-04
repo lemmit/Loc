@@ -54,19 +54,6 @@ describe("`Self id` anchored capability type (typed-capabilities.md)", () => {
     ).toBe("Region");
   });
 
-  it("recovers the host's id kind (not the default guid)", async () => {
-    const ir = await buildLoomModel(`
-      capability tenantRegistry { parent: Self id? }
-      system D { subdomain M { context C {
-        aggregate Region ids int with tenantRegistry { label: string }
-      }}}
-    `);
-    expect(parentType(findAgg(ir, "Region"))).toEqual({
-      kind: "optional",
-      inner: { kind: "id", targetName: "Region", valueType: "int" },
-    });
-  });
-
   it("`with <Cap>`(Self) == a hand-written self-referential field", async () => {
     const viaCapability = await buildLoomModel(`
       capability tenantRegistry { parent: Self id? }

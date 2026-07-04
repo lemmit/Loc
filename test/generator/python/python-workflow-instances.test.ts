@@ -148,19 +148,4 @@ describe("python event-sourced workflow-instance endpoints", () => {
     expect(wf).toContain("    row = _fold_tally(id, __stream)");
     expect(wf).toContain('    return {"orderId": row.order_id, "total": row.total}');
   });
-
-  it("derives the byId param from a non-guid correlation id (ids int → int, stringified stream key)", async () => {
-    // The correlation aggregate declares `ids int`: the param annotates `int`
-    // (FastAPI emits `{type: integer}`, not the uuid format) and the handler
-    // stringifies it back into the text stream key
-    // (docs/plans/non-guid-id-http-params.md).
-    const src = ES_SRC.replace("aggregate Order {", "aggregate Order ids int {");
-    const { model, errors } = await parseString(src);
-    if (errors.length) throw new Error(errors.join("\n"));
-    const wf = generateSystems(model).files.get("api/app/http/workflows_routes.py")!;
-    expect(wf).toContain("async def tally_instance(id: int, session: SessionDep)");
-    expect(wf).toContain("__stream = await _load_tally_events(session, str(id))");
-    expect(wf).toContain("    row = _fold_tally(str(id), __stream)");
-    expect(wf).not.toContain('json_schema_extra={"format": "uuid"}');
-  });
 });
