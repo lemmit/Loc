@@ -745,7 +745,7 @@ system DevPlatform {
         contexts: [Catalog, Builds, People]
         dataSources: [catalogState, buildsState, peopleState]
         serves: ProjectsApi, DeliveryApi, AccountsApi
-        port: 8082
+        port: 8081
         auth: required
     }
 

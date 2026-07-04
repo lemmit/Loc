@@ -10,7 +10,6 @@ import {
   platformSavingShapes,
 } from "../../../language/validators/data/platform-rules.js";
 import { descriptorFor } from "../../../platform/metadata.js";
-import { KEYCLOAK_HOST_PORT } from "../../../util/api-base.js";
 import { lowerFirst, snake } from "../../../util/naming.js";
 import {
   capabilitiesFor,
@@ -353,23 +352,13 @@ export function validateSystem(sys: SystemIR, diags: LoomDiagnostic[]): void {
 // ---------------------------------------------------------------------------
 // Compose uniqueness — the generated `docker-compose.yml` publishes each
 // deployable's `port` on the host and keys every service by its
-// `serviceSlug(name)` (= `naming.snake`), and — when auth is bundled — also
-// publishes Keycloak on `KEYCLOAK_HOST_PORT`.  Two deployables sharing a host
-// port (e.g. both defaulted to 3000, or a user port colliding with 8081) make
+// `serviceSlug(name)` (= `naming.snake`).  Two deployables sharing a host
+// port (e.g. both defaulted to 3000) make
 // `docker compose up` abort with a port-in-use error; two deployables whose
 // names slug to the same key (`SalesApi2` / `salesApi2` → `sales_api2`)
 // silently merge into one output directory + one compose service.  Both are
 // deploy-time breakage the IR can catch here (finding 20 / B24).
 // ---------------------------------------------------------------------------
-
-/** Mirrors `bundlesKeycloak` in `src/system/index.ts`: the compose file bundles
- *  a dev Keycloak (publishing `KEYCLOAK_HOST_PORT`) when the system declares an
- *  `auth {}` block with the default / keycloak / custom provider. */
-function bundlesKeycloakHostPort(sys: SystemIR): boolean {
-  const a = sys.auth;
-  if (!a) return false;
-  return !a.provider || a.provider === "keycloak" || a.provider === "custom";
-}
 
 export function validateComposeUniqueness(sys: SystemIR, diags: LoomDiagnostic[]): void {
   // Host-port collisions across deployables (plus the bundled Keycloak port).
@@ -380,9 +369,9 @@ export function validateComposeUniqueness(sys: SystemIR, diags: LoomDiagnostic[]
     else ownersByPort.set(port, [owner]);
   };
   for (const d of sys.deployables) addOwner(d.port, `deployable '${d.name}'`);
-  if (bundlesKeycloakHostPort(sys)) {
-    addOwner(KEYCLOAK_HOST_PORT, "the bundled Keycloak service");
-  }
+  // The bundled Keycloak never collides: the emitter (`keycloakHostPort` in
+  // src/system/index.ts) publishes it on the first free port >= 8081,
+  // stepping past any port a deployable claims.
   for (const [port, owners] of ownersByPort) {
     if (owners.length < 2) continue;
     diags.push({
@@ -391,11 +380,7 @@ export function validateComposeUniqueness(sys: SystemIR, diags: LoomDiagnostic[]
       message:
         `Host port ${port} is published by more than one service (${owners.join(", ")}); ` +
         `\`docker compose up\` would abort with a port-in-use error. Give each deployable a ` +
-        `distinct \`port:\`${
-          owners.some((o) => o.includes("Keycloak"))
-            ? ` (port ${KEYCLOAK_HOST_PORT} is reserved for the bundled Keycloak when auth is enabled)`
-            : ""
-        }.`,
+        `distinct \`port:\`.`,
       source: sys.name,
     });
   }

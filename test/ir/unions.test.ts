@@ -105,7 +105,7 @@ describe("unions — monomorphization (P4b)", () => {
        } } }`,
       "C",
     );
-    const u = payloads.find((p) => p.name === "CancelOrOrder");
+    const u = payloads.find((p) => p.name === "OrderOrCancel");
     expect(u).toBeDefined();
     expect(u!.synthesized).toBe(true);
     expect(u!.variants).toEqual([
@@ -138,7 +138,7 @@ describe("unions — monomorphization (P4b)", () => {
        } } }`,
       "C",
     );
-    expect(payloads.filter((p) => p.name === "CancelOrOrder")).toHaveLength(1);
+    expect(payloads.filter((p) => p.name === "OrderOrCancel")).toHaveLength(1);
   });
 });
 

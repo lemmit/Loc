@@ -1,7 +1,7 @@
 // B24 (finding 20): the generated docker-compose.yml publishes each
 // deployable's host `port` and keys every service by `serviceSlug(name)`
-// (= `naming.snake`); when auth is bundled it also publishes Keycloak on
-// `KEYCLOAK_HOST_PORT` (8081).  Two services sharing a host port abort
+// (= `naming.snake`); the bundled Keycloak publishes on the first free port
+// >= 8081, stepping past deployable ports.  Two services sharing a host port abort
 // `docker compose up`; two deployables whose names slug to the same key merge
 // into one output dir + one compose service.  The IR validator catches both.
 
@@ -42,14 +42,17 @@ describe("compose uniqueness — host ports (B24)", () => {
     expect(await codes(src)).toContain("loom.duplicate-host-port");
   });
 
-  it("rejects a user port colliding with the bundled Keycloak port 8081", async () => {
+  it("accepts a deployable on 8081 — the bundled Keycloak steps to the next free port", async () => {
+    // The emitter's keycloakHostPort picks the first free port >= 8081, so a
+    // deployable claiming 8081 relocates Keycloak (8082) instead of colliding
+    // (showcase's javaApi does exactly this).
     const src = twoDeployables(
       "one { platform: node, contexts: [A], dataSources: [stA], serves: Aapi, auth: required, port: 8081 }",
       "two { platform: node, contexts: [B], dataSources: [stB], serves: Aapi, auth: required, port: 3001 }",
       "auth",
     );
     const errs = await codes(src);
-    expect(errs).toContain("loom.duplicate-host-port");
+    expect(errs).not.toContain("loom.duplicate-host-port");
   });
 
   it("accepts distinct host ports", async () => {

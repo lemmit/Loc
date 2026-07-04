@@ -50,25 +50,23 @@ describe(".NET generator — domainService", () => {
     const svc = (await files()).get("Domain/Services/Pricing.cs")!;
     expect(svc).toMatch(/public static decimal Quote\(Cart cart, Customer customer\)/);
     expect(svc).toMatch(/return cart\.Subtotal;/);
-    // The union return type reuses the shared `unionInstanceName`, which
-    // canonicalizes the variant set by `typeKey` (so `A or B` / `B or A` are
-    // one payload): `CouponExpired` (`en:…`) sorts before the `money`
-    // primitive (`p:…`) → `CouponExpiredOrmoney`.  The wire name matches the
-    // aggregate-operation union DTOs byte-for-byte.
-    expect(svc).toMatch(/public static CouponExpiredOrmoney ApplyCoupon\(decimal price\)/);
-    expect(svc).toMatch(/return new CouponExpiredOrmoney_money\(price\);/);
+    // The union return type reuses the shared `unionInstanceName` (a `money`
+    // variant tags by its bare primitive name → `moneyOrCouponExpired`), so the
+    // wire name matches the aggregate-operation union DTOs byte-for-byte.
+    expect(svc).toMatch(/public static moneyOrCouponExpired ApplyCoupon\(decimal price\)/);
+    expect(svc).toMatch(/return new moneyOrCouponExpired_money\(price\);/);
   });
 
   it("emits the pure Domain union record for an or-union return", async () => {
-    const union = (await files()).get("Domain/Services/CouponExpiredOrmoney.cs");
+    const union = (await files()).get("Domain/Services/moneyOrCouponExpired.cs");
     expect(union).toBeDefined();
     expect(union!).toMatch(/namespace \w+\.Domain\.Services;/);
-    expect(union!).toMatch(/public abstract record CouponExpiredOrmoney;/);
+    expect(union!).toMatch(/public abstract record moneyOrCouponExpired;/);
     expect(union!).toMatch(
-      /public sealed record CouponExpiredOrmoney_money\(decimal Value\) : CouponExpiredOrmoney;/,
+      /public sealed record moneyOrCouponExpired_money\(decimal Value\) : moneyOrCouponExpired;/,
     );
     expect(union!).toMatch(
-      /public sealed record CouponExpiredOrmoney_CouponExpired\([^)]*\) : CouponExpiredOrmoney;/,
+      /public sealed record moneyOrCouponExpired_CouponExpired\([^)]*\) : moneyOrCouponExpired;/,
     );
   });
 });
