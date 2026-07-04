@@ -141,3 +141,20 @@ describe("Angular store lifetime ladder", () => {
     expect(m).toContain('window.addEventListener("popstate"');
   });
 });
+
+// Regression: a money store field lowers to `Decimal`, so a declared money
+// literal must be constructed (`new Decimal(...)`), not assigned raw to the
+// `signal<Decimal>` (a TS2322).  Scalar-only showcases don't cover it.
+describe("Angular store — money field init", () => {
+  it("constructs a Decimal for a money field default", async () => {
+    const m = (
+      await angularFiles(`
+      store Filt persist: local {
+        state { category: string = ""  minPrice: money = 0.00 }
+        action setCat(c: string) { category := c }
+      }
+      page P { route: "/p" body: Heading { Filt.category, level: 1 } }`)
+    ).get("web/src/app/stores/filt.store.ts")!;
+    expect(m).toContain('readonly minPrice = signal<Decimal>(new Decimal("0.00"));');
+  });
+});

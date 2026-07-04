@@ -95,7 +95,15 @@ function storeFieldTsType(type: TypeIR): string {
  *  the type's zero value (`[]` for arrays, `defaultInitForJs` for scalars). */
 function storeFieldInit(field: StateFieldIR): string {
   const lit = field.init !== undefined ? renderInitLiteral(field.init) : undefined;
-  if (lit !== undefined) return lit;
+  if (lit !== undefined) {
+    // A money field lowers to `Decimal`, so a numeric `= 0.00` literal must be
+    // constructed, not assigned raw (a bare number would be a TS2322 against
+    // the `signal<Decimal>`).
+    if (field.type.kind === "primitive" && field.type.name === "money") {
+      return `new Decimal(${JSON.stringify(lit)})`;
+    }
+    return lit;
+  }
   if (field.type.kind === "array") return "[]";
   return defaultInitForJs(field.type);
 }
