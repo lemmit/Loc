@@ -230,13 +230,24 @@ function problemImports(refersTo: (n: string) => boolean): string | null {
  *  (which registers the shared component); `install_openapi` re-keys
  *  the content to application/problem+json — and routes that declare
  *  their own 422 here suppress FastAPI's auto HTTPValidationError. */
-export function errorResponsesKwarg(kind: OpErrorKind, guarded = false): string {
-  const statuses = errorStatuses(kind, guarded);
+export function errorResponsesKwarg(
+  kind: OpErrorKind,
+  guarded = false,
+  extra: number[] = [],
+): string {
+  const statuses = [...new Set([...errorStatuses(kind, guarded), ...extra])].sort((a, b) => a - b);
   if (statuses.length === 0) return "";
   const entries = statuses.map(
     (st) => `${st}: {"model": ProblemDetails, "description": "${problemTitle(st)}"}`,
   );
   return `, responses={${entries.join(", ")}}`;
+}
+
+/** A versioned aggregate's `update` declares 409 (stale `If-Match` →
+ *  optimistic-concurrency conflict), mirroring the Hono / .NET / Phoenix /
+ *  Java contract so the conformance error-response dimension compares equal. */
+function versionedConflictStatuses(agg: EnrichedAggregateIR, op: OperationIR): number[] {
+  return op.name === "update" && aggregateIsVersioned(agg) ? [409] : [];
 }
 
 /** `{id}` path-param annotation carrying the uuid format every backend
@@ -788,7 +799,7 @@ function operationRoute(
     if (usesUser) callArgs.push("current_user");
     const vsave = versionedSave(agg);
     return lines(
-      `@router.post("/{id}/${opSnake}", response_model=None, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op))})`,
+      `@router.post("/{id}/${opSnake}", response_model=None, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), versionedConflictStatuses(agg, op))})`,
       `async def ${snake(op.name)}_${snake(agg.name)}(${ID_PARAM}, body: ${upperFirst(op.name)}${agg.name}Request, request: Request, session: SessionDep) -> dict[str, object] | JSONResponse:`,
       usesUser || stampUpdateUsesUser
         ? "    current_user: User = request.state.current_user"
@@ -827,7 +838,7 @@ function operationRoute(
   if (usesUser) callArgs.push("current_user");
   const vsave = versionedSave(agg);
   return lines(
-    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op))})`,
+    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), versionedConflictStatuses(agg, op))})`,
     `async def ${snake(op.name)}_${snake(agg.name)}(${opSig}) -> Response:`,
     usesUser || stampUpdateUsesUser ? "    current_user: User = request.state.current_user" : null,
     "    repo = _repo(session)",
@@ -877,7 +888,7 @@ function externRoute(
   );
   const vsave = versionedSave(agg);
   return lines(
-    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op))})`,
+    `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op), versionedConflictStatuses(agg, op))})`,
     `async def ${snake(op.name)}_${snake(agg.name)}(${sig}) -> Response:`,
     usesUser || stampUpdateUsesUser ? "    current_user: User = request.state.current_user" : null,
     "    repo = _repo(session)",

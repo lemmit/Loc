@@ -49,6 +49,7 @@ import {
   opWorkflowInstanceById,
   opWorkflowInstances,
 } from "../../../ir/util/openapi-ids.js";
+import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { defaultErrorStatus } from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { findUnionSpec, unionMembers } from "../../_payload/union-wire.js";
@@ -591,7 +592,10 @@ function renderApiSpec(
             }`
                 : `204 => %OpenApiSpex.Response{description: "No Content"}`
             }${errorResponseEntries("operation", schemasModule, operationIsGuarded(op))}${
-              op.when
+              // A `when` state gate OR a versioned aggregate's `update` (stale
+              // `If-Match` → optimistic-concurrency conflict) declares 409,
+              // mirroring the Hono / .NET contract.
+              op.when || (op.name === "update" && aggregateIsVersioned(agg))
                 ? `,
             409 => %OpenApiSpex.Response{
               description: "Conflict",

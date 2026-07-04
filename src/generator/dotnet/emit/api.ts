@@ -66,6 +66,9 @@ export interface ControllerShape {
      *  action and emits the side-effect-free `GET {id}/can_<op>` companion
      *  returning `CanResponse { allowed }` (criterion.md use site 2). */
     whenGated?: boolean;
+    /** A versioned aggregate's `update` → declares 409 (stale `If-Match`
+     *  optimistic-concurrency conflict), mirroring the Hono contract. */
+    versionedUpdate?: boolean;
     /** Exception-less return-typed op: the Domain-union → HTTP translation spec.
      *  When set, the action returns the mapped ProblemDetails / wire DTO instead
      *  of 204 (exception-less.md). */
@@ -393,7 +396,10 @@ export function renderOperationActionBlock(
   // DTO (cast to the polymorphic base so it serializes with the `type` tag).
   const ru = op.returnUnion;
   const STD = new Set<number>([400, 422, 404, ...(op.guarded ? [403] : [])]);
-  const when409 = op.whenGated ? ["    [ProducesResponseType(typeof(ProblemDetails), 409)]"] : [];
+  const when409 =
+    op.whenGated || op.versionedUpdate
+      ? ["    [ProducesResponseType(typeof(ProblemDetails), 409)]"]
+      : [];
   const responseDecls = ru
     ? [
         `    [ProducesResponseType(typeof(${ru.appNs}.${ru.unionName}), 200)]`,
