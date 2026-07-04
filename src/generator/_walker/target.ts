@@ -162,14 +162,14 @@ export interface VariantMatchSpec {
   resultType?: string;
   /** The discriminant arms, in source order. */
   arms: readonly VariantMatchArm[];
-  /** The wire tag of the union's single error variant (v1 scope: at most one
-   *  error variant per union — multi-error is a documented follow-up).  Present
-   *  ⇒ the target reifies a caught `ApiError` into `{ ...body, type: <errorTag> }`
-   *  (the backend intercepts the error variant into an RFC-7807 ProblemDetails
-   *  whose `type` is overwritten with the error URI, so the tag is re-stamped as
-   *  a static literal).  Undefined ⇒ the union has no error variant, so there is
-   *  nothing to reify (the try/catch may be omitted). */
-  errorTag?: string;
+  /** The union's error variants, in source order — each `{ tag, uri }` pairing a
+   *  wire tag with the RFC-7807 ProblemDetails `type` URI the backend stamps for
+   *  it.  Present (length ≥ 1) ⇒ the target reifies a caught `ApiError` back into
+   *  the variant: with one error it re-stamps the known tag; with N it maps the
+   *  caught `type` URI to the matching tag (the tag is clobbered to the URI on the
+   *  wire, but the fields survive).  Empty/undefined ⇒ no error variant, nothing
+   *  to reify (the try/catch is omitted). */
+  errorVariants?: readonly { tag: string; uri: string }[];
   /** Pre-rendered `else`-arm body statements (the `match … { … else => … }`
    *  fallthrough), or undefined when the source had no `else`. */
   elseBody?: readonly string[];

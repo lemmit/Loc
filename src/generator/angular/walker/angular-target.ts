@@ -24,6 +24,7 @@ import {
   lowerFirstName,
   referencesIdent,
   renderJsMatch,
+  renderJsVariantMatch,
   upperFirstName,
 } from "../../_walker/js-target-helpers.js";
 import type {
@@ -444,50 +445,12 @@ export const angularTarget: WalkerTarget = {
    *  unchanged.  walker-core resolved every piece — this only assembles the
    *  skeleton. */
   renderVariantMatch(spec: VariantMatchSpec): string {
-    const resultType = spec.resultType ?? "{ type: string }";
     const mutate = spec.mutationVar
       ? `this.${spec.mutationVar}.mutateAsync(${spec.mutateArgs})`
       : // Degenerate: no detected remote op (walker-core still delegates so the
         // statement is never dropped) — leave a typed placeholder await.
         `Promise.reject(new Error("no remote op for variant-match"))`;
-    const out: string[] = [];
-    out.push("{");
-    if (spec.errorTag !== undefined) {
-      // Reify the intercepted error variant: the backend maps it to an RFC-7807
-      // ProblemDetails whose `type` is the error URI, but the variant's own
-      // fields survive — so spread the body and re-stamp the known tag.
-      out.push(`  let result: ${resultType};`);
-      out.push(`  try {`);
-      out.push(`    result = await ${mutate};`);
-      out.push(`  } catch (e) {`);
-      out.push(`    if (e instanceof ApiError) {`);
-      out.push(
-        `      result = { ...(e.body as Record<string, unknown>), type: ${JSON.stringify(spec.errorTag)} } as ${resultType};`,
-      );
-      out.push(`    } else {`);
-      out.push(`      throw e;`);
-      out.push(`    }`);
-      out.push(`  }`);
-    } else {
-      out.push(`  const result = await ${mutate};`);
-    }
-    out.push(`  switch (result.type) {`);
-    for (const arm of spec.arms) {
-      out.push(`    case ${JSON.stringify(arm.tag)}: {`);
-      if (arm.binding) out.push(`      const ${arm.binding} = result;`);
-      for (const s of arm.body) out.push(`      ${s}`);
-      out.push(`      break;`);
-      out.push(`    }`);
-    }
-    if (spec.elseBody) {
-      out.push(`    default: {`);
-      for (const s of spec.elseBody) out.push(`      ${s}`);
-      out.push(`      break;`);
-      out.push(`    }`);
-    }
-    out.push(`  }`);
-    out.push("}");
-    return out.join("\n");
+    return renderJsVariantMatch(spec, mutate);
   },
 
   // `renderStoreModule` is intentionally NOT implemented on `angularTarget`:

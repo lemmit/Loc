@@ -10,6 +10,7 @@
 // byte-identity gates pin this.
 
 import type { TypeIR } from "../../ir/types/loom-ir.js";
+import type { VariantMatchSpec } from "./target.js";
 
 /** Hook local-variable name: `customerAll`, `orderCreate`. */
 export function hookVarName(aggregate: string, op: string): string {
@@ -156,4 +157,70 @@ function pluralName_(s: string): string {
  *  safe without escaping. */
 export function referencesIdent(code: string, ident: string): boolean {
   return new RegExp(`\\b${ident}\\b`).test(code);
+}
+
+/** Render a `match await` variant-match body — the shared JS-family shape the
+ *  four JSX/markup targets (React / Vue / Svelte / Angular) all emit.  Only the
+ *  awaited `mutate` expression differs per framework (e.g. Angular's `this.`
+ *  prefix), so the caller passes it in; everything else — the error reification
+ *  envelope and the discriminant `switch` — is identical.
+ *
+ *  Error reification: a returning op's error variant reaches the client as a
+ *  thrown `ApiError` whose RFC-7807 ProblemDetails `type` is the error URI (the
+ *  variant tag is clobbered), but its fields survive.  With ONE error variant we
+ *  re-stamp its known tag; with N, we map the caught `type` URI back to the
+ *  matching variant tag (a `uri === … ? tag : …` chain, falling back to the last
+ *  tag) so every named error arm routes correctly. */
+export function renderJsVariantMatch(spec: VariantMatchSpec, mutate: string): string {
+  const resultType = spec.resultType ?? "{ type: string }";
+  const errs = spec.errorVariants ?? [];
+  const lines: string[] = [];
+  lines.push("{");
+  if (errs.length > 0) {
+    lines.push(`  let result: ${resultType};`);
+    lines.push(`  try {`);
+    lines.push(`    result = await ${mutate};`);
+    lines.push(`  } catch (e) {`);
+    lines.push(`    if (e instanceof ApiError) {`);
+    if (errs.length === 1) {
+      lines.push(
+        `      result = { ...(e.body as Record<string, unknown>), type: ${JSON.stringify(errs[0]!.tag)} } as ${resultType};`,
+      );
+    } else {
+      // Map the ProblemDetails `type` URI back to the matching variant tag.
+      const chain =
+        errs
+          .slice(0, -1)
+          .map((v) => `__t === ${JSON.stringify(v.uri)} ? ${JSON.stringify(v.tag)}`)
+          .join(" : ") + ` : ${JSON.stringify(errs[errs.length - 1]!.tag)}`;
+      lines.push(`      const __t = (e.body as Record<string, unknown>)?.type;`);
+      lines.push(`      const __tag = ${chain};`);
+      lines.push(
+        `      result = { ...(e.body as Record<string, unknown>), type: __tag } as ${resultType};`,
+      );
+    }
+    lines.push(`    } else {`);
+    lines.push(`      throw e;`);
+    lines.push(`    }`);
+    lines.push(`  }`);
+  } else {
+    lines.push(`  const result = await ${mutate};`);
+  }
+  lines.push(`  switch (result.type) {`);
+  for (const arm of spec.arms) {
+    lines.push(`    case ${JSON.stringify(arm.tag)}: {`);
+    if (arm.binding) lines.push(`      const ${arm.binding} = result;`);
+    for (const s of arm.body) lines.push(`      ${s}`);
+    lines.push(`      break;`);
+    lines.push(`    }`);
+  }
+  if (spec.elseBody) {
+    lines.push(`    default: {`);
+    for (const s of spec.elseBody) lines.push(`      ${s}`);
+    lines.push(`      break;`);
+    lines.push(`    }`);
+  }
+  lines.push(`  }`);
+  lines.push("}");
+  return lines.join("\n");
 }

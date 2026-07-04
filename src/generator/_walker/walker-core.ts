@@ -64,6 +64,7 @@ import type {
   UiApiParamIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
+import { errorTypeUri } from "../../util/error-defaults.js";
 import { WALKER_LAYOUT_PRIMITIVES } from "../../util/walker-primitive-names.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { tryDetectApiHook } from "./api-hook-detector.js";
@@ -1606,8 +1607,14 @@ function emitVariantMatch(
     if (armCtx !== ctx) propagateSinkFlags(armCtx, ctx);
     return { tag, binding: arm.binding, body, isError: isErrorTag(tag, arm.isError) };
   });
-  const errorArm = arms.find((a) => a.isError);
-  if (errorArm) addPageImport(ctx, "../api/client", "ApiError");
+  // All error arms (not just the first) — each paired with the RFC-7807 `type`
+  // URI the backend stamps, so a multi-error reify can map the caught URI back to
+  // the matching variant tag.  `errorTypeUri` is the shared derivation every
+  // backend's ProblemDetails translator uses, so the client map stays in sync.
+  const errorVariants = arms
+    .filter((a) => a.isError)
+    .map((a) => ({ tag: a.tag, uri: errorTypeUri(a.tag) }));
+  if (errorVariants.length > 0) addPageImport(ctx, "../api/client", "ApiError");
   const elseBody = stmt.elseBody?.map((s) => emitStmt(s, ctx));
 
   return ctx.target.renderVariantMatch({
@@ -1615,7 +1622,7 @@ function emitVariantMatch(
     mutateArgs,
     resultType,
     arms: arms.map(({ tag, binding, body }) => ({ tag, binding, body })),
-    errorTag: errorArm?.tag,
+    errorVariants,
     elseBody,
   });
 }

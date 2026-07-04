@@ -19,9 +19,14 @@
 > assigns per variant; the success variant is the aggregate's own type, so the
 > error variant is re-classified from the tag (the lowered `isError` hint is
 > unreliable from a UI body). Compiled by the `vanilla-match-await` fixture under
-> `mix compile --warnings-as-errors`. **Remaining:** the `await`-required flip
-> (step 2), `spawn` / `onError` / `attempt {}` sugar (step 3), `async`-keyword
-> composition (step 4), and multi-error-variant reification. Split
+> `mix compile --warnings-as-errors`. **Error variants are now nameable + fully
+> reified** — a context-local `error` type resolves in a match-await arm (scoped
+> to the payload/error decls of the contexts the ui's `api X: Y` handles bind to,
+> not globally, so it doesn't leak across contexts), and the JS reify maps the
+> caught ProblemDetails `type` URI back to the matching tag so EVERY named error
+> arm routes (N-error, not just one). **Remaining:** the `await`-required flip
+> (step 2), `spawn` / `onError` / `attempt {}` sugar (step 3), and `async`-keyword
+> composition (step 4). Split
 > out of [`named-actions-and-stores.md`](named-actions-and-stores.md) ("Proposal A")
 > because the async surface **changes call semantics** (a remote call must be
 > marked) — it depends on Proposal A, Stage 1.
