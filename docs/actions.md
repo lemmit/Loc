@@ -1,0 +1,183 @@
+# Actions & effects — `action`, `match await`, error handling
+
+A page or component `action` is a **named event handler**: a block of statements
+wired to a control (`onClick: submit`). Actions come in two flavours — a **sync**
+action that only touches local `state` (Proposal A, Stage 1), and an **async**
+action that invokes a remote command and discriminates its result with
+`match await` (Stage 2 of [`docs/proposals/async-actions-and-effects.md`](proposals/async-actions-and-effects.md)).
+
+This page is the user-facing reference; the design rationale lives in the
+proposals. As always in Loom, every feature carries **two** examples — the `.ddd`
+source and the generated target output.
+
+## Named actions (sync)
+
+```ddd
+page Counter {
+  route: "/"
+  state { count: int = 0 }
+  action inc() { count += 1 }
+  body: Stack {
+    Heading { "Counter" },
+    Button { "＋", onClick: inc }
+  }
+}
+```
+
+A named `action` hoists to one handler per framework (React `const inc = …`,
+LiveView `handle_event("inc", …)`), referenced by name from the control. A bare
+`onClick: e => { count += 1 }` inline lambda works too; the named form is for
+reuse and readability.
+
+## `match await` — awaiting a remote command
+
+When an action needs to run a remote, `Result`-returning aggregate operation
+(one declared `operation foo(): Agg or SomeError`), it **awaits** the call as the
+subject of a `match` and discriminates the returned union:
+
+```ddd
+error Rejected { reason: string }
+
+aggregate Order {
+  code: string
+  operation confirm(): Order or Rejected { … }
+}
+
+page OrderDetail {
+  route: "/orders/:id"
+  state { message: string = "" }
+  action confirm() {
+    match await Orders.Order.confirm() {
+      Order o    => { message := o.code }
+      Rejected r => { message := r.reason }
+    }
+  }
+  body: Stack { Button { "Confirm", onClick: confirm } }
+}
+```
+
+- The subject is `await <api>.<Agg>.<op>(args)` — an instance operation, so it is
+  invoked against the page's **route-id record** (a detail page).
+- Each arm names a **variant** of the op's `or`-union: the **success** variant is
+  the aggregate itself (`Order`); the rest are **error** variants.
+- Arm bodies run statements (state writes, `navigate`), binding the narrowed
+  variant (`o`, `r`).
+- An `else` arm is the catch-all; it may replace the error arms entirely if you
+  don't need to distinguish them.
+
+### Generated output — client-side (React/Vue/Svelte/Angular)
+
+The JS frontends run the async boundary in the browser: await the mutation, reify
+a thrown `ApiError` back into the error variant, then `switch` on the tag.
+
+```tsx
+const confirm = async () => {
+  let result: ConfirmOrderResponse;
+  try {
+    result = await orderConfirm.mutateAsync({});
+  } catch (e) {
+    if (e instanceof ApiError) {
+      result = { ...(e.body as Record<string, unknown>), type: "Rejected" } as ConfirmOrderResponse;
+    } else { throw e; }
+  }
+  switch (result.type) {
+    case "Order":    { const o = result; setMessage(o.code); break; }
+    case "Rejected": { const r = result; setMessage(r.reason); break; }
+  }
+};
+```
+
+The backend maps an error variant to an RFC-7807 ProblemDetails whose `type` is
+the error URI (the tag is clobbered), but the fields survive — so the caught body
+is re-stamped with the known tag.
+
+### Generated output — server-side (Phoenix / HEEx)
+
+LiveView's async boundary is **server-side**: the `handle_event` loads the record,
+runs the op's context function, and `case`s on the tagged Result tuple — no HTTP
+round-trip, no reification.
+
+```elixir
+def handle_event("confirm", _params, socket) do
+  socket =
+    socket
+    |> then(fn socket ->
+      case Orders.get_order(socket.assigns.id) do
+        {:ok, record} ->
+          case apply(Orders, :confirm_order, [record, %{}]) do
+            {:ok, o}                 -> socket |> assign(:message, o.code)
+            {:error, "Rejected", r}  -> socket |> assign(:message, r.reason)
+            _                        -> socket
+          end
+        {:error, :not_found} ->
+          put_flash(socket, :error, "Order not found")
+      end
+    end)
+  {:noreply, socket}
+end
+```
+
+## Multiple error variants
+
+A union may declare more than one error. Each named arm routes independently: the
+client maps the caught ProblemDetails `type` URI back to the matching tag.
+
+```ddd
+operation confirm(): Order or Rejected or Blocked { … }
+
+action confirm() {
+  match await Orders.Order.confirm() {
+    Order o    => { message := o.code }
+    Rejected r => { message := r.reason }
+    Blocked b  => { message := "blocked" }
+  }
+}
+```
+
+```tsx
+} catch (e) {
+  if (e instanceof ApiError) {
+    const __t = (e.body as Record<string, unknown>)?.type;
+    const __tag = __t === "/errors/rejected" ? "Rejected" : "Blocked";
+    result = { ...(e.body as Record<string, unknown>), type: __tag } as ConfirmOrderResponse;
+  } else { throw e; }
+}
+```
+
+On HEEx each variant is its own `case` clause (`{:error, "Rejected", r}`,
+`{:error, "Blocked", _b}`; an unused binder is `_`-prefixed for
+`--warnings-as-errors`).
+
+### Naming a context-local error
+
+An `error` declared inside a `context` is **context-scoped** — it is not exported
+globally (so it can't collide across contexts). It is still nameable in a
+match-await arm **when the page's `api X: Y` handle binds the context that owns
+it** — the page can only match errors from contexts it actually talks to. An error
+from an unbound context does not resolve.
+
+## The effect marker
+
+A **bare** (un-`await`ed) remote mutating call in an action body has an invisible
+async boundary. The validator flags it — `loom.missing-effect-marker` (a warning
+during the Stage-2 ramp) — pointing you at the `match await` form:
+
+```ddd
+action confirm() {
+  Orders.Order.confirm()          // ⚠ loom.missing-effect-marker
+}
+```
+
+Reads (`byId`, finders), sibling-action calls, pure helpers, and view-effects
+(`navigate` / `toast`) are **not** flagged.
+
+## Further reading
+
+- [`docs/page-metamodel.md`](page-metamodel.md) — the page/component DSL surface,
+  `state`, `match`, block-body lambdas.
+- [`docs/payloads.md`](payloads.md) — `error` records, the `or`-union carrier, the
+  ProblemDetails wire.
+- [`docs/proposals/async-actions-and-effects.md`](proposals/async-actions-and-effects.md),
+  [`named-actions-and-stores.md`](proposals/named-actions-and-stores.md) — design
+  rationale and the remaining stages (`await`-required flip, `spawn` / `attempt`,
+  `async` composition).
