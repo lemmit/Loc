@@ -62,6 +62,7 @@ import {
 } from "../../../ir/util/openapi-ids.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
+import { aggregateIsEventSourced } from "../../../ir/util/resolve-datasource.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { walkExpr } from "../../../ir/validate/checks/shared.js";
 import type {
@@ -154,10 +155,10 @@ export function buildRoutesFile(
       : `import type { ${agg.name}Repository } from "../db/repositories/${lowerFirst(agg.name)}-repository";`,
   );
   lines.push(`import * as Ids from "../domain/ids";`);
-  // `ConcurrencyError` only when this aggregate is `versioned` — a
+  // `ConcurrencyError` only when this aggregate is `versioned` OR event-sourced — a
   // non-versioned aggregate's route file stays byte-identical.
   lines.push(
-    aggregateIsVersioned(agg)
+    aggregateIsVersioned(agg) || aggregateIsEventSourced(agg)
       ? `import { DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, ExternHandlerError, ConcurrencyError } from "../domain/errors";`
       : `import { DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, ExternHandlerError } from "../domain/errors";`,
   );
@@ -778,9 +779,11 @@ export function buildRoutesFile(
   // status as the `when` state-gate and 23505 arms above but a DISTINCT log
   // event (`conflict`, not `disallowed`) so a dashboard can separate a stale
   // write from a uniqueness clash or a state-gate refusal.  Gated on the
-  // aggregate declaring `versioned` so a non-versioned model emits
-  // byte-identically — only such a table's save ever throws ConcurrencyError.
-  if (aggregateIsVersioned(agg)) {
+  // aggregate declaring `versioned` OR being event-sourced so a plain model
+  // emits byte-identically — only such a table's save ever throws
+  // ConcurrencyError (the guarded write's stale-write rejection, or the
+  // event-log append's `(stream_id, version)` 23505 collision).
+  if (aggregateIsVersioned(agg) || aggregateIsEventSourced(agg)) {
     lines.push(`    if (err instanceof ConcurrencyError) {`);
     lines.push(
       `      ${renderHonoLogCall("conflict", `aggregate: "${agg.name}", message: err.message, status: 409`)}`,

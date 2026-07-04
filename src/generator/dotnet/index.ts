@@ -14,6 +14,7 @@ import { aggHasAuditedTarget } from "../../ir/util/audit-capability.js";
 import { durableEventTypes } from "../../ir/util/channels.js";
 import { isTpcBase, isTphBase, tableOwnerName, tphConcretesOf } from "../../ir/util/inheritance.js";
 import {
+  aggregateIsEventSourced,
   effectiveSavingShape,
   isDocumentShaped,
   isEmbeddedShaped,
@@ -431,12 +432,22 @@ function emitProjectFromContexts(
   // key — a unique-free project stays byte-identical (strict additivity).
   const hasUniqueKeys = merged.aggregates.some((a) => (a.uniqueKeys?.length ?? 0) > 0);
   // Only emit the optimistic-concurrency (DbUpdateConcurrencyException → 409)
-  // arm when some in-scope aggregate declares the `versioned` capability — a
-  // version-free project stays byte-identical.
-  const hasVersioned = merged.aggregates.some(aggregateIsVersioned);
+  // arm when some in-scope aggregate declares the `versioned` capability OR is
+  // event-sourced — the EF event-store append translates a `(stream_id,
+  // version)` 23505 collision into DbUpdateConcurrencyException, the same
+  // exception the guarded write's stale-write raises.  A project with neither
+  // stays byte-identical.
+  const hasConcurrency = merged.aggregates.some(
+    (a) => aggregateIsVersioned(a) || aggregateIsEventSourced(a),
+  );
   out.set(
     "Api/DomainExceptionFilter.cs",
-    renderExceptionFilter(ns, { usesValidators, usingDapper, hasUniqueKeys, hasVersioned }),
+    renderExceptionFilter(ns, {
+      usesValidators,
+      usingDapper,
+      hasUniqueKeys,
+      hasVersioned: hasConcurrency,
+    }),
   );
   out.set("Api/ProblemDetailsResponsesFilter.cs", renderProblemDetailsFilter(ns));
   out.set(

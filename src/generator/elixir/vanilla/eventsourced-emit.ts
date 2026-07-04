@@ -352,6 +352,16 @@ defmodule ${repoMod} do
       {:ok, _} -> :ok
       {:error, reason} -> {:error, reason}
     end
+  rescue
+    e in Postgrex.Error ->
+      # The (stream_id, version) PK rejected a duplicate append: a competing write
+      # won the version race (unique_violation, SQLSTATE 23505).  That IS the event
+      # stream's optimistic-concurrency control — surface it as {:error, :conflict}
+      # → HTTP 409 (parity with the \`versioned\` guarded write's stale-write).
+      case e do
+        %Postgrex.Error{postgres: %{code: :unique_violation}} -> {:error, :conflict}
+        _ -> reraise(e, __STACKTRACE__)
+      end
   end${findBlock}
 
 ${typeClauses}
@@ -528,6 +538,14 @@ export function renderEsController(
     ? `
   defp command_error(conn, :forbidden) do
     ProblemDetails.problem_response(conn, 403, "Forbidden", "Operation not permitted")
+  end
+
+  # A concurrent append lost the (stream_id, version) race — the append-only PK
+  # rejected the duplicate (unique_violation, 23505), which the repository
+  # rescued to {:error, :conflict}.  Map to the distinct 409 conflict responder
+  # (parity with the \`versioned\` capability's stale-write → 409).
+  defp command_error(conn, :conflict) do
+    ProblemDetails.conflict_response(conn)
   end
 
   defp command_error(conn, _reason) do

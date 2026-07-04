@@ -854,7 +854,21 @@ export function renderEventSourcedRepositoryImpl(
       "                    OccurredAt = DateTime.UtcNow,",
       "                });",
       "            }",
-      "            await _db.SaveChangesAsync(cancellationToken);",
+      // The (stream_id, version) PK IS the event stream's optimistic-concurrency
+      // control: a competing append that read the same Max(Version) inserts the
+      // same version and loses with a Postgres 23505.  EF surfaces it as a
+      // DbUpdateException with a PostgresException inner; translate it to the EF
+      // concurrency exception the DomainExceptionFilter maps to 409 (parity with
+      // the `versioned` guarded write's stale-write rejection).
+      "            try",
+      "            {",
+      "                await _db.SaveChangesAsync(cancellationToken);",
+      "            }",
+      "            catch (Microsoft.EntityFrameworkCore.DbUpdateException __ex)",
+      '                when (__ex.InnerException is Npgsql.PostgresException { SqlState: "23505" })',
+      "            {",
+      '                throw new Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException("The resource was modified by another request; reload and retry.", __ex);',
+      "            }",
       "        }",
       `        ${renderDotnetLogCall("repositorySave", [
         { name: "aggregate", valueExpr: `"${agg.name}"` },

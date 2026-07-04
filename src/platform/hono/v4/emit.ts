@@ -70,6 +70,7 @@ import {
 } from "../../../ir/util/inheritance.js";
 import { contextsHaveProvenancedField } from "../../../ir/util/prov-id.js";
 import {
+  aggregateIsEventSourced,
   effectiveSavingShape,
   resolveDataSourceConfig,
 } from "../../../ir/util/resolve-datasource.js";
@@ -368,9 +369,14 @@ export function generateTypeScriptForContexts(
   if (servicesFile) out.set("domain/services.ts", servicesFile);
   out.set("domain/events.ts", renderEvents(merged));
   // `ConcurrencyError` only when some aggregate in this deployable declares
-  // `versioned` — mirrors the emitProvenance / emitAudit presence-gating
-  // above so a concurrency-free project's errors file stays byte-identical.
-  const emitConcurrency = merged.aggregates.some(aggregateIsVersioned);
+  // `versioned` OR is event-sourced — mirrors the emitProvenance / emitAudit
+  // presence-gating above so a concurrency-free project's errors file stays
+  // byte-identical.  An event-sourced aggregate's append site throws
+  // `ConcurrencyError` on a `(stream_id, version)` 23505 collision, so it needs
+  // the same error class + 409 arm the `versioned` guarded write does.
+  const emitConcurrency = merged.aggregates.some(
+    (a) => aggregateIsVersioned(a) || aggregateIsEventSourced(a),
+  );
   out.set("domain/errors.ts", errorsTs(emitConcurrency));
   out.set("http/problem-details.ts", PROBLEM_DETAILS_TS);
   if (emitProvenance) out.set("domain/provenance.ts", PROVENANCE_TS);

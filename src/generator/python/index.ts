@@ -8,7 +8,11 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import { durableEventTypes } from "../../ir/util/channels.js";
-import { effectiveSavingShape, resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
+import {
+  aggregateIsEventSourced,
+  effectiveSavingShape,
+  resolveDataSourceConfig,
+} from "../../ir/util/resolve-datasource.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
@@ -214,7 +218,14 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
 
   out.set("app/domain/__init__.py", "");
   out.set("app/domain/ids.py", renderPyIds(merged));
-  out.set("app/domain/errors.py", errorsPy(merged.aggregates.some(aggregateIsVersioned)));
+  // `ConcurrencyError` (+ its 409 handler) rides on either the `versioned`
+  // guarded write's stale-write rejection or an event-sourced aggregate's
+  // append-time `(stream_id, version)` 23505 collision — a concurrency-free app
+  // omits both and stays byte-identical.
+  const hasConcurrency = merged.aggregates.some(
+    (a) => aggregateIsVersioned(a) || aggregateIsEventSourced(a),
+  );
+  out.set("app/domain/errors.py", errorsPy(hasConcurrency));
   out.set("app/domain/value_objects.py", renderPyEnumsAndValueObjects(merged));
   out.set("app/domain/events.py", renderPyEvents(merged));
 
@@ -259,7 +270,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     renderProblemPy(
       collectOpUnions([merged]),
       merged.aggregates.some((a) => (a.uniqueKeys?.length ?? 0) > 0),
-      merged.aggregates.some(aggregateIsVersioned),
+      hasConcurrency,
     ),
   );
   out.set("app/http/wire_models.py", renderPyWireModels(merged));
