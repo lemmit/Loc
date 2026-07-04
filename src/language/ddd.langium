@@ -280,8 +280,20 @@ Resource:
         ('isolationLevel' ':' isolationLevel=IsolationLevel ','?)?
         ('readonly'       ':' readonly?='true' ','?)?
         ('shape'          ':' shape=SavingShape ','?)?
+        ('index' ':' '[' indexes+=IndexSpec (',' indexes+=IndexSpec)* ','? ']' ','?)?
         ('config' ':' '{' (config+=ConfigEntry (',' config+=ConfigEntry)* ','?)? '}' ','?)?
     '}';
+
+// A manual performance index on the storage binding (uniqueness-and-indexes.md
+// §3.2, D-INDEX-INFRA) — pure infrastructure, never on the aggregate.  The
+// target entity is named EXPLICITLY (`Project.name`), never inferred from
+// which table happens to own the column — the binding knows the context's
+// shape, so the index says which entity it is on.  `Entity.col` is a
+// single-column index; `Entity.(a, b)` a composite.  The entity may be an
+// aggregate OR one of its contained parts (an inner entity's own table).
+// Always non-unique (uniqueness is the domain `unique (...)` invariant).
+IndexSpec:
+    entity=ID '.' ('(' columns+=LooseName (',' columns+=LooseName)* ')' | columns+=LooseName);
 
 DataSourceKind returns string:
     'state' | 'eventLog' | 'snapshot' | 'cache' | 'replica'

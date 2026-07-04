@@ -6,8 +6,16 @@
 > `softDeletable`) across every DB backend, the per-backend 23505 → 409
 > conflict mapping, and the validators (`loom.unique-unknown-field`,
 > `-duplicate-column`, `-collection-field`, `-valueobject-field`,
-> `-on-event-sourced`, `-missing-tenant-scope`). Slice 2 (auto-derived finder
-> indexes + the `resource index:` escape hatch) is still open. This doc scopes
+> `-on-event-sourced`, `-missing-tenant-scope`). The **`resource index:`**
+> manual escape hatch (§3.2) also ships with EXPLICIT entity qualification:
+> `index: [Project.name, Project.(active, sequence), Line.sku]` derives
+> non-unique `<table>_<cols>_idx` indexes (`Entity.col` = single-column,
+> `Entity.(a, b)` = composite) on the named entity's table — an aggregate root
+> or a contained part (inner entity) — never inferred from which table happens
+> to own a column.  Gated to `kind: state`, validated by
+> `loom.resource-index-non-state` / `-unknown-entity` / `-unknown-column`. The
+> remaining open piece of slice 2 is **auto-derived finder indexes** (indexing
+> `find ... where` columns automatically). This doc scopes
 > a Loomish, DDD-clean way to express database-level **uniqueness** and
 > **indexes**, and is explicit about how each is *enforced* (the DB),
 > *scoped* (tenancy), and *derived* (the compiler), so the design survives

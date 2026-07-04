@@ -712,7 +712,7 @@ system DevPlatform {
     }
 
     // ----- DataSources: per-(context, kind) bindings to physical storages -----
-    resource catalogState  { for: Catalog, kind: state, use: primarySql }
+    resource catalogState  { for: Catalog, kind: state, use: primarySql, index: [Project.visibility, Project.(active, sequence)] }
     resource catalogCache  { for: Catalog, kind: cache, use: hotCache }
     resource buildsState   { for: Builds,  kind: state, use: primarySql }
     resource peopleState   { for: People,  kind: state, use: primarySql }

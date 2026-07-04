@@ -8,6 +8,7 @@ import type {
   EntityPartIR,
   FieldIR,
   IdValueType,
+  ManualIndexIR,
   SavingShape,
   SubdomainIR,
   SystemIR,
@@ -33,7 +34,11 @@ import {
   tableOwnerName,
   tphConcretesOf,
 } from "../ir/util/inheritance.js";
-import { effectiveSavingShape, resolveDataSourceConfig } from "../ir/util/resolve-datasource.js";
+import {
+  effectiveSavingShape,
+  resolveDataSourceConfig,
+  resolveDataSourceForAggregate,
+} from "../ir/util/resolve-datasource.js";
 import {
   isValueCollectionType,
   type ValueCollectionIR,
@@ -87,6 +92,16 @@ export function schemaFromModule(
    *  finding 16). */
   schemaOf: (agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR) => string | undefined = () =>
     undefined,
+  /** Manual performance indexes for an aggregate — the `index: [...]` specs
+   *  on its (context, state) storage binding (uniqueness-and-indexes.md §3.2).
+   *  Each entry names its target entity + columns.  `buildMigrations` passes a
+   *  binding-aware resolver; defaults to none so schema-only unit tests keep
+   *  their legacy output.  Applied to the spec's explicitly-named entity table
+   *  (aggregate root or contained part). */
+  manualIndexesOf: (
+    agg: EnrichedAggregateIR,
+    ctx: EnrichedBoundedContextIR,
+  ) => readonly ManualIndexIR[] = () => [],
 ): SchemaSnapshot {
   const tables: TableShape[] = [];
   const aggPairs = collectAggregatePairs(module);
@@ -177,6 +192,11 @@ export function schemaFromModule(
     if (schema !== undefined) {
       for (const t of produced) t.schema = schema;
     }
+    // Manual performance indexes (`resource index: [...]`): place each index
+    // on its EXPLICITLY-named entity's table (an aggregate root or a contained
+    // part).  A spec whose entity isn't one of this aggregate's tables belongs
+    // to a sibling aggregate — skipped here, applied on its own iteration.
+    applyManualIndexes(produced, manualIndexesOf(agg, ctxFor(agg)));
     tables.push(...produced);
   }
   // Persisted workflow-correlation state tables (workflow-and-applier.md A2-S2):
@@ -784,7 +804,14 @@ export function buildMigrations(
       agg: EnrichedAggregateIR,
       ctx: EnrichedBoundedContextIR,
     ): string | undefined => resolveDataSourceConfig(agg, ctx, sys)?.schema;
-    const next = schemaFromModule(m, shapeOf, schemaOf);
+    // Binding-aware manual-index resolver: the `index: [...]` specs on the
+    // aggregate's (context, state) storage binding.
+    const manualIndexesOf = (
+      agg: EnrichedAggregateIR,
+      ctx: EnrichedBoundedContextIR,
+    ): readonly ManualIndexIR[] =>
+      resolveDataSourceForAggregate(agg, ctx, sys)?.manualIndexes ?? [];
+    const next = schemaFromModule(m, shapeOf, schemaOf, manualIndexesOf);
     const baseline = snapshots.read(m.name);
     const steps = applyDestructivePolicy(diffSchema(baseline, next), baseline, {
       allowDestructive,
@@ -856,6 +883,24 @@ function collectAggregatePairs(module: EnrichedSubdomainIR): AggCtxPair[] {
  *  pure function of the table + columns (uniqueness-and-indexes.md §4). */
 export function uniqueIndexName(tableName: string, columns: readonly string[]): string {
   return `${tableName}_${columns.join("_")}_uq`;
+}
+
+/** Attach each manual `index: [...]` spec to its EXPLICITLY-named entity's
+ *  table (uniqueness-and-indexes.md §3.2) — the entity resolves to
+ *  `plural(snake(entity))`, matching an aggregate root or a contained-part
+ *  table among the ones this aggregate produced.  A spec whose entity isn't in
+ *  `tables` is skipped (a sibling aggregate owns it).  Non-unique, named
+ *  `<table>_<cols>_idx`; deduped against an existing index of the same name. */
+function applyManualIndexes(tables: readonly TableShape[], specs: readonly ManualIndexIR[]): void {
+  for (const spec of specs) {
+    const target = plural(snake(spec.entity));
+    const table = tables.find((t) => t.name === target);
+    if (!table) continue;
+    const columns = spec.columns.map((c) => snake(c));
+    const name = `${table.name}_${columns.join("_")}_idx`;
+    if (table.indexes.some((i) => i.name === name)) continue;
+    table.indexes.push({ name, table: table.name, columns, unique: false });
+  }
 }
 
 /** Derive the DB unique index for each `unique (...)` declaration on the

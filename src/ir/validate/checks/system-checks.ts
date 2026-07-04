@@ -2035,8 +2035,69 @@ export function validateResourceConfig(sys: SystemIR, diags: LoomDiagnostic[]): 
   }
   for (const r of sys.dataSources) {
     const sourceType = storageType.get(r.storageName);
-    if (!sourceType) continue;
-    checkConfigBlock(r.config, sourceType, `resource '${r.name}'`, false, sys.name, diags);
+    if (sourceType) {
+      checkConfigBlock(r.config, sourceType, `resource '${r.name}'`, false, sys.name, diags);
+    }
+    validateManualIndexes(r, sys, diags);
+  }
+}
+
+/** `resource index: [...]` checks (uniqueness-and-indexes.md §3.2): a manual
+ *  index needs a relational table to sit on (so it is gated to `kind: state`),
+ *  and each column must resolve to a field on some aggregate in the binding's
+ *  `for:` context. */
+function validateManualIndexes(
+  r: SystemIR["dataSources"][number],
+  sys: SystemIR,
+  diags: LoomDiagnostic[],
+): void {
+  if (!r.manualIndexes || r.manualIndexes.length === 0) return;
+  const label = `resource '${r.name}'`;
+  if (r.kind !== "state") {
+    diags.push({
+      severity: "error",
+      code: "loom.resource-index-non-state",
+      message: `${label}: \`index:\` needs a relational table to sit on, so it is only valid on a \`kind: state\` binding (this is \`kind: ${r.kind}\`).`,
+      source: `${sys.name}/${label}`,
+    });
+    return;
+  }
+  // Entity (aggregate or contained part) → its field names, for every entity in
+  // the binding's context.  `index: Project.name` names the entity explicitly,
+  // so the column resolves against THAT entity, not any table that has the name.
+  const fieldsByEntity = new Map<string, Set<string>>();
+  for (const sub of sys.subdomains) {
+    for (const ctx of sub.contexts) {
+      if (ctx.name !== r.contextName) continue;
+      for (const agg of ctx.aggregates) {
+        fieldsByEntity.set(agg.name, new Set(agg.fields.map((f) => f.name)));
+        for (const part of agg.parts) {
+          fieldsByEntity.set(part.name, new Set(part.fields.map((f) => f.name)));
+        }
+      }
+    }
+  }
+  for (const spec of r.manualIndexes) {
+    const fields = fieldsByEntity.get(spec.entity);
+    if (!fields) {
+      diags.push({
+        severity: "error",
+        code: "loom.resource-index-unknown-entity",
+        message: `${label}: \`index:\` targets '${spec.entity}', which is not an aggregate or contained part in context '${r.contextName}'.`,
+        source: `${sys.name}/${label}`,
+      });
+      continue;
+    }
+    for (const col of spec.columns) {
+      if (!fields.has(col)) {
+        diags.push({
+          severity: "error",
+          code: "loom.resource-index-unknown-column",
+          message: `${label}: \`index:\` references '${spec.entity}.${col}', but '${col}' is not a field on '${spec.entity}'.`,
+          source: `${sys.name}/${label}`,
+        });
+      }
+    }
   }
 }
 
