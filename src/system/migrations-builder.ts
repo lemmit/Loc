@@ -918,7 +918,9 @@ function withTenantIndex(agg: AggregateIR, tables: TableShape[]): TableShape[] {
   if (!(agg.capabilities?.includes("tenantOwned") ?? false)) return tables;
   for (const t of tables) {
     if (!t.columns.some((c) => c.name === "tenant_id")) continue;
-    const already = t.indexes.some((ix) => ix.columns.length === 1 && ix.columns[0] === "tenant_id");
+    const already = t.indexes.some(
+      (ix) => ix.columns.length === 1 && ix.columns[0] === "tenant_id",
+    );
     if (already) continue;
     t.indexes.push({
       name: `${t.name}_tenant_id_idx`,
