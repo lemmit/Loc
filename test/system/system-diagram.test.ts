@@ -119,4 +119,20 @@ describe("deployment.mmd", () => {
     for (const m of sys.subdomains) expect(out).toContain(`📦 ${m.name}`);
     expect(renderDeploymentDiagram(sys).endsWith("\n")).toBe(true);
   });
+
+  it("defines every context node an edge references (no dangling ctx_* nodes)", async () => {
+    const sys = (await build("examples/acme.ddd")).systems[0]!;
+    const out = buildDeploymentDiagram(sys);
+    // Nodes DEFINED: `ctx_X["📁 …"]`.  Nodes REFERENCED by an edge: `--> ctx_X`.
+    const defined = new Set([...out.matchAll(/(ctx_[A-Za-z0-9_]+)\[/g)].map((m) => m[1]));
+    const referenced = new Set(
+      [...out.matchAll(/\|serves\| (ctx_[A-Za-z0-9_]+)/g)].map((m) => m[1]),
+    );
+    expect(referenced.size).toBeGreaterThan(0);
+    for (const ref of referenced) expect(defined).toContain(ref);
+    // Ownership is visible: each subdomain-owned context nests under its 📦.
+    for (const m of sys.subdomains) {
+      for (const ctx of m.contexts) expect(out).toContain(`📁 ${ctx.name}`);
+    }
+  });
 });

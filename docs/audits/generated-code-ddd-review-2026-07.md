@@ -414,14 +414,21 @@ honest `datasources.md` unused-flags.
 3. **Artifacts overstate or misdraw the architecture** (all fixable now):
    `likec4.ts` hand-freezes `PERSISTENT = new Set(["node","dotnet","elixir","java"])`
    — **`pythonApi → db` edge silently missing** (the "derive, don't stamp"
-   anti-pattern; derive from the registry's `needsDb`); `deployment.mmd` emits
+   anti-pattern; derive from the registry's `needsDb`) [✅ FIXED — `likec4.ts`
+   now derives persistence from `descriptorFor(d.platform).needsDb`, so every
+   DB-backed backend incl. python wires its `db` edge]; `deployment.mmd` emits
    module nodes and edges to `ctx_*` nodes it never defines (the one diagram
-   whose job is module→context ownership doesn't show it); frontend deployables
+   whose job is module→context ownership doesn't show it) [✅ FIXED — `mermaid.ts`
+   now defines each context node nested under its owning subdomain 📦 and draws
+   `serves` edges, so no edge dangles]; frontend deployables
    inherit the backend's `moduleNames` (enrichment #4) and so claim contexts
-   they never touch; `asyncapi.yaml` says `transport: hotCache` while compose
+   they never touch [still open — enrichment change]; `asyncapi.yaml` says
+   `transport: hotCache` while compose
    provisions no redis and no backend has a redis client (the `channelSource`
    binding is silently inert — mark it `declared, not provisioned` until
-   brokers land); the saga's `archival_tracker_events` table escapes to
+   brokers land) [✅ FIXED — a bound transport now carries
+   `transportStatus: "declared, not provisioned"`]; the saga's
+   `archival_tracker_events` table escapes to
    `public` instead of `catalog.`; `wire-spec.json` keys aggregates by bare
    name (two contexts with a same-named aggregate would collide).
 4. **Naming drifts across layers**: migrations say subdomain

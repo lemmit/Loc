@@ -8,7 +8,6 @@ import type {
   FunctionIR,
   OperationIR,
   ParamIR,
-  SubdomainIR,
   SystemIR,
   TypeIR,
   ValueObjectIR,
@@ -550,9 +549,42 @@ export function buildDeploymentDiagram(sys: SystemIR): string {
     return lines(...head, `  none["No deployables declared in this system."]`);
   }
 
-  const modules: string[] = sys.subdomains.map(
-    (m: SubdomainIR) => `  ${nid("mod", m.name)}["📦 ${label(m.name)}"]`,
-  );
+  // Every context referenced anywhere — owned by a subdomain and/or served by
+  // a deployable.  DEFINE these nodes: the deployable→context edges below used
+  // to point at `ctx_*` ids that were never declared, so the one diagram whose
+  // job is module→context ownership silently rendered bare auto-nodes and never
+  // showed the ownership at all.
+  const ownedByModule = new Map<string, string[]>();
+  const definedCtx = new Set<string>();
+  for (const m of sys.subdomains) {
+    const owned = m.contexts.map((c) => c.name);
+    ownedByModule.set(m.name, owned);
+    for (const c of owned) definedCtx.add(c);
+  }
+  for (const d of sys.deployables) {
+    for (const ctx of d.contextNames) definedCtx.add(ctx);
+  }
+
+  // Domain group: each subdomain (📦) with the contexts (📁) it owns nested
+  // inside, so subdomain→context ownership reads off the diagram directly.
+  const domain: string[] = [`  subgraph domain["🗂️ Domain"]`, `    direction TB`];
+  const ungrouped = new Set(definedCtx);
+  for (const m of sys.subdomains) {
+    domain.push(`    subgraph ${nid("mod", m.name)}["📦 ${label(m.name)}"]`);
+    domain.push(`      direction TB`);
+    for (const ctx of ownedByModule.get(m.name) ?? []) {
+      domain.push(`      ${nid("ctx", ctx)}["📁 ${label(ctx)}"]`);
+      ungrouped.delete(ctx);
+    }
+    domain.push(`    end`);
+  }
+  // Contexts served by a deployable but not owned by any subdomain — still
+  // define them so the served-by edge lands on a real node.
+  for (const ctx of ungrouped) {
+    domain.push(`    ${nid("ctx", ctx)}["📁 ${label(ctx)}"]`);
+  }
+  domain.push(`  end`);
+
   const cluster: string[] = [
     `  subgraph deployables["🚀 Deployables"]`,
     `    direction TB`,
@@ -567,13 +599,13 @@ export function buildDeploymentDiagram(sys: SystemIR): string {
   const known = new Set(sys.deployables.map((d) => d.name));
   for (const d of sys.deployables) {
     for (const ctx of d.contextNames)
-      edges.push(`  ${nid("deploy", d.name)} --> ${nid("ctx", ctx)}`);
+      edges.push(`  ${nid("deploy", d.name)} -->|serves| ${nid("ctx", ctx)}`);
     if (d.targetName && known.has(d.targetName)) {
       edges.push(`  ${nid("deploy", d.name)} -.->|calls| ${nid("deploy", d.targetName)}`);
     }
   }
 
-  return lines(...head, modules, cluster, edges);
+  return lines(...head, domain, cluster, edges);
 }
 
 // ===========================================================================

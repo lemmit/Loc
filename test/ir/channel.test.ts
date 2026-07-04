@@ -64,5 +64,9 @@ describe("channel lowering", () => {
     expect(yaml).toContain("retention: log");
     expect(yaml).toContain('"OrderPlaced":');
     expect(yaml).toContain('transport: "eventLog"');
+    // A bound transport is DECLARED, not provisioned (no broker/redis is
+    // emitted or compose-provisioned) — the artifact must say so, not imply
+    // a live hop.
+    expect(yaml).toContain('transportStatus: "declared, not provisioned"');
   });
 });

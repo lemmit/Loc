@@ -1,4 +1,5 @@
 import type { DeployableIR, SystemIR } from "../ir/types/loom-ir.js";
+import { descriptorFor } from "../platform/metadata.js";
 import { lines } from "../util/code-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -19,13 +20,11 @@ import { lines } from "../util/code-builder.js";
 // in the LikeC4 CLI / VS Code extension.
 // ---------------------------------------------------------------------------
 
-// Backends that own persistence — used to wire database relationships.
-const PERSISTENT: ReadonlySet<DeployableIR["platform"]> = new Set([
-  "node",
-  "dotnet",
-  "elixir",
-  "java",
-]);
+// Whether a deployable owns persistence — derived from the platform
+// registry's `needsDb`, NOT a hand-frozen set (derive, don't stamp).
+// A stamped list silently omits new DB backends: it had dropped the
+// `pythonApi → db` edge because `python` was never added to it.
+const persists = (d: DeployableIR): boolean => descriptorFor(d.platform).needsDb;
 
 // LikeC4 identifiers: word chars, not starting with a digit.
 function cid(name: string): string {
@@ -37,7 +36,7 @@ const quote = (s: string): string => `'${s.replace(/'/g, "\\'")}'`;
 
 export function buildC4Model(sys: SystemIR): string {
   const sysId = cid(sys.name);
-  const hasBackend = sys.deployables.some((d) => PERSISTENT.has(d.platform));
+  const hasBackend = sys.deployables.some((d) => persists(d));
   const known = new Set(sys.deployables.map((d) => d.name));
 
   const containers = sys.deployables.flatMap((d) => container(d));
@@ -47,7 +46,7 @@ export function buildC4Model(sys: SystemIR): string {
     if (d.targetName && known.has(d.targetName)) {
       rels.push(`    ${cid(d.name)} -> ${cid(d.targetName)} 'calls'`);
     }
-    if (PERSISTENT.has(d.platform) && hasBackend) {
+    if (persists(d) && hasBackend) {
       rels.push(`    ${cid(d.name)} -> db 'reads / writes'`);
     }
   }
@@ -142,7 +141,7 @@ export interface C4Spec {
 
 export function buildC4Spec(sys: SystemIR): C4Spec {
   const sysId = cid(sys.name);
-  const hasBackend = sys.deployables.some((d) => PERSISTENT.has(d.platform));
+  const hasBackend = sys.deployables.some((d) => persists(d));
   const known = new Set(sys.deployables.map((d) => d.name));
 
   const children: C4SpecNode[] = sys.deployables.map((d) => ({
@@ -167,7 +166,7 @@ export function buildC4Spec(sys: SystemIR): C4Spec {
     if (d.targetName && known.has(d.targetName)) {
       relationships.push({ source: from, target: `${sysId}.${cid(d.targetName)}`, label: "calls" });
     }
-    if (PERSISTENT.has(d.platform) && hasBackend) {
+    if (persists(d) && hasBackend) {
       relationships.push({ source: from, target: `${sysId}.db`, label: "reads / writes" });
     }
   }
