@@ -18,9 +18,18 @@
 > `StoreIR.lifetime`). React/Vue/Svelte/Angular emit all four tiers —
 > `local`/`session` via each framework's storage idiom (Zustand `persist`
 > middleware / hand-rolled `watch`/`$effect`/`effect` write-back; money fields
-> revived to `Decimal`), `url` via a **router-agnostic** bidirectional sync (a
-> typed untrusted-input decoder seeds from the query string, `history.replaceState`
-> mirrors changes back, `popstate` re-decodes). **LiveView is memory-only** —
+> revived to `Decimal`), `url` via a bidirectional sync with a typed
+> untrusted-input decoder — bound to **each framework's own router where a
+> module-level store can reach it**: **Angular** → native `Router`/
+> `ActivatedRoute` (`queryParamMap` ↔ `Router.navigate(...merge, replaceUrl)`);
+> **Svelte** → SvelteKit's router (reactive `page` from `$app/state` ↔
+> `goto(...replaceState)`); both observe every navigation and stay consistent
+> with the framework's history. **React and Vue** use `window.location` +
+> `history.replaceState` + `popstate` — deliberately, since react-router's
+> `useSearchParams` and vue-router's `useRoute` are component-scoped hooks a
+> module-store singleton cannot call (its one limitation: in-app `pushState`
+> link navigations aren't observed — only back/forward + manual edits — fine
+> for store-driven filter state). **LiveView is memory-only** —
 > `local`/`session`/`url` are gated by `loom.store-lifetime-liveview-unsupported`
 > (a server-side struct has no browser storage; URL state is the page's
 > `handle_params`, out of v1 store scope). Two other gates: `loom.store-lifetime-invalid`
