@@ -10,7 +10,7 @@ import { generateDotnet } from "../generator/dotnet/index.js";
 import { enrichLoomModel } from "../ir/enrich/enrichments.js";
 import { lowerModel, lowerProject } from "../ir/lower/lower.js";
 import type { EnrichedLoomModel, TestOutcome } from "../ir/types/loom-ir.js";
-import { validateLoomModel } from "../ir/validate/validate.js";
+import { indexSuggestions, validateLoomModel } from "../ir/validate/validate.js";
 import { createDddServices } from "../language/ddd-module.js";
 import type { Model } from "../language/generated/ast.js";
 import { applyPatches, type ModelPatch } from "../language/model-patch.js";
@@ -143,6 +143,20 @@ async function runParse(file: string) {
   const result = await parseFile(file);
   printDiagnostics(result);
   if (result.errorCount > 0) process.exit(1);
+  // AST is clean → run the advisory index-suggestion lint (uniqueness-and-
+  // indexes.md §11) and print it in its own footer.  These are HINTS, not
+  // validation: never fail the parse, and kept out of the correctness
+  // `validateLoomModel` gate.  Defensive: a throw in lower/enrich is swallowed
+  // (the AST result already printed).
+  try {
+    const hints = indexSuggestions(enrichLoomModel(lowerModel(result.model)));
+    if (hints.length > 0) {
+      console.error(`\nSuggestions (${hints.length}):`);
+      for (const d of hints) console.error(`  ${d.source}: ${d.message}`);
+    }
+  } catch {
+    // IR lowering can throw on shapes the AST validator doesn't gate.
+  }
   console.log(`OK: ${file}`);
 }
 

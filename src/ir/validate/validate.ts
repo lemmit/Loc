@@ -78,6 +78,9 @@ import {
 // and firstNonQueryableNode (in checks/shared) are re-exported here so existing
 // importers of "./validate.js" are unaffected.
 export type { LoomDiagnostic } from "./checks/diagnostic.js";
+// Advisory index-suggestion lint (uniqueness-and-indexes.md §11) — a SEPARATE
+// pass from the correctness gate, opted into by the lint surfaces (CLI/LSP).
+export { indexSuggestions } from "./checks/index-suggestion-checks.js";
 export { firstNonQueryableNode } from "./checks/shared.js";
 
 // ---------------------------------------------------------------------------

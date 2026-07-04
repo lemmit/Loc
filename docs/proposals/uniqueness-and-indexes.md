@@ -388,21 +388,30 @@ loom.index-suggestion — 'Customer.email' is filtered by find 'byEmail' but has
 no index. Consider `index: Customer.email` on resource 'ordState'.
 ```
 
-### 11.6 Delivery — hints, not a CI gate
+### 11.6 Delivery — a SEPARATE pass, not the correctness gate  ✅ SHIPPED
 
-Index suggestions are advice; they must not fail `generate`/CI like a real
-`warning` can. Two options (pick at build):
+Suggestions are *advice*, not validation. Grounding the design surfaced two
+facts: `validateLoomModel` is the correctness gate consumed by `generate` and
+by ~every "no diagnostics" test, and the CLI's `generate`/`parse` paths don't
+even print IR-level warnings today (`generate` prints diagnostics only on an
+error; `parse` runs only the AST validator). So folding suggestions into
+`validateLoomModel` as `warning`s both (a) conflated "your model is wrong" with
+"here's a perf idea" and (b) failed every consumer that asserts a clean
+diagnostic set — the wrong architecture.
 
-- **(a) opt-in surface** — emit as `warning` but only collected by
-  `ddd parse --lint` and the LSP, filtered out of the generate/CI diagnostic
-  set; **or**
-- **(b) a `"hint"` severity tier** on `LoomDiagnostic` (today `error |
-  warning`) — the CLI prints hints under a `Suggestions:` footer, CI ignores
-  them, the LSP renders them as `DiagnosticSeverity.Hint`.
+**Shipped:** a SEPARATE `indexSuggestions(loom): LoomDiagnostic[]` pass, kept
+out of `validateLoomModel` entirely, opted into by the lint surface:
 
-**Recommendation:** (b) — a first-class `hint` tier is reusable (future
-"consider a composite", "this find is unindexed *and* unsorted") and keeps the
-generate gate clean by construction.
+- `ddd parse` runs it after a clean AST parse and prints a dedicated
+  `Suggestions (N):` footer; it never changes the exit code (advice, not a
+  gate). `generate` never calls it — the build stays clean by construction.
+- `indexSuggestions` is exported from `validate.ts`, so the LSP / playground
+  can opt in and render each as `DiagnosticSeverity.Hint` (follow-up wiring).
+
+This needed no `"hint"` severity tier and no change to the shared
+`LoomDiagnostic` type — the "separate pass" seam gives the non-gating,
+low-noise behavior for free. (A `hint` tier stays an option if a future
+consumer wants suggestions co-mingled in one diagnostic stream.)
 
 ### 11.7 MVP scope (slice 3)
 
