@@ -106,11 +106,23 @@ The migration stays `create table(:orders) do add :data, :map; add :version …`
    jsonb keys + the response JSON are byte-identical to today (snake keys in the
    blob, camelCase on the wire, enum declared-casing, `@primary_key false` so no
    `id` leaks into embeds). The §14/§15 tests + a boot are the gate.
-2. **Value objects.** Converging `this.money.amount` onto the relational renderer
-   (`record.subtotal.amount` = struct-dot) requires VOs to be `embeds_one`
-   embedded schemas, **not** `:map` (a `:map` is a string-keyed map → `.amount`
-   raises `BadMapError` at runtime). This is a change the relational path may also
-   want; scope it to document if relational VO-subfield support differs.
+2. **Value objects — CONFIRMED, and it exposes a latent relational bug.**
+   Verified 2026-07-04: the **relational** path already stores VOs as
+   `field :subtotal, :map` and renders `this.subtotal.amount` as
+   `record.subtotal.amount` — **struct-dot access on a string-keyed map, which
+   `BadMapError`s at runtime** (it compiles; the failure is boot-only). So
+   relational VO-subfield reads are silently broken today, while the shipped
+   *document* map path (`data["subtotal"]["amount"]`) handles them correctly.
+   Consequence: converging document naively onto the relational renderer would
+   **regress** VO-subfield reads. The fix is to make VOs `embeds_one` embedded
+   schemas (so `record.subtotal` is a `%Money{}` struct and `.amount` is real
+   struct access) — which also fixes the latent relational bug if applied there.
+   This is **net-new VO-module emission** (VOs are `:map` everywhere today, no VO
+   struct module exists) and is the reason slice 1 is bigger than it looks.
+   Options: (a) emit a document-local VO embedded schema and converge document
+   only; (b) make VOs `embeds_one` across the elixir backend (fixes relational
+   too, but touches the heavily-tested relational path). Recommend (a) first,
+   file (b) as a separate correctness fix.
 3. **Inbound key normalization (§15).** `cast_embed` casts by field atom; incoming
    camelCase (`itemCount`) must be snake-normalized before the cast, per the
    nested-changeset convention (#1632). Reuse it.
