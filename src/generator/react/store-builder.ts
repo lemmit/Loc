@@ -19,12 +19,18 @@
 //     clear: () => set(() => ({ lines: [] })),
 //   }));
 //
-// This module is React-only.  The fan-out frontends (Vue/Svelte/Angular) wire
-// their own store-module emitters; their `WalkerTarget.renderStoreModule`
-// throws loudly until ported (the IR validator already gates LiveView).
+// This module is React-only.  The other frontends (Vue/Svelte/Angular) wire
+// their own store-module emitters with the same lifetime ladder; LiveView is
+// memory-only (gated by `loom.store-lifetime-liveview-unsupported`).
+//
+// The `lifetime` ladder (frontend-state-management.md §3.1): `memory` (default)
+// is the plain `create(...)` below; `persistLocal`/`persistSession` wrap it in
+// the Zustand `persist` middleware over `localStorage`/`sessionStorage`; `url`
+// makes the query string the source of truth via a typed untrusted-input
+// decoder + `history.replaceState` mirror + `popstate` re-decode.
 // ---------------------------------------------------------------------------
 
-import type { ActionIR, StoreIR, TypeIR } from "../../ir/types/loom-ir.js";
+import type { ActionIR, StateFieldIR, StoreIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { upperFirst } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
@@ -159,16 +165,80 @@ function renderStoreAction(action: ActionIR, fieldNames: ReadonlySet<string>): s
   return `${action.name}: (${param}) => { ${stmts.join(" ")} }`;
 }
 
-/** Render the full Zustand store module for a `StoreIR`. */
+/** The set of money-typed **top-level** field names — the keys a persisted or
+ *  URL-synced store must revive back into `Decimal` (JSON/query strings carry
+ *  them as plain strings).  Nested money (inside an array/entity) is a
+ *  documented v1 limitation of the persisted/URL tiers. */
+function moneyFieldNames(store: StoreIR): string[] {
+  return store.state
+    .filter((f) => f.type.kind === "primitive" && f.type.name === "money")
+    .map((f) => f.name);
+}
+
+/** A URL query param decodes as an untrusted string → the field's typed value,
+ *  defaulting on anything unparseable (frontend-state-management.md §3.1).  One
+ *  decode expression per field, read from a `URLSearchParams` named `p`. */
+function decodeFieldFromParam(field: StateFieldIR): string {
+  const key = JSON.stringify(field.name);
+  const t = field.type;
+  if (t.kind === "primitive") {
+    switch (t.name) {
+      case "int":
+      case "long":
+      case "decimal":
+        return `p.has(${key}) && Number.isFinite(Number(p.get(${key}))) ? Number(p.get(${key})) : ${storeFieldInit(t)}`;
+      case "money":
+        return `p.has(${key}) && p.get(${key})!.match(/^-?\\d+(\\.\\d+)?$/) ? new Decimal(p.get(${key})!) : ${storeFieldInit(t)}`;
+      case "bool":
+        return `p.get(${key}) === "true"`;
+      default:
+        return `p.get(${key}) ?? ${storeFieldInit(t)}`;
+    }
+  }
+  // ids/enums decode as bare strings (enum membership is not re-checked here;
+  // an off-set value is harmless client filter state, re-validated server-side).
+  if (t.kind === "id" || t.kind === "enum") return `p.get(${key}) ?? ${storeFieldInit(t)}`;
+  // Arrays / entities / anything structural are not URL-encodable in v1 — the
+  // validator (loom.store-url-field-unsupported) blocks them, so this is a
+  // defensive default only.
+  return storeFieldInit(t);
+}
+
+/** Serialise a field back into the query string (`p.set` / `p.delete`), keyed
+ *  by the field name; empty/default values are dropped so the URL stays clean. */
+function encodeFieldToParam(field: StateFieldIR): string {
+  const key = JSON.stringify(field.name);
+  const t = field.type;
+  const ref = `s.${field.name}`;
+  if (t.kind === "primitive" && t.name === "money") {
+    return `if (${ref} != null) p.set(${key}, ${ref}.toString()); else p.delete(${key});`;
+  }
+  if (t.kind === "primitive" && t.name === "bool") {
+    return `if (${ref}) p.set(${key}, "true"); else p.delete(${key});`;
+  }
+  if (t.kind === "primitive" && (t.name === "int" || t.name === "long" || t.name === "decimal")) {
+    // A number always serialises — `0` is a real value, not "empty".  (A
+    // `!== ""` guard here would be a `number`-vs-`string` TS2367 comparison.)
+    return `p.set(${key}, String(${ref}));`;
+  }
+  // string / id / enum — drop the param when empty so the URL stays clean.
+  return `if (${ref} !== "") p.set(${key}, ${ref}); else p.delete(${key});`;
+}
+
+/** Render the full Zustand store module for a `StoreIR`, honouring its
+ *  lifetime (frontend-state-management.md §3.1):
+ *   - `memory`  → a plain `create(...)`.
+ *   - `persistLocal` / `persistSession` → the Zustand `persist` middleware over
+ *     `localStorage` / `sessionStorage` (money fields revived via a reviver).
+ *   - `url` → a router-agnostic bidirectional sync: seed from the query string
+ *     via a typed untrusted-input decoder, and mirror every change back with
+ *     `history.replaceState`, re-decoding on `popstate`. */
 export function renderZustandStoreModule(store: StoreIR): string {
   const fieldNames = new Set(store.state.map((f) => f.name));
   const stateType = upperFirst(store.name) + "State";
   const hook = storeHookName(store.name);
-
-  // Whether any field is a money type — drives the `Decimal` import.
-  const needsDecimal = store.state.some(
-    (f) => f.type.kind === "primitive" && f.type.name === "money",
-  );
+  const needsDecimal = moneyFieldNames(store).length > 0;
+  const moneyKeys = moneyFieldNames(store);
 
   const interfaceLines = [
     ...store.state.map((f) => `  ${f.name}: ${storeFieldTsType(f.type)};`),
@@ -178,18 +248,69 @@ export function renderZustandStoreModule(store: StoreIR): string {
       return `  ${a.name}: (${paramSig}) => void;`;
     }),
   ];
+  const actionEntries = store.actions.map((a) => `  ${renderStoreAction(a, fieldNames)},`);
 
-  const bodyEntries = [
-    ...store.state.map((f) => `  ${f.name}: ${storeFieldInit(f.type)},`),
-    ...store.actions.map((a) => `  ${renderStoreAction(a, fieldNames)},`),
-  ];
+  if (store.lifetime === "url") {
+    return renderUrlStoreModule(
+      store,
+      stateType,
+      hook,
+      needsDecimal,
+      interfaceLines,
+      actionEntries,
+    );
+  }
+
+  const stateEntries = store.state.map((f) => `  ${f.name}: ${storeFieldInit(f.type)},`);
+  const bodyEntries = [...stateEntries, ...actionEntries];
+
+  if (store.lifetime === "persistLocal" || store.lifetime === "persistSession") {
+    const backing = store.lifetime === "persistLocal" ? "localStorage" : "sessionStorage";
+    // Money fields serialise to strings in JSON; a keyed reviver reconstructs
+    // the `Decimal` on load (top-level money fields — nested money is a
+    // documented v1 limitation of the persisted tier).
+    const storageArg = needsDecimal
+      ? [
+          `      storage: createJSONStorage(() => ${backing}, {`,
+          `        reviver: (key, value) =>`,
+          `          ${JSON.stringify(moneyKeys)}.includes(key) && typeof value === "string"`,
+          `            ? new Decimal(value)`,
+          `            : value,`,
+          `      }),`,
+        ]
+      : [`      storage: createJSONStorage(() => ${backing}),`];
+    return lines(
+      `import { create } from "zustand";`,
+      `import { persist, createJSONStorage } from "zustand/middleware";`,
+      needsDecimal ? `import Decimal from "decimal.js";` : undefined,
+      "",
+      `// Shared client-side state container generated from \`store ${store.name}\`.`,
+      `// Persisted to ${backing} (\`persist: ${store.lifetime === "persistLocal" ? "local" : "session"}\`) — survives ${store.lifetime === "persistLocal" ? "a browser restart" : "reload, cleared with the tab"}.`,
+      `export interface ${stateType} {`,
+      ...interfaceLines,
+      `}`,
+      "",
+      `export const ${hook} = create<${stateType}>()(`,
+      `  persist(`,
+      `    (set) => ({`,
+      ...bodyEntries.map((l) => `    ${l}`),
+      `    }),`,
+      `    {`,
+      `      name: ${JSON.stringify(`loom.store.${store.name}`)},`,
+      ...storageArg,
+      `    },`,
+      `  ),`,
+      `);`,
+      "",
+    );
+  }
 
   return lines(
     `import { create } from "zustand";`,
     needsDecimal ? `import Decimal from "decimal.js";` : undefined,
     "",
     `// Shared client-side state container generated from \`store ${store.name}\`.`,
-    `// In-memory (session-volatile) — Loom v1 stores carry no persistence.`,
+    `// In-memory (\`persist: memory\`, the default) — survives navigation, dies on reload.`,
     `export interface ${stateType} {`,
     ...interfaceLines,
     `}`,
@@ -197,6 +318,60 @@ export function renderZustandStoreModule(store: StoreIR): string {
     `export const ${hook} = create<${stateType}>((set) => ({`,
     ...bodyEntries,
     `}));`,
+    "",
+  );
+}
+
+/** The `url` lifetime: the query string is the source of truth, decoded through
+ *  a typed untrusted-input decoder and mirrored back on every change. */
+function renderUrlStoreModule(
+  store: StoreIR,
+  stateType: string,
+  hook: string,
+  needsDecimal: boolean,
+  interfaceLines: string[],
+  actionEntries: string[],
+): string {
+  const stateFieldNames = store.state.map((f) => f.name);
+  const stateSlice = `Pick<${stateType}, ${stateFieldNames.map((n) => JSON.stringify(n)).join(" | ")}>`;
+  return lines(
+    `import { create } from "zustand";`,
+    needsDecimal ? `import Decimal from "decimal.js";` : undefined,
+    "",
+    `// Shared client-side state container generated from \`store ${store.name}\`.`,
+    `// Synced to the URL query string (\`persist: url\`) — shareable, deep-linkable,`,
+    `// back/forward-navigable.  The URL is untrusted input: each field is decoded`,
+    `// through its declared type and defaulted on anything unparseable.`,
+    `export interface ${stateType} {`,
+    ...interfaceLines,
+    `}`,
+    "",
+    `function decodeFromUrl(): ${stateSlice} {`,
+    `  const p = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);`,
+    `  return {`,
+    ...store.state.map((f) => `    ${f.name}: ${decodeFieldFromParam(f)},`),
+    `  };`,
+    `}`,
+    "",
+    `function encodeToUrl(s: ${stateSlice}): void {`,
+    `  if (typeof window === "undefined") return;`,
+    `  const p = new URLSearchParams(window.location.search);`,
+    ...store.state.map((f) => `  ${encodeFieldToParam(f)}`),
+    `  const qs = p.toString();`,
+    `  window.history.replaceState(null, "", qs ? \`?\${qs}\` : window.location.pathname);`,
+    `}`,
+    "",
+    `export const ${hook} = create<${stateType}>((set) => ({`,
+    `  ...decodeFromUrl(),`,
+    ...actionEntries,
+    `}));`,
+    "",
+    `// store → URL: mirror every change back (replaceState, no history spam).`,
+    `${hook}.subscribe((s) => encodeToUrl(s));`,
+    `// URL → store: re-decode on back/forward and manual address edits.`,
+    `if (typeof window !== "undefined") {`,
+    `  window.addEventListener("popstate", () => ${hook}.setState(decodeFromUrl()));`,
+    `}`,
     "",
   );
 }

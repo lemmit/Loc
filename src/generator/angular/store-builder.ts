@@ -95,7 +95,15 @@ function storeFieldTsType(type: TypeIR): string {
  *  the type's zero value (`[]` for arrays, `defaultInitForJs` for scalars). */
 function storeFieldInit(field: StateFieldIR): string {
   const lit = field.init !== undefined ? renderInitLiteral(field.init) : undefined;
-  if (lit !== undefined) return lit;
+  if (lit !== undefined) {
+    // A money field lowers to `Decimal`, so a numeric `= 0.00` literal must be
+    // constructed, not assigned raw (a bare number would be a TS2322 against
+    // the `signal<Decimal>`).
+    if (field.type.kind === "primitive" && field.type.name === "money") {
+      return `new Decimal(${JSON.stringify(lit)})`;
+    }
+    return lit;
+  }
   if (field.type.kind === "array") return "[]";
   return defaultInitForJs(field.type);
 }
@@ -193,7 +201,67 @@ function renderStoreActionMethod(action: ActionIR, fieldNames: ReadonlySet<strin
   return `  ${action.name}(${paramSig}) { ${stmts.join(" ")} }`;
 }
 
-/** Render the full injectable signal-store module for a `StoreIR`. */
+/** Type zero for a store field — `[]` for arrays, `defaultInitForJs` otherwise.
+ *  Mirrors React's TYPE-based `storeFieldInit` (distinct from this module's
+ *  `storeFieldInit(field)`, which honours a declared `= init` literal).  The
+ *  URL decoder defaults to the type zero, not the literal — byte-for-byte with
+ *  React's `decodeFieldFromParam`. */
+function storeZeroForType(type: TypeIR): string {
+  if (type.kind === "array") return "[]";
+  return defaultInitForJs(type);
+}
+
+/** The money-typed **top-level** field names — the keys a persisted or
+ *  URL-synced store must revive back into `Decimal` (JSON / query strings carry
+ *  them as plain strings).  Byte-for-byte with React's `moneyFieldNames`.
+ *  Nested money (inside an array/entity) is a documented v1 limitation of the
+ *  persisted/URL tiers. */
+function moneyFieldNames(store: StoreIR): string[] {
+  return store.state
+    .filter((f) => f.type.kind === "primitive" && f.type.name === "money")
+    .map((f) => f.name);
+}
+
+/** A URL query param decodes as an untrusted string → the field's typed value,
+ *  defaulting on anything unparseable (frontend-state-management.md §3.1).  One
+ *  decode expression per field, read from a `URLSearchParams` named `p`.
+ *  Byte-for-byte with React's `decodeFieldFromParam`. */
+function decodeFieldFromParam(field: StateFieldIR): string {
+  const key = JSON.stringify(field.name);
+  const t = field.type;
+  if (t.kind === "primitive") {
+    switch (t.name) {
+      case "int":
+      case "long":
+      case "decimal":
+        return `p.has(${key}) && Number.isFinite(Number(p.get(${key}))) ? Number(p.get(${key})) : ${storeZeroForType(t)}`;
+      case "money":
+        return `p.has(${key}) && p.get(${key})!.match(/^-?\\d+(\\.\\d+)?$/) ? new Decimal(p.get(${key})!) : ${storeZeroForType(t)}`;
+      case "bool":
+        return `p.get(${key}) === "true"`;
+      default:
+        return `p.get(${key}) ?? ${storeZeroForType(t)}`;
+    }
+  }
+  // ids/enums decode as bare strings (enum membership is not re-checked here;
+  // an off-set value is harmless client filter state, re-validated server-side).
+  if (t.kind === "id" || t.kind === "enum") return `p.get(${key}) ?? ${storeZeroForType(t)}`;
+  // Arrays / entities / anything structural are not URL-encodable in v1 — the
+  // validator (loom.store-url-field-unsupported) blocks them, so this is a
+  // defensive default only.
+  return storeZeroForType(t);
+}
+
+/** Render the full injectable signal-store module for a `StoreIR`, honouring
+ *  its lifetime (frontend-state-management.md §3.1):
+ *   - `memory`  → a plain `providedIn: "root"` signal service.
+ *   - `persistLocal` / `persistSession` → hydrate the signals from
+ *     `localStorage` / `sessionStorage` in the constructor and mirror every
+ *     change back via an `effect` (money fields revived from string on load).
+ *   - `url` → a native-router bidirectional sync: seed + follow the signals off
+ *     `ActivatedRoute.queryParamMap` (every navigation, not just `popstate`)
+ *     via a typed untrusted-input decoder, and mirror each change back through
+ *     `Router.navigate(..., { queryParamsHandling: "merge", replaceUrl: true })`. */
 export function renderAngularStoreModule(store: StoreIR): string {
   const fieldNames = new Set(store.state.map((f) => f.name));
   const className = storeClassName(store.name);
@@ -208,15 +276,178 @@ export function renderAngularStoreModule(store: StoreIR): string {
   );
   const methodLines = store.actions.map((a) => renderStoreActionMethod(a, fieldNames));
 
+  if (store.lifetime === "url") {
+    return renderUrlStoreModule(store, className, needsDecimal, fieldLines, methodLines);
+  }
+  if (store.lifetime === "persistLocal" || store.lifetime === "persistSession") {
+    return renderPersistStoreModule(store, className, needsDecimal, fieldLines, methodLines);
+  }
+
   return lines(
     `import { Injectable, signal } from "@angular/core";`,
     needsDecimal ? `import Decimal from "decimal.js";` : undefined,
     "",
     `// Shared client-side state container generated from \`store ${store.name}\`.`,
-    `// In-memory (session-volatile) — Loom v1 stores carry no persistence.`,
+    `// In-memory (\`persist: memory\`, the default) — survives navigation, dies on reload.`,
     `@Injectable({ providedIn: "root" })`,
     `export class ${className} {`,
     ...fieldLines,
+    ...methodLines,
+    `}`,
+    "",
+  );
+}
+
+/** The `persistLocal` / `persistSession` lifetimes: hydrate the signals from
+ *  Web Storage in the constructor and write the whole snapshot back on any
+ *  change via an `effect`.  Storage key `"loom.store.<Name>"`; money fields
+ *  serialise to strings in JSON and are revived to `Decimal` on load (mirrors
+ *  React's keyed reviver over the top-level money field names). */
+function renderPersistStoreModule(
+  store: StoreIR,
+  className: string,
+  needsDecimal: boolean,
+  fieldLines: string[],
+  methodLines: string[],
+): string {
+  const backing = store.lifetime === "persistLocal" ? "localStorage" : "sessionStorage";
+  const storageKey = JSON.stringify(`loom.store.${store.name}`);
+  const snapshot = `{ ${store.state.map((f) => `${f.name}: this.${f.name}()`).join(", ")} }`;
+  const hydrateLines = store.state.map((f) => hydrateFieldLine(f));
+
+  return lines(
+    `import { effect, Injectable, signal } from "@angular/core";`,
+    needsDecimal ? `import Decimal from "decimal.js";` : undefined,
+    "",
+    `// Shared client-side state container generated from \`store ${store.name}\`.`,
+    `// Persisted to ${backing} (\`persist: ${store.lifetime === "persistLocal" ? "local" : "session"}\`) — survives ${store.lifetime === "persistLocal" ? "a browser restart" : "reload, cleared with the tab"}.`,
+    `@Injectable({ providedIn: "root" })`,
+    `export class ${className} {`,
+    ...fieldLines,
+    "",
+    `  constructor() {`,
+    `    this.hydrate();`,
+    `    effect(() => {`,
+    `      const raw = JSON.stringify(${snapshot});`,
+    `      if (typeof ${backing} !== "undefined") ${backing}.setItem(${storageKey}, raw);`,
+    `    });`,
+    `  }`,
+    "",
+    `  private hydrate(): void {`,
+    `    if (typeof ${backing} === "undefined") return;`,
+    `    const raw = ${backing}.getItem(${storageKey});`,
+    `    if (raw === null) return;`,
+    `    let parsed: Record<string, unknown>;`,
+    `    try {`,
+    `      parsed = JSON.parse(raw) as Record<string, unknown>;`,
+    `    } catch {`,
+    `      return;`,
+    `    }`,
+    ...hydrateLines,
+    `  }`,
+    ...methodLines,
+    `}`,
+    "",
+  );
+}
+
+/** One hydration statement per field, read out of the parsed `Record<string,
+ *  unknown>`.  Money fields carry as JSON strings and are revived to `Decimal`
+ *  (mirrors React's keyed reviver: string → `new Decimal(v)`, else use the raw
+ *  value); every other field is set with a checked cast to its declared type. */
+function hydrateFieldLine(field: StateFieldIR): string {
+  const key = JSON.stringify(field.name);
+  const t = field.type;
+  if (t.kind === "primitive" && t.name === "money") {
+    return `    if (${key} in parsed) { const v = parsed.${field.name}; this.${field.name}.set(typeof v === "string" ? new Decimal(v) : (v as Decimal)); }`;
+  }
+  return `    if (${key} in parsed) this.${field.name}.set(parsed.${field.name} as ${storeFieldTsType(t)});`;
+}
+
+/** One `<field>: <value | null>` entry for the `Router.navigate` queryParams
+ *  object — the store→URL half of the `url` tier.  `null` drops the param
+ *  (`queryParamsHandling: "merge"` treats a null value as a delete), so the URL
+ *  stays clean.  Runtime-equivalent to `encodeFieldToParamAngular` but shaped as
+ *  an object entry rather than `URLSearchParams` mutations. */
+function encodeFieldToQueryParam(field: StateFieldIR): string {
+  const key = field.name;
+  const ref = `this.${field.name}()`;
+  const t = field.type;
+  if (t.kind === "primitive" && t.name === "money") {
+    return `${key}: ${ref} != null ? ${ref}.toString() : null,`;
+  }
+  if (t.kind === "primitive" && t.name === "bool") {
+    return `${key}: ${ref} ? "true" : null,`;
+  }
+  if (t.kind === "primitive" && (t.name === "int" || t.name === "long" || t.name === "decimal")) {
+    return `${key}: String(${ref}),`;
+  }
+  // string / id / enum — drop the empty-string default.
+  return `${key}: ${ref} !== "" ? ${ref} : null,`;
+}
+
+/** The `url` lifetime: the query string is the source of truth, bound through
+ *  Angular's own router.  `ActivatedRoute.queryParamMap` seeds the signals and
+ *  follows EVERY navigation (routerLink, back/forward, manual edit — not just
+ *  `popstate`); an `effect` mirrors each signal change back via
+ *  `Router.navigate([], { queryParamsHandling: "merge", replaceUrl: true })`.
+ *  Runs inside Angular's zone (change detection stays correct) and needs no
+ *  `window` fallback.  Money signals carry a `Decimal`-aware `equal` so a
+ *  re-seed with an equal value doesn't retrigger the effect (breaking the
+ *  navigate → queryParamMap → set → effect cycle). */
+function renderUrlStoreModule(
+  store: StoreIR,
+  className: string,
+  needsDecimal: boolean,
+  _fieldLines: string[],
+  methodLines: string[],
+): string {
+  const urlFieldLines = store.state.map((f) => {
+    const isMoney = f.type.kind === "primitive" && f.type.name === "money";
+    const equal = isMoney ? ", { equal: (a, b) => a.eq(b) }" : "";
+    return `  readonly ${f.name} = signal<${storeFieldTsType(f.type)}>(${storeFieldInit(f)}${equal});`;
+  });
+  const decodeLines = store.state.map(
+    (f) => `      this.${f.name}.set(${decodeFieldFromParam(f)});`,
+  );
+  const queryParamLines = store.state.map((f) => `          ${encodeFieldToQueryParam(f)}`);
+
+  return lines(
+    `import { effect, inject, Injectable, signal } from "@angular/core";`,
+    `import { ActivatedRoute, Router } from "@angular/router";`,
+    needsDecimal ? `import Decimal from "decimal.js";` : undefined,
+    "",
+    `// Shared client-side state container generated from \`store ${store.name}\`.`,
+    `// Synced to the URL query string (\`persist: url\`) — shareable, deep-linkable,`,
+    `// back/forward-navigable — through Angular's router.  The URL is untrusted`,
+    `// input: each field is decoded through its declared type and defaulted on`,
+    `// anything unparseable.`,
+    `@Injectable({ providedIn: "root" })`,
+    `export class ${className} {`,
+    `  private readonly router = inject(Router);`,
+    `  private readonly route = inject(ActivatedRoute);`,
+    "",
+    ...urlFieldLines,
+    "",
+    `  constructor() {`,
+    `    // URL → store: seed synchronously, then follow every navigation`,
+    `    // (routerLink, back/forward, manual edit).  \`queryParamMap\` replays the`,
+    `    // current params on subscribe and emits on each change.`,
+    `    this.route.queryParamMap.subscribe((p) => {`,
+    ...decodeLines,
+    `    });`,
+    `    // store → URL: mirror every change back (merge + replaceUrl — no history`,
+    `    // spam).  A no-op navigate to the same URL doesn't re-emit.`,
+    `    effect(() => {`,
+    `      void this.router.navigate([], {`,
+    `        queryParams: {`,
+    ...queryParamLines,
+    `        },`,
+    `        queryParamsHandling: "merge",`,
+    `        replaceUrl: true,`,
+    `      });`,
+    `    });`,
+    `  }`,
     ...methodLines,
     `}`,
     "",

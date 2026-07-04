@@ -323,19 +323,10 @@ system Demo {
     ).not.toContain("loom.store-action-cycle");
   });
 
-  it("loom.store-lifetime-unsupported is a defensive guard (no grammar surface) — fires on a hand-built non-memory store", () => {
-    // The lifetime ladder (`persist:`/`sync:`) is intentionally NOT in the
-    // grammar, so lowering always produces `lifetime: "memory"`; the gate can
-    // only be reached by constructing the IR directly.  This pins it as a
-    // defensive check against programmatic mis-construction (it would otherwise
-    // be unreachable / dead).  If a future release adds the persistence surface,
-    // this test still holds.
-    const store: StoreIR = {
-      name: "Cart",
-      lifetime: "persistLocal",
-      state: [],
-      actions: [],
-    };
+  it("a non-memory lifetime on an SPA store is SUPPORTED — no diagnostic (the blanket gate is retired)", () => {
+    // The lifetime ladder now ships on the SPA frontends, so a `persistLocal`
+    // store on a non-LiveView ui produces no diagnostic.
+    const store: StoreIR = { name: "Cart", lifetime: "persistLocal", state: [], actions: [] };
     const diags: import("../../src/ir/validate/checks/diagnostic.js").LoomDiagnostic[] = [];
     validateStores(
       {
@@ -348,6 +339,73 @@ system Demo {
       } as never,
       diags,
     );
-    expect(diags.map((d) => d.code)).toContain("loom.store-lifetime-unsupported");
+    expect(diags.map((d) => d.code)).not.toContain("loom.store-lifetime-unsupported");
+    expect(diags.map((d) => d.code)).not.toContain("loom.store-lifetime-liveview-unsupported");
+  });
+
+  it("loom.store-lifetime-liveview-unsupported fires for a non-memory store mounted by a LiveView deployable", () => {
+    const store: StoreIR = { name: "Cart", lifetime: "url", state: [], actions: [] };
+    const diags: import("../../src/ir/validate/checks/diagnostic.js").LoomDiagnostic[] = [];
+    validateStores(
+      {
+        systems: [
+          {
+            uis: [
+              {
+                name: "Web",
+                stores: [store],
+                pages: [],
+                components: [],
+                framework: "phoenixLiveView",
+              },
+            ],
+            deployables: [{ name: "web", uiName: "Web", uiFramework: "phoenixLiveView" }],
+          },
+        ],
+      } as never,
+      diags,
+    );
+    expect(diags.map((d) => d.code)).toContain("loom.store-lifetime-liveview-unsupported");
+  });
+
+  it("loom.store-url-field-unsupported fires for an array/entity field in a `persist: url` store", () => {
+    const store: StoreIR = {
+      name: "Filters",
+      lifetime: "url",
+      state: [
+        { name: "tags", type: { kind: "array", element: { kind: "primitive", name: "string" } } },
+      ] as never,
+      actions: [],
+    };
+    const diags: import("../../src/ir/validate/checks/diagnostic.js").LoomDiagnostic[] = [];
+    validateStores(
+      {
+        systems: [
+          { uis: [{ name: "Web", stores: [store], pages: [], components: [] }], deployables: [] },
+        ],
+      } as never,
+      diags,
+    );
+    expect(diags.map((d) => d.code)).toContain("loom.store-url-field-unsupported");
+  });
+});
+
+describe("store — lifetime ladder (frontend-state-management.md §3.1)", () => {
+  it("lowers `persist: local|session|url` onto the StoreIR.lifetime enum", async () => {
+    const lower = async (life: string) =>
+      (await ir(`store S ${life} { state { q: string = "" } }`)).systems[0]!.uis[0]!.stores[0]!
+        .lifetime;
+    expect(await lower("persist: local")).toBe("persistLocal");
+    expect(await lower("persist: session")).toBe("persistSession");
+    expect(await lower("persist: url")).toBe("url");
+    expect(await lower("persist: memory")).toBe("memory");
+    expect(await lower("")).toBe("memory"); // bare store = in-memory default
+  });
+
+  it("loom.store-lifetime-invalid — an unknown `persist:` value is rejected at the AST tier", async () => {
+    const { errors } = await parseString(
+      wrap(`store S persist: bogus { state { q: string = "" } }`),
+    );
+    expect(errors.some((e) => e.includes("unknown lifetime 'bogus'"))).toBe(true);
   });
 });

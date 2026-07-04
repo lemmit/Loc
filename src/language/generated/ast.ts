@@ -211,6 +211,7 @@ export type DddKeywordNames =
     | "parent"
     | "payload"
     | "permissions"
+    | "persist"
     | "persistedAs"
     | "persistence"
     | "phoenixLiveView"
@@ -3110,12 +3111,14 @@ export interface Store extends langium.AstNode {
     readonly $container: Ui;
     readonly $type: 'Store';
     decls: Array<StoreDecl>;
+    lifetime?: string;
     name: string;
 }
 
 export const Store = {
     $type: 'Store',
     decls: 'decls',
+    lifetime: 'lifetime',
     name: 'name'
 } as const;
 
@@ -6306,6 +6309,10 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 decls: {
                     name: Store.decls,
                     defaultValue: [],
+                    optional: true
+                },
+                lifetime: {
+                    name: Store.lifetime,
                     optional: true
                 },
                 name: {

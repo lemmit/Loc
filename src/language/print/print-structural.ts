@@ -588,10 +588,12 @@ function printComponent(node: Component): string {
 /** `store Name { state {…} action …(…) {…} }` — a shared client-side state
  *  container (named-actions-and-stores.md §3).  Its decls reuse the StateBlock
  *  / ActionDecl printers verbatim (same surface as a page/component body).
- *  v1 has no lifetime surface (see the grammar `Store` rule). */
+ *  The optional `persist: <lifetime>` clause (frontend-state-management.md
+ *  §3.1) round-trips as a header modifier. */
 function printStore(node: import("../generated/ast.js").Store): string {
+  const persist = node.lifetime ? ` persist: ${node.lifetime}` : "";
   return block(
-    `store ${node.name}`,
+    `store ${node.name}${persist}`,
     node.decls.map((d) => (d.$type === "ActionDecl" ? printActionDecl(d) : printStateBlock(d))),
   );
 }

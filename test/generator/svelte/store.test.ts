@@ -110,3 +110,46 @@ describe("Svelte store emission", () => {
     expect(page).toContain("const cartLines = $derived(cart.lines);");
   });
 });
+
+// Lifetime ladder (frontend-state-management.md §3.1) — `persist:` tiers over
+// the `$state` rune singleton.  Parity with the React/Vue tier tests.
+describe("Svelte store lifetime ladder", () => {
+  const FILT = (life: string) => `
+    store Filt ${life} {
+      state { category: string = ""  pageNo: int = 0  minPrice: money = 0.00 }
+      action setPage(p: int) { pageNo := p }
+    }
+    page P { route: "/p" body: Heading { Filt.pageNo, level: 1 } }`;
+  const mod = async (life: string) =>
+    (await svelteFiles(FILT(life))).get("web/src/lib/stores/filt.svelte.ts")!;
+
+  it("persist: local hydrates from + writes back to localStorage via $effect.root", async () => {
+    const m = await mod("persist: local");
+    expect(m).toContain('const STORAGE_KEY = "loom.store.Filt";');
+    expect(m).toContain("localStorage.getItem(STORAGE_KEY)");
+    expect(m).toContain("localStorage.setItem(STORAGE_KEY");
+    expect(m).toContain("$effect.root");
+    expect(m).toContain('["minPrice"].includes(key)'); // money reviver
+  });
+
+  it("persist: session backs storage with sessionStorage", async () => {
+    const m = await mod("persist: session");
+    expect(m).toContain("sessionStorage.getItem(STORAGE_KEY)");
+    expect(m).toContain("sessionStorage.setItem(STORAGE_KEY");
+  });
+
+  it("persist: url binds SvelteKit's router (page + goto) with a typed decoder", async () => {
+    const m = await mod("persist: url");
+    expect(m).toContain('import { goto } from "$app/navigation";');
+    expect(m).toContain('import { page } from "$app/state";');
+    expect(m).toContain('import { browser } from "$app/environment";');
+    expect(m).toContain('category: p.get("category") ?? "",');
+    expect(m).toContain('Number.isFinite(Number(p.get("pageNo")))');
+    // URL → store via reactive `page.url`; store → URL via `goto(...replaceState)`.
+    expect(m).toContain("Object.assign(filt, decodeFrom(page.url.searchParams));");
+    expect(m).toContain("replaceState: true,");
+    // no raw window.history / popstate residue.
+    expect(m).not.toContain("window.history.replaceState");
+    expect(m).not.toContain("popstate");
+  });
+});

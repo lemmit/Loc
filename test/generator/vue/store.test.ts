@@ -117,3 +117,39 @@ describe("Vue store emission", () => {
     expect(sfc).toContain("const cartLines = computed(() => cart.state.lines);");
   });
 });
+
+// Lifetime ladder (frontend-state-management.md §3.1) — `persist:` tiers over
+// the reactive() singleton.  Mirrors the React tier tests; the item shape is
+// identical, only the module wrapper (storage watch / URL sync) changes.
+describe("Vue store lifetime ladder", () => {
+  const FILT = (life: string) => `
+    store Filt ${life} {
+      state { category: string = ""  pageNo: int = 0  minPrice: money = 0.00 }
+      action setPage(p: int) { pageNo := p }
+    }
+    page P { route: "/p" body: Heading { Filt.pageNo, level: 1 } }`;
+
+  it("persist: local hydrates from + writes back to localStorage", async () => {
+    const mod = (await vueFiles(FILT("persist: local"))).get("web/src/stores/filt.ts")!;
+    expect(mod).toContain('const STORAGE_KEY = "loom.store.Filt";');
+    expect(mod).toContain("localStorage.getItem(STORAGE_KEY)");
+    expect(mod).toContain("localStorage.setItem(STORAGE_KEY");
+    expect(mod).toContain('["minPrice"].includes(key)'); // money reviver
+    expect(mod).toContain("{ deep: true }");
+  });
+
+  it("persist: session backs storage with sessionStorage", async () => {
+    const mod = (await vueFiles(FILT("persist: session"))).get("web/src/stores/filt.ts")!;
+    expect(mod).toContain("sessionStorage.getItem(STORAGE_KEY)");
+    expect(mod).toContain("sessionStorage.setItem(STORAGE_KEY");
+  });
+
+  it("persist: url syncs to the query string with a typed decoder (parity with React)", async () => {
+    const mod = (await vueFiles(FILT("persist: url"))).get("web/src/stores/filt.ts")!;
+    expect(mod).toContain("function decodeFromUrl()");
+    expect(mod).toContain('category: p.get("category") ?? "",');
+    expect(mod).toContain('Number.isFinite(Number(p.get("pageNo")))');
+    expect(mod).toContain("window.history.replaceState(null");
+    expect(mod).toContain('window.addEventListener("popstate"');
+  });
+});

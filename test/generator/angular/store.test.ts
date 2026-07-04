@@ -105,3 +105,80 @@ describe("Angular store emission", () => {
     expect(comp).toContain("{{ this.cart.count() }}");
   });
 });
+
+// Lifetime ladder (frontend-state-management.md §3.1) — `persist:` tiers over
+// the `providedIn:"root"` signal service.  Parity with React/Vue/Svelte.
+describe("Angular store lifetime ladder", () => {
+  const FILT = (life: string) => `
+    store Filt ${life} {
+      state { category: string = ""  pageNo: int = 0  minPrice: money = 0.00 }
+      action setPage(p: int) { pageNo := p }
+    }
+    page P { route: "/p" body: Heading { Filt.pageNo, level: 1 } }`;
+  const mod = async (life: string) =>
+    (await angularFiles(FILT(life))).get("web/src/app/stores/filt.store.ts")!;
+
+  it("persist: local hydrates in the constructor + writes back via effect() to localStorage", async () => {
+    const m = await mod("persist: local");
+    expect(m).toContain('localStorage.getItem("loom.store.Filt")');
+    expect(m).toContain('localStorage.setItem("loom.store.Filt"');
+    expect(m).toContain("effect(()");
+    expect(m).toContain("new Decimal"); // money revival
+  });
+
+  it("persist: session backs storage with sessionStorage", async () => {
+    const m = await mod("persist: session");
+    expect(m).toContain('sessionStorage.getItem("loom.store.Filt")');
+    expect(m).toContain('sessionStorage.setItem("loom.store.Filt"');
+  });
+
+  it("persist: url binds the native router with a typed decoder", async () => {
+    const m = await mod("persist: url");
+    expect(m).toContain("this.route.queryParamMap.subscribe((p) => {");
+    expect(m).toContain('this.category.set(p.get("category") ?? "")');
+    expect(m).toContain('Number.isFinite(Number(p.get("pageNo")))');
+    expect(m).toContain("void this.router.navigate([], {");
+  });
+});
+
+// Regression: a money store field lowers to `Decimal`, so a declared money
+// literal must be constructed (`new Decimal(...)`), not assigned raw to the
+// `signal<Decimal>` (a TS2322).  Scalar-only showcases don't cover it.
+describe("Angular store — money field init", () => {
+  it("constructs a Decimal for a money field default", async () => {
+    const m = (
+      await angularFiles(`
+      store Filt persist: local {
+        state { category: string = ""  minPrice: money = 0.00 }
+        action setCat(c: string) { category := c }
+      }
+      page P { route: "/p" body: Heading { Filt.category, level: 1 } }`)
+    ).get("web/src/app/stores/filt.store.ts")!;
+    expect(m).toContain('readonly minPrice = signal<Decimal>(new Decimal("0.00"));');
+  });
+});
+
+describe("Angular store — url tier uses the native router", () => {
+  it("binds ActivatedRoute.queryParamMap + Router.navigate (not window.location)", async () => {
+    const m = (
+      await angularFiles(`
+      store Filt persist: url {
+        state { term: string = ""  pageNo: int = 0  minPrice: money = 0.00 }
+        action setPage(p: int) { pageNo := p }
+      }
+      page P { route: "/p" body: Heading { Filt.pageNo, level: 1 } }`)
+    ).get("web/src/app/stores/filt.store.ts")!;
+    expect(m).toContain('import { ActivatedRoute, Router } from "@angular/router";');
+    expect(m).toContain("private readonly router = inject(Router);");
+    expect(m).toContain("private readonly route = inject(ActivatedRoute);");
+    expect(m).toContain("this.route.queryParamMap.subscribe((p) => {");
+    expect(m).toContain("void this.router.navigate([], {");
+    expect(m).toContain('queryParamsHandling: "merge",');
+    expect(m).toContain("replaceUrl: true,");
+    // money signal carries a Decimal-aware equality so the re-seed doesn't loop.
+    expect(m).toContain("{ equal: (a, b) => a.eq(b) }");
+    // no window.location / popstate residue.
+    expect(m).not.toContain("window.location");
+    expect(m).not.toContain("popstate");
+  });
+});
