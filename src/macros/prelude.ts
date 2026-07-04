@@ -29,6 +29,7 @@ import {
   contextStamp,
   field,
   idRef,
+  intLit,
   memberAccess,
   nameRef,
   not,
@@ -113,6 +114,22 @@ function buildTenantOwned(): Capability {
   ] as CapabilityMember[]);
 }
 
+/** `capability versioned { version: int token = 1 }` — the opt-in
+ * optimistic-concurrency marker (optimistic-concurrency.md).  ONE synthetic
+ * field: `version: int` with `token` access (echoed by the client on update as
+ * a precondition, dropped from create/update editable bodies, present on every
+ * read — the wire-projection matrix already routes `token` this way).  The
+ * `= 1` default seeds new rows at version 1 and, mirrored onto the derived
+ * `version INTEGER NOT NULL DEFAULT 1` state-table column
+ * (`migrations-builder.ts`), keeps the schema add non-destructive.  Enforcement
+ * (guarded write + 409 on version mismatch) is per-backend, gated on
+ * `aggregateIsVersioned` (`src/ir/util/versioned-capability.ts`). */
+function buildVersioned(): Capability {
+  return capability("versioned", [
+    field("version", primType("int"), { access: "token", default: intLit(1) }),
+  ] as CapabilityMember[]);
+}
+
 let _cache: Map<string, Capability> | undefined;
 
 /** The built-in capabilities, built once and cached for the process.  The
@@ -125,6 +142,7 @@ export function builtinCapabilities(): Map<string, Capability> {
       ["auditable", buildAuditable()],
       ["softDeletable", buildSoftDeletable()],
       ["tenantOwned", buildTenantOwned()],
+      ["versioned", buildVersioned()],
     ]);
   }
   return _cache;

@@ -185,7 +185,7 @@ export function namedType(
 export function field(
   name: string,
   type: TypeRef,
-  opts: { provenanced?: boolean; access?: FieldAccess } = {},
+  opts: { provenanced?: boolean; access?: FieldAccess; default?: Expression } = {},
 ): Property {
   const origin = currentOrigin();
   const prop: Property = tag(
@@ -195,10 +195,15 @@ export function field(
       type,
       provenanced: opts.provenanced ?? false,
       ...(opts.access ? { access: opts.access } : {}),
+      ...(opts.default ? { default: opts.default } : {}),
     }),
     origin,
   );
   setContainer(type, prop, "type");
+  // `field: T = <expr>` — wire the default expression's container triple so
+  // Langium scope computation and lowering (`lower-members.ts` reads
+  // `p.default`) see a well-formed subtree.
+  if (opts.default) setContainer(opts.default, prop, "default");
   return prop;
 }
 
