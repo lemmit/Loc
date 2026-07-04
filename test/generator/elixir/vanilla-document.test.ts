@@ -138,3 +138,163 @@ describe("vanilla shape(document) persistence (DEBT-07)", () => {
     expect(ctrl).toContain('"itemCount" => record.item_count');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Scalar custom finds + named operations on a document aggregate (DEBT-07).
+// A document row has no flattened columns, so a find filters IN MEMORY over the
+// jsonb `data` map and a named op runs its body over that map, persisting via
+// the document repo's `update/2`.
+// ---------------------------------------------------------------------------
+const DOC_OPS = `
+system Carting {
+  subdomain Sales {
+    context Carts {
+      enum CartStatus { open, checkedOut }
+      aggregate Cart shape(document) with crudish {
+        reference: string
+        status: CartStatus
+        itemCount: int
+        invariant itemCount >= 0
+        operation addItem() {
+          precondition itemCount >= 0
+          itemCount := itemCount + 1
+        }
+        operation checkOut() {
+          precondition status == open
+          status := checkedOut
+        }
+      }
+      repository Carts for Cart {
+        find byReference(reference: string): Cart? where this.reference == reference
+        find checkedOutOnes(): Cart[] where this.status == checkedOut
+      }
+    }
+  }
+  api CartsApi from Sales
+  storage pg { type: postgres }
+  resource cartState { for: Carts, kind: state, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Carts]
+    dataSources: [cartState]
+    serves: CartsApi
+    port: 4000
+  }
+}
+`;
+
+describe("vanilla shape(document) scalar finds + named ops (DEBT-07)", () => {
+  it("emits in-memory custom finds that read the jsonb data map", async () => {
+    const repo = file(await generateSystemFiles(DOC_OPS), "/carts/cart_repository.ex");
+    // A list find returns every match; the predicate projects the field out of
+    // the normalised `data` map (not a struct column), enums compared as strings.
+    expect(repo).toContain("def checked_out_ones() do");
+    expect(repo).toContain("|> Repo.all()");
+    expect(repo).toContain("|> Enum.filter(fn record ->");
+    expect(repo).toContain("data = __doc_data(record)");
+    expect(repo).toContain('data["status"] == "checkedOut"');
+    expect(repo).toContain("{:ok, results}");
+    // A single-return find (`Cart?`) yields the first match (or nil).
+    expect(repo).toContain("def by_reference(reference) do");
+    expect(repo).toContain('data["reference"] == reference');
+    expect(repo).toContain("{:ok, List.first(results)}");
+    // The normaliser helper is emitted (gated on custom finds referencing it).
+    expect(repo).toContain(
+      "defp __doc_data(record), do: Map.new(record.data || %{}, fn {k, v} -> {to_string(k), v} end)",
+    );
+  });
+
+  it("emits scalar named-op context fns that run over the data map + persist via update/2", async () => {
+    const ctx = file(await generateSystemFiles(DOC_OPS), "/carts.ex");
+    // The op body normalises the jsonb, guards, and Map.put's the assigned field.
+    expect(ctx).toContain(
+      "def add_item_cart(%Api.Carts.Cart{} = record, params) when is_map(params) do",
+    );
+    expect(ctx).toContain("data = Map.new(record.data || %{}, fn {k, v} -> {to_string(k), v} end)");
+    expect(ctx).toContain('if not (data["item_count"] >= 0), do: raise(ArgumentError');
+    expect(ctx).toContain('data = Map.put(data, "item_count", data["item_count"] + 1)');
+    // Persist re-runs the schemaless changeset + bumps version via update/2.
+    expect(ctx).toContain("Api.Carts.CartRepository.update(record, data)");
+    // An enum assign uses the stored string form.
+    expect(ctx).toContain('data = Map.put(data, "status", "checkedOut")');
+    // The find defdelegates front the repository fns.
+    expect(ctx).toContain(
+      "defdelegate by_reference_cart(reference), to: Api.Carts.CartRepository, as: :by_reference",
+    );
+    // A document op must NOT use the relational struct-update / put_change path.
+    expect(ctx).not.toContain("Ecto.Changeset.put_change(:item_count");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Non-scalar residual now emitted (DEBT-07 follow-up): value-object-subfield
+// reads, pure-function calls, and RETURNING (`: A or B`) operations.
+// ---------------------------------------------------------------------------
+const DOC_RICH = `
+system Carting {
+  subdomain Sales {
+    context Carts {
+      valueobject Money { amount: int  currency: string }
+      error AlreadyClosed { message: string }
+      aggregate Cart shape(document) with crudish {
+        subtotal: Money
+        itemCount: int
+        function isCheap(): bool = subtotal.amount < 100
+        operation discount() {
+          precondition isCheap()
+          precondition subtotal.amount >= 0
+          itemCount := itemCount + 1
+        }
+        operation tryClose(): Cart or AlreadyClosed {
+          return AlreadyClosed { message: "closed" }
+        }
+        operation bumpOrClose(): Cart or AlreadyClosed {
+          itemCount := itemCount + 1
+        }
+      }
+      repository Carts for Cart { }
+    }
+  }
+  api CartsApi from Sales
+  storage pg { type: postgres }
+  resource cartState { for: Carts, kind: state, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Carts]
+    dataSources: [cartState]
+    serves: CartsApi
+    port: 4000
+  }
+}
+`;
+
+describe("vanilla shape(document) non-scalar residual (DEBT-07 follow-up)", () => {
+  it("emits document functions over the data map + value-object-subfield reads", async () => {
+    const ctx = file(await generateSystemFiles(DOC_RICH), "/carts.ex");
+    // A pure function on a document aggregate takes the jsonb `data` map (guarded
+    // is_map), reading the value-object subfield by nested bracket-index.
+    expect(ctx).toContain("def is_cheap(data) when is_map(data) do");
+    expect(ctx).toContain('data["subtotal"]["amount"] < 100');
+    // The op guard calls the function passing the data map, and reads the VO sub-field.
+    expect(ctx).toContain("if not (is_cheap(data)), do: raise(ArgumentError");
+    expect(ctx).toContain('if not (data["subtotal"]["amount"] >= 0), do: raise(ArgumentError');
+  });
+
+  it("emits returning ops as tagged tuples (error variant + fall-through success wire)", async () => {
+    const ctx = file(await generateSystemFiles(DOC_RICH), "/carts.ex");
+    // An error-variant `return` → {:error, "<tag>", <map>}; `record` is unused
+    // (no data touched) so it's underscored to avoid a -Werror unused warning.
+    expect(ctx).toContain(
+      "def try_close_cart(%Api.Carts.Cart{} = _record, params) when is_map(params) do",
+    );
+    expect(ctx).toContain('{:error, "AlreadyClosed", %{message: "closed"}}');
+    // A fall-through success projects the in-memory wire off the mutated data —
+    // `id` + every stored document field (camelCase keys, matching serialize/1).
+    expect(ctx).toContain(
+      "def bump_or_close_cart(%Api.Carts.Cart{} = record, params) when is_map(params) do",
+    );
+    expect(ctx).toContain(
+      '{:ok, %{"id" => record.id, "subtotal" => data["subtotal"], "itemCount" => data["item_count"]}}',
+    );
+  });
+});

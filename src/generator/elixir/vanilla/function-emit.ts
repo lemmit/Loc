@@ -124,18 +124,30 @@ export function aggHasFunctions(agg: AggregateIR): boolean {
 /** Render every `function` member of an aggregate as a module-level Elixir
  *  function (struct-guarded on the aggregate type), two-space indented for the
  *  context-facade module body.  Returns `[]` for a function-less aggregate, so
- *  such an aggregate emits byte-identical output. */
-export function renderAggregateFunctions(facadeMod: string, agg: AggregateIR): string[] {
+ *  such an aggregate emits byte-identical output.
+ *
+ *  `doc` (DEBT-07): a `shape(document)` aggregate has no flattened struct
+ *  columns, so its functions take the jsonb `data` map and read fields out of it
+ *  (`data["status"]`) — the clause head guards `is_map(data)` and the body renders
+ *  through the shared `docMap` mode.  (This also fixes the latent case of a
+ *  function on a CRUD-only document aggregate, which would otherwise emit a
+ *  `record.<field>` the `(id, data, version)` struct doesn't carry.) */
+export function renderAggregateFunctions(
+  facadeMod: string,
+  agg: AggregateIR,
+  doc = false,
+): string[] {
   if (!aggHasFunctions(agg)) return [];
   const aggModule = `${facadeMod}.${upperFirst(agg.name)}`;
   const rc: RenderCtx = {
     thisName: "record",
     contextModule: facadeMod,
     foundation: "vanilla",
+    ...(doc ? { docMap: "data" } : {}),
   };
   const out: string[] = [];
   for (const fn of agg.functions) {
-    out.push("", ...renderFunction(facadeMod, aggModule, fn, rc));
+    out.push("", ...renderFunction(facadeMod, aggModule, fn, rc, doc));
   }
   return out;
 }
@@ -145,6 +157,7 @@ function renderFunction(
   aggModule: string,
   fn: FunctionIR,
   rc: RenderCtx,
+  doc = false,
 ): string[] {
   const fnSnake = snake(fn.name);
   // The call site renders `passed(record, arg1, …)` — positional args after the
@@ -154,16 +167,21 @@ function renderFunction(
     bodyUsesParam(fn.body, p.name) ? snake(p.name) : `_${snake(p.name)}`,
   );
   // Underscore-prefix the receiver when the body never reads it (e.g.
-  // `function noop()`), else the struct-guarded clause head trips
-  // `mix compile --warnings-as-errors` on an unused `record` binding.
-  const recv = bodyUsesReceiver(fn.body) ? "record" : "_record";
-  const sig =
-    params.length > 0
-      ? `%${aggModule}{} = ${recv}, ${params.join(", ")}`
-      : `%${aggModule}{} = ${recv}`;
+  // `function noop()`), else the (struct- or map-)guarded clause head trips
+  // `mix compile --warnings-as-errors` on an unused receiver binding.  On the
+  // document path the receiver is the jsonb `data` map (guarded `is_map`); the
+  // relational path guards the aggregate struct.
+  const used = bodyUsesReceiver(fn.body);
+  const recv = doc ? (used ? "data" : "_data") : used ? "record" : "_record";
+  // The receiver head: a struct-guarded binding relationally, or a bare `data`
+  // binding on the document path — whose `is_map/1` guard is appended AFTER the
+  // full arg list (an inline `when` between params is a syntax error).
+  const recvHead = doc ? recv : `%${aggModule}{} = ${recv}`;
+  const sig = params.length > 0 ? `${recvHead}, ${params.join(", ")}` : recvHead;
+  const guard = doc ? ` when is_map(${recv})` : "";
   const ret = renderTypespec(fn.returnType, facadeMod);
   const specArgs = [
-    `${aggModule}.t()`,
+    doc ? "map()" : `${aggModule}.t()`,
     ...fn.params.map((p) => renderTypespec(p.type, facadeMod)),
   ].join(", ");
   const aggLeaf = aggModule.split(".").pop() ?? aggModule;
@@ -173,7 +191,7 @@ function renderFunction(
   return [
     `  @doc "Pure domain function \`${fn.name}\` on \`${aggLeaf}\`."`,
     `  @spec ${fnSnake}(${specArgs}) :: ${ret}`,
-    `  def ${fnSnake}(${sig}) do`,
+    `  def ${fnSnake}(${sig})${guard} do`,
     ...bodyLines,
     "  end",
   ];

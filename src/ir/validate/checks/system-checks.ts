@@ -16,6 +16,7 @@ import {
   configSchemaFor,
   supportsSurfaceKind,
 } from "../../../util/source-types.js";
+import { pagedReturn } from "../../stdlib/generics.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -27,6 +28,7 @@ import type {
   EnrichedLoomModel,
   EnrichedSystemIR,
   ExprIR,
+  FunctionIR,
   OperationIR,
   SavingShape,
   StmtIR,
@@ -41,6 +43,7 @@ import {
   firstUnlowerableForAdapter,
   isFindPredicateAdapter,
 } from "../../util/find-predicate-capability.js";
+import { opHasProvSite } from "../../util/prov-id.js";
 import {
   dataSourceKindForAggregate,
   effectiveSavingShape,
@@ -545,17 +548,179 @@ export function validateSavingShapeSupport(sys: SystemIR, diags: LoomDiagnostic[
 }
 
 // ---------------------------------------------------------------------------
-// Vanilla `shape(document)` v1 scope (DEBT-07).  The vanilla document path
-// emits the CRUD surface (list / get / create / update / delete) over the
-// `(id, data, version)` jsonb row.  Custom finds (which would need an
-// in-memory rehydrate-and-filter path) and user-defined named operations
-// (which struct-update flattened columns the document schema doesn't have)
-// are NOT yet emitted — and the context module would otherwise emit a
-// defdelegate / named-op fn that references a non-existent repository
-// function.  Reject the combination with a clear error rather than
-// misgenerate, exactly like the saving-shape capability gate above.
+// Vanilla `shape(document)` scope (DEBT-07).  The vanilla document path emits the
+// CRUD surface (list / get / create / update / delete) over the `(id, data,
+// version)` jsonb row, PLUS — since DEBT-07 — SCALAR custom finds (in-memory
+// filter over the loaded rows) and SCALAR named operations (the body runs over
+// the normalised `data` map, then persists through the document repository's
+// `update/2`).  A document blob has no flattened struct columns, so a handful of
+// op/find shapes still need machinery the document path deliberately omits, and
+// those stay gated (an honest error rather than a mis-emit):
+//
+//   - a RETURNING op (`: A or B`), an AUDITED op, a PROVENANCED op — all persist
+//     a pre-built changeset over struct columns inside a forced transaction;
+//   - COLLECTION mutation (`items += …`) — a document's contained parts are gated
+//     separately (`loom.vanilla-containment-unsupported`) anyway;
+//   - a body/filter that reads a VALUE-OBJECT sub-field, a DERIVED, or calls a
+//     `function` / value-object constructor — these need the loaded struct / list
+//     the jsonb map can't reconstruct in-place;
+//   - a PAGED or UNION-returning custom find (the wire-envelope / tagged-result
+//     shapes the document find path doesn't build).
+//
+// Everything else — scalar `assign` / `+=` / `-=` / `precondition` / `requires`
+// / `let` / `emit`, and scalar/convention/`where`-clause finds — is emitted.
 // ---------------------------------------------------------------------------
 const VANILLA_DOC_CRUD_OPS = new Set(["create", "update", "delete", "destroy", "list", "get"]);
+
+/** Does an expression reach a shape the vanilla document scalar path can't emit?
+ *  A derived read, a *dereferenced-entity* member (cross-aggregate `X id` join),
+ *  a collection METHOD (`.sum`/`.filter`/`.contains` — lambdas over jsonb maps),
+ *  a constructor / match / lambda — anything beyond scalar arithmetic,
+ *  whole-field / value-object-subfield / `.count` reads over the `data` map, and
+ *  (when `allowFnCall`) calls to the aggregate's own pure `function`s.
+ *
+ *  `allowFnCall` is true when the aggregate's `function` members are all
+ *  themselves doc-safe (verified once per aggregate) — then a `callKind:
+ *  "function"` is emittable (the function is rendered in the same `docMap` mode).
+ *  It is also passed `true` while verifying each function body, so a function
+ *  that calls a sibling function stays admissible (the sibling is verified too —
+ *  the whole call graph is checked, no recursion needed here). */
+function docExprUnsupported(e: ExprIR, allowFnCall: boolean): boolean {
+  const bad = (x: ExprIR): boolean => docExprUnsupported(x, allowFnCall);
+  switch (e.kind) {
+    case "ref":
+      // A `this-derived` read has no stored `data` key (derived aren't
+      // persisted); every other ref (this-prop / this-vo-prop whole read / param
+      // / let / enum-value / current-user) is a plain scalar/map read.
+      return e.refKind === "this-derived";
+    case "member":
+      // Supported: `this.<scalar>` (receiver `this`, entity type → `data[k]`), a
+      // value-object SUB-field (`this.money.amount` → `data["money"]["amount"]`),
+      // an array `.count`/`.length` (→ `Enum.count`).  NOT supported: a member off
+      // a *dereferenced* entity (a cross-aggregate ref → needs a join the document
+      // path can't do) — an entity receiver that isn't the aggregate's own `this`.
+      if (e.receiverType.kind === "entity" && e.receiver.kind !== "this") return true;
+      return bad(e.receiver);
+    case "method-call":
+      // A collection op (`.sum`/`.filter`/`.contains`) runs a lambda over the
+      // jsonb list of string-keyed maps — the loaded-struct machinery the scalar
+      // path lacks; a value-object method is the same story.  A scalar-receiver
+      // method (string/number) is fine.
+      return (
+        e.isCollectionOp ||
+        e.receiverType.kind === "valueobject" ||
+        e.receiverType.kind === "array" ||
+        bad(e.receiver) ||
+        e.args.some(bad)
+      );
+    case "call":
+      // A pure aggregate `function` call is emittable when the aggregate's
+      // functions are doc-safe; every other call kind (value-object ctor, private
+      // operation, domain service, resource op) still needs machinery the scalar
+      // path omits.
+      if (e.callKind === "function" && allowFnCall) return e.args.some(bad);
+      return true;
+    case "object":
+      // A bare object literal — the data map a returning op's error-variant
+      // `return TooMany { … }` ships — is a plain map on the document path.
+      return e.fields.some((f) => bad(f.value));
+    case "binary":
+      return bad(e.left) || bad(e.right);
+    case "unary":
+      return bad(e.operand);
+    case "paren":
+      return bad(e.inner);
+    case "ternary":
+      return bad(e.cond) || bad(e.then) || bad(e.otherwise);
+    case "convert":
+      return bad(e.value);
+    case "literal":
+    case "id":
+    case "this":
+      return false;
+    default:
+      // new / object / match / lambda / list / *-call — all need the struct /
+      // list / tuple machinery the document scalar path omits.
+      return true;
+  }
+}
+
+/** Does a pure `function` body reach a non-doc-safe shape?  Sibling-function
+ *  calls are admitted (`allowFnCall` true) because every function is checked, so
+ *  the whole graph is verified without recursing here. */
+function docFunctionUnsupported(fn: FunctionIR): boolean {
+  const body = fn.body;
+  const exprs: ExprIR[] = "expr" in body ? [body.expr] : [];
+  if ("stmts" in body) {
+    for (const s of body.stmts) {
+      switch (s.kind) {
+        case "precondition":
+        case "requires":
+        case "let":
+        case "expression":
+          exprs.push(s.expr);
+          break;
+        case "return":
+          exprs.push(s.value);
+          break;
+        case "call":
+          exprs.push(...s.args);
+          break;
+      }
+    }
+  }
+  return exprs.some((e) => docExprUnsupported(e, /* allowFnCall */ true));
+}
+
+/** Does an operation statement fall outside the vanilla document scalar op
+ *  surface?  `allowFnCall` mirrors {@link docExprUnsupported}. */
+function docStmtUnsupported(s: StmtIR, allowFnCall: boolean): boolean {
+  const bad = (e: ExprIR): boolean => docExprUnsupported(e, allowFnCall);
+  switch (s.kind) {
+    case "precondition":
+    case "requires":
+    case "let":
+    case "expression":
+      return bad(s.expr);
+    case "assign":
+      // A nested write target (`money.amount := …`, `segments.length > 1`) has no
+      // single `data` key to `Map.put` — the scalar path only writes top-level
+      // fields.  A whole-field write (incl. replacing a value object) is fine.
+      return s.target.segments.length > 1 || bad(s.value);
+    case "add":
+    case "remove":
+      // Scalar compound arithmetic is fine; a real COLLECTION mutation is not,
+      // and a nested target has no single top-level `data` key to update.
+      return s.collection || s.target.segments.length > 1 || bad(s.value);
+    case "emit":
+      return s.fields.some((f) => bad(f.value));
+    case "return":
+      // A returning op's `return <value>` — the value renders in `docMap` mode;
+      // an error-variant object literal is a plain response map.  A private-
+      // operation self-call in tail position stays gated (`docExprUnsupported`
+      // rejects the non-function call).
+      return bad(s.value);
+    default:
+      // call / variant-match — need the self-call / frontend machinery the
+      // scalar document path doesn't carry.
+      return true;
+  }
+}
+
+/** A user-defined document operation the scalar path can't emit.  `allowFnCall`
+ *  is set once per aggregate from whether its `function`s are all doc-safe.  A
+ *  RETURNING op is now admitted (it returns the in-memory tagged tuple — parity
+ *  with the relational non-audited returning path, no DB round-trip); an AUDITED
+ *  / PROVENANCED op still needs the transactional struct-column persist the
+ *  document scalar path deliberately omits. */
+function docOpUnsupported(op: OperationIR, allowFnCall: boolean): boolean {
+  return (
+    op.audited === true ||
+    opHasProvSite(op) ||
+    op.statements.some((s) => docStmtUnsupported(s, allowFnCall))
+  );
+}
+
 export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const ctxByName = new Map<string, BoundedContextIR>();
   for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
@@ -568,24 +733,43 @@ export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnosti
       for (const agg of ctx.aggregates) {
         const enriched = agg as EnrichedAggregateIR;
         if (!isDocumentShaped(enriched, resolveDataSourceConfig(enriched, ctx, sys))) continue;
-        const customFinds = (ctx.repositories ?? [])
-          .find((r) => r.aggregateName === agg.name)
-          ?.finds.filter((f) => f.name !== "all");
-        const customOps = agg.operations.filter((op) => !VANILLA_DOC_CRUD_OPS.has(op.name));
-        if ((customFinds?.length ?? 0) === 0 && customOps.length === 0) continue;
+        // A pure `function` call is emittable only when every function on the
+        // aggregate is itself doc-safe (they render in the same `docMap` mode —
+        // reading the jsonb `data` map); if any is not, a body that calls one is
+        // gated.  Computed once here and threaded into the op/find checks.
+        const allowFnCall = (agg.functions ?? []).every((fn) => !docFunctionUnsupported(fn));
+        // A custom find is unsupported when it's paged / union-returning (wire
+        // envelopes the document find path doesn't build) or its predicate reads
+        // a non-scalar shape.
+        const badFinds = (
+          (ctx.repositories ?? []).find((r) => r.aggregateName === agg.name)?.finds ?? []
+        )
+          .filter((f) => f.name !== "all")
+          .filter(
+            (f) =>
+              pagedReturn(f.returnType) ||
+              f.returnType.kind === "union" ||
+              (f.filter != null && docExprUnsupported(f.filter, allowFnCall)),
+          );
+        const badOps = agg.operations
+          .filter((op) => !VANILLA_DOC_CRUD_OPS.has(op.name))
+          .filter((op) => docOpUnsupported(op, allowFnCall));
+        if (badFinds.length === 0 && badOps.length === 0) continue;
         const bits: string[] = [];
-        if (customOps.length > 0)
-          bits.push(`named operation(s) ${customOps.map((o) => o.name).join(", ")}`);
-        if (customFinds && customFinds.length > 0)
-          bits.push(`custom find(s) ${customFinds.map((f) => f.name).join(", ")}`);
+        if (badOps.length > 0)
+          bits.push(`named operation(s) ${badOps.map((o) => o.name).join(", ")}`);
+        if (badFinds.length > 0)
+          bits.push(`custom find(s) ${badFinds.map((f) => f.name).join(", ")}`);
         diags.push({
           severity: "error",
           code: "loom.vanilla-document-unsupported",
           message:
-            `aggregate '${ctxName}.${agg.name}' is shape(document) on elixir, which ` +
-            `emits the CRUD surface only in v1, but declares ${bits.join(" and ")}. ` +
-            `Drop them, host this aggregate on a backend with full document support ` +
-            `(node / dotnet / python / java), or use shape(relational) / shape(embedded).`,
+            `aggregate '${ctxName}.${agg.name}' is shape(document) on elixir, which emits ` +
+            `scalar custom finds + named operations but not ${bits.join(" and ")} ` +
+            `(returning/audited/provenanced ops, collection mutation, value-object/derived/` +
+            `function reads, or paged/union finds). Simplify them to scalar form, host this ` +
+            `aggregate on a backend with full document support (node / dotnet / python / java), ` +
+            `or use shape(relational) / shape(embedded).`,
           source: `${sys.name}/${dep.name}`,
         });
       }

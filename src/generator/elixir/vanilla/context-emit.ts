@@ -28,7 +28,11 @@ import { renderReadingServiceContextFns } from "../domain-service-emit.js";
 import type { RenderCtx } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
-import { isVanillaDocAgg } from "./document-emit.js";
+import {
+  isVanillaDocAgg,
+  renderDocNamedOpFunction,
+  renderDocReturningOpFunction,
+} from "./document-emit.js";
 import {
   customFindsOfAgg,
   esContextNeedsEnsure,
@@ -128,20 +132,31 @@ function renderContextModule(
     const relationalContainments = usesRelationalContainments(agg, ctx, sys)
       ? new Set(agg.contains.map((c) => snake(c.name)))
       : new Set<string>();
+    // A document-shaped aggregate persists as one jsonb blob with no flattened
+    // columns, so its named operations run over the `data` map and persist via
+    // the document repository's `update/2` (DEBT-07) rather than the relational
+    // struct-update + `put_change` path.  Returning / audited / provenanced /
+    // collection-mutating document ops are validate-gated, so only the scalar
+    // `renderDocNamedOpFunction` shape reaches here.
+    const isDoc = isVanillaDocAgg(agg, ctx, sys);
     const opBlocks = (agg.operations ?? [])
       .filter((op) => !CRUD_RESERVED_NAMES.has(op.name))
       .map((op) =>
-        isReturningOperation(op)
-          ? renderReturningOpFunction(facadeMod, ctx, agg, op, relationalContainments)
-          : renderNamedOpFunction(
-              facadeMod,
-              ctx,
-              agg,
-              aggPascal,
-              aggSnake,
-              op,
-              relationalContainments,
-            ),
+        isDoc
+          ? isReturningOperation(op)
+            ? renderDocReturningOpFunction(facadeMod, op, agg, ctx)
+            : renderDocNamedOpFunction(facadeMod, op, agg, ctx)
+          : isReturningOperation(op)
+            ? renderReturningOpFunction(facadeMod, ctx, agg, op, relationalContainments)
+            : renderNamedOpFunction(
+                facadeMod,
+                ctx,
+                agg,
+                aggPascal,
+                aggSnake,
+                op,
+                relationalContainments,
+              ),
       );
     // Custom-find defdelegates — `<find>_<agg>(args...)` routes to the
     // repository fn emitted by `customFindsOf`.  Workflow `repo-let`
@@ -170,7 +185,6 @@ function renderContextModule(
     // per-aggregate Changeset module's `base_changeset/2`.  A DOCUMENT
     // aggregate has no `base_changeset` (it round-trips via `document_changeset`),
     // so skip the facade there — its form path is out of scope for this slice.
-    const isDoc = isVanillaDocAgg(agg, ctx, sys);
     const changesetMod = `${facadeMod}.${aggPascal}Changeset`;
     const changeFacade = isDoc
       ? ""
@@ -246,7 +260,7 @@ ${body}
     // op / precondition / derived bodies emitted above.  Each renders as a
     // struct-guarded `def <fn>(%Agg{} = record, …)` so the lowered call site
     // (`<fn>(record, …)`) resolves in THIS module.
-    const fnLines = renderAggregateFunctions(facadeMod, agg);
+    const fnLines = renderAggregateFunctions(facadeMod, agg, isDoc);
     const functionBlock = fnLines.length > 0 ? `${fnLines.join("\n")}\n` : "";
     return `  # ${aggPascal}
   defdelegate list_${aggSnake}s(${principal ? "current_user \\\\ nil" : ""}), to: ${repoMod}, as: :list
