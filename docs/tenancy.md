@@ -51,10 +51,12 @@ system Billder {
   }
   ```
 
-  The column lands in the migrations automatically; `internal` keeps
-  `tenantId` out of create inputs (the client can never pass it); the filter
-  is AND-ed into **every** generated read on all five backends; the stamp
-  copies the claim at create.
+  The column lands in the migrations automatically — **with a derived
+  non-unique `<table>_tenant_id_idx`** (every tenant read prefixes on that
+  column; derived in the shared `MigrationsIR`, so all DB backends emit it);
+  `internal` keeps `tenantId` out of create inputs (the client can never pass
+  it); the filter is AND-ed into **every** generated read on all five
+  backends; the stamp copies the claim at create.
 - **`crossTenant`** — an aggregate-header flag (like `abstract`), for shared
   reference data (`Plan`, `Country`). A stance marker: attaches nothing,
   generates nothing — it exists so "no tenant filter" is a declared decision,
@@ -145,6 +147,7 @@ bases are exempt). An unmarked aggregate is a hard error:
 | `loom.cross-tenant-without-tenancy` | `crossTenant` but no `tenancy by` | warning |
 | `loom.tenancy-conflicting-stance` | both markers on one aggregate (or a marker on the registry) | error |
 | `loom.tenancy-claim-type-mismatch` | the claim's type can't bind against the registry's `ids` type (see the id-vs-claim rule above) | error |
+| `loom.tenant-owned-claim-type` | a `tenantOwned` aggregate exists but the claim isn't `string` (the capability's field is `tenantId: string`; a `guid` claim mis-compiles typed backends — declare the claim `string`, guid values round-trip as text) | error |
 
 There is deliberately **no severity knob**: the escape hatch is writing
 `crossTenant` — one keyword, intent declared. This is fail-closed without

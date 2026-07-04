@@ -187,7 +187,7 @@ export function schemaFromModule(
   };
 
   for (const agg of pool) {
-    const produced = tablesForOneAggregate(agg);
+    const produced = withTenantIndex(agg, tablesForOneAggregate(agg));
     const schema = schemaOf(agg, ctxFor(agg));
     if (schema !== undefined) {
       for (const t of produced) t.schema = schema;
@@ -901,6 +901,33 @@ function applyManualIndexes(tables: readonly TableShape[], specs: readonly Manua
     if (table.indexes.some((i) => i.name === name)) continue;
     table.indexes.push({ name, table: table.name, columns, unique: false });
   }
+}
+
+/** Derived tenant read index (docs/tenancy.md): a `tenantOwned` aggregate's
+ *  generated reads ALL prefix on `tenant_id = <claim>`, so any of its tables
+ *  that physically carries the column gets a non-unique
+ *  `<table>_tenant_id_idx` (the FK-index naming convention).  Applied as a
+ *  post-pass over the aggregate's produced tables so every persistence shape
+ *  is covered exactly when the column exists — relational root, TPH shared
+ *  table, embedded root; document/eventLog tables hold the field inside the
+ *  blob/stream (no column) and are skipped naturally, as are parts and join
+ *  tables (the filter targets the root).  Deduped against a hand-declared
+ *  `unique (tenantId, ...)`-style index only by exact single-column shape —
+ *  a unique composite still benefits from the plain prefix index. */
+function withTenantIndex(agg: AggregateIR, tables: TableShape[]): TableShape[] {
+  if (!(agg.capabilities?.includes("tenantOwned") ?? false)) return tables;
+  for (const t of tables) {
+    if (!t.columns.some((c) => c.name === "tenant_id")) continue;
+    const already = t.indexes.some((ix) => ix.columns.length === 1 && ix.columns[0] === "tenant_id");
+    if (already) continue;
+    t.indexes.push({
+      name: `${t.name}_tenant_id_idx`,
+      table: t.name,
+      columns: ["tenant_id"],
+      unique: false,
+    });
+  }
+  return tables;
 }
 
 /** Derive the DB unique index for each `unique (...)` declaration on the
