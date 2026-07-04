@@ -1,0 +1,88 @@
+name: Tenancy isolation (runtime e2e)
+
+# Boots the generated Hono backend from the `tenancy-owned.ddd` corpus fixture
+# against a throwaway postgres, then proves cross-tenant isolation END TO END:
+#   POST invoice as org-a → 201; org-a GETs it → 200; org-b GETs it → 404;
+#   org-b's list omits it; a client-smuggled tenantId is ignored; crossTenant
+#   reference data is visible to all; and the registry self-scope + claim-less
+#   signup bootstrap round-trips (`tenantId ≡ Organization.id`).
+#
+# This is the assertion the structural tiers CANNOT make: per-backend generator
+# tests pin the filter and the 1a.0 pins the stamp, but only a boot proves the
+# two AGREE — the pre-1a.0 bug (stamp writes the actor id, filter reads the
+# claim) made every created row invisible and no structural test saw it.
+#
+# Uses a `services: postgres` container (not docker-in-runner) and hands the
+# test its URL via LOOM_TENANCY_PG_URL, so the suite skips its own docker
+# sidecar. Cost is dominated by the `npm install` of the generated project
+# (~60-90s warm, ~3-4min cold).
+#
+# Triggers `push: main` + manual dispatch only — NOT per-PR. Sibling to the
+# obs-e2e / oidc-e2e jobs; same rationale: a docker-heavy boot on every
+# tenancy-touching PR is a runner burst for a regression that is acceptable to
+# catch one merge later. The structural filter/stamp pins ARE per-PR (in the
+# fast vitest suite); this gate nets the end-to-end agreement.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/macros/prelude.ts'
+      - 'src/language/validators/tenancy.ts'
+      - 'src/ir/validate/checks/tenancy-checks.ts'
+      - 'src/ir/util/tenant-stance.ts'
+      - 'src/ir/enrich/enrichments.ts'
+      - 'test/e2e/tenancy-isolation.test.ts'
+      - 'test/fixtures/corpus/tenancy-owned.ddd'
+      - 'package.json'
+      - '.github/workflows/tenancy-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tenancy-e2e:
+    runs-on: ubuntu-latest
+    # Cold path: ~3-4min (npm install of the generated project). 10min cap.
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Run tenancy isolation runtime e2e
+        env:
+          LOOM_TENANCY_E2E: '1'
+          LOOM_TENANCY_PG_URL: postgres://postgres:postgres@127.0.0.1:5432/app
+        run: npx vitest run test/e2e/tenancy-isolation.test.ts --reporter=verbose
+
+      - name: Surface failure context
+        if: failure()
+        run: |
+          echo '## Tenancy isolation runtime e2e failed' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'See the "Run tenancy isolation runtime e2e" step above for the captured server stdout.' >> $GITHUB_STEP_SUMMARY
+          echo 'The test boots the generated Hono backend against postgres and asserts cross-tenant isolation (create/read/list as two principals), client tenantId-smuggling rejection, crossTenant visibility, and the registry self-scope + claim-less signup bootstrap.' >> $GITHUB_STEP_SUMMARY

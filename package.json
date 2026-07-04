@@ -46,6 +46,7 @@
     "test:k8s-e2e": "bash scripts/k8s-e2e-smoke.sh",
     "test:format-dotnet": "LOOM_DOTNET_FORMAT=1 vitest run test/e2e/generated-dotnet-format.test.ts",
     "test:phoenix": "LOOM_PHOENIX_VANILLA_BUILD=1 vitest run test/e2e/generated-elixir-vanilla-build.test.ts",
+    "test:tenancy": "LOOM_TENANCY_E2E=1 vitest run test/e2e/tenancy-isolation.test.ts",
     "test:obs": "LOOM_OBS_E2E=1 vitest run test/e2e/observability-events.test.ts",
     "test:obs-dotnet": "LOOM_OBS_E2E_DOTNET=1 vitest run test/e2e/observability-events-dotnet.test.ts",
     "test:obs-java": "LOOM_OBS_E2E_JAVA=1 vitest run test/e2e/observability-events-java.test.ts",
