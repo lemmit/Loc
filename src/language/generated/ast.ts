@@ -159,6 +159,7 @@ export type DddKeywordNames =
     | "import"
     | "in"
     | "inMemory"
+    | "index"
     | "inheritanceUsing"
     | "instance"
     | "int"
@@ -1558,6 +1559,23 @@ export function isImportStmt(item: unknown): item is ImportStmt {
     return reflection.isInstance(item, ImportStmt.$type);
 }
 
+export interface IndexSpec extends langium.AstNode {
+    readonly $container: Resource;
+    readonly $type: 'IndexSpec';
+    columns: Array<LooseName>;
+    entity: string;
+}
+
+export const IndexSpec = {
+    $type: 'IndexSpec',
+    columns: 'columns',
+    entity: 'entity'
+} as const;
+
+export function isIndexSpec(item: unknown): item is IndexSpec {
+    return reflection.isInstance(item, IndexSpec.$type);
+}
+
 export type InheritanceLayout = 'ownTable' | 'sharedTable';
 
 export function isInheritanceLayout(item: unknown): item is InheritanceLayout {
@@ -2729,6 +2747,7 @@ export interface Resource extends langium.AstNode {
     config: Array<ConfigEntry>;
     context?: langium.Reference<BoundedContext>;
     every?: number;
+    indexes: Array<IndexSpec>;
     isolationLevel?: IsolationLevel;
     keyPrefix?: string;
     kind?: DataSourceKind;
@@ -2747,6 +2766,7 @@ export const Resource = {
     config: 'config',
     context: 'context',
     every: 'every',
+    indexes: 'indexes',
     isolationLevel: 'isolationLevel',
     keyPrefix: 'keyPrefix',
     kind: 'kind',
@@ -3932,6 +3952,7 @@ export type DddAstType = {
     IfLetStmt: IfLetStmt
     ImplementsDecl: ImplementsDecl
     ImportStmt: ImportStmt
+    IndexSpec: IndexSpec
     IntConfigValue: IntConfigValue
     IntLit: IntLit
     Invariant: Invariant
@@ -5107,6 +5128,19 @@ export class DddAstReflection extends langium.AbstractAstReflection {
             },
             superTypes: []
         },
+        IndexSpec: {
+            name: IndexSpec.$type,
+            properties: {
+                columns: {
+                    name: IndexSpec.columns,
+                    defaultValue: []
+                },
+                entity: {
+                    name: IndexSpec.entity
+                }
+            },
+            superTypes: []
+        },
         IntConfigValue: {
             name: IntConfigValue.$type,
             properties: {
@@ -5998,6 +6032,11 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 },
                 every: {
                     name: Resource.every,
+                    optional: true
+                },
+                indexes: {
+                    name: Resource.indexes,
+                    defaultValue: [],
                     optional: true
                 },
                 isolationLevel: {

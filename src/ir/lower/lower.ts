@@ -571,6 +571,14 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
           : {}),
         ...(d.readonly ? { readonly: true } : {}),
         ...(d.shape == null ? {} : { shape: d.shape as DataSourceIR["shape"] }),
+        ...(d.indexes.length
+          ? {
+              manualIndexes: d.indexes.map((spec) => ({
+                entity: spec.entity,
+                columns: [...spec.columns],
+              })),
+            }
+          : {}),
         ...(d.config.length ? { config: d.config.map(lowerConfigEntry) } : {}),
       }),
     );

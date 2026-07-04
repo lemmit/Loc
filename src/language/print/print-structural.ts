@@ -412,6 +412,16 @@ function printDataSource(node: import("../generated/ast.js").Resource): string {
   if (node.isolationLevel) items.push(`isolationLevel: ${node.isolationLevel}`);
   if (node.readonly) items.push(`readonly: true`);
   if (node.shape) items.push(`shape: ${node.shape}`);
+  if (node.indexes.length > 0) {
+    // `Entity.col` for a single column, `Entity.(a, b)` for a composite —
+    // mirrors the `IndexSpec` grammar (explicit entity qualification).
+    const specs = node.indexes.map((s) =>
+      s.columns.length === 1
+        ? `${s.entity}.${s.columns[0]!}`
+        : `${s.entity}.(${s.columns.join(", ")})`,
+    );
+    items.push(`index: [${specs.join(", ")}]`);
+  }
   const cfg = printConfigItem(node.config);
   if (cfg) items.push(cfg);
   return block(`resource ${node.name}`, items);

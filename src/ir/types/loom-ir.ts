@@ -2292,6 +2292,23 @@ export interface DataSourceIR {
   shape?: SavingShape;
   /** Generic vendor-parameter map for the binding (RFC §3.2). */
   config?: readonly ConfigEntryIR[];
+  /** Manual performance indexes declared via `index: [...]`
+   *  (uniqueness-and-indexes.md §3.2, D-INDEX-INFRA).  Each entry names its
+   *  target entity EXPLICITLY (an aggregate or one of its contained parts in
+   *  the binding's context) plus the column(s) — one for a single-column
+   *  index, several for a composite.  Always non-unique — uniqueness is the
+   *  domain `unique (...)` invariant.  Omitted when none declared. */
+  manualIndexes?: readonly ManualIndexIR[];
+}
+
+/** One `index: [...]` entry — an explicitly-targeted performance index on a
+ *  storage binding (uniqueness-and-indexes.md §3.2).  `entity` is an aggregate
+ *  or contained-part name in the binding's context; `columns` are its
+ *  field names.  The migrations builder places the index on that entity's
+ *  table, named `<table>_<cols>_idx`, non-unique. */
+export interface ManualIndexIR {
+  entity: string;
+  columns: readonly string[];
 }
 
 export type DataSourceKind =
