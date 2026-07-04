@@ -306,12 +306,15 @@ export function renderJavaController(
 /** RFC 7807 problem+json advice — the DomainExceptionFilter / Hono
  *  onError analog: same statuses, same envelope, same 422 `errors[]`
  *  extension shape, so the frontend ACL works against any backend. */
-export function renderApiExceptionAdvice(basePkg: string): string {
+export function renderApiExceptionAdvice(basePkg: string, hasUniqueKeys = false): string {
   return lines(
     `package ${basePkg}.api;`,
     ``,
     `import java.util.stream.Collectors;`,
     ``,
+    // The 23505 → 409 handler (+ its import) is emitted only when some aggregate
+    // declares a `unique (...)` key — a unique-free project stays byte-identical.
+    hasUniqueKeys && `import org.springframework.dao.DataIntegrityViolationException;`,
     `import org.springframework.http.HttpStatus;`,
     `import org.springframework.http.MediaType;`,
     `import org.springframework.http.ProblemDetail;`,
@@ -360,6 +363,17 @@ export function renderApiExceptionAdvice(basePkg: string): string {
     `        return respond(problem(409, "Disallowed", e.getMessage(), request), 409);`,
     `    }`,
     ``,
+    hasUniqueKeys && [
+      `    @ExceptionHandler(DataIntegrityViolationException.class)`,
+      `    public ResponseEntity<ProblemDetail> onConflict(DataIntegrityViolationException e, WebRequest request) {`,
+      `        // A DB constraint (e.g. a \`unique (...)\` index → Postgres 23505) tripped;`,
+      `        // Spring translates it to DataIntegrityViolationException. Return a friendly`,
+      `        // 409 instead of leaking a 500, reusing the catalog 409 \`disallowed\` event.`,
+      `        CatalogLog.event("disallowed", "warn", "message", "A resource with these values already exists.", "status", 409);`,
+      `        return respond(problem(409, "Conflict", "A resource with these values already exists.", request), 409);`,
+      `    }`,
+      ``,
+    ],
     `    @ExceptionHandler(AggregateNotFoundException.class)`,
     `    public ResponseEntity<ProblemDetail> onNotFound(AggregateNotFoundException e, WebRequest request) {`,
     `        CatalogLog.event("not_found", "warn", "status", 404);`,

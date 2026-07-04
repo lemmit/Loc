@@ -253,7 +253,13 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   if (dispatchFile != null) out.set("app/dispatch.py", dispatchFile);
 
   out.set("app/http/__init__.py", "");
-  out.set("app/http/problem.py", renderProblemPy(collectOpUnions([merged])));
+  out.set(
+    "app/http/problem.py",
+    renderProblemPy(
+      collectOpUnions([merged]),
+      merged.aggregates.some((a) => (a.uniqueKeys?.length ?? 0) > 0),
+    ),
+  );
   out.set("app/http/wire_models.py", renderPyWireModels(merged));
   const viewsFile = buildPyViewsFile(merged, hasDispatch);
   if (viewsFile != null) out.set("app/http/views_routes.py", viewsFile);
@@ -781,13 +787,36 @@ function collectOpUnions(contexts: readonly EnrichedBoundedContextIR[]): PyOpUni
 // ForbiddenError → 403, AggregateNotFoundError → 404, and FastAPI's
 // RequestValidationError → 422 with the §3.2 `errors[]` extension
 // (RFC 6901 pointers), matching the other backends' ProblemDetails.
-function renderProblemPy(opUnions: PyOpUnion[]): string {
+function renderProblemPy(opUnions: PyOpUnion[], hasUniqueKeys = false): string {
   // JSON literals are valid Python for the value kinds used here (strings,
   // arrays, objects — no booleans/nulls cross).
   const responsesDict = JSON.stringify(Object.fromEntries(opUnions.map((u) => [u.path, u.name])));
   const componentsDict = JSON.stringify(
     Object.fromEntries(opUnions.map((u) => [u.name, u.schema])),
   );
+  // The 23505 → 409 IntegrityError handler (+ its import) is emitted only when
+  // some aggregate declares a `unique (...)` key, so a unique-free app stays
+  // byte-identical (the proposal's strict-additivity guarantee).
+  const integrityImport = hasUniqueKeys ? "\nfrom sqlalchemy.exc import IntegrityError" : "";
+  const integrityHandler = hasUniqueKeys
+    ? `    @app.exception_handler(IntegrityError)
+    async def _integrity(request: Request, err: IntegrityError) -> JSONResponse:
+        # A Postgres unique_violation (SQLSTATE 23505) — e.g. a \`unique (...)\`
+        # domain invariant breaching its derived DB unique index — maps to a
+        # friendly 409 Conflict instead of a raw 500.  Other integrity breaches
+        # (FK/check) are conflicts too, so they share the 409.  asyncpg exposes
+        # \`.sqlstate\` on the driver error SQLAlchemy wraps in \`.orig\`.
+        sqlstate = getattr(getattr(err, "orig", None), "sqlstate", None)
+        if sqlstate == "23505":
+            log("warn", "disallowed", message=str(err), status=409)
+            return problem(
+                request, 409, "Conflict", "A resource with these values already exists."
+            )
+        log("warn", "disallowed", message=str(err), status=409)
+        return problem(request, 409, "Conflict", "The request conflicts with the current state.")
+
+`
+    : "";
   return `"""RFC 7807 problem responses + exception handlers.  Auto-generated."""
 
 from typing import Any, cast
@@ -796,7 +825,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel${integrityImport}
 
 from app.domain.errors import (
     AggregateNotFoundError,
@@ -928,7 +957,7 @@ def install_error_handlers(app: FastAPI) -> None:
         log("warn", "domain_error", message=str(err), status=400)
         return problem(request, 400, "Bad Request", str(err))
 
-    @app.exception_handler(AggregateNotFoundError)
+${integrityHandler}    @app.exception_handler(AggregateNotFoundError)
     async def _not_found(request: Request, err: AggregateNotFoundError) -> JSONResponse:
         log("warn", "not_found", message=str(err), status=404)
         return problem(request, 404, "Not Found", str(err))

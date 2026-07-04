@@ -477,14 +477,53 @@ function renderCmdConstructorBody(args: string[], indent: string): string[] {
   return args.map((a, i) => `${indent}${a}${i < args.length - 1 ? "," : ""}`);
 }
 
-export function renderExceptionFilter(ns: string, options?: { usesValidators?: boolean }): string {
+export function renderExceptionFilter(
+  ns: string,
+  options?: { usesValidators?: boolean; usingDapper?: boolean; hasUniqueKeys?: boolean },
+): string {
   const usesValidators = !!options?.usesValidators;
+  // A project with no `unique (...)` key emits no 23505 → 409 arm, so a model
+  // without uniqueness is byte-identical to before the feature (the proposal's
+  // strict-additivity guarantee — only a `unique` index can raise 23505).
+  const hasUniqueKeys = !!options?.hasUniqueKeys;
+  // Persistence selection (D-REALIZATION-AXES): the EF adapter surfaces a
+  // Postgres unique-violation wrapped in `Microsoft.EntityFrameworkCore.
+  // DbUpdateException`; the Dapper adapter throws the bare
+  // `Npgsql.PostgresException`.  The unwrapped-Npgsql arm covers both driver
+  // levels, but the `DbUpdateException` wrapper clause is only emitted for the
+  // EF adapter — under `persistence: dapper`, `Microsoft.EntityFrameworkCore`
+  // isn't referenced (see the caveat at ~api.ts:119), so naming that type would
+  // be a CS0246.
+  const usingDapper = !!options?.usingDapper;
   // `Activity.Current` is referenced unconditionally below; the
   // `using System.Diagnostics;` is therefore part of the file's
   // baseline imports rather than something we'd derive from the body.
   // Confined to this file — adding `System.Diagnostics` project-wide
   // would expose `Activity` (a common DDD entity name) to every
   // generated source file.
+  // Postgres unique_violation (SQLSTATE 23505) → 409 Conflict — a `unique (...)`
+  // domain invariant's DB index rejected the write.  The bare
+  // `Npgsql.PostgresException` is the Dapper path; the EF adapter wraps it in a
+  // `DbUpdateException`.  Emitted only when the project declares a `unique` key.
+  const uniqueConflictArm = hasUniqueKeys
+    ? `
+        if (context.Exception is Npgsql.PostgresException { SqlState: "23505" }${
+          usingDapper
+            ? ""
+            : `
+            || (context.Exception is Microsoft.EntityFrameworkCore.DbUpdateException due
+                && due.InnerException is Npgsql.PostgresException { SqlState: "23505" })`
+        })
+        {
+            ${renderDotnetLogCall("disallowed", [
+              { name: "message", valueExpr: `"A resource with these values already exists."` },
+              { name: "status", valueExpr: "409" },
+            ])}
+            context.Result = Problem(context, 409, "Conflict", "A resource with these values already exists.", trace_id);
+            context.ExceptionHandled = true;
+            return;
+        }`
+    : "";
   return `// Auto-generated.${usesValidators ? "\nusing System.Collections.Generic;\nusing System.Linq;\nusing System.Text.Json;" : ""}
 using System.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
@@ -576,7 +615,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             context.Result = Problem(context, 409, "Disallowed", dx.Message, trace_id);
             context.ExceptionHandled = true;
             return;
-        }
+        }${uniqueConflictArm}
         if (context.Exception is DomainException de)
         {
             ${renderDotnetLogCall("domainError", [

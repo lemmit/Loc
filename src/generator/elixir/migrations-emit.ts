@@ -1,6 +1,7 @@
 import type {
   ColumnShape,
   ColumnType,
+  IndexShape,
   MigrationStep,
   MigrationsIR,
   TableShape,
@@ -50,6 +51,20 @@ function ectoDefaultClause(def: string | undefined): string {
  *  default (`public`) schema, preserving the unqualified output. */
 function prefixOpt(schema: string | undefined): string {
   return schema ? `, prefix: ${JSON.stringify(schema)}` : "";
+}
+
+/** Trailing Ecto `create index(...)` options for one `IndexShape`.
+ *  `, unique: true` for a unique index; `, where: "…"` for a partial index
+ *  (a `unique` key on a softDeletable aggregate — re-create after soft-delete
+ *  is allowed); an explicit `, name: "…"` for unique indexes so the
+ *  changeset's `unique_constraint` and the cross-backend 23505 → 409 mapping
+ *  reference the same deterministic constraint name.  FK / performance indexes
+ *  keep Ecto's default name (never referenced), so output is unchanged. */
+function ectoIndexOpts(i: IndexShape, prefix: string): string {
+  const unique = i.unique ? ", unique: true" : "";
+  const where = i.predicate ? `, where: ${JSON.stringify(i.predicate)}` : "";
+  const name = i.unique ? `, name: ${JSON.stringify(i.name)}` : "";
+  return `${unique}${where}${name}${prefix}`;
 }
 
 /** The `execute "CREATE SCHEMA …"` line (4-space indented, trailing
@@ -241,11 +256,10 @@ function renderInitialFile(table: TableShape, migrationName: string, appModule: 
   const ts = timestampsMacro(table);
   if (ts) colLines.push(`      ${ts}`);
   const prefix = prefixOpt(table.schema);
-  const indexLines = table.indexes.map((i) => {
-    const cols = i.columns.map((n) => `:${n}`).join(", ");
-    const unique = i.unique ? ", unique: true" : "";
-    return `    create index(:${i.table}, [${cols}]${unique}${prefix})`;
-  });
+  const indexLines = table.indexes.map(
+    (i) =>
+      `    create index(:${i.table}, [${i.columns.map((n) => `:${n}`).join(", ")}]${ectoIndexOpts(i, prefix)})`,
+  );
 
   return `defmodule ${appModule}.Repo.Migrations.${migrationName} do
   use Ecto.Migration
@@ -290,11 +304,10 @@ function renderInitialValueCollectionFile(
       );
     }
   }
-  const indexLines = table.indexes.map((i) => {
-    const cols = i.columns.map((n) => `:${n}`).join(", ");
-    const unique = i.unique ? ", unique: true" : "";
-    return `    create index(:${i.table}, [${cols}]${unique}${prefix})`;
-  });
+  const indexLines = table.indexes.map(
+    (i) =>
+      `    create index(:${i.table}, [${i.columns.map((n) => `:${n}`).join(", ")}]${ectoIndexOpts(i, prefix)})`,
+  );
   return `defmodule ${appModule}.Repo.Migrations.${migrationName} do
   use Ecto.Migration
 
@@ -336,11 +349,10 @@ function renderInitialJoinFile(
       );
     }
   }
-  const indexLines = table.indexes.map((i) => {
-    const cols = i.columns.map((n) => `:${n}`).join(", ");
-    const unique = i.unique ? ", unique: true" : "";
-    return `    create index(:${i.table}, [${cols}]${unique}${prefix})`;
-  });
+  const indexLines = table.indexes.map(
+    (i) =>
+      `    create index(:${i.table}, [${i.columns.map((n) => `:${n}`).join(", ")}]${ectoIndexOpts(i, prefix)})`,
+  );
   return `defmodule ${appModule}.Repo.Migrations.${migrationName} do
   use Ecto.Migration
 
@@ -415,8 +427,9 @@ function renderEctoStep(step: MigrationStep): string[] {
       ];
     case "addIndex": {
       const cols = step.index.columns.map((n) => `:${n}`).join(", ");
-      const unique = step.index.unique ? ", unique: true" : "";
-      return [`create index(:${step.index.table}, [${cols}]${unique}${prefixOpt(step.schema)})`];
+      return [
+        `create index(:${step.index.table}, [${cols}]${ectoIndexOpts(step.index, prefixOpt(step.schema))})`,
+      ];
     }
     case "dropIndex":
       return [`drop index(:${step.table}, name: "${step.name}"${prefixOpt(step.schema)})`];
@@ -443,8 +456,7 @@ function renderCreateTableInline(table: TableShape): string[] {
   lines.push("end");
   for (const idx of table.indexes) {
     const cols = idx.columns.map((n) => `:${n}`).join(", ");
-    const unique = idx.unique ? ", unique: true" : "";
-    lines.push(`create index(:${table.name}, [${cols}]${unique}${prefix})`);
+    lines.push(`create index(:${table.name}, [${cols}]${ectoIndexOpts(idx, prefix)})`);
   }
   return lines;
 }

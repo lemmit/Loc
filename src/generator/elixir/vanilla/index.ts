@@ -65,8 +65,16 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   const appModule = toModulePrefix(appName);
 
   // Shared cross-controller helper modules (Slice 4).  Emitted once
-  // per project; controllers `alias` the public functions.
-  out.set(`lib/${appName}_web/problem_details.ex`, renderVanillaProblemDetailsModule(appModule));
+  // per project; controllers `alias` the public functions.  The 23505 → 409
+  // conflict branch is emitted only when some aggregate declares a `unique (...)`
+  // key, so a unique-free project stays byte-identical (strict additivity).
+  const hasUniqueKeys = contexts.some((c) =>
+    c.aggregates.some((a) => (a.uniqueKeys?.length ?? 0) > 0),
+  );
+  out.set(
+    `lib/${appName}_web/problem_details.ex`,
+    renderVanillaProblemDetailsModule(appModule, hasUniqueKeys),
+  );
 
   // Resource-adapter helper modules — `lib/<app>/resources/<source_type>.ex`.
   // Plain Elixir helper fns from the shared Phoenix adapter set.  Workflows'

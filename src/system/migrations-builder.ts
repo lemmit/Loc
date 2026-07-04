@@ -850,6 +850,35 @@ function collectAggregatePairs(module: EnrichedSubdomainIR): AggCtxPair[] {
   return acc;
 }
 
+/** Deterministic constraint name for a `unique (...)` index:
+ *  `<table>_<col1>_<col2>_uq`.  The name is the join key the backends'
+ *  23505 → 409 conflict mapping resolves back to a field, so it must be a
+ *  pure function of the table + columns (uniqueness-and-indexes.md §4). */
+export function uniqueIndexName(tableName: string, columns: readonly string[]): string {
+  return `${tableName}_${columns.join("_")}_uq`;
+}
+
+/** Derive the DB unique index for each `unique (...)` declaration on the
+ *  aggregate (uniqueness-and-indexes.md §4.1).  Columns snake-case to their
+ *  physical names (validated scalar/id/enum fields — one column each).  A
+ *  `softDeletable` aggregate gets a PARTIAL index (`WHERE is_deleted =
+ *  false`) so re-creating a row whose predecessor was soft-deleted is
+ *  allowed.  Empty when the aggregate declares no `unique` keys. */
+function uniqueIndexesFor(agg: AggregateIR, tableName: string): IndexShape[] {
+  if (!agg.uniqueKeys || agg.uniqueKeys.length === 0) return [];
+  const softDeletable = agg.capabilities?.includes("softDeletable") ?? false;
+  return agg.uniqueKeys.map((uk) => {
+    const columns = uk.columns.map((c) => snake(c));
+    return {
+      name: uniqueIndexName(tableName, columns),
+      table: tableName,
+      columns,
+      unique: true,
+      ...(softDeletable ? { predicate: "is_deleted = false" } : {}),
+    };
+  });
+}
+
 function tableForAggregate(
   agg: AggregateIR,
   ownerModule: string,
@@ -860,7 +889,7 @@ function tableForAggregate(
     { name: "id", type: idColumnType(agg.idValueType), nullable: false },
   ];
   const foreignKeys: FKShape[] = [];
-  const indexes: IndexShape[] = [];
+  const indexes: IndexShape[] = uniqueIndexesFor(agg, tableName);
 
   for (const f of agg.fields) {
     // Reference collections (`Target id[]`) lower to a separate join
@@ -916,7 +945,7 @@ function tphTableForAggregate(
     mapField(kindField).column,
   ];
   const foreignKeys: FKShape[] = [];
-  const indexes: IndexShape[] = [];
+  const indexes: IndexShape[] = uniqueIndexesFor(base, tableName);
   const seen = new Set(columns.map((c) => c.name));
 
   const pushField = (f: FieldIR, forceNullable: boolean): void => {

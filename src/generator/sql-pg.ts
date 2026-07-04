@@ -118,9 +118,12 @@ function renderFkConstraint(fk: FKShape, schema?: string): string {
 
 function renderAddIndex(idx: IndexShape, schema?: string): string {
   const unique = idx.unique ? "UNIQUE " : "";
+  // Partial index (`WHERE …`) — set on a `unique` index derived for a
+  // softDeletable aggregate so re-create after soft-delete is allowed.
+  const where = idx.predicate ? ` WHERE ${idx.predicate}` : "";
   return (
     `CREATE ${unique}INDEX ${ident(idx.name)} ON ${qualified(schema, idx.table)} ` +
-    `(${idx.columns.map(ident).join(", ")});`
+    `(${idx.columns.map(ident).join(", ")})${where};`
   );
 }
 

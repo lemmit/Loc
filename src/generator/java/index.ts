@@ -269,7 +269,12 @@ function emitProjectFromContexts(
   place("_Namespace.java", "enum", renderPackageMarker(pkgFor("enum")));
   place("_Namespace.java", "valueobject", renderPackageMarker(pkgFor("valueobject")));
   place("_Namespace.java", "id", renderPackageMarker(pkgFor("id")));
-  place("ApiExceptionAdvice.java", "api-common", renderApiExceptionAdvice(basePkg));
+  // 23505 → 409 arm is emitted only when some aggregate declares a `unique (...)`
+  // key, so a unique-free project's advice stays byte-identical (strict additivity).
+  const hasUniqueKeys = contexts.some((c) =>
+    c.aggregates.some((a) => (a.uniqueKeys?.length ?? 0) > 0),
+  );
+  place("ApiExceptionAdvice.java", "api-common", renderApiExceptionAdvice(basePkg, hasUniqueKeys));
   // Observability catalog — always-on, like dotnet's request log +
   // Hono's pino lines (the obs e2e suites assert this envelope).
   place("CatalogLog.java", "config", renderCatalogLogger(basePkg));

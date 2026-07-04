@@ -151,6 +151,11 @@ system DevPlatform {
                 invariant name.length > 0
                 invariant pipelines.count >= 0 when active == true
 
+                // uniqueness invariant (uniqueness-and-indexes.md): a project
+                // name is a natural key — derives a DB unique index + a 23505 → 409
+                // conflict mapping across every backend.
+                unique (name)
+
                 // derived prop with match + ternary + unary + paren + literals
                 derived headline: string = match {
                     (visibility == Public) => "public: " + name,

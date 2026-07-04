@@ -225,6 +225,8 @@ export function printStructural(node: AstNode): string {
       return printDerivedProp(node as DerivedProp);
     case "Invariant":
       return printInvariant(node as Invariant);
+    case "Unique":
+      return printUnique(node as import("../generated/ast.js").Unique);
     case "Containment":
       return printContainment(node as Containment);
     case "Property":
@@ -958,6 +960,10 @@ function printInvariant(node: Invariant): string {
   const priv = node.serverOnly ? "private " : "";
   const guard = node.guard ? ` when ${printExpr(node.guard)}` : "";
   return `${priv}invariant ${printExpr(node.expr)}${guard}`;
+}
+
+function printUnique(node: import("../generated/ast.js").Unique): string {
+  return `unique (${node.columns.join(", ")})`;
 }
 
 function printFunctionDecl(node: FunctionDecl): string {

@@ -11,6 +11,7 @@ import type {
   Destroy,
   EntityPart,
   Model,
+  Unique,
   ValueObject,
   Workflow,
 } from "../generated/ast.js";
@@ -33,6 +34,7 @@ import {
   isPreconditionStmt,
   isPrimitiveType,
   isProperty,
+  isUnique,
   isValueObject,
   isWorkflow,
 } from "../generated/ast.js";
@@ -486,6 +488,7 @@ export function checkAggregate(agg: Aggregate, accept: ValidationAcceptor): void
     }
     if (isContainment(m)) checkContainment(m, agg, accept);
     if (isInvariant(m)) checkInvariant(m, envForAggregate(agg), accept);
+    if (isUnique(m)) checkUnique(m, agg, accept);
     if (isProperty(m) && m.check) checkPropertyCheck(m, envForAggregate(agg), accept);
     if (isProperty(m) && m.default) checkPropertyDefault(m, envForAggregate(agg), accept);
     if (isDerivedProp(m)) {
@@ -545,6 +548,63 @@ export function checkAggregate(agg: Aggregate, accept: ValidationAcceptor): void
     }
   }
   checkLifecycleConflicts(agg, accept);
+}
+
+/** Validate a `unique (...)` uniqueness invariant (uniqueness-and-indexes.md).
+ *  AST-level checks (fast editor feedback, no type resolution needed):
+ *   - every listed column resolves to a declared property field
+ *     (`loom.unique-unknown-field`, with the known field list);
+ *   - a column named at most once per key (`loom.unique-duplicate-column`);
+ *   - a collection (`[]`) field can't back a single-column unique key
+ *     (`loom.unique-collection-field`);
+ *   - uniqueness needs a single table to constrain, so it is gated off
+ *     event-sourced / non-relational (`document` / `embedded`) aggregates
+ *     (`loom.unique-on-event-sourced`) — the v1 deferral in §7.
+ *  Value-object columns (multi-column, no single physical column) are
+ *  rejected at IR level, where the resolved type is available. */
+function checkUnique(u: Unique, agg: Aggregate, accept: ValidationAcceptor): void {
+  const props = agg.members.filter(isProperty);
+  const fieldNames = new Set(props.map((p) => p.name));
+
+  if (agg.persistedAs === "eventLog" || agg.shape === "document" || agg.shape === "embedded") {
+    const how = agg.persistedAs === "eventLog" ? "event-sourced" : `${agg.shape}-shaped`;
+    accept(
+      "error",
+      `\`unique (...)\` on ${how} aggregate '${agg.name}' is not supported — uniqueness is enforced by a DB unique index, which needs a single relational table to constrain.`,
+      { node: u, code: "loom.unique-on-event-sourced" },
+    );
+    return;
+  }
+
+  const seen = new Set<string>();
+  u.columns.forEach((col, i) => {
+    if (seen.has(col)) {
+      accept("error", `\`unique\` on aggregate '${agg.name}' lists column '${col}' twice.`, {
+        node: u,
+        property: "columns",
+        index: i,
+        code: "loom.unique-duplicate-column",
+      });
+    }
+    seen.add(col);
+    if (!fieldNames.has(col)) {
+      const known = [...fieldNames].join(", ") || "<none>";
+      accept(
+        "error",
+        `\`unique\` on aggregate '${agg.name}' references unknown field '${col}'. Known fields: ${known}.`,
+        { node: u, property: "columns", index: i, code: "loom.unique-unknown-field" },
+      );
+      return;
+    }
+    const prop = props.find((p) => p.name === col);
+    if (prop?.type?.array) {
+      accept(
+        "error",
+        `\`unique\` column '${col}' on aggregate '${agg.name}' is a collection; a uniqueness key must list single-valued fields.`,
+        { node: u, property: "columns", index: i, code: "loom.unique-collection-field" },
+      );
+    }
+  });
 }
 
 /** Name-uniqueness rules for the lifecycle `create` / `destroy`

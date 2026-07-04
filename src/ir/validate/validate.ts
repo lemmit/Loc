@@ -23,6 +23,7 @@ import {
   validatePermissionRefs,
   validateUnionFindShapes,
   validateUnionsUnimplemented,
+  validateUniqueColumns,
   validateUnmappedErrorStatuses,
   validateVariantMatch,
   validateWhenGateSupport,
@@ -111,6 +112,8 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
   // Harmless for single-file projects: every collection is small
   // and the checks short-circuit when there are no duplicates.
   validateWorkspaceUniqueness(loom, diags);
+  // `unique (...)` value-object column rejection (needs the resolved IR type).
+  validateUniqueColumns(loom, diags);
   // System-wide: warn when a workflow event consumer subscribes to an event no
   // channel carries (it can't be dispatched in-process).  Needs every
   // context's channels, so it runs once over the whole model, not per-context.

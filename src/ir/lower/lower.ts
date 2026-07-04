@@ -84,6 +84,7 @@ import {
   isTestE2E,
   isThemeBlock,
   isUi,
+  isUnique,
   isUserBlock,
   isValueObject,
   isView,
@@ -168,6 +169,7 @@ import {
   lowerInvariant,
   lowerOperation,
   lowerPropertyChecks,
+  lowerUnique,
 } from "./lower-members.js";
 import { lowerRequirement, lowerSolution, lowerTestCase } from "./lower-requirements.js";
 import { lowerStatement } from "./lower-stmt.js";
@@ -1190,6 +1192,7 @@ function lowerAggregate(
     ...agg.members.filter(isInvariant).map((i) => lowerInvariant(i, inner)),
     ...lowerPropertyChecks(props, inner),
   ];
+  const uniqueKeys = agg.members.filter(isUnique).map(lowerUnique);
   const functions = agg.members.filter(isFunctionDecl).map((f) => lowerFunction(f, inner));
   const operations = (agg.members.filter(isOperation) as Operation[]).map((op) =>
     lowerOperation(op, inner),
@@ -1220,6 +1223,7 @@ function lowerAggregate(
     contains: containments,
     derived,
     invariants,
+    uniqueKeys: uniqueKeys.length > 0 ? uniqueKeys : undefined,
     functions,
     operations,
     creates,

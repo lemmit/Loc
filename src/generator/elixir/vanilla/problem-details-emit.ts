@@ -11,7 +11,83 @@
 
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 
-export function renderVanillaProblemDetailsModule(appModule: string): string {
+export function renderVanillaProblemDetailsModule(
+  appModule: string,
+  hasUniqueKeys = false,
+): string {
+  const log422 = renderPhoenixLogCall("domainError", [
+    { name: "message", valueExpr: `"Validation failed"` },
+    { name: "status", valueExpr: "422" },
+  ]);
+  // The 422 body — shared by the plain (no-`unique`) and the unique-aware forms.
+  const body422 = `    ${log422}
+
+    pointer_errors =
+      changeset.errors
+      |> List.flatten()
+      |> Enum.map(&render_changeset_error/1)
+      |> Enum.reject(&is_nil/1)
+
+    body =
+      Jason.encode!(%{
+        type: "about:blank",
+        title: "Validation failed",
+        status: 422,
+        detail: "One or more fields are invalid.",
+        instance: conn.request_path,
+        errors: pointer_errors
+      })
+
+    trace_id = conn |> get_resp_header("x-request-id") |> List.first("")
+
+    conn
+    |> put_resp_content_type("application/problem+json")
+    |> put_resp_header("x-request-id", trace_id)
+    |> send_resp(422, body)`;
+  // A `unique (...)` breach surfaces as a changeset `constraint: :unique` error
+  // (Ecto.Changeset.unique_constraint/3), which is a CONFLICT (409), not a 422.
+  // Only emit that branch when the app declares a `unique` key, so a unique-free
+  // app is byte-identical (strict additivity).
+  const conflictDoc = hasUniqueKeys
+    ? `
+
+  A changeset carrying a \`unique_constraint\` error (a breached \`unique (...)\`
+  domain invariant — the DB unique index raised 23505, which
+  \`Ecto.Changeset.unique_constraint/3\` converted into a changeset error tagged
+  \`constraint: :unique\`) is a CONFLICT, not a validation failure: it responds
+  409 instead of 422 (cross-backend parity with the Hono 23505 → 409 mapping).`
+    : "";
+  const responseFns = hasUniqueKeys
+    ? `  def validation_error_response(conn, %Ecto.Changeset{} = changeset) do
+    if unique_conflict?(changeset) do
+      problem_response(
+        conn,
+        409,
+        "Conflict",
+        "A record with these values already exists."
+      )
+    else
+      validation_failed_response(conn, changeset)
+    end
+  end
+
+  # A unique-constraint violation surfaces as a changeset error whose opts carry
+  # \`constraint: :unique\` (added by \`Ecto.Changeset.unique_constraint/3\` when the
+  # DB reports 23505).  Validation errors never carry that tag, so its presence
+  # unambiguously distinguishes a 409 Conflict from a 422 validation failure.
+  defp unique_conflict?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn
+      {_field, {_msg, opts}} -> Keyword.get(opts, :constraint) == :unique
+      _ -> false
+    end)
+  end
+
+  defp validation_failed_response(conn, %Ecto.Changeset{} = changeset) do
+${body422}
+  end`
+    : `  def validation_error_response(conn, %Ecto.Changeset{} = changeset) do
+${body422}
+  end`;
   return `# Auto-generated.  Do not edit by hand.
 defmodule ${appModule}Web.ProblemDetails do
   @moduledoc """
@@ -43,37 +119,9 @@ defmodule ${appModule}Web.ProblemDetails do
 
   @doc """
   Send a 422 ProblemDetails response carrying the §3.2 \`errors[]\`
-  extension built from an \`Ecto.Changeset\` errors map.
+  extension built from an \`Ecto.Changeset\` errors map.${conflictDoc}
   """
-  def validation_error_response(conn, %Ecto.Changeset{} = changeset) do
-    ${renderPhoenixLogCall("domainError", [
-      { name: "message", valueExpr: `"Validation failed"` },
-      { name: "status", valueExpr: "422" },
-    ])}
-
-    pointer_errors =
-      changeset.errors
-      |> List.flatten()
-      |> Enum.map(&render_changeset_error/1)
-      |> Enum.reject(&is_nil/1)
-
-    body =
-      Jason.encode!(%{
-        type: "about:blank",
-        title: "Validation failed",
-        status: 422,
-        detail: "One or more fields are invalid.",
-        instance: conn.request_path,
-        errors: pointer_errors
-      })
-
-    trace_id = conn |> get_resp_header("x-request-id") |> List.first("")
-
-    conn
-    |> put_resp_content_type("application/problem+json")
-    |> put_resp_header("x-request-id", trace_id)
-    |> send_resp(422, body)
-  end
+${responseFns}
 
   @doc """
   Send a 404 ProblemDetails response for a missing record.

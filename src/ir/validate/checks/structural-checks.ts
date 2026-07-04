@@ -195,6 +195,43 @@ export function validateDuplicateTables(sys: EnrichedSystemIR, diags: LoomDiagno
 }
 
 // ---------------------------------------------------------------------------
+// `unique (...)` column-type check (uniqueness-and-indexes.md).  The AST
+// validator already rejected unknown / collection columns and gated the
+// declaration off event-sourced / non-relational aggregates; this leaf
+// catches the one restriction that needs the resolved IR type: a
+// value-object column.  A `Money` field destructures into several physical
+// columns (`price_amount`, `price_currency`), so `unique (price)` has no
+// single column to constrain — reject it rather than derive a broken index.
+// ---------------------------------------------------------------------------
+
+export function validateUniqueColumns(loom: EnrichedLoomModel, diags: LoomDiagnostic[]): void {
+  for (const ctx of allContexts(loom)) {
+    for (const agg of ctx.aggregates) {
+      if (!agg.uniqueKeys || agg.uniqueKeys.length === 0) continue;
+      const byName = new Map(agg.fields.map((f) => [f.name, f]));
+      for (const uk of agg.uniqueKeys) {
+        for (const col of uk.columns) {
+          const field = byName.get(col);
+          if (!field) continue; // unknown-field already reported at AST level
+          const base = field.type.kind === "optional" ? field.type.inner : field.type;
+          if (base.kind === "valueobject") {
+            diags.push({
+              severity: "error",
+              code: "loom.unique-valueobject-field",
+              source: `${ctx.name}/${agg.name}`,
+              message:
+                `\`unique\` column '${col}' on aggregate '${agg.name}' is a value object, which ` +
+                `stores as several columns — a uniqueness key must list single-column ` +
+                `(scalar / enum / id) fields.`,
+            });
+          }
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Find-name collision check.  The TS repository emits two methods every
 // repo gets for free: `save(aggregate)` and `findById(id)`.  A
 // user-declared `find save(...)` or `find findById(...)` produces two

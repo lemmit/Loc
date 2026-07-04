@@ -426,7 +426,13 @@ function emitProjectFromContexts(
   // before the exception filter render so its FluentValidation
   // arm is gated on the same flag.
   const usesValidators = merged.aggregates.some(hasAnyWireValidator);
-  out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns, { usesValidators }));
+  // Only emit the 23505 → 409 arm when some aggregate declares a `unique (...)`
+  // key — a unique-free project stays byte-identical (strict additivity).
+  const hasUniqueKeys = merged.aggregates.some((a) => (a.uniqueKeys?.length ?? 0) > 0);
+  out.set(
+    "Api/DomainExceptionFilter.cs",
+    renderExceptionFilter(ns, { usesValidators, usingDapper, hasUniqueKeys }),
+  );
   out.set("Api/ProblemDetailsResponsesFilter.cs", renderProblemDetailsFilter(ns));
   out.set(
     "Api/ListResponseWrapperFilter.cs",

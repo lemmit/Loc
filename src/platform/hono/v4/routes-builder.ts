@@ -748,6 +748,25 @@ export function buildRoutesFile(
   lines.push(`      ${renderHonoLogCall("notFound", `aggregate: "${agg.name}", status: 404`)}`);
   lines.push(`      return problem(404, "Not Found", err.message);`);
   lines.push(`    }`);
+  // PG unique_violation (SQLSTATE 23505) — a `unique (...)` domain invariant
+  // was breached (the DB unique index is the enforcement contract,
+  // uniqueness-and-indexes.md D-UNIQUE-DB-AUTHORITATIVE).  Map to 409 Conflict
+  // (mirrors the local 23503 FK-violation handling on the delete route).  The
+  // constraint name (`<table>_<cols>_uq`) rides the pg error for traceability.
+  // Gated on a declared `unique` key so a model with none emits byte-identically
+  // (the proposal's strict-additivity guarantee) — only such a table can 23505.
+  if ((agg.uniqueKeys?.length ?? 0) > 0) {
+    lines.push(
+      `    if (err && typeof err === "object" && (err as { code?: string }).code === "23505") {`,
+    );
+    lines.push(
+      `      ${renderHonoLogCall("disallowed", `aggregate: "${agg.name}", message: (err as { constraint?: string }).constraint ?? "unique_violation", status: 409`)}`,
+    );
+    lines.push(
+      `      return problem(409, "Conflict", \`A ${agg.name} with these values already exists.\`);`,
+    );
+    lines.push(`    }`);
+  }
   lines.push(`    if (err instanceof ExternHandlerError) {`);
   lines.push(
     `      ${renderHonoLogCall("externHandlerThrew", "aggregate: err.aggName, op: err.opName, error: err.message")}`,
