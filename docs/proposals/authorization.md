@@ -95,24 +95,33 @@ factored.
 both filters applied. Redundant data but trivially backward-compatible.
 Likely temporary if it happens at all.
 
-### Recommendation
+### Recommendation — RESOLVED (option A), 2026-07-04
 
-Go with **option A**. Concretely:
-1. Delete the `crossTenant` definition from §2 of this doc; cite
-   `multi-tenancy-design-note.md` as the owner.
-2. Make `DataKey` itself **opt-in** at the aggregate header (`aggregate
-   Order hierarchical { … }` or similar — naming TBD) so flat-tenancy
-   aggregates pay no cost.
-3. Specify that `DataKey`'s leftmost segment **is** the `TenantId`
-   multi-tenancy auto-stamps — one source of truth for the tenant claim,
-   no double-stamping.
-4. The `policy { data { allow read on Descendants } }` direction-vocabulary
-   only compiles for aggregates declared hierarchical; on flat aggregates,
-   `Self` is the only valid direction (and it's just `TenantId == claim`).
+**Adopted: option A (layered).** Build order in
+[`../plans/multi-tenancy-phase2.md`](../plans/multi-tenancy-phase2.md). The
+settled calls:
+1. **`crossTenant` and the tenant floor belong to
+   [`multi-tenancy-design-note.md`](./multi-tenancy-design-note.md)** (shipped in
+   Phase 1). This doc does not define them — it cites them.
+2. **`DataKey` rides the `tenantOwned` capability, not a new header.** A
+   `tenantOwned` aggregate gets a `dataKey` column (like `tenantId`); flat-tenancy
+   models that never declare `tenantOwned` pay nothing, and `crossTenant` /
+   unscoped aggregates get no `dataKey`. This keeps the per-aggregate axis at the
+   two values Phase 1 settled (`tenantOwned` / `crossTenant`) — **no third
+   `hierarchical` header, no new axis.** `Descendants`/`deep` is available on any
+   `tenantOwned` aggregate a `policy {}` asks it of.
+3. **`DataKey`'s leftmost segment is the tenant id** — one source of truth, no
+   double-stamping. `dataKey` is off the wire (a persistence column only).
+4. **`currentUser`'s path is a *derived* value, not an IdP claim** — resolved
+   per-request from the registry and exposed as `currentUser.orgPath` (Phase 2
+   plan P2.1). It is **not** a `user {}` claim; the `claims:` map is a static
+   token→field projection with no derived-value carrier (verified 2026-07-04).
+5. `Self`/`Descendants`/`All` direction vocabulary compiles for `tenantOwned`
+   aggregates; on an aggregate without a `dataKey` column, `Self` (≈ the flat
+   `tenantId == claim` floor) is the only meaningful direction.
 
-This needs explicit agreement before either proposal moves to grammar; the
-sections below describe the policy block in the form that will survive the
-reconciliation regardless of which option is chosen.
+The sections below describe the policy block; where §2 still reads as if `DataKey`
+is ambient-on-every-aggregate or an IdP claim, the calls above supersede it.
 
 ---
 
@@ -155,8 +164,11 @@ The design was settled collaboratively. Key reframings from the raw research:
    set-filter) and operation/view/workflow/field **gates** (parameterized
    point-checks) are distinct constructs. They share only Loom's filter
    expression language — not their semantics or evaluation.
-3. **DataKey + tenancy are ambient**, on by default; `crossTenant` opts out;
-   tenant isolation is a non-negotiable floor.
+3. **Tenancy is the floor (owned by multi-tenancy); `DataKey` is its opt-in
+   hierarchical extension.** Flat tenant isolation (`tenantId == claim`) is
+   Phase 1's non-negotiable floor; `crossTenant` opts out of it. `DataKey` is
+   carried by the `tenantOwned` capability — present exactly where tenant data
+   is — never injected on every aggregate (§0 recommendation, resolved).
 4. **Reuse, don't reinvent.** `user {}`, `currentUser`, `permissions {}`,
    `function`/`let`, and the per-backend filter lowering already exist.
 
@@ -173,49 +185,51 @@ The design was settled collaboratively. Key reframings from the raw research:
 
 ## 2. DataKey & tenancy
 
-> **Reconciliation (2026-06-17) — the tenancy half now defers to
-> [`multi-tenancy-design-note.md`](./multi-tenancy-design-note.md).** That note is
-> **canonical** for the flat tenancy primitive: it owns `tenancy by … of
-> Organization`, the **two-value** scope axis `tenantOwned` / `crossTenant` (the
-> `platform` scope is **dropped** — admin-only cross-tenant data is `crossTenant`
-> + an authz policy), the immutable-`parent` registry (`implements
-> "tenantRegistry"`), and the `tenantId` + denormalised `dataKey` columns (stamped
-> from the token at create; `parent` immutable ⇒ permanent paths). **This section
-> contributes only the hierarchical extension**: the `DataKey` materialized path
-> + the **directional access levels** this doc already uses (`Self` / `Descendants`
-> / `All`; Dynamics' `local`/`deep`/`global` ladder is the same thing, a mnemonic)
-> — *who may read*, an authorization concern, **not** a tenancy scope. So do **not** re-introduce
-> `crossTenant` / `platform` / the flat floor here; cite the multi-tenancy note
-> and keep only the `DataKey` type + directional predicates. (This resolves §0's
-> recommended option A.)
+> **Reconciliation — RESOLVED 2026-07-04 (option A).** Build order in
+> [`../plans/multi-tenancy-phase2.md`](../plans/multi-tenancy-phase2.md).
+> [`multi-tenancy-design-note.md`](./multi-tenancy-design-note.md) is **canonical**
+> for the flat tenancy primitive: `tenancy by … of Organization`, the **two-value**
+> scope axis `tenantOwned` / `crossTenant` (admin-only cross-tenant data is
+> `crossTenant` + an authz policy), and the immutable-`parent` registry
+> (`implements "tenantRegistry"`). **This section contributes only the
+> hierarchical extension**: the `DataKey` materialized path + the directional
+> access levels (`Self` / `Descendants` / `All`; Dynamics' `local`/`deep`/`global`
+> is the same ladder) — *who may read*, an authorization concern. Do **not**
+> re-introduce `crossTenant` / the flat floor here; cite the multi-tenancy note.
+> **Two corrections to the older prose below** (per the Phase 2 audit): `dataKey`
+> is **not** stamped "from the token" and is **not** on every aggregate — it is
+> **derived per-request** from the registry and carried by the **`tenantOwned`
+> capability** only.
 
 - **Construction:** `{rootTenantId}.{parentId}.…{tenantId}` — a materialized
-  path of **tenant ids**. A record carries the path of its owning tenant. `id`
-  identifies the record; `dataKey` scopes it. Ancestor/descendant checks are
+  path of **tenant (org) ids**. A record carries the path of its owning tenant.
+  `id` identifies the record; `dataKey` scopes it. Ancestor/descendant checks are
   pure prefix arithmetic — no tree queries at runtime.
-- **Ambient & off the wire.** Every aggregate gets a `dataKey` *persistence
-  column* automatically. It is **kept out of `wireShape`** (never serialized) —
-  clients deal in domain `id`. (Implementation note: `wireShape` doubles as the
-  wire DTO *and* the column list, so `dataKey` is a separate `AggregateIR` flag
-  the entity emitters materialize, **not** an entry in `AggregateIR.fields`.)
-- **Tenant isolation floor.** Every reachability filter is implicitly
-  `row.dataKey.rootTenant == currentUser.dataKey.rootTenant`. Not widenable by a
-  normal policy; only a `system`/admin scope crosses it. `All` therefore means
-  "all in my tenant," never the whole table.
-- **`crossTenant`** aggregate-header modifier lifts the floor for
-  reference/shared data (`aggregate Country crossTenant { … }`). Decision:
-  **keep the key column** (avoids conditional `wireShape`/emitter logic).
-- **`dataKey` claim** in `user {}`, mandatory whenever `auth: required` is in
-  play. `currentUser.dataKey` is a typed `currentUser` member access.
+- **Carried by `tenantOwned`, off the wire.** A `dataKey` *persistence column* is
+  provided by the `tenantOwned` capability (beside `tenantId`) — so it exists
+  exactly where tenant data is, and `crossTenant` / unscoped aggregates get none.
+  It is **kept out of `wireShape`** (never serialized) — clients deal in domain
+  `id`. (Implementation note: `dataKey` is a separate `AggregateIR` flag the
+  entity emitters materialize, **not** an entry in `AggregateIR.fields`.)
+- **Tenant isolation floor is multi-tenancy's, not `DataKey`'s.** The flat
+  `row.tenantId == currentUser.tenantId` floor (Phase 1) is the non-widenable
+  base; `All`/`global` means "all in my tenant," never the whole table. `DataKey`
+  only refines *within* that floor (`Self` ⊆ `Descendants` ⊆ my tenant).
+- **`currentUser.orgPath` is derived, not a claim.** It is resolved per-request
+  from the registry (Phase 2 plan P2.1) and memoized on the principal — **not** a
+  `user {}` field. The `claims:` map is a static token→field projection with no
+  derived-value carrier (verified 2026-07-04), so `dataKey`/`orgPath` cannot ride
+  it.
 - **Built-in `DataKey` type** with operations: `isAncestorOf`, `isDescendantOf`,
   `sameParent`, `isRoot`, `rootTenant`, `depth`. Every direction below compiles
   to these primitives, so backends emit, never re-derive.
 
 ```loom
-user { id: string, permissions: string[], dataKey: DataKey }
+user { id: string, permissions: string[], tenantId: guid }   // tenantId claim; orgPath is DERIVED, not declared
 
-aggregate Invoice { amount: Money, status: InvoiceStatus }   // dataKey ambient
-aggregate Country crossTenant { code: string, name: string } // tenant-exempt
+tenancy by user.tenantId of Organization
+aggregate Invoice with tenantOwned { amount: Money }          // tenantId + dataKey via the capability
+aggregate Country crossTenant { code: string, name: string }  // tenant-exempt; no dataKey
 ```
 
 ---
@@ -378,9 +392,16 @@ Ecto query-scope predicate: a stable per-entity predicate parameterized only by 
 
 ## 9. Settled defaults (open to revision in review)
 
-- **Baseline reachability (no policy declared): Strict Self** — a caller sees
-  only their own node; wider visibility is granted explicitly. (Safest posture.)
-- **`crossTenant` = keep-key** (key column retained, no conditional emitter logic).
+- **Baseline reachability (no policy declared): the shipped flat floor** —
+  `tenantId == claim`. This is `All`-within-tenant (every row in the caller's
+  tenant), matching Phase 1's shipped behavior. A **Strict Self** default (caller
+  sees only their own org node) is the safer hierarchical posture, but flipping
+  the baseline is a *behavior change from shipped flat tenancy* — so it is a
+  reviewed decision at P2.4, not a silent default. For a flat model the two
+  coincide (every org is root ⇒ `Self` == the whole tenant).
+- **`dataKey` exists only on `tenantOwned` aggregates** — `crossTenant` / unscoped
+  get no `dataKey` column (supersedes the earlier "`crossTenant` = keep-key",
+  which assumed a column on every aggregate).
 - **Tenant root = fixed segment 0** (`rootTenant`).
 - **`implies`** lands as an independent later phase.
 - **Explicit `all`/`any`** required only on mixed (AND+OR) blocks.
@@ -451,10 +472,18 @@ Verified by exploration; cited so the proposal is concrete, not aspirational.
 
 ## 11. Implementation phasing (documented; not started)
 
-1. **DataKey infra** — built-in type, ambient column (off `wireShape`),
-   `crossTenant`, `dataKey` claim, tenant floor. No policies yet.
+> Sequenced against [`../plans/multi-tenancy-phase2.md`](../plans/multi-tenancy-phase2.md):
+> that plan's P2.1–P2.3 deliver the `DataKey` infra (item 1 below); this doc's
+> `policy {}` machinery is P2.4 onward.
+
+1. **DataKey infra (= Phase 2 plan P2.1–P2.3)** — the `DataKey` built-in type +
+   ops; the derived `currentUser.orgPath` keystone (per-request, not a claim); the
+   `dataKey` column carried by the `tenantOwned` capability (off `wireShape`). No
+   policies yet. `crossTenant` + the flat floor are Phase 1 (already shipped) —
+   not built here.
 2. **`policy { data {} }` reachability** — directions + row-attribute clauses +
-   `function`/`let` helpers → .NET set filter. Baseline = Strict Self.
+   `function`/`let` helpers → .NET set filter. Baseline = the shipped flat floor
+   (§9); Strict Self is a reviewed opt-in, not the silent default.
 3. **Operation/view/workflow gates** → .NET handler pre-checks (403); relocate
    gating out of domain bodies.
 4. **TS/Hono + Phoenix/Ecto parity** for phases 2–3.

@@ -353,6 +353,14 @@ Immutable `parent` is what makes always-stamping cheap rather than expensive:
 > read, but then the stamp is **not** a pure claim copy. So the claim-copy framing
 > is contingent on session-enrichment; verify against the auth model before
 > relying on it.
+>
+> **SETTLED (2026-07-04, Phase 2 plan P2.1):** the audit confirmed there is **no
+> session-enrichment surface** — the `claims:` map is a static token→field
+> projection. So the plan adopts the fallback as the *primary* mechanism: a
+> **per-request memoized registry lookup**, exposed as `currentUser.orgPath`; the
+> stamp is a pure copy of that derived value. Token-carry stays a later
+> optimization (identical read shape). See
+> [`../plans/multi-tenancy-phase2.md`](../plans/multi-tenancy-phase2.md).
 
 Columns, all stamped at create from the token, present from v1:
 
