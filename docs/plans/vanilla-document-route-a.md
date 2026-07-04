@@ -106,17 +106,21 @@ The migration stays `create table(:orders) do add :data, :map; add :version …`
    jsonb keys + the response JSON are byte-identical to today (snake keys in the
    blob, camelCase on the wire, enum declared-casing, `@primary_key false` so no
    `id` leaks into embeds). The §14/§15 tests + a boot are the gate.
-2. **Value objects — CONFIRMED, and it exposes a latent relational bug.**
-   Verified 2026-07-04: the **relational** path already stores VOs as
-   `field :subtotal, :map` and renders `this.subtotal.amount` as
-   `record.subtotal.amount` — **struct-dot access on a string-keyed map, which
-   `BadMapError`s at runtime** (it compiles; the failure is boot-only). So
-   relational VO-subfield reads are silently broken today, while the shipped
-   *document* map path (`data["subtotal"]["amount"]`) handles them correctly.
-   Consequence: converging document naively onto the relational renderer would
-   **regress** VO-subfield reads. The fix is to make VOs `embeds_one` embedded
-   schemas (so `record.subtotal` is a `%Money{}` struct and `.amount` is real
-   struct access) — which also fixes the latent relational bug if applied there.
+2. **Value objects are provenance-ambiguous → typed VO structs are MANDATORY,
+   not optional (issue #1660).** Verified 2026-07-04: a vanilla VO is an untyped
+   `:map` whose **key type depends on origin** — a VO built in-memory (a `Money{…}`
+   ctor, or a VO-typed op/service param) is **atom-keyed** (`%{amount: 5}`), while
+   a VO loaded from jsonb (`this.<vo>`) is **string-keyed** (`%{"amount" => 5}`).
+   So `record.<vo>.amount` (struct-dot) crashes with `KeyError` on the DB-loaded
+   case, and `record.<vo>["amount"]` (bracket) returns `nil` / breaks the
+   in-memory case — **neither form is universally correct** (a naive bracket
+   switch was tried and regressed `domain-service-reading/mutating` +
+   `vanilla-inspect-redaction`). The ONLY sound fix is making VOs `embeds_one`
+   embedded schemas (`%Money{}`), so `record.<vo>` is a real struct on *every*
+   path and `.amount` is genuine struct access. This means slice 1 **must** emit
+   typed VO modules — it is not a "later" nicety. Filed as #1660 (a standalone
+   relational bug independent of this refactor); this refactor should land on top
+   of that fix, or subsume it.
    This is **net-new VO-module emission** (VOs are `:map` everywhere today, no VO
    struct module exists) and is the reason slice 1 is bigger than it looks.
    Options: (a) emit a document-local VO embedded schema and converge document
