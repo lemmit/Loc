@@ -145,8 +145,12 @@ describe("cross-backend inspect redaction — `sensitive(...)` renders as `<reda
     expect(inspectLine).toContain('"phone: "');
     expect(inspectLine).not.toMatch(/record\.contact\.phone\b/);
 
-    // Non-sensitive VO sibling is reached normally.
-    expect(inspectLine).toMatch(/record\.contact\.email\b/);
+    // Non-sensitive VO sibling reached normally — via the key-type-agnostic
+    // VO-subfield fallback (a VO map may be string- or atom-keyed; #1660), not
+    // struct-dot (`record.contact.email` would KeyError on the string-keyed map).
+    expect(inspectLine).toContain(
+      'Map.get(record.contact, :email, Map.get(record.contact, "email"))',
+    );
     // Non-sensitive top-level field reached normally (snake_cased).
     expect(inspectLine).toMatch(/record\.full_name\b/);
   });
