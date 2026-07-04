@@ -84,7 +84,7 @@ describe("Phoenix OIDC verifier emission", () => {
     // over the declared value (12-factor).
     expect(auth!).toContain('defp issuer, do: (System.get_env("OIDC_ISSUER"');
     expect(auth!).not.toContain("DEV STUB");
-    // JWKS discovered + cached, never re-resolved.
+    // JWKS discovered + cached in :persistent_term.
     expect(auth!).toContain(":persistent_term");
     expect(auth!).toContain("/.well-known/openid-configuration");
   });
@@ -97,6 +97,19 @@ describe("Phoenix OIDC verifier emission", () => {
     // would otherwise pin every later verify to 401 until restart.
     expect(auth).toContain("case fetch_jwks() do");
     expect(auth).toMatch(/\[\] ->\n\s+\[\]/);
+  });
+
+  it("refetches the JWKS on a kid miss (rate-limited) so IdP key rotation heals without a restart", async () => {
+    const files = await build(source({ oidc: true }));
+    const auth = files.get("api/lib/api_web/auth.ex")!;
+    // A kid the cached set doesn't know retries against a fresh fetch…
+    expect(auth).toContain("find_key(jwks(), kid) || find_key(refreshed_jwks(), kid)");
+    // …rate-limited (one refetch per 30s) so unknown-kid bursts can't
+    // hammer the IdP…
+    expect(auth).toContain(":jwks_refreshed_at");
+    expect(auth).toContain("if now - last < 30 do");
+    // …and a successful refetch replaces the cached set for later requests.
+    expect(auth).toContain(":persistent_term.put({__MODULE__, :jwks}, keys)");
   });
 
   it("maps claims onto the user shape via dotted paths (id ← sub)", async () => {

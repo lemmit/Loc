@@ -168,6 +168,27 @@ public sealed class OidcUserVerifier : IUserVerifier
         };
 
         TokenValidationResult result = await Handler.ValidateTokenAsync(token, parameters);
+        if (!result.IsValid && result.Exception is SecurityTokenSignatureKeyNotFoundException)
+        {
+            // Key rotation: an unknown signing key may be a NEW key the IdP
+            // rotated in after the configuration was cached.  RequestRefresh
+            // marks the cache stale (internally rate-limited by
+            // ConfigurationManager.RefreshInterval, so unknown-kid bursts
+            // can't hammer the IdP); re-validate once against fresh keys.
+            Configuration.RequestRefresh();
+            try
+            {
+                configuration = await Configuration.GetConfigurationAsync(cancellationToken);
+            }
+#pragma warning disable CA1031 // a refresh failure rejects (401), never 500
+            catch (Exception)
+#pragma warning restore CA1031
+            {
+                return null;
+            }
+            parameters.IssuerSigningKeys = configuration.SigningKeys;
+            result = await Handler.ValidateTokenAsync(token, parameters);
+        }
         if (!result.IsValid)
         {
             return null;

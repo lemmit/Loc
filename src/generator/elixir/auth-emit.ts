@@ -320,12 +320,18 @@ ${audienceFn}
     end
   end
 
+  # Key rotation: a kid the cached JWKS doesn't know may be a NEW key the
+  # IdP rotated in after we cached — refetch once (rate-limited) and retry
+  # before rejecting, so rotation heals without a restart (the other
+  # backends' JWKS clients do this out of the box).
   defp signing_key(kid) do
-    case Enum.find(jwks(), fn key -> key["kid"] == kid end) do
+    case find_key(jwks(), kid) || find_key(refreshed_jwks(), kid) do
       nil -> :error
       key_map -> {:ok, JOSE.JWK.from_map(key_map)}
     end
   end
+
+  defp find_key(keys, kid), do: Enum.find(keys, fn key -> key["kid"] == kid end)
 
   # iss must equal the configured issuer; exp must be in the future.
   defp check_claims(claims) do
@@ -361,6 +367,31 @@ ${audienceFn}
 
       keys ->
         keys
+    end
+  end
+
+  # Forced refetch on a kid miss, rate-limited to one fetch per 30s (a burst
+  # of unknown-kid tokens — e.g. garbage \`kid\`s from an attacker — must not
+  # hammer the IdP).  A successful refetch replaces the cache; a failed one
+  # leaves the previous keys in place, so known-kid tokens keep verifying
+  # through an IdP outage.
+  defp refreshed_jwks do
+    now = System.system_time(:second)
+    last = :persistent_term.get({__MODULE__, :jwks_refreshed_at}, 0)
+
+    if now - last < 30 do
+      []
+    else
+      :persistent_term.put({__MODULE__, :jwks_refreshed_at}, now)
+
+      case fetch_jwks() do
+        [] ->
+          []
+
+        keys ->
+          :persistent_term.put({__MODULE__, :jwks}, keys)
+          keys
+      end
     end
   end
 
