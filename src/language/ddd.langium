@@ -136,19 +136,20 @@ SessionMode returns string:
 Enforcement returns string:
     'denyByDefault' | 'opt';
 
-// System-level tenancy declaration (multi-tenancy Phase 1a — see
-// docs/plans/multi-tenancy-implementation.md).  Sibling to `user { … }`
-// and `auth { … }`: names WHICH user claim partitions the data
-// (`user.tenantId`) and WHICH aggregate is the tenant registry
-// (`of Organization`).  The `user.` prefix is fixed surface syntax, not
-// a general reference — `claim` must name a field of the system's
-// `user { … }` block and `registry` an aggregate in the system (both
-// verified by the phase-④/⑦ tenancy validators, not by scoping).  At
-// most one per system (validator enforces).
+// System-level tenancy declaration (multi-tenancy Phase 1a; cross-refs
+// since 1b.1 — see docs/plans/multi-tenancy-implementation.md).  Sibling
+// to `user { … }` and `auth { … }`: names WHICH user claim partitions
+// the data (`user.tenantId`) and WHICH aggregate is the tenant registry
+// (`of Organization`).  The `user.` prefix is fixed surface syntax; both
+// bindings are real cross-references — `claim` resolves against the
+// system's `user { … }` fields (a targeted `ddd-scope.ts` arm exposes
+// them in this position only) and `registry` against the globally
+// exported aggregates, so a bad name is a linking error, not a themed
+// validator code.  At most one per system (validator enforces).
 //
 //   tenancy by user.tenantId of Organization
 TenancyDecl:
-    'tenancy' 'by' 'user' '.' claim=ID 'of' registry=ID;
+    'tenancy' 'by' 'user' '.' claim=[UserField:UserFieldName] 'of' registry=[Aggregate:ID];
 
 // E2E test against a running deployable.  The body reuses the per-
 // aggregate TestStatement vocabulary (let / expect / bare-call), but
@@ -1952,7 +1953,14 @@ LValueIdent returns string:
        // so an assignment target naming a field `tenancy` / `crossTenant`
        // parses.  Hard only in the `TenancyDecl` head / `Aggregate` header
        // flag slot.
-       | 'tenancy' | 'crossTenant';
+       | 'tenancy' | 'crossTenant'
+       // Capability source-surface keywords — soft in l-value position so an
+       // assignment target naming a field `filter` / `stamp` / `implements`
+       // (`filter := s`) parses, completing #1645's admission (Property.name /
+       // LooseName / StateFieldName / MemberName / NameRefIdent all admit
+       // them; l-value position was the missed spot).  Hard only at
+       // aggregate / context member position.
+       | 'filter' | 'stamp' | 'implements';
 
 // ---------------------------------------------------------------------------
 // Expressions (precedence climbing, lowest to highest)

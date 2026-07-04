@@ -416,11 +416,16 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
       // more).  Provider-preset resolution lives in `lowerAuth`.
       auth = lowerAuth(m);
     } else if (isTenancyDecl(m)) {
-      // System-level tenancy declaration (multi-tenancy Phase 1a).  At
-      // most one per system (validator enforces; last wins if the parser
-      // accepts more).  Claim / registry are plain names here — the
-      // tenancy validators (slice 1a.3) verify they exist.
-      tenancy = { claimField: m.claim, registryName: m.registry };
+      // System-level tenancy declaration (multi-tenancy Phase 1a; real
+      // cross-references since 1b.1).  At most one per system (validator
+      // enforces; last wins if the parser accepts more).  Existence is the
+      // linker's job now — lowering stays total on an unresolved ref by
+      // falling back to the source text, so the IR downstream is unchanged
+      // (plain names).
+      tenancy = {
+        claimField: m.claim?.ref?.name ?? m.claim?.$refText ?? "",
+        registryName: m.registry?.ref?.name ?? m.registry?.$refText ?? "",
+      };
     } else if (isThemeBlock(m)) {
       // Theme props are name/value pairs; we lower into a typed
       // partial.  Validation (known names, hex colours, radius

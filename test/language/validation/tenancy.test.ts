@@ -1,8 +1,11 @@
 // AST-level tenancy declaration checks (multi-tenancy Phase 1a, slice 1a.3 —
 // docs/plans/multi-tenancy-implementation.md §1): duplicate `tenancy by`
-// declarations and the claim-field-exists rule (the tenancy twin of
-// `loom.auth-unknown-claim-field`).  The registry/stance checks need the
-// merged IR and are covered by `test/ir/tenancy-checks.test.ts`.
+// declarations, plus the LINKING errors that replaced the existence checks
+// in 1b.1 — the claim / registry bindings are real cross-references now, so
+// an unknown user field or aggregate is a parse-level "Could not resolve
+// reference …" diagnostic (formerly `loom.tenancy-unknown-claim` /
+// `loom.tenancy-registry-unknown`).  The stance checks need the merged IR
+// and are covered by `test/ir/tenancy-checks.test.ts`.
 
 import { describe, expect, it } from "vitest";
 import { parseString } from "../../_helpers/parse.js";
@@ -27,7 +30,7 @@ describe("tenancy by — AST validation", () => {
     expect(errors.filter((e) => /more than one 'tenancy by'/.test(e))).toHaveLength(1);
   });
 
-  it("flags a claim that is not a user field (loom.tenancy-unknown-claim)", async () => {
+  it("a claim that is not a user field is a linking error (cross-ref since 1b.1)", async () => {
     const { errors } = await parseString(`
       system Billder {
         user { id: guid  email: string }
@@ -40,12 +43,12 @@ describe("tenancy by — AST validation", () => {
         }
       }
     `);
-    expect(errors.some((e) => /tenancy claim targets unknown user field 'orgId'/.test(e))).toBe(
-      true,
-    );
+    expect(
+      errors.some((e) => /Could not resolve reference to UserField named 'orgId'/.test(e)),
+    ).toBe(true);
   });
 
-  it("flags a tenancy declaration without any user block (same code, user-block message)", async () => {
+  it("a tenancy declaration without any user block is a linking error on the claim", async () => {
     const { errors } = await parseString(`
       system Billder {
         tenancy by user.tenantId of Organization
@@ -57,13 +60,46 @@ describe("tenancy by — AST validation", () => {
         }
       }
     `);
+    // No `user { … }` block ⇒ the claim scope is empty ⇒ the reference
+    // cannot link.  Same fix as before: declare the claim field.
     expect(
-      errors.some((e) =>
-        /'tenancy by user.tenantId' requires a `user { … }` block declaring field 'tenantId'/.test(
-          e,
-        ),
-      ),
+      errors.some((e) => /Could not resolve reference to UserField named 'tenantId'/.test(e)),
     ).toBe(true);
+  });
+
+  it("a registry naming no aggregate is a linking error (cross-ref since 1b.1)", async () => {
+    const { errors } = await parseString(`
+      system Billder {
+        user { id: guid  tenantId: string }
+        tenancy by user.tenantId of Organization
+        subdomain Billing {
+          context Invoicing {
+            aggregate Invoice with tenantOwned { number: string }
+            repository Invoices for Invoice { }
+          }
+        }
+      }
+    `);
+    expect(
+      errors.some((e) => /Could not resolve reference to Aggregate named 'Organization'/.test(e)),
+    ).toBe(true);
+  });
+
+  it("does not offer user fields outside the tenancy claim position (targeted scope)", async () => {
+    // A bare user-field name in a type position must NOT resolve to the
+    // `user { … }` field — the scope arm is claim-slot-only.
+    const { errors } = await parseString(`
+      system Billder {
+        user { id: guid  tenantId: string }
+        subdomain Billing {
+          context Accounts {
+            aggregate Organization { field: tenantId }
+            repository Organizations for Organization { }
+          }
+        }
+      }
+    `);
+    expect(errors.some((e) => /Could not resolve reference/.test(e))).toBe(true);
   });
 
   it("accepts a single tenancy declaration whose claim is a declared user field", async () => {

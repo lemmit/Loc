@@ -1847,10 +1847,10 @@ export function isLValue(item: unknown): item is LValue {
     return reflection.isInstance(item, LValue.$type);
 }
 
-export type LValueIdent = 'action' | 'aggregates' | 'api' | 'by' | 'command' | 'contains' | 'contexts' | 'create' | 'crossTenant' | 'destroy' | 'envelope' | 'error' | 'handle' | 'id' | 'modules' | 'option' | 'or' | 'paged' | 'payload' | 'permissions' | 'query' | 'response' | 'store' | 'tenancy' | 'ui' | 'views' | 'workflows' | string;
+export type LValueIdent = 'action' | 'aggregates' | 'api' | 'by' | 'command' | 'contains' | 'contexts' | 'create' | 'crossTenant' | 'destroy' | 'envelope' | 'error' | 'filter' | 'handle' | 'id' | 'implements' | 'modules' | 'option' | 'or' | 'paged' | 'payload' | 'permissions' | 'query' | 'response' | 'stamp' | 'store' | 'tenancy' | 'ui' | 'views' | 'workflows' | string;
 
 export function isLValueIdent(item: unknown): item is LValueIdent {
-    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'create' || item === 'destroy' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'by' || item === 'handle' || item === 'action' || item === 'store' || item === 'tenancy' || item === 'crossTenant' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'api' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'create' || item === 'destroy' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'by' || item === 'handle' || item === 'action' || item === 'store' || item === 'tenancy' || item === 'crossTenant' || item === 'filter' || item === 'stamp' || item === 'implements' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export interface MacroArg extends langium.AstNode {
@@ -3225,8 +3225,8 @@ export function isTargetable(item: unknown): item is Targetable {
 export interface TenancyDecl extends langium.AstNode {
     readonly $container: System;
     readonly $type: 'TenancyDecl';
-    claim: string;
-    registry: string;
+    claim: langium.Reference<UserField>;
+    registry: langium.Reference<Aggregate>;
 }
 
 export const TenancyDecl = {
@@ -6394,10 +6394,12 @@ export class DddAstReflection extends langium.AbstractAstReflection {
             name: TenancyDecl.$type,
             properties: {
                 claim: {
-                    name: TenancyDecl.claim
+                    name: TenancyDecl.claim,
+                    referenceType: UserField.$type
                 },
                 registry: {
-                    name: TenancyDecl.registry
+                    name: TenancyDecl.registry,
+                    referenceType: Aggregate.$type
                 }
             },
             superTypes: [SystemMember.$type]

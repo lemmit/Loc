@@ -1,8 +1,11 @@
 // IR-level tenancy checks (multi-tenancy Phase 1a, slice 1a.3 —
-// docs/plans/multi-tenancy-implementation.md §1): registry existence, the
-// explicit-stance lint (registry + abstract exemptions), stance markers
-// without a `tenancy by` declaration, and conflicting markers.  Stance is
-// derived per aggregate via `classifyTenantStance` (derive-don't-stamp).
+// docs/plans/multi-tenancy-implementation.md §1): the explicit-stance lint
+// (registry + abstract exemptions), stance markers without a `tenancy by`
+// declaration, and conflicting markers.  Stance is derived per aggregate via
+// `classifyTenantStance` (derive-don't-stamp).  Registry existence is the
+// LINKER's job since 1b.1 (`of` is a real `[Aggregate:ID]` cross-reference —
+// covered in `test/language/validation/tenancy.test.ts`), so there is no
+// `loom.tenancy-registry-unknown` code any more.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -14,7 +17,6 @@ import { buildLoomModel } from "../_helpers/ir.js";
 import { parseString } from "../_helpers/parse.js";
 
 const TENANCY_CODES = new Set([
-  "loom.tenancy-registry-unknown",
   "loom.tenancy-stance-unmarked",
   "loom.tenant-owned-without-tenancy",
   "loom.cross-tenant-without-tenancy",
@@ -29,8 +31,12 @@ async function tenancyDiags(source: string): Promise<LoomDiagnostic[]> {
   );
 }
 
-describe("loom.tenancy-registry-unknown", () => {
-  it("errors when `of <Registry>` names no aggregate in the system", async () => {
+describe("registry existence is the linker's job (1b.1) — no IR code fires", () => {
+  it("an unknown `of <Registry>` produces zero IR-level tenancy diagnostics", async () => {
+    // The unresolved `[Aggregate:ID]` cross-reference is a parse-level
+    // "Could not resolve reference to Aggregate named 'Organization'."
+    // (asserted in test/language/validation/tenancy.test.ts); lowering
+    // stays total via the `$refText` fallback and no themed code fires.
     const diags = await tenancyDiags(`
       system Billder {
         user { id: guid  tenantId: string }
@@ -43,12 +49,7 @@ describe("loom.tenancy-registry-unknown", () => {
         }
       }
     `);
-    expect(diags).toHaveLength(1);
-    expect(diags[0]).toMatchObject({
-      severity: "error",
-      code: "loom.tenancy-registry-unknown",
-    });
-    expect(diags[0]!.message).toContain("'Organization'");
+    expect(diags).toEqual([]);
   });
 });
 

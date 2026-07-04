@@ -1,11 +1,12 @@
 // Tenancy surface — grammar slice 1a.1 of multi-tenancy Phase 1a
-// (docs/plans/multi-tenancy-implementation.md).  Covers the `tenancy by
-// user.<claim> of <Registry>` SystemMember, the `crossTenant` aggregate
-// header flag (the `isAbstract` pattern — plain, `ids`, and with-clause
-// combinations), and the soft-keyword escape hatches (`tenancy` /
-// `crossTenant` stay legal as field / parameter / expression names).
-// Semantic verification (claim exists, registry exists, stance lint) is
-// slice 1a.3 — not asserted here.
+// (docs/plans/multi-tenancy-implementation.md), upgraded to real Langium
+// cross-references in 1b.1.  Covers the `tenancy by user.<claim> of
+// <Registry>` SystemMember (claim → the system's `user { … }` field,
+// registry → an aggregate; both resolve via `.ref`), the `crossTenant`
+// aggregate header flag (the `isAbstract` pattern — plain, `ids`, and
+// with-clause combinations), and the soft-keyword escape hatches
+// (`tenancy` / `crossTenant` stay legal as field / parameter /
+// expression names).  The stance lint is slice 1a.3 — not asserted here.
 
 import { describe, expect, it } from "vitest";
 import type {
@@ -60,8 +61,17 @@ describe("tenancy by — SystemMember grammar", () => {
     const decl = systemOf(model).members.find(isTenancyDecl) as TenancyDecl | undefined;
     expect(decl).toBeDefined();
     expect(decl!.$type).toBe("TenancyDecl");
-    expect(decl!.claim).toBe("tenantId");
-    expect(decl!.registry).toBe("Organization");
+    // Both bindings are real cross-references (1b.1): the claim resolves to
+    // the `user { … }` field node, the registry to the aggregate node — so
+    // goto-definition / rename / find-refs work through the standard linker.
+    expect(decl!.claim.$refText).toBe("tenantId");
+    expect(decl!.claim.ref).toBeDefined();
+    expect(decl!.claim.ref!.name).toBe("tenantId");
+    expect(decl!.claim.ref!.$type).toBe("UserField");
+    expect(decl!.registry.$refText).toBe("Organization");
+    expect(decl!.registry.ref).toBeDefined();
+    expect(decl!.registry.ref!.name).toBe("Organization");
+    expect(isAggregate(decl!.registry.ref!)).toBe(true);
   });
 
   it("parses with a different claim name (`user.orgId`)", async () => {
@@ -77,8 +87,8 @@ describe("tenancy by — SystemMember grammar", () => {
     `);
     expect(errors).toEqual([]);
     const decl = systemOf(model).members.find(isTenancyDecl) as TenancyDecl;
-    expect(decl.claim).toBe("orgId");
-    expect(decl.registry).toBe("Org");
+    expect(decl.claim.ref?.name).toBe("orgId");
+    expect(decl.registry.ref?.name).toBe("Org");
   });
 });
 
@@ -153,8 +163,8 @@ describe("tenancy surface — structural printer roundtrip", () => {
     expect(reparsed.errors).toEqual([]);
     const sys = systemOf(reparsed.model);
     const decl = sys.members.find(isTenancyDecl) as TenancyDecl;
-    expect(decl.claim).toBe("tenantId");
-    expect(decl.registry).toBe("Organization");
+    expect(decl.claim.ref?.name).toBe("tenantId");
+    expect(decl.registry.ref?.name).toBe("Organization");
     expect(aggByName(sys, "Plan").crossTenant).toBe(true);
   });
 });

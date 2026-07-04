@@ -83,8 +83,8 @@ aggregate Invoice {
 | Source | Diagnostic | Severity |
 |---|---|---|
 | unmarked `aggregate Shipment { … }` under a `tenancy by` system | `loom.tenancy-stance-unmarked` — "aggregate 'Shipment' declares no tenancy stance; add `with tenantOwned` (tenant data) or `crossTenant` (shared data)" | **error** |
-| `tenancy by user.orgId of …` when `user {}` has no `orgId` | `loom.tenancy-unknown-claim` (mirrors `loom.auth-unknown-claim-field`) | error |
-| `of Organization` when no such aggregate exists | `loom.tenancy-registry-unknown` | error |
+| `tenancy by user.orgId of …` when `user {}` has no `orgId` | linking error — `Could not resolve reference to UserField named 'orgId'.` (real `[UserField:UserFieldName]` cross-reference since 1b.1; formerly `loom.tenancy-unknown-claim`) | error |
+| `of Organization` when no such aggregate exists | linking error — `Could not resolve reference to Aggregate named 'Organization'.` (real `[Aggregate:ID]` cross-reference since 1b.1; formerly `loom.tenancy-registry-unknown`) | error |
 | two `tenancy by` declarations | `loom.tenancy-duplicate` | error |
 | `with tenantOwned` but no `tenancy by` in the system | `loom.tenant-owned-without-tenancy` | error |
 | `crossTenant` but no `tenancy by` | `loom.cross-tenant-without-tenancy` (intent declared, nothing to opt out of) | warning |

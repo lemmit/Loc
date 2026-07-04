@@ -1900,11 +1900,12 @@ export interface AuthIR {
  *  docs/plans/multi-tenancy-implementation.md).  Lowered from
  *  `tenancy by user.<claimField> of <registryName>`: `claimField` names
  *  the `user { … }` claim that partitions the data; `registryName` the
- *  aggregate acting as the tenant registry.  Both are plain names here —
- *  existence/singularity verification is the tenancy validators' job
- *  (slice 1a.3), and an aggregate's tenancy *stance* is derived on
- *  demand from `crossTenant` + capabilities (derive-don't-stamp), never
- *  stored on the IR. */
+ *  aggregate acting as the tenant registry.  Both are plain names here,
+ *  read off real cross-references at lowering (1b.1) — existence is the
+ *  linker's job, singularity the tenancy validators' (slice 1a.3), and
+ *  an aggregate's tenancy *stance* is derived on demand from
+ *  `crossTenant` + capabilities (derive-don't-stamp), never stored on
+ *  the IR. */
 export interface TenancyIR {
   claimField: string;
   registryName: string;

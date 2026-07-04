@@ -139,8 +139,7 @@ bases are exempt). An unmarked aggregate is a hard error:
 | Code | Fires when | Severity |
 |---|---|---|
 | `loom.tenancy-stance-unmarked` | unmarked aggregate under a `tenancy by` system | error |
-| `loom.tenancy-unknown-claim` | `user.<claim>` not on the `user {}` shape | error |
-| `loom.tenancy-registry-unknown` | `of` names a non-existent aggregate | error |
+| linking error (`Could not resolve reference …`) | `user.<claim>` not on the `user {}` shape, or `of` names a non-existent aggregate — both bindings are real cross-references since 1b.1 (navigation / rename / find-refs work) | error |
 | `loom.tenancy-duplicate` | more than one `tenancy by` | error |
 | `loom.tenant-owned-without-tenancy` | `with tenantOwned` but no `tenancy by` | error |
 | `loom.cross-tenant-without-tenancy` | `crossTenant` but no `tenancy by` | warning |

@@ -10,12 +10,13 @@ import type { LoomDiagnostic } from "./diagnostic.js";
 // Tenancy checks (multi-tenancy Phase 1a, slice 1a.3 —
 // docs/plans/multi-tenancy-implementation.md §1).
 //
-// The AST-level tenancy rules (duplicate `tenancy by`, unknown claim field)
-// live in `src/language/validators/tenancy.ts`; this leaf owns everything
-// that needs the merged, fully-lowered model:
+// The AST-level tenancy rule (duplicate `tenancy by`) lives in
+// `src/language/validators/tenancy.ts`; claim / registry existence is the
+// LINKER's job since 1b.1 (both bindings are real cross-references — an
+// unknown name is a parse-level "Could not resolve reference …", not the
+// former `loom.tenancy-registry-unknown` / `loom.tenancy-unknown-claim`).
+// This leaf owns everything that needs the merged, fully-lowered model:
 //
-//   - the `of <Registry>` target must exist as an aggregate in the system
-//     (`loom.tenancy-registry-unknown`)
 //   - the explicit-stance lint: under a `tenancy by` system every
 //     row-persisting aggregate must pick a side — `with tenantOwned`
 //     (tenant data) or `crossTenant` (shared data)
@@ -44,24 +45,12 @@ function typeName(t: TypeIR): string {
 export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
   const tenancy = sys.tenancy;
 
-  // Registry existence — `of <Registry>` must name an aggregate somewhere
-  // in the system (any context of any subdomain).
+  // Registry existence is a LINKING concern since 1b.1 — `of <Registry>` is a
+  // real cross-reference (`registry=[Aggregate:ID]`), so an unknown name
+  // surfaces as a Langium "could not resolve" diagnostic at parse time; no IR
+  // re-check needed (an unresolved ref lowers with its `$refText`, and the
+  // lookups below simply find no aggregate and skip).
   if (tenancy) {
-    const registryExists = sys.subdomains.some((mod) =>
-      mod.contexts.some((ctx) => ctx.aggregates.some((a) => a.name === tenancy.registryName)),
-    );
-    if (!registryExists) {
-      diags.push({
-        severity: "error",
-        code: "loom.tenancy-registry-unknown",
-        message:
-          `system '${sys.name}': tenancy registry '${tenancy.registryName}' does not name an ` +
-          `aggregate in the system.  Declare 'aggregate ${tenancy.registryName} { ... }' or ` +
-          `point 'of' at an existing aggregate.`,
-        source: `${sys.name}/tenancy`,
-      });
-    }
-
     // The derived registry self-scope filter (Phase 1b, capstone decision 4)
     // compares `<Registry>.id == currentUser.<claim>` — the `tenantId ≡
     // <Registry>.id` identity — so the claim's declared type must bind
