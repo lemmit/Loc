@@ -20,6 +20,7 @@ import {
 } from "../../ir/util/openapi-ids.js";
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
 import { commandWorkflowsOf } from "../../ir/util/workflow-command-route.js";
+import { workflowCorrIdValueType } from "../../ir/util/workflow-instances.js";
 import { walkExpr } from "../../ir/validate/checks/shared.js";
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
@@ -622,6 +623,14 @@ function instanceRoutes(wf: WorkflowIR): string {
   // snake-cased attrs `instance_field_value` projects, so the projection,
   // operationIds, and route paths stay identical to the state path.
   const fns = esFns(wf);
+  // The `{id}` param annotation derives from the correlation id's value type —
+  // guid → the uuid-format str `ID_PARAM`, int/long → `int`, string → plain
+  // `str` — parity with Hono / .NET / Java / Phoenix by construction
+  // (docs/plans/non-guid-id-http-params.md).
+  const corrVt = workflowCorrIdValueType(wf);
+  const idParam = corrVt === "guid" ? ID_PARAM : corrVt === "string" ? "id: str" : "id: int";
+  // `_load_<wf>_events` / `_fold_<wf>` key streams as str; a numeric id stringifies.
+  const idAsKey = corrVt === "int" || corrVt === "long" ? "str(id)" : "id";
   const list = wf.eventSourced
     ? lines(
         `@router.get("/${slug}/instances", response_model=${T}InstanceListResponse, operation_id="${camelId(opWorkflowInstances(wf.name))}")`,
@@ -638,16 +647,16 @@ function instanceRoutes(wf: WorkflowIR): string {
   const byId = wf.eventSourced
     ? lines(
         `@router.get("/${slug}/instances/{id}", response_model=${T}InstanceResponse, operation_id="${camelId(opWorkflowInstanceById(wf.name))}"${errorResponsesKwarg("getById")})`,
-        `async def ${slug}_instance(${ID_PARAM}, session: SessionDep) -> dict[str, object]:`,
-        `    __stream = await ${fns.load}(session, id)`,
+        `async def ${slug}_instance(${idParam}, session: SessionDep) -> dict[str, object]:`,
+        `    __stream = await ${fns.load}(session, ${idAsKey})`,
         "    if not __stream:",
         `        raise AggregateNotFoundError("not_found")`,
-        `    row = ${fns.fold}(id, __stream)`,
+        `    row = ${fns.fold}(${idAsKey}, __stream)`,
         `    return {${proj("row")}}`,
       )
     : lines(
         `@router.get("/${slug}/instances/{id}", response_model=${T}InstanceResponse, operation_id="${camelId(opWorkflowInstanceById(wf.name))}"${errorResponsesKwarg("getById")})`,
-        `async def ${slug}_instance(${ID_PARAM}, session: SessionDep) -> dict[str, object]:`,
+        `async def ${slug}_instance(${idParam}, session: SessionDep) -> dict[str, object]:`,
         `    row = await session.get(${row}, id)`,
         "    if row is None:",
         `        raise AggregateNotFoundError("not_found")`,

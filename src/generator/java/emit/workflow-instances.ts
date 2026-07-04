@@ -4,6 +4,10 @@ import {
   opWorkflowInstanceById,
   opWorkflowInstances,
 } from "../../../ir/util/openapi-ids.js";
+import {
+  workflowCorrIdValueType,
+  workflowCorrWireField,
+} from "../../../ir/util/workflow-instances.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
 import { javaValueTypeForId } from "../render-expr.js";
@@ -55,14 +59,9 @@ function stateRepoField(wf: WorkflowIR): string {
 }
 
 /** The correlation field's wire row (`source: "id"`) — its id targetName +
- *  value type drive the `{id}` path-param type and `new <Corr>Id(id)` wrap. */
-function corrWireField(wf: WorkflowIR): WireField {
-  const corr = (wf.instanceWireShape ?? []).find((f) => f.source === "id");
-  if (!corr) {
-    throw new Error(`java workflow-instances: '${wf.name}' has no id-shaped instance field`);
-  }
-  return corr;
-}
+ *  value type drive the `{id}` path-param type and `new <Corr>Id(id)` wrap.
+ *  Shared with the other backends via `ir/util/workflow-instances.ts`. */
+const corrWireField = workflowCorrWireField;
 
 export function renderJavaWorkflowInstanceReads(
   ctx: EnrichedBoundedContextIR,
@@ -121,7 +120,7 @@ function renderInstancesController(
 ): string {
   const className = `${ctx.name}WorkflowInstancesController`;
   const anyUuid = workflows.some(
-    (wf) => javaValueTypeForId(idValueType(corrWireField(wf))) === "UUID",
+    (wf) => javaValueTypeForId(workflowCorrIdValueType(wf)) === "UUID",
   );
   const stateWfs = workflows.filter((wf) => !wf.eventSourced);
   const esWfs = workflows.filter((wf) => wf.eventSourced);
@@ -134,13 +133,14 @@ function renderInstancesController(
     const T = `${upperFirst(wf.name)}InstanceResponse`;
     const slug = snake(wf.name);
     const corr = corrWireField(wf);
-    const idJava = javaValueTypeForId(idValueType(corr));
-    // A guid correlation id binds `@PathVariable UUID` so springdoc emits
-    // `{type: string, format: uuid}` — matching Hono's `z.string().uuid()`,
-    // .NET's `Guid id`, and Python/Phoenix on the parity gate's path-param
-    // dimension.  Non-guid ids keep the String bind + explicit parse.
-    const paramJava = idJava === "UUID" ? "UUID" : "String";
-    const idExpr = idJava === "UUID" ? "id" : idFromString("id", idJava);
+    const idJava = javaValueTypeForId(workflowCorrIdValueType(wf));
+    // The `{id}` param binds the correlation id's Java value type (UUID / int /
+    // long / String), so springdoc emits the matching param schema — guid →
+    // `{type: string, format: uuid}`, int/long → integer — parity with Hono /
+    // .NET / Python / Phoenix by construction
+    // (docs/plans/non-guid-id-http-params.md).
+    const paramJava = idJava;
+    const idExpr = "id";
     const shape = wf.instanceWireShape ?? [];
     const proj = (rowVar: string): string =>
       shape.map((f) => domainToWire(f.type, `${rowVar}.${f.name}()`)).join(", ");
@@ -175,7 +175,7 @@ function renderInstancesController(
         ``,
         `    @GetMapping("/${slug}/instances/{id}")`,
         `    public ResponseEntity<${T}> ${camelId(opWorkflowInstanceById(wf.name))}(@PathVariable ${paramJava} id) {`,
-        `        var __sid = ${idJava === "UUID" ? "id.toString()" : "id"};`,
+        `        var __sid = ${idJava === "String" ? "id" : "String.valueOf(id)"};`,
         `        var __rows = jdbc.queryForList(`,
         `            "select type, data from ${table} where stream_id = ? order by version", __sid);`,
         `        if (__rows.isEmpty()) return ResponseEntity.notFound().build();`,
@@ -281,11 +281,6 @@ function idTargetName(f: WireField): string {
   if (t.kind !== "id")
     throw new Error("java workflow-instances: correlation field must be id-typed");
   return t.targetName;
-}
-
-function idValueType(f: WireField): string {
-  const t = f.type.kind === "optional" ? f.type.inner : f.type;
-  return t.kind === "id" ? t.valueType : "guid";
 }
 
 /** Instance projection rides the three domain wildcards (enums / ids /

@@ -11,7 +11,7 @@ HTTP layer does not:
 | Surface | .NET | Java | Hono | Python | Phoenix |
 |---|---|---|---|---|---|
 | aggregate `/{id}` param | ✅ `csIdValueClrType` | ✅ `javaValueTypeForId` | ❌ `z.string().uuid()` hardcoded | ❌ `ID_PARAM` uuid-format hardcoded | (spec emit unverified) |
-| workflow `/instances/{id}` param | ✅ this slice | ✅ this slice | ✅ this slice | ✅ this slice | ✅ this slice |
+| workflow `/instances/{id}` param | ✅ this slice | ✅ this slice | ✅ this slice | ✅ this slice | ✅ already (`OPENAPI_ID_VALUE`) |
 
 ## The open aggregate-level gap
 
