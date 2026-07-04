@@ -143,6 +143,22 @@ async function runParse(file: string) {
   const result = await parseFile(file);
   printDiagnostics(result);
   if (result.errorCount > 0) process.exit(1);
+  // AST is clean → surface the advisory index-suggestion lint (uniqueness-and-
+  // indexes.md §11) in its own footer.  It rides the normal `validateLoomModel`
+  // channel — we just filter the WARNING-severity `loom.index-suggestion`
+  // diagnostics out of it here; they never fail the parse.  Defensive: a throw
+  // in lower/enrich/validate is swallowed (the AST result already printed).
+  try {
+    const hints = validateLoomModel(enrichLoomModel(lowerModel(result.model))).filter(
+      (d) => d.code === "loom.index-suggestion",
+    );
+    if (hints.length > 0) {
+      console.error(`\nSuggestions (${hints.length}):`);
+      for (const d of hints) console.error(`  ${d.source}: ${d.message}`);
+    }
+  } catch {
+    // IR lowering can throw on shapes the AST validator doesn't gate.
+  }
   console.log(`OK: ${file}`);
 }
 

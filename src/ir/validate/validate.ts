@@ -3,6 +3,7 @@ import { allContexts } from "../types/loom-ir.js";
 import { validateStampReadsBeforeFlush } from "./checks/capability-checks.js";
 import type { LoomDiagnostic } from "./checks/diagnostic.js";
 import { validateDomainServices } from "./checks/domain-service-checks.js";
+import { validateIndexSuggestions } from "./checks/index-suggestion-checks.js";
 import {
   validateQueryableWheres,
   validateRawSeedColumns,
@@ -154,6 +155,12 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     // Tenancy (multi-tenancy Phase 1a): registry existence, the explicit-
     // stance lint, marker-without-declaration, conflicting markers.
     validateTenancy(sys, diags);
+    // Advisory index-suggestion lint (uniqueness-and-indexes.md §11,
+    // D-INDEX-SUGGEST) — WARNING-severity `loom.index-suggestion` for a
+    // query-filtered column with no covering index.  Never auto-derives; rides
+    // the normal IR-warning channel (api → LSP / playground / `parse --json`).
+    // Warning-only, so it can't flip `ok` or block generation (both error-gated).
+    validateIndexSuggestions(sys, diags);
     // Scaffold expansion now runs at the AST level
     // (`src/language/ddd-scaffold-ast-expander.ts`).  Duplicate-page
     // detection happens through Langium's standard scope-walking

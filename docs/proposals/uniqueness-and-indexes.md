@@ -322,3 +322,111 @@ that is already there.
 
 Event-sourced/non-relational uniqueness is explicitly out of scope for v1
 (gated by validator).
+
+---
+
+## 11. Index suggestions — an advisory lint, NOT auto-derivation
+
+> Status: **SPEC** (slice 3). The `unique` invariant (§4) and the manual
+> `resource index:` hatch (§3.2) have shipped. This section supersedes slice
+> 2's "auto-derived finder indexes": the compiler will **not** silently create
+> performance indexes from finders — an infra decision it shouldn't own. It
+> **suggests** them instead, and the author adds the `resource index:` (§3.2)
+> if they agree. Declared high, *enforced never*, *advised in between*.
+
+### 11.1 Why suggest, not derive
+
+Auto-deriving a btree per filtered column is wrong for the same reason a
+per-column `@unique` was (§1): the compiler can't see write-amplification,
+cardinality, or the composite the DBA actually wants. The **one** index Loom
+*does* auto-derive is `tenant_id` (multi-tenancy 1b-tail, `#1657`) — universal,
+unambiguous, and on the every-read hot path — plus FK columns and the `unique`
+DDL. Everything else is a judgement call, so the compiler surfaces the
+candidate and leaves the decision (and the composite/partial shape) to the
+author.
+
+### 11.2 The signal (already in the resolved IR — no new grammar/IR)
+
+A column is a **query column** when the enriched IR shows it read on a
+filter/sort path:
+
+- `RepositoryIR.finds[].filter` — a finder's `where` predicate. Walk the
+  `ExprIR` for `this.<field>` compared to a param/literal/`currentUser.*`.
+- `AggregateIR.contextFilters` — reified capability + hand-written `filter`
+  predicates (run on *every* read). Same walk.
+- Retrieval `where:` (criterion) + `sort:` terms, and view sorts — leading
+  sort columns benefit from an index.
+
+### 11.3 Coverage — a column is "already indexed" when it is the LEADING
+column of any derived or declared index:
+
+- an FK column (`X id` → `<table>_<col>_idx`),
+- `tenant_id` (`<table>_tenant_id_idx`, `#1657`),
+- the first column of a `unique (...)` key,
+- the first column of a manual `resource index:` spec.
+
+Leading-column match only (a composite `(tenant_id, email)` covers a
+`tenant_id` filter, not an `email` one) — cheap, and avoids false silence.
+
+### 11.4 Exclusions (kill the noise)
+
+- **Boolean / very-low-cardinality columns** (`is_deleted`, `active`) — a
+  standalone btree rarely helps; suggesting one is *bad* advice. Skip
+  `bool`-typed columns. (A partial/composite index there is a human call.)
+- **Already-covered** columns (§11.3).
+- **Non-`kind: state`** aggregates (event-sourced / document) — no relational
+  table to index.
+- Dedupe to one suggestion per `(entity, column)`.
+
+### 11.5 The diagnostic
+
+`severity: "warning"`, code **`loom.index-suggestion`**, one per surviving
+`(entity, column)`, message names the exact fix site (the state resource):
+
+```
+loom.index-suggestion — 'Customer.email' is filtered by find 'byEmail' but has
+no index. Consider `index: Customer.email` on resource 'ordState'.
+```
+
+### 11.6 Delivery — a WARNING on the existing IR channel  ✅ SHIPPED
+
+Suggestions are *advice*, not validation — but Loom already has the right
+channel for non-fatal advice: **IR-level `warning`-severity diagnostics**.
+`validateLoomModel` already emits `warning`s (e.g. `loom.unique-missing-tenant-scope`),
+and every surface already consumes them through `src/api/validate()` — LSP
+squiggles, the playground, `parse --json`, `generate --json`. A report's `ok`
+flag and both CLI gates (`generate`, `parse` exit codes) are **error-gated**, so
+a `warning` can never block a build or flip a clean report. The correctness/advice
+split the design worried about is already encoded in the `severity` field, not in
+a separate pass.
+
+**Shipped:** `validateIndexSuggestions(sys, diags)` is registered in
+`validateLoomModel` like every other check, pushing WARNING-severity
+`loom.index-suggestion` diagnostics onto the shared stream:
+
+- LSP / playground / `parse --json` / `generate --json` render them for free —
+  no bespoke wiring, one producer.
+- `ddd parse` filters the `loom.index-suggestion` code out of the gate output
+  into a dedicated `Suggestions (N):` footer; it never changes the exit code
+  (advice, not a gate). `generate` prints IR diagnostics only on an error, so a
+  pure-warning build stays quiet there.
+
+An earlier iteration shipped this as a standalone `indexSuggestions(loom)` pass
+kept *out* of `validateLoomModel` — but that duplicated the existing warning
+channel and left the LSP/playground unwired. Folding it into the gate as a
+normal `warning` uses the mechanism that was already there. Noise is minimal:
+across the canonical examples only `acme.ddd` emits any (3); the rest zero. A
+`"hint"` severity tier stays an option if the editor squiggle proves too loud.
+
+### 11.7 MVP scope (slice 3)
+
+Finder-`filter` columns + hand-written `contextFilters` columns (equality or
+range compares), scalar/enum/id, `kind: state`, not boolean, not covered →
+one `loom.index-suggestion` hint each, naming the state resource to edit.
+Sort-column and cross-find "hot column" heuristics are a follow-up once the
+hint tier and the finder-column base are in.
+
+- **D-INDEX-SUGGEST** — performance indexes are never auto-derived from
+  finders; the compiler emits an advisory `loom.index-suggestion` hint and the
+  author opts in via `resource index:` (§3.2). (Supersedes the "auto-derived
+  finder indexes" half of D-INDEX-INFRA.)
