@@ -82,6 +82,34 @@ export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
         source: `${sys.name}/tenancy`,
       });
     }
+
+    // tenantOwned claim-type gate (1b-tail): the capability's provided field
+    // is `tenantId: string`, and its stamp/filter compare that field to the
+    // claim — a non-string claim (`tenantId: guid`) makes `string == Guid`
+    // comparisons that mis-compile the typed backends (.NET/Java).  The
+    // registry's own comparison handles guid claims (same-typed against
+    // `ids guid`), so this only fires when a `tenantOwned` aggregate exists.
+    // The proper fix — claim-typed capability fields — is future work; until
+    // then, string claims carry guid VALUES fine (the org id round-trips as
+    // text), so the suggested fix costs nothing.
+    const claimIsString = claimType?.kind === "primitive" && claimType.name === "string";
+    if (claimType && !claimIsString) {
+      const anyOwned = sys.subdomains.some((mod) =>
+        mod.contexts.some((ctx) => ctx.aggregates.some((a) => hasTenantOwned(a))),
+      );
+      if (anyOwned) {
+        diags.push({
+          severity: "error",
+          code: "loom.tenant-owned-claim-type",
+          message:
+            `system '${sys.name}': tenancy claim 'user.${tenancy.claimField}' is typed ` +
+            `'${typeName(claimType)}' but 'tenantOwned' provides 'tenantId: string' — the ` +
+            `stamp/filter comparison mis-compiles typed backends.  Declare the claim as ` +
+            `'${tenancy.claimField}: string' (guid values round-trip as text).`,
+          source: `${sys.name}/tenancy`,
+        });
+      }
+    }
   }
 
   for (const mod of sys.subdomains) {

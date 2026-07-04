@@ -1,10 +1,13 @@
 # Multi-tenancy — implementation plan (Phase 1a)
 
-> Status: **Phase 1a SHIPPED (#1634); Phase 1b.2 (registry self-scope filter
-> + claim-less bootstrap, capstone decision 4) BUILT on this branch** — see
-> the 1b section in §3 for what shipped and what remains (the
-> `claim`/`registry` cross-reference upgrade, decision 5, and the `tenant_id`
-> index). Original 1a plan text follows.
+> Status: **Phases 1a (#1634) and 1b (#1654 — registry self-scope + bootstrap
+> + cross-references) SHIPPED; 1b-tail IN PROGRESS (claimed on this branch)** —
+> 1b-tail = the derived `tenant_id` index on every `tenantOwned` table
+> (unblocked by #1648's `IndexShape` machinery; every tenant read prefixes on
+> that column) + the tenantOwned claim-type gate (a `guid` claim against the
+> capability's `tenantId: string` field mis-compiles typed backends — error
+> with a suggested fix until the capability learns claim-typed fields).
+> Original 1a plan text follows.
 >
 > Original status: plan — awaiting sign-off on the surface below. Derived from
 > [`docs/proposals/multi-tenancy-design-note.md`](../proposals/multi-tenancy-design-note.md)

@@ -22,6 +22,7 @@ const TENANCY_CODES = new Set([
   "loom.cross-tenant-without-tenancy",
   "loom.tenancy-conflicting-stance",
   "loom.tenancy-registry-marked",
+  "loom.tenant-owned-claim-type",
 ]);
 
 async function tenancyDiags(source: string): Promise<LoomDiagnostic[]> {
@@ -267,5 +268,43 @@ describe("the plan §1 worked example", () => {
     expect(stanceOf("Invoice")).toBe("tenantOwned");
     expect(stanceOf("Customer")).toBe("tenantOwned");
     expect(stanceOf("Organization")).toBe("registry");
+  });
+});
+
+describe("loom.tenant-owned-claim-type (1b-tail)", () => {
+  const sys = (claimType: string, agg: string) => `
+    system Billder {
+      user { id: guid  tenantId: ${claimType} }
+      tenancy by user.tenantId of Organization
+      subdomain Billing {
+        context Invoicing {
+          ${agg}
+          aggregate Organization ids guid { name: string }
+        }
+      }
+    }
+  `;
+
+  it("errors when a tenantOwned aggregate exists under a non-string claim", async () => {
+    const diags = await tenancyDiags(
+      sys("guid", `aggregate Invoice ids guid with tenantOwned { number: string }`),
+    );
+    const hit = diags.find((d) => d.code === "loom.tenant-owned-claim-type");
+    expect(hit?.severity).toBe("error");
+    expect(hit?.message).toContain("tenantId: string");
+  });
+
+  it("does not fire for a registry-only system with a guid claim (same-typed self-scope)", async () => {
+    const diags = await tenancyDiags(
+      sys("guid", `aggregate Plan ids guid crossTenant { code: string }`),
+    );
+    expect(diags.filter((d) => d.code === "loom.tenant-owned-claim-type")).toEqual([]);
+  });
+
+  it("does not fire for a string claim with tenantOwned aggregates", async () => {
+    const diags = await tenancyDiags(
+      sys("string", `aggregate Invoice ids guid with tenantOwned { number: string }`),
+    );
+    expect(diags.filter((d) => d.code === "loom.tenant-owned-claim-type")).toEqual([]);
   });
 });
