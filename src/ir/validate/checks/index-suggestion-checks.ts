@@ -8,13 +8,13 @@
 // index gets a `loom.index-suggestion` WARNING naming the fix — the author opts
 // in via `resource index: Entity.col` (§3.2) if they agree.
 //
-// Delivery: this is a SEPARATE pass (`indexSuggestions`), NOT part of the
-// `validateLoomModel` correctness gate — suggestions are advice, and folding
-// them into the gate would fail every "no diagnostics" consumer and conflate
-// "your model is wrong" with "here's a perf idea".  The CLI's `ddd parse` opts
-// in and prints them under a `Suggestions:` footer (never changing its exit
-// code); `generate` never calls it.  Warning-severity so the LSP can render a
-// `Hint`.
+// Delivery: a WARNING-severity `loom.index-suggestion` pushed onto the normal
+// `validateLoomModel` diagnostics — the same IR-warning channel every surface
+// already consumes (api → LSP squiggles / playground / `parse --json` /
+// `generate --json`).  Warning-only, so it can't flip a report's `ok` or block
+// generation (both are error-gated); `ddd parse` filters this code into a
+// `Suggestions:` footer.  Nothing is ever auto-derived — the author opts in via
+// `resource index: Entity.col` (§3.2) if they agree.
 //
 // Coverage (a column is "already indexed", so no suggestion) — LEADING column
 // of any derived/declared index: an FK column, `tenant_id` (multi-tenancy
@@ -28,7 +28,6 @@ import { snake } from "../../../util/naming.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
-  EnrichedLoomModel,
   EnrichedSystemIR,
   ExprIR,
   TypeIR,
@@ -37,18 +36,6 @@ import { resolveDataSourceForAggregate } from "../../util/resolve-datasource.js"
 import { hasTenantOwned } from "../../util/tenant-stance.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { walkExpr } from "./shared.js";
-
-/** Advisory index suggestions for a whole model.  Deliberately SEPARATE from
- *  `validateLoomModel` (the correctness gate): suggestions are advice, not
- *  validation — running them in the gate would fail every "no diagnostics"
- *  consumer and, worse, conflate "your model is wrong" with "here's a perf
- *  idea".  Callers that want the lint (the CLI's `ddd parse`, the LSP) opt in
- *  by calling this; `generate` never does. */
-export function indexSuggestions(loom: EnrichedLoomModel): LoomDiagnostic[] {
-  const diags: LoomDiagnostic[] = [];
-  for (const sys of loom.systems) validateIndexSuggestions(sys, diags);
-  return diags;
-}
 
 /** Aggregate-field names read as `this.<field>` anywhere in a filter
  *  predicate (a find `where` or a reified `filter`) — the columns a query

@@ -7,8 +7,14 @@
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
-import { indexSuggestions, type LoomDiagnostic } from "../../src/ir/validate/validate.js";
+import { type LoomDiagnostic, validateLoomModel } from "../../src/ir/validate/validate.js";
 import { parseString } from "../_helpers/parse.js";
+
+// The lint rides the normal `validateLoomModel` gate now (uniqueness-and-
+// indexes.md §11); filter the advisory `loom.index-suggestion` code out of it.
+function indexSuggestions(loom: Parameters<typeof validateLoomModel>[0]): LoomDiagnostic[] {
+  return validateLoomModel(loom).filter((d) => d.code === "loom.index-suggestion");
+}
 
 async function suggestions(source: string): Promise<LoomDiagnostic[]> {
   const { model } = await parseString(source, { validate: false });

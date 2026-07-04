@@ -10,7 +10,7 @@ import { generateDotnet } from "../generator/dotnet/index.js";
 import { enrichLoomModel } from "../ir/enrich/enrichments.js";
 import { lowerModel, lowerProject } from "../ir/lower/lower.js";
 import type { EnrichedLoomModel, TestOutcome } from "../ir/types/loom-ir.js";
-import { indexSuggestions, validateLoomModel } from "../ir/validate/validate.js";
+import { validateLoomModel } from "../ir/validate/validate.js";
 import { createDddServices } from "../language/ddd-module.js";
 import type { Model } from "../language/generated/ast.js";
 import { applyPatches, type ModelPatch } from "../language/model-patch.js";
@@ -143,13 +143,15 @@ async function runParse(file: string) {
   const result = await parseFile(file);
   printDiagnostics(result);
   if (result.errorCount > 0) process.exit(1);
-  // AST is clean → run the advisory index-suggestion lint (uniqueness-and-
-  // indexes.md §11) and print it in its own footer.  These are HINTS, not
-  // validation: never fail the parse, and kept out of the correctness
-  // `validateLoomModel` gate.  Defensive: a throw in lower/enrich is swallowed
-  // (the AST result already printed).
+  // AST is clean → surface the advisory index-suggestion lint (uniqueness-and-
+  // indexes.md §11) in its own footer.  It rides the normal `validateLoomModel`
+  // channel — we just filter the WARNING-severity `loom.index-suggestion`
+  // diagnostics out of it here; they never fail the parse.  Defensive: a throw
+  // in lower/enrich/validate is swallowed (the AST result already printed).
   try {
-    const hints = indexSuggestions(enrichLoomModel(lowerModel(result.model)));
+    const hints = validateLoomModel(enrichLoomModel(lowerModel(result.model))).filter(
+      (d) => d.code === "loom.index-suggestion",
+    );
     if (hints.length > 0) {
       console.error(`\nSuggestions (${hints.length}):`);
       for (const d of hints) console.error(`  ${d.source}: ${d.message}`);

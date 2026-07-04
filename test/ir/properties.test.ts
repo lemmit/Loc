@@ -35,10 +35,12 @@ function allValueObjects(loom: LoomModel): ValueObjectIR[] {
 describe("IR invariants — every example", () => {
   for (const example of EXAMPLES) {
     describe(example, () => {
-      it("validates with zero diagnostics", async () => {
+      it("validates with zero errors", async () => {
         const loom = await buildEnriched(example);
-        const diags = validateLoomModel(loom);
-        expect(diags, `${example} diagnostics: ${JSON.stringify(diags)}`).toEqual([]);
+        // Warnings are allowed (e.g. advisory `loom.index-suggestion`); the
+        // invariant is that no example produces a correctness ERROR.
+        const errors = validateLoomModel(loom).filter((d) => d.severity === "error");
+        expect(errors, `${example} errors: ${JSON.stringify(errors)}`).toEqual([]);
       });
 
       it("every aggregate has wireShape with `id` first", async () => {

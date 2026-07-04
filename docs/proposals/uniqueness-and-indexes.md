@@ -388,30 +388,35 @@ loom.index-suggestion — 'Customer.email' is filtered by find 'byEmail' but has
 no index. Consider `index: Customer.email` on resource 'ordState'.
 ```
 
-### 11.6 Delivery — a SEPARATE pass, not the correctness gate  ✅ SHIPPED
+### 11.6 Delivery — a WARNING on the existing IR channel  ✅ SHIPPED
 
-Suggestions are *advice*, not validation. Grounding the design surfaced two
-facts: `validateLoomModel` is the correctness gate consumed by `generate` and
-by ~every "no diagnostics" test, and the CLI's `generate`/`parse` paths don't
-even print IR-level warnings today (`generate` prints diagnostics only on an
-error; `parse` runs only the AST validator). So folding suggestions into
-`validateLoomModel` as `warning`s both (a) conflated "your model is wrong" with
-"here's a perf idea" and (b) failed every consumer that asserts a clean
-diagnostic set — the wrong architecture.
+Suggestions are *advice*, not validation — but Loom already has the right
+channel for non-fatal advice: **IR-level `warning`-severity diagnostics**.
+`validateLoomModel` already emits `warning`s (e.g. `loom.unique-missing-tenant-scope`),
+and every surface already consumes them through `src/api/validate()` — LSP
+squiggles, the playground, `parse --json`, `generate --json`. A report's `ok`
+flag and both CLI gates (`generate`, `parse` exit codes) are **error-gated**, so
+a `warning` can never block a build or flip a clean report. The correctness/advice
+split the design worried about is already encoded in the `severity` field, not in
+a separate pass.
 
-**Shipped:** a SEPARATE `indexSuggestions(loom): LoomDiagnostic[]` pass, kept
-out of `validateLoomModel` entirely, opted into by the lint surface:
+**Shipped:** `validateIndexSuggestions(sys, diags)` is registered in
+`validateLoomModel` like every other check, pushing WARNING-severity
+`loom.index-suggestion` diagnostics onto the shared stream:
 
-- `ddd parse` runs it after a clean AST parse and prints a dedicated
-  `Suggestions (N):` footer; it never changes the exit code (advice, not a
-  gate). `generate` never calls it — the build stays clean by construction.
-- `indexSuggestions` is exported from `validate.ts`, so the LSP / playground
-  can opt in and render each as `DiagnosticSeverity.Hint` (follow-up wiring).
+- LSP / playground / `parse --json` / `generate --json` render them for free —
+  no bespoke wiring, one producer.
+- `ddd parse` filters the `loom.index-suggestion` code out of the gate output
+  into a dedicated `Suggestions (N):` footer; it never changes the exit code
+  (advice, not a gate). `generate` prints IR diagnostics only on an error, so a
+  pure-warning build stays quiet there.
 
-This needed no `"hint"` severity tier and no change to the shared
-`LoomDiagnostic` type — the "separate pass" seam gives the non-gating,
-low-noise behavior for free. (A `hint` tier stays an option if a future
-consumer wants suggestions co-mingled in one diagnostic stream.)
+An earlier iteration shipped this as a standalone `indexSuggestions(loom)` pass
+kept *out* of `validateLoomModel` — but that duplicated the existing warning
+channel and left the LSP/playground unwired. Folding it into the gate as a
+normal `warning` uses the mechanism that was already there. Noise is minimal:
+across the canonical examples only `acme.ddd` emits any (3); the rest zero. A
+`"hint"` severity tier stays an option if the editor squiggle proves too loud.
 
 ### 11.7 MVP scope (slice 3)
 
