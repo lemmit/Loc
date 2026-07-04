@@ -29,6 +29,7 @@ import {
   opGetById,
   opOperation,
 } from "../../ir/util/openapi-ids.js";
+import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import {
   classifyForWire,
   type SingleFieldPattern,
@@ -729,6 +730,31 @@ function auditRecordCall(agg: EnrichedAggregateIR, op: OperationIR): string[] {
   ];
 }
 
+/** Optimistic-concurrency plumbing for a `versioned` aggregate's mutating
+ *  route.  Reads the caller's expected version off the `If-Match` header
+ *  (absent/malformed ⇒ write-time CAS against the loaded version) and threads
+ *  it to the guarded repository save, which raises ConcurrencyError → 409 when
+ *  the stored version no longer matches.  A non-versioned aggregate keeps the
+ *  bare `save(found)` and emits nothing extra (byte-identical). */
+function versionedSave(
+  agg: EnrichedAggregateIR,
+  foundVar = "found",
+): { ifMatch: string[]; save: string } {
+  if (!aggregateIsVersioned(agg)) {
+    return { ifMatch: [], save: `    await repo.save(${foundVar})` };
+  }
+  return {
+    ifMatch: [
+      // `chr(34)` is a literal double-quote — used instead of a quoted `"` so
+      // the routes-file import scanner's string-blanking regex (which pairs
+      // double-quotes) isn't thrown off by a lone quote inside a Python string.
+      '    _if_match = request.headers.get("if-match", "").strip(chr(34))',
+      "    _expected = int(_if_match) if _if_match.isdigit() else None",
+    ],
+    save: `    await repo.save(${foundVar}, expected_version=_expected)`,
+  };
+}
+
 function operationRoute(
   agg: EnrichedAggregateIR,
   op: OperationIR,
@@ -760,6 +786,7 @@ function operationRoute(
     const stampUpdateUsesUser = stampUsesUser(agg, "update");
     const callArgs = [...op.params.map((p) => pyWireToDomain(`body.${p.name}`, p.type, ctx))];
     if (usesUser) callArgs.push("current_user");
+    const vsave = versionedSave(agg);
     return lines(
       `@router.post("/{id}/${opSnake}", response_model=None, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op))})`,
       `async def ${snake(op.name)}_${snake(agg.name)}(${ID_PARAM}, body: ${upperFirst(op.name)}${agg.name}Request, request: Request, session: SessionDep) -> dict[str, object] | JSONResponse:`,
@@ -773,7 +800,8 @@ function operationRoute(
       op.audited ? "    __before = repo.to_wire(found)" : null,
       `    result = found.${snake(op.name)}(${callArgs.join(", ")})`,
       hasStamp(agg, "update") ? stampCall(agg, "update", "found") : null,
-      "    await repo.save(found)",
+      ...vsave.ifMatch,
+      vsave.save,
       op.audited ? "    __after = repo.to_wire(found)" : null,
       ...(op.audited ? auditRecordCall(agg, op) : []),
       ...translations,
@@ -787,7 +815,8 @@ function operationRoute(
   // Update stamps apply right before the persist; a principal-referencing
   // stamp threads `current_user` off the request scope (and takes `request`).
   const stampUpdateUsesUser = stampUsesUser(agg, "update");
-  const needsRequest = usesUser || stampUpdateUsesUser;
+  const versioned = aggregateIsVersioned(agg);
+  const needsRequest = usesUser || stampUpdateUsesUser || versioned;
   const opSig = [
     ID_PARAM,
     `body: ${upperFirst(op.name)}${agg.name}Request`,
@@ -796,10 +825,11 @@ function operationRoute(
   ].join(", ");
   const callArgs = [...op.params.map((p) => pyWireToDomain(`body.${p.name}`, p.type, ctx))];
   if (usesUser) callArgs.push("current_user");
+  const vsave = versionedSave(agg);
   return lines(
     `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op))})`,
     `async def ${snake(op.name)}_${snake(agg.name)}(${opSig}) -> Response:`,
-    needsRequest ? "    current_user: User = request.state.current_user" : null,
+    usesUser || stampUpdateUsesUser ? "    current_user: User = request.state.current_user" : null,
     "    repo = _repo(session)",
     `    found = await repo.get_by_id(${agg.name}Id(id))`,
     `    log("info", "operation_invoked", aggregate=${JSON.stringify(agg.name)}, op=${JSON.stringify(op.name)}, id=id)`,
@@ -807,7 +837,8 @@ function operationRoute(
     op.audited ? "    __before = repo.to_wire(found)" : null,
     `    found.${snake(op.name)}(${callArgs.join(", ")})`,
     hasStamp(agg, "update") ? stampCall(agg, "update", "found") : null,
-    "    await repo.save(found)",
+    ...vsave.ifMatch,
+    vsave.save,
     op.audited ? "    __after = repo.to_wire(found)" : null,
     ...(op.audited ? auditRecordCall(agg, op) : []),
     "    return Response(status_code=204)",
@@ -829,7 +860,8 @@ function externRoute(
   // Update stamps apply after the handler mutates, right before persist; a
   // principal-referencing stamp threads `current_user` (and takes `request`).
   const stampUpdateUsesUser = stampUsesUser(agg, "update");
-  const needsRequest = usesUser || stampUpdateUsesUser;
+  const versioned = aggregateIsVersioned(agg);
+  const needsRequest = usesUser || stampUpdateUsesUser || versioned;
   const sig = [
     ID_PARAM,
     `body: ${upperFirst(op.name)}${agg.name}Request`,
@@ -843,10 +875,11 @@ function externRoute(
   const reqEntries = op.params.map(
     (p) => `"${snake(p.name)}": ${pyWireToDomain(`body.${p.name}`, p.type, ctx)}`,
   );
+  const vsave = versionedSave(agg);
   return lines(
     `@router.post("/{id}/${opSnake}", status_code=204, operation_id="${camelId(opOperation(agg.name, op.name))}"${errorResponsesKwarg("operation", operationIsGuarded(op))})`,
     `async def ${snake(op.name)}_${snake(agg.name)}(${sig}) -> Response:`,
-    needsRequest ? "    current_user: User = request.state.current_user" : null,
+    usesUser || stampUpdateUsesUser ? "    current_user: User = request.state.current_user" : null,
     "    repo = _repo(session)",
     `    found = await repo.get_by_id(${agg.name}Id(id))`,
     `    log("info", "operation_invoked", aggregate=${JSON.stringify(agg.name)}, op=${JSON.stringify(op.name)}, id=id)`,
@@ -863,7 +896,8 @@ function externRoute(
     `        raise ExternHandlerError(${JSON.stringify(op.name)}, ${JSON.stringify(agg.name)}, err) from err`,
     "    found.assert_invariants()",
     hasStamp(agg, "update") ? stampCall(agg, "update", "found") : null,
-    "    await repo.save(found)",
+    ...vsave.ifMatch,
+    vsave.save,
     "    return Response(status_code=204)",
   );
 }

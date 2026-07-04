@@ -5,7 +5,19 @@
 // `domain/errors.ts`.
 // ---------------------------------------------------------------------------
 
-export const ERRORS_PY = `"""Domain error types.  Auto-generated."""
+/** The domain error taxonomy module.  A `ConcurrencyError` (mapped to
+ *  HTTP 409) is added only when some in-scope aggregate carries the
+ *  `versioned` capability, so a concurrency-free app stays byte-identical. */
+export function errorsPy(hasVersioned: boolean): string {
+  const concurrencyError = hasVersioned
+    ? `
+
+class ConcurrencyError(Exception):
+    """An optimistic-concurrency guard (the \`versioned\` capability) found the
+    row's version no longer matched the caller's expected version — a competing
+    write won the race (surfaces as HTTP 409; reload and retry)."""`
+    : "";
+  return `"""Domain error types.  Auto-generated."""
 
 
 class DomainError(Exception):
@@ -24,7 +36,7 @@ class DisallowedError(Exception):
     """A \`when\` state gate rejected the operation in the aggregate's
     current state (surfaces as HTTP 409; the side-effect-free
     \`GET /{id}/can_<op>\` query reports the same predicate as
-    \`{ allowed }\`)."""
+    \`{ allowed }\`)."""${concurrencyError}
 
 
 class ExternHandlerError(Exception):
@@ -36,3 +48,4 @@ class ExternHandlerError(Exception):
             f"Extern handler for '{operation}' on aggregate '{aggregate}' failed: {cause}"
         )
 `;
+}

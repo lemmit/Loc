@@ -20,6 +20,7 @@ import type {
   OperationIR,
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
+import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 import type { ApiRoute } from "../api-emit.js";
@@ -374,18 +375,57 @@ ${cuBind}    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id${getActor}),
     end
   end`;
 
+  // Optimistic concurrency (`versioned` capability, D-VERSIONED).  The update
+  // reads the client's expected version from the `if-match` request header
+  // (parsed to int by `__expected_version/1`), threads it into the context
+  // update, and maps the `{:error, :conflict}` a stale write yields (the
+  // repository rescued `Ecto.StaleEntryError`) onto a 409 ProblemDetails.
+  // Gated: a non-versioned aggregate's update action stays byte-identical.
+  const versioned = aggregateIsVersioned(agg);
+  const versionBind = versioned ? "    expected_version = __expected_version(conn)\n" : "";
+  const versionCallArg = versioned ? ", expected_version" : "";
+  const conflictClause = versioned
+    ? `
+
+      {:error, :conflict} ->
+        ProblemDetails.conflict_response(conn)`
+    : "";
+  // Private helper — parse the client's expected `version` from the `if-match`
+  // request header (bare int or a quoted ETag).  Absent/unparseable → nil, which
+  // the write path treats as write-time CAS (the loaded row's own version).
+  const versionHelper = versioned
+    ? `
+
+  # Parse the optimistic-concurrency precondition (the client's expected
+  # \`version\`) from the \`if-match\` request header.  Absent or unparseable → nil,
+  # which the write path treats as write-time CAS (the loaded row's own version).
+  defp __expected_version(conn) do
+    case get_req_header(conn, "if-match") do
+      [value | _] ->
+        case value |> String.trim("\\"") |> Integer.parse() do
+          {n, _} -> n
+          :error -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+`
+    : "";
+
   // The mutating actions (create / update / delete).  An abstract inheritance
   // base is read-only — it emits none of these (no write-seam context fns to
   // call).  Concrete / plain aggregates emit the full set, as before.
   const updateAction = `  def update(conn, %{"id" => id} = params) do
     attrs = Map.drop(params, ["id"])
-${cuBind}${updateCuBind}
+${cuBind}${updateCuBind}${versionBind}
     with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id${getActor}),
-         {:ok, updated} <- ${ctxModule}.update_${aggSnake}(record, attrs${updateActor}) do
+         {:ok, updated} <- ${ctxModule}.update_${aggSnake}(record, attrs${updateActor}${versionCallArg}) do
       json(conn, serialize(updated))
     else
       {:error, :not_found} ->
-        ProblemDetails.not_found_response(conn, "${aggPascal}", id)
+        ProblemDetails.not_found_response(conn, "${aggPascal}", id)${conflictClause}
 
       {:error, %Ecto.Changeset{} = changeset} ->
         ProblemDetails.validation_error_response(conn, changeset)
@@ -425,7 +465,7 @@ ${cuBind}    case ${ctxModule}.get_${aggSnake}(id${getActor}) do
 ${writeActions}
 ${findActions}
 ${opActions}
-${problemVariant}
+${problemVariant}${versionHelper}
 ${
   isDoc
     ? renderDocSerialize(agg)

@@ -62,6 +62,7 @@ import {
 } from "../../../ir/util/openapi-ids.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
+import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { walkExpr } from "../../../ir/validate/checks/shared.js";
 import type {
   ClassifyContext,
@@ -153,8 +154,12 @@ export function buildRoutesFile(
       : `import type { ${agg.name}Repository } from "../db/repositories/${lowerFirst(agg.name)}-repository";`,
   );
   lines.push(`import * as Ids from "../domain/ids";`);
+  // `ConcurrencyError` only when this aggregate is `versioned` — a
+  // non-versioned aggregate's route file stays byte-identical.
   lines.push(
-    `import { DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, ExternHandlerError } from "../domain/errors";`,
+    aggregateIsVersioned(agg)
+      ? `import { DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, ExternHandlerError, ConcurrencyError } from "../domain/errors";`
+      : `import { DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, ExternHandlerError } from "../domain/errors";`,
   );
   // `when` gates (and their auto-exposed can-query companions) render enum
   // values like `OrderStatus.Shipped` in the route file; import those enums
@@ -767,6 +772,22 @@ export function buildRoutesFile(
     );
     lines.push(`    }`);
   }
+  // Optimistic-concurrency conflict (`versioned` capability): the repository's
+  // guarded write affected zero rows — the expected version no longer matches
+  // the stored row (another request won the race).  Map to 409 Conflict, same
+  // status as the `when` state-gate and 23505 arms above but a DISTINCT log
+  // event (`conflict`, not `disallowed`) so a dashboard can separate a stale
+  // write from a uniqueness clash or a state-gate refusal.  Gated on the
+  // aggregate declaring `versioned` so a non-versioned model emits
+  // byte-identically — only such a table's save ever throws ConcurrencyError.
+  if (aggregateIsVersioned(agg)) {
+    lines.push(`    if (err instanceof ConcurrencyError) {`);
+    lines.push(
+      `      ${renderHonoLogCall("conflict", `aggregate: "${agg.name}", message: err.message, status: 409`)}`,
+    );
+    lines.push(`      return problem(409, "Conflict", err.message);`);
+    lines.push(`    }`);
+  }
   lines.push(`    if (err instanceof ExternHandlerError) {`);
   lines.push(
     `      ${renderHonoLogCall("externHandlerThrew", "aggregate: err.aggName, op: err.opName, error: err.message")}`,
@@ -888,6 +909,15 @@ function emitOperationRoute(
   if (op.returnType && !audit && !prov && !op.extern) {
     return emitReturningOperationRoute(agg, op, ctx, emitTrace);
   }
+  // The canonical `update(...)` operation (crudish, or a hand-declared one of
+  // the same name) is the one route that honours the client's optimistic-
+  // concurrency precondition (`updatePreconditions(agg.wireShape)` — the
+  // `version` token field) via an `If-Match` request header.  Every other
+  // mutate route on a versioned aggregate still gets a guarded write (see
+  // repository-save-builder.ts), just via the write-time CAS fallback
+  // (`aggregate.version`, the value the route just loaded) rather than a
+  // client-supplied header.
+  const isVersionedUpdate = op.name === "update" && aggregateIsVersioned(agg);
   const out: string[] = [];
   out.push(`app.openapi(`);
   out.push(`  createRoute({`);
@@ -913,8 +943,10 @@ function emitOperationRoute(
   out.push(
     `      422: { description: "Unprocessable Entity", content: { "application/problem+json": { schema: ProblemDetails } } },`,
   );
-  // A `when` state gate denies with 409 (DisallowedError → onError).
-  if (op.when) {
+  // A `when` state gate denies with 409 (DisallowedError → onError); a
+  // versioned `update` can also 409 on a stale `If-Match` (ConcurrencyError →
+  // onError) — either reason documents the same status once.
+  if (op.when || isVersionedUpdate) {
     out.push(
       `      409: { description: "Conflict", content: { "application/problem+json": { schema: ProblemDetails } } },`,
     );
@@ -998,9 +1030,23 @@ function emitOperationRoute(
 
   if (!audit && !prov) {
     out.push(`    const aggregate = await repo.getById(Ids.${agg.name}Id(id));`);
+    if (isVersionedUpdate) {
+      // `If-Match` carries the client's expected version
+      // (docs/plans/optimistic-concurrency-versioned.md /
+      // updatePreconditions); absent header falls back to the version just
+      // loaded, so an unaware client still gets a coherent guarded write.
+      out.push(`    const ifMatch = c.req.header("if-match");`);
+      out.push(
+        `    const expectedVersion = ifMatch !== undefined ? Number(ifMatch) : aggregate.version;`,
+      );
+    }
     out.push(...whenGateLine(agg, op, "    "));
     out.push(...mutation("    "));
-    out.push(`    await repo.save(aggregate);`);
+    out.push(
+      isVersionedUpdate
+        ? `    await repo.save(aggregate, expectedVersion);`
+        : `    await repo.save(aggregate);`,
+    );
   } else {
     // Audited / provenanced: load, mutate, save, then write the audit row
     // and/or flush the provenance history in ONE transaction (built on
@@ -1022,10 +1068,20 @@ function emitOperationRoute(
     out.push(`    await db.transaction(async (tx) => {`);
     out.push(`      const repoTx = new ${agg.name}Repository(tx, events);`);
     out.push(`      const aggregate = await repoTx.getById(Ids.${agg.name}Id(id));`);
+    if (isVersionedUpdate) {
+      out.push(`      const ifMatch = c.req.header("if-match");`);
+      out.push(
+        `      const expectedVersion = ifMatch !== undefined ? Number(ifMatch) : aggregate.version;`,
+      );
+    }
     out.push(...whenGateLine(agg, op, "      "));
     if (audit) out.push(`      const before = repoTx.toWire(aggregate);`);
     out.push(...mutation("      "));
-    out.push(`      await repoTx.save(aggregate);`);
+    out.push(
+      isVersionedUpdate
+        ? `      await repoTx.save(aggregate, expectedVersion);`
+        : `      await repoTx.save(aggregate);`,
+    );
     if (audit) {
       out.push(`      const after = repoTx.toWire(aggregate);`);
       out.push(`      await tx.insert(schema.auditRecords).values({`);

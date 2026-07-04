@@ -14,6 +14,7 @@ import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import { directParentOf } from "../../ir/util/containment-parent.js";
 import { isTpcBase, isTphBase, tableOwnerName } from "../../ir/util/inheritance.js";
 import { effectiveSavingShape, resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
+import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import type { Model } from "../../language/generated/ast.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
@@ -274,7 +275,14 @@ function emitProjectFromContexts(
   const hasUniqueKeys = contexts.some((c) =>
     c.aggregates.some((a) => (a.uniqueKeys?.length ?? 0) > 0),
   );
-  place("ApiExceptionAdvice.java", "api-common", renderApiExceptionAdvice(basePkg, hasUniqueKeys));
+  // The optimistic-lock → 409 arm is emitted only when some aggregate is
+  // `versioned`, so a version-free project's advice stays byte-identical.
+  const hasVersioned = contexts.some((c) => c.aggregates.some(aggregateIsVersioned));
+  place(
+    "ApiExceptionAdvice.java",
+    "api-common",
+    renderApiExceptionAdvice(basePkg, hasUniqueKeys, hasVersioned),
+  );
   // Observability catalog — always-on, like dotnet's request log +
   // Hono's pino lines (the obs e2e suites assert this envelope).
   place("CatalogLog.java", "config", renderCatalogLogger(basePkg));

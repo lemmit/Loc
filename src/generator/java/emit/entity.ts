@@ -9,6 +9,7 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { UnionMember } from "../../_payload/union-wire.js";
@@ -370,6 +371,15 @@ export function renderJavaEntity(
       }
       fieldLines.push(`    ${renderJavaType(f.type)} ${f.name};`);
       continue;
+    }
+    // Optimistic concurrency (`versioned`): the synthetic `version` token field
+    // becomes the JPA `@Version` column — Hibernate adds `WHERE version = ?` to
+    // UPDATEs and increments it, raising ObjectOptimisticLockingFailureException
+    // on a stale write.  In the Java backend the domain aggregate class IS the
+    // JPA @Entity, so @Version lands beside the existing @Column (a TPH/TPC base
+    // carries it once; the concrete subclass skips inherited fields above).
+    if (persistence && isAgg(entity) && aggregateIsVersioned(entity) && f.access === "token") {
+      fieldLines.push(`    @Version`);
     }
     if (persistence) fieldLines.push(...jpaFieldAnnotations(f, entity, persistence));
     if (isRefCollection(f.type)) {

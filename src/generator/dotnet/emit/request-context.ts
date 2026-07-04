@@ -20,15 +20,34 @@
  */
 export function renderRequestContext(
   ns: string,
-  opts: { hasAuth: boolean; hasLogger: boolean; actorIdProp?: string },
+  opts: { hasAuth: boolean; hasLogger: boolean; actorIdProp?: string; hasVersioned?: boolean },
 ): string {
   const { hasAuth, hasLogger, actorIdProp } = opts;
+  const hasVersioned = !!opts.hasVersioned;
   const loggingUsing = hasLogger ? "using Microsoft.Extensions.Logging;\n" : "";
   const authUsing = hasAuth ? `using ${ns}.Auth;\n` : "";
   // The principal is request-stable, so a child frame inherits it from its
   // parent (the accessor still resolves `currentUser` once dispatch opens a
   // child).  Only present when auth carries a CurrentUser slice.
   const childUserCopy = hasAuth ? "\n            CurrentUser = parent.CurrentUser," : "";
+  // The client's `If-Match` expected version (optimistic concurrency): read
+  // from the request header by RequestContextMiddleware and carried on the
+  // request-stable tier so a Mediator child frame (opened under --trace) still
+  // sees it when the repository's SaveAsync reads it.  Only emitted when some
+  // in-scope aggregate is `versioned`.
+  const expectedVersionSlice = hasVersioned
+    ? `
+    /// <summary>The client's optimistic-concurrency expected version, parsed
+    /// from the request's <c>If-Match</c> header (null when absent).  A
+    /// <c>versioned</c> aggregate's repository save sets EF's original value of
+    /// the version token to this before flushing, so a stale precondition
+    /// yields a zero-row UPDATE (DbUpdateConcurrencyException → 409).</summary>
+    public int? ExpectedVersion { get; set; }
+`
+    : "";
+  const childExpectedVersionCopy = hasVersioned
+    ? "\n            ExpectedVersion = parent.ExpectedVersion,"
+    : "";
   const currentUserSlice = hasAuth
     ? `
     /// <summary>The verified principal for this flow, or null before
@@ -109,7 +128,7 @@ public sealed class RequestContext
     public string CorrelationId { get; init; } = string.Empty;
     public string Locale { get; init; } = "en";
     public DateTimeOffset StartedAt { get; init; }
-${currentUserSlice}${loggerSlice}
+${currentUserSlice}${loggerSlice}${expectedVersionSlice}
     // ---- Frame-local tier — a fresh ScopeId per frame.  The root frame
     // (opened at the boundary) has no parent; each Mediator dispatch opens a
     // child whose ParentId chains to its caller, forming the causality chain.
@@ -139,7 +158,7 @@ ${principalJsonMethod}${actorIdProperty}
         {
             CorrelationId = parent.CorrelationId,
             Locale = parent.Locale,
-            StartedAt = parent.StartedAt,${childUserCopy}
+            StartedAt = parent.StartedAt,${childUserCopy}${childExpectedVersionCopy}
             ScopeId = Guid.NewGuid().ToString(),
             ParentId = parent.ScopeId,
         };

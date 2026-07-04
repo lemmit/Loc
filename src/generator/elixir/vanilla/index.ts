@@ -13,6 +13,7 @@
 // ---------------------------------------------------------------------------
 
 import type { PageNameCtx } from "../../../ir/util/page-kind.js";
+import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import {
   buildPhoenixResourceModules,
   emitPhoenixResourceFiles,
@@ -71,9 +72,13 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   const hasUniqueKeys = contexts.some((c) =>
     c.aggregates.some((a) => (a.uniqueKeys?.length ?? 0) > 0),
   );
+  // The optimistic-concurrency 409 branch (`conflict_response/1`) is emitted only
+  // when some in-scope aggregate carries the `versioned` capability, so a
+  // version-free project stays byte-identical (strict additivity).
+  const hasVersioned = contexts.some((c) => c.aggregates.some((a) => aggregateIsVersioned(a)));
   out.set(
     `lib/${appName}_web/problem_details.ex`,
-    renderVanillaProblemDetailsModule(appModule, hasUniqueKeys),
+    renderVanillaProblemDetailsModule(appModule, hasUniqueKeys, hasVersioned),
   );
 
   // Resource-adapter helper modules — `lib/<app>/resources/<source_type>.ex`.

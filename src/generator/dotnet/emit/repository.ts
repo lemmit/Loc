@@ -8,6 +8,7 @@ import type {
   RetrievalIR,
 } from "../../../ir/types/loom-ir.js";
 import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
@@ -137,6 +138,26 @@ export function renderRepositoryImpl(
   const loadByIdLines = buildLoadByIdLines(associations);
   const loadManyByIdsLines = buildLoadManyByIdsLines(agg.name, setName, associations);
   const saveDiffSyncLines = buildSaveDiffSyncLines(associations);
+  // Optimistic concurrency (`versioned`): on an UPDATE (the entity is tracked,
+  // not freshly added), guard the write on the loaded version — overridden by
+  // the client's `If-Match` expected version when supplied (ambient
+  // RequestContext, populated by RequestContextMiddleware) — and bump it.  EF's
+  // native concurrency token (efcore.ts `IsConcurrencyToken()`) turns that into
+  // `UPDATE ... SET version = @next WHERE id = @id AND version = @expected`; a
+  // zero-row result raises DbUpdateConcurrencyException, which the
+  // DomainExceptionFilter maps to 409.  Not applied to INSERTs (a new row keeps
+  // its seeded version).  Empty (byte-identical) for a non-versioned aggregate.
+  const versionGuardLines = aggregateIsVersioned(agg)
+    ? [
+        "        if (entry.State != EntityState.Added && entry.State != EntityState.Detached)",
+        "        {",
+        "            var __version = entry.Property(x => x.Version);",
+        "            var __expected = RequestContext.Current?.ExpectedVersion;",
+        "            if (__expected.HasValue) __version.OriginalValue = __expected.Value;",
+        "            __version.CurrentValue = __version.OriginalValue + 1;",
+        "        }",
+      ]
+    : [];
   // Provenance flush (provenance.md): drain the per-write lineage buffer and
   // stage one provenance_records row per write.  Added to the same scoped
   // AppDbContext as the aggregate change, BEFORE SaveChangesAsync, so the
@@ -327,6 +348,7 @@ export function renderRepositoryImpl(
       "        {",
       `            _db.${setName}.Add(aggregate);`,
       "        }",
+      ...versionGuardLines,
       ...saveDiffSyncLines,
       ...provFlushLines,
       // tx_* (trace) — emitted ONLY under --trace.  EF's SaveChangesAsync

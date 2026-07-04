@@ -73,6 +73,7 @@ import {
   effectiveSavingShape,
   resolveDataSourceConfig,
 } from "../../../ir/util/resolve-datasource.js";
+import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import type { Model } from "../../../language/generated/ast.js";
 import { dedupeByName } from "../../../util/dedupe.js";
 import { lowerFirst } from "../../../util/naming.js";
@@ -91,7 +92,12 @@ import { buildRoutesFile } from "./routes-builder.js";
 import { buildViewsRoutesFile } from "./view-routes-builder.js";
 import { buildWorkflowsFile } from "./workflow-builder.js";
 
-const ERRORS_TS = `// Auto-generated.
+/** `emitConcurrency` is true when some aggregate in scope declares the
+ *  `versioned` capability (optimistic concurrency) — only then does the
+ *  repository save's guarded write have anything to throw, so a
+ *  concurrency-free project's `domain/errors.ts` stays byte-identical. */
+function errorsTs(emitConcurrency: boolean): string {
+  return `// Auto-generated.
 export class DomainError extends Error {
   constructor(message: string) { super(message); this.name = "DomainError"; }
 }
@@ -134,7 +140,24 @@ export class ExternHandlerError extends Error {
     this.cause = cause;
   }
 }
-`;
+${
+  emitConcurrency
+    ? `/** Optimistic-concurrency conflict — raised by the repository's guarded
+ *  write when a \`versioned\` aggregate's expected version no longer
+ *  matches the stored row (another request won the race).  The per-router
+ *  catch maps this to HTTP 409 (Conflict), distinct from the \`disallowed\`
+ *  state-gate 409 — a dashboard can tell "stale write" from "state gate"
+ *  apart via the \`conflict\` vs \`disallowed\` log event. */
+export class ConcurrencyError extends Error {
+  constructor(aggregate: string, id: string) {
+    super(\`\${aggregate} \${id} was modified by another request\`);
+    this.name = "ConcurrencyError";
+  }
+}
+`
+    : ""
+}`;
+}
 
 /** Shared HTTP error shape — RFC 7807 ProblemDetails with the §3.2 `errors[]`
  *  extension for per-field validation failures.  See
@@ -344,7 +367,11 @@ export function generateTypeScriptForContexts(
   const servicesFile = renderDomainServices(merged);
   if (servicesFile) out.set("domain/services.ts", servicesFile);
   out.set("domain/events.ts", renderEvents(merged));
-  out.set("domain/errors.ts", ERRORS_TS);
+  // `ConcurrencyError` only when some aggregate in this deployable declares
+  // `versioned` — mirrors the emitProvenance / emitAudit presence-gating
+  // above so a concurrency-free project's errors file stays byte-identical.
+  const emitConcurrency = merged.aggregates.some(aggregateIsVersioned);
+  out.set("domain/errors.ts", errorsTs(emitConcurrency));
   out.set("http/problem-details.ts", PROBLEM_DETAILS_TS);
   if (emitProvenance) out.set("domain/provenance.ts", PROVENANCE_TS);
   // Per-aggregate dataSource lookup — feeds `pgSchema(...)` /

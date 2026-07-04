@@ -15,6 +15,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { discriminatorValue, tableOwnerName } from "../../ir/util/inheritance.js";
 import { isValueCollectionType, valueCollectionsFor } from "../../ir/util/value-collections.js";
+import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
@@ -118,6 +119,45 @@ function saveTxBody(agg: EnrichedAggregateIR, ctx: BoundedContextIR, emitTrace: 
   // fields only, createdAt/createdBy preserved).  Domain + handler carry no
   // stamping.  A non-audited aggregate's upsert is byte-identical to before.
   const audited = aggregateIsAudited(agg);
+
+  // Optimistic concurrency (`versioned` capability, versioned-capability.ts):
+  // the unconditional `insert...onConflictDoUpdate` upsert becomes a guarded
+  // write.  No existing row → plain insert seeding `version: 1` (a fresh
+  // aggregate can't conflict).  An existing row → an UPDATE conditioned on
+  // the *expected* version — the caller's `expectedVersion` argument (the
+  // route thread it from an `If-Match` header on the versioned `update` op;
+  // see routes-builder) falling back to the just-loaded `aggregate.version`
+  // (write-time CAS) when the caller doesn't pass one, so every mutate path
+  // stays a coherent guarded write, not just `update`.  Zero rows affected
+  // means another request won the race in between — `ConcurrencyError`,
+  // mapped to 409 by the shared `onError` arm.
+  if (aggregateIsVersioned(agg)) {
+    const baseEntries = rootEntries(agg, "aggregate", ctx, new Set(["version"]));
+    const insertRow = projectionObject("aggregate", [
+      ...baseEntries,
+      { fieldName: "version", expr: "1" },
+    ]);
+    const updateRow = projectionObject("aggregate", [
+      ...baseEntries,
+      { fieldName: "version", expr: "expected + 1" },
+    ]);
+    const insertValues = audited ? `stampInsert(${insertRow})` : insertRow;
+    const updateSet = audited ? `stampUpdate(${updateRow})` : updateRow;
+    return [
+      `      const expected = expectedVersion ?? aggregate.version;`,
+      `      const existingRow = await tx.select({ id: schema.${tableName}.id }).from(schema.${tableName}).where(eq(schema.${tableName}.id, aggregate.id));`,
+      `      if (existingRow.length === 0) {`,
+      `        await tx.insert(schema.${tableName}).values(${insertValues});`,
+      `      } else {`,
+      `        const updated = await tx.update(schema.${tableName}).set(${updateSet}).where(and(eq(schema.${tableName}.id, aggregate.id), eq(schema.${tableName}.version, expected))).returning({ id: schema.${tableName}.id });`,
+      `        if (updated.length === 0) throw new ConcurrencyError("${agg.name}", aggregate.id as string);`,
+      `      }`,
+      ...containBlocks,
+      ...assocBlocks,
+      ...valueCollectionBlocks,
+    ];
+  }
+
   const insertValues = audited ? "stampInsert(rootRow)" : "rootRow";
   const updateSet = audited ? "stampUpdate(rootRow)" : "rootRow";
   return [
@@ -138,8 +178,18 @@ export function saveMethod(
   // local array so the trace-on variant can wrap it with try/catch +
   // tx_* logs without duplicating the body.
   const body = saveTxBody(agg, ctx, emitTrace);
+  // A versioned aggregate's save accepts the client's expected version
+  // (threaded from the route's `If-Match` header) as an optional second
+  // arg — optional so every other mutate route, which only ever loaded
+  // and mutated `aggregate` itself, can keep calling `repo.save(aggregate)`
+  // and still get a guarded write (the tx body falls back to
+  // `aggregate.version`).  A non-versioned aggregate's signature is
+  // byte-identical to before.
+  const saveSig = aggregateIsVersioned(agg)
+    ? `  async save(aggregate: ${agg.name}, expectedVersion?: number): Promise<void> {`
+    : `  async save(aggregate: ${agg.name}): Promise<void> {`;
   return lines(
-    `  async save(aggregate: ${agg.name}): Promise<void> {`,
+    saveSig,
     emitTrace
       ? [
           `    ${renderHonoStoreLogCall("txBegin", `aggregate: "${agg.name}", id: aggregate.id as string`)}`,
@@ -171,19 +221,34 @@ export function saveMethod(
   );
 }
 
-function rootProjection(agg: EnrichedAggregateIR, varExpr: string, ctx: BoundedContextIR): string {
+/** The root row's projection entries — factored out of {@link rootProjection}
+ *  so the `versioned` guarded write (above) can build INSERT/UPDATE variants
+ *  that omit the synthetic `version` field and supply it explicitly per
+ *  branch, while sharing every other field's projection logic verbatim. */
+function rootEntries(
+  agg: EnrichedAggregateIR,
+  varExpr: string,
+  ctx: BoundedContextIR,
+  omit: ReadonlySet<string> = new Set(),
+): { fieldName: string; expr: string }[] {
   // TPH: stamp the `kind` discriminator so the shared-table row records which
   // concrete it is (null for non-TPH aggregates → entry omitted).
   const kind = discriminatorValue(agg, ctx.aggregates);
-  return projectionObject(varExpr, [
+  return [
     { fieldName: "id", expr: `${varExpr}.id as string` },
     ...(kind ? [{ fieldName: "kind", expr: JSON.stringify(kind) }] : []),
     // Reference collections live in join tables, not on the root row.
     ...agg.fields
-      .filter((f) => !isRefCollection(f.type) && !isValueCollectionType(f.type))
+      .filter(
+        (f) => !isRefCollection(f.type) && !isValueCollectionType(f.type) && !omit.has(f.name),
+      )
       .flatMap((f) => projectFieldEntries(f, varExpr, ctx)),
     ...provColumnEntries(agg.fields, varExpr),
-  ]);
+  ];
+}
+
+function rootProjection(agg: EnrichedAggregateIR, varExpr: string, ctx: BoundedContextIR): string {
+  return projectionObject(varExpr, rootEntries(agg, varExpr, ctx));
 }
 
 function entityProjection(part: EntityPartIR, varExpr: string, ctx: BoundedContextIR): string {
