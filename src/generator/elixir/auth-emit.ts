@@ -111,6 +111,45 @@ function renderAuthPlug(
 ): string {
   const buildUserBody = renderBuildUser(user, auth);
   const idKey = actorIdKey(user);
+  // DEV STUB only: let a caller override string claims (e.g. tenantId) via a
+  // base64-JSON `x-loom-dev-claims` header — the same injection the Hono dev
+  // stub honours (dotnet/java/python parity).  Never in OIDC mode: a header
+  // must not override verified claims.  Keyed by the declared field name; the
+  // value lands on the built principal's snake_case key.
+  const devClaimStringFields = (user?.fields ?? []).filter(
+    (f) => f.type.kind === "primitive" && f.type.name === "string",
+  );
+  const devClaimsEnabled = !auth && devClaimStringFields.length > 0;
+  const buildUserCall = devClaimsEnabled
+    ? "merge_dev_claims(conn, build_user(claims))"
+    : "build_user(claims)";
+  const mergeDevClaimsDef = devClaimsEnabled
+    ? `
+  # DEV STUB only: override string claims (e.g. tenantId) from a base64-encoded
+  # JSON \`x-loom-dev-claims\` header — the same injection the Hono dev stub
+  # honours.  Keyed by the declared field name; only string values apply.
+  defp merge_dev_claims(conn, user) do
+    case get_req_header(conn, "x-loom-dev-claims") do
+      [raw | _] ->
+        with {:ok, json} <- Base.decode64(raw),
+             {:ok, claims} <- Jason.decode(json) do
+          user
+${devClaimStringFields
+  .map((f) => `          |> maybe_put_claim(:${snake(f.name)}, claims["${f.name}"])`)
+  .join("\n")}
+        else
+          _ -> user
+        end
+
+      _ ->
+        user
+    end
+  end
+
+  defp maybe_put_claim(user, key, value) when is_binary(value), do: Map.put(user, key, value)
+  defp maybe_put_claim(user, _key, _value), do: user
+`
+    : "";
   // OIDC verifier vs dev stub.  The OIDC path additionally needs the JWKS
   // discovery/verification helpers; the dev stub needs none.
   const verifierSection = auth ? renderOidcVerifier(auth) : renderDevStubVerifier();
@@ -207,7 +246,7 @@ ${tokenBlock}
 
       case verify_token(token) do
         {:ok, claims} ->
-          user = build_user(claims)
+          user = ${buildUserCall}
           # Principal slice of the execution context: stamp ONLY the actor id
           # into Logger.metadata (the request-context carrier) so audit and log
           # lines can attribute the actor without leaking the rest of the
@@ -248,7 +287,7 @@ ${verifierSection}
 
   defp build_user(claims) do
 ${buildUserBody}  end
-end
+${mergeDevClaimsDef}end
 `;
 }
 
