@@ -174,7 +174,8 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // An `auth { oidc }` block drives the generated OIDC verifier + handshake;
   // absent it, the dev stub keeps a fresh stack callable out of the box.
   const oidc = authRequired ? args.sys.auth : undefined;
-  if (authRequired && args.sys.user) emitPyAuthFiles(args.sys.user, out, oidc);
+  if (authRequired && args.sys.user)
+    emitPyAuthFiles(args.sys.user, out, oidc, args.sys.tenancy?.claimField);
   // First-boot seeding (database-seeding.md): emitted only when a
   // dataset survives filtering (rows on concrete aggregates); the
   // lifespan runs seeds right after migrations (Hono/.NET boot order).

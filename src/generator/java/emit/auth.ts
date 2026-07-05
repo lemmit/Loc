@@ -43,6 +43,22 @@ export function renderAuthFiles(
       return `${renderJavaType(f.type)} ${f.name}`;
     })
     .join(", ");
+  // Derived `currentUser.orgPath` — the caller's tenant materialized path
+  // (multi-tenancy P2.1).  An extra record accessor (not a component), so
+  // every `new User(...)` site is untouched; stringified null-safely.  P2.1
+  // resolves it to the tenancy claim value (the root path); P2.2 swaps the
+  // body for a memoized registry `dataKey` lookup.
+  const orgPathClaim = sys.tenancy?.claimField;
+  const orgPathAccessor = orgPathClaim
+    ? [
+        ``,
+        `    /** The caller's tenant materialized path (\`currentUser.orgPath\`) —`,
+        `     *  derived per-request from the tenancy claim (Phase 2, P2.1). */`,
+        `    public String orgPath() {`,
+        `        return ${orgPathClaim}() == null ? "" : String.valueOf(${orgPathClaim}());`,
+        `    }`,
+      ]
+    : [];
   out.set(
     "User.java",
     lines(
@@ -53,6 +69,7 @@ export function renderAuthFiles(
       `/** Strongly-typed claim shape from the system's user block —`,
       ` *  \`currentUser\` references resolve against this. */`,
       `public record User(${components}) {`,
+      ...orgPathAccessor,
       `}`,
       ``,
     ),

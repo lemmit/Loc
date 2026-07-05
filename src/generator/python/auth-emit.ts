@@ -26,9 +26,14 @@ import { renderPyType } from "./render-expr.js";
 // /openapi.json, /swagger (plus /auth/login|callback|logout under OIDC).
 // ---------------------------------------------------------------------------
 
-export function emitPyAuthFiles(user: UserIR, out: Map<string, string>, auth?: AuthIR): void {
+export function emitPyAuthFiles(
+  user: UserIR,
+  out: Map<string, string>,
+  auth?: AuthIR,
+  orgPathClaim?: string,
+): void {
   out.set("app/auth/__init__.py", "");
-  out.set("app/auth/user.py", renderUserModule(user));
+  out.set("app/auth/user.py", renderUserModule(user, orgPathClaim));
   out.set("app/auth/verifier.py", VERIFIER_PY);
   out.set("app/auth/middleware.py", renderAuthMiddleware(user, !!auth));
   // /auth/me is emitted whenever a backend has auth — the frontend `auth: ui`
@@ -99,11 +104,26 @@ function stubValueForType(t: TypeIR): string {
   }
 }
 
-function renderUserModule(user: UserIR): string {
+function renderUserModule(user: UserIR, orgPathClaim?: string): string {
   const fields = user.fields.map((f) => {
     const t = renderPyType(f.optional ? { kind: "optional", inner: f.type } : f.type);
     return `    ${snake(f.name)}: ${t}`;
   });
+  // Derived `currentUser.orgPath` — the caller's tenant materialized path
+  // (multi-tenancy P2.1).  A computed @property (not a dataclass field), so
+  // every construction site is untouched and `asdict()` never serializes it;
+  // stringified null-safely.  P2.1 resolves it to the tenancy claim value (the
+  // root path); P2.2 swaps the body for a memoized registry `dataKey` lookup.
+  const orgPathProp = orgPathClaim
+    ? [
+        "",
+        "    @property",
+        "    def org_path(self) -> str:",
+        '        """The caller\'s tenant materialized path (`currentUser.orgPath`) —',
+        '        derived per-request from the tenancy claim (multi-tenancy Phase 2, P2.1)."""',
+        `        return "" if self.${snake(orgPathClaim)} is None else str(self.${snake(orgPathClaim)})`,
+      ]
+    : [];
   // Id-typed claims (`Customer id?`) reference the branded NewTypes.
   const idNames = [
     ...new Set(
@@ -138,6 +158,7 @@ function renderUserModule(user: UserIR): string {
     "@dataclass(frozen=True)",
     "class User:",
     ...fields,
+    ...orgPathProp,
     "",
     "",
     "# Ambient principal carrier — set by AuthMiddleware on every authenticated",

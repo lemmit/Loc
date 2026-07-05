@@ -31,7 +31,7 @@ import { renderCsType } from "./render-expr.js";
 
 export function emitAuthFiles(sys: SystemIR, ns: string, out: Map<string, string>): void {
   if (!sys.user) return;
-  out.set("Auth/User.cs", renderUserRecord(sys.user, ns));
+  out.set("Auth/User.cs", renderUserRecord(sys.user, ns, sys.tenancy?.claimField));
   out.set("Auth/IUserVerifier.cs", renderVerifierInterface(ns));
   out.set("Auth/ICurrentUserAccessor.cs", renderAccessorInterface(ns));
   out.set("Auth/HttpContextCurrentUserAccessor.cs", renderAccessorImpl(ns));
@@ -537,7 +537,7 @@ function stubCsharpValueForType(t: TypeIR): string {
   }
 }
 
-function renderUserRecord(user: UserIR, ns: string): string {
+function renderUserRecord(user: UserIR, ns: string, orgPathClaim?: string): string {
   const params = user.fields
     .map((f) => {
       const t = f.optional
@@ -546,6 +546,21 @@ function renderUserRecord(user: UserIR, ns: string): string {
       return `${t} ${upperFirst(f.name)}`;
     })
     .join(", ");
+  // Derived `currentUser.orgPath` — the caller's tenant materialized path
+  // (multi-tenancy P2.1).  A computed property (not a positional param), so
+  // every construction site (dev stub / OIDC verifier) is untouched; string
+  // interpolation stringifies the claim null-safely.  P2.1 resolves it to the
+  // tenancy claim value (the root path); P2.2 swaps the body for a memoized
+  // registry `dataKey` lookup.
+  const orgPathMember = orgPathClaim
+    ? `
+{
+    /// <summary>The caller's tenant materialized path
+    /// (<c>currentUser.orgPath</c>) — derived per-request from the tenancy
+    /// claim (multi-tenancy Phase 2, P2.1).</summary>
+    public string OrgPath => $"{${upperFirst(orgPathClaim)}}";
+}`
+    : ";";
   return `// Auto-generated.
 using ${ns}.Domain.Enums;
 using ${ns}.Domain.Ids;
@@ -556,7 +571,7 @@ namespace ${ns}.Auth;
 /// <summary>Strongly-typed claim shape decoded from the inbound
 /// JWT.  Populated per request by <see cref="IUserVerifier"/> and
 /// exposed to handlers via <see cref="ICurrentUserAccessor"/>.</summary>
-public sealed record User(${params});
+public sealed record User(${params})${orgPathMember}
 `;
 }
 
