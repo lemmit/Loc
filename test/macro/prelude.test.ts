@@ -60,26 +60,35 @@ describe("built-in capability prelude (typed-capabilities.md Phase 3)", () => {
     expect(agg.contextFilters?.length).toBe(1);
   });
 
-  it("`with tenantOwned` splices the tenantId field + onCreate stamp + tenant filter", async () => {
+  it("`with tenantOwned` splices the tenantId + dataKey fields + onCreate stamp + tenant filter", async () => {
     const ir = await buildLoomModel(`
       system D {
         user { id: guid  tenantId: string }
+        tenancy by user.tenantId of Org
         subdomain M { context C {
           aggregate Invoice with tenantOwned { number: string }
+          aggregate Org { name: string }
         }}
       }
     `);
     const agg = findAgg(ir, "Invoice");
-    // Field (internal access keeps it out of client create/update inputs):
+    // Fields (internal access keeps both out of client create/update inputs):
     const tenantId = agg.fields.find((f) => f.name === "tenantId")!;
     expect(tenantId).toBeDefined();
     expect(tenantId.access).toBe("internal");
     expect(agg.wireShape.map((f) => f.name)).toContain("tenantId");
-    // Stamp: onCreate { tenantId := currentUser.tenantId }:
+    const dataKey = agg.fields.find((f) => f.name === "dataKey")!;
+    expect(dataKey).toBeDefined();
+    expect(dataKey.access).toBe("internal");
+    expect(dataKey.optional).toBe(true);
+    // `dataKey` (P2.3) is kept OUT of wireShape entirely — never serialized,
+    // unlike `tenantId` which stays present (internal, API-read-excluded).
+    expect(agg.wireShape.map((f) => f.name)).not.toContain("dataKey");
+    // Stamp: onCreate { tenantId := currentUser.tenantId  dataKey := currentUser.orgPath }:
     expect(agg.contextStamps?.length).toBe(1);
     const stamp = agg.contextStamps![0]!;
     expect(stamp.event).toBe("create");
-    expect(stamp.assignments.map((a) => a.field)).toEqual(["tenantId"]);
+    expect(stamp.assignments.map((a) => a.field)).toEqual(["tenantId", "dataKey"]);
     // Filter: this.tenantId == currentUser.tenantId:
     expect(agg.contextFilters?.length).toBe(1);
     // Capability provenance (drives the `ignoring tenantOwned` bypass surface):
