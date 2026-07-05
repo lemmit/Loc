@@ -50,6 +50,10 @@ interface ParseResult {
   diagnostics: string[];
   errorCount: number;
   warningCount: number;
+  /** `.ddd` source text keyed by `URI.path` (the same key an `OriginRef`'s
+   *  `SourceRef.path` resolves to) — feeds `GenerateSystemOptions.sourceTexts`
+   *  for Source Map v3 sidecar emission.  Just this one document's text. */
+  sourceTexts: Map<string, string>;
 }
 
 async function parseFile(file: string): Promise<ParseResult> {
@@ -78,6 +82,7 @@ async function parseFile(file: string): Promise<ParseResult> {
     diagnostics,
     errorCount,
     warningCount,
+    sourceTexts: new Map([[doc.uri.path, doc.textDocument.getText()]]),
   };
 }
 
@@ -90,6 +95,9 @@ interface ProjectParseResult {
   diagnostics: string[];
   errorCount: number;
   warningCount: number;
+  /** `.ddd` source text keyed by `URI.path`, over every document in the
+   *  import graph — see `ParseResult.sourceTexts`. */
+  sourceTexts: Map<string, string>;
 }
 
 /**
@@ -106,6 +114,9 @@ async function parseProject(entryFile: string): Promise<ProjectParseResult> {
     throw new Error(`File not found: ${absolute}`);
   }
   const { all } = await loadProject(URI.file(absolute), services.shared);
+
+  const sourceTexts = new Map<string, string>();
+  for (const doc of all) sourceTexts.set(doc.uri.path, doc.textDocument.getText());
 
   const diagnostics: string[] = [];
   let errorCount = 0;
@@ -132,7 +143,7 @@ async function parseProject(entryFile: string): Promise<ProjectParseResult> {
   // docs/proposals/implicit-system-composition.md).
   const merged = lowerProject(all.map((doc) => doc.parseResult.value as Model));
   const loom = enrichLoomModel(merged);
-  return { loom, diagnostics, errorCount, warningCount };
+  return { loom, diagnostics, errorCount, warningCount, sourceTexts };
 }
 
 function printDiagnostics(result: ParseResult) {
@@ -349,6 +360,11 @@ async function runGenerate(
   // `generateDotnet` (each of which calls `enrichLoomModel(lowerModel(model))`).
   let loom: EnrichedLoomModel;
   let model: Model | undefined;
+  // Only the `system` target's project load carries a `sourceTexts` map
+  // today (Source Map v3 sidecars are node/Hono-only — see
+  // `GenerateSystemOptions.sourceTexts`); harmless to leave undefined on
+  // the legacy `ts`/`dotnet` paths, which never call `generateSystemsFromLoom`.
+  let sourceTexts: Map<string, string> | undefined;
   if (target === "system") {
     let projectResult: ProjectParseResult;
     try {
@@ -367,6 +383,7 @@ async function runGenerate(
       return { hadError: true };
     }
     loom = projectResult.loom;
+    sourceTexts = projectResult.sourceTexts;
   } else {
     const result = await parseFile(file);
     if (result.errorCount > 0) {
@@ -413,6 +430,9 @@ async function runGenerate(
         snapshots: fsSnapshotStore(outDir),
         allowDestructive: options.allowDestructive,
         sourcemap: options.sourcemap,
+        // Harmless to pass unconditionally — v3 sidecar emission is still
+        // gated on `sourcemap` inside `generateSystemsFromLoom`.
+        sourceTexts,
       }).files;
     } catch (err) {
       // A corrupted/truncated migration snapshot, or a destructive delta
