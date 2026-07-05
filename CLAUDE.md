@@ -81,6 +81,7 @@ npm run test:dotnet       # LOOM_DOTNET_BUILD=1 — `dotnet build /warnaserror` 
 npm run test:java         # LOOM_JAVA_BUILD=1 — `gradle testClasses bootJar` against generated Spring Boot projects (JDK 21 + Gradle)
 npm run test:python       # LOOM_PYTHON_BUILD=1 — `uv sync` + `ruff check` + `mypy --strict` + `pytest` against generated FastAPI projects (uv)
 npm run test:phoenix      # LOOM_PHOENIX_VANILLA_BUILD=1 — `mix compile --warnings-as-errors` against plain Ecto/Phoenix in Elixir docker
+npm run test:tenancy      # LOOM_TENANCY_E2E=1 — boots generated Hono backend on docker postgres, asserts cross-tenant isolation + registry self-scope/signup bootstrap end-to-end (LOOM_TENANCY_PG_URL override skips the sidecar)
 npm run test:obs          # LOOM_OBS_E2E=1 — boots generated Hono backend, asserts catalog envelope on stdout
 npm run test:obs-dotnet   # LOOM_OBS_E2E_DOTNET=1 — same for the .NET backend (postgres sidecar via docker)
 npm run test:obs-phoenix  # LOOM_OBS_E2E_PHOENIX=1 — same for the Phoenix backend (postgres sidecar via docker)
@@ -280,6 +281,7 @@ The framework-specific seams (state read/write syntax, helper imports, navigatio
 - `python-build.yml` — `uv sync` + `ruff check` + `mypy --strict` + `pytest` against the Python/FastAPI output.
 - `elixir-vanilla-build.yml` — `mix deps.get && mix compile --warnings-as-errors` against the vanilla Ecto/Phoenix dep set in an Elixir docker image.
 - `hono-obs-e2e.yml` / `dotnet-obs-e2e.yml` / the elixir-vanilla obs gate / `java-obs-e2e.yml` / `python-obs-e2e.yml` — per-backend observability e2e (boots the generated backend, asserts the catalog envelope on stdout).
+- `tenancy-e2e.yml` — boots the generated Hono backend (postgres service) and asserts cross-tenant isolation + the registry self-scope/claim-less-signup bootstrap end-to-end. The runtime agreement between the per-PR structural filter/stamp pins that a boot alone can catch. Main-push + dispatch, path-filtered (same docker-heavy-e2e rationale as the obs gates).
 - `generated-svelte-build.yml` — matrix `{example × svelte pack}`, generates the SvelteKit project and typechecks it (the Svelte analogue of `generated-react-build.yml`). Vue and Angular have their own `generated-{vue,angular}-build.yml`; all four JSX frontends now also carry a `generated-{react,vue,svelte,angular}-e2e.yml` runtime gate.
 - `playground-e2e.yml` — Playwright specs against the production-built playground (editor → generate → bundle → boot → preview).
 - `conformance-parity.yml` / `conformance-full.yml` — cross-backend OpenAPI / wire-shape parity (parity is the per-PR gate; full is the broader run). `conformance-full` (nightly / `run-conformance` label) is the only place the DSL-emitted behavioral `test e2e` suites run against a docker stack.
