@@ -395,13 +395,21 @@ context Reports {
 
 ```ddd
 context Reports {
-  // (Projection design deferred; placeholder)
-  // Subscribes to context-level events from Invoicing and builds own read model.
-  // The local read model is fully owned by Reports.
+  // Subscribes to context-level events from Invoicing and folds a local read
+  // model, fully owned by Reports.  Design now specified in projection.md:
+  projection InvoiceLedger keyed by invoice {
+    invoice: Invoice id;  total: Money;  status: InvoiceStatus
+    on(e: InvoiceIssued) { invoice := e.invoice; total := e.total; status := Issued }
+    on(e: InvoicePaid)   { status := Paid }
+  }
 }
 ```
 
-Projection design is deferred to a follow-up proposal but the pattern is sketched here for completeness — cross-BC reads always go through one of these two routes; never direct table access.
+The `projection` construct is now specified in
+[`projection.md`](./projection.md) (was "deferred to a follow-up proposal") —
+cross-BC reads always go through one of these two routes; never direct table
+access. A projection fold is **pure** (folds foreign events only, reads no
+repos); cross-source enrichment happens up in a `view` over the projection.
 
 ## Grammar additions
 
@@ -646,7 +654,7 @@ Mechanical (`s/module /subdomain /; s/modules: /contexts: /`) with three additio
 
 ## Open questions
 
-1. **Projections as first-class construct.** Strongly indicated; design deferred. Will need to fit the structural visibility model (projection-nested events = BC-scope; projection state queryable intra-BC; cross-BC reads via views over projections).
+1. **Projections as first-class construct.** Design now specified in [`projection.md`](./projection.md) (a `projection` context member folding foreign events into a pure, derived read model). Fits the structural visibility model as anticipated: projection state is queryable intra-BC; cross-BC reads go via `view`s over projections (`projection.md` v1.1).
 2. **Subdomain-level `consumes` import-alias shortcut.** Considered and deferred. Useful only if cross-BC dotted paths become genuinely painful in practice; collision-aliasing is the only legitimate use case. Add if pressure builds.
 3. **Per-aggregate storage override** (the v2 surface from the storage proposals). Add when at least one concrete user case demands cross-infra coexistence within a single BC.
 4. **Schema versioning Level 2 / 3.** Level 1 (convention + tooling, catalog + AsyncAPI + OpenAPI + code review discipline) suffices for v1. Layer Level 2 (snapshot-based breakage detection) when accidental breaks become recurring; Level 3 (explicit `v1 / v2` declarations) when multi-version coexistence is genuinely needed.
