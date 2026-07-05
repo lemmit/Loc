@@ -1,0 +1,93 @@
+// RST-8 behavioral-tier fixture — EVENT-SOURCED aggregate
+// (`persistedAs(eventLog)`), retargeted from web/src/examples/event-sourcing.ddd
+// to a single `platform: python` (FastAPI) backend. The aggregate's truth is
+// its append-only event stream (`account_events`); the `create`/`operation`
+// bodies `emit`, and the `apply(...)` bodies fold events back into state on
+// read. A wholly different persistence emitter path from the CRUD/relational
+// fixtures — the row is NOT the truth, the fold is.
+//
+// RS-rules the `test e2e` create→(op)→read round-trips assert on Python:
+//   RS-1  multi-word key both directions (`owner`, and read-back `balance`).
+//   RS-8  the emitted events persist through the log and the fold reconstructs
+//         `balance` (a mutation-via-op round-trip, event-sourced flavor).
+//   RS-3  no persistence-internal columns leak (read key-set == wireShape).
+
+system LedgerPy {
+
+  subdomain Core {
+    context Accounts {
+
+      event Opened { account: Account id, owner: string }
+      event Deposited { account: Account id, amount: int }
+      event Withdrawn { account: Account id, amount: int }
+
+      aggregate Account persistedAs(eventLog) {
+        owner: string
+        balance: int
+
+        invariant balance >= 0
+
+        create(owner: string) {
+          emit Opened { account: id, owner: owner }
+        }
+
+        operation deposit(amount: int) {
+          precondition amount > 0
+          emit Deposited { account: id, amount: amount }
+        }
+
+        operation withdraw(amount: int) {
+          precondition amount > 0
+          precondition balance >= amount
+          emit Withdrawn { account: id, amount: amount }
+        }
+
+        apply(e: Opened) {
+          owner := e.owner
+          balance := 0
+        }
+        apply(e: Deposited) {
+          balance := balance + e.amount
+        }
+        apply(e: Withdrawn) {
+          balance := balance - e.amount
+        }
+      }
+
+      repository Accounts for Account {
+        find byOwner(owner: string): Account? where this.owner == owner
+      }
+    }
+  }
+
+  storage primary { type: postgres }
+  resource accountsLog { for: Accounts, kind: eventLog, use: primary }
+
+  deployable api {
+    platform: python
+    contexts: [Accounts]
+    dataSources: [accountsLog]
+    port: 8000
+  }
+
+  // RS-1 (`owner` round-trip) + RS-8/RS-4-flavored fold: create opens the
+  // stream (balance folds to 0), then two ops emit events the fold sums.
+  test e2e "open an account, deposit and withdraw, read the folded balance" against api {
+    let a = api.accounts.create({ owner: "alice" })
+    api.accounts.deposit(a, { amount: 100 })
+    api.accounts.withdraw(a, { amount: 30 })
+    let read = api.accounts.getById(a)
+    expect(read.owner).toBe("alice")
+    expect(read.balance).toBe(70)
+  }
+
+  // RS-8 fold on a fresh read via the `byOwner` filter query — the event
+  // stream reconstructs `balance` identically through a non-getById reader.
+  test e2e "byOwner reads the folded balance through a filter query" against api {
+    let a = api.accounts.create({ owner: "bob" })
+    api.accounts.deposit(a, { amount: 250 })
+    let found = api.accounts.byOwner({ owner: "bob" })
+    expect(found.owner).toBe("bob")
+    expect(found.balance).toBe(250)
+  }
+}

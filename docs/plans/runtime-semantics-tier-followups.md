@@ -46,7 +46,19 @@ agents; they only collide on this doc's status table.
 
 ## Tickets (ranked)
 
-### RST-1 · Gate RS-9 (400/422 routing) — teach `test e2e` to assert HTTP status  ·  L
+### RST-1 · Gate RS-9 (400/422 routing) — teach `test e2e` to assert HTTP status  ·  L  ·  ✅ RESOLVED (language already shipped)
+- **Resolution (audit on fresh `main`).** The language slice this ticket
+  describes **already shipped** as `expect(<call>).toThrow(<status>)` (PR #1603):
+  lowered to `expect-throws { status? }` (`src/ir/lower/lower.ts`), emitted as
+  `.rejects.toThrow(/→ <status>\b/)` (`src/system/e2e-render.ts`), and the runner
+  already surfaces the status through the `__post`/`__get` throw message. RS-9 is
+  already `tier: "behavioral"`, `conforms` all 5 backends in
+  `semantics-rules.ts`. `examples/showcase.ddd` already uses `.toThrow(422)` /
+  `.toThrow(404)`. The only residual was per-PR **corpus** coverage of the 422
+  arm (showcase is nightly-docker-only) — and the **400 (malformed-body) arm is
+  not DSL-expressible**: `test e2e` args are statically type-checked, so an
+  ill-typed create can't be authored to send. Closed by decision; the 400 arm
+  stays conceded to backend-level handling.
 - **Why.** RS-9 (malformed body → 400, well-formed-but-invalid → 422) is the
   only behavioral rule with **no gate** — the `test e2e` DSL can express
   `expect(x).toThrow()` (throw/no-throw) but not the 400-vs-422 *status*, which
@@ -172,7 +184,23 @@ agents; they only collide on this doc's status table.
 - **Scope.** `test/behavioral/corpus-python/sales.ddd` (+ the node corpus if you
   want symmetry). **Collision:** shares the fixture with RST-1/RST-8 — coordinate.
 
-### RST-8 · Broaden the behavioral corpus (more domain shapes)  ·  M
+### RST-8 · Broaden the behavioral corpus (more domain shapes)  ·  M  ·  ✅ LANDED
+- **Landed:** three new `test/behavioral/corpus-python/*.ddd` fixtures (+ their
+  `corpus-python.json` entries), each a shape most divergent from plain CRUD:
+  `payments.ddd` (**aggregate inheritance / TPH** — `abstract aggregate … 
+  inheritanceUsing(sharedTable)` + two `extends` subtypes folded into one table;
+  asserts RS-1 multi-word keys, RS-2 enum casing, RS-3 no-leak across the
+  base+subtype DTO split), `ledger.ddd` (**event-sourced** — `persistedAs(eventLog)`,
+  `emit`/`apply` folds the stream back into `balance`; asserts the fold survives
+  getById + a `byOwner` filter), and `shapes.ddd` (**`shape(document)`** whole-jsonb
+  Cart + **`shape(embedded)`** Wishlist; asserts RS-7 Money VO into/out of the blob
+  + RS-8 `items += …` through jsonb). Each verified GREEN through `uv sync` +
+  `ruff` + `mypy --strict` on the generated FastAPI project (the #1681/#1684
+  static-bug class); no static bugs surfaced — the live-boot round-trip on the
+  three new shapes is the widened net `behavioral-e2e-python` now runs per-PR.
+  (Grammar note: `test e2e` has no array indexing — `read.items[0].x` doesn't
+  parse — so nested-VO-in-collection reads assert on the write+`items.length`
+  rehydrate path.)
 - **Why.** Both bugs came from **one** fixture. More shapes = more coverage:
   aggregate inheritance (TPH), a `workflow`, `shape(document)`, `shape(embedded)`,
   event-sourced (`persistedAs(eventLog)`), a `retrieval` with a filter. Each new
