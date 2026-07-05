@@ -1,0 +1,83 @@
+// RST-8 behavioral-tier fixture — aggregate INHERITANCE (TPH / sharedTable),
+// retargeted from web/src/examples/inheritance-system.ddd to a single
+// `platform: python` (FastAPI) backend (no UI). Exercises the Python DTO
+// emitter's inheritance path — a concrete subtype's wire shape is
+// `id → base fields → own fields`, folded into one `payment_methods` table
+// with a `kind` discriminator.
+//
+// RS-rules the `test e2e` create→read round-trips assert on Python:
+//   RS-1  multi-word key both directions (`holderName`, `expiryMonth/Year`).
+//   RS-2  enum declared casing (`CardNetwork` → "Visa" / "Mastercard").
+//   RS-3  no persistence-internal columns leak (read key-set == wireShape).
+// The divergence from plain CRUD: the create/read cross the TPH base+subtype
+// DTO split, so a mis-emitted base-field projection surfaces here.
+
+system PaymentsPy {
+
+  subdomain Wallet {
+    context Wallet {
+
+      enum CardNetwork { Visa, Mastercard, Amex }
+
+      // Abstract base: shared fields, no table / repository / routes of its
+      // own — TPH folds every subtype into one `payment_methods` table.
+      abstract aggregate PaymentMethod inheritanceUsing(sharedTable) {
+        holderName: string
+        last4: string
+        invariant holderName.length > 0
+        invariant last4.length == 4
+        derived display: string = holderName
+      }
+
+      aggregate CreditCard extends PaymentMethod with crudish {
+        network: CardNetwork
+        expiryMonth: int
+        expiryYear: int
+        invariant expiryMonth >= 1 && expiryMonth <= 12
+      }
+
+      aggregate BankAccount extends PaymentMethod with crudish {
+        routingNumber: string
+        invariant routingNumber.length > 0
+      }
+
+      repository CreditCards for CreditCard {
+        find byNetwork(network: CardNetwork): CreditCard[] where this.network == network
+      }
+      repository BankAccounts for BankAccount { }
+    }
+  }
+
+  storage primary { type: postgres }
+  resource walletState { for: Wallet, kind: state, use: primary }
+
+  deployable api {
+    platform: python
+    contexts: [Wallet]
+    dataSources: [walletState]
+    port: 8000
+  }
+
+  // RS-1 (multi-word `holderName`/`expiryMonth`/`expiryYear` both directions)
+  // + RS-2 (enum "Visa") + RS-3 (no leaked columns). Crosses the TPH
+  // base-field + subtype-field DTO projection.
+  test e2e "create a credit card and read it back" against api {
+    let c = api.creditCards.create({ holderName: "Ada Lovelace", last4: "4242", network: "Visa", expiryMonth: 4, expiryYear: 2030 })
+    let read = api.creditCards.getById(c)
+    expect(read.holderName).toBe("Ada Lovelace")
+    expect(read.last4).toBe("4242")
+    expect(read.network).toBe("Visa")
+    expect(read.expiryMonth).toBe(4)
+  }
+
+  // RS-1 (`holderName`/`routingNumber`) + RS-3. The second subtype of the
+  // same TPH base — its own field `routingNumber` must survive alongside the
+  // inherited base fields.
+  test e2e "create a bank account and read it back" against api {
+    let b = api.bankAccounts.create({ holderName: "Grace Hopper", last4: "0007", routingNumber: "021000021" })
+    let read = api.bankAccounts.getById(b)
+    expect(read.holderName).toBe("Grace Hopper")
+    expect(read.routingNumber).toBe("021000021")
+    expect(read.last4).toBe("0007")
+  }
+}
