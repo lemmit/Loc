@@ -108,3 +108,24 @@ describe("currentUser.orgPath — registry dataKey read under hierarchy (dotnet)
     expect(files).toMatch(/builder\.Services\.AddScoped<IOrgPathResolver, EfOrgPathResolver>\(\)/);
   });
 });
+
+describe("currentUser.orgPath — registry dataKey read under hierarchy (elixir)", () => {
+  it("elixir: put_org_path reads the registry `data_key` via the Repo, fail-safe to claim", async () => {
+    const files = await allFiles("elixir");
+    // `put_org_path` now delegates to a per-request registry read.
+    expect(files).toMatch(
+      /defp put_org_path\(user\), do: Map\.put\(user, :org_path, resolve_org_path/,
+    );
+    // The read goes through the registry's Ecto schema module (schema prefix +
+    // binary_id cast) via the app `Repo`, selecting the `data_key` column.
+    expect(files).toMatch(/Api\.Repo\.one\(/);
+    expect(files).toMatch(/from o in Api\.C\.Org, where: o\.id == \^claim, select: o\.data_key/);
+    // Fail-safe: nil/blank/malformed claim and any query error fall back to the
+    // claim (the root-segment path) — never crashes.
+    expect(files).toMatch(/defp resolve_org_path\(claim\) when is_binary\(claim\) and claim != ""/);
+    expect(files).toMatch(/rescue\n\s*_ -> claim/);
+    expect(files).toMatch(/defp resolve_org_path\(claim\), do: to_string\(claim\)/);
+    // The `from/2` import is present (hierarchy mode only).
+    expect(files).toMatch(/import Ecto\.Query, only: \[from: 2\]/);
+  });
+});
