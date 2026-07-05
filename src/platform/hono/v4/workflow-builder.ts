@@ -5,7 +5,8 @@ import {
   type WorkflowStmtTarget,
 } from "../../../generator/_workflow/stmt-target.js";
 import type { OpFragment } from "../../../generator/typescript/emit/aggregate.js";
-import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
+import { renderTsExpr, renderTsType } from "../../../generator/typescript/render-expr.js";
+import { renderTsStatements } from "../../../generator/typescript/render-stmt.js";
 import {
   type AggregateIR,
   type BoundedContextIR,
@@ -34,7 +35,7 @@ import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
 import { emitsCommandRoute } from "../../../ir/util/workflow-command-route.js";
 import { workflowCorrIdValueType } from "../../../ir/util/workflow-instances.js";
-import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst, workflowFnCamel } from "../../../util/naming.js";
 import { emitWireSchema, wireToDomainExpr, zodFor, zodForResponse } from "./routes-builder.js";
 import {
   emitWorkflowFoldHelpers,
@@ -186,6 +187,18 @@ export function buildWorkflowsFile(
   // when none expose instance reads.  Underscore the then-unused `db` /
   // `events` params so the generated-code lint stays clean; a context with any
   // route keeps them (and stays byte-identical).
+  // Workflow `function` helpers — a workflow body is not a class, so each
+  // helper is a module-scoped function namespaced by its workflow (workflows
+  // share this file).  Pure over its params (the IR validator forbids `this`),
+  // called from any of the workflow's handler bodies as `<wf><fn>(args)`.
+  for (const wf of ctx.workflows) {
+    const helpers = emitWorkflowFnHelpers(wf);
+    if (helpers.length > 0) {
+      body.push(...helpers);
+      body.push("");
+    }
+  }
+
   const hasHttpRoutes =
     ctx.workflows.some(emitsCommandRoute) || ctx.workflows.some((w) => !!w.instanceWireShape);
   body.push(`export function workflowsRoutes(`);
@@ -463,6 +476,26 @@ function hasAuditedOpCall(ctx: BoundedContextIR, sts: WorkflowStmtIR[]): boolean
     if (s.kind === "for-each") return hasAuditedOpCall(ctx, s.body);
     return false;
   });
+}
+
+// Emit a workflow's `function` helpers as module-scoped, workflow-namespaced
+// functions.  Pure over params (the IR validators reject `this` + impurity), so
+// a plain `renderTsExpr` / `renderTsStatements` with the default `this`-context
+// renders the body safely.  Both the expression form and the pure block form
+// (domain-services.md rev. 4) are supported — same shape the aggregate emitter uses.
+function emitWorkflowFnHelpers(wf: WorkflowIR): string[] {
+  const out: string[] = [];
+  for (const fn of wf.functions ?? []) {
+    const params = fn.params.map((p) => `${p.name}: ${renderTsType(p.type)}`).join(", ");
+    const name = workflowFnCamel(wf.name, fn.name);
+    const head = `function ${name}(${params}): ${renderTsType(fn.returnType)}`;
+    if ("expr" in fn.body) {
+      out.push(`${head} { return ${renderTsExpr(fn.body.expr)}; }`);
+    } else {
+      out.push(`${head} {`, renderTsStatements(fn.body.stmts), `}`);
+    }
+  }
+  return out;
 }
 
 function emitWorkflowRoute(

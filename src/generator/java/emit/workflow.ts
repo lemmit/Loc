@@ -17,14 +17,20 @@ import {
 import { readPortsForOperation } from "../../../ir/util/domain-service-read-ports.js";
 import { resolveWorkflowIsolation } from "../../../ir/util/resolve-datasource.js";
 import { lines } from "../../../util/code-builder.js";
-import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { lowerFirst, plural, snake, upperFirst, workflowFnCamel } from "../../../util/naming.js";
 import { statementSubRegions } from "../../_trace/sourcemap.js";
 import {
   collectUnionFindLets,
   renderWorkflowStmtChunks,
   type WorkflowStmtTarget,
 } from "../../_workflow/stmt-target.js";
-import { collectJavaExprImports, type JavaRenderContext, renderJavaExpr } from "../render-expr.js";
+import {
+  collectJavaExprImports,
+  type JavaRenderContext,
+  renderJavaExpr,
+  renderJavaType,
+} from "../render-expr.js";
+import { renderJavaStatements } from "../render-stmt.js";
 import type { OpFragment } from "./entity.js";
 import {
   collectWireImports,
@@ -687,6 +693,25 @@ export function renderJavaWorkflows(
       `    }`,
       ``,
     );
+    // Workflow `function` helpers — `private` methods on this shared
+    // `<Ctx>Workflows` bean, scoped by workflow (two workflows share the class).
+    // Pure over params (validator-guaranteed), so the body renders with the
+    // ordinary workflow render context.  Both the expression form and the pure
+    // block form (domain-services.md rev. 4) are supported.
+    for (const fn of wf.functions ?? []) {
+      const params = fn.params.map((p) => `${renderJavaType(p.type)} ${p.name}`).join(", ");
+      const name = workflowFnCamel(wf.name, fn.name);
+      const bodyLine =
+        "expr" in fn.body
+          ? `        return ${renderJavaExpr(fn.body.expr, renderCtxFor(ctx, wctx))};`
+          : renderJavaStatements(fn.body.stmts, renderCtxFor(ctx, wctx));
+      methods.push(
+        `    private ${renderJavaType(fn.returnType)} ${name}(${params}) {`,
+        bodyLine,
+        `    }`,
+        ``,
+      );
+    }
   }
   while (methods[methods.length - 1] === "") methods.pop();
 

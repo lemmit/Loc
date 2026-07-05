@@ -1,6 +1,12 @@
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type { EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
-import { escapeJavaIdent, lowerFirst, plural, upperFirst } from "../../util/naming.js";
+import {
+  escapeJavaIdent,
+  lowerFirst,
+  plural,
+  upperFirst,
+  workflowFnCamel,
+} from "../../util/naming.js";
 import {
   type BinaryExpr,
   type CallExpr,
@@ -393,6 +399,10 @@ function renderRef(e: RefExpr, ctx: JavaRenderContext): string {
       // A bare helper reference is a value position (passed to a
       // collection op) — Java spells that as a method reference.
       return `${ctx.thisName}::${e.name}`;
+    case "workflow-fn":
+      // Bare reference to a workflow helper — a method reference on the
+      // shared `<Ctx>Workflows` bean, scoped by workflow.
+      return `${ctx.thisName}::${workflowFnCamel(e.wfScope!, e.name)}`;
     case "enum-value":
       return `${e.enumName}.${e.name}`;
     case "current-user":
@@ -539,6 +549,10 @@ function renderCall(args: string[], e: CallExpr, ctx: JavaRenderContext): string
     case "function":
     case "private-operation":
       return `${ctx.thisName}.${e.name}(${argList})`;
+    case "workflow-fn":
+      // A workflow's own helper — a `private` method on the shared
+      // `<Ctx>Workflows` bean, scoped by workflow (two workflows share the class).
+      return `${ctx.thisName}.${workflowFnCamel(e.wfScope!, e.name)}(${argList})`;
     case "resource-op": {
       const op = e.resourceOp!;
       const cls = ctx.resourceClasses?.get(op.resourceName);

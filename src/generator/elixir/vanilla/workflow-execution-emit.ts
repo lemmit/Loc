@@ -86,6 +86,7 @@ import { lineCount, type SourceMapRecorder } from "../../_trace/sourcemap.js";
 import type { ApiRoute } from "../api-emit.js";
 import { inlineMutatingServiceCall } from "../domain-service-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
+import { renderFunctionBodyLines } from "./function-emit.js";
 
 export interface VanillaWorkflowExecResult {
   routes: ApiRoute[];
@@ -1359,6 +1360,17 @@ function renderWorkflowModule(
   // into the `valueExpr` (no inline `case`/expr that would mis-parse as a
   // keyword-arg value).  Shared catalog identity (field `workflow`) with
   // every backend.
+  // Workflow `function` helpers — `defp <snake(fn)>(params) do … end` in this
+  // per-workflow module (no scope prefix — the module already namespaces them).
+  // Pure over params (validator-guaranteed).  Both the expression form and the
+  // pure block form (domain-services.md rev. 4) render via `renderFunctionBodyLines`.
+  const helperDefs = (wf.functions ?? [])
+    .map((fn) => {
+      const params = fn.params.map((p) => snake(p.name)).join(", ");
+      const bodyLines = renderFunctionBodyLines(fn.body, renderCtx).join("\n");
+      return `\n  defp ${snake(fn.name)}(${params}) do\n${bodyLines}\n  end`;
+    })
+    .join("");
   const startedCall = renderPhoenixLogCall("workflowStarted", [
     { name: "workflow", valueExpr: JSON.stringify(wf.name) },
   ]);
@@ -1451,7 +1463,7 @@ defmodule ${moduleName} do
 
   defp run_inner(${innerParam}) when is_map(params) do
 ${finalBody}
-  end
+  end${helperDefs}
 end
 `;
     return { content, statementRegions };
@@ -1473,7 +1485,7 @@ defmodule ${moduleName} do
     ${appModule}.RequestContext.with_child_frame(fn ->
 ${finalBody}
     end)
-  end
+  end${helperDefs}
 end
 `;
   return { content, statementRegions };

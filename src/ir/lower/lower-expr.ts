@@ -10,6 +10,7 @@ import type {
   EntityPartMember,
   EventDecl,
   Expression,
+  FunctionDecl,
   Lambda,
   MemberSuffix,
   PayloadDecl,
@@ -379,6 +380,10 @@ function applySuffixToRecv(
         args,
         ...(named ? { argNames } : {}),
         ...(styleHoist.style ? { style: styleHoist.style } : {}),
+        // A workflow `function` is emitted as a per-workflow-scoped helper (not
+        // a `this`-method — a workflow body is not a class), so the call carries
+        // the enclosing workflow name; each backend renders `<wf><fn>(args)`.
+        ...(callKind === "workflow-fn" && env.workflow ? { wfScope: env.workflow.name } : {}),
         // An operation self-call lowers to `private-operation` regardless of the
         // target's `private` modifier; carry the resolved privacy so backends
         // that name public vs private operations differently render the call
@@ -1094,6 +1099,12 @@ function resolveNameRef(name: string, env: Env): ExprIR {
         };
       }
       if (isFunctionDecl(m) && m.name === name) {
+        // A workflow `function` is a per-workflow-scoped module helper, not a
+        // `this`-method — carry the workflow name so a bare (nullary) reference
+        // renders `<wf><fn>` rather than `this.<fn>`.
+        if (owner === env.workflow) {
+          return { kind: "ref", name, refKind: "workflow-fn", wfScope: env.workflow?.name };
+        }
         return { kind: "ref", name, refKind: "helper-fn" };
       }
     }
@@ -1159,7 +1170,15 @@ function resolveNameRef(name: string, env: Env): ExprIR {
 function resolveCallKind(
   name: string,
   env: Env,
-): "function" | "value-object-ctor" | "private-operation" | "free" {
+): "function" | "workflow-fn" | "value-object-ctor" | "private-operation" | "free" {
+  // A workflow's own `function` helper — emitted as a per-workflow-scoped
+  // module helper (a workflow body is not a class), so it gets its own callKind
+  // distinct from an aggregate `function` (which renders `this.<fn>`).
+  if (env.workflow) {
+    for (const m of env.workflow.members) {
+      if (isFunctionDecl(m) && m.name === name) return "workflow-fn";
+    }
+  }
   // Check enclosing aggregate / part for functions and operations
   const owners: Array<Aggregate | EntityPart | ValueObject | undefined> = [
     env.part,

@@ -546,10 +546,13 @@ export function findPayloadByName(env: Env, name: string): PayloadDecl | undefin
 }
 
 export function findFunctionInEnv(env: Env, name: string): FunctionDecl | undefined {
-  const owners: Array<Aggregate | EntityPart | ValueObject | undefined> = [
+  // `env.workflow` carries the aggregate-parity `function` members too, so a
+  // workflow-fn call's result type resolves the same way (workflow-and-applier.md).
+  const owners: Array<Aggregate | EntityPart | ValueObject | Workflow | undefined> = [
     env.part,
     env.aggregate,
     env.valueObject,
+    env.workflow,
   ];
   for (const o of owners) {
     if (!o) continue;

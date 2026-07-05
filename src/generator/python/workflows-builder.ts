@@ -23,7 +23,7 @@ import { commandWorkflowsOf } from "../../ir/util/workflow-command-route.js";
 import { workflowCorrIdValueType } from "../../ir/util/workflow-instances.js";
 import { walkExpr } from "../../ir/validate/checks/shared.js";
 import { lines } from "../../util/code-builder.js";
-import { snake, upperFirst } from "../../util/naming.js";
+import { snake, upperFirst, workflowFnSnake } from "../../util/naming.js";
 import { LogEvents } from "../_obs/log-events.js";
 import { statementSubRegions } from "../_trace/sourcemap.js";
 import { renderWorkflowStmtChunks, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
@@ -31,7 +31,8 @@ import type { OpFragment } from "./emit/aggregate.js";
 import { domainServiceImportLinesForWorkflow } from "./emit/domain-service.js";
 import { responsePyType } from "./emit/http-models.js";
 import { wireHelperImport } from "./py-type-imports.js";
-import { type PyRenderContext, renderPyExpr } from "./render-expr.js";
+import { type PyRenderContext, renderPyExpr, renderPyType } from "./render-expr.js";
+import { renderPyStatements } from "./render-stmt.js";
 import { resourceImportLines } from "./resource-clients.js";
 import {
   errorResponsesKwarg,
@@ -130,7 +131,12 @@ export function buildPyWorkflowsFile(
     ...obsWfs.map((wf) => instanceRoutes(wf)),
   ];
   const routes = routeBlocks.join("\n\n\n");
-  const body = `${models}${instanceModels}router = APIRouter(prefix="/workflows", tags=["workflows"])\n\n\n${routes}`;
+  // Workflow `function` helpers — module-scoped `def`s, namespaced by workflow
+  // (workflows share this file), emitted before the routes so the create/handle
+  // bodies can call them.  Expression-bodied + pure over params (validator-guaranteed).
+  const helperDefs = wfs.flatMap((wf) => workflowFnHelpers(wf)).join("\n\n");
+  const helpersBlock = helperDefs ? `${helperDefs}\n\n\n` : "";
+  const body = `${models}${instanceModels}${helpersBlock}router = APIRouter(prefix="/workflows", tags=["workflows"])\n\n\n${routes}`;
 
   const scan = body.replace(/"(?:\\.|[^"\\])*"/g, '""');
   const refersTo = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(scan);
@@ -496,6 +502,26 @@ function pyIsolationLevel(level: import("../../ir/types/loom-ir.js").IsolationLe
     case "serializable":
       return "SERIALIZABLE";
   }
+}
+
+// Workflow `function` helpers — module-scoped `def`s, namespaced by workflow.
+// Pure over params (validator-guaranteed, no `self`), so a plain `renderPyExpr` /
+// `renderPyStatements` renders the body safely.  Both the expression form and
+// the pure block form (domain-services.md rev. 4) are supported.
+function workflowFnHelpers(wf: WorkflowIR): string[] {
+  const out: string[] = [];
+  for (const fn of wf.functions ?? []) {
+    const params = fn.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`).join(", ");
+    const name = workflowFnSnake(wf.name, fn.name);
+    const head = `def ${name}(${params}) -> ${renderPyType(fn.returnType)}:`;
+    // Module-level def → 4-space body indent (methods use 8).
+    const body =
+      "expr" in fn.body
+        ? `    return ${renderPyExpr(fn.body.expr)}`
+        : renderPyStatements(fn.body.stmts, "    ");
+    out.push(`${head}\n${body}`);
+  }
+  return out;
 }
 
 function workflowRoute(

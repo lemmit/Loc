@@ -52,6 +52,7 @@ import { bypassedFilterNames } from "./emit/efcore.js";
 import type { OpFragment } from "./emit/entity.js";
 import type { CsRenderContext } from "./render-expr.js";
 import { collectCsExprUsings, renderCsExpr, renderCsType } from "./render-expr.js";
+import { collectCsStmtUsings, renderCsStatements } from "./render-stmt.js";
 import { esCorrIdClass, esEventDbSet, esEventRecordClass } from "./workflow-eventsourced-emit.js";
 import {
   workflowAllocateInitializer,
@@ -154,6 +155,12 @@ export function emitWorkflows(
       for (const frag of opFragments) {
         sourcemap.fragment(handlerPath, handlerContent, frag.fragmentText, frag.subRegions);
       }
+    }
+    const fnsContent = renderWorkflowFunctions(wf, ns);
+    if (fnsContent) {
+      const fnsPath = `Application/Workflows/${upperFirst(wf.name)}Functions.cs`;
+      out.set(fnsPath, fnsContent);
+      sourcemap?.file(fnsPath, fnsContent, wf.origin, construct);
     }
   }
   if (commandWfs.length > 0) {
@@ -1091,6 +1098,50 @@ using ${ns}.Domain.Enums;
 namespace ${ns}.Application.Workflows;
 
 public sealed record ${upperFirst(wf.name)}Command(${params}) : ICommand;
+`;
+}
+
+// Workflow `function` helpers — a `public static` method per helper on a shared
+// `<Wf>Functions` class.  A workflow's body renders into several handler /
+// reactor classes, so a static class (no receiver) is callable from all of them
+// without duplication and immune to the `thisName: "state"` reactor seam.
+// Pure over params (validator-guaranteed); params use the raw name (like the
+// aggregate-function emitter) so body param refs resolve.  Both the expression
+// form and the pure block form (domain-services.md rev. 4) are supported.
+function renderWorkflowFunctions(wf: WorkflowIR, ns: string): string | undefined {
+  const fns = wf.functions ?? [];
+  if (fns.length === 0) return undefined;
+  const renderCtx: CsRenderContext = { thisName: "this" };
+  // Seed the standard domain usings (mirroring the handler/command files):
+  // `Domain.Common` carries `DomainException` for a block body's `precondition`;
+  // Ids / ValueObjects / Enums carry any types the signature or body reference.
+  // `collectCs*Usings` then adds anything else the bodies touch (e.g. domain services).
+  const usings = new Set<string>([
+    `${ns}.Domain.Common`,
+    `${ns}.Domain.Ids`,
+    `${ns}.Domain.ValueObjects`,
+    `${ns}.Domain.Enums`,
+  ]);
+  const methods = fns.flatMap((fn) => {
+    const params = fn.params.map((p) => `${renderCsType(p.type)} ${p.name}`).join(", ");
+    const head = `    public static ${renderCsType(fn.returnType)} ${upperFirst(fn.name)}(${params})`;
+    if ("expr" in fn.body) {
+      collectCsExprUsings(fn.body.expr, usings, ns);
+      return [`${head} => ${renderCsExpr(fn.body.expr, renderCtx)};`];
+    }
+    collectCsStmtUsings(fn.body.stmts, usings, ns);
+    const body = renderCsStatements(fn.body.stmts, renderCtx);
+    return [head, "    {", ...(body.length > 0 ? [body] : []), "    }"];
+  });
+  const usingLines = [...usings].sort().map((u) => `using ${u};`);
+  return `// Auto-generated.
+${usingLines.join("\n")}${usingLines.length > 0 ? "\n" : ""}
+namespace ${ns}.Application.Workflows;
+
+public static class ${upperFirst(wf.name)}Functions
+{
+${methods.join("\n")}
+}
 `;
 }
 

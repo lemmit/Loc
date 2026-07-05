@@ -365,6 +365,9 @@ function renderRef(e: RefExpr, ctx: RenderCtx): string {
       return `${ctx.thisName}.${snake(e.name)}`;
     case "helper-fn":
       return snake(e.name);
+    case "workflow-fn":
+      // Bare reference to a workflow helper — the module-local `defp` name.
+      return snake(e.name);
     case "enum-value":
       // Enum values use the DECLARED casing (never snake — the wire contract +
       // every other backend keep it), but the FORM depends on context:
@@ -591,6 +594,11 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
         ? `${snake(e.name)}(${recv}, ${args.join(", ")})`
         : `${snake(e.name)}(${recv})`;
     }
+    case "workflow-fn":
+      // A workflow's own `function` — a `defp <snake(fn)>(params)` in the
+      // per-workflow module.  No receiver, no scope prefix (the module already
+      // namespaces it), so mirror the receiver-less `free` shape.
+      return `${snake(e.name)}(${args.join(", ")})`;
     case "private-operation": {
       // Sibling-OPERATION self-call → the operation's context function
       // `<op>_<agg>(record, params)` (arity 2; every op — public OR private — is

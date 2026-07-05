@@ -430,6 +430,10 @@ function renderRef(e: RefExpr, ctx: CsRenderContext): string {
       return `${ctx.thisName}.${upperFirst(e.name)}`;
     case "helper-fn":
       return `${ctx.thisName}.${upperFirst(e.name)}`;
+    case "workflow-fn":
+      // Bare reference to a workflow helper — the static method group on the
+      // shared `<Wf>Functions` class.
+      return `${upperFirst(e.wfScope!)}Functions.${upperFirst(e.name)}`;
     case "enum-value":
       return `${e.enumName}.${e.name}`;
     case "current-user":
@@ -570,6 +574,11 @@ function renderCall(args: string[], e: CallExpr, ctx: CsRenderContext): string {
     case "function":
     case "private-operation":
       return `${ctx.thisName}.${upperFirst(e.name)}(${argList})`;
+    case "workflow-fn":
+      // A workflow's own `function` — a `public static` method on the shared
+      // `<Wf>Functions` helper class (the workflow body renders into several
+      // handler/reactor classes, so a static class avoids a receiver + dupes).
+      return `${upperFirst(e.wfScope!)}Functions.${upperFirst(e.name)}(${argList})`;
     case "resource-op": {
       // Resource-op (Phase 4c) → `<Class>.<Resource>_<Verb>(args)`, an
       // async static helper the .NET ResourceAdapter emits.  Awaited by

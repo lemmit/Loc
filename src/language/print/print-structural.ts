@@ -900,7 +900,9 @@ function printWorkflow(node: Workflow): string {
             ? printProperty(m)
             : m.$type === "Apply"
               ? printApply(m)
-              : printHandleDecl(m),
+              : m.$type === "FunctionDecl"
+                ? printFunctionDecl(m)
+                : printHandleDecl(m),
     ),
   );
 }
