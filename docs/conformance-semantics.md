@@ -53,7 +53,7 @@ spec-diff cannot catch its violation.
 |---|---|---|---|
 | **T0 static** | assert a property of *emitted source* across all 5 backends (`test/conformance/*`) | per-PR, no docker | rules whose violation is visible in generated code |
 | **T1 behavioral (node)** | boot the Hono deployable on PGlite, round-trip (`test/behavioral/`) | per-PR, no docker | any runtime rule — but only proves **node** |
-| **T2 behavioral (Nth backend)** | **`A6.2` — not yet built.** Extend the T1 runner to a second host-runnable backend | *(target)* | the actual cross-backend drift the RS-rules describe |
+| **T2 behavioral (Nth backend)** | **`A6.2` — landed for Python** (`test/behavioral/run-python.mjs` + `behavioral-e2e-python.yml`): boots the generated FastAPI backend on a `services: postgres` sidecar and HTTP-dispatches the same emitted api e2e | per-PR (path-filtered) | the actual cross-backend drift the RS-rules describe (RS-1/4/7 on Python) |
 | **T3 full** | 5-backend docker round-trip (`conformance-full.yml`) | nightly / label | everything — but too slow to be the per-PR net |
 
 The RS-rules below tag each with the **lowest tier that can gate it today**.
@@ -214,9 +214,14 @@ When a cross-backend runtime bug is fixed:
   `union-find-absence-parity`). *(here)* Every rule assertable from emitted
   source is now gated per-PR; the remainder (RS-1/4/6/7/8/9) are behavioral and
   wait on A6.2.
-- **A6.2:** a second host-runnable backend in the per-PR behavioral tier
-  (Python is the cheapest candidate — `uv` + SQLite/PGlite-equivalent) so the
-  T2 column becomes per-PR. Every T1 rule above then gates a second backend.
+- **A6.2 (Python api tier LANDED):** `run-python.mjs` + `behavioral-e2e-python.yml`
+  boot the generated FastAPI backend on a `services: postgres` sidecar and
+  HTTP-dispatch the emitted api e2e — the T2 column is now per-PR for RS-1/4/7
+  on Python. On day one it surfaced a real codegen bug (a cross-aggregate
+  operation-param id type — `ProductId` — omitted from the emitted FastAPI
+  route imports), so the association round-trip (RS-8) is deferred pending that
+  fix. Next: the fix (unblocks RS-8), then a second backend (.NET/Java) on the
+  same seam, then the unit tier.
 - **v2:** promote the registry to a diffable `.loom/semantics-spec.json`
   artifact (the `wire-spec.json` precedent) so a spec change is a reviewable
   diff, and wire each RS-rule to a live round-trip assertion in the harness.

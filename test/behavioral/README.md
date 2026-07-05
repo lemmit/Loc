@@ -12,6 +12,16 @@ in-process — no docker, no separate Postgres) and runs the suites Loom
 - **ui** — the generated `*.ui.spec.ts` (from `test e2e "…" against
   <react-deployable>`): real Playwright page-object round-trips against
   the `vite build`-built React frontend wired to the backend.
+- **python** — the SAME emitted api e2e, but run against a booted
+  **generated FastAPI backend** over real HTTP (`run-python.mjs`, corpus
+  `corpus-python.json` + `corpus-python/`). Python has no in-process
+  Postgres, so this needs a real DB (`DATABASE_URL`); the emitted api
+  suite is backend-agnostic (HTTP contract), so the runner just swaps
+  `app.fetch` for `fetch(BASE + path)`. Its own `behavioral-e2e-python.yml`
+  workflow (a `services: postgres` sidecar) — the A6.2 second backend for
+  the runtime-semantics RS-rules (see `docs/conformance-semantics.md` and
+  `docs/plans/a6.2-behavioral-tier-second-backend.md`). Needs `uv` + a
+  reachable `DATABASE_URL`; run: `node run-python.mjs`.
   (`run-ui.mjs` — see below.)
 
 ## Why
