@@ -120,3 +120,51 @@ describe("tenancy by — AST validation", () => {
     expect(errors).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// `currentUser.orgPath` — the derived tenant materialized-path principal
+// member (multi-tenancy Phase 2, plan P2.1).  It is only meaningful under a
+// `tenancy by` declaration (it resolves from the tenancy claim + registry);
+// referencing it without one is fail-closed (`loom.orgpath-without-tenancy`).
+// ---------------------------------------------------------------------------
+
+describe("currentUser.orgPath — AST validation", () => {
+  it("accepts `currentUser.orgPath` under a tenancy declaration", async () => {
+    const { errors } = await parseString(`
+      system Shop {
+        user { id: guid  tenantId: string }
+        tenancy by user.tenantId of Org
+        subdomain S {
+          context C {
+            aggregate Doc with tenantOwned {
+              owner: string
+              filter this.owner == currentUser.orgPath
+            }
+            aggregate Org { name: string }
+            repository Docs for Doc { }
+            repository Orgs for Org { }
+          }
+        }
+      }
+    `);
+    expect(errors).toEqual([]);
+  });
+
+  it("rejects `currentUser.orgPath` without a tenancy declaration (loom.orgpath-without-tenancy)", async () => {
+    const { diagnostics } = await parseString(`
+      system Shop {
+        user { id: guid  tenantId: string }
+        subdomain S {
+          context C {
+            aggregate Doc {
+              owner: string
+              filter this.owner == currentUser.orgPath
+            }
+            repository Docs for Doc { }
+          }
+        }
+      }
+    `);
+    expect(diagnostics.some((d) => d.code === "loom.orgpath-without-tenancy")).toBe(true);
+  });
+});

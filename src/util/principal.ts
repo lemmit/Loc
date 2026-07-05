@@ -9,6 +9,23 @@
 // stays distinguishable from a (hypothetical) domain aggregate of the same name.
 export const PRINCIPAL_TYPE_NAME = "User";
 
+/** The derived principal member `currentUser.orgPath` — the materialized
+ *  DataKey path of the caller's tenant, resolved per-request and memoized on
+ *  the request-scoped principal (multi-tenancy Phase 2, plan P2.1).  Unlike
+ *  the `user { … }` claims it is NOT an IdP token field: the `claims:` map is
+ *  a static token→field projection with no derived-value carrier, so `orgPath`
+ *  is *computed* server-side from the tenancy claim we already hold.  It is
+ *  therefore only meaningful under a `tenancy by user.<claim> of <Registry>`
+ *  declaration; referencing it without one is a hard error
+ *  (`loom.orgpath-without-tenancy`, fail-closed).
+ *
+ *  P2.1 resolves it to the tenant claim's value (the root-segment path — the
+ *  defined fallback while the registry carries no `dataKey` column yet, P2.2);
+ *  every backend's principal exposes it via a computed accessor whose body is
+ *  that fallback, so P2.2 swaps only the accessor body (`SELECT dataKey FROM
+ *  <registry> WHERE id = <claim>`), never the call sites. */
+export const PRINCIPAL_ORG_PATH = "orgPath";
+
 /** The principal's id field — the field named `id`, else the first declared
  *  field of the `user { ... }` block.  A `currentUser` stamp / filter value
  *  resolves to `currentUser.<thisField>` (the principal id), mirroring the
