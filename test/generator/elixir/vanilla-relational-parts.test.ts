@@ -81,10 +81,18 @@ describe("vanilla relational entity parts (§11c)", () => {
     expect(pipeline).toContain("{k, v} when is_binary(k) -> {Macro.underscore(k), v}");
   });
 
-  it("base_changeset cast_assocs the containment (replace-on-update via on_replace)", async () => {
+  it("base_changeset cast_assocs the containment (create path), but update_changeset does NOT", async () => {
     const cs = file(await generateSystemFiles(SOURCE), "/catalog/project_changeset.ex");
+    // Create seam casts the containment (so a create body can seed pipelines).
     expect(cs).toContain("|> cast_assoc(:pipelines, with: &Api.Catalog.Pipeline.changeset/2)");
     expect(cs).not.toContain("cast_embed(:pipelines)");
+    // Generic PATCH seam must NOT touch the containment — a `PATCH {"pipelines":
+    // []}` would otherwise bulk-delete the child rows (on_replace: :delete),
+    // bypassing the aggregate's own `addPipeline` precondition.  Containment
+    // mutation goes through operations, so `update_changeset` casts scalars only.
+    const updateCs = cs.slice(cs.indexOf("def update_changeset"));
+    expect(cs).toContain("def update_changeset(struct, attrs) do");
+    expect(updateCs).not.toContain("cast_assoc(:pipelines");
   });
 
   it("the repository preloads the containment on every read (so the wire shape materialises)", async () => {
