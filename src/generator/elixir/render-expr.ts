@@ -132,16 +132,16 @@ export interface RenderCtx {
    *  reading fn itself is emitted INTO this module by `domain-service-emit.ts`.
    *  Defaults to `contextModule` when unset. */
   readingServiceModule?: string;
-  /** Document-shape rendering (DEBT-07).  A `shape(document)` aggregate persists
-   *  its whole tree as one string-keyed jsonb `data` map (no flattened struct
-   *  columns), so a `this.<field>` read must project out of that map, not off a
-   *  struct field.  When set to the map variable name (e.g. `"data"`), a
-   *  `this-prop` / `this-vo-prop` reference renders `<docMap>["<snake>"]` and an
-   *  `enum-value` renders its declared STRING (matching the jsonb-stored value)
-   *  rather than the loaded-struct atom.  Set only on the vanilla document
-   *  custom-find / named-operation body path; unset everywhere else (relational
-   *  bodies read the struct). */
-  docMap?: string;
+  /** Document-shape STRUCT rendering (Route A slice 2).  A `shape(document)`
+   *  aggregate now rehydrates its blob into a typed `%<Agg>.Data{}` struct, so a
+   *  `this.<field>` read is genuine struct access (`record.<field>`) — same as the
+   *  relational path — NOT a `data["<field>"]` bracket.  But the blob keeps enums
+   *  as `:string` and money/decimal as native JSON numbers (byte-identical to the
+   *  pre-Route-A map storage), so this flag borrows `docMap`'s value target
+   *  (string enums, native money) WITHOUT its bracket projection.  Set on the
+   *  vanilla document op/find/function body path in place of `docMap`; mutually
+   *  exclusive with it. */
+  docStruct?: boolean;
 }
 
 const DEFAULT: RenderCtx = { thisName: "record", contextModule: "MyApp" };
@@ -247,7 +247,11 @@ export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
   // — not `Decimal` structs — so it shares the native-operator filter target
   // (params still render as plain locals: the `^`-pin lives in `renderRef`'s
   // `filterArgs` arm, which `docMap` does NOT set).
-  const target = ctx.filterArgs || ctx.docMap ? ELIXIR_FILTER_TARGET : ELIXIR_TARGET;
+  // `docStruct` (Route A slice 2) reads struct fields off the rehydrated
+  // `%<Agg>.Data{}` embed, but the embed keeps enums as `:string` + money/decimal
+  // as native JSON numbers, so it shares the same native-value filter target
+  // (without any bracket projection — `this.<field>` renders as `record.<field>`).
+  const target = ctx.filterArgs || ctx.docStruct ? ELIXIR_FILTER_TARGET : ELIXIR_TARGET;
   return renderExprWith(e, target, ctx);
 }
 
@@ -348,9 +352,8 @@ function renderRef(e: RefExpr, ctx: RenderCtx): string {
       return escapeElixirIdent(snake(e.name));
     case "this-prop":
     case "this-vo-prop":
-      // Document shape (DEBT-07): the field lives in the string-keyed jsonb
-      // `data` map, not a struct column — project it out by key.
-      if (ctx.docMap) return `${ctx.docMap}[${JSON.stringify(snake(e.name))}]`;
+      // Struct access — relational and (Route A) document alike read the field
+      // off the rehydrated struct (`record.<field>`).
       return `${ctx.thisName}.${snake(e.name)}`;
     case "this-derived":
       return `${ctx.thisName}.${snake(e.name)}`;
@@ -369,12 +372,12 @@ function renderRef(e: RefExpr, ctx: RenderCtx): string {
       //     Public)` silently took the wrong branch before). Enum value names are
       //     grammar identifiers, so the atom never needs quoting (`:"Confirmed"`
       //     would trip Elixir's "quotes not required" warning under -Werror).
-      //   * Document shape (`docMap`) — the enum is stored in the jsonb `data`
-      //     map as its declared STRING (the schemaless changeset casts it as
-      //     `:string`), so an in-memory `data["status"] == <here>` comparison
-      //     must use the string form too.
+      //   * Document shape (`docStruct`) — the enum is stored in the jsonb blob
+      //     as its declared STRING (the `<Agg>.Data` embed keeps enum fields as
+      //     `:string`), so an in-memory `record.status == <here>` comparison must
+      //     use the string form too.
       // Jason encodes the atom back to the declared string on the wire either way.
-      return ctx.filterArgs || ctx.docMap ? JSON.stringify(e.name) : `:${e.name}`;
+      return ctx.filterArgs || ctx.docStruct ? JSON.stringify(e.name) : `:${e.name}`;
     case "current-user":
       return "current_user";
     case "match-binding":
@@ -398,15 +401,6 @@ function renderRef(e: RefExpr, ctx: RenderCtx): string {
 // ---------------------------------------------------------------------------
 
 function renderMember(recv: string, e: MemberExpr, ctx: RenderCtx): string {
-  // Document shape (DEBT-07): an explicit top-level `this.<field>` read (as a
-  // find `where` clause spells it) lowers to a member off the `this` node, not a
-  // `this-prop` ref — project it out of the string-keyed jsonb `data` map by key,
-  // the same way `renderRef` does for the implicit-`this` op-body reads.  The
-  // scalar `.length` / `.count` shorthands below still apply (their receiver
-  // already renders to the map key).
-  if (ctx.docMap && e.receiver.kind === "this") {
-    return `${ctx.docMap}[${JSON.stringify(snake(e.member))}]`;
-  }
   // Array/list size shorthand.  The DSL admits both `.count` and
   // `.length` on arrays (see the .NET renderer's matching comment);
   // both map to Elixir `Enum.count/1`.  Without the `.length` arm an
@@ -564,9 +558,9 @@ function renderCall(args: string[], e: CallExpr, ctx: RenderCtx): string {
       // Pure aggregate `function`: emitted as `is_draft(record)` (bare name,
       // arity 1 + the declared params), returning its value directly.  Skip the
       // trailing comma when it has no params — `passed(changeset, )` is invalid
-      // Elixir.  On the document path the function takes the jsonb `data` map (it
-      // reads fields out of it), so pass that instead of the struct receiver.
-      const recv = ctx.docMap ?? ctx.thisName;
+      // Elixir.  On the document path (Route A) the receiver is the rehydrated
+      // `%<Agg>.Data{}` embed, still bound as `record` (`ctx.thisName`).
+      const recv = ctx.thisName;
       return args.length > 0
         ? `${snake(e.name)}(${recv}, ${args.join(", ")})`
         : `${snake(e.name)}(${recv})`;

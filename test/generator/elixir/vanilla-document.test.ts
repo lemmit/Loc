@@ -195,51 +195,48 @@ system Carting {
 }
 `;
 
-describe("vanilla shape(document) scalar finds + named ops (DEBT-07)", () => {
-  it("emits in-memory custom finds that read the jsonb data map", async () => {
+describe("vanilla shape(document) scalar finds + named ops (Route A slice 2 — struct mode)", () => {
+  it("emits in-memory custom finds that read the rehydrated embed struct", async () => {
     const repo = file(await generateSystemFiles(DOC_OPS), "/carts/cart_repository.ex");
-    // A list find returns every match; the predicate projects the field out of
-    // the normalised `data` map (not a struct column), enums compared as strings.
+    // A list find returns every match; the predicate reads the rehydrated
+    // `%<Agg>.Data{}` embed bound as `record` (struct access, no docMap fork),
+    // enums compared as their stored strings.
     expect(repo).toContain("def checked_out_ones() do");
     expect(repo).toContain("|> Repo.all()");
-    expect(repo).toContain("|> Enum.filter(fn record ->");
-    expect(repo).toContain("data = __doc_data(record)");
-    expect(repo).toContain('data["status"] == "checkedOut"');
+    expect(repo).toContain("|> Enum.filter(fn row ->");
+    expect(repo).toContain("record = row.data");
+    expect(repo).toContain('record.status == "checkedOut"');
     expect(repo).toContain("{:ok, results}");
     // A single-return find (`Cart?`) yields the first match (or nil).
     expect(repo).toContain("def by_reference(reference) do");
-    expect(repo).toContain('data["reference"] == reference');
+    expect(repo).toContain("record.reference == reference");
     expect(repo).toContain("{:ok, List.first(results)}");
-    // The normaliser helper is emitted (gated on custom finds referencing it).
-    // Route A: `record.data` is a `%<Agg>.Data{}` struct → Map.from_struct flattens
-    // it (dropping :__struct__) before string-keying, so the docMap predicate reads
-    // the same string-keyed map as before.
-    expect(repo).toContain(
-      "defp __doc_data(record), do: record.data |> Map.from_struct() |> Map.new(fn {k, v} -> {to_string(k), v} end)",
-    );
+    // The docMap normaliser helper is gone.
+    expect(repo).not.toContain("__doc_data");
   });
 
-  it("emits scalar named-op context fns that run over the data map + persist via update/2", async () => {
+  it("emits struct-mode named-op fns that re-embed the mutated struct + bump version", async () => {
     const ctx = file(await generateSystemFiles(DOC_OPS), "/carts.ex");
-    // The op body normalises the jsonb, guards, and Map.put's the assigned field.
+    // Route A slice 2: bind the embed as `record`, mutate it in struct mode, then
+    // put_embed the flattened struct + bump version (no docMap, no schemaless fold).
     expect(ctx).toContain(
-      "def add_item_cart(%Api.Carts.Cart{} = record, params) when is_map(params) do",
+      "def add_item_cart(%Api.Carts.Cart{} = row, params) when is_map(params) do",
     );
-    expect(ctx).toContain(
-      "data = record.data |> Map.from_struct() |> Map.new(fn {k, v} -> {to_string(k), v} end)",
-    );
-    expect(ctx).toContain('if not (data["item_count"] >= 0), do: raise(ArgumentError');
-    expect(ctx).toContain('data = Map.put(data, "item_count", data["item_count"] + 1)');
-    // Persist re-runs the schemaless changeset + bumps version via update/2.
-    expect(ctx).toContain("Api.Carts.CartRepository.update(record, data)");
-    // An enum assign uses the stored string form.
-    expect(ctx).toContain('data = Map.put(data, "status", "checkedOut")');
+    expect(ctx).toContain("record = row.data");
+    expect(ctx).toContain("if not (record.item_count >= 0), do: raise(ArgumentError");
+    expect(ctx).toContain("record = %{record | item_count: record.item_count + 1}");
+    expect(ctx).toContain("|> Ecto.Changeset.change(%{version: row.version + 1})");
+    expect(ctx).toContain("|> Ecto.Changeset.put_embed(:data, Map.from_struct(record))");
+    expect(ctx).toContain("|> Api.Carts.CartRepository.persist_change()");
+    // An enum assign uses the stored string form (struct field stays `:string`).
+    expect(ctx).toContain('record = %{record | status: "checkedOut"}');
     // The find defdelegates front the repository fns.
     expect(ctx).toContain(
       "defdelegate by_reference_cart(reference), to: Api.Carts.CartRepository, as: :by_reference",
     );
-    // A document op must NOT use the relational struct-update / put_change path.
-    expect(ctx).not.toContain("Ecto.Changeset.put_change(:item_count");
+    // The docMap fork is gone — no `data = ... Map.from_struct` map bind, no Map.put.
+    expect(ctx).not.toContain('Map.put(data, "item_count"');
+    expect(ctx).not.toContain("CartRepository.update(record, data)");
   });
 });
 
@@ -286,37 +283,40 @@ system Carting {
 `;
 
 describe("vanilla shape(document) non-scalar residual (DEBT-07 follow-up)", () => {
-  it("emits document functions over the data map + value-object-subfield reads", async () => {
+  it("emits document functions over the rehydrated embed struct + value-object-subfield reads", async () => {
     const ctx = file(await generateSystemFiles(DOC_RICH), "/carts.ex");
-    // A pure function on a document aggregate takes the jsonb `data` map (guarded
-    // is_map), reading the value-object subfield via the key-type-agnostic
-    // fallback (a VO map may be string- or atom-keyed; #1660).
-    expect(ctx).toContain("def is_cheap(data) when is_map(data) do");
+    // Route A slice 2: a pure function on a document aggregate takes the
+    // `%<Agg>.Data{}` embed struct (struct-guarded, no `is_map` map form), reading
+    // the value-object subfield via the key-type-agnostic fallback (a VO map may
+    // be string- or atom-keyed; #1660).
+    expect(ctx).toContain("def is_cheap(%Api.Carts.Cart.Data{} = record) do");
     expect(ctx).toContain(
-      'Map.get(data["subtotal"], :amount, Map.get(data["subtotal"], "amount")) < 100',
+      'Map.get(record.subtotal, :amount, Map.get(record.subtotal, "amount")) < 100',
     );
-    // The op guard calls the function passing the data map, and reads the VO sub-field.
-    expect(ctx).toContain("if not (is_cheap(data)), do: raise(ArgumentError");
+    // The op guard calls the function passing the embed struct, reading the VO sub-field.
+    expect(ctx).toContain("if not (is_cheap(record)), do: raise(ArgumentError");
     expect(ctx).toContain(
-      'if not (Map.get(data["subtotal"], :amount, Map.get(data["subtotal"], "amount")) >= 0), do: raise(ArgumentError',
+      'if not (Map.get(record.subtotal, :amount, Map.get(record.subtotal, "amount")) >= 0), do: raise(ArgumentError',
     );
   });
 
   it("emits returning ops as tagged tuples (error variant + fall-through success wire)", async () => {
     const ctx = file(await generateSystemFiles(DOC_RICH), "/carts.ex");
-    // An error-variant `return` → {:error, "<tag>", <map>}; `record` is unused
-    // (no data touched) so it's underscored to avoid a -Werror unused warning.
+    // An error-variant `return` → {:error, "<tag>", <map>}; the row is unused
+    // (no embed read) so it's underscored to avoid a -Werror unused warning.
     expect(ctx).toContain(
-      "def try_close_cart(%Api.Carts.Cart{} = _record, params) when is_map(params) do",
+      "def try_close_cart(%Api.Carts.Cart{} = _row, params) when is_map(params) do",
     );
     expect(ctx).toContain('{:error, "AlreadyClosed", %{message: "closed"}}');
-    // A fall-through success projects the in-memory wire off the mutated data —
-    // `id` + every stored document field (camelCase keys, matching serialize/1).
+    // A fall-through success projects the in-memory wire off the mutated embed —
+    // `id` off the root row (the embed carries none), fields off `record`
+    // (camelCase keys, matching serialize/1).
     expect(ctx).toContain(
-      "def bump_or_close_cart(%Api.Carts.Cart{} = record, params) when is_map(params) do",
+      "def bump_or_close_cart(%Api.Carts.Cart{} = row, params) when is_map(params) do",
     );
+    expect(ctx).toContain("record = row.data");
     expect(ctx).toContain(
-      '{:ok, %{"id" => record.id, "subtotal" => data["subtotal"], "itemCount" => data["item_count"]}}',
+      '{:ok, %{"id" => row.id, "subtotal" => record.subtotal, "itemCount" => record.item_count}}',
     );
   });
 });
