@@ -31,11 +31,22 @@ export function emitPyAuthFiles(
   out: Map<string, string>,
   auth?: AuthIR,
   orgPathClaim?: string,
+  orgPathRegistryTable?: string,
 ): void {
+  // Hierarchy (multi-tenancy P2.2): `orgPathRegistryTable` is the tenant
+  // registry's schema-qualified table when it opts into `tenantRegistry` (a
+  // `data_key` column exists).  Present → `currentUser.orgPath` becomes a
+  // per-request memoized read of the caller org's materialized `data_key`
+  // (fail-safe fallback to the claim); absent (flat tenancy) → the P2.1
+  // claim-copy `@property` stands.
+  const orgPathReadsRegistry = !!orgPathRegistryTable;
   out.set("app/auth/__init__.py", "");
-  out.set("app/auth/user.py", renderUserModule(user, orgPathClaim));
+  out.set("app/auth/user.py", renderUserModule(user, orgPathClaim, orgPathReadsRegistry));
   out.set("app/auth/verifier.py", VERIFIER_PY);
-  out.set("app/auth/middleware.py", renderAuthMiddleware(user, !!auth));
+  out.set(
+    "app/auth/middleware.py",
+    renderAuthMiddleware(user, !!auth, orgPathClaim, orgPathRegistryTable),
+  );
   // /auth/me is emitted whenever a backend has auth — the frontend `auth: ui`
   // guard probes it, and it works for both the OIDC verifier and the dev stub.
   out.set("app/auth/routes.py", ROUTES_PY);
@@ -104,26 +115,50 @@ function stubValueForType(t: TypeIR): string {
   }
 }
 
-function renderUserModule(user: UserIR, orgPathClaim?: string): string {
+function renderUserModule(
+  user: UserIR,
+  orgPathClaim?: string,
+  orgPathReadsRegistry = false,
+): string {
   const fields = user.fields.map((f) => {
     const t = renderPyType(f.optional ? { kind: "optional", inner: f.type } : f.type);
     return `    ${snake(f.name)}: ${t}`;
   });
   // Derived `currentUser.orgPath` — the caller's tenant materialized path
-  // (multi-tenancy P2.1).  A computed @property (not a dataclass field), so
-  // every construction site is untouched and `asdict()` never serializes it;
-  // stringified null-safely.  P2.1 resolves it to the tenancy claim value (the
-  // root path); P2.2 swaps the body for a memoized registry `dataKey` lookup.
-  const orgPathProp = orgPathClaim
-    ? [
-        "",
-        "    @property",
-        "    def org_path(self) -> str:",
-        '        """The caller\'s tenant materialized path (`currentUser.orgPath`) —',
-        '        derived per-request from the tenancy claim (multi-tenancy Phase 2, P2.1)."""',
-        `        return "" if self.${snake(orgPathClaim)} is None else str(self.${snake(orgPathClaim)})`,
-      ]
-    : [];
+  // (multi-tenancy Phase 2).  Two shapes, both keeping it OFF `asdict()` /
+  // the `/auth/me` wire (derived, not a claim) and untouched by every
+  // construction site (the verifier never sets it):
+  //
+  //  - flat tenancy (P2.1): a computed `@property` deriving the root-segment
+  //    path from the tenancy claim, null-safely.
+  //  - hierarchy (P2.2): a bare class attribute (NOT a dataclass field, so
+  //    `asdict()` skips it) that the auth middleware resolves ONCE per request
+  //    from the registry's `data_key` column and writes back via
+  //    `object.__setattr__` (this dataclass is frozen).  The read is memoized
+  //    on the principal — `require_current_user().org_path` returns the
+  //    resolved path — and falls back to the claim when the row/dataKey is
+  //    absent.  Defaults to "" until the middleware resolves it.
+  const orgPathProp = !orgPathClaim
+    ? []
+    : orgPathReadsRegistry
+      ? [
+          "",
+          "    # The caller's tenant materialized path (`currentUser.orgPath`),",
+          "    # resolved once per request by the auth middleware from the tenant",
+          "    # registry's `data_key` column and stored here via",
+          "    # object.__setattr__ (this dataclass is frozen).  A bare class",
+          "    # attribute — NOT a dataclass field — so asdict()/the /auth/me wire",
+          "    # never serializes it (multi-tenancy Phase 2, P2.2).",
+          '    org_path = ""',
+        ]
+      : [
+          "",
+          "    @property",
+          "    def org_path(self) -> str:",
+          '        """The caller\'s tenant materialized path (`currentUser.orgPath`) —',
+          '        derived per-request from the tenancy claim (multi-tenancy Phase 2, P2.1)."""',
+          `        return "" if self.${snake(orgPathClaim)} is None else str(self.${snake(orgPathClaim)})`,
+        ];
   // Id-typed claims (`Customer id?`) reference the branded NewTypes.
   const idNames = [
     ...new Set(
@@ -246,14 +281,54 @@ export function actorIdAttr(user: UserIR): string | null {
   return field ? snake(field.name) : null;
 }
 
-function renderAuthMiddleware(user: UserIR, oidc: boolean): string {
+function renderAuthMiddleware(
+  user: UserIR,
+  oidc: boolean,
+  orgPathClaim?: string,
+  orgPathRegistryTable?: string,
+): string {
   const idAttr = actorIdAttr(user);
+  // Hierarchy (multi-tenancy P2.2): resolve `currentUser.orgPath` from the
+  // tenant registry's `data_key` once per request (fail-safe to the claim).
+  // Unlike the Hono auth layer (which can't reach the db and registers a
+  // boot-time resolver closure), the Starlette middleware can import the
+  // module-level `session_factory`, so the lookup lives right here.
+  const hierarchy = !!orgPathRegistryTable && !!orgPathClaim;
+  const claimAttr = orgPathClaim ? snake(orgPathClaim) : null;
   // Under OIDC the /auth/login|callback|logout redirect handlers must be
   // reachable without a verified principal — bypass them.  /auth/me is NOT
   // bypassed (the guard reads the verified user).
   const bypass = oidc
     ? `("/health", "/ready", "/openapi.json", "/swagger", "${AUTH_BASE_PATH}/login", "${AUTH_BASE_PATH}/callback", "${AUTH_BASE_PATH}/logout")`
     : '("/health", "/ready", "/openapi.json", "/swagger")';
+  // The per-request registry `data_key` resolver (hierarchy only).  A fresh
+  // session per lookup; `SELECT data_key … WHERE id = :claim LIMIT 1`; a
+  // missing row / NULL `data_key` / any error (e.g. a non-matching dev-stub
+  // claim) falls back to the claim itself — the documented root-segment
+  // fallback that never crashes a request.
+  const resolver = hierarchy
+    ? [
+        "",
+        "",
+        "async def _resolve_org_path(claim: str) -> str:",
+        '    """The caller org\'s materialized path (`currentUser.orgPath`): the tenant',
+        "    registry's `data_key` for the tenancy claim, else the claim itself",
+        "    (root-segment fallback).  Memoized — the middleware calls this once per",
+        '    request and stores the result on the principal (multi-tenancy P2.2)."""',
+        "    if not claim:",
+        "        return claim",
+        "    try:",
+        "        async with session_factory() as session:",
+        "            result = await session.execute(",
+        `                text("SELECT data_key FROM ${orgPathRegistryTable} WHERE id = :claim LIMIT 1"),`,
+        '                {"claim": claim},',
+        "            )",
+        "            data_key = result.scalar_one_or_none()",
+        "        return data_key if isinstance(data_key, str) else claim",
+        "    except Exception:",
+        "        return claim",
+      ]
+    : [];
   return lines(
     '"""Auth middleware.  Auto-generated.',
     "",
@@ -266,13 +341,16 @@ function renderAuthMiddleware(user: UserIR, oidc: boolean): string {
     "",
     "from fastapi import Request, Response",
     "from fastapi.responses import JSONResponse",
+    hierarchy ? "from sqlalchemy import text" : null,
     "from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint",
     "",
     "from app.auth.user import current_user_var",
     "from app.auth.verifier import verify_user_or_throw",
+    hierarchy ? "from app.db.engine import session_factory" : null,
     "from app.obs.log import set_actor_id",
     "",
     `BYPASS_PREFIXES = ${bypass}`,
+    ...resolver,
     "",
     "",
     "class AuthMiddleware(BaseHTTPMiddleware):",
@@ -287,6 +365,15 @@ function renderAuthMiddleware(user: UserIR, oidc: boolean): string {
     "            user = await verify_user_or_throw(request)",
     "        except Exception:",
     '            return JSONResponse({"error": "unauthorized"}, status_code=401)',
+    // Hierarchy (P2.2): resolve the caller's tenant materialized path once and
+    // store it on the (frozen) principal, so `currentUser.orgPath` reads a
+    // memoized value rather than recomputing per access.
+    ...(hierarchy && claimAttr
+      ? [
+          `        _claim = "" if user.${claimAttr} is None else str(user.${claimAttr})`,
+          '        object.__setattr__(user, "org_path", await _resolve_org_path(_claim))',
+        ]
+      : []),
     "        request.state.current_user = user",
     ...(idAttr ? [`        set_actor_id(str(user.${idAttr}))`] : []),
     "        # Stash the full principal in the ambient carrier so always-on",
