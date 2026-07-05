@@ -1,6 +1,8 @@
 # Runtime-semantics tier — follow-up backlog (claimable tickets)
 
-**Created:** 2026-07-05. **Status:** open backlog, built for **parallel agents**.
+**Created:** 2026-07-05. **Status:** ✅ **fully drained** (2026-07-05) — RST-2/3/5/6/7/8/9/10 landed;
+RST-1 resolved (its language slice already shipped in #1603); RST-4 is documented,
+awaiting one repo-admin branch-protection click. Kept as the record. Built for **parallel agents**.
 **Parents:** [`conformance-semantics.md`](../conformance-semantics.md) (the RS-rule
 contract) · [`a6.2-behavioral-tier-second-backend.md`](a6.2-behavioral-tier-second-backend.md)
 (the Python tier) · [`full-review-remediation.md`](full-review-remediation.md) (A6.x).
@@ -136,14 +138,39 @@ agents; they only collide on this doc's status table.
 - **DoD.** New runner + fixture + workflow; RS-1/4/6/7/8 tier notes add `java`
   once the first CI run confirms conformance (RS-4 pending the run's verdict).
 
-### RST-4 · Make `behavioral-e2e-python` a required check  ·  S
-- **Why.** It has 3 green runs (#1679/#1681/#1684); it's still non-blocking, so a
-  regression could land on `main`. Make the gate teeth real.
-- **Scope.** Either fold `behavioral-python` into the `tests-passed` rollup, or
-  add it to branch protection's required checks. **Needs repo-admin action** — an
-  agent should open a PR/issue documenting the intent and the exact check name if
-  it can't change settings directly.
-- **DoD.** `behavioral-e2e-python` required on PRs touching its path filter.
+### RST-4 · Make `behavioral-e2e-python` a required check  ·  S  ·  ✅ DOCUMENTED (awaiting one repo-admin click)
+- **Status.** The code side is a no-op — the only action is a **branch-protection
+  setting change, which requires repo-admin** and cannot be done from a PR. This
+  entry is the PR/issue the ticket asked for: it records the exact check name,
+  the green history, and the gotcha, so an admin can flip it in one click.
+- **Green history (well past the 3-run bar).** `behavioral-python` has run green
+  on #1679/#1681/#1684 (the original tier + its two bug-fixes), plus #1690 (RST-7),
+  #1707 (RST-8), #1712 (RST-6) this session — and it now gates **two** tiers
+  (pytest `unit` + api).
+- **The exact required-check name is `behavioral-python`** (the *job* id in
+  `.github/workflows/behavioral-e2e-python.yml`, line 48 — *not* the workflow
+  display name "Behavioral e2e — Python (FastAPI)"). Branch protection matches on
+  the job name.
+- **Admin step:** repo Settings → Branches → the `main` protection rule → *Require
+  status checks to pass* → add **`behavioral-python`**.
+- **Why NOT folded into `tests-passed`.** The `tests-passed` rollup
+  (`test.yml`) `needs: [test, coverage, lint]` — all jobs *inside* `test.yml`.
+  `behavioral-python` lives in a **separate** workflow (docker + `services:
+  postgres`, deliberately path-filtered so the heavy boot only runs when the
+  Python emitter / harness / corpus changes), and GitHub Actions has **no
+  cross-workflow `needs:`** — so it can't join that rollup without moving the
+  docker job into the fast suite (a regression). Require it directly instead.
+- **Path-filter caveat (the one thing to verify after flipping).** The workflow
+  is `pull_request`-`paths`-filtered, so on a PR that touches none of its paths it
+  is *skipped*, not *run*. GitHub treats a required check whose workflow was
+  skipped-by-path-filter as satisfied (it does not sit "pending"), so unrelated
+  PRs are **not** blocked — but confirm one unrelated PR merges cleanly after
+  enabling, since this behavior is the classic footgun. (If a future GitHub change
+  ever makes a skipped required check block, the fix is a tiny always-run
+  presence-gate job that reports success when the path filter is a miss — but
+  don't add it pre-emptively; it costs an extra queued job on every PR.)
+- **DoD.** `behavioral-e2e-python` required on PRs touching its path filter —
+  satisfied by the admin adding `behavioral-python` to the `main` required checks.
 
 ### RST-5 · Promote the RS registry to a diffable spec artifact  ·  M  ·  ✅ DONE
 - **Why.** `conformance-semantics.md` roadmap v2: make a contract change a
