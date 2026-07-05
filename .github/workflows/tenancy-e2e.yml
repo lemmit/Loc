@@ -1,11 +1,16 @@
 name: Tenancy isolation (runtime e2e)
 
-# Boots the generated Hono backend from the `tenancy-owned.ddd` corpus fixture
+# Boots the generated backend from the `tenancy-owned.ddd` corpus fixture
 # against a throwaway postgres, then proves cross-tenant isolation END TO END:
 #   POST invoice as org-a → 201; org-a GETs it → 200; org-b GETs it → 404;
 #   org-b's list omits it; a client-smuggled tenantId is ignored; crossTenant
 #   reference data is visible to all; and the registry self-scope + claim-less
 #   signup bootstrap round-trips (`tenantId ≡ Organization.id`).
+#
+# Fanned across backends as a matrix (the shared assertion sequence in
+# test/e2e/support/tenancy-isolation-harness.ts drives every backend; only the
+# boot differs). Each cell drives two principals via the dev-stub
+# `x-loom-dev-claims` header — the parity that makes this cross-backend.
 #
 # This is the assertion the structural tiers CANNOT make: per-backend generator
 # tests pin the filter and the 1a.0 pins the stamp, but only a boot proves the
@@ -14,8 +19,7 @@ name: Tenancy isolation (runtime e2e)
 #
 # Uses a `services: postgres` container (not docker-in-runner) and hands the
 # test its URL via LOOM_TENANCY_PG_URL, so the suite skips its own docker
-# sidecar. Cost is dominated by the `npm install` of the generated project
-# (~60-90s warm, ~3-4min cold).
+# sidecar.
 #
 # Triggers `push: main` + manual dispatch only — NOT per-PR. Sibling to the
 # obs-e2e / oidc-e2e jobs; same rationale: a docker-heavy boot on every
@@ -31,7 +35,10 @@ on:
       - 'src/ir/validate/checks/tenancy-checks.ts'
       - 'src/ir/util/tenant-stance.ts'
       - 'src/ir/enrich/enrichments.ts'
+      - 'src/generator/python/index.ts'
       - 'test/e2e/tenancy-isolation.test.ts'
+      - 'test/e2e/tenancy-isolation-python.test.ts'
+      - 'test/e2e/support/tenancy-isolation-harness.ts'
       - 'test/fixtures/corpus/tenancy-owned.ddd'
       - 'package.json'
       - '.github/workflows/tenancy-e2e.yml'
@@ -47,8 +54,18 @@ concurrency:
 jobs:
   tenancy-e2e:
     runs-on: ubuntu-latest
-    # Cold path: ~3-4min (npm install of the generated project). 10min cap.
-    timeout-minutes: 10
+    # Cold path is dominated by the generated project's dep install
+    # (npm / uv). 15min cap covers the slowest cell.
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: node
+            script: test:tenancy
+          - backend: python
+            script: test:tenancy-python
+    name: tenancy-e2e (${{ matrix.backend }})
     services:
       postgres:
         image: postgres:18-alpine
@@ -70,19 +87,22 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
+      - name: Set up uv (python backend)
+        if: matrix.backend == 'python'
+        uses: astral-sh/setup-uv@v7
+
       - name: Install Loom toolchain
         run: npm ci
 
-      - name: Run tenancy isolation runtime e2e
+      - name: Run tenancy isolation runtime e2e (${{ matrix.backend }})
         env:
-          LOOM_TENANCY_E2E: '1'
           LOOM_TENANCY_PG_URL: postgres://postgres:postgres@127.0.0.1:5432/app
-        run: npx vitest run test/e2e/tenancy-isolation.test.ts --reporter=verbose
+        run: npm run ${{ matrix.script }} -- --reporter=verbose
 
       - name: Surface failure context
         if: failure()
         run: |
-          echo '## Tenancy isolation runtime e2e failed' >> $GITHUB_STEP_SUMMARY
+          echo "## Tenancy isolation runtime e2e failed (${{ matrix.backend }})" >> $GITHUB_STEP_SUMMARY
           echo '' >> $GITHUB_STEP_SUMMARY
-          echo 'See the "Run tenancy isolation runtime e2e" step above for the captured server stdout.' >> $GITHUB_STEP_SUMMARY
-          echo 'The test boots the generated Hono backend against postgres and asserts cross-tenant isolation (create/read/list as two principals), client tenantId-smuggling rejection, crossTenant visibility, and the registry self-scope + claim-less signup bootstrap.' >> $GITHUB_STEP_SUMMARY
+          echo 'See the run step above for the captured server stdout.' >> $GITHUB_STEP_SUMMARY
+          echo 'The test boots the generated backend against postgres and asserts cross-tenant isolation (create/read/list as two principals), client tenantId-smuggling rejection, crossTenant visibility, and the registry self-scope + claim-less signup bootstrap.' >> $GITHUB_STEP_SUMMARY

@@ -82,6 +82,7 @@ npm run test:java         # LOOM_JAVA_BUILD=1 — `gradle testClasses bootJar` a
 npm run test:python       # LOOM_PYTHON_BUILD=1 — `uv sync` + `ruff check` + `mypy --strict` + `pytest` against generated FastAPI projects (uv)
 npm run test:phoenix      # LOOM_PHOENIX_VANILLA_BUILD=1 — `mix compile --warnings-as-errors` against plain Ecto/Phoenix in Elixir docker
 npm run test:tenancy      # LOOM_TENANCY_E2E=1 — boots generated Hono backend on docker postgres, asserts cross-tenant isolation + registry self-scope/signup bootstrap end-to-end (LOOM_TENANCY_PG_URL override skips the sidecar)
+npm run test:tenancy-python # LOOM_TENANCY_E2E_PYTHON=1 — same isolation assertions against the generated FastAPI backend (shared harness; needs uv + docker/LOOM_TENANCY_PG_URL)
 npm run test:obs          # LOOM_OBS_E2E=1 — boots generated Hono backend, asserts catalog envelope on stdout
 npm run test:obs-dotnet   # LOOM_OBS_E2E_DOTNET=1 — same for the .NET backend (postgres sidecar via docker)
 npm run test:obs-phoenix  # LOOM_OBS_E2E_PHOENIX=1 — same for the Phoenix backend (postgres sidecar via docker)
