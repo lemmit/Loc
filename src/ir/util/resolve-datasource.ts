@@ -123,6 +123,28 @@ export function resolveDataSourceConfig(
   };
 }
 
+/** The Postgres schema a bounded context's tables land in — the schema
+ *  its aggregate tables already use, so context-owned tables that aren't
+ *  tied to a single aggregate (a workflow's saga correlation-state /
+ *  event-log table) sit beside them instead of leaking to `public`.
+ *
+ *  Resolution mirrors {@link resolveDataSourceConfig}: prefer the
+ *  `state`-kind dataSource for the context, else any dataSource for it;
+ *  `schema:` from the DSL wins, otherwise the `snake(ctx.name)` default.
+ *  Returns `undefined` when the context has NO dataSource binding at all —
+ *  the same condition under which aggregate tables stay unqualified, so a
+ *  binding-free system emits byte-identically.
+ *
+ *  Shared by the migrations builder and every backend's schema emitter so
+ *  the migration DDL and each ORM mapping agree on the qualifier (a
+ *  divergence here is a boot break, not a compile error). */
+export function resolveContextSchema(ctx: BoundedContextIR, sys: SystemIR): string | undefined {
+  const forCtx = sys.dataSources.filter((d) => d.contextName === ctx.name);
+  if (forCtx.length === 0) return undefined;
+  const ds = forCtx.find((d) => d.kind === "state") ?? forCtx[0]!;
+  return ds.schema ?? snake(ctx.name);
+}
+
 /** Effective saving shape for an aggregate's primary read model.
  *
  *  Per-projection resolution (D-DOCUMENT-AXIS §8 Q4): the binding's

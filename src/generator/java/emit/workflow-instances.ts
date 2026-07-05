@@ -45,6 +45,9 @@ export interface WorkflowInstancesCtx {
   routePrefix?: string;
   /** Saga-state Spring Data repository package (infrastructure.repositories). */
   stateRepoPkg: string;
+  /** The workflows' owning-context Postgres schema — qualifies the ES saga
+   *  stream in native SQL to match the migration.  Undefined ⇒ unqualified. */
+  contextSchema?: string;
 }
 
 /** Observable workflows — correlation-bearing sagas the enricher gave an
@@ -155,7 +158,7 @@ function renderInstancesController(
     if (wf.eventSourced) {
       const cls = esWorkflowStateClass(wf);
       const corrId = esWorkflowCorrIdClass(wf);
-      const table = esWorkflowStreamTable(wf);
+      const table = esWorkflowStreamTable(wf, wctx.contextSchema);
       routes.push(
         `    @GetMapping("/${slug}/instances")`,
         `    public List<${T}> ${camelId(opWorkflowInstances(wf.name))}() {`,

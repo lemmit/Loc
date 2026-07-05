@@ -380,6 +380,70 @@ system Twin {
   });
 });
 
+describe("buildMigrations — workflow saga tables land in the context schema", () => {
+  // A workflow is context-owned, so its saga tables (correlation-state row +
+  // event-log stream) belong in the owning context's schema — beside its
+  // aggregate tables — not `public`, where two contexts with a same-named
+  // workflow would collide.  Regression for the `archival_tracker_events`
+  // escape (generated-code-ddd-review-2026-07 P2).
+  // End-to-end via `buildMigrations` so the real resolver wiring (aggregate
+  // `schemaOf` + the new context `contextSchemaOf`) is exercised together.
+  async function sagaSchemas(src: string) {
+    const loom = await buildLoomModel(src);
+    const out = buildMigrations(loom.systems[0]!, memorySnapshotStore());
+    return out[0]!.next.tables;
+  }
+
+  // A context body with an event-sourced (`_events`) and a correlation-state
+  // (`tallies`) saga workflow; `BIND` sets the state resource (or nothing).
+  const src = (bind: string) => `system S { subdomain M { context Ord {
+  aggregate Order { status: string  operation place() { status := "P"  emit OrderPlaced { order: id } } }
+  repository Orders for Order { }
+  event OrderPlaced { order: Order id }
+  event PaymentRegistered { order: Order id, amount: int }
+  workflow Tally eventSourced {
+    orderId: Order id
+    total: int
+    create(p: OrderPlaced) by p.order { emit PaymentRegistered { order: p.order, amount: 0 } }
+    apply(pr: PaymentRegistered) { total := total + pr.amount }
+  }
+  workflow Ledger {
+    orderId: Order id
+    seen: int
+    create(p: OrderPlaced) by p.order { }
+  }
+} } api A from M storage pg { type: postgres }
+  ${bind}
+  deployable api { platform: node contexts: [Ord] serves: A ${bind ? "dataSources: [ordState] " : ""}port: 3000 } }`;
+
+  it("stamps the context schema on both saga tables (default snake(ctx))", async () => {
+    const tables = await sagaSchemas(src("resource ordState { for: Ord, kind: state, use: pg }"));
+    const stream = tables.find((t) => t.name === "tally_events")!;
+    const state = tables.find((t) => t.name === "ledgers")!;
+    const orders = tables.find((t) => t.name === "orders")!;
+    // Saga tables share the context's aggregate schema (default `snake(ctx)`).
+    expect(orders.schema).toBe("ord");
+    expect(stream.schema).toBe("ord");
+    expect(state.schema).toBe("ord");
+  });
+
+  it("honours an explicit `schema:` override for the saga tables", async () => {
+    const tables = await sagaSchemas(
+      src('resource ordState { for: Ord, kind: state, use: pg, schema: "sales" }'),
+    );
+    expect(tables.find((t) => t.name === "tally_events")?.schema).toBe("sales");
+    expect(tables.find((t) => t.name === "ledgers")?.schema).toBe("sales");
+  });
+
+  it("leaves saga tables unqualified when the context has no resource binding", async () => {
+    const tables = await sagaSchemas(src(""));
+    // No binding → byte-identical unqualified output (public), like aggregates.
+    expect(tables.find((t) => t.name === "tally_events")?.schema).toBeUndefined();
+    expect(tables.find((t) => t.name === "ledgers")?.schema).toBeUndefined();
+    expect(tables.find((t) => t.name === "orders")?.schema).toBeUndefined();
+  });
+});
+
 describe("fsSnapshotStore", () => {
   const tmpDirs: string[] = [];
   const mkTmp = (): string => {

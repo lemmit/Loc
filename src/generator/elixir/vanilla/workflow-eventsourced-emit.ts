@@ -77,13 +77,17 @@ end
 
 // --- `<Wf>EventLog` Ecto schema over `<wf>_events` --------------------------
 
-function renderEventLogSchema(contextModule: string, wf: WorkflowIR): string {
+function renderEventLogSchema(contextModule: string, wf: WorkflowIR, schema?: string): string {
+  // `@schema_prefix` makes every Repo query/insert target the workflow's
+  // context schema (`catalog`), matching the migration `prefix:`.  Omitted →
+  // public, byte-identical for binding-free systems.
+  const prefixLine = schema ? `  @schema_prefix ${JSON.stringify(schema)}\n` : "";
   return `# Auto-generated.
 defmodule ${wfModule(contextModule, wf)}EventLog do
   @moduledoc false
   use Ecto.Schema
 
-  @primary_key false
+${prefixLine}  @primary_key false
   schema "${snake(wf.name)}_events" do
     field :stream_id, :string, primary_key: true
     field :version, :integer, primary_key: true
@@ -275,6 +279,9 @@ export function emitVanillaEsWorkflowFiles(
   appModule: string,
   ctx: EnrichedBoundedContextIR,
   out: Map<string, string>,
+  /** The workflows' owning-context schema for the ES `<Wf>EventLog`
+   *  `@schema_prefix`; undefined ⇒ unqualified. */
+  schema?: string,
 ): void {
   const ctxSnake = snake(ctx.name);
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
@@ -285,7 +292,7 @@ export function emitVanillaEsWorkflowFiles(
     const eventNames = [...new Set((wf.appliers ?? []).map((a) => a.event))];
     const events = eventNames.map((n) => eventsByName.get(n)).filter((e): e is EventIR => !!e);
     out.set(`${base}/${wfSnake}_state.ex`, renderStateStruct(contextModule, wf));
-    out.set(`${base}/${wfSnake}_event_log.ex`, renderEventLogSchema(contextModule, wf));
+    out.set(`${base}/${wfSnake}_event_log.ex`, renderEventLogSchema(contextModule, wf, schema));
     out.set(`${base}/${wfSnake}_fold.ex`, renderFoldModule(contextModule, wf));
     out.set(
       `${base}/${wfSnake}_stream.ex`,

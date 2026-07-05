@@ -13,7 +13,10 @@
 // ---------------------------------------------------------------------------
 
 import type { PageNameCtx } from "../../../ir/util/page-kind.js";
-import { aggregateIsEventSourced } from "../../../ir/util/resolve-datasource.js";
+import {
+  aggregateIsEventSourced,
+  resolveContextSchema,
+} from "../../../ir/util/resolve-datasource.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import {
   buildPhoenixResourceModules,
@@ -173,12 +176,15 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // emitted unconditionally for every correlation-bearing workflow so
     // `WorkflowInstancesController` (the deferred-Phoenix gap closer) has
     // the table to read from even on a command-only saga.
-    emitWorkflowStateSchemas(appName, ctx, appModule, out);
+    // Saga tables live in the context's schema (matching the migration
+    // `prefix:`), so the Ecto `@schema_prefix` and the DDL agree at runtime.
+    const wfSchema = sys ? resolveContextSchema(ctx, sys) : undefined;
+    emitWorkflowStateSchemas(appName, ctx, appModule, out, wfSchema);
     // Event-sourced workflows (workflow-and-applier.md A2-S5b): the per-workflow
     // fold struct + `<wf>_events` Ecto schema + fold + stream IO modules (the
     // saga analogue of the ES aggregate files above).  The dispatcher branches
     // their handlers to fold-on-load + append-own-events.
-    emitVanillaEsWorkflowFiles(appName, appModule, ctx, out);
+    emitVanillaEsWorkflowFiles(appName, appModule, ctx, out, wfSchema);
     emitDispatch(appName, ctx, appModule, out, sys, "vanilla");
     // Domain `test "..."` blocks → ExUnit (pure-subset; see tests-emit.ts).
     if (emitAggregateTests(ctx, appModule, "vanilla", out)) hasDomainTests = true;

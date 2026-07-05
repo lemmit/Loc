@@ -141,7 +141,7 @@ describe("java event-sourced workflow instance read endpoints", () => {
     expect(ctrl).toContain('@GetMapping("/tally/instances")');
     expect(ctrl).toContain("public List<TallyInstanceResponse> allTallyInstances() {");
     expect(ctrl).toContain(
-      '"select stream_id, type, data from tally_events order by stream_id, version");',
+      '"select stream_id, type, data from o.tally_events order by stream_id, version");',
     );
     expect(ctrl).toContain("var __byStream = new LinkedHashMap<String, List<DomainEvent>>();");
     expect(ctrl).toContain(

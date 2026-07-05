@@ -81,6 +81,9 @@ export function renderWorkflowStateEntity(
   ctx: EnrichedBoundedContextIR,
   basePkg: string,
   pkg: string,
+  /** The workflow's owning-context schema for the saga-state `@Table`.
+   *  Undefined ⇒ unqualified, byte-identical. */
+  schema?: string,
 ): string {
   const corr = wf.correlationField as string;
   const fields = wf.stateFields ?? [];
@@ -159,7 +162,7 @@ export function renderWorkflowStateEntity(
     `import ${basePkg}.domain.ids.*;`,
     `import ${basePkg}.domain.valueobjects.*;`,
     ``,
-    ...jpaClassAnnotations(workflowStateTable(wf), { voLookup }),
+    ...jpaClassAnnotations(workflowStateTable(wf), { voLookup, schema }),
     `public class ${workflowStateClass(wf)} {`,
     ...fieldLines,
     ``,

@@ -43,6 +43,10 @@ export interface DispatchCtx {
   statePkg: string;
   /** Saga-state Spring Data repository package (infrastructure.repositories). */
   stateRepoPkg: string;
+  /** The workflows' owning-context Postgres schema — qualifies the ES saga
+   *  stream in native SQL so it matches the migration DDL.  Undefined ⇒
+   *  unqualified (binding-free system). */
+  contextSchema?: string;
 }
 
 interface ResolvedHandler {
@@ -113,7 +117,7 @@ export function renderJavaDispatcher(
     if (!resolved) continue;
     methods.push(
       ...(wf.eventSourced
-        ? renderEsHandler(ctx, wf, sub, resolved, imports)
+        ? renderEsHandler(ctx, wf, sub, resolved, imports, dctx.contextSchema)
         : renderHandler(ctx, wf, sub, resolved, imports)),
     );
   }
@@ -331,6 +335,7 @@ function renderEsHandler(
   sub: EventSubscriptionIR,
   resolved: ResolvedHandler,
   imports: Set<string>,
+  schema?: string,
 ): string[] {
   const corr = wf.correlationField as string;
   const param = sub.param;
@@ -348,7 +353,7 @@ function renderEsHandler(
 
   const hasEmit = bodyHasEmit(resolved.statements);
   const cls = esWorkflowStateClass(wf);
-  const table = esWorkflowStreamTable(wf);
+  const table = esWorkflowStreamTable(wf, schema);
 
   // Render the body up front so we know whether it reads the folded snapshot (a
   // starter that only emits constants never touches `state`) — folding is then a

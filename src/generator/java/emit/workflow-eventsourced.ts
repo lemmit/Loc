@@ -37,10 +37,13 @@ export function esWorkflowStateClass(wf: WorkflowIR): string {
   return `${upperFirst(wf.name)}State`;
 }
 
-/** The `<wf>_events` stream table — unqualified (public schema), matching the
- *  shared migration (`eventLogTableForStream`) and the python/.NET ports. */
-export function esWorkflowStreamTable(wf: WorkflowIR): string {
-  return `${snake(wf.name)}_events`;
+/** The `<wf>_events` stream table, schema-qualified for native SQL when the
+ *  workflow's context has a schema (e.g. `catalog.archival_tracker_events`),
+ *  matching the shared migration (`eventLogTableForStream`) and the other
+ *  ports.  Unqualified when no schema — byte-identical for binding-free systems. */
+export function esWorkflowStreamTable(wf: WorkflowIR, schema?: string): string {
+  const base = `${snake(wf.name)}_events`;
+  return schema ? `${schema}.${base}` : base;
 }
 
 /** The correlation field's id class (`OrderId`) — the stream key type.  The IR

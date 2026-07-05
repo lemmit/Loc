@@ -75,6 +75,14 @@ export function renderSchema(
      *  aggregate they belong to (or stay schemaless when there's no
      *  binding). */
     resolveDataSource?: DataSourceLookup;
+    /** Per-workflow schema lookup — the schema its saga table (correlation
+     *  state / event-log stream) lands in, resolved from the workflow's
+     *  OWNING context (this `ctx` may be a merged union of several, so a
+     *  workflow's schema can't be derived from `ctx` alone).  Built by the
+     *  caller via `resolveContextSchema`, mirroring `resolveDataSource`'s
+     *  agg→context map-back.  Absent / undefined → unqualified `pgTable`,
+     *  byte-identical with the pre-fix output. */
+    resolveWorkflowSchema?: (wf: WorkflowIR) => string | undefined;
   } = {},
 ): string {
   const lookup = opts.resolveDataSource;
@@ -83,15 +91,18 @@ export function renderSchema(
   // schema.  Order: insertion order from the aggregate walk.
   const schemaNames: string[] = [];
   const schemaSeen = new Set<string>();
-  const schemaFor = (agg: AggregateIR): string | undefined => {
-    const ds = lookup?.(agg);
-    if (!ds?.schema) return undefined;
-    if (!schemaSeen.has(ds.schema)) {
-      schemaSeen.add(ds.schema);
-      schemaNames.push(ds.schema);
+  // Register a schema name so exactly one `pgSchema(...)` decl is emitted for
+  // it (order = first-seen).  Returns undefined for a falsy name so callers
+  // can pass through an unqualified table.
+  const registerSchema = (name: string | undefined): string | undefined => {
+    if (!name) return undefined;
+    if (!schemaSeen.has(name)) {
+      schemaSeen.add(name);
+      schemaNames.push(name);
     }
-    return ds.schema;
+    return name;
   };
+  const schemaFor = (agg: AggregateIR): string | undefined => registerSchema(lookup?.(agg)?.schema);
   const prefixFor = (agg: AggregateIR): string | undefined => lookup?.(agg)?.tablePrefix;
   const tables: string[] = [];
   for (const agg of ctx.aggregates) {
@@ -196,11 +207,15 @@ export function renderSchema(
   // without a correlation field (a plain command workflow) gets no table —
   // byte-identical.
   for (const wf of ctx.workflows) {
+    // The saga table is context-owned — it lands in the workflow's context
+    // schema (registered so its `pgSchema(...)` decl is emitted), matching the
+    // migration DDL.  Unqualified when the context has no dataSource binding.
+    const wfSchema = registerSchema(opts.resolveWorkflowSchema?.(wf));
     // An `eventSourced` workflow persists as an append-only `<wf>_events`
     // stream (folded on load), the saga analogue of a `persistedAs(eventLog)`
     // aggregate — not a mutable state row (workflow-and-applier.md A2-S5b).
-    if (wf.eventSourced) tables.push(emitEventLogTable(wf.name));
-    else if (wf.correlationField) tables.push(emitWorkflowStateTable(wf, ctx));
+    if (wf.eventSourced) tables.push(emitEventLogTable(wf.name, { schema: wfSchema }));
+    else if (wf.correlationField) tables.push(emitWorkflowStateTable(wf, ctx, wfSchema));
   }
   const schemaDecls = schemaNames.map(
     (name) => `export const ${schemaConstName(name)} = pgSchema("${name}");`,
@@ -454,10 +469,11 @@ function emitEmbeddedTable(
  *  aggregate-id column); the remaining state fields are saga columns rendered
  *  the same way an aggregate's are.  Reuses `drizzleColumnLines`, so column
  *  types stay in lockstep with aggregate tables. */
-function emitWorkflowStateTable(wf: WorkflowIR, ctx: BoundedContextIR): string {
+function emitWorkflowStateTable(wf: WorkflowIR, ctx: BoundedContextIR, schema?: string): string {
   const tableName = snake(plural(wf.name));
   const lines: string[] = [];
-  lines.push(`export const ${lowerFirst(plural(wf.name))} = pgTable("${tableName}", {`);
+  const factory = schema ? `${schemaConstName(schema)}.table` : "pgTable";
+  lines.push(`export const ${lowerFirst(plural(wf.name))} = ${factory}("${tableName}", {`);
   for (const f of wf.stateFields ?? []) {
     if (f.name === wf.correlationField) {
       const corrType = f.type.kind === "id" ? f.type.valueType : "guid";

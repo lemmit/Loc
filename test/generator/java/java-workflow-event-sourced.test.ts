@@ -80,7 +80,9 @@ describe("java event-sourced workflows", () => {
     expect(d).not.toContain("_fromEvents");
     expect(d).not.toContain("__loaded");
     expect(d).toContain("__events.add(new PaymentRegistered(p.order(), 0));");
-    expect(d).toContain("insert into tally_events (stream_id, version, type, data)");
+    // Context `O` has a `state` dataSource (`oState`), so its saga stream lands
+    // in the `o` schema — same schema its aggregate tables use.
+    expect(d).toContain("insert into o.tally_events (stream_id, version, type, data)");
     expect(d).toContain("__sid, __v, __e.getClass().getSimpleName(), TallyState._toData(__e));");
     expect(d).toContain("for (var __e : __events) events.publishEvent(__e);");
   });
