@@ -11,6 +11,7 @@ import type {
   Model,
   Operation,
   PayloadDecl,
+  Projection,
   Repository,
   TypeAtom,
   TypeRef,
@@ -70,6 +71,11 @@ export interface Env {
    *  state-bearing entity (workflow-and-applier.md A2), so `this` / bare names
    *  resolve against its `Property` state fields. */
   workflow?: Workflow;
+  /** The enclosing `projection` when lowering a fold (`on(e: Event)`) body
+   *  (projection.md).  A projection row is a state-bearing entity like a
+   *  workflow — its `Property` members resolve as `this`-props so `status :=
+   *  Shipped` folds into the row.  Mutually exclusive with the others. */
+  projection?: Projection;
   locals: Map<
     string,
     {
@@ -191,7 +197,28 @@ export function inValueObject(env: Env, vo: ValueObject): Env {
  *  aggregate `this` only in that the owner is a `Workflow`; `Property` members
  *  resolve identically (workflow-and-applier.md A2). */
 export function inWorkflow(env: Env, wf: Workflow): Env {
-  return { ...env, workflow: wf, aggregate: undefined, part: undefined, valueObject: undefined };
+  return {
+    ...env,
+    workflow: wf,
+    projection: undefined,
+    aggregate: undefined,
+    part: undefined,
+    valueObject: undefined,
+  };
+}
+
+/** Bind `this` to a projection's state inside a fold body (projection.md).
+ *  Distinct from a workflow `this` only in that the owner is a `Projection`;
+ *  `Property` members are accessible as `this`-props exactly the same way. */
+export function inProjection(env: Env, proj: Projection): Env {
+  return {
+    ...env,
+    projection: proj,
+    workflow: undefined,
+    aggregate: undefined,
+    part: undefined,
+    valueObject: undefined,
+  };
 }
 
 export interface ScopeCandidate {

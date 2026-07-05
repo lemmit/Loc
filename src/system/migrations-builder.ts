@@ -9,6 +9,7 @@ import type {
   FieldIR,
   IdValueType,
   ManualIndexIR,
+  ProjectionIR,
   SavingShape,
   SubdomainIR,
   SystemIR,
@@ -236,6 +237,14 @@ export function schemaFromModule(
         tables.push(t);
       }
     }
+    // Projection read models (projection.md): each folds foreign events into a
+    // context-owned state table, keyed by its correlation column — the same
+    // shape a plain correlation-bearing workflow persists.
+    for (const proj of ctx.projections) {
+      const t = projectionTableShape(proj, module.name, voLookup);
+      if (ctxSchema !== undefined) t.schema = ctxSchema;
+      tables.push(t);
+    }
   }
   // Transactional outbox (dispatch-delivery-semantics.md): one shared table
   // when any context's channel asks for durability (`retention: log | work`).
@@ -306,6 +315,43 @@ function workflowStateTableShape(
   }
   if (durable) {
     columns.push({ name: "last_event_id", type: { kind: "text" }, nullable: true });
+  }
+  return {
+    name: tableName,
+    ownerModule,
+    columns,
+    primaryKey: [snake(corr)],
+    foreignKeys: [],
+    indexes: [],
+  };
+}
+
+/** Projection read-model table (projection.md) — mirrors
+ *  `workflowStateTableShape`: PK is the projection's `keyed by` correlation
+ *  column, the remaining state fields are read-model columns.  No FK to the
+ *  aggregates whose events it folds (a derived row is standalone).  No
+ *  idempotent marker in v1 (in-process, at-most-once). */
+function projectionTableShape(
+  proj: ProjectionIR,
+  ownerModule: string,
+  voLookup: VoLookup,
+): TableShape {
+  const tableName = plural(snake(proj.name));
+  const corr = proj.correlationField;
+  const columns: ColumnShape[] = [];
+  for (const f of proj.stateFields) {
+    if (f.name === corr) {
+      const vt = f.type.kind === "id" ? f.type.valueType : "guid";
+      columns.push({ name: snake(f.name), type: idColumnType(vt), nullable: false });
+      continue;
+    }
+    if (isReferenceCollection(f.type)) {
+      columns.push({ name: snake(f.name), type: { kind: "json" }, nullable: !!f.optional });
+      continue;
+    }
+    for (const mapped of columnsForField(f, voLookup, proj.name)) {
+      columns.push(mapped.column);
+    }
   }
   return {
     name: tableName,

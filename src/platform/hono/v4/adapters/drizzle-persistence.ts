@@ -196,6 +196,7 @@ export function emitDrizzleSchema(
     criteria: ctx.contexts.flatMap((c) => c.criteria),
     domainServices: ctx.contexts.flatMap((c) => c.domainServices ?? []),
     channels: ctx.contexts.flatMap((c) => c.channels),
+    projections: ctx.contexts.flatMap((c) => c.projections ?? []),
     retrievals: ctx.contexts.flatMap((c) => c.retrievals),
     seeds: ctx.contexts.flatMap((c) => c.seeds),
     // Schema emission only — dispatch wiring reads the value computed in

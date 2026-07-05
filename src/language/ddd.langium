@@ -850,7 +850,8 @@ BoundedContext:
 
 ContextMember:
     EnumDecl | ValueObject | Aggregate | EventDecl | PayloadDecl | Repository | Workflow | View
-    | Seed | Criterion | Retrieval | FilterDecl | StampDecl | ImplementsDecl | Channel | DomainService;
+    | Seed | Criterion | Retrieval | FilterDecl | StampDecl | ImplementsDecl | Channel | DomainService
+    | Projection;
 
 EnumDecl:
     'enum' name=ID '{'
@@ -1217,6 +1218,35 @@ CorrelationExpr infers Expression:
 // (Postgres = read committed; SQL Server = read committed).
 IsolationLevel returns string:
     'readUncommitted' | 'readCommitted' | 'repeatableRead' | 'serializable';
+
+// Projection — a read model folded from FOREIGN events (projection.md).  The
+// passive read-half of an event-sourced workflow: declared state fields
+// (`Property`) + pure `on(e: Event)` folds, keyed by a correlation column.
+// No command side (no create/handle/emit, no operations) — a projection
+// originates nothing, it only reflects.  `keyed by` is REQUIRED (no inference,
+// unlike a workflow's derived correlation field): a read-model schema routinely
+// carries several foreign ids, so a single-id rule would be ambiguous.  `key`
+// is a plain name (like `Channel`'s `key:`), resolved to a declared state field
+// by the validator (`loom.projection-key-*`).
+Projection:
+    'projection' name=ID 'keyed' 'by' key=ID '{'
+        members+=ProjectionMember*
+    '}';
+
+ProjectionMember:
+    ProjectionOn | Property;
+
+// A pure fold over one foreign event.  Mirrors the workflow `OnDecl` reactor
+// spelling; the body is an apply-style pure fold (`:=` + field-derivation only,
+// enforced by loom.projection-fold-impure — no emit / repo / op calls).  The
+// optional `by <expr>` extracts the routing key from the event; omitted, it
+// defaults to `e.<key>` (the key field is required present on every event).
+ProjectionOn:
+    'on' '(' param=LooseName ':' event=[EventDecl:ID] ')'
+        ('by' correlation=CorrelationExpr)?
+    '{'
+        body+=Statement*
+    '}';
 
 // View — a saved, strongly-typed query over one source aggregate or
 // workflow (workflow-instance-views.md).  Two forms share the same head:

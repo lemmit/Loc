@@ -201,6 +201,8 @@ export function printStructural(node: AstNode): string {
       return printRepository(node as Repository);
     case "Workflow":
       return printWorkflow(node as Workflow);
+    case "Projection":
+      return printProjection(node as import("../generated/ast.js").Projection);
     case "View":
       return printView(node as View);
     case "Requirement":
@@ -907,6 +909,21 @@ function printHandleDecl(node: import("../generated/ast.js").HandleDecl): string
 
 // `on(e: Event) [by <expr>] { … }` reactor member (workflow-and-applier.md A2).
 function printOnDecl(node: OnDecl): string {
+  const by = node.correlation ? ` by ${printExpr(node.correlation)}` : "";
+  const head = `on(${node.param}: ${node.event.$refText})${by}`;
+  return block(head, node.body.map(printStmt));
+}
+
+// `projection <Name> keyed by <field> { … }` read model (projection.md).
+function printProjection(node: import("../generated/ast.js").Projection): string {
+  return block(
+    `projection ${node.name} keyed by ${node.key}`,
+    node.members.map((m) => (m.$type === "ProjectionOn" ? printProjectionOn(m) : printProperty(m))),
+  );
+}
+
+// `on(e: Event) [by <expr>] { … }` pure fold member of a projection.
+function printProjectionOn(node: import("../generated/ast.js").ProjectionOn): string {
   const by = node.correlation ? ` by ${printExpr(node.correlation)}` : "";
   const head = `on(${node.param}: ${node.event.$refText})${by}`;
   return block(head, node.body.map(printStmt));

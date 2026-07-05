@@ -4,6 +4,7 @@ import { validateStampReadsBeforeFlush } from "./checks/capability-checks.js";
 import type { LoomDiagnostic } from "./checks/diagnostic.js";
 import { validateDomainServices } from "./checks/domain-service-checks.js";
 import { validateIndexSuggestions } from "./checks/index-suggestion-checks.js";
+import { validateProjections } from "./checks/projection-checks.js";
 import {
   validateQueryableWheres,
   validateRawSeedColumns,
@@ -190,6 +191,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateExternOperations(c, diags);
     validateStampReadsBeforeFlush(c, diags);
     validateEventSourcedDiscipline(c, diags);
+    validateProjections(c, diags);
     validateWorkflows(c, diags);
     validateViews(c, diags);
     validateCurrentUserScope(c, diags);
