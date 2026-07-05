@@ -59,7 +59,27 @@ function unwrapOptional(t: TypeIR): TypeIR {
  *  (typed loosely so the call site in `api-emit.ts` — which holds the
  *  non-enriched surface types — needs no cast); `wireShape` is always present
  *  after enrichment. */
-export function renderWireSerialize(agg: AggregateIR, ctx: BoundedContextIR): WireSerializeResult {
+/** Options for rooting the serializer somewhere other than a bare `record`
+ *  struct.  The Route A document controller roots it at the rehydrated embed:
+ *  `defp serialize(row) do; record = row.data; …` — the wire fields read off the
+ *  `%<Agg>.Data{}` embed (`record`), but `id` lives on the root row
+ *  (`@primary_key false` on the embed), so `idExpr` overrides just that field. */
+export interface WireSerializeOpts {
+  /** Function-head parameter name (default `"record"`). */
+  headVar?: string;
+  /** A prelude line inserted before the wire map (e.g. `"    record = row.data"`). */
+  bind?: string;
+  /** Expression for the `source: "id"` wire field (default `"record.id"`). */
+  idExpr?: string;
+}
+
+export function renderWireSerialize(
+  agg: AggregateIR,
+  ctx: BoundedContextIR,
+  opts: WireSerializeOpts = {},
+): WireSerializeResult {
+  const headVar = opts.headVar ?? "record";
+  const idExpr = opts.idExpr ?? "record.id";
   const wireShape = (agg as EnrichedAggregateIR).wireShape ?? [];
   const parts = new Map<string, WireField[]>(agg.parts.map((p) => [p.name, p.wireShape ?? []]));
   const vos = new Map<string, WireField[]>(
@@ -119,11 +139,16 @@ export function renderWireSerialize(agg: AggregateIR, ctx: BoundedContextIR): Wi
   // wireShape order), skipping derived fields.  `isVo` = the map is a value
   // object's own body (string/atom-key-agnostic field access).  `baseIndent` is
   // the indentation of the `%{` opener; entries indent one step (2 spaces) more.
-  function renderMap(shape: WireField[], baseIndent: string, isVo: boolean): string {
+  function renderMap(
+    shape: WireField[],
+    baseIndent: string,
+    isVo: boolean,
+    idExprLocal = "record.id",
+  ): string {
     const entries: string[] = [];
     for (const wf of shape) {
       if (wf.source === "derived") continue;
-      const ve = wf.source === "id" ? "record.id" : valueExpr(wf, isVo);
+      const ve = wf.source === "id" ? idExprLocal : valueExpr(wf, isVo);
       entries.push(`${baseIndent}  "${wf.name}" => ${ve}`);
     }
     if (entries.length === 0) return `${baseIndent}%{}`;
@@ -152,7 +177,8 @@ export function renderWireSerialize(agg: AggregateIR, ctx: BoundedContextIR): Wi
     if (shape) buildHelper(name, shape, /* isVo */ true);
   }
 
-  const body = renderMap(wireShape, "    ", /* isVo */ false);
-  const serialize = `  defp serialize(record) do\n${body}\n  end`;
+  const body = renderMap(wireShape, "    ", /* isVo */ false, idExpr);
+  const preludeBind = opts.bind ? `${opts.bind}\n` : "";
+  const serialize = `  defp serialize(${headVar}) do\n${preludeBind}${body}\n  end`;
   return { serialize, body, helpers: [...helpers.values()] };
 }

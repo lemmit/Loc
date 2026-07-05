@@ -1281,25 +1281,12 @@ export function validateVanillaContainmentSupport(sys: SystemIR, diags: LoomDiag
         if ((agg.contains ?? []).length === 0 && (agg.parts ?? []).length === 0) continue;
         const enriched = agg as EnrichedAggregateIR;
         const shape = effectiveSavingShape(enriched, resolveDataSourceConfig(enriched, ctx, sys));
-        // `shape(embedded)` containments are wired (inline `embeds_many`).
-        if (shape === "embedded") continue;
-        // `shape(document)` folds the whole aggregate into one JSON column — its
-        // containments have no relational/embedded emit; keep them gated.
-        if (shape === "document") {
-          const part = agg.contains[0]?.partName ?? agg.parts[0]?.name ?? "Part";
-          diags.push({
-            severity: "error",
-            message:
-              `Deployable '${dep.name}' (platform ${dep.platform}) hosts ` +
-              `aggregate '${ctxName}.${agg.name}' which contains nested entity parts (e.g. '${part}') ` +
-              `on a 'shape(document)' aggregate — nested parts are not persisted on a document shape. ` +
-              `Use the default relational shape (child tables) or 'shape(embedded)' (inline jsonb), ` +
-              `model the part as a value object, or host this context on another backend.`,
-            source: `${sys.name}/${dep.name}`,
-            code: "loom.vanilla-containment-unsupported",
-          });
-          continue;
-        }
+        // `shape(embedded)` AND `shape(document)` (Route A) both fold containments
+        // inline: the `<Agg>.Data` embedded schema `embeds_many`/`embeds_one`s each
+        // part, the changeset `cast_embed`s them, and the wireShape serializer
+        // projects them through the shared `serialize_<part>/1` camelCase helpers.
+        // Both wired — allowed.
+        if (shape === "embedded" || shape === "document") continue;
         // Relational (§11c): persisted as child tables — allowed, INCLUDING
         // in-operation mutation (`pipelines += Pipeline{…}` / `-=`).  The persist
         // tail `put_assoc`s the mutated part-struct list (the schema's

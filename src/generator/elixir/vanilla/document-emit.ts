@@ -515,36 +515,3 @@ function docWireMap(agg: AggregateIR): string {
   ];
   return `%{${entries.join(", ")}}`;
 }
-
-// ---------------------------------------------------------------------------
-// Controller serialize — merge the document `data` back over the id.
-// ---------------------------------------------------------------------------
-
-/** The document-shaped `serialize/1` body — the wireShape-driven projection
- *  (mirrors the relational serializer #1628 introduced).
- *
- *  The stored `data` jsonb is keyed by `snake(f.name)` (the schemaless
- *  changeset casts `@all_fields = [:snake…]`), so a bare `Map.merge(%{id:},
- *  data)` shipped snake_case keys (`commit_sha`) — diverging from the canonical
- *  camelCase wire (`commitSha`) every other backend emits.  This projects each
- *  stored field under its declared name (already camelCase) reading the
- *  snake-cased `data` key, so the wire keys line up.  Emits exactly the fields
- *  the changeset stores (`id` + `docFields`) — no derived / timestamp leak —
- *  identical to the old merge except for the key casing. */
-export function renderDocSerialize(agg: AggregateIR): string {
-  const entries = [
-    `      "id" => record.id`,
-    ...docFields(agg).map((f) => `      "${f.name}" => Map.get(data, "${snake(f.name)}")`),
-  ];
-  // Normalise the `data` keys to strings first: a freshly-inserted record
-  // carries the schemaless changeset's ATOM-keyed applied map (`%{item_count:
-  // 3}`), while a DB-loaded record carries the STRING-keyed jsonb map — read
-  // both uniformly so the create response matches the read response.
-  return `  defp serialize(record) do
-    data = record.data |> Map.from_struct() |> Map.new(fn {k, v} -> {to_string(k), v} end)
-
-    %{
-${entries.join(",\n")}
-    }
-  end`;
-}

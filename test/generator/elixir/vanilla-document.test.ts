@@ -108,18 +108,20 @@ describe("vanilla shape(document) persistence (DEBT-07)", () => {
     expect(repo).toContain("def find_by_id(id)");
   });
 
-  it("serializes the document via the camelCase wireShape projection (§14)", async () => {
+  it("serializes the document via the shared wireShape projection rooted at the embed (§14)", async () => {
     const ctrl = file(await generateSystemFiles(DOC), "/controllers/cart_controller.ex");
-    // wireShape-driven: each stored field keyed by its declared (camelCase)
-    // name, read from the snake-cased `data` jsonb key — a multi-word field
-    // ships `itemCount`, not the raw `item_count`.  Route A: `record.data` is the
-    // `%<Agg>.Data{}` embed, flattened via Map.from_struct before string-keying.
-    expect(ctrl).toContain(
-      "data = record.data |> Map.from_struct() |> Map.new(fn {k, v} -> {to_string(k), v} end)",
-    );
-    expect(ctrl).toContain('"id" => record.id');
-    expect(ctrl).toContain('"itemCount" => Map.get(data, "item_count")');
-    expect(ctrl).toContain('"reference" => Map.get(data, "reference")');
+    // Route A slice 4: the document controller roots the SAME wireShape serializer
+    // at the rehydrated `%<Agg>.Data{}` embed (`record = row.data`), id off the
+    // root row — camelCase keys, VO via the shared serialize_<vo>/1 helper (wire
+    // byte-identical to the pre-slice-4 map projection).
+    expect(ctrl).toContain("defp serialize(row) do");
+    expect(ctrl).toContain("record = row.data");
+    expect(ctrl).toContain('"id" => row.id');
+    expect(ctrl).toContain('"itemCount" => record.item_count');
+    expect(ctrl).toContain('"reference" => record.reference');
+    // The VO projects through the shared camelCase helper (key-agnostic subfield read).
+    expect(ctrl).toContain('"subtotal" => serialize_money(record.subtotal)');
+    expect(ctrl).toContain("defp serialize_money(record) do");
   });
 
   it("normalizes camelCase inbound keys to snake before the embedded cast (§15)", async () => {
@@ -318,5 +320,53 @@ describe("vanilla shape(document) non-scalar residual (DEBT-07 follow-up)", () =
     expect(ctx).toContain(
       '{:ok, %{"id" => row.id, "subtotal" => record.subtotal, "itemCount" => record.item_count}}',
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Document containments (Route A slice 4) — nested entity parts fold into the
+// `<Agg>.Data` embed as embeds_many + project through the shared serialize helper.
+// ---------------------------------------------------------------------------
+const DOC_CONTAIN = `
+system Ordering {
+  subdomain Sales {
+    context Orders {
+      aggregate Order shape(document) with crudish {
+        reference: string
+        contains lines: OrderLine[]
+        entity OrderLine { sku: string  qty: int }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api OrdersApi from Sales
+  storage pg { type: postgres }
+  resource orderState { for: Orders, kind: state, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Orders]
+    dataSources: [orderState]
+    serves: OrdersApi
+    port: 4000
+  }
+}
+`;
+
+describe("vanilla shape(document) containments (Route A slice 4)", () => {
+  it("folds the part into the <Agg>.Data embed as embeds_many + cast_embed", async () => {
+    const schema = file(await generateSystemFiles(DOC_CONTAIN), "/orders/order.ex");
+    expect(schema).toContain("embeds_many :lines, Api.Orders.OrderLine");
+    expect(schema).toContain("|> cast_embed(:lines)");
+  });
+
+  it("projects the containment through the shared camelCase serialize helper", async () => {
+    const ctrl = file(await generateSystemFiles(DOC_CONTAIN), "/controllers/order_controller.ex");
+    // Rooted at the embed, id off the row; the part list maps through serialize_order_line/1.
+    expect(ctrl).toContain("defp serialize(row) do");
+    expect(ctrl).toContain("record = row.data");
+    expect(ctrl).toContain('"id" => row.id');
+    expect(ctrl).toContain('"lines" => Enum.map(record.lines || [], &serialize_order_line/1)');
+    expect(ctrl).toContain("defp serialize_order_line(record) do");
+    expect(ctrl).toContain('"sku" => record.sku');
   });
 });

@@ -117,6 +117,17 @@ The migration stays `create table(:orders) do add :data, :map; add :version …`
 4. **Containments.** Drop the `document` case from `validateVanillaContainmentSupport`
    (parts now nest via `embeds_many`); wire containment-mutating ops (`lines += …`)
    through the reused relational add/remove arm (`put_embed`).
+   **✅ PERSIST + READ LANDED (2026-07-05).** Dropped the `validateVanillaContainmentSupport`
+   document hard-error (parts now fold into `<Agg>.Data` via `embeds_many`/`cast_embed`,
+   emitted since slice 1). Switched the document controller `serialize/1` to the shared
+   `renderWireSerialize` rooted at the embed (`record = row.data`, `id` off the root row
+   via a new `idExpr`/`headVar`/`bind` opts) so containments project through the shared
+   `serialize_<part>/1` camelCase helpers — wire byte-identical for non-containment docs.
+   Deleted the bespoke `renderDocSerialize`. Boot-verified: `POST /orders {lines:[…]}` →
+   201 → `GET` round-trip with parts nested inline in the jsonb blob + camelCase wire.
+   **Still deferred:** in-op containment MUTATION (`lines += …`) on a document aggregate
+   (needs the `put_embed` add/remove arm wired for the embed — the `add`/`remove`
+   collection-mutation gate in `docStmtUnsupported` still stands).
 5. **✅ PARTLY LANDED (2026-07-05, with slice 2).** **Delete the fork.** Removed `RenderCtx.docMap` (the whole map-mode
    render path — `this-prop`/`renderMember` bracket, enum-string check, function
    receiver) from `render-expr.ts` and the doc-mode branch in `function-emit.ts`,

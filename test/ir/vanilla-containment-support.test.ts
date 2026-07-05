@@ -9,7 +9,10 @@
 //     (`items += Item{…}`) are now wired: the op persist tail `put_assoc`s the
 //     mutated part-struct list (`on_replace: :delete` rewrites the child rows),
 //     so `loom.vanilla-containment-mutation-unsupported` is retired.
-// A `shape(document)` aggregate still can't carry nested parts at all.
+//   * `shape(document)` (Route A) — each part folds into the `<Agg>.Data` embed
+//     as `embeds_many`/`embeds_one` (same as embedded), the changeset `cast_embed`s
+//     it, and the wireShape serializer projects it through `serialize_<part>/1`.
+//     Boot-verified round-trip; the document containment gate is retired.
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
@@ -86,6 +89,14 @@ describe("vanilla containment support gate", () => {
     ).toEqual([]);
     // …and neither does the plain unsupported gate.
     expect(await containmentErrors(source)).toEqual([]);
+  });
+
+  it("accepts an entity containment on a shape(document) vanilla aggregate (Route A — embeds_many)", async () => {
+    expect(
+      await containmentErrors(
+        sys("elixir { foundation: vanilla }", { contains: true, shape: "document" }),
+      ),
+    ).toEqual([]);
   });
 
   it("accepts a vanilla aggregate with NO nested parts (byte-identical)", async () => {
