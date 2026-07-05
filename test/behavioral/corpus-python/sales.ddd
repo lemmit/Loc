@@ -67,6 +67,45 @@ system SalesPy {
           quantity: int
           invariant quantity > 0
         }
+
+        // Pure-domain `test` blocks (the `unit` tier) — mirror the node
+        // source's Order tests (web/src/examples/sales-system.ddd), retargeted
+        // at the Python backend's emitted pytest suite (tests/test_order.py).
+        // They construct the aggregate in memory and exercise real domain logic
+        // (operations + precondition/invariant violations) — DB-free, so they
+        // gate independently of the FastAPI boot.  No `verifies` clause: this
+        // fixture declares no requirement/testCase graph.
+        test "adding a line then confirming yields a confirmed order" {
+          let order = Order.create({
+            customerId: "00000000-0000-0000-0000-000000000001",
+            status: Draft,
+            placedAt: "2024-01-01T00:00:00Z"
+          })
+          order.addLine("00000000-0000-0000-0000-000000000002", 2)
+          order.confirm()
+          expect(order.status).toBe(Confirmed)
+          expect(order.lines.count).toBe(1)
+        }
+
+        test "lines cannot be added once the order is confirmed" {
+          let order = Order.create({
+            customerId: "00000000-0000-0000-0000-000000000001",
+            status: Draft,
+            placedAt: "2024-01-01T00:00:00Z"
+          })
+          order.addLine("00000000-0000-0000-0000-000000000002", 2)
+          order.confirm()
+          expect(order.addLine("00000000-0000-0000-0000-000000000002", 1)).toThrow()
+        }
+
+        test "an order cannot be confirmed with no lines" {
+          let order = Order.create({
+            customerId: "00000000-0000-0000-0000-000000000001",
+            status: Draft,
+            placedAt: "2024-01-01T00:00:00Z"
+          })
+          expect(order.confirm()).toThrow()
+        }
       }
 
       repository Customers for Customer { }

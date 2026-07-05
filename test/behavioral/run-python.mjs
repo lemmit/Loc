@@ -7,6 +7,15 @@
 // it — the emitted suite is written against the HTTP contract, so it is
 // backend-agnostic (see docs/plans/a6.2-behavioral-tier-second-backend.md).
 //
+// Two tiers gate (mirroring the node tier's api + unit):
+//   - unit: the generated pure-domain pytest suite (`tests/test_<agg>.py`,
+//           emitted from aggregate `test "…"` blocks).  DB-free — it
+//           constructs aggregates in memory and asserts — so it runs right
+//           after `uv sync`, BEFORE the uvicorn boot, and a domain failure is
+//           caught even if the Postgres boot is flaky.  Systems with no
+//           `test "…"` blocks emit no `tests/` dir → the tier is skipped.
+//   - api : the emitted `test e2e` suite, HTTP-dispatched at the booted server.
+//
 // This gates the *behavioral* runtime-semantics RS-rules (conformance-
 // semantics.md) on a second backend per-PR: camelCase keys both directions
 // (RS-1), enum declared casing (RS-2), no leaked columns (RS-3), temporal
@@ -14,10 +23,11 @@
 //
 // Requires: `uv` on PATH and a reachable Postgres via DATABASE_URL
 // (postgresql+asyncpg://…). CI provides a `services: postgres` sidecar; locally,
-// point DATABASE_URL at any Postgres.
+// point DATABASE_URL at any Postgres.  (The unit tier needs only `uv`; it does
+// not touch the DB.)
 //
 // Usage:  node run-python.mjs [caseName...]
-// Exit code is non-zero if any case errors or any test fails.
+// Exit code is non-zero if any case errors or any test (unit or api) fails.
 
 import { build, transform } from "esbuild";
 import { execFileSync, spawn } from "node:child_process";
@@ -60,6 +70,51 @@ function findPythonDeployable(genDir) {
     throw new Error(`expected exactly one python deployable, found ${dirs.length}: ${dirs.join(", ")}`);
   }
   return dirs[0];
+}
+
+/** Run the emitted pure-domain pytest suite (`tests/`) in the generated
+ *  deployable and return a per-test `{ tier: "unit", name, status, error }`
+ *  list.  DB-free — assumes `uv sync` has already installed the (pinned)
+ *  dev deps, pytest among them.  Gates on pytest's exit code: a non-zero
+ *  exit with no parsed testcases (e.g. a collection error) is surfaced as a
+ *  synthetic failure so the run still fails. */
+function runPytestUnit(deplDir) {
+  const xmlPath = join(deplDir, ".loom-pytest.xml");
+  rmSync(xmlPath, { force: true });
+  let exit = 0;
+  try {
+    execFileSync("uv", ["run", "pytest", "tests/", "-q", `--junitxml=${xmlPath}`], {
+      cwd: deplDir,
+      stdio: "pipe",
+    });
+  } catch (err) {
+    exit = err?.status ?? 1;
+  }
+
+  const results = [];
+  if (existsSync(xmlPath)) {
+    const xml = readFileSync(xmlPath, "utf8");
+    // Passing cases self-close (`<testcase … />`); a failure/error nests a
+    // `<failure>`/`<error>` child, so match both shapes and inspect the body.
+    const re = /<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g;
+    for (let m = re.exec(xml); m; m = re.exec(xml)) {
+      const name = /\bname="([^"]*)"/.exec(m[1])?.[1] ?? "(unknown)";
+      const inner = m[2] ?? "";
+      const failMsg = /<(?:failure|error)\b[^>]*\bmessage="([^"]*)"/.exec(inner)?.[1];
+      const failed = /<(?:failure|error)\b/.test(inner);
+      results.push({
+        tier: "unit",
+        name,
+        status: failed ? "fail" : "pass",
+        error: failed ? (failMsg ?? "pytest failure") : undefined,
+      });
+    }
+    rmSync(xmlPath, { force: true });
+  }
+  if (results.length === 0 && exit !== 0) {
+    results.push({ tier: "unit", name: "pytest", status: "fail", error: `pytest exited ${exit}` });
+  }
+  return results;
 }
 
 /** Resolve when TCP :PORT accepts, or reject after the deadline. */
@@ -128,27 +183,50 @@ async function runCase(c) {
     const e2eFile = existsSync(e2eDir) ? (walk(e2eDir, (p) => p.endsWith(".e2e.test.ts"))[0] ?? null) : null;
     if (!e2eFile) throw new Error("no emitted e2e suite (the system declares no `test e2e … against <python>`)");
 
+    const out = [];
+
+    // A `tests/` dir with emitted `.py` files means the system declared
+    // aggregate `test "…"` blocks → run the DB-free unit tier.  Absent → skip
+    // (the other corpus fixtures declare no domain tests).
+    const testsDir = join(deplDir, "tests");
+    const hasUnit = existsSync(testsDir) && walk(testsDir, (p) => p.endsWith(".py")).length > 0;
+
     if (!EXTERNAL_BASE) {
-      // Install deps + boot uvicorn. Migrations auto-apply in the app lifespan.
+      // One `uv sync` serves both tiers (dev deps incl. pytest + runtime deps).
       execFileSync("uv", ["sync"], { cwd: deplDir, stdio: "pipe" });
-      server = spawn("uv", ["run", "uvicorn", "app.main:app", "--port", String(PORT)], {
-        cwd: deplDir,
-        stdio: "pipe",
-        env: { ...process.env, DATABASE_URL, PORT: String(PORT) },
-      });
-      let serverLog = "";
-      server.stdout.on("data", (d) => { serverLog += d; });
-      server.stderr.on("data", (d) => { serverLog += d; });
-      const exited = new Promise((_, rej) => server.on("exit", (code) => rej(new Error(`uvicorn exited early (code ${code})\n${serverLog.slice(-2000)}`))));
-      await Promise.race([waitForPort(PORT), exited]);
+
+      // Unit tier FIRST — DB-free and independent of the boot, so a domain
+      // failure is caught even if the uvicorn/Postgres boot is flaky.
+      if (hasUnit) out.push(...runPytestUnit(deplDir));
     }
 
-    const entry = join(workDir, "entry.mts");
-    const bundle = join(workDir, "bundle.mjs");
-    writeFileSync(entry, entrySource(e2eFile));
-    await build({ entryPoints: [entry], outfile: bundle, bundle: true, platform: "node", format: "esm", target: "node20", packages: "external", logLevel: "warning" });
-    const { run } = await import(pathToFileURL(bundle).href);
-    return await run();
+    // The api tier boots uvicorn against a real Postgres.  Keep it in its own
+    // try so an infra/boot failure is reported as an *errored* case WITHOUT
+    // discarding the already-collected unit results (which need no DB).
+    try {
+      if (!EXTERNAL_BASE) {
+        server = spawn("uv", ["run", "uvicorn", "app.main:app", "--port", String(PORT)], {
+          cwd: deplDir,
+          stdio: "pipe",
+          env: { ...process.env, DATABASE_URL, PORT: String(PORT) },
+        });
+        let serverLog = "";
+        server.stdout.on("data", (d) => { serverLog += d; });
+        server.stderr.on("data", (d) => { serverLog += d; });
+        const exited = new Promise((_, rej) => server.on("exit", (code) => rej(new Error(`uvicorn exited early (code ${code})\n${serverLog.slice(-2000)}`))));
+        await Promise.race([waitForPort(PORT), exited]);
+      }
+
+      const entry = join(workDir, "entry.mts");
+      const bundle = join(workDir, "bundle.mjs");
+      writeFileSync(entry, entrySource(e2eFile));
+      await build({ entryPoints: [entry], outfile: bundle, bundle: true, platform: "node", format: "esm", target: "node20", packages: "external", logLevel: "warning" });
+      const { run } = await import(pathToFileURL(bundle).href);
+      for (const r of await run()) out.push({ tier: "api", ...r });
+      return { results: out, error: null };
+    } catch (apiErr) {
+      return { results: out, error: apiErr?.message ?? String(apiErr) };
+    }
   } finally {
     if (server && !server.killed) server.kill("SIGTERM");
     rmSync(genDir, { recursive: true, force: true });
@@ -165,19 +243,26 @@ let fail = 0;
 let errored = 0;
 for (const c of corpus) {
   process.stdout.write(`\n▶ ${c.name}  (${c.ddd})  [python → ${BASE}]\n`);
-  let results;
+  let out;
   try {
-    results = await runCase(c);
+    out = await runCase(c);
   } catch (err) {
+    // generate / findDeployable / uv sync failure — nothing ran.
     errored++;
     process.stdout.write(`  ERROR booting/running: ${err?.message ?? err}\n`);
     continue;
   }
-  for (const r of results) {
+  for (const r of out.results) {
     const ok = r.status === "pass";
     ok ? pass++ : fail++;
-    process.stdout.write(`  ${ok ? "✓" : "✗"} [api] ${r.name}\n`);
+    process.stdout.write(`  ${ok ? "✓" : "✗"} [${r.tier ?? "api"}] ${r.name}\n`);
     if (!ok && r.error) process.stdout.write(`      ${String(r.error).split("\n")[0]}\n`);
+  }
+  // An api-tier boot/infra failure is an errored case, but the unit results
+  // above still counted — a domain failure is never masked by a flaky DB.
+  if (out.error) {
+    errored++;
+    process.stdout.write(`  ERROR booting/running [api]: ${out.error.split("\n")[0]}\n`);
   }
 }
 

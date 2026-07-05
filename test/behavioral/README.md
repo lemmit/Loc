@@ -12,17 +12,31 @@ in-process — no docker, no separate Postgres) and runs the suites Loom
 - **ui** — the generated `*.ui.spec.ts` (from `test e2e "…" against
   <react-deployable>`): real Playwright page-object round-trips against
   the `vite build`-built React frontend wired to the backend.
-- **python** — the SAME emitted api e2e, but run against a booted
-  **generated FastAPI backend** over real HTTP (`run-python.mjs`, corpus
-  `corpus-python.json` + `corpus-python/`). Python has no in-process
-  Postgres, so this needs a real DB (`DATABASE_URL`); the emitted api
-  suite is backend-agnostic (HTTP contract), so the runner just swaps
-  `app.fetch` for `fetch(BASE + path)`. Its own `behavioral-e2e-python.yml`
-  workflow (a `services: postgres` sidecar) — the A6.2 second backend for
-  the runtime-semantics RS-rules (see `docs/conformance-semantics.md` and
+- **python** — the **generated FastAPI backend** run over real HTTP
+  (`run-python.mjs`, corpus `corpus-python.json` + `corpus-python/`). Two
+  tiers gate, mirroring the node tier:
+  - **python unit** — the emitted pure-domain **pytest** suite
+    (`tests/test_<agg>.py`, from aggregate `test "…"` blocks), the Python
+    analogue of the node `unit` tier. DB-free (it constructs aggregates in
+    memory and asserts), so the runner runs `uv run pytest tests/ -q` right
+    after `uv sync`, **before** the uvicorn boot — a domain failure is caught
+    even if the Postgres boot is flaky, and the run gates on pytest's exit
+    code. Fixtures with no `test "…"` blocks emit no `tests/` dir → the tier
+    is **skipped** (only `corpus-python/sales.ddd` carries domain tests today;
+    payments/ledger/shapes don't). Per-test lines are parsed from pytest's
+    `--junitxml` report and printed `✓ [unit] <fn>`.
+  - **python api** — the SAME emitted api e2e, HTTP-dispatched at the booted
+    backend. Python has no in-process Postgres, so this needs a real DB
+    (`DATABASE_URL`); the emitted api suite is backend-agnostic (HTTP
+    contract), so the runner just swaps `app.fetch` for `fetch(BASE + path)`.
+
+  Its own `behavioral-e2e-python.yml` workflow (a `services: postgres`
+  sidecar) — the A6.2 second backend for the runtime-semantics RS-rules (see
+  `docs/conformance-semantics.md` and
   `docs/plans/a6.2-behavioral-tier-second-backend.md`). Needs `uv` + a
-  reachable `DATABASE_URL`; run: `node run-python.mjs`.
-  (`run-ui.mjs` — see below.)
+  reachable `DATABASE_URL`; run: `node run-python.mjs`. `LOOM_BH_PY_BASE`
+  dispatches the api tier at an already-running server (and skips `uv sync`,
+  so the unit tier is skipped too).
 - **dotnet** — the SAME emitted api e2e, run against a booted **generated
   .NET backend** (ASP.NET + EF Core) over real HTTP (`run-dotnet.mjs`, corpus
   `corpus-dotnet.json` + `corpus-dotnet/`). Like Python, .NET has no
