@@ -91,16 +91,26 @@ system SalesPy {
 
   // RS-1 (camelCase keys both directions: customerId/placedAt) + RS-2 (enum
   // declared casing "Draft") + RS-4 (temporal round-trip placedAt).
-  // NB: the association round-trip (RS-8, via `addLine`) is deferred — it trips
-  // a real Python codegen bug this gate found on day one (the emitted route
-  // handler calls `ProductId(...)` without importing it — a cross-aggregate
-  // operation-param id type omitted from the route import set). See the A6.2
-  // scoping note; add an `addLine`/`confirm` case here once it's fixed.
   test e2e "create an order and read it back" against api {
     let cust = api.customers.create({ name: "Buyer", email: "buyer@acme.test" })
     let ord = api.orders.create({ customerId: cust.id, status: "Draft", placedAt: "2024-01-01T00:00:00Z" })
     let read = api.orders.getById(ord)
     expect(read.status).toBe("Draft")
     expect(read.placedAt).toBe("2024-01-01T00:00:00Z")
+  }
+
+  // RS-8 (association round-trip via an operation) + RS-2 (enum "Confirmed").
+  // Exercises the cross-aggregate operation param (`addLine(productId: Product
+  // id)`) whose emitted `ProductId(...)` wrapper used to miss its import — the
+  // bug this python tier surfaced on day one, now fixed.
+  test e2e "create, add a line to, and confirm an order" against api {
+    let prod = api.products.create({ sku: "WIDGET-2", price: { amount: 5.00, currency: "USD" } })
+    let cust = api.customers.create({ name: "Buyer2", email: "buyer2@acme.test" })
+    let ord = api.orders.create({ customerId: cust.id, status: "Draft", placedAt: "2024-01-01T00:00:00Z" })
+    api.orders.addLine(ord, { productId: prod.id, qty: 3 })
+    api.orders.confirm(ord)
+    let read = api.orders.getById(ord)
+    expect(read.status).toBe("Confirmed")
+    expect(read.lines.length).toBe(1)
   }
 }

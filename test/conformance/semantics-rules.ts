@@ -147,11 +147,11 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
       "after the op, GET nests the added child / lists the added id — no in-memory projection that omits the join write",
     conforms: ["node", "dotnet", "java", "python", "elixir"],
     provenance: ["§11c", "#1626"],
-    // node gated (behavioral-e2e). The python behavioral gate (A6.2) surfaced a
-    // real codegen bug on the association path — the emitted FastAPI route calls
-    // `ProductId(...)` without importing it (a cross-aggregate operation-param
-    // id type omitted from the route import set). The RS-8 python round-trip is
-    // deferred until that's fixed; see a6.2-behavioral-tier-second-backend.md.
+    // Gated per-PR on node and python (A6.2). The python behavioral gate
+    // surfaced (and the fix closed) a real codegen bug on this exact path — the
+    // emitted FastAPI route wrapped a cross-aggregate operation-param id as
+    // `ProductId(...)` without importing it; the route import collector now
+    // draws candidates from every context aggregate (routes-builder.ts).
     tier: "behavioral",
   },
   {
