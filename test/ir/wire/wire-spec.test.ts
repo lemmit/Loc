@@ -33,6 +33,56 @@ describe("wire-spec.json", () => {
     // Parse-roundtrip must round-trip to the same shape.
     expect(JSON.parse(rendered)).toEqual(buildWireSpec(sys));
   });
+
+  it("qualifies same-named aggregates in sibling contexts instead of clobbering one", async () => {
+    // Two contexts each define `aggregate Order` with a DIFFERENT shape.  Keying
+    // by bare name silently dropped one (last write wins); the collision must be
+    // resolved by qualifying each key with its context.
+    const loom = await buildLoomModel(`
+system Coll {
+  subdomain S {
+    context Sales { aggregate Order { total: int }  repository Orders for Order { } }
+    context Billing { aggregate Order { amount: money  note: string }  repository Orders for Order { } }
+  }
+  storage pg { type: postgres }
+  resource salesState { for: Sales, kind: state, use: pg, schema: "sales" }
+  resource billingState { for: Billing, kind: state, use: pg, schema: "billing" }
+  deployable api { platform: node contexts: [Sales, Billing] dataSources: [salesState, billingState] port: 3000 }
+}`);
+    const spec = buildWireSpec(loom.systems[0]!);
+    // Both survive, context-qualified — neither clobbers the other.
+    expect(Object.keys(spec.aggregates).sort()).toEqual(["Billing.Order", "Sales.Order"]);
+    expect(Object.keys(spec.aggregates["Sales.Order"]!.properties).sort()).toEqual(["id", "total"]);
+    expect(Object.keys(spec.aggregates["Billing.Order"]!.properties).sort()).toEqual([
+      "amount",
+      "id",
+      "note",
+    ]);
+  });
+
+  it("leaves a same-named identical VO (ambient) as a single bare key", async () => {
+    // An identical value object in two contexts is NOT a collision — it dedupes
+    // to one bare-name entry, so the artifact stays byte-identical.
+    const loom = await buildLoomModel(`
+system Amb {
+  subdomain S {
+    context A { valueobject Money { amount: int  currency: string }
+      aggregate Wallet { balance: Money }  repository Wallets for Wallet { } }
+    context B { valueobject Money { amount: int  currency: string }
+      aggregate Purse { held: Money }  repository Purses for Purse { } }
+  }
+  storage pg { type: postgres }
+  resource aState { for: A, kind: state, use: pg, schema: "a" }
+  resource bState { for: B, kind: state, use: pg, schema: "b" }
+  deployable api { platform: node contexts: [A, B] dataSources: [aState, bState] port: 3000 }
+}`);
+    const spec = buildWireSpec(loom.systems[0]!);
+    expect(Object.keys(spec.valueObjects)).toEqual(["Money"]);
+    // The aggregates' `$ref` stays bare — resolves to the single `Money` key.
+    expect(spec.aggregates["Wallet"]!.properties.balance).toEqual({
+      $ref: "#/valueObjects/Money",
+    });
+  });
 });
 
 describe("wire-spec — primitive mappings", () => {
