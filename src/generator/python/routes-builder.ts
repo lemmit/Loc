@@ -464,7 +464,7 @@ function createModels(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR): 
       ? inputs.map((f) =>
           withFieldConstraint(
             f.name,
-            requestFieldDecl(f.type, f.optional, ctx),
+            requestFieldDecl(f.type, f.optional, ctx, f.default),
             constraints.get(f.name),
           ),
         )
@@ -495,10 +495,22 @@ function opRequestModel(
 }
 
 /** Request-model field declaration with the cross-backend required-set
- *  semantics: optional-typed values default to None, and bool inputs
- *  are optional-with-default-false (Hono's zod `.default(false)`). */
-export function requestFieldDecl(t: TypeIR, optional: boolean, ctx: BoundedContextIR): string {
+ *  semantics: a field with an EXPLICIT declared default becomes
+ *  optional-with-that-default (matching Hono's `.default(<declared>)`);
+ *  otherwise optional-typed values default to None, and a bare bool carries
+ *  the language-defined implicit `= False`.
+ *
+ *  `defaultExpr` (the field's lowered `= <expr>` default) must win over the
+ *  implicit bool `= False` — else `active: bool = true` omitted on create would
+ *  arrive `False` (RS-6; surfaced by the python behavioral tier). */
+export function requestFieldDecl(
+  t: TypeIR,
+  optional: boolean,
+  ctx: BoundedContextIR,
+  defaultExpr?: ExprIR,
+): string {
   const base = requestPyType(t, ctx);
+  if (defaultExpr) return `${base} = ${renderPyExpr(defaultExpr)}`;
   const isOpt = optional || t.kind === "optional";
   if (isOpt) return base.endsWith("| None") ? `${base} = None` : `${base} | None = None`;
   if (t.kind === "primitive" && t.name === "bool") return `${base} = False`;
