@@ -97,9 +97,12 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     observable:
       'POST {"createdAt":"2026-01-01T00:00:00Z"} reads back the same instant (ORM auto-value does not clobber it)',
     conforms: ["node", "dotnet", "java", "python", "elixir"],
-    provenance: ["#1626"],
-    // Gated per-PR on node and python (A6.2): the order create→read asserts
-    // placedAt reads back equal to the submitted instant.
+    provenance: ["#1626", "RST-9"],
+    // Gated behaviorally on node and python per-PR (A6.2): the order create→read
+    // asserts placedAt reads back equal to the submitted instant.  The
+    // corpus-dotnet order round-trip now asserts the same (RST-9 canonicalized
+    // the .NET instant wire form — trailing zero fractional seconds trimmed to
+    // `…00Z` — bringing it into parity with node/python).
     tier: "behavioral",
   },
   {

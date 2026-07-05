@@ -68,7 +68,8 @@
         "elixir"
       ],
       "provenance": [
-        "#1626"
+        "#1626",
+        "RST-9"
       ],
       "tier": "behavioral"
     },
