@@ -17,13 +17,19 @@ name: Tenancy isolation (runtime e2e)
 # model build and leaked cross-tenant — fixed by installing the filter on
 # AppDbContext reading the injected scoped ICurrentUserAccessor.
 #
-# Elixir is NOT in this matrix: the vanilla Phoenix REST surface is read-only
-# (mutations go through LiveView, not a POST endpoint), so the shared
-# create→read harness can't drive it.  Its read isolation was verified
-# out-of-band by seeding two tenants' rows and reading as each (org-b GET
-# org-a's row → 404, each LIST scoped to its own tenant) — the Ecto repository
-# threads current_user per call and rebuilds the `where tenant_id == ^claim`
-# filter fresh each request, so it is immune to the EF baked-filter class.
+# Elixir is NOT in this matrix — but for a SEPARATE, pre-existing bug, not by
+# design: the vanilla Phoenix router only wires GET routes for a bare aggregate
+# (`api-emit.ts` gates POST/PATCH/DELETE on explicit `creates`/`operations`/
+# `destroys`, while every other backend emits them by constructibility —
+# `hasCreate`/`isConstructible`).  The create/update/delete controller ACTIONS
+# are generated but left unrouted (dead code), so `POST /api/invoices` 404s and
+# the shared create→read harness can't drive it.  Tracked as its own fix.
+#
+# The tenancy READ isolation was still verified out-of-band by seeding two
+# tenants' rows and reading as each (org-b GET org-a's row → 404, each LIST
+# scoped to its own tenant) — the Ecto repository threads current_user per call
+# and rebuilds the `where tenant_id == ^claim` filter fresh each request, so it
+# is immune to the EF baked-filter class.
 #
 # This is the assertion the structural tiers CANNOT make: per-backend generator
 # tests pin the filter and the 1a.0 pins the stamp, but only a boot proves the
