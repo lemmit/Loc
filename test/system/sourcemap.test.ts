@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveToSource } from "../../src/ir/types/origin.js";
 import { generateSystems } from "../../src/system/index.js";
-import { parseValid } from "../_helpers/index.js";
+import { parseString, parseValid } from "../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // Round-trip test for the `--sourcemap` artifact (docs/plans/
@@ -82,23 +82,57 @@ function normalizeNondeterministic(content: string): string {
   return content.replace(/SECRET_KEY_BASE: "[0-9a-f]+"/, 'SECRET_KEY_BASE: "<redacted>"');
 }
 
+// Milestone 5 (Source Map v3 sidecars) appends exactly one trailing
+// `//# sourceMappingURL=…` directive line to every mapped node/Hono `.ts`
+// file — strip it before comparing against the flag-off run, whose files
+// never carry it.
+function stripSourceMappingDirective(content: string): string {
+  return content.replace(/\/\/# sourceMappingURL=.*\n$/, "");
+}
+
+// `langium/test`'s `parseHelper` mints the in-memory doc's URI from a
+// module-global counter (`/1.ddd`, `/2.ddd`, …) that keeps incrementing
+// across every `it` in this file — never assume `/1.ddd`.  Parse with
+// `parseString` (which returns the `LangiumDocument`, unlike `parseValid`)
+// and read the REAL path back off `doc.uri.path` so `sourceTexts` is keyed
+// correctly regardless of how many earlier tests already parsed something.
+async function parseWithSourceTexts(
+  source: string,
+): Promise<{ model: Awaited<ReturnType<typeof parseValid>>; sourceTexts: Map<string, string> }> {
+  const { model, doc, errors } = await parseString(source, { validate: true });
+  if (errors.length) throw new Error(`unexpected validation errors:\n${errors.join("\n")}`);
+  return { model, sourceTexts: new Map([[doc.uri.path, source]]) };
+}
+
 describe(".loom/sourcemap.json", () => {
   it("is absent by default, and output is otherwise byte-identical to a --sourcemap run", async () => {
-    const model = await parseValid(SOURCE);
+    const { model, sourceTexts } = await parseWithSourceTexts(SOURCE);
     const withoutFlag = generateSystems(model).files;
-    const withFlag = generateSystems(model, { sourcemap: true }).files;
+    const withFlag = generateSystems(model, {
+      sourcemap: true,
+      sourceTexts,
+    }).files;
 
     expect(withoutFlag.has(".loom/sourcemap.json")).toBe(false);
+    expect([...withoutFlag.keys()].some((p) => p.endsWith(".map"))).toBe(false);
+    for (const content of withoutFlag.values()) {
+      expect(content).not.toContain("//# sourceMappingURL=");
+    }
 
     const withFlagMinusMap = new Map(withFlag);
     withFlagMinusMap.delete(".loom/sourcemap.json");
+    for (const path of [...withFlagMinusMap.keys()]) {
+      if (path.endsWith(".map")) withFlagMinusMap.delete(path);
+    }
 
     expect([...withFlagMinusMap.keys()].sort()).toEqual([...withoutFlag.keys()].sort());
     for (const [path, content] of withoutFlag) {
       const other = withFlagMinusMap.get(path);
-      expect(other && normalizeNondeterministic(other), `content drifted for ${path}`).toBe(
-        normalizeNondeterministic(content),
-      );
+      expect(other, `missing ${path} in --sourcemap run`).toBeDefined();
+      expect(
+        normalizeNondeterministic(stripSourceMappingDirective(other!)),
+        `content drifted for ${path}`,
+      ).toBe(normalizeNondeterministic(content));
     }
   });
 
@@ -322,5 +356,141 @@ describe(".loom/sourcemap.json", () => {
       const text = SOURCE.slice(resolved!.span.start, resolved!.span.end);
       expect(text, `stmt region ${i} span doesn't contain "${tokens[i]}"`).toContain(tokens[i]);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Source Map v3 sidecars (Milestone 5, source-map-and-debugging.md §8) —
+// node/Hono `.ts`/`.tsx` output only.  A small hand-rolled VLQ decoder
+// mirrors `src/system/sourcemap-v3.ts`'s encoder so the test verifies the
+// actual wire bytes, not just that `renderSourceMapV3` was called.
+// ---------------------------------------------------------------------------
+
+const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/** Decode one base64-VLQ field starting at `pos.i`, advancing `pos.i` past
+ *  it.  Inverse of `encodeVLQ` in src/system/sourcemap-v3.ts. */
+function decodeVLQField(str: string, pos: { i: number }): number {
+  let result = 0;
+  let shift = 0;
+  let more: boolean;
+  do {
+    const digit = B64.indexOf(str[pos.i++]!);
+    expect(digit, `invalid base64-VLQ char in "${str}" at ${pos.i - 1}`).toBeGreaterThanOrEqual(0);
+    more = (digit & 0x20) !== 0;
+    result += (digit & 0x1f) << shift;
+    shift += 5;
+  } while (more);
+  return result & 1 ? -(result >> 1) : result >> 1;
+}
+
+interface DecodedSegment {
+  genLine: number; // 0-based
+  genCol: number;
+  sourceIndex: number;
+  sourceLine: number;
+  sourceCol: number;
+}
+
+/** Decode a full v3 `mappings` string into absolute (delta-resolved)
+ *  segments, replicating the running-total rules the spec defines:
+ *  `genCol` resets to 0 every line; `sourceIndex`/`sourceLine`/`sourceCol`
+ *  carry over across the whole mappings string. */
+function decodeMappings(mappings: string): DecodedSegment[] {
+  const segments: DecodedSegment[] = [];
+  let sourceIndex = 0;
+  let sourceLine = 0;
+  let sourceCol = 0;
+  const lines = mappings.split(";");
+  for (let li = 0; li < lines.length; li++) {
+    let genCol = 0;
+    const line = lines[li]!;
+    if (line === "") continue;
+    for (const seg of line.split(",")) {
+      const pos = { i: 0 };
+      const fields: number[] = [];
+      while (pos.i < seg.length) fields.push(decodeVLQField(seg, pos));
+      expect(fields.length, `segment "${seg}" on line ${li} has an unexpected field count`).toBe(4);
+      genCol += fields[0]!;
+      sourceIndex += fields[1]!;
+      sourceLine += fields[2]!;
+      sourceCol += fields[3]!;
+      segments.push({ genLine: li, genCol, sourceIndex, sourceLine, sourceCol });
+    }
+  }
+  return segments;
+}
+
+describe("Source Map v3 sidecars", () => {
+  it("emits valid Source Map v3 sidecars for the node backend", async () => {
+    const { model, sourceTexts } = await parseWithSourceTexts(SOURCE);
+    const [sourcePath] = sourceTexts.keys();
+    const files = generateSystems(model, {
+      sourcemap: true,
+      sourceTexts,
+    }).files;
+
+    const tsPath = "hono_api/domain/order.ts";
+    const mapPath = `${tsPath}.map`;
+    const raw = files.get(mapPath);
+    expect(raw, `${mapPath} not emitted`).toBeDefined();
+
+    const v3 = JSON.parse(raw!) as {
+      version: number;
+      file: string;
+      sources: string[];
+      sourcesContent: string[];
+      names: unknown[];
+      mappings: string;
+    };
+    expect(v3.version).toBe(3);
+    expect(v3.file).toBe("order.ts");
+    expect(v3.sources).toContain(sourcePath);
+    const sourceIdx = v3.sources.indexOf(sourcePath!);
+    expect(v3.sourcesContent[sourceIdx]).toBe(SOURCE);
+
+    const segments = decodeMappings(v3.mappings);
+    expect(segments.length).toBeGreaterThan(0);
+    for (const seg of segments) {
+      expect(seg.sourceIndex).toBeGreaterThanOrEqual(0);
+      expect(seg.sourceIndex).toBeLessThan(v3.sources.length);
+    }
+
+    // Cross-check against `.loom/sourcemap.json`'s own regions: the `let`
+    // statement's whole-line region is the narrowest one covering its
+    // generated line, so the v3 segment for that line must point back at
+    // `let note = customerName` in SOURCE.
+    const wireRaw = files.get(".loom/sourcemap.json")!;
+    const wireMap = JSON.parse(wireRaw) as {
+      files: Record<string, { target: [number, number]; construct?: string }[]>;
+    };
+    const stmtRegions = wireMap.files[tsPath]!.filter(
+      (r) => r.construct === "Orders.Order.confirm",
+    ).sort((a, b) => a.target[0] - b.target[0]);
+    expect(stmtRegions.length).toBeGreaterThan(0);
+    const letLine = stmtRegions[0]!.target[0]; // 1-based generated line
+
+    const seg = segments.find((s) => s.genLine === letLine - 1);
+    expect(seg, `no v3 segment recorded for generated line ${letLine}`).toBeDefined();
+
+    const letIdx = SOURCE.indexOf("let note = customerName");
+    expect(letIdx).toBeGreaterThanOrEqual(0);
+    const expectedSourceLine = SOURCE.slice(0, letIdx).split("\n").length - 1; // 0-based
+    expect(seg!.sourceLine).toBe(expectedSourceLine);
+    expect(seg!.sourceIndex).toBe(sourceIdx);
+
+    // Exactly one trailing directive line naming the sidecar's basename.
+    const tsContent = files.get(tsPath)!;
+    expect(tsContent.endsWith("//# sourceMappingURL=order.ts.map\n")).toBe(true);
+  });
+
+  it("without sourceTexts, flag-on emits no v3 sidecars (honest skip)", async () => {
+    const model = await parseValid(SOURCE);
+    const files = generateSystems(model, { sourcemap: true }).files;
+
+    expect([...files.keys()].some((p) => p.endsWith(".map"))).toBe(false);
+    for (const content of files.values()) {
+      expect(content).not.toContain("//# sourceMappingURL=");
+    }
   });
 });

@@ -37,6 +37,7 @@ import {
   snapshotRelPath,
 } from "./snapshot.js";
 import { renderSourceMap } from "./sourcemap.js";
+import { renderSourceMapV3 } from "./sourcemap-v3.js";
 import { renderTraceabilityArtifacts } from "./traceability.js";
 import { renderUIE2EFile } from "./ui-e2e-render.js";
 import { renderWireSpec } from "./wire-spec.js";
@@ -89,6 +90,16 @@ export interface GenerateSystemOptions {
    *  default so byte-identical output is preserved for every existing
    *  fixture/gate.  See docs/plans/source-map-debug-kickoff.md. */
   sourcemap?: boolean;
+  /** `.ddd` source text for every path an `OriginRef` can resolve to
+   *  (`SourceRef.path` — a Langium `URI.path`), keyed the same way.  Feeds
+   *  Source Map v3 sidecar emission (`<file>.ts.map` + a trailing
+   *  `sourceMappingURL` directive) for the node/Hono backend's `.ts`/`.tsx`
+   *  output — the only files a JS/TS debugger can step through today.
+   *  `src/system/` stays browser-safe (no `fs`), so the CLI/playground
+   *  supply the text; a mapped file with no entry here is skipped (no
+   *  sidecar), never guessed.  No effect unless `sourcemap` is also true.
+   *  See docs/proposals/source-map-and-debugging.md §8. */
+  sourceTexts?: ReadonlyMap<string, string>;
 }
 
 export function generateSystems(model: Model, options: GenerateSystemOptions = {}): SystemEmission {
@@ -132,6 +143,26 @@ export function generateSystemsFromLoom(
     out.set(path, content);
   }
   if (recorder) out.set(".loom/sourcemap.json", renderSourceMap(recorder));
+  // Source Map v3 sidecars — additive on top of `.loom/sourcemap.json`
+  // (proposal §8), scoped to the node/Hono backend's `.ts`/`.tsx` output
+  // (see `sourceTexts`' doc comment).  Skipped entirely without
+  // `sourceTexts` — never emitted with a guessed `sourcesContent`.
+  if (recorder && options.sourceTexts) {
+    for (const [path, regions] of recorder.entries()) {
+      if (!(path.endsWith(".ts") || path.endsWith(".tsx"))) continue;
+      const content = out.get(path);
+      if (content === undefined) continue;
+      const rendered = renderSourceMapV3(regions, path, options.sourceTexts);
+      if (!rendered) continue;
+      const mapPath = `${path}.map`;
+      out.set(mapPath, rendered);
+      // Appending AFTER recording is safe — the recorder already captured
+      // every region's line numbers against the file's pre-directive
+      // content, and this is the file's own only trailing-line addition.
+      const basename = mapPath.split("/").pop()!;
+      out.set(path, `${content}//# sourceMappingURL=${basename}\n`);
+    }
+  }
   return { files: out };
 }
 
