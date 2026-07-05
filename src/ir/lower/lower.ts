@@ -68,6 +68,7 @@ import {
   isOperation,
   isPayloadDecl,
   isPermissionsBlock,
+  isProjection,
   isProperty,
   isRepository,
   isRequirement,
@@ -119,6 +120,7 @@ import type {
   LoadSegmentIR,
   PayloadIR,
   PermissionDeclIR,
+  ProjectionIR,
   RawLoomModel,
   RepositoryIR,
   RequirementIR,
@@ -171,6 +173,7 @@ import {
   lowerPropertyChecks,
   lowerUnique,
 } from "./lower-members.js";
+import { lowerProjection } from "./lower-projection.js";
 import { lowerRequirement, lowerSolution, lowerTestCase } from "./lower-requirements.js";
 import { lowerStatement } from "./lower-stmt.js";
 import {
@@ -928,6 +931,7 @@ function lowerContext(
   const criteria: CriterionIR[] = [];
   const domainServices: DomainServiceIR[] = [];
   const channels: ChannelIR[] = [];
+  const projections: ProjectionIR[] = [];
   const retrievals: RetrievalIR[] = [];
   const seeds: SeedIR[] = [];
   // Context-level capabilities propagate to every aggregate inside.
@@ -947,6 +951,7 @@ function lowerContext(
     else if (isView(m)) views.push(lowerView(m, env));
     else if (isCriterion(m)) criteria.push(lowerCriterion(m, env));
     else if (isChannel(m)) channels.push(lowerChannel(m));
+    else if (isProjection(m)) projections.push(lowerProjection(m, env));
     else if (isRetrieval(m)) retrievals.push(lowerRetrieval(m, env));
     else if (isSeed(m)) seeds.push(lowerSeed(m, env));
   }
@@ -977,6 +982,7 @@ function lowerContext(
     criteria,
     domainServices,
     channels,
+    projections,
     retrievals,
     seeds,
     origin: originFor(ctx),

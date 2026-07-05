@@ -15,6 +15,7 @@ import type {
   PayloadDecl,
   PostfixChain,
   PostfixSuffix,
+  Projection,
   Property,
   ValueObject,
   Workflow,
@@ -1043,7 +1044,7 @@ function resolveNameRef(name: string, env: Env): ExprIR {
   // Property of enclosing entity / value object / workflow.  A workflow is a
   // state-bearing entity (workflow-and-applier.md A2): its `Property` members
   // resolve as `this`-props exactly like aggregate fields.
-  const owner = env.part ?? env.aggregate ?? env.valueObject ?? env.workflow;
+  const owner = env.part ?? env.aggregate ?? env.valueObject ?? env.workflow ?? env.projection;
   if (owner) {
     const isVo = !!env.valueObject;
     for (const m of owner.members) {
@@ -1197,6 +1198,7 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
     if (env.aggregate) return { kind: "entity", name: env.aggregate.name };
     if (env.valueObject) return { kind: "valueobject", name: env.valueObject.name };
     if (env.workflow) return { kind: "entity", name: env.workflow.name };
+    if (env.projection) return { kind: "entity", name: env.projection.name };
     return { kind: "primitive", name: "string" };
   }
   if (isIdRef(expr)) {
@@ -1210,6 +1212,7 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
     }
     // Workflows have no `ids` clause today — their synthetic id defaults to guid.
     if (env.workflow) return { kind: "id", targetName: env.workflow.name, valueType: "guid" };
+    if (env.projection) return { kind: "id", targetName: env.projection.name, valueType: "guid" };
     return { kind: "primitive", name: "string" };
   }
   if (isParenExpr(expr)) return inferExprType(expr.inner, env);
@@ -1804,6 +1807,13 @@ function memberOnWorkflow(wf: Workflow, name: string): TypeIR {
   return { kind: "primitive", name: "string" };
 }
 
+function memberOnProjection(proj: Projection, name: string): TypeIR {
+  for (const m of proj.members) {
+    if (isProperty(m) && m.name === name) return lowerType(m.type);
+  }
+  return { kind: "primitive", name: "string" };
+}
+
 // ---------------------------------------------------------------------------
 // Path typing — for assign/add/remove statements
 // ---------------------------------------------------------------------------
@@ -1858,6 +1868,7 @@ export function pathType(path: PathIR, env: Env): TypeIR {
   if (local) cur = local.type;
   else if (env.aggregate) cur = memberOnEntity(env.aggregate, head);
   else if (env.workflow) cur = memberOnWorkflow(env.workflow, head);
+  else if (env.projection) cur = memberOnProjection(env.projection, head);
   else cur = { kind: "primitive", name: "string" };
   for (let i = 1; i < path.segments.length; i++) {
     cur = stepInto(cur, path.segments[i]!, env);

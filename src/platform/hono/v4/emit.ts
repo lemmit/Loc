@@ -357,6 +357,7 @@ export function generateTypeScriptForContexts(
     criteria: contexts.flatMap((c) => c.criteria),
     domainServices: contexts.flatMap((c) => c.domainServices ?? []),
     channels: contexts.flatMap((c) => c.channels),
+    projections: contexts.flatMap((c) => c.projections ?? []),
     retrievals: contexts.flatMap((c) => c.retrievals),
     seeds: contexts.flatMap((c) => c.seeds),
     // Re-derive over the merged union so a reactor in one hosted context can

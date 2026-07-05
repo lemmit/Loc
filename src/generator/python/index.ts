@@ -398,6 +398,7 @@ function mergeContexts(contexts: EnrichedBoundedContextIR[]): EnrichedBoundedCon
     criteria: contexts.flatMap((c) => c.criteria),
     domainServices: contexts.flatMap((c) => c.domainServices ?? []),
     channels: contexts.flatMap((c) => c.channels),
+    projections: contexts.flatMap((c) => c.projections ?? []),
     retrievals: contexts.flatMap((c) => c.retrievals),
     seeds: contexts.flatMap((c) => c.seeds),
     // Re-derived over the merged union when event-triggered workflows

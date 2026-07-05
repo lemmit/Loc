@@ -952,6 +952,10 @@ export interface BoundedContextIR {
   /** Channel declarations in this context (channels.md, Slice 1) — the
    *  publisher-side transport contracts over this context's events. */
   channels: ChannelIR[];
+  /** Projection read models declared in this context (projection.md) — read
+   *  models folded from foreign events.  Populated by lowering; empty when the
+   *  context declares none. */
+  projections: ProjectionIR[];
   /** Named query bundles declared in this context (retrieval.md). */
   retrievals: RetrievalIR[];
   /** First-boot seed datasets declared in this context (database-seeding.md).
@@ -1225,6 +1229,51 @@ export interface OnIR {
    *  `CreateIR`.  A reactor is a workflow continuation, so a created /
    *  loaded-and-mutated aggregate is persisted on the way out. */
   savesAtExit: { name: string; aggName: string; repoName: string }[];
+}
+
+/** A `projection <Name> keyed by <field> { … }` read model (projection.md) —
+ *  the passive read-half of an event-sourced workflow.  Declared state fields
+ *  (the read-model schema + wire shape) plus pure `on(e: Event)` folds over
+ *  FOREIGN events, keyed by an explicit correlation column.  No command side:
+ *  a projection never emits, calls repos/operations, or starts anything — it
+ *  only reflects an event stream into a queryable table.  Reuses the
+ *  event-triggered saga machinery (load-or-allocate on every handler,
+ *  `wireShape` read surface, state-table migration). */
+export interface ProjectionIR {
+  name: string;
+  /** The read-model schema — the fold-target columns and the wire shape.
+   *  Lowered with the same `lowerField` as aggregate / workflow state. */
+  stateFields: FieldIR[];
+  /** The explicit id-shaped state field inbound events route to (`keyed by`).
+   *  Required — no inference (unlike `WorkflowIR.correlationField`). */
+  correlationField: string;
+  /** One pure fold per subscribed foreign event. */
+  handlers: ProjectionOnIR[];
+  /** Canonical wire shape of a projection row — correlation field as an id
+   *  token then the state fields, mirroring `WorkflowIR.instanceWireShape`.
+   *  Populated by `enrichLoomModel`. */
+  wireShape?: WireField[];
+  /** Provenance chain back to the `.ddd` source. */
+  origin?: OriginRef;
+}
+
+/** One `on(e: Event) [by <expr>] { … }` pure fold on a projection.  Shares the
+ *  reactor SUBSCRIPTION surface with `OnIR` (foreign event + param + optional
+ *  key-extraction expr) but the body is an apply-style PURE fold — `StmtIR`,
+ *  not `WorkflowStmtIR` — against the pre-loaded projection row bound as `this`.
+ *  Enforced pure by `loom.projection-fold-impure` (reuses the applier gate). */
+export interface ProjectionOnIR {
+  /** The foreign event type this handler folds, by name. */
+  event: string;
+  /** The parameter name the inbound event instance binds to in the body. */
+  param: string;
+  /** The `by <expr>` key-extraction expression, lowered in the event-binding
+   *  scope (e.g. `e.orderId`).  Undefined when the source omits `by`; the
+   *  runtime then routes by `e.<correlationField>` (the key field is required
+   *  present on every subscribed event). */
+  correlation?: ExprIR;
+  /** The fold body — pure assignments / derivations against the row (`this`). */
+  statements: StmtIR[];
 }
 
 export type WorkflowStmtIR =
