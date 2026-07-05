@@ -9,12 +9,14 @@ export class Customer {
   private _username: string;
   private _email: string;
   private _age: number;
-  private constructor(state: { id: Ids.CustomerId; username: string; email: string; age: number }) {
+  private constructor(state: { id: Ids.CustomerId; username: string; email: string; age: number }, trustStore = false) {
     this._id = state.id;
     this._username = state.username;
     this._email = state.email;
     this._age = state.age;
-    this._assertInvariants();
+    if (!trustStore) {
+      this._assertInvariants();
+    }
   }
 
   get id(): Ids.CustomerId { return this._id; }
@@ -48,6 +50,14 @@ export class Customer {
 
   static _create(state: { id: Ids.CustomerId; username: string; email: string; age: number }): Customer {
     return new Customer(state);
+  }
+
+  /** Reconstitution from the store — trusts persisted state, so no
+   *  invariant run: invariants guard transitions (create + operations),
+   *  not loads.  Repository hydration only; domain code constructs via
+   *  `create`/`_create`, which assert. */
+  static _rehydrate(state: { id: Ids.CustomerId; username: string; email: string; age: number }): Customer {
+    return new Customer(state, true);
   }
   static create(input: { username: string; email: string; age: number }): Customer {
     return new Customer({

@@ -25,7 +25,7 @@ export class ProductRepository {
         return null;
       }
       const root = rootRows[0]!;
-      const loaded = Product._create({ id: Ids.ProductId(root.id), sku: root.sku, price: new Money(Number(root.price_amount), root.price_currency) });
+      const loaded = Product._rehydrate({ id: Ids.ProductId(root.id), sku: root.sku, price: new Money(Number(root.price_amount), root.price_currency) });
       requestLog().debug({ event: "aggregate_loaded", aggregate: "Product", id: id as string, found: true });
       return loaded;
     });
@@ -41,7 +41,7 @@ export class ProductRepository {
     if (ids.length === 0) return [];
     const rootRows = await this.db.select().from(schema.products).where(inArray(schema.products.id, ids));
     if (rootRows.length === 0) return [];
-    return rootRows.map((root) => Product._create({ id: Ids.ProductId(root.id), sku: root.sku, price: new Money(Number(root.price_amount), root.price_currency) }));
+    return rootRows.map((root) => Product._rehydrate({ id: Ids.ProductId(root.id), sku: root.sku, price: new Money(Number(root.price_amount), root.price_currency) }));
   }
 
   async save(aggregate: Product): Promise<void> {
@@ -67,7 +67,7 @@ export class ProductRepository {
       requestLog().debug({ event: "find_executed", aggregate: "Product", find: "all", rows: 0 });
       return [];
     }
-    const result = rootRows.map((root) => Product._create({ id: Ids.ProductId(root.id), sku: root.sku, price: new Money(Number(root.price_amount), root.price_currency) }));
+    const result = rootRows.map((root) => Product._rehydrate({ id: Ids.ProductId(root.id), sku: root.sku, price: new Money(Number(root.price_amount), root.price_currency) }));
     requestLog().debug({ event: "find_executed", aggregate: "Product", find: "all", rows: result.length });
     return result;
   }
@@ -78,7 +78,7 @@ export class ProductRepository {
       requestLog().debug({ event: "find_executed", aggregate: "Product", find: "bySku", rows: 0 });
       return null;
     }
-    const result = Product._create({ id: Ids.ProductId(rootRows[0]!.id), sku: rootRows[0]!.sku, price: new Money(Number(rootRows[0]!.price_amount), rootRows[0]!.price_currency) });
+    const result = Product._rehydrate({ id: Ids.ProductId(rootRows[0]!.id), sku: rootRows[0]!.sku, price: new Money(Number(rootRows[0]!.price_amount), rootRows[0]!.price_currency) });
     requestLog().debug({ event: "find_executed", aggregate: "Product", find: "bySku", rows: 1 });
     return result;
   }
