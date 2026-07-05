@@ -82,6 +82,9 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
       "GET returns exactly the wireShape keys — no inserted_at/updated_at, no internal jsonb envelope",
     conforms: ["node", "dotnet", "java", "python", "elixir"],
     provenance: ["§14", "#1628"],
+    // Gated statically per-PR by test/conformance/wire-no-leak-parity.test.ts —
+    // asserts the framework-timestamp leak signature is absent at each backend's
+    // wire-serialization site.
     tier: "static",
   },
   {
@@ -102,6 +105,10 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
       "the absent arm is taken when the row is missing, identically across backends (nullable-subject ternary)",
     conforms: ["node", "dotnet", "java", "python", "elixir"],
     provenance: ["#1631"],
+    // Gated statically per-PR by the pre-existing
+    // test/conformance/union-find-absence-parity.test.ts — it anchors each
+    // backend's absence-check leaf (node `result == null`, python `is None`, …)
+    // and the 404 ProblemDetails mapping across all five.
     tier: "static",
   },
   {

@@ -108,8 +108,10 @@ the conforming backends, and the fix that established it.
   `inserted_at`, no `updated_at`.
 - **Conforms.** node, dotnet, java, python, elixir.
 - **Provenance.** §14 sweep, #1628 (`wireShape`-driven serializer replacing a
-  `Map.from_struct` leak). Tier: **T0** (the emitted serializer's key-set is
-  statically comparable to `wireShape`).
+  `Map.from_struct` leak). Tier: **T0** — gated per-PR by
+  [`test/conformance/wire-no-leak-parity.test.ts`](../test/conformance/wire-no-leak-parity.test.ts)
+  (asserts the framework-timestamp leak signature is absent at each backend's
+  wire-serialization site).
 
 ### RS-4 · Declared temporal fields round-trip
 - **Guarantee.** A declared `createdAt`/temporal field submitted on create is
@@ -133,8 +135,11 @@ the conforming backends, and the fix that established it.
   across backends.
 - **Conforms.** node, dotnet, java, python, elixir.
 - **Provenance.** #1631 (S2: absence match → nullable-subject ternary +
-  per-backend `absenceCheck` leaf). Tier: **T0** (lowering shape is assertable
-  in IR/generator tests) escalating to **T1** for the runtime arm.
+  per-backend `absenceCheck` leaf). Tier: **T0** — already gated per-PR by the
+  pre-existing
+  [`test/conformance/union-find-absence-parity.test.ts`](../test/conformance/union-find-absence-parity.test.ts),
+  which anchors each backend's absence-check leaf (`result == null`, `is None`,
+  …) and the 404 ProblemDetails mapping across all five.
 
 ### RS-6 · Boolean create defaults materialize at the wire boundary
 - **Guarantee.** A field declared `active: bool = true`, **omitted** on create,
@@ -203,10 +208,12 @@ When a cross-backend runtime bug is fixed:
 
 ## Roadmap
 
-- **v1 (this doc):** the registry + well-formedness gate + the first T0
-  assertion (**RS-2**, `enum-casing-parity.test.ts`, all five backends). *(here)*
-  The other T0-tier rules (RS-3 no-leak, RS-5 absence-shape) are the next
-  static gates to add against emitted source.
+- **v1 (this doc):** the registry + well-formedness gate + the T0-tier rules
+  gated statically across all five backends — **RS-2** (`enum-casing-parity`),
+  **RS-3** (`wire-no-leak-parity`), and **RS-5** (the pre-existing
+  `union-find-absence-parity`). *(here)* Every rule assertable from emitted
+  source is now gated per-PR; the remainder (RS-1/4/6/7/8/9) are behavioral and
+  wait on A6.2.
 - **A6.2:** a second host-runnable backend in the per-PR behavioral tier
   (Python is the cheapest candidate — `uv` + SQLite/PGlite-equivalent) so the
   T2 column becomes per-PR. Every T1 rule above then gates a second backend.
