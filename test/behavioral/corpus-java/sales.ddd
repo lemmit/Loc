@@ -1,0 +1,144 @@
+// RST-3 behavioral-tier fixture — the Sales domain from
+// web/src/examples/sales-system.ddd, retargeted to a `platform: java`
+// backend (Spring Boot + JPA; no UI/react). Its `test e2e` create→read
+// round-trips exercise the behavioral RS-rules against a booted Java backend:
+// camelCase multi-word keys both directions (RS-1 `externalRef`/`customerId`/
+// `placedAt`), enum declared casing (RS-2), temporal round-trip (RS-4
+// `placedAt`), bool create default (RS-6 `active`), value-object survival
+// (RS-7 `price`), and association round-trip (RS-8 `lines`). Mirrors
+// corpus-dotnet/sales.ddd — see docs/plans/runtime-semantics-tier-followups.md
+// (RST-3) + docs/plans/a6.2-behavioral-tier-second-backend.md.
+//
+// RS-4 note: unlike the .NET fixture (which DROPS the placedAt assertion
+// because .NET serializes the instant with 7 fractional digits, tracked as
+// RST-9), this Java fixture KEEPS the placedAt assertion. The first Java CI
+// run reveals whether Spring Boot/Jackson conforms to the canonical `…00Z`
+// wire form (RS-4) or diverges like .NET; if it diverges, drop/adjust this
+// one assertion, document it inline, and file the Java RS-4 follow-up.
+
+system SalesJava {
+
+  subdomain Sales {
+    context Sales {
+
+      enum OrderStatus { Draft, Confirmed, Shipped, Cancelled }
+
+      valueobject Money {
+        amount: decimal
+        currency: string
+        invariant amount >= 0
+        invariant currency.length == 3
+      }
+
+      event OrderConfirmed { order: Order id, at: datetime }
+
+      aggregate Customer with crudish {
+        name: string
+        email: string
+        externalRef: string
+        active: bool = true
+        invariant email.length > 0
+        derived display: string = name
+      }
+
+      aggregate Product with crudish {
+        sku: string
+        price: Money
+        invariant sku.length > 0
+        derived display: string = sku
+      }
+
+      aggregate Order with crudish {
+        customerId: Customer id
+        status: OrderStatus
+        placedAt: datetime
+        contains lines: OrderLine[]
+
+        invariant lines.count > 0 when status == Confirmed
+
+        function isMutable(): bool = status == Draft
+
+        operation addLine(productId: Product id, qty: int) {
+          precondition isMutable()
+          precondition qty > 0
+          lines += OrderLine { productId: productId, quantity: qty }
+        }
+
+        operation confirm() {
+          precondition isMutable()
+          precondition lines.count > 0
+          status := Confirmed
+          emit OrderConfirmed { order: id, at: now() }
+        }
+
+        entity OrderLine {
+          productId: Product id
+          quantity: int
+          invariant quantity > 0
+        }
+      }
+
+      repository Customers for Customer { }
+      repository Products for Product { }
+      repository Orders for Order { }
+    }
+  }
+
+  storage primary { type: postgres }
+  resource salesState { for: Sales, kind: state, use: primary }
+
+  deployable api {
+    platform: java
+    contexts: [Sales]
+    dataSources: [salesState]
+    port: 8000
+  }
+
+  // RS-7 (value-object survives round-trip) + RS-3 (no leaked columns).
+  test e2e "create a product and read it back" against api {
+    let p = api.products.create({ sku: "WIDGET-1", price: { amount: 9.99, currency: "USD" } })
+    let read = api.products.getById(p)
+    expect(read.sku).toBe("WIDGET-1")
+  }
+
+  // RS-6 (bool create default materializes at the wire boundary): `active` is
+  // omitted on create and must read back `true` (its declared default), not a
+  // zero-value false/null.
+  // RS-1 (multi-word wire key survives both directions): `externalRef` is sent
+  // camelCase on create — it must persist (snake `external_ref`) and read back
+  // as `externalRef`, not be dropped by a verbatim snake-key cast.
+  test e2e "create a customer: bool default + multi-word key round-trip" against api {
+    let c = api.customers.create({ name: "Defaulter", email: "def@acme.test", externalRef: "ext-42" })
+    let read = api.customers.getById(c)
+    expect(read.active).toBe(true)
+    expect(read.externalRef).toBe("ext-42")
+  }
+
+  // RS-1 (camelCase keys both directions: customerId/placedAt) + RS-2 (enum
+  // declared casing "Draft") + RS-4 (temporal round-trip: placedAt echoes the
+  // canonical `…00Z` wire form). The placedAt assertion is KEPT for Java (the
+  // .NET fixture drops it for a 7-fractional-digit divergence, RST-9) — the
+  // first CI run reveals whether Java conforms to RS-4 or needs the same defer.
+  test e2e "create an order and read it back" against api {
+    let cust = api.customers.create({ name: "Buyer", email: "buyer@acme.test", externalRef: "ext-b1" })
+    let ord = api.orders.create({ customerId: cust.id, status: "Draft", placedAt: "2024-01-01T00:00:00Z" })
+    let read = api.orders.getById(ord)
+    expect(read.status).toBe("Draft")
+    expect(read.placedAt).toBe("2024-01-01T00:00:00Z")
+  }
+
+  // RS-8 (association round-trip via an operation) + RS-2 (enum "Confirmed").
+  // Exercises the cross-aggregate operation param (`addLine(productId: Product
+  // id)`) whose emitted id wrapper is the cross-backend spot the Python tier
+  // caught a missing import on — the Java path renders it as `new ProductId(...)`.
+  test e2e "create, add a line to, and confirm an order" against api {
+    let prod = api.products.create({ sku: "WIDGET-2", price: { amount: 5.00, currency: "USD" } })
+    let cust = api.customers.create({ name: "Buyer2", email: "buyer2@acme.test", externalRef: "ext-b2" })
+    let ord = api.orders.create({ customerId: cust.id, status: "Draft", placedAt: "2024-01-01T00:00:00Z" })
+    api.orders.addLine(ord, { productId: prod.id, qty: 3 })
+    api.orders.confirm(ord)
+    let read = api.orders.getById(ord)
+    expect(read.status).toBe("Confirmed")
+    expect(read.lines.length).toBe(1)
+  }
+}

@@ -35,6 +35,17 @@ in-process — no docker, no separate Postgres) and runs the suites Loom
   (`dotnet`) + a reachable `ConnectionStrings__Default`; run:
   `node run-dotnet.mjs`. `LOOM_BH_DOTNET_BASE` dispatches at an
   already-running server (skips the boot).
+- **java** — the SAME emitted api e2e, run against a booted **generated
+  Java backend** (Spring Boot + JPA) over real HTTP (`run-java.mjs`, corpus
+  `corpus-java.json` + `corpus-java/`). Like Python/.NET, Java has no
+  in-process Postgres, so this builds the generated backend (`gradle bootJar`,
+  host-runnable — JDK 21 + Gradle) and boots the jar (`java -jar`) against a
+  real DB, re-pointing the backend-agnostic api suite at it. Its own
+  `behavioral-e2e-java.yml` workflow (a `services: postgres` sidecar) — the
+  RST-3 fourth backend for the runtime-semantics RS-rules (see
+  `docs/plans/runtime-semantics-tier-followups.md`). Needs JDK 21 + Gradle
+  (`gradle`) + a reachable `SPRING_DATASOURCE_URL`; run: `node run-java.mjs`.
+  `LOOM_BH_JAVA_BASE` dispatches at an already-running server (skips the boot).
 
 ## Why
 

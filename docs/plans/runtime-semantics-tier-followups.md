@@ -32,7 +32,7 @@ stack.
 |---|---|---|
 | RST-1 (RS-9 status assert) | grammar? + `test e2e` lower + `_frontend/e2e-harness.ts` + both runners | RST-2/3/4/5 (disjoint) — **not** RST-7/8 (share the fixtures) |
 | RST-2 (.NET tier) | `run-dotnet.mjs` (new) + corpus + new workflow | everything (new files) |
-| RST-3 (Java tier) | `run-java.mjs` (new) + corpus + new workflow | everything (new files) |
+| RST-3 (Java tier) ✅ | `run-java.mjs` (new) + corpus + new workflow | everything (new files) |
 | RST-4 (make python required) | branch protection / CI meta | everything |
 | RST-5 (semantics-spec artifact) | `src/system/` + `.loom` bundle | everything |
 | RST-6 (python unit tier) | `run-python.mjs` (+ maybe a sibling) | RST-2/3/4/5 — coordinate with RST-1 if it edits run-python |
@@ -101,10 +101,27 @@ agents; they only collide on this doc's status table.
 - **DoD.** New runner + fixture + workflow; RS-1/4/6/7/8 tier notes add `dotnet`;
   scoping-note "v2" bullet ticked.
 
-### RST-3 · Add Java as a behavioral backend  ·  L
+### RST-3 · Add Java as a behavioral backend  ·  L  ·  ✅ LANDED (pending first CI run)
+- **Landed:** `test/behavioral/run-java.mjs` (mirrors `run-dotnet.mjs`),
+  `test/behavioral/corpus-java/sales.ddd` + `corpus-java.json` (the .NET fixture
+  retargeted to `platform: java`), and `behavioral-e2e-java.yml` (a
+  `services: postgres` sidecar + JDK 21/temurin + Gradle, building `gradle
+  bootJar` and booting `java -jar` against `SPRING_DATASOURCE_URL`). The
+  live-boot round-trip runs in CI only (the local sandbox blocks long-lived
+  server spawns); the emitted api e2e is HTTP-dispatched at the booted Java
+  backend via the same `loadApiTests({dispatch})` seam.
+- **RS-4 status is UNKNOWN until the first CI run.** Unlike the .NET fixture
+  (which *drops* the `placedAt` assertion for RST-9's 7-fractional-digit
+  divergence), the Java fixture **keeps** `expect(read.placedAt).toBe("2024-01-01T00:00:00Z")`.
+  The first CI run reveals whether Spring Boot/Jackson conforms to the canonical
+  `…00Z` wire form (RS-4) or diverges like .NET. If it diverges, drop/adjust that
+  one assertion (document inline, like the .NET fixture) and file a Java RS-4
+  follow-up (the sibling of RST-9).
 - Sibling of RST-2 on Java. Boot recipe from `java-obs-e2e.yml` (JDK 21 + gradle
   `bootJar` → `java -jar`, host-runnable — no SDK container). Same seam, same
-  DoD. Give to a *different* agent than RST-2; they don't collide.
+  DoD.
+- **DoD.** New runner + fixture + workflow; RS-1/4/6/7/8 tier notes add `java`
+  once the first CI run confirms conformance (RS-4 pending the run's verdict).
 
 ### RST-4 · Make `behavioral-e2e-python` a required check  ·  S
 - **Why.** It has 3 green runs (#1679/#1681/#1684); it's still non-blocking, so a
@@ -207,6 +224,15 @@ registry is the source of truth — keep the three in lockstep).
   (`dotnet run`, `ConnectionStrings__Default`) and HTTP-dispatches the same
   backend-agnostic emitted api e2e — the runtime-semantics RS-rules' third
   behavioral backend (node + Python + .NET).
+- **RST-3** (Java behavioral backend) — ✅ (pending first CI run)
+  `test/behavioral/run-java.mjs` + `corpus-java/` + `corpus-java.json` +
+  `.github/workflows/behavioral-e2e-java.yml`. Boots the generated Java (Spring
+  Boot + JPA) backend against a `services: postgres` sidecar (`gradle bootJar` +
+  `java -jar`, `SPRING_DATASOURCE_URL`) and HTTP-dispatches the same
+  backend-agnostic emitted api e2e — the runtime-semantics RS-rules' fourth
+  behavioral backend (node + Python + .NET + Java). Keeps the RS-4 `placedAt`
+  assertion (unlike .NET/RST-9); the first CI run reveals whether Java conforms
+  to RS-4 or needs the same defer.
 - **RST-5** (diffable spec artifact) — ✅ `test/conformance/semantics-spec.json`,
   a committed diffable mirror of `SEMANTICS_RULES` derived by
   `serializeSemanticsSpec()` and gated by `semantics-spec-sync.test.ts`
