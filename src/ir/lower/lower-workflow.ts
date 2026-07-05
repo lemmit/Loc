@@ -30,6 +30,7 @@ import {
   isRequiresStmt,
   isWorkflowCreateDecl,
 } from "../../language/generated/ast.js";
+import { upperFirst } from "../../util/naming.js";
 import { findVerb } from "../resource-verbs.js";
 import type {
   AggregateIR,
@@ -50,7 +51,6 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../types/loom-ir.js";
-import { upperFirst } from "../../util/naming.js";
 import { aggregateOpResolver, type SaveResolver } from "../util/domain-service-tier.js";
 import { resolveBypass } from "./lower-capabilities.js";
 import {
