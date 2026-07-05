@@ -153,6 +153,10 @@ function AppShellLayout() {
 
   return (
     <Flex>
+      {/* Skip link (WCAG 2.4.1 Bypass Blocks) — first focusable element,
+          off-screen until focused, jumps to the <main> landmark. */}
+      <a href="#main-content" className="loom-skip-link">Skip to content</a>
+      <style>{`.loom-skip-link{position:absolute;left:-9999px;top:0;z-index:2000;padding:8px 16px;background:Canvas;color:CanvasText;border:1px solid;border-radius:4px}.loom-skip-link:focus{left:8px;top:8px}`}</style>
       {/* Mobile drawer */}
       <Drawer isOpen={isOpen} placement="left" onClose={onClose}>
         <DrawerOverlay />
@@ -165,6 +169,8 @@ function AppShellLayout() {
 
       {/* Desktop sidebar */}
       <Box
+        as="nav"
+        aria-label="Primary navigation"
         display=\{{ base: "none", md: "block" }}
         w={DRAWER_WIDTH}
         minH="100vh"
@@ -219,7 +225,7 @@ function AppShellLayout() {
           <Text fontWeight={600}>{{systemNameHuman}}</Text>
           <Box w={8} />
         </HStack>
-        <Box p={6}>
+        <Box as="main" id="main-content" p={6}>
           <AppErrorBoundary>
             <Outlet />
           </AppErrorBoundary>
