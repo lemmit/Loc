@@ -29,6 +29,7 @@ import { NORMALIZE_KEYS_DEFP } from "./key-normalize.js";
 import { managedTimestampNames } from "./managed-timestamps.js";
 import { isRefCollField, refCollFieldNames } from "./ref-collection-emit.js";
 import { usesRelationalContainments } from "./schema-emit.js";
+import { stampedFieldNames } from "./stamp-emit.js";
 import { valueCollectionsWithVo } from "./value-collection-schema-emit.js";
 
 interface AggField {
@@ -48,17 +49,25 @@ function isManaged(f: AggField): boolean {
 }
 
 /** The scalar columns a changeset casts: declared fields minus the id, the
- *  server-managed fields (audit stamps, managed timestamps), and the
- *  association-backed fields (value-object collections, `X id[]` reference
- *  collections) — those are wired via `cast_assoc`/`put_assoc`, not `cast`. */
+ *  server-managed fields (audit stamps, managed timestamps), the
+ *  lifecycle-stamp targets (`tenantOwned`'s `tenantId`, `createdAt := now()`),
+ *  and the association-backed fields (value-object collections, `X id[]`
+ *  reference collections) — those are wired via `cast_assoc`/`put_assoc`, not
+ *  `cast`.  A stamp target is server-owned: the repository `put_change`s it
+ *  right before persist, so it must be neither `cast` (a client can't spoof it;
+ *  a smuggled value is simply dropped) nor `validate_required`d (that runs
+ *  BEFORE the stamp and rejects the create — the 422 `tenant_id can't be blank`
+ *  bug for `tenantOwned`). */
 function castScalarFields(agg: AggregateIR, ctx: BoundedContextIR): AggField[] {
   const vcFieldNames = new Set(valueCollectionsWithVo(agg, ctx).map((v) => v.vc.fieldName));
   const managedTs = managedTimestampNames(agg);
+  const stampedFields = stampedFieldNames(agg);
   return (agg.fields as AggField[]).filter(
     (f) =>
       f.name !== "id" &&
       !isManaged(f) &&
       !managedTs.has(f.name) &&
+      !stampedFields.has(snake(f.name)) &&
       !vcFieldNames.has(f.name) &&
       !isRefCollField(f),
   );
