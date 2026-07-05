@@ -99,21 +99,32 @@ The migration stays `create table(:orders) do add :data, :map; add :version …`
    (`vanilla-wire-camelcase`, `vanilla-wire-key-normalization`) MUST stay green,
    and a **Postgres boot** (`test:obs-phoenix` or a k8s-e2e cell) must confirm
    the blob round-trips and the wire is byte-identical to today.
-2. **Converge ops onto the relational renderer.** Replace `renderDocNamedOpFunction`
+2. **✅ LANDED (2026-07-05).** **Converge ops onto the relational renderer.** Replaced `renderDocNamedOpFunction`
    / `renderDocReturningOpFunction` (map mode) with the `record = row.data` shim
-   over `renderReturningStmt` + a `put_embed` persist tail. Delete `renderDocOpStmt`.
-   Un-gate audited + provenanced + derived-reading ops.
-3. **In-memory finds in struct mode.** Rewrite `renderDocFindFn` to
-   `Repo.all |> Enum.filter(fn row -> <pred over row.data> end)` with the
-   predicate rendered in struct mode (`record.field`, `record = row.data`),
-   reusing the relational in-memory predicate. Add paged-envelope + union-tag
-   builders (both in-memory).
+   over `renderReturningStmt` + a `put_embed(:data, Map.from_struct(record))`
+   persist tail (a bare struct trips Ecto's `on_replace: :update` guard — a map is
+   required). Deleted `renderDocOpStmt`/`docOpBodyLines`. Functions converted to
+   the `%<Agg>.Data{}` struct receiver. **Un-gating deferred** (audited/provenanced/
+   derived ops stay gated for now — the persist tail there needs the transactional
+   audit/prov machinery; a clean follow-up now that the renderer is unified).
+   Boot-verified in `hexpm/elixir` + postgres (ops mutate + re-embed with version
+   bump, finds filter in struct mode).
+3. **✅ LANDED (2026-07-05, with slice 2).** **In-memory finds in struct mode.** Rewrote `renderDocFindFn` to
+   `Repo.all |> Enum.filter(fn row -> record = row.data; <pred over record> end)`
+   in struct mode (via the new `docStruct` render flag: struct field access + string
+   enums, no bracket). Paged-envelope + union-tag find builders still deferred (stay
+   gated).
 4. **Containments.** Drop the `document` case from `validateVanillaContainmentSupport`
    (parts now nest via `embeds_many`); wire containment-mutating ops (`lines += …`)
    through the reused relational add/remove arm (`put_embed`).
-5. **Delete the fork.** Remove `RenderCtx.docMap` from `render-expr.ts` and the
-   doc-mode branch in `function-emit.ts`; delete the residual
-   `validateVanillaDocumentScope` (or narrow to the genuinely-unsupported tail).
+5. **✅ PARTLY LANDED (2026-07-05, with slice 2).** **Delete the fork.** Removed `RenderCtx.docMap` (the whole map-mode
+   render path — `this-prop`/`renderMember` bracket, enum-string check, function
+   receiver) from `render-expr.ts` and the doc-mode branch in `function-emit.ts`,
+   replaced by the `docStruct` flag (struct field access + string-enum target). The
+   fork is GONE. **Still standing:** the `validateVanillaDocumentScope` /
+   `validateVanillaContainmentSupport` gates (slice 4 containments + the
+   audited/provenanced/derived/paged/union un-gating remain — the renderer now
+   supports the struct path, so those become validator + persist-tail follow-ups).
 
 ## Risks (all boot-only — the compile gate is blind to them)
 
