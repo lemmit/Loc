@@ -7,15 +7,18 @@ name: Tenancy isolation (runtime e2e)
 #   reference data is visible to all; and the registry self-scope + claim-less
 #   signup bootstrap round-trips (`tenantId ≡ Organization.id`).
 #
-# Fanned across backends as a matrix (the shared assertion sequence in
+# Fanned across ALL FIVE backends as a matrix (the shared assertion sequence in
 # test/e2e/support/tenancy-isolation-harness.ts drives every backend; only the
 # boot differs). Each cell drives two principals via the dev-stub
-# `x-loom-dev-claims` header — the parity that makes this cross-backend.
+# `x-loom-dev-claims` header — the parity (#1673) that makes this cross-backend.
 #
 # This is the assertion the structural tiers CANNOT make: per-backend generator
 # tests pin the filter and the 1a.0 pins the stamp, but only a boot proves the
 # two AGREE — the pre-1a.0 bug (stamp writes the actor id, filter reads the
-# claim) made every created row invisible and no structural test saw it.
+# claim) made every created row invisible and no structural test saw it. (The
+# per-backend runtime e2e already earned its keep: it caught the python
+# dev-claims injection silently no-oping on a snake_case field — green compile,
+# no actual isolation.)
 #
 # Uses a `services: postgres` container (not docker-in-runner) and hands the
 # test its URL via LOOM_TENANCY_PG_URL, so the suite skips its own docker
@@ -36,8 +39,15 @@ on:
       - 'src/ir/util/tenant-stance.ts'
       - 'src/ir/enrich/enrichments.ts'
       - 'src/generator/python/index.ts'
+      - 'src/generator/dotnet/auth-emit.ts'
+      - 'src/generator/java/emit/auth.ts'
+      - 'src/generator/elixir/auth-emit.ts'
+      - 'src/platform/hono/**'
       - 'test/e2e/tenancy-isolation.test.ts'
       - 'test/e2e/tenancy-isolation-python.test.ts'
+      - 'test/e2e/tenancy-isolation-dotnet.test.ts'
+      - 'test/e2e/tenancy-isolation-java.test.ts'
+      - 'test/e2e/tenancy-isolation-elixir.test.ts'
       - 'test/e2e/support/tenancy-isolation-harness.ts'
       - 'test/fixtures/corpus/tenancy-owned.ddd'
       - 'package.json'
@@ -54,9 +64,9 @@ concurrency:
 jobs:
   tenancy-e2e:
     runs-on: ubuntu-latest
-    # Cold path is dominated by the generated project's dep install
-    # (npm / uv). 15min cap covers the slowest cell.
-    timeout-minutes: 15
+    # Cold path is dominated by the generated project's build/dep install
+    # (gradle bootJar / mix deps.get + compile are the slowest). 20min cap.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -65,6 +75,12 @@ jobs:
             script: test:tenancy
           - backend: python
             script: test:tenancy-python
+          - backend: dotnet
+            script: test:tenancy-dotnet
+          - backend: java
+            script: test:tenancy-java
+          - backend: elixir
+            script: test:tenancy-elixir
     name: tenancy-e2e (${{ matrix.backend }})
     services:
       postgres:
@@ -87,9 +103,29 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Set up uv (python backend)
+      - name: Set up uv (python)
         if: matrix.backend == 'python'
         uses: astral-sh/setup-uv@v7
+
+      - name: Set up .NET (dotnet)
+        if: matrix.backend == 'dotnet'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Set up JDK (java)
+        if: matrix.backend == 'java'
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Elixir/OTP (elixir)
+        if: matrix.backend == 'elixir'
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.3'
+          elixir-version: '1.18.4'
 
       - name: Install Loom toolchain
         run: npm ci
