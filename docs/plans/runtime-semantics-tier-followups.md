@@ -68,7 +68,22 @@ agents; they only collide on this doc's status table.
 - **DoD.** RS-9 asserted on node + Python; `semantics-rules.ts` RS-9 gate note
   added; `conformance-semantics.md` RS-9 tier updated.
 
-### RST-2 · Add .NET as the 3rd behavioral backend  ·  L
+### RST-2 · Add .NET as the 3rd behavioral backend  ·  L  ·  ✅ LANDED
+- **Landed:** `test/behavioral/run-dotnet.mjs` (mirrors `run-python.mjs`),
+  `test/behavioral/corpus-dotnet/sales.ddd` + `corpus-dotnet.json` (the Python
+  fixture retargeted to `platform: dotnet`), and `behavioral-e2e-dotnet.yml`
+  (a `services: postgres` sidecar + .NET SDK, booting `dotnet run` against
+  `ConnectionStrings__Default`). The live-boot round-trip runs in CI (the local
+  sandbox blocks long-lived server spawns, same as the Python tier was verified);
+  the emitted api e2e is HTTP-dispatched at the booted .NET backend via the same
+  `loadApiTests({dispatch})` seam.
+- **First run found a real bug (as predicted).** The .NET tier booted, migrated,
+  and round-tripped — **3/4 green** (RS-1/2/6/7/8 conform on .NET). The one
+  failure is a genuine **RS-4** divergence: .NET serializes the instant with 7
+  trailing fractional digits (`2024-01-01T00:00:00.0000000Z`) where node/python
+  echo the canonical `…00Z`. Same instant, divergent wire string. The .NET
+  fixture's RS-4 assertion is deferred (documented in the fixture) and tracked as
+  **RST-9**; RS-4 stays a *target* on .NET until fixed.
 - **Why.** Cross-backend parity is the contract's whole point; 2→3 backends
   widens the net to the .NET wire/EF path. Likely finds bugs (as Python did).
 - **Scope.** `test/behavioral/run-dotnet.mjs` mirroring `run-python.mjs`: generate
@@ -149,6 +164,25 @@ agents; they only collide on this doc's status table.
 - **Note.** Expect red first — that's a found bug; fix on the #1681/#1684 seam or
   file it. **Collision:** `corpus-python.json` (shares with RST-7).
 
+### RST-9 · Canonicalize .NET instant wire serialization (found by RST-2)  ·  S–M
+- **Why.** RST-2's first CI run found it: the generated .NET backend serializes a
+  `datetime`/`instant` field with 7 trailing fractional digits
+  (`2024-01-01T00:00:00.0000000Z`) via System.Text.Json's default, where
+  node/python emit the canonical `2024-01-01T00:00:00Z`. Same instant, divergent
+  wire string — an RS-4 (temporal round-trip) parity break that a string-comparing
+  client would trip on.
+- **Scope.** In the .NET generator (`src/generator/dotnet/`), register a
+  `JsonConverter`/serializer option so instants serialize in a canonical ISO-8601
+  form matching node/python (trim trailing zero-fractions; keep real sub-second
+  precision when present). Verify with `dotnet build /warnaserror` + the
+  `behavioral-e2e-dotnet` round-trip. Compare against what node/python actually
+  emit for the same value first (they're the reference).
+- **Then:** restore `expect(read.placedAt).toBe("2024-01-01T00:00:00Z")` in
+  `corpus-dotnet/sales.ddd`, and flip RS-4 `conforms` to include `dotnet` in
+  `semantics-rules.ts` + `conformance-semantics.md`.
+- **Collision:** `src/generator/dotnet/` + the .NET fixture. Same pattern as
+  #1681/#1684 (gate found a bug → fix → widen).
+
 ---
 
 ## Suggested wave assignment (for a batch of agents)
@@ -166,6 +200,13 @@ registry is the source of truth — keep the three in lockstep).
 
 ## Landed
 
+- **RST-2** (.NET behavioral backend) — ✅ (pending first CI run)
+  `test/behavioral/run-dotnet.mjs` + `corpus-dotnet/` + `corpus-dotnet.json` +
+  `.github/workflows/behavioral-e2e-dotnet.yml`. Boots the generated .NET
+  (ASP.NET + EF Core) backend against a `services: postgres` sidecar
+  (`dotnet run`, `ConnectionStrings__Default`) and HTTP-dispatches the same
+  backend-agnostic emitted api e2e — the runtime-semantics RS-rules' third
+  behavioral backend (node + Python + .NET).
 - **RST-5** (diffable spec artifact) — ✅ `test/conformance/semantics-spec.json`,
   a committed diffable mirror of `SEMANTICS_RULES` derived by
   `serializeSemanticsSpec()` and gated by `semantics-spec-sync.test.ts`

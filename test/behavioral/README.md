@@ -23,6 +23,18 @@ in-process — no docker, no separate Postgres) and runs the suites Loom
   `docs/plans/a6.2-behavioral-tier-second-backend.md`). Needs `uv` + a
   reachable `DATABASE_URL`; run: `node run-python.mjs`.
   (`run-ui.mjs` — see below.)
+- **dotnet** — the SAME emitted api e2e, run against a booted **generated
+  .NET backend** (ASP.NET + EF Core) over real HTTP (`run-dotnet.mjs`, corpus
+  `corpus-dotnet.json` + `corpus-dotnet/`). Like Python, .NET has no
+  in-process Postgres, so this boots the generated backend as a real process
+  (`dotnet restore` + `dotnet run`) against a real DB and re-points the
+  backend-agnostic api suite at it. Its own `behavioral-e2e-dotnet.yml`
+  workflow (a `services: postgres` sidecar) — the RST-2 third backend for the
+  runtime-semantics RS-rules (see
+  `docs/plans/runtime-semantics-tier-followups.md`). Needs the .NET SDK
+  (`dotnet`) + a reachable `ConnectionStrings__Default`; run:
+  `node run-dotnet.mjs`. `LOOM_BH_DOTNET_BASE` dispatches at an
+  already-running server (skips the boot).
 
 ## Why
 
