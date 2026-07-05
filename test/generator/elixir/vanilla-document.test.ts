@@ -369,4 +369,21 @@ describe("vanilla shape(document) containments (Route A slice 4)", () => {
     expect(ctrl).toContain("defp serialize_order_line(record) do");
     expect(ctrl).toContain('"sku" => record.sku');
   });
+
+  it("emits an in-op containment mutation that appends a part struct + re-embeds (Route A slice 4b)", async () => {
+    const DOC_MUT = DOC_CONTAIN.replace(
+      "entity OrderLine { sku: string  qty: int }",
+      `entity OrderLine { sku: string  qty: int }
+        operation addLine(sku: string, qty: int) {
+          lines += OrderLine { sku: sku, qty: qty }
+        }`,
+    );
+    const ctx = file(await generateSystemFiles(DOC_MUT), "/orders.ex");
+    // `lines += OrderLine{…}` appends a part struct to the rehydrated embed list…
+    expect(ctx).toContain(
+      "record = %{record | lines: (record.lines || []) ++ [%Api.Orders.OrderLine{sku: sku, qty: qty}]}",
+    );
+    // …then re-embeds the whole mutated struct (the struct-list casts into embeds_many).
+    expect(ctx).toContain("|> Ecto.Changeset.put_embed(:data, Map.from_struct(record))");
+  });
 });

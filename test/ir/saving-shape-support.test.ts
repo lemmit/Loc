@@ -175,6 +175,30 @@ system Shop {
     expect(await docScopeErrors(src)).toEqual([]);
   });
 
+  it("accepts a CONTAINMENT mutation (`lines += Part{…}`) on a vanilla document aggregate (Route A)", async () => {
+    const src = `
+system Shop {
+  subdomain Sales {
+    context Shop {
+      aggregate Order ids guid shape(document) with crudish {
+        reference: string
+        contains lines: OrderLine[]
+        entity OrderLine { sku: string  qty: int }
+        operation addLine(sku: string, qty: int) {
+          lines += OrderLine { sku: sku, qty: qty }
+        }
+      }
+      repository Orders for Order { }
+    }
+  }
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api { platform: elixir { foundation: vanilla }, contexts: [Shop], dataSources: [shopState], port: 4000 }
+}
+`;
+    expect(await docScopeErrors(src)).toEqual([]);
+  });
+
   it("still rejects an AUDITED operation on a vanilla document aggregate", async () => {
     const src = `
 system Shop {

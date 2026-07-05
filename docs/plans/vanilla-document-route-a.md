@@ -125,9 +125,13 @@ The migration stays `create table(:orders) do add :data, :map; add :version …`
    `serialize_<part>/1` camelCase helpers — wire byte-identical for non-containment docs.
    Deleted the bespoke `renderDocSerialize`. Boot-verified: `POST /orders {lines:[…]}` →
    201 → `GET` round-trip with parts nested inline in the jsonb blob + camelCase wire.
-   **Still deferred:** in-op containment MUTATION (`lines += …`) on a document aggregate
-   (needs the `put_embed` add/remove arm wired for the embed — the `add`/`remove`
-   collection-mutation gate in `docStmtUnsupported` still stands).
+   **✅ MUTATION LANDED (2026-07-05, slice 4b).** In-op containment mutation
+   (`lines += OrderLine{…}`) on a document aggregate: `docStmtUnsupported` now admits a
+   `s.collection` add/remove whose target is a CONTAINMENT (ref/value collections stay
+   gated), with a doc-safe part-ctor value; the relational add arm already appends the
+   part struct in struct mode and the op re-embeds via `put_embed(Map.from_struct(record))`
+   (the struct-list casts into `embeds_many`). Boot-verified (create 1 line → addLine → GET
+   2 lines, nested inline in jsonb).
 5. **✅ PARTLY LANDED (2026-07-05, with slice 2).** **Delete the fork.** Removed `RenderCtx.docMap` (the whole map-mode
    render path — `this-prop`/`renderMember` bracket, enum-string check, function
    receiver) from `render-expr.ts` and the doc-mode branch in `function-emit.ts`,
