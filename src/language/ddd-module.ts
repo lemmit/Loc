@@ -16,6 +16,7 @@ import { DddCodeActionProvider } from "./lsp/ddd-code-actions.js";
 import { DddCompletionProvider } from "./lsp/ddd-completion.js";
 import { DddDefinitionProvider } from "./lsp/ddd-definition.js";
 import { DddHoverProvider } from "./lsp/ddd-hover.js";
+import { DddImplementationProvider } from "./lsp/ddd-implementation.js";
 import { DddNodeKindProvider } from "./lsp/ddd-node-kind.js";
 import { DddReferencesProvider } from "./lsp/ddd-references.js";
 import { DddRenameProvider } from "./lsp/ddd-rename.js";
@@ -47,6 +48,7 @@ export const DddModule: Module<DddServices, PartialLangiumServices & DddAddedSer
     SemanticTokenProvider: (services: LangiumServices) => new DddSemanticTokenProvider(services),
     SignatureHelp: () => new DddSignatureHelpProvider(),
     CodeActionProvider: () => new DddCodeActionProvider(),
+    ImplementationProvider: (services: LangiumServices) => new DddImplementationProvider(services),
   },
 };
 

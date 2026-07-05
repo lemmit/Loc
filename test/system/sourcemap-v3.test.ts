@@ -1,0 +1,131 @@
+import { describe, expect, it } from "vitest";
+import type { SourceMapRegion } from "../../src/generator/_trace/sourcemap.js";
+import { renderSourceMapV3 } from "../../src/system/sourcemap-v3.js";
+
+// ---------------------------------------------------------------------------
+// Unit coverage for renderSourceMapV3's multi-source path — a project built
+// from an import graph resolves origins into more than one `.ddd` file, so
+// `sources` must dedup + sort and the segments' `sourceIndex` deltas must
+// switch files correctly.  The end-to-end sidecar test in sourcemap.test.ts
+// only ever sees a single-source fixture; this pins the cross-file case at
+// the unit level (decoder copied from there — see its doc comments).
+// ---------------------------------------------------------------------------
+
+const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+function decodeVLQField(str: string, pos: { i: number }): number {
+  let result = 0;
+  let shift = 0;
+  let more: boolean;
+  do {
+    const digit = B64.indexOf(str[pos.i++]!);
+    expect(digit, `invalid base64-VLQ char in "${str}" at ${pos.i - 1}`).toBeGreaterThanOrEqual(0);
+    more = (digit & 0x20) !== 0;
+    result += (digit & 0x1f) << shift;
+    shift += 5;
+  } while (more);
+  return result & 1 ? -(result >> 1) : result >> 1;
+}
+
+interface DecodedSegment {
+  genLine: number; // 0-based
+  sourceIndex: number;
+  sourceLine: number;
+  sourceCol: number;
+}
+
+function decodeMappings(mappings: string): DecodedSegment[] {
+  const segments: DecodedSegment[] = [];
+  let sourceIndex = 0;
+  let sourceLine = 0;
+  let sourceCol = 0;
+  const lines = mappings.split(";");
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li]!;
+    if (line === "") continue;
+    for (const seg of line.split(",")) {
+      const pos = { i: 0 };
+      const fields: number[] = [];
+      while (pos.i < seg.length) fields.push(decodeVLQField(seg, pos));
+      expect(fields.length).toBe(4);
+      sourceIndex += fields[1]!;
+      sourceLine += fields[2]!;
+      sourceCol += fields[3]!;
+      segments.push({ genLine: li, sourceIndex, sourceLine, sourceCol });
+    }
+  }
+  return segments;
+}
+
+// Line 3 (0-based 2), col 4 of B; line 1 (0-based 0), col 0 of A.  Offsets
+// are byte positions into these exact strings.
+const TEXT_A = "context One {\n}\n";
+const TEXT_B = "// header\n\n    aggregate Two {\n    }\n";
+
+const region = (
+  target: [number, number],
+  path: string,
+  start: number,
+  end: number,
+): SourceMapRegion => ({
+  target,
+  origin: { kind: "source", path, span: { start, end } },
+});
+
+describe("renderSourceMapV3 (unit)", () => {
+  it("maps regions from two source files with correct sourceIndex switching", () => {
+    const sourceTexts = new Map([
+      ["/b/two.ddd", TEXT_B],
+      ["/a/one.ddd", TEXT_A],
+    ]);
+    const regions: SourceMapRegion[] = [
+      // Generated lines 1-2 come from A's `context One` (offset 0 = line 0, col 0);
+      // lines 3-4 from B's `aggregate Two` (offset 15 = line 2, col 4).
+      region([1, 2], "/a/one.ddd", 0, 13),
+      region([3, 4], "/b/two.ddd", TEXT_B.indexOf("aggregate"), TEXT_B.indexOf("aggregate") + 9),
+    ];
+    const rendered = renderSourceMapV3(regions, "out/gen.ts", sourceTexts);
+    expect(rendered).toBeDefined();
+    const v3 = JSON.parse(rendered!) as {
+      file: string;
+      sources: string[];
+      sourcesContent: string[];
+      mappings: string;
+    };
+
+    expect(v3.file).toBe("gen.ts");
+    // Deduped + sorted, sourcesContent index-aligned.
+    expect(v3.sources).toEqual(["/a/one.ddd", "/b/two.ddd"]);
+    expect(v3.sourcesContent).toEqual([TEXT_A, TEXT_B]);
+
+    const segments = decodeMappings(v3.mappings);
+    expect(segments).toHaveLength(4);
+    const bySourceIdx = segments.map((s) => s.sourceIndex);
+    expect(bySourceIdx).toEqual([0, 0, 1, 1]);
+    // A's region start: line 0 col 0; B's: line 2 col 4.
+    expect(segments[0]).toMatchObject({ genLine: 0, sourceLine: 0, sourceCol: 0 });
+    expect(segments[2]).toMatchObject({ genLine: 2, sourceLine: 2, sourceCol: 4 });
+    expect(segments[3]).toMatchObject({ genLine: 3, sourceLine: 2, sourceCol: 4 });
+  });
+
+  it("drops regions whose source text is missing, keeping the rest", () => {
+    const sourceTexts = new Map([["/a/one.ddd", TEXT_A]]);
+    const regions: SourceMapRegion[] = [
+      region([1, 1], "/a/one.ddd", 0, 13),
+      region([2, 2], "/missing.ddd", 0, 5),
+    ];
+    const rendered = renderSourceMapV3(regions, "gen.ts", sourceTexts);
+    expect(rendered).toBeDefined();
+    const v3 = JSON.parse(rendered!) as { sources: string[]; mappings: string };
+    expect(v3.sources).toEqual(["/a/one.ddd"]);
+    // Line 2's only region was dropped — its mapping group must be empty.
+    const segments = decodeMappings(v3.mappings);
+    expect(segments).toHaveLength(1);
+    expect(segments[0]!.genLine).toBe(0);
+  });
+
+  it("returns undefined when nothing resolves", () => {
+    const regions: SourceMapRegion[] = [region([1, 1], "/missing.ddd", 0, 5)];
+    expect(renderSourceMapV3(regions, "gen.ts", new Map())).toBeUndefined();
+  });
+});
