@@ -1581,6 +1581,12 @@ export interface EventSubscriptionIR {
   /** For `trigger: "create"`, the create's declared name (null for the
    *  canonical unnamed create).  Undefined for `on` reactors. */
   createName?: string | null;
+  /** Set when the consumer is a projection fold (projection.md) rather than a
+   *  workflow saga — carries the projection name (also mirrored into
+   *  `workflow`).  The dispatcher branches on this to emit an upsert fold
+   *  (load-or-allocate on every event) instead of a saga's create/route split.
+   *  Undefined for workflow subscriptions (they stay byte-identical). */
+  projection?: string;
 }
 
 export type EnrichedBoundedContextIR = Omit<BoundedContextIR, "aggregates" | "valueObjects"> & {

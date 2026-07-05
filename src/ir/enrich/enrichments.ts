@@ -36,6 +36,7 @@ import type {
   NeedIR,
   OperationIR,
   PayloadIR,
+  ProjectionIR,
   RawLoomModel,
   RepositoryIR,
   RetrievalIR,
@@ -513,6 +514,7 @@ export function enrichContext(
     ctx.criteria,
     ctx.domainServices,
   );
+  const projections = ctx.projections.map(enrichProjection);
   return {
     ...ctx,
     valueObjects,
@@ -521,6 +523,7 @@ export function enrichContext(
     repositories,
     payloads,
     workflows,
+    projections,
     retrievals,
     eventSubscriptions,
   };
@@ -676,6 +679,37 @@ function enrichWorkflowInstanceShape(wf: WorkflowIR): WorkflowIR {
   return { ...wf, instanceWireShape: wireFieldsForWorkflow(wf) };
 }
 
+/** Derive a projection's canonical wire shape (projection.md) — the correlation
+ *  field as the id token, then the remaining state fields as properties.
+ *  Structurally identical to a workflow instance's `instanceWireShape`, so the
+ *  read endpoint + `view`-over-projection (v1.1) reuse the same DTO machinery. */
+function enrichProjection(proj: ProjectionIR): ProjectionIR {
+  const fields = proj.stateFields;
+  const corr = proj.correlationField;
+  const corrField = fields.find((f) => f.name === corr);
+  const wireShape: WireField[] = [];
+  if (corrField) {
+    wireShape.push({
+      name: corrField.name,
+      type: corrField.type,
+      optional: corrField.optional,
+      source: "id",
+      access: "token",
+    });
+  }
+  for (const f of fields) {
+    if (f.name === corr) continue;
+    wireShape.push({
+      name: f.name,
+      type: f.type,
+      optional: f.optional,
+      source: "property",
+      access: f.access ?? "editable",
+    });
+  }
+  return { ...proj, wireShape };
+}
+
 /** The wire shape of a persisted workflow instance: the correlation field as
  *  the `id`-shaped `token` row (mirroring an aggregate's synthetic `id`),
  *  then the remaining `stateFields` as `property` rows in declaration order.
@@ -787,6 +821,7 @@ function isNarrowableType(t: TypeIR): boolean {
 export function deriveEventSubscriptions(
   channels: ChannelIR[],
   workflows: WorkflowIR[],
+  projections: ProjectionIR[] = [],
 ): EventSubscriptionIR[] {
   // Tolerate hand-built IR fixtures that predate the `channels` / `creates`
   // fields (the real lowering pipeline always populates them).
@@ -794,6 +829,23 @@ export function deriveEventSubscriptions(
   const carrier = (event: string): string | undefined =>
     channels.find((ch) => ch.carries.includes(event))?.name;
   const subs: EventSubscriptionIR[] = [];
+  // Projection folds subscribe like reactors, but every handler is an upsert
+  // (load-or-allocate) — the dispatcher reads the `projection` discriminant.
+  for (const proj of projections ?? []) {
+    for (const on of proj.handlers) {
+      const channel = carrier(on.event);
+      if (channel) {
+        subs.push({
+          event: on.event,
+          channel,
+          workflow: proj.name,
+          trigger: "on",
+          param: on.param,
+          projection: proj.name,
+        });
+      }
+    }
+  }
   for (const wf of workflows ?? []) {
     for (const on of wf.subscriptions ?? []) {
       const channel = carrier(on.event);

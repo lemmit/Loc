@@ -366,6 +366,7 @@ export function generateTypeScriptForContexts(
     eventSubscriptions: deriveEventSubscriptions(
       contexts.flatMap((c) => c.channels),
       contexts.flatMap((c) => c.workflows),
+      contexts.flatMap((c) => c.projections ?? []),
     ),
   };
 
