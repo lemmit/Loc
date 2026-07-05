@@ -46,7 +46,12 @@ agents; they only collide on this doc's status table.
 
 ## Tickets (ranked)
 
-### RST-1 · Gate RS-9 (400/422 routing) — teach `test e2e` to assert HTTP status  ·  L
+### RST-1 · Gate RS-9 (400/422 routing) — teach `test e2e` to assert HTTP status  ·  L  ·  🚧 IN PROGRESS
+> Claimed on `claude/loom-technical-debt-56y1qq`: adds a status-asserting form to
+> the api `test e2e` surface, threaded through the `test e2e` lowering, the
+> emitted api-suite builder (`src/generator/_frontend/e2e-harness.ts`), and the
+> headless runner (`web/src/testing/run-api-tests.ts`); plus RS-9 corpus cases.
+
 - **Why.** RS-9 (malformed body → 400, well-formed-but-invalid → 422) is the
   only behavioral rule with **no gate** — the `test e2e` DSL can express
   `expect(x).toThrow()` (throw/no-throw) but not the 400-vs-422 *status*, which
