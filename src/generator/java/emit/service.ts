@@ -58,7 +58,16 @@ export function renderJavaService(
   // are published to the in-process bus (Spring ApplicationEventPublisher →
   // the `<Ctx>Dispatcher`'s @EventListener handlers) instead of just logged.
   // No subscriptions ⇒ the log-only path stays byte-identical.
-  const dispatches = (ctx.boundedContext.eventSubscriptions ?? []).length > 0;
+  // Domain events raised by an aggregate are ALWAYS published through Spring's
+  // ApplicationEventPublisher — uniform with .NET (every repository dispatches
+  // through `IDomainEventDispatcher`, Noop when unsubscribed) and Hono/Python/
+  // Elixir (which always route through the in-process dispatcher).  Gating the
+  // publish on "this context has a subscriber" silently DROPPED an event whose
+  // context had none (audit §S5c: Java's `publishEvents` only logged, so e.g.
+  // `BuildPromoted` never reached the bus).  Publishing with no listener is a
+  // harmless no-op (the framework always provides the publisher) and keeps the
+  // dispatch seam ready for an out-of-process relay (the outbox upgrade path).
+  const dispatches = true;
   const idJava = javaValueTypeForId(agg.idValueType);
   if (idJava === "UUID") imports.add("java.util.UUID");
   const hasCreateValidator = aggHasCreateWireValidator(agg);

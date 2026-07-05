@@ -3,7 +3,9 @@
 // react to channel-carried events — load-or-allocate (event `create`) /
 // route-or-drop (`on`) the saga row, run the body, and re-publish so
 // choreography chains re-enter. Aggregate services publish drained domain
-// events through Spring's ApplicationEventPublisher (gated on subscriptions).
+// events through Spring's ApplicationEventPublisher — ALWAYS, uniform with
+// .NET/Hono/Python/Elixir (audit §S5c: gating the publish on "context has a
+// subscriber" dropped an event whose context had none).
 
 import { describe, expect, it } from "vitest";
 import { generateSystems } from "../../../src/system/index.js";
@@ -100,14 +102,19 @@ describe("java saga dispatcher", () => {
     );
   });
 
-  it("stays log-only (no dispatcher, byte-identical publish) without subscriptions", async () => {
+  it("still publishes to the ApplicationEventPublisher even with no subscriber (uniform, S5c)", async () => {
     const files = await gen(PLAIN);
+    // No saga → no `<Ctx>Dispatcher` @Component (nothing subscribes)…
     expect([...files.keys()].some((k) => k.endsWith("Dispatcher.java"))).toBe(false);
     const svc = [...files.entries()].find(([k]) => k.endsWith("CustomerService.java"))![1];
     expect(svc).toContain(
       'CatalogLog.event("event_dispatched", "info", "event_type", event.getClass().getSimpleName(), "aggregate", "Customer");',
     );
-    expect(svc).not.toContain("ApplicationEventPublisher");
+    // …but the emitting service STILL wires + publishes through Spring's
+    // ApplicationEventPublisher — the event reaches the bus (no silent drop),
+    // uniform with .NET's always-`DispatchAsync` and Hono's always-`dispatch`.
+    expect(svc).toContain("private final ApplicationEventPublisher eventPublisher;");
+    expect(svc).toContain("eventPublisher.publishEvent(event);");
   });
 
   it("the saga entity exposes a public _allocate factory seeding typed defaults", async () => {
