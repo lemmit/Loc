@@ -12,10 +12,19 @@ read, and a link to any existing plan.
 This is the **prioritized** companion to the empirical backend/frontend audits —
 [`docs/audits/backend-feature-parity-2026-06.md`](../audits/backend-feature-parity-2026-06.md)
 and [`docs/audits/frontend-parity-audit-2026-06.md`](../audits/frontend-parity-audit-2026-06.md),
-which cover the full five-backend / five-frontend roster. (The older
-[`gated-features-inventory.md`](../audits/gated-features-inventory.md), snapshot
-2026-06-03, is superseded — it predates the Java/Python/Vue/Svelte/Angular
+which cover the full five-backend / four-frontend roster (`src/platform/registry.ts`:
+node/dotnet/java/python/elixir backends; react/vue/svelte/angular frontends).
+(The older [`gated-features-inventory.md`](../audits/gated-features-inventory.md),
+snapshot 2026-06-03, is superseded — it predates the Java/Python/Vue/Svelte/Angular
 targets.) When a cited file disagrees with any doc, the **code wins**.
+
+> **Cross-link (2026-07-05):** cross-backend **runtime-value** parity — the wire
+> JSON a booted backend actually sends/accepts (camelCase keys, enum casing, no
+> leaked timestamps, association round-trip) — is now tracked as named RS-rules in
+> [`docs/conformance-semantics.md`](../conformance-semantics.md), separate from the
+> structural OpenAPI parity in [`conformance.md`](../conformance.md). That's the
+> home for the wire-parity fix class (#1620–#1660) this backlog's fix-avalanche
+> kept hitting; RS-2/3/5 are gated per-PR today.
 
 ---
 

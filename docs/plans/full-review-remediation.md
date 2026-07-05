@@ -179,11 +179,49 @@ Per the branch log, the following have **landed** (see the "Remediated in PR #16
 addendum in the audit doc for the finding-level map):
 
 - **Wave 0** — all landed (D1, A6.1, B5, B1, B25, B26, A8.5).
-- **Wave 1** — A1, A2 (+A2.2), A3 (+A3.3), A4 landed. **A7.1–A7.3** and **A8.1–A8.4** are still open (not yet on the branch).
+- **Wave 1** — A1, A2 (+A2.2), A3 (+A3.3), A4 landed. A7.1–A7.3 and A8.1–A8.4 landed
+  too (see the 2026-07-05 code-verified update below — this line's "still open" was stale).
 - **Wave 2** — B2–B4, B6–B24 landed (language / IR / generator / frontend / system fixes).
 - **C-slices** — **C8, C9, C10, C13, C14 landed** in this PR; the remaining C mediums (C1–C7, C11, C12, C15) are open.
 - **D-slices** — **D2–D9 landed** in this PR (D1 landed in Wave 0); the D set is complete.
-- **Open** — A5, A6.2/A6.3, A7.2/A7.4, A8.1–A8.4, B23 (heex behavioral), and the C mediums above.
+- **Open** — A5, A6.2, A7.4, B23 (heex behavioral), and the C mediums above.
+
+### Status (updated 2026-07-05 — code-verified against fresh `main`)
+
+Re-derived every A7/A8 claim from the cited code, not the prose. The "A7.1–A7.3
+and A8.1–A8.4 still open" line above was written mid-#1629 and is stale — the
+whole A7 + A8 architecture tier has **landed**:
+
+- **A7.1 — DONE.** `pipeline-layering.test.ts` carries `SIDE_EFFECT_RE`, scans
+  `src/macros/` + `src/platform/**`, and handles dynamic `import()`.
+- **A7.2 — DONE.** The pure-data leaf `src/platform/adapter-metadata.ts` exists;
+  `lower-deployment.ts` + `platform-rules.ts` read it (no `registry`/generator
+  import), pinned by `adapter-metadata-consistency.test.ts`.
+- **A7.3 — DONE.** `WALKER_LAYOUT_PRIMITIVES` moved to
+  `src/util/walker-primitive-names.js`; `walker-core.ts:68` imports it from
+  `util/`, the language mirror + completeness test stay.
+- **A8.1 — DONE.** Every `MigrationStep` carries `schema?`
+  (`src/ir/types/migrations-ir.ts`).
+- **A8.2 — DONE.** `migrations-builder.ts:506` drops in reverse-topological
+  (child-first) order via `orderTablesByFkDependency(...).reverse()`.
+- **A8.3 — DONE.** `MigrationDestructiveError` + `allowDestructive` /
+  `--allow-destructive` gate (`src/system/index.ts`, `migrations-builder.ts`).
+- **A8.4 — DONE.** `loom.duplicate-table` (`structural-checks.ts`).
+- **A8.5 — DONE** (Wave 0). `SnapshotReadError` on a corrupt snapshot, no silent
+  re-baseline (`src/system/snapshot.ts`).
+
+**A6.3 — v1 landed** (the runtime-semantics contract): `docs/conformance-semantics.md`
++ the `test/conformance/semantics-rules.ts` registry + well-formedness gate, with
+the three source-assertable rules gated per-PR (**RS-2** enum casing →
+`enum-casing-parity.test.ts`; **RS-3** wire no-leak → `wire-no-leak-parity.test.ts`;
+**RS-5** absence-match → the pre-existing `union-find-absence-parity.test.ts`).
+The behavioral remainder (RS-1/4/6/7/8/9) rides **A6.2**.
+
+**Genuinely still open:** **A5** (`WorkflowIR` still carries the `@deprecated`
+`params`/`statements`/`savesAtExit` facade — `loom-ir.ts:1053`), **A6.2** (a booted
+second backend in the per-PR behavioral tier — not docker-free: no in-process
+Postgres for Python/SQLAlchemy), **A7.4** (fullstack-embed seam — deferrable,
+own design doc), **B23**, and the C mediums.
 
 **Rules of engagement** (per CLAUDE.md): every slice re-syncs on fresh `main` before starting and checks open drafts (parallel agents are landing PRs continuously — several B-slices are plausible collision targets); each slice opens a draft PR first naming its audit finding numbers; slices that change emitted bytes run the matching `LOOM_*` build gate locally before push; wire-shape-affecting slices (B13, B14, B18) call it out for the conformance-parity diff.
 
