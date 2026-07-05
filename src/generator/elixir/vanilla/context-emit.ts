@@ -25,6 +25,8 @@ import type {
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { snake, upperFirst } from "../../../util/naming.js";
+import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
+import { statementSubRegions } from "../../_trace/sourcemap.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
 import { opUsesCurrentUser, stmtUsesParam } from "../domain/predicates.js";
 import { renderReadingServiceContextFns } from "../domain-service-emit.js";
@@ -47,6 +49,7 @@ import { renderAggregateFunctions } from "./function-emit.js";
 import { isAbstractBase } from "./inheritance-emit.js";
 import {
   isReturningOperation,
+  type OpFragment,
   opEmitsEvent,
   persistPutBodies,
   renderEmitDispatchLines,
@@ -80,11 +83,29 @@ export function emitVanillaContextModule(
   ctx: BoundedContextIR,
   out: Map<string, string>,
   sys?: SystemIR,
+  sourcemap?: SourceMapRecorder,
 ): void {
   const ctxSnake = snake(ctx.name);
   const ctxModule = upperFirst(ctx.name);
   const appSnake = appModule.replace(/([A-Z])/g, (_, c, i) => (i ? "_" : "") + c.toLowerCase());
-  out.set(`lib/${appSnake}/${ctxSnake}.ex`, renderContextModule(appModule, ctxModule, ctx, sys));
+  const path = `lib/${appSnake}/${ctxSnake}.ex`;
+  // This is the POOLED per-context module — every aggregate's CRUD facade
+  // plus named/returning-op bodies land in ONE file, so (unlike a
+  // per-aggregate file) there is no single IR node whose `origin` a
+  // whole-file `sourcemap.file(...)` region could honestly point at; that's
+  // a deliberate milestone-1 decision (see docs/plans/
+  // source-map-debug-kickoff.md).  What we CAN record honestly is
+  // statement-granular sub-regions inside each operation body — anchored by
+  // exact-text search against THIS file's own final content, independent of
+  // any whole-file region.
+  const opFragments: OpFragment[] | undefined = sourcemap ? [] : undefined;
+  const content = renderContextModule(appModule, ctxModule, ctx, sys, opFragments);
+  out.set(path, content);
+  if (sourcemap && opFragments) {
+    for (const frag of opFragments) {
+      sourcemap.fragment(path, content, frag.fragmentText, frag.subRegions);
+    }
+  }
 }
 
 function renderContextModule(
@@ -92,6 +113,7 @@ function renderContextModule(
   ctxModule: string,
   ctx: BoundedContextIR,
   sys?: SystemIR,
+  opFragments?: OpFragment[],
 ): string {
   const facadeMod = `${appModule}.${ctxModule}`;
   const blocks = ctx.aggregates.map((agg) => {
@@ -153,10 +175,17 @@ function renderContextModule(
       .map((op) =>
         isDoc
           ? isReturningOperation(op)
-            ? renderDocReturningOpFunction(facadeMod, op, agg, ctx)
-            : renderDocNamedOpFunction(facadeMod, op, agg, ctx)
+            ? renderDocReturningOpFunction(facadeMod, op, agg, ctx, opFragments)
+            : renderDocNamedOpFunction(facadeMod, op, agg, ctx, opFragments)
           : isReturningOperation(op)
-            ? renderReturningOpFunction(facadeMod, ctx, agg, op, relationalContainments)
+            ? renderReturningOpFunction(
+                facadeMod,
+                ctx,
+                agg,
+                op,
+                relationalContainments,
+                opFragments,
+              )
             : renderNamedOpFunction(
                 facadeMod,
                 ctx,
@@ -165,6 +194,7 @@ function renderContextModule(
                 aggSnake,
                 op,
                 relationalContainments,
+                opFragments,
               ),
       );
     // Custom-find defdelegates — `<find>_<agg>(args...)` routes to the
@@ -499,6 +529,9 @@ function renderNamedOpFunction(
   /** Containment fields persisted as child tables (relational §11c) — these
    *  `put_assoc` rather than `put_embed`.  Empty = embedded output (default). */
   relationalContainments: ReadonlySet<string> = new Set(),
+  /** Source-map Milestone 3 collector (`--sourcemap`) — only allocated by the
+   *  caller when a recorder is present (zero cost otherwise). */
+  opFragments?: OpFragment[],
 ): string {
   const opSnake = snake(op.name);
   const aggModule = `${facadeMod}.${aggPascal}`;
@@ -551,10 +584,20 @@ function renderNamedOpFunction(
   // Render the body (guards / assigns / let) — shared with the returning-op
   // path; a non-returning body never carries a `return` arm.  The statement index
   // disambiguates per-write provenance temp vars.  When emitting, the `emit`s are
-  // rendered post-commit (below), not inline.
-  const bodyLines = (emits ? op.statements.filter((s) => s.kind !== "emit") : op.statements).map(
-    (s, i) => renderReturningStmt(s, ctx, rc, i),
-  );
+  // rendered post-commit (below), not inline.  `bodyStmts` is kept alongside
+  // `bodyLines` (rather than only the mapped-over result) so a source-map
+  // collector can zip the two SAME-length, SAME-order arrays back together via
+  // `statementSubRegions` — a hoisted `emit` is deliberately excluded from
+  // both, matching the "regular body" scope this milestone covers (see
+  // `OpFragment` in operation-returns-emit.ts).
+  const bodyStmts = emits ? op.statements.filter((s) => s.kind !== "emit") : op.statements;
+  const bodyLines = bodyStmts.map((s, i) => renderReturningStmt(s, ctx, rc, i));
+  if (opFragments && bodyLines.length > 0) {
+    opFragments.push({
+      fragmentText: bodyLines.join("\n"),
+      subRegions: statementSubRegions(bodyStmts, bodyLines, `${ctx.name}.${agg.name}.${op.name}`),
+    });
+  }
 
   // Persist the fields the body assigned (deduped, declaration order) + the
   // co-located `<field>_provenance` backing columns — shared with the

@@ -31,8 +31,29 @@ export function renderJavaStatements(
   ctx: JavaRenderContext = DEFAULT_CTX,
   traceCtx: JavaTraceCtx = NO_TRACE,
 ): string {
-  return stmts.map((s, i) => renderJavaStatement(s, i, ctx, traceCtx)).join("\n");
+  return renderJavaStatementChunks(stmts, ctx, traceCtx).join("\n");
 }
+
+/** Same rendering as `renderJavaStatements`, but one (possibly multi-line)
+ *  string per statement instead of the pre-joined whole — exactly the map
+ *  `renderJavaStatements` joins with `"\n"` today, so `chunks.join("\n")` is
+ *  byte-identical to it.  Lets a caller that owns the final file content
+ *  (the entity emitter) recover each statement's own line span inside an
+ *  operation body for `SourceMapRecorder.fragment` — see
+ *  `statementSubRegions` (re-exported below). */
+export function renderJavaStatementChunks(
+  stmts: StmtIR[],
+  ctx: JavaRenderContext = DEFAULT_CTX,
+  traceCtx: JavaTraceCtx = NO_TRACE,
+): string[] {
+  return stmts.map((s, i) => renderJavaStatement(s, i, ctx, traceCtx));
+}
+
+// `statementSubRegions` lives in src/generator/_trace/sourcemap.ts — it's
+// origin-generic (works for any statement IR carrying `origin?`), so every
+// backend's chunk-producing renderer shares the one cursor walk. Re-exported
+// here so call sites can import it alongside the chunk renderer.
+export { statementSubRegions } from "../_trace/sourcemap.js";
 
 /** Imports a statement body needs — the union of
  *  `collectJavaExprImports` over every rendered expression. */

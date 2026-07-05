@@ -204,14 +204,68 @@ describe(".loom/sourcemap.json", () => {
     }
   });
 
-  // Statement-granular sub-regions (Milestone 3, Hono/node reference —
-  // source-map-and-debugging.md §5.2).  `Order.confirm()` now has 2
-  // statements (`let note = customerName` then `emit OrderPlaced { … }`);
-  // both are stamped with `origin` at lowering and anchored via
-  // `SourceMapRecorder.fragment`, layered onto the SAME whole-file region
-  // `place()` already records for `domain/order.ts` — this test asserts the
-  // layering actually shows up, not just that it compiles.
-  it("statement-granular regions land on the node aggregate's confirm() body, one per statement", async () => {
+  // Statement-granular sub-regions (Milestone 3, source-map-and-debugging.md
+  // §5.2 — Hono reference in #1701, fan-out to the other four backends here).
+  // `Order.confirm()` has 2 statements (`let note = customerName` then
+  // `emit OrderPlaced { … }`); both are stamped with `origin` at lowering and
+  // anchored via `SourceMapRecorder.fragment`.
+  //
+  // Per-backend expectations diverge on two axes:
+  // - `file`: where the op body lands.  Four backends emit one
+  //   aggregate-owned file; Elixir pools every op body into the per-context
+  //   module `lib/<app>/<ctx>.ex`.
+  // - `tokens` / `wholeFile`: on Elixir the fixture's `emit` is HOISTED out
+  //   of the rendered body (persist-then-dispatch restructuring) so only the
+  //   `let` statement gets a region, and the pooled file deliberately carries
+  //   NO whole-file region (milestone-1 decision — a pooled file has no
+  //   single honest origin), so the statement sub-regions are its only
+  //   regions.
+  const STMT_CASES: {
+    platform: string;
+    file: string;
+    tokens: string[];
+    wholeFile: boolean;
+  }[] = [
+    {
+      platform: "node",
+      file: "domain/order.ts",
+      tokens: ["customerName", "emit OrderPlaced"],
+      wholeFile: true,
+    },
+    {
+      platform: "dotnet",
+      file: "Domain/Orders/Order.cs",
+      tokens: ["customerName", "emit OrderPlaced"],
+      wholeFile: true,
+    },
+    {
+      platform: "python",
+      file: "app/domain/order.py",
+      tokens: ["customerName", "emit OrderPlaced"],
+      wholeFile: true,
+    },
+    {
+      platform: "java",
+      file: "features/orders/Order.java",
+      tokens: ["customerName", "emit OrderPlaced"],
+      wholeFile: true,
+    },
+    {
+      platform: "elixir",
+      file: "lib/phoenix_api/orders.ex",
+      tokens: ["customerName"],
+      wholeFile: false,
+    },
+  ];
+
+  it.each(
+    STMT_CASES,
+  )("statement-granular regions land on $platform's confirm() body, one per rendered statement", async ({
+    platform,
+    file,
+    tokens,
+    wholeFile,
+  }) => {
     const model = await parseValid(SOURCE);
     const files = generateSystems(model, { sourcemap: true }).files;
     const raw = files.get(".loom/sourcemap.json")!;
@@ -226,25 +280,27 @@ describe(".loom/sourcemap.json", () => {
       >;
     };
 
-    const slug = SLUG_FOR.node!;
-    const path = Object.keys(map.files).find(
-      (p) => p.startsWith(`${slug}/`) && p.endsWith("domain/order.ts"),
-    );
-    expect(path, `no domain/order.ts region recorded under ${slug}/`).toBeDefined();
+    const slug = SLUG_FOR[platform]!;
+    const path = Object.keys(map.files).find((p) => p.startsWith(`${slug}/`) && p.endsWith(file));
+    expect(path, `no ${file} region recorded under ${slug}/`).toBeDefined();
     const regions = map.files[path!]!;
     const content = files.get(path!)!;
     const fileLineCount = content.endsWith("\n")
       ? content.split("\n").length - 1
       : content.split("\n").length;
 
-    // (a) more than one region for a file whose operation has 2+ statements
-    // — the whole-file region plus a sub-region per statement.
+    // (a) one sub-region per RENDERED statement, layered onto the
+    // whole-file region where one exists (a pooled file has none).
     const opConstruct = "Orders.Order.confirm";
     const stmtRegions = regions
       .filter((r) => r.construct === opConstruct)
       .sort((a, b) => a.target[0] - b.target[0]);
-    expect(stmtRegions).toHaveLength(2);
-    expect(regions.length).toBeGreaterThan(stmtRegions.length);
+    expect(stmtRegions).toHaveLength(tokens.length);
+    if (wholeFile) {
+      expect(regions.length).toBeGreaterThan(stmtRegions.length);
+    } else {
+      expect(regions).toHaveLength(stmtRegions.length);
+    }
 
     // (b) within the file's line range, non-overlapping, monotonically
     // increasing target[0].
@@ -260,7 +316,6 @@ describe(".loom/sourcemap.json", () => {
 
     // (c) each statement region's origin resolves to a span whose text
     // contains that statement's own distinctive token, in source order.
-    const tokens = ["customerName", "emit OrderPlaced"];
     stmtRegions.forEach((r, i) => {
       const resolved = resolveToSource(r.origin);
       expect(resolved, `stmt region ${i} origin never resolves to a source span`).toBeDefined();

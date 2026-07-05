@@ -65,7 +65,7 @@ import { renderJavaDispatcher } from "./emit/dispatch.js";
 import { renderJavaDocumentRepositoryImpl } from "./emit/document-store.js";
 import { renderJavaDomainServices } from "./emit/domain-service.js";
 import { renderDtoFiles } from "./emit/dto.js";
-import { renderJavaAbstractBaseEntity, renderJavaEntity } from "./emit/entity.js";
+import { type OpFragment, renderJavaAbstractBaseEntity, renderJavaEntity } from "./emit/entity.js";
 import { renderJavaEnum, renderJavaValueObject } from "./emit/enums-vos.js";
 import { renderJavaEventSourcedRepositoryImpl } from "./emit/event-store.js";
 import { renderJavaEvent } from "./emit/events.js";
@@ -237,11 +237,20 @@ function emitProjectFromContexts(
     aggregateName?: string,
     origin?: OriginRef,
     construct?: string,
+    opFragments?: OpFragment[],
   ): void => {
     const artifact = { name, content, category, aggregateName } as JavaArtifact;
     const path = layout.pathFor(artifact, emitCtx);
     out.set(path, content);
     sourcemap?.file(path, content, origin, construct);
+    // Statement-granular sub-regions (source-map Milestone 3) — layered onto
+    // the whole-file region just recorded above, anchored by exact-text
+    // search against this SAME final content.
+    if (sourcemap && opFragments) {
+      for (const frag of opFragments) {
+        sourcemap.fragment(path, content, frag.fragmentText, frag.subRegions);
+      }
+    }
   };
   const pkgFor = (category: JavaArtifactCategory, aggregateName?: string): string =>
     layout.packageFor(category, basePkg, aggregateName);
@@ -447,6 +456,7 @@ function emitProjectFromContexts(
         system?.sys,
         authRequired,
         routePrefix,
+        sourcemap,
       );
     }
     // Workflows + views — per-context controllers under /workflows and
@@ -821,12 +831,14 @@ function emitAggregate(
     aggregateName?: string,
     origin?: OriginRef,
     construct?: string,
+    opFragments?: OpFragment[],
   ) => void,
   pkgFor: (category: JavaArtifactCategory, aggregateName?: string) => string,
   emitTrace: boolean,
   sys?: SystemIR,
   authRequired = false,
   routePrefix?: string,
+  sourcemap?: SourceMapRecorder,
 ): void {
   const eventFields = new Map(ctx.events.map((e) => [e.name, e.fields.map((f) => f.name)]));
   // The JPA mapping mirrors `schemaFromModule`: binding-resolved schema +
@@ -846,6 +858,11 @@ function emitAggregate(
   // aggregate from the context's read-decls — never stamped (capability-filter.ts).
   const promotedCaps = new Set(promotedCapabilities(agg, ctx));
   const construct = `${ctx.name}.${agg.name}`;
+  // Only collected when a recorder is actually threaded in — a no-sourcemap
+  // run pays no per-statement bookkeeping cost.  Regular (non-extern) op
+  // bodies only; entity parts never carry operations, so this collector is
+  // only ever populated by the ROOT `renderJavaEntity` call below.
+  const opFragments: OpFragment[] | undefined = sourcemap ? [] : undefined;
 
   // Abstract bases: TPC (`ownTable`) emits a @MappedSuperclass (columns
   // flatten into each concrete's table); a TPH (`sharedTable`) base owns
@@ -944,6 +961,8 @@ function emitAggregate(
       operationReturnUnions,
       eventFields,
       promotedCaps,
+      construct,
+      opFragments,
       // Event-sourced / document aggregates have no normalised state
       // tables — the entity is a plain domain class (no JPA bindings;
       // ES folds the stream, document round-trips one jsonb column).
@@ -961,6 +980,7 @@ function emitAggregate(
     agg.name,
     agg.origin,
     construct,
+    opFragments,
   );
 
   // Repository triple: domain port + Spring Data JPA interface + impl.

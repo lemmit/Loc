@@ -29,7 +29,7 @@ import {
   concretesOf,
 } from "./base-reader-builder.js";
 import { buildPyDispatchFile, dispatchSubscriptionsOf } from "./dispatch-builder.js";
-import { renderPyAggregate } from "./emit/aggregate.js";
+import { type OpFragment, renderPyAggregate } from "./emit/aggregate.js";
 import { emitPyAudit } from "./emit/audit.js";
 import { renderPyDomainServices } from "./emit/domain-service.js";
 import { errorsPy } from "./emit/errors.js";
@@ -326,9 +326,26 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       if (agg.isAbstract) continue;
       const construct = `${ctx.name}.${agg.name}`;
       const domainPath = `app/domain/${snake(agg.name)}.py`;
-      const domainContent = renderPyAggregate(agg, ctx, args.emitTrace, principalIdAttr);
+      // Only collected when a recorder is actually threaded in — a
+      // no-sourcemap run pays no per-statement bookkeeping cost.
+      const opFragments: OpFragment[] | undefined = sourcemap ? [] : undefined;
+      const domainContent = renderPyAggregate(
+        agg,
+        ctx,
+        args.emitTrace,
+        principalIdAttr,
+        opFragments,
+      );
       out.set(domainPath, domainContent);
       sourcemap?.file(domainPath, domainContent, agg.origin, construct);
+      // Statement-granular sub-regions (source-map Milestone 3) — layered
+      // onto the whole-file region just recorded above, anchored by
+      // exact-text search against this SAME final content.
+      if (sourcemap && opFragments) {
+        for (const frag of opFragments) {
+          sourcemap.fragment(domainPath, domainContent, frag.fragmentText, frag.subRegions);
+        }
+      }
       const externFile = buildPyExternHandlersFile(agg);
       if (externFile != null) {
         const externPath = `app/domain/${snake(agg.name)}_handlers.py`;
