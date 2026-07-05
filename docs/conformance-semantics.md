@@ -94,7 +94,9 @@ the conforming backends, and the fix that established it.
   `422 "is invalid"`.
 - **Conforms.** node, dotnet, java, python, elixir.
 - **Provenance.** #1622 (Ecto.Enum was snake-casing `:passed` vs the declared
-  `"Passed"`). Tier: **T1**.
+  `"Passed"`). Tier: **T0** — gated per-PR by
+  [`test/conformance/enum-casing-parity.test.ts`](../test/conformance/enum-casing-parity.test.ts)
+  (the emitted enum definition fixes the wire value, so no boot is needed).
 
 ### RS-3 · No persistence-internal columns leak to the wire
 - **Guarantee.** Framework/storage bookkeeping — `inserted_at`/`updated_at`,
@@ -201,8 +203,10 @@ When a cross-backend runtime bug is fixed:
 
 ## Roadmap
 
-- **v1 (this doc):** the registry + well-formedness gate + T0 assertions where
-  cheap. *(here)*
+- **v1 (this doc):** the registry + well-formedness gate + the first T0
+  assertion (**RS-2**, `enum-casing-parity.test.ts`, all five backends). *(here)*
+  The other T0-tier rules (RS-3 no-leak, RS-5 absence-shape) are the next
+  static gates to add against emitted source.
 - **A6.2:** a second host-runnable backend in the per-PR behavioral tier
   (Python is the cheapest candidate — `uv` + SQLite/PGlite-equivalent) so the
   T2 column becomes per-PR. Every T1 rule above then gates a second backend.
