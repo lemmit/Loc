@@ -294,7 +294,7 @@ describe("vanilla audit runtime (audit-and-logging.md)", () => {
     // projection (§14): each stored field keyed by its declared camelCase name,
     // read from the snake `data` jsonb key.
     expect(ctrl).toContain(
-      "data = Map.new(record.data || %{}, fn {k, v} -> {to_string(k), v} end)",
+      "data = record.data |> Map.from_struct() |> Map.new(fn {k, v} -> {to_string(k), v} end)",
     );
     expect(ctrl).toContain('"reference" => Map.get(data, "reference")');
     // create audit `after` + destroy audit `before` route through serialize/1, so

@@ -3,6 +3,21 @@
 **Status:** planned (design validated; not yet implemented). Follow-on to DEBT-07
 (#1653), which shipped the map-based document find/op surface.
 
+> **Scope update (2026-07-05, post-#1664/#1670).** Risk 2 below originally said
+> typed VO `embeds_one` struct modules were **mandatory** — the only sound fix for
+> the #1660 VO-subfield crash. That is **no longer true.** #1664 fixed the crash a
+> different way: the relational VO-subfield renderer (`render-expr.ts:435`) and the
+> wire serializer (`wire-serialize.ts:82`) now read VO subfields via a
+> key-type-agnostic fallback (`Map.get(vo, :k, Map.get(vo, "k"))`) that works on a
+> `:map` VO regardless of atom/string keying, and #1670 added a boot gate for it.
+> **Consequence:** Route A can bind `record = row.data` and run the relational
+> renderers **while keeping VOs as `:map` fields** in the `<Agg>Data` embedded
+> schema — no net-new typed-VO-struct emission (the thing that made slice 1 "bigger
+> than it looks"). Typed VO structs become an *optional* wire-cleanliness nicety,
+> not a prerequisite. This also means Route A's original **bug-driver is already
+> resolved** — it is now a pure fork-removal + document-feature-un-gating refactor,
+> not a correctness fix. Weigh it as cleanup, and prefer the lean `:map`-VO slice 1.
+
 ## Why
 
 Today the vanilla-Elixir document path is the **only** backend where the saving
@@ -73,7 +88,7 @@ The migration stays `create table(:orders) do add :data, :map; add :version …`
 
 ## Slice sequence (each lands green + independently verifiable)
 
-1. **`<Agg>Data` embedded schema + schema/changeset/repository CRUD.** Emit the
+1. **✅ LANDED (2026-07-05).** **`<Agg>Data` embedded schema + schema/changeset/repository CRUD.** Emit the
    `embeds_one :data` root + the `<Agg>Data` embedded schema (reuse
    `renderPartSchema`/`renderFieldLine`/`mapTypeToEcto` from `schema-emit.ts`;
    VOs become `embeds_one` embedded schemas — see risk 2). Rewrite

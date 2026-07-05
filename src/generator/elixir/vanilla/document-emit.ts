@@ -4,15 +4,17 @@
 //
 // A document-shaped aggregate persists as ONE jsonb column — the canonical
 // `(id, data, version)` table the migrations-builder already emits — instead of
-// the normalised table-per-entity tree.  Vanilla has no domain instance to
-// serialise (unlike Python's `_to_doc(aggregate)`); its validation layer is the
-// Ecto changeset, so the faithful equivalent of "validate through the normal
-// path, then serialise" is a **schemaless changeset** (`cast({%{}, @types},
-// attrs, …)` + the same `validate_required` / invariant validators the
-// relational `base_changeset` runs) whose validated map IS the stored document.
-// Document and relational therefore share one validation contract; only the
-// storage differs.  Reads merge `data` back over the id (`serialize/1`); the
-// wire shape is identical to the relational path (snake-cased field keys).
+// the normalised table-per-entity tree.  Route A (slice 1): the blob is a TYPED
+// `embeds_one :data, <Agg>.Data` embedded schema (`renderDocDataSchema`), so
+// `row.data` rehydrates into a `%<Agg>.Data{}` struct carrying every domain
+// field.  Validation lives on that embed's `changeset/2` (cast + `cast_embed` +
+// the same invariant validators the relational `base_changeset` runs); the root
+// `<Agg>Changeset.document_changeset/3` casts inbound attrs INTO the embed
+// (`on_replace: :update` giving merge-on-update semantics) and stamps `version`.
+// Enums stay `:string` and value objects stay `:map` inside `<Agg>.Data`, and
+// `@primary_key false` keeps `id` out of the blob, so the stored jsonb keys +
+// the wire remain byte-identical to the pre-Route-A map path.  Reads project the
+// struct back through `serialize/1` (snake-cased jsonb keys → camelCase wire).
 //
 // Beyond CRUD, this module also emits custom finds (in-memory `Enum.filter` over
 // the `data` map), named + returning operations (body over the `data` map), and
@@ -125,7 +127,14 @@ export function renderDocSchema(
   const moduleName = `${appModule}.${ctxModule}.${upperFirst(agg.name)}`;
   const tableName = snake(plural(agg.name));
   const prefixLine = schemaPrefix ? `  @schema_prefix ${JSON.stringify(schemaPrefix)}\n` : "";
-  return `# Auto-generated.
+  // Route A: the blob is a TYPED `embeds_one :data, <Agg>.Data` embedded schema
+  // (not a bare `field :data, :map`), so `row.data` rehydrates into a struct with
+  // every domain field — the seam that lets the relational renderers run against
+  // `record = row.data` (slices 2+).  The migration is unchanged (`add :data,
+  // :map`); Ecto round-trips the embed to/from that jsonb column.  Enums stay
+  // `:string` and value objects stay `:map` inside `<Agg>.Data` so the stored
+  // jsonb + the wire remain byte-identical to the pre-Route-A map path.
+  const root = `# Auto-generated.
 defmodule ${moduleName} do
   @moduledoc "Document-shaped aggregate — the whole tree persists as one jsonb \`data\` blob."
   use Ecto.Schema
@@ -134,10 +143,75 @@ defmodule ${moduleName} do
   @foreign_key_type :binary_id
 ${prefixLine}
   schema "${tableName}" do
-    field :data, :map
+    embeds_one :data, ${moduleName}.Data, on_replace: :update
     field :version, :integer, default: 1
     timestamps(type: :utc_datetime)
   end
+end
+`;
+  return `${root}\n${renderDocDataSchema(appModule, ctxModule, agg)}`;
+}
+
+/** The `<Agg>.Data` embedded schema — THE domain shape the whole document folds
+ *  into (`@primary_key false`, so no `id` leaks into the blob).  Scalar fields
+ *  use the same document cast types as the pre-Route-A schemaless changeset (enum
+ *  → `:string`, value object → `:map`), so the stored jsonb keys/values + the
+ *  wire stay byte-identical; containments nest as `embeds_many`/`embeds_one`.
+ *  Its `changeset/2` casts the scalar fields + `cast_embed`s the parts + runs the
+ *  aggregate's single-field invariant validators (the same set the old
+ *  `document_changeset` ran). */
+function renderDocDataSchema(appModule: string, ctxModule: string, agg: AggregateIR): string {
+  const dataMod = `${appModule}.${ctxModule}.${upperFirst(agg.name)}.Data`;
+  const fields = docFields(agg);
+  const fieldLines = fields.map((f) => `    field :${snake(f.name)}, ${castType(f.type)}`);
+  const containLines = agg.contains.map(
+    (c) =>
+      `    ${c.collection ? "embeds_many" : "embeds_one"} :${snake(c.name)}, ${appModule}.${ctxModule}.${upperFirst(c.partName)}`,
+  );
+  const schemaBody = [...fieldLines, ...containLines].join("\n");
+  const castCols = fields.map((f) => `:${snake(f.name)}`).join(", ");
+  const requiredCols = fields
+    .filter((f) => !f.optional)
+    .map((f) => `:${snake(f.name)}`)
+    .join(", ");
+  const castEmbeds = agg.contains.map((c) => `    |> cast_embed(:${snake(c.name)})`).join("\n");
+  const castEmbedBlock = castEmbeds ? `\n${castEmbeds}` : "";
+  // Wire/derive atom list: id is absent (@primary_key false), then domain fields
+  // + containments — the fields Jason would dump if the struct is encoded directly.
+  const wireAtoms = [
+    ...fields.map((f) => `:${snake(f.name)}`),
+    ...agg.contains.map((c) => `:${snake(c.name)}`),
+  ].join(", ");
+  // The aggregate's single-field invariants become Ecto validators on the embed
+  // changeset (the same set the pre-Route-A `document_changeset` carried).
+  const castFieldSet = new Set(fields.map((f) => snake(f.name)));
+  const validatorLines = (agg.invariants ?? [])
+    .flatMap((inv) => singleFieldConstraints(inv) ?? [])
+    .filter((c) => castFieldSet.has(snake(c.field)))
+    .map((c) => ectoValidator(snake(c.field), c.pattern));
+  const validatorBlock = validatorLines.length > 0 ? `\n${validatorLines.join("\n")}` : "";
+  const requiredBlock = requiredCols ? `\n    |> validate_required([${requiredCols}])` : "";
+  return `# Auto-generated.
+defmodule ${dataMod} do
+  @moduledoc "Embedded domain shape for the document aggregate — the whole tree stored in the jsonb \`data\` column."
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  @primary_key false
+  @derive {Jason.Encoder, only: [${wireAtoms}]}
+  embedded_schema do
+${schemaBody}
+  end
+
+  @doc false
+  def changeset(struct, attrs) do
+    attrs = __normalize_keys(attrs)
+
+    struct
+    |> cast(attrs, [${castCols}])${castEmbedBlock}${requiredBlock}${validatorBlock}
+  end
+
+${NORMALIZE_KEYS_DEFP}
 end
 `;
 }
@@ -168,33 +242,24 @@ function ectoValidator(field: string, p: SingleFieldPattern): string {
 }
 
 export function renderDocChangeset(appModule: string, ctxModule: string, agg: AggregateIR): string {
-  const changesetMod = `${appModule}.${ctxModule}.${upperFirst(agg.name)}Changeset`;
-  const fields = docFields(agg);
-  const required = fields.filter((f) => !f.optional);
-  const typeEntries = fields.map((f) => `${snake(f.name)}: ${castType(f.type)}`).join(", ");
-  const allCols = fields.map((f) => `:${snake(f.name)}`).join(", ");
-  const requiredCols = required.map((f) => `:${snake(f.name)}`).join(", ");
-  const castFields = new Set(fields.map((f) => snake(f.name)));
-  const validatorLines = (agg.invariants ?? [])
-    .flatMap((inv) => singleFieldConstraints(inv) ?? [])
-    .filter((c) => castFields.has(snake(c.field)))
-    .map((c) => ectoValidator(snake(c.field), c.pattern));
-  const validatorBlock = validatorLines.length > 0 ? `\n${validatorLines.join("\n")}` : "";
-
+  const aggMod = `${appModule}.${ctxModule}.${upperFirst(agg.name)}`;
+  const changesetMod = `${aggMod}Changeset`;
+  // Route A: the validation now lives on the `<Agg>.Data` embedded schema's
+  // `changeset/2` (cast + cast_embed + invariant validators).  This root
+  // changeset just casts the incoming attrs INTO the `:data` embed (so
+  // `on_replace: :update` gives merge-on-update semantics for free) and stamps
+  // the version.  `record` is `%<Agg>{}` on insert and the existing row on update.
   return `# Auto-generated.
 defmodule ${changesetMod} do
-  @moduledoc "Schemaless validation for the document aggregate — the validated map IS the stored document."
+  @moduledoc "Casts document attrs into the embedded \`:data\` schema + stamps the version."
   import Ecto.Changeset
 
-  @types %{${typeEntries}}
-  @all_fields [${allCols}]
-  @required_fields [${requiredCols}]
-
-  @doc "Validate \`attrs\` against the document field types; the applied map becomes the jsonb \`data\`."
-  def document_changeset(attrs) when is_map(attrs) do
-    {%{}, @types}
-    |> cast(attrs, @all_fields)
-    |> validate_required(@required_fields)${validatorBlock}
+  @doc "Cast \`attrs\` into the aggregate's embedded document, stamping \`version\`."
+  def document_changeset(%${aggMod}{} = record, attrs, version) when is_map(attrs) do
+    record
+    |> cast(%{"data" => attrs}, [])
+    |> cast_embed(:data, with: &${aggMod}.Data.changeset/2, required: true)
+    |> put_change(:version, version)
   end
 end
 `;
@@ -223,10 +288,13 @@ export function renderDocRepository(
   const findFns = finds.filter((f) => f.name !== "all").map((f) => renderDocFindFn(f, aggModule));
   const findBlock = findFns.length > 0 ? `\n\n${findFns.join("\n\n")}` : "";
   // The `__doc_data/1` normaliser is only referenced by the custom-find filters,
-  // so gate it (an unused defp trips `mix compile --warnings-as-errors`).
+  // so gate it (an unused defp trips `mix compile --warnings-as-errors`).  Route A:
+  // `record.data` is now a `%<Agg>.Data{}` struct, so flatten it via
+  // `Map.from_struct` (drops `:__struct__`) before string-keying — the docMap
+  // renderers still read the string-keyed map, byte-identical to before.
   const docDataHelper =
     findFns.length > 0
-      ? `\n\n  defp __doc_data(record), do: Map.new(record.data || %{}, fn {k, v} -> {to_string(k), v} end)`
+      ? `\n\n  defp __doc_data(record), do: record.data |> Map.from_struct() |> Map.new(fn {k, v} -> {to_string(k), v} end)`
       : "";
 
   return `# Auto-generated.
@@ -249,35 +317,20 @@ defmodule ${repoMod} do
 
   @spec insert(map()) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
   def insert(attrs) when is_map(attrs) do
-    attrs = __normalize_keys(attrs)
-
-    case Ecto.Changeset.apply_action(${changesetMod}.document_changeset(attrs), :insert) do
-      {:ok, data} ->
-        %${aggModule}{id: Ecto.UUID.generate(), data: data, version: 1}
-        |> Repo.insert()
-
-      {:error, changeset} ->
-        {:error, changeset}
-    end
+    %${aggModule}{}
+    |> ${changesetMod}.document_changeset(attrs, 1)
+    |> Repo.insert()
   end
 
   @spec update(${aggModule}.t(), map()) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
   def update(%${aggModule}{} = record, attrs) when is_map(attrs) do
-    # Merge the incoming attrs over the current document (snake-cased string
-    # keys, as the jsonb column round-trips), then re-validate the merged whole.
-    # Normalise camelCase wire keys to snake BEFORE the merge, so a camelCase
-    # field overwrites the stored snake key cleanly instead of landing beside it.
-    merged = Map.merge(record.data || %{}, __normalize_keys(stringify_keys(attrs)))
-
-    case Ecto.Changeset.apply_action(${changesetMod}.document_changeset(merged), :update) do
-      {:ok, data} ->
-        record
-        |> Ecto.Changeset.change(%{data: data, version: record.version + 1})
-        |> Repo.update()
-
-      {:error, changeset} ->
-        {:error, changeset}
-    end
+    # cast_embed(:data, on_replace: :update) casts the incoming (possibly
+    # partial) attrs ONTO the existing embedded document, so unspecified fields
+    # keep their stored values (the merge-on-update semantics the old manual
+    # Map.merge gave) and validate_required still sees the retained values.
+    record
+    |> ${changesetMod}.document_changeset(attrs, record.version + 1)
+    |> Repo.update()
   end
 
   @spec delete(${aggModule}.t()) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
@@ -290,13 +343,7 @@ defmodule ${repoMod} do
           {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
   def persist_change(%Ecto.Changeset{data: %${aggModule}{}} = changeset) do
     Repo.update(changeset)
-  end${findBlock}
-
-  defp stringify_keys(map) do
-    Map.new(map, fn {k, v} -> {to_string(k), v} end)
-  end${docDataHelper}
-
-${NORMALIZE_KEYS_DEFP}
+  end${findBlock}${docDataHelper}
 end
 `;
 }
@@ -445,8 +492,11 @@ ${prelude}${successTail}
   end`;
 }
 
-/** The `data` normaliser bind shared by both op-function shapes. */
-const DOC_DATA_BIND = `    data = Map.new(record.data || %{}, fn {k, v} -> {to_string(k), v} end)`;
+/** The `data` normaliser bind shared by both op-function shapes.  Route A:
+ *  `record.data` is a `%<Agg>.Data{}` struct, so flatten via `Map.from_struct`
+ *  (drops `:__struct__`) before string-keying — the docMap op renderers still
+ *  read a string-keyed map, byte-identical to the pre-Route-A path. */
+const DOC_DATA_BIND = `    data = record.data |> Map.from_struct() |> Map.new(fn {k, v} -> {to_string(k), v} end)`;
 
 /** Heuristic: does a rendered body line read/write the `data` map?  Used to
  *  decide whether the `data` bind is live (an unused bind trips `-Werror`). */
@@ -580,7 +630,7 @@ export function renderDocSerialize(agg: AggregateIR): string {
   // 3}`), while a DB-loaded record carries the STRING-keyed jsonb map — read
   // both uniformly so the create response matches the read response.
   return `  defp serialize(record) do
-    data = Map.new(record.data || %{}, fn {k, v} -> {to_string(k), v} end)
+    data = record.data |> Map.from_struct() |> Map.new(fn {k, v} -> {to_string(k), v} end)
 
     %{
 ${entries.join(",\n")}

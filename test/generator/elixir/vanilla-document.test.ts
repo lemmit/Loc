@@ -52,38 +52,57 @@ function file(files: Map<string, string>, suffix: string): string {
 describe("vanilla shape(document) persistence (DEBT-07)", () => {
   it("emits an (id, data, version) schema, not flattened columns", async () => {
     const schema = file(await generateSystemFiles(DOC), "/carts/cart.ex");
-    expect(schema).toContain("field :data, :map");
+    // Route A: the blob is a TYPED `embeds_one :data, <Agg>.Data` embedded schema
+    // (still one jsonb `data` column via the unchanged migration), not a flattened
+    // relational table nor a bare `field :data, :map`.
+    expect(schema).toContain("embeds_one :data, Api.Carts.Cart.Data, on_replace: :update");
     expect(schema).toContain("field :version, :integer, default: 1");
-    // No flattened domain columns on a document schema.
-    expect(schema).not.toContain("field :reference");
-    expect(schema).not.toContain("field :item_count");
+    // The ROOT schema carries no flattened relational table (`schema "carts"` holds
+    // only the embed + version + timestamps).
+    expect(schema).not.toContain("has_many");
+    // The `<Agg>.Data` embedded schema carries the domain fields — enum stays
+    // `:string` and value object stays `:map` so the stored jsonb + the wire are
+    // byte-identical to the pre-Route-A map path; `@primary_key false` so no `id`
+    // leaks into the blob.
+    expect(schema).toContain("defmodule Api.Carts.Cart.Data do");
+    expect(schema).toContain("@primary_key false");
+    expect(schema).toContain("embedded_schema do");
+    expect(schema).toContain("field :status, :string");
+    expect(schema).toContain("field :subtotal, :map");
+    expect(schema).toContain("field :item_count, :integer");
   });
 
-  it("validates through a schemaless changeset (cast + required + invariants)", async () => {
-    const cs = file(await generateSystemFiles(DOC), "/carts/cart_changeset.ex");
-    // Schemaless form: a {%{}, @types} cast, not a struct cast.
-    expect(cs).toContain(
-      "@types %{reference: :string, status: :string, subtotal: :map, item_count: :integer}",
-    );
-    expect(cs).toContain("{%{}, @types}");
-    expect(cs).toContain("|> cast(attrs, @all_fields)");
-    expect(cs).toContain("|> validate_required(@required_fields)");
+  it("validates through the embedded Data changeset (cast + required + invariants)", async () => {
+    const schema = file(await generateSystemFiles(DOC), "/carts/cart.ex");
+    // Route A: validation lives on the `<Agg>.Data` embedded schema's changeset/2
+    // (cast the scalar fields + validate_required + invariant validators), which
+    // the root changeset `cast_embed`s.
+    expect(schema).toContain("def changeset(struct, attrs) do");
+    expect(schema).toContain("|> cast(attrs, [:reference, :status, :subtotal, :item_count])");
+    expect(schema).toContain("|> validate_required([:reference, :status, :subtotal, :item_count])");
     // The same invariant-derived validator the relational path emits.
-    expect(cs).toContain("validate_number(:item_count, greater_than_or_equal_to: 0)");
+    expect(schema).toContain("validate_number(:item_count, greater_than_or_equal_to: 0)");
+    // The root changeset casts attrs INTO the embed + stamps version.
+    const cs = file(await generateSystemFiles(DOC), "/carts/cart_changeset.ex");
+    expect(cs).toContain("def document_changeset(%Api.Carts.Cart{} = record, attrs, version)");
+    expect(cs).toContain('|> cast(%{"data" => attrs}, [])');
+    expect(cs).toContain(
+      "|> cast_embed(:data, with: &Api.Carts.Cart.Data.changeset/2, required: true)",
+    );
+    expect(cs).toContain("|> put_change(:version, version)");
   });
 
-  it("repository CRUD round-trips the document (validated fold + version bump)", async () => {
+  it("repository CRUD round-trips the document (cast_embed + version bump)", async () => {
     const repo = file(await generateSystemFiles(DOC), "/carts/cart_repository.ex");
-    // Insert: validate → store the applied map as data, version 1.
+    // Insert: cast attrs into a fresh embed, version 1.
+    expect(repo).toContain("|> Api.Carts.CartChangeset.document_changeset(attrs, 1)");
+    expect(repo).toContain("%Api.Carts.Cart{}");
+    // Update: cast_embed(on_replace: :update) merges onto the existing embed,
+    // bumps version — no manual Map.merge.
     expect(repo).toContain(
-      "Ecto.Changeset.apply_action(Api.Carts.CartChangeset.document_changeset(attrs), :insert)",
+      "|> Api.Carts.CartChangeset.document_changeset(attrs, record.version + 1)",
     );
-    expect(repo).toContain("%Api.Carts.Cart{id: Ecto.UUID.generate(), data: data, version: 1}");
-    // Update: merge over the current doc, re-validate, bump version.
-    expect(repo).toContain(
-      "Map.merge(record.data || %{}, __normalize_keys(stringify_keys(attrs)))",
-    );
-    expect(repo).toContain("change(%{data: data, version: record.version + 1})");
+    expect(repo).not.toContain("Map.merge(record.data");
     // Same fn names as the relational repo (so context defdelegates are unchanged).
     expect(repo).toContain("def list do");
     expect(repo).toContain("def find_by_id(id)");
@@ -93,30 +112,23 @@ describe("vanilla shape(document) persistence (DEBT-07)", () => {
     const ctrl = file(await generateSystemFiles(DOC), "/controllers/cart_controller.ex");
     // wireShape-driven: each stored field keyed by its declared (camelCase)
     // name, read from the snake-cased `data` jsonb key — a multi-word field
-    // ships `itemCount`, not the raw `item_count` the old merge leaked.
+    // ships `itemCount`, not the raw `item_count`.  Route A: `record.data` is the
+    // `%<Agg>.Data{}` embed, flattened via Map.from_struct before string-keying.
     expect(ctrl).toContain(
-      "data = Map.new(record.data || %{}, fn {k, v} -> {to_string(k), v} end)",
+      "data = record.data |> Map.from_struct() |> Map.new(fn {k, v} -> {to_string(k), v} end)",
     );
     expect(ctrl).toContain('"id" => record.id');
     expect(ctrl).toContain('"itemCount" => Map.get(data, "item_count")');
     expect(ctrl).toContain('"reference" => Map.get(data, "reference")');
-    // NOT the old raw-merge (snake keys) or a struct dump.
-    expect(ctrl).not.toContain("Map.merge(%{id: record.id}, record.data");
-    expect(ctrl).not.toContain("Map.from_struct()");
   });
 
-  it("normalizes camelCase inbound keys to snake before the schemaless cast (§15)", async () => {
-    const repo = file(await generateSystemFiles(DOC), "/carts/cart_repository.ex");
-    // insert: raw params snaked before the changeset (a camelCase `itemCount`
-    // body casts into `:item_count` instead of silently dropping → 422).
-    expect(repo).toContain("attrs = __normalize_keys(attrs)");
-    // update: attrs snaked BEFORE the merge, so a camelCase field overwrites the
-    // stored snake key cleanly rather than landing beside it.
-    expect(repo).toContain(
-      "Map.merge(record.data || %{}, __normalize_keys(stringify_keys(attrs)))",
-    );
-    expect(repo).toContain("defp __normalize_keys(attrs) when is_map(attrs) do");
-    expect(repo).toContain("{k, v} when is_binary(k) -> {Macro.underscore(k), v}");
+  it("normalizes camelCase inbound keys to snake before the embedded cast (§15)", async () => {
+    const schema = file(await generateSystemFiles(DOC), "/carts/cart.ex");
+    // Route A: normalization lives on the `<Agg>.Data` changeset (a camelCase
+    // `itemCount` body casts into `:item_count` instead of silently dropping).
+    expect(schema).toContain("attrs = __normalize_keys(attrs)");
+    expect(schema).toContain("defp __normalize_keys(attrs) when is_map(attrs) do");
+    expect(schema).toContain("{k, v} when is_binary(k) -> {Macro.underscore(k), v}");
   });
 
   it("emits the canonical (id, data, version) document migration", async () => {
@@ -199,8 +211,11 @@ describe("vanilla shape(document) scalar finds + named ops (DEBT-07)", () => {
     expect(repo).toContain('data["reference"] == reference');
     expect(repo).toContain("{:ok, List.first(results)}");
     // The normaliser helper is emitted (gated on custom finds referencing it).
+    // Route A: `record.data` is a `%<Agg>.Data{}` struct → Map.from_struct flattens
+    // it (dropping :__struct__) before string-keying, so the docMap predicate reads
+    // the same string-keyed map as before.
     expect(repo).toContain(
-      "defp __doc_data(record), do: Map.new(record.data || %{}, fn {k, v} -> {to_string(k), v} end)",
+      "defp __doc_data(record), do: record.data |> Map.from_struct() |> Map.new(fn {k, v} -> {to_string(k), v} end)",
     );
   });
 
@@ -210,7 +225,9 @@ describe("vanilla shape(document) scalar finds + named ops (DEBT-07)", () => {
     expect(ctx).toContain(
       "def add_item_cart(%Api.Carts.Cart{} = record, params) when is_map(params) do",
     );
-    expect(ctx).toContain("data = Map.new(record.data || %{}, fn {k, v} -> {to_string(k), v} end)");
+    expect(ctx).toContain(
+      "data = record.data |> Map.from_struct() |> Map.new(fn {k, v} -> {to_string(k), v} end)",
+    );
     expect(ctx).toContain('if not (data["item_count"] >= 0), do: raise(ArgumentError');
     expect(ctx).toContain('data = Map.put(data, "item_count", data["item_count"] + 1)');
     // Persist re-runs the schemaless changeset + bumps version via update/2.
