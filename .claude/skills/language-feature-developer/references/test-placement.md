@@ -31,7 +31,7 @@ over real Postgres, nightly)**.
 | `test/ir/wire/` | `wireShape` / DTO contract (snapshot) | `create-input-contract.test.ts` |
 | `test/generator/hono/`, `typescript/` | node/TS emit (string-match) | `error-status-tiers.test.ts` |
 | `test/generator/dotnet/` | .NET emit | `aggregate-test-currentuser.test.ts` |
-| `test/generator/elixir/`, `elixir-vanilla/` | Phoenix/Ash + HEEx, vanilla Ecto | `ash-returning-emit.test.ts` |
+| `test/generator/elixir/`, `elixir-vanilla/` | Phoenix vanilla Ecto + HEEx | `vanilla-audit.test.ts` |
 | `test/generator/python/` | FastAPI/SQLAlchemy emit | `python-aggregate.test.ts` |
 | `test/generator/java/` | Spring Boot/JPA emit | `generator-java-api.test.ts` |
 | `test/generator/react/`, `vue/`, `svelte/`, `angular/` | frontend emit | `auth-ui-emit.test.ts` |
@@ -75,7 +75,7 @@ Reach for the one that matches the compiler your emitted code must satisfy.
 | `test:dotnet` | `LOOM_DOTNET_BUILD=1` | `dotnet build /warnaserror` |
 | `test:java` | `LOOM_JAVA_BUILD=1` | `gradle testClasses bootJar` |
 | `test:python` | `LOOM_PYTHON_BUILD=1` | `uv sync` + ruff + `mypy --strict` + pytest |
-| `test:phoenix` | `LOOM_PHOENIX_BUILD=1` | Ash `mix compile --warnings-as-errors` (`LOOM_HEX_MIRROR=1` behind the TLS proxy) |
+| `test:phoenix` | `LOOM_PHOENIX_VANILLA_BUILD=1` | vanilla Ecto/Phoenix `mix compile --warnings-as-errors` (`LOOM_HEX_MIRROR=1` behind the TLS proxy) |
 | `test:e2e` | `LOOM_E2E=1` | full docker-compose stack + `/health` + DSL e2e + Playwright + OpenAPI parity |
 | `test/behavioral/run.mjs` | (own deps) | generated Hono on PGlite: api e2e + unit |
 

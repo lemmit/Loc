@@ -69,11 +69,11 @@ Format: symptom → cause → fix → where it's pinned / who found it.
   verify. Needs `python3` + `openssl` and the privilege to bind `:443`. Unset
   (CI runners with direct hex.pm), it's a no-op.
   ```bash
-  LOOM_PHOENIX_BUILD=1 LOOM_HEX_MIRROR=1 npm run test:phoenix
+  LOOM_PHOENIX_VANILLA_BUILD=1 LOOM_HEX_MIRROR=1 npm run test:phoenix
   ```
 - **Found by:** `experience_gathered.md` §14; documented in `docs/tools.md`
   ("`LOOM_HEX_MIRROR` — Elixir builds behind a fingerprinting proxy") and
-  CLAUDE.md. Relevant for any Ash/Phoenix/OTP bump verified in this sandbox.
+  CLAUDE.md. Relevant for any Phoenix/Ecto/OTP bump verified in this sandbox.
 
 ## 4. TypeScript 6 breaks `@types/node` global resolution on the Node-only islands
 

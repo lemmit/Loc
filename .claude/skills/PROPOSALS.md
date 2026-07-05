@@ -55,7 +55,7 @@ standing debt register (`docs/proposals/platform-parity-debt.md`) and audit
 
 **What it does.**
 1. Enumerate the target matrix from `src/platform/registry.ts` (5 backends, 4
-   frontends, + elixir vanilla/ash foundations + HEEx).
+   frontends, + elixir vanilla Ecto foundation + HEEx).
 2. For each feature axis, find the *authoritative validator gate set* (so the
    matrix cites `loom.*` codes, not prose) and grep each backend's emitter for
    `TODO`/`throw`/stub markers on that axis.

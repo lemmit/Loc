@@ -145,7 +145,7 @@ file that proves it. The anchors, by claim kind (full index in
 Backend-count and frontend-count claims are where the most stale text hides, because
 the target set *grows* and prose written at "three backends" never self-updates. The
 ground truth is the registry: `src/platform/registry.ts` today registers **5 backends**
-(`node`/Hono, `dotnet`, `java`, `python`, `elixir` — with `ash`/`vanilla` foundations)
+(`node`/Hono, `dotnet`, `java`, `python`, `elixir` — vanilla Ecto/Phoenix)
 and **4 frontends** (`react`, `vue`, `svelte`, `angular`). Any doc saying "three
 backends", "four targets", "the React frontend" (singular), or listing
 "node/dotnet/phoenix/react" as if that's the whole set is a freeze artifact.

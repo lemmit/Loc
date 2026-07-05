@@ -120,7 +120,8 @@ The error lists exactly which logical names are missing. Add each to
 
 The required set is **format-specific** — `tsx`/`svelte`/`vue` own the full form
 family (`field-input-*`, `form-*`); `heex` and `angular` do NOT (Phoenix
-generates inputs from the Ash resource; Angular emits typed Reactive Forms inline
+renders form inputs inline through the HEEx walker from the Ecto schema / wire
+shape; Angular emits typed Reactive Forms inline
 through walker seams, so an angular pack ships the display/layout/input surface
 *minus* `form-of`/`modal`/`field-input-*`/`form-*`). Vue additionally owns
 `op-dialog`; Svelte additionally owns `svelte-config`. The exact per-format lists,
@@ -212,7 +213,7 @@ The build-case format is `<ddd-path>:<family>@<version>` (split on the first `:`
 the pack half is the qualified `family@version`). Omit the env var to run the full
 `example × pack` matrix. If the case string doesn't match, the test fails loudly
 and prints every available case — copy one from there. For a HEEx pack, the gate
-is `LOOM_PHOENIX_BUILD=1 npm run test:phoenix` (docker; see the CLAUDE.md Docker
+is `LOOM_PHOENIX_VANILLA_BUILD=1 npm run test:phoenix` (docker; see the CLAUDE.md Docker
 section). Iterate template fixes against this gate until it's green across the
 example matrix, not just one example.
 

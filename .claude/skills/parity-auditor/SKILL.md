@@ -24,7 +24,7 @@ description: >-
 
 Loom emits the same `.ddd` model across **9 targets** — 5 domain-logic backends
 (TS/Hono `node`, .NET `dotnet`, Java/Spring `java`, Python/FastAPI `python`,
-Phoenix `elixir` with two **foundations** `ash`/`vanilla`) and 4 frontends
+Phoenix `elixir` on plain Ecto — the `vanilla` foundation, the only one) and 4 frontends
 (React, Vue, Svelte, Angular) plus the Phoenix HEEx render path. Parity is the
 promise that a feature either works on a target or **fails fast at validate
 time** — it never silently emits a half-working backend. Auditing that promise,
@@ -91,17 +91,16 @@ The authoritative roster is `src/platform/registry.ts` (the `platforms` map +
 `inTreeBackends`) and `src/platform/surface.ts` (`PlatformDescriptor` —
 `needsDb` / `mountsUi` / `isFrontend` / `hostableFrameworks`). Don't hand-list
 targets from memory — read the registry, because backends arrive as
-`family@version` packages and the set grows. The current roster, the
-foundation split, and the per-axis gate index live in
+`family@version` packages and the set grows. The current roster and the
+per-axis gate index live in
 `references/target-matrix.md` — start there, but **re-read the registry** to
 confirm nothing was added.
 
 The two helpers that turn the registry into a usable test matrix already exist —
 reuse them, don't reinvent:
-- `test/fixtures/corpus/backends.ts` — the canonical 6 backend keys (`node`,
-  `dotnet`, `java`, `python`, `phoenix`, `vanilla`) and their `platform:` clauses,
-  including the foundation split (`phoenix` → `elixir { foundation: ash }`,
-  `vanilla` → `elixir { foundation: vanilla }`).
+- `test/fixtures/corpus/backends.ts` — the canonical 5 backend keys (`node`,
+  `dotnet`, `java`, `python`, `vanilla`) and their `platform:` clauses (`vanilla`
+  → `elixir { foundation: vanilla }`, the sole elixir foundation).
 - `src/util/platform-axes.ts` — the realization-axes vocabulary
   (`PLATFORM_SAVING_SHAPES` etc.) some gates read from.
 

@@ -107,7 +107,7 @@ disagree.
 ## Surface B — generated backends
 
 Each backend emits its own dependency manifest from a dedicated pin site. This is
-where a generated-backend dep (hono, EF Core, Spring Boot, fastapi, ash) is
+where a generated-backend dep (hono, EF Core, Spring Boot, fastapi, phoenix) is
 bumped — never root `package.json`.
 
 | Backend | Manifest | Pin site | Notable current pins |
@@ -116,7 +116,7 @@ bumped — never root `package.json`.
 | **.NET** | `<ns>.csproj` | `renderCsproj` in `src/generator/dotnet/emit/program.ts` (~line 575) | **TargetFramework net10.0**, EF Core 10.0.9, Npgsql.EFCore.PostgreSQL 10.0.2, Mediator.SourceGenerator 2.1.7, Swashbuckle 6.9; conditional FluentValidation 11.10, Ardalis.Specification 9.3, Microsoft.IdentityModel 8.0 (OIDC), Dapper 2.1 (dapper persistence) |
 | **Java / Spring** | `build.gradle.kts` | `renderGradleBuild` + `SPRING_BOOT_VERSION`/`JAVA_VERSION` consts in `src/generator/java/emit/program.ts` | **Spring Boot 4.1.0**, Java 21, jMolecules 1.10, springdoc 3.0.3, nimbus-jose-jwt 10.3 (OIDC); Flyway via `spring-boot-starter-flyway` + `flyway-database-postgresql` when migrations exist |
 | **Python / FastAPI** | `pyproject.toml` | `src/generator/python/pins.ts` (rendered by `renderPyproject` in `python/index.ts`) | **requires-python >=3.13**, fastapi >=0.115,<1, uvicorn[standard], sqlalchemy[asyncio] >=2.0.36,<3, asyncpg, pydantic >=2.10; dev mypy/ruff/pytest/pytest-asyncio; pyjwt (OIDC) |
-| **Elixir / Phoenix** | `mix.exs` | `renderMixExs` in `src/generator/elixir/shell/project.ts` | phoenix ~> 1.8, phoenix_live_view ~> 1.0, ash ~> 3.24, ash_postgres ~> 2.0, ash_phoenix ~> 2.0, ecto_sql ~> 3.10, postgrex ~> 0.20, bandit ~> 1.5, open_api_spex ~> 3.0; jose (OIDC) |
+| **Elixir / Phoenix** | `mix.exs` | `renderMixExs` in `src/generator/elixir/shell/project.ts` | phoenix ~> 1.8, phoenix_live_view ~> 1.0, ecto_sql ~> 3.10, postgrex ~> 0.20, bandit ~> 1.5, open_api_spex ~> 3.0; jose (OIDC) |
 
 > The old `docs/audits/stack-versions-audit.md` cites `phoenix-live-view/index.ts`
 > and "defer net8 / Spring Boot 3.5" — both stale. The current homes are
@@ -173,7 +173,7 @@ the bump can land green then break `main`. Force those via the local gate +
 | EF Core / .NET TFM | B | `dotnet/emit/program.ts` | `dotnet-build.yml` | `dotnet-obs-e2e.yml` — **push:main only ✗** |
 | Spring Boot / JDK / Flyway | B | `java/emit/program.ts` | `java-build.yml` | `java-obs-e2e.yml` — **push:main only ✗** |
 | fastapi / sqlalchemy / py version | B | `python/pins.ts` | `python-build.yml` | `python-obs-e2e.yml` — **push:main only ✗** |
-| ash / phoenix / OTP | B | `elixir/shell/project.ts` | `elixir-{ash,vanilla}-build.yml` | `elixir-*-obs-e2e.yml` — **push:main only ✗** |
+| phoenix / ecto / OTP | B | `elixir/shell/project.ts` | `elixir-vanilla-build.yml` | `elixir-vanilla-obs-e2e.yml` — **push:main only ✗** |
 | **Postgres image** | B (boot path) | `src/system/index.ts` | none directly | `conformance-parity` (path-filtered `src/system/**`,`docker/**` — ✗ on a tag-only diff), `k8s-e2e` (**nightly / `e2e-k8s` label ✗**) |
 | Node/Python/Elixir/JDK base image | B (boot path) | `docker/` + backend `renderDockerfile` | the per-backend build job (path-filtered) | the obs-e2e / conformance leg — ✗ |
 
