@@ -32,7 +32,10 @@ amputated**: it never `emit`s, never calls operations, never starts a process,
 has no HTTP command entry. It only folds events in and exposes state out.
 
 So v1 is **mostly wiring a passive alias over the event-triggered saga
-machinery**, not a new subsystem.
+machinery**, not a new subsystem. That framing is about *machinery reuse*; for
+*why projection is its own construct* — it folds **foreign** events (not its own)
+and is **derived, not a source of truth** (which is why it has no operations) —
+see §"Why its own construct — the source-of-truth axis".
 
 ```ddd
 context Sales {
@@ -107,6 +110,64 @@ the bespoke syntax is rejected in favour of the existing fold vocabulary:
 
 - `upsert { order: e.order, status: Placed }` = event-triggered **`create(e) by e.order`** (load-or-allocate the row for that key)
 - `set status = Shipped where order = e.order` = **`on(e) by e.order`** + `apply` (route to the row, fold)
+
+### Why its own construct — the source-of-truth axis
+
+The reuse table shows a projection shares a lot of *shape* with an event-sourced
+aggregate (state fields + pure `apply`-style folds + no direct mutation), which
+invites the question: is a projection just an event-sourced aggregate that
+*lacks operations*? No — "lacks operations" is the **symptom**, and two deeper
+differences are the essence, one of which is *why* it has no operations.
+
+**1. It folds foreign events, not its own.** An aggregate's `apply` is a *"pure
+intrinsic state transition **from own event**"* (`workflow-and-applier.md`:170);
+`AggregateIR` has `appliers` but **no `subscriptions`** — an aggregate can only
+fold events it emitted. A projection folds events emitted by *other* aggregates.
+The "subscribe to someone else's stream" surface (`on(e: Event)` →
+`subscriptions`) exists only on the **workflow** — which is exactly why v1
+reuses the workflow saga path, not the aggregate path.
+
+**2. It is derived, not a source of truth — which is why it has no operations.**
+An event-sourced aggregate's stream *is* the truth; operations exist to
+**originate** new events. A projection originates nothing — it is a derived,
+disposable reflection you can delete and rebuild by re-folding. There is nothing
+for an operation to *do*: you don't command a read model, you change it only by
+changing the upstream events it folds. No source-of-truth ⇒ no `emit` ⇒ no
+operations. (This is also *why the fold must be pure* — a disposable reflection
+has to be rebuildable — and why it can't read repos.)
+
+| | Folds *whose* events | Source of truth? | Command side (ops/`emit`) | Fold purity |
+|---|---|---|---|---|
+| **ES aggregate** | its **own** | yes | yes (emit-only) | pure `apply` |
+| **ES workflow** | its **own** + reacts to **foreign** | yes (process) | yes (`create`/`handle`) | pure `apply` |
+| **Projection** | **foreign** only | **no — derived** | **none** | pure fold |
+
+Projection is the one cell no existing construct occupies: **a reactor's
+foreign-event subscription + an applier's pure fold, over derived state.** It
+borrows the *subscription* from the reactor and the *purity* from the applier,
+and drops the entire command / source-of-truth half. That unique combination —
+not the machinery, which is the workflow's — is what earns it a keyword rather
+than a flag on `aggregate`.
+
+The `.ddd` contrast that makes the axis concrete:
+
+```ddd
+// ES aggregate — folds ITS OWN events; has a command side that emits
+aggregate Order persistedAs(eventLog) {
+  status: OrderStatus
+  create place(customer: Customer id) { emit OrderPlaced { order: id, customer } }  // originates
+  operation ship() { emit OrderShipped { order: id } }                              // originates
+  apply(e: OrderPlaced)  { status := Placed }    // folds its OWN event
+  apply(e: OrderShipped) { status := Shipped }
+}
+
+// Projection — folds FOREIGN events; no create, no operation, no emit
+projection OrderBook keyed by order {
+  order: Order id;  status: OrderStatus
+  on(e: OrderPlaced)  { order := e.order; status := Placed }   // folds Order's events
+  on(e: OrderShipped) { status := Shipped }                    // reflects; originates nothing
+}
+```
 
 **Design decision: a sibling `ProjectionIR`, not a `workflow` flavour.** Loom's
 direction (`workflow-and-applier.md`) is to *split* the overloaded workflow into
