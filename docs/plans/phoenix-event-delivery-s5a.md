@@ -68,3 +68,37 @@ emit-statement hoist + Dispatcher routing). Tests:
 guard (`create`-by-correlation no-ops when the stream exists); (c) uniform Java
 publisher wiring + .NET/Java saga pinned order; (d) transactional outbox
 (P2 upgrade path for the broker story). Tracked but not in this PR.
+
+## S12 — returning-op mutations must persist (folded in, closes the S5a residual)
+
+Investigating the S5a residual (explicit-`return` emitting ops kept the inline
+emit) uncovered the real, broader bug beneath it: **a Phoenix vanilla returning
+operation does not persist its mutation unless audit / provenance / ref-collection
+/ emit *incidentally* forces a transaction.** Two lost-mutation shapes on fresh
+`main`:
+
+```elixir
+# fall-through, assign-only  (operation adjust(delta): Item or NotFound { quantity := quantity + delta })
+def adjust_item(%Item{} = record, params) when is_map(params) do
+  delta = Map.get(params, "delta")
+  record = %{record | quantity: record.quantity + delta}
+  {:ok, %{id: record.id, sku: record.sku, quantity: record.quantity}}   # ← in-memory, NEVER persisted
+end
+
+# explicit `return this` (mutating)  → identical: mutates record, returns it, no persist_change
+```
+
+Named (non-returning) ops already persist via `case persist_change` in
+`renderNamedOpFunction`. The returning-op renderer only persists on the
+audit/prov/refcoll/emit branches; the plain `hasSuccessPath` branch returns the
+**in-memory** projection and the explicit-`return` branch emits no persist tail
+at all — so the DB row is never updated (audit §S12, "Phoenix doesn't overwrite
+on update").
+
+**Fix:** decouple the persist decision from the success-path *shape*. A returning
+op **persists whenever its body mutates** (`persistPutBodies` non-empty),
+regardless of fall-through vs explicit `return this`. The success value is
+projected off the **saved** struct; events dispatch after `{:ok, saved}`
+(subsuming the S5a hoist for the explicit-return shape). A pure (non-mutating)
+returning op keeps the in-memory return (no needless round-trip) and stays
+byte-identical.
