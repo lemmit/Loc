@@ -5,9 +5,16 @@
 > threaded `.ddd` → IR → emitted output, and a family of debug features
 > layered on top of it — a generic `.loom/sourcemap.json`, a `ddd trace`
 > stack-trace translator, native per-target debug info (Source Map v3 /
-> `#line`+PDB / JSR-45 SMAP), LSP source↔target navigation, and — as the
-> far horizon — DAP breakpoints in `.ddd`. The phases are independently
-> shippable; each names its own gate.
+> `#line`+PDB / JSR-45 SMAP), LSP source↔target navigation, and DAP
+> breakpoints in `.ddd`.
+>
+> **This is a committed platform pillar, not a minimum-viable slice.** The
+> full arc — through char-level fidelity and live DAP debugging — is the
+> deliverable; we do **not** gate the ambitious phases behind "a consumer
+> asked for it." The phasing below is **dependency ordering, not a
+> priority cut**: every phase is on the roadmap, each is independently
+> shippable, and each names its own gate. Sequencing exists so value lands
+> continuously while we build toward the whole thing.
 
 ## 1. North star
 
@@ -17,11 +24,16 @@ regardless of which backend served the request. Domain values show up in
 Loom terms. Any crash, anywhere in the generated stack, produces a stack
 trace in **`.ddd` coordinates**, not TypeScript/C#/Elixir ones.
 
-Fully realized, that state is only reachable for the targets whose
-runtimes have a remap-aware debugger (JS, .NET, JVM). Python and Elixir
-get the *post-mortem* half — trace translation — which is ~80 % of the
-day-to-day value for a fraction of the cost. The plan is built so that
-value lands early and the expensive last mile is optional.
+We commit to that end state for every target the runtime allows. Live
+breakpoint-and-step debugging lands natively on the targets whose runtimes
+have a remap-aware debugger (JS, .NET, JVM). Python and Elixir don't expose
+a native remap hook, so they don't get identical *live stepping* — but they
+are **not** relegated to static post-mortem: an enhanced trace path
+(traceback-rewriting import hook on Python; `@file`/line annotations on the
+BEAM) makes their runtime errors surface in `.ddd` coordinates *as they
+happen*, and `ddd trace` covers everything else. No target is left at
+"read the generated code and guess." The plan sequences so value lands
+continuously, but the expensive fidelity is **in scope**, not optional.
 
 ## 2. Why it doesn't exist today — two boundaries drop the position
 
@@ -124,7 +136,10 @@ common case cheap.
 
 ## 5. Granularity tiers — the cost dial
 
-The single biggest cost lever. Three levels, sequenced cheapest-first:
+The sequencing lever — **not** a scope cut. All three levels are the
+target; **statement/char fidelity is the platform-grade end state**, and
+construct-granular is simply the first shippable increment on the way, not
+a stopping point. Sequenced cheapest-first so each tier ships value:
 
 1. **Construct-granular** *(Phase 1).* "This region of `LoginSession.ts`
    ← aggregate `Identity.Auth.LoginSession` at `main.ddd:12`." Achieved by
@@ -138,10 +153,10 @@ The single biggest cost lever. Three levels, sequenced cheapest-first:
 2. **Statement-granular** *(Phase 4).* `origin` on `StmtIR`; `render-stmt`
    anchors each statement's line. Unlocks *meaningful* breakpoints (break
    on a line inside an operation body) and useful `#line`/SMAP.
-3. **Char/expression-granular** *(Phase 8).* `origin` on `ExprIR` +
-   span-tracking through `lines()`. Needed for column-precise maps and DAP
-   variable mapping. The expensive tier — deferred until a consumer
-   demands it.
+3. **Char/expression-granular** *(Phase 7).* `origin` on `ExprIR` +
+   span-tracking through `lines()`. Column-precise maps and DAP variable
+   mapping. The expensive tier — sequenced last because of its
+   dependencies, but a committed deliverable, not a maybe.
 
 ## 6. The consumers (features)
 
@@ -191,8 +206,8 @@ Each target emits its own dialect off the same spine:
 | Hono / React / Vue / Svelte | Source Map v3 + `//# sourceMappingURL` | Node inspector, browser devtools |
 | .NET | enhanced `#line (a,b)-(c,d) "main.ddd"` in generated `.cs` → PDB | .NET debugger (VS / `netcoredbg`) |
 | Java | JSR-45 SMAP injected into `SourceDebugExtension` (post-`javac` step, Kotlin's path) | JDWP / any JVM debugger |
-| Python | — (no native `#line`) | falls back to **B** |
-| Elixir | — (non-standard remap) | falls back to **B** |
+| Python | traceback-rewriting import hook (`sys.settrace` / `linecache` patch) → `.ddd` frames at runtime | debugpy post-mortem + **B** |
+| Elixir | `@file` + line annotations so BEAM stack entries report `.ddd` | `IEx`/logger + **B** |
 
 ### D. LSP source↔target navigation
 
@@ -201,13 +216,16 @@ from a `.ddd` construct and the reverse, off `sourcemap.json`. Only needs
 construct-granularity — cheap value. The existing `unfold-macro` action
 proves the seam.
 
-### E. DAP — breakpoints in `.ddd` (far future)
+### E. DAP — breakpoints in `.ddd` (committed pillar)
 
 The richest consumer, and mostly *not* new debugger work: with §C in place
 the editor drives the target's existing debugger, and the adapter's job is
-line/scope remap. Realistic only for JS + .NET + JVM; needs char-granular
-(§5.3) for variable inspection. Named here so it's a deliberate "later,"
-not a surprise.
+line/scope remap. This is the headline platform capability — set a
+breakpoint in `.ddd`, run the stack, step in your own language — and it is
+**on the roadmap, not a someday**. Native live debugging targets JS + .NET
++ JVM (the remap-aware runtimes); it needs char-granular origins (§5.3) for
+variable inspection, which is why it sequences last, not because it's
+optional. The `ddd-dap` adapter ships as a workspace alongside `ddd-mcp`.
 
 ## 7. Macros & synthetic nodes
 
@@ -238,8 +256,10 @@ not a surprise.
 
 ## 9. Phased roadmap
 
-Dependency-ordered, value-weighted. Each phase is independently shippable
-behind `--sourcemap` and names its gate.
+**Dependency-ordered, not priority-ranked — every row is committed.** Each
+phase is independently shippable behind `--sourcemap` and names its gate;
+the ordering is what unblocks what, so value lands continuously while we
+build the full arc through DAP.
 
 | # | Phase | Deliverable | Depends on | Effort |
 |---|---|---|---|---|
@@ -251,12 +271,14 @@ behind `--sourcemap` and names its gate.
 | 5 | **Source Map v3 (JS)** | `.map` + `sourceMappingURL` for the 4 JS backends | 1, 4 | Small–Med |
 | 6 | **.NET `#line` + Java SMAP** | enhanced `#line` → PDB; JSR-45 injector | 4 | Med / Med–Hard |
 | 7 | **Char/expression granularity** | `origin` on `ExprIR`; span-tracking `lines()` | 4 | Large |
-| 8 | **DAP** | adapter reusing target debuggers (JS/.NET/JVM); scope remap | 5, 6, 7 | Large |
+| 8 | **DAP** | `ddd-dap` adapter reusing target debuggers (JS/.NET/JVM); scope remap; Python/Elixir enhanced-trace | 5, 6, 7 | Large |
 
 Phases **0 → 1 → 2** are the core investment and already deliver
-cross-backend post-mortem debugging. **3** is cheap in-editor value off the
-same base. **4** is the hinge that makes **5/6** useful. **7/8** are the
-optional last mile.
+cross-backend post-mortem debugging. **3** is in-editor navigation off the
+same base. **4** is the hinge that makes **5/6** precise. **7 → 8** carry
+it to char-level maps and live `.ddd` breakpoints — the platform headline.
+None of this is an "optional last mile": the arc is the deliverable, the
+numbering is just the order the dependencies allow.
 
 ```
 0 ──┬── 1 ──┬── 2  (ddd trace)
@@ -281,9 +303,16 @@ optional last mile.
 
 ## 11. Non-goals
 
-- Char-level precision from day one (deferred to §5.3 / Phase 7).
-- Native step-debugging for Python/Elixir (trace-tier only; §3).
-- Debugging the *compiler* itself — pipeline/IR introspection is a
+Char-level fidelity and DAP are **in scope** (Phases 7–8) — they are not
+listed here. What's genuinely out of scope:
+
+- **Char-level precision *before its dependencies*** — it ships in Phase 7,
+  after the spine and statement tier, not on day one. In scope, later in
+  sequence.
+- **Native live *stepping* for Python/Elixir** — their runtimes expose no
+  remap hook, so they get enhanced runtime-trace fidelity (§6C) rather than
+  breakpoint-and-step. This is a runtime limit, not a descoping.
+- **Debugging the *compiler* itself** — pipeline/IR introspection is a
   separate concern (`unfold`, AST printer, per-phase dumps already exist).
-- Reformatting or prettifying generated output — the map anchors to bytes
-  as emitted.
+- **Reformatting or prettifying generated output** — the map anchors to
+  bytes as emitted.
