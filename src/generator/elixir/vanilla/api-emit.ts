@@ -35,6 +35,7 @@ import { aggregateHasUnionFind, findRoutes, renderFindActions } from "./find-con
 import { isAbstractBase } from "./inheritance-emit.js";
 import {
   aggregateHasReturningOpError,
+  GUARD_RESCUE,
   isReturningOperation,
   renderProblemVariantHelper,
   renderReturningOpControllerAction,
@@ -252,6 +253,7 @@ ${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
       {:error, %Ecto.Changeset{} = changeset} ->
         ProblemDetails.validation_error_response(conn, changeset)
     end
+${GUARD_RESCUE}
   end`;
     })
     .join("\n");

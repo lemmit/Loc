@@ -75,6 +75,25 @@ describe("vanilla LiveView operation-action bang seams (§13)", () => {
     expect(ctx).toContain("raise Ecto.NoResultsError");
   });
 
+  it("the operation controller action maps a raised guard to 403/400 (not 500)", async () => {
+    // `confirm` has `requires currentUser.role == "manager"` — its domain core
+    // raises `ArgumentError, "Forbidden: …"` on rejection.  Without a rescue that
+    // propagates to Phoenix's default 500; the controller action must map it to
+    // 403 (requires) / 400 (precondition), the statuses the other backends return.
+    const files = await generateSystemFiles(withOps(""));
+    const ctrlKey = [...files.keys()].find((k) => k.endsWith("/customer_controller.ex"))!;
+    const ctrl = files.get(ctrlKey)!;
+    // The confirm action carries the rescue clause.
+    const confirm = ctrl.slice(ctrl.indexOf("def confirm("));
+    expect(confirm).toContain("rescue");
+    expect(confirm).toContain('String.starts_with?(guard_msg, "Forbidden: ")');
+    expect(confirm).toContain('ProblemDetails.problem_response(conn, 403, "Forbidden", guard_msg)');
+    expect(confirm).toContain('String.starts_with?(guard_msg, "Precondition failed: ")');
+    expect(confirm).toContain('ProblemDetails.problem_response(conn, 400, "Bad Request", guard_msg)');
+    // A non-guard ArgumentError still reraises → 500 (unchanged).
+    expect(confirm).toContain("reraise(guard_error, __STACKTRACE__)");
+  });
+
   it("emits <op>_<agg>!(record) per operation, raising on {:error, _}", async () => {
     const ctx = ctxOf(await generateSystemFiles(withOps("")));
     // gated op threads current_user (default nil so the arity-1 call-site resolves)
