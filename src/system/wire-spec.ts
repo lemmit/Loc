@@ -1,6 +1,5 @@
 import type {
   EnrichedAggregateIR,
-  EnrichedBoundedContextIR,
   EnrichedEntityPartIR,
   EnrichedSystemIR,
   EnrichedValueObjectIR,
@@ -52,6 +51,41 @@ type JsonSchemaProperty =
   | { type: "object" }
   | { $ref: string };
 
+/** Resolves a `$ref` string for a referenced part / value object.  Threaded
+ *  through so a reference lands on the CONTEXT-QUALIFIED key when the target's
+ *  bare name collides across contexts (see the collision handling below). */
+type RefResolver = (bucket: "parts" | "valueObjects", name: string) => string;
+
+const bareRef: RefResolver = (bucket, name) => `#/${bucket}/${name}`;
+
+interface CollectedEntry<T> {
+  ctx: string;
+  name: string;
+  node: T;
+}
+
+/** Bare names that appear under more than one context with a STRUCTURALLY
+ *  DIFFERENT wire shape — a genuine collision.  Identical shapes (e.g. an
+ *  ambient root-level VO folded into every context) are NOT collisions: they
+ *  dedupe to a single bare-name entry, exactly as before. */
+function collidingNames<T>(
+  entries: CollectedEntry<T>[],
+  shapeOf: (n: T) => WireField[],
+): Set<string> {
+  const sigsByName = new Map<string, Set<string>>();
+  for (const e of entries) {
+    let sigs = sigsByName.get(e.name);
+    if (!sigs) {
+      sigs = new Set();
+      sigsByName.set(e.name, sigs);
+    }
+    sigs.add(JSON.stringify(shapeOf(e.node)));
+  }
+  const out = new Set<string>();
+  for (const [name, sigs] of sigsByName) if (sigs.size > 1) out.add(name);
+  return out;
+}
+
 export function buildWireSpec(sys: EnrichedSystemIR): WireSpecDoc {
   const doc: WireSpecDoc = {
     system: sys.name,
@@ -59,42 +93,72 @@ export function buildWireSpec(sys: EnrichedSystemIR): WireSpecDoc {
     parts: {},
     valueObjects: {},
   };
-  // System modules each carry their own bounded contexts; collect every
-  // one (a context can in theory appear under multiple modules — last
-  // write wins, all entries are structurally identical).
+  // Collect every (context, entry) pair first — a bounded context can host an
+  // aggregate / part / value object whose BARE NAME clashes with one in a
+  // sibling context (`Sales.Order` vs `Billing.Order`).  Keying the doc by bare
+  // name alone silently clobbered one of them (last write wins); we detect the
+  // clash and qualify only the colliding keys with their context.
+  const aggs: CollectedEntry<EnrichedAggregateIR>[] = [];
+  const parts: CollectedEntry<EnrichedEntityPartIR>[] = [];
+  const vos: CollectedEntry<EnrichedValueObjectIR>[] = [];
   for (const m of sys.subdomains) {
-    for (const ctx of m.contexts) collectContext(ctx, doc);
+    for (const ctx of m.contexts) {
+      for (const a of ctx.aggregates) {
+        aggs.push({ ctx: ctx.name, name: a.name, node: a });
+        for (const p of a.parts) parts.push({ ctx: ctx.name, name: p.name, node: p });
+      }
+      for (const v of ctx.valueObjects) vos.push({ ctx: ctx.name, name: v.name, node: v });
+    }
+  }
+
+  const shapeOf = (n: { wireShape: WireField[] }) => n.wireShape;
+  const collidedAgg = collidingNames(aggs, shapeOf);
+  const collidedPart = collidingNames(parts, shapeOf);
+  const collidedVo = collidingNames(vos, shapeOf);
+
+  // A colliding name is written as `Context.Name`; a non-colliding one stays
+  // bare (so output is byte-identical for every collision-free model).
+  const keyOf = (collided: Set<string>, ctx: string, name: string) =>
+    collided.has(name) ? `${ctx}.${name}` : name;
+  // `$ref` targets are resolved in the REFERER's context — a part is contained
+  // in its aggregate's context, and a VO used by an aggregate is folded into
+  // that same context — so a colliding target qualifies with the referer's ctx.
+  const refIn =
+    (ctx: string): RefResolver =>
+    (bucket, name) => {
+      const collided = bucket === "parts" ? collidedPart : collidedVo;
+      return `#/${bucket}/${collided.has(name) ? `${ctx}.${name}` : name}`;
+    };
+
+  for (const e of aggs) {
+    doc.aggregates[keyOf(collidedAgg, e.ctx, e.name)] = objectSchemaFromWireShape(
+      e.node.wireShape,
+      refIn(e.ctx),
+    );
+  }
+  for (const e of parts) {
+    doc.parts[keyOf(collidedPart, e.ctx, e.name)] = objectSchemaFromWireShape(
+      e.node.wireShape,
+      refIn(e.ctx),
+    );
+  }
+  for (const e of vos) {
+    doc.valueObjects[keyOf(collidedVo, e.ctx, e.name)] = objectSchemaFromWireShape(
+      e.node.wireShape,
+      refIn(e.ctx),
+    );
   }
   return doc;
 }
 
-function collectContext(ctx: EnrichedBoundedContextIR, doc: WireSpecDoc): void {
-  for (const a of ctx.aggregates) {
-    doc.aggregates[a.name] = aggregateSchema(a);
-    for (const p of a.parts) doc.parts[p.name] = partSchema(p);
-  }
-  for (const v of ctx.valueObjects) {
-    doc.valueObjects[v.name] = valueObjectSchema(v);
-  }
-}
-
-function aggregateSchema(a: EnrichedAggregateIR): JsonSchemaObject {
-  return objectSchemaFromWireShape(a.wireShape);
-}
-
-function partSchema(p: EnrichedEntityPartIR): JsonSchemaObject {
-  return objectSchemaFromWireShape(p.wireShape);
-}
-
-function valueObjectSchema(v: EnrichedValueObjectIR): JsonSchemaObject {
-  return objectSchemaFromWireShape(v.wireShape);
-}
-
-function objectSchemaFromWireShape(fields: WireField[]): JsonSchemaObject {
+function objectSchemaFromWireShape(
+  fields: WireField[],
+  ref: RefResolver = bareRef,
+): JsonSchemaObject {
   const properties: Record<string, JsonSchemaProperty> = {};
   const required: string[] = [];
   for (const f of fields) {
-    properties[f.name] = jsonPropertyForType(f.type);
+    properties[f.name] = jsonPropertyForType(f.type, ref);
     if (!f.optional) required.push(f.name);
   }
   return {
@@ -105,7 +169,7 @@ function objectSchemaFromWireShape(fields: WireField[]): JsonSchemaObject {
   };
 }
 
-export function jsonPropertyForType(t: TypeIR): JsonSchemaProperty {
+export function jsonPropertyForType(t: TypeIR, ref: RefResolver = bareRef): JsonSchemaProperty {
   switch (t.kind) {
     // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
     case "primitive":
@@ -150,13 +214,13 @@ export function jsonPropertyForType(t: TypeIR): JsonSchemaProperty {
     case "enum":
       return { type: "string" };
     case "valueobject":
-      return { $ref: `#/valueObjects/${t.name}` };
+      return { $ref: ref("valueObjects", t.name) };
     case "entity":
-      return { $ref: `#/parts/${t.name}` };
+      return { $ref: ref("parts", t.name) };
     case "array":
-      return { type: "array", items: jsonPropertyForType(t.element) };
+      return { type: "array", items: jsonPropertyForType(t.element, ref) };
     case "optional":
-      return jsonPropertyForType(t.inner);
+      return jsonPropertyForType(t.inner, ref);
     case "action":
     case "slot":
       throw new Error(
