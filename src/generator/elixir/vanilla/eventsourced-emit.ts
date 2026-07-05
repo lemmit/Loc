@@ -567,7 +567,9 @@ export function renderEsController(
   // `record.<snake>` reads line up.  A ref-collection field would need a
   // `__ref_ids/1` helper whose Ecto-assoc semantics don't hold for the in-memory
   // fold, so those (rare) aggregates keep the raw dump.
-  const wire = hasRefColls(agg) ? null : renderWireSerialize(agg, ctx);
+  const wire = hasRefColls(agg)
+    ? null
+    : renderWireSerialize(agg, ctx, { contextModule: facadeMod });
   const serializeBlock = wire
     ? `${wire.serialize}${wire.helpers.length > 0 ? `\n\n${wire.helpers.join("\n\n")}` : ""}`
     : `  defp serialize(record) do

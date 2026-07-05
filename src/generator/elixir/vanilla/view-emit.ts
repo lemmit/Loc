@@ -359,7 +359,9 @@ export function emitVanillaViewsController(
     if (seenAgg.has(aggModule)) continue;
     seenAgg.add(aggModule);
     if (hasRefColls(agg)) needsRefIds = true;
-    const { body, helpers } = renderWireSerialize(agg, ctx);
+    const { body, helpers } = renderWireSerialize(agg, ctx, {
+      contextModule: `${appModule}.${upperFirst(ctx.name)}`,
+    });
     structClauses.push(`  defp serialize(%${aggModule}{} = record) do\n${body}\n  end`);
     for (const h of helpers) {
       const name = h.match(/defp (serialize_\w+)\(/)?.[1] ?? h;
