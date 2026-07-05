@@ -192,13 +192,30 @@ export function generateDotnetForContexts(
     styleAdapter?: StyleAdapter;
     layoutAdapter?: LayoutAdapter;
   },
-  options: { emitTrace?: boolean; sourcemap?: SourceMapRecorder } = {},
+  options: {
+    emitTrace?: boolean;
+    sourcemap?: SourceMapRecorder;
+    /** `.ddd` source text keyed by `OriginRef` source path (M7 phase 6a) —
+     *  forwarded verbatim into the root `renderEntity` call so the REGULAR
+     *  named-operation body loop can weave `#line` directives.  Gated on
+     *  `sourcemap` also being present (same honest-skip convention as the
+     *  v3 sidecars): no text → no directives, never guessed. */
+    sourceTexts?: ReadonlyMap<string, string>;
+  } = {},
 ): Map<string, string> {
   const out = new Map<string, string>();
   const emitTrace = !!options.emitTrace;
   if (namespace !== undefined) {
     // Single project containing all the given contexts under one namespace.
-    emitProjectFromContexts(contexts, namespace, out, system, emitTrace, options.sourcemap);
+    emitProjectFromContexts(
+      contexts,
+      namespace,
+      out,
+      system,
+      emitTrace,
+      options.sourcemap,
+      options.sourceTexts,
+    );
   } else {
     for (const ctx of contexts) {
       emitContext(ctx, ctx.name, out, emitTrace);
@@ -220,6 +237,7 @@ function emitProjectFromContexts(
   },
   emitTrace = false,
   sourcemap?: SourceMapRecorder,
+  sourceTexts?: ReadonlyMap<string, string>,
 ): void {
   // Fullstack-dotnet branch — when the deployable declares a `ui:`
   // mount, the .NET project hosts an embedded React SPA from
@@ -283,7 +301,7 @@ function emitProjectFromContexts(
       sourcemap?.file(evPath, evContent, ev.origin, `${ctx.name}.${ev.name}`);
     }
     for (const agg of ctx.aggregates) {
-      emitAggregate(agg, ctx, ns, out, routePrefix, emitTrace, emitCtx, sourcemap);
+      emitAggregate(agg, ctx, ns, out, routePrefix, emitTrace, emitCtx, sourcemap, sourceTexts);
     }
     emitBaseReaders(ctx, ns, out, sourcemap);
     // Domain services (domain-services.md) — stateless pure calculators, one
@@ -726,6 +744,10 @@ function emitAggregate(
    *  only in system-mode emit, same discipline as `emitCtx`.  No-op when
    *  absent (legacy single-context path), so output stays byte-identical. */
   sourcemap?: SourceMapRecorder,
+  /** `.ddd` source text keyed by `OriginRef` source path (M7 phase 6a) —
+   *  forwarded into the root `renderEntity` call only (entity parts carry
+   *  no operations, so weaving would be a no-op there anyway). */
+  sourceTexts?: ReadonlyMap<string, string>,
 ): void {
   const aggFolder = plural(agg.name);
   const construct = `${ctx.name}.${agg.name}`;
@@ -875,6 +897,7 @@ function emitAggregate(
       operationReturnUnions,
       opFragments,
       construct,
+      sourceTexts,
     ),
     agg.origin,
     opFragments,

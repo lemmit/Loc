@@ -90,6 +90,16 @@ function stripSourceMappingDirective(content: string): string {
   return content.replace(/\/\/# sourceMappingURL=.*\n$/, "");
 }
 
+// M7 phase 6a: the .NET backend weaves enhanced `#line (a,b)-(c,d) "path"` /
+// `#line hidden` / `#line default` directives into REGULAR named-operation
+// bodies when `sourceTexts` is present — strip them before comparing a
+// `.cs` file against the flag-off run, whose `.cs` output never carries
+// them (see `test/generator/dotnet/line-directives.test.ts` for the
+// directive-shape assertions).
+function stripLineDirectives(content: string): string {
+  return content.replace(/^#line (\(|default\b|hidden\b).*\n/gm, "");
+}
+
 // `langium/test`'s `parseHelper` mints the in-memory doc's URI from a
 // module-global counter (`/1.ddd`, `/2.ddd`, …) that keeps incrementing
 // across every `it` in this file — never assume `/1.ddd`.  Parse with
@@ -115,8 +125,12 @@ describe(".loom/sourcemap.json", () => {
 
     expect(withoutFlag.has(".loom/sourcemap.json")).toBe(false);
     expect([...withoutFlag.keys()].some((p) => p.endsWith(".map"))).toBe(false);
-    for (const content of withoutFlag.values()) {
+    for (const [path, content] of withoutFlag) {
       expect(content).not.toContain("//# sourceMappingURL=");
+      // Honest skip: flag-off never weaves .NET `#line` directives, with or
+      // without `sourceTexts` (M7 phase 6a needs BOTH `sourcemap` and
+      // `sourceTexts` — flag-off has neither).
+      if (path.endsWith(".cs")) expect(content).not.toContain("\n#line ");
     }
 
     const withFlagMinusMap = new Map(withFlag);
@@ -129,10 +143,15 @@ describe(".loom/sourcemap.json", () => {
     for (const [path, content] of withoutFlag) {
       const other = withFlagMinusMap.get(path);
       expect(other, `missing ${path} in --sourcemap run`).toBeDefined();
-      expect(
-        normalizeNondeterministic(stripSourceMappingDirective(other!)),
-        `content drifted for ${path}`,
-      ).toBe(normalizeNondeterministic(content));
+      // The flag-on run also passes `sourceTexts`, so .cs output now carries
+      // woven `#line` directives (M7 phase 6a) — strip them before the
+      // byte-identical comparison; every other extension is untouched.
+      const otherNormalized = path.endsWith(".cs")
+        ? stripLineDirectives(stripSourceMappingDirective(other!))
+        : stripSourceMappingDirective(other!);
+      expect(normalizeNondeterministic(otherNormalized), `content drifted for ${path}`).toBe(
+        normalizeNondeterministic(content),
+      );
     }
   });
 
@@ -319,6 +338,11 @@ describe(".loom/sourcemap.json", () => {
     expect(path, `no ${file} region recorded under ${slug}/`).toBeDefined();
     const regions = map.files[path!]!;
     const content = files.get(path!)!;
+    // This suite's `generateSystems` call above passes no `sourceTexts`, so
+    // the .NET `#line` weave (M7 phase 6a, gated on BOTH `sourcemap` AND
+    // `sourceTexts`) never fires here — the sub-region line math below stays
+    // exactly the pre-M7 shape regardless of platform.
+    if (platform === "dotnet") expect(content).not.toContain("#line");
     const fileLineCount = content.endsWith("\n")
       ? content.split("\n").length - 1
       : content.split("\n").length;

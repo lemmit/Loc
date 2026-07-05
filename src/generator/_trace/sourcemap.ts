@@ -82,6 +82,26 @@ function lineAt(content: string, idx: number): number {
   return n;
 }
 
+/** 1-based (line, col) of `offset` within `text` — this is the
+ *  origin-tooling shared home for byte-offset → (line, col) conversion
+ *  (`OriginRef` spans stay byte offsets everywhere else; this is the
+ *  conversion boundary).  Consumed by `src/system/sourcemap-v3.ts` (which
+ *  converts to the 0-based pairs the Source Map v3 spec uses at its own
+ *  call site) and by the .NET enhanced `#line` directive weave
+ *  (`src/generator/dotnet/emit/entity.ts`), which wants 1-based pairs
+ *  directly — C#'s `#line (line,col)-(line,col)` form is 1-based. */
+export function offsetToLineCol(text: string, offset: number): { line: number; col: number } {
+  let line = 1;
+  let lineStart = 0;
+  for (let i = 0; i < offset && i < text.length; i++) {
+    if (text[i] === "\n") {
+      line++;
+      lineStart = i + 1;
+    }
+  }
+  return { line, col: offset - lineStart + 1 };
+}
+
 export class SourceMapRecorder {
   private readonly store: Map<string, SourceMapRegion[]>;
   private readonly prefix: string;

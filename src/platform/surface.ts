@@ -256,6 +256,14 @@ export interface PlatformSurface extends PlatformDescriptor {
      *  absent means "record nothing" — every platform without a bracket
      *  yet is a no-op here, not an error. */
     sourcemap?: SourceMapRecorder;
+    /** `.ddd` source text for every path an `OriginRef` can resolve to,
+     *  keyed the same way as `GenerateSystemOptions.sourceTexts`
+     *  (`src/system/index.ts`) — forwarded verbatim, no scoping.  Feeds
+     *  target-native debug-info dialects a platform may weave into its own
+     *  output (e.g. the .NET backend's enhanced C# `#line` directives, M7
+     *  phase 6a); platforms without one simply ignore it.  No effect
+     *  unless `sourcemap` is also present (same honest-skip convention). */
+    sourceTexts?: ReadonlyMap<string, string>;
   }): Map<string, string>;
   /** Inputs for the deployable's docker-compose service stanza. */
   composeService(args: {
