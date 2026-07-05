@@ -23,6 +23,7 @@ import type {
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
+import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
 import type { ApiRoute } from "../api-emit.js";
 import { opUsesCurrentUser } from "../domain/predicates.js";
 import { auditRecordCall, createAuditMeta, destroyAuditMeta } from "./audit-emit.js";
@@ -63,6 +64,7 @@ export function emitVanillaApiControllers(
   ctx: BoundedContextIR,
   out: Map<string, string>,
   sys?: SystemIR,
+  sourcemap?: SourceMapRecorder,
 ): VanillaApiEmitResult {
   const ctxModule = upperFirst(ctx.name);
   const routes: ApiRoute[] = [];
@@ -74,21 +76,21 @@ export function emitVanillaApiControllers(
     const controllerName = `${aggPascal}Controller`;
     const memberOps = memberOperations(agg);
     const es = isEventSourced(agg);
-    out.set(
-      `lib/${appName}_web/controllers/${aggSnake}_controller.ex`,
-      es
-        ? renderEsController(appModule, ctxModule, agg, ctx)
-        : renderController(
-            appModule,
-            ctxModule,
-            agg,
-            aggSnake,
-            memberOps,
-            ctx,
-            isVanillaDocAgg(agg, ctx, sys),
-            isAbstractBase(agg),
-          ),
-    );
+    const controllerPath = `lib/${appName}_web/controllers/${aggSnake}_controller.ex`;
+    const controllerContent = es
+      ? renderEsController(appModule, ctxModule, agg, ctx)
+      : renderController(
+          appModule,
+          ctxModule,
+          agg,
+          aggSnake,
+          memberOps,
+          ctx,
+          isVanillaDocAgg(agg, ctx, sys),
+          isAbstractBase(agg),
+        );
+    out.set(controllerPath, controllerContent);
+    sourcemap?.file(controllerPath, controllerContent, agg.origin, `${ctx.name}.${agg.name}`);
 
     // Read path.  Custom-find routes (`GET /<plural>/<find>`) MUST precede the
     // `/:id` show route — Phoenix matches in registration order, so a literal

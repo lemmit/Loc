@@ -29,6 +29,7 @@
 // `ir/types` → `ir/util`; the reverse edge (walk.ts → loom-ir.ts) is `import
 // type` only (erased at emit), so no runtime cycle forms.
 import { walkExprDeep, walkStmtExprsDeep, walkWorkflowStmtExprsDeep } from "../util/walk.js";
+import type { OriginRef } from "./origin.js";
 
 export type IdValueType = "guid" | "int" | "long" | "string";
 
@@ -197,6 +198,10 @@ export interface FieldIR {
    *  other `ExprIR`; consumed when synthesising a create for an aggregate
    *  with no explicit one. */
   default?: ExprIR;
+  /** Provenance chain back to the `.ddd` source — see
+   * src/ir/types/origin.ts.  Populated at lowering; absent on purely
+   * derived nodes. */
+  origin?: OriginRef;
 }
 
 /** One entry in an aggregate's reified **create-input contract** — the
@@ -409,6 +414,10 @@ export interface OperationIR {
    * functions inline like any boolean position.  Emission: Hono +
    * .NET; gated on elixir (`loom.when-unsupported`). */
   when?: ExprIR;
+  /** Provenance chain back to the `.ddd` source — see
+   * src/ir/types/origin.ts.  Populated at lowering; absent on purely
+   * derived nodes. */
+  origin?: OriginRef;
 }
 
 /** Event-fold applier — the lowered form of an `apply(e: Event) { … }`
@@ -629,6 +638,10 @@ export interface AggregateIR {
    * A `persistedAs(eventLog)` / `shape(document)` concrete of a `sharedTable`
    * base is forced to `ownTable` (D-ES-TPH; enforced by the validator). */
   inheritanceUsing?: InheritanceLayout;
+  /** Provenance chain back to the `.ddd` source — see
+   * src/ir/types/origin.ts.  Populated at lowering; absent on purely
+   * derived nodes. */
+  origin?: OriginRef;
 }
 
 /** Inheritance table layout — the aggregate-inheritance layout axis
@@ -710,11 +723,19 @@ export interface ValueObjectIR {
   /** Canonical wire-shape — no id, no containment, just declared
    * fields + derived. */
   wireShape?: WireField[];
+  /** Provenance chain back to the `.ddd` source — see
+   * src/ir/types/origin.ts.  Populated at lowering; absent on purely
+   * derived nodes. */
+  origin?: OriginRef;
 }
 
 export interface EventIR {
   name: string;
   fields: FieldIR[];
+  /** Provenance chain back to the `.ddd` source — see
+   * src/ir/types/origin.ts.  Populated at lowering; absent on purely
+   * derived nodes. */
+  origin?: OriginRef;
 }
 
 /** A channel — the publisher-side contract for how a context's events are
@@ -796,6 +817,10 @@ export interface RepositoryIR {
   name: string;
   aggregateName: string;
   finds: FindIR[];
+  /** Provenance chain back to the `.ddd` source — see
+   * src/ir/types/origin.ts.  Populated at lowering; absent on purely
+   * derived nodes. */
+  origin?: OriginRef;
 }
 
 /** A named, parameterised, pure boolean predicate over a candidate
@@ -939,6 +964,10 @@ export interface BoundedContextIR {
    *  translator reads `errorStatusOverrides?.[name] ?? defaultErrorStatus(name)`.
    *  Undefined in single-context (no-api) lowering — defaults apply. */
   errorStatusOverrides?: Record<string, number>;
+  /** Provenance chain back to the `.ddd` source — see
+   * src/ir/types/origin.ts.  Populated at lowering; absent on purely
+   * derived nodes. */
+  origin?: OriginRef;
 }
 
 /** A first-boot seed dataset for a context's aggregates
@@ -1032,6 +1061,10 @@ export interface ViewIR {
      *  no follows. */
     auxiliaries: { path: string[]; aggName: string; mapVar: string }[];
   };
+  /** Provenance chain back to the `.ddd` source — see
+   * src/ir/types/origin.ts.  Populated at lowering; absent on purely
+   * derived nodes. */
+  origin?: OriginRef;
 }
 
 /** SQL-92 isolation levels — optional on `transactional` workflows.
@@ -1130,6 +1163,10 @@ export interface WorkflowIR {
    *  fold of the per-correlation `<wf>_events` stream).  Absent only for
    *  stateless workflows (no correlation field ⇒ no instance to read). */
   instanceWireShape?: WireField[];
+  /** Provenance chain back to the `.ddd` source — see
+   * src/ir/types/origin.ts.  Populated at lowering; absent on purely
+   * derived nodes. */
+  origin?: OriginRef;
 }
 
 /** A named `handle name(params) { … }` command handler on a workflow
@@ -2128,6 +2165,10 @@ export interface PageIR {
    *  `ExprIR`.  Only the route-`/` page (or the first page when
    *  no `/` exists) contributes metadata to the shell. */
   metadata?: PageMetadataIR;
+  /** Provenance chain back to the `.ddd` source — see
+   * src/ir/types/origin.ts.  Populated at lowering; absent on purely
+   * derived nodes. */
+  origin?: OriginRef;
 }
 
 /** Static page metadata — SEO + social-graph tags written into

@@ -37,6 +37,7 @@ import {
   PLAYWRIGHT_CONFIG_TS_PHOENIX,
 } from "../_frontend/e2e-harness.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
+import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import {
   type ActionBinding,
   defaultInitFor,
@@ -63,8 +64,14 @@ export function emitLiveViewPages(args: {
    *  (plain Ecto/Phoenix LiveView — no Ash).  Kept on the options shape only
    *  so the caller's `foundation: "vanilla"` still type-checks; ignored. */
   foundation?: "vanilla";
+  /** Generate-time source-map recorder (`--sourcemap`).  Records one region
+   *  per emitted LiveView module AND per Playwright page object, both
+   *  against the page's `origin` — a scaffolded page's origin is a
+   *  `kind:"macro"` ref pointing at its `with scaffold(...)` call site, so
+   *  this is the macro leg of the source-map milestone. */
+  sourcemap?: SourceMapRecorder;
 }): { files: Map<string, string>; routes: LiveRoute[] } {
-  const { contexts, deployable, sys, appName, appModule } = args;
+  const { contexts, deployable, sys, appName, appModule, sourcemap } = args;
   const out = new Map<string, string>();
   const routes: LiveRoute[] = [];
 
@@ -198,6 +205,7 @@ export function emitLiveViewPages(args: {
       authEnabled,
     });
     out.set(filePath, source);
+    sourcemap?.file(filePath, source, page.origin, `${ui.name}.${page.name}`);
     routes.push({ route: page.route, liveModule });
 
     // Playwright page object emission.  Mirrors the React
@@ -210,7 +218,9 @@ export function emitLiveViewPages(args: {
       aggregatesByName,
       contextByAggName,
     });
-    out.set(`e2e/pages/${snake(emitName)}.ts`, pageObjectSource);
+    const pageObjectPath = `e2e/pages/${snake(emitName)}.ts`;
+    out.set(pageObjectPath, pageObjectSource);
+    sourcemap?.file(pageObjectPath, pageObjectSource, page.origin, `${ui.name}.${page.name}`);
   }
 
   // Playwright harness + route-driven smoke spec — the same e2e surface

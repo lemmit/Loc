@@ -27,6 +27,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { snake, upperFirst } from "../../../util/naming.js";
+import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import {
   aggregateUsesPrincipalContextFilter,
@@ -58,6 +59,7 @@ export function emitVanillaRepositories(
   out: Map<string, string>,
   sys?: SystemIR,
   principalIdKey = "id",
+  sourcemap?: SourceMapRecorder,
 ): void {
   const ctxModule = upperFirst(ctx.name);
   const pool = ctx.aggregates;
@@ -77,7 +79,9 @@ export function emitVanillaRepositories(
       : isVanillaDocAgg(agg, ctx, sys)
         ? renderDocRepository(appModule, ctxModule, agg, customFindsOf(repo))
         : renderRepository(appModule, ctxModule, agg, repo, principalIdKey, ctx, pool, sys);
-    out.set(`lib/${appSnake}/${ctxSnake}/${aggSnake}_repository.ex`, content);
+    const path = `lib/${appSnake}/${ctxSnake}/${aggSnake}_repository.ex`;
+    out.set(path, content);
+    sourcemap?.file(path, content, repo?.origin ?? agg.origin, `${ctx.name}.${agg.name}`);
   }
 }
 

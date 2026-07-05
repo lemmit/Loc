@@ -312,6 +312,13 @@ interface RunOptions {
    * table).  Off by default: a destructive delta aborts the run with a
    * `loom.migration-destructive` error.  See docs/migrations.md. */
   allowDestructive?: boolean;
+  /** `--sourcemap` switch — when true, `generate system` additionally emits
+   * `.loom/sourcemap.json` mapping generated file regions back to `.ddd`
+   * spans / macro-call sites.  Off by default (byte-identical output).
+   * System target only — the legacy single-project `generate ts` /
+   * `generate dotnet` paths don't accept this flag.
+   * See docs/plans/source-map-debug-kickoff.md. */
+  sourcemap?: boolean;
 }
 
 interface RunResult {
@@ -404,6 +411,7 @@ async function runGenerate(
         emitKubernetes: options.emitKubernetes,
         snapshots: fsSnapshotStore(outDir),
         allowDestructive: options.allowDestructive,
+        sourcemap: options.sourcemap,
       }).files;
     } catch (err) {
       // A corrupted/truncated migration snapshot, or a destructive delta
@@ -869,6 +877,10 @@ generate
     "--allow-destructive",
     "permit destructive delta migrations (column/table drops, NOT-NULL adds without a default on an existing table); off by default a destructive delta aborts. See docs/migrations.md.",
   )
+  .option(
+    "--sourcemap",
+    "emit .loom/sourcemap.json mapping generated code back to .ddd spans; off by default. See docs/plans/source-map-debug-kickoff.md.",
+  )
   .action(
     async (
       file: string,
@@ -880,6 +892,7 @@ generate
         trace?: boolean;
         k8s?: boolean;
         allowDestructive?: boolean;
+        sourcemap?: boolean;
       },
     ) => {
       if (options.json) {
@@ -895,6 +908,7 @@ generate
         emitTrace: !!options.trace,
         emitKubernetes: !!options.k8s,
         allowDestructive: !!options.allowDestructive,
+        sourcemap: !!options.sourcemap,
       };
       await runGenerate("system", file, options.out, runOpts);
       if (options.watch) {

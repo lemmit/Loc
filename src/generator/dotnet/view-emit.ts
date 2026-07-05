@@ -10,6 +10,7 @@ import type {
 import { exprUsesCurrentUser, viewUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { camelId, opView } from "../../ir/util/openapi-ids.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
+import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { dtoParam, projectEntityExpr, projectToResponse, wireType } from "./dto-mapping.js";
 import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
 import { esCorrIdClass, esEventDbSet } from "./workflow-eventsourced-emit.js";
@@ -40,38 +41,46 @@ export function emitViews(
   ctx: EnrichedBoundedContextIR,
   ns: string,
   out: Map<string, string>,
-  options?: { routePrefix?: string },
+  options?: { routePrefix?: string; sourcemap?: SourceMapRecorder },
 ): void {
   if (ctx.views.length === 0) return;
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
   const wfByName = new Map(ctx.workflows.map((w) => [w.name, w] as const));
+  const sourcemap = options?.sourcemap;
   for (const view of ctx.views) {
+    const construct = `${ctx.name}.${view.name}`;
     // Workflow-sourced view (workflow-instance-views.md): a Mediator query
     // whose handler reads the saga-state DbSet with the filter, returning the
     // workflow's `<Wf>InstanceResponse` (emitted by emitWorkflowInstanceReads).
     if (view.source.kind === "workflow") {
       const wf = wfByName.get(view.source.name);
       if (!wf?.instanceWireShape) continue; // validator already errored
-      out.set(
-        `Application/Views/${upperFirst(view.name)}Query.cs`,
-        renderWorkflowViewQuery(view, wf, ns),
-      );
-      out.set(
-        `Application/Views/${upperFirst(view.name)}Handler.cs`,
-        renderWorkflowViewHandler(view, wf, ctx, ns),
-      );
+      const queryPath = `Application/Views/${upperFirst(view.name)}Query.cs`;
+      const queryContent = renderWorkflowViewQuery(view, wf, ns);
+      out.set(queryPath, queryContent);
+      sourcemap?.file(queryPath, queryContent, view.origin, construct);
+      const handlerPath = `Application/Views/${upperFirst(view.name)}Handler.cs`;
+      const handlerContent = renderWorkflowViewHandler(view, wf, ctx, ns);
+      out.set(handlerPath, handlerContent);
+      sourcemap?.file(handlerPath, handlerContent, view.origin, construct);
       continue;
     }
     const agg = aggsByName.get(view.source.name);
     if (!agg) continue; // validator already errored
     if (view.output) {
-      out.set(`Application/Views/${upperFirst(view.name)}Row.cs`, renderRowRecord(view, ctx, ns));
+      const rowPath = `Application/Views/${upperFirst(view.name)}Row.cs`;
+      const rowContent = renderRowRecord(view, ctx, ns);
+      out.set(rowPath, rowContent);
+      sourcemap?.file(rowPath, rowContent, view.origin, construct);
     }
-    out.set(`Application/Views/${upperFirst(view.name)}Query.cs`, renderQuery(view, agg, ns));
-    out.set(
-      `Application/Views/${upperFirst(view.name)}Handler.cs`,
-      renderHandler(view, agg, ctx, ns),
-    );
+    const queryPath = `Application/Views/${upperFirst(view.name)}Query.cs`;
+    const queryContent = renderQuery(view, agg, ns);
+    out.set(queryPath, queryContent);
+    sourcemap?.file(queryPath, queryContent, view.origin, construct);
+    const handlerPath = `Application/Views/${upperFirst(view.name)}Handler.cs`;
+    const handlerContent = renderHandler(view, agg, ctx, ns);
+    out.set(handlerPath, handlerContent);
+    sourcemap?.file(handlerPath, handlerContent, view.origin, construct);
   }
   out.set(`Api/${ctx.name}ViewsController.cs`, renderController(ctx, ns, options?.routePrefix));
 }

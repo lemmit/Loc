@@ -8,9 +8,12 @@ import type {
   EnrichedBoundedContextIR,
   RepositoryIR,
   SystemIR,
+  ViewIR,
+  WorkflowIR,
 } from "../../ir/types/loom-ir.js";
-import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser, workflowEmitsCommandRoute } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
+import type { OriginRef } from "../../ir/types/origin.js";
 import { directParentOf } from "../../ir/util/containment-parent.js";
 import { isTpcBase, isTphBase, tableOwnerName } from "../../ir/util/inheritance.js";
 import {
@@ -25,6 +28,7 @@ import { API_BASE_PATH } from "../../util/api-base.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
 import { unionMembers } from "../_payload/union-wire.js";
+import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { generateReactForContexts } from "../react/index.js";
 import { generateSvelteForContexts } from "../svelte/index.js";
 import { generateVueForContexts } from "../vue/index.js";
@@ -125,7 +129,10 @@ import {
   eventSourcedWorkflows,
   renderEsWorkflowFoldClass,
 } from "./emit/workflow-eventsourced.js";
-import { renderJavaWorkflowInstanceReads } from "./emit/workflow-instances.js";
+import {
+  observableWorkflowsOf,
+  renderJavaWorkflowInstanceReads,
+} from "./emit/workflow-instances.js";
 import {
   correlationWorkflows,
   renderWorkflowStateEntity,
@@ -188,10 +195,10 @@ export function generateJavaForContexts(
   contexts: EnrichedBoundedContextIR[],
   ns: string,
   system?: SystemArgs,
-  options: { emitTrace?: boolean } = {},
+  options: { emitTrace?: boolean; sourcemap?: SourceMapRecorder } = {},
 ): Map<string, string> {
   const out = new Map<string, string>();
-  emitProjectFromContexts(contexts, ns, out, system, !!options.emitTrace);
+  emitProjectFromContexts(contexts, ns, out, system, !!options.emitTrace, options.sourcemap);
   return out;
 }
 
@@ -201,6 +208,7 @@ function emitProjectFromContexts(
   out: Map<string, string>,
   system?: SystemArgs,
   emitTrace = false,
+  sourcemap?: SourceMapRecorder,
 ): void {
   const basePkg = basePackageFor(ns);
   const slug = javaPackageSegment(ns);
@@ -227,9 +235,13 @@ function emitProjectFromContexts(
     category: JavaArtifactCategory,
     content: string,
     aggregateName?: string,
+    origin?: OriginRef,
+    construct?: string,
   ): void => {
     const artifact = { name, content, category, aggregateName } as JavaArtifact;
-    out.set(layout.pathFor(artifact, emitCtx), content);
+    const path = layout.pathFor(artifact, emitCtx);
+    out.set(path, content);
+    sourcemap?.file(path, content, origin, construct);
   };
   const pkgFor = (category: JavaArtifactCategory, aggregateName?: string): string =>
     layout.packageFor(category, basePkg, aggregateName);
@@ -379,19 +391,50 @@ function emitProjectFromContexts(
     // typed id); a TPH base owns the shared single-table key.
     for (const agg of ctx.aggregates) {
       if (agg.isAbstract && !isTphBase(agg, ctx.aggregates)) continue;
-      place(`${agg.name}Id.java`, "id", renderJavaId(agg.name, agg.idValueType, basePkg));
+      // Ids carry no origin of their own — attribute to the owning aggregate.
+      const idConstruct = `${ctx.name}.${agg.name}`;
+      place(
+        `${agg.name}Id.java`,
+        "id",
+        renderJavaId(agg.name, agg.idValueType, basePkg),
+        undefined,
+        agg.origin,
+        idConstruct,
+      );
       for (const part of agg.parts) {
-        place(`${part.name}Id.java`, "id", renderJavaId(part.name, agg.idValueType, basePkg));
+        place(
+          `${part.name}Id.java`,
+          "id",
+          renderJavaId(part.name, agg.idValueType, basePkg),
+          undefined,
+          agg.origin,
+          idConstruct,
+        );
       }
     }
     for (const e of ctx.enums) {
+      // EnumIR carries no origin — never recorded.
       place(`${e.name}.java`, "enum", renderJavaEnum(e, basePkg));
     }
     for (const vo of ctx.valueObjects) {
-      place(`${vo.name}.java`, "valueobject", renderJavaValueObject(vo, basePkg));
+      place(
+        `${vo.name}.java`,
+        "valueobject",
+        renderJavaValueObject(vo, basePkg),
+        undefined,
+        vo.origin,
+        `${ctx.name}.${vo.name}`,
+      );
     }
     for (const ev of ctx.events) {
-      place(`${ev.name}.java`, "event", renderJavaEvent(ev, basePkg));
+      place(
+        `${ev.name}.java`,
+        "event",
+        renderJavaEvent(ev, basePkg),
+        undefined,
+        ev.origin,
+        `${ctx.name}.${ev.name}`,
+      );
     }
     for (const agg of ctx.aggregates) {
       emitAggregate(
@@ -448,8 +491,25 @@ function emitProjectFromContexts(
       system?.sys,
     );
     if (workflowFiles) {
+      // Per-workflow Request DTOs are individually attributable; the combined
+      // per-context `<Ctx>Workflows` service and `<Ctx>WorkflowsController`
+      // merge every command workflow's method/route, so those stay unmapped
+      // rather than pinned to one workflow's origin.
+      const wfRequestOrigin = new Map<string, WorkflowIR>(
+        ctx.workflows
+          .filter((wf) => workflowEmitsCommandRoute(wf) && wf.params.length > 0)
+          .map((wf) => [`${upperFirst(wf.name)}Request.java`, wf]),
+      );
       for (const [name, f] of workflowFiles) {
-        place(name, f.category === "controller" ? "api-common" : "workflow-service", f.content);
+        const wf = wfRequestOrigin.get(name);
+        place(
+          name,
+          f.category === "controller" ? "api-common" : "workflow-service",
+          f.content,
+          undefined,
+          wf?.origin,
+          wf ? `${ctx.name}.${wf.name}` : undefined,
+        );
       }
     }
     // Saga-state persistence (workflow-debt-backend-parity.md, Java saga slice
@@ -463,10 +523,14 @@ function emitProjectFromContexts(
       // dispatcher's package so the handler body reaches its package-private
       // state fields (workflow-and-applier.md A2-S5b).
       if (wf.eventSourced) continue;
+      const wfConstruct = `${ctx.name}.${wf.name}`;
       place(
         `${workflowStateClass(wf)}.java`,
         "infra-persistence",
         renderWorkflowStateEntity(wf, ctx, basePkg, pkgFor("infra-persistence"), ctxSchema),
+        undefined,
+        wf.origin,
+        wfConstruct,
       );
       place(
         `${workflowStateClass(wf)}Repository.java`,
@@ -477,6 +541,9 @@ function emitProjectFromContexts(
           pkgFor("spring-data-repository"),
           pkgFor("infra-persistence"),
         ),
+        undefined,
+        wf.origin,
+        wfConstruct,
       );
     }
     for (const wf of eventSourcedWorkflows(ctx.workflows)) {
@@ -484,6 +551,9 @@ function emitProjectFromContexts(
         `${esWorkflowStateClass(wf)}.java`,
         "workflow-service",
         renderEsWorkflowFoldClass(wf, ctx, basePkg, pkgFor("workflow-service")),
+        undefined,
+        wf.origin,
+        `${ctx.name}.${wf.name}`,
       );
     }
     // In-process saga dispatcher (workflow-debt-backend-parity.md, Java saga
@@ -511,7 +581,23 @@ function emitProjectFromContexts(
       contextSchema: ctxSchema,
     });
     if (instanceReads) {
-      for (const [name, f] of instanceReads) place(name, f.category, f.content);
+      // Per-workflow InstanceResponse DTOs are individually attributable;
+      // the combined `<Ctx>WorkflowInstancesController` merges every
+      // observable saga's routes, so it stays unmapped.
+      const instanceResponseOrigin = new Map<string, WorkflowIR>(
+        observableWorkflowsOf(ctx).map((wf) => [`${upperFirst(wf.name)}InstanceResponse.java`, wf]),
+      );
+      for (const [name, f] of instanceReads) {
+        const wf = instanceResponseOrigin.get(name);
+        place(
+          name,
+          f.category,
+          f.content,
+          undefined,
+          wf?.origin,
+          wf ? `${ctx.name}.${wf.name}` : undefined,
+        );
+      }
     }
     const viewFiles = renderJavaViews(ctx, {
       basePkg,
@@ -525,7 +611,27 @@ function emitProjectFromContexts(
       contextSchema: ctxSchema,
     });
     if (viewFiles) {
-      for (const [name, f] of viewFiles) place(name, f.category, f.content);
+      // Per-view Row DTOs are individually attributable; the combined
+      // `<Ctx>Views` service + `<Ctx>ViewsController` merge every view's
+      // method/route, so those stay unmapped.
+      const viewRowOrigin = new Map<string, ViewIR>(
+        ctx.views
+          .filter(
+            (v) => v.source.kind === "workflow" || (v.source.kind === "aggregate" && v.output),
+          )
+          .map((v) => [`${upperFirst(v.name)}Row.java`, v]),
+      );
+      for (const [name, f] of viewFiles) {
+        const v = viewRowOrigin.get(name);
+        place(
+          name,
+          f.category,
+          f.content,
+          undefined,
+          v?.origin,
+          v ? `${ctx.name}.${v.name}` : undefined,
+        );
+      }
     }
     // Reified criteria → Specification<T> factories (java consumes the
     // CriterionIR directly — the proposal's headline differentiator).
@@ -713,6 +819,8 @@ function emitAggregate(
     category: JavaArtifactCategory,
     content: string,
     aggregateName?: string,
+    origin?: OriginRef,
+    construct?: string,
   ) => void,
   pkgFor: (category: JavaArtifactCategory, aggregateName?: string) => string,
   emitTrace: boolean,
@@ -737,6 +845,7 @@ function emitAggregate(
   // wraps a bypassing read with disableFilter/enableFilter.  Derived per
   // aggregate from the context's read-decls — never stamped (capability-filter.ts).
   const promotedCaps = new Set(promotedCapabilities(agg, ctx));
+  const construct = `${ctx.name}.${agg.name}`;
 
   // Abstract bases: TPC (`ownTable`) emits a @MappedSuperclass (columns
   // flatten into each concrete's table); a TPH (`sharedTable`) base owns
@@ -750,6 +859,8 @@ function emitAggregate(
         persistence: { schema, voLookup },
       }),
       agg.name,
+      agg.origin,
+      construct,
     );
     return;
   }
@@ -820,6 +931,8 @@ function emitAggregate(
               },
       }),
       agg.name,
+      agg.origin,
+      construct,
     );
   }
   place(
@@ -846,6 +959,8 @@ function emitAggregate(
             },
     }),
     agg.name,
+    agg.origin,
+    construct,
   );
 
   // Repository triple: domain port + Spring Data JPA interface + impl.
@@ -885,11 +1000,14 @@ function emitAggregate(
     promotedCaps,
     bypassByRetrieval: inlineRunBypassesByRetrieval(ctx, agg.name),
   };
+  const repoOrigin = repo?.origin ?? agg.origin;
   place(
     `${agg.name}Repository.java`,
     "repository-interface",
     renderJavaRepositoryInterface(agg, repoWithViews, repoCtx, idClass),
     agg.name,
+    repoOrigin,
+    construct,
   );
   if (agg.persistedAs === "eventLog") {
     // Event-sourced: no Spring Data interface — the impl reads/appends
@@ -899,6 +1017,8 @@ function emitAggregate(
       "repository-impl",
       renderJavaEventSourcedRepositoryImpl(agg, repoWithViews, repoCtx, idClass, schema),
       agg.name,
+      repoOrigin,
+      construct,
     );
   } else if (isDocument) {
     // Document shape: no Spring Data interface — the impl round-trips
@@ -908,6 +1028,8 @@ function emitAggregate(
       "repository-impl",
       renderJavaDocumentRepositoryImpl(agg, repoWithViews, repoCtx, idClass, schema),
       agg.name,
+      repoOrigin,
+      construct,
     );
   } else {
     place(
@@ -915,12 +1037,16 @@ function emitAggregate(
       "spring-data-repository",
       renderJavaSpringDataRepository(agg, repoWithViews, repoCtx, idClass),
       agg.name,
+      repoOrigin,
+      construct,
     );
     place(
       `${agg.name}RepositoryImpl.java`,
       "repository-impl",
       renderJavaRepositoryImpl(agg, repoWithViews, repoCtx, idClass),
       agg.name,
+      repoOrigin,
+      construct,
     );
   }
 
@@ -936,11 +1062,11 @@ function emitAggregate(
     pkgFor("entity", agg.name),
     esCreateParams,
   )) {
-    place(dto.name, dto.category, dto.content, agg.name);
+    place(dto.name, dto.category, dto.content, agg.name, agg.origin, construct);
   }
   const validators = renderJavaValidators(agg, applicationPkg, basePkg);
   if (validators) {
-    place(`${agg.name}Validators.java`, "service", validators, agg.name);
+    place(`${agg.name}Validators.java`, "service", validators, agg.name, agg.origin, construct);
   }
   place(
     `${agg.name}Service.java`,
@@ -956,6 +1082,8 @@ function emitAggregate(
       esCreateParams,
     }),
     agg.name,
+    agg.origin,
+    construct,
   );
   // Exception-less operation returns: the domain union (sealed interface
   // + variant records, entity package) and its Jackson-polymorphic wire
@@ -964,10 +1092,10 @@ function emitAggregate(
   for (const spec of aggregateReturnUnions(agg, ctx).values()) {
     emittedUnionNames.add(spec.name);
     for (const f of renderJavaDomainUnionFiles(spec, pkgFor("entity", agg.name), basePkg)) {
-      place(f.name, "entity", f.content, agg.name);
+      place(f.name, "entity", f.content, agg.name, agg.origin, construct);
     }
     for (const f of renderJavaUnionWireFiles(spec, pkgFor("response-dto", agg.name), basePkg)) {
-      place(f.name, "response-dto", f.content, agg.name);
+      place(f.name, "response-dto", f.content, agg.name, agg.origin, construct);
     }
   }
   // Single-success union finds (`Order or NotFound` / `Order option`) emit no
@@ -977,17 +1105,22 @@ function emitAggregate(
   // needed only for a genuine multi-success union, which IR validation rejects
   // for finds.
   for (const op of agg.operations.filter((o) => o.extern)) {
+    const opConstruct = `${construct}.${op.name}`;
     place(
       `${upperFirst(op.name)}${agg.name}Handler.java`,
       "extern-handler-interface",
       renderExternHandlerInterface(agg, op, applicationPkg, basePkg, pkgFor("entity", agg.name)),
       agg.name,
+      op.origin ?? agg.origin,
+      opConstruct,
     );
     place(
       `DevStub${upperFirst(op.name)}${agg.name}Handler.java`,
       "extern-handler-stub",
       renderExternHandlerStub(agg, op, applicationPkg, basePkg, pkgFor("entity", agg.name)),
       agg.name,
+      op.origin ?? agg.origin,
+      opConstruct,
     );
   }
   place(
@@ -1004,6 +1137,8 @@ function emitAggregate(
       esConstructible: !!esCreateParams,
     }),
     agg.name,
+    agg.origin,
+    construct,
   );
 
   // `test "name"` blocks → JUnit classes (pure domain, `mvn test`).
@@ -1015,6 +1150,6 @@ function emitAggregate(
     sys?.user?.fields,
   );
   if (testsFile) {
-    place(`${agg.name}Tests.java`, "test-class", testsFile, agg.name);
+    place(`${agg.name}Tests.java`, "test-class", testsFile, agg.name, agg.origin, construct);
   }
 }

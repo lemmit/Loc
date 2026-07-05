@@ -189,6 +189,7 @@ import {
 import { lowerComponent, lowerLayout, lowerUi } from "./lower-ui.js";
 import { lowerView } from "./lower-view.js";
 import { lowerWorkflow } from "./lower-workflow.js";
+import { originFor } from "./origin.js";
 import { buildExpandContext, type WalkerExpandContext } from "./walker-primitive-expander.js";
 
 // ---------------------------------------------------------------------------
@@ -978,6 +979,7 @@ function lowerContext(
     channels,
     retrievals,
     seeds,
+    origin: originFor(ctx),
   };
 }
 
@@ -1146,6 +1148,7 @@ function lowerValueObject(vo: ValueObject, env: Env): ValueObjectIR {
       ...lowerPropertyChecks(props, inner),
     ],
     functions: vo.members.filter(isFunctionDecl).map((f) => lowerFunction(f, inner)),
+    origin: originFor(vo),
   };
 }
 
@@ -1153,6 +1156,7 @@ function lowerEvent(e: EventDecl): EventIR {
   return {
     name: e.name,
     fields: e.fields.map((f) => lowerField(f)),
+    origin: originFor(e),
   };
 }
 
@@ -1263,6 +1267,7 @@ function lowerAggregate(
     inheritanceUsing:
       (agg.inheritanceUsing as import("../types/loom-ir.js").InheritanceLayout | undefined) ??
       undefined,
+    origin: originFor(agg),
   };
 }
 
@@ -1331,5 +1336,6 @@ function lowerRepository(
         ...resolveBypass(f),
       };
     }),
+    origin: originFor(repo),
   };
 }

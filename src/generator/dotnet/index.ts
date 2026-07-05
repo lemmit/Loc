@@ -11,6 +11,7 @@ import type {
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
+import type { OriginRef } from "../../ir/types/origin.js";
 import { aggHasAuditedTarget } from "../../ir/util/audit-capability.js";
 import { durableEventTypes } from "../../ir/util/channels.js";
 import { isTpcBase, isTphBase, tableOwnerName, tphConcretesOf } from "../../ir/util/inheritance.js";
@@ -29,6 +30,7 @@ import { dedupeByName } from "../../util/dedupe.js";
 import { plural, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
 import { unionMembers } from "../_payload/union-wire.js";
+import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { generateReactForContexts } from "../react/index.js";
 import { generateSvelteForContexts } from "../svelte/index.js";
 import { generateVueForContexts } from "../vue/index.js";
@@ -189,13 +191,13 @@ export function generateDotnetForContexts(
     styleAdapter?: StyleAdapter;
     layoutAdapter?: LayoutAdapter;
   },
-  options: { emitTrace?: boolean } = {},
+  options: { emitTrace?: boolean; sourcemap?: SourceMapRecorder } = {},
 ): Map<string, string> {
   const out = new Map<string, string>();
   const emitTrace = !!options.emitTrace;
   if (namespace !== undefined) {
     // Single project containing all the given contexts under one namespace.
-    emitProjectFromContexts(contexts, namespace, out, system, emitTrace);
+    emitProjectFromContexts(contexts, namespace, out, system, emitTrace, options.sourcemap);
   } else {
     for (const ctx of contexts) {
       emitContext(ctx, ctx.name, out, emitTrace);
@@ -216,6 +218,7 @@ function emitProjectFromContexts(
     layoutAdapter?: LayoutAdapter;
   },
   emitTrace = false,
+  sourcemap?: SourceMapRecorder,
 ): void {
   // Fullstack-dotnet branch — when the deployable declares a `ui:`
   // mount, the .NET project hosts an embedded React SPA from
@@ -273,18 +276,21 @@ function emitProjectFromContexts(
     emitEnums(ctx, ns, out);
     emitValueObjects(ctx, ns, out);
     for (const ev of ctx.events) {
-      out.set(`Domain/Events/${ev.name}.cs`, renderEvent(ev, ns));
+      const evPath = `Domain/Events/${ev.name}.cs`;
+      const evContent = renderEvent(ev, ns);
+      out.set(evPath, evContent);
+      sourcemap?.file(evPath, evContent, ev.origin, `${ctx.name}.${ev.name}`);
     }
     for (const agg of ctx.aggregates) {
-      emitAggregate(agg, ctx, ns, out, routePrefix, emitTrace, emitCtx);
+      emitAggregate(agg, ctx, ns, out, routePrefix, emitTrace, emitCtx, sourcemap);
     }
-    emitBaseReaders(ctx, ns, out);
+    emitBaseReaders(ctx, ns, out, sourcemap);
     // Domain services (domain-services.md) — stateless pure calculators, one
     // `public static class` per `domainService` + its `or`-union return records.
     emitDomainServices(ctx, ns, out);
-    emitWorkflows(ctx, ns, out, { routePrefix, sys: system?.sys });
+    emitWorkflows(ctx, ns, out, { routePrefix, sys: system?.sys, sourcemap });
     emitWorkflowInstanceReads(ctx, ns, out, { routePrefix });
-    emitViews(ctx, ns, out, { routePrefix });
+    emitViews(ctx, ns, out, { routePrefix, sourcemap });
   }
   // DbContext + project shell are emitted once, with all aggregates
   // collected from the union of contexts.
@@ -715,8 +721,13 @@ function emitAggregate(
    *  call.  Byte-identical because the adapter wraps the same
    *  `emitCqrs` underneath. */
   emitCtx?: EmitCtx,
+  /** Source-map recorder (docs/plans/source-map-debug-kickoff.md) — present
+   *  only in system-mode emit, same discipline as `emitCtx`.  No-op when
+   *  absent (legacy single-context path), so output stays byte-identical. */
+  sourcemap?: SourceMapRecorder,
 ): void {
   const aggFolder = plural(agg.name);
+  const construct = `${ctx.name}.${agg.name}`;
   // Per-aggregate placement (D-REALIZATION-AXES `directoryLayout:`): route the
   // aggregate's domain + persistence files through the deployable's RESOLVED
   // layout adapter (threaded via emitCtx), falling back to byLayer in the
@@ -726,14 +737,18 @@ function emitAggregate(
   // adapters ignore the EmitCtx arg for path routing, so an empty stand-in is
   // fine when there's no system context.
   const layout = emitCtx?.layoutAdapter ?? byLayerLayoutAdapter;
-  const place = (name: string, category: DotnetArtifactCategory, content: string): void => {
-    out.set(
-      layout.pathFor(
-        { name, content, category, aggregateName: agg.name } as DotnetArtifact,
-        emitCtx ?? ({} as EmitCtx),
-      ),
-      content,
+  const place = (
+    name: string,
+    category: DotnetArtifactCategory,
+    content: string,
+    origin?: OriginRef,
+  ): void => {
+    const path = layout.pathFor(
+      { name, content, category, aggregateName: agg.name } as DotnetArtifact,
+      emitCtx ?? ({} as EmitCtx),
     );
+    out.set(path, content);
+    sourcemap?.file(path, content, origin, construct);
   };
   // An abstract base owns no repository / routes.  A TPC (`ownTable`) base owns
   // no table either — emit just the class (Ignore<Base>()d at the DbContext) so
@@ -743,16 +758,22 @@ function emitAggregate(
   // concretes).  Either way, stop — everything below is per concrete aggregate.
   if (agg.isAbstract) {
     if (isTphBase(agg, ctx.aggregates)) {
-      place(`${agg.name}.cs`, "entity", renderAbstractBaseEntity(agg, ns, { tph: true }));
+      place(
+        `${agg.name}.cs`,
+        "entity",
+        renderAbstractBaseEntity(agg, ns, { tph: true }),
+        agg.origin,
+      );
       place(
         `${agg.name}Configuration.cs`,
         "ef-configuration",
         renderConfiguration(agg, ns, ctx, {
           tph: { role: "base", concretes: tphConcretesOf(agg, ctx.aggregates) },
         }),
+        agg.origin,
       );
     } else {
-      place(`${agg.name}.cs`, "entity", renderAbstractBaseEntity(agg, ns));
+      place(`${agg.name}.cs`, "entity", renderAbstractBaseEntity(agg, ns), agg.origin);
     }
     return;
   }
@@ -784,6 +805,10 @@ function emitAggregate(
   // repository + CQRS emitters so every id surface names the right class.
   const idClass = `${tableOwnerName(agg, ctx.aggregates)}Id`;
   const repo = findRepoFor(ctx, agg.name);
+  // Repository-shaped artifacts (interface + impl) prefer the RepositoryIR's
+  // own origin (the `repository X for Y { }` declaration) when the model has
+  // one, falling back to the owning aggregate's origin otherwise.
+  const repoOrigin = repo?.origin ?? agg.origin;
   // dataSource resolution drives BOTH the table-mapping knobs (schema /
   // tablePrefix) and the saving SHAPE.  `isDoc` (shape(document))
   // switches this aggregate onto the document-persistence path: a
@@ -801,7 +826,12 @@ function emitAggregate(
   const isEmbedded = !isEs && shape === "embedded";
 
   for (const part of agg.parts) {
-    place(`${part.name}.cs`, "entity", renderEntity(part, false, ns, agg.name, emitTrace, isDoc));
+    place(
+      `${part.name}.cs`,
+      "entity",
+      renderEntity(part, false, ns, agg.name, emitTrace, isDoc),
+      agg.origin,
+    );
   }
   // Exception-less operation returns (exception-less.md): precompute opName →
   // Domain union name + variant members where the bounded context is in scope,
@@ -821,10 +851,13 @@ function emitAggregate(
     `${agg.name}.cs`,
     "entity",
     renderEntity(agg, true, ns, agg.name, emitTrace, isDoc, superType, operationReturnUnions),
+    agg.origin,
   );
   // Pure Domain union types for exception-less operation returns — Domain-layer
   // artifacts (the aggregate method produces them), placed alongside the entity.
-  for (const f of domainUnionFiles(agg, ctx, ns)) place(f.name, "entity", f.content);
+  for (const f of domainUnionFiles(agg, ctx, ns)) {
+    place(f.name, "entity", f.content, agg.origin);
+  }
   // Views whose source is this aggregate become parameterless,
   // filtered, list-returning finds on the repository.  Synthesised
   // here so all the existing find emission paths (interface,
@@ -843,6 +876,7 @@ function emitAggregate(
     `I${agg.name}Repository.cs`,
     "repository-interface",
     renderRepositoryInterface(agg, repoWithViews, ns, aggRetrievals, idClass),
+    repoOrigin,
   );
   // Each retrieval emits an Ardalis `Specification<T>` (where + sort) the
   // EF repository's `Run<Name>Async` consumes via `.WithSpecification(...)`.
@@ -887,6 +921,7 @@ function emitAggregate(
       isEs
         ? renderDapperEventSourcedRepository(agg, repoWithViews, ns, findBodies)
         : renderDapperRepository(agg, repoWithViews, ns, aggRetrievals),
+      repoOrigin,
     );
   } else if (isEs) {
     // Event-sourced: the `<agg>_events` stream repository (fold on load,
@@ -899,12 +934,19 @@ function emitAggregate(
         extraUsings: [...repoImplUsings].sort(),
         idClass,
       }),
+      repoOrigin,
     );
-    place(`${agg.name}EventRecord.cs`, "event-record-poco", renderEventRecordPoco(agg.name, ns));
+    place(
+      `${agg.name}EventRecord.cs`,
+      "event-record-poco",
+      renderEventRecordPoco(agg.name, ns),
+      agg.origin,
+    );
     place(
       `${agg.name}EventRecordConfiguration.cs`,
       "ef-configuration",
       renderEventRecordConfiguration(agg.name, ns),
+      agg.origin,
     );
   } else {
     place(
@@ -923,19 +965,21 @@ function emitAggregate(
             idClass,
             embedded: isEmbedded,
           }),
+      repoOrigin,
     );
     if (isDoc) {
       // Document-shaped persistence: a `<Agg>Document` record (one JSONB
       // column) + its EF configuration + the snapshot DTOs the repository
       // (de)serialises.  No normalised entity configuration, no join
       // tables — contained parts + references fold into the document.
-      place(`${agg.name}Document.cs`, "document-poco", renderDocumentPoco(agg, ns));
+      place(`${agg.name}Document.cs`, "document-poco", renderDocumentPoco(agg, ns), agg.origin);
       place(
         `${agg.name}DocumentConfiguration.cs`,
         "ef-configuration",
         renderDocumentConfiguration(agg, ns, { schema: ds?.schema, tablePrefix: ds?.tablePrefix }),
+        agg.origin,
       );
-      place(`${agg.name}Snapshots.cs`, "entity", renderSnapshots(agg, ns));
+      place(`${agg.name}Snapshots.cs`, "entity", renderSnapshots(agg, ns), agg.origin);
     } else {
       // Relational (default) AND embedded both use the normal entity +
       // repository + DbSet<Agg>; they differ only in the EF configuration:
@@ -954,6 +998,7 @@ function emitAggregate(
           // are inherited from the base config (the shared table owner).
           ...(tphBase ? { tph: { role: "concrete" as const, base: tphBase } } : {}),
         }),
+        agg.origin,
       );
       // One file per reference-collection association: the join entity
       // class + its EF Core configuration (composite PK, FK converters).
@@ -962,11 +1007,12 @@ function emitAggregate(
       if (!isEmbedded) {
         for (const assoc of agg.associations) {
           const cls = joinEntityName(assoc);
-          place(`${cls}.cs`, "join-entity", renderJoinEntity(assoc, ns));
+          place(`${cls}.cs`, "join-entity", renderJoinEntity(assoc, ns), agg.origin);
           place(
             `${cls}Configuration.cs`,
             "join-entity-configuration",
             renderJoinEntityConfiguration(assoc, ns),
+            agg.origin,
           );
         }
       }
@@ -986,14 +1032,18 @@ function emitAggregate(
     const layout = emitCtx.layoutAdapter ?? byLayerLayoutAdapter;
     const artifacts = style.emitForAggregate?.(agg, emitCtx) ?? [];
     for (const artifact of artifacts) {
-      out.set(layout.pathFor(artifact, emitCtx), artifact.content);
+      const path = layout.pathFor(artifact, emitCtx);
+      out.set(path, artifact.content);
+      sourcemap?.file(path, artifact.content, agg.origin, construct);
     }
   } else {
     emitCqrs(agg, repo, ctx, ns, out, { routePrefix, emitTrace });
   }
   const testsFile = renderTestsFile(agg, ctx, ns);
   if (testsFile) {
-    out.set(`Tests/${ns}.Tests/${aggFolder}/${agg.name}Tests.cs`, testsFile);
+    const testsPath = `Tests/${ns}.Tests/${aggFolder}/${agg.name}Tests.cs`;
+    out.set(testsPath, testsFile);
+    sourcemap?.file(testsPath, testsFile, agg.origin, construct);
   }
 }
 

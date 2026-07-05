@@ -64,7 +64,7 @@ import {
 import { emitVanillaWorkflowInstances } from "./workflow-instances-emit.js";
 
 export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<string, string> {
-  const { contexts, deployable, sys } = args;
+  const { contexts, deployable, sys, sourcemap } = args;
   const out = new Map<string, string>();
   const appName = toSnakeApp(deployable.name);
   const appModule = toModulePrefix(appName);
@@ -116,7 +116,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   const principalIdKey = actorIdKey(sys.user);
   let hasDomainTests = false;
   for (const ctx of contexts) {
-    emitVanillaSchemas(appModule, ctx, out, sys);
+    emitVanillaSchemas(appModule, ctx, out, sys, sourcemap);
     // Value-object collection (`charges: Money[]`) child schemas — one Ecto
     // schema per VO-array field, owning the id-less `<owner>_<field>` child
     // table the parent `has_many`s + `cast_assoc`s.
@@ -125,7 +125,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // invariants — enforced at construction (F5) + called by the test suite.
     emitVanillaValueObjects(appModule, ctx, out);
     emitVanillaChangesets(appModule, ctx, out, sys);
-    emitVanillaRepositories(appModule, ctx, out, sys, principalIdKey);
+    emitVanillaRepositories(appModule, ctx, out, sys, principalIdKey, sourcemap);
     // Event-sourced aggregates (persistedAs(eventLog)) — struct + event-log
     // Ecto schema + fold + event-store repository (D-VANILLA-ES-HOME).  The
     // state emitters above skip them; the context module + controllers branch.
@@ -140,11 +140,11 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // structs against these (PubSub broadcast), and a future channel-on-
     // vanilla slice reuses the same module path.
     emitVanillaEventModules(appModule, ctx, out);
-    const { routes } = emitVanillaApiControllers(appName, appModule, ctx, out, sys);
+    const { routes } = emitVanillaApiControllers(appName, appModule, ctx, out, sys, sourcemap);
     apiRoutes.push(...routes);
     // Views — per-context Ecto query modules; controller + routes collected
     // project-wide (one `ViewsController` for all views).
-    emitVanillaViewModules(appName, appModule, ctx, out);
+    emitVanillaViewModules(appName, appModule, ctx, out, sourcemap);
     for (const view of ctx.views) allViews.push({ ctx, view });
     // Retrievals — per-context Ecto query modules at
     // `lib/<app>/<ctx>/retrievals/<name>.ex` plus a matching
@@ -159,7 +159,15 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // a project-wide `WorkflowsController` + POST /workflows/<name> routes.
     // Body lowering covers every WorkflowStmtIR kind; the optional
     // `Repo.transaction` wrap is driven by `wf.transactional`.
-    const wfExec = emitVanillaWorkflowExecution(appName, appModule, ctx, out, resourceModules, sys);
+    const wfExec = emitVanillaWorkflowExecution(
+      appName,
+      appModule,
+      ctx,
+      out,
+      resourceModules,
+      sys,
+      sourcemap,
+    );
     apiRoutes.push(...wfExec.routes);
     // Collect this context's command workflows; the single deployable-level
     // `WorkflowsController` aggregating every hosted context is emitted ONCE
@@ -244,6 +252,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
       appName,
       appModule,
       foundation: "vanilla",
+      sourcemap,
     });
     for (const [path, content] of liveFiles) out.set(path, content);
     liveRoutes.push(...routes);

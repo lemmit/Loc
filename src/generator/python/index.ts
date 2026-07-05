@@ -19,6 +19,7 @@ import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
 import { plural, snake } from "../../util/naming.js";
 import { unionJsonSchema } from "../_payload/union-wire.js";
+import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { generateReactForContexts } from "../react/index.js";
 import { actorIdAttr, emitPyAuthFiles, renderPyStubUserKwargs } from "./auth-emit.js";
 import {
@@ -92,12 +93,18 @@ export interface GeneratePythonArgs {
   migrations?: MigrationsIR[];
   /** Generate-time observability switch (S17). */
   emitTrace?: boolean;
+  /** Generate-time source-map recorder (`--sourcemap`) — arrives already
+   *  scoped to this deployable's output folder.  Undefined by default;
+   *  every `.file(...)` call is a no-op when the origin is absent, so an
+   *  unset recorder never changes output. */
+  sourcemap?: SourceMapRecorder;
 }
 
 export function generatePythonForContexts(args: GeneratePythonArgs): Map<string, string> {
   const out = new Map<string, string>();
   const slug = pythonProjectName(args.deployable.name);
   const merged = mergeContexts(args.contexts);
+  const sourcemap = args.sourcemap;
 
   // Fullstack-python branch (dotnet parity): a `ui:` mount embeds the
   // React SPA — routers move under /api/*, main.py serves wwwroot/ with
@@ -305,39 +312,51 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     for (const base of abstractBasesOf(ctx)) {
       const concretes = concretesOf(base, ctx);
       if (concretes.length === 0) continue;
-      out.set(`app/domain/${snake(base.name)}.py`, buildPyBaseUnionFile(base, concretes));
-      out.set(
-        `app/db/repositories/${snake(base.name)}_repository.py`,
-        buildPyBaseReaderFile(base, concretes, ctx),
-      );
+      const baseConstruct = `${ctx.name}.${base.name}`;
+      const baseDomainPath = `app/domain/${snake(base.name)}.py`;
+      const baseDomainContent = buildPyBaseUnionFile(base, concretes);
+      out.set(baseDomainPath, baseDomainContent);
+      sourcemap?.file(baseDomainPath, baseDomainContent, base.origin, baseConstruct);
+      const baseRepoPath = `app/db/repositories/${snake(base.name)}_repository.py`;
+      const baseRepoContent = buildPyBaseReaderFile(base, concretes, ctx);
+      out.set(baseRepoPath, baseRepoContent);
+      sourcemap?.file(baseRepoPath, baseRepoContent, base.origin, baseConstruct);
     }
     for (const agg of ctx.aggregates) {
       if (agg.isAbstract) continue;
-      out.set(
-        `app/domain/${snake(agg.name)}.py`,
-        renderPyAggregate(agg, ctx, args.emitTrace, principalIdAttr),
-      );
+      const construct = `${ctx.name}.${agg.name}`;
+      const domainPath = `app/domain/${snake(agg.name)}.py`;
+      const domainContent = renderPyAggregate(agg, ctx, args.emitTrace, principalIdAttr);
+      out.set(domainPath, domainContent);
+      sourcemap?.file(domainPath, domainContent, agg.origin, construct);
       const externFile = buildPyExternHandlersFile(agg);
       if (externFile != null) {
-        out.set(`app/domain/${snake(agg.name)}_handlers.py`, externFile);
+        const externPath = `app/domain/${snake(agg.name)}_handlers.py`;
+        out.set(externPath, externFile);
+        sourcemap?.file(externPath, externFile, agg.origin, construct);
       }
       const repo = ctx.repositories.find((r) => r.aggregateName === agg.name);
-      out.set(
-        `app/db/repositories/${snake(agg.name)}_repository.py`,
+      const repoPath = `app/db/repositories/${snake(agg.name)}_repository.py`;
+      const repoContent =
         agg.persistedAs === "eventLog"
           ? buildPyEventSourcedRepositoryFile(agg, repo, ctx)
           : effectiveSavingShape(agg, resolveDs(agg)) === "document"
             ? buildPyDocumentRepositoryFile(agg, repo, ctx)
             : effectiveSavingShape(agg, resolveDs(agg)) === "embedded"
               ? buildPyEmbeddedRepositoryFile(agg, repo, ctx)
-              : buildPyRepositoryFile(agg, repo, ctx),
-      );
-      out.set(
-        `app/http/${snake(agg.name)}_routes.py`,
-        buildPyRoutesFile(agg, repo, ctx, hasDispatch),
-      );
+              : buildPyRepositoryFile(agg, repo, ctx);
+      out.set(repoPath, repoContent);
+      sourcemap?.file(repoPath, repoContent, repo?.origin ?? agg.origin, construct);
+      const routesPath = `app/http/${snake(agg.name)}_routes.py`;
+      const routesContent = buildPyRoutesFile(agg, repo, ctx, hasDispatch);
+      out.set(routesPath, routesContent);
+      sourcemap?.file(routesPath, routesContent, agg.origin, construct);
       const tests = renderPyTestsFile(agg, ctx);
-      if (tests != null) out.set(`tests/test_${snake(agg.name)}.py`, tests);
+      if (tests != null) {
+        const testsPath = `tests/test_${snake(agg.name)}.py`;
+        out.set(testsPath, tests);
+        sourcemap?.file(testsPath, tests, agg.origin, construct);
+      }
     }
   }
   return out;

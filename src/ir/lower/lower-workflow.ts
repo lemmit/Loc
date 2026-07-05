@@ -68,6 +68,7 @@ import {
   lowerType,
   withLocal,
 } from "./lower-types.js";
+import { originFor } from "./origin.js";
 import {
   matchFindAllCall,
   matchFindCall,
@@ -155,6 +156,7 @@ export function lowerWorkflow(
     ...(correlationField ? { correlationField } : {}),
     ...(appliers.length > 0 ? { appliers } : {}),
     ...(handlers.length > 0 ? { handlers } : {}),
+    origin: originFor(wf),
   };
 }
 

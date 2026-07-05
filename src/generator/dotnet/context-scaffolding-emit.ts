@@ -1,6 +1,7 @@
 import type { BoundedContextIR, EnrichedBoundedContextIR } from "../../ir/types/loom-ir.js";
 import { isTpcBase, isTpcConcrete, isTphBase } from "../../ir/util/inheritance.js";
 import { plural } from "../../util/naming.js";
+import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import {
   renderAuditableInterceptor,
   renderBaseReaderImpl,
@@ -127,6 +128,7 @@ export function emitBaseReaders(
   ctx: EnrichedBoundedContextIR,
   ns: string,
   out: Map<string, string>,
+  sourcemap?: SourceMapRecorder,
 ): void {
   for (const base of ctx.aggregates) {
     if (!isTpcBase(base, ctx.aggregates)) continue;
@@ -134,13 +136,14 @@ export function emitBaseReaders(
       (a) => a.extendsAggregate === base.name && isTpcConcrete(a, ctx.aggregates),
     );
     if (concretes.length === 0) continue;
-    out.set(
-      `Domain/${plural(base.name)}/I${base.name}Repository.cs`,
-      renderBaseReaderInterface(base, ns),
-    );
-    out.set(
-      `Infrastructure/Repositories/${base.name}Repository.cs`,
-      renderBaseReaderImpl(base, concretes, ns),
-    );
+    const construct = `${ctx.name}.${base.name}`;
+    const ifacePath = `Domain/${plural(base.name)}/I${base.name}Repository.cs`;
+    const ifaceContent = renderBaseReaderInterface(base, ns);
+    out.set(ifacePath, ifaceContent);
+    sourcemap?.file(ifacePath, ifaceContent, base.origin, construct);
+    const implPath = `Infrastructure/Repositories/${base.name}Repository.cs`;
+    const implContent = renderBaseReaderImpl(base, concretes, ns);
+    out.set(implPath, implContent);
+    sourcemap?.file(implPath, implContent, base.origin, construct);
   }
 }

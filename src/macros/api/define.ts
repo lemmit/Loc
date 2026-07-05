@@ -21,6 +21,15 @@ import type {
   Ui,
   UiMember,
 } from "../../language/generated/ast.js";
+import type { OriginToken } from "../../language/macro-origin.js";
+
+// Re-exported so existing `import type { OriginToken } from "./define.js"`
+// sites (expander.ts, factories.ts, factories-internals.ts, index.ts,
+// unfold-macro.ts) keep resolving unchanged — the token's contract now
+// lives at the language/AST layer (`src/language/macro-origin.ts`) since
+// both the expander and IR lowering need it without an `ir/` → `macros/`
+// edge.
+export type { OriginToken };
 
 /** Macros attach to one of a fixed set of host kinds.  Each kind
  * determines (a) the AST type of `target` in `ExpandContext`,
@@ -110,21 +119,6 @@ export interface ExpandContext<P extends ParamSpec, T extends MacroTarget> {
     name: string,
     opts: { target: object; args?: Record<string, unknown> },
   ) => unknown[];
-}
-
-/** Opaque origin tag attached to every synthesised AST node by the
- * factories.  Carries a reference back to the `with X(...)` call
- * site's CST node so diagnostic renderers can report errors on
- * synthesised members against the user's source position.
- * Construction is internal to the expander; macro authors never
- * touch the inside. */
-export interface OriginToken {
-  readonly _kind: "macro-origin";
-  readonly macroName: string;
-  /** The MacroCall AST node whose expansion produced any nodes
-   * tagged with this token.  May lack CST info if it was itself
-   * macro-emitted (future: nested macro calls). */
-  readonly callNode: import("../../language/generated/ast.js").MacroCall;
 }
 
 /** A macro registered with the compiler.  Stdlib ships these

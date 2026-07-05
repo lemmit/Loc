@@ -10,6 +10,7 @@
 // Hono-framework builders now live in this package (P2b) — siblings.
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../../../generator/_adapters/index.js";
 import { renderHonoBaseLogCall } from "../../../generator/_obs/render-hono.js";
+import type { SourceMapRecorder } from "../../../generator/_trace/sourcemap.js";
 import {
   buildBaseReaderFile,
   buildBaseUnionFile,
@@ -60,6 +61,7 @@ import {
   type UserIR,
 } from "../../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
+import type { OriginRef } from "../../../ir/types/origin.js";
 import { contextHasAuditedTarget } from "../../../ir/util/audit-capability.js";
 import { durableEventTypes, realtimeEventTypes } from "../../../ir/util/channels.js";
 import {
@@ -304,9 +306,10 @@ export function generateTypeScriptForContexts(
     styleAdapter?: StyleAdapter;
     layoutAdapter?: LayoutAdapter;
   },
-  options: { emitTrace?: boolean } = {},
+  options: { emitTrace?: boolean; sourcemap?: SourceMapRecorder } = {},
 ): Map<string, string> {
   const emitTrace = !!options.emitTrace;
+  const sourcemap = options.sourcemap;
   const out = new Map<string, string>();
   const authRequired = !!(system?.deployable.auth?.required && system.sys.user);
   // OIDC turnkey auth (D-AUTH-OIDC): present when the system declares an
@@ -487,14 +490,25 @@ export function generateTypeScriptForContexts(
   // final) so a single post-emit pass can rewrite their relative imports.
   const layout = emitCtx?.layoutAdapter ?? byLayerLayoutAdapter;
   const moved = new Map<string, string>();
-  const placeArtifact = (artifact: HonoArtifact): void => {
+  const placeArtifact = (artifact: HonoArtifact, origin?: OriginRef, construct?: string): void => {
     const byLayerPath = byLayerLayoutAdapter.pathFor(artifact, emitCtx ?? ({} as EmitCtx));
     const finalPath = layout.pathFor(artifact, emitCtx ?? ({} as EmitCtx));
     if (finalPath !== byLayerPath) moved.set(byLayerPath, finalPath);
     out.set(finalPath, artifact.content);
+    sourcemap?.file(finalPath, artifact.content, origin, construct);
   };
-  const place = (category: HonoArtifactCategory, aggregateName: string, content: string): void => {
-    placeArtifact({ name: "", content, category, aggregateName } as HonoArtifact);
+  const place = (
+    category: HonoArtifactCategory,
+    aggregateName: string,
+    content: string,
+    origin?: OriginRef,
+    construct?: string,
+  ): void => {
+    placeArtifact(
+      { name: "", content, category, aggregateName } as HonoArtifact,
+      origin,
+      construct,
+    );
   };
   // Per-aggregate emission stays per-context — each aggregate file
   // and its repository / routes are emitted in the context that
@@ -507,7 +521,14 @@ export function generateTypeScriptForContexts(
       // the shared table filtered by `kind` (see the repository builders).
       if (agg.isAbstract) continue;
       const repo = findRepoFor(ctx, agg.name);
-      place("domain-aggregate", agg.name, renderAggregate(agg, ctx, emitProvenance, emitTrace));
+      const construct = `${ctx.name}.${agg.name}`;
+      place(
+        "domain-aggregate",
+        agg.name,
+        renderAggregate(agg, ctx, emitProvenance, emitTrace),
+        agg.origin,
+        construct,
+      );
       // Persistence routing.  Event-sourced (`persistedAs(eventLog)`) wins
       // over the saving-shape axis — its repository appends to / folds the
       // event stream rather than reading a state table.  Otherwise the
@@ -533,6 +554,8 @@ export function generateTypeScriptForContexts(
               : shape === "embedded"
                 ? buildEmbeddedRepositoryFile(agg, repo, ctx, emitTrace)
                 : buildRepositoryFile(agg, repo, ctx, emitTrace),
+        repo?.origin ?? agg.origin,
+        construct,
       );
       // Routes file — adapter-dispatched in system mode (the layered
       // StyleAdapter re-derives audit / provenance gates from
@@ -546,20 +569,20 @@ export function generateTypeScriptForContexts(
         const style = emitCtx.styleAdapter ?? layeredStyleAdapter;
         const artifacts = style.emitForAggregate?.(agg, emitCtx) ?? [];
         for (const artifact of artifacts) {
-          placeArtifact(artifact as HonoArtifact);
+          placeArtifact(artifact as HonoArtifact, agg.origin, construct);
         }
       } else {
-        out.set(
-          `http/${lowerFirst(agg.name)}.routes.ts`,
-          buildRoutesFile(agg, repo, ctx, emitAudit, emitProvenance, emitTrace),
-        );
+        const routesPath = `http/${lowerFirst(agg.name)}.routes.ts`;
+        const routesContent = buildRoutesFile(agg, repo, ctx, emitAudit, emitProvenance, emitTrace);
+        out.set(routesPath, routesContent);
+        sourcemap?.file(routesPath, routesContent, agg.origin, construct);
       }
       if (agg.operations.some((o) => o.extern)) {
-        place("domain-extern", agg.name, buildExternHandlersFile(agg, ctx));
+        place("domain-extern", agg.name, buildExternHandlersFile(agg, ctx), agg.origin, construct);
       }
       const testsFile = renderTestsFile(agg, ctx);
       if (testsFile) {
-        place("domain-test", agg.name, testsFile);
+        place("domain-test", agg.name, testsFile, agg.origin, construct);
       }
     }
     // TPH (aggregate-inheritance.md): each `sharedTable` base owns the shared
@@ -571,8 +594,21 @@ export function generateTypeScriptForContexts(
       if (!isTphBase(base, ctx.aggregates)) continue;
       const concretes = tphConcretesOf(base, ctx.aggregates) as typeof ctx.aggregates;
       if (concretes.length === 0) continue;
-      place("domain-aggregate", base.name, buildBaseUnionFile(base, concretes));
-      place("drizzle-repository", base.name, buildBaseReaderFile(base, concretes, ctx));
+      const baseConstruct = `${ctx.name}.${base.name}`;
+      place(
+        "domain-aggregate",
+        base.name,
+        buildBaseUnionFile(base, concretes),
+        base.origin,
+        baseConstruct,
+      );
+      place(
+        "drizzle-repository",
+        base.name,
+        buildBaseReaderFile(base, concretes, ctx),
+        base.origin,
+        baseConstruct,
+      );
     }
     // TPC (aggregate-inheritance.md, ownTable): the base owns no table, but is
     // the read home for the polymorphic `find all <Base>`.  Emit the `<Base>`
@@ -584,8 +620,21 @@ export function generateTypeScriptForContexts(
       if (!isTpcBase(base, ctx.aggregates)) continue;
       const concretes = tpcConcretesOf(base, ctx.aggregates) as typeof ctx.aggregates;
       if (concretes.length === 0) continue;
-      place("domain-aggregate", base.name, buildBaseUnionFile(base, concretes, "ownTable"));
-      place("drizzle-repository", base.name, buildTpcBaseReaderFile(base, concretes));
+      const baseConstruct = `${ctx.name}.${base.name}`;
+      place(
+        "domain-aggregate",
+        base.name,
+        buildBaseUnionFile(base, concretes, "ownTable"),
+        base.origin,
+        baseConstruct,
+      );
+      place(
+        "drizzle-repository",
+        base.name,
+        buildTpcBaseReaderFile(base, concretes),
+        base.origin,
+        baseConstruct,
+      );
     }
   }
 

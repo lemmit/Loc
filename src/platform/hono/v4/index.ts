@@ -80,6 +80,7 @@ export function makeHonoPlatform(pins: BackendPins): PlatformSurface {
       emitTrace,
       styleAdapter,
       layoutAdapter,
+      sourcemap,
     }): Map<string, string> {
       // The package supplies its own pins to the shared emitter —
       // edge points package → shared, never the reverse.  The deployable's
@@ -89,7 +90,7 @@ export function makeHonoPlatform(pins: BackendPins): PlatformSurface {
         contexts,
         pins,
         { deployable, sys, migrations, styleAdapter, layoutAdapter },
-        { emitTrace },
+        { emitTrace, sourcemap },
       );
     },
     composeService({ slug }): ComposeServiceShape {

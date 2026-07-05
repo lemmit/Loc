@@ -31,6 +31,7 @@ import type {
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
+import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
 import type { ApiRoute } from "../api-emit.js";
 import { stateModule } from "../dispatch-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
@@ -56,6 +57,7 @@ export function emitVanillaViewModules(
   appModule: string,
   ctx: BoundedContextIR,
   out: Map<string, string>,
+  sourcemap?: SourceMapRecorder,
 ): void {
   if (ctx.views.length === 0) return;
   const ctxSnake = snake(ctx.name);
@@ -74,18 +76,18 @@ export function emitVanillaViewModules(
     if (view.source.kind === "workflow") {
       const wf = ctx.workflows.find((w) => w.name === view.source.name);
       if (!wf?.instanceWireShape) continue; // validator gated / not observable
-      out.set(
-        `lib/${appName}/${ctxSnake}/views/${snake(view.name)}.ex`,
-        renderVanillaWorkflowView(view, wf, appModule, contextModule, typesModule),
-      );
+      const path = `lib/${appName}/${ctxSnake}/views/${snake(view.name)}.ex`;
+      const content = renderVanillaWorkflowView(view, wf, appModule, contextModule, typesModule);
+      out.set(path, content);
+      sourcemap?.file(path, content, view.origin, `${ctx.name}.${view.name}`);
       continue;
     }
     const agg = aggsByName.get(view.source.name);
     if (!agg) continue; // validator already errored / non-aggregate source
-    out.set(
-      `lib/${appName}/${ctxSnake}/views/${snake(view.name)}.ex`,
-      renderVanillaView(view, agg, appModule, contextModule, typesModule),
-    );
+    const path = `lib/${appName}/${ctxSnake}/views/${snake(view.name)}.ex`;
+    const content = renderVanillaView(view, agg, appModule, contextModule, typesModule);
+    out.set(path, content);
+    sourcemap?.file(path, content, view.origin, `${ctx.name}.${view.name}`);
   }
 }
 

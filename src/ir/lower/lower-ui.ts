@@ -45,6 +45,7 @@ import { lowerExpr } from "./lower-expr.js";
 import { lowerDerived } from "./lower-members.js";
 import { lowerStatement } from "./lower-stmt.js";
 import { type Env, lowerType, withLocal } from "./lower-types.js";
+import { originFor } from "./origin.js";
 
 /** Build the `env.actions` index (action name → single declared payload
  *  param type) consumed by `resolveNameRef` so a bare handler-arg reference
@@ -415,6 +416,7 @@ function lowerPage(p: Page, user?: UserIR, stores?: Env["stores"]): PageIR {
     menuMeta,
     layout,
     metadata,
+    origin: originFor(p),
   };
 }
 

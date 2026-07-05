@@ -4,6 +4,7 @@ import type {
   PlatformAdapters,
   StyleAdapter,
 } from "../generator/_adapters/index.js";
+import type { SourceMapRecorder } from "../generator/_trace/sourcemap.js";
 import type {
   ComponentIR,
   DeployableIR,
@@ -248,6 +249,13 @@ export interface PlatformSurface extends PlatformDescriptor {
      *  (byte-identical under today's size-1 menus). */
     styleAdapter?: StyleAdapter;
     layoutAdapter?: LayoutAdapter;
+    /** Generate-time source-map recorder (`--sourcemap`, off by default —
+     *  see docs/plans/source-map-debug-kickoff.md).  Platforms that
+     *  implement the emit bracket record whole-file construct regions
+     *  into it as they place each per-aggregate/-operation artifact;
+     *  absent means "record nothing" — every platform without a bracket
+     *  yet is a no-op here, not an error. */
+    sourcemap?: SourceMapRecorder;
   }): Map<string, string>;
   /** Inputs for the deployable's docker-compose service stanza. */
   composeService(args: {
