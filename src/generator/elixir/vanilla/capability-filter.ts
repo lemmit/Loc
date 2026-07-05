@@ -25,7 +25,8 @@
 
 import type { AggregateIR } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
-import { type RenderCtx, renderExpr } from "../render-expr.js";
+import { isDeepScopeFilter } from "../../../ir/util/tenant-stance.js";
+import { type RenderCtx, renderDeepScopeEcto, renderExpr } from "../render-expr.js";
 
 export { aggregateUsesPrincipalContextFilter } from "../../../ir/types/loom-ir.js";
 
@@ -75,7 +76,15 @@ export function vanillaCapabilityFilter(
   const preds = (agg.contextFilters ?? [])
     .filter((_, i) => !isFilterBypassed(agg.contextFilterOrigins?.[i], opts?.bypass))
     .filter((p) => opts?.actor || !exprUsesCurrentUser(p))
-    .map((p) => (exprUsesCurrentUser(p) ? pinPrincipal(renderExpr(p, ctx)) : renderExpr(p, ctx)));
+    .map((p) =>
+      // The `deep` sentinel renders its own fail-closed pinned fragment — do
+      // NOT run it through `pinPrincipal` (it already pins).
+      isDeepScopeFilter(p)
+        ? renderDeepScopeEcto(ctx.thisName)
+        : exprUsesCurrentUser(p)
+          ? pinPrincipal(renderExpr(p, ctx))
+          : renderExpr(p, ctx),
+    );
   if (preds.length === 0) return null;
   // `and` is a reserved word in Elixir — the infix form is the only valid one
   // inside `where:`.  Parenthesise each so a low-precedence operator inside one
@@ -107,7 +116,11 @@ export function vanillaCapabilityFilterParts(
   const parts: { origin: string | undefined; pred: string }[] = [];
   (agg.contextFilters ?? []).forEach((p, i) => {
     if (!opts?.actor && exprUsesCurrentUser(p)) return;
-    const pred = exprUsesCurrentUser(p) ? pinPrincipal(renderExpr(p, ctx)) : renderExpr(p, ctx);
+    const pred = isDeepScopeFilter(p)
+      ? renderDeepScopeEcto(ctx.thisName)
+      : exprUsesCurrentUser(p)
+        ? pinPrincipal(renderExpr(p, ctx))
+        : renderExpr(p, ctx);
     parts.push({ origin: agg.contextFilterOrigins?.[i], pred });
   });
   return parts;

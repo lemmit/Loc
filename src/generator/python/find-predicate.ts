@@ -7,6 +7,13 @@ import {
   type WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { tableOwnerName } from "../../ir/util/inheritance.js";
+import {
+  DATA_KEY_PATH_DELIMITER,
+  isDeepScopeFilter,
+  ORG_PATH_CLAIM_FIELD,
+  TENANT_OWNED_DATA_KEY_FIELD,
+  TENANT_OWNED_TENANT_ID_FIELD,
+} from "../../ir/util/tenant-stance.js";
 import { snake } from "../../util/naming.js";
 import { joinRowClassName, rowClassName } from "./py-columns.js";
 import { renderPyExpr } from "./render-expr.js";
@@ -135,6 +142,23 @@ function lower(
       return renderPyExpr(e);
     }
     case "method-call": {
+      // `deep` read level (multi-tenancy Phase 2 P2.4) — descendant-or-self
+      // materialized-path scope with the NULL-dataKey fallback to the tenant
+      // floor (see `DEEP_SCOPE_SEMANTICS`).  `Column.startswith(v)` lowers to
+      // `LIKE v || '%'` (SQLAlchemy auto-escapes `%`/`_` in `v`).
+      if (isDeepScopeFilter(e)) {
+        const col = `${row}.${snake(TENANT_OWNED_DATA_KEY_FIELD)}`;
+        const tenantCol = `${row}.${snake(TENANT_OWNED_TENANT_ID_FIELD)}`;
+        const org = `${principalAccessor}.${snake(ORG_PATH_CLAIM_FIELD)}`;
+        const tenant = `${principalAccessor}.${snake(TENANT_OWNED_TENANT_ID_FIELD)}`;
+        ops.add("or_");
+        ops.add("and_");
+        return (
+          `or_(and_(${col}.isnot(None), or_(${col} == ${org}, ` +
+          `${col}.startswith(${org} + ${JSON.stringify(DATA_KEY_PATH_DELIMITER)}))), ` +
+          `and_(${col}.is_(None), ${tenantCol} == ${tenant}))`
+        );
+      }
       // `this.<refColl>.contains(x)` → correlated EXISTS against the
       // field's join table.
       if (
