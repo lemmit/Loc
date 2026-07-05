@@ -68,7 +68,16 @@ agents; they only collide on this doc's status table.
 - **DoD.** RS-9 asserted on node + Python; `semantics-rules.ts` RS-9 gate note
   added; `conformance-semantics.md` RS-9 tier updated.
 
-### RST-2 · Add .NET as the 3rd behavioral backend  ·  L
+### RST-2 · Add .NET as the 3rd behavioral backend  ·  L  ·  ✅ LANDED (pending first CI run)
+- **Landed:** `test/behavioral/run-dotnet.mjs` (mirrors `run-python.mjs`),
+  `test/behavioral/corpus-dotnet/sales.ddd` + `corpus-dotnet.json` (the Python
+  fixture retargeted to `platform: dotnet`), and `behavioral-e2e-dotnet.yml`
+  (a `services: postgres` sidecar + .NET SDK, booting `dotnet run` against
+  `ConnectionStrings__Default`). The live-boot round-trip runs in CI (the local
+  sandbox blocks long-lived server spawns, same as the Python tier was verified);
+  the emitted api e2e is HTTP-dispatched at the booted .NET backend via the same
+  `loadApiTests({dispatch})` seam. May go red on the first run by finding a real
+  .NET wire-parity bug — that is the point (Python found two).
 - **Why.** Cross-backend parity is the contract's whole point; 2→3 backends
   widens the net to the .NET wire/EF path. Likely finds bugs (as Python did).
 - **Scope.** `test/behavioral/run-dotnet.mjs` mirroring `run-python.mjs`: generate
@@ -166,6 +175,13 @@ registry is the source of truth — keep the three in lockstep).
 
 ## Landed
 
+- **RST-2** (.NET behavioral backend) — ✅ (pending first CI run)
+  `test/behavioral/run-dotnet.mjs` + `corpus-dotnet/` + `corpus-dotnet.json` +
+  `.github/workflows/behavioral-e2e-dotnet.yml`. Boots the generated .NET
+  (ASP.NET + EF Core) backend against a `services: postgres` sidecar
+  (`dotnet run`, `ConnectionStrings__Default`) and HTTP-dispatches the same
+  backend-agnostic emitted api e2e — the runtime-semantics RS-rules' third
+  behavioral backend (node + Python + .NET).
 - **RST-5** (diffable spec artifact) — ✅ `test/conformance/semantics-spec.json`,
   a committed diffable mirror of `SEMANTICS_RULES` derived by
   `serializeSemanticsSpec()` and gated by `semantics-spec-sync.test.ts`
