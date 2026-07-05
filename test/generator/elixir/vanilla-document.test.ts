@@ -225,7 +225,10 @@ describe("vanilla shape(document) scalar finds + named ops (Route A slice 2 — 
       "def add_item_cart(%Api.Carts.Cart{} = row, params) when is_map(params) do",
     );
     expect(ctx).toContain("record = row.data");
-    expect(ctx).toContain("if not (record.item_count >= 0), do: raise(ArgumentError");
+    // A `precondition` guard hoists into a `with ensure(...)` denial chain (422,
+    // not a raise → 500) — the struct-mode read `record.item_count` is preserved.
+    expect(ctx).toContain("with :ok <- ensure(record.item_count >= 0, :precondition_failed) do");
+    expect(ctx).not.toContain("raise(ArgumentError");
     expect(ctx).toContain("record = %{record | item_count: record.item_count + 1}");
     expect(ctx).toContain("|> Ecto.Changeset.change(%{version: row.version + 1})");
     expect(ctx).toContain("|> Ecto.Changeset.put_embed(:data, Map.from_struct(record))");
@@ -295,11 +298,15 @@ describe("vanilla shape(document) non-scalar residual (DEBT-07 follow-up)", () =
     expect(ctx).toContain(
       'Map.get(record.subtotal, :amount, Map.get(record.subtotal, "amount")) < 100',
     );
-    // The op guard calls the function passing the embed struct, reading the VO sub-field.
-    expect(ctx).toContain("if not (is_cheap(record)), do: raise(ArgumentError");
+    // The op guard calls the function passing the embed struct, reading the VO
+    // sub-field — now hoisted into a `with ensure(...)` denial chain (422, not a
+    // raise → 500); the call-site qualification `is_cheap(record)` + the VO
+    // subfield read are preserved inside the ensure clause.
+    expect(ctx).toContain("ensure(is_cheap(record), :precondition_failed)");
     expect(ctx).toContain(
-      'if not (Map.get(record.subtotal, :amount, Map.get(record.subtotal, "amount")) >= 0), do: raise(ArgumentError',
+      'ensure(Map.get(record.subtotal, :amount, Map.get(record.subtotal, "amount")) >= 0, :precondition_failed)',
     );
+    expect(ctx).not.toContain("raise(ArgumentError");
   });
 
   it("emits returning ops as tagged tuples (error variant + fall-through success wire)", async () => {
@@ -432,5 +439,111 @@ system Shop {
     expect(repo).toContain("record.status == status");
     // An unfiltered paged find must NOT bind an unused `record` (else -Werror).
     expect(repo).toContain("|> Enum.filter(fn _row -> true end)");
+  });
+});
+// Document-op guards deny 403/422, not raise → 500 (parity with the relational
+// path).  A scalar/returning document op's `requires`/`precondition` hoists into
+// a leading `with ensure(...)` chain — an expected denial returns a typed tuple
+// the controller maps to 403 / 422, instead of raising an ArgumentError (500).
+// A guard-free document op stays byte-identical.
+// (docs/plans/phoenix-op-guards-403-422.md)
+// ---------------------------------------------------------------------------
+const DOC_GUARDS = `
+system S {
+  subdomain O {
+    context O {
+      error NotFound { resource: string }
+      aggregate Note shape(document) with crudish {
+        title: string
+        count: int
+        // Guarded NAMED (mutating scalar) op.
+        operation bump(by: int) {
+          requires by > 0
+          precondition count >= 0
+          count := count + by
+        }
+        // Guarded RETURNING op.
+        operation summary(): string or NotFound {
+          requires title != ""
+          return title
+        }
+        // Guard-free NAMED op — must stay byte-identical (no with/ensure).
+        operation touch() {
+          count := count + 1
+        }
+      }
+      repository Notes for Note { }
+    }
+  }
+  api A from O
+  storage pg { type: postgres }
+  resource st { for: O, kind: state, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [O]
+    dataSources: [st]
+    serves: A
+    port: 4000
+  }
+}
+`;
+
+describe("vanilla shape(document) op guards deny 403/422 (not raise → 500)", () => {
+  it("a guarded NAMED document op hoists guards into a `with ensure(...)` chain before the re-embed", async () => {
+    const ctx = file(await generateSystemFiles(DOC_GUARDS), "lib/api/o.ex");
+    const fn = ctx.slice(ctx.indexOf("def bump_note(%"));
+    const body = fn.slice(0, fn.indexOf("\n  end"));
+    // `record = row.data` + param binds precede the guards (guards read record).
+    expect(body).toContain("record = row.data");
+    // `requires` → 403 (`:forbidden`); `precondition` → 422 (`:precondition_failed`).
+    expect(body).toContain("with :ok <- ensure(by > 0, :forbidden),");
+    expect(body).toContain(":ok <- ensure(record.count >= 0, :precondition_failed) do");
+    // The mutation + re-embed persist run INSIDE the with-do (denial short-circuits
+    // before any write).
+    const withAt = body.indexOf("with :ok <- ensure");
+    const mutAt = body.indexOf("record = %{record | count:");
+    const embedAt = body.indexOf("Ecto.Changeset.put_embed(:data");
+    expect(withAt).toBeGreaterThan(-1);
+    expect(withAt).toBeLessThan(mutAt);
+    expect(mutAt).toBeLessThan(embedAt);
+    // NOT a raise — an expected denial is no longer a 500.
+    expect(body).not.toContain("raise(ArgumentError");
+    // The shared `ensure/2` helper is emitted (document op now needs it).
+    expect(ctx).toContain("defp ensure(true, _reason), do: :ok");
+    expect(ctx).toContain("defp ensure(false, reason), do: {:error, reason}");
+  });
+
+  it("a guarded RETURNING document op returns the denial tuple over a `with ensure(...)` chain", async () => {
+    const ctx = file(await generateSystemFiles(DOC_GUARDS), "lib/api/o.ex");
+    const fn = ctx.slice(ctx.indexOf("def summary_note(%"));
+    const body = fn.slice(0, fn.indexOf("\n  end"));
+    expect(body).toContain('with :ok <- ensure(record.title != "", :forbidden) do');
+    expect(body).toContain("{:ok, record.title}");
+    expect(body).not.toContain("raise(ArgumentError");
+  });
+
+  it("a GUARD-FREE document op stays flat (no with/ensure wrap)", async () => {
+    const ctx = file(await generateSystemFiles(DOC_GUARDS), "lib/api/o.ex");
+    const fn = ctx.slice(ctx.indexOf("def touch_note(%"));
+    const body = fn.slice(0, fn.indexOf("\n  end"));
+    expect(body).not.toContain("with :ok <- ensure");
+    // Flat: record bind → mutation → re-embed persist, no denial wrap.
+    expect(body).toContain("record = row.data");
+    expect(body).toContain("record = %{record | count: record.count + 1}");
+  });
+
+  it("the document-op controller maps the denial atoms to 403 / 422", async () => {
+    const files = await generateSystemFiles(DOC_GUARDS);
+    const ctl = file(files, "/controllers/note_controller.ex");
+    // NAMED op → `else` arms; RETURNING op → result-fn clauses.  Same status +
+    // ProblemDetails body as the relational / ES-command path.
+    expect(ctl).toContain(
+      'ProblemDetails.problem_response(conn, 403, "Forbidden", "Operation not permitted")',
+    );
+    expect(ctl).toContain(
+      'ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", "A precondition failed")',
+    );
+    expect(ctl).toContain("def summary_note_result(conn, {:error, :forbidden}),");
+    expect(ctl).toContain("def summary_note_result(conn, {:error, :precondition_failed}),");
   });
 });

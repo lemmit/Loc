@@ -20,6 +20,7 @@ import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   OperationIR,
+  StmtIR,
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
@@ -52,10 +53,13 @@ import {
   isReturningOperation,
   type OpFragment,
   opEmitsEvent,
+  opHasGuards,
   persistPutBodies,
   renderEmitDispatchLines,
+  renderOpGuardClause,
   renderReturningOpFunction,
   renderReturningStmt,
+  wrapOpBodyWithGuards,
 } from "./operation-returns-emit.js";
 import { refCollFieldNames } from "./ref-collection-emit.js";
 import { customFindsOf } from "./repository-emit.js";
@@ -335,10 +339,13 @@ ${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}${functi
   const retrievalBlock =
     retrievalLines.length > 0 ? `\n  # Retrievals\n${retrievalLines.join("\n")}\n` : "";
 
-  // Private `ensure/2` guard helper shared by the ES command runners (only
-  // emitted when an ES command body actually has a precondition/requires, so
-  // it never sits unused under --warnings-as-errors).
-  const ensureBlock = esContextNeedsEnsure(ctx) ? `\n${renderEnsureHelper()}\n` : "";
+  // Private `ensure/2` guard helper shared by the ES command runners AND every
+  // relational/document named/returning op that hoists its `requires`/
+  // `precondition` guards into a `with ensure(...)` chain (403/422 denials).
+  // Only emitted when SOME op body actually has a guard, so it never sits unused
+  // under --warnings-as-errors.
+  const ensureBlock =
+    esContextNeedsEnsure(ctx) || contextNeedsGuardEnsure(ctx) ? `\n${renderEnsureHelper()}\n` : "";
 
   // Shared ref-collection helpers — emitted once per context module when ANY
   // named operation appends/removes through a `many_to_many` reference
@@ -388,6 +395,23 @@ defmodule ${facadeMod} do
 
 ${blocks.join("\n")}${retrievalBlock}${readingServiceBlock}${ensureBlock}${refCollHelpers}${putAssocPartsHelper}end
 `;
+}
+
+/** Does any non-CRUD, non-ES operation in the context carry a `requires`/
+ *  `precondition` guard?  Those hoist to a `with ensure(...)` chain (403/422
+ *  typed denials — the fix for the raise→500 boundary bug), so the context
+ *  module needs the shared private `ensure/2` helper.  Covers BOTH the
+ *  relational (`renderNamedOpFunction`/`renderReturningOpFunction`) AND document
+ *  (`renderDoc*OpFunction`) op renderers, which both hoist guards now.  MUST
+ *  mirror the emit condition EXACTLY (else `ensure/2` sits unused under
+ *  --warnings-as-errors).  (ES ops have their own `esContextNeedsEnsure` gate.) */
+function contextNeedsGuardEnsure(ctx: BoundedContextIR): boolean {
+  return ctx.aggregates.some((agg) => {
+    if (isEventSourced(agg)) return false;
+    return (agg.operations ?? []).some(
+      (op) => !CRUD_RESERVED_NAMES.has(op.name) && opHasGuards(op),
+    );
+  });
 }
 
 /** Does any non-CRUD, non-ES named/returning operation in the context `emit` a
@@ -604,7 +628,21 @@ function renderNamedOpFunction(
   // `statementSubRegions` — a hoisted `emit` is deliberately excluded from
   // both, matching the "regular body" scope this milestone covers (see
   // `OpFragment` in operation-returns-emit.ts).
-  const bodyStmts = emits ? op.statements.filter((s) => s.kind !== "emit") : op.statements;
+  // `requires`/`precondition` guards are hoisted into a leading `with :ok <-
+  // ensure(...)` chain so an expected denial returns a typed tuple
+  // (`{:error, :forbidden}` 403 / `{:error, :precondition_failed}` 422) BEFORE the
+  // mutation/persist runs, instead of raising an ArgumentError (→ 500).  Exclude
+  // them from the in-body statements.
+  const guardStmts = op.statements.filter(
+    (s): s is Extract<StmtIR, { kind: "requires" | "precondition" }> =>
+      s.kind === "requires" || s.kind === "precondition",
+  );
+  const guardClauses = guardStmts.map((s) => renderOpGuardClause(s, rc));
+  const bodyStmts = op.statements.filter((s) => {
+    if (s.kind === "requires" || s.kind === "precondition") return false;
+    if (emits && s.kind === "emit") return false;
+    return true;
+  });
   const bodyLines = bodyStmts.map((s, i) => renderReturningStmt(s, ctx, rc, i));
   if (opFragments && bodyLines.length > 0) {
     opFragments.push({
@@ -736,10 +774,24 @@ ${dispatchBlock}
     |> ${repoMod}.persist_change()`;
   }
 
+  // A guarded op hoists its guards into a leading `with ensure(...)` chain: param
+  // binds stay before the `with`, and the body + persist tail move inside the
+  // `do` block (a failed guard short-circuits to `{:error, :forbidden}` /
+  // `{:error, :precondition_failed}` before any write).  The `{:error, term()}`
+  // spec arm already covers those denial atoms.  A guard-free op keeps the flat
+  // `${preludeBlock}${persist}` layout (byte-identical).
+  const bodyContent =
+    guardClauses.length > 0
+      ? `${beforeBind}${paramBinds.length > 0 ? `${paramBinds.join("\n")}\n` : ""}${wrapOpBodyWithGuards(
+          guardClauses,
+          [...bodyLines, persist],
+        ).join("\n")}`
+      : `${preludeBlock}${persist}`;
+
   return `  @doc "Named operation \`${op.name}\` on \`${aggPascal}\` — runs the body, persists the assigned fields."
   @spec ${opSnake}_${aggSnake}(${aggModule}.t(), map()) ::
           {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t() | term()}
   def ${opSnake}_${aggSnake}(%${aggModule}{} = record, params${opUsesCurrentUser(op) ? ", current_user \\\\ nil" : ""}) when is_map(params) do
-${preludeBlock}${persist}
+${bodyContent}
   end`;
 }
