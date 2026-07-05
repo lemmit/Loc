@@ -59,6 +59,9 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
       'POST {"commitSha":…} persists commit_sha and reads back {"commitSha":…}; a multi-word field is never silently dropped to a 422',
     conforms: ["node", "dotnet", "java", "python", "elixir"],
     provenance: ["#1620", "#1632", "#1636"],
+    // Gated per-PR on node (behavioral-e2e) and now python (behavioral-e2e-
+    // python, A6.2): the create→read round-trip asserts camelCase customerId/
+    // placedAt survive both directions.
     tier: "behavioral",
   },
   {
@@ -95,6 +98,8 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
       'POST {"createdAt":"2026-01-01T00:00:00Z"} reads back the same instant (ORM auto-value does not clobber it)',
     conforms: ["node", "dotnet", "java", "python", "elixir"],
     provenance: ["#1626"],
+    // Gated per-PR on node and python (A6.2): the order create→read asserts
+    // placedAt reads back equal to the submitted instant.
     tier: "behavioral",
   },
   {
@@ -130,6 +135,8 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
       "GET returns the nested {amount,currency}; a later op reading self.price.amount does not raise",
     conforms: ["node", "dotnet", "java", "python", "elixir"],
     provenance: ["#1660"],
+    // Gated per-PR on node and python (A6.2): the product create→read asserts
+    // the nested Money VO round-trips.
     tier: "behavioral",
   },
   {
@@ -140,6 +147,11 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
       "after the op, GET nests the added child / lists the added id — no in-memory projection that omits the join write",
     conforms: ["node", "dotnet", "java", "python", "elixir"],
     provenance: ["§11c", "#1626"],
+    // node gated (behavioral-e2e). The python behavioral gate (A6.2) surfaced a
+    // real codegen bug on the association path — the emitted FastAPI route calls
+    // `ProductId(...)` without importing it (a cross-aggregate operation-param
+    // id type omitted from the route import set). The RS-8 python round-trip is
+    // deferred until that's fixed; see a6.2-behavioral-tier-second-backend.md.
     tier: "behavioral",
   },
   {

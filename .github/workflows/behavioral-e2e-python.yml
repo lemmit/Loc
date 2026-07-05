@@ -1,0 +1,97 @@
+name: Behavioral e2e — Python (FastAPI)
+
+# A6.2 — the behavioral tier's SECOND backend. The node tier
+# (behavioral-e2e.yml) boots Hono in-process on PGlite; Python has no
+# in-process Postgres, so this boots the GENERATED FastAPI backend as a real
+# process against a `services: postgres` sidecar and HTTP-dispatches the SAME
+# emitted `test e2e` api suite at it (the emitted suite is backend-agnostic —
+# written against the HTTP contract).
+#
+# This is what moves the *behavioral* runtime-semantics RS-rules
+# (docs/conformance-semantics.md) from documented to gated on a second backend
+# per-PR: camelCase keys both directions (RS-1), enum declared casing (RS-2),
+# no leaked columns (RS-3), temporal round-trip (RS-4), value-object survival
+# (RS-7). See docs/plans/a6.2-behavioral-tier-second-backend.md.
+#
+# Reuses the proven boot pattern from python-obs-e2e.yml (uv + uvicorn) and the
+# harness wiring from behavioral-e2e.yml.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'bin/**'
+      - 'web/src/testing/**'
+      - 'test/behavioral/**'
+      - 'package.json'
+      - '.github/workflows/behavioral-e2e-python.yml'
+  pull_request:
+    paths:
+      - 'src/ir/**'
+      - 'src/generator/python/**'
+      - 'src/generator/_expr/**'
+      - 'src/platform/python.ts'
+      - 'web/src/testing/**'
+      - 'test/behavioral/**'
+      - '.github/workflows/behavioral-e2e-python.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  behavioral-python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: d
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/d
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # uv provisions the Python interpreter itself (same as python-obs-e2e).
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: 'src/generator/python/pins.ts'
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Build toolchain
+        run: npm run build
+
+      - name: Install behavioral harness deps
+        working-directory: test/behavioral
+        run: npm ci || npm install --no-audit --no-fund
+
+      - name: Run Python behavioral tier (api gate, real Postgres)
+        working-directory: test/behavioral
+        run: node run-python.mjs
