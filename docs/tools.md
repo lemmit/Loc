@@ -28,7 +28,14 @@ ddd generate system <file.ddd> -o <outdir>        # emit every deployable + dock
 ddd verify <file.ddd> --results <results.json>    # join test results onto the requirements graph
 ddd snapshot <file.ddd> -o <outdir>               # capture provenance rule snapshots
 ddd patch <file.ddd> --patches <patches.json>     # apply node-addressed model patches
+ddd trace <logfile>                               # translate a runtime stack-trace back to .ddd source
 ```
+
+`generate system` additionally accepts `--sourcemap`, which also emits
+`.loom/sourcemap.json` (construct- and statement-granular `.ddd` ↔ generated-line
+origins). `ddd trace <logfile>` reads that file to rewrite a backend stack-trace so
+each frame points at the `.ddd` line it was generated from — the debugging companion
+to the source map. See [`loom-artifacts.md`](loom-artifacts.md).
 
 ### `patch` — apply node-addressed model patches
 

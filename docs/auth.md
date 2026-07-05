@@ -360,6 +360,24 @@ When an aggregate operation references `currentUser`, the route
 handler reads `c.get("currentUser") as User` at the top and passes
 it as the trailing argument to the aggregate method.
 
+## Dev-stub verifier (`x-loom-dev-claims`)
+
+Until you register a real verifier, every backend ships an **accept-all dev
+stub** so the stack boots and the routes are reachable in local dev. The stub
+reads an optional **`x-loom-dev-claims`** request header — a JSON object of user
+claims — and projects it onto the `User` shape, so you can exercise
+`currentUser`/`requires` gates without wiring an identity provider:
+
+```bash
+curl -H 'x-loom-dev-claims: {"id":"u-1","role":"manager","tenantId":"t-1"}' \
+  http://localhost:8080/api/orders
+```
+
+With no header the stub returns a default principal. This is emitted uniformly
+across all five backends — Hono, .NET, Python, Java, and Elixir — so the same
+header drives every generated backend identically. It is a **dev convenience,
+not a production path**: register a real verifier (above) before shipping.
+
 ## Auth routes
 
 Every backend mounts its auth routes under the shared API base, i.e.

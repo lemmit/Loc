@@ -199,6 +199,19 @@ containment; `persistedAs(eventLog)` and `eventSourced` workflows → an append-
 workflows get a state table; a durable channel adds the shared `__loom_outbox`
 table.
 
+**Optimistic concurrency (`versioned`).** An aggregate `with versioned` gains a
+`version INTEGER NOT NULL DEFAULT 1` state column. Every backend's save path emits
+a guarded `UPDATE … WHERE id = $1 AND version = $2` (bumping `version`) and returns
+HTTP **409** when zero rows match — a lost-update guard. See
+[`capabilities.md`](capabilities.md).
+
+**Manual indexes.** A `resource index: [Entity.col, Entity.(a, b)]` binding
+(D-INDEX-INFRA) lands each entry as a non-unique `CREATE INDEX` on the named
+entity's table — the manual companion to the auto-derived FK covering indexes
+above. The advisory `loom.index-suggestion` lint (D-INDEX-SUGGEST) points at
+filtered columns that lack one; it never emits an index on its own. See
+[`resources.md`](resources.md).
+
 **Schema qualification.** Each table is stamped with its owning context's Postgres
 schema (`snake(context.name)` by default, or the dataSource `schema:` override).
 The SQL renderer emits `CREATE SCHEMA IF NOT EXISTS` and qualifies table/FK/index

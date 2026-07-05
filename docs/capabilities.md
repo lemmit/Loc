@@ -18,13 +18,26 @@ capability softDeletable {
 aggregate Order with softDeletable { subject: string }   // gains the field + filter
 ```
 
-`softDeletable`, `auditable`, and `tenantOwned` ship **built in** (the
-toolchain prelude, `src/macros/prelude.ts`) — available by name with nothing
+`softDeletable`, `auditable`, `tenantOwned`, and `versioned` ship **built in**
+(the toolchain prelude, `src/macros/prelude.ts`) — available by name with nothing
 declared. The `softDelete()`/`restore()` operations stay in the `softDelete`
 macro (operations aren't part of a pure-mixin capability): `with softDeletable,
 softDelete`. `tenantOwned` (tenant column + claim stamp + tenant read filter)
 additionally requires a system-level `tenancy by` declaration — see
 [`tenancy.md`](tenancy.md).
+
+`versioned` (optimistic concurrency) adds a single `version: int token = 1`
+field. Every backend's save path emits a guarded write
+(`UPDATE … WHERE id = $1 AND version = $2`, bumping `version`) and returns HTTP
+**409 Conflict** when zero rows match — a lost-update guard with no explicit
+version handling in the domain body:
+
+```ddd
+aggregate Order with versioned { subject: string }
+```
+
+The predicate `aggregateIsVersioned()` (`src/ir/util/versioned-capability.ts`) is
+the shared gate the five backend repositories and the migrations builder read.
 
 ## Surface
 
