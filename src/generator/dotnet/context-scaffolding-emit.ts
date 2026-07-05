@@ -5,6 +5,7 @@ import {
   renderAuditableInterceptor,
   renderBaseReaderImpl,
   renderBaseReaderInterface,
+  renderCanonicalInstantConverter,
   renderCommon,
   renderEnum,
   renderEvent,
@@ -98,6 +99,9 @@ export function emitEvents(
 
 export function emitCommon(ns: string, out: Map<string, string>): void {
   out.set("Domain/Common/DomainException.cs", renderCommon(ns));
+  // Canonical ISO-8601 UTC instant JSON converters (RS-4 temporal round-trip
+  // parity) — registered in Program.cs's controller + minimal-API JSON options.
+  out.set("Serialization/CanonicalInstantJsonConverter.cs", renderCanonicalInstantConverter(ns));
 }
 
 export function emitDispatcher(

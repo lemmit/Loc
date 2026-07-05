@@ -56,6 +56,19 @@ const CS_WIRE_PRIMITIVE: Record<WirePrimitive, string> = {
   json: "System.Text.Json.JsonElement",
 };
 
+/** C# expression rendering a domain `DateTime` as its canonical wire string:
+ *  ISO-8601 UTC with trailing zero fractional seconds trimmed (and the '.'
+ *  dropped when the fraction is entirely zero), matching the node (Hono),
+ *  Python (`isoformat`) and Java (`Instant.toString()`) backends (RS-4 temporal
+ *  round-trip).  `.ToString("o")` alone pads the fraction to a fixed 7 digits
+ *  (`…00.0000000Z`); `Regex.Replace(…, @"\.?0+Z$", "Z")` collapses an all-zero
+ *  fraction to `…00Z` while keeping genuine precision (`…00.123Z`).  The
+ *  emitted `CanonicalInstant.Format` helper (canonical-instant.ts) applies the
+ *  same trim to raw-DateTime serialization. */
+function csCanonicalInstantWire(domainExpr: string): string {
+  return `System.Text.RegularExpressions.Regex.Replace(${domainExpr}.ToUniversalTime().ToString("o"), @"\\.?0+Z$", "Z")`;
+}
+
 /** C# DTO property type for a `TypeIR`.  `dir` selects the suffix for
  *  nested value-object DTOs (`Request` for inputs, `Response` for
  *  outputs); entities always nest as `<Name>Response`. */
@@ -279,8 +292,9 @@ export function projectToResponse(
   switch (info.refKind) {
     case "primitive":
       if (info.primitive === "datetime") {
-        // ISO 8601 with Z suffix — matches Hono so clients see one shape.
-        return `${domainExpr}.ToUniversalTime().ToString("o")`;
+        // Canonical ISO-8601 UTC with Z suffix — matches Hono/Python/Java so
+        // clients see one shape (RS-4).  See `csCanonicalInstantWire`.
+        return csCanonicalInstantWire(domainExpr);
       }
       if (info.primitive === "money") {
         // System.Decimal → wire string, InvariantCulture for stability.
@@ -340,7 +354,7 @@ export function domainToRequestExpr(
   switch (info.refKind) {
     case "primitive":
       if (info.primitive === "datetime") {
-        return `${domainExpr}.ToUniversalTime().ToString("o")`;
+        return csCanonicalInstantWire(domainExpr);
       }
       return domainExpr;
     case "id":

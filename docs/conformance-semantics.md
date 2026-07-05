@@ -120,10 +120,12 @@ the conforming backends, and the fix that established it.
 - **Trigger.** An aggregate declaring `createdAt: instant` with an explicit
   create.
 - **Observable.** `POST {"createdAt":"2026-01-01T00:00:00Z"}` reads back the
-  same instant.
+  same instant, in the canonical `…00Z` wire form (trailing zero fractional
+  seconds trimmed) across every backend.
 - **Conforms.** node, dotnet, java, python, elixir.
 - **Provenance.** #1626 (cast declared `createdAt` + preload insert
-  associations). Tier: **T1**.
+  associations); RST-9 (canonicalize the .NET instant wire form — trailing zero
+  fractional seconds trimmed to `…00Z`, matching node/python/java). Tier: **T1**.
 
 ### RS-5 · Union-variant absence match is a presence check everywhere
 - **Guarantee.** A union-find variant `match` against an absent/nullable

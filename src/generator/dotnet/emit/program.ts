@@ -392,6 +392,28 @@ builder.Services.AddControllers(opts =>
     // converter and emits a named string-enum schema for each enum type.
     opts.JsonSerializerOptions.Converters.Add(
         new System.Text.Json.Serialization.JsonStringEnumConverter());
+    // Canonical ISO-8601 UTC instants (RS-4): trim trailing zero fractional
+    // seconds so an instant with no sub-second part serializes as "…00Z" (not
+    // System.Text.Json's fixed 7-digit "…00.0000000Z"), matching the node /
+    // Python / Java backends.  Business DTOs carry datetime as a pre-formatted
+    // wire string; this covers any raw DateTime a controller serializes.
+    opts.JsonSerializerOptions.Converters.Add(
+        new ${ns}.Serialization.CanonicalInstantJsonConverter());
+    opts.JsonSerializerOptions.Converters.Add(
+        new ${ns}.Serialization.CanonicalInstantOffsetJsonConverter());
+});
+
+// Minimal-API JSON options — the /health + /ready probes (and the /auth/me
+// session probe when auth is on) and any raw datetime a minimal endpoint
+// returns serialize through ConfigureHttpJsonOptions rather than the MVC
+// AddJsonOptions above.  Register the canonical instant converters here too so
+// their wire matches the controllers' (RS-4 temporal round-trip parity).
+builder.Services.ConfigureHttpJsonOptions(opts =>
+{
+    opts.SerializerOptions.Converters.Add(
+        new ${ns}.Serialization.CanonicalInstantJsonConverter());
+    opts.SerializerOptions.Converters.Add(
+        new ${ns}.Serialization.CanonicalInstantOffsetJsonConverter());
 });
 
 // CORS: the compose stack sets CORS_ORIGIN to the frontend origin(s) — a
