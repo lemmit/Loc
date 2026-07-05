@@ -50,6 +50,7 @@
     "test:tenancy-python": "LOOM_TENANCY_E2E_PYTHON=1 vitest run test/e2e/tenancy-isolation-python.test.ts",
     "test:tenancy-java": "LOOM_TENANCY_E2E_JAVA=1 vitest run test/e2e/tenancy-isolation-java.test.ts",
     "test:tenancy-dotnet": "LOOM_TENANCY_E2E_DOTNET=1 vitest run test/e2e/tenancy-isolation-dotnet.test.ts",
+    "test:tenancy-elixir": "LOOM_TENANCY_E2E_ELIXIR=1 vitest run test/e2e/tenancy-isolation-elixir.test.ts",
     "test:obs": "LOOM_OBS_E2E=1 vitest run test/e2e/observability-events.test.ts",
     "test:obs-dotnet": "LOOM_OBS_E2E_DOTNET=1 vitest run test/e2e/observability-events-dotnet.test.ts",
     "test:obs-java": "LOOM_OBS_E2E_JAVA=1 vitest run test/e2e/observability-events-java.test.ts",

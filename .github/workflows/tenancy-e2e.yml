@@ -11,25 +11,24 @@ name: Tenancy isolation (runtime e2e)
 # test/e2e/support/tenancy-isolation-harness.ts drives every backend; only the
 # boot differs). Each cell drives two principals via the dev-stub
 # `x-loom-dev-claims` header — the parity (#1673) that makes this cross-backend.
-# node/python/java/dotnet run in this matrix (REST create→read).  The .NET leg
-# gates the fix for a runtime isolation DEFECT this tier found: the EF global
-# query filter referenced the STATIC ambient currentUser, so EF baked it once at
-# model build and leaked cross-tenant — fixed by installing the filter on
-# AppDbContext reading the injected scoped ICurrentUserAccessor.
+# All five backends run this matrix (REST create→read): node/python/java/dotnet
+# + elixir.  The .NET leg gates the fix for a runtime isolation DEFECT this tier
+# found: the EF global query filter referenced the STATIC ambient currentUser,
+# so EF baked it once at model build and leaked cross-tenant — fixed by
+# installing the filter on AppDbContext reading the injected scoped
+# ICurrentUserAccessor.
 #
-# Elixir is NOT in this matrix — but for a SEPARATE, pre-existing bug, not by
-# design: the vanilla Phoenix router only wires GET routes for a bare aggregate
-# (`api-emit.ts` gates POST/PATCH/DELETE on explicit `creates`/`operations`/
-# `destroys`, while every other backend emits them by constructibility —
-# `hasCreate`/`isConstructible`).  The create/update/delete controller ACTIONS
-# are generated but left unrouted (dead code), so `POST /api/invoices` 404s and
-# the shared create→read harness can't drive it.  Tracked as its own fix.
-#
-# The tenancy READ isolation was still verified out-of-band by seeding two
-# tenants' rows and reading as each (org-b GET org-a's row → 404, each LIST
-# scoped to its own tenant) — the Ecto repository threads current_user per call
-# and rebuilds the `where tenant_id == ^claim` filter fresh each request, so it
-# is immune to the EF baked-filter class.
+# The elixir leg joined once the vanilla Phoenix router create-route parity bug
+# was fixed: the tenancy fixture's aggregates are BARE (`with tenantOwned` /
+# `crossTenant` / bare registry — no `with crudish`), so the router wired no
+# `POST /<plural>` for them (it gated the create route on explicit `creates`
+# while the controller emitted the `create` action — and the OpenAPI spec
+# documented it — by constructibility).  `POST /api/invoices` 404'd on a
+# documented, implemented endpoint.  Fixed by routing create off the shared
+# `emitsRestCreate` predicate (the same gate the OpenAPI `post` uses), matching
+# `hasCreate`/`isConstructible` on the other four backends.  The Ecto repository
+# threads current_user per call and rebuilds the `where tenant_id == ^claim`
+# filter fresh each request, so it is immune to the EF baked-filter class.
 #
 # This is the assertion the structural tiers CANNOT make: per-backend generator
 # tests pin the filter and the 1a.0 pins the stamp, but only a boot proves the
@@ -61,11 +60,14 @@ on:
       - 'src/generator/java/emit/auth.ts'
       - 'src/generator/dotnet/emit/efcore.ts'
       - 'src/generator/dotnet/auth-emit.ts'
+      - 'src/generator/elixir/vanilla/api-emit.ts'
+      - 'src/generator/elixir/vanilla/openapi-emit.ts'
       - 'src/platform/hono/**'
       - 'test/e2e/tenancy-isolation.test.ts'
       - 'test/e2e/tenancy-isolation-python.test.ts'
       - 'test/e2e/tenancy-isolation-java.test.ts'
       - 'test/e2e/tenancy-isolation-dotnet.test.ts'
+      - 'test/e2e/tenancy-isolation-elixir.test.ts'
       - 'test/e2e/support/tenancy-isolation-harness.ts'
       - 'test/fixtures/corpus/tenancy-owned.ddd'
       - 'package.json'
@@ -97,6 +99,8 @@ jobs:
             script: test:tenancy-java
           - backend: dotnet
             script: test:tenancy-dotnet
+          - backend: elixir
+            script: test:tenancy-elixir
     name: tenancy-e2e (${{ matrix.backend }})
     services:
       postgres:
@@ -135,6 +139,13 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+
+      - name: Set up Elixir/OTP (elixir)
+        if: matrix.backend == 'elixir'
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.3'
+          elixir-version: '1.18.4'
 
       - name: Install Loom toolchain
         run: npm ci
