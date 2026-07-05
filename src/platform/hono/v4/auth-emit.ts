@@ -1,5 +1,6 @@
 import { renderTsType } from "../../../generator/typescript/render-expr.js";
 import type { AuthIR, AuthValueIR, SystemIR, UserIR } from "../../../ir/types/loom-ir.js";
+import { hierarchyRegistry } from "../../../ir/util/tenant-stance.js";
 import { AUTH_BASE_PATH } from "../../../util/api-base.js";
 import { lines } from "../../../util/code-builder.js";
 
@@ -31,9 +32,17 @@ export function emitAuthFiles(sys: SystemIR, out: Map<string, string>): void {
   // The tenancy claim field, when the system declares `tenancy by …` — drives
   // the derived `currentUser.orgPath` principal member (multi-tenancy P2.1).
   const orgPathClaim = sys.tenancy?.claimField;
+  // Hierarchy (P2.2): when the registry opts into `tenantRegistry` (a `dataKey`
+  // column exists), `orgPath` becomes a per-request memoized registry read via
+  // a registered resolver (falling back to the claim when the row/dataKey is
+  // absent).  Without it (flat tenancy), the P2.1 claim-copy stands.
+  const orgPathReadsRegistry = hierarchyRegistry(sys) !== undefined;
   out.set("auth/user-types.ts", renderUserTypes(sys.user, orgPathClaim));
   out.set("auth/verifier.ts", renderVerifier());
-  out.set("auth/middleware.ts", renderMiddleware(sys.user, !!oidc, orgPathClaim));
+  out.set(
+    "auth/middleware.ts",
+    renderMiddleware(sys.user, !!oidc, orgPathClaim, orgPathReadsRegistry),
+  );
   // The session routes (always `/auth/me`, plus the OIDC redirect handshake
   // when an `auth { oidc }` block is present) are emitted whenever a
   // backend has auth — the frontend `auth: ui` guard probes `/auth/me`,
@@ -177,18 +186,60 @@ export function assertUserVerifierRegistered(): void {
 `;
 }
 
-function renderMiddleware(user: UserIR, oidc: boolean, orgPathClaim?: string): string {
+function renderMiddleware(
+  user: UserIR,
+  oidc: boolean,
+  orgPathClaim?: string,
+  orgPathReadsRegistry = false,
+): string {
   const idField = actorIdField(user);
   const stampActorId = idField ? `\n  if (ctx) ctx.actorId = String(user.${idField});` : "";
   // Derive the request principal from the verifier's claims.  Under tenancy,
-  // add the per-request `orgPath` — the caller's tenant materialized path
-  // (multi-tenancy P2.1).  Computed once here (post-verify, so it reflects any
-  // dev-claims override) and memoized on the request-scoped principal.  P2.1
-  // resolves it to the tenancy claim value (the root-segment path); P2.2 swaps
-  // this for a memoized registry `dataKey` lookup keyed by the same claim.
-  const deriveUser = orgPathClaim
-    ? `{ ...claims, orgPath: String(claims.${orgPathClaim} ?? "") }`
-    : "claims";
+  // add the per-request `orgPath` — the caller's tenant materialized path.
+  // Computed once here (post-verify, so it reflects any dev-claims override)
+  // and memoized on the request-scoped principal.
+  //
+  //  - flat tenancy (P2.1): `orgPath` is the claim itself (the root-segment
+  //    path — no registry `dataKey` column to read).
+  //  - hierarchy (P2.2): resolve the caller's registry `dataKey` once per
+  //    request via the registered resolver; fall back to the claim when the
+  //    row is missing or has no `dataKey` (pre-tree data) — never null/crash.
+  const claimExpr = orgPathClaim ? `String(claims.${orgPathClaim} ?? "")` : `""`;
+  const deriveUser =
+    orgPathClaim && !orgPathReadsRegistry
+      ? `{ ...claims, orgPath: ${claimExpr} }`
+      : orgPathClaim && orgPathReadsRegistry
+        ? `{ ...claims, orgPath: await resolveOrgPath(${claimExpr}) }`
+        : "claims";
+  // The registry-lookup seam (P2.2).  The auth layer can't reach the db (it is
+  // constructed at boot and injected into repositories), so — like the verifier
+  // — the resolver is REGISTERED at boot (index.ts) with a closure that reads
+  // `SELECT data_key FROM <registry> WHERE id = <claim>`.  Unregistered (or a
+  // missing/dataKey-less row), it yields the claim: the documented root-segment
+  // fallback that keeps every non-hierarchy stack (and pre-tree data) working.
+  const resolverSeam = orgPathReadsRegistry
+    ? `
+/** Resolves the caller's tenant materialized path (\`currentUser.orgPath\`) from
+ *  the registry's \`dataKey\` column, keyed by the tenancy claim.  Registered at
+ *  boot (see index.ts) with a db-backed closure; returns \`null\` for a missing
+ *  row / \`dataKey\`, in which case the middleware falls back to the claim. */
+export type OrgPathResolver = (claim: string) => Promise<string | null>;
+let orgPathResolver: OrgPathResolver | null = null;
+export function registerOrgPathResolver(fn: OrgPathResolver): void {
+  orgPathResolver = fn;
+}
+/** Per-request \`orgPath\`: the registry \`dataKey\`, else the claim (fail-safe). */
+async function resolveOrgPath(claim: string): Promise<string> {
+  if (!orgPathResolver || claim === "") return claim;
+  try {
+    const dataKey = await orgPathResolver(claim);
+    return dataKey ?? claim;
+  } catch {
+    return claim;
+  }
+}
+`
+    : "";
   // Only the handshake's redirect endpoints bypass auth — they must be
   // reachable without a verified principal.  `/api/auth/me` (the session probe
   // the frontend guard reads) is deliberately NOT bypassed, so the
@@ -203,7 +254,7 @@ import type { User, UserClaims } from "./user-types";
 import { verifyUserOrThrow } from "./verifier";
 
 const BYPASS_PREFIXES = ${bypass} as const;
-
+${resolverSeam}
 /** Hono middleware that decodes the request's JWT into a User, attaches it
  *  to the ambient RequestContext (the one source of truth, readable by
  *  non-HTTP code via \`requireCurrentUser()\`), and also stashes it on the
