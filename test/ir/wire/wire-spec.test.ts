@@ -79,7 +79,7 @@ system Amb {
     const spec = buildWireSpec(loom.systems[0]!);
     expect(Object.keys(spec.valueObjects)).toEqual(["Money"]);
     // The aggregates' `$ref` stays bare — resolves to the single `Money` key.
-    expect(spec.aggregates["Wallet"]!.properties.balance).toEqual({
+    expect(spec.aggregates.Wallet!.properties.balance).toEqual({
       $ref: "#/valueObjects/Money",
     });
   });

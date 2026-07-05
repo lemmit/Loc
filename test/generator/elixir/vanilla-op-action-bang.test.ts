@@ -89,7 +89,9 @@ describe("vanilla LiveView operation-action bang seams (§13)", () => {
     expect(confirm).toContain('String.starts_with?(guard_msg, "Forbidden: ")');
     expect(confirm).toContain('ProblemDetails.problem_response(conn, 403, "Forbidden", guard_msg)');
     expect(confirm).toContain('String.starts_with?(guard_msg, "Precondition failed: ")');
-    expect(confirm).toContain('ProblemDetails.problem_response(conn, 400, "Bad Request", guard_msg)');
+    expect(confirm).toContain(
+      'ProblemDetails.problem_response(conn, 400, "Bad Request", guard_msg)',
+    );
     // A non-guard ArgumentError still reraises → 500 (unchanged).
     expect(confirm).toContain("reraise(guard_error, __STACKTRACE__)");
   });
