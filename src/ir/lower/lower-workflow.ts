@@ -50,6 +50,7 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../types/loom-ir.js";
+import { upperFirst } from "../../util/naming.js";
 import { aggregateOpResolver, type SaveResolver } from "../util/domain-service-tier.js";
 import { resolveBypass } from "./lower-capabilities.js";
 import {
@@ -508,7 +509,7 @@ function lowerWorkflowStatementInner(
       const loadPlan: LoadPlanIR =
         loadPaths.length > 0 ? { kind: "explicit", paths: loadPaths } : { kind: "whole" };
       const retrievalName = anon
-        ? `findAllBy${anon.criterionName}${hasShaping ? `Shaped${shapeSignature(sortTerms, loadPaths)}` : ""}`
+        ? `findAllBy${anon.criterionName}${hasShaping ? shapeSuffix(sortTerms, loadPaths) : ""}`
         : runCall.retrievalName;
       const retrievalArgs = anon ? anon.criterionArgs : runCall.retrievalArgs;
       return {
@@ -839,13 +840,29 @@ function loadPathSegments(p: LoadPath): LoadSegmentIR[] {
   return p.segments.map((seg) => ({ name: seg.name, collection: !!seg.collection }));
 }
 
-/** A short, deterministic, content-based signature of an anonymous retrieval's
+/** A readable, deterministic suffix rendering an anonymous retrieval's
  *  `sort:` / `loads:` shaping — folded into the synthetic retrieval name so
  *  distinct shapes over one criterion get distinct retrievals while identical
- *  shapes dedupe (a plain djb2 string hash over the canonical JSON). */
-function shapeSignature(sort: SortTermIR[], loads: LoadSegmentIR[][]): string {
-  const canon = JSON.stringify({ sort, loads });
-  let h = 5381;
-  for (let i = 0; i < canon.length; i++) h = (h * 33) ^ canon.charCodeAt(i);
-  return (h >>> 0).toString(36);
+ *  shapes dedupe.  Readable ON PURPOSE (S8, `generated-code-ddd-review-2026-07`):
+ *  this name becomes a PUBLIC domain-surface method on every backend
+ *  (`runFindAllByActiveNamedBySequenceDesc` on Hono, the `…Spec` in the .NET
+ *  Domain namespace, the snake_cased Phoenix context fn), so the previous
+ *  structural hash (`Shaped1g7wy98`) leaked compiler internals into the
+ *  ubiquitous language.  The rendering is a canonical function of the shape
+ *  content — sort terms as `By<Path><Asc|Desc>` joined with `Then`, load
+ *  paths as `Loading<Path>` joined with `And` — so the
+ *  distinct-shapes-stay-distinct / identical-shapes-dedupe property the hash
+ *  provided is preserved (enrichment's dedup-by-name in
+ *  `synthesizeFindAllRetrievals` is untouched). */
+function shapeSuffix(sort: SortTermIR[], loads: LoadSegmentIR[][]): string {
+  const pathName = (segs: readonly LoadSegmentIR[]): string =>
+    segs.map((s) => upperFirst(s.name)).join("");
+  const sortPart =
+    sort.length > 0
+      ? `By${sort
+          .map((t) => `${pathName(t.path)}${t.direction === "desc" ? "Desc" : "Asc"}`)
+          .join("Then")}`
+      : "";
+  const loadsPart = loads.length > 0 ? `Loading${loads.map(pathName).join("And")}` : "";
+  return `${sortPart}${loadsPart}`;
 }
