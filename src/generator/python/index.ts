@@ -11,6 +11,7 @@ import { durableEventTypes } from "../../ir/util/channels.js";
 import {
   aggregateIsEventSourced,
   effectiveSavingShape,
+  resolveContextSchema,
   resolveDataSourceConfig,
 } from "../../ir/util/resolve-datasource.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
@@ -148,6 +149,13 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       ? resolveDataSourceConfig(agg as EnrichedAggregateIR, owning, args.sys)
       : undefined;
   };
+  // Per-workflow saga-table schema — resolved from the workflow's OWNING
+  // context (map-back by name, since `merged` unions several), so its
+  // correlation-state / event-log table lands in the context schema.
+  const resolveWorkflowSchema = (wf: import("../../ir/types/loom-ir.js").WorkflowIR) => {
+    const owning = args.contexts.find((c) => c.workflows.some((w) => w.name === wf.name));
+    return owning ? resolveContextSchema(owning, args.sys) : undefined;
+  };
   // Auth scaffolding (docs/auth.md): only an `auth: required` deployable
   // (whose system declares a `user { ... }` block) carries the verifier
   // registry + middleware — anonymous deployables stay byte-identical.
@@ -229,7 +237,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   out.set("app/domain/value_objects.py", renderPyEnumsAndValueObjects(merged));
   out.set("app/domain/events.py", renderPyEvents(merged));
 
-  out.set("app/db/schema.py", renderPySchema(merged, resolveDs));
+  out.set("app/db/schema.py", renderPySchema(merged, resolveDs, resolveWorkflowSchema));
   out.set("app/db/wire.py", WIRE_PY);
   out.set("app/db/migrate.py", MIGRATE_PY);
   const hasPaged = merged.repositories.some((r) =>

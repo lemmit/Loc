@@ -16,6 +16,7 @@ import { isTpcBase, isTphBase, tableOwnerName } from "../../ir/util/inheritance.
 import {
   aggregateIsEventSourced,
   effectiveSavingShape,
+  resolveContextSchema,
   resolveDataSourceConfig,
 } from "../../ir/util/resolve-datasource.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
@@ -371,6 +372,9 @@ function emitProjectFromContexts(
   }
 
   for (const ctx of contexts) {
+    // This context's Postgres schema — the workflow saga tables (JPA `@Table`
+    // + native-SQL ES stream) land here to match the migration DDL.
+    const ctxSchema = system?.sys ? resolveContextSchema(ctx, system.sys) : undefined;
     // Ids — an abstract TPC base keeps no identity (each concrete owns a
     // typed id); a TPH base owns the shared single-table key.
     for (const agg of ctx.aggregates) {
@@ -462,7 +466,7 @@ function emitProjectFromContexts(
       place(
         `${workflowStateClass(wf)}.java`,
         "infra-persistence",
-        renderWorkflowStateEntity(wf, ctx, basePkg, pkgFor("infra-persistence")),
+        renderWorkflowStateEntity(wf, ctx, basePkg, pkgFor("infra-persistence"), ctxSchema),
       );
       place(
         `${workflowStateClass(wf)}Repository.java`,
@@ -493,6 +497,7 @@ function emitProjectFromContexts(
       repoPkgOf: (a) => pkgFor("repository-interface", a),
       statePkg: pkgFor("infra-persistence"),
       stateRepoPkg: pkgFor("spring-data-repository"),
+      contextSchema: ctxSchema,
     });
     if (dispatcher) place(dispatcher.name, "workflow-service", dispatcher.content);
     // Read-only instance endpoints (workflow-debt-backend-parity.md, Java saga
@@ -503,6 +508,7 @@ function emitProjectFromContexts(
       pkg: pkgFor("workflow-service"),
       routePrefix,
       stateRepoPkg: pkgFor("spring-data-repository"),
+      contextSchema: ctxSchema,
     });
     if (instanceReads) {
       for (const [name, f] of instanceReads) place(name, f.category, f.content);
@@ -516,6 +522,7 @@ function emitProjectFromContexts(
       repoPkgOf: (a) => pkgFor("repository-interface", a),
       stateRepoPkg: pkgFor("spring-data-repository"),
       workflowPkg: pkgFor("workflow-service"),
+      contextSchema: ctxSchema,
     });
     if (viewFiles) {
       for (const [name, f] of viewFiles) place(name, f.category, f.content);

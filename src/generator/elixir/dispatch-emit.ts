@@ -8,6 +8,7 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
+import { resolveContextSchema } from "../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
 import { buildPhoenixResourceModules } from "./adapters/resource-clients.js";
@@ -111,6 +112,9 @@ export function emitWorkflowStateSchemas(
   ctx: EnrichedBoundedContextIR,
   appModule: string,
   out: Map<string, string>,
+  /** The context's schema for the saga-state `@schema_prefix`; undefined ⇒
+   *  unqualified. */
+  schema?: string,
 ): void {
   const ctxSnake = snake(ctx.name);
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
@@ -118,7 +122,7 @@ export function emitWorkflowStateSchemas(
     if (!wf.correlationField || wf.eventSourced) continue;
     out.set(
       `lib/${appName}/${ctxSnake}/workflows/${snake(wf.name)}_state.ex`,
-      renderStateSchema(contextModule, wf),
+      renderStateSchema(contextModule, wf, schema),
     );
   }
 }
@@ -155,10 +159,11 @@ export function emitDispatch(
     if (sub.workflow.correlationField && !sub.workflow.eventSourced)
       correlationWfs.set(sub.workflow.name, sub.workflow);
   }
+  const dispatchSchema = sys ? resolveContextSchema(ctx, sys) : undefined;
   for (const wf of correlationWfs.values()) {
     out.set(
       `lib/${appName}/${ctxSnake}/workflows/${snake(wf.name)}_state.ex`,
-      renderStateSchema(contextModule, wf),
+      renderStateSchema(contextModule, wf, dispatchSchema),
     );
   }
 
@@ -224,7 +229,7 @@ function ectoStateFieldType(t: import("../../ir/types/loom-ir.js").TypeIR): stri
   return ":string";
 }
 
-function renderStateSchema(contextModule: string, wf: WorkflowIR): string {
+function renderStateSchema(contextModule: string, wf: WorkflowIR, schema?: string): string {
   const corr = wf.correlationField as string;
   const corrField = (wf.stateFields ?? []).find((f) => f.name === corr);
   const pkType =
@@ -233,13 +238,16 @@ function renderStateSchema(contextModule: string, wf: WorkflowIR): string {
   const fieldLines = (wf.stateFields ?? [])
     .filter((f) => f.name !== corr)
     .map((f) => `    field :${snake(f.name)}, ${ectoStateFieldType(f.type)}`);
+  // `@schema_prefix` targets the workflow's context schema, matching the
+  // migration `prefix:`.  Omitted ⇒ public, byte-identical.
+  const prefixLine = schema ? `  @schema_prefix ${JSON.stringify(schema)}\n` : "";
   return `# Auto-generated.
 defmodule ${stateModule(contextModule, wf)} do
   @moduledoc "Persisted correlation state for the ${upperFirst(wf.name)} workflow."
 
   use Ecto.Schema
 
-  @primary_key {:${snake(corr)}, ${pkType}, autogenerate: false}
+${prefixLine}  @primary_key {:${snake(corr)}, ${pkType}, autogenerate: false}
   schema "${table}" do
 ${fieldLines.length > 0 ? fieldLines.join("\n") + "\n" : ""}    timestamps()
   end

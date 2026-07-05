@@ -167,6 +167,9 @@ export function emitEventSourcedWorkflowFiles(
   workflows: readonly WorkflowIR[],
   ns: string,
   out: Map<string, string>,
+  /** The saga stream's owning-context schema (workflow → context map-back);
+   *  undefined → unqualified, byte-identical. */
+  resolveWorkflowSchema: (wf: WorkflowIR) => string | undefined = () => undefined,
 ): void {
   for (const wf of eventSourcedWorkflows(workflows)) {
     out.set(`Application/Workflows/${workflowStateClass(wf)}.cs`, renderWorkflowFoldClass(wf, ns));
@@ -176,7 +179,7 @@ export function emitEventSourcedWorkflowFiles(
     );
     out.set(
       `Infrastructure/Persistence/Configurations/${esEventRecordClass(wf)}Configuration.cs`,
-      renderEventRecordConfiguration(upperFirst(wf.name), ns),
+      renderEventRecordConfiguration(upperFirst(wf.name), ns, resolveWorkflowSchema(wf)),
     );
   }
 }

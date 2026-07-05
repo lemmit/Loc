@@ -8,6 +8,7 @@ import type {
   EnrichedBoundedContextIR,
   RepositoryIR,
   SystemIR,
+  WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import { aggHasAuditedTarget } from "../../ir/util/audit-capability.js";
@@ -18,6 +19,7 @@ import {
   effectiveSavingShape,
   isDocumentShaped,
   isEmbeddedShaped,
+  resolveContextSchema,
   resolveDataSourceConfig,
 } from "../../ir/util/resolve-datasource.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
@@ -414,12 +416,26 @@ function emitProjectFromContexts(
     }
     // Persisted workflow-correlation state POCOs + EF configs (one per
     // correlation-bearing workflow); the DbSet/ApplyConfiguration wiring is
-    // inside renderDbContext above.
-    emitWorkflowStatePersistence(merged.workflows, ns, out, durableEventTypes(merged).size > 0);
+    // inside renderDbContext above.  The saga tables live in the workflow's
+    // OWNING-context schema (map-back by name over `contexts`, since `merged`
+    // unions several), matching the migration DDL.
+    const resolveWorkflowSchema = system
+      ? (wf: WorkflowIR): string | undefined => {
+          const owningCtx = contexts.find((c) => c.workflows.some((w) => w.name === wf.name));
+          return owningCtx ? resolveContextSchema(owningCtx, system.sys) : undefined;
+        }
+      : undefined;
+    emitWorkflowStatePersistence(
+      merged.workflows,
+      ns,
+      out,
+      durableEventTypes(merged).size > 0,
+      resolveWorkflowSchema,
+    );
     // Event-sourced workflows (workflow-and-applier.md A2-S5b): the `<Wf>State`
     // fold class + `<Wf>EventRecord` POCO/config (the stream the dispatch
     // handler folds-on-load / appends to).
-    emitEventSourcedWorkflowFiles(merged.workflows, ns, out);
+    emitEventSourcedWorkflowFiles(merged.workflows, ns, out, resolveWorkflowSchema);
   }
   // FluentValidation pipeline — emit the generic
   // ValidationBehavior + the csproj package ref + the

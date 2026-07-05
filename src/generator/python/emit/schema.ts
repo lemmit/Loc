@@ -47,6 +47,10 @@ export type PyDataSourceLookup = (agg: AggregateIR) => ResolvedDataSource | unde
 export function renderPySchema(
   ctx: EnrichedBoundedContextIR,
   resolveDataSource?: PyDataSourceLookup,
+  /** Per-workflow saga-table schema, resolved from the workflow's OWNING
+   *  context (`ctx` here may be a merged union).  Built by the caller via
+   *  `resolveContextSchema`; undefined → unqualified, byte-identical. */
+  resolveWorkflowSchema?: (wf: WorkflowIR) => string | undefined,
 ): string {
   const models: string[] = [];
   for (const agg of ctx.aggregates) {
@@ -135,15 +139,17 @@ export function renderPySchema(
   const durable = durableEventTypes(ctx).size > 0;
   for (const wf of ctx.workflows) {
     if (!wf.correlationField) continue;
+    // The saga table lands in the workflow's owning-context schema, matching
+    // the migration DDL (unqualified when the context has no binding).
+    const wfSchema = resolveWorkflowSchema?.(wf);
     // An `eventSourced` workflow persists as an append-only `<wf>_events`
     // stream (the saga analogue of a `persistedAs(eventLog)` aggregate),
-    // not a mutable correlation row — same unqualified stream table the
-    // migration derives (migrations-builder.eventLogTableForStream).
+    // not a mutable correlation row (migrations-builder.eventLogTableForStream).
     if (wf.eventSourced) {
-      models.push(renderEventLogModel(wf.name));
+      models.push(renderEventLogModel(wf.name, wfSchema));
       continue;
     }
-    models.push(renderWorkflowStateModel(wf, ctx, durable));
+    models.push(renderWorkflowStateModel(wf, ctx, durable, wfSchema));
   }
   // Transactional outbox (dispatch-delivery-semantics.md): the shared
   // `__loom_outbox` table when any channel asks for durability.
@@ -339,6 +345,7 @@ function renderWorkflowStateModel(
   wf: WorkflowIR,
   ctx: EnrichedBoundedContextIR,
   durable = false,
+  schema?: string,
 ): string {
   const tableName = plural(snake(wf.name));
   const corr = wf.correlationField as string;
@@ -373,6 +380,7 @@ function renderWorkflowStateModel(
   return lines(
     `class ${wf.name}Row(Base):`,
     `    __tablename__ = "${tableName}"`,
+    schema ? `    __table_args__ = ({"schema": "${schema}"},)` : null,
     "",
     cols.map(renderColumn),
   );

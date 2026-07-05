@@ -55,6 +55,9 @@ export function emitWorkflowStatePersistence(
    *  durable channel adds `LastEventId` so handlers can no-op on the
    *  relay's at-least-once redelivery. */
   durable = false,
+  /** The saga table's owning-context schema (workflow → context map-back);
+   *  undefined → unqualified, byte-identical. */
+  resolveWorkflowSchema: (wf: WorkflowIR) => string | undefined = () => undefined,
 ): void {
   for (const wf of correlationWorkflows(workflows)) {
     out.set(
@@ -63,7 +66,7 @@ export function emitWorkflowStatePersistence(
     );
     out.set(
       `Infrastructure/Persistence/Configurations/${workflowStateClass(wf)}Configuration.cs`,
-      renderWorkflowStateConfiguration(wf, ns, durable),
+      renderWorkflowStateConfiguration(wf, ns, durable, resolveWorkflowSchema(wf)),
     );
   }
 }
@@ -109,9 +112,15 @@ export function renderWorkflowStateConfiguration(
   wf: WorkflowIR,
   ns: string,
   durable = false,
+  schema?: string,
 ): string {
   const corr = wf.correlationField as string;
   const cls = workflowStateClass(wf);
+  // Saga state table lands in the workflow's context schema (two-arg ToTable);
+  // undefined → single-arg, byte-identical.
+  const toTableArgs = schema
+    ? `"${workflowStateTable(wf)}", "${schema}"`
+    : `"${workflowStateTable(wf)}"`;
   const fieldConfigs = (wf.stateFields ?? []).flatMap((f) => {
     if (f.type.kind === "id") {
       return [
@@ -139,7 +148,7 @@ export function renderWorkflowStateConfiguration(
       "{",
       `    public void Configure(EntityTypeBuilder<${cls}> builder)`,
       "    {",
-      `        builder.ToTable("${workflowStateTable(wf)}");`,
+      `        builder.ToTable(${toTableArgs});`,
       `        builder.HasKey(x => x.${upperFirst(corr)});`,
       ...fieldConfigs,
       // The marker column name matches the shared migration DDL

@@ -138,10 +138,7 @@ export function resolveDataSourceConfig(
  *  Shared by the migrations builder and every backend's schema emitter so
  *  the migration DDL and each ORM mapping agree on the qualifier (a
  *  divergence here is a boot break, not a compile error). */
-export function resolveContextSchema(
-  ctx: BoundedContextIR,
-  sys: SystemIR,
-): string | undefined {
+export function resolveContextSchema(ctx: BoundedContextIR, sys: SystemIR): string | undefined {
   const forCtx = sys.dataSources.filter((d) => d.contextName === ctx.name);
   if (forCtx.length === 0) return undefined;
   const ds = forCtx.find((d) => d.kind === "state") ?? forCtx[0]!;

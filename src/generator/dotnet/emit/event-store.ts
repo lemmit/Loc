@@ -48,8 +48,12 @@ export function renderEventRecordPoco(name: string, ns: string): string {
 /** EF Core configuration for the event-stream table: composite
  *  `(stream_id, version)` key, jsonb `data`, snake_case column names
  *  matching the canonical `<name>_events` migration. */
-export function renderEventRecordConfiguration(name: string, ns: string): string {
+export function renderEventRecordConfiguration(name: string, ns: string, schema?: string): string {
   const tableName = `${snake(name)}_events`;
+  // `schema` set (a workflow's saga stream in its context schema) → two-arg
+  // ToTable; undefined (aggregate stream / no binding) → single-arg, byte-
+  // identical.
+  const toTableArgs = schema ? `"${tableName}", "${schema}"` : `"${tableName}"`;
   return (
     lines(
       "// Auto-generated.",
@@ -63,7 +67,7 @@ export function renderEventRecordConfiguration(name: string, ns: string): string
       "{",
       `    public void Configure(EntityTypeBuilder<${name}EventRecord> builder)`,
       "    {",
-      `        builder.ToTable("${tableName}");`,
+      `        builder.ToTable(${toTableArgs});`,
       "        builder.HasKey(x => new { x.StreamId, x.Version });",
       '        builder.Property(x => x.StreamId).HasColumnName("stream_id");',
       '        builder.Property(x => x.Version).HasColumnName("version");',

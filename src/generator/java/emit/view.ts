@@ -67,6 +67,9 @@ export interface ViewCtx {
   /** Workflow-service package (application.workflows) — the home of the ES
    *  `<Wf>State` fold class an event-sourced workflow-view reads through. */
   workflowPkg: string;
+  /** The workflows' owning-context Postgres schema — qualifies the ES saga
+   *  stream in native SQL to match the migration.  Undefined ⇒ unqualified. */
+  contextSchema?: string;
 }
 
 export function renderJavaViews(
@@ -250,7 +253,7 @@ export function renderJavaViews(
       esWfs.push(wf);
       const cls = esWorkflowStateClass(wf);
       const corrId = esWorkflowCorrIdClass(wf);
-      const table = esWorkflowStreamTable(wf);
+      const table = esWorkflowStreamTable(wf, vctx.contextSchema);
       const corr = shape.find((f) => f.source === "id");
       const idJava = javaValueTypeForId(idValueTypeOf(corr));
       imports.add("java.util.ArrayList");
