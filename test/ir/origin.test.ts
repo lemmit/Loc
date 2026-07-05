@@ -5,6 +5,7 @@
 // enrichment, and that `resolveToSource` walks the chain correctly.
 
 import { describe, expect, it } from "vitest";
+import { allContexts } from "../../src/ir/types/loom-ir.js";
 import { resolveToSource } from "../../src/ir/types/origin.js";
 import { buildLoomModel } from "../_helpers/index.js";
 
@@ -101,6 +102,108 @@ describe("origin spine — source capture at lowering", () => {
     expect(agg.origin?.kind).toBe("source");
     const op = agg.operations.find((o) => o.name === "confirm")!;
     expect(op.origin?.kind).toBe("source"); // survives the `stamp()` routeSlug rebuild too
+  });
+});
+
+describe("statement origins", () => {
+  const STMT_SOURCE = `
+    system Shop {
+      subdomain Sales {
+        context Orders {
+          event OrderPlaced {
+            order: Order id
+          }
+          aggregate Order {
+            reference: string
+            operation confirm(): string {
+              let tag = reference
+              reference := tag
+              emit OrderPlaced { order: id }
+              return tag
+            }
+          }
+          repository Orders for Order { }
+        }
+      }
+      deployable Api { platform: node  contexts: [Orders] }
+    }
+  `;
+  // Distinctive token per statement, in source order — used to assert each
+  // span slices to ITS OWN statement's text, not merely somewhere inside the
+  // enclosing operation.
+  const TOKENS = ["let tag", "reference := tag", "emit OrderPlaced", "return tag"];
+
+  it("stamps a distinct real .ddd span on every statement in an aggregate operation body", async () => {
+    const loom = await buildLoomModel(STMT_SOURCE);
+    const ctx = loom.systems[0]!.subdomains[0]!.contexts[0]!;
+    const agg = ctx.aggregates.find((a) => a.name === "Order")!;
+    const op = agg.operations.find((o) => o.name === "confirm")!;
+    expect(op.statements.map((s) => s.kind)).toEqual(["let", "assign", "emit", "return"]);
+
+    const spanKeys = op.statements.map((s, i) => {
+      expect(s.origin?.kind, `statement ${i} (${s.kind}) has no source origin`).toBe("source");
+      if (s.origin?.kind !== "source") return "";
+      const text = STMT_SOURCE.slice(s.origin.span.start, s.origin.span.end);
+      expect(text, `statement ${i} span doesn't contain its own token`).toContain(TOKENS[i]);
+      return `${s.origin.span.start}:${s.origin.span.end}`;
+    });
+    // Spans must differ per statement — not all four collapsed onto the
+    // enclosing operation's span.
+    expect(new Set(spanKeys).size).toBe(spanKeys.length);
+  });
+
+  it("survives enrichment (buildLoomModel runs lower + enrich)", async () => {
+    const loom = await buildLoomModel(STMT_SOURCE);
+    const ctx = loom.systems[0]!.subdomains[0]!.contexts[0]!;
+    const agg = ctx.aggregates.find((a) => a.name === "Order")!;
+    const op = agg.operations.find((o) => o.name === "confirm")!;
+    const letStmt = op.statements[0]!;
+    expect(letStmt.origin?.kind).toBe("source");
+    if (letStmt.origin?.kind === "source") {
+      expect(STMT_SOURCE.slice(letStmt.origin.span.start, letStmt.origin.span.end)).toContain(
+        "let tag",
+      );
+    }
+  });
+
+  const WORKFLOW_SOURCE = `
+    context Sales {
+      event TagAssigned {
+        note: string
+      }
+      aggregate Order {
+        tag: string
+      }
+      repository Orders for Order { }
+      workflow TagFlow {
+        create() {
+          let picked = "alpha"
+          emit TagAssigned { note: picked }
+        }
+      }
+    }
+  `;
+
+  it("stamps a distinct real .ddd span on every statement in a workflow create body", async () => {
+    const loom = await buildLoomModel(WORKFLOW_SOURCE);
+    const ctx = allContexts(loom).find((c) => c.name === "Sales")!;
+    const wf = ctx.workflows.find((w) => w.name === "TagFlow")!;
+    const create = wf.creates[0]!;
+    expect(create.statements.map((s) => s.kind)).toEqual(["expr-let", "emit"]);
+
+    const tokens = ["let picked", "emit TagAssigned"];
+    const spanKeys = create.statements.map((s, i) => {
+      expect(s.origin?.kind, `workflow statement ${i} (${s.kind}) has no source origin`).toBe(
+        "source",
+      );
+      if (s.origin?.kind !== "source") return "";
+      const text = WORKFLOW_SOURCE.slice(s.origin.span.start, s.origin.span.end);
+      expect(text, `workflow statement ${i} span doesn't contain its own token`).toContain(
+        tokens[i],
+      );
+      return `${s.origin.span.start}:${s.origin.span.end}`;
+    });
+    expect(new Set(spanKeys).size).toBe(spanKeys.length);
   });
 });
 

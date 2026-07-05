@@ -4,11 +4,16 @@
 // [startLine, endLine] region against the `OriginRef` chain the IR node
 // carried in from lowering (see src/ir/types/origin.ts).
 //
-// Construct-granular only (Milestone 1 — see
-// docs/plans/source-map-debug-kickoff.md §2): one region per emitted file,
-// not per statement/line.  Pooled/merged files (domain/ids.ts,
-// db/schema.ts, ...) are simply never `.file(...)`-recorded — they stay
-// unmapped rather than getting a misleading single-origin region.
+// Construct-granular by default (Milestone 1 — see
+// docs/plans/source-map-debug-kickoff.md §2): `file()` records one region
+// per emitted file, not per statement/line.  Pooled/merged files
+// (domain/ids.ts, db/schema.ts, ...) are simply never `.file(...)`-recorded
+// — they stay unmapped rather than getting a misleading single-origin
+// region.  `fragment()` (Milestone 3, source-map-and-debugging.md §5.2)
+// layers statement-granular sub-regions onto one already-`file()`-recorded
+// fragment (e.g. one operation body) by anchoring its exact text in the
+// file's final content — line-anchored, not offset-tracked, so it needs no
+// cooperation from the string-builder that assembled the file.
 //
 // Pure and side-effect-free besides its own internal Map — safe to import
 // from browser-bundled code (the web playground), like the rest of
@@ -25,12 +30,31 @@ export interface SourceMapRegion {
   construct?: string;
 }
 
+/** One statement-granular sub-region within a `fragment()` call — a line
+ *  range RELATIVE to the start of the fragment text (1-based, inclusive),
+ *  paired with the origin of the statement it covers.  `origin: undefined`
+ *  (a synthesized statement with no `.ddd` span) is skipped, same as a
+ *  `file()` call with no origin. */
+export interface SourceMapSubRegion {
+  rel: [number, number];
+  origin: OriginRef | undefined;
+  construct?: string;
+}
+
 /** Number of 1-based lines `content` spans.  A trailing `"\n"` doesn't
  *  count as an extra (empty) final line. */
 function lineCount(content: string): number {
   const parts = content.split("\n");
   const n = content.endsWith("\n") ? parts.length - 1 : parts.length;
   return Math.max(1, n);
+}
+
+/** 1-based line number of `content[idx]` — the line `idx` (a match start)
+ *  falls on, counting every `"\n"` strictly before it. */
+function lineAt(content: string, idx: number): number {
+  let n = 1;
+  for (let i = 0; i < idx; i++) if (content[i] === "\n") n++;
+  return n;
 }
 
 export class SourceMapRecorder {
@@ -59,8 +83,45 @@ export class SourceMapRecorder {
    *  etc.) carry no origin and are silently skipped, never faked. */
   file(path: string, content: string, origin: OriginRef | undefined, construct?: string): void {
     if (!origin) return;
+    this.push(path, { target: [1, lineCount(content)], origin, construct });
+  }
+
+  /** Record statement-granular sub-regions inside a single already-emitted
+   *  fragment (e.g. one operation body) of an emitted file.  Anchors
+   *  `fragmentText` in `content` by exact-text search rather than tracking
+   *  offsets through the renderer:
+   *
+   *  - absent, or present more than once, in `content` → record NOTHING
+   *    (an honest skip — a non-unique anchor would be a guess, not a fact);
+   *  - otherwise, the fragment's absolute start line is `content`'s line at
+   *    the match index, and each `subRegions` entry with a defined `origin`
+   *    is pushed as a `[abs + rel[0] - 1, abs + rel[1] - 1]` region (`rel`
+   *    is 1-based and relative to the fragment's own first line).
+   *
+   *  A sub-region with `origin: undefined` (a synthesized statement) is
+   *  skipped silently, same as `file()`. */
+  fragment(
+    path: string,
+    content: string,
+    fragmentText: string,
+    subRegions: readonly SourceMapSubRegion[],
+  ): void {
+    const firstIdx = content.indexOf(fragmentText);
+    if (firstIdx === -1) return;
+    if (content.indexOf(fragmentText, firstIdx + 1) !== -1) return;
+    const abs = lineAt(content, firstIdx);
+    for (const sub of subRegions) {
+      if (!sub.origin) continue;
+      this.push(path, {
+        target: [abs + sub.rel[0] - 1, abs + sub.rel[1] - 1],
+        origin: sub.origin,
+        construct: sub.construct,
+      });
+    }
+  }
+
+  private push(path: string, region: SourceMapRegion): void {
     const key = this.prefix ? `${this.prefix}/${path}` : path;
-    const region: SourceMapRegion = { target: [1, lineCount(content)], origin, construct };
     const existing = this.store.get(key);
     if (existing) existing.push(region);
     else this.store.set(key, [region]);

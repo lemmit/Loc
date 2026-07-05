@@ -147,10 +147,12 @@ export interface Resolution {
 }
 
 /** Resolve one parsed frame against a loaded source map: path match
- *  (longest suffix), then region match (the first region whose target
- *  range contains the frame's line), then the origin chain walk. Returns
- *  `undefined` when the frame doesn't land in any mapped file/region —
- *  the frame passes through unannotated. */
+ *  (longest suffix), then region match (the NARROWEST region whose target
+ *  range contains the frame's line — statement-granular sub-regions nest
+ *  inside the whole-file construct region, and the tightest one is the
+ *  most precise answer; ties keep the earlier region), then the origin
+ *  chain walk. Returns `undefined` when the frame doesn't land in any
+ *  mapped file/region — the frame passes through unannotated. */
 export function resolveFrame(frame: ParsedFrame, map: SourceMap): Resolution | undefined {
   if (frame.line === undefined) return undefined;
   const candidate = candidatePathFor(frame);
@@ -159,9 +161,11 @@ export function resolveFrame(frame: ParsedFrame, map: SourceMap): Resolution | u
   const path = matchPath(candidate, Object.keys(map.files));
   if (!path) return undefined;
 
-  const region = map.files[path]!.find(
-    (r) => frame.line! >= r.target[0] && frame.line! <= r.target[1],
-  );
+  let region: WireRegion | undefined;
+  for (const r of map.files[path]!) {
+    if (frame.line < r.target[0] || frame.line > r.target[1]) continue;
+    if (!region || r.target[1] - r.target[0] < region.target[1] - region.target[0]) region = r;
+  }
   if (!region) return undefined;
 
   const origin = toOriginRef(region.origin);

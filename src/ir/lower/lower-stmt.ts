@@ -28,6 +28,7 @@ import {
   lowerAtom,
   withLocal,
 } from "./lower-types.js";
+import { originFor } from "./origin.js";
 
 /** Lower a block of statements, threading the env so a `let` binds for the
  *  statements after it.  Used for match-arm / else bodies (Stage 2); the
@@ -43,7 +44,21 @@ export function lowerStatements(stmts: readonly Statement[], env: Env): StmtIR[]
   return out;
 }
 
+/** Lower one statement, then stamp its `.ddd` (or macro-call) origin onto
+ *  the result — the single chokepoint every statement passes through,
+ *  including nested statements reached via recursive `variant-match` /
+ *  match-arm bodies (they recurse back through `lowerStatement`, not
+ *  `lowerStatementInner`, so they get stamped too).  An already-set
+ *  `origin` (none today, but future-proofed) wins over the derived one. */
 export function lowerStatement(stmt: Statement, env: Env): { stmt: StmtIR; envAfter: Env } {
+  const lowered = lowerStatementInner(stmt, env);
+  return {
+    ...lowered,
+    stmt: { ...lowered.stmt, origin: lowered.stmt.origin ?? originFor(stmt) },
+  };
+}
+
+function lowerStatementInner(stmt: Statement, env: Env): { stmt: StmtIR; envAfter: Env } {
   if (isPreconditionStmt(stmt)) {
     return {
       stmt: {

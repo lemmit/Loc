@@ -1,4 +1,5 @@
 import type { ExprIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
+import type { OriginRef } from "../../ir/types/origin.js";
 import { escapeTsIdent } from "../../util/naming.js";
 import { renderTsExpr } from "./render-expr.js";
 
@@ -35,7 +36,46 @@ export function renderTsStatements(
   emitProvenance = false,
   traceCtx: TraceCtx = NO_TRACE,
 ): string {
-  return stmts.map((s, i) => renderTsStatement(s, emitProvenance, i, traceCtx)).join("\n");
+  return renderTsStatementChunks(stmts, emitProvenance, traceCtx).join("\n");
+}
+
+/** Same rendering as `renderTsStatements`, but one (possibly multi-line)
+ *  string per statement instead of the pre-joined whole — exactly the map
+ *  `renderTsStatements` joins with `"\n"` today, so `chunks.join("\n")` is
+ *  byte-identical to it.  Lets a caller that owns the final file content
+ *  (the Hono aggregate emitter) recover each statement's own line span
+ *  inside an operation body for `SourceMapRecorder.fragment` — see
+ *  `statementSubRegions` below. */
+export function renderTsStatementChunks(
+  stmts: StmtIR[],
+  emitProvenance = false,
+  traceCtx: TraceCtx = NO_TRACE,
+): string[] {
+  return stmts.map((s, i) => renderTsStatement(s, emitProvenance, i, traceCtx));
+}
+
+/** One `SourceMapRecorder.fragment` sub-region per statement, keyed to the
+ *  chunk list `renderTsStatementChunks` produced from the SAME `stmts`
+ *  array (same length, same order — one chunk per statement).  `rel` is a
+ *  1-based inclusive line range relative to the fragment's own first line
+ *  (`chunks.join("\n")`'s line 1); a statement with no `origin` (synthesized)
+ *  is simply omitted — `fragment()` only ever records what it's given. */
+export function statementSubRegions(
+  stmts: readonly StmtIR[],
+  chunks: readonly string[],
+  construct: string,
+): { rel: [number, number]; origin: OriginRef | undefined; construct?: string }[] {
+  const regions: { rel: [number, number]; origin: OriginRef | undefined; construct?: string }[] =
+    [];
+  let cursor = 1;
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i]!;
+    const chunkLines = (chunk.match(/\n/g)?.length ?? 0) + 1;
+    const origin = stmts[i]?.origin;
+    if (origin) regions.push({ rel: [cursor, cursor + chunkLines - 1], origin, construct });
+    cursor += chunkLines;
+  }
+  return regions;
 }
 
 function renderTsStatement(

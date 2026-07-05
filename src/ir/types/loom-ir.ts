@@ -1228,18 +1228,20 @@ export interface OnIR {
 }
 
 export type WorkflowStmtIR =
-  | { kind: "precondition"; expr: ExprIR; source: string }
-  | { kind: "requires"; expr: ExprIR; source: string }
+  | { kind: "precondition"; expr: ExprIR; source: string; origin?: OriginRef }
+  | { kind: "requires"; expr: ExprIR; source: string; origin?: OriginRef }
   | {
       kind: "emit";
       eventName: string;
       fields: { name: string; value: ExprIR }[];
+      origin?: OriginRef;
     }
   | {
       kind: "factory-let";
       name: string;
       aggName: string;
       fields: { name: string; value: ExprIR }[];
+      origin?: OriginRef;
     }
   | {
       kind: "repo-let";
@@ -1249,12 +1251,14 @@ export type WorkflowStmtIR =
       method: string;
       args: ExprIR[];
       returnType: TypeIR;
+      origin?: OriginRef;
     }
   | {
       kind: "expr-let";
       name: string;
       type: TypeIR;
       expr: ExprIR;
+      origin?: OriginRef;
     }
   | {
       // `let xs = Repo.run(<Retrieval>(args), page?)` — bind the named
@@ -1295,6 +1299,7 @@ export type WorkflowStmtIR =
       bypassCaps?: string[];
       /** Element aggregate array type `{ kind: "array", element: entity }`. */
       returnType: TypeIR;
+      origin?: OriginRef;
     }
   | {
       kind: "op-call";
@@ -1302,6 +1307,7 @@ export type WorkflowStmtIR =
       aggName: string;
       op: string;
       args: ExprIR[];
+      origin?: OriginRef;
     }
   | {
       // `for <var> in <iterable> { <body> }` (retrieval.md).  Iterates an
@@ -1316,6 +1322,7 @@ export type WorkflowStmtIR =
       iterable: ExprIR;
       body: WorkflowStmtIR[];
       savesPerIteration: { name: string; aggName: string; repoName: string }[];
+      origin?: OriginRef;
     }
   | {
       // A bare (unbound) resource-op call statement — `files.put(k, v)`
@@ -1323,6 +1330,7 @@ export type WorkflowStmtIR =
       // `expr-let` instead.  `call` is the lowered `resource-op` call IR.
       kind: "resource-call";
       call: ExprIR;
+      origin?: OriginRef;
     }
   | {
       // A bare orchestrator call into a `domainService` operation —
@@ -1341,6 +1349,7 @@ export type WorkflowStmtIR =
       service: string;
       op: string;
       call: ExprIR;
+      origin?: OriginRef;
     }
   | {
       // `if let <var> = Repo.find(<Criterion>) { then } else { else }`
@@ -1376,6 +1385,7 @@ export type WorkflowStmtIR =
       /** Saves for aggregates created in `elseBody` (e.g. a not-found →
        *  `Agg.create(...)` fallback) — emitted at the end of the else-branch. */
       savesInElse: { name: string; aggName: string; repoName: string }[];
+      origin?: OriginRef;
     }
   | {
       // `field := value` — assignment to one of the workflow's OWN state
@@ -1390,6 +1400,7 @@ export type WorkflowStmtIR =
       target: PathIR;
       value: ExprIR;
       targetType: TypeIR;
+      origin?: OriginRef;
     };
 
 export interface LoomModel {
@@ -2561,10 +2572,17 @@ export interface UiParamBindingIR {
 // ---------------------------------------------------------------------------
 
 export type StmtIR =
-  | { kind: "precondition"; expr: ExprIR; source: string }
-  | { kind: "requires"; expr: ExprIR; source: string }
-  | { kind: "let"; name: string; expr: ExprIR; type: TypeIR }
-  | { kind: "assign"; target: PathIR; value: ExprIR; targetType: TypeIR; prov?: ProvSite }
+  | { kind: "precondition"; expr: ExprIR; source: string; origin?: OriginRef }
+  | { kind: "requires"; expr: ExprIR; source: string; origin?: OriginRef }
+  | { kind: "let"; name: string; expr: ExprIR; type: TypeIR; origin?: OriginRef }
+  | {
+      kind: "assign";
+      target: PathIR;
+      value: ExprIR;
+      targetType: TypeIR;
+      prov?: ProvSite;
+      origin?: OriginRef;
+    }
   | {
       kind: "add";
       target: PathIR;
@@ -2576,6 +2594,7 @@ export type StmtIR =
        *  walker reads this to choose `[...xs, v]` vs `x + v`. */
       collection: boolean;
       prov?: ProvSite;
+      origin?: OriginRef;
     }
   | {
       kind: "remove";
@@ -2586,11 +2605,13 @@ export type StmtIR =
        *  a scalar compound `-=` (arithmetic). */
       collection: boolean;
       prov?: ProvSite;
+      origin?: OriginRef;
     }
   | {
       kind: "emit";
       eventName: string;
       fields: { name: string; value: ExprIR }[];
+      origin?: OriginRef;
     }
   | {
       kind: "call";
@@ -2605,13 +2626,14 @@ export type StmtIR =
        *  of the target sibling operation (see the ExprIR `call` node's
        *  `targetPrivate`).  Absent (⇒ public) for `function` and the rest. */
       targetPrivate?: boolean;
+      origin?: OriginRef;
     }
   /**
    * Bare expression-statement.  Used when a chained call like
    * `a.b.c(args)` appears as an operation- or test-body statement.
    * Renderers emit `<expr>;` (TS / e2e) or `<expr>;` (C#).
    */
-  | { kind: "expression"; expr: ExprIR }
+  | { kind: "expression"; expr: ExprIR; origin?: OriginRef }
   /**
    * Effect-form variant `match` (async-actions-and-effects.md Stage 2) — a
    * `match SUBJECT { Variant b => <stmts> }` used for its side effects, where
@@ -2638,6 +2660,7 @@ export type StmtIR =
         isError?: boolean;
       }[];
       elseBody?: StmtIR[];
+      origin?: OriginRef;
     }
   /**
    * `return <expr>` — an operation's designed-in outcome
@@ -2656,6 +2679,7 @@ export type StmtIR =
       value: ExprIR;
       variantTag?: string;
       variantShape?: "record" | "scalar" | "none";
+      origin?: OriginRef;
     };
 
 /**

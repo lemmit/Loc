@@ -98,6 +98,38 @@ describe("annotateTrace", () => {
     expect(out).toBe(`${log}  →  Sales.CartPage  [macro scaffold]  (main.ddd:${callLine})`);
   });
 
+  it("prefers the narrowest containing region — a statement sub-region beats the whole-file region it nests in", () => {
+    // Statement-granular regions (source-map Milestone 3) nest inside the
+    // construct's whole-file region; the frame's line sits in both, and the
+    // tighter one must win.
+    const FIELD_LINE_START = DDD_SOURCE.split("\n").slice(0, 4).join("\n").length + 1;
+    const nested: SourceMap = {
+      version: 1,
+      sources: ["main.ddd"],
+      files: {
+        "hono_api/src/domain/order.ts": [
+          {
+            target: [1, 20],
+            origin: { kind: "source", path: "main.ddd", span: AGGREGATE_SPAN },
+            construct: "Sales.Orders.Order",
+          },
+          {
+            target: [10, 10],
+            origin: {
+              kind: "source",
+              path: "main.ddd",
+              span: [FIELD_LINE_START, FIELD_LINE_START + 10],
+            },
+            construct: "Sales.Orders.Order.confirm",
+          },
+        ],
+      },
+    };
+    const log = "    at /repo/out/hono_api/src/domain/order.ts:10:3";
+    const out = annotateTrace(log, nested, readMainDdd);
+    expect(out).toBe(`${log}  →  Sales.Orders.Order.confirm  (main.ddd:5)`);
+  });
+
   it("marks a derived-kind region [synthetic: <reason>] with no location (no `from` chain)", () => {
     const log = "    at /repo/out/hono_api/src/domain/repository.ts:88:3";
     const out = annotateTrace(log, MAP, readMainDdd);
