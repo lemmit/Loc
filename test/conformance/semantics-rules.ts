@@ -124,14 +124,18 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     title: "Boolean create defaults materialize at the wire boundary",
     trigger: "`active: bool = true`; a create body omitting `active`",
     observable: 'POST {} (no active) reads back {"active":true}, not a zero-value false/null',
-    conforms: ["node", "python"],
-    targets: ["dotnet", "java", "elixir"],
-    // Gated per-PR on node and python (A6.2). The python behavioral gate
-    // surfaced (and the fix closed) a real parity bug: the FastAPI create model
-    // hardcoded `active: bool = False` (the zero value) instead of the declared
-    // default — omitting `active` arrived False. Fix: the create request field
-    // uses the field's lowered `default` expr (routes-builder.ts requestFieldDecl).
-    provenance: ["full-code-review-2026-07 B14"],
+    conforms: ["node", "python", "java"],
+    targets: ["dotnet", "elixir"],
+    // Gated per-PR on node and python (A6.2), and on Java via the behavioral tier
+    // (RST-10). The python behavioral gate surfaced (and the fix closed) a real
+    // parity bug: the FastAPI create model hardcoded `active: bool = False` (the
+    // zero value) instead of the declared default — omitting `active` arrived
+    // False. Fix: the create request field uses the field's lowered `default`
+    // expr (routes-builder.ts requestFieldDecl). Java (RST-10) hit the same class:
+    // the Spring create record made the defaulted field a required primitive and
+    // 400ed on an omitted key — fixed by boxing the create-DTO component and
+    // materializing the declared default in the request→domain mapping (service.ts).
+    provenance: ["full-code-review-2026-07 B14", "RST-10"],
     tier: "behavioral",
   },
   {

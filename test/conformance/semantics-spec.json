@@ -97,15 +97,16 @@
       "observable": "POST {} (no active) reads back {\"active\":true}, not a zero-value false/null",
       "conforms": [
         "node",
-        "python"
+        "python",
+        "java"
       ],
       "targets": [
         "dotnet",
-        "java",
         "elixir"
       ],
       "provenance": [
-        "full-code-review-2026-07 B14"
+        "full-code-review-2026-07 B14",
+        "RST-10"
       ],
       "tier": "behavioral"
     },

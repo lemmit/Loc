@@ -5,10 +5,10 @@
 // camelCase multi-word keys both directions (RS-1 `externalRef`/`customerId`/
 // `placedAt`), enum declared casing (RS-2), temporal round-trip (RS-4
 // `placedAt`), value-object survival (RS-7 `price`), and association round-trip
-// (RS-8 `lines`). RS-6 (omitted bool create default) is NOT gated on Java — the
-// first run found a real bug (the Spring create DTO 400s on an omitted defaulted
-// field; tracked as RST-10), so `active` is sent explicitly. Mirrors
-// corpus-dotnet/sales.ddd — see docs/plans/runtime-semantics-tier-followups.md
+// (RS-8 `lines`). RS-6 (omitted bool create default) is now gated on Java too —
+// RST-10 boxed the defaulted create-DTO field and materialized the declared
+// default in the request→domain mapping, so `active` is omitted on create and
+// reads back `true`. See docs/plans/runtime-semantics-tier-followups.md
 // (RST-3) + docs/plans/a6.2-behavioral-tier-second-backend.md.
 //
 // RS-4 note: unlike the .NET fixture (which DROPS the placedAt assertion
@@ -103,18 +103,15 @@ system SalesJava {
     expect(read.sku).toBe("WIDGET-1")
   }
 
+  // RS-6 (bool create default materializes at the wire boundary): `active` is
+  // omitted on create and must read back `true` (its declared default), not a
+  // zero-value false/null. Fixed for Java by boxing the defaulted create-DTO
+  // field + materializing the default in the request→domain mapping (RST-10).
   // RS-1 (multi-word wire key survives both directions): `externalRef` is sent
   // camelCase on create — it must persist (snake `external_ref`) and read back
   // as `externalRef`.
-  // RS-6 (bool create default) is NOT asserted on Java yet: this tier's first
-  // run found a real divergence — the generated Spring create DTO REJECTS a body
-  // that OMITS `active` (which has a `= true` default) with 400 "Malformed
-  // request body", where node/python apply the declared default. Same class as
-  // the Python bug #1684. So `active: true` is sent explicitly here (to exercise
-  // the other rules), and the omitted-default check is deferred + tracked as
-  // RST-10. See docs/plans/runtime-semantics-tier-followups.md.
-  test e2e "create a customer with a multi-word key round-trip" against api {
-    let c = api.customers.create({ name: "Defaulter", email: "def@acme.test", externalRef: "ext-42", active: true })
+  test e2e "create a customer: bool default + multi-word key round-trip" against api {
+    let c = api.customers.create({ name: "Defaulter", email: "def@acme.test", externalRef: "ext-42" })
     let read = api.customers.getById(c)
     expect(read.active).toBe(true)
     expect(read.externalRef).toBe("ext-42")

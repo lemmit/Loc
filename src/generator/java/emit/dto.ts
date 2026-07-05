@@ -129,7 +129,16 @@ export function renderDtoFiles(
   if (hasCreate(agg) || esCreateParams) {
     const imports = new Set<string>();
     const components = (
-      esCreateParams ?? createInputs.map((f) => ({ name: f.name, type: eff(f.type, f.optional) }))
+      esCreateParams ??
+      // A field carrying a declared default (`field: T = <expr>`) is optional at
+      // the wire boundary: box the primitive so an OMITTED key deserializes to
+      // null instead of Jackson 400ing, and let the service materialize the
+      // declared default when it is absent (RS-6 / RST-10, parity with
+      // node/python).  A field WITHOUT a default keeps its required shape.
+      createInputs.map((f) => ({
+        name: f.name,
+        type: eff(f.type, f.optional || f.default != null),
+      }))
     ).map((f) => {
       collectWireImports(f.type, imports);
       return `${wireJavaType(f.type, "Request")} ${f.name}`;
