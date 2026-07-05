@@ -80,3 +80,31 @@ describe("currentUser.orgPath — registry dataKey read under hierarchy (java)",
     );
   });
 });
+
+describe("currentUser.orgPath — registry dataKey read under hierarchy (dotnet)", () => {
+  it("dotnet: memoized OrgPath slot + EF resolver reading the registry `data_key`, fail-safe to claim", async () => {
+    const files = await allFiles("dotnet");
+    // The User record's OrgPath becomes a settable slot memoizing the resolved
+    // path, defaulting to the claim (fail-safe) — no longer the flat computed
+    // property.
+    expect(files).toMatch(
+      /public string OrgPath\s*\{\s*get => _orgPath \?\? \$"\{TenantId\}";\s*set => _orgPath = value;\s*\}/,
+    );
+    // The middleware method-injects the resolver, resolves once per request,
+    // and memoizes onto the principal.
+    expect(files).toMatch(/IUserVerifier verifier, IOrgPathResolver orgPathResolver/);
+    expect(files).toMatch(
+      /await orgPathResolver\.ResolveAsync\(user\.TenantId, ctx\.RequestAborted\)/,
+    );
+    expect(files).toMatch(/user\.OrgPath = orgPath;/);
+    // The EF resolver reads the registry's `data_key` by id, ignoring the
+    // registry's own self-scope query filter, wrapping the claim to the id type.
+    expect(files).toMatch(/public interface IOrgPathResolver/);
+    expect(files).toMatch(/Guid\.TryParse\(claim, out var raw\)/);
+    expect(files).toMatch(
+      /_db\.Orgs\s*\.IgnoreQueryFilters\(\)\s*\.Where\(o => o\.Id == id\)\s*\.Select\(o => o\.DataKey\)\s*\.FirstOrDefaultAsync\(cancellationToken\)/,
+    );
+    // Boot registers the scoped resolver.
+    expect(files).toMatch(/builder\.Services\.AddScoped<IOrgPathResolver, EfOrgPathResolver>\(\)/);
+  });
+});
