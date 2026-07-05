@@ -433,8 +433,14 @@ honest `datasources.md` unused-flags.
    brokers land) [✅ FIXED — a bound transport now carries
    `transportStatus: "declared, not provisioned"`]; the saga's
    `archival_tracker_events` table escapes to
-   `public` instead of `catalog.`; `wire-spec.json` keys aggregates by bare
-   name (two contexts with a same-named aggregate would collide).
+   `public` instead of `catalog.` [✅ FIXED — workflow saga tables now land in
+   the owning context's schema on all five backends, DDL + every ORM in lockstep;
+   the module/cross-context infra tables (`__loom_outbox`, `audit_records`,
+   `provenance_records`) deliberately stay in `public` as they span every
+   context]; `wire-spec.json` keys aggregates by bare
+   name (two contexts with a same-named aggregate would collide) [✅ FIXED —
+   colliding aggregate/part/VO keys are now context-qualified; identical ambient
+   VOs still dedupe to a bare key, so collision-free output is byte-identical].
 4. **Naming drifts across layers**: migrations say subdomain
    (`accounts_initial`), schemas say context (`people.*`), code says aggregate
    (`Domain.Engineers`) — the context map is only recoverable from the DB.
