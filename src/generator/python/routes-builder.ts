@@ -163,8 +163,15 @@ export function buildPyRoutesFile(
     .map((v) => v.name)
     .filter((n) => refersTo(`${n}Model`))
     .sort();
-  const idNames = [agg.name, ...agg.fields.map(idTargetOf).filter((n): n is string => n != null)]
-    .map((n) => `${n}Id`)
+  // Every `X id` reference in the emitted routes wraps as `XId(...)`, and the
+  // target is always an aggregate. Offer every context aggregate's id type as a
+  // candidate and let `refersTo` keep only the ones actually emitted — so an id
+  // reached via an OPERATION PARAM or a CONTAINED-ENTITY field (not just the
+  // aggregate's own fields) is imported. The old `agg.name + agg.fields` set
+  // missed those, emitting e.g. `addLine(ProductId(...))` with `ProductId`
+  // never imported → NameError at runtime (found by the python behavioral tier).
+  const idNames = ctx.aggregates
+    .map((a) => `${a.name}Id`)
     .filter((n, i, arr) => refersTo(n) && arr.indexOf(n) === i)
     .sort();
 
@@ -274,13 +281,6 @@ function errorImports(refersTo: (n: string) => boolean): string | null {
  *  factory ⇒ no POST route (parity with Hono's `emitCreate`). */
 function hasCreateFactory(agg: EnrichedAggregateIR): boolean {
   return hasCreate(agg);
-}
-
-function idTargetOf(f: { type: TypeIR }): string | null {
-  const t = f.type.kind === "optional" ? f.type.inner : f.type;
-  if (t.kind === "id") return t.targetName;
-  if (t.kind === "array" && t.element.kind === "id") return t.element.targetName;
-  return null;
 }
 
 // --- DTO models ---------------------------------------------------------------
