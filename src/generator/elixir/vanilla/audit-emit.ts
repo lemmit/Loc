@@ -237,13 +237,14 @@ export function auditRecordCall(args: {
  *  projection the controller's `serialize/1` uses, inlined where `serialize/1`
  *  is out of scope (the context module + the returning-op fn).  Relational
  *  aggregates dump the whole struct (`Map.from_struct |> Map.drop`); a
- *  document-shaped aggregate (`shape(document)`) stores its wire form as the
- *  `data` jsonb merged under the row id — mirror `renderDocSerialize` so the
- *  audit before/after row carries the flattened wire shape every other backend
- *  records, not a nested `%{id:, data: …}`.  Pass `isDoc: true` for a doc agg. */
+ *  document-shaped aggregate (`shape(document)`) stores its wire form in the
+ *  `<Agg>.Data` embed (Route A) — flatten that struct (dropping `:__struct__`)
+ *  and merge under the row id so the audit before/after row carries the flat wire
+ *  shape every other backend records, not a nested `%{id:, data: …}`.  Pass
+ *  `isDoc: true` for a doc agg. */
 export function wireSnapshot(recordExpr: string, isDoc = false): string {
   return isDoc
-    ? `Map.merge(%{id: ${recordExpr}.id}, ${recordExpr}.data || %{})`
+    ? `Map.merge(%{id: ${recordExpr}.id}, (${recordExpr}.data && Map.from_struct(${recordExpr}.data)) || %{})`
     : `(${recordExpr} |> Map.from_struct() |> Map.drop([:__meta__, :__struct__]))`;
 }
 

@@ -28,7 +28,7 @@ import { opUsesCurrentUser } from "../domain/predicates.js";
 import { auditRecordCall, createAuditMeta, destroyAuditMeta } from "./audit-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
 import { CRUD_RESERVED_NAMES } from "./context-emit.js";
-import { isVanillaDocAgg, renderDocSerialize } from "./document-emit.js";
+import { isVanillaDocAgg } from "./document-emit.js";
 import { isEventSourced, renderEsController } from "./eventsourced-emit.js";
 import { aggregateHasUnionFind, findRoutes, renderFindActions } from "./find-controller.js";
 import { isAbstractBase } from "./inheritance-emit.js";
@@ -466,17 +466,22 @@ ${writeActions}
 ${findActions}
 ${opActions}
 ${problemVariant}${versionHelper}
-${
-  isDoc
-    ? renderDocSerialize(agg)
-    : (
-        (): string => {
-          const { serialize, helpers } = renderWireSerialize(agg, ctx);
-          const nested = helpers.length > 0 ? `\n\n${helpers.join("\n\n")}` : "";
-          return `${serialize}${nested}${refIdsHelper}`;
-        }
-      )()
-}
+${((): string => {
+  // Route A: the document controller roots the SAME wireShape serializer at the
+  // rehydrated `%<Agg>.Data{}` embed (`record = row.data`), with `id` off the
+  // root row — so containments + value objects project through the shared
+  // `serialize_<part|vo>/1` helpers (camelCase, byte-identical to relational),
+  // no bespoke document serializer.
+  const { serialize, helpers } = isDoc
+    ? renderWireSerialize(agg, ctx, {
+        headVar: "row",
+        bind: "    record = row.data",
+        idExpr: "row.id",
+      })
+    : renderWireSerialize(agg, ctx);
+  const nested = helpers.length > 0 ? `\n\n${helpers.join("\n\n")}` : "";
+  return `${serialize}${nested}${refIdsHelper}`;
+})()}
 end
 `;
 }
