@@ -6,6 +6,7 @@ import type {
   ExprIR,
   FieldIR,
   IdValueType,
+  ProjectionIR,
   TypeIR,
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
@@ -83,6 +84,10 @@ export function renderSchema(
      *  agg→context map-back.  Absent / undefined → unqualified `pgTable`,
      *  byte-identical with the pre-fix output. */
     resolveWorkflowSchema?: (wf: WorkflowIR) => string | undefined;
+    /** Per-projection schema lookup — the schema its read-model table lands in,
+     *  resolved from the projection's OWNING context (mirrors
+     *  `resolveWorkflowSchema`).  Absent / undefined → unqualified `pgTable`. */
+    resolveProjectionSchema?: (proj: ProjectionIR) => string | undefined;
   } = {},
 ): string {
   const lookup = opts.resolveDataSource;
@@ -217,6 +222,14 @@ export function renderSchema(
     if (wf.eventSourced) tables.push(emitEventLogTable(wf.name, { schema: wfSchema }));
     else if (wf.correlationField) tables.push(emitWorkflowStateTable(wf, ctx, wfSchema));
   }
+  // Projection read models (projection.md): one context-owned state table per
+  // projection, keyed by its correlation column — the fold dispatcher upserts
+  // rows here and the read routes select from it.  Shares the workflow saga
+  // schema resolution (a projection is a context member like a workflow).
+  for (const proj of ctx.projections) {
+    const projSchema = registerSchema(opts.resolveProjectionSchema?.(proj));
+    tables.push(emitProjectionTable(proj, ctx, projSchema));
+  }
   const schemaDecls = schemaNames.map(
     (name) => `export const ${schemaConstName(name)} = pgSchema("${name}");`,
   );
@@ -258,6 +271,26 @@ export function renderSchema(
       tables.join("\n\n"),
     ) + "\n"
   );
+}
+
+/** Drizzle read-model table for a projection (projection.md) — mirrors
+ *  `emitWorkflowStateTable`: the `keyed by` correlation column is the PK, the
+ *  remaining state fields are columns.  No idempotent marker in v1. */
+function emitProjectionTable(proj: ProjectionIR, ctx: BoundedContextIR, schema?: string): string {
+  const tableName = snake(plural(proj.name));
+  const lines: string[] = [];
+  const factory = schema ? `${schemaConstName(schema)}.table` : "pgTable";
+  lines.push(`export const ${lowerFirst(plural(proj.name))} = ${factory}("${tableName}", {`);
+  for (const f of proj.stateFields) {
+    if (f.name === proj.correlationField) {
+      const corrType = f.type.kind === "id" ? f.type.valueType : "guid";
+      lines.push(`  ${f.name}: ${drizzleIdColumn(corrType, snake(f.name))}.primaryKey(),`);
+    } else {
+      lines.push(...drizzleColumnLines(f, ctx).map((s) => `  ${s}`));
+    }
+  }
+  lines.push(`});`);
+  return lines.join("\n");
 }
 
 /** A many-to-many join table for an `T id[]` reference collection.

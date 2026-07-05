@@ -413,6 +413,13 @@ export function generateTypeScriptForContexts(
         return owningCtx ? resolveContextSchema(owningCtx, system.sys) : undefined;
       }
     : undefined;
+  // Per-projection read-model-table schema — same owning-context map-back.
+  const resolveProjectionSchema = system
+    ? (proj: import("../../../ir/types/loom-ir.js").ProjectionIR) => {
+        const owningCtx = contexts.find((c) => c.projections.some((p) => p.name === proj.name));
+        return owningCtx ? resolveContextSchema(owningCtx, system.sys) : undefined;
+      }
+    : undefined;
   // Persistence selection (D-REALIZATION-AXES `persistence:`): `mikroorm`
   // replaces the drizzle schema + per-aggregate drizzle repositories + drizzle
   // migrations with an EntitySchema persistence model + MikroORM repositories
@@ -431,6 +438,7 @@ export function generateTypeScriptForContexts(
         provenance: emitProvenance,
         resolveDataSource,
         resolveWorkflowSchema,
+        resolveProjectionSchema,
       }),
     );
   }
