@@ -11,11 +11,19 @@ name: Tenancy isolation (runtime e2e)
 # test/e2e/support/tenancy-isolation-harness.ts drives every backend; only the
 # boot differs). Each cell drives two principals via the dev-stub
 # `x-loom-dev-claims` header — the parity (#1673) that makes this cross-backend.
-# node/python/java/dotnet are runtime-verified; the elixir leg is deferred.
-# The .NET leg gates the fix for a runtime isolation DEFECT this tier found: the
-# EF global query filter referenced the STATIC ambient currentUser, so EF baked
-# it once at model build and leaked cross-tenant — fixed by installing the
-# filter on AppDbContext reading the injected scoped ICurrentUserAccessor.
+# node/python/java/dotnet run in this matrix (REST create→read).  The .NET leg
+# gates the fix for a runtime isolation DEFECT this tier found: the EF global
+# query filter referenced the STATIC ambient currentUser, so EF baked it once at
+# model build and leaked cross-tenant — fixed by installing the filter on
+# AppDbContext reading the injected scoped ICurrentUserAccessor.
+#
+# Elixir is NOT in this matrix: the vanilla Phoenix REST surface is read-only
+# (mutations go through LiveView, not a POST endpoint), so the shared
+# create→read harness can't drive it.  Its read isolation was verified
+# out-of-band by seeding two tenants' rows and reading as each (org-b GET
+# org-a's row → 404, each LIST scoped to its own tenant) — the Ecto repository
+# threads current_user per call and rebuilds the `where tenant_id == ^claim`
+# filter fresh each request, so it is immune to the EF baked-filter class.
 #
 # This is the assertion the structural tiers CANNOT make: per-backend generator
 # tests pin the filter and the 1a.0 pins the stamp, but only a boot proves the
