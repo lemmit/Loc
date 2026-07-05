@@ -126,7 +126,11 @@ agents; they only collide on this doc's status table.
   the generator emits a runnable pytest domain suite first.
 - **Collision:** `run-python.mjs` (coordinate with RST-1 if it also edits it).
 
-### RST-7 · Harden RS-1 with a genuinely multi-word field  ·  S
+### RST-7 · Harden RS-1 with a genuinely multi-word field  ·  S  ·  ✅ DONE
+- **Landed:** `externalRef: string` on `Customer` in `corpus-python/sales.ddd`,
+  created camelCase + asserted read-back (`expect(read.externalRef).toBe(…)`) —
+  exercises the inbound snake-normalization path (`external_ref` persist ↔
+  `externalRef` wire) explicitly on the Python behavioral tier.
 - **Why.** #1620 (the RS-1 bug) was specifically a **multi-word** field
   (`commitSha`) whose inbound camelCase key wasn't snake-normalized — single-word
   fields hid it. The Python fixture currently leans on `customerId`/`placedAt`;
@@ -167,3 +171,6 @@ registry is the source of truth — keep the three in lockstep).
   `serializeSemanticsSpec()` and gated by `semantics-spec-sync.test.ts`
   (regenerate with `UPDATE_SEMANTICS_SPEC=1`). Scoped as a global-contract
   committed artifact, not a per-system `.loom/` emit.
+- **RST-7** (multi-word RS-1) — ✅ `externalRef` on `Customer` in
+  `corpus-python/sales.ddd`, created camelCase + read-back-asserted; hardens the
+  RS-1 inbound normalization path on the Python behavioral tier.
