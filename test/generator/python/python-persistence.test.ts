@@ -74,14 +74,14 @@ describe("python schema emission", () => {
 });
 
 describe("python repository emission", () => {
-  it("find_by_id / get_by_id / all with hydration through _create", async () => {
+  it("find_by_id / get_by_id / all with hydration through _rehydrate", async () => {
     const files = await build();
     const repo = files.get("api/app/db/repositories/order_repository.py")!;
     expect(repo).toContain("async def find_by_id(self, id: OrderId) -> Order | None:");
     expect(repo).toContain("async def get_by_id(self, id: OrderId) -> Order:");
     expect(repo).toContain('raise AggregateNotFoundError(f"Order {id} not found")');
     expect(repo).toContain("async def all(self) -> list[Order]:");
-    expect(repo).toContain("return Order._create(");
+    expect(repo).toContain("return Order._rehydrate(");
     expect(repo).toContain("id=OrderId(row.id),");
   });
 

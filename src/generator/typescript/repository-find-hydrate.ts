@@ -1,4 +1,4 @@
-// Repository hydrate family — row → domain `_create(...)` expression
+// Repository hydrate family — row → domain `_rehydrate(...)` expression
 // builders for the Hono/Drizzle read paths.  Extracted from
 // repository-find-builder.ts: these turn a Drizzle row (root, contained
 // entity part, or shared TPH row) into the domain constructor call the
@@ -44,7 +44,7 @@ export function hydrateRootExpr(
   for (const c of agg.contains) {
     fields.push(`${c.name}`);
   }
-  return `${agg.name}._create({ ${fields.join(", ")} })`;
+  return `${agg.name}._rehydrate({ ${fields.join(", ")} })`;
 }
 
 /** Construct one value object from a child-collection row.  Each VO field
@@ -89,7 +89,7 @@ export function hydrateConcreteFromSharedRow(
   for (const c of agg.contains) {
     fields.push(`${c.name}: ${c.collection ? "[]" : "null"}`);
   }
-  return `${agg.name}._create({ ${fields.join(", ")} })`;
+  return `${agg.name}._rehydrate({ ${fields.join(", ")} })`;
 }
 
 function provHydrateEntries(fields: FieldIR[], rowVar: string): string[] {
@@ -111,7 +111,7 @@ export function hydrateEntityExpr(
     fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx)}`);
   }
   fields.push(...provHydrateEntries(part.fields, rowVar));
-  return `${part.name}._create({ ${fields.join(", ")} })`;
+  return `${part.name}._rehydrate({ ${fields.join(", ")} })`;
 }
 
 function hydrateFieldExpr(
@@ -206,5 +206,5 @@ export function hydrateRootForFindAllExpr(
       fields.push(`${c.name}: ${c.name}ByParent.get(${rowVar}.id) ?? null`);
     }
   }
-  return `${agg.name}._create({ ${fields.join(", ")} })`;
+  return `${agg.name}._rehydrate({ ${fields.join(", ")} })`;
 }

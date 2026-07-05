@@ -8,7 +8,7 @@ import { parseString } from "../../_helpers/index.js";
 // ---------------------------------------------------------------------------
 // Python backend — shape(document) (F2a).  A document aggregate persists
 // as ONE jsonb column (id, data, version); the repo serialises the
-// domain getters to a dict and rebuilds through `_create`, finds run
+// domain getters to a dict and rebuilds through `_rehydrate`, finds run
 // in-memory over the rehydrated documents.  Verified live (create →
 // addSection → bump → read-back → find popular) and statically by the
 // `document.ddd` corpus case (uv + ruff + mypy --strict).
@@ -49,7 +49,7 @@ describe("python shape(document)", () => {
     expect(repo).toContain("def _section_to_doc(a: Section) -> dict[str, object]:");
     expect(repo).toContain('"sections": [_section_to_doc(e) for e in a.sections]');
     expect(repo).toContain("def _article_from_doc(raw: object) -> Article:");
-    expect(repo).toContain('Article._create(id=ArticleId(cast(str, d["id"]))');
+    expect(repo).toContain('Article._rehydrate(id=ArticleId(cast(str, d["id"]))');
   });
 
   it("finds evaluate in-memory over the rehydrated documents", async () => {

@@ -9,11 +9,13 @@ export class Product {
   private _events: Events.DomainEvent[] = [];
   private _sku: string;
   private _price: Money;
-  private constructor(state: { id: Ids.ProductId; sku: string; price: Money }) {
+  private constructor(state: { id: Ids.ProductId; sku: string; price: Money }, trustStore = false) {
     this._id = state.id;
     this._sku = state.sku;
     this._price = state.price;
-    this._assertInvariants();
+    if (!trustStore) {
+      this._assertInvariants();
+    }
   }
 
   get id(): Ids.ProductId { return this._id; }
@@ -41,6 +43,14 @@ export class Product {
 
   static _create(state: { id: Ids.ProductId; sku: string; price: Money }): Product {
     return new Product(state);
+  }
+
+  /** Reconstitution from the store — trusts persisted state, so no
+   *  invariant run: invariants guard transitions (create + operations),
+   *  not loads.  Repository hydration only; domain code constructs via
+   *  `create`/`_create`, which assert. */
+  static _rehydrate(state: { id: Ids.ProductId; sku: string; price: Money }): Product {
+    return new Product(state, true);
   }
   static create(input: { sku: string; price: Money }): Product {
     return new Product({

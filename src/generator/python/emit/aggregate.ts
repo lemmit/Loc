@@ -398,8 +398,14 @@ function renderEntity(
     ...e.contains.map((c) => `${snake(c.name)}=${snake(c.name)}`),
   ].filter((s): s is string => s != null);
 
+  // `_trust_store` opts repository rehydration out of the invariant run
+  // (S6: invariants guard TRANSITIONS — reconstituted state was valid when
+  // stored, and re-asserting on load makes every pre-existing row
+  // unreadable the moment an invariant tightens, including the fix-it
+  // update path).  Domain construction (`create`, in-op part builds via
+  // `_create`) keeps the default and asserts.
   const ctor = [
-    `    def __init__(self, *, ${stateParams.join(", ")}) -> None:`,
+    `    def __init__(self, *, ${stateParams.join(", ")}, _trust_store: bool = False) -> None:`,
     `        self._id = id`,
     !e.isRoot ? `        self._parent_id = parent_id` : null,
     ...e.fields.map((f) => `        self._${snake(f.name)} = ${snake(f.name)}`),
@@ -408,7 +414,8 @@ function renderEntity(
     // Co-located provenance lineage, set on each provenanced write and
     // restored on hydrate; None until first written.
     ...provFields.map((f) => `        self._${provColumn(f.name)}: ProvLineage | None = None`),
-    assertCall("<init>"),
+    "        if not _trust_store:",
+    `    ${assertCall("<init>")}`,
   ].filter((s): s is string => s != null);
 
   // Extern ops (docs/extern.md): the user-supplied handler owns the
@@ -598,6 +605,14 @@ function renderEntity(
     "    @classmethod",
     `    def _create(cls, *, ${stateParams.join(", ")}) -> ${self}:`,
     `        return cls(${stateArgs.join(", ")})`,
+    "",
+    "    # Reconstitution from the store — trusts persisted state, so no",
+    "    # invariant run: invariants guard transitions (create + operations),",
+    "    # not loads.  Repository hydration only; domain code constructs via",
+    "    # `create`/`_create`, which assert.",
+    "    @classmethod",
+    `    def _rehydrate(cls, *, ${stateParams.join(", ")}) -> ${self}:`,
+    `        return cls(${stateArgs.join(", ")}, _trust_store=True)`,
   ];
 
   // Event-sourcing (appliers A2): per-event fold methods, the

@@ -77,7 +77,7 @@ describe("mikroorm persistence adapter — node/hono (Phase 5d)", () => {
     expect(repo).toContain('import { EntityManager } from "@mikro-orm/postgresql"');
     expect(repo).toContain("this.em.fork()"); // idiomatic isolated unit-of-work
     expect(repo).toContain("await em.upsert(OrderRow,");
-    expect(repo).toContain("Order._create({"); // shared hydration seam
+    expect(repo).toContain("Order._rehydrate({"); // shared hydration seam (RS-10: trusts the store)
     expect(repo).not.toContain("drizzle");
     // package.json + index wiring.
     expect(files.get("api/package.json")).toContain("@mikro-orm/postgresql");
@@ -178,7 +178,7 @@ describe("mikroorm — context retrievals (DEBT-17)", () => {
         '{ limit: page?.limit, offset: page?.offset, orderBy: { placedAt: "desc" } });',
     );
     // Reuses the shared flat hydration seam (no bulk-load of containments).
-    expect(repo).toContain("Order._create({");
+    expect(repo).toContain("Order._rehydrate({");
   });
 
   it("cleanly rejects an out-of-subset retrieval predicate (loom.find-predicate-unsupported)", async () => {

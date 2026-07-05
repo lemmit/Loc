@@ -28,7 +28,7 @@ import { toWireMethod } from "./repository-wire-builder.js";
 // C# needs snapshot records + STJ converters (private setters), TS is
 // structural: the repository serialises the aggregate's public getters
 // into a plain object (`<entity>ToDoc`) and rebuilds it through the
-// same `_create({...})` factory the normalised hydrate uses
+// same `_rehydrate({...})` factory the normalised hydrate uses
 // (`<entity>FromDoc`).  Contained parts nest; references ride as id
 // strings; finds evaluate in-memory over the rehydrated documents.
 //
@@ -308,7 +308,7 @@ export function entityFromDocFn(
   }
   return lines(
     `function ${fnName}(d: ${entity.name}Doc): ${entity.name} {`,
-    `  return ${entity.name}._create({ ${entries.join(", ")} });`,
+    `  return ${entity.name}._rehydrate({ ${entries.join(", ")} });`,
     `}`,
   );
 }

@@ -34,7 +34,7 @@ import {
 // A document aggregate persists as ONE jsonb column (`(id, data,
 // version)`) instead of the normalised table-per-entity tree.  The repo
 // serialises the aggregate's public getters into a plain dict
-// (`_<entity>_to_doc`) and rebuilds it through the same `_create(...)`
+// (`_<entity>_to_doc`) and rebuilds it through the same `_rehydrate(...)`
 // factory the normalised hydrate uses (`_<entity>_from_doc`).  Contained
 // parts nest; references ride as id strings; finds evaluate in-memory
 // over the rehydrated documents.
@@ -354,7 +354,7 @@ export function entityFromDoc(
   return lines(
     `def _${snake(entity.name)}_from_doc(raw: object) -> ${entity.name}:`,
     "    d = cast(dict[str, object], raw)",
-    `    return ${entity.name}._create(${entries.join(", ")})`,
+    `    return ${entity.name}._rehydrate(${entries.join(", ")})`,
   );
 }
 

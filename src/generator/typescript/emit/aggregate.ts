@@ -328,12 +328,19 @@ function renderEntity(
   for (const c of e.contains) {
     ctorAssignments.push(`    this._${c.name} = state.${c.name};`);
   }
-  // Constructor runs invariants on hydration and on `create`; the op
-  // context isn't meaningful here, so trace-on passes the sentinel
-  // "<init>" so the invariant_evaluated lines for ctor runs are
-  // distinguishable from in-operation evaluations.
+  // Constructor runs invariants on domain construction (`create`, in-op
+  // part builds via `_create`); repository rehydration opts out through
+  // `_rehydrate` (S6: invariants guard TRANSITIONS — reconstituted state
+  // was valid when stored, and re-asserting on load makes every
+  // pre-existing row unreadable the moment an invariant tightens,
+  // including the fix-it update path).  The op context isn't meaningful
+  // here, so trace-on passes the sentinel "<init>" so the
+  // invariant_evaluated lines for ctor runs are distinguishable from
+  // in-operation evaluations.
   ctorAssignments.push(
-    emitTrace ? `    this._assertInvariants("<init>");` : "    this._assertInvariants();",
+    "    if (!trustStore) {",
+    emitTrace ? `      this._assertInvariants("<init>");` : "      this._assertInvariants();",
+    "    }",
   );
 
   const getters: string[] = [];
@@ -631,7 +638,7 @@ function renderEntity(
           "  }",
           "",
           `  static _fromEvents(id: Ids.${e.name}Id, events: Events.DomainEvent[]): ${e.name} {`,
-          `    const inst = ${e.name}._create({ id } as unknown as ${stateLiteral});`,
+          `    const inst = ${e.name}._rehydrate({ id } as unknown as ${stateLiteral});`,
           "    for (const ev of events) inst._apply(ev);",
           "    return inst;",
           "  }",
@@ -642,7 +649,7 @@ function renderEntity(
   return lines(
     `export class ${e.name} {`,
     ...fieldDecls,
-    `  private constructor(state: ${stateLiteral}) {`,
+    `  private constructor(state: ${stateLiteral}, trustStore = false) {`,
     ...ctorAssignments,
     "  }",
     "",
@@ -665,6 +672,14 @@ function renderEntity(
     "",
     `  static _create(state: ${stateLiteral}): ${e.name} {`,
     `    return new ${e.name}(state);`,
+    "  }",
+    "",
+    "  /** Reconstitution from the store — trusts persisted state, so no",
+    "   *  invariant run: invariants guard transitions (create + operations),",
+    "   *  not loads.  Repository hydration only; domain code constructs via",
+    "   *  `create`/`_create`, which assert. */",
+    `  static _rehydrate(state: ${stateLiteral}): ${e.name} {`,
+    `    return new ${e.name}(state, true);`,
     "  }",
     ...createFactory,
     ...esCreateFactory,

@@ -197,6 +197,25 @@ the conforming backends, and the fix that established it.
   **T1** (structural envelope is T0 via the spec; the 400-vs-422 *routing* is
   runtime).
 
+### RS-10 · Rehydration trusts the store — invariants guard transitions only
+- **Guarantee.** Reading a persisted row never re-runs the aggregate's
+  invariants: reconstituted state was valid when stored, and invariants gate
+  *transitions* (`create` + every mutating operation), not loads. Tightening
+  an invariant must not make pre-existing rows unreadable — the fix-it path
+  (load → repair via an operation) stays open.
+- **Trigger.** An aggregate with an invariant; a stored row that predates a
+  tightened invariant is read back (`GET`/`findAll`), then repaired.
+- **Observable.** The read returns the row (no 500); `create` with the same
+  state and a mutator leaving the invariant violated both still fail.
+- **Conforms.** node, dotnet, java, python, elixir. node and python construct
+  domain objects on load, so their repositories hydrate through the
+  non-asserting `_rehydrate` (the asserting `_create` stays the domain-side
+  construction path — in-op part builds use it); .NET/Java materialize via
+  EF/JPA and elixir loads Ecto structs, which never ran invariants on load.
+- **Provenance.** `generated-code-ddd-review-2026-07.md` §S6. Tier: **T0** —
+  gated statically per-PR by
+  `test/conformance/rehydration-trust-parity.test.ts`.
+
 ---
 
 ## Adding a rule

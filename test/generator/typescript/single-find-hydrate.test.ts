@@ -37,13 +37,13 @@ describe("typescript generator — single-result find hydrates in place", () => 
     // The row in hand is hydrated directly, and its containment is bulk-loaded
     // off the same rows (mirroring the array branch).
     expect(warehouses).toContain("const rootIds = rootRows.map((r) => r.id);");
-    expect(warehouses).toMatch(/const result = Warehouse\._create\(\{[\s\S]*rootRows\[0\]!/);
+    expect(warehouses).toMatch(/const result = Warehouse\._rehydrate\(\{[\s\S]*rootRows\[0\]!/);
     expect(warehouses).toContain('find: "byCode", rows: 1');
 
     // A child-less aggregate becomes a single query (no rootIds / bulk-load).
     const skus = files.get("db/repositories/sku-repository.ts")!;
     expect(skus).not.toContain("await this.findById(rootRows[0]!.id");
-    expect(skus).toMatch(/const result = Sku\._create\(\{[\s\S]*rootRows\[0\]!/);
+    expect(skus).toMatch(/const result = Sku\._rehydrate\(\{[\s\S]*rootRows\[0\]!/);
     expect(skus).not.toContain("const rootIds");
   });
 });

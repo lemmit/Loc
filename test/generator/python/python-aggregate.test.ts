@@ -35,14 +35,19 @@ describe("python aggregate emission", () => {
     expect(order.indexOf("class OrderLine:")).toBeLessThan(order.indexOf("class Order:"));
   });
 
-  it("__init__ takes keyword-only full state and asserts invariants", async () => {
+  it("__init__ takes keyword-only full state and asserts invariants on domain construction", async () => {
     const files = await build();
     const order = files.get("api/app/domain/order.py")!;
     expect(order).toContain(
-      "def __init__(self, *, id: OrderId, status: OrderStatus, placed_at: datetime, unit_budget: Decimal, watchers: list[CustomerId], lines: list[OrderLine]) -> None:",
+      "def __init__(self, *, id: OrderId, status: OrderStatus, placed_at: datetime, unit_budget: Decimal, watchers: list[CustomerId], lines: list[OrderLine], _trust_store: bool = False) -> None:",
     );
-    expect(order).toContain("        self._assert_invariants()");
+    // RS-10: the invariant run is gated on the trust marker — repository
+    // rehydration (`_rehydrate`) skips it, domain construction asserts.
+    expect(order).toContain("        if not _trust_store:");
+    expect(order).toContain("            self._assert_invariants()");
     expect(order).toContain("        self._events: list[DomainEvent] = []");
+    expect(order).toContain("    def _rehydrate(");
+    expect(order).toContain("_trust_store=True)");
   });
 
   it("parts carry parent_id and their own invariants", async () => {

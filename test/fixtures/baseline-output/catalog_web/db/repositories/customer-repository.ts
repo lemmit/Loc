@@ -24,7 +24,7 @@ export class CustomerRepository {
         return null;
       }
       const root = rootRows[0]!;
-      const loaded = Customer._create({ id: Ids.CustomerId(root.id), username: root.username, email: root.email, age: root.age });
+      const loaded = Customer._rehydrate({ id: Ids.CustomerId(root.id), username: root.username, email: root.email, age: root.age });
       requestLog().debug({ event: "aggregate_loaded", aggregate: "Customer", id: id as string, found: true });
       return loaded;
     });
@@ -40,7 +40,7 @@ export class CustomerRepository {
     if (ids.length === 0) return [];
     const rootRows = await this.db.select().from(schema.customers).where(inArray(schema.customers.id, ids));
     if (rootRows.length === 0) return [];
-    return rootRows.map((root) => Customer._create({ id: Ids.CustomerId(root.id), username: root.username, email: root.email, age: root.age }));
+    return rootRows.map((root) => Customer._rehydrate({ id: Ids.CustomerId(root.id), username: root.username, email: root.email, age: root.age }));
   }
 
   async save(aggregate: Customer): Promise<void> {
@@ -66,7 +66,7 @@ export class CustomerRepository {
       requestLog().debug({ event: "find_executed", aggregate: "Customer", find: "all", rows: 0 });
       return [];
     }
-    const result = rootRows.map((root) => Customer._create({ id: Ids.CustomerId(root.id), username: root.username, email: root.email, age: root.age }));
+    const result = rootRows.map((root) => Customer._rehydrate({ id: Ids.CustomerId(root.id), username: root.username, email: root.email, age: root.age }));
     requestLog().debug({ event: "find_executed", aggregate: "Customer", find: "all", rows: result.length });
     return result;
   }
@@ -77,7 +77,7 @@ export class CustomerRepository {
       requestLog().debug({ event: "find_executed", aggregate: "Customer", find: "byEmail", rows: 0 });
       return null;
     }
-    const result = Customer._create({ id: Ids.CustomerId(rootRows[0]!.id), username: rootRows[0]!.username, email: rootRows[0]!.email, age: rootRows[0]!.age });
+    const result = Customer._rehydrate({ id: Ids.CustomerId(rootRows[0]!.id), username: rootRows[0]!.username, email: rootRows[0]!.email, age: rootRows[0]!.age });
     requestLog().debug({ event: "find_executed", aggregate: "Customer", find: "byEmail", rows: 1 });
     return result;
   }
