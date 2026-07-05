@@ -47,6 +47,52 @@ function isManaged(f: AggField): boolean {
   return f.access === "managed";
 }
 
+/** The scalar columns a changeset casts: declared fields minus the id, the
+ *  server-managed fields (audit stamps, managed timestamps), and the
+ *  association-backed fields (value-object collections, `X id[]` reference
+ *  collections) — those are wired via `cast_assoc`/`put_assoc`, not `cast`. */
+function castScalarFields(agg: AggregateIR, ctx: BoundedContextIR): AggField[] {
+  const vcFieldNames = new Set(valueCollectionsWithVo(agg, ctx).map((v) => v.vc.fieldName));
+  const managedTs = managedTimestampNames(agg);
+  return (agg.fields as AggField[]).filter(
+    (f) =>
+      f.name !== "id" &&
+      !isManaged(f) &&
+      !managedTs.has(f.name) &&
+      !vcFieldNames.has(f.name) &&
+      !isRefCollField(f),
+  );
+}
+
+/** Update-editable scalar columns — {@link castScalarFields} minus `token` /
+ *  `internal` / `immutable` (mirrors `wire-projection.forUpdateInput`).  A
+ *  client PATCH may modify only these; `managed` is already dropped upstream. */
+const UPDATE_EXCLUDED_ACCESS: ReadonlySet<string> = new Set(["token", "internal", "immutable"]);
+function updateScalarFields(agg: AggregateIR, ctx: BoundedContextIR): AggField[] {
+  return castScalarFields(agg, ctx).filter((f) => !UPDATE_EXCLUDED_ACCESS.has(f.access ?? ""));
+}
+
+/** Whether an aggregate needs a dedicated `update_changeset/2` distinct from
+ *  `base_changeset/2` — true when the generic update must behave differently
+ *  from create: it owns a contained part (whose bulk-replace on PATCH would
+ *  bypass the part's own add/remove operation), carries an update-excluded
+ *  field (immutable / token / internal that create sets but update must not),
+ *  or is `versioned` (needs `optimistic_lock`).  When false, the update path
+ *  reuses `base_changeset` unchanged (strict additivity — byte-identical). */
+export function aggregateNeedsUpdateChangeset(
+  agg: AggregateIR,
+  ctx?: BoundedContextIR,
+  _sys?: SystemIR,
+): boolean {
+  if (isEventSourced(agg) || isAbstractBase(agg)) return false;
+  if (aggregateIsVersioned(agg)) return true;
+  if ((agg.contains ?? []).length > 0) return true;
+  // The update-excluded-field check needs the context (value-collection
+  // resolution); the emitter always has one, so routing stays in step.
+  if (!ctx) return false;
+  return updateScalarFields(agg, ctx).length !== castScalarFields(agg, ctx).length;
+}
+
 export function emitVanillaChangesets(
   appModule: string,
   ctx: BoundedContextIR,
@@ -96,15 +142,7 @@ function renderChangeset(
   // `createdAt`/`updatedAt` stay out of the cast ONLY when they are actually
   // server-managed (a `stamp` target or `access: managed`); a plain declared
   // timestamp field is cast + validated like any column (see managed-timestamps).
-  const managedTs = managedTimestampNames(agg);
-  const allFields = (agg.fields as AggField[]).filter(
-    (f) =>
-      f.name !== "id" &&
-      !isManaged(f) &&
-      !managedTs.has(f.name) &&
-      !vcFieldNames.has(f.name) &&
-      !isRefCollField(f),
-  );
+  const allFields = castScalarFields(agg, ctx);
   const requiredFields = allFields.filter((f) => !f.optional);
 
   const allCols = allFields.map((f) => `:${snake(f.name)}`).join(", ");
@@ -279,22 +317,42 @@ ${keyAliasPairs.join(",\n")}
   });
   const uniqueBlock = uniqueLines.length > 0 ? `\n${uniqueLines.join("\n")}` : "";
 
-  // Optimistic concurrency (`versioned` capability, D-VERSIONED).  The update
-  // path gets its OWN changeset — `base_changeset |> optimistic_lock(:version)`
-  // — so the guarded write compares the struct's `version` (which the repository
-  // has just overridden to the client's EXPECTED value) against the DB row in
-  // the `UPDATE ... WHERE ... AND version = ?` clause and increments it.  A
-  // mismatch RAISES `Ecto.StaleEntryError` (not a changeset error), rescued at
-  // the `Repo.update` site (repository-emit).  Kept off `base_changeset` because
-  // that pipeline also feeds INSERT — where `optimistic_lock` would increment the
-  // schema's `default: 1` to 2 on the very first insert.  Gated: a non-versioned
-  // aggregate emits no `update_changeset/2` (strict additivity).
-  const versionedBlock = aggregateIsVersioned(agg)
-    ? `\n\n  @doc "Update changeset with optimistic-concurrency locking (\`versioned\`) — the caller sets \`:version\` on the struct to the client's expected value first; \`optimistic_lock/2\` then guards the write on it (a stale write raises \`Ecto.StaleEntryError\` at \`Repo.update\`)."
+  // Dedicated `update_changeset/2` — the generic PATCH seam (repository `update`
+  // routes here when `aggregateNeedsUpdateChangeset` is true).  It differs from
+  // `base_changeset` (the create seam) in three ways, so the aggregate stays a
+  // real consistency boundary on update, not just create:
+  //   1. casts only the UPDATE-EDITABLE columns (`token`/`internal`/`immutable`
+  //      dropped — a client can't rewrite an immutable field or a token on PATCH);
+  //   2. does NOT cast contained parts (the `castEmbedBlock` — `cast_assoc`/
+  //      `cast_embed` — is omitted), so `PATCH {"parts": []}` can't bulk-delete /
+  //      replace containment, bypassing the part's own `add<Part>` precondition;
+  //   3. adds `optimistic_lock(:version)` for a `versioned` aggregate (a stale
+  //      write raises `Ecto.StaleEntryError`, rescued to 409 at `Repo.update`).
+  // Gated on `aggregateNeedsUpdateChangeset` so an aggregate that needs none of
+  // these keeps reusing `base_changeset` for update — byte-identical (strict
+  // additivity).  Value-object fields/collections stay editable (they carry no
+  // identity or precondition), so `voBlock` / `castAssocBlock` are retained.
+  const versioned = aggregateIsVersioned(agg);
+  const emitUpdateChangeset = aggregateNeedsUpdateChangeset(agg, ctx, sys);
+  const updateFields = updateScalarFields(agg, ctx);
+  const updateFieldsDiffer = updateFields.length !== allFields.length;
+  const updateColsList = updateFieldsDiffer ? "@update_fields" : "@all_fields";
+  const updateReqList = updateFieldsDiffer ? "@update_required" : "@required_fields";
+  const updateAttrDecls = updateFieldsDiffer
+    ? `\n  @update_fields [${updateFields.map((f) => `:${snake(f.name)}`).join(", ")}]\n  @update_required [${updateFields
+        .filter((f) => !f.optional)
+        .map((f) => `:${snake(f.name)}`)
+        .join(", ")}]`
+    : "";
+  const optimisticLine = versioned ? "\n    |> optimistic_lock(:version)" : "";
+  const updateVcPrep = valueCollections.length > 0 ? "attrs = prepare_vc_attrs(attrs)\n\n    " : "";
+  const updateChangesetBlock = emitUpdateChangeset
+    ? `\n\n  @doc "Update changeset — the generic PATCH seam.  Casts only the update-editable wire fields and does NOT touch contained parts (their mutation goes through the aggregate's own operations)${versioned ? "; guards the write with optimistic_lock(:version)" : ""}."
   def update_changeset(struct, attrs) do
-    struct
-    |> base_changeset(attrs)
-    |> optimistic_lock(:version)
+    attrs = __normalize_keys(attrs)
+    ${updateVcPrep}struct
+    |> cast(attrs, ${updateColsList})
+    |> validate_required(${updateReqList})${validatorBlock}${castAssocBlock}${voBlock}${uniqueBlock}${optimisticLine}
   end`
     : "";
 
@@ -331,7 +389,7 @@ defmodule ${changesetMod} do
   alias ${aggModule}
 
   @all_fields [${allCols}]
-  @required_fields [${requiredCols}]
+  @required_fields [${requiredCols}]${updateAttrDecls}
 
   @doc "Default cast/3 helper applied by every per-action changeset below."
   def base_changeset(struct \\\\ %${aggPascal}{}, attrs) do
@@ -339,7 +397,7 @@ defmodule ${changesetMod} do
     ${valueCollections.length > 0 ? "attrs = prepare_vc_attrs(attrs)\n\n    " : ""}struct
     |> cast(attrs, @all_fields)
     |> validate_required(@required_fields)${validatorBlock}${castEmbedBlock}${castAssocBlock}${voBlock}${uniqueBlock}
-  end${versionedBlock}${keyNormalizeHelper}${voHelper}${normalizeHelper}${ordinalHelper}
+  end${updateChangesetBlock}${keyNormalizeHelper}${voHelper}${normalizeHelper}${ordinalHelper}
 
 ${actionHelpers}
 end

@@ -34,6 +34,7 @@ import {
   combineWhere,
   vanillaCapabilityFilter,
 } from "./capability-filter.js";
+import { aggregateNeedsUpdateChangeset } from "./changeset-emit.js";
 import { isVanillaDocAgg, renderDocRepository } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 import { isAbstractBase, isTphBase, tpcConcretesOf, tphKind } from "./inheritance-emit.js";
@@ -286,7 +287,14 @@ function renderRepository(
   const versionOverride = versioned
     ? `    record = %{record | version: expected_version || record.version}\n\n`
     : "";
-  const updateChangesetFn = versioned ? "update_changeset" : "base_changeset";
+  // The generic PATCH routes through `update_changeset` whenever the aggregate
+  // needs one (containment owner, update-excluded field, or versioned) — that
+  // changeset drops contained-part casts + immutable/token columns, so a PATCH
+  // can't bulk-replace containment or rewrite server-owned state.  Otherwise it
+  // reuses `base_changeset` (byte-identical — strict additivity).
+  const updateChangesetFn = aggregateNeedsUpdateChangeset(agg, ctx, sys)
+    ? "update_changeset"
+    : "base_changeset";
   const updateRescue = versioned
     ? "\n  rescue\n    Ecto.StaleEntryError -> {:error, :conflict}"
     : "";
