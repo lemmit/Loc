@@ -33,6 +33,10 @@ system PythonHierarchy {
         find byMinBalance(min: int): Account[] where this.balance >= min
       }
       repository Orgs for Org { }
+      // P2.5: `global` widens Account's tenant floor to the caller's ROOT-org
+      // subtree — the rootOrg-anchored materialized-path sentinel.  Compile-
+      // checks the `.root_org` accessor + the global filter path.
+      policy { allow global on Account }
     }
   }
 
