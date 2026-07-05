@@ -33,9 +33,6 @@ flowchart LR
   deploy_catalogWeb -->|serves| ctx_Customers
   deploy_catalogApi -->|serves| ctx_Products
   deploy_catalogApi -->|serves| ctx_Customers
-  deploy_webApp -->|serves| ctx_Products
-  deploy_webApp -->|serves| ctx_Orders
-  deploy_webApp -->|serves| ctx_Customers
   deploy_webApp -.->|calls| deploy_api"
 `;
 

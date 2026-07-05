@@ -32,9 +32,6 @@ model {
     }
     webApp = container 'webApp' {
       technology 'static'
-      Products = component 'Products'
-      Orders = component 'Orders'
-      Customers = component 'Customers'
     }
     db = database 'PostgreSQL'
 

@@ -46,4 +46,22 @@ describe("architecture.c4", () => {
       expect(out).toContain(`${id} -> db 'reads / writes'`);
     }
   });
+
+  it("a frontend container declares no context components (calls edge only)", async () => {
+    // acme's `webApp` (static SPA) inherits its target's contexts for
+    // wire-scope; the C4 container must not portray them as owned components.
+    const sys = (await build("examples/acme.ddd")).systems[0]!;
+    const web = sys.deployables.find((d) => d.name === "webApp")!;
+    expect(web.platform).toBe("static");
+    expect(web.contextNames.length).toBeGreaterThan(0);
+    const out = buildC4Model(sys);
+    // The container block for webApp is empty of `component` lines.
+    const block = out.slice(
+      out.indexOf("webApp = container"),
+      out.indexOf("}", out.indexOf("webApp = container")),
+    );
+    expect(block).not.toContain("= component");
+    // The `calls` relationship survives.
+    expect(out).toContain("webApp -> api 'calls'");
+  });
 });

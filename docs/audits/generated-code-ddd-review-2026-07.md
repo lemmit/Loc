@@ -422,7 +422,11 @@ honest `datasources.md` unused-flags.
    now defines each context node nested under its owning subdomain 📦 and draws
    `serves` edges, so no edge dangles]; frontend deployables
    inherit the backend's `moduleNames` (enrichment #4) and so claim contexts
-   they never touch [still open — enrichment change]; `asyncapi.yaml` says
+   they never touch [✅ FIXED at the artifact layer — the enrichment copy is
+   needed for the page emitter's wire-scope, so `likec4.ts` + `mermaid.ts` now
+   treat a frontend's inherited `contextNames` as scope, not ownership: a
+   frontend contributes no C4 context components and draws no `serves` edges,
+   only its `calls` edge to the backend]; `asyncapi.yaml` says
    `transport: hotCache` while compose
    provisions no redis and no backend has a redis client (the `channelSource`
    binding is silently inert — mark it `declared, not provisioned` until

@@ -14,6 +14,7 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../ir/types/loom-ir.js";
+import { descriptorFor } from "../platform/metadata.js";
 import { lines } from "../util/code-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -598,8 +599,14 @@ export function buildDeploymentDiagram(sys: SystemIR): string {
   const edges: string[] = [];
   const known = new Set(sys.deployables.map((d) => d.name));
   for (const d of sys.deployables) {
-    for (const ctx of d.contextNames)
-      edges.push(`  ${nid("deploy", d.name)} -->|serves| ${nid("ctx", ctx)}`);
+    // A frontend's `contextNames` are inherited wire-scope, not domain
+    // ownership — draw `serves` edges only from the deployable that actually
+    // owns the context (a backend).  The frontend's whole relationship to the
+    // domain is its `calls` edge to the backend below.
+    if (!descriptorFor(d.platform).isFrontend) {
+      for (const ctx of d.contextNames)
+        edges.push(`  ${nid("deploy", d.name)} -->|serves| ${nid("ctx", ctx)}`);
+    }
     if (d.targetName && known.has(d.targetName)) {
       edges.push(`  ${nid("deploy", d.name)} -.->|calls| ${nid("deploy", d.targetName)}`);
     }
