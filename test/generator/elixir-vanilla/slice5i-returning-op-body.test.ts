@@ -64,16 +64,28 @@ describe("vanilla — T2.c returning-op body statements", () => {
     expect(ctx).toContain("record = %{record | quantity: record.quantity + delta}");
   });
 
-  it("renders `emit` as a Phoenix.PubSub broadcast against the Events struct", async () => {
+  it("hoists `emit` past the persist — broadcast fires AFTER persist_change commits (S5a)", async () => {
     const ctx = get(await files(), "lib/api/stock.ex");
+    // The event struct is bound + broadcast inside the {:ok, saved} branch.
     expect(ctx).toContain(
-      'Phoenix.PubSub.broadcast(Api.PubSub, "events", %Api.Stock.Events.Adjusted{sku: record.sku, delta: delta})',
+      "loom_event_0 = %Api.Stock.Events.Adjusted{sku: record.sku, delta: delta}",
     );
+    expect(ctx).toContain('Phoenix.PubSub.broadcast(Api.PubSub, "events", loom_event_0)');
+    // Ordering: persist_change comes BEFORE the broadcast (no phantom event on a
+    // failed write).
+    const persistAt = ctx.indexOf("ItemRepository.persist_change(changeset)");
+    const bcastAt = ctx.indexOf('Phoenix.PubSub.broadcast(Api.PubSub, "events", loom_event_0)');
+    expect(persistAt).toBeGreaterThan(-1);
+    expect(persistAt).toBeLessThan(bcastAt);
+    // No saga in this context → no Dispatcher routing (broadcast-only).
+    expect(ctx).not.toContain("Stock.Dispatcher.dispatch");
   });
 
-  it("appends the wire-ready success tuple when the body falls through", async () => {
+  it("returns the wire-ready success tuple off the SAVED struct when the body falls through", async () => {
     const ctx = get(await files(), "lib/api/stock.ex");
-    expect(ctx).toContain("{:ok, %{id: record.id, sku: record.sku, quantity: record.quantity}}");
+    expect(ctx).toContain("{:ok, %{id: saved.id, sku: saved.sku, quantity: saved.quantity}}");
+    // A persist validation failure surfaces as {:error, changeset}.
+    expect(ctx).toContain("{:error, changeset} ->");
   });
 
   it("controller still translates the tagged result to HTTP", async () => {

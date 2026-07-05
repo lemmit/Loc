@@ -17,6 +17,7 @@ import type {
   AggregateIR,
   BoundedContextIR,
   EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
   ExprIR,
   OperationIR,
   ProvSite,
@@ -26,6 +27,7 @@ import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
+import { contextHasDispatcher } from "../dispatch-emit.js";
 import { opUsesCurrentUser } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
@@ -114,6 +116,65 @@ export function persistPutBodies(
 /** An operation that declares an `or`-union return type (exception-less). */
 export function isReturningOperation(op: OperationIR): boolean {
   return !!op.returnType;
+}
+
+/** True when an operation body raises at least one domain event (`emit`).  Such
+ *  a body is restructured to persist-then-dispatch (S5a) — the `emit`s are hoisted
+ *  out of the interleaved body and fanned out AFTER `persist_change` commits, so
+ *  no phantom event fires on a failed write and each event reaches the context
+ *  `Dispatcher` (the saga seam), not just the subscriber-less raw broadcast. */
+export function opEmitsEvent(op: OperationIR): boolean {
+  return op.statements.some((s) => s.kind === "emit");
+}
+
+/** A returning op whose body falls through to its aggregate success variant
+ *  (`Order` in `Order or NotFound`) — the only branch that commits a state
+ *  change (and thus the only one with an `{:ok, saved}` seam to dispatch after).
+ *  Extracted so the controller's `{:error, changeset}` clause gating matches the
+ *  body's persist decision exactly. */
+export function returningOpHasSuccessPath(op: OperationIR, agg: AggregateIR): boolean {
+  const lastIsReturn = op.statements[op.statements.length - 1]?.kind === "return";
+  const succeedsWithAggregate =
+    op.returnType?.kind === "union" &&
+    op.returnType.variants.some((v) => v.kind === "entity" && v.name === agg.name);
+  return !lastIsReturn && succeedsWithAggregate;
+}
+
+/** Render the post-commit event-dispatch block for an op body's `emit`
+ *  statements (S5a).  Each event struct is bound, the `event_dispatched` catalog
+ *  line logged, then the event routed through the context `Dispatcher` (saga
+ *  seam — only when the context emits one, mirroring the event-sourced path's
+ *  `dispatchLine` gating) AND the raw PubSub broadcast.  Emitted INSIDE the
+ *  `{:ok, saved}` branch of `persist_change`, so an event is observed iff the
+ *  write committed.  `baseIndent` is the leading whitespace for each line. */
+export function renderEmitDispatchLines(
+  op: OperationIR,
+  rc: RenderCtx,
+  hasDispatcher: boolean,
+  baseIndent: string,
+): string[] {
+  const appModule = rc.contextModule.split(".")[0]!;
+  const lines: string[] = [];
+  let i = 0;
+  for (const s of op.statements) {
+    if (s.kind !== "emit") continue;
+    const fields = s.fields.map((f) => `${snake(f.name)}: ${renderExpr(f.value, rc)}`).join(", ");
+    const struct = `%${rc.contextModule}.Events.${upperFirst(s.eventName)}{${fields}}`;
+    const evVar = `loom_event_${i}`;
+    // Narrative line at the dispatch seam — event_type stays a per-event LITERAL
+    // (byte-similar to the pre-hoist emit arm; asserted by the obs / narrative-log
+    // gates), so a heterogeneous emit list logs each event by name.
+    const logCall = renderPhoenixLogCall("eventDispatched", [
+      { name: "event_type", valueExpr: `"${upperFirst(s.eventName)}"` },
+      ...(rc.agg ? [{ name: "aggregate", valueExpr: `"${upperFirst(rc.agg.name)}"` }] : []),
+    ]);
+    lines.push(`${baseIndent}${evVar} = ${struct}`);
+    lines.push(`${baseIndent}${logCall}`);
+    if (hasDispatcher) lines.push(`${baseIndent}${rc.contextModule}.Dispatcher.dispatch(${evVar})`);
+    lines.push(`${baseIndent}Phoenix.PubSub.broadcast(${appModule}.PubSub, "events", ${evVar})`);
+    i++;
+  }
+  return lines;
 }
 
 /** Does this aggregate have any public returning operation (→ the controller
@@ -216,18 +277,28 @@ export function renderReturningOpFunction(
   // `loom.vanilla-document-unsupported`), so the struct-drop snapshot always
   // applies here.
   const beforeBind = hasAudit ? [`    audit_before = ${wireSnapshot("record")}`] : [];
-  // Per-statement index disambiguates provenance temp vars across writes.
-  const bodyLines = op.statements.map((s, i) => renderReturningStmt(s, ctx, renderCtx, i));
-
   // A body that doesn't end in an explicit `return` falls through to its
   // aggregate success variant (`Order` in `Order or NotFound`) — the mutated
   // `record`.  That fall-through success branch is the only place a state change
   // commits, so it's also the only place an audit / provenance row is recorded.
-  const lastIsReturn = op.statements[op.statements.length - 1]?.kind === "return";
-  const succeedsWithAggregate =
-    op.returnType?.kind === "union" &&
-    op.returnType.variants.some((v) => v.kind === "entity" && v.name === agg.name);
-  const hasSuccessPath = !lastIsReturn && succeedsWithAggregate;
+  const hasSuccessPath = returningOpHasSuccessPath(op, agg);
+  // S5a: a body that `emit`s a domain event AND has a commit (success) path is
+  // restructured to persist-then-dispatch — the `emit`s are hoisted out of the
+  // interleaved body and fanned out (Dispatcher + broadcast) AFTER the write
+  // commits, so no phantom event fires on a failed persist and the event reaches
+  // the context Dispatcher (saga seam).  When the body emits but can NEVER
+  // succeed (ends in an explicit `return`), there is no commit to gate on, so the
+  // legacy inline emit is kept (renderReturningStmt "emit" arm) — a rare shape.
+  const hoistEmits = opEmitsEvent(op) && hasSuccessPath;
+  const hasDispatcher = contextHasDispatcher(ctx as EnrichedBoundedContextIR);
+  const dispatchLines = hoistEmits
+    ? renderEmitDispatchLines(op, renderCtx, hasDispatcher, "        ")
+    : [];
+  // Per-statement index disambiguates provenance temp vars across writes.  When
+  // hoisting, the `emit`s are rendered post-commit (below), not inline.
+  const bodyLines = (
+    hoistEmits ? op.statements.filter((s) => s.kind !== "emit") : op.statements
+  ).map((s, i) => renderReturningStmt(s, ctx, renderCtx, i));
   // Did the body add/remove a reference collection (`X id[]` → `many_to_many`)?
   // That mutation edits a join table, so the success path MUST round-trip the DB
   // (a `put_assoc` changeset) rather than return the in-memory projection — and
@@ -286,22 +357,52 @@ export function renderReturningOpFunction(
         }),
       );
     }
-    tailLines = [
-      `    changeset =`,
-      `      record`,
-      `      |> Ecto.Changeset.change(%{})${putBlock6}`,
-      ``,
-      `    ${appModule}.Repo.transaction(fn ->`,
-      `      case ${repoMod}.persist_change(changeset) do`,
-      `        {:ok, saved} ->`,
-      ...txTail,
-      `          ${wireMap("saved", mutatesRefColl)}`,
-      ``,
-      `        {:error, reason} ->`,
-      `          ${appModule}.Repo.rollback(reason)`,
-      `      end`,
-      `    end)`,
-    ];
+    tailLines = hoistEmits
+      ? [
+          // Emit + prov/audit: the transaction commits the state change (+ derived
+          // rows), then the events are dispatched AFTER commit (outside the tx fn),
+          // so a rollback drops them too.
+          `    changeset =`,
+          `      record`,
+          `      |> Ecto.Changeset.change(%{})${putBlock6}`,
+          ``,
+          `    tx_result =`,
+          `      ${appModule}.Repo.transaction(fn ->`,
+          `      case ${repoMod}.persist_change(changeset) do`,
+          `        {:ok, saved} ->`,
+          ...txTail,
+          `          saved`,
+          ``,
+          `        {:error, reason} ->`,
+          `          ${appModule}.Repo.rollback(reason)`,
+          `      end`,
+          `    end)`,
+          ``,
+          `    case tx_result do`,
+          `      {:ok, saved} ->`,
+          ...dispatchLines,
+          `        {:ok, ${wireMap("saved", mutatesRefColl)}}`,
+          ``,
+          `      {:error, reason} ->`,
+          `        {:error, reason}`,
+          `    end`,
+        ]
+      : [
+          `    changeset =`,
+          `      record`,
+          `      |> Ecto.Changeset.change(%{})${putBlock6}`,
+          ``,
+          `    ${appModule}.Repo.transaction(fn ->`,
+          `      case ${repoMod}.persist_change(changeset) do`,
+          `        {:ok, saved} ->`,
+          ...txTail,
+          `          ${wireMap("saved", mutatesRefColl)}`,
+          ``,
+          `        {:error, reason} ->`,
+          `          ${appModule}.Repo.rollback(reason)`,
+          `      end`,
+          `    end)`,
+        ];
   } else if (hasSuccessPath && mutatesRefColl) {
     // Reference-collection mutation (`X id[]` add/remove → a `many_to_many` join
     // table): the body bound an id-list local, so persist it via a `put_assoc`
@@ -316,20 +417,63 @@ export function renderReturningOpFunction(
       relationalContainments,
     );
     const putBlock = putBodies.map((b) => `\n      |> ${b}`).join("");
+    tailLines = hoistEmits
+      ? [
+          `    changeset =`,
+          `      record`,
+          `      |> Ecto.Changeset.change(%{})${putBlock}`,
+          ``,
+          `    case ${repoMod}.persist_change(changeset) do`,
+          `      {:ok, saved} ->`,
+          ...dispatchLines,
+          `        {:ok, ${wireMap("saved", true)}}`,
+          ``,
+          `      {:error, changeset} ->`,
+          `        {:error, changeset}`,
+          `    end`,
+        ]
+      : [
+          `    changeset =`,
+          `      record`,
+          `      |> Ecto.Changeset.change(%{})${putBlock}`,
+          ``,
+          `    case ${repoMod}.persist_change(changeset) do`,
+          `      {:ok, saved} -> {:ok, ${wireMap("saved", true)}}`,
+          `      {:error, changeset} -> {:error, changeset}`,
+          `    end`,
+        ];
+  } else if (hasSuccessPath && hoistEmits) {
+    // S5a: an `emit`ting success body that neither audits/provenances nor mutates
+    // a ref collection now ALSO persists — the write is the commit the events are
+    // gated on.  Persist the assigned columns, dispatch AFTER `{:ok, saved}`, and
+    // return the SAVED wire (a validation failure surfaces as `{:error, changeset}`,
+    // and the controller gains the matching clause via `returningOpPersistsChangeset`).
+    const putBodies = persistPutBodies(
+      op,
+      agg,
+      appModule,
+      facadeMod.split(".").slice(1).join("."),
+      relationalContainments,
+    );
+    const putBlock = putBodies.map((b) => `\n      |> ${b}`).join("");
     tailLines = [
       `    changeset =`,
       `      record`,
       `      |> Ecto.Changeset.change(%{})${putBlock}`,
       ``,
       `    case ${repoMod}.persist_change(changeset) do`,
-      `      {:ok, saved} -> {:ok, ${wireMap("saved", true)}}`,
-      `      {:error, changeset} -> {:error, changeset}`,
+      `      {:ok, saved} ->`,
+      ...dispatchLines,
+      `        {:ok, ${wireMap("saved", false)}}`,
+      ``,
+      `      {:error, changeset} ->`,
+      `        {:error, changeset}`,
       `    end`,
     ];
   } else if (hasSuccessPath) {
-    // Unaudited / non-provenanced success with no ref-collection mutation: the
-    // in-memory wire projection (no DB round-trip — byte-identical to the
-    // pre-audit emission for `assign`-only / scalar-arithmetic bodies).
+    // Unaudited / non-provenanced success with no ref-collection mutation and no
+    // event emit: the in-memory wire projection (no DB round-trip — byte-identical
+    // to the pre-audit emission for `assign`-only / scalar-arithmetic bodies).
     tailLines = [`    {:ok, ${wireMap("record", false)}}`];
   } else {
     tailLines = [];
@@ -600,12 +744,16 @@ export function renderReturningOpControllerAction(
   // "unused clause" warning for whichever outcome this op's body can't
   // produce.  A public fn keeps the parameter at its full clause domain.
   // An audited / provenanced returning op persists its mutated columns inside a
-  // forced transaction, so a persist validation failure surfaces as
-  // `{:error, %Ecto.Changeset{}}` — translated to a 422 (the same shape the
-  // generic update/create paths use).  Unaudited ops never persist, so they
-  // never produce this 2-tuple and the clause is omitted (an unreachable clause
-  // would trip Elixir 1.18's type checker / `--warnings-as-errors`).
-  const persists = op.audited === true || opHasProvSite(op);
+  // forced transaction, and (S5a) an `emit`ting success body now persists too —
+  // in both cases a persist validation failure surfaces as
+  // `{:error, %Ecto.Changeset{}}`, translated to a 422 (the same shape the
+  // generic update/create paths use).  A non-persisting op never produces this
+  // 2-tuple, so the clause is omitted (an unreachable clause would trip Elixir
+  // 1.18's type checker / `--warnings-as-errors`).
+  const persists =
+    op.audited === true ||
+    opHasProvSite(op) ||
+    (opEmitsEvent(op) && returningOpHasSuccessPath(op, agg));
   const resultClauses = [
     `  def ${resultFn}(conn, {:ok, success}), do: json(conn, success)`,
     ...errorVariantsOf(op, ctx).map(
