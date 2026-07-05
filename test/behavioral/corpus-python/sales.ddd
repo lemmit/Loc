@@ -25,6 +25,7 @@ system SalesPy {
       aggregate Customer with crudish {
         name: string
         email: string
+        active: bool = true
         invariant email.length > 0
         derived display: string = name
       }
@@ -87,6 +88,15 @@ system SalesPy {
     let p = api.products.create({ sku: "WIDGET-1", price: { amount: 9.99, currency: "USD" } })
     let read = api.products.getById(p)
     expect(read.sku).toBe("WIDGET-1")
+  }
+
+  // RS-6 (bool create default materializes at the wire boundary): `active` is
+  // omitted on create and must read back `true` (its declared default), not a
+  // zero-value false/null.
+  test e2e "create a customer omitting the bool default reads back true" against api {
+    let c = api.customers.create({ name: "Defaulter", email: "def@acme.test" })
+    let read = api.customers.getById(c)
+    expect(read.active).toBe(true)
   }
 
   // RS-1 (camelCase keys both directions: customerId/placedAt) + RS-2 (enum

@@ -53,7 +53,7 @@ spec-diff cannot catch its violation.
 |---|---|---|---|
 | **T0 static** | assert a property of *emitted source* across all 5 backends (`test/conformance/*`) | per-PR, no docker | rules whose violation is visible in generated code |
 | **T1 behavioral (node)** | boot the Hono deployable on PGlite, round-trip (`test/behavioral/`) | per-PR, no docker | any runtime rule — but only proves **node** |
-| **T2 behavioral (Nth backend)** | **`A6.2` — landed for Python** (`test/behavioral/run-python.mjs` + `behavioral-e2e-python.yml`): boots the generated FastAPI backend on a `services: postgres` sidecar and HTTP-dispatches the same emitted api e2e | per-PR (path-filtered) | the actual cross-backend drift the RS-rules describe (RS-1/4/7/8 on Python) |
+| **T2 behavioral (Nth backend)** | **`A6.2` — landed for Python** (`test/behavioral/run-python.mjs` + `behavioral-e2e-python.yml`): boots the generated FastAPI backend on a `services: postgres` sidecar and HTTP-dispatches the same emitted api e2e | per-PR (path-filtered) | the actual cross-backend drift the RS-rules describe (RS-1/4/6/7/8 on Python) |
 | **T3 full** | 5-backend docker round-trip (`conformance-full.yml`) | nightly / label | everything — but too slow to be the per-PR net |
 
 The RS-rules below tag each with the **lowest tier that can gate it today**.
@@ -147,10 +147,13 @@ the conforming backends, and the fix that established it.
   zero-value `false`/`null`.
 - **Trigger.** `active: bool = true`; a create body omitting `active`.
 - **Observable.** `POST {}` (no `active`) reads back `{"active":true}`.
-- **Conforms.** node, dotnet, java, python, elixir *(target — flagged open by
-  the July review at `wire-projection.ts:161`; include as a conformance
-  assertion so any backend that regresses is caught).*
-- **Provenance.** July full-code-review finding B14. Tier: **T1**.
+- **Conforms.** node, **python** (dotnet/java/elixir still targets).
+- **Provenance.** July full-code-review finding B14. Tier: **T1** — gated per-PR
+  on node and python (A6.2). The python behavioral gate **found and closed** a
+  real parity bug here: the FastAPI create model hardcoded `active: bool = False`
+  (the zero value) instead of the declared default; fixed by rendering the
+  field's lowered `default` expr in the create request field
+  (`routes-builder.ts`).
 
 ### RS-7 · Value-object subfields survive a jsonb round-trip
 - **Guarantee.** A value object stored inline as jsonb rehydrates so that
@@ -217,7 +220,7 @@ When a cross-backend runtime bug is fixed:
 - **A6.2 (Python api tier LANDED):** `run-python.mjs` + `behavioral-e2e-python.yml`
   boot the generated FastAPI backend on a `services: postgres` sidecar and
   HTTP-dispatch the emitted api e2e — the T2 column is now per-PR for
-  **RS-1/4/7/8** on Python. On day one it surfaced a real codegen bug (a
+  **RS-1/4/6/7/8** on Python. On day one it surfaced a real codegen bug (a
   cross-aggregate operation-param id type — `ProductId` — omitted from the
   emitted FastAPI route imports); **that fix has landed** (the route import
   collector now draws candidates from every context aggregate), and the

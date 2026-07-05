@@ -121,8 +121,13 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     title: "Boolean create defaults materialize at the wire boundary",
     trigger: "`active: bool = true`; a create body omitting `active`",
     observable: 'POST {} (no active) reads back {"active":true}, not a zero-value false/null',
-    conforms: ["node"],
-    targets: ["dotnet", "java", "python", "elixir"],
+    conforms: ["node", "python"],
+    targets: ["dotnet", "java", "elixir"],
+    // Gated per-PR on node and python (A6.2). The python behavioral gate
+    // surfaced (and the fix closed) a real parity bug: the FastAPI create model
+    // hardcoded `active: bool = False` (the zero value) instead of the declared
+    // default — omitting `active` arrived False. Fix: the create request field
+    // uses the field's lowered `default` expr (routes-builder.ts requestFieldDecl).
     provenance: ["full-code-review-2026-07 B14"],
     tier: "behavioral",
   },
