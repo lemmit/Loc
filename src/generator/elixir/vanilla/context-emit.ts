@@ -18,12 +18,14 @@ import type {
   AggregateIR,
   BoundedContextIR,
   EnrichedAggregateIR,
+  EnrichedBoundedContextIR,
   OperationIR,
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { snake, upperFirst } from "../../../util/naming.js";
+import { contextHasDispatcher } from "../dispatch-emit.js";
 import { opUsesCurrentUser, stmtUsesParam } from "../domain/predicates.js";
 import { renderReadingServiceContextFns } from "../domain-service-emit.js";
 import type { RenderCtx } from "../render-expr.js";
@@ -45,7 +47,9 @@ import { renderAggregateFunctions } from "./function-emit.js";
 import { isAbstractBase } from "./inheritance-emit.js";
 import {
   isReturningOperation,
+  opEmitsEvent,
   persistPutBodies,
+  renderEmitDispatchLines,
   renderReturningOpFunction,
   renderReturningStmt,
 } from "./operation-returns-emit.js";
@@ -534,10 +538,23 @@ function renderNamedOpFunction(
     (p) => `    ${snake(p.name)} = Map.get(params, ${JSON.stringify(p.name)})`,
   );
 
-  // Render the body (guards / assigns / emit / let) — shared with the
-  // returning-op path; a non-returning body never carries a `return` arm.  The
-  // statement index disambiguates per-write provenance temp vars.
-  const bodyLines = op.statements.map((s, i) => renderReturningStmt(s, ctx, rc, i));
+  // S5a: a body that `emit`s a domain event is restructured to persist-then-
+  // dispatch — the `emit`s are hoisted out of the interleaved body and fanned
+  // out (Dispatcher + broadcast) AFTER `persist_change` commits, so no phantom
+  // event fires on a failed write and each event reaches the context Dispatcher
+  // (saga seam), not just the subscriber-less raw broadcast.  A named op always
+  // persists, so the `{:ok, saved}` seam always exists.
+  const emits = opEmitsEvent(op);
+  const hasDispatcher = contextHasDispatcher(ctx as EnrichedBoundedContextIR);
+  const dispatchLines = emits ? renderEmitDispatchLines(op, rc, hasDispatcher, "        ") : [];
+
+  // Render the body (guards / assigns / let) — shared with the returning-op
+  // path; a non-returning body never carries a `return` arm.  The statement index
+  // disambiguates per-write provenance temp vars.  When emitting, the `emit`s are
+  // rendered post-commit (below), not inline.
+  const bodyLines = (emits ? op.statements.filter((s) => s.kind !== "emit") : op.statements).map(
+    (s, i) => renderReturningStmt(s, ctx, rc, i),
+  );
 
   // Persist the fields the body assigned (deduped, declaration order) + the
   // co-located `<field>_provenance` backing columns — shared with the
@@ -580,9 +597,38 @@ function renderNamedOpFunction(
       }),
     );
   }
-  const persist =
-    hasProv || hasAudit
-      ? `    changeset =
+  const dispatchBlock = dispatchLines.join("\n");
+  let persist: string;
+  if (hasProv || hasAudit) {
+    persist = emits
+      ? // Emit + prov/audit: commit the state change (+ derived rows) in the
+        // transaction, then dispatch AFTER commit (outside the tx fn) so a
+        // rollback drops the events too.
+        `    changeset =
+      record
+      |> Ecto.Changeset.change(%{})${putBlock6}
+
+    tx_result =
+      ${appModule}.Repo.transaction(fn ->
+      case ${repoMod}.persist_change(changeset) do
+        {:ok, saved} ->
+${txTail.join("\n")}
+          saved
+
+        {:error, reason} ->
+          ${appModule}.Repo.rollback(reason)
+      end
+    end)
+
+    case tx_result do
+      {:ok, saved} ->
+${dispatchBlock}
+        {:ok, saved}
+
+      {:error, reason} ->
+        {:error, reason}
+    end`
+      : `    changeset =
       record
       |> Ecto.Changeset.change(%{})${putBlock6}
 
@@ -595,10 +641,28 @@ ${txTail.join("\n")}
         {:error, reason} ->
           ${appModule}.Repo.rollback(reason)
       end
-    end)`
+    end)`;
+  } else {
+    persist = emits
+      ? // Emit, no prov/audit: persist then dispatch after `{:ok, saved}` — a
+        // phantom event can no longer fire on a failed write, and the event
+        // reaches the context Dispatcher (saga seam) + the raw broadcast.
+        `    changeset =
+      record
+      |> Ecto.Changeset.change(%{})${putBlock6}
+
+    case ${repoMod}.persist_change(changeset) do
+      {:ok, saved} ->
+${dispatchBlock}
+        {:ok, saved}
+
+      {:error, reason} ->
+        {:error, reason}
+    end`
       : `    record
     |> Ecto.Changeset.change(%{})${putBlock}
     |> ${repoMod}.persist_change()`;
+  }
 
   return `  @doc "Named operation \`${op.name}\` on \`${aggPascal}\` — runs the body, persists the assigned fields."
   @spec ${opSnake}_${aggSnake}(${aggModule}.t(), map()) ::
