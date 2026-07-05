@@ -105,6 +105,11 @@ function AppShellLayout() {
     close();
   }, [location.pathname]);
   return (
+    <>
+      {/* Skip link (WCAG 2.4.1 Bypass Blocks) — first focusable element,
+          visually hidden until focused, jumps to the <main> landmark. */}
+      <a href="#main-content" className="loom-skip-link">Skip to content</a>
+      <style>{`.loom-skip-link{position:absolute;left:-9999px;top:0;z-index:1000;padding:8px 16px;background:var(--mantine-color-body);color:var(--mantine-color-text);border:1px solid var(--mantine-color-default-border);border-radius:4px}.loom-skip-link:focus{left:8px;top:8px}`}</style>
     <AppShell
       header={{ height: 56 }}
       navbar={{ width: 240, breakpoint: "sm", collapsed: { mobile: !opened } }}
@@ -129,7 +134,7 @@ function AppShellLayout() {
           </Group>
         </Group>
       </AppShell.Header>
-      <AppShell.Navbar p="md">
+      <AppShell.Navbar p="md" aria-label="Primary navigation">
         <Stack gap={4} data-testid="nav-sidebar">
           <Divider my="xs" label="Aggregates" labelPosition="left" />
           <NavLink component={RouterLink} to="/products" label="Products" active={isActive("/products")} data-testid="nav-products" />
@@ -144,12 +149,13 @@ function AppShellLayout() {
           <NavLink component={RouterLink} to="/views/order_summary" label="Order Summary" active={isActive("/views/order_summary")} data-testid="nav-view-order_summary" />
         </Stack>
       </AppShell.Navbar>
-      <AppShell.Main>
+      <AppShell.Main id="main-content">
         <AppErrorBoundary>
           <Outlet />
         </AppErrorBoundary>
       </AppShell.Main>
     </AppShell>
+    </>
   );
 }
 
