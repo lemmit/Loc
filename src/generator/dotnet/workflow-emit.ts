@@ -2,6 +2,7 @@ import { createInputFields, createOmissionValue } from "../../ir/enrich/wire-pro
 import {
   type AggregateIR,
   type EnrichedBoundedContextIR,
+  type EventSubscriptionIR,
   type ExprIR,
   operationUsesCurrentUser,
   type SystemIR,
@@ -10,6 +11,15 @@ import {
   workflowIsGuarded,
   workflowUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
+
+/** The resolved body of one subscription (the `on` reactor or event-`create`
+ *  starter): its statements, aggregate saves, and correlation routing expr. */
+type ResolvedWorkflowBody = {
+  statements: WorkflowStmtIR[];
+  saves: { name: string; aggName: string; repoName: string }[];
+  correlation: ExprIR | undefined;
+};
+
 import { durableEventTypes } from "../../ir/util/channels.js";
 import { readPortsForOperation } from "../../ir/util/domain-service-read-ports.js";
 import { errorStatuses } from "../../ir/util/openapi-errors.js";
@@ -226,27 +236,74 @@ export function emitDispatchHandlers(
   sys: SystemIR | undefined,
 ): void {
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
-  for (const sub of ctx.eventSubscriptions) {
-    const wf = ctx.workflows.find((w) => w.name === sub.workflow);
-    if (!wf) continue;
-    let statements: WorkflowStmtIR[];
-    let saves: { name: string; aggName: string; repoName: string }[];
-    let correlation: ExprIR | undefined;
+  // Event-sourced saga double-append (S5b): when an event-sourced workflow has
+  // BOTH an `on` reactor and an event-`create` starter for the SAME event, the
+  // two `INotificationHandler` classes fan out in unspecified Mediator order —
+  // a start-first-on-a-new-stream ordering double-appends.  Merge them into ONE
+  // handler that reads the stream once and branches (empty → create-logic,
+  // non-empty → on-logic).  Non-ES workflows and events without both an `on` and
+  // a `create` stay two independent handlers (byte-identical).
+  const isMergedEsEvent = (wf: WorkflowIR, event: string): boolean =>
+    !!wf.eventSourced &&
+    (wf.subscriptions ?? []).some((o) => o.event === event) &&
+    wf.creates.some((c) => c.triggerKind === "event" && c.eventRef === event && !!c.eventBinding);
+
+  const resolveSub = (
+    wf: WorkflowIR,
+    sub: EventSubscriptionIR,
+  ): {
+    statements: WorkflowStmtIR[];
+    saves: { name: string; aggName: string; repoName: string }[];
+    correlation: ExprIR | undefined;
+  } | null => {
     if (sub.trigger === "on") {
       const on = (wf.subscriptions ?? []).find(
         (o) => o.event === sub.event && o.param === sub.param,
       );
-      if (!on) continue;
-      statements = on.statements;
-      saves = on.savesAtExit;
-      correlation = on.correlation;
-    } else {
-      const cr = wf.creates.find((c) => c.eventRef === sub.event && c.eventBinding === sub.param);
-      if (!cr) continue;
-      statements = cr.statements;
-      saves = cr.savesAtExit;
-      correlation = cr.correlation;
+      return on
+        ? { statements: on.statements, saves: on.savesAtExit, correlation: on.correlation }
+        : null;
     }
+    const cr = wf.creates.find((c) => c.eventRef === sub.event && c.eventBinding === sub.param);
+    return cr
+      ? { statements: cr.statements, saves: cr.savesAtExit, correlation: cr.correlation }
+      : null;
+  };
+
+  for (const sub of ctx.eventSubscriptions) {
+    const wf = ctx.workflows.find((w) => w.name === sub.workflow);
+    if (!wf) continue;
+    if (isMergedEsEvent(wf, sub.event)) {
+      // Render the merged handler once (on the `create` sub); drop the `on` sub
+      // (its logic is the else-branch).
+      if (sub.trigger !== "create") continue;
+      const createResolved = resolveSub(wf, sub);
+      const onSub = ctx.eventSubscriptions.find(
+        (s) => s.workflow === sub.workflow && s.event === sub.event && s.trigger === "on",
+      );
+      const onResolved = onSub ? resolveSub(wf, onSub) : null;
+      if (!createResolved || !onSub || !onResolved) continue;
+      const className = `${upperFirst(wf.name)}On${upperFirst(sub.event)}Handler`;
+      out.set(
+        `Application/Workflows/${className}.cs`,
+        renderMergedEventSourcedHandler(
+          className,
+          wf,
+          sub.event,
+          sub,
+          createResolved,
+          onSub,
+          onResolved,
+          aggsByName,
+          ns,
+          ctx,
+          sys,
+        ),
+      );
+      continue;
+    }
+    const resolved = resolveSub(wf, sub);
+    if (!resolved) continue;
     const className = `${upperFirst(wf.name)}${sub.trigger === "on" ? "On" : "Start"}${upperFirst(sub.event)}Handler`;
     out.set(
       `Application/Workflows/${className}.cs`,
@@ -256,9 +313,9 @@ export function emitDispatchHandlers(
         sub.trigger,
         sub.event,
         sub.param,
-        correlation,
-        statements,
-        saves,
+        resolved.correlation,
+        resolved.statements,
+        resolved.saves,
         aggsByName,
         ns,
         ctx,
@@ -612,6 +669,246 @@ ${fields.join("\n")}
 ${ctor}
 
     public ${isAsync ? "async " : ""}ValueTask Handle(${eventName} notification, CancellationToken cancellationToken)
+    {
+${body}    }
+}
+`;
+}
+
+/** The append + re-publish tail for ONE branch of a merged event-sourced saga
+ *  handler: the emit-list decl, the body against the shared folded `state`, the
+ *  aggregate saves, then the gap-free own-event stream append + SaveChanges +
+ *  re-dispatch.  Stream load + fold are shared across branches, so they are NOT
+ *  emitted here.  Rendered at the 8-space base; the caller indents each branch
+ *  a further level inside its `if`/`else` block. */
+function renderCsEsBranch(
+  wf: WorkflowIR,
+  resolved: ResolvedWorkflowBody,
+  paramName: string,
+  aggsByName: Map<string, AggregateIR>,
+  ctx: EnrichedBoundedContextIR,
+  sys: SystemIR | undefined,
+  usings: Set<string>,
+  ns: string,
+  auditsOps: boolean,
+): string[] {
+  const usage = analyseStmts(resolved.statements, resolved.saves, aggsByName);
+  const resourceClasses = buildResourceClasses(sys);
+  const renderArg = (e: ExprIR): string => {
+    collectCsExprUsings(e, usings, ns);
+    return renderExprWithEventParam(e, paramName, resourceClasses, "state");
+  };
+  const lines: string[] = [];
+  if (usage.hasEmit) lines.push("        var _workflowEvents = new List<IDomainEvent>();");
+  lines.push(
+    ...renderWorkflowStmts(
+      resolved.statements,
+      csWorkflowStmtTarget(ctx, renderArg, true, auditsOps),
+      INDENT,
+    ),
+  );
+  for (const save of resolved.saves) {
+    const fieldName = `_${save.repoName.charAt(0).toLowerCase() + save.repoName.slice(1)}`;
+    lines.push(`        await ${fieldName}.SaveAsync(${save.name}, cancellationToken);`);
+  }
+  if (usage.hasEmit) {
+    const dbSet = esEventDbSet(wf);
+    const recordCls = esEventRecordClass(wf);
+    const stateCls = workflowStateClass(wf);
+    lines.push(
+      `        var __version = await _db.${dbSet}.Where(e => e.StreamId == __sid).Select(e => (int?)e.Version).MaxAsync(cancellationToken) ?? 0;`,
+      "        foreach (var __ev in _workflowEvents)",
+      "        {",
+      "            __version++;",
+      `            _db.${dbSet}.Add(new ${recordCls}`,
+      "            {",
+      "                StreamId = __sid,",
+      "                Version = __version,",
+      "                Type = __ev.GetType().Name,",
+      `                Data = ${stateCls}.ToData(__ev),`,
+      "                OccurredAt = DateTime.UtcNow,",
+      "            });",
+      "        }",
+      "        await _db.SaveChangesAsync(cancellationToken);",
+      "        foreach (var ev in _workflowEvents)",
+      "            await _events.DispatchAsync(ev, cancellationToken);",
+    );
+  }
+  return lines;
+}
+
+/** The merged event-sourced saga handler (S5b): one `INotificationHandler` that
+ *  reads the `<wf>_events` stream ONCE and branches — empty stream → the
+ *  `create` starter body, non-empty → the `on` reactor body — so exactly one of
+ *  the two appends regardless of Mediator's notification fan-out order.
+ *  Replaces the two independent `On…`/`Start…` handler classes that otherwise
+ *  double-append.  Emitted only for an event with BOTH an `on` and an
+ *  event-`create` on the same event-sourced workflow. */
+function renderMergedEventSourcedHandler(
+  className: string,
+  wf: WorkflowIR,
+  eventName: string,
+  createSub: EventSubscriptionIR,
+  createResolved: ResolvedWorkflowBody,
+  onSub: EventSubscriptionIR,
+  onResolved: ResolvedWorkflowBody,
+  aggsByName: Map<string, AggregateIR>,
+  ns: string,
+  ctx: EnrichedBoundedContextIR,
+  sys: SystemIR | undefined,
+): string {
+  const mergedStatements = [...createResolved.statements, ...onResolved.statements];
+  const mergedSaves = [...createResolved.saves, ...onResolved.saves];
+  const usage = analyseStmts(mergedStatements, mergedSaves, aggsByName);
+  const usings = new Set<string>();
+
+  // Field declarations + ctor for injected dependencies (union of both branches).
+  const fields: string[] = [];
+  const ctorParamPairs: string[] = [];
+  const ctorAssigns: string[] = [];
+  for (const [repoName, aggName] of usage.repos.entries()) {
+    const fieldName = `_${repoName.charAt(0).toLowerCase() + repoName.slice(1)}`;
+    fields.push(`    private readonly I${aggName}Repository ${fieldName};`);
+    ctorParamPairs.push(`I${aggName}Repository ${fieldName.replace(/^_/, "")}`);
+    ctorAssigns.push(`${fieldName} = ${fieldName.replace(/^_/, "")}`);
+  }
+  if (usage.hasEmit) {
+    fields.push("    private readonly IDomainEventDispatcher _events;");
+    ctorParamPairs.push("IDomainEventDispatcher events");
+    ctorAssigns.push("_events = events");
+  }
+  for (const ext of usage.externs.values()) {
+    const ifaceName = `I${upperFirst(ext.opName)}${ext.aggName}Handler`;
+    const fieldName = `_${ext.opName}${ext.aggName}Handler`;
+    fields.push(`    private readonly ${ifaceName} ${fieldName};`);
+    ctorParamPairs.push(`${ifaceName} ${fieldName.replace(/^_/, "")}`);
+    ctorAssigns.push(`${fieldName} = ${fieldName.replace(/^_/, "")}`);
+  }
+  const auditAggs = new Set<string>();
+  const collectAuditAggs = (sts: WorkflowStmtIR[]): void => {
+    for (const s of sts) {
+      if (s.kind === "op-call") {
+        const o = ctx.aggregates
+          .find((a) => a.name === s.aggName)
+          ?.operations.find((x) => x.name === s.op);
+        if (o?.audited && !o.extern) auditAggs.add(s.aggName);
+      } else if (s.kind === "for-each") collectAuditAggs(s.body);
+    }
+  };
+  collectAuditAggs(mergedStatements);
+  const auditsOps = auditAggs.size > 0;
+  if (auditsOps) {
+    fields.push("    private readonly IAuditWriter _audit;");
+    ctorParamPairs.push("IAuditWriter audit");
+    ctorAssigns.push("_audit = audit");
+    usings.add(`${ns}.Application.Common`);
+    usings.add(`${ns}.Infrastructure.Persistence`);
+    for (const aggName of auditAggs) usings.add(`${ns}.Application.${plural(aggName)}.Responses`);
+  }
+  fields.push(`    private readonly global::${ns}.Infrastructure.Persistence.AppDbContext _db;`);
+  ctorParamPairs.push(`global::${ns}.Infrastructure.Persistence.AppDbContext db`);
+  ctorAssigns.push("_db = db");
+  usings.add("Microsoft.EntityFrameworkCore");
+  usings.add(`${ns}.Infrastructure.Persistence.Events`);
+  usings.add("System");
+  usings.add("System.Linq");
+
+  const resourceClasses = buildResourceClasses(sys);
+  const usesResourceOp = mergedStatements.some((st) => {
+    const call =
+      st.kind === "resource-call" ? st.call : st.kind === "expr-let" ? st.expr : undefined;
+    return call?.kind === "call" && call.callKind === "resource-op";
+  });
+  if (resourceClasses.size > 0 && usesResourceOp) usings.add(`${ns}.Resources`);
+
+  const corr = wf.correlationField as string;
+  const corrPascal = upperFirst(corr);
+  const keyExpr = createResolved.correlation
+    ? renderExprWithEventParam(createResolved.correlation, createSub.param, resourceClasses)
+    : `notification.${corrPascal}`;
+  if (createResolved.correlation) collectCsExprUsings(createResolved.correlation, usings, ns);
+  const dbSet = esEventDbSet(wf);
+  const stateCls = workflowStateClass(wf);
+
+  const createBranch = renderCsEsBranch(
+    wf,
+    createResolved,
+    createSub.param,
+    aggsByName,
+    ctx,
+    sys,
+    usings,
+    ns,
+    auditsOps,
+  );
+  const onBranch = renderCsEsBranch(
+    wf,
+    onResolved,
+    onSub.param,
+    aggsByName,
+    ctx,
+    sys,
+    usings,
+    ns,
+    auditsOps,
+  );
+
+  const bodyLines: string[] = [
+    `        var __key = ${keyExpr};`,
+    "        var __sid = __key.Value.ToString();",
+    `        var __rows = await _db.${dbSet}.Where(e => e.StreamId == __sid).OrderBy(e => e.Version).ToListAsync(cancellationToken);`,
+    `        var state = ${stateCls}._FromEvents(__key, __rows.Select(${stateCls}.RowToEvent).ToList());`,
+    "        if (__rows.Count == 0)",
+    "        {",
+    ...createBranch.map((l) => `    ${l}`),
+    "        }",
+    "        else",
+    "        {",
+    ...onBranch.map((l) => `    ${l}`),
+    "        }",
+  ];
+  const body = bodyLines.join("\n") + "\n";
+
+  const ctor =
+    ctorParamPairs.length === 0
+      ? `    public ${className}() { }`
+      : `    public ${className}(${ctorParamPairs.join(", ")})\n    {\n        ${ctorAssigns.join("; ")};\n    }`;
+
+  const aggsTouched = new Set<string>([
+    ...usage.repos.values(),
+    ...[...usage.externs.values()].map((e) => e.aggName),
+  ]);
+  const aggUsings = [
+    ...new Set([...aggsTouched].map((agg) => `using ${ns}.Domain.${plural(agg)};`)),
+  ];
+  const externUsings = [
+    ...new Set(
+      [...usage.externs.values()].flatMap((e) => [
+        `using ${ns}.Application.${plural(e.aggName)}.Handlers;`,
+        `using ${ns}.Application.${plural(e.aggName)}.Requests;`,
+      ]),
+    ),
+  ];
+  const extraUsings = [...usings].sort().map((n) => `using ${n};`);
+  return `// Auto-generated.
+using System.Threading;
+using System.Threading.Tasks;${extraUsings.length > 0 ? "\n" + extraUsings.join("\n") : ""}
+using Mediator;
+using ${ns}.Domain.Common;
+using ${ns}.Domain.Events;
+using ${ns}.Domain.Ids;
+using ${ns}.Domain.ValueObjects;
+using ${ns}.Domain.Enums;
+${aggUsings.join("\n")}${externUsings.length > 0 ? "\n" + externUsings.join("\n") : ""}
+
+namespace ${ns}.Application.Workflows;
+
+public sealed class ${className} : INotificationHandler<${eventName}>
+{
+${fields.join("\n")}
+${ctor}
+
+    public async ValueTask Handle(${eventName} notification, CancellationToken cancellationToken)
     {
 ${body}    }
 }
