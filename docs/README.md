@@ -12,7 +12,7 @@ section that matches what you need.
 | [`language.md`](language.md) | You're writing or reading `.ddd` source.  Declarations, types, expressions, statements, validation rules. |
 | [`page-metamodel.md`](page-metamodel.md) | You're writing `ui` / `page` / `component` blocks. |
 | [`architecture.md`](architecture.md) | You want to know how `module`, `deployable`, `api`, `storage`, and `ui` compose into a runnable system. |
-| [`tools.md`](tools.md) | You're using the `ddd` CLI, `.loomignore`, watch mode, the docker workflow, or the OpenAPI parity check. |
+| [`tools.md`](tools.md) | You're using the `ddd` CLI (`generate`, `verify`, `snapshot`, `patch`, `trace`), `.loomignore`, watch mode, the docker workflow, or the OpenAPI parity check. |
 | [`generators.md`](generators.md) | You want to know exactly what each backend (Hono, .NET, Phoenix LiveView, Java, Python) or frontend (React, Vue, Svelte, Angular) emits for a given DSL construct. |
 | [`kubernetes.md`](kubernetes.md) | You want to deploy the generated system to a cluster — the opt-in `generate system --k8s` Helm chart + raw manifests. |
 | [`playground.md`](playground.md) | You want to know what the browser playground is — the typed editor, visual builders, live preview, and in-browser PGlite test runner at lemmit.github.io/Loc/playground. |
@@ -32,7 +32,7 @@ These cover a single language feature each.  Each one is self-contained.
 | [`resources.md`](resources.md) | `storage` / `resource`, source types, the `objectStore` / `queue` / `api` kinds, the `config` map, and workflow-level resource consumption (`files.put`, `jobs.enqueue`, `rates.get`). |
 | [`extern.md`](extern.md) | `extern` operations and their per-backend handler registries. |
 | [`criterion.md`](criterion.md) | `criterion` — reusable named predicate specifications, shared across queries, validation, and permissions. |
-| [`capabilities.md`](capabilities.md) | `filter`, `stamp`, `implements` — cross-aggregate behaviours like soft-delete and audit. |
+| [`capabilities.md`](capabilities.md) | `filter`, `stamp`, `implements` — cross-aggregate behaviours like soft-delete, audit, tenant-ownership, and optimistic concurrency (`versioned`). |
 | [`tenancy.md`](tenancy.md) | Multi-tenancy — `tenancy by user.<claim> of <Registry>`, the `tenantOwned` capability, `crossTenant`, and the explicit-stance rule. |
 | [`domain-services.md`](domain-services.md) | `domainService` — stateless cross-aggregate pure calculators, the no-infra contract, and per-backend emission. |
 | [`scaffold-macros.md`](scaffold-macros.md) | The `scaffold`, `crudish`, `audit`, and `softDelete` macros — what they expand to. |
@@ -58,7 +58,7 @@ These cover a single language feature each.  Each one is self-contained.
 | [`technical.md`](technical.md) | The canonical pipeline reference — the ten phases from `.ddd` to disk.  Read this before extending the language or adding a backend. |
 | [`testing.md`](testing.md) | The test-tier placement guide — given a change, which tier proves it and where a new test belongs (fast vitest vs behavioral api/unit/ui vs per-backend build vs conformance vs playground e2e). |
 | [`macro-api.md`](macro-api.md) | You're authoring a macro (stdlib or project-local).  Covers `defineMacro`, parameter types, the factory surface, composability rules. |
-| [`loom-artifacts.md`](loom-artifacts.md) | The `.loom/` output directory — wire-spec, mermaid + C4 diagrams, traceability files, verification, snapshots.  What each artefact is and which CLI command produces it. |
+| [`loom-artifacts.md`](loom-artifacts.md) | The `.loom/` output directory — wire-spec, mermaid + C4 diagrams, traceability files, verification, snapshots, and the opt-in `sourcemap.json` (`ddd trace`).  What each artefact is and which CLI command produces it. |
 | [`api-toolkit.md`](api-toolkit.md) | The transport-neutral `src/api/` toolkit (`validate` / `generate` / `outline` / `applyPatches` + nav/refactor) and the `src/diagnostics/contract.ts` wire shapes — one browser-safe core behind the CLI, MCP, LSP, and playground. |
 | [`mcp.md`](mcp.md) | The MCP stdio server (`ddd-mcp`) + the transport-neutral `loom_*` agent-tool catalog — the three-layer tools/api/mcp stack and how to wire it into an MCP host. |
 

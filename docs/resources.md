@@ -92,6 +92,26 @@ The validator rejects a `kind` on an incompatible sourceType
 are modelled internally as capabilities under a `database` infra-kind; that
 reframe stays inside the registry — the surface keeps the fine-grained names.
 
+### Manual indexes — `index: [...]`
+
+A `state`/`replica` resource may declare **manual performance indexes** — pure
+infrastructure, never on the aggregate (uniqueness stays the domain `unique (...)`
+invariant; these are non-unique). Each entry names the entity **explicitly** —
+`Entity.col` is single-column, `Entity.(a, b)` composite — because the binding
+knows the context's shape, so the index says which entity's table it's on (an
+aggregate *or* one of its contained parts):
+
+```ddd
+resource ordersDb {
+  for: Orders, kind: state, use: primarySql, schema: "orders",
+  index: [Order.customerId, Order.(status, placedAt)]
+}
+```
+
+These feed `manualIndexes` in the IR and land as `CREATE INDEX` in the derived
+migration. The advisory lint `loom.index-suggestion` (D-INDEX-SUGGEST) flags
+frequently-filtered columns that have no covering index — a hint to add one here.
+
 ## Consuming a resource from a workflow
 
 `objectStore` / `queue` / `api` resources are *used*, not persisted to. A

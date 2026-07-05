@@ -330,7 +330,8 @@ is retired.  Embedded (`put_embed`) output stays byte-identical.
 1. **Part-in-part nesting** (a part that itself declares `contains`) on a relational
    owner — the shared `tableForPart` migration emits no child table for a part's own
    containments, so there's no backing storage. Stays `loom.vanilla-containment-unsupported`.
-   (`shape(document)` containments stay gated too.)
+   (`shape(document)` containments were **un-gated** by Route A slice 4 — `embeds_many` +
+   a shared serializer; `system-checks.ts` now skips the gate for `document`/`embedded` shapes.)
 
 ### 11d. Pure-domain-core `requires currentUser` threading — **CLOSED**
 

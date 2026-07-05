@@ -211,7 +211,7 @@ order:
 | --- | --- |
 | `enum Name { A, B, C }` | Closed enumeration; values are referenced bare. |
 | `valueobject Name { … }` | Immutable record with optional invariants and derived members. |
-| `aggregate Name [ids guid] [persistedAs(eventLog\|state)] [shape(relational\|embedded\|document)] { … }` | Aggregate root with implicit `Name id` field (always a `guid`; `ids guid` is an optional explicit spelling — `ids int\|long\|string` were removed, see the identity note below).  Header modifiers (D-DOCUMENT-AXIS): `persistedAs(…)` picks the primary truth kind (default `state`); `shape(…)` picks the saving shape (default `relational`) — how the hierarchy is laid out physically: **`relational`** = table-per-entity; **`embedded`** = queryable root row + contained parts folded into one JSONB column (EF owned `.ToJson()` / Drizzle jsonb / Ecto embedded schemas); **`document`** = the whole aggregate as one opaque JSONB blob (`id, data, version`).  Emitted on all backends for `relational`/`embedded`; `document` on `dotnet`, `node`, `python`, and `java` (elixir is relational/embedded only) (a `shape(…)` a backend can't emit is a validation error — see `supportedShapes`). |
+| `aggregate Name [ids guid] [persistedAs(eventLog\|state)] [shape(relational\|embedded\|document)] { … }` | Aggregate root with implicit `Name id` field (always a `guid`; `ids guid` is an optional explicit spelling — `ids int\|long\|string` were removed, see the identity note below).  Header modifiers (D-DOCUMENT-AXIS): `persistedAs(…)` picks the primary truth kind (default `state`); `shape(…)` picks the saving shape (default `relational`) — how the hierarchy is laid out physically: **`relational`** = table-per-entity; **`embedded`** = queryable root row + contained parts folded into one JSONB column (EF owned `.ToJson()` / Drizzle jsonb / Ecto embedded schemas); **`document`** = the whole aggregate as one opaque JSONB blob (`id, data, version`).  Emitted on all backends for `relational`/`embedded`; `document` on all five backends — `dotnet`, `node`, `python`, `java`, and `elixir` (Route A — plain Phoenix persists the aggregate as a typed `embeds_one` embed) (a `shape(…)` a backend can't emit is a validation error — see `supportedShapes`). |
 | `event Name { field: Type, … }` | Flat record raised via `emit`. |
 | `repository Name for Aggregate { find … }` | Repository declaration with optional find queries. |
 
@@ -897,6 +897,9 @@ Warnings (non-fatal):
   in its context (`loom.reactor-channel-ambiguous`): in-process dispatch records
   the first channel by declaration order, so the binding is ambiguous — carry
   the event on a single channel to keep routing explicit.
+- A frequently-filtered column with no covering index (`loom.index-suggestion`,
+  D-INDEX-SUGGEST): advisory only — add a manual `resource index: [...]` if the
+  access pattern warrants it. See [`resources.md`](resources.md).
 
 ---
 

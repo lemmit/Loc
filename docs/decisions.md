@@ -2045,3 +2045,44 @@ deduplication when a capability is reused (`typed-capabilities.md` OQ#1).
 **Affects.** `typed-capabilities.md` (canonical); `../capabilities.md` (evolves
 its mechanism); `multi-tenancy-design-note.md` (`tenantOwned`/`tenantRegistry`
 are capabilities).
+
+---
+
+## D-INDEX-INFRA — manual performance indexes live on the storage binding, not the aggregate
+
+**Status:** PINNED.
+
+**Problem.** Domain uniqueness is a `unique (...)` invariant on the aggregate, but
+a plain **performance** index (speed up a frequent filter) has no domain meaning —
+putting it on the aggregate conflates infrastructure with the model.
+
+**Decision.** A performance index is declared on the `resource` binding via
+`index: [Entity.col, Entity.(a, b)]` (grammar `IndexSpec`). It is **pure
+infrastructure** and always **non-unique** (uniqueness stays the domain
+invariant). The target entity is named **explicitly** (`Project.name`), never
+inferred from which table owns the column — the binding knows the context's shape,
+and the entity may be an aggregate *or* a contained part. Lowers to `manualIndexes`
+in the IR and lands as `CREATE INDEX` in the derived migration.
+
+**Affects.** `uniqueness-and-indexes.md` §3.2 (canonical); `../resources.md`
+(surface); `../migrations.md`.
+
+---
+
+## D-INDEX-SUGGEST — index suggestions are an advisory lint, not an auto-emitted index
+
+**Status:** PINNED.
+
+**Problem.** Loom can see which columns get filtered frequently (find predicates,
+FK-shaped reads), so it *could* auto-create covering indexes. But silently
+emitting indexes hides a cost (write amplification, storage) the author never
+chose, and an index is an ops decision.
+
+**Decision.** Loom does **not** auto-emit performance indexes. It emits an
+**advisory warning** — `loom.index-suggestion` (`validateIndexSuggestions`,
+`src/ir/validate/checks/index-suggestion-checks.ts`) — pointing at a
+frequently-filtered column with no covering index, and the author opts in via the
+manual `index:` hatch (D-INDEX-INFRA). Advisory, never an error; never changes
+emitted schema on its own.
+
+**Affects.** `uniqueness-and-indexes.md` §11 (canonical); `../resources.md`.

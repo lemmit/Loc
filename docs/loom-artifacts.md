@@ -31,6 +31,7 @@ consumption.
     ├── gaps.md
     ├── verification.json        # written by `ddd verify`
     ├── verification.md          # written by `ddd verify`
+    ├── sourcemap.json           # opt-in, only under `generate system --sourcemap`
     └── snapshots/
         ├── <Subdomain>.snapshot.json                  # migration baselines
         └── <ts>-<guid>.loomsnap.json               # provenance rule captures
@@ -93,6 +94,19 @@ populates these.
 Migration snapshots are derived from the IR and written on every
 regen.  Provenance snapshots are only written by the explicit
 `ddd snapshot` sub-command — never by `generate`.
+
+## Source map (opt-in)
+
+`sourcemap.json` is the one artifact **not** written by default — it lands only
+when `generate system` is passed `--sourcemap`.  Emitted by `src/system/sourcemap.ts`
+from an `Origin` spine that all five backends thread through their emitters, it maps
+each generated line back to the `.ddd` construct — and, for operation bodies, the
+`.ddd` statement — it came from, at both construct and statement granularity.
+
+Its consumer is `ddd trace <logfile>`: given a runtime stack-trace from a generated
+backend, it rewrites each frame to point at the originating `.ddd` source line, so a
+failure in the generated code reads against the model the author actually wrote.  See
+[`tools.md`](tools.md) for the CLI.
 
 ## What `.loom/` is NOT
 
