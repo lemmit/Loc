@@ -32,7 +32,7 @@ stack.
 |---|---|---|
 | RST-1 (RS-9 status assert) | grammar? + `test e2e` lower + `_frontend/e2e-harness.ts` + both runners | RST-2/3/4/5 (disjoint) — **not** RST-7/8 (share the fixtures) |
 | RST-2 (.NET tier) | `run-dotnet.mjs` (new) + corpus + new workflow | everything (new files) |
-| RST-3 (Java tier) | `run-java.mjs` (new) + corpus + new workflow | everything (new files) |
+| RST-3 (Java tier) ✅ | `run-java.mjs` (new) + corpus + new workflow | everything (new files) |
 | RST-4 (make python required) | branch protection / CI meta | everything |
 | RST-5 (semantics-spec artifact) | `src/system/` + `.loom` bundle | everything |
 | RST-6 (python unit tier) | `run-python.mjs` (+ maybe a sibling) | RST-2/3/4/5 — coordinate with RST-1 if it edits run-python |
@@ -101,10 +101,28 @@ agents; they only collide on this doc's status table.
 - **DoD.** New runner + fixture + workflow; RS-1/4/6/7/8 tier notes add `dotnet`;
   scoping-note "v2" bullet ticked.
 
-### RST-3 · Add Java as a behavioral backend  ·  L
+### RST-3 · Add Java as a behavioral backend  ·  L  ·  ✅ LANDED
+- **Landed:** `test/behavioral/run-java.mjs` (mirrors `run-dotnet.mjs`),
+  `test/behavioral/corpus-java/sales.ddd` + `corpus-java.json` (the .NET fixture
+  retargeted to `platform: java`), and `behavioral-e2e-java.yml` (a
+  `services: postgres` sidecar + JDK 21/temurin + Gradle, building `gradle
+  bootJar` and booting `java -jar` against `SPRING_DATASOURCE_URL`). The
+  live-boot round-trip runs in CI only; the emitted api e2e is HTTP-dispatched at
+  the booted Java backend via the same `loadApiTests({dispatch})` seam.
+- **First run found a real bug (as predicted).** The Java tier booted, migrated,
+  and ran the e2e — and **every customer create 400'd** (`Malformed request
+  body`) because the create body OMITS `active` (a `= true`-defaulted field) and
+  the generated Spring create DTO rejects the omitted field, where node/python
+  apply the declared default. **Same class as the Python bug #1684** (RS-6).
+  Tracked as **RST-10**; the Java fixture now sends `active` explicitly to
+  exercise the other rules, and the RS-6 omitted-default check is deferred on
+  Java. RS-4 (`placedAt`) is kept — the re-run reveals whether Java also diverges
+  on the instant format like .NET (RST-9); if so, defer it too.
 - Sibling of RST-2 on Java. Boot recipe from `java-obs-e2e.yml` (JDK 21 + gradle
   `bootJar` → `java -jar`, host-runnable — no SDK container). Same seam, same
-  DoD. Give to a *different* agent than RST-2; they don't collide.
+  DoD.
+- **DoD.** New runner + fixture + workflow; RS-1/4/6/7/8 tier notes add `java`
+  once the first CI run confirms conformance (RS-4 pending the run's verdict).
 
 ### RST-4 · Make `behavioral-e2e-python` a required check  ·  S
 - **Why.** It has 3 green runs (#1679/#1681/#1684); it's still non-blocking, so a
@@ -183,6 +201,27 @@ agents; they only collide on this doc's status table.
 - **Collision:** `src/generator/dotnet/` + the .NET fixture. Same pattern as
   #1681/#1684 (gate found a bug → fix → widen).
 
+### RST-10 · Java create DTO honors an omitted bool default (found by RST-3)  ·  S–M
+- **Why.** RST-3's first CI run found it: the generated Spring Boot create DTO
+  **400s** (`Malformed request body`) on a create body that OMITS `active` — a
+  field with a `= true` default — where node/python apply the declared default
+  and echo it back. Same class as the Python bug #1684 (RS-6, bool create
+  default). The Java create request record makes the defaulted field required
+  (non-nullable / no Jackson default), so Jackson rejects the omitted key.
+- **Scope.** In the Java generator (`src/generator/java/`), make a create-DTO
+  field that carries a declared default **optional at the wire boundary** and
+  apply the declared default when the key is absent (mirror what the Python fix
+  #1684 did in `requestFieldDecl`, and what node already does) — likely the
+  create request record + its `@JsonProperty`/constructor mapping into the
+  domain factory. Verify with `gradle testClasses bootJar` + the
+  `behavioral-e2e-java` round-trip.
+- **Then:** restore the omitted-`active` create in `corpus-java/sales.ddd` (drop
+  the explicit `active: true` from the multi-word-key test, assert `active`
+  reads back `true`), and flip RS-6 `conforms` to include `java` in
+  `semantics-rules.ts` + `conformance-semantics.md`.
+- **Collision:** `src/generator/java/` + the Java fixture. Same pattern as
+  #1681/#1684/RST-9 (gate found a bug → fix → widen).
+
 ---
 
 ## Suggested wave assignment (for a batch of agents)
@@ -207,6 +246,15 @@ registry is the source of truth — keep the three in lockstep).
   (`dotnet run`, `ConnectionStrings__Default`) and HTTP-dispatches the same
   backend-agnostic emitted api e2e — the runtime-semantics RS-rules' third
   behavioral backend (node + Python + .NET).
+- **RST-3** (Java behavioral backend) — ✅ (pending first CI run)
+  `test/behavioral/run-java.mjs` + `corpus-java/` + `corpus-java.json` +
+  `.github/workflows/behavioral-e2e-java.yml`. Boots the generated Java (Spring
+  Boot + JPA) backend against a `services: postgres` sidecar (`gradle bootJar` +
+  `java -jar`, `SPRING_DATASOURCE_URL`) and HTTP-dispatches the same
+  backend-agnostic emitted api e2e — the runtime-semantics RS-rules' fourth
+  behavioral backend (node + Python + .NET + Java). Keeps the RS-4 `placedAt`
+  assertion (unlike .NET/RST-9); the first CI run reveals whether Java conforms
+  to RS-4 or needs the same defer.
 - **RST-5** (diffable spec artifact) — ✅ `test/conformance/semantics-spec.json`,
   a committed diffable mirror of `SEMANTICS_RULES` derived by
   `serializeSemanticsSpec()` and gated by `semantics-spec-sync.test.ts`

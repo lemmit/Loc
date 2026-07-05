@@ -1,0 +1,114 @@
+name: Behavioral e2e — Java (Spring Boot + JPA)
+
+# RST-3 — the behavioral tier's FOURTH backend. The node tier
+# (behavioral-e2e.yml) boots Hono in-process on PGlite; Java has no
+# in-process Postgres, so this boots the GENERATED Java backend as a real
+# process against a `services: postgres` sidecar and HTTP-dispatches the SAME
+# emitted `test e2e` api suite at it (the emitted suite is backend-agnostic —
+# written against the HTTP contract).
+#
+# This moves the *behavioral* runtime-semantics RS-rules
+# (docs/conformance-semantics.md) onto a FOURTH backend per-PR: camelCase keys
+# both directions (RS-1), enum declared casing (RS-2), no leaked columns
+# (RS-3), temporal round-trip (RS-4), bool create default (RS-6), value-object
+# survival (RS-7), association round-trip (RS-8). See
+# docs/plans/runtime-semantics-tier-followups.md (RST-3).
+#
+# Reuses the proven boot recipe from java-obs-e2e.yml (gradle bootJar +
+# java -jar against SPRING_DATASOURCE_URL) and the harness wiring from
+# behavioral-e2e-dotnet.yml.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'bin/**'
+      - 'web/src/testing/**'
+      - 'test/behavioral/**'
+      - 'package.json'
+      - '.github/workflows/behavioral-e2e-java.yml'
+  pull_request:
+    paths:
+      - 'src/ir/**'
+      - 'src/generator/java/**'
+      - 'src/generator/_expr/**'
+      - 'src/platform/java.ts'
+      - 'web/src/testing/**'
+      - 'test/behavioral/**'
+      - '.github/workflows/behavioral-e2e-java.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  behavioral-java:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Spring Boot's native datasource env vars. Point at the postgres sidecar
+      # above (POSTGRES_DB: app).
+      SPRING_DATASOURCE_URL: jdbc:postgresql://127.0.0.1:5432/app
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      # Pre-warm the Gradle caches. Without this every run pays the full cold
+      # dependency resolution. Key tracks the Java emitter's build source so a
+      # dep-set change mints a fresh entry.
+      - name: Cache Gradle packages
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-behavioral-${{ hashFiles('src/generator/java/emit/program.ts') }}
+          restore-keys: |
+            gradle-behavioral-
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Build toolchain
+        run: npm run build
+
+      - name: Install behavioral harness deps
+        working-directory: test/behavioral
+        run: npm ci || npm install --no-audit --no-fund
+
+      - name: Run Java behavioral tier (api gate, real Postgres)
+        working-directory: test/behavioral
+        run: node run-java.mjs
