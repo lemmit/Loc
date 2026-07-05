@@ -157,7 +157,29 @@ is the read side and can be sequenced after P2.1–P2.3 land the write side.
 **Gate:** the full language-feature checklist (grammar → IR → validate → 5
 backends → tests), per `docs/technical.md`.
 
-### P2.5 — materialized-path index (perf, non-blocking)
+### P2.5 — materialized-path index + `global` root-subtree widening — SHIPPED
+
+> **Shipped — closes multi-tenancy Phase 2.** Two parts:
+>
+> **Part A — prefix-index perf.** `IndexShape` gained an optional per-column
+> `opclasses?: Record<string,string>` slot. `migrations-builder.ts`'s
+> `withTenantIndex` post-pass derives a second non-unique `<table>_data_key_idx`
+> on every `tenantOwned` table with the `text_pattern_ops` opclass, so
+> `LIKE 'prefix.%'` (`deep`/`global`) is index-usable under any locale. Emitted
+> by `sql-pg.ts` (`(data_key text_pattern_ops)`) AND the Ecto emitter (fragment
+> column form `["data_key text_pattern_ops"]`) — the two `MigrationsIR`-DDL
+> backends. The id-keyed registry (read by id, not `tenantOwned`) gets none.
+>
+> **Part B — `currentUser.rootOrg` + `global` widening.** `rootOrg` (the first
+> `orgPath` segment) is a pure string derivation off the already-resolved
+> `orgPath` — NO DB read — exposed beside `orgPath` on all five backend principal
+> surfaces, typed on the `__User__` shape, and gated fail-closed without tenancy
+> (`loom.orgpath-without-tenancy`, mirroring `orgPath`). Under a hierarchy,
+> `global` now widens to the caller's **root-org subtree**: the same
+> descendant-or-self sentinel as `deep`, anchored at `rootOrg` instead of
+> `orgPath` (each backend reads the anchor off the sentinel's `args[0]`). Under
+> flat tenancy `rootOrg == orgPath == the tenant floor`, so the levels coincide
+> (and `global`/`deep` still require a hierarchy).
 
 Extend `IndexShape` (`src/ir/types/migrations-ir.ts`) with an opclass/method slot
 and emit a `text_pattern_ops` (or C-collation) index on `dataKey` in `sql-pg.ts` +

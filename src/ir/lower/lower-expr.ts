@@ -59,7 +59,7 @@ import {
 } from "../../language/generated/ast.js";
 import { isCollectionOp } from "../../util/collection-ops.js";
 import { isIntrinsicMatcher } from "../../util/intrinsic-matchers.js";
-import { PRINCIPAL_ORG_PATH } from "../../util/principal.js";
+import { PRINCIPAL_ORG_PATH, PRINCIPAL_ROOT_ORG } from "../../util/principal.js";
 import { findVerb, type ResourceVerbDef } from "../resource-verbs.js";
 import { variantTag } from "../stdlib/unions.js";
 import type {
@@ -1668,7 +1668,8 @@ function memberType(t: TypeIR, name: string, env: Env): TypeIR {
     // `currentUser.orgPath` — the derived tenant materialized-path member
     // (multi-tenancy Phase 2, P2.1).  Not a `user {}` claim; computed per
     // backend from the tenancy claim, typed as the DataKey path (a string).
-    if (name === PRINCIPAL_ORG_PATH) return { kind: "primitive", name: "string" };
+    if (name === PRINCIPAL_ORG_PATH || name === PRINCIPAL_ROOT_ORG)
+      return { kind: "primitive", name: "string" };
     const f = env.user.fields.find((f) => f.name === name);
     if (f) return f.optional ? { kind: "optional", inner: f.type } : f.type;
     return { kind: "primitive", name: "string" };
@@ -1888,7 +1889,8 @@ function stepInto(t: TypeIR, name: string, env: Env): TypeIR {
   // step into currentUser because it's read-only, but the symmetric
   // case keeps the two functions in sync.
   if (t.kind === "entity" && t.name === USER_SHAPE_NAME && env.user) {
-    if (name === PRINCIPAL_ORG_PATH) return { kind: "primitive", name: "string" };
+    if (name === PRINCIPAL_ORG_PATH || name === PRINCIPAL_ROOT_ORG)
+      return { kind: "primitive", name: "string" };
     const f = env.user.fields.find((f) => f.name === name);
     if (f) return f.optional ? { kind: "optional", inner: f.type } : f.type;
     return { kind: "primitive", name: "string" };

@@ -159,6 +159,21 @@ function renderUserModule(
           '        derived per-request from the tenancy claim (multi-tenancy Phase 2, P2.1)."""',
           `        return "" if self.${snake(orgPathClaim)} is None else str(self.${snake(orgPathClaim)})`,
         ];
+  // `currentUser.rootOrg` (P2.5): the ROOT-org segment — the first segment of
+  // `org_path` (up to the first `.`).  A read-only property off `org_path`
+  // (pure, no extra read), correct under both flat and hierarchy tenancy;
+  // anchors the `global` read level's root-subtree widening.  Not a dataclass
+  // field, so asdict()/the /auth/me wire never serializes it.
+  const rootOrgProp = orgPathClaim
+    ? [
+        "",
+        "    @property",
+        "    def root_org(self) -> str:",
+        '        """The caller\'s ROOT-org segment (`currentUser.rootOrg`) — the first',
+        '        segment of `org_path` (multi-tenancy Phase 2, P2.5)."""',
+        '        return self.org_path.split(".", 1)[0]',
+      ]
+    : [];
   // Id-typed claims (`Customer id?`) reference the branded NewTypes.
   const idNames = [
     ...new Set(
@@ -194,6 +209,7 @@ function renderUserModule(
     "class User:",
     ...fields,
     ...orgPathProp,
+    ...rootOrgProp,
     "",
     "",
     "# Ambient principal carrier — set by AuthMiddleware on every authenticated",

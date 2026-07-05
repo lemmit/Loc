@@ -26,6 +26,17 @@ export const PRINCIPAL_TYPE_NAME = "User";
  *  <registry> WHERE id = <claim>`), never the call sites. */
 export const PRINCIPAL_ORG_PATH = "orgPath";
 
+/** The derived principal member `currentUser.rootOrg` — the caller's ROOT-org
+ *  segment (multi-tenancy Phase 2, plan P2.5): the first segment of
+ *  {@link PRINCIPAL_ORG_PATH} (the substring before the first `.`, or the whole
+ *  path when it has no `.`).  A pure string computation off the already-resolved
+ *  `orgPath` — NO extra DB read; every backend derives it from its `orgPath`
+ *  accessor.  Like `orgPath` it is meaningful only under a `tenancy by` line
+ *  (`loom.orgpath-without-tenancy`, fail-closed).  It anchors the `global` read
+ *  level's root-subtree widening; under flat tenancy `orgPath` is the
+ *  root-segment claim, so `rootOrg == orgPath`. */
+export const PRINCIPAL_ROOT_ORG = "rootOrg";
+
 /** The principal's id field — the field named `id`, else the first declared
  *  field of the `user { ... }` block.  A `currentUser` stamp / filter value
  *  resolves to `currentUser.<thisField>` (the principal id), mirroring the

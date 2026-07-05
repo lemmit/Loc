@@ -292,7 +292,7 @@ plumbing. The levels:
 |---|---|
 | `local` | `tenantId == currentUser.tenantId` — the caller's own org node. **The default** (an omitted / `local` aggregate keeps today's flat floor). |
 | `deep` | descendant-or-self on the materialized path: `dataKey = orgPath OR dataKey LIKE orgPath \|\| '.%'` — the caller's org and every org beneath it. |
-| `global` | the flat tenant floor (see the decision below). |
+| `global` | the caller's **root-org subtree** (P2.5): the same descendant-or-self prefix scan as `deep` but anchored at `currentUser.rootOrg` (the first `orgPath` segment) — `dataKey = rootOrg OR dataKey LIKE rootOrg \|\| '.%'`. Under flat tenancy `rootOrg == orgPath == the tenant floor`, so all three levels coincide (see the decision below). |
 
 Generated `deep` filter, one line per backend (for `allow deep on Account`):
 
@@ -317,15 +317,18 @@ Generated `deep` filter, one line per backend (for `allow deep on Account`):
    `path || '.%'` (the `.` segment separator), so `org_a` never prefix-matches
    `org_ab`. The full opclass/`text_pattern_ops` index discipline is P2.5; the
    *correct* prefix ships here.
-3. **`global` = the flat tenant floor.** The plan says "global = no [additional]
-   filter, still tenant-root-floored," and authorization.md §2 says "all in my
-   tenant, never the whole table." Emitting the `tenantId ==` floor satisfies
-   both (for a flat model `global == local == the whole tenant`, since every org
-   is its own root). Widening `global` under a hierarchy to the full **root
-   subtree** needs a `currentUser.rootOrg` accessor (the first `orgPath`
-   segment) — a P2.1-scale principal-builder addition kept out of P2.4's minimal
-   surface, so `global` stays fail-closed at the tenant floor for now (a
-   documented P2.5+ follow-up). It never leaks; under a hierarchy it under-grants.
+3. **`global` = the caller's root-org subtree (P2.5).** authorization.md §2 says
+   "all in my tenant, never the whole table." Under a hierarchy `global` is the
+   full **root subtree** — every org descending from the caller's *root* org —
+   emitted as the same descendant-or-self prefix scan as `deep` but anchored at
+   `currentUser.rootOrg` (the first `orgPath` segment) instead of `orgPath`. The
+   accessor is a pure string derivation off the already-resolved `orgPath` (no
+   extra DB read); every backend exposes it beside `orgPath`. Under **flat**
+   tenancy every org is its own root, so `rootOrg == orgPath == the tenant floor`
+   and `global == deep == local` all coincide — and `global`/`deep` still
+   require a `tenantRegistry` hierarchy (`loom.policy-level-requires-hierarchy`),
+   so a flat model keeps the fail-closed floor. It never leaks past the tenant
+   root.
 
 **Validation (fail closed).** `deep`/`global` need a `tenantRegistry` hierarchy
 (`loom.policy-level-requires-hierarchy`); the target must be a tenant-owned
@@ -342,13 +345,15 @@ self-scope + claim-less bootstrap shipped as Phase 1b (above). The registry tree
 (`implements tenantRegistry` → `parent` + managed `dataKey`) + the `orgPath`
 registry read on all five backends shipped as Phase 2 P2.2 (above). Stamping
 `dataKey` on every `tenantOwned` aggregate (P2.3, above) shipped too. The
-`deep`/`global` `policy {}` read ladder (P2.4, above) shipped. Deferred:
+`deep`/`global` `policy {}` read ladder (P2.4, above) shipped. The
+materialized-path `dataKey` prefix index (`text_pattern_ops`) + the
+`currentUser.rootOrg` accessor that widens `global` to the root-org subtree
+shipped as P2.5 (above) — **closing multi-tenancy Phase 2**. Deferred:
 
 - **The `claim`/`registry` cross-reference upgrade** (capstone decision 5) —
   byte-identical surface, tooling win (navigation/rename); still open.
 - **`tenant_id` index** — blocked on the index surface
   ([`proposals/uniqueness-and-indexes.md`](proposals/uniqueness-and-indexes.md)).
-- **The materialized-path `dataKey` index** (`text_pattern_ops` / C-collation)
-  + full delimiter discipline + the `currentUser.rootOrg` accessor that widens
-  `global` to the root subtree (P2.5) — see
-  [`plans/multi-tenancy-phase2.md`](plans/multi-tenancy-phase2.md).
+  (The `dataKey` prefix index rides the shared `MigrationsIR` directly — a
+  derived, non-authored index like `tenant_id_idx` — so it needed no `index:`
+  surface; the `tenant_id` index is a separate, still-blocked item.)

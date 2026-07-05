@@ -93,3 +93,54 @@ describe("policy deep — Elixir (plain Ecto/Phoenix)", () => {
     expect(text).toContain("LIKE ? || '.%'");
   });
 });
+
+// `policy { allow global on <Agg> }` (multi-tenancy Phase 2 P2.5) widens to the
+// caller's ROOT-org SUBTREE: the same descendant-or-self prefix scan as `deep`,
+// but anchored at `currentUser.rootOrg` (the first `orgPath` segment) instead of
+// `orgPath`.  Structurally identical shape; only the anchor claim differs.
+
+describe("policy global — node (Hono/Drizzle)", () => {
+  it("emits the root-subtree prefix anchored at rootOrg (not orgPath)", async () => {
+    const text = await allText("node", "global");
+    expect(text).toContain('.rootOrg + ".%"');
+    expect(text).not.toContain('.orgPath + ".%"');
+    expect(text).toContain("isNotNull(");
+    expect(text).toContain("isNull(");
+  });
+});
+
+describe("policy global — .NET (EF Core)", () => {
+  it("emits the StartsWith prefix anchored at RootOrg + NULL fallback", async () => {
+    const text = await allText("dotnet", "global");
+    expect(text).toContain(".StartsWith(");
+    expect(text).toContain('.RootOrg + "."');
+    expect(text).toContain(".DataKey == null");
+  });
+});
+
+describe("policy global — Python (FastAPI/SQLAlchemy)", () => {
+  it("emits the startswith prefix anchored at root_org + is_/isnot NULL fallback", async () => {
+    const text = await allText("python", "global");
+    expect(text).toContain(".startswith(");
+    expect(text).toContain(".root_org");
+    expect(text).toContain(".isnot(None)");
+  });
+});
+
+describe("policy global — Java (Spring/JPA)", () => {
+  it("emits the JPQL prefix anchored at rootOrg() with the NULL fallback", async () => {
+    const text = await allText("java", "global");
+    expect(text).toContain("like concat(");
+    expect(text).toContain("rootOrg()");
+    expect(text).toContain("dataKey is not null");
+  });
+});
+
+describe("policy global — Elixir (plain Ecto/Phoenix)", () => {
+  it("emits the fail-closed LIKE fragment anchored at root_org", async () => {
+    const text = await allText("elixir", "global");
+    expect(text).toContain("fragment(");
+    expect(text).toContain("LIKE ? || '.%'");
+    expect(text).toContain("current_user.root_org");
+  });
+});

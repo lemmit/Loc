@@ -100,6 +100,22 @@ export function renderAuthFiles(
           `    }`,
         ]
     : [];
+  // `currentUser.rootOrg` (P2.5): the ROOT-org segment — the first segment of
+  // `orgPath()` (up to the first `.`).  A record accessor off `orgPath()`
+  // (pure, no extra read), correct under both flat and hierarchy tenancy;
+  // anchors the `global` read level's root-subtree widening.
+  const rootOrgAccessor = orgPathClaim
+    ? [
+        ``,
+        `    /** The caller's ROOT-org segment (\`currentUser.rootOrg\`) — the first`,
+        `     *  segment of \`orgPath()\` (multi-tenancy Phase 2, P2.5). */`,
+        `    public String rootOrg() {`,
+        `        String path = orgPath();`,
+        `        int i = path.indexOf('.');`,
+        `        return i < 0 ? path : path.substring(0, i);`,
+        `    }`,
+      ]
+    : [];
   out.set(
     "User.java",
     lines(
@@ -111,6 +127,7 @@ export function renderAuthFiles(
       ` *  \`currentUser\` references resolve against this. */`,
       `public record User(${components}) {`,
       ...orgPathAccessor,
+      ...rootOrgAccessor,
       `}`,
       ``,
     ),

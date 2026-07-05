@@ -9,8 +9,8 @@ import {
 import { tableOwnerName } from "../../ir/util/inheritance.js";
 import {
   DATA_KEY_PATH_DELIMITER,
+  deepScopeAnchorClaim,
   isDeepScopeFilter,
-  ORG_PATH_CLAIM_FIELD,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
@@ -149,7 +149,8 @@ function lower(
       if (isDeepScopeFilter(e)) {
         const col = `${row}.${snake(TENANT_OWNED_DATA_KEY_FIELD)}`;
         const tenantCol = `${row}.${snake(TENANT_OWNED_TENANT_ID_FIELD)}`;
-        const org = `${principalAccessor}.${snake(ORG_PATH_CLAIM_FIELD)}`;
+        // Anchor claim off `args[0]`: `orgPath` for `deep`, `rootOrg` for `global`.
+        const org = `${principalAccessor}.${snake(deepScopeAnchorClaim(e))}`;
         const tenant = `${principalAccessor}.${snake(TENANT_OWNED_TENANT_ID_FIELD)}`;
         ops.add("or_");
         ops.add("and_");

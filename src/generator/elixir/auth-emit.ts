@@ -171,7 +171,9 @@ function renderAuthPlug(
   //    fail safe to the claim when the row / dataKey is absent or the claim is
   //    malformed — never crashes.
   const orgPathKey = orgPathClaim ? snake(orgPathClaim) : undefined;
-  const orgPathPipe = orgPathKey ? " |> put_org_path()" : "";
+  // `put_root_org/1` runs AFTER `put_org_path/1` in the pipe, deriving
+  // `current_user.root_org` (P2.5) from the just-set `:org_path`.
+  const orgPathPipe = orgPathKey ? " |> put_org_path() |> put_root_org()" : "";
   const putOrgPathDef = !orgPathKey
     ? ""
     : orgPathRegistry
@@ -203,6 +205,26 @@ function renderAuthPlug(
       : `
   # Derives \`current_user.org_path\` from the tenancy claim (multi-tenancy P2.1).
   defp put_org_path(user), do: Map.put(user, :org_path, to_string(user[:${orgPathKey}]))
+`;
+  // `current_user.root_org` (P2.5): the ROOT-org segment — the first segment of
+  // `:org_path` (up to the first `.`).  Derived off the already-resolved
+  // `:org_path` (pure, no extra read), correct under both flat and hierarchy
+  // tenancy; anchors the `global` read level's root-subtree widening.
+  const putRootOrgDef = !orgPathKey
+    ? ""
+    : `
+  # Derives \`current_user.root_org\` (multi-tenancy P2.5): the first segment of
+  # the materialized \`org_path\`, the anchor for the \`global\` read level.
+  defp put_root_org(user), do: Map.put(user, :root_org, root_org_of(user[:org_path]))
+
+  defp root_org_of(path) when is_binary(path) do
+    case :binary.split(path, ".") do
+      [root | _] -> root
+      _ -> path
+    end
+  end
+
+  defp root_org_of(path), do: to_string(path)
 `;
   // The P2.2 registry read needs `from/2`; import it only in hierarchy mode so
   // a flat / no-tenancy plug carries no unused import (--warnings-as-errors).
@@ -384,7 +406,7 @@ ${verifierSection}
 
   defp build_user(claims) do
 ${buildUserBody}  end
-${mergeDevClaimsDef}${putOrgPathDef}end
+${mergeDevClaimsDef}${putOrgPathDef}${putRootOrgDef}end
 `;
 }
 

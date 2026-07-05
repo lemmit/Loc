@@ -586,6 +586,21 @@ function renderUserRecord(
   //    caller org's registry `data_key` once per request and memoizes it here.
   //    On a missing row / dataKey the slot stays unset ⇒ the claim fallback,
   //    fail-safe (never null/crash).
+  // `currentUser.rootOrg` (P2.5): the ROOT-org segment — the first segment of
+  // `OrgPath` (up to the first `.`).  A computed property off `OrgPath` (pure,
+  // no extra read), so it is correct under both flat and hierarchy tenancy and
+  // anchors the `global` read level's root-subtree widening.
+  const rootOrgProp = `
+    /// <summary>The caller's ROOT-org segment (<c>currentUser.rootOrg</c>) —
+    /// the first segment of <c>OrgPath</c> (multi-tenancy Phase 2, P2.5).</summary>
+    public string RootOrg
+    {
+        get
+        {
+            var i = OrgPath.IndexOf('.');
+            return i < 0 ? OrgPath : OrgPath.Substring(0, i);
+        }
+    }`;
   const orgPathMember = !orgPathClaim
     ? ";"
     : readsRegistry
@@ -604,6 +619,7 @@ function renderUserRecord(
         get => _orgPath ?? $"{${upperFirst(orgPathClaim)}}";
         set => _orgPath = value;
     }
+${rootOrgProp}
 }`
       : `
 {
@@ -611,6 +627,7 @@ function renderUserRecord(
     /// (<c>currentUser.orgPath</c>) — derived per-request from the tenancy
     /// claim (multi-tenancy Phase 2, P2.1).</summary>
     public string OrgPath => $"{${upperFirst(orgPathClaim)}}";
+${rootOrgProp}
 }`;
   return `// Auto-generated.
 using ${ns}.Domain.Enums;

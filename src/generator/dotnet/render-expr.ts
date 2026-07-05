@@ -3,8 +3,8 @@ import type { EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
 import {
   DATA_KEY_PATH_DELIMITER,
+  deepScopeAnchorClaim,
   isDeepScopeFilter,
-  ORG_PATH_CLAIM_FIELD,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
@@ -485,7 +485,8 @@ function renderMethodCall(
     const col = `${t}.${upperFirst(TENANT_OWNED_DATA_KEY_FIELD)}`;
     const tenantCol = `${t}.${upperFirst(TENANT_OWNED_TENANT_ID_FIELD)}`;
     const principal = ctx.currentUserExpr ?? "currentUser";
-    const org = `${principal}.${upperFirst(ORG_PATH_CLAIM_FIELD)}`;
+    // Anchor claim off `args[0]`: `orgPath` for `deep`, `rootOrg` for `global`.
+    const org = `${principal}.${upperFirst(deepScopeAnchorClaim(e))}`;
     const tenant = `${principal}.${upperFirst(TENANT_OWNED_TENANT_ID_FIELD)}`;
     const prefix = JSON.stringify(DATA_KEY_PATH_DELIMITER);
     return (
