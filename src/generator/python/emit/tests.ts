@@ -58,8 +58,16 @@ export function renderPyTestsFile(agg: AggregateIR, ctx: BoundedContextIR): stri
   const voEnumNames = [...ctx.valueObjects.map((v) => v.name), ...ctx.enums.map((e) => e.name)]
     .filter(refs)
     .sort();
-  const idNames = [agg.name, ...agg.parts.map((p) => p.name)]
-    .map((n) => `${n}Id`)
+  // Every aggregate + part in the context yields an id class in
+  // `app/domain/ids.py`.  A create-input `X id` field brands to `<X>Id(…)`,
+  // and X may be a *cross-aggregate* reference (e.g. `customerId: Customer id`
+  // on an Order test), so the candidate set is the whole context's ids, not
+  // just this aggregate's own — filtered to those actually referenced.
+  const idNames = [
+    ...new Set(
+      ctx.aggregates.flatMap((a) => [a.name, ...a.parts.map((p) => p.name)]).map((n) => `${n}Id`),
+    ),
+  ]
     .filter(refs)
     .sort();
   const usesPytest = /\bpytest\./.test(bodyStr);

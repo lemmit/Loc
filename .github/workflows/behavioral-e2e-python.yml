@@ -92,6 +92,9 @@ jobs:
         working-directory: test/behavioral
         run: npm ci || npm install --no-audit --no-fund
 
-      - name: Run Python behavioral tier (api gate, real Postgres)
+      # Runs both tiers internally: `unit` (emitted pytest domain suite, DB-free)
+      # and `api` (emitted e2e against the booted FastAPI backend). The generated
+      # project's `uv sync` pulls pytest from its dev group, so no extra install.
+      - name: Run Python behavioral tier (unit + api gate, real Postgres)
         working-directory: test/behavioral
         run: node run-python.mjs
