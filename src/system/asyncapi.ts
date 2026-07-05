@@ -70,6 +70,11 @@ export function renderAsyncApi(sys: SystemIR): string {
     if (ch.key) out.push(`      key: ${yamlStr(ch.key)}`);
     const storage = bindingByChannel.get(ch.name);
     out.push(`      transport: ${storage ? yamlStr(storage) : "in-process"}`);
+    // Honesty flag: a `channelSource` binding names a broker/cache, but no
+    // backend emits a client for it and compose provisions none — the
+    // transport is DECLARED, not wired.  Say so until brokers actually land,
+    // rather than implying `transport: hotCache` is a live redis hop.
+    if (storage) out.push('      transportStatus: "declared, not provisioned"');
   }
 
   if (subscriptionEntries.length > 0) {

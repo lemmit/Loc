@@ -119,4 +119,32 @@ describe("deployment.mmd", () => {
     for (const m of sys.subdomains) expect(out).toContain(`📦 ${m.name}`);
     expect(renderDeploymentDiagram(sys).endsWith("\n")).toBe(true);
   });
+
+  it("defines every context node an edge references (no dangling ctx_* nodes)", async () => {
+    const sys = (await build("examples/acme.ddd")).systems[0]!;
+    const out = buildDeploymentDiagram(sys);
+    // Nodes DEFINED: `ctx_X["📁 …"]`.  Nodes REFERENCED by an edge: `--> ctx_X`.
+    const defined = new Set([...out.matchAll(/(ctx_[A-Za-z0-9_]+)\[/g)].map((m) => m[1]));
+    const referenced = new Set(
+      [...out.matchAll(/\|serves\| (ctx_[A-Za-z0-9_]+)/g)].map((m) => m[1]),
+    );
+    expect(referenced.size).toBeGreaterThan(0);
+    for (const ref of referenced) expect(defined).toContain(ref);
+    // Ownership is visible: each subdomain-owned context nests under its 📦.
+    for (const m of sys.subdomains) {
+      for (const ctx of m.contexts) expect(out).toContain(`📁 ${ctx.name}`);
+    }
+  });
+
+  it("does not draw `serves` edges from a frontend (only its `calls` edge)", async () => {
+    // acme's `webApp` is a static SPA that inherits its target's context set
+    // for wire-scope — it must NOT claim to serve those contexts.
+    const sys = (await build("examples/acme.ddd")).systems[0]!;
+    const web = sys.deployables.find((d) => d.name === "webApp")!;
+    expect(web.platform).toBe("static");
+    const out = buildDeploymentDiagram(sys);
+    expect(out).not.toContain("deploy_webApp -->|serves|");
+    // …but the honest relationship — calling its backend — is still drawn.
+    expect(out).toContain("deploy_webApp -.->|calls| deploy_api");
+  });
 });

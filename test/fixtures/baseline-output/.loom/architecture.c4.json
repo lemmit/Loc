@@ -76,26 +76,7 @@
         "kind": "container",
         "title": "webApp",
         "technology": "static",
-        "children": [
-          {
-            "localId": "Products",
-            "kind": "component",
-            "title": "Products",
-            "children": []
-          },
-          {
-            "localId": "Orders",
-            "kind": "component",
-            "title": "Orders",
-            "children": []
-          },
-          {
-            "localId": "Customers",
-            "kind": "component",
-            "title": "Customers",
-            "children": []
-          }
-        ]
+        "children": []
       },
       {
         "localId": "db",

@@ -1,9 +1,21 @@
 %% Loom deployment diagram — generated from the IR, do not edit by hand.
 %% System: Acme
 flowchart LR
-  mod_Catalog["📦 Catalog"]
-  mod_Sales["📦 Sales"]
-  mod_CustomerMgmt["📦 CustomerMgmt"]
+  subgraph domain["🗂️ Domain"]
+    direction TB
+    subgraph mod_Catalog["📦 Catalog"]
+      direction TB
+      ctx_Products["📁 Products"]
+    end
+    subgraph mod_Sales["📦 Sales"]
+      direction TB
+      ctx_Orders["📁 Orders"]
+    end
+    subgraph mod_CustomerMgmt["📦 CustomerMgmt"]
+      direction TB
+      ctx_Customers["📁 Customers"]
+    end
+  end
   subgraph deployables["🚀 Deployables"]
     direction TB
     deploy_api{{"api · dotnet"}}
@@ -11,14 +23,11 @@ flowchart LR
     deploy_catalogApi{{"catalogApi · dotnet"}}
     deploy_webApp{{"webApp · static"}}
   end
-  deploy_api --> ctx_Products
-  deploy_api --> ctx_Orders
-  deploy_api --> ctx_Customers
-  deploy_catalogWeb --> ctx_Products
-  deploy_catalogWeb --> ctx_Customers
-  deploy_catalogApi --> ctx_Products
-  deploy_catalogApi --> ctx_Customers
-  deploy_webApp --> ctx_Products
-  deploy_webApp --> ctx_Orders
-  deploy_webApp --> ctx_Customers
+  deploy_api -->|serves| ctx_Products
+  deploy_api -->|serves| ctx_Orders
+  deploy_api -->|serves| ctx_Customers
+  deploy_catalogWeb -->|serves| ctx_Products
+  deploy_catalogWeb -->|serves| ctx_Customers
+  deploy_catalogApi -->|serves| ctx_Products
+  deploy_catalogApi -->|serves| ctx_Customers
   deploy_webApp -.->|calls| deploy_api

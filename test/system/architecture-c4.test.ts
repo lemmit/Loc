@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { descriptorFor } from "../../src/platform/metadata.js";
 import { buildC4Model, renderC4Model } from "../../src/system/likec4.js";
 import { loadExampleModel, toLoomModel } from "../_helpers/index.js";
 
@@ -30,5 +31,37 @@ describe("architecture.c4", () => {
     }
     expect(out).toContain("view index {");
     expect(renderC4Model(sys).endsWith("\n")).toBe(true);
+  });
+
+  it("wires a db edge for EVERY persistent backend, derived from the registry", async () => {
+    // showcase.ddd hosts a python backend — the frozen PERSISTENT set omitted
+    // `python`, silently dropping its `-> db` edge.  Derive from `needsDb`
+    // instead, and assert it holds for every DB-backed deployable.
+    const sys = (await build("examples/showcase.ddd")).systems[0]!;
+    const out = buildC4Model(sys);
+    const dbBacked = sys.deployables.filter((d) => descriptorFor(d.platform).needsDb);
+    expect(dbBacked.some((d) => d.platform === "python")).toBe(true);
+    for (const d of dbBacked) {
+      const id = d.name.replace(/[^A-Za-z0-9_]/g, "_");
+      expect(out).toContain(`${id} -> db 'reads / writes'`);
+    }
+  });
+
+  it("a frontend container declares no context components (calls edge only)", async () => {
+    // acme's `webApp` (static SPA) inherits its target's contexts for
+    // wire-scope; the C4 container must not portray them as owned components.
+    const sys = (await build("examples/acme.ddd")).systems[0]!;
+    const web = sys.deployables.find((d) => d.name === "webApp")!;
+    expect(web.platform).toBe("static");
+    expect(web.contextNames.length).toBeGreaterThan(0);
+    const out = buildC4Model(sys);
+    // The container block for webApp is empty of `component` lines.
+    const block = out.slice(
+      out.indexOf("webApp = container"),
+      out.indexOf("}", out.indexOf("webApp = container")),
+    );
+    expect(block).not.toContain("= component");
+    // The `calls` relationship survives.
+    expect(out).toContain("webApp -> api 'calls'");
   });
 });

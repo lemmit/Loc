@@ -1,4 +1,5 @@
 import type { DeployableIR, SystemIR } from "../ir/types/loom-ir.js";
+import { descriptorFor } from "../platform/metadata.js";
 import { lines } from "../util/code-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -19,13 +20,20 @@ import { lines } from "../util/code-builder.js";
 // in the LikeC4 CLI / VS Code extension.
 // ---------------------------------------------------------------------------
 
-// Backends that own persistence — used to wire database relationships.
-const PERSISTENT: ReadonlySet<DeployableIR["platform"]> = new Set([
-  "node",
-  "dotnet",
-  "elixir",
-  "java",
-]);
+// Whether a deployable owns persistence — derived from the platform
+// registry's `needsDb`, NOT a hand-frozen set (derive, don't stamp).
+// A stamped list silently omits new DB backends: it had dropped the
+// `pythonApi → db` edge because `python` was never added to it.
+const persists = (d: DeployableIR): boolean => descriptorFor(d.platform).needsDb;
+
+// A frontend deployable (React/Vue/Svelte/Angular/static SPA) inherits its
+// `contextNames` from the backend it targets purely so the page emitter has
+// every aggregate's wire shape in scope (enrichment #4).  That is NOT domain
+// ownership: the bounded contexts live in the backend, and the SPA's only
+// architectural relationship is the `calls` edge to it.  So artifacts must not
+// portray a frontend as *owning* (component) or *serving* those contexts —
+// that was the false "claims contexts it never touches" claim.
+const isFrontend = (d: DeployableIR): boolean => descriptorFor(d.platform).isFrontend;
 
 // LikeC4 identifiers: word chars, not starting with a digit.
 function cid(name: string): string {
@@ -37,7 +45,7 @@ const quote = (s: string): string => `'${s.replace(/'/g, "\\'")}'`;
 
 export function buildC4Model(sys: SystemIR): string {
   const sysId = cid(sys.name);
-  const hasBackend = sys.deployables.some((d) => PERSISTENT.has(d.platform));
+  const hasBackend = sys.deployables.some((d) => persists(d));
   const known = new Set(sys.deployables.map((d) => d.name));
 
   const containers = sys.deployables.flatMap((d) => container(d));
@@ -47,7 +55,7 @@ export function buildC4Model(sys: SystemIR): string {
     if (d.targetName && known.has(d.targetName)) {
       rels.push(`    ${cid(d.name)} -> ${cid(d.targetName)} 'calls'`);
     }
-    if (PERSISTENT.has(d.platform) && hasBackend) {
+    if (persists(d) && hasBackend) {
       rels.push(`    ${cid(d.name)} -> db 'reads / writes'`);
     }
   }
@@ -87,11 +95,17 @@ export function buildC4Model(sys: SystemIR): string {
 }
 
 function container(d: DeployableIR): string[] {
+  // Contexts appear as internal components only for the deployable that owns
+  // the domain (a backend).  A frontend's inherited context set is wire-scope,
+  // not ownership — it contributes no components (its `calls` edge carries the
+  // whole relationship).
+  const components = isFrontend(d)
+    ? []
+    : d.contextNames.map((m) => `      ${cid(m)} = component ${quote(m)}`);
   return [
     `    ${cid(d.name)} = container ${quote(d.name)} {`,
     `      technology ${quote(d.platform)}`,
-    // Modules the deployable ships, as components within it.
-    ...d.contextNames.map((m) => `      ${cid(m)} = component ${quote(m)}`),
+    ...components,
     `    }`,
   ];
 }
@@ -142,7 +156,7 @@ export interface C4Spec {
 
 export function buildC4Spec(sys: SystemIR): C4Spec {
   const sysId = cid(sys.name);
-  const hasBackend = sys.deployables.some((d) => PERSISTENT.has(d.platform));
+  const hasBackend = sys.deployables.some((d) => persists(d));
   const known = new Set(sys.deployables.map((d) => d.name));
 
   const children: C4SpecNode[] = sys.deployables.map((d) => ({
@@ -150,12 +164,15 @@ export function buildC4Spec(sys: SystemIR): C4Spec {
     kind: "container",
     title: d.name,
     technology: d.platform,
-    children: d.contextNames.map((m) => ({
-      localId: cid(m),
-      kind: "component",
-      title: m,
-      children: [],
-    })),
+    // Frontends contribute no context components (wire-scope, not ownership).
+    children: isFrontend(d)
+      ? []
+      : d.contextNames.map((m) => ({
+          localId: cid(m),
+          kind: "component" as const,
+          title: m,
+          children: [],
+        })),
   }));
   if (hasBackend) {
     children.push({ localId: "db", kind: "database", title: "PostgreSQL", children: [] });
@@ -167,7 +184,7 @@ export function buildC4Spec(sys: SystemIR): C4Spec {
     if (d.targetName && known.has(d.targetName)) {
       relationships.push({ source: from, target: `${sysId}.${cid(d.targetName)}`, label: "calls" });
     }
-    if (PERSISTENT.has(d.platform) && hasBackend) {
+    if (persists(d) && hasBackend) {
       relationships.push({ source: from, target: `${sysId}.db`, label: "reads / writes" });
     }
   }
