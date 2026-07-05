@@ -77,6 +77,20 @@ export function renderAuthFiles(
 
   const stubImports = new Set<string>();
   for (const f of fields) collectAuthImports(f.type, stubImports);
+  const stubArgs = fields.map((f) => stubValue(f.type)).join(", ");
+  // Dev-claims override is limited to string-typed claims (the tenant-claim
+  // case) — a JSON string maps cleanly onto a `String` component; non-string
+  // components keep their built-in value.  FQNs avoid import churn.
+  const stubStringFields = fields.filter(
+    (f) => f.type.kind === "primitive" && f.type.name === "string",
+  );
+  const overrideArgs = fields
+    .map((f) =>
+      f.type.kind === "primitive" && f.type.name === "string"
+        ? `claims.has("${f.name}") && claims.get("${f.name}").isTextual() ? claims.get("${f.name}").asText() : ${stubValue(f.type)}`
+        : stubValue(f.type),
+    )
+    .join(", ");
   out.set(
     "DevStubUserVerifier.java",
     lines(
@@ -89,13 +103,42 @@ export function renderAuthFiles(
       `import jakarta.servlet.http.HttpServletRequest;`,
       ``,
       `/** Dev-stub verifier — accepts every request as a built-in user.`,
+      stubStringFields.length > 0
+        ? ` *  Dev-only: override string claims (e.g. tenantId) by sending a base64-encoded`
+        : null,
+      stubStringFields.length > 0
+        ? ` *  JSON object in the \`x-loom-dev-claims\` header — the same injection the Hono`
+        : null,
+      stubStringFields.length > 0 ? ` *  dev stub honours.` : null,
       ` *  REPLACE for production by providing your own @Primary UserVerifier. */`,
       `@Component`,
       `public class DevStubUserVerifier implements UserVerifier {`,
-      `    @Override`,
-      `    public User verify(HttpServletRequest request) {`,
-      `        return new User(${fields.map((f) => stubValue(f.type)).join(", ")});`,
-      `    }`,
+      ...(stubStringFields.length > 0
+        ? [
+            `    private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER =`,
+            `        new com.fasterxml.jackson.databind.ObjectMapper();`,
+            ``,
+            `    @Override`,
+            `    public User verify(HttpServletRequest request) {`,
+            `        String injected = request.getHeader("x-loom-dev-claims");`,
+            `        if (injected != null && !injected.isEmpty()) {`,
+            `            try {`,
+            `                com.fasterxml.jackson.databind.JsonNode claims =`,
+            `                    MAPPER.readTree(java.util.Base64.getDecoder().decode(injected));`,
+            `                return new User(${overrideArgs});`,
+            `            } catch (Exception e) {`,
+            `                // Malformed dev-claims header → fall back to the built-in identity.`,
+            `            }`,
+            `        }`,
+            `        return new User(${stubArgs});`,
+            `    }`,
+          ]
+        : [
+            `    @Override`,
+            `    public User verify(HttpServletRequest request) {`,
+            `        return new User(${stubArgs});`,
+            `    }`,
+          ]),
       `}`,
       ``,
     ),

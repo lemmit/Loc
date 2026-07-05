@@ -419,7 +419,14 @@ function renderDevStubVerifier(user: UserIR, ns: string): string {
   const args = user.fields
     .map((f) => `${upperFirst(f.name)}: ${stubCsharpValueFor(f)}`)
     .join(",\n            ");
-  return `// Auto-generated.
+  // Dev-claims override is limited to string-typed claims (the tenant-claim
+  // case) — a JSON string maps cleanly onto a `string` property; non-string
+  // fields keep their built-in value.
+  const stringFields = user.fields.filter(
+    (f) => !f.optional && f.type.kind === "primitive" && f.type.name === "string",
+  );
+  if (stringFields.length === 0) {
+    return `// Auto-generated.
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
@@ -435,6 +442,60 @@ public sealed class DevStubUserVerifier : IUserVerifier
     {
         return Task.FromResult<User?>(new User(
             ${args}));
+    }
+}
+`;
+  }
+  const arms = stringFields
+    .map(
+      (f) =>
+        `                    "${f.name}" => prop.Value.ValueKind == JsonValueKind.String ? user with { ${upperFirst(f.name)} = prop.Value.GetString()! } : user,`,
+    )
+    .join("\n");
+  return `// Auto-generated.
+using System;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
+
+namespace ${ns}.Auth;
+
+/// <summary>Dev-stub verifier — accepts every request as a built-in user.
+/// Dev-only: override string claims (e.g. tenantId) by sending a base64-encoded
+/// JSON object in the <c>x-loom-dev-claims</c> header — the same injection the
+/// Hono dev stub honours.  REPLACE for production by registering your own
+/// IUserVerifier (e.g. builder.Services.AddScoped&lt;IUserVerifier, MyJwtVerifier&gt;()).</summary>
+public sealed class DevStubUserVerifier : IUserVerifier
+{
+    public Task<User?> VerifyAsync(HttpContext httpContext, CancellationToken cancellationToken)
+    {
+        var user = new User(
+            ${args});
+        var injected = httpContext.Request.Headers["x-loom-dev-claims"].ToString();
+        if (string.IsNullOrEmpty(injected))
+        {
+            return Task.FromResult<User?>(user);
+        }
+        try
+        {
+            var payload = Encoding.UTF8.GetString(Convert.FromBase64String(injected));
+            using var doc = JsonDocument.Parse(payload);
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                user = prop.Name switch
+                {
+${arms}
+                    _ => user,
+                };
+            }
+        }
+        catch (Exception)
+        {
+            // Malformed dev-claims header → fall back to the built-in identity.
+        }
+        return Task.FromResult<User?>(user);
     }
 }
 `;
