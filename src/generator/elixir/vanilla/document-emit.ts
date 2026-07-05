@@ -44,11 +44,12 @@ import {
   singleFieldConstraints,
 } from "../../../ir/validate/invariant-classify.js";
 import { elixirRegexBody, plural, snake, upperFirst } from "../../../util/naming.js";
+import { statementSubRegions } from "../../_trace/sourcemap.js";
 import { opUsesCurrentUser, stmtUsesParam } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { NORMALIZE_KEYS_DEFP } from "./key-normalize.js";
 import { managedTimestampNames } from "./managed-timestamps.js";
-import { renderReturningStmt } from "./operation-returns-emit.js";
+import { type OpFragment, renderReturningStmt } from "./operation-returns-emit.js";
 
 /** True iff the aggregate's effective saving shape is `document` (binding-aware,
  *  matching the migration + validator).  `sys` may be absent in a few legacy
@@ -416,6 +417,12 @@ function docOpStructBody(
   agg: AggregateIR,
   facadeMod: string,
   ctx: BoundedContextIR,
+  /** Source-map Milestone 3 collector (`--sourcemap`) — only allocated by the
+   *  caller when a recorder is present (zero cost otherwise).  Unlike the
+   *  relational named/returning-op paths, a document op's body is never
+   *  filtered (no emit-hoisting restructuring here), so `op.statements` and
+   *  `body` line up 1:1 already. */
+  opFragments?: OpFragment[],
 ): { params: string[]; body: string[] } {
   const rc: RenderCtx = {
     thisName: "record",
@@ -431,6 +438,12 @@ function docOpStructBody(
     (p) => `    ${snake(p.name)} = Map.get(params, ${JSON.stringify(p.name)})`,
   );
   const body = op.statements.map((s, i) => renderReturningStmt(s, ctx, rc, i));
+  if (opFragments && body.length > 0) {
+    opFragments.push({
+      fragmentText: body.join("\n"),
+      subRegions: statementSubRegions(op.statements, body, `${ctx.name}.${agg.name}.${op.name}`),
+    });
+  }
   return { params, body };
 }
 
@@ -443,13 +456,14 @@ export function renderDocNamedOpFunction(
   op: OperationIR,
   agg: AggregateIR,
   ctx: BoundedContextIR,
+  opFragments?: OpFragment[],
 ): string {
   const opSnake = snake(op.name);
   const aggPascal = upperFirst(agg.name);
   const aggSnake = snake(agg.name);
   const aggModule = `${facadeMod}.${aggPascal}`;
   const repoMod = `${aggModule}Repository`;
-  const { params, body } = docOpStructBody(op, agg, facadeMod, ctx);
+  const { params, body } = docOpStructBody(op, agg, facadeMod, ctx, opFragments);
   const prelude = [`    record = row.data`, ...params, ...body].join("\n");
   const actorParam = opUsesCurrentUser(op) ? ", current_user \\\\ nil" : "";
   return `  @doc "Named operation \`${op.name}\` on \`${aggPascal}\` (document shape) — runs the body against the embedded struct, then re-embeds + bumps version."
@@ -476,6 +490,7 @@ export function renderDocReturningOpFunction(
   op: OperationIR,
   agg: AggregateIR,
   ctx: BoundedContextIR,
+  opFragments?: OpFragment[],
 ): string {
   const opSnake = snake(op.name);
   const aggPascal = upperFirst(agg.name);
@@ -488,7 +503,7 @@ export function renderDocReturningOpFunction(
     op.returnType.variants.some((v) => v.kind === "entity" && v.name === agg.name);
   const successTail =
     !lastIsReturn && succeedsWithAggregate ? `\n    {:ok, ${docWireMap(agg)}}` : "";
-  const { params, body } = docOpStructBody(op, agg, facadeMod, ctx);
+  const { params, body } = docOpStructBody(op, agg, facadeMod, ctx, opFragments);
   // `record = row.data` is live only when the body reads/writes `record` or the
   // success wire projects its fields; otherwise skip it (and underscore `row`,
   // read only for `.data`) so the struct-guarded head doesn't warn under -Werror.

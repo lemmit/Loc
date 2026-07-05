@@ -68,6 +68,7 @@ import {
 } from "./emit/dapper.js";
 import { renderDomainLog, renderExecutionContextBehavior } from "./emit/domain-log.js";
 import { emitDomainServices } from "./emit/domain-service.js";
+import type { OpFragment } from "./emit/entity.js";
 import { emitDotnetMigrations, emitDotnetProvenanceAuditMigration } from "./emit/migrations.js";
 import {
   renderOutboxDelivery,
@@ -742,6 +743,7 @@ function emitAggregate(
     category: DotnetArtifactCategory,
     content: string,
     origin?: OriginRef,
+    opFragments?: OpFragment[],
   ): void => {
     const path = layout.pathFor(
       { name, content, category, aggregateName: agg.name } as DotnetArtifact,
@@ -749,6 +751,15 @@ function emitAggregate(
     );
     out.set(path, content);
     sourcemap?.file(path, content, origin, construct);
+    // Statement-granular sub-regions (source-map Milestone 3) — layered onto
+    // the whole-file region just recorded above, anchored by exact-text
+    // search against this SAME final content, so they land at the right
+    // absolute lines regardless of what the layout adapter did to the path.
+    if (sourcemap && opFragments) {
+      for (const frag of opFragments) {
+        sourcemap.fragment(path, content, frag.fragmentText, frag.subRegions);
+      }
+    }
   };
   // An abstract base owns no repository / routes.  A TPC (`ownTable`) base owns
   // no table either — emit just the class (Ignore<Base>()d at the DbContext) so
@@ -847,11 +858,26 @@ function emitAggregate(
       members: unionMembers(op.returnType.variants, ctx),
     });
   }
+  // Only collected when a recorder is actually threaded in — a no-sourcemap
+  // run pays no per-statement bookkeeping cost.
+  const opFragments: OpFragment[] | undefined = sourcemap ? [] : undefined;
   place(
     `${agg.name}.cs`,
     "entity",
-    renderEntity(agg, true, ns, agg.name, emitTrace, isDoc, superType, operationReturnUnions),
+    renderEntity(
+      agg,
+      true,
+      ns,
+      agg.name,
+      emitTrace,
+      isDoc,
+      superType,
+      operationReturnUnions,
+      opFragments,
+      construct,
+    ),
     agg.origin,
+    opFragments,
   );
   // Pure Domain union types for exception-less operation returns — Domain-layer
   // artifacts (the aggregate method produces them), placed alongside the entity.

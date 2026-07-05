@@ -13,6 +13,7 @@ import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import type { UnionMember } from "../../_payload/union-wire.js";
+import type { SourceMapSubRegion } from "../../_trace/sourcemap.js";
 import { promotedFilters, sqlRestrictionFilters } from "../capability-filter.js";
 import {
   buildJavaRegexFields,
@@ -24,7 +25,12 @@ import {
   renderJavaType,
 } from "../render-expr.js";
 import { renderSqlRestriction } from "../render-sql-restriction.js";
-import { collectJavaStmtImports, renderJavaStatements } from "../render-stmt.js";
+import {
+  collectJavaStmtImports,
+  renderJavaStatementChunks,
+  renderJavaStatements,
+  statementSubRegions,
+} from "../render-stmt.js";
 import {
   jpaClassAnnotations,
   jpaContainmentAnnotations,
@@ -131,6 +137,17 @@ export interface JavaSuperTypeInfo {
   readonly pkg?: string;
 }
 
+/** One operation body's exact emitted text plus its per-statement
+ *  sub-regions — surfaced by `renderJavaEntity` (when `opFragments` is
+ *  passed via `JavaEntityOptions`) to the caller that owns the recorder and
+ *  the final file content (`src/generator/java/index.ts`), which anchors it
+ *  via `SourceMapRecorder.fragment`.  Covers only the REGULAR (non-extern)
+ *  operation-body path — see the call site in `renderJavaEntity` below. */
+export interface OpFragment {
+  fragmentText: string;
+  subRegions: SourceMapSubRegion[];
+}
+
 export interface JavaEntityOptions {
   emitTrace?: boolean;
   superType?: JavaSuperTypeInfo;
@@ -176,6 +193,15 @@ export interface JavaEntityOptions {
    *  non-principal cap rides `@SQLRestriction`).  Derived by the orchestrator
    *  from the context's read-decls (`capability-filter.ts`). */
   promotedCaps?: ReadonlySet<string>;
+  /** `${ctx.name}.${agg.name}` — construct-id prefix for this aggregate's
+   *  own operation bodies (source-map Milestone 3).  Only consulted when
+   *  `opFragments` is also passed; entity parts never carry operations, so
+   *  neither is ever needed for a part render call. */
+  construct?: string;
+  /** Collector for per-statement sub-regions across this entity's REGULAR
+   *  (non-extern) operation bodies — allocated by the caller only when a
+   *  `SourceMapRecorder` is threaded in (zero cost otherwise). */
+  opFragments?: OpFragment[];
 }
 
 export function renderJavaEntity(
@@ -531,11 +557,25 @@ export function renderJavaEntity(
     const retUnion = options.operationReturnUnions?.get(op.name);
     const retType = op.returnType ? renderJavaType(op.returnType) : "void";
     opLines.push(`    ${visibility} ${retType} ${op.name}(${params}) {`);
-    const body = renderJavaStatements(
+    // Chunked (one string per statement) rather than the pre-joined
+    // `renderJavaStatements` here — `renderJavaStatements` IS
+    // `chunks.join("\n")` by construction, so `body` below is byte-identical
+    // either way, but the per-chunk list lets us surface per-statement
+    // sub-regions to the caller that owns the recorder + this file's final
+    // content (source-map Milestone 3 — see `OpFragment`).  Extern check
+    // bodies and lifecycle appliers are out of scope for this slice.
+    const chunks = renderJavaStatementChunks(
       op.statements,
       retUnion ? { ...renderCtx, returnUnion: retUnion } : renderCtx,
       traceCtx,
     );
+    const body = chunks.join("\n");
+    if (options.opFragments && chunks.length > 0) {
+      options.opFragments.push({
+        fragmentText: body,
+        subRegions: statementSubRegions(op.statements, chunks, `${options.construct}.${op.name}`),
+      });
+    }
     if (body.length > 0) opLines.push(body);
     if (!op.returnType) {
       opLines.push(

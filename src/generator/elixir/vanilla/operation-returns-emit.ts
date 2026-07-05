@@ -27,12 +27,34 @@ import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
+import { type SourceMapSubRegion, statementSubRegions } from "../../_trace/sourcemap.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
 import { opUsesCurrentUser } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
 import { provColumn, provenancedFieldsOf } from "./provenance-emit.js";
 import { isRefCollFieldName, refCollTargetModule } from "./ref-collection-emit.js";
+
+/** One operation body's exact emitted text plus its per-statement
+ *  sub-regions — surfaced by `renderReturningOpFunction` (and the sibling
+ *  `renderNamedOpFunction` in `context-emit.ts`, which shares this type) when
+ *  `opFragments` is passed, to the caller that owns the recorder and the
+ *  POOLED per-context module's final content (`emitVanillaContextModule` in
+ *  `context-emit.ts`), which anchors it via `SourceMapRecorder.fragment`.
+ *
+ *  Vanilla has no pre-joined statement renderer to split into a chunked
+ *  sibling — `renderReturningStmt` already renders one (possibly multi-line)
+ *  string per statement, so the existing per-statement map each caller builds
+ *  (`bodyLines`) IS the chunk list; no separate chunk-producing renderer is
+ *  needed here (contrast the TS/.NET/Python backends, which pre-join and so
+ *  need a `renderXStatementChunks` sibling).  Covers only the REGULAR
+ *  (non-extern, non-event-sourced) named/returning operation body path —
+ *  extern check bodies, event-sourced init, and appliers are out of scope for
+ *  this milestone. */
+export interface OpFragment {
+  fragmentText: string;
+  subRegions: SourceMapSubRegion[];
+}
 
 /** The wire field list a returning op's success branch serialises `record`
  *  into — the same ordered `wireShape` the find/CRUD controllers expose, so the
@@ -277,6 +299,9 @@ export function renderReturningOpFunction(
    *  §11c) — those `put_assoc` rather than `put_embed`.  Caller computes via
    *  `usesRelationalContainments`; empty (the default) keeps embedded output. */
   relationalContainments: ReadonlySet<string> = new Set(),
+  /** Source-map Milestone 3 collector (`--sourcemap`) — only allocated by the
+   *  caller when a recorder is present (zero cost otherwise). */
+  opFragments?: OpFragment[],
 ): string {
   const aggPascal = upperFirst(agg.name);
   const aggModule = `${facadeMod}.${aggPascal}`;
@@ -361,14 +386,24 @@ export function renderReturningOpFunction(
   const lastIdx = op.statements.length - 1;
   // Per-statement index disambiguates provenance temp vars across writes.  When
   // persisting, the hoisted `emit`s and the relocated trailing success `return`
-  // are rendered post-commit (below), not inline.
-  const bodyLines = op.statements
-    .filter((s, idx) => {
-      if (hoistEmits && s.kind === "emit") return false;
-      if (persists && trailingReturn !== undefined && idx === lastIdx) return false;
-      return true;
-    })
-    .map((s, i) => renderReturningStmt(s, ctx, renderCtx, i));
+  // are rendered post-commit (below), not inline.  `bodyStmts` is kept
+  // alongside `bodyLines` (rather than only the mapped-over result) so a
+  // source-map collector can zip the two SAME-length, SAME-order arrays back
+  // together via `statementSubRegions` — the hoisted `emit`(s) and the
+  // relocated trailing return are deliberately excluded from both, matching
+  // the "regular body" scope this milestone covers (see `OpFragment`).
+  const bodyStmts = op.statements.filter((s, idx) => {
+    if (hoistEmits && s.kind === "emit") return false;
+    if (persists && trailingReturn !== undefined && idx === lastIdx) return false;
+    return true;
+  });
+  const bodyLines = bodyStmts.map((s, i) => renderReturningStmt(s, ctx, renderCtx, i));
+  if (opFragments && bodyLines.length > 0) {
+    opFragments.push({
+      fragmentText: bodyLines.join("\n"),
+      subRegions: statementSubRegions(bodyStmts, bodyLines, `${ctx.name}.${agg.name}.${op.name}`),
+    });
+  }
   // Did the body add/remove a reference collection (`X id[]` → `many_to_many`)?
   // That mutation edits a join table, so the success path MUST round-trip the DB
   // (a `put_assoc` changeset) rather than return the in-memory projection — and

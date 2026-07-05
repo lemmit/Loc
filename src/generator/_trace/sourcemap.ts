@@ -41,6 +41,31 @@ export interface SourceMapSubRegion {
   construct?: string;
 }
 
+/** One `fragment()` sub-region per statement, keyed to the chunk list a
+ *  backend's chunk-producing statement renderer built from the SAME
+ *  statements array (same length, same order — one chunk per statement,
+ *  chunks joined with `"\n"` to form the fragment).  `rel` is a 1-based
+ *  inclusive line range relative to the fragment's own first line; a
+ *  statement with no `origin` (synthesized) is simply omitted.
+ *  Origin-generic on purpose: `StmtIR` and `WorkflowStmtIR` both satisfy
+ *  the element shape, so every backend shares this one cursor walk. */
+export function statementSubRegions(
+  stmts: readonly { origin?: OriginRef }[],
+  chunks: readonly string[],
+  construct: string,
+): SourceMapSubRegion[] {
+  const regions: SourceMapSubRegion[] = [];
+  let cursor = 1;
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i]!;
+    const chunkLines = (chunk.match(/\n/g)?.length ?? 0) + 1;
+    const origin = stmts[i]?.origin;
+    if (origin) regions.push({ rel: [cursor, cursor + chunkLines - 1], origin, construct });
+    cursor += chunkLines;
+  }
+  return regions;
+}
+
 /** Number of 1-based lines `content` spans.  A trailing `"\n"` doesn't
  *  count as an extra (empty) final line. */
 function lineCount(content: string): number {

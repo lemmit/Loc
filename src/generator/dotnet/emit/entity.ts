@@ -1,3 +1,4 @@
+import type { SourceMapSubRegion } from "../../../generator/_trace/sourcemap.js";
 import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
@@ -10,7 +11,25 @@ import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import type { UnionMember } from "../../_payload/union-wire.js";
 import { collectCsExprUsings, csNewIdValue, renderCsExpr, renderCsType } from "../render-expr.js";
-import { collectCsStmtUsings, renderCsStatements } from "../render-stmt.js";
+import {
+  collectCsStmtUsings,
+  renderCsStatementChunks,
+  renderCsStatements,
+  statementSubRegions,
+} from "../render-stmt.js";
+
+/** One operation body's exact emitted text plus its per-statement
+ *  sub-regions — surfaced by `renderEntity` (when `opFragments` is passed)
+ *  to the caller that owns the recorder and the final file content
+ *  (`src/generator/dotnet/index.ts`'s `emitAggregate`/`place`), which
+ *  anchors it via `SourceMapRecorder.fragment`.  Covers only the REGULAR
+ *  (non-extern) named-operation body path — see the call site in
+ *  `renderEntity` below; extern check bodies, event-sourced init, and
+ *  appliers are out of scope for this slice. */
+export interface OpFragment {
+  fragmentText: string;
+  subRegions: SourceMapSubRegion[];
+}
 
 /** True for a field type that is a collection of references
  * (`Id<T>[]`) — persisted via a join table, not a column. */
@@ -82,6 +101,18 @@ export function renderEntity(
    *  signature with the union type and threads `returnUnion` into the body's
    *  render context so tagged `return`s build the right variant record. */
   operationReturnUnions?: Map<string, { name: string; members: UnionMember[] }>,
+  /** Source-map Milestone 3 (statement regions) — when passed, the REGULAR
+   *  named-operation body loop below pushes one `OpFragment` per operation.
+   *  Only the root render call gets this (entity parts carry no
+   *  operations); allocated by the caller ONLY when a recorder is present
+   *  (`src/generator/dotnet/index.ts`), so a no-`--sourcemap` run pays no
+   *  per-statement bookkeeping cost. */
+  opFragments?: OpFragment[],
+  /** Dotted construct prefix for this entity's operations, e.g.
+   *  `"Sales.Order"` — combined with each op's name to build the
+   *  `statementSubRegions` construct id `"Sales.Order.confirm"`.  Required
+   *  whenever `opFragments` is passed. */
+  constructPrefix?: string,
 ): string {
   // `operations` is the discriminator between EnrichedAggregateIR and
   // EnrichedEntityPartIR — wrapped in a type predicate so the union
@@ -315,16 +346,30 @@ export function renderEntity(
     const retType = op.returnType ? renderCsType(op.returnType) : "void";
     opLines.push(`    ${visibility} ${retType} ${upperFirst(op.name)}(${params})`);
     opLines.push("    {");
-    const body = renderCsStatements(
-      op.statements,
-      retUnion ? { ...renderCtx, returnUnion: retUnion } : renderCtx,
-      {
-        emitTrace,
-        aggregate: entity.name,
-        op: op.name,
-        eventSourced,
-      },
-    );
+    // Chunked (one string per statement) rather than the pre-joined
+    // `renderCsStatements` here — `renderCsStatements` IS `chunks.join("\n")`
+    // by construction, so `body` below is byte-identical either way, but the
+    // per-chunk list lets us surface per-statement sub-regions to the caller
+    // that owns the recorder + this file's final content (source-map
+    // Milestone 3).
+    const opRenderCtx = retUnion ? { ...renderCtx, returnUnion: retUnion } : renderCtx;
+    const chunks = renderCsStatementChunks(op.statements, opRenderCtx, {
+      emitTrace,
+      aggregate: entity.name,
+      op: op.name,
+      eventSourced,
+    });
+    const body = chunks.join("\n");
+    if (opFragments && chunks.length > 0) {
+      opFragments.push({
+        fragmentText: body,
+        subRegions: statementSubRegions(
+          op.statements,
+          chunks,
+          `${constructPrefix ?? entity.name}.${op.name}`,
+        ),
+      });
+    }
     if (body.length > 0) opLines.push(body);
     if (!op.returnType) {
       opLines.push(

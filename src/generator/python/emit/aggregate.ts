@@ -1,3 +1,4 @@
+import type { SourceMapSubRegion } from "../../../generator/_trace/sourcemap.js";
 import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
 import {
   type AggregateIR,
@@ -20,8 +21,25 @@ import { snake } from "../../../util/naming.js";
 import { provColumn, provenancedFieldsOf } from "../emit/provenance.js";
 import { emptyPyTypeImports, visitPyTypeImports } from "../py-type-imports.js";
 import { collectPyExprImports, renderPyExpr, renderPyType } from "../render-expr.js";
-import { renderPyStatements } from "../render-stmt.js";
+import {
+  renderPyStatementChunks,
+  renderPyStatements,
+  statementSubRegions,
+} from "../render-stmt.js";
 import { domainServiceImportLines } from "./domain-service.js";
+
+/** One operation body's exact emitted text plus its per-statement
+ *  sub-regions — surfaced by `renderPyAggregate` (when `opFragments` is
+ *  passed) to the caller that owns the recorder and the final file content
+ *  (`src/generator/python/index.ts`), which anchors it via
+ *  `SourceMapRecorder.fragment`.  Covers only the REGULAR (non-extern)
+ *  named-operation body path — see the call site in `renderEntity` below;
+ *  extern check bodies / event-sourced init / appliers are out of scope for
+ *  this milestone. */
+export interface OpFragment {
+  fragmentText: string;
+  subRegions: SourceMapSubRegion[];
+}
 
 // ---------------------------------------------------------------------------
 // Aggregate emission — `app/domain/<snake(agg)>.py`.  One module per
@@ -78,13 +96,29 @@ export function renderPyAggregate(
    *  threaded for auth deployables; principal stamps without auth are
    *  gated upstream (loom.python-stamp-unsupported). */
   principalIdAttr?: string | null,
+  /** Collector for source-map Milestone 3 statement sub-regions — only
+   *  allocated by the caller when a recorder is present (zero cost
+   *  otherwise).  Only the root shape carries operations, so only its
+   *  `renderEntity` call contributes fragments. */
+  opFragments?: OpFragment[],
 ): string {
   // Provenance (provenance.md): the runtime is emitted only when the
   // aggregate hosts a `provenanced` field (root fields only — captured at
   // named-operation write sites, which target root columns).
   const emitProvenance = provenancedFieldsOf(agg).length > 0;
   const shapes = [...agg.parts.map((p) => partShape(p, agg)), rootShape(agg)];
-  const rendered = shapes.map((s) => renderEntity(s, emitTrace, principalIdAttr, emitProvenance));
+  // Entity parts never carry operations (see `partShape`), so they never
+  // contribute op fragments — only the root shape's render call does.
+  const rendered = shapes.map((s) =>
+    renderEntity(
+      s,
+      emitTrace,
+      principalIdAttr,
+      emitProvenance,
+      ctx.name,
+      s.isRoot ? opFragments : undefined,
+    ),
+  );
   const body = rendered.join("\n\n\n");
 
   // --- import resolution -------------------------------------------------
@@ -330,6 +364,10 @@ function renderEntity(
   emitTrace = false,
   principalIdAttr?: string | null,
   emitProvenance = false,
+  /** Bounded-context name — only needed to build the `ctx.agg.op` construct
+   *  id for `opFragments`; unused when `opFragments` is undefined. */
+  ctxName?: string,
+  opFragments?: OpFragment[],
 ): string {
   // Provenanced fields (root-only) carry a co-located `_<field>_provenance`
   // backing field holding the current lineage — initialised to None in the
@@ -446,11 +484,24 @@ function renderEntity(
     }
     const prefix = op.visibility === "public" ? "" : "_";
     const retType = op.returnType ? renderPyOperationReturnType(op.returnType) : "None";
-    const body = renderPyStatements(op.statements, undefined, {
+    // Chunked (one string per statement) rather than the pre-joined
+    // `renderPyStatements` here — `renderPyStatements` IS `chunks.join("\n")`
+    // by construction, so `body` below is byte-identical either way, but the
+    // per-chunk list lets us surface per-statement sub-regions to the caller
+    // that owns the recorder + this file's final content (source-map
+    // Milestone 3, regular named-operation bodies only — see `OpFragment`).
+    const chunks = renderPyStatementChunks(op.statements, undefined, {
       eventSourced: e.eventSourced,
       trace,
       emitProvenance,
     });
+    const body = chunks.join("\n");
+    if (opFragments && chunks.length > 0) {
+      opFragments.push({
+        fragmentText: body,
+        subRegions: statementSubRegions(op.statements, chunks, `${ctxName}.${e.name}.${op.name}`),
+      });
+    }
     return [
       "",
       `    def ${prefix}${snake(op.name)}(${params.join(", ")}) -> ${retType}:`,

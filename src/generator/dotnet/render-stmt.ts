@@ -31,8 +31,30 @@ export function renderCsStatements(
   ctx: CsRenderContext = DEFAULT_CTX,
   traceCtx: TraceCtx = NO_TRACE,
 ): string {
-  return stmts.map((s, i) => renderCsStatement(s, i, ctx, traceCtx)).join("\n");
+  return renderCsStatementChunks(stmts, ctx, traceCtx).join("\n");
 }
+
+/** Same rendering as `renderCsStatements`, but one (possibly multi-line)
+ *  string per statement instead of the pre-joined whole — exactly the map
+ *  `renderCsStatements` joins with `"\n"` today, so `chunks.join("\n")` is
+ *  byte-identical to it.  Lets a caller that owns the final file content
+ *  (the .NET entity emitter) recover each statement's own line span inside
+ *  an operation body for `SourceMapRecorder.fragment` — see
+ *  `statementSubRegions` (re-exported below). */
+export function renderCsStatementChunks(
+  stmts: StmtIR[],
+  ctx: CsRenderContext = DEFAULT_CTX,
+  traceCtx: TraceCtx = NO_TRACE,
+): string[] {
+  return stmts.map((s, i) => renderCsStatement(s, i, ctx, traceCtx));
+}
+
+// `statementSubRegions` lives in src/generator/_trace/sourcemap.ts —
+// origin-generic (works for any statement IR carrying `origin?`), so every
+// backend's chunk-producing renderer shares the one cursor walk.  Re-exported
+// here so call sites in this backend's emitters can import it alongside
+// `renderCsStatementChunks` from a single module.
+export { statementSubRegions } from "../_trace/sourcemap.js";
 
 /** Namespaces a statement body reaches into beyond the SDK's implicit
  *  usings — the union of `collectCsExprUsings` over every expression

@@ -46,16 +46,38 @@ export function renderPyStatements(
   indent: string = METHOD_BODY_INDENT,
   ctx: PyStmtCtx = {},
 ): string {
+  return renderPyStatementChunks(stmts, indent, ctx).join("\n");
+}
+
+/** Same rendering as `renderPyStatements`, but one (possibly multi-line)
+ *  string per statement instead of the pre-joined whole — exactly the map
+ *  `renderPyStatements` joins with `"\n"` today, so `chunks.join("\n")` is
+ *  byte-identical to it.  Lets a caller that owns the final file content
+ *  (the Python aggregate emitter) recover each statement's own line span
+ *  inside an operation body for `SourceMapRecorder.fragment` — see
+ *  `statementSubRegions` in `src/generator/_trace/sourcemap.ts`.
+ *
+ *  Threads the SAME two running counters `renderPyStatements` always has
+ *  (`preIndex` bumped only on a `precondition` statement, `provIndex` bumped
+ *  only on a provenanced `assign`/`add`) — a chunk's `__pre_N_ok` / `__prov_N`
+ *  temp names must match what the pre-joined renderer would have produced
+ *  for the exact same statement at the exact same position, so this cannot
+ *  be a plain positional index. */
+export function renderPyStatementChunks(
+  stmts: StmtIR[],
+  indent: string = METHOD_BODY_INDENT,
+  ctx: PyStmtCtx = {},
+): string[] {
   let preIndex = 0;
   let provIndex = 0;
-  return stmts
-    .map((s) => {
-      const pre = s.kind === "precondition" ? preIndex++ : 0;
-      const pi = (s.kind === "assign" || s.kind === "add") && s.prov ? provIndex++ : 0;
-      return renderPyStatement(s, indent, ctx, pre, pi);
-    })
-    .join("\n");
+  return stmts.map((s) => {
+    const pre = s.kind === "precondition" ? preIndex++ : 0;
+    const pi = (s.kind === "assign" || s.kind === "add") && s.prov ? provIndex++ : 0;
+    return renderPyStatement(s, indent, ctx, pre, pi);
+  });
 }
+
+export { statementSubRegions } from "../_trace/sourcemap.js";
 
 /** Bounded walk over the RHS expression collecting leaf inputs —
  *  `this`-props, params and let-bindings (and member-access chains rooted at
