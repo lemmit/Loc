@@ -1,0 +1,116 @@
+name: Elixir / Vanilla VO wire round-trip (runtime e2e)
+
+# Boots the generated vanilla Phoenix backend against a real postgres
+# sidecar, POSTs a value-object-bearing aggregate, then GETs it back and
+# asserts the VO subfields survive wire serialisation.
+#
+# The runtime regression gate for issue #1660 (fixed in #1664): a VO
+# persists as an untyped jsonb `:map` and reloads STRING-keyed, but the
+# emitted `serialize_<vo>/1` used to read subfields via struct-dot
+# (`record.amount`), which `KeyError`s on a string-keyed map — so
+# serialising ANY DB-loaded VO-bearing aggregate crashed (`GET /…/:id`
+# → 500).  This shipped invisibly because NO other elixir boot fixture
+# uses a value object, and `mix compile` is blind to the runtime crash.
+#
+# Reverting the #1664 fallback (`Map.get(record, :amount, Map.get(record,
+# "amount"))` → `record.amount`) turns this job red.
+#
+# Triggers `push: main` + manual dispatch, plus a per-PR `run-e2e` label
+# (the serializer blast radius is small and CI-invisible otherwise, so a
+# labelled pre-merge run is the honest gate).  Cold path is ~3-5min.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/elixir/render-expr.ts'
+      - 'src/generator/elixir/vanilla/wire-serialize.ts'
+      - 'src/generator/elixir/vanilla/**'
+      - 'src/platform/elixir.ts'
+      - 'test/e2e/vo-roundtrip-elixir-vanilla.test.ts'
+      - 'package.json'
+      - '.github/workflows/elixir-vanilla-vo-e2e.yml'
+  workflow_dispatch:
+  # On-demand per-PR run: apply the `run-e2e` label to a PR to run this
+  # otherwise push:main-only suite against that branch before merge.
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  vanilla-vo-e2e:
+    runs-on: ubuntu-latest
+    # Skip the labeled trigger unless it's specifically `run-e2e`; push
+    # and manual (`workflow_dispatch`) runs always proceed.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.label.name == 'run-e2e'
+    # Cold path: hex deps + plain Phoenix compile + postgres pull is
+    # ~3-5min (plain Ecto dep set).  10min is comfortable.
+    timeout-minutes: 10
+    # Service container — pre-starts postgres on the host network with a
+    # built-in healthcheck before any step runs.
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: api
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # erlef/setup-beam — pinned so the dep set resolves deterministically.
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.3'
+          elixir-version: '1.18.4'
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      # Cache the hex dep tree + _build outputs across runs.  The key
+      # tracks the vanilla shell-emit module that emits mix.exs so a dep
+      # change mints a fresh entry, but unrelated emitter tweaks reuse
+      # the warm cache.
+      - name: Cache hex deps + _build
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.hex
+            ~/.mix
+          key: hex-mix-vanilla-${{ hashFiles('src/generator/elixir/vanilla/shell-emit.ts') }}
+          restore-keys: |
+            hex-mix-vanilla-
+
+      - name: Run vanilla VO wire round-trip e2e
+        env:
+          LOOM_VO_E2E_PHOENIX_VANILLA: '1'
+          # The test reads LOOM_OBS_PG_URL and skips its in-test
+          # `docker run postgres` step when the URL is supplied.
+          LOOM_OBS_PG_URL: 'postgres://postgres:postgres@127.0.0.1:5432'
+          LOOM_OBS_PG_DB: 'api'
+        run: npx vitest run test/e2e/vo-roundtrip-elixir-vanilla.test.ts --reporter=verbose
+
+      - name: Surface failure context
+        if: failure()
+        run: |
+          echo '## Vanilla Phoenix VO wire round-trip failed' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'A 500 on `GET /api/invoices/:id` is the #1660 regression: a jsonb-loaded value object reloads string-keyed, and the wire serializer must read subfields key-type-agnostically (`Map.get(record, :amount, Map.get(record, "amount"))`), not via struct-dot.' >> $GITHUB_STEP_SUMMARY
