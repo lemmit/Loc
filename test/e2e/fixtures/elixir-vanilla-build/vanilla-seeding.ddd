@@ -13,6 +13,12 @@ system Seeding {
         tier: Tier
         invariant size >= 0
         derived display: string = name
+        // Computed derived — projected into serialize/1 (Slice 5): the wire
+        // serializer emits `record.size * 2`, not a skipped field.
+        derived doubleSize: int = size * 2
+        // Derived-of-derived — NOT record-evaluable (`doubleSize` is no column),
+        // so it stays skipped rather than emitting a KeyError-raising read.
+        derived quadInfo: int = doubleSize * 2
       }
 
       repository Widgets for Widget { }

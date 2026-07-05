@@ -481,8 +481,9 @@ ${((): string => {
         headVar: "row",
         bind: "    record = row.data",
         idExpr: "row.id",
+        contextModule: facadeMod,
       })
-    : renderWireSerialize(agg, ctx);
+    : renderWireSerialize(agg, ctx, { contextModule: facadeMod });
   const nested = helpers.length > 0 ? `\n\n${helpers.join("\n\n")}` : "";
   return `${serialize}${nested}${refIdsHelper}`;
 })()}
