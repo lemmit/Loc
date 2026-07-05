@@ -46,17 +46,40 @@ system Billder {
     amountDue: decimal
     // — what `with tenantOwned` expands to —
     tenantId: string internal
-    stamp onCreate { tenantId := currentUser.tenantId }
+    dataKey: string? internal
+    stamp onCreate {
+      tenantId := currentUser.tenantId
+      dataKey := currentUser.orgPath
+    }
     filter this.tenantId == currentUser.tenantId
   }
   ```
 
-  The column lands in the migrations automatically — **with a derived
-  non-unique `<table>_tenant_id_idx`** (every tenant read prefixes on that
-  column; derived in the shared `MigrationsIR`, so all DB backends emit it);
-  `internal` keeps `tenantId` out of create inputs (the client can never pass
-  it); the filter is AND-ed into **every** generated read on all five
-  backends; the stamp copies the claim at create.
+  The `tenantId` column lands in the migrations automatically — **with a
+  derived non-unique `<table>_tenant_id_idx`** (every tenant read prefixes on
+  that column; derived in the shared `MigrationsIR`, so all DB backends emit
+  it); `internal` keeps both columns out of create inputs (the client can
+  never pass them); the filter is AND-ed into **every** generated read on all
+  five backends; the stamp copies the claim at create.
+
+  **`dataKey`** (multi-tenancy Phase 2, plan P2.3) is the materialized
+  DataKey path, stamped unconditionally from `currentUser.orgPath` — the
+  **same** claim-copy stamp mechanism as `tenantId`, riding the identical
+  `contextStamp` pipeline (no per-backend code: every backend already renders
+  `currentUser.orgPath` for the P2.1/P2.2 filter use-site; a stamp assignment
+  is the same expression renderer, a different call site). It is stamped on
+  every `tenantOwned` aggregate regardless of whether the registry has opted
+  into `implements tenantRegistry` — under flat tenancy `orgPath` resolves to
+  the tenancy claim itself (P2.1's fallback, a correct root-only path); once
+  the registry opts into hierarchy, `orgPath` resolves to the real
+  materialized path with nothing here needing to change. Unlike `tenantId`,
+  `dataKey` is **not just `internal`** — `authorization.md §2` calls it a
+  persistence column only, so `wireFieldsForAggregate`
+  (`src/ir/enrich/enrichments.ts`) drops it from `wireShape` **entirely**: it
+  never appears in `.loom/wire-spec.json`, a DTO, or any read response — a
+  stricter exclusion than `tenantId`'s (which stays in `wireShape`, just
+  filtered out of API reads). No read-side filtering rides `dataKey` yet —
+  that is the `policy { data {} }` ladder, P2.4.
 - **`crossTenant`** — an aggregate-header flag (like `abstract`), for shared
   reference data (`Plan`, `Country`). A stance marker: attaches nothing,
   generates nothing — it exists so "no tenant filter" is a declared decision,
@@ -159,17 +182,19 @@ capability the aggregate *wrote* carries the fields (unfoldable, reviewable).
 The filter and stamp ride the standard capability-filter/stamp pipeline —
 tenancy adds **no bespoke backend code**:
 
-| Backend | Read scope | Create stamp |
+| Backend | Read scope | Create stamp (`tenantId` + `dataKey`) |
 |---|---|---|
-| node (Hono/Drizzle) | `.where(and(…, eq(t.tenantId, requireCurrentUser().tenantId)))` on every repository read | `stampInsert` copies the claim off the ambient principal (no-op for system/seed saves) |
-| .NET (EF Core) | `HasQueryFilter(x => x.TenantId == RequestContext.Current!.CurrentUser!.TenantId)` | `SaveChangesInterceptor` sets the claim on `Added` |
-| elixir (Ecto) | fail-closed `^(current_user && current_user.tenant_id)` match in every read | `put_change(:tenant_id, current_user && current_user.tenant_id)` |
-| python (FastAPI/SQLAlchemy) | `.where(...)` on every read | `self._tenant_id = current_user.tenant_id` in the create factory |
-| java (Spring/JPA) | principal predicate composed into the repository specification | `@PrePersist` hook reading `CurrentUserAccessor.currentOrNull()` |
+| node (Hono/Drizzle) | `.where(and(…, eq(t.tenantId, requireCurrentUser().tenantId)))` on every repository read | `stampInsert` copies both claims off the ambient principal — `tenantId: currentUser.tenantId, dataKey: currentUser.orgPath` (no-op for system/seed saves) |
+| .NET (EF Core) | `HasQueryFilter(x => x.TenantId == RequestContext.Current!.CurrentUser!.TenantId)` | `SaveChangesInterceptor` sets both on `Added` — `x.TenantId` off `…CurrentUser!.TenantId`, `x.DataKey` off `…CurrentUser!.OrgPath` |
+| elixir (Ecto) | fail-closed `^(current_user && current_user.tenant_id)` match in every read | `put_change(:tenant_id, current_user && current_user.tenant_id) \|> put_change(:data_key, current_user && current_user.org_path)` |
+| python (FastAPI/SQLAlchemy) | `.where(...)` on every read | `self._tenant_id = current_user.tenant_id` + `self._data_key = current_user.org_path` in the create factory |
+| java (Spring/JPA) | principal predicate composed into the repository specification | `@PrePersist` hook reading `CurrentUserAccessor.currentOrNull()`, setting `this.tenantId = currentUser.tenantId()` and `this.dataKey = currentUser.orgPath()` |
 
-Frontends need nothing: enforcement is server-side, and `tenantId` never
-appears in create forms. (It does appear in read DTOs, like `softDeletable`'s
-`isDeleted` — internals are wire-visible today.)
+Frontends need nothing: enforcement is server-side, and neither `tenantId` nor
+`dataKey` ever appears in create forms. `tenantId` (like `softDeletable`'s
+`isDeleted`) is wire-visible on reads today — internals aren't hidden from
+read DTOs by default. `dataKey` is the exception: it is dropped from
+`wireShape` entirely (see above), so it never reaches any read DTO either.
 
 Cross-tenant reads of another tenant's row return **404** (existence hidden),
 falling out of the filter semantics: the row simply isn't found.
@@ -243,12 +268,12 @@ five backends**, each through its own request-scoped principal seam:
 Phase 1 is flat tenancy (`local` reads — tenant-id equality). The registry
 self-scope + claim-less bootstrap shipped as Phase 1b (above). The registry tree
 (`implements tenantRegistry` → `parent` + managed `dataKey`) + the `orgPath`
-registry read on all five backends shipped as Phase 2 P2.2 (above). Deferred:
+registry read on all five backends shipped as Phase 2 P2.2 (above). Stamping
+`dataKey` on every `tenantOwned` aggregate (P2.3, above) shipped too. Deferred:
 
 - **The `claim`/`registry` cross-reference upgrade** (capstone decision 5) —
   byte-identical surface, tooling win (navigation/rename); still open.
 - **`tenant_id` index** — blocked on the index surface
   ([`proposals/uniqueness-and-indexes.md`](proposals/uniqueness-and-indexes.md)).
-- **Stamping `dataKey` on `tenantOwned` aggregates** (P2.3) + the
-  **`deep`/`global` `policy {}` ladder** (P2.4) + the **materialized-path
+- **The `deep`/`global` `policy {}` ladder** (P2.4) + the **materialized-path
   index** (P2.5) — see [`plans/multi-tenancy-phase2.md`](plans/multi-tenancy-phase2.md).
