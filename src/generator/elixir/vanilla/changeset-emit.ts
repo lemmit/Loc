@@ -21,6 +21,10 @@ import type {
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { singleFieldConstraints } from "../../../ir/validate/invariant-classify.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import {
+  aggregateHasResidualInvariants,
+  renderInvariantValidatorFn,
+} from "./changeset-invariant-emit.js";
 import { ectoValidator, voHasConstraints } from "./changeset-validators.js";
 import { isVanillaDocAgg, renderDocChangeset } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
@@ -317,6 +321,17 @@ ${keyAliasPairs.join(",\n")}
   });
   const uniqueBlock = uniqueLines.length > 0 ? `\n${uniqueLines.join("\n")}` : "";
 
+  // Cross-field aggregate invariants (`handle != email`) — no single-field
+  // native chain fits, so they run through a custom `validate_invariants/1`
+  // (changeset-invariant-emit).  Piped onto BOTH the create (`base_changeset`)
+  // and PATCH (`update_changeset`) seams so the rule holds on every write path,
+  // matching the other backends' domain-floor `AssertInvariants()`.  Empty when
+  // the aggregate has none → byte-identical.
+  const hasResidualInvariants = aggregateHasResidualInvariants(agg);
+  const invBlock = hasResidualInvariants ? "\n    |> validate_invariants()" : "";
+  const invariantFn = renderInvariantValidatorFn(agg, `${appModule}.${ctxModule}`);
+  const invariantFnBlock = invariantFn ? `\n\n${invariantFn}` : "";
+
   // Dedicated `update_changeset/2` — the generic PATCH seam (repository `update`
   // routes here when `aggregateNeedsUpdateChangeset` is true).  It differs from
   // `base_changeset` (the create seam) in three ways, so the aggregate stays a
@@ -352,7 +367,7 @@ ${keyAliasPairs.join(",\n")}
     attrs = __normalize_keys(attrs)
     ${updateVcPrep}struct
     |> cast(attrs, ${updateColsList})
-    |> validate_required(${updateReqList})${validatorBlock}${castAssocBlock}${voBlock}${uniqueBlock}${optimisticLine}
+    |> validate_required(${updateReqList})${validatorBlock}${castAssocBlock}${voBlock}${uniqueBlock}${invBlock}${optimisticLine}
   end`
     : "";
 
@@ -396,8 +411,8 @@ defmodule ${changesetMod} do
     attrs = __normalize_keys(attrs)
     ${valueCollections.length > 0 ? "attrs = prepare_vc_attrs(attrs)\n\n    " : ""}struct
     |> cast(attrs, @all_fields)
-    |> validate_required(@required_fields)${validatorBlock}${castEmbedBlock}${castAssocBlock}${voBlock}${uniqueBlock}
-  end${updateChangesetBlock}${keyNormalizeHelper}${voHelper}${normalizeHelper}${ordinalHelper}
+    |> validate_required(@required_fields)${validatorBlock}${castEmbedBlock}${castAssocBlock}${voBlock}${uniqueBlock}${invBlock}
+  end${updateChangesetBlock}${invariantFnBlock}${keyNormalizeHelper}${voHelper}${normalizeHelper}${ordinalHelper}
 
 ${actionHelpers}
 end

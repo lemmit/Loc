@@ -31,6 +31,7 @@ import { renderReadingServiceContextFns } from "../domain-service-emit.js";
 import type { RenderCtx } from "../render-expr.js";
 import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
 import { aggregateUsesPrincipalContextFilter } from "./capability-filter.js";
+import { aggregateHasResidualInvariants } from "./changeset-invariant-emit.js";
 import {
   isVanillaDocAgg,
   renderDocNamedOpFunction,
@@ -572,6 +573,21 @@ function renderNamedOpFunction(
   const putBlock = putBodies.map((b) => `\n    |> ${b}`).join("");
   const putBlock6 = putBodies.map((b) => `\n      |> ${b}`).join("");
 
+  // Operation persistence re-runs the aggregate's cross-field invariants (the
+  // audit's "operation persist skips validation"): the plain `change(%{})` +
+  // `put_change` path bypasses every changeset validator, so a `handle := …`
+  // mutation could break `handle != email`.  Pipe the persisted changeset
+  // through the changeset module's `validate_invariants/1` before the write so an
+  // unmet invariant returns `{:error, changeset}` (422) instead of committing.
+  // Gated on residual invariants → byte-identical when the aggregate has none.
+  const changesetMod = `${aggModule}Changeset`;
+  const invPipe = aggregateHasResidualInvariants(agg)
+    ? `\n    |> ${changesetMod}.validate_invariants()`
+    : "";
+  const invPipe6 = aggregateHasResidualInvariants(agg)
+    ? `\n      |> ${changesetMod}.validate_invariants()`
+    : "";
+
   const prelude = [...paramBinds, ...bodyLines].join("\n");
   const preludeBlock = prelude ? `${beforeBind}${prelude}\n` : beforeBind;
 
@@ -606,7 +622,7 @@ function renderNamedOpFunction(
         // rollback drops the events too.
         `    changeset =
       record
-      |> Ecto.Changeset.change(%{})${putBlock6}
+      |> Ecto.Changeset.change(%{})${putBlock6}${invPipe6}
 
     tx_result =
       ${appModule}.Repo.transaction(fn ->
@@ -630,7 +646,7 @@ ${dispatchBlock}
     end`
       : `    changeset =
       record
-      |> Ecto.Changeset.change(%{})${putBlock6}
+      |> Ecto.Changeset.change(%{})${putBlock6}${invPipe6}
 
     ${appModule}.Repo.transaction(fn ->
       case ${repoMod}.persist_change(changeset) do
@@ -649,7 +665,7 @@ ${txTail.join("\n")}
         // reaches the context Dispatcher (saga seam) + the raw broadcast.
         `    changeset =
       record
-      |> Ecto.Changeset.change(%{})${putBlock6}
+      |> Ecto.Changeset.change(%{})${putBlock6}${invPipe6}
 
     case ${repoMod}.persist_change(changeset) do
       {:ok, saved} ->
@@ -660,7 +676,7 @@ ${dispatchBlock}
         {:error, reason}
     end`
       : `    record
-    |> Ecto.Changeset.change(%{})${putBlock}
+    |> Ecto.Changeset.change(%{})${putBlock}${invPipe}
     |> ${repoMod}.persist_change()`;
   }
 
