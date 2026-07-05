@@ -149,13 +149,17 @@ the conforming backends, and the fix that established it.
   zero-value `false`/`null`.
 - **Trigger.** `active: bool = true`; a create body omitting `active`.
 - **Observable.** `POST {}` (no `active`) reads back `{"active":true}`.
-- **Conforms.** node, **python** (dotnet/java/elixir still targets).
-- **Provenance.** July full-code-review finding B14. Tier: **T1** — gated per-PR
-  on node and python (A6.2). The python behavioral gate **found and closed** a
-  real parity bug here: the FastAPI create model hardcoded `active: bool = False`
-  (the zero value) instead of the declared default; fixed by rendering the
-  field's lowered `default` expr in the create request field
-  (`routes-builder.ts`).
+- **Conforms.** node, **python**, **java** (dotnet/elixir still targets).
+- **Provenance.** July full-code-review finding B14; Java closed by RST-10. Tier:
+  **T1** — gated per-PR on node and python (A6.2) and on Java via the behavioral
+  tier. The python behavioral gate **found and closed** a real parity bug here:
+  the FastAPI create model hardcoded `active: bool = False` (the zero value)
+  instead of the declared default; fixed by rendering the field's lowered
+  `default` expr in the create request field (`routes-builder.ts`). Java (RST-10)
+  hit the same class — the Spring create record made the defaulted field a
+  required primitive and 400ed on an omitted key; fixed by boxing the create-DTO
+  component and materializing the declared default in the request→domain mapping
+  (`emit/dto.ts` + `emit/service.ts`).
 
 ### RS-7 · Value-object subfields survive a jsonb round-trip
 - **Guarantee.** A value object stored inline as jsonb rehydrates so that

@@ -11,7 +11,12 @@ import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../../util/naming.js";
-import { javaValueTypeForId, renderJavaExpr, renderJavaType } from "../render-expr.js";
+import {
+  collectJavaExprImports,
+  javaValueTypeForId,
+  renderJavaExpr,
+  renderJavaType,
+} from "../render-expr.js";
 import { declaredFinds, isPagedFind, unionFindAsOptionalTwin } from "./repository.js";
 import { returnUnionSpec } from "./unions.js";
 import { aggHasCreateWireValidator, renderJavaValidators } from "./validator.js";
@@ -67,10 +72,22 @@ export function renderJavaService(
   const createParams: readonly { name: string; type: TypeIR; optional?: boolean }[] =
     ctx.esCreateParams ?? createInputs;
   for (const f of createParams) collectWireToDomainImports(f.type, imports);
-  const createLets = createParams.map(
-    (f) =>
-      `        var ${f.name} = ${wireToDomain(eff(f.type, !!f.optional), `request.${f.name}()`)};`,
-  );
+  const createLets = createParams.map((f) => {
+    const raw = `request.${f.name}()`;
+    // A create-input field with a declared default (`field: T = <expr>`) is
+    // boxed/nullable in the request record (see dto.ts): an omitted key arrives
+    // null, so materialize the declared default here — parity with node/python
+    // (RS-6 / RST-10).  Fields without a default keep their existing mapping.
+    const dflt = ctx.esCreateParams ? undefined : (f as FieldIR).default;
+    if (dflt) {
+      // The rendered default may reference an imported domain type (e.g. a
+      // `decimal` default → `new BigDecimal("0")`, needing java.math.BigDecimal)
+      // that the wire→domain conversion alone doesn't pull in.
+      collectJavaExprImports(dflt, imports);
+      return `        var ${f.name} = ${raw} != null ? ${wireToDomain(f.type, raw)} : ${renderJavaExpr(dflt)};`;
+    }
+    return `        var ${f.name} = ${wireToDomain(eff(f.type, !!f.optional), raw)};`;
+  });
   const createArgs = createParams.map((f) => f.name).join(", ");
   // Lifecycle stamps (audit / softDelete) are persist-time on Java: the entity
   // carries Spring Data JPA auditing annotations (@CreatedDate / @CreatedBy /
