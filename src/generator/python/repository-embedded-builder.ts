@@ -204,7 +204,7 @@ function hydrateMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContextIR):
   }
   return lines(
     `    async def _hydrate(self, row: ${row}) -> ${agg.name}:`,
-    `        return ${agg.name}._create(`,
+    `        return ${agg.name}._rehydrate(`,
     kwargs.map((k) => `            ${k},`),
     "        )",
   );

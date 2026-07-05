@@ -7,7 +7,7 @@
 // called from save paths.  This file owns the find half; the two leaves it
 // builds on live alongside it:
 //
-//   - repository-find-hydrate.ts   — row → domain `_create(...)`
+//   - repository-find-hydrate.ts   — row → domain `_rehydrate(...)`
 //   - repository-find-predicate.ts — `where` → Drizzle + capability filters
 //
 // Those leaves' externally-consumed symbols are re-exported below so this

@@ -662,7 +662,7 @@ function tphAssertNarrow(
 
 type ConstructSink = { kind: "return" } | { kind: "append"; into: string };
 
-/** Build the `<Agg>._create(...)` construction from `row` + the in-scope
+/** Build the `<Agg>._rehydrate(...)` construction from `row` + the in-scope
  *  `<collection>_rows` variables — the shared tail of `_hydrate` (one row) and
  *  `_hydrate_many` (bulk).  `ind` is the leading indent; `sink` is whether the
  *  built aggregate is returned or appended to a result list. */
@@ -699,17 +699,17 @@ function buildAggConstruction(
     );
   }
   const provFields = provenancedFieldsOf(agg);
-  // Fast path: a plain `return <Agg>._create(...)` when nothing needs the
+  // Fast path: a plain `return <Agg>._rehydrate(...)` when nothing needs the
   // instance bound after construction (byte-identical to the pre-refactor
   // single-row emission).
   if (sink.kind === "return" && provFields.length === 0) {
     return [
-      `${ind}return ${agg.name}._create(`,
+      `${ind}return ${agg.name}._rehydrate(`,
       ...kwargs.map((k) => `${ind}    ${k},`),
       `${ind})`,
     ];
   }
-  const out: string[] = [`${ind}__agg = ${agg.name}._create(`];
+  const out: string[] = [`${ind}__agg = ${agg.name}._rehydrate(`];
   out.push(...kwargs.map((k) => `${ind}    ${k},`));
   out.push(`${ind})`);
   // Restore co-located provenance lineage from the row's jsonb column — the
@@ -878,7 +878,7 @@ function partHydrateMethod(
   ];
   return lines(
     `    def _hydrate_${snake(p.name)}(self, row: ${partRow}) -> ${p.name}:`,
-    `        return ${p.name}._create(`,
+    `        return ${p.name}._rehydrate(`,
     kwargs.map((k) => `            ${k},`),
     "        )",
   );

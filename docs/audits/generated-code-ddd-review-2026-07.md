@@ -256,6 +256,15 @@ divergent semantics across backends today.)
 mutator; pin the cross-backend semantics ("rehydration trusts the store") in
 conformance.
 
+> **✅ FIXED** — repositories on node + python now hydrate through a named
+> non-asserting **`_rehydrate`** (the asserting `_create` stays the
+> domain-construction path — in-op part builds use it; the ES `_fromEvents`
+> shell switches to `_rehydrate` too). Pinned as **RS-10** in
+> `docs/conformance-semantics.md` / `test/conformance/semantics-rules.ts`,
+> gated per-PR by `test/conformance/rehydration-trust-parity.test.ts`;
+> runtime-verified on generated Python (invalid legacy row loads + is
+> repairable; create/mutators still raise).
+
 ### S7 · Repository ports: missing or leaking (P2)
 
 - **Hono/Python**: no domain-owned repository abstraction at all — and the

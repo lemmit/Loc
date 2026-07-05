@@ -49,14 +49,14 @@ describe("Hono/Drizzle document-persistence emission (normalised(false))", () =>
     expect(schema).toContain('export const customers = pgTable("customers", {');
   });
 
-  it("repository round-trips through toDoc/fromDoc + _create", () => {
+  it("repository round-trips through toDoc/fromDoc + _rehydrate", () => {
     const repo = files.get("db/repositories/cart-repository.ts")!;
     expect(repo).toContain("const data = cartToDoc(aggregate);");
     expect(repo).toContain("return cartFromDoc(row.data as CartDoc);");
-    // fromDoc rebuilds through the same _create factory the normalised
+    // fromDoc rebuilds through the same _rehydrate factory the normalised
     // hydrate uses, rehydrating contained parts.
     expect(repo).toContain("function cartFromDoc(d: CartDoc): Cart {");
-    expect(repo).toContain("Cart._create({");
+    expect(repo).toContain("Cart._rehydrate({");
     expect(repo).toContain("items: (d.items ?? []).map((x) => cartItemFromDoc(x))");
     expect(repo).toContain(
       "unitPrice: new Money(Number(d.unitPrice.amount), d.unitPrice.currency)",
@@ -103,7 +103,7 @@ describe("Hono/Drizzle document-persistence emission (normalised(false))", () =>
     expect(repo).toContain(
       "const items = ((row.items ?? []) as WishItemDoc[]).map((x) => wishItemFromDoc(x));",
     );
-    expect(repo).toContain("Wishlist._create({ id: Ids.WishlistId(row.id)");
+    expect(repo).toContain("Wishlist._rehydrate({ id: Ids.WishlistId(row.id)");
     // Save writes root columns + items jsonb in one upsert.
     expect(repo).toContain("items: aggregate.items.map((e) => wishItemToDoc(e))");
     expect(repo).toContain(".onConflictDoUpdate({ target: schema.wishlists.id");

@@ -162,6 +162,23 @@
         "generated-code-review-2026-06-30"
       ],
       "tier": "behavioral"
+    },
+    {
+      "id": "RS-10",
+      "title": "Rehydration trusts the store — invariants guard transitions only",
+      "trigger": "an aggregate with an invariant; a persisted row that predates a tightened invariant is read back",
+      "observable": "GET/findAll return the stored row (no invariant re-run on load), so it can be repaired via an operation; create and every mutator still assert",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "generated-code-ddd-review-2026-07 §S6"
+      ],
+      "tier": "static"
     }
   ]
 }

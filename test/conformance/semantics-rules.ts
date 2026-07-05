@@ -176,6 +176,22 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     provenance: ["#1620", "generated-code-review-2026-06-30"],
     tier: "behavioral",
   },
+  {
+    id: "RS-10",
+    title: "Rehydration trusts the store — invariants guard transitions only",
+    trigger:
+      "an aggregate with an invariant; a persisted row that predates a tightened invariant is read back",
+    observable:
+      "GET/findAll return the stored row (no invariant re-run on load), so it can be repaired via an operation; create and every mutator still assert",
+    conforms: ["node", "dotnet", "java", "python", "elixir"],
+    provenance: ["generated-code-ddd-review-2026-07 §S6"],
+    // Gated statically per-PR by test/conformance/rehydration-trust-parity.test.ts
+    // on the two backends that construct domain objects on load (node + python:
+    // repos hydrate via the non-asserting `_rehydrate`, while `create`/ops keep
+    // asserting). .NET/Java materialize via EF/JPA and elixir loads Ecto
+    // structs — no invariant runs on those load paths by construction.
+    tier: "static",
+  },
 ];
 
 // ---------------------------------------------------------------------------
