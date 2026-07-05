@@ -194,6 +194,26 @@ To apply stamps to some aggregates and not others, bundle them in a
 `capability` (the built-in `auditable` is exactly this) and opt in per
 aggregate with `with auditable`.
 
+### Stamp targets are server-owned wire fields
+
+A field assigned by any `stamp` block is server-populated at persist
+time, so it is **never client input** — on create *or* update — while
+staying readable everywhere:
+
+- Enrichment promotes a stamp target that is still create-writable to
+  `access: managed` (`promoteStampTargets`), which drops it from the
+  create-input contract (`forCreateInput`) every backend's Create
+  request DTO, the frontend api-module schema, the scaffolded
+  create-form inputs, and the Playwright page-object fill derive from.
+- The `crudish` `update` operation excludes stamp targets from its
+  params (`writableUpdateFields`), so the Update request DTO — which is
+  shaped from those params on every backend — cannot mass-assign a
+  stamped column (often the very one a row-security `filter` reads).
+
+Read surfaces (responses, views, detail/list pages) keep the field —
+`managed` is readable.  Pinned cross-backend by
+`test/conformance/stamp-request-no-leak-parity.test.ts`.
+
 ### Backend emission
 
 - **.NET / EF Core** — context stamps are emitted as a
