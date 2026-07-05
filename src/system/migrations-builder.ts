@@ -44,6 +44,7 @@ import {
   type ValueCollectionIR,
   valueCollectionsFor,
 } from "../ir/util/value-collections.js";
+import { aggregateIsVersioned } from "../ir/util/versioned-capability.js";
 import { plural, snake, upperFirst } from "../util/naming.js";
 import type { SnapshotStore } from "./snapshot.js";
 
@@ -984,6 +985,19 @@ function tableForAggregate(
         unique: false,
       });
     }
+  }
+
+  // Optimistic concurrency (`with versioned`): the capability contributes a
+  // `version: int token` field, which the field loop above already emitted as
+  // a `version` column (int, NOT NULL, no default).  Stamp it `DEFAULT 1` so
+  // new rows seed at version 1 and — as an ADD COLUMN on an existing table —
+  // the change stays non-destructive (a NOT NULL add WITH a default doesn't
+  // trip `isBlockingNotNullAdd`).  sql-pg renders it `... NOT NULL DEFAULT 1`;
+  // the Ecto emitter reads the same `default` off MigrationsIR.  Gated so
+  // non-versioned aggregates are byte-identical.
+  if (aggregateIsVersioned(agg)) {
+    const versionCol = columns.find((c) => c.name === "version");
+    if (versionCol) versionCol.default = "1";
   }
 
   return {

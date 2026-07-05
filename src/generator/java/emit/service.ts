@@ -8,6 +8,7 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../../util/naming.js";
 import { javaValueTypeForId, renderJavaExpr, renderJavaType } from "../render-expr.js";
@@ -224,13 +225,26 @@ export function renderJavaService(
   // accessor must be injected whenever audit + auth are both present — not only
   // when `anyOpUsesUser`, or the audit call references an uninjected field.
   const needsUserAccessor = anyOpUsesUser || (anyAudited && !!ctx.authed);
+  // Optimistic concurrency (`versioned`): every public mutation threads the
+  // client's expected version from the `If-Match` request header (think-time
+  // CAS).  When supplied and it disagrees with the freshly-loaded aggregate's
+  // `@Version`, we raise ObjectOptimisticLockingFailureException up-front — the
+  // same exception Hibernate raises for the load→save race (write-time CAS) — so
+  // both surface through the ApiExceptionAdvice 409 arm.  A non-versioned
+  // aggregate threads nothing and stays byte-identical.
+  const versioned = aggregateIsVersioned(agg);
+  const ifMatchParam = versioned ? ", Integer ifMatch" : "";
+  const ifMatchGuard = versioned
+    ? `        if (ifMatch != null && aggregate.version() != ifMatch) throw new ObjectOptimisticLockingFailureException(${agg.name}.class, id.value());`
+    : null;
   const unionReturnNames = new Set<string>();
   const opLines = agg.operations
     .filter((op) => op.visibility === "public")
     .flatMap((op) => {
       const hasParams = op.params.length > 0;
       const reqType = `${upperFirst(op.name)}${agg.name}Request`;
-      const paramSig = hasParams ? `${idClass} id, ${reqType} request` : `${idClass} id`;
+      const paramSig =
+        (hasParams ? `${idClass} id, ${reqType} request` : `${idClass} id`) + ifMatchParam;
       const lets = op.params.map(
         (p) => `        var ${p.name} = ${wireToDomain(p.type, `request.${p.name}()`)};`,
       );
@@ -250,6 +264,7 @@ export function renderJavaService(
           ...lets,
           usesUser ? `        var currentUser = currentUserAccessor.user();` : null,
           `        var aggregate = repository.getById(id);`,
+          ifMatchGuard,
           whenGateLine(op),
           `        aggregate.check${upperFirst(op.name)}(${args});`,
           `        try {`,
@@ -286,6 +301,7 @@ export function renderJavaService(
           ? `        ${agg.name}Validators.${op.name}(${op.params.map((p) => p.name).join(", ")});`
           : null,
         `        var aggregate = repository.getById(id);`,
+        ifMatchGuard,
         whenGateLine(op),
         audited ? `        var __before = ${agg.name}Response.from(aggregate);` : null,
         spec
@@ -392,6 +408,7 @@ export function renderJavaService(
     `import org.springframework.stereotype.Service;`,
     `import org.springframework.transaction.annotation.Transactional;`,
     dispatches ? `import org.springframework.context.ApplicationEventPublisher;` : null,
+    versioned ? `import org.springframework.orm.ObjectOptimisticLockingFailureException;` : null,
     ``,
     ctx.entityPkg !== ctx.pkg ? `import ${ctx.entityPkg}.${agg.name};` : null,
     ...(ctx.entityPkg !== ctx.pkg

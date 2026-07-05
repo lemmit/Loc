@@ -30,7 +30,7 @@ system D { subdomain M { context C {
     await completion({
       text,
       index: 0,
-      expectedItems: ["auditable", "softDeletable", "tenantOwned", "tenantRegistry"],
+      expectedItems: ["auditable", "softDeletable", "tenantOwned", "versioned", "tenantRegistry"],
       disposeAfterCheck: true,
     });
   });
@@ -46,7 +46,7 @@ system D { subdomain M { context C {
     await completion({
       text,
       index: 0,
-      expectedItems: ["auditable", "softDeletable", "tenantOwned", "tenantRegistry"],
+      expectedItems: ["auditable", "softDeletable", "tenantOwned", "versioned", "tenantRegistry"],
       disposeAfterCheck: true,
     });
   });

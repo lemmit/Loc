@@ -19,6 +19,7 @@ import {
   PROBLEM_SCHEMA,
   problemTitle,
 } from "../../../ir/util/openapi-errors.js";
+import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { defaultErrorStatus } from "../../../util/error-defaults.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
@@ -257,6 +258,9 @@ export function buildJavaOpenApiContract(
         if (op.visibility !== "public") continue;
         const opPath = `${route}/{id}/${snake(op.name)}`;
         const spec = ctx ? returnUnionSpec(op, ctx) : undefined;
+        // A versioned aggregate's `update` declares 409 (stale `If-Match` →
+        // optimistic-concurrency conflict), mirroring the Hono / .NET contract.
+        const versionedUpdate = op.name === "update" && aggregateIsVersioned(agg);
         if (spec && op.returnType?.kind === "union") {
           // Exception-less return union: 200 carries the tagged union DTO
           // (the controller returns `ResponseEntity<?>`, so springdoc infers
@@ -268,6 +272,7 @@ export function buildJavaOpenApiContract(
           unions.set(unionName, JSON.stringify(unionJsonSchema(op.returnType.variants, ctx)));
           const statuses = new Set<number>(errorStatuses("operation", operationIsGuarded(op)));
           for (const a of spec.arms) if (a.isError) statuses.add(a.status);
+          if (versionedUpdate) statuses.add(409);
           routes.push({
             method: "post",
             path: opPath,
@@ -275,10 +280,12 @@ export function buildJavaOpenApiContract(
             errors: err([...statuses].sort((x, y) => x - y)),
           });
         } else {
+          const statuses = new Set<number>(errorStatuses("operation", operationIsGuarded(op)));
+          if (versionedUpdate) statuses.add(409);
           routes.push({
             method: "post",
             path: opPath,
-            errors: err(errorStatuses("operation", operationIsGuarded(op))),
+            errors: err([...statuses].sort((x, y) => x - y)),
           });
         }
         // can_<op> companion (GET) → 404 (loads the aggregate first).

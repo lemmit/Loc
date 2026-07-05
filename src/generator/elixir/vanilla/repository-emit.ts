@@ -25,6 +25,7 @@ import type {
   SystemIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
+import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import {
@@ -266,6 +267,28 @@ function renderRepository(
   // serializer projects them to id arrays.
   const findByIdHit = preload ? `record -> {:ok, record${preload}}` : "record -> {:ok, record}";
 
+  // Optimistic concurrency (`versioned` capability, D-VERSIONED).  The update
+  // takes the client's EXPECTED version (the controller parsed it from the
+  // If-Match header) as a trailing `expected_version \\ nil` param and overrides
+  // the loaded struct's `:version` with it BEFORE building the changeset — so
+  // `optimistic_lock` (in `update_changeset`) guards the write on the value the
+  // client last saw (think-time CAS).  Absent → the loaded row's own version
+  // (write-time CAS).  A stale write RAISES `Ecto.StaleEntryError` (not a
+  // changeset error), rescued here into `{:error, :conflict}` (→ 409 at the
+  // controller).  A non-versioned aggregate keeps the plain `base_changeset`
+  // update (byte-identical).
+  const versioned = aggregateIsVersioned(agg);
+  const versionedParam = versioned ? ", expected_version \\\\ nil" : "";
+  const versionOverride = versioned
+    ? `    record = %{record | version: expected_version || record.version}\n\n`
+    : "";
+  const updateChangesetFn = versioned ? "update_changeset" : "base_changeset";
+  const updateRescue = versioned
+    ? "\n  rescue\n    Ecto.StaleEntryError -> {:error, :conflict}"
+    : "";
+  const updateErrTail = versioned ? "Ecto.Changeset.t() | :conflict" : "Ecto.Changeset.t()";
+  const updateSpecArgTail = `${hasStamps && stampPrincipal ? ", map() | nil" : ""}${versioned ? ", integer() | nil" : ""}`;
+
   return `# Auto-generated.
 defmodule ${repoMod} do
   @moduledoc false${ectoImport}
@@ -289,11 +312,11 @@ defmodule ${repoMod} do
     ${insertBody}
   end
 
-  @spec update(${aggModule}.t(), map()${hasStamps && stampPrincipal ? ", map() | nil" : ""}) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
-  def update(%${aggModule}{} = record, attrs${updateStampActorParam}) when is_map(attrs) do
-    record${updatePreload}
-    |> ${aggModule}Changeset.base_changeset(attrs)${updateStamps}${updatePutAssoc}
-    |> Repo.update()
+  @spec update(${aggModule}.t(), map()${updateSpecArgTail}) :: {:ok, ${aggModule}.t()} | {:error, ${updateErrTail}}
+  def update(%${aggModule}{} = record, attrs${updateStampActorParam}${versionedParam}) when is_map(attrs) do
+${versionOverride}    record${updatePreload}
+    |> ${aggModule}Changeset.${updateChangesetFn}(attrs)${updateStamps}${updatePutAssoc}
+    |> Repo.update()${updateRescue}
   end
 
   @spec delete(${aggModule}.t()) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}

@@ -22,6 +22,7 @@ import type {
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
 import { opHasProvSite } from "../../../ir/util/prov-id.js";
+import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { opUsesCurrentUser, stmtUsesParam } from "../domain/predicates.js";
 import { renderReadingServiceContextFns } from "../domain-service-emit.js";
@@ -120,6 +121,10 @@ function renderContextModule(
     // `current_user.<idKey>` for `createdBy`/`updatedBy`).  The `\\ nil` default
     // keeps internal callers compiling + fail-safe (a nil actor stamps nil).
     const stampActorArg = stampUsesPrincipal(agg) ? ", current_user \\\\ nil" : "";
+    // A `versioned` aggregate threads the client's expected version (parsed from
+    // the If-Match header at the controller) as a trailing `expected_version \\ nil`
+    // arg through the update defdelegate to the repository's optimistic-lock write.
+    const versionedArg = aggregateIsVersioned(agg) ? ", expected_version \\\\ nil" : "";
     // Skip ops whose names collide with the CRUD defdelegates above —
     // notably `update`/`destroy` from `with crudish` would redefine
     // `update_<agg>/2`/`delete_<agg>/1` otherwise.  The CRUD seam
@@ -266,7 +271,7 @@ ${body}
   defdelegate list_${aggSnake}s(${principal ? "current_user \\\\ nil" : ""}), to: ${repoMod}, as: :list
   defdelegate get_${aggSnake}(id${actorArg}), to: ${repoMod}, as: :find_by_id
   defdelegate create_${aggSnake}(attrs${stampActorArg}), to: ${repoMod}, as: :insert
-  defdelegate update_${aggSnake}(record, attrs${stampActorArg}), to: ${repoMod}, as: :update
+  defdelegate update_${aggSnake}(record, attrs${stampActorArg}${versionedArg}), to: ${repoMod}, as: :update
   defdelegate delete_${aggSnake}(record), to: ${repoMod}, as: :delete${changeFacade}${destroyFacade}${opBangFacade}
 ${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}${functionBlock}`;
   });

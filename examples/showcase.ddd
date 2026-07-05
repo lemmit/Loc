@@ -353,7 +353,7 @@ system DevPlatform {
 
             event BuildPromoted { build: Build id, env: string, at: datetime }
 
-            aggregate Build with crudish {
+            aggregate Build with crudish, versioned {
                 commitSha: string
                 buildState: BuildState
                 // `total` is a plain field here: the Builds context is hosted on

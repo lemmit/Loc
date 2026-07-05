@@ -21,6 +21,7 @@
 
 import { snake } from "../../util/naming.js";
 import type {
+  AggregateIR,
   BoundedContextIR,
   DataSourceIR,
   DataSourceKind,
@@ -35,6 +36,22 @@ import type {
  *  `persistedAs(…)` values are the `kind` names (default `state`). */
 export function dataSourceKindForAggregate(agg: EnrichedAggregateIR): DataSourceKind {
   return agg.persistedAs ?? "state";
+}
+
+/** True when the aggregate's primary truth is its event stream
+ *  (`persistedAs(eventLog)`).  Parallel to {@link dataSourceKindForAggregate}
+ *  (the `state` default means anything not `eventLog` is stateful) but takes a
+ *  bare `AggregateIR` so backend index gates can call it before enrichment.
+ *
+ *  The append-only `<agg>_events` `(stream_id, version)` PRIMARY KEY IS that
+ *  aggregate's optimistic-concurrency control: two concurrent `save`s that both
+ *  read `max(version)=N` and both insert `version=N+1` race, and the loser hits
+ *  a Postgres unique-violation (SQLSTATE 23505).  Each backend maps that to
+ *  409 Conflict — the event-sourced sibling of the `versioned` capability's
+ *  guarded write (`aggregateIsVersioned`), so `hasVersioned || hasEventSourced`
+ *  is the widened gate for the shared `ConcurrencyError` + 409 machinery. */
+export function aggregateIsEventSourced(agg: AggregateIR): boolean {
+  return agg.persistedAs === "eventLog";
 }
 
 /** Find the dataSource binding for an aggregate within its bounded

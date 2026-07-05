@@ -109,7 +109,21 @@ export function buildEventSourcedRepositoryFile(
     `        type: event.type,`,
     `        data: eventToData(event),`,
     `      }));`,
-    `      await this.db.insert(schema.${table}).values(rows);`,
+    // The `(stream_id, version)` PK IS this stream's optimistic-concurrency
+    // control: a competing append that read the same `max(version)` inserts
+    // the same version and loses the race with a Postgres unique-violation
+    // (SQLSTATE 23505).  Map it to `ConcurrencyError` → 409 (the shared
+    // `onError` arm), mirroring the `versioned` guarded write's stale-write
+    // rejection.  The pg driver surfaces `.code === "23505"` (same shape the
+    // routes `onError` uses for the `unique (...)` arm).
+    `      try {`,
+    `        await this.db.insert(schema.${table}).values(rows);`,
+    `      } catch (err) {`,
+    `        if (err && typeof err === "object" && (err as { code?: string }).code === "23505") {`,
+    `          throw new ConcurrencyError("${agg.name}", aggregate.id as string);`,
+    `        }`,
+    `        throw err;`,
+    `      }`,
     `    }`,
     `    ${renderHonoStoreLogCall("repositorySave", `aggregate: "${agg.name}", id: aggregate.id as string`)}`,
     `    for (const event of pending) {`,
@@ -176,7 +190,7 @@ export function buildEventSourcedRepositoryFile(
     voOrEnumImportLine,
     `import * as Ids from "../../domain/ids";`,
     `import type * as Events from "../../domain/events";`,
-    `import { AggregateNotFoundError } from "../../domain/errors";`,
+    `import { AggregateNotFoundError, ConcurrencyError } from "../../domain/errors";`,
     `import type { DomainEventDispatcher } from "../../domain/events";`,
     `import { requestLog } from "../../obs/als";`,
     "",

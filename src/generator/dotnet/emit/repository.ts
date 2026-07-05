@@ -8,6 +8,7 @@ import type {
   RetrievalIR,
 } from "../../../ir/types/loom-ir.js";
 import { findUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
@@ -137,6 +138,26 @@ export function renderRepositoryImpl(
   const loadByIdLines = buildLoadByIdLines(associations);
   const loadManyByIdsLines = buildLoadManyByIdsLines(agg.name, setName, associations);
   const saveDiffSyncLines = buildSaveDiffSyncLines(associations);
+  // Optimistic concurrency (`versioned`): on an UPDATE (the entity is tracked,
+  // not freshly added), guard the write on the loaded version — overridden by
+  // the client's `If-Match` expected version when supplied (ambient
+  // RequestContext, populated by RequestContextMiddleware) — and bump it.  EF's
+  // native concurrency token (efcore.ts `IsConcurrencyToken()`) turns that into
+  // `UPDATE ... SET version = @next WHERE id = @id AND version = @expected`; a
+  // zero-row result raises DbUpdateConcurrencyException, which the
+  // DomainExceptionFilter maps to 409.  Not applied to INSERTs (a new row keeps
+  // its seeded version).  Empty (byte-identical) for a non-versioned aggregate.
+  const versionGuardLines = aggregateIsVersioned(agg)
+    ? [
+        "        if (entry.State != EntityState.Added && entry.State != EntityState.Detached)",
+        "        {",
+        "            var __version = entry.Property(x => x.Version);",
+        "            var __expected = RequestContext.Current?.ExpectedVersion;",
+        "            if (__expected.HasValue) __version.OriginalValue = __expected.Value;",
+        "            __version.CurrentValue = __version.OriginalValue + 1;",
+        "        }",
+      ]
+    : [];
   // Provenance flush (provenance.md): drain the per-write lineage buffer and
   // stage one provenance_records row per write.  Added to the same scoped
   // AppDbContext as the aggregate change, BEFORE SaveChangesAsync, so the
@@ -327,6 +348,7 @@ export function renderRepositoryImpl(
       "        {",
       `            _db.${setName}.Add(aggregate);`,
       "        }",
+      ...versionGuardLines,
       ...saveDiffSyncLines,
       ...provFlushLines,
       // tx_* (trace) — emitted ONLY under --trace.  EF's SaveChangesAsync
@@ -832,7 +854,21 @@ export function renderEventSourcedRepositoryImpl(
       "                    OccurredAt = DateTime.UtcNow,",
       "                });",
       "            }",
-      "            await _db.SaveChangesAsync(cancellationToken);",
+      // The (stream_id, version) PK IS the event stream's optimistic-concurrency
+      // control: a competing append that read the same Max(Version) inserts the
+      // same version and loses with a Postgres 23505.  EF surfaces it as a
+      // DbUpdateException with a PostgresException inner; translate it to the EF
+      // concurrency exception the DomainExceptionFilter maps to 409 (parity with
+      // the `versioned` guarded write's stale-write rejection).
+      "            try",
+      "            {",
+      "                await _db.SaveChangesAsync(cancellationToken);",
+      "            }",
+      "            catch (Microsoft.EntityFrameworkCore.DbUpdateException __ex)",
+      '                when (__ex.InnerException is Npgsql.PostgresException { SqlState: "23505" })',
+      "            {",
+      '                throw new Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException("The resource was modified by another request; reload and retry.", __ex);',
+      "            }",
       "        }",
       `        ${renderDotnetLogCall("repositorySave", [
         { name: "aggregate", valueExpr: `"${agg.name}"` },

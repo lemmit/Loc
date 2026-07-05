@@ -12,6 +12,7 @@ import {
   viewUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
 import { tableOwnerName } from "../../ir/util/inheritance.js";
+import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst, plural } from "../../util/naming.js";
 import { aggregateIsAudited } from "./emit/audit-stamp.js";
@@ -258,7 +259,11 @@ export function buildRepositoryFile(
     `import { ${domainImports} } from "../../domain/${lowerFirst(agg.name)}";`,
     voOrEnumImportLine,
     `import * as Ids from "../../domain/ids";`,
-    `import { AggregateNotFoundError } from "../../domain/errors";`,
+    // `ConcurrencyError` only when this aggregate is `versioned` — a
+    // non-versioned repository's imports stay byte-identical.
+    aggregateIsVersioned(agg)
+      ? `import { AggregateNotFoundError, ConcurrencyError } from "../../domain/errors";`
+      : `import { AggregateNotFoundError } from "../../domain/errors";`,
     `import type { DomainEventDispatcher } from "../../domain/events";`,
     `import { requestLog } from "../../obs/als";`,
     "",

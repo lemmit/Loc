@@ -8,6 +8,7 @@ import type {
   RepositoryIR,
 } from "../../../ir/types/loom-ir.js";
 import { operationIsGuarded } from "../../../ir/types/loom-ir.js";
+import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { findUnionSpec, unionMembers } from "../../_payload/union-wire.js";
@@ -73,6 +74,10 @@ export function buildOperationSpec(
     // `when` canCommand gate: 409 on the action + the GET can_<op>
     // companion (criterion.md use site 2).
     whenGated: !!op.when,
+    // A versioned aggregate's `update` declares 409 (stale `If-Match` →
+    // optimistic-concurrency conflict), mirroring the Hono contract so the
+    // conformance error-response dimension compares equal.
+    versionedUpdate: op.name === "update" && aggregateIsVersioned(agg),
     // Exception-less return-typed op: the controller-side translation spec
     // (Domain union → ProblemDetails / Ok-wrapped wire DTO).
     returnUnion: buildReturnUnionSpec(op, agg, ctx, ns),

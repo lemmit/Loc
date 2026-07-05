@@ -6,7 +6,24 @@
 // docs/architecture/request-context.md (seam 1: boundary establishment).
 
 /** Render `Middleware/RequestContextMiddleware.cs`. */
-export function renderRequestContextMiddleware(ns: string): string {
+export function renderRequestContextMiddleware(
+  ns: string,
+  opts?: { hasVersioned?: boolean },
+): string {
+  const hasVersioned = !!opts?.hasVersioned;
+  // Optimistic concurrency (`versioned`): parse the client's `If-Match`
+  // precondition (a bare or quoted integer version) onto the ambient carrier,
+  // so a versioned aggregate's repository save can guard the write on it.  Read
+  // here beside the correlation id / locale — the one place the carrier reads
+  // request headers.  Emitted only when some in-scope aggregate is `versioned`.
+  const ifMatchLines = hasVersioned
+    ? `
+        if (ctx.Request.Headers.TryGetValue("If-Match", out var __ifMatch)
+            && int.TryParse(__ifMatch.ToString().Trim('"'), out var __expectedVersion))
+        {
+            rootFrame.ExpectedVersion = __expectedVersion;
+        }`
+    : "";
   return `// Auto-generated.
 using System;
 using System.Collections.Generic;
@@ -55,7 +72,7 @@ public sealed class RequestContextMiddleware
         // Echo the correlation id back to the caller.  Set before _next so
         // it lands before the response headers are sent.
         ctx.Response.Headers["X-Correlation-Id"] = correlationId;
-        var rootFrame = RequestContext.OpenRoot(correlationId, locale, DateTimeOffset.UtcNow);
+        var rootFrame = RequestContext.OpenRoot(correlationId, locale, DateTimeOffset.UtcNow);${ifMatchLines}
         using (RequestContext.Enter(rootFrame))
         using (log.BeginScope(new Dictionary<string, object?>
         {

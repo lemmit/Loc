@@ -4,6 +4,7 @@ import type {
   EnrichedBoundedContextIR,
   RepositoryIR,
 } from "../../../ir/types/loom-ir.js";
+import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
@@ -55,6 +56,14 @@ export function renderJavaController(
 ): string {
   const route = snake(plural(agg.name));
   const idClass = ctx.idClass ?? `${agg.name}Id`;
+  // Optimistic concurrency (`versioned`): a mutation carries the client's
+  // expected version in the `If-Match` header (think-time CAS), forwarded to the
+  // service.  Non-versioned aggregates thread nothing → byte-identical routes.
+  const versioned = aggregateIsVersioned(agg);
+  const ifMatchHeaderParam = versioned
+    ? `, @RequestHeader(value = "If-Match", required = false) Integer ifMatch`
+    : "";
+  const ifMatchServiceArg = versioned ? ", ifMatch" : "";
   const idJava = javaValueTypeForId(agg.idValueType);
   const imports = new Set<string>(["java.util.List"]);
   if (idJava === "UUID") imports.add("java.util.UUID");
@@ -118,12 +127,12 @@ export function renderJavaController(
         return [
           `    @PostMapping("/{id}/${snake(op.name)}")`,
           hasParams
-            ? `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id, @RequestBody ${reqType} request) {`
-            : `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id) {`,
+            ? `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id, @RequestBody ${reqType} request${ifMatchHeaderParam}) {`
+            : `    public ResponseEntity<?> ${op.name}${agg.name}(@PathVariable ${idJava} id${ifMatchHeaderParam}) {`,
           `        CatalogLog.event("operation_invoked", "info", "aggregate", "${agg.name}", "op", "${op.name}", "id", id);`,
           hasParams
-            ? `        var result = service.${op.name}(new ${idClass}(id), request);`
-            : `        var result = service.${op.name}(new ${idClass}(id));`,
+            ? `        var result = service.${op.name}(new ${idClass}(id), request${ifMatchServiceArg});`
+            : `        var result = service.${op.name}(new ${idClass}(id)${ifMatchServiceArg});`,
           `        return switch (result) {`,
           ...arms,
           `        };`,
@@ -136,12 +145,12 @@ export function renderJavaController(
         `    @PostMapping("/{id}/${snake(op.name)}")`,
         `    @ResponseStatus(HttpStatus.NO_CONTENT)`,
         hasParams
-          ? `    public void ${op.name}${agg.name}(@PathVariable ${idJava} id, @RequestBody ${reqType} request) {`
-          : `    public void ${op.name}${agg.name}(@PathVariable ${idJava} id) {`,
+          ? `    public void ${op.name}${agg.name}(@PathVariable ${idJava} id, @RequestBody ${reqType} request${ifMatchHeaderParam}) {`
+          : `    public void ${op.name}${agg.name}(@PathVariable ${idJava} id${ifMatchHeaderParam}) {`,
         `        CatalogLog.event("operation_invoked", "info", "aggregate", "${agg.name}", "op", "${op.name}", "id", id);`,
         hasParams
-          ? `        service.${op.name}(new ${idClass}(id), request);`
-          : `        service.${op.name}(new ${idClass}(id));`,
+          ? `        service.${op.name}(new ${idClass}(id), request${ifMatchServiceArg});`
+          : `        service.${op.name}(new ${idClass}(id)${ifMatchServiceArg});`,
         `    }`,
         ``,
         ...canRouteLines(op),
@@ -306,7 +315,11 @@ export function renderJavaController(
 /** RFC 7807 problem+json advice — the DomainExceptionFilter / Hono
  *  onError analog: same statuses, same envelope, same 422 `errors[]`
  *  extension shape, so the frontend ACL works against any backend. */
-export function renderApiExceptionAdvice(basePkg: string, hasUniqueKeys = false): string {
+export function renderApiExceptionAdvice(
+  basePkg: string,
+  hasUniqueKeys = false,
+  hasVersioned = false,
+): string {
   return lines(
     `package ${basePkg}.api;`,
     ``,
@@ -315,6 +328,9 @@ export function renderApiExceptionAdvice(basePkg: string, hasUniqueKeys = false)
     // The 23505 → 409 handler (+ its import) is emitted only when some aggregate
     // declares a `unique (...)` key — a unique-free project stays byte-identical.
     hasUniqueKeys && `import org.springframework.dao.DataIntegrityViolationException;`,
+    // The optimistic-lock → 409 handler (+ its import) is emitted only when some
+    // aggregate is `versioned` — a version-free project stays byte-identical.
+    hasVersioned && `import org.springframework.orm.ObjectOptimisticLockingFailureException;`,
     `import org.springframework.http.HttpStatus;`,
     `import org.springframework.http.MediaType;`,
     `import org.springframework.http.ProblemDetail;`,
@@ -371,6 +387,18 @@ export function renderApiExceptionAdvice(basePkg: string, hasUniqueKeys = false)
       `        // 409 instead of leaking a 500, reusing the catalog 409 \`disallowed\` event.`,
       `        CatalogLog.event("disallowed", "warn", "message", "A resource with these values already exists.", "status", 409);`,
       `        return respond(problem(409, "Conflict", "A resource with these values already exists.", request), 409);`,
+      `    }`,
+      ``,
+    ],
+    hasVersioned && [
+      `    @ExceptionHandler(org.springframework.orm.ObjectOptimisticLockingFailureException.class)`,
+      `    public ResponseEntity<ProblemDetail> onConcurrencyConflict(ObjectOptimisticLockingFailureException e, WebRequest request) {`,
+      `        // A \`versioned\` aggregate's optimistic-lock check failed — either the`,
+      `        // client's If-Match expected version was stale (think-time CAS) or the`,
+      `        // load→save window lost a race (Hibernate @Version write-time CAS).`,
+      `        // Return a friendly 409 instead of leaking a 500.`,
+      `        CatalogLog.event("conflict", "warn", "message", "The resource was modified by another request; reload and retry.", "status", 409);`,
+      `        return respond(problem(409, "Conflict", "The resource was modified by another request; reload and retry.", request), 409);`,
       `    }`,
       ``,
     ],

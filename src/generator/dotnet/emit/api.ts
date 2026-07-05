@@ -66,6 +66,9 @@ export interface ControllerShape {
      *  action and emits the side-effect-free `GET {id}/can_<op>` companion
      *  returning `CanResponse { allowed }` (criterion.md use site 2). */
     whenGated?: boolean;
+    /** A versioned aggregate's `update` → declares 409 (stale `If-Match`
+     *  optimistic-concurrency conflict), mirroring the Hono contract. */
+    versionedUpdate?: boolean;
     /** Exception-less return-typed op: the Domain-union → HTTP translation spec.
      *  When set, the action returns the mapped ProblemDetails / wire DTO instead
      *  of 204 (exception-less.md). */
@@ -393,7 +396,10 @@ export function renderOperationActionBlock(
   // DTO (cast to the polymorphic base so it serializes with the `type` tag).
   const ru = op.returnUnion;
   const STD = new Set<number>([400, 422, 404, ...(op.guarded ? [403] : [])]);
-  const when409 = op.whenGated ? ["    [ProducesResponseType(typeof(ProblemDetails), 409)]"] : [];
+  const when409 =
+    op.whenGated || op.versionedUpdate
+      ? ["    [ProducesResponseType(typeof(ProblemDetails), 409)]"]
+      : [];
   const responseDecls = ru
     ? [
         `    [ProducesResponseType(typeof(${ru.appNs}.${ru.unionName}), 200)]`,
@@ -479,13 +485,21 @@ function renderCmdConstructorBody(args: string[], indent: string): string[] {
 
 export function renderExceptionFilter(
   ns: string,
-  options?: { usesValidators?: boolean; usingDapper?: boolean; hasUniqueKeys?: boolean },
+  options?: {
+    usesValidators?: boolean;
+    usingDapper?: boolean;
+    hasUniqueKeys?: boolean;
+    hasVersioned?: boolean;
+  },
 ): string {
   const usesValidators = !!options?.usesValidators;
   // A project with no `unique (...)` key emits no 23505 → 409 arm, so a model
   // without uniqueness is byte-identical to before the feature (the proposal's
   // strict-additivity guarantee — only a `unique` index can raise 23505).
   const hasUniqueKeys = !!options?.hasUniqueKeys;
+  // A project with no `versioned` aggregate emits no concurrency-conflict arm,
+  // so a non-versioned model is byte-identical (strict additivity).
+  const hasVersioned = !!options?.hasVersioned;
   // Persistence selection (D-REALIZATION-AXES): the EF adapter surfaces a
   // Postgres unique-violation wrapped in `Microsoft.EntityFrameworkCore.
   // DbUpdateException`; the Dapper adapter throws the bare
@@ -524,6 +538,31 @@ export function renderExceptionFilter(
             return;
         }`
     : "";
+  // Optimistic concurrency (`versioned`) → 409 Conflict: EF's native
+  // concurrency token (efcore.ts `IsConcurrencyToken()` on the `version`
+  // column) raises `DbUpdateConcurrencyException` when a guarded UPDATE affects
+  // zero rows — i.e. the row was modified since it was read (write-time CAS) or
+  // the client's `If-Match` expected version no longer matches (think-time
+  // CAS).  Emitted only when some in-scope aggregate is `versioned`, and only on
+  // the EF path — the `Microsoft.EntityFrameworkCore` type would be a CS0246
+  // under `persistence: dapper` (which has no EF concurrency token anyway).
+  const concurrencyConflictArm =
+    hasVersioned && !usingDapper
+      ? `
+        if (context.Exception is Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+        {
+            ${renderDotnetLogCall("conflict", [
+              {
+                name: "message",
+                valueExpr: `"The resource was modified by another request; reload and retry."`,
+              },
+              { name: "status", valueExpr: "409" },
+            ])}
+            context.Result = Problem(context, 409, "Conflict", "The resource was modified by another request; reload and retry.", trace_id);
+            context.ExceptionHandled = true;
+            return;
+        }`
+      : "";
   return `// Auto-generated.${usesValidators ? "\nusing System.Collections.Generic;\nusing System.Linq;\nusing System.Text.Json;" : ""}
 using System.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
@@ -615,7 +654,7 @@ public sealed class DomainExceptionFilter : IExceptionFilter
             context.Result = Problem(context, 409, "Disallowed", dx.Message, trace_id);
             context.ExceptionHandled = true;
             return;
-        }${uniqueConflictArm}
+        }${uniqueConflictArm}${concurrencyConflictArm}
         if (context.Exception is DomainException de)
         {
             ${renderDotnetLogCall("domainError", [

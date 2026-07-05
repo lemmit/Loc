@@ -158,6 +158,14 @@ export function renderJavaEventSourcedRepositoryImpl(
     `                    jdbc.update(`,
     `                        "insert into ${table} (stream_id, version, type, data) values (?, ?, ?, ?::jsonb)",`,
     `                        sid, version, ev.getClass().getSimpleName(), JSON.writeValueAsString(ev));`,
+    // The (stream_id, version) PK IS the event stream's optimistic-concurrency
+    // control: a competing append that read the same max(version) inserts the
+    // same version and loses with a Postgres 23505, which JdbcTemplate maps to
+    // DuplicateKeyException.  Rethrow the SAME exception the `versioned` service
+    // raises so the ApiExceptionAdvice 409 arm maps it to Conflict.
+    `                } catch (org.springframework.dao.DuplicateKeyException e) {`,
+    `                    throw new org.springframework.orm.ObjectOptimisticLockingFailureException(`,
+    `                        ${agg.name}.class, aggregate.id().value());`,
     `                } catch (com.fasterxml.jackson.core.JsonProcessingException e) {`,
     `                    throw new IllegalStateException("event serialization failed", e);`,
     `                }`,

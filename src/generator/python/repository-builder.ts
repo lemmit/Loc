@@ -24,6 +24,7 @@ import {
   tableOwnerName,
 } from "../../ir/util/inheritance.js";
 import { type ValueCollectionIR, valueCollectionsFor } from "../../ir/util/value-collections.js";
+import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { provColumn, provenancedFieldsOf } from "./emit/provenance.js";
@@ -255,7 +256,9 @@ export function buildPyRepositoryFile(
     hasProv ? "from app.db.provenance import ProvenanceRecord" : null,
     rowNames.length > 0 ? `from app.db.schema import ${rowNames.join(", ")}` : null,
     refersTo("iso") ? "from app.db.wire import iso" : null,
-    "from app.domain.errors import AggregateNotFoundError",
+    aggregateIsVersioned(agg)
+      ? "from app.domain.errors import AggregateNotFoundError, ConcurrencyError"
+      : "from app.domain.errors import AggregateNotFoundError",
     "from app.domain.events import DomainEventDispatcher",
     idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
     domainNames.length > 0
@@ -936,7 +939,17 @@ function saveMethod(
   const root = rowClassName(tableOwnerName(agg, ctx.aggregates));
   const kind = discriminatorValue(agg, ctx.aggregates);
   const provFields = provenancedFieldsOf(agg);
-  const out: string[] = [`    async def save(self, ${aggVar}: ${agg.name}) -> None:`];
+  const versioned = aggregateIsVersioned(agg);
+  // A `versioned` aggregate opts into optimistic concurrency: the caller's
+  // expected version (the `If-Match` header, threaded by the operation route)
+  // rides in as `expected_version`; absent, the loaded version is used
+  // (write-time CAS).  The guarded upsert only writes when the row's version
+  // still matches, so a competing write is detected as a 0-row update.
+  const out: string[] = [
+    versioned
+      ? `    async def save(self, ${aggVar}: ${agg.name}, expected_version: int | None = None) -> None:`
+      : `    async def save(self, ${aggVar}: ${agg.name}) -> None:`,
+  ];
   const rootPairs: Array<[string, string]> = [["id", `${aggVar}.id`]];
   if (kind) rootPairs.push(["kind", JSON.stringify(kind)]);
   for (const f of agg.fields) {
@@ -954,11 +967,41 @@ function saveMethod(
   out.push("        root = {");
   out.push(...rootPairs.map(([k, v]) => `            "${k}": ${v},`));
   out.push("        }");
-  out.push("        await self._session.execute(");
-  out.push(
-    `            insert(${root}).values(**root).on_conflict_do_update(index_elements=["id"], set_=root)`,
-  );
-  out.push("        )");
+  if (versioned) {
+    // Guarded upsert (optimistic concurrency): on an INSERT-conflict, only
+    // overwrite when the stored `version` still equals the caller's expected
+    // value, bumping it by one; a stale write matches the `where` against no
+    // row, so `RETURNING id` comes back empty → ConcurrencyError → 409.  A
+    // fresh INSERT never conflicts, so create/seed writes are unaffected.
+    const setEntries = rootPairs
+      .map(([k]) => k)
+      .filter((k) => k !== "id" && k !== "version")
+      .map((k) => `"${k}": root[${JSON.stringify(k)}]`);
+    setEntries.push(`"version": ${root}.version + 1`);
+    out.push(
+      `        _expected = ${aggVar}.version if expected_version is None else expected_version`,
+    );
+    out.push("        _guarded = await self._session.execute(");
+    out.push(`            insert(${root})`);
+    out.push("            .values(**root)");
+    out.push("            .on_conflict_do_update(");
+    out.push('                index_elements=["id"],');
+    out.push(`                set_={${setEntries.join(", ")}},`);
+    out.push(`                where=${root}.version == _expected,`);
+    out.push("            )");
+    out.push(`            .returning(${root}.id)`);
+    out.push("        )");
+    out.push("        if _guarded.first() is None:");
+    out.push(
+      `            raise ConcurrencyError(f"${agg.name} {${aggVar}.id} was modified concurrently")`,
+    );
+  } else {
+    out.push("        await self._session.execute(");
+    out.push(
+      `            insert(${root}).values(**root).on_conflict_do_update(index_elements=["id"], set_=root)`,
+    );
+    out.push("        )");
+  }
 
   // Diff-sync each contained collection.
   for (const c of agg.contains) {

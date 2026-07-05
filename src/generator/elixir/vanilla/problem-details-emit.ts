@@ -14,7 +14,51 @@ import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
 export function renderVanillaProblemDetailsModule(
   appModule: string,
   hasUniqueKeys = false,
+  hasVersioned = false,
 ): string {
+  // Optimistic-concurrency 409 (`versioned` capability, D-VERSIONED).  A stale
+  // write raises `Ecto.StaleEntryError`, which the repository rescues into
+  // `{:error, :conflict}`; the controller maps that onto this responder.  It
+  // logs the DISTINCT `conflict` catalog event (not `disallowed`, which the
+  // `unique (...)` 409 uses via `problem_response/4`) so a dashboard can tell a
+  // concurrency conflict from a business-rule refusal.  Gated on `hasVersioned`
+  // so a version-free app is byte-identical (strict additivity).
+  const conflictFn = hasVersioned
+    ? `
+
+  @doc """
+  Send a 409 ProblemDetails response for an optimistic-concurrency conflict — a
+  \`versioned\` aggregate whose \`optimistic_lock\` guard found the row changed
+  since the client read it (\`Ecto.StaleEntryError\`, rescued to
+  \`{:error, :conflict}\`).  Logs the \`conflict\` catalog event, distinct from
+  the \`unique (...)\` 409 (which logs \`disallowed\` via \`problem_response/4\`).
+  """
+  def conflict_response(conn) do
+    ${renderPhoenixLogCall("conflict", [
+      {
+        name: "message",
+        valueExpr: `"The resource was modified by another request; reload and retry."`,
+      },
+      { name: "status", valueExpr: "409" },
+    ])}
+
+    body =
+      Jason.encode!(%{
+        type: "about:blank",
+        title: "Conflict",
+        status: 409,
+        detail: "The resource was modified by another request; reload and retry.",
+        instance: conn.request_path
+      })
+
+    trace_id = conn |> get_resp_header("x-request-id") |> List.first("")
+
+    conn
+    |> put_resp_content_type("application/problem+json")
+    |> put_resp_header("x-request-id", trace_id)
+    |> send_resp(409, body)
+  end`
+    : "";
   const log422 = renderPhoenixLogCall("domainError", [
     { name: "message", valueExpr: `"Validation failed"` },
     { name: "status", valueExpr: "422" },
@@ -173,7 +217,7 @@ ${responseFns}
     |> put_resp_content_type("application/problem+json")
     |> put_resp_header("x-request-id", trace_id)
     |> send_resp(status, body)
-  end
+  end${conflictFn}
 
   # ---------------------------------------------------------------------------
   # Internal helpers — Ecto.Changeset error → RFC 6901 pointer + message.

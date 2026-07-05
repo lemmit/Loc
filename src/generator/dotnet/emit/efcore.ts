@@ -10,6 +10,7 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { isTphBase, ownFieldsOf } from "../../../ir/util/inheritance.js";
 import { isValueCollectionType, valueCollectionsFor } from "../../../ir/util/value-collections.js";
+import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { AMBIENT_CURRENT_USER, renderCsExpr } from "../render-expr.js";
@@ -282,9 +283,25 @@ export function renderConfiguration(
   // immediately `.Ignore`s and the embedded path replaces).
   const isRefCollectionField = (f: FieldIR): boolean =>
     f.type.kind === "array" && f.type.element.kind === "id";
+  // Optimistic concurrency (`versioned`): the synthetic `version` token field
+  // is configured as EF's native concurrency token, so every UPDATE/DELETE
+  // guards on the loaded value (`... WHERE id = @id AND version = @orig`) and a
+  // stale write raises DbUpdateConcurrencyException → 409.  Gated on
+  // `aggregateIsVersioned` — a non-versioned aggregate is byte-identical.
+  const versioned = aggregateIsVersioned(agg);
   const fieldConfigs = cfgFields
     .filter((f) => !isRefCollectionField(f))
-    .flatMap((f) => fieldConfigLines(f, "        ", "builder", voLookup, false, agg.name));
+    .flatMap((f) =>
+      fieldConfigLines(
+        f,
+        "        ",
+        "builder",
+        voLookup,
+        false,
+        agg.name,
+        versioned && f.name === "version",
+      ),
+    );
   // Table + key + id-conversion live on the table-owning config: a standalone
   // aggregate or a TPH base.  A TPH concrete inherits all three from the base.
   const tableKeyLines = isTphConcreteCfg
@@ -634,6 +651,9 @@ function fieldConfigLines(
   voLookup?: VoLookup,
   embedded = false,
   ownerName?: string,
+  /** Mark this (plain-scalar) property as EF's native concurrency token —
+   *  set only for the `versioned` capability's synthetic `version` field. */
+  concurrencyToken = false,
 ): string[] {
   // Value-object array (`charges: Money[]`): an owned collection mapped to
   // the id-less child table — the migration's `order_charges` (owner FK +
@@ -696,7 +716,10 @@ function fieldConfigLines(
   // snake_case, otherwise it defaults to the PascalCase property name.  In the
   // embedded shape the field is a JSON key, so emit nothing (the default).
   if (embedded) return [];
-  return [`${indent}${builder}.Property(x => x.${upperFirst(f.name)}).HasColumnName("${col}");`];
+  const tokenSuffix = concurrencyToken ? ".IsConcurrencyToken()" : "";
+  return [
+    `${indent}${builder}.Property(x => x.${upperFirst(f.name)}).HasColumnName("${col}")${tokenSuffix};`,
+  ];
 }
 
 /** Configure an owned value object so its (recursively-flattened) columns

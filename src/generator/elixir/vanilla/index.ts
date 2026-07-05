@@ -13,6 +13,8 @@
 // ---------------------------------------------------------------------------
 
 import type { PageNameCtx } from "../../../ir/util/page-kind.js";
+import { aggregateIsEventSourced } from "../../../ir/util/resolve-datasource.js";
+import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import {
   buildPhoenixResourceModules,
   emitPhoenixResourceFiles,
@@ -71,9 +73,18 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   const hasUniqueKeys = contexts.some((c) =>
     c.aggregates.some((a) => (a.uniqueKeys?.length ?? 0) > 0),
   );
+  // The optimistic-concurrency 409 branch (`conflict_response/1`) is emitted when
+  // some in-scope aggregate carries the `versioned` capability OR is
+  // event-sourced: the `versioned` write rescues `Ecto.StaleEntryError` and the
+  // event-log append rescues a `(stream_id, version)` unique_violation, both to
+  // `{:error, :conflict}` → this responder.  A project with neither stays
+  // byte-identical (strict additivity).
+  const hasConcurrency = contexts.some((c) =>
+    c.aggregates.some((a) => aggregateIsVersioned(a) || aggregateIsEventSourced(a)),
+  );
   out.set(
     `lib/${appName}_web/problem_details.ex`,
-    renderVanillaProblemDetailsModule(appModule, hasUniqueKeys),
+    renderVanillaProblemDetailsModule(appModule, hasUniqueKeys, hasConcurrency),
   );
 
   // Resource-adapter helper modules — `lib/<app>/resources/<source_type>.ex`.

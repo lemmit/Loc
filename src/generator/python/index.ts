@@ -8,7 +8,12 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import { durableEventTypes } from "../../ir/util/channels.js";
-import { effectiveSavingShape, resolveDataSourceConfig } from "../../ir/util/resolve-datasource.js";
+import {
+  aggregateIsEventSourced,
+  effectiveSavingShape,
+  resolveDataSourceConfig,
+} from "../../ir/util/resolve-datasource.js";
+import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
 import { plural, snake } from "../../util/naming.js";
@@ -25,7 +30,7 @@ import { buildPyDispatchFile, dispatchSubscriptionsOf } from "./dispatch-builder
 import { renderPyAggregate } from "./emit/aggregate.js";
 import { emitPyAudit } from "./emit/audit.js";
 import { renderPyDomainServices } from "./emit/domain-service.js";
-import { ERRORS_PY } from "./emit/errors.js";
+import { errorsPy } from "./emit/errors.js";
 import { renderPyEvents } from "./emit/events.js";
 import { renderPyWireModels } from "./emit/http-models.js";
 import { renderPyIds } from "./emit/ids.js";
@@ -213,7 +218,14 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
 
   out.set("app/domain/__init__.py", "");
   out.set("app/domain/ids.py", renderPyIds(merged));
-  out.set("app/domain/errors.py", ERRORS_PY);
+  // `ConcurrencyError` (+ its 409 handler) rides on either the `versioned`
+  // guarded write's stale-write rejection or an event-sourced aggregate's
+  // append-time `(stream_id, version)` 23505 collision — a concurrency-free app
+  // omits both and stays byte-identical.
+  const hasConcurrency = merged.aggregates.some(
+    (a) => aggregateIsVersioned(a) || aggregateIsEventSourced(a),
+  );
+  out.set("app/domain/errors.py", errorsPy(hasConcurrency));
   out.set("app/domain/value_objects.py", renderPyEnumsAndValueObjects(merged));
   out.set("app/domain/events.py", renderPyEvents(merged));
 
@@ -258,6 +270,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     renderProblemPy(
       collectOpUnions([merged]),
       merged.aggregates.some((a) => (a.uniqueKeys?.length ?? 0) > 0),
+      hasConcurrency,
     ),
   );
   out.set("app/http/wire_models.py", renderPyWireModels(merged));
@@ -787,7 +800,11 @@ function collectOpUnions(contexts: readonly EnrichedBoundedContextIR[]): PyOpUni
 // ForbiddenError → 403, AggregateNotFoundError → 404, and FastAPI's
 // RequestValidationError → 422 with the §3.2 `errors[]` extension
 // (RFC 6901 pointers), matching the other backends' ProblemDetails.
-function renderProblemPy(opUnions: PyOpUnion[], hasUniqueKeys = false): string {
+function renderProblemPy(
+  opUnions: PyOpUnion[],
+  hasUniqueKeys = false,
+  hasVersioned = false,
+): string {
   // JSON literals are valid Python for the value kinds used here (strings,
   // arrays, objects — no booleans/nulls cross).
   const responsesDict = JSON.stringify(Object.fromEntries(opUnions.map((u) => [u.path, u.name])));
@@ -817,6 +834,26 @@ function renderProblemPy(opUnions: PyOpUnion[], hasUniqueKeys = false): string {
 
 `
     : "";
+  // The `versioned` optimistic-concurrency guard raises ConcurrencyError from
+  // the repository save when the row's version no longer matches the caller's
+  // expected version; it maps to a 409 Conflict (+ its import + a distinct
+  // `conflict` catalog event).  Emitted only when some aggregate is versioned,
+  // so a concurrency-free app stays byte-identical.
+  const versionedImport = hasVersioned ? "    ConcurrencyError,\n" : "";
+  const versionedHandler = hasVersioned
+    ? `    @app.exception_handler(ConcurrencyError)
+    async def _conflict(request: Request, err: ConcurrencyError) -> JSONResponse:
+        # An optimistic-concurrency guard (the \`versioned\` capability) found the
+        # row's version no longer matched the caller's expected version — a
+        # competing write won the race.  Surface a friendly 409 so the client
+        # reloads and retries instead of clobbering the newer state.
+        log("warn", "conflict", message=str(err), status=409)
+        return problem(
+            request, 409, "Conflict", "The resource was modified by another request; reload and retry."
+        )
+
+`
+    : "";
   return `"""RFC 7807 problem responses + exception handlers.  Auto-generated."""
 
 from typing import Any, cast
@@ -829,7 +866,7 @@ from pydantic import BaseModel${integrityImport}
 
 from app.domain.errors import (
     AggregateNotFoundError,
-    DisallowedError,
+${versionedImport}    DisallowedError,
     DomainError,
     ExternHandlerError,
     ForbiddenError,
@@ -957,7 +994,7 @@ def install_error_handlers(app: FastAPI) -> None:
         log("warn", "domain_error", message=str(err), status=400)
         return problem(request, 400, "Bad Request", str(err))
 
-${integrityHandler}    @app.exception_handler(AggregateNotFoundError)
+${integrityHandler}${versionedHandler}    @app.exception_handler(AggregateNotFoundError)
     async def _not_found(request: Request, err: AggregateNotFoundError) -> JSONResponse:
         log("warn", "not_found", message=str(err), status=404)
         return problem(request, 404, "Not Found", str(err))

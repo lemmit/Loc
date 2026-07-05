@@ -160,6 +160,16 @@ export const LogEvents = {
     level: "warn",
     fields: ["aggregate", "message", "status"],
   },
+  /** An optimistic-concurrency guard (a `versioned` aggregate's
+   *  `optimistic_lock`) found the row changed since the client read it — the
+   *  stale write is rejected (HTTP 409).  Distinct from `disallowed` (a
+   *  state-gate rejection) so a dashboard can tell a concurrency conflict from
+   *  a business-rule refusal. */
+  conflict: {
+    event: "conflict",
+    level: "warn",
+    fields: ["aggregate", "message", "status"],
+  },
   notFound: { event: "not_found", level: "warn", fields: ["aggregate", "id", "status"] },
 
   // ─── domain — error (system fault) ───────────────────────────────────

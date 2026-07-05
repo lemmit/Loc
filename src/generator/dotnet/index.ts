@@ -14,11 +14,13 @@ import { aggHasAuditedTarget } from "../../ir/util/audit-capability.js";
 import { durableEventTypes } from "../../ir/util/channels.js";
 import { isTpcBase, isTphBase, tableOwnerName, tphConcretesOf } from "../../ir/util/inheritance.js";
 import {
+  aggregateIsEventSourced,
   effectiveSavingShape,
   isDocumentShaped,
   isEmbeddedShaped,
   resolveDataSourceConfig,
 } from "../../ir/util/resolve-datasource.js";
+import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import type { Model } from "../../language/generated/ast.js";
 import { apiRoutePrefix } from "../../util/api-base.js";
 import { dedupeByName } from "../../util/dedupe.js";
@@ -429,9 +431,23 @@ function emitProjectFromContexts(
   // Only emit the 23505 → 409 arm when some aggregate declares a `unique (...)`
   // key — a unique-free project stays byte-identical (strict additivity).
   const hasUniqueKeys = merged.aggregates.some((a) => (a.uniqueKeys?.length ?? 0) > 0);
+  // Only emit the optimistic-concurrency (DbUpdateConcurrencyException → 409)
+  // arm when some in-scope aggregate declares the `versioned` capability OR is
+  // event-sourced — the EF event-store append translates a `(stream_id,
+  // version)` 23505 collision into DbUpdateConcurrencyException, the same
+  // exception the guarded write's stale-write raises.  A project with neither
+  // stays byte-identical.
+  const hasConcurrency = merged.aggregates.some(
+    (a) => aggregateIsVersioned(a) || aggregateIsEventSourced(a),
+  );
   out.set(
     "Api/DomainExceptionFilter.cs",
-    renderExceptionFilter(ns, { usesValidators, usingDapper, hasUniqueKeys }),
+    renderExceptionFilter(ns, {
+      usesValidators,
+      usingDapper,
+      hasUniqueKeys,
+      hasVersioned: hasConcurrency,
+    }),
   );
   out.set("Api/ProblemDetailsResponsesFilter.cs", renderProblemDetailsFilter(ns));
   out.set(
@@ -1091,15 +1107,23 @@ function emitProject(
   // / logger slices are layered on via the render options below; the bare
   // carrier (no auth, no --trace) still compiles with `ActorId => null`.
   const authRequired = !!options?.authRequired;
+  // Optimistic concurrency (`versioned`): the ambient carrier grows a settable
+  // `ExpectedVersion` (from the request's `If-Match` header) that the versioned
+  // repository save reads.  Gated so a version-free project is byte-identical.
+  const hasVersioned = ctx.aggregates.some(aggregateIsVersioned);
   out.set(
     "Domain/Common/RequestContext.cs",
     renderRequestContext(ns, {
       hasAuth: authRequired,
       hasLogger: emitTrace,
       actorIdProp: options?.actorIdProp,
+      hasVersioned,
     }),
   );
-  out.set("Middleware/RequestContextMiddleware.cs", renderRequestContextMiddleware(ns));
+  out.set(
+    "Middleware/RequestContextMiddleware.cs",
+    renderRequestContextMiddleware(ns, { hasVersioned }),
+  );
   if (emitTrace) {
     // Domain-layer logger plumbing — emitted only on --trace so the
     // default artefact stays free of the DomainLog shim.

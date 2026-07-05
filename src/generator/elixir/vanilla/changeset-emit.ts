@@ -18,6 +18,7 @@ import type {
   OperationIR,
   SystemIR,
 } from "../../../ir/types/loom-ir.js";
+import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { singleFieldConstraints } from "../../../ir/validate/invariant-classify.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { ectoValidator, voHasConstraints } from "./changeset-validators.js";
@@ -278,6 +279,25 @@ ${keyAliasPairs.join(",\n")}
   });
   const uniqueBlock = uniqueLines.length > 0 ? `\n${uniqueLines.join("\n")}` : "";
 
+  // Optimistic concurrency (`versioned` capability, D-VERSIONED).  The update
+  // path gets its OWN changeset — `base_changeset |> optimistic_lock(:version)`
+  // — so the guarded write compares the struct's `version` (which the repository
+  // has just overridden to the client's EXPECTED value) against the DB row in
+  // the `UPDATE ... WHERE ... AND version = ?` clause and increments it.  A
+  // mismatch RAISES `Ecto.StaleEntryError` (not a changeset error), rescued at
+  // the `Repo.update` site (repository-emit).  Kept off `base_changeset` because
+  // that pipeline also feeds INSERT — where `optimistic_lock` would increment the
+  // schema's `default: 1` to 2 on the very first insert.  Gated: a non-versioned
+  // aggregate emits no `update_changeset/2` (strict additivity).
+  const versionedBlock = aggregateIsVersioned(agg)
+    ? `\n\n  @doc "Update changeset with optimistic-concurrency locking (\`versioned\`) — the caller sets \`:version\` on the struct to the client's expected value first; \`optimistic_lock/2\` then guards the write on it (a stale write raises \`Ecto.StaleEntryError\` at \`Repo.update\`)."
+  def update_changeset(struct, attrs) do
+    struct
+    |> base_changeset(attrs)
+    |> optimistic_lock(:version)
+  end`
+    : "";
+
   // Per-action changeset helpers — create + destroy.  Named OPERATIONS no
   // longer get a `change_<op>` helper: their `<op>_<agg>` context fn renders the
   // body and `put_change`s the assigned columns directly (context-emit).  The
@@ -319,7 +339,7 @@ defmodule ${changesetMod} do
     ${valueCollections.length > 0 ? "attrs = prepare_vc_attrs(attrs)\n\n    " : ""}struct
     |> cast(attrs, @all_fields)
     |> validate_required(@required_fields)${validatorBlock}${castEmbedBlock}${castAssocBlock}${voBlock}${uniqueBlock}
-  end${keyNormalizeHelper}${voHelper}${normalizeHelper}${ordinalHelper}
+  end${versionedBlock}${keyNormalizeHelper}${voHelper}${normalizeHelper}${ordinalHelper}
 
 ${actionHelpers}
 end
