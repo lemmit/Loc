@@ -63,8 +63,22 @@ Today, escaping of `.ddd`-sourced strings/identifiers into generated source is p
 **Addresses the strategic finding: compile-green/round-trip-red regressions land serially on main.**
 
 - **A6.1 (S) — Widen Elixir gate path filters:** `elixir-vanilla-build.yml` must trigger on `src/ir/**`, `src/generator/_expr/**`, `src/generator/elixir/**` (all of it), `src/platform/elixir.ts`. Add an elixir leg to `corpus-build.yml`.
-- **A6.2 (M) — Behavioral tier beyond Hono:** extend `test/behavioral/corpus.json` runner dispatch so at least one non-Hono backend gets a per-PR headless round-trip (Python is the cheapest host-runnable candidate: uv + SQLite/PGlite-equivalent; evaluate before building). If a second in-process backend is not feasible, promote `conformance-parity.yml` from non-required to required on `src/ir/**`-touching PRs.
-- **A6.3 (L) — Runtime-semantics contract doc + artifact:** specify casing/casting rules, association persistence, error-envelope shape, bool/default handling as a versioned spec (start as `docs/conformance-semantics.md`, promote to a `.loom/semantics-spec.json` diff artifact like `wire-spec.json` once stable). Each recent Elixir fix (#1620–#1628) becomes a named rule with a cross-backend conformance test.
+- **A6.2 (M) — Behavioral tier beyond Hono:** **scoped 2026-07-05 →
+  [`a6.2-behavioral-tier-second-backend.md`](a6.2-behavioral-tier-second-backend.md).**
+  The "SQLite/PGlite-equivalent" guess was refuted (generated DDL is
+  Postgres-specific — jsonb/`pgEnum`); no non-Hono backend has an in-process
+  Postgres. Recommended path: HTTP-dispatch the *existing* emitted api-tier e2e
+  (the runner's `dispatch` seam is already abstracted) against a booted Python
+  FastAPI backend on a `services: postgres` sidecar (the obs-python boot recipe
+  is liftable). The `conformance-parity`-required fallback is noted but gates
+  only the *structural* contract, not the runtime-value RS-rules. Open call:
+  whether a service container counts as "per-PR". Not yet built.
+- **A6.3 (L) — Runtime-semantics contract doc + artifact: v1 LANDED (2026-07-05).**
+  `docs/conformance-semantics.md` + the `test/conformance/semantics-rules.ts`
+  registry + well-formedness gate ship; the three source-assertable rules are
+  gated per-PR (RS-2 `enum-casing-parity`, RS-3 `wire-no-leak-parity`, RS-5 the
+  pre-existing `union-find-absence-parity`). Remaining: the behavioral RS-rules
+  (ride A6.2) and the `.loom/semantics-spec.json` diff artifact (v2).
 - **Sequencing:** A6.1 immediately (one-file change); A6.2/A6.3 after B-wave lands so the contract codifies the *fixed* behavior.
 
 ### A7. Layering gates: close the blind spots, then fix what they catch
