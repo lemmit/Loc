@@ -190,11 +190,18 @@ projection <Name> keyed by <field> {
 - **Schema is declared, not inferred.** The state fields are the read model's
   columns and its wire shape — explicit, like an aggregate/VO body. (Resolves
   channels.md open question: inference is fragile and has no wire story.)
-- **`keyed by <field>`** names the correlation column events route to. It must
-  name one of the declared state fields, id-shaped, present as a field (directly
-  or reachable) on **every** subscribed event (so every event can be routed).
-  When exactly one id-shaped state field exists, `keyed by` may be omitted and
-  inferred — same rule as `correlationField`.
+- **`keyed by <field>` is required — always explicit, no inference.** It names
+  the correlation column events route to; it must name one of the declared state
+  fields, id-shaped, present as a field (directly or reachable) on **every**
+  subscribed event (so every event can be routed. This **deliberately diverges
+  from workflows**, which *infer* `correlationField` as the single id-shaped
+  state field (`lower-workflow.ts:136`). Inference is safe there because a saga's
+  state is one correlation id + non-id fields; a projection's read-model schema
+  routinely denormalises **several** foreign ids as columns
+  (`OrderBook { order: Order id, customer: Customer id }`), so a single-id rule
+  would be ambiguous in the common case and force a disambiguator anyway.
+  Explicit keying is clearer and makes the routing column unmissable at the
+  declaration site.
 - **`on(e: <Event>)`** reuses the *shipped* reactor spelling
   (`ddd.langium:1201`), **not** the sketch's `on OrderPlaced(e)`. First event for
   a key allocates the row; subsequent events for a known key fold into it;
@@ -241,7 +248,7 @@ ContextMember:
     ... | Channel | DomainService | Projection ;
 
 Projection:
-    'projection' name=ID ('keyed' 'by' key=ID)? '{'
+    'projection' name=ID 'keyed' 'by' key=ID '{'   // keyed by is required
         members+=ProjectionMember*
     '}';
 
@@ -314,7 +321,7 @@ export interface ProjectionOnIR {
 |---|---|
 | `loom.projection-key-unknown` | `keyed by X` names no declared state field. |
 | `loom.projection-key-not-id` | the key field is not id-shaped. |
-| `loom.projection-key-ambiguous` | `keyed by` omitted and ≠1 id-shaped state field. |
+| `loom.projection-key-required` | `keyed by` omitted (it is mandatory — no inference). |
 | `loom.projection-event-unkeyed` | a subscribed event carries no field routable to the key. |
 | `loom.projection-fold-impure` | a fold body emits / calls a repo or operation (**reuses `loom.apply-impure`**). |
 | `loom.projection-duplicate-on` | two `on(...)` handlers for the same event. |
