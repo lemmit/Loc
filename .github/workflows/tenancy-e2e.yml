@@ -11,10 +11,11 @@ name: Tenancy isolation (runtime e2e)
 # test/e2e/support/tenancy-isolation-harness.ts drives every backend; only the
 # boot differs). Each cell drives two principals via the dev-stub
 # `x-loom-dev-claims` header — the parity (#1673) that makes this cross-backend.
-# node/python/java are runtime-verified; dotnet + elixir legs are deferred
-# (a runtime .NET isolation defect was found — the EF HasQueryFilter captures
-# the ambient currentUser at model-build, so it does not isolate per request;
-# tracked as follow-up before those legs join the matrix).
+# node/python/java/dotnet are runtime-verified; the elixir leg is deferred.
+# The .NET leg gates the fix for a runtime isolation DEFECT this tier found: the
+# EF global query filter referenced the STATIC ambient currentUser, so EF baked
+# it once at model build and leaked cross-tenant — fixed by installing the
+# filter on AppDbContext reading the injected scoped ICurrentUserAccessor.
 #
 # This is the assertion the structural tiers CANNOT make: per-backend generator
 # tests pin the filter and the 1a.0 pins the stamp, but only a boot proves the
@@ -44,10 +45,13 @@ on:
       - 'src/ir/enrich/enrichments.ts'
       - 'src/generator/python/index.ts'
       - 'src/generator/java/emit/auth.ts'
+      - 'src/generator/dotnet/emit/efcore.ts'
+      - 'src/generator/dotnet/auth-emit.ts'
       - 'src/platform/hono/**'
       - 'test/e2e/tenancy-isolation.test.ts'
       - 'test/e2e/tenancy-isolation-python.test.ts'
       - 'test/e2e/tenancy-isolation-java.test.ts'
+      - 'test/e2e/tenancy-isolation-dotnet.test.ts'
       - 'test/e2e/support/tenancy-isolation-harness.ts'
       - 'test/fixtures/corpus/tenancy-owned.ddd'
       - 'package.json'
@@ -77,6 +81,8 @@ jobs:
             script: test:tenancy-python
           - backend: java
             script: test:tenancy-java
+          - backend: dotnet
+            script: test:tenancy-dotnet
     name: tenancy-e2e (${{ matrix.backend }})
     services:
       postgres:
@@ -109,6 +115,12 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+
+      - name: Set up .NET (dotnet)
+        if: matrix.backend == 'dotnet'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
 
       - name: Install Loom toolchain
         run: npm ci

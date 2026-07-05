@@ -13,7 +13,7 @@ import { isValueCollectionType, valueCollectionsFor } from "../../../ir/util/val
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
-import { AMBIENT_CURRENT_USER, renderCsExpr } from "../render-expr.js";
+import { renderCsExpr } from "../render-expr.js";
 import {
   esEventDbSet,
   esEventRecordClass,
@@ -196,14 +196,29 @@ export function renderDbContext(
   const auditApplyConfigs = hasAudit
     ? ["        modelBuilder.ApplyConfiguration(new Configurations.AuditRecordConfiguration());"]
     : [];
-  // Capability filter installation is per-EntityConfiguration —
-  // see `renderConfiguration` below, which emits one
-  // `builder.HasQueryFilter(...)` per `agg.contextFilters` entry.  No
-  // DbContext-level loop, no marker interfaces, no per-capability
-  // helper class.  Pre-Phase-3-refactor shape; the grouping
-  // infrastructure was removed when stdlib macros were split into
-  // level-correct trios (capability behaviour declared at context;
-  // state declared at aggregate).
+  // Principal-referencing query filters (tenancy) are installed HERE, on the
+  // DbContext, not in the stateless per-entity configurations.  An EF query
+  // filter that references the STATIC ambient (`RequestContext.Current`) is
+  // evaluated once at model build and baked into the cached per-query-shape
+  // plan — it does not track the per-request principal, so it fails to isolate
+  // (confirmed at runtime).  Referencing the injected scoped
+  // `ICurrentUserAccessor` instance field (`_currentUser`) instead makes EF
+  // parameterize it and RE-EVALUATE per query execution against this
+  // request-scoped context — the standard EF Core multi-tenancy pattern.
+  // Principal-free filters (softDelete) stay in the per-entity config.
+  const principalFilterLines = entityAggs
+    .filter((a) => !isDoc(a.name) && !isEs(a.name))
+    .flatMap((a) => {
+      const names = queryFilterNames(a);
+      return (a.contextFilters ?? [])
+        .map((predicate, i) => [predicate, i] as const)
+        .filter(([predicate]) => exprRefsCurrentUser(predicate))
+        .map(
+          ([predicate, i]) =>
+            `        modelBuilder.Entity<${a.name}>().HasQueryFilter(${JSON.stringify(names[i])}, x => ${renderCsExpr(predicate, { thisName: "x", currentUserExpr: "_currentUser.User" })});`,
+        );
+    });
+  const anyPrincipalFilter = principalFilterLines.length > 0;
   return (
     lines(
       "// Auto-generated.",
@@ -212,11 +227,28 @@ export function renderDbContext(
       ...joinUsings,
       ...wfStateUsings,
       ...esWfUsings,
+      // The scoped principal accessor the per-request tenancy query filters read,
+      // plus the id namespace (a registry self-scope filter constructs an `<Agg>Id`).
+      anyPrincipalFilter ? `using ${ns}.Auth;` : null,
+      anyPrincipalFilter ? `using ${ns}.Domain.Ids;` : null,
       `namespace ${ns}.Infrastructure.Persistence;`,
       "",
       "public sealed class AppDbContext : DbContext",
       "{",
-      "    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }",
+      // Tenancy query filters resolve the current principal through this
+      // injected scoped accessor so EF re-evaluates them per request (see
+      // OnModelCreating).  AddDbContext resolves the ctor arg from the app
+      // service provider; the context is not pooled, so scoped injection is safe.
+      ...(anyPrincipalFilter
+        ? [
+            "    private readonly ICurrentUserAccessor _currentUser;",
+            "",
+            "    public AppDbContext(DbContextOptions<AppDbContext> options, ICurrentUserAccessor currentUser) : base(options)",
+            "    {",
+            "        _currentUser = currentUser;",
+            "    }",
+          ]
+        : ["    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }"]),
       "",
       ...dbSets,
       ...tphBaseDbSets,
@@ -237,6 +269,8 @@ export function renderDbContext(
       ...outboxApplyConfigs,
       ...provenanceApplyConfigs,
       ...auditApplyConfigs,
+      // Per-request tenancy filters (after the entities are configured).
+      ...principalFilterLines,
       "    }",
       "}",
     ) + "\n"
@@ -377,16 +411,29 @@ export function renderConfiguration(
   // local the way an operation body can — resolve it through the same ambient
   // accessor the read side uses (`AMBIENT_CURRENT_USER`), so the whole backend
   // resolves `currentUser` one way (shared with the reified retrieval spec).
+  // Principal-referencing capability filters (tenancy `filter this.x ==
+  // currentUser.x`) are NOT emitted here.  An EF query filter defined in a
+  // stateless IEntityTypeConfiguration cannot reach a per-request principal:
+  // referencing the STATIC ambient (`RequestContext.Current`) makes EF evaluate
+  // it ONCE at model build and bake it into the cached per-query-shape plan — a
+  // stale filter that fails to isolate (confirmed at runtime: a cross-tenant
+  // read leak AND empty results for the owner).  Those filters move to
+  // `AppDbContext.OnModelCreating` (see `renderDbContext`), where they reference
+  // the injected scoped `ICurrentUserAccessor` so EF re-evaluates per request.
+  // Only genuinely-static, principal-free filters (e.g. softDelete
+  // `!isDeleted`) stay here.
   const filterLines = tph
     ? []
-    : (agg.contextFilters ?? []).map(
-        (predicate, i) =>
-          `        builder.HasQueryFilter(${JSON.stringify(filterNames[i])}, x => ${renderCsExpr(predicate, { thisName: "x", currentUserExpr: AMBIENT_CURRENT_USER })});`,
-      );
-  // The ambient accessor lives in `<ns>.Domain.Common` (RequestContext); only
-  // import it when a filter actually references the principal.
-  const filterRefsCurrentUser =
-    !tph && (agg.contextFilters ?? []).some((p) => exprRefsCurrentUser(p));
+    : (agg.contextFilters ?? [])
+        .map((predicate, i) => [predicate, i] as const)
+        .filter(([predicate]) => !exprRefsCurrentUser(predicate))
+        .map(
+          ([predicate, i]) =>
+            `        builder.HasQueryFilter(${JSON.stringify(filterNames[i])}, x => ${renderCsExpr(predicate, { thisName: "x" })});`,
+        );
+  // The config class no longer references the principal (those filters moved to
+  // AppDbContext), so it never needs the ambient `RequestContext` import.
+  const filterRefsCurrentUser = false;
   // Co-located provenance (provenance.md): each `provenanced` field's
   // `<Field>Provenance` lineage maps to a `<field>_provenance` jsonb column via
   // a System.Text.Json value-converter (ProvJson.Options → the same Web-default
