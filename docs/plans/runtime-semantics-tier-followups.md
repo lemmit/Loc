@@ -101,22 +101,23 @@ agents; they only collide on this doc's status table.
 - **DoD.** New runner + fixture + workflow; RS-1/4/6/7/8 tier notes add `dotnet`;
   scoping-note "v2" bullet ticked.
 
-### RST-3 · Add Java as a behavioral backend  ·  L  ·  ✅ LANDED (pending first CI run)
+### RST-3 · Add Java as a behavioral backend  ·  L  ·  ✅ LANDED
 - **Landed:** `test/behavioral/run-java.mjs` (mirrors `run-dotnet.mjs`),
   `test/behavioral/corpus-java/sales.ddd` + `corpus-java.json` (the .NET fixture
   retargeted to `platform: java`), and `behavioral-e2e-java.yml` (a
   `services: postgres` sidecar + JDK 21/temurin + Gradle, building `gradle
   bootJar` and booting `java -jar` against `SPRING_DATASOURCE_URL`). The
-  live-boot round-trip runs in CI only (the local sandbox blocks long-lived
-  server spawns); the emitted api e2e is HTTP-dispatched at the booted Java
-  backend via the same `loadApiTests({dispatch})` seam.
-- **RS-4 status is UNKNOWN until the first CI run.** Unlike the .NET fixture
-  (which *drops* the `placedAt` assertion for RST-9's 7-fractional-digit
-  divergence), the Java fixture **keeps** `expect(read.placedAt).toBe("2024-01-01T00:00:00Z")`.
-  The first CI run reveals whether Spring Boot/Jackson conforms to the canonical
-  `…00Z` wire form (RS-4) or diverges like .NET. If it diverges, drop/adjust that
-  one assertion (document inline, like the .NET fixture) and file a Java RS-4
-  follow-up (the sibling of RST-9).
+  live-boot round-trip runs in CI only; the emitted api e2e is HTTP-dispatched at
+  the booted Java backend via the same `loadApiTests({dispatch})` seam.
+- **First run found a real bug (as predicted).** The Java tier booted, migrated,
+  and ran the e2e — and **every customer create 400'd** (`Malformed request
+  body`) because the create body OMITS `active` (a `= true`-defaulted field) and
+  the generated Spring create DTO rejects the omitted field, where node/python
+  apply the declared default. **Same class as the Python bug #1684** (RS-6).
+  Tracked as **RST-10**; the Java fixture now sends `active` explicitly to
+  exercise the other rules, and the RS-6 omitted-default check is deferred on
+  Java. RS-4 (`placedAt`) is kept — the re-run reveals whether Java also diverges
+  on the instant format like .NET (RST-9); if so, defer it too.
 - Sibling of RST-2 on Java. Boot recipe from `java-obs-e2e.yml` (JDK 21 + gradle
   `bootJar` → `java -jar`, host-runnable — no SDK container). Same seam, same
   DoD.
@@ -199,6 +200,27 @@ agents; they only collide on this doc's status table.
   `semantics-rules.ts` + `conformance-semantics.md`.
 - **Collision:** `src/generator/dotnet/` + the .NET fixture. Same pattern as
   #1681/#1684 (gate found a bug → fix → widen).
+
+### RST-10 · Java create DTO honors an omitted bool default (found by RST-3)  ·  S–M
+- **Why.** RST-3's first CI run found it: the generated Spring Boot create DTO
+  **400s** (`Malformed request body`) on a create body that OMITS `active` — a
+  field with a `= true` default — where node/python apply the declared default
+  and echo it back. Same class as the Python bug #1684 (RS-6, bool create
+  default). The Java create request record makes the defaulted field required
+  (non-nullable / no Jackson default), so Jackson rejects the omitted key.
+- **Scope.** In the Java generator (`src/generator/java/`), make a create-DTO
+  field that carries a declared default **optional at the wire boundary** and
+  apply the declared default when the key is absent (mirror what the Python fix
+  #1684 did in `requestFieldDecl`, and what node already does) — likely the
+  create request record + its `@JsonProperty`/constructor mapping into the
+  domain factory. Verify with `gradle testClasses bootJar` + the
+  `behavioral-e2e-java` round-trip.
+- **Then:** restore the omitted-`active` create in `corpus-java/sales.ddd` (drop
+  the explicit `active: true` from the multi-word-key test, assert `active`
+  reads back `true`), and flip RS-6 `conforms` to include `java` in
+  `semantics-rules.ts` + `conformance-semantics.md`.
+- **Collision:** `src/generator/java/` + the Java fixture. Same pattern as
+  #1681/#1684/RST-9 (gate found a bug → fix → widen).
 
 ---
 
