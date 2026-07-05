@@ -12,36 +12,37 @@ import {
 } from "./support/tenancy-isolation-harness.js";
 
 // ---------------------------------------------------------------------------
-// Cross-tenant isolation — the runtime leak test for first-class multi-tenancy
-// (docs/tenancy.md), NODE/Hono backend.  Generates the corpus fixture
-// `tenancy-owned.ddd` (`tenancy by user.tenantId of Organization` + a
-// `with tenantOwned` aggregate), boots it against a throwaway postgres
-// (migrations apply at boot), then runs the shared isolation + registry
-// bootstrap assertions driving two principals via `x-loom-dev-claims`.
+// Cross-tenant isolation — JAVA/Spring Boot backend (sibling of
+// tenancy-isolation.test.ts).  Same corpus fixture + shared assertions; boots
+// via `gradle bootJar` → `java -jar`.  Proves the tenantOwned stamp + filter
+// agree at RUNTIME on Spring Boot / JPA, driving two principals via the
+// dev-stub `x-loom-dev-claims` header (parity landed in #1673).
 //
-// The assertion sequence lives in support/tenancy-isolation-harness.ts and is
-// backend-agnostic; the sibling files (…-dotnet / -python / -java / -elixir)
-// reuse it, differing only in boot mechanics.  This is the assertion the
-// structural tiers can't make: the filter is pinned per backend by generator
-// tests and the stamp by the 1a.0 pins, but only a boot proves the two agree
-// end-to-end (the pre-1a.0 bug — stamp writes the actor id, filter reads the
-// claim — made every created row invisible and NO structural test saw it).
-//
-// Slow (npm install + docker pg + boot), so opt-in: LOOM_TENANCY_E2E=1.
-// LOOM_TENANCY_PG_URL=postgres://… skips the docker sidecar (docker-less dev).
+// Opt-in: LOOM_TENANCY_E2E_JAVA=1.  Needs `gradle` + JDK 21 on PATH + docker
+// (postgres sidecar) or LOOM_TENANCY_PG_URL.
 // ---------------------------------------------------------------------------
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..");
 const cli = path.join(repoRoot, "bin", "cli.js");
 
-const ENABLED = process.env.LOOM_TENANCY_E2E === "1";
+const ENABLED = process.env.LOOM_TENANCY_E2E_JAVA === "1";
+
+function hasGradle(): boolean {
+  try {
+    execSync("gradle --version", { stdio: "pipe", timeout: 15_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 describe.skipIf(!ENABLED)(
-  "cross-tenant isolation over the generated node backend (LOOM_TENANCY_E2E=1)",
+  "cross-tenant isolation over the generated java backend (LOOM_TENANCY_E2E_JAVA=1)",
   () => {
     it("tenant A's rows are invisible to tenant B — 404 on get, absent from list", async () => {
-      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tenancy-node-"));
+      if (!hasGradle()) throw new Error("LOOM_TENANCY_E2E_JAVA=1 set but `gradle` is not on PATH.");
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tenancy-java-"));
       let child: ReturnType<typeof spawn> | undefined;
       let pg: Awaited<ReturnType<typeof startPostgres>> | undefined;
       try {
@@ -49,26 +50,37 @@ describe.skipIf(!ENABLED)(
           path.join(repoRoot, "test", "fixtures", "corpus", "tenancy-owned.ddd"),
           "utf8",
         );
-        const dddPath = path.join(outDir, "tenancy-owned-node.ddd");
-        fs.writeFileSync(dddPath, fixture.replace("__PLATFORM__", "node"));
+        const dddPath = path.join(outDir, "tenancy-owned-java.ddd");
+        fs.writeFileSync(dddPath, fixture.replace("__PLATFORM__", "java"));
         execSync(`node ${cli} generate system ${dddPath} -o ${outDir}`, {
           stdio: "pipe",
           cwd: repoRoot,
         });
         const appDir = path.join(outDir, "d"); // deployable `d`
 
-        pg = await startPostgres("node");
-        const pgUrl = `postgres://${pg.user}:${pg.password}@${pg.host}:${pg.port}/${pg.db}`;
-
-        execSync("npm install --silent --no-audit --no-fund", {
+        execSync("gradle --no-daemon -q bootJar", {
           cwd: appDir,
           stdio: "pipe",
-          timeout: 180_000,
+          timeout: 600_000,
         });
+        const jar = fs
+          .readdirSync(path.join(appDir, "build", "libs"))
+          .find((f) => f.endsWith(".jar") && !f.endsWith("-plain.jar"));
+        if (!jar) throw new Error("bootJar produced no runnable jar");
+
+        pg = await startPostgres("java");
+        const jdbc = `jdbc:postgresql://${pg.host}:${pg.port}/${pg.db}`;
+
         const port = await freePort();
-        child = spawn("npx", ["tsx", "index.ts"], {
+        child = spawn("java", ["-jar", path.join("build", "libs", jar)], {
           cwd: appDir,
-          env: { ...process.env, DATABASE_URL: pgUrl, PORT: String(port) },
+          env: {
+            ...process.env,
+            SPRING_DATASOURCE_URL: jdbc,
+            SPRING_DATASOURCE_USERNAME: pg.user,
+            SPRING_DATASOURCE_PASSWORD: pg.password,
+            SERVER_PORT: String(port),
+          },
           stdio: ["ignore", "pipe", "pipe"],
           detached: true,
         });
@@ -80,7 +92,7 @@ describe.skipIf(!ENABLED)(
           bootLog += c.toString("utf8");
         });
         const base = `http://127.0.0.1:${port}`;
-        await waitForReady(base, () => bootLog);
+        await waitForReady(base, () => bootLog, 120_000);
 
         await assertCrossTenantIsolation(base);
       } finally {
@@ -98,6 +110,6 @@ describe.skipIf(!ENABLED)(
           /* best-effort */
         }
       }
-    }, 360_000);
+    }, 900_000);
   },
 );

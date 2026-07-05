@@ -30,6 +30,20 @@ export function aggregateHasStamps(agg: AggregateIR): boolean {
   return (agg.contextStamps ?? []).length > 0;
 }
 
+/** Snake-cased names of every field a lifecycle stamp writes (`onCreate` /
+ *  `onUpdate` assignment targets — audit `createdBy`, `tenantOwned`'s
+ *  `tenantId`, `createdAt := now()`, …).  These are server-owned: the stamp
+ *  `put_change`s them onto the changeset right before persist, so they must NOT
+ *  be `cast` from client attrs (a client could spoof the value) nor
+ *  `validate_required`d in `base_changeset` (that runs BEFORE the stamp and
+ *  would reject a create whose stamped column the client never sends — the bug
+ *  that 422'd `tenantOwned`'s create with "tenant_id can't be blank"). */
+export function stampedFieldNames(agg: AggregateIR): Set<string> {
+  return new Set(
+    (agg.contextStamps ?? []).flatMap((r) => r.assignments.map((a) => snake(a.field))),
+  );
+}
+
 /** Does any of the aggregate's stamps reference the request principal
  *  (`currentUser`)?  Gates the `current_user` threading through the
  *  create/update seam (delegate + controller). */

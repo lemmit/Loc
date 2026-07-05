@@ -14,6 +14,7 @@
 // extension shape byte-identical to the other backends) lands in Slice 4.
 // ---------------------------------------------------------------------------
 
+import { hasCreate } from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -57,6 +58,27 @@ function memberOperations(agg: { operations: readonly OperationIR[] }): Operatio
 
 export interface VanillaApiEmitResult {
   routes: ApiRoute[];
+}
+
+/**
+ * Whether the vanilla Phoenix backend exposes a REST create surface — the
+ * `POST /<plural>` route AND its OpenAPI `post` operation — for this
+ * aggregate.  Derived ONCE here and consumed by both `emitVanillaApiControllers`
+ * (the router) and `emitOpenApiSpec` (the spec), so the two can never disagree
+ * (the class of bug where the controller `create` action was generated and
+ * documented but left unrouted).
+ *
+ * Matches the node/dotnet/python/java backends, which gate create on
+ * **constructibility** (`hasCreate` = `isConstructible`): a constructible
+ * non-ES aggregate is created via the generic `create_<agg>` domain function
+ * even without an explicit `create` operation.  Event-sourced aggregates keep
+ * the explicit-create gate — their `create_<agg>` returns `:not_constructible`
+ * unless a create event is declared.  An abstract inheritance base is
+ * read-only (no `create` action emitted), so it never exposes create.
+ */
+export function emitsRestCreate(agg: AggregateIR): boolean {
+  if (isAbstractBase(agg)) return false;
+  return isEventSourced(agg) ? (agg.creates ?? []).length > 0 : hasCreate(agg);
 }
 
 export function emitVanillaApiControllers(
@@ -109,10 +131,12 @@ export function emitVanillaApiControllers(
       controller: controllerName,
       action: ":show",
     });
-    // Write path — Slice 2.  Always emitted when the aggregate has a
-    // canonical create / destroy / mutate operation.  The aggregate
-    // shape from `with crudish` always carries these.
-    if ((agg.creates ?? []).length > 0) {
+    // Write path.  The create route rides the shared `emitsRestCreate`
+    // predicate — the SAME gate the OpenAPI `post` operation uses — so the
+    // route and the documented contract can never diverge (`generators.md`:
+    // "POST / → create").  See `emitsRestCreate` for the constructibility
+    // rationale.
+    if (emitsRestCreate(agg)) {
       routes.push({
         method: "post",
         path: `/${aggsPath}`,

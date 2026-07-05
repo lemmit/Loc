@@ -12,36 +12,42 @@ import {
 } from "./support/tenancy-isolation-harness.js";
 
 // ---------------------------------------------------------------------------
-// Cross-tenant isolation — the runtime leak test for first-class multi-tenancy
-// (docs/tenancy.md), NODE/Hono backend.  Generates the corpus fixture
-// `tenancy-owned.ddd` (`tenancy by user.tenantId of Organization` + a
-// `with tenantOwned` aggregate), boots it against a throwaway postgres
-// (migrations apply at boot), then runs the shared isolation + registry
-// bootstrap assertions driving two principals via `x-loom-dev-claims`.
+// Cross-tenant isolation — .NET/ASP.NET Core + EF Core backend (sibling of
+// tenancy-isolation.test.ts).  Same corpus fixture + shared assertions; boots
+// via `dotnet run`.  Proves the tenantOwned stamp + filter agree at RUNTIME on
+// EF Core.  This is the backend the runtime tier most needed: the tenant
+// filter is an EF global query filter, and referencing the STATIC ambient
+// baked it once at model build — a cross-tenant read leak that compiled green
+// and passed every structural test.  The fix installs the filter on
+// AppDbContext reading the injected scoped ICurrentUserAccessor (`_currentUser`)
+// so EF re-evaluates per request; this test is the gate that keeps it honest.
 //
-// The assertion sequence lives in support/tenancy-isolation-harness.ts and is
-// backend-agnostic; the sibling files (…-dotnet / -python / -java / -elixir)
-// reuse it, differing only in boot mechanics.  This is the assertion the
-// structural tiers can't make: the filter is pinned per backend by generator
-// tests and the stamp by the 1a.0 pins, but only a boot proves the two agree
-// end-to-end (the pre-1a.0 bug — stamp writes the actor id, filter reads the
-// claim — made every created row invisible and NO structural test saw it).
-//
-// Slow (npm install + docker pg + boot), so opt-in: LOOM_TENANCY_E2E=1.
-// LOOM_TENANCY_PG_URL=postgres://… skips the docker sidecar (docker-less dev).
+// Opt-in: LOOM_TENANCY_E2E_DOTNET=1.  Needs the .NET SDK on PATH + docker
+// (postgres sidecar) or LOOM_TENANCY_PG_URL.
 // ---------------------------------------------------------------------------
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..");
 const cli = path.join(repoRoot, "bin", "cli.js");
 
-const ENABLED = process.env.LOOM_TENANCY_E2E === "1";
+const ENABLED = process.env.LOOM_TENANCY_E2E_DOTNET === "1";
+
+function hasDotnet(): boolean {
+  try {
+    execSync("dotnet --version", { stdio: "pipe", timeout: 15_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 describe.skipIf(!ENABLED)(
-  "cross-tenant isolation over the generated node backend (LOOM_TENANCY_E2E=1)",
+  "cross-tenant isolation over the generated .NET backend (LOOM_TENANCY_E2E_DOTNET=1)",
   () => {
     it("tenant A's rows are invisible to tenant B — 404 on get, absent from list", async () => {
-      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tenancy-node-"));
+      if (!hasDotnet())
+        throw new Error("LOOM_TENANCY_E2E_DOTNET=1 set but `dotnet` is not on PATH.");
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tenancy-dotnet-"));
       let child: ReturnType<typeof spawn> | undefined;
       let pg: Awaited<ReturnType<typeof startPostgres>> | undefined;
       try {
@@ -49,26 +55,27 @@ describe.skipIf(!ENABLED)(
           path.join(repoRoot, "test", "fixtures", "corpus", "tenancy-owned.ddd"),
           "utf8",
         );
-        const dddPath = path.join(outDir, "tenancy-owned-node.ddd");
-        fs.writeFileSync(dddPath, fixture.replace("__PLATFORM__", "node"));
+        const dddPath = path.join(outDir, "tenancy-owned-dotnet.ddd");
+        fs.writeFileSync(dddPath, fixture.replace("__PLATFORM__", "dotnet"));
         execSync(`node ${cli} generate system ${dddPath} -o ${outDir}`, {
           stdio: "pipe",
           cwd: repoRoot,
         });
         const appDir = path.join(outDir, "d"); // deployable `d`
 
-        pg = await startPostgres("node");
-        const pgUrl = `postgres://${pg.user}:${pg.password}@${pg.host}:${pg.port}/${pg.db}`;
+        execSync("dotnet restore", { cwd: appDir, stdio: "pipe", timeout: 300_000 });
 
-        execSync("npm install --silent --no-audit --no-fund", {
-          cwd: appDir,
-          stdio: "pipe",
-          timeout: 180_000,
-        });
+        pg = await startPostgres("dotnet");
+        const conn = `Host=${pg.host};Port=${pg.port};Database=${pg.db};Username=${pg.user};Password=${pg.password}`;
+
         const port = await freePort();
-        child = spawn("npx", ["tsx", "index.ts"], {
+        child = spawn("dotnet", ["run", "--no-restore", "--no-launch-profile"], {
           cwd: appDir,
-          env: { ...process.env, DATABASE_URL: pgUrl, PORT: String(port) },
+          env: {
+            ...process.env,
+            ConnectionStrings__Default: conn,
+            ASPNETCORE_URLS: `http://127.0.0.1:${port}`,
+          },
           stdio: ["ignore", "pipe", "pipe"],
           detached: true,
         });
@@ -80,7 +87,7 @@ describe.skipIf(!ENABLED)(
           bootLog += c.toString("utf8");
         });
         const base = `http://127.0.0.1:${port}`;
-        await waitForReady(base, () => bootLog);
+        await waitForReady(base, () => bootLog, 180_000);
 
         await assertCrossTenantIsolation(base);
       } finally {
@@ -98,6 +105,6 @@ describe.skipIf(!ENABLED)(
           /* best-effort */
         }
       }
-    }, 360_000);
+    }, 600_000);
   },
 );

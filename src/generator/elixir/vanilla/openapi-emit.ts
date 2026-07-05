@@ -54,6 +54,7 @@ import { defaultErrorStatus } from "../../../util/error-defaults.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { findUnionSpec, unionMembers } from "../../_payload/union-wire.js";
 import type { ApiRoute } from "../api-emit.js";
+import { emitsRestCreate } from "./api-emit.js";
 
 // ---------------------------------------------------------------------------
 // OpenApiSpex emission for Phoenix LiveView / Ash.
@@ -490,19 +491,12 @@ function renderApiSpec(
     const listRespMod = `${schemasModule}.${agg.name}ListResponse`;
     const createReqMod = `${schemasModule}.Create${agg.name}Request`;
     const createRespMod = `${schemasModule}.Create${agg.name}Response`;
-    pathEntries.push(
-      `      "/${aggSlug}" => %OpenApiSpex.PathItem{
-        get: %OpenApiSpex.Operation{
-          summary: "List ${agg.name}",
-          operationId: "${camelId(opList(agg.name))}",
-          tags: ["${aggSlug}"],
-          responses: %{
-            200 => %OpenApiSpex.Response{
-              description: "OK",
-              content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${listRespMod}}}
-            }
-          }
-        },
+    // The `post` create operation rides the SAME `emitsRestCreate` predicate as
+    // the router route (api-emit.ts) — documenting a create the router doesn't
+    // wire (or vice versa) is the exact divergence this shares away.  A
+    // non-constructible / abstract aggregate documents no create.
+    const createPost = emitsRestCreate(agg)
+      ? `,
         post: %OpenApiSpex.Operation{
           summary: "Create ${agg.name}",
           operationId: "${camelId(opCreate(agg.name))}",
@@ -519,7 +513,21 @@ function renderApiSpec(
               content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${createRespMod}}}
             }${errorResponseEntries("create", schemasModule)}
           }
-        }
+        }`
+      : "";
+    pathEntries.push(
+      `      "/${aggSlug}" => %OpenApiSpex.PathItem{
+        get: %OpenApiSpex.Operation{
+          summary: "List ${agg.name}",
+          operationId: "${camelId(opList(agg.name))}",
+          tags: ["${aggSlug}"],
+          responses: %{
+            200 => %OpenApiSpex.Response{
+              description: "OK",
+              content: %{"application/json" => %OpenApiSpex.MediaType{schema: ${listRespMod}}}
+            }
+          }
+        }${createPost}
       }`,
       `      "/${aggSlug}/{id}" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
