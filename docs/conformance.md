@@ -27,6 +27,13 @@ equivalent) but converging on the same 7807 wire shape.
 This doc describes the dimensions the harness diffs, how to read a
 divergence report, and how to extend it.
 
+This harness owns the **structural** contract (the spec a client binds
+against) and is deliberately casing-tolerant. The **runtime-value**
+contract — the JSON a booted backend actually sends/accepts (camelCase
+keys, enum casing, no leaked timestamps, absence-match, association
+round-trip) — is its companion: [`conformance-semantics.md`](conformance-semantics.md).
+A spec-diff is blind to those (see #1620), so they live as named RS-rules.
+
 For the runner workflow (CLI, docker, env vars) see
 [`tools.md`](tools.md#cross-platform-openapi-parity-check). For the
 list of architectural decisions that led to the current design see the
