@@ -69,7 +69,9 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
       'POST {"buildState":"Passed"} → 201 and reads back "Passed" (not "passed"/"PASSED")',
     conforms: ["node", "dotnet", "java", "python", "elixir"],
     provenance: ["#1622"],
-    tier: "behavioral",
+    // Gated statically per-PR by test/conformance/enum-casing-parity.test.ts —
+    // the emitted enum definition fixes the wire value, no boot needed.
+    tier: "static",
   },
   {
     id: "RS-3",
