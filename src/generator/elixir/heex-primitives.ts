@@ -12,6 +12,7 @@
 // so the dependency is one-directional (primitives -> core).
 // ---------------------------------------------------------------------------
 
+import { createInputFields } from "../../ir/enrich/wire-projection.js";
 import type { EnumIR, ExprIR, TypeIR, ValueObjectIR } from "../../ir/types/loom-ir.js";
 import { humanize, plural, snake } from "../../util/naming.js";
 import {
@@ -305,7 +306,13 @@ export function renderForm(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkCon
   if (ofPascal) {
     const agg = ctx.aggregatesByName.get(ofPascal);
     if (agg) {
-      for (const f of agg.fields) {
+      // Render the create-input contract (`createInputFields`), not raw
+      // `agg.fields` — server-owned fields (`managed`/`token`/`internal`,
+      // incl. `stamp` targets promoted by `promoteStampTargets`) must not
+      // surface as client inputs; the LiveView save path stamps them at
+      // persist.  Unlike the JS `CreateForm`, optionals stay rendered —
+      // the HEEx form has no update flow to defer them to.
+      for (const f of createInputFields(agg)) {
         if (f.name === "id") continue;
         inputs.push(
           `  ${renderFieldInputForField(

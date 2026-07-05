@@ -6,6 +6,7 @@
 // trigger surface onto the operation state its Form child just pushed,
 // so it must share the same sink and live alongside the form emitters.
 
+import { createInputFields } from "../../../ir/enrich/wire-projection.js";
 import type { AggregateIR, BoundedContextIR, ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import { humanize, lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import {
@@ -417,12 +418,18 @@ function emitFormOfAggregate(
       `CreateForm(of: ${aggName}): aggregate not found in this UI's reachable contexts`,
     );
   }
-  // Optional fields are excluded from create forms — same rule as
-  // the scaffold New-page builder (`!f.optional`).  This keeps the
-  // first iteration of a form schema focused on what the wire
-  // contract REQUIRES; optional fields surface via update-flow
-  // operations on the detail page.
-  const fields = agg.fields.filter((f) => !f.optional);
+  // The form renders the create-input contract (`createInputFields` —
+  // the same set the api-module's `Create<Agg>Request` zod schema and
+  // every backend DTO derive from), so a server-owned field (`managed`/
+  // `token`/`internal`, incl. stamp targets promoted by
+  // `promoteStampTargets`) never surfaces as a client input.  Raw
+  // `agg.fields` here rendered inputs the payload type doesn't carry.
+  // Optional fields are excluded on top — same rule as the scaffold
+  // New-page builder (`!f.optional`).  This keeps the first iteration
+  // of a form schema focused on what the wire contract REQUIRES;
+  // optional fields surface via update-flow operations on the detail
+  // page.
+  const fields = createInputFields(agg).filter((f) => !f.optional);
   const testidNamespace = stringNamed(call, "testid") ?? `${snake(plural(agg.name))}-new`;
   // The pack's `primitive-form-of` imports cover the form-shell
   // components (Stack/Button/Group on Mantine, equivalents elsewhere).

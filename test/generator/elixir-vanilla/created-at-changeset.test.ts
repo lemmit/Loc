@@ -83,7 +83,14 @@ system Shop {
     expect(cs).toContain("@all_fields [:label]");
     expect(cs).not.toMatch(/@all_fields \[[^\]]*:created_at/);
     expect(cs).not.toMatch(/@required_fields \[[^\]]*:created_at/);
-    // …because the lifecycle stamp owns its value instead.
-    expect(cs).toContain(":created_at");
+    // …and from every per-action cast: a stamp target is server-owned, so
+    // it is never client input on create OR update (S1(b) — the crudish
+    // update op excludes stamp targets from its params).  The changeset
+    // module therefore never touches the column at all…
+    expect(cs).not.toContain(":created_at");
+    // …because the lifecycle stamp writes it at persist time instead.
+    const repoKey = [...files.keys()].find((k) => k.endsWith("/order_repository.ex"));
+    expect(repoKey, "order repository").toBeDefined();
+    expect(files.get(repoKey!)!).toContain("put_change(:created_at");
   });
 });

@@ -37,7 +37,7 @@ import type {
   TypeRef,
   UnaryExpr,
 } from "../../language/generated/ast.js";
-import { isProperty, isSubdomain } from "../../language/generated/ast.js";
+import { isProperty, isStampDecl, isSubdomain } from "../../language/generated/ast.js";
 import {
   mkAssignOrCallStmt,
   mkCallArg,
@@ -429,8 +429,19 @@ export function targetFields(target: Aggregate): readonly Property[] {
  *      `id`/`version`), `internal` (never client-input).  `secret`
  *      STAYS — write-only fields belong IN update inputs (password
  *      changes etc.).
+ *   3. **Stamp target** — exclude fields a visible `stamp onCreate` /
+ *      `stamp onUpdate` assigns (aggregate-body or context-level): the
+ *      server owns their value at persist time, so admitting them as
+ *      update params would let the client overwrite a server-stamped
+ *      column (often the very one a row-security `filter` reads).  The
+ *      AST twin of enrichment's `promoteStampTargets` → `managed`
+ *      promotion — that IR pass runs long after this macro has already
+ *      baked the params into the `update` op, so the exclusion must
+ *      happen here too.  Capability-spliced stamps need no handling:
+ *      the splice runs after `with`-macros, so neither the capability's
+ *      field nor its stamp exists when crudish reads the host.
  *
- * The two filters cover non-overlapping concerns: a user-declared
+ * The filters cover non-overlapping concerns: a user-declared
  * `slug: string immutable` is excluded by (2) alone; a macro-added
  * `createdAt: datetime` is excluded by (1) regardless of whether the
  * macro thought to set `access: "managed"`.
@@ -440,8 +451,10 @@ export function targetFields(target: Aggregate): readonly Property[] {
  * server-owned ones differently.  See the access-modifier matrix in
  * `src/ir/types/loom-ir.ts` (`FieldAccess`) for the canonical semantics. */
 export function writableUpdateFields(target: Aggregate): readonly Property[] {
+  const stamped = stampTargetNames(target);
   return targetFields(target).filter((f) => {
     if ((f as { [ORIGIN_PROP]?: OriginToken })[ORIGIN_PROP] !== undefined) return false;
+    if (stamped.has(f.name)) return false;
     const access = (f as { access?: FieldAccess }).access;
     if (
       access === "immutable" ||
@@ -455,6 +468,22 @@ export function writableUpdateFields(target: Aggregate): readonly Property[] {
   });
 }
 
+/** Field names targeted by `stamp onCreate` / `stamp onUpdate`
+ * declarations visible at expansion time: the aggregate's own
+ * `StampDecl` members plus the enclosing context's (context-level
+ * stamps propagate to every aggregate — `collectStamps` in
+ * `src/ir/lower/lower-capabilities.ts` merges the same two scopes).
+ * A stamp target from EITHER event is server-owned on BOTH create and
+ * update, mirroring `promoteStampTargets` (any stamp target →
+ * `managed`), so both writable-field helpers consult this set. */
+function stampTargetNames(target: Aggregate): ReadonlySet<string> {
+  const decls = [
+    ...(target.members ?? []).filter(isStampDecl),
+    ...(target.$container?.members ?? []).filter(isStampDecl),
+  ];
+  return new Set(decls.flatMap((s) => s.assignments.map((a) => a.target.head)));
+}
+
 /** Subset of `targetFields` suitable for use as `create`-operation
  * parameters.  Same origin-tag filter as `writableUpdateFields` but
  * the access filter is symmetric:
@@ -466,13 +495,20 @@ export function writableUpdateFields(target: Aggregate): readonly Property[] {
  *      `immutable` is KEPT — it's the whole point: settable on
  *      create, frozen after.  `secret` is KEPT — client supplies
  *      password hashes / API keys at creation time.
+ *   3. **Stamp target** — same exclusion as `writableUpdateFields`:
+ *      a stamped field's value is server-derived at persist time, so
+ *      it is never a create param (`promoteStampTargets` drops it from
+ *      the create-input contract; the factory initialises it and the
+ *      stamp overwrites at save).
  *
  * Companion to `writableUpdateFields`.  When `crudish` grows a
  * `create` operation in a future phase, this is the helper it
  * iterates to derive the request-body shape. */
 export function writableCreateFields(target: Aggregate): readonly Property[] {
+  const stamped = stampTargetNames(target);
   return targetFields(target).filter((f) => {
     if ((f as { [ORIGIN_PROP]?: OriginToken })[ORIGIN_PROP] !== undefined) return false;
+    if (stamped.has(f.name)) return false;
     const access = (f as { access?: FieldAccess }).access;
     if (access === "managed" || access === "token" || access === "internal") {
       return false;

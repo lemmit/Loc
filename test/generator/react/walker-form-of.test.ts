@@ -228,3 +228,45 @@ describe("CreateForm { of: <Aggregate> } auto-dispatch", () => {
     expect(tsx).toMatch(/\{\/\* CreateForm\(of: …\): missing 'of:' aggregate ref \*\/\}/);
   });
 });
+
+describe("CreateForm renders the create-input contract, not raw fields (S1b)", () => {
+  it("a stamp-target field never surfaces as a client input (form, defaults, page object)", async () => {
+    const files = await buildAndGenerate(`
+      system S {
+        user { id: guid  role: string }
+        subdomain M {
+          context C {
+            aggregate Order {
+              customerId: string
+              createdByRole: string
+              stamp onCreate { createdByRole := currentUser.role }
+            }
+            repository Orders for Order { }
+          }
+        }
+        ui WebApp {
+          page CreateOrder {
+            route: "/orders/new"
+            body:  CreateForm { of: Order }
+          }
+        }
+        deployable api { platform: node, contexts: [C], port: 3000, auth: required }
+        deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
+      }
+    `);
+    const tsx = files.get("web/src/pages/create_order.tsx")!;
+    expect(tsx).toBeDefined();
+    // The client-suppliable field renders; the server-stamped one does not —
+    // it isn't in Create<Agg>Request (promoteStampTargets → managed →
+    // forCreateInput), so an input/defaultValue for it would not typecheck.
+    expect(tsx).toMatch(/data-testid="orders-new-input-customerId"/);
+    expect(tsx).not.toMatch(/createdByRole/);
+    // Managed fields stay readable — the api module keeps it in the RESPONSE
+    // schema while dropping it from the create request.
+    const api = files.get("web/src/api/order.ts")!;
+    expect(api).toBeDefined();
+    const createSchema = api.slice(0, api.indexOf("OrderResponse"));
+    expect(createSchema).not.toMatch(/createdByRole/);
+    expect(api).toMatch(/createdByRole/);
+  });
+});

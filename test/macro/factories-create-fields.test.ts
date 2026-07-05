@@ -72,3 +72,31 @@ describe("writableCreateFields — modifier filter", () => {
     expect(writableUpdateFields(agg).map((f) => f.name)).toEqual(["subject", "passwordHash"]);
   });
 });
+
+describe("stamp targets are server-owned — excluded from create AND update input (S1b)", () => {
+  it("an aggregate-body `stamp onCreate` target drops out of both writable sets", async () => {
+    const agg = await aggregate(
+      `aggregate Doc {
+        title: string
+        createdByRole: string
+        stamp onCreate { createdByRole := "x" }
+      }`,
+      "Doc",
+    );
+    expect(writableCreateFields(agg).map((f) => f.name)).toEqual(["title"]);
+    expect(writableUpdateFields(agg).map((f) => f.name)).toEqual(["title"]);
+  });
+
+  it("a context-level stamp propagates: its target is excluded on every aggregate", async () => {
+    const agg = await aggregate(
+      `stamp onUpdate { touchedBy := "x" }
+      aggregate Doc {
+        title: string
+        touchedBy: string
+      }`,
+      "Doc",
+    );
+    expect(writableCreateFields(agg).map((f) => f.name)).toEqual(["title"]);
+    expect(writableUpdateFields(agg).map((f) => f.name)).toEqual(["title"]);
+  });
+});

@@ -1,3 +1,4 @@
+import { createInputFields } from "../../ir/enrich/wire-projection.js";
 import type { AggregateIR, BoundedContextIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { unwrapOpt } from "./form-helpers.js";
@@ -29,7 +30,10 @@ export function buildPageObjectModule(
   const slug = snake(plural(agg.name));
   const aggCap = upperFirst(agg.name);
   const ops = agg.operations.filter((o) => o.visibility === "public");
-  const required = agg.fields.filter((f) => !f.optional);
+  // The New-page fill targets the inputs the CreateForm actually renders:
+  // the non-optional create-input contract (`createInputFields` — excludes
+  // server-owned `managed`/`token`/`internal` fields, incl. stamp targets).
+  const required = createInputFields(agg).filter((f) => !f.optional);
 
   // Collect the candidate api/* type imports, then narrow them once the
   // body is assembled — page-object classes rarely use every Request/Response,
