@@ -137,6 +137,19 @@ describe("policy read levels — validation (fail closed)", () => {
     expect(diags).toEqual([]);
   });
 
+  it("a `deep` model passes FULL IR validation — the sentinel is queryable", async () => {
+    // The `deep` sentinel is a synthetic method-call; it must be admitted by
+    // the queryable-subset gate (`firstNonQueryableNode`), or the tenant-floor
+    // rewrite trips `loom.*` selectability at generate time.
+    const { model } = await parseString(hierarchy({ policy: "allow deep on Invoice" }), {
+      validate: false,
+    });
+    const errors = validateLoomModel(enrichLoomModel(lowerModel(model))).filter(
+      (d) => d.severity === "error",
+    );
+    expect(errors).toEqual([]);
+  });
+
   it("unknown aggregate → loom.policy-unknown-aggregate", async () => {
     const diags = await policyDiags(hierarchy({ policy: "allow deep on Ghost" }));
     expect(diags.map((d) => d.code)).toContain("loom.policy-unknown-aggregate");
