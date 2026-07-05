@@ -27,11 +27,25 @@ const SRC = readFileSync("test/fixtures/corpus/tenancy-owned.ddd", "utf8").repla
 );
 
 describe("dotnet generator — derived registry self-scope filter", () => {
-  it("installs the self-scope as a per-request HasQueryFilter on AppDbContext (Guid.Parse binding)", async () => {
+  it("installs the self-scope as a per-request HasQueryFilter reading a HOISTED, TryParse-guarded id member", async () => {
     const files = await generateSystemFiles(SRC);
     const ctx = files.get("d/Infrastructure/Persistence/AppDbContext.cs")!;
+    // The constructed `<Agg>Id` is HOISTED to a private context member — EF
+    // cannot translate a value-converted-key comparison whose RHS still holds
+    // the `new OrganizationId(...)` constructor in-tree (it parameterizes only
+    // the inner claim → "could not be translated", 500 at runtime).  The member
+    // is funcletized whole into one `OrganizationId?` parameter (the shape
+    // `GetByIdAsync`'s `x.Id == id` translates), and `TryParse` → `null` on a
+    // non-guid / claim-less principal so the filter fails CLOSED (id = NULL).
     expect(ctx).toContain(
-      'modelBuilder.Entity<Organization>().HasQueryFilter("IdFilter", x => x.Id == new OrganizationId(Guid.Parse(_currentUser.User.TenantId)));',
+      "private OrganizationId? __SelfScopeId_Organization_0 => Guid.TryParse(_currentUser.User.TenantId, out var __g) ? new OrganizationId(__g) : (OrganizationId?)null;",
+    );
+    expect(ctx).toContain(
+      'modelBuilder.Entity<Organization>().HasQueryFilter("IdFilter", x => x.Id == __SelfScopeId_Organization_0);',
+    );
+    // The filter must NOT inline the constructor (the untranslatable form).
+    expect(ctx).not.toContain(
+      'HasQueryFilter("IdFilter", x => x.Id == new OrganizationId(Guid.Parse',
     );
     // The filter reads an INJECTED scoped accessor (proper DI) so EF re-evaluates
     // it per request — not a static ambient baked at model build.
@@ -45,11 +59,14 @@ describe("dotnet generator — derived registry self-scope filter", () => {
     expect(cfg).not.toContain("HasQueryFilter");
   });
 
-  it("binds a same-typed guid claim without the parse", async () => {
+  it("binds a same-typed guid claim without the parse (still hoisted)", async () => {
     const files = await generateSystemFiles(SRC.replace("tenantId: string", "tenantId: guid"));
     const ctx = files.get("d/Infrastructure/Persistence/AppDbContext.cs")!;
     expect(ctx).toContain(
-      'modelBuilder.Entity<Organization>().HasQueryFilter("IdFilter", x => x.Id == new OrganizationId(_currentUser.User.TenantId));',
+      "private OrganizationId? __SelfScopeId_Organization_0 => new OrganizationId(_currentUser.User.TenantId);",
+    );
+    expect(ctx).toContain(
+      'modelBuilder.Entity<Organization>().HasQueryFilter("IdFilter", x => x.Id == __SelfScopeId_Organization_0);',
     );
   });
 

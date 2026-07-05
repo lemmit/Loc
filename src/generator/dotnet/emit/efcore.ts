@@ -206,6 +206,18 @@ export function renderDbContext(
   // parameterize it and RE-EVALUATE per query execution against this
   // request-scoped context — the standard EF Core multi-tenancy pattern.
   // Principal-free filters (softDelete) stay in the per-entity config.
+  // A self-scope registry filter compares the strongly-typed key `x.Id` to the
+  // principal claim lifted into `new <Agg>Id(Guid.Parse(claim))`.  EF CANNOT
+  // translate a value-converted-key comparison whose right side still holds the
+  // `new <Agg>Id(...)` CONSTRUCTOR (it parameterizes only the inner claim access
+  // — `new <Agg>Id(@ef_filter__p)` — then fails: "could not be translated",
+  // confirmed at runtime).  So the constructed id is HOISTED to a private
+  // context member (`this.<member>`), which EF funcletizes whole into a single
+  // `<Agg>Id?` query parameter — exactly the shape `GetByIdAsync`'s `x.Id == id`
+  // translates.  The member `TryParse`s the claim and yields `null` for a
+  // non-guid / claim-less principal, so the filter fails CLOSED (id = NULL → no
+  // rows) instead of throwing `FormatException`.
+  const principalFilterMembers: string[] = [];
   const principalFilterLines = entityAggs
     .filter((a) => !isDoc(a.name) && !isEs(a.name))
     .flatMap((a) => {
@@ -213,10 +225,33 @@ export function renderDbContext(
       return (a.contextFilters ?? [])
         .map((predicate, i) => [predicate, i] as const)
         .filter(([predicate]) => exprRefsCurrentUser(predicate))
-        .map(
-          ([predicate, i]) =>
-            `        modelBuilder.Entity<${a.name}>().HasQueryFilter(${JSON.stringify(names[i])}, x => ${renderCsExpr(predicate, { thisName: "x", currentUserExpr: "_currentUser.User" })});`,
-        );
+        .map(([predicate, i]) => {
+          let body = renderCsExpr(predicate, {
+            thisName: "x",
+            currentUserExpr: "_currentUser.User",
+          });
+          // Hoist a `new <Agg>Id(...)` self-scope construction out of the filter
+          // expression (EF can't translate the constructor in-tree).
+          const guidCtor = new RegExp(`new ${a.name}Id\\(Guid\\.Parse\\((.+?)\\)\\)`);
+          const directCtor = new RegExp(`new ${a.name}Id\\(((?:(?!Guid\\.Parse).)+?)\\)`);
+          const guidMatch = body.match(guidCtor);
+          const directMatch = guidMatch ? null : body.match(directCtor);
+          if (guidMatch || directMatch) {
+            const member = `__SelfScopeId_${a.name}_${i}`;
+            if (guidMatch) {
+              principalFilterMembers.push(
+                `    private ${a.name}Id? ${member} => Guid.TryParse(${guidMatch[1]}, out var __g) ? new ${a.name}Id(__g) : (${a.name}Id?)null;`,
+              );
+              body = body.replace(guidCtor, member);
+            } else if (directMatch) {
+              principalFilterMembers.push(
+                `    private ${a.name}Id? ${member} => new ${a.name}Id(${directMatch[1]});`,
+              );
+              body = body.replace(directCtor, member);
+            }
+          }
+          return `        modelBuilder.Entity<${a.name}>().HasQueryFilter(${JSON.stringify(names[i])}, x => ${body});`;
+        });
     });
   const anyPrincipalFilter = principalFilterLines.length > 0;
   return (
@@ -250,6 +285,9 @@ export function renderDbContext(
           ]
         : ["    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }"]),
       "",
+      // Hoisted self-scope registry ids (see principalFilterLines) — private
+      // funcletizable members the query filters compare `x.Id` against.
+      ...(principalFilterMembers.length > 0 ? [...principalFilterMembers, ""] : []),
       ...dbSets,
       ...tphBaseDbSets,
       ...joinDbSets,
