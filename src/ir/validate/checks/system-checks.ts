@@ -672,9 +672,23 @@ function docFunctionUnsupported(fn: FunctionIR): boolean {
   return exprs.some((e) => docExprUnsupported(e, /* allowFnCall */ true));
 }
 
-/** Does an operation statement fall outside the vanilla document scalar op
- *  surface?  `allowFnCall` mirrors {@link docExprUnsupported}. */
-function docStmtUnsupported(s: StmtIR, allowFnCall: boolean): boolean {
+/** Is the value of a containment `+=`/`-=` a doc-safe part constructor?  Route A:
+ *  `lines += OrderLine { sku: …, qty: … }` appends a part struct to the embed's
+ *  `embeds_many` list, so the value must be a part ctor (`new`/`object`) whose
+ *  field values are themselves doc-safe scalars/VOs. */
+function docContainmentValueUnsupported(e: ExprIR, allowFnCall: boolean): boolean {
+  if (e.kind === "new" || e.kind === "object") {
+    return e.fields.some((f) => docExprUnsupported(f.value, allowFnCall));
+  }
+  // A `-=` may pass a bare element/predicate — fall back to the scalar check.
+  return docExprUnsupported(e, allowFnCall);
+}
+
+/** Does an operation statement fall outside the vanilla document op surface?
+ *  `allowFnCall` mirrors {@link docExprUnsupported}; `agg` distinguishes a
+ *  CONTAINMENT collection (embeds_many — mutable on document, Route A) from a
+ *  reference/value collection (still gated). */
+function docStmtUnsupported(s: StmtIR, allowFnCall: boolean, agg: AggregateIR): boolean {
   const bad = (e: ExprIR): boolean => docExprUnsupported(e, allowFnCall);
   switch (s.kind) {
     case "precondition":
@@ -684,40 +698,49 @@ function docStmtUnsupported(s: StmtIR, allowFnCall: boolean): boolean {
       return bad(s.expr);
     case "assign":
       // A nested write target (`money.amount := …`, `segments.length > 1`) has no
-      // single `data` key to `Map.put` — the scalar path only writes top-level
-      // fields.  A whole-field write (incl. replacing a value object) is fine.
+      // single field to struct-update — the path only writes top-level fields.  A
+      // whole-field write (incl. replacing a value object) is fine.
       return s.target.segments.length > 1 || bad(s.value);
     case "add":
-    case "remove":
-      // Scalar compound arithmetic is fine; a real COLLECTION mutation is not,
-      // and a nested target has no single top-level `data` key to update.
-      return s.collection || s.target.segments.length > 1 || bad(s.value);
+    case "remove": {
+      // Scalar compound arithmetic (`total += n`) is fine.  A COLLECTION mutation
+      // is supported ONLY for a CONTAINMENT (`lines += Item{…}`): the relational
+      // add/remove arm appends/removes a part struct and the op re-embeds the
+      // mutated list via `put_embed` (Route A slice 4b — boot-verified).  A
+      // reference collection (`X id[]` → many_to_many) and a scalar value
+      // collection stay gated (no join table / not-yet-wired on a document blob).
+      if (s.collection) {
+        const field = snake(s.target.segments[0] ?? "");
+        const isContainment = agg.contains.some((c) => snake(c.name) === field);
+        if (!isContainment) return true;
+        return s.target.segments.length > 1 || docContainmentValueUnsupported(s.value, allowFnCall);
+      }
+      return s.target.segments.length > 1 || bad(s.value);
+    }
     case "emit":
       return s.fields.some((f) => bad(f.value));
     case "return":
-      // A returning op's `return <value>` — the value renders in `docMap` mode;
-      // an error-variant object literal is a plain response map.  A private-
-      // operation self-call in tail position stays gated (`docExprUnsupported`
-      // rejects the non-function call).
+      // A returning op's `return <value>` — an error-variant object literal is a
+      // plain response map.  A private-operation self-call in tail position stays
+      // gated (`docExprUnsupported` rejects the non-function call).
       return bad(s.value);
     default:
       // call / variant-match — need the self-call / frontend machinery the
-      // scalar document path doesn't carry.
+      // document op path doesn't carry.
       return true;
   }
 }
 
-/** A user-defined document operation the scalar path can't emit.  `allowFnCall`
- *  is set once per aggregate from whether its `function`s are all doc-safe.  A
- *  RETURNING op is now admitted (it returns the in-memory tagged tuple — parity
- *  with the relational non-audited returning path, no DB round-trip); an AUDITED
- *  / PROVENANCED op still needs the transactional struct-column persist the
- *  document scalar path deliberately omits. */
-function docOpUnsupported(op: OperationIR, allowFnCall: boolean): boolean {
+/** A user-defined document operation the path can't emit.  `allowFnCall` is set
+ *  once per aggregate from whether its `function`s are all doc-safe.  A RETURNING
+ *  op is admitted (in-memory tagged tuple) and CONTAINMENT mutation is admitted
+ *  (Route A); an AUDITED / PROVENANCED op still needs the transactional persist
+ *  the document path deliberately omits. */
+function docOpUnsupported(op: OperationIR, allowFnCall: boolean, agg: AggregateIR): boolean {
   return (
     op.audited === true ||
     opHasProvSite(op) ||
-    op.statements.some((s) => docStmtUnsupported(s, allowFnCall))
+    op.statements.some((s) => docStmtUnsupported(s, allowFnCall, agg))
   );
 }
 
@@ -753,7 +776,7 @@ export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnosti
           );
         const badOps = agg.operations
           .filter((op) => !VANILLA_DOC_CRUD_OPS.has(op.name))
-          .filter((op) => docOpUnsupported(op, allowFnCall));
+          .filter((op) => docOpUnsupported(op, allowFnCall, agg));
         if (badFinds.length === 0 && badOps.length === 0) continue;
         const bits: string[] = [];
         if (badOps.length > 0)
