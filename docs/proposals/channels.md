@@ -273,12 +273,26 @@ context Shipping {
 
   // Projection — write side of a read model, folded from a channel.
   // Reuses apply()-style pure fold discipline (workflow-and-applier.md).
+  // NOTE: this bespoke `upsert`/`set…where` sketch is SUPERSEDED by
+  // `projection.md`, which specifies the construct using the shipped
+  // `apply()`/workflow-body fold vocabulary and drops `from <Channel>` in v1
+  // (in-process fold; `from` returns with the durable-log tier below).
   projection OrderBook from Orders.Lifecycle {
     on OrderPlaced(e)   { upsert { order: e.order, status: Placed } }
     on OrderShipped(e)  { set status = Shipped where order = e.order }
   }
 }
 ```
+
+> **The `projection` construct now has its own proposal —
+> [`projection.md`](./projection.md)** (minimal in-process v1). It supersedes
+> the sketch above: same intent, but the fold language is the shipped
+> `apply()`/workflow-body vocabulary (not `upsert`/`set…where`), and v1 is
+> explicitly in-process — the `from <Channel>` binding re-enters only when a
+> projection folds from a **durable** channel (`retention: log`), which is also
+> where projection **replay/rebuild** lives. Channels keeps ownership of the
+> transport (`channelSource`, brokers, the durable log); `projection.md` owns
+> the construct and its fold/read semantics.
 
 ```langium
 // ContextMember += Reactor | Projection

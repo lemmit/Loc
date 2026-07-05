@@ -386,6 +386,19 @@ A1/A3 shipped independently, and A2 (`?`) is dropped.
   and adds appliers. Read the lifecycle doc first; the workflow doc
   builds on its `OperationIR.kind` tagging.
 
+- **projection ↔ workflow-and-applier ↔ channels.** `projection.md`
+  specifies the `projection` read model that `channels.md` (§"Surface —
+  consumers") and `bounded-context-model.md` (Pattern B) sketch-and-defer.
+  It's the **read/fold half of an event-sourced workflow** — reuses
+  `workflow-and-applier.md`'s saga-state + `apply()` machinery, but folds
+  **foreign** events (not its own) into a **derived, non-source-of-truth**
+  read model, so it has no command side. Folds are pure (reuses
+  `loom.apply-impure`); cross-source reads live up in a `view` at query time.
+  v1 rides the **in-process** dispatch that ships today; `from <Channel>` and
+  projection **replay** wait on `channels.md`'s durable-log tier
+  (`channelSource` → `retention: log`). Channels owns the transport;
+  projection owns one consumer of it.
+
 - **unfoldable-api-derivation ↔ payload-transport-layer ↔
   aggregate-inheritance.** Three docs touch the wire-shape pipeline.
   `payload-transport-layer.md` proposes naming the wireShape
