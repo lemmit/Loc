@@ -476,7 +476,9 @@ describe("Source Map v3 sidecars", () => {
     const letIdx = SOURCE.indexOf("let note = customerName");
     expect(letIdx).toBeGreaterThanOrEqual(0);
     const expectedSourceLine = SOURCE.slice(0, letIdx).split("\n").length - 1; // 0-based
+    const expectedSourceCol = letIdx - SOURCE.lastIndexOf("\n", letIdx) - 1; // 0-based
     expect(seg!.sourceLine).toBe(expectedSourceLine);
+    expect(seg!.sourceCol).toBe(expectedSourceCol);
     expect(seg!.sourceIndex).toBe(sourceIdx);
 
     // Exactly one trailing directive line naming the sidecar's basename.
