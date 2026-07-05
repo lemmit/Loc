@@ -55,6 +55,7 @@ import { mutatedParamNames, type SaveResolver } from "../util/domain-service-tie
 import { lowerExpr, lowerExprInContext } from "./lower-expr.js";
 import { lowerStatement } from "./lower-stmt.js";
 import { cstText, type Env, inPart, lowerType, withLocal } from "./lower-types.js";
+import { originFor } from "./origin.js";
 
 // Applier lowering — `apply(e: Event) { … }` folds one event type into
 // aggregate state.  The event param binds as a `refKind: "param"` local
@@ -130,6 +131,7 @@ export function lowerField(p: Property, env?: Env): FieldIR {
     // Enrichment fills in the default / inferred-from-type cases.
     ...(declared ? { access: declared, accessSource: "declared" as const } : {}),
     ...(defaultExpr ? { default: defaultExpr } : {}),
+    origin: originFor(p),
   };
 }
 
@@ -256,6 +258,7 @@ export function lowerOperation(op: Operation, env: Env): OperationIR {
   // belong to `from <Criterion>(args)`, not `when`); the validator reports
   // a param reference rather than letting it lower as a free name.
   if (op.when) ir.when = lowerExpr(op.when, env);
+  ir.origin = originFor(op);
   return ir;
 }
 
@@ -268,7 +271,7 @@ export function lowerOperation(op: Operation, env: Env): OperationIR {
 // those default off; `audited` is read from the postfix grammar slot
 // (`create(...) audited { }` / `destroy audited { }`).
 export function lowerCreate(c: Create, env: Env): OperationIR {
-  return lowerActionBody(
+  const ir = lowerActionBody(
     {
       kind: "create",
       name: c.name ?? "create",
@@ -281,10 +284,12 @@ export function lowerCreate(c: Create, env: Env): OperationIR {
     },
     env,
   );
+  ir.origin = originFor(c);
+  return ir;
 }
 
 export function lowerDestroy(d: Destroy, env: Env): OperationIR {
-  return lowerActionBody(
+  const ir = lowerActionBody(
     {
       kind: "destroy",
       name: d.name ?? "destroy",
@@ -297,6 +302,8 @@ export function lowerDestroy(d: Destroy, env: Env): OperationIR {
     },
     env,
   );
+  ir.origin = originFor(d);
+  return ir;
 }
 
 interface ActionSpec {

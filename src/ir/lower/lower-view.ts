@@ -10,6 +10,7 @@ import { resolveBypass } from "./lower-capabilities.js";
 import { inferExprType, lowerExpr } from "./lower-expr.js";
 import { lowerField } from "./lower-members.js";
 import { type Env, inAggregate, inWorkflow } from "./lower-types.js";
+import { originFor } from "./origin.js";
 
 export function lowerView(view: View, env: Env): ViewIR {
   // Filter + bind expressions resolve against the source's schema — same env
@@ -75,6 +76,7 @@ export function lowerView(view: View, env: Env): ViewIR {
     filter,
     ...resolveBypass(view),
     output,
+    origin: originFor(view),
   };
 }
 

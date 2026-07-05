@@ -3,13 +3,15 @@
 // Public surface lives in `factories.ts` / `ui-factories.ts` /
 // `index.ts`.
 
+// The token contract (`ORIGIN_PROP`, `OriginToken`, `originOf`) lives at the
+// language/AST layer (`src/language/macro-origin.ts`) — both the expander
+// and IR lowering need it, and lowering must not import from `src/macros/`.
+// Re-exported here unchanged so every existing macros-internal consumer
+// keeps working.
+import { ORIGIN_PROP, originOf } from "../../language/macro-origin.js";
 import type { OriginToken } from "./define.js";
 
-/** Hidden property on every macro-emitted AST node — the expander
- * uses it when splicing, and the validator/diagnostics layer reads
- * it to redirect errors at the call site.  Not part of the public
- * Langium AST contract. */
-export const ORIGIN_PROP = "$origin" as const;
+export { ORIGIN_PROP, originOf };
 
 // ---------------------------------------------------------------------------
 // Active-origin slot — single source of truth across factory files.
@@ -63,17 +65,4 @@ export function _setContainer(
   c.$container = parent;
   c.$containerProperty = property;
   if (index !== undefined) c.$containerIndex = index;
-}
-
-/** Read the origin token off a node, if any.  Walks `$container`
- * chain so a property buried inside a synthesised operation body
- * still reports its origin. */
-export function originOf(node: unknown): OriginToken | undefined {
-  let cur: unknown = node;
-  while (cur && typeof cur === "object") {
-    const v = (cur as Record<string, unknown>)[ORIGIN_PROP];
-    if (v !== undefined) return v as OriginToken;
-    cur = (cur as Record<string, unknown>).$container;
-  }
-  return undefined;
 }
