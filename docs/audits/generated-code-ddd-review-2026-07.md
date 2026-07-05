@@ -137,6 +137,17 @@ stamp-target fields from Create/Update request DTOs — an OpenAPI-shape change,
 so it lands as an all-backend parity slice (same shape as SYS-1). Python's
 `_stamp_on_create` already stamps the right value; use it as the reference.
 
+> **✅ (b) FIXED** — two layers, gated by
+> `test/conformance/stamp-request-no-leak-parity.test.ts` (all 5 backends):
+> **create** landed with #1629 (`promoteStampTargets` → `access: managed` →
+> `forCreateInput`, every backend + frontend api-module); **update** was the
+> remaining leak — the crudish `update` op params (which every update DTO is
+> shaped from) were stamp-blind at the AST layer — closed in
+> `writableUpdateFields`/`writableCreateFields` (`src/macros/api/factories.ts`).
+> The frontend tail (walker `CreateForm`, HEEx form, Playwright page objects
+> still rendering/filling raw `agg.fields`) now derives from
+> `createInputFields` like the api-module and Angular already did.
+
 ### S2 · Variant-`match` over a union-returning find is broken on four backends (P0)
 
 `find locate(name): Project or ProjectNotFound` lowers the repository find to
