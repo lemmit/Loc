@@ -1,3 +1,4 @@
+import { SourceMapRecorder } from "../generator/_trace/sourcemap.js";
 import { E2E_FIXTURES_TS } from "../generator/react/emit-templates.js";
 import { enrichLoomModel } from "../ir/enrich/enrichments.js";
 import { lowerModel } from "../ir/lower/lower.js";
@@ -35,6 +36,7 @@ import {
   serializeSnapshot,
   snapshotRelPath,
 } from "./snapshot.js";
+import { renderSourceMap } from "./sourcemap.js";
 import { renderTraceabilityArtifacts } from "./traceability.js";
 import { renderUIE2EFile } from "./ui-e2e-render.js";
 import { renderWireSpec } from "./wire-spec.js";
@@ -81,6 +83,12 @@ export interface GenerateSystemOptions {
    *  operator applies it deliberately (the CLI `--allow-destructive`
    *  flag).  See docs/migrations.md § Destructive changes. */
   allowDestructive?: boolean;
+  /** `--sourcemap` switch — when true, additionally emit
+   *  `.loom/sourcemap.json` mapping generated file regions back to the
+   *  `.ddd` spans (or macro-call sites) that produced them.  Off by
+   *  default so byte-identical output is preserved for every existing
+   *  fixture/gate.  See docs/plans/source-map-debug-kickoff.md. */
+  sourcemap?: boolean;
 }
 
 export function generateSystems(model: Model, options: GenerateSystemOptions = {}): SystemEmission {
@@ -103,12 +111,17 @@ export function generateSystemsFromLoom(
 ): SystemEmission {
   const out = new Map<string, string>();
   const snapshots = options.snapshots ?? memorySnapshotStore();
+  // One recorder for the whole model — systems share one flat output map
+  // (same pattern as traceability below), so a single recorder's paths
+  // line up with the final written paths across every system.
+  const recorder = options.sourcemap ? SourceMapRecorder.create() : undefined;
   for (const sys of loom.systems) {
     emitSystem(sys, loom, out, {
       emitTrace: options.emitTrace,
       emitKubernetes: options.emitKubernetes,
       snapshots,
       allowDestructive: options.allowDestructive,
+      sourcemap: recorder,
     });
   }
   // Traceability artifacts — model-global (requirements may
@@ -118,6 +131,7 @@ export function generateSystemsFromLoom(
   for (const [path, content] of renderTraceabilityArtifacts(loom)) {
     out.set(path, content);
   }
+  if (recorder) out.set(".loom/sourcemap.json", renderSourceMap(recorder));
   return { files: out };
 }
 
@@ -130,6 +144,7 @@ function emitSystem(
     emitKubernetes?: boolean;
     snapshots: SnapshotStore;
     allowDestructive?: boolean;
+    sourcemap?: SourceMapRecorder;
   },
 ): void {
   // Pre-compute a module-name → contexts lookup so a deployable can
@@ -161,6 +176,7 @@ function emitSystem(
       emitTrace: options.emitTrace,
       migrations: ownedMigrations,
       topLevelComponents: loom.components,
+      sourcemap: options.sourcemap,
     });
   }
 
@@ -334,6 +350,7 @@ function emitDeployable(
     emitTrace?: boolean;
     migrations?: MigrationsIR[];
     topLevelComponents?: import("../ir/types/loom-ir.js").ComponentIR[];
+    sourcemap?: SourceMapRecorder;
   } = {},
 ): void {
   const emitTrace = !!options.emitTrace;
@@ -373,6 +390,9 @@ function emitDeployable(
     topLevelComponents: options.topLevelComponents,
     styleAdapter: resolvedStyle,
     layoutAdapter: resolvedLayout,
+    // Scoped so paths the platform records land pre-prefixed with `sub`,
+    // matching the final written path exactly (see the loop below).
+    sourcemap: options.sourcemap?.scope(sub),
   });
   for (const [relPath, content] of files) {
     out.set(`${sub}/${relPath}`, content);
