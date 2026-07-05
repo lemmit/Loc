@@ -195,9 +195,13 @@ export function emitHeading(
 ): string {
   // First positional is the heading text — accepts a string
   // literal OR a ref (e.g. a route-param name).  Optional `level:`
-  // named arg controls the heading rank (1..6, default 2).
+  // named arg controls the heading rank (1..6); when absent the rank is
+  // DERIVED from the `Section`/`Card` nesting depth (accessibility.md
+  // Phase 2 — `min(6, 2 + headingDepth)`, so levels never skip) rather
+  // than a flat default.  At page top (depth 0) this is `<h2>`; the page
+  // chrome owns the single `<h1>`.
   const text = firstPositionalContent(call, ctx) ?? '"Heading"';
-  const level = numericNamed(call, "level") ?? 2;
+  const level = numericNamed(call, "level") ?? Math.min(6, 2 + (ctx.headingDepth ?? 0));
   void depth;
   // Phase 5 — explicit typography control decoupled from semantic level.
   // `size:` overrides the level's default size; `weight:` sets the
