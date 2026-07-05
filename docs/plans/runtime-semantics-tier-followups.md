@@ -100,16 +100,22 @@ agents; they only collide on this doc's status table.
   it can't change settings directly.
 - **DoD.** `behavioral-e2e-python` required on PRs touching its path filter.
 
-### RST-5 · Promote the RS registry to a diffable `.loom/semantics-spec.json`  ·  M
+### RST-5 · Promote the RS registry to a diffable spec artifact  ·  M  ·  ✅ DONE
 - **Why.** `conformance-semantics.md` roadmap v2: make a contract change a
   reviewable artifact diff, exactly as `wire-spec.json` does for wire shape.
-- **Scope.** A `src/system/semantics-spec.ts` (sibling of `wire-spec.ts`) that
-  serializes `test/conformance/semantics-rules.ts` `SEMANTICS_RULES` into
-  `<out>/.loom/semantics-spec.json`; wire it into the `.loom` bundle emit
-  (`src/system/index.ts`) and document it in `docs/loom-artifacts.md`. Keep the
-  TS registry the source of truth; the JSON is a derived artifact.
-- **Collision:** `src/system/` only. **DoD.** Artifact emitted + documented +
-  a test pinning it against the registry.
+- **Landed as a committed, diffable JSON mirror with a drift gate** (not a
+  per-`.loom/` emit). The RS-rules are a **global toolchain contract**, not a
+  per-generated-system fact, so emitting them into every system's `.loom/`
+  bundle would be wrong — instead the mirror follows the `wire-spec.json` /
+  `langium-generated` "derived file + CI drift gate" precedent:
+  - `serializeSemanticsSpec()` in `test/conformance/semantics-rules.ts`
+    deterministically serializes `SEMANTICS_RULES` (stable id order + fixed
+    per-rule field order, `{ version, rules }` envelope, 2-space indent).
+  - The committed mirror lives at `test/conformance/semantics-spec.json`.
+  - `test/conformance/semantics-spec-sync.test.ts` fails on drift; regenerate
+    with `UPDATE_SEMANTICS_SPEC=1 npx vitest run test/conformance/semantics-spec-sync.test.ts`.
+  - Documented in `docs/conformance-semantics.md` (Roadmap v2 bullet).
+- **Collision:** none — `test/conformance/` + docs only (`src/system/` untouched).
 
 ### RST-6 · Python **unit-tier** parity (generated pytest domain suite)  ·  M–L
 - **Why.** `run-python.mjs` runs only the **api** tier; the generated pure-domain
@@ -153,3 +159,11 @@ agents; they only collide on this doc's status table.
 When a ticket lands, tick it here and update the RS-rule's `tier`/`conforms` in
 `test/conformance/semantics-rules.ts` + `docs/conformance-semantics.md` (the
 registry is the source of truth — keep the three in lockstep).
+
+## Landed
+
+- **RST-5** (diffable spec artifact) — ✅ `test/conformance/semantics-spec.json`,
+  a committed diffable mirror of `SEMANTICS_RULES` derived by
+  `serializeSemanticsSpec()` and gated by `semantics-spec-sync.test.ts`
+  (regenerate with `UPDATE_SEMANTICS_SPEC=1`). Scoped as a global-contract
+  committed artifact, not a per-system `.loom/` emit.
