@@ -976,7 +976,7 @@ function applyManualIndexes(tables: readonly TableShape[], specs: readonly Manua
   }
 }
 
-/** Derived tenant read index (docs/tenancy.md): a `tenantOwned` aggregate's
+/** Derived tenant read indexes (docs/tenancy.md): a `tenantOwned` aggregate's
  *  generated reads ALL prefix on `tenant_id = <claim>`, so any of its tables
  *  that physically carries the column gets a non-unique
  *  `<table>_tenant_id_idx` (the FK-index naming convention).  Applied as a
@@ -986,22 +986,33 @@ function applyManualIndexes(tables: readonly TableShape[], specs: readonly Manua
  *  blob/stream (no column) and are skipped naturally, as are parts and join
  *  tables (the filter targets the root).  Deduped against a hand-declared
  *  `unique (tenantId, ...)`-style index only by exact single-column shape —
- *  a unique composite still benefits from the plain prefix index. */
+ *  a unique composite still benefits from the plain prefix index.
+ *
+ *  Multi-tenancy Phase 2 P2.5 adds a SECOND derived index on `data_key`: the
+ *  `deep` / `global` read levels prefix-match the materialized path with
+ *  `LIKE 'prefix.%'`, so `data_key` gets a non-unique `<table>_data_key_idx`
+ *  with the `text_pattern_ops` opclass — the opclass that makes a prefix `LIKE`
+ *  index-usable under ANY locale/collation (the default opclass only does so
+ *  under the C collation).  Same column-existence gating as `tenant_id` (the
+ *  registry, id-keyed and NOT `tenantOwned`, is read by id and gets none). */
 function withTenantIndex(agg: AggregateIR, tables: TableShape[]): TableShape[] {
   if (!(agg.capabilities?.includes("tenantOwned") ?? false)) return tables;
-  for (const t of tables) {
-    if (!t.columns.some((c) => c.name === "tenant_id")) continue;
-    const already = t.indexes.some(
-      (ix) => ix.columns.length === 1 && ix.columns[0] === "tenant_id",
-    );
-    if (already) continue;
-    t.indexes.push({
-      name: `${t.name}_tenant_id_idx`,
-      table: t.name,
-      columns: ["tenant_id"],
-      unique: false,
-    });
-  }
+  const derive = (column: string, opclasses?: Record<string, string>): void => {
+    for (const t of tables) {
+      if (!t.columns.some((c) => c.name === column)) continue;
+      const already = t.indexes.some((ix) => ix.columns.length === 1 && ix.columns[0] === column);
+      if (already) continue;
+      t.indexes.push({
+        name: `${t.name}_${column}_idx`,
+        table: t.name,
+        columns: [column],
+        unique: false,
+        ...(opclasses ? { opclasses } : {}),
+      });
+    }
+  };
+  derive("tenant_id");
+  derive("data_key", { data_key: "text_pattern_ops" });
   return tables;
 }
 
