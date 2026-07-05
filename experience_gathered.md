@@ -1780,3 +1780,74 @@ Removing the non-guid aggregate-id kinds (`ids int|long|string`, keeping only
   backend's id emit); excising the parameter is a large no-behaviour-change
   refactor. Narrowing the *grammar* and letting the field always resolve to `guid`
   removes the feature with a ~90-line diff instead of a ~48-file one.
+
+## 21. Converging a forked codegen render path onto the shared renderer (Route A, elixir `shape(document)`, 2026-07-05)
+
+Route A converged the vanilla-Elixir `shape(document)` path off its parallel
+map-mode renderer (`RenderCtx.docMap` → `data["field"]`) onto the SAME struct
+renderer the relational path uses (`record = row.data` over a typed
+`embeds_one :data, <Agg>.Data` embed), then deleted the fork and un-gated
+document features. Four merged slices (#1678/#1689/#1696). The lessons below are
+the ones that cost real tool-calls and are non-obvious.
+
+- **A design doc's stated *risk / prerequisite* can be silently obsoleted by an
+  unrelated fix that merged *after* it was written — re-derive the premise, don't
+  trust the doc.** `docs/plans/vanilla-document-route-a.md` risk 2 said typed VO
+  *struct* modules were **mandatory** (the only sound fix for the #1660 VO-subfield
+  crash). That was true when written — but #1664 had since fixed #1660 a different
+  way (a key-agnostic `Map.get(vo, :k, Map.get(vo, "k"))` fallback that works on a
+  `:map` VO). So Route A could keep VOs as `:map` and skip all net-new VO-struct
+  emission — the single thing that had made slice 1 "bigger than it looks." This is
+  the plan-premise twin of §17's "audit's base rots under it": before executing a
+  plan, check whether an intervening merge invalidated its *reasoning*, not just its
+  line numbers. One `git log`/grep on the cited bug saved a large wasted sub-slice.
+
+- **Two render modes that differ only in a value's *representation* couple every
+  consumer of that representation — you cannot slice the conversion per-consumer.**
+  Map-mode stored/compared enums as **strings** (`data["status"] == "checkedOut"`);
+  the relational struct renderer emits enum values as **atoms** (`:checkedOut`). So
+  "convert ops to struct mode but leave finds on map mode" is impossible: the moment
+  the `<Agg>.Data` embed's enum field changes representation, BOTH ops and finds (and
+  functions, which ops call) break together. The fix was a third render flag
+  (`docStruct`) that keeps map-mode's *string-enum + native-money value target* while
+  switching field access to struct-dot — so the embed stays `field :status, :string`
+  (byte-identical stored jsonb + wire) and every consumer converts in ONE slice. When
+  a shared representation forces an all-or-nothing conversion, look for a flag that
+  changes *access* without changing the *value target*, rather than fighting the
+  coupling.
+
+- **Ecto `embeds_one … on_replace: :update` REJECTS a struct passed to
+  `put_embed/3` — it demands a field *map*.** Compile-green, boot-red. An op mutates
+  the loaded embed struct in place (`record = %{record | qty: record.qty + 1}`) then
+  persists it; `put_embed(:data, record)` raises at runtime
+  (`you are giving it a struct/changeset … only allowed to update … as a map`).
+  Since the op holds the *whole* mutated struct, `put_embed(:data, Map.from_struct(record))`
+  gives the same wholesale-replace effect through the map path. Only a real boot
+  (`mix phx.server` + an HTTP round-trip) surfaces this — `mix compile
+  --warnings-as-errors` is blind to it, exactly like the §14 class.
+
+- **When boot-verifying in Docker across turns: the egress proxy PORT rotates, and
+  the dockerd daemon gets reaped.** `$HTTPS_PROXY` is `http://127.0.0.1:<port>` and
+  the `<port>` **changes between turns/sessions** — hardcoding a port I'd read
+  earlier gave `econnrefused` (Erlang `:ssl`) and a silent empty container exit. Always
+  re-read `$HTTPS_PROXY` at boot time (`-e HTTPS_PROXY=$HTTPS_PROXY`), and mount
+  `/root/.ccr/ca-bundle.crt` + set `HEX_CACERTS_PATH`/`SSL_CERT_FILE` so hex.pm
+  resolves through the proxy. The elixir container needs `--network host` to reach the
+  host-loopback proxy, so publish postgres to the host (`-p 5432:5432`) rather than a
+  shared docker network. And `dockerd` does not survive a long compile — relaunch it
+  (`sudo dockerd >/tmp/dockerd.log 2>&1 &`) whenever `docker info` starts failing
+  mid-boot; a 2-minute foreground poll loop will itself get killed and take the
+  backgrounded daemon with it, so start it with `run_in_background`.
+
+- **A red `behavioral-*` check-run can be a flaky race, not your regression —
+  check the workflow's recent `main` history before treating it as a blocker.**
+  `behavioral-e2e-python.yml` went red on an elixir-only PR (a Python containment
+  op → `404 Not Found` immediately after create — a commit/visibility race). It was
+  NOT caused by the change (the Python `build-generated-python` gate was green; the
+  failing step is a runtime harness race), and the same workflow had failed
+  intermittently on `main` itself (one recent run red, the neighbours green).
+  Diagnosis path: `actions_list` the workflow's recent `main` runs — intermittent
+  red/green there ⇒ flaky, not yours. (Sibling of §19: verify a red check is *real*
+  before acting on it. Note the integration token here lacked `rerun-failed-jobs`
+  permission, so re-running to confirm flakiness wasn't available — the main-history
+  check is the fallback.)
