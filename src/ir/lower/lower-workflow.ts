@@ -290,7 +290,26 @@ interface LoweredWorkflowStmt {
   binding?: { name: string; aggName: string; repoName: string };
 }
 
+/** Lower one workflow statement, then stamp its `.ddd` (or macro-call)
+ *  origin onto the result — the chokepoint every workflow statement passes
+ *  through, including nested `for-each`/`if-let` bodies (they recurse back
+ *  through `lowerWorkflowStatement`, not the inner function, so they're
+ *  stamped too).  An already-set `origin` wins over the derived one. */
 function lowerWorkflowStatement(
+  stmt: Statement,
+  env: Env,
+  aggsByName: Map<string, Aggregate>,
+  reposByName: Map<string, Repository>,
+  repoForAgg: Map<string, string>,
+): LoweredWorkflowStmt {
+  const lowered = lowerWorkflowStatementInner(stmt, env, aggsByName, reposByName, repoForAgg);
+  return {
+    ...lowered,
+    stmt: { ...lowered.stmt, origin: lowered.stmt.origin ?? originFor(stmt) },
+  };
+}
+
+function lowerWorkflowStatementInner(
   stmt: Statement,
   env: Env,
   aggsByName: Map<string, Aggregate>,

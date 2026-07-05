@@ -32,6 +32,7 @@ import {
 } from "../../../generator/typescript/emit/mikroorm.js";
 import { emitTypescriptSeeds } from "../../../generator/typescript/emit/seed.js";
 import {
+  type OpFragment,
   renderAggregate,
   renderEnumsAndValueObjects,
   renderEvents,
@@ -490,12 +491,26 @@ export function generateTypeScriptForContexts(
   // final) so a single post-emit pass can rewrite their relative imports.
   const layout = emitCtx?.layoutAdapter ?? byLayerLayoutAdapter;
   const moved = new Map<string, string>();
-  const placeArtifact = (artifact: HonoArtifact, origin?: OriginRef, construct?: string): void => {
+  const placeArtifact = (
+    artifact: HonoArtifact,
+    origin?: OriginRef,
+    construct?: string,
+    opFragments?: OpFragment[],
+  ): void => {
     const byLayerPath = byLayerLayoutAdapter.pathFor(artifact, emitCtx ?? ({} as EmitCtx));
     const finalPath = layout.pathFor(artifact, emitCtx ?? ({} as EmitCtx));
     if (finalPath !== byLayerPath) moved.set(byLayerPath, finalPath);
     out.set(finalPath, artifact.content);
     sourcemap?.file(finalPath, artifact.content, origin, construct);
+    // Statement-granular sub-regions (source-map Milestone 3) — layered onto
+    // the whole-file region just recorded above, anchored by exact-text
+    // search against this SAME final content, so they land at the right
+    // absolute lines regardless of what the layout adapter did to the path.
+    if (sourcemap && opFragments) {
+      for (const frag of opFragments) {
+        sourcemap.fragment(finalPath, artifact.content, frag.fragmentText, frag.subRegions);
+      }
+    }
   };
   const place = (
     category: HonoArtifactCategory,
@@ -503,11 +518,13 @@ export function generateTypeScriptForContexts(
     content: string,
     origin?: OriginRef,
     construct?: string,
+    opFragments?: OpFragment[],
   ): void => {
     placeArtifact(
       { name: "", content, category, aggregateName } as HonoArtifact,
       origin,
       construct,
+      opFragments,
     );
   };
   // Per-aggregate emission stays per-context — each aggregate file
@@ -522,12 +539,16 @@ export function generateTypeScriptForContexts(
       if (agg.isAbstract) continue;
       const repo = findRepoFor(ctx, agg.name);
       const construct = `${ctx.name}.${agg.name}`;
+      // Only collected when a recorder is actually threaded in — a
+      // no-sourcemap run pays no per-statement bookkeeping cost.
+      const opFragments: OpFragment[] | undefined = sourcemap ? [] : undefined;
       place(
         "domain-aggregate",
         agg.name,
-        renderAggregate(agg, ctx, emitProvenance, emitTrace),
+        renderAggregate(agg, ctx, emitProvenance, emitTrace, opFragments),
         agg.origin,
         construct,
+        opFragments,
       );
       // Persistence routing.  Event-sourced (`persistedAs(eventLog)`) wins
       // over the saving-shape axis — its repository appends to / folds the

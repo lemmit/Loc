@@ -35,6 +35,7 @@ system SourceMapDemo {
         customerName: string
         total: Money
         operation confirm() {
+          let note = customerName
           emit OrderPlaced { order: id }
         }
       }
@@ -201,5 +202,70 @@ describe(".loom/sourcemap.json", () => {
         `platform ${platform}: no region's construct mentions ${aggName} (saw ${JSON.stringify(constructs)})`,
       ).toBe(true);
     }
+  });
+
+  // Statement-granular sub-regions (Milestone 3, Hono/node reference —
+  // source-map-and-debugging.md §5.2).  `Order.confirm()` now has 2
+  // statements (`let note = customerName` then `emit OrderPlaced { … }`);
+  // both are stamped with `origin` at lowering and anchored via
+  // `SourceMapRecorder.fragment`, layered onto the SAME whole-file region
+  // `place()` already records for `domain/order.ts` — this test asserts the
+  // layering actually shows up, not just that it compiles.
+  it("statement-granular regions land on the node aggregate's confirm() body, one per statement", async () => {
+    const model = await parseValid(SOURCE);
+    const files = generateSystems(model, { sourcemap: true }).files;
+    const raw = files.get(".loom/sourcemap.json")!;
+    const map = JSON.parse(raw) as {
+      files: Record<
+        string,
+        {
+          target: [number, number];
+          origin: import("../../src/ir/types/origin.js").OriginRef;
+          construct?: string;
+        }[]
+      >;
+    };
+
+    const slug = SLUG_FOR.node!;
+    const path = Object.keys(map.files).find(
+      (p) => p.startsWith(`${slug}/`) && p.endsWith("domain/order.ts"),
+    );
+    expect(path, `no domain/order.ts region recorded under ${slug}/`).toBeDefined();
+    const regions = map.files[path!]!;
+    const content = files.get(path!)!;
+    const fileLineCount = content.endsWith("\n")
+      ? content.split("\n").length - 1
+      : content.split("\n").length;
+
+    // (a) more than one region for a file whose operation has 2+ statements
+    // — the whole-file region plus a sub-region per statement.
+    const opConstruct = "Orders.Order.confirm";
+    const stmtRegions = regions
+      .filter((r) => r.construct === opConstruct)
+      .sort((a, b) => a.target[0] - b.target[0]);
+    expect(stmtRegions).toHaveLength(2);
+    expect(regions.length).toBeGreaterThan(stmtRegions.length);
+
+    // (b) within the file's line range, non-overlapping, monotonically
+    // increasing target[0].
+    let prevEnd = 0;
+    for (const r of stmtRegions) {
+      const [start, end] = r.target;
+      expect(start).toBeGreaterThanOrEqual(1);
+      expect(end).toBeLessThanOrEqual(fileLineCount);
+      expect(start).toBeLessThanOrEqual(end);
+      expect(start).toBeGreaterThan(prevEnd);
+      prevEnd = end;
+    }
+
+    // (c) each statement region's origin resolves to a span whose text
+    // contains that statement's own distinctive token, in source order.
+    const tokens = ["customerName", "emit OrderPlaced"];
+    stmtRegions.forEach((r, i) => {
+      const resolved = resolveToSource(r.origin);
+      expect(resolved, `stmt region ${i} origin never resolves to a source span`).toBeDefined();
+      const text = SOURCE.slice(resolved!.span.start, resolved!.span.end);
+      expect(text, `stmt region ${i} span doesn't contain "${tokens[i]}"`).toContain(tokens[i]);
+    });
   });
 });

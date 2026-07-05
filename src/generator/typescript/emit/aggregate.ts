@@ -1,4 +1,5 @@
 import { unionMembers } from "../../../generator/_payload/union-wire.js";
+import type { SourceMapSubRegion } from "../../../generator/_trace/sourcemap.js";
 import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
@@ -18,7 +19,23 @@ import { stmtHasProv } from "../../../ir/util/prov-id.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst } from "../../../util/naming.js";
 import { renderTsExpr, renderTsType } from "../render-expr.js";
-import { renderTsStatements } from "../render-stmt.js";
+import {
+  renderTsStatementChunks,
+  renderTsStatements,
+  statementSubRegions,
+} from "../render-stmt.js";
+
+/** One operation body's exact emitted text plus its per-statement
+ *  sub-regions — surfaced by `renderAggregate` (when `opFragments` is
+ *  passed) to the caller that owns the recorder and the final file content
+ *  (`src/platform/hono/v4/emit.ts`), which anchors it via
+ *  `SourceMapRecorder.fragment`.  Covers only the REGULAR (non-extern,
+ *  non-lifecycle) operation-body path — see the call site in `renderEntity`
+ *  below. */
+export interface OpFragment {
+  fragmentText: string;
+  subRegions: SourceMapSubRegion[];
+}
 
 // ---------------------------------------------------------------------------
 // Aggregate emission.  One file per aggregate root, containing the root
@@ -62,6 +79,7 @@ export function renderAggregate(
   ctx: BoundedContextIR,
   emitProvenance = false,
   emitTrace = false,
+  opFragments?: OpFragment[],
 ): string {
   const valueObjectAliases = ctx.valueObjects.map((v) => v.name);
   const enumAliases = ctx.enums.map((e) => e.name);
@@ -75,10 +93,12 @@ export function renderAggregate(
   // imported here only when --trace is on, so the default artefact keeps
   // the domain layer free of any infra import.
   const hasDomainTrace = emitTrace;
+  // Entity parts never carry operations (see `partShape`), so they never
+  // contribute op fragments — only the root render call gets `opFragments`.
   const partsRendered = agg.parts.map((p) =>
     renderEntity(partShape(p, agg), ctx, emitProvenance, emitTrace),
   );
-  const rootRendered = renderEntity(rootShape(agg), ctx, emitProvenance, emitTrace);
+  const rootRendered = renderEntity(rootShape(agg), ctx, emitProvenance, emitTrace, opFragments);
   // When any aggregate op references `currentUser` we pull the User
   // type from the auth/ package so the operation's `currentUser:
   // User` parameter typechecks.  Files emitted under deployables
@@ -238,6 +258,7 @@ function renderEntity(
   ctx: BoundedContextIR,
   emitProvenance = false,
   emitTrace = false,
+  opFragments?: OpFragment[],
 ): string {
   const containsType = (c: ContainmentIR): string =>
     `${c.partName}${c.collection ? "[]" : " | null"}`;
@@ -412,12 +433,25 @@ function renderEntity(
     // ends in `return`, so the trailing assert would be unreachable — skip it.
     const retType = op.returnType ? renderOperationReturnType(op.returnType, ctx) : "void";
     ops.push(`  ${visibility} ${lowerFirst(op.name)}(${params}): ${retType} {`);
-    const body = renderTsStatements(op.statements, emitProvenance, {
+    // Chunked (one string per statement) rather than the pre-joined
+    // `renderTsStatements` here — `renderTsStatements` IS `chunks.join("\n")`
+    // by construction, so `body` below is byte-identical either way, but the
+    // per-chunk list lets us surface per-statement sub-regions to the caller
+    // that owns the recorder + this file's final content (source-map
+    // Milestone 3, Hono-only for now — see `OpFragment`).
+    const chunks = renderTsStatementChunks(op.statements, emitProvenance, {
       emitTrace,
       aggregate: e.name,
       op: op.name,
       eventSourced: e.eventSourced,
     });
+    const body = chunks.join("\n");
+    if (opFragments && chunks.length > 0) {
+      opFragments.push({
+        fragmentText: body,
+        subRegions: statementSubRegions(op.statements, chunks, `${ctx.name}.${e.name}.${op.name}`),
+      });
+    }
     if (body.length > 0) ops.push(body);
     if (!op.returnType) {
       ops.push(
