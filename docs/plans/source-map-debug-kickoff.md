@@ -1,6 +1,9 @@
 # Source-map debugging — implementation kickoff (Milestone 1)
 
-**Milestone 1 = the Origin spine + a construct-granular `.loom/sourcemap.json` on the Hono/node backend only.** This is the foundational slice of the committed debugging arc in
+**Milestone 1 = the Origin spine (backend-agnostic) + a construct-granular `.loom/sourcemap.json`, proved end-to-end on the Hono backend first, then replicated across the other four.** This is the foundational slice of the committed debugging arc in
+
+> **Not a JS-first effort.** The spine lives in the *shared* lowering/IR layer every backend consumes, and `.loom/sourcemap.json` is language-neutral. The only genuinely JS-specific piece — the Source Map **v3** format — is Phase 5 of the proposal, additive on top of this, and out of scope here. Hono is the *reference* backend for the first bracket purely because it has the fastest verification loop in the repo (`behavioral-e2e.yml` boots the generated Hono backend headless on PGlite as a per-PR gate); it is not privileged because it's JavaScript. Bracketing the other four backends is a small, mechanical repeat once the spine is proven, and it's the closing slice of this milestone — that's what makes `ddd trace` (Phase 2) all-backends rather than JS-first.
+
 [`../proposals/source-map-and-debugging.md`](../proposals/source-map-and-debugging.md) — read that first for the north star, the prior art (v3 / JSR-45 SMAP / `#line`+PDB), the full phase roadmap, and the pinned decisions. This doc scopes the *first shippable milestone* and hands over the concrete anchors from a completed codebase investigation.
 
 The kickoff prompt for the implementing session is at the bottom (§7).
@@ -12,12 +15,12 @@ Loom compiles `.ddd` → five backends + four frontends, and today you cannot tr
 ## 2. Scope — do this, not more
 
 **In:**
-- **Phase 0 (spine).** An `OriginRef` type; an optional `origin?` field on the *structural* IR nodes the Hono path reaches (context / aggregate / operation / field / page as encountered); capture from `$cstNode` during lowering; capture the macro-call origin **before** lowering discards the `OriginToken`.
-- **Phase 1 (artifact).** A construct-granular `TracedBuilder` bracket in the Hono orchestrator; `src/system/sourcemap.ts` emitting `.loom/sourcemap.json`; a `--sourcemap` CLI flag, **default off**.
+- **Phase 0 (spine — backend-agnostic).** An `OriginRef` type; an optional `origin?` field on the *structural* IR nodes (context / aggregate / operation / field / page); capture from `$cstNode` during lowering; capture the macro-call origin **before** lowering discards the `OriginToken`. This lives in shared lowering/IR — it serves every backend at once, so build it universally, not scoped to one target.
+- **Phase 1 (artifact).** A construct-granular `TracedBuilder` bracket in each backend orchestrator; `src/system/sourcemap.ts` emitting `.loom/sourcemap.json`; a `--sourcemap` CLI flag, **default off**. Sequence it: **bracket Hono first** (fastest verification loop) to validate the spine shape end-to-end, then **replicate the bracket across the other four backends** (.NET, Phoenix, Python, Java) as the closing slice — the bracket is mechanically identical per orchestrator once the spine is proven. Land Hono as its own reviewable PR if it helps, but the milestone isn't done until the map covers all five backends.
 
 **Explicitly out (later milestones — do not build):**
-- Any backend other than Hono/node. One backend proves the shape.
-- `ddd trace`, Source Map v3, LSP navigation, DAP.
+- **Source Map v3 / native `#line`+PDB / JSR-45 SMAP.** The genuinely target-specific debug-info formats are Phase 5–6, additive on top of the generic `.loom/sourcemap.json`. (v3 is the *only* JS-specific piece — do not let it leak into this milestone.)
+- `ddd trace`, LSP navigation, DAP.
 - Statement- or char-level granularity. Construct-level only.
 - Rewriting `code-builder.ts`.
 
@@ -42,9 +45,9 @@ Loom compiles `.ddd` → five backends + four frontends, and today you cannot tr
 
 ## 5. Definition of done
 
-- `node bin/cli.js generate system <f.ddd> -o out --sourcemap` writes `out/<HonoDeployable>/.loom/sourcemap.json` whose regions resolve to **real `.ddd` spans** (and, for scaffolded code, to the macro-call span).
+- `node bin/cli.js generate system <f.ddd> -o out --sourcemap` writes `.loom/sourcemap.json` for **every backend deployable** (Hono lands first; the milestone closes when all five are covered), whose regions resolve to **real `.ddd` spans** (and, for scaffolded code, to the macro-call span).
 - **Without `--sourcemap`, generated output is byte-identical to today** (diff a full `generate system` before/after).
-- `test/system/sourcemap.test.ts` gates: every mapped region resolves to a real source span or a macro/derived chain terminating in one; the mapped span's text corresponds to the construct; a coverage floor (≥ N% of emitted Hono domain files carry ≥ 1 mapping).
+- `test/system/sourcemap.test.ts` gates: every mapped region resolves to a real source span or a macro/derived chain terminating in one; the mapped span's text corresponds to the construct; a coverage floor (≥ N% of emitted domain files carry ≥ 1 mapping) — asserted across backends, not Hono alone.
 - `npm test` green; walker/expr and fixture byte-identical gates untouched.
 - A sample `sourcemap.json` in the PR body (or a committed fixture) so reviewers see the shape.
 
@@ -58,12 +61,14 @@ Loom compiles `.ddd` → five backends + four frontends, and today you cannot tr
 
 ## 7. Kickoff prompt (paste into the new Fable session)
 
-> You're implementing the first milestone of a committed design. Loom (this repo) compiles a `.ddd` DSL to several target languages, and today nothing can trace a line of generated code back to the `.ddd` that produced it — the IR drops source positions and emission is anonymous string concatenation. We're building a real debugging story (full arc in `docs/proposals/source-map-and-debugging.md`); your job is its foundation: the **Origin spine** plus a construct-granular `.loom/sourcemap.json`, on the **Hono/node backend only**.
+> You're implementing the first milestone of a committed design. Loom (this repo) compiles a `.ddd` DSL to five backends and four frontends, and today nothing can trace a line of generated code back to the `.ddd` that produced it — the IR drops source positions and emission is anonymous string concatenation. We're building a real debugging story (full arc in `docs/proposals/source-map-and-debugging.md`); your job is its foundation: the **Origin spine** plus a construct-granular `.loom/sourcemap.json`. This is a platform-wide capability, not a JS feature — the spine lives in the shared lowering/IR layer and the artifact is language-neutral, so it must land for **all backends**. (The one genuinely JS-specific piece, the Source Map v3 format, is a later phase and explicitly out of scope here — don't build it.)
 >
 > Start from branch `claude/loom-source-map-debug-hw7bj3` — it carries the proposal and the implementation brief at `docs/plans/source-map-debug-kickoff.md`, docs-only and rebased on recent `main`. Read both before touching code: the brief has the exact file anchors from a completed investigation and the pinned design decisions. Trust them, but verify against fresh `main` — it moves fast here, so re-sync before you start and between slices.
 >
-> Done looks like this: `generate system … --sourcemap` emits a `.loom/sourcemap.json` mapping generated Hono file regions back to real `.ddd` spans (and scaffolded code back to its macro-call site), while output with the flag OFF stays byte-identical to today. A round-trip test gates it.
+> Done looks like this: `generate system … --sourcemap` emits a `.loom/sourcemap.json` for every backend deployable, mapping generated file regions back to real `.ddd` spans (and scaffolded code back to its macro-call site), while output with the flag OFF stays byte-identical to today. A round-trip test gates it across backends.
 >
-> The constraints that matter, and why: capture positions from `$cstNode` at lowering (reuse the `provSiteFor` pattern) and the macro `OriginToken` before lowering discards it, because those are the only two places the position still exists. Store byte offsets on an `origin?` field on the structural IR nodes, not a side-table. Do **not** rewrite `code-builder.ts` — bracket the per-construct emit in the Hono orchestrator, which already loops per aggregate/operation. One backend only; no `ddd trace`, v3, or LSP yet. Don't refactor or tidy beyond what the milestone needs.
+> Sequence it to de-risk, not to privilege a target: build the spine once (it's shared, so it serves everyone), then prove the emit-side bracket end-to-end on **Hono first** — it has the fastest verification loop in the repo (the behavioral-e2e gate boots the generated Hono backend headless on PGlite) — and once the shape holds, **replicate the bracket across the other four backends** (.NET, Phoenix, Python, Java), which is a mechanical repeat. The milestone isn't done until the map covers all five.
 >
-> Work autonomously to milestone completion. Open a draft PR first to claim it, then build slice by slice without pausing to ask whether to continue — finishing one slice is the go-ahead for the next. Delegate parallel file-reading to sub-agents where it helps. Ground every progress claim against a tool result: if a test fails, say so with the output; state what's verified plainly. When you hit a fork the brief didn't settle, name your default and take it unless it's irreversible.
+> The constraints that matter, and why: capture positions from `$cstNode` at lowering (reuse the `provSiteFor` pattern) and the macro `OriginToken` before lowering discards it, because those are the only two places the position still exists. Store byte offsets on an `origin?` field on the structural IR nodes, not a side-table. Do **not** rewrite `code-builder.ts` — bracket the per-construct emit in each backend orchestrator, which already loops per aggregate/operation. No v3, `ddd trace`, or LSP yet. Don't refactor or tidy beyond what the milestone needs.
+>
+> Work autonomously to milestone completion. Open a draft PR first to claim it, then build slice by slice without pausing to ask whether to continue — finishing one slice is the go-ahead for the next. Delegate parallel work to sub-agents where it helps — the four-backend bracket replication in particular fans out cleanly. Ground every progress claim against a tool result: if a test fails, say so with the output; state what's verified plainly. When you hit a fork the brief didn't settle, name your default and take it unless it's irreversible.
