@@ -36,6 +36,7 @@ import {
 } from "../ir/util/inheritance.js";
 import {
   effectiveSavingShape,
+  resolveContextSchema,
   resolveDataSourceConfig,
   resolveDataSourceForAggregate,
 } from "../ir/util/resolve-datasource.js";
@@ -103,6 +104,14 @@ export function schemaFromModule(
     agg: EnrichedAggregateIR,
     ctx: EnrichedBoundedContextIR,
   ) => readonly ManualIndexIR[] = () => [],
+  /** The owning context's Postgres schema — for context-owned tables that
+   *  aren't tied to a single aggregate (a workflow's saga correlation-state /
+   *  event-log table), so they land beside the context's aggregate tables
+   *  instead of leaking to `public`.  `buildMigrations` passes
+   *  `resolveContextSchema`; defaults to `() => undefined` so schema-only unit
+   *  tests keep the legacy unqualified output.  Module/cross-context infra
+   *  (outbox) is deliberately NOT stamped — it spans every context. */
+  contextSchemaOf: (ctx: EnrichedBoundedContextIR) => string | undefined = () => undefined,
 ): SchemaSnapshot {
   const tables: TableShape[] = [];
   const aggPairs = collectAggregatePairs(module);
@@ -207,15 +216,24 @@ export function schemaFromModule(
   // for these, so the runtime DDL and the ORM mapping line up.
   for (const ctx of module.contexts) {
     const durable = durableEventTypes(ctx).size > 0;
+    // The workflow's saga tables are context-owned (a workflow belongs to a
+    // context), so they live in that context's schema — beside its aggregate
+    // tables — not in `public`, where two contexts each with a `Tracker`
+    // workflow would collide on `tracker_events`.
+    const ctxSchema = contextSchemaOf(ctx);
     for (const wf of ctx.workflows) {
       // An `eventSourced` workflow persists as an append-only `<wf>_events`
       // stream (folded on load), not a mutable correlation-state row — the saga
       // analogue of a `persistedAs(eventLog)` aggregate (workflow-and-applier.md
       // A2-S5b).  A plain correlation-bearing workflow keeps its state table.
       if (wf.eventSourced) {
-        tables.push(eventLogTableForStream(snake(wf.name), module.name));
+        const t = eventLogTableForStream(snake(wf.name), module.name);
+        if (ctxSchema !== undefined) t.schema = ctxSchema;
+        tables.push(t);
       } else if (wf.correlationField) {
-        tables.push(workflowStateTableShape(wf, module.name, voLookup, durable));
+        const t = workflowStateTableShape(wf, module.name, voLookup, durable);
+        if (ctxSchema !== undefined) t.schema = ctxSchema;
+        tables.push(t);
       }
     }
   }
@@ -812,7 +830,11 @@ export function buildMigrations(
       ctx: EnrichedBoundedContextIR,
     ): readonly ManualIndexIR[] =>
       resolveDataSourceForAggregate(agg, ctx, sys)?.manualIndexes ?? [];
-    const next = schemaFromModule(m, shapeOf, schemaOf, manualIndexesOf);
+    // Context-owned saga tables land in the context's schema (same resolver
+    // the backend schema emitters use), not `public`.
+    const contextSchemaOf = (ctx: EnrichedBoundedContextIR): string | undefined =>
+      resolveContextSchema(ctx, sys);
+    const next = schemaFromModule(m, shapeOf, schemaOf, manualIndexesOf, contextSchemaOf);
     const baseline = snapshots.read(m.name);
     const steps = applyDestructivePolicy(diffSchema(baseline, next), baseline, {
       allowDestructive,

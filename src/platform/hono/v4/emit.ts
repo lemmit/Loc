@@ -72,6 +72,7 @@ import { contextsHaveProvenancedField } from "../../../ir/util/prov-id.js";
 import {
   aggregateIsEventSourced,
   effectiveSavingShape,
+  resolveContextSchema,
   resolveDataSourceConfig,
 } from "../../../ir/util/resolve-datasource.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
@@ -396,6 +397,16 @@ export function generateTypeScriptForContexts(
           : undefined;
       }
     : undefined;
+  // Per-workflow saga-table schema — resolved from the workflow's OWNING
+  // context (map-back by name, mirroring `resolveDataSource`), so its
+  // correlation-state / event-log table lands in the same schema as that
+  // context's aggregate tables instead of `public`.
+  const resolveWorkflowSchema = system
+    ? (wf: import("../../../ir/types/loom-ir.js").WorkflowIR) => {
+        const owningCtx = contexts.find((c) => c.workflows.some((w) => w.name === wf.name));
+        return owningCtx ? resolveContextSchema(owningCtx, system.sys) : undefined;
+      }
+    : undefined;
   // Persistence selection (D-REALIZATION-AXES `persistence:`): `mikroorm`
   // replaces the drizzle schema + per-aggregate drizzle repositories + drizzle
   // migrations with an EntitySchema persistence model + MikroORM repositories
@@ -409,7 +420,12 @@ export function generateTypeScriptForContexts(
   } else {
     out.set(
       "db/schema.ts",
-      renderSchema(merged, { audit: emitAudit, provenance: emitProvenance, resolveDataSource }),
+      renderSchema(merged, {
+        audit: emitAudit,
+        provenance: emitProvenance,
+        resolveDataSource,
+        resolveWorkflowSchema,
+      }),
     );
   }
   if (merged.workflows.length > 0) {
