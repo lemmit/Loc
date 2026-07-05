@@ -208,6 +208,10 @@ When a cross-backend runtime bug is fixed:
 4. `semantics-rules.test.ts` fails until the registry entry is well-formed and
    its `backends` are a subset of the five — so a rule can't be added as prose
    only.
+5. Regenerate the committed spec mirror:
+   `UPDATE_SEMANTICS_SPEC=1 npx vitest run test/conformance/semantics-spec-sync.test.ts`
+   and commit `test/conformance/semantics-spec.json` — `semantics-spec-sync.test.ts`
+   gates the drift.
 
 ## Roadmap
 
@@ -230,6 +234,16 @@ When a cross-backend runtime bug is fixed:
   collector now draws candidates from every context aggregate), and the
   association round-trip (RS-8) is back in the fixture. Next: a second backend
   (.NET/Java) on the same seam, then the unit tier.
-- **v2:** promote the registry to a diffable `.loom/semantics-spec.json`
-  artifact (the `wire-spec.json` precedent) so a spec change is a reviewable
-  diff, and wire each RS-rule to a live round-trip assertion in the harness.
+- **v2 (diffable spec artifact — LANDED):** the registry is mirrored to a
+  committed, diffable JSON spec at
+  [`test/conformance/semantics-spec.json`](../test/conformance/semantics-spec.json)
+  (the `wire-spec.json` / `langium-generated` "derived file + CI drift gate"
+  precedent) so a contract change surfaces as a reviewable JSON diff. The
+  registry is a **global toolchain contract**, not a per-generated-system fact,
+  so the mirror lives here — it is **not** emitted into each system's `.loom/`
+  bundle. The JSON is derived by `serializeSemanticsSpec()` in
+  `semantics-rules.ts` and pinned by `semantics-spec-sync.test.ts`; regenerate
+  after editing the registry with
+  `UPDATE_SEMANTICS_SPEC=1 npx vitest run test/conformance/semantics-spec-sync.test.ts`
+  and commit the result. Still open: wire each RS-rule to a live round-trip
+  assertion in the harness.

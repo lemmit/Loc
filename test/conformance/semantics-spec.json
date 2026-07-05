@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "RS-1",
+      "title": "Wire keys are camelCase, both directions",
+      "trigger": "an aggregate with a multi-word field (`commitSha: string`) on create/update",
+      "observable": "POST {\"commitSha\":…} persists commit_sha and reads back {\"commitSha\":…}; a multi-word field is never silently dropped to a 422",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "#1620",
+        "#1632",
+        "#1636"
+      ],
+      "tier": "behavioral"
+    },
+    {
+      "id": "RS-2",
+      "title": "Enum values use declared casing on the wire",
+      "trigger": "enum BuildState = Passed | Failed; a field of that type on a create body",
+      "observable": "POST {\"buildState\":\"Passed\"} → 201 and reads back \"Passed\" (not \"passed\"/\"PASSED\")",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "#1622"
+      ],
+      "tier": "static"
+    },
+    {
+      "id": "RS-3",
+      "title": "No persistence-internal columns leak to the wire",
+      "trigger": "any read of a softDeletable/auditable aggregate, or an ORM that auto-stamps timestamps",
+      "observable": "GET returns exactly the wireShape keys — no inserted_at/updated_at, no internal jsonb envelope",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "§14",
+        "#1628"
+      ],
+      "tier": "static"
+    },
+    {
+      "id": "RS-4",
+      "title": "Declared temporal fields round-trip",
+      "trigger": "an aggregate declaring `createdAt: instant` with an explicit create",
+      "observable": "POST {\"createdAt\":\"2026-01-01T00:00:00Z\"} reads back the same instant (ORM auto-value does not clobber it)",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "#1626"
+      ],
+      "tier": "behavioral"
+    },
+    {
+      "id": "RS-5",
+      "title": "Union-variant absence match is a presence check everywhere",
+      "trigger": "`find one X or absent` feeding a match { X => … | absent => … }",
+      "observable": "the absent arm is taken when the row is missing, identically across backends (nullable-subject ternary)",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "#1631"
+      ],
+      "tier": "static"
+    },
+    {
+      "id": "RS-6",
+      "title": "Boolean create defaults materialize at the wire boundary",
+      "trigger": "`active: bool = true`; a create body omitting `active`",
+      "observable": "POST {} (no active) reads back {\"active\":true}, not a zero-value false/null",
+      "conforms": [
+        "node",
+        "python"
+      ],
+      "targets": [
+        "dotnet",
+        "java",
+        "elixir"
+      ],
+      "provenance": [
+        "full-code-review-2026-07 B14"
+      ],
+      "tier": "behavioral"
+    },
+    {
+      "id": "RS-7",
+      "title": "Value-object subfields survive a jsonb round-trip",
+      "trigger": "valueobject Money { amount, currency } as an aggregate field on a jsonb-storing backend",
+      "observable": "GET returns the nested {amount,currency}; a later op reading self.price.amount does not raise",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "#1660"
+      ],
+      "tier": "behavioral"
+    },
+    {
+      "id": "RS-8",
+      "title": "Associations persist and preload on round-trip",
+      "trigger": "an op mutating a containment or X id[] ref-collection (`lines += …`, `members += t`)",
+      "observable": "after the op, GET nests the added child / lists the added id — no in-memory projection that omits the join write",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "§11c",
+        "#1626"
+      ],
+      "tier": "behavioral"
+    },
+    {
+      "id": "RS-9",
+      "title": "Error bodies converge on RFC 7807 with the 400/422 split",
+      "trigger": "a create violating an invariant vs a create with a malformed body",
+      "observable": "malformed body → 400, well-formed-but-invalid → 422; identical problem-body shape on every backend",
+      "conforms": [
+        "node",
+        "dotnet",
+        "java",
+        "python",
+        "elixir"
+      ],
+      "provenance": [
+        "#1620",
+        "generated-code-review-2026-06-30"
+      ],
+      "tier": "behavioral"
+    }
+  ]
+}

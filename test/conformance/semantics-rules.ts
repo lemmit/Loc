@@ -170,3 +170,46 @@ export const SEMANTICS_RULES: readonly SemanticsRule[] = [
     tier: "behavioral",
   },
 ];
+
+// ---------------------------------------------------------------------------
+// Diffable spec artifact.
+//
+// `SEMANTICS_RULES` above is the single source of truth; `serializeSemanticsSpec`
+// derives a committed, pretty-printed JSON mirror (`semantics-spec.json`) so a
+// contract change surfaces as a reviewable JSON diff — the `wire-spec.json` /
+// `langium-generated` "derived file + CI drift gate" precedent.
+//
+// The registry is a GLOBAL toolchain contract, not a per-generated-system fact,
+// so the mirror is committed here (test/conformance/), NOT emitted into each
+// system's `.loom/` bundle. `semantics-spec-sync.test.ts` fails if this output
+// drifts from the committed file; regenerate with `UPDATE_SEMANTICS_SPEC=1`.
+// ---------------------------------------------------------------------------
+
+/** Bump when the envelope shape (not the rules) changes. */
+export const SEMANTICS_SPEC_VERSION = 1;
+
+/**
+ * Deterministic, pretty-printed JSON mirror of `SEMANTICS_RULES`.
+ *
+ * Stable across runs: rules sorted by numeric id; per-rule field order fixed
+ * (id, title, trigger, observable, conforms, targets, provenance, tier);
+ * `targets` omitted when absent. 2-space indent, trailing newline.
+ */
+export function serializeSemanticsSpec(): string {
+  const rules = [...SEMANTICS_RULES]
+    .sort((a, b) => Number(a.id.slice(3)) - Number(b.id.slice(3)))
+    .map((r) => {
+      const out: Record<string, unknown> = {
+        id: r.id,
+        title: r.title,
+        trigger: r.trigger,
+        observable: r.observable,
+        conforms: r.conforms,
+      };
+      if (r.targets) out.targets = r.targets;
+      out.provenance = r.provenance;
+      out.tier = r.tier;
+      return out;
+    });
+  return `${JSON.stringify({ version: SEMANTICS_SPEC_VERSION, rules }, null, 2)}\n`;
+}
