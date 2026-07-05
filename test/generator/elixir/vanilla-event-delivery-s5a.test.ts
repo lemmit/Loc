@@ -131,6 +131,69 @@ describe("vanilla — S5a persist-then-dispatch", () => {
     expect(persistAt).toBeLessThan(dispatchAt);
   });
 
+  it("an explicit `return this` mutating+emitting op persists then dispatches post-commit (S12)", async () => {
+    // A returning op whose body ends in `return this` used to keep the inline
+    // pre-persist emit + in-memory return (the S5a residual); it now normalizes
+    // onto the persist-then-dispatch path.
+    const src = `
+system FulfillmentSys {
+  subdomain Fulfillment {
+    context Fulfillment {
+      error Rejected { reason: string }
+      aggregate Order with crudish {
+        status: string
+        operation place(): Order or Rejected {
+          status := "Placed"
+          emit OrderPlaced { order: this.id, at: now() }
+          return this
+        }
+      }
+      repository Orders for Order { }
+
+      event OrderPlaced { order: Order id, at: datetime }
+      event ShipmentRequested { order: Order id, at: datetime }
+
+      channel Lifecycle {
+        carries: OrderPlaced, ShipmentRequested
+        delivery: broadcast
+        retention: ephemeral
+      }
+
+      workflow OrderFulfillment {
+        orderId: Order id
+        attempts: int
+        create(p: OrderPlaced) by p.order {
+          emit ShipmentRequested { order: p.order, at: now() }
+        }
+      }
+    }
+  }
+  api FulfillmentApi from Fulfillment
+  storage primary { type: postgres }
+  resource fulfillmentState { for: Fulfillment, kind: state, use: primary }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Fulfillment]
+    dataSources: [fulfillmentState]
+    serves: FulfillmentApi
+    port: 4000
+  }
+}
+`;
+    const ctx = get(await generateSystemFiles(src), "lib/api/fulfillment.ex");
+    const body = ctx.slice(ctx.indexOf("def place_order(%"));
+    // The explicit-return shape now persists (S12) — no more inline pre-persist
+    // emit + in-memory return.
+    expect(body).toContain("case Api.Fulfillment.OrderRepository.persist_change(changeset) do");
+    const persistAt = body.indexOf("persist_change(changeset)");
+    const dispatchAt = body.indexOf("Dispatcher.dispatch(loom_event_0)");
+    expect(persistAt).toBeGreaterThan(-1);
+    expect(persistAt).toBeLessThan(dispatchAt);
+    // Wire projected off the SAVED struct, not the in-memory record.
+    expect(body).toContain("{:ok, saved} ->");
+    expect(body).toContain("{:ok, %{id: saved.id");
+  });
+
   it("a NON-emitting op keeps the byte-identical plain persist pipe (no case restructure)", async () => {
     const ctx = get(await generateSystemFiles(NO_SAGA), "lib/api/ordering.ex");
     const body = ctx.slice(ctx.indexOf("def touch_order(%"));
