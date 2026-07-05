@@ -2,6 +2,22 @@
 
 > **[2026-06-20 status audit]** 'Done' is understated — the Phase 1 validator ships R1+R3+R4+R6 (`deployable.ts`); Phase 2's `phoenixLiveView→phoenix` is superseded by D-ELIXIR-PLATFORM (`→elixir`); transport/runtime are now adapter-backed (`platform/elixir.ts`, `platform/dotnet.ts`).
 
+> **[2026-07-05 status audit — corrects two claims above/below]** Code-verified against `main`:
+> 1. **transport/runtime are menu-backed, not emit-backed.** They carry adapter *menus* on
+>    the platform surface — the validator reads them via `availableAdapterNames(family,
+>    "transport"|"runtime")` (`src/language/validators/data/platform-rules.ts:227-229`) — but
+>    neither has an emit-time consumer: `resolveTransport` / `resolveRuntime`
+>    (`src/platform/resolve-adapters.ts`) have **zero call sites**. The 2026-06-20 "adapter-backed"
+>    wording overstates them; read it as "carry a validator menu."
+> 2. **`persistence:`'s first emit consumer landed (Phase 5c/5d) but as a raw-key branch, not
+>    adapter dispatch.** The dotnet/node orchestrators branch on the `deployable.persistence`
+>    string key (14 such branches in `src/generator/dotnet/index.ts`); the `PersistenceAdapter`
+>    object is **not** threaded through `EmitCtx`, and `resolvePersistence()` remains **uninvoked**
+>    (its only references are its own definition + a comment). The adapter object feeds the
+>    validator's axis menu (`availableAdapterNames`), not emission. So the Phase 4 "threads when
+>    Phase 5 adds one" promise below is only half-kept: the consumer arrived, the adapter-threading
+>    did not.
+
 > Status: **planning**. Sequences the work that turns the pinned
 > realization-axes design (**D-REALIZATION-AXES**, **D-NODE-PLATFORM**,
 > **D-PHOENIX-SURFACE**) into shipped behaviour. Each phase is independently
@@ -29,7 +45,9 @@
   Byte-identical under today's size-1 real menus (baseline-fixture + conformance
   gates green); end-to-end threading covered by
   `test/platform/realization-axes-emit-wiring.test.ts`. `persistence:` has no
-  live emit-dispatch consumer yet — it threads when Phase 5 adds one.
+  live emit-dispatch consumer yet — its first consumer lands in Phase 5c/5d, but as
+  a `deployable.persistence` key-branch, **not** the adapter-threading this line
+  anticipated (see the 2026-07-05 audit note above).
 
 ## Phase 3 — `hono → node` rename + `hono` as `transport:` (D-NODE-PLATFORM) — **DONE**
 
@@ -80,7 +98,9 @@ edges — shaped the seam):
   passes none → sibling fallback → unchanged output.
 - **`persistence:` deferred** — no backend invokes a persistence adapter through
   `EmitCtx` yet (efcore is internal, drizzle is a static constant), so threading
-  it would be inert plumbing.  It threads in Phase 5 alongside its first consumer.
+  it would be inert plumbing.  Its first consumer landed in Phase 5c/5d — but as a
+  `deployable.persistence` key-branch, so the `PersistenceAdapter` is still not
+  threaded through `EmitCtx` and `resolvePersistence()` stays uninvoked (2026-07-05 audit).
 - **Byte-identical** under today's size-1 real menus: baseline-fixture
   (`page-emitter-equivalence`) + conformance-parity green, wire-spec diff empty.
   End-to-end threading (sentinel-adapter injection through the public
