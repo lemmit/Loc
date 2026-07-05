@@ -227,27 +227,28 @@ select data_key from organizations where id = <currentUser.tenantId>
 ```
 
 **Fail-safe:** a missing row, a null `data_key` (pre-tree data), or any lookup
-error falls back to the claim value — never null, never a crash. On **node**
-(Hono) this is wired end-to-end: the auth middleware calls a registered resolver
-(`registerOrgPathResolver`, mirroring the verifier seam — the auth layer can't
-reach the db, so boot registers a db-backed closure). The other four backends
-currently emit the fail-safe claim fallback; their live registry read is the
-per-backend accessor-layer follow-up.
+error falls back to the claim value — never null, never a crash. Wired on **all
+five backends**, each through its own request-scoped principal seam:
+
+| Backend | Registry read | Memoization |
+|---|---|---|
+| node (Hono/Drizzle) | boot registers `registerOrgPathResolver` (a db-backed closure — the auth layer can't reach the injected db); middleware `await`s it | once in middleware, on the request principal |
+| .NET (EF Core) | `IOrgPathResolver`/`EfOrgPathResolver` (`IgnoreQueryFilters().Where(id).Select(DataKey)`), method-injected into `UserMiddleware` | scoped resolver; `user.OrgPath` slot set once per request |
+| Java (Spring/JPA) | `OrgPathResolver` holder + a boot `@Component` registering a `JdbcTemplate` `SELECT data_key … WHERE id = ?` closure | per-request `ThreadLocal` memo, cleared in `UserFilter` |
+| Python (FastAPI/SQLAlchemy) | Starlette middleware queries `text("SELECT data_key … WHERE id = :claim")` via the module-level `session_factory` | written once onto the frozen principal (off `asdict()`/wire) |
+| Elixir (Ecto) | `put_org_path/1` reads via `Repo.one(from o in <Registry>, where: o.id == ^claim, select: o.data_key)` (schema-prefix + binary_id cast) | the plug runs once per request → memoized on the principal map |
 
 ## Scope and roadmap
 
 Phase 1 is flat tenancy (`local` reads — tenant-id equality). The registry
 self-scope + claim-less bootstrap shipped as Phase 1b (above). The registry tree
-(`implements tenantRegistry` → `parent` + managed `dataKey`) + node's `orgPath`
-registry read shipped as Phase 2 P2.2 (above). Deferred:
+(`implements tenantRegistry` → `parent` + managed `dataKey`) + the `orgPath`
+registry read on all five backends shipped as Phase 2 P2.2 (above). Deferred:
 
 - **The `claim`/`registry` cross-reference upgrade** (capstone decision 5) —
   byte-identical surface, tooling win (navigation/rename); still open.
 - **`tenant_id` index** — blocked on the index surface
   ([`proposals/uniqueness-and-indexes.md`](proposals/uniqueness-and-indexes.md)).
-- **`orgPath` registry read on .NET / Java / Python / Elixir** — the P2.2 tail
-  (node landed first as the reference); each needs the resolution moved into its
-  request-scoped accessor/dependency.
 - **Stamping `dataKey` on `tenantOwned` aggregates** (P2.3) + the
   **`deep`/`global` `policy {}` ladder** (P2.4) + the **materialized-path
   index** (P2.5) — see [`plans/multi-tenancy-phase2.md`](plans/multi-tenancy-phase2.md).
