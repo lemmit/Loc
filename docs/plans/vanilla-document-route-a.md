@@ -112,8 +112,12 @@ The migration stays `create table(:orders) do add :data, :map; add :version …`
 3. **✅ LANDED (2026-07-05, with slice 2).** **In-memory finds in struct mode.** Rewrote `renderDocFindFn` to
    `Repo.all |> Enum.filter(fn row -> record = row.data; <pred over record> end)`
    in struct mode (via the new `docStruct` render flag: struct field access + string
-   enums, no bracket). Paged-envelope + union-tag find builders still deferred (stay
-   gated).
+   enums, no bracket). **✅ PAGED LANDED (2026-07-05, slice 4c):** `renderDocFindFn`
+   now builds the `%{items, page, pageSize, total, totalPages}` wire envelope IN
+   MEMORY for a `paged` find (filter the whole table → `Enum.slice` the page); the
+   shared paged find-controller action maps `serialize/1` over `items`. Union-tag
+   find builders still deferred (union finds stay gated). Boot-verified (3 tickets,
+   `?page=1&pageSize=2` → 2 items totalPages 2, page 2 → 1 item).
 4. **Containments.** Drop the `document` case from `validateVanillaContainmentSupport`
    (parts now nest via `embeds_many`); wire containment-mutating ops (`lines += …`)
    through the reused relational add/remove arm (`put_embed`).

@@ -387,3 +387,50 @@ describe("vanilla shape(document) containments (Route A slice 4)", () => {
     expect(ctx).toContain("|> Ecto.Changeset.put_embed(:data, Map.from_struct(record))");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Paged custom finds (Route A slice 4c) — the document find fn builds the
+// %{items, page, pageSize, total, totalPages} wire envelope IN MEMORY.
+// ---------------------------------------------------------------------------
+describe("vanilla shape(document) paged finds (Route A slice 4c)", () => {
+  const DOC_PAGED = `
+system Shop {
+  subdomain Sales {
+    context Shop {
+      enum Status { open, closed }
+      aggregate Ticket shape(document) with crudish {
+        title: string
+        status: Status
+      }
+      repository Tickets for Ticket {
+        find recent(): Ticket paged
+        find byStatus(status: Status): Ticket paged where this.status == status
+      }
+    }
+  }
+  api ShopApi from Sales
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api { platform: elixir { foundation: vanilla }, contexts: [Shop], dataSources: [shopState], serves: ShopApi, port: 4000 }
+}
+`;
+
+  it("builds the paged envelope in-memory (filter → slice → %{items,page,…})", async () => {
+    const repo = file(await generateSystemFiles(DOC_PAGED), "/shop/ticket_repository.ex");
+    // Page controls with the shared defaults.
+    expect(repo).toContain("def recent(page \\\\ 1, page_size \\\\ 20) do");
+    expect(repo).toContain("def by_status(status, page \\\\ 1, page_size \\\\ 20) do");
+    // Filter the whole table, then slice the page in memory.
+    expect(repo).toContain("|> Repo.all()");
+    expect(repo).toContain("total = length(matched)");
+    expect(repo).toContain("items = Enum.slice(matched, offset, page_size)");
+    // camelCase envelope keys (Jason serialises the atoms verbatim).
+    expect(repo).toContain("pageSize: page_size");
+    expect(repo).toContain("totalPages: if(page_size > 0, do: ceil(total / page_size), else: 0)");
+    // A filtered paged find still reads the embed (struct-mode predicate).
+    expect(repo).toContain("record = row.data");
+    expect(repo).toContain("record.status == status");
+    // An unfiltered paged find must NOT bind an unused `record` (else -Werror).
+    expect(repo).toContain("|> Enum.filter(fn _row -> true end)");
+  });
+});
