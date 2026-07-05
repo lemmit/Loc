@@ -1,0 +1,47 @@
+// Multi-tenancy P2.2 — HIERARCHY on the JAVA backend.  The tenant registry
+// (`Org`) opts into `implements tenantRegistry`, so it carries a managed
+// `data_key` materialized-path column; `currentUser.orgPath` then resolves to
+// the caller org's `data_key`, read once per request from the registry table
+// (`SELECT data_key FROM <schema>.orgs WHERE id = <claim>`) via the generated
+// OrgPathResolver + its boot @Component, falling back to the claim when the row
+// is absent (fail-safe).  A `with tenantOwned` aggregate (`Doc`) filters on
+// `currentUser.orgPath`, so the SpEL use-site `@currentUserAccessor.user()
+// .orgPath()` must resolve — the record accessor still exists, it just
+// delegates.  The registry itself carries the derived self-scope filter
+// (`this.id == currentUser.tenantId`, guid-from-string).
+//
+// Decisive check that the P2.2 registry read + resolver seam compile under
+// `gradle testClasses bootJar` (the java-build gate).
+system JavaHierarchy {
+  user { id: guid  tenantId: string }
+  tenancy by user.tenantId of Org
+
+  subdomain S {
+    context C {
+      aggregate Doc with tenantOwned {
+        owner: string
+        // Row scoping by the caller's materialized org path (the registry
+        // `data_key`, resolved per request under hierarchy).
+        filter this.owner == currentUser.orgPath
+      }
+      aggregate Org ids guid {
+        name: string
+        implements tenantRegistry
+      }
+      repository Docs for Doc { }
+      repository Orgs for Org { }
+    }
+  }
+
+  api ShopApi from S
+  storage primarySql { type: postgres }
+  resource shopState { for: C, kind: state, use: primarySql }
+  deployable api1 {
+    platform: java
+    contexts: [C]
+    dataSources: [shopState]
+    serves: ShopApi
+    port: 8081
+    auth: required
+  }
+}

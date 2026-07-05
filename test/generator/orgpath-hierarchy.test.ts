@@ -60,3 +60,23 @@ describe("currentUser.orgPath — registry dataKey read under hierarchy (node)",
     expect(files).toMatch(/\.where\(eq\(schema\.orgs\.id, claim\)\)/);
   });
 });
+
+describe("currentUser.orgPath — registry dataKey read under hierarchy (java)", () => {
+  it("java: `orgPath()` delegates to a per-request memoized registry `data_key` read, fail-safe to claim", async () => {
+    const files = await allFiles("java");
+    // The User record accessor still exists (the SpEL use-site
+    // `@currentUserAccessor.user().orgPath()` binds it) — but now delegates.
+    expect(files).toMatch(/public String orgPath\(\) \{/);
+    expect(files).toMatch(/\.orgPath\(\)/);
+    expect(files).toMatch(/return OrgPathResolver\.resolve\(/);
+    // The static holder memoizes per request and falls back to the claim.
+    expect(files).toMatch(/public static String resolve\(String claim\)/);
+    expect(files).toMatch(/resolved = dataKey == null \? claim : dataKey;/);
+    // Boot @Component registers a JdbcTemplate closure reading the registry
+    // `data_key`, binding the string claim as the guid id (fail-closed parse).
+    expect(files).toMatch(/OrgPathResolver\.register\(claim -> \{/);
+    expect(files).toMatch(
+      /"SELECT data_key FROM c\.orgs WHERE id = \?", String\.class, java\.util\.UUID\.fromString\(claim\)/,
+    );
+  });
+});

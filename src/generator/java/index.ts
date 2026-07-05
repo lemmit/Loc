@@ -6,6 +6,7 @@ import type {
   DeployableIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
+  IdValueType,
   RepositoryIR,
   SystemIR,
   ViewIR,
@@ -22,6 +23,7 @@ import {
   resolveContextSchema,
   resolveDataSourceConfig,
 } from "../../ir/util/resolve-datasource.js";
+import { hierarchyRegistry } from "../../ir/util/tenant-stance.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import type { Model } from "../../language/generated/ast.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
@@ -708,7 +710,33 @@ function emitProjectFromContexts(
   // Auth surface — only when the deployable opts in via auth: required
   // and the system declares a user block.
   if (authRequired && system?.sys) {
-    for (const [name, content] of renderAuthFiles(system.sys, basePkg, routePrefix)) {
+    // Hierarchy (multi-tenancy P2.2): when the tenant registry opts into
+    // `tenantRegistry` (a `data_key` column exists) AND its state table is
+    // among THIS deployable's contexts (so the boot JdbcTemplate reaches it),
+    // `currentUser.orgPath` reads the registry's `data_key` per request;
+    // otherwise the P2.1 claim-copy accessor stands.
+    let orgPathRegistry: { table: string; idValueType: IdValueType } | undefined;
+    const reg = hierarchyRegistry(system.sys);
+    if (reg) {
+      for (const ctx of contexts) {
+        const regAgg = ctx.aggregates.find((a) => a.name === reg.name);
+        if (regAgg) {
+          const schema = resolveDataSourceConfig(regAgg, ctx, system.sys)?.schema;
+          const table = plural(snake(reg.name));
+          orgPathRegistry = {
+            table: schema ? `${schema}.${table}` : table,
+            idValueType: reg.idValueType,
+          };
+          break;
+        }
+      }
+    }
+    for (const [name, content] of renderAuthFiles(
+      system.sys,
+      basePkg,
+      routePrefix,
+      orgPathRegistry,
+    )) {
       out.set(mainSourcePath(`${basePkg}.auth`, name), content);
     }
   }
