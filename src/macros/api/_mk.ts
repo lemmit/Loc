@@ -58,6 +58,7 @@ import type {
   PrimitiveType,
   Property,
   RouteProp,
+  SelfType,
   StampDecl,
   StateBlock,
   StateField,
@@ -102,6 +103,10 @@ export function mkIdType(shape: AstLiteral<IdType>): IdType {
 
 export function mkNamedType(shape: AstLiteral<NamedType>): NamedType {
   return mkAst<NamedType>(shape);
+}
+
+export function mkSelfType(shape: AstLiteral<SelfType>): SelfType {
+  return mkAst<SelfType>(shape);
 }
 
 export function mkProperty(shape: AstLiteral<Property>): Property {

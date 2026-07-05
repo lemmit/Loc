@@ -2,6 +2,7 @@ import type { SystemIR, TypeIR } from "../../types/loom-ir.js";
 import {
   classifyTenantStance,
   hasTenantOwned,
+  hasTenantRegistry,
   tenancyClaimBinding,
 } from "../../util/tenant-stance.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
@@ -42,7 +43,78 @@ function typeName(t: TypeIR): string {
   return t.kind === "primitive" ? t.name : t.kind;
 }
 
+/** Structural checks for the `tenantRegistry` hierarchy capability
+ *  (multi-tenancy Phase 2, plan P2.2).  The capability PROVIDES the registry
+ *  tree fields (`parent: Self id?`, managed `dataKey`); this verifies the
+ *  facts the design lists that aren't field-presence (which the capability
+ *  guarantees by construction): it is opted into only under a `tenancy by`
+ *  system, exactly one aggregate carries it, and that aggregate is the
+ *  `of <Registry>` target.  `parent`'s immutability and its self-reference are
+ *  structural — `immutable` access freezes it after create, and `Self`
+ *  resolves to the host aggregate at expansion — so neither needs a check. */
+function validateTenantRegistry(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const registries: { ctx: string; agg: string }[] = [];
+  for (const mod of sys.subdomains) {
+    for (const ctx of mod.contexts) {
+      for (const agg of ctx.aggregates) {
+        if (hasTenantRegistry(agg)) registries.push({ ctx: ctx.name, agg: agg.name });
+      }
+    }
+  }
+  if (registries.length === 0) return;
+
+  // Hierarchy has no meaning without the `tenancy by` declaration that names
+  // the claim keying `currentUser.orgPath` into the registry — fail-closed.
+  if (!sys.tenancy) {
+    for (const r of registries) {
+      diags.push({
+        severity: "error",
+        code: "loom.tenant-registry-without-tenancy",
+        message:
+          `aggregate '${r.agg}' implements 'tenantRegistry' but system '${sys.name}' declares no ` +
+          `'tenancy by user.<claim> of <Registry>' line.  The registry tree (parent + dataKey) is ` +
+          `only meaningful under a tenancy declaration — add it, or drop 'implements tenantRegistry'.`,
+        source: `${r.ctx}/${r.agg}`,
+      });
+    }
+    return;
+  }
+
+  // Exactly one registry aggregate — 'tenantRegistry' is the singular tree root.
+  if (registries.length > 1) {
+    for (const r of registries) {
+      diags.push({
+        severity: "error",
+        code: "loom.tenancy-registry-duplicate",
+        message:
+          `system '${sys.name}' has ${registries.length} aggregates implementing 'tenantRegistry' ` +
+          `(${registries.map((x) => `'${x.agg}'`).join(", ")}); the tenant registry is singular — ` +
+          `keep it on exactly one aggregate (the '${sys.tenancy.registryName}' named in 'tenancy by … of').`,
+        source: `${r.ctx}/${r.agg}`,
+      });
+    }
+    return;
+  }
+
+  // The one registry must BE the `of <Registry>` target — the hierarchy fields
+  // hang off the aggregate the tenancy claim keys into, nowhere else.
+  const only = registries[0];
+  if (only && only.agg !== sys.tenancy.registryName) {
+    diags.push({
+      severity: "error",
+      code: "loom.tenancy-registry-not-target",
+      message:
+        `aggregate '${only.agg}' implements 'tenantRegistry' but the tenancy registry is ` +
+        `'${sys.tenancy.registryName}' ('tenancy by … of ${sys.tenancy.registryName}').  The tree ` +
+        `capability belongs on the registry itself — move 'implements tenantRegistry' onto ` +
+        `'${sys.tenancy.registryName}'.`,
+      source: `${only.ctx}/${only.agg}`,
+    });
+  }
+}
+
 export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  validateTenantRegistry(sys, diags);
   const tenancy = sys.tenancy;
 
   // Registry existence is a LINKING concern since 1b.1 — `of <Registry>` is a

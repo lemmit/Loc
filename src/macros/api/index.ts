@@ -71,6 +71,7 @@ export {
   originOf,
   param,
   primType,
+  selfRef,
   targetFields,
   thisRef,
   viewsIn,

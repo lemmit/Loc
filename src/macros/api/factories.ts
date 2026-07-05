@@ -33,6 +33,7 @@ import type {
   PostfixChain,
   PrimitiveType,
   Property,
+  SelfType,
   Statement,
   TypeRef,
   UnaryExpr,
@@ -56,6 +57,7 @@ import {
   mkPostfixChain,
   mkPrimitiveType,
   mkProperty,
+  mkSelfType,
   mkStampDecl,
   mkThisRef,
   mkTypeRef,
@@ -140,6 +142,32 @@ export function idRef(
     origin,
   );
   setContainer(idType, ref, "base");
+  return ref;
+}
+
+/** A `Self id` type reference — the anchored self-type
+ * (typed-capabilities.md): inside a capability it denotes an id-ref to
+ * whatever aggregate carries the capability.  The macro expander's
+ * `resolveSelfTypes` rewrites the `SelfType` base to the host aggregate's
+ * `IdType` at splice time (`src/macros/expander.ts`), so a capability field
+ * `parent: Self id?` becomes `parent: <Host> id?` — a self-FK.  Only
+ * meaningful in a capability body; a `Self` elsewhere is
+ * `loom.self-outside-capability`. */
+export function selfRef(opts: { array?: boolean; optional?: boolean } = {}): TypeRef {
+  const origin = currentOrigin();
+  const self: SelfType = tag(mkSelfType({ $type: "SelfType", selfRef: true }), origin);
+  const ref: TypeRef = tag(
+    mkTypeRef({
+      $type: "TypeRef",
+      base: self,
+      ctors: [],
+      alternatives: [],
+      array: opts.array ?? false,
+      optional: opts.optional ?? false,
+    }),
+    origin,
+  );
+  setContainer(self, ref, "base");
   return ref;
 }
 

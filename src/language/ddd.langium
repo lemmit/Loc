@@ -1751,7 +1751,14 @@ LooseName returns string:
     // code can still name a field / parameter `tenancy` / `crossTenant`.
     // `tenancy` is hard only at the head of the `TenancyDecl` SystemMember;
     // `crossTenant` only in the `Aggregate` header flag slot.
-    | 'tenancy' | 'crossTenant';
+    | 'tenancy' | 'crossTenant'
+    // `parent` is hard only in the `Requirement` hierarchy clause
+    // (`requirement R parent R0`); admit it here so it parses as a call-arg /
+    // object-literal field name — e.g. the tenant-registry signup factory
+    // `Organization.create({ name: nm, parent: par })` setting the immutable
+    // self-FK the `tenantRegistry` capability provides (multi-tenancy Phase 2).
+    // Already soft in `Property.name`; this mirrors it for `LooseName`.
+    | 'parent';
 
 // A dotted page reference for `menu { link <Area>.<Page> }` — lets a menu link
 // disambiguate role-named scaffold pages (`List` / `New` / `Detail`) by their
