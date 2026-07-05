@@ -2,6 +2,12 @@
 // build-generated-elixir-vanilla so the emitted `validate_number` /
 // `validate_length` / `validate_format` chain (derived from single-field
 // invariants) passes `mix compile --warnings-as-errors`.
+//
+// Also exercises the CROSS-field invariant seam (`validate_invariants/1`,
+// changeset-invariant-emit): `name != sku` fits no single-field native chain,
+// so it renders as a custom Ecto validation piped onto base_changeset,
+// update_changeset, and the operation-persist path.  A guarded cross-field
+// invariant (`... when ...`) exercises the `if guard do ... end` shape.
 system Catalog {
   subdomain Core {
     context Shop {
@@ -9,10 +15,19 @@ system Catalog {
         name: string
         price: int
         sku: string
+        status: string
 
         invariant price >= 0
         invariant name.length <= 50
         invariant sku.matches("[A-Z]{3}")
+        // Cross-field: no single-field chain fits → validate_invariants/1.
+        invariant name != sku
+        // Guarded cross-field: only enforced in the "listed" state.
+        invariant price >= 1 when status == "listed"
+
+        operation relabel(newName: string) {
+          name := newName
+        }
       }
       repository Products for Product { }
     }

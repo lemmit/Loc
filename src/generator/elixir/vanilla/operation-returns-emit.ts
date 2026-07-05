@@ -871,6 +871,31 @@ function leafPath(e: ExprIR): string {
 /** The `POST /<plural>/:id/<op>` member action for a returning operation:
  *  load the aggregate, run the op, then translate the tagged result — a success
  *  to 200 + body, each error variant to its RFC-7807 ProblemDetails status. */
+// A rejected `requires` / `precondition` in an operation / function /
+// domain-service body RAISES `raise(ArgumentError, "Forbidden: …")` /
+// `"Precondition failed: …")` (the message prefixes here are the contract —
+// they must stay in lockstep with the `case "precondition"/"requires"` arms in
+// `renderStatement` above, and the `function-emit` / `domain-service-emit`
+// siblings).  A controller action appends this `rescue` clause so the raise maps
+// to the same HTTP status the other backends return — `requires` → 403 (Hono
+// `ForbiddenError`), `precondition` → 400 (Hono `DomainError` → Bad Request) —
+// instead of propagating to Phoenix's default 500.  Any other `ArgumentError`
+// reraises unchanged (still a 500 for a genuine bug).
+export const GUARD_RESCUE = `  rescue
+    guard_error in ArgumentError ->
+      guard_msg = Exception.message(guard_error)
+
+      cond do
+        String.starts_with?(guard_msg, "Forbidden: ") ->
+          ProblemDetails.problem_response(conn, 403, "Forbidden", guard_msg)
+
+        String.starts_with?(guard_msg, "Precondition failed: ") ->
+          ProblemDetails.problem_response(conn, 400, "Bad Request", guard_msg)
+
+        true ->
+          reraise(guard_error, __STACKTRACE__)
+      end`;
+
 export function renderReturningOpControllerAction(
   ctxModule: string,
   agg: AggregateIR,
@@ -933,6 +958,7 @@ ${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
       {:error, :not_found} ->
         ProblemDetails.not_found_response(conn, "${aggPascal}", id)
     end
+${GUARD_RESCUE}
   end
 
 ${resultClauses}`;
