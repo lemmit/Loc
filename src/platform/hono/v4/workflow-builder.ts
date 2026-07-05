@@ -835,6 +835,7 @@ function emitSubscriptionHandlers(
             statements,
             saves,
             ctx,
+            sub.trigger === "create" && (wf.subscriptions ?? []).some((o) => o.event === sub.event),
           )
         : emitHandlerFn(
             fn,
@@ -1149,6 +1150,13 @@ function emitEventSourcedHandlerFn(
   statements: WorkflowStmtIR[],
   saves: { name: string; aggName: string; repoName: string }[],
   ctx: BoundedContextIR,
+  /** A `create` starter that shares its event with an `on` reactor on the SAME
+   *  workflow (the event-sourced-saga double-append case, S5b): the starter must
+   *  no-op when the stream ALREADY exists (the `on` reactor owns that event), the
+   *  inverse of the `on` handler's emptiness guard.  Without it both handlers
+   *  append and the workflow event folds twice.  A create with no paired `on`
+   *  stays byte-identical (guard omitted). */
+  guardStreamExists = false,
 ): string[] {
   const out: string[] = [];
   const corr = wf.correlationField as string;
@@ -1170,6 +1178,16 @@ function emitEventSourcedHandlerFn(
   if (trigger === "on") {
     // A continuation needs a started saga — an empty stream means none exists.
     out.push(`  if (__stream.length === 0) {`);
+    out.push(
+      `    ${renderHonoStoreLogCall("eventUnrouted", `workflow: "${wf.name}", event_type: "${eventName}", key: __key`)}`,
+    );
+    out.push(`    return;`);
+    out.push(`  }`);
+  } else if (guardStreamExists) {
+    // Inverse of the `on` guard (S5b): the paired `on` reactor already handles
+    // this event once the saga has started, so the starter must NOT re-append —
+    // a non-empty stream means it exists.  Mirrors the `on` telemetry inverted.
+    out.push(`  if (__stream.length !== 0) {`);
     out.push(
       `    ${renderHonoStoreLogCall("eventUnrouted", `workflow: "${wf.name}", event_type: "${eventName}", key: __key`)}`,
     );

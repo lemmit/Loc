@@ -421,6 +421,12 @@ export function renderEsWorkflowHandler(contextModule: string, sub: EsSub): stri
 
   const letBlock = lets.length > 0 ? `${lets.join("\n")}\n` : "";
 
+  // A `create` starter that shares its event with an `on` reactor on the same
+  // workflow (S5b) must no-op when the stream ALREADY exists — the inverse of
+  // the `on` emptiness guard — so the event folds once, not twice.  A starter
+  // with no paired `on` stays byte-identical (folds unconditionally).
+  const guardStreamExists =
+    sub.trigger === "create" && (wf.subscriptions ?? []).some((o) => o.event === sub.event);
   let inner: string;
   if (sub.trigger === "on") {
     // Reactor: a started saga has a non-empty stream; else drop + log.
@@ -441,6 +447,26 @@ export function renderEsWorkflowHandler(contextModule: string, sub: EsSub): stri
         ${stateBind} = ${foldMod}.from_events(key, loaded)
 ${letBlock}${withBlock.replace(/^/gm, "  ")}
     end`;
+  } else if (guardStreamExists) {
+    // Starter with a paired `on`: fold from zero ONLY when the stream is empty;
+    // a non-empty stream means the `on` reactor owns this event — drop + log.
+    const logCall = renderPhoenixLogCall("eventUnrouted", [
+      { name: "workflow", valueExpr: JSON.stringify(wf.name) },
+      { name: "event_type", valueExpr: JSON.stringify(sub.event) },
+      { name: "key", valueExpr: "key" },
+    ]);
+    inner = `    key = ${keyExpr}
+    sid = to_string(key)
+
+    case ${streamMod}.load(sid) do
+      [] ->
+        ${stateBind} = ${foldMod}.from_events(key, [])
+${letBlock}${withBlock.replace(/^/gm, "  ")}
+
+      _loaded ->
+        ${logCall}
+        :ok
+    end`;
   } else {
     // Starter: fold from zero (empty stream → seeded defaults).
     inner = `    key = ${keyExpr}
@@ -449,7 +475,7 @@ ${letBlock}${withBlock.replace(/^/gm, "  ")}
 ${letBlock}${withBlock}`;
   }
 
-  const requireLogger = sub.trigger === "on" ? "  require Logger\n\n" : "";
+  const requireLogger = sub.trigger === "on" || guardStreamExists ? "  require Logger\n\n" : "";
   return `# Auto-generated.
 defmodule ${handlerMod} do
   @moduledoc "${sub.trigger === "on" ? "Reactor" : "Starter"} for ${upperFirst(sub.event)} → ${upperFirst(wf.name)} (event-sourced)."

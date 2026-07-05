@@ -109,10 +109,49 @@ export function renderJavaDispatcher(
   const imports = new Set<string>();
   const wfByName = new Map(ctx.workflows.map((w) => [w.name, w] as const));
 
+  // Event-sourced saga double-append (S5b): when an event-sourced workflow has
+  // BOTH an `on` reactor and an event-`create` starter for the SAME event,
+  // Spring fans the two @EventListener methods out in unspecified order — a
+  // start-first-on-a-new-stream ordering double-appends.  Merge them into ONE
+  // ordered @EventListener that reads the stream once and branches
+  // (empty → create-logic, non-empty → on-logic), so exactly one appends
+  // regardless of fan-out order.  Non-ES workflows and events without both an
+  // `on` and a `create` stay two independent handlers (byte-identical).
+  const mergedEsEvent = (wf: WorkflowIR, event: string): boolean =>
+    !!wf.eventSourced &&
+    (wf.subscriptions ?? []).some((o) => o.event === event) &&
+    (wf.creates ?? []).some(
+      (c) => c.triggerKind === "event" && c.eventRef === event && !!c.eventBinding,
+    );
+
   const methods: string[] = [];
   for (const sub of subs) {
     const wf = wfByName.get(sub.workflow);
     if (!wf?.correlationField) continue;
+    if (mergedEsEvent(wf, sub.event)) {
+      // Render the merged handler once, on the `create` sub; drop the `on` sub
+      // (its logic is the else-branch).
+      if (sub.trigger !== "create") continue;
+      const createResolved = resolveHandler(wf, sub);
+      const onSub = (ctx.eventSubscriptions ?? []).find(
+        (s) => s.workflow === sub.workflow && s.event === sub.event && s.trigger === "on",
+      );
+      const onResolved = onSub ? resolveHandler(wf, onSub) : null;
+      if (!createResolved || !onSub || !onResolved) continue;
+      methods.push(
+        ...renderEsMergedHandler(
+          ctx,
+          wf,
+          sub,
+          createResolved,
+          onSub,
+          onResolved,
+          imports,
+          dctx.contextSchema,
+        ),
+      );
+      continue;
+    }
     const resolved = resolveHandler(wf, sub);
     if (!resolved) continue;
     methods.push(
@@ -434,6 +473,126 @@ function renderEsHandler(
   return [
     `    @EventListener`,
     `    public void ${handlerName(sub)}(${sub.event} ${param}) {`,
+    `        try (var __frame = RequestContext.openChild()) {`,
+    ...body.map((l) => `    ${l}`),
+    `        }`,
+    `    }`,
+    ``,
+  ];
+}
+
+/** One branch of a merged event-sourced saga handler (S5b): the emit-sink
+ *  decl, the body rendered against the shared folded `state`, aggregate saves,
+ *  and the gap-free own-event append + re-publish.  The stream load + fold are
+ *  shared across the two branches, so they are NOT emitted here.  `aliasEvent`
+ *  binds this branch's event param to the merged method param when the two
+ *  triggers named it differently. */
+function esMergedBranchLines(
+  ctx: EnrichedBoundedContextIR,
+  wf: WorkflowIR,
+  resolved: ResolvedHandler,
+  imports: Set<string>,
+  methodParam: string,
+  branchParam: string,
+  schema: string | undefined,
+): { lines: string[]; usesState: boolean } {
+  const cls = esWorkflowStateClass(wf);
+  const table = esWorkflowStreamTable(wf, schema);
+  const hasEmit = bodyHasEmit(resolved.statements);
+  const bodyLines = renderWorkflowStmts(
+    resolved.statements,
+    javaWorkflowStmtTarget(
+      ctx,
+      imports,
+      { thisName: "state" },
+      hasEmit ? "__events" : undefined,
+      collectUnionFindLets(resolved.statements),
+    ),
+    "        ",
+  );
+  const usesState = bodyLines.some((l) => /\bstate\b/.test(l));
+  const out: string[] = [];
+  // The two triggers may name their event binding differently; alias so this
+  // branch's body references resolve against the single merged method param.
+  if (branchParam !== methodParam) {
+    out.push(`        var ${branchParam} = ${methodParam};`);
+  }
+  if (hasEmit) out.push(`        var __events = new ArrayList<DomainEvent>();`);
+  out.push(...bodyLines);
+  for (const s of resolved.saves) {
+    out.push(`        ${repoField(s.aggName)}.save(${s.name});`);
+    out.push(`        for (var __e : ${s.name}.pullEvents()) events.publishEvent(__e);`);
+  }
+  if (hasEmit) {
+    out.push(
+      `        Integer __max = jdbc.queryForObject(`,
+      `            "select max(version) from ${table} where stream_id = ?", Integer.class, __sid);`,
+      `        int __v = __max == null ? 0 : __max;`,
+      `        for (var __e : __events) {`,
+      `            __v++;`,
+      `            jdbc.update(`,
+      `                "insert into ${table} (stream_id, version, type, data) values (?, ?, ?, ?::jsonb)",`,
+      `                __sid, __v, __e.getClass().getSimpleName(), ${cls}._toData(__e));`,
+      `        }`,
+      `        for (var __e : __events) events.publishEvent(__e);`,
+    );
+  }
+  return { lines: out, usesState };
+}
+
+/** The merged event-sourced saga handler (S5b): one ordered @EventListener that
+ *  reads the `<wf>_events` stream ONCE and branches — empty stream → the
+ *  `create` starter body, non-empty → the `on` reactor body — so exactly one of
+ *  the two appends regardless of Spring's fan-out order.  Replaces the two
+ *  independent `on…`/`start…` listeners that otherwise double-append. */
+function renderEsMergedHandler(
+  ctx: EnrichedBoundedContextIR,
+  wf: WorkflowIR,
+  createSub: EventSubscriptionIR,
+  createResolved: ResolvedHandler,
+  onSub: EventSubscriptionIR,
+  onResolved: ResolvedHandler,
+  imports: Set<string>,
+  schema?: string,
+): string[] {
+  const corr = wf.correlationField as string;
+  const param = createSub.param;
+  const cls = esWorkflowStateClass(wf);
+  const table = esWorkflowStreamTable(wf, schema);
+  const renderCtx = { thisName: "state" };
+  const keyExpr = createResolved.correlation
+    ? renderJavaExpr(createResolved.correlation, renderCtx)
+    : `${param}.${snake(corr)}()`;
+  if (createResolved.correlation) collectJavaExprImports(createResolved.correlation, imports);
+
+  const createBranch = esMergedBranchLines(ctx, wf, createResolved, imports, param, param, schema);
+  const onBranch = esMergedBranchLines(ctx, wf, onResolved, imports, param, onSub.param, schema);
+  const usesState = createBranch.usesState || onBranch.usesState;
+
+  const body: string[] = [
+    `        var __key = ${keyExpr};`,
+    `        var __sid = String.valueOf(__key.value());`,
+    `        var __rows = jdbc.queryForList(`,
+    `            "select type, data from ${table} where stream_id = ? order by version", __sid);`,
+  ];
+  if (usesState) {
+    // Fold once; both branches read the same folded snapshot.  An empty stream
+    // folds from zero (the create branch), a non-empty one replays it (on).
+    body.push(
+      `        var __loaded = new ArrayList<DomainEvent>();`,
+      `        for (var __r : __rows) __loaded.add(${cls}._rowToEvent((String) __r.get("type"), String.valueOf(__r.get("data"))));`,
+      `        var state = ${cls}._fromEvents(__key, __loaded);`,
+    );
+  }
+  body.push(`        if (__rows.isEmpty()) {`);
+  body.push(...createBranch.lines.map((l) => `    ${l}`));
+  body.push(`        } else {`);
+  body.push(...onBranch.lines.map((l) => `    ${l}`));
+  body.push(`        }`);
+
+  return [
+    `    @EventListener`,
+    `    public void on${upperFirst(wf.name)}${upperFirst(createSub.event)}(${createSub.event} ${param}) {`,
     `        try (var __frame = RequestContext.openChild()) {`,
     ...body.map((l) => `    ${l}`),
     `        }`,

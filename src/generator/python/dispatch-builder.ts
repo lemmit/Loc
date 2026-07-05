@@ -427,6 +427,12 @@ function esHandlerFn(
     "    ",
   );
   const usesState = bodyLines.some((l) => /\bstate\b/.test(l));
+  // A `create` starter that shares its event with an `on` reactor on the same
+  // workflow (S5b) must no-op when the stream ALREADY exists — the inverse of
+  // the `on` emptiness guard — so the event folds once, not twice.  A starter
+  // with no paired `on` stays byte-identical.
+  const guardStreamExists =
+    sub.trigger === "create" && (wf.subscriptions ?? []).some((o) => o.event === sub.event);
   const out: string[] = [
     "@in_child_context",
     `async def ${fn}(`,
@@ -434,14 +440,23 @@ function esHandlerFn(
     ") -> None:",
     `    __key = str(${keyExpr})`,
   ];
-  // `__events` is needed by an `on` reactor's empty-stream check (always) and
-  // by the fold (only when the body reads state) — skip the load otherwise.
-  if (sub.trigger === "on" || usesState) {
+  // `__events` is needed by an `on` reactor's empty-stream check (always), a
+  // guarded starter's stream-exists check (always), and the fold (only when the
+  // body reads state) — skip the load otherwise.
+  if (sub.trigger === "on" || guardStreamExists || usesState) {
     out.push(`    __events = await ${fns.load}(session, __key)`);
   }
   if (sub.trigger === "on") {
     // A continuation needs a started saga (non-empty stream); else drop + log.
     out.push("    if not __events:");
+    out.push(
+      `        log("warn", "event_unrouted", workflow=${JSON.stringify(wf.name)}, event_type=${JSON.stringify(sub.event)}, key=__key)`,
+    );
+    out.push("        return");
+  } else if (guardStreamExists) {
+    // Inverse of the `on` guard: a non-empty stream means the paired `on`
+    // reactor already handles this event — the starter must not re-append.
+    out.push("    if __events:");
     out.push(
       `        log("warn", "event_unrouted", workflow=${JSON.stringify(wf.name)}, event_type=${JSON.stringify(sub.event)}, key=__key)`,
     );
