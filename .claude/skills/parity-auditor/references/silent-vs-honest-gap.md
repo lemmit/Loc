@@ -28,9 +28,9 @@ isolation silently vanished.
 
 A near-cousin worth a separate note:
 
-**`⚠ partial`** — the target emits *something* but not the whole feature (e.g.
-Phoenix·ash handles return-dominant ops but defers `emit`/`add`/`remove` bodies to
-vanilla). Partial is honest only if the *unsupported* slice fails fast; if the
+**`⚠ partial`** — the target emits *something* but not the whole feature (e.g. the
+vanilla Phoenix backend handles the common shape of an operation but defers a rarer
+sub-case to a validator gate). Partial is honest only if the *unsupported* slice fails fast; if the
 unsupported slice silently no-ops, it's a 🔴 hiding inside a ⚠. Check the boundary.
 
 ## The recipe
@@ -50,9 +50,9 @@ rg -n "validate\w+Support|loom\.[a-z-]+unsupported" \
 ```
 
 Record: is the target **in** the set (claims support) or **out** (claims to
-reject)? Watch for the elixir foundation branch
-(`FOO.has(p) || (p === "elixir" && elixirFooCapable)`) — that's a foundation-level
-answer, not a platform-level one.
+reject)? Watch for the separate elixir branch
+(`FOO.has(p) || (p === "elixir" && elixirFooCapable)`) — read the `||` clause; with
+a single foundation it resolves to one `✓ elixir` / `✗ elixir` cell.
 
 ### 2. Grep the emitter for the IR field the feature populates
 

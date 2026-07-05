@@ -25,7 +25,7 @@ read the root cause + fix.
 ```
 column "updated_at" specified more than once
 ```
-The Elixir/Ash project **compiles cleanly** (`mix compile` validates the schema
+The Elixir project **compiles cleanly** (`mix compile` validates the schema
 module and the migration module separately — both are valid Elixir). The
 collision only exists in the executed DDL, so it surfaces only at migrate time.
 
@@ -34,14 +34,11 @@ collision only exists in the executed DDL, so it surfaces only at migrate time.
 emitter *also* appended a bundled `timestamps()` macro on every state table,
 which adds its **own** `updated_at` — two `updated_at`s in one `CREATE TABLE`.
 
-**Fix (the healthy shape).** The `timestamps()` line is foundation- and
-column-aware in `src/generator/elixir/migrations-emit.ts`:
-- **vanilla** foundation: drops `timestamps()` entirely when an `updated_at`
-  column is present (the audit columns are the only timestamps) — matches
-  `src/generator/elixir/vanilla/schema-emit.ts`.
-- **Ash** foundation: emits `timestamps(updated_at: false)` so the auto
-  `inserted_at` stays but the colliding auto `updated_at` is suppressed — matches
-  `domain-emit.ts`, emitting the audit `updated_at` exactly once.
+**Fix (the healthy shape).** The `timestamps()` line is column-aware in
+`src/generator/elixir/migrations-emit.ts`: it drops `timestamps()` entirely when
+an `updated_at` column is present (the audit columns are the only timestamps) —
+matches `src/generator/elixir/vanilla/schema-emit.ts`, so the audit `updated_at`
+is emitted exactly once.
 
 **How to catch it locally.** Generate a `.ddd` with an `auditable` aggregate
 against the Elixir backend, boot the compose stack, and watch for the migrate
@@ -148,7 +145,7 @@ config-driven failures.
    accepts every request as a built-in admin). LiveViews authenticate from the
    **browser session** via `LiveAuth.verify_session`, which nothing seeds in dev
    → they redirect to `/login`.
-2. The Ash foundation's `config/config.exs` omitted `live_view: [signing_salt:
+2. The generated `config/config.exs` omitted `live_view: [signing_salt:
    …]`, which LiveView needs to sign the dead-render session token. Without it the
    first static render raises.
 

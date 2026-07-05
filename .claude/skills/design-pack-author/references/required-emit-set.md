@@ -97,8 +97,8 @@ field-input-enum-select, field-input-id-select, field-input-id-text, field-input
 field-input-money, field-input-string, field-input-valueobject
 ```
 
-Not required for **heex** (Phoenix's `AshPhoenix.Form` generates inputs from the
-Ash resource at compile time) or **angular** (typed Reactive Forms emitted inline
+Not required for **heex** (Phoenix renders form inputs inline via the HEEx walker
+from the Ecto schema / wire shape) or **angular** (typed Reactive Forms emitted inline
 via walker seams in `src/generator/angular/*-form.ts`).
 
 ### `form` — `TSX_FORM` (tsx, svelte) / `+ op-dialog` (vue)

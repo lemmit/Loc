@@ -141,8 +141,8 @@ No `field-input-*`, no `form-*`, no `op-dialog`, no `primitive-form-of`/
 `stack`** (Phoenix manages deps via `mix.exs`). Filenames are `*.heex.hbs`.
 
 **Layout:** `SHARED_PRIMITIVES` core + `SHARED_SHELL` only — **no** `fieldInput`
-or `form` set (Phoenix's `AshPhoenix.Form` generates inputs from the Ash resource
-at compile time). Several primitives the JSX walker emits as templates
+or `form` set (Phoenix renders form inputs inline via the HEEx walker from the
+Ecto schema / wire shape). Several primitives the JSX walker emits as templates
 (`Section`, `Sticky`, `Modal`, `Icon`, `CodeBlock`) are rendered **inline** by the
 HEEx walker (`src/generator/elixir/heex-walker.ts`) and so are deliberately
 exempt from the heex required set — this is the documented exemption pattern.

@@ -11,7 +11,7 @@ exits, then touch only those rows. The canonical deep dive is
      → ⑥ enrich → ⑦ IR validate → ⑧ per-platform codegen → ⑨ system compose → ⑩ write
 ```
 
-Targets: **5 backends** (TypeScript/Hono `node`, .NET, Phoenix/Ash + vanilla
+Targets: **5 backends** (TypeScript/Hono `node`, .NET, Phoenix vanilla Ecto
 `elixir`, Python/FastAPI, Java/Spring) and **4 frontends** (React, Vue,
 Svelte, Angular). The two seams that let one feature reach all backends:
 `ExprTarget` (`src/generator/_expr/target.ts`) for expressions and
@@ -100,7 +100,7 @@ tells you when it applies.
   matching emitter — TS `src/generator/typescript/emit/*.ts` +
   `src/platform/hono/v4/{emit,routes-builder}.ts`; .NET `src/generator/dotnet/emit/*.ts`;
   Elixir `src/generator/elixir/{domain/*,*-emit}.ts` (+ `vanilla/*` for the
-  non-Ash foundation); Python `src/generator/python/emit/*.ts`; Java
+  vanilla Ecto foundation); Python `src/generator/python/emit/*.ts`; Java
   `src/generator/java/emit/*.ts`. Larger per-aggregate-variable content lives in
   a `*-builder.ts`.
 - **New UI page primitive (React/Vue/Svelte):** register it in

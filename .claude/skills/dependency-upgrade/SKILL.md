@@ -90,7 +90,7 @@ gate map; the short version:
 |---|---|---|
 | A toolchain dep (langium, langium-cli, typescript, vitest, chevrotain, vscode-languageserver, handlebars, commander, chalk) | **A only** | Listed in root `package.json`; the compiler imports it. |
 | A generated-frontend dep (react, vue, svelte, angular, vite, zod, a router, a design-pack lib, a query lib) | **B only** | Pinned in `stacks/<id>/*.hbs` or `designs/<pack>/.../package-json.hbs`. |
-| A generated-backend dep (hono, drizzle, EF Core, Spring Boot, fastapi, sqlalchemy, ash, phoenix) | **B only** | Pinned in that backend's `pins.ts` / `renderCsproj` / `renderGradleBuild` / `renderPyproject` / `renderMixExs`. |
+| A generated-backend dep (hono, drizzle, EF Core, Spring Boot, fastapi, sqlalchemy, phoenix, ecto) | **B only** | Pinned in that backend's `pins.ts` / `renderCsproj` / `renderGradleBuild` / `renderPyproject` / `renderMixExs`. |
 | A runtime / base image (Node, Python, Elixir/OTP, JDK, .NET SDK, the Postgres image) | **B only — and on the compose-boot path** | A `FROM` in `docker/` or a backend emitter, or `postgres:NN` in `src/system/index.ts`. **These are the ones that skip the gate.** |
 | A dep the toolchain uses **and** mirrors into generated output (zod, typescript) | **BOTH** | Appears in root `package.json` *and* in a stack/backend emitter. Bump them together or note explicitly why not. |
 
@@ -166,7 +166,7 @@ backend bump:
 | .NET deps / TFM | `LOOM_DOTNET_BUILD=1 npm run test:dotnet` (sdk:10.0 container) |
 | Java / Spring Boot / JDK | `LOOM_JAVA_BUILD=1 npm run test:java` (host JDK 21 + Gradle) |
 | Python deps / version | `LOOM_PYTHON_BUILD=1 npm run test:python` |
-| Elixir / Ash / OTP | `LOOM_PHOENIX_BUILD=1 npm run test:phoenix` (add `LOOM_HEX_MIRROR=1` behind a TLS-fingerprinting proxy — see landmines) |
+| Elixir / Phoenix / OTP | `LOOM_PHOENIX_VANILLA_BUILD=1 npm run test:phoenix` (add `LOOM_HEX_MIRROR=1` behind a TLS-fingerprinting proxy — see landmines) |
 
 **The part that actually prevents the #1423-class failure:** if the bump moved a
 **runtime path** — the Postgres image, a migration tool (Flyway/EF/Ecto), a

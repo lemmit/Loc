@@ -1721,3 +1721,62 @@ Gotchas worth keeping:
   backend port. Distinguish that from a real `diffSpecs` assertion (`X drift
   (node ↔ java)`) before "fixing" anything. The session token can't `rerun`/
   `workflow_dispatch` (403), so re-trigger by pushing the next real commit.
+
+## 19. A CI check-run failure webhook can be a *cancelled run of a superseded head*, not a real failure (2026-07-04)
+
+Pushing a new commit to a PR cancels the in-flight runs on the previous head.
+Their jobs report `failure`, and the `<github-webhook-activity>` check-run events
+for them keep arriving **after** you've already pushed the fix — so you get a
+stream of `tests passed` / `coverage (merge shards)` / `test (shard i/4)`
+*failures* that have nothing to do with your current head.
+
+- **The tell is the `HeadSHA` field.** Compare it against the PR's *current* head
+  (`pull_request_read method=get`). If the webhook's HeadSHA is an older commit,
+  the failure is cancellation fallout — skip it (steward option 3). This session
+  burned ~6 investigation cycles confirming events on `02f3ba6` / `3d316a4` /
+  `f31ee50` (three successive superseded heads) were all noise.
+- **`coverage (merge shards)` failing with `ENOENT: … .vitest-reports` is the
+  signature of a cancelled shard set.** The merge job runs `download-artifact`
+  for `blob-*`, finds zero (the shards were cancelled before uploading), and dies
+  on `readdir` of a missing `.vitest-reports`. That specific error ≠ a test
+  failure — it means "the shards never finished," i.e. superseded head.
+- **Only the current head's `tests passed` matters for merge.** Don't gate on the
+  per-shard checks or on statuses fired on old heads. `pull_request_read
+  method=get_status` returns the *legacy commit-status* API (often `pending`/0)
+  even when the `tests passed` **check run** is green — read `get_check_runs`, not
+  `get_status`, to decide mergeability.
+
+## 20. Retiring an enum-alternative surface: narrow the *rule*, don't delete the *clause* — and "type-consistent emit" ≠ "the feature works" (2026-07-04)
+
+Removing the non-guid aggregate-id kinds (`ids int|long|string`, keeping only
+`ids guid`) taught two things.
+
+- **Narrow the alternative rule to the surviving value(s); do NOT delete the
+  containing optional clause.** First attempt deleted `('ids' idKind=IdKind)?`
+  from the `Aggregate` rule outright — which broke **248 fixtures/examples** that
+  spell out the *default* `ids guid` explicitly (a no-op, but pervasive). The
+  surfacing was brutal: 155 test failures with `Expecting token of type '{' but
+  found 'ids'`. The correct edit keeps the clause and narrows the rule:
+  `IdKind returns string: 'guid';` (was `'guid'|'int'|'long'|'string'`). Now
+  `ids guid` still parses; `ids int` is a hard parse error. Grep the corpus for
+  the default spelling (`grep -rn "ids guid" test/ examples/ web/`) *before*
+  touching a shared header clause.
+- **A backend emitting *type-consistent* code for a construct is NOT evidence the
+  feature works — generate the project and read the create/runtime path.** The
+  first cut of this work shipped a validator gate claiming .NET/Java/Elixir
+  supported non-guid ids "end-to-end" because their emitters read `idValueType`
+  and produced matching PK-column / DTO / param types. Actually generating an
+  `ids int` aggregate showed the *create* path mints `new TicketId(0)` against a
+  plain `INTEGER NOT NULL` PK (no `SERIAL`/`IDENTITY`) on **every** backend — the
+  second insert collides. The feature was non-functional everywhere; guid is the
+  only kind `create` can mint a unique value for. Lesson: to judge whether a
+  capability actually works, `node bin/cli.js generate system <fixture> -o /tmp/out`
+  and read the emitted create + migration, don't infer it from the emitter reading
+  the right type. (Corollary: a *gate* is a punt — when a surface is broken
+  everywhere, removal beats gating.)
+
+- **Leaving the IR type parameter collapsed to one value is fine.** `IdValueType`
+  and `TypeIR.id.valueType` are read across ~48 files (migrations, wire-spec, every
+  backend's id emit); excising the parameter is a large no-behaviour-change
+  refactor. Narrowing the *grammar* and letting the field always resolve to `guid`
+  removes the feature with a ~90-line diff instead of a ~48-file one.

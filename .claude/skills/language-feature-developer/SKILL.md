@@ -21,7 +21,7 @@ description: >-
 Adding a feature to Loom means walking a ten-phase, strictly one-directional
 pipeline (`.ddd → parse → macro → scope → AST-validate → lower → enrich →
 IR-validate → codegen → compose → write`) and landing it across **nine targets**
-(5 backends: TS/Hono, .NET, Phoenix/Ash + vanilla, Python/FastAPI, Java/Spring;
+(5 backends: TS/Hono, .NET, Phoenix vanilla Ecto, Python/FastAPI, Java/Spring;
 4 frontends: React, Vue, Svelte, Angular). The failure mode this skill exists to
 prevent is a feature that's designed for one backend, half-implemented, or
 rebuilt because it was already shipped on a fast-moving `main`.

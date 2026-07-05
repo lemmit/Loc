@@ -64,7 +64,7 @@ shape `scripts/k8s-e2e/k8s-smoke.smoke.json`:
   "list": "/widgets", "idField": "id" }
 ```
 A backend-agnostic round-trip (Loom's wire shape is identical across backends;
-the Elixir foundations mount REST under `/api`, so probe both prefixes):
+the Elixir backend mounts REST under `/api`, so probe both prefixes):
 ```bash
 PORT=<backend-port>     # 3000 hono / 8080 dotnet / 8081 java / 8000 python / 4000 elixir
 BASE="http://localhost:${PORT}"
@@ -196,7 +196,7 @@ succeed). Set `LOOM_HEX_MIRROR=1` to route hex.pm through a loopback
 TLS-terminating mirror (`scripts/hex-mirror.py`, stdlib Python only) that
 re-originates with the accepted fingerprint:
 ```bash
-LOOM_PHOENIX_BUILD=1 LOOM_HEX_MIRROR=1 npm run test:phoenix
+LOOM_PHOENIX_VANILLA_BUILD=1 LOOM_HEX_MIRROR=1 npm run test:phoenix
 ```
 `test/e2e/support/hex-mirror.ts` starts the mirror, generates a throwaway CA +
 `*.hex.pm` cert, and runs the build container with `--network host --add-host
@@ -221,7 +221,7 @@ Docker".
 | Elixir | `phoenix_api` | 4000 | `DATABASE_URL` = `ecto://…@db:5432/<slug>` (+ `SECRET_KEY_BASE`) | `Ecto.Migrator` in `release.ex` | `src/platform/elixir.ts` |
 
 All backends expose `/health` (liveness, no DB) and `/ready` (DB-aware). REST is at
-the root except the Elixir foundations, which mount it under `/api`. The slug is
+the root except the Elixir backend, which mounts it under `/api`. The slug is
 `serviceSlug(deployable.name)` (`-` → `_`); the compose `db-init` script creates
 one database per slug. Exact ports/env are emitted by each surface's
 `composeService` / `defaultPort` — read the surface file if a value looks off

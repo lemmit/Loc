@@ -26,7 +26,7 @@ never updates itself when a fourth and fifth land. This is the "3-backend-era fr
 it registers:
 
 - **5 backends:** `node` (Hono — bareword resolves to `honoV5Platform`, the v5 default
-  lane), `dotnet`, `java`, `python`, `elixir` (with `ash`/`vanilla` foundations).
+  lane), `dotnet`, `java`, `python`, `elixir` (vanilla Ecto/Phoenix).
 - **4 frontends:** `react`, `vue`, `svelte`, `angular` (plus `static`/`vite` aliasing
   to `react`).
 

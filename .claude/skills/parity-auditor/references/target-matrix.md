@@ -32,18 +32,18 @@ the `PlatformDescriptor` fields each carries (`needsDb` / `mountsUi` / `isFronte
 | .NET | `dotnet` | `dotnet@v10` | ASP.NET + EF Core + Mediator |
 | Java | `java` | `java@v1` | Spring Boot + Spring Data JPA |
 | Python | `python` | `python@v1` | FastAPI + SQLAlchemy 2 |
-| Phoenix | `elixir` | `elixir@v1` | LiveView + **Ash** (default) *or* **vanilla** Ecto |
+| Phoenix | `elixir` | `elixir@v1` | LiveView + **vanilla** Ecto (the only foundation) |
 
 `node` is the only **versioned-package** backend (`src/platform/hono/vN/`); the
 other four are thin `src/platform/<name>.ts` surfaces over
 `src/generator/<name>/`. The legacy `phoenix`/`phoenixLiveView` and `fastapi`
 aliases were retired — `elixir` and `python` are the only spellings.
 
-**The Phoenix foundation split** is the single most important nuance: `elixir`
-has two foundations, `ash` (default) and `vanilla` (Ecto), and many gaps are
-*foundation-shaped*, not platform-shaped (event-sourcing, `shape(document)`, and
-provenance ship on `vanilla` but are gated on `ash`). Always split the `elixir`
-column into `elixir·ash` / `elixir·vanilla` when the gap is foundation-shaped.
+**The elixir backend is single-foundation.** `elixir` generates on plain Ecto/
+Phoenix — the **vanilla** foundation, the only one (the Ash foundation was removed,
+#1568; `foundation: ash` is now a hard validation error). So the `elixir` column is
+a single cell, not a foundation split — features like event-sourcing,
+`shape(document)`, and provenance ship on the vanilla backend.
 
 **Frontends (4 + the HEEx path):**
 
@@ -69,15 +69,14 @@ so there's no second primitive list to drift.
 compile/generation tiers iterate — reuse it instead of hand-listing:
 
 ```ts
-BACKENDS = ["node", "dotnet", "java", "python", "phoenix", "vanilla"]
+BACKENDS = ["node", "dotnet", "java", "python", "vanilla"]
 PLATFORM_CLAUSE = {
   node: "node", dotnet: "dotnet", java: "java", python: "python",
-  phoenix: "elixir { foundation: ash }",
-  vanilla: "elixir { foundation: vanilla }",   // <- the foundation split, as two keys
+  vanilla: "elixir { foundation: vanilla }",   // <- the sole elixir foundation
 }
 ```
 
-So the corpus already encodes Phoenix as two columns (`phoenix`/`vanilla`). A
+So the corpus encodes the elixir backend as a single `vanilla` column. A
 platform-agnostic corpus `.ddd` writes `platform: __PLATFORM__`; the harness swaps
 the token (see `references/silent-vs-honest-gap.md` §run-it for the harness API).
 
@@ -114,7 +113,7 @@ prose version of this table.)
 
 | Feature axis | Gate set / fn | File | Diagnostic code |
 |---|---|---|---|
-| Event-sourced storage `persistedAs(eventLog)` | `EVENT_SOURCING_BACKENDS` (+ elixir·vanilla branch) | `system-checks.ts` | `loom.event-sourcing-backend-unsupported` |
+| Event-sourced storage `persistedAs(eventLog)` | `EVENT_SOURCING_BACKENDS` (+ elixir branch) | `system-checks.ts` | `loom.event-sourcing-backend-unsupported` |
 | Event-sourced **workflow** (saga appliers) | `EVENT_SOURCING_WORKFLOW_BACKENDS` | `system-checks.ts` | `loom.*-unsupported` |
 | TPH inheritance `inheritanceUsing(sharedTable)` | `TPH_CAPABLE` | `system-checks.ts` | TPH gate |
 | TPC inheritance `inheritanceUsing(ownTable)` | (universal — no gate) | — | — |
@@ -124,14 +123,14 @@ prose version of this table.)
 | `when` canCommand gate + `can_<op>` query | `SUPPORTED_WHEN_BACKENDS` | `structural-checks.ts` | `when` gate |
 | Exception-less returns (`op(): X or NotFound`) | `SUPPORTED_RETURN_BACKENDS` | `structural-checks.ts` | return gate |
 | Capability `filter` (relational / principal / non-relational) | `LIMITED_FAMILIES` → `validateContextFilterSupport` | `system-checks.ts` | `loom.context-filter-unsupported` |
-| Provenanced fields | `PROVENANCE_BACKENDS` (+ elixir·vanilla branch) | `system-checks.ts` | provenance gate |
+| Provenanced fields | `PROVENANCE_BACKENDS` (+ elixir branch) | `system-checks.ts` | provenance gate |
 | Per-operation `audited` | `AUDIT_OP_BACKENDS` | `system-checks.ts` | `loom.audited-backend-unsupported` |
 | Audited **lifecycle** (`audited create`/`destroy`) | `AUDIT_LIFECYCLE_BACKENDS` | `system-checks.ts` | audit-lifecycle gate |
 
-**Watch for the foundation branch pattern.** Several gates read
-`FOO_BACKENDS.has(p) || (p === "elixir" && elixirFooCapable)` — the elixir branch
-checks the *foundation*, so the row is `✓ vanilla / ✗ ash`, not a single elixir
-cell. Read the actual `||` clause, don't assume.
+**Watch for the elixir capability branch.** Several gates read
+`FOO_BACKENDS.has(p) || (p === "elixir" && elixirFooCapable)` — a separate elixir
+branch. With a single foundation this resolves to one `✓ elixir` / `✗ elixir` cell
+(no `ash`/`vanilla` split). Read the actual `||` clause, don't assume.
 
 **Watch for the silent-gap pattern.** A target *absent* from a `LIMITED_FAMILIES`
 / `FOO_BACKENDS` set is only honest if the emitter also errors. The historical 🔴
