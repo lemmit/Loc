@@ -28,10 +28,6 @@ system Acme {
         entity Pipeline { label: string }
       }
       repository Projects for Project { }
-      aggregate Ticket ids int {
-        subject: string
-      }
-      repository Tickets for Ticket { }
     }
   }
   api SalesApi from Sales
@@ -58,18 +54,8 @@ describe("hono drizzle schema — id columns are uuid, matching the migration", 
     expect(schema).toContain('uuid("owner")');
     // Containment part FK back to the parent (project_id).
     expect(schema).toContain('uuid("project_id")');
-    // No guid-id column should still be declared as text.
+    // No id column should be declared as text.
     expect(schema).not.toContain('text("id").primaryKey()');
     expect(schema).not.toContain('text("project_id")');
-  });
-
-  it("maps id columns by their value type — an `id: int` aggregate uses integer(), not uuid", async () => {
-    // The original `text("id")` wasn't about integers, but the fix is correct
-    // for them too: id columns mirror the migration's idColumnType
-    // (guid→uuid, int→integer, long→bigint, string→text).
-    const files = await generateSystemFiles(SRC);
-    const schema = [...files.entries()].find(([p]) => p.endsWith("db/schema.ts"))?.[1];
-    // Ticket has `id: int`.
-    expect(schema).toContain('id: integer("id").primaryKey()');
   });
 });

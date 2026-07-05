@@ -7548,25 +7548,8 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
       "name": "IdKind",
       "dataType": "string",
       "definition": {
-        "$type": "Alternatives",
-        "elements": [
-          {
-            "$type": "Keyword",
-            "value": "guid"
-          },
-          {
-            "$type": "Keyword",
-            "value": "int"
-          },
-          {
-            "$type": "Keyword",
-            "value": "long"
-          },
-          {
-            "$type": "Keyword",
-            "value": "string"
-          }
-        ]
+        "$type": "Keyword",
+        "value": "guid"
       },
       "entry": false,
       "fragment": false,

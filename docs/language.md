@@ -211,7 +211,7 @@ order:
 | --- | --- |
 | `enum Name { A, B, C }` | Closed enumeration; values are referenced bare. |
 | `valueobject Name { … }` | Immutable record with optional invariants and derived members. |
-| `aggregate Name [ids guid\|int\|long\|string] [persistedAs(eventLog\|state)] [shape(relational\|embedded\|document)] { … }` | Aggregate root with implicit `Name id` field.  Header modifiers (D-DOCUMENT-AXIS): `persistedAs(…)` picks the primary truth kind (default `state`); `shape(…)` picks the saving shape (default `relational`) — how the hierarchy is laid out physically: **`relational`** = table-per-entity; **`embedded`** = queryable root row + contained parts folded into one JSONB column (EF owned `.ToJson()` / Drizzle jsonb / Ecto embedded schemas); **`document`** = the whole aggregate as one opaque JSONB blob (`id, data, version`).  Emitted on all backends for `relational`/`embedded`; `document` on `dotnet`, `node`, `python`, and `java` (elixir is relational/embedded only) (a `shape(…)` a backend can't emit is a validation error — see `supportedShapes`). |
+| `aggregate Name [ids guid] [persistedAs(eventLog\|state)] [shape(relational\|embedded\|document)] { … }` | Aggregate root with implicit `Name id` field (always a `guid`; `ids guid` is an optional explicit spelling — `ids int\|long\|string` were removed, see the identity note below).  Header modifiers (D-DOCUMENT-AXIS): `persistedAs(…)` picks the primary truth kind (default `state`); `shape(…)` picks the saving shape (default `relational`) — how the hierarchy is laid out physically: **`relational`** = table-per-entity; **`embedded`** = queryable root row + contained parts folded into one JSONB column (EF owned `.ToJson()` / Drizzle jsonb / Ecto embedded schemas); **`document`** = the whole aggregate as one opaque JSONB blob (`id, data, version`).  Emitted on all backends for `relational`/`embedded`; `document` on `dotnet`, `node`, `python`, and `java` (elixir is relational/embedded only) (a `shape(…)` a backend can't emit is a validation error — see `supportedShapes`). |
 | `event Name { field: Type, … }` | Flat record raised via `emit`. |
 | `repository Name for Aggregate { find … }` | Repository declaration with optional find queries. |
 
@@ -228,11 +228,11 @@ Cross-aggregate references are written as `Other id`:
 customerId: Customer id
 ```
 
-The underlying value type defaults to `guid`; override per-aggregate:
-
-```
-aggregate Order ids int { … }
-```
+The underlying value type is always `guid`. `ids guid` may be written
+explicitly (a no-op spelling of the default); `ids int|long|string` were
+removed — no backend implemented id generation for a non-guid primary key, so
+declaring one produced an app that collided on the second insert. See
+[`docs/plans/non-guid-id-http-params.md`](plans/non-guid-id-http-params.md).
 
 #### Reference collections — `X id[]`
 

@@ -1474,10 +1474,10 @@ export function isHandleDecl(item: unknown): item is HandleDecl {
     return reflection.isInstance(item, HandleDecl.$type);
 }
 
-export type IdKind = 'guid' | 'int' | 'long' | 'string';
+export type IdKind = 'guid';
 
 export function isIdKind(item: unknown): item is IdKind {
-    return item === 'guid' || item === 'int' || item === 'long' || item === 'string';
+    return item === 'guid';
 }
 
 export interface IdRef extends langium.AstNode {

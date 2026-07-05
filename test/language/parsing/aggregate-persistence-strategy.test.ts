@@ -58,6 +58,24 @@ describe("aggregate persistedAs (truth kind, D-DOCUMENT-AXIS)", () => {
     expect(firstAgg(model).idKind).toBe("guid");
   });
 
+  it("rejects a non-guid id kind (`ids int|long|string` were removed — guid only)", async () => {
+    // No backend implemented id generation for a non-guid PK, so the surface
+    // was removed; `guid` is the only accepted id kind.  See
+    // docs/plans/non-guid-id-http-params.md.
+    for (const kind of ["int", "long", "string"]) {
+      const { errors } = await parse(`
+        context T {
+          aggregate Order ids ${kind} {
+            name: string
+          }
+        }
+      `);
+      expect(errors.join("\n"), `ids ${kind} should be a parse error`).toMatch(
+        /Expecting token of type 'guid'/,
+      );
+    }
+  });
+
   it("omits persistedAs when not declared (defaults to state at resolution)", async () => {
     const { model, errors } = await parse(`
       context T {

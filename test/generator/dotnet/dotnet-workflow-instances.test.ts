@@ -12,8 +12,6 @@ import { describe, expect, it } from "vitest";
 import { generateDotnet } from "../../../src/generator/dotnet/index.js";
 import { createDddServices } from "../../../src/language/ddd-module.js";
 import type { Model } from "../../../src/language/generated/ast.js";
-import { generateSystems } from "../../../src/system/index.js";
-import { parseString } from "../../_helpers/index.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..", "..", "..");
@@ -68,31 +66,6 @@ describe(".NET workflow instance read endpoints", () => {
     expect(ctrl).toMatch(/var __key = new OrderId\(id\);/);
     expect(ctrl).toMatch(/FirstOrDefaultAsync\(r => r\.OrderId == __key\)/);
     expect(ctrl).toContain("if (x is null) return NotFound();");
-  });
-
-  it("binds a non-guid correlation id's CLR value type on the byId param (ids int → int)", async () => {
-    // The correlation aggregate declares `ids int`, so the param binds `int`
-    // (Swashbuckle emits `{type: integer}`, not the uuid format) — parity with
-    // Hono/Java/Python (docs/plans/non-guid-id-http-params.md).
-    const src = `system S { subdomain O { context O {
-      aggregate Ticket ids int { status: string  operation open() { status := "O"  emit TicketOpened { ticket: id } } }
-      repository Tickets for Ticket { }
-      event TicketOpened { ticket: Ticket id }
-      channel L { carries: TicketOpened  delivery: broadcast  retention: ephemeral }
-      workflow TickerTally {
-        ticketId: Ticket id
-        seen: int
-        create(p: TicketOpened) by p.ticket { let t = Tickets.getById(p.ticket) }
-      }
-    } } api A from O storage pg { type: postgres } deployable api { platform: dotnet contexts: [O] serves: A port: 8080 } }`;
-    const { model, errors } = await parseString(src);
-    if (errors.length) throw new Error(errors.join("\n"));
-    const files = generateSystems(model).files;
-    const ctrl =
-      [...files.entries()].find(([k]) => k.endsWith("OWorkflowInstancesController.cs"))?.[1] ?? "";
-    expect(ctrl).toContain("public async Task<IActionResult> GetTickerTallyInstanceById(int id)");
-    expect(ctrl).toMatch(/var __key = new TicketId\(id\);/);
-    expect(ctrl).not.toContain("Guid id");
   });
 
   it("emits no instance controller for a workflow without a correlation field", async () => {
