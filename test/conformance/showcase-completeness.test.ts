@@ -107,6 +107,15 @@ const ALLOWLIST = new Set<string>([
   // conflict this HARD_GATE is designed to surface).
   "Projection",
   "ProjectionOn",
+  // `policy {}` (+ its `PolicyReadRule` rows) is the tenant read-reachability
+  // ladder (multi-tenancy Phase 2 P2.4): it only validates on a `tenancy by`
+  // system with `tenantOwned` aggregates (`deep`/`global` also need an
+  // `implements tenantRegistry` hierarchy).  Adding it to showcase.ddd would
+  // require tenancy-izing the whole fixture — the same reason `TenancyDecl` is
+  // excluded above.  Covered by test/ir/policy-read-levels.test.ts +
+  // test/generator/policy-deep-scope.test.ts instead.
+  "PolicyDecl",
+  "PolicyReadRule",
 ]);
 
 async function buildShowcase(): Promise<LangiumDocument<Model>> {
