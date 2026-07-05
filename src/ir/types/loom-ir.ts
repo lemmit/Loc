@@ -972,6 +972,30 @@ export interface BoundedContextIR {
    * src/ir/types/origin.ts.  Populated at lowering; absent on purely
    * derived nodes. */
   origin?: OriginRef;
+  /** Per-aggregate read reachability levels declared by `policy {}` blocks in
+   *  this context (authorization.md §3; multi-tenancy Phase 2 P2.4).  Each
+   *  entry names a tenant-owned aggregate and its directional read level
+   *  (`local`/`deep`/`global`).  Consumed by `enrichLoomModel`
+   *  (`applyPolicyReadLevels`), which rewrites the aggregate's `tenantOwned`
+   *  capability filter (`contextFilters`) to the level-appropriate predicate.
+   *  Undefined / empty when the context declares no policy. */
+  policyReadLevels?: PolicyReadLevelIR[];
+}
+
+/** One `allow <level> on <Aggregate>` rule lowered from a `policy {}` block —
+ *  a tenant-owned aggregate's directional read reachability level
+ *  (multi-tenancy Phase 2 P2.4).  `local` is today's `tenantId ==` tenant
+ *  floor (and the default when no policy names an aggregate); `deep` widens to
+ *  the caller's org + all descendants (a `dataKey` materialized-path prefix
+ *  match); `global` is all rows in the caller's tenant (tenant-root-floored). */
+export interface PolicyReadLevelIR {
+  /** The tenant-owned aggregate this level applies to (by name, in this
+   *  context).  Resolution + tenant-owned-ness is validated in phase ⑦. */
+  aggregate: string;
+  /** The directional read level. */
+  level: "local" | "deep" | "global";
+  /** Source span text for diagnostics (`allow deep on Invoice`). */
+  source: string;
 }
 
 /** A first-boot seed dataset for a context's aggregates

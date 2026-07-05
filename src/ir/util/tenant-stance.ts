@@ -117,6 +117,82 @@ export function buildRegistrySelfScopeFilter(
   };
 }
 
+/** The tenant-discriminator column the `tenantOwned` capability provides
+ *  (`src/macros/prelude.ts`) — the flat tenant floor's LHS. */
+export const TENANT_OWNED_TENANT_ID_FIELD = "tenantId";
+
+/** The derived principal member that carries the caller's materialized org
+ *  path (multi-tenancy Phase 2 P2.1 — `currentUser.orgPath`). */
+export const ORG_PATH_CLAIM_FIELD = "orgPath";
+
+/** The materialized-path segment delimiter (`root.child.leaf`).  The `deep`
+ *  read level prefix-matches on it so `org_a` does NOT match `org_ab` — a
+ *  descendant is `path` exactly or `path` + delimiter + more.  (Full
+ *  delimiter/opclass index discipline is P2.5; the delimiter-correct prefix
+ *  itself is emitted here.) */
+export const DATA_KEY_PATH_DELIMITER = ".";
+
+/** The reserved `method-call.member` sentinel for the `deep` read-level
+ *  reachability predicate (multi-tenancy Phase 2 P2.4).  A `deep` policy level
+ *  rewrites a tenant-owned aggregate's `tenantOwned` capability filter to this
+ *  single node; each backend's query-filter translator recognises the member
+ *  and renders the whole compound natively (`{@link DEEP_SCOPE_SEMANTICS}`),
+ *  so the generic comparison/null lowering stays untouched.  Double-underscore
+ *  fenced so it can never collide with a user method name. */
+export const DEEP_SCOPE_MEMBER = "__loomDeepScope__";
+
+/**
+ * Semantics every backend renders `DEEP_SCOPE_MEMBER` to (row R, principal P;
+ * fail-closed — no principal ⇒ matches nothing):
+ *
+ *   (R.dataKey IS NOT NULL
+ *      AND (R.dataKey = P.orgPath                       -- the caller's own node
+ *           OR R.dataKey LIKE P.orgPath || '.%'))       -- + all descendants
+ *   OR (R.dataKey IS NULL                               -- legacy / principal-less
+ *       AND R.tenantId = P.tenantId)                    --   rows degrade to `local`
+ *
+ * The NULL branch is the deliberate OR-fallback (not pure fail-closed LIKE):
+ * every row stamped before P2.3 (or by a principal-less workflow save) carries
+ * a NULL `data_key`, which a bare prefix LIKE would silently hide.  Falling
+ * those rows back to the flat `tenantId ==` floor keeps them visible to their
+ * own tenant (never widening past it — no cross-tenant leak) and degrades
+ * `deep` to exactly `local` for them, preserving flat-tenancy correctness.
+ */
+export const DEEP_SCOPE_SEMANTICS = "descendant-or-self path prefix; NULL-dataKey ⇒ tenant floor";
+
+/** Build the `deep` read-level reachability predicate for a tenant-owned
+ *  aggregate as the `DEEP_SCOPE_MEMBER` sentinel method-call.  The args carry
+ *  the two principal claims (`currentUser.orgPath`, `currentUser.tenantId`) as
+ *  fully-resolved `member` nodes so `exprUsesCurrentUser` classifies the filter
+ *  as principal-referencing (routing it to each backend's ambient-principal
+ *  query path), and each backend reads the claim field names off them.  The row
+ *  columns (`dataKey`, `tenantId`) are fixed by the `tenantOwned` capability. */
+export function buildDeepScopeFilter(agg: Pick<AggregateIR, "name">): ExprIR {
+  const userShape: TypeIR = { kind: "entity", name: "__User__" };
+  const claim = (member: string): ExprIR => ({
+    kind: "member",
+    receiver: { kind: "ref", name: "currentUser", refKind: "current-user", type: userShape },
+    member,
+    receiverType: userShape,
+    memberType: { kind: "primitive", name: "string" },
+  });
+  return {
+    kind: "method-call",
+    receiver: { kind: "this" },
+    member: DEEP_SCOPE_MEMBER,
+    args: [claim(ORG_PATH_CLAIM_FIELD), claim(TENANT_OWNED_TENANT_ID_FIELD)],
+    receiverType: { kind: "entity", name: agg.name },
+    isCollectionOp: false,
+  };
+}
+
+/** True when `e` is the `deep` read-level sentinel (`DEEP_SCOPE_MEMBER`
+ *  method-call).  Each backend's query-filter translator gates its native
+ *  compound rendering on this. */
+export function isDeepScopeFilter(e: ExprIR): boolean {
+  return e.kind === "method-call" && e.member === DEEP_SCOPE_MEMBER;
+}
+
 export type TenantStance = "tenantOwned" | "crossTenant" | "registry" | "unscoped";
 
 /** True when the aggregate implements the `tenantOwned` prelude capability

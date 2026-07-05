@@ -55,6 +55,7 @@ export type DddKeywordNames =
     | "against"
     | "aggregate"
     | "aggregates"
+    | "allow"
     | "angular"
     | "angularMaterial"
     | "api"
@@ -101,6 +102,7 @@ export type DddKeywordNames =
     | "dataSources"
     | "datetime"
     | "decimal"
+    | "deep"
     | "delivery"
     | "denyByDefault"
     | "deployable"
@@ -145,6 +147,7 @@ export type DddKeywordNames =
     | "framework"
     | "from"
     | "function"
+    | "global"
     | "guid"
     | "handle"
     | "header"
@@ -180,6 +183,7 @@ export type DddKeywordNames =
     | "link"
     | "literal"
     | "loads"
+    | "local"
     | "log"
     | "long"
     | "main"
@@ -218,6 +222,7 @@ export type DddKeywordNames =
     | "persistence"
     | "phoenixLiveView"
     | "platform"
+    | "policy"
     | "port"
     | "postgres"
     | "precondition"
@@ -961,7 +966,7 @@ export function isContainment(item: unknown): item is Containment {
     return reflection.isInstance(item, Containment.$type);
 }
 
-export type ContextMember = Aggregate | Channel | Criterion | DomainService | EnumDecl | EventDecl | FilterDecl | ImplementsDecl | PayloadDecl | Projection | Repository | Retrieval | Seed | StampDecl | ValueObject | View | Workflow;
+export type ContextMember = Aggregate | Channel | Criterion | DomainService | EnumDecl | EventDecl | FilterDecl | ImplementsDecl | PayloadDecl | PolicyDecl | Projection | Repository | Retrieval | Seed | StampDecl | ValueObject | View | Workflow;
 
 export const ContextMember = {
     $type: 'ContextMember'
@@ -1840,10 +1845,10 @@ export function isLoadSegment(item: unknown): item is LoadSegment {
     return reflection.isInstance(item, LoadSegment.$type);
 }
 
-export type LooseName = 'action' | 'aggregates' | 'api' | 'application' | 'asc' | 'await' | 'bind' | 'body' | 'by' | 'cache' | 'canonical' | 'command' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'crossTenant' | 'dataSources' | 'desc' | 'description' | 'design' | 'directoryLayout' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'filter' | 'foundation' | 'framework' | 'handle' | 'id' | 'ignoring' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'loads' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'of' | 'ogImage' | 'option' | 'or' | 'page' | 'paged' | 'parent' | 'payload' | 'permissions' | 'persistence' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'route' | 'runtime' | 'schema' | 'secret' | 'section' | 'service' | 'snapshot' | 'sort' | 'stamp' | 'state' | 'static' | 'store' | 'tablePrefix' | 'targets' | 'tenancy' | 'title' | 'token' | 'transactional' | 'transport' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | string;
+export type LooseName = 'action' | 'aggregates' | 'allow' | 'api' | 'application' | 'asc' | 'await' | 'bind' | 'body' | 'by' | 'cache' | 'canonical' | 'command' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'crossTenant' | 'dataSources' | 'deep' | 'desc' | 'description' | 'design' | 'directoryLayout' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'filter' | 'foundation' | 'framework' | 'global' | 'handle' | 'id' | 'ignoring' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'loads' | 'local' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'of' | 'ogImage' | 'option' | 'or' | 'page' | 'paged' | 'parent' | 'payload' | 'permissions' | 'persistence' | 'policy' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'route' | 'runtime' | 'schema' | 'secret' | 'section' | 'service' | 'snapshot' | 'sort' | 'stamp' | 'state' | 'static' | 'store' | 'tablePrefix' | 'targets' | 'tenancy' | 'title' | 'token' | 'transactional' | 'transport' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | string;
 
 export function isLooseName(item: unknown): item is LooseName {
-    return item === 'of' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'store' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'await' || item === 'by' || item === 'handle' || item === 'cache' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || item === 'urlStyle' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'foundation' || item === 'application' || item === 'persistence' || item === 'directoryLayout' || item === 'transport' || item === 'runtime' || item === 'transactional' || item === 'retrieval' || item === 'sort' || item === 'loads' || item === 'asc' || item === 'desc' || item === 'action' || item === 'ignoring' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'tenancy' || item === 'crossTenant' || item === 'parent' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'of' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'store' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'await' || item === 'by' || item === 'handle' || item === 'cache' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || item === 'urlStyle' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'foundation' || item === 'application' || item === 'persistence' || item === 'directoryLayout' || item === 'transport' || item === 'runtime' || item === 'transactional' || item === 'retrieval' || item === 'sort' || item === 'loads' || item === 'asc' || item === 'desc' || item === 'action' || item === 'ignoring' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'tenancy' || item === 'crossTenant' || item === 'parent' || item === 'policy' || item === 'allow' || item === 'local' || item === 'deep' || item === 'global' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export interface LValue extends langium.AstNode {
@@ -2535,6 +2540,40 @@ export function isPlatform(item: unknown): item is Platform {
     return item === 'dotnet' || item === 'node' || item === 'react' || item === 'svelte' || item === 'vue' || item === 'angular' || item === 'static' || item === 'elixir' || item === 'python' || item === 'java' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
 }
 
+export interface PolicyDecl extends langium.AstNode {
+    readonly $container: BoundedContext;
+    readonly $type: 'PolicyDecl';
+    name?: string;
+    rules: Array<PolicyReadRule>;
+}
+
+export const PolicyDecl = {
+    $type: 'PolicyDecl',
+    name: 'name',
+    rules: 'rules'
+} as const;
+
+export function isPolicyDecl(item: unknown): item is PolicyDecl {
+    return reflection.isInstance(item, PolicyDecl.$type);
+}
+
+export interface PolicyReadRule extends langium.AstNode {
+    readonly $container: PolicyDecl;
+    readonly $type: 'PolicyReadRule';
+    level: ReadLevel;
+    target: string;
+}
+
+export const PolicyReadRule = {
+    $type: 'PolicyReadRule',
+    level: 'level',
+    target: 'target'
+} as const;
+
+export function isPolicyReadRule(item: unknown): item is PolicyReadRule {
+    return reflection.isInstance(item, PolicyReadRule.$type);
+}
+
 export interface PostfixChain extends langium.AstNode {
     readonly $container: AssignOrCallStmt | AwaitExpr | BinaryChain | BindEntry | BodyProp | BuilderEntry | CallArg | Component | Criterion | DerivedProp | EmitField | ExpectStmt | FilterDecl | FindDecl | ForStmt | FunctionDecl | IfLetStmt | Invariant | LValue | Lambda | LayoutNamedSlot | LetStmt | ListLit | MatchArm | MatchExpr | MatchStmt | MenuLinkProp | MenuMetaEntry | ObjectFieldInit | OnDecl | Operation | ParenExpr | PostfixChain | PreconditionStmt | PrimitiveConversion | ProjectionOn | Property | RequirementProp | RequiresProp | RequiresStmt | Retrieval | RetrievalLiteral | ReturnStmt | StateField | TernaryExpr | TitleProp | UnaryExpr | VariantArm | View | WorkflowCreateDecl;
     readonly $type: 'PostfixChain';
@@ -2700,6 +2739,12 @@ export type QualifiedPageName = string;
 
 export function isQualifiedPageName(item: unknown): item is QualifiedPageName {
     return typeof item === 'string';
+}
+
+export type ReadLevel = 'deep' | 'global' | 'local';
+
+export function isReadLevel(item: unknown): item is ReadLevel {
+    return item === 'local' || item === 'deep' || item === 'global';
 }
 
 export interface Repository extends langium.AstNode {
@@ -3183,7 +3228,7 @@ export interface Store extends langium.AstNode {
     readonly $container: Ui;
     readonly $type: 'Store';
     decls: Array<StoreDecl>;
-    lifetime?: string;
+    lifetime?: LooseName;
     name: string;
 }
 
@@ -4061,6 +4106,8 @@ export type DddAstType = {
     PayloadDecl: PayloadDecl
     PermissionDecl: PermissionDecl
     PermissionsBlock: PermissionsBlock
+    PolicyDecl: PolicyDecl
+    PolicyReadRule: PolicyReadRule
     PostfixChain: PostfixChain
     PostfixSuffix: PostfixSuffix
     PreconditionStmt: PreconditionStmt
@@ -5907,6 +5954,33 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                     name: PermissionsBlock.decls,
                     defaultValue: [],
                     optional: true
+                }
+            },
+            superTypes: []
+        },
+        PolicyDecl: {
+            name: PolicyDecl.$type,
+            properties: {
+                name: {
+                    name: PolicyDecl.name,
+                    optional: true
+                },
+                rules: {
+                    name: PolicyDecl.rules,
+                    defaultValue: [],
+                    optional: true
+                }
+            },
+            superTypes: [ContextMember.$type]
+        },
+        PolicyReadRule: {
+            name: PolicyReadRule.$type,
+            properties: {
+                level: {
+                    name: PolicyReadRule.level
+                },
+                target: {
+                    name: PolicyReadRule.target
                 }
             },
             superTypes: []
