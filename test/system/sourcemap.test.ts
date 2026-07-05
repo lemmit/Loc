@@ -5,12 +5,11 @@ import { parseValid } from "../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // Round-trip test for the `--sourcemap` artifact (docs/plans/
-// source-map-debug-kickoff.md §5/§6).  Hono is the only backend bracketed
-// in this slice; the fan-out slices append their platform name here as
-// they land the emit bracket for it.
+// source-map-debug-kickoff.md §5/§6).  All five backends carry the emit
+// bracket, so each must map at least one file per aggregate.
 // ---------------------------------------------------------------------------
 
-const BRACKETED: string[] = ["node"];
+const BRACKETED: string[] = ["node", "dotnet", "elixir", "python", "java"];
 
 const AGGREGATE_NAMES = ["Order", "Product"];
 

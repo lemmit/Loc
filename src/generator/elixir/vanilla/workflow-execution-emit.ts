@@ -81,6 +81,7 @@ import { classifyDomainServiceTier } from "../../../ir/util/domain-service-tier.
 import { resolveWorkflowIsolation } from "../../../ir/util/resolve-datasource.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
+import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
 import type { ApiRoute } from "../api-emit.js";
 import { inlineMutatingServiceCall } from "../domain-service-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
@@ -104,6 +105,7 @@ export function emitVanillaWorkflowExecution(
   out: Map<string, string>,
   resourceModules: Map<string, string> = new Map(),
   sys?: SystemIR,
+  sourcemap?: SourceMapRecorder,
 ): VanillaWorkflowExecResult {
   if (ctx.workflows.length === 0) return { routes: [], commandWorkflows: [] };
 
@@ -123,10 +125,10 @@ export function emitVanillaWorkflowExecution(
   // gets one controller with all actions rather than per-context overwrites.
   for (const wf of commandWorkflows) {
     const wfSnake = snake(wf.name);
-    out.set(
-      `lib/${appSnake}/${ctxSnake}/workflows/${wfSnake}.ex`,
-      renderWorkflowModule(appModule, ctxModule, wf, resourceModules, ctx, sys),
-    );
+    const path = `lib/${appSnake}/${ctxSnake}/workflows/${wfSnake}.ex`;
+    const content = renderWorkflowModule(appModule, ctxModule, wf, resourceModules, ctx, sys);
+    out.set(path, content);
+    sourcemap?.file(path, content, wf.origin, `${ctx.name}.${wf.name}`);
   }
 
   for (const wf of commandWorkflows) {

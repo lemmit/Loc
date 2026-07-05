@@ -67,6 +67,7 @@ const elixirPlatform: PlatformSurface = {
     migrations,
     emitTrace,
     styleAdapter,
+    sourcemap,
   }): Map<string, string> {
     // Forward the deployable's resolved style adapter (D-REALIZATION-AXES
     // `application:`) into the generator's EmitCtx; the layout axis has no
@@ -78,6 +79,7 @@ const elixirPlatform: PlatformSurface = {
       migrations,
       emitTrace,
       styleAdapter,
+      sourcemap,
     });
   },
   composeService({ slug }): ComposeServiceShape {

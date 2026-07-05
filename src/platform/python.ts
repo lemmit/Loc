@@ -46,13 +46,21 @@ const pythonPlatform: PlatformSurface = {
   // `_to_wire`; a user find named `all` merges with the auto reader
   // the same way Hono's does).
   reservedRepositoryFindNames: new Set(["save", "findById", "getById", "delete"]),
-  emitProject({ contexts, deployable, sys, migrations, emitTrace }): Map<string, string> {
+  emitProject({
+    contexts,
+    deployable,
+    sys,
+    migrations,
+    emitTrace,
+    sourcemap,
+  }): Map<string, string> {
     return generatePythonForContexts({
       contexts,
       deployable,
       sys,
       migrations,
       emitTrace,
+      sourcemap,
     });
   },
   composeService({ slug }): ComposeServiceShape {

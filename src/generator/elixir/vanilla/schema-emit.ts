@@ -27,6 +27,7 @@ import {
 } from "../../../ir/util/resolve-datasource.js";
 import { isValueCollectionType } from "../../../ir/util/value-collections.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
 import { isVanillaDocAgg, renderDocSchema } from "./document-emit.js";
 import { renderAggregatePureCore } from "./domain-core-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
@@ -64,6 +65,7 @@ export function emitVanillaSchemas(
   ctx: BoundedContextIR,
   out: Map<string, string>,
   sys?: SystemIR,
+  sourcemap?: SourceMapRecorder,
 ): void {
   const ctxModule = upperFirst(ctx.name);
   // Per-context enum-lookup table so the schema can pull each enum's
@@ -100,10 +102,10 @@ export function emitVanillaSchemas(
     // byte-identical.  Rendered from the IR's synthesized `inspect` member, so
     // the redaction contract matches the TS/.NET backends exactly.
     const inspectImpl = renderInspectImpl(appModule, ctxModule, agg as EnrichedAggregateIR, ctx);
-    out.set(
-      `lib/${appSnake}/${ctxSnake}/${aggSnake}.ex`,
-      inspectImpl ? `${schemaModule}\n${inspectImpl}` : schemaModule,
-    );
+    const schemaPath = `lib/${appSnake}/${ctxSnake}/${aggSnake}.ex`;
+    const schemaContent = inspectImpl ? `${schemaModule}\n${inspectImpl}` : schemaModule;
+    out.set(schemaPath, schemaContent);
+    sourcemap?.file(schemaPath, schemaContent, agg.origin, `${ctx.name}.${agg.name}`);
     // Each entity part (`entity Line { … }`) becomes either an `embedded_schema`
     // module the aggregate `embeds_many`/`embeds_one`s (stored inline as the
     // parent's jsonb column) on an `shape(embedded)` aggregate, OR a real

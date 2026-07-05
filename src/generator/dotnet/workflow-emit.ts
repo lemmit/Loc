@@ -24,6 +24,7 @@ import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
 import { workflowCorrIdValueType } from "../../ir/util/workflow-instances.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { renderDotnetLogCall } from "../_obs/render-dotnet.js";
+import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { renderWorkflowStmts, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
 import { dotnetResourceAdapterFor, resourceClassName } from "./adapters/resource-clients.js";
 import {
@@ -103,10 +104,11 @@ export function emitWorkflows(
   ctx: EnrichedBoundedContextIR,
   ns: string,
   out: Map<string, string>,
-  options?: { routePrefix?: string; sys?: SystemIR },
+  options?: { routePrefix?: string; sys?: SystemIR; sourcemap?: SourceMapRecorder },
 ): void {
   if (ctx.workflows.length === 0) return;
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
+  const sourcemap = options?.sourcemap;
 
   // Only command-triggered workflows get the HTTP command path (Request /
   // Command / Handler + a controller POST).  An event-triggered-only workflow
@@ -117,15 +119,19 @@ export function emitWorkflows(
   const commandWfs = ctx.workflows.filter(emitsCommandRoute);
   for (const wf of commandWfs) {
     const usage = analyseWorkflow(wf, aggsByName);
-    out.set(
-      `Application/Workflows/${upperFirst(wf.name)}Request.cs`,
-      renderRequestDto(wf, ctx, ns),
-    );
-    out.set(`Application/Workflows/${upperFirst(wf.name)}Command.cs`, renderCommand(wf, ns));
-    out.set(
-      `Application/Workflows/${upperFirst(wf.name)}Handler.cs`,
-      renderHandler(wf, usage, ns, ctx, options?.sys),
-    );
+    const construct = `${ctx.name}.${wf.name}`;
+    const requestPath = `Application/Workflows/${upperFirst(wf.name)}Request.cs`;
+    const requestContent = renderRequestDto(wf, ctx, ns);
+    out.set(requestPath, requestContent);
+    sourcemap?.file(requestPath, requestContent, wf.origin, construct);
+    const commandPath = `Application/Workflows/${upperFirst(wf.name)}Command.cs`;
+    const commandContent = renderCommand(wf, ns);
+    out.set(commandPath, commandContent);
+    sourcemap?.file(commandPath, commandContent, wf.origin, construct);
+    const handlerPath = `Application/Workflows/${upperFirst(wf.name)}Handler.cs`;
+    const handlerContent = renderHandler(wf, usage, ns, ctx, options?.sys);
+    out.set(handlerPath, handlerContent);
+    sourcemap?.file(handlerPath, handlerContent, wf.origin, construct);
   }
   if (commandWfs.length > 0) {
     out.set(

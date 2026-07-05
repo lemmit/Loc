@@ -1,6 +1,7 @@
 import type { DeployableIR, EnrichedBoundedContextIR, SystemIR } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import type { StyleAdapter } from "../_adapters/index.js";
+import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { generateVanillaElixirProject } from "./vanilla/index.js";
 
 // ---------------------------------------------------------------------------
@@ -50,6 +51,12 @@ export interface GenerateElixirArgs {
    *  Absent in legacy single-context mode → falls back to the
    *  `layeredStyleAdapter`. */
   styleAdapter?: StyleAdapter;
+  /** Generate-time source-map recorder (`--sourcemap`).  Threaded straight
+   *  through to the vanilla orchestrator, which records whole-file
+   *  construct regions as it places each per-aggregate/-view/-workflow/-page
+   *  artifact.  Absent → every recorder call is a no-op (see
+   *  `SourceMapRecorder.file`). */
+  sourcemap?: SourceMapRecorder;
 }
 
 export function generateElixirProject(args: GenerateElixirArgs): Map<string, string> {

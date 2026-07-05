@@ -57,12 +57,13 @@ const javaPlatform: PlatformSurface = {
     emitTrace,
     styleAdapter,
     layoutAdapter,
+    sourcemap,
   }): Map<string, string> {
     return generateJavaForContexts(
       contexts,
       deployable.name,
       { deployable, sys, migrations, styleAdapter, layoutAdapter },
-      { emitTrace },
+      { emitTrace, sourcemap },
     );
   },
   composeService({ slug }): ComposeServiceShape {
