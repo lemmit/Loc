@@ -321,6 +321,17 @@ hash out of the domain vocabulary.
 - **Phoenix**: idiomatic schemaless-changeset + `new/1` ✔ (dinged only for the
   dropped derived member, part of S12).
 
+> **✅ FIXED** — Python VOs are `@dataclass(frozen=True)` (field-wise
+> `__eq__`/`__hash__`, `FrozenInstanceError` on mutation, invariants in
+> `__post_init__`); Hono VOs gain a type-driven field-wise `equals()` and
+> throw `DomainError` on invariant violation.  Fixing it surfaced (and
+> closed) three latent compile breaks on the never-tsc-gated money/VO-nesting
+> shapes — the shallow money check couldn't see through a VO name ref
+> (→ `aggregateUsesMoneyDeep`), and the VO-in-VO hydrate read one
+> non-existent column instead of recursing — now pinned by
+> `test/e2e/fixtures/ts-build/money-vo.ddd` in the `LOOM_TS_BUILD` corpus
+> plus `test/generator/typescript/value-object-semantics.test.ts`.
+
 ### S10 · The `extern` escape hatch dissolves encapsulation aggregate-wide (P2 — Hono, .NET)
 
 One `extern` operation widens **every** field: Hono emits public

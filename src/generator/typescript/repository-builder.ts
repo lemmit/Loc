@@ -6,7 +6,7 @@ import type {
   RepositoryIR,
 } from "../../ir/types/loom-ir.js";
 import {
-  aggregateUsesMoney,
+  aggregateUsesMoneyDeep,
   aggregateUsesPrincipalContextFilter,
   findUsesCurrentUser,
   viewUsesCurrentUser,
@@ -239,7 +239,7 @@ export function buildRepositoryFile(
     }
   }
 
-  const repoUsesMoney = aggregateUsesMoney(agg);
+  const repoUsesMoney = aggregateUsesMoneyDeep(agg, ctx.valueObjects);
 
   return lines(
     "// Auto-generated.  Do not edit by hand.",

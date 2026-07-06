@@ -14,7 +14,6 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { isTphConcrete } from "../../ir/util/inheritance.js";
 import { isValueCollectionType, type ValueCollectionIR } from "../../ir/util/value-collections.js";
-import { valueObjectColumnNames } from "./emit.js";
 import { isRefCollection } from "./repository-associations-builder.js";
 
 export function hydrateRootExpr(
@@ -130,6 +129,7 @@ function hydrateValueExpr(
   ctx: BoundedContextIR,
   optional: boolean,
   forceNonNull = false,
+  voSubfield = false,
 ): string {
   // For a TPH concrete's required column (nullable in the shared table, but
   // guaranteed present by the `kind` filter), assert non-null on read.
@@ -137,7 +137,7 @@ function hydrateValueExpr(
   const bang = forceNonNull && !optional ? "!" : "";
   const colExpr = `${rowVar}.${fieldName}${bang}`;
   if (t.kind === "optional") {
-    return `(${rowVar}.${fieldName} == null ? null : ${hydrateValueExpr(fieldName, t.inner, rowVar, ctx, true, forceNonNull)})`;
+    return `(${rowVar}.${fieldName} == null ? null : ${hydrateValueExpr(fieldName, t.inner, rowVar, ctx, true, forceNonNull, voSubfield)})`;
   }
   if (t.kind === "primitive") {
     // decimal hydrates lossy through JS `number` — money does NOT
@@ -153,25 +153,42 @@ function hydrateValueExpr(
     return `Ids.${t.targetName}Id(${colExpr})`;
   }
   if (t.kind === "enum") {
-    return `${colExpr} as ${t.name}`;
+    // A VO subfield's pgEnum column already carries the literal-union type,
+    // and repositories don't import enum names for VO subfields — casting
+    // would reference an unimported type name (tsc TS2304).
+    return voSubfield ? colExpr : `${colExpr} as ${t.name}`;
   }
   if (t.kind === "valueobject") {
-    const cols = valueObjectColumnNames(fieldName, t.name, ctx);
-    const args = cols
-      .map((c) => primitiveColumnRead(`${rowVar}.${c.columnName}${bang}`, c.type))
+    // Recurse per subfield: a VO-TYPED subfield flattens to doubly-prefixed
+    // columns (`offer_price_amount`), so its value reconstructs via a nested
+    // `new <Vo>(...)`.  The schema, save, and wire sides already recurse —
+    // this arm used to read a single non-existent column (`row.offer_price`),
+    // a latent tsc break on the VO-in-VO shape.
+    const vo = ctx.valueObjects.find((v) => v.name === t.name);
+    const args = (vo?.fields ?? [])
+      .map((f) =>
+        hydrateValueExpr(`${fieldName}_${f.name}`, f.type, rowVar, ctx, false, forceNonNull, true),
+      )
       .join(", ");
     if (optional) {
-      return `(${rowVar}.${cols[0]!.columnName} == null ? null : new ${t.name}(${args}))`;
+      return `(${rowVar}.${firstLeafColumn(fieldName, t.name, ctx)} == null ? null : new ${t.name}(${args}))`;
     }
     return `new ${t.name}(${args})`;
   }
   return colExpr;
 }
 
-function primitiveColumnRead(expr: string, t: TypeIR): string {
-  if (t.kind === "primitive" && t.name === "decimal") return `Number(${expr})`;
-  if (t.kind === "primitive" && t.name === "money") return `new Decimal(${expr})`;
-  return expr;
+/** The first LEAF (non-VO) flattened column of a VO field — the null probe
+ *  an optional VO field's hydrate guards on.  Recurses through VO-typed
+ *  first subfields (`offer` → `offer_price` → `offer_price_amount`). */
+function firstLeafColumn(fieldName: string, voName: string, ctx: BoundedContextIR): string {
+  const vo = ctx.valueObjects.find((v) => v.name === voName);
+  const f = vo?.fields[0];
+  if (!f) return fieldName;
+  const inner = f.type.kind === "optional" ? f.type.inner : f.type;
+  return inner.kind === "valueobject"
+    ? firstLeafColumn(`${fieldName}_${f.name}`, inner.name, ctx)
+    : `${fieldName}_${f.name}`;
 }
 
 /** Variant of `hydrateRootExpr` where ALL containments

@@ -1,0 +1,26 @@
+// Compile-gate fixture for the money-inside-VO shape (S9 follow-through).
+// A `money` field nested in a value object renders as decimal.js `Decimal`
+// in the VO class, the repository hydrate (`new Decimal(row.…)`), and the
+// route's zod schema (`moneySchema`) — three files whose Decimal/moneySchema
+// imports key on the VO-registry-aware `aggregateUsesMoneyDeep` (the shallow
+// check saw only the VO name ref, leaving unresolved references: a latent
+// tsc break this fixture pins closed).  Also compiles the emitted field-wise
+// `equals()` (money → Decimal.equals, nested VO recursion, optional guard).
+
+context Listings {
+  valueobject Money {
+    amount: money
+    currency: string
+    invariant currency.length == 3
+  }
+
+  valueobject Offer {
+    price: Money
+    label: string?
+  }
+
+  aggregate Ad ids guid {
+    code: string
+    offer: Offer
+  }
+}

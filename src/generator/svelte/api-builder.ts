@@ -6,7 +6,7 @@ import {
 } from "../../ir/stdlib/generics.js";
 import { unionReturn } from "../../ir/stdlib/unions.js";
 import {
-  aggregateUsesMoney,
+  aggregateUsesMoneyDeep,
   type BoundedContextIR,
   type EnrichedAggregateIR,
   type RepositoryIR,
@@ -52,7 +52,7 @@ export function buildSvelteApiModule(
     `import { createMutation, createQuery, useQueryClient } from "@tanstack/svelte-query";`,
   );
   lines.push(`import { api } from "./client";`);
-  if (aggregateUsesMoney(agg)) {
+  if (aggregateUsesMoneyDeep(agg, ctx.valueObjects)) {
     lines.push(`import { moneySchema } from "../schemas";`);
   }
   lines.push("");

@@ -61,6 +61,10 @@ describe.skipIf(!ENABLED)(
       // Drizzle `and(...)` chain across repository finds + a view read. Pins that
       // the bypassed/`*`/normal read variants all type-check.
       "test/e2e/fixtures/ts-build/filter-bypass.ddd",
+      // money-inside-VO: Decimal/moneySchema imports key on the VO-registry-
+      // aware deep money check (S9 follow-through) — pins the previously
+      // ungated latent tsc break + the emitted field-wise VO equals().
+      "test/e2e/fixtures/ts-build/money-vo.ddd",
     ])("%s — `ddd generate ts` output type-checks + tsup-bundles", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-"));
       try {

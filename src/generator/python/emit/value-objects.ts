@@ -68,6 +68,7 @@ export function renderPyEnumsAndValueObjects(ctx: BoundedContextIR): string {
     "",
     exprImports.has("math") ? "import math" : null,
     exprImports.has("re") ? "import re" : null,
+    ctx.valueObjects.length > 0 ? "from dataclasses import dataclass" : null,
     usesDatetime ? "from datetime import UTC, datetime" : null,
     usesDecimal ? "from decimal import Decimal" : null,
     ctx.enums.length > 0 ? "from enum import StrEnum" : null,
@@ -87,8 +88,14 @@ function renderPyEnum(e: EnumIR): string[] {
 }
 
 function renderPyValueObject(v: ValueObjectIR): string[] {
-  const params = v.fields.map((f) => `${snake(f.name)}: ${renderPyType(f.type)}`);
-  const assigns = v.fields.map((f) => `        self.${snake(f.name)} = ${snake(f.name)}`);
+  // A frozen dataclass gives the VO its VALUE semantics (S9): generated
+  // `__eq__`/`__hash__` compare field-wise (identity equality was the bug),
+  // and post-construction mutation (`slug.value = ""`, which bypassed the
+  // invariants) raises FrozenInstanceError.  The dataclass `__init__` keeps
+  // the declaration-order positional/keyword signature the hand-rolled ctor
+  // had, so every construction site is unchanged; invariants move to
+  // `__post_init__` (the events emitter's pattern).
+  const fields = v.fields.map((f) => `    ${snake(f.name)}: ${renderPyType(f.type)}`);
   const invariants = v.invariants.flatMap((inv) => {
     const cond = inv.guard
       ? `(${renderPyExpr(inv.guard, VO_CTX)}) and not (${renderPyExpr(inv.expr, VO_CTX)})`
@@ -116,10 +123,10 @@ function renderPyValueObject(v: ValueObjectIR): string[] {
   return [
     "",
     "",
+    "@dataclass(frozen=True)",
     `class ${v.name}:`,
-    `    def __init__(self, ${params.join(", ")}) -> None:`,
-    ...assigns,
-    ...invariants,
+    ...fields,
+    ...(invariants.length > 0 ? ["", "    def __post_init__(self) -> None:", ...invariants] : []),
     ...derived,
     ...fns,
   ];

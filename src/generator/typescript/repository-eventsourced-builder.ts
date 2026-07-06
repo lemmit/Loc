@@ -5,7 +5,7 @@ import type {
   FindIR,
   RepositoryIR,
 } from "../../ir/types/loom-ir.js";
-import { aggregateUsesMoney, findUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { aggregateUsesMoneyDeep, findUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
@@ -181,7 +181,7 @@ export function buildEventSourcedRepositoryFile(
 
   return lines(
     "// Auto-generated.  Do not edit by hand.",
-    aggregateUsesMoney(agg) && `import Decimal from "decimal.js";`,
+    aggregateUsesMoneyDeep(agg, ctx.valueObjects) && `import Decimal from "decimal.js";`,
     `import type { NodePgDatabase } from "drizzle-orm/node-postgres";`,
     `import { eq } from "drizzle-orm";`,
     `import * as schema from "../schema";`,

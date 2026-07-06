@@ -41,7 +41,7 @@ import type {
   ValueObjectIR,
 } from "../../../ir/types/loom-ir.js";
 import {
-  aggregateUsesMoney,
+  aggregateUsesMoneyDeep,
   findUsesCurrentUser,
   operationIsGuarded,
   operationUsesCurrentUser,
@@ -135,7 +135,7 @@ export function buildRoutesFile(
   // (db/audit-stamp.ts), reading the principal from the ambient request context.
   const lines: string[] = [];
   lines.push("// Auto-generated.  Do not edit by hand.");
-  if (aggregateUsesMoney(agg)) {
+  if (aggregateUsesMoneyDeep(agg, ctx.valueObjects)) {
     // Money-bearing routes consume the parsed `Decimal` via Zod's
     // type inference through `moneySchema`; the route file itself
     // never names `Decimal` directly, so a `moneySchema` import is

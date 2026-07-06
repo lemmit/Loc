@@ -6,7 +6,7 @@ import type {
   TypeIR,
 } from "../../ir/types/loom-ir.js";
 import {
-  aggregateUsesMoney,
+  aggregateUsesMoneyDeep,
   aggregateUsesPrincipalContextFilter,
   findUsesCurrentUser,
 } from "../../ir/types/loom-ir.js";
@@ -205,7 +205,7 @@ export function buildEmbeddedRepositoryFile(
 
   return lines(
     "// Auto-generated.  Do not edit by hand.",
-    aggregateUsesMoney(agg) && `import Decimal from "decimal.js";`,
+    aggregateUsesMoneyDeep(agg, ctx.valueObjects) && `import Decimal from "decimal.js";`,
     `import type { NodePgDatabase } from "drizzle-orm/node-postgres";`,
     `import { ${usedDrizzleOps.join(", ")} } from "drizzle-orm";`,
     `import * as schema from "../schema";`,
