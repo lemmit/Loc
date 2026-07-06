@@ -44,7 +44,16 @@ system SmokeMap {
   storage primary { type: postgres }
   resource ordersState { for: Orders, kind: state, use: primary }
   api SalesApi from Sales
+  ui WebApp {
+    area Back {
+      page OrderBoard {
+        route: "/board"
+        body: Text { "board" }
+      }
+    }
+  }
   deployable honoApi { platform: node contexts: [Orders] dataSources: [ordersState] serves: SalesApi port: 3000 }
+  deployable webApp { platform: react targets: honoApi ui: WebApp port: 3001 }
 }
 `;
 
@@ -161,6 +170,24 @@ describe("DddImplementationProvider (textDocument/implementation)", () => {
         position: pos,
       });
       expect(links ?? []).toEqual([]);
+    }
+
+    // (d) M9 end-to-end: cursor inside the HAND-WRITTEN page — the derived
+    // area-qualified id (snake()d segments) must actually hit the region
+    // the react frontend recorded, landing on the emitted page file. This
+    // automates the manual probe that caught the Back vs back casing
+    // divergence during M9.
+    {
+      const pos = positionOf(SOURCE, 'route: "/board"');
+      const links = await provider.getImplementation(doc, {
+        textDocument: { uri: doc.textDocument.uri },
+        position: pos,
+      });
+      expect(links, "expected locations for the hand-written page position").toBeDefined();
+      expect(links!.length).toBeGreaterThan(0);
+      for (const link of links!) {
+        expect(link.targetUri.endsWith("web_app/src/pages/back/order_board.tsx")).toBe(true);
+      }
     }
   });
 
