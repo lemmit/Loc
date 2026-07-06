@@ -1,4 +1,5 @@
 import type { ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
+import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
   isDeepScopeFilter,
@@ -6,6 +7,7 @@ import {
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
+import type { DurationUnit } from "../../util/temporal.js";
 
 // ---------------------------------------------------------------------------
 // Find-filter → JPQL renderer.  Spring Data derived method names can't
@@ -154,6 +156,12 @@ function renderLiteral(lit: string, value: string): string {
   if (lit === "string") return `'${value.replace(/'/g, "''")}'`;
   if (lit === "null") return "null";
   if (lit === "bool") return value;
+  // Loom `now()` — HQL's `instant` (the current instant, java.time.Instant;
+  // Hibernate 6+ grammar `currentDateTimeFunction`), matching the `Instant`
+  // this backend maps `datetime` to.  Renders `current_timestamp` on the
+  // SQL side.  (Before A5 this fell through to the bare IR value `now`,
+  // which no HQL grammar accepts — temporal where-clauses made it live.)
+  if (lit === "now") return "instant";
   // ints / longs / decimals / money are numeric literals in JPQL.
   return value;
 }
@@ -173,7 +181,38 @@ function renderRef(e: Extract<ExprIR, { kind: "ref" }>, ctx: JpqlCtx): string {
   }
 }
 
+// HQL duration-unit keyword per Loom duration unit (A5 temporal) — the
+// `<magnitude> <unit>` "to duration" form of Hibernate 6+'s HQL grammar
+// (`toDurationExpression: expression datetimeField`), which translates to
+// native SQL interval arithmetic on Postgres.  `month` is calendar-correct
+// there (`timestamptz + interval '1 month'`), so the SQL side needs no
+// calendar special case.
+const HQL_DURATION_UNIT: Record<DurationUnit, string> = {
+  days: "day",
+  hours: "hour",
+  minutes: "minute",
+  months: "month",
+};
+
 function renderBinary(e: Extract<ExprIR, { kind: "binary" }>, ctx: JpqlCtx): string {
+  // A5 temporal — `datetime ± days/hours/minutes/months(n)` renders as HQL
+  // duration arithmetic: `(e.dueDate + 30 day)`.  Works on BOTH sides of a
+  // comparison (a column path navigates, a `:param` datetime binds, and the
+  // amount likewise binds or navigates).  Only the DIRECT constructor
+  // operand form reaches here (paren-transparent) — exactly what
+  // `firstNonQueryableNode` admits; the commuted `days(2) + q` normalizes
+  // to `(:q + 2 day)` (addition commutes).  Loom `datetime - datetime` in
+  // where-position stays rejected by the gate, so no arm is needed for it.
+  if (e.op === "+" || e.op === "-") {
+    const rightDur = durationCtorOperand(e.right);
+    const leftDur = e.op === "+" ? durationCtorOperand(e.left) : null;
+    const dur = rightDur ?? leftDur;
+    const other = rightDur ? e.left : leftDur ? e.right : null;
+    if (dur && other && !durationCtorOperand(other)) {
+      const amount = render(dur.amount, ctx);
+      return `(${render(other, ctx)} ${e.op} ${amount} ${HQL_DURATION_UNIT[dur.unit]})`;
+    }
+  }
   const isNull = (x: ExprIR): boolean => x.kind === "literal" && x.lit === "null";
   if ((e.op === "==" || e.op === "!=") && (isNull(e.left) || isNull(e.right))) {
     const operand = isNull(e.left) ? e.right : e.left;

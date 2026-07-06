@@ -50,7 +50,6 @@ function renderJavaOptionalTwinMatch(
   m: Extract<ExprIR, { kind: "match" }>,
   renderCtx: JavaRenderContext,
 ): string {
-  // biome-ignore lint/style/noNonNullAssertion: guarded at the call site (subject ref present)
   const subject = renderJavaExpr(m.subject!, renderCtx);
   const success = m.variantArms.find((a) => !a.isError);
   const error = m.variantArms.find((a) => a.isError);
