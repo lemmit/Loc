@@ -20,6 +20,20 @@ function inputLabelForms(
   };
 }
 
+/** Read an optional `error:` named arg as a rendered expression string.
+ *  The expression is walked in the page/component scope, so it can read
+ *  `state` / `derived` (`error: passwordsMatch ? "" : "Passwords must
+ *  match"`) — the inline validation message the pack renders in its
+ *  native error slot.  Returns undefined when no `error:` was given.
+ *  This is the ergonomic seam that lets a `state`-composed form show a
+ *  dependent-validation message inline, instead of a sibling `Text`
+ *  gated by `match`. */
+function inputErrorExpr(call: ExprIR & { kind: "call" }, ctx: WalkContext): string | undefined {
+  const arg = namedArgValue(call, "error");
+  if (!arg) return undefined;
+  return emitExpr(arg, ctx);
+}
+
 /** Read a `bind:` named arg as a state-field name.
  *  Returns the field name when the arg is a `ref` to a known
  *  state field (and marks `usesState` on the context); otherwise
@@ -53,12 +67,15 @@ export function emitField(
   const { labelAttr, labelText } = inputLabelForms(call, ctx);
   const bind = stateBindArg(call, "bind", ctx);
   const setter = bind !== undefined ? "set" + bind[0]!.toUpperCase() + bind.slice(1) : undefined;
+  const error = inputErrorExpr(call, ctx);
   return renderPrimitive(ctx, "primitive-field", {
     labelAttr,
     labelText,
     bind,
     setter,
     hasBind: bind !== undefined,
+    error,
+    hasError: error !== undefined,
     testidAttr: testidAttr(call, ctx),
   });
 }
@@ -73,12 +90,15 @@ export function emitToggle(
   const { labelAttr, labelText } = inputLabelForms(call, ctx);
   const bind = stateBindArg(call, "bind", ctx);
   const setter = bind !== undefined ? "set" + bind[0]!.toUpperCase() + bind.slice(1) : undefined;
+  const error = inputErrorExpr(call, ctx);
   return renderPrimitive(ctx, "primitive-toggle", {
     labelAttr,
     labelText,
     bind,
     setter,
     hasBind: bind !== undefined,
+    error,
+    hasError: error !== undefined,
     testidAttr: testidAttr(call, ctx),
   });
 }
@@ -96,12 +116,15 @@ export function emitNumberField(
   const { labelAttr, labelText } = inputLabelForms(call, ctx);
   const bind = stateBindArg(call, "bind", ctx);
   const setter = bind !== undefined ? "set" + bind[0]!.toUpperCase() + bind.slice(1) : undefined;
+  const error = inputErrorExpr(call, ctx);
   return renderPrimitive(ctx, "primitive-number-field", {
     labelAttr,
     labelText,
     bind,
     setter,
     hasBind: bind !== undefined,
+    error,
+    hasError: error !== undefined,
     testidAttr: testidAttr(call, ctx),
   });
 }
@@ -117,12 +140,15 @@ export function emitMultilineField(
   const { labelAttr, labelText } = inputLabelForms(call, ctx);
   const bind = stateBindArg(call, "bind", ctx);
   const setter = bind !== undefined ? "set" + bind[0]!.toUpperCase() + bind.slice(1) : undefined;
+  const error = inputErrorExpr(call, ctx);
   return renderPrimitive(ctx, "primitive-multiline-field", {
     labelAttr,
     labelText,
     bind,
     setter,
     hasBind: bind !== undefined,
+    error,
+    hasError: error !== undefined,
     testidAttr: testidAttr(call, ctx),
   });
 }
@@ -140,6 +166,7 @@ export function emitSelectField(
   const { labelAttr, labelText } = inputLabelForms(call, ctx);
   const bind = stateBindArg(call, "bind", ctx);
   const setter = bind !== undefined ? "set" + bind[0]!.toUpperCase() + bind.slice(1) : undefined;
+  const error = inputErrorExpr(call, ctx);
   const optionsArg = namedArgValue(call, "options");
   const optionsExpr = optionsArg ? emitExpr(optionsArg, ctx) : "[]";
   return renderPrimitive(ctx, "primitive-select-field", {
@@ -148,6 +175,8 @@ export function emitSelectField(
     bind,
     setter,
     hasBind: bind !== undefined,
+    error,
+    hasError: error !== undefined,
     optionsExpr,
     testidAttr: testidAttr(call, ctx),
   });
@@ -164,12 +193,15 @@ export function emitPasswordField(
   const { labelAttr, labelText } = inputLabelForms(call, ctx);
   const bind = stateBindArg(call, "bind", ctx);
   const setter = bind !== undefined ? "set" + bind[0]!.toUpperCase() + bind.slice(1) : undefined;
+  const error = inputErrorExpr(call, ctx);
   return renderPrimitive(ctx, "primitive-password-field", {
     labelAttr,
     labelText,
     bind,
     setter,
     hasBind: bind !== undefined,
+    error,
+    hasError: error !== undefined,
     testidAttr: testidAttr(call, ctx),
   });
 }

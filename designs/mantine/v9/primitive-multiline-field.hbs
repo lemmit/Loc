@@ -1,1 +1,1 @@
-{{#if hasBind}}<Textarea label={{{labelAttr}}} value={{expr bind}} onChange={(e) => {{setter}}(e.currentTarget.value)}{{{testidAttr}}} />{{else}}<Textarea label={{{labelAttr}}}{{{testidAttr}}} />{{/if}}
+{{#if hasBind}}<Textarea label={{{labelAttr}}} value={{expr bind}} onChange={(e) => {{setter}}(e.currentTarget.value)}{{#if hasError}} error={ {{{error}}} }{{/if}}{{{testidAttr}}} />{{else}}<Textarea label={{{labelAttr}}}{{#if hasError}} error={ {{{error}}} }{{/if}}{{{testidAttr}}} />{{/if}}

@@ -207,7 +207,8 @@
         "named": [
           "Input",
           "FormLabel",
-          "FormControl"
+          "FormControl",
+          "FormErrorMessage"
         ]
       }
     ],
@@ -228,7 +229,8 @@
           "NumberInput",
           "NumberInputField",
           "FormLabel",
-          "FormControl"
+          "FormControl",
+          "FormErrorMessage"
         ]
       }
     ],
@@ -238,7 +240,8 @@
         "named": [
           "Input",
           "FormLabel",
-          "FormControl"
+          "FormControl",
+          "FormErrorMessage"
         ]
       }
     ],
@@ -568,7 +571,8 @@
         "named": [
           "FormControl",
           "FormLabel",
-          "Textarea"
+          "Textarea",
+          "FormErrorMessage"
         ]
       }
     ],
@@ -578,7 +582,8 @@
         "named": [
           "FormControl",
           "FormLabel",
-          "Select"
+          "Select",
+          "FormErrorMessage"
         ]
       }
     ],
