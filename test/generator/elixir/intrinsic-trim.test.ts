@@ -29,7 +29,7 @@ system Shop {
   storage pg { type: postgres }
   resource st { for: Catalog, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Catalog]
     dataSources: [st]
     serves: CatalogApi
@@ -90,7 +90,7 @@ describe("elixir generator — string.trim() intrinsic (stdlib A1 pilot)", () =>
         storage pg { type: postgres }
         resource st { for: Catalog, kind: state, use: pg }
         deployable api {
-          platform: elixir { foundation: vanilla }
+          platform: elixir
           contexts: [Catalog]
           dataSources: [st]
           serves: CatalogApi
@@ -125,7 +125,7 @@ system Shop {
   storage pg { type: postgres }
   resource st { for: Catalog, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Catalog]
     dataSources: [st]
     serves: CatalogApi
@@ -198,7 +198,7 @@ system Shop {
   storage pg { type: postgres }
   resource st { for: Catalog, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Catalog]
     dataSources: [st]
     serves: CatalogApi
