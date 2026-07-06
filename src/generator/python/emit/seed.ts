@@ -84,6 +84,7 @@ export function buildPySeedFile(
     `"""`,
     "",
     "import asyncio",
+    refersTo("math") ? "import math" : null,
     "import os",
     refersTo("datetime") ? "from datetime import UTC, datetime" : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,

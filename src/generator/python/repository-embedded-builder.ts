@@ -143,9 +143,10 @@ export function buildPyEmbeddedRepositoryFile(
   return lines(
     `"""${agg.name} embedded repository (shape(embedded)).  Auto-generated."""`,
     "",
+    refersTo("math") ? "import math" : null,
     refersTo("datetime") ? "from datetime import datetime" : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
-    refersTo("datetime") || refersTo("Decimal") ? "" : null,
+    refersTo("math") || refersTo("datetime") || refersTo("Decimal") ? "" : null,
     refersTo("cast") ? "from typing import cast" : null,
     "",
     saNames.length > 0 ? `from sqlalchemy import ${saNames.join(", ")}` : null,

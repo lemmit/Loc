@@ -234,11 +234,14 @@ export function buildPyRepositoryFile(
   return lines(
     `"""${agg.name} repository.  Auto-generated."""`,
     "",
+    refersTo("math") ? "import math" : null,
     refersTo("Sequence") ? "from collections.abc import Sequence" : null,
     hasProv || hasAudit ? "from datetime import UTC, datetime" : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
     hasProv || hasAudit ? "from uuid import uuid4" : null,
-    refersTo("Sequence") || refersTo("Decimal") || hasProv || hasAudit ? "" : null,
+    refersTo("math") || refersTo("Sequence") || refersTo("Decimal") || hasProv || hasAudit
+      ? ""
+      : null,
     saNames.length > 0 ? `from sqlalchemy import ${saNames.join(", ")}` : null,
     refersTo("insert") ? "from sqlalchemy.dialects.postgresql import insert" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",

@@ -164,9 +164,10 @@ export function buildPyDocumentRepositoryFile(
   return lines(
     `"""${agg.name} document repository (shape(document)).  Auto-generated."""`,
     "",
+    refersTo("math") ? "import math" : null,
     refersTo("datetime") ? "from datetime import datetime" : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
-    refersTo("datetime") || refersTo("Decimal") ? "" : null,
+    refersTo("math") || refersTo("datetime") || refersTo("Decimal") ? "" : null,
     refersTo("cast") ? "from typing import cast" : null,
     "",
     "from sqlalchemy import select",

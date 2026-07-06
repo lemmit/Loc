@@ -73,11 +73,13 @@ export function renderPyTestsFile(agg: AggregateIR, ctx: BoundedContextIR): stri
   const usesPytest = /\bpytest\./.test(bodyStr);
   const usesDatetime = /\bdatetime\./.test(bodyStr);
   const usesDecimal = /\bDecimal\(/.test(bodyStr);
+  const usesMath = /\bmath\./.test(bodyStr);
   const usesActor = bodyStr.includes("SimpleNamespace(");
 
   const out: string[] = [];
   out.push(`"""Domain tests for ${agg.name}.  Auto-generated."""`);
-  if (usesDatetime || usesDecimal || usesPytest || usesActor) out.push("");
+  if (usesDatetime || usesDecimal || usesMath || usesPytest || usesActor) out.push("");
+  if (usesMath) out.push("import math");
   if (usesDatetime) {
     out.push(
       /\bUTC\b/.test(bodyStr)

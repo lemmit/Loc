@@ -132,3 +132,102 @@ system Shop {
     expect(repo).toMatch(/from sqlalchemy import [^\n]*\bfunc\b/);
   });
 });
+
+// A3 math batch — abs/min/max on the four numeric receivers plus
+// round/floor/ceil on decimal (float-backed) and money (Decimal-backed).
+// Round is HALF-AWAY-FROM-ZERO by catalogue contract: the money path forces
+// ROUND_HALF_UP on quantize (Decimal's default is context half-even), the
+// float path takes the copysign/floor route (builtin round() is banker's and
+// must not appear).  SQL side: func.round/floor/ceil + two-value
+// least/greatest.
+describe("python generator — numeric math intrinsics (stdlib A3)", () => {
+  const SRC_A3 = `
+system Shop {
+  subdomain Catalog {
+    context Catalog {
+      aggregate Product ids guid {
+        qty: int
+        weight: decimal
+        price: money
+        cap: money
+        derived qtyAbs: int = qty.abs()
+        derived qtyFloor: int = qty.min(5)
+        derived priceRounded: money = price.round(2)
+        derived priceWhole: money = price.round()
+        derived priceFloor: money = price.floor()
+        derived priceCapped: money = price.min(cap)
+        derived weightRounded: decimal = weight.round(1)
+        derived weightCeil: decimal = weight.ceil()
+      }
+      repository Products for Product {
+        find byRoundedPrice(q: money): Product[] where this.price.round(2) == q
+        find byWholeWeight(q: decimal): Product[] where this.weight.round() == q
+        find byMinQty(q: int): Product[] where this.qty.min(5) == q
+        find byNormalizedWeight(q: decimal): Product[] where this.weight == q.round(1)
+      }
+    }
+  }
+  api CatalogApi from Catalog
+  storage pg { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: pg }
+  deployable api { platform: python, contexts: [Catalog], dataSources: [catalogState], serves: CatalogApi, port: 4000 }
+}
+`;
+
+  it("parses + validates cleanly (all A3 ops typed + queryable)", async () => {
+    const { errors } = await parseString(SRC_A3);
+    expect(errors).toEqual([]);
+  });
+
+  it("renders money.round via quantize with explicit ROUND_HALF_UP (never builtin round)", async () => {
+    const domain = (await build(SRC_A3)).get(DOMAIN)!;
+    expect(domain).toContain(
+      'self._price.quantize(Decimal(1).scaleb(-(2)), rounding="ROUND_HALF_UP")',
+    );
+    // Optional places defaults to 0.
+    expect(domain).toContain(
+      'self._price.quantize(Decimal(1).scaleb(-(0)), rounding="ROUND_HALF_UP")',
+    );
+  });
+
+  it("renders decimal.round half-away-from-zero via math.copysign (not banker's round())", async () => {
+    const domain = (await build(SRC_A3)).get(DOMAIN)!;
+    expect(domain).toContain(
+      "(math.copysign(math.floor(abs(self._weight) * 10 ** (1) + 0.5), self._weight) / 10 ** (1))",
+    );
+    // Python's builtin round() is half-even — it must never carry a .round().
+    const code = domain.replace(/"(?:\\.|[^"\\])*"/g, '""');
+    expect(code).not.toMatch(/\bround\(/);
+  });
+
+  it("renders abs/min/floor/ceil keeping the receiver type", async () => {
+    const domain = (await build(SRC_A3)).get(DOMAIN)!;
+    expect(domain).toContain("abs(self._qty)");
+    expect(domain).toContain("min(self._qty, 5)");
+    expect(domain).toContain("min(self._price, self._cap)");
+    expect(domain).toContain('self._price.to_integral_value(rounding="ROUND_FLOOR")');
+    expect(domain).toContain("float(math.ceil(self._weight))");
+  });
+
+  it("threads the math + Decimal imports through the domain module header", async () => {
+    const domain = (await build(SRC_A3)).get(DOMAIN)!;
+    expect(domain).toContain("import math");
+    expect(domain).toContain("from decimal import Decimal");
+  });
+
+  it("renders queryable math as func.round/least in the find where-clauses", async () => {
+    const repo = (await build(SRC_A3)).get(REPO)!;
+    expect(repo).toContain("select(ProductRow).where((func.round(ProductRow.price, 2) == q))");
+    expect(repo).toContain("select(ProductRow).where((func.round(ProductRow.weight) == q))");
+    expect(repo).toContain("select(ProductRow).where((func.least(ProductRow.qty, 5) == q))");
+    expect(repo).toMatch(/from sqlalchemy import [^\n]*\bfunc\b/);
+  });
+
+  it("renders a value-side decimal.round (param receiver) as host Python and imports math", async () => {
+    const repo = (await build(SRC_A3)).get(REPO)!;
+    expect(repo).toContain(
+      "(ProductRow.weight == (math.copysign(math.floor(abs(q) * 10 ** (1) + 0.5), q) / 10 ** (1)))",
+    );
+    expect(repo).toContain("import math");
+  });
+});
