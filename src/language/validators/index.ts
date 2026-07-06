@@ -32,6 +32,7 @@ export {
 } from "./match.js";
 export { checkUnknownNameRefs } from "./names.js";
 export { checkPayloads } from "./payload.js";
+export { checkPolicyFns } from "./policy-fn.js";
 export { checkSeeds } from "./seed.js";
 export {
   checkAssignOrCall,

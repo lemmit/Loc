@@ -50,6 +50,7 @@ import {
   checkMatchesCalls,
   checkOrgPathReferences,
   checkPayloads,
+  checkPolicyFns,
   checkPrimitiveConversions,
   checkProjectSingletons,
   checkRetrievalLiteral,
@@ -280,6 +281,9 @@ export class DddValidator {
     // Criterion declarations + use sites: candidate-type support,
     // body purity, reference cycles, and call arity.
     guard("criteria", model, () => checkCriteria(model, accept));
+    // Named policy functions (auth P3.2): return-type = bool, use-site arity,
+    // reference cycles.  See `src/language/validators/policy-fn.ts`.
+    guard("policy-fns", model, () => checkPolicyFns(model, accept));
     // Channel + channelSource: key-field existence and the channel<->storage
     // transport compatibility matrix (channels.md, Slice 1).
     guard("channels", model, () => checkChannels(model, accept));

@@ -217,6 +217,75 @@ default) a deployable on `auth: required` still serves any
 operation that doesn't declare a `requires` gate — Slice 2's
 original behaviour.
 
+### Named policy functions (P3.2)
+
+A **named policy function** names a reusable `requires` predicate once so a
+non-trivial gate isn't re-typed at every operation it guards.  It is a
+context-level declaration —
+
+```
+policy <Name>(<params>): bool ( = <expr> | { <expr> } )
+```
+
+— an **ambient** boolean predicate (it sees `currentUser`, its own parameters,
+`permissions.<name>`, enum values, and sibling policy functions / criteria; it
+has **no candidate row** — pass row fields in as arguments).  Parentheses are
+**required** (even for zero parameters) so the parser distinguishes the
+function form from the `policy {}` read-ladder block ([tenancy](tenancy.md)).
+
+```ddd
+context Orders {
+  permissions { approve, manage }
+
+  policy CanApprove(cap: money): bool =
+    currentUser.permissions.contains(permissions.approve) && cap <= 10000
+  policy IsManager(): bool { currentUser.permissions.contains(permissions.manage) }
+
+  aggregate Order {
+    amount: money
+    status: OrderStatus
+    operation approve() {
+      requires CanApprove(amount)   // ← argument bound to the parameter
+      requires IsManager()
+      status := OrderStatus.Approved
+    }
+  }
+}
+```
+
+A `requires PolicyName(args)` reference is **inlined** at the gate (the
+argument substituted for the parameter), exactly like a `criterion … of bool`
+reference (see [`docs/criterion.md`](criterion.md)).  Because the result is an
+ordinary boolean gate expression, **every backend enforces it through the same
+`requires` → 403 path** — no new render code.  The generated `approve` body:
+
+```ts
+// node / Hono
+if (!((currentUser.permissions).includes("sales.approve") && this._amount.lte(new Decimal("10000"))))
+  throw new ForbiddenError("Forbidden: CanApprove(amount)");
+if (!((currentUser.permissions).includes("sales.manage")))
+  throw new ForbiddenError("Forbidden: IsManager()");
+```
+
+```csharp
+// .NET / EF
+if (!((currentUser.Permissions).Contains("sales.approve") && this.Amount <= 10000m))
+    throw new ForbiddenException("Forbidden: CanApprove(amount)");
+```
+
+Composition falls out of the ordinary boolean operators
+(`requires IsManager() && CanApprove(amount)`), like criteria.
+
+| Diagnostic | When |
+| --- | --- |
+| `loom.policy-fn-return-type` | the return annotation is not `bool` |
+| `loom.policy-fn-arity` | a `PolicyName(args)` call supplies the wrong argument count |
+| `loom.policy-fn-cycle` | a policy function (transitively) references itself |
+
+**Not yet shipped (P3.x follow-ups):** the `resource` scope (referencing the
+gated row's fields directly instead of passing them as arguments), field
+masking, `deny`, and hosting policy functions inside the `policy {}` block.
+
 ### View `requires` gates
 
 A `view` accepts an optional `requires <expr>` clause **before**

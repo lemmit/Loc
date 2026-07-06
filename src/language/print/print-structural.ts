@@ -692,8 +692,15 @@ function printSeed(node: import("../generated/ast.js").Seed): string {
 }
 
 /** `policy <Name>? { allow <level> on <Aggregate> … }` (authorization.md §3;
- *  multi-tenancy Phase 2 P2.4 — the read-reachability ladder). */
+ *  multi-tenancy Phase 2 P2.4 — the read-reachability ladder) OR the function
+ *  form `policy <Name>(<params>): bool = <expr>` (authorization Phase 3.2 — a
+ *  named, requires-gated authorization predicate). */
 function printPolicyDecl(node: import("../generated/ast.js").PolicyDecl): string {
+  // Function form: carries a `returnType` (the read-ladder block has none).
+  if (node.returnType) {
+    const params = node.params.map(printParameter).join(", ");
+    return `policy ${node.name}(${params}): ${printTypeRef(node.returnType)} = ${node.body ? printExpr(node.body) : ""}`;
+  }
   const name = node.name ? ` ${node.name}` : "";
   return block(
     `policy${name}`,

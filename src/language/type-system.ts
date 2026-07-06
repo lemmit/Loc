@@ -16,6 +16,7 @@ import type {
   Operation,
   Parameter,
   PayloadDecl,
+  PolicyDecl,
   PostfixChain,
   PostfixSuffix,
   Property,
@@ -59,6 +60,7 @@ import {
   isPage,
   isParenExpr,
   isPayloadDecl,
+  isPolicyDecl,
   isPostfixChain,
   isPrimitiveConversion,
   isPrimitiveType,
@@ -510,8 +512,10 @@ export function typeOf(expr: Expression | undefined, env: Env): DddType {
   if (isNameRef(expr)) {
     const looked = env.resolve(expr.name);
     if (looked) return looked.type;
-    // A bare reference to a parameterless criterion is a boolean predicate.
+    // A bare reference to a parameterless criterion / policy function is a
+    // boolean predicate.
     if (lookupCriterionByName(expr.name, env)) return T.prim("bool");
+    if (lookupPolicyFnByName(expr.name, env)) return T.prim("bool");
     return T.unknown;
   }
   return T.unknown;
@@ -668,8 +672,10 @@ function typeOfFreeCall(name: string, env: Env): DddType {
   if (fn) return resolveTypeRef(fn.returnType);
   const vo = lookupValueObjectByName(name, env);
   if (vo) return { kind: "valueobject", ref: vo };
-  // A parameterised criterion call (`InRegion("EU")`) is a boolean predicate.
+  // A parameterised criterion call (`InRegion("EU")`) or policy-function call
+  // (`CanApprove(cap)`) is a boolean predicate.
   if (lookupCriterionByName(name, env)) return T.prim("bool");
+  if (lookupPolicyFnByName(name, env)) return T.prim("bool");
   return T.unknown;
 }
 
@@ -920,6 +926,22 @@ function lookupCriterionByName(name: string, env: Env): Criterion | undefined {
   if (!ctx) return undefined;
   for (const m of ctx.members) {
     if (isCriterion(m) && m.name === name) return m;
+  }
+  return undefined;
+}
+
+/** Resolve a FUNCTION-form `policy` declaration by name against the enclosing
+ *  bounded context (auth P3.2).  A reference to one in expression position
+ *  (e.g. a `requires PolicyName(args)` gate) types as `bool`.  Only the
+ *  function form (carrying a `returnType`) is callable; a block-form
+ *  `policy {}` read ladder is not. */
+function lookupPolicyFnByName(name: string, env: Env): PolicyDecl | undefined {
+  const start = env.aggregate ?? env.part ?? env.valueObject;
+  if (!start) return undefined;
+  const ctx = AstUtils.getContainerOfType(start, isBoundedContext);
+  if (!ctx) return undefined;
+  for (const m of ctx.members) {
+    if (isPolicyDecl(m) && m.returnType !== undefined && m.name === name) return m;
   }
   return undefined;
 }
