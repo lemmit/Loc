@@ -46,6 +46,11 @@ export type DddKeywordNames =
     | ">"
     | ">="
     | "?"
+    | "DELETE"
+    | "GET"
+    | "PATCH"
+    | "POST"
+    | "PUT"
     | "Self"
     | "["
     | "[]"
@@ -85,6 +90,7 @@ export type DddKeywordNames =
     | "clientId"
     | "clientSecret"
     | "command"
+    | "commandHandler"
     | "component"
     | "config"
     | "connection"
@@ -231,6 +237,7 @@ export type DddKeywordNames =
     | "provider"
     | "python"
     | "query"
+    | "queryHandler"
     | "queue"
     | "rabbitmq"
     | "raw"
@@ -407,6 +414,7 @@ export interface Api extends langium.AstNode {
     readonly $container: Model | System;
     readonly $type: 'Api';
     name: string;
+    routes: Array<Route>;
     source: langium.Reference<Subdomain>;
     statuses: Array<ApiStatus>;
     urlStyle?: 'literal' | 'resource';
@@ -415,6 +423,7 @@ export interface Api extends langium.AstNode {
 export const Api = {
     $type: 'Api',
     name: 'name',
+    routes: 'routes',
     source: 'source',
     statuses: 'statuses',
     urlStyle: 'urlStyle'
@@ -488,7 +497,7 @@ export function isAreaMember(item: unknown): item is AreaMember {
 }
 
 export interface AssignOrCallStmt extends langium.AstNode {
-    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | MatchStmt | OnDecl | Operation | ProjectionOn | StampDecl | TestBlock | TestE2E | UiNotification | VariantStmtArm | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | CommandHandler | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | MatchStmt | OnDecl | Operation | ProjectionOn | QueryHandler | StampDecl | TestBlock | TestE2E | UiNotification | VariantStmtArm | WorkflowCreateDecl;
     readonly $type: 'AssignOrCallStmt';
     op?: '+=' | '-=' | ':=';
     target: LValue;
@@ -870,6 +879,27 @@ export function isClaimsMap(item: unknown): item is ClaimsMap {
     return reflection.isInstance(item, ClaimsMap.$type);
 }
 
+export interface CommandHandler extends langium.AstNode {
+    readonly $container: BoundedContext;
+    readonly $type: 'CommandHandler';
+    body: Array<Statement>;
+    name: string;
+    params: Array<Parameter>;
+    returnType?: TypeRef;
+}
+
+export const CommandHandler = {
+    $type: 'CommandHandler',
+    body: 'body',
+    name: 'name',
+    params: 'params',
+    returnType: 'returnType'
+} as const;
+
+export function isCommandHandler(item: unknown): item is CommandHandler {
+    return reflection.isInstance(item, CommandHandler.$type);
+}
+
 export interface Component extends langium.AstNode {
     readonly $container: Model | Ui;
     readonly $type: 'Component';
@@ -963,7 +993,7 @@ export function isContainment(item: unknown): item is Containment {
     return reflection.isInstance(item, Containment.$type);
 }
 
-export type ContextMember = Aggregate | Channel | Criterion | DomainService | EnumDecl | EventDecl | FilterDecl | ImplementsDecl | PayloadDecl | PolicyDecl | Projection | Repository | Retrieval | Seed | StampDecl | ValueObject | View | Workflow;
+export type ContextMember = Aggregate | Channel | CommandHandler | Criterion | DomainService | EnumDecl | EventDecl | FilterDecl | ImplementsDecl | PayloadDecl | PolicyDecl | Projection | QueryHandler | Repository | Retrieval | Seed | StampDecl | ValueObject | View | Workflow;
 
 export const ContextMember = {
     $type: 'ContextMember'
@@ -1198,7 +1228,7 @@ export function isEmitField(item: unknown): item is EmitField {
 }
 
 export interface EmitStmt extends langium.AstNode {
-    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | MatchStmt | OnDecl | Operation | ProjectionOn | TestBlock | TestE2E | VariantStmtArm | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | CommandHandler | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | MatchStmt | OnDecl | Operation | ProjectionOn | QueryHandler | TestBlock | TestE2E | VariantStmtArm | WorkflowCreateDecl;
     readonly $type: 'EmitStmt';
     event: langium.Reference<EventDecl>;
     fields: Array<EmitField>;
@@ -1398,7 +1428,7 @@ export function isFindDecl(item: unknown): item is FindDecl {
 }
 
 export interface ForStmt extends langium.AstNode {
-    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | MatchStmt | OnDecl | Operation | ProjectionOn | VariantStmtArm | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | CommandHandler | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | MatchStmt | OnDecl | Operation | ProjectionOn | QueryHandler | VariantStmtArm | WorkflowCreateDecl;
     readonly $type: 'ForStmt';
     body: Array<Statement>;
     iterable: Expression;
@@ -1470,6 +1500,29 @@ export function isHandleDecl(item: unknown): item is HandleDecl {
     return reflection.isInstance(item, HandleDecl.$type);
 }
 
+export interface HandlerRef extends langium.AstNode {
+    readonly $container: Route;
+    readonly $type: 'HandlerRef';
+    context: langium.Reference<BoundedContext>;
+    handler: string;
+}
+
+export const HandlerRef = {
+    $type: 'HandlerRef',
+    context: 'context',
+    handler: 'handler'
+} as const;
+
+export function isHandlerRef(item: unknown): item is HandlerRef {
+    return reflection.isInstance(item, HandlerRef.$type);
+}
+
+export type HttpMethod = 'DELETE' | 'GET' | 'PATCH' | 'POST' | 'PUT';
+
+export function isHttpMethod(item: unknown): item is HttpMethod {
+    return item === 'GET' || item === 'POST' || item === 'PUT' || item === 'PATCH' || item === 'DELETE';
+}
+
 export type IdKind = 'guid';
 
 export function isIdKind(item: unknown): item is IdKind {
@@ -1505,7 +1558,7 @@ export function isIdType(item: unknown): item is IdType {
 }
 
 export interface IfLetStmt extends langium.AstNode {
-    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | MatchStmt | OnDecl | Operation | ProjectionOn | VariantStmtArm | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | CommandHandler | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | MatchStmt | OnDecl | Operation | ProjectionOn | QueryHandler | VariantStmtArm | WorkflowCreateDecl;
     readonly $type: 'IfLetStmt';
     elseBody: Array<Statement>;
     source: Expression;
@@ -1731,7 +1784,7 @@ export function isLayoutSlotName(item: unknown): item is LayoutSlotName {
 }
 
 export interface LetStmt extends langium.AstNode {
-    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | MatchStmt | OnDecl | Operation | ProjectionOn | TestBlock | TestE2E | VariantStmtArm | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | CommandHandler | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | MatchStmt | OnDecl | Operation | ProjectionOn | QueryHandler | TestBlock | TestE2E | VariantStmtArm | WorkflowCreateDecl;
     readonly $type: 'LetStmt';
     expr: Expression;
     name: 'write' | string;
@@ -2025,7 +2078,7 @@ export function isMatchExpr(item: unknown): item is MatchExpr {
 }
 
 export interface MatchStmt extends langium.AstNode {
-    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | MatchStmt | OnDecl | Operation | ProjectionOn | VariantStmtArm | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | CommandHandler | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | MatchStmt | OnDecl | Operation | ProjectionOn | QueryHandler | VariantStmtArm | WorkflowCreateDecl;
     readonly $type: 'MatchStmt';
     elseBody: Array<Statement>;
     subject: Expression;
@@ -2435,7 +2488,7 @@ export function isPageProp(item: unknown): item is PageProp {
 }
 
 export interface Parameter extends langium.AstNode {
-    readonly $container: ActionDecl | Component | Create | Criterion | Destroy | DomainServiceOperation | FindDecl | FunctionDecl | HandleDecl | Operation | Page | PolicyDecl | Retrieval | UiFunction | WorkflowCreateDecl;
+    readonly $container: ActionDecl | CommandHandler | Component | Create | Criterion | Destroy | DomainServiceOperation | FindDecl | FunctionDecl | HandleDecl | Operation | Page | PolicyDecl | QueryHandler | Retrieval | UiFunction | WorkflowCreateDecl;
     readonly $type: 'Parameter';
     name: LooseName;
     type: TypeRef;
@@ -2609,7 +2662,7 @@ export function isPostfixSuffix(item: unknown): item is PostfixSuffix {
 }
 
 export interface PreconditionStmt extends langium.AstNode {
-    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | MatchStmt | OnDecl | Operation | ProjectionOn | TestBlock | TestE2E | VariantStmtArm | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | CommandHandler | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | MatchStmt | OnDecl | Operation | ProjectionOn | QueryHandler | TestBlock | TestE2E | VariantStmtArm | WorkflowCreateDecl;
     readonly $type: 'PreconditionStmt';
     expr: Expression;
 }
@@ -2744,6 +2797,27 @@ export function isQualifiedPageName(item: unknown): item is QualifiedPageName {
     return typeof item === 'string';
 }
 
+export interface QueryHandler extends langium.AstNode {
+    readonly $container: BoundedContext;
+    readonly $type: 'QueryHandler';
+    body: Array<Statement>;
+    name: string;
+    params: Array<Parameter>;
+    returnType: TypeRef;
+}
+
+export const QueryHandler = {
+    $type: 'QueryHandler',
+    body: 'body',
+    name: 'name',
+    params: 'params',
+    returnType: 'returnType'
+} as const;
+
+export function isQueryHandler(item: unknown): item is QueryHandler {
+    return reflection.isInstance(item, QueryHandler.$type);
+}
+
 export type ReadLevel = 'deep' | 'global' | 'local';
 
 export function isReadLevel(item: unknown): item is ReadLevel {
@@ -2827,7 +2901,7 @@ export function isRequiresProp(item: unknown): item is RequiresProp {
 }
 
 export interface RequiresStmt extends langium.AstNode {
-    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | MatchStmt | OnDecl | Operation | ProjectionOn | VariantStmtArm | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | CommandHandler | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | MatchStmt | OnDecl | Operation | ProjectionOn | QueryHandler | VariantStmtArm | WorkflowCreateDecl;
     readonly $type: 'RequiresStmt';
     expr: Expression;
 }
@@ -2929,7 +3003,7 @@ export function isRetrievalLiteral(item: unknown): item is RetrievalLiteral {
 }
 
 export interface ReturnStmt extends langium.AstNode {
-    readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | MatchStmt | OnDecl | Operation | ProjectionOn | VariantStmtArm | WorkflowCreateDecl;
+    readonly $container: ActionDecl | Apply | CommandHandler | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | MatchStmt | OnDecl | Operation | ProjectionOn | QueryHandler | VariantStmtArm | WorkflowCreateDecl;
     readonly $type: 'ReturnStmt';
     value: Expression;
 }
@@ -2941,6 +3015,25 @@ export const ReturnStmt = {
 
 export function isReturnStmt(item: unknown): item is ReturnStmt {
     return reflection.isInstance(item, ReturnStmt.$type);
+}
+
+export interface Route extends langium.AstNode {
+    readonly $container: Api;
+    readonly $type: 'Route';
+    method: HttpMethod;
+    path: string;
+    target: HandlerRef;
+}
+
+export const Route = {
+    $type: 'Route',
+    method: 'method',
+    path: 'path',
+    target: 'target'
+} as const;
+
+export function isRoute(item: unknown): item is Route {
+    return reflection.isInstance(item, Route.$type);
 }
 
 export interface RouteProp extends langium.AstNode {
@@ -3543,7 +3636,7 @@ export function isTypeAtom(item: unknown): item is TypeAtom {
 }
 
 export interface TypeRef extends langium.AstNode {
-    readonly $container: ActionType | Criterion | DerivedProp | DomainServiceOperation | FindDecl | FunctionDecl | Operation | Parameter | PolicyDecl | Property | Retrieval | StateField | UiFunction | UserField;
+    readonly $container: ActionType | CommandHandler | Criterion | DerivedProp | DomainServiceOperation | FindDecl | FunctionDecl | Operation | Parameter | PolicyDecl | Property | QueryHandler | Retrieval | StateField | UiFunction | UserField;
     readonly $type: 'TypeRef';
     alternatives: Array<TypeAtom>;
     array: boolean;
@@ -4015,6 +4108,7 @@ export type DddAstType = {
     ChannelSource: ChannelSource
     ClaimEntry: ClaimEntry
     ClaimsMap: ClaimsMap
+    CommandHandler: CommandHandler
     Component: Component
     ComponentDecl: ComponentDecl
     ConfigEntry: ConfigEntry
@@ -4047,6 +4141,7 @@ export type DddAstType = {
     ForStmt: ForStmt
     FunctionDecl: FunctionDecl
     HandleDecl: HandleDecl
+    HandlerRef: HandlerRef
     IdRef: IdRef
     IdType: IdType
     IfLetStmt: IfLetStmt
@@ -4120,6 +4215,7 @@ export type DddAstType = {
     ProjectionMember: ProjectionMember
     ProjectionOn: ProjectionOn
     Property: Property
+    QueryHandler: QueryHandler
     Repository: Repository
     Requirement: Requirement
     RequirementProp: RequirementProp
@@ -4129,6 +4225,7 @@ export type DddAstType = {
     Retrieval: Retrieval
     RetrievalLiteral: RetrievalLiteral
     ReturnStmt: ReturnStmt
+    Route: Route
     RouteProp: RouteProp
     SecretConnectionSource: SecretConnectionSource
     Seed: Seed
@@ -4284,6 +4381,11 @@ export class DddAstReflection extends langium.AbstractAstReflection {
             properties: {
                 name: {
                     name: Api.name
+                },
+                routes: {
+                    name: Api.routes,
+                    defaultValue: [],
+                    optional: true
                 },
                 source: {
                     name: Api.source,
@@ -4634,6 +4736,29 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 }
             },
             superTypes: []
+        },
+        CommandHandler: {
+            name: CommandHandler.$type,
+            properties: {
+                body: {
+                    name: CommandHandler.body,
+                    defaultValue: [],
+                    optional: true
+                },
+                name: {
+                    name: CommandHandler.name
+                },
+                params: {
+                    name: CommandHandler.params,
+                    defaultValue: [],
+                    optional: true
+                },
+                returnType: {
+                    name: CommandHandler.returnType,
+                    optional: true
+                }
+            },
+            superTypes: [ContextMember.$type]
         },
         Component: {
             name: Component.$type,
@@ -5160,6 +5285,19 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 }
             },
             superTypes: [WorkflowMember.$type]
+        },
+        HandlerRef: {
+            name: HandlerRef.$type,
+            properties: {
+                context: {
+                    name: HandlerRef.context,
+                    referenceType: BoundedContext.$type
+                },
+                handler: {
+                    name: HandlerRef.handler
+                }
+            },
+            superTypes: []
         },
         IdRef: {
             name: IdRef.$type,
@@ -6128,6 +6266,28 @@ export class DddAstReflection extends langium.AbstractAstReflection {
             },
             superTypes: [AggregateMember.$type, CapabilityMember.$type, EntityPartMember.$type, ProjectionMember.$type, ValueObjectMember.$type, WorkflowMember.$type]
         },
+        QueryHandler: {
+            name: QueryHandler.$type,
+            properties: {
+                body: {
+                    name: QueryHandler.body,
+                    defaultValue: [],
+                    optional: true
+                },
+                name: {
+                    name: QueryHandler.name
+                },
+                params: {
+                    name: QueryHandler.params,
+                    defaultValue: [],
+                    optional: true
+                },
+                returnType: {
+                    name: QueryHandler.returnType
+                }
+            },
+            superTypes: [ContextMember.$type]
+        },
         Repository: {
             name: Repository.$type,
             properties: {
@@ -6322,6 +6482,21 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 }
             },
             superTypes: [Statement.$type]
+        },
+        Route: {
+            name: Route.$type,
+            properties: {
+                method: {
+                    name: Route.method
+                },
+                path: {
+                    name: Route.path
+                },
+                target: {
+                    name: Route.target
+                }
+            },
+            superTypes: []
         },
         RouteProp: {
             name: RouteProp.$type,

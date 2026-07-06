@@ -1,5 +1,6 @@
 import type { EnrichedLoomModel } from "../types/loom-ir.js";
 import { allContexts } from "../types/loom-ir.js";
+import { validateApplicationHandlers, validateRoutes } from "./checks/api-checks.js";
 import { validateStampReadsBeforeFlush } from "./checks/capability-checks.js";
 import type { LoomDiagnostic } from "./checks/diagnostic.js";
 import { validateDomainServices } from "./checks/domain-service-checks.js";
@@ -193,6 +194,9 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateEventSourcedDiscipline(c, diags);
     validateProjections(c, diags);
     validateWorkflows(c, diags);
+    // Explicit application-layer handlers (unfoldable-api-derivation.md, Layer 3):
+    // queryHandler-read-only + commandHandler-single-aggregate layering contracts.
+    validateApplicationHandlers(c, diags);
     validateViews(c, diags);
     validateCurrentUserScope(c, diags);
     validatePermissionRefs(c, diags);
@@ -221,6 +225,10 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     validateAuditedOperationSupport(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
   }
   validateExprIntegrity(loom, diags);
+  // Explicit transport bindings (unfoldable-api-derivation.md, Layer 4): every
+  // `route ... -> Context.Handler` target must resolve.  Whole-model (routes are
+  // system-level, their targets cross-context).
+  validateRoutes(loom, diags);
   validateVariantMatch(loom, diags);
   validateUiBodies(loom, diags);
   validateStores(loom, diags);

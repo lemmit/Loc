@@ -955,6 +955,13 @@ export interface BoundedContextIR {
   aggregates: AggregateIR[];
   repositories: RepositoryIR[];
   workflows: WorkflowIR[];
+  /** Top-level `commandHandler` application-layer members
+   *  (unfoldable-api-derivation.md, Layer 3).  Present when the context declares
+   *  any; ride alongside the IR, unread by backends in this slice. */
+  commandHandlers?: CommandHandlerIR[];
+  /** Top-level `queryHandler` application-layer members
+   *  (unfoldable-api-derivation.md, Layer 3). */
+  queryHandlers?: QueryHandlerIR[];
   views: ViewIR[];
   /** Named predicate specifications declared in this context. */
   criteria: CriterionIR[];
@@ -1252,6 +1259,32 @@ export interface HandleIR {
   statements: WorkflowStmtIR[];
   /** Which let-bound aggregates need a save call at handler exit, in
    *  declaration order — same derivation as `WorkflowIR.savesAtExit`. */
+  savesAtExit: { name: string; aggName: string; repoName: string }[];
+}
+
+/** A top-level `commandHandler name(params): T { … }` application-layer member
+ *  (unfoldable-api-derivation.md, Layer 3) — a workflow `handle` lifted out of a
+ *  workflow when the orchestration is single-aggregate.  `returnType` is optional
+ *  (a `commandHandler` may omit it, `: void`-equivalent).  Body statements are
+ *  `WorkflowStmtIR` (load → mutate → save → return), same as `HandleIR`.  These
+ *  ride alongside the IR and are not yet read by any backend. */
+export interface CommandHandlerIR {
+  name: string;
+  params: ParamIR[];
+  returnType?: TypeIR;
+  statements: WorkflowStmtIR[];
+  savesAtExit: { name: string; aggName: string; repoName: string }[];
+}
+
+/** A top-level `queryHandler name(params): T { … }` application-layer member
+ *  (unfoldable-api-derivation.md, Layer 3).  Like `CommandHandlerIR` but the
+ *  `returnType` is REQUIRED (a query always produces a response) and the body
+ *  must not mutate/save (validator `loom.query-handler-saves`). */
+export interface QueryHandlerIR {
+  name: string;
+  params: ParamIR[];
+  returnType: TypeIR;
+  statements: WorkflowStmtIR[];
   savesAtExit: { name: string; aggName: string; repoName: string }[];
 }
 
@@ -2207,6 +2240,25 @@ export interface ApiIR {
    *  error absent here falls back to the stdlib default
    *  (`src/util/error-defaults.ts`).  Empty when the api declares none. */
   errorStatuses: Record<string, number>;
+  /** Explicit transport bindings declared via `route <METHOD> <PATH> ->
+   *  <Context>.<Handler>` in the api block (unfoldable-api-derivation.md,
+   *  Layer 4).  Ride alongside the api; unread by backends in this slice.
+   *  Empty when the api declares none. */
+  routes: RouteIR[];
+}
+
+/** A single explicit `route <METHOD> <PATH> -> <Context>.<Handler>` transport
+ *  binding (unfoldable-api-derivation.md, Layer 4).  `target.handler` is a plain
+ *  name resolved by the IR validator (`loom.route-handler-unresolved`) against
+ *  the commandHandler / queryHandler / workflow-handle members of
+ *  `target.context`. */
+export interface RouteIR {
+  /** HTTP method — `GET` | `POST` | `PUT` | `PATCH` | `DELETE`. */
+  method: string;
+  /** URL path template, delimiters stripped (`/orders/{id}`). */
+  path: string;
+  /** The `Context.Handler` target. */
+  target: { context: string; handler: string };
 }
 
 /** UI api parameter — local handle + which api it expects. */

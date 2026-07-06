@@ -1,10 +1,12 @@
 import type {
   Aggregate,
   BoundedContext,
+  CommandHandler,
   Expression,
   HandleDecl,
   LoadPath,
   OnDecl,
+  QueryHandler,
   Repository,
   Statement,
   Workflow,
@@ -36,6 +38,7 @@ import { findVerb } from "../resource-verbs.js";
 import type {
   AggregateIR,
   ApplyIR,
+  CommandHandlerIR,
   CreateIR,
   DomainServiceIR,
   DomainServiceOperationIR,
@@ -48,6 +51,7 @@ import type {
   OnIR,
   ParamIR,
   PathIR,
+  QueryHandlerIR,
   SortTermIR,
   TypeIR,
   WorkflowIR,
@@ -255,6 +259,109 @@ function lowerHandle(
   return {
     name: h.name,
     params,
+    statements,
+    savesAtExit: computeSaves(statements, repoForAgg, undefined, saveResolver),
+  };
+}
+
+/** Build the `(aggregate | repository)` lookup maps a workflow / handler body
+ *  needs to resolve loads, saves, and repo calls within its context.  Mirrors
+ *  the inline pass at the top of `lowerWorkflow`. */
+function ctxAggRepoMaps(ctx: BoundedContext): {
+  aggsByName: Map<string, Aggregate>;
+  reposByName: Map<string, Repository>;
+  repoForAgg: Map<string, string>;
+} {
+  const aggsByName = new Map<string, Aggregate>();
+  const reposByName = new Map<string, Repository>();
+  const repoForAgg = new Map<string, string>();
+  for (const m of ctx.members) {
+    if (isAggregate(m)) aggsByName.set(m.name, m);
+    else if (isRepository(m)) {
+      reposByName.set(m.name, m);
+      const target = m.aggregate?.ref;
+      if (target?.name) repoForAgg.set(target.name, m.name);
+    }
+  }
+  return { aggsByName, reposByName, repoForAgg };
+}
+
+function saveResolverFor(lowered?: SecondPassLowered): SaveResolver | undefined {
+  return lowered
+    ? {
+        resolveAggOp: aggregateOpResolver({ aggregates: lowered.aggregates }),
+        resolveServiceOp: serviceOpResolver(lowered.domainServices),
+      }
+    : undefined;
+}
+
+type SecondPassLowered = { aggregates: AggregateIR[]; domainServices: DomainServiceIR[] };
+
+/** Lower a top-level `commandHandler name(params): T { … }` application-layer
+ *  member (unfoldable-api-derivation.md, Layer 3).  Structurally a workflow
+ *  `handle` lifted to the context — params bind as `refKind: "param"` locals on
+ *  the context env (no workflow `this`), the body lowers through
+ *  `lowerWorkflowStatement`, and exit-saves derive the same way.  `returnType`
+ *  is optional. */
+export function lowerCommandHandler(
+  h: CommandHandler,
+  env: Env,
+  ctx: BoundedContext,
+  lowered?: SecondPassLowered,
+): CommandHandlerIR {
+  const { aggsByName, reposByName, repoForAgg } = ctxAggRepoMaps(ctx);
+  const saveResolver = saveResolverFor(lowered);
+  let inner = env;
+  const params: ParamIR[] = [];
+  for (const p of h.params) {
+    const t = lowerType(p.type, env);
+    params.push({ name: p.name, type: t });
+    inner = withLocal(inner, p.name, "param", t);
+  }
+  const statements: WorkflowStmtIR[] = [];
+  for (const s of h.body) {
+    const l = lowerWorkflowStatement(s, inner, aggsByName, reposByName, repoForAgg);
+    statements.push(l.stmt);
+    inner = l.envAfter;
+  }
+  return {
+    name: h.name,
+    params,
+    ...(h.returnType ? { returnType: lowerType(h.returnType, env) } : {}),
+    statements,
+    savesAtExit: computeSaves(statements, repoForAgg, undefined, saveResolver),
+  };
+}
+
+/** Lower a top-level `queryHandler name(params): T { … }` application-layer
+ *  member (unfoldable-api-derivation.md, Layer 3).  Like `lowerCommandHandler`
+ *  but `returnType` is required (a query always produces a response); the
+ *  no-mutation contract is enforced by the IR validator, not here. */
+export function lowerQueryHandler(
+  h: QueryHandler,
+  env: Env,
+  ctx: BoundedContext,
+  lowered?: SecondPassLowered,
+): QueryHandlerIR {
+  const { aggsByName, reposByName, repoForAgg } = ctxAggRepoMaps(ctx);
+  const saveResolver = saveResolverFor(lowered);
+  let inner = env;
+  const params: ParamIR[] = [];
+  for (const p of h.params) {
+    const t = lowerType(p.type, env);
+    params.push({ name: p.name, type: t });
+    inner = withLocal(inner, p.name, "param", t);
+  }
+  const statements: WorkflowStmtIR[] = [];
+  for (const s of h.body) {
+    const l = lowerWorkflowStatement(s, inner, aggsByName, reposByName, repoForAgg);
+    statements.push(l.stmt);
+    inner = l.envAfter;
+  }
+  return {
+    name: h.name,
+    params,
+    returnType: lowerType(h.returnType, env),
     statements,
     savesAtExit: computeSaves(statements, repoForAgg, undefined, saveResolver),
   };

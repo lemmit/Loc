@@ -215,6 +215,10 @@ export function printStructural(node: AstNode): string {
       return printEntityPart(node as EntityPart);
     case "Operation":
       return printOperation(node as Operation);
+    case "CommandHandler":
+      return printCommandHandler(node as import("../generated/ast.js").CommandHandler);
+    case "QueryHandler":
+      return printQueryHandler(node as import("../generated/ast.js").QueryHandler);
     case "Create":
       return printCreate(node as import("../generated/ast.js").Create);
     case "Destroy":
@@ -449,6 +453,13 @@ function printApi(node: Api): string {
   const items: string[] = [];
   if (node.urlStyle) items.push(`urlStyle: ${node.urlStyle}`);
   for (const s of node.statuses ?? []) items.push(`httpStatus ${s.error} ${s.code}`);
+  // Explicit transport bindings (unfoldable-api-derivation.md, Layer 4):
+  //   route POST "/orders" -> Ordering.PlaceOrder
+  for (const r of node.routes ?? []) {
+    items.push(
+      `route ${r.method} ${JSON.stringify(r.path)} -> ${r.target.context.$refText}.${r.target.handler}`,
+    );
+  }
   return items.length === 0 ? head : block(head, items);
 }
 
@@ -1037,6 +1048,24 @@ function printOperation(node: Operation): string {
   const when = node.when ? ` when ${printExpr(node.when)}` : "";
   return block(
     `${priv}operation ${node.name}(${params})${extern}${audited}${ret}${when}`,
+    node.body.map(printStmt),
+  );
+}
+
+// `commandHandler name(params)[: T] { … }` application-layer context member
+// (unfoldable-api-derivation.md, Layer 3).  Return type is optional.
+function printCommandHandler(node: import("../generated/ast.js").CommandHandler): string {
+  const params = node.params.map(printParameter).join(", ");
+  const ret = node.returnType ? `: ${printTypeRef(node.returnType)}` : "";
+  return block(`commandHandler ${node.name}(${params})${ret}`, node.body.map(printStmt));
+}
+
+// `queryHandler name(params): T { … }` application-layer context member
+// (unfoldable-api-derivation.md, Layer 3).  Return type is required.
+function printQueryHandler(node: import("../generated/ast.js").QueryHandler): string {
+  const params = node.params.map(printParameter).join(", ");
+  return block(
+    `queryHandler ${node.name}(${params}): ${printTypeRef(node.returnType)}`,
     node.body.map(printStmt),
   );
 }
