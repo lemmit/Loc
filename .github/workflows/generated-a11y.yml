@@ -1,0 +1,71 @@
+name: Generated a11y (axe-core)
+
+# accessibility.md Phase 4 — the axe-core tripwire over the generated
+# frontends.  Generate a frontend for a design pack, `vite build` + `vite
+# preview` it, then drive axe-core over every param-less page route and assert
+# zero serious/critical WCAG 2.x A/AA violations.  Because the output is
+# generated, coverage is exhaustive across the example × pack matrix.
+#
+# axe runs REPO-side (root devDeps) against the preview URL — the generated
+# project is untouched — so this never turns the per-PR build/e2e gates red.
+#
+# NOT per-PR (heavy: npm installs + a chromium build; and the proposal expects
+# the first runs to surface violations to fix, lead pack first):
+#   - nightly schedule,
+#   - on-demand via the `a11y` label on a PR,
+#   - manual dispatch.
+
+on:
+  schedule:
+    - cron: '0 5 * * *'      # 05:00 UTC nightly
+  pull_request:
+    types: [labeled, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  axe:
+    # Schedule / manual always; on a PR only when the `a11y` label is set.
+    if: >
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'a11y'))
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pack: ['mantine@v9', 'shadcn@v4', 'mui@v7', 'chakra@v3']
+    timeout-minutes: 25
+    name: showcase × ${{ matrix.pack }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      # Root install runs the `prepare` lifecycle (langium:generate) and pulls
+      # the repo-side axe/playwright devDeps.
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Build toolchain
+        run: npm run build
+
+      - name: Install the axe chromium browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run generated-frontend axe scan
+        env:
+          LOOM_A11Y_E2E: '1'
+          LOOM_A11Y_PACK: ${{ matrix.pack }}
+        run: npx vitest run test/e2e/generated-a11y-e2e.test.ts
