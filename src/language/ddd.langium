@@ -194,11 +194,8 @@ Deployable:
         // parser (the `design:` precedent).
         ('platform' ':' platform=Platform
             ('{' (
-                  'application' ':' application=LooseName ','?
-                | 'persistence' ':' persistence=LooseName ','?
+                  'persistence' ':' persistence=LooseName ','?
                 | 'directoryLayout' ':' directoryLayout=LooseName ','?
-                | 'transport' ':' transport=LooseName ','?
-                | 'runtime' ':' runtime=LooseName ','?
             )* '}')?
             ','?)
         // The remaining clauses are ORDER-INDEPENDENT: each is introduced by
@@ -1797,14 +1794,12 @@ LooseName returns string:
     // as soft so user code can still name a field / parameter `or`; hard only
     // between `TypeAtom`s in a `TypeRef`.
     | 'or'
-    // D-REALIZATION-AXES — the six platform-block axis keywords admitted
-    // as soft so user code can still name a field `application`,
-    // `transport`, `runtime`, etc.  `transactional` is the `runtime`
-    // default value and is ALSO the storage-isolation flag keyword
-    // (`transactional?='transactional'`) — admit it here so it parses as
-    // a `LooseName` value in the `runtime:` slot.
-    | 'foundation' | 'application' | 'persistence' | 'directoryLayout'
-    | 'transport' | 'runtime' | 'transactional'
+    // D-REALIZATION-AXES — the platform-block axis keywords admitted as
+    // soft so user code can still name a field `persistence`, etc.
+    // `transactional` is the storage-isolation flag keyword
+    // (`transactional?='transactional'`) — admit it here so it parses as a
+    // `LooseName` value too.
+    | 'persistence' | 'directoryLayout' | 'transactional'
     // Retrieval keywords (retrieval.md) admitted as soft so user code can
     // still name a field `retrieval` / `sort` / `loads` / `asc` / `desc`.
     // Hard only inside the `Retrieval` rule's slots.

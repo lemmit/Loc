@@ -386,14 +386,14 @@ deployable apiDotnet {
 }
 ```
 
-The five axes (grammar order): `application`, `persistence`, `directoryLayout`, `transport`, `runtime`. The bare `platform: dotnet` form is unchanged — the block is additive and every axis is optional, defaulting to the platform's primary value. Axis *values* are validated against a per-platform menu (`src/language/validators/data/platform-rules.ts`), not the grammar:
+The two axes (grammar order): `persistence`, `directoryLayout`. The bare `platform: dotnet` form is unchanged — the block is additive and every axis is optional, defaulting to the platform's primary value. Axis *values* are validated against a per-platform menu (`src/language/validators/data/platform-rules.ts`), not the grammar:
 
-- **`application`** — architectural style (e.g. `flat` → `serviceLayer` → `cqrs`), resolved against the backend's live style-adapter menu.
-- **`persistence`** — data layer (`elixir` admits `ecto`; each backend lists its own).
-- **`directoryLayout`** — `byLayer` vs `byFeature` on-disk shape; must be one the chosen `application` style supports (the R3 layout check otherwise).
-- **`transport`** / **`runtime`** — adapter-backed HTTP-surface / runtime axes.
+- **`persistence`** — data layer (`elixir` admits `ecto`; `dotnet` admits `efcore`/`dapper`; `node` admits `drizzle`/`mikroorm`; each backend lists its own).
+- **`directoryLayout`** — `byLayer` vs `byFeature` on-disk shape; must be one the backend's emission style supports (the R3 layout check otherwise).
 
-Frontends carry **no** axes (empty menu — any axis written on a `react`/`vue`/… deployable is rejected). `platform: elixir` emits plain Ecto/Phoenix (the Ash foundation was removed — there is no `foundation:` axis; a would-be `foundation: ash` no longer parses). (The `foundation:` axis was removed — on every backend it had collapsed to a single value, `vanilla`.)
+Only these two axes offer real per-backend choice. The other realization knobs were removed as inert/theater: `foundation:` (single value `vanilla` everywhere), `application:`/style (a single fixed emission style per backend — `cqrs` on dotnet, `layered` elsewhere — kept internally, not user-selectable), and `transport:`/`runtime:` (name-only registries no emitter read). Writing any of those clauses no longer parses.
+
+Frontends carry **no** axes (empty menu — any axis written on a `react`/`vue`/… deployable is rejected). `platform: elixir` emits plain Ecto/Phoenix (the Ash foundation was removed).
 
 No generated tab here — the axes select *which* emitter subtree runs (e.g. `byFeature` vs `byLayer` reorganises the directory tree shown under [`deployable`](#deployable)); the divergence is structural across whole projects, not a single excerptable line.
 

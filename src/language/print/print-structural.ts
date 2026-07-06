@@ -458,11 +458,8 @@ function printDeployable(node: Deployable): string {
   // only when at least one axis is set (bare `platform: dotnet` otherwise).
   const platformLine = `platform: ${enumOrString(node.platform, PLATFORM_KEYWORDS)}`;
   const axes: string[] = [];
-  if (node.application) axes.push(`application: ${node.application}`);
   if (node.persistence) axes.push(`persistence: ${node.persistence}`);
   if (node.directoryLayout) axes.push(`directoryLayout: ${node.directoryLayout}`);
-  if (node.transport) axes.push(`transport: ${node.transport}`);
-  if (node.runtime) axes.push(`runtime: ${node.runtime}`);
   const items: string[] = [axes.length > 0 ? block(platformLine, axes) : platformLine];
   if (node.contextRefs.length > 0) {
     items.push(`contexts: [${node.contextRefs.map((r) => r.$refText).join(", ")}]`);

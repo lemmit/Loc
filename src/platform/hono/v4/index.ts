@@ -9,13 +9,9 @@
 // loadable.
 // ---------------------------------------------------------------------------
 
-import {
-  type PlatformAdapterDefaults,
-  type PlatformAdapters,
-  type RuntimeAdapter,
-  type StyleAdapter,
-  stubAdapter,
-  type TransportAdapter,
+import type {
+  PlatformAdapterDefaults,
+  PlatformAdapters,
 } from "../../../generator/_adapters/index.js";
 import type { LoomBackendManifest } from "../../manifest.js";
 import {
@@ -110,8 +106,7 @@ export function makeHonoPlatform(pins: BackendPins): PlatformSurface {
       };
     },
     // hono (Node backend) — `drizzle` + `mikroorm` persistence + `layered` style
-    // + `byLayer` / `byFeature` layout are real (F6a/b/c + Phase 5b/5d);
-    // `cqrs` is a stub.  Built lazily (see PlatformSurface jsdoc).
+    // + `byLayer` / `byFeature` layout.  Built lazily (see PlatformSurface jsdoc).
     adapters(): PlatformAdapters {
       const menu: PlatformAdapters = {
         persistence: {
@@ -120,63 +115,10 @@ export function makeHonoPlatform(pins: BackendPins): PlatformSurface {
         },
         styles: {
           layered: layeredStyleAdapter,
-          cqrs: stubAdapter<StyleAdapter>("style", "cqrs", "node", () => Object.keys(menu.styles), {
-            name: "cqrs",
-            supportedStrategies: ["state"],
-            supportedLayouts: ["byLayer", "byFeature"],
-          }),
-          // `flat` — reserved-not-implemented, completing the `application:`
-          // vocabulary `flat` → `serviceLayer` (= `layered`) → `cqrs`
-          // (realization-axes-alignment.md).
-          flat: stubAdapter<StyleAdapter>("style", "flat", "node", () => Object.keys(menu.styles), {
-            name: "flat",
-            supportedStrategies: ["state"],
-            supportedLayouts: ["byLayer", "byFeature"],
-          }),
         },
         layouts: {
           byLayer: byLayerLayoutAdapter,
           byFeature: byFeatureLayoutAdapter,
-        },
-        transports: {
-          // The Hono router — the only real HTTP surface today.
-          hono: { name: "hono" },
-          // Reserved alternatives (the per-transport emit is future work;
-          // realization-axes-alignment.md): `express` (the canonical, most
-          // widely-used Node web framework) and `fastify` (the popular modern
-          // one).  `transport: controllers` is the dotnet analogue.
-          express: stubAdapter<TransportAdapter>(
-            "transport",
-            "express",
-            "node",
-            () => Object.keys(menu.transports),
-            { name: "express" },
-          ),
-          fastify: stubAdapter<TransportAdapter>(
-            "transport",
-            "fastify",
-            "node",
-            () => Object.keys(menu.transports),
-            { name: "fastify" },
-          ),
-        },
-        runtimes: {
-          // DB-transaction consistency — the only real runtime today.
-          transactional: { name: "transactional" },
-          // `worker` — Node's built-in `worker_threads` concurrency primitive
-          // (the idiomatic Node story; there is no mainstream actor runtime).
-          // Reserved — the per-runtime emit is future work
-          // (realization-axes-alignment.md).  Node's stand-in on the runtime
-          // axis where dotnet has `orleans` and elixir `genserver`.
-          worker: stubAdapter<RuntimeAdapter>(
-            "runtime",
-            "worker",
-            "node",
-            () => Object.keys(menu.runtimes),
-            {
-              name: "worker",
-            },
-          ),
         },
       };
       return menu;
@@ -186,8 +128,6 @@ export function makeHonoPlatform(pins: BackendPins): PlatformSurface {
         persistence: { state: "drizzle", eventLog: "drizzle" },
         style: "layered",
         layout: "byLayer",
-        transport: "hono",
-        runtime: "transactional",
       };
     },
   };

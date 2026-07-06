@@ -1,7 +1,6 @@
 import type { Deployable, Ui } from "../../language/generated/ast.js";
 import { defaultsFor } from "../../platform/adapter-metadata.js";
 import { descriptorFor } from "../../platform/metadata.js";
-import { applicationDslToAdapter } from "../../util/platform-axes.js";
 import type { DeployableIR, Platform, UiParamBindingIR } from "../types/loom-ir.js";
 import { qualifyDesign, qualifyPlatform } from "./lower-platform.js";
 
@@ -143,36 +142,22 @@ export function lowerDeployable(d: Deployable): DeployableIR {
   // bindings the deployable hosts.
   const contextNames = (d.contextRefs ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);
   const dataSourceNames = (d.dataSourceRefs ?? []).map((r) => r.ref?.name ?? "").filter(Boolean);
-  // D-REALIZATION-AXES: normalize the six axes.  Backends fill every axis
-  // with a concrete value (an absent knob → the platform default);
-  // frontends (`react`/`static`) carry none — `defaultsFor` is undefined
-  // for them, the validator rejects any axis written on a frontend.  The
-  // three adapter-backed axes source their default from the live adapter
-  // menu (`adapterDefaults`); the three greenfield axes from the table
-  // above.  `application`↔adapter `style`, `directoryLayout`↔`layout`.
+  // D-REALIZATION-AXES: normalize the three realization axes.  Backends fill
+  // every axis with a concrete value (an absent knob → the platform default);
+  // frontends (`react`/`static`) carry none — `defaultsFor` is undefined for
+  // them, the validator rejects any axis written on a frontend.  Each sources
+  // its default from the live adapter menu (`adapterDefaults`).
+  // `application`↔adapter `style`, `directoryLayout`↔`layout`.
   const adapterDefaults = defaultsFor(platform);
   const axes =
     adapterDefaults !== undefined
       ? {
-          // Each adapter-backed axis takes its default from the platform's
-          // live adapter menu (`adapterDefaults`) (D-REALIZATION-AXES;
-          // realization-axes-alignment.md).
-          // Store the resolved adapter key (`serviceLayer` → `layered`)
-          // so the future codegen passes it straight to `resolveStyle`.
-          application: d.application
-            ? applicationDslToAdapter(d.application)
-            : adapterDefaults.style,
           persistence: d.persistence ?? adapterDefaults.persistence.state,
           directoryLayout: d.directoryLayout ?? adapterDefaults.layout,
-          transport: d.transport ?? adapterDefaults.transport,
-          runtime: d.runtime ?? adapterDefaults.runtime,
         }
       : {
-          application: undefined,
           persistence: undefined,
           directoryLayout: undefined,
-          transport: undefined,
-          runtime: undefined,
         };
   return {
     name: d.name,
@@ -184,11 +169,8 @@ export function lowerDeployable(d: Deployable): DeployableIR {
     targetName: d.targets?.ref?.name,
     auth,
     design,
-    application: axes.application,
     persistence: axes.persistence,
     directoryLayout: axes.directoryLayout,
-    transport: axes.transport,
-    runtime: axes.runtime,
     uiName,
     uiFramework,
     hostedUiNames,

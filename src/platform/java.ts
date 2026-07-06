@@ -1,10 +1,4 @@
-import {
-  type PersistenceAdapter,
-  type PlatformAdapterDefaults,
-  type PlatformAdapters,
-  type StyleAdapter,
-  stubAdapter,
-} from "../generator/_adapters/index.js";
+import type { PlatformAdapterDefaults, PlatformAdapters } from "../generator/_adapters/index.js";
 import { byFeatureLayoutAdapter } from "../generator/java/adapters/by-feature-layout.js";
 import { byLayerLayoutAdapter } from "../generator/java/adapters/by-layer-layout.js";
 import { jpaPersistenceAdapter } from "../generator/java/adapters/jpa-persistence.js";
@@ -84,56 +78,19 @@ const javaPlatform: PlatformSurface = {
       internalPort: 8080,
     };
   },
-  // java — JPA persistence real; `jooq` (typesafe-SQL sibling, the
-  // Dapper analog) and `axon` (event-store analog of dotnet's `marten`)
-  // are reserved stubs.  `layered` is the real Spring style; `cqrs` is
-  // the reserved stub (the inverse of dotnet, where cqrs is real).
+  // java — JPA persistence; `layered` is the Spring style (controller →
+  // service → repository); byLayer / byFeature layout.
   adapters(): PlatformAdapters {
     const menu: PlatformAdapters = {
       persistence: {
         jpa: jpaPersistenceAdapter,
-        jooq: stubAdapter<PersistenceAdapter>(
-          "persistence",
-          "jooq",
-          "java",
-          () => Object.keys(menu.persistence),
-          {
-            name: "jooq",
-            supportedStrategies: ["state"],
-            supports: (type) => type === "postgres",
-          },
-        ),
-        axon: stubAdapter<PersistenceAdapter>(
-          "persistence",
-          "axon",
-          "java",
-          () => Object.keys(menu.persistence),
-          {
-            name: "axon",
-            supportedStrategies: ["state", "eventLog"],
-            supports: (type) => type === "postgres",
-          },
-        ),
       },
       styles: {
         layered: layeredStyleAdapter,
-        cqrs: stubAdapter<StyleAdapter>("style", "cqrs", "java", () => Object.keys(menu.styles), {
-          name: "cqrs",
-          supportedStrategies: ["state", "eventLog"],
-          supportedLayouts: ["byLayer", "byFeature"],
-        }),
       },
       layouts: {
         byLayer: byLayerLayoutAdapter,
         byFeature: byFeatureLayoutAdapter,
-      },
-      transports: {
-        // Spring MVC @RestController — the only real HTTP surface.
-        restController: { name: "restController" },
-      },
-      runtimes: {
-        // DB-transaction consistency — the only real runtime today.
-        transactional: { name: "transactional" },
       },
     };
     return menu;
@@ -141,16 +98,12 @@ const javaPlatform: PlatformSurface = {
   adapterDefaults(): PlatformAdapterDefaults {
     return {
       // eventLog → `jpa`: JPA hosts the real event-sourced store (it declares
-      // `["state","eventLog"]` and emits the fold/append repository).  `axon` is
-      // a reserved STUB, so it must not be the default (DEBT-20 — the default
-      // eventLog must resolve to an adapter that actually emits ES).
+      // `["state","eventLog"]` and emits the fold/append repository).
       persistence: { state: "jpa", eventLog: "jpa" },
       style: "layered",
       // Package-by-feature is the idiomatic Spring arrangement
       // (java-backend.md adapter menu).
       layout: "byFeature",
-      transport: "restController",
-      runtime: "transactional",
     };
   },
 };

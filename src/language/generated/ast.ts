@@ -59,7 +59,6 @@ export type DddKeywordNames =
     | "angular"
     | "angularMaterial"
     | "api"
-    | "application"
     | "apply"
     | "area"
     | "asc"
@@ -143,7 +142,6 @@ export type DddKeywordNames =
     | "flowbite"
     | "footer"
     | "for"
-    | "foundation"
     | "framework"
     | "from"
     | "function"
@@ -256,7 +254,6 @@ export type DddKeywordNames =
     | "retrieval"
     | "return"
     | "route"
-    | "runtime"
     | "s3"
     | "schema"
     | "scopes"
@@ -299,7 +296,6 @@ export type DddKeywordNames =
     | "title"
     | "token"
     | "transactional"
-    | "transport"
     | "true"
     | "ttl"
     | "type"
@@ -1043,7 +1039,6 @@ export function isDecLit(item: unknown): item is DecLit {
 export interface Deployable extends langium.AstNode {
     readonly $container: Model | System;
     readonly $type: 'Deployable';
-    application?: LooseName;
     auth?: AuthMode;
     contextRefs: Array<langium.Reference<BoundedContext>>;
     dataSourceRefs: Array<langium.Reference<Resource>>;
@@ -1055,10 +1050,8 @@ export interface Deployable extends langium.AstNode {
     persistence?: LooseName;
     platform: Platform;
     port?: number;
-    runtime?: LooseName;
     serves: Array<langium.Reference<Api>>;
     targets?: langium.Reference<Deployable>;
-    transport?: LooseName;
     uiBlock?: UiBlockBinding;
     uiCompose?: UiComposeBinding;
     uiSugar?: UiSugarBinding;
@@ -1066,7 +1059,6 @@ export interface Deployable extends langium.AstNode {
 
 export const Deployable = {
     $type: 'Deployable',
-    application: 'application',
     auth: 'auth',
     contextRefs: 'contextRefs',
     dataSourceRefs: 'dataSourceRefs',
@@ -1078,10 +1070,8 @@ export const Deployable = {
     persistence: 'persistence',
     platform: 'platform',
     port: 'port',
-    runtime: 'runtime',
     serves: 'serves',
     targets: 'targets',
-    transport: 'transport',
     uiBlock: 'uiBlock',
     uiCompose: 'uiCompose',
     uiSugar: 'uiSugar'
@@ -1844,10 +1834,10 @@ export function isLoadSegment(item: unknown): item is LoadSegment {
     return reflection.isInstance(item, LoadSegment.$type);
 }
 
-export type LooseName = 'action' | 'aggregates' | 'allow' | 'api' | 'application' | 'asc' | 'await' | 'bind' | 'body' | 'by' | 'cache' | 'canonical' | 'command' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'crossTenant' | 'dataSources' | 'deep' | 'desc' | 'description' | 'design' | 'directoryLayout' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'filter' | 'foundation' | 'framework' | 'global' | 'handle' | 'id' | 'ignoring' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'loads' | 'local' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'of' | 'ogImage' | 'option' | 'or' | 'page' | 'paged' | 'parent' | 'payload' | 'permissions' | 'persistence' | 'policy' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'route' | 'runtime' | 'schema' | 'secret' | 'section' | 'service' | 'snapshot' | 'sort' | 'stamp' | 'state' | 'static' | 'store' | 'tablePrefix' | 'targets' | 'tenancy' | 'title' | 'token' | 'transactional' | 'transport' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | 'write' | string;
+export type LooseName = 'action' | 'aggregates' | 'allow' | 'api' | 'asc' | 'await' | 'bind' | 'body' | 'by' | 'cache' | 'canonical' | 'command' | 'component' | 'config' | 'connection' | 'contains' | 'contexts' | 'crossTenant' | 'dataSources' | 'deep' | 'desc' | 'description' | 'design' | 'directoryLayout' | 'env' | 'envelope' | 'error' | 'eventLog' | 'every' | 'favicon' | 'filter' | 'framework' | 'global' | 'handle' | 'id' | 'ignoring' | 'immutable' | 'implements' | 'instance' | 'internal' | 'isolationLevel' | 'keyPrefix' | 'kind' | 'link' | 'literal' | 'loads' | 'local' | 'managed' | 'menu' | 'modules' | 'money' | 'objectStore' | 'of' | 'ogImage' | 'option' | 'or' | 'page' | 'paged' | 'parent' | 'payload' | 'permissions' | 'persistence' | 'policy' | 'query' | 'queue' | 'readonly' | 'replica' | 'resource' | 'response' | 'retain' | 'retrieval' | 'route' | 'schema' | 'secret' | 'section' | 'service' | 'snapshot' | 'sort' | 'stamp' | 'state' | 'static' | 'store' | 'tablePrefix' | 'targets' | 'tenancy' | 'title' | 'token' | 'transactional' | 'ttl' | 'ui' | 'urlStyle' | 'use' | 'views' | 'workflows' | 'write' | string;
 
 export function isLooseName(item: unknown): item is LooseName {
-    return item === 'of' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'store' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'await' || item === 'by' || item === 'handle' || item === 'cache' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || item === 'urlStyle' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'foundation' || item === 'application' || item === 'persistence' || item === 'directoryLayout' || item === 'transport' || item === 'runtime' || item === 'transactional' || item === 'retrieval' || item === 'sort' || item === 'loads' || item === 'asc' || item === 'desc' || item === 'action' || item === 'ignoring' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'tenancy' || item === 'crossTenant' || item === 'parent' || item === 'policy' || item === 'allow' || item === 'local' || item === 'deep' || item === 'global' || item === 'write' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
+    return item === 'of' || item === 'id' || item === 'permissions' || item === 'contains' || item === 'ui' || item === 'page' || item === 'component' || item === 'store' || item === 'state' || item === 'menu' || item === 'section' || item === 'link' || item === 'route' || item === 'title' || item === 'body' || item === 'framework' || item === 'static' || item === 'modules' || item === 'contexts' || item === 'aggregates' || item === 'workflows' || item === 'views' || item === 'design' || item === 'targets' || item === 'bind' || item === 'api' || item === 'await' || item === 'by' || item === 'handle' || item === 'cache' || item === 'money' || item === 'immutable' || item === 'managed' || item === 'token' || item === 'internal' || item === 'secret' || item === 'description' || item === 'ogImage' || item === 'canonical' || item === 'favicon' || item === 'instance' || item === 'connection' || item === 'service' || item === 'env' || item === 'literal' || item === 'kind' || item === 'schema' || item === 'tablePrefix' || item === 'keyPrefix' || item === 'ttl' || item === 'every' || item === 'retain' || item === 'isolationLevel' || item === 'readonly' || item === 'use' || item === 'eventLog' || item === 'snapshot' || item === 'replica' || item === 'objectStore' || item === 'queue' || item === 'config' || item === 'resource' || item === 'dataSources' || item === 'urlStyle' || item === 'payload' || item === 'command' || item === 'query' || item === 'response' || item === 'error' || item === 'paged' || item === 'envelope' || item === 'option' || item === 'or' || item === 'persistence' || item === 'directoryLayout' || item === 'transactional' || item === 'retrieval' || item === 'sort' || item === 'loads' || item === 'asc' || item === 'desc' || item === 'action' || item === 'ignoring' || item === 'filter' || item === 'stamp' || item === 'implements' || item === 'tenancy' || item === 'crossTenant' || item === 'parent' || item === 'policy' || item === 'allow' || item === 'local' || item === 'deep' || item === 'global' || item === 'write' || (typeof item === 'string' && (/[_a-zA-Z][\w_]*/.test(item)));
 }
 
 export interface LValue extends langium.AstNode {
@@ -4793,10 +4783,6 @@ export class DddAstReflection extends langium.AbstractAstReflection {
         Deployable: {
             name: Deployable.$type,
             properties: {
-                application: {
-                    name: Deployable.application,
-                    optional: true
-                },
                 auth: {
                     name: Deployable.auth,
                     optional: true
@@ -4845,10 +4831,6 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                     name: Deployable.port,
                     optional: true
                 },
-                runtime: {
-                    name: Deployable.runtime,
-                    optional: true
-                },
                 serves: {
                     name: Deployable.serves,
                     defaultValue: [],
@@ -4858,10 +4840,6 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 targets: {
                     name: Deployable.targets,
                     referenceType: Deployable.$type,
-                    optional: true
-                },
-                transport: {
-                    name: Deployable.transport,
                     optional: true
                 },
                 uiBlock: {

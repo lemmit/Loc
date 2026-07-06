@@ -1,9 +1,4 @@
-import {
-  type PlatformAdapterDefaults,
-  type PlatformAdapters,
-  type RuntimeAdapter,
-  stubAdapter,
-} from "../generator/_adapters/index.js";
+import type { PlatformAdapterDefaults, PlatformAdapters } from "../generator/_adapters/index.js";
 import { byFeatureLayoutAdapter } from "../generator/elixir/adapters/by-feature-layout.js";
 import { ectoPersistenceAdapter } from "../generator/elixir/adapters/ecto-persistence.js";
 import { layeredStyleAdapter } from "../generator/elixir/adapters/layered-style.js";
@@ -107,34 +102,14 @@ const elixirPlatform: PlatformSurface = {
       internalPort: 4000,
     };
   },
-  // elixir — the `vanilla` foundation (plain Ecto/Phoenix) is the only
-  // foundation (D-REALIZATION-AXES; docs/plans/realization-axes-alignment.md).
-  // Persistence is `ecto` (the DB-agnostic data layer); the application style
-  // is `layered` (DSL `serviceLayer` — plain Phoenix's controller → context →
-  // repository pipeline).  The transport (`phoenix`) and runtime
-  // (`transactional`) adapters are real; `genserver` (process-per-aggregate
-  // runtime) is a reserved stub.
+  // elixir — plain Ecto/Phoenix.  Persistence is `ecto` (the DB-agnostic data
+  // layer); the application style is `layered` (plain Phoenix's controller →
+  // context → repository pipeline).
   adapters(): PlatformAdapters {
     const menu: PlatformAdapters = {
       persistence: { ecto: ectoPersistenceAdapter },
       styles: { layered: layeredStyleAdapter },
       layouts: { byFeature: byFeatureLayoutAdapter },
-      // Phoenix (Router + controllers) — the Elixir backend's HTTP surface,
-      // shared by both foundations (D-PHOENIX-TRANSPORT).
-      transports: { phoenix: { name: "phoenix" } },
-      runtimes: {
-        // DB-transaction consistency — the only real runtime today.
-        transactional: { name: "transactional" },
-        // A BEAM process per aggregate — reserved (the GenServer-runtime emit
-        // is future work; realization-axes-alignment.md).
-        genserver: stubAdapter<RuntimeAdapter>(
-          "runtime",
-          "genserver",
-          "elixir",
-          () => Object.keys(menu.runtimes),
-          { name: "genserver" },
-        ),
-      },
     };
     return menu;
   },
@@ -145,8 +120,6 @@ const elixirPlatform: PlatformSurface = {
       persistence: { state: "ecto", eventLog: "ecto" },
       style: "layered",
       layout: "byFeature",
-      transport: "phoenix",
-      runtime: "transactional",
     };
   },
 };

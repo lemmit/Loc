@@ -29,7 +29,7 @@ import { parseBuiltinPlatformRef } from "./metadata.js";
 
 /** The adapter-backed realization axes (each maps 1:1 to a `PlatformAdapters`
  *  record on the live surface). */
-export type AdapterAxisKind = "persistence" | "style" | "layout" | "transport" | "runtime";
+export type AdapterAxisKind = "persistence" | "style" | "layout";
 
 /** One axis's menu on a backend: the REAL (implemented) adapter names and the
  *  reserved STUB names (registered, but every `emit*` throws). */
@@ -42,8 +42,6 @@ interface BackendAdapterMeta {
   readonly persistence: AxisMenu;
   readonly style: AxisMenu;
   readonly layout: AxisMenu;
-  readonly transport: AxisMenu;
-  readonly runtime: AxisMenu;
   /** `supportedLayouts` per style adapter name (real + stub) — read by the
    *  validator's R3 style↔layout compatibility check. */
   readonly styleSupportedLayouts: Readonly<Record<string, readonly string[]>>;
@@ -62,48 +60,34 @@ interface BackendAdapterMeta {
 const BACKEND_ADAPTER_METADATA: Partial<Record<Platform, BackendAdapterMeta>> = {
   node: {
     persistence: { real: ["drizzle", "mikroorm"], stub: [] },
-    style: { real: ["layered"], stub: ["cqrs", "flat"] },
+    style: { real: ["layered"], stub: [] },
     layout: { real: ["byLayer", "byFeature"], stub: [] },
-    transport: { real: ["hono"], stub: ["express", "fastify"] },
-    runtime: { real: ["transactional"], stub: ["worker"] },
     styleSupportedLayouts: {
       layered: ["byLayer", "byFeature"],
-      cqrs: ["byLayer", "byFeature"],
-      flat: ["byLayer", "byFeature"],
     },
     defaults: {
       persistence: { state: "drizzle", eventLog: "drizzle" },
       style: "layered",
       layout: "byLayer",
-      transport: "hono",
-      runtime: "transactional",
     },
   },
   dotnet: {
-    persistence: { real: ["efcore", "dapper"], stub: ["marten"] },
-    style: { real: ["cqrs"], stub: ["layered", "flat"] },
+    persistence: { real: ["efcore", "dapper"], stub: [] },
+    style: { real: ["cqrs"], stub: [] },
     layout: { real: ["byLayer", "byFeature"], stub: [] },
-    transport: { real: ["controllers"], stub: ["minimalApi"] },
-    runtime: { real: ["transactional"], stub: ["orleans"] },
     styleSupportedLayouts: {
       cqrs: ["byLayer", "byFeature"],
-      layered: ["byLayer"],
-      flat: ["byLayer", "byFeature"],
     },
     defaults: {
       persistence: { state: "efcore", eventLog: "efcore" },
       style: "cqrs",
       layout: "byLayer",
-      transport: "controllers",
-      runtime: "transactional",
     },
   },
   elixir: {
     persistence: { real: ["ecto"], stub: [] },
     style: { real: ["layered"], stub: [] },
     layout: { real: ["byFeature"], stub: [] },
-    transport: { real: ["phoenix"], stub: [] },
-    runtime: { real: ["transactional"], stub: ["genserver"] },
     styleSupportedLayouts: {
       layered: ["byFeature"],
     },
@@ -111,26 +95,19 @@ const BACKEND_ADAPTER_METADATA: Partial<Record<Platform, BackendAdapterMeta>> = 
       persistence: { state: "ecto", eventLog: "ecto" },
       style: "layered",
       layout: "byFeature",
-      transport: "phoenix",
-      runtime: "transactional",
     },
   },
   java: {
-    persistence: { real: ["jpa"], stub: ["jooq", "axon"] },
-    style: { real: ["layered"], stub: ["cqrs"] },
+    persistence: { real: ["jpa"], stub: [] },
+    style: { real: ["layered"], stub: [] },
     layout: { real: ["byLayer", "byFeature"], stub: [] },
-    transport: { real: ["restController"], stub: [] },
-    runtime: { real: ["transactional"], stub: [] },
     styleSupportedLayouts: {
       layered: ["byLayer", "byFeature"],
-      cqrs: ["byLayer", "byFeature"],
     },
     defaults: {
       persistence: { state: "jpa", eventLog: "jpa" },
       style: "layered",
       layout: "byFeature",
-      transport: "restController",
-      runtime: "transactional",
     },
   },
 };

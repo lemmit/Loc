@@ -322,11 +322,8 @@ export function checkDeployableRealizationAxes(d: Deployable, accept: Validation
   if (d.platform == null) return;
   const family = resolveAxisFamily(d.platform);
   const axes: { name: RealizationAxis; value: string | undefined }[] = [
-    { name: "application", value: d.application },
     { name: "persistence", value: d.persistence },
     { name: "directoryLayout", value: d.directoryLayout },
-    { name: "transport", value: d.transport },
-    { name: "runtime", value: d.runtime },
   ];
 
   // R1 — every set axis value must be in its platform menu.
@@ -347,25 +344,19 @@ export function checkDeployableRealizationAxes(d: Deployable, accept: Validation
     });
   }
 
-  // R3 — the resolved application STYLE must support the resolved
-  // directoryLayout (StyleAdapter.supportedLayouts; realization-axes
-  // -alignment.md).  Uses effective values (explicit knob or platform
-  // default) and only fires for a REAL style + REAL layout — a stub/unknown
-  // value already errored under R1.  Reachable today via node
-  // `application: serviceLayer` (= `layered`, byLayer-only) + `directoryLayout:
-  // byFeature`.
-  const styleLayout = resolveStyleLayoutCompat(
-    family,
-    d.application ?? undefined,
-    d.directoryLayout ?? undefined,
-  );
+  // R3 — the backend's fixed emission STYLE must support the resolved
+  // directoryLayout (StyleAdapter.supportedLayouts).  Uses the platform's
+  // default style + the effective layout (explicit knob or platform default);
+  // only fires for a REAL layout — an unknown value already errored under R1.
+  // Reachable via elixir (`layered`, byFeature-only) + `directoryLayout: byLayer`.
+  const styleLayout = resolveStyleLayoutCompat(family, d.directoryLayout ?? undefined);
   if (styleLayout && !styleLayout.ok) {
     accept(
       "error",
-      `'directoryLayout: ${styleLayout.layout}' on deployable '${d.name}' is not supported by application style '${styleLayout.style}'. Supported: ${styleLayout.supported.map((v) => `'${v}'`).join(", ")}.`,
+      `'directoryLayout: ${styleLayout.layout}' on deployable '${d.name}' is not supported by the '${styleLayout.style}' emission style. Supported: ${styleLayout.supported.map((v) => `'${v}'`).join(", ")}.`,
       {
         node: d,
-        property: d.directoryLayout != null ? "directoryLayout" : "application",
+        property: "directoryLayout",
         code: "loom.platform-knob-style-layout-mismatch",
       },
     );

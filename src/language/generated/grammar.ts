@@ -1601,36 +1601,6 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                         "elements": [
                           {
                             "$type": "Keyword",
-                            "value": "application"
-                          },
-                          {
-                            "$type": "Keyword",
-                            "value": ":"
-                          },
-                          {
-                            "$type": "Assignment",
-                            "feature": "application",
-                            "operator": "=",
-                            "terminal": {
-                              "$type": "RuleCall",
-                              "rule": {
-                                "$ref": "#/rules@162"
-                              },
-                              "arguments": []
-                            }
-                          },
-                          {
-                            "$type": "Keyword",
-                            "value": ",",
-                            "cardinality": "?"
-                          }
-                        ]
-                      },
-                      {
-                        "$type": "Group",
-                        "elements": [
-                          {
-                            "$type": "Keyword",
                             "value": "persistence"
                           },
                           {
@@ -1670,66 +1640,6 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                           {
                             "$type": "Assignment",
                             "feature": "directoryLayout",
-                            "operator": "=",
-                            "terminal": {
-                              "$type": "RuleCall",
-                              "rule": {
-                                "$ref": "#/rules@162"
-                              },
-                              "arguments": []
-                            }
-                          },
-                          {
-                            "$type": "Keyword",
-                            "value": ",",
-                            "cardinality": "?"
-                          }
-                        ]
-                      },
-                      {
-                        "$type": "Group",
-                        "elements": [
-                          {
-                            "$type": "Keyword",
-                            "value": "transport"
-                          },
-                          {
-                            "$type": "Keyword",
-                            "value": ":"
-                          },
-                          {
-                            "$type": "Assignment",
-                            "feature": "transport",
-                            "operator": "=",
-                            "terminal": {
-                              "$type": "RuleCall",
-                              "rule": {
-                                "$ref": "#/rules@162"
-                              },
-                              "arguments": []
-                            }
-                          },
-                          {
-                            "$type": "Keyword",
-                            "value": ",",
-                            "cardinality": "?"
-                          }
-                        ]
-                      },
-                      {
-                        "$type": "Group",
-                        "elements": [
-                          {
-                            "$type": "Keyword",
-                            "value": "runtime"
-                          },
-                          {
-                            "$type": "Keyword",
-                            "value": ":"
-                          },
-                          {
-                            "$type": "Assignment",
-                            "feature": "runtime",
                             "operator": "=",
                             "terminal": {
                               "$type": "RuleCall",
@@ -13330,27 +13240,11 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           },
           {
             "$type": "Keyword",
-            "value": "foundation"
-          },
-          {
-            "$type": "Keyword",
-            "value": "application"
-          },
-          {
-            "$type": "Keyword",
             "value": "persistence"
           },
           {
             "$type": "Keyword",
             "value": "directoryLayout"
-          },
-          {
-            "$type": "Keyword",
-            "value": "transport"
-          },
-          {
-            "$type": "Keyword",
-            "value": "runtime"
           },
           {
             "$type": "Keyword",

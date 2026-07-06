@@ -2563,11 +2563,10 @@ export type Platform =
   | "python"
   | "java";
 
-// The `application:`/`shape(…)` platform-axes lookups
-// (`applicationDslToAdapter`, `applicationAdapterToDsl`,
-// `PLATFORM_SAVING_SHAPES`) live in `src/util/platform-axes.ts` so the
-// language validators may consume them without a backward `language → ir`
-// value edge.  They type-depend on `Platform` / `SavingShape` here.
+// The `shape(…)` platform-axes lookup (`PLATFORM_SAVING_SHAPES`) lives in
+// `src/util/platform-axes.ts` so the language validators may consume it
+// without a backward `language → ir` value edge.  It type-depends on
+// `Platform` / `SavingShape` here.
 
 export interface DeployableIR {
   name: string;
@@ -2625,18 +2624,14 @@ export interface DeployableIR {
    *  (normalized to the platform's default, mirroring how `design` is
    *  resolved via `BUILTIN_PACK_LATEST`); left `undefined` on frontend
    *  (`react`/`static`) deployables, which carry no domain realization.
-   *  This PR is DSL-surface-only: the fields are carried through lowering
-   *  and validated, but no generator consumes them yet.
    *
-   *  `application`/`directoryLayout` map onto the existing
-   *  D-ADAPTER-HOME adapter kinds `style`/`layout`; `persistence` onto
-   *  the `persistence` adapter; `transport`/`runtime` are
-   *  greenfield (no adapter infra yet, single default value each). */
-  application?: string;
+   *  `directoryLayout` maps onto the D-ADAPTER-HOME adapter kind `layout`;
+   *  `persistence` onto the `persistence` adapter.  Both carry real
+   *  per-backend choice.  (The application/style axis was removed — each
+   *  backend has a single fixed emission style, resolved internally by
+   *  `resolveStyle`; it is not a user knob.) */
   persistence?: string;
   directoryLayout?: string;
-  transport?: string;
-  runtime?: string;
   /** Per-deployable auth opt-in.  Populated when the source declares
    *  `auth: required` or `auth: ui` on the deployable.  Backends with
    *  `auth.required === true` emit JWT-decode middleware + a verifier

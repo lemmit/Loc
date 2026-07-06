@@ -17,7 +17,7 @@
 
 /** Adapter category — present in error messages and the registry entry
  *  name, so the user sees which slot they tripped. */
-export type AdapterKind = "persistence" | "style" | "layout" | "transport" | "runtime";
+export type AdapterKind = "persistence" | "style" | "layout";
 
 /** Brand stamped on every stub's capability target so a pure lookup can
  *  tell stubs from real adapters WITHOUT invoking an `emit*` method

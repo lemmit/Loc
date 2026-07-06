@@ -18,7 +18,7 @@ import * as live from "../../src/platform/resolve-adapters.js";
 // default or a style's `supportedLayouts` fails here until the mirror follows.
 // ---------------------------------------------------------------------------
 
-const AXES = ["persistence", "style", "layout", "transport", "runtime"] as const;
+const AXES = ["persistence", "style", "layout"] as const;
 
 // Every `platform:` spelling the front half may see — backends (with menus),
 // python (backend, no menu yet), frontends (no menu), and the `node@v4` pin.

@@ -27,11 +27,7 @@ import {
   type PackFormat,
   packFormatForBuiltin,
 } from "../../../util/builtin-formats.js";
-import {
-  applicationAdapterToDsl,
-  applicationDslToAdapter,
-  PLATFORM_SAVING_SHAPES,
-} from "../../../util/platform-axes.js";
+import { PLATFORM_SAVING_SHAPES } from "../../../util/platform-axes.js";
 
 /** Frontend keyword platforms — those that are valid as bareword
  *  `platform:` values without being registered as a backend family. */
@@ -157,41 +153,24 @@ export function builtinPackNamesForFormat(format: PackFormat): string {
 }
 
 // ---------------------------------------------------------------------------
-// D-REALIZATION-AXES — the five deployable realization axes.
+// D-REALIZATION-AXES — the two deployable realization axes.
 //
-// All five (`application` / `persistence` / `directoryLayout` / `transport` /
-// `runtime`) ride the live D-ADAPTER-HOME adapter menus; their DSL menu is the
-// REAL (non-stub) adapters off the surface, in DSL spelling.  Frontends carry
-// no axes (empty menu → validator rejects any axis written on them).
+// Both (`persistence` / `directoryLayout`) ride the live D-ADAPTER-HOME adapter
+// menus; their DSL menu is the REAL (non-stub) adapters off the surface.  Both
+// carry real per-backend choice.  Frontends carry no axes (empty menu →
+// validator rejects any axis written on them).  (The application/style axis was
+// removed — each backend has a single fixed emission style, not a user knob.)
 // ---------------------------------------------------------------------------
 
-export type RealizationAxis =
-  | "application"
-  | "persistence"
-  | "directoryLayout"
-  | "transport"
-  | "runtime";
+export type RealizationAxis = "persistence" | "directoryLayout";
 
-// `applicationDslToAdapter` / `applicationAdapterToDsl` live in
-// `util/platform-axes.ts` (shared with lowering) — imported above.
-
-/** Adapter kind backing each axis.  Every realization axis is now
- *  adapter-backed (`transport` + `runtime` joined the set when they were
- *  promoted from greenfield; `foundation` was removed). */
-const ADAPTER_KIND_BY_AXIS: Record<
-  RealizationAxis,
-  "persistence" | "style" | "layout" | "transport" | "runtime"
-> = {
+/** Adapter kind backing each realization axis. */
+const ADAPTER_KIND_BY_AXIS: Record<RealizationAxis, "persistence" | "layout"> = {
   persistence: "persistence",
-  application: "style",
   directoryLayout: "layout",
-  transport: "transport",
-  runtime: "runtime",
 };
 
-function adapterKindForAxis(
-  axis: RealizationAxis,
-): "persistence" | "style" | "layout" | "transport" | "runtime" {
+function adapterKindForAxis(axis: RealizationAxis): "persistence" | "layout" {
   return ADAPTER_KIND_BY_AXIS[axis];
 }
 
@@ -205,54 +184,46 @@ export function realizationAxisMenu(family: Platform, axis: RealizationAxis): st
       return availableAdapterNames(family, "persistence");
     case "directoryLayout":
       return availableAdapterNames(family, "layout");
-    case "application":
-      return availableAdapterNames(family, "style").map(applicationAdapterToDsl);
-    case "transport":
-      return availableAdapterNames(family, "transport");
-    case "runtime":
-      return availableAdapterNames(family, "runtime");
   }
 }
 
 /** True when an out-of-menu value is a REGISTERED STUB (the platform
  *  reserves the name but hasn't implemented it) rather than an unknown
- *  value — lets the diagnostic say "reserved but not yet implemented". */
+ *  value.  No stubs are registered today, so this is always false; kept as
+ *  the seam for a future reserved-but-unimplemented adapter. */
 export function isReservedStub(family: Platform, axis: RealizationAxis, dslValue: string): boolean {
   const kind = adapterKindForAxis(axis);
-  const key = axis === "application" ? applicationDslToAdapter(dslValue) : dslValue;
   return (
-    allAdapterNames(family, kind).includes(key) &&
-    !availableAdapterNames(family, kind).includes(key)
+    allAdapterNames(family, kind).includes(dslValue) &&
+    !availableAdapterNames(family, kind).includes(dslValue)
   );
 }
 
-/** R3 support — does the resolved application *style* accept the resolved
+/** R3 support — does the backend's fixed emission *style* accept the resolved
  *  `directoryLayout`?  A `StyleAdapter` declares `supportedLayouts`; the
- *  validator pairs it with the chosen layout to reject combinations the style
- *  can't fit (e.g. node's `layered` only supports `byLayer`, so `byFeature`
- *  is rejected).
+ *  validator pairs the platform's default style with the chosen layout to
+ *  reject combinations the style can't fit (e.g. elixir's `layered` only
+ *  supports `byFeature`).
  *
- *  `applicationDsl` / `layout` may be undefined (knob omitted) → the platform
- *  default applies.  Returns `undefined` when the check doesn't apply: a
- *  frontend / unknown family, or a style / layout that isn't a REAL adapter
- *  (a stub or unknown value already errored under R1 — R3 stays quiet to
- *  avoid a double diagnostic). */
+ *  `layout` may be undefined (knob omitted) → the platform default applies.
+ *  Returns `undefined` when the check doesn't apply: a frontend / unknown
+ *  family, or a layout that isn't a REAL adapter (an unknown value already
+ *  errored under R1 — R3 stays quiet to avoid a double diagnostic). */
 export function resolveStyleLayoutCompat(
   family: Platform,
-  applicationDsl: string | undefined,
   layout: string | undefined,
 ): { style: string; layout: string; supported: readonly string[]; ok: boolean } | undefined {
   // Guard the unresolved-platform case FIRST.  A name that isn't a known
   // backend family (a typo'd quoted `platform:`) has no adapter metadata, so
   // stay quiet: an unknown platform already draws its own diagnostic from
   // `checkDeployablePlatform` (deployable.ts), and a frontend legitimately has
-  // no style/layout axes to check.  Reads pure adapter FACTS from
+  // no layout axis to check.  Reads pure adapter FACTS from
   // `adapter-metadata.ts` (no live surface / generator import), so the
   // validator no longer drags the backend generators into a client bundle.
   if (parseBuiltinPlatformRef(family) == null) return undefined;
   const defaults = defaultsFor(family);
   if (!defaults) return undefined;
-  const styleKey = applicationDsl ? applicationDslToAdapter(applicationDsl) : defaults.style;
+  const styleKey = defaults.style;
   const supported = styleSupportedLayouts(family, styleKey);
   if (!supported || !availableAdapterNames(family, "style").includes(styleKey)) return undefined;
   const resolvedLayout = layout ?? defaults.layout;
