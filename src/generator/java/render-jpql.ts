@@ -48,6 +48,8 @@ export interface JpqlCtx {
 // test.
 export const JPQL_INTRINSIC_SQL: Record<string, (recv: string, args: string[]) => string> = {
   "string.trim": (recv) => `trim(${recv})`,
+  "string.toUpper": (recv) => `upper(${recv})`,
+  "string.toLower": (recv) => `lower(${recv})`,
 };
 
 export function renderJpqlWhere(e: ExprIR, ctx: JpqlCtx): string {

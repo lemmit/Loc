@@ -81,7 +81,18 @@ describe("type-system — membersOfType (single source for member completion)", 
   it("string → length + catalogue intrinsics; other primitives → their intrinsics", () => {
     // `length` stays first; scalar intrinsics (src/util/intrinsics.ts)
     // follow in catalogue order.
-    expect(names({ kind: "primitive", name: "string" })).toEqual(["length", "trim"]);
+    expect(names({ kind: "primitive", name: "string" })).toEqual([
+      "length",
+      "trim",
+      "toUpper",
+      "toLower",
+      "substring",
+      "startsWith",
+      "endsWith",
+      "contains",
+      "replace",
+      "split",
+    ]);
     expect(names({ kind: "primitive", name: "int" })).toEqual([]);
   });
 

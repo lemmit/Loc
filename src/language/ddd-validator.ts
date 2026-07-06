@@ -42,6 +42,7 @@ import {
   checkExpectMatcher,
   checkGenericCarriers,
   checkInheritance,
+  checkIntrinsicCalls,
   checkLayout,
   checkLegacyConstructorCalls,
   checkMacroExpansion,
@@ -261,6 +262,9 @@ export class DddValidator {
     // typo cascades to `T.unknown` and every operand check on it is
     // suppressed — so the mistake produces no diagnostic at all.
     guard("unknown-member-access", model, () => checkUnknownMemberAccess(model, accept));
+    // Scalar-intrinsic call-shape gate (src/util/intrinsics.ts): call form,
+    // arity, positional-only args, argument primitive types.
+    guard("intrinsic-calls", model, () => checkIntrinsicCalls(model, accept));
     // Unresolved bare-identifier heads (`total := amout`, `let x = amout`):
     // a `NameRef` is not a cross-reference, so an unresolvable head types as
     // `T.unknown` and every downstream gate suppresses on it — the finding-1

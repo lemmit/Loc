@@ -4,6 +4,7 @@
 
 import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
 import { intrinsicMatcherSig } from "../../util/intrinsic-matchers.js";
+import { intrinsicFor, intrinsicMinArity } from "../../util/intrinsics.js";
 import type {
   Aggregate,
   BinaryChain,
@@ -193,6 +194,70 @@ export function checkUnknownMemberAccess(model: Model, accept: ValidationAccepto
           // Stop walking this chain — the receiver is now indeterminate and
           // any further suffix would cascade off the unresolved access.
           break;
+        }
+      }
+      recvType = typeAfterSuffix(recvType, suffix, env);
+    }
+  }
+}
+
+/** Validate scalar-intrinsic calls (src/util/intrinsics.ts) against their
+ *  catalogue signature — call form, arity, no named args, and argument
+ *  primitive types.  Fail-open everywhere the receiver or an argument
+ *  types as `unknown` (anti-double-reporting, like the operand checks). */
+export function checkIntrinsicCalls(model: Model, accept: ValidationAcceptor): void {
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (!isPostfixChain(node)) continue;
+    const chain = node as PostfixChain;
+    const env = envForNode(chain);
+    let recvType = typeOf(chain.head, env);
+    for (const suffix of chain.suffixes) {
+      if (isMemberSuffix(suffix) && recvType.kind === "primitive") {
+        const ms = suffix as MemberSuffix;
+        const sig = intrinsicFor(recvType.name, ms.member);
+        if (sig) {
+          if (!ms.call) {
+            accept(
+              "error",
+              `'${ms.member}' is an intrinsic operation and needs a call — write '.${ms.member}${sig.signature.split("):")[0]})'.`,
+              { node: ms, property: "member", code: "loom.intrinsic-bare" },
+            );
+            break;
+          }
+          const min = intrinsicMinArity(sig);
+          if (ms.args.length < min || ms.args.length > sig.params.length) {
+            const expected = min === sig.params.length ? `${min}` : `${min}–${sig.params.length}`;
+            accept(
+              "error",
+              `'${ms.member}' takes ${expected} argument(s) — signature: ${ms.member}${sig.signature}.`,
+              { node: ms, property: "args", code: "loom.intrinsic-arity" },
+            );
+            break;
+          }
+          for (let i = 0; i < ms.args.length; i++) {
+            const argWrap = ms.args[i]!;
+            if (argWrap.name) {
+              accept("error", `'${ms.member}' takes positional arguments only.`, {
+                node: argWrap,
+                property: "name",
+                code: "loom.intrinsic-named-arg",
+              });
+              break;
+            }
+            const expected = T.prim(sig.params[i]!.replace("?", "") as never);
+            const actual = typeOf(argWrap.value, env);
+            if (
+              actual.kind !== "unknown" &&
+              !isAssignable(actual, expected) &&
+              !canPromoteLiteralTo(argWrap.value, expected)
+            ) {
+              accept(
+                "error",
+                `'${ms.member}' argument ${i + 1} is '${typeToString(actual)}' but the signature ${ms.member}${sig.signature} expects '${typeToString(expected)}'.`,
+                { node: argWrap, property: "value", code: "loom.intrinsic-arg-type" },
+              );
+            }
+          }
         }
       }
       recvType = typeAfterSuffix(recvType, suffix, env);

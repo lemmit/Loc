@@ -42,6 +42,8 @@ import { associationsOf } from "./repository-associations-builder.js";
 // for the intrinsic completeness test.
 export const DRIZZLE_INTRINSIC_SQL: Record<string, (recv: string, args: string[]) => string> = {
   "string.trim": (recv) => `sql\`trim(\${${recv}})\``,
+  "string.toUpper": (recv) => `sql\`upper(\${${recv}})\``,
+  "string.toLower": (recv) => `sql\`lower(\${${recv}})\``,
 };
 
 // IR expression → Drizzle expression

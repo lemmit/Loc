@@ -90,6 +90,8 @@ function bool(e: ExprIR, ctx: CriteriaCtx): string {
 // for the intrinsic completeness test.
 export const JAVA_CRITERIA_INTRINSICS: Record<string, (recv: string, args: string[]) => string> = {
   "string.trim": (recv) => `cb.trim(${recv})`,
+  "string.toUpper": (recv) => `cb.upper(${recv})`,
+  "string.toLower": (recv) => `cb.lower(${recv})`,
 };
 
 /** Candidate-path side of a comparison, rendered — a bare `this.a.b` path

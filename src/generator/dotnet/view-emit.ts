@@ -304,7 +304,7 @@ function renderWorkflowViewHandler(
   const dbSet = workflowStateDbSet(wf);
   const eventSourced = !!wf.eventSourced;
   const usings = new Set<string>();
-  const where = view.filter ? renderCsExpr(view.filter, { thisName: "r" }) : undefined;
+  const where = view.filter ? renderCsExpr(view.filter, { thisName: "r", efQuery: true }) : undefined;
   if (view.filter) collectCsExprUsings(view.filter, usings);
   if (view.requires) collectCsExprUsings(view.requires, usings);
   const proj = (wf.instanceWireShape ?? [])

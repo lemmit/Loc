@@ -6,13 +6,13 @@ import type {
   TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
-import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import {
   DATA_KEY_PATH_DELIMITER,
   ORG_PATH_CLAIM_FIELD,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
+import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import {
   elixirRegexBody,
   elixirString,
@@ -460,10 +460,36 @@ function renderMember(recv: string, e: MemberExpr, ctx: RenderCtx): string {
 export const ELIXIR_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[]) => string> =
   {
     "string.trim": (recv) => `String.trim(${recv})`,
+    "string.toUpper": (recv) => `String.upcase(${recv})`,
+    "string.toLower": (recv) => `String.downcase(${recv})`,
+    // 0-based clamping semantics = JS slice (the catalogue contract):
+    // `String.slice/3` takes start + LENGTH and clamps at both ends; the
+    // omitted-len arity runs to the end via the stepped range (`..-1//1`
+    // keeps an out-of-range start yielding "" instead of wrapping).
+    // Grapheme-vs-codeunit divergence is accepted and documented in the
+    // catalogue.
+    "string.substring": (recv, args) =>
+      args.length > 1
+        ? `String.slice(${recv}, ${args[0]}, ${args[1]})`
+        : `String.slice(${recv}, ${args[0]}..-1//1)`,
+    "string.startsWith": (recv, args) => `String.starts_with?(${recv}, ${args[0]})`,
+    "string.endsWith": (recv, args) => `String.ends_with?(${recv}, ${args[0]})`,
+    // String-receiver `contains` is the intrinsic (lowering keys
+    // `isCollectionOp` off the receiver type, so this never collides with the
+    // array-membership arm above).
+    "string.contains": (recv, args) => `String.contains?(${recv}, ${args[0]})`,
+    // Replaces ALL occurrences of a literal find-string — `String.replace/3`'s
+    // default (`global: true`), matching the catalogue contract.
+    "string.replace": (recv, args) => `String.replace(${recv}, ${args[0]}, ${args[1]})`,
+    // Literal separator; keeps empty segments (Elixir's default), per the
+    // catalogue contract.
+    "string.split": (recv, args) => `String.split(${recv}, ${args[0]})`,
   };
 
 export const ECTO_INTRINSIC_FRAGMENTS: Record<string, (recv: string, args: string[]) => string> = {
   "string.trim": (recv) => `fragment("btrim(?)", ${recv})`,
+  "string.toUpper": (recv) => `fragment("upper(?)", ${recv})`,
+  "string.toLower": (recv) => `fragment("lower(?)", ${recv})`,
 };
 
 function renderMethodCall(recv: string, args: string[], e: MethodCallExpr, ctx: RenderCtx): string {

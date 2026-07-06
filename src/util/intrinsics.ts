@@ -33,7 +33,8 @@ export type IntrinsicParam =
 
 /** Return type of an intrinsic. `"receiver"` means "same type as the
  *  receiver" (e.g. numeric `abs` on int stays int, on decimal stays
- *  decimal). */
+ *  decimal); `"string[]"` is a string collection (collection ops apply
+ *  to the result). */
 export type IntrinsicReturn =
   | "string"
   | "int"
@@ -42,7 +43,8 @@ export type IntrinsicReturn =
   | "money"
   | "bool"
   | "datetime"
-  | "receiver";
+  | "receiver"
+  | "string[]";
 
 export interface IntrinsicSignature {
   receiver: IntrinsicReceiver;
@@ -59,6 +61,21 @@ export interface IntrinsicSignature {
   signature: string;
 }
 
+// Cross-backend semantics contract (each op behaves the same from `.ddd`
+// source on every backend; edge behaviour is pinned here, not per backend):
+//   - `toUpper` / `toLower` — full-string case mapping in the platform's
+//     default (invariant-leaning) mapping; queryable as SQL upper()/lower().
+//   - `substring(start, len?)` — 0-BASED and CLAMPING (JS `slice`
+//     semantics): out-of-range start yields "", len past the end truncates,
+//     omitted len runs to the end.  Non-negative arguments expected.
+//   - `startsWith` / `endsWith` / `contains` — ordinal (culture-free)
+//     comparison.  A string-receiver `contains` is an intrinsic, NOT the
+//     collection op — lowering keys the `isCollectionOp` flag off the
+//     receiver type, so the two never collide.
+//   - `replace(find, repl)` — replaces ALL occurrences; `find` is a literal
+//     string, never a pattern (use `matches` for regex).
+//   - `split(sep)` — literal separator; keeps empty segments (including a
+//     trailing one), like JS/Python/Elixir defaults.
 export const INTRINSIC_SIGNATURES: ReadonlyArray<IntrinsicSignature> = [
   // ---- string ------------------------------------------------------------
   {
@@ -69,7 +86,76 @@ export const INTRINSIC_SIGNATURES: ReadonlyArray<IntrinsicSignature> = [
     queryable: true,
     signature: "(): string",
   },
+  {
+    receiver: "string",
+    name: "toUpper",
+    params: [],
+    returns: "string",
+    queryable: true,
+    signature: "(): string",
+  },
+  {
+    receiver: "string",
+    name: "toLower",
+    params: [],
+    returns: "string",
+    queryable: true,
+    signature: "(): string",
+  },
+  {
+    receiver: "string",
+    name: "substring",
+    params: ["int", "int?"],
+    returns: "string",
+    queryable: false,
+    signature: "(start: int, len?: int): string",
+  },
+  {
+    receiver: "string",
+    name: "startsWith",
+    params: ["string"],
+    returns: "bool",
+    queryable: false,
+    signature: "(s: string): bool",
+  },
+  {
+    receiver: "string",
+    name: "endsWith",
+    params: ["string"],
+    returns: "bool",
+    queryable: false,
+    signature: "(s: string): bool",
+  },
+  {
+    receiver: "string",
+    name: "contains",
+    params: ["string"],
+    returns: "bool",
+    queryable: false,
+    signature: "(s: string): bool",
+  },
+  {
+    receiver: "string",
+    name: "replace",
+    params: ["string", "string"],
+    returns: "string",
+    queryable: false,
+    signature: "(find: string, repl: string): string",
+  },
+  {
+    receiver: "string",
+    name: "split",
+    params: ["string"],
+    returns: "string[]",
+    queryable: false,
+    signature: "(sep: string): string[]",
+  },
 ];
+
+/** Number of REQUIRED parameters (the prefix before any `?`-marked ones). */
+export function intrinsicMinArity(sig: IntrinsicSignature): number {
+  return sig.params.filter((p) => !p.endsWith("?")).length;
+}
 
 /** Stable lookup key for an intrinsic — receiver-qualified so a future
  *  numeric `round` and a hypothetical string `round` never collide.

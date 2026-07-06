@@ -89,3 +89,46 @@ system Shop {
     expect(repo).toContain("select(ProductRow).where((ProductRow.name == q.strip()))");
   });
 });
+
+// A2 string batch — chained case-mapping in a domain body plus the queryable
+// `toLower` in a find where-clause (`func.lower(col)`), mirroring the trim
+// pilot above.
+describe("python generator — string case intrinsics (stdlib A2)", () => {
+  const SRC_A2 = `
+system Shop {
+  subdomain Catalog {
+    context Catalog {
+      aggregate Product ids guid {
+        name: string
+        derived slug: string = name.trim().toLower()
+      }
+      repository Products for Product {
+        find byNameCi(q: string): Product[] where this.name.toLower() == q
+      }
+    }
+  }
+  api CatalogApi from Catalog
+  storage pg { type: postgres }
+  resource catalogState { for: Catalog, kind: state, use: pg }
+  deployable api { platform: python, contexts: [Catalog], dataSources: [catalogState], serves: CatalogApi, port: 4000 }
+}
+`;
+
+  it("parses + validates cleanly", async () => {
+    const { errors } = await parseString(SRC_A2);
+    expect(errors).toEqual([]);
+  });
+
+  it("renders a chained trim().toLower() derived as .strip().lower()", async () => {
+    const domain = (await build(SRC_A2)).get(DOMAIN)!;
+    expect(domain).toBeDefined();
+    expect(domain).toContain("self._name.strip().lower()");
+  });
+
+  it("renders toLower as func.lower(col) in the find where-clause and imports `func`", async () => {
+    const repo = (await build(SRC_A2)).get(REPO)!;
+    expect(repo).toBeDefined();
+    expect(repo).toContain("select(ProductRow).where((func.lower(ProductRow.name) == q))");
+    expect(repo).toMatch(/from sqlalchemy import [^\n]*\bfunc\b/);
+  });
+});

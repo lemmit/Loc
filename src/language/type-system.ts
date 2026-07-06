@@ -704,7 +704,11 @@ export function typeAfterSuffix(recvType: DddType, suffix: PostfixSuffix, env: E
     // Scalar intrinsics (src/util/intrinsics.ts) — catalogue-driven, so a
     // new op types here (and completes, via membersOfType) without code.
     const sig = intrinsicFor(recvType.name, memberName);
-    if (sig) return T.prim(intrinsicReturnType(sig, recvType.name) as PrimitiveName);
+    if (sig) {
+      const ret = intrinsicReturnType(sig, recvType.name);
+      if (ret.endsWith("[]")) return T.array(T.prim(ret.slice(0, -2) as PrimitiveName));
+      return T.prim(ret as PrimitiveName);
+    }
   }
   if (recvType.kind === "id") {
     return lookupEntityMember(recvType.target, memberName);

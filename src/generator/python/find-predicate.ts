@@ -51,6 +51,8 @@ export interface PyPredicate {
 // The Python mirror of node's `DRIZZLE_INTRINSIC_SQL`.
 export const SQLALCHEMY_INTRINSIC_SQL: Record<string, (recv: string, args: string[]) => string> = {
   "string.trim": (recv) => `func.trim(${recv})`,
+  "string.toUpper": (recv) => `func.upper(${recv})`,
+  "string.toLower": (recv) => `func.lower(${recv})`,
 };
 
 export function lowerToSqlAlchemy(

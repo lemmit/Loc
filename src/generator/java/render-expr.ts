@@ -436,6 +436,32 @@ function renderMember(recv: string, e: MemberExpr): string {
 // completeness test can pin that every catalogue row has a Java arm.
 export const JAVA_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[]) => string> = {
   "string.trim": (recv) => `${recv}.trim()`,
+  // Locale.ROOT — the catalogue contract is culture-free case mapping
+  // (the default-locale overloads diverge under e.g. tr-TR dotted-i).
+  "string.toUpper": (recv) => `${recv}.toUpperCase(java.util.Locale.ROOT)`,
+  "string.toLower": (recv) => `${recv}.toLowerCase(java.util.Locale.ROOT)`,
+  // 0-based CLAMPING semantics (JS slice — see the catalogue contract):
+  // Java's String.substring throws on out-of-range indices, so guard the
+  // start and clamp the end.  Argument duplication is safe — Loom
+  // expressions are pure.
+  "string.substring": (recv, args) =>
+    args.length > 1
+      ? `(${args[0]} >= ${recv}.length() ? "" : ${recv}.substring(${args[0]}, Math.min((${args[0]}) + (${args[1]}), ${recv}.length())))`
+      : `(${args[0]} >= ${recv}.length() ? "" : ${recv}.substring(${args[0]}))`,
+  "string.startsWith": (recv, args) => `${recv}.startsWith(${args[0]})`,
+  "string.endsWith": (recv, args) => `${recv}.endsWith(${args[0]})`,
+  "string.contains": (recv, args) => `${recv}.contains(${args[0]})`,
+  // Java's String.replace(CharSequence, CharSequence) already replaces ALL
+  // occurrences with a LITERAL find — exactly the catalogue contract
+  // (String.replaceAll would regex-interpret the pattern; wrong here).
+  "string.replace": (recv, args) => `${recv}.replace(${args[0]}, ${args[1]})`,
+  // Literal separator (Pattern.quote — String.split takes a regex), -1
+  // keeps trailing empty segments (catalogue contract).  Fully-qualified
+  // names avoid import wiring; wrapped in Arrays.asList because Loom
+  // `string[]` is List<String> on Java (renderJavaType) and every
+  // collection op renders the List API (.size()/.stream()/.contains()).
+  "string.split": (recv, args) =>
+    `java.util.Arrays.asList(${recv}.split(java.util.regex.Pattern.quote(${args[0]}), -1))`,
 };
 
 function renderMethodCall(

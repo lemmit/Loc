@@ -116,10 +116,10 @@ function retrievalWhereClause(
   ctx: BoundedContextIR,
 ): string {
   if (r.criterionRef && canEmitToExpressionFor(r.criterionRef.name, ctx, agg.name)) {
-    const args = r.criterionRef.args.map((a) => renderCsExpr(a, { thisName: "x", agg })).join(", ");
+    const args = r.criterionRef.args.map((a) => renderCsExpr(a, { thisName: "x", agg, efQuery: true })).join(", ");
     return `.Where(new ${upperFirst(r.criterionRef.name)}Criterion(${args}).ToExpression())`;
   }
-  return `.Where(x => ${renderCsExpr(r.where, { thisName: "x", agg })})`;
+  return `.Where(x => ${renderCsExpr(r.where, { thisName: "x", agg, efQuery: true })})`;
 }
 
 /** `.OrderBy(x => x.Col)[.ThenBy…]` for a retrieval's sort terms (empty
@@ -158,7 +158,7 @@ function filterClauseFor(find: FindIR, agg: EnrichedAggregateIR, ctx?: BoundedCo
   // reified `ToExpression()` (Slice 2b, symmetric to the retrieval path).
   if (ctx && find.criterionRef && canEmitToExpressionFor(find.criterionRef.name, ctx, agg.name)) {
     const args = find.criterionRef.args
-      .map((a) => renderCsExpr(a, { thisName: "x", agg }))
+      .map((a) => renderCsExpr(a, { thisName: "x", agg, efQuery: true }))
       .join(", ");
     return `.Where(new ${upperFirst(find.criterionRef.name)}Criterion(${args}).ToExpression())`;
   }
@@ -167,7 +167,7 @@ function filterClauseFor(find: FindIR, agg: EnrichedAggregateIR, ctx?: BoundedCo
     // `this.<refColl>.contains(param)` predicate to its
     // AssociationIR and emit a join-table subquery.  See
     // `render-expr.ts:renderMethodCall`.
-    return `.Where(x => ${renderCsExpr(find.filter, { thisName: "x", agg })})`;
+    return `.Where(x => ${renderCsExpr(find.filter, { thisName: "x", agg, efQuery: true })})`;
   }
   if (find.params.length === 0) return "";
   const conditions: string[] = [];

@@ -98,7 +98,7 @@ function renderCriterion(c: CriterionIR, candidate: string, ns: string): string 
   // parameters render as bare names, which resolve to the fields below.  The
   // same rendered body serves both faces — `IsSatisfiedBy(c) => body` and the
   // `c => body` lambda of `ToExpression()`.
-  const body = renderCsExpr(c.body, { thisName: CANDIDATE });
+  const body = renderCsExpr(c.body, { thisName: CANDIDATE, efQuery: true });
   // The *query* face is emitted only for criteria in the queryable subset —
   // `ToExpression()` is meant for EF `IQueryable`/`Where`, so a body that
   // can't translate to SQL gets the evaluate face only.

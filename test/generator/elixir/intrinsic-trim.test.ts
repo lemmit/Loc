@@ -105,3 +105,56 @@ describe("elixir generator — string.trim() intrinsic (stdlib A1 pilot)", () =>
     expect(repo).toContain('record.name == fragment("btrim(?)", ^q)');
   });
 });
+
+// A2 string batch — chained intrinsics in-memory + the queryable toLower in a
+// find where-clause (SQL lower() fragment).
+const A2_SRC = `
+system Shop {
+  subdomain Core {
+    context Catalog {
+      aggregate Product with crudish {
+        name: string
+        derived slug: string = name.trim().toLower()
+      }
+      repository Products for Product {
+        find byNameCi(q: string): Product[] where this.name.toLower() == q
+      }
+    }
+  }
+  api CatalogApi from Core
+  storage pg { type: postgres }
+  resource st { for: Catalog, kind: state, use: pg }
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Catalog]
+    dataSources: [st]
+    serves: CatalogApi
+    port: 4000
+  }
+}
+`;
+
+describe("elixir generator — string intrinsics batch (stdlib A2)", () => {
+  it("parses + validates cleanly", async () => {
+    const { errors } = await parseString(A2_SRC);
+    expect(errors).toEqual([]);
+  });
+
+  it("renders a chained trim().toLower() derived in-memory via nested String.* calls", async () => {
+    const files = await generateSystemFiles(A2_SRC);
+    const ctrl = fileEndingWith(files, "/controllers/product_controller.ex");
+    expect(ctrl).toContain('"slug" => String.downcase(String.trim(record.name))');
+    // Never the invalid method-call fallthroughs.
+    expect(ctrl).not.toContain(".trim()");
+    expect(ctrl).not.toContain(".to_lower(");
+  });
+
+  it("renders toLower as a SQL lower() fragment in the find where-clause", async () => {
+    const files = await generateSystemFiles(A2_SRC);
+    const repo = fileEndingWith(files, "/product_repository.ex");
+    expect(repo).toContain(
+      'from(record in Api.Catalog.Product, where: fragment("lower(?)", record.name) == ^q)',
+    );
+    expect(repo).not.toContain("String.downcase(");
+  });
+});

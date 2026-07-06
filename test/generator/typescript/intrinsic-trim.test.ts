@@ -57,3 +57,35 @@ describe("typescript generator — string.trim() intrinsic (stdlib A1 pilot)", (
     expect(repo).toContain("eq(schema.products.name, q.trim())");
   });
 });
+
+describe("typescript generator — A2 string intrinsics end-to-end", () => {
+  const SRC2 = `
+    context Catalog {
+      aggregate Product ids guid {
+        name: string
+        derived slug: string = name.trim().toLower()
+        derived initial: string = name.substring(0, 1).toUpper()
+        derived tagCount: int = name.split(",").count
+      }
+      repository Products for Product {
+        find byNameCi(q: string): Product[] where this.name.toLower() == q.toLower()
+      }
+    }
+  `;
+
+  it("parses + validates cleanly and renders chained intrinsics in-memory", async () => {
+    const { model, errors } = await parseString(SRC2);
+    expect(errors).toEqual([]);
+    const domain = generateHono(model).get("domain/product.ts")!;
+    expect(domain).toContain("this._name.trim().toLowerCase()");
+    expect(domain).toContain("this._name.slice(0, (0) + (1)).toUpperCase()");
+    expect(domain).toContain('this._name.split(",").length');
+  });
+
+  it("renders toLower on BOTH sides of a where (column SQL + value JS)", async () => {
+    const { model } = await parseString(SRC2);
+    const repo = generateHono(model).get("db/repositories/product-repository.ts")!;
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source that interpolates the schema column in the generated sql tag, not here
+    expect(repo).toContain("eq(sql`lower(${schema.products.name})`, q.toLowerCase())");
+  });
+});

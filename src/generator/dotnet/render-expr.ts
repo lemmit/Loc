@@ -49,6 +49,10 @@ export interface CsRenderContext {
    * `where` clauses, so other emission contexts (derived, invariant)
    * shouldn't reach it. */
   agg?: EnrichedAggregateIR;
+  /** EF-translated expression position (find/view `Where`, `HasQueryFilter`,
+   *  criteria Specifications): scalar intrinsics render their EF-translatable
+   *  spelling (see CS_INTRINSIC_QUERY_RENDERERS) instead of the domain form. */
+  efQuery?: boolean;
   /** Resource-op call routing: resourceName → static C# helper class
    *  name (e.g. `salesFiles` → `S3Resources`).  Set on the workflow
    *  render context (Phase 4c); a `resource-op` call renders to
@@ -479,6 +483,41 @@ function renderMember(recv: string, e: MemberExpr): string {
 // completeness test can pin that every catalogue row has a C# arm.
 export const CS_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[]) => string> = {
   "string.trim": (recv) => `${recv}.Trim()`,
+  // Invariant forms — the catalogue contract is culture-free case mapping,
+  // and the culture-sensitive ToUpper()/ToLower() trip CA1304/CA1311 under
+  // the generated project's /warnaserror.  EF Core (≥9) translates the
+  // Invariant forms to SQL upper()/lower(), so the query position keeps
+  // working through the same LINQ path (verified via ToQueryString).
+  "string.toUpper": (recv) => `${recv}.ToUpperInvariant()`,
+  "string.toLower": (recv) => `${recv}.ToLowerInvariant()`,
+  // 0-based CLAMPING semantics (JS `slice` — see the catalogue contract):
+  // .NET's Substring throws on out-of-range, so guard + Math.Min.  Receiver /
+  // arg duplication is safe — Loom expressions are pure.  StringComparison
+  // and Math live in `System`, covered by the SDK's <ImplicitUsings>.
+  "string.substring": (recv, args) =>
+    args.length > 1
+      ? `(${args[0]} >= ${recv}.Length ? "" : ${recv}.Substring(${args[0]}, Math.Min(${args[1]}, ${recv}.Length - ${args[0]})))`
+      : `(${args[0]} >= ${recv}.Length ? "" : ${recv}.Substring(${args[0]}))`,
+  "string.startsWith": (recv, args) => `${recv}.StartsWith(${args[0]}, StringComparison.Ordinal)`,
+  "string.endsWith": (recv, args) => `${recv}.EndsWith(${args[0]}, StringComparison.Ordinal)`,
+  "string.contains": (recv, args) => `${recv}.Contains(${args[0]}, StringComparison.Ordinal)`,
+  "string.replace": (recv, args) => `${recv}.Replace(${args[0]}, ${args[1]})`,
+  // Materialized to a List: Loom `string[]` renders as List<T> on this
+  // backend, and the collection-op renderer emits the List API (`.Count`,
+  // LINQ) — a raw string[] would not compose (CS0428 on `.Count`).
+  "string.split": (recv, args) => `${recv}.Split(${args[0]}).ToList()`,
+};
+
+// EF-query-position overrides (sparse).  EF Core translates ONLY the
+// culture-sensitive parameterless ToUpper()/ToLower() to SQL upper()/lower()
+// — the Invariant forms throw "could not be translated" (verified against
+// EF Core 10 + Npgsql via ToQueryString).  Since the SQL functions are
+// culture-free, the semantics stay the catalogue's invariant contract; the
+// culture-default C# SPELLING never actually executes.  CA1304/CA1311 are
+// NoWarn'd in the generated csproj for exactly this line of code.
+export const CS_INTRINSIC_QUERY_RENDERERS: Record<string, (recv: string, args: string[]) => string> = {
+  "string.toUpper": (recv) => `${recv}.ToUpper()`,
+  "string.toLower": (recv) => `${recv}.ToLower()`,
 };
 
 function renderMethodCall(
@@ -547,7 +586,11 @@ function renderMethodCall(
     return `Regex.IsMatch(${recv}, ${args[0]})`;
   }
   if (e.receiverType.kind === "primitive") {
-    const intrinsic = CS_INTRINSIC_RENDERERS[intrinsicKey(e.receiverType.name, e.member)];
+    const key = intrinsicKey(e.receiverType.name, e.member);
+    // EF-translated positions (find/view Where, HasQueryFilter, criteria
+    // Specifications) may need a different C# spelling than domain bodies —
+    // the sparse query table wins there, falling back to the main table.
+    const intrinsic = (ctx.efQuery ? CS_INTRINSIC_QUERY_RENDERERS[key] : undefined) ?? CS_INTRINSIC_RENDERERS[key];
     if (intrinsic) return intrinsic(recv, args);
   }
   return `${recv}.${upperFirst(e.member)}(${args.join(", ")})`;

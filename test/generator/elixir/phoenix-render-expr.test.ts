@@ -472,6 +472,129 @@ describe("phoenix renderExpr — member, method-call, call, new, list, lambda", 
     ).toBe('fragment("btrim(?)", record.name)');
   });
 
+  it("renders string.toUpper()/toLower() in both modes (stdlib A2)", () => {
+    const upper: ExprIR = {
+      kind: "method-call",
+      receiver: thisProp("name"),
+      member: "toUpper",
+      args: [],
+      receiverType: STRING,
+      isCollectionOp: false,
+    };
+    const lower: ExprIR = { ...upper, member: "toLower" } as ExprIR;
+    // In-memory: the String.* stdlib calls.
+    expect(renderExpr(upper, ctx)).toBe("String.upcase(record.name)");
+    expect(renderExpr(lower, ctx)).toBe("String.downcase(record.name)");
+    // Filter mode: SQL upper()/lower() fragments (String.* is invalid in Ecto queries).
+    expect(renderExpr(upper, { ...ctx, filterArgs: true })).toBe(
+      'fragment("upper(?)", record.name)',
+    );
+    expect(renderExpr(lower, { ...ctx, filterArgs: true })).toBe(
+      'fragment("lower(?)", record.name)',
+    );
+  });
+
+  it("renders string.substring in both arities via String.slice (stdlib A2)", () => {
+    const twoArg: ExprIR = {
+      kind: "method-call",
+      receiver: thisProp("name"),
+      member: "substring",
+      args: [litInt("1"), litInt("3")],
+      receiverType: STRING,
+      isCollectionOp: false,
+    };
+    // Two-arg: `String.slice/3` takes start + LENGTH and clamps — the
+    // catalogue's JS-slice contract.
+    expect(renderExpr(twoArg, ctx)).toBe("String.slice(record.name, 1, 3)");
+    // One-arg: run to the end via the stepped range (out-of-range start → "").
+    const oneArg: ExprIR = { ...twoArg, args: [litInt("2")] } as ExprIR;
+    expect(renderExpr(oneArg, ctx)).toBe("String.slice(record.name, 2..-1//1)");
+  });
+
+  it("renders string.contains as the String.contains? intrinsic — never Enum.member? (stdlib A2)", () => {
+    // Since the A2 core, lowering keys `isCollectionOp` off the receiver type:
+    // a primitive-string receiver's `contains` is the intrinsic, not the
+    // collection membership op.
+    expect(
+      renderExpr(
+        {
+          kind: "method-call",
+          receiver: thisProp("name"),
+          member: "contains",
+          args: [litStr("x")],
+          receiverType: STRING,
+          isCollectionOp: false,
+        },
+        ctx,
+      ),
+    ).toBe('String.contains?(record.name, "x")');
+  });
+
+  it("renders string.startsWith/endsWith via String.starts_with?/ends_with? (stdlib A2)", () => {
+    const starts: ExprIR = {
+      kind: "method-call",
+      receiver: thisProp("name"),
+      member: "startsWith",
+      args: [litStr("pre")],
+      receiverType: STRING,
+      isCollectionOp: false,
+    };
+    expect(renderExpr(starts, ctx)).toBe('String.starts_with?(record.name, "pre")');
+    const ends: ExprIR = { ...starts, member: "endsWith", args: [litStr("suf")] } as ExprIR;
+    expect(renderExpr(ends, ctx)).toBe('String.ends_with?(record.name, "suf")');
+  });
+
+  it("renders string.replace via String.replace/3 (replaces ALL occurrences) (stdlib A2)", () => {
+    expect(
+      renderExpr(
+        {
+          kind: "method-call",
+          receiver: thisProp("name"),
+          member: "replace",
+          args: [litStr("a"), litStr("b")],
+          receiverType: STRING,
+          isCollectionOp: false,
+        },
+        ctx,
+      ),
+    ).toBe('String.replace(record.name, "a", "b")');
+  });
+
+  it("renders string.split via String.split/2 (keeps empty segments) (stdlib A2)", () => {
+    expect(
+      renderExpr(
+        {
+          kind: "method-call",
+          receiver: thisProp("name"),
+          member: "split",
+          args: [litStr(",")],
+          receiverType: STRING,
+          isCollectionOp: false,
+        },
+        ctx,
+      ),
+    ).toBe('String.split(record.name, ",")');
+  });
+
+  it("keeps refColl/array contains on the membership path (Enum.member?) — keyed off the array receiver type", () => {
+    // The string intrinsic keys on `receiverType.kind === "primitive"`; an
+    // array-receiver contains stays the collection op (`isCollectionOp: true`)
+    // and never routes through the intrinsic table.
+    expect(
+      renderExpr(
+        {
+          kind: "method-call",
+          receiver: thisProp("tags"),
+          member: "contains",
+          args: [litStr("x")],
+          receiverType: { kind: "array", element: STRING },
+          isCollectionOp: true,
+        },
+        ctx,
+      ),
+    ).toBe('Enum.member?(record.tags, "x")');
+  });
+
   it("renders collection-op `count` as Enum.count", () => {
     expect(
       renderExpr(

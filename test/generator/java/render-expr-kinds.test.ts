@@ -151,6 +151,50 @@ describe("java renderJavaExpr — member + method-call", () => {
     ).toBe("this.name.trim()");
   });
 
+  it("renders the A2 string-batch intrinsics via the catalogue snippets", () => {
+    const call = (member: string, args: ExprIR[] = []): ExprIR => ({
+      kind: "method-call",
+      receiver: thisProp("name"),
+      member,
+      args,
+      receiverType: STRING,
+      isCollectionOp: false,
+    });
+    expect(renderJavaExpr(call("toUpper"))).toBe("this.name.toUpperCase(java.util.Locale.ROOT)");
+    expect(renderJavaExpr(call("toLower"))).toBe("this.name.toLowerCase(java.util.Locale.ROOT)");
+    // string-receiver contains is the INTRINSIC (isCollectionOp=false), not
+    // the array-membership arm — both spell `.contains` in Java.
+    expect(renderJavaExpr(call("contains", [litStr("x")]))).toBe('this.name.contains("x")');
+    expect(renderJavaExpr(call("startsWith", [litStr("a")]))).toBe('this.name.startsWith("a")');
+    expect(renderJavaExpr(call("endsWith", [litStr("z")]))).toBe('this.name.endsWith("z")');
+    // Literal-find replace-all → String.replace (NOT the regex replaceAll).
+    expect(renderJavaExpr(call("replace", [litStr("a"), litStr("b")]))).toBe(
+      'this.name.replace("a", "b")',
+    );
+    // Literal separator, trailing empties kept, wrapped to List (Loom
+    // string[] is List<String> on Java).
+    expect(renderJavaExpr(call("split", [litStr(",")]))).toBe(
+      'java.util.Arrays.asList(this.name.split(java.util.regex.Pattern.quote(","), -1))',
+    );
+  });
+
+  it("renders substring with 0-based clamping semantics (both arities)", () => {
+    const sub = (args: ExprIR[]): ExprIR => ({
+      kind: "method-call",
+      receiver: thisProp("name"),
+      member: "substring",
+      args,
+      receiverType: STRING,
+      isCollectionOp: false,
+    });
+    expect(renderJavaExpr(sub([litInt("2")]))).toBe(
+      '(2 >= this.name.length() ? "" : this.name.substring(2))',
+    );
+    expect(renderJavaExpr(sub([litInt("2"), litInt("3")]))).toBe(
+      '(2 >= this.name.length() ? "" : this.name.substring(2, Math.min((2) + (3), this.name.length())))',
+    );
+  });
+
   it("renders collection ops via Streams", () => {
     const items = (member: string, args: ExprIR[] = []): ExprIR => ({
       kind: "method-call",
