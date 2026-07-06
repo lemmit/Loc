@@ -23,7 +23,11 @@ const SOURCE = `
     storage primary { type: postgres }
     resource ordersState { for: Orders, kind: state, use: primary }
     api SalesApi from Sales
-    ui WebApp with scaffold(subdomains: [Sales]) { }
+    ui WebApp with scaffold(subdomains: [Sales]) {
+      component StatusPill(label: string) {
+        body: Stack { Badge { label } }
+      }
+    }
     deployable api { platform: node, contexts: [Orders], dataSources: [ordersState], serves: SalesApi, port: 3000 }
     deployable web { platform: vue, targets: api, ui: WebApp, port: 3003 }
   }
@@ -45,6 +49,25 @@ describe("vue generator — sourcemap recording", () => {
     const region = regions![0]!;
     expect(region.construct).toBe("WebApp.widgets.List");
     expect(region.origin.kind).toBe("macro");
+  });
+
+  // ComponentIR.origin (stamped in lowerComponent, M8) — hand-written ui
+  // components carry a `source` origin, unlike the scaffolded pages' macro
+  // origin; this frontend's own component recording site has no other gate.
+  it("records a user-declared component file with a source origin and ui-scoped construct", async () => {
+    const model = await parseValid(SOURCE);
+    const files = generateSystems(model, { sourcemap: true }).files;
+    const map = JSON.parse(files.get(".loom/sourcemap.json")!) as {
+      files: Record<string, { construct?: string; origin: OriginRef }[]>;
+    };
+
+    const path = "web/src/components/StatusPill.vue";
+    expect(files.has(path), `${path} not emitted`).toBe(true);
+    const regions = map.files[path];
+    expect(regions, `no region recorded for ${path}`).toBeDefined();
+    const region = regions![0]!;
+    expect(region.construct).toBe("WebApp.StatusPill");
+    expect(region.origin.kind).toBe("source");
   });
 
   it("off by default — no sourcemap artifact, page content unaffected", async () => {
