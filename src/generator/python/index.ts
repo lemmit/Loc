@@ -79,6 +79,7 @@ import {
 //   app/main.py                     — FastAPI app: CORS, /health, /ready
 //   app/settings.py                 — DATABASE_URL from env
 //   app/db/engine.py                — async engine + session factory
+//   app/db/transaction.py           — per-request tx boundary (commit-before-send)
 //   app/domain/…                    — ids / VOs / events / aggregates (S3+)
 //   app/db/schema.py, repositories/ — SQLAlchemy models + repos (S6)
 //   app/http/…                      — Pydantic DTOs + APIRouters (S7)
@@ -131,6 +132,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   out.set("app/settings.py", renderSettings(slug));
   out.set("app/db/__init__.py", "");
   out.set("app/db/engine.py", ENGINE_PY);
+  out.set("app/db/transaction.py", TRANSACTION_PY);
   out.set("app/obs/__init__.py", "");
   out.set("app/obs/log.py", OBS_LOG_PY);
   out.set("app/obs/middleware.py", OBS_MIDDLEWARE_PY);
@@ -543,6 +545,7 @@ const ENGINE_PY = lines(
   `"""Async SQLAlchemy engine + per-request session factory."""`,
   "",
   "from collections.abc import AsyncIterator",
+  "from contextvars import ContextVar",
   "",
   "from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine",
   "",
@@ -551,18 +554,83 @@ const ENGINE_PY = lines(
   "engine = create_async_engine(DATABASE_URL)",
   "session_factory = async_sessionmaker(engine, expire_on_commit=False)",
   "",
+  "# The request-scoped session, owned + committed by TransactionMiddleware",
+  "# (app/db/transaction.py) BEFORE the response starts, so a client that reads",
+  "# its own write (read-after-create) can't race the commit.",
+  "request_session: ContextVar[AsyncSession | None] = ContextVar(",
+  '    "loom_request_session", default=None',
+  ")",
+  "",
   "",
   "async def get_session() -> AsyncIterator[AsyncSession]:",
   `    """One session — and exactly one transaction — per request.`,
   "",
-  "    Repositories flush; the commit happens here once the handler",
-  "    returns, so multi-save workflows stay atomic.",
+  "    Repositories flush; the commit is done by TransactionMiddleware just",
+  "    before the response starts — NOT in this dependency's teardown, which",
+  "    FastAPI runs AFTER the response is sent (the read-after-create race).",
+  "    Off the request path (seeds, CLI) there is no middleware, so fall back",
+  "    to owning the session and committing on exit.",
   `    """`,
+  "    existing = request_session.get()",
+  "    if existing is not None:",
+  "        yield existing",
+  "        return",
   "    async with session_factory() as session:",
   "        yield session",
   "        await session.commit()",
   "",
 );
+
+const TRANSACTION_PY = `"""Per-request transaction boundary (pure-ASGI).  Auto-generated.
+
+Owns exactly one session/transaction per HTTP request and commits it
+*before* the response starts — not in a FastAPI \`yield\`-dependency
+teardown, which runs AFTER the response is sent and lets a client racing
+a read against its own just-committed write see a 404 / stale FK.
+
+On a success status (< 400) the session is committed before the first
+response byte leaves; on an error status (or an exception) it is rolled
+back.  Repositories/handlers pull this session via \`get_session\`
+(app/db/engine.py) off the \`request_session\` ContextVar.
+"""
+
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from app.db.engine import request_session, session_factory
+
+
+class TransactionMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async with session_factory() as session:
+            token = request_session.set(session)
+            finalized = False
+
+            async def send_wrapper(message: Message) -> None:
+                nonlocal finalized
+                if message["type"] == "http.response.start" and not finalized:
+                    finalized = True
+                    if message["status"] < 400:
+                        await session.commit()
+                    else:
+                        await session.rollback()
+                await send(message)
+
+            try:
+                await self.app(scope, receive, send_wrapper)
+            except BaseException:
+                if not finalized:
+                    await session.rollback()
+                raise
+            finally:
+                request_session.reset(token)
+`;
 
 function renderMain(
   systemName: string,
@@ -628,6 +696,7 @@ function renderMain(
     oidc ? "from app.auth.verifier import assert_user_verifier_registered" : null,
     "from app.db.engine import engine",
     "from app.db.migrate import run_migrations",
+    "from app.db.transaction import TransactionMiddleware",
     hasSeeds ? "from app.db.seed import run_seeds" : null,
     startsRelay ? "from app.dispatch import start_outbox_relay" : null,
     stubIds.length > 0 ? `from app.domain.ids import ${stubIds.join(", ")}` : null,
@@ -737,6 +806,11 @@ function renderMain(
     // added BEFORE CORS to keep CORS outermost (auth after CORS — the
     // same ordering the Hono/.NET pipelines mount).
     authRequired ? "app.add_middleware(AuthMiddleware)" : null,
+    "# Innermost (added first): owns the per-request DB transaction and commits",
+    "# it BEFORE the response starts, so a client's read-after-create can't race",
+    "# the commit (a FastAPI yield-dependency commit runs after the response is",
+    "# sent).  Inside auth/CORS/obs so their teardown still brackets it.",
+    "app.add_middleware(TransactionMiddleware)",
     "# CORS: the compose stack sets CORS_ORIGIN to the frontend origin(s) — a",
     "# comma-separated allowlist.  When set, only those origins are allowed",
     "# (with credentials, so the session cookie flows cross-origin).  When",
