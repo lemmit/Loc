@@ -38,14 +38,50 @@ context Sales {
 }
 `;
 
-async function idsAt(marker: string): Promise<string[] | undefined> {
-  const { model, doc, errors } = await parseString(SOURCE, { validate: true });
+// A ui with a HAND-WRITTEN nested-area page and component — the arms M9
+// added (a scaffolded ui's synthesized pages have no CST, so only
+// hand-written declarations are cursor-reachable).
+const UI_SOURCE = `
+system Shop {
+  subdomain Sales {
+    context Orders {
+      aggregate Order {
+        status: string
+      }
+      repository Orders for Order { }
+    }
+  }
+  storage primary { type: postgres }
+  resource salesState { for: Orders, kind: state, use: primary }
+  api ShopApi from Sales
+  ui WebApp {
+    component StatusPill(label: string) {
+      body: Badge { label }
+    }
+    area Back {
+      area Office {
+        page OrderBoard {
+          route: "/board"
+          body: Text { "board" }
+        }
+      }
+    }
+  }
+  deployable api { platform: node, contexts: [Orders], dataSources: [salesState], serves: ShopApi, port: 3000 }
+  deployable web { platform: react, targets: api, ui: WebApp, port: 3001 }
+}
+`;
+
+async function idsIn(source: string, marker: string): Promise<string[] | undefined> {
+  const { model, doc, errors } = await parseString(source, { validate: true });
   if (errors.length) throw new Error(`unexpected validation errors:\n${errors.join("\n")}`);
   void model;
-  const offset = SOURCE.indexOf(marker);
+  const offset = source.indexOf(marker);
   expect(offset, `marker "${marker}" not found`).toBeGreaterThanOrEqual(0);
   return constructIdAt(doc, offset);
 }
+
+const idsAt = (marker: string) => idsIn(SOURCE, marker);
 
 describe("constructIdAt", () => {
   it("returns op id then aggregate id, narrowest first, inside an operation body", async () => {
@@ -66,6 +102,14 @@ describe("constructIdAt", () => {
 
   it("returns undefined on an event (no construct regions recorded for events)", async () => {
     expect(await idsAt("OrderPlaced {")).toBeUndefined();
+  });
+
+  it("maps a hand-written page to its area-qualified ui construct id (areas snake()d, matching PageIR.area)", async () => {
+    expect(await idsIn(UI_SOURCE, 'route: "/board"')).toEqual(["WebApp.back.office.OrderBoard"]);
+  });
+
+  it("maps a ui component to Ui.Component", async () => {
+    expect(await idsIn(UI_SOURCE, "Badge { label }")).toEqual(["WebApp.StatusPill"]);
   });
 });
 

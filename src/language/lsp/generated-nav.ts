@@ -15,22 +15,27 @@
 // deliberately NOT recognised here — scaffolding bases have no dedicated
 // `.ddd` construct to jump FROM.
 
-import { AstUtils, CstUtils, type LangiumDocument } from "langium";
+import { type AstNode, AstUtils, CstUtils, type LangiumDocument } from "langium";
 import type { SourceMap, WireOriginRef } from "../../trace/index.js";
 import { matchPath } from "../../trace/index.js";
+import { snake } from "../../util/naming.js";
 import {
   isAggregate,
+  isArea,
   isBoundedContext,
+  isComponent,
   isOperation,
+  isPage,
+  isUi,
   isView,
   isWorkflow,
 } from "../generated/ast.js";
 
 /** Innermost-first construct ids the cursor at `offset` sits inside, or
  *  undefined when it names none of the constructs the generators record
- *  (value objects, events, pages, etc. have no construct-granular
- *  sourcemap entries). When the cursor is inside an operation body, both
- *  the operation id AND its owning aggregate id are returned (narrowest
+ *  (value objects and events have no construct-granular sourcemap
+ *  entries). When the cursor is inside an operation body, both the
+ *  operation id AND its owning aggregate id are returned (narrowest
  *  first) — the aggregate's whole-file region is a valid, if coarser,
  *  jump target too. */
 export function constructIdAt(document: LangiumDocument, offset: number): string[] | undefined {
@@ -65,7 +70,41 @@ export function constructIdAt(document: LangiumDocument, offset: number): string
     if (ctx) return [`${ctx.name}.${view.name}`];
   }
 
+  // Pages/components (M8 frontend bracket): recorded as
+  // `<ui>.<area path…>.<page>` / `<ui>.<component>` — the same id
+  // `pageConstructId` (src/ir/util/page-kind.ts) mints at recording time,
+  // INLINED here because `language/` may not import `ir/` (pipeline
+  // layering). Only hand-written declarations are reachable: a scaffolded
+  // page is synthesized with no CST, so a cursor can never sit inside one.
+  const page = AstUtils.getContainerOfType(node, isPage);
+  if (page) {
+    const ui = AstUtils.getContainerOfType(page, isUi);
+    if (ui) return [[ui.name, ...areaPathOf(page), page.name].join(".")];
+  }
+
+  const component = AstUtils.getContainerOfType(node, isComponent);
+  if (component) {
+    // A top-level component (declared outside any ui) is recorded under
+    // each CONSUMING ui's name — unknowable from the declaration alone, so
+    // it stays unreachable here (honest skip, not a guess).
+    const ui = AstUtils.getContainerOfType(component, isUi);
+    if (ui) return [`${ui.name}.${component.name}`];
+  }
+
   return undefined;
+}
+
+/** Names of the `area` blocks enclosing `page`, outermost first — the
+ *  `$container` chain between the page and its ui, `snake()`d per segment
+ *  because that is what lowering stores on `PageIR.area`
+ *  (src/ir/lower/lower-ui.ts, the `area` containment walk) and therefore
+ *  what `pageConstructId` recorded into the map. */
+function areaPathOf(page: AstNode): string[] {
+  const path: string[] = [];
+  for (let n = page.$container; n && isArea(n); n = n.$container) {
+    path.unshift(snake(n.name));
+  }
+  return path;
 }
 
 /** One hit: a mapped output file (relative to the map's root) plus the
