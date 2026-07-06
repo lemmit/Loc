@@ -173,6 +173,34 @@ describe("statementExprMarks", () => {
     const [chunk] = renderTsStatementChunks([stmt]);
     expect(statementExprMarks(stmt, chunk!)).toHaveLength(0);
   });
+
+  // The chunk-level anchor is the same one-occurrence discipline the
+  // composer applies per level — pin its two skip arms directly, since no
+  // real renderTsStatementChunks output in the fixture triggers them (a
+  // provenance/trace-wrapped chunk repeating the RHS in its snapshot array
+  // is the real-world case the ambiguity arm exists for).
+  it("returns no marks when the RHS text occurs more than once in the chunk (ambiguous anchor)", () => {
+    const origin: OriginRef = { kind: "source", path: "/a.ddd", span: { start: 5, end: 17 } };
+    const stmt: StmtIR = {
+      kind: "let",
+      name: "note",
+      expr: { kind: "ref", name: "customerName", refKind: "this-prop", origin },
+      type: { kind: "primitive", name: "string" },
+    };
+    const chunk = '    const note = this._customerName; // __prov: ["this._customerName"]';
+    expect(statementExprMarks(stmt, chunk)).toHaveLength(0);
+  });
+
+  it("returns no marks when the RHS text does not occur in the chunk at all", () => {
+    const origin: OriginRef = { kind: "source", path: "/a.ddd", span: { start: 5, end: 17 } };
+    const stmt: StmtIR = {
+      kind: "let",
+      name: "note",
+      expr: { kind: "ref", name: "customerName", refKind: "this-prop", origin },
+      type: { kind: "primitive", name: "string" },
+    };
+    expect(statementExprMarks(stmt, "    const note = somethingElse;")).toHaveLength(0);
+  });
 });
 
 describe("statementSubRegions — exprMarks parameter", () => {
@@ -205,6 +233,21 @@ describe("statementSubRegions — exprMarks parameter", () => {
     // The column range slices to exactly the marked text inside the chunk
     // (1-based, half-open — `endCol - 1` is the last included character).
     expect(chunk.slice(fine!.col![0] - 1, fine!.col![1] - 1)).toBe("this._customerName");
+  });
+
+  it("skips a mark whose start and end fall on different chunk lines (no single col to report)", () => {
+    const origin: OriginRef = { kind: "source", path: "/a.ddd", span: { start: 0, end: 5 } };
+    const stmts = [{ origin }];
+    const chunks = ["    const x = foo(\n        bar);"];
+    // A hand-built mark spanning the newline — statementExprMarks never
+    // produces one today (only single-line let/assign/return RHS), but
+    // statementSubRegions must stay honest if a later slice does.
+    const marks = [[{ start: 14, end: 28, origin }]];
+    const regions = statementSubRegions(stmts, chunks, "Ctx.Agg.op", marks);
+    // Only the coarse per-statement region survives; the multi-line mark is
+    // dropped rather than pinned to a wrong single-line column.
+    expect(regions).toHaveLength(1);
+    expect(regions[0]!.col).toBeUndefined();
   });
 
   it("omits exprMarks entirely when the 4th param is not passed (backward-compatible)", () => {
