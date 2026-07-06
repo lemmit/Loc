@@ -298,6 +298,15 @@ name from the shape (`FindAllByActiveNamedBySequenceDesc`) or emit anonymous
 retrievals as private members of the repository implementation, keeping the
 hash out of the domain vocabulary.
 
+> **✅ FIXED** — the hash is replaced by a canonical readable rendering of
+> the shape at the single minting site (`shapeSuffix` in
+> `lower-workflow.ts`): the audit's example now emits exactly
+> `FindAllByActiveNamedBySequenceDescSpec` / `runFindAllByActiveNamedBySequenceDesc`
+> / `run_find_all_by_active_named_by_sequence_desc_project` across the five
+> backends. Distinct-shapes-stay-distinct / identical-shapes-dedupe is
+> preserved (the name is still a deterministic function of the canonical
+> shape). Pinned per backend in `test/ir/anonymous-retrieval.test.ts`.
+
 ### S9 · Value objects are values only on .NET/Java (P2)
 
 - **.NET/Java**: `sealed record` / `@Embeddable record` with compact-ctor

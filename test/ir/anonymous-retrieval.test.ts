@@ -57,7 +57,9 @@ describe("anonymous retrieval — run(retrieval { where, sort, loads })", () => 
       `let xs = Orders.run(retrieval { where: ActiveOrder  sort: [region desc, code asc] })
        for o in xs { }`,
     );
-    const ret = rs.find((r) => r.name.startsWith("findAllByActiveOrderShaped"));
+    // S8: the synthetic name is a READABLE rendering of the shape, not a
+    // structural hash — it becomes a public method name on every backend.
+    const ret = rs.find((r) => r.name === "findAllByActiveOrderByRegionDescThenCodeAsc");
     expect(ret).toBeDefined();
     expect(ret?.criterionRef?.name).toBe("ActiveOrder");
     expect(ret?.sort.map((sortTerm) => [sortTerm.path[0]?.name, sortTerm.direction])).toEqual([
@@ -98,7 +100,11 @@ describe("anonymous retrieval — run(retrieval { where, sort, loads })", () => 
        for o in b { }
        for o in c { }`,
     );
-    expect(rs.filter((r) => r.name.startsWith("findAllByActiveOrderShaped"))).toHaveLength(2);
+    const names = rs.filter((r) => r.name.startsWith("findAllByActiveOrderBy")).map((r) => r.name);
+    expect(names.sort()).toEqual([
+      "findAllByActiveOrderByCodeAsc",
+      "findAllByActiveOrderByCodeDesc",
+    ]);
   });
 
   it("rejects a non-criterion where: at the language layer", async () => {
@@ -119,4 +125,30 @@ describe("anonymous retrieval — run(retrieval { where, sort, loads })", () => 
         for o in xs { }`),
     ).toContain("loom.findall-criterion-mismatch");
   });
+});
+
+describe("S8 — the synthetic name is readable on every backend's public surface", () => {
+  // The name minted at lower-workflow.ts becomes a PUBLIC domain-surface
+  // method on all five backends; a structural hash there leaks compiler
+  // internals into the ubiquitous language (audit S8).  Pin the readable
+  // rendering AND the absence of the old `Shaped<hash>` residue.
+  const BODY = `let xs = Orders.run(retrieval { where: ActiveOrder  sort: [code desc] })
+       for o in xs { }`;
+  const CASES: [string, RegExp][] = [
+    ["node", /runFindAllByActiveOrderByCodeDesc/],
+    ["dotnet", /FindAllByActiveOrderByCodeDescSpec/],
+    ["java", /runFindAllByActiveOrderByCodeDesc/],
+    ["python", /run_find_all_by_active_order_by_code_desc/],
+    ["elixir { foundation: vanilla }", /run_find_all_by_active_order_by_code_desc_order/],
+  ];
+  for (const [platform, name] of CASES) {
+    it(`${platform.split(" ")[0]}: emits the shape-derived method name, no hash`, async () => {
+      const files = await generateSystemFiles(
+        SYS(BODY).replace("platform: node", `platform: ${platform}`),
+      );
+      const all = [...files.values()].join("\n");
+      expect(all).toMatch(name);
+      expect(all).not.toMatch(/Shaped[0-9a-z]{4,}|shaped[0-9a-z]{4,}/);
+    });
+  }
 });
