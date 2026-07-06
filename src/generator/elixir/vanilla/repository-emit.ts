@@ -325,7 +325,14 @@ defmodule ${repoMod} do
     end
   end
 ${
-  writeEff
+  // Gate on `writeScope` (the aggregate's own write-scope narrowing), NOT
+  // `writeEff`: a TPH concrete carries a non-null `kindFilter` even with no
+  // write policy, and a kind-only guard would never reference `current_user`
+  // → an unused-variable warning that fails `--warnings-as-errors` (and dead
+  // code — the facade/controller only dispatch here when `writeScopeFilter`
+  // is set).  `writeEff` still supplies the body so a real write guard on a
+  // TPH concrete keeps its kind discriminator.
+  writeScope
     ? `
   @doc "Command-load path (authorization Phase 3 P3.1): scope the by-id load to the WRITE scope; a readable-but-not-writable (or missing) row reads as :not_found → 404."
   @spec find_by_id_for_write(binary(), map() | nil) :: {:ok, ${aggModule}.t()} | {:error, :not_found}

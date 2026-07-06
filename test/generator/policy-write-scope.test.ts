@@ -137,4 +137,40 @@ describe("policy write scope — Elixir (plain Ecto/Phoenix)", () => {
     const text = await allText("elixir", "");
     expect(text).not.toContain("find_by_id_for_write");
   });
+
+  // Regression pin (CI vanilla-inheritance cell): a TPH concrete carries a
+  // non-null `kind` discriminator filter even with NO write policy — the guard
+  // must gate on the aggregate's own write-scope narrowing, not the combined
+  // predicate, or it emits a kind-only `find_by_id_for_write` whose
+  // `current_user` param is unused (a hard failure under
+  // `mix compile --warnings-as-errors`).
+  it("a TPH concrete without a write policy emits NO find_by_id_for_write", async () => {
+    const files = await generateSystemFiles(`
+      system Inh {
+        subdomain S {
+          context Parties {
+            abstract aggregate Party inheritanceUsing(sharedTable) {
+              name: string
+            }
+            aggregate Customer extends Party { email: string }
+            aggregate Vendor extends Party { rating: int }
+            repository Customers for Customer { }
+            repository Vendors for Vendor { }
+          }
+        }
+        api InhApi from S
+        storage primarySql { type: postgres }
+        resource inhState { for: Parties, kind: state, use: primarySql }
+        deployable api {
+          platform: elixir
+          contexts: [Parties]
+          dataSources: [inhState]
+          serves: InhApi
+          port: 3001
+        }
+      }
+    `);
+    const text = [...files.values()].join("\n\n");
+    expect(text).not.toContain("find_by_id_for_write");
+  });
 });
