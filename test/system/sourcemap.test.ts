@@ -68,7 +68,7 @@ system SourceMapDemo {
       }
 
       channel Lifecycle {
-        carries: OrderPlaced
+        carries: OrderPlaced, PaymentTaken
       }
 
       // Correlated (by) deliberately: Java's dispatcher silently skips
@@ -84,6 +84,29 @@ system SourceMapDemo {
           let order = Orders.getById(o.order)
           order.confirm()
         }
+      }
+
+      event PaymentTaken {
+        order: Order id
+        amount: int
+      }
+
+      // Event-sourced saga with a create+on pair — exercises the MERGED
+      // event-sourced handler renderers (.NET's if/else-nested branches,
+      // Java's doubly-re-indented try-frame branches), the shapes with the
+      // trickiest silent-failure risk in the re-indent replay. Bodies are
+      // distinct from every other body here (the pooled duplicate-anchor
+      // hazard above).
+      workflow fulfillOrder eventSourced {
+        orderId: Order id
+        paid: int
+        create(p: OrderPlaced) by p.order {
+          emit PaymentTaken { order: p.order, amount: 1 }
+        }
+        on(pt: PaymentTaken) by pt.order {
+          let alreadyPaid = paid
+        }
+        apply(pt: PaymentTaken) { paid := paid + pt.amount }
       }
     }
   }
@@ -372,12 +395,14 @@ describe(".loom/sourcemap.json", () => {
   // - `file`: where the op body lands.  Four backends emit one
   //   aggregate-owned file; Elixir pools every op body into the per-context
   //   module `lib/<app>/<ctx>.ex`.
-  // - `tokens` / `wholeFile`: on Elixir the fixture's `emit` is HOISTED out
-  //   of the rendered body (persist-then-dispatch restructuring) so only the
-  //   `let` statement gets a region, and the pooled file deliberately carries
-  //   NO whole-file region (milestone-1 decision — a pooled file has no
-  //   single honest origin), so the statement sub-regions are its only
-  //   regions.
+  // - `wholeFile`: the pooled elixir file deliberately carries NO whole-file
+  //   region (milestone-1 decision — a pooled file has no single honest
+  //   origin), so the statement sub-regions are its only regions.  The
+  //   fixture's `emit` is HOISTED out of the rendered body (persist-then-
+  //   dispatch restructuring, S5a) so it renders in a DIFFERENT structural
+  //   position than the `let` — M13 (#1704 leftover) gives it its own
+  //   per-emit fragment (`renderEmitDispatchLines`), so elixir's `tokens`
+  //   now matches the other four backends' 2-statement shape.
   const STMT_CASES: {
     platform: string;
     file: string;
@@ -409,9 +434,12 @@ describe(".loom/sourcemap.json", () => {
       wholeFile: true,
     },
     {
+      // M13 (#1704 leftover): the hoisted `emit` block now gets its OWN
+      // per-emit fragment (`renderEmitDispatchLines`), alongside the regular
+      // body's `let` — so elixir joins the other four backends at 2 tokens.
       platform: "elixir",
       file: "lib/phoenix_api/orders.ex",
-      tokens: ["customerName"],
+      tokens: ["customerName", "emit OrderPlaced"],
       wholeFile: false,
     },
   ];
@@ -500,16 +528,23 @@ describe(".loom/sourcemap.json", () => {
   // `<Ctx>Workflows.java` — so those files carry NO whole-file region, only
   // the fragment-only statement regions.  .NET's `<Wf>Handler.cs` is
   // per-workflow (not pooled), so it keeps its Milestone-1 whole-file region
-  // alongside the new statement regions.  Elixir workflows are OUT OF SCOPE
-  // for this milestone (`assembleBody` reorders emit-then-persist, so
-  // per-statement chunks don't correspond 1:1 with source order — a
-  // separate slice) and is asserted separately below.
+  // alongside the new statement regions.
+  //
+  // M13 adds elixir's own per-workflow `<wf>.ex` module: its `assembleBody`
+  // REORDERS `with`-clauses vs. `emit`s into different structural buckets,
+  // so (unlike the cursor-walked `statementSubRegions` the other four
+  // backends share) it anchors each statement INDEPENDENTLY, one
+  // `fragment()` call per statement, keyed to that statement's own text
+  // regardless of where the bucketing relocated it.  The per-workflow file
+  // is not pooled, so — like .NET — it keeps its Milestone-1 whole-file
+  // region alongside the statement regions.
   const WORKFLOW_STMT_CASES: {
     platform: string;
     file: string;
     /** Whether this backend's workflow-body file also carries a
-     *  Milestone-1 whole-file region (true only for .NET's per-workflow
-     *  handler file; the pooled node/python/java files carry none). */
+     *  Milestone-1 whole-file region (true only for .NET's and elixir's
+     *  per-workflow handler files; the pooled node/python/java files carry
+     *  none). */
     wholeFile: boolean;
   }[] = [
     { platform: "node", file: "http/workflows.ts", wholeFile: false },
@@ -519,6 +554,11 @@ describe(".loom/sourcemap.json", () => {
       platform: "java",
       file: "application/workflows/OrdersWorkflows.java",
       wholeFile: false,
+    },
+    {
+      platform: "elixir",
+      file: "lib/phoenix_api/orders/workflows/confirm_order.ex",
+      wholeFile: true,
     },
   ];
 
@@ -579,9 +619,12 @@ describe(".loom/sourcemap.json", () => {
     } else {
       expect(wholeFileRegion).toBeUndefined();
       for (const r of regions) {
-        expect(["Orders.confirmOrder", "Orders.archiveOrder", "Orders.notifyPlaced"]).toContain(
-          r.construct,
-        );
+        expect([
+          "Orders.confirmOrder",
+          "Orders.archiveOrder",
+          "Orders.notifyPlaced",
+          "Orders.fulfillOrder",
+        ]).toContain(r.construct);
       }
     }
 
@@ -617,8 +660,11 @@ describe(".loom/sourcemap.json", () => {
   // node/python/java dispatch files (fragment-only, no whole-file region —
   // node shares the SAME pooled `http/workflows.ts` the command-workflow
   // case above uses; python and java route reactors to their OWN pooled
-  // file, separate from the command-workflow one).  Elixir stays out of
-  // scope, same as Milestone 11.
+  // file, separate from the command-workflow one).  M13 extends elixir's
+  // OWN per-subscription handler file (`.../workflows/<wf>/on_<event>.ex`,
+  // threaded through `emitDispatch`'s new `sourcemap` param) — like .NET,
+  // it is single-workflow-attributable (not pooled), so it keeps its
+  // Milestone-1 whole-file region alongside the statement regions.
   //
   // .NET's construct diverges from the other three: `emitDispatchHandlers`
   // runs over the SYSTEM-MODE merged context (so a reactor in one hosted
@@ -659,6 +705,12 @@ describe(".loom/sourcemap.json", () => {
       file: "application/workflows/OrdersDispatcher.java",
       construct: "Orders.notifyPlaced",
       wholeFile: false,
+    },
+    {
+      platform: "elixir",
+      file: "lib/phoenix_api/orders/workflows/notify_placed/on_order_placed.ex",
+      construct: "Orders.notifyPlaced",
+      wholeFile: true,
     },
   ];
 
@@ -786,7 +838,123 @@ describe(".loom/sourcemap.json", () => {
     });
   });
 
-  it("elixir workflow bodies stay out of scope: no statement-granular Orders.confirmOrder regions", async () => {
+  // The MERGED event-sourced handler shapes carry the trickiest re-indent
+  // replays — .NET nests each branch +4 inside the if/else, Java replays
+  // TWICE (+8: if/else nest plus the try(RequestContext.openChild()) frame)
+  // — and a missed replay fails silently (fragment() records nothing).
+  // fulfillOrder's create+on pair pins both.
+  it.each([
+    {
+      platform: "dotnet",
+      file: "Application/Workflows/FulfillOrderStartOrderPlacedHandler.cs",
+      construct: "DotnetApi.fulfillOrder",
+      token: "emit PaymentTaken",
+      wholeFile: true,
+    },
+    {
+      platform: "dotnet",
+      file: "Application/Workflows/FulfillOrderOnPaymentTakenHandler.cs",
+      construct: "DotnetApi.fulfillOrder",
+      token: "alreadyPaid",
+      wholeFile: true,
+    },
+    {
+      // java's dispatcher is POOLED across every reactor/starter in the
+      // context — no single honest whole-file origin (same milestone-1
+      // reasoning as the other pooled dispatch files).
+      platform: "java",
+      file: "application/workflows/OrdersDispatcher.java",
+      construct: "Orders.fulfillOrder",
+      token: "emit PaymentTaken",
+      wholeFile: false,
+    },
+    // M13 — elixir's ES handlers are TWO SEPARATE files (not merged like
+    // .NET's if/else, and not pooled like java's dispatcher), each
+    // single-workflow-attributable: the `create` starter
+    // (`start_order_placed.ex`) and the `on` reactor
+    // (`on_payment_taken.ex`), both threaded through
+    // `emitVanillaEsWorkflowFiles`/`emitDispatch`'s new `sourcemap` param.
+    {
+      platform: "elixir",
+      file: "lib/phoenix_api/orders/workflows/fulfill_order/start_order_placed.ex",
+      construct: "Orders.fulfillOrder",
+      token: "emit PaymentTaken",
+      wholeFile: true,
+    },
+    {
+      platform: "elixir",
+      file: "lib/phoenix_api/orders/workflows/fulfill_order/on_payment_taken.ex",
+      construct: "Orders.fulfillOrder",
+      token: "alreadyPaid",
+      wholeFile: true,
+    },
+  ])("merged event-sourced bodies anchor through the branch re-indents ($platform $file)", async ({
+    platform,
+    file,
+    construct,
+    token,
+    wholeFile,
+  }) => {
+    const model = await parseValid(SOURCE);
+    const files = generateSystems(model, { sourcemap: true }).files;
+    const map = JSON.parse(files.get(".loom/sourcemap.json")!) as {
+      files: Record<
+        string,
+        {
+          target: [number, number];
+          origin: import("../../src/ir/types/origin.js").OriginRef;
+          construct?: string;
+        }[]
+      >;
+    };
+
+    const slug = SLUG_FOR[platform]!;
+    const path = Object.keys(map.files).find((p) => p.startsWith(`${slug}/`) && p.endsWith(file));
+    expect(path, `no ${file} region recorded under ${slug}/`).toBeDefined();
+    const content = files.get(path!)!;
+    const fileLineCount = content.endsWith("\n")
+      ? content.split("\n").length - 1
+      : content.split("\n").length;
+
+    const wholeFileRegion = map.files[path!]!.find(
+      (r) => r.target[0] === 1 && r.target[1] === fileLineCount,
+    );
+    if (wholeFile) {
+      expect(wholeFileRegion, "expected a Milestone-1 whole-file region too").toBeDefined();
+    } else {
+      expect(wholeFileRegion).toBeUndefined();
+    }
+
+    const stmtRegions = map.files[path!]!.filter(
+      (r) => r.construct === construct && !(r.target[0] === 1 && r.target[1] === fileLineCount),
+    );
+    expect(
+      stmtRegions.length,
+      "merged-ES body's statement regions failed to anchor",
+    ).toBeGreaterThanOrEqual(1);
+
+    const sliced = stmtRegions.map((r) => {
+      const resolved = resolveToSource(r.origin);
+      expect(resolved, "origin never resolves to a source span").toBeDefined();
+      return SOURCE.slice(resolved!.span.start, resolved!.span.end);
+    });
+    expect(
+      sliced.some((t) => t.includes(token)),
+      `no region's origin slices to "${token}" (got ${JSON.stringify(sliced)})`,
+    ).toBe(true);
+  });
+
+  // M13 INVERTS the old "elixir workflow bodies stay out of scope" test:
+  // elixir's `assembleBody` bucketing REORDERS `with`-clauses vs. `emit`s
+  // (so the cursor-walked `statementSubRegions` the other backends share
+  // doesn't apply), but a per-statement INDEPENDENT `fragment()` anchor
+  // (keyed to each statement's own text, position-independent) works fine
+  // regardless — so elixir workflows are no longer out of scope.  The four
+  // legs (command-workflow body, reactor body, event-sourced handler,
+  // aggregate hoisted emit) are now covered by the WORKFLOW_STMT_CASES /
+  // REACTOR_STMT_CASES / merged-event-sourced-bodies / STMT_CASES cases
+  // above, each carrying an `elixir` row.
+  it("elixir's per-context module carries no stray confirmOrder-construct regions outside the dedicated workflow file", async () => {
     const model = await parseValid(SOURCE);
     const files = generateSystems(model, { sourcemap: true }).files;
     const raw = files.get(".loom/sourcemap.json")!;
@@ -794,6 +962,11 @@ describe(".loom/sourcemap.json", () => {
       files: Record<string, { target: [number, number]; construct?: string }[]>;
     };
 
+    // `Orders.confirmOrder`-construct regions must land EXCLUSIVELY on the
+    // dedicated `orders/workflows/confirm_order.ex` module — never leak
+    // onto the pooled `orders.ex` context module the aggregate op bodies
+    // share (a workflow and an op body are lowered by separate emitters;
+    // this pins that they never cross-contaminate each other's file).
     const elixirConfirmOrderRegions = Object.entries(map.files)
       .filter(([p]) => p.startsWith(`${SLUG_FOR.elixir}/`))
       .flatMap(([p, regions]) =>
@@ -801,22 +974,12 @@ describe(".loom/sourcemap.json", () => {
           .filter((r) => r.construct === "Orders.confirmOrder")
           .map((r) => ({ path: p, ...r })),
       );
-    // Exactly the ONE Milestone-1 whole-file region on the dedicated
-    // `orders/workflows/confirm_order.ex` module — no additional
-    // statement-granular regions (this milestone's spine change deliberately
-    // does not extend elixir workflows).
-    expect(elixirConfirmOrderRegions).toHaveLength(1);
-    const region = elixirConfirmOrderRegions[0]!;
-    expect(region.path).toBe(
-      `${SLUG_FOR.elixir}/lib/phoenix_api/orders/workflows/confirm_order.ex`,
-    );
-    // A whole-file region, not a narrower statement sub-region: its target
-    // spans exactly [1, fileLineCount].
-    const content = files.get(region.path)!;
-    const fileLineCount = content.endsWith("\n")
-      ? content.split("\n").length - 1
-      : content.split("\n").length;
-    expect(region.target).toEqual([1, fileLineCount]);
+    expect(elixirConfirmOrderRegions.length).toBeGreaterThan(0);
+    for (const region of elixirConfirmOrderRegions) {
+      expect(region.path).toBe(
+        `${SLUG_FOR.elixir}/lib/phoenix_api/orders/workflows/confirm_order.ex`,
+      );
+    }
   });
 });
 

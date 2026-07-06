@@ -77,11 +77,12 @@ import {
   workflowEmitsCommandRoute,
   workflowUsesCurrentUser,
 } from "../../../ir/types/loom-ir.js";
+import type { OriginRef } from "../../../ir/types/origin.js";
 import { classifyDomainServiceTier } from "../../../ir/util/domain-service-tier.js";
 import { resolveWorkflowIsolation } from "../../../ir/util/resolve-datasource.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
-import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
+import { lineCount, type SourceMapRecorder } from "../../_trace/sourcemap.js";
 import type { ApiRoute } from "../api-emit.js";
 import { inlineMutatingServiceCall } from "../domain-service-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
@@ -126,9 +127,26 @@ export function emitVanillaWorkflowExecution(
   for (const wf of commandWorkflows) {
     const wfSnake = snake(wf.name);
     const path = `lib/${appSnake}/${ctxSnake}/workflows/${wfSnake}.ex`;
-    const content = renderWorkflowModule(appModule, ctxModule, wf, resourceModules, ctx, sys);
+    const { content, statementRegions } = renderWorkflowModule(
+      appModule,
+      ctxModule,
+      wf,
+      resourceModules,
+      ctx,
+      sys,
+      !!sourcemap,
+    );
     out.set(path, content);
-    sourcemap?.file(path, content, wf.origin, `${ctx.name}.${wf.name}`);
+    const construct = `${ctx.name}.${wf.name}`;
+    sourcemap?.file(path, content, wf.origin, construct);
+    // M13 — one independent `fragment()` anchor per top-level statement (see
+    // `WorkflowModuleResult.statementRegions`); `undefined` origins were
+    // already filtered out by `renderWorkflowModule`.
+    for (const r of statementRegions) {
+      sourcemap?.fragment(path, content, r.text, [
+        { rel: [1, lineCount(r.text)], origin: r.origin, construct },
+      ]);
+    }
   }
 
   for (const wf of commandWorkflows) {
@@ -183,6 +201,16 @@ interface BodyLine {
   /** Bind name for `with-clause` lines — used to pick the final result
    *  of `run/1` (last bound name, or `:ok` if no binds). */
   bindName?: string;
+  /** M13 — the source `WorkflowStmtIR` this line was lowered from (stamped
+   *  by `lowerStatements`, not the individual `lowerStatement` arms).  A
+   *  `for-each`/`if-let` blob lowers to ONE `BodyLine` whose `text` embeds
+   *  its nested statements' own rendering — it keeps only the OUTER
+   *  statement's origin (nested per-statement granularity is out of scope,
+   *  the same contract the reactor/dispatch `renderWorkflowStmtChunks`
+   *  sibling uses).  A `domain-service-call` that expands to several
+   *  with-clauses stamps every clause with the SAME origin (one source
+   *  statement, several rendered lines). */
+  origin?: OriginRef;
 }
 
 function lowerStatements(
@@ -193,7 +221,9 @@ function lowerStatements(
 ): BodyLine[] {
   const lines: BodyLine[] = [];
   for (const st of stmts) {
-    lines.push(...lowerStatement(st, contextModule, renderCtx, ctx));
+    for (const line of lowerStatement(st, contextModule, renderCtx, ctx)) {
+      lines.push({ ...line, origin: st.origin });
+    }
   }
   return lines;
 }
@@ -1271,6 +1301,17 @@ function elixirIsolationSql(level: IsolationLevel): string {
   }
 }
 
+interface WorkflowModuleResult {
+  content: string;
+  /** M13 — one entry per top-level `WorkflowStmtIR` with an origin, its text
+   *  ALREADY put through the same `contextModuleFq` → `Context` alias
+   *  rewrite `content` itself went through, so it anchors verbatim via
+   *  `SourceMapRecorder.fragment` regardless of the bucketing that moved it
+   *  (with-clauses vs. `emit`s land in different structural positions —
+   *  see `assembleBody`).  Empty when the caller didn't ask for it. */
+  statementRegions: { text: string; origin: OriginRef | undefined }[];
+}
+
 function renderWorkflowModule(
   appModule: string,
   ctxModule: string,
@@ -1278,7 +1319,10 @@ function renderWorkflowModule(
   resourceModules: Map<string, string>,
   ctx?: BoundedContextIR,
   sys?: SystemIR,
-): string {
+  /** Only collect `statementRegions` when a source-map recorder is present
+   *  upstream (zero cost otherwise). */
+  wantRegions = false,
+): WorkflowModuleResult {
   const wfPascal = upperFirst(wf.name);
   const moduleName = `${appModule}.${ctxModule}.Workflows.${wfPascal}`;
   const contextModuleFq = `${appModule}.${ctxModule}`;
@@ -1336,6 +1380,20 @@ function renderWorkflowModule(
   // Rewrite the body's fully-qualified context module to the `Context`
   // alias to keep the rendered Elixir tidy and avoid long-line warnings.
   const aliasedBody = hasContextCall ? body.replaceAll(contextModuleFq, "Context") : body;
+  // M13 — one `fragment()` anchor per statement, independent of position
+  // (assembleBody's with-clause/emit bucketing REORDERS statements relative
+  // to source order, so a single cursor-walked fragment can't be used — see
+  // docs/plans/source-map-and-debugging.md).  Each line's own text is put
+  // through the SAME `Context`-alias rewrite `aliasedBody` got, so the
+  // anchor matches the final content verbatim.
+  const statementRegions: { text: string; origin: OriginRef | undefined }[] = wantRegions
+    ? lines
+        .filter((l) => l.origin)
+        .map((l) => ({
+          text: hasContextCall ? l.text.replaceAll(contextModuleFq, "Context") : l.text,
+          origin: l.origin,
+        }))
+    : [];
   // Surface referenced create-params as locals via a leading map
   // destructure — the body's bare `param` refs (`initial_title`) bind off
   // the `run/1` map.  Empty when no params are referenced, so a
@@ -1365,7 +1423,7 @@ function renderWorkflowModule(
     const txnBody = isolation
       ? `\n      Repo.query!("SET TRANSACTION ISOLATION LEVEL ${elixirIsolationSql(isolation)}")\n      commit_result(run_inner(${innerArgs}))\n    `
       : ` commit_result(run_inner(${innerArgs})) `;
-    return `# Auto-generated.
+    const content = `# Auto-generated.
 defmodule ${moduleName} do
   @moduledoc """
   Workflow \`${wf.name}\` — plain Elixir.${transactionalDoc}
@@ -1396,9 +1454,10 @@ ${finalBody}
   end
 end
 `;
+    return { content, statementRegions };
   }
 
-  return `# Auto-generated.
+  const content = `# Auto-generated.
 defmodule ${moduleName} do
   @moduledoc """
   Workflow \`${wf.name}\` — plain Elixir.
@@ -1417,6 +1476,7 @@ ${finalBody}
   end
 end
 `;
+  return { content, statementRegions };
 }
 
 function renderWorkflowsController(appModule: string, groups: WorkflowControllerGroup[]): string {

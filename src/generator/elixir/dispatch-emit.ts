@@ -8,13 +8,27 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
+import type { OriginRef } from "../../ir/types/origin.js";
 import { resolveContextSchema } from "../../ir/util/resolve-datasource.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
 import { renderPhoenixLogCall } from "../_obs/render-phoenix.js";
+import { lineCount, type SourceMapRecorder } from "../_trace/sourcemap.js";
 import { buildPhoenixResourceModules } from "./adapters/resource-clients.js";
 import { type RenderCtx, renderExpr } from "./render-expr.js";
 import { renderEsWorkflowHandler } from "./vanilla/workflow-eventsourced-emit.js";
 import { lookupOp, opCallParamFields } from "./vanilla/workflow-execution-emit.js";
+
+/** M13 — a handler-render result: the module's final content plus one
+ *  statement-granular `fragment()` anchor per rendered statement — the
+ *  exact text a statement rendered to (VERBATIM, as it appears in the
+ *  final content) paired with its origin.  Shared shape between the
+ *  regular (`renderHandler`) and event-sourced (`renderEsWorkflowHandler`
+ *  in `workflow-eventsourced-emit.ts`) reactor bodies, so `emitDispatch`'s
+ *  call site handles both without a per-path branch. */
+export interface HandlerResult {
+  content: string;
+  regions: { text: string; origin: OriginRef | undefined }[];
+}
 
 // ---------------------------------------------------------------------------
 // In-process event dispatch for Phoenix LiveView (channels.md).
@@ -141,6 +155,11 @@ export function emitDispatch(
   out: Map<string, string>,
   sys?: SystemIR,
   _foundation: "vanilla" = "vanilla",
+  /** Source-map Milestone 13 collector (`--sourcemap`).  Each handler file is
+   *  single-workflow-attributable, so it gets a whole-file `wf.origin`
+   *  region (like the command-workflow file) PLUS per-statement fragments —
+   *  same contract as `emitVanillaWorkflowExecution`. */
+  sourcemap?: SourceMapRecorder,
 ): void {
   if ((ctx.eventSubscriptions ?? []).length === 0) return;
   const ctxSnake = snake(ctx.name);
@@ -172,13 +191,24 @@ export function emitDispatch(
     const verb = sub.trigger === "on" ? "on" : "start";
     // An event-sourced workflow's handler folds the stream on load and appends
     // its own emitted events (the saga analogue of the ES aggregate).
-    const content = sub.workflow.eventSourced
+    const { content, regions }: HandlerResult = sub.workflow.eventSourced
       ? renderEsWorkflowHandler(contextModule, sub)
       : renderHandler(appModule, contextModule, ctx, sub, sys);
-    out.set(
-      `lib/${appName}/${ctxSnake}/workflows/${snake(sub.workflow.name)}/${verb}_${snake(sub.event)}.ex`,
-      content,
-    );
+    const path = `lib/${appName}/${ctxSnake}/workflows/${snake(sub.workflow.name)}/${verb}_${snake(sub.event)}.ex`;
+    out.set(path, content);
+    const construct = `${ctx.name}.${sub.workflow.name}`;
+    sourcemap?.file(path, content, sub.workflow.origin, construct);
+    // M13 — one independent `fragment()` anchor per rendered statement
+    // (verified: `renderBody`/`renderStmt`'s guard/chain/dispatch bucketing —
+    // and the ES handler's guards/lets/emits bucketing — relocate a
+    // statement's own text WITHOUT splitting it, so each anchors on its own
+    // exact text regardless of the position the bucketing moved it to).
+    for (const r of regions) {
+      if (!r.origin) continue;
+      sourcemap?.fragment(path, content, r.text, [
+        { rel: [1, lineCount(r.text)], origin: r.origin, construct },
+      ]);
+    }
   }
 
   // --- Dispatcher — routes each event struct to its handler(s). ----------
@@ -360,7 +390,7 @@ function renderHandler(
   ctx: EnrichedBoundedContextIR,
   sub: Subscription,
   sys?: SystemIR,
-): string {
+): HandlerResult {
   const wf = sub.workflow;
   const persisted = !!wf.correlationField;
   const usesThis = persisted && bodyUsesThis(sub.statements);
@@ -374,7 +404,7 @@ function renderHandler(
 
   // Body statements → ordered Elixir lines (0-indented), woven into a
   // `with`-chain plus the re-entrant dispatches the do-branch runs.
-  const body = renderBody(sub.statements, ctx, renderCtx, contextModule);
+  const { lines: body, regions } = renderBody(sub.statements, ctx, renderCtx, contextModule);
 
   // Saga routing wrapper, indented to the `def handle` body (4 spaces).
   const inner = persisted
@@ -387,7 +417,7 @@ function renderHandler(
   const needLogger = sub.trigger === "on" && persisted;
   const requireLogger = needLogger ? "  require Logger\n\n" : "";
 
-  return `# Auto-generated.
+  const content = `# Auto-generated.
 defmodule ${handlerModule(contextModule, sub)} do
   @moduledoc "${sub.trigger === "on" ? "Reactor" : "Starter"} for ${upperFirst(sub.event)} → ${upperFirst(wf.name)}."
 
@@ -401,6 +431,7 @@ ${inner}
   end
 end
 `;
+  return { content, regions };
 }
 
 /** Prefix every non-empty physical line of a 0-indented block with `n`
@@ -509,6 +540,23 @@ interface BodyLine {
    *  is only needed when a later line reads `state`; otherwise it's dropped so
    *  `mix compile --warnings-as-errors` doesn't trip on an unused variable. */
   rebindsState?: boolean;
+  /** M13 — the source `WorkflowStmtIR` this line was lowered from, stamped
+   *  by `renderBody` (every `renderStmt` arm returns exactly one `BodyLine`,
+   *  so it's a straight 1:1 zip against `statements`). */
+  origin?: OriginRef;
+}
+
+interface RenderBodyResult {
+  /** 0-indented Elixir lines (the caller indents the block to its position). */
+  lines: string[];
+  /** M13 — one independent `fragment()` anchor per rendered statement: each
+   *  statement's OWN text (as originally rendered, before the guard/chain/
+   *  dispatch bucketing groups it into `lines`), verbatim-preserved through
+   *  that bucketing (verified: bucketing only prepends/joins text around a
+   *  statement's own substring — it never splits or rewrites the interior of
+   *  a statement's rendered text, so an independent per-statement anchor
+   *  works regardless of where the bucketing relocated it). */
+  regions: { text: string; origin: OriginRef | undefined }[];
 }
 
 /** Render the constrained reactor / starter statement set into ordered,
@@ -521,9 +569,13 @@ function renderBody(
   ctx: EnrichedBoundedContextIR,
   renderCtx: RenderCtx,
   contextModule: string,
-): string[] {
+): RenderBodyResult {
   const lines: BodyLine[] = [];
-  for (const st of statements) lines.push(...renderStmt(st, ctx, renderCtx, contextModule));
+  for (const st of statements) {
+    for (const l of renderStmt(st, ctx, renderCtx, contextModule)) {
+      lines.push({ ...l, origin: st.origin });
+    }
+  }
 
   const guards = lines.filter((l) => l.kind === "guard");
   // `with` clauses + `=` matches compose the chain, in source order.
@@ -541,6 +593,12 @@ function renderBody(
     if (!laterReadsState) d.text = d.text.replace(/^state = /, "");
   }
 
+  // M13 — capture the per-statement anchors AFTER the assign-prefix-drop
+  // mutation above (it mutates the SAME `BodyLine` objects `lines` holds), so
+  // a rebind-dropped assign anchors on the text that actually lands in the
+  // final content, not the pre-mutation text.
+  const regions = lines.map((l) => ({ text: l.text, origin: l.origin }));
+
   const out: string[] = [];
   for (const g of guards) out.push(g.text);
 
@@ -548,7 +606,7 @@ function renderBody(
     // No chained calls — run the dispatches (if any) then return :ok.
     for (const d of dispatches) out.push(d.text);
     out.push(":ok");
-    return out;
+    return { lines: out, regions };
   }
   // `with` must hug its first clause on the same line; continuations align
   // under it (5 cols = "with ").
@@ -559,7 +617,7 @@ function renderBody(
   for (const d of dispatches) out.push(`  ${d.text}`);
   out.push("  :ok");
   out.push("end");
-  return out;
+  return { lines: out, regions };
 }
 
 function renderStmt(

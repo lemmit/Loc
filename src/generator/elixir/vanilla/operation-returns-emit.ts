@@ -211,12 +211,26 @@ export function returningOpPersistsChangeset(
  *  seam — only when the context emits one, mirroring the event-sourced path's
  *  `dispatchLine` gating) AND the raw PubSub broadcast.  Emitted INSIDE the
  *  `{:ok, saved}` branch of `persist_change`, so an event is observed iff the
- *  write committed.  `baseIndent` is the leading whitespace for each line. */
+ *  write committed.  `baseIndent` is the leading whitespace for each line.
+ *
+ *  M13 (#1704 leftover) — a hoisted `emit` renders OUTSIDE the regular body
+ *  `OpFragment` (that fragment deliberately excludes hoisted emits, see its
+ *  doc comment above), so it gets its OWN per-emit fragment here: pushed
+ *  into the SAME `opFragments` out-param the regular body uses, keyed to
+ *  the SAME `construct` — the caller's existing `sourcemap.fragment(path,
+ *  content, frag.fragmentText, frag.subRegions)` loop over `opFragments`
+ *  (context-emit.ts) picks it up with no changes of its own. */
 export function renderEmitDispatchLines(
   op: OperationIR,
   rc: RenderCtx,
   hasDispatcher: boolean,
   baseIndent: string,
+  /** Dotted construct id (`Ctx.Agg.op`) — only needed when `opFragments` is
+   *  passed. */
+  construct?: string,
+  /** Source-map Milestone 13 collector (`--sourcemap`) — only allocated by
+   *  the caller when a recorder is present (zero cost otherwise). */
+  opFragments?: OpFragment[],
 ): string[] {
   const appModule = rc.contextModule.split(".")[0]!;
   const lines: string[] = [];
@@ -233,10 +247,19 @@ export function renderEmitDispatchLines(
       { name: "event_type", valueExpr: `"${upperFirst(s.eventName)}"` },
       ...(rc.agg ? [{ name: "aggregate", valueExpr: `"${upperFirst(rc.agg.name)}"` }] : []),
     ]);
-    lines.push(`${baseIndent}${evVar} = ${struct}`);
-    lines.push(`${baseIndent}${logCall}`);
-    if (hasDispatcher) lines.push(`${baseIndent}${rc.contextModule}.Dispatcher.dispatch(${evVar})`);
-    lines.push(`${baseIndent}Phoenix.PubSub.broadcast(${appModule}.PubSub, "events", ${evVar})`);
+    const emitLines = [`${baseIndent}${evVar} = ${struct}`, `${baseIndent}${logCall}`];
+    if (hasDispatcher)
+      emitLines.push(`${baseIndent}${rc.contextModule}.Dispatcher.dispatch(${evVar})`);
+    emitLines.push(
+      `${baseIndent}Phoenix.PubSub.broadcast(${appModule}.PubSub, "events", ${evVar})`,
+    );
+    lines.push(...emitLines);
+    if (opFragments && construct) {
+      opFragments.push({
+        fragmentText: emitLines.join("\n"),
+        subRegions: [{ rel: [1, emitLines.length], origin: s.origin, construct }],
+      });
+    }
     i++;
   }
   return lines;
@@ -381,7 +404,14 @@ export function renderReturningOpFunction(
   const hoistEmits = opEmitsEvent(op) && persists;
   const hasDispatcher = contextHasDispatcher(ctx as EnrichedBoundedContextIR);
   const dispatchLines = hoistEmits
-    ? renderEmitDispatchLines(op, renderCtx, hasDispatcher, "        ")
+    ? renderEmitDispatchLines(
+        op,
+        renderCtx,
+        hasDispatcher,
+        "        ",
+        `${ctx.name}.${agg.name}.${op.name}`,
+        opFragments,
+      )
     : [];
   const lastIdx = op.statements.length - 1;
   // Per-statement index disambiguates provenance temp vars across writes.  When
