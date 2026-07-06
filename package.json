@@ -16,7 +16,7 @@
   "main": "./out/language/main.js",
   "scripts": {
     "build": "tsc -b tsconfig.json",
-    "build:web": "test -d web/node_modules && tsc -p web/tsconfig.json --noEmit || echo 'web/node_modules not present \u2014 run (cd web && npm install) once to enable the web tsc gate'",
+    "build:web": "test -d web/node_modules && tsc -p web/tsconfig.json --noEmit || echo 'web/node_modules not present — run (cd web && npm install) once to enable the web tsc gate'",
     "watch": "tsc -b tsconfig.json --watch",
     "langium:generate": "langium generate",
     "langium:watch": "langium generate --watch",
@@ -85,6 +85,7 @@
     "vscode-uri": "~3.1.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@biomejs/biome": "^2.5.0",
     "@isomorphic-git/lightning-fs": "^4.6.2",
     "@types/node": "~24.13.0",
@@ -94,6 +95,7 @@
     "isomorphic-git": "^1.38.5",
     "langium-cli": "~4.3.0",
     "marked": "^18.0.5",
+    "playwright": "^1.61.1",
     "typescript": "~6.0.0",
     "vitest": "^4.1.9"
   }
