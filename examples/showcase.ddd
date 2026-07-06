@@ -581,7 +581,7 @@ system DevPlatform {
                     cols: [2, 1],
                     Group {
                         Avatar { "P" },
-                        Image { "/logo.png" },
+                        Image { "/logo.png", alt: "Acme logo" },
                         Heading { "Project detail", level: 2 }
                     },
                     Tabs {

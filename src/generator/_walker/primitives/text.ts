@@ -6,6 +6,7 @@
 import type { ExprIR } from "../../../ir/types/loom-ir.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
+  boolNamed,
   escapeJsxText,
   namedArgValue,
   numericNamed,
@@ -157,7 +158,12 @@ export function emitImage(
       ? JSON.stringify(positional.value)
       : undefined;
   const src = stringOrRefArgValue(call, "src", ctx) ?? positionalSrc;
-  const alt = stringOrRefArgValue(call, "alt", ctx);
+  // `decorative: true` (accessibility.md Phase 3) renders an explicit empty
+  // alt (`alt=""`), hiding a purely-decorative image from assistive tech; a
+  // real `alt:` wins over it.  The validator guarantees one of the two is
+  // present when the image has a src.
+  const alt =
+    stringOrRefArgValue(call, "alt", ctx) ?? (boolNamed(call, "decorative") ? '""' : undefined);
   return renderPrimitive(ctx, "primitive-image", {
     src,
     alt,
@@ -177,7 +183,9 @@ export function emitAvatar(
   // image.  Without src, packs render their user-icon fallback.
   void depth;
   const src = stringOrRefArgValue(call, "src", ctx);
-  const alt = stringOrRefArgValue(call, "alt", ctx);
+  // `decorative: true` → explicit empty alt (see emitImage); real `alt:` wins.
+  const alt =
+    stringOrRefArgValue(call, "alt", ctx) ?? (boolNamed(call, "decorative") ? '""' : undefined);
   return renderPrimitive(ctx, "primitive-avatar", {
     src,
     alt,

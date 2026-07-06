@@ -62,6 +62,26 @@ describe("Image + Avatar in walker stdlib", () => {
     expect(content).toMatch(/<Avatar src="\/u\.png" alt="User" \/>/);
   });
 
+  // accessibility.md Phase 3 — `decorative: true` renders an explicit empty
+  // alt (`alt=""`), hiding a purely-decorative image from assistive tech.
+  it('Image { decorative: true } emits alt=""', async () => {
+    const files = await buildAndGenerate(`
+      system S {
+        subdomain M { context C { } }
+        ui WebApp {
+          page Home {
+            route: "/"
+            body:  Image { "/spacer.png", decorative: true }
+          }
+        }
+        deployable api { platform: node, contexts: [C], port: 3000 }
+        deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
+      }
+    `);
+    const content = files.get("web/src/pages/home.tsx")!;
+    expect(content).toMatch(/<Image src="\/spacer\.png" alt="" \/>/);
+  });
+
   it("Image with no attrs emits a self-closing Image (Mantine fallback)", async () => {
     const files = await buildAndGenerate(`
       system S {
