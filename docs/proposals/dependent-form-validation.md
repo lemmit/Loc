@@ -54,12 +54,13 @@ PasswordField { "Confirm", bind: confirmPassword,
 
 Wiring: `inputErrorExpr` in `src/generator/_walker/primitives/inputs.ts`
 (one `error`/`hasError` pair threaded through all six input emitters).
-Rendered today in the **Mantine** packs (v7/v9) via the native `error=` prop;
-the other packs render `label + input` and ignore the slot — a mechanical
-per-pack follow-up (each pack's own error idiom: shadcn `<p>` sibling, MUI
-`helperText`, Chakra `Field.ErrorText`, Vuetify `:error-messages`, Angular
-Material `<mat-error>`, …), tracked but not blocking (the slot is additive —
-no pack breaks without it).
+Rendered across **every pack**, each in its own error idiom: Mantine
+`error=` prop, MUI `error`/`helperText`, Chakra `FormErrorMessage` (v2) /
+`Field.ErrorText` (v3), shadcn/shadcnVue destructive `<p>`, Vuetify
+`:error-messages`, shadcnSvelte/flowbite `{#if}` `<span>`/`<p>`, Angular
+(Material/Spartan/PrimeNG) an `@if`-gated error span. The expression is
+walked in page scope, so per-framework state access is correct out of the
+box (React plain, Vue unwrapped, Svelte plain, Angular signal `()` calls).
 
 ## 3. Why the payload-invariant idea was wrong (retained as the reasoning trail)
 
@@ -88,5 +89,3 @@ forms — but that is not this, and is not scheduled.
   `criterion` / `can-<op>` concern ([`criterion.md`](./criterion.md)).
 - A dedicated `email`/`url` format vocabulary — expressed today as
   `matches("…")` regex invariants.
-- Fanning the `error:` slot across the remaining 13 packs — mechanical
-  follow-up (§2).

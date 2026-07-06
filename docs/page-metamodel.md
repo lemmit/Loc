@@ -400,9 +400,10 @@ Split the problem by where the rule lives:
   `confirmPassword` is a `state` field, so it is in scope for `derived` /
   `match` / `error:`, and `call signup({ email, password })` posts only the
   wire fields — the confirmation never travels. `error:` takes any expression
-  (empty string ⇒ no error); it renders in the pack's native error slot
-  (Mantine's `error=` prop today; the other packs render `label + input` and
-  ignore it pending a per-pack error-slot follow-up).
+  (empty string ⇒ no error); it renders in each pack's native error slot —
+  Mantine's `error=` prop, MUI's `helperText`, Chakra's `ErrorText`, shadcn's
+  destructive `<p>`, Vuetify's `:error-messages`, Angular Material's error
+  span — across all React / Vue / Svelte / Angular packs.
 
 ---
 
