@@ -5112,11 +5112,20 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "feature": "name",
             "operator": "=",
             "terminal": {
-              "$type": "RuleCall",
-              "rule": {
-                "$ref": "#/rules@231"
-              },
-              "arguments": []
+              "$type": "Alternatives",
+              "elements": [
+                {
+                  "$type": "RuleCall",
+                  "rule": {
+                    "$ref": "#/rules@231"
+                  },
+                  "arguments": []
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "write"
+                }
+              ]
             }
           },
           {
@@ -11384,11 +11393,20 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "feature": "name",
             "operator": "=",
             "terminal": {
-              "$type": "RuleCall",
-              "rule": {
-                "$ref": "#/rules@231"
-              },
-              "arguments": []
+              "$type": "Alternatives",
+              "elements": [
+                {
+                  "$type": "RuleCall",
+                  "rule": {
+                    "$ref": "#/rules@231"
+                  },
+                  "arguments": []
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "write"
+                }
+              ]
             }
           },
           {
@@ -12371,11 +12389,20 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "feature": "name",
             "operator": "=",
             "terminal": {
-              "$type": "RuleCall",
-              "rule": {
-                "$ref": "#/rules@231"
-              },
-              "arguments": []
+              "$type": "Alternatives",
+              "elements": [
+                {
+                  "$type": "RuleCall",
+                  "rule": {
+                    "$ref": "#/rules@231"
+                  },
+                  "arguments": []
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "write"
+                }
+              ]
             }
           },
           {
@@ -14054,11 +14081,20 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "feature": "var",
             "operator": "=",
             "terminal": {
-              "$type": "RuleCall",
-              "rule": {
-                "$ref": "#/rules@231"
-              },
-              "arguments": []
+              "$type": "Alternatives",
+              "elements": [
+                {
+                  "$type": "RuleCall",
+                  "rule": {
+                    "$ref": "#/rules@231"
+                  },
+                  "arguments": []
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "write"
+                }
+              ]
             }
           },
           {
@@ -14350,11 +14386,20 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "feature": "name",
             "operator": "=",
             "terminal": {
-              "$type": "RuleCall",
-              "rule": {
-                "$ref": "#/rules@231"
-              },
-              "arguments": []
+              "$type": "Alternatives",
+              "elements": [
+                {
+                  "$type": "RuleCall",
+                  "rule": {
+                    "$ref": "#/rules@231"
+                  },
+                  "arguments": []
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "write"
+                }
+              ]
             }
           },
           {

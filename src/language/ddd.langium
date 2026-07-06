@@ -587,7 +587,7 @@ PageProp:
 // reference resolves + carries the action's param type during
 // lowering so backends never re-resolve.
 ActionDecl:
-    'action' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')'
+    'action' name=(ID | 'write') '(' (params+=Parameter (',' params+=Parameter)*)? ')'
         '{' stmts+=Statement* '}';
 
 RouteProp:
@@ -1473,7 +1473,7 @@ DomainService:
 // NOT carry `private` / `extern` / `audited` / `when` — those are
 // aggregate-operation-only.
 DomainServiceOperation:
-    'operation' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')'
+    'operation' name=(ID | 'write') '(' (params+=Parameter (',' params+=Parameter)*)? ')'
     (':' returnType=TypeRef)? '{'
         stmts+=Statement*
     '}';
@@ -1646,7 +1646,7 @@ FunctionDecl:
 // `GET /{id}/can_<op>` returning `{ allowed }`.  Distinct from `requires`
 // (auth, 403) and `precondition` (argument validation inside the body, 400).
 Operation:
-    (private?='private')? 'operation' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' (extern?='extern')? (audited?='audited')? (':' returnType=TypeRef)? ('when' when=Expression)? '{'
+    (private?='private')? 'operation' name=(ID | 'write') '(' (params+=Parameter (',' params+=Parameter)*)? ')' (extern?='extern')? (audited?='audited')? (':' returnType=TypeRef)? ('when' when=Expression)? '{'
         body+=Statement*
     '}';
 
@@ -1973,7 +1973,7 @@ VariantStmtArm:
 // shape, which also keeps a trailing `{ }` block from being swallowed by a
 // `BuilderCall` the way the loop iterable does.
 IfLetStmt:
-    'if' 'let' var=ID '=' source=ForIterable '{'
+    'if' 'let' var=(ID | 'write') '=' source=ForIterable '{'
         thenBody+=Statement*
     '}' ('else' '{'
         elseBody+=Statement*
@@ -2020,7 +2020,7 @@ RequiresStmt:
     'requires' expr=Expression;
 
 LetStmt:
-    'let' name=ID '=' expr=Expression;
+    'let' name=(ID | 'write') '=' expr=Expression;
 
 EmitStmt:
     'emit' event=[EventDecl:ID] '{'

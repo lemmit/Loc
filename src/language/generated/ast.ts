@@ -331,7 +331,7 @@ export type DddTokenNames = DddTerminalNames | DddKeywordNames;
 export interface ActionDecl extends langium.AstNode {
     readonly $container: Component | Page | Store;
     readonly $type: 'ActionDecl';
-    name: string;
+    name: 'write' | string;
     params: Array<Parameter>;
     stmts: Array<Statement>;
 }
@@ -1174,7 +1174,7 @@ export function isDomainService(item: unknown): item is DomainService {
 export interface DomainServiceOperation extends langium.AstNode {
     readonly $container: DomainService;
     readonly $type: 'DomainServiceOperation';
-    name: string;
+    name: 'write' | string;
     params: Array<Parameter>;
     returnType?: TypeRef;
     stmts: Array<Statement>;
@@ -1522,7 +1522,7 @@ export interface IfLetStmt extends langium.AstNode {
     elseBody: Array<Statement>;
     source: Expression;
     thenBody: Array<Statement>;
-    var: string;
+    var: 'write' | string;
 }
 
 export const IfLetStmt = {
@@ -1746,7 +1746,7 @@ export interface LetStmt extends langium.AstNode {
     readonly $container: ActionDecl | Apply | Create | Destroy | DomainServiceOperation | ForStmt | FunctionDecl | HandleDecl | IfLetStmt | Lambda | MatchStmt | OnDecl | Operation | ProjectionOn | TestBlock | TestE2E | VariantStmtArm | WorkflowCreateDecl;
     readonly $type: 'LetStmt';
     expr: Expression;
-    name: string;
+    name: 'write' | string;
 }
 
 export const LetStmt = {
@@ -2379,7 +2379,7 @@ export interface Operation extends langium.AstNode {
     audited: boolean;
     body: Array<Statement>;
     extern: boolean;
-    name: string;
+    name: 'write' | string;
     params: Array<Parameter>;
     private: boolean;
     returnType?: TypeRef;
