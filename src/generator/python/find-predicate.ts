@@ -281,6 +281,21 @@ export function contextFilterPredicate(
   return { expr: `and_(${lowered.join(", ")})`, ops };
 }
 
+/** Lower an aggregate's `writeScopeFilter` (authorization Phase 3 P3.1 — the
+ *  WRITE-ladder guard) to a single SQLAlchemy predicate, or null when the
+ *  aggregate has no write-scope narrowing.  Renders `current_user.<field>`
+ *  against the ambient `require_current_user()` accessor, exactly like the read
+ *  capability filter. */
+export function writeScopePredicate(
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+): PyPredicate | null {
+  if (!agg.writeScopeFilter) return null;
+  return lowerToSqlAlchemy(agg.writeScopeFilter, agg, ctx, {
+    principalAccessor: "require_current_user()",
+  });
+}
+
 /** True when the aggregate carries a principal-referencing capability `filter`
  *  (`currentUser.<claim>`).  Drives the repository module's
  *  `require_current_user` import gating — only those repos weave the ambient

@@ -1026,8 +1026,21 @@ PolicyDecl:
         rules+=PolicyReadRule*
     '}';
 
+// `allow [read|write] <level> on <Aggregate>` — the optional `verb` selects
+// the ladder (authorization Phase 3 P3.1, docs/plans/authorization-phase3.md):
+// bare / `read` = the read reachability ladder (Phase 2, unchanged); `write`
+// gates INSTANCE mutations (update-style ops, destroy, applier dispatch) on the
+// target row's write scope.  `write global` PARSES but is a phase-⑦ validator
+// error (`loom.policy-write-global-unsupported`) — root-subtree-wide mutation
+// is a footgun; only `write local` (the default floor) and `write deep` are
+// offered.  The rule name stays `PolicyReadRule` (both verbs are policy read
+// rules structurally); the IR splits them by verb.
 PolicyReadRule:
-    'allow' level=ReadLevel 'on' target=ID;
+    'allow' (verb=PolicyVerb)? level=ReadLevel 'on' target=ID;
+
+// The optional policy verb.  Absent = `read` (Phase 2 behavior).
+PolicyVerb returns string:
+    'read' | 'write';
 
 // The directional read ladder (docs/plans/multi-tenancy-phase2.md P2.4):
 //   - `local`  — the caller's own org node (today's `tenantId ==` floor; default)
@@ -1808,7 +1821,10 @@ LooseName returns string:
     // `policy` / `allow` / `local` / `deep` / `global`.  `policy` is hard only
     // at the head of the `PolicyDecl` ContextMember; `allow` / the three
     // `ReadLevel` words only inside a `policy {}` block's read rules.
-    | 'policy' | 'allow' | 'local' | 'deep' | 'global';
+    // `read` / `write` (the P3.1 policy verb) are soft only in the optional
+    // verb slot of a `PolicyReadRule`; admit them here so user code can still
+    // name a field / parameter / arg `read` / `write`.
+    | 'policy' | 'allow' | 'local' | 'deep' | 'global' | 'read' | 'write';
 
 // A dotted page reference for `menu { link <Area>.<Page> }` — lets a menu link
 // disambiguate role-named scaffold pages (`List` / `New` / `Detail`) by their

@@ -33,6 +33,7 @@ import {
   aggregateUsesPrincipalContextFilter,
   combineWhere,
   vanillaCapabilityFilter,
+  vanillaWriteScopeFilter,
 } from "./capability-filter.js";
 import { aggregateNeedsUpdateChangeset } from "./changeset-emit.js";
 import { isVanillaDocAgg, renderDocRepository } from "./document-emit.js";
@@ -185,6 +186,11 @@ function renderRepository(
   // discriminator (for a concrete sharing the base table).  A non-TPH aggregate
   // keeps `capEff === cap` so its output stays byte-identical.
   const capEff = combineWhere(kindFilter, cap);
+  // The WRITE-scope command-load filter (authorization Phase 3 P3.1) — null
+  // unless the aggregate's write scope is narrower than its read scope.  When
+  // present, a `find_by_id_for_write` mirrors `find_by_id` but scopes on it.
+  const writeScope = vanillaWriteScopeFilter(agg, contextModule);
+  const writeEff = combineWhere(kindFilter, writeScope);
   // On insert, a TPH concrete stamps its `kind` discriminator (the migration's
   // NOT-NULL text column) so the shared-table row is routable back to this
   // subtype.  `kind` isn't a cast field (it's not a declared aggregate column),
@@ -318,6 +324,20 @@ defmodule ${repoMod} do
       ${findByIdHit}
     end
   end
+${
+  writeEff
+    ? `
+  @doc "Command-load path (authorization Phase 3 P3.1): scope the by-id load to the WRITE scope; a readable-but-not-writable (or missing) row reads as :not_found → 404."
+  @spec find_by_id_for_write(binary(), map() | nil) :: {:ok, ${aggModule}.t()} | {:error, :not_found}
+  def find_by_id_for_write(id, current_user \\\\ nil) when is_binary(id) do
+    case Repo.one(from(record in ${aggModule}, where: record.id == ^id and (${writeEff}))) do
+      nil -> {:error, :not_found}
+      ${findByIdHit}
+    end
+  end
+`
+    : ""
+}
 
   @spec insert(map()${hasStamps && stampPrincipal ? ", map() | nil" : ""}) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
   def insert(attrs${stampActorParam}) when is_map(attrs) do

@@ -26,6 +26,14 @@ function whenGate(agg: AggregateIR, op: AggregateIR["operations"][number]): stri
 // Create command + handler
 // ---------------------------------------------------------------------------
 
+/** The repo method a MUTATION command handler loads through: `GetByIdForWriteAsync`
+ *  when the aggregate's write scope is narrower than its read scope
+ *  (authorization Phase 3 P3.1), else the ordinary `GetByIdAsync` (byte-
+ *  identical).  Query (read) handlers always use `GetByIdAsync`. */
+function writeCmdLoad(agg: AggregateIR): string {
+  return agg.writeScopeFilter ? "GetByIdForWriteAsync" : "GetByIdAsync";
+}
+
 export function emitCreateCommandAndHandler(
   agg: AggregateIR,
   requiredFields: AggregateIR["fields"],
@@ -222,7 +230,7 @@ export function emitDestroyCommandAndHandler(
       extraDeps: destroyAuditDeps,
       extraUsings: destroyAuditUsings,
       body:
-        `        var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)\n` +
+        `        var aggregate = await _repo.${writeCmdLoad(agg)}(command.Id, cancellationToken)\n` +
         `            ?? throw new AggregateNotFoundException($"${agg.name} {command.Id} not found");\n` +
         destroyAuditStage +
         `        await _repo.DeleteAsync(aggregate, cancellationToken);\n` +
@@ -366,7 +374,7 @@ export function emitOperationCommandAndHandler(
           // unchanged so DomainException → 400, ForbiddenException →
           // 403, AggregateNotFoundException → 404 still apply.
           body:
-            `        var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)\n` +
+            `        var aggregate = await _repo.${writeCmdLoad(agg)}(command.Id, cancellationToken)\n` +
             `            ?? throw new AggregateNotFoundException($"${agg.name} {command.Id} not found");\n` +
             whenGate(agg, op) +
             `        aggregate.Check${upperFirst(op.name)}(${callArgs});\n` +
@@ -447,7 +455,7 @@ export function emitOperationCommandAndHandler(
     // A return-typed op threads the union value: capture the method result,
     // save, then return it (the aggregate produces the tagged Domain union).
     const loadLine =
-      `        var aggregate = await _repo.GetByIdAsync(command.Id, cancellationToken)\n` +
+      `        var aggregate = await _repo.${writeCmdLoad(agg)}(command.Id, cancellationToken)\n` +
       `            ?? throw new AggregateNotFoundException($"${agg.name} {command.Id} not found");\n` +
       whenGate(agg, op);
     const handlerBody = returnUnion

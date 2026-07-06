@@ -557,6 +557,18 @@ export interface AggregateIR {
    * backend maps a bypassed capability name to the predicate(s) it owns.  Purely
    * additive — no consumer until the bypass surface lands, so byte-neutral. */
   contextFilterOrigins?: (string | undefined)[];
+  /** The WRITE-scope predicate an INSTANCE mutation's command load must satisfy
+   *  (authorization Phase 3 P3.1 — `docs/plans/authorization-phase3.md`).
+   *  Derived in enrichment from the aggregate's `policy` read + write levels,
+   *  and set **only when the write scope is strictly narrower than the read
+   *  scope** — i.e. when the mutation load (which reuses the read filter on
+   *  every backend) must be tightened below what a read can see.  Two shapes:
+   *  the flat `tenantId ==` floor (`write local` under a widened read) or the
+   *  `deep` descendant-or-self sentinel (`write deep` under a `global` read).
+   *  `undefined` = the command load already matches the write scope, so the
+   *  mutation seam stays byte-identical.  Uses `currentUser`, so backends
+   *  render it through their existing principal-filter path. */
+  writeScopeFilter?: ExprIR;
   /** Lifecycle stamping rules contributed by `stamp onCreate { ... }`
    * / `stamp onUpdate { ... }` declarations (hand-written or
    * macro-emitted) on the aggregate, plus any propagated from the
@@ -980,6 +992,16 @@ export interface BoundedContextIR {
    *  capability filter (`contextFilters`) to the level-appropriate predicate.
    *  Undefined / empty when the context declares no policy. */
   policyReadLevels?: PolicyReadLevelIR[];
+  /** Per-aggregate WRITE reachability levels declared by `policy { allow write
+   *  <level> on X }` blocks in this context (authorization Phase 3 P3.1 —
+   *  `docs/plans/authorization-phase3.md`).  A write level gates INSTANCE
+   *  mutations (update-style ops, destroy, applier dispatch) on the target
+   *  row's write scope; `local` is the flat `tenantId ==` floor (the default),
+   *  `deep` the caller's org + descendants.  Consumed by `enrichLoomModel`,
+   *  which derives each tenant-owned aggregate's `writeScopeFilter` from the
+   *  read + write levels.  Undefined / empty when the context declares no
+   *  `allow write` rule. */
+  policyWriteLevels?: PolicyWriteLevelIR[];
 }
 
 /** One `allow <level> on <Aggregate>` rule lowered from a `policy {}` block —
@@ -995,6 +1017,22 @@ export interface PolicyReadLevelIR {
   /** The directional read level. */
   level: "local" | "deep" | "global";
   /** Source span text for diagnostics (`allow deep on Invoice`). */
+  source: string;
+}
+
+/** One `allow write <level> on <Aggregate>` rule lowered from a `policy {}`
+ *  block (authorization Phase 3 P3.1).  `local` is the flat `tenantId ==`
+ *  tenant floor (and the default write scope when no rule names an aggregate);
+ *  `deep` widens to the caller's org + all descendants (a `dataKey`
+ *  materialized-path prefix).  `global` parses but is rejected in P3.1
+ *  (`loom.policy-write-global-unsupported`). */
+export interface PolicyWriteLevelIR {
+  /** The tenant-owned aggregate this write level applies to (by name, in this
+   *  context).  Resolution + tenant-owned-ness is validated in phase ⑦. */
+  aggregate: string;
+  /** The directional write level. */
+  level: "local" | "deep" | "global";
+  /** Source span text for diagnostics (`allow write deep on Invoice`). */
   source: string;
 }
 

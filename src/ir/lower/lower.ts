@@ -122,6 +122,7 @@ import type {
   PayloadIR,
   PermissionDeclIR,
   PolicyReadLevelIR,
+  PolicyWriteLevelIR,
   ProjectionIR,
   RawLoomModel,
   RepositoryIR,
@@ -971,14 +972,25 @@ function lowerContext(
   // `tenantOwned` filter happens in enrichment; validation (tenant-owned-ness,
   // hierarchy requirement, unknown/duplicate target) is phase ⑦.
   const policyReadLevels: PolicyReadLevelIR[] = [];
+  const policyWriteLevels: PolicyWriteLevelIR[] = [];
   for (const m of ctx.members) {
     if (!isPolicyDecl(m)) continue;
     for (const r of m.rules) {
-      policyReadLevels.push({
-        aggregate: r.target,
-        level: r.level as PolicyReadLevelIR["level"],
-        source: `allow ${r.level} on ${r.target}`,
-      });
+      // The optional `verb` (P3.1) selects the ladder: `write` gates
+      // mutations; bare / `read` is the Phase 2 read ladder.
+      if (r.verb === "write") {
+        policyWriteLevels.push({
+          aggregate: r.target,
+          level: r.level as PolicyWriteLevelIR["level"],
+          source: `allow write ${r.level} on ${r.target}`,
+        });
+      } else {
+        policyReadLevels.push({
+          aggregate: r.target,
+          level: r.level as PolicyReadLevelIR["level"],
+          source: `allow ${r.level} on ${r.target}`,
+        });
+      }
     }
   }
   return {
@@ -1004,6 +1016,7 @@ function lowerContext(
     seeds,
     origin: originFor(ctx),
     ...(policyReadLevels.length > 0 ? { policyReadLevels } : {}),
+    ...(policyWriteLevels.length > 0 ? { policyWriteLevels } : {}),
   };
 }
 

@@ -224,6 +224,14 @@ export function buildPyRoutesFile(
 }
 
 /** `app.http.problem` names this routes file references. */
+/** The repo method a MUTATION route loads through: `get_by_id_for_write` when
+ *  the aggregate carries a `writeScopeFilter` (authorization Phase 3 P3.1 — the
+ *  write scope is narrower than the read scope), else `get_by_id` (byte-
+ *  identical).  Read routes always use `get_by_id`. */
+function cmdLoad(agg: EnrichedAggregateIR): string {
+  return agg.writeScopeFilter ? "get_by_id_for_write" : "get_by_id";
+}
+
 function problemImports(refersTo: (n: string) => boolean): string | null {
   const names = [
     refersTo("ProblemDetails") ? "ProblemDetails" : null,
@@ -681,8 +689,8 @@ function destroyRoute(agg: EnrichedAggregateIR): string {
     `async def destroy_${snake(agg.name)}(${ID_PARAM}, request: Request, session: SessionDep) -> Response:`,
     "    repo = _repo(session)",
     auditDestroy
-      ? `    __loaded = await repo.get_by_id(${agg.name}Id(id))`
-      : `    await repo.get_by_id(${agg.name}Id(id))`,
+      ? `    __loaded = await repo.${cmdLoad(agg)}(${agg.name}Id(id))`
+      : `    await repo.${cmdLoad(agg)}(${agg.name}Id(id))`,
     auditDestroy ? "    __before = repo.to_wire(__loaded)" : null,
     ...destroyAuditCall,
     "    try:",
@@ -728,7 +736,7 @@ function canOpRoute(
     `@router.get("/{id}/can_${opSnake}", response_model=CanResponse, operation_id="${camelId(opOperation(agg.name, `can_${op.name}`))}"${errorResponsesKwarg("getById")})`,
     `async def can_${snake(op.name)}_${snake(agg.name)}(${ID_PARAM}, session: SessionDep) -> dict[str, object]:`,
     "    repo = _repo(session)",
-    `    found = await repo.get_by_id(${agg.name}Id(id))`,
+    `    found = await repo.${cmdLoad(agg)}(${agg.name}Id(id))`,
     `    return {"allowed": ${pred}}`,
   );
 }
@@ -817,7 +825,7 @@ function operationRoute(
         ? "    current_user: User = request.state.current_user"
         : null,
       "    repo = _repo(session)",
-      `    found = await repo.get_by_id(${agg.name}Id(id))`,
+      `    found = await repo.${cmdLoad(agg)}(${agg.name}Id(id))`,
       `    log("info", "operation_invoked", aggregate=${JSON.stringify(agg.name)}, op=${JSON.stringify(op.name)}, id=id)`,
       ...whenGate(agg, op),
       op.audited ? "    __before = repo.to_wire(found)" : null,
@@ -854,7 +862,7 @@ function operationRoute(
     `async def ${snake(op.name)}_${snake(agg.name)}(${opSig}) -> Response:`,
     usesUser || stampUpdateUsesUser ? "    current_user: User = request.state.current_user" : null,
     "    repo = _repo(session)",
-    `    found = await repo.get_by_id(${agg.name}Id(id))`,
+    `    found = await repo.${cmdLoad(agg)}(${agg.name}Id(id))`,
     `    log("info", "operation_invoked", aggregate=${JSON.stringify(agg.name)}, op=${JSON.stringify(op.name)}, id=id)`,
     ...whenGate(agg, op),
     op.audited ? "    __before = repo.to_wire(found)" : null,
@@ -904,7 +912,7 @@ function externRoute(
     `async def ${snake(op.name)}_${snake(agg.name)}(${sig}) -> Response:`,
     usesUser || stampUpdateUsesUser ? "    current_user: User = request.state.current_user" : null,
     "    repo = _repo(session)",
-    `    found = await repo.get_by_id(${agg.name}Id(id))`,
+    `    found = await repo.${cmdLoad(agg)}(${agg.name}Id(id))`,
     `    log("info", "operation_invoked", aggregate=${JSON.stringify(agg.name)}, op=${JSON.stringify(op.name)}, id=id)`,
     ...whenGate(agg, op),
     `    found.check_${snake(op.name)}(${checkArgs.join(", ")})`,
