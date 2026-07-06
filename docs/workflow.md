@@ -110,6 +110,72 @@ injects the user's `IXAggHandler` and runs the same dispatch
 dance the auto HTTP route does), and can't `findById` (use
 `getById` for must-exist loads).
 
+## `function` — private pure helper
+
+A workflow is a state-bearing entity like an aggregate, so it carries the same
+private-helper member: a `function`.  It factors a shared, side-effect-free
+expression out of the `create` / `handle` / `on` bodies that use it:
+
+```ddd
+workflow FulfillOrder {
+  orderId: Order id
+
+  // Private pure helper — never a route, callable from any body below.
+  function slaDays(priority: int): int = priority > 5 ? 1 : 5
+
+  create(orderId: Order id, priority: int) {
+    let order = Orders.getById(orderId)
+    order.scheduleShipment(slaDays(priority))   // ← call
+  }
+}
+```
+
+A workflow body is not a class, so — unlike an aggregate `function` (a `private`
+method on the entity class) — each backend emits a workflow function as a
+**module/file-scoped helper, namespaced by its workflow** (all of a context's
+workflows share one generated file), and a call to it renders as that scoped,
+per-backend-cased name.  The Hono/TS backend:
+
+```ts
+// generated api/http/workflows.ts
+function fulfillOrderSlaDays(priority: number): number { return priority > 5 ? 1 : 5; }
+// … inside the create handler:
+order.scheduleShipment(fulfillOrderSlaDays(priority));
+```
+
+and the Python/FastAPI backend:
+
+```py
+# generated api/app/http/workflows_routes.py
+def fulfill_order_sla_days(priority: int) -> int:
+    return 1 if priority > 5 else 5
+# … inside the create handler:
+order.schedule_shipment(fulfill_order_sla_days(priority))
+```
+
+Both body forms an aggregate `function` supports are allowed, identically — the
+expression form (`= <expr>`) and the **pure block form** (`{ let … precondition …
+return … }`, domain-services.md rev. 4):
+
+```ddd
+function slaDays(priority: int): int {
+  let expedited = priority > 5
+  precondition priority >= 0
+  return expedited ? 1 : 5
+}
+```
+
+Two constraints keep the helper a well-formed module/static function:
+
+- **Pure** — like any `function`, a workflow function may not mutate, `emit`, or
+  call an operation / repository / domain service / extern (a block body is
+  gated by `loom.function-block-impure`).  It may call a sibling workflow
+  `function`.
+- **Pure over its parameters** — it may not read the workflow's own state
+  (`this` / a state field): the helper is emitted at module/static scope, where
+  there is no `this`.  A body that does is rejected —
+  `loom.workflow-function-uses-state`.  Pass the value in as a parameter.
+
 ## Save + event drain semantics
 
 - **Fresh aggregates** (`Agg.create`) are always saved at workflow

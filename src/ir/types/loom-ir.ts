@@ -1166,6 +1166,14 @@ export interface WorkflowIR {
    *  Each carries its own params + saves, lowered like the legacy paren-form
    *  body.  Omitted when the workflow declares none. */
   handlers?: HandleIR[];
+  /** Private, expression-bodied pure helpers declared via `function f(...): T =
+   *  expr` members — the aggregate-parity helper (a workflow is a state-bearing
+   *  entity, so it factors shared expressions the same way).  A workflow body is
+   *  not a class, so each backend emits these as per-workflow-scoped module
+   *  helpers (`<wf><fn>`), and a call to one lowers to `callKind: "workflow-fn"`.
+   *  Block-bodied helpers are rejected by the AST validator
+   *  (`loom.workflow-function-block-body`).  Omitted when the workflow declares none. */
+  functions?: FunctionIR[];
   /** Tail-position success type of the primary `run` body, derived once in
    *  enrichment (`enrichWorkflowReturnType`).  The value the workflow returns
    *  on the happy path is the last value-binding statement's result (the same
@@ -2821,6 +2829,7 @@ export type RefKind =
   | "this-vo-prop" // value-object public readonly field
   | "this-derived"
   | "helper-fn"
+  | "workflow-fn" // a bare reference to a workflow's own `function` helper (rendered as the scoped name)
   | "enum-value"
   | "current-user" // magic identifier — system's `user` block shape
   | "resource" // ambient resource handle — `files`, `jobs`, … (Phase 4)
@@ -2830,6 +2839,7 @@ export type RefKind =
 
 export type CallKind =
   | "function" // calls a `function` declared in scope
+  | "workflow-fn" // calls a workflow's own `function` helper — emitted as a per-workflow-scoped module helper
   | "value-object-ctor" // calls a value-object constructor
   | "private-operation" // calls a private operation
   | "resource-op" // a verb call on an ambient resource handle (Phase 4)
@@ -2874,6 +2884,10 @@ export type ExprIR =
        *  module without re-resolving the receiver (Stage 5).  `name` is the
        *  field; `type` its declared type. */
       storeName?: string;
+      /** Populated when `refKind === "workflow-fn"` — the enclosing workflow's
+       *  name, so a bare reference renders the scoped helper name `<wf><fn>`
+       *  (workflows share a file, so helpers are namespaced by workflow). */
+      wfScope?: string;
       origin?: OriginRef;
     }
   | {
@@ -2922,6 +2936,11 @@ export type ExprIR =
        *  `method-call` node's `awaited`.  Set when the call was the subject of a
        *  `match await <call>()`; drives the frontend async-await envelope. */
       awaited?: boolean;
+      /** Populated when `callKind === "workflow-fn"` — the enclosing workflow's
+       *  name.  A workflow `function` is emitted as a per-workflow-scoped module
+       *  helper (a workflow body is not a class), so backends render the call as
+       *  the scoped, per-backend-cased name `<wf><fn>(args)`. */
+      wfScope?: string;
       /** Populated when `callKind === "resource-op"` (Phase 4) — the
        *  resolved resource binding, verb, the capability it requires,
        *  and the access interface (default from

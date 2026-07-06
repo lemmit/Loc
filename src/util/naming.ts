@@ -29,6 +29,24 @@ export function plural(input: string): string {
   return input + "s";
 }
 
+/** Per-workflow-scoped name for an emitted workflow `function` helper.
+ *  A workflow body is not a class, so its `function` helpers are emitted as
+ *  file/module-scoped helpers — and workflows share a generated file, so the
+ *  helper is namespaced by its workflow (`placeOrder` + `slaDays`).  The call
+ *  site (render-expr, `callKind: "workflow-fn"`) and the definition site (each
+ *  backend's workflow emitter) must agree byte-for-byte, so BOTH route through
+ *  these — one per target-language casing.  Source identifiers are already
+ *  camelCase, so first-letter casing is all that's needed.  See docs/workflow.md. */
+export function workflowFnCamel(wf: string, fn: string): string {
+  return `${lowerFirst(wf)}${upperFirst(fn)}`;
+}
+export function workflowFnPascal(wf: string, fn: string): string {
+  return `${upperFirst(wf)}${upperFirst(fn)}`;
+}
+export function workflowFnSnake(wf: string, fn: string): string {
+  return `${snake(wf)}_${snake(fn)}`;
+}
+
 /** Convert an identifier (camelCase, PascalCase, snake_case) into a
  *  human-friendly Title Case label suitable for UI display.
  *  Examples: "customerId" → "Customer Id"; "placedAt" → "Placed At";

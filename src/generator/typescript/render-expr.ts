@@ -1,7 +1,7 @@
 import { genericShape } from "../../ir/stdlib/generics.js";
 import { variantTag } from "../../ir/stdlib/unions.js";
 import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
-import { escapeTsIdent, lowerFirst, upperFirst } from "../../util/naming.js";
+import { escapeTsIdent, lowerFirst, upperFirst, workflowFnCamel } from "../../util/naming.js";
 import {
   type ExprTarget,
   type MemberExpr,
@@ -218,6 +218,9 @@ function renderRef(e: RefExpr, ctx: TsRenderContext): string {
       return fromOutside ? `${ctx.thisName}.${e.name}` : `this.${e.name}`;
     case "helper-fn":
       return fromOutside ? `${ctx.thisName}.${lowerFirst(e.name)}` : `this.${lowerFirst(e.name)}`;
+    case "workflow-fn":
+      // A bare (uncalled) reference to a workflow helper — the module-scoped name.
+      return workflowFnCamel(e.wfScope!, e.name);
     case "enum-value":
       return `${e.enumName}.${e.name}`;
     case "current-user":
@@ -320,6 +323,11 @@ function renderCall(
       return fromOutside
         ? `${ctx.thisName}.${lowerFirst(e.name)}(${argList})`
         : `this.${lowerFirst(e.name)}(${argList})`;
+    case "workflow-fn":
+      // A workflow's own `function` helper — a module-scoped function named by
+      // its workflow (workflows share the generated file).  Call and def sites
+      // both derive the name via `workflowFnCamel`.
+      return `${workflowFnCamel(e.wfScope!, e.name)}(${argList})`;
     case "resource-op": {
       // A verb call on an ambient resource handle (Phase 4).  The
       // resource client module exports an async `<resource>$<verb>`

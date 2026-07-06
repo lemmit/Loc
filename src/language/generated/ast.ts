@@ -1434,7 +1434,7 @@ export function isFramework(item: unknown): item is Framework {
 }
 
 export interface FunctionDecl extends langium.AstNode {
-    readonly $container: Aggregate | EntityPart | ValueObject;
+    readonly $container: Aggregate | EntityPart | ValueObject | Workflow;
     readonly $type: 'FunctionDecl';
     block: Array<Statement>;
     body?: Expression;
@@ -3970,7 +3970,7 @@ export function isWorkflowCreateDecl(item: unknown): item is WorkflowCreateDecl 
     return reflection.isInstance(item, WorkflowCreateDecl.$type);
 }
 
-export type WorkflowMember = Apply | HandleDecl | OnDecl | Property | WorkflowCreateDecl;
+export type WorkflowMember = Apply | FunctionDecl | HandleDecl | OnDecl | Property | WorkflowCreateDecl;
 
 export const WorkflowMember = {
     $type: 'WorkflowMember'
@@ -5153,7 +5153,7 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                     name: FunctionDecl.returnType
                 }
             },
-            superTypes: [AggregateMember.$type, EntityPartMember.$type, ValueObjectMember.$type]
+            superTypes: [AggregateMember.$type, EntityPartMember.$type, ValueObjectMember.$type, WorkflowMember.$type]
         },
         HandleDecl: {
             name: HandleDecl.$type,

@@ -1199,8 +1199,16 @@ Workflow:
 // commands (`handle`), event reactors (`on`), and event folds (`apply`).  The
 // legacy `workflow X(params) { stmts }` is migrated to
 // `workflow X { create(params) { stmts } }` by scripts/migrate-workflows-to-create.mjs.
+//
+// `function` — a private, expression-bodied pure helper, the aggregate-parity
+// member (workflows are state-bearing entities like aggregates, so they get the
+// same helper-factoring surface).  Restricted to the expression form
+// (`function f(...): T = expr`) by the validator (`loom.workflow-function-block-body`):
+// a workflow body is not a class, so an expression-bodied helper is INLINED at
+// each call site during lowering (like a parameterised `criterion`), needing no
+// per-backend emission.  Block-bodied / recursive helpers are a later slice.
 WorkflowMember:
-    WorkflowCreateDecl | Apply | OnDecl | HandleDecl | Property;
+    WorkflowCreateDecl | Apply | OnDecl | HandleDecl | Property | FunctionDecl;
 
 // A workflow starter.  Param-shape discriminates the trigger (resolved at
 // lowering, not parse time):

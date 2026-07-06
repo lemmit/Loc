@@ -259,6 +259,14 @@ function checkWorkflow(wf: Workflow, accept: ValidationAcceptor): void {
   }
   checkWorkflowEventSourcedDiscipline(wf, accept);
 
+  // Workflow `function` members are the aggregate-parity pure helper — both the
+  // expression form (`function f(...): T = expr`) and the pure block form
+  // (`{ let … precondition … return … }`, domain-services.md rev. 4) are
+  // allowed, exactly as on an aggregate.  Purity (no mutation / emit /
+  // side-effecting call) is enforced at the IR layer (`loom.function-block-impure`),
+  // and the no-`this` rule (a workflow helper is emitted at module/static scope)
+  // by `loom.workflow-function-uses-state`.
+
   // Transactional legality (workflow-and-applier.md A2-S5e): `transactional`
   // is one DB transaction, so it is incompatible with continuation handlers —
   // an `on(...)` reactor or a `handle` command runs in its own later

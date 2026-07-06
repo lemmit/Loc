@@ -1162,7 +1162,11 @@ function flagFunctionBody(
 /** Call kinds a pure function block may invoke — another pure `function` or a
  *  value-object constructor.  Every other kind reaches infrastructure or the
  *  mutating layer and is rejected. */
-const PURE_FUNCTION_CALL_KINDS: ReadonlySet<string> = new Set(["function", "value-object-ctor"]);
+const PURE_FUNCTION_CALL_KINDS: ReadonlySet<string> = new Set([
+  "function",
+  "workflow-fn",
+  "value-object-ctor",
+]);
 
 export function validateFunctionBlockBodies(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
   const check = (owner: string, fn: FunctionIR): void => {
@@ -1223,6 +1227,12 @@ export function validateFunctionBlockBodies(ctx: BoundedContextIR, diags: LoomDi
   }
   for (const vo of ctx.valueObjects) {
     for (const fn of vo.functions) check(vo.name, fn);
+  }
+  // Workflow `function` helpers are pure over their params too (workflow-and-
+  // applier.md) — same block-body purity contract; a sibling `workflow-fn` call
+  // is admitted via `PURE_FUNCTION_CALL_KINDS`.
+  for (const wf of ctx.workflows) {
+    for (const fn of wf.functions ?? []) check(wf.name, fn);
   }
 }
 

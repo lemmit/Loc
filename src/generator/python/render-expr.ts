@@ -1,6 +1,6 @@
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
-import { escapePythonIdent, snake, upperFirst } from "../../util/naming.js";
+import { escapePythonIdent, snake, upperFirst, workflowFnSnake } from "../../util/naming.js";
 import {
   type CallExpr,
   type ExprTarget,
@@ -266,6 +266,9 @@ function renderRef(e: RefExpr, ctx: PyRenderContext): string {
       return `${ctx.thisName}.${snake(e.name)}`;
     case "helper-fn":
       return `${ctx.thisName}.${ctx.fnPrefix ?? "_"}${snake(e.name)}`;
+    case "workflow-fn":
+      // Bare reference to a workflow helper — the module-scoped `def` name.
+      return workflowFnSnake(e.wfScope!, e.name);
     case "enum-value":
       return `${e.enumName}.${e.name}`;
     case "match-binding":
@@ -363,6 +366,11 @@ function renderCall(args: string[], e: CallExpr, ctx: PyRenderContext): string {
     case "function":
       // Helper functions are always emitted as private methods (`def _is_draft`).
       return `${ctx.thisName}.${ctx.fnPrefix ?? "_"}${snake(e.name)}(${argList})`;
+    case "workflow-fn":
+      // A workflow's own `function` — a module-scoped `def`, namespaced by its
+      // workflow (workflows share the generated file).  Same derivation as the
+      // def site (`workflowFnSnake`).
+      return `${workflowFnSnake(e.wfScope!, e.name)}(${argList})`;
     case "private-operation": {
       // Operations are emitted as PUBLIC methods (`def reserve`) unless declared
       // `private` (`def _reserve`) — so a sibling-operation self-call only gets

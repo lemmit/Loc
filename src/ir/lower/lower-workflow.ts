@@ -16,6 +16,7 @@ import {
   isAssignOrCallStmt,
   isEmitStmt,
   isForStmt,
+  isFunctionDecl,
   isHandleDecl,
   isIfLetStmt,
   isLetStmt,
@@ -40,6 +41,7 @@ import type {
   DomainServiceOperationIR,
   ExprIR,
   FieldIR,
+  FunctionIR,
   HandleIR,
   LoadPlanIR,
   LoadSegmentIR,
@@ -60,7 +62,7 @@ import {
   lowerExprInContext,
   pathType,
 } from "./lower-expr.js";
-import { computeSaves, lowerApply, lowerField, plural } from "./lower-members.js";
+import { computeSaves, lowerApply, lowerField, lowerFunction, plural } from "./lower-members.js";
 import {
   cstText,
   type Env,
@@ -119,6 +121,12 @@ export function lowerWorkflow(
   const stateFields: FieldIR[] = wf.members.filter(isProperty).map((p) => lowerField(p, paramEnv));
   // Appliers fold emitted events into workflow state (A2-S5b).
   const appliers: ApplyIR[] = wf.members.filter(isApply).map((a) => lowerApply(a, paramEnv));
+  // Private pure helpers (`function f(...): T = expr`) — the aggregate-parity
+  // member.  Lowered with the same `lowerFunction` aggregates use; each backend
+  // emits them as per-workflow-scoped module helpers.
+  const functions: FunctionIR[] = wf.members
+    .filter(isFunctionDecl)
+    .map((f) => lowerFunction(f, paramEnv));
   for (const m of wf.members) {
     if (isWorkflowCreateDecl(m)) {
       creates.push(
@@ -157,6 +165,7 @@ export function lowerWorkflow(
     ...(correlationField ? { correlationField } : {}),
     ...(appliers.length > 0 ? { appliers } : {}),
     ...(handlers.length > 0 ? { handlers } : {}),
+    ...(functions.length > 0 ? { functions } : {}),
     origin: originFor(wf),
   };
 }

@@ -14,6 +14,7 @@ import type {
   WorkflowStmtIR,
 } from "../../types/loom-ir.js";
 import { findUsesCurrentUser } from "../../types/loom-ir.js";
+import { walkExprDeep, walkStmtExprsDeep } from "../../util/walk.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
 import { firstColumnVsColumn, firstNonQueryableNode, firstUnknownColumnRef } from "./shared.js";
 
@@ -157,6 +158,42 @@ export function validateWorkflows(ctx: BoundedContextIR, diags: LoomDiagnostic[]
     validateWorkflowBody(ctx, wf, diags);
     validateWorkflowCorrelation(ctx, wf, diags);
     validateWorkflowCreates(wf, diags, ctx.name);
+    validateWorkflowFunctions(wf, diags, ctx.name);
+  }
+}
+
+// A workflow `function` is emitted as a per-workflow-scoped MODULE helper (a
+// workflow body is not a class), so it has no `this` at its emission site: it
+// must be pure over its PARAMETERS and may not read the workflow's own state
+// fields.  A body that references `this` / a state field would render an
+// undefined `this` at module scope, so reject it here
+// (`loom.workflow-function-uses-state`).  Pass the value in as a parameter
+// instead.  (Sibling workflow-function calls are fine — they are module helpers
+// too.)
+function validateWorkflowFunctions(wf: WorkflowIR, diags: LoomDiagnostic[], ctxName: string): void {
+  const readsState = (node: ExprIR): boolean =>
+    node.kind === "this" ||
+    (node.kind === "ref" &&
+      (node.refKind === "this-prop" ||
+        node.refKind === "this-vo-prop" ||
+        node.refKind === "this-derived"));
+  for (const fn of wf.functions ?? []) {
+    let usesState = false;
+    const visit = (node: ExprIR): void => {
+      if (readsState(node)) usesState = true;
+    };
+    // Both forms: the expression body, or every expression reachable from the
+    // pure block body's statements (let / precondition / return).
+    if ("expr" in fn.body) walkExprDeep(fn.body.expr, visit);
+    else for (const s of fn.body.stmts) walkStmtExprsDeep(s, visit);
+    if (usesState) {
+      diags.push({
+        severity: "error",
+        code: "loom.workflow-function-uses-state",
+        message: `context '${ctxName}': workflow '${wf.name}' function '${fn.name}' reads the workflow's state (\`this\`). A workflow function is a pure helper over its parameters — pass the value in as an argument instead.`,
+        source: `${ctxName}/${wf.name}`,
+      });
+    }
   }
 }
 
