@@ -7,8 +7,10 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, snake, upperFirst } from "../../../util/naming.js";
-import { collectUnionFindLets, renderWorkflowStmts } from "../../_workflow/stmt-target.js";
+import { statementSubRegions } from "../../_trace/sourcemap.js";
+import { collectUnionFindLets, renderWorkflowStmtChunks } from "../../_workflow/stmt-target.js";
 import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
+import type { OpFragment } from "./entity.js";
 import { javaWorkflowStmtTarget, repoField, reposUsed } from "./workflow.js";
 import { esWorkflowStateClass, esWorkflowStreamTable } from "./workflow-eventsourced.js";
 import { workflowStateClass } from "./workflow-state.js";
@@ -101,6 +103,13 @@ function factoryAggsIn(statements: WorkflowStmtIR[]): string[] {
 export function renderJavaDispatcher(
   ctx: EnrichedBoundedContextIR,
   dctx: DispatchCtx,
+  /** Source-map Milestone 12 — `<Ctx>Dispatcher.java` pools every reactor /
+   *  event-create handler, so it never gets a whole-file region — only these
+   *  fragment-only statement regions (mirrors `renderJavaWorkflows`'
+   *  `opFragments` at Milestone 11).  Allocated by the caller ONLY when a
+   *  recorder is present, so a no-`--sourcemap` run pays no per-statement
+   *  bookkeeping cost. */
+  opFragments?: OpFragment[],
 ): { name: string; content: string } | null {
   const subs = ctx.eventSubscriptions ?? [];
   if (subs.length === 0) return null;
@@ -138,6 +147,7 @@ export function renderJavaDispatcher(
       );
       const onResolved = onSub ? resolveHandler(wf, onSub) : null;
       if (!createResolved || !onSub || !onResolved) continue;
+      const construct = `${ctx.name}.${wf.name}`;
       methods.push(
         ...renderEsMergedHandler(
           ctx,
@@ -148,16 +158,28 @@ export function renderJavaDispatcher(
           onResolved,
           imports,
           dctx.contextSchema,
+          construct,
+          opFragments,
         ),
       );
       continue;
     }
     const resolved = resolveHandler(wf, sub);
     if (!resolved) continue;
+    const construct = `${ctx.name}.${wf.name}`;
     methods.push(
       ...(wf.eventSourced
-        ? renderEsHandler(ctx, wf, sub, resolved, imports, dctx.contextSchema)
-        : renderHandler(ctx, wf, sub, resolved, imports)),
+        ? renderEsHandler(
+            ctx,
+            wf,
+            sub,
+            resolved,
+            imports,
+            construct,
+            dctx.contextSchema,
+            opFragments,
+          )
+        : renderHandler(ctx, wf, sub, resolved, imports, construct, opFragments)),
     );
   }
   if (methods.length === 0) return null;
@@ -286,6 +308,9 @@ function renderHandler(
   sub: EventSubscriptionIR,
   resolved: ResolvedHandler,
   imports: Set<string>,
+  construct: string,
+  /** Source-map Milestone 12 — see `renderJavaDispatcher`'s `opFragments`. */
+  opFragments?: OpFragment[],
 ): string[] {
   const corr = wf.correlationField as string;
   const param = sub.param;
@@ -326,19 +351,34 @@ function renderHandler(
   }
   if (hasEmit) body.push(`        var __events = new ArrayList<DomainEvent>();`);
   // Handler body — emit appends to __events; the spine threads the 8-space base.
-  body.push(
-    ...renderWorkflowStmts(
-      resolved.statements,
-      javaWorkflowStmtTarget(
-        ctx,
-        imports,
-        renderCtx,
-        hasEmit ? "__events" : undefined,
-        collectUnionFindLets(resolved.statements),
-      ),
-      "        ",
+  // Chunked (one lines-array per top-level statement) rather than the
+  // pre-flattened `renderWorkflowStmts` — byte-identical either way, but the
+  // per-chunk list lets us surface per-statement sub-regions (source-map
+  // Milestone 12).
+  const stmtChunks = renderWorkflowStmtChunks(
+    resolved.statements,
+    javaWorkflowStmtTarget(
+      ctx,
+      imports,
+      renderCtx,
+      hasEmit ? "__events" : undefined,
+      collectUnionFindLets(resolved.statements),
     ),
+    "        ",
   );
+  body.push(...stmtChunks.flat());
+  if (opFragments) {
+    // `body` gets re-indented +4 below (`body.map((l) => \`    ${l}\`)`) when
+    // nested inside the try frame — replay that SAME shift onto the chunk
+    // texts before anchoring, mirroring the .NET transactional precedent.
+    const chunkTexts = stmtChunks.map((ls) => ls.map((l) => "    " + l).join("\n"));
+    if (chunkTexts.length > 0) {
+      opFragments.push({
+        fragmentText: chunkTexts.join("\n"),
+        subRegions: statementSubRegions(resolved.statements, chunkTexts, construct),
+      });
+    }
+  }
   // Saves: persist each dirty aggregate, then re-publish its own domain events
   // (aggregate-level choreography re-entry).
   for (const s of resolved.saves) {
@@ -374,7 +414,10 @@ function renderEsHandler(
   sub: EventSubscriptionIR,
   resolved: ResolvedHandler,
   imports: Set<string>,
+  construct: string,
   schema?: string,
+  /** Source-map Milestone 12 — see `renderJavaDispatcher`'s `opFragments`. */
+  opFragments?: OpFragment[],
 ): string[] {
   const corr = wf.correlationField as string;
   const param = sub.param;
@@ -394,10 +437,13 @@ function renderEsHandler(
   const cls = esWorkflowStateClass(wf);
   const table = esWorkflowStreamTable(wf, schema);
 
-  // Render the body up front so we know whether it reads the folded snapshot (a
-  // starter that only emits constants never touches `state`) — folding is then a
-  // pure no-op, so we skip the stream load + fold (parity with the python port).
-  const bodyLines = renderWorkflowStmts(
+  // Render the body up front (chunked, one lines-array per top-level
+  // statement) so we know whether it reads the folded snapshot (a starter
+  // that only emits constants never touches `state`) — folding is then a
+  // pure no-op, so we skip the stream load + fold (parity with the python
+  // port).  The chunk list also lets us surface per-statement sub-regions
+  // (source-map Milestone 12).
+  const stmtChunks = renderWorkflowStmtChunks(
     resolved.statements,
     javaWorkflowStmtTarget(
       ctx,
@@ -408,6 +454,7 @@ function renderEsHandler(
     ),
     "        ",
   );
+  const bodyLines = stmtChunks.flat();
   const usesState = bodyLines.some((l) => /\bstate\b/.test(l));
 
   const loadFold = [
@@ -447,6 +494,18 @@ function renderEsHandler(
   }
   if (hasEmit) body.push(`        var __events = new ArrayList<DomainEvent>();`);
   body.push(...bodyLines);
+  if (opFragments) {
+    // `body` gets re-indented +4 below (`body.map((l) => \`    ${l}\`)`) when
+    // nested inside the try frame — replay that SAME shift onto the chunk
+    // texts before anchoring, mirroring the .NET transactional precedent.
+    const chunkTexts = stmtChunks.map((ls) => ls.map((l) => "    " + l).join("\n"));
+    if (chunkTexts.length > 0) {
+      opFragments.push({
+        fragmentText: chunkTexts.join("\n"),
+        subRegions: statementSubRegions(resolved.statements, chunkTexts, construct),
+      });
+    }
+  }
   // Aggregate saves still re-publish their own events (choreography re-entry).
   for (const s of resolved.saves) {
     body.push(`        ${repoField(s.aggName)}.save(${s.name});`);
@@ -495,11 +554,21 @@ function esMergedBranchLines(
   methodParam: string,
   branchParam: string,
   schema: string | undefined,
+  construct: string,
+  /** Source-map Milestone 12 — this branch's own `OpFragment`, pushed here so
+   *  the merged handler (create + on) records TWO fragments, one per branch.
+   *  This branch's lines get re-indented TWICE before landing in the final
+   *  file: once by the caller's if/else wrap (`renderEsMergedHandler`, +4)
+   *  and once by that function's own try-frame wrap (+4) — replay BOTH (+8
+   *  total) onto the chunk texts before anchoring, mirroring the .NET
+   *  merged-branch precedent (doubled here because Java also wraps in a try
+   *  frame). */
+  opFragments?: OpFragment[],
 ): { lines: string[]; usesState: boolean } {
   const cls = esWorkflowStateClass(wf);
   const table = esWorkflowStreamTable(wf, schema);
   const hasEmit = bodyHasEmit(resolved.statements);
-  const bodyLines = renderWorkflowStmts(
+  const stmtChunks = renderWorkflowStmtChunks(
     resolved.statements,
     javaWorkflowStmtTarget(
       ctx,
@@ -510,7 +579,17 @@ function esMergedBranchLines(
     ),
     "        ",
   );
+  const bodyLines = stmtChunks.flat();
   const usesState = bodyLines.some((l) => /\bstate\b/.test(l));
+  if (opFragments) {
+    const chunkTexts = stmtChunks.map((ls) => ls.map((l) => "        " + l).join("\n"));
+    if (chunkTexts.length > 0) {
+      opFragments.push({
+        fragmentText: chunkTexts.join("\n"),
+        subRegions: statementSubRegions(resolved.statements, chunkTexts, construct),
+      });
+    }
+  }
   const out: string[] = [];
   // The two triggers may name their event binding differently; alias so this
   // branch's body references resolve against the single merged method param.
@@ -553,7 +632,11 @@ function renderEsMergedHandler(
   onSub: EventSubscriptionIR,
   onResolved: ResolvedHandler,
   imports: Set<string>,
-  schema?: string,
+  schema: string | undefined,
+  construct: string,
+  /** Source-map Milestone 12 — forwarded to `esMergedBranchLines` for BOTH
+   *  branches, so a merged handler records two `OpFragment`s (create + on). */
+  opFragments?: OpFragment[],
 ): string[] {
   const corr = wf.correlationField as string;
   const param = createSub.param;
@@ -565,8 +648,28 @@ function renderEsMergedHandler(
     : `${param}.${snake(corr)}()`;
   if (createResolved.correlation) collectJavaExprImports(createResolved.correlation, imports);
 
-  const createBranch = esMergedBranchLines(ctx, wf, createResolved, imports, param, param, schema);
-  const onBranch = esMergedBranchLines(ctx, wf, onResolved, imports, param, onSub.param, schema);
+  const createBranch = esMergedBranchLines(
+    ctx,
+    wf,
+    createResolved,
+    imports,
+    param,
+    param,
+    schema,
+    construct,
+    opFragments,
+  );
+  const onBranch = esMergedBranchLines(
+    ctx,
+    wf,
+    onResolved,
+    imports,
+    param,
+    onSub.param,
+    schema,
+    construct,
+    opFragments,
+  );
   const usesState = createBranch.usesState || onBranch.usesState;
 
   const body: string[] = [

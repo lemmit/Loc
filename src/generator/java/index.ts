@@ -580,16 +580,37 @@ function emitProjectFromContexts(
     // slice 2): a @Component whose @EventListener handlers react to
     // channel-carried events — load-or-allocate / route-or-drop the saga row,
     // run the handler body, re-publish so choreography chains re-enter.
-    const dispatcher = renderJavaDispatcher(ctx, {
-      basePkg,
-      pkg: pkgFor("workflow-service"),
-      entityPkgOf: (a) => pkgFor("entity", a),
-      repoPkgOf: (a) => pkgFor("repository-interface", a),
-      statePkg: pkgFor("infra-persistence"),
-      stateRepoPkg: pkgFor("spring-data-repository"),
-      contextSchema: ctxSchema,
-    });
-    if (dispatcher) place(dispatcher.name, "workflow-service", dispatcher.content);
+    // Only collected when a recorder is actually threaded in — a
+    // no-sourcemap run pays no per-statement bookkeeping cost.  Milestone 12:
+    // `<Ctx>Dispatcher.java` pools every reactor / event-create handler, so
+    // it never gets a whole-file region (origin/construct stay undefined on
+    // the `place()` call below) — only these fragment-only statement
+    // regions, mirroring the workflow-service `place` above.
+    const dispatcherOpFragments: OpFragment[] | undefined = sourcemap ? [] : undefined;
+    const dispatcher = renderJavaDispatcher(
+      ctx,
+      {
+        basePkg,
+        pkg: pkgFor("workflow-service"),
+        entityPkgOf: (a) => pkgFor("entity", a),
+        repoPkgOf: (a) => pkgFor("repository-interface", a),
+        statePkg: pkgFor("infra-persistence"),
+        stateRepoPkg: pkgFor("spring-data-repository"),
+        contextSchema: ctxSchema,
+      },
+      dispatcherOpFragments,
+    );
+    if (dispatcher) {
+      place(
+        dispatcher.name,
+        "workflow-service",
+        dispatcher.content,
+        undefined,
+        undefined,
+        undefined,
+        dispatcherOpFragments,
+      );
+    }
     // Read-only instance endpoints (workflow-debt-backend-parity.md, Java saga
     // slice 3): every observable (correlation-bearing) saga gets
     // GET /workflows/<wf>/instances[/{id}] over its persisted state row.

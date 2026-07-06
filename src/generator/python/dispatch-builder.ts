@@ -12,7 +12,9 @@ import type {
 import { durableEventTypes } from "../../ir/util/channels.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
-import { renderWorkflowStmts } from "../_workflow/stmt-target.js";
+import { statementSubRegions } from "../_trace/sourcemap.js";
+import { renderWorkflowStmtChunks } from "../_workflow/stmt-target.js";
+import type { OpFragment } from "./emit/aggregate.js";
 import { renderPyExpr } from "./render-expr.js";
 import { resourceImportLines } from "./resource-clients.js";
 import { esEventRow, esFns, esWorkflowFoldBlock } from "./workflow-eventsourced-emit.js";
@@ -52,7 +54,17 @@ export function dispatchSubscriptionsOf(ctx: EnrichedBoundedContextIR): EventSub
   return deriveEventSubscriptions(ctx.channels, ctx.workflows);
 }
 
-export function buildPyDispatchFile(ctx: EnrichedBoundedContextIR, sys?: SystemIR): string | null {
+export function buildPyDispatchFile(
+  ctx: EnrichedBoundedContextIR,
+  sys?: SystemIR,
+  /** Source-map Milestone 12 — `app/dispatch.py` pools every reactor /
+   *  event-create handler, so it never gets a whole-file region — only
+   *  these fragment-only statement regions (mirrors `workflows_routes.py`'s
+   *  `opFragments` at Milestone 11).  Allocated by the caller ONLY when a
+   *  recorder is present, so a no-`--sourcemap` run pays no per-statement
+   *  bookkeeping cost. */
+  opFragments?: OpFragment[],
+): string | null {
   const subs = dispatchSubscriptionsOf(ctx);
   if (subs.length === 0) return null;
 
@@ -83,8 +95,19 @@ export function buildPyDispatchFile(ctx: EnrichedBoundedContextIR, sys?: SystemI
     const resolved = resolveHandlerBody(wf, sub);
     if (!resolved) continue;
     const fn = `_${snake(sub.workflow)}_${sub.trigger}_${snake(sub.event)}`;
+    const construct = `${ctx.name}.${wf.name}`;
     handlers.push(
-      handlerFn(fn, wf, sub, resolved.correlation, resolved.statements, resolved.saves, hasOutbox),
+      handlerFn(
+        fn,
+        wf,
+        sub,
+        resolved.correlation,
+        resolved.statements,
+        resolved.saves,
+        hasOutbox,
+        construct,
+        opFragments,
+      ),
       "",
     );
     const list = handlerByEvent.get(sub.event) ?? [];
@@ -321,9 +344,22 @@ function handlerFn(
   statements: WorkflowStmtIR[],
   saves: { name: string; aggName: string; repoName: string }[],
   hasOutbox: boolean,
+  construct: string,
+  /** Source-map Milestone 12 — see `buildPyDispatchFile`'s `opFragments`. */
+  opFragments?: OpFragment[],
 ): string {
   if (wf.correlationField && wf.eventSourced) {
-    return esHandlerFn(fn, wf, sub, correlation, statements, saves, hasOutbox);
+    return esHandlerFn(
+      fn,
+      wf,
+      sub,
+      correlation,
+      statements,
+      saves,
+      hasOutbox,
+      construct,
+      opFragments,
+    );
   }
   const param = snake(sub.param);
   // A reactor is a per-dispatch boundary: run it in a child execution-context
@@ -373,13 +409,28 @@ function handlerFn(
   }
   const hasEmit = statements.some((st) => st.kind === "emit");
   if (hasEmit) out.push("    workflow_events: list[DomainEvent] = []");
-  out.push(
-    ...renderWorkflowStmts(
-      statements,
-      pyWorkflowStmtTarget(rctx, undefined, collectUsedLetNames(statements)),
-      "    ",
-    ),
+  // Chunked (one lines-array per top-level statement) rather than the
+  // pre-flattened `renderWorkflowStmts` — byte-identical either way, but the
+  // per-chunk list lets us surface per-statement sub-regions to the caller
+  // (source-map Milestone 12, mirrors `workflowRoute`'s `stmtChunks`).  No
+  // re-indent transform sits between here and the final file, so the chunk
+  // texts collected here are already the exact text that lands in
+  // `app/dispatch.py`.
+  const stmtChunks = renderWorkflowStmtChunks(
+    statements,
+    pyWorkflowStmtTarget(rctx, undefined, collectUsedLetNames(statements)),
+    "    ",
   );
+  out.push(...stmtChunks.flat());
+  if (opFragments) {
+    const chunkTexts = stmtChunks.map((ls) => ls.join("\n"));
+    if (chunkTexts.length > 0) {
+      opFragments.push({
+        fragmentText: chunkTexts.join("\n"),
+        subRegions: statementSubRegions(statements, chunkTexts, construct),
+      });
+    }
+  }
   for (const save of saves) {
     out.push(`    await ${snake(save.repoName)}.save(${snake(save.name)})`);
   }
@@ -412,20 +463,26 @@ function esHandlerFn(
   statements: WorkflowStmtIR[],
   saves: { name: string; aggName: string; repoName: string }[],
   hasOutbox: boolean,
+  construct: string,
+  /** Source-map Milestone 12 — see `buildPyDispatchFile`'s `opFragments`. */
+  opFragments?: OpFragment[],
 ): string {
   const param = snake(sub.param);
   const corr = wf.correlationField as string;
   const fns = esFns(wf);
   const rctx = { thisName: "state" } as const;
   const keyExpr = correlation ? renderPyExpr(correlation, rctx) : `${param}.${snake(corr)}`;
-  // Render the body up front so we know whether it reads the folded snapshot
-  // (a starter that only emits constants never touches `state`) — folding is a
-  // pure no-op then, so we skip the unused binding (ruff F841).
-  const bodyLines = renderWorkflowStmts(
+  // Render the body up front (chunked, one lines-array per top-level
+  // statement) so we know whether it reads the folded snapshot (a starter
+  // that only emits constants never touches `state`) — folding is a pure
+  // no-op then, so we skip the unused binding (ruff F841).  The chunk list
+  // also lets us surface per-statement sub-regions (source-map Milestone 12).
+  const stmtChunks = renderWorkflowStmtChunks(
     statements,
     pyWorkflowStmtTarget(rctx, undefined, collectUsedLetNames(statements)),
     "    ",
   );
+  const bodyLines = stmtChunks.flat();
   const usesState = bodyLines.some((l) => /\bstate\b/.test(l));
   // A `create` starter that shares its event with an `on` reactor on the same
   // workflow (S5b) must no-op when the stream ALREADY exists — the inverse of
@@ -469,6 +526,15 @@ function esHandlerFn(
   const hasEmit = statements.some((st) => st.kind === "emit");
   if (hasEmit) out.push("    workflow_events: list[DomainEvent] = []");
   out.push(...bodyLines);
+  if (opFragments) {
+    const chunkTexts = stmtChunks.map((ls) => ls.join("\n"));
+    if (chunkTexts.length > 0) {
+      opFragments.push({
+        fragmentText: chunkTexts.join("\n"),
+        subRegions: statementSubRegions(statements, chunkTexts, construct),
+      });
+    }
+  }
   for (const save of saves) {
     out.push(`    await ${snake(save.repoName)}.save(${snake(save.name)})`);
   }

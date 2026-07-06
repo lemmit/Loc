@@ -36,11 +36,7 @@ import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { renderDotnetLogCall } from "../_obs/render-dotnet.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { statementSubRegions } from "../_trace/sourcemap.js";
-import {
-  renderWorkflowStmtChunks,
-  renderWorkflowStmts,
-  type WorkflowStmtTarget,
-} from "../_workflow/stmt-target.js";
+import { renderWorkflowStmtChunks, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
 import { dotnetResourceAdapterFor, resourceClassName } from "./adapters/resource-clients.js";
 import {
   collectWireUsings,
@@ -251,6 +247,13 @@ export function emitDispatchHandlers(
   ns: string,
   out: Map<string, string>,
   sys: SystemIR | undefined,
+  /** Source-map recorder (Milestone 12) — threaded ONLY from the system-mode
+   *  `dotnet/index.ts` entry point; the legacy single-context path stays
+   *  unmapped by design (undefined here), so its output is untouched.  Each
+   *  dispatch-handler file is per-subscription and single-workflow-attributable,
+   *  so it gets a whole-file region (like `emitWorkflows`) PLUS statement
+   *  sub-regions layered on top. */
+  sourcemap?: SourceMapRecorder,
 ): void {
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
   // Event-sourced saga double-append (S5b): when an event-sourced workflow has
@@ -301,44 +304,62 @@ export function emitDispatchHandlers(
       const onResolved = onSub ? resolveSub(wf, onSub) : null;
       if (!createResolved || !onSub || !onResolved) continue;
       const className = `${upperFirst(wf.name)}On${upperFirst(sub.event)}Handler`;
-      out.set(
-        `Application/Workflows/${className}.cs`,
-        renderMergedEventSourcedHandler(
-          className,
-          wf,
-          sub.event,
-          sub,
-          createResolved,
-          onSub,
-          onResolved,
-          aggsByName,
-          ns,
-          ctx,
-          sys,
-        ),
+      const construct = `${ctx.name}.${wf.name}`;
+      const path = `Application/Workflows/${className}.cs`;
+      // Only collected when a recorder is actually threaded in — a
+      // no-sourcemap run pays no per-statement bookkeeping cost.
+      const opFragments: OpFragment[] | undefined = sourcemap ? [] : undefined;
+      const content = renderMergedEventSourcedHandler(
+        className,
+        wf,
+        sub.event,
+        sub,
+        createResolved,
+        onSub,
+        onResolved,
+        aggsByName,
+        ns,
+        ctx,
+        sys,
+        construct,
+        opFragments,
       );
+      out.set(path, content);
+      sourcemap?.file(path, content, wf.origin, construct);
+      if (sourcemap && opFragments) {
+        for (const frag of opFragments)
+          sourcemap.fragment(path, content, frag.fragmentText, frag.subRegions);
+      }
       continue;
     }
     const resolved = resolveSub(wf, sub);
     if (!resolved) continue;
     const className = `${upperFirst(wf.name)}${sub.trigger === "on" ? "On" : "Start"}${upperFirst(sub.event)}Handler`;
-    out.set(
-      `Application/Workflows/${className}.cs`,
-      renderEventReactorHandler(
-        className,
-        wf,
-        sub.trigger,
-        sub.event,
-        sub.param,
-        resolved.correlation,
-        resolved.statements,
-        resolved.saves,
-        aggsByName,
-        ns,
-        ctx,
-        sys,
-      ),
+    const construct = `${ctx.name}.${wf.name}`;
+    const path = `Application/Workflows/${className}.cs`;
+    const opFragments: OpFragment[] | undefined = sourcemap ? [] : undefined;
+    const content = renderEventReactorHandler(
+      className,
+      wf,
+      sub.trigger,
+      sub.event,
+      sub.param,
+      resolved.correlation,
+      resolved.statements,
+      resolved.saves,
+      aggsByName,
+      ns,
+      ctx,
+      sys,
+      construct,
+      opFragments,
     );
+    out.set(path, content);
+    sourcemap?.file(path, content, wf.origin, construct);
+    if (sourcemap && opFragments) {
+      for (const frag of opFragments)
+        sourcemap.fragment(path, content, frag.fragmentText, frag.subRegions);
+    }
   }
 }
 
@@ -408,6 +429,12 @@ function renderEventReactorHandler(
   ns: string,
   ctx: EnrichedBoundedContextIR,
   sys: SystemIR | undefined,
+  construct: string,
+  /** Source-map Milestone 12 — when passed, pushes ONE `OpFragment` covering
+   *  this handler's whole reactor-body chunk list (mirrors `renderHandler`'s
+   *  `opFragments`, no re-indent here — the body renders flush, unlike the
+   *  transactional command-handler tab-in). */
+  opFragments?: OpFragment[],
 ): string {
   const usage = analyseStmts(statements, saves, aggsByName);
   const usings = new Set<string>();
@@ -589,13 +616,27 @@ function renderEventReactorHandler(
     }
   }
   // Reactor / event-create bodies always dereference their loads → guard all.
-  stmtLines.push(
-    ...renderWorkflowStmts(
-      statements,
-      csWorkflowStmtTarget(ctx, renderArg, true, auditsOps),
-      INDENT,
-    ),
+  // Chunked (one lines-array per top-level statement) rather than the
+  // pre-flattened `renderWorkflowStmts` — byte-identical either way, but the
+  // per-chunk list lets us surface per-statement sub-regions to the caller
+  // (source-map Milestone 12; mirrors `renderHandler`'s `stmtChunks`).
+  const stmtChunks = renderWorkflowStmtChunks(
+    statements,
+    csWorkflowStmtTarget(ctx, renderArg, true, auditsOps),
+    INDENT,
   );
+  stmtLines.push(...stmtChunks.flat());
+  if (opFragments) {
+    // No re-indent on this path — the reactor body renders flush at INDENT,
+    // unlike the transactional command handler's tab-in (renderHandler).
+    const chunkTexts = stmtChunks.map((ls) => ls.join("\n"));
+    if (chunkTexts.length > 0) {
+      opFragments.push({
+        fragmentText: chunkTexts.join("\n"),
+        subRegions: statementSubRegions(statements, chunkTexts, construct),
+      });
+    }
+  }
   for (const save of saves) {
     const fieldName = `_${save.repoName.charAt(0).toLowerCase() + save.repoName.slice(1)}`;
     stmtLines.push(`        await ${fieldName}.SaveAsync(${save.name}, cancellationToken);`);
@@ -708,6 +749,15 @@ function renderCsEsBranch(
   usings: Set<string>,
   ns: string,
   auditsOps: boolean,
+  construct: string,
+  /** Source-map Milestone 12 — this branch's own `OpFragment`, pushed here so
+   *  the merged handler (create + on) records TWO fragments, one per branch.
+   *  The caller (`renderMergedEventSourcedHandler`) nests this branch's WHOLE
+   *  returned `lines` one level (+4 spaces, uniform per-line map) inside its
+   *  `if`/`else` — so the fragment text/sub-regions must replay that SAME +4
+   *  re-indent onto the statement chunks before anchoring, mirroring the
+   *  `renderHandler` transactional precedent. */
+  opFragments?: OpFragment[],
 ): string[] {
   const usage = analyseStmts(resolved.statements, resolved.saves, aggsByName);
   const resourceClasses = buildResourceClasses(sys);
@@ -717,13 +767,24 @@ function renderCsEsBranch(
   };
   const lines: string[] = [];
   if (usage.hasEmit) lines.push("        var _workflowEvents = new List<IDomainEvent>();");
-  lines.push(
-    ...renderWorkflowStmts(
-      resolved.statements,
-      csWorkflowStmtTarget(ctx, renderArg, true, auditsOps),
-      INDENT,
-    ),
+  const stmtChunks = renderWorkflowStmtChunks(
+    resolved.statements,
+    csWorkflowStmtTarget(ctx, renderArg, true, auditsOps),
+    INDENT,
   );
+  lines.push(...stmtChunks.flat());
+  if (opFragments) {
+    // Replay the +4 re-indent the caller applies when nesting this branch
+    // inside the if/else (renderMergedEventSourcedHandler's `if (__rows.Count
+    // == 0)` / `else` blocks) so the fragment anchors the FINAL text.
+    const chunkTexts = stmtChunks.map((ls) => ls.map((l) => "    " + l).join("\n"));
+    if (chunkTexts.length > 0) {
+      opFragments.push({
+        fragmentText: chunkTexts.join("\n"),
+        subRegions: statementSubRegions(resolved.statements, chunkTexts, construct),
+      });
+    }
+  }
   for (const save of resolved.saves) {
     const fieldName = `_${save.repoName.charAt(0).toLowerCase() + save.repoName.slice(1)}`;
     lines.push(`        await ${fieldName}.SaveAsync(${save.name}, cancellationToken);`);
@@ -773,6 +834,11 @@ function renderMergedEventSourcedHandler(
   ns: string,
   ctx: EnrichedBoundedContextIR,
   sys: SystemIR | undefined,
+  construct: string,
+  /** Source-map Milestone 12 — forwarded to `renderCsEsBranch` for BOTH
+   *  branches, so a merged handler records two `OpFragment`s (create + on),
+   *  each anchored at its own nested position in the final `if`/`else`. */
+  opFragments?: OpFragment[],
 ): string {
   const mergedStatements = [...createResolved.statements, ...onResolved.statements];
   const mergedSaves = [...createResolved.saves, ...onResolved.saves];
@@ -857,6 +923,8 @@ function renderMergedEventSourcedHandler(
     usings,
     ns,
     auditsOps,
+    construct,
+    opFragments,
   );
   const onBranch = renderCsEsBranch(
     wf,
@@ -868,6 +936,8 @@ function renderMergedEventSourcedHandler(
     usings,
     ns,
     auditsOps,
+    construct,
+    opFragments,
   );
 
   const bodyLines: string[] = [

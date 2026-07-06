@@ -339,7 +339,7 @@ function emitProjectFromContexts(
   // channel-routed reactor / event-create, derived over the merged context so
   // a reactor in one hosted context can route off another's channel.
   if (hasSubscriptions) {
-    emitDispatchHandlers(merged, ns, out, system?.sys);
+    emitDispatchHandlers(merged, ns, out, system?.sys, sourcemap);
   }
   // Transactional outbox (dispatch-delivery-semantics.md): durable channels
   // (`retention: log | work`) record their events in __loom_outbox (EF

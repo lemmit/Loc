@@ -66,6 +66,25 @@ system SourceMapDemo {
           product.discontinue()
         }
       }
+
+      channel Lifecycle {
+        carries: OrderPlaced
+      }
+
+      // Correlated (by) deliberately: Java's dispatcher silently skips
+      // by-less reactors entirely. Body text must stay DISTINCT from every
+      // other workflow/op body in this fixture (identical bodies in a pooled
+      // file collide on fragment()'s uniqueness rule and wipe both — see the
+      // archiveOrder comment above). Generation-only fixture: this body would
+      // loop at runtime (confirm re-emits OrderPlaced) — fine here, do not
+      // reuse for boot tests.
+      workflow notifyPlaced {
+        orderId: Order id
+        on(o: OrderPlaced) by o.order {
+          let order = Orders.getById(o.order)
+          order.confirm()
+        }
+      }
     }
   }
 
@@ -547,22 +566,152 @@ describe(".loom/sourcemap.json", () => {
     expect(stmtRegions.length).toBeGreaterThanOrEqual(2);
 
     // A pooled file (node/python/java) carries ONLY statement regions — no
-    // whole-file region exists to layer onto — though for BOTH workflows the
-    // fixture declares (confirmOrder + the transactional archiveOrder), so
-    // every region must be workflow-construct-tagged rather than exactly the
-    // confirmOrder set.  .NET's handler file is not pooled, so it keeps its
-    // whole-file region alongside its own workflow's statement regions.
+    // whole-file region exists to layer onto — though for every workflow the
+    // fixture declares (confirmOrder + the transactional archiveOrder +,
+    // node-only, the notifyPlaced reactor sharing node's pooled
+    // http/workflows.ts — Milestone 12), so every region must be
+    // workflow-construct-tagged rather than exactly the confirmOrder set.
+    // .NET's handler file is not pooled, so it keeps its whole-file region
+    // alongside its own workflow's statement regions.
     if (wholeFile) {
       expect(wholeFileRegion, "expected a Milestone-1 whole-file region too").toBeDefined();
       expect(regions.length).toBeGreaterThan(stmtRegions.length);
     } else {
       expect(wholeFileRegion).toBeUndefined();
       for (const r of regions) {
-        expect(["Orders.confirmOrder", "Orders.archiveOrder"]).toContain(r.construct);
+        expect(["Orders.confirmOrder", "Orders.archiveOrder", "Orders.notifyPlaced"]).toContain(
+          r.construct,
+        );
       }
     }
 
     // Monotonic, non-overlapping, in-bounds — same shape as the op-body case.
+    let prevEnd = 0;
+    for (const r of stmtRegions) {
+      const [start, end] = r.target;
+      expect(start).toBeGreaterThanOrEqual(1);
+      expect(end).toBeLessThanOrEqual(fileLineCount);
+      expect(start).toBeLessThanOrEqual(end);
+      expect(start).toBeGreaterThan(prevEnd);
+      prevEnd = end;
+    }
+
+    // Each statement region's origin resolves to a span whose text contains
+    // that statement's own distinctive token, in source order.
+    const tokens = ["Orders.getById", "order.confirm"];
+    stmtRegions.forEach((r, i) => {
+      const resolved = resolveToSource(r.origin);
+      expect(resolved, `stmt region ${i} origin never resolves to a source span`).toBeDefined();
+      const text = SOURCE.slice(resolved!.span.start, resolved!.span.end);
+      expect(text, `stmt region ${i} span doesn't contain "${tokens[i]}"`).toContain(tokens[i]);
+    });
+  });
+
+  // Milestone 12 (reactor-file recording) — the REACTOR-body analogue of the
+  // Milestone 11 command-workflow-body case above.  `notifyPlaced`'s `on`
+  // reactor has 2 statements (`let order = Orders.getById(o.order)` then
+  // `order.confirm()`), riding the SAME `renderWorkflowStmtChunks` +
+  // `statementSubRegions` + `fragment()` machinery, now extended onto the
+  // reactor/event-create dispatch files: .NET's per-subscription
+  // `<Wf>On<Event>Handler.cs` (whole-file + fragments), and the pooled
+  // node/python/java dispatch files (fragment-only, no whole-file region —
+  // node shares the SAME pooled `http/workflows.ts` the command-workflow
+  // case above uses; python and java route reactors to their OWN pooled
+  // file, separate from the command-workflow one).  Elixir stays out of
+  // scope, same as Milestone 11.
+  //
+  // .NET's construct diverges from the other three: `emitDispatchHandlers`
+  // runs over the SYSTEM-MODE merged context (so a reactor in one hosted
+  // context can react to a channel declared in another), and that merged
+  // context's `.name` is the deployable's C# namespace ("DotnetApi"), not
+  // the first hosted context's own name ("Orders") — unlike node/python's
+  // merge (`contexts[0]?.name`) or java's un-merged per-context call.  This
+  // is pre-existing `emitDispatchHandlers` architecture, not new here.
+  const REACTOR_STMT_CASES: {
+    platform: string;
+    file: string;
+    construct: string;
+    /** Whether this backend's dispatch file also carries a Milestone-1
+     *  whole-file region (true only for .NET's per-subscription handler
+     *  file; the pooled node/python/java files carry none). */
+    wholeFile: boolean;
+  }[] = [
+    {
+      platform: "dotnet",
+      file: "Application/Workflows/NotifyPlacedOnOrderPlacedHandler.cs",
+      construct: "DotnetApi.notifyPlaced",
+      wholeFile: true,
+    },
+    {
+      platform: "node",
+      file: "http/workflows.ts",
+      construct: "Orders.notifyPlaced",
+      wholeFile: false,
+    },
+    {
+      platform: "python",
+      file: "app/dispatch.py",
+      construct: "Orders.notifyPlaced",
+      wholeFile: false,
+    },
+    {
+      platform: "java",
+      file: "application/workflows/OrdersDispatcher.java",
+      construct: "Orders.notifyPlaced",
+      wholeFile: false,
+    },
+  ];
+
+  it.each(
+    REACTOR_STMT_CASES,
+  )("reactor-body statement regions land on $platform's notifyPlaced body, one per rendered statement", async ({
+    platform,
+    file,
+    construct,
+    wholeFile,
+  }) => {
+    const model = await parseValid(SOURCE);
+    const files = generateSystems(model, { sourcemap: true }).files;
+    const raw = files.get(".loom/sourcemap.json")!;
+    const map = JSON.parse(raw) as {
+      files: Record<
+        string,
+        {
+          target: [number, number];
+          origin: import("../../src/ir/types/origin.js").OriginRef;
+          construct?: string;
+        }[]
+      >;
+    };
+
+    const slug = SLUG_FOR[platform]!;
+    const path = Object.keys(map.files).find((p) => p.startsWith(`${slug}/`) && p.endsWith(file));
+    expect(path, `no ${file} region recorded under ${slug}/`).toBeDefined();
+    const regions = map.files[path!]!;
+    const content = files.get(path!)!;
+    const fileLineCount = content.endsWith("\n")
+      ? content.split("\n").length - 1
+      : content.split("\n").length;
+
+    // .NET's per-subscription file() call records its Milestone-1 whole-file
+    // region under the SAME construct as the fragment-only statement
+    // regions (both derive from `wf.origin`), so exclude the region whose
+    // target IS the whole file before looking at statement granularity.
+    const wholeFileRegion = regions.find((r) => r.target[0] === 1 && r.target[1] === fileLineCount);
+    const stmtRegions = regions
+      .filter((r) => r.construct === construct && r !== wholeFileRegion)
+      .sort((a, b) => a.target[0] - b.target[0]);
+    expect(stmtRegions.length).toBeGreaterThanOrEqual(2);
+
+    if (wholeFile) {
+      expect(wholeFileRegion, "expected a Milestone-1 whole-file region too").toBeDefined();
+      expect(regions.length).toBeGreaterThan(stmtRegions.length);
+    } else {
+      expect(wholeFileRegion).toBeUndefined();
+    }
+
+    // Monotonic, non-overlapping, in-bounds — same shape as the command-
+    // workflow-body case.
     let prevEnd = 0;
     for (const r of stmtRegions) {
       const [start, end] = r.target;

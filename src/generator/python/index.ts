@@ -275,9 +275,22 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // a subscribed event does `app/dispatch.py` exist — and then every
   // repository constructed by routes/views/workflows takes the live
   // dispatcher instead of the Noop (mirrors Hono's createApp default).
-  const dispatchFile = buildPyDispatchFile(merged, args.sys);
+  // Only collected when a recorder is actually threaded in — a
+  // no-sourcemap run pays no per-statement bookkeeping cost.  Milestone 12:
+  // `app/dispatch.py` pools every reactor / event-create handler, so it
+  // never gets a whole-file region — only these fragment-only statement
+  // regions (mirrors `workflows_routes.py` at Milestone 11).
+  const dispatchOpFragments: OpFragment[] | undefined = sourcemap ? [] : undefined;
+  const dispatchFile = buildPyDispatchFile(merged, args.sys, dispatchOpFragments);
   const hasDispatch = dispatchFile != null;
-  if (dispatchFile != null) out.set("app/dispatch.py", dispatchFile);
+  if (dispatchFile != null) {
+    out.set("app/dispatch.py", dispatchFile);
+    if (sourcemap && dispatchOpFragments) {
+      for (const frag of dispatchOpFragments) {
+        sourcemap.fragment("app/dispatch.py", dispatchFile, frag.fragmentText, frag.subRegions);
+      }
+    }
+  }
 
   out.set("app/http/__init__.py", "");
   out.set(
