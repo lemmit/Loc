@@ -156,6 +156,46 @@ describe("Field + Toggle with bind: state binding", () => {
     expect(content).not.toMatch(/useState/);
   });
 
+  it("error: renders the pack's inline error slot from a state-reactive expr", async () => {
+    // Dependent form validation the state way: `confirmPassword` is a
+    // client-only state field; the `error:` expr reads it + `password`
+    // and drives Mantine's native `error=` prop — an inline message
+    // without a sibling Text + match.
+    const files = await buildAndGenerate(`
+      system S {
+        subdomain M { context C { } }
+        ui WebApp {
+          page SignUp {
+            route: "/signup"
+            state {
+              password:        string = ""
+              confirmPassword: string = ""
+            }
+            body: Stack {
+              PasswordField { "Password", bind: password },
+              PasswordField { "Confirm",  bind: confirmPassword,
+                              error: confirmPassword == password ? "" : "Passwords must match" }
+            }
+          }
+        }
+        deployable api { platform: node, contexts: [C], port: 3000 }
+        deployable web {
+          platform: static
+          targets: api
+          ui: WebApp
+          port: 3001
+        }
+      }
+    `);
+    const content = files.get("web/src/pages/sign_up.tsx")!;
+    // The confirm field carries an inline error slot reading state.
+    expect(content).toMatch(
+      /value=\{confirmPassword\}[^/]*error=\{[^}]*Passwords must match[^}]*\}/,
+    );
+    // The plain password field has no error slot.
+    expect(content).toMatch(/value=\{password\} onChange=\{[^}]*\} \/>/);
+  });
+
   it("Field label accepts a binary-op (state interpolation in label)", async () => {
     const files = await buildAndGenerate(`
       system S {

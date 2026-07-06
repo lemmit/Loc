@@ -342,6 +342,68 @@ Two boundaries to know:
   idioms (`filter`/`map` → `Enum.filter/2` / `Enum.map/2`), so inline
   `filter`/`map` shaping works on every frontend.
 
+### 8.2 Dependent / conditional form validation — use `state`
+
+There is **no dedicated "conditional field" or "dependent validation"
+construct**, and you don't need one — the existing pieces compose to it.
+Split the problem by where the rule lives:
+
+- **Cross-field rules over fields that travel the wire** (`endDate >
+  startDate`, `total <= creditLimit`, "`vatId` required when `kind ==
+  company`") are a **contract** concern, not a form concern. Declare them as
+  an aggregate / value-object `invariant … (when …)` (or an operation
+  `precondition`). Loom already lowers each to a zod `.refine((data) => …, {
+  path, message })` on the form's request schema **and** to every backend's
+  validator **and** to the live RFC-7807 `errors[]` surface — so a
+  `CreateForm { of: T }` shows the error inline, with no per-form wiring.
+  See [`docs/language.md`](language.md) (invariants) and the shipped
+  `validation-error-extension.md`.
+
+- **Rules over client-only fields that never reach the server**
+  (`confirmPassword == password`, "repeat email", an un-stored consent
+  checkbox, or showing/hiding a field on another's live value) belong on the
+  **page**, not the wire. Hand-compose the form from the bindable inputs
+  (`Field` / `PasswordField` / `SelectField` / `Toggle`) over `state`,
+  derive the predicate with `derived`, gate visibility with `match`, and pass
+  the inline message through each input's **`error:`** slot:
+
+  ```ddd
+  page SignUp {
+    route: "/signup"
+    state {
+      email:           string = ""
+      password:        string = ""
+      confirmPassword: string = ""
+    }
+    derived passwordsMatch: bool = confirmPassword == password
+
+    body: Stack {[
+      Field         { "Email",    bind: email },
+      PasswordField { "Password", bind: password },
+      PasswordField { "Confirm",  bind: confirmPassword,
+                      error: passwordsMatch ? "" : "Passwords must match" },
+      Button { "Create account",
+               disabled: !passwordsMatch,
+               on: () => call signup({ email, password }) }  // confirmPassword never sent
+    ]}
+  }
+  ```
+
+  ```tsx
+  const passwordsMatch = useMemo(() => confirmPassword === password, [confirmPassword, password]);
+  // …
+  <PasswordInput label="Confirm" value={confirmPassword}
+                 onChange={(e) => setConfirmPassword(e.currentTarget.value)}
+                 error={ passwordsMatch ? "" : "Passwords must match" } />
+  ```
+
+  `confirmPassword` is a `state` field, so it is in scope for `derived` /
+  `match` / `error:`, and `call signup({ email, password })` posts only the
+  wire fields — the confirmation never travels. `error:` takes any expression
+  (empty string ⇒ no error); it renders in the pack's native error slot
+  (Mantine's `error=` prop today; the other packs render `label + input` and
+  ignore it pending a per-pack error-slot follow-up).
+
 ---
 
 ## 9. Builtin component library — closed v0
@@ -354,7 +416,7 @@ Two boundaries to know:
 | `Review(of: T, onSubmit)` | Read-only summary view of a typed value, with a submit action. |
 | `Stack`, `Group`, `Grid`, `Tabs` (+ `Tab`), `Card`, `Toolbar`, `Container`, `Paper`, `Breadcrumbs`, `Divider`, `Section`, `Sticky` | Layout primitives. `Section` is a semantic anchor target; `Sticky` a sticky-position wrapper; `Tab` is the sub-element of `Tabs`. |
 | `Heading`, `Text`, `Bold`, `Italic`, `InlineCode`, `Badge`, `Stat`, `Empty`, `Anchor`, `Image`, `Avatar`, `Loader`, `Skeleton`, `Alert`, `KeyValueRow`, `Icon` | Display primitives. `Bold`/`Italic`/`InlineCode` are inline-emphasis spans; `Icon` is a builtin-name or `svg:` literal. |
-| `Field`, `NumberField`, `PasswordField`, `MultilineField`, `Toggle`, `SelectField { label, bind, options }`, `Select`, `Fieldset` | Bindable inputs. `MultilineField` is the textarea twin of `Field`; `SelectField` is a controlled single-select over a string-array `options:` expression. |
+| `Field`, `NumberField`, `PasswordField`, `MultilineField`, `Toggle`, `SelectField { label, bind, options }`, `Select`, `Fieldset` | Bindable inputs. `MultilineField` is the textarea twin of `Field`; `SelectField` is a controlled single-select over a string-array `options:` expression. All accept an optional `error:` expression rendered in the pack's inline error slot (§8.2). |
 | `Action(operation, then?)`, `Button { label, on? }` | Action primitives. |
 | `Modal { trigger, … }` | Disclosure surface — hosts an `OperationForm` (scaffold detail pages) or a state-controlled `open:` body. |
 | `Money`, `DateDisplay`, `EnumBadge`, `IdLink` | Formatter primitives. |

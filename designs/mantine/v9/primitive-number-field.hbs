@@ -1,1 +1,1 @@
-{{#if hasBind}}<NumberInput label={{{labelAttr}}} value={{expr bind}} onChange={(v) => {{setter}}(typeof v === "number" ? v : 0)}{{{testidAttr}}} />{{else}}<NumberInput label={{{labelAttr}}}{{{testidAttr}}} />{{/if}}
+{{#if hasBind}}<NumberInput label={{{labelAttr}}} value={{expr bind}} onChange={(v) => {{setter}}(typeof v === "number" ? v : 0)}{{#if hasError}} error={ {{{error}}} }{{/if}}{{{testidAttr}}} />{{else}}<NumberInput label={{{labelAttr}}}{{#if hasError}} error={ {{{error}}} }{{/if}}{{{testidAttr}}} />{{/if}}

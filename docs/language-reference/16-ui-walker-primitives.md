@@ -40,6 +40,8 @@ page ProductDetail(id: Product id) {
 
 `Stack`/`Group`/`Grid` become the pack's flex/grid container; `Field`/`Toggle` become controlled inputs bound to `state`; `Money` routes through the pack's currency-formatter helper.
 
+The bindable inputs (`Field`, `NumberField`, `PasswordField`, `MultilineField`, `SelectField`, `Toggle`) also accept an optional **`error:`** expression, rendered in the pack's inline error slot. Since the expression is walked in page scope it can read `state`/`derived` — the idiom for dependent form validation over client-only fields (`error: passwordsMatch ? "" : "Passwords must match"`; see [page-metamodel.md §8.2](../page-metamodel.md)).
+
 ::: tabs frontend
 == react
 ```tsx
