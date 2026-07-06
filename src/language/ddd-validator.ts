@@ -39,6 +39,7 @@ import {
   checkDataSource,
   checkDeployable,
   checkDuplicateNames,
+  checkDurationConstructors,
   checkExpectMatcher,
   checkGenericCarriers,
   checkImageAltText,
@@ -271,6 +272,9 @@ export class DddValidator {
     // Scalar-intrinsic call-shape gate (src/util/intrinsics.ts): call form,
     // arity, positional-only args, argument primitive types.
     guard("intrinsic-calls", model, () => checkIntrinsicCalls(model, accept));
+    // A5 duration constructors (days/hours/minutes/months): arity, int
+    // amount, and the months(...)-only-in-datetime± position gate.
+    guard("duration-constructors", model, () => checkDurationConstructors(model, accept));
     // Unresolved bare-identifier heads (`total := amout`, `let x = amout`):
     // a `NameRef` is not a cross-reference, so an unresolvable head types as
     // `T.unknown` and every downstream gate suppresses on it — the finding-1

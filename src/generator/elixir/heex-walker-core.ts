@@ -429,6 +429,10 @@ export function renderExpr(expr: ExprIR, ctx: WalkContext): string {
       }
       return v;
     }
+    case "duration":
+      // A5 temporal — never reaches a page body today (duration values only
+      // arise in domain expressions); the Phoenix domain renderer owns it.
+      throw new Error("A5: duration not yet implemented on elixir");
     case "match":
       return renderMatch(expr, ctx);
     case "list":

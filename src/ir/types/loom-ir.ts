@@ -28,6 +28,7 @@
 // exhaustive child-walker (`src/ir/util/walk.ts`).  This is a value import from
 // `ir/types` → `ir/util`; the reverse edge (walk.ts → loom-ir.ts) is `import
 // type` only (erased at emit), so no runtime cycle forms.
+import type { DurationUnit } from "../../util/temporal.js";
 import { walkExprDeep, walkStmtExprsDeep, walkWorkflowStmtExprsDeep } from "../util/walk.js";
 import type { OriginRef } from "./origin.js";
 
@@ -47,7 +48,16 @@ export type PrimitiveName =
    *  expanded or structurally diffed).  See
    *  `docs/proposals/document-and-json-hierarchies.md` (Option 1,
    *  D-DOCUMENT-AXIS). */
-  | "json";
+  | "json"
+  /** A span of time (A5 temporal, docs/plans/stdlib.md).  EXPRESSION-ONLY
+   *  in this slice: not in the grammar's `PrimitiveType` rule, so it can
+   *  never appear in field / param / wire position — it only arises from
+   *  the `days(n)`/`hours(n)`/`minutes(n)`/`months(n)` constructors and
+   *  the temporal arithmetic rules (`datetime - datetime`, `duration ±
+   *  duration`, `duration * int`).  Deliberately NOT in `PRIMITIVES`
+   *  below (that list feeds user-facing type pickers; a type you cannot
+   *  write does not belong in one). */
+  | "duration";
 
 /** Canonical ordering for UI surfaces that enumerate primitives —
  *  playground type picker, docs tables, completion provider, future
@@ -3143,6 +3153,26 @@ export type ExprIR =
       target: PrimitiveName;
       from: PrimitiveName | undefined;
       value: ExprIR;
+      origin?: OriginRef;
+    }
+  /**
+   * Duration constructor (A5 temporal, docs/plans/stdlib.md) —
+   * `days(n)` / `hours(n)` / `minutes(n)` / `months(n)`.  Parsed as an
+   * ordinary free call; lowered to this node ONLY when the name did not
+   * resolve to any user declaration (a user `function days(...)`
+   * shadows the builtin and lowers to a plain `call`).  `amount` is
+   * int-typed (validated by `loom.duration-arity` /
+   * `loom.duration-arg-type`); the node's type is
+   * `{ kind: "primitive", name: "duration" }`.  `months` is calendar-
+   * relative (no fixed millisecond width) and is restricted by
+   * `loom.duration-months-position` to direct `datetime ± months(n)`
+   * position, where each backend's binary renderer takes its native
+   * calendar path instead of the absolute-milliseconds path.
+   */
+  | {
+      kind: "duration";
+      unit: DurationUnit;
+      amount: ExprIR;
       origin?: OriginRef;
     }
   /**

@@ -19,6 +19,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
+import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
   deepScopeAnchorClaim,
@@ -28,6 +29,7 @@ import {
 } from "../../ir/util/tenant-stance.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { lowerFirst, plural } from "../../util/naming.js";
+import { DURATION_UNIT_MS, type DurationUnit } from "../../util/temporal.js";
 import { joinColumnName, joinTableConstName } from "./emit.js";
 import { TS_INTRINSIC_RENDERERS } from "./render-expr.js";
 import { associationsOf } from "./repository-associations-builder.js";
@@ -89,6 +91,17 @@ const COMPARE_OP_TO_DRIZZLE: Record<string, string> = {
   ">=": "gte",
 };
 
+/** Postgres `make_interval` named-argument spelling per duration unit
+ *  (A5 temporal).  `months` is calendar-correct here: `timestamptz +
+ *  make_interval(months => 1)` does native calendar arithmetic, so the
+ *  SQL side needs no `setMonth`-style special case. */
+const MAKE_INTERVAL_ARG: Record<DurationUnit, string> = {
+  days: "days",
+  hours: "hours",
+  minutes: "mins",
+  months: "months",
+};
+
 export interface DrizzleLowering {
   /** The TypeScript source for the whole expression. */
   expr: string;
@@ -145,6 +158,23 @@ export function lowerToDrizzle(
       }
       const drizzleFn = COMPARE_OP_TO_DRIZZLE[e.op];
       if (!drizzleFn) return null;
+      // A5 temporal — a `datetime ± duration` side is an sql`…` fragment
+      // that composes on EITHER side of the comparison, against a column, a
+      // bound value, or another fragment (`this.due + days(1) < q`,
+      // `q + days(2) < this.due`, `this.a + days(1) == this.b`).  Handled
+      // before the column/value split below, whose one-column-one-value
+      // shape doesn't fit a fragment.
+      {
+        const lT = renderTemporalArith(e.left);
+        const rT = renderTemporalArith(e.right);
+        if (lT !== null || rT !== null) {
+          const l = lT ?? renderColumnRef(e.left) ?? renderValue(e.left);
+          const r = rT ?? renderColumnRef(e.right) ?? renderValue(e.right);
+          if (l === null || r === null) return null;
+          ops.add(drizzleFn);
+          return `${drizzleFn}(${l}, ${r})`;
+        }
+      }
       const colExpr = renderColumnRef(e.left) ?? renderColumnRef(e.right);
       const valueExpr =
         renderColumnRef(e.left) === null ? renderValue(e.left) : renderValue(e.right);
@@ -220,8 +250,36 @@ export function lowerToDrizzle(
     return null;
   }
 
+  /** A5 temporal — `datetime ± days/hours/minutes/months(n)` renders as SQL
+   *  interval arithmetic: `sql\`\${side} ± make_interval(days => \${n})\``.
+   *  Works for BOTH sides of a comparison: a column interpolates into the
+   *  tag, a param / `new Date()` value binds as a parameter, and the
+   *  amount likewise binds (param / literal) or interpolates (column).
+   *  Only the DIRECT constructor operand form lowers (paren-transparent) —
+   *  mirroring exactly what `firstNonQueryableNode` admits (the parity
+   *  test pins the agreement).  Loom `datetime - datetime` in
+   *  where-position is NOT lowered — the gate rejects it, so no arm is
+   *  needed here. */
+  function renderTemporalArith(e: ExprIR): string | null {
+    if (e.kind === "paren") return renderTemporalArith(e.inner);
+    if (e.kind !== "binary" || (e.op !== "+" && e.op !== "-")) return null;
+    const rightDur = durationCtorOperand(e.right);
+    const leftDur = e.op === "+" ? durationCtorOperand(e.left) : null;
+    const dur = rightDur ?? leftDur;
+    const other = rightDur ? e.left : leftDur ? e.right : null;
+    if (!dur || !other || durationCtorOperand(other)) return null;
+    const side = renderColumnRef(other) ?? renderValue(other);
+    const amount = renderValue(dur.amount) ?? renderColumnRef(dur.amount);
+    if (side === null || amount === null) return null;
+    ops.add("sql");
+    return `sql\`\${${side}} ${e.op} make_interval(${MAKE_INTERVAL_ARG[dur.unit]} => \${${amount}})\``;
+  }
+
   function renderColumnRef(e: ExprIR): string | null {
     if (e.kind === "paren") return renderColumnRef(e.inner);
+    // A5 temporal — column-side `this.due + days(n)` wraps in the SQL
+    // interval fragment (Drizzle accepts a `sql` tag in operator position).
+    if (e.kind === "binary") return renderTemporalArith(e);
     // Queryable scalar intrinsic over a column — `this.name.trim()` —
     // wraps the column ref in its SQL snippet (`sql\`trim(col)\``).
     if (e.kind === "method-call" && e.receiverType.kind === "primitive") {
@@ -263,6 +321,10 @@ export function lowerToDrizzle(
 
   function renderValue(e: ExprIR): string | null {
     if (e.kind === "paren") return renderValue(e.inner);
+    // A5 temporal — value-side `q + days(n)` / `now() - hours(n)` lowers
+    // through the same SQL interval fragment as the column side (the
+    // datetime value binds as a parameter inside the tag).
+    if (e.kind === "binary") return renderTemporalArith(e);
     if (e.kind === "literal") {
       switch (e.lit) {
         case "string":
@@ -278,11 +340,24 @@ export function lowerToDrizzle(
           return JSON.stringify(e.value);
         case "bool":
           return e.value;
+        case "now":
+          // Server-side clock read at query time — binds as a Date
+          // parameter (consistent with `renderLiteral`'s `new Date()`).
+          return "new Date()";
         case "null":
           return "null";
         default:
           return null;
       }
+    }
+    // A5 — a standalone (non-months) duration constructor is plain
+    // milliseconds on the value side, mirroring the TS runtime
+    // representation.  Standalone `months(n)` has no absolute width and
+    // is rejected upstream (`loom.duration-months-position`).
+    if (e.kind === "duration") {
+      if (e.unit === "months") return null;
+      const amt = renderValue(e.amount);
+      return amt === null ? null : `((${amt}) * ${DURATION_UNIT_MS[e.unit]})`;
     }
     if (e.kind === "ref") {
       // Param / let / lambda: bare identifier.  Drizzle's `eq<T>` infers

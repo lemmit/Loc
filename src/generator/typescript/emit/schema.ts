@@ -792,6 +792,10 @@ function drizzleColumnLinesForName(
           return [`${fieldName}: uuid("${colName}")${not},`];
         case "json":
           return [`${fieldName}: jsonb("${colName}")${not},`];
+        case "duration":
+          // A5: expression-only primitive — never a stored column in this
+          // slice (Postgres `interval` columns are a follow-on).
+          throw new Error("internal: 'duration' is expression-only and never reaches a column");
       }
     case "id":
       return [`${fieldName}: ${drizzleIdColumn(inner.valueType, colName)}${not},`];

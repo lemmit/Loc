@@ -317,6 +317,9 @@ const JAVA_TARGET: ExprTarget<JavaRenderContext> = {
   binary: renderBinary,
   ternary: (cond, then, otherwise) => `${cond} ? ${then} : ${otherwise}`,
   convert: (value, e) => renderJavaConvert(e.target, e.from, value),
+  duration: () => {
+    throw new Error("A5: duration not yet implemented on java");
+  },
   match(arms, otherwise) {
     // Right-folded ternary chain, same semantics as the TS / C# leaves.
     let out = otherwise ?? "null";
@@ -811,6 +814,10 @@ export function renderJavaType(t: TypeIR): string {
           return "UUID";
         case "json":
           return "JsonNode";
+        case "duration":
+          // A5: duration not yet implemented on java — expression-only
+          // primitive; never a field / wire type in this slice.
+          throw new Error("A5: duration not yet implemented on java");
       }
     case "id":
       return `${t.targetName}Id`;

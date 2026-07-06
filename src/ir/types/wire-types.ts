@@ -174,6 +174,12 @@ export function wireTypeInfo(t: TypeIR, dir: WireDirection): WireTypeInfo {
 
   switch (cur.kind) {
     case "primitive":
+      // A5: `duration` is expression-only (not in the grammar's type rule),
+      // so it can never appear in a wire position — `WirePrimitive`
+      // deliberately excludes it.
+      if (cur.name === "duration") {
+        throw new Error("internal: 'duration' is expression-only and never reaches the wire");
+      }
       return {
         base: cur.name,
         refKind: "primitive",

@@ -3,6 +3,7 @@ import { AstUtils } from "langium";
 import type { PrimitiveName } from "../ir/types/loom-ir.js";
 import { COLLECTION_OP_SIGNATURES, isCollectionOp } from "../util/collection-ops.js";
 import { intrinsicFor, intrinsicReturnType, intrinsicsForReceiver } from "../util/intrinsics.js";
+import { durationUnitOf } from "../util/temporal.js";
 import type {
   Aggregate,
   BaseType,
@@ -566,6 +567,16 @@ export function arithmeticResult(a: DddType, b: DddType, op: string): DddType {
     return withTags(moneyArithmetic(a, b, op, aIsMoney, bIsMoney), tags);
   }
 
+  // duration / datetime form a closed temporal algebra (A5 temporal) —
+  // checked before the numeric-widening path (like money) so a stray
+  // operand is rejected instead of silently widening.  Rules in
+  // `temporalArithmetic` below.
+  const isTemporal = (t: DddType): boolean =>
+    t.kind === "primitive" && (t.name === "duration" || t.name === "datetime");
+  if (isTemporal(a) || isTemporal(b)) {
+    return withTags(temporalArithmetic(a, b, op), tags);
+  }
+
   if (a.kind === "primitive" && b.kind === "primitive") {
     const order = ["int", "long", "decimal"] as const;
     const ai = (order as readonly string[]).indexOf(a.name);
@@ -573,6 +584,42 @@ export function arithmeticResult(a: DddType, b: DddType, op: string): DddType {
     if (ai >= 0 && bi >= 0) return withTags(T.prim(order[Math.max(ai, bi)]!), tags);
   }
   return withTags(T.unknown, tags);
+}
+
+/**
+ * The closed temporal arithmetic rules (A5 temporal, docs/plans/stdlib.md)
+ * — the duration/datetime twin of `moneyArithmetic`.  At least one operand
+ * is duration- or datetime-typed when this runs.  Rules:
+ *
+ *   datetime + duration → datetime      duration + datetime → datetime
+ *   datetime - duration → datetime      datetime - datetime → duration
+ *   duration ± duration → duration
+ *   duration × int → duration           int × duration → duration
+ *
+ * Everything else involving a duration/datetime operand under `+ - * / %`
+ * is rejected (unknown) — including `duration ÷ anything`, `datetime ×`,
+ * and mixing with non-int numerics (a fractional day is written as
+ * `hours(n)`, not `days(0.5)`).
+ */
+function temporalArithmetic(a: DddType, b: DddType, op: string): DddType {
+  const an = a.kind === "primitive" ? a.name : undefined;
+  const bn = b.kind === "primitive" ? b.name : undefined;
+  if (an === "datetime" && bn === "duration") {
+    return op === "+" || op === "-" ? T.prim("datetime") : T.unknown;
+  }
+  if (an === "duration" && bn === "datetime") {
+    return op === "+" ? T.prim("datetime") : T.unknown;
+  }
+  if (an === "datetime" && bn === "datetime") {
+    return op === "-" ? T.prim("duration") : T.unknown;
+  }
+  if (an === "duration" && bn === "duration") {
+    return op === "+" || op === "-" ? T.prim("duration") : T.unknown;
+  }
+  if (op === "*" && ((an === "duration" && bn === "int") || (an === "int" && bn === "duration"))) {
+    return T.prim("duration");
+  }
+  return T.unknown;
 }
 
 /**
@@ -677,7 +724,30 @@ function typeOfFreeCall(name: string, env: Env): DddType {
   // (`CanApprove(cap)`) is a boolean predicate.
   if (lookupCriterionByName(name, env)) return T.prim("bool");
   if (lookupPolicyFnByName(name, env)) return T.prim("bool");
+  // A5 duration constructors (`days(n)` / `hours(n)` / `minutes(n)` /
+  // `months(n)`) — builtins only when no user declaration matched above
+  // (a user `function days(...)` shadows the builtin).  Arity / argument
+  // type are the validator's job (`loom.duration-arity`), not typing's.
+  if (durationUnitOf(name)) return T.prim("duration");
   return T.unknown;
+}
+
+/**
+ * True iff a free call to `name` is an A5 duration-constructor BUILTIN in
+ * `env` — i.e. `name` is one of `days`/`hours`/`minutes`/`months` AND no
+ * user declaration (function / value object / criterion) shadows it.
+ * Mirrors `typeOfFreeCall`'s lookup order exactly; exported for the
+ * temporal validator (`checkDurationConstructors`), so the validator and
+ * the type system can never disagree about what is a builtin.
+ */
+export function isDurationBuiltinCall(name: string, env: Env): boolean {
+  if (!durationUnitOf(name)) return false;
+  const sym = env.resolve(name);
+  if (sym && (isFunctionDecl(sym.origin) || isValueObject(sym.origin))) return false;
+  if (lookupFunctionInScope(name, env)) return false;
+  if (lookupValueObjectByName(name, env)) return false;
+  if (lookupCriterionByName(name, env)) return false;
+  return true;
 }
 
 export function typeAfterSuffix(recvType: DddType, suffix: PostfixSuffix, env: Env): DddType {

@@ -246,6 +246,9 @@ const CS_TARGET: ExprTarget<CsRenderContext> = {
   },
   ternary: (cond, then, otherwise) => `${cond} ? ${then} : ${otherwise}`,
   convert: (value, e) => renderCsConvert(e.target, e.from, value),
+  duration: () => {
+    throw new Error("A5: duration not yet implemented on dotnet");
+  },
   match(arms, otherwise) {
     // Lower a match expression to a chained C# ternary so it can appear
     // inside `derived` bodies, view binds, and other C#-rendered expression
@@ -827,6 +830,10 @@ export function renderCsType(t: TypeIR): string {
           return "Guid";
         case "json":
           return "System.Text.Json.JsonElement";
+        case "duration":
+          // A5: duration not yet implemented on dotnet — expression-only
+          // primitive; never a field / wire type in this slice.
+          throw new Error("A5: duration not yet implemented on dotnet");
       }
     case "id":
       return `${t.targetName}Id`;

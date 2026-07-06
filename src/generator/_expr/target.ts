@@ -50,6 +50,7 @@ export type ObjectExpr = Extract<ExprIR, { kind: "object" }>;
 export type UnaryExpr = Extract<ExprIR, { kind: "unary" }>;
 export type BinaryExpr = Extract<ExprIR, { kind: "binary" }>;
 export type ConvertExpr = Extract<ExprIR, { kind: "convert" }>;
+export type DurationExpr = Extract<ExprIR, { kind: "duration" }>;
 
 /** A `name: value` pair with `value` already rendered (object / new fields). */
 export interface RenderedField {
@@ -131,6 +132,16 @@ export interface ExprTarget<Ctx extends ExprCtxBase> {
   binary(left: string, right: string, e: BinaryExpr): string;
   ternary(cond: string, then: string, otherwise: string): string;
   convert(value: string, e: ConvertExpr): string;
+  /** Duration constructor `days(n)`/`hours(n)`/`minutes(n)`/`months(n)`
+   *  (A5 temporal) — render the backend's ABSOLUTE-duration value from the
+   *  already-rendered `amount`.  NOTE the `months` wrinkle: a calendar month
+   *  has no absolute width, and the validator
+   *  (`loom.duration-months-position`) restricts `months(...)` to direct
+   *  `datetime ± months(n)` position — a backend's `binary` leaf owns that
+   *  calendar path (it sees the raw duration node on `e.left`/`e.right`),
+   *  so this standalone leaf is only ever *composed into* a binary for
+   *  `months` and may render a count-only carrier or throw, per backend. */
+  duration(unit: DurationExpr["unit"], amount: string, e: DurationExpr, ctx: Ctx): string;
   /** Boolean predicate-arms `match { cond => value }` — the original form,
    *  unchanged.  Lowered to the backend's chained-conditional idiom. */
   match(arms: RenderedArm[], otherwise: string | undefined): string;
@@ -213,6 +224,8 @@ export function renderExprWith<Ctx extends ExprCtxBase>(
       return t.ternary(r(e.cond), r(e.then), r(e.otherwise));
     case "convert":
       return t.convert(r(e.value), e);
+    case "duration":
+      return t.duration(e.unit, r(e.amount), e, ctx);
     case "match": {
       // Variant form (variant-match.md) when a subject is present.
       if (e.subject) {
@@ -456,6 +469,10 @@ export function renderExprWithMarks<Ctx extends ExprCtxBase>(
     case "convert": {
       const value = rm(e.value);
       return compose(t.convert(value.text, e), [value]);
+    }
+    case "duration": {
+      const amount = rm(e.amount);
+      return compose(t.duration(e.unit, amount.text, e, ctx), [amount]);
     }
     case "match": {
       if (e.subject) {

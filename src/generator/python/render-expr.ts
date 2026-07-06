@@ -87,6 +87,9 @@ const PY_TARGET: ExprTarget<PyRenderContext> = {
   binary: renderBinary,
   ternary: (cond, then, otherwise) => `(${then} if ${cond} else ${otherwise})`,
   convert: (value, e) => renderPyConvert(e.target, e.from, value),
+  duration: () => {
+    throw new Error("A5: duration not yet implemented on python");
+  },
   match(arms, otherwise) {
     // Python's `match` is a statement — lower to chained conditional
     // expressions so the result composes in any expression position.
@@ -571,6 +574,10 @@ export function renderPyType(t: TypeIR): string {
           return "datetime";
         case "json":
           return "object";
+        case "duration":
+          // A5: duration not yet implemented on python — expression-only
+          // primitive; never a field / wire type in this slice.
+          throw new Error("A5: duration not yet implemented on python");
       }
     case "id":
       return `${t.targetName}Id`;

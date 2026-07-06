@@ -163,6 +163,10 @@ function constructionEvaluable(
       );
     case "list":
       return e.elements.every((el) => constructionEvaluable(el, available, scope));
+    case "duration":
+      // A5 temporal: a duration constructor is a pure function of its
+      // amount — evaluable whenever the amount is.
+      return constructionEvaluable(e.amount, available, scope);
     case "action-ref":
       // UI-handler-arg form — never appears in a construction-evaluable
       // invariant body.
@@ -279,6 +283,11 @@ function exprIsTranslatable(
       // Same posture as money literals: server-side only.  Server's
       // `_assertInvariants` renders the conversion correctly via
       // `renderTsConvert`.
+      return false;
+    case "duration":
+      // A5 temporal: the wire-refine renderer (zod-refine.ts) has no
+      // duration arm — temporal invariants enforce server-side only,
+      // where `_assertInvariants` renders through the full ExprTarget.
       return false;
     case "match":
       // A match expression is wire-translatable iff every arm
@@ -552,6 +561,9 @@ function firstFieldRef(e: ExprIR): string | null {
     case "convert":
       // The wrapped value may itself be a field reference; walk into it.
       return firstFieldRef(e.value);
+    case "duration":
+      // The amount may itself be a field reference; walk into it.
+      return firstFieldRef(e.amount);
     case "match":
       // First arm (cond, then value), then the `else` branch — same
       // left-to-right walk semantics as `ternary`.

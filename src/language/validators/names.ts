@@ -39,6 +39,7 @@
 // accept) — but a name declared/bound *nowhere* is unambiguously the bug.
 
 import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
+import { DURATION_UNITS } from "../../util/temporal.js";
 import type { DddServices } from "../ddd-module.js";
 import {
   type BoundedContext,
@@ -50,10 +51,12 @@ import {
 
 // Magic identifiers resolvable in an expression with no declaration node.
 // `currentUser` is backed by the system `user { … }` block; `permissions`
-// is the module-permissions namespace head (`permissions.<name>`).  Both
-// are admitted unconditionally — a superset is safe (only ever masks a
-// report, never invents one).
-const MAGIC_NAMES: ReadonlySet<string> = new Set(["currentUser", "permissions"]);
+// is the module-permissions namespace head (`permissions.<name>`); the A5
+// duration constructors (`days`/`hours`/`minutes`/`months`) are free-call
+// builtins.  All admitted unconditionally — a superset is safe (only ever
+// masks a report, never invents one; the temporal validator owns the
+// duration arity / position checks).
+const MAGIC_NAMES: ReadonlySet<string> = new Set(["currentUser", "permissions", ...DURATION_UNITS]);
 
 // Executable domain expression containers we validate inside.  These only
 // ever nest under a domain declaration (aggregate / value object / entity

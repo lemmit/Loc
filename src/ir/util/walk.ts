@@ -112,6 +112,9 @@ export function walkExprChildren(e: ExprIR, v: ExprChildVisitor): void {
     case "convert":
       expr?.(e.value);
       break;
+    case "duration":
+      expr?.(e.amount);
+      break;
     case "match":
       if (e.subject) expr?.(e.subject);
       for (const a of e.arms) {

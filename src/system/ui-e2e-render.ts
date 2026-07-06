@@ -13,6 +13,7 @@ import type {
 } from "../ir/types/loom-ir.js";
 import { intrinsicMatcherSig } from "../util/intrinsic-matchers.js";
 import { lowerFirst, plural, snake, upperFirst } from "../util/naming.js";
+import { DURATION_UNIT_MS } from "../util/temporal.js";
 import { renderExpectStmt } from "./expect-stmt.js";
 
 // ---------------------------------------------------------------------------
@@ -459,6 +460,14 @@ function renderUIExpr(e: ExprIR, ctx: RenderCtx): string {
         return `new Decimal(${v})`;
       }
       return v;
+    }
+    case "duration": {
+      // A5 temporal — same ms representation as the TS domain renderer.
+      // `months` never stands alone in valid source (validator-gated to
+      // datetime ± position); render the bare count to stay total.
+      const amt = renderUIExpr(e.amount, ctx);
+      if (e.unit === "months") return `(${amt})`;
+      return `((${amt}) * ${DURATION_UNIT_MS[e.unit]})`;
     }
     case "match": {
       // Lower match to chained ternary.  Same approach as

@@ -14,6 +14,7 @@ import type {
 import { platformFor } from "../platform/registry.js";
 import { API_BASE_PATH } from "../util/api-base.js";
 import { lowerFirst, plural, snake } from "../util/naming.js";
+import { DURATION_UNIT_MS } from "../util/temporal.js";
 import { renderExpectStmt } from "./expect-stmt.js";
 
 // ---------------------------------------------------------------------------
@@ -413,6 +414,14 @@ function renderE2EExpr(e: ExprIR, ctx: RenderCtx): string {
         return `new Decimal(${v})`;
       }
       return v;
+    }
+    case "duration": {
+      // A5 temporal — same ms representation as the TS domain renderer.
+      // `months` never stands alone in valid source (validator-gated to
+      // datetime ± position); render the bare count to stay total.
+      const amt = renderE2EExpr(e.amount, ctx);
+      if (e.unit === "months") return `(${amt})`;
+      return `((${amt}) * ${DURATION_UNIT_MS[e.unit]})`;
     }
     case "match": {
       // Lower a match expression to a chained ternary.  E2E

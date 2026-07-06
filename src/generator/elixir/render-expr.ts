@@ -202,6 +202,9 @@ const ELIXIR_TARGET: ExprTarget<RenderCtx> = {
   // Lower to `if … do … else … end`
   ternary: (cond, then, otherwise) => `if ${cond}, do: ${then}, else: ${otherwise}`,
   convert: (value, e) => renderElixirConvert(e.target, e.from, value),
+  duration: () => {
+    throw new Error("A5: duration not yet implemented on elixir");
+  },
   match: renderMatch,
   // Variant-`match` (variant-match.md) — a `case` over the union result's
   // asymmetric tagged tuple (operation-returns-emit): the success variant is
@@ -244,6 +247,9 @@ const ELIXIR_FILTER_TARGET: ExprTarget<RenderCtx> = {
   unary: (op, operand, e) => renderUnary(op, operand, e, /* inFilter */ true),
   binary: (l, r, e) => renderBinary(l, r, e, /* inFilter */ true),
   convert: (value, e) => renderElixirConvert(e.target, e.from, value, /* inFilter */ true),
+  duration: () => {
+    throw new Error("A5: duration not yet implemented on elixir");
+  },
 };
 
 export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
@@ -1030,6 +1036,10 @@ export function renderTypespec(t: TypeIR, contextModule: string, typesModule?: s
           return "String.t()";
         case "json":
           return "map()";
+        case "duration":
+          // A5: duration not yet implemented on elixir — expression-only
+          // primitive; never a field / wire type in this slice.
+          throw new Error("A5: duration not yet implemented on elixir");
       }
     case "id":
       // IDs flow as UUID strings on the struct (`:uuid` → String.t()).
