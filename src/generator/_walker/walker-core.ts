@@ -520,6 +520,15 @@ export interface WalkEnv {
    *  reference; the shell imports each used one from its
    *  `src/lib/<name>` conformance shim. */
   externFunctions?: ReadonlySet<string>;
+  /** Semantic heading-nesting depth (accessibility.md Phase 2, Layer 3 —
+   *  derived whole-page structure).  Incremented by the `nesting: true`
+   *  containers in the a11y contract (`Section` / `Card`) when they walk
+   *  their children; consumed by `emitHeading` to derive the heading rank
+   *  (`min(6, 2 + depth)`) when the author gives no explicit `level:`, so
+   *  levels never skip.  Distinct from the layout-indentation `depth`
+   *  param threaded through `walk()`.  Absent → 0 (page top → `<h2>`; the
+   *  page chrome owns the single `<h1>`). */
+  headingDepth?: number;
 }
 
 /** Mutable accumulators written during the walk; read by the page

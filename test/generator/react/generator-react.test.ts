@@ -267,10 +267,27 @@ describe("react generator", () => {
       // Burger toggle in header.
       expect(app).toMatch(/<Burger\s+opened=\{opened\}/);
       expect(app).toMatch(/data-testid="nav-burger"/);
-      // Sidebar Stack uses Mantine NavLinks (not bare Anchors).
-      expect(app).toMatch(/<AppShell\.Navbar p="md">/);
+      // Sidebar Stack uses Mantine NavLinks (not bare Anchors); the
+      // navbar carries an accessible name so the <nav> landmark is
+      // distinguishable (accessibility.md Phase 2).
+      expect(app).toMatch(/<AppShell\.Navbar p="md" aria-label="Primary navigation">/);
       expect(app).toMatch(/data-testid="nav-sidebar"/);
       expect(app).toMatch(/from "@mantine\/core"[\s\S]*?NavLink/);
+    });
+
+    // accessibility.md Phase 2 — bypass-blocks skip link + named landmarks.
+    it("App.tsx emits a skip link targeting the <main> landmark", async () => {
+      const model = await buildModel("examples/acme.ddd");
+      const { files } = generateSystems(model);
+      const app = files.get("web_app/src/App.tsx")!;
+      // Skip link is present and points at the main-content anchor.
+      expect(app).toMatch(
+        /<a href="#main-content" className="loom-skip-link">Skip to content<\/a>/,
+      );
+      // The <main> region carries the matching id (AppShell.Main renders <main>).
+      expect(app).toMatch(/<AppShell\.Main id="main-content">/);
+      // Focus-reveal style for the otherwise-offscreen link.
+      expect(app).toMatch(/\.loom-skip-link:focus/);
     });
 
     it("sidebar groups Aggregates / Workflows / Views with Dividers + active highlighting", async () => {

@@ -95,6 +95,11 @@ function AppShellLayout() {
     close();
   }, [location.pathname]);
   return (
+    <>
+      {/* Skip link (WCAG 2.4.1 Bypass Blocks) — first focusable element,
+          visually hidden until focused, jumps to the <main> landmark. */}
+      <a href="#main-content" className="loom-skip-link">Skip to content</a>
+      <style>{`.loom-skip-link{position:absolute;left:-9999px;top:0;z-index:1000;padding:8px 16px;background:var(--mantine-color-body);color:var(--mantine-color-text);border:1px solid var(--mantine-color-default-border);border-radius:4px}.loom-skip-link:focus{left:8px;top:8px}`}</style>
     <AppShell
       header=\{{ height: 56 }}
       navbar=\{{ width: 240, breakpoint: "sm", collapsed: { mobile: !opened } }}
@@ -119,18 +124,19 @@ function AppShellLayout() {
           </Group>
         </Group>
       </AppShell.Header>
-      <AppShell.Navbar p="md">
+      <AppShell.Navbar p="md" aria-label="Primary navigation">
         <Stack gap={4} data-testid="nav-sidebar">
 {{#each navSections}}          <Divider my="xs" label="{{label}}" labelPosition="left" />
 {{#each entries}}{{#if external}}          <Anchor href="{{href}}" target="_blank" rel="noreferrer" data-testid="{{testId}}">{{label}}</Anchor>{{else}}{{#if requiresJs}}          {({{{requiresJs}}}) ? <NavLink component={RouterLink} to="{{to}}" label="{{label}}" active={isActive({{{activeArgs}}})} data-testid="{{testId}}" /> : null}{{else}}          <NavLink component={RouterLink} to="{{to}}" label="{{label}}" active={isActive({{{activeArgs}}})} data-testid="{{testId}}" />{{/if}}{{/if}}
 {{/each}}{{/each}}        </Stack>
       </AppShell.Navbar>
-      <AppShell.Main>
+      <AppShell.Main id="main-content">
         <AppErrorBoundary>
           <Outlet />
         </AppErrorBoundary>
       </AppShell.Main>
     </AppShell>
+    </>
   );
 }
 

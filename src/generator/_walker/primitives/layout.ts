@@ -23,6 +23,23 @@ import {
   walk,
 } from "../walker-core.js";
 
+/** Run `fn` with the walk one semantic heading-nesting level deeper — used
+ *  by the `nesting: true` a11y-contract containers (`Section` / `Card`) so a
+ *  `Heading` in their body derives a rank deeper (accessibility.md Phase 2).
+ *  Mutate-and-restore on the SAME context (not a spread copy) so every
+ *  value-typed `Sink` flag a child writes (`usesNavigate`, `usesChildren`,
+ *  …) still lands on the shared object — a shallow `{...ctx}` would silently
+ *  drop those boolean writes. */
+function withHeadingNesting<T>(ctx: WalkContext, fn: () => T): T {
+  const prev = ctx.headingDepth ?? 0;
+  ctx.headingDepth = prev + 1;
+  try {
+    return fn();
+  } finally {
+    ctx.headingDepth = prev;
+  }
+}
+
 export function emitStack(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
@@ -136,7 +153,9 @@ export function emitSection(
   // pack — the wrapping element shape is the same; only pack-specific
   // theming (if any) varies per template.
   const id = stringNamed(call, "id");
-  const children = positionalChildren(call, ctx, depth + 1);
+  // `Section` is a `nesting: true` container in the a11y contract — its
+  // children's `Heading`s derive one rank deeper (accessibility.md Phase 2).
+  const children = withHeadingNesting(ctx, () => positionalChildren(call, ctx, depth + 1));
   const indent = "  ".repeat(depth + 1);
   const closeIndent = "  ".repeat(depth);
   return renderPrimitive(ctx, "primitive-section", {
@@ -282,7 +301,12 @@ export function emitCard(call: ExprIR & { kind: "call" }, ctx: WalkContext, dept
     titleIsTextLike && titleArg
       ? unwrapTextLiteral(renderTextContent(titleArg, ctx) ?? '""', ctx.target.escapeText)
       : undefined;
-  const contentJsx = contentExpr ? walk(contentExpr, ctx, depth + 1) : undefined;
+  // `Card` is a `nesting: true` container in the a11y contract — its body
+  // `Heading`s derive one rank deeper (accessibility.md Phase 2).  The card
+  // title itself is not a `Heading` primitive, so it is unaffected.
+  const contentJsx = contentExpr
+    ? withHeadingNesting(ctx, () => walk(contentExpr, ctx, depth + 1))
+    : undefined;
   // Phase 5 — visual rank.  `variant: "raised" | "flat" | "outline"`
   // picks the card's elevation idiom per pack.  `shadow: "sm" | "md"
   // | "lg" | "none"` overrides the variant's default shadow level.

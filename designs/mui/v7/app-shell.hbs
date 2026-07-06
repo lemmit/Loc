@@ -112,6 +112,10 @@ function AppShellLayout() {
 
   return (
     <Box sx=\{{ display: "flex" }}>
+      {/* Skip link (WCAG 2.4.1 Bypass Blocks) — first focusable element,
+          off-screen until focused, jumps to the <main> landmark. */}
+      <a href="#main-content" className="loom-skip-link">Skip to content</a>
+      <style>{`.loom-skip-link{position:absolute;left:-9999px;top:0;z-index:2000;padding:8px 16px;background:Canvas;color:CanvasText;border:1px solid;border-radius:4px}.loom-skip-link:focus{left:8px;top:8px}`}</style>
       <CssBaseline />
       <AppBar position="fixed" sx=\{{ zIndex: (t) => t.zIndex.drawer + 1 }}>
         <Toolbar>
@@ -157,6 +161,7 @@ function AppShellLayout() {
       </Drawer>
       <Box
         component="main"
+        id="main-content"
         sx=\{{ flexGrow: 1, p: 3, width: { sm: `calc(100% - ${DRAWER_WIDTH}px)` } }}
       >
         <Toolbar />

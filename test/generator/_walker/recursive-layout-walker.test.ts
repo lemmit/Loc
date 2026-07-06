@@ -184,4 +184,55 @@ describe("recursive layout walker", () => {
     // mid-tree.
     expect(content).toMatch(/unknown layout component: SomeUnknownThing/);
   });
+
+  // accessibility.md Phase 2 — heading rank is DERIVED from `Section`/`Card`
+  // nesting depth (never a skipped level) when `level:` is absent.
+  it("derives heading level from Section/Card nesting depth", async () => {
+    const files = await buildAndGenerate(`
+      system S {
+        subdomain M { context C { } }
+        ui WebApp {
+          page Nested {
+            route: "/nested"
+            body: Stack {
+              Heading { "Top" },
+              Section {
+                Heading { "In section" },
+                Card { "Card title", Heading { "In card in section" } }
+              },
+              Card { "Just a card", Heading { "In card" } }
+            }
+          }
+        }
+        deployable api { platform: node, contexts: [C], port: 3000 }
+        deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
+      }
+    `);
+    const content = files.get("web/src/pages/nested.tsx")!;
+    // Page top → h2 (chrome owns the h1); Section body → h3; Card inside
+    // Section → h4; a top-level Card body → h3.  No level is skipped.
+    expect(content).toMatch(/<Title order=\{2\}>Top<\/Title>/);
+    expect(content).toMatch(/<Title order=\{3\}>In section<\/Title>/);
+    expect(content).toMatch(/<Title order=\{4\}>In card in section<\/Title>/);
+    expect(content).toMatch(/<Title order=\{3\}>In card<\/Title>/);
+  });
+
+  // An explicit `level:` always wins over the derivation.
+  it("honours an explicit level: inside a nesting container", async () => {
+    const files = await buildAndGenerate(`
+      system S {
+        subdomain M { context C { } }
+        ui WebApp {
+          page Explicit {
+            route: "/explicit"
+            body: Section { Heading { "Pinned", level: 2 } }
+          }
+        }
+        deployable api { platform: node, contexts: [C], port: 3000 }
+        deployable web { platform: static, targets: api, ui: WebApp, port: 3001 }
+      }
+    `);
+    const content = files.get("web/src/pages/explicit.tsx")!;
+    expect(content).toMatch(/<Title order=\{2\}>Pinned<\/Title>/);
+  });
 });
