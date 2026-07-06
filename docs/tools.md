@@ -35,7 +35,11 @@ ddd trace <logfile>                               # translate a runtime stack-tr
 `.loom/sourcemap.json` (construct- and statement-granular `.ddd` ↔ generated-line
 origins). `ddd trace <logfile>` reads that file to rewrite a backend stack-trace so
 each frame points at the `.ddd` line it was generated from — the debugging companion
-to the source map. See [`loom-artifacts.md`](loom-artifacts.md).
+to the source map. For Node/V8 frames (the only dialect whose frames carry a column),
+the column selects the expression-level `targetCol` region containing it and the
+annotation prints the exact `.ddd` `path:line:col` of that sub-expression; every other
+format (and any column matching no region) keeps the line-granular `path:line`.
+See [`loom-artifacts.md`](loom-artifacts.md).
 
 ### `patch` — apply node-addressed model patches
 

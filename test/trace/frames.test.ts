@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseFrames } from "../../src/trace/frames.js";
 
 describe("parseFrames", () => {
-  it("parses a V8/Node frame with a function name", () => {
+  it("parses a V8/Node frame with a function name, carrying the column", () => {
     const [frame] = parseFrames(
       "    at LoginSession.start (/repo/out/hono_api/src/domain/LoginSession.ts:47:12)",
     );
@@ -10,15 +10,17 @@ describe("parseFrames", () => {
       lineIndex: 0,
       file: "/repo/out/hono_api/src/domain/LoginSession.ts",
       line: 47,
+      col: 12,
     });
   });
 
-  it("parses a bare V8/Node frame (no function name)", () => {
+  it("parses a bare V8/Node frame (no function name), carrying the column", () => {
     const [frame] = parseFrames("    at /repo/out/hono_api/src/domain/order.ts:88:3");
     expect(frame).toEqual({
       lineIndex: 0,
       file: "/repo/out/hono_api/src/domain/order.ts",
       line: 88,
+      col: 3,
     });
   });
 

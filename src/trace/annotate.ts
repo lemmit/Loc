@@ -15,9 +15,10 @@ import type { SourceRef } from "../ir/types/origin.js";
 import { parseFrames } from "./frames.js";
 import { type Resolution, resolveFrame, type SourceMap } from "./resolve.js";
 
-/** Maps a source offset to its 1-based line number. Built once per
- *  distinct source text `annotateTrace` needs to convert (the module
- *  never re-scans the same text for every frame). */
+/** Maps a source offset to its 1-based line number (and, via `colOf`, its
+ *  1-based column). Built once per distinct source text `annotateTrace`
+ *  needs to convert (the module never re-scans the same text for every
+ *  frame). */
 export class LineIndex {
   private readonly starts: number[];
 
@@ -29,8 +30,9 @@ export class LineIndex {
     this.starts = starts;
   }
 
-  /** 1-based line number containing byte offset `offset`. */
-  lineOf(offset: number): number {
+  /** 0-based index into `starts` of the line containing byte offset
+   *  `offset` — the shared binary search `lineOf`/`colOf` both walk. */
+  private lineIndexOf(offset: number): number {
     let lo = 0;
     let hi = this.starts.length - 1;
     let ans = 0;
@@ -43,7 +45,23 @@ export class LineIndex {
         hi = mid - 1;
       }
     }
-    return ans + 1;
+    return ans;
+  }
+
+  /** 1-based line number containing byte offset `offset`. */
+  lineOf(offset: number): number {
+    return this.lineIndexOf(offset) + 1;
+  }
+
+  /** 1-based column of byte offset `offset` within its line. Deliberately
+   *  a local re-implementation, not `offsetToLineCol` from
+   *  `src/generator/_trace/sourcemap.ts` — `src/trace/` stays decoupled
+   *  from `src/generator/` (same rationale as `WireRegion`'s hand-rolled
+   *  copy in `resolve.ts`), and this one reuses the `LineIndex` binary
+   *  search instead of a linear scan since it's called per resolved
+   *  frame. */
+  colOf(offset: number): number {
+    return offset - this.starts[this.lineIndexOf(offset)]! + 1;
   }
 }
 
@@ -51,6 +69,21 @@ function locationOf(source: SourceRef, indexFor: (path: string) => LineIndex | u
   const index = indexFor(source.path);
   if (index) {
     return `${source.path}:${index.lineOf(source.span.start)}`;
+  }
+  return `${source.path}@bytes ${source.span.start}..${source.span.end}`;
+}
+
+/** Same as `locationOf`, but also prints the 1-based column — used only
+ *  when the resolution matched via a `targetCol` region (see `describe`),
+ *  so a fine expression origin prints `path:line:col` while every other
+ *  resolution keeps today's `path:line`. */
+function locationWithColOf(
+  source: SourceRef,
+  indexFor: (path: string) => LineIndex | undefined,
+): string {
+  const index = indexFor(source.path);
+  if (index) {
+    return `${source.path}:${index.lineOf(source.span.start)}:${index.colOf(source.span.start)}`;
   }
   return `${source.path}@bytes ${source.span.start}..${source.span.end}`;
 }
@@ -69,7 +102,10 @@ function describe(res: Resolution, indexFor: (path: string) => LineIndex | undef
   else if (res.origin.kind === "derived") bits.push(`[synthetic: ${res.origin.reason}]`);
 
   const label = bits.join("  ");
-  const loc = res.source ? `(${locationOf(res.source, indexFor)})` : "";
+  const printCol = res.region.targetCol !== undefined;
+  const loc = res.source
+    ? `(${printCol ? locationWithColOf(res.source, indexFor) : locationOf(res.source, indexFor)})`
+    : "";
   return [label, loc].filter(Boolean).join("  ");
 }
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { annotateTrace, LineIndex } from "../../src/trace/annotate.js";
-import type { SourceMap } from "../../src/trace/resolve.js";
+import type { ParsedFrame } from "../../src/trace/frames.js";
+import { resolveFrame, type SourceMap } from "../../src/trace/resolve.js";
 
 // ---------------------------------------------------------------------------
 // Hand-built sourcemap covering the three OriginRef kinds a region can
@@ -167,5 +168,124 @@ describe("LineIndex", () => {
     expect(idx.lineOf(3)).toBe(1); // '\n' itself still counts as line 1
     expect(idx.lineOf(4)).toBe(2); // 'd'
     expect(idx.lineOf(8)).toBe(3); // 'g'
+  });
+
+  it("maps a byte offset to its 1-based column", () => {
+    const idx = new LineIndex("abc\ndef\nghi");
+    expect(idx.colOf(0)).toBe(1); // 'a'
+    expect(idx.colOf(2)).toBe(3); // 'c'
+    expect(idx.colOf(4)).toBe(1); // 'd' — first char of line 2
+    expect(idx.colOf(6)).toBe(3); // 'f'
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Column-aware resolution (M16, phase 7 slice 3) — `resolveFrame` layers a
+// column-narrowest match on top of the line-narrowest walk, but ONLY when
+// the frame carries a column AND some candidate region carries a matching
+// `targetCol`. `COL_MAP` mirrors the real shape span-tracking emission
+// produces: a wide whole-construct region (no `targetCol` — never chosen
+// by column, no column evidence) with two single-line, `targetCol`-bearing
+// sub-regions nested on the statement's own line (`target: [10, 10]`) —
+// `INNER` (the RHS's `customerName` reference) nested inside `OUTER` (the
+// whole `let note = customerName` statement).
+// ---------------------------------------------------------------------------
+describe("resolveFrame — column-aware region selection", () => {
+  const CONSTRUCT_SPAN = AGGREGATE_SPAN; // whole-construct origin — no column evidence
+  const OUTER_SPAN: [number, number] = [200, 240]; // e.g. `let note = customerName`
+  const INNER_SPAN: [number, number] = [214, 226]; // e.g. `customerName` alone, nested inside OUTER
+
+  const COL_MAP: SourceMap = {
+    version: 1,
+    sources: ["main.ddd"],
+    files: {
+      "hono_api/src/domain/order.ts": [
+        {
+          target: [1, 20],
+          origin: { kind: "source", path: "main.ddd", span: CONSTRUCT_SPAN },
+          construct: "Sales.Orders.Order",
+        },
+        {
+          target: [10, 10],
+          targetCol: [5, 40],
+          origin: { kind: "source", path: "main.ddd", span: OUTER_SPAN },
+          construct: "Sales.Orders.Order.rename (let note = customerName)",
+        },
+        {
+          target: [10, 10],
+          targetCol: [12, 24],
+          origin: { kind: "source", path: "main.ddd", span: INNER_SPAN },
+          construct: "Sales.Orders.Order.rename (customerName)",
+        },
+      ],
+    },
+  };
+
+  function frame(col: number | undefined): ParsedFrame {
+    return { lineIndex: 0, file: "hono_api/src/domain/order.ts", line: 10, col };
+  }
+
+  it("(a) a col inside a targetCol region resolves to the fine region's origin and prints path:line:col", () => {
+    const res = resolveFrame(frame(15), COL_MAP);
+    expect(res?.region.targetCol).toEqual([12, 24]);
+    expect(res?.origin).toEqual({
+      kind: "source",
+      path: "main.ddd",
+      span: { start: INNER_SPAN[0], end: INNER_SPAN[1] },
+    });
+
+    const log = "    at /repo/out/hono_api/src/domain/order.ts:10:15";
+    const out = annotateTrace(log, COL_MAP, readMainDdd);
+    const idx = new LineIndex(DDD_SOURCE);
+    expect(out).toBe(
+      `${log}  →  Sales.Orders.Order.rename (customerName)  (main.ddd:${idx.lineOf(INNER_SPAN[0])}:${idx.colOf(INNER_SPAN[0])})`,
+    );
+  });
+
+  it("(b) a col outside every targetCol region falls back to the statement region and does not print a col", () => {
+    const res = resolveFrame(frame(999), COL_MAP);
+    expect(res?.region.targetCol).toBeUndefined();
+    expect(res?.origin).toEqual({
+      kind: "source",
+      path: "main.ddd",
+      span: { start: CONSTRUCT_SPAN[0], end: CONSTRUCT_SPAN[1] },
+    });
+
+    const log = "    at /repo/out/hono_api/src/domain/order.ts:10:999";
+    const out = annotateTrace(log, COL_MAP, readMainDdd);
+    const idx = new LineIndex(DDD_SOURCE);
+    expect(out).toBe(`${log}  →  Sales.Orders.Order  (main.ddd:${idx.lineOf(CONSTRUCT_SPAN[0])})`);
+    expect(out).not.toMatch(/main\.ddd:\d+:\d+/);
+  });
+
+  it("(c) a frame without a col on a line with targetCol regions still resolves to the statement region — no-regression pin", () => {
+    // Both `targetCol`-bearing regions have a strictly narrower `target`
+    // ([10, 10], width 0) than the whole-construct region ([1, 20], width
+    // 19). Without the ELSE-branch exclusion, plain line-narrowest walking
+    // would wrongly pick one of them by line-width accident — this is
+    // exactly the case that keeps every column-less resolution
+    // byte-identical to before `targetCol` existed.
+    const res = resolveFrame(frame(undefined), COL_MAP);
+    expect(res?.region.targetCol).toBeUndefined();
+    expect(res?.origin).toEqual({
+      kind: "source",
+      path: "main.ddd",
+      span: { start: CONSTRUCT_SPAN[0], end: CONSTRUCT_SPAN[1] },
+    });
+  });
+
+  it("(d) two targetCol regions on one line, col inside both (nested) — the narrowest wins", () => {
+    // OUTER's targetCol is [5, 40] (width 35), INNER's is [12, 24] (width
+    // 12) — col 20 sits inside both; INNER must win regardless of
+    // registration order.
+    const res = resolveFrame(frame(20), COL_MAP);
+    expect(res?.region.targetCol).toEqual([12, 24]);
+  });
+
+  it("(e) a col exactly at targetCol[1] (the half-open upper bound) does not match that region", () => {
+    // INNER's targetCol is [12, 24) — col 24 is excluded from INNER (must
+    // fall through to OUTER's [5, 40), which does contain it).
+    const res = resolveFrame(frame(24), COL_MAP);
+    expect(res?.region.targetCol).toEqual([5, 40]);
   });
 });

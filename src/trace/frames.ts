@@ -2,7 +2,8 @@
 // Stack-frame parsing — the first step of `ddd trace` (docs/proposals/
 // source-map-and-debugging.md §6B).  Recognizes one stack-frame line per
 // backend's native crash-log dialect and reduces it to a
-// `{file, line}` (or, for Java, `{file, line, javaFqn}`) tuple that
+// `{file, line}` (for Java `{file, line, javaFqn}`; for V8/Node
+// `{file, line, col}` — the only dialect that carries a column) tuple that
 // `resolve.ts` can match against `.loom/sourcemap.json`.
 //
 // Pure and dependency-free (no `fs`, no Node APIs) — browser-safe, like
@@ -23,7 +24,11 @@
 
 /** One recognized stack frame.  `line` is 1-based, as every native
  *  runtime reports it. `javaFqn` is set only for a Java frame — the
- *  dotted `pkg.pkg.Class.method` the frame line names. */
+ *  dotted `pkg.pkg.Class.method` the frame line names. `col` (1-based,
+ *  same base as `WireRegion.targetCol` in `resolve.ts`) is set only for a
+ *  V8/Node frame — the only dialect this slice's native frames carry a
+ *  column for (.NET/Java/Python/Elixir formats have no column and keep
+ *  today's line-only behavior). */
 export interface ParsedFrame {
   /** 0-based index into `logText.split("\n")` — lets `annotate.ts` splice
    *  the annotation back onto the exact source line. */
@@ -31,6 +36,7 @@ export interface ParsedFrame {
   file?: string;
   line?: number;
   javaFqn?: string;
+  col?: number;
 }
 
 // Order doesn't affect correctness here (each format's trailing shape is
@@ -75,7 +81,9 @@ function parseLine(line: string): Omit<ParsedFrame, "lineIndex"> | undefined {
   if (m) return { file: m[1], line: Number(m[2]) };
 
   m = NODE_RE.exec(line);
-  if (m) return { file: m[1], line: Number(m[2]) };
+  // V8 columns are 1-based — the same base `WireRegion.targetCol` uses, so
+  // `resolve.ts` compares the two directly with no adjustment.
+  if (m) return { file: m[1], line: Number(m[2]), col: Number(m[3]) };
 
   return undefined;
 }

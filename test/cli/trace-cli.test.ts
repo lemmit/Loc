@@ -9,13 +9,19 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..");
 const cli = path.join(repoRoot, "bin", "cli.js");
 
+// `confirm`'s body carries a `let` whose RHS gets a `targetCol` region from
+// span-tracking emission (M15) — real content for the column-aware e2e below.
 const DDL = `
   system Shop {
     subdomain Sales {
       context Orders {
         aggregate Order {
           customerName: string
-          operation confirm() { }
+          label: string
+          operation confirm() {
+            let note = customerName
+            label := note
+          }
         }
         repository Orders for Order { }
       }
@@ -74,6 +80,57 @@ describe("ddd trace", () => {
     expect(lines[1]).toContain("Orders.Order");
     expect(lines[1]).toContain("→");
     expect(lines[2]).toBe("    at /nowhere/does-not-exist.ts:1:1");
+  });
+
+  it("a node frame's column inside a targetCol region annotates the exact .ddd line:col (M16)", () => {
+    // Derive the frame from the emitted map instead of hardcoding generated
+    // line/col numbers: find a targetCol-bearing region whose origin span is
+    // the `customerName` RHS of `let note = customerName`, then aim the
+    // frame's line:col into it.
+    const map = JSON.parse(fs.readFileSync(path.join(out, ".loom", "sourcemap.json"), "utf8")) as {
+      files: Record<
+        string,
+        {
+          target: [number, number];
+          targetCol?: [number, number];
+          origin: { kind: string; span?: [number, number] };
+        }[]
+      >;
+    };
+    let file: string | undefined;
+    let region: (typeof map.files)[string][number] | undefined;
+    for (const [p, regions] of Object.entries(map.files)) {
+      const r = regions.find(
+        (r) =>
+          r.targetCol &&
+          r.origin.kind === "source" &&
+          r.origin.span &&
+          DDL.slice(r.origin.span[0], r.origin.span[1]) === "customerName",
+      );
+      if (r) {
+        file = p;
+        region = r;
+        break;
+      }
+    }
+    expect(region, "no targetCol region mapping back to `customerName` found").toBeDefined();
+
+    const line = region!.target[0];
+    const col = region!.targetCol![0]; // half-open [start, end) — start is inside
+    const logPath = path.join(tmp, "crash-col.log");
+    fs.writeFileSync(logPath, `    at Order.confirm (${file}:${line}:${col})`, "utf8");
+
+    const r = run(["trace", logPath, "--out", out]);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("Orders.Order.confirm");
+
+    // The annotation ends `(<shop.ddd path>:<line>:<col>)` — the exact .ddd
+    // position of `customerName` (1-based col), derived from the DDL text.
+    const rhsOffset = region!.origin.span![0];
+    const before = DDL.slice(0, rhsOffset);
+    const dddLine = before.split("\n").length;
+    const dddCol = rhsOffset - before.lastIndexOf("\n");
+    expect(r.stdout.trimEnd()).toMatch(new RegExp(`:${dddLine}:${dddCol}\\)$`));
   });
 
   it("--map takes an explicit path", () => {
