@@ -217,7 +217,9 @@ describe('conversion vocabulary — disambiguation from `money("…")` literal',
     `);
     const foo = allAggregates(loom).find((a) => a.name === "Foo")!;
     const total = foo.derived.find((d) => d.name === "total")!;
-    expect(total.expr).toEqual({ kind: "literal", lit: "money", value: "10.50" });
+    // `toMatchObject` — this literal lowers through the `lowerExpr` wrapper
+    // (src/ir/lower/lower-expr.ts), which stamps a real M14 `origin`.
+    expect(total.expr).toMatchObject({ kind: "literal", lit: "money", value: "10.50" });
   });
 
   it("`money(decimalField)` is a PrimitiveConversion, not a MoneyLit", async () => {

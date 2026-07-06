@@ -346,6 +346,10 @@ context X {
     const lhs = top.left as Extract<ExprIR, { kind: "binary" }>;
     expect(lhs.kind).toBe("binary");
     expect(lhs.resultType).toEqual({ kind: "primitive", name: "money" });
-    expect(lhs.right).toEqual({ kind: "literal", lit: "money", value: "0.50" });
+    // `toMatchObject` — a promoted literal built directly by
+    // `tryPromoteNumericLit` bypasses the `lowerExpr` origin wrapper today
+    // (src/ir/lower/lower-expr.ts), but pin the assertion loosely so a future
+    // change to stamp it doesn't break this test on an unrelated field.
+    expect(lhs.right).toMatchObject({ kind: "literal", lit: "money", value: "0.50" });
   });
 });

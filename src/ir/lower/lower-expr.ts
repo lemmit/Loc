@@ -92,6 +92,7 @@ import {
   USER_SHAPE_NAME,
   withLocal,
 } from "./lower-types.js";
+import { originFor } from "./origin.js";
 import { matchRepoRead } from "./repo-read.js";
 
 /** Synthetic entity name used to type the `currentUser` magic
@@ -638,7 +639,27 @@ function collectionElementType(t: TypeIR): TypeIR | undefined {
   return unwrapped.kind === "array" ? unwrapped.element : undefined;
 }
 
+/** Lower an expression, then stamp its `.ddd` (or macro-call) origin onto
+ *  the result — the expression-side twin of `lowerStatement`'s chokepoint
+ *  (src/ir/lower/lower-stmt.ts), same shape.  Every recursive `lowerExpr`
+ *  call below (in this file and its siblings) routes back through this
+ *  wrapper, so each sub-expression node gets its own stamp; only the
+ *  synthetic intermediates built directly as object literals — a binary
+ *  chain's fold accumulators, a postfix chain's per-suffix nodes, lambda/
+ *  builder/criterion internals — never pass back through here and so stay
+ *  `origin: undefined` (honest: consumers already skip undefined).  For a
+ *  chain expression the OUTERMOST node picks up the whole chain's span,
+ *  which is correct — that's what the source expression covers.
+ *
+ *  `originFor` walks `$container` / `getDocument` from the AST node (a
+ *  shallow 5-10 hop root-walk per node) — accepted per-node cost, no
+ *  cache; see docs/plans/source-map-debug-kickoff.md. */
 export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
+  const lowered = lowerExprInner(expr, env);
+  return { ...lowered, origin: lowered.origin ?? originFor(expr) };
+}
+
+function lowerExprInner(expr: Expression | undefined, env: Env): ExprIR {
   if (!expr) return lit("null", "null");
   if (isStringLit(expr)) return lit("string", expr.value);
   if (isIntLit(expr)) return lit("int", String(expr.value));

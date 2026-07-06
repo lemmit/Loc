@@ -22,6 +22,27 @@ function findAgg(
   throw new Error(`aggregate ${name} not found in IR`);
 }
 
+/** Deep-clone `value` with every `origin` key stripped.  A capability's
+ *  spliced members carry no `$cstNode` of their own (the expander doesn't
+ *  preserve one on the clone), so `lowerExpr`'s M14 origin wrapper
+ *  (src/ir/lower/lower-expr.ts) leaves them `origin: undefined` — while the
+ *  hand-written equivalent, lowered straight from real `.ddd` text, gets a
+ *  real `source` origin.  The equivalence these tests assert is structural
+ *  (same shape once the capability is spliced), not "same origin" — so
+ *  strip it before comparing. */
+function stripOrigin<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((v) => stripOrigin(v)) as unknown as T;
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (k === "origin") continue;
+      out[k] = stripOrigin(v);
+    }
+    return out as T;
+  }
+  return value;
+}
+
 describe("typed capability expansion (typed-capabilities.md Phase 2)", () => {
   it("a filter capability via `with` == hand-written filter + field", async () => {
     const viaCapability = await buildLoomModel(`
@@ -44,7 +65,9 @@ describe("typed capability expansion (typed-capabilities.md Phase 2)", () => {
     `);
     const a = findAgg(viaCapability, "Order");
     const b = findAgg(handWritten, "Order");
-    expect(JSON.stringify(a.contextFilters)).toEqual(JSON.stringify(b.contextFilters));
+    expect(JSON.stringify(stripOrigin(a.contextFilters))).toEqual(
+      JSON.stringify(stripOrigin(b.contextFilters)),
+    );
     expect(a.wireShape.map((f) => f.name)).toEqual(b.wireShape.map((f) => f.name));
   });
 
@@ -73,7 +96,9 @@ describe("typed capability expansion (typed-capabilities.md Phase 2)", () => {
     `);
     const a = findAgg(viaCapability, "Order");
     const b = findAgg(handWritten, "Order");
-    expect(JSON.stringify(a.contextStamps)).toEqual(JSON.stringify(b.contextStamps));
+    expect(JSON.stringify(stripOrigin(a.contextStamps))).toEqual(
+      JSON.stringify(stripOrigin(b.contextStamps)),
+    );
     expect(a.wireShape.map((f) => f.name)).toEqual(b.wireShape.map((f) => f.name));
   });
 

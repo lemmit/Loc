@@ -186,7 +186,9 @@ describe('money — literal form `money("...")`', () => {
     const { allAggregates } = await import("../../../src/ir/types/loom-ir.js");
     const inv = allAggregates(loom).find((a) => a.name === "Invoice")!;
     const starting = inv.derived.find((d) => d.name === "starting")!;
-    expect(starting.expr).toEqual({
+    // `toMatchObject` — this literal lowers through the `lowerExpr` wrapper
+    // (src/ir/lower/lower-expr.ts), which stamps a real M14 `origin`.
+    expect(starting.expr).toMatchObject({
       kind: "literal",
       lit: "money",
       value: "10.50",

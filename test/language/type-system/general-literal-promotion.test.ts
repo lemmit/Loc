@@ -72,7 +72,9 @@ describe("literal promotion — IR carries the elaborated kind", () => {
     `);
     const foo = allAggregates(loom).find((a) => a.name === "Foo")!;
     const n = foo.derived.find((d) => d.name === "n")!;
-    expect(n.expr).toEqual({ kind: "literal", lit: "int", value: "5" });
+    // `toMatchObject` — the un-promoted literal lowers through the `lowerExpr`
+    // wrapper (src/ir/lower/lower-expr.ts), which stamps a real M14 `origin`.
+    expect(n.expr).toMatchObject({ kind: "literal", lit: "int", value: "5" });
   });
 });
 
@@ -92,7 +94,8 @@ describe("literal promotion in binary expressions — operand-typed anchor", () 
     const bin = bumped.expr as Extract<typeof bumped.expr, { kind: "binary" }>;
     expect(bin.leftType).toEqual({ kind: "primitive", name: "long" });
     expect(bin.resultType).toEqual({ kind: "primitive", name: "long" });
-    expect(bin.right).toEqual({ kind: "literal", lit: "long", value: "5" });
+    // `toMatchObject` — see the M14 origin note above.
+    expect(bin.right).toMatchObject({ kind: "literal", lit: "long", value: "5" });
   });
 
   it("`5 + rate` (IntLit + decimal) promotes the literal to decimal", async () => {
@@ -108,7 +111,8 @@ describe("literal promotion in binary expressions — operand-typed anchor", () 
     const foo = allAggregates(loom).find((a) => a.name === "Foo")!;
     const shifted = foo.derived.find((d) => d.name === "shifted")!;
     const bin = shifted.expr as Extract<typeof shifted.expr, { kind: "binary" }>;
-    expect(bin.left).toEqual({ kind: "literal", lit: "decimal", value: "5" });
+    // `toMatchObject` — see the M14 origin note above.
+    expect(bin.left).toMatchObject({ kind: "literal", lit: "decimal", value: "5" });
   });
 
   it("`count + n` (long + int field — both typed values) does NOT promote", async () => {

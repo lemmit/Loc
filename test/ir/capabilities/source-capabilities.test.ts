@@ -23,6 +23,26 @@ function findAgg(
   throw new Error(`aggregate ${name} not found in IR`);
 }
 
+/** Deep-clone `value` with every `origin` key stripped.  A prelude/macro
+ *  capability's spliced members carry no `$cstNode` of their own, so
+ *  `lowerExpr`'s M14 origin wrapper (src/ir/lower/lower-expr.ts) leaves
+ *  them `origin: undefined` — while the hand-written equivalent, lowered
+ *  straight from real `.ddd` text, gets a real `source` origin.  The
+ *  equivalence this test asserts is structural, not "same origin" — see
+ *  the matching helper in typed-capability-equivalence.test.ts. */
+function stripOrigin<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((v) => stripOrigin(v)) as unknown as T;
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (k === "origin") continue;
+      out[k] = stripOrigin(v);
+    }
+    return out as T;
+  }
+  return value;
+}
+
 describe("source-level capabilities (hand-written, no macro)", () => {
   it("`filter !this.isDeleted` produces contextFilters[0]", async () => {
     const ir = await buildLoomModel(`
@@ -93,7 +113,9 @@ describe("source-level capabilities (hand-written, no macro)", () => {
     `);
     const hand = findAgg(handIR, "Order");
     const cap = findAgg(capIR, "Order");
-    expect(JSON.stringify(hand.contextFilters)).toEqual(JSON.stringify(cap.contextFilters));
+    expect(JSON.stringify(stripOrigin(hand.contextFilters))).toEqual(
+      JSON.stringify(stripOrigin(cap.contextFilters)),
+    );
     expect(hand.wireShape.map((f) => f.name)).toEqual(cap.wireShape.map((f) => f.name));
   });
 });

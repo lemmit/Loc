@@ -80,11 +80,16 @@ describe(".NET enhanced #line directives (M7 phase 6a)", () => {
     expect(content, `${ORDER_CS_PATH} not emitted`).toBeDefined();
     const lines = content!.split("\n");
 
-    // (a) the `let` statement.
-    const letText = "let note = customerName";
-    const letStart = SOURCE.indexOf(letText);
-    expect(letStart).toBeGreaterThanOrEqual(0);
-    const letEnd = letStart + letText.length;
+    // (a) the `let` statement — the directive now narrows to the RHS
+    // expression's own span (`customerName`), not the whole `let note = …`
+    // statement: `weaveLineDirectives` prefers a `let`'s inner `expr.origin`
+    // when present (src/generator/dotnet/emit/entity.ts's `narrowedOrigin`).
+    const letStmtText = "let note = customerName";
+    const letStmtStart = SOURCE.indexOf(letStmtText);
+    expect(letStmtStart).toBeGreaterThanOrEqual(0);
+    const letRhsText = "customerName";
+    const letStart = SOURCE.indexOf(letRhsText, letStmtStart);
+    const letEnd = letStart + letRhsText.length;
     const letFrom = lineCol(SOURCE, letStart);
     const letTo = lineCol(SOURCE, letEnd);
     const letDirective = `#line (${letFrom.line},${letFrom.col})-(${letTo.line},${letTo.col}) "${docPath}"`;
@@ -92,7 +97,8 @@ describe(".NET enhanced #line directives (M7 phase 6a)", () => {
     expect(letLineIdx, "rendered let-statement line not found").toBeGreaterThan(0);
     expect(lines[letLineIdx - 1]).toBe(letDirective);
 
-    // (b) the `emit` statement.
+    // (b) the `emit` statement — `emit` isn't one of the narrowed kinds
+    // (`assign`/`return`/`let`), so it keeps its whole-statement span.
     const emitText = "emit OrderPlaced { order: id }";
     const emitStart = SOURCE.indexOf(emitText);
     expect(emitStart).toBeGreaterThanOrEqual(0);

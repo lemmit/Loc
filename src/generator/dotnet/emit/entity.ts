@@ -40,6 +40,32 @@ function isRefCollection(t: TypeIR): boolean {
   return t.kind === "array" && t.element.kind === "id";
 }
 
+/** A statement shape narrow enough to cover both a real `StmtIR` and the
+ *  bare `{ origin }` fixtures `weave-line-directives.test.ts` exercises —
+ *  `value`/`expr` mirror the `assign`/`return`/`let` StmtIR fields (see
+ *  `src/ir/types/loom-ir.ts`), each narrowed to just the inner `origin` a
+ *  weave needs. */
+interface NarrowableStmt {
+  kind?: string;
+  origin?: OriginRef;
+  value?: { origin?: OriginRef };
+  expr?: { origin?: OriginRef };
+}
+
+/** Prefer an `assign`/`return`/`let` statement's INNER expression origin
+ *  (the RHS span) over the whole statement's span — the statement span
+ *  always includes the LHS/keyword too, so the narrower expression span
+ *  gives column-precise `#line` stepping for free (the origin is already
+ *  stamped by `lowerExpr`'s wrapper, `src/ir/lower/lower-expr.ts`; no new
+ *  mechanism here).  Falls back to the statement's own origin for every
+ *  other statement kind, and when the inner expression has no origin of
+ *  its own (e.g. it lowered to a synthetic node). */
+function narrowedOrigin(stmt: NarrowableStmt): OriginRef | undefined {
+  if (stmt.kind === "assign" || stmt.kind === "return") return stmt.value?.origin ?? stmt.origin;
+  if (stmt.kind === "let") return stmt.expr?.origin ?? stmt.origin;
+  return stmt.origin;
+}
+
 /** M7 phase 6a: weave enhanced C#10 `#line (a,b)-(c,d) "path"` directives
  *  (source-map-and-debugging.md §6.C) into a REGULAR named-operation's
  *  per-statement chunk list, one directive per statement whose origin
@@ -51,14 +77,15 @@ function isRefCollection(t: TypeIR): boolean {
  *  matching generated-code readability over C#'s tolerance for indented
  *  directives.  `stmts`/`chunks` must be the same 1:1 arrays
  *  `statementSubRegions` walks, so the returned chunks stay line-countable
- *  the same way. */
+ *  the same way.  An `assign`/`return`/`let` statement narrows to its inner
+ *  expression's span via `narrowedOrigin` — see there. */
 export function weaveLineDirectives(
-  stmts: readonly { origin?: OriginRef }[],
+  stmts: readonly NarrowableStmt[],
   chunks: readonly string[],
   sourceTexts: ReadonlyMap<string, string>,
 ): { chunks: string[]; wove: boolean } {
   const resolved = stmts.map((s) => {
-    const src = resolveToSource(s.origin);
+    const src = resolveToSource(narrowedOrigin(s));
     if (!src) return undefined;
     const text = sourceTexts.get(src.path);
     return text === undefined ? undefined : { path: src.path, span: src.span, text };
