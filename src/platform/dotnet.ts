@@ -51,6 +51,7 @@ const dotnetPlatform: PlatformSurface = {
     layoutAdapter,
     emitTrace,
     sourcemap,
+    sourceTexts,
   }): Map<string, string> {
     const namespace = deployable.name[0]!.toUpperCase() + deployable.name.slice(1);
     // The orchestrator (`generator/dotnet/index.ts`) dispatches
@@ -76,7 +77,7 @@ const dotnetPlatform: PlatformSurface = {
         styleAdapter,
         layoutAdapter,
       },
-      { emitTrace, sourcemap },
+      { emitTrace, sourcemap, sourceTexts },
     );
   },
   composeService({ slug }): ComposeServiceShape {

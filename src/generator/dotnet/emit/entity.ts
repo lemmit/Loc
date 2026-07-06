@@ -1,4 +1,5 @@
 import type { SourceMapSubRegion } from "../../../generator/_trace/sourcemap.js";
+import { offsetToLineCol } from "../../../generator/_trace/sourcemap.js";
 import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
@@ -7,6 +8,8 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import type { OriginRef } from "../../../ir/types/origin.js";
+import { resolveToSource } from "../../../ir/types/origin.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import type { UnionMember } from "../../_payload/union-wire.js";
@@ -35,6 +38,40 @@ export interface OpFragment {
  * (`Id<T>[]`) — persisted via a join table, not a column. */
 function isRefCollection(t: TypeIR): boolean {
   return t.kind === "array" && t.element.kind === "id";
+}
+
+/** M7 phase 6a: weave enhanced C#10 `#line (a,b)-(c,d) "path"` directives
+ *  (source-map-and-debugging.md §6.C) into a REGULAR named-operation's
+ *  per-statement chunk list, one directive per statement whose origin
+ *  resolves to a span in `sourceTexts`.  A statement with no usable origin
+ *  gets `#line hidden` instead (the debugger steps over it) — but only once
+ *  at least one OTHER statement in this body resolved; an all-unmapped body
+ *  is left untouched (`wove: false`), never a body of bare `#line hidden`s.
+ *  Directives sit flush-left (column 0) ahead of the original chunk text,
+ *  matching generated-code readability over C#'s tolerance for indented
+ *  directives.  `stmts`/`chunks` must be the same 1:1 arrays
+ *  `statementSubRegions` walks, so the returned chunks stay line-countable
+ *  the same way. */
+function weaveLineDirectives(
+  stmts: readonly { origin?: OriginRef }[],
+  chunks: readonly string[],
+  sourceTexts: ReadonlyMap<string, string>,
+): { chunks: string[]; wove: boolean } {
+  const resolved = stmts.map((s) => {
+    const src = resolveToSource(s.origin);
+    if (!src) return undefined;
+    const text = sourceTexts.get(src.path);
+    return text === undefined ? undefined : { path: src.path, span: src.span, text };
+  });
+  if (!resolved.some((r) => r !== undefined)) return { chunks: [...chunks], wove: false };
+  const woven = chunks.map((chunk, i) => {
+    const r = resolved[i];
+    if (!r) return `#line hidden\n${chunk}`;
+    const from = offsetToLineCol(r.text, r.span.start);
+    const to = offsetToLineCol(r.text, r.span.end);
+    return `#line (${from.line},${from.col})-(${to.line},${to.col}) "${r.path}"\n${chunk}`;
+  });
+  return { chunks: woven, wove: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +150,14 @@ export function renderEntity(
    *  `statementSubRegions` construct id `"Sales.Order.confirm"`.  Required
    *  whenever `opFragments` is passed. */
   constructPrefix?: string,
+  /** `.ddd` source text keyed by `OriginRef` source path (M7 phase 6a) —
+   *  present only alongside `opFragments` (same recorder-present gate).
+   *  When set, the REGULAR named-operation body loop below weaves C#
+   *  enhanced `#line` directives (see `weaveLineDirectives`) so the PDB
+   *  carries `.ddd` sequence points.  Absent ⇒ byte-identical output;
+   *  only dotnet consumes this today, and only the root render call
+   *  passes it (entity parts carry no operations). */
+  sourceTexts?: ReadonlyMap<string, string>,
 ): string {
   // `operations` is the discriminator between EnrichedAggregateIR and
   // EnrichedEntityPartIR — wrapped in a type predicate so the union
@@ -353,12 +398,21 @@ export function renderEntity(
     // that owns the recorder + this file's final content (source-map
     // Milestone 3).
     const opRenderCtx = retUnion ? { ...renderCtx, returnUnion: retUnion } : renderCtx;
-    const chunks = renderCsStatementChunks(op.statements, opRenderCtx, {
+    const rawChunks = renderCsStatementChunks(op.statements, opRenderCtx, {
       emitTrace,
       aggregate: entity.name,
       op: op.name,
       eventSourced,
     });
+    // M7 phase 6a: weave enhanced `#line` directives BEFORE the join, so
+    // `chunks`/`body`/`fragmentText` and the sub-region cursor walk below
+    // all see the exact same (post-weave) text that lands in the file —
+    // never post-process the joined `body`, that would desync
+    // `content.indexOf(fragmentText)` in `SourceMapRecorder.fragment`.
+    const woven = sourceTexts
+      ? weaveLineDirectives(op.statements, rawChunks, sourceTexts)
+      : undefined;
+    const chunks = woven?.chunks ?? rawChunks;
     const body = chunks.join("\n");
     if (opFragments && chunks.length > 0) {
       opFragments.push({
@@ -371,6 +425,7 @@ export function renderEntity(
       });
     }
     if (body.length > 0) opLines.push(body);
+    if (woven?.wove) opLines.push("#line default");
     if (!op.returnType) {
       opLines.push(
         emitTrace ? `        AssertInvariants("${op.name}");` : "        AssertInvariants();",

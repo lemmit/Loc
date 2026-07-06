@@ -133,6 +133,7 @@ export function generateSystemsFromLoom(
       snapshots,
       allowDestructive: options.allowDestructive,
       sourcemap: recorder,
+      sourceTexts: options.sourceTexts,
     });
   }
   // Traceability artifacts — model-global (requirements may
@@ -176,6 +177,7 @@ function emitSystem(
     snapshots: SnapshotStore;
     allowDestructive?: boolean;
     sourcemap?: SourceMapRecorder;
+    sourceTexts?: ReadonlyMap<string, string>;
   },
 ): void {
   // Pre-compute a module-name → contexts lookup so a deployable can
@@ -208,6 +210,7 @@ function emitSystem(
       migrations: ownedMigrations,
       topLevelComponents: loom.components,
       sourcemap: options.sourcemap,
+      sourceTexts: options.sourceTexts,
     });
   }
 
@@ -382,6 +385,7 @@ function emitDeployable(
     migrations?: MigrationsIR[];
     topLevelComponents?: import("../ir/types/loom-ir.js").ComponentIR[];
     sourcemap?: SourceMapRecorder;
+    sourceTexts?: ReadonlyMap<string, string>;
   } = {},
 ): void {
   const emitTrace = !!options.emitTrace;
@@ -424,6 +428,9 @@ function emitDeployable(
     // Scoped so paths the platform records land pre-prefixed with `sub`,
     // matching the final written path exactly (see the loop below).
     sourcemap: options.sourcemap?.scope(sub),
+    // Passed verbatim (no scoping — it's keyed by `.ddd` source path, not
+    // generated output path).
+    sourceTexts: options.sourceTexts,
   });
   for (const [relPath, content] of files) {
     out.set(`${sub}/${relPath}`, content);

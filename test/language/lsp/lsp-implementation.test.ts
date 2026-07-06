@@ -177,4 +177,29 @@ describe("DddImplementationProvider (textDocument/implementation)", () => {
     });
     expect(links ?? []).toEqual([]);
   });
+
+  // Discovery's ANCESTOR walk — the first test's doc sits right beside the
+  // out dir (level-0 child scan). Here the doc is nested two directories
+  // below the project root, so discovery must walk UP (src/orders →
+  // src → project) before the child scan can see project/out/.loom.
+  it("discovers a map two ancestor levels up from a nested document", async () => {
+    const deepProject = path.join(tmp, "deep-project");
+    const deepDocDir = path.join(deepProject, "src", "orders");
+    const { services, doc } = await loadRealDocument(deepDocDir, "main.ddd", SOURCE);
+    const model = doc.parseResult.value;
+    writeGeneratedTree(model, new Map([[doc.uri.path, SOURCE]]), path.join(deepProject, "out"));
+
+    const provider = services.Ddd.lsp.ImplementationProvider!;
+    const pos = positionOf(SOURCE, "customerName\n");
+    const links = await provider.getImplementation(doc, {
+      textDocument: { uri: doc.textDocument.uri },
+      position: pos,
+    });
+    expect(links, "expected the nested document to discover project/out").toBeDefined();
+    expect(links!.length).toBeGreaterThan(0);
+    for (const link of links!) {
+      expect(link.targetUri.includes("/deep-project/out/")).toBe(true);
+      expect(link.targetUri.endsWith("hono_api/domain/order.ts")).toBe(true);
+    }
+  });
 });

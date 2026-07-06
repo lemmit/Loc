@@ -1,4 +1,5 @@
 import type { SourceMapRegion } from "../generator/_trace/sourcemap.js";
+import { offsetToLineCol } from "../generator/_trace/sourcemap.js";
 import { resolveToSource } from "../ir/types/origin.js";
 
 // ---------------------------------------------------------------------------
@@ -13,28 +14,17 @@ import { resolveToSource } from "../ir/types/origin.js";
 // steps through.  Other backends record regions too, but there is no v3
 // consumer for `.cs`/`.java`/`.py`/`.ex` today.
 //
-// Line/col derivation happens HERE, not in `src/ir/` or `src/trace/`
-// (D-ORIGIN-OFFSETS) — `OriginRef` spans stay byte offsets everywhere else;
-// this is the one serialization boundary that needs (line, col) pairs, so
-// the conversion is a tiny local helper rather than a new cross-cutting
-// concept.  Dependency-free: `source-map` / `convert-source-map` are only
-// transitive dev deps, not importable from `src/` — the base64-VLQ encoder
-// below is hand-rolled (standard algorithm, ~20 lines).
+// Line/col derivation happens off the shared `offsetToLineCol` (D-ORIGIN-
+// OFFSETS) in `src/generator/_trace/sourcemap.ts` — `OriginRef` spans stay
+// byte offsets everywhere else; that helper is the one conversion boundary
+// every (line, col) consumer shares.  It returns 1-based pairs; v3 mappings
+// are 0-based, so this file subtracts 1 at its own call site rather than
+// pushing a 0-based variant onto the shared helper's other consumer (the
+// .NET `#line` weave, which wants 1-based directly).  Dependency-free:
+// `source-map` / `convert-source-map` are only transitive dev deps, not
+// importable from `src/` — the base64-VLQ encoder below is hand-rolled
+// (standard algorithm, ~20 lines).
 // ---------------------------------------------------------------------------
-
-/** 0-based (line, col) of `offset` within `text` — v3 mappings are 0-based,
- *  unlike the byte-offset spans `OriginRef` carries everywhere else. */
-function offsetToLineCol(text: string, offset: number): { line: number; col: number } {
-  let line = 0;
-  let lineStart = 0;
-  for (let i = 0; i < offset && i < text.length; i++) {
-    if (text[i] === "\n") {
-      line++;
-      lineStart = i + 1;
-    }
-  }
-  return { line, col: offset - lineStart };
-}
 
 const BASE64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -101,8 +91,9 @@ export function renderSourceMapV3(
     if (!source) continue;
     const text = sourceTexts.get(source.path);
     if (text === undefined) continue;
+    // Shared helper is 1-based; v3 mappings are 0-based.
     const { line, col } = offsetToLineCol(text, source.span.start);
-    resolved.push({ target: region.target, path: source.path, line, col });
+    resolved.push({ target: region.target, path: source.path, line: line - 1, col: col - 1 });
   }
   if (resolved.length === 0) return undefined;
 
