@@ -44,7 +44,15 @@ system SourceMapDemo {
       aggregate Product {
         name: string
         price: int
-        operation discontinue() { }
+        // M17 phase 7 slice 4: the ONLY precondition in this fixture — added
+        // so the widened statementExprMarks (every expression-bearing StmtIR
+        // kind, not just let/assign/return) has a real predicate to anchor a
+        // targetCol region on. Was an empty body pre-slice-4; adding this one
+        // statement does not shift any other assertion in this file (nothing
+        // here counts Product.discontinue()'s own statements — only the
+        // workflow-level product.discontinue() CALL inside archiveOrder is
+        // asserted elsewhere, unaffected by the operation body's contents).
+        operation discontinue() { precondition price > 0 }
       }
       repository Products for Product { }
 
@@ -290,6 +298,81 @@ describe(".loom/sourcemap.json", () => {
     }
   });
 
+  // M17 phase 7 slice 4 (span-tracking-emission.md §4): marks widen from
+  // let/assign/return to every expression-bearing StmtIR kind. The fixture's
+  // `emit OrderPlaced { order: id }` (Order.confirm) and `precondition price
+  // > 0` (Product.discontinue, the ONLY precondition in this fixture) are
+  // the two new kinds this test proves land a real targetCol region —
+  // recomputed straight from the emitted content, the #1744 pattern.
+  it("carries targetCol on an emit field expr and a precondition predicate (M17 slice 4 widening)", async () => {
+    const model = await parseValid(SOURCE);
+    const files = generateSystems(model, { sourcemap: true }).files;
+    const raw = files.get(".loom/sourcemap.json")!;
+    const map = JSON.parse(raw) as {
+      files: Record<
+        string,
+        { target: [number, number]; construct?: string; targetCol?: [number, number] }[]
+      >;
+    };
+
+    // (a) the emit field expr: `order: id` renders as `order: this._id`
+    // inside the pushed event object literal.
+    const orderPath = Object.keys(map.files).find(
+      (p) => p.startsWith(`${SLUG_FOR.node}/`) && p.endsWith("domain/order.ts"),
+    )!;
+    const orderContent = files.get(orderPath)!;
+    const orderRegions = map.files[orderPath]!;
+    const emitLine = orderContent.split("\n").findIndex((l) => l.includes("this._events.push")) + 1;
+    expect(emitLine).toBeGreaterThan(0);
+    const emitMarked = orderRegions.filter(
+      (r) =>
+        r.construct === "Orders.Order.confirm" &&
+        r.targetCol !== undefined &&
+        r.target[0] === emitLine,
+    );
+    expect(emitMarked.length).toBeGreaterThan(0);
+    const emitLineText = orderContent.split("\n")[emitLine - 1]!;
+    const idCol0 = emitLineText.indexOf("this._id");
+    expect(idCol0).toBeGreaterThanOrEqual(0);
+    const idRegion = emitMarked.find(
+      (r) => r.targetCol![0] === idCol0 + 1 && r.targetCol![1] === idCol0 + 1 + "this._id".length,
+    );
+    expect(
+      idRegion,
+      "expected a targetCol region anchored on the emit field's `this._id`",
+    ).toBeDefined();
+
+    // (b) the precondition predicate: `price > 0` renders as
+    // `if (!(this._price > 0)) throw ...`.
+    const productPath = Object.keys(map.files).find(
+      (p) => p.startsWith(`${SLUG_FOR.node}/`) && p.endsWith("domain/product.ts"),
+    )!;
+    const productContent = files.get(productPath)!;
+    const productRegions = map.files[productPath]!;
+    const preLine =
+      productContent.split("\n").findIndex((l) => l.includes("Precondition failed")) + 1;
+    expect(preLine).toBeGreaterThan(0);
+    const preMarked = productRegions.filter(
+      (r) =>
+        r.construct === "Orders.Product.discontinue" &&
+        r.targetCol !== undefined &&
+        r.target[0] === preLine,
+    );
+    expect(preMarked.length).toBeGreaterThan(0);
+    const preLineText = productContent.split("\n")[preLine - 1]!;
+    const wholePredCol0 = preLineText.indexOf("this._price > 0");
+    expect(wholePredCol0).toBeGreaterThanOrEqual(0);
+    const predRegion = preMarked.find(
+      (r) =>
+        r.targetCol![0] === wholePredCol0 + 1 &&
+        r.targetCol![1] === wholePredCol0 + 1 + "this._price > 0".length,
+    );
+    expect(
+      predRegion,
+      "expected a targetCol region anchored on the precondition's whole predicate `this._price > 0`",
+    ).toBeDefined();
+  });
+
   it("every recorded region resolves to a real source span and a sane target range", async () => {
     const model = await parseValid(SOURCE);
     const files = generateSystems(model, { sourcemap: true }).files;
@@ -528,7 +611,18 @@ describe(".loom/sourcemap.json", () => {
     if (wholeFile) {
       expect(regions.length).toBeGreaterThan(stmtRegions.length);
     } else {
-      expect(regions).toHaveLength(stmtRegions.length);
+      // The pooled elixir context file also carries OTHER aggregates' own
+      // op regions now — Product.discontinue grew a real precondition
+      // statement in M17 phase 7 slice 4 (added so the widened
+      // `statementExprMarks` has a predicate to anchor a targetCol mark on,
+      // sourcemap.test.ts's own "targetCol on a precondition" case), so
+      // "this op's regions are the file's ONLY regions" no longer holds —
+      // the invariant that DOES still hold, and is what `wholeFile: false`
+      // is actually pinning, is "no stray WHOLE-FILE (construct-less)
+      // region exists" (a pooled elixir file has no single honest
+      // whole-file origin — see the class comment above).
+      expect(regions.every((r) => r.construct !== undefined)).toBe(true);
+      expect(regions.length).toBeGreaterThanOrEqual(stmtRegions.length);
     }
 
     // (b) within the file's line range, non-overlapping, monotonically

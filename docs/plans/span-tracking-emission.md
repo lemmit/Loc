@@ -122,11 +122,16 @@ flag-off path.
   single segment at column 0 (`narrowestRegion`'s existing tie-break),
   untouched.
 
-## 4. Prototype scope — TS/Hono only, `let`/`assign`/`return` RHS only
+## 4. Prototype scope — TS/Hono only, `let`/`assign`/`return` RHS only (SHIPPED — widened in slice 4)
 
-Full statement-shape coverage is out of scope this slice (mirrors the
-.NET `#line` weave's own narrowing from phase 6a — see
-`narrowedOrigin`/M7). The marks-carrying path:
+Full statement-shape coverage was out of scope THIS (slice 2) prototype
+(mirrors the .NET `#line` weave's own narrowing from phase 6a — see
+`narrowedOrigin`/M7); **M17 phase 7 slice 4 widened it** to every
+expression-bearing `StmtIR` kind — `precondition`/`requires` predicates,
+`add`/`remove` values, bare `expression` statements, `call` args, and
+`emit` field values, alongside the original `let`/`assign`/`return` — still
+TS/Hono only (see §6). The marks-carrying path (as it stood at slice 2;
+still accurate, just fanned across more `StmtIR` kinds now):
 
 - `src/generator/typescript/render-expr.ts` exports
   `renderTsExprWithMarks` — a thin sibling of `renderTsExpr` that runs the
@@ -206,6 +211,18 @@ without requiring any re-anchoring machinery.
   it to the exact generated statement AND sub-expression, rather than just
   "somewhere on this generated line" — the missing piece phase 8 needs
   that this slice supplies for TS/Hono.
-- **Statement kinds beyond `let`/`assign`/`return`**: `precondition`,
-  `requires`, `emit` field values, `add`/`remove` — same shape, deferred
-  to keep this slice's diff reviewable.
+- **Statement kinds beyond `let`/`assign`/`return`** (SHIPPED, M17 phase 7
+  slice 4): `markableExprsOf` in `src/generator/typescript/render-stmt.ts`
+  now covers `precondition`/`requires` predicates, `add`/`remove` values,
+  bare `expression` statements, `call` args, and `emit` field values —
+  same anchoring shape, each expr anchored independently of its siblings.
+  The biggest payoff is `precondition`/`requires`: those are the actual
+  THROW sites a Node stack frame points at on a failed invariant, so `ddd
+  trace` (slice 3) now resolves a thrown precondition to the exact
+  predicate text, not just the statement's line.
+- **Other four backends remain deliberately deferred** (scout-confirmed,
+  M17 phase 7 slice 4): .NET, Phoenix/Elixir, Python, and Java have no
+  live consumer of a generated column today (no `#line`-style per-column
+  weave reads one, and `ddd trace`'s column-aware resolution is
+  Node/V8-frame-specific) — fanning `statementExprMarks` out to them has
+  no payoff yet, so it stays scoped to TS/Hono until a consumer exists.
