@@ -41,6 +41,7 @@ import {
   checkDuplicateNames,
   checkExpectMatcher,
   checkGenericCarriers,
+  checkImageAltText,
   checkInheritance,
   checkLayout,
   checkLegacyConstructorCalls,
@@ -174,6 +175,10 @@ export class DddValidator {
     // A bindable input (`Field`/`Toggle`/…) wires to page state via `bind:`;
     // `value:` is silently ignored by the walker — warn and suggest `bind:`.
     guard("bindable-input-args", model, () => checkBindableInputArgs(model, accept));
+    // Accessibility: an `Image`/`Avatar` rendering an image needs a text
+    // alternative (`alt:` or `decorative: true`).  Alt text is human content
+    // Loom can't derive — a missing alt fails WCAG 1.1.1 (accessibility.md).
+    guard("a11y-missing-alt", model, () => checkImageAltText(model, accept));
     // Project composition: a top-level `subdomain` (declared outside any
     // `system { }`) folds into the project's single system — enforce that
     // exactly one system exists across the import graph.  See
