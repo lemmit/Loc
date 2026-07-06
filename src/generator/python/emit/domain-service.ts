@@ -136,9 +136,23 @@ function renderService(svc: DomainServiceIR, ctx: BoundedContextIR): string {
     "",
     exprImports.has("math") ? "import math" : null,
     exprImports.has("re") ? "import re" : null,
-    usesDatetime ? "from datetime import UTC, datetime" : null,
+    usesDatetime || exprImports.has("timedelta")
+      ? `from datetime import ${[
+          ...(usesDatetime ? ["UTC", "datetime"] : []),
+          ...(exprImports.has("timedelta") ? ["timedelta"] : []),
+        ].join(", ")}`
+      : null,
     usesDecimal ? "from decimal import Decimal" : null,
-    exprImports.has("math") || exprImports.has("re") || usesDatetime || usesDecimal ? "" : null,
+    // A5 temporal — `datetime ± months(n)` via dateutil (conditional dep).
+    exprImports.has("relativedelta") ? "from dateutil.relativedelta import relativedelta" : null,
+    exprImports.has("math") ||
+      exprImports.has("re") ||
+      exprImports.has("timedelta") ||
+      exprImports.has("relativedelta") ||
+      usesDatetime ||
+      usesDecimal
+      ? ""
+      : null,
     errorNames.length > 0 ? `from app.domain.errors import ${errorNames.join(", ")}` : null,
     idImports.length > 0 ? `from app.domain.ids import ${idImports.join(", ")}` : null,
     voEnumNames.length > 0

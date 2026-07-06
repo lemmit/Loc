@@ -69,9 +69,16 @@ export function renderPyEnumsAndValueObjects(ctx: BoundedContextIR): string {
     exprImports.has("math") ? "import math" : null,
     exprImports.has("re") ? "import re" : null,
     ctx.valueObjects.length > 0 ? "from dataclasses import dataclass" : null,
-    usesDatetime ? "from datetime import UTC, datetime" : null,
+    usesDatetime || exprImports.has("timedelta")
+      ? `from datetime import ${[
+          ...(usesDatetime ? ["UTC", "datetime"] : []),
+          ...(exprImports.has("timedelta") ? ["timedelta"] : []),
+        ].join(", ")}`
+      : null,
     usesDecimal ? "from decimal import Decimal" : null,
     ctx.enums.length > 0 ? "from enum import StrEnum" : null,
+    // A5 temporal — `datetime ± months(n)` via dateutil (conditional dep).
+    exprImports.has("relativedelta") ? "from dateutil.relativedelta import relativedelta" : null,
     hasInvariants ? "" : null,
     hasInvariants ? "from app.domain.errors import DomainError" : null,
     idNames.length > 0

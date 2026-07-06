@@ -12,7 +12,7 @@ import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { responsePyType } from "./emit/http-models.js";
 import { lowerWorkflowFilterToSqlAlchemy, type PyPredicate } from "./find-predicate.js";
-import { wireHelperImport } from "./py-type-imports.js";
+import { dtImportLine, wireHelperImport } from "./py-type-imports.js";
 import { collectPyExprImports, renderPyExpr } from "./render-expr.js";
 import { esFns } from "./workflow-eventsourced-emit.js";
 import { instanceFieldValue } from "./workflows-builder.js";
@@ -147,7 +147,12 @@ export function buildPyViewsFile(
     "",
     needsMath ? "import math" : null,
     needsRe ? "import re" : null,
-    needsMath || needsRe ? "" : null,
+    // A5 temporal — a view filter can bind `datetime.now(UTC)` (value-side
+    // `now()`) or reach for `timedelta` (ES in-memory filters); months
+    // shifts add dateutil's relativedelta (conditional dep).
+    dtImportLine(refersTo),
+    needsMath || needsRe || dtImportLine(refersTo) != null ? "" : null,
+    refersTo("relativedelta") ? "from dateutil.relativedelta import relativedelta" : null,
     `from fastapi import APIRouter, Depends${anyGateUsesUser ? ", Request" : ""}`,
     models.length > 0 || wfModels.length > 0 ? "from pydantic import BaseModel, RootModel" : null,
     saOps.size > 0 ? `from sqlalchemy import ${[...saOps].sort().join(", ")}` : null,

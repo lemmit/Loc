@@ -17,7 +17,7 @@ import {
   lowerToSqlAlchemy,
 } from "./find-predicate.js";
 import { rowClassName } from "./py-columns.js";
-import { wireHelperImport } from "./py-type-imports.js";
+import { dtImportLine, wireHelperImport } from "./py-type-imports.js";
 import { renderPyExpr, renderPyType } from "./render-expr.js";
 import {
   authUserImport,
@@ -167,11 +167,16 @@ export function buildPyDocumentRepositoryFile(
     `"""${agg.name} document repository (shape(document)).  Auto-generated."""`,
     "",
     refersTo("math") ? "import math" : null,
-    refersTo("datetime") ? "from datetime import datetime" : null,
+    // In-app filters render domain expressions (A5 temporal included), so
+    // `UTC` (`now()`) and `timedelta` (absolute durations) ride in on use.
+    dtImportLine(refersTo),
     refersTo("Decimal") ? "from decimal import Decimal" : null,
-    refersTo("math") || refersTo("datetime") || refersTo("Decimal") ? "" : null,
+    refersTo("math") || refersTo("datetime") || refersTo("timedelta") || refersTo("Decimal")
+      ? ""
+      : null,
     refersTo("cast") ? "from typing import cast" : null,
     "",
+    refersTo("relativedelta") ? "from dateutil.relativedelta import relativedelta" : null,
     "from sqlalchemy import select",
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "",

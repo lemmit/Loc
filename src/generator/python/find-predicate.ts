@@ -7,6 +7,7 @@ import {
   type WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { tableOwnerName } from "../../ir/util/inheritance.js";
+import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
   deepScopeAnchorClaim,
@@ -16,6 +17,7 @@ import {
 } from "../../ir/util/tenant-stance.js";
 import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { snake } from "../../util/naming.js";
+import type { DurationUnit } from "../../util/temporal.js";
 import { joinRowClassName, rowClassName } from "./py-columns.js";
 import { PY_INTRINSIC_RENDERERS, renderPyExpr } from "./render-expr.js";
 
@@ -123,6 +125,21 @@ function lowerOver(
   return { expr, ops };
 }
 
+/** Positional-argument prefix per duration unit for Postgres
+ *  `make_interval(years, months, weeks, days, hours, mins, secs)` —
+ *  SQLAlchemy's generic `func.` has no named-argument spelling, so the
+ *  amount lands positionally after the right number of zeros (A5
+ *  temporal).  `months` is calendar-correct here: `timestamptz +
+ *  make_interval(0, 1)` does native calendar arithmetic, so the SQL side
+ *  needs no `relativedelta`-style special case.  The mirror of node's
+ *  `MAKE_INTERVAL_ARG`. */
+const MAKE_INTERVAL_ZEROS: Record<DurationUnit, number> = {
+  months: 1,
+  days: 3,
+  hours: 4,
+  minutes: 5,
+};
+
 function lower(
   e: ExprIR,
   row: string,
@@ -132,6 +149,20 @@ function lower(
 ): string | null {
   switch (e.kind) {
     case "binary": {
+      // A5 temporal — `datetime ± days/hours/minutes/months(n)` renders as
+      // SQL interval arithmetic (`side ± make_interval(…, n)`), composing on
+      // EITHER side of a comparison: a column stands as-is, a host value
+      // (param / `now()`) wraps in `literal(...)` so the `±` dispatches
+      // through SQLAlchemy (parameter-bound), and the amount likewise binds
+      // (param / literal) or interpolates (column).  Only the DIRECT
+      // constructor operand form lowers (paren-transparent) — mirroring
+      // exactly what `firstNonQueryableNode` admits.  Loom
+      // `datetime - datetime` in where-position is NOT lowered — the gate
+      // rejects it, so no arm is needed here.
+      if (e.op === "+" || e.op === "-") {
+        const temporal = renderTemporalArith(e, row, associations, ops, principalAccessor);
+        if (temporal != null) return temporal;
+      }
       const l = lower(e.left, row, associations, ops, principalAccessor);
       const r = lower(e.right, row, associations, ops, principalAccessor);
       if (l == null || r == null) return null;
@@ -252,6 +283,48 @@ function lower(
     default:
       return null;
   }
+}
+
+/** A5 temporal — `datetime ± days/hours/minutes/months(n)` as a SQLAlchemy
+ *  column expression: `(side ± func.make_interval(…, amount))`.  The
+ *  positional zeros place the amount in the unit's `make_interval` slot; the
+ *  amount is parameter-bound when it's a param/literal and interpolates when
+ *  it's a column, exactly like any other lowered operand.  The datetime side
+ *  is the lowered column expression when column-rooted (or itself a nested
+ *  temporal fragment), else a host value wrapped in `literal(...)` so the
+ *  native `±` dispatches through SQLAlchemy's operator overloads with the
+ *  value bound as a parameter (`literal(q) + make_interval(0, 0, 0, 2)`).
+ *  Returns null for every non-temporal shape (the caller falls through).
+ *  The SQLAlchemy mirror of node's `renderTemporalArith`. */
+function renderTemporalArith(
+  e: ExprIR,
+  row: string,
+  associations: AssociationIR[],
+  ops: Set<string>,
+  principalAccessor: string,
+): string | null {
+  if (e.kind === "paren")
+    return renderTemporalArith(e.inner, row, associations, ops, principalAccessor);
+  if (e.kind !== "binary" || (e.op !== "+" && e.op !== "-")) return null;
+  const rightDur = durationCtorOperand(e.right);
+  const leftDur = e.op === "+" ? durationCtorOperand(e.left) : null;
+  const dur = rightDur ?? leftDur;
+  const other = rightDur ? e.left : leftDur ? e.right : null;
+  if (!dur || !other || durationCtorOperand(other)) return null;
+  // The datetime side: a nested temporal fragment / column lowers as-is;
+  // a host value (param, `now()`) wraps in `literal(...)`.
+  const nested = renderTemporalArith(other, row, associations, ops, principalAccessor);
+  let side = nested ?? lower(other, row, associations, ops, principalAccessor);
+  if (side == null) return null;
+  if (nested == null && !isColumnRooted(other)) {
+    ops.add("literal");
+    side = `literal(${side})`;
+  }
+  const amount = lower(dur.amount, row, associations, ops, principalAccessor);
+  if (amount == null) return null;
+  ops.add("func");
+  const zeros = "0, ".repeat(MAKE_INTERVAL_ZEROS[dur.unit]);
+  return `(${side} ${e.op} func.make_interval(${zeros}${amount}))`;
 }
 
 /** True when the expression reads a `this`-rooted column — directly

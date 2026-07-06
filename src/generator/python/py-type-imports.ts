@@ -15,6 +15,15 @@ export function wireHelperImport(refersTo: (n: string) => boolean): string | nul
   return names.length > 0 ? `from app.db.wire import ${names.join(", ")}` : null;
 }
 
+/** The `from datetime import …` line for a body-scan `refersTo` predicate —
+ *  `UTC` (a `now()` bind renders `datetime.now(UTC)`), `datetime`, and
+ *  `timedelta` (A5 temporal — absolute durations) — or null when the body
+ *  references none of them. */
+export function dtImportLine(refersTo: (n: string) => boolean): string | null {
+  const names = ["UTC", "datetime", "timedelta"].filter(refersTo);
+  return names.length > 0 ? `from datetime import ${names.join(", ")}` : null;
+}
+
 export interface PyTypeImports {
   usesDecimal: boolean;
   usesDatetime: boolean;
