@@ -42,10 +42,120 @@ export const SPRINGDOC_VERSION = "3.0.3";
  *  backend doesn't pull), so a version-less coordinate fails to resolve. */
 export const NIMBUS_JOSE_JWT_VERSION = "10.3";
 
+/** ASM — the bytecode library the emitted `injectSmap` Gradle task (below)
+ *  uses to attach a `.smap` sidecar as a compiled class's
+ *  `SourceDebugExtension` attribute (JSR-45, M10 phase 6b).  Only pulled
+ *  onto the BUILDSCRIPT classpath — the build script itself imports
+ *  `org.objectweb.asm.*` to define the task — never onto the generated
+ *  app's own runtime classpath. */
+export const ASM_VERSION = "9.7.1";
+
+/** Marker comments fencing the `--sourcemap` additions to `build.gradle.kts`
+ *  (M10 phase 6b) so the byte-identical gate (test/system/sourcemap.test.ts)
+ *  can strip them cleanly with one regex, leaving the flag-off file exactly
+ *  as if they were never there. */
+const SOURCEMAP_FENCE_BEGIN = "// loom:sourcemap-begin";
+const SOURCEMAP_FENCE_END = "// loom:sourcemap-end";
+
+/** `buildscript {}` block supplying ASM's classpath to the build SCRIPT
+ *  ITSELF (the task below imports `org.objectweb.asm.*` directly).  In
+ *  Gradle's Kotlin DSL, `plugins {}` is extracted and applied before the
+ *  rest of the script compiles, so nothing but a leading `buildscript {}`
+ *  may sit above it — this is why the block is emitted at the very TOP of
+ *  the file rather than alongside `dependencies {}` further down (that
+ *  block only affects the generated APP's classpath, not the script's
+ *  own). */
+const SOURCEMAP_BUILDSCRIPT_BLOCK: string[] = [
+  SOURCEMAP_FENCE_BEGIN,
+  `buildscript {`,
+  `    repositories {`,
+  `        mavenCentral()`,
+  `    }`,
+  `    dependencies {`,
+  `        classpath("org.ow2.asm:asm:${ASM_VERSION}")`,
+  `    }`,
+  `}`,
+  SOURCEMAP_FENCE_END,
+  ``,
+];
+
+/** The `injectSmap` task registration + task-graph wiring.  Walks every
+ *  `src/main/java/**\/*.smap` sidecar `compileJava` leaves behind (the java
+ *  backend co-emits each `.smap` next to its `.java` source — see
+ *  `src/system/index.ts`'s `--sourcemap` loop), locates the matching
+ *  compiled class(es) (`X.class` and any inner/lambda `X$*.class`) under
+ *  `build/classes/java/main/<same package dir>/`, and re-writes each via
+ *  ASM `ClassReader`/`ClassWriter` with a `visitSource` override supplying
+ *  the SMAP text as the `debug` argument — ASM attaches that as the
+ *  class's `SourceDebugExtension` attribute (the same mechanism the
+ *  JSP/Kotlin compilers use).  A class that already carries one (its
+ *  `debug` argument arrives non-null, parsed off the existing attribute by
+ *  `ClassReader` itself) is passed through unchanged rather than
+ *  double-injected.
+ *
+ *  Wiring: `compileJava` `finalizedBy` `injectSmap` schedules it right
+ *  after compilation; `jar` / `bootJar` / `testClasses` each `dependsOn`
+ *  it so packaging always sees the patched classes regardless of which
+ *  entry point invoked the build. */
+const SOURCEMAP_TASK_BLOCK: string[] = [
+  SOURCEMAP_FENCE_BEGIN,
+  `tasks.register("injectSmap") {`,
+  `    group = "build"`,
+  `    description = "Attaches emitted .smap sidecars (JSR-45) to their compiled classes' SourceDebugExtension attribute."`,
+  `    doLast {`,
+  `        val srcRoot = file("src/main/java")`,
+  `        val classesRoot = file("build/classes/java/main")`,
+  `        fileTree(srcRoot) { include("**/*.smap") }.forEach { smapFile ->`,
+  `            val smapText = smapFile.readText()`,
+  `            val relDir = smapFile.parentFile.relativeTo(srcRoot)`,
+  `            val classesDir = classesRoot.resolve(relDir)`,
+  `            if (!classesDir.isDirectory) return@forEach`,
+  `            val baseName = smapFile.name.removeSuffix(".smap").removeSuffix(".java")`,
+  `            val classFiles = classesDir.listFiles { f ->`,
+  `                f.name == "$baseName.class" || f.name.startsWith("$baseName$")`,
+  `            } ?: emptyArray()`,
+  `            classFiles.forEach { classFile ->`,
+  `                val reader = org.objectweb.asm.ClassReader(classFile.readBytes())`,
+  `                val writer = org.objectweb.asm.ClassWriter(0)`,
+  `                val visitor = object : org.objectweb.asm.ClassVisitor(org.objectweb.asm.Opcodes.ASM9, writer) {`,
+  `                    override fun visitSource(source: String?, debug: String?) {`,
+  `                        // Already-patched classes surface their existing`,
+  `                        // SourceDebugExtension as \`debug\` here (ASM parses`,
+  `                        // it off the class file) — pass it through`,
+  `                        // unchanged rather than double-inject.`,
+  `                        super.visitSource(source, debug ?: smapText)`,
+  `                    }`,
+  `                }`,
+  `                reader.accept(visitor, 0)`,
+  `                classFile.writeBytes(writer.toByteArray())`,
+  `            }`,
+  `        }`,
+  `    }`,
+  `}`,
+  ``,
+  `tasks.named("compileJava") { finalizedBy("injectSmap") }`,
+  `tasks.named("jar") { dependsOn("injectSmap") }`,
+  `tasks.named("bootJar") { dependsOn("injectSmap") }`,
+  `tasks.named("testClasses") { dependsOn("injectSmap") }`,
+  SOURCEMAP_FENCE_END,
+  ``,
+];
+
 export function renderGradleBuild(
-  options: { flyway?: boolean; oidc?: boolean; extraDeps?: Record<string, string> } = {},
+  options: {
+    flyway?: boolean;
+    oidc?: boolean;
+    extraDeps?: Record<string, string>;
+    /** `--sourcemap` — gated on the SourceMapRecorder's PRESENCE alone (the
+     *  java generator never threads `sourceTexts` — see
+     *  `generateJavaForContexts`).  Appends the `injectSmap` task (M10
+     *  phase 6b); flag-off output stays byte-identical (no fenced block
+     *  emitted at all). */
+    sourcemap?: boolean;
+  } = {},
 ): string {
   return lines(
+    options.sourcemap ? SOURCEMAP_BUILDSCRIPT_BLOCK : null,
     `plugins {`,
     `    java`,
     `    id("org.springframework.boot") version "${SPRING_BOOT_VERSION}"`,
@@ -103,6 +213,7 @@ export function renderGradleBuild(
     `    useJUnitPlatform()`,
     `}`,
     ``,
+    options.sourcemap ? SOURCEMAP_TASK_BLOCK : null,
   );
 }
 
