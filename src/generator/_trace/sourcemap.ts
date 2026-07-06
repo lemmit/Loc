@@ -67,8 +67,13 @@ export function statementSubRegions(
 }
 
 /** Number of 1-based lines `content` spans.  A trailing `"\n"` doesn't
- *  count as an extra (empty) final line. */
-function lineCount(content: string): number {
+ *  count as an extra (empty) final line.  Exported for the callers that
+ *  build a single-subregion `fragment()` call per statement (rather than
+ *  the cursor-walked `statementSubRegions` — the elixir workflow/reactor
+ *  bodies, whose bucketing REORDERS statements relative to source order, so
+ *  the single-fragment relative-cursor shape doesn't apply; see M13,
+ *  docs/plans/source-map-and-debugging.md). */
+export function lineCount(content: string): number {
   const parts = content.split("\n");
   const n = content.endsWith("\n") ? parts.length - 1 : parts.length;
   return Math.max(1, n);

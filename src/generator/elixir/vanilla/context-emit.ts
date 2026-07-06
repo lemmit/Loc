@@ -580,7 +580,16 @@ function renderNamedOpFunction(
   // persists, so the `{:ok, saved}` seam always exists.
   const emits = opEmitsEvent(op);
   const hasDispatcher = contextHasDispatcher(ctx as EnrichedBoundedContextIR);
-  const dispatchLines = emits ? renderEmitDispatchLines(op, rc, hasDispatcher, "        ") : [];
+  const dispatchLines = emits
+    ? renderEmitDispatchLines(
+        op,
+        rc,
+        hasDispatcher,
+        "        ",
+        `${ctx.name}.${agg.name}.${op.name}`,
+        opFragments,
+      )
+    : [];
 
   // Render the body (guards / assigns / let) — shared with the returning-op
   // path; a non-returning body never carries a `return` arm.  The statement index

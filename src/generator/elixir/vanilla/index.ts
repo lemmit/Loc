@@ -192,8 +192,8 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // fold struct + `<wf>_events` Ecto schema + fold + stream IO modules (the
     // saga analogue of the ES aggregate files above).  The dispatcher branches
     // their handlers to fold-on-load + append-own-events.
-    emitVanillaEsWorkflowFiles(appName, appModule, ctx, out, wfSchema);
-    emitDispatch(appName, ctx, appModule, out, sys, "vanilla");
+    emitVanillaEsWorkflowFiles(appName, appModule, ctx, out, wfSchema, sourcemap);
+    emitDispatch(appName, ctx, appModule, out, sys, "vanilla", sourcemap);
     // Domain `test "..."` blocks → ExUnit (pure-subset; see tests-emit.ts).
     if (emitAggregateTests(ctx, appModule, "vanilla", out)) hasDomainTests = true;
   }

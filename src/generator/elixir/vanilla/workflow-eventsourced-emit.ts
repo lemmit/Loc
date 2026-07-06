@@ -27,8 +27,10 @@ import type {
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../../ir/types/loom-ir.js";
+import type { OriginRef } from "../../../ir/types/origin.js";
 import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
+import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 
 /** Event-sourced workflows in a context. */
@@ -282,6 +284,11 @@ export function emitVanillaEsWorkflowFiles(
   /** The workflows' owning-context schema for the ES `<Wf>EventLog`
    *  `@schema_prefix`; undefined ⇒ unqualified. */
   schema?: string,
+  /** Source-map Milestone 13 collector (`--sourcemap`).  Each of these four
+   *  derived-machinery files is single-workflow-attributable — a whole-file
+   *  `wf.origin` region only (no statement-granular fragments; there is no
+   *  per-statement rendering here to anchor against). */
+  sourcemap?: SourceMapRecorder,
 ): void {
   const ctxSnake = snake(ctx.name);
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
@@ -291,13 +298,17 @@ export function emitVanillaEsWorkflowFiles(
     const wfSnake = snake(wf.name);
     const eventNames = [...new Set((wf.appliers ?? []).map((a) => a.event))];
     const events = eventNames.map((n) => eventsByName.get(n)).filter((e): e is EventIR => !!e);
-    out.set(`${base}/${wfSnake}_state.ex`, renderStateStruct(contextModule, wf));
-    out.set(`${base}/${wfSnake}_event_log.ex`, renderEventLogSchema(contextModule, wf, schema));
-    out.set(`${base}/${wfSnake}_fold.ex`, renderFoldModule(contextModule, wf));
-    out.set(
-      `${base}/${wfSnake}_stream.ex`,
-      renderStreamModule(appModule, contextModule, wf, events),
-    );
+    const construct = `${ctx.name}.${wf.name}`;
+    const files: [string, string][] = [
+      [`${base}/${wfSnake}_state.ex`, renderStateStruct(contextModule, wf)],
+      [`${base}/${wfSnake}_event_log.ex`, renderEventLogSchema(contextModule, wf, schema)],
+      [`${base}/${wfSnake}_fold.ex`, renderFoldModule(contextModule, wf)],
+      [`${base}/${wfSnake}_stream.ex`, renderStreamModule(appModule, contextModule, wf, events)],
+    ];
+    for (const [path, content] of files) {
+      out.set(path, content);
+      sourcemap?.file(path, content, wf.origin, construct);
+    }
   }
 }
 
@@ -351,8 +362,20 @@ function bodyUsesState(statements: WorkflowStmtIR[]): boolean {
 /** Render an ES workflow handler module: fold-on-load, run the emit-only body
  *  against the folded snapshot, append the workflow's own events gap-free, then
  *  re-publish for choreography.  `emit` collects into the appended-then-
- *  dispatched `events` list (unlike the state path's inline re-dispatch). */
-export function renderEsWorkflowHandler(contextModule: string, sub: EsSub): string {
+ *  dispatched `events` list (unlike the state path's inline re-dispatch).
+ *
+ *  Returns the module content plus M13's per-statement `fragment()` anchors
+ *  (see `HandlerResult` in `dispatch-emit.ts`, whose shape this matches
+ *  structurally so the caller handles both without a per-path branch).  Each
+ *  anchor is the statement's OWN rendered text — guards/lets/emits are all
+ *  bucketed BEFORE assembly (never split), and the re-indent replays below
+ *  (`.replace(/^/gm, "  ")`) only insert whitespace at physical line starts,
+ *  never touch a statement's interior text, so the un-prefixed anchor stays
+ *  a valid substring regardless of which branch embeds it. */
+export function renderEsWorkflowHandler(
+  contextModule: string,
+  sub: EsSub,
+): { content: string; regions: { text: string; origin: OriginRef | undefined }[] } {
   const wf = sub.workflow;
   // contextModule is `<appModule>.<Context>`; strip the context segment for the
   // RequestContext module path.
@@ -377,22 +400,36 @@ export function renderEsWorkflowHandler(contextModule: string, sub: EsSub): stri
   const guards: string[] = [];
   const lets: string[] = [];
   const emits: string[] = [];
+  // M13 — one region per rendered statement, keyed to that statement's OWN
+  // text (never the padded/joined `lets`/`withClauses` string it lands in).
+  const regions: { text: string; origin: OriginRef | undefined }[] = [];
   for (const st of sub.statements) {
     switch (st.kind) {
-      case "precondition":
-        guards.push(`:ok <- ensure(${renderExpr(st.expr, renderCtx)}, :precondition_failed)`);
+      case "precondition": {
+        const text = `:ok <- ensure(${renderExpr(st.expr, renderCtx)}, :precondition_failed)`;
+        guards.push(text);
+        regions.push({ text, origin: st.origin });
         break;
-      case "requires":
-        guards.push(`:ok <- ensure(${renderExpr(st.expr, renderCtx)}, :forbidden)`);
+      }
+      case "requires": {
+        const text = `:ok <- ensure(${renderExpr(st.expr, renderCtx)}, :forbidden)`;
+        guards.push(text);
+        regions.push({ text, origin: st.origin });
         break;
-      case "expr-let":
-        lets.push(`      ${snake(st.name)} = ${renderExpr(st.expr, renderCtx)}`);
+      }
+      case "expr-let": {
+        const text = `${snake(st.name)} = ${renderExpr(st.expr, renderCtx)}`;
+        lets.push(`      ${text}`);
+        regions.push({ text, origin: st.origin });
         break;
+      }
       case "emit": {
         const fields = st.fields
           .map((f) => `${snake(f.name)}: ${renderExpr(f.value, renderCtx)}`)
           .join(", ");
-        emits.push(`%${contextModule}.Events.${upperFirst(st.eventName)}{${fields}}`);
+        const text = `%${contextModule}.Events.${upperFirst(st.eventName)}{${fields}}`;
+        emits.push(text);
+        regions.push({ text, origin: st.origin });
         break;
       }
       default:
@@ -476,7 +513,7 @@ ${letBlock}${withBlock}`;
   }
 
   const requireLogger = sub.trigger === "on" || guardStreamExists ? "  require Logger\n\n" : "";
-  return `# Auto-generated.
+  const content = `# Auto-generated.
 defmodule ${handlerMod} do
   @moduledoc "${sub.trigger === "on" ? "Reactor" : "Starter"} for ${upperFirst(sub.event)} → ${upperFirst(wf.name)} (event-sourced)."
 
@@ -489,4 +526,5 @@ ${inner}
   end
 ${ensureHelper}end
 `;
+  return { content, regions };
 }
