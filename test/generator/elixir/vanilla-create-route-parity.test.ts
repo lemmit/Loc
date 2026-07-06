@@ -80,6 +80,19 @@ describe("vanilla create-route ⟺ OpenAPI parity", () => {
     expect(router).toContain('post "/orders", OrderController, :create');
   });
 
+  it("the plain list index returns a BARE array, not an {items} envelope", async () => {
+    // A non-paged `findAll` list must serialise as a bare array — the
+    // cross-backend contract (node/python/java/dotnet + the OpenAPI
+    // `type: array` spec all use bare arrays; only `paged<T>` finds carry the
+    // `{items, page, …}` envelope).  The index action used to wrap in
+    // `%{items: …}`, which breaks every generated frontend's API client and the
+    // shared isolation harness's `list.map`.
+    const files = await generateSystemFiles(BARE);
+    const ctrl = file(files, "/order_controller.ex");
+    expect(ctrl).toContain("json(conn, Enum.map(records, &serialize/1))");
+    expect(ctrl).not.toContain("json(conn, %{items: Enum.map(records");
+  });
+
   it("documents the create in the OpenAPI spec for the same bare aggregate", async () => {
     const files = await generateSystemFiles(BARE);
     const specKey = [...files.keys()].find((k) => k.endsWith("_spec.ex") && k.includes("/api/"));

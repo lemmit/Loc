@@ -155,7 +155,11 @@ describe.skipIf(!ENABLED)(
           ["-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", String(appPort)],
           {
             cwd: proj,
-            env: { ...process.env, DATABASE_URL: pgUrl, PORT: String(appPort) },
+            // LOG_LEVEL=debug surfaces the /health probe's debug-level
+            // `health_ok` line (the backend defaults to `info`, which filters
+            // it — same knob the node obs test sets); without it the
+            // `health_ok` assertion below can never see the event.
+            env: { ...process.env, DATABASE_URL: pgUrl, PORT: String(appPort), LOG_LEVEL: "debug" },
             stdio: ["ignore", "pipe", "pipe"],
             detached: true,
           },

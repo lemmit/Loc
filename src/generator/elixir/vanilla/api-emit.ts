@@ -476,7 +476,7 @@ defmodule ${appModule}Web.${aggPascal}Controller do
 
   def index(conn, _params) do
 ${cuBind}    with {:ok, records} <- ${ctxModule}.list_${aggSnake}s(${listArg}) do
-      json(conn, %{items: Enum.map(records, &serialize/1)})
+      json(conn, Enum.map(records, &serialize/1))
     end
   end
 
