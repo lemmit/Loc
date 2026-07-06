@@ -75,7 +75,7 @@ describe("hono capability-filter support guard", () => {
   it("accepts a principal filter on elixir-vanilla (DEBT-01 — threaded current_user + pinned predicate)", async () => {
     expect(
       await honoFilterErrors(
-        sys("elixir { foundation: vanilla }", {
+        sys("elixir", {
           filter: "filter this.tenantId == currentUser.tenantId",
         }),
       ),

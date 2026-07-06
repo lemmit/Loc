@@ -51,7 +51,7 @@ system TenancyShop {
 
   api LedgerApi from Core
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Ledger]
     serves: LedgerApi
     dataSources: [ledgerState]

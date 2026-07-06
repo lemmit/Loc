@@ -34,7 +34,7 @@ system Gatekeeper {
   }
 
   deployable phoenixApp {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Work]
     dataSources: [jobState]
     serves: OpsApi

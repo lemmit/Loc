@@ -21,7 +21,7 @@ system Bank {
   storage primary { type: postgres }
   resource peopleState { for: People, kind: state, use: primary }
   deployable elixirApi {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [People]
     dataSources: [peopleState]
     serves: PeopleApi

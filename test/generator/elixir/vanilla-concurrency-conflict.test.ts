@@ -29,7 +29,7 @@ system Shop {
   storage primary { type: postgres }
   resource ordState { for: Ordering, kind: state, use: primary }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Ordering]
     dataSources: [ordState]
     serves: SalesApi

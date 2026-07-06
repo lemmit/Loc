@@ -35,7 +35,7 @@ system L {
   storage pg { type: postgres }
   resource acctlog { for: Accounts, kind: eventLog, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Accounts]
     dataSources: [acctlog]
     serves: A

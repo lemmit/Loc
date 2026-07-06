@@ -43,7 +43,7 @@ system MultiCtxWf {
   resource ordersState { for: Orders, kind: state, use: pg }
   resource shipmentsState { for: Shipments, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Orders, Shipments]
     dataSources: [ordersState, shipmentsState]
     serves: SalesApi, DeliveryApi

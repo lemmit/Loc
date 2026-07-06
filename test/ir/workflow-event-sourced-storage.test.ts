@@ -35,10 +35,9 @@ async function diagnose(src: string) {
   return validateLoomModel(enrichLoomModel(lowerModel(model)));
 }
 
-// Vanilla variant — `platform: elixir { foundation: vanilla }` (the only elixir
+// Vanilla variant — `platform: elixir` (the only elixir
 // foundation that hosts pure ES, D-VANILLA-ES-HOME).
-const mkVanilla = (eventSourced: boolean): string =>
-  mk("elixir { foundation: vanilla }", eventSourced);
+const mkVanilla = (eventSourced: boolean): string => mk("elixir", eventSourced);
 
 describe("event-sourced workflow storage gate", () => {
   // The Hono (node) + .NET (dotnet) + Python (FastAPI) + Java (Spring) backends

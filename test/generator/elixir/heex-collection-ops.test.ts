@@ -32,7 +32,7 @@ const phoenixSystem = (uiBody: string): string => `
       page Landing { route: "/" body: ${uiBody} }
     }
     deployable phoenixApp {
-      platform: elixir { foundation: vanilla }, contexts: [C], serves: DemoApi, ui: DemoUi, port: 4000
+      platform: elixir, contexts: [C], serves: DemoApi, ui: DemoUi, port: 4000
     }
   }
 `;

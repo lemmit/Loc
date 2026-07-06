@@ -36,7 +36,7 @@ system Catalog {
   storage pg { type: postgres }
   resource productState { for: Shop, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Shop]
     dataSources: [productState]
     serves: CatalogApi

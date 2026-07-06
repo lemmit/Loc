@@ -26,7 +26,7 @@ system S {
   api A from Accounts
   storage pg { type: postgres }
   resource st { for: Accounts, kind: state, use: pg }
-  deployable api { platform: elixir { foundation: vanilla } contexts: [Accounts] dataSources: [st] serves: A port: 4000 }
+  deployable api { platform: elixir contexts: [Accounts] dataSources: [st] serves: A port: 4000 }
 }
 `;
 }

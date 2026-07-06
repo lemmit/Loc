@@ -2630,9 +2630,8 @@ export interface DeployableIR {
    *
    *  `application`/`directoryLayout` map onto the existing
    *  D-ADAPTER-HOME adapter kinds `style`/`layout`; `persistence` onto
-   *  the `persistence` adapter; `foundation`/`transport`/`runtime` are
+   *  the `persistence` adapter; `transport`/`runtime` are
    *  greenfield (no adapter infra yet, single default value each). */
-  foundation?: string;
   application?: string;
   persistence?: string;
   directoryLayout?: string;

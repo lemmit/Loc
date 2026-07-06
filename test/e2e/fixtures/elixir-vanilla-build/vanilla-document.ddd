@@ -62,7 +62,7 @@ system Carting {
   storage pg { type: postgres }
   resource cartState { for: Carts, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Carts]
     dataSources: [cartState]
     serves: CartsApi

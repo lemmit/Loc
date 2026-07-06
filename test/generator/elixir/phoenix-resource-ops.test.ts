@@ -26,7 +26,7 @@ system Sys {
   resource salesFiles { for: Sales, kind: objectStore, use: files }
   resource salesJobs  { for: Sales, kind: queue, use: bus }
   resource salesApi   { for: Sales, kind: api, use: pay }
-  deployable api { platform: elixir { foundation: vanilla }, contexts: [Sales], dataSources: [salesState, salesFiles, salesJobs, salesApi], port: 4000 }
+  deployable api { platform: elixir, contexts: [Sales], dataSources: [salesState, salesFiles, salesJobs, salesApi], port: 4000 }
 }`;
 
 async function gen() {
@@ -76,7 +76,7 @@ system Sys {
   subdomain Sales { context Sales { aggregate Order { name: string } } }
   storage pg { type: postgres }
   resource salesState { for: Sales, kind: state, use: pg }
-  deployable api { platform: elixir { foundation: vanilla }, contexts: [Sales], dataSources: [salesState], port: 4000 }
+  deployable api { platform: elixir, contexts: [Sales], dataSources: [salesState], port: 4000 }
 }`;
     const { model } = await parseString(plain, { validate: false });
     const files = generateSystems(model).files;

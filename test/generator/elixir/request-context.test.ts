@@ -87,12 +87,12 @@ function assertCarrier(files: Map<string, string>): void {
 
 describe("Phoenix execution-context carrier", () => {
   it("ash foundation: emits the RequestContext Plug + accessor and mounts it", async () => {
-    const files = await generateSystemFiles(SYSTEM("elixir { foundation: vanilla }"));
+    const files = await generateSystemFiles(SYSTEM("elixir"));
     assertCarrier(files);
   });
 
   it("vanilla foundation: emits the same carrier module + mount", async () => {
-    const files = await generateSystemFiles(SYSTEM("elixir { foundation: vanilla }"));
+    const files = await generateSystemFiles(SYSTEM("elixir"));
     assertCarrier(files);
   });
 });

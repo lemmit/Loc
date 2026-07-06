@@ -20,12 +20,9 @@ import {
 import type { Deployable, Ui, UiComposeBinding } from "../generated/ast.js";
 import {
   builtinPackNamesForFormat,
-  defaultFoundationFor,
   expectedFrameworkFor,
   expectedPackFormatFor,
-  FOUNDATION_OWNED_AXES,
   FRONTEND_KEYWORDS,
-  foundationCompatibleMenu,
   hostableFrameworksFor,
   isReservedStub,
   platformMountsUi,
@@ -318,28 +315,19 @@ function resolveAxisFamily(platform: string): Platform {
 }
 
 /** D-REALIZATION-AXES gating.  Ships **R1** (out-of-menu, incl. reserved
- *  stubs), **R3** (application style ↔ directoryLayout compatibility), **R4**
- *  (foundation owns layers), and **R6** (foundation ↔ persistence/application
- *  compatibility — realization-axes-alignment.md).  R2/R7 still have no
- *  reachable trigger and are deferred (see
+ *  stubs) and **R3** (application style ↔ directoryLayout compatibility).
+ *  R2/R7 still have no reachable trigger and are deferred (see
  *  `docs/proposals/platform-realization-axes.md` §7). */
 export function checkDeployableRealizationAxes(d: Deployable, accept: ValidationAcceptor): void {
   if (d.platform == null) return;
   const family = resolveAxisFamily(d.platform);
   const axes: { name: RealizationAxis; value: string | undefined }[] = [
-    { name: "foundation", value: d.foundation },
     { name: "application", value: d.application },
     { name: "persistence", value: d.persistence },
     { name: "directoryLayout", value: d.directoryLayout },
     { name: "transport", value: d.transport },
     { name: "runtime", value: d.runtime },
   ];
-
-  // `platform: elixir` generates `vanilla` (plain Phoenix LiveView on Ecto),
-  // the only foundation — the Ash foundation was removed.  A bare `platform:
-  // elixir` (no explicit `foundation:`) resolves to `vanilla` via
-  // `lower-platform.ts:greenfieldAxisDefaults`; an explicit `foundation: ash`
-  // is rejected by R1 below as an out-of-menu value.
 
   // R1 — every set axis value must be in its platform menu.
   for (const { name, value } of axes) {
@@ -357,52 +345,6 @@ export function checkDeployableRealizationAxes(d: Deployable, accept: Validation
       property: name,
       code: "loom.platform-knob-out-of-menu",
     });
-  }
-
-  // R4 — a `foundation:` framework owns some axes; setting an owned axis
-  // alongside it is an error (the framework supplies it).
-  if (d.foundation != null) {
-    const owned = FOUNDATION_OWNED_AXES[d.foundation] ?? [];
-    for (const axis of owned) {
-      const set = axes.find((a) => a.name === axis)?.value;
-      if (set == null) continue;
-      accept(
-        "error",
-        `'foundation: ${d.foundation}' owns the ${axis} layer — remove '${axis}:' (the framework supplies it).`,
-        { node: d, property: axis, code: "loom.platform-knob-owned-by-foundation" },
-      );
-    }
-  }
-
-  // R5 — `foundation: vanilla` on `platform: elixir` is now accepted
-  // (D-VANILLA-PHOENIX-FOUNDATION) — Slice 0 of the vanilla TDD plan
-  // lifts the previous emitter-not-implemented gate.  The orchestrator
-  // branches to `vanilla/index.ts` for the vanilla emit subtree; per-
-  // slice gaps (e.g. unsupported aggregate shapes) raise their own
-  // focused diagnostics as they arise.
-
-  // R6 — `persistence:` / `application:` must be compatible with the
-  // foundation (docs/plans/realization-axes-alignment.md).  A named
-  // foundation admits only its framework family; `vanilla` admits the
-  // non-framework libraries (`ecto`).  The effective foundation is the
-  // explicit value or the platform default.  Owned axes (R4) are skipped to
-  // avoid a double diagnostic.  (No named foundation ships today — the rule
-  // stays active for `abp`/`nestjs` when they're wired.)
-  const effectiveFoundation = d.foundation ?? defaultFoundationFor(family);
-  if (effectiveFoundation != null) {
-    const owned = FOUNDATION_OWNED_AXES[effectiveFoundation] ?? [];
-    for (const axis of ["persistence", "application"] as const) {
-      const value = axis === "persistence" ? d.persistence : d.application;
-      if (value == null || owned.includes(axis)) continue;
-      const compat = foundationCompatibleMenu(family, effectiveFoundation, axis);
-      if (compat.length === 0 || compat.includes(value)) continue;
-      const via = d.foundation == null ? ` (the default on '${family}')` : "";
-      accept(
-        "error",
-        `'${axis}: ${value}' on deployable '${d.name}' is incompatible with 'foundation: ${effectiveFoundation}'${via}. Compatible: ${compat.map((v) => `'${v}'`).join(", ")}.`,
-        { node: d, property: axis, code: "loom.platform-knob-foundation-mismatch" },
-      );
-    }
   }
 
   // R3 — the resolved application STYLE must support the resolved

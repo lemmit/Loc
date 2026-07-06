@@ -103,7 +103,7 @@ const BACKENDS: Backend[] = [
     response: "d/src/main/java/com/loom/d/features/orders/OrderResponse.java",
   },
   {
-    platform: "elixir { foundation: vanilla }",
+    platform: "elixir",
     requests: [
       { file: "d/lib/d_web/api/schemas/create_order_request.ex" },
       { file: "d/lib/d_web/api/schemas/update_order_request.ex" },

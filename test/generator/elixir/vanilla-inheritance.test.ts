@@ -40,7 +40,7 @@ system Parties {
   storage pg { type: postgres }
   resource partiesState { for: Parties, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Parties]
     dataSources: [partiesState]
     serves: PartiesApi
@@ -64,7 +64,7 @@ system Assets {
   storage pg { type: postgres }
   resource assetsState { for: Assets, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Assets]
     dataSources: [assetsState]
     serves: AssetsApi

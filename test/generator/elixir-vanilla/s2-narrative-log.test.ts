@@ -35,7 +35,7 @@ system Sales {
   storage primary { type: postgres }
   resource salesState { for: Sales, kind: state, use: primary }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Sales]
     dataSources: [salesState]
     serves: SalesApi

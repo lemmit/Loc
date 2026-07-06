@@ -13,7 +13,7 @@ import { parseString } from "../../_helpers/parse.js";
 // is accepted on vanilla (the only foundation).
 // ---------------------------------------------------------------------------
 
-const source = (foundation: string) => `
+const source = () => `
 system L {
   subdomain Core {
     context Orders {
@@ -29,7 +29,7 @@ system L {
   storage pg { type: postgres }
   resource st { for: Orders, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: ${foundation} }
+    platform: elixir
     contexts: [Orders]
     dataSources: [st]
     serves: A
@@ -40,20 +40,20 @@ system L {
 
 const RET_GATE = "loom.operation-return-unsupported";
 
-async function diagnostics(foundation: string) {
-  const { model } = await parseString(source(foundation), { validate: false });
+async function diagnostics() {
+  const { model } = await parseString(source(), { validate: false });
   return validateLoomModel(enrichLoomModel(lowerModel(model)));
 }
 
 describe("vanilla — T2.c operation-return gate", () => {
   it("accepts an `or`-union operation return on foundation: vanilla", async () => {
-    const diags = await diagnostics("vanilla");
+    const diags = await diagnostics();
     expect(diags.find((d) => d.code === RET_GATE)).toBeUndefined();
   });
 });
 
 describe("vanilla — T2.c operation-return emit", () => {
-  const files = () => generateSystemFiles(source("vanilla"));
+  const files = () => generateSystemFiles(source());
   const get = (m: Map<string, string>, suffix: string) =>
     m.get([...m.keys()].find((k) => k.endsWith(suffix))!)!;
 
@@ -99,7 +99,7 @@ system P {
   api A from Core
   storage pg { type: postgres }
   resource st { for: Tasks, kind: state, use: pg }
-  deployable api { platform: elixir { foundation: vanilla } contexts: [Tasks] dataSources: [st] serves: A port: 4000 }
+  deployable api { platform: elixir contexts: [Tasks] dataSources: [st] serves: A port: 4000 }
 }
 `;
     const f = await generateSystemFiles(plain);
@@ -125,7 +125,7 @@ system P {
   api A from Core
   storage pg { type: postgres }
   resource st { for: Tasks, kind: state, use: pg }
-  deployable api { platform: elixir { foundation: vanilla } contexts: [Tasks] dataSources: [st] serves: A port: 4000 }
+  deployable api { platform: elixir contexts: [Tasks] dataSources: [st] serves: A port: 4000 }
 }
 `;
     const f = await generateSystemFiles(scalar);

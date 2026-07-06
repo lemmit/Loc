@@ -36,7 +36,7 @@ system DerivedWire {
   storage pg { type: postgres }
   resource st { for: Sales, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Sales]
     dataSources: [st]
     serves: SalesApi

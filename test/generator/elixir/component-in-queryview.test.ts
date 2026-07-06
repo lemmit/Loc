@@ -33,7 +33,7 @@ system Shop {
       }
     }
   }
-  deployable app { platform: elixir { foundation: vanilla } contexts: [Orders] dataSources: [st] ui: WebApp port: 4000 }
+  deployable app { platform: elixir contexts: [Orders] dataSources: [st] ui: WebApp port: 4000 }
 }
 `;
 

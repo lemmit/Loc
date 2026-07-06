@@ -5,13 +5,14 @@ import { createDddServices } from "../../../src/language/ddd-module.js";
 import type { Model } from "../../../src/language/generated/ast.js";
 
 // ---------------------------------------------------------------------------
-// D-REALIZATION-AXES — the `platform: <name> { … }` block carries six
-// optional realization axes.  This PR is DSL-surface + validation only:
-// the grammar admits the block, lowering normalizes defaults, and the
-// validator enforces R1 (out-of-menu, against the live REAL-adapter menu)
-// and R4 (a `foundation:` framework owns some axes).  Menus list only
-// implemented adapters, so on dotnet/node the adapter axes are size-1
-// today (selecting a stub is rejected, not run).
+// D-REALIZATION-AXES — the `platform: <name> { … }` block carries five
+// optional realization axes (application / persistence / directoryLayout /
+// transport / runtime).  This is DSL-surface + validation only: the grammar
+// admits the block, lowering normalizes defaults, and the validator enforces
+// R1 (out-of-menu, against the live REAL-adapter menu).  Menus list only
+// implemented adapters, so on dotnet/node the adapter axes are size-1 today
+// (selecting a stub is rejected, not run).  (The `foundation:` axis was
+// removed — it was a single-value knob, `vanilla` everywhere.)
 // ---------------------------------------------------------------------------
 
 async function parse(source: string) {
@@ -32,10 +33,10 @@ const sys = (platformClause: string) => `
 `;
 
 describe("realization axes — grammar admits the block", () => {
-  it("parses a full six-axis block (values gated by validator, not parser)", async () => {
+  it("parses a full five-axis block (values gated by validator, not parser)", async () => {
     const { errors, model } = await parse(
       sys(
-        "dotnet { foundation: vanilla, application: cqrs, persistence: efcore, directoryLayout: byLayer, transport: controllers, runtime: transactional }",
+        "dotnet { application: cqrs, persistence: efcore, directoryLayout: byLayer, transport: controllers, runtime: transactional }",
       ),
     );
     expect(errors).toEqual([]);
@@ -195,26 +196,16 @@ describe("realization axes — R3 style ↔ directoryLayout compatibility", () =
   });
 });
 
-describe("realization axes — R4 foundation owns layers", () => {
-  // The Ash foundation was removed: `foundation: ash` is now rejected outright
-  // as an out-of-menu value (elixir is `vanilla`-only), so the old R4 axis-
-  // ownership cases ("ash owns the application/transport layer") are obsolete.
-  it("`foundation: vanilla` owns nothing — no R4 error", async () => {
-    const { errors } = await parse(sys("dotnet { foundation: vanilla, application: cqrs }"));
-    expect(errors).toEqual([]);
-  });
-});
-
 // ---------------------------------------------------------------------------
-// Slice 0 of docs/plans/vanilla-foundation-tdd-plan.md — the previous
-// R5 emitter-not-implemented rejection is lifted now that the
-// `vanilla/` orchestrator subtree exists.  `foundation: vanilla` on
-// `platform: elixir` must now parse, lower, and validate without error.
-// (The legacy `phoenix` / `phoenixLiveView` platform aliases were retired.)
+// `platform: elixir` generates plain Phoenix LiveView on Ecto (the Ash
+// foundation was removed).  A bare `platform: elixir` parses, lowers, and
+// validates without error; the Ash-era axis values (`ashPostgres`, `ash`) are
+// simply out-of-menu now — R1 rejects them against elixir's single-adapter
+// menus (persistence → `ecto`, style → `serviceLayer`).
 // ---------------------------------------------------------------------------
-describe("realization axes — foundation: vanilla on elixir is accepted (Slice 0)", () => {
-  it("accepts `foundation: vanilla` on elixir without R5 (gate lifted)", async () => {
-    const { errors } = await parse(sys("elixir { foundation: vanilla }"));
+describe("realization axes — elixir is plain Ecto/Phoenix (Ash removed)", () => {
+  it("accepts a bare `platform: elixir`", async () => {
+    const { errors } = await parse(sys("elixir"));
     expect(errors).toEqual([]);
   });
 
@@ -223,97 +214,36 @@ describe("realization axes — foundation: vanilla on elixir is accepted (Slice 
     expect(errors.some((e) => /Unknown platform 'phoenix'/.test(e))).toBe(true);
   });
 
-  it("rejects the removed `foundation: ash` outright (elixir is vanilla-only)", async () => {
-    const { errors } = await parse(sys("elixir { foundation: ash }"));
-    expect(
-      errors.some((e) =>
-        /foundation: ash.*is not available on platform 'elixir'.*'vanilla'/.test(e),
-      ),
-    ).toBe(true);
+  it("rejects `persistence: ashPostgres` on elixir (out-of-menu — ecto only)", async () => {
+    const { errors } = await parse(sys("elixir { persistence: ashPostgres }"));
+    expect(errors.some((e) => /persistence: ashPostgres.*platform 'elixir'.*'ecto'/.test(e))).toBe(
+      true,
+    );
   });
 
-  it("`foundation: vanilla` is accepted on non-phoenix platforms (the existing default)", async () => {
-    // Regression: the menu lift shouldn't change anything for dotnet/node.
-    const { errors } = await parse(sys("dotnet { foundation: vanilla }"));
-    expect(errors).toEqual([]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// R6 — persistence / application must be compatible with the foundation
-// (docs/plans/realization-axes-alignment.md).  `ash` admits only its
-// framework family (`ashPostgres`); `vanilla` admits the non-framework
-// libraries (`ecto`).  The effective foundation is the explicit value or the
-// platform default, so a cross pair is rejected either way.
-// ---------------------------------------------------------------------------
-describe("realization axes — R6 foundation ↔ persistence/application compatibility", () => {
-  it("rejects `foundation: vanilla` + `persistence: ashPostgres` (plain Ecto only)", async () => {
-    const { errors } = await parse(sys("elixir { foundation: vanilla, persistence: ashPostgres }"));
-    expect(
-      errors.some((e) =>
-        /persistence: ashPostgres.*incompatible with 'foundation: vanilla'.*'ecto'/.test(e),
-      ),
-    ).toBe(true);
-  });
-
-  it("accepts `persistence: ecto` with NO foundation on elixir (defaults to vanilla)", async () => {
-    // Post D-VANILLA-DEFAULT the omitted-foundation default is vanilla, whose
-    // data layer IS ecto — so the aligned pair needs no explicit `foundation:`.
+  it("accepts `persistence: ecto` on elixir (the only data layer)", async () => {
     const { errors } = await parse(sys("elixir { persistence: ecto }"));
     expect(errors).toEqual([]);
   });
 
-  it("rejects `persistence: ashPostgres` with NO foundation on elixir (defaults to vanilla)", async () => {
-    // The mirror: the default vanilla foundation does NOT admit Ash's framework
-    // data layer — and the Ash foundation was removed, so `ashPostgres` is no
-    // longer reachable at all on elixir.
-    const { errors } = await parse(sys("elixir { persistence: ashPostgres }"));
-    expect(
-      errors.some((e) =>
-        /persistence: ashPostgres.*incompatible with 'foundation: vanilla'.*default on 'elixir'/.test(
-          e,
-        ),
-      ),
-    ).toBe(true);
-  });
-
-  it("accepts `foundation: vanilla` + `persistence: ecto` (the aligned pair)", async () => {
-    const { errors } = await parse(sys("elixir { foundation: vanilla, persistence: ecto }"));
-    expect(errors).toEqual([]);
-  });
-
-  it("rejects `foundation: vanilla` + `application: ash` (Ash style needs Ash)", async () => {
-    const { errors } = await parse(sys("elixir { foundation: vanilla, application: ash }"));
-    expect(
-      errors.some((e) =>
-        // Compatible style for the vanilla foundation is the real pipeline shape
-        // `serviceLayer` (= adapter `layered`), not a style named after the
-        // foundation.
-        /application: ash.*incompatible with 'foundation: vanilla'.*'serviceLayer'/.test(e),
-      ),
-    ).toBe(true);
-  });
-
-  it("accepts `foundation: vanilla` + `application: serviceLayer` (plain Phoenix's real pipeline)", async () => {
-    // The plain-Phoenix style is the real `layered`/`serviceLayer` shape — it
-    // is the explicit spelling of the vanilla foundation's defaulted style.
-    const { errors } = await parse(
-      sys("elixir { foundation: vanilla, application: serviceLayer }"),
+  it("rejects `application: ash` on elixir (out-of-menu — serviceLayer only)", async () => {
+    const { errors } = await parse(sys("elixir { application: ash }"));
+    expect(errors.some((e) => /application: ash.*platform 'elixir'.*'serviceLayer'/.test(e))).toBe(
+      true,
     );
+  });
+
+  it("accepts `application: serviceLayer` on elixir (plain Phoenix's real pipeline)", async () => {
+    const { errors } = await parse(sys("elixir { application: serviceLayer }"));
     expect(errors).toEqual([]);
   });
 
-  it("rejects `application: vanilla` — `vanilla` is a foundation, never a style", async () => {
-    const { errors } = await parse(sys("elixir { foundation: vanilla, application: vanilla }"));
+  it("rejects `application: vanilla` — never a style on any platform", async () => {
+    const { errors } = await parse(sys("elixir { application: vanilla }"));
     expect(errors.some((e) => /application: vanilla/.test(e))).toBe(true);
   });
 
-  it("no R6 error for a foundation without an explicit data layer", async () => {
-    expect((await parse(sys("elixir { foundation: vanilla }"))).errors).toEqual([]);
-    expect((await parse(sys("elixir"))).errors).toEqual([]);
-  });
-
-  it("dotnet persistence (vanilla foundation) is unaffected — no framework binding", async () => {
+  it("dotnet persistence is unaffected", async () => {
     expect((await parse(sys("dotnet { persistence: efcore }"))).errors).toEqual([]);
     expect((await parse(sys("dotnet { persistence: dapper }"))).errors).toEqual([]);
   });

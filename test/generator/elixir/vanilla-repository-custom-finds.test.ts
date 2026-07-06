@@ -63,7 +63,7 @@ system Sales {
   storage primary { type: postgres }
   resource ordersState { for: Orders, kind: state, use: primary }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Orders]
     dataSources: [ordersState]
     serves: OrdersApi
@@ -136,7 +136,7 @@ describe("vanilla — custom find functions on the repository module", () => {
         storage primary { type: postgres }
         resource trackerState { for: Tracker, kind: state, use: primary }
         deployable api {
-          platform: elixir { foundation: vanilla }
+          platform: elixir
           contexts: [Tracker]
           dataSources: [trackerState]
           serves: TrackerApi

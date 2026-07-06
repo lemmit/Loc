@@ -16,7 +16,7 @@ const deployable = `
   storage pg { type: postgres }
   resource cState { for: C, kind: state, use: pg }
   deployable phoenixApp {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [C]
     dataSources: [cState]
     serves: CApi

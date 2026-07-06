@@ -86,7 +86,7 @@ system StoreShowcaseElixir {
   }
 
   deployable webApp {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Sales]
     dataSources: [salesState]
     serves: SalesApi

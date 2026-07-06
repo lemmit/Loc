@@ -62,7 +62,7 @@ function source(opts: { oidc: boolean }): string {
   resource ticketState { for: Tickets, kind: state, use: primary }
   api SupportApi from Support
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Tickets]
     serves: SupportApi
     dataSources: [ticketState]

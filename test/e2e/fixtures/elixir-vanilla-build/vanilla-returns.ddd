@@ -28,7 +28,7 @@ system Orders {
   resource orderState { for: Reservations, kind: state, use: pg }
 
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Reservations]
     dataSources: [orderState]
     serves: OrdersApi

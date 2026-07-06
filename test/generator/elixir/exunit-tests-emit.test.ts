@@ -54,8 +54,8 @@ system Shop {
   api SalesApi from Sales
   storage primary { type: postgres }
   resource sellingState { for: Selling, kind: state, use: primary }
-  deployable ashApi { platform: elixir { foundation: vanilla } contexts: [Selling] dataSources: [sellingState] serves: SalesApi port: 4000 }
-  deployable vanApi { platform: elixir { foundation: vanilla } contexts: [Selling] dataSources: [sellingState] serves: SalesApi port: 4001 }
+  deployable ashApi { platform: elixir contexts: [Selling] dataSources: [sellingState] serves: SalesApi port: 4000 }
+  deployable vanApi { platform: elixir contexts: [Selling] dataSources: [sellingState] serves: SalesApi port: 4001 }
 }
 `;
 
@@ -133,7 +133,7 @@ system G {
   api GApi from Sales
   storage pg { type: postgres }
   resource st { for: Selling, kind: state, use: pg }
-  deployable api { platform: elixir { foundation: vanilla } contexts: [Selling] dataSources: [st] serves: GApi port: 4000 auth: required }
+  deployable api { platform: elixir contexts: [Selling] dataSources: [st] serves: GApi port: 4000 auth: required }
 }
 `;
     const src = findFile(await generateSystemFiles(SRC), /api\/test\/selling\/order_test\.exs$/);

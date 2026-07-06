@@ -194,8 +194,7 @@ Deployable:
         // parser (the `design:` precedent).
         ('platform' ':' platform=Platform
             ('{' (
-                  'foundation' ':' foundation=LooseName ','?
-                | 'application' ':' application=LooseName ','?
+                  'application' ':' application=LooseName ','?
                 | 'persistence' ':' persistence=LooseName ','?
                 | 'directoryLayout' ':' directoryLayout=LooseName ','?
                 | 'transport' ':' transport=LooseName ','?

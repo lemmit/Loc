@@ -132,7 +132,7 @@ describe("vanilla foundation — workflow-instance read endpoints", () => {
           }
         }
         storage primary { type: postgres }
-        deployable api { platform: elixir { foundation: vanilla }  contexts: [F]  port: 4000 }
+        deployable api { platform: elixir  contexts: [F]  port: 4000 }
       }
     `;
     const { model } = await parseString(SRC, { validate: false });
@@ -176,7 +176,7 @@ describe("vanilla foundation — event-sourced workflow-instance reads", () => {
     api A from F
     storage primary { type: postgres }
     resource fState { for: F, kind: state, use: primary }
-    deployable api { platform: elixir { foundation: vanilla }  contexts: [F]  serves: A  dataSources: [fState]  port: 4000 }
+    deployable api { platform: elixir  contexts: [F]  serves: A  dataSources: [fState]  port: 4000 }
   }`;
 
   it("routes the instance actions through the <Wf>Stream fold helpers", async () => {

@@ -812,6 +812,8 @@ no `apiOnly`, `framework:` is UI-only, default domain = Ash).
 ## D-REALIZATION-AXES — the deployable platform-config axes (and the `foundation:` amendment)
 
 > **Superseded (2026): the Ash foundation was removed.** `platform: elixir` is plain Ecto/Phoenix only; `foundation: ash` is now a validation error and `vanilla` is the default and only valid value. The Ash-vs-vanilla reasoning below is historical.
+>
+> **Superseded (2026): the `foundation:` axis was removed entirely.** With Ash gone it had collapsed to a single value (`vanilla`) on every backend, so it gated nothing — the grammar clause, the `DeployableIR.foundation` field, the R4 (foundation-owns-layers) and R6 (foundation-compat) validator rules, and the `foundation-default-flipping` warning are all deleted. The realization block now carries **five** axes: `application`, `persistence`, `directoryLayout`, `transport`, `runtime`. All `foundation:`-keyword reasoning below (the amendment, the ownership rules, the rung table) is historical.
 
 **Status:** PINNED. (Amends **D-PHOENIX-SURFACE**'s domain-axis mechanism;
 depends on **D-ADAPTER-HOME** and **D-STORAGE-SPLIT**. Full matrix, gating rules,

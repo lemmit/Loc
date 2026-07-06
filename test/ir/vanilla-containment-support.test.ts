@@ -31,7 +31,7 @@ async function containmentErrors(
 }
 
 /** A Shop context whose Order aggregate optionally contains an entity part,
- *  hosted on the given platform string (e.g. `elixir { foundation: vanilla }`).
+ *  hosted on the given platform string (e.g. `elixir`).
  *  `mutates` adds an `items += Item{…}` operation (the gated relational case). */
 function sys(
   platform: string,
@@ -67,14 +67,12 @@ system Shop {
 describe("vanilla containment support gate", () => {
   it("accepts an entity containment on a shape(embedded) vanilla aggregate (DEBT-32 — embeds_many)", async () => {
     expect(
-      await containmentErrors(
-        sys("elixir { foundation: vanilla }", { contains: true, shape: "embedded", mutates: true }),
-      ),
+      await containmentErrors(sys("elixir", { contains: true, shape: "embedded", mutates: true })),
     ).toEqual([]);
   });
 
   it("accepts a non-mutating entity containment on a RELATIONAL vanilla aggregate (§11c — has_many)", async () => {
-    const source = sys("elixir { foundation: vanilla }", { contains: true });
+    const source = sys("elixir", { contains: true });
     expect(await containmentErrors(source)).toEqual([]);
     expect(
       await containmentErrors(source, "loom.vanilla-containment-mutation-unsupported"),
@@ -82,7 +80,7 @@ describe("vanilla containment support gate", () => {
   });
 
   it("accepts an in-op containment MUTATION on a relational vanilla aggregate (§11c — put_assoc)", async () => {
-    const source = sys("elixir { foundation: vanilla }", { contains: true, mutates: true });
+    const source = sys("elixir", { contains: true, mutates: true });
     // The retired gate no longer fires…
     expect(
       await containmentErrors(source, "loom.vanilla-containment-mutation-unsupported"),
@@ -92,17 +90,13 @@ describe("vanilla containment support gate", () => {
   });
 
   it("accepts an entity containment on a shape(document) vanilla aggregate (Route A — embeds_many)", async () => {
-    expect(
-      await containmentErrors(
-        sys("elixir { foundation: vanilla }", { contains: true, shape: "document" }),
-      ),
-    ).toEqual([]);
+    expect(await containmentErrors(sys("elixir", { contains: true, shape: "document" }))).toEqual(
+      [],
+    );
   });
 
   it("accepts a vanilla aggregate with NO nested parts (byte-identical)", async () => {
-    expect(
-      await containmentErrors(sys("elixir { foundation: vanilla }", { contains: false })),
-    ).toEqual([]);
+    expect(await containmentErrors(sys("elixir", { contains: false }))).toEqual([]);
   });
 
   it("does not fire for non-elixir backends (this gate is vanilla-only)", async () => {

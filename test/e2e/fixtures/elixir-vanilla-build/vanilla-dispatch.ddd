@@ -57,7 +57,7 @@ system FulfillmentSys {
   storage primary { type: postgres }
   resource fulfillmentState { for: Fulfillment, kind: state, use: primary }
   deployable phoenixApp {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Fulfillment]
     dataSources: [fulfillmentState]
     serves: FulfillmentApi

@@ -139,7 +139,7 @@ describe("S8 — the synthetic name is readable on every backend's public surfac
     ["dotnet", /FindAllByActiveOrderByCodeDescSpec/],
     ["java", /runFindAllByActiveOrderByCodeDesc/],
     ["python", /run_find_all_by_active_order_by_code_desc/],
-    ["elixir { foundation: vanilla }", /run_find_all_by_active_order_by_code_desc_order/],
+    ["elixir", /run_find_all_by_active_order_by_code_desc_order/],
   ];
   for (const [platform, name] of CASES) {
     it(`${platform.split(" ")[0]}: emits the shape-derived method name, no hash`, async () => {

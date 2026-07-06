@@ -115,7 +115,7 @@ system Demo {
   storage primary { type: postgres }
   resource st { for: C, kind: state, use: primary }
   deployable app {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [C]
     dataSources: [st]
     serves: A
@@ -196,7 +196,7 @@ system Demo {
   storage primary { type: postgres }
   resource st { for: C, kind: state, use: primary }
   deployable app {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [C]
     dataSources: [st]
     serves: A
@@ -264,7 +264,7 @@ system Demo {
   storage primary { type: postgres }
   resource st { for: C, kind: state, use: primary }
   deployable app {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [C]
     dataSources: [st]
     serves: A
@@ -319,7 +319,7 @@ system Demo {
   storage primary { type: postgres }
   resource st { for: C, kind: state, use: primary }
   deployable app {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [C]
     dataSources: [st]
     serves: A
@@ -355,7 +355,7 @@ system Demo {
   storage primary { type: postgres }
   resource st { for: C, kind: state, use: primary }
   deployable app {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [C]
     dataSources: [st]
     serves: A
@@ -385,7 +385,7 @@ system Demo {
   storage primary { type: postgres }
   resource st { for: C, kind: state, use: primary }
   deployable app {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [C]
     dataSources: [st]
     serves: A

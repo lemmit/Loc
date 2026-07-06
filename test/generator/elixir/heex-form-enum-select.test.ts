@@ -45,7 +45,7 @@ function phoenixSystemWithEnum(enumBody: string, fieldType = "OrderStatus"): str
       }
     }
     deployable phoenixApp {
-      platform: elixir { foundation: vanilla }, contexts: [C], serves: DemoApi,
+      platform: elixir, contexts: [C], serves: DemoApi,
       ui: DemoUi, port: 4000
     }
   }

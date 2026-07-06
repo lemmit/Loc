@@ -38,7 +38,7 @@ const system = (platform: string, cap: string) => `
   }
 `;
 
-const ELIXIR = "elixir { foundation: vanilla }";
+const ELIXIR = "elixir";
 
 const fileMatching = (files: Map<string, string>, pred: (p: string) => boolean): string =>
   [...files.entries()]

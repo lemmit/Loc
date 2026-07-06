@@ -3,7 +3,7 @@ import { defaultsFor } from "../../platform/adapter-metadata.js";
 import { descriptorFor } from "../../platform/metadata.js";
 import { applicationDslToAdapter } from "../../util/platform-axes.js";
 import type { DeployableIR, Platform, UiParamBindingIR } from "../types/loom-ir.js";
-import { greenfieldAxisDefaults, qualifyDesign, qualifyPlatform } from "./lower-platform.js";
+import { qualifyDesign, qualifyPlatform } from "./lower-platform.js";
 
 export function lowerDeployable(d: Deployable): DeployableIR {
   const { family: platform, ref: platformRef } = qualifyPlatform(d.platform);
@@ -153,27 +153,21 @@ export function lowerDeployable(d: Deployable): DeployableIR {
   const adapterDefaults = defaultsFor(platform);
   const axes =
     adapterDefaults !== undefined
-      ? (() => {
-          const gf = greenfieldAxisDefaults(platform);
+      ? {
           // Each adapter-backed axis takes its default from the platform's
-          // live adapter menu (`adapterDefaults`); `foundation` is the lone
-          // greenfield axis (D-REALIZATION-AXES; realization-axes-alignment.md).
-          const foundation = d.foundation ?? gf.foundation;
-          return {
-            foundation,
-            // Store the resolved adapter key (`serviceLayer` → `layered`)
-            // so the future codegen passes it straight to `resolveStyle`.
-            application: d.application
-              ? applicationDslToAdapter(d.application)
-              : adapterDefaults.style,
-            persistence: d.persistence ?? adapterDefaults.persistence.state,
-            directoryLayout: d.directoryLayout ?? adapterDefaults.layout,
-            transport: d.transport ?? adapterDefaults.transport,
-            runtime: d.runtime ?? adapterDefaults.runtime,
-          };
-        })()
+          // live adapter menu (`adapterDefaults`) (D-REALIZATION-AXES;
+          // realization-axes-alignment.md).
+          // Store the resolved adapter key (`serviceLayer` → `layered`)
+          // so the future codegen passes it straight to `resolveStyle`.
+          application: d.application
+            ? applicationDslToAdapter(d.application)
+            : adapterDefaults.style,
+          persistence: d.persistence ?? adapterDefaults.persistence.state,
+          directoryLayout: d.directoryLayout ?? adapterDefaults.layout,
+          transport: d.transport ?? adapterDefaults.transport,
+          runtime: d.runtime ?? adapterDefaults.runtime,
+        }
       : {
-          foundation: undefined,
           application: undefined,
           persistence: undefined,
           directoryLayout: undefined,
@@ -190,7 +184,6 @@ export function lowerDeployable(d: Deployable): DeployableIR {
     targetName: d.targets?.ref?.name,
     auth,
     design,
-    foundation: axes.foundation,
     application: axes.application,
     persistence: axes.persistence,
     directoryLayout: axes.directoryLayout,

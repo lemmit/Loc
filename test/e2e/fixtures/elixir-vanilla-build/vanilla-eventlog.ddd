@@ -55,7 +55,7 @@ system Ledger {
   resource accountsLog { for: Accounts, kind: eventLog, use: pg }
 
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Accounts]
     dataSources: [accountsLog]
     serves: LedgerApi

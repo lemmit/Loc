@@ -449,9 +449,7 @@ system Sys {
   });
 
   it("emits Ecto schemas for the TPC concretes on the vanilla foundation", async () => {
-    const { files } = generateSystems(
-      await parseValid(TPC_TWO_CONCRETE("elixir { foundation: vanilla }", 4000)),
-    );
+    const { files } = generateSystems(await parseValid(TPC_TWO_CONCRETE("elixir", 4000)));
     const paths = [...files.keys()];
     // Concrete subtypes emit Ecto schemas, each carrying the merged base fields.
     expect(paths.some((p) => p.endsWith("parties/customer.ex"))).toBe(true);

@@ -157,18 +157,15 @@ export function builtinPackNamesForFormat(format: PackFormat): string {
 }
 
 // ---------------------------------------------------------------------------
-// D-REALIZATION-AXES — the six deployable realization axes.
+// D-REALIZATION-AXES — the five deployable realization axes.
 //
-// Three axes (`persistence` / `application` / `directoryLayout`) ride the
-// live D-ADAPTER-HOME adapter menus; their DSL menu is the REAL (non-stub)
-// adapters off the surface, in DSL spelling.  Three (`foundation` /
-// `transport` / `runtime`) are greenfield — no adapter infra yet, so a
-// single current value each.  Frontends carry no axes (empty menu →
-// validator rejects any axis written on them).
+// All five (`application` / `persistence` / `directoryLayout` / `transport` /
+// `runtime`) ride the live D-ADAPTER-HOME adapter menus; their DSL menu is the
+// REAL (non-stub) adapters off the surface, in DSL spelling.  Frontends carry
+// no axes (empty menu → validator rejects any axis written on them).
 // ---------------------------------------------------------------------------
 
 export type RealizationAxis =
-  | "foundation"
   | "application"
   | "persistence"
   | "directoryLayout"
@@ -178,12 +175,12 @@ export type RealizationAxis =
 // `applicationDslToAdapter` / `applicationAdapterToDsl` live in
 // `util/platform-axes.ts` (shared with lowering) — imported above.
 
-/** Adapter kind backing each axis, or undefined for the one remaining
- *  greenfield axis (`foundation`).  `transport` + `runtime` joined the
- *  adapter-backed set when they were promoted from greenfield
- *  (realization-axes-alignment.md). */
-const ADAPTER_KIND_BY_AXIS: Partial<
-  Record<RealizationAxis, "persistence" | "style" | "layout" | "transport" | "runtime">
+/** Adapter kind backing each axis.  Every realization axis is now
+ *  adapter-backed (`transport` + `runtime` joined the set when they were
+ *  promoted from greenfield; `foundation` was removed). */
+const ADAPTER_KIND_BY_AXIS: Record<
+  RealizationAxis,
+  "persistence" | "style" | "layout" | "transport" | "runtime"
 > = {
   persistence: "persistence",
   application: "style",
@@ -194,25 +191,12 @@ const ADAPTER_KIND_BY_AXIS: Partial<
 
 function adapterKindForAxis(
   axis: RealizationAxis,
-): "persistence" | "style" | "layout" | "transport" | "runtime" | undefined {
+): "persistence" | "style" | "layout" | "transport" | "runtime" {
   return ADAPTER_KIND_BY_AXIS[axis];
 }
 
-/** Menu for the one remaining greenfield axis, `foundation`.  `transport` and
- *  `runtime` are now adapter-backed (realization-axes-alignment.md), resolved
- *  via `availableAdapterNames(family, …)` in `realizationAxisMenu`.  Every
- *  backend — elixir included — is `vanilla` only (the Ash foundation was
- *  removed; `foundation: ash` is now rejected as an out-of-menu value).  The
- *  FIRST entry is the platform default (`defaultFoundationFor`). */
-function greenfieldMenu(family: Platform, axis: "foundation"): string[] {
-  void axis;
-  void family;
-  return ["vanilla"];
-}
-
-/** The DSL-legal values for one realization axis on a platform family.
- *  Adapter-backed axes → the REAL adapters (stubs excluded) in DSL
- *  spelling; greenfield axes → the size-1 menu.  `[]` for frontends /
+/** The DSL-legal values for one realization axis on a platform family — the
+ *  REAL adapters (stubs excluded) in DSL spelling.  `[]` for frontends /
  *  unknown platforms (no adapter menu) — any axis there is rejected. */
 export function realizationAxisMenu(family: Platform, axis: RealizationAxis): string[] {
   if (!hasAdapters(family)) return [];
@@ -227,8 +211,6 @@ export function realizationAxisMenu(family: Platform, axis: RealizationAxis): st
       return availableAdapterNames(family, "transport");
     case "runtime":
       return availableAdapterNames(family, "runtime");
-    default:
-      return greenfieldMenu(family, axis);
   }
 }
 
@@ -237,46 +219,11 @@ export function realizationAxisMenu(family: Platform, axis: RealizationAxis): st
  *  value — lets the diagnostic say "reserved but not yet implemented". */
 export function isReservedStub(family: Platform, axis: RealizationAxis, dslValue: string): boolean {
   const kind = adapterKindForAxis(axis);
-  if (kind === undefined) return false; // greenfield axes have no stubs
   const key = axis === "application" ? applicationDslToAdapter(dslValue) : dslValue;
   return (
     allAdapterNames(family, kind).includes(key) &&
     !availableAdapterNames(family, kind).includes(key)
   );
-}
-
-/** Which realization axes each `foundation:` value OWNS (supplies itself)
- *  — setting an owned axis alongside the foundation is an error (R4).
- *  `vanilla` owns nothing; a rung-3/4 framework owns the application +
- *  HTTP surface.  Data-driven: growing the foundation menu activates the
- *  rule with no code change.  (`abp` / `nestjs` are reserved future
- *  foundations, not yet on any platform menu.) */
-export const FOUNDATION_OWNED_AXES: Record<string, readonly RealizationAxis[]> = {
-  vanilla: [],
-  abp: ["application", "transport"],
-  nestjs: ["application", "transport"],
-};
-
-/** Adapters BOUND to a specific opinionated foundation framework — its data
- *  layer (`persistence`) and architectural style (`application`, in DSL
- *  spelling).  A *named* foundation admits ONLY its own family on these axes;
- *  `vanilla` admits the rest (the non-framework libraries).  Drives R6
- *  (foundation↔axis compatibility) + the foundation-narrowed menu.
- *
- *  Empty today — the Ash foundation was removed.  `abp` / `nestjs` gain
- *  entries when those foundations are wired. */
-export const FOUNDATION_FAMILY_ADAPTERS: Record<
-  string,
-  { readonly persistence?: readonly string[]; readonly application?: readonly string[] }
-> = {};
-
-/** The platform's DEFAULT foundation — the primary (first) entry of its
- *  foundation menu (every backend → `vanilla` post D-VANILLA-DEFAULT).
- *  Used by R6 to resolve the effective foundation when the knob is omitted.
- *  (Mirror of the `foundation` default in `greenfieldAxisDefaults`, kept here
- *  in the language layer so the validator need not reach into lowering.) */
-export function defaultFoundationFor(family: Platform): string | undefined {
-  return greenfieldMenu(family, "foundation")[0];
 }
 
 /** R3 support — does the resolved application *style* accept the resolved
@@ -316,28 +263,4 @@ export function resolveStyleLayoutCompat(
     supported,
     ok: supported.includes(resolvedLayout),
   };
-}
-
-/** The values legal for `persistence:` / `application:` under a foundation on
- *  a platform (R6).  Named foundation → its framework family ∩ the platform
- *  menu.  `vanilla` (or any non-framework foundation) → the platform menu
- *  minus every framework family (the non-framework libraries).  Returns the
- *  axis values in DSL spelling, matching `realizationAxisMenu`. */
-export function foundationCompatibleMenu(
-  family: Platform,
-  foundation: string,
-  axis: "persistence" | "application",
-): string[] {
-  const full = realizationAxisMenu(family, axis);
-  const own = FOUNDATION_FAMILY_ADAPTERS[foundation]?.[axis];
-  if (own !== undefined) {
-    // Named foundation: only its own family that the platform actually ships.
-    return full.filter((v) => own.includes(v));
-  }
-  // vanilla / non-framework: everything that is NOT bound to a framework.
-  const frameworkBound = new Set<string>();
-  for (const fam of Object.values(FOUNDATION_FAMILY_ADAPTERS)) {
-    for (const v of fam[axis] ?? []) frameworkBound.add(v);
-  }
-  return full.filter((v) => !frameworkBound.has(v));
 }

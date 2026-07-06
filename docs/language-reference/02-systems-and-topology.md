@@ -2,7 +2,7 @@
 
 The outermost shells: a `system` groups `subdomain`s and `context`s (the pure domain) and then describes how to *ship* that domain as one or more `deployable`s — each pinned to a backend or frontend platform, bound to its contexts and data sources, and composed into a single `docker compose` stack. Reach for this chapter when you're deciding what runs where, on which stack, behind which UI, and how the pieces wire together.
 
-> **Grammar:** `System`, `Subdomain`, `BoundedContext`, `Deployable`, `Platform`, `Framework`, `DesignPack`, `ThemeBlock` · **Validators:** `checkDeployable` / `checkDeployablePlatform` (`src/language/validators/deployable.ts`), `checkTheme` (`src/language/validators/ui.ts`), `loom.foundation-default-flipping`, `loom.platform-knob-*` · **Docs:** [`../architecture.md`](../architecture.md), [`../platforms.md`](../platforms.md)
+> **Grammar:** `System`, `Subdomain`, `BoundedContext`, `Deployable`, `Platform`, `Framework`, `DesignPack`, `ThemeBlock` · **Validators:** `checkDeployable` / `checkDeployablePlatform` (`src/language/validators/deployable.ts`), `checkTheme` (`src/language/validators/ui.ts`), `loom.platform-knob-*` · **Docs:** [`../architecture.md`](../architecture.md), [`../platforms.md`](../platforms.md)
 
 Everything below was generated from one scratch system (`system Shop` — one `Orders` context served by six deployables, one per platform plus a React frontend) via `node bin/cli.js generate system shop.ddd -o out`. The compose stanzas and directory trees are excerpted verbatim from that run.
 
@@ -386,15 +386,14 @@ deployable apiDotnet {
 }
 ```
 
-The six axes (grammar order): `foundation`, `application`, `persistence`, `directoryLayout`, `transport`, `runtime`. The bare `platform: dotnet` form is unchanged — the block is additive and every axis is optional, defaulting to the platform's primary value. Axis *values* are validated against a per-platform menu (`src/language/validators/data/platform-rules.ts`), not the grammar:
+The five axes (grammar order): `application`, `persistence`, `directoryLayout`, `transport`, `runtime`. The bare `platform: dotnet` form is unchanged — the block is additive and every axis is optional, defaulting to the platform's primary value. Axis *values* are validated against a per-platform menu (`src/language/validators/data/platform-rules.ts`), not the grammar:
 
-- **`foundation`** — the opinionated framework that owns higher layers. `elixir` admits `vanilla` only (plain Ecto/Phoenix); `foundation: ash` is now a validation error. Every other backend is `vanilla` only.
 - **`application`** — architectural style (e.g. `flat` → `serviceLayer` → `cqrs`), resolved against the backend's live style-adapter menu.
-- **`persistence`** — data layer (`vanilla` admits `ecto`; each backend lists its own).
-- **`directoryLayout`** — `byLayer` vs `byFeature` on-disk shape; must be one the chosen `application` style supports (`loom.platform-knob-foundation-mismatch` / the R3 layout check otherwise).
+- **`persistence`** — data layer (`elixir` admits `ecto`; each backend lists its own).
+- **`directoryLayout`** — `byLayer` vs `byFeature` on-disk shape; must be one the chosen `application` style supports (the R3 layout check otherwise).
 - **`transport`** / **`runtime`** — adapter-backed HTTP-surface / runtime axes.
 
-Frontends carry **no** axes (empty menu — any axis written on a `react`/`vue`/… deployable is rejected). `platform: elixir` resolves `foundation:` to `vanilla` (plain Ecto/Phoenix) — the default and only valid value; `foundation: ash` is rejected as a validation error.
+Frontends carry **no** axes (empty menu — any axis written on a `react`/`vue`/… deployable is rejected). `platform: elixir` emits plain Ecto/Phoenix (the Ash foundation was removed — there is no `foundation:` axis; a would-be `foundation: ash` no longer parses). (The `foundation:` axis was removed — on every backend it had collapsed to a single value, `vanilla`.)
 
 No generated tab here — the axes select *which* emitter subtree runs (e.g. `byFeature` vs `byLayer` reorganises the directory tree shown under [`deployable`](#deployable)); the divergence is structural across whole projects, not a single excerptable line.
 

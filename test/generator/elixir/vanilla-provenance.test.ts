@@ -43,7 +43,7 @@ system Ordering {
   storage pg { type: postgres }
   resource orderState { for: Orders, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Orders]
     dataSources: [orderState]
     serves: OrdersApi
@@ -69,7 +69,7 @@ system Plain {
   storage pg { type: postgres }
   resource itemState { for: Stock, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Stock]
     dataSources: [itemState]
     serves: StockApi

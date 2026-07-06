@@ -31,7 +31,7 @@ system Acme {
   storage primary { type: postgres }
   resource usersState { for: Users, kind: state, use: primary }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Users]
     dataSources: [usersState]
     serves: UsersApi

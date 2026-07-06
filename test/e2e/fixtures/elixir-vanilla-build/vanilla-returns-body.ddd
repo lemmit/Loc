@@ -35,7 +35,7 @@ system Inventory {
   resource itemState { for: Stock, kind: state, use: pg }
 
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Stock]
     dataSources: [itemState]
     serves: StockApi

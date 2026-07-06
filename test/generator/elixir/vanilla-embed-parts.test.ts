@@ -27,7 +27,7 @@ system Emb {
   storage pg { type: postgres }
   resource orderState { for: Shop, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Shop]
     dataSources: [orderState]
     serves: CatalogApi

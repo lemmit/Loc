@@ -37,7 +37,7 @@ system RC {
   storage pg { type: postgres }
   resource st { for: Roster, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Roster]
     dataSources: [st]
     serves: RApi

@@ -123,12 +123,13 @@ Other axes — `directoryLayout: byLayer | byFeature`, `style` / `application`,
 and the greenfield `transport` / `runtime` axes — are at varying stages; the
 rollout tracker above is the source of truth for what's real today.
 
-### Phoenix foundation (`foundation: vanilla`)
+### Phoenix backend (plain Ecto/Phoenix)
 
-The `foundation:` axis stays on the grammar, but `elixir` now admits a single
-value: `foundation: vanilla` (the default). It emits plain `Ecto.Schema` /
-`Ecto.Changeset` / `Ecto.Repo` over `Phoenix.Endpoint` + LiveView. The former
-`foundation: ash` is **removed** — writing it is now a **validation error**.
+`platform: elixir` emits plain `Ecto.Schema` / `Ecto.Changeset` / `Ecto.Repo`
+over `Phoenix.Endpoint` + LiveView. The former `foundation: ash` is **removed**,
+and with it the `foundation:` axis itself — it had collapsed to a single value
+(`vanilla`) on every backend, so it no longer exists on the grammar. A would-be
+`foundation:` clause no longer parses.
 
 The document sub-case below is the one feature with a partial story:
 

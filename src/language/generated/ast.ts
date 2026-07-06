@@ -1050,7 +1050,6 @@ export interface Deployable extends langium.AstNode {
     design?: DesignPack;
     directoryLayout?: LooseName;
     favicon?: string;
-    foundation?: LooseName;
     hosts: Array<langium.Reference<Ui>>;
     name: LooseName;
     persistence?: LooseName;
@@ -1074,7 +1073,6 @@ export const Deployable = {
     design: 'design',
     directoryLayout: 'directoryLayout',
     favicon: 'favicon',
-    foundation: 'foundation',
     hosts: 'hosts',
     name: 'name',
     persistence: 'persistence',
@@ -4825,10 +4823,6 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 },
                 favicon: {
                     name: Deployable.favicon,
-                    optional: true
-                },
-                foundation: {
-                    name: Deployable.foundation,
                     optional: true
                 },
                 hosts: {

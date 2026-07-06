@@ -48,7 +48,7 @@ system TenancyRegistryShop {
 
   api CoreApi from Core
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Accounts]
     serves: CoreApi
     dataSources: [accountsState]

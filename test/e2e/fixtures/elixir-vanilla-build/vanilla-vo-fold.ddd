@@ -51,7 +51,7 @@ system Wallet {
   resource acctLog { for: Accounts, kind: eventLog, use: pg }
 
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Accounts]
     dataSources: [acctLog]
     serves: WalletApi

@@ -248,7 +248,7 @@ const phoenixSystem = (): string => `
       page Landing { route: "/" body: ${BODY} }
     }
     deployable phoenixApp {
-      platform: elixir { foundation: vanilla }, contexts: [C], serves: DemoApi,
+      platform: elixir, contexts: [C], serves: DemoApi,
       ui: Web, port: 4000
     }
   }

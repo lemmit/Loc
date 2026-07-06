@@ -32,7 +32,7 @@ describe("lifecycle-stamp backend support gate", () => {
     "node",
     "python",
     "elixir",
-    "elixir { foundation: vanilla }",
+    "elixir",
   ])("does NOT gate `with auditable` (authed) on the %s backend", async (platform) => {
     const loom = await buildLoomModel(src(platform));
     const stampErrors = validateLoomModel(loom).filter((d) =>
@@ -46,7 +46,7 @@ describe("lifecycle-stamp backend support gate", () => {
   // fail-fast on the elixir vanilla foundation (and on Ash), the principal-
   // without-auth case that survives the gate removal.
   it("gates a principal stamp WITHOUT auth on the elixir vanilla foundation", async () => {
-    const loom = await buildLoomModel(src("elixir { foundation: vanilla }", ""));
+    const loom = await buildLoomModel(src("elixir", ""));
     const errors = validateLoomModel(loom).filter(
       (d) => d.code === "loom.elixir-stamp-unsupported",
     );
