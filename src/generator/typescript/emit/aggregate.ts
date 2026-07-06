@@ -22,6 +22,7 @@ import { renderTsExpr, renderTsType } from "../render-expr.js";
 import {
   renderTsStatementChunks,
   renderTsStatements,
+  statementExprMarks,
   statementSubRegions,
 } from "../render-stmt.js";
 
@@ -454,9 +455,19 @@ function renderEntity(
     });
     const body = chunks.join("\n");
     if (opFragments && chunks.length > 0) {
+      // Expression-level marks (span-tracking-emission.md, M15 phase 7
+      // slice 2) — only computed on this recording path (`opFragments`
+      // present); the flag-off run above never re-renders the RHS
+      // expressions through the marks-carrying entry.
+      const exprMarks = op.statements.map((s, i) => statementExprMarks(s, chunks[i]!));
       opFragments.push({
         fragmentText: body,
-        subRegions: statementSubRegions(op.statements, chunks, `${ctx.name}.${e.name}.${op.name}`),
+        subRegions: statementSubRegions(
+          op.statements,
+          chunks,
+          `${ctx.name}.${e.name}.${op.name}`,
+          exprMarks,
+        ),
       });
     }
     if (body.length > 0) ops.push(body);

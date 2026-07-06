@@ -29,6 +29,7 @@ function decodeVLQField(str: string, pos: { i: number }): number {
 
 interface DecodedSegment {
   genLine: number; // 0-based
+  genCol: number; // 0-based
   sourceIndex: number;
   sourceLine: number;
   sourceCol: number;
@@ -41,6 +42,7 @@ function decodeMappings(mappings: string): DecodedSegment[] {
   let sourceCol = 0;
   const lines = mappings.split(";");
   for (let li = 0; li < lines.length; li++) {
+    let genCol = 0;
     const line = lines[li]!;
     if (line === "") continue;
     for (const seg of line.split(",")) {
@@ -48,10 +50,11 @@ function decodeMappings(mappings: string): DecodedSegment[] {
       const fields: number[] = [];
       while (pos.i < seg.length) fields.push(decodeVLQField(seg, pos));
       expect(fields.length).toBe(4);
+      genCol += fields[0]!;
       sourceIndex += fields[1]!;
       sourceLine += fields[2]!;
       sourceCol += fields[3]!;
-      segments.push({ genLine: li, sourceIndex, sourceLine, sourceCol });
+      segments.push({ genLine: li, genCol, sourceIndex, sourceLine, sourceCol });
     }
   }
   return segments;
@@ -127,5 +130,55 @@ describe("renderSourceMapV3 (unit)", () => {
   it("returns undefined when nothing resolves", () => {
     const regions: SourceMapRegion[] = [region([1, 1], "/missing.ddd", 0, 5)];
     expect(renderSourceMapV3(regions, "gen.ts", new Map())).toBeUndefined();
+  });
+});
+
+// Span-tracking emission (span-tracking-emission.md, M15 phase 7 slice 2):
+// `targetCol`-bearing regions supersede the col-0 construct-granular
+// fallback on the lines they cover, and multiple such regions on ONE
+// generated line become multiple segments, sorted by column.
+describe("renderSourceMapV3 — targetCol (unit)", () => {
+  it("reports the real generated column instead of col 0 when targetCol is present", () => {
+    const sourceTexts = new Map([["/a/one.ddd", TEXT_A]]);
+    const regions: SourceMapRegion[] = [
+      { ...region([1, 1], "/a/one.ddd", 0, 7), targetCol: [10, 17] },
+    ];
+    const rendered = renderSourceMapV3(regions, "gen.ts", sourceTexts);
+    const v3 = JSON.parse(rendered!) as { mappings: string };
+    const segments = decodeMappings(v3.mappings);
+    expect(segments).toHaveLength(1);
+    // 1-based targetCol[0] = 10 -> 0-based genCol = 9.
+    expect(segments[0]).toMatchObject({ genLine: 0, genCol: 9 });
+  });
+
+  it("emits multiple segments, sorted by column, when several regions share one generated line", () => {
+    const sourceTexts = new Map([["/a/one.ddd", TEXT_A]]);
+    const regions: SourceMapRegion[] = [
+      // Deliberately built out of column order — the renderer must sort.
+      { ...region([1, 1], "/a/one.ddd", 8, 13), targetCol: [20, 25] },
+      { ...region([1, 1], "/a/one.ddd", 0, 7), targetCol: [3, 8] },
+    ];
+    const rendered = renderSourceMapV3(regions, "gen.ts", sourceTexts);
+    const v3 = JSON.parse(rendered!) as { mappings: string };
+    const segments = decodeMappings(v3.mappings);
+    expect(segments).toHaveLength(2);
+    expect(segments.every((s) => s.genLine === 0)).toBe(true);
+    // Ascending genCol, 0-based (targetCol[0] - 1).
+    expect(segments[0]!.genCol).toBe(2);
+    expect(segments[1]!.genCol).toBe(19);
+    // Each segment's source position matches its OWN region's span, not
+    // whichever happened to sort first.
+    expect(segments[0]!.sourceCol).toBe(0); // from the [0,7) region's offset 0
+    expect(segments[1]!.sourceCol).toBe(8); // from the [8,13) region's offset 8
+  });
+
+  it("keeps the col-0 fallback on a line with no targetCol-bearing region", () => {
+    const sourceTexts = new Map([["/a/one.ddd", TEXT_A]]);
+    const regions: SourceMapRegion[] = [region([1, 1], "/a/one.ddd", 0, 7)];
+    const rendered = renderSourceMapV3(regions, "gen.ts", sourceTexts);
+    const v3 = JSON.parse(rendered!) as { mappings: string };
+    const segments = decodeMappings(v3.mappings);
+    expect(segments).toHaveLength(1);
+    expect(segments[0]!.genCol).toBe(0);
   });
 });

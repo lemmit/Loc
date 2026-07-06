@@ -52,6 +52,11 @@ interface ResolvedRegion {
   path: string;
   line: number;
   col: number;
+  /** Straight passthrough of `SourceMapRegion.targetCol` (1-based,
+   *  half-open) — converted to 0-based only where it's consumed below,
+   *  same treatment `line`/`col` already get from `offsetToLineCol`'s
+   *  1-based output (span-tracking-emission.md, M15 phase 7 slice 2). */
+  targetCol?: [number, number];
 }
 
 /** Narrowest region covering generated line `line` — same tie-break rule as
@@ -93,7 +98,13 @@ export function renderSourceMapV3(
     if (text === undefined) continue;
     // Shared helper is 1-based; v3 mappings are 0-based.
     const { line, col } = offsetToLineCol(text, source.span.start);
-    resolved.push({ target: region.target, path: source.path, line: line - 1, col: col - 1 });
+    resolved.push({
+      target: region.target,
+      path: source.path,
+      line: line - 1,
+      col: col - 1,
+      targetCol: region.targetCol,
+    });
   }
   if (resolved.length === 0) return undefined;
 
@@ -107,6 +118,38 @@ export function renderSourceMapV3(
   let prevSourceCol = 0;
   const lineGroups: string[] = [];
   for (let line = 1; line <= maxLine; line++) {
+    // Expression-level marks (span-tracking-emission.md, M15 phase 7 slice
+    // 2): a region carrying `targetCol` reports the REAL generated column
+    // instead of the construct-granular col-0 fallback.  Multiple marked
+    // regions covering the SAME generated line become multiple segments,
+    // sorted by column — each is its own precise (generated col) → (source
+    // line, col) pair, rather than collapsing to whichever is "narrowest".
+    const colRegions = resolved
+      .filter((r) => r.targetCol && line >= r.target[0] && line <= r.target[1])
+      .sort((a, b) => a.targetCol![0] - b.targetCol![0]);
+    if (colRegions.length > 0) {
+      // genCol resets to 0 at the start of every line group per the v3
+      // spec; source index/line/col stay running deltas across the WHOLE
+      // mappings string, same as the col-0 path below.
+      let prevGenCol = 0;
+      const segs: string[] = [];
+      for (const r of colRegions) {
+        const genCol = r.targetCol![0] - 1; // 1-based -> 0-based
+        const sourceIndex = sourceIndexOf.get(r.path)!;
+        segs.push(
+          encodeVLQ(genCol - prevGenCol) +
+            encodeVLQ(sourceIndex - prevSourceIndex) +
+            encodeVLQ(r.line - prevSourceLine) +
+            encodeVLQ(r.col - prevSourceCol),
+        );
+        prevGenCol = genCol;
+        prevSourceIndex = sourceIndex;
+        prevSourceLine = r.line;
+        prevSourceCol = r.col;
+      }
+      lineGroups.push(segs.join(","));
+      continue;
+    }
     const region = narrowestRegion(resolved, line);
     if (!region) {
       lineGroups.push("");

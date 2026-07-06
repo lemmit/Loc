@@ -296,8 +296,13 @@ numbering is just the order the dependencies allow.
   serialization boundary. (§4)
 - **D-SM-OPTIN** — source-map emission is opt-in (`--sourcemap`), default
   off, to preserve byte-identical gates. (§8)
-- **Open — formatter ordering.** Does map-build run after Biome on
-  generated TS, or do we re-anchor via markers post-format? (§8)
+- **RESOLVED — formatter ordering.** Moot: there is no post-emission
+  reformatting step in this pipeline. `test:biome-gen` runs `biome lint`
+  (a check, never `--write`/`format`) against generated output, and
+  nothing in the write path reformats emitted bytes afterward — the bytes
+  a recorder measures are the bytes written to disk. See
+  [`../plans/span-tracking-emission.md`](../plans/span-tracking-emission.md)
+  §5 (phase 7 slice 2). (§8)
 - **Open — Java SMAP injection.** Post-`javac` class rewrite vs a javac
   plugin vs shelling to Kotlin's tooling. (§6C)
 

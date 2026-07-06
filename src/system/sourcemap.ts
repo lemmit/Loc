@@ -42,6 +42,12 @@ interface WireRegion {
   target: [number, number];
   origin: WireOriginRef;
   construct?: string;
+  /** OPTIONAL real generated column range — see `SourceMapRegion.targetCol`
+   *  (`src/generator/_trace/sourcemap.ts`) for the 1-based half-open
+   *  convention.  Additive: `.loom/sourcemap.json` stays version 1, and a
+   *  consumer reading only `target` is unaffected (span-tracking-emission.md,
+   *  M15 phase 7 slice 2). */
+  targetCol?: [number, number];
 }
 
 /** Serialize an `OriginRef` into its wire shape.  Deliberately hand-rolled
@@ -77,6 +83,7 @@ function renderRegion(region: SourceMapRegion): WireRegion {
     target: region.target,
     origin: renderOrigin(region.origin),
     ...(region.construct ? { construct: region.construct } : {}),
+    ...(region.targetCol ? { targetCol: region.targetCol } : {}),
   };
 }
 

@@ -4,11 +4,13 @@ import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.
 import { escapeTsIdent, lowerFirst, upperFirst, workflowFnCamel } from "../../util/naming.js";
 import {
   type ExprTarget,
+  type MarkedText,
   type MemberExpr,
   type MethodCallExpr,
   type NewExpr,
   type RefExpr,
   renderExprWith,
+  renderExprWithMarks,
 } from "../_expr/target.js";
 
 // ---------------------------------------------------------------------------
@@ -143,6 +145,15 @@ const TS_TARGET: ExprTarget<TsRenderContext> = {
 
 export function renderTsExpr(e: ExprIR, ctx: TsRenderContext = DEFAULT): string {
   return renderExprWith(e, TS_TARGET, ctx);
+}
+
+/** Marks-carrying sibling of `renderTsExpr` (span-tracking-emission.md, M15
+ *  phase 7 slice 2) — same TS leaf table, composed through the level-wise
+ *  anchoring dispatcher instead of the plain one.  Only called from a
+ *  recording path (the aggregate op-body loop, when a `SourceMapRecorder`
+ *  is threaded in); never on the default flag-off path. */
+export function renderTsExprWithMarks(e: ExprIR, ctx: TsRenderContext = DEFAULT): MarkedText {
+  return renderExprWithMarks(e, TS_TARGET, ctx);
 }
 
 /**

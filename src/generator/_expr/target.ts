@@ -1,5 +1,6 @@
 import { unionInstanceName, variantTag } from "../../ir/stdlib/unions.js";
 import type { ExprIR, LiteralKind } from "../../ir/types/loom-ir.js";
+import type { OriginRef } from "../../ir/types/origin.js";
 
 // ---------------------------------------------------------------------------
 // Shared ExprIR dispatch — the `ExprTarget` contract.
@@ -281,5 +282,243 @@ export function renderExprWith<Ctx extends ExprCtxBase>(
       // expression renderer — reaching it here means it leaked to a domain
       // position, which the IR validator should already have rejected.
       throw new Error("renderExprWith: 'action-ref' is not a domain expression");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Span-tracking emission — the marks-carrying twin of `renderExprWith`
+// (docs/plans/span-tracking-emission.md, M15 phase 7 slice 2).
+//
+// LEVEL-WISE ANCHORING: `renderExprWith` already renders every child via its
+// local `r` BEFORE handing the child STRINGS to the leaf method, so the
+// dispatcher holds both each child's rendered text and the leaf's composed
+// output at the same point.  `renderExprWithMarks` mirrors that exact
+// recursion, but each step returns `{ text, marks }` instead of a bare
+// string: a child's already-anchored marks are re-anchored into the parent's
+// composed text by locating the child's TEXT inside it (the same
+// exact-text-search discipline `SourceMapRecorder.fragment` already uses) —
+// if the text occurs EXACTLY ONCE, the child's marks shift by the found
+// offset; if it occurs zero or more-than-once, that child's marks are
+// skipped (honest — a non-unique anchor is a guess, not a fact).  Because
+// this happens ONE LEVEL AT A TIME, same-text SIBLINGS (`a + a`) skip at
+// their shared parent while a DEEPER repeat two levels down (`count > 0 &&
+// count < max`, where `count` repeats but each occurrence is already
+// resolved within its own comparison's text one level up) still resolves —
+// the fragment() discipline applied one level finer.
+//
+// Every node also contributes its OWN mark — `{ start: 0, end: text.length,
+// origin: e.origin }` — appended AFTER the (already-shifted) child marks, so
+// a consumer that wants the most specific mark covering a position prefers
+// the narrowest one it can find (same "narrowest wins" rule
+// `narrowestRegion` already applies at line granularity in
+// src/system/sourcemap-v3.ts).
+//
+// Leaves are untouched: every `ExprTarget` method is called with plain
+// strings exactly as `renderExprWith` calls it today, so a backend's target
+// table needs no changes to support this.  `renderExprWith` itself is also
+// untouched — this is a parallel entry a caller opts into only when a
+// `SourceMapRecorder` is actually threaded in (the TS aggregate op-body
+// loop, this slice); the flag-off path never calls this function and pays
+// no extra allocation.
+// ---------------------------------------------------------------------------
+
+/** One mark discovered while composing an expression's rendered text —
+ *  `start`/`end` are 0-based, end-exclusive offsets RELATIVE to the owning
+ *  `MarkedText.text` (never absolute file offsets; a caller anchors this
+ *  text into its own larger context, same as `SourceMapRecorder.fragment`
+ *  anchors a whole rendered fragment into a file's final content). */
+export interface ExprMark {
+  start: number;
+  end: number;
+  origin: OriginRef;
+}
+
+/** An expression's rendered text plus every mark discovered while composing
+ *  it — its own node's mark (when `origin` is present) and, recursively, its
+ *  children's marks re-anchored into this text.  Marks are NOT sorted or
+ *  deduplicated — narrowest-first callers should look at end-start width
+ *  themselves, same as `narrowestRegion`. */
+export interface MarkedText {
+  text: string;
+  marks: ExprMark[];
+}
+
+/** Locate `child`'s text inside the already-composed `composed` text and
+ *  shift its marks by the (unique) match offset.  Empty text or a
+ *  zero-mark child short-circuits (nothing to anchor); an absent or
+ *  ambiguous (>1 occurrence) match is an honest skip, not a guess. */
+function anchorChild(child: MarkedText, composed: string): ExprMark[] {
+  if (child.marks.length === 0 || child.text.length === 0) return [];
+  const first = composed.indexOf(child.text);
+  if (first === -1) return [];
+  if (composed.indexOf(child.text, first + 1) !== -1) return [];
+  return child.marks.map((m) => ({ start: m.start + first, end: m.end + first, origin: m.origin }));
+}
+
+/**
+ * Dispatch a resolved `ExprIR` through a backend's `ExprTarget`, exactly as
+ * `renderExprWith` does, but additionally composing the marks described
+ * above.  Mirrors the 17-arm switch (including the variant-`match` /
+ * absence-shape branches) so it stays a drop-in alternative entry — a
+ * caller picks this OR `renderExprWith`, never both, per render.
+ */
+export function renderExprWithMarks<Ctx extends ExprCtxBase>(
+  e: ExprIR,
+  t: ExprTarget<Ctx>,
+  ctx: Ctx,
+): MarkedText {
+  const rm = (x: ExprIR): MarkedText => renderExprWithMarks(x, t, ctx);
+  // Compose this node's own result: anchor every child's marks into `text`
+  // (in child order), then append this node's own whole-text mark.
+  const compose = (text: string, children: readonly MarkedText[]): MarkedText => {
+    const childMarks = children.flatMap((c) => anchorChild(c, text));
+    const ownMarks: ExprMark[] = e.origin ? [{ start: 0, end: text.length, origin: e.origin }] : [];
+    return { text, marks: [...childMarks, ...ownMarks] };
+  };
+  switch (e.kind) {
+    case "literal":
+      return compose(t.literal(e.lit, e.value), []);
+    case "this":
+      return compose(ctx.thisName, []);
+    case "id":
+      return compose(t.id(ctx), []);
+    case "ref":
+      return compose(t.ref(e, ctx), []);
+    case "member": {
+      const recv = rm(e.receiver);
+      return compose(t.member(recv.text, e, ctx), [recv]);
+    }
+    case "method-call": {
+      const recv = rm(e.receiver);
+      const args = e.args.map(rm);
+      return compose(
+        t.methodCall(
+          recv.text,
+          args.map((a) => a.text),
+          e,
+          ctx,
+        ),
+        [recv, ...args],
+      );
+    }
+    case "call": {
+      const args = e.args.map(rm);
+      return compose(
+        t.call(
+          args.map((a) => a.text),
+          e,
+          ctx,
+        ),
+        args,
+      );
+    }
+    case "lambda": {
+      const body = e.body ? rm(e.body) : undefined;
+      return compose(t.lambda(e.param, body?.text), body ? [body] : []);
+    }
+    case "new": {
+      const fields = e.fields.map((f) => ({ name: f.name, value: rm(f.value) }));
+      return compose(
+        t.newPart(
+          fields.map((f) => ({ name: f.name, value: f.value.text })),
+          e,
+          ctx,
+        ),
+        fields.map((f) => f.value),
+      );
+    }
+    case "object": {
+      const fields = e.fields.map((f) => ({ name: f.name, value: rm(f.value) }));
+      return compose(
+        t.object(fields.map((f) => ({ name: f.name, value: f.value.text }))),
+        fields.map((f) => f.value),
+      );
+    }
+    case "paren": {
+      const inner = rm(e.inner);
+      return compose(`(${inner.text})`, [inner]);
+    }
+    case "unary": {
+      const operand = rm(e.operand);
+      return compose(t.unary(e.op, operand.text, e), [operand]);
+    }
+    case "binary": {
+      const left = rm(e.left);
+      const right = rm(e.right);
+      return compose(t.binary(left.text, right.text, e), [left, right]);
+    }
+    case "ternary": {
+      const cond = rm(e.cond);
+      const then = rm(e.then);
+      const otherwise = rm(e.otherwise);
+      return compose(t.ternary(cond.text, then.text, otherwise.text), [cond, then, otherwise]);
+    }
+    case "convert": {
+      const value = rm(e.value);
+      return compose(t.convert(value.text, e), [value]);
+    }
+    case "match": {
+      if (e.subject) {
+        const subject = rm(e.subject);
+        if (e.subjectShape === "absence") {
+          const isFailureArm = (a: (typeof e.variantArms)[number]) =>
+            a.isError === true || a.varType.kind === "none";
+          const successArm = e.variantArms.find((a) => !isFailureArm(a));
+          const failureArm = e.variantArms.find(isFailureArm);
+          const fallback = e.otherwise ? rm(e.otherwise) : undefined;
+          const onPresent = successArm ? rm(successArm.value) : (fallback ?? subject);
+          const onAbsent = failureArm ? rm(failureArm.value) : (fallback ?? subject);
+          const text = t.ternary(t.absenceCheck(subject.text), onPresent.text, onAbsent.text);
+          return compose(text, [subject, onPresent, onAbsent]);
+        }
+        const arms = e.variantArms.map((a) => {
+          const bindingText = a.binding ? t.bindingRefText(a.binding, subject.text) : undefined;
+          const armCtx: Ctx =
+            a.binding && bindingText !== undefined
+              ? { ...ctx, matchBindings: new Map([[a.binding, bindingText]]) }
+              : ctx;
+          const value = renderExprWithMarks(a.value, t, armCtx);
+          return {
+            value,
+            rendered: {
+              tag: variantTag(a.varType),
+              variantTypeName: variantTypeName(a),
+              binding: a.binding,
+              value: value.text,
+              isError: a.isError ?? false,
+            },
+          };
+        });
+        const otherwise = e.otherwise ? rm(e.otherwise) : undefined;
+        const text = t.matchVariant({
+          subject: subject.text,
+          arms: arms.map((a) => a.rendered),
+          otherwise: otherwise?.text,
+          unionName:
+            e.subjectType?.kind === "union" ? unionInstanceName(e.subjectType.variants) : "",
+        });
+        return compose(text, [
+          subject,
+          ...arms.map((a) => a.value),
+          ...(otherwise ? [otherwise] : []),
+        ]);
+      }
+      const arms = e.arms.map((a) => ({ cond: rm(a.cond), value: rm(a.value) }));
+      const otherwise = e.otherwise ? rm(e.otherwise) : undefined;
+      const text = t.match(
+        arms.map((a) => ({ cond: a.cond.text, value: a.value.text })),
+        otherwise?.text,
+      );
+      return compose(text, [
+        ...arms.flatMap((a) => [a.cond, a.value]),
+        ...(otherwise ? [otherwise] : []),
+      ]);
+    }
+    case "list": {
+      const elements = e.elements.map(rm);
+      return compose(t.list(elements.map((el) => el.text)), elements);
+    }
+    case "action-ref":
+      throw new Error("renderExprWithMarks: 'action-ref' is not a domain expression");
   }
 }
