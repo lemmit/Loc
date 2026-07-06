@@ -6043,6 +6043,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           },
           {
             "$type": "Keyword",
+            "value": "write"
+          },
+          {
+            "$type": "Keyword",
             "value": "kind"
           },
           {
@@ -8305,17 +8309,8 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
       "name": "PolicyVerb",
       "dataType": "string",
       "definition": {
-        "$type": "Alternatives",
-        "elements": [
-          {
-            "$type": "Keyword",
-            "value": "read"
-          },
-          {
-            "$type": "Keyword",
-            "value": "write"
-          }
-        ]
+        "$type": "Keyword",
+        "value": "write"
       },
       "entry": false,
       "fragment": false,
@@ -11789,6 +11784,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
                 {
                   "$type": "Keyword",
                   "value": "implements"
+                },
+                {
+                  "$type": "Keyword",
+                  "value": "write"
                 }
               ]
             }
@@ -13266,10 +13265,6 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "global"
-          },
-          {
-            "$type": "Keyword",
-            "value": "read"
           },
           {
             "$type": "Keyword",
@@ -14859,6 +14854,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "implements"
+          },
+          {
+            "$type": "Keyword",
+            "value": "write"
           }
         ]
       },
@@ -16388,6 +16387,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           },
           {
             "$type": "Keyword",
+            "value": "write"
+          },
+          {
+            "$type": "Keyword",
             "value": "create"
           },
           {
@@ -17490,6 +17493,10 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
           {
             "$type": "Keyword",
             "value": "implements"
+          },
+          {
+            "$type": "Keyword",
+            "value": "write"
           },
           {
             "$type": "Keyword",

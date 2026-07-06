@@ -84,8 +84,8 @@ describe("policy write levels — parsing + lowering", () => {
     ]);
   });
 
-  it("bare `allow` and explicit `allow read` both lower to READ rules", async () => {
-    const model = await buildLoomModel(system({ policy: "allow read deep on Invoice" }));
+  it("bare `allow` lowers to a READ rule (no write verb)", async () => {
+    const model = await buildLoomModel(system({ policy: "allow deep on Invoice" }));
     const ctx = model.systems[0]!.subdomains[0]!.contexts[0]!;
     expect(ctx.policyReadLevels).toEqual([
       { aggregate: "Invoice", level: "deep", source: "allow deep on Invoice" },

@@ -40,9 +40,14 @@ policy {
 
 - **Loom (`.ddd`) source** — bare `allow <level> on X` is today's read rule,
   byte-identical. `allow write <level> on X` is new.
-- **Grammar** — `PolicyReadRule` gains `verb=('read'|'write')?`. `read` is an
-  explicit synonym of bare. `local`/`deep`/`global` share the same `ReadLevel`
-  token set; `write global` parses but is a **validator** error (below).
+- **Grammar** — `PolicyReadRule` gains `verb=('write')?`. There is deliberately
+  **no `read` verb synonym**: `read` is far too common a user identifier
+  (`let read = api.orders.getById(...)` appears across the corpus) to promote to
+  a global keyword, so the read form stays bare. `write` is the only new
+  keyword (unused as an identifier anywhere), admitted as a soft keyword in the
+  identifier rules alongside `filter`/`stamp`. `local`/`deep`/`global` share the
+  same `ReadLevel` token set; `write global` parses but is a **validator** error
+  (below).
 
 ### Write levels
 
