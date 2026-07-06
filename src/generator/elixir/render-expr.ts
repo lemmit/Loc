@@ -6,6 +6,7 @@ import type {
   TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
+import { durationCtorOperand, monthsCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
   ORG_PATH_CLAIM_FIELD,
@@ -20,6 +21,7 @@ import {
   snake,
   upperFirst,
 } from "../../util/naming.js";
+import { DURATION_UNIT_MS, type DurationUnit } from "../../util/temporal.js";
 import {
   type BinaryExpr,
   type CallExpr,
@@ -202,9 +204,21 @@ const ELIXIR_TARGET: ExprTarget<RenderCtx> = {
   // Lower to `if … do … else … end`
   ternary: (cond, then, otherwise) => `if ${cond}, do: ${then}, else: ${otherwise}`,
   convert: (value, e) => renderElixirConvert(e.target, e.from, value),
-  duration: () => {
-    throw new Error("A5: duration not yet implemented on elixir");
-  },
+  // A5 temporal: an absolute duration is plain integer MILLISECONDS on this
+  // backend (mirrors the TS representation, so cross-backend `dt − dt` /
+  // duration-algebra values agree).  `duration ± duration` and
+  // `duration * int` therefore fall through to native integer operators, and
+  // `datetime ± duration` dispatches through `DateTime.add/3` in
+  // `renderBinary`'s temporal arm.  Self-parenthesized: the snippet lands in
+  // arbitrary expression slots.
+  //
+  // `months` is the calendar-relative exception — it has no millisecond
+  // width.  The validator (`loom.duration-months-position`) restricts it to
+  // direct `datetime ± months(n)` position, where `renderBinary` sees the raw
+  // duration node on the operand and takes the calendar-shift path CONSUMING
+  // this leaf's output as the bare month COUNT.  So the months arm renders
+  // the count only — it never stands alone in valid output.
+  duration: renderDurationInMemory,
   match: renderMatch,
   // Variant-`match` (variant-match.md) — a `case` over the union result's
   // asymmetric tagged tuple (operation-returns-emit): the success variant is
@@ -245,11 +259,32 @@ const ELIXIR_FILTER_TARGET: ExprTarget<RenderCtx> = {
   ...ELIXIR_TARGET,
   literal: (lit, value) => renderLiteral(lit, value, /* inFilter */ true),
   unary: (op, operand, e) => renderUnary(op, operand, e, /* inFilter */ true),
-  binary: (l, r, e) => renderBinary(l, r, e, /* inFilter */ true),
+  binary: (l, r, e) => renderBinary(l, r, e, /* inFilter */ true, /* ectoQuery */ true),
   convert: (value, e) => renderElixirConvert(e.target, e.from, value, /* inFilter */ true),
-  duration: () => {
-    throw new Error("A5: duration not yet implemented on elixir");
-  },
+  // A5 temporal, where-position: inside an Ecto `where:` a duration
+  // constructor renders as its BARE (parenthesized) COUNT — the queryable
+  // gate (`firstNonQueryableNode`) only admits the DIRECT-constructor
+  // `datetime ± days/hours/minutes/months(n)` shape, so the enclosing
+  // `binary` arm always consumes this output as the `make_interval` amount
+  // (it reads the unit off the raw duration node; see
+  // `renderEctoTemporalBinary`).  Same contract as the in-memory months
+  // leaf: count-only, never standing alone in valid output.  A pinned param
+  // amount arrives pre-rendered as `^n`, so the emit is `(^n)` — parens are
+  // AST-transparent to the Ecto query compiler.
+  duration: (_unit, amount) => `(${amount})`,
+};
+
+// Document-shape STRUCT rendering target (`docStruct` — Route A slice 2).
+// Shares the FILTER target's native-value leaves (the jsonb blob keeps enums
+// as strings and money/decimal as native JSON numbers), but its predicates
+// run IN-MEMORY (`Enum.filter` over rehydrated `%<Agg>.Data{}` embeds), so
+// temporal arithmetic must take the in-memory `DateTime.add/diff` arms — an
+// Ecto `fragment(...)` would be invalid outside a query.  Before A5 the two
+// paths shared one table; the duration/temporal split is the only divergence.
+const ELIXIR_DOC_TARGET: ExprTarget<RenderCtx> = {
+  ...ELIXIR_FILTER_TARGET,
+  binary: (l, r, e) => renderBinary(l, r, e, /* inFilter */ true, /* ectoQuery */ false),
+  duration: renderDurationInMemory,
 };
 
 export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
@@ -262,9 +297,16 @@ export function renderExpr(e: ExprIR, ctx: RenderCtx = DEFAULT): string {
   // `filterArgs` arm, which `docMap` does NOT set).
   // `docStruct` (Route A slice 2) reads struct fields off the rehydrated
   // `%<Agg>.Data{}` embed, but the embed keeps enums as `:string` + money/decimal
-  // as native JSON numbers, so it shares the same native-value filter target
-  // (without any bracket projection — `this.<field>` renders as `record.<field>`).
-  const target = ctx.filterArgs || ctx.docStruct ? ELIXIR_FILTER_TARGET : ELIXIR_TARGET;
+  // as native JSON numbers, so it shares the native-value leaves (without any
+  // bracket projection — `this.<field>` renders as `record.<field>`).  Its
+  // predicates run in-memory though, so it takes the DOC target, whose
+  // temporal arms are the in-memory `DateTime.*` forms rather than Ecto
+  // `fragment(...)` SQL (A5).
+  const target = ctx.filterArgs
+    ? ELIXIR_FILTER_TARGET
+    : ctx.docStruct
+      ? ELIXIR_DOC_TARGET
+      : ELIXIR_TARGET;
   return renderExprWith(e, target, ctx);
 }
 
@@ -917,7 +959,33 @@ function isStringType(e: ExprIR): boolean {
   return false;
 }
 
-function renderBinary(l: string, r: string, e: BinaryExpr, inFilter = false): string {
+function renderBinary(
+  l: string,
+  r: string,
+  e: BinaryExpr,
+  inFilter = false,
+  // True only inside a REAL Ecto query (`from ... where: ...`) — the
+  // `filterArgs` path.  The document path (`docStruct`) shares `inFilter`'s
+  // native money/decimal handling but runs in-memory, so it passes false and
+  // temporal arithmetic takes the `DateTime.*` arms instead of `fragment`s.
+  ectoQuery = false,
+): string {
+  // Inside an Ecto query a bare `now()` (`DateTime.utc_now()`) is not a valid
+  // query expression — it must be `^`-pinned so the clock read happens in
+  // Elixir and binds as a query parameter (same posture as the TS backend's
+  // bound `new Date()`).
+  if (ectoQuery) {
+    if (isNowLiteral(e.left)) l = "^DateTime.utc_now()";
+    if (isNowLiteral(e.right)) r = "^DateTime.utc_now()";
+  }
+  // A5 temporal: datetime ± duration / datetime − datetime / duration +
+  // datetime.  `duration ± duration` and `duration * int` stay native integer
+  // arithmetic (a duration is plain milliseconds on this backend) and fall
+  // through to the default operator path below.
+  if (e.op === "+" || e.op === "-") {
+    const temporal = ectoQuery ? renderEctoTemporalBinary(l, r, e) : renderTemporalBinary(l, r, e);
+    if (temporal !== null) return temporal;
+  }
   // `x == null` / `x != null` → `is_nil(x)` / `not is_nil(x)`.  Comparing
   // against `nil` with `==`/`!=` is an Elixir footgun: the compiler warns
   // ("Comparing values with nil will always return false. Use is_nil/1
@@ -946,6 +1014,25 @@ function renderBinary(l: string, r: string, e: BinaryExpr, inFilter = false): st
   if (!inFilter && e.leftType?.kind === "primitive" && isDecimalStruct(e.leftType.name)) {
     return renderDecimalBinary(e.op, l, r);
   }
+  // A5 temporal — datetime ORDER comparisons dispatch through
+  // `DateTime.compare/2` (mirroring the Decimal path above): native `<`/`>`
+  // on `%DateTime{}` structs is STRUCTURAL comparison (field order compares
+  // day before month before year — semantically wrong), and Elixir 1.18's
+  // type checker flags any order comparison with a known-struct operand
+  // ("comparison with structs found"), failing `--warnings-as-errors` on
+  // e.g. `now() > dueDate + days(1)`.  In-memory only — inside an Ecto query
+  // the native operators lower to SQL timestamp comparison, which is correct.
+  // `==`/`!=` stay native: struct equality is semantic for equal values and
+  // nil-safe (`DateTime.compare/2` raises on nil), and the 1.18 warning
+  // covers only the order operators.
+  if (
+    !ectoQuery &&
+    e.leftType?.kind === "primitive" &&
+    e.leftType.name === "datetime" &&
+    (e.op === "<" || e.op === "<=" || e.op === ">" || e.op === ">=")
+  ) {
+    return renderDateTimeCompare(e.op, l, r);
+  }
   // Prefer the IR-level `leftType` over the AST-shape check: chained
   // string concats (`a + b + c`) carry `leftType: string` on the outer
   // binary even when the left operand is itself a binary.
@@ -957,6 +1044,15 @@ function renderBinary(l: string, r: string, e: BinaryExpr, inFilter = false): st
     return `rem(${l}, ${r})`;
   }
   return `${l} ${elOp} ${r}`;
+}
+
+/** `DateTime.compare/2`-based order comparison (A5 temporal) — the datetime
+ *  sibling of `renderDecimalBinary`'s comparison arms. */
+function renderDateTimeCompare(op: "<" | "<=" | ">" | ">=", l: string, r: string): string {
+  if (op === "<") return `DateTime.compare(${l}, ${r}) == :lt`;
+  if (op === "<=") return `DateTime.compare(${l}, ${r}) in [:lt, :eq]`;
+  if (op === ">") return `DateTime.compare(${l}, ${r}) == :gt`;
+  return `DateTime.compare(${l}, ${r}) in [:gt, :eq]`;
 }
 
 const DECIMAL_ARITH: Record<string, string | undefined> = {
@@ -978,6 +1074,138 @@ function renderDecimalBinary(op: BinOp, l: string, r: string): string {
   if (op === ">=") return `Decimal.compare(${l}, ${r}) in [:gt, :eq]`;
   // Fall through for unsupported ops — surfaces in generated Elixir.
   return `${l} ${op} ${r}`;
+}
+
+// ---------------------------------------------------------------------------
+// A5 temporal — duration constructors + datetime arithmetic.
+//
+// Representation: an ABSOLUTE Loom duration is a plain integer number of
+// MILLISECONDS (mirrors the TS backend, so `dt − dt` values and duration
+// algebra agree across backends).  Loom `datetime` is a `DateTime` struct
+// here (Ecto `:utc_datetime` — see schema-emit's `:utc_datetime` mapping), so
+// the shift/diff arms go through `DateTime.add/3` / `DateTime.diff/3` with
+// the `:millisecond` unit.  days/hours/minutes are whole seconds, so a
+// shifted value still casts cleanly into a second-precision `:utc_datetime`
+// column.
+//
+// `months(n)` is calendar arithmetic with no fixed width; the generated
+// `mix.exs` pins `elixir: "~> 1.16"`, which admits 1.16 where
+// `DateTime.shift/2` (1.17+) does not exist — so the calendar shift is
+// hand-rolled: a whole-month index shift with the day clamped to the target
+// month's last day (`Jan 31 + 1 month → Feb 28/29`), matching Postgres
+// `make_interval(months => n)` (the where-position twin below), .NET
+// `AddMonths`, Java `plusMonths`, and Python `relativedelta`.
+// ---------------------------------------------------------------------------
+
+/** The in-memory duration-constructor leaf (shared by `ELIXIR_TARGET` and
+ *  `ELIXIR_DOC_TARGET`) — see the target-table doc comments. */
+function renderDurationInMemory(unit: DurationUnit, amount: string): string {
+  switch (unit) {
+    case "days":
+      return `((${amount}) * ${DURATION_UNIT_MS.days})`;
+    case "hours":
+      return `((${amount}) * ${DURATION_UNIT_MS.hours})`;
+    case "minutes":
+      return `((${amount}) * ${DURATION_UNIT_MS.minutes})`;
+    case "months":
+      // Bare count — consumed only by the binary calendar arm; the validator
+      // (`loom.duration-months-position`) makes other positions unreachable.
+      return `(${amount})`;
+  }
+}
+
+/** `now()` (paren-transparently) — the one literal that must be `^`-pinned
+ *  inside an Ecto query, where a bare function call is not a valid query
+ *  expression. */
+function isNowLiteral(e: ExprIR): boolean {
+  if (e.kind === "paren") return isNowLiteral(e.inner);
+  return e.kind === "literal" && e.lit === "now";
+}
+
+/** The hand-rolled calendar month shift (see the section comment): an
+ *  immediately-applied `fn` so the datetime operand is evaluated once.
+ *  `count` is the months leaf's output (the bare parenthesized amount);
+ *  `Integer.floor_div`/`Integer.mod` keep a backwards shift across a year
+ *  boundary correct (truncating `div/rem` would not). */
+function calendarShift(dt: string, sign: "+" | "-", count: string): string {
+  return (
+    `(fn dt -> total = dt.year * 12 + dt.month - 1 ${sign} ${count}; ` +
+    `y = Integer.floor_div(total, 12); m = Integer.mod(total, 12) + 1; ` +
+    `%{dt | year: y, month: m, day: min(dt.day, :calendar.last_day_of_the_month(y, m))} end).(${dt})`
+  );
+}
+
+/** The datetime-involving `+`/`-` arms (A5 temporal) for IN-MEMORY rendering
+ *  (op / derived / invariant bodies, ExUnit tests, the document path), or
+ *  null to fall through to native operator rendering.  Dispatch is
+ *  type-driven off the lowering's `leftType`/`resultType` stamps:
+ *    datetime − datetime → duration   ⇒ `DateTime.diff(l, r, :millisecond)`
+ *    datetime ± duration → datetime   ⇒ `DateTime.add(l, ±r, :millisecond)`
+ *    duration + datetime → datetime   ⇒ `DateTime.add(r, l, :millisecond)`
+ *  with the calendar exception: when the duration operand is a direct
+ *  `months(n)` constructor node (the only position the validator admits
+ *  months in), the pre-rendered operand string is the bare month COUNT (see
+ *  the `duration` leaf) and the shift goes through `calendarShift`. */
+function renderTemporalBinary(l: string, r: string, e: BinaryExpr): string | null {
+  if (e.op !== "+" && e.op !== "-") return null;
+  const prim = (t: TypeIR | undefined): string | null => (t?.kind === "primitive" ? t.name : null);
+  const lt = prim(e.leftType);
+  const rt = prim(e.resultType);
+  if (lt === "datetime") {
+    // datetime − datetime → milliseconds (the duration representation).
+    if (e.op === "-" && rt === "duration") return `DateTime.diff(${l}, ${r}, :millisecond)`;
+    if (rt === "datetime") {
+      if (monthsCtorOperand(e.right)) return calendarShift(l, e.op, r);
+      return e.op === "+"
+        ? `DateTime.add(${l}, ${r}, :millisecond)`
+        : `DateTime.add(${l}, -(${r}), :millisecond)`;
+    }
+    return null;
+  }
+  // duration + datetime (commuted form; `duration - datetime` never types).
+  if (lt === "duration" && e.op === "+" && rt === "datetime") {
+    if (monthsCtorOperand(e.left)) return calendarShift(r, "+", l);
+    return `DateTime.add(${r}, ${l}, :millisecond)`;
+  }
+  return null;
+}
+
+/** Postgres `make_interval` named-argument spelling per duration unit —
+ *  the same table the TS backend's Drizzle lowerer uses
+ *  (`repository-find-predicate.ts`); `months` is calendar-correct on the SQL
+ *  side (`timestamp + make_interval(months => 1)` does native calendar
+ *  arithmetic), so where-position needs no special month path. */
+const MAKE_INTERVAL_ARG: Record<DurationUnit, string> = {
+  days: "days",
+  hours: "hours",
+  minutes: "mins",
+  months: "months",
+};
+
+/** The where-position twin of `renderTemporalBinary` — `datetime ±
+ *  days/hours/minutes/months(n)` inside an Ecto `where:` renders as SQL
+ *  interval arithmetic: `fragment("? ± make_interval(days => ?)", side, n)`.
+ *  Works on EITHER side of a comparison: a column (`record.due_date`)
+ *  interpolates, a pinned param (`^q`) binds, and the amount likewise binds
+ *  (`(^n)`) or embeds (`(30)`) — the pre-rendered strings are all valid
+ *  fragment arguments.  Only the DIRECT constructor operand form lowers
+ *  (paren-transparent), mirroring exactly what `firstNonQueryableNode`
+ *  admits; `datetime − datetime` in where-position is rejected by the gate,
+ *  so no arm is needed.  The `?`-placeholder string is verbatim SQL to Ecto,
+ *  so the `days => ?` named-argument form passes straight through to
+ *  Postgres (which accepts parameters in named-notation calls). */
+function renderEctoTemporalBinary(l: string, r: string, e: BinaryExpr): string | null {
+  const rightDur = durationCtorOperand(e.right);
+  const leftDur = e.op === "+" ? durationCtorOperand(e.left) : null;
+  const dur = rightDur ?? leftDur;
+  const otherRaw = rightDur ? e.left : leftDur ? e.right : null;
+  if (!dur || !otherRaw || durationCtorOperand(otherRaw)) return null;
+  // The datetime side (already `^`-pinned by the caller when it was a bare
+  // `now()`); the duration side's pre-rendered string is the bare count from
+  // the filter target's duration leaf.
+  const side = rightDur ? l : r;
+  const amount = rightDur ? r : l;
+  return `fragment("? ${e.op} make_interval(${MAKE_INTERVAL_ARG[dur.unit]} => ?)", ${side}, ${amount})`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1037,9 +1265,12 @@ export function renderTypespec(t: TypeIR, contextModule: string, typesModule?: s
         case "json":
           return "map()";
         case "duration":
-          // A5: duration not yet implemented on elixir — expression-only
-          // primitive; never a field / wire type in this slice.
-          throw new Error("A5: duration not yet implemented on elixir");
+          // A5 temporal — an absolute duration is plain integer milliseconds
+          // on this backend (see the temporal section above).  Expression-only
+          // (never a field / wire type in this slice), so this arm serves
+          // inferred spec positions (e.g. a duration-typed `let` flowing into
+          // a `function` signature) rather than stored attributes.
+          return "integer()";
       }
     case "id":
       // IDs flow as UUID strings on the struct (`:uuid` → String.t()).

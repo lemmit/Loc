@@ -103,6 +103,11 @@ function walkExpr(e: ExprIR, pred: (sub: ExprIR | undefined) => boolean): boolea
       return pred(e.operand);
     case "paren":
       return pred(e.inner);
+    case "duration":
+      // A5 temporal — `days(n)` etc.; the amount may reference a param
+      // (`days(graceDays)`), so the usage probes must descend into it or the
+      // param's binding line is dropped and the generated body doesn't compile.
+      return pred(e.amount);
     case "call":
       return e.args.some((a) => pred(a));
     case "lambda":
