@@ -125,7 +125,7 @@ function esZero(t: TypeIR): string {
 /** Render one applier statement against the public `state` object — the
  *  `this.<field>` seam resolves to `state.<field>`.  Applier bodies are pure
  *  folds (A1 discipline), so only assigns / collection mutations appear. */
-function renderApplierStmt(s: StmtIR, indent: string): string {
+export function renderApplierStmt(s: StmtIR, indent: string): string {
   const target = (segments: readonly string[]): string =>
     `state.${segments.map((x) => snake(x)).join(".")}`;
   const rctx = { thisName: "state" } as const;

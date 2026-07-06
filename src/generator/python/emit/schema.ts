@@ -3,6 +3,7 @@ import type {
   AssociationIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
+  ProjectionIR,
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import { durableEventTypes } from "../../../ir/util/channels.js";
@@ -51,6 +52,8 @@ export function renderPySchema(
    *  context (`ctx` here may be a merged union).  Built by the caller via
    *  `resolveContextSchema`; undefined → unqualified, byte-identical. */
   resolveWorkflowSchema?: (wf: WorkflowIR) => string | undefined,
+  /** Per-projection read-model-table schema — same owning-context map-back. */
+  resolveProjectionSchema?: (proj: ProjectionIR) => string | undefined,
 ): string {
   const models: string[] = [];
   for (const agg of ctx.aggregates) {
@@ -150,6 +153,12 @@ export function renderPySchema(
       continue;
     }
     models.push(renderWorkflowStateModel(wf, ctx, durable, wfSchema));
+  }
+  // Projection read models (projection.md): one context-owned read-model row
+  // per projection, keyed by its correlation column, non-key columns nullable
+  // (a fold upserts partial rows) — matches the shared nullable DDL.
+  for (const proj of ctx.projections) {
+    models.push(renderProjectionStateModel(proj, ctx, resolveProjectionSchema?.(proj)));
   }
   // Transactional outbox (dispatch-delivery-semantics.md): the shared
   // `__loom_outbox` table when any channel asks for durability.
@@ -379,6 +388,46 @@ function renderWorkflowStateModel(
   }
   return lines(
     `class ${wf.name}Row(Base):`,
+    `    __tablename__ = "${tableName}"`,
+    schema ? `    __table_args__ = ({"schema": "${schema}"},)` : null,
+    "",
+    cols.map(renderColumn),
+  );
+}
+
+/** Projection read-model row (mirrors `renderWorkflowStateModel`): PK is the
+ *  `keyed by` correlation column; every non-key column is forced NULLABLE so a
+ *  fold can upsert a partial row (matches the shared nullable `MigrationsIR`
+ *  DDL — a mismatch would break `mypy --strict` / inserts). */
+function renderProjectionStateModel(
+  proj: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
+  schema?: string,
+): string {
+  const tableName = plural(snake(proj.name));
+  const corr = proj.correlationField;
+  const cols: PyColumn[] = [];
+  for (const f of proj.stateFields) {
+    if (f.name === corr) {
+      cols.push({
+        attr: snake(f.name),
+        pyType: "str",
+        saType: "Uuid(as_uuid=False)",
+        optional: false,
+        primaryKey: true,
+      });
+      continue;
+    }
+    const t = f.type.kind === "optional" ? f.type.inner : f.type;
+    if (t.kind === "array" && t.element.kind === "id") {
+      cols.push({ attr: snake(f.name), pyType: "object", saType: "JSONB", optional: true });
+      continue;
+    }
+    // Force nullable on every non-key column.
+    cols.push(...columnsForFields([f], ctx).map((c) => ({ ...c, optional: true })));
+  }
+  return lines(
+    `class ${proj.name}Row(Base):`,
     `    __tablename__ = "${tableName}"`,
     schema ? `    __table_args__ = ({"schema": "${schema}"},)` : null,
     "",
