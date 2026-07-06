@@ -26,9 +26,23 @@ import {
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
+import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { lowerFirst, plural } from "../../util/naming.js";
 import { joinColumnName, joinTableConstName } from "./emit.js";
+import { TS_INTRINSIC_RENDERERS } from "./render-expr.js";
 import { associationsOf } from "./repository-associations-builder.js";
+
+// SQL-side scalar-intrinsic snippets (src/util/intrinsics.ts) — how a
+// `queryable` intrinsic applied to a COLUMN renders inside a Drizzle
+// predicate.  The snippet receives the already-rendered column ref (and
+// rendered value args) and yields a `sql\`…\`` wrapper Drizzle accepts in
+// operator position; callers add `sql` to the import set.  Value-side
+// intrinsic applications (a param receiver) render through the plain TS
+// snippet table instead — the value side is host-language JS.  Exported
+// for the intrinsic completeness test.
+export const DRIZZLE_INTRINSIC_SQL: Record<string, (recv: string, args: string[]) => string> = {
+  "string.trim": (recv) => `sql\`trim(\${${recv}})\``,
+};
 
 // IR expression → Drizzle expression
 //
@@ -182,6 +196,20 @@ export function lowerToDrizzle(
 
   function renderColumnRef(e: ExprIR): string | null {
     if (e.kind === "paren") return renderColumnRef(e.inner);
+    // Queryable scalar intrinsic over a column — `this.name.trim()` —
+    // wraps the column ref in its SQL snippet (`sql\`trim(col)\``).
+    if (e.kind === "method-call" && e.receiverType.kind === "primitive") {
+      const sig = intrinsicFor(e.receiverType.name, e.member);
+      const sqlSnippet = DRIZZLE_INTRINSIC_SQL[intrinsicKey(e.receiverType.name, e.member)];
+      if (sig?.queryable && sqlSnippet) {
+        const col = renderColumnRef(e.receiver);
+        const args = e.args.map((a) => renderValue(a));
+        if (col === null || args.some((a) => a === null)) return null;
+        ops.add("sql");
+        return sqlSnippet(col, args as string[]);
+      }
+      return null;
+    }
     // `this.field` — direct column access.  In the IR this is a
     // `member` over the `this` literal.
     if (e.kind === "member" && e.receiver.kind === "this") {
@@ -252,6 +280,19 @@ export function lowerToDrizzle(
     // is structurally assignable.
     if (e.kind === "member" && e.receiver.kind === "ref" && e.receiver.refKind === "current-user") {
       return `${principal}.${e.member}`;
+    }
+    // Queryable scalar intrinsic over a VALUE (a param/let receiver —
+    // `q.trim()`): the value side of a Drizzle comparison is plain JS,
+    // so render through the TS in-memory snippet table.
+    if (e.kind === "method-call" && e.receiverType.kind === "primitive") {
+      const sig = intrinsicFor(e.receiverType.name, e.member);
+      const tsSnippet = TS_INTRINSIC_RENDERERS[intrinsicKey(e.receiverType.name, e.member)];
+      if (sig?.queryable && tsSnippet) {
+        const recv = renderValue(e.receiver);
+        const args = e.args.map((a) => renderValue(a));
+        if (recv === null || args.some((a) => a === null)) return null;
+        return tsSnippet(recv, args as string[]);
+      }
     }
     void ctx;
     return null;

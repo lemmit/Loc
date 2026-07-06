@@ -3,6 +3,7 @@
 // queryable-subset predicate helpers, used across several check modules.
 // -------------------------------------------------------------------------
 
+import { intrinsicFor } from "../../../util/intrinsics.js";
 import type { AggregateIR, BoundedContextIR, ExprIR } from "../../types/loom-ir.js";
 import { isDeepScopeFilter } from "../../util/tenant-stance.js";
 import { walkExprDeep } from "../../util/walk.js";
@@ -131,6 +132,16 @@ function isColumnRef(e: ExprIR): boolean {
   if (e.kind === "member" && e.receiver.kind === "this") return true;
   if (e.kind === "member" && e.receiver.kind === "member" && e.receiver.receiver.kind === "this")
     return true;
+  // A queryable scalar intrinsic over a column is still column-side —
+  // `this.name.trim()` renders as SQL over the column, so a comparison
+  // against another column must trip the column-vs-column gate too.
+  if (
+    e.kind === "method-call" &&
+    e.receiverType.kind === "primitive" &&
+    intrinsicFor(e.receiverType.name, e.member)?.queryable
+  ) {
+    return isColumnRef(e.receiver);
+  }
   return false;
 }
 
@@ -140,6 +151,7 @@ function describeColumnRef(e: ExprIR): string {
   if (e.kind === "member" && e.receiver.kind === "this") return `'this.${e.member}'`;
   if (e.kind === "member" && e.receiver.kind === "member" && e.receiver.receiver.kind === "this")
     return `'this.${e.receiver.member}.${e.member}'`;
+  if (e.kind === "method-call") return `${describeColumnRef(e.receiver)}.${e.member}()`;
   return "<column>";
 }
 
@@ -253,6 +265,25 @@ export function firstNonQueryableNode(e: ExprIR): string | null {
         e.args.length === 1
       ) {
         return firstNonQueryableNode(e.args[0]!);
+      }
+      // Queryable scalar intrinsics (src/util/intrinsics.ts) — an op the
+      // catalogue marks `queryable` is admitted when its receiver and every
+      // argument are themselves queryable (every backend's predicate
+      // renderer carries a matching SQL arm, pinned by the intrinsic
+      // completeness test).  A non-queryable intrinsic reports itself by
+      // name so `loom.find-where-not-queryable` stays actionable.
+      if (e.receiverType.kind === "primitive") {
+        const sig = intrinsicFor(e.receiverType.name, e.member);
+        if (sig?.queryable) {
+          const recv = firstNonQueryableNode(e.receiver);
+          if (recv) return recv;
+          for (const a of e.args) {
+            const bad = firstNonQueryableNode(a);
+            if (bad) return bad;
+          }
+          return null;
+        }
+        if (sig) return `non-queryable intrinsic '.${e.member}'`;
       }
       return `collection op '.${e.member}'`;
     case "lambda":

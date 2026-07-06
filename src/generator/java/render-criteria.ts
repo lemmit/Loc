@@ -6,6 +6,7 @@ import {
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
+import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { boxedJavaType, collectJavaExprImports, renderJavaExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -81,6 +82,39 @@ function bool(e: ExprIR, ctx: CriteriaCtx): string {
   }
 }
 
+// Criteria-API-side scalar-intrinsic snippets (src/util/intrinsics.ts) —
+// how a `queryable` intrinsic applied to a candidate PATH renders inside a
+// Specification predicate (`this.name.trim()` → `cb.trim(root.get("name"))`).
+// Value-side applications (a param receiver — `q.trim()`) render as plain
+// Java through `JAVA_INTRINSIC_RENDERERS` via `value()` instead.  Exported
+// for the intrinsic completeness test.
+export const JAVA_CRITERIA_INTRINSICS: Record<string, (recv: string, args: string[]) => string> = {
+  "string.trim": (recv) => `cb.trim(${recv})`,
+};
+
+/** Candidate-path side of a comparison, rendered — a bare `this.a.b` path
+ *  or a queryable intrinsic wrapping one (`this.name.trim()` →
+ *  `cb.trim(root.<String>get("name"))`).  Null when `e` is not path-rooted
+ *  (i.e. it's the value side). */
+function criteriaPathExpr(e: ExprIR, ctx: CriteriaCtx): string | null {
+  if (e.kind === "paren") return criteriaPathExpr(e.inner, ctx);
+  if (e.kind === "method-call" && e.receiverType.kind === "primitive") {
+    const sig = intrinsicFor(e.receiverType.name, e.member);
+    const snippet = JAVA_CRITERIA_INTRINSICS[intrinsicKey(e.receiverType.name, e.member)];
+    if (sig?.queryable && snippet) {
+      const recv = criteriaPathExpr(e.receiver, ctx);
+      if (recv === null) return null;
+      return snippet(
+        recv,
+        e.args.map((a) => value(a, ctx)),
+      );
+    }
+    return null;
+  }
+  const segs = pathSegments(e);
+  return segs ? path(segs, ctx) : null;
+}
+
 function binary(e: Extract<ExprIR, { kind: "binary" }>, ctx: CriteriaCtx): string {
   if (e.op === "&&") return `cb.and(${bool(e.left, ctx)}, ${bool(e.right, ctx)})`;
   if (e.op === "||") return `cb.or(${bool(e.left, ctx)}, ${bool(e.right, ctx)})`;
@@ -91,14 +125,14 @@ function binary(e: Extract<ExprIR, { kind: "binary" }>, ctx: CriteriaCtx): strin
     if (!segs) throw unsupported("null check over a non-path operand");
     return e.op === "==" ? `cb.isNull(${path(segs, ctx)})` : `cb.isNotNull(${path(segs, ctx)})`;
   }
-  // Comparison: one side is the candidate path, the other the value.
-  const leftSegs = pathSegments(e.left);
-  const rightSegs = pathSegments(e.right);
-  const segs = leftSegs ?? rightSegs;
-  if (!segs) throw unsupported("comparison without a candidate path side");
-  const valueExpr = leftSegs ? e.right : e.left;
-  const flip = !leftSegs;
-  const p = path(segs, ctx);
+  // Comparison: one side is the candidate path (possibly wrapped in a
+  // queryable intrinsic), the other the value.
+  const leftPath = criteriaPathExpr(e.left, ctx);
+  const rightPath = leftPath === null ? criteriaPathExpr(e.right, ctx) : null;
+  const p = leftPath ?? rightPath;
+  if (p === null) throw unsupported("comparison without a candidate path side");
+  const valueExpr = leftPath !== null ? e.right : e.left;
+  const flip = leftPath === null;
   const v = value(valueExpr, ctx);
   const op = flip ? (FLIPPED[e.op] ?? e.op) : e.op;
   switch (op) {

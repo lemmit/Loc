@@ -138,6 +138,19 @@ describe("java renderJavaExpr — member + method-call", () => {
     ).toBe('Pattern.compile("^[^@]+@.+$").matcher(this.email).find()');
   });
 
+  it("renders the `string.trim()` intrinsic via the catalogue snippet", () => {
+    expect(
+      renderJavaExpr({
+        kind: "method-call",
+        receiver: thisProp("name"),
+        member: "trim",
+        args: [],
+        receiverType: STRING,
+        isCollectionOp: false,
+      }),
+    ).toBe("this.name.trim()");
+  });
+
   it("renders collection ops via Streams", () => {
     const items = (member: string, args: ExprIR[] = []): ExprIR => ({
       kind: "method-call",

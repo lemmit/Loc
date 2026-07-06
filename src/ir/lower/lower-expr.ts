@@ -61,6 +61,7 @@ import {
 import { isCollectionOp } from "../../util/collection-ops.js";
 import { isIntrinsicMatcher } from "../../util/intrinsic-matchers.js";
 import { PRINCIPAL_ORG_PATH, PRINCIPAL_ROOT_ORG } from "../../util/principal.js";
+import { intrinsicFor, intrinsicReturnType } from "../../util/intrinsics.js";
 import { findVerb, type ResourceVerbDef } from "../resource-verbs.js";
 import { variantTag } from "../stdlib/unions.js";
 import type {
@@ -1771,6 +1772,11 @@ function memberType(t: TypeIR, name: string, env: Env): TypeIR {
   }
   if (t.kind === "primitive" && t.name === "string" && name === "length") {
     return { kind: "primitive", name: "int" };
+  }
+  if (t.kind === "primitive") {
+    // Scalar intrinsics (src/util/intrinsics.ts) — catalogue-driven.
+    const sig = intrinsicFor(t.name, name);
+    if (sig) return { kind: "primitive", name: intrinsicReturnType(sig, t.name) as PrimitiveName };
   }
   return { kind: "primitive", name: "string" };
 }

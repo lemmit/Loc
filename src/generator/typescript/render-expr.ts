@@ -1,6 +1,7 @@
 import { genericShape } from "../../ir/stdlib/generics.js";
 import { variantTag } from "../../ir/stdlib/unions.js";
 import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
+import { intrinsicKey } from "../../util/intrinsics.js";
 import { escapeTsIdent, lowerFirst, upperFirst, workflowFnCamel } from "../../util/naming.js";
 import {
   type ExprTarget,
@@ -250,6 +251,13 @@ function renderMember(recv: string, e: MemberExpr): string {
   return `${recv}.${e.member}`;
 }
 
+// Scalar-intrinsic snippet table (src/util/intrinsics.ts) — one arm per
+// catalogue row, keyed `<receiver>.<name>`.  Exported so the intrinsic
+// completeness test can pin that every catalogue row has a TS arm.
+export const TS_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[]) => string> = {
+  "string.trim": (recv) => `${recv}.trim()`,
+};
+
 function renderMethodCall(
   recv: string,
   args: string[],
@@ -277,6 +285,10 @@ function renderMethodCall(
       return `${asRegexLiteral(arg0.value)}.test(${recv})`;
     }
     return `new RegExp(${args[0]}).test(${recv})`;
+  }
+  if (e.receiverType.kind === "primitive") {
+    const intrinsic = TS_INTRINSIC_RENDERERS[intrinsicKey(e.receiverType.name, e.member)];
+    if (intrinsic) return intrinsic(recv, args);
   }
   return `${recv}.${e.member}(${args.join(", ")})`;
 }

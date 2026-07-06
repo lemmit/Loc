@@ -47,6 +47,29 @@ describe("render-expr vanilla leaves", () => {
     expect(renderExpr(prop, ctx)).toBe("record.ship_state");
   });
 
+  it("string.trim() intrinsic → SQL fragment in a filter (query) context, String.trim in-memory (stdlib A1)", () => {
+    const trimmed: ExprIR = {
+      kind: "method-call",
+      receiver: { kind: "ref", name: "name", refKind: "this-prop" },
+      member: "trim",
+      args: [],
+      receiverType: { kind: "primitive", name: "string" },
+      isCollectionOp: false,
+    };
+    // Query context (filterArgs): a `String.*` call is not a valid Ecto query
+    // expression — render the SQL fragment (both column-side and value-side
+    // receivers compose inside `where:`).
+    expect(renderExpr(trimmed, ctx)).toBe('fragment("btrim(?)", record.name)');
+    // In-memory context: the `String.trim/1` stdlib call (Elixir strings have
+    // no methods — the old fallthrough emitted invalid `record.name.trim()`).
+    const memCtx: RenderCtx = {
+      thisName: "record",
+      contextModule: "Acme.Sales",
+      foundation: "vanilla",
+    };
+    expect(renderExpr(trimmed, memCtx)).toBe("String.trim(record.name)");
+  });
+
   // An operation self-call resolves to the sibling op's context fn
   // `<op>_<agg>(record, params)` (arity 2, tagged-tuple result); a `function`
   // self-call stays the bare arity-1 `is_draft(record)`.  The op ctx needs `agg`

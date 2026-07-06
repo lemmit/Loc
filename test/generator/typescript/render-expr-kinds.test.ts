@@ -142,6 +142,19 @@ describe("ts renderTsExpr — member + method-call", () => {
     ).toBe("/^[^@]+@.+$/.test(this._email)");
   });
 
+  it("renders the `string.trim()` intrinsic via the catalogue snippet", () => {
+    expect(
+      renderTsExpr({
+        kind: "method-call",
+        receiver: thisProp("name"),
+        member: "trim",
+        args: [],
+        receiverType: STRING,
+        isCollectionOp: false,
+      }),
+    ).toBe("this._name.trim()");
+  });
+
   it("renders collection-op `count` as .length", () => {
     expect(
       renderTsExpr({

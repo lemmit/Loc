@@ -8,6 +8,7 @@ import {
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
+import { intrinsicKey } from "../../util/intrinsics.js";
 import { escapeCsharpIdent, upperFirst } from "../../util/naming.js";
 import {
   type CallExpr,
@@ -473,6 +474,13 @@ function renderMember(recv: string, e: MemberExpr): string {
   return `${recv}.${upperFirst(e.member)}`;
 }
 
+// Scalar-intrinsic snippet table (src/util/intrinsics.ts) — one arm per
+// catalogue row, keyed `<receiver>.<name>`.  Exported so the intrinsic
+// completeness test can pin that every catalogue row has a C# arm.
+export const CS_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[]) => string> = {
+  "string.trim": (recv) => `${recv}.Trim()`,
+};
+
 function renderMethodCall(
   recv: string,
   args: string[],
@@ -537,6 +545,10 @@ function renderMethodCall(
     args.length === 1
   ) {
     return `Regex.IsMatch(${recv}, ${args[0]})`;
+  }
+  if (e.receiverType.kind === "primitive") {
+    const intrinsic = CS_INTRINSIC_RENDERERS[intrinsicKey(e.receiverType.name, e.member)];
+    if (intrinsic) return intrinsic(recv, args);
   }
   return `${recv}.${upperFirst(e.member)}(${args.join(", ")})`;
 }

@@ -138,6 +138,20 @@ describe("py renderPyExpr — member / method-call", () => {
     ).toBe("len(name)");
   });
 
+  it("renders the string.trim intrinsic as .strip(), not .trim() (stdlib A1)", () => {
+    expect(
+      renderPyExpr({
+        kind: "method-call",
+        receiver: refParam("name"),
+        member: "trim",
+        args: [],
+        receiverType: STRING,
+        memberType: STRING,
+        isCollectionOp: false,
+      }),
+    ).toBe("name.strip()");
+  });
+
   it("renders string.matches via re.search", () => {
     expect(
       renderPyExpr({

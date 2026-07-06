@@ -155,6 +155,19 @@ describe("dotnet renderCsExpr — member + method-call", () => {
     ).toBe('Regex.IsMatch(this.Email, "^[^@]+@.+$")');
   });
 
+  it("renders the `string.trim()` intrinsic as `.Trim()`", () => {
+    expect(
+      renderCsExpr({
+        kind: "method-call",
+        receiver: thisProp("name"),
+        member: "trim",
+        args: [],
+        receiverType: STRING,
+        isCollectionOp: false,
+      }),
+    ).toBe("this.Name.Trim()");
+  });
+
   it("renders collection-op `count` as `.Count()`", () => {
     expect(
       renderCsExpr({

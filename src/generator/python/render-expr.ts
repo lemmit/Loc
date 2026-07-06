@@ -1,5 +1,6 @@
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
+import { intrinsicKey } from "../../util/intrinsics.js";
 import { escapePythonIdent, snake, upperFirst, workflowFnSnake } from "../../util/naming.js";
 import {
   type CallExpr,
@@ -310,6 +311,16 @@ function renderMember(recv: string, e: MemberExpr): string {
   return `${recv}.${snake(e.member)}`;
 }
 
+// Scalar-intrinsic snippet table (src/util/intrinsics.ts) — one arm per
+// catalogue row, keyed `<receiver>.<name>`.  Consulted BEFORE the default
+// fallthrough below: the default snake-cases the DSL member onto the
+// receiver (`.trim()`), which is not a Python string method — the catalogue
+// snippet owns the host spelling (`.strip()`).  Exported so the intrinsic
+// completeness test can pin that every catalogue row has a Python arm.
+export const PY_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[]) => string> = {
+  "string.trim": (recv) => `${recv}.strip()`,
+};
+
 function renderMethodCall(
   recv: string,
   args: string[],
@@ -328,6 +339,10 @@ function renderMethodCall(
     args.length === 1
   ) {
     return `re.search(${args[0]}, ${recv}) is not None`;
+  }
+  if (e.receiverType.kind === "primitive") {
+    const intrinsic = PY_INTRINSIC_RENDERERS[intrinsicKey(e.receiverType.name, e.member)];
+    if (intrinsic) return intrinsic(recv, args);
   }
   return `${recv}.${snake(e.member)}(${args.join(", ")})`;
 }

@@ -1,5 +1,6 @@
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type { EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
+import { intrinsicKey } from "../../util/intrinsics.js";
 import {
   escapeJavaIdent,
   lowerFirst,
@@ -430,6 +431,13 @@ function renderMember(recv: string, e: MemberExpr): string {
   return `${recv}.${e.member}()`;
 }
 
+// Scalar-intrinsic snippet table (src/util/intrinsics.ts) — one arm per
+// catalogue row, keyed `<receiver>.<name>`.  Exported so the intrinsic
+// completeness test can pin that every catalogue row has a Java arm.
+export const JAVA_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[]) => string> = {
+  "string.trim": (recv) => `${recv}.trim()`,
+};
+
 function renderMethodCall(
   recv: string,
   args: string[],
@@ -457,6 +465,10 @@ function renderMethodCall(
     return field
       ? `${field}.matcher(${recv}).find()`
       : `Pattern.compile(${args[0]}).matcher(${recv}).find()`;
+  }
+  if (e.receiverType.kind === "primitive") {
+    const intrinsic = JAVA_INTRINSIC_RENDERERS[intrinsicKey(e.receiverType.name, e.member)];
+    if (intrinsic) return intrinsic(recv, args);
   }
   return `${recv}.${e.member}(${args.join(", ")})`;
 }

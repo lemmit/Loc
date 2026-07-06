@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { lowerToDrizzle } from "../../src/generator/typescript/repository-find-builder.js";
 import type { EnrichedBoundedContextIR, ExprIR, TypeIR } from "../../src/ir/types/loom-ir.js";
+import { firstColumnVsColumn } from "../../src/ir/validate/checks/shared.js";
 import { firstNonQueryableNode } from "../../src/ir/validate/validate.js";
 
 // ---------------------------------------------------------------------------
@@ -123,6 +124,50 @@ const QUERYABLE: { name: string; e: ExprIR }[] = [
   { name: "this.col == lambda", e: cmpThisRef("lambda") },
   { name: "this.col == enum-value", e: cmpThisRef("enum-value") },
   {
+    name: "this.col.trim() == literal (queryable scalar intrinsic on the column side)",
+    e: {
+      kind: "binary",
+      op: "==",
+      left: {
+        kind: "method-call",
+        receiver: {
+          kind: "member",
+          receiver: thisExpr,
+          member: "name",
+          receiverType: STR,
+          memberType: STR,
+        },
+        member: "trim",
+        args: [],
+        receiverType: STR,
+        isCollectionOp: false,
+      },
+      right: strLit,
+    },
+  },
+  {
+    name: "this.col == param.trim() (queryable scalar intrinsic on the value side)",
+    e: {
+      kind: "binary",
+      op: "==",
+      left: {
+        kind: "member",
+        receiver: thisExpr,
+        member: "name",
+        receiverType: STR,
+        memberType: STR,
+      },
+      right: {
+        kind: "method-call",
+        receiver: { kind: "ref", name: "q", refKind: "param", type: STR },
+        member: "trim",
+        args: [],
+        receiverType: STR,
+        isCollectionOp: false,
+      },
+    },
+  },
+  {
     name: "currentUser.field comparison",
     e: {
       kind: "binary",
@@ -170,6 +215,38 @@ describe("queryable-subset parity — validator admits ⊆ Drizzle lowers", () =
     };
     expect(firstNonQueryableNode(bareVoProp)).not.toBeNull();
     expect(lowerToDrizzle(bareVoProp, "things", ctx)).toBeNull();
+  });
+
+  it("trim(col) vs col still trips the column-vs-column gate", () => {
+    // A queryable intrinsic over a column stays column-side: comparing it
+    // against another column must be flagged (Drizzle's eq() needs one
+    // column and one value), not admitted into an internal lowering throw.
+    const trimColVsCol: ExprIR = {
+      kind: "binary",
+      op: "==",
+      left: {
+        kind: "method-call",
+        receiver: {
+          kind: "member",
+          receiver: thisExpr,
+          member: "a",
+          receiverType: STR,
+          memberType: STR,
+        },
+        member: "trim",
+        args: [],
+        receiverType: STR,
+        isCollectionOp: false,
+      },
+      right: {
+        kind: "member",
+        receiver: thisExpr,
+        member: "b",
+        receiverType: STR,
+        memberType: STR,
+      },
+    };
+    expect(firstColumnVsColumn(trimColVsCol)).toContain("'this.a'.trim()");
   });
 
   it("contains over a ref-collection is queryable (the one admitted collection op)", () => {

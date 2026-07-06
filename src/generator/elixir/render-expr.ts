@@ -6,6 +6,7 @@ import type {
   TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
+import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import {
   DATA_KEY_PATH_DELIMITER,
   ORG_PATH_CLAIM_FIELD,
@@ -446,6 +447,25 @@ function renderMember(recv: string, e: MemberExpr, ctx: RenderCtx): string {
 // Method calls
 // ---------------------------------------------------------------------------
 
+// Scalar-intrinsic snippet tables (src/util/intrinsics.ts) — one arm per
+// catalogue row, keyed `<receiver>.<name>`.  Elixir strings have no methods,
+// so the default `${recv}.trim()` fallthrough is invalid in BOTH rendering
+// modes; the universal renderer needs two forms:
+//   * in-memory (op / derived / invariant bodies, doc paths) — the `String.*`
+//     stdlib call;
+//   * Ecto query filter (`ctx.filterArgs` — `from ... where: ...`) — a SQL
+//     `fragment(...)`, since `String.*` is not a valid Ecto query expression.
+// Exported so the intrinsic completeness test can pin that every catalogue
+// row has an Elixir arm in each table.
+export const ELIXIR_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[]) => string> =
+  {
+    "string.trim": (recv) => `String.trim(${recv})`,
+  };
+
+export const ECTO_INTRINSIC_FRAGMENTS: Record<string, (recv: string, args: string[]) => string> = {
+  "string.trim": (recv) => `fragment("btrim(?)", ${recv})`,
+};
+
 function renderMethodCall(recv: string, args: string[], e: MethodCallExpr, ctx: RenderCtx): string {
   // `this.<refColl>.contains(x)` — membership over a reference
   // collection.  Inside an Ash `filter expr(...)` this lowers to a
@@ -499,6 +519,18 @@ function renderMethodCall(recv: string, args: string[], e: MethodCallExpr, ctx: 
     const pat =
       raw?.kind === "literal" && raw.lit === "string" ? elixirRegexBody(raw.value) : args[0]!;
     return `Regex.match?(~r/${pat}/, ${recv})`;
+  }
+  // Catalogued scalar intrinsic (src/util/intrinsics.ts) — `s.trim()` etc.
+  // Inside an Ecto query filter (`ctx.filterArgs`) the SQL `fragment(...)`
+  // form is the only valid one (both column-side `record.name` and value-side
+  // `^q` receivers compose there); everywhere else (op / derived / invariant
+  // bodies, the docMap/docStruct in-memory paths) the `String.*` call renders.
+  if (e.receiverType.kind === "primitive" && intrinsicFor(e.receiverType.name, e.member)) {
+    const key = intrinsicKey(e.receiverType.name, e.member);
+    const snippet = ctx.filterArgs
+      ? ECTO_INTRINSIC_FRAGMENTS[key]
+      : ELIXIR_INTRINSIC_RENDERERS[key];
+    if (snippet) return snippet(recv, args);
   }
   return `${recv}.${snake(e.member)}(${args.join(", ")})`;
 }

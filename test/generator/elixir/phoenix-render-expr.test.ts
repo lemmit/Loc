@@ -435,6 +435,43 @@ describe("phoenix renderExpr — member, method-call, call, new, list, lambda", 
     ).toBe("Regex.match?(~r/^[^@]+@.+$/, record.email)");
   });
 
+  it("renders string.trim() intrinsic as String.trim(...) in-memory (stdlib A1)", () => {
+    // Elixir strings have no methods — the pre-catalogue fallthrough emitted
+    // `record.name.trim()`, invalid Elixir.  The catalogue row routes through
+    // ELIXIR_INTRINSIC_RENDERERS in-memory.
+    expect(
+      renderExpr(
+        {
+          kind: "method-call",
+          receiver: thisProp("name"),
+          member: "trim",
+          args: [],
+          receiverType: STRING,
+          isCollectionOp: false,
+        },
+        ctx,
+      ),
+    ).toBe("String.trim(record.name)");
+  });
+
+  it("renders string.trim() as an Ecto fragment in filter mode (stdlib A1)", () => {
+    // Inside `from ... where: ...` a `String.*` call is not a valid Ecto query
+    // expression — the catalogue row routes through ECTO_INTRINSIC_FRAGMENTS.
+    expect(
+      renderExpr(
+        {
+          kind: "method-call",
+          receiver: thisProp("name"),
+          member: "trim",
+          args: [],
+          receiverType: STRING,
+          isCollectionOp: false,
+        },
+        { ...ctx, filterArgs: true },
+      ),
+    ).toBe('fragment("btrim(?)", record.name)');
+  });
+
   it("renders collection-op `count` as Enum.count", () => {
     expect(
       renderExpr(

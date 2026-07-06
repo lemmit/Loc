@@ -2,6 +2,7 @@ import type { AstNode } from "langium";
 import { AstUtils } from "langium";
 import type { PrimitiveName } from "../ir/types/loom-ir.js";
 import { COLLECTION_OP_SIGNATURES, isCollectionOp } from "../util/collection-ops.js";
+import { intrinsicFor, intrinsicReturnType, intrinsicsForReceiver } from "../util/intrinsics.js";
 import type {
   Aggregate,
   BaseType,
@@ -698,6 +699,12 @@ export function typeAfterSuffix(recvType: DddType, suffix: PostfixSuffix, env: E
   if (recvType.kind === "primitive" && recvType.name === "string") {
     if (memberName === "length") return T.prim("int");
     if (memberName === "matches" && ms.call) return T.prim("bool");
+  }
+  if (recvType.kind === "primitive" && ms.call) {
+    // Scalar intrinsics (src/util/intrinsics.ts) — catalogue-driven, so a
+    // new op types here (and completes, via membersOfType) without code.
+    const sig = intrinsicFor(recvType.name, memberName);
+    if (sig) return T.prim(intrinsicReturnType(sig, recvType.name) as PrimitiveName);
   }
   if (recvType.kind === "id") {
     return lookupEntityMember(recvType.target, memberName);
@@ -1410,8 +1417,16 @@ export function membersOfType(t: DddType): MemberCompletion[] {
       // Member access transparently unwraps an optional (the validator
       // enforces the null-guard separately).
       return membersOfType(t.inner);
-    case "primitive":
-      return t.name === "string" ? [{ name: "length", kind: "field", detail: "int" }] : [];
+    case "primitive": {
+      const intrinsics: MemberCompletion[] = intrinsicsForReceiver(t.name).map((s) => ({
+        name: s.name,
+        kind: "method",
+        detail: s.signature,
+      }));
+      return t.name === "string"
+        ? [{ name: "length", kind: "field", detail: "int" }, ...intrinsics]
+        : intrinsics;
+    }
     case "enum":
       return t.ref.values.map((v) => ({ name: v.name, kind: "enum-value", detail: t.ref.name }));
     case "payload":
