@@ -30,6 +30,10 @@ system JavaHierarchy {
       }
       repository Docs for Doc { }
       repository Orgs for Org { }
+      // P2.5: `global` widens Doc's tenant floor to the caller's ROOT-org
+      // subtree — the rootOrg-anchored materialized-path sentinel.  Compile-
+      // checks the `currentUser.rootOrg()` accessor + the global filter path.
+      policy { allow global on Doc }
     }
   }
 

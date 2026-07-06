@@ -67,6 +67,19 @@ function ectoIndexOpts(i: IndexShape, prefix: string): string {
   return `${unique}${where}${name}${prefix}`;
 }
 
+/** The bracketed column list for a `create index(...)` call.  A column with a
+ *  per-column opclass (P2.5 materialized-path prefix index) uses Ecto's raw
+ *  fragment string form (`"data_key text_pattern_ops"`) so the opclass reaches
+ *  the DDL; plain columns stay `:atom`s. */
+function ectoIndexColumns(i: IndexShape): string {
+  return i.columns
+    .map((n) => {
+      const oc = i.opclasses?.[n];
+      return oc ? JSON.stringify(`${n} ${oc}`) : `:${n}`;
+    })
+    .join(", ");
+}
+
 /** The `execute "CREATE SCHEMA …"` line (4-space indented, trailing
  *  newline) prepended to a `change/0` body when the table is schema-
  *  qualified, or "" for the default schema.  Idempotent (`IF NOT
@@ -257,8 +270,7 @@ function renderInitialFile(table: TableShape, migrationName: string, appModule: 
   if (ts) colLines.push(`      ${ts}`);
   const prefix = prefixOpt(table.schema);
   const indexLines = table.indexes.map(
-    (i) =>
-      `    create index(:${i.table}, [${i.columns.map((n) => `:${n}`).join(", ")}]${ectoIndexOpts(i, prefix)})`,
+    (i) => `    create index(:${i.table}, [${ectoIndexColumns(i)}]${ectoIndexOpts(i, prefix)})`,
   );
 
   return `defmodule ${appModule}.Repo.Migrations.${migrationName} do
@@ -305,8 +317,7 @@ function renderInitialValueCollectionFile(
     }
   }
   const indexLines = table.indexes.map(
-    (i) =>
-      `    create index(:${i.table}, [${i.columns.map((n) => `:${n}`).join(", ")}]${ectoIndexOpts(i, prefix)})`,
+    (i) => `    create index(:${i.table}, [${ectoIndexColumns(i)}]${ectoIndexOpts(i, prefix)})`,
   );
   return `defmodule ${appModule}.Repo.Migrations.${migrationName} do
   use Ecto.Migration
@@ -350,8 +361,7 @@ function renderInitialJoinFile(
     }
   }
   const indexLines = table.indexes.map(
-    (i) =>
-      `    create index(:${i.table}, [${i.columns.map((n) => `:${n}`).join(", ")}]${ectoIndexOpts(i, prefix)})`,
+    (i) => `    create index(:${i.table}, [${ectoIndexColumns(i)}]${ectoIndexOpts(i, prefix)})`,
   );
   return `defmodule ${appModule}.Repo.Migrations.${migrationName} do
   use Ecto.Migration
@@ -426,7 +436,7 @@ function renderEctoStep(step: MigrationStep): string[] {
         `end`,
       ];
     case "addIndex": {
-      const cols = step.index.columns.map((n) => `:${n}`).join(", ");
+      const cols = ectoIndexColumns(step.index);
       return [
         `create index(:${step.index.table}, [${cols}]${ectoIndexOpts(step.index, prefixOpt(step.schema))})`,
       ];
@@ -455,7 +465,7 @@ function renderCreateTableInline(table: TableShape): string[] {
   if (ts) lines.push(`  ${ts}`);
   lines.push("end");
   for (const idx of table.indexes) {
-    const cols = idx.columns.map((n) => `:${n}`).join(", ");
+    const cols = ectoIndexColumns(idx);
     lines.push(`create index(:${table.name}, [${cols}]${ectoIndexOpts(idx, prefix)})`);
   }
   return lines;

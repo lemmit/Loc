@@ -47,6 +47,10 @@ system TenancyHierarchyShop {
         filter this.balance >= 0
       }
       repository Accounts for Account { }
+      // P2.5: `global` widens Account's tenant floor to the caller's ROOT-org
+      // subtree — the rootOrg-anchored materialized-path fragment.  Compile-
+      // checks `current_user.root_org` + the global filter path.
+      policy { allow global on Account }
     }
   }
 

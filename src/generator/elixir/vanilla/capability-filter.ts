@@ -25,7 +25,7 @@
 
 import type { AggregateIR } from "../../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
-import { isDeepScopeFilter } from "../../../ir/util/tenant-stance.js";
+import { deepScopeAnchorClaim, isDeepScopeFilter } from "../../../ir/util/tenant-stance.js";
 import { type RenderCtx, renderDeepScopeEcto, renderExpr } from "../render-expr.js";
 
 export { aggregateUsesPrincipalContextFilter } from "../../../ir/types/loom-ir.js";
@@ -80,7 +80,7 @@ export function vanillaCapabilityFilter(
       // The `deep` sentinel renders its own fail-closed pinned fragment — do
       // NOT run it through `pinPrincipal` (it already pins).
       isDeepScopeFilter(p)
-        ? renderDeepScopeEcto(ctx.thisName)
+        ? renderDeepScopeEcto(ctx.thisName, deepScopeAnchorClaim(p))
         : exprUsesCurrentUser(p)
           ? pinPrincipal(renderExpr(p, ctx))
           : renderExpr(p, ctx),
@@ -117,7 +117,7 @@ export function vanillaCapabilityFilterParts(
   (agg.contextFilters ?? []).forEach((p, i) => {
     if (!opts?.actor && exprUsesCurrentUser(p)) return;
     const pred = isDeepScopeFilter(p)
-      ? renderDeepScopeEcto(ctx.thisName)
+      ? renderDeepScopeEcto(ctx.thisName, deepScopeAnchorClaim(p))
       : exprUsesCurrentUser(p)
         ? pinPrincipal(renderExpr(p, ctx))
         : renderExpr(p, ctx);

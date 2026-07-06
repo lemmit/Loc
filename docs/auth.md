@@ -103,6 +103,21 @@ system Acme {
 }
 ```
 
+### Computed principal members — `orgPath`, `rootOrg`
+
+Beyond the declared `user { … }` claim fields, `currentUser` carries two
+computed members under multi-tenancy (Phase 2):
+
+| Member | Type | Meaning |
+| --- | --- | --- |
+| `currentUser.orgPath` | `string` | The caller org's materialized path in the tenant registry tree (`root.child.grandchild`). Under flat tenancy it equals the tenant claim; under a hierarchy (`implements tenantRegistry`) each backend resolves it from the registry per request, memoized. |
+| `currentUser.rootOrg` | `string` | The first segment of `orgPath` — a pure string derivation, no DB read. Anchors the `global` read level's subtree widening. |
+
+Both are fail-closed: referencing either without a `tenancy by`
+declaration is a validation error (`loom.orgpath-without-tenancy`).
+Full semantics, per-backend seams, and the `policy {}` read ladder they
+feed live in [tenancy.md](tenancy.md).
+
 ### Permissions surface
 
 `permissions { ... }` lives at subdomain scope; each declared name

@@ -2,15 +2,17 @@
 // (authorization.md §3; multi-tenancy Phase 2 P2.4).  Covers lowering
 // (`BoundedContextIR.policyReadLevels`), the enrichment rewrite of the
 // `tenantOwned` capability filter for a `deep` level, and the phase-⑦
-// validator gates.  Stance/level are derived — `local`/`global` keep the flat
-// tenant floor unchanged; only `deep` rewrites to the materialized-path
-// sentinel.
+// validator gates.  Stance/level are derived — `local` keeps the flat tenant
+// floor unchanged; `deep` rewrites to the materialized-path sentinel anchored
+// at `orgPath`; `global` (P2.5) rewrites to the SAME sentinel anchored at
+// `rootOrg` (the root subtree), but only under a hierarchy registry (fail-closed
+// to the floor otherwise).
 
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
 import type { ExprIR } from "../../src/ir/types/loom-ir.js";
-import { isDeepScopeFilter } from "../../src/ir/util/tenant-stance.js";
+import { deepScopeAnchorClaim, isDeepScopeFilter } from "../../src/ir/util/tenant-stance.js";
 import type { LoomDiagnostic } from "../../src/ir/validate/validate.js";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import { buildLoomModel } from "../_helpers/ir.js";
@@ -94,22 +96,72 @@ describe("policy read levels — lowering", () => {
 });
 
 describe("policy read levels — enrichment rewrite", () => {
-  it("`deep` REPLACES the tenantOwned floor with the materialized-path sentinel", async () => {
+  it("`deep` REPLACES the tenantOwned floor with the `orgPath`-anchored sentinel", async () => {
     const model = await buildLoomModel(hierarchy({ policy: "allow deep on Invoice" }));
     const { invoice } = invoiceFilters(model);
     // Exactly one filter (the tenantOwned floor), now the deep sentinel.
-    expect(invoice.some(isDeepScopeFilter)).toBe(true);
+    const sentinel = invoice.find(isDeepScopeFilter);
+    expect(sentinel).toBeDefined();
+    expect(deepScopeAnchorClaim(sentinel!)).toBe("orgPath");
     // The floor's `tenantId ==` binary is gone (replaced, not appended).
     expect(invoice.some((f) => f.kind === "binary")).toBe(false);
   });
 
-  it("`local` and `global` keep the flat tenantId floor unchanged (no sentinel)", async () => {
-    for (const level of ["local", "global"] as const) {
-      const model = await buildLoomModel(hierarchy({ policy: `allow ${level} on Invoice` }));
-      const { invoice } = invoiceFilters(model);
-      expect(invoice.some(isDeepScopeFilter)).toBe(false);
-      expect(invoice.some((f) => f.kind === "binary")).toBe(true);
-    }
+  it("`global` under a hierarchy REPLACES the floor with the `rootOrg`-anchored sentinel (P2.5)", async () => {
+    const model = await buildLoomModel(hierarchy({ policy: "allow global on Invoice" }));
+    const { invoice } = invoiceFilters(model);
+    const sentinel = invoice.find(isDeepScopeFilter);
+    expect(sentinel).toBeDefined();
+    // Root-subtree widening: same sentinel shape, anchored at `rootOrg`.
+    expect(deepScopeAnchorClaim(sentinel!)).toBe("rootOrg");
+    expect(invoice.some((f) => f.kind === "binary")).toBe(false);
+  });
+
+  it("`local` keeps the flat tenantId floor unchanged (no sentinel)", async () => {
+    const model = await buildLoomModel(hierarchy({ policy: "allow local on Invoice" }));
+    const { invoice } = invoiceFilters(model);
+    expect(invoice.some(isDeepScopeFilter)).toBe(false);
+    expect(invoice.some((f) => f.kind === "binary")).toBe(true);
+  });
+
+  it("`global` WITHOUT a hierarchy keeps the flat floor (fail-closed; rootOrg==tenant floor coincide)", async () => {
+    // A registry without `implements tenantRegistry` — flat tenancy.  `global`
+    // is a phase-⑦ error here, but enrichment runs first and must leave the
+    // floor: under flat tenancy every org is its own root, so `global == local`.
+    const flat = `
+      system Shop {
+        user { id: guid  tenantId: string }
+        tenancy by user.tenantId of Org
+        subdomain S {
+          context C {
+            aggregate Invoice with tenantOwned { amount: int }
+            aggregate Org ids guid { name: string }
+            repository Invoices for Invoice { }
+            repository Orgs for Org { }
+            policy Reach { allow global on Invoice }
+          }
+        }
+        api ShopApi from S
+        storage primarySql { type: postgres }
+        resource shopState { for: C, kind: state, use: primarySql }
+        deployable api {
+          platform: node
+          contexts: [C]
+          dataSources: [shopState]
+          serves: ShopApi
+          port: 3001
+          auth: required
+        }
+      }
+    `;
+    const { model: ast } = await parseString(flat, { validate: false });
+    const model = enrichLoomModel(lowerModel(ast));
+    const inv = model.systems[0]!.subdomains[0]!.contexts[0]!.aggregates.find(
+      (a) => a.name === "Invoice",
+    )!;
+    const filters = inv.contextFilters ?? [];
+    expect(filters.some(isDeepScopeFilter)).toBe(false);
+    expect(filters.some((f) => f.kind === "binary")).toBe(true);
   });
 
   it("only the named aggregate is rewritten; siblings keep the floor", async () => {

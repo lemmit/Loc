@@ -74,6 +74,46 @@ describe("tenantOwned → derived tenant_id index DDL", () => {
     expect(exs).toMatch(/create index\(:invoices, \[:tenant_id\]/);
   });
 
+  it("derives a `<table>_data_key_idx` with `text_pattern_ops` on a tenantOwned aggregate (P2.5)", async () => {
+    const files = await generateSystemFiles(
+      tenancySystem(`aggregate Invoice ids guid with tenantOwned { number: string }`),
+    );
+    const sql = sqlOf(files);
+    // The materialized-path prefix index — `text_pattern_ops` makes a
+    // `LIKE 'prefix.%'` (deep/global) scan index-usable under any locale.
+    expect(sql).toMatch(
+      /CREATE INDEX "?invoices_data_key_idx"? ON \S+ \("?data_key"? text_pattern_ops\)/,
+    );
+  });
+
+  it("derives no data_key index for the registry / a crossTenant aggregate", async () => {
+    const files = await generateSystemFiles(
+      tenancySystem(
+        `aggregate Invoice ids guid with tenantOwned { number: string }
+         aggregate Plan ids guid crossTenant { code: string }`,
+      ),
+    );
+    const sql = sqlOf(files);
+    // Only the tenantOwned aggregate carries a data_key column; the id-keyed
+    // registry (read by id) and crossTenant shared data get none.
+    expect(sql).not.toMatch(/organizations_data_key_idx/);
+    expect(sql).not.toMatch(/plans_data_key_idx/);
+  });
+
+  it("rides the data_key `text_pattern_ops` index into the Ecto migration (fragment column form)", async () => {
+    const files = await generateSystemFiles(
+      tenancySystem(`aggregate Invoice ids guid with tenantOwned { number: string }`).replace(
+        "platform: node",
+        "platform: elixir",
+      ),
+    );
+    const exs = [...files.entries()]
+      .filter(([p]) => p.endsWith(".exs"))
+      .map(([, c]) => c)
+      .join("\n");
+    expect(exs).toMatch(/create index\(:invoices, \["data_key text_pattern_ops"\]/);
+  });
+
   it("does not duplicate a hand-declared single-column unique (tenantId) index", async () => {
     const files = await generateSystemFiles(
       tenancySystem(

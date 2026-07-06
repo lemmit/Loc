@@ -117,6 +117,10 @@ function renderUserTypes(user: UserIR, orgPathClaim?: string): string {
         "   *  derived per-request from the tenancy claim, memoized on this",
         "   *  request-scoped principal (multi-tenancy Phase 2, P2.1). */",
         "  orgPath: string;",
+        "  /** The caller's ROOT-org segment (`currentUser.rootOrg`) — the first",
+        "   *  segment of `orgPath` (multi-tenancy Phase 2, P2.5).  Anchors the",
+        "   *  `global` read level's root-subtree widening. */",
+        "  rootOrg: string;",
         "}",
       ]
     : ["export type User = UserClaims;"];
@@ -205,12 +209,14 @@ function renderMiddleware(
   //    request via the registered resolver; fall back to the claim when the
   //    row is missing or has no `dataKey` (pre-tree data) — never null/crash.
   const claimExpr = orgPathClaim ? `String(claims.${orgPathClaim} ?? "")` : `""`;
-  const deriveUser =
-    orgPathClaim && !orgPathReadsRegistry
-      ? `{ ...claims, orgPath: ${claimExpr} }`
-      : orgPathClaim && orgPathReadsRegistry
-        ? `{ ...claims, orgPath: await resolveOrgPath(${claimExpr}) }`
-        : "claims";
+  // The per-request `orgPath` expression (claim itself under flat tenancy, the
+  // memoized registry read under hierarchy).  `rootOrg` (P2.5) is its first
+  // segment — a pure string derivation, no extra read.  Build both onto the
+  // principal: compute `orgPath` once into a const, then derive `rootOrg`.
+  const orgPathExpr = orgPathReadsRegistry ? `await resolveOrgPath(${claimExpr})` : claimExpr;
+  const buildUser = orgPathClaim
+    ? `const orgPath = ${orgPathExpr};\n  const user: User = { ...claims, orgPath, rootOrg: rootOrgOf(orgPath) };`
+    : `const user: User = claims;`;
   // The registry-lookup seam (P2.2).  The auth layer can't reach the db (it is
   // constructed at boot and injected into repositories), so — like the verifier
   // — the resolver is REGISTERED at boot (index.ts) with a closure that reads
@@ -240,6 +246,19 @@ async function resolveOrgPath(claim: string): Promise<string> {
 }
 `
     : "";
+  // `rootOrg` (P2.5): the first segment of the caller's `orgPath` (up to the
+  // first `.`), the anchor for the `global` read level's root-subtree widening.
+  // Pure string derivation — emitted whenever tenancy is declared.
+  const rootOrgSeam = orgPathClaim
+    ? `
+/** The caller's ROOT-org segment (\`currentUser.rootOrg\`): the first segment of
+ *  the materialized \`orgPath\` (multi-tenancy Phase 2, P2.5). */
+function rootOrgOf(orgPath: string): string {
+  const i = orgPath.indexOf(".");
+  return i === -1 ? orgPath : orgPath.slice(0, i);
+}
+`
+    : "";
   // Only the handshake's redirect endpoints bypass auth — they must be
   // reachable without a verified principal.  `/api/auth/me` (the session probe
   // the frontend guard reads) is deliberately NOT bypassed, so the
@@ -254,7 +273,7 @@ import type { User, UserClaims } from "./user-types";
 import { verifyUserOrThrow } from "./verifier";
 
 const BYPASS_PREFIXES = ${bypass} as const;
-${resolverSeam}
+${resolverSeam}${rootOrgSeam}
 /** Hono middleware that decodes the request's JWT into a User, attaches it
  *  to the ambient RequestContext (the one source of truth, readable by
  *  non-HTTP code via \`requireCurrentUser()\`), and also stashes it on the
@@ -277,7 +296,7 @@ export const authMiddleware = createMiddleware<{
   } catch {
     return c.json({ error: "unauthorized" }, 401);
   }
-  const user: User = ${deriveUser};
+  ${buildUser}
   // Attach the principal to the ambient frame (read by non-HTTP code via
   // requireCurrentUser) and to the Hono context (read by route handlers
   // that hold \`c\`).

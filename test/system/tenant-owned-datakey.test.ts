@@ -40,7 +40,7 @@ const SRC = `
 `;
 
 describe("tenantOwned — dataKey column flows through migrations + the create factory", () => {
-  it("emits a nullable `data_key` text column on the tenantOwned table (no index — P2.5 is separate)", async () => {
+  it("emits a nullable `data_key` text column + the P2.5 `text_pattern_ops` prefix index", async () => {
     const files = await generateSystemFiles(SRC);
     const sql = [...files.entries()].find(
       ([p]) => p.endsWith(".sql") && p.includes("migrations"),
@@ -48,9 +48,12 @@ describe("tenantOwned — dataKey column flows through migrations + the create f
     expect(sql).toBeDefined();
     expect(sql!).toContain(`"tenant_id" TEXT NOT NULL`);
     expect(sql!).toContain(`"data_key" TEXT NULL`);
-    // Scope discipline (P2.3 excludes the materialized-path index — P2.5):
-    // only the existing derived `tenant_id` index, nothing for `data_key`.
-    expect(sql!).not.toMatch(/data_key.*idx/);
+    // P2.5: the materialized-path prefix index — `text_pattern_ops` opclass so
+    // `LIKE 'prefix.%'` (deep/global) is index-usable under any collation.
+    expect(sql!).toMatch(
+      /CREATE INDEX "?invoices_data_key_idx"? ON \S+ \("?data_key"? text_pattern_ops\)/,
+    );
+    expect(sql!).not.toMatch(/CREATE UNIQUE INDEX "?invoices_data_key_idx"?/);
   });
 
   it("drizzle schema carries both columns", async () => {

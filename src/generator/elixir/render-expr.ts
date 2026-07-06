@@ -510,10 +510,11 @@ function renderMethodCall(recv: string, args: string[], e: MethodCallExpr, ctx: 
  *  the sentinel here directly, so the principal pins are ALREADY fail-closed —
  *  it must NOT run this through `pinPrincipal` again.  `thisName` is the query
  *  binding (`record`). */
-export function renderDeepScopeEcto(thisName: string): string {
+export function renderDeepScopeEcto(thisName: string, anchorClaim = ORG_PATH_CLAIM_FIELD): string {
   const dk = `${thisName}.${snake(TENANT_OWNED_DATA_KEY_FIELD)}`;
   const tid = `${thisName}.${snake(TENANT_OWNED_TENANT_ID_FIELD)}`;
-  const org = `^(current_user && current_user.${snake(ORG_PATH_CLAIM_FIELD)})`;
+  // Anchor claim: `orgPath` for `deep`, `rootOrg` for `global`.
+  const org = `^(current_user && current_user.${snake(anchorClaim)})`;
   const tenant = `^(current_user && current_user.${snake(TENANT_OWNED_TENANT_ID_FIELD)})`;
   const sql = `(? IS NOT NULL AND (? = ? OR ? LIKE ? || '${DATA_KEY_PATH_DELIMITER}%')) OR (? IS NULL AND ? = ?)`;
   return `fragment(${JSON.stringify(sql)}, ${dk}, ${dk}, ${org}, ${dk}, ${org}, ${dk}, ${tid}, ${tenant})`;

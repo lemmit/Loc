@@ -21,8 +21,8 @@ import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
 import {
   DATA_KEY_PATH_DELIMITER,
+  deepScopeAnchorClaim,
   isDeepScopeFilter,
-  ORG_PATH_CLAIM_FIELD,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
@@ -84,7 +84,8 @@ export function lowerToDrizzle(
     if (isDeepScopeFilter(e)) {
       const col = `schema.${tableName}.${TENANT_OWNED_DATA_KEY_FIELD}`;
       const tenantCol = `schema.${tableName}.${TENANT_OWNED_TENANT_ID_FIELD}`;
-      const org = `${principal}.${ORG_PATH_CLAIM_FIELD}`;
+      // Anchor claim off `args[0]`: `orgPath` for `deep`, `rootOrg` for `global`.
+      const org = `${principal}.${deepScopeAnchorClaim(e)}`;
       const tenant = `${principal}.${TENANT_OWNED_TENANT_ID_FIELD}`;
       for (const op of ["or", "and", "eq", "isNull", "isNotNull", "like"]) ops.add(op);
       return (

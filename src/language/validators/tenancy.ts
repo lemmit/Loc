@@ -15,7 +15,7 @@
 // lives in `src/ir/validate/checks/tenancy-checks.ts` (phase ⑦).
 
 import { AstUtils, type ValidationAcceptor } from "langium";
-import { PRINCIPAL_ORG_PATH } from "../../util/principal.js";
+import { PRINCIPAL_ORG_PATH, PRINCIPAL_ROOT_ORG } from "../../util/principal.js";
 import {
   isMemberSuffix,
   isNameRef,
@@ -40,12 +40,13 @@ export function checkTenancyDecls(system: System, accept: ValidationAcceptor): v
 }
 
 // ---------------------------------------------------------------------------
-// `currentUser.orgPath` requires a tenancy declaration (multi-tenancy Phase 2,
-// plan P2.1).  `orgPath` is the derived materialized-path member — it is
-// resolved per-request from the tenant registry keyed by the tenancy claim, so
-// without a `tenancy by user.<claim> of <Registry>` line there is no claim to
-// resolve it from and nothing for the backend accessor to compute.  Referencing
-// it there is fail-closed: a hard error (`loom.orgpath-without-tenancy`) rather
+// `currentUser.orgPath` / `currentUser.rootOrg` require a tenancy declaration
+// (multi-tenancy Phase 2, plans P2.1 / P2.5).  Both are derived materialized-
+// path members — `orgPath` is resolved per-request from the tenant registry
+// keyed by the tenancy claim, and `rootOrg` is its first segment — so without a
+// `tenancy by user.<claim> of <Registry>` line there is no claim to resolve
+// them from and nothing for the backend accessor to compute.  Referencing them
+// there is fail-closed: a hard error (`loom.orgpath-without-tenancy`) rather
 // than a silent principal member that resolves to nothing at runtime.
 //
 // The check is model-wide: a `tenancy by` line is a system member, and
@@ -70,12 +71,13 @@ export function checkOrgPathReferences(model: Model, accept: ValidationAcceptor)
     const head = node.head;
     if (!isNameRef(head) || head.name !== "currentUser") continue;
     const first = node.suffixes[0];
-    if (!first || !isMemberSuffix(first) || first.member !== PRINCIPAL_ORG_PATH) continue;
+    if (!first || !isMemberSuffix(first)) continue;
+    if (first.member !== PRINCIPAL_ORG_PATH && first.member !== PRINCIPAL_ROOT_ORG) continue;
     accept(
       "error",
-      `'currentUser.${PRINCIPAL_ORG_PATH}' requires a 'tenancy by user.<claim> of <Registry>' ` +
-        `declaration — it is the caller's tenant materialized path, resolved from the tenancy ` +
-        `claim and registry.  Add the tenancy line, or drop the '${PRINCIPAL_ORG_PATH}' reference.`,
+      `'currentUser.${first.member}' requires a 'tenancy by user.<claim> of <Registry>' ` +
+        `declaration — it is derived from the caller's tenant materialized path, resolved from ` +
+        `the tenancy claim and registry.  Add the tenancy line, or drop the '${first.member}' reference.`,
       { node: first, code: "loom.orgpath-without-tenancy" },
     );
   }

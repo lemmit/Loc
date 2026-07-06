@@ -125,6 +125,16 @@ export const TENANT_OWNED_TENANT_ID_FIELD = "tenantId";
  *  path (multi-tenancy Phase 2 P2.1 — `currentUser.orgPath`). */
 export const ORG_PATH_CLAIM_FIELD = "orgPath";
 
+/** The derived principal member that carries the caller's ROOT-org segment
+ *  (multi-tenancy Phase 2 P2.5 — `currentUser.rootOrg`): the first segment of
+ *  `orgPath` (everything before the first {@link DATA_KEY_PATH_DELIMITER}, or
+ *  the whole path when it has none).  A pure string computation off the
+ *  already-resolved `orgPath` — no DB read.  It anchors the `global` read
+ *  level's root-subtree widening (P2.5): under flat tenancy `orgPath` is the
+ *  root-segment claim itself, so `rootOrg == orgPath` and `global == deep ==
+ *  local` all coincide at the tenant floor. */
+export const ROOT_ORG_CLAIM_FIELD = "rootOrg";
+
 /** The materialized-path segment delimiter (`root.child.leaf`).  The `deep`
  *  read level prefix-matches on it so `org_a` does NOT match `org_ab` — a
  *  descendant is `path` exactly or `path` + delimiter + more.  (Full
@@ -160,14 +170,19 @@ export const DEEP_SCOPE_MEMBER = "__loomDeepScope__";
  */
 export const DEEP_SCOPE_SEMANTICS = "descendant-or-self path prefix; NULL-dataKey ⇒ tenant floor";
 
-/** Build the `deep` read-level reachability predicate for a tenant-owned
- *  aggregate as the `DEEP_SCOPE_MEMBER` sentinel method-call.  The args carry
- *  the two principal claims (`currentUser.orgPath`, `currentUser.tenantId`) as
- *  fully-resolved `member` nodes so `exprUsesCurrentUser` classifies the filter
- *  as principal-referencing (routing it to each backend's ambient-principal
- *  query path), and each backend reads the claim field names off them.  The row
- *  columns (`dataKey`, `tenantId`) are fixed by the `tenantOwned` capability. */
-export function buildDeepScopeFilter(agg: Pick<AggregateIR, "name">): ExprIR {
+/** Build a subtree reachability predicate for a tenant-owned aggregate as the
+ *  `DEEP_SCOPE_MEMBER` sentinel method-call, anchored at `anchorClaim`.  The
+ *  args carry the two principal claims (`currentUser.<anchorClaim>`,
+ *  `currentUser.tenantId`) as fully-resolved `member` nodes so
+ *  `exprUsesCurrentUser` classifies the filter as principal-referencing
+ *  (routing it to each backend's ambient-principal query path), and each
+ *  backend reads the anchor claim field name off `args[0]` (see
+ *  {@link deepScopeAnchorClaim}).  The row columns (`dataKey`, `tenantId`) are
+ *  fixed by the `tenantOwned` capability.  `deep` anchors at
+ *  {@link ORG_PATH_CLAIM_FIELD} (the caller's own node + descendants); `global`
+ *  anchors at {@link ROOT_ORG_CLAIM_FIELD} (the caller's ROOT node +
+ *  descendants — the whole root subtree). */
+function buildScopeFilter(agg: Pick<AggregateIR, "name">, anchorClaim: string): ExprIR {
   const userShape: TypeIR = { kind: "entity", name: "__User__" };
   const claim = (member: string): ExprIR => ({
     kind: "member",
@@ -180,17 +195,46 @@ export function buildDeepScopeFilter(agg: Pick<AggregateIR, "name">): ExprIR {
     kind: "method-call",
     receiver: { kind: "this" },
     member: DEEP_SCOPE_MEMBER,
-    args: [claim(ORG_PATH_CLAIM_FIELD), claim(TENANT_OWNED_TENANT_ID_FIELD)],
+    args: [claim(anchorClaim), claim(TENANT_OWNED_TENANT_ID_FIELD)],
     receiverType: { kind: "entity", name: agg.name },
     isCollectionOp: false,
   };
 }
 
-/** True when `e` is the `deep` read-level sentinel (`DEEP_SCOPE_MEMBER`
- *  method-call).  Each backend's query-filter translator gates its native
- *  compound rendering on this. */
+/** The `deep` read-level reachability predicate — the descendant-or-self
+ *  materialized-path scope anchored at `currentUser.orgPath` (P2.4). */
+export function buildDeepScopeFilter(agg: Pick<AggregateIR, "name">): ExprIR {
+  return buildScopeFilter(agg, ORG_PATH_CLAIM_FIELD);
+}
+
+/** The `global` read-level reachability predicate — the ROOT-org-subtree scope
+ *  (multi-tenancy Phase 2 P2.5).  Structurally identical to `deep` but anchored
+ *  at `currentUser.rootOrg` (the first `orgPath` segment) instead of `orgPath`,
+ *  so it widens from the caller's own node to the caller's ENTIRE root subtree.
+ *  Only emitted under a hierarchy registry; under flat tenancy `rootOrg ==
+ *  orgPath == the tenant floor` so the levels coincide. */
+export function buildGlobalScopeFilter(agg: Pick<AggregateIR, "name">): ExprIR {
+  return buildScopeFilter(agg, ROOT_ORG_CLAIM_FIELD);
+}
+
+/** True when `e` is a subtree read-level sentinel (`DEEP_SCOPE_MEMBER`
+ *  method-call — used by both `deep` and `global`).  Each backend's query-
+ *  filter translator gates its native compound rendering on this. */
 export function isDeepScopeFilter(e: ExprIR): boolean {
   return e.kind === "method-call" && e.member === DEEP_SCOPE_MEMBER;
+}
+
+/** The anchor principal-claim field a subtree sentinel prefix-matches on —
+ *  read off `args[0]`'s member name (`orgPath` for `deep`, `rootOrg` for
+ *  `global`).  Each backend renders `currentUser.<anchorClaim>` as the LIKE
+ *  prefix.  Falls back to {@link ORG_PATH_CLAIM_FIELD} for a hand-built sentinel
+ *  whose first arg isn't a `member` (defensive; the builders always emit one). */
+export function deepScopeAnchorClaim(e: ExprIR): string {
+  if (e.kind === "method-call") {
+    const a0 = e.args[0];
+    if (a0?.kind === "member") return a0.member;
+  }
+  return ORG_PATH_CLAIM_FIELD;
 }
 
 export type TenantStance = "tenantOwned" | "crossTenant" | "registry" | "unscoped";

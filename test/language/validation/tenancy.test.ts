@@ -167,4 +167,43 @@ describe("currentUser.orgPath — AST validation", () => {
     `);
     expect(diagnostics.some((d) => d.code === "loom.orgpath-without-tenancy")).toBe(true);
   });
+
+  it("accepts `currentUser.rootOrg` under a tenancy declaration (P2.5)", async () => {
+    const { errors } = await parseString(`
+      system Shop {
+        user { id: guid  tenantId: string }
+        tenancy by user.tenantId of Org
+        subdomain S {
+          context C {
+            aggregate Doc with tenantOwned {
+              owner: string
+              filter this.owner == currentUser.rootOrg
+            }
+            aggregate Org { name: string }
+            repository Docs for Doc { }
+            repository Orgs for Org { }
+          }
+        }
+      }
+    `);
+    expect(errors).toEqual([]);
+  });
+
+  it("rejects `currentUser.rootOrg` without a tenancy declaration (loom.orgpath-without-tenancy)", async () => {
+    const { diagnostics } = await parseString(`
+      system Shop {
+        user { id: guid  tenantId: string }
+        subdomain S {
+          context C {
+            aggregate Doc {
+              owner: string
+              filter this.owner == currentUser.rootOrg
+            }
+            repository Docs for Doc { }
+          }
+        }
+      }
+    `);
+    expect(diagnostics.some((d) => d.code === "loom.orgpath-without-tenancy")).toBe(true);
+  });
 });
