@@ -54,6 +54,18 @@ system SourceMapDemo {
           order.confirm()
         }
       }
+
+      // Body DELIBERATELY differs from confirmOrder's: identical bodies
+      // render to identical fragment text in the pooled workflow files, and
+      // fragment()'s uniqueness rule then honestly skips BOTH — wiping every
+      // workflow region there (observed live when this fixture first used a
+      // copy of confirmOrder's body).
+      workflow archiveOrder transactional {
+        create(productId: Product id) {
+          let product = Products.getById(productId)
+          product.discontinue()
+        }
+      }
     }
   }
 
@@ -534,15 +546,20 @@ describe(".loom/sourcemap.json", () => {
       .sort((a, b) => a.target[0] - b.target[0]);
     expect(stmtRegions.length).toBeGreaterThanOrEqual(2);
 
-    // A pooled file (node/python/java) carries ONLY the statement regions —
-    // no whole-file region exists to layer onto.  .NET's handler file is not
-    // pooled, so it keeps its whole-file region alongside these.
+    // A pooled file (node/python/java) carries ONLY statement regions — no
+    // whole-file region exists to layer onto — though for BOTH workflows the
+    // fixture declares (confirmOrder + the transactional archiveOrder), so
+    // every region must be workflow-construct-tagged rather than exactly the
+    // confirmOrder set.  .NET's handler file is not pooled, so it keeps its
+    // whole-file region alongside its own workflow's statement regions.
     if (wholeFile) {
       expect(wholeFileRegion, "expected a Milestone-1 whole-file region too").toBeDefined();
       expect(regions.length).toBeGreaterThan(stmtRegions.length);
     } else {
       expect(wholeFileRegion).toBeUndefined();
-      expect(regions.length).toBe(stmtRegions.length);
+      for (const r of regions) {
+        expect(["Orders.confirmOrder", "Orders.archiveOrder"]).toContain(r.construct);
+      }
     }
 
     // Monotonic, non-overlapping, in-bounds — same shape as the op-body case.
@@ -564,6 +581,59 @@ describe(".loom/sourcemap.json", () => {
       expect(resolved, `stmt region ${i} origin never resolves to a source span`).toBeDefined();
       const text = SOURCE.slice(resolved!.span.start, resolved!.span.end);
       expect(text, `stmt region ${i} span doesn't contain "${tokens[i]}"`).toContain(tokens[i]);
+    });
+  });
+
+  // The TRANSACTIONAL paths re-indent the rendered body AFTER chunking
+  // (.NET wraps the whole body in a tx block at +4 spaces; hono's builder
+  // wraps the facade in a +2-space map) — the recording sites replay the
+  // identical transform onto the chunks before anchoring, and a regression
+  // there fails SILENTLY (fragment() records nothing on a missed anchor).
+  // `archiveOrder transactional` pins that replay on both backends.
+  it.each([
+    { platform: "dotnet", file: "Application/Workflows/ArchiveOrderHandler.cs" },
+    { platform: "node", file: "http/workflows.ts" },
+  ])("transactional workflow bodies anchor through the re-indent on $platform", async ({
+    platform,
+    file,
+  }) => {
+    const model = await parseValid(SOURCE);
+    const files = generateSystems(model, { sourcemap: true }).files;
+    const map = JSON.parse(files.get(".loom/sourcemap.json")!) as {
+      files: Record<
+        string,
+        {
+          target: [number, number];
+          origin: import("../../src/ir/types/origin.js").OriginRef;
+          construct?: string;
+        }[]
+      >;
+    };
+
+    const slug = SLUG_FOR[platform]!;
+    const path = Object.keys(map.files).find((p) => p.startsWith(`${slug}/`) && p.endsWith(file));
+    expect(path, `no ${file} region recorded under ${slug}/`).toBeDefined();
+    const content = files.get(path!)!;
+    const fileLineCount = content.endsWith("\n")
+      ? content.split("\n").length - 1
+      : content.split("\n").length;
+
+    const stmtRegions = map.files[path!]!.filter(
+      (r) =>
+        r.construct === "Orders.archiveOrder" &&
+        !(r.target[0] === 1 && r.target[1] === fileLineCount),
+    ).sort((a, b) => a.target[0] - b.target[0]);
+    expect(
+      stmtRegions.length,
+      "transactional body's statement regions failed to anchor",
+    ).toBeGreaterThanOrEqual(2);
+
+    const tokens = ["Orders.getById", "order.confirm"];
+    stmtRegions.forEach((r, i) => {
+      const resolved = resolveToSource(r.origin);
+      expect(resolved, `stmt region ${i} origin never resolves`).toBeDefined();
+      const text = SOURCE.slice(resolved!.span.start, resolved!.span.end);
+      expect(text).toContain(tokens[i]);
     });
   });
 
