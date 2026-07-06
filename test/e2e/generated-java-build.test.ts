@@ -193,5 +193,50 @@ describe.skipIf(!ENABLED)(
       },
       660_000,
     );
+
+    // M10 phase 6b: the `injectSmap` task is Kotlin DSL emitted as a string
+    // — vitest can never catch a syntax error in it, and every fixture above
+    // generates flag-OFF, so without this case the emitted Gradle/ASM code
+    // would only ever be proven by hand. Generate WITH --sourcemap, build,
+    // and assert `javap -v` shows the SourceDebugExtension carrying the
+    // Loom-stratum SMAP on the compiled aggregate class.
+    it("--sourcemap: injectSmap attaches the JSR-45 SMAP (SourceDebugExtension via javap)", () => {
+      const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-java-smap-"));
+      try {
+        execSync(
+          `node ${cli} generate system test/e2e/fixtures/java-build/domain.ddd -o ${outDir} --sourcemap`,
+          { stdio: "inherit", cwd: repoRoot },
+        );
+        const projectDir = path.join(outDir, "shop_api");
+        const smaps = execSync(`find src/main/java -name '*.smap'`, {
+          cwd: projectDir,
+          encoding: "utf8",
+        })
+          .trim()
+          .split("\n")
+          .filter(Boolean);
+        if (smaps.length === 0) throw new Error("no .smap sidecars emitted under src/main/java");
+
+        execSync(`gradle --no-daemon -q testClasses`, {
+          cwd: projectDir,
+          stdio: "inherit",
+          timeout: 600_000,
+        });
+
+        // The first sidecar's class must carry the attribute.
+        const rel = smaps[0]!
+          .replace(/\.java\.smap$/, ".class")
+          .replace(/^src\/main\/java\//, "build/classes/java/main/");
+        const javap = execSync(`javap -v ${rel}`, { cwd: projectDir, encoding: "utf8" });
+        if (!javap.includes("SourceDebugExtension")) {
+          throw new Error(`javap shows no SourceDebugExtension on ${rel}`);
+        }
+        if (!javap.includes("*S Loom")) {
+          throw new Error(`SourceDebugExtension on ${rel} carries no Loom stratum`);
+        }
+      } finally {
+        fs.rmSync(outDir, { recursive: true, force: true });
+      }
+    }, 660_000);
   },
 );
