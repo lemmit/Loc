@@ -97,6 +97,16 @@ const ALLOWLIST = new Set<string>([
   // Tenancy-izing the showcase is a deliberate follow-up, not a drive-by
   // (docs/plans/multi-tenancy-implementation.md).
   "TenancyDecl",
+  // Projections are MID-FLIGHT (v1 slice 2 landed the Hono runtime only —
+  // #1732); the other four backends don't consume them yet, and showcase.ddd
+  // feeds every cross-backend matrix, so exercising `projection` here would
+  // trip the unsupported-platform paths rather than add a conformance
+  // dimension. The projection work owns removing these two entries when the
+  // feature is showcase-ready (this allowlisting unbroke main after the
+  // grammar kinds landed without showcase coverage — a cross-PR semantic
+  // conflict this HARD_GATE is designed to surface).
+  "Projection",
+  "ProjectionOn",
 ]);
 
 async function buildShowcase(): Promise<LangiumDocument<Model>> {

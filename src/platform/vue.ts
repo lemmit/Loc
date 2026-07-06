@@ -35,7 +35,7 @@ const vuePlatform: PlatformSurface = {
   // Vue generator only emits API call factories — no per-aggregate
   // repository class.  No find-name collisions are possible.
   reservedRepositoryFindNames: new Set(),
-  emitProject({ contexts, sys, deployable, topLevelComponents }): Map<string, string> {
+  emitProject({ contexts, sys, deployable, topLevelComponents, sourcemap }): Map<string, string> {
     // Frontend hosts dispatch by the UI's framework, not the platform keyword —
     // a vue host can serve a `framework: react|svelte|angular` ui (any static
     // bundle runs on a static host).  Previously vue had NO dispatch and
@@ -46,6 +46,7 @@ const vuePlatform: PlatformSurface = {
       sys,
       deployable,
       topLevelComponents,
+      sourcemap,
     });
   },
   composeService({ deployable, sys }): ComposeServiceShape {

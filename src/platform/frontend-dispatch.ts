@@ -15,6 +15,7 @@
 // newly-added static frontend can't silently regress the matrix.
 // ---------------------------------------------------------------------------
 
+import type { SourceMapRecorder } from "../generator/_trace/sourcemap.js";
 import { generateAngularForContexts } from "../generator/angular/index.js";
 import { generateReactForContexts } from "../generator/react/index.js";
 import { generateSvelteForContexts } from "../generator/svelte/index.js";
@@ -32,6 +33,11 @@ export interface FrontendEmitArgs {
   sys: SystemIR;
   deployable: DeployableIR;
   topLevelComponents?: ComponentIR[];
+  /** Generate-time source-map recorder (M8 — see `PlatformSurface.emitProject`'s
+   *  doc comment).  Forwarded verbatim into the generator's own options; no
+   *  scoping happens here (the system orchestrator already scoped it per
+   *  deployable before calling the platform surface). */
+  sourcemap?: SourceMapRecorder;
 }
 
 type FrontendGenerator = (args: FrontendEmitArgs) => Map<string, string>;
@@ -42,11 +48,14 @@ const forward =
       contexts: EnrichedBoundedContextIR[],
       sys: SystemIR,
       deployable: DeployableIR,
-      options: { topLevelComponents?: ComponentIR[] },
+      options: { topLevelComponents?: ComponentIR[]; sourcemap?: SourceMapRecorder },
     ) => Map<string, string>,
   ): FrontendGenerator =>
   (a) =>
-    gen(a.contexts, a.sys, a.deployable, { topLevelComponents: a.topLevelComponents });
+    gen(a.contexts, a.sys, a.deployable, {
+      topLevelComponents: a.topLevelComponents,
+      sourcemap: a.sourcemap,
+    });
 
 /** Framework keyword → its project generator.  `static` is React's UI-only
  *  alias (the same Vite-built bundle).  Kept in lockstep with

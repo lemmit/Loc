@@ -70,6 +70,11 @@ export interface GenerateSvelteOptions {
    *  (dotnet/java wwwroot, standalone) → byte-identical. */
   basePath?: string;
   topLevelComponents?: import("../../ir/types/loom-ir.js").ComponentIR[];
+  /** Generate-time source-map recorder (`--sourcemap`) — see
+   *  `PlatformSurface.emitProject`'s doc comment.  Forwarded into the
+   *  shared page-emit context so pages/components record whole-file
+   *  regions alongside their `out.set(...)`. */
+  sourcemap?: import("../_trace/sourcemap.js").SourceMapRecorder;
 }
 
 export function generateSvelteForContexts(
@@ -143,6 +148,7 @@ export function generateSvelteForContexts(
     pack,
     topLevelComponents: options.topLevelComponents ?? [],
     authUi,
+    sourcemap: options.sourcemap,
   };
   for (const [path, content] of emitSveltePagesForUi(ui, emitCtx)) out.set(path, content);
   for (const [path, content] of emitSveltePageObjectsForUi(ui, emitCtx)) out.set(path, content);

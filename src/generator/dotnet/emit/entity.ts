@@ -52,7 +52,7 @@ function isRefCollection(t: TypeIR): boolean {
  *  directives.  `stmts`/`chunks` must be the same 1:1 arrays
  *  `statementSubRegions` walks, so the returned chunks stay line-countable
  *  the same way. */
-function weaveLineDirectives(
+export function weaveLineDirectives(
   stmts: readonly { origin?: OriginRef }[],
   chunks: readonly string[],
   sourceTexts: ReadonlyMap<string, string>,

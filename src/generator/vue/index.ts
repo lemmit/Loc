@@ -13,7 +13,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { contextUsesMoney, uiUsesMoney } from "../../ir/types/loom-ir.js";
 import { realtimeEventTypes } from "../../ir/util/channels.js";
-import { classifyPage, type PageNameCtx } from "../../ir/util/page-kind.js";
+import { classifyPage, type PageNameCtx, pageConstructId } from "../../ir/util/page-kind.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { humanize, plural, snake, upperFirst } from "../../util/naming.js";
 import { buildApiModule } from "../_frontend/api-module.js";
@@ -31,6 +31,7 @@ import { buildWorkflowsApiModule, hasAnyWorkflow } from "../_frontend/workflows-
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { emitShellFiles, emitShellGlobs } from "../_packs/shell-emits.js";
+import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { walkBody } from "../_walker/walker-core.js";
 // Framework-neutral pieces that live react-side today (same sharing
 // pattern as the elixir theme-emit): the e2e harness constants, the
@@ -92,6 +93,10 @@ export interface GenerateVueOptions {
    *  `src/components/<Name>.vue` (ui-scope wins on name collisions).
    *  Mirrors `GenerateReactOptions.topLevelComponents`. */
   topLevelComponents?: ComponentIR[];
+  /** Generate-time source-map recorder (`--sourcemap`) — see
+   *  `PlatformSurface.emitProject`'s doc comment.  Records whole-file
+   *  regions for pages + components alongside their `out.set(...)`. */
+  sourcemap?: SourceMapRecorder;
 }
 
 export function generateVueForContexts(
@@ -215,24 +220,24 @@ export function generateVueForContexts(
   // app-shell must mount the toast host (`hasToastHost` below).
   let hasFormToast = false;
   for (const c of emittedComponents.values()) {
+    const componentConstruct = `${ui.name}.${c.name}`;
     if (c.extern) {
       externComponentNames.add(c.name);
-      out.set(
-        `src/components/${c.name}.props.ts`,
-        renderVueExternComponentProps(c.name, c.params, aggregatesIRByName),
-      );
-      out.set(
-        `src/components/${c.name}.ts`,
-        renderVueExternComponentShim(
-          c.name,
-          c.externPath ?? "",
-          c.params.some(
-            (p) =>
-              p.type.kind === "slot" ||
-              (p.type.kind === "optional" && p.type.inner.kind === "slot"),
-          ),
+      const propsPath = `src/components/${c.name}.props.ts`;
+      const propsContent = renderVueExternComponentProps(c.name, c.params, aggregatesIRByName);
+      out.set(propsPath, propsContent);
+      options.sourcemap?.file(propsPath, propsContent, c.origin, componentConstruct);
+      const shimPath = `src/components/${c.name}.ts`;
+      const shimContent = renderVueExternComponentShim(
+        c.name,
+        c.externPath ?? "",
+        c.params.some(
+          (p) =>
+            p.type.kind === "slot" || (p.type.kind === "optional" && p.type.inner.kind === "slot"),
         ),
       );
+      out.set(shimPath, shimContent);
+      options.sourcemap?.file(shimPath, shimContent, c.origin, componentConstruct);
       continue;
     }
     const component = renderVueComponentFile(
@@ -257,12 +262,17 @@ export function generateVueForContexts(
       ui.stores,
     );
     if (component.usesFormToast) hasFormToast = true;
-    out.set(`src/components/${c.name}.vue`, component.source);
+    const componentPath = `src/components/${c.name}.vue`;
+    out.set(componentPath, component.source);
+    options.sourcemap?.file(componentPath, component.source, c.origin, componentConstruct);
   }
 
   for (const page of pages) {
     if (!page.body) {
-      out.set(pagePath(page), renderPageStub(page));
+      const stubPath = pagePath(page);
+      const stubContent = renderPageStub(page);
+      out.set(stubPath, stubContent);
+      options.sourcemap?.file(stubPath, stubContent, page.origin, pageConstructId(ui.name, page));
       continue;
     }
     const paramNames = new Set(page.params.map((p) => p.name));
@@ -293,22 +303,27 @@ export function generateVueForContexts(
     ) {
       hasFormToast = true;
     }
-    out.set(
-      pagePath(page),
-      renderVuePage({
-        page,
-        routeParams: page.params.map((p) => p.name),
-        result,
-        pack,
-        externComponents: externComponentNames,
-        authUi,
-        stores: ui.stores,
-        // Stage 2 (`match await <op>()`): the detection context a page action
-        // needs to recognise + hoist an awaited op's vue-query mutation.
-        apiParams: ui.apiParams,
-        aggregatesByName: aggregatesIRByName,
-        bcByAggregate,
-      }),
+    const renderedPagePath = pagePath(page);
+    const renderedPageContent = renderVuePage({
+      page,
+      routeParams: page.params.map((p) => p.name),
+      result,
+      pack,
+      externComponents: externComponentNames,
+      authUi,
+      stores: ui.stores,
+      // Stage 2 (`match await <op>()`): the detection context a page action
+      // needs to recognise + hoist an awaited op's vue-query mutation.
+      apiParams: ui.apiParams,
+      aggregatesByName: aggregatesIRByName,
+      bcByAggregate,
+    });
+    out.set(renderedPagePath, renderedPageContent);
+    options.sourcemap?.file(
+      renderedPagePath,
+      renderedPageContent,
+      page.origin,
+      pageConstructId(ui.name, page),
     );
   }
   out.set("src/pages/NotFound.vue", renderShell(pack, "not-found-page", {}));

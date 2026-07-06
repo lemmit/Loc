@@ -93,12 +93,13 @@ export interface GenerateSystemOptions {
   /** `.ddd` source text for every path an `OriginRef` can resolve to
    *  (`SourceRef.path` — a Langium `URI.path`), keyed the same way.  Feeds
    *  Source Map v3 sidecar emission (`<file>.ts.map` + a trailing
-   *  `sourceMappingURL` directive) for the node/Hono backend's `.ts`/`.tsx`
-   *  output — the only files a JS/TS debugger can step through today.
-   *  `src/system/` stays browser-safe (no `fs`), so the CLI/playground
-   *  supply the text; a mapped file with no entry here is skipped (no
-   *  sidecar), never guessed.  No effect unless `sourcemap` is also true.
-   *  See docs/proposals/source-map-and-debugging.md §8. */
+   *  `sourceMappingURL` directive) for every recorded `.ts`/`.tsx` output —
+   *  the node/Hono backend's domain code, plus (M8) the React and Angular
+   *  frontends' `.tsx` / `.component.ts` pages — the only files a JS/TS
+   *  debugger can step through today.  `src/system/` stays browser-safe (no
+   *  `fs`), so the CLI/playground supply the text; a mapped file with no
+   *  entry here is skipped (no sidecar), never guessed.  No effect unless
+   *  `sourcemap` is also true.  See docs/proposals/source-map-and-debugging.md §8. */
   sourceTexts?: ReadonlyMap<string, string>;
 }
 
@@ -145,8 +146,11 @@ export function generateSystemsFromLoom(
   }
   if (recorder) out.set(".loom/sourcemap.json", renderSourceMap(recorder));
   // Source Map v3 sidecars — additive on top of `.loom/sourcemap.json`
-  // (proposal §8), scoped to the node/Hono backend's `.ts`/`.tsx` output
-  // (see `sourceTexts`' doc comment).  Skipped entirely without
+  // (proposal §8), scoped to every recorded `.ts`/`.tsx` output: the
+  // node/Hono backend's domain code, plus (M8) the React `.tsx` pages and
+  // Angular `.component.ts` pages that also ride this loop (Vue's `.vue` and
+  // Svelte's `.svelte` files are correctly skipped by the extension filter
+  // below — see `sourceTexts`' doc comment).  Skipped entirely without
   // `sourceTexts` — never emitted with a guessed `sourcesContent`.
   if (recorder && options.sourceTexts) {
     for (const [path, regions] of recorder.entries()) {

@@ -31,7 +31,7 @@ const sveltePlatform: PlatformSurface = {
   // Svelte generator only emits API call factories — no per-aggregate
   // repository class.  No find-name collisions are possible.
   reservedRepositoryFindNames: new Set(),
-  emitProject({ contexts, sys, deployable, topLevelComponents }): Map<string, string> {
+  emitProject({ contexts, sys, deployable, topLevelComponents, sourcemap }): Map<string, string> {
     // Frontend hosts dispatch by the UI's framework, not the platform keyword —
     // a svelte host can serve a `framework: react|vue|angular` ui (any static
     // bundle runs on a static host).  `svelte` is the native fallback.
@@ -40,6 +40,7 @@ const sveltePlatform: PlatformSurface = {
       sys,
       deployable,
       topLevelComponents,
+      sourcemap,
     });
   },
   composeService({ deployable, sys }): ComposeServiceShape {

@@ -106,3 +106,18 @@ export function pageEmitName(page: PageIR, ctx: PageNameCtx): string {
   if (k.kind === "aggregate-detail") return `${upperFirst(k.aggregateName)}Detail`;
   return page.name;
 }
+
+/** Dotted construct id for a page's `SourceMapRecorder.file(...)` call.
+ *  `${ui.name}.${page.name}` is AMBIGUOUS: a scaffolded ui repeats role names
+ *  (`List`/`New`/`Detail`) across every per-aggregate `area` scope (confirmed
+ *  empirically against the M8 shared fixture — `SalesUi` scaffolded over two
+ *  aggregates emits two pages both named `List`, one per `area`), the exact
+ *  same ambiguity `classifyPage` resolves for page *kind* above. Folding in
+ *  the full area path (outermost → innermost) disambiguates while staying
+ *  human-readable; a top-level page (no `area`) falls back to the
+ *  unambiguous `${ui.name}.${page.name}`. Shared by all four SPA frontends
+ *  AND the Phoenix LiveView emitter so the sourcemap's construct-id
+ *  convention stays uniform across every backend that emits a page. */
+export function pageConstructId(uiName: string, page: Pick<PageIR, "name" | "area">): string {
+  return [uiName, ...(page.area ?? []), page.name].join(".");
+}
