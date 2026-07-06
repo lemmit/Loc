@@ -4,6 +4,8 @@ import type {
   EventIR,
   EventSubscriptionIR,
   ExprIR,
+  ProjectionIR,
+  ProjectionOnIR,
   SystemIR,
   TypeIR,
   WorkflowIR,
@@ -17,7 +19,12 @@ import { renderWorkflowStmtChunks } from "../_workflow/stmt-target.js";
 import type { OpFragment } from "./emit/aggregate.js";
 import { renderPyExpr } from "./render-expr.js";
 import { resourceImportLines } from "./resource-clients.js";
-import { esEventRow, esFns, esWorkflowFoldBlock } from "./workflow-eventsourced-emit.js";
+import {
+  esEventRow,
+  esFns,
+  esWorkflowFoldBlock,
+  renderApplierStmt,
+} from "./workflow-eventsourced-emit.js";
 import { collectUsedLetNames, pyWorkflowStmtTarget } from "./workflows-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -51,7 +58,7 @@ export function dispatchSubscriptionsOf(ctx: EnrichedBoundedContextIR): EventSub
   // Re-derive over the (possibly merged) context so a reactor in one
   // hosted context can route off a channel declared in another —
   // mirrors the Hono orchestrator's merged-union derivation.
-  return deriveEventSubscriptions(ctx.channels, ctx.workflows);
+  return deriveEventSubscriptions(ctx.channels, ctx.workflows, ctx.projections);
 }
 
 export function buildPyDispatchFile(
@@ -83,7 +90,28 @@ export function buildPyDispatchFile(
   const handlerByEvent = new Map<string, string[]>();
   const handlers: string[] = [];
 
+  const touchedProjections: ProjectionIR[] = [];
   for (const sub of subs) {
+    // Projection fold (projection.md): a pure read-model fold, not a saga.
+    // Load-or-allocate the row keyed by the correlation column, apply the fold
+    // against `state`, flush.  Registered into the same isinstance fan-out.
+    if (sub.projection) {
+      const proj = ctx.projections.find((p) => p.name === sub.projection);
+      if (!proj) continue;
+      if (!helperDone.has(`proj:${proj.name}`)) {
+        out.push(projectionStateHelper(proj), "");
+        helperDone.add(`proj:${proj.name}`);
+        touchedProjections.push(proj);
+      }
+      const on = proj.handlers.find((h) => h.event === sub.event && h.param === sub.param);
+      if (!on) continue;
+      const fn = `_proj_${snake(proj.name)}_${snake(sub.event)}`;
+      handlers.push(projectionHandlerFn(fn, proj, on), "");
+      const list = handlerByEvent.get(sub.event) ?? [];
+      list.push(fn);
+      handlerByEvent.set(sub.event, list);
+      continue;
+    }
     const wf = ctx.workflows.find((w) => w.name === sub.workflow);
     if (!wf) continue;
     if (wf.correlationField && !helperDone.has(wf.name)) {
@@ -179,7 +207,8 @@ export function buildPyDispatchFile(
     .map((n) => ctx.workflows.find((w) => w.name === n))
     .filter((w): w is WorkflowIR => w != null);
   const stateRows = touchedWorkflows.map((w) => (w.eventSourced ? esEventRow(w) : `${w.name}Row`));
-  const schemaRows = [...stateRows, ...(hasOutbox ? ["LoomOutboxRow"] : [])].sort();
+  const projRows = touchedProjections.map((p) => `${p.name}Row`);
+  const schemaRows = [...stateRows, ...projRows, ...(hasOutbox ? ["LoomOutboxRow"] : [])].sort();
   // The folded events of an ES workflow are constructed/dispatched in its
   // codec + isinstance fold, so import them alongside the subscribed events.
   const esEventNames = touchedWorkflows
@@ -223,9 +252,16 @@ export function buildPyDispatchFile(
     idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
     ...factoryAggs.map((n) => `from app.domain.${snake(n)} import ${n}`),
     ...resourceImports,
-    refersTo("log")
-      ? "from app.obs.log import in_child_context, log"
-      : "from app.obs.log import in_child_context",
+    // `in_child_context` frames workflow reactor handlers; `log` is the reactor
+    // drop-log.  A projection-only dispatch file uses neither (pure folds), so
+    // both are conditional to keep the import free of dead names.
+    (() => {
+      const names = [
+        refersTo("in_child_context") ? "in_child_context" : null,
+        refersTo("log") ? "log" : null,
+      ].filter((x): x is string => x != null);
+      return names.length > 0 ? `from app.obs.log import ${names.join(", ")}` : null;
+    })(),
     voEnumNames.length > 0
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
       : null,
@@ -299,6 +335,49 @@ function stateHelpers(wf: WorkflowIR): string {
     `        await session.execute(select(${row}).where(${row}.${corr} == key).limit(1))`,
     "    ).scalars().first()",
   );
+}
+
+/** Projection row loader (mirrors `stateHelpers`) — selects the read-model row
+ *  by its correlation key. */
+function projectionStateHelper(proj: ProjectionIR): string {
+  const row = `${proj.name}Row`;
+  const corr = snake(proj.correlationField);
+  return lines(
+    `async def _load_${snake(proj.name)}(session: AsyncSession, key: str) -> ${row} | None:`,
+    `    return (`,
+    `        await session.execute(select(${row}).where(${row}.${corr} == key).limit(1))`,
+    "    ).scalars().first()",
+  );
+}
+
+/** One pure projection fold handler: load-or-allocate the row for the event's
+ *  key (every handler allocates — a projection has no route-or-drop split),
+ *  apply the fold assignments against `state`, flush.  Pure — no repos, no
+ *  emit, no child-context frame (enforced by `loom.projection-fold-impure`). */
+function projectionHandlerFn(fn: string, proj: ProjectionIR, on: ProjectionOnIR): string {
+  const row = `${proj.name}Row`;
+  const corr = snake(proj.correlationField);
+  const param = snake(on.param);
+  const keyExpr = on.correlation
+    ? renderPyExpr(on.correlation, { thisName: "state" })
+    : `${param}.${corr}`;
+  const out: string[] = [
+    `async def ${fn}(`,
+    `    session: AsyncSession, _events: "InProcessDispatcher", ${param}: ${on.event}`,
+    ") -> None:",
+    `    __key = str(${keyExpr})`,
+    `    state = await _load_${snake(proj.name)}(session, __key)`,
+    "    if state is None:",
+    `        state = ${row}(${corr}=__key)`,
+    "        session.add(state)",
+  ];
+  for (const stmt of on.statements) {
+    if (stmt.kind === "assign" || stmt.kind === "add" || stmt.kind === "remove") {
+      out.push(renderApplierStmt(stmt, "    "));
+    }
+  }
+  out.push("    await session.flush()");
+  return lines(...out);
 }
 
 /** Allocation kwargs for a fresh instance: the correlation key plus a

@@ -51,6 +51,7 @@ import { renderPyTestsFile } from "./emit/tests.js";
 import { renderPyEnumsAndValueObjects } from "./emit/value-objects.js";
 import { buildPyExternHandlersFile, externOpsOf } from "./extern-builder.js";
 import { PYTHON_PINS } from "./pins.js";
+import { buildPyProjectionsFile } from "./projections-builder.js";
 import { buildPyRepositoryFile } from "./repository-builder.js";
 import { buildPyDocumentRepositoryFile } from "./repository-document-builder.js";
 import { buildPyEmbeddedRepositoryFile } from "./repository-embedded-builder.js";
@@ -151,6 +152,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // observable, parity with Hono / .NET).
   const hasWorkflows =
     commandWorkflowsOf(merged).length > 0 || observableWorkflowsOf(merged).length > 0;
+  const hasProjections = merged.projections.length > 0;
   const resolveDs = (agg: import("../../ir/types/loom-ir.js").AggregateIR) => {
     const owning = args.contexts.find((c) => c.aggregates.some((a) => a.name === agg.name));
     return owning
@@ -162,6 +164,11 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // correlation-state / event-log table lands in the context schema.
   const resolveWorkflowSchema = (wf: import("../../ir/types/loom-ir.js").WorkflowIR) => {
     const owning = args.contexts.find((c) => c.workflows.some((w) => w.name === wf.name));
+    return owning ? resolveContextSchema(owning, args.sys) : undefined;
+  };
+  // Per-projection read-model-table schema — same owning-context map-back.
+  const resolveProjectionSchema = (proj: import("../../ir/types/loom-ir.js").ProjectionIR) => {
+    const owning = args.contexts.find((c) => c.projections.some((p) => p.name === proj.name));
     return owning ? resolveContextSchema(owning, args.sys) : undefined;
   };
   // Auth scaffolding (docs/auth.md): only an `auth: required` deployable
@@ -220,6 +227,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       routedAggs,
       hasViews,
       hasWorkflows,
+      hasProjections,
       authRequired ? args.sys.user : undefined,
       hasSeeds,
       externAggs,
@@ -263,7 +271,10 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   out.set("app/domain/value_objects.py", renderPyEnumsAndValueObjects(merged));
   out.set("app/domain/events.py", renderPyEvents(merged));
 
-  out.set("app/db/schema.py", renderPySchema(merged, resolveDs, resolveWorkflowSchema));
+  out.set(
+    "app/db/schema.py",
+    renderPySchema(merged, resolveDs, resolveWorkflowSchema, resolveProjectionSchema),
+  );
   out.set("app/db/wire.py", WIRE_PY);
   out.set("app/db/migrate.py", MIGRATE_PY);
   const hasPaged = merged.repositories.some((r) =>
@@ -323,6 +334,8 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   out.set("app/http/wire_models.py", renderPyWireModels(merged));
   const viewsFile = buildPyViewsFile(merged, hasDispatch);
   if (viewsFile != null) out.set("app/http/views_routes.py", viewsFile);
+  const projectionsFile = buildPyProjectionsFile(merged);
+  if (projectionsFile != null) out.set("app/http/projections_routes.py", projectionsFile);
   // Only collected when a recorder is actually threaded in — a
   // no-sourcemap run pays no per-statement bookkeeping cost.  Milestone 11:
   // `app/http/workflows_routes.py` pools every command workflow, so it
@@ -569,6 +582,7 @@ function renderMain(
   routerAggs: string[],
   hasViews = false,
   hasWorkflows = false,
+  hasProjections = false,
   authUser: import("../../ir/types/loom-ir.js").UserIR | undefined = undefined,
   hasSeeds = false,
   externAggs: string[] = [],
@@ -641,6 +655,7 @@ function renderMain(
     "from app.http.problem import install_error_handlers, install_openapi",
     hasViews ? "from app.http.views_routes import router as views_router" : null,
     hasWorkflows ? "from app.http.workflows_routes import router as workflows_router" : null,
+    hasProjections ? "from app.http.projections_routes import router as projections_router" : null,
     "from app.obs.log import log",
     "from app.obs.middleware import ObservabilityMiddleware",
     "",
@@ -757,6 +772,7 @@ function renderMain(
     ...routerAggs.map((name) => `app.include_router(${snake(name)}_router${routerArgs})`),
     hasViews ? `app.include_router(views_router${routerArgs})` : null,
     hasWorkflows ? `app.include_router(workflows_router${routerArgs})` : null,
+    hasProjections ? `app.include_router(projections_router${routerArgs})` : null,
     // Auth routers mount under the shared API base (`/api/auth`, set by each
     // router's prefix): the frontend guard probes `${API_BASE_URL}/auth/me`
     // and the handshake redirect lands at `/api/auth/callback`.
