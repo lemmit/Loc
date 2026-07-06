@@ -31,6 +31,7 @@ import {
 } from "../../ir/util/openapi-ids.js";
 import { collectReachableTypes } from "../../ir/util/reachable-types.js";
 import { resolveWorkflowIsolation } from "../../ir/util/resolve-datasource.js";
+import { walkWorkflowStmtExprsDeep } from "../../ir/util/walk.js";
 import { workflowCorrIdValueType } from "../../ir/util/workflow-instances.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { renderDotnetLogCall } from "../_obs/render-dotnet.js";
@@ -1419,11 +1420,14 @@ function renderCsOmission(
 
 /**
  * Walk a workflow body (recursing into `for-each` bodies) and collect the
- * names that are dereferenced via a method call — i.e. every `op-call`
- * target.  A `getById` load bound to such a name is load-or-throw: the deref
- * (`b.Promote(...)`) would be a CS8602 under nullable-reference types unless
- * the `Task<T?>` result is guarded.  Loads that are never dereferenced (e.g.
- * `placeOrder`'s `customer`, only read to seed a `create`) stay unguarded.
+ * names that are dereferenced — every `op-call` target, every aggregate arg
+ * to a domain-service call, and every name whose MEMBERS are read inside any
+ * body expression (`loaded.dataKey + "." + seg` in an op-call arg or
+ * factory-let seed).  A `getById` load bound to such a name is load-or-throw:
+ * the deref (`b.Promote(...)`, `loaded.DataKey`) would be a CS8602 under
+ * nullable-reference types unless the `Task<T?>` result is guarded.  Loads
+ * that are never dereferenced (e.g. a load passed whole into a `create`
+ * field) stay unguarded and byte-identical.
  */
 function collectDereferencedLoads(stmts: readonly WorkflowStmtIR[]): Set<string> {
   const names = new Set<string>();
@@ -1441,6 +1445,16 @@ function collectDereferencedLoads(stmts: readonly WorkflowStmtIR[]): Set<string>
     } else if (st.kind === "for-each") {
       for (const n of collectDereferencedLoads(st.body)) names.add(n);
     }
+    // Member/method reads on a plain ref anywhere in the statement's
+    // expressions (op-call args, emit/factory-let field seeds, preconditions…)
+    // dereference that name — `loaded.DataKey` on an unguarded `Task<T?>`
+    // result is the same CS8602 an op-call deref is.  The walk descends into
+    // nested `for-each`/`if-let` bodies, so top-level statements suffice.
+    walkWorkflowStmtExprsDeep(st, (e) => {
+      if ((e.kind === "member" || e.kind === "method-call") && e.receiver.kind === "ref") {
+        names.add(e.receiver.name);
+      }
+    });
   }
   return names;
 }

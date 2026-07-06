@@ -7,9 +7,10 @@
 //     managed `dataKey` materialized path).  `setPath` sets the managed path
 //     deterministically so the harness controls the exact path strings it seeds
 //     (`org_a`, `org_a.b`, `org_a.b.c`, the delimiter-trap `org_ab`, the
-//     unrelated `org_z`); `signUpChild` is the docs-canonical
-//     dataKey-from-parent create factory (`parent.dataKey + "." + seg`),
-//     compiled + exercised through every backend's workflow emitter.
+//     unrelated `org_z`); `signUpChild` is the signUp-style create factory
+//     (load parent via repo-let → create child with the immutable `parent` FK
+//     → set the child path off a parent field), compiled + exercised through
+//     every backend's workflow emitter.
 //   - `Account` carries `policy allow deep`   → descendant-or-self subtree.
 //   - `Entry`   carries `policy allow global` → the caller's ROOT-org subtree.
 //   - `Memo`    carries `policy allow local`  → the flat own-org floor (default).
@@ -47,15 +48,20 @@ system TenantHierarchy {
       repository Entries for Entry { }
       repository Memos for Memo { }
       repository Orgs for Org { }
-      // The docs-canonical child signup: load the parent, create the child with
-      // the immutable `parent` FK, compute the managed `dataKey` off the
-      // parent's path.  Compiled + emitted on every backend (structural leg of
-      // the "signUp-style create factory building dataKey from parent").
+      // The child-signup create factory: load the parent via repo-let, create
+      // the child with the immutable `parent` FK, set the child's managed path
+      // off a parent field.  Compiled + emitted on every backend (structural
+      // leg of the signUp-style create factory).  NOTE: deliberately reads
+      // `loaded.name` (non-nullable), not `loaded.dataKey` — the capability's
+      // `dataKey` is `string?` and the DSL has no null-coalescing operator, so
+      // the docs-canonical `parent.dataKey + "." + seg` form is `str | None +
+      // str` under mypy --strict on the python backend (it only typechecks
+      // where the parent path is provably non-null).
       workflow signUpChild {
         create(nm: string, seg: string, par: Org id) {
           let loaded = Orgs.getById(par)
           let org = Org.create({ name: nm, parent: par })
-          org.setPath(loaded.dataKey + "." + seg)
+          org.setPath(loaded.name + "." + seg)
         }
       }
       policy {
