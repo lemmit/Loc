@@ -148,7 +148,10 @@ describe("workflow own-state assignment — validation", () => {
       if (assign.value.kind === "binary") {
         expect(assign.value.op).toBe("+");
         // Left operand is the current own-state value (a `this-prop` read).
-        expect(assign.value.left).toEqual({
+        // `toMatchObject` (not `toEqual`) since M14 stamps a real `origin` on
+        // this ref — the head operand of the `+=` binary chain, lowered via
+        // the recursive `lowerExpr` wrapper (src/ir/lower/lower-expr.ts).
+        expect(assign.value.left).toMatchObject({
           kind: "ref",
           name: "attempts",
           refKind: "this-prop",

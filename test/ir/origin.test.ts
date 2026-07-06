@@ -207,6 +207,90 @@ describe("statement origins", () => {
   });
 });
 
+describe("expression origins", () => {
+  const EXPR_SOURCE = `
+    system Shop {
+      subdomain Sales {
+        context Orders {
+          aggregate Order {
+            reference: string
+            a: int
+            b: int
+            c: int
+            function double(x: int): int {
+              return x * 2
+            }
+            operation confirm(): int {
+              let tag = reference
+              let total = a + b + c
+              let doubled = double(a)
+              return total
+            }
+          }
+          repository Orders for Order { }
+        }
+      }
+      deployable Api { platform: node  contexts: [Orders] }
+    }
+  `;
+
+  it("stamps a let's RHS ref with its own exact .ddd token span", async () => {
+    const loom = await buildLoomModel(EXPR_SOURCE);
+    const ctx = loom.systems[0]!.subdomains[0]!.contexts[0]!;
+    const agg = ctx.aggregates.find((a) => a.name === "Order")!;
+    const op = agg.operations.find((o) => o.name === "confirm")!;
+    const tagStmt = op.statements[0]!;
+    expect(tagStmt.kind).toBe("let");
+    if (tagStmt.kind !== "let") return;
+    expect(tagStmt.expr.kind).toBe("ref");
+    expect(tagStmt.expr.origin?.kind).toBe("source");
+    if (tagStmt.expr.origin?.kind === "source") {
+      expect(EXPR_SOURCE.slice(tagStmt.expr.origin.span.start, tagStmt.expr.origin.span.end)).toBe(
+        "reference",
+      );
+    }
+  });
+
+  it("stamps a binary chain's OUTERMOST node with the whole chain's span; a folded inner node stays undefined", async () => {
+    const loom = await buildLoomModel(EXPR_SOURCE);
+    const ctx = loom.systems[0]!.subdomains[0]!.contexts[0]!;
+    const agg = ctx.aggregates.find((a) => a.name === "Order")!;
+    const op = agg.operations.find((o) => o.name === "confirm")!;
+    const totalStmt = op.statements[1]!;
+    expect(totalStmt.kind).toBe("let");
+    if (totalStmt.kind !== "let") return;
+    expect(totalStmt.expr.kind).toBe("binary");
+    expect(totalStmt.expr.origin?.kind).toBe("source");
+    if (totalStmt.expr.origin?.kind === "source") {
+      expect(
+        EXPR_SOURCE.slice(totalStmt.expr.origin.span.start, totalStmt.expr.origin.span.end),
+      ).toBe("a + b + c");
+    }
+    // The fold's inner accumulator (`a + b`, the left operand of the
+    // outermost `+ c` node) is a synthetic intermediate built directly by
+    // `lowerBinaryChain`'s left-fold — never passed back through the
+    // `lowerExpr` wrapper — so it carries no origin of its own.
+    expect(totalStmt.expr.kind === "binary" && totalStmt.expr.left.origin).toBeUndefined();
+  });
+
+  it("stamps a call with the whole call expression's span", async () => {
+    const loom = await buildLoomModel(EXPR_SOURCE);
+    const ctx = loom.systems[0]!.subdomains[0]!.contexts[0]!;
+    const agg = ctx.aggregates.find((a) => a.name === "Order")!;
+    const op = agg.operations.find((o) => o.name === "confirm")!;
+    const doubledStmt = op.statements[2]!;
+    expect(doubledStmt.kind).toBe("let");
+    if (doubledStmt.kind !== "let") return;
+    expect(doubledStmt.expr.kind).toBe("call");
+    expect(doubledStmt.expr.origin?.kind).toBe("source");
+    if (doubledStmt.expr.origin?.kind === "source") {
+      expect(
+        EXPR_SOURCE.slice(doubledStmt.expr.origin.span.start, doubledStmt.expr.origin.span.end),
+      ).toBe("double(a)");
+    }
+  });
+});
+
 describe("origin spine — macro-synthesized pages", () => {
   const SCAFFOLD_SOURCE = `
     system Demo {

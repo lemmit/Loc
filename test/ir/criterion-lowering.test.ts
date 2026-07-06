@@ -31,6 +31,25 @@ async function finds() {
   return { ctx, byName };
 }
 
+/** Deep-clone `value` with every `origin` key stripped.  A criterion-inlined
+ *  filter's body lowers from the `criterion` DECLARATION's own `.ddd` span
+ *  (`inlineCriterion`, src/ir/lower/lower-expr.ts), while the hand-written
+ *  inline predicate lowers from its own — different — span in the same
+ *  source.  The equivalence these tests assert is structural shape, not
+ *  "same source position", so strip `origin` before comparing. */
+function stripOrigin<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((v) => stripOrigin(v)) as unknown as T;
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (k === "origin") continue;
+      out[k] = stripOrigin(v);
+    }
+    return out as T;
+  }
+  return value;
+}
+
 describe("lowering — criterion", () => {
   it("records criteria on the bounded-context IR", async () => {
     const loom = await buildLoomModel(SRC);
@@ -43,17 +62,23 @@ describe("lowering — criterion", () => {
 
   it("inlines a parameterless criterion identically to the inline predicate", async () => {
     const { byName } = await finds();
-    expect(byName("activeViaCriterion").filter).toEqual(byName("activeInline").filter);
+    expect(stripOrigin(byName("activeViaCriterion").filter)).toEqual(
+      stripOrigin(byName("activeInline").filter),
+    );
   });
 
   it("substitutes parameters when inlining a parameterised criterion", async () => {
     const { byName } = await finds();
-    expect(byName("inRegionViaCriterion").filter).toEqual(byName("inRegionInline").filter);
+    expect(stripOrigin(byName("inRegionViaCriterion").filter)).toEqual(
+      stripOrigin(byName("inRegionInline").filter),
+    );
   });
 
   it("composes criteria via `&&` into the same shape as the inline composition", async () => {
     const { byName } = await finds();
-    expect(byName("eligibleViaCriterion").filter).toEqual(byName("eligibleInline").filter);
+    expect(stripOrigin(byName("eligibleViaCriterion").filter)).toEqual(
+      stripOrigin(byName("eligibleInline").filter),
+    );
   });
 
   it("produces a queryable binary tree (no unresolved refs) for the composed criterion", async () => {

@@ -52,6 +52,45 @@ describe("weaveLineDirectives", () => {
     expect(wove).toBe(true);
     expect(woven[1]).toBe("#line hidden\n        var b = 2;");
   });
+
+  // --- narrowing arm (M14): `assign`/`return`/`let` prefer the inner
+  // expression's own origin over the whole statement's span. ---
+
+  it("narrows an `assign` statement to its `value` expression's origin", () => {
+    const stmts = [{ kind: "assign", ...withOrigin(0, 8), value: withOrigin(3, 8) }];
+    const chunks = ["        this.A = b;"];
+    const { chunks: woven } = weaveLineDirectives(stmts, chunks, TEXTS);
+    // (3,8) is inside "line one" — offsets 3..8 map to (1,4)-(1,9).
+    expect(woven[0]).toBe(`#line (1,4)-(1,9) "${PATH}"\n        this.A = b;`);
+  });
+
+  it("narrows a `return` statement to its `value` expression's origin", () => {
+    const stmts = [{ kind: "return", ...withOrigin(0, 8), value: withOrigin(9, 17) }];
+    const chunks = ["        return b;"];
+    const { chunks: woven } = weaveLineDirectives(stmts, chunks, TEXTS);
+    expect(woven[0]).toBe(`#line (2,1)-(2,9) "${PATH}"\n        return b;`);
+  });
+
+  it("narrows a `let` statement to its `expr`'s origin", () => {
+    const stmts = [{ kind: "let", ...withOrigin(0, 17), expr: withOrigin(9, 17) }];
+    const chunks = ["        var tag = b;"];
+    const { chunks: woven } = weaveLineDirectives(stmts, chunks, TEXTS);
+    expect(woven[0]).toBe(`#line (2,1)-(2,9) "${PATH}"\n        var tag = b;`);
+  });
+
+  it("falls back to the statement's own origin when the inner expression has none", () => {
+    const stmts = [{ kind: "assign", ...withOrigin(0, 8), value: noOrigin }];
+    const chunks = ["        this.A = b;"];
+    const { chunks: woven } = weaveLineDirectives(stmts, chunks, TEXTS);
+    expect(woven[0]).toBe(`#line (1,1)-(1,9) "${PATH}"\n        this.A = b;`);
+  });
+
+  it("leaves a non-narrowed statement kind (e.g. `emit`) on its own statement span", () => {
+    const stmts = [{ kind: "emit", ...withOrigin(0, 8) }];
+    const chunks = ["        _domainEvents.Add(new Foo());"];
+    const { chunks: woven } = weaveLineDirectives(stmts, chunks, TEXTS);
+    expect(woven[0]).toBe(`#line (1,1)-(1,9) "${PATH}"\n        _domainEvents.Add(new Foo());`);
+  });
 });
 
 describe("offsetToLineCol (1-based)", () => {

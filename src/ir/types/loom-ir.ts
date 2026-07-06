@@ -2855,9 +2855,9 @@ export type BinOp =
   | "||";
 
 export type ExprIR =
-  | { kind: "literal"; lit: LiteralKind; value: string }
-  | { kind: "this" }
-  | { kind: "id" }
+  | { kind: "literal"; lit: LiteralKind; value: string; origin?: OriginRef }
+  | { kind: "this"; origin?: OriginRef }
+  | { kind: "id"; origin?: OriginRef }
   | {
       kind: "ref";
       name: string;
@@ -2874,6 +2874,7 @@ export type ExprIR =
        *  module without re-resolving the receiver (Stage 5).  `name` is the
        *  field; `type` its declared type. */
       storeName?: string;
+      origin?: OriginRef;
     }
   | {
       kind: "member";
@@ -2881,6 +2882,7 @@ export type ExprIR =
       member: string;
       receiverType: TypeIR;
       memberType: TypeIR;
+      origin?: OriginRef;
     }
   | {
       kind: "method-call";
@@ -2907,6 +2909,7 @@ export type ExprIR =
        *  the thrown error into the union) around a variant-match on the
        *  result; every other consumer ignores it. */
       awaited?: boolean;
+      origin?: OriginRef;
     }
   | {
       kind: "call";
@@ -2987,6 +2990,7 @@ export type ExprIR =
        *  `function` calls (functions are always private) and every other
        *  `callKind`. */
       targetPrivate?: boolean;
+      origin?: OriginRef;
     }
   | {
       /** A bare reference to a named page/component `action` in
@@ -3001,6 +3005,7 @@ export type ExprIR =
       kind: "action-ref";
       actionName: string;
       paramType?: TypeIR;
+      origin?: OriginRef;
     }
   | {
       kind: "lambda";
@@ -3013,15 +3018,18 @@ export type ExprIR =
        *  emits, etc. are admissible.  React emitter lowers
        *  state mutations against `state {}` fields to `setX(...)`. */
       block?: StmtIR[];
+      origin?: OriginRef;
     }
   | {
       kind: "new";
       partName: string;
       fields: { name: string; value: ExprIR }[];
+      origin?: OriginRef;
     }
   | {
       kind: "object";
       fields: { name: string; value: ExprIR }[];
+      origin?: OriginRef;
     }
   | {
       /** Bracketed list literal — `[expr, expr, ...]`.  Produced by
@@ -3032,9 +3040,10 @@ export type ExprIR =
        *  validators decide whether to flag them. */
       kind: "list";
       elements: ExprIR[];
+      origin?: OriginRef;
     }
-  | { kind: "paren"; inner: ExprIR }
-  | { kind: "unary"; op: "-" | "!"; operand: ExprIR }
+  | { kind: "paren"; inner: ExprIR; origin?: OriginRef }
+  | { kind: "unary"; op: "-" | "!"; operand: ExprIR; origin?: OriginRef }
   | {
       kind: "binary";
       op: BinOp;
@@ -3054,8 +3063,9 @@ export type ExprIR =
        *  closed-money and numeric-widening rules.  Same population
        *  policy as `leftType`. */
       resultType?: TypeIR;
+      origin?: OriginRef;
     }
-  | { kind: "ternary"; cond: ExprIR; then: ExprIR; otherwise: ExprIR }
+  | { kind: "ternary"; cond: ExprIR; then: ExprIR; otherwise: ExprIR; origin?: OriginRef }
   /**
    * Explicit primitive conversion — `<target>(<value>)`.  Source-
    * level form: `string(age)`, `money(decimalField)`,
@@ -3071,7 +3081,13 @@ export type ExprIR =
    * couldn't be inferred (broken upstream; validator will already be
    * reporting it).
    */
-  | { kind: "convert"; target: PrimitiveName; from: PrimitiveName | undefined; value: ExprIR }
+  | {
+      kind: "convert";
+      target: PrimitiveName;
+      from: PrimitiveName | undefined;
+      value: ExprIR;
+      origin?: OriginRef;
+    }
   /**
    * Predicate-arms expression — first arm whose
    * `cond` evaluates to `true` returns its `value`; if no arm
@@ -3136,6 +3152,7 @@ export type ExprIR =
          *  (the generators have no context to re-derive it). */
         isError?: boolean;
       }[];
+      origin?: OriginRef;
     };
 
 // Convenience constructors used by the lowering layer.
