@@ -28,9 +28,12 @@ import { lines } from "../../../util/code-builder.js";
 export function emitAuthFiles(sys: SystemIR, out: Map<string, string>): void {
   if (!sys.user) return;
   const oidc = sys.auth;
-  out.set("auth/user-types.ts", renderUserTypes(sys.user));
+  // The tenancy claim field, when the system declares `tenancy by …` — drives
+  // the derived `currentUser.orgPath` principal member (multi-tenancy P2.1).
+  const orgPathClaim = sys.tenancy?.claimField;
+  out.set("auth/user-types.ts", renderUserTypes(sys.user, orgPathClaim));
   out.set("auth/verifier.ts", renderVerifier());
-  out.set("auth/middleware.ts", renderMiddleware(sys.user, !!oidc));
+  out.set("auth/middleware.ts", renderMiddleware(sys.user, !!oidc, orgPathClaim));
   // The session routes (always `/auth/me`, plus the OIDC redirect handshake
   // when an `auth { oidc }` block is present) are emitted whenever a
   // backend has auth — the frontend `auth: ui` guard probes `/auth/me`,
@@ -82,7 +85,7 @@ function claimPathFor(field: string, auth: AuthIR): string {
   return field === "id" ? "sub" : field;
 }
 
-function renderUserTypes(user: UserIR): string {
+function renderUserTypes(user: UserIR, orgPathClaim?: string): string {
   // User shape lives in its own module so any per-aggregate file (or
   // workflow / view route) can `import type { User }` without
   // pulling the verifier registry alongside.
@@ -93,29 +96,49 @@ function renderUserTypes(user: UserIR): string {
     const t = f.optional ? renderTsType({ kind: "optional", inner: f.type }) : renderTsType(f.type);
     return `  ${f.name}: ${t};`;
   });
+  // `UserClaims` is the raw token→field projection the verifier returns; the
+  // request principal `User` extends it with the derived, per-request
+  // `orgPath` (multi-tenancy P2.1) when the system declares tenancy.  The
+  // split keeps the verifier free of the derived member (it can't know the
+  // path from the token) while every domain-code `import { User }` sees it.
+  const userDecl = orgPathClaim
+    ? [
+        "export interface User extends UserClaims {",
+        "  /** The caller's tenant materialized path (`currentUser.orgPath`) —",
+        "   *  derived per-request from the tenancy claim, memoized on this",
+        "   *  request-scoped principal (multi-tenancy Phase 2, P2.1). */",
+        "  orgPath: string;",
+        "}",
+      ]
+    : ["export type User = UserClaims;"];
   return (
     lines(
       "// Auto-generated.",
       "// User-claim shape decoded from the inbound JWT.  The verifier",
-      "// hook (auth/verifier.ts) returns this exact shape; downstream",
-      "// route handlers / workflow handlers / view binds reference it",
-      "// via the magic `currentUser` identifier.",
-      "export interface User {",
+      "// hook (auth/verifier.ts) returns `UserClaims`; the auth middleware",
+      "// derives the request principal `User` from it (adding `orgPath` under",
+      "// tenancy).  Downstream route handlers / workflow handlers / view binds",
+      "// reference `User` via the magic `currentUser` identifier.",
+      "export interface UserClaims {",
       ...fields,
       "}",
+      "",
+      ...userDecl,
     ) + "\n"
   );
 }
 
 function renderVerifier(): string {
   return `// Auto-generated.
-import type { User } from "./user-types";
+import type { UserClaims } from "./user-types";
 
 /** Verifier hook the user implements: decode the inbound request's
- *  JWT, return a populated User on success, return null (or throw)
- *  to reject with a 401.  Register your implementation at app
- *  startup, BEFORE calling \`serve(...)\`. */
-export type UserVerifier = (req: Request) => Promise<User | null> | User | null;
+ *  JWT, return the populated claim shape on success, return null (or
+ *  throw) to reject with a 401.  Register your implementation at app
+ *  startup, BEFORE calling \`serve(...)\`.  The auth middleware derives
+ *  the request principal (\`User\`, incl. \`orgPath\` under tenancy) from
+ *  the returned claims. */
+export type UserVerifier = (req: Request) => Promise<UserClaims | null> | UserClaims | null;
 
 let registered: UserVerifier | null = null;
 
@@ -125,7 +148,7 @@ export function registerUserVerifier(fn: UserVerifier): void {
 }
 
 /** Internal — called by the middleware on every authenticated request. */
-export async function verifyUserOrThrow(req: Request): Promise<User> {
+export async function verifyUserOrThrow(req: Request): Promise<UserClaims> {
   if (!registered) {
     throw new Error(
       "No user verifier is registered.  Call registerUserVerifier(...) " +
@@ -154,9 +177,18 @@ export function assertUserVerifierRegistered(): void {
 `;
 }
 
-function renderMiddleware(user: UserIR, oidc: boolean): string {
+function renderMiddleware(user: UserIR, oidc: boolean, orgPathClaim?: string): string {
   const idField = actorIdField(user);
   const stampActorId = idField ? `\n  if (ctx) ctx.actorId = String(user.${idField});` : "";
+  // Derive the request principal from the verifier's claims.  Under tenancy,
+  // add the per-request `orgPath` — the caller's tenant materialized path
+  // (multi-tenancy P2.1).  Computed once here (post-verify, so it reflects any
+  // dev-claims override) and memoized on the request-scoped principal.  P2.1
+  // resolves it to the tenancy claim value (the root-segment path); P2.2 swaps
+  // this for a memoized registry `dataKey` lookup keyed by the same claim.
+  const deriveUser = orgPathClaim
+    ? `{ ...claims, orgPath: String(claims.${orgPathClaim} ?? "") }`
+    : "claims";
   // Only the handshake's redirect endpoints bypass auth — they must be
   // reachable without a verified principal.  `/api/auth/me` (the session probe
   // the frontend guard reads) is deliberately NOT bypassed, so the
@@ -167,7 +199,7 @@ function renderMiddleware(user: UserIR, oidc: boolean): string {
   return `// Auto-generated.
 import { createMiddleware } from "hono/factory";
 import { requestContext } from "../obs/als";
-import type { User } from "./user-types";
+import type { User, UserClaims } from "./user-types";
 import { verifyUserOrThrow } from "./verifier";
 
 const BYPASS_PREFIXES = ${bypass} as const;
@@ -188,12 +220,13 @@ export const authMiddleware = createMiddleware<{
       return;
     }
   }
-  let user: User;
+  let claims: UserClaims;
   try {
-    user = await verifyUserOrThrow(c.req.raw);
+    claims = await verifyUserOrThrow(c.req.raw);
   } catch {
     return c.json({ error: "unauthorized" }, 401);
   }
+  const user: User = ${deriveUser};
   // Attach the principal to the ambient frame (read by non-HTTP code via
   // requireCurrentUser) and to the Hono context (read by route handlers
   // that hold \`c\`).
@@ -246,7 +279,7 @@ function renderOidcVerifier(user: UserIR, auth: AuthIR): string {
   });
   return `// Auto-generated.
 import { createRemoteJWKSet, type JWTPayload, jwtVerify } from "jose";
-import type { User } from "./user-types";
+import type { UserClaims } from "./user-types";
 import { registerUserVerifier } from "./verifier";
 
 // Resolved from the system \`auth { oidc { … } }\` block.  Env-bound values
@@ -294,8 +327,9 @@ function claim(payload: JWTPayload, path: string): unknown {
   }, payload);
 }
 
-/** Project verified claims onto the typed User shape. */
-function toUser(payload: JWTPayload): User {
+/** Project verified claims onto the typed claim shape.  The auth middleware
+ *  derives the request principal (incl. \`orgPath\` under tenancy) from this. */
+function toUser(payload: JWTPayload): UserClaims {
   return {
 ${toUserLines.join("\n")}
   };
@@ -303,7 +337,7 @@ ${toUserLines.join("\n")}
 
 /** Generated OIDC verifier — validates signature (JWKS), issuer, and
  *  audience, then maps claims onto User.  Returns null to reject (→ 401). */
-export const oidcVerifier = async (req: Request): Promise<User | null> => {
+export const oidcVerifier = async (req: Request): Promise<UserClaims | null> => {
   const token = bearer(req);
   if (!token) return null;
   try {

@@ -66,7 +66,10 @@ export function emitAuth(args: AuthEmitArgs): AuthEmitResult {
   // dev stub keeps a freshly-generated stack callable out of the box.
   const auth = sys.auth;
 
-  files.set(`lib/${appName}_web/auth.ex`, renderAuthPlug(sys.user, webModule, auth));
+  files.set(
+    `lib/${appName}_web/auth.ex`,
+    renderAuthPlug(sys.user, webModule, auth, sys.tenancy?.claimField),
+  );
   files.set(`lib/${appName}_web/live_auth.ex`, renderLiveAuth(webModule, auth));
   files.set(
     `lib/${appName}_web/controllers/auth_controller.ex`,
@@ -108,9 +111,24 @@ function renderAuthPlug(
   user: UserIR | undefined,
   webModule: string,
   auth: AuthIR | undefined,
+  orgPathClaim?: string,
 ): string {
   const buildUserBody = renderBuildUser(user, auth);
   const idKey = actorIdKey(user);
+  // Derived `currentUser.orgPath` — the caller's tenant materialized path
+  // (multi-tenancy P2.1).  Applied as a final `put_org_path/1` step AFTER the
+  // principal (and any dev-claims override) is built, so it reflects the final
+  // claim value; stringified null-safely.  P2.1 resolves it to the tenancy
+  // claim value (the root path); P2.2 swaps the body for a memoized registry
+  // `dataKey` lookup.
+  const orgPathKey = orgPathClaim ? snake(orgPathClaim) : undefined;
+  const orgPathPipe = orgPathKey ? " |> put_org_path()" : "";
+  const putOrgPathDef = orgPathKey
+    ? `
+  # Derives \`current_user.org_path\` from the tenancy claim (multi-tenancy P2.1).
+  defp put_org_path(user), do: Map.put(user, :org_path, to_string(user[:${orgPathKey}]))
+`
+    : "";
   // DEV STUB only: let a caller override string claims (e.g. tenantId) via a
   // base64-JSON `x-loom-dev-claims` header — the same injection the Hono dev
   // stub honours (dotnet/java/python parity).  Never in OIDC mode: a header
@@ -120,9 +138,9 @@ function renderAuthPlug(
     (f) => f.type.kind === "primitive" && f.type.name === "string",
   );
   const devClaimsEnabled = !auth && devClaimStringFields.length > 0;
-  const buildUserCall = devClaimsEnabled
-    ? "merge_dev_claims(conn, build_user(claims))"
-    : "build_user(claims)";
+  const buildUserCall =
+    (devClaimsEnabled ? "merge_dev_claims(conn, build_user(claims))" : "build_user(claims)") +
+    orgPathPipe;
   const mergeDevClaimsDef = devClaimsEnabled
     ? `
   # DEV STUB only: override string claims (e.g. tenantId) from a base64-encoded
@@ -167,7 +185,7 @@ ${devClaimStringFields
     : `
   # DEV STUB: the built-in admin principal, exposed so LiveAuth grants
   # LiveViews the same identity the :api pipeline grants every request.
-  def dev_user, do: build_user(elem(verify_token(nil), 1))
+  def dev_user, do: build_user(elem(verify_token(nil), 1))${orgPathPipe}
 `;
 
   // OIDC: the token rides the Authorization header OR the `session` cookie the
@@ -287,7 +305,7 @@ ${verifierSection}
 
   defp build_user(claims) do
 ${buildUserBody}  end
-${mergeDevClaimsDef}end
+${mergeDevClaimsDef}${putOrgPathDef}end
 `;
 }
 

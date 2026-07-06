@@ -48,6 +48,7 @@ import {
   checkMatchExpressions,
   checkMatcherArity,
   checkMatchesCalls,
+  checkOrgPathReferences,
   checkPayloads,
   checkPrimitiveConversions,
   checkProjectSingletons,
@@ -267,6 +268,9 @@ export class DddValidator {
     // Restores the "`unknown` implies already-reported" invariant its
     // siblings assume.  Needs `services` for cross-file / workspace names.
     guard("unknown-name-refs", model, () => checkUnknownNameRefs(model, accept, this.services));
+    // `currentUser.orgPath` (the derived tenant materialized path, P2.1) is
+    // only meaningful under a `tenancy by` declaration — fail-closed otherwise.
+    guard("orgpath-tenancy", model, () => checkOrgPathReferences(model, accept));
     // Primitive conversion expressions (`string(x)`, `money(d)`):
     // restrict to the infallible (source, target) pairs.  Fallible
     // parses (`int("42")`) and narrowing (`int(longValue)`) are

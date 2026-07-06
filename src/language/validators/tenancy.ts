@@ -14,8 +14,16 @@
 // The per-aggregate stance lint needs the merged multi-file IR, so it
 // lives in `src/ir/validate/checks/tenancy-checks.ts` (phase ⑦).
 
-import type { ValidationAcceptor } from "langium";
-import { isTenancyDecl, type System } from "../generated/ast.js";
+import { AstUtils, type ValidationAcceptor } from "langium";
+import { PRINCIPAL_ORG_PATH } from "../../util/principal.js";
+import {
+  isMemberSuffix,
+  isNameRef,
+  isPostfixChain,
+  isTenancyDecl,
+  type Model,
+  type System,
+} from "../generated/ast.js";
 
 export function checkTenancyDecls(system: System, accept: ValidationAcceptor): void {
   const decls = system.members.filter(isTenancyDecl);
@@ -27,6 +35,48 @@ export function checkTenancyDecls(system: System, accept: ValidationAcceptor): v
       "error",
       `system '${system.name}' declares more than one 'tenancy by' line; keep just the first.`,
       { node: extra, code: "loom.tenancy-duplicate" },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// `currentUser.orgPath` requires a tenancy declaration (multi-tenancy Phase 2,
+// plan P2.1).  `orgPath` is the derived materialized-path member — it is
+// resolved per-request from the tenant registry keyed by the tenancy claim, so
+// without a `tenancy by user.<claim> of <Registry>` line there is no claim to
+// resolve it from and nothing for the backend accessor to compute.  Referencing
+// it there is fail-closed: a hard error (`loom.orgpath-without-tenancy`) rather
+// than a silent principal member that resolves to nothing at runtime.
+//
+// The check is model-wide: a `tenancy by` line is a system member, and
+// top-level deployment members fold into the single system, so "the model
+// declares tenancy anywhere" is the correct gate for the single-system case
+// (the only shape a `tenancy by` supports today) and stays fail-closed when
+// tenancy is absent.
+// ---------------------------------------------------------------------------
+
+export function checkOrgPathReferences(model: Model, accept: ValidationAcceptor): void {
+  let hasTenancy = false;
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (isTenancyDecl(node)) {
+      hasTenancy = true;
+      break;
+    }
+  }
+  if (hasTenancy) return;
+
+  for (const node of AstUtils.streamAllContents(model)) {
+    if (!isPostfixChain(node)) continue;
+    const head = node.head;
+    if (!isNameRef(head) || head.name !== "currentUser") continue;
+    const first = node.suffixes[0];
+    if (!first || !isMemberSuffix(first) || first.member !== PRINCIPAL_ORG_PATH) continue;
+    accept(
+      "error",
+      `'currentUser.${PRINCIPAL_ORG_PATH}' requires a 'tenancy by user.<claim> of <Registry>' ` +
+        `declaration — it is the caller's tenant materialized path, resolved from the tenancy ` +
+        `claim and registry.  Add the tenancy line, or drop the '${PRINCIPAL_ORG_PATH}' reference.`,
+      { node: first, code: "loom.orgpath-without-tenancy" },
     );
   }
 }
