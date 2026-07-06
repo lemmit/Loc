@@ -22,6 +22,19 @@ export const TENANT_OWNED_CAPABILITY = "tenantOwned";
  *  registry `dataKey` lookup.  See `src/macros/prelude.ts`. */
 export const TENANT_REGISTRY_CAPABILITY = "tenantRegistry";
 
+/** The field name the `tenantOwned` capability provides for the materialized
+ *  DataKey path (multi-tenancy Phase 2, plan P2.3 —
+ *  `docs/plans/multi-tenancy-phase2.md`).  Unlike the `tenantRegistry`
+ *  capability's own `dataKey` (a managed field that stays ON the wire — the
+ *  registry's path is meant to be readable), `tenantOwned`'s `dataKey` is a
+ *  **persistence-only column**: `authorization.md §2` calls for it "kept out
+ *  of `wireShape`" entirely, never just access-gated.  `enrichLoomModel`
+ *  (`wireFieldsForAggregate`) drops any field with this name on an aggregate
+ *  where {@link hasTenantOwned} holds — the registry's own same-named field is
+ *  unaffected since a `tenantOwned` aggregate and the registry are disjoint
+ *  (`classifyTenantStance`). */
+export const TENANT_OWNED_DATA_KEY_FIELD = "dataKey";
+
 /** `contextFilterOrigins` marker for the DERIVED registry self-scope filter
  *  (multi-tenancy Phase 1b, capstone decision 4): under `tenancy by
  *  user.<claim> of <Registry>`, enrichment appends `this.id ==

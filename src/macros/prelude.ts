@@ -86,24 +86,45 @@ function buildSoftDeletable(): Capability {
   ] as CapabilityMember[]);
 }
 
-/** `capability tenantOwned { tenantId (internal) + onCreate stamp from the
- * principal's claim + filter this.tenantId == currentUser.tenantId }` — the
- * tenant-data marker of multi-tenancy Phase 1a
- * (docs/plans/multi-tenancy-implementation.md, slice 1a.2).  Combines
- * `auditable`'s principal-stamp shape with `softDeletable`'s filter shape:
- * every read is scoped to the caller's tenant, every create is stamped with
- * it, and `internal` keeps `tenantId` out of client create/update inputs.
+/** `capability tenantOwned { tenantId (internal) + dataKey (internal) +
+ * onCreate stamp from the principal's claim + orgPath + filter this.tenantId
+ * == currentUser.tenantId }` — the tenant-data marker of multi-tenancy Phase
+ * 1a (docs/plans/multi-tenancy-implementation.md, slice 1a.2), extended by
+ * Phase 2 slice P2.3 (docs/plans/multi-tenancy-phase2.md) with the
+ * materialized `dataKey` path.  Combines `auditable`'s principal-stamp shape
+ * with `softDeletable`'s filter shape: every read is scoped to the caller's
+ * tenant, every create is stamped with it, and `internal` keeps both
+ * `tenantId` and `dataKey` out of client create/update inputs.
  *
  * NOTE: the stamp/filter claim field is hardcoded `tenantId` here — the
  * capability does NOT read the system's `tenancy by user.<claim>`
  * declaration.  That the declared claim actually is `tenantId` (and that a
  * `tenancy by` declaration exists at all) is verified by the slice-1a.3
- * tenancy validators, not by this capability. */
+ * tenancy validators, not by this capability.
+ *
+ * `dataKey := currentUser.orgPath` is a pure claim-copy stamp exactly like
+ * `tenantId`'s — it rides the same `contextStamp` pipeline, no per-backend
+ * code needed (every backend already renders `currentUser.orgPath` for the
+ * P2.1/P2.2 filter use-site; a stamp assignment is the same expression
+ * renderer, different call site).  It is stamped **unconditionally** — not
+ * gated on the system having opted the registry into `implements
+ * tenantRegistry` (P2.2) — because `currentUser.orgPath` is never a
+ * placeholder: under flat tenancy (no registry hierarchy) it resolves to the
+ * tenancy claim itself (P2.1's defined fallback, the correct *root-only*
+ * path), and once a hierarchy exists it resolves to the real materialized
+ * path with no code here needing to change. `authorization.md §2` calls
+ * `dataKey` a persistence column only — it is dropped from `wireShape`
+ * entirely by `wireFieldsForAggregate` (`src/ir/enrich/enrichments.ts`),
+ * never just access-gated like `tenantId`. */
 function buildTenantOwned(): Capability {
   return capability("tenantOwned", [
     field("tenantId", primType("string"), { access: "internal" }),
+    field("dataKey", primType("string", { optional: true }), { access: "internal" }),
     ...contextStamp({
-      onCreate: [{ field: "tenantId", value: memberAccess(nameRef("currentUser"), "tenantId") }],
+      onCreate: [
+        { field: "tenantId", value: memberAccess(nameRef("currentUser"), "tenantId") },
+        { field: "dataKey", value: memberAccess(nameRef("currentUser"), "orgPath") },
+      ],
     }),
     contextFilter(
       binaryExpr(

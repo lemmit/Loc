@@ -52,7 +52,9 @@ import type {
 } from "../types/loom-ir.js";
 import {
   buildRegistrySelfScopeFilter,
+  hasTenantOwned,
   TENANCY_SELF_SCOPE_ORIGIN,
+  TENANT_OWNED_DATA_KEY_FIELD,
   tenancyClaimBinding,
 } from "../util/tenant-stance.js";
 import { walkStmtExprsDeep } from "../util/walk.js";
@@ -1414,6 +1416,14 @@ function wireFieldsForAggregate(agg: AggregateIR): WireField[] {
     },
   ];
   for (const f of agg.fields) {
+    // `tenantOwned`'s `dataKey` (multi-tenancy P2.3) is a persistence-only
+    // materialized-path column — `authorization.md §2` calls for it "kept
+    // out of wireShape" entirely, unlike `tenantId` which stays in wireShape
+    // as `internal` (excluded from API reads by `forApiRead`, still visible
+    // in `.loom/wire-spec.json`). The registry's own same-named `dataKey`
+    // (from `tenantRegistry`, `managed`) is unaffected — the two capabilities
+    // are mutually exclusive per aggregate (`classifyTenantStance`).
+    if (f.name === TENANT_OWNED_DATA_KEY_FIELD && hasTenantOwned(agg)) continue;
     out.push({
       name: f.name,
       type: f.type,

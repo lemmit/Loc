@@ -235,18 +235,21 @@ context Sales with softDeleteByDefault {
     expect(result).toMatch(/implements softDeletable/);
   });
 
-  it("unfolds `with tenantOwned` into the tenantId field + stamp + filter source", async () => {
+  it("unfolds `with tenantOwned` into the tenantId + dataKey fields + stamp + filter source", async () => {
     // Capability unfold (multi-tenancy Phase 1a slice 1a.2, the anti-magic
     // story): `with tenantOwned` materializes exactly what it attaches.
     const source = `
 system D {
   user { id: guid  tenantId: string }
+  tenancy by user.tenantId of Org
   subdomain M {
     context Sales {
       aggregate Invoice with tenantOwned {
         number: string
       }
+      aggregate Org { name: string }
       repository Invoices for Invoice { }
+      repository Orgs for Org { }
     }
   }
 }
@@ -255,8 +258,10 @@ system D {
     // The clause is gone; the members materialized as source:
     expect(unfolded).not.toMatch(/with tenantOwned/);
     expect(unfolded).toMatch(/tenantId: string internal/);
+    expect(unfolded).toMatch(/dataKey: string\? internal/);
     expect(unfolded).toMatch(/stamp onCreate \{/);
     expect(unfolded).toMatch(/tenantId := currentUser\.tenantId/);
+    expect(unfolded).toMatch(/dataKey := currentUser\.orgPath/);
     expect(unfolded).toMatch(/filter this\.tenantId == currentUser\.tenantId/);
     // And the unfolded source re-parses cleanly:
     const reparse = await validate(unfolded);
