@@ -746,7 +746,16 @@ function emitProjectFromContexts(
   // Project shell — stable from S1 on.
   out.set(
     "build.gradle.kts",
-    renderGradleBuild({ flyway: hasMigrations, oidc, extraDeps: resourceEmission.deps }),
+    renderGradleBuild({
+      flyway: hasMigrations,
+      oidc,
+      extraDeps: resourceEmission.deps,
+      // M10 phase 6b: the recorder's PRESENCE alone gates the emitted
+      // `injectSmap` task — this generator never sees `sourceTexts` (the
+      // `.smap` sidecars themselves are rendered later, system-side, from
+      // the SAME recorder — see src/system/index.ts).
+      sourcemap: !!sourcemap,
+    }),
   );
   out.set("settings.gradle.kts", renderGradleSettings(slug));
   out.set("src/main/resources/application.yml", renderApplicationYml(slug));

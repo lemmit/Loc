@@ -103,6 +103,22 @@ function stripLineDirectives(content: string): string {
   return content.replace(/^#line (\(|default\b|hidden\b).*\n/gm, "");
 }
 
+// M10 phase 6b: the java backend weaves a fenced `// loom:sourcemap-begin` /
+// `// loom:sourcemap-end` block (a `buildscript {}` at the top plus the
+// `injectSmap` task registration near the bottom — see
+// src/generator/java/emit/program.ts) into `build.gradle.kts` when the
+// recorder is present, regardless of `sourceTexts` (the java generator
+// itself never sees `sourceTexts` — only the `.smap` sidecar rendering,
+// system-side, needs it).  Strip both fenced blocks (plus the blank-line
+// separator each introduces) before comparing against the flag-off run,
+// whose `build.gradle.kts` never carries them.
+function stripJavaSourcemapFence(content: string): string {
+  return content.replace(
+    /\n?\/\/ loom:sourcemap-begin\n[\s\S]*?\/\/ loom:sourcemap-end\n{0,2}/g,
+    "",
+  );
+}
+
 // `langium/test`'s `parseHelper` mints the in-memory doc's URI from a
 // module-global counter (`/1.ddd`, `/2.ddd`, …) that keeps incrementing
 // across every `it` in this file — never assume `/1.ddd`.  Parse with
@@ -128,8 +144,12 @@ describe(".loom/sourcemap.json", () => {
 
     expect(withoutFlag.has(".loom/sourcemap.json")).toBe(false);
     expect([...withoutFlag.keys()].some((p) => p.endsWith(".map"))).toBe(false);
+    // Honest skip, M10 phase 6b: flag-off never emits `.smap` sidecars nor
+    // the java `injectSmap` Gradle fence, with or without `sourceTexts`.
+    expect([...withoutFlag.keys()].some((p) => p.endsWith(".smap"))).toBe(false);
     for (const [path, content] of withoutFlag) {
       expect(content).not.toContain("//# sourceMappingURL=");
+      expect(content).not.toContain("loom:sourcemap-begin");
       // Honest skip: flag-off never weaves .NET `#line` directives, with or
       // without `sourceTexts` (M7 phase 6a needs BOTH `sourcemap` and
       // `sourceTexts` — flag-off has neither).
@@ -139,7 +159,7 @@ describe(".loom/sourcemap.json", () => {
     const withFlagMinusMap = new Map(withFlag);
     withFlagMinusMap.delete(".loom/sourcemap.json");
     for (const path of [...withFlagMinusMap.keys()]) {
-      if (path.endsWith(".map")) withFlagMinusMap.delete(path);
+      if (path.endsWith(".map") || path.endsWith(".smap")) withFlagMinusMap.delete(path);
     }
 
     expect([...withFlagMinusMap.keys()].sort()).toEqual([...withoutFlag.keys()].sort());
@@ -147,11 +167,14 @@ describe(".loom/sourcemap.json", () => {
       const other = withFlagMinusMap.get(path);
       expect(other, `missing ${path} in --sourcemap run`).toBeDefined();
       // The flag-on run also passes `sourceTexts`, so .cs output now carries
-      // woven `#line` directives (M7 phase 6a) — strip them before the
-      // byte-identical comparison; every other extension is untouched.
-      const otherNormalized = path.endsWith(".cs")
-        ? stripLineDirectives(stripSourceMappingDirective(other!))
-        : stripSourceMappingDirective(other!);
+      // woven `#line` directives (M7 phase 6a) and `java_api/build.gradle.kts`
+      // now carries the fenced `injectSmap` block (M10 phase 6b) — strip
+      // each before the byte-identical comparison; every other extension /
+      // path is untouched.
+      let otherNormalized = stripSourceMappingDirective(other!);
+      if (path.endsWith(".cs")) otherNormalized = stripLineDirectives(otherNormalized);
+      if (path.endsWith("build.gradle.kts"))
+        otherNormalized = stripJavaSourcemapFence(otherNormalized);
       expect(normalizeNondeterministic(otherNormalized), `content drifted for ${path}`).toBe(
         normalizeNondeterministic(content),
       );
@@ -584,5 +607,69 @@ describe("Source Map v3 sidecars", () => {
 
     const tsxContent = files.get(tsxPath)!;
     expect(tsxContent.endsWith("//# sourceMappingURL=list.tsx.map\n")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JSR-45 SMAP sidecars (Milestone 10 phase 6b, source-map-and-debugging.md
+// §9) — the java backend's own debugger artifact.  Unlike the v3 loop
+// (which appends a trailing directive to the mapped file itself), the
+// `.java` source is untouched; the sidecar is a standalone `<file>.smap`
+// text document, consumed at BUILD time by the emitted `injectSmap` Gradle
+// task (src/generator/java/emit/program.ts) rather than by anything reading
+// the `.java` file at runtime.
+// ---------------------------------------------------------------------------
+
+describe("JSR-45 SMAP sidecars (java)", () => {
+  it("emits a .smap sidecar for the java backend's Order.java naming the Loom stratum", async () => {
+    const { model, sourceTexts } = await parseWithSourceTexts(SOURCE);
+    const files = generateSystems(model, { sourcemap: true, sourceTexts }).files;
+
+    const javaPath = "java_api/src/main/java/com/loom/javaapi/features/orders/Order.java";
+    expect(files.has(javaPath), `expected ${javaPath} in output`).toBe(true);
+    const smapPath = `${javaPath}.smap`;
+    const raw = files.get(smapPath);
+    expect(raw, `${smapPath} not emitted`).toBeDefined();
+
+    expect(raw!.startsWith("SMAP\n")).toBe(true);
+    const lines = raw!.split("\n");
+    expect(lines[1]).toBe("Order.java");
+    expect(lines[2]).toBe("Loom");
+    expect(lines).toContain("*S Loom");
+    expect(lines).toContain("*F");
+    expect(lines).toContain("*L");
+    expect(raw!.trimEnd().endsWith("*E")).toBe(true);
+
+    // The `let note = customerName` statement's own *L entry names the
+    // exact .ddd input line it sits on (computed independently from SOURCE,
+    // the same way the v3 sidecar test cross-checks its segment).
+    const letIdx = SOURCE.indexOf("let note = customerName");
+    expect(letIdx).toBeGreaterThanOrEqual(0);
+    const expectedDdlLine = SOURCE.slice(0, letIdx).split("\n").length; // 1-based
+    const lEntries = lines.slice(lines.indexOf("*L") + 1, lines.indexOf("*E"));
+    expect(
+      lEntries.some((e) => e.startsWith(`${expectedDdlLine}#`)),
+      `no *L entry for .ddd line ${expectedDdlLine} in:\n${lEntries.join("\n")}`,
+    ).toBe(true);
+  });
+
+  it("without sourceTexts, flag-on emits no .smap sidecars (honest skip)", async () => {
+    const model = await parseValid(SOURCE);
+    const files = generateSystems(model, { sourcemap: true }).files;
+
+    expect([...files.keys()].some((p) => p.endsWith(".smap"))).toBe(false);
+  });
+
+  it("emits the fenced injectSmap Gradle block in java_api/build.gradle.kts whenever the recorder is present, even without sourceTexts", async () => {
+    const model = await parseValid(SOURCE);
+    const files = generateSystems(model, { sourcemap: true }).files;
+
+    const content = files.get("java_api/build.gradle.kts")!;
+    expect(content).toContain("// loom:sourcemap-begin");
+    expect(content).toContain("// loom:sourcemap-end");
+    expect(content).toContain('classpath("org.ow2.asm:asm:');
+    expect(content).toContain('tasks.register("injectSmap")');
+    expect(content).toContain('tasks.named("compileJava") { finalizedBy("injectSmap") }');
+    expect(content).toContain('tasks.named("bootJar") { dependsOn("injectSmap") }');
   });
 });

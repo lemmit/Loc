@@ -30,6 +30,7 @@ import {
   renderWorkflowDiagram,
 } from "./mermaid.js";
 import { buildMigrations } from "./migrations-builder.js";
+import { renderSmap } from "./smap.js";
 import {
   memorySnapshotStore,
   type SnapshotStore,
@@ -96,10 +97,13 @@ export interface GenerateSystemOptions {
    *  `sourceMappingURL` directive) for every recorded `.ts`/`.tsx` output —
    *  the node/Hono backend's domain code, plus (M8) the React and Angular
    *  frontends' `.tsx` / `.component.ts` pages — the only files a JS/TS
-   *  debugger can step through today.  `src/system/` stays browser-safe (no
-   *  `fs`), so the CLI/playground supply the text; a mapped file with no
-   *  entry here is skipped (no sidecar), never guessed.  No effect unless
-   *  `sourcemap` is also true.  See docs/proposals/source-map-and-debugging.md §8. */
+   *  debugger can step through today.  Also feeds JSR-45 `.java.smap`
+   *  sidecar emission (M10 phase 6b, `src/system/smap.ts`) for every
+   *  recorded `.java` output, sharing this same gate.  `src/system/` stays
+   *  browser-safe (no `fs`), so the CLI/playground supply the text; a
+   *  mapped file with no entry here is skipped (no sidecar), never guessed.
+   *  No effect unless `sourcemap` is also true.  See
+   *  docs/proposals/source-map-and-debugging.md §8. */
   sourceTexts?: ReadonlyMap<string, string>;
 }
 
@@ -166,6 +170,21 @@ export function generateSystemsFromLoom(
       // content, and this is the file's own only trailing-line addition.
       const basename = mapPath.split("/").pop()!;
       out.set(path, `${content}//# sourceMappingURL=${basename}\n`);
+    }
+  }
+  // JSR-45 SMAP sidecars (Milestone 10 phase 6b) — the Java sibling of the
+  // v3 loop above, same `recorder && options.sourceTexts` gate.  Unlike v3,
+  // the mapped `.java` file's own content is never touched: a compiled
+  // class carries the SourceDebugExtension pointer at Gradle build time
+  // (the `injectSmap` task the java backend emits behind `--sourcemap`),
+  // not a trailing source directive.  See src/system/smap.ts.
+  if (recorder && options.sourceTexts) {
+    for (const [path, regions] of recorder.entries()) {
+      if (!path.endsWith(".java")) continue;
+      if (!out.has(path)) continue;
+      const rendered = renderSmap(regions, path, options.sourceTexts);
+      if (!rendered) continue;
+      out.set(`${path}.smap`, rendered);
     }
   }
   return { files: out };
