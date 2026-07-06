@@ -455,7 +455,28 @@ export function generateTypeScriptForContexts(
         if (st) resourceSourceTypes.set(r.name, st);
       }
     }
-    out.set("http/workflows.ts", buildWorkflowsFile(merged, aggsByName, resourceSourceTypes));
+    // Only collected when a recorder is actually threaded in — a
+    // no-sourcemap run pays no per-statement bookkeeping cost.  Milestone 11:
+    // `http/workflows.ts` pools every workflow, so it never gets a
+    // whole-file region — only these fragment-only statement regions.
+    const workflowOpFragments: OpFragment[] | undefined = sourcemap ? [] : undefined;
+    const workflowsContent = buildWorkflowsFile(
+      merged,
+      aggsByName,
+      resourceSourceTypes,
+      workflowOpFragments,
+    );
+    out.set("http/workflows.ts", workflowsContent);
+    if (sourcemap && workflowOpFragments) {
+      for (const frag of workflowOpFragments) {
+        sourcemap.fragment(
+          "http/workflows.ts",
+          workflowsContent,
+          frag.fragmentText,
+          frag.subRegions,
+        );
+      }
+    }
   }
   if (merged.views.length > 0) {
     const aggsByName = new Map(merged.aggregates.map((a) => [a.name, a] as const));

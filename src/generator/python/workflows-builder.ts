@@ -25,7 +25,9 @@ import { walkExpr } from "../../ir/validate/checks/shared.js";
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
 import { LogEvents } from "../_obs/log-events.js";
-import { renderWorkflowStmts, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
+import { statementSubRegions } from "../_trace/sourcemap.js";
+import { renderWorkflowStmtChunks, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
+import type { OpFragment } from "./emit/aggregate.js";
 import { domainServiceImportLinesForWorkflow } from "./emit/domain-service.js";
 import { responsePyType } from "./emit/http-models.js";
 import { wireHelperImport } from "./py-type-imports.js";
@@ -81,6 +83,15 @@ export function buildPyWorkflowsFile(
   ctx: EnrichedBoundedContextIR,
   hasDispatch = false,
   sys?: SystemIR,
+  /** Source-map Milestone 11 (workflow-body statement regions) — allocated by
+   *  the caller (`src/generator/python/index.ts`) ONLY when a recorder is
+   *  present.  `app/http/workflows_routes.py` pools every command workflow,
+   *  so it never gets a `sourcemap.file(...)` whole-file region (mirrors the
+   *  Elixir pooled-file precedent) — these fragment-only statement regions
+   *  are the only mapping this file gets.  Reactor / event-`create` starter
+   *  bodies live in `dispatch-builder.ts` (`app/dispatch.py`), out of scope
+   *  for this slice. */
+  opFragments?: OpFragment[],
 ): string | null {
   const wfs = commandWorkflowsOf(ctx);
   const obsWfs = observableWorkflowsOf(ctx);
@@ -115,7 +126,7 @@ export function buildPyWorkflowsFile(
   const instanceModels = obsWfs.map((wf) => instanceResponseModels(wf, ctx)).join("");
 
   const routeBlocks = [
-    ...wfs.map((wf) => workflowRoute(wf, ctx, dispatcherExpr, sys)),
+    ...wfs.map((wf) => workflowRoute(wf, ctx, dispatcherExpr, sys, opFragments)),
     ...obsWfs.map((wf) => instanceRoutes(wf)),
   ];
   const routes = routeBlocks.join("\n\n\n");
@@ -492,6 +503,8 @@ function workflowRoute(
   ctx: EnrichedBoundedContextIR,
   dispatcherExpr: string,
   sys?: SystemIR,
+  /** Source-map Milestone 11 — see `buildPyWorkflowsFile`'s `opFragments`. */
+  opFragments?: OpFragment[],
 ): string {
   // A `requires`-guarded workflow declares its 403 outcome; a
   // currentUser-referencing one binds the actor off the request scope
@@ -539,21 +552,37 @@ function workflowRoute(
   }
   const hasEmit = collectEmits(wf.statements).length > 0;
   if (hasEmit) out.push("    workflow_events: list[DomainEvent] = []");
-  out.push(
-    ...renderWorkflowStmts(
-      wf.statements,
-      // Thread the read-port resolver so a `reading`-tier domain-service call in
-      // the body is supplied its repository handle(s) ahead of the user args
-      // (domain-services.md rev. 4, Slice 1).  PURE service calls resolve to
-      // `[]` → byte-identical.
-      pyWorkflowStmtTarget(
-        { thisName: "self", readPortArgs: workflowReadPortResolver(ctx) },
-        ctx,
-        collectUsedLetNames(wf.statements),
-      ),
-      "    ",
+  // Chunked (one lines-array per top-level statement) rather than the
+  // pre-flattened `renderWorkflowStmts` — byte-identical either way
+  // (`renderWorkflowStmts` IS `chunks.flat()` by construction), but the
+  // per-chunk list lets us surface per-statement sub-regions to the caller
+  // that owns the recorder + this file's final content (source-map
+  // Milestone 11).  No re-indent transform sits between here and the final
+  // file (unlike the .NET transactional path), so the chunk texts collected
+  // here are already the exact text that lands in `workflows_routes.py`.
+  const stmtChunks = renderWorkflowStmtChunks(
+    wf.statements,
+    // Thread the read-port resolver so a `reading`-tier domain-service call in
+    // the body is supplied its repository handle(s) ahead of the user args
+    // (domain-services.md rev. 4, Slice 1).  PURE service calls resolve to
+    // `[]` → byte-identical.
+    pyWorkflowStmtTarget(
+      { thisName: "self", readPortArgs: workflowReadPortResolver(ctx) },
+      ctx,
+      collectUsedLetNames(wf.statements),
     ),
+    "    ",
   );
+  out.push(...stmtChunks.flat());
+  if (opFragments) {
+    const chunkTexts = stmtChunks.map((ls) => ls.join("\n"));
+    if (chunkTexts.length > 0) {
+      opFragments.push({
+        fragmentText: chunkTexts.join("\n"),
+        subRegions: statementSubRegions(wf.statements, chunkTexts, `${ctx.name}.${wf.name}`),
+      });
+    }
+  }
   for (const save of wf.savesAtExit) {
     out.push(`    await ${snake(save.repoName)}.save(${snake(save.name)})`);
   }

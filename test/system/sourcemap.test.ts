@@ -47,6 +47,13 @@ system SourceMapDemo {
         operation discontinue() { }
       }
       repository Products for Product { }
+
+      workflow confirmOrder {
+        create(orderId: Order id) {
+          let order = Orders.getById(orderId)
+          order.confirm()
+        }
+      }
     }
   }
 
@@ -447,6 +454,150 @@ describe(".loom/sourcemap.json", () => {
       const text = SOURCE.slice(resolved!.span.start, resolved!.span.end);
       expect(text, `stmt region ${i} span doesn't contain "${tokens[i]}"`).toContain(tokens[i]);
     });
+  });
+
+  // Milestone 11 (workflow-body statement regions) — the `WorkflowStmtIR`
+  // analogue of the aggregate op-body sub-regions above, riding the SAME
+  // machinery (`statementSubRegions` + `SourceMapRecorder.fragment`) via the
+  // shared `renderWorkflowStmtChunks` spine.  `confirmOrder`'s `create` body
+  // has 2 statements (`let order = Orders.getById(orderId)` then
+  // `order.confirm()`); both carry `origin` at lowering.
+  //
+  // Unlike the op-body case, three of the four covered backends (node,
+  // python, java) emit the workflow body into a POOLED file shared by every
+  // workflow — `http/workflows.ts`, `workflows_routes.py`,
+  // `<Ctx>Workflows.java` — so those files carry NO whole-file region, only
+  // the fragment-only statement regions.  .NET's `<Wf>Handler.cs` is
+  // per-workflow (not pooled), so it keeps its Milestone-1 whole-file region
+  // alongside the new statement regions.  Elixir workflows are OUT OF SCOPE
+  // for this milestone (`assembleBody` reorders emit-then-persist, so
+  // per-statement chunks don't correspond 1:1 with source order — a
+  // separate slice) and is asserted separately below.
+  const WORKFLOW_STMT_CASES: {
+    platform: string;
+    file: string;
+    /** Whether this backend's workflow-body file also carries a
+     *  Milestone-1 whole-file region (true only for .NET's per-workflow
+     *  handler file; the pooled node/python/java files carry none). */
+    wholeFile: boolean;
+  }[] = [
+    { platform: "node", file: "http/workflows.ts", wholeFile: false },
+    { platform: "dotnet", file: "Application/Workflows/ConfirmOrderHandler.cs", wholeFile: true },
+    { platform: "python", file: "app/http/workflows_routes.py", wholeFile: false },
+    {
+      platform: "java",
+      file: "application/workflows/OrdersWorkflows.java",
+      wholeFile: false,
+    },
+  ];
+
+  it.each(
+    WORKFLOW_STMT_CASES,
+  )("workflow-body statement regions land on $platform's confirmOrder body, one per rendered statement", async ({
+    platform,
+    file,
+    wholeFile,
+  }) => {
+    const model = await parseValid(SOURCE);
+    const files = generateSystems(model, { sourcemap: true }).files;
+    const raw = files.get(".loom/sourcemap.json")!;
+    const map = JSON.parse(raw) as {
+      files: Record<
+        string,
+        {
+          target: [number, number];
+          origin: import("../../src/ir/types/origin.js").OriginRef;
+          construct?: string;
+        }[]
+      >;
+    };
+
+    const slug = SLUG_FOR[platform]!;
+    const path = Object.keys(map.files).find((p) => p.startsWith(`${slug}/`) && p.endsWith(file));
+    expect(path, `no ${file} region recorded under ${slug}/`).toBeDefined();
+    const regions = map.files[path!]!;
+    const content = files.get(path!)!;
+    const fileLineCount = content.endsWith("\n")
+      ? content.split("\n").length - 1
+      : content.split("\n").length;
+
+    // .NET's per-workflow file() call records its Milestone-1 whole-file
+    // region under the SAME `${ctx.name}.${wf.name}` construct as the
+    // fragment-only statement regions (both derive from `wf.origin`), so a
+    // bare construct filter can't tell them apart — exclude the region whose
+    // target IS the whole file `[1, fileLineCount]` before looking at
+    // statement granularity.
+    const wfConstruct = "Orders.confirmOrder";
+    const wholeFileRegion = regions.find((r) => r.target[0] === 1 && r.target[1] === fileLineCount);
+    const stmtRegions = regions
+      .filter((r) => r.construct === wfConstruct && r !== wholeFileRegion)
+      .sort((a, b) => a.target[0] - b.target[0]);
+    expect(stmtRegions.length).toBeGreaterThanOrEqual(2);
+
+    // A pooled file (node/python/java) carries ONLY the statement regions —
+    // no whole-file region exists to layer onto.  .NET's handler file is not
+    // pooled, so it keeps its whole-file region alongside these.
+    if (wholeFile) {
+      expect(wholeFileRegion, "expected a Milestone-1 whole-file region too").toBeDefined();
+      expect(regions.length).toBeGreaterThan(stmtRegions.length);
+    } else {
+      expect(wholeFileRegion).toBeUndefined();
+      expect(regions.length).toBe(stmtRegions.length);
+    }
+
+    // Monotonic, non-overlapping, in-bounds — same shape as the op-body case.
+    let prevEnd = 0;
+    for (const r of stmtRegions) {
+      const [start, end] = r.target;
+      expect(start).toBeGreaterThanOrEqual(1);
+      expect(end).toBeLessThanOrEqual(fileLineCount);
+      expect(start).toBeLessThanOrEqual(end);
+      expect(start).toBeGreaterThan(prevEnd);
+      prevEnd = end;
+    }
+
+    // Each statement region's origin resolves to a span whose text contains
+    // that statement's own distinctive token, in source order.
+    const tokens = ["Orders.getById", "order.confirm"];
+    stmtRegions.forEach((r, i) => {
+      const resolved = resolveToSource(r.origin);
+      expect(resolved, `stmt region ${i} origin never resolves to a source span`).toBeDefined();
+      const text = SOURCE.slice(resolved!.span.start, resolved!.span.end);
+      expect(text, `stmt region ${i} span doesn't contain "${tokens[i]}"`).toContain(tokens[i]);
+    });
+  });
+
+  it("elixir workflow bodies stay out of scope: no statement-granular Orders.confirmOrder regions", async () => {
+    const model = await parseValid(SOURCE);
+    const files = generateSystems(model, { sourcemap: true }).files;
+    const raw = files.get(".loom/sourcemap.json")!;
+    const map = JSON.parse(raw) as {
+      files: Record<string, { target: [number, number]; construct?: string }[]>;
+    };
+
+    const elixirConfirmOrderRegions = Object.entries(map.files)
+      .filter(([p]) => p.startsWith(`${SLUG_FOR.elixir}/`))
+      .flatMap(([p, regions]) =>
+        regions
+          .filter((r) => r.construct === "Orders.confirmOrder")
+          .map((r) => ({ path: p, ...r })),
+      );
+    // Exactly the ONE Milestone-1 whole-file region on the dedicated
+    // `orders/workflows/confirm_order.ex` module — no additional
+    // statement-granular regions (this milestone's spine change deliberately
+    // does not extend elixir workflows).
+    expect(elixirConfirmOrderRegions).toHaveLength(1);
+    const region = elixirConfirmOrderRegions[0]!;
+    expect(region.path).toBe(
+      `${SLUG_FOR.elixir}/lib/phoenix_api/orders/workflows/confirm_order.ex`,
+    );
+    // A whole-file region, not a narrower statement sub-region: its target
+    // spans exactly [1, fileLineCount].
+    const content = files.get(region.path)!;
+    const fileLineCount = content.endsWith("\n")
+      ? content.split("\n").length - 1
+      : content.split("\n").length;
+    expect(region.target).toEqual([1, fileLineCount]);
   });
 });
 

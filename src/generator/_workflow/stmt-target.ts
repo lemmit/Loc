@@ -92,13 +92,34 @@ export function collectUnionFindLets(stmts: readonly WorkflowStmtIR[]): Set<stri
 }
 
 /** Render a workflow statement sequence at `indent`, dispatching each kind to
- *  the backend `target`. Owns the only `for-each` recursion. */
+ *  the backend `target`. Owns the only `for-each` recursion.  Byte-identical
+ *  by construction: exactly the one-level flatten of
+ *  `renderWorkflowStmtChunks` (`stmts.flatMap(f)` and `stmts.map(f).flat()`
+ *  are the same array for every `f`). */
 export function renderWorkflowStmts(
   stmts: readonly WorkflowStmtIR[],
   target: WorkflowStmtTarget,
   indent: string,
 ): string[] {
-  return stmts.flatMap((st) => renderWorkflowStmt(st, target, indent));
+  return renderWorkflowStmtChunks(stmts, target, indent).flat();
+}
+
+/** Same rendering as `renderWorkflowStmts`, but one chunk (the statement's
+ *  own — possibly multi-line — lines array) per TOP-LEVEL `WorkflowStmtIR`
+ *  instead of the pre-flattened whole.  A `for-each` / `if-let`'s nested body
+ *  lines stay INSIDE their statement's chunk (`statementSubRegions` is a flat
+ *  walk keyed 1:1 against `stmts`, so nested-body granularity is out of scope
+ *  for this cursor — see `src/generator/_trace/sourcemap.ts`).  Lets a caller
+ *  that owns the final file content recover each top-level statement's own
+ *  line span for `SourceMapRecorder.fragment`, mirroring
+ *  `renderTsStatementChunks` / `renderCsStatementChunks` / the Python and Java
+ *  siblings — this is the `WorkflowStmtIR` analogue for workflow bodies. */
+export function renderWorkflowStmtChunks(
+  stmts: readonly WorkflowStmtIR[],
+  target: WorkflowStmtTarget,
+  indent: string,
+): string[][] {
+  return stmts.map((st) => renderWorkflowStmt(st, target, indent));
 }
 
 function renderWorkflowStmt(

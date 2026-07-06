@@ -35,7 +35,12 @@ import { workflowCorrIdValueType } from "../../ir/util/workflow-instances.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { renderDotnetLogCall } from "../_obs/render-dotnet.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
-import { renderWorkflowStmts, type WorkflowStmtTarget } from "../_workflow/stmt-target.js";
+import { statementSubRegions } from "../_trace/sourcemap.js";
+import {
+  renderWorkflowStmtChunks,
+  renderWorkflowStmts,
+  type WorkflowStmtTarget,
+} from "../_workflow/stmt-target.js";
 import { dotnetResourceAdapterFor, resourceClassName } from "./adapters/resource-clients.js";
 import {
   collectWireUsings,
@@ -48,6 +53,7 @@ import {
   wireType,
 } from "./dto-mapping.js";
 import { bypassedFilterNames } from "./emit/efcore.js";
+import type { OpFragment } from "./emit/entity.js";
 import type { CsRenderContext } from "./render-expr.js";
 import { collectCsExprUsings, renderCsExpr, renderCsType } from "./render-expr.js";
 import { esCorrIdClass, esEventDbSet, esEventRecordClass } from "./workflow-eventsourced-emit.js";
@@ -139,9 +145,20 @@ export function emitWorkflows(
     out.set(commandPath, commandContent);
     sourcemap?.file(commandPath, commandContent, wf.origin, construct);
     const handlerPath = `Application/Workflows/${upperFirst(wf.name)}Handler.cs`;
-    const handlerContent = renderHandler(wf, usage, ns, ctx, options?.sys);
+    // Only collected when a recorder is actually threaded in — a
+    // no-sourcemap run pays no per-statement bookkeeping cost.
+    const opFragments: OpFragment[] | undefined = sourcemap ? [] : undefined;
+    const handlerContent = renderHandler(wf, usage, ns, ctx, options?.sys, opFragments);
     out.set(handlerPath, handlerContent);
     sourcemap?.file(handlerPath, handlerContent, wf.origin, construct);
+    // Statement-granular sub-regions (source-map Milestone 11) — layered onto
+    // the whole-file region just recorded above, anchored by exact-text
+    // search against this SAME final content.
+    if (sourcemap && opFragments) {
+      for (const frag of opFragments) {
+        sourcemap.fragment(handlerPath, handlerContent, frag.fragmentText, frag.subRegions);
+      }
+    }
   }
   if (commandWfs.length > 0) {
     out.set(
@@ -1017,6 +1034,12 @@ function renderHandler(
   ns: string,
   ctx: EnrichedBoundedContextIR,
   sys: SystemIR | undefined,
+  /** Source-map Milestone 11 (workflow-body statement regions) — when passed,
+   *  pushes ONE `OpFragment` covering this handler's whole workflow-body
+   *  chunk list.  Allocated by the caller ONLY when a recorder is present
+   *  (`emitWorkflows`), so a no-`--sourcemap` run pays no per-statement
+   *  bookkeeping cost. */
+  opFragments?: OpFragment[],
 ): string {
   const cmdName = `${upperFirst(wf.name)}Command`;
   const handlerName = `${upperFirst(wf.name)}Handler`;
@@ -1167,13 +1190,37 @@ function renderHandler(
   // Guard exactly the getById loads this command handler later dereferences
   // (op-call targets); loads only read to seed a `create` stay unguarded.
   const dereffedLoads = collectDereferencedLoads(wf.statements);
-  stmtLines.push(
-    ...renderWorkflowStmts(
-      wf.statements,
-      csWorkflowStmtTarget(ctx, renderArg, dereffedLoads, auditsOps),
-      INDENT,
-    ),
+  // Chunked (one lines-array per top-level statement) rather than the
+  // pre-flattened `renderWorkflowStmts` — byte-identical either way
+  // (`renderWorkflowStmts` IS `chunks.flat()` by construction), but the
+  // per-chunk list lets us surface per-statement sub-regions to the caller
+  // that owns the recorder + this file's final content (source-map
+  // Milestone 11).
+  const stmtChunks = renderWorkflowStmtChunks(
+    wf.statements,
+    csWorkflowStmtTarget(ctx, renderArg, dereffedLoads, auditsOps),
+    INDENT,
   );
+  stmtLines.push(...stmtChunks.flat());
+  if (opFragments) {
+    // CAREFUL: the transactional path below re-indents the WHOLE `stmtLines`
+    // array by 4 spaces (a uniform, per-line map) before it lands in `body` —
+    // the fragment text/sub-regions must reflect that FINAL text, so apply
+    // the identical re-indent to each chunk here rather than to the
+    // already-rendered (pre-transform) chunks.  A per-line map distributes
+    // over any sub-array, so re-indenting just the statement chunks is
+    // equivalent to re-indenting them as part of the larger `stmtLines`.
+    const finalChunks = wf.transactional
+      ? stmtChunks.map((ls) => ls.map((l) => "    " + l))
+      : stmtChunks;
+    const chunkTexts = finalChunks.map((ls) => ls.join("\n"));
+    if (chunkTexts.length > 0) {
+      opFragments.push({
+        fragmentText: chunkTexts.join("\n"),
+        subRegions: statementSubRegions(wf.statements, chunkTexts, `${ctx.name}.${wf.name}`),
+      });
+    }
+  }
   // Saves.
   for (const save of wf.savesAtExit) {
     const fieldName = `_${save.repoName.charAt(0).toLowerCase() + save.repoName.slice(1)}`;

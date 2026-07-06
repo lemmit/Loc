@@ -1,8 +1,10 @@
 import { renderHonoStoreLogCall } from "../../../generator/_obs/render-hono.js";
+import { statementSubRegions } from "../../../generator/_trace/sourcemap.js";
 import {
-  renderWorkflowStmts,
+  renderWorkflowStmtChunks,
   type WorkflowStmtTarget,
 } from "../../../generator/_workflow/stmt-target.js";
+import type { OpFragment } from "../../../generator/typescript/emit/aggregate.js";
 import { renderTsExpr } from "../../../generator/typescript/render-expr.js";
 import {
   type AggregateIR,
@@ -71,6 +73,14 @@ export function buildWorkflowsFile(
   /** resourceName → sourceType, so resource-op verb helpers can be
    *  imported from `../resources/<sourceType>` (Phase 4). */
   resourceSourceTypes: Map<string, string> = new Map(),
+  /** Source-map Milestone 11 (workflow-body statement regions) — allocated by
+   *  the caller (`src/platform/hono/v4/emit.ts`) ONLY when a recorder is
+   *  present, so a no-`--sourcemap` run pays no per-statement bookkeeping
+   *  cost.  `http/workflows.ts` pools every workflow's command route AND its
+   *  reactor/starter handlers, so it never gets a `sourcemap.file(...)`
+   *  whole-file region (mirrors the Elixir pooled-file precedent) — these
+   *  fragment-only statement regions are the only mapping this file gets. */
+  opFragments?: OpFragment[],
 ): string {
   if (ctx.workflows.length === 0) return "";
   // Build the body first; imports are derived from what the body actually
@@ -189,7 +199,7 @@ export function buildWorkflowsFile(
 
   for (const wf of ctx.workflows) {
     if (!emitsCommandRoute(wf)) continue;
-    body.push(...emitWorkflowRoute(wf, ctx, aggsByName).map((l) => `  ${l}`));
+    body.push(...emitWorkflowRoute(wf, ctx, aggsByName, opFragments).map((l) => `  ${l}`));
     body.push("");
   }
 
@@ -237,7 +247,9 @@ export function buildWorkflowsFile(
   // byte-identical (and `createApp` keeps the Noop dispatcher).
   if (ctx.eventSubscriptions.length > 0) {
     body.push("");
-    body.push(...emitSubscriptionHandlers(ctx, helperDone, esInstanceWorkflows.length > 0));
+    body.push(
+      ...emitSubscriptionHandlers(ctx, helperDone, esInstanceWorkflows.length > 0, opFragments),
+    );
   }
   // Now derive imports from what the body actually references.
   const rawBodyStr = body.join("\n");
@@ -457,6 +469,14 @@ function emitWorkflowRoute(
   wf: WorkflowIR,
   ctx: BoundedContextIR,
   aggsByName: Map<string, AggregateIR>,
+  /** Source-map Milestone 11 (workflow-body statement regions) — when passed,
+   *  pushes ONE `OpFragment` covering this route's workflow-body chunk list.
+   *  `http/workflows.ts` is a POOLED file (every workflow + reactor shares
+   *  it), so it never gets a whole-file region — only these fragment-only
+   *  statement regions (mirroring the Elixir pooled-file precedent: pooled
+   *  files stay unmapped at the whole-file grain, but a fragment anchors by
+   *  exact text regardless of what else shares the file). */
+  opFragments?: OpFragment[],
 ): string[] {
   const reqName = `${upperFirst(wf.name)}Request`;
   const out: string[] = [];
@@ -574,19 +594,42 @@ function emitWorkflowRoute(
   if (wrapsFrame) {
     out.push(`    await runInChildContext(async () => {`);
   }
+  // Chunked (one lines-array per top-level statement) rather than the
+  // pre-flattened `renderWorkflowStmts` — byte-identical either way
+  // (`renderWorkflowStmts` IS `chunks.flat()` by construction), but the
+  // per-chunk list lets us surface per-statement sub-regions to the caller
+  // that owns the recorder + this file's final content (source-map
+  // Milestone 11).  Both branches render directly at their final indent (no
+  // post-hoc re-indent transform like the .NET transactional path), so the
+  // chunk texts collected here are already the exact text that lands in
+  // `http/workflows.ts`.
+  const pushFragment = (stmtChunks: string[][]): void => {
+    if (!opFragments) return;
+    // CAREFUL: `buildWorkflowsFile`'s single call site wraps this function's
+    // ENTIRE return value in a uniform +2-space indent
+    // (`.map((l) => \`  ${l}\`)`) before it lands in the final file — the
+    // fragment text must reflect that FINAL text, so re-apply the identical
+    // per-line transform here (mirrors the .NET transactional re-indent).
+    const chunkTexts = stmtChunks.map((ls) => ls.map((l) => `  ${l}`).join("\n"));
+    if (chunkTexts.length === 0) return;
+    opFragments.push({
+      fragmentText: chunkTexts.join("\n"),
+      subRegions: statementSubRegions(wf.statements, chunkTexts, `${ctx.name}.${wf.name}`),
+    });
+  };
   if (wf.transactional) {
     const txOpts = wf.isolation ? `, { isolationLevel: "${pgIsolationLevel(wf.isolation)}" }` : ``;
     out.push(`${bi}await db.transaction(async (tx) => {${""}`);
     for (const r of reposNeeded) {
       out.push(`${bi}  const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(tx, events);`);
     }
-    out.push(
-      ...renderWorkflowStmts(
-        wf.statements,
-        honoWorkflowStmtTarget(ctx, paramExprs, "this", { dbHandle: "tx", repoVarByAgg }),
-        `${bi}  `,
-      ),
+    const stmtChunks = renderWorkflowStmtChunks(
+      wf.statements,
+      honoWorkflowStmtTarget(ctx, paramExprs, "this", { dbHandle: "tx", repoVarByAgg }),
+      `${bi}  `,
     );
+    out.push(...stmtChunks.flat());
+    pushFragment(stmtChunks);
     for (const save of wf.savesAtExit) {
       out.push(`${bi}  await ${lowerFirst(save.repoName)}.save(${save.name});`);
     }
@@ -596,13 +639,13 @@ function emitWorkflowRoute(
     for (const r of reposNeeded) {
       out.push(`${bi}const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(db, events);`);
     }
-    out.push(
-      ...renderWorkflowStmts(
-        wf.statements,
-        honoWorkflowStmtTarget(ctx, paramExprs, "this", { dbHandle: "db", repoVarByAgg }),
-        bi,
-      ),
+    const stmtChunks = renderWorkflowStmtChunks(
+      wf.statements,
+      honoWorkflowStmtTarget(ctx, paramExprs, "this", { dbHandle: "db", repoVarByAgg }),
+      bi,
     );
+    out.push(...stmtChunks.flat());
+    pushFragment(stmtChunks);
     for (const save of wf.savesAtExit) {
       out.push(`${bi}await ${lowerFirst(save.repoName)}.save(${save.name});`);
     }
@@ -774,6 +817,9 @@ function emitSubscriptionHandlers(
   helperDone: Set<string> = new Set<string>(),
   /** Whether the stream (de)serialisers were already emitted by the prelude. */
   serializersDone = false,
+  /** Source-map Milestone 11 — forwarded into each reactor/starter handler
+   *  body (see `emitHandlerFn` / `emitEventSourcedHandlerFn`). */
+  opFragments?: OpFragment[],
 ): string[] {
   const subs = ctx.eventSubscriptions;
   const out: string[] = [];
@@ -836,6 +882,7 @@ function emitSubscriptionHandlers(
             saves,
             ctx,
             sub.trigger === "create" && (wf.subscriptions ?? []).some((o) => o.event === sub.event),
+            opFragments,
           )
         : emitHandlerFn(
             fn,
@@ -848,6 +895,7 @@ function emitSubscriptionHandlers(
             saves,
             ctx,
             durableEventTypes(ctx).size > 0,
+            opFragments,
           )),
     );
     out.push("");
@@ -1040,6 +1088,11 @@ function emitHandlerFn(
    *  no-ops when the saga row already records the inbound outbox event id
    *  and stamps it before save.  Ephemeral contexts stay byte-identical. */
   durable = false,
+  /** Source-map Milestone 11 — see `emitWorkflowRoute`'s `opFragments`; same
+   *  fragment-only discipline, keyed off the SAME `${ctx.name}.${wf.name}`
+   *  construct as the workflow's command-route body (a reactor/starter body
+   *  belongs to the same workflow). */
+  opFragments?: OpFragment[],
 ): string[] {
   const out: string[] = [];
   out.push(`export async function ${fn}(`);
@@ -1107,13 +1160,21 @@ function emitHandlerFn(
   for (const r of reactorRepos) {
     out.push(`${bi}const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(db, events);`);
   }
-  out.push(
-    ...renderWorkflowStmts(
-      statements,
-      honoWorkflowStmtTarget(ctx, noParams, thisName, { dbHandle: "db", repoVarByAgg }),
-      bi,
-    ),
+  const stmtChunks = renderWorkflowStmtChunks(
+    statements,
+    honoWorkflowStmtTarget(ctx, noParams, thisName, { dbHandle: "db", repoVarByAgg }),
+    bi,
   );
+  out.push(...stmtChunks.flat());
+  if (opFragments) {
+    const chunkTexts = stmtChunks.map((ls) => ls.join("\n"));
+    if (chunkTexts.length > 0) {
+      opFragments.push({
+        fragmentText: chunkTexts.join("\n"),
+        subRegions: statementSubRegions(statements, chunkTexts, `${ctx.name}.${wf.name}`),
+      });
+    }
+  }
   for (const save of saves) out.push(`${bi}await ${lowerFirst(save.repoName)}.save(${save.name});`);
   out.push(...renderProvFlush(provSaves, bi, "db"));
   if (wrapsFrame) out.push(`  });`);
@@ -1157,6 +1218,9 @@ function emitEventSourcedHandlerFn(
    *  append and the workflow event folds twice.  A create with no paired `on`
    *  stays byte-identical (guard omitted). */
   guardStreamExists = false,
+  /** Source-map Milestone 11 — see `emitWorkflowRoute`'s `opFragments`; same
+   *  fragment-only discipline and construct id. */
+  opFragments?: OpFragment[],
 ): string[] {
   const out: string[] = [];
   const corr = wf.correlationField as string;
@@ -1216,13 +1280,21 @@ function emitEventSourcedHandlerFn(
   for (const r of reactorRepos) {
     out.push(`${bi}const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(db, events);`);
   }
-  out.push(
-    ...renderWorkflowStmts(
-      statements,
-      honoWorkflowStmtTarget(ctx, noParams, "state", { dbHandle: "db", repoVarByAgg }),
-      bi,
-    ),
+  const stmtChunks = renderWorkflowStmtChunks(
+    statements,
+    honoWorkflowStmtTarget(ctx, noParams, "state", { dbHandle: "db", repoVarByAgg }),
+    bi,
   );
+  out.push(...stmtChunks.flat());
+  if (opFragments) {
+    const chunkTexts = stmtChunks.map((ls) => ls.join("\n"));
+    if (chunkTexts.length > 0) {
+      opFragments.push({
+        fragmentText: chunkTexts.join("\n"),
+        subRegions: statementSubRegions(statements, chunkTexts, `${ctx.name}.${wf.name}`),
+      });
+    }
+  }
   for (const save of saves) out.push(`${bi}await ${lowerFirst(save.repoName)}.save(${save.name});`);
   out.push(...renderProvFlush(provSaves, bi, "db"));
   if (wrapsFrame) out.push(`  });`);
