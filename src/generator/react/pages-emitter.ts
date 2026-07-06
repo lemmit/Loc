@@ -32,11 +32,17 @@ import type {
   SystemIR,
   UiIR,
 } from "../../ir/types/loom-ir.js";
-import { classifyPage, type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
+import {
+  classifyPage,
+  type PageNameCtx,
+  pageConstructId,
+  pageEmitName,
+} from "../../ir/util/page-kind.js";
 import { lowerFirst, snake } from "../../util/naming.js";
 import { buildViewPageObject } from "../_frontend/views-module.js";
 import { buildWorkflowPageObject } from "../_frontend/workflows-module.js";
 import type { LoadedPack } from "../_packs/loader.js";
+import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { isWalkableLayoutBody, walkBodyToTsx } from "./body-walker.js";
 import {
   buildExternFunctionShim,
@@ -80,6 +86,10 @@ export interface PageEmitContext {
    *  Optional: only the React host wires the page gate today (Vue/Svelte reuse
    *  this context but don't yet consume it), so absent means "ungated". */
   authUi?: boolean;
+  /** Generate-time source-map recorder (`--sourcemap`) — see
+   *  `PlatformSurface.emitProject`'s doc comment.  Absent means "record
+   *  nothing" (the default, flag-off shape). */
+  sourcemap?: SourceMapRecorder;
 }
 
 /** Compute the relative-path prefix from a page's emit
@@ -242,42 +252,43 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
   for (const c of ctx.topLevelComponents) emittedComponents.set(c.name, c);
   for (const c of ui.components) emittedComponents.set(c.name, c);
   for (const c of emittedComponents.values()) {
+    const componentConstruct = `${ui.name}.${c.name}`;
     // Extern component: Loom owns a re-export shim at
     // `src/components/<Name>.tsx` (so call sites import `components/<Name>`
     // unchanged) plus a typed `<Name>.props.ts`; the user owns the
     // hand-written module at the `from` path.  No body is walked.
     if (c.extern) {
-      out.set(
-        `src/components/${c.name}.tsx`,
-        renderExternComponentShim(c.name, c.externPath ?? ""),
-      );
-      out.set(
-        `src/components/${c.name}.props.ts`,
-        renderExternComponentProps(c.name, c.params, ctx.aggregatesByName),
-      );
+      const shimPath = `src/components/${c.name}.tsx`;
+      const shimContent = renderExternComponentShim(c.name, c.externPath ?? "");
+      out.set(shimPath, shimContent);
+      ctx.sourcemap?.file(shimPath, shimContent, c.origin, componentConstruct);
+      const propsPath = `src/components/${c.name}.props.ts`;
+      const propsContent = renderExternComponentProps(c.name, c.params, ctx.aggregatesByName);
+      out.set(propsPath, propsContent);
+      ctx.sourcemap?.file(propsPath, propsContent, c.origin, componentConstruct);
       continue;
     }
-    out.set(
-      `src/components/${c.name}.tsx`,
-      renderUserComponentFile(
-        c.name,
-        c.params,
-        c.state,
-        c.body!,
-        ctx.pack,
-        userComponents,
-        ctx.aggregatesByName,
-        buildBcByAggregate(ctx),
-        pageRoutes,
-        externFunctionNames,
-        c.derived,
-        // `auth: ui` enables currentUser-only operation `requires` gating on
-        // `Action(...)` buttons in this component.
-        ctx.authUi,
-        // Named, typed component event handlers (Proposal A Stage 1).
-        c.actions,
-      ),
+    const componentPath = `src/components/${c.name}.tsx`;
+    const componentContent = renderUserComponentFile(
+      c.name,
+      c.params,
+      c.state,
+      c.body!,
+      ctx.pack,
+      userComponents,
+      ctx.aggregatesByName,
+      buildBcByAggregate(ctx),
+      pageRoutes,
+      externFunctionNames,
+      c.derived,
+      // `auth: ui` enables currentUser-only operation `requires` gating on
+      // `Action(...)` buttons in this component.
+      ctx.authUi,
+      // Named, typed component event handlers (Proposal A Stage 1).
+      c.actions,
     );
+    out.set(componentPath, componentContent);
+    ctx.sourcemap?.file(componentPath, componentContent, c.origin, componentConstruct);
   }
 
   for (const page of ui.pages) {
@@ -302,39 +313,38 @@ export function emitPagesForUi(ui: UiIR, ctx: PageEmitContext): Map<string, stri
       // Computed from the depth difference between emitPath and
       // `src/`.
       const srcImportPrefix = computeSrcImportPrefix(emitPath);
-      out.set(
-        emitPath,
-        renderCustomLayoutPage(
-          // Component function name stays the aggregate-qualified `OrderList`
-          // form even though the scaffold names the page by role (`List`) — see
-          // `pageEmitName`.  Matches the origin-bound router import.
-          pageEmitName(page, pageCtx),
-          page.body!,
-          ctx.pack,
-          page.params,
-          page.state,
-          page.title,
-          userComponents,
-          ui.apiParams,
-          ctx.aggregatesByName,
-          buildBcByAggregate(ctx),
-          srcImportPrefix,
-          buildWorkflowsByName(ctx),
-          buildBcByWorkflow(ctx),
-          pageRoutes,
-          externFunctionNames,
-          page.derived,
-          // `page { requires <expr> }` UI gate — only meaningful when the
-          // frontend has a verified session to evaluate it against.
-          ctx.authUi ? page.requires : undefined,
-          // `auth: ui` also enables currentUser-only operation `requires`
-          // gating on `Action(...)` buttons inside the body.
-          ctx.authUi,
-          // Named, typed page event handlers — hoisted as `const <name> = …`
-          // and bound by bare `onSubmit: <name>` references.
-          page.actions,
-        ),
+      const pageContent = renderCustomLayoutPage(
+        // Component function name stays the aggregate-qualified `OrderList`
+        // form even though the scaffold names the page by role (`List`) — see
+        // `pageEmitName`.  Matches the origin-bound router import.
+        pageEmitName(page, pageCtx),
+        page.body!,
+        ctx.pack,
+        page.params,
+        page.state,
+        page.title,
+        userComponents,
+        ui.apiParams,
+        ctx.aggregatesByName,
+        buildBcByAggregate(ctx),
+        srcImportPrefix,
+        buildWorkflowsByName(ctx),
+        buildBcByWorkflow(ctx),
+        pageRoutes,
+        externFunctionNames,
+        page.derived,
+        // `page { requires <expr> }` UI gate — only meaningful when the
+        // frontend has a verified session to evaluate it against.
+        ctx.authUi ? page.requires : undefined,
+        // `auth: ui` also enables currentUser-only operation `requires`
+        // gating on `Action(...)` buttons inside the body.
+        ctx.authUi,
+        // Named, typed page event handlers — hoisted as `const <name> = …`
+        // and bound by bare `onSubmit: <name>` references.
+        page.actions,
       );
+      out.set(emitPath, pageContent);
+      ctx.sourcemap?.file(emitPath, pageContent, page.origin, pageConstructId(ui.name, page));
     }
     // Bodies the v0 dispatcher doesn't recognise are silently
     // skipped (e.g. user-defined components composed of stdlib

@@ -32,7 +32,7 @@ import type {
   UiIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
-import { classifyPage, type PageNameCtx } from "../../ir/util/page-kind.js";
+import { classifyPage, type PageNameCtx, pageConstructId } from "../../ir/util/page-kind.js";
 import { lowerFirst, plural, snake } from "../../util/naming.js";
 import {
   buildExternFunctionShim,
@@ -43,6 +43,7 @@ import { buildViewPageObject } from "../_frontend/view-page-object.js";
 import { buildWalkerPageObject } from "../_frontend/walker-page-objects.js";
 import { buildWorkflowPageObject } from "../_frontend/workflow-page-object.js";
 import type { LoadedPack } from "../_packs/loader.js";
+import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { isWalkableLayoutBody, walkBody } from "../_walker/walker-core.js";
 import { svelteLayoutGroup } from "./layouts-emitter.js";
 import {
@@ -64,6 +65,10 @@ export interface SveltePageEmitContext {
    *  then renders a client-side `{#if}`-guarded `<Forbidden/>` against the
    *  verified session claims.  Optional: absent ⇒ ungated. */
   authUi?: boolean;
+  /** Generate-time source-map recorder (`--sourcemap`) — see
+   *  `PlatformSurface.emitProject`'s doc comment.  Absent means "record
+   *  nothing" (the default, flag-off shape). */
+  sourcemap?: SourceMapRecorder;
 }
 
 /** Translate a page-metamodel route to a SvelteKit route directory
@@ -152,45 +157,50 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
   for (const c of ctx.topLevelComponents) emittedComponents.set(c.name, c);
   for (const c of ui.components) emittedComponents.set(c.name, c);
   for (const c of emittedComponents.values()) {
+    const componentConstruct = `${ui.name}.${c.name}`;
     // Extern component: Loom owns a re-export wrapper at
     // `src/lib/components/<Name>.svelte` (so call sites import
     // `$lib/components/<Name>.svelte` unchanged) + a typed
     // `<Name>.props.ts`; the user owns the hand-written module at the
     // `from` path.  No body is walked.
     if (c.extern) {
-      out.set(
-        `src/lib/components/${c.name}.svelte`,
-        renderSvelteExternComponentShim(c.name, c.externPath ?? ""),
-      );
-      out.set(
-        `src/lib/components/${c.name}.props.ts`,
-        renderSvelteExternComponentProps(c.name, [...c.params], ctx.aggregatesByName),
-      );
-      continue;
-    }
-    out.set(
-      `src/lib/components/${c.name}.svelte`,
-      renderSvelteComponentFile(
+      const shimPath = `src/lib/components/${c.name}.svelte`;
+      const shimContent = renderSvelteExternComponentShim(c.name, c.externPath ?? "");
+      out.set(shimPath, shimContent);
+      ctx.sourcemap?.file(shimPath, shimContent, c.origin, componentConstruct);
+      const propsPath = `src/lib/components/${c.name}.props.ts`;
+      const propsContent = renderSvelteExternComponentProps(
         c.name,
         [...c.params],
-        c.state,
-        c.body!,
-        ctx.pack,
-        userComponents,
         ctx.aggregatesByName,
-        buildBcByAggregate(ctx),
-        pageRoutes,
-        externFunctionNames,
-        c.derived,
-        // `auth: ui` enables currentUser-only operation-`requires` gating on
-        // `Action(...)` buttons in this component.
-        ctx.authUi,
-        // Named, typed component event handlers (Proposal A Stage 1).
-        c.actions,
-        // Shared client-side stores (Stage 5) — for store-import + bindings.
-        ui.stores,
-      ),
+      );
+      out.set(propsPath, propsContent);
+      ctx.sourcemap?.file(propsPath, propsContent, c.origin, componentConstruct);
+      continue;
+    }
+    const componentPath = `src/lib/components/${c.name}.svelte`;
+    const componentContent = renderSvelteComponentFile(
+      c.name,
+      [...c.params],
+      c.state,
+      c.body!,
+      ctx.pack,
+      userComponents,
+      ctx.aggregatesByName,
+      buildBcByAggregate(ctx),
+      pageRoutes,
+      externFunctionNames,
+      c.derived,
+      // `auth: ui` enables currentUser-only operation-`requires` gating on
+      // `Action(...)` buttons in this component.
+      ctx.authUi,
+      // Named, typed component event handlers (Proposal A Stage 1).
+      c.actions,
+      // Shared client-side stores (Stage 5) — for store-import + bindings.
+      ui.stores,
     );
+    out.set(componentPath, componentContent);
+    ctx.sourcemap?.file(componentPath, componentContent, c.origin, componentConstruct);
   }
 
   const seenPaths = new Map<string, string>();
@@ -205,36 +215,35 @@ export function emitSveltePagesForUi(ui: UiIR, ctx: SveltePageEmitContext): Map<
       );
     }
     seenPaths.set(emitPath, page.name);
-    out.set(
-      emitPath,
-      renderSveltePage(
-        page.name,
-        page.body!,
-        ctx.pack,
-        page.params,
-        page.state,
-        page.title,
-        userComponents,
-        ui.apiParams,
-        ctx.aggregatesByName,
-        buildBcByAggregate(ctx),
-        buildWorkflowsByName(ctx),
-        buildBcByWorkflow(ctx),
-        pageRoutes,
-        externFunctionNames,
-        page.derived,
-        // `page { requires <expr> }` UI gate — only when a verified session is
-        // available to evaluate it against.
-        ctx.authUi ? page.requires : undefined,
-        // `auth: ui` also enables currentUser-only operation-`requires` gating
-        // on `Action(...)` buttons inside the body.
-        ctx.authUi,
-        // Named, typed page event handlers (Proposal A Stage 1).
-        page.actions,
-        // Shared client-side stores (Stage 5) — for store-import + bindings.
-        ui.stores,
-      ),
+    const pageContent = renderSveltePage(
+      page.name,
+      page.body!,
+      ctx.pack,
+      page.params,
+      page.state,
+      page.title,
+      userComponents,
+      ui.apiParams,
+      ctx.aggregatesByName,
+      buildBcByAggregate(ctx),
+      buildWorkflowsByName(ctx),
+      buildBcByWorkflow(ctx),
+      pageRoutes,
+      externFunctionNames,
+      page.derived,
+      // `page { requires <expr> }` UI gate — only when a verified session is
+      // available to evaluate it against.
+      ctx.authUi ? page.requires : undefined,
+      // `auth: ui` also enables currentUser-only operation-`requires` gating
+      // on `Action(...)` buttons inside the body.
+      ctx.authUi,
+      // Named, typed page event handlers (Proposal A Stage 1).
+      page.actions,
+      // Shared client-side stores (Stage 5) — for store-import + bindings.
+      ui.stores,
     );
+    out.set(emitPath, pageContent);
+    ctx.sourcemap?.file(emitPath, pageContent, page.origin, pageConstructId(ui.name, page));
   }
   return out;
 }

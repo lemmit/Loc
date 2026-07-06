@@ -438,6 +438,7 @@ export function lowerComponent(c: Component, stores?: Env["stores"]): ComponentI
       actions: [],
       extern: true,
       externPath: c.externPath,
+      origin: originFor(c),
     };
   }
   // Component-scoped env: params + state bind so `inferExprType`
@@ -478,7 +479,7 @@ export function lowerComponent(c: Component, stores?: Env["stores"]): ComponentI
   // Non-extern components always carry a body (validator-enforced);
   // guard defensively so lowering an invalid model can't crash.
   const body = c.body ? lowerExpr(c.body, env) : undefined;
-  return { name: c.name, params, state, derived, actions, body };
+  return { name: c.name, params, state, derived, actions, body, origin: originFor(c) };
 }
 
 function lowerStateField(f: StateField, env: Env): StateFieldIR {

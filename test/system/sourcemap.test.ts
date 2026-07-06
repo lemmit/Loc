@@ -60,6 +60,7 @@ system SourceMapDemo {
   deployable pythonApi  { platform: python                        contexts: [Orders] dataSources: [ordersState] serves: SalesApi port: 8000 }
   deployable javaApi    { platform: java                          contexts: [Orders] dataSources: [ordersState] serves: SalesApi port: 8081 }
   deployable phoenixApi { platform: elixir { foundation: vanilla } contexts: [Orders] dataSources: [ordersState] ui: SalesUi port: 4000 }
+  deployable reactApp   { platform: react targets: honoApi ui: SalesUi port: 3001 }
 }
 `;
 
@@ -72,6 +73,8 @@ const SLUG_FOR: Record<string, string> = {
   java: "java_api",
   elixir: "phoenix_api",
 };
+
+const REACT_SLUG = "react_app";
 
 // The elixir platform's `composeService` mints a fresh cryptographically
 // random `SECRET_KEY_BASE` on every call (src/platform/elixir.ts) — a
@@ -254,6 +257,47 @@ describe(".loom/sourcemap.json", () => {
         constructs.some((c) => c?.endsWith(`.${aggName}`)),
         `platform ${platform}: no region's construct mentions ${aggName} (saw ${JSON.stringify(constructs)})`,
       ).toBe(true);
+    }
+  });
+
+  // M8 (frontend recording bracket): the react frontend's page constructs are
+  // page-name-shaped (`SalesUi.orders.List`), not aggregate-name-shaped, so
+  // they don't fit the `.endsWith(".Order")` assertion the bracketed-platform
+  // table above uses — a separate test asserts the frontend-specific shape:
+  // every mapped `src/pages/...` file's construct starts with the ui name,
+  // and its origin is the `macro` kind a scaffolded ui always carries,
+  // resolving to a real `.ddd` span.
+  it("react frontend maps page files under the ui name, each with a macro origin resolving to source", async () => {
+    const model = await parseValid(SOURCE);
+    const files = generateSystems(model, { sourcemap: true }).files;
+    const raw = files.get(".loom/sourcemap.json")!;
+    const map = JSON.parse(raw) as {
+      files: Record<
+        string,
+        { construct?: string; origin: import("../../src/ir/types/origin.js").OriginRef }[]
+      >;
+    };
+
+    const prefix = `${REACT_SLUG}/`;
+    const pageEntries = Object.entries(map.files).filter(([p]) =>
+      p.startsWith(`${prefix}src/pages/`),
+    );
+    expect(pageEntries.length, `no src/pages/... regions recorded under ${prefix}`).toBeGreaterThan(
+      0,
+    );
+
+    for (const [path, regions] of pageEntries) {
+      expect(regions.length, `${path}: expected at least one region`).toBeGreaterThan(0);
+      for (const region of regions) {
+        expect(region.construct, `${path}: missing construct`).toBeDefined();
+        expect(
+          region.construct!.startsWith("SalesUi."),
+          `${path}: construct ${region.construct} doesn't start with the ui name`,
+        ).toBe(true);
+        expect(region.origin.kind, `${path}: expected a scaffold macro origin`).toBe("macro");
+        const resolved = resolveToSource(region.origin);
+        expect(resolved, `${path}: origin never resolves to a source span`).toBeDefined();
+      }
     }
   });
 
@@ -518,5 +562,27 @@ describe("Source Map v3 sidecars", () => {
     for (const content of files.values()) {
       expect(content).not.toContain("//# sourceMappingURL=");
     }
+  });
+
+  // M8 free ride: the v3 loop (src/system/index.ts) walks every RECORDED
+  // `.ts`/`.tsx` path with no per-frontend code of its own — once the react
+  // generator records its `.tsx` page regions (M8), a react page picks up a
+  // `.map` sidecar + trailing directive exactly like a Hono `.ts` file does,
+  // with zero new code in the v3 loop itself.
+  it("free-rides the v3 loop for a react .tsx page when both sourcemap and sourceTexts are passed", async () => {
+    const { model, sourceTexts } = await parseWithSourceTexts(SOURCE);
+    const files = generateSystems(model, { sourcemap: true, sourceTexts }).files;
+
+    const tsxPath = "react_app/src/pages/orders/list.tsx";
+    const mapPath = `${tsxPath}.map`;
+    const raw = files.get(mapPath);
+    expect(raw, `${mapPath} not emitted`).toBeDefined();
+
+    const v3 = JSON.parse(raw!) as { version: number; file: string; sources: string[] };
+    expect(v3.version).toBe(3);
+    expect(v3.file).toBe("list.tsx");
+
+    const tsxContent = files.get(tsxPath)!;
+    expect(tsxContent.endsWith("//# sourceMappingURL=list.tsx.map\n")).toBe(true);
   });
 });

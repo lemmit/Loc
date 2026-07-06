@@ -2279,6 +2279,12 @@ export interface ComponentIR {
    *  generated project's `src/` root (the `from "<path>"` clause).
    *  Always present when `extern` is true. */
   externPath?: string;
+  /** Provenance chain back to the `.ddd` source — see
+   * src/ir/types/origin.ts.  Populated at lowering; absent on purely
+   * derived nodes.  Mirrors `PageIR.origin`; feeds the frontend
+   * generators' `SourceMapRecorder.file(...)` calls for per-component
+   * output regions (M8, source-map-debug-kickoff.md). */
+  origin?: OriginRef;
 }
 
 /** One reactive local field, inside a `page` or `component`. */

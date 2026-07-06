@@ -28,7 +28,7 @@ import type {
   UiIR,
   ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
-import { type PageNameCtx, pageEmitName } from "../../ir/util/page-kind.js";
+import { type PageNameCtx, pageConstructId, pageEmitName } from "../../ir/util/page-kind.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import {
   E2E_FIXTURES_TS,
@@ -205,7 +205,7 @@ export function emitLiveViewPages(args: {
       authEnabled,
     });
     out.set(filePath, source);
-    sourcemap?.file(filePath, source, page.origin, `${ui.name}.${page.name}`);
+    sourcemap?.file(filePath, source, page.origin, pageConstructId(ui.name, page));
     routes.push({ route: page.route, liveModule });
 
     // Playwright page object emission.  Mirrors the React
@@ -220,7 +220,7 @@ export function emitLiveViewPages(args: {
     });
     const pageObjectPath = `e2e/pages/${snake(emitName)}.ts`;
     out.set(pageObjectPath, pageObjectSource);
-    sourcemap?.file(pageObjectPath, pageObjectSource, page.origin, `${ui.name}.${page.name}`);
+    sourcemap?.file(pageObjectPath, pageObjectSource, page.origin, pageConstructId(ui.name, page));
   }
 
   // Playwright harness + route-driven smoke spec — the same e2e surface

@@ -27,6 +27,7 @@ import {
 import type { LoadedPack } from "../_packs/loader.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
 import { emitShellFiles, emitShellGlobs } from "../_packs/shell-emits.js";
+import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import {
   E2E_FIXTURES_TS,
   E2E_PACKAGE_JSON,
@@ -95,6 +96,11 @@ export interface GenerateReactOptions {
    *  component referenced from this ui (ui-scope wins on
    *  collisions). */
   topLevelComponents?: import("../../ir/types/loom-ir.js").ComponentIR[];
+  /** Generate-time source-map recorder (`--sourcemap`) — see
+   *  `PlatformSurface.emitProject`'s doc comment.  Forwarded into
+   *  `emitPagesForUi`'s context so the page/component loop can record
+   *  whole-file regions alongside each `out.set(...)`. */
+  sourcemap?: SourceMapRecorder;
 }
 
 export function generateReactForContexts(
@@ -194,6 +200,7 @@ export function generateReactForContexts(
     pack,
     topLevelComponents: options.topLevelComponents ?? [],
     authUi,
+    sourcemap: options.sourcemap,
   };
   const pages = emitPagesForUi(ui, emitCtx);
   for (const [path, content] of pages) out.set(path, content);

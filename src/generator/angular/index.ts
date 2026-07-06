@@ -10,7 +10,7 @@ import type {
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { contextUsesMoney } from "../../ir/types/loom-ir.js";
-import type { PageNameCtx } from "../../ir/util/page-kind.js";
+import { type PageNameCtx, pageConstructId } from "../../ir/util/page-kind.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { humanize, lowerFirst } from "../../util/naming.js";
 import { AUTH_GATE_ANGULAR, AUTH_SESSION_SERVICE_ANGULAR } from "../_frontend/auth-ui.js";
@@ -26,6 +26,7 @@ import { prepareThemeVM } from "../_frontend/theme-preparer.js";
 import { hasAnyView } from "../_frontend/views-module.js";
 import { hasAnyWorkflow } from "../_frontend/workflows-module.js";
 import { loadPack, resolvePackDir } from "../_packs/loader-fs.js";
+import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { walkBody } from "../_walker/walker-core.js";
 import { emitPageObjectsForUi } from "../react/pages-emitter.js";
 import { buildAngularApiModule } from "./api-module.js";
@@ -60,6 +61,13 @@ export interface GenerateAngularOptions {
   apiBaseUrl?: string;
   basePath?: string;
   topLevelComponents?: ComponentIR[];
+  /** Generate-time source-map recorder (`--sourcemap`) — see
+   *  `PlatformSurface.emitProject`'s doc comment.  Records whole-file
+   *  page regions alongside their `out.set(...)`.  Angular has no
+   *  per-component emission today (user components in page bodies
+   *  aren't rendered — see `pages/route` loop below), so there is no
+   *  component-loop counterpart to wire here. */
+  sourcemap?: SourceMapRecorder;
 }
 
 const DEFAULT_DESIGN = "angularMaterial@v1";
@@ -186,7 +194,11 @@ export function generateAngularForContexts(
             bcByWorkflow,
           });
     }
-    out.set(`src/app/pages/${slug}.component.ts`, content);
+    const pagePath = `src/app/pages/${slug}.component.ts`;
+    out.set(pagePath, content);
+    // `ui` is guaranteed defined here: `pages` (the loop source) is derived
+    // from `ui?.pages ?? []`, so a non-empty iteration implies `ui` exists.
+    options.sourcemap?.file(pagePath, content, page.origin, pageConstructId(ui!.name, page));
     routeDescs.push({ route: page.route!, component: pageComponentName(page, pageCtx), slug });
   }
 
