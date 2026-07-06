@@ -129,6 +129,7 @@ function hydrateValueExpr(
   ctx: BoundedContextIR,
   optional: boolean,
   forceNonNull = false,
+  voSubfield = false,
 ): string {
   // For a TPH concrete's required column (nullable in the shared table, but
   // guaranteed present by the `kind` filter), assert non-null on read.
@@ -136,7 +137,7 @@ function hydrateValueExpr(
   const bang = forceNonNull && !optional ? "!" : "";
   const colExpr = `${rowVar}.${fieldName}${bang}`;
   if (t.kind === "optional") {
-    return `(${rowVar}.${fieldName} == null ? null : ${hydrateValueExpr(fieldName, t.inner, rowVar, ctx, true, forceNonNull)})`;
+    return `(${rowVar}.${fieldName} == null ? null : ${hydrateValueExpr(fieldName, t.inner, rowVar, ctx, true, forceNonNull, voSubfield)})`;
   }
   if (t.kind === "primitive") {
     // decimal hydrates lossy through JS `number` — money does NOT
@@ -152,7 +153,10 @@ function hydrateValueExpr(
     return `Ids.${t.targetName}Id(${colExpr})`;
   }
   if (t.kind === "enum") {
-    return `${colExpr} as ${t.name}`;
+    // A VO subfield's pgEnum column already carries the literal-union type,
+    // and repositories don't import enum names for VO subfields — casting
+    // would reference an unimported type name (tsc TS2304).
+    return voSubfield ? colExpr : `${colExpr} as ${t.name}`;
   }
   if (t.kind === "valueobject") {
     // Recurse per subfield: a VO-TYPED subfield flattens to doubly-prefixed
@@ -163,7 +167,7 @@ function hydrateValueExpr(
     const vo = ctx.valueObjects.find((v) => v.name === t.name);
     const args = (vo?.fields ?? [])
       .map((f) =>
-        hydrateValueExpr(`${fieldName}_${f.name}`, f.type, rowVar, ctx, false, forceNonNull),
+        hydrateValueExpr(`${fieldName}_${f.name}`, f.type, rowVar, ctx, false, forceNonNull, true),
       )
       .join(", ");
     if (optional) {
