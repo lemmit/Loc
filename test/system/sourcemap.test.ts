@@ -68,7 +68,7 @@ system SourceMapDemo {
       }
 
       channel Lifecycle {
-        carries: OrderPlaced
+        carries: OrderPlaced, PaymentTaken
       }
 
       // Correlated (by) deliberately: Java's dispatcher silently skips
@@ -84,6 +84,29 @@ system SourceMapDemo {
           let order = Orders.getById(o.order)
           order.confirm()
         }
+      }
+
+      event PaymentTaken {
+        order: Order id
+        amount: int
+      }
+
+      // Event-sourced saga with a create+on pair — exercises the MERGED
+      // event-sourced handler renderers (.NET's if/else-nested branches,
+      // Java's doubly-re-indented try-frame branches), the shapes with the
+      // trickiest silent-failure risk in the re-indent replay. Bodies are
+      // distinct from every other body here (the pooled duplicate-anchor
+      // hazard above).
+      workflow fulfillOrder eventSourced {
+        orderId: Order id
+        paid: int
+        create(p: OrderPlaced) by p.order {
+          emit PaymentTaken { order: p.order, amount: 1 }
+        }
+        on(pt: PaymentTaken) by pt.order {
+          let alreadyPaid = paid
+        }
+        apply(pt: PaymentTaken) { paid := paid + pt.amount }
       }
     }
   }
@@ -579,9 +602,12 @@ describe(".loom/sourcemap.json", () => {
     } else {
       expect(wholeFileRegion).toBeUndefined();
       for (const r of regions) {
-        expect(["Orders.confirmOrder", "Orders.archiveOrder", "Orders.notifyPlaced"]).toContain(
-          r.construct,
-        );
+        expect([
+          "Orders.confirmOrder",
+          "Orders.archiveOrder",
+          "Orders.notifyPlaced",
+          "Orders.fulfillOrder",
+        ]).toContain(r.construct);
       }
     }
 
@@ -784,6 +810,76 @@ describe(".loom/sourcemap.json", () => {
       const text = SOURCE.slice(resolved!.span.start, resolved!.span.end);
       expect(text).toContain(tokens[i]);
     });
+  });
+
+  // The MERGED event-sourced handler shapes carry the trickiest re-indent
+  // replays — .NET nests each branch +4 inside the if/else, Java replays
+  // TWICE (+8: if/else nest plus the try(RequestContext.openChild()) frame)
+  // — and a missed replay fails silently (fragment() records nothing).
+  // fulfillOrder's create+on pair pins both.
+  it.each([
+    {
+      platform: "dotnet",
+      file: "Application/Workflows/FulfillOrderStartOrderPlacedHandler.cs",
+      construct: "DotnetApi.fulfillOrder",
+      token: "emit PaymentTaken",
+    },
+    {
+      platform: "dotnet",
+      file: "Application/Workflows/FulfillOrderOnPaymentTakenHandler.cs",
+      construct: "DotnetApi.fulfillOrder",
+      token: "alreadyPaid",
+    },
+    {
+      platform: "java",
+      file: "application/workflows/OrdersDispatcher.java",
+      construct: "Orders.fulfillOrder",
+      token: "emit PaymentTaken",
+    },
+  ])("merged event-sourced bodies anchor through the branch re-indents ($platform $file)", async ({
+    platform,
+    file,
+    construct,
+    token,
+  }) => {
+    const model = await parseValid(SOURCE);
+    const files = generateSystems(model, { sourcemap: true }).files;
+    const map = JSON.parse(files.get(".loom/sourcemap.json")!) as {
+      files: Record<
+        string,
+        {
+          target: [number, number];
+          origin: import("../../src/ir/types/origin.js").OriginRef;
+          construct?: string;
+        }[]
+      >;
+    };
+
+    const slug = SLUG_FOR[platform]!;
+    const path = Object.keys(map.files).find((p) => p.startsWith(`${slug}/`) && p.endsWith(file));
+    expect(path, `no ${file} region recorded under ${slug}/`).toBeDefined();
+    const content = files.get(path!)!;
+    const fileLineCount = content.endsWith("\n")
+      ? content.split("\n").length - 1
+      : content.split("\n").length;
+
+    const stmtRegions = map.files[path!]!.filter(
+      (r) => r.construct === construct && !(r.target[0] === 1 && r.target[1] === fileLineCount),
+    );
+    expect(
+      stmtRegions.length,
+      "merged-ES body's statement regions failed to anchor",
+    ).toBeGreaterThanOrEqual(1);
+
+    const sliced = stmtRegions.map((r) => {
+      const resolved = resolveToSource(r.origin);
+      expect(resolved, "origin never resolves to a source span").toBeDefined();
+      return SOURCE.slice(resolved!.span.start, resolved!.span.end);
+    });
+    expect(
+      sliced.some((t) => t.includes(token)),
+      `no region's origin slices to "${token}" (got ${JSON.stringify(sliced)})`,
+    ).toBe(true);
   });
 
   it("elixir workflow bodies stay out of scope: no statement-granular Orders.confirmOrder regions", async () => {
