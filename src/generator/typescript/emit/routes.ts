@@ -77,7 +77,15 @@ export function renderHttpIndex(
   // `createApp` defaults `events` to it (routing emitted events to reactors /
   // event-creates) instead of the no-op.  Mikro and channel-less projects keep
   // the Noop default — byte-identical output.
-  const wireDispatcher = ctx.eventSubscriptions.length > 0 && !usingMikro;
+  // Workflow saga dispatch: driven by WORKFLOW subscriptions only (projection
+  // subs carry a `projection` discriminant and are handled by the projectionTee
+  // below).  Excluding them keeps a workflow-only project byte-identical and a
+  // projection-only project from importing the never-emitted
+  // `createInProcessDispatcher`.
+  const wireDispatcher = ctx.eventSubscriptions.some((s) => !s.projection) && !usingMikro;
+  // Projection folds (projection.md): a dispatcher decorator that upserts read
+  // models, composed over the workflow dispatcher (or the Noop).
+  const hasProjections = ctx.projections.length > 0 && !usingMikro;
   // Transactional-outbox tier (dispatch-delivery-semantics.md): when any
   // channel asks for durability (`retention: log | work`), createApp's
   // default dispatcher wraps the in-process one — durable events are
@@ -101,7 +109,10 @@ export function renderHttpIndex(
   const inProcessExpr = wireDispatcher
     ? "createInProcessDispatcher(db)"
     : "NoopDomainEventDispatcher";
-  const innerExpr = wireRealtime ? `realtimeTee(${inProcessExpr})` : inProcessExpr;
+  // The projection tee wraps the in-process/Noop base so folds run on every
+  // dispatched event before the (workflow) fan-out; realtime + outbox wrap that.
+  const withProjections = hasProjections ? `projectionTee(db, ${inProcessExpr})` : inProcessExpr;
+  const innerExpr = wireRealtime ? `realtimeTee(${withProjections})` : withProjections;
   const defaultEventsExpr = wireOutbox ? `createOutboxDispatcher(db, ${innerExpr})` : innerExpr;
   const workflowImport = hasWorkflows
     ? wireDispatcher
@@ -117,6 +128,12 @@ export function renderHttpIndex(
   const viewImport = hasViews ? `import { viewsRoutes } from "./views";` : null;
   const viewMount = hasViews
     ? `  app.route("${API_BASE_PATH}/views", viewsRoutes(db, events));`
+    : null;
+  const projectionImport = hasProjections
+    ? `import { projectionsRoutes, projectionTee } from "./projections";`
+    : null;
+  const projectionMount = hasProjections
+    ? `  app.route("${API_BASE_PATH}/projections", projectionsRoutes(db));`
     : null;
   // Auth wiring — when the deployable opts in via `auth: required`,
   // we import the middleware + verifier registry, assert at startup
@@ -152,6 +169,7 @@ export function renderHttpIndex(
       workflowImport,
       realtimeImport,
       viewImport,
+      projectionImport,
       usingMikro
         ? 'import { EntityManager } from "@mikro-orm/postgresql";'
         : 'import type { NodePgDatabase } from "drizzle-orm/node-postgres";',
@@ -242,6 +260,7 @@ export function renderHttpIndex(
       workflowMount,
       realtimeMount,
       viewMount,
+      projectionMount,
       "  // OpenAPI 3.1 spec assembled from every sub-router's createRoute()",
       "  // calls.  Diffed against the .NET-emitted /openapi.json by",
       "  // the cross-platform contract check.",

@@ -345,11 +345,15 @@ function projectionTableShape(
       columns.push({ name: snake(f.name), type: idColumnType(vt), nullable: false });
       continue;
     }
+    // Non-key columns are NULLABLE: a fold upserts only the fields an event
+    // carries, so a row is partial until every contributing event arrives
+    // (a projection is derived + eventually consistent — the fold must not
+    // require all columns on the first event for a key).
     if (isReferenceCollection(f.type)) {
-      columns.push({ name: snake(f.name), type: { kind: "json" }, nullable: !!f.optional });
+      columns.push({ name: snake(f.name), type: { kind: "json" }, nullable: true });
       continue;
     }
-    for (const mapped of columnsForField(f, voLookup, proj.name)) {
+    for (const mapped of columnsForField({ ...f, optional: true }, voLookup, proj.name)) {
       columns.push(mapped.column);
     }
   }
