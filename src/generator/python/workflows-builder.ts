@@ -163,6 +163,7 @@ export function buildPyWorkflowsFile(
   return lines(
     `"""Workflow routes.  Auto-generated."""`,
     "",
+    refersTo("math") ? "import math" : null,
     refersTo("datetime") ? "from datetime import UTC, datetime" : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
     `from fastapi import ${[

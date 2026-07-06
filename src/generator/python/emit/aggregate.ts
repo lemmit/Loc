@@ -237,11 +237,12 @@ export function renderPyAggregate(
   return lines(
     `"""${agg.name} aggregate.  Auto-generated."""`,
     "",
+    exprImports.has("math") ? "import math" : null,
     exprImports.has("re") ? "import re" : null,
     bodyUsesCast ? "from typing import cast" : null,
     usesDatetime ? "from datetime import UTC, datetime" : null,
     usesDecimal ? "from decimal import Decimal" : null,
-    exprImports.has("re") || usesDatetime || usesDecimal ? "" : null,
+    exprImports.has("math") || exprImports.has("re") || usesDatetime || usesDecimal ? "" : null,
     usesCurrentUser ? "from app.auth.user import User" : null,
     errorNames.length > 0 ? `from app.domain.errors import ${errorNames.join(", ")}` : null,
     `from app.domain.events import ${eventImports.join(", ")}`,

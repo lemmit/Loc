@@ -93,7 +93,15 @@ describe("type-system — membersOfType (single source for member completion)", 
       "replace",
       "split",
     ]);
-    expect(names({ kind: "primitive", name: "int" })).toEqual([]);
+    expect(names({ kind: "primitive", name: "int" })).toEqual(["abs", "min", "max"]);
+    expect(names({ kind: "primitive", name: "money" })).toEqual([
+      "abs",
+      "min",
+      "max",
+      "round",
+      "floor",
+      "ceil",
+    ]);
   });
 
   it("enum → its values", () => {

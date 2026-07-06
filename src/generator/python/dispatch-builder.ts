@@ -226,6 +226,7 @@ export function buildPyDispatchFile(
     `"""In-process event dispatch (channels.md).  Auto-generated."""`,
     "",
     hasOutbox ? "import asyncio" : null,
+    refersTo("math") ? "import math" : null,
     hasOutbox ? "from contextvars import ContextVar" : null,
     refersTo("datetime") ? "from datetime import UTC, datetime" : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,

@@ -484,12 +484,67 @@ export const ELIXIR_INTRINSIC_RENDERERS: Record<string, (recv: string, args: str
     // Literal separator; keeps empty segments (Elixir's default), per the
     // catalogue contract.
     "string.split": (recv, args) => `String.split(${recv}, ${args[0]})`,
+    // ---- numerics (A3 math batch) -----------------------------------------
+    // int/long are native Elixir integers → Kernel abs/min/max.  Loom decimal
+    // AND money both map to the Decimal struct (hex `decimal`, pinned ~> 2.0
+    // transitively via ecto_sql) → Decimal.* calls.  Decimal's `:half_up`
+    // rounding mode IS half-away-from-zero, matching the catalogue's
+    // commercial-rounding contract; floor/ceil keep the receiver type as
+    // whole-valued Decimals via Decimal.round/3's `:floor`/`:ceiling` modes.
+    "int.abs": (recv) => `abs(${recv})`,
+    "long.abs": (recv) => `abs(${recv})`,
+    "decimal.abs": (recv) => `Decimal.abs(${recv})`,
+    "money.abs": (recv) => `Decimal.abs(${recv})`,
+    "int.min": (recv, args) => `min(${recv}, ${args[0]})`,
+    "long.min": (recv, args) => `min(${recv}, ${args[0]})`,
+    "decimal.min": (recv, args) => `Decimal.min(${recv}, ${args[0]})`,
+    "money.min": (recv, args) => `Decimal.min(${recv}, ${args[0]})`,
+    "int.max": (recv, args) => `max(${recv}, ${args[0]})`,
+    "long.max": (recv, args) => `max(${recv}, ${args[0]})`,
+    "decimal.max": (recv, args) => `Decimal.max(${recv}, ${args[0]})`,
+    "money.max": (recv, args) => `Decimal.max(${recv}, ${args[0]})`,
+    // `places` is optional (defaults to 0 per the catalogue signature).
+    "decimal.round": (recv, args) => `Decimal.round(${recv}, ${args[0] ?? "0"}, :half_up)`,
+    "money.round": (recv, args) => `Decimal.round(${recv}, ${args[0] ?? "0"}, :half_up)`,
+    "decimal.floor": (recv) => `Decimal.round(${recv}, 0, :floor)`,
+    "money.floor": (recv) => `Decimal.round(${recv}, 0, :floor)`,
+    "decimal.ceil": (recv) => `Decimal.round(${recv}, 0, :ceiling)`,
+    "money.ceil": (recv) => `Decimal.round(${recv}, 0, :ceiling)`,
   };
 
 export const ECTO_INTRINSIC_FRAGMENTS: Record<string, (recv: string, args: string[]) => string> = {
   "string.trim": (recv) => `fragment("btrim(?)", ${recv})`,
   "string.toUpper": (recv) => `fragment("upper(?)", ${recv})`,
   "string.toLower": (recv) => `fragment("lower(?)", ${recv})`,
+  // ---- numerics (A3 math batch) — Postgres SQL fragments ------------------
+  // Args arrive pre-rendered (value-side params already carry the `^` pin) —
+  // never add pins here.  Two-value min/max are SQL least()/greatest().
+  "int.abs": (recv) => `fragment("abs(?)", ${recv})`,
+  "long.abs": (recv) => `fragment("abs(?)", ${recv})`,
+  "decimal.abs": (recv) => `fragment("abs(?)", ${recv})`,
+  "money.abs": (recv) => `fragment("abs(?)", ${recv})`,
+  "int.min": (recv, args) => `fragment("least(?, ?)", ${recv}, ${args[0]})`,
+  "long.min": (recv, args) => `fragment("least(?, ?)", ${recv}, ${args[0]})`,
+  "decimal.min": (recv, args) => `fragment("least(?, ?)", ${recv}, ${args[0]})`,
+  "money.min": (recv, args) => `fragment("least(?, ?)", ${recv}, ${args[0]})`,
+  "int.max": (recv, args) => `fragment("greatest(?, ?)", ${recv}, ${args[0]})`,
+  "long.max": (recv, args) => `fragment("greatest(?, ?)", ${recv}, ${args[0]})`,
+  "decimal.max": (recv, args) => `fragment("greatest(?, ?)", ${recv}, ${args[0]})`,
+  "money.max": (recv, args) => `fragment("greatest(?, ?)", ${recv}, ${args[0]})`,
+  // Postgres round(numeric, n) is already half-away-from-zero on numeric —
+  // matches the catalogue contract and the in-memory `:half_up`.
+  "decimal.round": (recv, args) =>
+    args.length > 0
+      ? `fragment("round(?, ?)", ${recv}, ${args[0]})`
+      : `fragment("round(?)", ${recv})`,
+  "money.round": (recv, args) =>
+    args.length > 0
+      ? `fragment("round(?, ?)", ${recv}, ${args[0]})`
+      : `fragment("round(?)", ${recv})`,
+  "decimal.floor": (recv) => `fragment("floor(?)", ${recv})`,
+  "money.floor": (recv) => `fragment("floor(?)", ${recv})`,
+  "decimal.ceil": (recv) => `fragment("ceil(?)", ${recv})`,
+  "money.ceil": (recv) => `fragment("ceil(?)", ${recv})`,
 };
 
 function renderMethodCall(recv: string, args: string[], e: MethodCallExpr, ctx: RenderCtx): string {

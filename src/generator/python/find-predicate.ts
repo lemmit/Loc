@@ -53,6 +53,30 @@ export const SQLALCHEMY_INTRINSIC_SQL: Record<string, (recv: string, args: strin
   "string.trim": (recv) => `func.trim(${recv})`,
   "string.toUpper": (recv) => `func.upper(${recv})`,
   "string.toLower": (recv) => `func.lower(${recv})`,
+  // ---- numerics (A3 math batch) -------------------------------------------
+  // Postgres round(numeric, n) is already half-away-from-zero (the catalogue
+  // contract), so the SQL side needs no mode forcing; min/max are the
+  // two-value LEAST/GREATEST, not the aggregates.
+  "int.abs": (recv) => `func.abs(${recv})`,
+  "long.abs": (recv) => `func.abs(${recv})`,
+  "decimal.abs": (recv) => `func.abs(${recv})`,
+  "money.abs": (recv) => `func.abs(${recv})`,
+  "int.min": (recv, args) => `func.least(${recv}, ${args[0]})`,
+  "long.min": (recv, args) => `func.least(${recv}, ${args[0]})`,
+  "decimal.min": (recv, args) => `func.least(${recv}, ${args[0]})`,
+  "money.min": (recv, args) => `func.least(${recv}, ${args[0]})`,
+  "int.max": (recv, args) => `func.greatest(${recv}, ${args[0]})`,
+  "long.max": (recv, args) => `func.greatest(${recv}, ${args[0]})`,
+  "decimal.max": (recv, args) => `func.greatest(${recv}, ${args[0]})`,
+  "money.max": (recv, args) => `func.greatest(${recv}, ${args[0]})`,
+  "decimal.round": (recv, args) =>
+    args[0] !== undefined ? `func.round(${recv}, ${args[0]})` : `func.round(${recv})`,
+  "money.round": (recv, args) =>
+    args[0] !== undefined ? `func.round(${recv}, ${args[0]})` : `func.round(${recv})`,
+  "decimal.floor": (recv) => `func.floor(${recv})`,
+  "money.floor": (recv) => `func.floor(${recv})`,
+  "decimal.ceil": (recv) => `func.ceil(${recv})`,
+  "money.ceil": (recv) => `func.ceil(${recv})`,
 };
 
 export function lowerToSqlAlchemy(

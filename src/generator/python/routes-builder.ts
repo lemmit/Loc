@@ -178,9 +178,10 @@ export function buildPyRoutesFile(
   return lines(
     `"""${agg.name} HTTP routes + wire DTOs.  Auto-generated."""`,
     "",
+    refersTo("math") ? "import math" : null,
     refersTo("datetime") ? "from datetime import datetime" : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
-    refersTo("datetime") || refersTo("Decimal") ? "" : null,
+    refersTo("math") || refersTo("datetime") || refersTo("Decimal") ? "" : null,
     `from fastapi import ${["APIRouter", "Depends", refersTo("Path") ? "Path" : null, refersTo("Request") ? "Request" : null, refersTo("Response") ? "Response" : null].filter(Boolean).join(", ")}`,
     refersTo("JSONResponse") ? "from fastapi.responses import JSONResponse" : null,
     `from pydantic import ${["BaseModel", refersTo("Field") ? "Field" : null, refersTo("RootModel") ? "RootModel" : null, refersTo("model_validator") ? "model_validator" : null].filter(Boolean).join(", ")}`,

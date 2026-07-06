@@ -506,6 +506,42 @@ export const CS_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[
   // backend, and the collection-op renderer emits the List API (`.Count`,
   // LINQ) — a raw string[] would not compose (CS0428 on `.Count`).
   "string.split": (recv, args) => `${recv}.Split(${args[0]}).ToList()`,
+  // ---- numerics (A3 math batch) -------------------------------------------
+  // Loom money AND decimal both map to C# `decimal` (money is a bare precise
+  // scalar, no currency); int→int, long→long — so the System.Math overloads
+  // resolve per receiver with no casts.  `Math` is in `System`, covered by
+  // the SDK's <ImplicitUsings>.
+  "int.abs": (recv) => `Math.Abs(${recv})`,
+  "long.abs": (recv) => `Math.Abs(${recv})`,
+  "decimal.abs": (recv) => `Math.Abs(${recv})`,
+  "money.abs": (recv) => `Math.Abs(${recv})`,
+  // Two-value LEAST/GREATEST (the catalogue contract), not the LINQ
+  // aggregates.
+  "int.min": (recv, args) => `Math.Min(${recv}, ${args[0]})`,
+  "long.min": (recv, args) => `Math.Min(${recv}, ${args[0]})`,
+  "decimal.min": (recv, args) => `Math.Min(${recv}, ${args[0]})`,
+  "money.min": (recv, args) => `Math.Min(${recv}, ${args[0]})`,
+  "int.max": (recv, args) => `Math.Max(${recv}, ${args[0]})`,
+  "long.max": (recv, args) => `Math.Max(${recv}, ${args[0]})`,
+  "decimal.max": (recv, args) => `Math.Max(${recv}, ${args[0]})`,
+  "money.max": (recv, args) => `Math.Max(${recv}, ${args[0]})`,
+  // HALF-AWAY-FROM-ZERO ("commercial") rounding per the catalogue contract —
+  // .NET's native default is banker's half-even, so the mode is forced.
+  // `places` defaults to 0 (the parameterless Math.Round overload).
+  "decimal.round": (recv, args) =>
+    args.length > 0
+      ? `Math.Round(${recv}, ${args[0]}, MidpointRounding.AwayFromZero)`
+      : `Math.Round(${recv}, MidpointRounding.AwayFromZero)`,
+  "money.round": (recv, args) =>
+    args.length > 0
+      ? `Math.Round(${recv}, ${args[0]}, MidpointRounding.AwayFromZero)`
+      : `Math.Round(${recv}, MidpointRounding.AwayFromZero)`,
+  // floor/ceil keep the receiver type (whole-valued decimal, not int) — the
+  // decimal overloads of Math.Floor/Ceiling do exactly that.
+  "decimal.floor": (recv) => `Math.Floor(${recv})`,
+  "money.floor": (recv) => `Math.Floor(${recv})`,
+  "decimal.ceil": (recv) => `Math.Ceiling(${recv})`,
+  "money.ceil": (recv) => `Math.Ceiling(${recv})`,
 };
 
 // EF-query-position overrides (sparse).  EF Core translates ONLY the
@@ -521,6 +557,16 @@ export const CS_INTRINSIC_QUERY_RENDERERS: Record<
 > = {
   "string.toUpper": (recv) => `${recv}.ToUpper()`,
   "string.toLower": (recv) => `${recv}.ToLower()`,
+  // The MidpointRounding overloads of Math.Round are NOT translatable — only
+  // the bare Math.Round(x) / Math.Round(x, n) forms lower to SQL round()
+  // (verified against EF Core 10.0.9 + Npgsql 10.0.2 via ToQueryString).
+  // Postgres round(numeric[, n]) is half-away-from-zero already, so the
+  // catalogue's commercial-rounding contract holds; the banker's-default C#
+  // SPELLING never actually executes.  (Math.Abs/Min/Max/Floor/Ceiling all
+  // translate as-is — abs()/LEAST()/GREATEST()/floor()/ceiling() — so no
+  // other numeric row needs a query override.)
+  "decimal.round": (recv, args) => `Math.Round(${recv}, ${args[0] ?? "0"})`,
+  "money.round": (recv, args) => `Math.Round(${recv}, ${args[0] ?? "0"})`,
 };
 
 function renderMethodCall(

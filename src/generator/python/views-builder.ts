@@ -102,6 +102,7 @@ export function buildPyViewsFile(
   const esFilterImports = new Set<string>();
   for (const v of esWfViews) if (v.filter) collectPyExprImports(v.filter, esFilterImports);
   const needsRe = esFilterImports.has("re");
+  const needsMath = esFilterImports.has("math");
   const routes = routeBlocks.join("\n\n\n");
   const body = `${models.join("")}${wfModels}router = APIRouter(prefix="/views", tags=["views"])\n\n\n${routes}`;
 
@@ -144,8 +145,9 @@ export function buildPyViewsFile(
   return lines(
     `"""Read-model view routes.  Auto-generated."""`,
     "",
+    needsMath ? "import math" : null,
     needsRe ? "import re" : null,
-    needsRe ? "" : null,
+    needsMath || needsRe ? "" : null,
     `from fastapi import APIRouter, Depends${anyGateUsesUser ? ", Request" : ""}`,
     models.length > 0 || wfModels.length > 0 ? "from pydantic import BaseModel, RootModel" : null,
     saOps.size > 0 ? `from sqlalchemy import ${[...saOps].sort().join(", ")}` : null,

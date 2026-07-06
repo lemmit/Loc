@@ -67,6 +67,18 @@ export function renderJavaController(
   const idJava = javaValueTypeForId(agg.idValueType);
   const imports = new Set<string>(["java.util.List"]);
   if (idJava === "UUID") imports.add("java.util.UUID");
+  // Find params surface as raw `@RequestParam <JavaType> <name>` declarations
+  // on the controller itself (unlike operation params, which travel inside
+  // generated request records that collect their own imports) — so pull in
+  // the non-java.lang types their rendered spellings reference.
+  for (const f of declaredFinds(repo)) {
+    for (const p of f.params) {
+      const rendered = renderJavaType(p.type);
+      if (rendered.includes("BigDecimal")) imports.add("java.math.BigDecimal");
+      if (rendered.includes("Instant")) imports.add("java.time.Instant");
+      if (rendered.includes("UUID")) imports.add("java.util.UUID");
+    }
+  }
 
   const unionImports = new Set<string>();
   let anyUnionProblem = false;

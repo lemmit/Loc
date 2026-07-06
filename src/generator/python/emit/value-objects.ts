@@ -66,6 +66,7 @@ export function renderPyEnumsAndValueObjects(ctx: BoundedContextIR): string {
   return lines(
     `"""Enums + value objects with constructor-enforced invariants.  Auto-generated."""`,
     "",
+    exprImports.has("math") ? "import math" : null,
     exprImports.has("re") ? "import re" : null,
     usesDatetime ? "from datetime import UTC, datetime" : null,
     usesDecimal ? "from decimal import Decimal" : null,

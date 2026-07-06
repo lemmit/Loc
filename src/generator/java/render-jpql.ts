@@ -50,6 +50,30 @@ export const JPQL_INTRINSIC_SQL: Record<string, (recv: string, args: string[]) =
   "string.trim": (recv) => `trim(${recv})`,
   "string.toUpper": (recv) => `upper(${recv})`,
   "string.toLower": (recv) => `lower(${recv})`,
+  // ---- numerics (A3 math batch) — Hibernate 6+ HQL: abs/round/floor are
+  // standard; `ceil` is spelled CEILING; two-value min/max are the HQL-native
+  // least()/greatest() (NOT the aggregate min/max).  Postgres round(numeric, n)
+  // is already half-away-from-zero, matching the catalogue contract.
+  "int.abs": (recv) => `abs(${recv})`,
+  "long.abs": (recv) => `abs(${recv})`,
+  "decimal.abs": (recv) => `abs(${recv})`,
+  "money.abs": (recv) => `abs(${recv})`,
+  "int.min": (recv, args) => `least(${recv}, ${args[0]})`,
+  "int.max": (recv, args) => `greatest(${recv}, ${args[0]})`,
+  "long.min": (recv, args) => `least(${recv}, ${args[0]})`,
+  "long.max": (recv, args) => `greatest(${recv}, ${args[0]})`,
+  "decimal.min": (recv, args) => `least(${recv}, ${args[0]})`,
+  "decimal.max": (recv, args) => `greatest(${recv}, ${args[0]})`,
+  "money.min": (recv, args) => `least(${recv}, ${args[0]})`,
+  "money.max": (recv, args) => `greatest(${recv}, ${args[0]})`,
+  "decimal.round": (recv, args) =>
+    args[0] !== undefined ? `round(${recv}, ${args[0]})` : `round(${recv})`,
+  "money.round": (recv, args) =>
+    args[0] !== undefined ? `round(${recv}, ${args[0]})` : `round(${recv})`,
+  "decimal.floor": (recv) => `floor(${recv})`,
+  "money.floor": (recv) => `floor(${recv})`,
+  "decimal.ceil": (recv) => `ceiling(${recv})`,
+  "money.ceil": (recv) => `ceiling(${recv})`,
 };
 
 export function renderJpqlWhere(e: ExprIR, ctx: JpqlCtx): string {

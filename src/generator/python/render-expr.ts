@@ -138,8 +138,9 @@ export function renderPyExpr(e: ExprIR, ctx: PyRenderContext = DEFAULT): string 
  * Pure mirror of the renderer's triggers (the C#
  * `collectCsExprUsings` pattern): file emitters call it over the same
  * expressions they render to build their import header.  Keys are
- * import lines: `re`, `decimal` (→ `from decimal import Decimal`),
- * `datetime` (→ `from datetime import UTC, datetime`).
+ * import lines: `re`, `math` (→ `import math`), `decimal` (→ `from
+ * decimal import Decimal`), `datetime` (→ `from datetime import UTC,
+ * datetime`).
  */
 export function collectPyExprImports(e: ExprIR, into: Set<string> = new Set()): Set<string> {
   switch (e.kind) {
@@ -155,6 +156,10 @@ export function collectPyExprImports(e: ExprIR, into: Set<string> = new Set()): 
         e.args.length === 1
       ) {
         into.add("re");
+      }
+      if (e.receiverType.kind === "primitive") {
+        const needs = PY_INTRINSIC_IMPORTS[intrinsicKey(e.receiverType.name, e.member)];
+        if (needs) into.add(needs);
       }
       collectPyExprImports(e.receiver, into);
       for (const a of e.args) collectPyExprImports(a, into);
@@ -334,6 +339,54 @@ export const PY_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[
   "string.contains": (recv, args) => `(${args[0]} in ${recv})`,
   "string.replace": (recv, args) => `${recv}.replace(${args[0]}, ${args[1]})`,
   "string.split": (recv, args) => `${recv}.split(${args[0]})`,
+  // ---- numerics (A3 math batch) -------------------------------------------
+  // abs/min/max are Python builtins that work uniformly across int (int/long),
+  // float (decimal), and Decimal (money) receivers.
+  "int.abs": (recv) => `abs(${recv})`,
+  "long.abs": (recv) => `abs(${recv})`,
+  "decimal.abs": (recv) => `abs(${recv})`,
+  "money.abs": (recv) => `abs(${recv})`,
+  "int.min": (recv, args) => `min(${recv}, ${args[0]})`,
+  "long.min": (recv, args) => `min(${recv}, ${args[0]})`,
+  "decimal.min": (recv, args) => `min(${recv}, ${args[0]})`,
+  "money.min": (recv, args) => `min(${recv}, ${args[0]})`,
+  "int.max": (recv, args) => `max(${recv}, ${args[0]})`,
+  "long.max": (recv, args) => `max(${recv}, ${args[0]})`,
+  "decimal.max": (recv, args) => `max(${recv}, ${args[0]})`,
+  "money.max": (recv, args) => `max(${recv}, ${args[0]})`,
+  // `round(places?)` is HALF-AWAY-FROM-ZERO by catalogue contract — Python's
+  // builtin round() is banker's (half-even), so it must NOT appear here.
+  // Float path: copysign(floor(|x|·10^p + 0.5), x) / 10^p — exact half-away
+  // at float precision, mypy-strict clean (floor's int is float-compatible),
+  // self-parenthesised.  Needs `import math` (collectPyExprImports mirrors).
+  "decimal.round": (recv, args) => {
+    const p = args[0] ?? "0";
+    return `(math.copysign(math.floor(abs(${recv}) * 10 ** (${p}) + 0.5), ${recv}) / 10 ** (${p}))`;
+  },
+  // Decimal path: quantize to 10^-places with the explicit ROUND_HALF_UP mode
+  // (Decimal's own default is context-dependent half-even).  Stays Decimal.
+  // Needs `from decimal import Decimal` (collectPyExprImports mirrors).
+  "money.round": (recv, args) =>
+    `${recv}.quantize(Decimal(1).scaleb(-(${args[0] ?? "0"})), rounding="ROUND_HALF_UP")`,
+  // floor/ceil KEEP the receiver type (catalogue contract): float-wrapped on
+  // the float-backed decimal (math.floor/ceil return int), to_integral_value
+  // on money so the result stays Decimal.
+  "decimal.floor": (recv) => `float(math.floor(${recv}))`,
+  "decimal.ceil": (recv) => `float(math.ceil(${recv}))`,
+  "money.floor": (recv) => `${recv}.to_integral_value(rounding="ROUND_FLOOR")`,
+  "money.ceil": (recv) => `${recv}.to_integral_value(rounding="ROUND_CEILING")`,
+};
+
+// Intrinsic snippets above whose emitted Python reaches for an import —
+// consulted by collectPyExprImports's method-call arm so the collector stays
+// a pure mirror of the renderer.  `decimal.*` rounding rides on `math`;
+// `money.round` constructs `Decimal(1)` (the receiver alone wouldn't force
+// the import when no money literal appears in the expression).
+const PY_INTRINSIC_IMPORTS: Record<string, "math" | "decimal"> = {
+  "decimal.round": "math",
+  "decimal.floor": "math",
+  "decimal.ceil": "math",
+  "money.round": "decimal",
 };
 
 function renderMethodCall(

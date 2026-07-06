@@ -92,6 +92,41 @@ export const JAVA_CRITERIA_INTRINSICS: Record<string, (recv: string, args: strin
   "string.trim": (recv) => `cb.trim(${recv})`,
   "string.toUpper": (recv) => `cb.upper(${recv})`,
   "string.toLower": (recv) => `cb.lower(${recv})`,
+  // ---- numerics (A3 math batch) — cb.abs is JPA-2.0-native; the typed
+  // cb.round(x, n) / cb.floor / cb.ceiling landed in Jakarta Persistence 3.1
+  // (generated projects build on Spring Boot 4.x → Hibernate 7 / JPA 3.2, so
+  // they're on the CriteriaBuilder interface).  Two-value min/max must NOT be
+  // cb.least/cb.greatest — those are AGGREGATE functions — so they route
+  // through cb.function("least"/"greatest", …) with the receiver's boxed type
+  // witness (Integer/Long/java.math.BigDecimal, matching how the path
+  // witnesses type; BigDecimal fully-qualified to skip import wiring).  The
+  // pre-rendered value arg wraps in cb.literal — cb.function takes
+  // Expression arguments, and the value side of a criterion renders as a
+  // bare Java local closed over by the Specification.
+  "int.abs": (recv) => `cb.abs(${recv})`,
+  "long.abs": (recv) => `cb.abs(${recv})`,
+  "decimal.abs": (recv) => `cb.abs(${recv})`,
+  "money.abs": (recv) => `cb.abs(${recv})`,
+  "int.min": (recv, args) => `cb.function("least", Integer.class, ${recv}, cb.literal(${args[0]}))`,
+  "int.max": (recv, args) =>
+    `cb.function("greatest", Integer.class, ${recv}, cb.literal(${args[0]}))`,
+  "long.min": (recv, args) => `cb.function("least", Long.class, ${recv}, cb.literal(${args[0]}))`,
+  "long.max": (recv, args) =>
+    `cb.function("greatest", Long.class, ${recv}, cb.literal(${args[0]}))`,
+  "decimal.min": (recv, args) =>
+    `cb.function("least", java.math.BigDecimal.class, ${recv}, cb.literal(${args[0]}))`,
+  "decimal.max": (recv, args) =>
+    `cb.function("greatest", java.math.BigDecimal.class, ${recv}, cb.literal(${args[0]}))`,
+  "money.min": (recv, args) =>
+    `cb.function("least", java.math.BigDecimal.class, ${recv}, cb.literal(${args[0]}))`,
+  "money.max": (recv, args) =>
+    `cb.function("greatest", java.math.BigDecimal.class, ${recv}, cb.literal(${args[0]}))`,
+  "decimal.round": (recv, args) => `cb.round(${recv}, ${args[0] ?? "0"})`,
+  "money.round": (recv, args) => `cb.round(${recv}, ${args[0] ?? "0"})`,
+  "decimal.floor": (recv) => `cb.floor(${recv})`,
+  "money.floor": (recv) => `cb.floor(${recv})`,
+  "decimal.ceil": (recv) => `cb.ceiling(${recv})`,
+  "money.ceil": (recv) => `cb.ceiling(${recv})`,
 };
 
 /** Candidate-path side of a comparison, rendered — a bare `this.a.b` path

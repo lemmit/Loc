@@ -122,6 +122,7 @@ export function buildPyEventSourcedRepositoryFile(
   return lines(
     `"""${agg.name} event-store repository.  Auto-generated."""`,
     "",
+    refersTo("math") ? "import math" : null,
     "from datetime import UTC, datetime",
     refersTo("Decimal") ? "from decimal import Decimal" : null,
     "from typing import cast",
