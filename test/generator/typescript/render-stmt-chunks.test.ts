@@ -153,14 +153,157 @@ describe("statementExprMarks", () => {
     expect(retChunk!.slice(retMarks[0]!.start, retMarks[0]!.end)).toBe("this._count");
   });
 
-  it("returns no marks for statement kinds outside the let/assign/return narrowing", () => {
+  it("returns no marks for a variant-match-shaped statement kind (frontend-only; never reaches this backend in practice)", () => {
+    // `variant-match` is the one StmtIR kind `markableExprsOf` never returns
+    // exprs for (`renderTsStatement` throws on it before this would ever be
+    // called for real) — falls through to `default: []` alongside any future
+    // unhandled kind. Exercise `statementExprMarks` directly (bypassing the
+    // throwing renderer) to pin the empty-list arm.
+    const stmt: StmtIR = {
+      kind: "variant-match",
+      subject: { kind: "ref", name: "x", refKind: "param" },
+      arms: [],
+    };
+    expect(statementExprMarks(stmt, "    // unreachable")).toHaveLength(0);
+  });
+
+  it("marks a precondition's predicate expression", () => {
+    const stmt: StmtIR = {
+      kind: "precondition",
+      expr: { kind: "ref", name: "isActive", refKind: "this-prop", origin },
+      source: "isActive",
+    };
+    const [chunk] = renderTsStatementChunks([stmt]);
+    expect(chunk).toBe(
+      '    if (!(this._isActive)) throw new DomainError("Precondition failed: isActive");',
+    );
+    const marks = statementExprMarks(stmt, chunk!);
+    expect(marks).toHaveLength(1);
+    expect(chunk!.slice(marks[0]!.start, marks[0]!.end)).toBe("this._isActive");
+  });
+
+  it("marks a requires predicate expression", () => {
+    const stmt: StmtIR = {
+      kind: "requires",
+      expr: { kind: "ref", name: "isAdmin", refKind: "this-prop", origin },
+      source: "isAdmin",
+    };
+    const [chunk] = renderTsStatementChunks([stmt]);
+    const marks = statementExprMarks(stmt, chunk!);
+    expect(marks).toHaveLength(1);
+    expect(chunk!.slice(marks[0]!.start, marks[0]!.end)).toBe("this._isAdmin");
+  });
+
+  it("marks an add/remove's value expression", () => {
+    const add: StmtIR = {
+      kind: "add",
+      target: { segments: ["tags"] },
+      value: { kind: "ref", name: "newTag", refKind: "this-prop", origin },
+      elementType: { kind: "primitive", name: "string" },
+      collection: true,
+    };
+    const [addChunk] = renderTsStatementChunks([add]);
+    const addMarks = statementExprMarks(add, addChunk!);
+    expect(addMarks).toHaveLength(1);
+    expect(addChunk!.slice(addMarks[0]!.start, addMarks[0]!.end)).toBe("this._newTag");
+
+    const remove: StmtIR = {
+      kind: "remove",
+      target: { segments: ["tags"] },
+      value: { kind: "ref", name: "oldTag", refKind: "this-prop", origin },
+      elementType: { kind: "primitive", name: "string" },
+      collection: true,
+    };
+    const [removeChunk] = renderTsStatementChunks([remove]);
+    const removeMarks = statementExprMarks(remove, removeChunk!);
+    expect(removeMarks).toHaveLength(1);
+    expect(removeChunk!.slice(removeMarks[0]!.start, removeMarks[0]!.end)).toBe("this._oldTag");
+  });
+
+  it("marks a bare `expression` statement's expr", () => {
+    const stmt: StmtIR = {
+      kind: "expression",
+      expr: { kind: "ref", name: "counter", refKind: "this-prop", origin },
+    };
+    const [chunk] = renderTsStatementChunks([stmt]);
+    const marks = statementExprMarks(stmt, chunk!);
+    expect(marks).toHaveLength(1);
+    expect(chunk!.slice(marks[0]!.start, marks[0]!.end)).toBe("this._counter");
+  });
+
+  it("marks every field value of a multi-field emit independently", () => {
+    const origin2: OriginRef = { kind: "source", path: "/a.ddd", span: { start: 20, end: 30 } };
     const stmt: StmtIR = {
       kind: "emit",
       eventName: "Thing",
-      fields: [{ name: "n", value: { kind: "ref", name: "count", refKind: "this-prop", origin } }],
+      fields: [
+        { name: "n", value: { kind: "ref", name: "count", refKind: "this-prop", origin } },
+        {
+          name: "m",
+          value: { kind: "ref", name: "otherCount", refKind: "this-prop", origin: origin2 },
+        },
+      ],
     };
     const [chunk] = renderTsStatementChunks([stmt]);
-    expect(statementExprMarks(stmt, chunk!)).toHaveLength(0);
+    const marks = statementExprMarks(stmt, chunk!);
+    expect(marks).toHaveLength(2);
+    const texts = marks.map((m) => chunk!.slice(m.start, m.end)).sort();
+    expect(texts).toEqual(["this._count", "this._otherCount"]);
+  });
+
+  it("marks every arg of a multi-arg call independently, but two IDENTICAL args mutually skip while a distinct sibling still resolves", () => {
+    const distinctArg: StmtIR = {
+      kind: "call",
+      target: "function",
+      name: "helper",
+      args: [
+        { kind: "ref", name: "a", refKind: "this-prop", origin },
+        { kind: "ref", name: "b", refKind: "this-prop", origin },
+      ],
+    };
+    const [distinctChunk] = renderTsStatementChunks([distinctArg]);
+    const distinctMarks = statementExprMarks(distinctArg, distinctChunk!);
+    expect(distinctMarks).toHaveLength(2);
+    const texts = distinctMarks.map((m) => distinctChunk!.slice(m.start, m.end)).sort();
+    expect(texts).toEqual(["this._a", "this._b"]);
+
+    // Two args that render to the IDENTICAL text: `indexOf` can't tell the
+    // two occurrences apart for EITHER of them, so both honestly skip, while
+    // a third, distinct sibling arg still resolves.
+    const identicalArgs: StmtIR = {
+      kind: "call",
+      target: "function",
+      name: "helper",
+      args: [
+        { kind: "ref", name: "dup", refKind: "this-prop", origin },
+        { kind: "ref", name: "dup", refKind: "this-prop", origin },
+        { kind: "ref", name: "unique", refKind: "this-prop", origin },
+      ],
+    };
+    const [dupChunk] = renderTsStatementChunks([identicalArgs]);
+    const dupMarks = statementExprMarks(identicalArgs, dupChunk!);
+    expect(dupMarks).toHaveLength(1);
+    expect(dupChunk!.slice(dupMarks[0]!.start, dupMarks[0]!.end)).toBe("this._unique");
+  });
+
+  it("a traced precondition anchors into (or honestly skips) the __pre_N_ok binding line", () => {
+    const stmt: StmtIR = {
+      kind: "precondition",
+      expr: { kind: "ref", name: "isActive", refKind: "this-prop", origin },
+      source: "isActive",
+    };
+    const traceCtx = { emitTrace: true, aggregate: "Widget", op: "touch" };
+    const [chunk] = renderTsStatementChunks([stmt], false, traceCtx);
+    // Multi-line chunk: `const __pre_0_ok = (this._isActive);` on line 1,
+    // then a trace-log line repeating the SOURCE text `"isActive"` (not the
+    // rendered `this._isActive`), then the conditional throw.
+    expect(chunk).toContain("const __pre_0_ok = (this._isActive);");
+    const marks = statementExprMarks(stmt, chunk!);
+    // `this._isActive` appears exactly once in the whole chunk (the JSON
+    // source-text echo is `"isActive"`, not `this._isActive`), so the anchor
+    // resolves cleanly into the __pre_0_ok binding.
+    expect(marks).toHaveLength(1);
+    expect(chunk!.slice(marks[0]!.start, marks[0]!.end)).toBe("this._isActive");
   });
 
   it("returns no marks when the RHS carries no origin", () => {

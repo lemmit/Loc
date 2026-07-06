@@ -61,46 +61,76 @@ export function renderTsStatementChunks(
 // existing import sites keep working.
 export { statementSubRegions } from "../_trace/sourcemap.js";
 
-/** The statement kinds whose RHS expression is marked THIS SLICE
- *  (span-tracking-emission.md, M15 phase 7 slice 2) — narrowed to `let`'s
- *  initializer, `assign`'s value, and `return`'s value, mirroring the .NET
- *  `#line` weave's own narrowing (M7 phase 6a).  `undefined` for every other
- *  kind keeps the prototype minimal; nothing stops a later slice from
- *  widening this. */
-function rhsExprOf(s: StmtIR): ExprIR | undefined {
+/** The expression-bearing sub-nodes marked for EVERY StmtIR kind
+ *  (span-tracking-emission.md, M17 phase 7 slice 4 — widened from the
+ *  `let`/`assign`/`return`-only narrowing of M15 phase 7 slice 2, which
+ *  mirrored the .NET `#line` weave's own scope-6a narrowing).  Each
+ *  returned expr is anchored INDEPENDENTLY in `statementExprMarks` below —
+ *  a multi-expr kind (`call`'s args, `emit`'s field values) doesn't let one
+ *  ambiguous/missing sibling suppress the rest; two siblings that render to
+ *  IDENTICAL text still naturally skip each other, since the shared
+ *  one-occurrence `indexOf` anchor can't tell them apart (the same honesty
+ *  rule the single-expr case already followed). `variant-match` is
+ *  frontend-only (never reaches the TS backend, see `renderTsStatement`'s
+ *  `default` throw) and any future unhandled kind both fall through to
+ *  `[]`. */
+function markableExprsOf(s: StmtIR): ExprIR[] {
   switch (s.kind) {
+    case "precondition":
+    case "requires":
+      return [s.expr];
     case "let":
-      return s.expr;
+      return [s.expr];
     case "assign":
     case "return":
-      return s.value;
+      return [s.value];
+    case "add":
+    case "remove":
+      return [s.value];
+    case "expression":
+      return [s.expr];
+    case "call":
+      return s.args;
+    case "emit":
+      return s.fields.map((f) => f.value);
     default:
-      return undefined;
+      return [];
   }
 }
 
 /** Expression-level marks for ONE already-rendered statement chunk — the
- *  prototype's marks-carrying sibling to `renderTsStatementChunks`
- *  (span-tracking-emission.md, M15 phase 7 slice 2).  Renders the
- *  statement's RHS expression a SECOND time through `renderTsExprWithMarks`
- *  (the level-wise mark composer, `src/generator/_expr/target.ts`), then
- *  locates that rendered text inside the ALREADY-rendered `chunk` via the
- *  same one-occurrence anchor discipline `SourceMapRecorder.fragment` uses:
- *  absent or ambiguous ⇒ an honest skip (no marks), not a guess — the same
+ *  marks-carrying sibling to `renderTsStatementChunks`
+ *  (span-tracking-emission.md, M15 phase 7 slice 2; widened to every
+ *  expression-bearing kind in M17 phase 7 slice 4).  Renders EACH of the
+ *  statement's markable expressions (`markableExprsOf` above) a SECOND time
+ *  through `renderTsExprWithMarks` (the level-wise mark composer,
+ *  `src/generator/_expr/target.ts`), then locates that rendered text inside
+ *  the ALREADY-rendered `chunk` via the same one-occurrence anchor
+ *  discipline `SourceMapRecorder.fragment` uses: absent or ambiguous ⇒ an
+ *  honest skip for THAT expr (no marks from it), not a guess — the same
  *  fragment() honesty every other source-map region in this codebase
  *  already follows (e.g. a provenance/trace-wrapped chunk that repeats the
  *  RHS text in its `__prov_N` snapshot array skips here for exactly that
- *  reason).  ONLY meant to be called from the aggregate op-body loop when a
- *  `SourceMapRecorder` is actually threaded in — a flag-off run never calls
- *  this and pays zero extra allocation. */
+ *  reason; a traced precondition's `__pre_N_ok` binding line is exactly the
+ *  same shape — anchor there or skip, never guess). Each expr anchors
+ *  independently of its siblings — one ambiguous/absent expr doesn't
+ *  suppress marks from the rest of the list; the results are simply
+ *  concatenated. ONLY meant to be called from the aggregate op-body loop
+ *  when a `SourceMapRecorder` is actually threaded in — a flag-off run
+ *  never calls this and pays zero extra allocation. */
 export function statementExprMarks(s: StmtIR, chunk: string): ChunkMark[] {
-  const rhs = rhsExprOf(s);
-  if (!rhs) return [];
-  const { text, marks } = renderTsExprWithMarks(rhs);
-  if (text.length === 0 || marks.length === 0) return [];
-  const first = chunk.indexOf(text);
-  if (first === -1 || chunk.indexOf(text, first + 1) !== -1) return [];
-  return marks.map((m) => ({ start: first + m.start, end: first + m.end, origin: m.origin }));
+  const exprs = markableExprsOf(s);
+  const out: ChunkMark[] = [];
+  for (const expr of exprs) {
+    const { text, marks } = renderTsExprWithMarks(expr);
+    if (text.length === 0 || marks.length === 0) continue;
+    const first = chunk.indexOf(text);
+    if (first === -1 || chunk.indexOf(text, first + 1) !== -1) continue;
+    for (const m of marks) {
+      out.push({ start: first + m.start, end: first + m.end, origin: m.origin });
+    }
+  }
+  return out;
 }
 
 function renderTsStatement(
