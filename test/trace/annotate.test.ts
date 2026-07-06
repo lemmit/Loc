@@ -288,4 +288,104 @@ describe("resolveFrame — column-aware region selection", () => {
     const res = resolveFrame(frame(24), COL_MAP);
     expect(res?.region.targetCol).toEqual([5, 40]);
   });
+
+  it("(f) equal-width targetCol regions both containing the col — the earlier region wins", () => {
+    // Not derivable from (d): both regions are width 10, so narrowest-wins
+    // gives no verdict and only the documented strict-`<` tie-break decides.
+    const tieMap: SourceMap = {
+      version: 1,
+      sources: ["main.ddd"],
+      files: {
+        "hono_api/src/domain/order.ts": [
+          {
+            target: [10, 10],
+            targetCol: [5, 15],
+            origin: { kind: "source", path: "main.ddd", span: OUTER_SPAN },
+          },
+          {
+            target: [10, 10],
+            targetCol: [8, 18],
+            origin: { kind: "source", path: "main.ddd", span: INNER_SPAN },
+          },
+        ],
+      },
+    };
+    const res = resolveFrame(frame(12), tieMap); // col 12 is inside both [5,15) and [8,18)
+    expect(res?.region.targetCol).toEqual([5, 15]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The realistic emitted shape: `statementSubRegions` always layers the fine
+// `targetCol` regions ALONGSIDE a coarse, col-less region for the SAME
+// statement on the SAME line (src/generator/_trace/sourcemap.ts). COL_MAP
+// above deliberately omits that coarse sibling to isolate the selection
+// rules; this fixture adds it back so the fallback cases pin the answer a
+// real map produces — the STATEMENT region, not the whole-construct one.
+// ---------------------------------------------------------------------------
+describe("resolveFrame — realistic map with a coarse same-line statement region", () => {
+  const CONSTRUCT_SPAN = AGGREGATE_SPAN;
+  const STMT_SPAN: [number, number] = [200, 240]; // the whole `let note = customerName`
+  const RHS_SPAN: [number, number] = [214, 226]; // `customerName` alone
+
+  const REAL_MAP: SourceMap = {
+    version: 1,
+    sources: ["main.ddd"],
+    files: {
+      "hono_api/src/domain/order.ts": [
+        {
+          target: [1, 20],
+          origin: { kind: "source", path: "main.ddd", span: CONSTRUCT_SPAN },
+          construct: "Sales.Orders.Order",
+        },
+        {
+          // The coarse per-statement sub-region — col-less, same line.
+          target: [10, 10],
+          origin: { kind: "source", path: "main.ddd", span: STMT_SPAN },
+          construct: "Sales.Orders.Order.rename",
+        },
+        {
+          // The fine expression-level mark layered onto the same line.
+          target: [10, 10],
+          targetCol: [12, 24],
+          origin: { kind: "source", path: "main.ddd", span: RHS_SPAN },
+          construct: "Sales.Orders.Order.rename",
+        },
+      ],
+    },
+  };
+
+  function frame(col: number | undefined): ParsedFrame {
+    return { lineIndex: 0, file: "hono_api/src/domain/order.ts", line: 10, col };
+  }
+
+  it("a col inside the fine region still picks it over the coarse same-line sibling", () => {
+    const res = resolveFrame(frame(15), REAL_MAP);
+    expect(res?.region.targetCol).toEqual([12, 24]);
+    expect(res?.origin).toEqual({
+      kind: "source",
+      path: "main.ddd",
+      span: { start: RHS_SPAN[0], end: RHS_SPAN[1] },
+    });
+  });
+
+  it("a col missing every fine region falls back to the coarse STATEMENT region, not the construct", () => {
+    const res = resolveFrame(frame(2), REAL_MAP);
+    expect(res?.region.targetCol).toBeUndefined();
+    expect(res?.origin).toEqual({
+      kind: "source",
+      path: "main.ddd",
+      span: { start: STMT_SPAN[0], end: STMT_SPAN[1] },
+    });
+  });
+
+  it("a col-less frame on the marked line resolves to the coarse STATEMENT region — exactly as before targetCol existed", () => {
+    const res = resolveFrame(frame(undefined), REAL_MAP);
+    expect(res?.region.targetCol).toBeUndefined();
+    expect(res?.origin).toEqual({
+      kind: "source",
+      path: "main.ddd",
+      span: { start: STMT_SPAN[0], end: STMT_SPAN[1] },
+    });
+  });
 });
