@@ -484,6 +484,13 @@ function emitProjectFromContexts(
         if (!voRequestPkg.has(vo)) voRequestPkg.set(vo, pkgFor("service", agg.name));
       }
     }
+    // Only collected when a recorder is actually threaded in — a
+    // no-sourcemap run pays no per-statement bookkeeping cost.  Milestone 11:
+    // the merged `<Ctx>Workflows.java` service pools every command
+    // workflow's method, so it never gets a whole-file region — only these
+    // fragment-only statement regions, attached below via `place`'s
+    // `opFragments` (already forwarded for aggregates).
+    const workflowOpFragments: OpFragment[] | undefined = sourcemap ? [] : undefined;
     const workflowFiles = renderJavaWorkflows(
       ctx,
       {
@@ -499,6 +506,7 @@ function emitProjectFromContexts(
       },
       authRequired,
       system?.sys,
+      workflowOpFragments,
     );
     if (workflowFiles) {
       // Per-workflow Request DTOs are individually attributable; the combined
@@ -510,6 +518,7 @@ function emitProjectFromContexts(
           .filter((wf) => workflowEmitsCommandRoute(wf) && wf.params.length > 0)
           .map((wf) => [`${upperFirst(wf.name)}Request.java`, wf]),
       );
+      const workflowServiceFileName = `${ctx.name}Workflows.java`;
       for (const [name, f] of workflowFiles) {
         const wf = wfRequestOrigin.get(name);
         place(
@@ -519,6 +528,7 @@ function emitProjectFromContexts(
           undefined,
           wf?.origin,
           wf ? `${ctx.name}.${wf.name}` : undefined,
+          name === workflowServiceFileName ? workflowOpFragments : undefined,
         );
       }
     }

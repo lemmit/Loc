@@ -291,8 +291,26 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   out.set("app/http/wire_models.py", renderPyWireModels(merged));
   const viewsFile = buildPyViewsFile(merged, hasDispatch);
   if (viewsFile != null) out.set("app/http/views_routes.py", viewsFile);
-  const workflowsFile = buildPyWorkflowsFile(merged, hasDispatch, args.sys);
-  if (workflowsFile != null) out.set("app/http/workflows_routes.py", workflowsFile);
+  // Only collected when a recorder is actually threaded in — a
+  // no-sourcemap run pays no per-statement bookkeeping cost.  Milestone 11:
+  // `app/http/workflows_routes.py` pools every command workflow, so it
+  // never gets a whole-file region — only these fragment-only statement
+  // regions.
+  const workflowOpFragments: OpFragment[] | undefined = sourcemap ? [] : undefined;
+  const workflowsFile = buildPyWorkflowsFile(merged, hasDispatch, args.sys, workflowOpFragments);
+  if (workflowsFile != null) {
+    out.set("app/http/workflows_routes.py", workflowsFile);
+    if (sourcemap && workflowOpFragments) {
+      for (const frag of workflowOpFragments) {
+        sourcemap.fragment(
+          "app/http/workflows_routes.py",
+          workflowsFile,
+          frag.fragmentText,
+          frag.subRegions,
+        );
+      }
+    }
+  }
 
   // Per-aggregate emission stays per-context — each aggregate module is
   // emitted in the context that owns it.  An abstract base owns no

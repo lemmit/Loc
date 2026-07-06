@@ -18,12 +18,14 @@ import { readPortsForOperation } from "../../../ir/util/domain-service-read-port
 import { resolveWorkflowIsolation } from "../../../ir/util/resolve-datasource.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
+import { statementSubRegions } from "../../_trace/sourcemap.js";
 import {
   collectUnionFindLets,
-  renderWorkflowStmts,
+  renderWorkflowStmtChunks,
   type WorkflowStmtTarget,
 } from "../../_workflow/stmt-target.js";
 import { collectJavaExprImports, type JavaRenderContext, renderJavaExpr } from "../render-expr.js";
+import type { OpFragment } from "./entity.js";
 import {
   collectWireImports,
   collectWireToDomainImports,
@@ -545,6 +547,13 @@ export function renderJavaWorkflows(
   wctx: WorkflowCtx,
   authed: boolean,
   sys?: SystemIR,
+  /** Source-map Milestone 11 (workflow-body statement regions) — allocated by
+   *  the caller (`src/generator/java/index.ts`) ONLY when a recorder is
+   *  present.  The merged `<Ctx>Workflows.java` service deliberately gets no
+   *  whole-file region (a multi-workflow pool — see the call site's comment),
+   *  so these fragment-only statement regions, one per workflow method body,
+   *  are the only mapping that file gets. */
+  opFragments?: OpFragment[],
 ): Map<string, { category: "service" | "controller" | "request-dto"; content: string }> | null {
   // Only command-surfaced workflows get a service method + POST route.  An
   // event-triggered (saga) workflow is invoked by the in-process dispatcher,
@@ -619,7 +628,15 @@ export function renderJavaWorkflows(
       collectWireToDomainImports(p.type, imports);
       return `            var ${p.name} = ${wireToDomain(p.type, `request.${p.name}()`)};`;
     });
-    const bodyLines = renderWorkflowStmts(
+    // Chunked (one lines-array per top-level statement) rather than the
+    // pre-flattened `renderWorkflowStmts` — byte-identical either way
+    // (`renderWorkflowStmts` IS `chunks.flat()` by construction), but the
+    // per-chunk list lets us surface per-statement sub-regions to the caller
+    // that owns the recorder + this file's final content (source-map
+    // Milestone 11).  No re-indent transform sits between here and the final
+    // file, so the chunk texts collected here are already the exact text
+    // that lands in `<Ctx>Workflows.java`.
+    const bodyChunks = renderWorkflowStmtChunks(
       wf.statements,
       javaWorkflowStmtTarget(
         ctx,
@@ -630,6 +647,16 @@ export function renderJavaWorkflows(
       ),
       "            ",
     );
+    const bodyLines = bodyChunks.flat();
+    if (opFragments) {
+      const chunkTexts = bodyChunks.map((ls) => ls.join("\n"));
+      if (chunkTexts.length > 0) {
+        opFragments.push({
+          fragmentText: chunkTexts.join("\n"),
+          subRegions: statementSubRegions(wf.statements, chunkTexts, `${ctx.name}.${wf.name}`),
+        });
+      }
+    }
     const saves = wf.savesAtExit.map((s) => `            ${repoField(s.aggName)}.save(${s.name});`);
     // The service carries a class-level `@Transactional`; a workflow that pins
     // an isolation level (`transactional(<level>)`, or its state dataSource's
