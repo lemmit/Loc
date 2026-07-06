@@ -181,4 +181,69 @@ describe("renderSourceMapV3 — targetCol (unit)", () => {
     expect(segments).toHaveLength(1);
     expect(segments[0]!.genCol).toBe(0);
   });
+
+  it("emits ONLY the column segments on a line covered by both a targetCol and a plain region", () => {
+    const sourceTexts = new Map([["/a/one.ddd", TEXT_A]]);
+    const regions: SourceMapRegion[] = [
+      // Coarse statement-level region and a fine expression-level one on the
+      // SAME generated line — the fine one supersedes (its real column IS the
+      // more precise fact; emitting both would put a bogus col-0 segment
+      // ahead of it).
+      region([1, 1], "/a/one.ddd", 0, 13),
+      { ...region([1, 1], "/a/one.ddd", 0, 7), targetCol: [10, 17] },
+    ];
+    const rendered = renderSourceMapV3(regions, "gen.ts", sourceTexts);
+    const v3 = JSON.parse(rendered!) as { mappings: string };
+    const segments = decodeMappings(v3.mappings);
+    expect(segments).toHaveLength(1);
+    expect(segments[0]).toMatchObject({ genLine: 0, genCol: 9 });
+  });
+
+  // The running source deltas (sourceIndex / sourceLine / sourceCol) are
+  // SHARED between the targetCol path and the col-0 fallback path — a delta
+  // bug at the seam corrupts every segment AFTER the first marked line while
+  // all single-path tests stay green.  Pin a map that crosses the seam twice:
+  // plain line → marked line → plain line, across two source files.
+  it("keeps source deltas continuous across mixed targetCol and col-0 lines", () => {
+    const sourceTexts = new Map([
+      ["/a/one.ddd", TEXT_A],
+      ["/b/two.ddd", TEXT_B],
+    ]);
+    const aggOffset = TEXT_B.indexOf("aggregate"); // line 2 (0-based), col 4
+    const regions: SourceMapRegion[] = [
+      region([1, 1], "/a/one.ddd", 0, 7), // plain, A offset 0 -> (0,0)
+      { ...region([2, 2], "/b/two.ddd", aggOffset, aggOffset + 9), targetCol: [12, 21] },
+      region([3, 3], "/a/one.ddd", TEXT_A.indexOf("}"), TEXT_A.indexOf("}") + 1), // plain, A (1,0)
+    ];
+    const rendered = renderSourceMapV3(regions, "gen.ts", sourceTexts);
+    const v3 = JSON.parse(rendered!) as { sources: string[]; mappings: string };
+    const segments = decodeMappings(v3.mappings);
+    expect(segments).toHaveLength(3);
+
+    const idxA = v3.sources.indexOf("/a/one.ddd");
+    const idxB = v3.sources.indexOf("/b/two.ddd");
+    // The decoder accumulates raw deltas, so these ABSOLUTE positions only
+    // come out right if both emission paths advance the shared state.
+    expect(segments[0]).toMatchObject({
+      genLine: 0,
+      genCol: 0,
+      sourceIndex: idxA,
+      sourceLine: 0,
+      sourceCol: 0,
+    });
+    expect(segments[1]).toMatchObject({
+      genLine: 1,
+      genCol: 11,
+      sourceIndex: idxB,
+      sourceLine: 2,
+      sourceCol: 4,
+    });
+    expect(segments[2]).toMatchObject({
+      genLine: 2,
+      genCol: 0,
+      sourceIndex: idxA,
+      sourceLine: 1,
+      sourceCol: 0,
+    });
+  });
 });
