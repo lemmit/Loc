@@ -7,7 +7,7 @@
 // mechanics differ per backend (own test file), so those stay per-backend; the
 // postgres sidecar + the assertions live here.
 
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import * as net from "node:net";
 import { expect } from "vitest";
 
@@ -239,4 +239,179 @@ export async function assertCrossTenantIsolation(base: string): Promise<void> {
     await fetch(`${base}/api/organizations`, { headers: claims(orgAId) })
   ).json()) as Array<{ id: string }>;
   expect(orgList.map((o) => o.id)).toEqual([orgAId]);
+}
+
+// ---------------------------------------------------------------------------
+// Hierarchy / `policy {}` read-ladder isolation (multi-tenancy Phase 2, P2.4/5).
+//
+// Where `assertCrossTenantIsolation` proves the FLAT tenant floor, this proves
+// the TREE-scoped reads over the same REST surface, from the `tenancy-hierarchy`
+// corpus fixture: a registry `Org implements tenantRegistry` (materialized-path
+// `dataKey`) and three `tenantOwned` aggregates carrying
+// `policy { allow deep on Account · allow global on Entry · allow local on Memo }`.
+//
+// The org tree is seeded deterministically (plain create → id, then the `setPath`
+// op → managed `dataKey`), so the harness controls the exact path strings; each
+// aggregate row is then created AS a principal of its org, letting the backend
+// stamp `dataKey` from `currentUser.orgPath` (a registry `data_key` read).  Rows
+// are identified by their `label` (`dataKey`/`tenantId` are not on the read
+// wire), seeded to the owning org's path key.
+//
+// Backend-agnostic — the only per-backend variable is how the server booted.
+// `pg` is threaded through solely for the NULL-`dataKey` fallback probe, which
+// nulls one column via host `psql` (a state a principal-stamped write can never
+// produce, since `orgPath` always resolves — the flat floor or the claim).
+// ---------------------------------------------------------------------------
+
+/** `postgres://…` URL for host `psql`, from the harness's `Postgres` parts. */
+function psqlUrl(pg: Postgres): string {
+  return `postgres://${encodeURIComponent(pg.user)}:${encodeURIComponent(pg.password)}@${pg.host}:${pg.port}/${pg.db}`;
+}
+
+/** Run one SQL statement via host `psql` (no shell — `execFileSync`); returns
+ *  trimmed stdout.  Used only for the NULL-`dataKey` legacy-row probe. */
+export function runSql(pg: Postgres, sql: string): string {
+  try {
+    return execFileSync("psql", [psqlUrl(pg), "-tAqc", sql], {
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 20_000,
+    })
+      .toString()
+      .trim();
+  } catch (e) {
+    const err = e as { stderr?: Buffer; message?: string };
+    throw new Error(
+      `psql failed (is postgresql-client on PATH?): ${err.stderr?.toString() ?? err.message ?? e}`,
+    );
+  }
+}
+
+export async function assertHierarchyIsolation(base: string, pg: Postgres): Promise<void> {
+  // --- seed the registry tree: plain create (→ id) then setPath (managed path).
+  async function createOrg(name: string, parent?: string): Promise<string> {
+    const r = await fetch(`${base}/api/orgs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" }, // claim-less signup
+      body: JSON.stringify(parent ? { name, parent } : { name }),
+    });
+    expect(r.status, await r.clone().text()).toBe(201);
+    const { id } = (await r.json()) as { id: string };
+    expect(id).toBeTruthy();
+    return id;
+  }
+  async function setPath(orgId: string, path: string): Promise<void> {
+    const r = await fetch(`${base}/api/orgs/${orgId}/set_path`, {
+      method: "POST",
+      headers: claims(orgId), // self-scope: the op reads its own org row
+      body: JSON.stringify({ p: path }),
+    });
+    expect(r.status, await r.clone().text()).toBe(204);
+  }
+
+  // org_a → org_a.b → org_a.b.c (a spine), plus the delimiter-trap sibling root
+  // `org_ab` (NOT a child of org_a) and an unrelated root `org_z`.
+  const orgA = await createOrg("A");
+  await setPath(orgA, "org_a");
+  const orgAB = await createOrg("A.B", orgA);
+  await setPath(orgAB, "org_a.b");
+  const orgABC = await createOrg("A.B.C", orgAB);
+  await setPath(orgABC, "org_a.b.c");
+  const orgAb = await createOrg("Ab"); // delimiter trap: "org_ab" vs "org_a"
+  await setPath(orgAb, "org_ab");
+  const orgZ = await createOrg("Z");
+  await setPath(orgZ, "org_z");
+
+  const tree = [
+    { id: orgA, key: "org_a" },
+    { id: orgAB, key: "org_a.b" },
+    { id: orgABC, key: "org_a.b.c" },
+    { id: orgAb, key: "org_ab" },
+    { id: orgZ, key: "org_z" },
+  ];
+
+  // --- seed one row per org in each aggregate, AS that org (backend stamps
+  //     dataKey from currentUser.orgPath).  Row label = the owning org key.
+  async function createRow(
+    plural: string,
+    orgId: string,
+    body: Record<string, unknown>,
+  ): Promise<string> {
+    const r = await fetch(`${base}/api/${plural}`, {
+      method: "POST",
+      headers: claims(orgId),
+      body: JSON.stringify(body),
+    });
+    expect(r.status, await r.clone().text()).toBe(201);
+    return ((await r.json()) as { id: string }).id;
+  }
+  const acctId: Record<string, string> = {};
+  for (const o of tree) {
+    acctId[o.key] = await createRow("accounts", o.id, { label: o.key, amount: 1 });
+    await createRow("entries", o.id, { label: o.key });
+    await createRow("memos", o.id, { label: o.key });
+  }
+
+  // Visible labels for a caller (sorted), and a by-id status probe.
+  async function labels(plural: string, orgId: string): Promise<string[]> {
+    const r = await fetch(`${base}/api/${plural}`, { headers: claims(orgId) });
+    expect(r.status, await r.clone().text()).toBe(200);
+    return ((await r.json()) as Array<{ label: string }>).map((x) => x.label).sort();
+  }
+  async function getStatus(plural: string, orgId: string, rowId: string): Promise<number> {
+    return (await fetch(`${base}/api/${plural}/${rowId}`, { headers: claims(orgId) })).status;
+  }
+
+  // === DEEP (Account): descendant-or-self on the materialized path. ===
+  // Caller at org_a.b sees itself + its descendant, NOT its ancestor org_a, NOT
+  // the delimiter-trap sibling org_ab, NOT the unrelated org_z.
+  expect(await labels("accounts", orgAB)).toEqual(["org_a.b", "org_a.b.c"]);
+  // Caller at the root org_a sees its WHOLE subtree — and the delimiter trap is
+  // excluded (`org_ab` must not prefix-match `org_a`).
+  expect(await labels("accounts", orgA)).toEqual(["org_a", "org_a.b", "org_a.b.c"]);
+  // Neither root leaks into the other; org_z is an island.
+  expect(await labels("accounts", orgAb)).toEqual(["org_ab"]);
+  expect(await labels("accounts", orgZ)).toEqual(["org_z"]);
+  // By-id: an in-subtree row is 200, an out-of-subtree row is 404 (hidden).
+  expect(await getStatus("accounts", orgAB, acctId["org_a.b.c"])).toBe(200); // descendant
+  expect(await getStatus("accounts", orgAB, acctId["org_a"])).toBe(404); // ancestor
+  expect(await getStatus("accounts", orgAB, acctId["org_ab"])).toBe(404); // delimiter trap
+  expect(await getStatus("accounts", orgAB, acctId["org_z"])).toBe(404); // unrelated
+
+  // === LOCAL (Memo, the default): only own-org rows (flat tenant floor). ===
+  expect(await labels("memos", orgAB)).toEqual(["org_a.b"]);
+  expect(await labels("memos", orgA)).toEqual(["org_a"]);
+  expect(await labels("memos", orgABC)).toEqual(["org_a.b.c"]);
+
+  // === GLOBAL (Entry): the caller's ROOT-org subtree (root-org widening). ===
+  // The grandchild org_a.b.c widens to the whole org_a subtree…
+  expect(await labels("entries", orgABC)).toEqual(["org_a", "org_a.b", "org_a.b.c"]);
+  // …still never the delimiter-trap sibling or the unrelated root.
+  expect(await labels("entries", orgAb)).toEqual(["org_ab"]);
+  expect(await labels("entries", orgZ)).toEqual(["org_z"]);
+
+  // === NULL-dataKey fallback: a legacy row degrades to the LOCAL floor. ===
+  // A row a principal-stamped write can never make (orgPath always resolves), so
+  // it's forced via SQL: create a normal Account as org_a.b, then null its
+  // data_key.  It must stay visible to its own tenant and NEVER widen past it.
+  const legacyId = await createRow("accounts", orgAB, { label: "legacy", amount: 1 });
+  const acctTable = runSql(
+    pg,
+    "SELECT format('%I.%I', table_schema, table_name) FROM information_schema.columns WHERE lower(column_name) = 'amount' LIMIT 1",
+  );
+  expect(acctTable, "could not locate the accounts table via information_schema").toBeTruthy();
+  runSql(pg, `UPDATE ${acctTable} SET data_key = NULL WHERE id = '${legacyId}'`);
+  expect(runSql(pg, `SELECT data_key IS NULL FROM ${acctTable} WHERE id = '${legacyId}'`)).toBe(
+    "t",
+  );
+
+  // Own tenant (org_a.b) still sees it — via the NULL-branch tenantId floor.
+  expect(await labels("accounts", orgAB)).toContain("legacy");
+  expect(await getStatus("accounts", orgAB, legacyId)).toBe(200);
+  // The ANCESTOR org_a — whose deep subtree contains org_a.b — does NOT see it:
+  // the NULL row has no path, so it never widens past its own tenant floor.
+  expect(await labels("accounts", orgA)).not.toContain("legacy");
+  expect(await getStatus("accounts", orgA, legacyId)).toBe(404);
+  // Nor does a DESCENDANT (org_a.b.c) — different tenant → outside the floor.
+  expect(await labels("accounts", orgABC)).not.toContain("legacy");
+  expect(await getStatus("accounts", orgABC, legacyId)).toBe(404);
 }

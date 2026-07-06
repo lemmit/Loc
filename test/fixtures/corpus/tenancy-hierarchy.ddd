@@ -14,7 +14,7 @@
 //   - `Entry`   carries `policy allow global` → the caller's ROOT-org subtree.
 //   - `Memo`    carries `policy allow local`  → the flat own-org floor (default).
 //
-// `__PLATFORM__` is substituted per leg (node / python / java / dotnet / elixir).
+// The deployable platform is substituted per leg (node/python/java/dotnet/elixir).
 system TenantHierarchy {
   user { id: guid  tenantId: string }
 

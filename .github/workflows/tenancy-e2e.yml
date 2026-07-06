@@ -68,8 +68,14 @@ on:
       - 'test/e2e/tenancy-isolation-java.test.ts'
       - 'test/e2e/tenancy-isolation-dotnet.test.ts'
       - 'test/e2e/tenancy-isolation-elixir.test.ts'
+      - 'test/e2e/tenancy-hierarchy.test.ts'
+      - 'test/e2e/tenancy-hierarchy-python.test.ts'
+      - 'test/e2e/tenancy-hierarchy-java.test.ts'
+      - 'test/e2e/tenancy-hierarchy-dotnet.test.ts'
+      - 'test/e2e/tenancy-hierarchy-elixir.test.ts'
       - 'test/e2e/support/tenancy-isolation-harness.ts'
       - 'test/fixtures/corpus/tenancy-owned.ddd'
+      - 'test/fixtures/corpus/tenancy-hierarchy.ddd'
       - 'package.json'
       - '.github/workflows/tenancy-e2e.yml'
   workflow_dispatch:
@@ -91,17 +97,41 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Flat tenant floor (tenancy-owned.ddd) — one boot per backend.
           - backend: node
+            suite: flat
             script: test:tenancy
           - backend: python
+            suite: flat
             script: test:tenancy-python
           - backend: java
+            suite: flat
             script: test:tenancy-java
           - backend: dotnet
+            suite: flat
             script: test:tenancy-dotnet
           - backend: elixir
+            suite: flat
             script: test:tenancy-elixir
-    name: tenancy-e2e (${{ matrix.backend }})
+          # Hierarchy / policy read ladder (tenancy-hierarchy.ddd) — a SEPARATE
+          # cell per backend (own boot, own 20-min budget), so the heavier
+          # backends never run two boots in one job.
+          - backend: node
+            suite: hierarchy
+            script: test:tenancy-hierarchy
+          - backend: python
+            suite: hierarchy
+            script: test:tenancy-hierarchy-python
+          - backend: java
+            suite: hierarchy
+            script: test:tenancy-hierarchy-java
+          - backend: dotnet
+            suite: hierarchy
+            script: test:tenancy-hierarchy-dotnet
+          - backend: elixir
+            suite: hierarchy
+            script: test:tenancy-hierarchy-elixir
+    name: tenancy-e2e (${{ matrix.backend }} / ${{ matrix.suite }})
     services:
       postgres:
         image: postgres:18-alpine
