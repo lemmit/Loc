@@ -52,6 +52,13 @@ export interface WireRegion {
   target: [number, number];
   origin: WireOriginRef;
   construct?: string;
+  /** OPTIONAL real generated column range — mirrors `SourceMapRegion.targetCol`
+   *  (`src/generator/_trace/sourcemap.ts`) / `src/system/sourcemap.ts`'s wire
+   *  copy verbatim (1-based, half-open `[startCol, endCol)`). Deliberately
+   *  re-declared rather than imported — same decoupling rationale as the
+   *  rest of this file's wire types (see the module comment above): `trace/`
+   *  only ever consumes the published JSON. */
+  targetCol?: [number, number];
 }
 
 /** The parsed shape of `.loom/sourcemap.json` — see `src/system/sourcemap.ts`. */
@@ -147,24 +154,62 @@ export interface Resolution {
 }
 
 /** Resolve one parsed frame against a loaded source map: path match
- *  (longest suffix), then region match (the NARROWEST region whose target
- *  range contains the frame's line — statement-granular sub-regions nest
- *  inside the whole-file construct region, and the tightest one is the
- *  most precise answer; ties keep the earlier region), then the origin
- *  chain walk. Returns `undefined` when the frame doesn't land in any
- *  mapped file/region — the frame passes through unannotated. */
+ *  (longest suffix), then region match, then the origin chain walk.
+ *
+ *  Region match is layered:
+ *   - IF the frame carries a column (V8/Node only, see `frames.ts`) AND
+ *     some line-matching region carries a `targetCol` containing it
+ *     (`targetCol[0] <= col < targetCol[1]`, half-open): pick the
+ *     NARROWEST such region by `targetCol` width — the fine
+ *     expression-level origin, the whole point of this slice. Ties keep
+ *     the earlier region.
+ *   - ELSE (no column, or a column matching no `targetCol` region): fall
+ *     back to today's line-narrowest walk — the NARROWEST region whose
+ *     target range contains the frame's line — but EXCLUDING every
+ *     `targetCol`-bearing region from consideration. A fine expression
+ *     region must never win a line-width contest by accident when the
+ *     column gives no evidence for it; this exclusion is what keeps every
+ *     column-less resolution byte-identical to before `targetCol` existed
+ *     (see test/system/trace-roundtrip.test.ts). Ties keep the earlier
+ *     region.
+ *
+ *  Which path won is derivable from the result: `region.targetCol !==
+ *  undefined` means the column-aware path matched (no separate
+ *  `viaColumn` field needed).
+ *
+ *  Returns `undefined` when the frame doesn't land in any mapped
+ *  file/region — the frame passes through unannotated. */
 export function resolveFrame(frame: ParsedFrame, map: SourceMap): Resolution | undefined {
-  if (frame.line === undefined) return undefined;
+  const line = frame.line;
+  if (line === undefined) return undefined;
   const candidate = candidatePathFor(frame);
   if (!candidate) return undefined;
 
   const path = matchPath(candidate, Object.keys(map.files));
   if (!path) return undefined;
 
+  const lineMatches = map.files[path]!.filter((r) => line >= r.target[0] && line <= r.target[1]);
+
   let region: WireRegion | undefined;
-  for (const r of map.files[path]!) {
-    if (frame.line < r.target[0] || frame.line > r.target[1]) continue;
-    if (!region || r.target[1] - r.target[0] < region.target[1] - region.target[0]) region = r;
+  const col = frame.col;
+  if (col !== undefined) {
+    let colWidth = Number.POSITIVE_INFINITY;
+    for (const r of lineMatches) {
+      if (!r.targetCol) continue;
+      if (col < r.targetCol[0] || col >= r.targetCol[1]) continue;
+      const width = r.targetCol[1] - r.targetCol[0];
+      if (!region || width < colWidth) {
+        region = r;
+        colWidth = width;
+      }
+    }
+  }
+
+  if (!region) {
+    for (const r of lineMatches) {
+      if (r.targetCol) continue;
+      if (!region || r.target[1] - r.target[0] < region.target[1] - region.target[0]) region = r;
+    }
   }
   if (!region) return undefined;
 
