@@ -286,7 +286,9 @@ function emitProjectionTable(proj: ProjectionIR, ctx: BoundedContextIR, schema?:
       const corrType = f.type.kind === "id" ? f.type.valueType : "guid";
       lines.push(`  ${f.name}: ${drizzleIdColumn(corrType, snake(f.name))}.primaryKey(),`);
     } else {
-      lines.push(...drizzleColumnLines(f, ctx).map((s) => `  ${s}`));
+      // Non-key columns NULLABLE — a fold upserts only the fields its event
+      // carries, so a row is partial until every contributing event arrives.
+      lines.push(...drizzleColumnLines({ ...f, optional: true }, ctx).map((s) => `  ${s}`));
     }
   }
   lines.push(`});`);

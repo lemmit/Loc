@@ -92,6 +92,7 @@ import { layeredStyleAdapter } from "./adapters/layered-style.js";
 import { resourceAdapterFor } from "./adapters/resource-clients.js";
 import { emitAuthFiles } from "./auth-emit.js";
 import { emitObservabilityFiles } from "./observability-builder.js";
+import { buildProjectionsFile } from "./projection-builder.js";
 import { buildRealtimeFile } from "./realtime-builder.js";
 import { buildRoutesFile } from "./routes-builder.js";
 import { buildViewsRoutesFile } from "./view-routes-builder.js";
@@ -459,6 +460,9 @@ export function generateTypeScriptForContexts(
   if (merged.views.length > 0) {
     const aggsByName = new Map(merged.aggregates.map((a) => [a.name, a] as const));
     out.set("http/views.ts", buildViewsRoutesFile(merged, aggsByName));
+  }
+  if (merged.projections.length > 0 && !usingMikro) {
+    out.set("http/projections.ts", buildProjectionsFile(merged));
   }
   out.set(
     "http/index.ts",
