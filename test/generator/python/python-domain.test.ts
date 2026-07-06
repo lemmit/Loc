@@ -94,12 +94,19 @@ describe("python domain primitives", () => {
     expect(vos).toContain('    Retired = "Retired"');
   });
 
-  it("value objects enforce invariants in __init__ after field assignment", async () => {
+  it("value objects are frozen dataclasses with __post_init__ invariants (S9)", async () => {
     const files = await build();
     const vos = files.get("api/app/domain/value_objects.py")!;
+    // frozen=True gives field-wise __eq__/__hash__ (value semantics — the
+    // defining VO property) and rejects post-construction mutation; the
+    // dataclass __init__ keeps the declaration-order signature, so every
+    // construction site is unchanged.
+    expect(vos).toContain("from dataclasses import dataclass");
+    expect(vos).toContain("@dataclass(frozen=True)");
     expect(vos).toContain("class Price:");
-    expect(vos).toContain("def __init__(self, amount: float, currency: str) -> None:");
-    expect(vos).toContain("        self.amount = amount");
+    expect(vos).toContain("    amount: float");
+    expect(vos).toContain("    currency: str");
+    expect(vos).toContain("    def __post_init__(self) -> None:");
     expect(vos).toContain("        if not (self.amount >= 0):");
     expect(vos).toContain('            raise DomainError("Invariant violated: amount >= 0")');
     expect(vos).toContain("        if not (len(self.currency) == 3):");

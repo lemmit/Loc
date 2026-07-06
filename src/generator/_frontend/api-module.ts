@@ -8,7 +8,7 @@ import {
 import { unionInstanceName, unionReturn, variantTag } from "../../ir/stdlib/unions.js";
 import {
   type AggregateIR,
-  aggregateUsesMoney,
+  aggregateUsesMoneyDeep,
   type BoundedContextIR,
   type EnrichedAggregateIR,
   type EnrichedEntityPartIR,
@@ -73,7 +73,7 @@ export function buildApiModule(
     lines.push(`import { type MaybeRefOrGetter, computed, toValue } from "vue";`);
   }
   lines.push(`import { api } from "./client";`);
-  if (aggregateUsesMoney(agg)) {
+  if (aggregateUsesMoneyDeep(agg, ctx.valueObjects)) {
     // Shared `moneySchema` — single home for the precise-decimal
     // wire shape; emitted to `src/lib/schemas.ts` whenever any
     // context uses money.  Both request and response sides of every

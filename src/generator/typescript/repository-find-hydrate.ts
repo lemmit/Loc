@@ -14,7 +14,6 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { isTphConcrete } from "../../ir/util/inheritance.js";
 import { isValueCollectionType, type ValueCollectionIR } from "../../ir/util/value-collections.js";
-import { valueObjectColumnNames } from "./emit.js";
 import { isRefCollection } from "./repository-associations-builder.js";
 
 export function hydrateRootExpr(
@@ -156,22 +155,36 @@ function hydrateValueExpr(
     return `${colExpr} as ${t.name}`;
   }
   if (t.kind === "valueobject") {
-    const cols = valueObjectColumnNames(fieldName, t.name, ctx);
-    const args = cols
-      .map((c) => primitiveColumnRead(`${rowVar}.${c.columnName}${bang}`, c.type))
+    // Recurse per subfield: a VO-TYPED subfield flattens to doubly-prefixed
+    // columns (`offer_price_amount`), so its value reconstructs via a nested
+    // `new <Vo>(...)`.  The schema, save, and wire sides already recurse —
+    // this arm used to read a single non-existent column (`row.offer_price`),
+    // a latent tsc break on the VO-in-VO shape.
+    const vo = ctx.valueObjects.find((v) => v.name === t.name);
+    const args = (vo?.fields ?? [])
+      .map((f) =>
+        hydrateValueExpr(`${fieldName}_${f.name}`, f.type, rowVar, ctx, false, forceNonNull),
+      )
       .join(", ");
     if (optional) {
-      return `(${rowVar}.${cols[0]!.columnName} == null ? null : new ${t.name}(${args}))`;
+      return `(${rowVar}.${firstLeafColumn(fieldName, t.name, ctx)} == null ? null : new ${t.name}(${args}))`;
     }
     return `new ${t.name}(${args})`;
   }
   return colExpr;
 }
 
-function primitiveColumnRead(expr: string, t: TypeIR): string {
-  if (t.kind === "primitive" && t.name === "decimal") return `Number(${expr})`;
-  if (t.kind === "primitive" && t.name === "money") return `new Decimal(${expr})`;
-  return expr;
+/** The first LEAF (non-VO) flattened column of a VO field — the null probe
+ *  an optional VO field's hydrate guards on.  Recurses through VO-typed
+ *  first subfields (`offer` → `offer_price` → `offer_price_amount`). */
+function firstLeafColumn(fieldName: string, voName: string, ctx: BoundedContextIR): string {
+  const vo = ctx.valueObjects.find((v) => v.name === voName);
+  const f = vo?.fields[0];
+  if (!f) return fieldName;
+  const inner = f.type.kind === "optional" ? f.type.inner : f.type;
+  return inner.kind === "valueobject"
+    ? firstLeafColumn(`${fieldName}_${f.name}`, inner.name, ctx)
+    : `${fieldName}_${f.name}`;
 }
 
 /** Variant of `hydrateRootExpr` where ALL containments

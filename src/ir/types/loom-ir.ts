@@ -3393,6 +3393,47 @@ export function aggregateUsesMoney(a: AggregateIR): boolean {
   return false;
 }
 
+/** The value-object name a field type resolves to, unwrapping
+ *  array/optional envelopes — undefined for non-VO types. */
+function typeVoName(t: TypeIR): string | undefined {
+  if (t.kind === "valueobject") return t.name;
+  if (t.kind === "array") return typeVoName(t.element);
+  if (t.kind === "optional") return typeVoName(t.inner);
+  return undefined;
+}
+
+/** {@link aggregateUsesMoney}, additionally resolving VO-TYPED FIELDS
+ *  through the context's value-object registry: `typeUsesMoney` sees only
+ *  the name ref on a `listing: Listing` field, so money nested inside the
+ *  VO (`Listing { price: money }`) is invisible to the shallow check —
+ *  which left every emitter keying its `Decimal`/`moneySchema` import on
+ *  it with an unresolved reference (latent compile break on the
+ *  money-inside-VO shape).  Recurses through VO-in-VO nesting; cycle-safe. */
+export function aggregateUsesMoneyDeep(
+  a: AggregateIR,
+  valueObjects: readonly ValueObjectIR[],
+): boolean {
+  if (aggregateUsesMoney(a)) return true;
+  const byName = new Map(valueObjects.map((v) => [v.name, v]));
+  const seen = new Set<string>();
+  const voUsesMoneyDeep = (name: string): boolean => {
+    if (seen.has(name)) return false;
+    seen.add(name);
+    const vo = byName.get(name);
+    if (!vo) return false;
+    if (valueObjectUsesMoney(vo)) return true;
+    return vo.fields.some((f) => {
+      const n = typeVoName(f.type);
+      return n ? voUsesMoneyDeep(n) : false;
+    });
+  };
+  const fieldTypes = [...a.fields, ...a.parts.flatMap((p) => p.fields)].map((f) => f.type);
+  return fieldTypes.some((t) => {
+    const n = typeVoName(t);
+    return n ? voUsesMoneyDeep(n) : false;
+  });
+}
+
 /** True when the value object's wire shape carries any money field. */
 export function valueObjectUsesMoney(vo: ValueObjectIR): boolean {
   if (vo.fields.some((f) => typeUsesMoney(f.type))) return true;

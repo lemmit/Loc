@@ -15,7 +15,14 @@ import type { BoundedContextIR, EnrichedAggregateIR, TypeIR } from "../../ir/typ
 export function collectValueObjects(agg: EnrichedAggregateIR, ctx: BoundedContextIR): string[] {
   const used = new Set<string>();
   const visit = (t: TypeIR) => {
-    if (t.kind === "valueobject") used.add(t.name);
+    if (t.kind === "valueobject" && !used.has(t.name)) {
+      used.add(t.name);
+      // Transitive closure: a VO-in-VO hydrate constructs the NESTED VO too
+      // (`new Offer(new Money(…))`), so the inner class needs importing —
+      // recurse into the referenced VO's own fields (cycle-safe via `used`).
+      const vo = ctx.valueObjects.find((v) => v.name === t.name);
+      for (const f of vo?.fields ?? []) visit(f.type);
+    }
     if (t.kind === "array") visit(t.element);
     if (t.kind === "optional") visit(t.inner);
   };
