@@ -53,7 +53,10 @@ const cases: Record<string, [RegExp, RegExp]> = {
   // from the verifier's claims), read via `requireCurrentUser().orgPath`.
   node: [/orgPath: String\(claims\.tenantId \?\? ""\)/, /requireCurrentUser\(\)\.orgPath/],
   // .NET: computed record property `OrgPath`, read off the current user.
-  dotnet: [/public string OrgPath => \$"\{TenantId\}";/, /CurrentUser!\.OrgPath/],
+  dotnet: [
+    /public string OrgPath => \$"\{TenantId\}";/,
+    /(_currentUser\.User|CurrentUser!)\.OrgPath/,
+  ],
   // Python: computed `@property org_path`, read via `.org_path`.
   python: [/def org_path\(self\) -> str:/, /require_current_user\(\)\.org_path/],
   // Java: record accessor `orgPath()`, read via `.orgPath()` in the SpEL query.
