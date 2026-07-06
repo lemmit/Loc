@@ -515,7 +515,10 @@ export const CS_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[
 // culture-free, the semantics stay the catalogue's invariant contract; the
 // culture-default C# SPELLING never actually executes.  CA1304/CA1311 are
 // NoWarn'd in the generated csproj for exactly this line of code.
-export const CS_INTRINSIC_QUERY_RENDERERS: Record<string, (recv: string, args: string[]) => string> = {
+export const CS_INTRINSIC_QUERY_RENDERERS: Record<
+  string,
+  (recv: string, args: string[]) => string
+> = {
   "string.toUpper": (recv) => `${recv}.ToUpper()`,
   "string.toLower": (recv) => `${recv}.ToLower()`,
 };
@@ -590,7 +593,8 @@ function renderMethodCall(
     // EF-translated positions (find/view Where, HasQueryFilter, criteria
     // Specifications) may need a different C# spelling than domain bodies —
     // the sparse query table wins there, falling back to the main table.
-    const intrinsic = (ctx.efQuery ? CS_INTRINSIC_QUERY_RENDERERS[key] : undefined) ?? CS_INTRINSIC_RENDERERS[key];
+    const intrinsic =
+      (ctx.efQuery ? CS_INTRINSIC_QUERY_RENDERERS[key] : undefined) ?? CS_INTRINSIC_RENDERERS[key];
     if (intrinsic) return intrinsic(recv, args);
   }
   return `${recv}.${upperFirst(e.member)}(${args.join(", ")})`;

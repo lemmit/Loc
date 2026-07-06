@@ -116,7 +116,9 @@ function retrievalWhereClause(
   ctx: BoundedContextIR,
 ): string {
   if (r.criterionRef && canEmitToExpressionFor(r.criterionRef.name, ctx, agg.name)) {
-    const args = r.criterionRef.args.map((a) => renderCsExpr(a, { thisName: "x", agg, efQuery: true })).join(", ");
+    const args = r.criterionRef.args
+      .map((a) => renderCsExpr(a, { thisName: "x", agg, efQuery: true }))
+      .join(", ");
     return `.Where(new ${upperFirst(r.criterionRef.name)}Criterion(${args}).ToExpression())`;
   }
   return `.Where(x => ${renderCsExpr(r.where, { thisName: "x", agg, efQuery: true })})`;
