@@ -10,9 +10,11 @@ import { describe, expect, it } from "vitest";
 import {
   renderTsStatementChunks,
   renderTsStatements,
+  statementExprMarks,
   statementSubRegions,
 } from "../../../src/generator/typescript/render-stmt.js";
 import type { ExprIR, PathIR, StmtIR } from "../../../src/ir/types/loom-ir.js";
+import type { OriginRef } from "../../../src/ir/types/origin.js";
 
 const litInt = (v: string): ExprIR => ({ kind: "literal", lit: "int", value: v });
 const thisProp = (name: string): ExprIR => ({ kind: "ref", name, refKind: "this-prop" });
@@ -97,5 +99,128 @@ describe("statementSubRegions", () => {
     // past the skipped (no-origin) `return` chunk in between.
     expect(regions[1]!.rel[0]).toBeGreaterThan(regions[0]!.rel[1]);
     expect(regions[1]!.origin).toEqual(stmts[2]!.origin);
+  });
+});
+
+// Span-tracking emission (span-tracking-emission.md, M15 phase 7 slice 2):
+// `statementExprMarks` locates a `let`/`assign`/`return` RHS's rendered text
+// inside its own already-rendered chunk; `statementSubRegions`'s optional
+// 4th param then turns each mark into a column-bearing sub-region layered
+// alongside the plain per-statement one.
+describe("statementExprMarks", () => {
+  const origin: OriginRef = { kind: "source", path: "/a.ddd", span: { start: 5, end: 17 } };
+
+  it("marks a `let`'s RHS ref at its real position inside the rendered chunk", () => {
+    const stmt: StmtIR = {
+      kind: "let",
+      name: "note",
+      expr: { kind: "ref", name: "customerName", refKind: "this-prop", origin },
+      type: { kind: "primitive", name: "string" },
+    };
+    const [chunk] = renderTsStatementChunks([stmt]);
+    expect(chunk).toBe("    const note = this._customerName;");
+    const marks = statementExprMarks(stmt, chunk!);
+    expect(marks).toHaveLength(1);
+    const [mark] = marks;
+    expect(chunk!.slice(mark!.start, mark!.end)).toBe("this._customerName");
+    expect(mark!.origin).toEqual(origin);
+  });
+
+  it("marks an `assign`'s value and a `return`'s value the same way", () => {
+    // Target and value deliberately name DIFFERENT fields — `count := total`
+    // rather than a self-referential `count := count`, whose target text
+    // would collide with the RHS text and honestly (and correctly) skip
+    // per the anchor-ambiguity rule (see the sibling-ambiguity unit tests
+    // in render-expr-marks.test.ts).
+    const assign: StmtIR = {
+      kind: "assign",
+      target: { segments: ["count"] },
+      value: { kind: "ref", name: "total", refKind: "this-prop", origin },
+      targetType: { kind: "primitive", name: "int" },
+    };
+    const [assignChunk] = renderTsStatementChunks([assign]);
+    const assignMarks = statementExprMarks(assign, assignChunk!);
+    expect(assignMarks).toHaveLength(1);
+    expect(assignChunk!.slice(assignMarks[0]!.start, assignMarks[0]!.end)).toBe("this._total");
+
+    const ret: StmtIR = {
+      kind: "return",
+      value: { kind: "ref", name: "count", refKind: "this-prop", origin },
+    };
+    const [retChunk] = renderTsStatementChunks([ret]);
+    const retMarks = statementExprMarks(ret, retChunk!);
+    expect(retMarks).toHaveLength(1);
+    expect(retChunk!.slice(retMarks[0]!.start, retMarks[0]!.end)).toBe("this._count");
+  });
+
+  it("returns no marks for statement kinds outside the let/assign/return narrowing", () => {
+    const stmt: StmtIR = {
+      kind: "emit",
+      eventName: "Thing",
+      fields: [{ name: "n", value: { kind: "ref", name: "count", refKind: "this-prop", origin } }],
+    };
+    const [chunk] = renderTsStatementChunks([stmt]);
+    expect(statementExprMarks(stmt, chunk!)).toHaveLength(0);
+  });
+
+  it("returns no marks when the RHS carries no origin", () => {
+    const stmt: StmtIR = {
+      kind: "let",
+      name: "note",
+      expr: { kind: "ref", name: "customerName", refKind: "this-prop" },
+      type: { kind: "primitive", name: "string" },
+    };
+    const [chunk] = renderTsStatementChunks([stmt]);
+    expect(statementExprMarks(stmt, chunk!)).toHaveLength(0);
+  });
+});
+
+describe("statementSubRegions — exprMarks parameter", () => {
+  it("layers a column-bearing sub-region alongside the coarse per-statement region", () => {
+    const origin: OriginRef = { kind: "source", path: "/a.ddd", span: { start: 5, end: 17 } };
+    const stmts: StmtIR[] = [
+      {
+        kind: "let",
+        name: "note",
+        expr: { kind: "ref", name: "customerName", refKind: "this-prop", origin },
+        type: { kind: "primitive", name: "string" },
+        origin,
+      },
+    ];
+    const chunks = renderTsStatementChunks(stmts);
+    const exprMarks = stmts.map((s, i) => statementExprMarks(s, chunks[i]!));
+    const regions = statementSubRegions(stmts, chunks, "Ctx.Agg.op", exprMarks);
+
+    // The coarse per-statement region (from `stmts[0].origin`) plus the
+    // fine expression-level one (from the `customerName` ref's origin) —
+    // both on the SAME (single) generated line.
+    expect(regions).toHaveLength(2);
+    const coarse = regions.find((r) => r.col === undefined);
+    const fine = regions.find((r) => r.col !== undefined);
+    expect(coarse).toBeDefined();
+    expect(fine).toBeDefined();
+    expect(fine!.rel).toEqual(coarse!.rel);
+    expect(fine!.col![0]).toBeLessThan(fine!.col![1]);
+    const chunk = chunks[0]!;
+    // The column range slices to exactly the marked text inside the chunk
+    // (1-based, half-open — `endCol - 1` is the last included character).
+    expect(chunk.slice(fine!.col![0] - 1, fine!.col![1] - 1)).toBe("this._customerName");
+  });
+
+  it("omits exprMarks entirely when the 4th param is not passed (backward-compatible)", () => {
+    const origin: OriginRef = { kind: "source", path: "/a.ddd", span: { start: 0, end: 5 } };
+    const stmts: StmtIR[] = [
+      {
+        kind: "let",
+        name: "x",
+        expr: { kind: "literal", lit: "int", value: "1" },
+        type: { kind: "primitive", name: "int" },
+        origin,
+      },
+    ];
+    const chunks = renderTsStatementChunks(stmts);
+    const regions = statementSubRegions(stmts, chunks, "Ctx.Agg.op");
+    expect(regions).toHaveLength(1);
+    expect(regions[0]!.col).toBeUndefined();
   });
 });

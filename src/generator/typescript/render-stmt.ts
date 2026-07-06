@@ -1,6 +1,7 @@
 import type { ExprIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
 import { escapeTsIdent } from "../../util/naming.js";
-import { renderTsExpr } from "./render-expr.js";
+import type { ChunkMark } from "../_trace/sourcemap.js";
+import { renderTsExpr, renderTsExprWithMarks } from "./render-expr.js";
 
 const INDENT = "    ";
 
@@ -59,6 +60,48 @@ export function renderTsStatementChunks(
 // chunk-producing renderer shares the one cursor walk. Re-exported here so
 // existing import sites keep working.
 export { statementSubRegions } from "../_trace/sourcemap.js";
+
+/** The statement kinds whose RHS expression is marked THIS SLICE
+ *  (span-tracking-emission.md, M15 phase 7 slice 2) — narrowed to `let`'s
+ *  initializer, `assign`'s value, and `return`'s value, mirroring the .NET
+ *  `#line` weave's own narrowing (M7 phase 6a).  `undefined` for every other
+ *  kind keeps the prototype minimal; nothing stops a later slice from
+ *  widening this. */
+function rhsExprOf(s: StmtIR): ExprIR | undefined {
+  switch (s.kind) {
+    case "let":
+      return s.expr;
+    case "assign":
+    case "return":
+      return s.value;
+    default:
+      return undefined;
+  }
+}
+
+/** Expression-level marks for ONE already-rendered statement chunk — the
+ *  prototype's marks-carrying sibling to `renderTsStatementChunks`
+ *  (span-tracking-emission.md, M15 phase 7 slice 2).  Renders the
+ *  statement's RHS expression a SECOND time through `renderTsExprWithMarks`
+ *  (the level-wise mark composer, `src/generator/_expr/target.ts`), then
+ *  locates that rendered text inside the ALREADY-rendered `chunk` via the
+ *  same one-occurrence anchor discipline `SourceMapRecorder.fragment` uses:
+ *  absent or ambiguous ⇒ an honest skip (no marks), not a guess — the same
+ *  fragment() honesty every other source-map region in this codebase
+ *  already follows (e.g. a provenance/trace-wrapped chunk that repeats the
+ *  RHS text in its `__prov_N` snapshot array skips here for exactly that
+ *  reason).  ONLY meant to be called from the aggregate op-body loop when a
+ *  `SourceMapRecorder` is actually threaded in — a flag-off run never calls
+ *  this and pays zero extra allocation. */
+export function statementExprMarks(s: StmtIR, chunk: string): ChunkMark[] {
+  const rhs = rhsExprOf(s);
+  if (!rhs) return [];
+  const { text, marks } = renderTsExprWithMarks(rhs);
+  if (text.length === 0 || marks.length === 0) return [];
+  const first = chunk.indexOf(text);
+  if (first === -1 || chunk.indexOf(text, first + 1) !== -1) return [];
+  return marks.map((m) => ({ start: first + m.start, end: first + m.end, origin: m.origin }));
+}
 
 function renderTsStatement(
   s: StmtIR,

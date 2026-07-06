@@ -259,6 +259,37 @@ describe(".loom/sourcemap.json", () => {
     expect(Object.keys(map.files).length).toBeGreaterThan(0);
   });
 
+  // Span-tracking emission (M15 phase 7 slice 2, span-tracking-emission.md):
+  // the wire artifact stays version 1 (additive field) but at least one
+  // region on the TS/Hono aggregate file now carries a real `targetCol`.
+  it("carries targetCol on the node backend's confirm() RHS region — additive, version unchanged", async () => {
+    const model = await parseValid(SOURCE);
+    const files = generateSystems(model, { sourcemap: true }).files;
+    const raw = files.get(".loom/sourcemap.json")!;
+    const map = JSON.parse(raw) as {
+      version: number;
+      files: Record<
+        string,
+        { target: [number, number]; construct?: string; targetCol?: [number, number] }[]
+      >;
+    };
+    expect(map.version).toBe(1);
+
+    const path = Object.keys(map.files).find(
+      (p) => p.startsWith(`${SLUG_FOR.node}/`) && p.endsWith("domain/order.ts"),
+    )!;
+    const regions = map.files[path]!;
+    const marked = regions.filter(
+      (r) => r.construct === "Orders.Order.confirm" && r.targetCol !== undefined,
+    );
+    expect(marked.length).toBeGreaterThan(0);
+    for (const r of marked) {
+      expect(r.targetCol![0]).toBeGreaterThanOrEqual(1);
+      expect(r.targetCol![0]).toBeLessThan(r.targetCol![1]);
+      expect(r.target[0]).toBe(r.target[1]); // single-line, per the type comment
+    }
+  });
+
   it("every recorded region resolves to a real source span and a sane target range", async () => {
     const model = await parseValid(SOURCE);
     const files = generateSystems(model, { sourcemap: true }).files;
@@ -462,6 +493,7 @@ describe(".loom/sourcemap.json", () => {
           target: [number, number];
           origin: import("../../src/ir/types/origin.js").OriginRef;
           construct?: string;
+          targetCol?: [number, number];
         }[]
       >;
     };
@@ -481,10 +513,16 @@ describe(".loom/sourcemap.json", () => {
       : content.split("\n").length;
 
     // (a) one sub-region per RENDERED statement, layered onto the
-    // whole-file region where one exists (a pooled file has none).
+    // whole-file region where one exists (a pooled file has none).  M15
+    // phase 7 slice 2 (node/TS only) layers an ADDITIONAL, finer
+    // `targetCol`-bearing region onto the SAME construct for the `let`
+    // statement's RHS — exclude those from the one-per-statement count
+    // here (they're covered by their own dedicated targetCol assertions
+    // above) so this invariant stays about statement, not expression,
+    // granularity.
     const opConstruct = "Orders.Order.confirm";
     const stmtRegions = regions
-      .filter((r) => r.construct === opConstruct)
+      .filter((r) => r.construct === opConstruct && r.targetCol === undefined)
       .sort((a, b) => a.target[0] - b.target[0]);
     expect(stmtRegions).toHaveLength(tokens.length);
     if (wholeFile) {
@@ -1080,33 +1118,64 @@ describe("Source Map v3 sidecars", () => {
       expect(seg.sourceIndex).toBeLessThan(v3.sources.length);
     }
 
-    // Cross-check against `.loom/sourcemap.json`'s own regions: the `let`
-    // statement's whole-line region is the narrowest one covering its
-    // generated line, so the v3 segment for that line must point back at
-    // `let note = customerName` in SOURCE.
+    // Cross-check against `.loom/sourcemap.json`'s own regions.  Before M15
+    // phase 7 slice 2, the `let` statement's WHOLE-LINE region was the only
+    // (and so the "narrowest") one covering its generated line, and the v3
+    // segment pointed at the whole `let note = customerName` statement span.
+    // Span-tracking emission now ALSO records a finer, `targetCol`-bearing
+    // region for the RHS `customerName` ref alone (src/generator/typescript/
+    // emit/aggregate.ts's opFragments loop, via `statementExprMarks` +
+    // `renderExprWithMarks`'s level-wise anchoring) — a region with
+    // `targetCol` takes priority in `renderSourceMapV3`'s per-line loop, so
+    // the v3 segment for this line now points at the REAL generated column
+    // of `this._customerName`, resolving back to the exact `customerName`
+    // token (not merely the `let` statement's start).
+    const tsContent = files.get(tsPath)!;
     const wireRaw = files.get(".loom/sourcemap.json")!;
     const wireMap = JSON.parse(wireRaw) as {
-      files: Record<string, { target: [number, number]; construct?: string }[]>;
+      files: Record<
+        string,
+        { target: [number, number]; construct?: string; targetCol?: [number, number] }[]
+      >;
     };
     const stmtRegions = wireMap.files[tsPath]!.filter(
       (r) => r.construct === "Orders.Order.confirm",
     ).sort((a, b) => a.target[0] - b.target[0]);
     expect(stmtRegions.length).toBeGreaterThan(0);
-    const letLine = stmtRegions[0]!.target[0]; // 1-based generated line
+    const fineRegion = stmtRegions.find((r) => r.targetCol);
+    expect(
+      fineRegion,
+      "expected a targetCol-bearing region on confirm()'s let statement",
+    ).toBeDefined();
+    const letLine = fineRegion!.target[0]; // 1-based generated line
+    expect(fineRegion!.target[0]).toBe(fineRegion!.target[1]); // single-line region
 
     const seg = segments.find((s) => s.genLine === letLine - 1);
     expect(seg, `no v3 segment recorded for generated line ${letLine}`).toBeDefined();
 
-    const letIdx = SOURCE.indexOf("let note = customerName");
-    expect(letIdx).toBeGreaterThanOrEqual(0);
-    const expectedSourceLine = SOURCE.slice(0, letIdx).split("\n").length - 1; // 0-based
-    const expectedSourceCol = letIdx - SOURCE.lastIndexOf("\n", letIdx) - 1; // 0-based
+    // Recompute the expected generated column straight from the emitted TS
+    // content — `this._customerName`'s own real 0-based column on that line
+    // — rather than trusting the implementation to have gotten it right.
+    const genLineText = tsContent.split("\n")[letLine - 1]!;
+    const genCol0 = genLineText.indexOf("this._customerName");
+    expect(genCol0).toBeGreaterThanOrEqual(0);
+    expect(seg!.genCol).toBe(genCol0);
+    // The wire artifact's own `targetCol` agrees (1-based, half-open) — the
+    // `.loom/sourcemap.json` half of the brief's proof.
+    expect(fineRegion!.targetCol).toEqual([genCol0 + 1, genCol0 + 1 + "this._customerName".length]);
+
+    // The SOURCE side: the SECOND `customerName` occurrence (the field
+    // DECLARATION is the first; `operation confirm`'s `let` RHS is the one
+    // this mark must resolve to).
+    const nameIdx = SOURCE.indexOf("customerName", SOURCE.indexOf("operation confirm"));
+    expect(nameIdx).toBeGreaterThanOrEqual(0);
+    const expectedSourceLine = SOURCE.slice(0, nameIdx).split("\n").length - 1; // 0-based
+    const expectedSourceCol = nameIdx - SOURCE.lastIndexOf("\n", nameIdx) - 1; // 0-based
     expect(seg!.sourceLine).toBe(expectedSourceLine);
     expect(seg!.sourceCol).toBe(expectedSourceCol);
     expect(seg!.sourceIndex).toBe(sourceIdx);
 
     // Exactly one trailing directive line naming the sidecar's basename.
-    const tsContent = files.get(tsPath)!;
     expect(tsContent.endsWith("//# sourceMappingURL=order.ts.map\n")).toBe(true);
   });
 
