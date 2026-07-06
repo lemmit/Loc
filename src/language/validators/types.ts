@@ -3,8 +3,8 @@
 // invariants, derived fields, and function bodies.
 
 import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
-import { intrinsicMatcherSig } from "../../util/intrinsic-matchers.js";
-import { intrinsicFor, intrinsicMinArity } from "../../util/intrinsics.js";
+import { intrinsicMatcherSig, isIntrinsicMatcher } from "../../util/intrinsic-matchers.js";
+import { intrinsicFor, intrinsicMinArity, intrinsicsForReceiver } from "../../util/intrinsics.js";
 import type {
   Aggregate,
   BinaryChain,
@@ -258,6 +258,26 @@ export function checkIntrinsicCalls(model: Model, accept: ValidationAcceptor): v
               );
             }
           }
+        } else if (
+          ms.call &&
+          !isIntrinsicMatcher(ms.member) &&
+          !(recvType.name === "string" && ms.member === "matches")
+        ) {
+          // Strict unknown-intrinsic gate: a CALL on a known primitive
+          // receiver that matches no catalogue row (and is neither the
+          // string regex `matches` nor a test matcher) used to fail open —
+          // rendering garbage per backend.  Bare member ACCESS stays
+          // un-gated (string `.length` is legal; future field-style members
+          // shouldn't need a catalogue change to parse).
+          const known = intrinsicsForReceiver(recvType.name)
+            .map((s) => s.name)
+            .join(", ");
+          accept(
+            "error",
+            `'${recvType.name}' has no intrinsic '.${ms.member}()'${known ? ` — available: ${known}` : ""}.`,
+            { node: ms, property: "member", code: "loom.intrinsic-unknown" },
+          );
+          break;
         }
       }
       recvType = typeAfterSuffix(recvType, suffix, env);

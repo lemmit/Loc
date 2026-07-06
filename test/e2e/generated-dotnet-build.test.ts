@@ -67,6 +67,11 @@ describe.skipIf(!ENABLED)(
       // tagged value, and the controller action that switch-translates an error
       // variant to a ProblemDetails (stdlib status) and a success to the wire DTO.
       "examples/operation-return-dotnet.ddd",
+      // A3 math intrinsics (stdlib): all 18 numeric catalogue rows in derived
+      // properties + an operation (Math.Abs/Min/Max/Round-with-AwayFromZero/
+      // Floor/Ceiling) AND in `find … where` positions (the EF LINQ path,
+      // incl. the round query override that drops MidpointRounding).
+      "test/e2e/fixtures/dotnet-build/math-intrinsics.ddd",
     ])("%s — `ddd generate dotnet` output restores + builds", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-"));
       try {

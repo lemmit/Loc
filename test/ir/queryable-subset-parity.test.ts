@@ -190,6 +190,103 @@ const QUERYABLE: { name: string; e: ExprIR }[] = [
     },
   },
   {
+    name: "this.col.round(2) == param (multi-arg numeric intrinsic, A3)",
+    e: {
+      kind: "binary",
+      op: "==",
+      left: {
+        kind: "method-call",
+        receiver: {
+          kind: "member",
+          receiver: thisExpr,
+          member: "amount",
+          receiverType: { kind: "primitive", name: "decimal" },
+          memberType: { kind: "primitive", name: "decimal" },
+        },
+        member: "round",
+        args: [{ kind: "literal", lit: "int", value: "2" }],
+        receiverType: { kind: "primitive", name: "decimal" },
+        isCollectionOp: false,
+      },
+      right: {
+        kind: "ref",
+        name: "a",
+        refKind: "param",
+        type: { kind: "primitive", name: "decimal" },
+      },
+    },
+  },
+  {
+    name: "this.a.min(this.b) == param (column in the ARG position — LEAST(a,b) is legitimate SQL)",
+    e: {
+      kind: "binary",
+      op: "==",
+      left: {
+        kind: "method-call",
+        receiver: {
+          kind: "member",
+          receiver: thisExpr,
+          member: "amount",
+          receiverType: { kind: "primitive", name: "decimal" },
+          memberType: { kind: "primitive", name: "decimal" },
+        },
+        member: "min",
+        args: [
+          {
+            kind: "member",
+            receiver: thisExpr,
+            member: "cap",
+            receiverType: { kind: "primitive", name: "decimal" },
+            memberType: { kind: "primitive", name: "decimal" },
+          },
+        ],
+        receiverType: { kind: "primitive", name: "decimal" },
+        isCollectionOp: false,
+      },
+      right: {
+        kind: "ref",
+        name: "a",
+        refKind: "param",
+        type: { kind: "primitive", name: "decimal" },
+      },
+    },
+  },
+  {
+    name: "this.col == param.min(this.cap) (VALUE-side intrinsic with a column ARG → SQL fallback)",
+    e: {
+      kind: "binary",
+      op: "==",
+      left: {
+        kind: "member",
+        receiver: thisExpr,
+        member: "amount",
+        receiverType: { kind: "primitive", name: "decimal" },
+        memberType: { kind: "primitive", name: "decimal" },
+      },
+      right: {
+        kind: "method-call",
+        receiver: {
+          kind: "ref",
+          name: "a",
+          refKind: "param",
+          type: { kind: "primitive", name: "decimal" },
+        },
+        member: "min",
+        args: [
+          {
+            kind: "member",
+            receiver: thisExpr,
+            member: "cap",
+            receiverType: { kind: "primitive", name: "decimal" },
+            memberType: { kind: "primitive", name: "decimal" },
+          },
+        ],
+        receiverType: { kind: "primitive", name: "decimal" },
+        isCollectionOp: false,
+      },
+    },
+  },
+  {
     name: "currentUser.field comparison",
     e: {
       kind: "binary",

@@ -89,3 +89,53 @@ describe("typescript generator — A2 string intrinsics end-to-end", () => {
     expect(repo).toContain("eq(sql`lower(${schema.products.name})`, q.toLowerCase())");
   });
 });
+
+describe("typescript generator — A3 math intrinsics end-to-end", () => {
+  const SRC3 = `
+    context Billing {
+      aggregate Invoice ids guid {
+        qty: int
+        amount: decimal
+        price: money
+        derived absQty: int = qty.abs()
+        derived rounded: decimal = amount.round(2)
+        derived whole: decimal = amount.floor()
+        derived cappedPrice: money = price.min(price.round()).max(price.ceil().abs())
+      }
+      repository Invoices for Invoice {
+        find pricier(m: money): Invoice[] where this.price.round(2) > m
+        find qtyNear(n: int): Invoice[] where this.qty.abs() == n.abs()
+        find capped(a: decimal): Invoice[] where this.amount.min(a) == a
+      }
+    }
+  `;
+
+  it("parses + validates cleanly and renders numerics in-memory", async () => {
+    const { model, errors } = await parseString(SRC3);
+    expect(errors).toEqual([]);
+    const domain = generateHono(model).get("domain/invoice.ts")!;
+    // int → Math.*, money → decimal.js Decimal methods.
+    expect(domain).toContain("Math.abs(this._qty)");
+    expect(domain).toContain(
+      "Math.sign(this._amount) * (Math.round(Math.abs(this._amount) * 10 ** (2)) / 10 ** (2))",
+    );
+    expect(domain).toContain("Math.floor(this._amount)");
+    expect(domain).toContain(".toDecimalPlaces(0, Decimal.ROUND_HALF_UP)");
+    expect(domain).toContain("Decimal.min(this._price,");
+    expect(domain).toContain("Decimal.max(");
+    expect(domain).toContain(".ceil().abs()");
+  });
+
+  it("renders numeric intrinsics as SQL on the column side of a where", async () => {
+    const { model } = await parseString(SRC3);
+    const repo = generateHono(model).get("db/repositories/invoice-repository.ts")!;
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source interpolating the schema column in the generated sql tag, not here
+    expect(repo).toContain("gt(sql`round(${schema.invoices.price}, ${2})`, m)");
+    // Value-side abs (param receiver) stays host JS while the column side is SQL.
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source interpolating the schema column in the generated sql tag, not here
+    expect(repo).toContain("eq(sql`abs(${schema.invoices.qty})`, Math.abs(n))");
+    // Column-side LEAST with a value arg.
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: matching emitted source interpolating the schema column in the generated sql tag, not here
+    expect(repo).toContain("eq(sql`least(${schema.invoices.amount}, ${a})`, a)");
+  });
+});

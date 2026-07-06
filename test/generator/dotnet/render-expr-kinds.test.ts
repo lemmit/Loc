@@ -18,6 +18,7 @@ import type { ExprIR, TypeIR } from "../../../src/ir/types/loom-ir.js";
 const STRING: TypeIR = { kind: "primitive", name: "string" };
 const INT: TypeIR = { kind: "primitive", name: "int" };
 const MONEY: TypeIR = { kind: "primitive", name: "money" };
+const DECIMAL: TypeIR = { kind: "primitive", name: "decimal" };
 
 const litInt = (v: string): ExprIR => ({ kind: "literal", lit: "int", value: v });
 const litLong = (v: string): ExprIR => ({ kind: "literal", lit: "long", value: v });
@@ -179,6 +180,115 @@ describe("dotnet renderCsExpr — member + method-call", () => {
         isCollectionOp: false,
       }),
     ).toBe("this.Name.ToUpperInvariant()");
+  });
+
+  it("renders numeric `abs`/`min`/`max` intrinsics via System.Math (A3 batch)", () => {
+    expect(
+      renderCsExpr({
+        kind: "method-call",
+        receiver: thisProp("qty"),
+        member: "abs",
+        args: [],
+        receiverType: INT,
+        isCollectionOp: false,
+      }),
+    ).toBe("Math.Abs(this.Qty)");
+    expect(
+      renderCsExpr({
+        kind: "method-call",
+        receiver: thisProp("amount"),
+        member: "min",
+        args: [refParam("q")],
+        receiverType: MONEY,
+        isCollectionOp: false,
+      }),
+    ).toBe("Math.Min(this.Amount, q)");
+    expect(
+      renderCsExpr({
+        kind: "method-call",
+        receiver: thisProp("rate"),
+        member: "max",
+        args: [litDecimal("1.5")],
+        receiverType: DECIMAL,
+        isCollectionOp: false,
+      }),
+    ).toBe("Math.Max(this.Rate, 1.5m)");
+  });
+
+  it("renders `round` in-memory forcing MidpointRounding.AwayFromZero (both arities)", () => {
+    expect(
+      renderCsExpr({
+        kind: "method-call",
+        receiver: thisProp("amount"),
+        member: "round",
+        args: [litInt("2")],
+        receiverType: MONEY,
+        isCollectionOp: false,
+      }),
+    ).toBe("Math.Round(this.Amount, 2, MidpointRounding.AwayFromZero)");
+    expect(
+      renderCsExpr({
+        kind: "method-call",
+        receiver: thisProp("rate"),
+        member: "round",
+        args: [],
+        receiverType: DECIMAL,
+        isCollectionOp: false,
+      }),
+    ).toBe("Math.Round(this.Rate, MidpointRounding.AwayFromZero)");
+  });
+
+  it("renders `round` in EF-query position WITHOUT MidpointRounding (untranslatable; Postgres round() is half-away-from-zero)", () => {
+    const ctx = { thisName: "x", efQuery: true };
+    expect(
+      renderCsExpr(
+        {
+          kind: "method-call",
+          receiver: thisProp("amount"),
+          member: "round",
+          args: [litInt("2")],
+          receiverType: MONEY,
+          isCollectionOp: false,
+        },
+        ctx,
+      ),
+    ).toBe("Math.Round(x.Amount, 2)");
+    expect(
+      renderCsExpr(
+        {
+          kind: "method-call",
+          receiver: thisProp("amount"),
+          member: "round",
+          args: [],
+          receiverType: MONEY,
+          isCollectionOp: false,
+        },
+        ctx,
+      ),
+    ).toBe("Math.Round(x.Amount, 0)");
+  });
+
+  it("renders `floor`/`ceil` keeping the receiver type (decimal Math.Floor/Ceiling overloads)", () => {
+    expect(
+      renderCsExpr({
+        kind: "method-call",
+        receiver: thisProp("amount"),
+        member: "floor",
+        args: [],
+        receiverType: MONEY,
+        isCollectionOp: false,
+      }),
+    ).toBe("Math.Floor(this.Amount)");
+    expect(
+      renderCsExpr({
+        kind: "method-call",
+        receiver: thisProp("rate"),
+        member: "ceil",
+        args: [],
+        receiverType: DECIMAL,
+        isCollectionOp: false,
+      }),
+    ).toBe("Math.Ceiling(this.Rate)");
   });
 
   it("renders 2-arg `string.substring(start, len)` with clamping (JS-slice semantics)", () => {

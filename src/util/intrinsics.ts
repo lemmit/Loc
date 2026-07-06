@@ -76,6 +76,26 @@ export interface IntrinsicSignature {
 //     string, never a pattern (use `matches` for regex).
 //   - `split(sep)` — literal separator; keeps empty segments (including a
 //     trailing one), like JS/Python/Elixir defaults.
+//   - numeric `abs` — absolute value; keeps the receiver type.  SQL `abs()`.
+//     (The `money` primitive is a bare precise-decimal scalar — Decimal /
+//     BigDecimal / C# decimal per backend — with no currency component, so
+//     numeric intrinsics on it are plain scalar transforms.  `decimal` is
+//     binary floating point on the TS and Python backends; money is the
+//     precise type there.)
+//   - `round(places?)` — HALF-AWAY-FROM-ZERO ("commercial" rounding, the
+//     money-safe mode), NOT banker's half-even; backends whose native
+//     default is half-even (.NET `Math.Round`, Python decimal) must force
+//     the mode.  `places` defaults to 0; the result keeps the receiver
+//     type.  SQL `round(numeric, n)` on Postgres is already
+//     half-away-from-zero.  On float-backed `decimal` (TS/Python) the mode
+//     is honoured at float precision (best-effort, like all float math).
+//   - `floor` / `ceil` — toward −∞ / +∞ to a whole number; the result KEEPS
+//     the receiver type (`floor` on decimal/money is a whole-valued
+//     decimal/money, not an int).  SQL `floor()` / `ceil()`.
+//   - `min(other)` / `max(other)` — two-value comparison returning the
+//     receiver type.  SQL `LEAST()` / `GREATEST()` (two-value, not the
+//     aggregate min/max).  A column-typed `other` is allowed in queryable
+//     position (`LEAST(col_a, col_b)` is legitimate SQL).
 export const INTRINSIC_SIGNATURES: ReadonlyArray<IntrinsicSignature> = [
   // ---- string ------------------------------------------------------------
   {
@@ -150,6 +170,62 @@ export const INTRINSIC_SIGNATURES: ReadonlyArray<IntrinsicSignature> = [
     queryable: false,
     signature: "(sep: string): string[]",
   },
+  // ---- numerics (A3 math batch) -------------------------------------------
+  // abs / min / max on all four numeric receivers; round / floor / ceil only
+  // where they change anything (decimal, money) — on int/long they would be
+  // identities, and an identity row would just be noise in completion.
+  ...(["int", "long", "decimal", "money"] as const).flatMap((receiver): IntrinsicSignature[] => [
+    {
+      receiver,
+      name: "abs",
+      params: [],
+      returns: "receiver",
+      queryable: true,
+      signature: `(): ${receiver}`,
+    },
+    {
+      receiver,
+      name: "min",
+      params: [receiver],
+      returns: "receiver",
+      queryable: true,
+      signature: `(other: ${receiver}): ${receiver}`,
+    },
+    {
+      receiver,
+      name: "max",
+      params: [receiver],
+      returns: "receiver",
+      queryable: true,
+      signature: `(other: ${receiver}): ${receiver}`,
+    },
+  ]),
+  ...(["decimal", "money"] as const).flatMap((receiver): IntrinsicSignature[] => [
+    {
+      receiver,
+      name: "round",
+      params: ["int?"],
+      returns: "receiver",
+      queryable: true,
+      signature: `(places?: int): ${receiver}`,
+    },
+    {
+      receiver,
+      name: "floor",
+      params: [],
+      returns: "receiver",
+      queryable: true,
+      signature: `(): ${receiver}`,
+    },
+    {
+      receiver,
+      name: "ceil",
+      params: [],
+      returns: "receiver",
+      queryable: true,
+      signature: `(): ${receiver}`,
+    },
+  ]),
 ];
 
 /** Number of REQUIRED parameters (the prefix before any `?`-marked ones). */

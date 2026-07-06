@@ -266,12 +266,14 @@ context X {
   });
 
   it("`a.b().c` produces one MemberSuffix(call=true) and one MemberSuffix(no call)", async () => {
+    // Uses a real string intrinsic + `.length` — a CALL on a primitive
+    // receiver must resolve in the intrinsic catalogue since the strict
+    // unknown-intrinsic gate (loom.intrinsic-unknown) landed.
     const src = `
 context X {
   aggregate Foo {
-    a: int
-    function bar(): int = 1
-    derived label: int = a.bar().bar
+    a: string
+    derived label: int = a.trim().length
   }
   repository Foos for Foo { }
 }`;
@@ -292,9 +294,8 @@ context X {
     const src = `
 context X {
   aggregate Foo {
-    a: int
-    function bar(x: int): int = x
-    derived label: int = a.bar(1).bar
+    a: string
+    derived label: int = a.substring(1).length
   }
   repository Foos for Foo { }
 }`;

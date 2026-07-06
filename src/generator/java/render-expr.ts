@@ -462,6 +462,34 @@ export const JAVA_INTRINSIC_RENDERERS: Record<string, (recv: string, args: strin
   // collection op renders the List API (.size()/.stream()/.contains()).
   "string.split": (recv, args) =>
     `java.util.Arrays.asList(${recv}.split(java.util.regex.Pattern.quote(${args[0]}), -1))`,
+  // ---- numerics (A3 math batch) --------------------------------------------
+  // int/long are Java primitives (java.lang.Math); decimal/money are
+  // BigDecimal (method API — arithmetic receivers already render as method
+  // chains, so appending `.abs()` etc. never hits a precedence issue).
+  // RoundingMode.HALF_UP is Java's HALF-AWAY-FROM-ZERO — exactly the
+  // catalogue's commercial-rounding contract; floor/ceil keep the receiver
+  // type (whole-valued BigDecimal via setScale, NOT an int).  Fully-qualified
+  // RoundingMode avoids import wiring (same trick as string.split above).
+  "int.abs": (recv) => `Math.abs(${recv})`,
+  "long.abs": (recv) => `Math.abs(${recv})`,
+  "decimal.abs": (recv) => `${recv}.abs()`,
+  "money.abs": (recv) => `${recv}.abs()`,
+  "int.min": (recv, args) => `Math.min(${recv}, ${args[0]})`,
+  "int.max": (recv, args) => `Math.max(${recv}, ${args[0]})`,
+  "long.min": (recv, args) => `Math.min(${recv}, ${args[0]})`,
+  "long.max": (recv, args) => `Math.max(${recv}, ${args[0]})`,
+  "decimal.min": (recv, args) => `${recv}.min(${args[0]})`,
+  "decimal.max": (recv, args) => `${recv}.max(${args[0]})`,
+  "money.min": (recv, args) => `${recv}.min(${args[0]})`,
+  "money.max": (recv, args) => `${recv}.max(${args[0]})`,
+  "decimal.round": (recv, args) =>
+    `${recv}.setScale(${args[0] ?? "0"}, java.math.RoundingMode.HALF_UP)`,
+  "money.round": (recv, args) =>
+    `${recv}.setScale(${args[0] ?? "0"}, java.math.RoundingMode.HALF_UP)`,
+  "decimal.floor": (recv) => `${recv}.setScale(0, java.math.RoundingMode.FLOOR)`,
+  "money.floor": (recv) => `${recv}.setScale(0, java.math.RoundingMode.FLOOR)`,
+  "decimal.ceil": (recv) => `${recv}.setScale(0, java.math.RoundingMode.CEILING)`,
+  "money.ceil": (recv) => `${recv}.setScale(0, java.math.RoundingMode.CEILING)`,
 };
 
 function renderMethodCall(

@@ -1,0 +1,63 @@
+// A3 math-intrinsic batch (stdlib) — compile gate for the .NET backend.
+// Exercises ALL 18 numeric catalogue rows ({int,long,decimal,money} ×
+// abs/min/max + {decimal,money} × round/floor/ceil) in derived properties
+// and an operation body (in-memory rendering), plus queryable ops in `find
+// ... where` positions (the EF LINQ path, incl. the round query override
+// that drops MidpointRounding for translatability).
+context Billing {
+
+  aggregate Invoice ids guid {
+    amount: money
+    budget: money
+    rate: decimal
+    factor: decimal
+    qty: int
+    cap: int
+    big: long
+    bigCap: long
+
+    // abs — all four numeric receivers
+    derived absAmount: money = amount.abs()
+    derived absRate: decimal = rate.abs()
+    derived absQty: int = qty.abs()
+    derived absBig: long = big.abs()
+
+    // min/max — all four numeric receivers (two-value LEAST/GREATEST)
+    derived minAmount: money = amount.min(budget)
+    derived maxAmount: money = amount.max(budget)
+    derived minRate: decimal = rate.min(factor)
+    derived maxRate: decimal = rate.max(factor)
+    derived minQty: int = qty.min(cap)
+    derived maxQty: int = qty.max(cap)
+    derived minBig: long = big.min(bigCap)
+    derived maxBig: long = big.max(bigCap)
+
+    // round (both arities) / floor / ceil — decimal + money
+    derived roundedAmount: money = amount.round(2)
+    derived wholeAmount: money = amount.round()
+    derived roundedRate: decimal = rate.round(2)
+    derived wholeRate: decimal = rate.round()
+    derived flooredAmount: money = amount.floor()
+    derived ceiledAmount: money = amount.ceil()
+    derived flooredRate: decimal = rate.floor()
+    derived ceiledRate: decimal = rate.ceil()
+
+    invariant amount.round(2).abs() >= 0
+
+    operation reprice(delta: money) {
+      amount := amount.max(delta).round(2)
+      budget := budget.min(delta).floor()
+    }
+  }
+
+  repository Invoices for Invoice {
+    find pricierThan(q: money): Invoice[] where this.amount.round(2) > q
+    find wholeAbove(q: money): Invoice[] where this.amount.round() > q
+    find byAbsQty(n: int): Invoice[] where this.qty.abs() > n
+    find byAbsBig(l: long): Invoice[] where this.big.abs() > l
+    find cappedAt(q: money): Invoice[] where this.amount.min(q) == q && this.amount.max(q) > q
+    find byRateBand(r: decimal): Invoice[] where this.rate.floor() <= r && this.rate.ceil() >= r
+    find byQtyBand(n: int): Invoice[] where this.qty.min(n) == n && this.qty.max(n) == n
+    find byAbsAmount(q: money): Invoice[] where this.amount.abs() > q
+  }
+}

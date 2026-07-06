@@ -44,6 +44,30 @@ export const DRIZZLE_INTRINSIC_SQL: Record<string, (recv: string, args: string[]
   "string.trim": (recv) => `sql\`trim(\${${recv}})\``,
   "string.toUpper": (recv) => `sql\`upper(\${${recv}})\``,
   "string.toLower": (recv) => `sql\`lower(\${${recv}})\``,
+  // Numerics (A3) — int/long map to integer/bigint columns, decimal/money
+  // both to `numeric`, so the same Postgres function applies per op.
+  // `round(numeric, n)` is half-away-from-zero on Postgres, matching the
+  // catalogue contract; LEAST/GREATEST are the two-value forms.
+  "int.abs": (recv) => `sql\`abs(\${${recv}})\``,
+  "long.abs": (recv) => `sql\`abs(\${${recv}})\``,
+  "decimal.abs": (recv) => `sql\`abs(\${${recv}})\``,
+  "money.abs": (recv) => `sql\`abs(\${${recv}})\``,
+  "int.min": (recv, args) => `sql\`least(\${${recv}}, \${${args[0]}})\``,
+  "long.min": (recv, args) => `sql\`least(\${${recv}}, \${${args[0]}})\``,
+  "decimal.min": (recv, args) => `sql\`least(\${${recv}}, \${${args[0]}})\``,
+  "money.min": (recv, args) => `sql\`least(\${${recv}}, \${${args[0]}})\``,
+  "int.max": (recv, args) => `sql\`greatest(\${${recv}}, \${${args[0]}})\``,
+  "long.max": (recv, args) => `sql\`greatest(\${${recv}}, \${${args[0]}})\``,
+  "decimal.max": (recv, args) => `sql\`greatest(\${${recv}}, \${${args[0]}})\``,
+  "money.max": (recv, args) => `sql\`greatest(\${${recv}}, \${${args[0]}})\``,
+  "decimal.round": (recv, args) =>
+    args.length > 0 ? `sql\`round(\${${recv}}, \${${args[0]}})\`` : `sql\`round(\${${recv}})\``,
+  "money.round": (recv, args) =>
+    args.length > 0 ? `sql\`round(\${${recv}}, \${${args[0]}})\`` : `sql\`round(\${${recv}})\``,
+  "decimal.floor": (recv) => `sql\`floor(\${${recv}})\``,
+  "money.floor": (recv) => `sql\`floor(\${${recv}})\``,
+  "decimal.ceil": (recv) => `sql\`ceil(\${${recv}})\``,
+  "money.ceil": (recv) => `sql\`ceil(\${${recv}})\``,
 };
 
 // IR expression → Drizzle expression
@@ -205,7 +229,10 @@ export function lowerToDrizzle(
       const sqlSnippet = DRIZZLE_INTRINSIC_SQL[intrinsicKey(e.receiverType.name, e.member)];
       if (sig?.queryable && sqlSnippet) {
         const col = renderColumnRef(e.receiver);
-        const args = e.args.map((a) => renderValue(a));
+        // An intrinsic ARG may itself be a column (`this.a.min(this.b)` →
+        // `least(a, b)`) — values bind as params, columns interpolate, so
+        // both render fine inside the sql tag.
+        const args = e.args.map((a) => renderValue(a) ?? renderColumnRef(a));
         if (col === null || args.some((a) => a === null)) return null;
         ops.add("sql");
         return sqlSnippet(col, args as string[]);
@@ -285,15 +312,29 @@ export function lowerToDrizzle(
     }
     // Queryable scalar intrinsic over a VALUE (a param/let receiver —
     // `q.trim()`): the value side of a Drizzle comparison is plain JS,
-    // so render through the TS in-memory snippet table.
+    // so render through the TS in-memory snippet table.  If an ARG is
+    // itself a column (`q.min(this.cap)`), plain JS can't express it —
+    // fall over to the SQL snippet instead (the param receiver binds as
+    // a parameter inside the sql tag, the column interpolates).
     if (e.kind === "method-call" && e.receiverType.kind === "primitive") {
       const sig = intrinsicFor(e.receiverType.name, e.member);
-      const tsSnippet = TS_INTRINSIC_RENDERERS[intrinsicKey(e.receiverType.name, e.member)];
+      const key = intrinsicKey(e.receiverType.name, e.member);
+      const tsSnippet = TS_INTRINSIC_RENDERERS[key];
+      const sqlSnippet = DRIZZLE_INTRINSIC_SQL[key];
       if (sig?.queryable && tsSnippet) {
         const recv = renderValue(e.receiver);
-        const args = e.args.map((a) => renderValue(a));
-        if (recv === null || args.some((a) => a === null)) return null;
-        return tsSnippet(recv, args as string[]);
+        if (recv === null) return null;
+        const plainArgs = e.args.map((a) => renderValue(a));
+        if (plainArgs.every((a) => a !== null)) {
+          return tsSnippet(recv, plainArgs as string[]);
+        }
+        if (sqlSnippet) {
+          const mixedArgs = e.args.map((a) => renderValue(a) ?? renderColumnRef(a));
+          if (mixedArgs.some((a) => a === null)) return null;
+          ops.add("sql");
+          return sqlSnippet(recv, mixedArgs as string[]);
+        }
+        return null;
       }
     }
     void ctx;
