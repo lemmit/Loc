@@ -23,6 +23,7 @@ import {
   resolveContextSchema,
   resolveDataSourceConfig,
 } from "../../ir/util/resolve-datasource.js";
+import { hierarchyRegistry } from "../../ir/util/tenant-stance.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import type { Model } from "../../language/generated/ast.js";
 import { apiRoutePrefix } from "../../util/api-base.js";
@@ -551,6 +552,11 @@ function emitProjectFromContexts(
     hasProvenance,
     resourceNugetDeps: resourceEmission.nugetDeps,
     oidc: !!(authRequired && system?.sys.auth),
+    // Tenant hierarchy (multi-tenancy P2.2): the registry opts into
+    // `tenantRegistry` (a `dataKey` column), so Program.cs registers the scoped
+    // `IOrgPathResolver` → `EfOrgPathResolver` the auth middleware calls to
+    // materialize `currentUser.orgPath`.  Undefined (flat tenancy) ⇒ omitted.
+    orgPathResolver: !!(authRequired && system?.sys && hierarchyRegistry(system.sys)),
   });
   emitTestProject(merged, ns, out);
   // Fullstack mode — generate the React project under ClientApp/.
@@ -1161,6 +1167,10 @@ function emitProject(
     /** OIDC turnkey auth (D-AUTH-OIDC): the system declares `auth { oidc }`,
      *  so emit the generated verifier registration + its NuGet refs. */
     oidc?: boolean;
+    /** Tenant hierarchy (multi-tenancy P2.2): register the scoped
+     *  `IOrgPathResolver` → `EfOrgPathResolver` for the per-request
+     *  `currentUser.orgPath` registry `data_key` read. */
+    orgPathResolver?: boolean;
   },
 ): void {
   const hasExtern = ctx.aggregates.some((a) => a.operations.some((o) => o.extern));
@@ -1186,6 +1196,7 @@ function emitProject(
       hasOutbox: !!options?.hasOutbox,
       hasAudit: !!options?.hasAudit,
       oidc: !!options?.oidc,
+      orgPathResolver: !!options?.orgPathResolver,
       hasProvenance: !!options?.hasProvenance,
     }),
   );

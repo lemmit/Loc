@@ -13,6 +13,15 @@ import type { AggregateIR, ExprIR, IdValueType, SystemIR, TypeIR } from "../type
  *  (`with tenantOwned` — see `src/macros/prelude.ts`). */
 export const TENANT_OWNED_CAPABILITY = "tenantOwned";
 
+/** The prelude capability that opts the tenant registry into hierarchy
+ *  (`implements tenantRegistry` — multi-tenancy Phase 2, plan P2.2).  It
+ *  PROVIDES the registry tree fields `parent: Self id?` (immutable self-FK,
+ *  null = root) and the managed `dataKey` materialized path.  Only the
+ *  registry (the `of <Registry>` target) may carry it, and its presence is
+ *  what turns `currentUser.orgPath` from the claim-copy fallback into a real
+ *  registry `dataKey` lookup.  See `src/macros/prelude.ts`. */
+export const TENANT_REGISTRY_CAPABILITY = "tenantRegistry";
+
 /** `contextFilterOrigins` marker for the DERIVED registry self-scope filter
  *  (multi-tenancy Phase 1b, capstone decision 4): under `tenancy by
  *  user.<claim> of <Registry>`, enrichment appends `this.id ==
@@ -102,6 +111,35 @@ export type TenantStance = "tenantOwned" | "crossTenant" | "registry" | "unscope
  *  `capabilities` identity record; never re-derived from member shapes). */
 export function hasTenantOwned(agg: Pick<AggregateIR, "capabilities">): boolean {
   return (agg.capabilities ?? []).includes(TENANT_OWNED_CAPABILITY);
+}
+
+/** True when the aggregate carries the `tenantRegistry` prelude capability —
+ *  i.e. it opted into hierarchy and therefore has a `dataKey` column
+ *  (multi-tenancy Phase 2, plan P2.2).  Drives both the structural checks
+ *  (exactly one, on the `of` target) and the `currentUser.orgPath` accessor
+ *  swap (registry `dataKey` read only when hierarchy is enabled). */
+export function hasTenantRegistry(agg: Pick<AggregateIR, "capabilities">): boolean {
+  return (agg.capabilities ?? []).includes(TENANT_REGISTRY_CAPABILITY);
+}
+
+/** The system's tenant-registry aggregate when it has opted into hierarchy —
+ *  the `of <Registry>` target that also carries `implements tenantRegistry`
+ *  (so it has a `dataKey` column).  `undefined` for a flat system (no
+ *  `tenancy by`, or a registry without the capability).  The single signal the
+ *  per-backend `currentUser.orgPath` emitters read to decide between the P2.1
+ *  claim-copy fallback and the real registry `dataKey` lookup. */
+export function hierarchyRegistry(
+  sys: Pick<SystemIR, "tenancy" | "subdomains">,
+): AggregateIR | undefined {
+  if (!sys.tenancy) return undefined;
+  for (const mod of sys.subdomains) {
+    for (const ctx of mod.contexts) {
+      for (const agg of ctx.aggregates) {
+        if (agg.name === sys.tenancy.registryName && hasTenantRegistry(agg)) return agg;
+      }
+    }
+  }
+  return undefined;
 }
 
 /** Classify an aggregate's tenancy stance under its system.

@@ -1,0 +1,65 @@
+// Multi-tenancy Phase 2 (plan P2.2) — the HIERARCHY registry read on the
+// vanilla (plain Ecto) foundation.  The registry opts into hierarchy with
+// `implements tenantRegistry`, which PROVIDES `parent: Self id?` (immutable,
+// null = root) and the managed `dataKey` materialized-path column.  Under
+// `tenancy by user.tenantId of Organization`, `currentUser.orgPath` becomes a
+// per-request read of the caller org's `data_key` from the registry table
+// (through its Ecto schema module, so the `@schema_prefix` + binary_id claim
+// cast apply), memoized on the principal by the auth plug — fail-safe to the
+// raw claim (the root-segment path) when the row / dataKey is absent or the
+// claim is malformed.
+//
+// This is the decisive check that the P2.2 `put_org_path/1` registry read
+// compiles under `mix compile --warnings-as-errors` (the elixir-vanilla-build
+// gate): the `import Ecto.Query`, the `Repo.one(from o in <Registry> …)` query,
+// and the `resolve_org_path/1` fail-safe clauses.
+system TenancyHierarchyShop {
+  user {
+    id: string
+    tenantId: string
+  }
+
+  auth {
+    provider: keycloak
+    oidc {
+      issuer: env("OIDC_ISSUER")
+      clientId: env("OIDC_CLIENT_ID")
+    }
+    claims: { tenantId: "tenant_id" }
+  }
+
+  tenancy by user.tenantId of Organization
+
+  subdomain Core {
+    context Accounts {
+      // The registry opts into hierarchy — `tenantRegistry` provides the
+      // immutable `parent` self-FK + the managed `dataKey` path column.  The
+      // self-scope filter is still derived from the `tenancy by` line.
+      aggregate Organization ids guid with tenantRegistry {
+        name: string
+      }
+      repository Organizations for Organization { }
+
+      aggregate Account ids guid with tenantOwned {
+        balance: int
+        // Reads `currentUser.orgPath` — the caller org's materialized path,
+        // resolved from the registry `data_key` by the auth plug.
+        filter this.balance >= 0
+      }
+      repository Accounts for Account { }
+    }
+  }
+
+  storage primary { type: postgres }
+  resource accountsState { for: Accounts, kind: state, use: primary }
+
+  api CoreApi from Core
+  deployable api {
+    platform: elixir { foundation: vanilla }
+    contexts: [Accounts]
+    serves: CoreApi
+    dataSources: [accountsState]
+    port: 4000
+    auth: required
+  }
+}

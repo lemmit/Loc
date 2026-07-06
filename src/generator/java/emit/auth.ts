@@ -1,7 +1,28 @@
-import type { AuthIR, AuthValueIR, FieldIR, SystemIR, TypeIR } from "../../../ir/types/loom-ir.js";
+import type {
+  AuthIR,
+  AuthValueIR,
+  FieldIR,
+  IdValueType,
+  SystemIR,
+  TypeIR,
+} from "../../../ir/types/loom-ir.js";
 import { AUTH_BASE_PATH } from "../../../util/api-base.js";
 import { lines } from "../../../util/code-builder.js";
 import { renderJavaType } from "../render-expr.js";
+
+/** The tenant registry (`implements tenantRegistry`) facts the P2.2
+ *  `currentUser.orgPath` resolver needs.  Present only under hierarchy — its
+ *  presence flips the `orgPath()` accessor from P2.1's claim-copy to a real,
+ *  per-request memoized registry `data_key` read. */
+export interface OrgPathRegistry {
+  /** `plural(snake(registry.name))` — the registry's Flyway state table
+   *  (already schema-qualified when the datasource pins a schema). */
+  table: string;
+  /** The registry id's value type — drives the claim→id SQL bind conversion
+   *  (a `string` claim against a `guid` id parses to UUID at the lookup site,
+   *  fail-closed like the JPQL principal accessor). */
+  idValueType: IdValueType;
+}
 
 // ---------------------------------------------------------------------------
 // Auth surface — emitted only when the deployable opts in via
@@ -23,6 +44,11 @@ export function renderAuthFiles(
   /** Fullstack mode: only guard routes under this prefix ("/api"), so
    *  the SPA bundle + client-side routes stay public. */
   guardPrefix?: string,
+  /** Hierarchy (multi-tenancy P2.2): when the tenant registry opts into
+   *  `tenantRegistry` (a `data_key` column exists) AND its table is reachable
+   *  from this deployable, `orgPath()` reads it per request.  `undefined` for
+   *  flat tenancy — the P2.1 claim-copy accessor stands. */
+  orgPathRegistry?: OrgPathRegistry,
 ): Map<string, string> {
   const out = new Map<string, string>();
   const fields = sys.user?.fields ?? [];
@@ -49,15 +75,30 @@ export function renderAuthFiles(
   // resolves it to the tenancy claim value (the root path); P2.2 swaps the
   // body for a memoized registry `dataKey` lookup.
   const orgPathClaim = sys.tenancy?.claimField;
+  const claimAsString = orgPathClaim
+    ? `${orgPathClaim}() == null ? "" : String.valueOf(${orgPathClaim}())`
+    : `""`;
   const orgPathAccessor = orgPathClaim
-    ? [
-        ``,
-        `    /** The caller's tenant materialized path (\`currentUser.orgPath\`) —`,
-        `     *  derived per-request from the tenancy claim (Phase 2, P2.1). */`,
-        `    public String orgPath() {`,
-        `        return ${orgPathClaim}() == null ? "" : String.valueOf(${orgPathClaim}());`,
-        `    }`,
-      ]
+    ? orgPathRegistry
+      ? [
+          ``,
+          `    /** The caller's tenant materialized path (\`currentUser.orgPath\`) —`,
+          `     *  the tenant registry's \`data_key\`, resolved once per request and`,
+          `     *  memoized (multi-tenancy Phase 2, P2.2).  Falls back to the claim`,
+          `     *  (the root-segment path) when the row / dataKey is absent or the`,
+          `     *  lookup errors — fail-safe, never null / never throws. */`,
+          `    public String orgPath() {`,
+          `        return OrgPathResolver.resolve(${claimAsString});`,
+          `    }`,
+        ]
+      : [
+          ``,
+          `    /** The caller's tenant materialized path (\`currentUser.orgPath\`) —`,
+          `     *  derived per-request from the tenancy claim (Phase 2, P2.1). */`,
+          `    public String orgPath() {`,
+          `        return ${claimAsString};`,
+          `    }`,
+        ]
     : [];
   out.set(
     "User.java",
@@ -281,6 +322,9 @@ export function renderAuthFiles(
       `            chain.doFilter(request, response);`,
       `        } finally {`,
       `            accessor.clear();`,
+      // Hierarchy (P2.2): drop the per-request orgPath memo so a pooled thread
+      // never serves a stale tenant path to the next request.
+      orgPathRegistry ? `            OrgPathResolver.clearRequestCache();` : null,
       `        }`,
       `    }`,
       `}`,
@@ -300,7 +344,153 @@ export function renderAuthFiles(
     out.set("OidcUserVerifier.java", renderOidcVerifier(fields, oidc, pkg));
   }
 
+  // Hierarchy (multi-tenancy P2.2): the registry-backed `orgPath` resolver.
+  // The `User` record can't inject beans, so `orgPath()` delegates to a static
+  // holder (`OrgPathResolver`) that memoizes the lookup per request; a boot
+  // @Component (`OrgPathResolverConfig`) registers a JdbcTemplate closure
+  // reading `SELECT data_key FROM <registry> WHERE id = <claim>`.
+  if (orgPathClaim && orgPathRegistry) {
+    out.set("OrgPathResolver.java", renderOrgPathResolver(pkg));
+    out.set("OrgPathResolverConfig.java", renderOrgPathResolverConfig(pkg, orgPathRegistry));
+  }
+
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// currentUser.orgPath under hierarchy (multi-tenancy P2.2) — the registry
+// `data_key` read.  Two files:
+//
+//   OrgPathResolver       — a static holder the `User.orgPath()` accessor
+//                           delegates to.  Owns the per-request memo (a
+//                           ThreadLocal cache — servlet requests are thread-
+//                           bound) and the fail-safe fallback to the claim.
+//   OrgPathResolverConfig — a boot @Component that registers a JdbcTemplate
+//                           closure reading the registry's `data_key` column.
+//
+// The record stays the SpEL use-site (`@currentUserAccessor.user().orgPath()`
+// / `.orgPath()` in the JPQL/criteria filters) — resolution moves behind the
+// method, not off it, so render-jpql / render-criteria are untouched.
+// ---------------------------------------------------------------------------
+
+function renderOrgPathResolver(pkg: string): string {
+  return lines(
+    `package ${pkg};`,
+    ``,
+    `import java.util.HashMap;`,
+    `import java.util.Map;`,
+    ``,
+    `/** Resolves \`currentUser.orgPath\` — the caller org's materialized`,
+    ` *  \`data_key\` from the tenant registry table, memoized per request`,
+    ` *  (multi-tenancy Phase 2, P2.2).  A boot closure (OrgPathResolverConfig)`,
+    ` *  supplies the db-backed lookup; a missing row / null dataKey / any error`,
+    ` *  falls back to the claim (the root-segment path) — fail-safe, never`,
+    ` *  null / never throws.  Unregistered (flat tenancy), \`resolve\` is the`,
+    ` *  identity on the claim. */`,
+    `public final class OrgPathResolver {`,
+    `    private OrgPathResolver() {}`,
+    ``,
+    `    /** Registry lookup: the tenancy claim -> the caller org's materialized`,
+    `     *  \`data_key\` (null when the row is absent or its dataKey is null). */`,
+    `    public interface Lookup {`,
+    `        String dataKey(String claim);`,
+    `    }`,
+    ``,
+    `    private static volatile Lookup lookup;`,
+    `    // Per-request memo: servlet requests are thread-bound, so a ThreadLocal`,
+    `    // cache computes the lookup once per request; UserFilter clears it.`,
+    `    private static final ThreadLocal<Map<String, String>> CACHE =`,
+    `        ThreadLocal.withInitial(HashMap::new);`,
+    ``,
+    `    /** Registered once at boot (OrgPathResolverConfig) with a db-backed closure. */`,
+    `    public static void register(Lookup fn) {`,
+    `        lookup = fn;`,
+    `    }`,
+    ``,
+    `    /** The caller's materialized path for \`claim\`, computed once per request`,
+    `     *  and cached; falls back to the claim when unregistered / no row / error. */`,
+    `    public static String resolve(String claim) {`,
+    `        if (claim == null || claim.isEmpty()) {`,
+    `            return claim == null ? "" : claim;`,
+    `        }`,
+    `        Lookup fn = lookup;`,
+    `        if (fn == null) {`,
+    `            return claim;`,
+    `        }`,
+    `        Map<String, String> cache = CACHE.get();`,
+    `        String cached = cache.get(claim);`,
+    `        if (cached != null) {`,
+    `            return cached;`,
+    `        }`,
+    `        String resolved;`,
+    `        try {`,
+    `            String dataKey = fn.dataKey(claim);`,
+    `            resolved = dataKey == null ? claim : dataKey;`,
+    `        } catch (RuntimeException e) {`,
+    `            // Bad claim (e.g. non-UUID against a guid id) / db error -> claim.`,
+    `            resolved = claim;`,
+    `        }`,
+    `        cache.put(claim, resolved);`,
+    `        return resolved;`,
+    `    }`,
+    ``,
+    `    /** Drop the per-request memo — called by UserFilter at request end. */`,
+    `    public static void clearRequestCache() {`,
+    `        CACHE.remove();`,
+    `    }`,
+    `}`,
+    ``,
+  );
+}
+
+function renderOrgPathResolverConfig(pkg: string, registry: OrgPathRegistry): string {
+  // The tenancy claim binds as the registry id's SQL type at the lookup site:
+  // a `string` claim against a `guid` id parses to UUID (throwing on a
+  // non-UUID claim -> caught by OrgPathResolver -> claim fallback); other id
+  // types bind their parsed value; a same-typed string claim binds directly.
+  const bind =
+    registry.idValueType === "guid"
+      ? "java.util.UUID.fromString(claim)"
+      : registry.idValueType === "int"
+        ? "Integer.parseInt(claim)"
+        : registry.idValueType === "long"
+          ? "Long.parseLong(claim)"
+          : "claim";
+  const sql = `SELECT data_key FROM ${registry.table} WHERE id = ?`;
+  return lines(
+    `package ${pkg};`,
+    ``,
+    `import java.util.List;`,
+    ``,
+    `import org.springframework.jdbc.core.JdbcTemplate;`,
+    `import org.springframework.stereotype.Component;`,
+    ``,
+    `import jakarta.annotation.PostConstruct;`,
+    ``,
+    `/** Wires the tenant-registry \`orgPath\` lookup at boot (multi-tenancy`,
+    ` *  Phase 2, P2.2): \`currentUser.orgPath\` = the caller org's materialized`,
+    ` *  \`data_key\`, read from the registry table keyed by the tenancy claim.`,
+    ` *  A missing row / null dataKey / bad claim falls back to the claim`,
+    ` *  (fail-safe — handled in OrgPathResolver). */`,
+    `@Component`,
+    `public class OrgPathResolverConfig {`,
+    `    private final JdbcTemplate jdbc;`,
+    ``,
+    `    public OrgPathResolverConfig(JdbcTemplate jdbc) {`,
+    `        this.jdbc = jdbc;`,
+    `    }`,
+    ``,
+    `    @PostConstruct`,
+    `    void register() {`,
+    `        OrgPathResolver.register(claim -> {`,
+    `            List<String> rows = jdbc.queryForList(`,
+    `                "${sql}", String.class, ${bind});`,
+    `            return rows.isEmpty() ? null : rows.get(0);`,
+    `        });`,
+    `    }`,
+    `}`,
+    ``,
+  );
 }
 
 // ---------------------------------------------------------------------------

@@ -98,6 +98,13 @@ const CASES: Array<[fixture: string, project: string, flags?: string]> = [
   // ContextVar accessor) into every root read; the generated SQLAlchemy must
   // stay ruff- + mypy --strict-clean.
   ["test/e2e/fixtures/python-build/tenancy-filter.ddd", "api"],
+  // Multi-tenancy P2.2 hierarchy `currentUser.orgPath`: the registry opts into
+  // `tenantRegistry` (a `data_key` column), so the auth middleware resolves
+  // `org_path` per request from the registry table (`_resolve_org_path` +
+  // `session_factory` lookup, fail-safe to the claim) and stores it on the
+  // frozen User via `object.__setattr__`; the generated middleware + stored
+  // `org_path` attribute must stay ruff- + mypy --strict-clean.
+  ["test/e2e/fixtures/python-build/tenancy-hierarchy.ddd", "api"],
   // `--trace` domain instrumentation: precondition_evaluated /
   // value_computed / invariant_evaluated trace lines must stay
   // ruff-/mypy-clean (the domain fixture exercises all three).

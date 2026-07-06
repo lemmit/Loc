@@ -174,16 +174,81 @@ appears in create forms. (It does appear in read DTOs, like `softDeletable`'s
 Cross-tenant reads of another tenant's row return **404** (existence hidden),
 falling out of the filter semantics: the row simply isn't found.
 
+## Hierarchy — the registry tree (`implements tenantRegistry`, Phase 2)
+
+The tenant registry opts into a hierarchy by carrying `implements
+tenantRegistry` — a built-in prelude capability
+(`src/macros/prelude.ts`, next to `tenantOwned`). It **provides** two managed
+tree fields; the author writes neither (unfold the capability to see them):
+
+```ddd
+tenancy by user.tenantId of Organization
+
+aggregate Organization ids guid {
+  name: string
+  implements tenantRegistry
+  // — what `implements tenantRegistry` provides —
+  //   parent: Organization id?   immutable   // self-FK; null = root org
+  //   dataKey: string?           managed     // the materialized path
+}
+```
+
+- **`parent: Self id?`** — an immutable, nullable self-FK (`Self` resolves to
+  the registry aggregate). `immutable` keeps it settable at create (the signup
+  bootstrap passes it) but frozen after — **reparent is out of scope** (immutable
+  paths are what make `deep` a cheap prefix scan). It lands in migrations as a
+  nullable self-referential FK (`parent uuid null references organizations(id)`)
+  plus an `organizations_parent_idx`.
+- **`dataKey: string?`** — the managed materialized path (`data_key text null`,
+  off create/update inputs, present on reads). Its **value** is computed
+  server-side in the author-written `signUp` create factory via the workflow-tier
+  `repo-let` on the parent (`dataKey := parent.dataKey + "." + <segment>`); a
+  capability is a pure mixin, so it carries the field but cannot inject a
+  repo-reading create body. Root orgs get a root-segment path; children extend
+  the parent's.
+
+Structural verification (`src/ir/validate/checks/tenancy-checks.ts`): only under
+a `tenancy by` system (`loom.tenant-registry-without-tenancy`), **exactly one**
+aggregate (`loom.tenancy-registry-duplicate`), and it must be the `of <Registry>`
+target (`loom.tenancy-registry-not-target`). `parent`'s immutability and
+self-reference are structural (the access modifier + `Self`), so neither needs a
+check.
+
+### `currentUser.orgPath` under hierarchy
+
+`orgPath` (the P2.1 principal member) is the caller's materialized path. With no
+`tenantRegistry` (flat tenancy) it is the tenancy claim itself — the
+root-segment path, since there is no `dataKey` column to read. Once the registry
+`implements tenantRegistry`, the principal resolves `orgPath` from the registry's
+`data_key` column, **memoized per request**, keyed by the tenancy claim:
+
+```sql
+select data_key from organizations where id = <currentUser.tenantId>
+```
+
+**Fail-safe:** a missing row, a null `data_key` (pre-tree data), or any lookup
+error falls back to the claim value — never null, never a crash. Wired on **all
+five backends**, each through its own request-scoped principal seam:
+
+| Backend | Registry read | Memoization |
+|---|---|---|
+| node (Hono/Drizzle) | boot registers `registerOrgPathResolver` (a db-backed closure — the auth layer can't reach the injected db); middleware `await`s it | once in middleware, on the request principal |
+| .NET (EF Core) | `IOrgPathResolver`/`EfOrgPathResolver` (`IgnoreQueryFilters().Where(id).Select(DataKey)`), method-injected into `UserMiddleware` | scoped resolver; `user.OrgPath` slot set once per request |
+| Java (Spring/JPA) | `OrgPathResolver` holder + a boot `@Component` registering a `JdbcTemplate` `SELECT data_key … WHERE id = ?` closure | per-request `ThreadLocal` memo, cleared in `UserFilter` |
+| Python (FastAPI/SQLAlchemy) | Starlette middleware queries `text("SELECT data_key … WHERE id = :claim")` via the module-level `session_factory` | written once onto the frozen principal (off `asdict()`/wire) |
+| Elixir (Ecto) | `put_org_path/1` reads via `Repo.one(from o in <Registry>, where: o.id == ^claim, select: o.data_key)` (schema-prefix + binary_id cast) | the plug runs once per request → memoized on the principal map |
+
 ## Scope and roadmap
 
 Phase 1 is flat tenancy (`local` reads — tenant-id equality). The registry
-self-scope + claim-less bootstrap shipped as Phase 1b (above). Deferred:
+self-scope + claim-less bootstrap shipped as Phase 1b (above). The registry tree
+(`implements tenantRegistry` → `parent` + managed `dataKey`) + the `orgPath`
+registry read on all five backends shipped as Phase 2 P2.2 (above). Deferred:
 
 - **The `claim`/`registry` cross-reference upgrade** (capstone decision 5) —
   byte-identical surface, tooling win (navigation/rename); still open.
 - **`tenant_id` index** — blocked on the index surface
   ([`proposals/uniqueness-and-indexes.md`](proposals/uniqueness-and-indexes.md)).
-- **Hierarchy** (`tenantRegistry` capability, `parent`, the managed `dataKey`
-  materialized path, `deep`/`global` access levels) — Phase 2, blocked on
-  auth session-enrichment and [`proposals/authorization.md`](proposals/authorization.md).
-  See the design note's R5.
+- **Stamping `dataKey` on `tenantOwned` aggregates** (P2.3) + the
+  **`deep`/`global` `policy {}` ladder** (P2.4) + the **materialized-path
+  index** (P2.5) — see [`plans/multi-tenancy-phase2.md`](plans/multi-tenancy-phase2.md).

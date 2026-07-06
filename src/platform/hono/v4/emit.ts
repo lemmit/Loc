@@ -78,10 +78,11 @@ import {
   resolveContextSchema,
   resolveDataSourceConfig,
 } from "../../../ir/util/resolve-datasource.js";
+import { hierarchyRegistry } from "../../../ir/util/tenant-stance.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import type { Model } from "../../../language/generated/ast.js";
 import { dedupeByName } from "../../../util/dedupe.js";
-import { lowerFirst } from "../../../util/naming.js";
+import { lowerFirst, plural } from "../../../util/naming.js";
 import {
   byLayerLayoutAdapter,
   type HonoArtifact,
@@ -810,6 +811,16 @@ export function generateTypeScriptForContexts(
       // OIDC turnkey auth: register the generated verifier instead of the
       // dev stub.
       !!oidcAuth,
+      // Hierarchy (multi-tenancy P2.2): the drizzle table var for the tenant
+      // registry when it opts into `tenantRegistry` — boot registers the
+      // `orgPath` resolver (`SELECT data_key … WHERE id = <claim>`) that the
+      // auth middleware calls per request.  `undefined` for flat tenancy.
+      authRequired && system
+        ? (() => {
+            const reg = hierarchyRegistry(system.sys);
+            return reg ? lowerFirst(plural(reg.name)) : undefined;
+          })()
+        : undefined,
     ),
   );
   if (!usingMikro) out.set("drizzle.config.ts", DRIZZLE_CONFIG);
@@ -1027,6 +1038,7 @@ function renderProjectIndexTs(
   outboxRelay = false,
   hasRealtime = false,
   oidc = false,
+  orgPathRegistryTable?: string,
 ): string {
   // Side-effect imports for the resource-client modules (objectStore /
   // queue / api) so their clients instantiate at boot.  Empty for
@@ -1056,6 +1068,17 @@ function renderProjectIndexTs(
     : oidc
       ? `\n// OIDC verifier (D-AUTH-OIDC) — validates the IdP's tokens against its\n// JWKS and maps claims onto the typed User.  Configure the issuer /\n// client via the env vars the \`auth { oidc }\` block referenced.\nregisterOidcVerifier();\nbaseLogger.info({ event: "auth_oidc_verifier_registered" });\n`
       : `\n// Dev-stub verifier — accepts every request as a built-in admin user.\n// Dev-only: the Loom playground (or curl) can override the claims by\n// sending a base64-encoded JSON object in \`x-loom-dev-claims\`; absent the\n// header the built-in identity is used.  REPLACE for production by calling\n// registerUserVerifier(...) with a real JWT-decoding implementation.\nregisterUserVerifier((req) => {\n  const base = ${indentContinuation(renderStubUserLiteral(userShape), "  ")};\n  const injected = req.headers.get("x-loom-dev-claims");\n  if (!injected) return base;\n  try {\n    return { ...base, ...JSON.parse(Buffer.from(injected, "base64").toString("utf8")) };\n  } catch {\n    return base;\n  }\n});\nbaseLogger.warn({ event: "auth_dev_stub_registered" });\n`;
+  // Tenant-registry orgPath resolver (multi-tenancy P2.2) — wired only on the
+  // drizzle path (mikroorm hierarchy falls back to the claim via the
+  // unregistered-resolver path).  The auth middleware calls it per request;
+  // here we bind it to the db with a `SELECT data_key … WHERE id = <claim>`.
+  const wireOrgPath = !!orgPathRegistryTable && !usingMikro;
+  const orgPathImport = wireOrgPath
+    ? `import { eq } from "drizzle-orm";\nimport { registerOrgPathResolver } from "./auth/middleware";\n`
+    : "";
+  const orgPathRegistration = wireOrgPath
+    ? `\n// Register the tenant-registry \`orgPath\` resolver (multi-tenancy P2.2):\n// currentUser.orgPath = the caller org's materialized \`data_key\`, memoized\n// per request in the auth middleware; a missing row / dataKey falls back to\n// the claim (root-segment path) — fail-safe, never null/crash.\nregisterOrgPathResolver(async (claim) => {\n  const rows = await db\n    .select({ dataKey: schema.${orgPathRegistryTable}.dataKey })\n    .from(schema.${orgPathRegistryTable})\n    .where(eq(schema.${orgPathRegistryTable}.id, claim))\n    .limit(1);\n  return rows[0]?.dataKey ?? null;\n});\n`
+    : "";
   // Persistence wiring (D-REALIZATION-AXES `persistence:`) — drizzle (pg pool +
   // boot-time migrate) vs mikroorm (MikroORM.init + schema:update at startup).
   // The drizzle import header is kept byte-identical to the pre-mikroorm shape.
@@ -1075,7 +1098,7 @@ ${
         hasRealtime ? `import { realtimeTee } from "./http/realtime";\n` : ""
       }`
     : ""
-}${migImport}${seedImport}${authStubImport}import { baseLogger } from "./obs/log";`;
+}${migImport}${seedImport}${authStubImport}${orgPathImport}import { baseLogger } from "./obs/log";`;
   const connectionBlock = usingMikro
     ? `// Persistence connection — owned by the mikroorm PersistenceAdapter\n// (MikroORM.init → dev schema bootstrap → EntityManager as \`db\`).\n${mikroConnectionSetup().join("\n")}`
     : `// Persistence connection — owned by the drizzle PersistenceAdapter\n// (DATABASE_URL guard → pg pool → pool-error logging → drizzle db).\n${DRIZZLE_CONNECTION_SETUP.join("\n")}`;
@@ -1089,7 +1112,7 @@ ${connectionBlock}
 
 const port = Number(process.env.PORT ?? 3000);
 baseLogger.info({ event: "server_starting", port, env: process.env.NODE_ENV ?? "development" });
-${effectiveMigCall}${seedCall}${authStubCall}${
+${effectiveMigCall}${seedCall}${authStubCall}${orgPathRegistration}${
   outboxRelay
     ? `// Transactional outbox (dispatch-delivery-semantics.md): durable events
 // (channels with retention: log | work) are recorded in __loom_outbox by

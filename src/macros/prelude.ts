@@ -34,6 +34,7 @@ import {
   nameRef,
   not,
   primType,
+  selfRef,
   thisRef,
 } from "./api/index.js";
 import { nowExpr } from "./api/ui-factories.js";
@@ -114,6 +115,41 @@ function buildTenantOwned(): Capability {
   ] as CapabilityMember[]);
 }
 
+/** `capability tenantRegistry { parent: Self id? (immutable) + dataKey: string?
+ * (managed) }` — the tenant-registry TREE capability of multi-tenancy Phase 2
+ * (docs/plans/multi-tenancy-phase2.md, slice P2.2).  The registry aggregate —
+ * the `of <Registry>` target of `tenancy by user.<claim> of <Registry>` — opts
+ * into hierarchy by carrying `implements tenantRegistry`, which PROVIDES:
+ *
+ *   - `parent: Self id?` — an immutable self-FK to another registry row
+ *     (`Self` resolves to the host aggregate at expansion; null = root org).
+ *     `immutable` keeps it settable at create (the signup bootstrap passes it)
+ *     but frozen after — reparent is out of scope (immutable paths are what
+ *     make `deep` a cheap prefix scan).
+ *   - `dataKey: string?` — the managed materialized path (`root` → `<id>`,
+ *     `child` → `<parent.dataKey>.<id>`).  `managed` keeps it off client
+ *     create/update inputs; the value is computed server-side in the `signUp`
+ *     create factory via a workflow-tier `repo-let` on the parent (the
+ *     mechanism already exists — a capability is a pure mixin and cannot inject
+ *     a repo-reading create body, so the author writes the factory; the
+ *     capability only carries the fields).  Nullable so pre-tree registry rows
+ *     (no path yet) and the non-destructive column ADD stay valid; the derived
+ *     `currentUser.orgPath` accessor falls back to the tenancy claim when a
+ *     row has no `dataKey`.
+ *
+ * The registry is self-keyed (stance `"registry"`, never `tenantOwned`), so it
+ * carries no `tenantId` column and receives no tenant stamp/filter — only the
+ * derived self-scope read filter (enrichments.ts).  `tenantRegistry` adds the
+ * tree fields on top of that, and is verified structurally by the phase-⑦
+ * tenancy checks (exactly one, on the `of` target, only under a `tenancy by`
+ * system). */
+function buildTenantRegistry(): Capability {
+  return capability("tenantRegistry", [
+    field("parent", selfRef({ optional: true }), { access: "immutable" }),
+    field("dataKey", primType("string", { optional: true }), { access: "managed" }),
+  ] as CapabilityMember[]);
+}
+
 /** `capability versioned { version: int token = 1 }` — the opt-in
  * optimistic-concurrency marker (optimistic-concurrency.md).  ONE synthetic
  * field: `version: int` with `token` access (echoed by the client on update as
@@ -142,6 +178,7 @@ export function builtinCapabilities(): Map<string, Capability> {
       ["auditable", buildAuditable()],
       ["softDeletable", buildSoftDeletable()],
       ["tenantOwned", buildTenantOwned()],
+      ["tenantRegistry", buildTenantRegistry()],
       ["versioned", buildVersioned()],
     ]);
   }

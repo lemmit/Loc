@@ -23,6 +23,9 @@ const TENANCY_CODES = new Set([
   "loom.tenancy-conflicting-stance",
   "loom.tenancy-registry-marked",
   "loom.tenant-owned-claim-type",
+  "loom.tenant-registry-without-tenancy",
+  "loom.tenancy-registry-duplicate",
+  "loom.tenancy-registry-not-target",
 ]);
 
 async function tenancyDiags(source: string): Promise<LoomDiagnostic[]> {
@@ -306,5 +309,102 @@ describe("loom.tenant-owned-claim-type (1b-tail)", () => {
       sys("string", `aggregate Invoice ids guid with tenantOwned { number: string }`),
     );
     expect(diags.filter((d) => d.code === "loom.tenant-owned-claim-type")).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// tenantRegistry hierarchy capability (multi-tenancy Phase 2, plan P2.2).
+// The registry opts into the tree (`parent: Self id?` + managed `dataKey`) by
+// carrying `implements tenantRegistry`.  These structural checks verify the
+// facts field-presence can't: only under a `tenancy by` system, exactly one
+// aggregate, and on the `of <Registry>` target.
+// ---------------------------------------------------------------------------
+
+describe("tenantRegistry structural checks", () => {
+  it("accepts the registry (the `of` target) carrying `implements tenantRegistry`", async () => {
+    const diags = await tenancyDiags(`
+      system Billder {
+        user { id: guid  tenantId: string }
+        tenancy by user.tenantId of Organization
+        subdomain Platform {
+          context Accounts {
+            aggregate Organization ids guid {
+              name: string
+              implements tenantRegistry
+            }
+            repository Organizations for Organization { }
+          }
+        }
+      }
+    `);
+    expect(diags).toEqual([]);
+  });
+
+  it("errors when `implements tenantRegistry` has no `tenancy by` line", async () => {
+    const diags = await tenancyDiags(`
+      system Billder {
+        subdomain Platform {
+          context Accounts {
+            aggregate Organization ids guid {
+              name: string
+              implements tenantRegistry
+            }
+            repository Organizations for Organization { }
+          }
+        }
+      }
+    `);
+    expect(diags.map((d) => [d.code, d.source])).toEqual([
+      ["loom.tenant-registry-without-tenancy", "Accounts/Organization"],
+    ]);
+  });
+
+  it("errors when two aggregates implement tenantRegistry", async () => {
+    const diags = await tenancyDiags(`
+      system Billder {
+        user { id: guid  tenantId: string }
+        tenancy by user.tenantId of Organization
+        subdomain Platform {
+          context Accounts {
+            aggregate Organization ids guid {
+              name: string
+              implements tenantRegistry
+            }
+            aggregate Division ids guid {
+              name: string
+              implements tenantRegistry
+            }
+            repository Organizations for Organization { }
+            repository Divisions for Division { }
+          }
+        }
+      }
+    `);
+    expect(diags.filter((d) => d.code === "loom.tenancy-registry-duplicate")).toHaveLength(2);
+  });
+
+  it("errors when a NON-registry aggregate implements tenantRegistry", async () => {
+    const diags = await tenancyDiags(`
+      system Billder {
+        user { id: guid  tenantId: string }
+        tenancy by user.tenantId of Organization
+        subdomain Platform {
+          context Accounts {
+            aggregate Organization ids guid { name: string }
+            aggregate Division ids guid {
+              name: string
+              implements tenantRegistry
+            }
+            repository Organizations for Organization { }
+            repository Divisions for Division { }
+          }
+        }
+      }
+    `);
+    // Division is also unmarked (no stance), so `loom.tenancy-stance-unmarked`
+    // fires alongside — assert the registry-target code specifically.
+    expect(diags.filter((d) => d.code === "loom.tenancy-registry-not-target")).toMatchObject([
+      { code: "loom.tenancy-registry-not-target", source: "Accounts/Division" },
+    ]);
   });
 });

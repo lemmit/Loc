@@ -87,10 +87,17 @@ export function renderProgram(
      *  rows stamp the per-dispatch frame's scope / parent ids, so it also
      *  forces the `ExecutionContextBehavior` frame-opener to be registered. */
     hasProvenance?: boolean;
+    /** Tenant hierarchy (multi-tenancy P2.2): the registry opts into
+     *  `tenantRegistry`, so register the scoped `IOrgPathResolver` →
+     *  `EfOrgPathResolver` that UserMiddleware calls per request to materialize
+     *  `currentUser.orgPath` from the registry's `data_key`.  Implies
+     *  `authRequired`. */
+    orgPathResolver?: boolean;
   },
 ): string {
   const authRequired = !!options?.authRequired;
   const oidc = !!options?.oidc;
+  const orgPathResolver = !!options?.orgPathResolver;
   const usesValidators = !!options?.usesValidators;
   const usesStamping = !!options?.usesStamping;
   const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;
@@ -225,7 +232,16 @@ builder.Services.AddScoped<IUserVerifier, OidcUserVerifier>();`
           : ""
       }
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddScoped<ICurrentUserAccessor, HttpContextCurrentUserAccessor>();
+builder.Services.AddScoped<ICurrentUserAccessor, HttpContextCurrentUserAccessor>();${
+        orgPathResolver
+          ? `
+// Tenant hierarchy (multi-tenancy P2.2): the per-request \`orgPath\` resolver —
+// currentUser.orgPath = the caller org's materialized \`data_key\`, read once
+// per request by UserMiddleware and memoized on the principal (fail-safe to
+// the claim).  Scoped: it holds the request-scoped AppDbContext.
+builder.Services.AddScoped<IOrgPathResolver, EfOrgPathResolver>();`
+          : ""
+      }
 `
     : "";
   const authVerify = authRequired

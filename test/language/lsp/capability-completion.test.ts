@@ -21,7 +21,7 @@ function freshServices() {
 describe("capability LSP completion (typed-capabilities.md Phase 5)", () => {
   it("offers built-ins + declared capabilities after `with`", async () => {
     const text = `
-capability tenantRegistry { name: string }
+capability orgScoped { note: string }
 system D { subdomain M { context C {
   aggregate Org with <|>
 }}}
@@ -30,14 +30,21 @@ system D { subdomain M { context C {
     await completion({
       text,
       index: 0,
-      expectedItems: ["auditable", "softDeletable", "tenantOwned", "versioned", "tenantRegistry"],
+      expectedItems: [
+        "auditable",
+        "softDeletable",
+        "tenantOwned",
+        "tenantRegistry",
+        "versioned",
+        "orgScoped",
+      ],
       disposeAfterCheck: true,
     });
   });
 
   it("offers built-ins + declared capabilities after `implements`", async () => {
     const text = `
-capability tenantRegistry { name: string }
+capability orgScoped { note: string }
 system D { subdomain M { context C {
   aggregate Org { label: string  implements <|> }
 }}}
@@ -46,7 +53,14 @@ system D { subdomain M { context C {
     await completion({
       text,
       index: 0,
-      expectedItems: ["auditable", "softDeletable", "tenantOwned", "versioned", "tenantRegistry"],
+      expectedItems: [
+        "auditable",
+        "softDeletable",
+        "tenantOwned",
+        "tenantRegistry",
+        "versioned",
+        "orgScoped",
+      ],
       disposeAfterCheck: true,
     });
   });

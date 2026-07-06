@@ -1,0 +1,50 @@
+// Multi-tenancy P2.2 — HIERARCHY `currentUser.orgPath` on the PYTHON (FastAPI +
+// SQLAlchemy) backend.  The tenant registry (`Org`) opts into
+// `implements tenantRegistry`, so it carries a `data_key` materialized-path
+// column; `currentUser.orgPath` therefore resolves — once per request, in the
+// Starlette auth middleware — to the caller org's `data_key` via
+// `SELECT data_key FROM <registry> WHERE id = :claim`, memoized onto the frozen
+// User principal via `object.__setattr__` (fail-safe fallback to the claim when
+// the row / dataKey is absent), and read at the use-site through the ambient
+// `require_current_user().org_path` accessor in the `tenantOwned` aggregate's
+// filter.
+//
+// Decisive check that the generated middleware (`_resolve_org_path` +
+// `session_factory` lookup) and the stored `org_path` principal attribute stay
+// ruff- and mypy --strict-clean under the python-build gate.
+system PythonHierarchy {
+  user { id: guid  tenantId: string }
+  tenancy by user.tenantId of Org
+
+  subdomain Core {
+    context Ledger {
+      aggregate Account with tenantOwned {
+        owner: string
+        balance: int
+        // Row scoping by the caller's tenant materialized path (the hierarchy
+        // `orgPath` — a registry `data_key` read, not the claim-copy).
+        filter this.owner == currentUser.orgPath
+      }
+      aggregate Org ids guid {
+        name: string
+        implements tenantRegistry
+      }
+      repository Accounts for Account {
+        find byMinBalance(min: int): Account[] where this.balance >= min
+      }
+      repository Orgs for Org { }
+    }
+  }
+
+  api LedgerApi from Core
+  storage primary { type: postgres }
+  resource ledgerState { for: Ledger, kind: state, use: primary }
+  deployable api {
+    platform: python
+    contexts: [Ledger]
+    dataSources: [ledgerState]
+    serves: LedgerApi
+    port: 8082
+    auth: required
+  }
+}

@@ -6,8 +6,9 @@ import type {
   SystemIR,
   UserIR,
 } from "../../ir/types/loom-ir.js";
+import { hierarchyRegistry } from "../../ir/util/tenant-stance.js";
 import { AUTH_BASE_PATH } from "../../util/api-base.js";
-import { snake } from "../../util/naming.js";
+import { snake, upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Phoenix LiveView auth scaffolding — emitted per deployable when
@@ -66,9 +67,22 @@ export function emitAuth(args: AuthEmitArgs): AuthEmitResult {
   // dev stub keeps a freshly-generated stack callable out of the box.
   const auth = sys.auth;
 
+  // Hierarchy (multi-tenancy P2.2): when the registry opts into
+  // `tenantRegistry` (a `dataKey` column exists), `currentUser.orgPath` becomes
+  // a per-request registry read — the caller org's materialized `data_key`,
+  // resolved through the registry's Ecto schema module (which carries the
+  // `@schema_prefix` + `:binary_id` cast) via the app `Repo`.  Without it (flat
+  // tenancy), the P2.1 claim-copy stands.  The plug is constructed once per
+  // request, so the read is naturally memoized on `conn.assigns.current_user`.
+  const registry = hierarchyRegistry(sys);
+  const orgPathRegistry =
+    registry && sys.tenancy
+      ? orgPathRegistryRef(sys, appModule, sys.tenancy.registryName)
+      : undefined;
+
   files.set(
     `lib/${appName}_web/auth.ex`,
-    renderAuthPlug(sys.user, webModule, auth, sys.tenancy?.claimField),
+    renderAuthPlug(sys.user, webModule, auth, sys.tenancy?.claimField, orgPathRegistry),
   );
   files.set(`lib/${appName}_web/live_auth.ex`, renderLiveAuth(webModule, auth));
   files.set(
@@ -77,6 +91,36 @@ export function emitAuth(args: AuthEmitArgs): AuthEmitResult {
   );
 
   return { files, enabled: true };
+}
+
+/** The Ecto modules the P2.2 `orgPath` registry read needs — the registry's
+ *  schema module (carrying `@schema_prefix` + the `:binary_id` id cast) and the
+ *  app `Repo`.  `undefined` for flat tenancy (P2.1 claim-copy). */
+interface OrgPathRegistryRef {
+  repoModule: string;
+  schemaModule: string;
+}
+
+/** Locate the tenant registry aggregate's Ecto schema module —
+ *  `<App>.<Context>.<Registry>` (mirrors `schema-emit.ts`:
+ *  `${appModule}.${upperFirst(ctx.name)}.${upperFirst(agg.name)}`) — plus the
+ *  app `Repo`.  `undefined` when the registry isn't found in any context. */
+function orgPathRegistryRef(
+  sys: SystemIR,
+  appModule: string,
+  registryName: string,
+): OrgPathRegistryRef | undefined {
+  for (const sub of sys.subdomains) {
+    for (const ctx of sub.contexts) {
+      if (ctx.aggregates.some((a) => a.name === registryName)) {
+        return {
+          repoModule: `${appModule}.Repo`,
+          schemaModule: `${appModule}.${upperFirst(ctx.name)}.${upperFirst(registryName)}`,
+        };
+      }
+    }
+  }
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -112,23 +156,58 @@ function renderAuthPlug(
   webModule: string,
   auth: AuthIR | undefined,
   orgPathClaim?: string,
+  orgPathRegistry?: OrgPathRegistryRef,
 ): string {
   const buildUserBody = renderBuildUser(user, auth);
   const idKey = actorIdKey(user);
-  // Derived `currentUser.orgPath` — the caller's tenant materialized path
-  // (multi-tenancy P2.1).  Applied as a final `put_org_path/1` step AFTER the
-  // principal (and any dev-claims override) is built, so it reflects the final
-  // claim value; stringified null-safely.  P2.1 resolves it to the tenancy
-  // claim value (the root path); P2.2 swaps the body for a memoized registry
-  // `dataKey` lookup.
+  // Derived `currentUser.orgPath` — the caller's tenant materialized path.
+  // Applied as a final `put_org_path/1` step AFTER the principal (and any
+  // dev-claims override) is built, so it reflects the final claim value.
+  //
+  //  - flat tenancy (P2.1): `orgPath` is the claim itself (the root-segment
+  //    path — no registry `dataKey` column to read), stringified null-safely.
+  //  - hierarchy (P2.2): resolve the caller org's registry `data_key` once per
+  //    request (the plug runs per request, so it is memoized on the principal);
+  //    fail safe to the claim when the row / dataKey is absent or the claim is
+  //    malformed — never crashes.
   const orgPathKey = orgPathClaim ? snake(orgPathClaim) : undefined;
   const orgPathPipe = orgPathKey ? " |> put_org_path()" : "";
-  const putOrgPathDef = orgPathKey
-    ? `
+  const putOrgPathDef = !orgPathKey
+    ? ""
+    : orgPathRegistry
+      ? `
+  # Derives \`current_user.org_path\` (multi-tenancy P2.2): the caller org's
+  # materialized \`data_key\`, read once per request from the tenant registry via
+  # the app \`Repo\`.  The registry's Ecto schema module applies the schema prefix
+  # and casts the pinned string claim against the \`:binary_id\` id column (the
+  # same cast the registry self-scope filter uses).  Fails safe to the raw claim
+  # (the root-segment path) when the row / data_key is absent or the claim is
+  # malformed — never crashes the request.
+  defp put_org_path(user), do: Map.put(user, :org_path, resolve_org_path(user[:${orgPathKey}]))
+
+  defp resolve_org_path(claim) when is_binary(claim) and claim != "" do
+    try do
+      case ${orgPathRegistry.repoModule}.one(
+             from o in ${orgPathRegistry.schemaModule}, where: o.id == ^claim, select: o.data_key
+           ) do
+        data_key when is_binary(data_key) and data_key != "" -> data_key
+        _ -> claim
+      end
+    rescue
+      _ -> claim
+    end
+  end
+
+  defp resolve_org_path(claim), do: to_string(claim)
+`
+      : `
   # Derives \`current_user.org_path\` from the tenancy claim (multi-tenancy P2.1).
   defp put_org_path(user), do: Map.put(user, :org_path, to_string(user[:${orgPathKey}]))
-`
-    : "";
+`;
+  // The P2.2 registry read needs `from/2`; import it only in hierarchy mode so
+  // a flat / no-tenancy plug carries no unused import (--warnings-as-errors).
+  const ectoQueryImport =
+    orgPathKey && orgPathRegistry ? "\n  import Ecto.Query, only: [from: 2]" : "";
   // DEV STUB only: let a caller override string claims (e.g. tenantId) via a
   // base64-JSON `x-loom-dev-claims` header — the same injection the Hono dev
   // stub honours (dotnet/java/python parity).  Never in OIDC mode: a header
@@ -250,7 +329,7 @@ defmodule ${webModule}.Auth do
 
   @behaviour Plug
   import Plug.Conn
-  require Logger
+  require Logger${ectoQueryImport}
 
   @impl Plug
   def init(opts), do: opts
