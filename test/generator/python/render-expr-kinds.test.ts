@@ -138,6 +138,81 @@ describe("py renderPyExpr — member / method-call", () => {
     ).toBe("len(name)");
   });
 
+  it("renders the string.trim intrinsic as .strip(), not .trim() (stdlib A1)", () => {
+    expect(
+      renderPyExpr({
+        kind: "method-call",
+        receiver: refParam("name"),
+        member: "trim",
+        args: [],
+        receiverType: STRING,
+        memberType: STRING,
+        isCollectionOp: false,
+      }),
+    ).toBe("name.strip()");
+  });
+
+  it("renders the string case intrinsics as .upper()/.lower() (stdlib A2)", () => {
+    const call = (member: string): ExprIR => ({
+      kind: "method-call",
+      receiver: refParam("name"),
+      member,
+      args: [],
+      receiverType: STRING,
+      memberType: STRING,
+      isCollectionOp: false,
+    });
+    expect(renderPyExpr(call("toUpper"))).toBe("name.upper()");
+    expect(renderPyExpr(call("toLower"))).toBe("name.lower()");
+  });
+
+  it("renders string.substring as a clamping slice (both arities)", () => {
+    const sub = (args: ExprIR[]): ExprIR => ({
+      kind: "method-call",
+      receiver: refParam("name"),
+      member: "substring",
+      args,
+      receiverType: STRING,
+      memberType: STRING,
+      isCollectionOp: false,
+    });
+    expect(renderPyExpr(sub([litInt("2")]))).toBe("name[2 :]");
+    expect(renderPyExpr(sub([litInt("2"), litInt("3")]))).toBe("name[2 : (2) + (3)]");
+  });
+
+  it("renders string.contains as a parenthesised `in` (intrinsic, not the collection op)", () => {
+    expect(
+      renderPyExpr({
+        kind: "method-call",
+        receiver: refParam("name"),
+        member: "contains",
+        args: [litStr("x")],
+        receiverType: STRING,
+        memberType: BOOL,
+        isCollectionOp: false,
+      }),
+    ).toBe('("x" in name)');
+  });
+
+  it("renders string startsWith/endsWith/replace/split through the host methods", () => {
+    const call = (member: string, args: ExprIR[]): ExprIR => ({
+      kind: "method-call",
+      receiver: refParam("name"),
+      member,
+      args,
+      receiverType: STRING,
+      memberType: STRING,
+      isCollectionOp: false,
+    });
+    expect(renderPyExpr(call("startsWith", [litStr("a")]))).toBe('name.startswith("a")');
+    expect(renderPyExpr(call("endsWith", [litStr("z")]))).toBe('name.endswith("z")');
+    // `replace` on Python str replaces ALL occurrences — the catalogue contract.
+    expect(renderPyExpr(call("replace", [litStr("-"), litStr("_")]))).toBe(
+      'name.replace("-", "_")',
+    );
+    expect(renderPyExpr(call("split", [litStr(",")]))).toBe('name.split(",")');
+  });
+
   it("renders string.matches via re.search", () => {
     expect(
       renderPyExpr({

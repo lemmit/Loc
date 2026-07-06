@@ -229,6 +229,7 @@ export function renderDbContext(
           let body = renderCsExpr(predicate, {
             thisName: "x",
             currentUserExpr: "_currentUser.User",
+            efQuery: true,
           });
           // Hoist a `new <Agg>Id(...)` self-scope construction out of the filter
           // expression (EF can't translate the constructor in-tree).
@@ -467,7 +468,7 @@ export function renderConfiguration(
         .filter(([predicate]) => !exprRefsCurrentUser(predicate))
         .map(
           ([predicate, i]) =>
-            `        builder.HasQueryFilter(${JSON.stringify(filterNames[i])}, x => ${renderCsExpr(predicate, { thisName: "x" })});`,
+            `        builder.HasQueryFilter(${JSON.stringify(filterNames[i])}, x => ${renderCsExpr(predicate, { thisName: "x", efQuery: true })});`,
         );
   // The config class no longer references the principal (those filters moved to
   // AppDbContext), so it never needs the ambient `RequestContext` import.

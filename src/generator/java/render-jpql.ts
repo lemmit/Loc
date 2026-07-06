@@ -5,6 +5,7 @@ import {
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
+import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 
 // ---------------------------------------------------------------------------
 // Find-filter → JPQL renderer.  Spring Data derived method names can't
@@ -37,6 +38,20 @@ export interface JpqlCtx {
   enumsPkg: string;
 }
 
+// JPQL-side scalar-intrinsic snippets (src/util/intrinsics.ts) — how a
+// `queryable` intrinsic renders inside a `@Query` where-string.  The
+// snippet receives the already-rendered receiver (and rendered args) and
+// yields the JPQL function application.  JPQL functions apply to
+// parameters as well as paths, so the same snippet serves BOTH the
+// column side (`this.name.trim()` → `trim(e.name)`) and the value side
+// (`q.trim()` → `trim(:q)`).  Exported for the intrinsic completeness
+// test.
+export const JPQL_INTRINSIC_SQL: Record<string, (recv: string, args: string[]) => string> = {
+  "string.trim": (recv) => `trim(${recv})`,
+  "string.toUpper": (recv) => `upper(${recv})`,
+  "string.toLower": (recv) => `lower(${recv})`,
+};
+
 export function renderJpqlWhere(e: ExprIR, ctx: JpqlCtx): string {
   return render(e, ctx);
 }
@@ -67,7 +82,7 @@ function render(e: ExprIR, ctx: JpqlCtx): string {
       return `${e.op}${render(e.operand, ctx)}`;
     case "binary":
       return renderBinary(e, ctx);
-    case "method-call":
+    case "method-call": {
       // `deep` read level (multi-tenancy Phase 2 P2.4) — descendant-or-self
       // materialized-path scope with the NULL-dataKey fallback to the tenant
       // floor (see `DEEP_SCOPE_SEMANTICS`).  The principal claims render as the
@@ -89,7 +104,23 @@ function render(e: ExprIR, ctx: JpqlCtx): string {
       if (e.member === "contains" && e.receiverType.kind === "array" && e.args.length === 1) {
         return `${render(e.args[0]!, ctx)} member of ${render(e.receiver, ctx)}`;
       }
+      // Queryable scalar intrinsic (src/util/intrinsics.ts) — render the
+      // receiver recursively and apply the JPQL snippet.  Serves both the
+      // column side (`this.name.trim()` → `trim(e.name)`) and the value
+      // side (`q.trim()` → `trim(:q)`) — JPQL functions accept bind
+      // parameters too.
+      if (e.receiverType.kind === "primitive") {
+        const sig = intrinsicFor(e.receiverType.name, e.member);
+        const snippet = JPQL_INTRINSIC_SQL[intrinsicKey(e.receiverType.name, e.member)];
+        if (sig?.queryable && snippet) {
+          return snippet(
+            render(e.receiver, ctx),
+            e.args.map((a) => render(a, ctx)),
+          );
+        }
+      }
       throw unsupported(`method call '${e.member}'`);
+    }
     default:
       throw unsupported(`expression kind '${e.kind}'`);
   }

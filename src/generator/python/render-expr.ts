@@ -1,5 +1,6 @@
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
+import { intrinsicKey } from "../../util/intrinsics.js";
 import { escapePythonIdent, snake, upperFirst, workflowFnSnake } from "../../util/naming.js";
 import {
   type CallExpr,
@@ -310,6 +311,31 @@ function renderMember(recv: string, e: MemberExpr): string {
   return `${recv}.${snake(e.member)}`;
 }
 
+// Scalar-intrinsic snippet table (src/util/intrinsics.ts) — one arm per
+// catalogue row, keyed `<receiver>.<name>`.  Consulted BEFORE the default
+// fallthrough below: the default snake-cases the DSL member onto the
+// receiver (`.trim()`), which is not a Python string method — the catalogue
+// snippet owns the host spelling (`.strip()`).  Exported so the intrinsic
+// completeness test can pin that every catalogue row has a Python arm.
+export const PY_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[]) => string> = {
+  "string.trim": (recv) => `${recv}.strip()`,
+  "string.toUpper": (recv) => `${recv}.upper()`,
+  "string.toLower": (recv) => `${recv}.lower()`,
+  // 0-based clamping semantics = JS slice (see the catalogue contract);
+  // Python slicing clamps natively.  Space around the slice colon is the
+  // black/ruff-format style for non-trivial slice operands.
+  "string.substring": (recv, args) =>
+    args.length > 1 ? `${recv}[${args[0]} : (${args[0]}) + (${args[1]})]` : `${recv}[${args[0]} :]`,
+  "string.startsWith": (recv, args) => `${recv}.startswith(${args[0]})`,
+  "string.endsWith": (recv, args) => `${recv}.endswith(${args[0]})`,
+  // String-receiver `contains` is the intrinsic (lowering keys
+  // `isCollectionOp` off the receiver type) — parenthesised so the `in`
+  // expression composes in any position (`not (x in s)`).
+  "string.contains": (recv, args) => `(${args[0]} in ${recv})`,
+  "string.replace": (recv, args) => `${recv}.replace(${args[0]}, ${args[1]})`,
+  "string.split": (recv, args) => `${recv}.split(${args[0]})`,
+};
+
 function renderMethodCall(
   recv: string,
   args: string[],
@@ -328,6 +354,10 @@ function renderMethodCall(
     args.length === 1
   ) {
     return `re.search(${args[0]}, ${recv}) is not None`;
+  }
+  if (e.receiverType.kind === "primitive") {
+    const intrinsic = PY_INTRINSIC_RENDERERS[intrinsicKey(e.receiverType.name, e.member)];
+    if (intrinsic) return intrinsic(recv, args);
   }
   return `${recv}.${snake(e.member)}(${args.join(", ")})`;
 }

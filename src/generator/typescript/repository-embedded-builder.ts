@@ -186,7 +186,8 @@ export function buildEmbeddedRepositoryFile(
     .replace(/'(?:\\.|[^'\\])*'/g, "''")
     .replace(/`(?:\\.|[^`\\])*`/g, "``");
   const usedDrizzleOps = [...drizzleOps]
-    .filter((op) => new RegExp(`\\b${op}\\(`).test(bodyScan))
+    // `op(` call or `op`…`` tagged template (the `sql` intrinsic wrapper).
+    .filter((op) => new RegExp(`\\b${op}[(\\\`]`).test(bodyScan))
     .sort();
   const voOrEnumImports = [...collectValueObjects(agg, ctx), ...collectEnums(agg, ctx)];
   const isValueUsed = (n: string): boolean =>

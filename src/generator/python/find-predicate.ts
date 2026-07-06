@@ -14,9 +14,10 @@ import {
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
+import { intrinsicFor, intrinsicKey } from "../../util/intrinsics.js";
 import { snake } from "../../util/naming.js";
 import { joinRowClassName, rowClassName } from "./py-columns.js";
-import { renderPyExpr } from "./render-expr.js";
+import { PY_INTRINSIC_RENDERERS, renderPyExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
 // `where` predicate lowering — typed find-filter ExprIR → a SQLAlchemy
@@ -34,9 +35,25 @@ import { renderPyExpr } from "./render-expr.js";
 export interface PyPredicate {
   expr: string;
   /** sqlalchemy helpers the expression calls (`and_`, `or_`, `not_`,
-   *  `select` for membership subqueries). */
+   *  `select` for membership subqueries, `func` for column-side scalar
+   *  intrinsics). */
   ops: Set<string>;
 }
+
+// SQL-side scalar-intrinsic snippets (src/util/intrinsics.ts) — how a
+// `queryable` intrinsic applied to a COLUMN renders inside a SQLAlchemy
+// predicate.  The snippet receives the already-lowered column expression
+// (and lowered value args) and yields a `func.<fn>(…)` call; callers add
+// `func` to the predicate's `ops` import set.  Value-side intrinsic
+// applications (a param receiver — `q.trim()`) render through the plain
+// Python snippet table instead — the value side of a comparison is
+// host-language code.  Exported for the intrinsic completeness test.
+// The Python mirror of node's `DRIZZLE_INTRINSIC_SQL`.
+export const SQLALCHEMY_INTRINSIC_SQL: Record<string, (recv: string, args: string[]) => string> = {
+  "string.trim": (recv) => `func.trim(${recv})`,
+  "string.toUpper": (recv) => `func.upper(${recv})`,
+  "string.toLower": (recv) => `func.lower(${recv})`,
+};
 
 export function lowerToSqlAlchemy(
   e: ExprIR,
@@ -182,12 +199,57 @@ function lower(
           return `select(${join}).where(${join}.${assoc.ownerFk} == ${row}.id, ${join}.${assoc.targetFk} == ${arg}).exists()`;
         }
       }
+      // Queryable scalar intrinsic (src/util/intrinsics.ts).  COLUMN side —
+      // a `this`-rooted receiver (`this.name.trim()`) — wraps the lowered
+      // column expression in its SQL snippet (`func.trim(Row.name)`), pulling
+      // `func` into the import ops.  VALUE side — a param/let receiver
+      // (`… == q.trim()`) — is plain host Python, so it renders through the
+      // in-memory snippet table (`q.strip()`), mirroring how node splits
+      // DRIZZLE_INTRINSIC_SQL (column) from TS_INTRINSIC_RENDERERS (value).
+      if (e.receiverType.kind === "primitive") {
+        const sig = intrinsicFor(e.receiverType.name, e.member);
+        const key = intrinsicKey(e.receiverType.name, e.member);
+        const sqlSnippet = SQLALCHEMY_INTRINSIC_SQL[key];
+        if (sig?.queryable && sqlSnippet && isColumnRooted(e.receiver)) {
+          const recv = lower(e.receiver, row, associations, ops, principalAccessor);
+          const args = e.args.map((a) => lower(a, row, associations, ops, principalAccessor));
+          if (recv == null || args.some((a) => a == null)) return null;
+          ops.add("func");
+          return sqlSnippet(recv, args as string[]);
+        }
+        if (sig?.queryable && PY_INTRINSIC_RENDERERS[key]) {
+          return renderPyExpr(e);
+        }
+      }
       return null;
     }
     case "literal":
       return renderPyExpr(e);
     default:
       return null;
+  }
+}
+
+/** True when the expression reads a `this`-rooted column — directly
+ *  (`this.name` / bare `this-prop` ref), through a flattened VO member
+ *  (`this.price.amount`), or through a nested intrinsic application — i.e.
+ *  the side of a comparison that lowers to a SQL column expression rather
+ *  than a plain Python bind value. */
+function isColumnRooted(e: ExprIR): boolean {
+  switch (e.kind) {
+    case "paren":
+      return isColumnRooted(e.inner);
+    case "ref":
+      return e.refKind === "this-prop" || e.refKind === "this-vo-prop";
+    case "member":
+      return (
+        e.receiver.kind === "this" ||
+        (e.receiver.kind === "member" && e.receiver.receiver.kind === "this")
+      );
+    case "method-call":
+      return isColumnRooted(e.receiver);
+    default:
+      return false;
   }
 }
 

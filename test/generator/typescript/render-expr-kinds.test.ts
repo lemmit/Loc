@@ -142,6 +142,52 @@ describe("ts renderTsExpr — member + method-call", () => {
     ).toBe("/^[^@]+@.+$/.test(this._email)");
   });
 
+  it("renders the `string.trim()` intrinsic via the catalogue snippet", () => {
+    expect(
+      renderTsExpr({
+        kind: "method-call",
+        receiver: thisProp("name"),
+        member: "trim",
+        args: [],
+        receiverType: STRING,
+        isCollectionOp: false,
+      }),
+    ).toBe("this._name.trim()");
+  });
+
+  it("renders the A2 string intrinsics via the catalogue snippets", () => {
+    const call = (member: string, args: ReturnType<typeof litStr>[] = []) =>
+      renderTsExpr({
+        kind: "method-call",
+        receiver: thisProp("name"),
+        member,
+        args,
+        receiverType: STRING,
+        isCollectionOp: false,
+      });
+    expect(call("toUpper")).toBe("this._name.toUpperCase()");
+    expect(call("toLower")).toBe("this._name.toLowerCase()");
+    expect(call("startsWith", [litStr("A")])).toBe('this._name.startsWith("A")');
+    expect(call("contains", [litStr("x")])).toBe('this._name.includes("x")');
+    expect(call("replace", [litStr("a"), litStr("b")])).toBe('this._name.replaceAll("a", "b")');
+    expect(call("split", [litStr(",")])).toBe('this._name.split(",")');
+  });
+
+  it("renders substring with both arities (0-based clamping slice)", () => {
+    const litInt = (v: string) => ({ kind: "literal", lit: "int", value: v }) as const;
+    const sub = (args: ReturnType<typeof litInt>[]) =>
+      renderTsExpr({
+        kind: "method-call",
+        receiver: thisProp("name"),
+        member: "substring",
+        args: [...args],
+        receiverType: STRING,
+        isCollectionOp: false,
+      });
+    expect(sub([litInt("1")])).toBe("this._name.slice(1)");
+    expect(sub([litInt("1"), litInt("3")])).toBe("this._name.slice(1, (1) + (3))");
+  });
+
   it("renders collection-op `count` as .length", () => {
     expect(
       renderTsExpr({

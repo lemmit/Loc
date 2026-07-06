@@ -1,6 +1,7 @@
 import { genericShape } from "../../ir/stdlib/generics.js";
 import { variantTag } from "../../ir/stdlib/unions.js";
 import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
+import { intrinsicKey } from "../../util/intrinsics.js";
 import { escapeTsIdent, lowerFirst, upperFirst, workflowFnCamel } from "../../util/naming.js";
 import {
   type ExprTarget,
@@ -261,6 +262,25 @@ function renderMember(recv: string, e: MemberExpr): string {
   return `${recv}.${e.member}`;
 }
 
+// Scalar-intrinsic snippet table (src/util/intrinsics.ts) — one arm per
+// catalogue row, keyed `<receiver>.<name>`.  Exported so the intrinsic
+// completeness test can pin that every catalogue row has a TS arm.
+export const TS_INTRINSIC_RENDERERS: Record<string, (recv: string, args: string[]) => string> = {
+  "string.trim": (recv) => `${recv}.trim()`,
+  "string.toUpper": (recv) => `${recv}.toUpperCase()`,
+  "string.toLower": (recv) => `${recv}.toLowerCase()`,
+  // 0-based clamping semantics = JS slice (see the catalogue contract).
+  "string.substring": (recv, args) =>
+    args.length > 1
+      ? `${recv}.slice(${args[0]}, (${args[0]}) + (${args[1]}))`
+      : `${recv}.slice(${args[0]})`,
+  "string.startsWith": (recv, args) => `${recv}.startsWith(${args[0]})`,
+  "string.endsWith": (recv, args) => `${recv}.endsWith(${args[0]})`,
+  "string.contains": (recv, args) => `${recv}.includes(${args[0]})`,
+  "string.replace": (recv, args) => `${recv}.replaceAll(${args[0]}, ${args[1]})`,
+  "string.split": (recv, args) => `${recv}.split(${args[0]})`,
+};
+
 function renderMethodCall(
   recv: string,
   args: string[],
@@ -288,6 +308,10 @@ function renderMethodCall(
       return `${asRegexLiteral(arg0.value)}.test(${recv})`;
     }
     return `new RegExp(${args[0]}).test(${recv})`;
+  }
+  if (e.receiverType.kind === "primitive") {
+    const intrinsic = TS_INTRINSIC_RENDERERS[intrinsicKey(e.receiverType.name, e.member)];
+    if (intrinsic) return intrinsic(recv, args);
   }
   return `${recv}.${e.member}(${args.join(", ")})`;
 }

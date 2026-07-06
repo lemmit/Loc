@@ -155,6 +155,99 @@ describe("dotnet renderCsExpr — member + method-call", () => {
     ).toBe('Regex.IsMatch(this.Email, "^[^@]+@.+$")');
   });
 
+  it("renders the `string.trim()` intrinsic as `.Trim()`", () => {
+    expect(
+      renderCsExpr({
+        kind: "method-call",
+        receiver: thisProp("name"),
+        member: "trim",
+        args: [],
+        receiverType: STRING,
+        isCollectionOp: false,
+      }),
+    ).toBe("this.Name.Trim()");
+  });
+
+  it("renders the `string.toUpper()` intrinsic as `.ToUpperInvariant()`", () => {
+    expect(
+      renderCsExpr({
+        kind: "method-call",
+        receiver: thisProp("name"),
+        member: "toUpper",
+        args: [],
+        receiverType: STRING,
+        isCollectionOp: false,
+      }),
+    ).toBe("this.Name.ToUpperInvariant()");
+  });
+
+  it("renders 2-arg `string.substring(start, len)` with clamping (JS-slice semantics)", () => {
+    expect(
+      renderCsExpr({
+        kind: "method-call",
+        receiver: thisProp("name"),
+        member: "substring",
+        args: [litInt("0"), litInt("3")],
+        receiverType: STRING,
+        isCollectionOp: false,
+      }),
+    ).toBe(
+      '(0 >= this.Name.Length ? "" : this.Name.Substring(0, Math.Min(3, this.Name.Length - 0)))',
+    );
+  });
+
+  it("renders 1-arg `string.substring(start)` with the out-of-range guard", () => {
+    expect(
+      renderCsExpr({
+        kind: "method-call",
+        receiver: thisProp("name"),
+        member: "substring",
+        args: [litInt("2")],
+        receiverType: STRING,
+        isCollectionOp: false,
+      }),
+    ).toBe('(2 >= this.Name.Length ? "" : this.Name.Substring(2))');
+  });
+
+  it("renders the `string.contains(s)` INTRINSIC ordinally (not the collection op)", () => {
+    expect(
+      renderCsExpr({
+        kind: "method-call",
+        receiver: thisProp("name"),
+        member: "contains",
+        args: [litStr("x")],
+        receiverType: STRING,
+        isCollectionOp: false,
+      }),
+    ).toBe('this.Name.Contains("x", StringComparison.Ordinal)');
+  });
+
+  it("renders `string.replace(find, repl)` as `.Replace(...)` (all occurrences, literal)", () => {
+    expect(
+      renderCsExpr({
+        kind: "method-call",
+        receiver: thisProp("name"),
+        member: "replace",
+        args: [litStr("a"), litStr("b")],
+        receiverType: STRING,
+        isCollectionOp: false,
+      }),
+    ).toBe('this.Name.Replace("a", "b")');
+  });
+
+  it("renders `string.split(sep)` as `.Split(sep).ToList()` (keeps empty segments, List API)", () => {
+    expect(
+      renderCsExpr({
+        kind: "method-call",
+        receiver: thisProp("name"),
+        member: "split",
+        args: [litStr(",")],
+        receiverType: STRING,
+        isCollectionOp: false,
+      }),
+    ).toBe('this.Name.Split(",").ToList()');
+  });
+
   it("renders collection-op `count` as `.Count()`", () => {
     expect(
       renderCsExpr({

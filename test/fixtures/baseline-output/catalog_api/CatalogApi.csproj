@@ -20,7 +20,19 @@
          emits (handful of events per request), the overhead is negligible
          and the LoggerMessage boilerplate would dominate the file.
          ASP.NET project templates routinely suppress these. -->
-    <NoWarn>CA1707;CA1848;CA1873</NoWarn>
+    <!-- CA1862 + CA1847: idiomatic-alternative suggestions the scalar-
+         intrinsic contract can't take (src/util/intrinsics.ts).  CA1862
+         wants `string.Equals(x, StringComparison)` instead of
+         `a.ToLowerInvariant() == b` — but the == form is what EF Core
+         translates to SQL lower() in the same expression, and the domain
+         semantics are the catalogue's, not C#'s.  CA1847 wants
+         `Contains(char)` for single-character literals — the intrinsic
+         is string-typed by contract on every backend.
+         CA1304 + CA1311: the EF-query position MUST spell case mapping as
+         the parameterless ToUpper()/ToLower() (the only forms EF Core
+         translates — the Invariant forms throw at query compile); they
+         execute as SQL upper()/lower(), so no culture ever applies. -->
+    <NoWarn>CA1707;CA1848;CA1873;CA1862;CA1847;CA1304;CA1311</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <!-- Test files live in the sibling Tests/CatalogApi.Tests project -->

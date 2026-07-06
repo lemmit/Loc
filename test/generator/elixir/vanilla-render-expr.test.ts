@@ -47,6 +47,85 @@ describe("render-expr vanilla leaves", () => {
     expect(renderExpr(prop, ctx)).toBe("record.ship_state");
   });
 
+  it("string.trim() intrinsic → SQL fragment in a filter (query) context, String.trim in-memory (stdlib A1)", () => {
+    const trimmed: ExprIR = {
+      kind: "method-call",
+      receiver: { kind: "ref", name: "name", refKind: "this-prop" },
+      member: "trim",
+      args: [],
+      receiverType: { kind: "primitive", name: "string" },
+      isCollectionOp: false,
+    };
+    // Query context (filterArgs): a `String.*` call is not a valid Ecto query
+    // expression — render the SQL fragment (both column-side and value-side
+    // receivers compose inside `where:`).
+    expect(renderExpr(trimmed, ctx)).toBe('fragment("btrim(?)", record.name)');
+    // In-memory context: the `String.trim/1` stdlib call (Elixir strings have
+    // no methods — the old fallthrough emitted invalid `record.name.trim()`).
+    const memCtx: RenderCtx = {
+      thisName: "record",
+      contextModule: "Acme.Sales",
+      foundation: "vanilla",
+    };
+    expect(renderExpr(trimmed, memCtx)).toBe("String.trim(record.name)");
+  });
+
+  it("string.toUpper()/toLower() → upper()/lower() SQL fragments in a filter, String.upcase/downcase in-memory (stdlib A2)", () => {
+    const upper: ExprIR = {
+      kind: "method-call",
+      receiver: { kind: "ref", name: "name", refKind: "this-prop" },
+      member: "toUpper",
+      args: [],
+      receiverType: { kind: "primitive", name: "string" },
+      isCollectionOp: false,
+    };
+    const lower: ExprIR = { ...upper, member: "toLower" } as ExprIR;
+    expect(renderExpr(upper, ctx)).toBe('fragment("upper(?)", record.name)');
+    expect(renderExpr(lower, ctx)).toBe('fragment("lower(?)", record.name)');
+    const memCtx: RenderCtx = {
+      thisName: "record",
+      contextModule: "Acme.Sales",
+      foundation: "vanilla",
+    };
+    expect(renderExpr(upper, memCtx)).toBe("String.upcase(record.name)");
+    expect(renderExpr(lower, memCtx)).toBe("String.downcase(record.name)");
+  });
+
+  it("non-queryable string intrinsics render in-memory: substring both arities, contains, replace, split (stdlib A2)", () => {
+    const memCtx: RenderCtx = {
+      thisName: "record",
+      contextModule: "Acme.Sales",
+      foundation: "vanilla",
+    };
+    const call = (member: string, args: ExprIR[]): ExprIR => ({
+      kind: "method-call",
+      receiver: { kind: "ref", name: "name", refKind: "this-prop" },
+      member,
+      args,
+      receiverType: { kind: "primitive", name: "string" },
+      isCollectionOp: false,
+    });
+    const int = (v: string): ExprIR => ({ kind: "literal", lit: "int", value: v });
+    const str = (v: string): ExprIR => ({ kind: "literal", lit: "string", value: v });
+    // substring(start, len) → String.slice/3 (start + LENGTH, clamping = the
+    // catalogue's JS-slice contract); substring(start) → run-to-end range.
+    expect(renderExpr(call("substring", [int("0"), int("4")]), memCtx)).toBe(
+      "String.slice(record.name, 0, 4)",
+    );
+    expect(renderExpr(call("substring", [int("4")]), memCtx)).toBe(
+      "String.slice(record.name, 4..-1//1)",
+    );
+    // String-receiver contains is the intrinsic (isCollectionOp keys off the
+    // receiver type since the A2 core) — never Enum.member?.
+    expect(renderExpr(call("contains", [str("x")]), memCtx)).toBe(
+      'String.contains?(record.name, "x")',
+    );
+    expect(renderExpr(call("replace", [str("-"), str("_")]), memCtx)).toBe(
+      'String.replace(record.name, "-", "_")',
+    );
+    expect(renderExpr(call("split", [str(",")]), memCtx)).toBe('String.split(record.name, ",")');
+  });
+
   // An operation self-call resolves to the sibling op's context fn
   // `<op>_<agg>(record, params)` (arity 2, tagged-tuple result); a `function`
   // self-call stays the bare arity-1 `is_draft(record)`.  The op ctx needs `agg`

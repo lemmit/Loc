@@ -58,6 +58,7 @@ export {
   checkBinaryOperands,
   checkDerived,
   checkFunction,
+  checkIntrinsicCalls,
   checkInvariant,
   checkPrimitiveConversions,
   checkPropertyCheck,

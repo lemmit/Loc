@@ -218,7 +218,8 @@ export function buildRepositoryFile(
   // Narrow `drizzle-orm` ops to those actually called in the body, drop
   // `type Tx` when no method declares a `(tx: Tx)` parameter.
   const usedDrizzleOps = [...drizzleOps]
-    .filter((op) => new RegExp(`\\b${op}\\(`).test(bodyScan))
+    // `op(` call or `op`…`` tagged template (the `sql` intrinsic wrapper).
+    .filter((op) => new RegExp(`\\b${op}[(\\\`]`).test(bodyScan))
     .sort();
   const usesTx = /:\s*Tx\b/.test(bodyScan);
   // VO / enum imports: per-symbol. A name needs a runtime value when

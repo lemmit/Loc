@@ -60,6 +60,7 @@ import {
 } from "../../language/generated/ast.js";
 import { isCollectionOp } from "../../util/collection-ops.js";
 import { isIntrinsicMatcher } from "../../util/intrinsic-matchers.js";
+import { intrinsicFor, intrinsicReturnType } from "../../util/intrinsics.js";
 import { PRINCIPAL_ORG_PATH, PRINCIPAL_ROOT_ORG } from "../../util/principal.js";
 import { findVerb, type ResourceVerbDef } from "../resource-verbs.js";
 import { variantTag } from "../stdlib/unions.js";
@@ -520,7 +521,13 @@ function applySuffixToRecv(
       const resultType = verbResultType(verbDef);
       return { recv: callIR, recvType: resultType };
     }
-    const collectionOp = isCollectionOp(ms.member);
+    // A collection op needs a collection receiver: a string-receiver
+    // `contains` (or any future name collision) is the scalar INTRINSIC,
+    // not the collection op — key the flag off the receiver type so the
+    // renderers dispatch to the intrinsic snippet tables instead.
+    const collectionOp =
+      isCollectionOp(ms.member) &&
+      !(recvType.kind === "primitive" && intrinsicFor(recvType.name, ms.member) !== undefined);
     const mcIR: ExprIR = {
       kind: "method-call",
       receiver: recv,
@@ -1771,6 +1778,20 @@ function memberType(t: TypeIR, name: string, env: Env): TypeIR {
   }
   if (t.kind === "primitive" && t.name === "string" && name === "length") {
     return { kind: "primitive", name: "int" };
+  }
+  if (t.kind === "primitive") {
+    // Scalar intrinsics (src/util/intrinsics.ts) — catalogue-driven.
+    const sig = intrinsicFor(t.name, name);
+    if (sig) {
+      const ret = intrinsicReturnType(sig, t.name);
+      if (ret.endsWith("[]")) {
+        return {
+          kind: "array",
+          element: { kind: "primitive", name: ret.slice(0, -2) as PrimitiveName },
+        };
+      }
+      return { kind: "primitive", name: ret as PrimitiveName };
+    }
   }
   return { kind: "primitive", name: "string" };
 }
