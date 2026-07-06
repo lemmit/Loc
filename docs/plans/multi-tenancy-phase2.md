@@ -134,7 +134,18 @@ Trivial once P2.1 lands — a second stamp assignment beside `tenantId`. **Rides
 the existing `contextStamp` pipeline + `wireShape`/entity emitters. **Gate:**
 generator tests per backend; wire-spec unchanged (dataKey off the wire).
 
-### P2.4 — the `policy {}` ladder: `deep` / `global`
+### P2.4 — the `policy {}` ladder: `deep` / `global` — SHIPPED
+
+> **Shipped.** `policy { allow <level> on <Aggregate> }` context member +
+> the `local`/`deep`/`global` read ladder, lowering each level to a rewrite of
+> the aggregate's `tenantOwned` capability filter on all five backends. Settled
+> the three semantics calls authorization.md §9 left open: (1) the NULL-`dataKey`
+> **OR-fallback** (legacy rows degrade to the `local` floor, never leaking);
+> (2) the **delimiter-correct** descendant prefix (`path` or `path || '.%'`);
+> (3) **`global` = the flat tenant floor** — root-subtree widening under a
+> hierarchy is deferred to P2.5 (it needs a `currentUser.rootOrg` accessor, the
+> first `orgPath` segment, kept out of P2.4's minimal surface). Full write-up:
+> [`../tenancy.md`](../tenancy.md) → "The `policy {}` read ladder".
 
 Land the `policy {}` context member + the `Self`/`Descendants`/`All` (≈
 `local`/`deep`/`global`) directional levels from `authorization.md §3`. Each
@@ -150,8 +161,13 @@ backends → tests), per `docs/technical.md`.
 
 Extend `IndexShape` (`src/ir/types/migrations-ir.ts`) with an opclass/method slot
 and emit a `text_pattern_ops` (or C-collation) index on `dataKey` in `sql-pg.ts` +
-the Ecto emitter, so `LIKE 'prefix%'` uses the index under any locale. Plus the
-delimiter discipline (a path separator so `org_a` doesn't prefix-match `org_ab`).
+the Ecto emitter, so `LIKE 'prefix%'` uses the index under any locale. The
+delimiter discipline (a path separator so `org_a` doesn't prefix-match `org_ab`)
+already shipped in P2.4's `deep` prefix; P2.5 owns the index + full opclass
+discipline. **Also here:** the `currentUser.rootOrg` derived principal accessor
+(the first `orgPath` segment) that lets `global` widen from the flat tenant floor
+to the caller's **root-org subtree** — P2.4 ships `global` at the tenant floor
+(fail-closed) pending this accessor.
 **Separable** — correctness is complete at P2.4; this is the read-perf follow-up.
 **Gate:** `k8s-build` (kubeconform) unaffected; migration/system tests.
 

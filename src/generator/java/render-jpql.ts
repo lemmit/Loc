@@ -1,4 +1,10 @@
 import type { ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
+import {
+  DATA_KEY_PATH_DELIMITER,
+  isDeepScopeFilter,
+  TENANT_OWNED_DATA_KEY_FIELD,
+  TENANT_OWNED_TENANT_ID_FIELD,
+} from "../../ir/util/tenant-stance.js";
 
 // ---------------------------------------------------------------------------
 // Find-filter → JPQL renderer.  Spring Data derived method names can't
@@ -62,6 +68,22 @@ function render(e: ExprIR, ctx: JpqlCtx): string {
     case "binary":
       return renderBinary(e, ctx);
     case "method-call":
+      // `deep` read level (multi-tenancy Phase 2 P2.4) — descendant-or-self
+      // materialized-path scope with the NULL-dataKey fallback to the tenant
+      // floor (see `DEEP_SCOPE_SEMANTICS`).  The principal claims render as the
+      // same null-safe SpEL accessors the tenant floor uses (`render` on the
+      // `currentUser.<claim>` arg members).
+      if (isDeepScopeFilter(e)) {
+        const col = `${ctx.alias}.${TENANT_OWNED_DATA_KEY_FIELD}`;
+        const tenantCol = `${ctx.alias}.${TENANT_OWNED_TENANT_ID_FIELD}`;
+        const org = render(e.args[0]!, ctx);
+        const tenant = render(e.args[1]!, ctx);
+        const like = `${col} like concat(${org}, '${DATA_KEY_PATH_DELIMITER}%')`;
+        return (
+          `(${col} is not null and (${col} = ${org} or ${like})) ` +
+          `or (${col} is null and ${tenantCol} = ${tenant})`
+        );
+      }
       // Reference-collection membership: `this.<refColl>.contains(x)` →
       // `:x member of e.<refColl>`.
       if (e.member === "contains" && e.receiverType.kind === "array" && e.args.length === 1) {

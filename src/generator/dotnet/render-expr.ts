@@ -1,6 +1,13 @@
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type { EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
+import {
+  DATA_KEY_PATH_DELIMITER,
+  isDeepScopeFilter,
+  ORG_PATH_CLAIM_FIELD,
+  TENANT_OWNED_DATA_KEY_FIELD,
+  TENANT_OWNED_TENANT_ID_FIELD,
+} from "../../ir/util/tenant-stance.js";
 import { escapeCsharpIdent, upperFirst } from "../../util/naming.js";
 import {
   type CallExpr,
@@ -468,6 +475,24 @@ function renderMethodCall(
   e: MethodCallExpr,
   ctx: CsRenderContext,
 ): string {
+  // `deep` read level (multi-tenancy Phase 2 P2.4) — descendant-or-self
+  // materialized-path scope with the NULL-dataKey fallback to the tenant
+  // floor (see `DEEP_SCOPE_SEMANTICS`).  Rendered as a static-expressible EF
+  // query-filter lambda: `.StartsWith(...)` translates to SQL LIKE, `== null`
+  // to IS NULL — no host call inside the filter (#1676 pattern).
+  if (isDeepScopeFilter(e)) {
+    const t = ctx.thisName;
+    const col = `${t}.${upperFirst(TENANT_OWNED_DATA_KEY_FIELD)}`;
+    const tenantCol = `${t}.${upperFirst(TENANT_OWNED_TENANT_ID_FIELD)}`;
+    const principal = ctx.currentUserExpr ?? "currentUser";
+    const org = `${principal}.${upperFirst(ORG_PATH_CLAIM_FIELD)}`;
+    const tenant = `${principal}.${upperFirst(TENANT_OWNED_TENANT_ID_FIELD)}`;
+    const prefix = JSON.stringify(DATA_KEY_PATH_DELIMITER);
+    return (
+      `((${col} != null && (${col} == ${org} || ${col}.StartsWith(${org} + ${prefix}))) ` +
+      `|| (${col} == null && ${tenantCol} == ${tenant}))`
+    );
+  }
   // `this.<refColl>.contains(x)` — membership over a reference
   // collection.  Lowers to a join-table subquery, mirroring TS's
   // `inArray(roots.id, ...)` shape.  Detection is structural: the

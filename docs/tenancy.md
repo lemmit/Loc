@@ -263,17 +263,92 @@ five backends**, each through its own request-scoped principal seam:
 | Python (FastAPI/SQLAlchemy) | Starlette middleware queries `text("SELECT data_key … WHERE id = :claim")` via the module-level `session_factory` | written once onto the frozen principal (off `asdict()`/wire) |
 | Elixir (Ecto) | `put_org_path/1` reads via `Repo.one(from o in <Registry>, where: o.id == ^claim, select: o.data_key)` (schema-prefix + binary_id cast) | the plug runs once per request → memoized on the principal map |
 
+## The `policy {}` read ladder (`local` / `deep` / `global`, Phase 2 P2.4)
+
+A `policy {}` context member selects a per-aggregate **read reachability level**
+for tenant-owned aggregates — the directional ladder from
+[`proposals/authorization.md`](proposals/authorization.md) §3 (`Self` /
+`Descendants` / `All` ≈ `local` / `deep` / `global`). It is the read side of the
+hierarchy: P2.1–P2.3 wrote `dataKey`; P2.4 reads by it.
+
+```loom
+context Ledger {
+  aggregate Invoice with tenantOwned { amount: Money }
+  aggregate Org ids guid { name: string  implements tenantRegistry }
+  // …
+  policy {
+    allow deep on Invoice        // caller's org + all descendant orgs
+  }
+}
+```
+
+Each rule rewrites the aggregate's `tenantOwned` capability filter (its
+`contextFilters` entry), riding the exact per-backend query seams the flat
+tenant floor already uses (Drizzle `.where`, EF `HasQueryFilter`, SQLAlchemy
+conjunction, JPA `@Query`/`Specification`, pinned Ecto `where:`) — no new backend
+plumbing. The levels:
+
+| Level | Emitted scope |
+|---|---|
+| `local` | `tenantId == currentUser.tenantId` — the caller's own org node. **The default** (an omitted / `local` aggregate keeps today's flat floor). |
+| `deep` | descendant-or-self on the materialized path: `dataKey = orgPath OR dataKey LIKE orgPath \|\| '.%'` — the caller's org and every org beneath it. |
+| `global` | the flat tenant floor (see the decision below). |
+
+Generated `deep` filter, one line per backend (for `allow deep on Account`):
+
+| Backend | Emitted predicate |
+|---|---|
+| node (Hono/Drizzle) | `or(and(isNotNull(t.dataKey), or(eq(t.dataKey, p.orgPath), like(t.dataKey, p.orgPath + ".%"))), and(isNull(t.dataKey), eq(t.tenantId, p.tenantId)))` |
+| .NET (EF Core) | `(x.DataKey != null && (x.DataKey == u.OrgPath \|\| x.DataKey.StartsWith(u.OrgPath + "."))) \|\| (x.DataKey == null && x.TenantId == u.TenantId)` |
+| Python (SQLAlchemy) | `or_(and_(R.data_key.isnot(None), or_(R.data_key == u.org_path, R.data_key.startswith(u.org_path + "."))), and_(R.data_key.is_(None), R.tenant_id == u.tenant_id))` |
+| Java (JPA) | `(e.dataKey is not null and (e.dataKey = :#{…orgPath} or e.dataKey like concat(:#{…orgPath}, '.%'))) or (e.dataKey is null and e.tenantId = :#{…tenantId})` |
+| Elixir (Ecto) | `fragment("(? IS NOT NULL AND (? = ? OR ? LIKE ? \|\| '.%')) OR (? IS NULL AND ? = ?)", …)` with `^`-pinned fail-closed principal |
+
+**Three settled semantics decisions** (authorization.md §9 leaves them to P2.4):
+
+1. **NULL-`dataKey` fallback (OR-fallback, not pure fail-closed LIKE).** Rows
+   stamped before P2.3 — or by a principal-less save — carry a NULL `data_key`,
+   which a bare prefix LIKE silently hides. `deep` therefore ORs in
+   `dataKey IS NULL AND tenantId == currentUser.tenantId`: NULL rows degrade to
+   exactly the `local` floor, staying visible to their own tenant and **never
+   widening past it** (no cross-tenant leak). This preserves flat-tenancy
+   correctness for legacy rows while the tree fills in.
+2. **Delimiter-correct prefix.** The descendant match is `path` exactly OR
+   `path || '.%'` (the `.` segment separator), so `org_a` never prefix-matches
+   `org_ab`. The full opclass/`text_pattern_ops` index discipline is P2.5; the
+   *correct* prefix ships here.
+3. **`global` = the flat tenant floor.** The plan says "global = no [additional]
+   filter, still tenant-root-floored," and authorization.md §2 says "all in my
+   tenant, never the whole table." Emitting the `tenantId ==` floor satisfies
+   both (for a flat model `global == local == the whole tenant`, since every org
+   is its own root). Widening `global` under a hierarchy to the full **root
+   subtree** needs a `currentUser.rootOrg` accessor (the first `orgPath`
+   segment) — a P2.1-scale principal-builder addition kept out of P2.4's minimal
+   surface, so `global` stays fail-closed at the tenant floor for now (a
+   documented P2.5+ follow-up). It never leaks; under a hierarchy it under-grants.
+
+**Validation (fail closed).** `deep`/`global` need a `tenantRegistry` hierarchy
+(`loom.policy-level-requires-hierarchy`); the target must be a tenant-owned
+aggregate in the same context (`loom.policy-unknown-aggregate`,
+`loom.policy-target-not-tenant-owned`); one level per aggregate
+(`loom.policy-duplicate-target`). The minimal surface is the read ladder only —
+operation/view/field gates, `deny`, and policy `function`/`let` helpers stay
+later proposal work.
+
 ## Scope and roadmap
 
 Phase 1 is flat tenancy (`local` reads — tenant-id equality). The registry
 self-scope + claim-less bootstrap shipped as Phase 1b (above). The registry tree
 (`implements tenantRegistry` → `parent` + managed `dataKey`) + the `orgPath`
 registry read on all five backends shipped as Phase 2 P2.2 (above). Stamping
-`dataKey` on every `tenantOwned` aggregate (P2.3, above) shipped too. Deferred:
+`dataKey` on every `tenantOwned` aggregate (P2.3, above) shipped too. The
+`deep`/`global` `policy {}` read ladder (P2.4, above) shipped. Deferred:
 
 - **The `claim`/`registry` cross-reference upgrade** (capstone decision 5) —
   byte-identical surface, tooling win (navigation/rename); still open.
 - **`tenant_id` index** — blocked on the index surface
   ([`proposals/uniqueness-and-indexes.md`](proposals/uniqueness-and-indexes.md)).
-- **The `deep`/`global` `policy {}` ladder** (P2.4) + the **materialized-path
-  index** (P2.5) — see [`plans/multi-tenancy-phase2.md`](plans/multi-tenancy-phase2.md).
+- **The materialized-path `dataKey` index** (`text_pattern_ops` / C-collation)
+  + full delimiter discipline + the `currentUser.rootOrg` accessor that widens
+  `global` to the root subtree (P2.5) — see
+  [`plans/multi-tenancy-phase2.md`](plans/multi-tenancy-phase2.md).

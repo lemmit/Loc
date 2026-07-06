@@ -1,4 +1,11 @@
 import type { AggregateIR, ExprIR, FieldIR, TypeIR } from "../../ir/types/loom-ir.js";
+import {
+  DATA_KEY_PATH_DELIMITER,
+  isDeepScopeFilter,
+  ORG_PATH_CLAIM_FIELD,
+  TENANT_OWNED_DATA_KEY_FIELD,
+  TENANT_OWNED_TENANT_ID_FIELD,
+} from "../../ir/util/tenant-stance.js";
 import { boxedJavaType, collectJavaExprImports, renderJavaExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -55,6 +62,11 @@ function bool(e: ExprIR, ctx: CriteriaCtx): string {
       if (e.lit === "bool") return e.value === "true" ? "cb.conjunction()" : "cb.disjunction()";
       throw unsupported(`literal '${e.lit}'`);
     case "method-call":
+      // `deep` read level (multi-tenancy Phase 2 P2.4) — descendant-or-self
+      // materialized-path scope with the NULL-dataKey fallback to the tenant
+      // floor (see `DEEP_SCOPE_SEMANTICS`), as a JPA Criteria predicate over the
+      // `tenantScope(User currentUser)` Specification's null-safe principal.
+      if (isDeepScopeFilter(e)) return deepScopeCriteria(e, ctx);
       // Reference-collection membership.
       if (e.member === "contains" && e.receiverType.kind === "array" && e.args.length === 1) {
         const segs = pathSegments(e.receiver);
@@ -171,6 +183,27 @@ function value(e: ExprIR, ctx: CriteriaCtx): string {
   }
   collectJavaExprImports(e, ctx.imports);
   return renderJavaExpr(e, { thisName: "root" });
+}
+
+/** The `deep` read-level sentinel as a JPA Criteria predicate.  `dataKey` /
+ *  `tenantId` are typed candidate paths; the principal claims render null-safe
+ *  against the `currentUser` the `tenantScope` factory is handed (no actor →
+ *  null → matches no rows, fail-closed).  The descendant LIKE pattern is built
+ *  in plain Java (`orgPath() + ".%"`) so `cb.like(path, String)` binds it. */
+function deepScopeCriteria(e: Extract<ExprIR, { kind: "method-call" }>, ctx: CriteriaCtx): string {
+  const dataKeyPath = path([TENANT_OWNED_DATA_KEY_FIELD], ctx);
+  const tenantIdPath = path([TENANT_OWNED_TENANT_ID_FIELD], ctx);
+  const orgVal = value(e.args[0]!, ctx);
+  const tenantVal = value(e.args[1]!, ctx);
+  const orgMember =
+    e.args[0]!.kind === "member" ? (e.args[0] as { member: string }).member : ORG_PATH_CLAIM_FIELD;
+  const orgPattern = `(currentUser == null ? null : currentUser.${orgMember}() + "${DATA_KEY_PATH_DELIMITER}%")`;
+  return (
+    `cb.or(` +
+    `cb.and(cb.isNotNull(${dataKeyPath}), ` +
+    `cb.or(cb.equal(${dataKeyPath}, ${orgVal}), cb.like(${dataKeyPath}, ${orgPattern}))), ` +
+    `cb.and(cb.isNull(${dataKeyPath}), cb.equal(${tenantIdPath}, ${tenantVal})))`
+  );
 }
 
 function unsupported(what: string): Error {

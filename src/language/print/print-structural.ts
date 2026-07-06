@@ -277,6 +277,8 @@ export function printStructural(node: AstNode): string {
       return printRetrieval(node as import("../generated/ast.js").Retrieval);
     case "Seed":
       return printSeed(node as import("../generated/ast.js").Seed);
+    case "PolicyDecl":
+      return printPolicyDecl(node as import("../generated/ast.js").PolicyDecl);
     default:
       throw new Error(`printStructural: unhandled node ${node.$type}`);
   }
@@ -686,6 +688,16 @@ function printSeed(node: import("../generated/ast.js").Seed): string {
   return block(
     `seed${dataset}${raw}`,
     node.rows.map((r) => `${r.aggregate.$refText} ${printExpr(r.value)}`),
+  );
+}
+
+/** `policy <Name>? { allow <level> on <Aggregate> … }` (authorization.md §3;
+ *  multi-tenancy Phase 2 P2.4 — the read-reachability ladder). */
+function printPolicyDecl(node: import("../generated/ast.js").PolicyDecl): string {
+  const name = node.name ? ` ${node.name}` : "";
+  return block(
+    `policy${name}`,
+    (node.rules ?? []).map((r) => `allow ${r.level} on ${r.target}`),
   );
 }
 

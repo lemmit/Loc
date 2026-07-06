@@ -3,6 +3,7 @@ import {
   classifyTenantStance,
   hasTenantOwned,
   hasTenantRegistry,
+  hierarchyRegistry,
   tenancyClaimBinding,
 } from "../../util/tenant-stance.js";
 import type { LoomDiagnostic } from "./diagnostic.js";
@@ -113,8 +114,90 @@ function validateTenantRegistry(sys: SystemIR, diags: LoomDiagnostic[]): void {
   }
 }
 
+/** Validate `policy { allow <level> on <Aggregate> }` read-reachability rules
+ *  (authorization.md §3; multi-tenancy Phase 2 P2.4).  Fail-closed:
+ *
+ *   - `loom.policy-unknown-aggregate` — the target names no aggregate in the
+ *     policy's own context (the read ladder scopes a concrete tenant-owned
+ *     aggregate; a bare name must resolve locally).
+ *   - `loom.policy-target-not-tenant-owned` — the target exists but isn't
+ *     `with tenantOwned`.  A read level only refines the tenant floor, which
+ *     only tenant-owned aggregates carry (`crossTenant` / unscoped / the
+ *     self-keyed registry have no `tenantId`/`dataKey` to scope by).
+ *   - `loom.policy-level-requires-hierarchy` — `deep` / `global` need the
+ *     materialized-path tree (`implements tenantRegistry`); without it the
+ *     directional ladder is meaningless (`local` is the only defined level
+ *     under flat tenancy — every org is its own root).
+ *   - `loom.policy-duplicate-target` — two rules select the same aggregate, so
+ *     the effective level is ambiguous.
+ */
+function validatePolicyReadLevels(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const hierarchy = hierarchyRegistry(sys) !== undefined;
+  for (const mod of sys.subdomains) {
+    for (const ctx of mod.contexts) {
+      const rules = ctx.policyReadLevels ?? [];
+      if (rules.length === 0) continue;
+      const seen = new Set<string>();
+      for (const rule of rules) {
+        const src = `${ctx.name}/policy`;
+        if (seen.has(rule.aggregate)) {
+          diags.push({
+            severity: "error",
+            code: "loom.policy-duplicate-target",
+            message:
+              `policy in context '${ctx.name}' selects a read level for '${rule.aggregate}' more ` +
+              `than once (\`${rule.source}\`); keep exactly one \`allow … on ${rule.aggregate}\`.`,
+            source: src,
+          });
+          continue;
+        }
+        seen.add(rule.aggregate);
+
+        const agg = ctx.aggregates.find((a) => a.name === rule.aggregate);
+        if (!agg) {
+          diags.push({
+            severity: "error",
+            code: "loom.policy-unknown-aggregate",
+            message:
+              `policy in context '${ctx.name}': \`${rule.source}\` names '${rule.aggregate}', which ` +
+              `is not an aggregate in this context.  A read level scopes a tenant-owned aggregate ` +
+              `declared in the same context.`,
+            source: src,
+          });
+          continue;
+        }
+        if (!hasTenantOwned(agg)) {
+          diags.push({
+            severity: "error",
+            code: "loom.policy-target-not-tenant-owned",
+            message:
+              `policy in context '${ctx.name}': \`${rule.source}\` targets '${rule.aggregate}', which ` +
+              `is not \`with tenantOwned\`.  A read level refines the tenant floor, so it applies only ` +
+              `to tenant-owned aggregates (crossTenant / unscoped / the registry have no tenant scope).`,
+            source: src,
+          });
+          continue;
+        }
+        if ((rule.level === "deep" || rule.level === "global") && !hierarchy) {
+          diags.push({
+            severity: "error",
+            code: "loom.policy-level-requires-hierarchy",
+            message:
+              `policy in context '${ctx.name}': \`${rule.source}\` uses the '${rule.level}' read level, ` +
+              `which needs a tenant hierarchy — mark the registry \`implements tenantRegistry\` (the ` +
+              `materialized-path tree).  Under flat tenancy only 'local' is defined (every org is its ` +
+              `own root).`,
+            source: src,
+          });
+        }
+      }
+    }
+  }
+}
+
 export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
   validateTenantRegistry(sys, diags);
+  validatePolicyReadLevels(sys, diags);
   const tenancy = sys.tenancy;
 
   // Registry existence is a LINKING concern since 1b.1 — `of <Registry>` is a

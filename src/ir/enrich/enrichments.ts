@@ -51,9 +51,11 @@ import type {
   WorkflowStmtIR,
 } from "../types/loom-ir.js";
 import {
+  buildDeepScopeFilter,
   buildRegistrySelfScopeFilter,
   hasTenantOwned,
   TENANCY_SELF_SCOPE_ORIGIN,
+  TENANT_OWNED_CAPABILITY,
   TENANT_OWNED_DATA_KEY_FIELD,
   tenancyClaimBinding,
 } from "../util/tenant-stance.js";
@@ -190,7 +192,9 @@ function enrichSystem(
   // Multi-tenancy Phase 1b (capstone decision 4): derive the registry's
   // self-scope filter from the `tenancy by` declaration.  See
   // `applyRegistrySelfScope` below.
-  const subdomainsScoped = subdomains.map((m) => applyRegistrySelfScope(m, sys));
+  const subdomainsScoped = subdomains
+    .map((m) => applyRegistrySelfScope(m, sys))
+    .map(applyPolicyReadLevels);
   // Then propagate react deployables' context sets from their targets.
   // Done after subdomain enrichment so frontends see the same enriched
   // contexts every other consumer sees.
@@ -386,6 +390,56 @@ function applyRegistrySelfScope(m: EnrichedSubdomainIR, sys: SystemIR): Enriched
         };
       }),
     })),
+  };
+}
+
+// Policy read-reachability levels — multi-tenancy Phase 2 P2.4.
+//
+// A `policy { allow <level> on <Agg> }` block selects an aggregate's read
+// scope.  `local` (the default) and `global` both keep the flat `tenantId ==`
+// tenant floor the `tenantOwned` capability already contributed — so they need
+// NO rewrite (under a hierarchy `global`'s root-subtree widening awaits a
+// `currentUser.rootOrg` accessor, a P2.5+ follow-up; it stays fail-closed at
+// the tenant floor, matching the plan's "global = no [additional] filter, still
+// tenant-root-floored").  Only `deep` rewrites: it REPLACES the aggregate's
+// `tenantOwned`-origin `contextFilters` entry (the `tenantId ==` floor) with the
+// `buildDeepScopeFilter` sentinel (materialized-path prefix, delimiter-correct,
+// NULL-dataKey fallback to the floor — see `DEEP_SCOPE_SEMANTICS`), keeping the
+// same `"tenantOwned"` origin so an `ignoring tenantOwned` read still drops it.
+//
+// The origin marker keeps this idempotent-ish: a second pass rewrites an
+// already-`deep` filter to the same sentinel (byte-identical).  Validation
+// (tenant-owned-ness, hierarchy requirement, unknown/duplicate target) is
+// phase ⑦ (`tenancy-checks.ts`); enrichment only rewrites where a `tenantOwned`
+// floor exists to replace, so an invalid target is a no-op here.
+// ---------------------------------------------------------------------------
+
+function applyPolicyReadLevels(m: EnrichedSubdomainIR): EnrichedSubdomainIR {
+  const anyDeep = m.contexts.some((c) =>
+    (c.policyReadLevels ?? []).some((r) => r.level === "deep"),
+  );
+  if (!anyDeep) return m;
+  return {
+    ...m,
+    contexts: m.contexts.map((ctx) => {
+      const deepAggs = new Set(
+        (ctx.policyReadLevels ?? []).filter((r) => r.level === "deep").map((r) => r.aggregate),
+      );
+      if (deepAggs.size === 0) return ctx;
+      return {
+        ...ctx,
+        aggregates: ctx.aggregates.map((agg) => {
+          if (!deepAggs.has(agg.name) || !hasTenantOwned(agg)) return agg;
+          const filters = agg.contextFilters ?? [];
+          const origins = agg.contextFilterOrigins ?? filters.map(() => undefined);
+          const i = origins.indexOf(TENANT_OWNED_CAPABILITY);
+          if (i < 0) return agg;
+          const rewritten = [...filters];
+          rewritten[i] = buildDeepScopeFilter(agg);
+          return { ...agg, contextFilters: rewritten };
+        }),
+      };
+    }),
   };
 }
 

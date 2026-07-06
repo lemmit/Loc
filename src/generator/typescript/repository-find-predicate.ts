@@ -19,6 +19,13 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser } from "../../ir/types/loom-ir.js";
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
+import {
+  DATA_KEY_PATH_DELIMITER,
+  isDeepScopeFilter,
+  ORG_PATH_CLAIM_FIELD,
+  TENANT_OWNED_DATA_KEY_FIELD,
+  TENANT_OWNED_TENANT_ID_FIELD,
+} from "../../ir/util/tenant-stance.js";
 import { lowerFirst, plural } from "../../util/naming.js";
 import { joinColumnName, joinTableConstName } from "./emit.js";
 import { associationsOf } from "./repository-associations-builder.js";
@@ -71,6 +78,21 @@ export function lowerToDrizzle(
 
   function lowerExpr(e: ExprIR): string | null {
     if (e.kind === "paren") return lowerExpr(e.inner);
+    // `deep` read level (multi-tenancy Phase 2 P2.4) — the materialized-path
+    // descendant-or-self scope with the NULL-dataKey fallback to the tenant
+    // floor (see `DEEP_SCOPE_SEMANTICS`).  Renders as a Drizzle operator tree.
+    if (isDeepScopeFilter(e)) {
+      const col = `schema.${tableName}.${TENANT_OWNED_DATA_KEY_FIELD}`;
+      const tenantCol = `schema.${tableName}.${TENANT_OWNED_TENANT_ID_FIELD}`;
+      const org = `${principal}.${ORG_PATH_CLAIM_FIELD}`;
+      const tenant = `${principal}.${TENANT_OWNED_TENANT_ID_FIELD}`;
+      for (const op of ["or", "and", "eq", "isNull", "isNotNull", "like"]) ops.add(op);
+      return (
+        `or(and(isNotNull(${col}), or(eq(${col}, ${org}), ` +
+        `like(${col}, ${org} + ${JSON.stringify(`${DATA_KEY_PATH_DELIMITER}%`)}))), ` +
+        `and(isNull(${col}), eq(${tenantCol}, ${tenant})))`
+      );
+    }
     if (e.kind === "binary") {
       if (e.op === "&&" || e.op === "||") {
         const l = lowerExpr(e.left);

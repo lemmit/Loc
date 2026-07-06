@@ -68,6 +68,7 @@ import {
   isOperation,
   isPayloadDecl,
   isPermissionsBlock,
+  isPolicyDecl,
   isProjection,
   isProperty,
   isRepository,
@@ -120,6 +121,7 @@ import type {
   LoadSegmentIR,
   PayloadIR,
   PermissionDeclIR,
+  PolicyReadLevelIR,
   ProjectionIR,
   RawLoomModel,
   RepositoryIR,
@@ -964,6 +966,21 @@ function lowerContext(
   for (const m of ctx.members) {
     if (isWorkflow(m)) workflows.push(lowerWorkflow(m, env, ctx, { aggregates, domainServices }));
   }
+  // `policy {}` read-reachability rules (multi-tenancy Phase 2 P2.4).  A pure
+  // structural projection — the per-aggregate `deep`/`global` rewrite of the
+  // `tenantOwned` filter happens in enrichment; validation (tenant-owned-ness,
+  // hierarchy requirement, unknown/duplicate target) is phase ⑦.
+  const policyReadLevels: PolicyReadLevelIR[] = [];
+  for (const m of ctx.members) {
+    if (!isPolicyDecl(m)) continue;
+    for (const r of m.rules) {
+      policyReadLevels.push({
+        aggregate: r.target,
+        level: r.level as PolicyReadLevelIR["level"],
+        source: `allow ${r.level} on ${r.target}`,
+      });
+    }
+  }
   return {
     name: ctx.name,
     enums,
@@ -986,6 +1003,7 @@ function lowerContext(
     retrievals,
     seeds,
     origin: originFor(ctx),
+    ...(policyReadLevels.length > 0 ? { policyReadLevels } : {}),
   };
 }
 

@@ -4,6 +4,7 @@
 // -------------------------------------------------------------------------
 
 import type { AggregateIR, BoundedContextIR, ExprIR } from "../../types/loom-ir.js";
+import { isDeepScopeFilter } from "../../util/tenant-stance.js";
 import { walkExprDeep } from "../../util/walk.js";
 
 /** True when `name` is a stored field, containment, or derived property
@@ -231,6 +232,14 @@ export function firstNonQueryableNode(e: ExprIR): string | null {
       if (e.receiver.kind === "ref" && e.receiver.refKind === "current-user") return null;
       return "member access not rooted at 'this' or beyond a flattened value object";
     case "method-call":
+      // The `deep` read-level sentinel (multi-tenancy Phase 2 P2.4) — a
+      // synthetic capability-filter node enrichment installs for a
+      // `policy { allow deep on <Agg> }` rule.  It is queryable by
+      // construction: every domain-logic backend's query translator renders it
+      // to its native materialized-path scope (see `DEEP_SCOPE_SEMANTICS`), so
+      // admit it here rather than have the tenant-owned floor rewrite trip the
+      // selectability gate.
+      if (isDeepScopeFilter(e)) return null;
       // Membership over a reference collection — `this.<refColl>.contains(x)`
       // — is the one collection op we admit: it lowers to an EXISTS-style
       // subquery against the field's join table.  Everything else

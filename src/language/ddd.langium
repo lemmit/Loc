@@ -412,7 +412,7 @@ UiMember:
 // the AST validator (`loom.store-lifetime-invalid`); lowering maps it onto the
 // `StoreIR.lifetime` enum.
 Store:
-    'store' name=ID ('persist' ':' lifetime=ID)? '{'
+    'store' name=ID ('persist' ':' lifetime=LooseName)? '{'
         decls+=StoreDecl*
     '}';
 
@@ -851,7 +851,7 @@ BoundedContext:
 ContextMember:
     EnumDecl | ValueObject | Aggregate | EventDecl | PayloadDecl | Repository | Workflow | View
     | Seed | Criterion | Retrieval | FilterDecl | StampDecl | ImplementsDecl | Channel | DomainService
-    | Projection;
+    | Projection | PolicyDecl;
 
 EnumDecl:
     'enum' name=ID '{'
@@ -1001,6 +1001,42 @@ StampDecl:
 
 StampEvent returns string:
     'onCreate' | 'onUpdate';
+
+// ---- policy block (authorization.md §3; multi-tenancy Phase 2 P2.4) ------
+//
+// A `policy {}` context member declares record-level read reachability for
+// tenant-owned aggregates: the directional read ladder
+// `local`/`deep`/`global` (≈ authorization.md's `Self`/`Descendants`/`All`).
+// Each `allow <level> on <Aggregate>` rule selects one aggregate's read
+// scope, lowering to a rewrite of that aggregate's `tenantOwned` capability
+// filter (its `contextFilters` entry) — so it rides the exact per-backend
+// query-filter seams the tenant floor already uses.
+//
+// MINIMAL P2.4 SURFACE — the read ladder only.  The full policy DSL
+// (operation/view/workflow gates, field masking, `function`/`let` helpers,
+// `deny`) is later proposal work and is deliberately NOT in this grammar.
+//
+// `target` is a bare `ID` resolved by NAME against the enclosing context's
+// aggregates in phase ⑦ (`loom.policy-*` diagnostics) — NOT a Langium
+// cross-reference, so an unknown aggregate surfaces a controlled `loom.*`
+// error rather than a generic linker message, and the scope provider needs no
+// change.  `name` is optional (a context may hold one anonymous policy).
+PolicyDecl:
+    'policy' name=ID? '{'
+        rules+=PolicyReadRule*
+    '}';
+
+PolicyReadRule:
+    'allow' level=ReadLevel 'on' target=ID;
+
+// The directional read ladder (docs/plans/multi-tenancy-phase2.md P2.4):
+//   - `local`  — the caller's own org node (today's `tenantId ==` floor; default)
+//   - `deep`   — the caller's org + all descendants (`dataKey` path prefix)
+//   - `global` — all in the caller's tenant (tenant-root-floored)
+// A closed set — an unknown level name is a parse error, so no validator arm
+// is needed for it.
+ReadLevel returns string:
+    'local' | 'deep' | 'global';
 
 // `implements <Cap>` is the typed capability-application form
 // (typed-capabilities.md) — a synonym of `with <Cap>`: the expander splices
@@ -1758,7 +1794,13 @@ LooseName returns string:
     // `Organization.create({ name: nm, parent: par })` setting the immutable
     // self-FK the `tenantRegistry` capability provides (multi-tenancy Phase 2).
     // Already soft in `Property.name`; this mirrors it for `LooseName`.
-    | 'parent';
+    | 'parent'
+    // Policy-block keywords (authorization.md §3; multi-tenancy Phase 2 P2.4)
+    // admitted as soft so user code can still name a field / parameter / arg
+    // `policy` / `allow` / `local` / `deep` / `global`.  `policy` is hard only
+    // at the head of the `PolicyDecl` ContextMember; `allow` / the three
+    // `ReadLevel` words only inside a `policy {}` block's read rules.
+    | 'policy' | 'allow' | 'local' | 'deep' | 'global';
 
 // A dotted page reference for `menu { link <Area>.<Page> }` — lets a menu link
 // disambiguate role-named scaffold pages (`List` / `New` / `Detail`) by their

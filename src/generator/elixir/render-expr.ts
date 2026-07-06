@@ -7,6 +7,12 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
 import {
+  DATA_KEY_PATH_DELIMITER,
+  ORG_PATH_CLAIM_FIELD,
+  TENANT_OWNED_DATA_KEY_FIELD,
+  TENANT_OWNED_TENANT_ID_FIELD,
+} from "../../ir/util/tenant-stance.js";
+import {
   elixirRegexBody,
   elixirString,
   escapeElixirIdent,
@@ -492,6 +498,25 @@ function renderMethodCall(recv: string, args: string[], e: MethodCallExpr, ctx: 
     return `Regex.match?(~r/${pat}/, ${recv})`;
   }
   return `${recv}.${snake(e.member)}(${args.join(", ")})`;
+}
+
+/** The `deep` read-level sentinel (multi-tenancy Phase 2 P2.4) as a raw Ecto
+ *  `fragment` inside a `where:` — descendant-or-self materialized-path scope
+ *  with the NULL-dataKey fallback to the tenant floor (see
+ *  `DEEP_SCOPE_SEMANTICS`).  A SQL `fragment` sidesteps Ecto's `is_nil`/`like`
+ *  helper composition and the `nil <> "…"` raise: `^`-pinned principal claims
+ *  bind fail-closed (a nil actor binds NULL → every comparison is false → no
+ *  rows).  The caller (the capability-filter, which owns actor gating) routes
+ *  the sentinel here directly, so the principal pins are ALREADY fail-closed —
+ *  it must NOT run this through `pinPrincipal` again.  `thisName` is the query
+ *  binding (`record`). */
+export function renderDeepScopeEcto(thisName: string): string {
+  const dk = `${thisName}.${snake(TENANT_OWNED_DATA_KEY_FIELD)}`;
+  const tid = `${thisName}.${snake(TENANT_OWNED_TENANT_ID_FIELD)}`;
+  const org = `^(current_user && current_user.${snake(ORG_PATH_CLAIM_FIELD)})`;
+  const tenant = `^(current_user && current_user.${snake(TENANT_OWNED_TENANT_ID_FIELD)})`;
+  const sql = `(? IS NOT NULL AND (? = ? OR ? LIKE ? || '${DATA_KEY_PATH_DELIMITER}%')) OR (? IS NULL AND ? = ?)`;
+  return `fragment(${JSON.stringify(sql)}, ${dk}, ${dk}, ${org}, ${dk}, ${org}, ${dk}, ${tid}, ${tenant})`;
 }
 
 function renderCollectionOp(recv: string, name: string, args: string[]): string {
