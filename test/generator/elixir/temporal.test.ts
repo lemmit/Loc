@@ -49,7 +49,7 @@ system Api {
   storage pg { type: postgres }
   resource st { for: Billing, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Billing]
     dataSources: [st]
     serves: BillingApi
@@ -169,7 +169,7 @@ describe("elixir generator — A5 temporal", () => {
         storage pg { type: postgres }
         resource st { for: Billing, kind: state, use: pg }
         deployable api {
-          platform: elixir { foundation: vanilla }
+          platform: elixir
           contexts: [Billing]
           dataSources: [st]
           serves: BillingApi
