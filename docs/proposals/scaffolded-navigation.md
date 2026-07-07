@@ -52,20 +52,23 @@ editable, `unfold`-able). There is **no implicit emit-time derivation**.
 - **No `menu {}` block ⇒ no sidebar.** Nothing is conjured invisibly.
 - A `menu {}` block has one of two origins, and they **merge freely**:
   - **Handwritten** — `menu { section "Admin" { link Settings } }`.
-  - **Scaffold-materialized** — a `scaffold` directive emits, alongside
+  - **Scaffold-materialized** — a `with scaffold(…)` macro emits, alongside
     its pages/areas, **one** `menu {}` block over the listable pages it
     created, as real cross-referenced AST.
 
 ```ddd
-ui WebApp {
-  scaffold subdomain: Sales
-  // expands (phase ②) to: areas + pages for every aggregate in Sales
-  //                     + ONE  menu { section "Orders"    { link Orders.List }
-  //                                   section "Customers" { link Customers.List } … }
+ui WebApp with scaffold(subdomains: [Sales]) {
+  // the `with scaffold(…)` macro expands (phase ②) to:
+  //   areas + pages for every aggregate in Sales
+  //   + ONE  menu { section "Orders"    { link Orders.List }
+  //                 section "Customers" { link Customers.List } … }
 
   menu { section "Admin" { link Settings } }   // handwritten — merges in
 }
 ```
+
+(Macros attach only through `with` — on `aggregate` / `context` / `ui`.
+There is no bare `scaffold …:` directive; that form is legacy.)
 
 Sidebar → **Orders** · **Customers** · **Admin**. Add an aggregate to the
 scaffold scope and its section appears automatically on the next compile;
@@ -98,10 +101,10 @@ handwritten), in expansion/source order, then:
 
 ## Scaffold ownership
 
-- **The outermost scaffold directive owns the menu.** `scaffold subdomain:
-  Sales` fans out to per-aggregate builders internally, but those emit
-  **pages/areas only** — the top-level directive collects them and emits
-  **one** `menu {}`. One user-written scaffold → one block, never a
+- **The outermost scaffold macro owns the menu.** `with scaffold(subdomains:
+  [Sales])` fans out to per-aggregate builders internally, but those emit
+  **pages/areas only** — the top-level macro collects them and emits
+  **one** `menu {}`. One `with scaffold(…)` → one block, never a
   fragment per aggregate.
 - **Section granularity = the top-level `area` the scaffold creates**
   (default). Finer nesting (context, aggregate) nests as sub-entries or
@@ -159,7 +162,7 @@ change is a **deletion**:
 ## Migration
 
 A codemod strips per-page `menu { … }` bags. For a hand-authored page that
-relied on a derived section, ensure either a scaffold directive or a
+relied on a derived section, ensure either a `with scaffold(…)` macro or a
 handwritten `menu {}` block now covers it (the codemod can synthesize a
 handwritten block from the removed bags as a starting point).
 
@@ -170,8 +173,8 @@ handwritten block from the removed bags as a starting point).
 2. **Keep the `hidden` page modifier**, or rely purely on unfold-and-delete
    / not-writing-the-link? (Recommend keep — it's a cheap "skip in
    scaffold" that avoids an eject.)
-3. **Cross-scaffold section ordering** when several directives (or a
-   directive + handwritten blocks) contribute sections — first-appearance
+3. **Cross-scaffold section ordering** when several `with scaffold(…)` macros
+   (or a scaffold + handwritten blocks) contribute sections — first-appearance
    default vs. requiring explicit `order:`.
 
 ## Decided (not open)
