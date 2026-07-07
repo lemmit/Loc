@@ -1,7 +1,13 @@
 # Unfoldable API derivation — explicit contract, application, and transport layers
 
-> Status: **PROPOSED** (design only — no grammar, IR, or generator
-> work scheduled).
+> Status: **PARTIALLY LANDED** — the grammar + IR slice (steps 1–2 of
+> the phasing below) shipped in #1756: `commandHandler` / `queryHandler`
+> context members, `route <M> "<path>" -> Context.Handler` api bindings
+> with a cross-referenced `HandlerRef`, lowering, and the three
+> one-directional layering validators (`loom.query-handler-saves`,
+> `loom.command-handler-multi-aggregate`, `loom.route-handler-unresolved`).
+> No backend reads the new nodes yet — codegen (steps 3+), the
+> `scaffoldApi` stdlib, and the `wireShape` retirement remain design-only.
 >
 > Companion to [`lifecycle-operations.md`](./lifecycle-operations.md)
 > (lifecycle kinds drive scaffold synthesis),
@@ -334,7 +340,7 @@ artefact at all — it's source generation only.
 
 The relationship between domain and contract is therefore:
 
-- **Macro form** (`with apiSurface(Sales)`): each layer scaffold walks
+- **Macro form** (`with scaffoldApi(of: Sales)`): each layer scaffold walks
   the relevant domain node (operation params or aggregate fields) and
   emits contract declarations. The contract stays in sync with the
   domain by re-expansion.
@@ -417,7 +423,7 @@ reads `X.kind` to pick the HTTP verb; `scaffoldHandler(of: X)` picks
 `commandHandler` vs `queryHandler` from whether `X` is mutating.
 
 ```
-apiSurface(Sales)
+scaffoldApi(of: Sales)
 ├── scaffoldContext(of: Ordering)
 │   ├── scaffoldAggregate(of: Order)
 │   │   ├── scaffoldOperation(of: Order.place)         ← aggregator level
@@ -503,7 +509,7 @@ that scaffold entirely.
 
 Two scaffold-stdlib invariants:
 
-1. **Aggregators compose; leaves emit.** `apiSurface` doesn't
+1. **Aggregators compose; leaves emit.** `scaffoldApi` doesn't
    synthesise anything directly — it invokes `scaffoldContext`, which
    invokes the per-source aggregators (`scaffoldAggregate`,
    `scaffoldRepository`, `scaffoldWorkflow`, `scaffoldView`), which
@@ -556,7 +562,7 @@ handlers).
 ```
 Api:
     'api' name=ID withClause=WithClause?
-        ('from' source=[Subdomain:ID])?       // optional now; carried by `with apiSurface(X)` macro
+        ('from' source=[Subdomain:ID])?       // optional now; carried by `with scaffoldApi(of: X)` macro
         ('{'
             … existing urlStyle / statuses …
             (routes+=Route)*
@@ -580,7 +586,7 @@ the right one and reports unambiguous "handler not found" otherwise.
 
 The existing `WithClause` rule is grammar-level reusable; today's
 aggregates and UI consume it. Adding `withClause=WithClause?` to the
-`Api` rule lets `api SalesApi with apiSurface(Sales)` parse.
+`Api` rule lets `api SalesApi with scaffoldApi(of: Sales)` parse.
 
 ### NOT NEW — no `wire X` operator
 
@@ -588,7 +594,7 @@ A prior draft proposed `wire X` as a type expression
 (`response OrderResponse = wire Order`). It's deliberately dropped.
 The domain → contract relationship is **scaffold-time only** — a walk
 of `aggregate.fields + containments + derived` filtered by the
-`apiRead` access modifier. The macro form (`with apiSurface(Sales)`)
+`apiRead` access modifier. The macro form (`with scaffoldApi(of: Sales)`)
 runs that walk and emits literal contract source; the unfolded form
 *is* the literal contract source. Neither carries a residual `wire`
 reference into the AST, the IR, or the runtime.
@@ -612,7 +618,7 @@ See § "wireShape retires from the IR" above for the full reasoning.
 ### Macro form (level 0)
 
 ```ddd
-api SalesApi with apiSurface(Sales)
+api SalesApi with scaffoldApi(of: Sales)
 ```
 
 ### One-level unfold (level 1)
@@ -768,7 +774,7 @@ subdomain Sales {
   context Billing  { … }
 }
 
-api SalesApi with apiSurface(Sales)
+api SalesApi with scaffoldApi(of: Sales)
 ```
 
 The macro stub stays in the root until every leaf scaffold has been
@@ -780,7 +786,7 @@ deleted.
 - **`urlStyle: literal | resource`** (D-URLSTYLE). Today's per-api
   setting drives `routeSlugFor` in enrichment. In the fully-unfolded
   form, the slug is *literal* in each `route` line — the urlStyle
-  setting is redundant. In the *macro* form, `apiSurface(Sales,
+  setting is redundant. In the *macro* form, `scaffoldApi(of: Sales,
   urlStyle: resource)` continues to drive scaffold output: leaves
   pluralise slugs when emitting `route` lines. The IR field
   (`Api.urlStyle`) stays as a macro input; backends stop reading it
@@ -823,24 +829,26 @@ rest of the macro tree intact.
 
 ## Open questions
 
-1. **Single `handler` vs three keywords.** This proposal commits to
-   `commandHandler` / `queryHandler` / `workflow` as three peers with
-   different validator contracts. The cheaper alternative is one
-   `handler` keyword with contract derived from body shape (`.save`
-   present → command; cross-aggregate → workflow). Three is more
-   honest; one is less to learn. Open.
+1. **Single `handler` vs three keywords.** ~~Open.~~ **Resolved —
+   three keywords.** The grammar + IR slice shipped
+   `commandHandler` / `queryHandler` as distinct context members
+   alongside `workflow`, each with its own validator contract
+   (`loom.query-handler-saves`, `loom.command-handler-multi-aggregate`).
 2. **Where do errors live?** Names are contract (per context; what
    counts as `NotFound` is domain-shaped). Status mapping is system
    policy (one truth). This proposal sketches the split; the policy
-   surface itself wants its own short proposal.
-3. **HandlerRef vs system-flat handler names.** `Ordering.PlaceOrder`
-   qualifies by context. The alternative is system-flat names with
-   uniqueness enforced. The qualified form documents the contract's
-   bounded-context origin in the route line itself; the flat form
-   reads cleaner. Open.
-4. **`with apiSurface(...)` macro arguments.** Positional (`(Sales)`)
-   vs named (`(of: Sales)`). The rest of the macro stdlib uses named
-   (`of:` is canonical). Worth aligning before this lands.
+   surface itself wants its own short proposal. Open.
+3. **HandlerRef vs system-flat handler names.** ~~Open.~~ **Resolved —
+   qualified.** The shipped `HandlerRef` is `Context.Handler`
+   (`context=[BoundedContext:ID] '.' handler=ID`); the route line
+   documents the contract's bounded-context origin.
+4. **`scaffoldApi(...)` macro name + arguments.** ~~Open (was
+   `apiSurface`, positional).~~ **Resolved — `scaffoldApi(of: Sales)`.**
+   The composer joins the `scaffold<NodeKind>(of: X)` family it heads
+   (the earlier `apiSurface` broke that family; "spans layers" didn't
+   justify a distinct word, since `scaffoldContext` spans them too and
+   keeps the prefix). Named `of:` args match the rest of the macro
+   stdlib.
 5. **Should `commandHandler` / `queryHandler` be folded into
    workflow's existing `handle` / read-only-handle members?** The
    semantic overlap is real; the cost of a separate keyword is the
@@ -938,7 +946,7 @@ If adopted, a reasonable ordering would be:
    `scaffoldContext` / `scaffoldAggregate` composition pattern.
    `wire-projection.ts` filters relocate from enrichment-stamped
    to scaffold-time consumed at this step.
-4. **`apiSurface` composer** wiring all three sub-trees, replacing
+4. **`scaffoldApi` composer** wiring all three sub-trees, replacing
    the current `Api from Subdomain` implicit derivation.
 5. **Backend DTO emitters** — each generator switches from
    `wireShapeFor(ent) → filter → emit` to reading literal contract
