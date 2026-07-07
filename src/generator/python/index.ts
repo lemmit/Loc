@@ -122,22 +122,9 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // PyJWT (with the `crypto` extra for RS256/ES256 JWKS verification) ships
   // in pyproject only under an `auth { oidc }` block.
   const oidcDeps = args.deployable.auth?.required && args.sys.auth ? ["pyjwt[crypto]>=2.9,<3"] : [];
-  // A5 temporal — `datetime ± months(n)` renders through dateutil's
-  // calendar-aware `relativedelta` (days/hours/minutes are stdlib
-  // `timedelta`), so python-dateutil ships CONDITIONALLY: only when the
-  // model actually constructs a months duration.  dateutil doesn't ship
-  // `py.typed`, so the stub package rides along in the dev group for the
-  // `mypy --strict` gate.
-  const usesMonths = args.contexts.some(containsMonthsCtor);
-  const dateutilDeps = usesMonths ? ["python-dateutil>=2.9,<3"] : [];
-  const dateutilDevDeps = usesMonths ? ["types-python-dateutil>=2.9,<3"] : [];
   out.set(
     "pyproject.toml",
-    renderPyproject(
-      slug,
-      [...resources.deps, ...oidcDeps, ...dateutilDeps],
-      [...resources.devDeps, ...dateutilDevDeps],
-    ),
+    renderPyproject(slug, [...resources.deps, ...oidcDeps], [...resources.devDeps]),
   );
   out.set("Dockerfile", hasEmbeddedSpa ? DOCKERFILE_PY_FULLSTACK : DOCKERFILE_PY);
   out.set(".dockerignore", DOCKERIGNORE_PY);
@@ -483,23 +470,6 @@ function mergeContexts(contexts: EnrichedBoundedContextIR[]): EnrichedBoundedCon
     // land (S15) — mirrors the Hono orchestrator.
     eventSubscriptions: contexts.flatMap((c) => c.eventSubscriptions),
   };
-}
-
-/** A5 temporal — true when the context's IR contains a calendar
- *  `months(n)` duration constructor anywhere (derived / invariants /
- *  operation bodies / find filters / workflow statements / …).  A deep
- *  structural scan over the plain-data IR tree beats enumerating every
- *  expression-carrying site — a missed site would silently drop the
- *  python-dateutil dependency the rendered `relativedelta(...)` needs.
- *  The IR is acyclic JSON-shaped data, so the walk terminates. */
-function containsMonthsCtor(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(containsMonthsCtor);
-  if (value !== null && typeof value === "object") {
-    const o = value as Record<string, unknown>;
-    if (o.kind === "duration" && o.unit === "months") return true;
-    return Object.values(o).some(containsMonthsCtor);
-  }
-  return false;
 }
 
 function dedupeByName<T extends { name: string }>(items: T[]): T[] {

@@ -106,11 +106,11 @@ paths) — default `queryable: false`, honest validator gate, revisit per-op.
 
 The one part that is *not* just registry rows — new vocabulary:
 
-- `duration` primitive + constructors `days(n), hours(n), minutes(n), months(n)`
-  (calendar-aware vs absolute split follows each backend's native type: `Period`/
-  `Duration` on Java, `TimeSpan`/months-special-case on .NET, `timedelta`/
-  `relativedelta` on Python, `Timex`-free Ecto interval on Elixir, `date-fns` on TS —
-  the per-backend divergence is why this must be Layer 0).
+- `duration` primitive + constructors `days(n), hours(n), minutes(n)` — an
+  **ABSOLUTE** span only (fixed millisecond width per unit), which is what keeps it
+  uniformly translatable across every backend (JS ms-numbers, .NET `TimeSpan`, Java
+  `Duration`, Python `timedelta`, Elixir ms-integers) with no calendar arithmetic and
+  no new dependency.
 - `arithmeticResult` arms: `datetime ± duration → datetime`, `datetime - datetime →
   duration`, `duration ± duration`, `duration * int`.
 - Queryable: `interval` arithmetic exists on Postgres for all five ORMs.
@@ -128,11 +128,21 @@ now() > due_date + interval '30 days'
 
 **Implementation notes (recon 2026-07-06, corrects the sketch above):**
 
+- **`months` was cut, deliberately (post-ship refinement).** A5 originally shipped a
+  fourth constructor `months(n)`, but a calendar month has no fixed width — it could
+  not share the absolute-duration runtime representation, it forced the *only* new
+  dependency (`python-dateutil`), it needed a positional validator gate
+  (`loom.duration-months-position`, restricting it to direct `datetime ± months(n)`),
+  and it diverged into five per-backend calendar paths (`setMonth` / `AddMonths` /
+  `plusMonths` / `relativedelta` / hand-rolled Elixir shift). That conflated two
+  concepts — absolute duration vs calendar offset (cf. java.time `Duration` vs
+  `Period`) — and broke the "natively translatable" principle. `duration` is now
+  absolute-only; a calendar/`period` type (`months`, `years`) is a possible future
+  slice if real demand appears. This removed the dep, the gate, and the divergence.
 - **No backend ships a date library** — the `date-fns`-on-TS note above is wrong
-  (only the frontend stacks carry `dayjs`). Java `Period`/`Duration`, .NET
-  `TimeSpan`/`AddMonths`, Elixir `DateTime`, and TS native `Date` arithmetic are
-  all dependency-free; only Python's `months(n)` needs `python-dateutil`
-  (conditional-dep hook already exists: `python/index.ts` `extraDeps`).
+  (only the frontend stacks carry `dayjs`). Java `Duration`, .NET `TimeSpan`, Elixir
+  `DateTime`, TS native `Date`, and Python `timedelta` arithmetic are all
+  dependency-free (with `months` gone, nothing pulls `python-dateutil`).
 - **Constructors follow the `now()` pattern** — a dedicated grammar node (like
   `NowExpr`, ddd.langium:2387) lowered to a dedicated IR form, NOT
   `callKind: "free"` (free calls type to `unknown`). `arithmeticResult` gains a

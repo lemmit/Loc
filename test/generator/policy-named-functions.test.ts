@@ -82,7 +82,7 @@ describe("named policy functions — per-backend requires enforcement", () => {
   });
 
   it("Elixir/Phoenix: inlines the predicate into the forbidden gate", async () => {
-    const text = await allText("elixir { foundation: vanilla }");
+    const text = await allText("elixir");
     expect(text).toContain('Enum.member?(current_user.permissions, "sales.approve")');
     expect(text).toContain('Enum.member?(current_user.permissions, "sales.manage")');
     expect(text).toContain('Decimal.new("10000")');

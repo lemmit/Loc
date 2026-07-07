@@ -49,14 +49,17 @@ export type PrimitiveName =
    *  `docs/proposals/document-and-json-hierarchies.md` (Option 1,
    *  D-DOCUMENT-AXIS). */
   | "json"
-  /** A span of time (A5 temporal, docs/plans/stdlib.md).  EXPRESSION-ONLY
-   *  in this slice: not in the grammar's `PrimitiveType` rule, so it can
-   *  never appear in field / param / wire position — it only arises from
-   *  the `days(n)`/`hours(n)`/`minutes(n)`/`months(n)` constructors and
-   *  the temporal arithmetic rules (`datetime - datetime`, `duration ±
-   *  duration`, `duration * int`).  Deliberately NOT in `PRIMITIVES`
-   *  below (that list feeds user-facing type pickers; a type you cannot
-   *  write does not belong in one). */
+  /** An ABSOLUTE span of time (A5 temporal, docs/plans/stdlib.md) — fixed
+   *  millisecond width per unit, so it renders uniformly on every backend.
+   *  EXPRESSION-ONLY in this slice: not in the grammar's `PrimitiveType`
+   *  rule, so it can never appear in field / param / wire position — it only
+   *  arises from the `days(n)`/`hours(n)`/`minutes(n)` constructors and the
+   *  temporal arithmetic rules (`datetime - datetime`, `duration ±
+   *  duration`, `duration * int`).  Calendar-relative offsets (`months`,
+   *  `years`) are deliberately excluded — no fixed width, so they would
+   *  break the uniform translation.  Deliberately NOT in `PRIMITIVES` below
+   *  (that list feeds user-facing type pickers; a type you cannot write does
+   *  not belong in one). */
   | "duration";
 
 /** Canonical ordering for UI surfaces that enumerate primitives —
@@ -3203,17 +3206,15 @@ export type ExprIR =
     }
   /**
    * Duration constructor (A5 temporal, docs/plans/stdlib.md) —
-   * `days(n)` / `hours(n)` / `minutes(n)` / `months(n)`.  Parsed as an
-   * ordinary free call; lowered to this node ONLY when the name did not
-   * resolve to any user declaration (a user `function days(...)`
-   * shadows the builtin and lowers to a plain `call`).  `amount` is
-   * int-typed (validated by `loom.duration-arity` /
-   * `loom.duration-arg-type`); the node's type is
-   * `{ kind: "primitive", name: "duration" }`.  `months` is calendar-
-   * relative (no fixed millisecond width) and is restricted by
-   * `loom.duration-months-position` to direct `datetime ± months(n)`
-   * position, where each backend's binary renderer takes its native
-   * calendar path instead of the absolute-milliseconds path.
+   * `days(n)` / `hours(n)` / `minutes(n)`.  Parsed as an ordinary free
+   * call; lowered to this node ONLY when the name did not resolve to any
+   * user declaration (a user `function days(...)` shadows the builtin and
+   * lowers to a plain `call`).  `amount` is int-typed (validated by
+   * `loom.duration-arity` / `loom.duration-arg-type`); the node's type is
+   * `{ kind: "primitive", name: "duration" }`.  Every unit is ABSOLUTE
+   * (fixed millisecond width), which is what lets every backend render the
+   * absolute-milliseconds path uniformly; calendar-relative offsets
+   * (`months`, `years`) are deliberately not part of `duration`.
    */
   | {
       kind: "duration";

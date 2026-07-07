@@ -247,13 +247,9 @@ export function renderPyAggregate(
         ].join(", ")}`
       : null,
     usesDecimal ? "from decimal import Decimal" : null,
-    // A5 temporal — `datetime ± months(n)` goes through dateutil's
-    // calendar-aware relativedelta (conditional dep, wired in index.ts).
-    exprImports.has("relativedelta") ? "from dateutil.relativedelta import relativedelta" : null,
     exprImports.has("math") ||
       exprImports.has("re") ||
       exprImports.has("timedelta") ||
-      exprImports.has("relativedelta") ||
       usesDatetime ||
       usesDecimal
       ? ""

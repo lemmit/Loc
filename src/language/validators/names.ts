@@ -52,10 +52,10 @@ import {
 // Magic identifiers resolvable in an expression with no declaration node.
 // `currentUser` is backed by the system `user { … }` block; `permissions`
 // is the module-permissions namespace head (`permissions.<name>`); the A5
-// duration constructors (`days`/`hours`/`minutes`/`months`) are free-call
+// duration constructors (`days`/`hours`/`minutes`) are free-call
 // builtins.  All admitted unconditionally — a superset is safe (only ever
 // masks a report, never invents one; the temporal validator owns the
-// duration arity / position checks).
+// duration arity checks).
 const MAGIC_NAMES: ReadonlySet<string> = new Set(["currentUser", "permissions", ...DURATION_UNITS]);
 
 // Executable domain expression containers we validate inside.  These only

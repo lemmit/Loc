@@ -148,11 +148,9 @@ export function buildPyViewsFile(
     needsMath ? "import math" : null,
     needsRe ? "import re" : null,
     // A5 temporal — a view filter can bind `datetime.now(UTC)` (value-side
-    // `now()`) or reach for `timedelta` (ES in-memory filters); months
-    // shifts add dateutil's relativedelta (conditional dep).
+    // `now()`) or reach for `timedelta` (ES in-memory filters).
     dtImportLine(refersTo),
     needsMath || needsRe || dtImportLine(refersTo) != null ? "" : null,
-    refersTo("relativedelta") ? "from dateutil.relativedelta import relativedelta" : null,
     `from fastapi import APIRouter, Depends${anyGateUsesUser ? ", Request" : ""}`,
     models.length > 0 || wfModels.length > 0 ? "from pydantic import BaseModel, RootModel" : null,
     saOps.size > 0 ? `from sqlalchemy import ${[...saOps].sort().join(", ")}` : null,

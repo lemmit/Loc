@@ -132,15 +132,13 @@ export interface ExprTarget<Ctx extends ExprCtxBase> {
   binary(left: string, right: string, e: BinaryExpr): string;
   ternary(cond: string, then: string, otherwise: string): string;
   convert(value: string, e: ConvertExpr): string;
-  /** Duration constructor `days(n)`/`hours(n)`/`minutes(n)`/`months(n)`
-   *  (A5 temporal) — render the backend's ABSOLUTE-duration value from the
-   *  already-rendered `amount`.  NOTE the `months` wrinkle: a calendar month
-   *  has no absolute width, and the validator
-   *  (`loom.duration-months-position`) restricts `months(...)` to direct
-   *  `datetime ± months(n)` position — a backend's `binary` leaf owns that
-   *  calendar path (it sees the raw duration node on `e.left`/`e.right`),
-   *  so this standalone leaf is only ever *composed into* a binary for
-   *  `months` and may render a count-only carrier or throw, per backend. */
+  /** Duration constructor `days(n)`/`hours(n)`/`minutes(n)` (A5 temporal) —
+   *  render the backend's ABSOLUTE-duration value from the already-rendered
+   *  `amount`.  Every unit has a fixed millisecond width, so each backend
+   *  renders one uniform absolute-span value (JS ms-number, .NET `TimeSpan`,
+   *  java `Duration`, python `timedelta`, Elixir ms-integer) with no calendar
+   *  arithmetic.  Calendar-relative offsets (`months`/`years`) are not part
+   *  of `duration`. */
   duration(unit: DurationExpr["unit"], amount: string, e: DurationExpr, ctx: Ctx): string;
   /** Boolean predicate-arms `match { cond => value }` — the original form,
    *  unchanged.  Lowered to the backend's chained-conditional idiom. */

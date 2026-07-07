@@ -1,6 +1,5 @@
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type { EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
-import { monthsCtorOperand } from "../../ir/util/temporal.js";
 import { intrinsicKey } from "../../util/intrinsics.js";
 import {
   escapeJavaIdent,
@@ -179,10 +178,8 @@ export function collectJavaExprImports(e: ExprIR, into: Set<string> = new Set())
       return into;
     case "duration":
       // A5 temporal — an absolute duration constructor renders
-      // `Duration.ofDays(…)` etc.  `months` renders a bare count consumed
-      // by the binary calendar arm (fully-qualified ZoneOffset there), so
-      // it needs no import.
-      if (e.unit !== "months") into.add("java.time.Duration");
+      // `Duration.ofDays(…)` etc.
+      into.add("java.time.Duration");
       visit(e.amount);
       return into;
     default:
@@ -351,15 +348,6 @@ const JAVA_TARGET: ExprTarget<JavaRenderContext> = {
   // on this backend, so `duration ± duration` / `duration * int` go through
   // the Duration method API and `datetime ± duration` through
   // `Instant.plus/minus` in `renderBinary`.
-  //
-  // `months` is the calendar-relative exception — it has no fixed width
-  // (java.time.Duration cannot hold "a month").  The validator
-  // (`loom.duration-months-position`) restricts it to direct
-  // `datetime ± months(n)` position, where `renderBinary` sees the raw
-  // duration node on the operand and takes the UTC calendar path
-  // (`atOffset(UTC).plusMonths(…).toInstant()`) CONSUMING this leaf's
-  // output as the bare month COUNT.  So the months arm renders the count
-  // only — it never stands alone in valid output.
   duration: (unit, amount) => {
     switch (unit) {
       case "days":
@@ -368,8 +356,6 @@ const JAVA_TARGET: ExprTarget<JavaRenderContext> = {
         return `Duration.ofHours(${amount})`;
       case "minutes":
         return `Duration.ofMinutes(${amount})`;
-      case "months":
-        return `(${amount})`;
     }
   },
   match(arms, otherwise) {
@@ -800,13 +786,7 @@ function renderBinary(l: string, r: string, e: BinaryExpr): string {
  *    datetime ± duration → datetime   ⇒ `l.plus(r)` / `l.minus(r)`
  *    duration + datetime → datetime   ⇒ `r.plus(l)`   (commuted form)
  *    duration ± duration → duration   ⇒ `l.plus(r)` / `l.minus(r)`
- *    duration × int / int × duration  ⇒ `d.multipliedBy(n)`
- *  with the calendar exception: when the duration operand is a direct
- *  `months(n)` constructor node (the only position the validator admits
- *  months in), the pre-rendered operand string is the bare month COUNT
- *  (see the `duration` leaf) and — Instant having no plusMonths — the
- *  shift hops through the UTC calendar:
- *  `dt.atOffset(java.time.ZoneOffset.UTC).plusMonths(n).toInstant()`. */
+ *    duration × int / int × duration  ⇒ `d.multipliedBy(n)` */
 function renderTemporalBinary(l: string, r: string, e: BinaryExpr): string | null {
   const prim = (t: TypeIR | undefined): string | null => {
     const u = unwrapOptional(t);
@@ -814,15 +794,12 @@ function renderTemporalBinary(l: string, r: string, e: BinaryExpr): string | nul
   };
   const lt = prim(e.leftType);
   const rt = prim(e.resultType);
-  const calendarShift = (dt: string, sign: "+" | "-", count: string): string =>
-    `${dt}.atOffset(java.time.ZoneOffset.UTC).${sign === "+" ? "plusMonths" : "minusMonths"}(${count}).toInstant()`;
   if (e.op === "+" || e.op === "-") {
     if (lt === "datetime") {
       // datetime − datetime → Duration (Loom `a - b` = a minus b, and
       // `Duration.between(start, end)` = end − start).
       if (e.op === "-" && rt === "duration") return `Duration.between(${r}, ${l})`;
       if (rt === "datetime") {
-        if (monthsCtorOperand(e.right)) return calendarShift(l, e.op, r);
         return `${l}.${e.op === "+" ? "plus" : "minus"}(${r})`;
       }
       return null;
@@ -830,7 +807,6 @@ function renderTemporalBinary(l: string, r: string, e: BinaryExpr): string | nul
     if (lt === "duration") {
       // duration + datetime (commuted; `duration - datetime` never types).
       if (e.op === "+" && rt === "datetime") {
-        if (monthsCtorOperand(e.left)) return calendarShift(r, "+", l);
         return `${r}.plus(${l})`;
       }
       if (rt === "duration") return `${l}.${e.op === "+" ? "plus" : "minus"}(${r})`;

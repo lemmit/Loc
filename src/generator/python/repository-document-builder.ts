@@ -176,7 +176,6 @@ export function buildPyDocumentRepositoryFile(
       : null,
     refersTo("cast") ? "from typing import cast" : null,
     "",
-    refersTo("relativedelta") ? "from dateutil.relativedelta import relativedelta" : null,
     "from sqlalchemy import select",
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "",

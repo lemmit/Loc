@@ -337,32 +337,6 @@ const QUERYABLE: { name: string; e: ExprIR }[] = [
     },
   },
   {
-    name: "this.createdAt + months(1) >= now() (calendar unit + now literal, A5)",
-    e: {
-      kind: "binary",
-      op: ">=",
-      left: {
-        kind: "binary",
-        op: "+",
-        left: {
-          kind: "member",
-          receiver: thisExpr,
-          member: "createdAt",
-          receiverType: DT,
-          memberType: DT,
-        },
-        right: {
-          kind: "duration",
-          unit: "months",
-          amount: { kind: "literal", lit: "int", value: "1" },
-        },
-        leftType: DT,
-        resultType: DT,
-      },
-      right: { kind: "literal", lit: "now", value: "now" },
-    },
-  },
-  {
     name: "this.dueDate < param + days(2) (value-side temporal arithmetic, A5)",
     e: {
       kind: "binary",
@@ -459,27 +433,6 @@ describe("queryable-subset parity — validator admits ⊆ Drizzle lowers", () =
     };
     expect(firstNonQueryableNode(composite)).not.toBeNull();
     expect(lowerToDrizzle(composite, "things", ctx)).toBeNull();
-  });
-
-  it("A5: standalone months(n) is rejected BY NAME and unlowerable (no drift)", () => {
-    const bareMonths: ExprIR = {
-      kind: "binary",
-      op: "==",
-      left: {
-        kind: "member",
-        receiver: thisExpr,
-        member: "span",
-        receiverType: DT,
-        memberType: DT,
-      },
-      right: {
-        kind: "duration",
-        unit: "months",
-        amount: { kind: "literal", lit: "int", value: "1" },
-      },
-    };
-    expect(firstNonQueryableNode(bareMonths)).toBe("'months(...)' outside datetime ± position");
-    expect(lowerToDrizzle(bareMonths, "things", ctx)).toBeNull();
   });
 
   it("a non-queryable intrinsic in where-position is rejected BY NAME", () => {

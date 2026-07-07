@@ -138,18 +138,15 @@ const HCB_CAST = "((HibernateCriteriaBuilder) cb)";
 const HCB_IMPORT = "org.hibernate.query.criteria.HibernateCriteriaBuilder";
 
 /** `java.time.Duration` factory per ABSOLUTE duration unit — the constant/
- *  param amount path.  `months` is deliberately absent: a calendar month has
- *  no fixed width, so it goes through Hibernate's unit-tagged
- *  `duration(n, TemporalUnit.MONTH)` (→ SQL `interval` months — Postgres
- *  calendar arithmetic) instead of a java.time.Duration value. */
-const JAVA_DURATION_FACTORY: Record<Exclude<DurationExprIR["unit"], "months">, string> = {
+ *  param amount path. */
+const JAVA_DURATION_FACTORY: Record<DurationExprIR["unit"], string> = {
   days: "ofDays",
   hours: "ofHours",
   minutes: "ofMinutes",
 };
 
 /** A5 temporal — the candidate-path side of a comparison when it is a
- *  `datetime ± days/hours/minutes/months(n)` arithmetic over a path-rooted
+ *  `datetime ± days/hours/minutes(n)` arithmetic over a path-rooted
  *  datetime: renders Hibernate's Criteria duration arithmetic
  *  (`addDuration`/`subtractDuration`, → SQL interval arithmetic on
  *  Postgres).  Null when `e` is not that shape or its datetime operand is
@@ -178,17 +175,6 @@ function temporalPathExpr(e: Extract<ExprIR, { kind: "binary" }>, ctx: CriteriaC
 function criteriaDurationExpr(dur: DurationExprIR, ctx: CriteriaCtx): string {
   const amountSegs = pathSegments(dur.amount);
   const amountPath = amountSegs && amountSegs.length > 0 ? path(amountSegs, ctx) : null;
-  if (dur.unit === "months") {
-    // Calendar months — Hibernate's unit-tagged duration (no java.time
-    // representation exists; TemporalUnit.MONTH keeps the SQL side calendar-
-    // correct).  `duration(long, TemporalUnit)` takes the constant / param
-    // amount directly; a column amount scales a one-month duration.
-    ctx.imports.add("org.hibernate.query.common.TemporalUnit");
-    if (amountPath !== null) {
-      return `${HCB_CAST}.durationScaled(${amountPath}, ${HCB_CAST}.duration(1, TemporalUnit.MONTH))`;
-    }
-    return `${HCB_CAST}.duration(${value(dur.amount, ctx)}, TemporalUnit.MONTH)`;
-  }
   ctx.imports.add("java.time.Duration");
   const factory = JAVA_DURATION_FACTORY[dur.unit];
   if (amountPath !== null) {

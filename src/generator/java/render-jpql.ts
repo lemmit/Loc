@@ -184,18 +184,15 @@ function renderRef(e: Extract<ExprIR, { kind: "ref" }>, ctx: JpqlCtx): string {
 // HQL duration-unit keyword per Loom duration unit (A5 temporal) — the
 // `<magnitude> <unit>` "to duration" form of Hibernate 6+'s HQL grammar
 // (`toDurationExpression: expression datetimeField`), which translates to
-// native SQL interval arithmetic on Postgres.  `month` is calendar-correct
-// there (`timestamptz + interval '1 month'`), so the SQL side needs no
-// calendar special case.
+// native SQL interval arithmetic on Postgres.
 const HQL_DURATION_UNIT: Record<DurationUnit, string> = {
   days: "day",
   hours: "hour",
   minutes: "minute",
-  months: "month",
 };
 
 function renderBinary(e: Extract<ExprIR, { kind: "binary" }>, ctx: JpqlCtx): string {
-  // A5 temporal — `datetime ± days/hours/minutes/months(n)` renders as HQL
+  // A5 temporal — `datetime ± days/hours/minutes(n)` renders as HQL
   // duration arithmetic: `(e.dueDate + 30 day)`.  Works on BOTH sides of a
   // comparison (a column path navigates, a `:param` datetime binds, and the
   // amount likewise binds or navigates).  Only the DIRECT constructor

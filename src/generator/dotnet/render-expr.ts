@@ -1,7 +1,7 @@
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type { EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
-import { durationCtorOperand, monthsCtorOperand } from "../../ir/util/temporal.js";
+import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
   deepScopeAnchorClaim,
@@ -234,24 +234,15 @@ const CS_TARGET: ExprTarget<CsRenderContext> = {
   // native TimeSpan operators and `datetime ± duration` to the native
   // `DateTime ± TimeSpan` operators in `renderCsBinary`.
   //
-  // `months` is the calendar-relative exception — it has no absolute width
-  // (a TimeSpan cannot hold "a month").  The validator
-  // (`loom.duration-months-position`) restricts it to direct
-  // `datetime ± months(n)` position, where `renderCsBinary` sees the raw
-  // duration node on the operand and takes the `AddMonths` calendar path
-  // CONSUMING this leaf's output as the bare month COUNT.  So the months arm
-  // renders the count only — it never stands alone in valid output.
-  //
   // EF-translated positions (`ctx.efQuery` — find/view `Where`,
   // `HasQueryFilter`, criteria Specifications) render the bare count for
   // EVERY unit: the queryable gate admits ONLY the direct constructor
   // operand of a `datetime ± duration` shift there, and the EF binary arm
-  // (CS_TARGET_EF) consumes the count via `DateTime.Add{Days,Hours,Minutes,
-  // Months}` — the forms EF Core/Npgsql translate to SQL interval
-  // arithmetic (a bare `DateTime ± TimeSpan` operator is not reliably
-  // translatable).
+  // (CS_TARGET_EF) consumes the count via `DateTime.Add{Days,Hours,Minutes}`
+  // — the forms EF Core/Npgsql translate to SQL interval arithmetic (a bare
+  // `DateTime ± TimeSpan` operator is not reliably translatable).
   duration: (unit, amount, _e, ctx) => {
-    if (unit === "months" || ctx.efQuery) return `(${amount})`;
+    if (ctx.efQuery) return `(${amount})`;
     switch (unit) {
       case "days":
         return `TimeSpan.FromDays(${amount})`;
@@ -362,14 +353,12 @@ function renderCsBinary(left: string, right: string, e: BinaryExpr, efQuery: boo
 }
 
 /** `DateTime.Add<Unit>` method per duration unit (A5 temporal) — the EF
- *  where-position spelling.  EF Core/Npgsql translate all four to SQL
- *  interval arithmetic (`make_interval`), with `AddMonths` calendar-correct
- *  on the Postgres side. */
-const CS_ADD_METHOD: Record<"days" | "hours" | "minutes" | "months", string> = {
+ *  where-position spelling.  EF Core/Npgsql translate all three to SQL
+ *  interval arithmetic (`make_interval`). */
+const CS_ADD_METHOD: Record<"days" | "hours" | "minutes", string> = {
   days: "AddDays",
   hours: "AddHours",
   minutes: "AddMinutes",
-  months: "AddMonths",
 };
 
 /** The datetime-involving `+`/`-` arms (A5 temporal), or null to fall
@@ -381,10 +370,6 @@ const CS_ADD_METHOD: Record<"days" | "hours" | "minutes" | "months", string> = {
  *    datetime ± duration → datetime   ⇒ native `DateTime ± TimeSpan` — fall-through
  *    duration + datetime → datetime   ⇒ operand swap (`dt + span`; C# defines
  *                                       `DateTime + TimeSpan` but not the commuted form)
- *  with the calendar exception: when the duration operand is a direct
- *  `months(n)` constructor node (the only position the validator admits
- *  months in), the pre-rendered operand string is the bare month COUNT
- *  (see the `duration` leaf) and the shift goes through `AddMonths`.
  *
  *  EF query position (`efQuery === true`): the queryable gate
  *  (`firstNonQueryableNode`) admits ONLY the direct constructor operand —
@@ -419,14 +404,8 @@ function renderCsTemporalBinary(
   const prim = (t: TypeIR | undefined): string | null => (t?.kind === "primitive" ? t.name : null);
   const lt = prim(e.leftType);
   const rt = prim(e.resultType);
-  if (lt === "datetime" && rt === "datetime" && monthsCtorOperand(e.right)) {
-    // Calendar path — `right` is the months leaf's bare count.
-    const amount = e.op === "-" ? `-${right}` : right;
-    return `(${left}).AddMonths(${amount})`;
-  }
   // duration + datetime (commuted form; `duration - datetime` never types).
   if (lt === "duration" && e.op === "+" && rt === "datetime") {
-    if (monthsCtorOperand(e.left)) return `(${right}).AddMonths(${left})`;
     return `${right} + ${left}`;
   }
   return null;

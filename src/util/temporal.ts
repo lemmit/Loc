@@ -1,6 +1,6 @@
 // A5 temporal vocabulary — the duration-constructor builtins.
 //
-// `days(n)` / `hours(n)` / `minutes(n)` / `months(n)` are NOT grammar
+// `days(n)` / `hours(n)` / `minutes(n)` are NOT grammar
 // keywords: they parse as ordinary free calls (PostfixChain NameRef +
 // CallSuffix) and become `duration` ExprIR nodes during lowering ONLY
 // when the name does not resolve to any user declaration (a user
@@ -15,7 +15,7 @@
 // validators) and the IR layer (lowering) need the runtime vocabulary,
 // and `language/` may not take a runtime import from `ir/`.
 
-export const DURATION_UNITS = ["days", "hours", "minutes", "months"] as const;
+export const DURATION_UNITS = ["days", "hours", "minutes"] as const;
 
 export type DurationUnit = (typeof DURATION_UNITS)[number];
 
@@ -24,13 +24,14 @@ export function durationUnitOf(name: string): DurationUnit | undefined {
   return (DURATION_UNITS as readonly string[]).includes(name) ? (name as DurationUnit) : undefined;
 }
 
-/** Milliseconds per ABSOLUTE duration unit.  `months` is deliberately
- *  absent — a calendar month has no fixed millisecond width, which is
- *  why the validator (`loom.duration-months-position`) restricts
- *  `months(...)` to direct `datetime ± months(n)` position where each
- *  backend takes its native calendar path (JS `setMonth`, .NET
- *  `AddMonths`, java `Period`, python `relativedelta`, Elixir shift). */
-export const DURATION_UNIT_MS: Record<Exclude<DurationUnit, "months">, number> = {
+/** Milliseconds per duration unit.  `duration` is an ABSOLUTE span — every
+ *  unit has a fixed millisecond width, so every backend renders it uniformly
+ *  (JS ms-numbers, .NET `TimeSpan`, java `Duration`, python `timedelta`,
+ *  Elixir ms-integers) with no calendar arithmetic and no new dependency.
+ *  Calendar-relative offsets (`months`, `years`) are deliberately NOT part
+ *  of `duration` — they have no fixed width and would break that uniform
+ *  translation; if they return, it is as a distinct calendar/`period` type. */
+export const DURATION_UNIT_MS: Record<DurationUnit, number> = {
   days: 86_400_000,
   hours: 3_600_000,
   minutes: 60_000,

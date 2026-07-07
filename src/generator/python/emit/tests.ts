@@ -73,10 +73,8 @@ export function renderPyTestsFile(agg: AggregateIR, ctx: BoundedContextIR): stri
   const usesPytest = /\bpytest\./.test(bodyStr);
   const usesDatetime = /\bdatetime\./.test(bodyStr);
   // A5 temporal — test bodies render domain expressions, so duration
-  // constructors (`timedelta(...)`) / months shifts (`relativedelta(...)`)
-  // can appear and need their imports.
+  // constructors (`timedelta(...)`) can appear and need their imports.
   const usesTimedelta = /\btimedelta\(/.test(bodyStr);
-  const usesRelativedelta = /\brelativedelta\(/.test(bodyStr);
   const usesDecimal = /\bDecimal\(/.test(bodyStr);
   const usesMath = /\bmath\./.test(bodyStr);
   const usesActor = bodyStr.includes("SimpleNamespace(");
@@ -94,7 +92,6 @@ export function renderPyTestsFile(agg: AggregateIR, ctx: BoundedContextIR): stri
     ];
     out.push(`from datetime import ${names.join(", ")}`);
   }
-  if (usesRelativedelta) out.push("from dateutil.relativedelta import relativedelta");
   if (usesDecimal) out.push("from decimal import Decimal");
   if (usesActor) out.push("from types import SimpleNamespace");
   if (usesActor) out.push("from typing import cast");

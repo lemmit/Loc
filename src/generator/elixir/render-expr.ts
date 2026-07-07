@@ -6,7 +6,7 @@ import type {
   TypeIR,
 } from "../../ir/types/loom-ir.js";
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
-import { durationCtorOperand, monthsCtorOperand } from "../../ir/util/temporal.js";
+import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
   ORG_PATH_CLAIM_FIELD,
@@ -211,13 +211,6 @@ const ELIXIR_TARGET: ExprTarget<RenderCtx> = {
   // `datetime ± duration` dispatches through `DateTime.add/3` in
   // `renderBinary`'s temporal arm.  Self-parenthesized: the snippet lands in
   // arbitrary expression slots.
-  //
-  // `months` is the calendar-relative exception — it has no millisecond
-  // width.  The validator (`loom.duration-months-position`) restricts it to
-  // direct `datetime ± months(n)` position, where `renderBinary` sees the raw
-  // duration node on the operand and takes the calendar-shift path CONSUMING
-  // this leaf's output as the bare month COUNT.  So the months arm renders
-  // the count only — it never stands alone in valid output.
   duration: renderDurationInMemory,
   match: renderMatch,
   // Variant-`match` (variant-match.md) — a `case` over the union result's
@@ -264,13 +257,12 @@ const ELIXIR_FILTER_TARGET: ExprTarget<RenderCtx> = {
   // A5 temporal, where-position: inside an Ecto `where:` a duration
   // constructor renders as its BARE (parenthesized) COUNT — the queryable
   // gate (`firstNonQueryableNode`) only admits the DIRECT-constructor
-  // `datetime ± days/hours/minutes/months(n)` shape, so the enclosing
+  // `datetime ± days/hours/minutes(n)` shape, so the enclosing
   // `binary` arm always consumes this output as the `make_interval` amount
   // (it reads the unit off the raw duration node; see
-  // `renderEctoTemporalBinary`).  Same contract as the in-memory months
-  // leaf: count-only, never standing alone in valid output.  A pinned param
-  // amount arrives pre-rendered as `^n`, so the emit is `(^n)` — parens are
-  // AST-transparent to the Ecto query compiler.
+  // `renderEctoTemporalBinary`).  Count-only, never standing alone in valid
+  // output.  A pinned param amount arrives pre-rendered as `^n`, so the emit
+  // is `(^n)` — parens are AST-transparent to the Ecto query compiler.
   duration: (_unit, amount) => `(${amount})`,
 };
 
@@ -1087,14 +1079,6 @@ function renderDecimalBinary(op: BinOp, l: string, r: string): string {
 // the `:millisecond` unit.  days/hours/minutes are whole seconds, so a
 // shifted value still casts cleanly into a second-precision `:utc_datetime`
 // column.
-//
-// `months(n)` is calendar arithmetic with no fixed width; the generated
-// `mix.exs` pins `elixir: "~> 1.16"`, which admits 1.16 where
-// `DateTime.shift/2` (1.17+) does not exist — so the calendar shift is
-// hand-rolled: a whole-month index shift with the day clamped to the target
-// month's last day (`Jan 31 + 1 month → Feb 28/29`), matching Postgres
-// `make_interval(months => n)` (the where-position twin below), .NET
-// `AddMonths`, Java `plusMonths`, and Python `relativedelta`.
 // ---------------------------------------------------------------------------
 
 /** The in-memory duration-constructor leaf (shared by `ELIXIR_TARGET` and
@@ -1107,10 +1091,6 @@ function renderDurationInMemory(unit: DurationUnit, amount: string): string {
       return `((${amount}) * ${DURATION_UNIT_MS.hours})`;
     case "minutes":
       return `((${amount}) * ${DURATION_UNIT_MS.minutes})`;
-    case "months":
-      // Bare count — consumed only by the binary calendar arm; the validator
-      // (`loom.duration-months-position`) makes other positions unreachable.
-      return `(${amount})`;
   }
 }
 
@@ -1122,30 +1102,13 @@ function isNowLiteral(e: ExprIR): boolean {
   return e.kind === "literal" && e.lit === "now";
 }
 
-/** The hand-rolled calendar month shift (see the section comment): an
- *  immediately-applied `fn` so the datetime operand is evaluated once.
- *  `count` is the months leaf's output (the bare parenthesized amount);
- *  `Integer.floor_div`/`Integer.mod` keep a backwards shift across a year
- *  boundary correct (truncating `div/rem` would not). */
-function calendarShift(dt: string, sign: "+" | "-", count: string): string {
-  return (
-    `(fn dt -> total = dt.year * 12 + dt.month - 1 ${sign} ${count}; ` +
-    `y = Integer.floor_div(total, 12); m = Integer.mod(total, 12) + 1; ` +
-    `%{dt | year: y, month: m, day: min(dt.day, :calendar.last_day_of_the_month(y, m))} end).(${dt})`
-  );
-}
-
 /** The datetime-involving `+`/`-` arms (A5 temporal) for IN-MEMORY rendering
  *  (op / derived / invariant bodies, ExUnit tests, the document path), or
  *  null to fall through to native operator rendering.  Dispatch is
  *  type-driven off the lowering's `leftType`/`resultType` stamps:
  *    datetime − datetime → duration   ⇒ `DateTime.diff(l, r, :millisecond)`
  *    datetime ± duration → datetime   ⇒ `DateTime.add(l, ±r, :millisecond)`
- *    duration + datetime → datetime   ⇒ `DateTime.add(r, l, :millisecond)`
- *  with the calendar exception: when the duration operand is a direct
- *  `months(n)` constructor node (the only position the validator admits
- *  months in), the pre-rendered operand string is the bare month COUNT (see
- *  the `duration` leaf) and the shift goes through `calendarShift`. */
+ *    duration + datetime → datetime   ⇒ `DateTime.add(r, l, :millisecond)` */
 function renderTemporalBinary(l: string, r: string, e: BinaryExpr): string | null {
   if (e.op !== "+" && e.op !== "-") return null;
   const prim = (t: TypeIR | undefined): string | null => (t?.kind === "primitive" ? t.name : null);
@@ -1155,7 +1118,6 @@ function renderTemporalBinary(l: string, r: string, e: BinaryExpr): string | nul
     // datetime − datetime → milliseconds (the duration representation).
     if (e.op === "-" && rt === "duration") return `DateTime.diff(${l}, ${r}, :millisecond)`;
     if (rt === "datetime") {
-      if (monthsCtorOperand(e.right)) return calendarShift(l, e.op, r);
       return e.op === "+"
         ? `DateTime.add(${l}, ${r}, :millisecond)`
         : `DateTime.add(${l}, -(${r}), :millisecond)`;
@@ -1164,7 +1126,6 @@ function renderTemporalBinary(l: string, r: string, e: BinaryExpr): string | nul
   }
   // duration + datetime (commuted form; `duration - datetime` never types).
   if (lt === "duration" && e.op === "+" && rt === "datetime") {
-    if (monthsCtorOperand(e.left)) return calendarShift(r, "+", l);
     return `DateTime.add(${r}, ${l}, :millisecond)`;
   }
   return null;
@@ -1172,18 +1133,15 @@ function renderTemporalBinary(l: string, r: string, e: BinaryExpr): string | nul
 
 /** Postgres `make_interval` named-argument spelling per duration unit —
  *  the same table the TS backend's Drizzle lowerer uses
- *  (`repository-find-predicate.ts`); `months` is calendar-correct on the SQL
- *  side (`timestamp + make_interval(months => 1)` does native calendar
- *  arithmetic), so where-position needs no special month path. */
+ *  (`repository-find-predicate.ts`). */
 const MAKE_INTERVAL_ARG: Record<DurationUnit, string> = {
   days: "days",
   hours: "hours",
   minutes: "mins",
-  months: "months",
 };
 
 /** The where-position twin of `renderTemporalBinary` — `datetime ±
- *  days/hours/minutes/months(n)` inside an Ecto `where:` renders as SQL
+ *  days/hours/minutes(n)` inside an Ecto `where:` renders as SQL
  *  interval arithmetic: `fragment("? ± make_interval(days => ?)", side, n)`.
  *  Works on EITHER side of a comparison: a column (`record.due_date`)
  *  interpolates, a pinned param (`^q`) binds, and the amount likewise binds

@@ -25,7 +25,6 @@ const SRC = `
       orderedAt: datetime
       gracePeriod: int
       derived due: datetime = createdAt + days(30)
-      derived renewal: datetime = createdAt + months(1)
       operation slack(): bool {
         let span = deliveredAt - orderedAt
         let window = days(gracePeriod) + hours(2)
@@ -51,15 +50,6 @@ describe("A5 — duration lowering", () => {
     expect(dur.amount).toMatchObject({ kind: "literal", lit: "int", value: "30" });
     // Type stamps drive the backends' temporal dispatch — pin them.
     expect(bin.leftType).toMatchObject({ kind: "primitive", name: "datetime" });
-    expect(bin.resultType).toMatchObject({ kind: "primitive", name: "datetime" });
-  });
-
-  it("months(1) lowers to a months-unit duration node", async () => {
-    const loom = await lower(SRC);
-    const inv = allAggregates(loom).find((a) => a.name === "Invoice")!;
-    const renewal = inv.derived.find((d) => d.name === "renewal")!;
-    const bin = renewal.expr as BinaryExpr;
-    expect((bin.right as DurationExpr).unit).toBe("months");
     expect(bin.resultType).toMatchObject({ kind: "primitive", name: "datetime" });
   });
 
