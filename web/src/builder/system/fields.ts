@@ -127,9 +127,19 @@ export function baseSpecOf(type: TypeRef): BaseSpec {
 export function buildTypeRef(spec: TypeSpec): TypeRef {
   let base: TypeRef["base"];
   switch (spec.base.kind) {
-    case "primitive":
+    case "primitive": {
+      // `duration` is expression-only (A5 temporal): it is deliberately
+      // absent from the grammar's `PrimitiveType` rule, so it can never be
+      // a structural base type — only the `days/hours/minutes/months`
+      // constructors and temporal arithmetic produce it.  The IR-level
+      // `PrimitiveName` union carries it, so narrow it out here before
+      // building the grammar node.
+      if (spec.base.name === "duration") {
+        throw new Error("'duration' is not a storable primitive type (expression-only)");
+      }
       base = mkPrimitiveType({ $type: "PrimitiveType", name: spec.base.name });
       break;
+    }
     case "id":
       base = mkIdType({ $type: "IdType", target: { $refText: spec.base.target, ref: undefined } });
       break;
