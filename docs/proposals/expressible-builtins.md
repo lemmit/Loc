@@ -155,15 +155,43 @@ hierarchy-building and cross-tenant-scoped writes derive the path from the
 *target* org's `dataKey`, via a hand-written factory. That's the honest
 escape hatch, and it's already how the code works.
 
-**A cross-scope create is properly a workflow with explicit stamping.**
-Because it *reads another aggregate* (the target/parent org) to compute the
-path, it is orchestration — a **workflow**, by Loom's single-aggregate-vs-
-workflow layering, not an aggregate create. And it must **explicitly stamp**
-`dataKey`/`tenantId` to the target org, *overriding* the capability's
-self-scope default. This is the clean division the whole proposal pushes
-toward: **capability = the common-case default (self-scope stamp);
-workflow = the explicit cross-scope override.** The framework never needs
-to know about cross-scope writes — they are ordinary workflows. No new
+**Cross-scope creates — two framings, the second is preferred.**
+
+*Framing A (workflow + explicit stamp).* Because a cross-scope create
+*reads another aggregate* (the target org) to compute the path, it is
+orchestration — a **workflow**, by Loom's single-aggregate-vs-workflow
+layering — that explicitly stamps `dataKey`/`tenantId` to the target,
+overriding the capability's self-scope default. Works, but needs the
+override rule (open question 4) and a repo-let per create.
+
+*Framing B (ambient `organizationContext`) — PREFERRED.* Split the
+conflation in `currentUser.orgPath`: **`currentUser`** is the *principal*
+(identity, home org, permissions); **`organizationContext`** is the
+*operating tenant scope* — which org this request runs in, defaulting to
+the principal's home org but settable (authorization-gated) to another org
+in the principal's write-scope. Then **every** dataKey computation is the
+same unconditional stamp, the context varying rather than the stamp:
+
+| Case | Stamp |
+|---|---|
+| self-scope | `dataKey := organizationContext.orgPath` |
+| sub-org (registry) | `dataKey := organizationContext.orgPath + "." + id` |
+| cross-scope | *same* — set the context to the target org first |
+
+Framing B is strictly simpler: it **eliminates the repo-let** (the parent
+*is* the operating context — no row read to build the path), **removes the
+cross-scope workflow** for path purposes, and **dissolves open question 4**
+(there is no override — switching context is how you go cross-scope). It
+rides the existing **execution-context / scope-frame backbone** (a peer
+ambient accessor to `currentUser`). Its cost is real but *moved*: context
+establishment must be **authorization-gated** (you may only operate within
+your write-scope subtree — an unvalidated context switch is a cross-tenant
+write hole), and it resolves org→path **once per request** instead of per
+write. How the context is set (header / an explicit "act as" action / path
+segment) is an auth/transport design choice.
+
+Either way, the framework never needs to know about cross-scope writes —
+they are ordinary in-language stamps + an ambient context frame. No new
 magic.
 
 The remaining `deep`/`global` **subtree reads** are ordinary `filter`s
@@ -329,15 +357,17 @@ shape-triggering) so no name silently carries framework meaning.
    `old` inside a `stamp onUpdate`; confirm the pre-image scope extends to
    stamp bodies, not just `onWrite precondition`. (The simulation confirms
    it's *needed*; the question is the scope-plumbing.)
-4. **Cross-scope stamp override** — a cross-scope create is a workflow that
-   explicitly stamps `dataKey`/`tenantId` to the *target* org, which must
-   override the `tenantOwned` capability's unconditional `onCreate`
-   self-stamp. Resolve by (1) the self-stamp being a *default* the
-   orchestrated create bypasses, or (2) override-after (a workflow writing
-   `internal` fields). Option 1 is cleaner but needs an "explicit value
-   beats capability default" rule. (Only bites for a **regular
-   `tenantOwned`** aggregate created on behalf of another org; the registry
-   is stance `"registry"` and never gets the self-stamp.)
+4. **`organizationContext` (preferred cross-scope resolution)** — split
+   `currentUser` (principal) from `organizationContext` (operating tenant
+   scope). This makes every dataKey a single unconditional stamp off
+   `organizationContext.orgPath` and dissolves the cross-scope "stamp
+   override" problem (context varies, not the stamp). Open design surface:
+   (a) how the context is set (header / "act as" action / path); (b) the
+   authorization gate (you may only operate within your write-scope subtree
+   — an unvalidated switch is a cross-tenant write hole); (c) whether it's a
+   new frame on the existing execution-context backbone or a fresh accessor.
+   Without it, the fallback is the workflow-with-explicit-stamp framing,
+   which then needs an "explicit value beats capability default" rule.
 
 **Resolved by the simulation:** no storage shape needs gating out (all four
 have an atomic write mechanism today); write-guards require an `old`
