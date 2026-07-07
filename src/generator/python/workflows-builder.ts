@@ -164,8 +164,16 @@ export function buildPyWorkflowsFile(
     `"""Workflow routes.  Auto-generated."""`,
     "",
     refersTo("math") ? "import math" : null,
-    refersTo("datetime") ? "from datetime import UTC, datetime" : null,
+    // A5 temporal — workflow bodies render domain expressions, so
+    // `timedelta` / `relativedelta` ride in on use (like UTC/datetime).
+    refersTo("datetime") || refersTo("timedelta")
+      ? `from datetime import ${[
+          ...(refersTo("datetime") ? ["UTC", "datetime"] : []),
+          ...(refersTo("timedelta") ? ["timedelta"] : []),
+        ].join(", ")}`
+      : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
+    refersTo("relativedelta") ? "from dateutil.relativedelta import relativedelta" : null,
     `from fastapi import ${[
       "APIRouter",
       "Depends",

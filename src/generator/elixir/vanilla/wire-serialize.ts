@@ -90,6 +90,11 @@ function derivedRenderable(e: ExprIR, scope: ReadonlySet<string> = new Set()): b
       return derivedRenderable(e.value, scope);
     case "binary":
       return derivedRenderable(e.left, scope) && derivedRenderable(e.right, scope);
+    case "duration":
+      // A5 temporal — a duration constructor renders in-memory (integer ms /
+      // the calendar-shift count; see render-expr.ts), so a temporal derived
+      // (`derived due: datetime = createdAt + days(30)`) projects cleanly.
+      return derivedRenderable(e.amount, scope);
     case "ternary":
       return (
         derivedRenderable(e.cond, scope) &&

@@ -72,21 +72,29 @@ export function renderPyTestsFile(agg: AggregateIR, ctx: BoundedContextIR): stri
     .sort();
   const usesPytest = /\bpytest\./.test(bodyStr);
   const usesDatetime = /\bdatetime\./.test(bodyStr);
+  // A5 temporal — test bodies render domain expressions, so duration
+  // constructors (`timedelta(...)`) / months shifts (`relativedelta(...)`)
+  // can appear and need their imports.
+  const usesTimedelta = /\btimedelta\(/.test(bodyStr);
+  const usesRelativedelta = /\brelativedelta\(/.test(bodyStr);
   const usesDecimal = /\bDecimal\(/.test(bodyStr);
   const usesMath = /\bmath\./.test(bodyStr);
   const usesActor = bodyStr.includes("SimpleNamespace(");
 
   const out: string[] = [];
   out.push(`"""Domain tests for ${agg.name}.  Auto-generated."""`);
-  if (usesDatetime || usesDecimal || usesMath || usesPytest || usesActor) out.push("");
-  if (usesMath) out.push("import math");
-  if (usesDatetime) {
-    out.push(
-      /\bUTC\b/.test(bodyStr)
-        ? "from datetime import UTC, datetime"
-        : "from datetime import datetime",
-    );
+  if (usesDatetime || usesTimedelta || usesDecimal || usesMath || usesPytest || usesActor) {
+    out.push("");
   }
+  if (usesMath) out.push("import math");
+  if (usesDatetime || usesTimedelta) {
+    const names = [
+      ...(usesDatetime ? (/\bUTC\b/.test(bodyStr) ? ["UTC", "datetime"] : ["datetime"]) : []),
+      ...(usesTimedelta ? ["timedelta"] : []),
+    ];
+    out.push(`from datetime import ${names.join(", ")}`);
+  }
+  if (usesRelativedelta) out.push("from dateutil.relativedelta import relativedelta");
   if (usesDecimal) out.push("from decimal import Decimal");
   if (usesActor) out.push("from types import SimpleNamespace");
   if (usesActor) out.push("from typing import cast");

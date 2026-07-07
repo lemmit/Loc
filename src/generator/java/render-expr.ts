@@ -1,5 +1,6 @@
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type { EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
+import { monthsCtorOperand } from "../../ir/util/temporal.js";
 import { intrinsicKey } from "../../util/intrinsics.js";
 import {
   escapeJavaIdent,
@@ -125,6 +126,16 @@ export function collectJavaExprImports(e: ExprIR, into: Set<string> = new Set())
       } else if ((e.op === "==" || e.op === "!=") && needsObjectsEquals(lt, e)) {
         into.add("java.util.Objects");
       }
+      // A5 temporal — `datetime - datetime` renders `Duration.between(…)`.
+      if (
+        e.op === "-" &&
+        e.resultType?.kind === "primitive" &&
+        e.resultType.name === "duration" &&
+        lt?.kind === "primitive" &&
+        lt.name === "datetime"
+      ) {
+        into.add("java.time.Duration");
+      }
       visit(e.left);
       visit(e.right);
       return into;
@@ -165,6 +176,14 @@ export function collectJavaExprImports(e: ExprIR, into: Set<string> = new Set())
     case "list":
       into.add("java.util.List");
       for (const el of e.elements) visit(el);
+      return into;
+    case "duration":
+      // A5 temporal — an absolute duration constructor renders
+      // `Duration.ofDays(…)` etc.  `months` renders a bare count consumed
+      // by the binary calendar arm (fully-qualified ZoneOffset there), so
+      // it needs no import.
+      if (e.unit !== "months") into.add("java.time.Duration");
+      visit(e.amount);
       return into;
     default:
       // this | id | ref — leaves with no sub-expressions.
@@ -228,6 +247,9 @@ export function collectJavaRegexLiterals(e: ExprIR, into: Set<string> = new Set(
     case "list":
       for (const el of e.elements) visit(el);
       break;
+    case "duration":
+      visit(e.amount);
+      break;
     default:
       break;
   }
@@ -279,7 +301,15 @@ function needsObjectsEquals(t: TypeIR | undefined, e: BinaryExpr): boolean {
   if (comparesNullLiteral(e)) return false;
   if (!t) return false;
   if (t.kind === "primitive") {
-    return t.name === "string" || t.name === "datetime" || t.name === "guid" || t.name === "json";
+    return (
+      t.name === "string" ||
+      t.name === "datetime" ||
+      t.name === "guid" ||
+      t.name === "json" ||
+      // A5 temporal — a duration is a java.time.Duration reference
+      // (Duration.equals is exact and consistent with compareTo).
+      t.name === "duration"
+    );
   }
   return t.kind === "id" || t.kind === "valueobject" || t.kind === "entity" || t.kind === "array";
 }
@@ -317,6 +347,31 @@ const JAVA_TARGET: ExprTarget<JavaRenderContext> = {
   binary: renderBinary,
   ternary: (cond, then, otherwise) => `${cond} ? ${then} : ${otherwise}`,
   convert: (value, e) => renderJavaConvert(e.target, e.from, value),
+  // A5 temporal: a Loom ABSOLUTE duration value is a `java.time.Duration`
+  // on this backend, so `duration ± duration` / `duration * int` go through
+  // the Duration method API and `datetime ± duration` through
+  // `Instant.plus/minus` in `renderBinary`.
+  //
+  // `months` is the calendar-relative exception — it has no fixed width
+  // (java.time.Duration cannot hold "a month").  The validator
+  // (`loom.duration-months-position`) restricts it to direct
+  // `datetime ± months(n)` position, where `renderBinary` sees the raw
+  // duration node on the operand and takes the UTC calendar path
+  // (`atOffset(UTC).plusMonths(…).toInstant()`) CONSUMING this leaf's
+  // output as the bare month COUNT.  So the months arm renders the count
+  // only — it never stands alone in valid output.
+  duration: (unit, amount) => {
+    switch (unit) {
+      case "days":
+        return `Duration.ofDays(${amount})`;
+      case "hours":
+        return `Duration.ofHours(${amount})`;
+      case "minutes":
+        return `Duration.ofMinutes(${amount})`;
+      case "months":
+        return `(${amount})`;
+    }
+  },
   match(arms, otherwise) {
     // Right-folded ternary chain, same semantics as the TS / C# leaves.
     let out = otherwise ?? "null";
@@ -709,6 +764,10 @@ function renderBinary(l: string, r: string, e: BinaryExpr): string {
   if (isMoneyLike(lt)) {
     return renderMoneyBinary(e.op, l, r);
   }
+  // A5 temporal: datetime ± duration / datetime − datetime / duration ±
+  // duration / duration × int — all method-based on java.time.
+  const temporal = renderTemporalBinary(l, r, e);
+  if (temporal !== null) return temporal;
   if (e.op === "==" || e.op === "!=") {
     if (comparesNullLiteral(e)) return `${l} ${e.op} ${r}`;
     if (needsObjectsEquals(lt, e)) {
@@ -723,7 +782,66 @@ function renderBinary(l: string, r: string, e: BinaryExpr): string {
     if (e.op === "<=") return `!${l}.isAfter(${r})`;
     if (e.op === ">=") return `!${l}.isBefore(${r})`;
   }
+  // Duration ordering — Comparable, so compareTo like money (isNegative /
+  // isPositive don't cover the two-operand form).
+  if (lt?.kind === "primitive" && lt.name === "duration") {
+    if (e.op === "<") return `${l}.compareTo(${r}) < 0`;
+    if (e.op === "<=") return `${l}.compareTo(${r}) <= 0`;
+    if (e.op === ">") return `${l}.compareTo(${r}) > 0`;
+    if (e.op === ">=") return `${l}.compareTo(${r}) >= 0`;
+  }
   return `${l} ${e.op} ${r}`;
+}
+
+/** The temporal `+`/`-`/`*` arms (A5), or null to fall through to the
+ *  default operator rendering.  Dispatch is type-driven off the lowering's
+ *  `leftType`/`resultType` stamps (Loom `datetime` is `Instant` here):
+ *    datetime − datetime → duration   ⇒ `Duration.between(r, l)`  (l − r)
+ *    datetime ± duration → datetime   ⇒ `l.plus(r)` / `l.minus(r)`
+ *    duration + datetime → datetime   ⇒ `r.plus(l)`   (commuted form)
+ *    duration ± duration → duration   ⇒ `l.plus(r)` / `l.minus(r)`
+ *    duration × int / int × duration  ⇒ `d.multipliedBy(n)`
+ *  with the calendar exception: when the duration operand is a direct
+ *  `months(n)` constructor node (the only position the validator admits
+ *  months in), the pre-rendered operand string is the bare month COUNT
+ *  (see the `duration` leaf) and — Instant having no plusMonths — the
+ *  shift hops through the UTC calendar:
+ *  `dt.atOffset(java.time.ZoneOffset.UTC).plusMonths(n).toInstant()`. */
+function renderTemporalBinary(l: string, r: string, e: BinaryExpr): string | null {
+  const prim = (t: TypeIR | undefined): string | null => {
+    const u = unwrapOptional(t);
+    return u?.kind === "primitive" ? u.name : null;
+  };
+  const lt = prim(e.leftType);
+  const rt = prim(e.resultType);
+  const calendarShift = (dt: string, sign: "+" | "-", count: string): string =>
+    `${dt}.atOffset(java.time.ZoneOffset.UTC).${sign === "+" ? "plusMonths" : "minusMonths"}(${count}).toInstant()`;
+  if (e.op === "+" || e.op === "-") {
+    if (lt === "datetime") {
+      // datetime − datetime → Duration (Loom `a - b` = a minus b, and
+      // `Duration.between(start, end)` = end − start).
+      if (e.op === "-" && rt === "duration") return `Duration.between(${r}, ${l})`;
+      if (rt === "datetime") {
+        if (monthsCtorOperand(e.right)) return calendarShift(l, e.op, r);
+        return `${l}.${e.op === "+" ? "plus" : "minus"}(${r})`;
+      }
+      return null;
+    }
+    if (lt === "duration") {
+      // duration + datetime (commuted; `duration - datetime` never types).
+      if (e.op === "+" && rt === "datetime") {
+        if (monthsCtorOperand(e.left)) return calendarShift(r, "+", l);
+        return `${r}.plus(${l})`;
+      }
+      if (rt === "duration") return `${l}.${e.op === "+" ? "plus" : "minus"}(${r})`;
+    }
+    return null;
+  }
+  // duration × int / int × duration — scaling.
+  if (e.op === "*" && rt === "duration") {
+    return lt === "duration" ? `${l}.multipliedBy(${r})` : `${r}.multipliedBy(${l})`;
+  }
+  return null;
 }
 
 function renderMoneyBinary(op: BinaryExpr["op"], l: string, r: string): string {
@@ -811,6 +929,10 @@ export function renderJavaType(t: TypeIR): string {
           return "UUID";
         case "json":
           return "JsonNode";
+        case "duration":
+          // A5 temporal — absolute duration as java.time.Duration.
+          // Expression-only (never a field / wire type in this slice).
+          return "Duration";
       }
     case "id":
       return `${t.targetName}Id`;
@@ -855,6 +977,7 @@ export function collectJavaTypeImports(t: TypeIR, into: Set<string> = new Set())
     case "primitive":
       if (t.name === "decimal" || t.name === "money") into.add("java.math.BigDecimal");
       if (t.name === "datetime") into.add("java.time.Instant");
+      if (t.name === "duration") into.add("java.time.Duration");
       if (t.name === "guid") into.add("java.util.UUID");
       if (t.name === "json") into.add("com.fasterxml.jackson.databind.JsonNode");
       return into;

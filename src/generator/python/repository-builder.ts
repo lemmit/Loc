@@ -261,7 +261,7 @@ export function buildPyRepositoryFile(
   ]
     .filter(refersTo)
     .sort();
-  const saNames = ["and_", "delete", "func", "not_", "or_", "select"].filter(refersTo);
+  const saNames = ["and_", "delete", "func", "literal", "not_", "or_", "select"].filter(refersTo);
 
   const hasProv = provenancedFieldsOf(agg).length > 0;
   const hasAudit = aggHasAuditedTarget(agg);
@@ -279,15 +279,27 @@ export function buildPyRepositoryFile(
       ...(hasAudit ? ["correlation_id", "parent_id", "scope_id"] : []),
     ]),
   ].sort();
+  // `datetime` (a temporal find param / `q: datetime` annotation) and `UTC`
+  // (a value-side `now()` → `datetime.now(UTC)` bind) ride in whenever the
+  // body references them — provenance/audit always stamp `datetime.now(UTC)`.
+  const dtNames = [
+    ...(hasProv || hasAudit || refersTo("UTC") ? ["UTC"] : []),
+    ...(hasProv || hasAudit || refersTo("datetime") ? ["datetime"] : []),
+  ];
   return lines(
     `"""${agg.name} repository.  Auto-generated."""`,
     "",
     refersTo("math") ? "import math" : null,
     refersTo("Sequence") ? "from collections.abc import Sequence" : null,
-    hasProv || hasAudit ? "from datetime import UTC, datetime" : null,
+    dtNames.length > 0 ? `from datetime import ${dtNames.join(", ")}` : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
     hasProv || hasAudit ? "from uuid import uuid4" : null,
-    refersTo("math") || refersTo("Sequence") || refersTo("Decimal") || hasProv || hasAudit
+    refersTo("math") ||
+      refersTo("Sequence") ||
+      refersTo("Decimal") ||
+      dtNames.length > 0 ||
+      hasProv ||
+      hasAudit
       ? ""
       : null,
     saNames.length > 0 ? `from sqlalchemy import ${saNames.join(", ")}` : null,

@@ -246,6 +246,7 @@ function renderFluentPredicate(e: ExprIR): string {
     case "call":
     case "new":
     case "convert":
+    case "duration":
     case "match":
     case "list":
     case "action-ref":

@@ -1,4 +1,5 @@
 import type { AggregateIR, ExprIR, FieldIR, TypeIR } from "../../ir/types/loom-ir.js";
+import { type DurationExprIR, durationCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
   isDeepScopeFilter,
@@ -129,12 +130,81 @@ export const JAVA_CRITERIA_INTRINSICS: Record<string, (recv: string, args: strin
   "money.ceil": (recv) => `cb.ceiling(${recv})`,
 };
 
-/** Candidate-path side of a comparison, rendered — a bare `this.a.b` path
- *  or a queryable intrinsic wrapping one (`this.name.trim()` →
- *  `cb.trim(root.<String>get("name"))`).  Null when `e` is not path-rooted
+// The generated Specification lambda receives the plain JPA
+// `CriteriaBuilder`; Hibernate's duration arithmetic lives on its
+// `HibernateCriteriaBuilder` subinterface (Spring Data always hands
+// Hibernate's SqmCriteriaNodeBuilder, so the downcast is total).
+const HCB_CAST = "((HibernateCriteriaBuilder) cb)";
+const HCB_IMPORT = "org.hibernate.query.criteria.HibernateCriteriaBuilder";
+
+/** `java.time.Duration` factory per ABSOLUTE duration unit — the constant/
+ *  param amount path.  `months` is deliberately absent: a calendar month has
+ *  no fixed width, so it goes through Hibernate's unit-tagged
+ *  `duration(n, TemporalUnit.MONTH)` (→ SQL `interval` months — Postgres
+ *  calendar arithmetic) instead of a java.time.Duration value. */
+const JAVA_DURATION_FACTORY: Record<Exclude<DurationExprIR["unit"], "months">, string> = {
+  days: "ofDays",
+  hours: "ofHours",
+  minutes: "ofMinutes",
+};
+
+/** A5 temporal — the candidate-path side of a comparison when it is a
+ *  `datetime ± days/hours/minutes/months(n)` arithmetic over a path-rooted
+ *  datetime: renders Hibernate's Criteria duration arithmetic
+ *  (`addDuration`/`subtractDuration`, → SQL interval arithmetic on
+ *  Postgres).  Null when `e` is not that shape or its datetime operand is
+ *  not path-rooted (an all-value temporal side — `q + hours(6)` — renders
+ *  as plain Java through `value()` instead and binds as one parameter).
+ *  Only the DIRECT constructor operand form reaches here — exactly what
+ *  `firstNonQueryableNode` admits. */
+function temporalPathExpr(e: Extract<ExprIR, { kind: "binary" }>, ctx: CriteriaCtx): string | null {
+  if (e.op !== "+" && e.op !== "-") return null;
+  const rightDur = durationCtorOperand(e.right);
+  const leftDur = e.op === "+" ? durationCtorOperand(e.left) : null;
+  const dur = rightDur ?? leftDur;
+  const other = rightDur ? e.left : leftDur ? e.right : null;
+  if (!dur || !other || durationCtorOperand(other)) return null;
+  const datetimePath = criteriaPathExpr(other, ctx);
+  if (datetimePath === null) return null;
+  ctx.imports.add(HCB_IMPORT);
+  const method = e.op === "+" ? "addDuration" : "subtractDuration";
+  return `${HCB_CAST}.${method}(${datetimePath}, ${criteriaDurationExpr(dur, ctx)})`;
+}
+
+/** The duration operand for `temporalPathExpr`, as either a plain
+ *  `java.time.Duration` value (constant / param amount — closed over by the
+ *  Specification and bound) or an `Expression<Duration>` (a COLUMN amount
+ *  scales a one-unit duration: `durationScaled(root.get("n"), …)`). */
+function criteriaDurationExpr(dur: DurationExprIR, ctx: CriteriaCtx): string {
+  const amountSegs = pathSegments(dur.amount);
+  const amountPath = amountSegs && amountSegs.length > 0 ? path(amountSegs, ctx) : null;
+  if (dur.unit === "months") {
+    // Calendar months — Hibernate's unit-tagged duration (no java.time
+    // representation exists; TemporalUnit.MONTH keeps the SQL side calendar-
+    // correct).  `duration(long, TemporalUnit)` takes the constant / param
+    // amount directly; a column amount scales a one-month duration.
+    ctx.imports.add("org.hibernate.query.common.TemporalUnit");
+    if (amountPath !== null) {
+      return `${HCB_CAST}.durationScaled(${amountPath}, ${HCB_CAST}.duration(1, TemporalUnit.MONTH))`;
+    }
+    return `${HCB_CAST}.duration(${value(dur.amount, ctx)}, TemporalUnit.MONTH)`;
+  }
+  ctx.imports.add("java.time.Duration");
+  const factory = JAVA_DURATION_FACTORY[dur.unit];
+  if (amountPath !== null) {
+    return `${HCB_CAST}.durationScaled(${amountPath}, Duration.${factory}(1))`;
+  }
+  return `Duration.${factory}(${value(dur.amount, ctx)})`;
+}
+
+/** Candidate-path side of a comparison, rendered — a bare `this.a.b` path,
+ *  a queryable intrinsic wrapping one (`this.name.trim()` →
+ *  `cb.trim(root.<String>get("name"))`), or datetime ± duration arithmetic
+ *  over one (A5 — `temporalPathExpr`).  Null when `e` is not path-rooted
  *  (i.e. it's the value side). */
 function criteriaPathExpr(e: ExprIR, ctx: CriteriaCtx): string | null {
   if (e.kind === "paren") return criteriaPathExpr(e.inner, ctx);
+  if (e.kind === "binary") return temporalPathExpr(e, ctx);
   if (e.kind === "method-call" && e.receiverType.kind === "primitive") {
     const sig = intrinsicFor(e.receiverType.name, e.member);
     const snippet = JAVA_CRITERIA_INTRINSICS[intrinsicKey(e.receiverType.name, e.member)];

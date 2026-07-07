@@ -124,10 +124,14 @@ export function buildPyEventSourcedRepositoryFile(
     `"""${agg.name} event-store repository.  Auto-generated."""`,
     "",
     refersTo("math") ? "import math" : null,
-    "from datetime import UTC, datetime",
+    // A5 temporal — in-memory find filters over rehydrated instances may
+    // reach for `timedelta` / `relativedelta`; UTC + datetime are always
+    // used (the event-store `at` stamp).
+    `from datetime import UTC, datetime${refersTo("timedelta") ? ", timedelta" : ""}`,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
     "from typing import cast",
     "",
+    refersTo("relativedelta") ? "from dateutil.relativedelta import relativedelta" : null,
     "from sqlalchemy import func, select",
     "from sqlalchemy.dialects.postgresql import insert",
     "from sqlalchemy.exc import IntegrityError",

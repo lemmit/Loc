@@ -36,6 +36,8 @@ import { firstNonQueryableNode } from "../../src/ir/validate/validate.js";
 
 const STR: TypeIR = { kind: "primitive", name: "string" };
 const BOOL: TypeIR = { kind: "primitive", name: "bool" };
+const DT: TypeIR = { kind: "primitive", name: "datetime" };
+const INT: TypeIR = { kind: "primitive", name: "int" };
 const VO: TypeIR = { kind: "valueobject", name: "Address" };
 const IDARR: TypeIR = {
   kind: "array",
@@ -307,6 +309,85 @@ const QUERYABLE: { name: string; e: ExprIR }[] = [
       },
     },
   },
+  // ---- A5 temporal — datetime ± duration constructor in where-position ----
+  {
+    name: "this.dueDate + days(param) < param (column-side temporal arithmetic, A5)",
+    e: {
+      kind: "binary",
+      op: "<",
+      left: {
+        kind: "binary",
+        op: "+",
+        left: {
+          kind: "member",
+          receiver: thisExpr,
+          member: "dueDate",
+          receiverType: DT,
+          memberType: DT,
+        },
+        right: {
+          kind: "duration",
+          unit: "days",
+          amount: { kind: "ref", name: "n", refKind: "param", type: INT },
+        },
+        leftType: DT,
+        resultType: DT,
+      },
+      right: { kind: "ref", name: "q", refKind: "param", type: DT },
+    },
+  },
+  {
+    name: "this.createdAt + months(1) >= now() (calendar unit + now literal, A5)",
+    e: {
+      kind: "binary",
+      op: ">=",
+      left: {
+        kind: "binary",
+        op: "+",
+        left: {
+          kind: "member",
+          receiver: thisExpr,
+          member: "createdAt",
+          receiverType: DT,
+          memberType: DT,
+        },
+        right: {
+          kind: "duration",
+          unit: "months",
+          amount: { kind: "literal", lit: "int", value: "1" },
+        },
+        leftType: DT,
+        resultType: DT,
+      },
+      right: { kind: "literal", lit: "now", value: "now" },
+    },
+  },
+  {
+    name: "this.dueDate < param + days(2) (value-side temporal arithmetic, A5)",
+    e: {
+      kind: "binary",
+      op: "<",
+      left: {
+        kind: "member",
+        receiver: thisExpr,
+        member: "dueDate",
+        receiverType: DT,
+        memberType: DT,
+      },
+      right: {
+        kind: "binary",
+        op: "+",
+        left: { kind: "ref", name: "q", refKind: "param", type: DT },
+        right: {
+          kind: "duration",
+          unit: "days",
+          amount: { kind: "literal", lit: "int", value: "2" },
+        },
+        leftType: DT,
+        resultType: DT,
+      },
+    },
+  },
 ];
 
 describe("queryable-subset parity — validator admits ⊆ Drizzle lowers", () => {
@@ -334,6 +415,71 @@ describe("queryable-subset parity — validator admits ⊆ Drizzle lowers", () =
     };
     expect(firstNonQueryableNode(bareVoProp)).not.toBeNull();
     expect(lowerToDrizzle(bareVoProp, "things", ctx)).toBeNull();
+  });
+
+  it("A5: a duration ± duration COMPOSITE operand is rejected in BOTH places (no drift)", () => {
+    // Only the DIRECT constructor form is queryable — `this.due + (days(1)
+    // + hours(2))` must be rejected by the gate AND unlowerable by Drizzle.
+    const composite: ExprIR = {
+      kind: "binary",
+      op: "<",
+      left: {
+        kind: "binary",
+        op: "+",
+        left: {
+          kind: "member",
+          receiver: thisExpr,
+          member: "dueDate",
+          receiverType: DT,
+          memberType: DT,
+        },
+        right: {
+          kind: "paren",
+          inner: {
+            kind: "binary",
+            op: "+",
+            left: {
+              kind: "duration",
+              unit: "days",
+              amount: { kind: "literal", lit: "int", value: "1" },
+            },
+            right: {
+              kind: "duration",
+              unit: "hours",
+              amount: { kind: "literal", lit: "int", value: "2" },
+            },
+            leftType: { kind: "primitive", name: "duration" },
+            resultType: { kind: "primitive", name: "duration" },
+          },
+        },
+        leftType: DT,
+        resultType: DT,
+      },
+      right: { kind: "ref", name: "q", refKind: "param", type: DT },
+    };
+    expect(firstNonQueryableNode(composite)).not.toBeNull();
+    expect(lowerToDrizzle(composite, "things", ctx)).toBeNull();
+  });
+
+  it("A5: standalone months(n) is rejected BY NAME and unlowerable (no drift)", () => {
+    const bareMonths: ExprIR = {
+      kind: "binary",
+      op: "==",
+      left: {
+        kind: "member",
+        receiver: thisExpr,
+        member: "span",
+        receiverType: DT,
+        memberType: DT,
+      },
+      right: {
+        kind: "duration",
+        unit: "months",
+        amount: { kind: "literal", lit: "int", value: "1" },
+      },
+    };
+    expect(firstNonQueryableNode(bareMonths)).toBe("'months(...)' outside datetime ± position");
+    expect(lowerToDrizzle(bareMonths, "things", ctx)).toBeNull();
   });
 
   it("a non-queryable intrinsic in where-position is rejected BY NAME", () => {

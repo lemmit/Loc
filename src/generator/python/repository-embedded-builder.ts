@@ -140,15 +140,21 @@ export function buildPyEmbeddedRepositoryFile(
   // `and_`/`or_`/`not_` ride in when a capability filter lowers to them; `func`
   // for a paged find's count; `select` for the reads + membership EXISTS.
   // (`insert` is the separate `sqlalchemy.dialects.postgresql` import below.)
-  const saNames = ["and_", "func", "not_", "or_", "select"].filter(refersTo);
+  const saNames = ["and_", "func", "literal", "not_", "or_", "select"].filter(refersTo);
+  // `UTC` rides in with a value-side `now()` bind (`datetime.now(UTC)`), A5
+  // temporal `where` arithmetic included.
+  const dtNames = [
+    ...(refersTo("UTC") ? ["UTC"] : []),
+    ...(refersTo("datetime") ? ["datetime"] : []),
+  ];
 
   return lines(
     `"""${agg.name} embedded repository (shape(embedded)).  Auto-generated."""`,
     "",
     refersTo("math") ? "import math" : null,
-    refersTo("datetime") ? "from datetime import datetime" : null,
+    dtNames.length > 0 ? `from datetime import ${dtNames.join(", ")}` : null,
     refersTo("Decimal") ? "from decimal import Decimal" : null,
-    refersTo("math") || refersTo("datetime") || refersTo("Decimal") ? "" : null,
+    refersTo("math") || dtNames.length > 0 || refersTo("Decimal") ? "" : null,
     refersTo("cast") ? "from typing import cast" : null,
     "",
     saNames.length > 0 ? `from sqlalchemy import ${saNames.join(", ")}` : null,

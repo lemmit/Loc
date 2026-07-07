@@ -64,6 +64,7 @@ import { isCollectionOp } from "../../util/collection-ops.js";
 import { isIntrinsicMatcher } from "../../util/intrinsic-matchers.js";
 import { intrinsicFor, intrinsicReturnType } from "../../util/intrinsics.js";
 import { PRINCIPAL_ORG_PATH, PRINCIPAL_ROOT_ORG } from "../../util/principal.js";
+import { durationUnitOf } from "../../util/temporal.js";
 import { findVerb, type ResourceVerbDef } from "../resource-verbs.js";
 import { variantTag } from "../stdlib/unions.js";
 import type {
@@ -407,6 +408,23 @@ function applySuffixToRecv(
         };
       }
       const callKind = resolveCallKind(recv.name, env);
+      // A5 duration constructor — `days(n)` / `hours(n)` / `minutes(n)` /
+      // `months(n)` becomes a dedicated `duration` IR node, but ONLY when
+      // the name resolved to nothing user-declared (`resolveCallKind`
+      // checks user functions / operations / VO ctors first, and the
+      // criterion probe above ran before this — so a user `function
+      // days(...)` shadows the builtin and lowers as a plain call).
+      // Wrong-arity calls fall through to the plain free call; the
+      // validator (`loom.duration-arity`) reports them.
+      if (callKind === "free" && args.length === 1) {
+        const unit = durationUnitOf(recv.name);
+        if (unit) {
+          return {
+            recv: { kind: "duration", unit, amount: args[0]! },
+            recvType: { kind: "primitive", name: "duration" },
+          };
+        }
+      }
       const callIR: ExprIR = {
         kind: "call",
         callKind,
@@ -1505,6 +1523,10 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
         else {
           const vo = findValueObjectByName(env, expr.head.name);
           if (vo) curType = { kind: "valueobject", name: vo.name };
+          // A5 duration constructor — checked after every user-decl
+          // lookup failed, mirroring the lowering's shadowing rule.
+          else if (durationUnitOf(expr.head.name))
+            curType = { kind: "primitive", name: "duration" };
           else curType = { kind: "primitive", name: "string" };
         }
       }
@@ -1789,6 +1811,34 @@ function binaryResultType(op: string, a: TypeIR, b: TypeIR): TypeIR {
     if (op === "*") return { kind: "primitive", name: "money" };
     if (op === "/" && aIsMoney) return { kind: "primitive", name: "money" };
     return a;
+  }
+  // A5 temporal — the env-free mirror of the type-system's
+  // `temporalArithmetic` (src/language/type-system.ts), so the lowered
+  // binary node's `resultType` stamp agrees with what `typeOf` reported
+  // and the backends' operand-type dispatch (datetime ± duration vs
+  // dt − dt) never re-infers.  Ill-typed combinations fall through to
+  // the left type (validator already reported them).
+  {
+    const an = a.kind === "primitive" ? a.name : undefined;
+    const bn = b.kind === "primitive" ? b.name : undefined;
+    if (an === "datetime" && bn === "duration" && (op === "+" || op === "-")) {
+      return { kind: "primitive", name: "datetime" };
+    }
+    if (an === "duration" && bn === "datetime" && op === "+") {
+      return { kind: "primitive", name: "datetime" };
+    }
+    if (an === "datetime" && bn === "datetime" && op === "-") {
+      return { kind: "primitive", name: "duration" };
+    }
+    if (an === "duration" && bn === "duration" && (op === "+" || op === "-")) {
+      return { kind: "primitive", name: "duration" };
+    }
+    if (
+      op === "*" &&
+      ((an === "duration" && bn === "int") || (an === "int" && bn === "duration"))
+    ) {
+      return { kind: "primitive", name: "duration" };
+    }
   }
   if (a.kind === "primitive" && b.kind === "primitive") {
     const order = ["int", "long", "decimal"] as const;

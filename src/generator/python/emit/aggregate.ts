@@ -240,9 +240,24 @@ export function renderPyAggregate(
     exprImports.has("math") ? "import math" : null,
     exprImports.has("re") ? "import re" : null,
     bodyUsesCast ? "from typing import cast" : null,
-    usesDatetime ? "from datetime import UTC, datetime" : null,
+    usesDatetime || exprImports.has("timedelta")
+      ? `from datetime import ${[
+          ...(usesDatetime ? ["UTC", "datetime"] : []),
+          ...(exprImports.has("timedelta") ? ["timedelta"] : []),
+        ].join(", ")}`
+      : null,
     usesDecimal ? "from decimal import Decimal" : null,
-    exprImports.has("math") || exprImports.has("re") || usesDatetime || usesDecimal ? "" : null,
+    // A5 temporal — `datetime ± months(n)` goes through dateutil's
+    // calendar-aware relativedelta (conditional dep, wired in index.ts).
+    exprImports.has("relativedelta") ? "from dateutil.relativedelta import relativedelta" : null,
+    exprImports.has("math") ||
+      exprImports.has("re") ||
+      exprImports.has("timedelta") ||
+      exprImports.has("relativedelta") ||
+      usesDatetime ||
+      usesDecimal
+      ? ""
+      : null,
     usesCurrentUser ? "from app.auth.user import User" : null,
     errorNames.length > 0 ? `from app.domain.errors import ${errorNames.join(", ")}` : null,
     `from app.domain.events import ${eventImports.join(", ")}`,

@@ -1,6 +1,7 @@
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type { EnrichedAggregateIR, ExprIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { refCollectionFieldName } from "../../ir/util/ref-collection.js";
+import { durationCtorOperand, monthsCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
   deepScopeAnchorClaim,
@@ -11,6 +12,7 @@ import {
 import { intrinsicKey } from "../../util/intrinsics.js";
 import { escapeCsharpIdent, upperFirst } from "../../util/naming.js";
 import {
+  type BinaryExpr,
   type CallExpr,
   type ExprTarget,
   type MemberExpr,
@@ -224,28 +226,41 @@ const CS_TARGET: ExprTarget<CsRenderContext> = {
   object: (fields) =>
     `new { ${fields.map((f) => `${upperFirst(f.name)} = ${f.value}`).join(", ")} }`,
   unary: (op, operand) => `${op}${operand}`,
-  binary: (left, right, e) => {
-    // Self-id vs scalar comparison (`this.id == currentUser.<claim>` — the
-    // derived tenancy registry self-scope, Phase 1b).  The entity's `Id` is
-    // the strongly-typed `<Agg>Id` record struct, so a raw scalar operand
-    // must be lifted into it: same-typed claims wrap directly
-    // (`new OrgId(claim)`), a `string` claim against a guid id parses first
-    // (`new OrgId(Guid.Parse(claim))`).  Inside an EF query filter the
-    // wrapped side references no lambda parameter, so EF funcletizes it into
-    // a query parameter and translates the comparison through the id's
-    // `HasConversion` — exactly like `GetByIdAsync`'s `x.Id == id`.  Scoped
-    // to the aggregate's OWN key (`this.id`) so `<Agg>Id` is guaranteed to
-    // exist; id-typed reference FIELDS are untouched.
-    if (e.op === "==" || e.op === "!=") {
-      const liftedRight = liftScalarToSelfId(e.left, e.right, right);
-      if (liftedRight) return `${left} ${e.op} ${liftedRight}`;
-      const liftedLeft = liftScalarToSelfId(e.right, e.left, left);
-      if (liftedLeft) return `${liftedLeft} ${e.op} ${right}`;
-    }
-    return `${left} ${e.op} ${right}`;
-  },
+  binary: (left, right, e) => renderCsBinary(left, right, e, false),
   ternary: (cond, then, otherwise) => `${cond} ? ${then} : ${otherwise}`,
   convert: (value, e) => renderCsConvert(e.target, e.from, value),
+  // A5 temporal: a Loom ABSOLUTE duration value is a `TimeSpan` on this
+  // backend, so `duration ± duration` / `duration * int` fall through to
+  // native TimeSpan operators and `datetime ± duration` to the native
+  // `DateTime ± TimeSpan` operators in `renderCsBinary`.
+  //
+  // `months` is the calendar-relative exception — it has no absolute width
+  // (a TimeSpan cannot hold "a month").  The validator
+  // (`loom.duration-months-position`) restricts it to direct
+  // `datetime ± months(n)` position, where `renderCsBinary` sees the raw
+  // duration node on the operand and takes the `AddMonths` calendar path
+  // CONSUMING this leaf's output as the bare month COUNT.  So the months arm
+  // renders the count only — it never stands alone in valid output.
+  //
+  // EF-translated positions (`ctx.efQuery` — find/view `Where`,
+  // `HasQueryFilter`, criteria Specifications) render the bare count for
+  // EVERY unit: the queryable gate admits ONLY the direct constructor
+  // operand of a `datetime ± duration` shift there, and the EF binary arm
+  // (CS_TARGET_EF) consumes the count via `DateTime.Add{Days,Hours,Minutes,
+  // Months}` — the forms EF Core/Npgsql translate to SQL interval
+  // arithmetic (a bare `DateTime ± TimeSpan` operator is not reliably
+  // translatable).
+  duration: (unit, amount, _e, ctx) => {
+    if (unit === "months" || ctx.efQuery) return `(${amount})`;
+    switch (unit) {
+      case "days":
+        return `TimeSpan.FromDays(${amount})`;
+      case "hours":
+        return `TimeSpan.FromHours(${amount})`;
+      case "minutes":
+        return `TimeSpan.FromMinutes(${amount})`;
+    }
+  },
   match(arms, otherwise) {
     // Lower a match expression to a chained C# ternary so it can appear
     // inside `derived` bodies, view binds, and other C#-rendered expression
@@ -302,8 +317,119 @@ const CS_TARGET: ExprTarget<CsRenderContext> = {
   list: (elements) => `new[] { ${elements.join(", ")} }`,
 };
 
+/** EF-translated-position twin of `CS_TARGET` (find/view `Where`,
+ *  `HasQueryFilter`, criteria Specifications — `ctx.efQuery`).  The `binary`
+ *  leaf has no ctx parameter on the `ExprTarget` contract, so the efQuery
+ *  flag rides on the target table instead: `renderCsExpr` picks this table
+ *  whenever the render context is an EF query, and the only divergence is
+ *  the temporal-binary arm (`DateTime.Add{Days,…}` instead of native
+ *  `DateTime ± TimeSpan` operators — see `renderCsTemporalBinary`). */
+const CS_TARGET_EF: ExprTarget<CsRenderContext> = {
+  ...CS_TARGET,
+  binary: (left, right, e) => renderCsBinary(left, right, e, true),
+};
+
 export function renderCsExpr(e: ExprIR, ctx: CsRenderContext = DEFAULT): string {
-  return renderExprWith(e, CS_TARGET, ctx);
+  return renderExprWith(e, ctx.efQuery ? CS_TARGET_EF : CS_TARGET, ctx);
+}
+
+function renderCsBinary(left: string, right: string, e: BinaryExpr, efQuery: boolean): string {
+  // A5 temporal — the datetime-involving `+`/`-` arms.  `duration ± duration`
+  // and `duration * int` stay native TimeSpan operator arithmetic and fall
+  // through to the default operator path below.
+  if (e.op === "+" || e.op === "-") {
+    const temporal = renderCsTemporalBinary(left, right, e, efQuery);
+    if (temporal !== null) return temporal;
+  }
+  // Self-id vs scalar comparison (`this.id == currentUser.<claim>` — the
+  // derived tenancy registry self-scope, Phase 1b).  The entity's `Id` is
+  // the strongly-typed `<Agg>Id` record struct, so a raw scalar operand
+  // must be lifted into it: same-typed claims wrap directly
+  // (`new OrgId(claim)`), a `string` claim against a guid id parses first
+  // (`new OrgId(Guid.Parse(claim))`).  Inside an EF query filter the
+  // wrapped side references no lambda parameter, so EF funcletizes it into
+  // a query parameter and translates the comparison through the id's
+  // `HasConversion` — exactly like `GetByIdAsync`'s `x.Id == id`.  Scoped
+  // to the aggregate's OWN key (`this.id`) so `<Agg>Id` is guaranteed to
+  // exist; id-typed reference FIELDS are untouched.
+  if (e.op === "==" || e.op === "!=") {
+    const liftedRight = liftScalarToSelfId(e.left, e.right, right);
+    if (liftedRight) return `${left} ${e.op} ${liftedRight}`;
+    const liftedLeft = liftScalarToSelfId(e.right, e.left, left);
+    if (liftedLeft) return `${liftedLeft} ${e.op} ${right}`;
+  }
+  return `${left} ${e.op} ${right}`;
+}
+
+/** `DateTime.Add<Unit>` method per duration unit (A5 temporal) — the EF
+ *  where-position spelling.  EF Core/Npgsql translate all four to SQL
+ *  interval arithmetic (`make_interval`), with `AddMonths` calendar-correct
+ *  on the Postgres side. */
+const CS_ADD_METHOD: Record<"days" | "hours" | "minutes" | "months", string> = {
+  days: "AddDays",
+  hours: "AddHours",
+  minutes: "AddMinutes",
+  months: "AddMonths",
+};
+
+/** The datetime-involving `+`/`-` arms (A5 temporal), or null to fall
+ *  through to native operator rendering.
+ *
+ *  In-memory (`efQuery === false`), dispatch is type-driven off the
+ *  lowering's `leftType`/`resultType` stamps, mirroring the TS renderer:
+ *    datetime − datetime → duration   ⇒ native `DateTime - DateTime` (TimeSpan) — fall-through
+ *    datetime ± duration → datetime   ⇒ native `DateTime ± TimeSpan` — fall-through
+ *    duration + datetime → datetime   ⇒ operand swap (`dt + span`; C# defines
+ *                                       `DateTime + TimeSpan` but not the commuted form)
+ *  with the calendar exception: when the duration operand is a direct
+ *  `months(n)` constructor node (the only position the validator admits
+ *  months in), the pre-rendered operand string is the bare month COUNT
+ *  (see the `duration` leaf) and the shift goes through `AddMonths`.
+ *
+ *  EF query position (`efQuery === true`): the queryable gate
+ *  (`firstNonQueryableNode`) admits ONLY the direct constructor operand —
+ *  paren-transparent, on EITHER side of the shift (`this.due + days(1) < q`,
+ *  `q + hours(6) > this.due`) — so the `duration` leaf rendered the bare
+ *  count for every unit and this arm spells the shift as
+ *  `(dt).Add<Unit>(n)`, the form EF Core/Npgsql translate to SQL interval
+ *  arithmetic.  Loom `datetime - datetime` in where-position is NOT lowered
+ *  — the gate rejects it, so no arm is needed here. */
+function renderCsTemporalBinary(
+  left: string,
+  right: string,
+  e: BinaryExpr,
+  efQuery: boolean,
+): string | null {
+  if (e.op !== "+" && e.op !== "-") return null;
+  if (efQuery) {
+    // Structural probe, mirroring exactly what the queryable gate admits
+    // (and the Drizzle lowerer translates): a direct ctor operand whose
+    // OTHER side is not itself a duration ctor.
+    const rightDur = durationCtorOperand(e.right);
+    if (rightDur && !durationCtorOperand(e.left)) {
+      const amount = e.op === "-" ? `-${right}` : right;
+      return `(${left}).${CS_ADD_METHOD[rightDur.unit]}(${amount})`;
+    }
+    const leftDur = e.op === "+" ? durationCtorOperand(e.left) : null;
+    if (leftDur && !durationCtorOperand(e.right)) {
+      return `(${right}).${CS_ADD_METHOD[leftDur.unit]}(${left})`;
+    }
+    return null;
+  }
+  const prim = (t: TypeIR | undefined): string | null => (t?.kind === "primitive" ? t.name : null);
+  const lt = prim(e.leftType);
+  const rt = prim(e.resultType);
+  if (lt === "datetime" && rt === "datetime" && monthsCtorOperand(e.right)) {
+    // Calendar path — `right` is the months leaf's bare count.
+    const amount = e.op === "-" ? `-${right}` : right;
+    return `(${left}).AddMonths(${amount})`;
+  }
+  // duration + datetime (commuted form; `duration - datetime` never types).
+  if (lt === "duration" && e.op === "+" && rt === "datetime") {
+    if (monthsCtorOperand(e.left)) return `(${right}).AddMonths(${left})`;
+    return `${right} + ${left}`;
+  }
+  return null;
 }
 
 /** When `idSide` is the aggregate's own key (`this.id`, id-typed) and
@@ -827,6 +953,11 @@ export function renderCsType(t: TypeIR): string {
           return "Guid";
         case "json":
           return "System.Text.Json.JsonElement";
+        case "duration":
+          // A5 temporal — absolute duration as a native TimeSpan.
+          // Expression-only (never a field / wire type in this slice);
+          // reachable for duration-typed locals in operation bodies.
+          return "TimeSpan";
       }
     case "id":
       return `${t.targetName}Id`;

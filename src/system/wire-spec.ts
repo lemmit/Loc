@@ -196,6 +196,9 @@ export function jsonPropertyForType(t: TypeIR, ref: RefResolver = bareRef): Json
         case "json":
           // Opaque blob — freeform object at the JSON boundary.
           return { type: "object" };
+        case "duration":
+          // A5: expression-only primitive — never a wire / schema type.
+          throw new Error("internal: 'duration' is expression-only and never reaches the wire");
       }
     // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the id valueType union is exhaustive (every arm returns)
     case "id":

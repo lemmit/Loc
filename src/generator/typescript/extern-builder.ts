@@ -149,6 +149,9 @@ function wireTsType(t: TypeIR): string {
           return "Date";
         case "json":
           return "unknown";
+        case "duration":
+          // A5: expression-only primitive — never an extern wire param.
+          throw new Error("internal: 'duration' is expression-only and never reaches the wire");
       }
     case "id":
       return "string";

@@ -5,6 +5,7 @@
 
 import { intrinsicFor } from "../../../util/intrinsics.js";
 import type { AggregateIR, BoundedContextIR, ExprIR } from "../../types/loom-ir.js";
+import { durationCtorOperand, isDatetimeTypedIR } from "../../util/temporal.js";
 import { isDeepScopeFilter } from "../../util/tenant-stance.js";
 import { walkExprDeep } from "../../util/walk.js";
 
@@ -216,8 +217,27 @@ export function firstNonQueryableNode(e: ExprIR): string | null {
         case "&&":
         case "||":
           return firstNonQueryableNode(e.left) ?? firstNonQueryableNode(e.right);
-        default:
+        default: {
+          // A5 temporal: `datetime ± days/hours/minutes/months(n)` IS
+          // queryable — the Drizzle lowerer renders SQL interval arithmetic
+          // (`col ± make_interval(days => n)`), and the other backends'
+          // universal renderers translate it natively.  Only the DIRECT
+          // constructor form is admitted (paren-transparent); a duration-
+          // typed `let` / a `duration ± duration` composite stays rejected —
+          // exactly the subset `lowerToDrizzle` lowers (see the parity test).
+          // Loom `datetime - datetime` in where-position also stays rejected
+          // (falls through: neither operand is a duration constructor).
+          if (e.op === "+" || e.op === "-") {
+            const rightDur = durationCtorOperand(e.right);
+            const leftDur = e.op === "+" ? durationCtorOperand(e.left) : null;
+            const dur = rightDur ?? leftDur;
+            const other = rightDur ? e.left : leftDur ? e.right : null;
+            if (dur && other && !durationCtorOperand(other) && isDatetimeTypedIR(other)) {
+              return firstNonQueryableNode(other) ?? firstNonQueryableNode(dur.amount);
+            }
+          }
           return `arithmetic '${e.op}'`;
+        }
       }
     case "member":
       // Reject any member access whose receiver evaluates to a
@@ -303,6 +323,17 @@ export function firstNonQueryableNode(e: ExprIR): string | null {
       // the query to avoid the conversion (e.g. cast on the DB
       // side via a `derived` projection if needed).
       return `conversion to '${e.target}'`;
+    case "duration":
+      // A5 temporal: a duration constructor is queryable when its amount
+      // is (a literal / param binds; a column interpolates) — the Drizzle
+      // lowerer renders it (ms on the value side, `make_interval` on the
+      // column side).  `months` is the exception: it has no absolute width,
+      // so it is only lowerable in direct `datetime ± months(n)` position
+      // (the binary arm above, which recurses into `amount` directly and
+      // never reaches this case) — standalone it is honestly rejected here,
+      // matching the AST validator's `loom.duration-months-position` gate.
+      if (e.unit === "months") return "'months(...)' outside datetime ± position";
+      return firstNonQueryableNode(e.amount);
     case "match":
       // `match { ... }` is a value-producing expression but contains
       // arbitrary arm conditions / values; it doesn't translate to a

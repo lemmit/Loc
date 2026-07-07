@@ -1,5 +1,6 @@
 import { unionInstanceName } from "../../ir/stdlib/unions.js";
 import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
+import { monthsCtorOperand } from "../../ir/util/temporal.js";
 import { intrinsicKey } from "../../util/intrinsics.js";
 import { escapePythonIdent, snake, upperFirst, workflowFnSnake } from "../../util/naming.js";
 import {
@@ -87,6 +88,31 @@ const PY_TARGET: ExprTarget<PyRenderContext> = {
   binary: renderBinary,
   ternary: (cond, then, otherwise) => `(${then} if ${cond} else ${otherwise})`,
   convert: (value, e) => renderPyConvert(e.target, e.from, value),
+  // A5 temporal: a Loom ABSOLUTE duration value is a stdlib
+  // `datetime.timedelta` on this backend, so `duration ± duration` /
+  // `duration * int` and `datetime ± duration` all fall through to the
+  // native operators in `renderBinary`.  The emitters import the name via
+  // `collectPyExprImports` (`from datetime import timedelta`).
+  //
+  // `months` is the calendar-relative exception — it has no absolute
+  // width (no timedelta).  The validator (`loom.duration-months-position`)
+  // restricts it to direct `datetime ± months(n)` position, where
+  // `renderBinary` sees the raw duration node on the operand and wraps
+  // THIS leaf's output — the bare month COUNT — in
+  // `dateutil.relativedelta.relativedelta(months=…)`.  So the months arm
+  // renders the count only; it never stands alone in valid output.
+  duration: (unit, amount) => {
+    switch (unit) {
+      case "days":
+        return `timedelta(days=(${amount}))`;
+      case "hours":
+        return `timedelta(hours=(${amount}))`;
+      case "minutes":
+        return `timedelta(minutes=(${amount}))`;
+      case "months":
+        return `(${amount})`;
+    }
+  },
   match(arms, otherwise) {
     // Python's `match` is a statement — lower to chained conditional
     // expressions so the result composes in any expression position.
@@ -188,6 +214,12 @@ export function collectPyExprImports(e: ExprIR, into: Set<string> = new Set()): 
       if (e.target === "money") into.add("decimal");
       collectPyExprImports(e.value, into);
       return into;
+    case "duration":
+      // A5 temporal — an absolute constructor renders `timedelta(...)`; a
+      // `months(n)` node makes the enclosing binary arm render
+      // `relativedelta(months=…)` (the leaf itself is just the count).
+      into.add(e.unit === "months" ? "relativedelta" : "timedelta");
+      return collectPyExprImports(e.amount, into);
     case "lambda":
       if (e.body) collectPyExprImports(e.body, into);
       return into;
@@ -533,9 +565,42 @@ function renderNew(
 }
 
 function renderBinary(left: string, right: string, e: Extract<ExprIR, { kind: "binary" }>): string {
+  // A5 temporal — Python's datetime/timedelta overload the native
+  // operators (`datetime ± timedelta`, `datetime - datetime → timedelta`,
+  // timedelta algebra/scaling), so only the calendar-relative `months`
+  // needs a dedicated arm.
+  if (e.op === "+" || e.op === "-") {
+    const calendar = renderCalendarBinary(left, right, e);
+    if (calendar !== null) return calendar;
+  }
   // Python's `Decimal` overloads the native operators precisely, so
   // money needs no method-dispatch detour (unlike decimal.js).
   return `${left} ${pyBinOp(e.op)} ${right}`;
+}
+
+/** The `datetime ± months(n)` calendar arm (A5 temporal), or null to fall
+ *  through to native operator rendering.  When the duration operand is a
+ *  direct `months(n)` constructor node (the only position the validator
+ *  admits months in), the pre-rendered operand string is the bare month
+ *  COUNT (see the `duration` leaf) and the shift goes through
+ *  `dateutil.relativedelta.relativedelta`, which the native `±` operators
+ *  compose with (`dt + relativedelta(months=(1))`). */
+function renderCalendarBinary(
+  left: string,
+  right: string,
+  e: Extract<ExprIR, { kind: "binary" }>,
+): string | null {
+  const prim = (t: TypeIR | undefined): string | null => (t?.kind === "primitive" ? t.name : null);
+  const lt = prim(e.leftType);
+  const rt = prim(e.resultType);
+  if (lt === "datetime" && rt === "datetime" && monthsCtorOperand(e.right)) {
+    return `${left} ${e.op} relativedelta(months=${right})`;
+  }
+  // months(n) + datetime (commuted form; `months(n) - datetime` never types).
+  if (lt === "duration" && e.op === "+" && rt === "datetime" && monthsCtorOperand(e.left)) {
+    return `${right} + relativedelta(months=${left})`;
+  }
+  return null;
 }
 
 function pyBinOp(op: BinOp): string {
@@ -571,6 +636,10 @@ export function renderPyType(t: TypeIR): string {
           return "datetime";
         case "json":
           return "object";
+        case "duration":
+          // A5 temporal — absolute duration as `datetime.timedelta`.
+          // Expression-only (never a field / wire type in this slice).
+          return "timedelta";
       }
     case "id":
       return `${t.targetName}Id`;

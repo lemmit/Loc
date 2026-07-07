@@ -1,8 +1,10 @@
 import { genericShape } from "../../ir/stdlib/generics.js";
 import { variantTag } from "../../ir/stdlib/unions.js";
 import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
+import { monthsCtorOperand } from "../../ir/util/temporal.js";
 import { intrinsicKey } from "../../util/intrinsics.js";
 import { escapeTsIdent, lowerFirst, upperFirst, workflowFnCamel } from "../../util/naming.js";
+import { DURATION_UNIT_MS } from "../../util/temporal.js";
 import {
   type ExprTarget,
   type MarkedText,
@@ -91,6 +93,30 @@ const TS_TARGET: ExprTarget<TsRenderContext> = {
   binary: renderBinary,
   ternary: (cond, then, otherwise) => `${cond} ? ${then} : ${otherwise}`,
   convert: (value, e) => renderTsConvert(e.target, e.from, value),
+  // A5 temporal: a Loom ABSOLUTE duration value is plain MILLISECONDS (a
+  // `number`) on this backend, so `duration ± duration` / `duration * int`
+  // fall through to native numeric operators and `datetime ± duration`
+  // becomes `.getTime()` arithmetic in `renderBinary`.  Self-parenthesized:
+  // the snippet lands in arbitrary expression slots.
+  //
+  // `months` is the calendar-relative exception — it has no millisecond
+  // width.  The validator (`loom.duration-months-position`) restricts it to
+  // direct `datetime ± months(n)` position, where `renderBinary` sees the
+  // raw duration node on the operand and takes the `setMonth` calendar path
+  // CONSUMING this leaf's output as the bare month COUNT.  So the months arm
+  // renders the count only — it never stands alone in valid output.
+  duration: (unit, amount) => {
+    switch (unit) {
+      case "days":
+        return `((${amount}) * ${DURATION_UNIT_MS.days})`;
+      case "hours":
+        return `((${amount}) * ${DURATION_UNIT_MS.hours})`;
+      case "minutes":
+        return `((${amount}) * ${DURATION_UNIT_MS.minutes})`;
+      case "months":
+        return `(${amount})`;
+    }
+  },
   match(arms, otherwise) {
     // Lower a match expression to a chained ternary so it can appear inside
     // `derived` bodies, view binds, and other TS-rendered expression
@@ -470,9 +496,58 @@ function renderBinary(left: string, right: string, e: Extract<ExprIR, { kind: "b
   if (e.leftType?.kind === "primitive" && e.leftType.name === "money") {
     return renderMoneyBinary(e.op, left, right);
   }
+  // A5 temporal: datetime ± duration / datetime − datetime / duration +
+  // datetime.  duration ± duration and duration * int stay native number
+  // arithmetic (a duration is plain milliseconds on this backend) and fall
+  // through to the default operator path below.
+  if (e.op === "+" || e.op === "-") {
+    const temporal = renderTemporalBinary(left, right, e);
+    if (temporal !== null) return temporal;
+  }
   // Equality comparisons in TS: prefer === / !==
   const opPrint = e.op === "==" ? "===" : e.op === "!=" ? "!==" : e.op;
   return `${left} ${opPrint} ${right}`;
+}
+
+/** The datetime-involving `+`/`-` arms (A5 temporal), or null to fall
+ *  through to native operator rendering.  Dispatch is type-driven off the
+ *  lowering's `leftType`/`resultType` stamps:
+ *    datetime − datetime → duration   ⇒ `((l).getTime() - (r).getTime())`
+ *    datetime ± duration → datetime   ⇒ `new Date((l).getTime() ± (r))`
+ *    duration + datetime → datetime   ⇒ `new Date((r).getTime() + (l))`
+ *  with the calendar exception: when the duration operand is a direct
+ *  `months(n)` constructor node (the only position the validator admits
+ *  months in), the pre-rendered operand string is the bare month COUNT
+ *  (see the `duration` leaf) and the shift goes through `setMonth`. */
+function renderTemporalBinary(
+  left: string,
+  right: string,
+  e: Extract<ExprIR, { kind: "binary" }>,
+): string | null {
+  if (e.op !== "+" && e.op !== "-") return null;
+  const prim = (t: TypeIR | undefined): string | null => (t?.kind === "primitive" ? t.name : null);
+  const lt = prim(e.leftType);
+  const rt = prim(e.resultType);
+  // Calendar path: `(d => { const r = new Date(d); r.setMonth(r.getMonth()
+  // ± (n)); return r; })(dt)` — `count` is the months leaf's output (the
+  // bare parenthesized amount).
+  const calendarShift = (dt: string, sign: "+" | "-", count: string): string =>
+    `((d) => { const r = new Date(d); r.setMonth(r.getMonth() ${sign} ${count}); return r; })(${dt})`;
+  if (lt === "datetime") {
+    // datetime − datetime → milliseconds (the duration representation).
+    if (e.op === "-" && rt === "duration") return `((${left}).getTime() - (${right}).getTime())`;
+    if (rt === "datetime") {
+      if (monthsCtorOperand(e.right)) return calendarShift(left, e.op, right);
+      return `new Date((${left}).getTime() ${e.op} (${right}))`;
+    }
+    return null;
+  }
+  // duration + datetime (commuted form; `duration - datetime` never types).
+  if (lt === "duration" && e.op === "+" && rt === "datetime") {
+    if (monthsCtorOperand(e.left)) return calendarShift(right, "+", left);
+    return `new Date((${right}).getTime() + (${left}))`;
+  }
+  return null;
 }
 
 const MONEY_METHOD: Record<string, string | undefined> = {
@@ -526,6 +601,10 @@ export function renderTsType(t: TypeIR): string {
           return "boolean";
         case "datetime":
           return "Date";
+        case "duration":
+          // A5 temporal — absolute duration as plain milliseconds.
+          // Expression-only (never a field / wire type in this slice).
+          return "number";
         case "json":
           return "unknown";
       }

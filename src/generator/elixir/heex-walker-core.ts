@@ -53,7 +53,9 @@ import type {
   UiIR,
   ValueObjectIR,
 } from "../../ir/types/loom-ir.js";
+import { monthsCtorOperand } from "../../ir/util/temporal.js";
 import { elixirString, humanize, snake, upperFirst } from "../../util/naming.js";
+import { DURATION_UNIT_MS, type DurationUnit } from "../../util/temporal.js";
 import { tryRenderGate } from "../_frontend/gate-expr.js";
 import { WALKER_PRIMITIVES } from "../_walker/registry.js";
 import { heexTarget, renderHeexStoreActionCall, renderHeexStoreFieldRead } from "./heex-target.js";
@@ -429,6 +431,14 @@ export function renderExpr(expr: ExprIR, ctx: WalkContext): string {
       }
       return v;
     }
+    case "duration":
+      // A5 temporal — an absolute duration is plain integer MILLISECONDS
+      // (mirrors the domain renderer, `render-expr.ts`); `months` renders its
+      // bare count, consumed only by `renderBinary`'s calendar arm (the
+      // validator restricts months to `datetime ± months(n)` position).
+      // Duration values rarely reach a page body (they mostly arise in
+      // domain expressions), but a page-level `dt + days(n)` is valid DSL.
+      return renderDuration(expr.unit, renderExpr(expr.amount, ctx));
     case "match":
       return renderMatch(expr, ctx);
     case "list":
@@ -753,6 +763,14 @@ function renderBinary(expr: Extract<ExprIR, { kind: "binary" }>, ctx: WalkContex
   if (expr.op === "+" && (isStringLit(expr.left) || isStringLit(expr.right))) {
     return `${l} <> ${r}`;
   }
+  // A5 temporal — datetime ± duration / datetime − datetime in a page body.
+  // Mirrors the domain renderer's in-memory arms (`render-expr.ts`,
+  // `renderTemporalBinary`): ms `DateTime.add/diff`, calendar shift for a
+  // direct `months(n)` operand.
+  if (expr.op === "+" || expr.op === "-") {
+    const temporal = renderTemporalBinary(l, r, expr);
+    if (temporal !== null) return temporal;
+  }
   switch (expr.op) {
     case "&&":
       return `${l} and ${r}`;
@@ -765,6 +783,66 @@ function renderBinary(expr: Extract<ExprIR, { kind: "binary" }>, ctx: WalkContex
 
 function isStringLit(e: ExprIR): boolean {
   return e.kind === "literal" && e.lit === "string";
+}
+
+// A5 temporal (page bodies) — the same in-memory representation as the
+// domain renderer (`render-expr.ts`): an absolute duration is plain integer
+// MILLISECONDS; `months(n)` is a hand-rolled calendar shift (day clamped to
+// the target month's last day) because the generated `mix.exs` pins
+// `elixir: "~> 1.16"`, predating `DateTime.shift/2`.
+
+function renderDuration(unit: DurationUnit, amount: string): string {
+  switch (unit) {
+    case "days":
+      return `((${amount}) * ${DURATION_UNIT_MS.days})`;
+    case "hours":
+      return `((${amount}) * ${DURATION_UNIT_MS.hours})`;
+    case "minutes":
+      return `((${amount}) * ${DURATION_UNIT_MS.minutes})`;
+    case "months":
+      // Bare count — consumed only by renderBinary's calendar arm; the
+      // validator (`loom.duration-months-position`) pins months to direct
+      // `datetime ± months(n)` position.
+      return `(${amount})`;
+  }
+}
+
+function calendarShift(dt: string, sign: "+" | "-", count: string): string {
+  return (
+    `(fn dt -> total = dt.year * 12 + dt.month - 1 ${sign} ${count}; ` +
+    `y = Integer.floor_div(total, 12); m = Integer.mod(total, 12) + 1; ` +
+    `%{dt | year: y, month: m, day: min(dt.day, :calendar.last_day_of_the_month(y, m))} end).(${dt})`
+  );
+}
+
+/** The datetime-involving `+`/`-` arms, or null to fall through to native
+ *  operator rendering — dispatch off the lowering's `leftType`/`resultType`
+ *  stamps, exactly like the domain renderer's `renderTemporalBinary`. */
+function renderTemporalBinary(
+  l: string,
+  r: string,
+  e: Extract<ExprIR, { kind: "binary" }>,
+): string | null {
+  if (e.op !== "+" && e.op !== "-") return null;
+  const prim = (t: { kind: string; name?: string } | undefined): string | null =>
+    t?.kind === "primitive" ? (t.name ?? null) : null;
+  const lt = prim(e.leftType);
+  const rt = prim(e.resultType);
+  if (lt === "datetime") {
+    if (e.op === "-" && rt === "duration") return `DateTime.diff(${l}, ${r}, :millisecond)`;
+    if (rt === "datetime") {
+      if (monthsCtorOperand(e.right)) return calendarShift(l, e.op, r);
+      return e.op === "+"
+        ? `DateTime.add(${l}, ${r}, :millisecond)`
+        : `DateTime.add(${l}, -(${r}), :millisecond)`;
+    }
+    return null;
+  }
+  if (lt === "duration" && e.op === "+" && rt === "datetime") {
+    if (monthsCtorOperand(e.left)) return calendarShift(r, "+", l);
+    return `DateTime.add(${r}, ${l}, :millisecond)`;
+  }
+  return null;
 }
 
 function renderMatch(expr: Extract<ExprIR, { kind: "match" }>, ctx: WalkContext): string {

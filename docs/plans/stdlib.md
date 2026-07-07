@@ -126,6 +126,28 @@ derived isOverdue: bool = now() > dueDate + days(30)
 now() > due_date + interval '30 days'
 ```
 
+**Implementation notes (recon 2026-07-06, corrects the sketch above):**
+
+- **No backend ships a date library** — the `date-fns`-on-TS note above is wrong
+  (only the frontend stacks carry `dayjs`). Java `Period`/`Duration`, .NET
+  `TimeSpan`/`AddMonths`, Elixir `DateTime`, and TS native `Date` arithmetic are
+  all dependency-free; only Python's `months(n)` needs `python-dateutil`
+  (conditional-dep hook already exists: `python/index.ts` `extraDeps`).
+- **Constructors follow the `now()` pattern** — a dedicated grammar node (like
+  `NowExpr`, ddd.langium:2387) lowered to a dedicated IR form, NOT
+  `callKind: "free"` (free calls type to `unknown`). `arithmeticResult` gains a
+  `durationArithmetic` helper mirroring `moneyArithmetic`; `comparable` needs
+  nothing (self-compare via `typesEqual`).
+- **`duration` is EXPRESSION-ONLY in this slice** — a validator gate rejects it
+  in field position. The plan's example needs no storable duration; keeping it
+  out of field position removes 5 DB-column + 5 wire/DTO arms. Storable
+  Postgres `interval` columns are a clean follow-on slice.
+- **The hard arm is `datetime ± duration` in where-position** — Java's criteria
+  renderer only handles comparison/logical ops today, and Java persists
+  aggregates as one jsonb blob, so the `interval` translation needs explicit
+  per-backend find-predicate work; datetime *comparison* already works
+  everywhere.
+
 ### A6 (optional, independent) — string interpolation
 
 `"Order {id} for {customer.name}"` — grammar + lowering to concat of existing pieces;
