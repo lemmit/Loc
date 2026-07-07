@@ -1,0 +1,86 @@
+// Multi-tenancy Phase 2 — the HIERARCHY / `policy {}` read ladder, driven at
+// RUNTIME over a booted backend (docs/tenancy.md → "Hierarchy" + "The policy {}
+// read ladder").  Sibling of tenancy-owned.ddd (which proves the FLAT tenant
+// floor); this fixture proves the tree-scoped reads.
+//
+//   - `Org implements tenantRegistry` → the registry tree (`parent` self-FK +
+//     managed `dataKey` materialized path).  `setPath` sets the managed path
+//     deterministically so the harness controls the exact path strings it seeds
+//     (`org_a`, `org_a.b`, `org_a.b.c`, the delimiter-trap `org_ab`, the
+//     unrelated `org_z`); `signUpChild` is the signUp-style create factory
+//     (load parent via repo-let → create child with the immutable `parent` FK
+//     → set the child path off a parent field), compiled + exercised through
+//     every backend's workflow emitter.
+//   - `Account` carries `policy allow deep`   → descendant-or-self subtree.
+//   - `Entry`   carries `policy allow global` → the caller's ROOT-org subtree.
+//   - `Memo`    carries `policy allow local`  → the flat own-org floor (default).
+//
+// The deployable platform is substituted per leg (node/python/java/dotnet/elixir).
+system TenantHierarchy {
+  user { id: guid  tenantId: string }
+
+  tenancy by user.tenantId of Org
+
+  subdomain Core {
+    context Books {
+      // deep — caller's own org node + every org beneath it (materialized path).
+      aggregate Account with tenantOwned {
+        label: string
+        amount: int
+      }
+      // global — the caller's ROOT-org subtree (root-org widening, P2.5).
+      aggregate Entry with tenantOwned {
+        label: string
+      }
+      // local (the default) — only own-org rows (the flat tenant floor).
+      aggregate Memo with tenantOwned {
+        label: string
+      }
+      // The tenant registry, opted into the tree.  `setPath` writes the managed
+      // materialized path (harness seeds deterministic path strings); the plain
+      // create takes `name` + the immutable `parent` self-FK.
+      aggregate Org ids guid {
+        name: string
+        implements tenantRegistry
+        operation setPath(p: string) { dataKey := p }
+      }
+      repository Accounts for Account { }
+      repository Entries for Entry { }
+      repository Memos for Memo { }
+      repository Orgs for Org { }
+      // The child-signup create factory: load the parent via repo-let, create
+      // the child with the immutable `parent` FK, set the child's managed path
+      // off a parent field.  Compiled + emitted on every backend (structural
+      // leg of the signUp-style create factory).  NOTE: deliberately reads
+      // `loaded.name` (non-nullable), not `loaded.dataKey` — the capability's
+      // `dataKey` is `string?` and the DSL has no null-coalescing operator, so
+      // the docs-canonical `parent.dataKey + "." + seg` form is `str | None +
+      // str` under mypy --strict on the python backend (it only typechecks
+      // where the parent path is provably non-null).
+      workflow signUpChild {
+        create(nm: string, seg: string, par: Org id) {
+          let loaded = Orgs.getById(par)
+          let org = Org.create({ name: nm, parent: par })
+          org.setPath(loaded.name + "." + seg)
+        }
+      }
+      policy {
+        allow deep on Account
+        allow global on Entry
+        allow local on Memo
+      }
+    }
+  }
+
+  api BooksApi from Core
+  storage primary { type: postgres }
+  resource booksState { for: Books, kind: state, use: primary }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Books]
+    dataSources: [booksState]
+    serves: BooksApi
+    port: 4000
+    auth: required
+  }
+}
