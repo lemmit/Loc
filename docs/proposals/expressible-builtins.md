@@ -45,7 +45,7 @@ materialized `derived` · **(c)** error→status mapper (`httpStatus`) ·
 | `versioned` — guarded CAS write + increment | **capability name** | **(a)** | → `onWrite precondition version == old.version` |
 | `versioned` — atomic zero-rows detection | (infra) | (f) | stays, generic |
 | `versioned` / `unique` / `when` / FK / event-store — **409** | hardcoded | **(c)** | → route through `httpStatus` mapper |
-| `tenantOwned` — `tenantId`/`dataKey` filter + stamp | (prelude body) | (e) | already fine — `dataKey` value is a `stamp onCreate` off ambient `currentUser.orgPath` |
+| `tenantOwned` — `tenantId`/`dataKey` filter + stamp | (prelude body) | (e) | already fine — regular `dataKey` is a `stamp onCreate` off `currentUser.orgPath`; registry/cross-scope `dataKey` (`parent.dataKey + "." + id`) is a hand-written create factory (`prelude.ts:150-156`) |
 | `tenantOwned` — `deep`/`global` scope reads | **capability name** | **(e)** | → `filter` + a **prefix-match operator** (`startsWith`) |
 | `tenantOwned` — `dataKey` prefix index | (infra) | (f) | stays — shape-triggered (field in prefix-filters → btree index) |
 | `auditable` — fields + createdBy/updatedBy | (prelude body) | (e) | **reference case — no magic** |
@@ -131,37 +131,43 @@ tracing shows it does **not** — and neither does any other built-in, so
 that primitive has **no current consumer** and drops off the critical path
 (kept only as a speculative general computed-column feature).
 
-`dataKey` decomposes entirely into things that already exist plus one
-small operator:
+`dataKey` has **two distinct computations** (both already in-language —
+neither is framework name-magic, neither needs a materialized-`derived`):
 
-- the **field** (`dataKey: string internal`) — a field-role;
-- the **value** — a `stamp onCreate`, because `parent` is *immutable* and
-  the caller's path is already the ambient `currentUser.orgPath` accessor
-  (`tenant-stance.ts:126`), so no cross-aggregate read and no cascade;
-- the **`deep`/`global` subtree reads** — ordinary `filter`s, *if* the
-  filter language gains a **prefix-match operator** (`startsWith` /
-  `LIKE 'prefix.%'`). Today this is the `__loomDeepScope__` sentinel; the
-  current SQL is literally `R.dataKey = P.orgPath OR R.dataKey LIKE
-  P.orgPath || '.%'` (`tenant-stance.ts:159-160`).
+1. **Regular tenant-owned aggregate** — the record sits *at* its owner-org's
+   node, so `dataKey == the caller's org path`. A pure claim-copy **stamp**
+   off the ambient `currentUser.orgPath` accessor (`prelude.ts:126`,
+   `tenant-stance.ts:126`) — no cross-row read, no `"." + id`:
+   ```ddd
+   stamp onCreate { tenantId := currentUser.tenantId
+                    dataKey  := currentUser.orgPath }
+   ```
+2. **The registry tree** (`tenantRegistry`) / any **cross-scope write
+   anchored to a non-caller org** — `dataKey = <parent org's dataKey>
+   + "." + id`, i.e. based on *another* org's path. This genuinely needs a
+   **repo read of the parent row**, so a capability (a pure mixin) *cannot*
+   express it — the author writes a **create factory** that reads the
+   parent and concatenates (`prelude.ts:150-156`; the `signUp` `repo-let`
+   mechanism already exists). The capability only carries the fields.
 
-```ddd
-capability tenantOwned {
-  tenantId: Organization id internal
-  dataKey:  string internal
-  stamp onCreate { tenantId := currentUser.tenantId
-                   dataKey  := currentUser.orgPath + "." + id }   // create-time, immutable
-  filter this.tenantId == currentUser.tenantId                    // local
-  // deep/global scope (a filter rewrite) once prefix-match exists:
-  //   this.dataKey == currentUser.orgPath || this.dataKey startsWith currentUser.orgPath + "."
-}
-```
+So `currentUser.orgPath` covers the common case but is **not universal** —
+hierarchy-building and cross-tenant-scoped writes derive the path from the
+*target* org's `dataKey`, via a hand-written factory. That's the honest
+escape hatch, and it's already how the code works.
 
-So the real new language surface for tenancy is **just the prefix-match
-operator** — far smaller than a materialized-derived primitive. The only
-framework residue is the **prefix btree index** for those subtree scans
-(class (f)), and it becomes *shape-triggered* — a field used in
-prefix-match filters gets a btree index, exactly like `unique(...)` → a
-unique index — not keyed on the capability's name.
+The remaining `deep`/`global` **subtree reads** are ordinary `filter`s
+*if* the filter language gains a **prefix-match operator** (`startsWith` /
+`LIKE 'prefix.%'`). Today this is the `__loomDeepScope__` sentinel; the
+current SQL is literally `R.dataKey = P.orgPath OR R.dataKey LIKE
+P.orgPath || '.%'` (`tenant-stance.ts:159-160`).
+
+So the only genuinely-new language surface for tenancy is the
+**prefix-match operator** — far smaller than a materialized-`derived`
+primitive (which no built-in needs). The lone framework residue is the
+**prefix btree index** for the subtree scans (class (f)), now
+*shape-triggered* — a field used in prefix-match filters gets a btree
+index, exactly like `unique(...)` → a unique index — not keyed on the
+capability's name.
 
 ### 3. Unify structural conflicts through the error→status mapper
 
@@ -229,16 +235,18 @@ lowerings, all real:
   means *either* the guard failed *or* the row was deleted — the lowering
   must re-check existence to return `409 conflict` vs `404 not-found`.
 
-### `dataKey` (primitive 2) — the simulation dissolves it entirely
+### `dataKey` (primitive 2) — no materialized-`derived` needed
 
-Tracing `dataKey`: `parent` is **immutable** (set once at create) *and* the
-caller's path is already the ambient `currentUser.orgPath` accessor. So
-`dataKey` is neither a recompute-on-write value nor a cross-aggregate read
-— it's a plain `stamp onCreate` writing an `internal` field (see §2 above).
-The only genuinely-new surface it needs is the **prefix-match operator** for
-the `deep`/`global` scope `filter`. The materialized-`derived`-with-cascade
-primitive the audit first proposed has **no built-in consumer** and leaves
-the critical path.
+Tracing `dataKey` (see §2 above for the detail): the **regular**
+tenant-owned case is a plain claim-copy `stamp onCreate` off the ambient
+`currentUser.orgPath`; the **registry / cross-scope** case (`dataKey =
+parent.dataKey + "." + id`, based on *another* org's path) needs a repo
+read of the parent and so is a **hand-written create factory** — already
+in-language today (`prelude.ts:150-156`), not framework magic. `parent` is
+immutable, so neither case recomputes on write. So no
+materialized-`derived`-with-cascade primitive is needed (it has **no
+built-in consumer**), and the only genuinely-new surface is the
+**prefix-match operator** for the `deep`/`global` scope `filter`.
 
 ## What is already right — do not touch
 
