@@ -54,6 +54,7 @@ import {
   buildDeepScopeFilter,
   buildGlobalScopeFilter,
   buildRegistrySelfScopeFilter,
+  buildTenantFloorFilter,
   hasTenantOwned,
   hierarchyRegistry,
   TENANCY_SELF_SCOPE_ORIGIN,
@@ -196,7 +197,8 @@ function enrichSystem(
   // `applyRegistrySelfScope` below.
   const subdomainsScoped = subdomains
     .map((m) => applyRegistrySelfScope(m, sys))
-    .map((m) => applyPolicyReadLevels(m, sys));
+    .map((m) => applyPolicyReadLevels(m, sys))
+    .map((m) => applyPolicyWriteLevels(m, sys));
   // Then propagate react deployables' context sets from their targets.
   // Done after subdomain enrichment so frontends see the same enriched
   // contexts every other consumer sees.
@@ -456,6 +458,71 @@ function applyPolicyReadLevels(m: EnrichedSubdomainIR, sys: SystemIR): EnrichedS
           const rewritten = [...filters];
           rewritten[i] = replacement;
           return { ...agg, contextFilters: rewritten };
+        }),
+      };
+    }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// `policy { allow write <level> on X }` — the WRITE ladder (authorization
+// Phase 3 P3.1, docs/plans/authorization-phase3.md).  Derives each tenant-owned
+// aggregate's `writeScopeFilter`: the predicate an INSTANCE mutation's command
+// load must satisfy, set ONLY when the write scope is strictly narrower than
+// the read scope (so the mutation load — which reuses the read filter on every
+// backend — must be tightened below what a read sees).  Ranks: local=0 < deep=1
+// < global=2.  Write levels are `local` (floor, default) and `deep`; `global`
+// write is rejected in phase ⑦.  Byte-neutral when nothing narrows (the common
+// flat / read-`local` case): `writeScopeFilter` stays undefined.
+// ---------------------------------------------------------------------------
+
+const SCOPE_RANK: Record<string, number> = { local: 0, deep: 1, global: 2 };
+
+function applyPolicyWriteLevels(m: EnrichedSubdomainIR, sys: SystemIR): EnrichedSubdomainIR {
+  const hierarchy = hierarchyRegistry(sys) !== undefined;
+  // The write scope is derived whenever a tenant-owned aggregate's command load
+  // (which reuses the read filter on every backend) could be WIDER than the
+  // caller's write scope: either an explicit `allow write` rule, OR a widened
+  // READ (`deep`/`global`) with no `allow write` — the fail-closed default,
+  // which restores the floor (the task's "every mutation still hits the flat
+  // tenant floor" invariant; a widened read must NOT silently widen writes).
+  const anyRelevant = m.contexts.some(
+    (c) =>
+      (c.policyWriteLevels ?? []).length > 0 ||
+      (c.policyReadLevels ?? []).some((r) => r.level === "deep" || r.level === "global"),
+  );
+  if (!anyRelevant) return m;
+  return {
+    ...m,
+    contexts: m.contexts.map((ctx) => {
+      const writeByAgg = new Map(
+        (ctx.policyWriteLevels ?? []).map((r) => [r.aggregate, r.level] as const),
+      );
+      const readByAgg = new Map(
+        (ctx.policyReadLevels ?? []).map((r) => [r.aggregate, r.level] as const),
+      );
+      if (writeByAgg.size === 0 && readByAgg.size === 0) return ctx;
+      return {
+        ...ctx,
+        aggregates: ctx.aggregates.map((agg) => {
+          if (!hasTenantOwned(agg)) return agg;
+          // Explicit write level, else the fail-closed default `local`.
+          const writeLevel = writeByAgg.get(agg.name) ?? "local";
+          // `global` write is unsupported (validator rejects it); leave the
+          // command load unchanged so an invalid model still generates.
+          if (writeLevel === "global") return agg;
+          const readLevel = readByAgg.get(agg.name) ?? "local";
+          const writeRank = SCOPE_RANK[writeLevel] ?? 0;
+          const readRank = SCOPE_RANK[readLevel] ?? 0;
+          // Only tighten when the write scope is strictly narrower than the
+          // read scope — otherwise the command load already matches (byte-
+          // identical seam: no policy, read `local`, or write == read).
+          if (writeRank >= readRank) return agg;
+          const filter =
+            writeLevel === "deep" && hierarchy
+              ? buildDeepScopeFilter(agg)
+              : buildTenantFloorFilter(agg);
+          return { ...agg, writeScopeFilter: filter };
         }),
       };
     }),

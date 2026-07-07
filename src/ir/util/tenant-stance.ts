@@ -207,6 +207,38 @@ export function buildDeepScopeFilter(agg: Pick<AggregateIR, "name">): ExprIR {
   return buildScopeFilter(agg, ORG_PATH_CLAIM_FIELD);
 }
 
+/** The flat tenant FLOOR predicate `this.tenantId == currentUser.tenantId` —
+ *  the exact ExprIR shape the `tenantOwned` prelude capability filter lowers to
+ *  (`src/macros/prelude.ts`), rebuilt here so the `local` WRITE level
+ *  (authorization Phase 3 P3.1) can restore the floor at a mutation's command
+ *  load even when the READ filter has been widened to `deep`/`global` in
+ *  enrichment.  Every backend already renders this shape (it is today's tenant
+ *  floor), so the write guard needs no new render code. */
+export function buildTenantFloorFilter(agg: Pick<AggregateIR, "name">): ExprIR {
+  const userShape: TypeIR = { kind: "entity", name: "__User__" };
+  const stringType: TypeIR = { kind: "primitive", name: "string" };
+  return {
+    kind: "binary",
+    op: "==",
+    left: {
+      kind: "member",
+      receiver: { kind: "this" },
+      member: TENANT_OWNED_TENANT_ID_FIELD,
+      receiverType: { kind: "entity", name: agg.name },
+      memberType: stringType,
+    },
+    right: {
+      kind: "member",
+      receiver: { kind: "ref", name: "currentUser", refKind: "current-user", type: userShape },
+      member: TENANT_OWNED_TENANT_ID_FIELD,
+      receiverType: userShape,
+      memberType: stringType,
+    },
+    leftType: stringType,
+    resultType: { kind: "primitive", name: "bool" },
+  };
+}
+
 /** The `global` read-level reachability predicate — the ROOT-org-subtree scope
  *  (multi-tenancy Phase 2 P2.5).  Structurally identical to `deep` but anchored
  *  at `currentUser.rootOrg` (the first `orgPath` segment) instead of `orgPath`,

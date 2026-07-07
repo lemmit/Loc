@@ -10,7 +10,7 @@ import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { wireHelperImport } from "./py-type-imports.js";
 import { renderPyExpr } from "./render-expr.js";
-import { emittableFinds, findExecutedLine } from "./repository-builder.js";
+import { emittableFinds, findExecutedLine, writeGuardAlias } from "./repository-builder.js";
 
 // ---------------------------------------------------------------------------
 // Event-sourced repository — `persistedAs(eventLog)` aggregates persist
@@ -58,6 +58,7 @@ export function buildPyEventSourcedRepositoryFile(
     "        if found is None:",
     `            raise AggregateNotFoundError(f"${agg.name} {id} not found")`,
     "        return found",
+    ...writeGuardAlias(agg),
     "",
     `    async def all(self) -> list[${agg.name}]:`,
     "        rows = (",

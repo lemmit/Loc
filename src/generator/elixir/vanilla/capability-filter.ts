@@ -92,6 +92,22 @@ export function vanillaCapabilityFilter(
   return preds.length === 1 ? preds[0]! : preds.map((p) => `(${p})`).join(" and ");
 }
 
+/** The aggregate's `writeScopeFilter` (authorization Phase 3 P3.1 — the WRITE
+ *  ladder) as a single Ecto `where:` predicate, or null when the aggregate has
+ *  no write-scope narrowing.  Rendered exactly like a principal capability read
+ *  filter (deep sentinel → the fail-closed pinned LIKE fragment; the floor →
+ *  `pinPrincipal(...)`), so the write guard needs no new render path. */
+export function vanillaWriteScopeFilter(agg: AggregateIR, contextModule: string): string | null {
+  if (!agg.writeScopeFilter) return null;
+  const ctx: RenderCtx = { thisName: "record", contextModule, foundation: "vanilla" };
+  const p = agg.writeScopeFilter;
+  return isDeepScopeFilter(p)
+    ? renderDeepScopeEcto(ctx.thisName, deepScopeAnchorClaim(p))
+    : exprUsesCurrentUser(p)
+      ? pinPrincipal(renderExpr(p, ctx))
+      : renderExpr(p, ctx);
+}
+
 /** Conjoin a capability-filter predicate with an existing `where:` predicate.
  *  Either side may be null (no existing filter / no capability filter). */
 export function combineWhere(existing: string | null, cap: string | null): string | null {

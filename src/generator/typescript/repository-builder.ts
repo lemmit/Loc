@@ -29,6 +29,7 @@ import {
   repoTableName,
   runMethod,
 } from "./repository-find-builder.js";
+import { writeScopePredicate } from "./repository-find-predicate.js";
 import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
 import { saveMethod } from "./repository-save-builder.js";
 import { toWireMethod } from "./repository-wire-builder.js";
@@ -175,11 +176,7 @@ export function buildRepositoryFile(
     "",
     findByIdMethod(agg, ctx, emitTrace, filterPred),
     "",
-    `  async getById(id: Ids.${agg.name}Id): Promise<${agg.name}> {`,
-    `    const found = await this.findById(id);`,
-    `    if (!found) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
-    `    return found;`,
-    `  }`,
+    getByIdMethod(agg, ctx, drizzleOps),
     "",
     // Bulk loader used by views that follow `X id` references in bind
     // expressions.  Same hydration path as the array-return finds;
@@ -277,6 +274,40 @@ export function buildRepositoryFile(
     criterionFns.length > 0 && "",
     bodyStr,
     "",
+  );
+}
+
+/** `async getById(id)` — the command-load path (distinct from `findById`, the
+ *  read path): every mutation route loads through this.  When the aggregate
+ *  carries a `writeScopeFilter` (authorization Phase 3 P3.1 — the write scope is
+ *  strictly narrower than the read scope), a write-scope existence pre-guard
+ *  runs first: a row a caller may READ but not WRITE (out of write scope) is
+ *  indistinguishable from a missing one (404), and the `findById` read filter
+ *  still hydrates the row afterwards.  Byte-identical (plain
+ *  `findById` + not-found throw) when there is no write narrowing. */
+function getByIdMethod(
+  agg: EnrichedAggregateIR,
+  ctx: EnrichedBoundedContextIR,
+  drizzleOps: Set<string>,
+): string {
+  const tableName = repoTableName(agg, ctx);
+  const writePred = writeScopePredicate(agg, tableName, ctx, drizzleOps);
+  const guard: string[] = [];
+  if (writePred) {
+    drizzleOps.add("and");
+    drizzleOps.add("eq");
+    guard.push(
+      `    const inScope = await this.db.select({ id: schema.${tableName}.id }).from(schema.${tableName}).where(and(eq(schema.${tableName}.id, id), ${writePred})).limit(1);`,
+      `    if (inScope.length === 0) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
+    );
+  }
+  return lines(
+    `  async getById(id: Ids.${agg.name}Id): Promise<${agg.name}> {`,
+    ...guard,
+    `    const found = await this.findById(id);`,
+    `    if (!found) throw new AggregateNotFoundError(\`${agg.name} \${id} not found\`);`,
+    `    return found;`,
+    `  }`,
   );
 }
 

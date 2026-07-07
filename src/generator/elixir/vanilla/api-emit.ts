@@ -217,6 +217,11 @@ function renderController(
   const cuBind = principal ? "    current_user = Map.get(conn.assigns, :current_user)\n" : "";
   const listArg = principal ? "current_user" : "";
   const getActor = principal ? ", current_user" : "";
+  // Command-load context fn a MUTATION action loads through (authorization
+  // Phase 3 P3.1): `get_<agg>_for_write` when the aggregate's write scope is
+  // narrower than its read scope, else `get_<agg>` (byte-identical).  Reads
+  // (`show`) always use `get_<agg>`.
+  const cmdGet = agg.writeScopeFilter ? `get_${aggSnake}_for_write` : `get_${aggSnake}`;
 
   // A principal-referencing lifecycle stamp (`createdBy := currentUser`) threads
   // the request actor into the create/update WRITE seam — the controller pulls
@@ -267,7 +272,7 @@ ${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
         { name: "id", valueExpr: "id" },
       ])}
 
-    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id${getActor}),
+    with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
          {:ok, _updated} <- ${ctxModule}.${opSnake}_${aggSnake}(record, attrs${opCallActor}) do
       send_resp(conn, 204, "")
     else
@@ -362,7 +367,7 @@ ${createCuBind}    case ${ctxModule}.create_${aggSnake}(params${createActor}) do
 
   const deleteAction = auditDestroy
     ? `  def delete(conn, %{"id" => id}) do
-${cuBind}    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id${getActor}),
+${cuBind}    with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
          {:ok, _} <-
            ${appModule}.Repo.transaction(fn ->
 ${auditRecordCall({
@@ -391,7 +396,7 @@ ${auditRecordCall({
     end
   end`
     : `  def delete(conn, %{"id" => id}) do
-${cuBind}    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id${getActor}),
+${cuBind}    with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
          {:ok, _} <- ${ctxModule}.delete_${aggSnake}(record) do
       send_resp(conn, 204, "")
     else
@@ -448,7 +453,7 @@ ${cuBind}    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id${getActor}),
   const updateAction = `  def update(conn, %{"id" => id} = params) do
     attrs = Map.drop(params, ["id"])
 ${cuBind}${updateCuBind}${versionBind}
-    with {:ok, record} <- ${ctxModule}.get_${aggSnake}(id${getActor}),
+    with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
          {:ok, updated} <- ${ctxModule}.update_${aggSnake}(record, attrs${updateActor}${versionCallArg}) do
       json(conn, serialize(updated))
     else

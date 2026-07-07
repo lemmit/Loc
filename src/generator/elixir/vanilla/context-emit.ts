@@ -304,7 +304,11 @@ ${body}
     const functionBlock = fnLines.length > 0 ? `${fnLines.join("\n")}\n` : "";
     return `  # ${aggPascal}
   defdelegate list_${aggSnake}s(${principal ? "current_user \\\\ nil" : ""}), to: ${repoMod}, as: :list
-  defdelegate get_${aggSnake}(id${actorArg}), to: ${repoMod}, as: :find_by_id
+  defdelegate get_${aggSnake}(id${actorArg}), to: ${repoMod}, as: :find_by_id${
+    agg.writeScopeFilter
+      ? `\n  defdelegate get_${aggSnake}_for_write(id${actorArg}), to: ${repoMod}, as: :find_by_id_for_write`
+      : ""
+  }
   defdelegate create_${aggSnake}(attrs${stampActorArg}), to: ${repoMod}, as: :insert
   defdelegate update_${aggSnake}(record, attrs${stampActorArg}${versionedArg}), to: ${repoMod}, as: :update
   defdelegate delete_${aggSnake}(record), to: ${repoMod}, as: :delete${changeFacade}${destroyFacade}${opBangFacade}

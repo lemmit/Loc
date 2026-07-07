@@ -195,9 +195,123 @@ function validatePolicyReadLevels(sys: SystemIR, diags: LoomDiagnostic[]): void 
   }
 }
 
+/** Validate `policy { allow write <level> on <Aggregate> }` rules (authorization
+ *  Phase 3 P3.1 — `docs/plans/authorization-phase3.md`).  Fail-closed:
+ *
+ *   - the shared target checks (`loom.policy-unknown-aggregate`,
+ *     `loom.policy-target-not-tenant-owned`, `loom.policy-duplicate-target`) —
+ *     a write rule scopes a concrete tenant-owned aggregate, and a context may
+ *     hold at most one write rule per aggregate.
+ *   - `loom.policy-write-global-unsupported` — `write global` is rejected in
+ *     P3.1 (root-subtree-wide mutation is a footgun); only `write local` (the
+ *     floor) and `write deep` are offered.
+ *   - `loom.policy-level-requires-hierarchy` — `write deep` needs the
+ *     materialized-path tree (`implements tenantRegistry`), same as read `deep`.
+ *   - `loom.policy-write-wider-than-read` — `write deep` requires a matching
+ *     `allow deep`/`allow global` read rule (you cannot write what you cannot
+ *     read).
+ */
+function validatePolicyWriteLevels(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const hierarchy = hierarchyRegistry(sys) !== undefined;
+  const rank: Record<string, number> = { local: 0, deep: 1, global: 2 };
+  for (const mod of sys.subdomains) {
+    for (const ctx of mod.contexts) {
+      const rules = ctx.policyWriteLevels ?? [];
+      if (rules.length === 0) continue;
+      const readByAgg = new Map(
+        (ctx.policyReadLevels ?? []).map((r) => [r.aggregate, r.level] as const),
+      );
+      const seen = new Set<string>();
+      for (const rule of rules) {
+        const src = `${ctx.name}/policy`;
+        if (seen.has(rule.aggregate)) {
+          diags.push({
+            severity: "error",
+            code: "loom.policy-duplicate-target",
+            message:
+              `policy in context '${ctx.name}' selects a write level for '${rule.aggregate}' more ` +
+              `than once (\`${rule.source}\`); keep exactly one \`allow write … on ${rule.aggregate}\`.`,
+            source: src,
+          });
+          continue;
+        }
+        seen.add(rule.aggregate);
+
+        const agg = ctx.aggregates.find((a) => a.name === rule.aggregate);
+        if (!agg) {
+          diags.push({
+            severity: "error",
+            code: "loom.policy-unknown-aggregate",
+            message:
+              `policy in context '${ctx.name}': \`${rule.source}\` names '${rule.aggregate}', which ` +
+              `is not an aggregate in this context.  A write level scopes a tenant-owned aggregate ` +
+              `declared in the same context.`,
+            source: src,
+          });
+          continue;
+        }
+        if (!hasTenantOwned(agg)) {
+          diags.push({
+            severity: "error",
+            code: "loom.policy-target-not-tenant-owned",
+            message:
+              `policy in context '${ctx.name}': \`${rule.source}\` targets '${rule.aggregate}', which ` +
+              `is not \`with tenantOwned\`.  A write level refines the tenant floor, so it applies only ` +
+              `to tenant-owned aggregates.`,
+            source: src,
+          });
+          continue;
+        }
+        if (rule.level === "global") {
+          diags.push({
+            severity: "error",
+            code: "loom.policy-write-global-unsupported",
+            message:
+              `policy in context '${ctx.name}': \`${rule.source}\` uses \`write global\`, which is not ` +
+              `offered — root-subtree-wide mutation is a footgun.  Use \`write deep\` (the caller's own ` +
+              `subtree) or \`write local\` (the floor).  A caller can still \`allow global\` for READS.`,
+            source: src,
+          });
+          continue;
+        }
+        if (rule.level === "deep" && !hierarchy) {
+          diags.push({
+            severity: "error",
+            code: "loom.policy-level-requires-hierarchy",
+            message:
+              `policy in context '${ctx.name}': \`${rule.source}\` uses the 'deep' write level, which ` +
+              `needs a tenant hierarchy — mark the registry \`implements tenantRegistry\` (the ` +
+              `materialized-path tree).  Under flat tenancy only 'local' is defined.`,
+            source: src,
+          });
+          continue;
+        }
+        // Coherence: you cannot write wider than you can read.  `write deep`
+        // requires the aggregate's read level to be at least `deep`
+        // (`allow deep` or `allow global`).
+        if (rule.level === "deep") {
+          const readLevel = readByAgg.get(rule.aggregate) ?? "local";
+          if ((rank[readLevel] ?? 0) < (rank.deep ?? 1)) {
+            diags.push({
+              severity: "error",
+              code: "loom.policy-write-wider-than-read",
+              message:
+                `policy in context '${ctx.name}': \`${rule.source}\` grants a wider WRITE scope than ` +
+                `the READ scope for '${rule.aggregate}' (read is '${readLevel}').  You cannot write ` +
+                `what you cannot read — add \`allow deep on ${rule.aggregate}\` (or \`allow global\`).`,
+              source: src,
+            });
+          }
+        }
+      }
+    }
+  }
+}
+
 export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
   validateTenantRegistry(sys, diags);
   validatePolicyReadLevels(sys, diags);
+  validatePolicyWriteLevels(sys, diags);
   const tenancy = sys.tenancy;
 
   // Registry existence is a LINKING concern since 1b.1 — `of <Registry>` is a

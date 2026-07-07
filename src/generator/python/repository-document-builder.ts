@@ -25,6 +25,7 @@ import {
   findExecutedLine,
   partWireMethod,
   toWireMethod,
+  writeGuardAlias,
 } from "./repository-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -93,6 +94,7 @@ export function buildPyDocumentRepositoryFile(
     "        if found is None:",
     `            raise AggregateNotFoundError(f"${agg.name} {id} not found")`,
     "        return found",
+    ...writeGuardAlias(agg),
     "",
     `    async def all(self) -> list[${agg.name}]:`,
     `        rows = (await self._session.execute(select(${row}))).scalars().all()`,

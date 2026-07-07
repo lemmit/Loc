@@ -34,6 +34,7 @@ import {
   type FilterBypass,
   lowerToSqlAlchemy,
   type PyPredicate,
+  writeScopePredicate,
 } from "./find-predicate.js";
 import {
   columnsForFields,
@@ -81,6 +82,43 @@ export function authUserImport(needsUser: boolean, needsAccessor: boolean): stri
   return names.length > 0 ? `from app.auth.user import ${names.join(", ")}` : null;
 }
 
+/** The `get_by_id_for_write` command-load method — a write-scope existence
+ *  pre-guard then `get_by_id`.  Empty (byte-identical repo) when the aggregate
+ *  carries no `writeScopeFilter`.  `root` is the SQLAlchemy row class of the
+ *  aggregate's owning table; `writePred` the lowered write-scope predicate. */
+function writeGuardMethod(
+  agg: EnrichedAggregateIR,
+  root: string,
+  writePred: PyPredicate | null,
+): (string | null)[] {
+  if (!writePred) return [];
+  return [
+    "",
+    `    async def get_by_id_for_write(self, id: ${agg.name}Id) -> ${agg.name}:`,
+    `        __ok = (await self._session.execute(select(${root}.id).where(${root}.id == id, ${writePred.expr}))).first()`,
+    "        if __ok is None:",
+    `            raise AggregateNotFoundError(f"${agg.name} {id} not found")`,
+    "        return await self.get_by_id(id)",
+  ];
+}
+
+/** For non-relational shapes (document / embedded / event-sourced) the P3.1
+ *  write-scope guard is not yet enforced; emit `get_by_id_for_write` as an alias
+ *  to `get_by_id` so a mutation route's command load resolves (the routes layer
+ *  dispatches to it whenever `writeScopeFilter` is set, regardless of shape).
+ *  Non-relational write-scope enforcement is a documented follow-up. Emitted
+ *  only when the aggregate carries a `writeScopeFilter`. */
+export function writeGuardAlias(agg: EnrichedAggregateIR): (string | null)[] {
+  if (!agg.writeScopeFilter) return [];
+  return [
+    "",
+    `    async def get_by_id_for_write(self, id: ${agg.name}Id) -> ${agg.name}:`,
+    "        # P3.1 write-scope guard is enforced on relational shapes; the",
+    "        # non-relational command load falls back to the read-scoped load.",
+    "        return await self.get_by_id(id)",
+  ];
+}
+
 export function buildPyRepositoryFile(
   agg: EnrichedAggregateIR,
   repo: RepositoryIR | undefined,
@@ -99,6 +137,9 @@ export function buildPyRepositoryFile(
   // Principal-referencing filters are gated by the IR validator on python
   // (W1b), so only non-principal predicates reach here.
   const filterPred = contextFilterPredicate(agg, ctx);
+  // The WRITE-scope guard predicate (authorization Phase 3 P3.1) — null unless
+  // the aggregate's write scope is narrower than its read scope.
+  const writePred = writeScopePredicate(agg, ctx);
   // Inline `Repo.findAll(<Criterion>) ignoring …` / `Repo.run(…) ignoring …`
   // call-sites lower to `run_<retrieval>(…)`; that method is SHARED across
   // sites, so its baked-in capability filter must OMIT the UNION of the caps
@@ -147,6 +188,13 @@ export function buildPyRepositoryFile(
     "        if found is None:",
     `            raise AggregateNotFoundError(f"${agg.name} {id} not found")`,
     "        return found",
+    // The command-load path (authorization Phase 3 P3.1): a mutation route
+    // loads through this when the aggregate's WRITE scope is narrower than its
+    // READ scope.  A write-scope existence pre-guard runs first — a row the
+    // caller may READ but not WRITE (or a missing one) → 404, no existence
+    // leak; then `get_by_id` hydrates (its read filter is always ⊇ the write
+    // scope).  Emitted only when `writeScopeFilter` is set.
+    ...writeGuardMethod(agg, root, writePred),
     "",
     `    async def all(self) -> list[${agg.name}]:`,
     `        rows = (await self._session.execute(select(${root})${rootWhere(null, root, kind, filterPred)})).scalars().all()`,
@@ -252,7 +300,7 @@ export function buildPyRepositoryFile(
     // (DEBT-02).  One sorted import covers whichever (or both) apply.
     authUserImport(
       emittableFinds(repo).some(findUsesCurrentUser),
-      aggUsesPrincipalContextFilter(agg),
+      aggUsesPrincipalContextFilter(agg) || agg.writeScopeFilter !== undefined,
     ),
     hasAudit ? "from app.db.audit import AuditRecordRow" : null,
     refersTo("PagedResult") ? "from app.db.paging import PagedResult" : null,

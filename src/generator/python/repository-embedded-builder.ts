@@ -20,6 +20,7 @@ import {
   relationalFindMethod,
   rootWhere,
   toWireMethod,
+  writeGuardAlias,
 } from "./repository-builder.js";
 import { entityFromDoc, entityToDoc } from "./repository-document-builder.js";
 
@@ -80,6 +81,7 @@ export function buildPyEmbeddedRepositoryFile(
     "        if found is None:",
     `            raise AggregateNotFoundError(f"${agg.name} {id} not found")`,
     "        return found",
+    ...writeGuardAlias(agg),
     "",
     `    async def all(self) -> list[${agg.name}]:`,
     `        rows = (await self._session.execute(select(${row})${rootWhere(null, row, undefined, filterPred)})).scalars().all()`,

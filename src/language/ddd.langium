@@ -587,7 +587,7 @@ PageProp:
 // reference resolves + carries the action's param type during
 // lowering so backends never re-resolve.
 ActionDecl:
-    'action' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')'
+    'action' name=(ID | 'write') '(' (params+=Parameter (',' params+=Parameter)*)? ')'
         '{' stmts+=Statement* '}';
 
 RouteProp:
@@ -715,7 +715,7 @@ StateField:
 // aggregate / context member positions; everywhere else they remain
 // admissible identifiers.
 StateFieldName returns string:
-    ID | 'filter' | 'stamp' | 'implements'
+    ID | 'filter' | 'stamp' | 'implements' | 'write'
     // DataSource clause keys (PR-3 / D-STORAGE-SPLIT) are admitted as
     // soft so user pages can still declare a state field named `kind`,
     // `schema`, `every`, etc.  Without this, `state { kind: string }`
@@ -1026,8 +1026,24 @@ PolicyDecl:
         rules+=PolicyReadRule*
     '}';
 
+// `allow [write] <level> on <Aggregate>` — the optional `write` verb selects
+// the ladder (authorization Phase 3 P3.1, docs/plans/authorization-phase3.md):
+// bare = the read reachability ladder (Phase 2, unchanged); `write` gates
+// INSTANCE mutations (update-style ops, destroy, applier dispatch) on the target
+// row's write scope.  `write global` PARSES but is a phase-⑦ validator error
+// (`loom.policy-write-global-unsupported`) — root-subtree-wide mutation is a
+// footgun; only `write local` (the default floor) and `write deep` are offered.
+// There is deliberately NO `read` verb synonym: `read` is far too common a user
+// identifier (`let read = …`) to promote to a keyword, so the read form stays
+// bare.  The rule name stays `PolicyReadRule` (both verbs are policy rules
+// structurally); the IR splits them by verb.
 PolicyReadRule:
-    'allow' level=ReadLevel 'on' target=ID;
+    'allow' (verb=PolicyVerb)? level=ReadLevel 'on' target=ID;
+
+// The optional policy verb.  Absent = read (Phase 2 behavior).  `write` is the
+// only new keyword — see the note above on why `read` is not one.
+PolicyVerb returns string:
+    'write';
 
 // The directional read ladder (docs/plans/multi-tenancy-phase2.md P2.4):
 //   - `local`  — the caller's own org node (today's `tenantId ==` floor; default)
@@ -1457,7 +1473,7 @@ DomainService:
 // NOT carry `private` / `extern` / `audited` / `when` — those are
 // aggregate-operation-only.
 DomainServiceOperation:
-    'operation' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')'
+    'operation' name=(ID | 'write') '(' (params+=Parameter (',' params+=Parameter)*)? ')'
     (':' returnType=TypeRef)? '{'
         stmts+=Statement*
     '}';
@@ -1561,7 +1577,10 @@ Property:
         // parses (already soft in `StateFieldName` / `MemberName` /
         // `NameRefIdent`).  Hard only at aggregate / context member position
         // (`FilterDecl` / `StampDecl` / `ImplementsDecl`).
-        | 'filter' | 'stamp' | 'implements')
+        | 'filter' | 'stamp' | 'implements'
+        // Policy verb keywords (P3.1) admitted in property position so a
+        // field named `read` / `write` parses.
+        | 'write')
     ':' type=TypeRef
     (provenanced?='provenanced')?
     sensitivity=SensitivityClause?
@@ -1627,7 +1646,7 @@ FunctionDecl:
 // `GET /{id}/can_<op>` returning `{ allowed }`.  Distinct from `requires`
 // (auth, 403) and `precondition` (argument validation inside the body, 400).
 Operation:
-    (private?='private')? 'operation' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' (extern?='extern')? (audited?='audited')? (':' returnType=TypeRef)? ('when' when=Expression)? '{'
+    (private?='private')? 'operation' name=(ID | 'write') '(' (params+=Parameter (',' params+=Parameter)*)? ')' (extern?='extern')? (audited?='audited')? (':' returnType=TypeRef)? ('when' when=Expression)? '{'
         body+=Statement*
     '}';
 
@@ -1808,7 +1827,10 @@ LooseName returns string:
     // `policy` / `allow` / `local` / `deep` / `global`.  `policy` is hard only
     // at the head of the `PolicyDecl` ContextMember; `allow` / the three
     // `ReadLevel` words only inside a `policy {}` block's read rules.
-    | 'policy' | 'allow' | 'local' | 'deep' | 'global';
+    // `read` / `write` (the P3.1 policy verb) are soft only in the optional
+    // verb slot of a `PolicyReadRule`; admit them here so user code can still
+    // name a field / parameter / arg `read` / `write`.
+    | 'policy' | 'allow' | 'local' | 'deep' | 'global' | 'write';
 
 // A dotted page reference for `menu { link <Area>.<Page> }` — lets a menu link
 // disambiguate role-named scaffold pages (`List` / `New` / `Detail`) by their
@@ -1951,7 +1973,7 @@ VariantStmtArm:
 // shape, which also keeps a trailing `{ }` block from being swallowed by a
 // `BuilderCall` the way the loop iterable does.
 IfLetStmt:
-    'if' 'let' var=ID '=' source=ForIterable '{'
+    'if' 'let' var=(ID | 'write') '=' source=ForIterable '{'
         thenBody+=Statement*
     '}' ('else' '{'
         elseBody+=Statement*
@@ -1998,7 +2020,7 @@ RequiresStmt:
     'requires' expr=Expression;
 
 LetStmt:
-    'let' name=ID '=' expr=Expression;
+    'let' name=(ID | 'write') '=' expr=Expression;
 
 EmitStmt:
     'emit' event=[EventDecl:ID] '{'
@@ -2064,7 +2086,9 @@ LValueIdent returns string:
        // LooseName / StateFieldName / MemberName / NameRefIdent all admit
        // them; l-value position was the missed spot).  Hard only at
        // aggregate / context member position.
-       | 'filter' | 'stamp' | 'implements';
+       | 'filter' | 'stamp' | 'implements'
+       // Policy verb keywords (P3.1) — soft in l-value position (`read := x`).
+       | 'write';
 
 // ---------------------------------------------------------------------------
 // Expressions (precedence climbing, lowest to highest)
@@ -2227,6 +2251,9 @@ MemberName returns string:
     ID | 'id' | 'permissions' | 'contains' | 'ui' | 'api'
        | 'modules' | 'contexts' | 'aggregates' | 'workflows' | 'views'
        | 'filter' | 'stamp' | 'implements'
+       // Policy verb keywords (P3.1) admissible after `.` so a member named
+       // `read` / `write` parses.
+       | 'write'
        // `create` / `destroy` are hard keywords for the lifecycle
        // member rules (`Create` / `Destroy`) but must stay admissible
        // after `.` so the e2e + page surfaces keep parsing —
@@ -2457,6 +2484,9 @@ NameRefIdent returns string:
     // no escape hatch and are ordinary identifiers again.)
     | 'cache'
        | 'filter' | 'stamp' | 'implements'
+       // Policy verb keywords (P3.1) — soft in NameRef so an expression can
+       // read a field named `read` / `write`.
+       | 'write'
        | 'immutable' | 'managed' | 'token' | 'internal' | 'secret'
        // Phase 2 page-metadata + favicon keywords admitted as NameRef
        // so expressions can read a field named `description`,

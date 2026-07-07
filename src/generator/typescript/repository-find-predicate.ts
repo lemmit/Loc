@@ -503,6 +503,26 @@ export function contextFilterPredicate(
   return `and(${lowered.join(", ")})`;
 }
 
+/** Lower an aggregate's `writeScopeFilter` (authorization Phase 3 P3.1 — the
+ *  WRITE-ladder guard) to a single Drizzle predicate string, or null when the
+ *  aggregate has no write-scope narrowing.  Renders `currentUser.<field>`
+ *  against the ambient `requireCurrentUser()` accessor, exactly like the read
+ *  capability filter.  Adds the Drizzle ops it uses to `ops`. */
+export function writeScopePredicate(
+  agg: EnrichedAggregateIR,
+  tableName: string,
+  ctx: EnrichedBoundedContextIR,
+  ops: Set<string>,
+): string | null {
+  if (!agg.writeScopeFilter) return null;
+  const l = lowerToDrizzle(agg.writeScopeFilter, tableName, ctx, {
+    principalAccessor: "requireCurrentUser()",
+  });
+  if (!l) return null;
+  for (const op of l.ops) ops.add(op);
+  return l.expr;
+}
+
 /** Combine a capability-filter predicate with an existing read predicate.
  *  `existing` is a raw Drizzle predicate expression (the argument that
  *  would go inside `.where(...)`), e.g. `eq(schema.docs.id, id)`.  When a

@@ -374,7 +374,29 @@ export function renderJavaSpringDataRepository(
       ``,
     );
   }
-  const allMethodLines = [...principalOverrides, ...methodLines, ...retrievalLines];
+  // Command-load path (authorization Phase 3 P3.1): a WRITE-scope-narrowed
+  // `findByIdForWrite` the impl's `getById` loads through when the aggregate's
+  // write scope is narrower than its read scope.  Same SpEL-principal @Query
+  // shape as the read override, but with the write predicate — a row a caller
+  // may READ but not WRITE reads as empty → 404 (no existence leak).
+  const writeOverride: string[] = [];
+  if (agg.writeScopeFilter) {
+    imports.add("org.springframework.data.jpa.repository.Query");
+    imports.add("org.springframework.data.repository.query.Param");
+    imports.add("java.util.Optional");
+    const writeClause = renderJpqlWhere(agg.writeScopeFilter, { alias: "e", enumsPkg });
+    writeOverride.push(
+      `    @Query("select e from ${agg.name} e where e.id = :id and ${writeClause}")`,
+      `    Optional<${agg.name}> findByIdForWrite(@Param("id") ${idClass} id);`,
+      ``,
+    );
+  }
+  const allMethodLines = [
+    ...principalOverrides,
+    ...writeOverride,
+    ...methodLines,
+    ...retrievalLines,
+  ];
   while (allMethodLines.length > 0 && allMethodLines[allMethodLines.length - 1] === "")
     allMethodLines.pop();
   return lines(
@@ -642,7 +664,11 @@ export function renderJavaRepositoryImpl(
     ``,
     `    @Override`,
     `    public ${agg.name} getById(${idClass} id) {`,
-    `        var found = jpa.findById(id);`,
+    // Command load (authorization Phase 3 P3.1): when the aggregate's write
+    // scope is narrower than its read scope, load through the write-scoped
+    // `findByIdForWrite` @Query — a readable-but-not-writable (or missing) row
+    // → 404.  Otherwise the ordinary read-scoped `findById` (byte-identical).
+    `        var found = jpa.${agg.writeScopeFilter ? "findByIdForWrite" : "findById"}(id);`,
     // aggregate_loaded (debug) — mirrors the Hono/.NET repo emission; `found` is
     // a bool so a downstream filter can grep failed loads by
     // (event="aggregate_loaded", found=false).

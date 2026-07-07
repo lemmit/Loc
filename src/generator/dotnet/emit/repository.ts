@@ -13,7 +13,12 @@ import { lines } from "../../../util/code-builder.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
 import { unionFindAsOptionalTwin } from "../find-emit.js";
-import { csValueTypeForId, renderCsType } from "../render-expr.js";
+import {
+  AMBIENT_CURRENT_USER,
+  csValueTypeForId,
+  renderCsExpr,
+  renderCsType,
+} from "../render-expr.js";
 import { joinDbSetName, joinEntityName, joinFkPropName } from "./join-entities.js";
 
 // Repository interface (Domain layer) + EF-backed implementation
@@ -66,6 +71,14 @@ export function renderRepositoryInterface(
       `public interface I${agg.name}Repository`,
       "{",
       `    Task<${agg.name}?> GetByIdAsync(${idClass} id, CancellationToken cancellationToken = default);`,
+      // Command-load path (authorization Phase 3 P3.1): a write-scope-narrowed
+      // GetById the mutation handlers load through.  Only when the aggregate's
+      // write scope is narrower than its read scope.
+      ...(agg.writeScopeFilter
+        ? [
+            `    Task<${agg.name}?> GetByIdForWriteAsync(${idClass} id, CancellationToken cancellationToken = default);`,
+          ]
+        : []),
       `    Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${idClass}> ids, CancellationToken cancellationToken = default);`,
       `    Task SaveAsync(${agg.name} aggregate, CancellationToken cancellationToken = default);`,
       // Hard delete — only when the aggregate has a canonical `destroy`
@@ -335,6 +348,28 @@ export function renderRepositoryImpl(
       "        return found;",
       "    }",
       "",
+      // Command-load path (authorization Phase 3 P3.1): a write-scope existence
+      // pre-guard (EF applies the read query-filter automatically; the extra
+      // predicate narrows to the write scope, which is always ⊆ the read scope),
+      // then the ordinary hydrating `GetByIdAsync`.  A row the caller may READ
+      // but not WRITE (out of write scope) reads as missing → 404 (no existence
+      // leak).  Principal via the ambient accessor (re-read per call, so no
+      // stale-plan pitfall of a static EF query filter).  Emitted only when the
+      // aggregate carries a `writeScopeFilter`.
+      ...(agg.writeScopeFilter
+        ? [
+            `    public async Task<${agg.name}?> GetByIdForWriteAsync(${idClass} id, CancellationToken cancellationToken = default)`,
+            "    {",
+            `        var inScope = await _db.${setName}.AnyAsync(x => x.Id == id && (${renderCsExpr(
+              agg.writeScopeFilter,
+              { thisName: "x", currentUserExpr: AMBIENT_CURRENT_USER, agg },
+            )}), cancellationToken);`,
+            "        if (!inScope) return null;",
+            "        return await GetByIdAsync(id, cancellationToken);",
+            "    }",
+            "",
+          ]
+        : []),
       `    public async Task<IReadOnlyList<${agg.name}>> FindManyByIdsAsync(IReadOnlyList<${idClass}> ids, CancellationToken cancellationToken = default)`,
       "    {",
       "        if (ids.Count == 0) return Array.Empty<" + agg.name + ">();",
