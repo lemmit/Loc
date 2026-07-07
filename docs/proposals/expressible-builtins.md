@@ -45,9 +45,9 @@ materialized `derived` · **(c)** error→status mapper (`httpStatus`) ·
 | `versioned` — guarded CAS write + increment | **capability name** | **(a)** | → `onWrite precondition version == old.version` |
 | `versioned` — atomic zero-rows detection | (infra) | (f) | stays, generic |
 | `versioned` / `unique` / `when` / FK / event-store — **409** | hardcoded | **(c)** | → route through `httpStatus` mapper |
-| `tenantOwned` — `tenantId` filter + stamp | (prelude body) | (e) | already fine |
-| `tenantOwned` — `dataKey` materialized path | **capability name** | **(b)** | → materialized `derived` field |
-| `tenantOwned` — `dataKey` prefix index | (infra) | (f) | stays, generic |
+| `tenantOwned` — `tenantId`/`dataKey` filter + stamp | (prelude body) | (e) | already fine — `dataKey` value is a `stamp onCreate` off ambient `currentUser.orgPath` |
+| `tenantOwned` — `deep`/`global` scope reads | **capability name** | **(e)** | → `filter` + a **prefix-match operator** (`startsWith`) |
+| `tenantOwned` — `dataKey` prefix index | (infra) | (f) | stays — shape-triggered (field in prefix-filters → btree index) |
 | `auditable` — fields + createdBy/updatedBy | (prelude body) | (e) | **reference case — no magic** |
 | `softDeletable` + `softDelete` — fields/filter + destroy rewrite | (prelude body + macro) | (e) | **reference case — no magic** |
 | `access: token/secret/internal/managed/immutable` | field role | (d) | already the right abstraction |
@@ -123,30 +123,45 @@ A sane v1 restricts `onWrite precondition` to *pushable* predicates
 (covers versioning + most numeric/equality invariants) and defers the
 pessimistic path.
 
-### 2. Materialized / persisted `derived`
+### 2. A prefix-match filter operator (NOT a materialized `derived`)
 
-Loom's `derived` is compute-on-read only. Add a **persisted** variant — a
-`derived` value that is *stored as a column and recomputed on write*.
+The audit first framed `tenantOwned`'s `dataKey` as needing a *materialized
+`derived`* primitive (a computed column recomputed on write). Closer
+tracing shows it does **not** — and neither does any other built-in, so
+that primitive has **no current consumer** and drops off the critical path
+(kept only as a speculative general computed-column feature).
 
-This retires `tenantOwned`'s remaining name-magic: the `dataKey`
-hierarchical path (`root.child.leaf`) is exactly a stored computed value.
-`tenantOwned`'s `filter` and `stamp` halves are *already* prelude bodies
-(class (e)); with a materialized `derived` the `dataKey` join the
-in-language half:
+`dataKey` decomposes entirely into things that already exist plus one
+small operator:
+
+- the **field** (`dataKey: string internal`) — a field-role;
+- the **value** — a `stamp onCreate`, because `parent` is *immutable* and
+  the caller's path is already the ambient `currentUser.orgPath` accessor
+  (`tenant-stance.ts:126`), so no cross-aggregate read and no cascade;
+- the **`deep`/`global` subtree reads** — ordinary `filter`s, *if* the
+  filter language gains a **prefix-match operator** (`startsWith` /
+  `LIKE 'prefix.%'`). Today this is the `__loomDeepScope__` sentinel; the
+  current SQL is literally `R.dataKey = P.orgPath OR R.dataKey LIKE
+  P.orgPath || '.%'` (`tenant-stance.ts:159-160`).
 
 ```ddd
 capability tenantOwned {
   tenantId: Organization id internal
-  derived persisted dataKey: string = parent.dataKey + "." + id   // materialized path
-  filter this.tenantId == currentUser.tenantId
-  stamp onCreate { tenantId := currentUser.tenantId }
+  dataKey:  string internal
+  stamp onCreate { tenantId := currentUser.tenantId
+                   dataKey  := currentUser.orgPath + "." + id }   // create-time, immutable
+  filter this.tenantId == currentUser.tenantId                    // local
+  // deep/global scope (a filter rewrite) once prefix-match exists:
+  //   this.dataKey == currentUser.orgPath || this.dataKey startsWith currentUser.orgPath + "."
 }
 ```
 
-The prefix index for subtree (`deep`/`global`) scans stays infrastructure
-(class (f)), but it's triggered by the *shape* (a materialized path
-column that gets `LIKE 'prefix.%'` reads), not the capability's name. The
-primitive is general — any denormalized/computed column wants it.
+So the real new language surface for tenancy is **just the prefix-match
+operator** — far smaller than a materialized-derived primitive. The only
+framework residue is the **prefix btree index** for those subtree scans
+(class (f)), and it becomes *shape-triggered* — a field used in
+prefix-match filters gets a btree index, exactly like `unique(...)` → a
+unique index — not keyed on the capability's name.
 
 ### 3. Unify structural conflicts through the error→status mapper
 
@@ -214,22 +229,16 @@ lowerings, all real:
   means *either* the guard failed *or* the row was deleted — the lowering
   must re-check existence to return `409 conflict` vs `404 not-found`.
 
-### Materialized `derived` (primitive 2) — the simulation shrinks it
+### `dataKey` (primitive 2) — the simulation dissolves it entirely
 
-Tracing `dataKey = parent.dataKey + "." + id`: tenancy's `parent` is
-**immutable** (set once at create), so `dataKey` is computed *once at
-create* and never recomputed. That is **not** the hard "recompute-on-write
-with cascade" primitive — it reduces to a **`managed` stored field written
-by a `stamp onCreate`** (the only gap is letting a stamp read the parent
-aggregate's `dataKey`, a small stamp-expressiveness extension). No cascade,
-no dependency tracking.
-
-So primitive 2 splits:
-
-- **create-time materialized** (immutable dependency — covers tenancy's
-  `dataKey`) → ship as `stamp onCreate` writing a `managed` field. Cheap.
-- **recompute-on-write with cascade** (mutable dependency — the general
-  computed column) → genuinely new, deferred; **tenancy doesn't need it.**
+Tracing `dataKey`: `parent` is **immutable** (set once at create) *and* the
+caller's path is already the ambient `currentUser.orgPath` accessor. So
+`dataKey` is neither a recompute-on-write value nor a cross-aggregate read
+— it's a plain `stamp onCreate` writing an `internal` field (see §2 above).
+The only genuinely-new surface it needs is the **prefix-match operator** for
+the `deep`/`global` scope `filter`. The materialized-`derived`-with-cascade
+primitive the audit first proposed has **no built-in consumer** and leaves
+the critical path.
 
 ## What is already right — do not touch
 
@@ -281,10 +290,11 @@ shape-triggering) so no name silently carries framework meaning.
    consistency win; makes structural 409s overridable.
 2. **`onWrite precondition` + `old` (1)** — pushable predicates only;
    retires the `versioned` name-gate and unlocks write-invariants.
-3. **Create-time materialized `derived` (2a)** — `stamp onCreate` writing a
-   `managed` field (+ let a stamp read a parent aggregate's field). Retires
-   `tenantOwned`'s `dataKey` name-gate. The recompute-on-write-with-cascade
-   form (2b) is deferred — tenancy doesn't need it.
+3. **Prefix-match filter operator (2)** — `startsWith` / `LIKE 'prefix.%'`
+   in the filter language. Turns `tenantOwned`'s `deep`/`global` scope into
+   an ordinary `filter` (retiring the `__loomDeepScope__` sentinel) and
+   reduces `dataKey` to a `stamp onCreate`. The materialized-`derived`
+   primitive is dropped — no built-in needs it.
 4. **Reserved-name guard** — after 1–3, lock down the residual magic names.
 
 ## Open questions
