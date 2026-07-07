@@ -8217,38 +8217,203 @@ export const DddGrammar = (): Grammar => loadedDddGrammar ?? (loadedDddGrammar =
             "value": "policy"
           },
           {
-            "$type": "Assignment",
-            "feature": "name",
-            "operator": "=",
-            "terminal": {
-              "$type": "RuleCall",
-              "rule": {
-                "$ref": "#/rules@231"
+            "$type": "Alternatives",
+            "elements": [
+              {
+                "$type": "Group",
+                "elements": [
+                  {
+                    "$type": "Keyword",
+                    "value": "{"
+                  },
+                  {
+                    "$type": "Assignment",
+                    "feature": "rules",
+                    "operator": "+=",
+                    "terminal": {
+                      "$type": "RuleCall",
+                      "rule": {
+                        "$ref": "#/rules@106"
+                      },
+                      "arguments": []
+                    },
+                    "cardinality": "*"
+                  },
+                  {
+                    "$type": "Keyword",
+                    "value": "}"
+                  }
+                ]
               },
-              "arguments": []
-            },
-            "cardinality": "?"
-          },
-          {
-            "$type": "Keyword",
-            "value": "{"
-          },
-          {
-            "$type": "Assignment",
-            "feature": "rules",
-            "operator": "+=",
-            "terminal": {
-              "$type": "RuleCall",
-              "rule": {
-                "$ref": "#/rules@106"
-              },
-              "arguments": []
-            },
-            "cardinality": "*"
-          },
-          {
-            "$type": "Keyword",
-            "value": "}"
+              {
+                "$type": "Group",
+                "elements": [
+                  {
+                    "$type": "Assignment",
+                    "feature": "name",
+                    "operator": "=",
+                    "terminal": {
+                      "$type": "RuleCall",
+                      "rule": {
+                        "$ref": "#/rules@231"
+                      },
+                      "arguments": []
+                    }
+                  },
+                  {
+                    "$type": "Alternatives",
+                    "elements": [
+                      {
+                        "$type": "Group",
+                        "elements": [
+                          {
+                            "$type": "Keyword",
+                            "value": "("
+                          },
+                          {
+                            "$type": "Group",
+                            "elements": [
+                              {
+                                "$type": "Assignment",
+                                "feature": "params",
+                                "operator": "+=",
+                                "terminal": {
+                                  "$type": "RuleCall",
+                                  "rule": {
+                                    "$ref": "#/rules@161"
+                                  },
+                                  "arguments": []
+                                }
+                              },
+                              {
+                                "$type": "Group",
+                                "elements": [
+                                  {
+                                    "$type": "Keyword",
+                                    "value": ","
+                                  },
+                                  {
+                                    "$type": "Assignment",
+                                    "feature": "params",
+                                    "operator": "+=",
+                                    "terminal": {
+                                      "$type": "RuleCall",
+                                      "rule": {
+                                        "$ref": "#/rules@161"
+                                      },
+                                      "arguments": []
+                                    }
+                                  }
+                                ],
+                                "cardinality": "*"
+                              }
+                            ],
+                            "cardinality": "?"
+                          },
+                          {
+                            "$type": "Keyword",
+                            "value": ")"
+                          },
+                          {
+                            "$type": "Keyword",
+                            "value": ":"
+                          },
+                          {
+                            "$type": "Assignment",
+                            "feature": "returnType",
+                            "operator": "=",
+                            "terminal": {
+                              "$type": "RuleCall",
+                              "rule": {
+                                "$ref": "#/rules@164"
+                              },
+                              "arguments": []
+                            }
+                          },
+                          {
+                            "$type": "Alternatives",
+                            "elements": [
+                              {
+                                "$type": "Group",
+                                "elements": [
+                                  {
+                                    "$type": "Keyword",
+                                    "value": "="
+                                  },
+                                  {
+                                    "$type": "Assignment",
+                                    "feature": "body",
+                                    "operator": "=",
+                                    "terminal": {
+                                      "$type": "RuleCall",
+                                      "rule": {
+                                        "$ref": "#/rules@189"
+                                      },
+                                      "arguments": []
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "$type": "Group",
+                                "elements": [
+                                  {
+                                    "$type": "Keyword",
+                                    "value": "{"
+                                  },
+                                  {
+                                    "$type": "Assignment",
+                                    "feature": "body",
+                                    "operator": "=",
+                                    "terminal": {
+                                      "$type": "RuleCall",
+                                      "rule": {
+                                        "$ref": "#/rules@189"
+                                      },
+                                      "arguments": []
+                                    }
+                                  },
+                                  {
+                                    "$type": "Keyword",
+                                    "value": "}"
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "$type": "Group",
+                        "elements": [
+                          {
+                            "$type": "Keyword",
+                            "value": "{"
+                          },
+                          {
+                            "$type": "Assignment",
+                            "feature": "rules",
+                            "operator": "+=",
+                            "terminal": {
+                              "$type": "RuleCall",
+                              "rule": {
+                                "$ref": "#/rules@106"
+                              },
+                              "arguments": []
+                            },
+                            "cardinality": "*"
+                          },
+                          {
+                            "$type": "Keyword",
+                            "value": "}"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
           }
         ]
       },

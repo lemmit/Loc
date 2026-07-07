@@ -14,6 +14,7 @@ import type {
   Lambda,
   MemberSuffix,
   PayloadDecl,
+  PolicyDecl,
   PostfixChain,
   PostfixSuffix,
   Projection,
@@ -49,6 +50,7 @@ import {
   isOperation,
   isParenExpr,
   isPayloadDecl,
+  isPolicyDecl,
   isPostfixChain,
   isPrimitiveConversion,
   isProperty,
@@ -330,6 +332,28 @@ function lowerPostfixChain(chain: PostfixChain, env: Env): ExprIR {
     }
     return recv;
   }
+  // Named policy-function CALL at the chain head (`IsManager()` /
+  // `CanApprove(amount)`, auth P3.2) — inline the ambient predicate body with
+  // the call arguments, then apply any trailing suffixes.  Handled here (not
+  // via the `recv.kind === "ref"` call branch below) because a PARAMETERLESS
+  // policy function resolves eagerly to its inlined body in `resolveNameRef`,
+  // so by the time a `()` suffix is applied the head is no longer a callable
+  // ref — the criterion path has the same latent shape but is never called
+  // with parens, whereas a policy function always is.
+  if (isNameRef(chain.head) && first && isCallSuffix(first)) {
+    const pf = findPolicyFnInEnv(env, chain.head.name);
+    if (pf) {
+      const args = first.args.map((a) => lowerExpr(a.value, env));
+      let recv: ExprIR = inlinePolicyFn(pf, args, env);
+      let recvType: TypeIR = { kind: "primitive", name: "bool" };
+      for (let i = 1; i < chain.suffixes.length; i++) {
+        const out = applySuffixToRecv(recv, recvType, chain.suffixes[i]!, env);
+        recv = out.recv;
+        recvType = out.recvType;
+      }
+      return recv;
+    }
+  }
   let recv = lowerExpr(chain.head, env);
   let recvType = inferExprType(chain.head, env);
   for (const s of chain.suffixes) {
@@ -370,6 +394,15 @@ function applySuffixToRecv(
       if (crit) {
         return {
           recv: inlineCriterion(crit, args, env),
+          recvType: { kind: "primitive", name: "bool" },
+        };
+      }
+      // Parameterised policy-function call (`CanApprove(cap)`) — inline the
+      // ambient predicate body with the call arguments substituted (auth P3.2).
+      const policyFn = findPolicyFnInEnv(env, recv.name);
+      if (policyFn) {
+        return {
+          recv: inlinePolicyFn(policyFn, args, env),
           recvType: { kind: "primitive", name: "bool" },
         };
       }
@@ -960,6 +993,58 @@ function findCriterionInEnv(env: Env, name: string): Criterion | undefined {
   return undefined;
 }
 
+/** Locate a FUNCTION-form `policy` declaration by name in the enclosing
+ *  context (authorization Phase 3.2).  A block-form `policy {}` (read ladder)
+ *  has no `returnType`; only the function form is a callable predicate. */
+function findPolicyFnInEnv(env: Env, name: string): PolicyDecl | undefined {
+  if (!env.ctx) return undefined;
+  for (const m of env.ctx.members) {
+    if (isPolicyDecl(m) && m.returnType !== undefined && m.name === name) return m;
+  }
+  return undefined;
+}
+
+/** Inline a named policy-function reference into the host expression
+ *  (authorization Phase 3.2).  Unlike a criterion, a policy function is
+ *  AMBIENT — it has no candidate aggregate, so the body sees only
+ *  `currentUser`, its own parameters (substituted by the caller's already-
+ *  lowered arguments), and context-level ambient names (module `permissions`,
+ *  enum values, sibling policy functions / criteria).  The enclosing
+ *  aggregate/part scope is cleared so a bare field name cannot leak in — pass
+ *  such values as arguments.  Because the result is an ordinary boolean
+ *  `ExprIR` spliced into a `requires` gate, every backend enforces it through
+ *  the existing `requires` → 403 path with no new render code.  A reference
+ *  cycle is broken by leaving the inner reference unresolved
+ *  (`loom.policy-fn-cycle` reports it).  The generic `criterionArgs` /
+ *  `criterionStack` inline-substitution + cycle machinery is reused. */
+function inlinePolicyFn(fn: PolicyDecl, args: ExprIR[], env: Env): ExprIR {
+  const stack = env.criterionStack ?? [];
+  if (stack.includes(fn.name as string)) {
+    return { kind: "ref", name: fn.name as string, refKind: "unknown" };
+  }
+  const argMap = new Map<string, ExprIR>();
+  fn.params.forEach((p, i) => {
+    const a = args[i];
+    if (a) argMap.set(p.name, a);
+  });
+  const bodyEnv: Env = {
+    ...env,
+    locals: new Map(),
+    aggregate: undefined,
+    part: undefined,
+    valueObject: undefined,
+    workflow: undefined,
+    projection: undefined,
+    criterionArgs: argMap,
+    criterionStack: [...stack, fn.name as string],
+  };
+  // `body` is always present on a function-form PolicyDecl (grammar), but the
+  // AST types it optional (shared with the block form) — guard defensively.
+  return fn.body
+    ? lowerExpr(fn.body, bodyEnv)
+    : { kind: "ref", name: fn.name as string, refKind: "unknown" };
+}
+
 /** When `where`/`filter` is *exactly* one named `criterion` reference — a
  *  bare parameterless criterion (`ActiveCustomer`) or a parameterised call
  *  (`InRegion("EU")`) — return the criterion name + its lowered argument
@@ -1134,6 +1219,14 @@ function resolveNameRef(name: string, env: Env): ExprIR {
     const crit = findCriterionInEnv(env, name);
     if (crit && crit.params.length === 0) {
       return inlineCriterion(crit, [], env);
+    }
+    // Parameterless policy-function reference (`IsManager`) — inline the
+    // ambient predicate body (auth P3.2).  A parameterised policy function
+    // referenced bare falls through; the validator reports the arity mismatch
+    // (`loom.policy-fn-arity`).
+    const policyFn = findPolicyFnInEnv(env, name);
+    if (policyFn && policyFn.params.length === 0) {
+      return inlinePolicyFn(policyFn, [], env);
     }
   }
   // Enum value lookup — only when an enclosing context exists.  E2E
@@ -1391,8 +1484,9 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
     // — the result type is the function's return type / VO type, then
     // we walk remaining suffixes.
     if (first && isCallSuffix(first) && isNameRef(expr.head)) {
-      // Criterion call (`InRegion("EU")`) types as a boolean predicate.
-      if (findCriterionInEnv(env, expr.head.name)) {
+      // Criterion / policy-function call (`InRegion("EU")` / `CanApprove(cap)`)
+      // types as a boolean predicate.
+      if (findCriterionInEnv(env, expr.head.name) || findPolicyFnInEnv(env, expr.head.name)) {
         curType = { kind: "primitive", name: "bool" };
         for (let i = 1; i < expr.suffixes.length; i++) {
           curType = inferSuffixType(curType, expr.suffixes[i]!, env);
@@ -1433,9 +1527,12 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
     if (alias) {
       return "type" in alias && alias.type ? alias.type : { kind: "primitive", name: "string" };
     }
-    // Parameterless criterion reference types as a boolean predicate.
+    // Parameterless criterion / policy-function reference types as a boolean
+    // predicate.
     const crit = findCriterionInEnv(env, expr.name);
     if (crit && crit.params.length === 0) return { kind: "primitive", name: "bool" };
+    const policyFn = findPolicyFnInEnv(env, expr.name);
+    if (policyFn && policyFn.params.length === 0) return { kind: "primitive", name: "bool" };
     const ref = resolveNameRef(expr.name, env);
     if (ref.kind === "ref" && ref.type) return ref.type;
     return { kind: "primitive", name: "string" };

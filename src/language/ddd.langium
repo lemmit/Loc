@@ -1021,10 +1021,25 @@ StampEvent returns string:
 // cross-reference, so an unknown aggregate surfaces a controlled `loom.*`
 // error rather than a generic linker message, and the scope provider needs no
 // change.  `name` is optional (a context may hold one anonymous policy).
+//
+// FUNCTION FORM (authorization Phase 3.2, docs/plans/authorization-phase3-2.md):
+// `policy <Name>(<params>): bool ( = <expr> | { <expr> } )` is a named, ambient,
+// parameterised boolean AUTHORIZATION predicate — the reusable twin of an inline
+// `requires` gate, referenced from a `requires PolicyName(args)` clause and
+// INLINED at that gate (like a `criterion … of bool`).  It shares the `policy`
+// head with the read-ladder block; the two are disambiguated after the name by
+// the next token — `(` opens a function, `{` opens a read-ladder block.  The
+// parentheses are therefore REQUIRED (even for zero params).  `returnType`
+// present ⇒ function form; a block form leaves it undefined.
 PolicyDecl:
-    'policy' name=ID? '{'
-        rules+=PolicyReadRule*
-    '}';
+    'policy' (
+        '{' rules+=PolicyReadRule* '}'
+      | name=ID (
+            '(' (params+=Parameter (',' params+=Parameter)*)? ')' ':' returnType=TypeRef
+                ( '=' body=Expression | '{' body=Expression '}' )
+          | '{' rules+=PolicyReadRule* '}'
+        )
+    );
 
 // `allow [write] <level> on <Aggregate>` — the optional `write` verb selects
 // the ladder (authorization Phase 3 P3.1, docs/plans/authorization-phase3.md):
