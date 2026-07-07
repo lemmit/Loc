@@ -86,7 +86,13 @@ describe("named policy functions — per-backend requires enforcement", () => {
     expect(text).toContain('Enum.member?(current_user.permissions, "sales.approve")');
     expect(text).toContain('Enum.member?(current_user.permissions, "sales.manage")');
     expect(text).toContain('Decimal.new("10000")');
-    expect(text).toContain('"Forbidden: CanApprove(amount)"');
+    // The `requires` predicate is inlined into a `with :ok <- ensure(…, :forbidden)`
+    // guard — an expected denial returns `{:error, :forbidden}` (→ 403), not a
+    // `raise(ArgumentError, "Forbidden: …")` (→ 500).  See the phoenix op-guards fix.
+    expect(text).toContain(
+      'ensure(Enum.member?(current_user.permissions, "sales.manage"), :forbidden)',
+    );
+    expect(text).not.toContain('"Forbidden: CanApprove(amount)"');
   });
 
   it("a plain aggregate with no policy-function gate is unaffected", async () => {
