@@ -21,6 +21,7 @@ import { renderDataSourcesMd } from "./datasources.js";
 import { renderE2EFile } from "./e2e-render.js";
 import { renderHelmChart } from "./helm.js";
 import { renderKubernetesManifests } from "./kubernetes.js";
+import { renderVsCodeLaunchJson } from "./launch-config.js";
 import { renderC4Model, renderC4SpecJson } from "./likec4.js";
 import {
   renderDeploymentDiagram,
@@ -239,6 +240,17 @@ function emitSystem(
 
   out.set("docker-compose.yml", renderDockerCompose(sys));
   out.set("db-init/00-create-databases.sql", renderDbInit(sys));
+  // M18 phase 8 slice 1 (Node debug wiring, --sourcemap only): one VS Code
+  // launch config per node-family deployable, sibling of docker-compose.yml.
+  // See docs/plans/dap-node-debug.md and src/system/launch-config.ts.
+  if (options.sourcemap) {
+    const nodeTargets = sys.deployables
+      .filter((d) => platformFor(d.platform).name === "node")
+      .map((d) => ({ name: d.name, slug: serviceSlug(d.name) }));
+    if (nodeTargets.length > 0) {
+      out.set(".vscode/launch.json", renderVsCodeLaunchJson(nodeTargets));
+    }
+  }
   // Opt-in production deployment artifacts (D-K8S-*; docs/kubernetes.md).
   // Emitted ALONGSIDE compose, never instead of it: compose stays the
   // inner-loop story, the chart + raw manifests are the cluster story.

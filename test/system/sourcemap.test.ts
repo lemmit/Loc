@@ -188,6 +188,39 @@ function stripJavaSourcemapFence(content: string): string {
   );
 }
 
+// M18 phase 8 slice 1 (Node debug wiring, dap-node-debug.md): the node/Hono
+// backend's `addTsExtensionsForNodeDebug` (src/generator/typescript/
+// debug-imports.ts) suffixes every relative import with its real `.ts`/
+// `.tsx` extension, ONLY when `sourcemap` is on — strip it back off before
+// comparing a node-deployable `.ts` file against the flag-off run, whose
+// imports stay extensionless (Bundler-style).
+const RELATIVE_IMPORT_RE = /\b(?:from|import)\s*\(?\s*(['"])(\.[^'"]*)\1/g;
+function stripNodeDebugImportExtensions(content: string): string {
+  return content.replace(RELATIVE_IMPORT_RE, (full, quote: string, spec: string) => {
+    const noExt = spec.replace(/\.(ts|tsx)$/, "");
+    return full.replace(`${quote}${spec}${quote}`, `${quote}${noExt}${quote}`);
+  });
+}
+
+// Same slice: `package.json` grows a `debug` script and `tsconfig.json`
+// grows `allowImportingTsExtensions` — both ONLY under `sourcemap`.  Both
+// are appended as the LAST key of their object (see
+// src/platform/hono/v4/emit.ts's `projectPackageJson` / `projectTsconfigJson`),
+// so parsing, deleting the key, and re-serializing with the same `null, 2`
+// indent reproduces the flag-off file byte-for-byte (verified against a live
+// generation — a plain regex strip risks the trailing-comma bookkeeping a
+// last-position JSON key removal needs).
+function stripNodeDebugScript(content: string): string {
+  const pkg = JSON.parse(content) as { scripts?: Record<string, string> };
+  if (pkg.scripts) delete pkg.scripts.debug;
+  return `${JSON.stringify(pkg, null, 2)}\n`;
+}
+function stripAllowImportingTsExtensions(content: string): string {
+  const cfg = JSON.parse(content) as { compilerOptions?: Record<string, unknown> };
+  if (cfg.compilerOptions) delete cfg.compilerOptions.allowImportingTsExtensions;
+  return `${JSON.stringify(cfg, null, 2)}\n`;
+}
+
 // `langium/test`'s `parseHelper` mints the in-memory doc's URI from a
 // module-global counter (`/1.ddd`, `/2.ddd`, …) that keeps incrementing
 // across every `it` in this file — never assume `/1.ddd`.  Parse with
@@ -227,11 +260,16 @@ describe(".loom/sourcemap.json", () => {
 
     const withFlagMinusMap = new Map(withFlag);
     withFlagMinusMap.delete(".loom/sourcemap.json");
+    // M18 phase 8 slice 1: `.vscode/launch.json` is a whole NEW file under
+    // `sourcemap`, not a per-file content divergence — drop it from the
+    // comparison the same way the wire artifact itself is dropped above.
+    withFlagMinusMap.delete(".vscode/launch.json");
     for (const path of [...withFlagMinusMap.keys()]) {
       if (path.endsWith(".map") || path.endsWith(".smap")) withFlagMinusMap.delete(path);
     }
 
     expect([...withFlagMinusMap.keys()].sort()).toEqual([...withoutFlag.keys()].sort());
+    const nodePrefix = `${SLUG_FOR.node}/`;
     for (const [path, content] of withoutFlag) {
       const other = withFlagMinusMap.get(path);
       expect(other, `missing ${path} in --sourcemap run`).toBeDefined();
@@ -244,6 +282,16 @@ describe(".loom/sourcemap.json", () => {
       if (path.endsWith(".cs")) otherNormalized = stripLineDirectives(otherNormalized);
       if (path.endsWith("build.gradle.kts"))
         otherNormalized = stripJavaSourcemapFence(otherNormalized);
+      // M18 phase 8 slice 1 (Node debug wiring): the node deployable's own
+      // package.json/tsconfig.json/*.ts grow debug-only content under
+      // `sourcemap` — normalize each back before comparing.
+      if (path.startsWith(nodePrefix)) {
+        if (path.endsWith("/package.json")) otherNormalized = stripNodeDebugScript(otherNormalized);
+        else if (path.endsWith("/tsconfig.json"))
+          otherNormalized = stripAllowImportingTsExtensions(otherNormalized);
+        else if (path.endsWith(".ts") || path.endsWith(".tsx"))
+          otherNormalized = stripNodeDebugImportExtensions(otherNormalized);
+      }
       expect(normalizeNondeterministic(otherNormalized), `content drifted for ${path}`).toBe(
         normalizeNondeterministic(content),
       );

@@ -16,6 +16,7 @@ import {
   buildBaseUnionFile,
   buildTpcBaseReaderFile,
 } from "../../../generator/typescript/base-reader-builder.js";
+import { addTsExtensionsForNodeDebug } from "../../../generator/typescript/debug-imports.js";
 import {
   aggregateIsAudited,
   renderAuditStampHelper,
@@ -781,6 +782,10 @@ export function generateTypeScriptForContexts(
       resourceDeps,
       hasSeeds,
       persistence: usingMikro ? "mikroorm" : "drizzle",
+      // M18 phase 8 slice 1 (Node debug wiring): a `debug` script only when
+      // `--sourcemap` is on — see the `addTsExtensionsForNodeDebug` call
+      // below for why this needs the sibling import rewrite to actually run.
+      debugScript: !!sourcemap,
     }),
   );
   // Shared primitive-schema helpers — one home for non-trivial wire
@@ -790,7 +795,7 @@ export function generateTypeScriptForContexts(
   if (projectUsesMoney) {
     out.set("lib/schemas.ts", LIB_SCHEMAS_MONEY_TS);
   }
-  out.set("tsconfig.json", PROJECT_TSCONFIG_JSON);
+  out.set("tsconfig.json", projectTsconfigJson(!!sourcemap));
   out.set("tsup.config.ts", TSUP_CONFIG);
   out.set(
     "index.ts",
@@ -832,6 +837,13 @@ export function generateTypeScriptForContexts(
   // project so the moved modules still resolve.  No-op (byte-identical) for the
   // byLayer default, where `moved` is empty.
   rewriteRelativeImports(out, moved);
+  // M18 phase 8 slice 1 (Node debug wiring, docs/plans/dap-node-debug.md):
+  // ONLY under `--sourcemap` — suffix every relative import with its real
+  // `.ts`/`.tsx` extension so plain `node --enable-source-maps index.ts`
+  // (no tsx/tsup loader) can resolve the whole module graph, chaining
+  // through the phase-5 `.ts.map` sidecars straight to `.ddd` coordinates.
+  // Flag-off keeps today's extensionless (Bundler-style) imports untouched.
+  if (sourcemap) addTsExtensionsForNodeDebug(out);
   return out;
 }
 
@@ -858,6 +870,16 @@ function projectPackageJson(
     resourceDeps?: Record<string, string>;
     hasSeeds?: boolean;
     persistence?: "drizzle" | "mikroorm";
+    /** M18 phase 8 slice 1 (Node debug wiring) — a `debug` script that runs
+     *  the project under plain Node (no tsx/tsup loader), chaining Node's
+     *  own `--enable-source-maps` through the phase-5 `.ts.map` sidecars
+     *  straight to `.ddd` coordinates.  Requires the sibling
+     *  `addTsExtensionsForNodeDebug` import rewrite (this file's caller) —
+     *  both are gated on the SAME `--sourcemap` flag, so they always ship
+     *  together.  Targets the docker image's node:24 (unflagged type
+     *  stripping); see docs/plans/dap-node-debug.md for why
+     *  `--experimental-strip-types` is deliberately NOT included. */
+    debugScript?: boolean;
   },
 ): string {
   const mikro = opts.persistence === "mikroorm";
@@ -913,6 +935,9 @@ function projectPackageJson(
           // no self-executing entry (a run-directly guard misfires once tsup
           // bundles it into dist/index.js, seeding before migrations).
           ...(opts.hasSeeds ? { "db:seed": "tsx db/seed-cli.ts" } : {}),
+          // M18 phase 8 slice 1 (Node debug wiring, --sourcemap only): plain
+          // Node, no tsx/tsup loader — see the `debugScript` jsdoc above.
+          ...(opts.debugScript ? { debug: "node --enable-source-maps index.ts" } : {}),
         },
         dependencies: {
           ...dependencies,
@@ -982,32 +1007,45 @@ export const moneySchema = z.string().transform((s, ctx) => {
 });
 `;
 
-const PROJECT_TSCONFIG_JSON =
-  JSON.stringify(
-    {
-      compilerOptions: {
-        // ES2022 is the highest target drizzle-kit's bundled
-        // @esbuild-kit/esm-loader accepts; tsup's own `target: "node24"`
-        // (in tsup.config.ts) is what governs the prod bundle.
-        target: "ES2022",
-        module: "ESNext",
-        moduleResolution: "Bundler",
-        strict: true,
-        esModuleInterop: true,
-        skipLibCheck: true,
-        // tsup handles emit (single bundled `dist/index.js`); tsc is
-        // type-check only via `npm run typecheck`.
-        noEmit: true,
-        // `Bundler` resolution lets relative imports omit the `.js`
-        // extension — esbuild (via tsup at build time, tsx at dev
-        // time, vite-node at test time) resolves them.
+/** `debugImports` — M18 phase 8 slice 1 (Node debug wiring, `--sourcemap`
+ *  only): once `addTsExtensionsForNodeDebug` suffixes relative imports with
+ *  their real `.ts`/`.tsx` extension, plain `tsc --noEmit` (the project's
+ *  own `typecheck` script) rejects them with TS5097 ("An import path can
+ *  only end with a '.ts' extension when 'allowImportingTsExtensions' is
+ *  enabled") unless that option is set — confirmed empirically, see
+ *  docs/plans/dap-node-debug.md. `noEmit` (already set below) is the other
+ *  half of that flag's precondition. Flag-off keeps this field absent, so
+ *  the emitted tsconfig.json is byte-identical to before. */
+function projectTsconfigJson(debugImports: boolean): string {
+  return (
+    JSON.stringify(
+      {
+        compilerOptions: {
+          // ES2022 is the highest target drizzle-kit's bundled
+          // @esbuild-kit/esm-loader accepts; tsup's own `target: "node24"`
+          // (in tsup.config.ts) is what governs the prod bundle.
+          target: "ES2022",
+          module: "ESNext",
+          moduleResolution: "Bundler",
+          strict: true,
+          esModuleInterop: true,
+          skipLibCheck: true,
+          // tsup handles emit (single bundled `dist/index.js`); tsc is
+          // type-check only via `npm run typecheck`.
+          noEmit: true,
+          // `Bundler` resolution lets relative imports omit the `.js`
+          // extension — esbuild (via tsup at build time, tsx at dev
+          // time, vite-node at test time) resolves them.
+          ...(debugImports ? { allowImportingTsExtensions: true } : {}),
+        },
+        include: ["**/*.ts"],
+        exclude: ["node_modules", "dist"],
       },
-      include: ["**/*.ts"],
-      exclude: ["node_modules", "dist"],
-    },
-    null,
-    2,
-  ) + "\n";
+      null,
+      2,
+    ) + "\n"
+  );
+}
 
 const TSUP_CONFIG = `// Auto-generated.  tsup bundles index.ts → dist/index.js for
 // production.  Externals match runtime deps from package.json so
