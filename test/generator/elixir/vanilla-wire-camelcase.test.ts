@@ -38,7 +38,7 @@ system CamelWire {
   storage pg { type: postgres }
   resource buildState { for: Builds, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Builds]
     dataSources: [buildState]
     serves: BuildsApi

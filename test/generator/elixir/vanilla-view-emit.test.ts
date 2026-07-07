@@ -146,7 +146,7 @@ describe("vanilla foundation — view emit (Ecto, no Ash.Query)", () => {
           }
         }
         storage primary { type: postgres }
-        deployable api { platform: elixir { foundation: vanilla }  contexts: [Ops]  port: 4000 }
+        deployable api { platform: elixir  contexts: [Ops]  port: 4000 }
       }
     `;
     const { model } = await parseString(SRC, { validate: false });

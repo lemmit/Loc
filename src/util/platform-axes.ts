@@ -10,24 +10,6 @@
 
 import type { Platform, SavingShape } from "../ir/types/loom-ir.js";
 
-// D-REALIZATION-AXES — the `application:` axis is the one axis whose DSL
-// spelling differs from its backing D-ADAPTER-HOME adapter key: the
-// decision renamed the service-layer value to `serviceLayer`, while the
-// `style` adapter key stays `layered`.  `cqrs`/`flat` map to themselves.
-// One source of truth so lowering AND the validator agree — the lowered
-// `DeployableIR.application` carries the resolved ADAPTER key, ready for
-// `resolveStyle`.
-
-/** DSL `application:` value → `style` adapter key. */
-export function applicationDslToAdapter(v: string): string {
-  return v === "serviceLayer" ? "layered" : v;
-}
-
-/** `style` adapter key → DSL `application:` value (for menus / display). */
-export function applicationAdapterToDsl(v: string): string {
-  return v === "layered" ? "serviceLayer" : v;
-}
-
 /** Saving shapes (D-DOCUMENT-AXIS `shape(…)`) each backend platform can
  *  EMIT today — the single source of truth for the `supportedShapes`
  *  capability check.  A `shape(…)` not listed for the target platform is

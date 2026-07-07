@@ -29,7 +29,7 @@ system Parties {
   storage pg { type: postgres }
   resource partiesState { for: Parties, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Parties]
     dataSources: [partiesState]
     serves: PartiesApi

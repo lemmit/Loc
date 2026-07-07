@@ -109,7 +109,7 @@ async function emit(layout: string): Promise<Map<string, string>> {
     deployable: d,
     sys,
     migrations: [],
-    styleAdapter: resolveStyle(d.platform, d.application),
+    styleAdapter: resolveStyle(d.platform, null),
     layoutAdapter: resolveLayout(d.platform, d.directoryLayout),
   });
 }

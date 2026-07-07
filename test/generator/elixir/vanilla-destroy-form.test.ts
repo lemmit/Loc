@@ -32,7 +32,7 @@ system DestroyDemo {
     }
   }
   deployable phoenixApp {
-    platform: elixir { foundation: vanilla }, contexts: [Inventory],
+    platform: elixir, contexts: [Inventory],
     serves: InventoryApi, ui: Admin, port: 4000
   }
 }
@@ -71,7 +71,7 @@ system NoDestroy {
   }
   api InvApi from S
   deployable phoenixApp {
-    platform: elixir { foundation: vanilla }, contexts: [Inv],
+    platform: elixir, contexts: [Inv],
     serves: InvApi, port: 4000
   }
 }

@@ -42,7 +42,7 @@ system MatchAwait {
   storage pg { type: postgres }
   resource orderState { for: Orders, kind: state, use: pg }
   deployable phoenixApp {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Orders]
     dataSources: [orderState]
     serves: OrdersApi

@@ -41,7 +41,7 @@ system Club {
   storage pg { type: postgres }
   resource st { for: Membership, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Membership]
     dataSources: [st]
     serves: ClubApi

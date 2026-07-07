@@ -50,14 +50,12 @@ ${body}
 
 describe("loom.vanilla-op-call-position", () => {
   it("allows an op self-call in `return` tail position", async () => {
-    expect(
-      await positionErrors(sys("elixir { foundation: vanilla }", "          return reserve()")),
-    ).toEqual([]);
+    expect(await positionErrors(sys("elixir", "          return reserve()"))).toEqual([]);
   });
 
   it("rejects an op self-call bound with `let`", async () => {
     const errs = await positionErrors(
-      sys("elixir { foundation: vanilla }", "          let x = reserve()\n          return x"),
+      sys("elixir", "          let x = reserve()\n          return x"),
     );
     expect(errs).toHaveLength(1);
     expect(errs[0]).toContain("summarize");
@@ -66,9 +64,7 @@ describe("loom.vanilla-op-call-position", () => {
   });
 
   it("rejects an op self-call nested in a larger expression", async () => {
-    const errs = await positionErrors(
-      sys("elixir { foundation: vanilla }", '          return reserve() + "!"'),
-    );
+    const errs = await positionErrors(sys("elixir", '          return reserve() + "!"'));
     expect(errs).toHaveLength(1);
   });
 

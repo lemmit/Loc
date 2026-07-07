@@ -126,7 +126,7 @@ const deployable = (platform: string) => `
 
 // elixir on the vanilla foundation (Slice-2-supported); contrast with the
 // default `platform: elixir` (Ash foundation, still fail-fast).
-const ELIXIR_VANILLA = "elixir { foundation: vanilla }";
+const ELIXIR_VANILLA = "elixir";
 
 const systemWith = (ctxBody: string, platform = "dotnet") => `
   system S {

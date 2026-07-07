@@ -38,7 +38,7 @@ const SRC = `system FulfillmentSys {
   storage pg { type: postgres }
   resource fulfillmentState { for: Fulfillment, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Fulfillment]
     dataSources: [fulfillmentState]
     serves: FulfillmentApi

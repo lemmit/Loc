@@ -32,7 +32,7 @@ const NON_PRINCIPAL = `system ST {
   api A from D
   storage primary { type: postgres }
   resource st { for: Shop, kind: state, use: primary }
-  deployable api1 { platform: elixir { foundation: vanilla }, contexts: [Shop], dataSources: [st], serves: A, port: 8081 }
+  deployable api1 { platform: elixir, contexts: [Shop], dataSources: [st], serves: A, port: 8081 }
 }`;
 
 // Principal stamps (`with auditable` → createdBy/updatedBy := currentUser) on an
@@ -48,7 +48,7 @@ const PRINCIPAL = `system PS {
   api A from D
   storage primary { type: postgres }
   resource st { for: Shop, kind: state, use: primary }
-  deployable api1 { platform: elixir { foundation: vanilla }, contexts: [Shop], dataSources: [st], serves: A, port: 8081, auth: required }
+  deployable api1 { platform: elixir, contexts: [Shop], dataSources: [st], serves: A, port: 8081, auth: required }
 }`;
 
 const MIGRATION = "api1/priv/repo/migrations/20260101000000_create_orders.exs";
@@ -62,14 +62,8 @@ const MIGRATION = "api1/priv/repo/migrations/20260101000000_create_orders.exs";
 // NOT-NULL `updated_*` is filled on create).  Same two fail-fast gates apply.
 // ---------------------------------------------------------------------------
 
-const VANILLA_NON_PRINCIPAL = NON_PRINCIPAL.replace(
-  "platform: elixir { foundation: vanilla },",
-  "platform: elixir { foundation: vanilla },",
-);
-const VANILLA_PRINCIPAL = PRINCIPAL.replace(
-  "platform: elixir { foundation: vanilla },",
-  "platform: elixir { foundation: vanilla },",
-);
+const VANILLA_NON_PRINCIPAL = NON_PRINCIPAL.replace("platform: elixir,", "platform: elixir,");
+const VANILLA_PRINCIPAL = PRINCIPAL.replace("platform: elixir,", "platform: elixir,");
 const VANILLA_REPO = "api1/lib/api1/shop/order_repository.ex";
 const VANILLA_SCHEMA = "api1/lib/api1/shop/order.ex";
 const VANILLA_CONTEXT = "api1/lib/api1/shop.ex";
@@ -154,7 +148,7 @@ describe("elixir/vanilla generator — lifecycle stamps", () => {
       api A from D
       storage primary { type: postgres }
       resource st { for: Ledger, kind: state, use: primary }
-      deployable api1 { platform: elixir { foundation: vanilla }, contexts: [Ledger], dataSources: [st], serves: A, port: 8081, auth: required }
+      deployable api1 { platform: elixir, contexts: [Ledger], dataSources: [st], serves: A, port: 8081, auth: required }
     }`;
     const repo = (await generateSystemFiles(claim)).get(
       "api1/lib/api1/ledger/account_repository.ex",
@@ -195,7 +189,7 @@ describe("elixir/vanilla generator — lifecycle stamps", () => {
       api A from D
       storage primary { type: postgres }
       resource el { for: Shop, kind: eventLog, use: primary }
-      deployable api1 { platform: elixir { foundation: vanilla }, contexts: [Shop], dataSources: [el], serves: A, port: 8081 }
+      deployable api1 { platform: elixir, contexts: [Shop], dataSources: [el], serves: A, port: 8081 }
     }`;
     const loom = await buildLoomModel(eventSourced);
     const errors = validateLoomModel(loom).filter(

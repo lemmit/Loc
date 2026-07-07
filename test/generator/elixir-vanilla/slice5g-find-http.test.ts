@@ -23,7 +23,7 @@ system S {
   api A from Core
   storage pg { type: postgres }
   resource st { for: Shop, kind: state, use: pg }
-  deployable api { platform: elixir { foundation: vanilla } contexts: [Shop] dataSources: [st] serves: A port: 4000 }
+  deployable api { platform: elixir contexts: [Shop] dataSources: [st] serves: A port: 4000 }
 }
 `;
 

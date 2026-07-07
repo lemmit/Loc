@@ -89,7 +89,7 @@ describe("workflow lifecycle log events — emitted on every backend (S3)", () =
   });
 
   it("Elixir (vanilla) logs both lifecycle events and requires Logger", async () => {
-    const mod = await fileEndingWith("platform: elixir { foundation: vanilla }", "ship_order.ex");
+    const mod = await fileEndingWith("platform: elixir", "ship_order.ex");
     expect(mod).toContain("require Logger");
     expect(mod).toContain(
       'Logger.info("workflow_started", event: "workflow_started", workflow: "shipOrder")',

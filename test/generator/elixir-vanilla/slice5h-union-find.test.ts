@@ -16,7 +16,7 @@ import { parseString } from "../../_helpers/parse.js";
 // (the elixir exemption is Ash-only).
 // ---------------------------------------------------------------------------
 
-const source = (foundation: string) => `
+const source = () => `
 system S {
   subdomain Core {
     context Shop {
@@ -30,7 +30,7 @@ system S {
   api A from Core
   storage pg { type: postgres }
   resource st { for: Shop, kind: state, use: pg }
-  deployable api { platform: elixir { foundation: ${foundation} }
+  deployable api { platform: elixir
     contexts: [Shop] dataSources: [st] serves: A port: 4000 }
 }
 `;
@@ -40,7 +40,7 @@ const get = (m: Map<string, string>, suffix: string) =>
 
 describe("vanilla — union-find absence producer", () => {
   it("translates the absent variant and returns the found record untagged", async () => {
-    const f = await generateSystemFiles(source("vanilla"));
+    const f = await generateSystemFiles(source());
     const ctl = get(f, "/controllers/order_controller.ex");
     expect(ctl).toContain("def locate(conn, params) do");
     // absent (NotFound) → ProblemDetails at its status, carrying resource: "Order"
@@ -56,22 +56,15 @@ describe("vanilla — union-find absence producer", () => {
   });
 
   it("the repository find is a single-get returning {:ok, record | nil}", async () => {
-    const repo = get(await generateSystemFiles(source("vanilla")), "/shop/order_repository.ex");
+    const repo = get(await generateSystemFiles(source()), "/shop/order_repository.ex");
     expect(repo).toContain("def locate(ref) do");
     expect(repo).toContain("{:ok, Repo.one(query)}");
   });
 
-  it("the union-find shape check runs on vanilla but stays exempt on ash", async () => {
-    const diagsFor = async (foundation: string) => {
-      const { model } = await parseString(source(foundation), { validate: false });
-      return validateLoomModel(enrichLoomModel(lowerModel(model)));
-    };
-    // A well-shaped union find (Order + NotFound{resource}) passes on both.
-    expect(
-      (await diagsFor("vanilla")).find((d) => d.code === "loom.union-find-shape-unsupported"),
-    ).toBeUndefined();
-    expect(
-      (await diagsFor("ash")).find((d) => d.code === "loom.union-find-shape-unsupported"),
-    ).toBeUndefined();
+  it("the union-find shape check passes for a well-shaped union find", async () => {
+    const { model } = await parseString(source(), { validate: false });
+    const diags = validateLoomModel(enrichLoomModel(lowerModel(model)));
+    // A well-shaped union find (Order + NotFound{resource}) passes.
+    expect(diags.find((d) => d.code === "loom.union-find-shape-unsupported")).toBeUndefined();
   });
 });

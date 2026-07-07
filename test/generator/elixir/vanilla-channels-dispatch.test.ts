@@ -69,7 +69,7 @@ system FulfillmentSys {
   storage primary { type: postgres }
   resource fulfillmentState { for: Fulfillment, kind: state, use: primary }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Fulfillment]
     dataSources: [fulfillmentState]
     serves: FulfillmentApi
@@ -196,7 +196,7 @@ describe("vanilla — channel-less project emits no dispatch wiring (byte-shape 
         storage primary { type: postgres }
         resource trackerState { for: Tracker, kind: state, use: primary }
         deployable api {
-          platform: elixir { foundation: vanilla }
+          platform: elixir
           contexts: [Tracker]
           dataSources: [trackerState]
           serves: TrackerApi

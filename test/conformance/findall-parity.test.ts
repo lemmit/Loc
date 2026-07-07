@@ -59,14 +59,7 @@ system S {
 }`;
 }
 
-const BACKENDS = [
-  "node",
-  "dotnet",
-  "java",
-  "python",
-  "elixir",
-  "elixir { foundation: vanilla }",
-] as const;
+const BACKENDS = ["node", "dotnet", "java", "python", "elixir", "elixir"] as const;
 
 /** Count generated files whose content mentions the `findAllBy<Criterion>`
  *  retrieval, tolerant of each backend's casing (`runFindAllByActiveOrder`,

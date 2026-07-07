@@ -194,12 +194,8 @@ Deployable:
         // parser (the `design:` precedent).
         ('platform' ':' platform=Platform
             ('{' (
-                  'foundation' ':' foundation=LooseName ','?
-                | 'application' ':' application=LooseName ','?
-                | 'persistence' ':' persistence=LooseName ','?
+                  'persistence' ':' persistence=LooseName ','?
                 | 'directoryLayout' ':' directoryLayout=LooseName ','?
-                | 'transport' ':' transport=LooseName ','?
-                | 'runtime' ':' runtime=LooseName ','?
             )* '}')?
             ','?)
         // The remaining clauses are ORDER-INDEPENDENT: each is introduced by
@@ -450,6 +446,7 @@ Api:
         ('{'
             ('urlStyle' ':' urlStyle=('literal' | 'resource'))?
             (statuses+=ApiStatus)*
+            (routes+=Route)*
         '}')?;
 
 // Per-error HTTP status override for the exception-less ProblemDetails
@@ -459,6 +456,26 @@ Api:
 // `status: OrderStatus` field name keeps parsing without a soft keyword.
 ApiStatus:
     'httpStatus' error=ID code=INT;
+
+// Explicit transport binding (unfoldable-api-derivation.md, Layer 4):
+//
+//   route POST "/orders" -> Ordering.PlaceOrder
+//
+// A single line binding an HTTP method + path to a named handler in a
+// bounded context.  `target` is a `HandlerRef` (`Context.Handler`); the
+// `context` segment is a real cross-ref (existing global scope for
+// `BoundedContext`), while the `handler` segment is a plain name resolved
+// by the IR validator (it spans commandHandler | queryHandler | workflow
+// handle — three kinds one Langium cross-ref can't span cleanly).  These
+// nodes ride alongside `ApiIR` and are not yet read by any backend.
+Route:
+    'route' method=HttpMethod path=STRING '->' target=HandlerRef;
+
+HttpMethod returns string:
+    'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+
+HandlerRef:
+    context=[BoundedContext:ID] '.' handler=ID;
 
 // ---- storage declaration (system-level) ------------------------
 //
@@ -851,7 +868,31 @@ BoundedContext:
 ContextMember:
     EnumDecl | ValueObject | Aggregate | EventDecl | PayloadDecl | Repository | Workflow | View
     | Seed | Criterion | Retrieval | FilterDecl | StampDecl | ImplementsDecl | Channel | DomainService
-    | Projection | PolicyDecl;
+    | Projection | PolicyDecl | CommandHandler | QueryHandler;
+
+// Application-layer handlers (unfoldable-api-derivation.md, Layer 3) —
+// top-level context members, effectively a workflow `handle` lifted out
+// when the orchestration is single-aggregate.  Function-signature form
+// mirrors `Operation` / `HandleDecl`; the body reuses the same
+// `Statement*` grammar (load → mutate → save → return).
+//
+//   commandHandler PlaceOrder(cmd: PlaceOrderCommand): OrderResponse { … }
+//   queryHandler   GetOrderById(q: OrdersByIdQuery): OrderResponse { … }
+//
+// `queryHandler` ALWAYS carries a return type (it produces a response);
+// `commandHandler` MAY omit it (a `: void`-equivalent destroy-style
+// handler).  Layering contracts (queryHandler must not save; a
+// commandHandler may touch only one aggregate) are enforced by the IR
+// validator, not the grammar.
+CommandHandler:
+    'commandHandler' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' (':' returnType=TypeRef)? '{'
+        body+=Statement*
+    '}';
+
+QueryHandler:
+    'queryHandler' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' ':' returnType=TypeRef '{'
+        body+=Statement*
+    '}';
 
 EnumDecl:
     'enum' name=ID '{'
@@ -1798,14 +1839,12 @@ LooseName returns string:
     // as soft so user code can still name a field / parameter `or`; hard only
     // between `TypeAtom`s in a `TypeRef`.
     | 'or'
-    // D-REALIZATION-AXES — the six platform-block axis keywords admitted
-    // as soft so user code can still name a field `application`,
-    // `transport`, `runtime`, etc.  `transactional` is the `runtime`
-    // default value and is ALSO the storage-isolation flag keyword
-    // (`transactional?='transactional'`) — admit it here so it parses as
-    // a `LooseName` value in the `runtime:` slot.
-    | 'foundation' | 'application' | 'persistence' | 'directoryLayout'
-    | 'transport' | 'runtime' | 'transactional'
+    // D-REALIZATION-AXES — the platform-block axis keywords admitted as
+    // soft so user code can still name a field `persistence`, etc.
+    // `transactional` is the storage-isolation flag keyword
+    // (`transactional?='transactional'`) — admit it here so it parses as a
+    // `LooseName` value too.
+    | 'persistence' | 'directoryLayout' | 'transactional'
     // Retrieval keywords (retrieval.md) admitted as soft so user code can
     // still name a field `retrieval` / `sort` / `loads` / `asc` / `desc`.
     // Hard only inside the `Retrieval` rule's slots.

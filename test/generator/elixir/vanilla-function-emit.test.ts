@@ -45,7 +45,7 @@ system FnDemo {
   storage primary { type: postgres }
   resource orderState { for: Ordering, kind: state, use: primary }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Ordering]
     dataSources: [orderState]
     serves: OrderApi
@@ -111,7 +111,7 @@ system NoFns {
   }
   api InvApi from S
   deployable api {
-    platform: elixir { foundation: vanilla }, contexts: [Inv],
+    platform: elixir, contexts: [Inv],
     serves: InvApi, port: 4000
   }
 }

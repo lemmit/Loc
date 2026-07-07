@@ -40,7 +40,7 @@ system UN {
   api OApi from Orders
   storage pg { type: postgres }
   resource st { for: Orders, kind: state, use: pg }
-  deployable api { platform: elixir { foundation: vanilla } contexts: [Orders] dataSources: [st] serves: OApi port: 4000 }
+  deployable api { platform: elixir contexts: [Orders] dataSources: [st] serves: OApi port: 4000 }
 }
 `;
 
@@ -70,9 +70,7 @@ describe("union finds — cross-backend success-variant-directly wire (exception
   });
 
   it("Python types the 200 as OrderResponse and returns the wire directly", async () => {
-    const files = await generateSystemFiles(
-      VANILLA_SYSTEM.replace("elixir { foundation: vanilla }", "python"),
-    );
+    const files = await generateSystemFiles(VANILLA_SYSTEM.replace("elixir", "python"));
     const routes = files.get([...files.keys()].find((k) => k.endsWith("http/order_routes.py"))!)!;
     // No untyped `response_model=None`, no tagged union model — the find is
     // typed as the plain OrderResponse and returns the wire record directly.
@@ -85,9 +83,7 @@ describe("union finds — cross-backend success-variant-directly wire (exception
   });
 
   it("Java controller returns the <Agg>Response, with no union wire DTO", async () => {
-    const files = await generateSystemFiles(
-      VANILLA_SYSTEM.replace("elixir { foundation: vanilla }", "java"),
-    );
+    const files = await generateSystemFiles(VANILLA_SYSTEM.replace("elixir", "java"));
     expect([...files.keys()].some((k) => /OrderOrNotFound.*\.java$/.test(k))).toBe(false);
     const ctrl = files.get([...files.keys()].find((k) => k.endsWith("OrdersController.java"))!)!;
     expect(ctrl).toContain("return ResponseEntity.ok(r);");

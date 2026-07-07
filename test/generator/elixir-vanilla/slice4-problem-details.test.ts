@@ -33,7 +33,7 @@ system Tasks {
   storage primary { type: postgres }
   resource trackerState { for: Tracker, kind: state, use: primary }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Tracker]
     dataSources: [trackerState]
     serves: TrackerApi

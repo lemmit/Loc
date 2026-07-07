@@ -65,7 +65,7 @@ const REDACTION_SOURCE = `
     deployable honoApi { platform: node, contexts: [People], port: 3000 }
     deployable dotnetApi { platform: dotnet, contexts: [People], port: 3001 }
     deployable elixirApi {
-      platform: elixir { foundation: vanilla }
+      platform: elixir
       contexts: [People]
       dataSources: [peopleState]
       serves: PeopleApi
@@ -170,7 +170,7 @@ describe("cross-backend inspect redaction — `sensitive(...)` renders as `<reda
         storage primary { type: postgres }
         resource peopleState { for: People, kind: state, use: primary }
         deployable elixirApi {
-          platform: elixir { foundation: vanilla }
+          platform: elixir
           contexts: [People]
           dataSources: [peopleState]
           serves: PeopleApi

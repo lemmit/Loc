@@ -37,7 +37,7 @@ system Sales {
   api A from Core
   storage pg { type: postgres }
   resource es { for: Orders, kind: eventLog, use: pg }
-  deployable api { platform: elixir { foundation: vanilla } contexts: [Orders] dataSources: [es] serves: A port: 4000 }
+  deployable api { platform: elixir contexts: [Orders] dataSources: [es] serves: A port: 4000 }
 }
 `;
 
@@ -58,7 +58,7 @@ system L {
   api A from Core
   storage pg { type: postgres }
   resource es { for: Accounts, kind: eventLog, use: pg }
-  deployable api { platform: elixir { foundation: vanilla } contexts: [Accounts] dataSources: [es] serves: A port: 4000 }
+  deployable api { platform: elixir contexts: [Accounts] dataSources: [es] serves: A port: 4000 }
 }
 `;
 

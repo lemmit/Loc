@@ -45,7 +45,7 @@ system Catalog {
   storage primary { type: postgres }
   resource storefrontState { for: Storefront, kind: state, use: primary }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Storefront]
     dataSources: [storefrontState]
     serves: StorefrontApi

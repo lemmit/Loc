@@ -43,7 +43,7 @@ ${authBits}  subdomain Sales {
   storage primary { type: postgres }
   resource salesState { for: Tickets, kind: state, use: primary }
   deployable app {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Tickets]
     dataSources: [salesState]
     serves: SalesApi

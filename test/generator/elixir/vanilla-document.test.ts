@@ -30,7 +30,7 @@ system Carting {
   storage pg { type: postgres }
   resource cartState { for: Carts, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Carts]
     dataSources: [cartState]
     serves: CartsApi
@@ -188,7 +188,7 @@ system Carting {
   storage pg { type: postgres }
   resource cartState { for: Carts, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Carts]
     dataSources: [cartState]
     serves: CartsApi
@@ -275,7 +275,7 @@ system Carting {
   storage pg { type: postgres }
   resource cartState { for: Carts, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Carts]
     dataSources: [cartState]
     serves: CartsApi
@@ -343,7 +343,7 @@ system Ordering {
   storage pg { type: postgres }
   resource orderState { for: Orders, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Orders]
     dataSources: [orderState]
     serves: OrdersApi

@@ -161,7 +161,7 @@ system StorefrontPhoenix {
   resource storefrontState { for: Storefront, kind: state, use: primary }
 
   deployable phoenixApp {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Storefront]
     dataSources: [storefrontState]
     serves: StorefrontApi

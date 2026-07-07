@@ -443,11 +443,10 @@ function emitDeployable(
   // `resolve-adapters` (generators must not reach into `src/platform/`).
   // The resolved adapters thread down through `emitProject` into each
   // backend's `EmitCtx`.  Backends only (`hasAdapters`); frontends carry
-  // no axes, so both stay undefined.  Under today's size-1 real menus the
-  // resolved adapter is the backend's existing default → byte-identical.
-  const resolvedStyle = hasAdapters(d.platform)
-    ? resolveStyle(d.platform, d.application)
-    : undefined;
+  // no axes, so both stay undefined.  The style is the backend's single
+  // fixed emission style (no user knob) — `resolveStyle(_, null)` picks
+  // the default; `directoryLayout` is the one user-selectable layout axis.
+  const resolvedStyle = hasAdapters(d.platform) ? resolveStyle(d.platform, null) : undefined;
   const resolvedLayout = hasAdapters(d.platform)
     ? resolveLayout(d.platform, d.directoryLayout)
     : undefined;

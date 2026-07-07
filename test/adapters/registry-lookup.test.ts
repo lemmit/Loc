@@ -12,9 +12,7 @@ import {
   hasAdapters,
   resolveLayout,
   resolvePersistence,
-  resolveRuntime,
   resolveStyle,
-  resolveTransport,
 } from "../../src/platform/resolve-adapters.js";
 
 describe("adapter registry — lookup", () => {
@@ -97,7 +95,6 @@ describe("adapter registry — lookup", () => {
       expect(err.adapterName).toBe("nopeql");
       expect(err.message).toContain("dapper");
       expect(err.message).toContain("efcore");
-      expect(err.message).toContain("marten");
     }
   });
 
@@ -130,7 +127,7 @@ describe("adapter registry — lookup", () => {
 });
 
 describe("availableAdapterNames — real adapters only (D-REALIZATION-AXES R1 menu)", () => {
-  it("excludes stubs on dotnet (efcore/dapper/cqrs/byLayer/byFeature real; marten/layered stubs)", () => {
+  it("dotnet menu is efcore/dapper persistence · cqrs style · byLayer/byFeature layout (all real)", () => {
     // dapper became real in Phase 5c — both persistence adapters selectable.
     expect(availableAdapterNames("dotnet", "persistence")).toEqual(["dapper", "efcore"]);
     expect(availableAdapterNames("dotnet", "style")).toEqual(["cqrs"]);
@@ -162,70 +159,12 @@ describe("availableAdapterNames — real adapters only (D-REALIZATION-AXES R1 me
     expect(availableAdapterNames("static", "style")).toEqual([]);
   });
 
-  it("allAdapterNames includes reserved stubs (so 'reserved' can be told from 'unknown')", () => {
+  it("allAdapterNames equals availableAdapterNames — no reserved stubs remain", () => {
+    // All stub adapters were removed, so the full menu is exactly the real menu.
     const all = allAdapterNames("dotnet", "persistence");
     expect(all).toContain("efcore"); // real
     expect(all).toContain("dapper"); // real since Phase 5c
-    expect(all).toContain("marten"); // a registered stub
-    expect(availableAdapterNames("dotnet", "persistence")).not.toContain("marten");
-  });
-});
-
-describe("transport — adapter-backed axis (realization-axes-alignment.md slice 3)", () => {
-  it("each backend exposes its real transport (alternatives are stubs)", () => {
-    expect(availableAdapterNames("dotnet", "transport")).toEqual(["controllers"]);
-    expect(availableAdapterNames("node", "transport")).toEqual(["hono"]);
-    expect(availableAdapterNames("elixir", "transport")).toEqual(["phoenix"]);
-    // Reserved stubs — present in allAdapterNames, excluded from the real menu:
-    // controllers (dotnet); express + fastify (node).
-    expect(allAdapterNames("dotnet", "transport")).toEqual(["controllers", "minimalApi"]);
-    expect(allAdapterNames("node", "transport")).toEqual(["express", "fastify", "hono"]);
-  });
-
-  it("exposes the transport default per backend", () => {
-    expect(defaultsFor("dotnet")!.transport).toBe("controllers");
-    expect(defaultsFor("node")!.transport).toBe("hono");
-    expect(defaultsFor("elixir")!.transport).toBe("phoenix");
-  });
-
-  it("resolves a bareword default + an explicit transport; throws on unknown", () => {
-    expect(resolveTransport("dotnet", null).name).toBe("controllers");
-    expect(resolveTransport("dotnet", "controllers").name).toBe("controllers");
-    expect(resolveTransport("elixir", null).name).toBe("phoenix");
-    // controllers is a registered stub: capability fields answer (name), so
-    // resolution returns it cleanly (emit-time is where stubs throw).
-    expect(resolveTransport("dotnet", "controllers").name).toBe("controllers");
-  });
-
-  it("frontends expose no transport", () => {
-    expect(availableAdapterNames("react", "transport")).toEqual([]);
-  });
-});
-
-describe("runtime — adapter-backed axis (realization-axes-alignment.md slice 5)", () => {
-  it("each backend exposes `transactional`; actor runtimes are reserved stubs", () => {
-    expect(availableAdapterNames("dotnet", "runtime")).toEqual(["transactional"]);
-    expect(availableAdapterNames("node", "runtime")).toEqual(["transactional"]);
-    expect(availableAdapterNames("elixir", "runtime")).toEqual(["transactional"]);
-    // Actor runtimes are registered stubs — present in allAdapterNames,
-    // excluded from the real menu: orleans (dotnet), genserver (elixir),
-    // worker (node — worker_threads).
-    expect(allAdapterNames("dotnet", "runtime")).toEqual(["orleans", "transactional"]);
-    expect(allAdapterNames("elixir", "runtime")).toEqual(["genserver", "transactional"]);
-    expect(allAdapterNames("node", "runtime")).toEqual(["transactional", "worker"]);
-  });
-
-  it("exposes the runtime default per backend (transactional)", () => {
-    expect(defaultsFor("dotnet")!.runtime).toBe("transactional");
-    expect(defaultsFor("node")!.runtime).toBe("transactional");
-    expect(defaultsFor("elixir")!.runtime).toBe("transactional");
-  });
-
-  it("resolves the default + an explicit runtime; reserved stubs resolve cleanly", () => {
-    expect(resolveRuntime("dotnet", null).name).toBe("transactional");
-    expect(resolveRuntime("elixir", "transactional").name).toBe("transactional");
-    expect(resolveRuntime("dotnet", "orleans").name).toBe("orleans");
-    expect(resolveRuntime("elixir", "genserver").name).toBe("genserver");
-    expect(resolveRuntime("node", "worker").name).toBe("worker");
+    expect(all).not.toContain("marten"); // the marten stub was removed
+    expect(all).toEqual(availableAdapterNames("dotnet", "persistence"));
   });
 });

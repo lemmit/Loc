@@ -42,7 +42,7 @@ describe("validator: ui framework must be hostable by the deployable (D-PHOENIX-
       system S {
         subdomain M { context C { aggregate A { x: int } } }
         ui Admin { framework: phoenixLiveView }
-        deployable app { platform: elixir { foundation: vanilla }, contexts: [C], ui: Admin, port: 4000 }
+        deployable app { platform: elixir, contexts: [C], ui: Admin, port: 4000 }
       }
     `);
     expect(

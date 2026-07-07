@@ -39,7 +39,7 @@ describe("validator: retired phoenix-family platform + framework aliases", () =>
       system S {
         subdomain M { context C { aggregate A { x: int } } }
         ui Admin { framework: phoenixLiveView }
-        deployable app { platform: elixir { foundation: vanilla }, contexts: [C], hosts: Admin, port: 4000 }
+        deployable app { platform: elixir, contexts: [C], hosts: Admin, port: 4000 }
       }
     `);
     expect(
@@ -53,7 +53,7 @@ describe("validator: retired phoenix-family platform + framework aliases", () =>
       system S {
         subdomain M { context C { aggregate A { x: int } } }
         ui Web { framework: react }
-        deployable app { platform: elixir { foundation: vanilla }, contexts: [C], hosts: Web, port: 4000 }
+        deployable app { platform: elixir, contexts: [C], hosts: Web, port: 4000 }
       }
     `);
     expect(
@@ -83,7 +83,7 @@ describe("validator: retired phoenix-family platform + framework aliases", () =>
       system S {
         subdomain M { context C { aggregate A { x: int = 0 } repository As for A { } } }
         ui Admin { framework: phoenixLiveView  page Home { route: "/" } }
-        deployable app { platform: elixir { foundation: vanilla }, contexts: [C], hosts: Admin, port: 4000, design: coreComponents }
+        deployable app { platform: elixir, contexts: [C], hosts: Admin, port: 4000, design: coreComponents }
       }
     `);
     expect(

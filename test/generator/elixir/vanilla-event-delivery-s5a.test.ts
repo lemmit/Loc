@@ -38,7 +38,7 @@ system Shop {
   storage primarySql { type: postgres }
   resource ordState { for: Ordering, kind: state, use: primarySql }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Ordering]
     dataSources: [ordState]
     serves: SalesApi
@@ -84,7 +84,7 @@ system FulfillmentSys {
   storage primary { type: postgres }
   resource fulfillmentState { for: Fulfillment, kind: state, use: primary }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Fulfillment]
     dataSources: [fulfillmentState]
     serves: FulfillmentApi
@@ -172,7 +172,7 @@ system FulfillmentSys {
   storage primary { type: postgres }
   resource fulfillmentState { for: Fulfillment, kind: state, use: primary }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Fulfillment]
     dataSources: [fulfillmentState]
     serves: FulfillmentApi

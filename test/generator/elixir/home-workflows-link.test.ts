@@ -25,7 +25,7 @@ const SYS = (workflowBody: string) => `
     storage pg { type: postgres }
     resource st { for: C, kind: state, use: pg }
     deployable app {
-      platform: elixir { foundation: vanilla }
+      platform: elixir
       contexts: [C]
       dataSources: [st]
       ui: U

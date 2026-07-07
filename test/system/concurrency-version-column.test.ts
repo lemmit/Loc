@@ -46,7 +46,7 @@ const elixirSystem = (cap: string) => `
       }
     }
     deployable api {
-      platform: elixir { foundation: vanilla }
+      platform: elixir
       contexts: [Ordering]
     }
   }

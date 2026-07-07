@@ -29,7 +29,7 @@ const PAIRED = `system S {
   api A from O
   storage pg { type: postgres }
   resource oState { for: O, kind: state, use: pg }
-  deployable api { platform: elixir { foundation: vanilla } contexts: [O] dataSources: [oState] serves: A port: 4000 } }`;
+  deployable api { platform: elixir contexts: [O] dataSources: [oState] serves: A port: 4000 } }`;
 
 const UNPAIRED = `system S {
   subdomain O { context O {
@@ -49,7 +49,7 @@ const UNPAIRED = `system S {
   api A from O
   storage pg { type: postgres }
   resource oState { for: O, kind: state, use: pg }
-  deployable api { platform: elixir { foundation: vanilla } contexts: [O] dataSources: [oState] serves: A port: 4000 } }`;
+  deployable api { platform: elixir contexts: [O] dataSources: [oState] serves: A port: 4000 } }`;
 
 const file = (files: Map<string, string>, suffix: string): string =>
   [...files.entries()].find(([k]) => k.endsWith(suffix))?.[1] ?? "";

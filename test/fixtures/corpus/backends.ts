@@ -16,7 +16,7 @@ export const PLATFORM_CLAUSE: Record<Backend, string> = {
   dotnet: "dotnet",
   java: "java",
   python: "python",
-  vanilla: "elixir { foundation: vanilla }",
+  vanilla: "elixir",
 };
 
 /** Human label for diagnostics. */

@@ -812,6 +812,8 @@ no `apiOnly`, `framework:` is UI-only, default domain = Ash).
 ## D-REALIZATION-AXES — the deployable platform-config axes (and the `foundation:` amendment)
 
 > **Superseded (2026): the Ash foundation was removed.** `platform: elixir` is plain Ecto/Phoenix only; `foundation: ash` is now a validation error and `vanilla` is the default and only valid value. The Ash-vs-vanilla reasoning below is historical.
+>
+> **Superseded (2026): the realization block was pruned to two axes.** The bundle-decomposition instinct below stands, but four of the six axes were inert or theater and were removed, leaving only the two with real per-backend choice — **`persistence`** and **`directoryLayout`**. Removed: `foundation:` (single value `vanilla` everywhere — grammar clause, `DeployableIR.foundation`, the R4/R6 rules, the `foundation-default-flipping` warning all deleted); `application:`/style (each backend has one fixed emission style — `cqrs` on dotnet, `layered` elsewhere — kept as an internal `StyleAdapter`, no longer a user knob); and `transport:`/`runtime:` (name-only `TransportAdapter`/`RuntimeAdapter` registries that no emitter ever read — pure validation theater, deleted whole). Every reserved *stub* adapter (`marten`/`jooq`/`axon`/`minimalApi`/`orleans`/`genserver`/`worker`/the `cqrs`/`flat`/`layered` style stubs) was removed too — a stub that throws on `emit*` is speculative-generality debt, not a shipped capability. All `foundation:`/`application:`/`transport:`/`runtime:` reasoning below (the amendment, ownership rules, rung table, gating matrix, the R2–R7 rules) is historical.
 
 **Status:** PINNED. (Amends **D-PHOENIX-SURFACE**'s domain-axis mechanism;
 depends on **D-ADAPTER-HOME** and **D-STORAGE-SPLIT**. Full matrix, gating rules,

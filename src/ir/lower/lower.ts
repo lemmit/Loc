@@ -49,6 +49,7 @@ import {
   isBoundedContext,
   isChannel,
   isChannelSource,
+  isCommandHandler,
   isComponent,
   isContainment,
   isCreate,
@@ -71,6 +72,7 @@ import {
   isPolicyDecl,
   isProjection,
   isProperty,
+  isQueryHandler,
   isRepository,
   isRequirement,
   isResource,
@@ -102,6 +104,7 @@ import type {
   BoundedContextIR,
   ChannelIR,
   ChannelSourceIR,
+  CommandHandlerIR,
   ComponentIR,
   ConfigEntryIR,
   ConnectionSourceIR,
@@ -124,6 +127,7 @@ import type {
   PolicyReadLevelIR,
   PolicyWriteLevelIR,
   ProjectionIR,
+  QueryHandlerIR,
   RawLoomModel,
   RepositoryIR,
   RequirementIR,
@@ -194,7 +198,7 @@ import {
 } from "./lower-types.js";
 import { lowerComponent, lowerLayout, lowerUi } from "./lower-ui.js";
 import { lowerView } from "./lower-view.js";
-import { lowerWorkflow } from "./lower-workflow.js";
+import { lowerCommandHandler, lowerQueryHandler, lowerWorkflow } from "./lower-workflow.js";
 import { originFor } from "./origin.js";
 import { buildExpandContext, type WalkerExpandContext } from "./walker-primitive-expander.js";
 
@@ -544,6 +548,14 @@ function lowerSystem(sys: System, extraMembers: ReadonlyArray<SystemMember> = []
         sourceModule: a.source?.$refText ?? "",
         urlStyle: a.urlStyle === "resource" ? "resource" : "literal",
         errorStatuses: Object.fromEntries((a.statuses ?? []).map((s) => [s.error, s.code])),
+        routes: (a.routes ?? []).map((r) => ({
+          method: r.method,
+          path: r.path,
+          target: {
+            context: r.target.context?.$refText ?? "",
+            handler: r.target.handler,
+          },
+        })),
       }),
     );
   const storages = members
@@ -930,6 +942,8 @@ function lowerContext(
   const aggregates: AggregateIR[] = [];
   const repositories: RepositoryIR[] = [];
   const workflows: WorkflowIR[] = [];
+  const commandHandlers: CommandHandlerIR[] = [];
+  const queryHandlers: QueryHandlerIR[] = [];
   const views: ViewIR[] = [];
   const criteria: CriterionIR[] = [];
   const domainServices: DomainServiceIR[] = [];
@@ -966,6 +980,13 @@ function lowerContext(
   // domain services never reference workflows, so deferring is safe.
   for (const m of ctx.members) {
     if (isWorkflow(m)) workflows.push(lowerWorkflow(m, env, ctx, { aggregates, domainServices }));
+    // Application-layer handlers (unfoldable-api-derivation.md, Layer 3) lower in
+    // this same second pass — like workflows, their exit-saves must see the
+    // context's already-lowered aggregates + domain services.
+    else if (isCommandHandler(m))
+      commandHandlers.push(lowerCommandHandler(m, env, ctx, { aggregates, domainServices }));
+    else if (isQueryHandler(m))
+      queryHandlers.push(lowerQueryHandler(m, env, ctx, { aggregates, domainServices }));
   }
   // `policy {}` read-reachability rules (multi-tenancy Phase 2 P2.4).  A pure
   // structural projection — the per-aggregate `deep`/`global` rewrite of the
@@ -1007,6 +1028,8 @@ function lowerContext(
     aggregates,
     repositories,
     workflows,
+    ...(commandHandlers.length > 0 ? { commandHandlers } : {}),
+    ...(queryHandlers.length > 0 ? { queryHandlers } : {}),
     views,
     criteria,
     domainServices,

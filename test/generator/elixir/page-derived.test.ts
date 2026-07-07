@@ -15,7 +15,7 @@ const SYS = (ui: string): string => `
     storage primary { type: postgres }
     resource cState { for: C, kind: state, use: primary }
     deployable app {
-      platform: elixir { foundation: vanilla }
+      platform: elixir
       contexts: [C] dataSources: [cState] serves: Api ui: Web port: 4000
     }
   }

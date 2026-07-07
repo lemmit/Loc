@@ -33,7 +33,7 @@ const AGG = `
       }
       repository Accounts for Account { find byOwner(owner: string): Account? where this.owner == owner }`;
 
-const source = (foundation: string) => `
+const source = () => `
 system L {
   subdomain Core {
     context Accounts {${AGG}
@@ -43,7 +43,7 @@ system L {
   storage pg { type: postgres }
   resource log { for: Accounts, kind: eventLog, use: pg }
   deployable api {
-    platform: elixir { foundation: ${foundation} }
+    platform: elixir
     contexts: [Accounts]
     dataSources: [log]
     serves: A
@@ -52,8 +52,8 @@ system L {
 }
 `;
 
-async function diagnostics(foundation: string) {
-  const { model } = await parseString(source(foundation), { validate: false });
+async function diagnostics() {
+  const { model } = await parseString(source(), { validate: false });
   return validateLoomModel(enrichLoomModel(lowerModel(model)));
 }
 
@@ -61,13 +61,13 @@ const ES_GATE = "loom.event-sourcing-backend-unsupported";
 
 describe("vanilla — Slice P4.1 event-sourcing gate", () => {
   it("accepts persistedAs(eventLog) on foundation: vanilla", async () => {
-    const diags = await diagnostics("vanilla");
+    const diags = await diagnostics();
     expect(diags.find((d) => d.code === ES_GATE)).toBeUndefined();
   });
 });
 
 describe("vanilla — Slice P4.2 event-sourcing emit", () => {
-  const files = () => generateSystemFiles(source("vanilla"));
+  const files = () => generateSystemFiles(source());
   const get = (m: Map<string, string>, suffix: string) =>
     m.get([...m.keys()].find((k) => k.endsWith(suffix))!)!;
 
@@ -159,7 +159,7 @@ system L {
   storage pg { type: postgres }
   resource log { for: Accounts, kind: eventLog, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Accounts]
     dataSources: [log]
     serves: A

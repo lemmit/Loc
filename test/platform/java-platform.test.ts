@@ -18,7 +18,8 @@ import {
 // `src/platform/java.js` directly — a direct import ahead of the registry
 // re-enters the tolerated `registry → surface → generator → enrich →
 // registry` cycle from the wrong end and observes a half-initialised
-// module (D-ADAPTER-HOME).
+// module (D-ADAPTER-HOME).  The adapter menu is now stub-free: jpa
+// persistence, layered style, byLayer+byFeature layouts.
 const javaPlatform = platformFor("java");
 
 describe("java platform — registry resolution", () => {
@@ -78,22 +79,19 @@ describe("java platform — adapter menu", () => {
     expect(availableAdapterNames("java", "persistence")).toEqual(["jpa"]);
     expect(availableAdapterNames("java", "style")).toEqual(["layered"]);
     expect(availableAdapterNames("java", "layout")).toEqual(["byFeature", "byLayer"]);
-    expect(availableAdapterNames("java", "transport")).toEqual(["restController"]);
-    expect(availableAdapterNames("java", "runtime")).toEqual(["transactional"]);
   });
 
-  it("reserved stubs: jooq + axon persistence, cqrs style", () => {
-    expect(allAdapterNames("java", "persistence")).toEqual(["axon", "jooq", "jpa"]);
-    expect(allAdapterNames("java", "style")).toEqual(["cqrs", "layered"]);
+  it("no reserved stubs remain — the full menu equals the real menu", () => {
+    // The jooq / axon persistence stubs and the cqrs style stub were removed.
+    expect(allAdapterNames("java", "persistence")).toEqual(["jpa"]);
+    expect(allAdapterNames("java", "style")).toEqual(["layered"]);
   });
 
-  it("defaults: jpa / layered / byFeature / restController / transactional", () => {
+  it("defaults: jpa / layered / byFeature", () => {
     expect(defaultsFor("java")).toEqual({
       persistence: { state: "jpa", eventLog: "jpa" },
       style: "layered",
       layout: "byFeature",
-      transport: "restController",
-      runtime: "transactional",
     });
   });
 });

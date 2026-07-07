@@ -191,7 +191,7 @@ system Tasks {
   resource trackerState { for: Tracker, kind: state, use: primary }
   resource files       { for: Tracker, kind: objectStore, use: objects }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Tracker]
     dataSources: [trackerState, files]
     serves: TrackerApi

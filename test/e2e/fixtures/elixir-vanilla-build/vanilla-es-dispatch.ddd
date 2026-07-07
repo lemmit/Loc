@@ -45,7 +45,7 @@ system Sales {
   storage pg { type: postgres }
   resource ordersLog { for: Orders, kind: eventLog, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Orders]
     dataSources: [ordersLog]
     serves: SalesApi

@@ -24,9 +24,7 @@ import {
   type PersistenceAdapter,
   type PlatformAdapterDefaults,
   type PlatformAdapters,
-  type RuntimeAdapter,
   type StyleAdapter,
-  type TransportAdapter,
 } from "../generator/_adapters/index.js";
 import type { Platform } from "../ir/types/loom-ir.js";
 import { platformFor } from "./registry.js";
@@ -47,12 +45,12 @@ export function defaultsFor(platform: Platform): PlatformAdapterDefaults | undef
 }
 
 /** The DSL-selectable adapter names for one axis on a platform — i.e. the
- *  REAL (implemented) adapters only, stubs excluded.  Pure lookup: reads
- *  capability fields off the menu, never invokes an `emit*` method (so no
- *  stub throws).  Powers the validator's realization-axis menu
- *  (D-REALIZATION-AXES R1): a stub key parses but must be rejected with
- *  "reserved but not yet implemented", not silently accepted.  Returns
- *  `[]` for frontend / unknown platforms (no adapter menu). */
+ *  REAL (implemented) adapters only, any stubs excluded.  Pure lookup: reads
+ *  capability fields off the menu, never invokes an `emit*` method.  Powers
+ *  the validator's realization-axis menu (D-REALIZATION-AXES R1).  No stubs
+ *  are registered today, so this equals `allAdapterNames`; the `ADAPTER_IS_STUB`
+ *  filter stays as the seam for a future reserved-but-unimplemented adapter.
+ *  Returns `[]` for frontend / unknown platforms (no adapter menu). */
 export function availableAdapterNames(platform: Platform, kind: AdapterAxisKind): string[] {
   const bag = adapterBagFor(platform, kind);
   if (!bag) return [];
@@ -62,9 +60,10 @@ export function availableAdapterNames(platform: Platform, kind: AdapterAxisKind)
     .sort();
 }
 
-/** Every adapter name in a platform's menu for one axis — REAL and STUB.
- *  Used to distinguish "reserved but unimplemented" (a registered stub)
- *  from "unknown" in validator diagnostics.  `[]` for frontends. */
+/** Every adapter name in a platform's menu for one axis — REAL and (any)
+ *  STUB.  Kept distinct from `availableAdapterNames` as the seam that would
+ *  tell "reserved but unimplemented" from "unknown" if a stub is ever
+ *  registered again.  `[]` for frontends. */
 export function allAdapterNames(platform: Platform, kind: AdapterAxisKind): string[] {
   const bag = adapterBagFor(platform, kind);
   if (!bag) return [];
@@ -72,9 +71,8 @@ export function allAdapterNames(platform: Platform, kind: AdapterAxisKind): stri
 }
 
 /** The adapter-backed realization axes (each maps 1:1 to a `PlatformAdapters`
- *  record).  `transport` joined the set when it was promoted from a greenfield
- *  axis (realization-axes-alignment.md). */
-type AdapterAxisKind = "persistence" | "style" | "layout" | "transport" | "runtime";
+ *  record). */
+type AdapterAxisKind = "persistence" | "style" | "layout";
 
 /** The adapter record for one axis on a platform, or undefined for
  *  frontends / unknown platforms (no menu). */
@@ -91,10 +89,6 @@ function adapterBagFor(
       return adapters.styles;
     case "layout":
       return adapters.layouts;
-    case "transport":
-      return adapters.transports;
-    case "runtime":
-      return adapters.runtimes;
   }
 }
 
@@ -159,52 +153,6 @@ export function resolveLayout(platform: Platform, name: string | null | undefine
       resolved,
       platform,
       Object.keys(adapters.layouts),
-    );
-  }
-  return adapter;
-}
-
-export function resolveTransport(
-  platform: Platform,
-  name: string | null | undefined,
-): TransportAdapter {
-  const surface = platformFor(platform);
-  const adapters = surface.adapters?.();
-  const defaults = surface.adapterDefaults?.();
-  if (!adapters || !defaults) {
-    throw new AdapterNotImplementedError("transport", name ?? "<default>", platform, []);
-  }
-  const resolved = name && name.length > 0 ? name : defaults.transport;
-  const adapter = adapters.transports[resolved];
-  if (!adapter) {
-    throw new AdapterNotImplementedError(
-      "transport",
-      resolved,
-      platform,
-      Object.keys(adapters.transports),
-    );
-  }
-  return adapter;
-}
-
-export function resolveRuntime(
-  platform: Platform,
-  name: string | null | undefined,
-): RuntimeAdapter {
-  const surface = platformFor(platform);
-  const adapters = surface.adapters?.();
-  const defaults = surface.adapterDefaults?.();
-  if (!adapters || !defaults) {
-    throw new AdapterNotImplementedError("runtime", name ?? "<default>", platform, []);
-  }
-  const resolved = name && name.length > 0 ? name : defaults.runtime;
-  const adapter = adapters.runtimes[resolved];
-  if (!adapter) {
-    throw new AdapterNotImplementedError(
-      "runtime",
-      resolved,
-      platform,
-      Object.keys(adapters.runtimes),
     );
   }
   return adapter;

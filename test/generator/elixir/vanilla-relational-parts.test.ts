@@ -33,7 +33,7 @@ system RelParts {
   storage pg { type: postgres }
   resource projectState { for: Catalog, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Catalog]
     dataSources: [projectState]
     serves: CatalogApi
@@ -147,7 +147,7 @@ system RelMut {
   storage pg { type: postgres }
   resource projectState { for: Catalog, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Catalog]
     dataSources: [projectState]
     serves: CatalogApi

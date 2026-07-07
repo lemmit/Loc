@@ -50,7 +50,7 @@ function phoenixSystem(uiOrderBody: string, extras = ""): string {
       }
     }
     deployable phoenixApp {
-      platform: elixir { foundation: vanilla }, contexts: [C], serves: DemoApi,
+      platform: elixir, contexts: [C], serves: DemoApi,
       ui: DemoUi, port: 4000
     }
   }
@@ -111,7 +111,7 @@ describe("HEEx form — value-object field renders as <.inputs_for> nested form"
           page NewProduct { route: "/products/new" body: CreateForm { of: Product } }
         }
         deployable phoenixApp {
-          platform: elixir { foundation: vanilla }, contexts: [C], serves: DemoApi,
+          platform: elixir, contexts: [C], serves: DemoApi,
           ui: DemoUi, port: 4000
         }
       }
@@ -141,7 +141,7 @@ describe("HEEx form — value-object field renders as <.inputs_for> nested form"
           page NewProduct { route: "/products/new" body: CreateForm { of: Product } }
         }
         deployable phoenixApp {
-          platform: elixir { foundation: vanilla }, contexts: [C], serves: DemoApi,
+          platform: elixir, contexts: [C], serves: DemoApi,
           ui: DemoUi, port: 4000
         }
       }
@@ -181,7 +181,7 @@ describe("HEEx form — value-object field renders as <.inputs_for> nested form"
         api DemoApi from M
         ui DemoUi with scaffold(subdomains: [M]) {}
         deployable phoenixApp {
-          platform: elixir { foundation: vanilla }, contexts: [C], serves: DemoApi,
+          platform: elixir, contexts: [C], serves: DemoApi,
           ui: DemoUi, port: 4000
         }
       }

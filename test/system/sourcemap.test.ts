@@ -128,7 +128,7 @@ system SourceMapDemo {
   deployable dotnetApi  { platform: dotnet                        contexts: [Orders] dataSources: [ordersState] serves: SalesApi port: 8080 }
   deployable pythonApi  { platform: python                        contexts: [Orders] dataSources: [ordersState] serves: SalesApi port: 8000 }
   deployable javaApi    { platform: java                          contexts: [Orders] dataSources: [ordersState] serves: SalesApi port: 8081 }
-  deployable phoenixApi { platform: elixir { foundation: vanilla } contexts: [Orders] dataSources: [ordersState] ui: SalesUi port: 4000 }
+  deployable phoenixApi { platform: elixir contexts: [Orders] dataSources: [ordersState] ui: SalesUi port: 4000 }
   deployable reactApp   { platform: react targets: honoApi ui: SalesUi port: 3001 }
 }
 `;

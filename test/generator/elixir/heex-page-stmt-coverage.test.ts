@@ -43,7 +43,7 @@ async function landingHeex(uiBody: string, extra = ""): Promise<string> {
         }
       }
       deployable phoenixApp {
-        platform: elixir { foundation: vanilla }, contexts: [C], serves: DemoApi, ui: DemoUi, port: 4000
+        platform: elixir, contexts: [C], serves: DemoApi, ui: DemoUi, port: 4000
       }
     }
   `;

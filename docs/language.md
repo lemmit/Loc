@@ -182,7 +182,7 @@ used in operation / workflow expression bodies.  The
 | --- | --- |
 | `dotnet` | ASP.NET Core + EF Core + Mediator (martinothamar) + Swashbuckle.  Default port 8080. |
 | `node`   | Hono + Drizzle ORM + Zod with `@hono/zod-openapi`.  Default port 3000. |
-| `elixir` / `phoenixLiveView` | Phoenix + Ecto (plain Ecto/Phoenix — `foundation: vanilla` is the default and only valid foundation).  `phoenixLiveView` additionally mounts a HEEx UI (fullstack). |
+| `elixir` / `phoenixLiveView` | Phoenix + Ecto (plain Ecto/Phoenix — the Ash foundation and the `foundation:` axis were removed).  `phoenixLiveView` additionally mounts a HEEx UI (fullstack). |
 | `python` | FastAPI + SQLAlchemy + Pydantic. |
 | `java`   | Spring Boot + JPA + Hibernate. |
 | `react`  | Vite + React Router + React Query + Zod + Mantine + Playwright page objects.  Default port 3001. |

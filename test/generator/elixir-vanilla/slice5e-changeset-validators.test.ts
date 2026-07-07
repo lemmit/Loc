@@ -26,7 +26,7 @@ system S {
   api A from Core
   storage pg { type: postgres }
   resource st { for: Shop, kind: state, use: pg }
-  deployable api { platform: elixir { foundation: vanilla } contexts: [Shop] dataSources: [st] serves: A port: 4000 }
+  deployable api { platform: elixir contexts: [Shop] dataSources: [st] serves: A port: 4000 }
 }
 `;
 
@@ -51,7 +51,7 @@ system P {
   api A from Core
   storage pg { type: postgres }
   resource st { for: Tracker, kind: state, use: pg }
-  deployable api { platform: elixir { foundation: vanilla } contexts: [Tracker] dataSources: [st] serves: A port: 4000 }
+  deployable api { platform: elixir contexts: [Tracker] dataSources: [st] serves: A port: 4000 }
 }
 `;
     const f = await generateSystemFiles(plain);

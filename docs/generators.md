@@ -782,8 +782,9 @@ stay byte-identical (`pipeline-layering` + the full suite gate this).
 Single project that both serves a context-derived API (when `serves:` is
 populated) AND mounts a `ui:` rendered as Phoenix LiveView modules.
 Owns its own Postgres database (`needsDb: true`). Plain Ecto/Phoenix —
-`foundation: vanilla` is the default and only valid foundation (`foundation:
-ash` is a validation error).
+the Ash foundation was removed (and with it the `foundation:` axis, which had
+collapsed to a single value everywhere; a would-be `foundation:` clause no
+longer parses).
 
 ### File map
 

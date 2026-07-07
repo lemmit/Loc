@@ -35,7 +35,7 @@ system L {
   storage pg { type: postgres }
   resource st { for: Stock, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Stock]
     dataSources: [st]
     serves: A
@@ -134,7 +134,7 @@ system L {
   storage pg { type: postgres }
   resource st { for: Stock, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Stock]
     dataSources: [st]
     serves: A

@@ -43,7 +43,7 @@ system TenancyShop {
   resource ledgerState { for: Ledger, kind: state, use: pg }
   api LedgerApi from Core
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Ledger]
     serves: LedgerApi
     dataSources: [ledgerState]
@@ -157,7 +157,7 @@ system EmbTenancy {
   storage pg { type: postgres }
   resource st { for: Shop, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Shop]
     serves: A
     dataSources: [st]

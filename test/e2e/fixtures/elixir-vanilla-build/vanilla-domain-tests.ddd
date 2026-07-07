@@ -74,7 +74,7 @@ system Shop {
   storage pg { type: postgres }
   resource sellingState { for: Selling, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Selling]
     dataSources: [sellingState]
     serves: SalesApi

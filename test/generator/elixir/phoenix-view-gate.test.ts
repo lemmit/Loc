@@ -3,13 +3,13 @@
 // the view's controller action — the read-side analogue of an operation's
 // `requires` — evaluated against `conn.assigns.current_user` before the query.
 // A failure returns an RFC-7807 403 ProblemDetails; an ungated view emits no
-// gate.  Covered on BOTH foundations (ash + vanilla), whose ViewsControllers
-// are emitted by separate paths.
+// gate.  (`platform: elixir` is plain Phoenix LiveView on Ecto — the Ash
+// foundation was removed.)
 
 import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/generate.js";
 
-function system(foundation: "ash" | "vanilla", viewClause: string): string {
+function system(viewClause: string): string {
   return `
 system Acme {
   user { id: string  role: string }
@@ -24,7 +24,7 @@ system Acme {
   storage primary { type: postgres }
   resource salesState { for: Tickets, kind: state, use: primary }
   deployable api {
-    platform: elixir { foundation: ${foundation} }
+    platform: elixir
     contexts: [Tickets]
     dataSources: [salesState]
     serves: SalesApi
@@ -35,40 +35,38 @@ system Acme {
 `;
 }
 
-async function controller(foundation: "ash" | "vanilla", viewClause: string): Promise<string> {
-  const files = await generateSystemFiles(system(foundation, viewClause));
+async function controller(viewClause: string): Promise<string> {
+  const files = await generateSystemFiles(system(viewClause));
   const ctrl = files.get("api/lib/api_web/controllers/views_controller.ex");
   expect(ctrl, "views controller not emitted").toBeDefined();
   return ctrl!;
 }
 
-for (const foundation of ["ash", "vanilla"] as const) {
-  describe(`phoenix (${foundation}) — view requires gate`, () => {
-    it("emits a 403 ProblemDetails gate evaluated against current_user before the query", async () => {
-      const ctrl = await controller(foundation, 'requires currentUser.role == "agent" ');
-      expect(ctrl).toContain('if not (current_user.role == "agent") do');
-      expect(ctrl).toContain(
-        'ApiWeb.ProblemDetails.problem_response(conn, 403, "Forbidden", "Forbidden: view OpenTickets")',
-      );
-      // The gate sits before the view module's run/1.
-      const gateIdx = ctrl.indexOf("problem_response(conn, 403");
-      const runIdx = ctrl.indexOf("Views.OpenTickets.run(current_user)");
-      expect(gateIdx).toBeGreaterThan(0);
-      expect(runIdx).toBeGreaterThan(gateIdx);
-    });
-
-    it("emits no gate for an ungated view", async () => {
-      const ctrl = await controller(foundation, "");
-      expect(ctrl).not.toContain("problem_response(conn, 403");
-      expect(ctrl).not.toContain("if not (");
-    });
-
-    it("`requires true` emits an always-pass gate", async () => {
-      const ctrl = await controller(foundation, "requires true ");
-      expect(ctrl).toContain("if not (true) do");
-      expect(ctrl).toContain(
-        'ApiWeb.ProblemDetails.problem_response(conn, 403, "Forbidden", "Forbidden: view OpenTickets")',
-      );
-    });
+describe("phoenix — view requires gate", () => {
+  it("emits a 403 ProblemDetails gate evaluated against current_user before the query", async () => {
+    const ctrl = await controller('requires currentUser.role == "agent" ');
+    expect(ctrl).toContain('if not (current_user.role == "agent") do');
+    expect(ctrl).toContain(
+      'ApiWeb.ProblemDetails.problem_response(conn, 403, "Forbidden", "Forbidden: view OpenTickets")',
+    );
+    // The gate sits before the view module's run/1.
+    const gateIdx = ctrl.indexOf("problem_response(conn, 403");
+    const runIdx = ctrl.indexOf("Views.OpenTickets.run(current_user)");
+    expect(gateIdx).toBeGreaterThan(0);
+    expect(runIdx).toBeGreaterThan(gateIdx);
   });
-}
+
+  it("emits no gate for an ungated view", async () => {
+    const ctrl = await controller("");
+    expect(ctrl).not.toContain("problem_response(conn, 403");
+    expect(ctrl).not.toContain("if not (");
+  });
+
+  it("`requires true` emits an always-pass gate", async () => {
+    const ctrl = await controller("requires true ");
+    expect(ctrl).toContain("if not (true) do");
+    expect(ctrl).toContain(
+      'ApiWeb.ProblemDetails.problem_response(conn, 403, "Forbidden", "Forbidden: view OpenTickets")',
+    );
+  });
+});

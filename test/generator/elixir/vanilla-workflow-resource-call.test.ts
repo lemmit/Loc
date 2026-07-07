@@ -47,7 +47,7 @@ system Archive {
   resource ordersState { for: Orders, kind: state, use: primary }
   resource files       { for: Orders, kind: objectStore, use: objects }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Orders]
     dataSources: [ordersState, files]
     serves: OrdersApi
@@ -121,7 +121,7 @@ describe("vanilla — workflow body lowering (resource-call)", () => {
         storage primary { type: postgres }
         resource trackerState { for: Tracker, kind: state, use: primary }
         deployable api {
-          platform: elixir { foundation: vanilla }
+          platform: elixir
           contexts: [Tracker]
           dataSources: [trackerState]
           serves: TrackerApi

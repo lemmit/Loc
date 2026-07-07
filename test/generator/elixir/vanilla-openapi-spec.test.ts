@@ -35,7 +35,7 @@ system Shop {
   storage primary { type: postgres }
   resource ordersState { for: Orders, kind: state, use: primary }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Orders]
     dataSources: [ordersState]
     serves: OrdersApi
@@ -119,7 +119,7 @@ system Shop {
   storage primary { type: postgres }
   resource ordersState { for: Orders, kind: state, use: primary }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Orders]
     dataSources: [ordersState]
     serves: OrdersApi
@@ -166,7 +166,7 @@ system Shop {
   storage primary { type: postgres }
   resource ordersState { for: Orders, kind: state, use: primary }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Orders]
     dataSources: [ordersState]
     serves: OrdersApi
@@ -211,7 +211,7 @@ system S {
   api A from O
   storage pg { type: postgres }
   resource oState { for: O, kind: state, use: pg }
-  deployable api { platform: elixir { foundation: vanilla } contexts: [O] dataSources: [oState] serves: A port: 4000 }
+  deployable api { platform: elixir contexts: [O] dataSources: [oState] serves: A port: 4000 }
 }
 `;
 

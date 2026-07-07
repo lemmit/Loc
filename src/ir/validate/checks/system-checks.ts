@@ -1580,7 +1580,7 @@ const FILTER_BYPASS_FAMILIES = new Set(["dotnet", "node", "elixir", "java", "pyt
  *  not pass this gate while still silently filtering — a family is supported
  *  only once its emitter actually OMITS the bypassed predicate.  Elixir (plain
  *  Ecto) omits the bypassed `where:` on the reads that `ignoring` it. */
-function bypassSupported(dep: { platform: string; foundation?: string }): boolean {
+function bypassSupported(dep: { platform: string }): boolean {
   const fam = platformFamily(dep.platform);
   if (!fam) return false;
   return FILTER_BYPASS_FAMILIES.has(fam);

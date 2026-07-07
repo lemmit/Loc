@@ -170,7 +170,7 @@ describe("resource isolationLevel — end-to-end emit", () => {
           for: C, kind: state, use: pg, isolationLevel: repeatableRead
         }
         deployable phoenixApp {
-          platform: elixir { foundation: vanilla }, contexts: [C], dataSources: [cState],
+          platform: elixir, contexts: [C], dataSources: [cState],
           serves: CApi, ui: Admin, port: 4000
         }
       }
@@ -220,7 +220,7 @@ describe("resource isolationLevel — end-to-end emit", () => {
           for: C, kind: state, use: pg
         }
         deployable phoenixApp {
-          platform: elixir { foundation: vanilla }, contexts: [C], dataSources: [cState],
+          platform: elixir, contexts: [C], dataSources: [cState],
           serves: CApi, ui: Admin, port: 4000
         }
       }

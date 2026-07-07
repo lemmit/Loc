@@ -45,9 +45,7 @@ system DaisyuiPack {
   resource salesState { for: Sales, kind: state, use: primary }
   resource shoppingState { for: Shopping, kind: state, use: primary }
   deployable phoenixApp {
-    platform: elixir {
-      foundation: vanilla
-    }
+    platform: elixir
     design: daisyui
     contexts: [Sales, Shopping]
     dataSources: [salesState, shoppingState]

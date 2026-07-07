@@ -35,7 +35,7 @@ system PhoenixEmbedReact {
   resource catalogState { for: Catalog, kind: state, use: primary }
 
   deployable phoenixApp {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Catalog]
     dataSources: [catalogState]
     serves: CatalogApi

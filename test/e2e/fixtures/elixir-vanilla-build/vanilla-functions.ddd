@@ -47,7 +47,7 @@ system Shop {
   storage pg { type: postgres }
   resource orderingState { for: Ordering, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Ordering]
     dataSources: [orderingState]
     serves: OrderingApi

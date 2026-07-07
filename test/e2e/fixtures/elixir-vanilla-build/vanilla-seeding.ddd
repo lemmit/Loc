@@ -38,7 +38,7 @@ system Seeding {
   resource catalogState { for: Catalog, kind: state, use: primary }
 
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Catalog]
     dataSources: [catalogState]
     serves: CatalogApi

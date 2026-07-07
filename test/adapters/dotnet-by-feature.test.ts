@@ -232,7 +232,7 @@ async function emitSrc(src: string): Promise<Map<string, string>> {
     deployable: d,
     sys,
     migrations: [],
-    styleAdapter: resolveStyle("dotnet", d.application),
+    styleAdapter: resolveStyle("dotnet", null),
     layoutAdapter: resolveLayout("dotnet", d.directoryLayout),
   });
 }

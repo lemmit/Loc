@@ -21,7 +21,7 @@ async function phoenixLive(uiBody: string): Promise<string> {
       storage primary { type: postgres }
       resource cState { for: C, kind: state, use: primary }
       deployable phoenixApp {
-        platform: elixir { foundation: vanilla }
+        platform: elixir
         contexts: [C]
         dataSources: [cState]
         serves: CApi

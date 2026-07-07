@@ -39,7 +39,7 @@ system Tasks {
   storage primary { type: postgres }
   resource trackerState { for: Tracker, kind: state, use: primary }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Tracker]
     dataSources: [trackerState]
     serves: TrackerApi
@@ -131,7 +131,7 @@ describe("vanilla — workflow body lowering (repo-let / custom find routes thro
         storage primary { type: postgres }
         resource itemsState { for: Items, kind: state, use: primary }
         deployable api {
-          platform: elixir { foundation: vanilla }
+          platform: elixir
           contexts: [Items]
           dataSources: [itemsState]
           serves: CatalogApi

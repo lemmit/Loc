@@ -40,7 +40,7 @@ const SOURCE = `
     storage primary { type: postgres }
     resource cState { for: C, kind: state, use: primary }
     deployable phoenixApp {
-      platform: elixir { foundation: vanilla }
+      platform: elixir
       contexts: [C]
       dataSources: [cState]
       serves: CApi
@@ -108,7 +108,7 @@ describe("HEEx `match await` (Stage 2) — server-side variant-match", () => {
         storage primary { type: postgres }
         resource cState { for: C, kind: state, use: primary }
         deployable phoenixApp {
-          platform: elixir { foundation: vanilla }
+          platform: elixir
           contexts: [C]
           dataSources: [cState]
           serves: CApi

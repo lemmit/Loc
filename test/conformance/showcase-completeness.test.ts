@@ -116,6 +116,18 @@ const ALLOWLIST = new Set<string>([
   // test/generator/policy-deep-scope.test.ts instead.
   "PolicyDecl",
   "PolicyReadRule",
+  // The explicit application/transport layer (unfoldable-api-derivation.md) —
+  // `commandHandler`/`queryHandler` context members and `route <M> <P> ->
+  // Context.Handler` api bindings. This is the GRAMMAR+IR slice only: the nodes
+  // ride alongside `ApiIR`/`BoundedContextIR` and no backend reads them yet, so
+  // exercising them in showcase.ddd would add zero conformance dimension while
+  // the `apiSurface(...)` scaffold + per-backend route/handler emission are
+  // still unbuilt. The codegen slice owns removing these four entries when the
+  // feature is showcase-ready (same cross-PR pattern as `Projection` above).
+  "CommandHandler",
+  "QueryHandler",
+  "Route",
+  "HandlerRef",
 ]);
 
 async function buildShowcase(): Promise<LangiumDocument<Model>> {

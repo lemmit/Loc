@@ -36,7 +36,7 @@ system S {
   storage pg { type: postgres }
   resource st { for: Sales, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Sales]
     dataSources: [st]
     serves: SApi
@@ -133,7 +133,7 @@ system PC {
   api PApi from Sales
   storage pg { type: postgres }
   resource st { for: Sales, kind: state, use: pg }
-  deployable api { platform: elixir { foundation: vanilla } contexts: [Sales] dataSources: [st] serves: PApi port: 4000 auth: required }
+  deployable api { platform: elixir contexts: [Sales] dataSources: [st] serves: PApi port: 4000 auth: required }
 }
 `;
     const files = await generateSystemFiles(SRC);
@@ -158,7 +158,7 @@ system S2 {
   api CApi from Cat
   storage pg { type: postgres }
   resource st { for: Cat, kind: state, use: pg }
-  deployable api { platform: elixir { foundation: vanilla } contexts: [Cat] dataSources: [st] serves: CApi port: 4000 }
+  deployable api { platform: elixir contexts: [Cat] dataSources: [st] serves: CApi port: 4000 }
 }
 `;
     const key = [...(await generateSystemFiles(SRC)).keys()].find((k) => k.endsWith("/cat.ex"));

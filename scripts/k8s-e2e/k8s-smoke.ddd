@@ -31,5 +31,5 @@ system K8sSmoke {
   deployable dotnetApi  { platform: dotnet                      contexts: [Inventory] dataSources: [inventoryState] serves: InventoryApi port: 8080 }
   deployable pythonApi  { platform: python                      contexts: [Inventory] dataSources: [inventoryState] serves: InventoryApi port: 8000 }
   deployable javaApi    { platform: java                        contexts: [Inventory] dataSources: [inventoryState] serves: InventoryApi port: 8081 }
-  deployable phoenixApi { platform: elixir { foundation: vanilla } contexts: [Inventory] dataSources: [inventoryState] serves: InventoryApi port: 4000 }
+  deployable phoenixApi { platform: elixir contexts: [Inventory] dataSources: [inventoryState] serves: InventoryApi port: 4000 }
 }

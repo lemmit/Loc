@@ -28,25 +28,6 @@ export function qualifyDesign(raw: string | undefined, fallback: BuiltinPackFami
   return parsed ? parsed.qualified : value;
 }
 
-/** Default values for the greenfield realization axes (D-REALIZATION-AXES) —
- *  the axes with no adapter infra yet.  Only `foundation` remains greenfield;
- *  `application`/`persistence`/`directoryLayout`/`transport`/`runtime` source
- *  their defaults from the live adapter menu (`defaultsFor`) — `transport` and
- *  `runtime` joined them when promoted to adapter axes
- *  (realization-axes-alignment.md).  Only ever called for backends (frontends
- *  carry no realization axes). */
-export function greenfieldAxisDefaults(platform: Platform): {
-  foundation: string;
-} {
-  void platform;
-  return {
-    // Every backend defaults to `vanilla` (no framework foundation).  For
-    // elixir this means `platform: elixir` generates plain Phoenix LiveView on
-    // Ecto — the only foundation it supports.
-    foundation: "vanilla",
-  };
-}
-
 /** Split a `platform:` value into the family (the closed `Platform`
  *  union every consumer branches on) and the fully-qualified ref
  *  (`family@version`, mirrors `qualifyDesign`).  Bareword backend →
