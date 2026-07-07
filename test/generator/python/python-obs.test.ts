@@ -48,14 +48,24 @@ describe("python observability", () => {
       'logger.setLevel(_LEVELNO.get(os.environ.get("LOG_LEVEL", "info").lower(), logging.INFO))',
     );
     const mw = files.get("api/app/obs/middleware.py")!;
+    // Pure-ASGI (NOT BaseHTTPMiddleware): BaseHTTPMiddleware runs the endpoint
+    // in a child task and defers the yield-dependency DB commit until after the
+    // response is sent — the read-after-create race.  Pure ASGI keeps it inline.
+    expect(mw).not.toContain("starlette.middleware.base");
+    expect(mw).not.toContain("(BaseHTTPMiddleware)");
+    expect(mw).toContain("class ObservabilityMiddleware:");
+    expect(mw).toContain(
+      "async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:",
+    );
     // Correlation resolves x-correlation-id || x-request-id || minted.
     expect(mw).toContain('request.headers.get("x-correlation-id")');
     expect(mw).toContain('or request.headers.get("x-request-id")');
     expect(mw).toContain("or new_id()");
-    expect(mw).toContain('log("info", "request_start", method=request.method');
+    expect(mw).toContain('log("info", "request_start", method=method, path=path)');
     expect(mw).toContain("duration_ms=int((time.monotonic() - started) * 1000)");
-    expect(mw).toContain('response.headers["x-request-id"] = correlation');
-    expect(mw).toContain('response.headers["x-correlation-id"] = correlation');
+    // Correlation echoed via the ASGI response-start headers (MutableHeaders).
+    expect(mw).toContain('headers["x-request-id"] = correlation');
+    expect(mw).toContain('headers["x-correlation-id"] = correlation');
   });
 
   it("emits the RequestContext carrier (subsumes the request-id contextvar)", async () => {

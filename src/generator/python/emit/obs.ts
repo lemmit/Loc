@@ -240,20 +240,33 @@ request locale, and the start time — brackets the request with
 request_start / request_end, and echoes the correlation id back on both
 x-correlation-id and x-request-id.  Added last in app/main.py so it runs
 outermost: the context is open before auth (which stamps actor_id) runs.
+
+Pure-ASGI (NOT BaseHTTPMiddleware): BaseHTTPMiddleware runs the inner app
+in a child task, which defers \`yield\`-dependency teardown — including the
+per-request DB commit — until after the response is sent.  Pure ASGI keeps
+the endpoint in the same task, so TransactionMiddleware's commit-before-send
+holds and read-after-create doesn't race the commit.
 """
 
 import time
 
-from fastapi import Request, Response
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.datastructures import MutableHeaders
+from starlette.requests import Request
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.obs.log import RequestContext, log, new_id, open_context, reset_context
 
 
-class ObservabilityMiddleware(BaseHTTPMiddleware):
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
+class ObservabilityMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request = Request(scope)
         correlation = (
             request.headers.get("x-correlation-id")
             or request.headers.get("x-request-id")
@@ -268,15 +281,29 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             )
         )
         started = time.monotonic()
-        log("info", "request_start", method=request.method, path=request.url.path)
+        method = request.method
+        path = request.url.path
+        log("info", "request_start", method=method, path=path)
+
+        status_code = 500
+
+        async def send_wrapper(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                nonlocal status_code
+                status_code = message["status"]
+                headers = MutableHeaders(scope=message)
+                headers["x-request-id"] = correlation
+                headers["x-correlation-id"] = correlation
+            await send(message)
+
         try:
-            response = await call_next(request)
+            await self.app(scope, receive, send_wrapper)
         except Exception:
             log(
                 "info",
                 "request_end",
-                method=request.method,
-                path=request.url.path,
+                method=method,
+                path=path,
                 status=500,
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
@@ -285,13 +312,10 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         log(
             "info",
             "request_end",
-            method=request.method,
-            path=request.url.path,
-            status=response.status_code,
+            method=method,
+            path=path,
+            status=status_code,
             duration_ms=int((time.monotonic() - started) * 1000),
         )
-        response.headers["x-request-id"] = correlation
-        response.headers["x-correlation-id"] = correlation
         reset_context(token)
-        return response
 `;
