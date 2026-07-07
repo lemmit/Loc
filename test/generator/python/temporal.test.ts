@@ -1,9 +1,8 @@
 // A5 temporal end-to-end on the Python/FastAPI backend — in-memory
-// rendering (stdlib `timedelta` arithmetic, the dateutil `relativedelta`
-// calendar path, dt−dt) in domain bodies AND SQL interval rendering
-// (`func.make_interval`) in queryable `find … where` positions.  Runtime
-// representation: an absolute duration is a `datetime.timedelta`; months
-// go through `relativedelta` only.  The Python mirror of
+// rendering (stdlib `timedelta` arithmetic, dt−dt) in domain bodies AND
+// SQL interval rendering (`func.make_interval`) in queryable `find … where`
+// positions.  Runtime representation: an absolute duration is a
+// `datetime.timedelta`.  The Python mirror of
 // test/generator/typescript/temporal.test.ts.
 
 import { describe, expect, it } from "vitest";
@@ -41,8 +40,6 @@ const SRC = sys(`
       orderedAt: datetime
       gracePeriod: int
       derived due: datetime = createdAt + days(30)
-      derived renewal: datetime = createdAt + months(1)
-      derived trial: datetime = createdAt - months(3)
       derived early: datetime = dueDate - hours(6)
       derived overdue: bool = now() > dueDate + days(1)
       operation slack(): bool {
@@ -55,7 +52,6 @@ const SRC = sys(`
     repository Invoices for Invoice {
       find overdueBy(q: datetime): Invoice[] where this.dueDate + days(30) < q
       find dueSoon(n: int): Invoice[] where this.dueDate - hours(n) < now()
-      find renewing(q: datetime): Invoice[] where this.createdAt + months(1) >= q
       find windowed(q: datetime): Invoice[] where this.dueDate < q + days(2)
     }
   }
@@ -82,14 +78,6 @@ describe("python generator — A5 temporal", () => {
     expect(domain).toContain("from datetime import UTC, datetime, timedelta");
   });
 
-  it("renders datetime ± months through the relativedelta calendar path (+ and -)", async () => {
-    const files = await build(SRC);
-    const domain = files.get("api/app/domain/invoice.py")!;
-    expect(domain).toContain("return self._created_at + relativedelta(months=(1))");
-    expect(domain).toContain("return self._created_at - relativedelta(months=(3))");
-    expect(domain).toContain("from dateutil.relativedelta import relativedelta");
-  });
-
   it("renders dt−dt, duration algebra/scaling, and duration-typed lets natively", async () => {
     const files = await build(SRC);
     const domain = files.get("api/app/domain/invoice.py")!;
@@ -112,9 +100,6 @@ describe("python generator — A5 temporal", () => {
     expect(repo).toContain(
       "((InvoiceRow.due_date - func.make_interval(0, 0, 0, 0, n)) < datetime.now(UTC))",
     );
-    // months in where-position uses make_interval's months slot — Postgres
-    // does the calendar arithmetic natively (no relativedelta on SQL side).
-    expect(repo).toContain("((InvoiceRow.created_at + func.make_interval(0, 1)) >= q)");
     expect(repo).toMatch(/from sqlalchemy import .*\bfunc\b/);
     // The temporal find params / now() bind need the datetime import.
     expect(repo).toContain("from datetime import UTC, datetime");
@@ -127,13 +112,8 @@ describe("python generator — A5 temporal", () => {
     expect(repo).toMatch(/from sqlalchemy import .*\bliteral\b/);
   });
 
-  it("ships python-dateutil (+ stubs) in pyproject only when months is used", async () => {
-    const withMonths = await build(SRC);
-    const pyproject = withMonths.get("api/pyproject.toml")!;
-    expect(pyproject).toContain('"python-dateutil>=2.9,<3",');
-    expect(pyproject).toContain('"types-python-dateutil>=2.9,<3",');
-
-    const withoutMonths = await build(
+  it("never ships python-dateutil (+ stubs) in pyproject (days/hours/minutes are stdlib-only)", async () => {
+    const files = await build(
       sys(`
         context Billing {
           aggregate Invoice ids guid {
@@ -144,11 +124,11 @@ describe("python generator — A5 temporal", () => {
         }
       `),
     );
-    const plain = withoutMonths.get("api/pyproject.toml")!;
-    expect(plain).not.toContain("python-dateutil");
-    expect(plain).not.toContain("types-python-dateutil");
+    const pyproject = files.get("api/pyproject.toml")!;
+    expect(pyproject).not.toContain("python-dateutil");
+    expect(pyproject).not.toContain("types-python-dateutil");
     // days/hours/minutes stay stdlib — timedelta needs no dependency.
-    expect(withoutMonths.get("api/app/domain/invoice.py")!).toContain(
+    expect(files.get("api/app/domain/invoice.py")!).toContain(
       "return self._due_date + timedelta(days=(30))",
     );
   });

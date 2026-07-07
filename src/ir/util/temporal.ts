@@ -18,12 +18,6 @@ export function durationCtorOperand(e: ExprIR): DurationExprIR | null {
   return e.kind === "duration" ? e : null;
 }
 
-/** `durationCtorOperand`, narrowed to the calendar-relative `months` unit. */
-export function monthsCtorOperand(e: ExprIR): DurationExprIR | null {
-  const d = durationCtorOperand(e);
-  return d && d.unit === "months" ? d : null;
-}
-
 /** Best-effort "this expression is datetime-typed" probe over lowered IR —
  *  member accesses carry `memberType`, refs carry `type`, `now` is the
  *  datetime literal, and a lowered binary carries `resultType`.  Synthetic

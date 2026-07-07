@@ -462,11 +462,9 @@ function renderUIExpr(e: ExprIR, ctx: RenderCtx): string {
       return v;
     }
     case "duration": {
-      // A5 temporal — same ms representation as the TS domain renderer.
-      // `months` never stands alone in valid source (validator-gated to
-      // datetime ± position); render the bare count to stay total.
+      // A5 temporal — same absolute-ms representation as the TS domain
+      // renderer (every unit has a fixed millisecond width).
       const amt = renderUIExpr(e.amount, ctx);
-      if (e.unit === "months") return `(${amt})`;
       return `((${amt}) * ${DURATION_UNIT_MS[e.unit]})`;
     }
     case "match": {

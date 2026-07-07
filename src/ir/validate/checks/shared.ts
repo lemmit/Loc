@@ -218,7 +218,7 @@ export function firstNonQueryableNode(e: ExprIR): string | null {
         case "||":
           return firstNonQueryableNode(e.left) ?? firstNonQueryableNode(e.right);
         default: {
-          // A5 temporal: `datetime ± days/hours/minutes/months(n)` IS
+          // A5 temporal: `datetime ± days/hours/minutes(n)` IS
           // queryable — the Drizzle lowerer renders SQL interval arithmetic
           // (`col ± make_interval(days => n)`), and the other backends'
           // universal renderers translate it natively.  Only the DIRECT
@@ -327,12 +327,8 @@ export function firstNonQueryableNode(e: ExprIR): string | null {
       // A5 temporal: a duration constructor is queryable when its amount
       // is (a literal / param binds; a column interpolates) — the Drizzle
       // lowerer renders it (ms on the value side, `make_interval` on the
-      // column side).  `months` is the exception: it has no absolute width,
-      // so it is only lowerable in direct `datetime ± months(n)` position
-      // (the binary arm above, which recurses into `amount` directly and
-      // never reaches this case) — standalone it is honestly rejected here,
-      // matching the AST validator's `loom.duration-months-position` gate.
-      if (e.unit === "months") return "'months(...)' outside datetime ± position";
+      // column side).  Every duration unit is absolute (fixed width), so
+      // there is no calendar-relative carve-out here.
       return firstNonQueryableNode(e.amount);
     case "match":
       // `match { ... }` is a value-producing expression but contains

@@ -1,7 +1,6 @@
 import { genericShape } from "../../ir/stdlib/generics.js";
 import { variantTag } from "../../ir/stdlib/unions.js";
 import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
-import { monthsCtorOperand } from "../../ir/util/temporal.js";
 import { intrinsicKey } from "../../util/intrinsics.js";
 import { escapeTsIdent, lowerFirst, upperFirst, workflowFnCamel } from "../../util/naming.js";
 import { DURATION_UNIT_MS } from "../../util/temporal.js";
@@ -93,18 +92,11 @@ const TS_TARGET: ExprTarget<TsRenderContext> = {
   binary: renderBinary,
   ternary: (cond, then, otherwise) => `${cond} ? ${then} : ${otherwise}`,
   convert: (value, e) => renderTsConvert(e.target, e.from, value),
-  // A5 temporal: a Loom ABSOLUTE duration value is plain MILLISECONDS (a
-  // `number`) on this backend, so `duration ± duration` / `duration * int`
-  // fall through to native numeric operators and `datetime ± duration`
-  // becomes `.getTime()` arithmetic in `renderBinary`.  Self-parenthesized:
-  // the snippet lands in arbitrary expression slots.
-  //
-  // `months` is the calendar-relative exception — it has no millisecond
-  // width.  The validator (`loom.duration-months-position`) restricts it to
-  // direct `datetime ± months(n)` position, where `renderBinary` sees the
-  // raw duration node on the operand and takes the `setMonth` calendar path
-  // CONSUMING this leaf's output as the bare month COUNT.  So the months arm
-  // renders the count only — it never stands alone in valid output.
+  // A5 temporal: a Loom duration value is plain MILLISECONDS (a `number`) on
+  // this backend, so `duration ± duration` / `duration * int` fall through
+  // to native numeric operators and `datetime ± duration` becomes
+  // `.getTime()` arithmetic in `renderBinary`.  Self-parenthesized: the
+  // snippet lands in arbitrary expression slots.
   duration: (unit, amount) => {
     switch (unit) {
       case "days":
@@ -113,8 +105,6 @@ const TS_TARGET: ExprTarget<TsRenderContext> = {
         return `((${amount}) * ${DURATION_UNIT_MS.hours})`;
       case "minutes":
         return `((${amount}) * ${DURATION_UNIT_MS.minutes})`;
-      case "months":
-        return `(${amount})`;
     }
   },
   match(arms, otherwise) {
@@ -514,11 +504,7 @@ function renderBinary(left: string, right: string, e: Extract<ExprIR, { kind: "b
  *  lowering's `leftType`/`resultType` stamps:
  *    datetime − datetime → duration   ⇒ `((l).getTime() - (r).getTime())`
  *    datetime ± duration → datetime   ⇒ `new Date((l).getTime() ± (r))`
- *    duration + datetime → datetime   ⇒ `new Date((r).getTime() + (l))`
- *  with the calendar exception: when the duration operand is a direct
- *  `months(n)` constructor node (the only position the validator admits
- *  months in), the pre-rendered operand string is the bare month COUNT
- *  (see the `duration` leaf) and the shift goes through `setMonth`. */
+ *    duration + datetime → datetime   ⇒ `new Date((r).getTime() + (l))` */
 function renderTemporalBinary(
   left: string,
   right: string,
@@ -528,23 +514,16 @@ function renderTemporalBinary(
   const prim = (t: TypeIR | undefined): string | null => (t?.kind === "primitive" ? t.name : null);
   const lt = prim(e.leftType);
   const rt = prim(e.resultType);
-  // Calendar path: `(d => { const r = new Date(d); r.setMonth(r.getMonth()
-  // ± (n)); return r; })(dt)` — `count` is the months leaf's output (the
-  // bare parenthesized amount).
-  const calendarShift = (dt: string, sign: "+" | "-", count: string): string =>
-    `((d) => { const r = new Date(d); r.setMonth(r.getMonth() ${sign} ${count}); return r; })(${dt})`;
   if (lt === "datetime") {
     // datetime − datetime → milliseconds (the duration representation).
     if (e.op === "-" && rt === "duration") return `((${left}).getTime() - (${right}).getTime())`;
     if (rt === "datetime") {
-      if (monthsCtorOperand(e.right)) return calendarShift(left, e.op, right);
       return `new Date((${left}).getTime() ${e.op} (${right}))`;
     }
     return null;
   }
   // duration + datetime (commuted form; `duration - datetime` never types).
   if (lt === "duration" && e.op === "+" && rt === "datetime") {
-    if (monthsCtorOperand(e.left)) return calendarShift(right, "+", left);
     return `new Date((${right}).getTime() + (${left}))`;
   }
   return null;

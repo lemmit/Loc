@@ -1,11 +1,9 @@
 // A5 temporal end-to-end on the Elixir/Phoenix (vanilla Ecto) backend —
-// in-memory rendering (DateTime.add/diff ms arithmetic, the hand-rolled
-// calendar month shift, dt−dt) in domain bodies AND Ecto `fragment(...)`
-// SQL interval rendering (`make_interval`) in queryable `find … where`
-// positions.  Runtime representation: an absolute duration is plain integer
-// MILLISECONDS (mirrors the TS backend); months go through the calendar
-// path only.  The Elixir sibling of
-// test/generator/typescript/temporal.test.ts.
+// in-memory rendering (DateTime.add/diff ms arithmetic, dt−dt) in domain
+// bodies AND Ecto `fragment(...)` SQL interval rendering (`make_interval`)
+// in queryable `find … where` positions.  Runtime representation: an
+// absolute duration is plain integer MILLISECONDS (mirrors the TS backend).
+// The Elixir sibling of test/generator/typescript/temporal.test.ts.
 
 import { describe, expect, it } from "vitest";
 import { renderExpr, renderTypespec } from "../../../src/generator/elixir/render-expr.js";
@@ -24,8 +22,6 @@ system Api {
         orderedAt: datetime
         gracePeriod: int
         derived due: datetime = createdAt + days(30)
-        derived renewal: datetime = createdAt + months(1)
-        derived trial: datetime = createdAt - months(3)
         derived early: datetime = dueDate - hours(6)
         derived overdue: bool = now() > dueDate + days(1)
         operation slack(): bool {
@@ -41,7 +37,6 @@ system Api {
       repository Invoices for Invoice {
         find overdueBy(q: datetime): Invoice[] where this.dueDate + days(30) < q
         find dueSoon(n: int): Invoice[] where this.dueDate - hours(n) < now()
-        find renewing(q: datetime): Invoice[] where this.createdAt + months(1) >= q
       }
     }
   }
@@ -49,7 +44,7 @@ system Api {
   storage pg { type: postgres }
   resource st { for: Billing, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Billing]
     dataSources: [st]
     serves: BillingApi
@@ -77,16 +72,6 @@ function allElixir(files: Map<string, string>): string {
     .join("\n");
 }
 
-const CALENDAR_PLUS_1 =
-  "(fn dt -> total = dt.year * 12 + dt.month - 1 + (1); " +
-  "y = Integer.floor_div(total, 12); m = Integer.mod(total, 12) + 1; " +
-  "%{dt | year: y, month: m, day: min(dt.day, :calendar.last_day_of_the_month(y, m))} end)";
-
-const CALENDAR_MINUS_3 =
-  "(fn dt -> total = dt.year * 12 + dt.month - 1 - (3); " +
-  "y = Integer.floor_div(total, 12); m = Integer.mod(total, 12) + 1; " +
-  "%{dt | year: y, month: m, day: min(dt.day, :calendar.last_day_of_the_month(y, m))} end)";
-
 describe("elixir generator — A5 temporal", () => {
   it("parses + validates cleanly (incl. queryable temporal where-clauses)", async () => {
     const { errors } = await parseString(SRC);
@@ -108,13 +93,6 @@ describe("elixir generator — A5 temporal", () => {
     expect(ctrl).toContain(
       '"overdue" => DateTime.compare(DateTime.utc_now(), DateTime.add(record.due_date, ((1) * 86400000), :millisecond)) == :gt',
     );
-  });
-
-  it("renders datetime ± months through the calendar-shift path (+ and -, day clamped)", async () => {
-    const files = await load();
-    const ctrl = fileEndingWith(files, "/controllers/invoice_controller.ex");
-    expect(ctrl).toContain(`"renewal" => ${CALENDAR_PLUS_1}.(record.created_at)`);
-    expect(ctrl).toContain(`"trial" => ${CALENDAR_MINUS_3}.(record.created_at)`);
   });
 
   it("renders dt−dt as DateTime.diff ms, duration algebra as plain integers", async () => {
@@ -147,11 +125,6 @@ describe("elixir generator — A5 temporal", () => {
     expect(repo).toContain(
       'fragment("? - make_interval(hours => ?)", record.due_date, (^n)) < ^DateTime.utc_now()',
     );
-    // months in where-position uses make_interval(months => …) — Postgres
-    // does the calendar arithmetic natively.
-    expect(repo).toContain(
-      'fragment("? + make_interval(months => ?)", record.created_at, (1)) >= ^q',
-    );
   });
 
   it("value-side datetime ± duration also lowers (fragment side, param pins)", async () => {
@@ -169,7 +142,7 @@ describe("elixir generator — A5 temporal", () => {
         storage pg { type: postgres }
         resource st { for: Billing, kind: state, use: pg }
         deployable api {
-          platform: elixir { foundation: vanilla }
+          platform: elixir
           contexts: [Billing]
           dataSources: [st]
           serves: BillingApi
@@ -194,7 +167,7 @@ const filterCtx = { ...ctx, filterArgs: true };
 const docCtx = { ...ctx, docStruct: true };
 
 const litInt = (v: string): ExprIR => ({ kind: "literal", lit: "int", value: v });
-const dur = (unit: "days" | "hours" | "minutes" | "months", n: string): ExprIR => ({
+const dur = (unit: "days" | "hours" | "minutes", n: string): ExprIR => ({
   kind: "duration",
   unit,
   amount: litInt(n),
@@ -282,18 +255,6 @@ describe("phoenix renderExpr — A5 temporal arms", () => {
     expect(renderExpr(scaled, ctx)).toBe("((1) * 86400000) * 2");
   });
 
-  it("renders datetime ± months(n) through the hand-rolled calendar shift", () => {
-    const plus: ExprIR = {
-      kind: "binary",
-      op: "+",
-      left: dtProp("due"),
-      right: dur("months", "1"),
-      leftType: DATETIME,
-      resultType: DATETIME,
-    };
-    expect(renderExpr(plus, ctx)).toBe(`${CALENDAR_PLUS_1}.(record.due)`);
-  });
-
   it("the document (docStruct) path keeps the in-memory arms — no fragment", () => {
     const e: ExprIR = {
       kind: "binary",
@@ -306,8 +267,8 @@ describe("phoenix renderExpr — A5 temporal arms", () => {
     expect(renderExpr(e, docCtx)).toBe("DateTime.add(record.due, ((30) * 86400000), :millisecond)");
   });
 
-  it("the Ecto filter path renders make_interval fragments for all four units", () => {
-    const mk = (unit: "days" | "hours" | "minutes" | "months", op: "+" | "-"): ExprIR => ({
+  it("the Ecto filter path renders make_interval fragments for all three units", () => {
+    const mk = (unit: "days" | "hours" | "minutes", op: "+" | "-"): ExprIR => ({
       kind: "binary",
       op,
       left: dtProp("due"),
@@ -323,9 +284,6 @@ describe("phoenix renderExpr — A5 temporal arms", () => {
     );
     expect(renderExpr(mk("minutes", "+"), filterCtx)).toBe(
       'fragment("? + make_interval(mins => ?)", record.due, (3))',
-    );
-    expect(renderExpr(mk("months", "+"), filterCtx)).toBe(
-      'fragment("? + make_interval(months => ?)", record.due, (3))',
     );
   });
 

@@ -408,8 +408,8 @@ function applySuffixToRecv(
         };
       }
       const callKind = resolveCallKind(recv.name, env);
-      // A5 duration constructor — `days(n)` / `hours(n)` / `minutes(n)` /
-      // `months(n)` becomes a dedicated `duration` IR node, but ONLY when
+      // A5 duration constructor — `days(n)` / `hours(n)` / `minutes(n)`
+      // becomes a dedicated `duration` IR node, but ONLY when
       // the name resolved to nothing user-declared (`resolveCallKind`
       // checks user functions / operations / VO ctors first, and the
       // criterion probe above ran before this — so a user `function

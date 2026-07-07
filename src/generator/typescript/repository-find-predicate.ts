@@ -92,14 +92,11 @@ const COMPARE_OP_TO_DRIZZLE: Record<string, string> = {
 };
 
 /** Postgres `make_interval` named-argument spelling per duration unit
- *  (A5 temporal).  `months` is calendar-correct here: `timestamptz +
- *  make_interval(months => 1)` does native calendar arithmetic, so the
- *  SQL side needs no `setMonth`-style special case. */
+ *  (A5 temporal). */
 const MAKE_INTERVAL_ARG: Record<DurationUnit, string> = {
   days: "days",
   hours: "hours",
   minutes: "mins",
-  months: "months",
 };
 
 export interface DrizzleLowering {
@@ -250,7 +247,7 @@ export function lowerToDrizzle(
     return null;
   }
 
-  /** A5 temporal — `datetime ± days/hours/minutes/months(n)` renders as SQL
+  /** A5 temporal — `datetime ± days/hours/minutes(n)` renders as SQL
    *  interval arithmetic: `sql\`\${side} ± make_interval(days => \${n})\``.
    *  Works for BOTH sides of a comparison: a column interpolates into the
    *  tag, a param / `new Date()` value binds as a parameter, and the
@@ -350,12 +347,9 @@ export function lowerToDrizzle(
           return null;
       }
     }
-    // A5 — a standalone (non-months) duration constructor is plain
-    // milliseconds on the value side, mirroring the TS runtime
-    // representation.  Standalone `months(n)` has no absolute width and
-    // is rejected upstream (`loom.duration-months-position`).
+    // A5 — a standalone duration constructor is plain milliseconds on the
+    // value side, mirroring the TS runtime representation.
     if (e.kind === "duration") {
-      if (e.unit === "months") return null;
       const amt = renderValue(e.amount);
       return amt === null ? null : `((${amt}) * ${DURATION_UNIT_MS[e.unit]})`;
     }

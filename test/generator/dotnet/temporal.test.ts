@@ -1,9 +1,8 @@
 // A5 temporal end-to-end on the .NET backend — in-memory rendering
-// (native DateTime/TimeSpan arithmetic, the AddMonths calendar path, dt−dt)
-// in domain bodies AND EF-translatable `DateTime.Add{Days,Hours,Minutes,
-// Months}` rendering in queryable `find … where` positions.  Runtime
-// representation: an absolute duration is a `TimeSpan`; months go through
-// the calendar path only.  Mirrors test/generator/typescript/temporal.test.ts.
+// (native DateTime/TimeSpan arithmetic, dt−dt) in domain bodies AND
+// EF-translatable `DateTime.Add{Days,Hours,Minutes}` rendering in queryable
+// `find … where` positions.  Runtime representation: an absolute duration
+// is a `TimeSpan`.  Mirrors test/generator/typescript/temporal.test.ts.
 
 import { describe, expect, it } from "vitest";
 import { generateDotnet } from "../../../src/generator/dotnet/index.js";
@@ -20,8 +19,6 @@ const SRC = `
       orderedAt: datetime
       gracePeriod: int
       derived due: datetime = createdAt + days(30)
-      derived renewal: datetime = createdAt + months(1)
-      derived trial: datetime = createdAt - months(3)
       derived early: datetime = dueDate - hours(6)
       derived overdue: bool = now() > dueDate + days(1)
       operation slack(): bool {
@@ -34,9 +31,7 @@ const SRC = `
     repository Invoices for Invoice {
       find overdueBy(q: datetime): Invoice[] where this.dueDate + days(30) < q
       find dueSoon(n: int): Invoice[] where this.dueDate - hours(n) < now()
-      find renewing(q: datetime): Invoice[] where this.createdAt + months(1) >= q
       find slipped(q: datetime): Invoice[] where this.dueDate < q + days(2)
-      find lapsed(q: datetime): Invoice[] where this.createdAt < q - months(2)
     }
   }
 `;
@@ -53,13 +48,6 @@ describe("dotnet generator — A5 temporal", () => {
     expect(domain).toContain("this.CreatedAt + TimeSpan.FromDays(30)");
     expect(domain).toContain("this.DueDate - TimeSpan.FromHours(6)");
     expect(domain).toContain("DateTime.UtcNow > this.DueDate + TimeSpan.FromDays(1)");
-  });
-
-  it("renders datetime ± months through the AddMonths calendar path (+ and -)", async () => {
-    const { model } = await parseString(SRC);
-    const domain = generateDotnet(model).get("Domain/Invoices/Invoice.cs")!;
-    expect(domain).toContain("(this.CreatedAt).AddMonths((1))");
-    expect(domain).toContain("(this.CreatedAt).AddMonths(-(3))");
   });
 
   it("renders dt−dt, duration algebra, and duration * int as native TimeSpan ops", async () => {
@@ -84,14 +72,6 @@ describe("dotnet generator — A5 temporal", () => {
     // param amount composes; `now()` renders as DateTime.UtcNow (funcletized
     // into a query parameter by EF).
     expect(repo).toContain(".Where(x => (x.DueDate).AddHours(-(n)) < DateTime.UtcNow)");
-  });
-
-  it("lowers months in Where via AddMonths (Postgres does calendar arithmetic natively)", async () => {
-    const { model } = await parseString(SRC);
-    const repo = generateDotnet(model).get("Infrastructure/Repositories/InvoiceRepository.cs")!;
-    expect(repo).toContain(".Where(x => (x.CreatedAt).AddMonths((1)) >= q)");
-    // value-side months subtraction: `q - months(2)` → AddMonths(-(2)).
-    expect(repo).toContain(".Where(x => x.CreatedAt < (q).AddMonths(-(2)))");
   });
 
   it("value-side datetime ± duration also lowers (EF funcletizes the value side)", async () => {

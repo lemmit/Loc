@@ -143,12 +143,9 @@ function renderService(svc: DomainServiceIR, ctx: BoundedContextIR): string {
         ].join(", ")}`
       : null,
     usesDecimal ? "from decimal import Decimal" : null,
-    // A5 temporal — `datetime ± months(n)` via dateutil (conditional dep).
-    exprImports.has("relativedelta") ? "from dateutil.relativedelta import relativedelta" : null,
     exprImports.has("math") ||
       exprImports.has("re") ||
       exprImports.has("timedelta") ||
-      exprImports.has("relativedelta") ||
       usesDatetime ||
       usesDecimal
       ? ""

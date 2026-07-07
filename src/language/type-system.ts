@@ -724,17 +724,17 @@ function typeOfFreeCall(name: string, env: Env): DddType {
   // (`CanApprove(cap)`) is a boolean predicate.
   if (lookupCriterionByName(name, env)) return T.prim("bool");
   if (lookupPolicyFnByName(name, env)) return T.prim("bool");
-  // A5 duration constructors (`days(n)` / `hours(n)` / `minutes(n)` /
-  // `months(n)`) — builtins only when no user declaration matched above
-  // (a user `function days(...)` shadows the builtin).  Arity / argument
-  // type are the validator's job (`loom.duration-arity`), not typing's.
+  // A5 duration constructors (`days(n)` / `hours(n)` / `minutes(n)`) —
+  // builtins only when no user declaration matched above (a user
+  // `function days(...)` shadows the builtin).  Arity / argument type are
+  // the validator's job (`loom.duration-arity`), not typing's.
   if (durationUnitOf(name)) return T.prim("duration");
   return T.unknown;
 }
 
 /**
  * True iff a free call to `name` is an A5 duration-constructor BUILTIN in
- * `env` — i.e. `name` is one of `days`/`hours`/`minutes`/`months` AND no
+ * `env` — i.e. `name` is one of `days`/`hours`/`minutes` AND no
  * user declaration (function / value object / criterion) shadows it.
  * Mirrors `typeOfFreeCall`'s lookup order exactly; exported for the
  * temporal validator (`checkDurationConstructors`), so the validator and

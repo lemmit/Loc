@@ -126,15 +126,11 @@ function lowerOver(
 }
 
 /** Positional-argument prefix per duration unit for Postgres
- *  `make_interval(years, months, weeks, days, hours, mins, secs)` —
+ *  `make_interval(years, ..., weeks, days, hours, mins, secs)` —
  *  SQLAlchemy's generic `func.` has no named-argument spelling, so the
  *  amount lands positionally after the right number of zeros (A5
- *  temporal).  `months` is calendar-correct here: `timestamptz +
- *  make_interval(0, 1)` does native calendar arithmetic, so the SQL side
- *  needs no `relativedelta`-style special case.  The mirror of node's
- *  `MAKE_INTERVAL_ARG`. */
+ *  temporal).  The mirror of node's `MAKE_INTERVAL_ARG`. */
 const MAKE_INTERVAL_ZEROS: Record<DurationUnit, number> = {
-  months: 1,
   days: 3,
   hours: 4,
   minutes: 5,
@@ -149,7 +145,7 @@ function lower(
 ): string | null {
   switch (e.kind) {
     case "binary": {
-      // A5 temporal — `datetime ± days/hours/minutes/months(n)` renders as
+      // A5 temporal — `datetime ± days/hours/minutes(n)` renders as
       // SQL interval arithmetic (`side ± make_interval(…, n)`), composing on
       // EITHER side of a comparison: a column stands as-is, a host value
       // (param / `now()`) wraps in `literal(...)` so the `±` dispatches
@@ -285,7 +281,7 @@ function lower(
   }
 }
 
-/** A5 temporal — `datetime ± days/hours/minutes/months(n)` as a SQLAlchemy
+/** A5 temporal — `datetime ± days/hours/minutes(n)` as a SQLAlchemy
  *  column expression: `(side ± func.make_interval(…, amount))`.  The
  *  positional zeros place the amount in the unit's `make_interval` slot; the
  *  amount is parameter-bound when it's a param/literal and interpolates when

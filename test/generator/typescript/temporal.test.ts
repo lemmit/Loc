@@ -1,8 +1,7 @@
 // A5 temporal end-to-end on the Hono/TS backend — in-memory rendering
-// (ms arithmetic, the setMonth calendar path, dt−dt) in domain bodies AND
-// SQL interval rendering (`make_interval`) in queryable `find … where`
-// positions.  Runtime representation: an absolute duration is plain
-// MILLISECONDS (a number); months go through the calendar path only.
+// (ms arithmetic, dt−dt) in domain bodies AND SQL interval rendering
+// (`make_interval`) in queryable `find … where` positions.  Runtime
+// representation: an absolute duration is plain MILLISECONDS (a number).
 
 import { describe, expect, it } from "vitest";
 import { validateLoomModel } from "../../../src/ir/validate/validate.js";
@@ -19,8 +18,6 @@ const SRC = `
       orderedAt: datetime
       gracePeriod: int
       derived due: datetime = createdAt + days(30)
-      derived renewal: datetime = createdAt + months(1)
-      derived trial: datetime = createdAt - months(3)
       derived early: datetime = dueDate - hours(6)
       derived overdue: bool = now() > dueDate + days(1)
       operation slack(): bool {
@@ -33,7 +30,6 @@ const SRC = `
     repository Invoices for Invoice {
       find overdueBy(q: datetime): Invoice[] where this.dueDate + days(30) < q
       find dueSoon(n: int): Invoice[] where this.dueDate - hours(n) < now()
-      find renewing(q: datetime): Invoice[] where this.createdAt + months(1) >= q
     }
   }
 `;
@@ -58,17 +54,6 @@ describe("typescript generator — A5 temporal", () => {
     );
   });
 
-  it("renders datetime ± months through the setMonth calendar path (+ and -)", async () => {
-    const { model } = await parseString(SRC);
-    const domain = generateHono(model).get("domain/invoice.ts")!;
-    expect(domain).toContain(
-      "((d) => { const r = new Date(d); r.setMonth(r.getMonth() + (1)); return r; })(this._createdAt)",
-    );
-    expect(domain).toContain(
-      "((d) => { const r = new Date(d); r.setMonth(r.getMonth() - (3)); return r; })(this._createdAt)",
-    );
-  });
-
   it("renders dt−dt as ms, duration algebra as plain numbers", async () => {
     const { model } = await parseString(SRC);
     const domain = generateHono(model).get("domain/invoice.ts")!;
@@ -88,12 +73,6 @@ describe("typescript generator — A5 temporal", () => {
       // param amount binds; `now()` renders as a bound Date value
       // biome-ignore lint/suspicious/noTemplateCurlyInString: emitted source
       "lt(sql`${schema.invoices.dueDate} - make_interval(hours => ${n})`, new Date())",
-    );
-    // months in where-position uses make_interval(months => …) — Postgres
-    // does the calendar arithmetic natively.
-    expect(repo).toContain(
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: emitted source
-      "gte(sql`${schema.invoices.createdAt} + make_interval(months => ${1})`, q)",
     );
     expect(repo).toMatch(/import \{[^}]*\bsql\b[^}]*\} from "drizzle-orm";/);
   });
