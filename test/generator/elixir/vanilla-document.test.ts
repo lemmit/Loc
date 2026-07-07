@@ -418,7 +418,7 @@ system Shop {
   api ShopApi from Sales
   storage pg { type: postgres }
   resource shopState { for: Shop, kind: state, use: pg }
-  deployable api { platform: elixir { foundation: vanilla }, contexts: [Shop], dataSources: [shopState], serves: ShopApi, port: 4000 }
+  deployable api { platform: elixir, contexts: [Shop], dataSources: [shopState], serves: ShopApi, port: 4000 }
 }
 `;
 
@@ -479,7 +479,7 @@ system S {
   storage pg { type: postgres }
   resource st { for: O, kind: state, use: pg }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [O]
     dataSources: [st]
     serves: A

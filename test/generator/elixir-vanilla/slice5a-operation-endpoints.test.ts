@@ -120,7 +120,7 @@ system Ledger {
   storage primary { type: postgres }
   resource accountsState { for: Accounts, kind: state, use: primary }
   deployable api {
-    platform: elixir { foundation: vanilla }
+    platform: elixir
     contexts: [Accounts]
     dataSources: [accountsState]
     serves: AccountsApi
