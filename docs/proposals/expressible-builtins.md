@@ -155,6 +155,17 @@ hierarchy-building and cross-tenant-scoped writes derive the path from the
 *target* org's `dataKey`, via a hand-written factory. That's the honest
 escape hatch, and it's already how the code works.
 
+**A cross-scope create is properly a workflow with explicit stamping.**
+Because it *reads another aggregate* (the target/parent org) to compute the
+path, it is orchestration — a **workflow**, by Loom's single-aggregate-vs-
+workflow layering, not an aggregate create. And it must **explicitly stamp**
+`dataKey`/`tenantId` to the target org, *overriding* the capability's
+self-scope default. This is the clean division the whole proposal pushes
+toward: **capability = the common-case default (self-scope stamp);
+workflow = the explicit cross-scope override.** The framework never needs
+to know about cross-scope writes — they are ordinary workflows. No new
+magic.
+
 The remaining `deep`/`global` **subtree reads** are ordinary `filter`s
 *if* the filter language gains a **prefix-match operator** (`startsWith` /
 `LIKE 'prefix.%'`). Today this is the `__loomDeepScope__` sentinel; the
@@ -318,6 +329,15 @@ shape-triggering) so no name silently carries framework meaning.
    `old` inside a `stamp onUpdate`; confirm the pre-image scope extends to
    stamp bodies, not just `onWrite precondition`. (The simulation confirms
    it's *needed*; the question is the scope-plumbing.)
+4. **Cross-scope stamp override** — a cross-scope create is a workflow that
+   explicitly stamps `dataKey`/`tenantId` to the *target* org, which must
+   override the `tenantOwned` capability's unconditional `onCreate`
+   self-stamp. Resolve by (1) the self-stamp being a *default* the
+   orchestrated create bypasses, or (2) override-after (a workflow writing
+   `internal` fields). Option 1 is cleaner but needs an "explicit value
+   beats capability default" rule. (Only bites for a **regular
+   `tenantOwned`** aggregate created on behalf of another org; the registry
+   is stance `"registry"` and never gets the self-stamp.)
 
 **Resolved by the simulation:** no storage shape needs gating out (all four
 have an atomic write mechanism today); write-guards require an `old`
