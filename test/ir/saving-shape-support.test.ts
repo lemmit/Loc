@@ -244,7 +244,7 @@ system Shop {
     expect(errs[0]).toContain("named operation(s) sync");
   });
 
-  it("still rejects a PAGED custom find on a vanilla document aggregate", async () => {
+  it("accepts a PAGED custom find on a vanilla document aggregate (Route A slice 4c)", async () => {
     const src = `
 system Shop {
   subdomain Sales {
@@ -254,6 +254,29 @@ system Shop {
       }
       repository Carts for Cart {
         find recent(): Cart paged
+        find byRef(reference: string): Cart paged where this.reference == reference
+      }
+    }
+  }
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api { platform: elixir { foundation: vanilla }, contexts: [Shop], dataSources: [shopState], port: 4000 }
+}
+`;
+    expect(await docScopeErrors(src)).toEqual([]);
+  });
+
+  it("still rejects a UNION-returning custom find on a vanilla document aggregate", async () => {
+    const src = `
+system Shop {
+  subdomain Sales {
+    context Shop {
+      error NotFound { message: string }
+      aggregate Cart ids guid shape(document) with crudish {
+        reference: string
+      }
+      repository Carts for Cart {
+        find byRef(reference: string): Cart or NotFound where this.reference == reference
       }
     }
   }
@@ -264,7 +287,7 @@ system Shop {
 `;
     const errs = await docScopeErrors(src);
     expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("custom find(s) recent");
+    expect(errs[0]).toContain("custom find(s) byRef");
   });
 
   it("accepts a CRUD-only vanilla document aggregate", async () => {

@@ -16,7 +16,6 @@ import {
   configSchemaFor,
   supportsSurfaceKind,
 } from "../../../util/source-types.js";
-import { pagedReturn } from "../../stdlib/generics.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -761,16 +760,17 @@ export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnosti
         // reading the jsonb `data` map); if any is not, a body that calls one is
         // gated.  Computed once here and threaded into the op/find checks.
         const allowFnCall = (agg.functions ?? []).every((fn) => !docFunctionUnsupported(fn));
-        // A custom find is unsupported when it's paged / union-returning (wire
-        // envelopes the document find path doesn't build) or its predicate reads
-        // a non-scalar shape.
+        // A custom find is unsupported when it's UNION-returning (the tagged-union
+        // wire the document find path doesn't build) or its predicate reads a
+        // non-scalar shape.  A PAGED find is now supported — `renderDocFindFn`
+        // builds the `%{items, page, pageSize, total, totalPages}` envelope
+        // in-memory (Route A slice 4c).
         const badFinds = (
           (ctx.repositories ?? []).find((r) => r.aggregateName === agg.name)?.finds ?? []
         )
           .filter((f) => f.name !== "all")
           .filter(
             (f) =>
-              pagedReturn(f.returnType) ||
               f.returnType.kind === "union" ||
               (f.filter != null && docExprUnsupported(f.filter, allowFnCall)),
           );

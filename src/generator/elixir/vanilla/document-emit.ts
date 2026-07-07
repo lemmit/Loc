@@ -28,6 +28,11 @@
 // `validateVanillaDocumentScope`.
 // ---------------------------------------------------------------------------
 
+import {
+  PAGED_DEFAULT_PAGE,
+  PAGED_DEFAULT_PAGE_SIZE,
+  pagedReturn,
+} from "../../../ir/stdlib/generics.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -358,6 +363,7 @@ function isDocSingleReturn(t: TypeIR): boolean {
 function renderDocFindFn(f: FindIR, aggModule: string): string {
   const fnName = snake(f.name);
   const argNames = f.params.map((p) => snake(p.name));
+  const paged = pagedReturn(f.returnType) != null;
   const single = isDocSingleReturn(f.returnType);
   const rc: RenderCtx = {
     thisName: "record",
@@ -370,6 +376,52 @@ function renderDocFindFn(f: FindIR, aggModule: string): string {
     : argNames.length > 0
       ? argNames.map((n) => `record.${n} == ${n}`).join(" and ")
       : "true";
+  // A predicate that doesn't read the embed (an unfiltered find → `true`) must
+  // NOT bind `record = row.data` — an unused binding trips `--warnings-as-errors`.
+  const filter = /\brecord\b/.test(predicate)
+    ? `
+      ${aggModule}
+      |> Repo.all()
+      |> Enum.filter(fn row ->
+        record = row.data
+        ${predicate}
+      end)`
+    : `
+      ${aggModule}
+      |> Repo.all()
+      |> Enum.filter(fn _row -> ${predicate} end)`;
+
+  if (paged) {
+    // Paged WIRE ENVELOPE (`%{items, page, pageSize, total, totalPages}`) built
+    // IN MEMORY: filter the whole table, then slice the page.  The controller's
+    // paged find action maps `serialize/1` over `items` (the loaded `%<Agg>{}`
+    // rows), so the envelope carries rows, not wire maps — parity with the
+    // relational `Repo.aggregate(:count)` + `limit/offset` paged shape.
+    const pageArgs = [
+      `page \\\\ ${PAGED_DEFAULT_PAGE}`,
+      `page_size \\\\ ${PAGED_DEFAULT_PAGE_SIZE}`,
+    ];
+    const argList = [...argNames, ...pageArgs].join(", ");
+    const specArgs = [...argNames.map(() => "term()"), "pos_integer()", "pos_integer()"].join(", ");
+    return `  @spec ${fnName}(${specArgs}) :: {:ok, map()} | {:error, term()}
+  def ${fnName}(${argList}) do
+    matched =${filter}
+
+    total = length(matched)
+    offset = (page - 1) * page_size
+    items = Enum.slice(matched, offset, page_size)
+
+    {:ok,
+     %{
+       items: items,
+       page: page,
+       pageSize: page_size,
+       total: total,
+       totalPages: if(page_size > 0, do: ceil(total / page_size), else: 0)
+     }}
+  end`;
+  }
+
   const specArgs = argNames.map(() => "term()").join(", ");
   const specTail = single
     ? `{:ok, ${aggModule}.t() | nil} | {:error, term()}`
@@ -377,13 +429,7 @@ function renderDocFindFn(f: FindIR, aggModule: string): string {
   const result = single ? "List.first(results)" : "results";
   return `  @spec ${fnName}(${specArgs}) :: ${specTail}
   def ${fnName}(${argNames.join(", ")}) do
-    results =
-      ${aggModule}
-      |> Repo.all()
-      |> Enum.filter(fn row ->
-        record = row.data
-        ${predicate}
-      end)
+    results =${filter}
 
     {:ok, ${result}}
   end`;
