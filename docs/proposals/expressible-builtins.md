@@ -96,13 +96,19 @@ The framework loses its `versioned` branch entirely; it keeps only a
 **generic** rule — *"lower an `old`-referencing write-guard into an atomic
 guarded write; zero rows ⇒ the declared error."* Versioning is then the
 simplest instance. The same primitive unlocks user write-invariants that
-are impossible today:
+are impossible today. **A guard is only an `onWrite precondition` when it
+references `old`** — a predicate over `new`/`this` alone is a plain
+`invariant` (checkable before the write, no pre-image needed) and should
+stay one. The write-guards are the ones that compare against persisted
+state:
 
 ```ddd
-onWrite precondition new.balance >= 0                // race-free non-negative
-onWrite precondition new.total   >= old.total        // monotonic / append-only
+onWrite precondition amount <= old.balance           // can't overdraw the *persisted* balance
+onWrite precondition new.total >= old.total          // monotonic / append-only
 onWrite precondition old.status.canGoTo(new.status)  // legal state transition
 ```
+
+(`new.balance >= 0` is NOT a write-guard — it's an ordinary invariant.)
 
 **Atomicity is the contract.** The primitive MUST lower atomically —
 never load-check-then-write, which silently reintroduces a TOCTOU race
@@ -169,6 +175,62 @@ drift (today they're derived independently). No new surface — this reuses
 a mechanism that already ships; it just extends its reach from user errors
 to the built-in ones.
 
+## Simulation — storage-shape lowering & atomicity
+
+The one genuine risk in primitives 1 & 2 is that a write-guard lowers to a
+*different* mechanism per storage shape, and one shape might not support it
+atomically. Traced against the real write paths (`versioned == old.version`
+plus an inequality guard), through all four shapes:
+
+| Shape | Write path today | Guard lowering | Atomic? |
+|---|---|---|---|
+| **relational state** | `UPDATE … SET … WHERE id=?` (`repository-save-builder.ts`) | add `AND <guard>` to the WHERE; 0 rows ⇒ conflict | ✅ (this is how `versioned` works today) |
+| **embedded** | root columns + parts JSONB; `UPDATE … WHERE id=?` | root/`version` fields → column WHERE; part fields → `data->>` WHERE | ✅ pushable |
+| **document** | table `(id, data jsonb, **version**)`; `UPDATE … set(data,version) WHERE id=?` (`repository-document-builder.ts:103-110`) | `version` is a **top-level column** → `AND version=?` trivially; domain fields → `(data->>'f')` WHERE | ✅ pushable — the post-hydrate raciness is a **read-filter** concern, not writes |
+| **event-sourced** | append at `version=max+1` vs `unique(stream_id,version)` (`repository-eventsourced-builder.ts:100-110`) | fold stream → check guard → append at V+1; a concurrent append takes V+1 first → 23505 ⇒ conflict | ✅ the **native ES optimistic-append CAS** — serializable write-guards for free |
+
+**Verdict: no shape needs to be gated out.** Every shape already has an
+atomic write mechanism (that's how `versioned` works on each today), so the
+primitive *reproduces existing infra*, it doesn't invent atomicity. Three
+lowerings, all real:
+
+1. relational / embedded / document → **`WHERE`-push** on the UPDATE
+   (top-level column directly; JSONB field via `data->>`),
+2. event-sourced → the **stream-version append CAS** (fold → check →
+   append; the intrinsic `unique(stream_id, version)` rejects concurrent
+   writers, making the fold-then-append serializable).
+
+### Refinements the simulation forced
+
+- **`onWrite precondition` requires an `old` reference** (else it's a plain
+  `invariant`) — corrected above.
+- **Pushable vs. pessimistic.** Equality/inequality over columns or
+  JSONB-extractable fields → `WHERE`-push (all non-ES shapes). A
+  method-call predicate SQL can't express (`old.status.canGoTo(…)`) →
+  `SELECT … FOR UPDATE` on relational/document/embedded, or is *naturally*
+  atomic on event-sourced (fold → check → append). **v1 = pushable
+  predicates only**; the pessimistic path is a later slice.
+- **Zero-rows disambiguation.** On the `WHERE`-push shapes, 0 affected rows
+  means *either* the guard failed *or* the row was deleted — the lowering
+  must re-check existence to return `409 conflict` vs `404 not-found`.
+
+### Materialized `derived` (primitive 2) — the simulation shrinks it
+
+Tracing `dataKey = parent.dataKey + "." + id`: tenancy's `parent` is
+**immutable** (set once at create), so `dataKey` is computed *once at
+create* and never recomputed. That is **not** the hard "recompute-on-write
+with cascade" primitive — it reduces to a **`managed` stored field written
+by a `stamp onCreate`** (the only gap is letting a stamp read the parent
+aggregate's `dataKey`, a small stamp-expressiveness extension). No cascade,
+no dependency tracking.
+
+So primitive 2 splits:
+
+- **create-time materialized** (immutable dependency — covers tenancy's
+  `dataKey`) → ship as `stamp onCreate` writing a `managed` field. Cheap.
+- **recompute-on-write with cascade** (mutable dependency — the general
+  computed column) → genuinely new, deferred; **tenancy doesn't need it.**
+
 ## What is already right — do not touch
 
 - **Field roles** (`token`/`secret`/`internal`/`managed`/`immutable`,
@@ -219,21 +281,27 @@ shape-triggering) so no name silently carries framework meaning.
    consistency win; makes structural 409s overridable.
 2. **`onWrite precondition` + `old` (1)** — pushable predicates only;
    retires the `versioned` name-gate and unlocks write-invariants.
-3. **Materialized `derived` (2)** — retires `tenantOwned`'s `dataKey`
-   name-gate; general computed-column primitive.
-4. **Reserved-name guard** — after 1–2, lock down the residual magic names.
+3. **Create-time materialized `derived` (2a)** — `stamp onCreate` writing a
+   `managed` field (+ let a stamp read a parent aggregate's field). Retires
+   `tenantOwned`'s `dataKey` name-gate. The recompute-on-write-with-cascade
+   form (2b) is deferred — tenancy doesn't need it.
+4. **Reserved-name guard** — after 1–3, lock down the residual magic names.
 
 ## Open questions
 
-1. **`onWrite precondition` non-pushable predicates** — ship the
-   pessimistic `SELECT … FOR UPDATE` lowering, or restrict to pushable
-   forever?
-2. **Materialized `derived` recompute triggers** — recompute on any write,
-   or only when a dependency field changes (dependency tracking)?
-3. **Built-in error payloads** — are `ConcurrencyConflict` /
+1. **`onWrite precondition` non-pushable predicates** — the simulation
+   sequences these to a later slice (v1 is pushable-only). Ship the
+   pessimistic `SELECT … FOR UPDATE` lowering then, or restrict forever?
+2. **Built-in error payloads** — are `ConcurrencyConflict` /
    `UniquenessConflict` / `Disallowed` / `ReferencedInUse` first-class
    `error` decls in a prelude, or a fixed internal set the `httpStatus`
    mapper is taught to accept?
-4. **`old` in `stamp`** — the increment `version := old.version + 1` needs
+3. **`old` in `stamp`** — the increment `version := old.version + 1` needs
    `old` inside a `stamp onUpdate`; confirm the pre-image scope extends to
-   stamp bodies, not just `onWrite precondition`.
+   stamp bodies, not just `onWrite precondition`. (The simulation confirms
+   it's *needed*; the question is the scope-plumbing.)
+
+**Resolved by the simulation:** no storage shape needs gating out (all four
+have an atomic write mechanism today); write-guards require an `old`
+reference (else they're plain invariants); materialized `derived` splits
+into a cheap create-time form (covers tenancy) and a deferred cascade form.
