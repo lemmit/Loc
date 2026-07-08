@@ -32,8 +32,12 @@ the source proposals. Owner decisions still gate the parts that supersede
 6. **`crossTenant` is fail-closed under `tenancy by`** — a `crossTenant`
    aggregate *requires* an explicit read policy, independent of the global
    `enforcement` default.
-7. **The authz "current row" pronoun is `record`**, never `resource`
-   (which is the infra declaration keyword).
+7. **No dedicated authz "current row" pronoun** — drop `authorization.md`'s
+   `resource` (which collides with the `resource {}` storage-binding
+   keyword) *and* the `record` rename. Reference the row with what already
+   exists: **`this`** (or a bare field ref) in an operation gate, a **typed
+   param** in a named policy, an explicit **`as`-binding** in a bare
+   policy-block predicate. Nothing ambient ⇒ no param-vs-field ambiguity.
 
 ## Surface — piece by piece
 
@@ -162,16 +166,27 @@ context Reference {
 }
 ```
 
-### Ambient authorization predicate — `record`, not `resource` (decision 7)
+### Referencing the row — no pronoun needed (decision 7)
+
+There is no ambient "current row" identifier. Use what exists:
 
 ```ddd
-// inline gate referencing the current row:
-operation cancel() requires record.ownerId == currentUser.id { … }
+// 1. operation gate → `this` (or bare field ref, like an invariant):
+operation cancel() requires this.ownerId == currentUser.id { … }
+operation cancel() requires ownerId == currentUser.id { … }        // bare = this.field
 
-// reusable named policy (authorization phase 3.2):
+// 2. reusable named policy → a typed PARAM names the row:
 policy CanCancel(o: Order): bool = o.ownerId == currentUser.id
-//                                 ^ the param IS the row; `record` is only the *ambient* pronoun
+//                ^ param (declared)          ^ field access — unambiguous
+
+// 3. bare policy-block predicate → bind explicitly with `as`:
+policy { allow read on Order as o where o.ownerId == currentUser.id }
 ```
+
+Params are declared in the signature; fields are `.`-accessed; `this` is
+Loom's existing instance pronoun (`ThisRef`). Because nothing is ambient,
+there is no param-vs-field ambiguity — which is exactly the problem
+`authorization.md`'s `resource` pronoun introduced.
 
 ## What this supersedes / reconciles
 
@@ -179,7 +194,7 @@ policy CanCancel(o: Order): bool = o.ownerId == currentUser.id
 |---|---|
 | `authorization.md` `DataKey` **type** + 6 magic ops | **dropped** → `string` field + `startsWith` operator |
 | `authorization.md` / multi-tenancy stamp on `currentUser.orgPath` | **re-rooted** → write stamp reads `organizationContext.orgPath`; reads stay on `currentUser` |
-| `authorization.md` `resource` pronoun | **renamed** → `record` |
+| `authorization.md` `resource` pronoun | **dropped** → `this` / typed param / `as`-binding (no ambient pronoun) |
 | `crossTenant` fail-open (relies on global `enforcement`) | **fail-closed** → explicit read policy required |
 | `__loomDeepScope__` internal sentinel | **surfaced** → an ordinary `startsWith` filter |
 
