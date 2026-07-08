@@ -319,18 +319,29 @@ every behavior from declarative shape on screen** — a `writeGuard`, a
 `unique(...)`, a `persistedAs(eventLog)`. No behavior hinges on the
 compiler recognizing a blessed capability string.
 
-## Cross-proposal seam — the `deep`/`global` read anchor
+## Cross-proposal seams
 
-⚠️ This proposal and [`organization-context.md`](./organization-context.md)
-must **jointly** decide one security-relevant question: does the
-`deep`/`global` subtree-read filter anchor on the **principal**
-(`currentUser`'s reachability, as today — `tenant-stance.ts:160-190`) or on
-the **operating context** (`organizationContext`)? Operating-context-anchored
-`deep` could let a switched context reach a subtree the principal cannot,
-so the two proposals cannot specify this independently. Recommended default:
-**anchor reads on the principal**, and treat a context switch as an
-*explicit, separately-authorized widening* — see `organization-context`
-open question 4.
+**The `deep`/`global` read anchor** — this proposal and
+[`organization-context.md`](./organization-context.md) must **jointly**
+decide one security-relevant question: does the `deep`/`global` subtree-read
+filter anchor on the **principal** (`currentUser`'s reachability, as today —
+`tenant-stance.ts:160-190`) or on the **operating context**
+(`organizationContext`)? Operating-context-anchored `deep` could let a
+switched context reach a subtree the principal cannot, so the two proposals
+cannot specify this independently. Recommended default: **anchor reads on
+the principal**, and treat a context switch as an *explicit,
+separately-authorized widening* — see `organization-context` open question 4.
+
+**⚠️ Conflicts with `authorization.md`'s `DataKey` type.** `authorization.md`
+(§2/§10) proposes `dataKey` as a **first-class built-in type** with six magic
+member ops (`isAncestorOf` / `isDescendantOf` / `sameParent` / `isRoot` /
+`rootTenant` / `depth`) and a special off-`wireShape` ambient column. This
+proposal argues the same capability reduces to an **ordinary `string` field +
+one `startsWith` / `LIKE 'prefix.%'` filter operator** — far less surface,
+and it matches the `__loomDeepScope__` SQL already in `tenant-stance.ts`.
+**These cannot both land.** Recommendation: pin the reduction here and drop
+the `DataKey`-type + 6-op surface from `authorization.md`. (Owner decision —
+this proposal cannot edit `authorization.md`; flagged for reconciliation.)
 
 ## Reserved-name cleanup (falls out of the above)
 

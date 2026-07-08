@@ -52,6 +52,27 @@ set (each is roadmap, so *not* a `surface-redundancy-cuts` deletion):
 The list is not fixed — it is *whatever is marked reserved* (below), so it
 shrinks automatically as emitters land.
 
+### Deferred-keyword debt — the highest-value application
+
+A review of the whole proposal corpus found the single largest
+surface-stability risk is **pre-settling common-word keywords for sugar that
+hasn't shipped** — each books soft-keyword-sprawl or collision debt before
+the feature exists. Prime candidates to hold *unreserved* until emission,
+routed through this mechanism rather than declared "settled":
+
+- MVU / effects family — `spawn`, `attempt`, `async`, `onError`, `errors`
+  (`async-actions-and-effects`, `error-handling-and-failure-sink`);
+- quickstart / channels — `email`, `job`, `cached`, `live`
+  (all common field names: `user { email: … }`, `Build { … }`);
+- messaging — `channel`, `delivery`, `retention`, `carries`, `key`,
+  `projection`, `keyed` are hard-reserved **today** with *zero* soft
+  re-admission (a model with `Shipment { delivery: date }` fails to parse).
+
+The rule this proposal implies: **do not reserve a common-word keyword until
+its emitter lands.** Until then the feature is a `reserved-not-emitted`
+diagnostic on a *placeholder* syntax, not a keyword grabbed from the
+identifier namespace. This directly serves the anti-sprawl goal.
+
 ## Mechanism
 
 Two options for how a construct declares itself reserved:

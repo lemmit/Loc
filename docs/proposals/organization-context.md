@@ -122,12 +122,22 @@ Consequences (each removes machinery that exists today):
   child's path — the parent *is* the operating context.
 - **No cross-scope workflow** for path purposes — a cross-scope write is
   "set context, then create normally," not orchestration.
-- **No stamp-override rule.** There is nothing to override: the stamp is
-  always `organizationContext.orgPath`; *switching context* is how you go
-  cross-scope. (This dissolves `expressible-builtins.md` open question 4.)
-- **Reads follow writes.** The tenant read `filter`s move from
-  `currentUser.orgPath` to `organizationContext.orgPath`, so a context
-  switch re-scopes reads consistently.
+- **No stamp-override rule.** There is nothing to override: the *write*
+  stamp is always `organizationContext.orgPath`; *switching context* is how
+  you go cross-scope. (This dissolves the cross-scope override question.)
+- **Reads stay principal-anchored by default** (see the semantics callout
+  above): a validated context switch is an *explicit widening* of read
+  scope, not a blanket repoint of every tenant `filter` — the safer of the
+  two answers to open question 4, and it must reconcile with
+  `expressible-builtins.md`'s `deep`/`global` anchor seam.
+
+**⚠️ Cross-proposal seam — the tenancy stamp's ambient home.**
+`authorization.md` (decision 4) and `multi-tenancy` (R5) currently stamp
+`dataKey := currentUser.orgPath` and expose `orgPath` **on `currentUser`**.
+If this split lands, that stamp is rooted on the wrong ambient — the *write*
+stamp must read `organizationContext.orgPath`, not `currentUser.orgPath`.
+These must reconcile before either ships. (Owner decision — this proposal
+cannot edit those docs; flagged.)
 
 ## The cost — moved, not deleted
 
