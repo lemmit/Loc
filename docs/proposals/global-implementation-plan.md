@@ -296,6 +296,26 @@ A pragmatic order, dependency-consistent (T2.a / T2.b / T2.c / T2.e / T2.i all
 4. **Tier 4 #1–#3** execution-context → multi-tenancy → authorization
     — the governance spine.
 
+## Session proposals (2026-07-08) — surface cleanup & de-magic
+
+Six proposals from a language-surface stability review. Most are
+**governance-independent** and interleave anywhere; only `organization-context`
+rides the governance spine. Suggested order, low-risk-first:
+
+| # | Proposal | Depends on | Notes |
+|---|---|---|---|
+| S1 | [`reserved-surface-signposting`](./reserved-surface-signposting.md) | — | **Additive** (a warning) — cannot break anyone. Do first; it makes every later gap honest. |
+| S2 | [`surface-redundancy-cuts`](./surface-redundancy-cuts.md) | — | Deletions with trivial/empty migrations (`ids guid`, criterion block-form, legacy `ui{framework:}`, `write global`). `static` is a separate verify-then-decide. |
+| S3 | [`scaffolded-navigation`](./scaffolded-navigation.md) | — | Removes `PageMenuMeta` + implicit sidebar derivation; needs a page-`menu{}` codemod. |
+| S4 | [`with-implements-split`](./with-implements-split.md) | typed-capabilities (✅) | Codemod is deterministic (expander already classifies name→kind). |
+| S5 | [`expressible-builtins`](./expressible-builtins.md) | versioned (✅), the `httpStatus` mapper (✅) | **Phased:** (a) route structural 409s through the error→status mapper — *additive*; (b) `onWrite precondition` + `old` (write-guards, pushable-only v1); (c) prefix-match filter operator. Retires the `versioned` name-gate. |
+| S6 | [`organization-context`](./organization-context.md) | execution-context (Tier-0, ✅), multi-tenancy substrate (✅), authorization (Tier 4 #3) | On the **governance spine**. Consumes S5(c)'s prefix-match op. Its auth gate is a security surface — sequence with authorization, not before. |
+
+Coordination notes: S5(c) prefix-match op + S6 together retire `tenantOwned`'s
+`dataKey` name-magic (see `expressible-builtins` §2 and `organization-context`).
+S1 subsumes the parity-debt runtime-signal need. S2 is strictly disjoint from
+S1/S5 (cuts the dead; S1/S5 keep + signpost the roadmap).
+
 ## Parallelisation
 
 Three loosely-coupled tracks (one agent each):
