@@ -164,31 +164,19 @@ layering — that explicitly stamps `dataKey`/`tenantId` to the target,
 overriding the capability's self-scope default. Works, but needs the
 override rule (open question 4) and a repo-let per create.
 
-*Framing B (ambient `organizationContext`) — PREFERRED.* Split the
-conflation in `currentUser.orgPath`: **`currentUser`** is the *principal*
-(identity, home org, permissions); **`organizationContext`** is the
-*operating tenant scope* — which org this request runs in, defaulting to
-the principal's home org but settable (authorization-gated) to another org
-in the principal's write-scope. Then **every** dataKey computation is the
-same unconditional stamp, the context varying rather than the stamp:
-
-| Case | Stamp |
-|---|---|
-| self-scope | `dataKey := organizationContext.orgPath` |
-| sub-org (registry) | `dataKey := organizationContext.orgPath + "." + id` |
-| cross-scope | *same* — set the context to the target org first |
-
-Framing B is strictly simpler: it **eliminates the repo-let** (the parent
-*is* the operating context — no row read to build the path), **removes the
-cross-scope workflow** for path purposes, and **dissolves open question 4**
-(there is no override — switching context is how you go cross-scope). It
-rides the existing **execution-context / scope-frame backbone** (a peer
-ambient accessor to `currentUser`). Its cost is real but *moved*: context
-establishment must be **authorization-gated** (you may only operate within
-your write-scope subtree — an unvalidated context switch is a cross-tenant
-write hole), and it resolves org→path **once per request** instead of per
-write. How the context is set (header / an explicit "act as" action / path
-segment) is an auth/transport design choice.
+*Framing B (ambient `organizationContext`) — PREFERRED.* Split
+`currentUser.orgPath`'s conflation of *principal* and *operating tenant
+scope* into `currentUser` (principal) + `organizationContext` (operating
+scope). Then every dataKey is the *same* unconditional stamp
+(`dataKey := organizationContext.orgPath`, `+ "." + id` for sub-orgs),
+the context varying rather than the stamp — which **eliminates the
+repo-let**, **removes the cross-scope workflow** for path purposes, and
+**dissolves open question 4** (no override; switching context is how you go
+cross-scope). Its cost moves to an authorization-gated,
+once-per-request context establishment. Full design (semantics, the
+security gate, the two-flat-accessors-vs-unified-`context` shape decision,
+open questions) is its own proposal:
+[`organization-context.md`](./organization-context.md).
 
 Either way, the framework never needs to know about cross-scope writes —
 they are ordinary in-language stamps + an ambient context frame. No new
