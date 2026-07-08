@@ -40,19 +40,42 @@ the **operating tenant scope**:
 - `organizationContext.orgId` / `.tenantId` — the operating org's id;
 - `organizationContext.orgPath` — its materialized path.
 
+> ⚠️ **BLOCKING PREREQUISITE — this is a cross-tenant security control.**
+> Today the tenant read `filter` and write `stamp` anchor on
+> `currentUser.orgPath`, a JWT **claim the caller cannot forge**
+> (`prelude.ts:126`, `tenant-stance.ts:129`). This proposal repoints them
+> onto a value the caller *submits*. So the **authorization gate is the
+> load-bearing part, not an open detail** — the surface (`organizationContext`)
+> must NOT be admitted until the gate is a concrete, **fail-closed**,
+> validator-enforced, **per-backend** mechanism with a parity test (a sibling
+> of `tenancy-e2e`) asserting a switch outside the write-ladder is *rejected
+> on all five backends*. A backend that ships the switch but forgets the gate
+> is a silent cross-tenant read **and** write hole — precisely the failure
+> mode this whole effort exists to prevent. The gate is a hard dependency on
+> the authorization work (Tier 4 #3), sequenced *with* it, never before.
+
 Semantics:
 
 - **Defaults to the principal's home org**, so
   `organizationContext.orgPath == currentUser.orgPath` unless explicitly
-  switched — existing behavior is unchanged (pure additive).
+  switched. This is *functionally* additive (the default case is unchanged),
+  but it is **not additive for the trust model** — the *basis* of the tenant
+  filter shifts from claim-derived (unforgeable) to context-derived
+  (submitted-then-validated). That shift is the whole reason the gate above
+  is mandatory; do not describe this feature as "purely additive."
 - **Settable per request, authorization-gated** — a principal may set the
   context only to an org within its authorized **write-scope** (its own
   subtree, per the `deep`/`global` write ladder). An unvalidated switch is
   a cross-tenant write hole, so the gate is mandatory, not optional.
-- **Drives the whole tenant scope coherently** — both the `stamp` (writes)
-  and the `filter` (reads) read from `organizationContext`, so switching
-  context re-scopes reads *and* writes together. An admin "in" org X writes
-  X's data and sees X's data, consistently.
+- **Reads stay principal-anchored by default; a switch is an explicit
+  widening.** Do *not* blanket-repoint every read onto `organizationContext`.
+  Keep the tenant read `filter` anchored on `currentUser` (the unforgeable
+  claim), and treat a validated context switch as a *separately-authorized
+  widening* of the read scope — not a silent global repoint. The write
+  `stamp` follows the operating context (that is the point); reads widen only
+  when the switch is validated. (This is open question 4, and it must
+  reconcile with `expressible-builtins.md`'s `deep`/`global` anchor — see its
+  "Cross-proposal seam".)
 
 `currentUser` keeps identity/permissions/home-org; `organizationContext` is
 the operating lens over the tenant tree.

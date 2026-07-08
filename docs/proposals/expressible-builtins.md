@@ -34,7 +34,7 @@ see. Nothing should hinge on the compiler recognizing a blessed string.
 
 ## What the audit found (classified)
 
-Classification: **(a)** `onWrite precondition` + `old` · **(b)**
+Classification: **(a)** `writeGuard` + `old` · **(b)**
 materialized `derived` · **(c)** error→status mapper (`httpStatus`) ·
 **(d)** field-role (already right) · **(e)** `stamp`/`filter`
 (already body-expressible) · **(f)** irreducible infrastructure.
@@ -42,7 +42,7 @@ materialized `derived` · **(c)** error→status mapper (`httpStatus`) ·
 | Built-in behavior | Keyed on | Class | Verdict |
 |---|---|---|---|
 | `versioned` — version column | field | (d)/field | already fine |
-| `versioned` — guarded CAS write + increment | **capability name** | **(a)** | → `onWrite precondition version == old.version` |
+| `versioned` — guarded CAS write + increment | **capability name** | **(a)** | → `writeGuard version == old.version` |
 | `versioned` — atomic zero-rows detection | (infra) | (f) | stays, generic |
 | `versioned` / `unique` / `when` / FK / event-store — **409** | hardcoded | **(c)** | → route through `httpStatus` mapper |
 | `tenantOwned` — `tenantId`/`dataKey` filter + stamp | (prelude body) | (e) | already fine — regular `dataKey` is a `stamp onCreate` off `currentUser.orgPath`; registry/cross-scope `dataKey` (`parent.dataKey + "." + id`) is a hand-written create factory (`prelude.ts:150-156`) |
@@ -67,7 +67,7 @@ should reach.
 
 ## The three primitives
 
-### 1. Atomic write-guards — `onWrite precondition` + `old`
+### 1. Atomic write-guards — `writeGuard` + `old`
 
 A capability body has `filter` (a *read* predicate) and `stamp` (field
 *assignments*), but nothing that conditions the **write** on the persisted
@@ -77,7 +77,7 @@ state. Add:
   predicate. (`this` is the being-written state — a mutable cursor that
   is already "new" by write time — so it cannot name the pre-image;
   `this.x >= this.x` is a tautology.)
-- **`onWrite precondition <expr>`** — a guard evaluated against the stored
+- **`writeGuard <expr>`** — a guard evaluated against the stored
   row *at the write*, lowered **atomically** (predicate pushed into the
   `UPDATE … WHERE` clause, or a `SELECT … FOR UPDATE` fallback). A
   zero-row result ⇒ the guard's declared conflict error.
@@ -87,7 +87,7 @@ state. Add:
 ```ddd
 capability versioned {
   version: int token                              // client echoes last-seen value
-  onWrite precondition version == old.version     // guard: expected == persisted
+  writeGuard version == old.version     // guard: expected == persisted
   stamp onUpdate { version := old.version + 1 }   // increment off the pre-image
 }
 ```
@@ -96,19 +96,22 @@ The framework loses its `versioned` branch entirely; it keeps only a
 **generic** rule — *"lower an `old`-referencing write-guard into an atomic
 guarded write; zero rows ⇒ the declared error."* Versioning is then the
 simplest instance. The same primitive unlocks user write-invariants that
-are impossible today. **A guard is only an `onWrite precondition` when it
-references `old`** — a predicate over `new`/`this` alone is a plain
-`invariant` (checkable before the write, no pre-image needed) and should
-stay one. The write-guards are the ones that compare against persisted
+are impossible today. **A guard is only a `writeGuard` when it references
+`old`** — a predicate over `this` alone is a plain `invariant` (checkable
+before the write, no pre-image needed) and should stay one. Only **two**
+scopes exist in a guard: `old` (the persisted pre-image) and `this` (the
+being-written image). There is deliberately **no `new` alias** — reusing
+`this` keeps the surface free of a redundant second spelling (and a costly
+soft keyword). The write-guards are the ones that compare against persisted
 state:
 
 ```ddd
-onWrite precondition amount <= old.balance           // can't overdraw the *persisted* balance
-onWrite precondition new.total >= old.total          // monotonic / append-only
-onWrite precondition old.status.canGoTo(new.status)  // legal state transition
+writeGuard amount <= old.balance            // can't overdraw the *persisted* balance
+writeGuard this.total >= old.total          // monotonic / append-only
+writeGuard old.status.canGoTo(this.status)  // legal state transition
 ```
 
-(`new.balance >= 0` is NOT a write-guard — it's an ordinary invariant.)
+(`this.balance >= 0` is NOT a write-guard — it's an ordinary invariant.)
 
 **Atomicity is the contract.** The primitive MUST lower atomically —
 never load-check-then-write, which silently reintroduces a TOCTOU race
@@ -119,7 +122,7 @@ while looking correct. Two generic lowerings:
 - **non-pushable** (a method call SQL can't express) → pessimistic
   `SELECT … FOR UPDATE` + check.
 
-A sane v1 restricts `onWrite precondition` to *pushable* predicates
+A sane v1 restricts `writeGuard` to *pushable* predicates
 (covers versioning + most numeric/equality invariants) and defers the
 pessimistic path.
 
@@ -250,7 +253,7 @@ lowerings, all real:
 
 ### Refinements the simulation forced
 
-- **`onWrite precondition` requires an `old` reference** (else it's a plain
+- **`writeGuard` requires an `old` reference** (else it's a plain
   `invariant`) — corrected above.
 - **Pushable vs. pessimistic.** Equality/inequality over columns or
   JSONB-extractable fields → `WHERE`-push (all non-ES shapes). A
@@ -261,6 +264,14 @@ lowerings, all real:
 - **Zero-rows disambiguation.** On the `WHERE`-push shapes, 0 affected rows
   means *either* the guard failed *or* the row was deleted — the lowering
   must re-check existence to return `409 conflict` vs `404 not-found`.
+- **JSONB-cast pushability (document/embedded).** A guard over a *domain*
+  field on a document/embedded aggregate lowers to a cast comparison
+  (`(data->>'total')::numeric <= :x`). v1's "pushable only" must state
+  explicitly whether it *includes* the numeric-cast-from-`data->>` case
+  (a top-level `version` column is trivially pushable; a JSONB-nested field
+  is pushable but needs the cast) or **excludes** JSONB-nested guards until
+  the pessimistic path lands. Recommend: include top-level columns
+  (covers `versioned`), exclude JSONB-nested domain guards in v1.
 
 ### `dataKey` (primitive 2) — no materialized-`derived` needed
 
@@ -304,9 +315,22 @@ triggered by a *visible declaration*, never a recognized name:
 8. `tenantOwned` → `dataKey` prefix index for subtree scans.
 
 The distinction that matters: after this proposal, **a reader predicts
-every behavior from declarative shape on screen** — a `derived persisted`,
-an `onWrite precondition`, a `unique(...)`, a `persistedAs(eventLog)`. No
-behavior hinges on the compiler recognizing a blessed capability string.
+every behavior from declarative shape on screen** — a `writeGuard`, a
+`unique(...)`, a `persistedAs(eventLog)`. No behavior hinges on the
+compiler recognizing a blessed capability string.
+
+## Cross-proposal seam — the `deep`/`global` read anchor
+
+⚠️ This proposal and [`organization-context.md`](./organization-context.md)
+must **jointly** decide one security-relevant question: does the
+`deep`/`global` subtree-read filter anchor on the **principal**
+(`currentUser`'s reachability, as today — `tenant-stance.ts:160-190`) or on
+the **operating context** (`organizationContext`)? Operating-context-anchored
+`deep` could let a switched context reach a subtree the principal cannot,
+so the two proposals cannot specify this independently. Recommended default:
+**anchor reads on the principal**, and treat a context switch as an
+*explicit, separately-authorized widening* — see `organization-context`
+open question 4.
 
 ## Reserved-name cleanup (falls out of the above)
 
@@ -314,7 +338,7 @@ Today `versioned` / `tenantOwned` / `tenantRegistry` are **magic capability
 names** — a user-defined `capability versioned {}` would collide with or
 shadow the built-in, and nothing in the surface signals these four names
 are special. Once (1) and (2) land, `versioned` is an ordinary capability
-using `onWrite precondition` (no name-gate at all) and `tenantOwned`'s
+using `writeGuard` (no name-gate at all) and `tenantOwned`'s
 name-gate shrinks to the residual index trigger. The remaining reserved
 names should get an explicit validator guard (or move fully to
 shape-triggering) so no name silently carries framework meaning.
@@ -323,7 +347,7 @@ shape-triggering) so no name silently carries framework meaning.
 
 1. **Unify conflict statuses (3)** — additive, no new surface, immediate
    consistency win; makes structural 409s overridable.
-2. **`onWrite precondition` + `old` (1)** — pushable predicates only;
+2. **`writeGuard` + `old` (1)** — pushable predicates only;
    retires the `versioned` name-gate and unlocks write-invariants.
 3. **Prefix-match filter operator (2)** — `startsWith` / `LIKE 'prefix.%'`
    in the filter language. Turns `tenantOwned`'s `deep`/`global` scope into
@@ -334,7 +358,7 @@ shape-triggering) so no name silently carries framework meaning.
 
 ## Open questions
 
-1. **`onWrite precondition` non-pushable predicates** — the simulation
+1. **`writeGuard` non-pushable predicates** — the simulation
    sequences these to a later slice (v1 is pushable-only). Ship the
    pessimistic `SELECT … FOR UPDATE` lowering then, or restrict forever?
 2. **Built-in error payloads** — are `ConcurrencyConflict` /
@@ -343,7 +367,7 @@ shape-triggering) so no name silently carries framework meaning.
    mapper is taught to accept?
 3. **`old` in `stamp`** — the increment `version := old.version + 1` needs
    `old` inside a `stamp onUpdate`; confirm the pre-image scope extends to
-   stamp bodies, not just `onWrite precondition`. (The simulation confirms
+   stamp bodies, not just `writeGuard`. (The simulation confirms
    it's *needed*; the question is the scope-plumbing.)
 4. **`organizationContext` (preferred cross-scope resolution)** — split
    `currentUser` (principal) from `organizationContext` (operating tenant

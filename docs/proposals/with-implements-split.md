@@ -92,10 +92,16 @@ line, so the codemod reads its classification.
 
 ## Open questions
 
-1. **`implements` position** — keep it strictly a member (as `ImplementsDecl`
-   is today), or also allow it as a header clause beside `with` for
-   read-flow (`aggregate X with m implements c { … }` reads left-to-right)?
-   The before/after above assumes header-adjacency; confirm the grammar
-   admits both without ambiguity.
+1. **`implements` position — load-bearing, resolve before implementing.**
+   `ImplementsDecl` is a **member** today (`ddd.langium:1120`), inside the
+   body. But the headline before/after examples (`aggregate Build with
+   crudish implements versioned { … }`) put it as a **header clause** beside
+   `with` — which the grammar does **not** admit today. Since that
+   left-to-right read is the proposal's ergonomic payoff, the grammar must be
+   extended to allow `implements` in header position (a comma-list, like
+   `with`), and a Langium-ambiguity check must confirm `with … implements …`
+   parses cleanly before the `{`. If header-adjacency turns out ambiguous,
+   the proposal falls back to `implements` staying a member — and the
+   examples must be rewritten to reflect that. Not a soft "open" item.
 2. **Deprecation window** — hard cutover (codemod + validator error), or a
    release where `with <capability>` warns before it errors?

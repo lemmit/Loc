@@ -6,13 +6,23 @@
 
 ## Problem
 
-Navigation (the sidebar) is built two ways today, and the seam between
-them leaks a confusing construct into the language surface.
+Navigation (the sidebar) is built **three** ways today (verified in
+`src/generator/_frontend/menu-emitter.ts:12-27,104-160` and
+`react/templating/preparers/app-shell.ts`):
 
 1. **Explicit** — a `ui`-level `menu { section "S" { link A.B } }` block.
-   This is fine and stays.
-2. **Derived fallback** — when no explicit block exists, the sidebar is
-   *derived at emit time* by grouping pages on a **per-page metadata bag**:
+   Fine, stays.
+2. **The real default: a hardcoded grouping** in
+   `prepareAppShellVM(aggregates, workflows, views, …)` — when no explicit
+   `menu {}` exists, the sidebar is a hardcoded Aggregates / Workflows /
+   Views grouping. This is what gives **every scaffolded UI (and most
+   hand-written ones)** its sidebar. The emitter says so outright:
+   *"Per-page `menuMeta` is not consulted as the default sidebar driver; the
+   default sidebar still flows through the hardcoded grouping in
+   `prepareAppShellVM`."*
+3. **Per-page `menu {}` metadata bag** — consulted **only for `custom`
+   hand-written pages** (`menu-emitter.ts:116`), grouping them by their
+   `section` string:
 
    ```ddd
    page Orders {
@@ -20,8 +30,11 @@ them leaks a confusing construct into the language surface.
    }
    ```
 
-That per-page `menu { … }` bag (`PageMenuMeta` / `MenuMetaEntry`,
-`ddd.langium:681`) is the wart:
+The wart this proposal removes is **path 3** — the per-page `menu { … }` bag
+(`PageMenuMeta` / `MenuMetaEntry`, `ddd.langium:681`). But it must do so
+**without losing path 2** (see the migration below — a naïve "no `menu {}` ⇒
+no sidebar" would silently strip the sidebar from every UI that relies on
+the hardcoded default). The bag's problems:
 
 - **Keyword overload.** `menu {}` at `ui` scope holds `section` *blocks
   with `link`s*; at `page` scope it holds `key: value` *scalars*. Same
@@ -49,12 +62,17 @@ nav; it doesn't.
 Either you wrote it, or the scaffold macro materialized it (visible,
 editable, `unfold`-able). There is **no implicit emit-time derivation**.
 
-- **No `menu {}` block ⇒ no sidebar.** Nothing is conjured invisibly.
+- **No `menu {}` block ⇒ no sidebar.** Nothing is conjured invisibly. This
+  is only safe because the scaffold macro **materializes the equivalent of
+  today's hardcoded `prepareAppShellVM` default** (path 2) — see below — so
+  a scaffolded UI still gets its full sidebar, now as visible source.
 - A `menu {}` block has one of two origins, and they **merge freely**:
   - **Handwritten** — `menu { section "Admin" { link Settings } }`.
   - **Scaffold-materialized** — a `with scaffold(…)` macro emits, alongside
-    its pages/areas, **one** `menu {}` block over the listable pages it
-    created, as real cross-referenced AST.
+    its pages/areas, **one** `menu {}` block reproducing the full default
+    grouping — **Aggregates, Workflows, *and* Views** (not aggregates alone,
+    which is all today's `prepareAppShellVM` groups) — as real
+    cross-referenced AST.
 
 ```ddd
 ui WebApp with scaffold(subdomains: [Sales]) {
@@ -90,10 +108,16 @@ scaffolded page.
 At lowering, collect **every** `menu {}` block in the `ui` (scaffolded +
 handwritten), in expansion/source order, then:
 
-1. **Merge sections by exact label.** A later `section "Orders"` *appends
-   its links* to the existing "Orders" section rather than duplicating it
-   — this is what lets a handwritten block extend a scaffolded section
-   without an unfold.
+1. **Merge sections by label.** A later `section "Orders"` *appends its
+   links* to the existing "Orders" section rather than duplicating it — this
+   is what lets a handwritten block extend a scaffolded section without an
+   unfold. **Footgun:** exact-string matching means `section "orders"` /
+   `"Order"` silently produces a *duplicate* section instead of extending.
+   Mitigate: the validator **warns on near-miss labels** (case-/whitespace-
+   insensitive collision with a different exact string), and — where the
+   scaffold owns a section — key its identity on the `area` reference, not
+   the rendered string, so a handwritten extension that mismatches is a
+   *warning*, not a silent second section.
 2. **Links** keep declaration order within a section; **dedup** identical
    targets (the scaffold's canonical entry wins).
 3. **Section order** = first-appearance order, with an optional
@@ -142,29 +166,50 @@ change is a **deletion**:
 
 - Remove `PageMenuMeta` and `MenuMetaEntry` (`ddd.langium:681–687`) and the
   `PageMenuMeta` arm of `PageProp` (`ddd.langium:591`).
-- Remove `menu` from the soft-keyword lists where *only* `PageMenuMeta`
-  required it (verify each site — `menu` is still needed as a `UiMember`
-  keyword and stays soft elsewhere).
+- `menu` **cannot** be dropped from the soft-keyword lists — it is still a
+  `UiMember` keyword (`ddd.langium:752`) and stays soft in every identifier
+  position (`:1771,2525`). Removing `PageMenuMeta` yields **no** soft-keyword
+  reduction; don't claim one.
 - Delete the `menuMeta` key-allowlist validator checks.
 
-## Lowering / emit impact
+## Lowering / emit impact — all five frontends
 
-- **Scaffold macros** (`src/macros/stdlib/scaffold/`): the top-level
-  entry additionally emits a `MenuBlock` AST over the pages it collected.
-- **Lowering**: collect *all* `MenuBlock`s → one merged `UiIR` menu
-  (today's path assumes a single block).
-- **Menu emitter** (`src/generator/_frontend/menu-emitter.ts`): consume the
-  merged sections; **delete the per-page `menuMeta` fallback path**; a `ui`
-  with no `menu {}` block renders no sidebar.
-- **Validator**: drop the one-menu-per-`ui` assumption; delete the
-  `menuMeta` key checks.
+The sidebar is emitted per-frontend, so the change must land on **every**
+one, not just React, or the frontends diverge (some deriving, some
+sidebar-less):
+
+- **React** — `src/generator/_frontend/menu-emitter.ts` + the hardcoded
+  default in `react/templating/preparers/app-shell.ts` (`prepareAppShellVM`).
+- **Vue** — its own `deriveSidebarFromUi` + default Aggregates/Workflows/
+  Views grouping (`vue/index.ts:734`).
+- **Phoenix** — `src/generator/elixir/sidebar-emit.ts`.
+- **Svelte / Angular** — consume the framework-neutral `NavSectionVM`
+  (`menu-emitter.ts:52`).
+
+Per frontend: (1) the scaffold-materialized `menu {}` feeds them all through
+the shared `NavSectionVM`; (2) **remove the hardcoded default grouping**
+(`prepareAppShellVM` / `deriveSidebarFromUi` / the Phoenix equivalent) *and*
+the per-page `menuMeta` fallback — the materialized block replaces both.
+Lowering collects all `MenuBlock`s → one merged `UiIR` menu (today assumes a
+single block). Validator: drop the one-menu-per-`ui` assumption + the
+`menuMeta` key checks.
 
 ## Migration
 
-A codemod strips per-page `menu { … }` bags. For a hand-authored page that
-relied on a derived section, ensure either a `with scaffold(…)` macro or a
-handwritten `menu {}` block now covers it (the codemod can synthesize a
-handwritten block from the removed bags as a starting point).
+The real default today is the **hardcoded `prepareAppShellVM` grouping**
+(path 2), *not* the per-page bag — so a codemod that only strips bags would
+silently leave path-2 UIs sidebar-less. The migration therefore:
+
+1. For **every** `ui` that renders a sidebar (scaffolded or relying on the
+   hardcoded default), ensure a `menu {}` now exists — the scaffold macro
+   emits it automatically for `with scaffold(…)` UIs; for hand-built UIs the
+   codemod **synthesizes the full Aggregates/Workflows/Views grouping**
+   (what `prepareAppShellVM` produced), not just what any removed bags held.
+2. Then strip the per-page `menu { … }` bags (path 3), folding any custom
+   `section:` they carried into the synthesized block.
+
+A UI must never lose its sidebar across this migration — an emitted-output
+diff (or a golden-nav snapshot per example) gates it.
 
 ## Open questions
 

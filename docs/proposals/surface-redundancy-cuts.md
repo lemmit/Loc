@@ -47,10 +47,23 @@ which is now also declarable on the `Ui` block itself (`ui X { framework:
 react }`, `ddd.langium:385`) and on the `ui:`/`ui:{…}` sugar. Three binding
 spellings collapse to two.
 
-**Cut:** remove the `UiBlockBinding` alternative (and its branches in
-`deployable.ts` / `print-structural.ts`).
-**Migration:** move the `framework:` onto the `ui` declaration; use the
-`ui:` sugar at the binding site.
+⚠️ **Verify first — this may be a real capability, not pure redundancy.**
+The binding-site `framework:` override lives **only** in `UiBlockBinding`
+(`ddd.langium:303`); neither `UiSugarBinding` (`:299`) nor `UiComposeBinding`
+(`:250`) has a framework slot, and the `Ui` *declaration*'s `framework:`
+(`:385`) is **one** framework per `ui`. CLAUDE.md notes the same `ui X` can
+be served by different hosts ("a svelte host can also serve a `framework:
+react` bundle") — so if two deployables bind one `ui X` with **divergent**
+frameworks, *only* `UiBlockBinding` expresses that today; collapsing to the
+`Ui` decl loses it.
+
+**Cut only if** a grep confirms no source/example binds a shared `ui` with
+divergent per-binding `framework:`. If none: remove the `UiBlockBinding`
+alternative (+ its `deployable.ts` / `print-structural.ts` branches);
+migration = move `framework:` onto the `ui` declaration (note: `ui: X { … }`
+with braces is already `UiComposeBinding` for *param* bindings and has no
+framework slot — only bare `ui: X` sugar remains). If a divergent binding
+exists, this is a **capability removal** — keep it or redesign.
 
 ### 4. `write global` policy level — a parseable always-error
 
@@ -59,10 +72,16 @@ spellings collapse to two.
 wide mutation is a deliberate never, not a roadmap gap. A grammatically
 reachable state whose only destiny is an error.
 
-**Cut:** tighten the grammar so `write` admits only `local`/`deep` (exclude
-`global` from the write-verb's reachable levels). A parse error beats
-"parses, then always errors."
-**Migration:** none (any such source is already failing).
+**Cut — but keep the good message.** Do **not** downgrade to a raw parse
+error: today's `loom.policy-write-global-unsupported` *explains why* global
+writes are a deliberate never; a bare "expected `local` | `deep`" is a UX
+regression (against the signposting principle — fail loudly *with a reason*).
+Also, `level` is shared read/write in one rule (`PolicyReadRule`), so
+excluding `global` for `write` alone likely needs a separate `WriteLevel`
+rule — more grammar than "almost free." **Recommendation:** keep the
+validator error and its message; treat this as already-handled, not a cut.
+(Or, if cut, the parser must emit the *custom* diagnostic, not the default.)
+**Migration:** none.
 
 ### 5. `static` platform — alias of `react` *(lower confidence — verify)*
 
