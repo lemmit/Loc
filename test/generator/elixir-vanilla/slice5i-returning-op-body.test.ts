@@ -177,7 +177,7 @@ describe("vanilla — S12 returning-op mutations persist", () => {
     // The mutation is persisted via `case persist_change(changeset)`, NOT the
     // in-memory `{:ok, %{... record ...}}` projection that silently dropped it.
     expect(body).toContain("case Api.Stock.ItemRepository.persist_change(changeset) do");
-    expect(body).toContain("|> Ecto.Changeset.put_change(:quantity, record.quantity)");
+    expect(body).toContain("|> Ecto.Changeset.force_change(:quantity, record.quantity)");
     // Success is projected off the SAVED struct, not the in-memory record.
     expect(body).toContain("{:ok, %{id: saved.id, sku: saved.sku, quantity: saved.quantity}}");
     expect(body).not.toContain("{:ok, %{id: record.id");
@@ -187,7 +187,7 @@ describe("vanilla — S12 returning-op mutations persist", () => {
   it("an explicit `return this` mutating op persists identically (subsumes the S5a residual)", async () => {
     const body = fn(get(await files(), "lib/api/stock.ex"), "adjust_return_item");
     expect(body).toContain("case Api.Stock.ItemRepository.persist_change(changeset) do");
-    expect(body).toContain("|> Ecto.Changeset.put_change(:quantity, record.quantity)");
+    expect(body).toContain("|> Ecto.Changeset.force_change(:quantity, record.quantity)");
     // Normalized onto the fall-through path → wire projected off `saved`.
     expect(body).toContain("{:ok, %{id: saved.id, sku: saved.sku, quantity: saved.quantity}}");
   });
