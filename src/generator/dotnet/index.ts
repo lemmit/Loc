@@ -124,6 +124,8 @@ import {
   collectRetrievalBodyUsings,
 } from "./find-emit.js";
 import { rewriteNamespacesForLayout } from "./layout-namespaces.js";
+import { emitProjectionDispatch, emitProjectionReads } from "./projection-emit.js";
+import { emitProjectionRowPersistence } from "./projection-state-emit.js";
 import { emitRetrievalSpecs, renderPagingExtension } from "./spec-emit.js";
 import { hasAnyWireValidator, renderValidationBehavior } from "./validator-emit.js";
 import { emitViews } from "./view-emit.js";
@@ -258,7 +260,13 @@ function emitProjectFromContexts(
   // channel-routed event subscription?  Gates the Mediator-notification
   // dispatcher, the `IDomainEvent : INotification` upgrade, the reactor /
   // starter `INotificationHandler`s, and the Program.cs registration.
-  const hasSubscriptions = contexts.some((c) => c.eventSubscriptions.length > 0);
+  // Projections (projection.md) subscribe like reactors but are omitted from the
+  // enricher-stored `eventSubscriptions`; OR them in so a projection-only context
+  // still gets the Mediator dispatcher + IDomainEvent notification plumbing (the
+  // fold handlers, discovered by assembly scan, otherwise never run).
+  const hasSubscriptions = contexts.some(
+    (c) => c.eventSubscriptions.length > 0 || (c.projections?.length ?? 0) > 0,
+  );
   emitCommon(ns, out);
   emitDispatcher(ns, out, hasSubscriptions);
   out.set("Domain/Events/IDomainEvent.cs", renderIDomainEvent(ns, hasSubscriptions));
@@ -310,6 +318,9 @@ function emitProjectFromContexts(
     emitDomainServices(ctx, ns, out);
     emitWorkflows(ctx, ns, out, { routePrefix, sys: system?.sys, sourcemap });
     emitWorkflowInstanceReads(ctx, ns, out, { routePrefix });
+    // Projection read routes (projection.md) — GET /<prefix>projections/<snake>
+    // [/{key}] + the `<Proj>Response` DTOs, over the read-model row DbSet.
+    emitProjectionReads(ctx, ns, out, { routePrefix });
     emitViews(ctx, ns, out, { routePrefix, sourcemap });
   }
   // DbContext + project shell are emitted once, with all aggregates
@@ -341,6 +352,10 @@ function emitProjectFromContexts(
   // a reactor in one hosted context can route off another's channel.
   if (hasSubscriptions) {
     emitDispatchHandlers(merged, ns, out, system?.sys, sourcemap);
+    // Projection fold handlers (one INotificationHandler<TEvent> per fold),
+    // derived over the merged context so a fold can route off another hosted
+    // context's channel — mirrors the reactor derivation above.
+    emitProjectionDispatch(merged, ns, out);
   }
   // Transactional outbox (dispatch-delivery-semantics.md): durable channels
   // (`retention: log | work`) record their events in __loom_outbox (EF
@@ -459,6 +474,19 @@ function emitProjectFromContexts(
       durableEventTypes(merged).size > 0,
       resolveWorkflowSchema,
     );
+    // Projection read-model row POCOs + EF configs (one per projection); the
+    // DbSet/ApplyConfiguration wiring is inside renderDbContext above.  Rows
+    // land in their projection's OWNING-context schema (map-back by name over
+    // `contexts`, since `merged` unions several), matching the migration DDL.
+    const resolveProjectionSchema = system
+      ? (proj: (typeof merged.projections)[number]): string | undefined => {
+          const owningCtx = contexts.find((c) =>
+            (c.projections ?? []).some((p) => p.name === proj.name),
+          );
+          return owningCtx ? resolveContextSchema(owningCtx, system.sys) : undefined;
+        }
+      : undefined;
+    emitProjectionRowPersistence(merged.projections, ns, out, resolveProjectionSchema);
     // Event-sourced workflows (workflow-and-applier.md A2-S5b): the `<Wf>State`
     // fold class + `<Wf>EventRecord` POCO/config (the stream the dispatch
     // handler folds-on-load / appends to).
@@ -666,7 +694,7 @@ function emitContext(
   out: Map<string, string>,
   emitTrace = false,
 ): void {
-  const hasSubscriptions = ctx.eventSubscriptions.length > 0;
+  const hasSubscriptions = ctx.eventSubscriptions.length > 0 || (ctx.projections?.length ?? 0) > 0;
   // Transactional outbox (dispatch-delivery-semantics.md) — see the
   // system-mode twin above for the design.
   const durableTypes = [...durableEventTypes(ctx)].sort();
@@ -694,7 +722,11 @@ function emitContext(
   emitDomainServices(ctx, ns, out);
   emitWorkflows(ctx, ns, out);
   emitWorkflowInstanceReads(ctx, ns, out);
-  if (hasSubscriptions) emitDispatchHandlers(ctx, ns, out, undefined);
+  emitProjectionReads(ctx, ns, out);
+  if (hasSubscriptions) {
+    emitDispatchHandlers(ctx, ns, out, undefined);
+    emitProjectionDispatch(ctx, ns, out);
+  }
   emitViews(ctx, ns, out);
   // Reified `criterion` specifications (evaluate face) — additive, not yet
   // wired into invariants/preconditions (see criteria-emit.ts).
@@ -1126,6 +1158,7 @@ function emitInfrastructure(
     ),
   );
   emitWorkflowStatePersistence(ctx.workflows, ns, out, durableEventTypes(ctx).size > 0);
+  emitProjectionRowPersistence(ctx.projections, ns, out);
   emitEventSourcedWorkflowFiles(ctx.workflows, ns, out);
   out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns, { usesValidators }));
   out.set("Api/ProblemDetailsResponsesFilter.cs", renderProblemDetailsFilter(ns));
