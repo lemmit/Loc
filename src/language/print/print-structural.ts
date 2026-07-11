@@ -487,9 +487,6 @@ function printDeployable(node: Deployable): string {
   } else if (node.uiCompose) {
     const binds = node.uiCompose.bindings.map((b) => `${b.name}: ${b.source.$refText}`);
     items.push(commaBlock(`ui: ${node.uiCompose.ref.$refText}`, binds));
-  } else if (node.uiBlock) {
-    const inner = node.uiBlock.framework ? [`framework: ${node.uiBlock.framework}`] : [];
-    items.push(block(`ui ${node.uiBlock.ref.$refText}`, inner));
   }
   if (node.port !== undefined) items.push(`port: ${node.port}`);
   if (node.auth) items.push(`auth: ${node.auth}`);

@@ -32,37 +32,25 @@ export function lowerDeployable(d: Deployable): DeployableIR {
   const hostedUiNames = hostedUis.map((u) => u.name);
   const firstHostedUi = hostedUis[0];
   const uiName =
-    d.uiSugar?.ref?.ref?.name ??
-    d.uiCompose?.ref?.ref?.name ??
-    d.uiBlock?.ref?.ref?.name ??
-    firstHostedUi?.name ??
-    undefined;
-  // Page-metamodel UI binding.  The grammar accepts two
-  // surface forms — `ui: WebApp` (sugar) and `ui WebApp { framework: react }`
-  // (full block).  Both lower to the same `uiName` + optional
-  // `uiFramework` here.  `uiName` is computed above so the `design`
-  // default can branch on it for dual-mode platforms (fullstack
-  // dotnet).  Validator enforces that the referenced ui
-  // exists, the platform supports a UI mount, and the framework value
-  // is one of the v0-allowed alternatives.
-  // Explicit `framework: …` in the full block wins; otherwise default
-  // from the platform.  Fullstack dotnet renders React; phoenixLiveView
-  // renders LiveView; react/static render React.  Backends without a
-  // `ui:` binding leave this undefined.
-  // Precedence: explicit `framework:` on the legacy block binding, then
-  // the framework declared on the bound `ui` itself — whether bound via
-  // `ui:` sugar / `compose` / the block's reference or via `hosts:`
-  // (D-PHOENIX-SURFACE phase 2 — the ui owns its framework) — then the
-  // legacy platform-derived default.  The bound-ui hop matters: the
-  // validator's rules 13b/14 read the ui's declared framework through
-  // every binding spelling, so lowering must agree or a validation-clean
-  // `ui X { framework: svelte }` + `ui: X` would silently lower as the
-  // platform default.  Computed before `design` so the pack default can
-  // branch on it (a phoenix host embedding react needs a tsx pack, not
-  // coreComponents).
-  const boundUi = d.uiSugar?.ref?.ref ?? d.uiCompose?.ref?.ref ?? d.uiBlock?.ref?.ref;
+    d.uiSugar?.ref?.ref?.name ?? d.uiCompose?.ref?.ref?.name ?? firstHostedUi?.name ?? undefined;
+  // Page-metamodel UI binding.  The grammar accepts two surface forms —
+  // `ui: WebApp` (sugar) and `ui: WebApp { Sales: salesApi }` (compose).
+  // Both lower to the same `uiName` + optional `uiFramework` here.
+  // `uiName` is computed above so the `design` default can branch on it
+  // for dual-mode platforms (fullstack dotnet).  Validator enforces that
+  // the referenced ui exists, the platform supports a UI mount, and the
+  // framework value is one of the v0-allowed alternatives.
+  // Precedence: the framework declared on the bound `ui` itself — whether
+  // bound via `ui:` sugar / `compose` or via `hosts:` (D-PHOENIX-SURFACE
+  // phase 2 — the ui owns its framework) — then the legacy platform-derived
+  // default.  The bound-ui hop matters: the validator's rules 13b/14 read
+  // the ui's declared framework through every binding spelling, so lowering
+  // must agree or a validation-clean `ui X { framework: svelte }` + `ui: X`
+  // would silently lower as the platform default.  Computed before `design`
+  // so the pack default can branch on it (a phoenix host embedding react
+  // needs a tsx pack, not coreComponents).
+  const boundUi = d.uiSugar?.ref?.ref ?? d.uiCompose?.ref?.ref;
   const uiFramework =
-    d.uiBlock?.framework ??
     boundUi?.framework ??
     firstHostedUi?.framework ??
     (uiName

@@ -69,20 +69,14 @@ export function checkDeployable(
   // legacy `ui:` bindings — it satisfies the "must declare a UI" rules
   // (4/4b) and is subject to the same platform-mounts-UI check (3).
   const hasHosts = (d.hosts ?? []).length > 0;
-  const hasUiBinding = !!(d.uiSugar || d.uiCompose || d.uiBlock) || hasHosts;
+  const hasUiBinding = !!(d.uiSugar || d.uiCompose) || hasHosts;
   if (hasUiBinding && !platformMountsUi(d.platform)) {
     accept(
       "error",
       `'ui:'/'hosts:' binding is only valid on platforms that mount a UI ('react', 'svelte', 'vue', 'static', 'elixir', 'dotnet', 'java'); got '${d.platform}'.`,
       {
         node: d,
-        property: d.uiSugar
-          ? "uiSugar"
-          : d.uiCompose
-            ? "uiCompose"
-            : d.uiBlock
-              ? "uiBlock"
-              : "hosts",
+        property: d.uiSugar ? "uiSugar" : d.uiCompose ? "uiCompose" : "hosts",
       },
     );
   }
@@ -115,51 +109,21 @@ export function checkDeployable(
       { node: d, property: "name", code: `loom.${d.platform}-deployable-missing-ui` },
     );
   }
-  // Rule 13: framework values must match the deployable's platform.
-  // `react`/`static` mount the `react` framework; `phoenixLiveView`
-  // mounts the `phoenixLiveView` framework.  The grammar enum admits
-  // both values; this rule rejects cross-pairing
-  // (e.g. `platform: react` + `framework: phoenixLiveView`).
-  // Membership in the platform's hostable set (D-PHOENIX-SURFACE) —
-  // the host serves a framework iff it provides its runtime.  Replaces
-  // the old single-expected-value check so a dotnet host can declare
-  // `framework: svelte` (any static bundle on a static root) while a
-  // LiveView override on a react host still errors.
-  const framework = d.uiBlock?.framework;
-  if (framework && d.uiBlock) {
-    const expected = expectedFrameworkFor(d.platform, hasUiBinding);
-    const hostable = hostableFrameworksFor(d.platform);
-    const canonical = framework;
-    if (canonical && hostable.size > 0 && !hostable.has(canonical)) {
-      accept(
-        "error",
-        `Framework '${framework}' does not match platform '${d.platform}' (expected '${expected ?? [...hostable].sort().join("' | '")}'). Drop the framework override or align it with the platform.`,
-        {
-          node: d.uiBlock,
-          property: "framework",
-          code: "loom.framework-mismatch",
-          data: { expected },
-        },
-      );
-    }
-  }
-
-  // Rule 13b (D-PHOENIX-SURFACE): when the referenced `ui { framework: … }`
+  // Rule 13 (D-PHOENIX-SURFACE): when the referenced `ui { framework: … }`
   // declaration carries its own framework, the hosting deployable's
   // platform must be able to serve it — `framework ∈ host.hostableFrameworks`.
-  // This is the host-capability direction (the `ui` owns its framework,
-  // the host declares what it can host) that supersedes Rule 13's
-  // derive-from-platform model.  Backward-compatible: only fires when the
+  // This is the host-capability direction: the `ui` owns its framework, the
+  // host declares what it can host (the former per-deployable `framework:`
+  // override, once carried on the legacy `ui X { framework: … }` block
+  // binding, was removed — the `ui` declaration is the sole framework home).
+  // Backward-compatible: only fires when the
   // `ui` declaration opts in by declaring `framework:` (existing sources
   // omit it and are unaffected).  The principled rule means LiveView is
   // rejected on every non-Phoenix host, while React is accepted on any
   // static-asset host.
   // Every `ui` the deployable mounts — the legacy single binding plus
   // each `hosts:` entry (phase 4) — checked uniformly.
-  const mountedUis = [
-    (d.uiSugar ?? d.uiCompose ?? d.uiBlock)?.ref?.ref,
-    ...(d.hosts ?? []).map((r) => r.ref),
-  ];
+  const mountedUis = [(d.uiSugar ?? d.uiCompose)?.ref?.ref, ...(d.hosts ?? []).map((r) => r.ref)];
   if (hasUiBinding && platformMountsUi(d.platform)) {
     const hostable = hostableFrameworksFor(d.platform);
     for (const ui of mountedUis) {
@@ -171,14 +135,7 @@ export function checkDeployable(
         `Deployable '${d.name}' (platform '${d.platform}') cannot host ui '${ui?.name}' framework '${uiFramework}'. This platform hosts: ${menu}. A runtime-coupled framework (e.g. 'phoenixLiveView'/LiveView) can only run on its own runtime; a static-bundle framework (e.g. 'react') runs on any static-asset host.`,
         {
           node: d,
-          property:
-            d.hosts && d.hosts.length > 0
-              ? "hosts"
-              : d.uiSugar
-                ? "uiSugar"
-                : d.uiCompose
-                  ? "uiCompose"
-                  : "uiBlock",
+          property: d.hosts && d.hosts.length > 0 ? "hosts" : d.uiSugar ? "uiSugar" : "uiCompose",
           code: "loom.ui-framework-unhostable",
         },
       );
@@ -194,13 +151,12 @@ export function checkDeployable(
   // packs (any name not in BUILTIN_PACK_FORMATS) get a warning
   // instead — the validator can't read their `pack.json` to know the
   // format, but a typo should still surface loudly.
-  // The framework the design pack must match: prefer a hosted/referenced
+  // The framework the design pack must match: the hosted/referenced
   // `ui` declaration's own `framework:` (D-PHOENIX-SURFACE — the ui owns
   // it; e.g. a phoenix host embedding `framework: react` needs a tsx
-  // pack, not coreComponents), then the legacy block-binding framework.
-  // Mirrors the lowering precedence in `lower.ts`.
+  // pack, not coreComponents).  Mirrors the lowering precedence in `lower.ts`.
   const uiDeclaredFramework = mountedUis.find((u) => u?.framework)?.framework;
-  checkDeployableDesignPack(d, hasUiBinding, uiDeclaredFramework ?? framework, accept);
+  checkDeployableDesignPack(d, hasUiBinding, uiDeclaredFramework, accept);
 
   // Existing rules — react/static both behave like frontends.
   if (isFrontendPlatform(d.platform)) {
@@ -536,9 +492,9 @@ export function checkDeployableServes(d: Deployable, accept: ValidationAcceptor)
  *    - Every UI api param must have a matching binding (no
  *      param left unbound). */
 export function checkDeployableUiCompose(d: Deployable, accept: ValidationAcceptor): void {
-  // Legacy single-ui mount (`ui:` sugar / `compose` / block) carries its
+  // Single-ui mount (`ui:` sugar / `compose`) carries its
   // bindings in `d.uiCompose`.
-  const legacyUi = d.uiSugar?.ref?.ref ?? d.uiCompose?.ref?.ref ?? d.uiBlock?.ref?.ref;
+  const legacyUi = d.uiSugar?.ref?.ref ?? d.uiCompose?.ref?.ref;
   if (legacyUi) checkUiApiBindings(d, legacyUi, d.uiCompose, accept);
   // `hosts:`-mounted uis (D-PHOENIX-SURFACE) get the SAME api-binding
   // validation (C7) — previously they escaped it entirely.  A `hosts:` mount

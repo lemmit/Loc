@@ -487,20 +487,19 @@ describe("validation", () => {
       expect(errors).toEqual([]);
     });
 
-    it("rejects an unknown framework value in the ui-block binding", async () => {
-      // The grammar's Framework enum currently only admits 'react',
-      // so this surfaces as a parse error.  Either way the diagnostic
-      // surface is the same — the user can't sneak in an unsupported
-      // framework today.
+    it("rejects an unknown framework value on the ui declaration", async () => {
+      // Framework now lives on the `ui` declaration (the deployable's
+      // colon-less block-binding form was removed).  The grammar's
+      // Framework enum rejects an unsupported value as a parse error.
       const { errors } = await parse(`
         system S {
           subdomain M { context T { } }
-          ui WebApp { }
+          ui WebApp { framework: blazor-wasm }
           deployable api { platform: node, contexts: [T], port: 3000 }
           deployable web {
             platform: static
             targets: api
-            ui WebApp { framework: blazor-wasm }
+            ui: WebApp
             port: 3001
           }
         }

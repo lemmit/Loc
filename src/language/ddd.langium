@@ -228,8 +228,9 @@ Deployable:
             // UI binding — references a `ui { ... }` block at system scope:
             //   ui: WebApp                            // sugar — no params
             //   ui: WebApp { Sales: salesApi, ... }   // compose-block
-            //   ui WebApp { framework: react }        // legacy block form
-          | (uiSugar=UiSugarBinding | uiCompose=UiComposeBinding | uiBlock=UiBlockBinding)
+            // (The legacy colon-less `ui WebApp { framework: react }` block
+            // form was removed — set `framework:` on the `ui` declaration.)
+          | (uiSugar=UiSugarBinding | uiCompose=UiComposeBinding)
             // D-PHOENIX-SURFACE: `hosts:` is the host↔ui relation. Bracketed
             // multi form mirrors `contexts:`/`dataSources:`; the bare single
             // form takes one ref. (The bracketed form avoids the
@@ -304,11 +305,6 @@ DataSourceKind returns string:
 UiSugarBinding:
     'ui' ':' ref=[Ui:ID] ','?;
 
-UiBlockBinding:
-    'ui' ref=[Ui:ID] '{'
-        ('framework' ':' framework=Framework ','?)?
-    '}';
-
 // Frameworks the `ui:` mount lowers against.  `react` renders TSX
 // against a design pack (`mantine`/`shadcn`); `phoenixLiveView`
 // renders HEEx against the `coreComponents` pack as part of a fullstack
@@ -376,9 +372,9 @@ AuthMode returns string:
 // Plus two expression-level reserved tokens (later in the grammar):
 //   match, else
 //
-// `section` and `link` inside `menu`, and `framework` inside the
-// deployable ui-block binding, are soft keywords scoped to their
-// parent block — they remain free as ordinary identifiers elsewhere.
+// `section` and `link` inside `menu`, and `framework` inside the `ui`
+// declaration, are soft keywords scoped to their parent block — they
+// remain free as ordinary identifiers elsewhere.
 // ---------------------------------------------------------------------------
 
 Ui:
