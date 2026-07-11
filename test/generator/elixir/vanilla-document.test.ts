@@ -441,6 +441,53 @@ system Shop {
     expect(repo).toContain("|> Enum.filter(fn _row -> true end)");
   });
 });
+
+describe("vanilla shape(document) union finds (Route A slice 4d)", () => {
+  const DOC_UNION = `
+system Shop {
+  subdomain Sales {
+    context Shop {
+      error NotFound { }
+      aggregate Cart shape(document) with crudish {
+        reference: string
+      }
+      repository Carts for Cart {
+        find byRef(reference: string): Cart or NotFound where this.reference == reference
+      }
+    }
+  }
+  api ShopApi from Sales
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api { platform: elixir, contexts: [Shop], dataSources: [shopState], serves: ShopApi, port: 4000 }
+}
+`;
+
+  it("returns the single-get {:ok, nil}/{:ok, record} tuple the union controller reads", async () => {
+    const files = await generateSystemFiles(DOC_UNION);
+    const repo = file(files, "/shop/cart_repository.ex");
+    // A union find is a single-return in-memory filter → first match or nil.
+    expect(repo).toContain(
+      "@spec by_ref(term()) :: {:ok, Api.Shop.Cart.t() | nil} | {:error, term()}",
+    );
+    expect(repo).toContain("def by_ref(reference) do");
+    expect(repo).toContain("record = row.data");
+    expect(repo).toContain("record.reference == reference");
+    expect(repo).toContain("{:ok, List.first(results)}");
+  });
+
+  it("translates the absent variant to the tagged union wire in the controller", async () => {
+    const ctrl = file(await generateSystemFiles(DOC_UNION), "/cart_controller.ex");
+    // Found → 200 body (untagged success variant); absent → RFC-7807 via the
+    // shared problem_variant/5 responder (NotFound → 404).
+    expect(ctrl).toContain("def by_ref(conn, params) do");
+    expect(ctrl).toContain("{:ok, nil} ->");
+    expect(ctrl).toContain("problem_variant(conn, 404,");
+    expect(ctrl).toContain("{:ok, record} ->");
+    expect(ctrl).toContain("json(conn, serialize(record))");
+    expect(ctrl).toContain("defp problem_variant(conn, status, type, title, data) do");
+  });
+});
 // Document-op guards deny 403/422, not raise → 500 (parity with the relational
 // path).  A scalar/returning document op's `requires`/`precondition` hoists into
 // a leading `with ensure(...)` chain — an expected denial returns a typed tuple

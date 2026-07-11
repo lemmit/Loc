@@ -21,9 +21,11 @@
 // the rehydrated `%<Agg>.Data{}` embed (`record = row.data`) via the SHARED
 // relational body renderer (`renderReturningStmt`) — no `docMap` fork; an op
 // re-embeds the mutated struct + bumps version, a find filters in memory over the
-// struct.  The residual the document path can't express yet (audited/provenanced
-// ops, collection mutation, derived / dereferenced-entity / collection-method
-// reads, paged/union finds) is gated at validate time
+// struct.  Paged finds build the wire envelope in memory (slice 4c) and union finds
+// return the single-get tuple the shared find controller tags (slice 4d).  The
+// residual the document path can't express yet (audited/provenanced ops, derived /
+// dereferenced-entity / collection-method reads, non-scalar find predicates) is
+// gated at validate time
 // (`loom.vanilla-document-unsupported`) rather than misgenerated — see
 // `validateVanillaDocumentScope`.
 // ---------------------------------------------------------------------------
