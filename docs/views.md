@@ -45,7 +45,14 @@ shorthand form is a strict subset of the full form's surface.
 
 ### Both forms
 
-- **Source** must be an aggregate declared in the same context.
+- **Source** must be an aggregate, a workflow instance, or a
+  projection declared in the same context.  A projection source
+  reads the materialised `<Proj>Row` read-model row (its correlation
+  key plus the folded state fields — the projection's wire shape);
+  the filter and binds see those columns as `this`, exactly as an
+  aggregate source sees its schema.  (A view is a query, not a
+  replayable fold, so reading the projection row + repositories at
+  query time is legal.)
 - **Filter** (when present) is type-checked against the source
   aggregate's schema exactly like a repository `find` filter:
   - bare names resolve to the aggregate's properties / containments /
@@ -359,7 +366,10 @@ Stay with a repository `find` when the query needs caller-supplied
 parameters or you want it co-located with the aggregate's
 repository declaration.
 
-A future slice adds **projections** — materialised denormalised
-read models updated by event handlers — for the cases where view
-queries become too expensive or need to denormalise across
-aggregates.
+For the cases where view queries become too expensive or need to
+denormalise across aggregates, reach for a **projection** —
+a materialised denormalised read model updated by event handlers
+(see [`projection.md`](proposals/projection.md)).  A view can then curate and
+bind-follow off that projection's read-model row by naming it as the
+view `from` source, combining the projection's cheap pre-folded read
+with a view's filter + `X id` follow tail.

@@ -338,13 +338,15 @@ workflow-instance surface.
 
 ## Deferred / open questions
 
-- **v1.1 — projection as a `view` source.** Add `Projection` to
+- **v1.1 — projection as a `view` source. ✅ shipped.** `Projection` joined
   `type ViewSource = Aggregate | Workflow | Projection` (the exact slice #1037
-  was for workflows). Then a view can curate + bind-follow off a projection row
+  was for workflows). A view now curates + bind-follows off a projection row
   (`view ShippedOrders { from OrderBook where status == Shipped bind customerName = customer.name }`)
-  — reading projection + repos at query time, which is legal because a view is a
-  query, not a replayable fold. Kept out of v1 to keep the first slice to
-  "fold + own endpoint," mirroring aggregate-views-before-workflow-views.
+  — reading the `<Proj>Row` read-model row + repositories at query time, which is
+  legal because a view is a query, not a replayable fold. Both view forms
+  (shorthand `= Proj where …` → the projection wire shape; full-form `{ … bind … }`
+  → an output record with `X id` follows) emit on all five backends and all four
+  frontends. See [`views.md`](../views.md).
 - **Replay / rebuild.** v1 folds synchronously in-process at emit time; there is
   no durable log to replay from and no rebuild command. Replay lands with the
   durable-log channel tier (`channels.md` `channelSource` → kafka/redis-streams)
