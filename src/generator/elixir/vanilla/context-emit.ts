@@ -63,6 +63,7 @@ import {
 } from "./operation-returns-emit.js";
 import { refCollFieldNames } from "./ref-collection-emit.js";
 import { customFindsOf } from "./repository-emit.js";
+import { emitsRestDelete } from "./rest-surface.js";
 import { usesRelationalContainments } from "./schema-emit.js";
 import { stampUsesPrincipal } from "./stamp-emit.js";
 
@@ -306,6 +307,15 @@ ${body}
     // (`<fn>(record, …)`) resolves in THIS module.
     const fnLines = renderAggregateFunctions(facadeMod, agg, isDoc);
     const functionBlock = fnLines.length > 0 ? `${fnLines.join("\n")}\n` : "";
+    // The CRUD `delete_<agg>` defdelegate is emitted only when the aggregate
+    // exposes a REST delete surface (a reachable `destroy`).  Without it the
+    // delegate — and the repository `delete/1` it fronts — were dead code no
+    // route reached (audit: dead hard-`delete`).  The `destroy_<agg>!` LiveView
+    // bang seam above is the SEPARATE `DestroyForm` path (its own `hasDestroy`
+    // gate), so a detail-page destroy button is unaffected.
+    const deleteDelegate = emitsRestDelete(agg)
+      ? `\n  defdelegate delete_${aggSnake}(record), to: ${repoMod}, as: :delete`
+      : "";
     return `  # ${aggPascal}
   defdelegate list_${aggSnake}s(${principal ? "current_user \\\\ nil" : ""}), to: ${repoMod}, as: :list
   defdelegate get_${aggSnake}(id${actorArg}), to: ${repoMod}, as: :find_by_id${
@@ -314,8 +324,7 @@ ${body}
       : ""
   }
   defdelegate create_${aggSnake}(attrs${stampActorArg}), to: ${repoMod}, as: :insert
-  defdelegate update_${aggSnake}(record, attrs${stampActorArg}${versionedArg}), to: ${repoMod}, as: :update
-  defdelegate delete_${aggSnake}(record), to: ${repoMod}, as: :delete${changeFacade}${destroyFacade}${opBangFacade}
+  defdelegate update_${aggSnake}(record, attrs${stampActorArg}${versionedArg}), to: ${repoMod}, as: :update${deleteDelegate}${changeFacade}${destroyFacade}${opBangFacade}
 ${findBlock}${opBlocks.length > 0 ? `\n${opBlocks.join("\n\n")}\n` : ""}${functionBlock}`;
   });
 

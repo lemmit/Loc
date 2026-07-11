@@ -43,6 +43,7 @@ import {
   renderReturningOpControllerAction,
 } from "./operation-returns-emit.js";
 import { hasRefColls } from "./ref-collection-emit.js";
+import { emitsRestDelete } from "./rest-surface.js";
 import { stampUsesPrincipal } from "./stamp-emit.js";
 import { renderWireSerialize } from "./wire-serialize.js";
 
@@ -155,7 +156,7 @@ export function emitVanillaApiControllers(
         action: ":update",
       });
     }
-    if (!es && (agg.destroys ?? []).length > 0) {
+    if (emitsRestDelete(agg)) {
       routes.push({
         method: "delete",
         path: `/${aggsPath}/:id`,
@@ -381,8 +382,16 @@ ${createCuBind}    case ${ctxModule}.create_${aggSnake}(params${createActor}) do
     end
   end`;
 
-  const deleteAction = auditDestroy
-    ? `  def delete(conn, %{"id" => id}) do
+  // The CRUD `delete` action is emitted only when the aggregate exposes a REST
+  // delete surface (a reachable `destroy` op).  Without it the action, its
+  // context `delete_<agg>` call, and the repository `delete/1` it drives were
+  // dead code the router never routed to (audit: dead hard-`delete`).  Gated on
+  // the SAME `emitsRestDelete` predicate the router (above) and the context /
+  // repository seams use.
+  const deleteAction = !emitsRestDelete(agg)
+    ? ""
+    : auditDestroy
+      ? `  def delete(conn, %{"id" => id}) do
 ${cuBind}    with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
          {:ok, _} <-
            ${appModule}.Repo.transaction(fn ->
@@ -411,7 +420,7 @@ ${auditRecordCall({
         ProblemDetails.validation_error_response(conn, changeset)
     end
   end`
-    : `  def delete(conn, %{"id" => id}) do
+      : `  def delete(conn, %{"id" => id}) do
 ${cuBind}    with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
          {:ok, _} <- ${ctxModule}.delete_${aggSnake}(record) do
       send_resp(conn, 204, "")
@@ -482,11 +491,7 @@ ${cuBind}${updateCuBind}${versionBind}
   end`;
   const writeActions = readOnly
     ? ""
-    : `${createAction}
-
-${updateAction}
-
-${deleteAction}`;
+    : [createAction, updateAction, deleteAction].filter((a) => a !== "").join("\n\n");
 
   return `# Auto-generated.
 defmodule ${appModule}Web.${aggPascal}Controller do
