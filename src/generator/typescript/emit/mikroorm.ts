@@ -538,10 +538,17 @@ export function renderMikroRepository(
 
   const body = lines(
     `export class ${agg.name}Repository {`,
+    // Explicit field declarations + constructor assignments, not
+    // parameter properties — see emit/value-objects.ts's renderValueObject.
+    `  private readonly em: EntityManager;`,
+    `  private readonly events: DomainEventDispatcher;`,
     `  constructor(`,
-    `    private readonly em: EntityManager,`,
-    `    private readonly events: DomainEventDispatcher,`,
-    `  ) {}`,
+    `    em: EntityManager,`,
+    `    events: DomainEventDispatcher,`,
+    `  ) {`,
+    `    this.em = em;`,
+    `    this.events = events;`,
+    `  }`,
     "",
     `  async findById(id: Ids.${agg.name}Id): Promise<${agg.name} | null> {`,
     `    const em = this.em.fork();`,
@@ -717,10 +724,17 @@ export function renderMikroEventSourcedRepository(
 
   const body = lines(
     `export class ${agg.name}Repository {`,
+    // Explicit field declarations + constructor assignments, not
+    // parameter properties — see emit/value-objects.ts's renderValueObject.
+    "  private readonly em: EntityManager;",
+    "  private readonly events: DomainEventDispatcher;",
     "  constructor(",
-    "    private readonly em: EntityManager,",
-    "    private readonly events: DomainEventDispatcher,",
-    "  ) {}",
+    "    em: EntityManager,",
+    "    events: DomainEventDispatcher,",
+    "  ) {",
+    "    this.em = em;",
+    "    this.events = events;",
+    "  }",
     "",
     `  async findById(id: Ids.${agg.name}Id): Promise<${agg.name} | null> {`,
     "    const em = this.em.fork();",

@@ -4,7 +4,10 @@ import type { PlaceOrderRequest } from "../../../src/api/workflows";
 
 export class PlaceOrderWorkflowPage {
   static readonly url = "/workflows/place_order";
-  constructor(public readonly page: Page) {}
+  readonly page: Page;
+  constructor(page: Page) {
+    this.page = page;
+  }
 
   async goto(): Promise<this> {
     await this.page.goto(PlaceOrderWorkflowPage.url);

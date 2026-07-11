@@ -5,14 +5,17 @@ import { getLogger } from "../logger";
 const log = getLogger("api");
 
 export class ApiError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-    /** Parsed response body (RFC 7807 ProblemDetails on 422s) — the
-     *  form helper reads per-field errors off it. */
-    public body: unknown = undefined,
-  ) {
+  status: number;
+  /** Parsed response body (RFC 7807 ProblemDetails on 422s) — the
+   *  form helper reads per-field errors off it. */
+  body: unknown;
+  // Explicit field declarations + constructor assignments, not
+  // parameter properties — the latter is non-erasable sugar Node's
+  // type stripping rejects; see src/generator/typescript/emit/value-objects.ts.
+  constructor(status: number, message: string, body: unknown = undefined) {
     super(message);
+    this.status = status;
+    this.body = body;
     this.name = "ApiError";
   }
 }

@@ -5,11 +5,18 @@ import { getLogger } from "../logger";
 const log = getLogger("api");
 
 export class ApiError extends Error {
+  status: number;
   // `body` retains the parsed error response (an RFC 7807 ProblemDetails on a
   // 422, carrying the per-field `errors[]`) so the form decoder
   // (`applyServerErrors`) can map field errors back onto inputs.
-  constructor(public status: number, message: string, public body?: unknown) {
+  body?: unknown;
+  // Explicit field declarations + constructor assignments, not
+  // parameter properties — the latter is non-erasable sugar Node's
+  // type stripping rejects; see src/generator/typescript/emit/value-objects.ts.
+  constructor(status: number, message: string, body?: unknown) {
     super(message);
+    this.status = status;
+    this.body = body;
     this.name = "ApiError";
   }
 }
