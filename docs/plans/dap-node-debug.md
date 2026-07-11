@@ -350,6 +350,12 @@ does the debugger actually arm it on?"
   trip mirroring `test/system/trace-roundtrip.test.ts`) and two new
   `LineIndex.offsetOfLine` unit tests alongside the existing `lineOf`/`colOf`
   cases in `test/trace/annotate.test.ts`.
+- **Milestone 22**: `ddd breakpoints <file.ddd> --line <n>` landed as the
+  thin CLI probe on top of this core — `runBreakpoints` in `src/cli/main.ts`,
+  structured identically to `runTrace` (same `resolveMapPath` discovery,
+  same `readSource` closure, same best-effort exit-0-on-loaded-map ethos),
+  registered right after the `trace` command. Tests in
+  `test/cli/breakpoints-cli.test.ts` mirror `test/cli/trace-cli.test.ts`.
 
 ### What's deferred
 

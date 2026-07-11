@@ -29,6 +29,7 @@ ddd verify <file.ddd> --results <results.json>    # join test results onto the r
 ddd snapshot <file.ddd> -o <outdir>               # capture provenance rule snapshots
 ddd patch <file.ddd> --patches <patches.json>     # apply node-addressed model patches
 ddd trace <logfile>                               # translate a runtime stack-trace back to .ddd source
+ddd breakpoints <file.ddd> --line <n>             # resolve a .ddd source line to the generated file:line(s) — the reverse of `trace`
 ```
 
 `generate system` additionally accepts `--sourcemap`, which also emits
@@ -40,6 +41,17 @@ the column selects the expression-level `targetCol` region containing it and the
 annotation prints the exact `.ddd` `path:line:col` of that sub-expression; every other
 format (and any column matching no region) keeps the line-granular `path:line`.
 See [`loom-artifacts.md`](loom-artifacts.md).
+
+`ddd breakpoints <file.ddd> --line <n>` is the reverse lookup: given a
+`.ddd` source line, it prints every generated `file:line` that line produced
+(narrowest construct first — a line can host nested constructs, e.g. an
+aggregate declaration and a narrower operation inside it), sourced from the
+same `.loom/sourcemap.json` (`--map`/`-o, --out` follow the identical
+discovery rule as `trace`). A line with no mapping prints an informative
+message and still exits 0 — a future editor/DAP integration's primitive for
+translating "set a breakpoint on this `.ddd` line" into the real
+backend-native breakpoint(s) to arm. See
+[`docs/plans/dap-node-debug.md`](plans/dap-node-debug.md).
 
 ### `patch` — apply node-addressed model patches
 
