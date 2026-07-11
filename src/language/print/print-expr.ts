@@ -27,6 +27,18 @@ export function printExpr(node: Expression): string {
   switch (node.$type) {
     case "StringLit":
       return JSON.stringify(node.value);
+    case "TemplateStr": {
+      // A6 — reassemble `` `seg0{hole0}seg1…` ``.  `strings` hold the
+      // delimiter-stripped, unescaped segments (value converter), so re-escape
+      // the template-significant chars on the way back out.
+      let out = "`";
+      for (let i = 0; i < node.strings.length; i++) {
+        out += escapeTemplateSegment(node.strings[i] ?? "");
+        const hole = node.holes[i];
+        if (hole) out += `{${printExpr(hole)}}`;
+      }
+      return `${out}\``;
+    }
     case "IntLit":
       return String(node.value);
     case "DecLit":
@@ -95,6 +107,33 @@ export function printExpr(node: Expression): string {
       throw new Error(`printExpr: unhandled node ${(exhaustive as { $type: string }).$type}`);
     }
   }
+}
+
+/** Re-escape a template segment's literal text for backtick-source output —
+ *  the inverse of `DddValueConverter`'s unescape.  Backtick / `{` / `}` /
+ *  backslash are template-significant; control chars print as escapes for
+ *  readability (they round-trip either way). */
+function escapeTemplateSegment(s: string): string {
+  return s.replace(/[\\`{}\n\r\t]/g, (c) => {
+    switch (c) {
+      case "\\":
+        return "\\\\";
+      case "`":
+        return "\\`";
+      case "{":
+        return "\\{";
+      case "}":
+        return "\\}";
+      case "\n":
+        return "\\n";
+      case "\r":
+        return "\\r";
+      case "\t":
+        return "\\t";
+      default:
+        return c;
+    }
+  });
 }
 
 function printBinaryChain(node: Extract<Expression, { $type: "BinaryChain" }>): string {

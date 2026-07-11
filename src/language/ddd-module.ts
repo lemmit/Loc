@@ -22,6 +22,7 @@ import { DddReferencesProvider } from "./lsp/ddd-references.js";
 import { DddRenameProvider } from "./lsp/ddd-rename.js";
 import { DddSemanticTokenProvider } from "./lsp/ddd-semantic-tokens.js";
 import { DddSignatureHelpProvider } from "./lsp/ddd-signature-help.js";
+import { DddTokenBuilder, DddValueConverter } from "./template-support.js";
 
 export type DddAddedServices = {
   validation: {
@@ -34,6 +35,13 @@ export type DddServices = LangiumServices & DddAddedServices;
 export const DddModule: Module<DddServices, PartialLangiumServices & DddAddedServices> = {
   validation: {
     DddValidator: (services) => new DddValidator(services as DddServices),
+  },
+  // A6 string interpolation — the multi-mode lexer (backtick template
+  // terminals live in an `interpolation` mode so `}`-leading MIDDLE/END
+  // never shadow block braces) + the segment delimiter-strip/unescape.
+  parser: {
+    TokenBuilder: () => new DddTokenBuilder(),
+    ValueConverter: () => new DddValueConverter(),
   },
   references: {
     ScopeProvider: (services: LangiumServices) => new DddScopeProvider(services),

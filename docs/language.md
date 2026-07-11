@@ -572,6 +572,7 @@ Pragmatic core, similar to a subset of TypeScript / C# expressions.
 | Kind | Examples |
 | --- | --- |
 | String | `"hello"` |
+| Interpolated string | `` `Order #{quantity} for {customerName}` `` — see [String interpolation](#string-interpolation) |
 | Integer | `0`, `42` |
 | Decimal | `1.5`, `0.0` |
 | Boolean | `true`, `false` |
@@ -602,6 +603,37 @@ Pragmatic core, similar to a subset of TypeScript / C# expressions.
 | `x => expr` | Lambda (only valid as a collection-op argument). |
 | `PartName { field: expr, … }` | Construct a contained part; `id` and parent `parentId` are auto-injected. |
 | `Money { amount, currency }` | Value-object constructor. |
+
+### String interpolation
+
+A **backtick-delimited** template with `{expr}` holes. It lowers to plain string
+concatenation of the literal segments and the `string()`-converted holes, so it is
+exactly `"…" + string(hole) + …` written more legibly — it works anywhere a `string`
+expression is valid (derived members, labels, view binds, function bodies).
+
+```ddd
+derived label: string = `Order #{quantity} for {customerName}`
+```
+
+```typescript
+// generated TS (Hono) — concatenation through the existing String() path
+get label(): string { return "Order #" + String(this._quantity) + " for " + this._customerName; }
+```
+
+- **Backtick, not `"…"`** — plain double-quoted strings are never interpolated, so a
+  literal `{`/`}` inside `"…"` stays literal.
+- **Holes are full expressions** — arithmetic, calls, ternaries, member chains, even a
+  nested `` `…` `` template. The one exception: a hole may **not** contain a literal
+  `{ }` block (an object / `match` / builder-call literal); factor that into a `derived`
+  and interpolate the derived.
+- **Hole type** — a hole must be `string` or implicitly stringifiable (`int` / `long` /
+  `decimal` / `money` / `bool` / an enum / an `X id` / an aggregate with a
+  `derived display: string`). A `datetime`, `duration`, collection, or plain aggregate
+  hole is rejected (`loom.interp-hole-type`) — format it first.
+- **Escaping** — a literal brace or backtick in the text is `\{` / `\}` / `` \` ``;
+  `\n` / `\t` / `\\` behave as in a string literal.
+- **Not queryable** — an interpolated string desugars to `+`/`convert`, so (like any
+  concatenation) it cannot appear in a `find` / `view` `where:` clause.
 
 ### Collection operators
 

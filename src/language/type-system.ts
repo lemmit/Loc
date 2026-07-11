@@ -69,6 +69,7 @@ import {
   isProperty,
   isSlotType,
   isStringLit,
+  isTemplateStr,
   isTernaryExpr,
   isThisRef,
   isUnaryExpr,
@@ -448,6 +449,9 @@ export interface Env {
 export function typeOf(expr: Expression | undefined, env: Env): DddType {
   if (!expr) return T.unknown;
   if (isStringLit(expr)) return T.prim("string");
+  // A6 string interpolation — a template always types as `string`; its holes
+  // are checked separately by `checkTemplateHoles` (`loom.interp-hole-type`).
+  if (isTemplateStr(expr)) return T.prim("string");
   if (isIntLit(expr)) return T.prim("int");
   if (isDecLit(expr)) return T.prim("decimal");
   if (isMoneyLit(expr)) return T.prim("money");
@@ -637,7 +641,7 @@ function temporalArithmetic(a: DddType, b: DddType, op: string): DddType {
  * explicit `string(x)` once admitted).  Same set the explicit
  * `string(x)` conversion vocabulary admits.
  */
-function isImplicitlyStringifiable(t: DddType): boolean {
+export function isImplicitlyStringifiable(t: DddType): boolean {
   if (t.kind === "primitive") {
     return (
       t.name === "int" ||

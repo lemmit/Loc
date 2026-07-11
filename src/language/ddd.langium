@@ -2377,6 +2377,7 @@ PrimaryExpr infers Expression:
     | ObjectLit
     | ParenExpr
     | ListLit
+    | TemplateString
     | LiteralExpr
     | MoneyLit
     | PrimitiveConversion
@@ -2384,6 +2385,25 @@ PrimaryExpr infers Expression:
     | ThisRef
     | IdRef
     | NameRef;
+
+// String interpolation (A6, docs/plans/stdlib.md) — a backtick-delimited
+// template with `{expr}` holes, e.g. `Order {id} for {customer.name}`.
+// It lowers (phase ⑤) to plain string concatenation of the literal
+// segments and the `string()`-converted holes, so NO backend sees a new
+// node — it rides the existing `+` / `convert` paths.  `strings` holds the
+// N+1 literal segments, `holes` the N hole expressions, interleaved
+// segment / hole / segment / … .  Holes are full expressions, EXCEPT ones
+// carrying a literal `{ }` block (object / `match` / builder literals): the
+// dedicated `interpolation` lexer mode (see `DddTokenBuilder`) drops `{` /
+// `}` inside a hole so the first `}` closes it.  A literal brace in text is
+// written `\{` / `\}`; a literal backtick `` \` ``.
+TemplateString infers Expression:
+    {infer TemplateStr} (
+        strings+=TEMPLATE_FULL
+      | strings+=TEMPLATE_START holes+=Expression
+        (strings+=TEMPLATE_MIDDLE holes+=Expression)*
+        strings+=TEMPLATE_END
+    );
 
 // Bracketed list literal — `[3, 2, 1]`.  Used as the value of named
 // args that admit a list shape (e.g. `Grid { cols: [3, 2, 1] }` for
@@ -2592,6 +2612,17 @@ hidden terminal ML_COMMENT: /\/\*[\s\S]*?\*\//;
 hidden terminal SL_COMMENT: /\/\/[^\n\r]*/;
 
 terminal STRING: /"(\\.|[^"\\])*"/;
+// A6 string interpolation — backtick template segments.  Each token is
+// `<delim>text<delim>` with single-char delimiters; `text` admits `\.`
+// escapes and any char except backtick / backslash / `{` (a literal `{`
+// is written `\{`).  FULL is a hole-free `` `…` ``; START `` `…{ ``, MIDDLE
+// `` }…{ ``, END `` }…` ``.  MIDDLE and END begin with `}` and are placed
+// by `DddTokenBuilder` ONLY in the `interpolation` lexer mode, so they
+// never shadow the block-closing `}` keyword in ordinary code.
+terminal TEMPLATE_FULL:   /`(\\.|[^`\\{])*`/;
+terminal TEMPLATE_START:  /`(\\.|[^`\\{])*\{/;
+terminal TEMPLATE_MIDDLE: /\}(\\.|[^`\\{])*\{/;
+terminal TEMPLATE_END:    /\}(\\.|[^`\\{])*`/;
 terminal DECIMAL: /[0-9]+\.[0-9]+/;
 terminal INT returns number: /[0-9]+/;
 // Ticket-style trace identifier (`US-001`, `AC-001`, `SOL-001`).  Must
