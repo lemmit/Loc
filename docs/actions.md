@@ -25,9 +25,13 @@ page Counter {
 ```
 
 A named `action` hoists to one handler per framework (React `const inc = …`,
-LiveView `handle_event("inc", …)`), referenced by name from the control. A bare
-`onClick: e => { count += 1 }` inline lambda works too; the named form is for
-reuse and readability.
+LiveView `handle_event("inc", …)`), referenced by name from the control. A named
+`action` is the **only** home for an effect: an inline effect handler
+(`onClick: e => { count += 1 }`) is rejected by `loom.effect-in-lambda`, so a
+render-tree lambda stays pure (a value projection like a `Table` column
+accessor). This keeps one effect-handler form across the language and, for the
+[MVU/Elmish study](proposals/fable-elmish-frontend.md), keeps the `Model → Html`
+view pure so `Msg`/`update` project straight off the action list.
 
 ## `match await` — awaiting a remote command
 

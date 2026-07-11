@@ -253,9 +253,9 @@ the expression engine and is usable anywhere an expression appears.
 
 ```ddd
 body: match {
-  step == 0 => Form { fields: [customerId], onSubmit: c => { … } }
-  step == 1 => Form { fields: [items],      onSubmit: i => { … } }
-  step == 2 => Review(draft,              onSubmit: () => { … })
+  step == 0 => Form { fields: [customerId], onSubmit: toItems }
+  step == 1 => Form { fields: [items],      onSubmit: toReview }
+  step == 2 => Review(draft,              onSubmit: submitOrder)
   else      => Empty {}
 }
 ```
@@ -285,24 +285,37 @@ Validator may warn on non-exhaustive matches that lack `else`.
 
 ---
 
-## 8. Block-body lambdas
+## 8. Effectful handlers live in a named `action`
 
-Existing single-expression lambda extends to allow a block of statements.
-Required for "mutate then navigate" event handlers.
+A "mutate then navigate" event handler is a block of statements — `:=` state
+writes, `+=`/`-=`, calls, `emit`, `navigate`. **These live in a named `action`,
+never in an inline render-tree lambda.** An inline effect handler
+(`onSubmit: c => { step := 1 }`) is rejected by `loom.effect-in-lambda`
+([`docs/actions.md`](actions.md)); a render-tree lambda must be pure (a value
+projection — §8.1). Declare the handler and reference it by name:
 
 ```ddd
-onSubmit: c => {
-  draft.customerId := c.customerId   // nested state write
-  step := 1                          // scalar state write
-  tags  += newTag                    // collection append
-  tags  -= oldTag                    // collection remove
-  count += 1                         // scalar increment
+page PlaceOrderWizard {
+  state { step: int = 0  draft: PlaceOrderRequest = {} }
+  action toItems(c) {
+    draft.customerId := c.customerId   // nested state write
+    step := 1                          // scalar state write
+    tags  += newTag                    // collection append
+    tags  -= oldTag                    // collection remove
+    count += 1                         // scalar increment
+  }
+  body: match {
+    step == 0 => Form { fields: [customerId], onSubmit: toItems }
+    else      => Empty {}
+  }
 }
 ```
 
-Reuses the existing `Statement` rule (covers `let`, `:=`, calls, `emit`).
+An `action` body reuses the `Statement` rule (`let`, `:=`, calls, `emit`); the
+block-body lambda still exists in the render tree, but only for **pure** value
+composition (§8.1).
 
-State-mutation lowering across the frontends:
+State-mutation lowering across the frontends (inside an `action` body):
 
 - **`:=` nested** (`addr.zip := v`) — React rebuilds the object immutably
   (`setAddr({ ...addr, zip: v })`); Vue refs / Svelte `$state` / Angular
@@ -594,16 +607,16 @@ page PlaceOrderWizard {
     draft: PlaceOrderRequest = {}
   }
 
+  action toItems()  { step := 1 }
+  action toReview() { step := 2 }
+  action submitOrder() {
+    call placeOrder(draft)
+    navigate(OrderConsole, { customerId: draft.customerId })
+  }
   body: match {
-    step == 0 => Form {into: draft, fields: [customerId],
-                      onSubmit: () => step := 1}
-    step == 1 => Form {into: draft, fields: [items],
-                      onSubmit: () => step := 2}
-    step == 2 => Review(of: draft,
-                        onSubmit: () => {
-                          call placeOrder(draft)
-                          navigate(OrderConsole, { customerId: draft.customerId })
-                        })
+    step == 0 => Form {into: draft, fields: [customerId], onSubmit: toItems}
+    step == 1 => Form {into: draft, fields: [items],      onSubmit: toReview}
+    step == 2 => Review(of: draft,                        onSubmit: submitOrder)
     else      => Empty {}
   }
 }
@@ -614,22 +627,21 @@ page PlaceOrderWizard {
 ```ddd
 page CustomerStep {
   route: "/orders/new/customer"
-  body:  Form {fields: [customerId],
-              onSubmit: c => navigate(ItemsStep, { customerId: c.customerId })}
+  action next(c) { navigate(ItemsStep, { customerId: c.customerId }) }
+  body:  Form {fields: [customerId], onSubmit: next}
 }
 page ItemsStep(customerId: Customer id) {
   route: "/orders/new/items"
-  body:  Form {fields: [items],
-              onSubmit: i => navigate(ReviewStep,
-                                       { customerId, items: i.items })}
+  action next(i) { navigate(ReviewStep, { customerId, items: i.items }) }
+  body:  Form {fields: [items], onSubmit: next}
 }
 page ReviewStep(customerId: Customer id, items: OrderLine[]) {
   route: "/orders/new/review"
-  body:  Review(of: { customerId, placedAt: now(), items },
-                onSubmit: () => {
-                  call placeOrder({ customerId, placedAt: now(), items })
-                  navigate(OrderConsole, { customerId })
-                })
+  action submit() {
+    call placeOrder({ customerId, placedAt: now(), items })
+    navigate(OrderConsole, { customerId })
+  }
+  body:  Review(of: { customerId, placedAt: now(), items }, onSubmit: submit)
 }
 ```
 

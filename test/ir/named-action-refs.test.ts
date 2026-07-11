@@ -331,3 +331,81 @@ describe("loom.missing-effect-marker (async-actions-and-effects.md Stage 2)", ()
     expect(diags).not.toContain("loom.unresolved-action-ref");
   });
 });
+
+// -------------------------------------------------------------------------
+// loom.effect-in-lambda (fable-elmish-frontend.md §8) — an inline effect
+// handler in a page/component body is rejected; effects live only in a named
+// `action`.  Keeps the render tree pure (one effect-handler form, and the
+// MVU `Model → Html` view stays a projection).
+// -------------------------------------------------------------------------
+
+/** Parse → assert clean AST → lower → enrich → validate; return only the
+ *  `loom.effect-in-lambda` codes. */
+async function lambdaDiags(source: string): Promise<string[]> {
+  const { model, errors } = await parseString(source);
+  expect(errors, `unexpected AST errors:\n${errors.join("\n")}`).toEqual([]);
+  const loom = enrichLoomModel(lowerModel(model));
+  return validateLoomModel(loom)
+    .map((d) => d.code)
+    .filter((c) => c === "loom.effect-in-lambda");
+}
+
+describe("loom.effect-in-lambda (fable-elmish-frontend.md §8)", () => {
+  it("fires on an inline state-write handler (`onClick: e => { n := n + 1 }`)", async () => {
+    const diags = await lambdaDiags(
+      withApi(
+        `state { n: int = 0 }`,
+        ``,
+        `body: Stack { Button { "Go", onClick: e => { n := n + 1 } } }`,
+      ),
+    );
+    expect(diags).toContain("loom.effect-in-lambda");
+  });
+
+  it('fires on an inline navigate handler (`onClick: e => { navigate("/x") }`)', async () => {
+    const diags = await lambdaDiags(
+      withApi(``, ``, `body: Stack { Button { "Go", onClick: e => { navigate("/x") } } }`),
+    );
+    expect(diags).toContain("loom.effect-in-lambda");
+  });
+
+  it('fires on a SINGLE-EXPRESSION view-effect body (`onClick: e => navigate("/x")`)', async () => {
+    // No block — the effect rides the expression body; the check must still
+    // catch it (a value lambda's expression is a render, never a `navigate`).
+    const diags = await lambdaDiags(
+      withApi(``, ``, `body: Stack { Button { "Go", onClick: e => navigate("/x") } }`),
+    );
+    expect(diags).toContain("loom.effect-in-lambda");
+  });
+
+  it("does NOT fire on the named-action equivalent (`action go() {…}` + `onClick: go`)", async () => {
+    const diags = await lambdaDiags(
+      withApi(
+        `state { n: int = 0 }  action go() { n := n + 1 }`,
+        ``,
+        `body: Stack { Button { "Go", onClick: go } }`,
+      ),
+    );
+    expect(diags).not.toContain("loom.effect-in-lambda");
+  });
+
+  it("does NOT fire on effects inside a named action body (effects live there)", async () => {
+    const diags = await lambdaDiags(
+      withApi(`state { n: int = 0 }  action go() { n := n + 1  navigate("/x") }`),
+    );
+    expect(diags).not.toContain("loom.effect-in-lambda");
+  });
+
+  it("does NOT fire on a PURE value lambda (a Table column accessor `o => Text { o.code }`)", async () => {
+    // A value lambda whose body is a render expression (no effect statement) is
+    // legitimate — the ubiquitous column-accessor / row-renderer shape.
+    const diags = await lambdaDiags(
+      withApi(
+        `action go() { toast("x") }`,
+        ``,
+        `body: Stack { Table { rows: Order.active(), Column { "Code", o => Text { o.code } } } }`,
+      ),
+    );
+    expect(diags).not.toContain("loom.effect-in-lambda");
+  });
+});

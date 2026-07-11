@@ -192,6 +192,12 @@ function checkBody(e: ExprIR | undefined, ctx: BodyCheckCtx, diags: LoomDiagnost
     }
     case "lambda": {
       const childScope = new Set<string>([...ctx.scope, e.param]);
+      // A render-tree lambda must be PURE — an inline effect handler
+      // (`onClick: e => { count := count + 1 }`) is rejected in favour of a
+      // named `action` (loom.effect-in-lambda).  Effects live only in an
+      // `action` body (walked via `checkActionBodies`, never through this arm),
+      // so any effectful statement reached here is an inline handler.
+      checkLambdaPurity(e, ctx, diags);
       checkBody(e.body, { ...ctx, scope: childScope }, diags);
       for (const s of e.block ?? []) checkStmt(s, { ...ctx, scope: childScope }, diags);
       return;
@@ -294,6 +300,66 @@ function checkStmt(
   if (Array.isArray(s.fields)) {
     for (const f of s.fields as { value: ExprIR }[]) checkBody(f.value, ctx, diags);
   }
+}
+
+/** Effectful `StmtIR` kinds — a statement that mutates state, dispatches a
+ *  command, or drives navigation.  A render-tree lambda body containing any of
+ *  these is an inline effect handler and must become a named `action`; the pure
+ *  kinds (`let` binding, trailing `expression`, `return`, `precondition`/
+ *  `requires`) are legitimate inside a value lambda block. */
+const EFFECT_STMT_TOKEN: Record<string, string> = {
+  assign: ":=",
+  add: "+=",
+  remove: "-=",
+  emit: "emit",
+  call: "call",
+  "variant-match": "match await",
+};
+
+/** `loom.effect-in-lambda` — reject an inline effect handler in a page/component
+ *  body (`onClick: e => { count := count + 1 }`).  Named actions
+ *  (named-actions-and-stores.md) are the only home for an effect; this makes the
+ *  language uniform (one effect-handler form) and, for the MVU/Elmish study
+ *  (`docs/proposals/fable-elmish-frontend.md` §8), keeps the `Model → Html` view
+ *  pure so `Msg`/`update` project straight off the `ActionIR` list.  Fires only
+ *  through `checkBody`'s `lambda` arm — an `action` body is walked via
+ *  `checkActionBodies` and never reaches here, so effects there are untouched.
+ *
+ *  Scope: the census vocabulary — effect StmtIR kinds + a single-expression
+ *  view-effect (`navigate`/`toast`) call.  A direct api-hook mutation call
+ *  (`onClick: e => { X.create.mutate(v) }`) is a SEPARATE mechanism (the
+ *  `tryDetectApiHook` hoist, not a free effect statement) and is intentionally
+ *  out of scope here. */
+function checkLambdaPurity(
+  lambda: Extract<ExprIR, { kind: "lambda" }>,
+  ctx: BodyCheckCtx,
+  diags: LoomDiagnostic[],
+): void {
+  // Block form (`e => { count := count + 1 }`): any effectful StmtIR kind.
+  // Single-expression form (`e => navigate("/x")`): a bare view-effect call
+  // (`navigate`/`toast`) — the only effect an expression body can carry (a
+  // value lambda's expression is a render/projection like `Text { … }`, not an
+  // effect).  A `let`/trailing-expression block stays pure and is not flagged.
+  const blockEffect = (lambda.block ?? []).find((s) => s.kind in EFFECT_STMT_TOKEN);
+  const body = lambda.body;
+  const singleExprEffect =
+    body?.kind === "call" && body.callKind === "free" && VIEW_EFFECT_BUILTINS.has(body.name);
+  const token = blockEffect
+    ? EFFECT_STMT_TOKEN[blockEffect.kind]
+    : singleExprEffect
+      ? body.name
+      : undefined;
+  if (!token) return;
+  const arrow = lambda.param ? `${lambda.param} => …` : `() => …`;
+  diags.push({
+    severity: "error",
+    code: "loom.effect-in-lambda",
+    message:
+      `${ctx.where}: inline handler \`${arrow}\` performs an effect (\`${token}\`) in the page body. ` +
+      `Only a named \`action\` may carry effects — declare one and reference it by name ` +
+      `(e.g. \`action doIt(…) { … }\` then \`onClick: doIt\`). Render-tree lambdas must be pure.`,
+    source: ctx.where,
+  });
 }
 
 /** F1 — flag an `Action(<inst>.<op>)` whose resolved public operation

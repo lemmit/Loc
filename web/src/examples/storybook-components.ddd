@@ -42,6 +42,7 @@ system Storybook {
         notifications: bool = true
         clickCount: int = 0
       }
+      action increment() { clickCount := clickCount + 1 }
 
       body: Stack {
         // ── Header ────────────────────────────────────────────
@@ -131,7 +132,7 @@ system Storybook {
         Heading { "Actions", level: 2 },
 
         Card {"Button — event handler", Stack {
-          Button { "Increment", onClick: e => { clickCount := clickCount + 1 } },
+          Button { "Increment", onClick: increment },
           Text { "Clicks: " + clickCount }
         }}
       }

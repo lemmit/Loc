@@ -370,9 +370,10 @@ compatibility surface.
    (`hoistLambdaToHandler`) becomes dead code** — nothing can reach it — and
    *every* frontend inherits named, unit-testable handlers. Reuses the purity
    machinery named actions already ship (`loom.action-payload-mismatch`, the
-   effect-freedom check). **Recommended.** (Contrast the MVU-scoped variant
-   `loom.mvu-requires-named-action`: same effect, but makes MVU stricter than its
-   siblings — a per-target wart with no upside once the corpus is migrated.)
+   effect-freedom check). **Recommended — SHIPPED** (`loom.effect-in-lambda`,
+   §8.3). (Contrast the MVU-scoped variant `loom.mvu-requires-named-action`:
+   same effect, but makes MVU stricter than its siblings — a per-target wart with
+   no upside once the corpus is migrated.)
 2. **Auto-name lowering pass.** An IR→IR normalization that lifts each effectful
    page/component lambda into a synthesized `ActionIR` before codegen: derive
    the `Msg` name from the single write target when the body is one assignment
@@ -392,7 +393,7 @@ compatibility surface.
    per-target hoist named actions just removed, and yields `event_N`-quality
    `Msg` names. Only reachable as option 0's uglier cousin.
 
-### 8.3 Recommendation
+### 8.3 Recommendation — ✅ SHIPPED
 
 **Delete the form, don't tolerate it (option 1).** Because there is no external
 corpus, the tolerant strategies (a per-target gate, an auto-name bridge) solve a
@@ -405,7 +406,15 @@ frontends. This is a decision that is only available *because* all Loom code is
 in-repo; spend that leverage here rather than banking machinery to preserve a
 form nobody depends on.
 
-Sequencing: the migration + `loom.effect-in-lambda` gate is a **standalone
-language-cleanup PR** that need not wait on any Fable work — land it on its own
-merits, and MVU inherits a total projection for free. **(2)** downgrades to
-optional; **(0)** stays a documented escape hatch; **(3)** stays rejected.
+**Landed** as a standalone language-cleanup ahead of any Fable work (2026-07,
+code-verified): the four residual files (`svelte-shop.ddd`,
+`storybook-components.ddd`, `sales-ui.ddd`) are migrated to named actions, and
+the global `loom.effect-in-lambda` invariant is enforced in
+`src/ir/validate/checks/ui-checks.ts` (`checkLambdaPurity`, fired from
+`checkBody`'s `lambda` arm — an `action` body is walked via `checkActionBodies`
+and never reaches it, so effects there are untouched). Tests in
+`test/ir/named-action-refs.test.ts`. The walker keeps its inline-handler
+rendering for now (exercised directly by the generator unit tests, which bypass
+`validateLoomModel`); retiring that path + HEEx's `hoistLambdaToHandler` is the
+optional follow-up **(2)**. **(0)** stays a documented escape hatch; **(3)**
+stays rejected. MVU now inherits a total sync projection for free.
