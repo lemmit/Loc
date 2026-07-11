@@ -98,12 +98,23 @@ guarded write; zero rows ⇒ the declared error."* Versioning is then the
 simplest instance. The same primitive unlocks user write-invariants that
 are impossible today. **A guard is only a `writeGuard` when it references
 `old`** — a predicate over `this` alone is a plain `invariant` (checkable
-before the write, no pre-image needed) and should stay one. Only **two**
-scopes exist in a guard: `old` (the persisted pre-image) and `this` (the
-being-written image). There is deliberately **no `new` alias** — reusing
-`this` keeps the surface free of a redundant second spelling (and a costly
-soft keyword). The write-guards are the ones that compare against persisted
-state:
+before the write, no pre-image needed) and should stay one.
+
+**Scope resolution** (identical to the ordinary bare-vs-`this` rule):
+
+- **bare `<name>`** → the being-written (new) image: a `param`/`let` if one
+  shadows, else `this.<field>`. Bare *is* new.
+- **`this.<field>`** → the being-written field explicitly (needed under a
+  shadow).
+- **`old.<field>`** → the persisted pre-image — **always explicit** (no bare
+  form). Available in `writeGuard` *and* `stamp onUpdate` (both write-time,
+  both have a pre-image); a reference to `old` at create is a validation
+  error (no prior state).
+
+There is deliberately **no `new` alias** — `this`/bare already covers it, so
+adding `new` would be a redundant second spelling (and a costly soft
+keyword). The write-guards are the ones that compare `old` against the new
+image:
 
 ```ddd
 writeGuard amount <= old.balance            // can't overdraw the *persisted* balance
