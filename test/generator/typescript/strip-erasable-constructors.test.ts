@@ -39,17 +39,29 @@ const repoRoot = path.resolve(here, "..", "..", "..");
 // a public/private/protected modifier on a parameter.
 const PARAMETER_PROPERTY_RE = /constructor\s*\(\s*(?:\n\s*)*(public|private|protected)\b/;
 
-async function buildAcme(): Promise<Model> {
+async function buildFixture(rel: string): Promise<Model> {
   const services = createDddServices(NodeFileSystem);
   const docs = services.shared.workspace.LangiumDocuments;
-  const doc = await docs.getOrCreateDocument(URI.file(path.join(repoRoot, "examples/acme.ddd")));
+  const doc = await docs.getOrCreateDocument(URI.file(path.join(repoRoot, rel)));
   await services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
   return doc.parseResult.value as Model;
 }
 
+// Two fixtures, deliberately: `acme.ddd` is the everyday shape, but
+// `showcase.ddd` is the single-file conformance fixture built to exercise
+// EVERY language feature (test/conformance/showcase-completeness.test.ts
+// hard-gates that) — so it reaches emitter paths acme never triggers
+// (eventsourced + document repositories, every page-object kind, the full
+// design-pack `.tsx` surface). Scanning both is what makes this tripwire a
+// real repo-wide gate rather than an acme-only one; a parameter property
+// reintroduced on a showcase-only path would slip past acme alone.
+const STRIP_FIXTURES = ["examples/acme.ddd", "examples/showcase.ddd"] as const;
+
 describe("strip-erasable constructors (Node type-stripping compatibility)", () => {
-  it("no emitted .ts/.tsx file in the acme system carries a parameter-property constructor", async () => {
-    const model = await buildAcme();
+  it.each(
+    STRIP_FIXTURES,
+  )("no emitted .ts/.tsx file in %s carries a parameter-property constructor", async (rel) => {
+    const model = await buildFixture(rel);
     const { files } = generateSystems(model);
     const offenders: string[] = [];
     for (const [name, content] of files) {
