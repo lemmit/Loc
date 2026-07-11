@@ -31,13 +31,15 @@ function isActive(path: string, opts?: { exact?: boolean }): boolean {
 
 <template>
   <v-app>
+    <!-- Skip link (WCAG 2.4.1 Bypass Blocks) — first focusable element. -->
+    <a href="#main-content" class="loom-skip-link">Skip to content</a>
     <v-app-bar density="comfortable" flat border>
       <v-app-bar-nav-icon class="d-sm-none" data-testid="nav-burger" @click="drawer = !drawer" />
       <v-app-bar-title>
         <router-link to="/" style="color: inherit; text-decoration: none">{{systemNameHuman}}</router-link>
       </v-app-bar-title>
     </v-app-bar>
-    <v-navigation-drawer v-model="drawer" width="240">
+    <v-navigation-drawer v-model="drawer" width="240" aria-label="Primary navigation">
       <v-list density="compact" nav data-testid="nav-sidebar">
 {{#each navSections}}        <v-list-subheader>{{label}}</v-list-subheader>
 {{#each entries}}{{#if external}}        <v-list-item :href="'{{href}}'" target="_blank" rel="noreferrer" title="{{label}}" data-testid="{{testId}}" />
@@ -45,7 +47,7 @@ function isActive(path: string, opts?: { exact?: boolean }): boolean {
 {{else}}        <v-list-item to="{{to}}" title="{{label}}" :active="isActive('{{to}}'{{#if exact}}, { exact: true }{{/if}})" data-testid="{{testId}}" />
 {{/if}}{{/if}}{{/each}}{{/each}}      </v-list>
     </v-navigation-drawer>
-    <v-main>
+    <v-main id="main-content">
       <v-container fluid>
         <div v-if="appError" data-testid="app-error">
           <v-alert type="error" title="Something went wrong" :text="appError.message" />
@@ -60,3 +62,9 @@ function isActive(path: string, opts?: { exact?: boolean }): boolean {
     </div>
 {{/if}}  </v-app>
 </template>
+
+<style>
+/* Skip link (WCAG 2.4.1) — off-screen until focused. */
+.loom-skip-link{position:absolute;left:-9999px;top:0;z-index:3000;padding:8px 16px;background:Canvas;color:CanvasText;border:1px solid;border-radius:4px}
+.loom-skip-link:focus{left:8px;top:8px}
+</style>
