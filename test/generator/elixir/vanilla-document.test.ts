@@ -309,24 +309,26 @@ describe("vanilla shape(document) non-scalar residual (DEBT-07 follow-up)", () =
     expect(ctx).not.toContain("raise(ArgumentError");
   });
 
-  it("emits returning ops as tagged tuples (error variant + fall-through success wire)", async () => {
+  it("emits returning ops as tagged tuples (error variant in-memory, mutating success persists)", async () => {
     const ctx = file(await generateSystemFiles(DOC_RICH), "/carts.ex");
-    // An error-variant `return` → {:error, "<tag>", <map>}; the row is unused
-    // (no embed read) so it's underscored to avoid a -Werror unused warning.
+    // An unconditional error-variant `return` never commits → {:error, "<tag>", <map>};
+    // the row is unused (no embed read, no persist) so it's underscored (-Werror).
     expect(ctx).toContain(
       "def try_close_cart(%Api.Carts.Cart{} = _row, params) when is_map(params) do",
     );
     expect(ctx).toContain('{:error, "AlreadyClosed", %{message: "closed"}}');
-    // A fall-through success projects the in-memory wire off the mutated embed —
-    // `id` off the root row (the embed carries none), fields off `record`
-    // (camelCase keys, matching serialize/1).
+    // #1774: a MUTATING fall-through success now PERSISTS the embed re-write (it
+    // previously projected the mutated struct in memory and dropped the write) and
+    // projects the aggregate wire off the SAVED embed.
     expect(ctx).toContain(
       "def bump_or_close_cart(%Api.Carts.Cart{} = row, params) when is_map(params) do",
     );
-    expect(ctx).toContain("record = row.data");
+    expect(ctx).toContain("|> Ecto.Changeset.put_embed(:data, Map.from_struct(record))");
+    expect(ctx).toContain("case Api.Carts.CartRepository.persist_change(changeset) do");
     expect(ctx).toContain(
-      '{:ok, %{"id" => row.id, "subtotal" => record.subtotal, "itemCount" => record.item_count}}',
+      '{:ok, saved} -> {:ok, %{"id" => saved.id, "subtotal" => saved.data.subtotal, "itemCount" => saved.data.item_count}}',
     );
+    expect(ctx).toContain("{:error, changeset} -> {:error, changeset}");
   });
 });
 
@@ -539,6 +541,74 @@ system Shop {
     // audit_before + record bind precede the `with`; the tx is inside the `do`.
     expect(bump.indexOf("audit_before =")).toBeLessThan(bump.indexOf("with :ok <-"));
     expect(bump.indexOf("with :ok <-")).toBeLessThan(bump.indexOf("Api.Repo.transaction"));
+  });
+});
+
+describe("vanilla shape(document) returning ops persist their mutation (#1774)", () => {
+  const DOC_RET = `
+system Shop {
+  subdomain Sales {
+    context Shop {
+      error TooMany { }
+      aggregate Cart shape(document) with crudish {
+        total: int
+        operation bumpFall(): Cart or TooMany {
+          precondition total < 10
+          total := total + 1
+        }
+        operation bumpReturn(): Cart or TooMany {
+          precondition total < 10
+          total := total + 1
+          return this
+        }
+        operation peek(): Cart or TooMany {
+          precondition total < 100
+          return this
+        }
+      }
+      repository Carts for Cart { }
+    }
+  }
+  api ShopApi from Sales { httpStatus TooMany 409 }
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api { platform: elixir, contexts: [Shop], dataSources: [shopState], serves: ShopApi, port: 4000 }
+}
+`;
+
+  function op(facade: string, name: string): string {
+    const start = facade.indexOf(`def ${name}(%`);
+    return facade.slice(start, facade.indexOf("\n  end", start));
+  }
+
+  it("persists a MUTATING fall-through success + projects off the saved embed", async () => {
+    const bump = op(file(await generateSystemFiles(DOC_RET), "/shop.ex"), "bump_fall_cart");
+    expect(bump).toContain("record = %{record | total: record.total + 1}");
+    expect(bump).toContain("|> Ecto.Changeset.change(%{version: row.version + 1})");
+    expect(bump).toContain("|> Ecto.Changeset.put_embed(:data, Map.from_struct(record))");
+    expect(bump).toContain("case Api.Shop.CartRepository.persist_change(changeset) do");
+    expect(bump).toContain(
+      '{:ok, saved} -> {:ok, %{"id" => saved.id, "total" => saved.data.total}}',
+    );
+    expect(bump).toContain("{:error, changeset} -> {:error, changeset}");
+  });
+
+  it("persists a MUTATING trailing `return this` (normalized onto the persist path)", async () => {
+    const bump = op(file(await generateSystemFiles(DOC_RET), "/shop.ex"), "bump_return_cart");
+    // The trailing `return this` is excluded from the linear body and folded into
+    // the aggregate-success projection off the saved embed (no inline in-memory return).
+    expect(bump).toContain("|> Ecto.Changeset.put_embed(:data, Map.from_struct(record))");
+    expect(bump).toContain(
+      '{:ok, saved} -> {:ok, %{"id" => saved.id, "total" => saved.data.total}}',
+    );
+  });
+
+  it("leaves a NON-mutating returning op in-memory (no persist, byte-identical)", async () => {
+    const peek = op(file(await generateSystemFiles(DOC_RET), "/shop.ex"), "peek_cart");
+    // A pure read commits nothing — no changeset / put_embed / persist_change.
+    expect(peek).not.toContain("put_embed");
+    expect(peek).not.toContain("persist_change");
+    expect(peek).toContain("{:ok, record}");
   });
 });
 // Document-op guards deny 403/422, not raise → 500 (parity with the relational

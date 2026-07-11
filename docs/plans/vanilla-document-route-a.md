@@ -162,14 +162,20 @@ The migration stays `create table(:orders) do add :data, :map; add :version …`
   (`Map.merge(%{id: r.id}, Map.from_struct(r.data))`). Boot-verified: `touch`/`bump`
   audited ops → total persists (5→6→9), `audit_records` carries before/after totals, a
   guarded `bump by:0` denies 403 with NO audit row.
-- **Audited RETURNING ops + derived reads stay gated — both blocked on separate bugs, NOT
-  on Route A machinery:**
-  - **Audited returning ops** need the document returning-op path to persist first. It
-    does **not** today: `renderDocReturningOpFunction` projects `docWireMap` in memory and
-    never `put_embed`s — a mutating `operation bump(): Cart or E { total := total+1 }`
-    returns `total+1` in the response but the DB row is unchanged (the relational sibling
-    `persist_change`s). Filed as **#1774**; audited-returning stays gated until fixed.
-  - **Derived reads** are a shared bug, not a missing document feature: the RELATIONAL
+- **✅ RETURNING ops now PERSIST (#1774, 2026-07-05).** A mutating returning op re-embeds +
+  `persist_change`s its write, projecting the aggregate wire off the SAVED embed (fall-through
+  AND trailing `return this`, both normalized onto the persist path; shape-C — a non-aggregate
+  success return — persists then re-renders over `record = saved.data`). A non-committing body
+  (pure read / unconditional error return) stays in-memory (byte-identical). The persist gate is
+  the SAME `returningOpPersistsChangeset` predicate the shared returning-op controller uses for
+  its `{:error, %Ecto.Changeset{}}` clause, so op fn + controller never disagree. Boot-verified:
+  `bumpFall`/`bumpReturn` → total persists (5→6→7), a non-mutating `peek` stays in-memory, `GET`
+  reflects the persisted value.
+- **Audited RETURNING ops stay gated — now unblocked by #1774, but still needing the
+  audit-transaction wrapping on the returning path (a clean follow-up; the persist tail is now
+  the same `put_embed` the named-op audit path wraps).**
+- **Derived reads stay gated — a shared bug, NOT a missing document feature:**
+  - **Derived reads**: the RELATIONAL
     op-body path emits `record.<derived>` against a schema with no such column → runtime
     500 (KeyError; the compiler only warns). Filed as **#1765**. The document gate is
     correct — un-gating would replicate the bug.

@@ -24,10 +24,13 @@
 // struct.  Paged finds build the wire envelope in memory (slice 4c), union finds
 // return the single-get tuple the shared find controller tags (slice 4d), and an
 // AUDITED named op records its audit row inside the persist transaction (slice 4e).
-// The residual the document path can't express yet (audited RETURNING ops — the
-// returning path doesn't persist yet; provenanced ops — no per-field prov columns
-// on a jsonb blob; derived / dereferenced-entity / collection-method reads;
-// non-scalar find predicates) is gated at validate time
+// A mutating RETURNING op re-embeds + persists its write, projecting the wire off
+// the saved embed (#1774 — it previously dropped the write).  The residual the
+// document path can't express yet (audited RETURNING ops — now unblocked by #1774
+// but still needing the audit-transaction wrapping on the returning path;
+// provenanced ops — no per-field prov columns on a jsonb blob; derived /
+// dereferenced-entity / collection-method reads; non-scalar find predicates) is
+// gated at validate time
 // (`loom.vanilla-document-unsupported`) rather than misgenerated — see
 // `validateVanillaDocumentScope`.
 // ---------------------------------------------------------------------------
@@ -64,6 +67,8 @@ import {
   type OpFragment,
   renderOpGuardClause,
   renderReturningStmt,
+  returningOpHasSuccessPath,
+  returningOpPersistsChangeset,
   wrapOpBodyWithGuards,
 } from "./operation-returns-emit.js";
 
@@ -486,7 +491,12 @@ function docOpStructBody(
    *  body is filtered only of its guards (no emit-hoisting restructuring here),
    *  so `bodyStmts` and `body` line up 1:1 for the sub-region zip. */
   opFragments?: OpFragment[],
-): { params: string[]; body: string[]; guardClauses: string[] } {
+  /** When a persisting RETURNING op ends in an explicit `return`, that trailing
+   *  statement is excluded from the linear body and rendered SEPARATELY post-commit
+   *  (over the saved struct) — mirrors the relational returning-op restructuring.
+   *  The excluded line comes back as `trailingReturnLine`. */
+  excludeTrailingReturn = false,
+): { params: string[]; body: string[]; guardClauses: string[]; trailingReturnLine?: string } {
   const rc: RenderCtx = {
     thisName: "record",
     contextModule: facadeMod,
@@ -505,15 +515,26 @@ function docOpStructBody(
       s.kind === "requires" || s.kind === "precondition",
   );
   const guardClauses = guardStmts.map((s) => renderOpGuardClause(s, rc));
-  const bodyStmts = op.statements.filter((s) => s.kind !== "requires" && s.kind !== "precondition");
+  const lastIdx = op.statements.length - 1;
+  const bodyStmts = op.statements.filter(
+    (s, i) =>
+      s.kind !== "requires" &&
+      s.kind !== "precondition" &&
+      !(excludeTrailingReturn && i === lastIdx && s.kind === "return"),
+  );
   const body = bodyStmts.map((s, i) => renderReturningStmt(s, ctx, rc, i));
+  const trailingStmt = op.statements[lastIdx];
+  const trailingReturnLine =
+    excludeTrailingReturn && trailingStmt?.kind === "return"
+      ? renderReturningStmt(trailingStmt, ctx, rc, lastIdx).trimStart()
+      : undefined;
   if (opFragments && body.length > 0) {
     opFragments.push({
       fragmentText: body.join("\n"),
       subRegions: statementSubRegions(bodyStmts, body, `${ctx.name}.${agg.name}.${op.name}`),
     });
   }
-  return { params, body, guardClauses };
+  return { params, body, guardClauses, trailingReturnLine };
 }
 
 /** `<op>_<agg>(row, params)` for a document aggregate (Route A slice 2) — bind
@@ -613,9 +634,18 @@ ${bodyContent}
 /** `<op>_<agg>(row, params)` for a RETURNING (`: A or B`) document operation —
  *  runs the body in struct mode, returning the tagged result the controller's
  *  `<op>_<agg>_result/2` translates to HTTP (success → 200 + wire, error variant
- *  → RFC-7807).  Mirrors the relational non-audited returning path: the
- *  fall-through success returns the IN-MEMORY wire projection off the mutated
- *  embed (no DB round-trip). */
+ *  → RFC-7807).
+ *
+ *  #1774: a MUTATING returning op now PERSISTS its embed re-write (the relational
+ *  sibling always did; the doc path previously projected the mutated struct in
+ *  memory and silently dropped the write).  The persist gate is the SAME predicate
+ *  the shared returning-op controller uses for its `{:error, %Ecto.Changeset{}}`
+ *  clause (`returningOpPersistsChangeset`), so the op fn + controller never
+ *  disagree.  A non-committing body (pure read, or an unconditional error return)
+ *  stays in-memory (no DB round-trip), byte-identical to before.  Audited-returning
+ *  + provenanced doc ops are validate-gated, so the prov/audit/emit-hoist/ref-coll
+ *  shapes of the relational path can't reach here — only the plain aggregate-success
+ *  and shape-C (non-aggregate success return) persists apply. */
 export function renderDocReturningOpFunction(
   facadeMod: string,
   op: OperationIR,
@@ -627,56 +657,117 @@ export function renderDocReturningOpFunction(
   const aggPascal = upperFirst(agg.name);
   const aggSnake = snake(agg.name);
   const aggModule = `${facadeMod}.${aggPascal}`;
+  const repoMod = `${aggModule}Repository`;
   const actorParam = opUsesCurrentUser(op) ? ", current_user \\\\ nil" : "";
-  const lastIsReturn = op.statements[op.statements.length - 1]?.kind === "return";
-  const succeedsWithAggregate =
-    op.returnType?.kind === "union" &&
-    op.returnType.variants.some((v) => v.kind === "entity" && v.name === agg.name);
-  const successTail =
-    !lastIsReturn && succeedsWithAggregate ? `\n    {:ok, ${docWireMap(agg)}}` : "";
-  const { params, body, guardClauses } = docOpStructBody(op, agg, facadeMod, ctx, opFragments);
-  // `record = row.data` is live only when the body reads/writes `record`, the
-  // success wire projects its fields, OR a hoisted guard reads `record.<field>`;
-  // otherwise skip it (and underscore `row`, read only for `.data`) so the
-  // struct-guarded head doesn't warn under -Werror.
-  const guardsUseRecord = guardClauses.some((l) => /\brecord\b/.test(l));
+
+  const persists = returningOpPersistsChangeset(op, agg, ctx);
+  const fallThrough = returningOpHasSuccessPath(op, agg);
+  const lastStmt = op.statements[op.statements.length - 1];
+  const trailingReturn =
+    lastStmt?.kind === "return" ? (lastStmt as Extract<StmtIR, { kind: "return" }>) : undefined;
+  // A trailing `return this` / aggregate-typed success return commits the same
+  // mutated aggregate as a fall-through; a trailing NON-aggregate success return
+  // (shape C, `return Reserved {…}`) re-renders its own tuple over the saved embed.
+  const trailingIsAggregate =
+    trailingReturn !== undefined &&
+    (trailingReturn.value.kind === "this" || trailingReturn.variantTag === agg.name);
+  const aggregateSuccess = persists && (fallThrough || trailingIsAggregate);
+
+  const { params, body, guardClauses, trailingReturnLine } = docOpStructBody(
+    op,
+    agg,
+    facadeMod,
+    ctx,
+    opFragments,
+    /* excludeTrailingReturn */ persists && trailingReturn !== undefined,
+  );
+
+  // The persist changeset — re-embed the mutated struct + bump version, round-tripped
+  // through the doc repo's `persist_change` (shared by every persisting shape).
+  const persistChangeset = [
+    "    changeset =",
+    "      row",
+    "      |> Ecto.Changeset.change(%{version: row.version + 1})",
+    "      |> Ecto.Changeset.put_embed(:data, Map.from_struct(record))",
+    "",
+  ];
+
+  let tailLines: string[];
+  if (!persists) {
+    // Non-committing: a fall-through returns the in-memory wire projection off the
+    // (possibly mutated but uncommitted) embed; an explicit `return` renders inline
+    // in `body`.  Byte-identical to the pre-#1774 doc path for these shapes.
+    tailLines = fallThrough ? [`    {:ok, ${docWireMap(agg, "row.id", "record")}}`] : [];
+  } else if (aggregateSuccess) {
+    // Mutating success (fall-through OR normalized trailing `return this`): persist,
+    // then project the aggregate wire off the SAVED embed.
+    tailLines = [
+      ...persistChangeset,
+      `    case ${repoMod}.persist_change(changeset) do`,
+      `      {:ok, saved} -> {:ok, ${docWireMap(agg, "saved.id", "saved.data")}}`,
+      `      {:error, changeset} -> {:error, changeset}`,
+      `    end`,
+    ];
+  } else {
+    // Shape C: a mutating body ending in a NON-aggregate success return
+    // (`return Reserved {…}`).  Persist FIRST, rebind `record = saved.data`, then
+    // render the trailing return over the saved embed so its `this.*` reads reflect
+    // the persisted values.
+    tailLines = [
+      ...persistChangeset,
+      `    case ${repoMod}.persist_change(changeset) do`,
+      `      {:ok, saved} ->`,
+      `        record = saved.data`,
+      `        ${trailingReturnLine}`,
+      ``,
+      `      {:error, changeset} -> {:error, changeset}`,
+      `    end`,
+    ];
+  }
+
+  // `record = row.data` is live when the body reads/writes it, a persist reads it
+  // (`Map.from_struct(record)`), the in-memory success projects its fields, or a
+  // hoisted guard reads `record.<field>`; otherwise skip it (and underscore `row`,
+  // read only for `.data`) so the head doesn't warn under -Werror.  A persisting op
+  // always reads `row` (`put_embed` on it), so `row` is never underscored there.
   const usesRecord =
-    body.some((l) => /\brecord\b/.test(l)) || successTail !== "" || guardsUseRecord;
+    body.some((l) => /\brecord\b/.test(l)) ||
+    tailLines.some((l) => /\brecord\b/.test(l)) ||
+    guardClauses.some((l) => /\brecord\b/.test(l));
   const recordBind = usesRecord ? [`    record = row.data`] : [];
-  const rowName = usesRecord ? "row" : "_row";
+  const rowName = persists || usesRecord ? "row" : "_row";
   // A guarded op hoists its guards into a leading `with ensure(...)` chain
   // (403/422 denials): `record = row.data` + params stay before the `with`, the
-  // body + the success-projection tail move inside the `do` block.  The
-  // `{:error, atom()}` spec arm carries the denial atoms.  A guard-free op keeps
-  // the flat layout (byte-identical).
+  // body + the persist/return tail move inside the `do` block.  A guard-free op
+  // keeps the flat layout.
   const bodyContent =
     guardClauses.length > 0
       ? [
           ...recordBind,
           ...params,
-          ...wrapOpBodyWithGuards(guardClauses, [
-            ...body,
-            ...(successTail ? [successTail.replace(/^\n/, "")] : []),
-          ]),
+          ...wrapOpBodyWithGuards(guardClauses, [...body, ...tailLines]),
         ].join("\n")
-      : `${[...recordBind, ...params, ...body].join("\n")}${successTail}`;
+      : [...recordBind, ...params, ...body, ...tailLines].join("\n");
   const denialSpec = guardClauses.length > 0 ? " | {:error, atom()}" : "";
-  return `  @doc "Returning operation \`${op.name}\` on \`${aggPascal}\` (document shape, exception-less)."
+  // A persisting op can additionally fail its persist changeset validation.
+  const changesetSpec = persists ? " | {:error, Ecto.Changeset.t()}" : "";
+  return `  @doc "Returning operation \`${op.name}\` on \`${aggPascal}\` (document shape, exception-less)${persists ? " — persists the mutated embed" : ""}."
   @spec ${opSnake}_${aggSnake}(${aggModule}.t(), map()) ::
-          {:ok, term()} | {:error, binary(), map()}${denialSpec}
+          {:ok, term()} | {:error, binary(), map()}${changesetSpec}${denialSpec}
   def ${opSnake}_${aggSnake}(%${aggModule}{} = ${rowName}, params${actorParam}) when is_map(params) do
 ${bodyContent}
   end`;
 }
 
-/** The success wire map a returning op projects off the mutated embed — the same
- *  `id` + stored-field shape (camelCase keys) the document `serialize/1` emits,
- *  so the op response matches `GET /<plural>/:id`.  `id` comes off the root row
- *  (the embed carries none — `@primary_key false`); the fields off `record`. */
-function docWireMap(agg: AggregateIR): string {
+/** The success wire map a returning op projects off the embed — the same `id` +
+ *  stored-field shape (camelCase keys) the document `serialize/1` emits, so the op
+ *  response matches `GET /<plural>/:id`.  `idExpr` supplies the id (off the root
+ *  row / saved row — the embed carries none, `@primary_key false`); `recvExpr` is
+ *  the struct the fields read off (`record` in-memory, `saved.data` post-commit). */
+function docWireMap(agg: AggregateIR, idExpr: string, recvExpr: string): string {
   const entries = [
-    `"id" => row.id`,
-    ...docFields(agg).map((f) => `${JSON.stringify(f.name)} => record.${snake(f.name)}`),
+    `"id" => ${idExpr}`,
+    ...docFields(agg).map((f) => `${JSON.stringify(f.name)} => ${recvExpr}.${snake(f.name)}`),
   ];
   return `%{${entries.join(", ")}}`;
 }
