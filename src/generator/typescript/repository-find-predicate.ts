@@ -24,6 +24,7 @@ import {
   DATA_KEY_PATH_DELIMITER,
   deepScopeAnchorClaim,
   isDeepScopeFilter,
+  isDenyFilter,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
@@ -128,6 +129,15 @@ export function lowerToDrizzle(
 
   function lowerExpr(e: ExprIR): string | null {
     if (e.kind === "paren") return lowerExpr(e.inner);
+    // DENY carve-out (authorization Phase 4 — deny-wins).  An always-false term:
+    // a column can't be both NULL and NOT NULL, so `and(isNull(id), isNotNull(id))`
+    // matches no row.  Self-contained (uses the always-present `id` column and
+    // standard Drizzle ops), so it needs no `sql` import and works on any table.
+    if (isDenyFilter(e)) {
+      for (const op of ["and", "isNull", "isNotNull"]) ops.add(op);
+      const idCol = `schema.${tableName}.id`;
+      return `and(isNull(${idCol}), isNotNull(${idCol}))`;
+    }
     // `deep` read level (multi-tenancy Phase 2 P2.4) — the materialized-path
     // descendant-or-self scope with the NULL-dataKey fallback to the tenant
     // floor (see `DEEP_SCOPE_SEMANTICS`).  Renders as a Drizzle operator tree.

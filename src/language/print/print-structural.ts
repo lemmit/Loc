@@ -711,7 +711,11 @@ function printPolicyDecl(node: import("../generated/ast.js").PolicyDecl): string
   const name = node.name ? ` ${node.name}` : "";
   return block(
     `policy${name}`,
-    (node.rules ?? []).map((r) => `allow ${r.verb ? `${r.verb} ` : ""}${r.level} on ${r.target}`),
+    (node.rules ?? []).map((r) =>
+      r.effect === "deny"
+        ? `deny ${r.verb ? `${r.verb} ` : ""}on ${r.target}`
+        : `allow ${r.verb ? `${r.verb} ` : ""}${r.level} on ${r.target}`,
+    ),
   );
 }
 

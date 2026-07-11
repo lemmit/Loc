@@ -3,6 +3,7 @@ import { type DurationExprIR, durationCtorOperand } from "../../ir/util/temporal
 import {
   DATA_KEY_PATH_DELIMITER,
   isDeepScopeFilter,
+  isDenyFilter,
   ORG_PATH_CLAIM_FIELD,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
@@ -68,6 +69,9 @@ function bool(e: ExprIR, ctx: CriteriaCtx): string {
       // materialized-path scope with the NULL-dataKey fallback to the tenant
       // floor (see `DEEP_SCOPE_SEMANTICS`), as a JPA Criteria predicate over the
       // `tenantScope(User currentUser)` Specification's null-safe principal.
+      // DENY carve-out (authorization Phase 4 — deny-wins).  `cb.disjunction()`
+      // is the JPA Criteria always-false predicate (an empty OR).
+      if (isDenyFilter(e)) return "cb.disjunction()";
       if (isDeepScopeFilter(e)) return deepScopeCriteria(e, ctx);
       // Reference-collection membership.
       if (e.member === "contains" && e.receiverType.kind === "array" && e.args.length === 1) {

@@ -6,7 +6,7 @@
 import { intrinsicFor } from "../../../util/intrinsics.js";
 import type { AggregateIR, BoundedContextIR, ExprIR } from "../../types/loom-ir.js";
 import { durationCtorOperand, isDatetimeTypedIR } from "../../util/temporal.js";
-import { isDeepScopeFilter } from "../../util/tenant-stance.js";
+import { isDeepScopeFilter, isDenyFilter } from "../../util/tenant-stance.js";
 import { walkExprDeep } from "../../util/walk.js";
 
 /** True when `name` is a stored field, containment, or derived property
@@ -272,6 +272,10 @@ export function firstNonQueryableNode(e: ExprIR): string | null {
       // admit it here rather than have the tenant-owned floor rewrite trip the
       // selectability gate.
       if (isDeepScopeFilter(e)) return null;
+      // Likewise the DENY carve-out sentinel (authorization Phase 4 —
+      // `policy { deny [write] on <Agg> }`): every backend renders it to its
+      // native always-false query fragment, so it is queryable by construction.
+      if (isDenyFilter(e)) return null;
       // Membership over a reference collection — `this.<refColl>.contains(x)`
       // — is the one collection op we admit: it lowers to an EXISTS-style
       // subquery against the field's join table.  Everything else

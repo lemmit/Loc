@@ -6,6 +6,7 @@ import {
   DATA_KEY_PATH_DELIMITER,
   deepScopeAnchorClaim,
   isDeepScopeFilter,
+  isDenyFilter,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
@@ -686,6 +687,9 @@ function renderMethodCall(
   // floor (see `DEEP_SCOPE_SEMANTICS`).  Rendered as a static-expressible EF
   // query-filter lambda: `.StartsWith(...)` translates to SQL LIKE, `== null`
   // to IS NULL — no host call inside the filter (#1676 pattern).
+  // DENY carve-out (authorization Phase 4 — deny-wins).  An always-false EF
+  // query-filter predicate; EF Core translates `Where(_ => false)` to no rows.
+  if (isDenyFilter(e)) return "false";
   if (isDeepScopeFilter(e)) {
     const t = ctx.thisName;
     const col = `${t}.${upperFirst(TENANT_OWNED_DATA_KEY_FIELD)}`;

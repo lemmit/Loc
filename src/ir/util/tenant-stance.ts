@@ -151,6 +151,14 @@ export const DATA_KEY_PATH_DELIMITER = ".";
  *  fenced so it can never collide with a user method name. */
 export const DEEP_SCOPE_MEMBER = "__loomDeepScope__";
 
+/** Marker member for the DENY carve-out sentinel (authorization Phase 4 —
+ *  `deny [write] on X`, docs/plans/authorization-phase4-deny.md).  Like
+ *  {@link DEEP_SCOPE_MEMBER} it is a recognizable `method-call` marker each
+ *  backend's filter translator special-cases — here to its native *always-false*
+ *  fragment.  Double-underscore fenced so it can never collide with a user
+ *  method name. */
+export const DENY_SCOPE_MEMBER = "__loomDeny__";
+
 /**
  * Semantics every backend renders `DEEP_SCOPE_MEMBER` to (row R, principal P;
  * fail-closed — no principal ⇒ matches nothing):
@@ -254,6 +262,36 @@ export function buildGlobalScopeFilter(agg: Pick<AggregateIR, "name">): ExprIR {
  *  filter translator gates its native compound rendering on this. */
 export function isDeepScopeFilter(e: ExprIR): boolean {
   return e.kind === "method-call" && e.member === DEEP_SCOPE_MEMBER;
+}
+
+/** The DENY carve-out predicate (authorization Phase 4 — deny-wins).  A
+ *  recognizable always-false marker `method-call` on `this` (no `currentUser`,
+ *  so `exprUsesCurrentUser` is false → each backend routes it to its STATIC
+ *  filter path, adding no principal parameter — this is what keeps a denied
+ *  aggregate's read/write seam free of the unused-param trap).  Appended to a
+ *  denied aggregate's read `contextFilters` (deny read) or set as its
+ *  `writeScopeFilter` (deny write) in enrichment; every backend's filter
+ *  translator special-cases {@link isDenyFilter} to its native always-false
+ *  fragment (Drizzle contradiction / EF `false` / JPQL `1 = 0` /
+ *  `cb.disjunction()` / SQLAlchemy contradiction / Ecto `fragment("false")`).
+ *  A bare `literal: bool` node is deliberately NOT used — it is not a valid
+ *  standalone predicate in Drizzle/Ecto/SQLAlchemy, which is why deny is a
+ *  recognized sentinel, exactly like the deep-scope one. */
+export function buildDenyFilter(agg: Pick<AggregateIR, "name">): ExprIR {
+  return {
+    kind: "method-call",
+    receiver: { kind: "this" },
+    member: DENY_SCOPE_MEMBER,
+    args: [],
+    receiverType: { kind: "entity", name: agg.name },
+    isCollectionOp: false,
+  };
+}
+
+/** True when `e` is the DENY carve-out sentinel (authorization Phase 4).  Each
+ *  backend's filter translator gates its always-false fragment on this. */
+export function isDenyFilter(e: ExprIR): boolean {
+  return e.kind === "method-call" && e.member === DENY_SCOPE_MEMBER;
 }
 
 /** The anchor principal-claim field a subtree sentinel prefix-matches on —

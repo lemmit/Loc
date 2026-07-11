@@ -7,6 +7,7 @@ import {
   type EnrichedAggregateIR,
   type EnrichedBoundedContextIR,
   type EnrichedEntityPartIR,
+  exprUsesCurrentUser,
   type FieldIR,
   type FindIR,
   findUsesCurrentUser,
@@ -312,7 +313,11 @@ export function buildPyRepositoryFile(
     // (DEBT-02).  One sorted import covers whichever (or both) apply.
     authUserImport(
       emittableFinds(repo).some(findUsesCurrentUser),
-      aggUsesPrincipalContextFilter(agg) || agg.writeScopeFilter !== undefined,
+      // Gate the `require_current_user` accessor import on ACTUAL principal usage,
+      // not mere `writeScopeFilter` presence: a `deny write` carve-out (Phase 4)
+      // sets an always-false write scope that references NO principal, so an
+      // unconditional import would be unused → ruff F401 on the generated project.
+      aggUsesPrincipalContextFilter(agg) || exprUsesCurrentUser(agg.writeScopeFilter),
     ),
     hasAudit ? "from app.db.audit import AuditRecordRow" : null,
     refersTo("PagedResult") ? "from app.db.paging import PagedResult" : null,

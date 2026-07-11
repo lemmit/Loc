@@ -308,10 +308,84 @@ function validatePolicyWriteLevels(sys: SystemIR, diags: LoomDiagnostic[]): void
   }
 }
 
+/** Validate `policy { deny [write] on <Aggregate> }` carve-outs (authorization
+ *  Phase 4 — deny-wins, docs/plans/authorization-phase4-deny.md):
+ *
+ *   - `loom.policy-deny-unknown-aggregate` — the target names no aggregate in the
+ *     policy's own context (a carve-out scopes a concrete local aggregate).
+ *   - `loom.policy-deny-duplicate` — the same `(aggregate, access)` is denied by
+ *     two rules in one context (copy-paste; the carve-out is already total).
+ *   - `loom.policy-deny-shadows-allow` — an `allow` rule targets the same
+ *     `(aggregate, access)` a `deny` covers in this context; the allow is DEAD
+ *     because deny wins.  Emitted as a WARNING (not an error): the proposal's
+ *     motivating "role A allows, role B denies" scenario is legitimate deny-wins
+ *     and must not be a hard error, but a shadowed allow should never be silent.
+ *
+ *  Unlike the allow ladder, deny is NOT gated on `tenantOwned` — it composes
+ *  through `contextFilters` / `writeScopeFilter`, which every aggregate carries.
+ */
+function validatePolicyDenies(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  for (const mod of sys.subdomains) {
+    for (const ctx of mod.contexts) {
+      const rules = ctx.policyDenies ?? [];
+      if (rules.length === 0) continue;
+      const readAllowed = new Set((ctx.policyReadLevels ?? []).map((r) => r.aggregate));
+      const writeAllowed = new Set((ctx.policyWriteLevels ?? []).map((r) => r.aggregate));
+      const seen = new Set<string>();
+      for (const rule of rules) {
+        const src = `${ctx.name}/policy`;
+        const key = `${rule.access}:${rule.aggregate}`;
+        if (seen.has(key)) {
+          diags.push({
+            severity: "error",
+            code: "loom.policy-deny-duplicate",
+            message:
+              `policy in context '${ctx.name}' denies ${rule.access} on '${rule.aggregate}' more ` +
+              `than once (\`${rule.source}\`); one \`deny ${rule.access === "write" ? "write " : ""}` +
+              `on ${rule.aggregate}\` is total — keep exactly one.`,
+            source: src,
+          });
+          continue;
+        }
+        seen.add(key);
+
+        const agg = ctx.aggregates.find((a) => a.name === rule.aggregate);
+        if (!agg) {
+          diags.push({
+            severity: "error",
+            code: "loom.policy-deny-unknown-aggregate",
+            message:
+              `policy in context '${ctx.name}': \`${rule.source}\` names '${rule.aggregate}', which ` +
+              `is not an aggregate in this context.  A deny carve-out scopes an aggregate declared ` +
+              `in the same context.`,
+            source: src,
+          });
+          continue;
+        }
+
+        // A shadowed allow is dead (deny wins) — flag it, but only as a warning.
+        const shadowed = rule.access === "write" ? writeAllowed : readAllowed;
+        if (shadowed.has(rule.aggregate)) {
+          diags.push({
+            severity: "warning",
+            code: "loom.policy-deny-shadows-allow",
+            message:
+              `policy in context '${ctx.name}': \`${rule.source}\` shadows an \`allow\` ${rule.access} ` +
+              `rule for '${rule.aggregate}' — deny wins, so the allow is dead.  Remove the allow, or ` +
+              `the deny if you meant to keep the grant.`,
+            source: src,
+          });
+        }
+      }
+    }
+  }
+}
+
 export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
   validateTenantRegistry(sys, diags);
   validatePolicyReadLevels(sys, diags);
   validatePolicyWriteLevels(sys, diags);
+  validatePolicyDenies(sys, diags);
   const tenancy = sys.tenancy;
 
   // Registry existence is a LINKING concern since 1b.1 — `of <Registry>` is a

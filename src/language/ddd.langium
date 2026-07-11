@@ -1093,8 +1093,19 @@ PolicyDecl:
 // identifier (`let read = …`) to promote to a keyword, so the read form stays
 // bare.  The rule name stays `PolicyReadRule` (both verbs are policy rules
 // structurally); the IR splits them by verb.
+//
+// `deny [write] on <Aggregate>` — the DENY-WINS carve-out (authorization Phase 4,
+// docs/plans/authorization-phase4-deny.md).  `effect` discriminates the two forms:
+// `allow` carries a widening `level` (local/deep/global); `deny` is ALL-OR-NOTHING
+// at the aggregate — no level word (a partial deny is the field-mask / `data {}`
+// row-clause territory of a later slice).  Deny reuses the same optional `write`
+// verb: bare `deny on X` denies READ (the aggregate becomes invisible; the write
+// command load — which reuses the read filter — fails too), `deny write on X`
+// denies only WRITE (reads stay, mutations 404).  Deny wins over allow, resolved
+// in enrichment.  Only new keyword is `deny` (`read` is still not one).
 PolicyReadRule:
-    'allow' (verb=PolicyVerb)? level=ReadLevel 'on' target=ID;
+      effect='allow' (verb=PolicyVerb)? level=ReadLevel 'on' target=ID
+    | effect='deny' (verb=PolicyVerb)? 'on' target=ID;
 
 // The optional policy verb.  Absent = read (Phase 2 behavior).  `write` is the
 // only new keyword — see the note above on why `read` is not one.

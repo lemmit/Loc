@@ -3,6 +3,7 @@ import { durationCtorOperand } from "../../ir/util/temporal.js";
 import {
   DATA_KEY_PATH_DELIMITER,
   isDeepScopeFilter,
+  isDenyFilter,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
@@ -109,6 +110,9 @@ function render(e: ExprIR, ctx: JpqlCtx): string {
     case "binary":
       return renderBinary(e, ctx);
     case "method-call": {
+      // DENY carve-out (authorization Phase 4 — deny-wins).  An always-false JPQL
+      // predicate; no row satisfies `1 = 0`.
+      if (isDenyFilter(e)) return "1 = 0";
       // `deep` read level (multi-tenancy Phase 2 P2.4) — descendant-or-self
       // materialized-path scope with the NULL-dataKey fallback to the tenant
       // floor (see `DEEP_SCOPE_SEMANTICS`).  The principal claims render as the

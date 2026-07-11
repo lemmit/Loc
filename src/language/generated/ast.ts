@@ -113,6 +113,7 @@ export type DddKeywordNames =
     | "decimal"
     | "deep"
     | "delivery"
+    | "deny"
     | "denyByDefault"
     | "deployable"
     | "derived"
@@ -2612,13 +2613,15 @@ export function isPolicyDecl(item: unknown): item is PolicyDecl {
 export interface PolicyReadRule extends langium.AstNode {
     readonly $container: PolicyDecl;
     readonly $type: 'PolicyReadRule';
-    level: ReadLevel;
+    effect: 'allow' | 'deny';
+    level?: ReadLevel;
     target: string;
     verb?: PolicyVerb;
 }
 
 export const PolicyReadRule = {
     $type: 'PolicyReadRule',
+    effect: 'effect',
     level: 'level',
     target: 'target',
     verb: 'verb'
@@ -6136,8 +6139,12 @@ export class DddAstReflection extends langium.AbstractAstReflection {
         PolicyReadRule: {
             name: PolicyReadRule.$type,
             properties: {
+                effect: {
+                    name: PolicyReadRule.effect
+                },
                 level: {
-                    name: PolicyReadRule.level
+                    name: PolicyReadRule.level,
+                    optional: true
                 },
                 target: {
                     name: PolicyReadRule.target
