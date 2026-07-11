@@ -27,13 +27,14 @@ import type {
   AggregateIR,
   BoundedContextIR,
   ExprIR,
+  ProjectionIR,
   ViewIR,
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
 import type { ApiRoute } from "../api-emit.js";
-import { stateModule } from "../dispatch-emit.js";
+import { projectionRowModule, stateModule } from "../dispatch-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import {
   aggregateUsesPrincipalContextFilter,
@@ -78,6 +79,30 @@ export function emitVanillaViewModules(
       if (!wf?.instanceWireShape) continue; // validator gated / not observable
       const path = `lib/${appName}/${ctxSnake}/views/${snake(view.name)}.ex`;
       const content = renderVanillaWorkflowView(view, wf, appModule, contextModule, typesModule);
+      out.set(path, content);
+      sourcemap?.file(path, content, view.origin, `${ctx.name}.${view.name}`);
+      continue;
+    }
+    // Projection-sourced view (projection.md v1.1): rows come from a direct
+    // `<Proj>Row` read-model table SELECT (the read-side sibling of the
+    // projection LIST endpoint, projections-emit.ts) with the view filter pushed
+    // into the query — no repository/context, like the state-based workflow arm
+    // above.  Unlike a workflow view, the full-form (bind-projected) shape IS
+    // supported, but the `<Proj>Row` schema is FLAT (no `belongs_to`), so an
+    // `X id` bind-follow bulk-loads the foreign aggregate explicitly by id
+    // (`from a in <Agg>, where: a.id in ^ids`) rather than `Repo.preload`ing an
+    // association the row schema doesn't have.
+    if (view.source.kind === "projection") {
+      const proj = ctx.projections.find((p) => p.name === view.source.name);
+      if (!proj) continue; // validator gated / non-projection source
+      const path = `lib/${appName}/${ctxSnake}/views/${snake(view.name)}.ex`;
+      const content = renderVanillaProjectionView(
+        view,
+        proj,
+        appModule,
+        contextModule,
+        typesModule,
+      );
       out.set(path, content);
       sourcemap?.file(path, content, view.origin, `${ctx.name}.${view.name}`);
       continue;
@@ -170,6 +195,212 @@ ${query}    |> Enum.map(fn record -> %{${proj}} end)
   end
 end
 `;
+}
+
+// ---------------------------------------------------------------------------
+// Projection-sourced view (projection.md v1.1).
+//
+// Row acquisition mirrors the state-based workflow arm — a plain Ecto read of
+// the `<Proj>Row` read-model schema with the filter pushed into the `where:`
+// (enum literals render as the dumped declared STRING via `filterArgs`, since
+// `Ecto.Enum` won't cast an inline atom in a query).  There is no capability
+// filter (a projection is not an aggregate).
+//
+//   - Shorthand (no `output`) — project the projection `wireShape` (camelCase
+//     wire key ← snake row field), identical to the `<Proj>ListResponse` the
+//     v1 `GET /api/projections/<slug>` controller returns (projections-emit.ts).
+//   - Full form (bind projection) — the aggregate-view tail, but the flat
+//     `<Proj>Row` schema carries no `belongs_to`, so each `X id` follow
+//     bulk-loads its foreign aggregate by id into a `%{id => struct}` map and
+//     the bind rewrites `customer.name` → `Map.get(<map>, record.customer).name`
+//     (the Elixir sibling of Hono's `findManyByIds` + `renderBindWithFollows`).
+//
+// `run/1` returns plain maps either way, so the project-wide `ViewsController`'s
+// `serialize/1` is the identity `is_map` clause (no struct handling).
+// ---------------------------------------------------------------------------
+
+function renderVanillaProjectionView(
+  view: ViewIR,
+  proj: ProjectionIR,
+  appModule: string,
+  contextModule: string,
+  typesModule: string,
+): string {
+  const moduleName = `${contextModule}.Views.${upperFirst(view.name)}`;
+  const rowMod = projectionRowModule(contextModule, proj);
+  const renderCtx: RenderCtx = {
+    thisName: "record",
+    contextModule,
+    typesModule,
+    foundation: "vanilla",
+  };
+  // The `where:` is an Ecto QUERY context — enum literals render as the dumped
+  // declared string (`filterArgs`); the projection binds below stay in-memory.
+  const queryCtx: RenderCtx = { ...renderCtx, filterArgs: true };
+  const isShorthand = !view.output;
+  const body = isShorthand
+    ? buildProjectionShorthandBody(view, proj, rowMod, queryCtx)
+    : buildProjectionFullFormBody(view, rowMod, contextModule, renderCtx, queryCtx);
+
+  return `# Auto-generated.
+defmodule ${moduleName} do
+  @moduledoc """
+  View: ${upperFirst(view.name)}
+
+  Source projection: ${upperFirst(proj.name)} (read-model row)
+  Form: ${isShorthand ? "shorthand" : "full (bind projection)"}
+  Foundation: vanilla (plain Ecto).
+  """
+
+  import Ecto.Query
+  alias ${appModule}.Repo
+
+  @doc "Execute the view query and return results."
+  @spec run(any()) :: [map()]
+  def run(current_user \\\\ nil) do
+    _ = current_user
+${body}
+  end
+end
+`;
+}
+
+/** Shorthand projection view — filter only, projecting the projection
+ *  `wireShape` (`f.name: record.<snake>`), the same shape the v1 projection
+ *  LIST controller returns. */
+function buildProjectionShorthandBody(
+  view: ViewIR,
+  proj: ProjectionIR,
+  rowMod: string,
+  queryCtx: RenderCtx,
+): string {
+  const proj_ = (proj.wireShape ?? []).map((f) => `${f.name}: record.${snake(f.name)}`).join(", ");
+  const query = view.filter
+    ? `    from(record in ${rowMod}, where: ${renderExpr(view.filter, queryCtx)})
+    |> Repo.all()`
+    : `    Repo.all(${rowMod})`;
+  return `${query}
+    |> Enum.map(fn record -> %{${proj_}} end)`;
+}
+
+/** Full-form projection view — the filtered `<Proj>Row` read, foreign-aggregate
+ *  bulk-loads for every `X id` follow, then the bind projection with the
+ *  follow rewrites. */
+function buildProjectionFullFormBody(
+  view: ViewIR,
+  rowMod: string,
+  contextModule: string,
+  ctx: RenderCtx,
+  queryCtx: RenderCtx,
+): string {
+  const output = view.output!;
+  const lines: string[] = [];
+  const query = view.filter
+    ? `from(record in ${rowMod}, where: ${renderExpr(view.filter, queryCtx)})\n      |> Repo.all()`
+    : `Repo.all(${rowMod})`;
+  lines.push(`    rows =\n      ${query}`);
+
+  // One `%{id => struct}` bulk-load per `X id` follow auxiliary, dependency
+  // order (shortest path first — a length-1 path sources its ids from the rows,
+  // a longer one from a prior map's values).
+  const pathToMap = new Map<string, { mapVar: string; aggName: string }>();
+  for (const aux of output.auxiliaries) {
+    const mapVar = snake(aux.mapVar);
+    const aggMod = `${contextModule}.${upperFirst(aux.aggName)}`;
+    const idsSource = projIdsSourceForAux(aux, pathToMap);
+    lines.push(
+      `    ${mapVar} =\n      Repo.all(from(a in ${aggMod}, where: a.id in ^${idsSource}))\n      |> Map.new(fn a -> {a.id, a} end)`,
+    );
+    pathToMap.set(aux.path.join("."), { mapVar, aggName: aux.aggName });
+  }
+
+  lines.push(`    Enum.map(rows, fn record ->`);
+  lines.push(`      %{`);
+  output.binds.forEach((bind, i) => {
+    const tail = i === output.binds.length - 1 ? "" : ",";
+    lines.push(
+      `        ${bind.name}: ${renderProjBindWithFollows(bind.expr, "record", ctx, pathToMap)}${tail}`,
+    );
+  });
+  lines.push(`      }`);
+  lines.push(`    end)`);
+  return lines.join("\n");
+}
+
+/** The id-source list for an auxiliary's bulk load.  Length-1 paths source from
+ *  the row var (`Enum.map(rows, & &1.<field>)`); length-2+ paths source from the
+ *  prior map's values (the auxiliary whose path is the current path's prefix). */
+function projIdsSourceForAux(
+  aux: { path: string[]; aggName: string; mapVar: string },
+  pathToMap: Map<string, { mapVar: string; aggName: string }>,
+): string {
+  if (aux.path.length === 1) {
+    return `Enum.map(rows, & &1.${snake(aux.path[0]!)})`;
+  }
+  const prev = pathToMap.get(aux.path.slice(0, -1).join("."));
+  if (!prev) return `[]`;
+  const finalField = snake(aux.path[aux.path.length - 1]!);
+  return `Enum.map(Map.values(${prev.mapVar}), & &1.${finalField})`;
+}
+
+/** Render a projection-view bind with chained `X id` follow rewriting.  At each
+ *  `member` whose receiverType is `X id`, the access becomes
+ *  `Map.get(<map>, <receiverRendered>).<member>`; a non-follow shape falls back
+ *  to the standard in-memory `renderExpr` (a plain `record.<col>` read). */
+function renderProjBindWithFollows(
+  expr: ExprIR,
+  thisName: string,
+  ctx: RenderCtx,
+  pathToMap: Map<string, { mapVar: string; aggName: string }>,
+): string {
+  if (expr.kind === "member" && expr.receiverType.kind === "id") {
+    const path = projIdFollowPath(expr.receiver);
+    if (path) {
+      const map = pathToMap.get(path.join("."));
+      if (map) {
+        const receiver = renderProjIdReceiver(expr.receiver, thisName, ctx, pathToMap);
+        return `Map.get(${map.mapVar}, ${receiver}).${snake(expr.member)}`;
+      }
+    }
+  }
+  return renderExpr(expr, { ...ctx, thisName });
+}
+
+/** Render an Id-typed follow receiver — a `ref` (single hop, `record.<field>`)
+ *  or a chain of Id-typed member accesses (multi-hop, each intermediate hop
+ *  through its map's `Map.get(...)`). */
+function renderProjIdReceiver(
+  expr: ExprIR,
+  thisName: string,
+  ctx: RenderCtx,
+  pathToMap: Map<string, { mapVar: string; aggName: string }>,
+): string {
+  if (expr.kind === "ref") {
+    return `${thisName}.${snake(expr.name)}`;
+  }
+  if (expr.kind === "member" && expr.receiverType.kind === "id") {
+    const path = projIdFollowPath(expr.receiver);
+    if (path) {
+      const map = pathToMap.get(path.join("."));
+      if (map) {
+        const inner = renderProjIdReceiver(expr.receiver, thisName, ctx, pathToMap);
+        return `Map.get(${map.mapVar}, ${inner}).${snake(expr.member)}`;
+      }
+    }
+  }
+  return renderExpr(expr, { ...ctx, thisName });
+}
+
+/** Emission-time `X id` follow-path check (the local sibling of the lowering's
+ *  helper, mirroring `view-routes-builder.ts:idFollowPath` on Hono). */
+function projIdFollowPath(e: ExprIR): string[] | undefined {
+  if (e.kind === "ref" && e.type?.kind === "id") return [e.name];
+  if (e.kind === "member" && e.receiverType.kind === "id") {
+    const inner = projIdFollowPath(e.receiver);
+    if (!inner) return undefined;
+    return [...inner, e.member];
+  }
+  return undefined;
 }
 
 function renderVanillaView(

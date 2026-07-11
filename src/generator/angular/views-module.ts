@@ -65,6 +65,17 @@ function shorthandRow(view: ViewIR, ctx: BoundedContextIR): Array<{ name: string
       ts: f.source === "id" ? "string" : wireTsType(f.type),
     }));
   }
+  if (view.source.kind === "projection") {
+    // A projection source's row is its canonical wire shape — correlation id
+    // token then the state fields (projection.md v1.1).
+    const proj = ctx.projections.find((p) => p.name === view.source.name);
+    const shape = proj?.wireShape;
+    if (!shape) return [{ name: "id", ts: "string" }];
+    return shape.map((f) => ({
+      name: f.name,
+      ts: f.source === "id" ? "string" : wireTsType(f.type),
+    }));
+  }
   const agg = ctx.aggregates.find((a) => a.name === view.source.name);
   const out: Array<{ name: string; ts: string }> = [{ name: "id", ts: "string" }];
   for (const f of agg?.fields ?? []) {

@@ -389,8 +389,8 @@ function emitFullFormTail(view: ViewIR): string[] {
     );
     pathToMap.set(aux.path.join("."), { mapVar, aggName: aux.aggName });
   }
-  const projectedFields = view.output!.binds
-    .map((b) => `      ${b.name}: ${renderBindWithFollows(b.expr, "r", pathToMap)}`)
+  const projectedFields = view
+    .output!.binds.map((b) => `      ${b.name}: ${renderBindWithFollows(b.expr, "r", pathToMap)}`)
     .join(",\n");
   out.push(`    const projected = rows.map((r) => ({\n${projectedFields},\n    }));`);
   out.push(

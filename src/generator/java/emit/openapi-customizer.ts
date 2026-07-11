@@ -357,6 +357,12 @@ export function buildJavaOpenApiContract(
         const aggName = view.source.name;
         wrapper = `${aggName}ListResponse`;
         wrappers.set(wrapper, `${aggName}Response`);
+      } else if (view.source.kind === "projection") {
+        // Shorthand projection view → reuse the projection's `<Proj>Response`
+        // wire shape (the v1 read endpoint's DTO), wrapped as a named array.
+        const projName = view.source.name;
+        wrapper = `${projName}ListResponse`;
+        wrappers.set(wrapper, `${projName}Response`);
       } else {
         // Workflow-sourced view → `<View>Row` element wrapper.
         wrapper = `${upperFirst(view.name)}Response`;

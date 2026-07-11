@@ -64,8 +64,13 @@ export function buildViewsApiModule(
     // Shorthand views re-export the source's list response: an aggregate's
     // `<Agg>ListResponse` (from `./<agg>`) or a workflow's
     // `<Wf>InstanceListResponse` (from `./workflows`, workflow-instance-views.md).
+    // A projection source has no frontend api module, so a shorthand projection
+    // view emits its row schema INLINE from `proj.wireShape` (below) — nothing
+    // to import here (projection.md v1.1).
     if (view.source.kind === "workflow") workflowSources.add(view.source.name);
-    else shorthandSources.add(view.source.name);
+    else if (view.source.kind === "projection") {
+      /* inline — no import */
+    } else shorthandSources.add(view.source.name);
   }
   for (const aggName of [...shorthandSources].sort()) {
     lines.push(`import { ${aggName}ListResponse } from "./${lowerFirst(aggName)}";`);
@@ -82,7 +87,7 @@ export function buildViewsApiModule(
   }
   lines.push("");
 
-  for (const { view } of views) {
+  for (const { view, ctx } of views) {
     const slug = snake(view.name);
     if (view.output) {
       lines.push(`export const ${upperFirst(view.name)}Row = z.object({`);
@@ -99,6 +104,23 @@ export function buildViewsApiModule(
       lines.push(
         `export type ${upperFirst(view.name)}Response = z.infer<typeof ${upperFirst(view.name)}Response>;`,
       );
+    } else if (view.source.kind === "projection") {
+      // Shorthand projection view: no frontend api module for a projection, so
+      // emit the row schema inline from the projection's canonical wire shape —
+      // correlation field as an id string, then the state fields (projection.md
+      // v1.1).  Mirrors the full-form branch's inline `z.object`.
+      const T = upperFirst(view.name);
+      const proj = ctx.projections.find((p) => p.name === view.source.name);
+      lines.push(`export const ${T}Row = z.object({`);
+      for (const f of proj?.wireShape ?? []) {
+        lines.push(
+          `  ${f.name}: ${f.source === "id" ? "z.string()" : zodForViewResponse(f.type, f.optional)},`,
+        );
+      }
+      lines.push(`});`);
+      lines.push(`export type ${T}Row = z.infer<typeof ${T}Row>;`);
+      lines.push(`export const ${T}Response = z.array(${T}Row);`);
+      lines.push(`export type ${T}Response = z.infer<typeof ${T}Response>;`);
     } else {
       // Shorthand: reuse the source's list-response — an aggregate's
       // `<Agg>ListResponse` or a workflow's `<Wf>InstanceListResponse`

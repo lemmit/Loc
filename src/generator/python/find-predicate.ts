@@ -114,6 +114,15 @@ export function lowerWorkflowFilterToSqlAlchemy(e: ExprIR, wf: WorkflowIR): PyPr
   return lowerOver(e, rowClassName(wf.name), [], "current_user");
 }
 
+/** Lower a projection-sourced view's filter (projection.md v1.1) to a predicate
+ *  over the projection read-model `<Proj>Row`.  `this.<stateField>` refs bind to
+ *  the row's snake columns exactly as a workflow-state view binds to its saga
+ *  row; projection rows carry no reference collections, so the join-table
+ *  `contains` arm never fires here. */
+export function lowerProjectionFilterToSqlAlchemy(e: ExprIR, projName: string): PyPredicate | null {
+  return lowerOver(e, rowClassName(projName), [], "current_user");
+}
+
 function lowerOver(
   e: ExprIR,
   row: string,

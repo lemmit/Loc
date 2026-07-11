@@ -54,8 +54,13 @@ export function buildViewsApiModule(contexts: BoundedContextIR[]): string {
     // Shorthand views re-export the source's list response: an aggregate's
     // `<Agg>ListResponse` (from `./<agg>`) or a workflow's
     // `<Wf>InstanceListResponse` (from `./workflows`, workflow-instance-views.md).
+    // A projection source has no frontend api module — a shorthand projection
+    // view emits its row schema inline from `proj.wireShape` (below), no import
+    // (projection.md v1.1).
     if (view.source.kind === "workflow") workflowSources.add(view.source.name);
-    else shorthandSources.add(view.source.name);
+    else if (view.source.kind === "projection") {
+      /* inline — no import */
+    } else shorthandSources.add(view.source.name);
   }
   for (const aggName of [...shorthandSources].sort()) {
     lines.push(`import { ${aggName}ListResponse } from "./${lowerFirst(aggName)}";`);
@@ -72,7 +77,7 @@ export function buildViewsApiModule(contexts: BoundedContextIR[]): string {
   }
   lines.push("");
 
-  for (const { view } of views) {
+  for (const { view, ctx } of views) {
     const slug = snake(view.name);
     if (view.output) {
       lines.push(`export const ${upperFirst(view.name)}Row = z.object({`);
@@ -89,6 +94,22 @@ export function buildViewsApiModule(contexts: BoundedContextIR[]): string {
       lines.push(
         `export type ${upperFirst(view.name)}Response = z.infer<typeof ${upperFirst(view.name)}Response>;`,
       );
+    } else if (view.source.kind === "projection") {
+      // Shorthand projection view: inline row schema from the projection's wire
+      // shape (id token then state fields) — no frontend projection module to
+      // reuse (projection.md v1.1).
+      const T = upperFirst(view.name);
+      const proj = ctx.projections.find((p) => p.name === view.source.name);
+      lines.push(`export const ${T}Row = z.object({`);
+      for (const f of proj?.wireShape ?? []) {
+        lines.push(
+          `  ${f.name}: ${f.source === "id" ? "z.string()" : zodForViewResponse(f.type, f.optional)},`,
+        );
+      }
+      lines.push(`});`);
+      lines.push(`export type ${T}Row = z.infer<typeof ${T}Row>;`);
+      lines.push(`export const ${T}Response = z.array(${T}Row);`);
+      lines.push(`export type ${T}Response = z.infer<typeof ${T}Response>;`);
     } else {
       // Shorthand: reuse the source's list-response — an aggregate's
       // `<Agg>ListResponse` or a workflow's `<Wf>InstanceListResponse`

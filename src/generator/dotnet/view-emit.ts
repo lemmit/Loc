@@ -4,7 +4,10 @@ import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   ExprIR,
+  ProjectionIR,
+  TypeIR,
   ViewIR,
+  WireField,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { exprUsesCurrentUser, viewUsesCurrentUser } from "../../ir/types/loom-ir.js";
@@ -12,6 +15,7 @@ import { camelId, opView } from "../../ir/util/openapi-ids.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { dtoParam, projectEntityExpr, projectToResponse, wireType } from "./dto-mapping.js";
+import { projectionRowDbSet } from "./projection-state-emit.js";
 import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
 import { esCorrIdClass, esEventDbSet } from "./workflow-eventsourced-emit.js";
 import { workflowStateClass, workflowStateDbSet } from "./workflow-state-emit.js";
@@ -61,6 +65,31 @@ export function emitViews(
       sourcemap?.file(queryPath, queryContent, view.origin, construct);
       const handlerPath = `Application/Views/${upperFirst(view.name)}Handler.cs`;
       const handlerContent = renderWorkflowViewHandler(view, wf, ctx, ns);
+      out.set(handlerPath, handlerContent);
+      sourcemap?.file(handlerPath, handlerContent, view.origin, construct);
+      continue;
+    }
+    // Projection-sourced view (projection.md v1.1): a Mediator query whose
+    // handler reads the `<Proj>Row` EF DbSet directly (no repository) with the
+    // view filter, then — full form — bulk-loads the foreign aggregates an
+    // `X id` follow bind references and projects each row through the binds
+    // (the shared aggregate full-form tail, over projection rows).  Shorthand
+    // form returns the projection's `<Proj>Response` wire shape.
+    if (view.source.kind === "projection") {
+      const proj = ctx.projections.find((p) => p.name === view.source.name);
+      if (!proj) continue; // validator already errored
+      if (view.output) {
+        const rowPath = `Application/Views/${upperFirst(view.name)}Row.cs`;
+        const rowContent = renderRowRecord(view, ctx, ns);
+        out.set(rowPath, rowContent);
+        sourcemap?.file(rowPath, rowContent, view.origin, construct);
+      }
+      const queryPath = `Application/Views/${upperFirst(view.name)}Query.cs`;
+      const queryContent = renderProjectionViewQuery(view, proj, ns);
+      out.set(queryPath, queryContent);
+      sourcemap?.file(queryPath, queryContent, view.origin, construct);
+      const handlerPath = `Application/Views/${upperFirst(view.name)}Handler.cs`;
+      const handlerContent = renderProjectionViewHandler(view, proj, ctx, ns);
       out.set(handlerPath, handlerContent);
       sourcemap?.file(handlerPath, handlerContent, view.origin, construct);
       continue;
@@ -382,6 +411,306 @@ ${gateLines.length > 0 ? gateLines.join("\n") + "\n" : ""}${queryBody}
 `;
 }
 
+// ---------------------------------------------------------------------------
+// Projection-sourced views (projection.md v1.1) — a Mediator query whose
+// handler reads the `<Proj>Row` read-model DbSet directly (no repository) with
+// the view filter pushed to a SQL `WHERE`, then:
+//   - **full form** — bulk-loads every foreign aggregate an `X id` follow bind
+//     references (`FindManyByIdsAsync`, the aggregate full-form tail) and
+//     projects each row through the binds, returning `<View>Row`;
+//   - **shorthand** — projects each row through the projection's wire shape,
+//     returning the same `<Proj>Response` the v1 projection read controller
+//     emits.
+//
+// The one wrinkle versus the aggregate arm: every NON-KEY projection column is
+// nullable (partial upsert), so a bind referencing one — a bare column ref or
+// the leaf of an `X id` follow — is normalized back to its non-null domain type
+// (`.Value` for a value type / `!` for a reference type) before `projectToResponse`
+// runs, and the follow bulk-load filters nulls out of its id source.  The
+// correlation key column is NOT NULL, so it needs neither.
+// ---------------------------------------------------------------------------
+
+/** The projection view's response record — `<View>Row` (full form) or the
+ *  projection's `<Proj>Response` wire record (shorthand). */
+function projectionResponseRecordName(view: ViewIR, proj: ProjectionIR): string {
+  return view.output ? `${upperFirst(view.name)}Row` : `${upperFirst(proj.name)}Response`;
+}
+
+function renderProjectionViewQuery(view: ViewIR, proj: ProjectionIR, ns: string): string {
+  const responseRecord = projectionResponseRecordName(view, proj);
+  // Shorthand reuses the projection's `<Proj>Response` (Application.Workflows);
+  // full form's `<View>Row` is sibling in Application.Views.
+  const usingResponse = view.output ? "" : `using ${ns}.Application.Workflows;\n`;
+  return `// Auto-generated.
+using System.Collections.Generic;
+using Mediator;
+${usingResponse}namespace ${ns}.Application.Views;
+
+public sealed record ${upperFirst(view.name)}Query() : IQuery<IReadOnlyList<${responseRecord}>>;
+`;
+}
+
+function renderProjectionViewHandler(
+  view: ViewIR,
+  proj: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+): string {
+  const queryName = `${upperFirst(view.name)}Query`;
+  const handlerName = `${upperFirst(view.name)}Handler`;
+  const responseRecord = projectionResponseRecordName(view, proj);
+  const dbSet = projectionRowDbSet(proj);
+  const auxiliaries = view.output?.auxiliaries ?? [];
+  const usings = new Set<string>();
+  for (const f of view.output?.fields ?? []) {
+    const bind = view.output?.binds.find((b) => b.name === f.name);
+    if (bind) collectCsExprUsings(bind.expr, usings);
+  }
+  if (view.filter) collectCsExprUsings(view.filter, usings);
+  if (view.requires) collectCsExprUsings(view.requires, usings);
+  // Authorization gate — same shape as the workflow / aggregate arms; the
+  // accessor is injected only when a gate references currentUser.
+  const gateUsesUser = !!view.requires && exprUsesCurrentUser(view.requires);
+  // Ctor: AppDbContext always, one foreign repository per follow-referenced
+  // aggregate (deduped), plus the current-user accessor for a user gate.
+  const fields: string[] = [`    private readonly AppDbContext _db;`];
+  const ctorParams: string[] = [`AppDbContext db`];
+  const ctorAssigns: string[] = [`_db = db`];
+  const seenAggs = new Set<string>();
+  for (const aux of auxiliaries) {
+    if (seenAggs.has(aux.aggName)) continue;
+    seenAggs.add(aux.aggName);
+    const fieldName = `_${lowerFirst(aux.aggName)}Repo`;
+    fields.push(`    private readonly I${aux.aggName}Repository ${fieldName};`);
+    ctorParams.push(`I${aux.aggName}Repository ${fieldName.replace(/^_/, "")}`);
+    ctorAssigns.push(`${fieldName} = ${fieldName.replace(/^_/, "")}`);
+  }
+  if (gateUsesUser) {
+    fields.push(`    private readonly ICurrentUserAccessor _currentUser;`);
+    ctorParams.push(`ICurrentUserAccessor currentUser`);
+    ctorAssigns.push(`_currentUser = currentUser`);
+  }
+  const ctor =
+    ctorParams.length === 1
+      ? `    public ${handlerName}(${ctorParams[0]}) => _db = db;`
+      : `    public ${handlerName}(${ctorParams.join(", ")})\n    {\n        ${ctorAssigns.join(";\n        ")};\n    }`;
+  // Authorization gate lines, emitted before the query runs.
+  const gateLines: string[] = [];
+  if (view.requires) {
+    if (gateUsesUser) gateLines.push(`        var currentUser = _currentUser.User;`);
+    gateLines.push(
+      `        if (!(${renderCsExpr(view.requires)})) throw new ForbiddenException(${JSON.stringify(
+        `Forbidden: view ${view.name}`,
+      )});`,
+    );
+  }
+  // SQL-pushed row read over the read-model DbSet (`this.<col>` → `r.<Col>`).
+  const where = view.filter
+    ? renderCsExpr(view.filter, { thisName: "r", efQuery: true })
+    : undefined;
+  const readLine = `        var rows = await _db.${dbSet}.AsNoTracking()${
+    where ? `.Where(r => ${where})` : ""
+  }.ToListAsync(cancellationToken);`;
+  // Full-form bind-projection tail (bulk-load + follow rewrite over the rows),
+  // else the shorthand projection wire shape.
+  const pathToMap = new Map<string, { mapVar: string; aggName: string }>();
+  const auxLines: string[] = [];
+  for (const aux of auxiliaries) {
+    const repoField = `_${lowerFirst(aux.aggName)}Repo`;
+    const mapVar = aux.mapVar;
+    const idsExpr = projIdsSourceForAux(aux, proj, pathToMap);
+    auxLines.push(
+      `        var ${mapVar} = (await ${repoField}.FindManyByIdsAsync(${idsExpr}, cancellationToken)).ToDictionary(__a => __a.Id);`,
+    );
+    pathToMap.set(aux.path.join("."), { mapVar, aggName: aux.aggName });
+  }
+  const projection = view.output
+    ? projectProjectionFullForm(view, proj, ctx, pathToMap)
+    : projectProjectionShorthand(proj, ctx);
+  // Imports.  Full form pulls each follow aggregate's Domain namespace (for
+  // `IXRepository`); shorthand pulls Application.Workflows (for `<Proj>Response`).
+  const auxUsings = [
+    ...new Set(auxiliaries.map((a) => `using ${ns}.Domain.${plural(a.aggName)};`)),
+  ].join("\n");
+  const usingResponse = view.output ? "" : `using ${ns}.Application.Workflows;\n`;
+  const authUsing = gateUsesUser ? `using ${ns}.Auth;\n` : "";
+  const commonUsing = view.requires ? `using ${ns}.Domain.Common;\n` : "";
+  const extraUsings = [...usings]
+    .sort()
+    .map((n) => `using ${n};`)
+    .join("\n");
+  return `// Auto-generated.
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;${extraUsings ? "\n" + extraUsings : ""}
+using Microsoft.EntityFrameworkCore;
+using Mediator;
+using ${ns}.Domain.Ids;
+using ${ns}.Domain.ValueObjects;
+using ${ns}.Domain.Enums;
+${auxUsings ? auxUsings + "\n" : ""}${authUsing}${commonUsing}${usingResponse}using ${ns}.Infrastructure.Persistence;
+using ${ns}.Infrastructure.Persistence.Projections;
+
+namespace ${ns}.Application.Views;
+
+public sealed class ${handlerName} : IQueryHandler<${queryName}, IReadOnlyList<${responseRecord}>>
+{
+${fields.join("\n")}
+${ctor}
+
+    public async ValueTask<IReadOnlyList<${responseRecord}>> Handle(${queryName} query, CancellationToken cancellationToken)
+    {
+${gateLines.length > 0 ? gateLines.join("\n") + "\n" : ""}${readLine}
+${auxLines.join("\n")}${auxLines.length > 0 ? "\n" : ""}        return rows.Select(d => ${projection}).ToList();
+    }
+}
+`;
+}
+
+/** Full-form projection: one `<View>Row` per row, each bind rendered with the
+ *  `X id` follow rewrites + nullable-column normalization. */
+function projectProjectionFullForm(
+  view: ViewIR,
+  proj: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
+  pathToMap: Map<string, { mapVar: string; aggName: string }>,
+): string {
+  const args = view.output!.fields.map((f) => {
+    const bind = view.output!.binds.find((b) => b.name === f.name)!;
+    const rendered = renderProjectionBind(bind.expr, proj, pathToMap);
+    return projectToResponse(rendered, f.type, ctx);
+  });
+  return `new ${upperFirst(view.name)}Row(${args.join(", ")})`;
+}
+
+/** Shorthand projection: the projection's `<Proj>Response`, projected from the
+ *  row's wire shape exactly like the v1 projection read controller (non-key
+ *  columns nullable). */
+function projectProjectionShorthand(proj: ProjectionIR, ctx: EnrichedBoundedContextIR): string {
+  const args = (proj.wireShape ?? [])
+    .map((f) => projectToResponse(`d.${upperFirst(f.name)}`, projWireFieldType(f), ctx))
+    .join(", ");
+  return `new ${upperFirst(proj.name)}Response(${args})`;
+}
+
+/** Every non-key projection column is nullable → wrap its wire field as optional
+ *  (mirrors projection-emit's `wireFieldType`) so `projectToResponse` unwraps it
+ *  the same way the projection read controller does. */
+function projWireFieldType(f: WireField): TypeIR {
+  if (f.source === "id" || f.type.kind === "optional") return f.type;
+  return { kind: "optional", inner: f.type };
+}
+
+/** True when a projection column's domain type lowers to a C# value type (its
+ *  nullable form is `Nullable<T>`, unwrapped with `.Value`); reference types
+ *  (`string`, value objects) unwrap with the null-forgiving `!`. */
+function projColIsValueType(t: TypeIR): boolean {
+  const leaf = t.kind === "optional" ? t.inner : t;
+  switch (leaf.kind) {
+    case "id":
+    case "enum":
+      return true;
+    case "primitive":
+      return leaf.name !== "string";
+    default:
+      return false;
+  }
+}
+
+/** A bare projection-column ref, normalized to its NON-null domain type: the
+ *  correlation key is already non-null; a non-key column is `T?`, unwrapped with
+ *  `.Value` (value type) / `!` (reference type).  Undefined when `name` is not a
+ *  projection state field. */
+function normalizeProjColRef(name: string, proj: ProjectionIR): string | undefined {
+  const field = proj.stateFields.find((f) => f.name === name);
+  if (!field) return undefined;
+  const prop = `d.${upperFirst(name)}`;
+  if (name === proj.correlationField) return prop; // NOT NULL key
+  // `d.<Col>` is `Nullable<T>` / `T?`; the partial upsert always populated it,
+  // but the compiler can't see that — unwrap through the null-forgiving `!`
+  // (`!.Value` for a value type, so `.Value` doesn't trip CS8629; a bare `!`
+  // for a reference type).
+  return projColIsValueType(field.type) ? `${prop}!.Value` : `${prop}!`;
+}
+
+/** Bind renderer for a projection full-form view — the `X id` follow rewrite
+ *  (dictionary lookups) with the nullable-column normalization at every
+ *  projection-row leaf.  Non-follow refs to a column normalize the same way;
+ *  everything else delegates to `renderCsExpr` with `thisName: "d"`. */
+function renderProjectionBind(
+  expr: ExprIR,
+  proj: ProjectionIR,
+  pathToMap: Map<string, { mapVar: string; aggName: string }>,
+): string {
+  if (expr.kind === "member" && expr.receiverType.kind === "id") {
+    const path = idFollowPathCs(expr.receiver);
+    if (path) {
+      const map = pathToMap.get(path.join("."));
+      if (map) {
+        const inner = renderProjIdReceiver(expr.receiver, proj, pathToMap);
+        return `${map.mapVar}[${inner}].${upperFirst(expr.member)}`;
+      }
+    }
+  }
+  if (expr.kind === "ref") {
+    const norm = normalizeProjColRef(expr.name, proj);
+    if (norm) return norm;
+  }
+  return renderCsExpr(expr, { thisName: "d" });
+}
+
+/** Render an Id-typed receiver rooted in a projection column ref (leaf,
+ *  nullable-normalized) or a chain of dictionary follows (each intermediate hop
+ *  keyed into its map). */
+function renderProjIdReceiver(
+  expr: ExprIR,
+  proj: ProjectionIR,
+  pathToMap: Map<string, { mapVar: string; aggName: string }>,
+): string {
+  if (expr.kind === "ref") {
+    return normalizeProjColRef(expr.name, proj) ?? `d.${upperFirst(expr.name)}`;
+  }
+  if (expr.kind === "member" && expr.receiverType.kind === "id") {
+    const path = idFollowPathCs(expr.receiver);
+    if (path) {
+      const map = pathToMap.get(path.join("."));
+      if (map) {
+        const inner = renderProjIdReceiver(expr.receiver, proj, pathToMap);
+        return `${map.mapVar}[${inner}].${upperFirst(expr.member)}`;
+      }
+    }
+  }
+  return renderCsExpr(expr, { thisName: "d" });
+}
+
+/** Pick the C# id-source for a projection follow's bulk load.  Length-1 paths
+ *  source from the projection rows (`d.<Col>`) — a non-key id column is nullable,
+ *  so nulls are filtered and the value unwrapped before `FindManyByIdsAsync`;
+ *  length-2+ paths source from the prior map's aggregate values (non-null). */
+function projIdsSourceForAux(
+  aux: { path: string[]; aggName: string; mapVar: string },
+  proj: ProjectionIR,
+  pathToMap: Map<string, { mapVar: string; aggName: string }>,
+): string {
+  if (aux.path.length === 1) {
+    const col = aux.path[0]!;
+    const prop = `d.${upperFirst(col)}`;
+    if (col === proj.correlationField) {
+      return `rows.Select(d => ${prop}).ToList()`;
+    }
+    // Non-key id column is `Nullable<XId>`; drop null rows and unwrap through
+    // the null-forgiving `!` so `.Value` doesn't trip CS8629 (the compiler
+    // doesn't carry the `HasValue` guard across the `Select` lambda).
+    return `rows.Where(d => ${prop}.HasValue).Select(d => ${prop}!.Value).ToList()`;
+  }
+  const prevPath = aux.path.slice(0, -1).join(".");
+  const prev = pathToMap.get(prevPath);
+  if (!prev) return `new List<object>()`;
+  const finalField = aux.path[aux.path.length - 1]!;
+  return `${prev.mapVar}.Values.Select(__a => __a.${upperFirst(finalField)}).ToList()`;
+}
+
 /** Render a bind expression with chained `X id` follow rewriting
  *  for .NET.  At each `member` whose receiverType is `X id`, the
  *  access becomes `<map>[<receiverRendered>].<Member>`; receiver
@@ -458,7 +787,11 @@ function renderController(ctx: BoundedContextIR, ns: string, routePrefix?: strin
   const route = `${routePrefix ?? ""}views`;
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
   const wfByName = new Map(ctx.workflows.map((w) => [w.name, w] as const));
+  const projByName = new Map(ctx.projections.map((p) => [p.name, p] as const));
   let hasWorkflowView = false;
+  // A shorthand projection view returns the projection's `<Proj>Response`
+  // (Application.Workflows); a full-form one returns `<View>Row` (Application.Views).
+  let hasShorthandProjectionView = false;
   const blocks: string[] = [];
   for (const view of ctx.views) {
     let recordName: string;
@@ -467,6 +800,11 @@ function renderController(ctx: BoundedContextIR, ns: string, routePrefix?: strin
       if (!wf?.instanceWireShape) continue;
       recordName = `${upperFirst(wf.name)}InstanceResponse`;
       hasWorkflowView = true;
+    } else if (view.source.kind === "projection") {
+      const proj = projByName.get(view.source.name);
+      if (!proj) continue;
+      recordName = projectionResponseRecordName(view, proj);
+      if (!view.output) hasShorthandProjectionView = true;
     } else {
       const agg = aggsByName.get(view.source.name);
       if (!agg) continue;
@@ -493,8 +831,11 @@ function renderController(ctx: BoundedContextIR, ns: string, routePrefix?: strin
         .map((a) => `using ${ns}.Application.${plural(a.name)}.Responses;`),
     ),
   ];
-  // Workflow-view responses (`<Wf>InstanceResponse`) live in Application.Workflows.
-  if (hasWorkflowView) aggResponseUsings.push(`using ${ns}.Application.Workflows;`);
+  // Workflow-view responses (`<Wf>InstanceResponse`) and shorthand
+  // projection-view responses (`<Proj>Response`) both live in Application.Workflows.
+  if (hasWorkflowView || hasShorthandProjectionView) {
+    aggResponseUsings.push(`using ${ns}.Application.Workflows;`);
+  }
   return `// Auto-generated.
 using System.Threading.Tasks;
 using Mediator;

@@ -146,6 +146,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   const hasViews = merged.views.some(
     (v) =>
       v.source.kind === "aggregate" ||
+      v.source.kind === "projection" ||
       (v.source.kind === "workflow" && wfHasInstanceShape.get(v.source.name) != null),
   );
   // A command workflow gets a POST route; an observable (correlation-bearing)

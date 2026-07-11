@@ -1,0 +1,34 @@
+system Shop { subdomain Sales { context Orders {
+  enum OrderStatus { Placed Shipped }
+  event OrderPlaced  { order: Order id, customer: Customer id }
+  event OrderShipped { order: Order id }
+  aggregate Customer { name: string }
+  repository Customers for Customer { }
+  aggregate Order {
+    status: OrderStatus
+    create place(customer: Customer id) {}
+    operation ship() { emit OrderShipped { order: id } }
+  }
+  repository Orders for Order { }
+  channel Lifecycle { carries: OrderPlaced, OrderShipped  retention: log  key: order }
+  projection OrderBook keyed by order {
+    order: Order id
+    customer: Customer id
+    status: OrderStatus
+    on(e: OrderPlaced)  { order := e.order  customer := e.customer  status := Placed }
+    on(e: OrderShipped) { status := Shipped }
+  }
+  // Full-form projection view: reads the OrderBook read-model row, filters by
+  // the folded status, and bind-follows the foreign `customer` id into Customer.
+  view ShippedOrders {
+    orderId: Order id
+    customerName: string
+    status: OrderStatus
+    from OrderBook where status == Shipped
+    bind orderId = order, customerName = customer.name, status = status
+  }
+  // Shorthand projection view: no output block → the projection wire shape.
+  view PlacedOrderBooks = OrderBook where status == Placed
+} } storage pg { type: postgres }
+  resource oState { for: Orders, kind: state, use: pg }
+  deployable salesApi { platform: elixir contexts: [Orders] dataSources: [oState] port: 4000 } }
