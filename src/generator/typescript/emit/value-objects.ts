@@ -50,10 +50,17 @@ function renderEnum(e: EnumIR): string[] {
 }
 
 function renderValueObject(v: ValueObjectIR): string[] {
+  // Explicit field declarations + constructor assignments, not TypeScript
+  // parameter properties — the latter is non-erasable sugar the type
+  // checker must desugar, which Node's `--experimental-strip-types` /
+  // unflagged type stripping (Node 24) rejects outright
+  // (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`); see docs/plans/dap-node-debug.md
+  // "Non-erasable syntax". Semantically identical output otherwise.
+  const fieldDecls = v.fields.map((f) => `  readonly ${f.name}: ${renderTsType(f.type)};`);
   const ctorParams = v.fields.map(
-    (f, i) =>
-      `    public readonly ${f.name}: ${renderTsType(f.type)}${i < v.fields.length - 1 ? "," : ""}`,
+    (f, i) => `    ${f.name}: ${renderTsType(f.type)}${i < v.fields.length - 1 ? "," : ""}`,
   );
+  const ctorAssignments = v.fields.map((f) => `    this.${f.name} = ${f.name};`);
   // Invariant violations throw DomainError, not a bare Error (S9): a VO
   // tripping on request input must surface through the ProblemDetails
   // taxonomy (400), never as an unclassified 500.
@@ -83,9 +90,11 @@ function renderValueObject(v: ValueObjectIR): string[] {
   const equalsBody = fieldEqs.length > 0 ? `return ${fieldEqs.join(" && ")};` : "return true;";
   return [
     `export class ${v.name} {`,
+    ...fieldDecls,
     "  constructor(",
     ...ctorParams,
     "  ) {",
+    ...ctorAssignments,
     ...invariants,
     "  }",
     "",

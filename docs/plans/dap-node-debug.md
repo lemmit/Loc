@@ -128,6 +128,31 @@ is a correctly-scoped, small, but **separate** follow-up slice with its own
 review, not something to fold silently into "Node debug wiring." Tracked
 below under Follow-ups.
 
+**RESOLVED (slice 2, Milestone 19).** `emit/value-objects.ts` now emits
+explicit field declarations + constructor assignments instead of parameter
+properties, unconditionally (every generated node project, flag on or off) —
+`test/generator/typescript/strip-erasable-constructors.test.ts` pins it. Both
+probes from Phase A re-run clean on the rewritten emitter: the isolated
+domain-module probe still succeeds, and — new for this slice — the value
+object itself no longer trips `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` when a full
+`index.ts` boot forces `value-objects.ts` to actually parse.
+
+**Adjacent gap found while re-proving the full-boot probe, NOT fixed by
+slice 2 (new follow-up, see below):** the full-server boot probe still hits
+`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` — just one file later. Every
+repository/reader class (`src/generator/typescript/repository-builder.ts`
+and its `-document`/`-embedded`/`-eventsourced` siblings,
+`base-reader-builder.ts`) and the `mikroorm` persistence adapter
+(`emit/mikroorm.ts`) inject their dependencies via the same parameter-property
+shape (`constructor(private readonly db: Db, private readonly events:
+DomainEventDispatcher) {}`), and these ARE on the request-handling load path
+(every route touches a repository). The Playwright page-object emitters
+(`src/generator/_frontend/page-objects-builder.ts` and friends) emit the same
+shape for their `constructor(public readonly page: Page)`, though those are
+test-only `.ts` files under `e2e/pages/`, not part of a server boot. This
+slice's spike-first discipline applies again: mechanical, low-risk, but its
+own correctly-scoped follow-up — see below.
+
 ### 3. tsx/tsup path — resolves, but does NOT chain to `.ddd` (confirmed, as expected)
 
 `npx tsx --enable-source-maps probe.mjs` runs (extensionless imports resolve
@@ -243,15 +268,27 @@ fence already established for their own gated content changes).
 
 ## Fan-out plan
 
-- **Value-object constructor rewrite** (near-term, small, separate slice):
-  change `emit/value-objects.ts` to explicit field declaration + constructor
-  assignment instead of TS parameter properties. Unblocks the FULL
-  generated server (not just isolated domain probes) from booting under
-  plain Node's type stripping. Gate the byte-identical comparisons the same
-  way this slice did (round-trip through the existing snapshot fixtures);
-  low risk since the output is semantically identical, but touches every
-  generated project's `value-objects.ts` unconditionally, so it deserves its
-  own review pass rather than riding in on this milestone.
+- **Value-object constructor rewrite** — **DONE (slice 2, Milestone 19).**
+  `emit/value-objects.ts` now emits explicit field declaration + constructor
+  assignment instead of TS parameter properties, unconditionally.
+- **Repository/reader/persistence-adapter constructor rewrite** (near-term,
+  small, separate slice — found while re-proving slice 2's full-boot probe,
+  see the RESOLVED note above): the same parameter-property shape lives in
+  `src/generator/typescript/repository-builder.ts` and its
+  `-document`/`-embedded`/`-eventsourced` siblings, `base-reader-builder.ts`,
+  and `emit/mikroorm.ts` (`constructor(private readonly db: Db, private
+  readonly events: DomainEventDispatcher) {}`). Unlike the VO gap, these ARE
+  on the request-handling load path (every route touches a repository), so
+  this is the ACTUAL remaining blocker to a full generated node server
+  booting cleanly under plain Node's type stripping. Same mechanical
+  low-risk rewrite; deserves its own review pass for the same reason the VO
+  rewrite did.
+- **Playwright page-object constructor rewrite** (lower priority — these are
+  test-only `.ts` files under `e2e/pages/`, never on a server boot path):
+  `src/generator/_frontend/page-objects-builder.ts` and its siblings emit
+  `constructor(public readonly page: Page) {}`. Only matters if a future
+  slice wants the e2e page objects themselves debuggable/strippable under
+  plain Node rather than via Playwright's own tsx-based runner.
 - **.NET debug config** (`launch.json` `type: "coreclr"` against the
   already-shipped `#line` → PDB weave, phase 6a) — later slice, same
   `.vscode/launch.json` file, additional configurations.
