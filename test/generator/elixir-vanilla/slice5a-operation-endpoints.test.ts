@@ -80,4 +80,88 @@ describe("vanilla — Slice P4.0 per-operation endpoints", () => {
     expect(router).toMatch(/post "\/accounts", AccountController, :create/);
     expect(router).toMatch(/get "\/accounts\/:id", AccountController, :show/);
   });
+
+  it("a NO-guard named op keeps the flat linear body (no `with ensure(...)` wrap)", async () => {
+    // `deposit` has no requires/precondition — its context fn stays byte-identical
+    // (plain changeset pipe), and no `ensure/2` helper is emitted.
+    const files = await generateSystemFiles(VANILLA_SOURCE);
+    const ctx = files.get([...files.keys()].find((k) => k.endsWith("lib/api/accounts.ex"))!)!;
+    const body = ctx.slice(ctx.indexOf("def deposit_account(%"));
+    expect(body.slice(0, body.indexOf("\n  end"))).not.toContain("with :ok <- ensure");
+    expect(ctx).not.toContain("defp ensure(");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A NAMED (non-returning) op with `requires`/`precondition` guards must deny
+// with a typed tuple (403/422), NOT raise an ArgumentError (→ 500).  The guards
+// hoist into a leading `with ensure(...)` chain that runs BEFORE the persist,
+// and the controller `else` maps the atoms.  (docs/plans/phoenix-op-guards-403-422.md)
+// ---------------------------------------------------------------------------
+
+const GUARDED_NAMED = `
+system Ledger {
+  subdomain Core {
+    context Accounts {
+      aggregate Account with crudish {
+        owner: string
+        balance: int
+
+        operation withdraw(amount: int) {
+          requires balance >= amount
+          precondition amount > 0
+          balance := balance - amount
+        }
+      }
+      repository Accounts for Account { }
+    }
+  }
+  api AccountsApi from Core
+  storage primary { type: postgres }
+  resource accountsState { for: Accounts, kind: state, use: primary }
+  deployable api {
+    platform: elixir
+    contexts: [Accounts]
+    dataSources: [accountsState]
+    serves: AccountsApi
+    port: 4000
+  }
+}
+`;
+
+describe("vanilla — guarded NAMED op denies 403/422 (not raise → 500)", () => {
+  const get = (m: Map<string, string>, suffix: string) =>
+    m.get([...m.keys()].find((k) => k.endsWith(suffix))!)!;
+
+  it("context fn hoists the guards into a `with ensure(...)` chain before the persist", async () => {
+    const ctx = get(await generateSystemFiles(GUARDED_NAMED), "lib/api/accounts.ex");
+    const body = ctx.slice(ctx.indexOf("def withdraw_account(%"));
+    const fn = body.slice(0, body.indexOf("\n  end"));
+    // `requires` → 403 (`:forbidden`); `precondition` → 422 (`:precondition_failed`).
+    expect(fn).toContain("with :ok <- ensure(record.balance >= amount, :forbidden),");
+    expect(fn).toContain(":ok <- ensure(amount > 0, :precondition_failed) do");
+    // Guards precede the mutation + persist.
+    const withAt = fn.indexOf("with :ok <- ensure");
+    const mutAt = fn.indexOf("record = %{record | balance:");
+    const persistAt = fn.indexOf("persist_change");
+    expect(withAt).toBeGreaterThan(-1);
+    expect(withAt).toBeLessThan(mutAt);
+    expect(mutAt).toBeLessThan(persistAt);
+    // NOT a raise — an expected denial is no longer a 500.
+    expect(fn).not.toContain("raise(ArgumentError");
+    // The shared `ensure/2` helper is emitted (state op now needs it).
+    expect(ctx).toContain("defp ensure(true, _reason), do: :ok");
+  });
+
+  it("controller `else` maps the denial atoms to 403 / 422", async () => {
+    const ctl = get(await generateSystemFiles(GUARDED_NAMED), "/controllers/account_controller.ex");
+    expect(ctl).toContain(
+      'ProblemDetails.problem_response(conn, 403, "Forbidden", "Operation not permitted")',
+    );
+    expect(ctl).toContain(
+      'ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", "A precondition failed")',
+    );
+    expect(ctl).toContain("{:error, :forbidden} ->");
+    expect(ctl).toContain("{:error, :precondition_failed} ->");
+  });
 });

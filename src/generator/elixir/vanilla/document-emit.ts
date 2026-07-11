@@ -40,6 +40,7 @@ import type {
   FieldIR,
   FindIR,
   OperationIR,
+  StmtIR,
   SystemIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
@@ -54,7 +55,12 @@ import { opUsesCurrentUser, stmtUsesParam } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import { NORMALIZE_KEYS_DEFP } from "./key-normalize.js";
 import { managedTimestampNames } from "./managed-timestamps.js";
-import { type OpFragment, renderReturningStmt } from "./operation-returns-emit.js";
+import {
+  type OpFragment,
+  renderOpGuardClause,
+  renderReturningStmt,
+  wrapOpBodyWithGuards,
+} from "./operation-returns-emit.js";
 
 /** True iff the aggregate's effective saving shape is `document` (binding-aware,
  *  matching the migration + validator).  `sys` may be absent in a few legacy
@@ -456,20 +462,26 @@ function renderDocFindFn(f: FindIR, aggModule: string): string {
 /** Bind the op's referenced params + render its body statements in STRUCT mode
  *  (`docStruct`) via the SHARED relational body renderer `renderReturningStmt` —
  *  `record` is the rehydrated `%<Agg>.Data{}` embed, so `field := value` →
- *  `record = %{record | field: value}`, guards raise, `emit` broadcasts, exactly
- *  as the relational path.  No `docMap` fork. */
+ *  `record = %{record | field: value}`, `emit` broadcasts, exactly as the
+ *  relational path.  No `docMap` fork.
+ *
+ *  `requires`/`precondition` guards are hoisted OUT of the linear body (returned
+ *  separately as `guardClauses`) so the callers can wrap the body + their persist/
+ *  return tail in a leading `with :ok <- ensure(...)` chain — an expected denial
+ *  returns `{:error, :forbidden}` (403) / `{:error, :precondition_failed}` (422)
+ *  BEFORE any write, instead of raising an ArgumentError (→ 500).  Mirrors the
+ *  relational named/returning-op guard hoist exactly. */
 function docOpStructBody(
   op: OperationIR,
   agg: AggregateIR,
   facadeMod: string,
   ctx: BoundedContextIR,
   /** Source-map Milestone 3 collector (`--sourcemap`) — only allocated by the
-   *  caller when a recorder is present (zero cost otherwise).  Unlike the
-   *  relational named/returning-op paths, a document op's body is never
-   *  filtered (no emit-hoisting restructuring here), so `op.statements` and
-   *  `body` line up 1:1 already. */
+   *  caller when a recorder is present (zero cost otherwise).  A document op's
+   *  body is filtered only of its guards (no emit-hoisting restructuring here),
+   *  so `bodyStmts` and `body` line up 1:1 for the sub-region zip. */
   opFragments?: OpFragment[],
-): { params: string[]; body: string[] } {
+): { params: string[]; body: string[]; guardClauses: string[] } {
   const rc: RenderCtx = {
     thisName: "record",
     contextModule: facadeMod,
@@ -483,14 +495,20 @@ function docOpStructBody(
   const params = usedParams.map(
     (p) => `    ${snake(p.name)} = Map.get(params, ${JSON.stringify(p.name)})`,
   );
-  const body = op.statements.map((s, i) => renderReturningStmt(s, ctx, rc, i));
+  const guardStmts = op.statements.filter(
+    (s): s is Extract<StmtIR, { kind: "requires" | "precondition" }> =>
+      s.kind === "requires" || s.kind === "precondition",
+  );
+  const guardClauses = guardStmts.map((s) => renderOpGuardClause(s, rc));
+  const bodyStmts = op.statements.filter((s) => s.kind !== "requires" && s.kind !== "precondition");
+  const body = bodyStmts.map((s, i) => renderReturningStmt(s, ctx, rc, i));
   if (opFragments && body.length > 0) {
     opFragments.push({
       fragmentText: body.join("\n"),
-      subRegions: statementSubRegions(op.statements, body, `${ctx.name}.${agg.name}.${op.name}`),
+      subRegions: statementSubRegions(bodyStmts, body, `${ctx.name}.${agg.name}.${op.name}`),
     });
   }
-  return { params, body };
+  return { params, body, guardClauses };
 }
 
 /** `<op>_<agg>(row, params)` for a document aggregate (Route A slice 2) — bind
@@ -509,19 +527,36 @@ export function renderDocNamedOpFunction(
   const aggSnake = snake(agg.name);
   const aggModule = `${facadeMod}.${aggPascal}`;
   const repoMod = `${aggModule}Repository`;
-  const { params, body } = docOpStructBody(op, agg, facadeMod, ctx, opFragments);
-  const prelude = [`    record = row.data`, ...params, ...body].join("\n");
+  const { params, body, guardClauses } = docOpStructBody(op, agg, facadeMod, ctx, opFragments);
   const actorParam = opUsesCurrentUser(op) ? ", current_user \\\\ nil" : "";
+  // The re-embed persist tail (shared by both the guarded + guard-free shapes).
+  const persistTail = [
+    "",
+    "    row",
+    "    |> Ecto.Changeset.change(%{version: row.version + 1})",
+    "    |> Ecto.Changeset.put_embed(:data, Map.from_struct(record))",
+    `    |> ${repoMod}.persist_change()`,
+  ];
+  // A guarded op hoists its `requires`/`precondition` into a leading
+  // `with ensure(...)` chain (403/422 denials) — `record = row.data` + param
+  // binds stay before the `with` (the guards read `record.<field>`), the body +
+  // persist tail move inside the `do` block.  The `{:error, atom()}` spec arm
+  // carries the denial atoms.  A guard-free op keeps the flat layout
+  // (byte-identical).
+  const bodyContent =
+    guardClauses.length > 0
+      ? [
+          `    record = row.data`,
+          ...params,
+          ...wrapOpBodyWithGuards(guardClauses, [...body, ...persistTail]),
+        ].join("\n")
+      : `${[`    record = row.data`, ...params, ...body].join("\n")}\n${persistTail.join("\n")}`;
+  const denialSpec = guardClauses.length > 0 ? " | {:error, atom()}" : "";
   return `  @doc "Named operation \`${op.name}\` on \`${aggPascal}\` (document shape) — runs the body against the embedded struct, then re-embeds + bumps version."
   @spec ${opSnake}_${aggSnake}(${aggModule}.t(), map()) ::
-          {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}${denialSpec}
   def ${opSnake}_${aggSnake}(%${aggModule}{} = row, params${actorParam}) when is_map(params) do
-${prelude}
-
-    row
-    |> Ecto.Changeset.change(%{version: row.version + 1})
-    |> Ecto.Changeset.put_embed(:data, Map.from_struct(record))
-    |> ${repoMod}.persist_change()
+${bodyContent}
   end`;
 }
 
@@ -549,19 +584,38 @@ export function renderDocReturningOpFunction(
     op.returnType.variants.some((v) => v.kind === "entity" && v.name === agg.name);
   const successTail =
     !lastIsReturn && succeedsWithAggregate ? `\n    {:ok, ${docWireMap(agg)}}` : "";
-  const { params, body } = docOpStructBody(op, agg, facadeMod, ctx, opFragments);
-  // `record = row.data` is live only when the body reads/writes `record` or the
-  // success wire projects its fields; otherwise skip it (and underscore `row`,
-  // read only for `.data`) so the struct-guarded head doesn't warn under -Werror.
-  const usesRecord = body.some((l) => /\brecord\b/.test(l)) || successTail !== "";
+  const { params, body, guardClauses } = docOpStructBody(op, agg, facadeMod, ctx, opFragments);
+  // `record = row.data` is live only when the body reads/writes `record`, the
+  // success wire projects its fields, OR a hoisted guard reads `record.<field>`;
+  // otherwise skip it (and underscore `row`, read only for `.data`) so the
+  // struct-guarded head doesn't warn under -Werror.
+  const guardsUseRecord = guardClauses.some((l) => /\brecord\b/.test(l));
+  const usesRecord =
+    body.some((l) => /\brecord\b/.test(l)) || successTail !== "" || guardsUseRecord;
   const recordBind = usesRecord ? [`    record = row.data`] : [];
   const rowName = usesRecord ? "row" : "_row";
-  const prelude = [...recordBind, ...params, ...body].join("\n");
+  // A guarded op hoists its guards into a leading `with ensure(...)` chain
+  // (403/422 denials): `record = row.data` + params stay before the `with`, the
+  // body + the success-projection tail move inside the `do` block.  The
+  // `{:error, atom()}` spec arm carries the denial atoms.  A guard-free op keeps
+  // the flat layout (byte-identical).
+  const bodyContent =
+    guardClauses.length > 0
+      ? [
+          ...recordBind,
+          ...params,
+          ...wrapOpBodyWithGuards(guardClauses, [
+            ...body,
+            ...(successTail ? [successTail.replace(/^\n/, "")] : []),
+          ]),
+        ].join("\n")
+      : `${[...recordBind, ...params, ...body].join("\n")}${successTail}`;
+  const denialSpec = guardClauses.length > 0 ? " | {:error, atom()}" : "";
   return `  @doc "Returning operation \`${op.name}\` on \`${aggPascal}\` (document shape, exception-less)."
   @spec ${opSnake}_${aggSnake}(${aggModule}.t(), map()) ::
-          {:ok, term()} | {:error, binary(), map()}
+          {:ok, term()} | {:error, binary(), map()}${denialSpec}
   def ${opSnake}_${aggSnake}(%${aggModule}{} = ${rowName}, params${actorParam}) when is_map(params) do
-${prelude}${successTail}
+${bodyContent}
   end`;
 }
 

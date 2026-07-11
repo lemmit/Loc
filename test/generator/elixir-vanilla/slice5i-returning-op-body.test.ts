@@ -6,7 +6,11 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 // (exception-less.md "Two-regime split" + success-path serialisation).  Beyond
 // the return-only path (slice5c), a returning op may carry guards, mutations,
 // and event emits in its body:
-//   - `precondition` / `requires` → raise guards (bug-shaped / forbidden),
+//   - `precondition` / `requires` → hoisted into a leading `with ensure(...)`
+//     guard chain so an expected denial returns a typed tuple
+//     (`{:error, :precondition_failed}` → 422 / `{:error, :forbidden}` → 403),
+//     NOT a `raise(ArgumentError, …)` (which the fallback handler turned into a
+//     500).  Mirrors the vanilla workflow / ES-command guard shape.
 //   - `assign field := value`    → struct-update the threaded `record`,
 //   - `emit Event { … }`         → Phoenix.PubSub broadcast,
 //   - fall-through success        → `{:ok, %{…wireShape…}}` (wire-ready map).
@@ -49,14 +53,18 @@ describe("vanilla — T2.c returning-op body statements", () => {
   const get = (m: Map<string, string>, suffix: string) =>
     m.get([...m.keys()].find((k) => k.endsWith(suffix))!)!;
 
-  it("renders precondition/requires as raise guards", async () => {
+  it("hoists precondition/requires into a `with ensure(...)` denial chain (NOT a raise)", async () => {
     const ctx = get(await files(), "lib/api/stock.ex");
-    expect(ctx).toContain(
-      'if not (delta != 0), do: raise(ArgumentError, "Precondition failed: delta != 0")',
-    );
-    expect(ctx).toContain(
-      'if not (record.quantity + delta >= 0), do: raise(ArgumentError, "Forbidden: quantity + delta >= 0")',
-    );
+    // `precondition` denies 422 (`:precondition_failed`); `requires` denies 403
+    // (`:forbidden`) — the same atoms + status the workflow/ES-command renderers
+    // use.  The guards run BEFORE the mutation/persist.
+    expect(ctx).toContain("with :ok <- ensure(delta != 0, :precondition_failed),");
+    expect(ctx).toContain(":ok <- ensure(record.quantity + delta >= 0, :forbidden) do");
+    // The old raise form is gone — an expected denial is no longer a 500.
+    expect(ctx).not.toContain("raise(ArgumentError");
+    // The `ensure/2` helper is emitted for the state op that now needs it.
+    expect(ctx).toContain("defp ensure(true, _reason), do: :ok");
+    expect(ctx).toContain("defp ensure(false, reason), do: {:error, reason}");
   });
 
   it("renders `assign` as a struct-update on the threaded record", async () => {
@@ -93,6 +101,18 @@ describe("vanilla — T2.c returning-op body statements", () => {
     expect(ctl).toContain("adjust_item_result(conn, Stock.adjust_item(record, attrs))");
     expect(ctl).toContain("def adjust_item_result(conn, {:ok, success})");
     expect(ctl).toContain('problem_variant(conn, 404, "/errors/not-found", "Not Found", data)');
+  });
+
+  it("controller maps the guard denials to 403 / 422 (parity with the workflow/ES path)", async () => {
+    const ctl = get(await files(), "/controllers/item_controller.ex");
+    // `requires` → 403 Forbidden; `precondition` → 422 — matching the atoms the
+    // context fn's `with ensure(...)` chain short-circuits to.
+    expect(ctl).toContain(
+      'def adjust_item_result(conn, {:error, :forbidden}),\n    do: ProblemDetails.problem_response(conn, 403, "Forbidden", "Operation not permitted")',
+    );
+    expect(ctl).toContain(
+      'def adjust_item_result(conn, {:error, :precondition_failed}),\n    do: ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", "A precondition failed")',
+    );
   });
 });
 

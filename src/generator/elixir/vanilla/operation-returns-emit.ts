@@ -149,6 +149,50 @@ export function opEmitsEvent(op: OperationIR): boolean {
   return op.statements.some((s) => s.kind === "emit");
 }
 
+/** Does an operation carry any `requires`/`precondition` guard?  A guarded op's
+ *  HTTP-boundary context fn short-circuits to a typed denial tuple
+ *  (`{:error, :forbidden}` / `{:error, :precondition_failed}`) instead of
+ *  raising an `ArgumentError` (which the fallback handler would turn into a 500);
+ *  the controller maps those to 403 / 422.  Gates both the `with ensure(...)`
+ *  body wrap AND the matching controller denial clauses, so the two never
+ *  disagree.  A guard-free op stays byte-identical. */
+export function opHasGuards(op: OperationIR): boolean {
+  return op.statements.some((s) => s.kind === "requires" || s.kind === "precondition");
+}
+
+/** One `requires`/`precondition` statement → an `ensure/2` with-clause.  A
+ *  `requires` (authorisation gate) denies with `:forbidden` → 403; a
+ *  `precondition` denies with `:precondition_failed` → 422.  Identical atoms +
+ *  status mapping to the vanilla workflow (`workflow-execution-emit.ts`) and
+ *  ES-command (`eventsourced-emit.ts`) renderers, so every guard path across the
+ *  Phoenix backend maps to the same HTTP status. */
+export function renderOpGuardClause(
+  s: Extract<StmtIR, { kind: "requires" | "precondition" }>,
+  rc: RenderCtx,
+): string {
+  const reason = s.kind === "requires" ? ":forbidden" : ":precondition_failed";
+  return `:ok <- ensure(${renderExpr(s.expr, rc)}, ${reason})`;
+}
+
+/** Wrap an operation body (its rendered 4-space-indented `bodyLines` + persist
+ *  tail) in a leading `with :ok <- ensure(...)` guard chain, so a failed
+ *  `requires`/`precondition` short-circuits to `{:error, :forbidden}` /
+ *  `{:error, :precondition_failed}` BEFORE any mutation or persist runs — the
+ *  controller maps those to 403 / 422 (vs the old `raise(ArgumentError, …)`,
+ *  which the fallback handler turned into a 500).  The `with` default `else`
+ *  passes the `{:error, atom}` tuple straight through as the function's return
+ *  value.  Mirrors the workflow / ES-command `ensure/2` guard shape.  Returns
+ *  the wrapped lines (guards hoisted ahead of the body — the guards read only
+ *  `record` fields + params, both bound before the `with`). */
+export function wrapOpBodyWithGuards(guardClauses: string[], innerLines: string[]): string[] {
+  const header = `    with ${guardClauses.join(",\n         ")} do`;
+  // Re-indent the body + persist two spaces deeper for the `do` block; skip
+  // blank lines so no trailing whitespace is emitted (`mix compile
+  // --warnings-as-errors` / Biome would flag it).
+  const inner = innerLines.join("\n").replace(/^(?=.)/gm, "  ");
+  return [header, inner, "    end"];
+}
+
 /** A returning op whose body falls through to its aggregate success variant
  *  (`Order` in `Order or NotFound`) — the only branch that commits a state
  *  change (and thus the only one with an `{:ok, saved}` seam to dispatch after).
@@ -422,7 +466,17 @@ export function renderReturningOpFunction(
   // together via `statementSubRegions` — the hoisted `emit`(s) and the
   // relocated trailing return are deliberately excluded from both, matching
   // the "regular body" scope this milestone covers (see `OpFragment`).
+  // `requires`/`precondition` guards are hoisted out of the linear body into a
+  // leading `with :ok <- ensure(...)` chain (below), so a failed guard returns a
+  // typed denial tuple (403/422) instead of raising (→ 500).  Exclude them from
+  // the in-body statements (they no longer render inline).
+  const guardStmts = op.statements.filter(
+    (s): s is Extract<StmtIR, { kind: "requires" | "precondition" }> =>
+      s.kind === "requires" || s.kind === "precondition",
+  );
+  const guardClauses = guardStmts.map((s) => renderOpGuardClause(s, renderCtx));
   const bodyStmts = op.statements.filter((s, idx) => {
+    if (s.kind === "requires" || s.kind === "precondition") return false;
     if (hoistEmits && s.kind === "emit") return false;
     if (persists && trailingReturn !== undefined && idx === lastIdx) return false;
     return true;
@@ -656,11 +710,22 @@ export function renderReturningOpFunction(
       `    end`,
     ];
   }
-  const body = [...beforeBind, ...paramReads, ...bodyLines, ...tailLines].join("\n");
+  // A guarded op wraps its body + persist in a leading `with ensure(...)` chain
+  // (guards short-circuit to `{:error, atom}` before any write); a guard-free op
+  // keeps the flat linear body (byte-identical).
+  const innerLines = [...bodyLines, ...tailLines];
+  const body = (
+    guardClauses.length > 0
+      ? [...beforeBind, ...paramReads, ...wrapOpBodyWithGuards(guardClauses, innerLines)]
+      : [...beforeBind, ...paramReads, ...innerLines]
+  ).join("\n");
+  // The guard denial adds an `{:error, atom()}` outcome to the result union; the
+  // controller's `<op>_<agg>_result/2` gains the matching 403/422 clauses.
+  const denialSpec = guardClauses.length > 0 ? " | {:error, atom()}" : "";
 
   return `  @doc "Returning operation \`${op.name}\` on \`${aggPascal}\` (exception-less)."
   @spec ${opSnake}_${aggSnake}(${aggModule}.t(), map()) ::
-          {:ok, term()} | {:error, binary(), map()} | {:error, Ecto.Changeset.t()}
+          {:ok, term()} | {:error, binary(), map()} | {:error, Ecto.Changeset.t()}${denialSpec}
   def ${opSnake}_${aggSnake}(%${aggModule}{} = record, params${opUsesCurrentUser(op) ? ", current_user \\\\ nil" : ""}) when is_map(params) do
 ${body}
   end`;
@@ -670,8 +735,16 @@ ${body}
  *  the guard/mutation/emit forms mirror what the other backends render for a
  *  returning op (exception-less.md "Two-regime split"):
  *
- *  - `precondition`/`requires` are bug-shaped guards — they **raise** (the
- *    aggregate-internal 500 / forbidden path), not return a typed error.
+ *  - `precondition`/`requires` render as `if not (…), do: raise(ArgumentError,…)`
+ *    guards.  This raise form is used ONLY by the paths where raising is the
+ *    correct contract: the PURE domain core (`domain-core-emit.ts`, a Repo-free
+ *    in-memory fn the generated ExUnit tests `assert_raise` against), the
+ *    document-op body, and pure `function` bodies.  The HTTP-boundary context
+ *    fns (`renderReturningOpFunction` here + `renderNamedOpFunction` in
+ *    `context-emit.ts`) DON'T reach this arm — they hoist their guards into a
+ *    leading `with :ok <- ensure(…)` chain (`renderOpGuardClause` /
+ *    `wrapOpBodyWithGuards`) so an expected denial returns `{:error, :forbidden}`
+ *    (403) / `{:error, :precondition_failed}` (422), never a 500.
  *  - `assign field := value` mutates the threaded `record` struct so the
  *    fall-through success branch serialises the updated aggregate.
  *  - `emit` broadcasts a domain event over `Phoenix.PubSub` (the same form the
@@ -716,10 +789,12 @@ export function renderReturningStmt(
     case "let":
       return `    ${escapeElixirIdent(snake(s.name))} = ${renderExpr(s.expr, rc)}`;
     case "precondition":
-      // Bug-shaped guard → raises (aggregate-internal 500 ProblemDetails).
+      // Raise form — reached only by the pure-core / document / function paths
+      // (HTTP-boundary ops hoist guards to `with ensure(…)` for a 422 denial).
       return `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Precondition failed: ${s.source}`)})`;
     case "requires":
-      // Authorization guard → raises (translated to a forbidden response).
+      // Raise form — reached only by the pure-core / document / function paths
+      // (HTTP-boundary ops hoist guards to `with ensure(…)` for a 403 denial).
       return `    if not (${renderExpr(s.expr, rc)}), do: raise(ArgumentError, ${JSON.stringify(`Forbidden: ${s.source}`)})`;
     case "assign": {
       // `field := value` → struct-update the threaded `record`, so the
@@ -954,12 +1029,26 @@ export function renderReturningOpControllerAction(
   // 1.18's type checker / `--warnings-as-errors`).  Gated on the SAME predicate
   // as the body renderer so the two never disagree.
   const persists = returningOpPersistsChangeset(op, agg, ctx);
+  // A guarded op's body can short-circuit to `{:error, :forbidden}` (403) or
+  // `{:error, :precondition_failed}` (422) — the typed denials that replace the
+  // old `raise(ArgumentError, …)` (→ 500).  Emit the matching clauses only when
+  // the op has a guard (else the clauses would be unreachable — `--warnings-as-
+  // errors`).  Same status + ProblemDetails body as the ES-command controller.
+  const denialClauses = opHasGuards(op)
+    ? [
+        `  def ${resultFn}(conn, {:error, :forbidden}),
+    do: ProblemDetails.problem_response(conn, 403, "Forbidden", "Operation not permitted")`,
+        `  def ${resultFn}(conn, {:error, :precondition_failed}),
+    do: ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", "A precondition failed")`,
+      ]
+    : [];
   const resultClauses = [
     `  def ${resultFn}(conn, {:ok, success}), do: json(conn, success)`,
     ...errorVariantsOf(op, ctx).map(
       (v) => `  def ${resultFn}(conn, {:error, ${JSON.stringify(v.tag)}, data}),
     do: problem_variant(conn, ${v.status}, ${JSON.stringify(v.type)}, ${JSON.stringify(v.title)}, data)`,
     ),
+    ...denialClauses,
     ...(persists
       ? [
           `  def ${resultFn}(conn, {:error, %Ecto.Changeset{} = changeset}),

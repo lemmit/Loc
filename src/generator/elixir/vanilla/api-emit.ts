@@ -38,6 +38,7 @@ import {
   aggregateHasReturningOpError,
   GUARD_RESCUE,
   isReturningOperation,
+  opHasGuards,
   renderProblemVariantHelper,
   renderReturningOpControllerAction,
 } from "./operation-returns-emit.js";
@@ -263,6 +264,21 @@ function renderController(
           ? cuBind
           : "    current_user = Map.get(conn.assigns, :current_user)\n";
       const opCallActor = opActor ? ", current_user" : "";
+      // A guarded op's context fn short-circuits to `{:error, :forbidden}` (403)
+      // or `{:error, :precondition_failed}` (422) — the typed denials that
+      // replaced `raise(ArgumentError, …)` (→ 500).  Emit the matching `else`
+      // arms only when the op has a guard (else they'd be unreachable clauses —
+      // `--warnings-as-errors`).  Same status + ProblemDetails body as the
+      // ES-command controller.
+      const denialArms = opHasGuards(op)
+        ? `
+
+      {:error, :forbidden} ->
+        ProblemDetails.problem_response(conn, 403, "Forbidden", "Operation not permitted")
+
+      {:error, :precondition_failed} ->
+        ProblemDetails.problem_response(conn, 422, "Unprocessable Entity", "A precondition failed")`
+        : "";
       return `
   def ${opSnake}(conn, %{"id" => id} = params) do
     attrs = Map.drop(params, ["id"])
@@ -280,7 +296,7 @@ ${opCuBind}    ${renderPhoenixLogCall("operationInvoked", [
         ProblemDetails.not_found_response(conn, "${aggPascal}", id)
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        ProblemDetails.validation_error_response(conn, changeset)
+        ProblemDetails.validation_error_response(conn, changeset)${denialArms}
     end
 ${GUARD_RESCUE}
   end`;

@@ -260,7 +260,7 @@ system Shop {
   }
   storage pg { type: postgres }
   resource shopState { for: Shop, kind: state, use: pg }
-  deployable api { platform: elixir { foundation: vanilla }, contexts: [Shop], dataSources: [shopState], port: 4000 }
+  deployable api { platform: elixir, contexts: [Shop], dataSources: [shopState], port: 4000 }
 }
 `;
     expect(await docScopeErrors(src)).toEqual([]);
