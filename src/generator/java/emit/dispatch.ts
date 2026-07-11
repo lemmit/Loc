@@ -1,7 +1,10 @@
+import { deriveEventSubscriptions } from "../../../ir/enrich/enrichments.js";
 import type {
   EnrichedBoundedContextIR,
   EventSubscriptionIR,
   ExprIR,
+  ProjectionIR,
+  ProjectionOnIR,
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../../ir/types/loom-ir.js";
@@ -11,6 +14,7 @@ import { statementSubRegions } from "../../_trace/sourcemap.js";
 import { collectUnionFindLets, renderWorkflowStmtChunks } from "../../_workflow/stmt-target.js";
 import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
 import type { OpFragment } from "./entity.js";
+import { projectionRowClass } from "./projection-state.js";
 import { javaWorkflowStmtTarget, repoField, reposUsed } from "./workflow.js";
 import { esWorkflowStateClass, esWorkflowStreamTable } from "./workflow-eventsourced.js";
 import { workflowStateClass } from "./workflow-state.js";
@@ -62,6 +66,60 @@ function stateRepoField(wf: WorkflowIR): string {
   return `${lowerFirst(wf.name)}StateRepository`;
 }
 
+/** The projection read-model row repository field name (`orderBookRowRepository`). */
+function projRepoField(proj: ProjectionIR): string {
+  return `${lowerFirst(proj.name)}RowRepository`;
+}
+
+/** One pure projection fold (projection.md): a @EventListener that loads-or-
+ *  allocates the read-model row for the event's key (every event allocates — a
+ *  projection has no route-or-drop split), writes each `:=` through the row's
+ *  setter, and saves.  Pure — no emit, no aggregate saves, no child frame.
+ *  The correlation `:=` (if the fold spells it) is skipped: the key is the
+ *  immutable `@EmbeddedId`, already seeded by `_allocate`. */
+function renderProjectionFold(
+  proj: ProjectionIR,
+  on: ProjectionOnIR,
+  sub: EventSubscriptionIR,
+  imports: Set<string>,
+): string[] {
+  const corr = proj.correlationField;
+  const param = sub.param;
+  // this-prop refs resolve through the row's record-style accessors
+  // (`state.status()`); writes go through the JavaBean setter (spelled below).
+  const renderCtx = { thisName: "state", accessorProps: true };
+  // Routing key: the `by <expr>` value, else the event field name-matching the
+  // correlation field (omitted-`by` rule) — an id-typed accessor, so `findById`
+  // gets the `<Corr>Id` it expects.
+  const keyExpr = on.correlation
+    ? renderJavaExpr(on.correlation, renderCtx)
+    : `${param}.${snake(corr)}()`;
+  if (on.correlation) collectJavaExprImports(on.correlation, imports);
+
+  const cls = projectionRowClass(proj);
+  const repo = projRepoField(proj);
+  const body: string[] = [
+    `        var __key = ${keyExpr};`,
+    `        var state = ${repo}.findById(__key).orElseGet(() -> ${cls}._allocate(__key));`,
+  ];
+  for (const stmt of on.statements) {
+    if (stmt.kind !== "assign") continue;
+    const segs = stmt.target.segments;
+    const field = segs[segs.length - 1];
+    if (field === corr) continue; // immutable @EmbeddedId key, seeded by _allocate
+    collectJavaExprImports(stmt.value, imports);
+    body.push(`        state.set${upperFirst(field)}(${renderJavaExpr(stmt.value, renderCtx)});`);
+  }
+  body.push(`        ${repo}.save(state);`);
+  return [
+    `    @EventListener`,
+    `    public void on${upperFirst(proj.name)}On${upperFirst(sub.event)}(${sub.event} ${param}) {`,
+    ...body,
+    `    }`,
+    ``,
+  ];
+}
+
 /** The handler body + correlation for one subscription (mirrors python's
  *  `resolveHandlerBody`): an `on` reactor or an event-triggered `create`. */
 function resolveHandler(wf: WorkflowIR, sub: EventSubscriptionIR): ResolvedHandler | null {
@@ -111,12 +169,20 @@ export function renderJavaDispatcher(
    *  bookkeeping cost. */
   opFragments?: OpFragment[],
 ): { name: string; content: string } | null {
-  const subs = ctx.eventSubscriptions ?? [];
+  // Re-derive over the (possibly merged) context WITH projections — the
+  // enricher-stored `ctx.eventSubscriptions` omits projection folds (it derives
+  // without them), so a projection-only context would otherwise get no
+  // dispatcher.  Mirrors python's `dispatchSubscriptionsOf`.
+  const subs = deriveEventSubscriptions(ctx.channels, ctx.workflows, ctx.projections);
   if (subs.length === 0) return null;
 
   const className = `${ctx.name}Dispatcher`;
   const imports = new Set<string>();
   const wfByName = new Map(ctx.workflows.map((w) => [w.name, w] as const));
+  const projByName = new Map(ctx.projections.map((p) => [p.name, p] as const));
+  // Projections whose fold this dispatcher wires — each injects a read-model row
+  // Spring Data repo (deduped, declaration order).
+  const touchedProjections: ProjectionIR[] = [];
 
   // Event-sourced saga double-append (S5b): when an event-sourced workflow has
   // BOTH an `on` reactor and an event-`create` starter for the SAME event,
@@ -135,6 +201,19 @@ export function renderJavaDispatcher(
 
   const methods: string[] = [];
   for (const sub of subs) {
+    // Projection fold (projection.md): a pure read-model upsert, not a saga.
+    // Load-or-allocate the row keyed by the correlation column, write each `:=`
+    // through the row's setter, save.  No emit, no aggregate saves, no child
+    // frame (enforced pure by `loom.projection-fold-impure`).
+    if (sub.projection) {
+      const proj = projByName.get(sub.projection);
+      if (!proj) continue;
+      const on = proj.handlers.find((h) => h.event === sub.event && h.param === sub.param);
+      if (!on) continue;
+      methods.push(...renderProjectionFold(proj, on, sub, imports));
+      if (!touchedProjections.some((p) => p.name === proj.name)) touchedProjections.push(proj);
+      continue;
+    }
     const wf = wfByName.get(sub.workflow);
     if (!wf?.correlationField) continue;
     if (mergedEsEvent(wf, sub.event)) {
@@ -142,7 +221,7 @@ export function renderJavaDispatcher(
       // (its logic is the else-branch).
       if (sub.trigger !== "create") continue;
       const createResolved = resolveHandler(wf, sub);
-      const onSub = (ctx.eventSubscriptions ?? []).find(
+      const onSub = subs.find(
         (s) => s.workflow === sub.workflow && s.event === sub.event && s.trigger === "on",
       );
       const onResolved = onSub ? resolveHandler(wf, onSub) : null;
@@ -214,18 +293,23 @@ export function renderJavaDispatcher(
     ...stateWfs.map(
       (wf) => `    private final ${workflowStateClass(wf)}Repository ${stateRepoField(wf)};`,
     ),
+    ...touchedProjections.map(
+      (p) => `    private final ${projectionRowClass(p)}Repository ${projRepoField(p)};`,
+    ),
   ];
   const ctorParams = [
     "ApplicationEventPublisher events",
     ...repoAggs.map((a) => `${a}Repository ${repoField(a)}`),
     ...(esPresent ? ["JdbcTemplate jdbc"] : []),
     ...stateWfs.map((wf) => `${workflowStateClass(wf)}Repository ${stateRepoField(wf)}`),
+    ...touchedProjections.map((p) => `${projectionRowClass(p)}Repository ${projRepoField(p)}`),
   ].join(", ");
   const ctorAssigns = [
     "        this.events = events;",
     ...repoAggs.map((a) => `        this.${repoField(a)} = ${repoField(a)};`),
     ...(esPresent ? ["        this.jdbc = jdbc;"] : []),
     ...stateWfs.map((wf) => `        this.${stateRepoField(wf)} = ${stateRepoField(wf)};`),
+    ...touchedProjections.map((p) => `        this.${projRepoField(p)} = ${projRepoField(p)};`),
   ];
 
   // Cross-package imports (entities for factory-lets, repos, saga entities +
@@ -248,14 +332,24 @@ export function renderJavaDispatcher(
       `import ${dctx.statePkg}.${workflowStateClass(wf)};`,
       `import ${dctx.stateRepoPkg}.${workflowStateClass(wf)}Repository;`,
     ]),
+    // Projection folds import their read-model row entity + Spring Data repo
+    // (same packages as the saga state — infra-persistence / spring-data-repository).
+    ...touchedProjections.flatMap((p) => [
+      `import ${dctx.statePkg}.${projectionRowClass(p)};`,
+      `import ${dctx.stateRepoPkg}.${projectionRowClass(p)}Repository;`,
+    ]),
   ];
   // Dedup (an aggregate can be both a repo target and a factory target).
   const uniqueImports = [...new Set(importLines)].sort();
 
   if (methods.some((m) => m.includes("new ArrayList<"))) imports.add("java.util.ArrayList");
   if (esPresent) imports.add("org.springframework.jdbc.core.JdbcTemplate");
-  // Every reactor opens a per-dispatch child frame via RequestContext.openChild().
-  imports.add(`${dctx.basePkg}.config.RequestContext`);
+  // Workflow reactors open a per-dispatch child frame via RequestContext
+  // .openChild(); a projection-only dispatcher (pure folds) never does, so gate
+  // the import on actual use to keep a folds-only file free of a dead import.
+  if (methods.some((m) => m.includes("RequestContext.openChild"))) {
+    imports.add(`${dctx.basePkg}.config.RequestContext`);
+  }
   // Handler bodies can guard with `precondition` / `requires`, which throw the
   // domain.common exceptions — import them when a body uses one (the stmt target
   // emits the `throw` but leaves the import to the host).

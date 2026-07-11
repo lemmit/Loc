@@ -7,6 +7,7 @@ import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   IdValueType,
+  ProjectionIR,
   RepositoryIR,
   SystemIR,
   ViewIR,
@@ -96,6 +97,12 @@ import {
   renderJsonFormatMapperConfig,
   renderSpaWebConfig,
 } from "./emit/program.js";
+import { renderJavaProjectionReads } from "./emit/projection-reads.js";
+import {
+  projectionRowClass,
+  renderProjectionRowEntity,
+  renderProjectionRowRepository,
+} from "./emit/projection-state.js";
 import {
   contextsHaveProvenance,
   emitJavaProvenanceMigration,
@@ -578,6 +585,35 @@ function emitProjectFromContexts(
         `${ctx.name}.${wf.name}`,
       );
     }
+    // Projection read-model persistence (projection.md): each projection gets a
+    // `<Proj>Row` JPA @Entity bound to the Flyway-owned read-model table + a
+    // Spring Data repository over it — the foundation the dispatcher fold and
+    // the read routes build on (the saga-state analogue with the command side
+    // removed).  Placed in the same packages as the saga state.
+    for (const proj of ctx.projections) {
+      const projConstruct = `${ctx.name}.${proj.name}`;
+      place(
+        `${projectionRowClass(proj)}.java`,
+        "infra-persistence",
+        renderProjectionRowEntity(proj, ctx, basePkg, pkgFor("infra-persistence"), ctxSchema),
+        undefined,
+        proj.origin,
+        projConstruct,
+      );
+      place(
+        `${projectionRowClass(proj)}Repository.java`,
+        "spring-data-repository",
+        renderProjectionRowRepository(
+          proj,
+          basePkg,
+          pkgFor("spring-data-repository"),
+          pkgFor("infra-persistence"),
+        ),
+        undefined,
+        proj.origin,
+        projConstruct,
+      );
+    }
     // In-process saga dispatcher (workflow-debt-backend-parity.md, Java saga
     // slice 2): a @Component whose @EventListener handlers react to
     // channel-carried events — load-or-allocate / route-or-drop the saga row,
@@ -639,6 +675,34 @@ function emitProjectFromContexts(
           undefined,
           wf?.origin,
           wf ? `${ctx.name}.${wf.name}` : undefined,
+        );
+      }
+    }
+    // Read-only projection endpoints (projection.md): every projection gets
+    // GET /projections/<snake>[/{key}] over its persisted read-model row.  The
+    // read-side analogue of the workflow instance reads above.
+    const projectionReads = renderJavaProjectionReads(ctx, {
+      basePkg,
+      pkg: pkgFor("workflow-service"),
+      routePrefix,
+      rowRepoPkg: pkgFor("spring-data-repository"),
+    });
+    if (projectionReads) {
+      // Per-projection Response DTOs are individually attributable; the combined
+      // `<Ctx>ProjectionsController` merges every projection's routes, so it
+      // stays unmapped.
+      const projResponseOrigin = new Map<string, ProjectionIR>(
+        ctx.projections.map((p) => [`${upperFirst(p.name)}Response.java`, p]),
+      );
+      for (const [name, f] of projectionReads) {
+        const p = projResponseOrigin.get(name);
+        place(
+          name,
+          f.category,
+          f.content,
+          undefined,
+          p?.origin,
+          p ? `${ctx.name}.${p.name}` : undefined,
         );
       }
     }
