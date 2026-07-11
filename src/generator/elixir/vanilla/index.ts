@@ -43,6 +43,11 @@ import { emitVanillaEventModules } from "./events-emit.js";
 import { emitVanillaEventSourcedFiles } from "./eventsourced-emit.js";
 import { emitOpenApiSpec } from "./openapi-emit.js";
 import { renderVanillaProblemDetailsModule } from "./problem-details-emit.js";
+import {
+  emitVanillaProjectionSchemas,
+  emitVanillaProjectionsController,
+  type VanillaProjectionRef,
+} from "./projections-emit.js";
 import { emitVanillaProvenance } from "./provenance-emit.js";
 import { emitVanillaRepositories } from "./repository-emit.js";
 import { emitVanillaRetrievals } from "./retrieval-emit.js";
@@ -109,6 +114,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // controllers.  Changeset before Repository so the latter can alias it.
   const apiRoutes: ApiRoute[] = [];
   const allViews: VanillaViewRef[] = [];
+  const allProjections: VanillaProjectionRef[] = [];
   const workflowGroups: WorkflowControllerGroup[] = [];
   // The principal id field name a `currentUser` lifecycle stamp resolves to
   // (`current_user.<idKey>`), defaulting to `id` when no `user {}` block —
@@ -193,12 +199,20 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // saga analogue of the ES aggregate files above).  The dispatcher branches
     // their handlers to fold-on-load + append-own-events.
     emitVanillaEsWorkflowFiles(appName, appModule, ctx, out, wfSchema, sourcemap);
+    // Projection read models (projection.md): the `<Proj>Row` Ecto schema per
+    // projection (collected here for the project-wide controller); the fold
+    // handlers + dispatcher wiring are emitted by `emitDispatch` below.
+    allProjections.push(...emitVanillaProjectionSchemas(appName, appModule, ctx, out, sys));
     emitDispatch(appName, ctx, appModule, out, sys, "vanilla", sourcemap);
     // Domain `test "..."` blocks → ExUnit (pure-subset; see tests-emit.ts).
     if (emitAggregateTests(ctx, appModule, "vanilla", out)) hasDomainTests = true;
   }
   if (hasDomainTests) emitTestHelper(out);
   apiRoutes.push(...emitVanillaViewsController(appName, appModule, allViews, out));
+  // One deployable-level ProjectionsController over every hosted context's
+  // projections (the per-context schema emit above intentionally does NOT write
+  // the controller — sibling of ViewsController).
+  apiRoutes.push(...emitVanillaProjectionsController(appName, appModule, allProjections, out));
   // One deployable-level WorkflowsController over every hosted context's command
   // workflows (the per-context emit above intentionally does NOT write it).
   emitVanillaWorkflowsController(appName, appModule, workflowGroups, out);

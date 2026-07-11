@@ -1,9 +1,13 @@
+import { deriveEventSubscriptions } from "../../ir/enrich/enrichments.js";
 import type {
   CreateIR,
   EnrichedBoundedContextIR,
   ExprIR,
   IdValueType,
   OnIR,
+  ProjectionIR,
+  ProjectionOnIR,
+  StmtIR,
   SystemIR,
   WorkflowIR,
   WorkflowStmtIR,
@@ -47,11 +51,21 @@ export interface HandlerResult {
 // a plain `Ecto.Schema` over the saga table the shared `MigrationsIR`
 // already derives — read/written through the app `Ecto.Repo`.
 //
-// Emitted files (only when `ctx.eventSubscriptions` is non-empty — a
-// channel-less context emits none of this, byte-identical):
+// A projection (projection.md) subscribes to the SAME channel events as a
+// pure read-model fold (load-or-allocate → set fields → upsert; no route-or-
+// drop split, no child frame).  Subscriptions are re-derived WITH projections
+// (like python's `dispatchSubscriptionsOf`) because the enricher-stored
+// `ctx.eventSubscriptions` omits them — so a projection-only context still gets
+// a dispatcher.  Its fold joins the event's dispatch clause alongside any saga
+// reactor.
+//
+// Emitted files (only when the context has ≥1 workflow subscription OR
+// projection fold — a channel-/projection-less context emits none of this,
+// byte-identical):
 //   lib/<app>/<ctx>/dispatcher.ex                        — the router
-//   lib/<app>/<ctx>/workflows/<wf>/<start|on>_<event>.ex — one per subscription
+//   lib/<app>/<ctx>/workflows/<wf>/<start|on>_<event>.ex — one per saga subscription
 //   lib/<app>/<ctx>/workflows/<wf>_state.ex              — saga Ecto.Schema
+//   lib/<app>/<ctx>/projections/<proj>/on_<event>.ex     — one per projection fold
 // ---------------------------------------------------------------------------
 
 interface Subscription {
@@ -63,11 +77,24 @@ interface Subscription {
   statements: WorkflowStmtIR[];
 }
 
-/** Resolve a context's `eventSubscriptions` join back to the concrete
- *  reactor / event-create node carrying the body + correlation expression. */
+/** A projection fold subscription (projection.md) — a pure read-model upsert,
+ *  kept SEPARATE from the saga `Subscription` so the workflow handler renderers
+ *  keep their required-`workflow` contract. */
+interface ProjectionSub {
+  event: string;
+  param: string;
+  projection: ProjectionIR;
+  on: ProjectionOnIR;
+}
+
+/** Resolve a context's channel-routed WORKFLOW subscriptions back to the
+ *  concrete reactor / event-create node.  Re-derives WITH projections so the
+ *  derivation is shared, then keeps only the workflow (non-projection) subs;
+ *  projection folds are resolved by `resolveProjectionSubs`. */
 function resolveSubscriptions(ctx: EnrichedBoundedContextIR): Subscription[] {
   const subs: Subscription[] = [];
-  for (const s of ctx.eventSubscriptions) {
+  for (const s of deriveEventSubscriptions(ctx.channels, ctx.workflows, ctx.projections)) {
+    if (s.projection) continue;
     const wf = ctx.workflows.find((w) => w.name === s.workflow);
     if (!wf) continue;
     if (s.trigger === "on") {
@@ -101,19 +128,50 @@ function resolveSubscriptions(ctx: EnrichedBoundedContextIR): Subscription[] {
   return subs;
 }
 
+/** Resolve a context's projection fold subscriptions (projection.md) — one per
+ *  `(projection, on-handler)`.  A projection has no route-or-drop split: every
+ *  event allocates-or-loads and upserts. */
+function resolveProjectionSubs(ctx: EnrichedBoundedContextIR): ProjectionSub[] {
+  const out: ProjectionSub[] = [];
+  for (const proj of ctx.projections) {
+    for (const on of proj.handlers) {
+      // Only folds whose event is carried by a channel in this context route
+      // (matches `deriveEventSubscriptions`); a fold on an uncarried event is
+      // unreachable and silently skipped (parity with the saga derivation).
+      const carried = ctx.channels.some((ch) => ch.carries.includes(on.event));
+      if (carried) out.push({ event: on.event, param: on.param, projection: proj, on });
+    }
+  }
+  return out;
+}
+
 /** True when this context emits a `Dispatcher` module — i.e. it has at least
- *  one resolvable workflow event subscription.  Callers (e.g. the event-sourced
- *  repository, which fans appended events into the dispatcher) must guard the
- *  `<Ctx>.Dispatcher.dispatch/1` reference on this, since the module is only
- *  emitted when subscriptions exist (`emitDispatch` short-circuits otherwise). */
+ *  one resolvable workflow event subscription OR projection fold.  Callers (e.g.
+ *  the aggregate emit path, which fans emitted events into the dispatcher) must
+ *  guard the `<Ctx>.Dispatcher.dispatch/1` reference on this, since the module is
+ *  only emitted when a subscriber exists (`emitDispatch` short-circuits otherwise). */
 export function contextHasDispatcher(ctx: EnrichedBoundedContextIR): boolean {
-  if ((ctx.eventSubscriptions ?? []).length === 0) return false;
-  return resolveSubscriptions(ctx).length > 0;
+  return resolveSubscriptions(ctx).length > 0 || resolveProjectionSubs(ctx).length > 0;
 }
 
 /** The saga-state module name (`<App>.<Ctx>.Workflows.<Wf>State`). */
 export function stateModule(contextModule: string, wf: WorkflowIR): string {
   return `${contextModule}.Workflows.${upperFirst(wf.name)}State`;
+}
+
+/** The projection read-model row module (`<App>.<Ctx>.Projections.<Proj>Row`) —
+ *  the Ecto schema the fold upserts and the read controller queries. */
+export function projectionRowModule(contextModule: string, proj: ProjectionIR): string {
+  return `${contextModule}.Projections.${upperFirst(proj.name)}Row`;
+}
+
+/** The projection fold handler module (`<App>.<Ctx>.Projections.<Proj>.On<Event>`). */
+function projectionHandlerModule(
+  contextModule: string,
+  proj: ProjectionIR,
+  on: ProjectionOnIR,
+): string {
+  return `${contextModule}.Projections.${upperFirst(proj.name)}.On${upperFirst(on.event)}`;
 }
 
 /** Emit the saga-state Ecto schema (`<wf>_state.ex`) for EVERY
@@ -161,11 +219,11 @@ export function emitDispatch(
    *  same contract as `emitVanillaWorkflowExecution`. */
   sourcemap?: SourceMapRecorder,
 ): void {
-  if ((ctx.eventSubscriptions ?? []).length === 0) return;
   const ctxSnake = snake(ctx.name);
   const contextModule = `${appModule}.${upperFirst(ctx.name)}`;
   const subs = resolveSubscriptions(ctx);
-  if (subs.length === 0) return;
+  const projSubs = resolveProjectionSubs(ctx);
+  if (subs.length === 0 && projSubs.length === 0) return;
 
   // --- Saga-state Ecto schemas — one per correlation-bearing workflow that
   //     a subscription references (matches the saga table the migrations
@@ -173,6 +231,8 @@ export function emitDispatch(
   // Event-sourced workflows fold a `<wf>_events` stream — they have no mutable
   // `<wf>_state` row (their `<wf>_state.ex` carries the plain fold struct,
   // emitted by `emitVanillaEsWorkflowFiles`), so skip the saga schema here.
+  // Projection read-model row schemas are emitted by `emitVanillaProjections`
+  // (vanilla/index.ts), not here.
   const correlationWfs = new Map<string, WorkflowIR>();
   for (const sub of subs) {
     if (sub.workflow.correlationField && !sub.workflow.eventSourced)
@@ -186,7 +246,7 @@ export function emitDispatch(
     );
   }
 
-  // --- Handler modules — one per subscription. --------------------------
+  // --- Workflow handler modules — one per subscription. -----------------
   for (const sub of subs) {
     const verb = sub.trigger === "on" ? "on" : "start";
     // An event-sourced workflow's handler folds the stream on load and appends
@@ -211,8 +271,19 @@ export function emitDispatch(
     }
   }
 
+  // --- Projection fold modules — a pure read-model upsert per (proj, event). --
+  for (const ps of projSubs) {
+    const content = renderProjectionFoldHandler(appModule, contextModule, ps.projection, ps.on);
+    const path = `lib/${appName}/${ctxSnake}/projections/${snake(ps.projection.name)}/on_${snake(ps.event)}.ex`;
+    out.set(path, content);
+    sourcemap?.file(path, content, ps.projection.origin, `${ctx.name}.${ps.projection.name}`);
+  }
+
   // --- Dispatcher — routes each event struct to its handler(s). ----------
-  out.set(`lib/${appName}/${ctxSnake}/dispatcher.ex`, renderDispatcher(contextModule, ctx, subs));
+  out.set(
+    `lib/${appName}/${ctxSnake}/dispatcher.ex`,
+    renderDispatcher(contextModule, ctx, subs, projSubs),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -223,7 +294,7 @@ export function emitDispatch(
  *  aligned with the migration's column type (`idColumnType` in the
  *  migrations builder): guid → uuid column → `:binary_id`, string → text
  *  column → `:string`, int/long → `:integer`. */
-function ectoIdType(vt: IdValueType): string {
+export function ectoIdType(vt: IdValueType): string {
   switch (vt) {
     case "guid":
       return ":binary_id";
@@ -293,18 +364,22 @@ function renderDispatcher(
   contextModule: string,
   ctx: EnrichedBoundedContextIR,
   subs: Subscription[],
+  projSubs: ProjectionSub[] = [],
 ): string {
-  // Group subscriptions by event type so one `dispatch(%Event{})` clause
-  // invokes every handler subscribed to that event.
-  const byEvent = new Map<string, Subscription[]>();
-  for (const sub of subs) {
-    const list = byEvent.get(sub.event) ?? [];
-    list.push(sub);
-    byEvent.set(sub.event, list);
-  }
+  // Group handler-module calls by event type so one `dispatch(%Event{})` clause
+  // invokes every subscriber — workflow reactor AND projection fold — of that
+  // event (parity with python's isinstance fan-out / Hono's `projectionTee`).
+  const byEvent = new Map<string, string[]>();
+  const push = (event: string, mod: string): void => {
+    const list = byEvent.get(event) ?? [];
+    list.push(`    ${mod}.handle(event)`);
+    byEvent.set(event, list);
+  };
+  for (const sub of subs) push(sub.event, handlerModule(contextModule, sub));
+  for (const ps of projSubs)
+    push(ps.event, projectionHandlerModule(contextModule, ps.projection, ps.on));
   const clauses: string[] = [];
-  for (const [event, list] of byEvent) {
-    const calls = list.map((sub) => `    ${handlerModule(contextModule, sub)}.handle(event)`);
+  for (const [event, calls] of byEvent) {
     clauses.push(
       `  def dispatch(%${contextModule}.Events.${upperFirst(event)}{} = event) do\n${calls.join("\n")}\n    :ok\n  end`,
     );
@@ -526,6 +601,69 @@ function stateDefault(t: import("../../ir/types/loom-ir.js").TypeIR): string {
   }
   if (t.kind === "array") return "[]";
   return "nil";
+}
+
+// ---------------------------------------------------------------------------
+// Projection fold handler (projection.md)
+// ---------------------------------------------------------------------------
+
+/** A pure projection fold: load-or-allocate the read-model row for the event's
+ *  key, apply each `:=` as an in-memory struct update, upsert.  Every event
+ *  allocates (a projection has no route-or-drop split), and the body is pure —
+ *  no emit, no child frame, no `event_unrouted` logging (contrast the saga
+ *  reactor).  The fold body is `StmtIR` (the applier statement set), so it only
+ *  ever carries `:=` assigns — rendered here directly, matching the ES-applier
+ *  `state = %{state | field: value}` shape. */
+function renderProjectionFoldHandler(
+  appModule: string,
+  contextModule: string,
+  proj: ProjectionIR,
+  on: ProjectionOnIR,
+): string {
+  const corr = proj.correlationField;
+  const rowMod = projectionRowModule(contextModule, proj);
+  const renderCtx: RenderCtx = {
+    thisName: "state",
+    contextModule,
+    paramRenames: { [on.param]: "event" },
+  };
+  // Routing key: the `by <expr>` value, else the event field name-matching the
+  // correlation field (the omitted-`by` rule) — an id, so `Repo.get` keys on it.
+  const keyExpr = on.correlation ? renderExpr(on.correlation, renderCtx) : `event.${snake(corr)}`;
+  // Each `field := value` → an in-memory struct update.  The correlation `:=`
+  // (if the fold spells it) is skipped: it's the immutable primary key, seeded
+  // at allocation (parity with the java / hono / python folds).
+  const assignLines = on.statements
+    .filter(
+      (s): s is Extract<StmtIR, { kind: "assign" }> =>
+        s.kind === "assign" && snake(s.target.segments[0] ?? "") !== snake(corr),
+    )
+    .map(
+      (s) =>
+        `    state = %{state | ${snake(s.target.segments[0]!)}: ${renderExpr(s.value, renderCtx)}}`,
+    );
+  const body = [
+    `    key = ${keyExpr}`,
+    "",
+    `    state =`,
+    `      case ${appModule}.Repo.get(${rowMod}, key) do`,
+    `        nil -> %${rowMod}{${snake(corr)}: key}`,
+    `        existing -> existing`,
+    `      end`,
+    ...(assignLines.length > 0 ? ["", ...assignLines] : []),
+    "",
+    `    {:ok, _} = ${appModule}.Repo.insert_or_update(Ecto.Changeset.change(state))`,
+    `    :ok`,
+  ];
+  return `# Auto-generated.
+defmodule ${projectionHandlerModule(contextModule, proj, on)} do
+  @moduledoc "Projection fold for ${upperFirst(on.event)} → ${upperFirst(proj.name)}."
+
+  def handle(%${contextModule}.Events.${upperFirst(on.event)}{} = event) do
+${body.join("\n")}
+  end
+end
+`;
 }
 
 // ---------------------------------------------------------------------------
