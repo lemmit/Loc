@@ -72,6 +72,7 @@ import {
   tpcConcretesOf,
   tphConcretesOf,
 } from "../../../ir/util/inheritance.js";
+import { mergeContexts } from "../../../ir/util/merge-contexts.js";
 import { contextsHaveProvenancedField } from "../../../ir/util/prov-id.js";
 import {
   aggregateIsEventSourced,
@@ -82,7 +83,6 @@ import {
 import { hierarchyRegistry } from "../../../ir/util/tenant-stance.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import type { Model } from "../../../language/generated/ast.js";
-import { dedupeByName } from "../../../util/dedupe.js";
 import { lowerFirst, plural } from "../../../util/naming.js";
 import {
   byLayerLayoutAdapter,
@@ -343,26 +343,11 @@ export function generateTypeScriptForContexts(
   // `domain/value-objects.ts`, `domain/events.ts`, `db/schema.ts`,
   // `http/workflows.ts`, `http/views.ts`, and `http/index.ts` all
   // reflect the FULL aggregate / VO / enum / event set.
+  // Union the hosted contexts into one synthetic context (ambient enums / VOs
+  // deduped by name — see src/ir/util/merge-contexts.ts) so the shared domain /
+  // schema modules reflect the FULL set.
   const merged: EnrichedBoundedContextIR = {
-    name: contexts[0]?.name ?? "merged",
-    // Ambient root-level enums / VOs are folded into every context by
-    // enrichment, so a plain union across hosted contexts would emit them
-    // once per context (duplicate `export const currencyEnum = …`, which the
-    // bundler rejects).  Dedupe by name to collapse the ambient copies.
-    enums: dedupeByName(contexts.flatMap((c) => c.enums)),
-    valueObjects: dedupeByName(contexts.flatMap((c) => c.valueObjects)),
-    events: contexts.flatMap((c) => c.events),
-    payloads: contexts.flatMap((c) => c.payloads),
-    aggregates: contexts.flatMap((c) => c.aggregates),
-    repositories: contexts.flatMap((c) => c.repositories),
-    workflows: contexts.flatMap((c) => c.workflows),
-    views: contexts.flatMap((c) => c.views),
-    criteria: contexts.flatMap((c) => c.criteria),
-    domainServices: contexts.flatMap((c) => c.domainServices ?? []),
-    channels: contexts.flatMap((c) => c.channels),
-    projections: contexts.flatMap((c) => c.projections ?? []),
-    retrievals: contexts.flatMap((c) => c.retrievals),
-    seeds: contexts.flatMap((c) => c.seeds),
+    ...mergeContexts(contexts),
     // Re-derive over the merged union so a reactor in one hosted context can
     // route off a channel declared in another — cross-context choreography
     // within a single deployable (in-process dispatch slice).
