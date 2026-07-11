@@ -1,4 +1,4 @@
-import type { ExprIR, InvariantIR } from "../types/loom-ir.js";
+import type { ExprIR, InvariantIR, TypeIR } from "../types/loom-ir.js";
 
 // ---------------------------------------------------------------------------
 // Invariant classification + single-field pattern detection.
@@ -316,8 +316,14 @@ function exprIsTranslatable(
 // ---------------------------------------------------------------------------
 
 export type SingleFieldPattern =
-  | { kind: "min"; n: number } // f >= N (numeric)
-  | { kind: "max"; n: number } // f <= N (numeric)
+  // f >= N (numeric).  `exclusive` ⇒ the source used a strict `>` on a
+  // NON-integer field (decimal/money), so the bound is `f > N` and backends
+  // render their native exclusive form (`.gt` / `greater_than:` /
+  // `.GreaterThan` / `gt=` / imperative `>`) instead of `>=`.  A strict `>`
+  // on an INTEGER field never sets this — it folds to `>= N+1` (see below),
+  // keeping output byte-identical.
+  | { kind: "min"; n: number; exclusive?: boolean } // f >= N (or f > N when exclusive)
+  | { kind: "max"; n: number; exclusive?: boolean } // f <= N (or f < N when exclusive)
   | { kind: "between"; lo: number; hi: number } // f >= N && f <= M
   | { kind: "len-min"; n: number } // f.length >= N
   | { kind: "len-max"; n: number } // f.length <= N
@@ -381,8 +387,17 @@ function matchSingleField(e: ExprIR): { field: string; pattern: SingleFieldPatte
     const lo = matchSingleField(e.left);
     const hi = matchSingleField(e.right);
     if (lo && hi && lo.field === hi.field) {
-      // Numeric `f >= N && f <= M`.
-      if (lo.pattern.kind === "min" && hi.pattern.kind === "max") {
+      // Numeric `f >= N && f <= M`.  Only fold two INCLUSIVE bounds into a
+      // `between` — if either side is an exclusive (strict on a non-integer)
+      // bound, fall through to the generic refine, which renders the raw
+      // `f > N && f < M` expression faithfully on every backend.  (Integer
+      // strict bounds are never exclusive, so integer ranges still fold.)
+      if (
+        lo.pattern.kind === "min" &&
+        hi.pattern.kind === "max" &&
+        !lo.pattern.exclusive &&
+        !hi.pattern.exclusive
+      ) {
         return {
           field: lo.field,
           pattern: { kind: "between", lo: lo.pattern.n, hi: hi.pattern.n },
@@ -439,21 +454,45 @@ function matchSingleField(e: ExprIR): { field: string; pattern: SingleFieldPatte
 
   const numField = numericFieldRef(left);
   if (numField !== null) {
+    // Strict `>` / `<` on an INTEGER field folds to an inclusive bound via the
+    // `n±1` identity (`x > 5 ≡ x >= 6`), which keeps the emitted native chain
+    // (`z.number().min(6)` etc.) byte-identical to what shipped.  On a
+    // NON-integer field (decimal / money) that identity is WRONG — `weight >
+    // 0.5` is not `weight >= 1.5`, and `min(1.5)` would reject the whole open
+    // interval (0.5, 1.5) at the wire boundary.  So we carry the RAW literal
+    // and mark the bound `exclusive`; backends render their native exclusive
+    // form.  Integer-ness is read off the left operand's lowered type (same
+    // source as the money guard above); an absent/unknown type conservatively
+    // keeps the legacy inclusive fold, since only synthetic binary nodes (never
+    // a wire-validated user invariant) leave `leftType` undefined.
+    const exclusiveBound = isNonIntegerNumericType(e.leftType);
     switch (e.op) {
       case ">=":
         return { field: numField, pattern: { kind: "min", n: numLit } };
       case ">":
-        return { field: numField, pattern: { kind: "min", n: numLit + 1 } };
+        return exclusiveBound
+          ? { field: numField, pattern: { kind: "min", n: numLit, exclusive: true } }
+          : { field: numField, pattern: { kind: "min", n: numLit + 1 } };
       case "<=":
         return { field: numField, pattern: { kind: "max", n: numLit } };
       case "<":
-        return { field: numField, pattern: { kind: "max", n: numLit - 1 } };
+        return exclusiveBound
+          ? { field: numField, pattern: { kind: "max", n: numLit, exclusive: true } }
+          : { field: numField, pattern: { kind: "max", n: numLit - 1 } };
       default:
         return null;
     }
   }
 
   return null;
+}
+
+/** True when `t` is a confirmed non-integer numeric primitive (`decimal` /
+ *  `money`) — the case where the strict-to-inclusive `n±1` fold is unsound and
+ *  a strict `>`/`<` bound must stay exclusive.  Integer types (`int`/`long`)
+ *  and an absent/unknown type both return false, preserving the legacy fold. */
+function isNonIntegerNumericType(t: TypeIR | undefined): boolean {
+  return t?.kind === "primitive" && (t.name === "decimal" || t.name === "money");
 }
 
 function numericLiteral(e: ExprIR): number | null {

@@ -370,9 +370,11 @@ function createFieldConstraints(
 function pydanticKwargs(p: SingleFieldPattern): string[] {
   switch (p.kind) {
     case "min":
-      return [`ge=${p.n}`];
+      // Exclusive (`weight > 0.5` on a decimal/money field) → pydantic's `gt=`;
+      // inclusive keeps `ge=`.
+      return [p.exclusive ? `gt=${p.n}` : `ge=${p.n}`];
     case "max":
-      return [`le=${p.n}`];
+      return [p.exclusive ? `lt=${p.n}` : `le=${p.n}`];
     case "between":
       return [`ge=${p.lo}`, `le=${p.hi}`];
     case "len-min":

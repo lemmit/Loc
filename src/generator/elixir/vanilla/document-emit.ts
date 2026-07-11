@@ -241,9 +241,15 @@ end
 function ectoValidator(field: string, p: SingleFieldPattern): string {
   switch (p.kind) {
     case "min":
-      return `    |> validate_number(:${field}, greater_than_or_equal_to: ${p.n})`;
+      // Exclusive (`weight > 0.5` on a decimal/money field) → Ecto's strict
+      // `greater_than:`; inclusive keeps `greater_than_or_equal_to:`.
+      return p.exclusive
+        ? `    |> validate_number(:${field}, greater_than: ${p.n})`
+        : `    |> validate_number(:${field}, greater_than_or_equal_to: ${p.n})`;
     case "max":
-      return `    |> validate_number(:${field}, less_than_or_equal_to: ${p.n})`;
+      return p.exclusive
+        ? `    |> validate_number(:${field}, less_than: ${p.n})`
+        : `    |> validate_number(:${field}, less_than_or_equal_to: ${p.n})`;
     case "between":
       return `    |> validate_number(:${field}, greater_than_or_equal_to: ${p.lo}, less_than_or_equal_to: ${p.hi})`;
     case "len-min":
