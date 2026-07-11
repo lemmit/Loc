@@ -27,6 +27,7 @@ import { opHasProvSite } from "../../../ir/util/prov-id.js";
 import { defaultErrorStatus, errorTitle, errorTypeUri } from "../../../util/error-defaults.js";
 import { escapeElixirIdent, snake, upperFirst } from "../../../util/naming.js";
 import { renderPhoenixLogCall } from "../../_obs/render-phoenix.js";
+import { leafPath } from "../../_stmt/leaves.js";
 import { type SourceMapSubRegion, statementSubRegions } from "../../_trace/sourcemap.js";
 import { contextHasDispatcher } from "../dispatch-emit.js";
 import { opUsesCurrentUser } from "../domain/predicates.js";
@@ -959,14 +960,6 @@ function collectVanillaLeaves(
       break;
   }
   return out;
-}
-
-/** Dotted source-side path for a member-access chain (e.g. `line.price`). */
-function leafPath(e: ExprIR): string {
-  if (e.kind === "ref") return e.name;
-  if (e.kind === "this") return "this";
-  if (e.kind === "member") return `${leafPath(e.receiver)}.${e.member}`;
-  return "<expr>";
 }
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 import type { ExprIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
 import { escapePythonIdent, snake } from "../../util/naming.js";
+import { collectLeaves } from "../_stmt/leaves.js";
 import { renderPyExpr } from "./render-expr.js";
 
 // ---------------------------------------------------------------------------
@@ -79,69 +80,6 @@ export function renderPyStatementChunks(
 
 export { statementSubRegions } from "../_trace/sourcemap.js";
 
-/** Bounded walk over the RHS expression collecting leaf inputs —
- *  `this`-props, params and let-bindings (and member-access chains rooted at
- *  them).  Each leaf is `(source path, rendered Python access)`; the access
- *  re-uses `renderPyExpr`, so a `this`-prop renders `self._x`, a param `x`.
- *  Mirrors the TS `collectLeaves`. */
-function collectLeaves(
-  e: ExprIR,
-  out: { path: string; value: string }[] = [],
-): { path: string; value: string }[] {
-  switch (e.kind) {
-    case "ref":
-      if (e.refKind === "this-prop" || e.refKind === "param" || e.refKind === "let") {
-        out.push({ path: e.name, value: renderPyExpr(e) });
-      }
-      break;
-    case "member":
-      out.push({ path: leafPath(e), value: renderPyExpr(e) });
-      break;
-    case "method-call":
-      collectLeaves(e.receiver, out);
-      for (const a of e.args) collectLeaves(a, out);
-      break;
-    case "call":
-      for (const a of e.args) collectLeaves(a, out);
-      break;
-    case "paren":
-      collectLeaves(e.inner, out);
-      break;
-    case "unary":
-      collectLeaves(e.operand, out);
-      break;
-    case "binary":
-      collectLeaves(e.left, out);
-      collectLeaves(e.right, out);
-      break;
-    case "ternary":
-      collectLeaves(e.cond, out);
-      collectLeaves(e.then, out);
-      collectLeaves(e.otherwise, out);
-      break;
-    case "match":
-      for (const arm of e.arms) {
-        collectLeaves(arm.cond, out);
-        collectLeaves(arm.value, out);
-      }
-      if (e.otherwise) collectLeaves(e.otherwise, out);
-      break;
-    case "new":
-    case "object":
-      for (const f of e.fields) collectLeaves(f.value, out);
-      break;
-  }
-  return out;
-}
-
-/** Dotted source-side path for a member-access chain (e.g. `line.price`). */
-function leafPath(e: ExprIR): string {
-  if (e.kind === "ref") return e.name;
-  if (e.kind === "this") return "this";
-  if (e.kind === "member") return `${leafPath(e.receiver)}.${e.member}`;
-  return "<expr>";
-}
-
 /** Splice provenance trace capture around a write-site `base` line:
  *  snapshot the leaf inputs *before* the mutation (so a self-referential
  *  `x := x + n` records the pre-write value), perform the write, build the
@@ -164,7 +102,7 @@ function withProv(
   const lin = `__lin_${index}`;
   const computed = renderPath(target);
   const field = prov.target.field;
-  const inputs = collectLeaves(value)
+  const inputs = collectLeaves(value, renderPyExpr)
     .map((l) => `ProvInput(path=${JSON.stringify(l.path)}, value=${l.value})`)
     .join(", ");
   return [

@@ -1,5 +1,6 @@
 import type { ExprIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
 import { escapeCsharpIdent, upperFirst } from "../../util/naming.js";
+import { collectLeaves } from "../_stmt/leaves.js";
 import type { CsRenderContext } from "./render-expr.js";
 import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
 
@@ -232,7 +233,7 @@ function withProvCapture(
   // sub-object, which carries no co-located lineage slot — skip, mirroring the
   // value-computed trace's same guard.
   if (target.segments.length !== 1) return base;
-  const inputs = collectLeaves(value, ctx)
+  const inputs = collectLeaves(value, (x) => renderCsExpr(x, ctx))
     .map((l) => `new ProvInput(${JSON.stringify(l.path)}, ${l.value})`)
     .join(", ");
   const tmp = `__prov_${index}`;
@@ -247,69 +248,6 @@ function withProvCapture(
     `${INDENT}this.${field} = ${lin};`,
     `${INDENT}this._provTraces.Add(${lin});`,
   ].join("\n");
-}
-
-/** Bounded walk over the RHS expression collecting leaf inputs — `this`-props,
- *  params and let-bindings (and member-access chains rooted at them).  Mirrors
- *  the Hono `collectLeaves`; renders each leaf value through `renderCsExpr` so
- *  the captured value is the C# expression (boxed into `ProvInput.Value`). */
-function collectLeaves(
-  e: ExprIR,
-  ctx: CsRenderContext,
-  out: { path: string; value: string }[] = [],
-): { path: string; value: string }[] {
-  switch (e.kind) {
-    case "ref":
-      if (e.refKind === "this-prop" || e.refKind === "param" || e.refKind === "let") {
-        out.push({ path: e.name, value: renderCsExpr(e, ctx) });
-      }
-      break;
-    case "member":
-      out.push({ path: leafPath(e), value: renderCsExpr(e, ctx) });
-      break;
-    case "method-call":
-      collectLeaves(e.receiver, ctx, out);
-      for (const a of e.args) collectLeaves(a, ctx, out);
-      break;
-    case "call":
-      for (const a of e.args) collectLeaves(a, ctx, out);
-      break;
-    case "paren":
-      collectLeaves(e.inner, ctx, out);
-      break;
-    case "unary":
-      collectLeaves(e.operand, ctx, out);
-      break;
-    case "binary":
-      collectLeaves(e.left, ctx, out);
-      collectLeaves(e.right, ctx, out);
-      break;
-    case "ternary":
-      collectLeaves(e.cond, ctx, out);
-      collectLeaves(e.then, ctx, out);
-      collectLeaves(e.otherwise, ctx, out);
-      break;
-    case "match":
-      e.arms.forEach((a) => {
-        collectLeaves(a.cond, ctx, out);
-        collectLeaves(a.value, ctx, out);
-      });
-      if (e.otherwise) collectLeaves(e.otherwise, ctx, out);
-      break;
-    case "new":
-    case "object":
-      for (const f of e.fields) collectLeaves(f.value, ctx, out);
-      break;
-  }
-  return out;
-}
-
-/** Dotted source-side path for a member-access chain (e.g. `line.price`). */
-function leafPath(e: ExprIR): string {
-  if (e.kind === "ref") return e.name;
-  if (e.kind === "this") return "this";
-  if (e.kind === "member") return `${leafPath(e.receiver)}.${e.member}`;
-  return "<expr>";
 }
 
 // `DomainLog` is the static AsyncLocal accessor emitted under
