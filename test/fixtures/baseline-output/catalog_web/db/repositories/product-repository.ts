@@ -12,10 +12,15 @@ import { requestLog } from "../../obs/als";
 type Db = NodePgDatabase<typeof schema>;
 
 export class ProductRepository {
+  private readonly db: Db;
+  private readonly events: DomainEventDispatcher;
   constructor(
-    private readonly db: Db,
-    private readonly events: DomainEventDispatcher,
-  ) {}
+    db: Db,
+    events: DomainEventDispatcher,
+  ) {
+    this.db = db;
+    this.events = events;
+  }
 
   async findById(id: Ids.ProductId): Promise<Product | null> {
     return await this.db.transaction(async (tx) => {

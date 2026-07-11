@@ -187,7 +187,10 @@ function buildAggregateListPageObject(
   lines.push(``);
   lines.push(`export class ${className} {`);
   lines.push(`  static readonly url = ${JSON.stringify(route)};`);
-  lines.push(`  constructor(public readonly page: Page) {}`);
+  lines.push(`  readonly page: Page;`);
+  lines.push(`  constructor(page: Page) {`);
+  lines.push(`    this.page = page;`);
+  lines.push(`  }`);
   lines.push(``);
   lines.push(`  async goto(): Promise<this> {`);
   lines.push(`    await this.page.goto(${className}.url);`);
@@ -225,7 +228,10 @@ function buildAggregateListPageObject(
   // Companion New + Detail stubs (referenced above)
   lines.push(`export class ${aggPascal}NewPage {`);
   lines.push(`  static readonly url = ${JSON.stringify(`${route}/new`)};`);
-  lines.push(`  constructor(public readonly page: Page) {}`);
+  lines.push(`  readonly page: Page;`);
+  lines.push(`  constructor(page: Page) {`);
+  lines.push(`    this.page = page;`);
+  lines.push(`  }`);
   lines.push(``);
   lines.push(`  async goto(): Promise<this> {`);
   lines.push(`    await this.page.goto(${aggPascal}NewPage.url);`);
@@ -255,7 +261,12 @@ function buildAggregateListPageObject(
   lines.push(``);
 
   lines.push(`export class ${aggPascal}DetailPage {`);
-  lines.push(`  constructor(public readonly page: Page, public readonly id: string) {}`);
+  lines.push(`  readonly page: Page;`);
+  lines.push(`  readonly id: string;`);
+  lines.push(`  constructor(page: Page, id: string) {`);
+  lines.push(`    this.page = page;`);
+  lines.push(`    this.id = id;`);
+  lines.push(`  }`);
   lines.push(``);
   lines.push(`  async goto(): Promise<this> {`);
   lines.push(`    await this.page.goto(\`${route}/\${this.id}\`);`);
@@ -335,7 +346,10 @@ function buildAggregateNewPageObject(
   lines.push(``);
   lines.push(`export class ${className} {`);
   lines.push(`  static readonly url = ${JSON.stringify(route)};`);
-  lines.push(`  constructor(public readonly page: Page) {}`);
+  lines.push(`  readonly page: Page;`);
+  lines.push(`  constructor(page: Page) {`);
+  lines.push(`    this.page = page;`);
+  lines.push(`  }`);
   lines.push(``);
   lines.push(`  async goto(): Promise<this> {`);
   lines.push(`    await this.page.goto(${className}.url);`);
@@ -361,7 +375,12 @@ function buildAggregateNewPageObject(
   lines.push(``);
   // Companion detail stub
   lines.push(`export class ${aggPascal}DetailPage {`);
-  lines.push(`  constructor(public readonly page: Page, public readonly id: string) {}`);
+  lines.push(`  readonly page: Page;`);
+  lines.push(`  readonly id: string;`);
+  lines.push(`  constructor(page: Page, id: string) {`);
+  lines.push(`    this.page = page;`);
+  lines.push(`    this.id = id;`);
+  lines.push(`  }`);
   lines.push(``);
   lines.push(`  async goto(): Promise<this> {`);
   lines.push(`    await this.page.goto(\`/${slug}/\${this.id}\`);`);
@@ -397,7 +416,12 @@ function buildAggregateDetailPageObject(
   lines.push(`import type { Page } from "@playwright/test";`);
   lines.push(``);
   lines.push(`export class ${className} {`);
-  lines.push(`  constructor(public readonly page: Page, public readonly id: string) {}`);
+  lines.push(`  readonly page: Page;`);
+  lines.push(`  readonly id: string;`);
+  lines.push(`  constructor(page: Page, id: string) {`);
+  lines.push(`    this.page = page;`);
+  lines.push(`    this.id = id;`);
+  lines.push(`  }`);
   lines.push(``);
   lines.push(`  static urlFor(id: string): string {`);
   lines.push(`    return \`/${slug}/\${id}\`;`);
@@ -475,7 +499,10 @@ function buildWorkflowFormPageObject(
   lines.push(``);
   lines.push(`export class ${className} {`);
   lines.push(`  static readonly url = ${JSON.stringify(route)};`);
-  lines.push(`  constructor(public readonly page: Page) {}`);
+  lines.push(`  readonly page: Page;`);
+  lines.push(`  constructor(page: Page) {`);
+  lines.push(`    this.page = page;`);
+  lines.push(`  }`);
   lines.push(``);
   lines.push(`  async goto(): Promise<this> {`);
   lines.push(`    await this.page.goto(${className}.url);`);
@@ -520,7 +547,10 @@ function buildViewListPageObject(
   lines.push(``);
   lines.push(`export class ${className} {`);
   lines.push(`  static readonly url = ${JSON.stringify(route)};`);
-  lines.push(`  constructor(public readonly page: Page) {}`);
+  lines.push(`  readonly page: Page;`);
+  lines.push(`  constructor(page: Page) {`);
+  lines.push(`    this.page = page;`);
+  lines.push(`  }`);
   lines.push(``);
   lines.push(`  async goto(): Promise<this> {`);
   lines.push(`    await this.page.goto(${className}.url);`);
@@ -555,7 +585,10 @@ function buildWorkflowsIndexPageObject(page: PageIR, emitName: string): string {
   lines.push(``);
   lines.push(`export class ${className} {`);
   lines.push(`  static readonly url = ${JSON.stringify(route)};`);
-  lines.push(`  constructor(public readonly page: Page) {}`);
+  lines.push(`  readonly page: Page;`);
+  lines.push(`  constructor(page: Page) {`);
+  lines.push(`    this.page = page;`);
+  lines.push(`  }`);
   lines.push(``);
   lines.push(`  async goto(): Promise<this> {`);
   lines.push(`    await this.page.goto(${className}.url);`);
@@ -590,7 +623,10 @@ function buildViewsIndexPageObject(page: PageIR, emitName: string): string {
   lines.push(``);
   lines.push(`export class ${className} {`);
   lines.push(`  static readonly url = ${JSON.stringify(route)};`);
-  lines.push(`  constructor(public readonly page: Page) {}`);
+  lines.push(`  readonly page: Page;`);
+  lines.push(`  constructor(page: Page) {`);
+  lines.push(`    this.page = page;`);
+  lines.push(`  }`);
   lines.push(``);
   lines.push(`  async goto(): Promise<this> {`);
   lines.push(`    await this.page.goto(${className}.url);`);
@@ -625,7 +661,10 @@ function buildHomePageObject(page: PageIR, emitName: string): string {
   lines.push(``);
   lines.push(`export class ${className} {`);
   lines.push(`  static readonly url = ${JSON.stringify(route)};`);
-  lines.push(`  constructor(public readonly page: Page) {}`);
+  lines.push(`  readonly page: Page;`);
+  lines.push(`  constructor(page: Page) {`);
+  lines.push(`    this.page = page;`);
+  lines.push(`  }`);
   lines.push(``);
   lines.push(`  async goto(): Promise<this> {`);
   lines.push(`    await this.page.goto(${className}.url);`);
@@ -674,7 +713,10 @@ function buildGenericPageObject(page: PageIR, emitName: string): string {
     lines.push(`  static urlFor(${paramList}): string {`);
     lines.push(`    return ${urlExpr};`);
     lines.push(`  }`);
-    lines.push(`  constructor(public readonly page: Page) {}`);
+    lines.push(`  readonly page: Page;`);
+    lines.push(`  constructor(page: Page) {`);
+    lines.push(`    this.page = page;`);
+    lines.push(`  }`);
     lines.push(``);
     lines.push(`  async goto(${paramList}): Promise<this> {`);
     lines.push(
@@ -684,7 +726,10 @@ function buildGenericPageObject(page: PageIR, emitName: string): string {
     lines.push(`  }`);
   } else {
     lines.push(`  static readonly url = ${JSON.stringify(route)};`);
-    lines.push(`  constructor(public readonly page: Page) {}`);
+    lines.push(`  readonly page: Page;`);
+    lines.push(`  constructor(page: Page) {`);
+    lines.push(`    this.page = page;`);
+    lines.push(`  }`);
     lines.push(``);
     lines.push(`  async goto(): Promise<this> {`);
     lines.push(`    await this.page.goto(${className}.url);`);
@@ -713,7 +758,10 @@ function buildFallback(page: PageIR, emitName: string): string {
   lines.push(``);
   lines.push(`export class ${className} {`);
   lines.push(`  static readonly url = ${JSON.stringify(route)};`);
-  lines.push(`  constructor(public readonly page: Page) {}`);
+  lines.push(`  readonly page: Page;`);
+  lines.push(`  constructor(page: Page) {`);
+  lines.push(`    this.page = page;`);
+  lines.push(`  }`);
   lines.push(``);
   lines.push(`  async goto(): Promise<this> {`);
   lines.push(`    await this.page.goto(${className}.url);`);

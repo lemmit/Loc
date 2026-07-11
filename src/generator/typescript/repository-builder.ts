@@ -169,10 +169,19 @@ export function buildRepositoryFile(
   // free of dead names (Biome generated-code gate).
   const bodyStr = lines(
     `export class ${agg.name}Repository {`,
+    // Explicit field declarations + constructor assignments, not
+    // parameter properties — the latter is non-erasable sugar Node's
+    // type stripping rejects; see docs/plans/dap-node-debug.md
+    // "Non-erasable syntax" and emit/value-objects.ts's renderValueObject.
+    `  private readonly db: Db;`,
+    `  private readonly events: DomainEventDispatcher;`,
     `  constructor(`,
-    `    private readonly db: Db,`,
-    `    private readonly events: DomainEventDispatcher,`,
-    `  ) {}`,
+    `    db: Db,`,
+    `    events: DomainEventDispatcher,`,
+    `  ) {`,
+    `    this.db = db;`,
+    `    this.events = events;`,
+    `  }`,
     "",
     findByIdMethod(agg, ctx, emitTrace, filterPred),
     "",

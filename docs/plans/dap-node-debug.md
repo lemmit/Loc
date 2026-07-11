@@ -271,24 +271,26 @@ fence already established for their own gated content changes).
 - **Value-object constructor rewrite** — **DONE (slice 2, Milestone 19).**
   `emit/value-objects.ts` now emits explicit field declaration + constructor
   assignment instead of TS parameter properties, unconditionally.
-- **Repository/reader/persistence-adapter constructor rewrite** (near-term,
-  small, separate slice — found while re-proving slice 2's full-boot probe,
-  see the RESOLVED note above): the same parameter-property shape lives in
+- **Repository/reader/persistence-adapter constructor rewrite** — **RESOLVED
+  (slice 3, Milestone 20).** The same parameter-property shape lived in
   `src/generator/typescript/repository-builder.ts` and its
   `-document`/`-embedded`/`-eventsourced` siblings, `base-reader-builder.ts`,
   and `emit/mikroorm.ts` (`constructor(private readonly db: Db, private
   readonly events: DomainEventDispatcher) {}`). Unlike the VO gap, these ARE
   on the request-handling load path (every route touches a repository), so
-  this is the ACTUAL remaining blocker to a full generated node server
+  this was the ACTUAL remaining blocker to a full generated node server
   booting cleanly under plain Node's type stripping. Same mechanical
   low-risk rewrite; deserves its own review pass for the same reason the VO
   rewrite did.
-- **Playwright page-object constructor rewrite** (lower priority — these are
-  test-only `.ts` files under `e2e/pages/`, never on a server boot path):
-  `src/generator/_frontend/page-objects-builder.ts` and its siblings emit
-  `constructor(public readonly page: Page) {}`. Only matters if a future
-  slice wants the e2e page objects themselves debuggable/strippable under
-  plain Node rather than via Playwright's own tsx-based runner.
+- **Playwright page-object constructor rewrite** — **RESOLVED (slice 3,
+  Milestone 20).** These are test-only `.ts` files under `e2e/pages/`, never
+  on a server boot path: `src/generator/_frontend/page-objects-builder.ts`
+  and its siblings (plus the elixir backend's
+  `src/generator/elixir/page-objects-emit.ts` and the shared
+  `api/api-client.hbs` / `sveltekit/api-client.hbs` `ApiError` class) emitted
+  `constructor(public readonly page: Page) {}`. Matters because the strip-
+  erasable tripwire (`test/generator/typescript/strip-erasable-constructors.test.ts`)
+  now covers every emitted `.ts`/`.tsx` file, not just `domain/`.
 - **.NET debug config** (`launch.json` `type: "coreclr"` against the
   already-shipped `#line` → PDB weave, phase 6a) — later slice, same
   `.vscode/launch.json` file, additional configurations.

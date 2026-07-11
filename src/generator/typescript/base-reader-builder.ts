@@ -59,7 +59,12 @@ export function buildBaseReaderFile(
   ]);
   const bodyStr = lines(
     `export class ${base.name}Repository {`,
-    `  constructor(private readonly db: Db) {}`,
+    // Explicit field declaration + constructor assignment, not a
+    // parameter property — see emit/value-objects.ts's renderValueObject.
+    `  private readonly db: Db;`,
+    `  constructor(db: Db) {`,
+    `    this.db = db;`,
+    `  }`,
     "",
     `  async findById(id: Ids.${base.name}Id): Promise<${base.name} | null> {`,
     `    const rows = await this.db.select().from(schema.${table}).where(eq(schema.${table}.id, id));`,

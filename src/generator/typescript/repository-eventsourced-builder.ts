@@ -60,10 +60,17 @@ export function buildEventSourcedRepositoryFile(
 
   const bodyStr = lines(
     `export class ${agg.name}Repository {`,
+    // Explicit field declarations + constructor assignments, not
+    // parameter properties — see emit/value-objects.ts's renderValueObject.
+    `  private readonly db: Db;`,
+    `  private readonly events: DomainEventDispatcher;`,
     `  constructor(`,
-    `    private readonly db: Db,`,
-    `    private readonly events: DomainEventDispatcher,`,
-    `  ) {}`,
+    `    db: Db,`,
+    `    events: DomainEventDispatcher,`,
+    `  ) {`,
+    `    this.db = db;`,
+    `    this.events = events;`,
+    `  }`,
     "",
     `  async findById(id: ${idVar}): Promise<${agg.name} | null> {`,
     `    const rows = await this.db`,

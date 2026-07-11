@@ -20,7 +20,12 @@ export function buildViewPageObject(view: ViewIR, ctx: BoundedContextIR): string
   lines.push("");
   lines.push(`export class ${className} {`);
   lines.push(`  static readonly url = "/views/${slug}";`);
-  lines.push(`  constructor(public readonly page: Page) {}`);
+  // Explicit field declaration + constructor assignment, not a
+  // parameter property — see emit/value-objects.ts's renderValueObject.
+  lines.push(`  readonly page: Page;`);
+  lines.push(`  constructor(page: Page) {`);
+  lines.push(`    this.page = page;`);
+  lines.push(`  }`);
   lines.push("");
   lines.push(`  async goto(): Promise<this> {`);
   lines.push(`    await this.page.goto(${className}.url);`);

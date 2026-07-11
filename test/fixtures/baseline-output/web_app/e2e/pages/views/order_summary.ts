@@ -9,7 +9,10 @@ export interface OrderSummaryRowText {
 
 export class OrderSummaryViewPage {
   static readonly url = "/views/order_summary";
-  constructor(public readonly page: Page) {}
+  readonly page: Page;
+  constructor(page: Page) {
+    this.page = page;
+  }
 
   async goto(): Promise<this> {
     await this.page.goto(OrderSummaryViewPage.url);

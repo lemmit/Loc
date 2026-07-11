@@ -9,26 +9,18 @@
 // route body parsing construct VOs at runtime) — see the design doc's Phase
 // A finding 2.
 //
-// This is the durable tripwire: no emitted domain-layer `.ts` file (the
-// aggregate/entity/value-object/id/event/error modules under any
-// deployable's `domain/` directory — the set the design doc characterized as
-// "erasable-only... value objects [were] the exception") may carry a
+// RESOLVED (slice 3, Milestone 20). The repository/reader/persistence-adapter
+// constructors (`repository-builder.ts` + siblings, `base-reader-builder.ts`,
+// `emit/mikroorm.ts`) and the Playwright page-object constructors
+// (`src/generator/_frontend/*-page-object*.ts`, `page-objects-builder.ts`,
+// `src/generator/elixir/page-objects-emit.ts`) now emit explicit field
+// declarations + constructor assignments too — the same mechanical rewrite
+// slice 2 used for value objects. This is the durable tripwire, widened:
+// EVERY emitted `.ts`/`.tsx` file in the system (domain layer, `db/`
+// repositories, and `e2e/pages/` Playwright page objects alike) may carry no
 // `constructor(...)` with a public/private/protected modifier on a
-// parameter.
-//
-// KNOWN, SEPARATE, NOT-YET-FIXED GAP (found while proving this slice's
-// payoff, out of this slice's scope — see the design doc's Follow-ups):
-// the repository/reader/persistence-adapter constructors
-// (`repository-builder.ts` + siblings, `emit/mikroorm.ts`) and the Playwright
-// page-object constructors (`src/generator/_frontend/*-page-object*.ts`,
-// `page-objects-builder.ts`) ALSO emit parameter properties
-// (`constructor(private readonly db: Db, ...)` /
-// `constructor(public readonly page: Page) {}`). Those files sit OUTSIDE
-// `domain/` (db/repositories/, e2e/pages/) and are deliberately NOT covered
-// by this tripwire — fixing them is its own follow-up slice, same reasoning
-// the design doc used to scope this one. Do not widen this test's file
-// filter to "every emitted .ts file" without first landing that follow-up,
-// or it fails on a gap this slice never promised to close.
+// parameter — the whole plain-Node emitted project, plus the emitted
+// Playwright specs, is strip-erasable.
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { URI } from "langium";
@@ -56,16 +48,15 @@ async function buildAcme(): Promise<Model> {
 }
 
 describe("strip-erasable constructors (Node type-stripping compatibility)", () => {
-  it("no domain-layer .ts file in the acme system carries a parameter-property constructor", async () => {
+  it("no emitted .ts/.tsx file in the acme system carries a parameter-property constructor", async () => {
     const model = await buildAcme();
     const { files } = generateSystems(model);
     const offenders: string[] = [];
     for (const [name, content] of files) {
       if (!name.endsWith(".ts") && !name.endsWith(".tsx")) continue;
-      if (!name.includes("/domain/")) continue;
       if (PARAMETER_PROPERTY_RE.test(content)) offenders.push(name);
     }
-    expect(offenders, "domain-layer files with a parameter-property constructor").toEqual([]);
+    expect(offenders, "emitted files with a parameter-property constructor").toEqual([]);
   });
 
   it("value-objects.ts specifically: explicit field declarations, not parameter properties", async () => {

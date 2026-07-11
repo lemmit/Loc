@@ -49,7 +49,12 @@ export function buildPageObjectModule(
   // ---------------------------------------------------------------------
   lines.push(`export class ${aggCap}ListPage {`);
   lines.push(`  static readonly url = "/${slug}";`);
-  lines.push(`  constructor(public readonly page: Page) {}`);
+  // Explicit field declaration + constructor assignment, not a
+  // parameter property — see emit/value-objects.ts's renderValueObject.
+  lines.push(`  readonly page: Page;`);
+  lines.push(`  constructor(page: Page) {`);
+  lines.push(`    this.page = page;`);
+  lines.push(`  }`);
   lines.push("");
   lines.push(`  async goto(): Promise<this> {`);
   lines.push(`    await this.page.goto(${aggCap}ListPage.url);`);
@@ -83,7 +88,12 @@ export function buildPageObjectModule(
   // ---------------------------------------------------------------------
   lines.push(`export class ${aggCap}NewPage {`);
   lines.push(`  static readonly url = "/${slug}/new";`);
-  lines.push(`  constructor(public readonly page: Page) {}`);
+  // Explicit field declaration + constructor assignment, not a
+  // parameter property — see emit/value-objects.ts's renderValueObject.
+  lines.push(`  readonly page: Page;`);
+  lines.push(`  constructor(page: Page) {`);
+  lines.push(`    this.page = page;`);
+  lines.push(`  }`);
   lines.push("");
   lines.push(`  async goto(): Promise<this> {`);
   lines.push(`    await this.page.goto(${aggCap}NewPage.url);`);
@@ -117,7 +127,14 @@ export function buildPageObjectModule(
   // Detail page
   // ---------------------------------------------------------------------
   lines.push(`export class ${aggCap}DetailPage {`);
-  lines.push(`  constructor(public readonly page: Page, public readonly id: string) {}`);
+  // Explicit field declarations + constructor assignments, not
+  // parameter properties — see emit/value-objects.ts's renderValueObject.
+  lines.push(`  readonly page: Page;`);
+  lines.push(`  readonly id: string;`);
+  lines.push(`  constructor(page: Page, id: string) {`);
+  lines.push(`    this.page = page;`);
+  lines.push(`    this.id = id;`);
+  lines.push(`  }`);
   lines.push("");
   lines.push(`  async goto(): Promise<this> {`);
   lines.push(`    await this.page.goto(\`/${slug}/\${this.id}\`);`);

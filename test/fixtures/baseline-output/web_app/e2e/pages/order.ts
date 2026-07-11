@@ -5,7 +5,10 @@ import type { CreateOrderRequest, AddLineOrderRequest, UpdateOrderRequest, Order
 
 export class OrderListPage {
   static readonly url = "/orders";
-  constructor(public readonly page: Page) {}
+  readonly page: Page;
+  constructor(page: Page) {
+    this.page = page;
+  }
 
   async goto(): Promise<this> {
     await this.page.goto(OrderListPage.url);
@@ -35,7 +38,10 @@ export class OrderListPage {
 
 export class OrderNewPage {
   static readonly url = "/orders/new";
-  constructor(public readonly page: Page) {}
+  readonly page: Page;
+  constructor(page: Page) {
+    this.page = page;
+  }
 
   async goto(): Promise<this> {
     await this.page.goto(OrderNewPage.url);
@@ -73,7 +79,12 @@ export class OrderNewPage {
 }
 
 export class OrderDetailPage {
-  constructor(public readonly page: Page, public readonly id: string) {}
+  readonly page: Page;
+  readonly id: string;
+  constructor(page: Page, id: string) {
+    this.page = page;
+    this.id = id;
+  }
 
   async goto(): Promise<this> {
     await this.page.goto(`/orders/${this.id}`);

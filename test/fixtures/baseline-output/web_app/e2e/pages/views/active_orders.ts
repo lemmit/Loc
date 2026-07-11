@@ -9,7 +9,10 @@ export interface ActiveOrdersRowText {
 
 export class ActiveOrdersViewPage {
   static readonly url = "/views/active_orders";
-  constructor(public readonly page: Page) {}
+  readonly page: Page;
+  constructor(page: Page) {
+    this.page = page;
+  }
 
   async goto(): Promise<this> {
     await this.page.goto(ActiveOrdersViewPage.url);

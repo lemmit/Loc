@@ -5,7 +5,10 @@ import type { CreateCustomerRequest, UpdateCustomerRequest, CustomerResponse } f
 
 export class CustomerListPage {
   static readonly url = "/customers";
-  constructor(public readonly page: Page) {}
+  readonly page: Page;
+  constructor(page: Page) {
+    this.page = page;
+  }
 
   async goto(): Promise<this> {
     await this.page.goto(CustomerListPage.url);
@@ -35,7 +38,10 @@ export class CustomerListPage {
 
 export class CustomerNewPage {
   static readonly url = "/customers/new";
-  constructor(public readonly page: Page) {}
+  readonly page: Page;
+  constructor(page: Page) {
+    this.page = page;
+  }
 
   async goto(): Promise<this> {
     await this.page.goto(CustomerNewPage.url);
@@ -67,7 +73,12 @@ export class CustomerNewPage {
 }
 
 export class CustomerDetailPage {
-  constructor(public readonly page: Page, public readonly id: string) {}
+  readonly page: Page;
+  readonly id: string;
+  constructor(page: Page, id: string) {
+    this.page = page;
+    this.id = id;
+  }
 
   async goto(): Promise<this> {
     await this.page.goto(`/customers/${this.id}`);
