@@ -70,7 +70,7 @@ describe("vanilla — cross-field invariant enforcement", () => {
     expect(cs).toMatch(/if data\.status == "active" do\s*\n\s*if data\.handle != data\.email/);
   });
 
-  it("routes the operation-persist path through validate_invariants (no bare change/put_change)", async () => {
+  it("routes the operation-persist path through validate_invariants (force_change then validate)", async () => {
     const files = await generateSystemFiles(
       sys(`aggregate Profile with crudish {
         handle: string
@@ -81,7 +81,7 @@ describe("vanilla — cross-field invariant enforcement", () => {
     );
     const ctx = files.get([...files.keys()].find((k) => k.endsWith("/accounts.ex"))!)!;
     expect(ctx).toMatch(
-      /put_change\(:handle[\s\S]*\|> Api\.Accounts\.ProfileChangeset\.validate_invariants\(\)\s*\n\s*\|> Api\.Accounts\.ProfileRepository\.persist_change\(\)/,
+      /force_change\(:handle[\s\S]*\|> Api\.Accounts\.ProfileChangeset\.validate_invariants\(\)\s*\n\s*\|> Api\.Accounts\.ProfileRepository\.persist_change\(\)/,
     );
   });
 

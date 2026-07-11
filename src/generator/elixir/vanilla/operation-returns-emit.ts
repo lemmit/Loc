@@ -130,9 +130,15 @@ export function persistPutBodies(
         // `record.<field>` as the loaded assoc so put_assoc can replace it).
         return `Ecto.Changeset.put_assoc(:${f}, __resolve_refs(${f}, ${targetMod}))`;
       }
-      return `Ecto.Changeset.put_change(:${f}, record.${f})`;
+      // FORCE the change: the op body rebinds `record = %{record | f: newval}`
+      // BEFORE this changeset is built, so the changeset's DATA already carries the
+      // new value.  `put_change/3` DROPS a change whose value equals the data
+      // (`Ecto.Type.equal?`), leaving an EMPTY changeset — `Repo.update` then runs
+      // no SQL and the operation's write is silently lost.  `force_change/3` stores
+      // it regardless, so the assigned column actually persists.
+      return `Ecto.Changeset.force_change(:${f}, record.${f})`;
     }),
-    ...provColumns.map((c) => `Ecto.Changeset.put_change(:${c}, record.${c})`),
+    ...provColumns.map((c) => `Ecto.Changeset.force_change(:${c}, record.${c})`),
   ];
 }
 

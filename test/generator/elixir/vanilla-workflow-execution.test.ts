@@ -72,7 +72,7 @@ describe("vanilla — Slice 5c workflow execution", () => {
     // casting params.
     expect(ctx).toContain("def mark_done_task(%Api.Tracker.Task{} = record, params)");
     expect(ctx).toContain("record = %{record | done: true}");
-    expect(ctx).toContain("Ecto.Changeset.put_change(:done, record.done)");
+    expect(ctx).toContain("Ecto.Changeset.force_change(:done, record.done)");
     expect(ctx).toContain("Api.Tracker.TaskRepository.persist_change()");
     // CRUDish's `update` operation must NOT also emit a named-op
     // function — it would collide with the `update_task/2` defdelegate

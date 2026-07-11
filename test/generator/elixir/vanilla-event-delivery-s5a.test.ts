@@ -201,7 +201,7 @@ system FulfillmentSys {
     // The plain terminal pipe — unchanged from before S5a.
     expect(body).toContain(`    record
     |> Ecto.Changeset.change(%{})
-    |> Ecto.Changeset.put_change(:status, record.status)
+    |> Ecto.Changeset.force_change(:status, record.status)
     |> Api.Ordering.OrderRepository.persist_change()`);
     // No persist_change `case`, no broadcast/dispatch.
     expect(body).not.toContain("case Api.Ordering.OrderRepository.persist_change");
