@@ -135,6 +135,19 @@ export function setAmbientEnumIndex(index: ReadonlyMap<string, string>): void {
   ambientEnumIndex = index;
 }
 
+// Project-global index of TOP-LEVEL (ambient) helper `function`s (stdlib
+// Phase B), name → decl.  Installed once by `lowerModel` before any body is
+// lowered (single synchronous pass, so the module-global is safe — same
+// posture as `ambientEnumIndex`).  A call to one of these inlines its
+// expression body at the call site (`inlineTopLevelFn`), so it needs no
+// owning aggregate.  Only expression-form functions are indexed usefully;
+// block-form at top level is rejected by the validator.
+let topLevelFnIndex: ReadonlyMap<string, FunctionDecl> = new Map();
+
+export function setTopLevelFnIndex(index: ReadonlyMap<string, FunctionDecl>): void {
+  topLevelFnIndex = index;
+}
+
 /** Map a resource verb's declared result to a `TypeIR`.  `json`/`json?`
  *  → the `json` primitive (optional wrapped); `void`/unknown → a string
  *  placeholder (the value is unused at a void call site). */
@@ -410,6 +423,21 @@ function applySuffixToRecv(
         };
       }
       const callKind = resolveCallKind(recv.name, env);
+      // Top-level (ambient) helper `function` call (stdlib Phase B) — inline
+      // its expression body with the arguments substituted.  Gated on
+      // `callKind === "free"` so a LOCAL member (aggregate/VO/workflow
+      // function, operation, VO ctor) of the same name shadows the top-level
+      // one; and, running before the duration-builtin check below, a user
+      // `function days(...)` shadows the A5 `days()` builtin.
+      if (callKind === "free") {
+        const topFn = findTopLevelFn(recv.name);
+        if (topFn) {
+          return {
+            recv: inlineTopLevelFn(topFn, args, env),
+            recvType: lowerType(topFn.returnType),
+          };
+        }
+      }
       // A5 duration constructor — `days(n)` / `hours(n)` / `minutes(n)`
       // becomes a dedicated `duration` IR node, but ONLY when
       // the name resolved to nothing user-declared (`resolveCallKind`
@@ -1129,6 +1157,53 @@ function inlineCriterion(c: Criterion, args: ExprIR[], env: Env): ExprIR {
   });
   bodyEnv = { ...bodyEnv, criterionArgs: argMap, criterionStack: [...stack, c.name] };
   return lowerExpr(c.body, bodyEnv);
+}
+
+/** The top-level (ambient) helper `function` named `name`, or undefined. */
+function findTopLevelFn(name: string): FunctionDecl | undefined {
+  return topLevelFnIndex.get(name);
+}
+
+/** Inline a top-level (ambient) helper `function` at the call site (stdlib
+ *  Phase B).  Like `inlinePolicyFn`, the body is AMBIENT — it sees only its
+ *  own parameters (substituted by the caller's already-lowered arguments),
+ *  context-level ambient names (root enums, sibling top-level functions), and
+ *  `currentUser` if present; the enclosing aggregate/part/VO/workflow scope is
+ *  cleared so a bare field name can't leak in (pass such values as arguments).
+ *  The result is ordinary `ExprIR` spliced at the call site, so every backend
+ *  renders it through existing paths and a `where`-clause use stays queryable.
+ *  A reference cycle is broken by leaving the inner reference unresolved; the
+ *  `loom.function-recursive` validator rejects it at AST-validate time.  Only
+ *  the expression form (`= expr`) is inlinable; a block-form top-level function
+ *  is rejected by the validator, so `body` is present here in practice. */
+function inlineTopLevelFn(fn: FunctionDecl, args: ExprIR[], env: Env): ExprIR {
+  const stack = env.criterionStack ?? [];
+  if (stack.includes(fn.name)) {
+    return { kind: "ref", name: fn.name, refKind: "unknown" };
+  }
+  const argMap = new Map<string, ExprIR>();
+  fn.params.forEach((p, i) => {
+    const a = args[i];
+    if (a) argMap.set(p.name, a);
+  });
+  const bodyEnv: Env = {
+    ...env,
+    locals: new Map(),
+    aggregate: undefined,
+    part: undefined,
+    valueObject: undefined,
+    workflow: undefined,
+    projection: undefined,
+    criterionArgs: argMap,
+    criterionStack: [...stack, fn.name],
+  };
+  const inlined: ExprIR = fn.body
+    ? lowerExpr(fn.body, bodyEnv)
+    : { kind: "ref", name: fn.name, refKind: "unknown" };
+  // Wrap the spliced body in a paren so precedence is preserved at ANY call
+  // site — a call boundary groups the body, but the bare inlined ExprIR does
+  // not, so `!isBlank(x)` must inline as `!(<body>)`, not `!<body>`.
+  return { kind: "paren", inner: inlined };
 }
 
 function resolveNameRef(name: string, env: Env): ExprIR {

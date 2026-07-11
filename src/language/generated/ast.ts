@@ -1458,7 +1458,7 @@ export function isFramework(item: unknown): item is Framework {
 }
 
 export interface FunctionDecl extends langium.AstNode {
-    readonly $container: Aggregate | EntityPart | ValueObject | Workflow;
+    readonly $container: Aggregate | EntityPart | Model | System | ValueObject | Workflow;
     readonly $type: 'FunctionDecl';
     block: Array<Statement>;
     body?: Expression;
@@ -2229,7 +2229,7 @@ export function isModel(item: unknown): item is Model {
     return reflection.isInstance(item, Model.$type);
 }
 
-export type ModelMember = Api | AuthBlock | BoundedContext | Capability | ChannelSource | Component | Deployable | EnumDecl | Layout | PayloadDecl | Requirement | Resource | Solution | Storage | Subdomain | System | TestCase | TestE2E | ThemeBlock | Ui | UserBlock | ValueObject;
+export type ModelMember = Api | AuthBlock | BoundedContext | Capability | ChannelSource | Component | Deployable | EnumDecl | FunctionDecl | Layout | PayloadDecl | Requirement | Resource | Solution | Storage | Subdomain | System | TestCase | TestE2E | ThemeBlock | Ui | UserBlock | ValueObject;
 
 export const ModelMember = {
     $type: 'ModelMember'
@@ -3422,7 +3422,7 @@ export function isSystem(item: unknown): item is System {
     return reflection.isInstance(item, System.$type);
 }
 
-export type SystemMember = Api | AuthBlock | BoundedContext | Capability | ChannelSource | Deployable | Layout | Resource | Storage | Subdomain | TenancyDecl | TestE2E | ThemeBlock | Ui | UserBlock;
+export type SystemMember = Api | AuthBlock | BoundedContext | Capability | ChannelSource | Deployable | FunctionDecl | Layout | Resource | Storage | Subdomain | TenancyDecl | TestE2E | ThemeBlock | Ui | UserBlock;
 
 export const SystemMember = {
     $type: 'SystemMember'
@@ -5290,7 +5290,7 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                     name: FunctionDecl.returnType
                 }
             },
-            superTypes: [AggregateMember.$type, EntityPartMember.$type, ValueObjectMember.$type, WorkflowMember.$type]
+            superTypes: [AggregateMember.$type, EntityPartMember.$type, ModelMember.$type, SystemMember.$type, ValueObjectMember.$type, WorkflowMember.$type]
         },
         HandleDecl: {
             name: HandleDecl.$type,

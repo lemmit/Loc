@@ -17,6 +17,7 @@ import type {
   EnumDecl,
   EventDecl,
   Expression,
+  FunctionDecl,
   Layout,
   LoadPath,
   Model,
@@ -166,7 +167,12 @@ import {
 } from "./lower-capabilities.js";
 import { lowerDeployable } from "./lower-deployment.js";
 import { lowerDomainService } from "./lower-domain-service.js";
-import { criterionRefOf, lowerExpr, setAmbientEnumIndex } from "./lower-expr.js";
+import {
+  criterionRefOf,
+  lowerExpr,
+  setAmbientEnumIndex,
+  setTopLevelFnIndex,
+} from "./lower-expr.js";
 import {
   lowerApply,
   lowerContainment,
@@ -248,6 +254,23 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
     }
   }
   setAmbientEnumIndex(ambientEnumIndex);
+  // Project-global index of TOP-LEVEL (ambient) helper `function`s (stdlib
+  // Phase B) — declared at file root or inside a `system { }`, visible
+  // workspace-wide.  Expression-form functions INLINE at every call site
+  // during lowering (`inlineTopLevelFn` in lower-expr.ts), so they need this
+  // ambient index rather than an owning aggregate.  First declaration wins on
+  // a name collision (the validator owns any ambiguity).  Local functions
+  // (aggregate / VO / workflow members) are NOT indexed here — they keep the
+  // emitted `this.<fn>` path via `resolveCallKind`.
+  const topLevelFnIndex = new Map<string, FunctionDecl>();
+  const addTopLevelFn = (m: { $type: string; name?: string }): void => {
+    if (isFunctionDecl(m) && !topLevelFnIndex.has(m.name)) topLevelFnIndex.set(m.name, m);
+  };
+  for (const m of allMembers) {
+    addTopLevelFn(m);
+    if (isSystem(m)) for (const sm of m.members) addTopLevelFn(sm);
+  }
+  setTopLevelFnIndex(topLevelFnIndex);
   // Project-global name → decl index for every value object / enum / entity
   // across the import graph (recursing into systems / subdomains / contexts).
   // Backstops the `findXByName` lookups in lower-types so a macro-emitted

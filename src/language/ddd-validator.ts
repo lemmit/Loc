@@ -66,6 +66,7 @@ import {
   checkTernaryExprs,
   checkTheme,
   checkTopLevelDomainComposition,
+  checkTopLevelFunctions,
   checkTraceability,
   checkTypeReferences,
   checkUi,
@@ -277,6 +278,9 @@ export class DddValidator {
     guard("duration-constructors", model, () => checkDurationConstructors(model, accept));
     // A6 string-interpolation hole types (loom.interp-hole-type).
     guard("template-holes", model, () => checkTemplateHoles(model, accept));
+    // Phase B top-level functions: block-form rejection + recursion cycle
+    // (loom.function-toplevel-block / loom.function-recursive).
+    guard("toplevel-functions", model, () => checkTopLevelFunctions(model, accept));
     // Unresolved bare-identifier heads (`total := amout`, `let x = amout`):
     // a `NameRef` is not a cross-reference, so an unresolvable head types as
     // `T.unknown` and every downstream gate suppresses on it — the finding-1

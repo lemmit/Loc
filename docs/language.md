@@ -564,6 +564,53 @@ records.  See [`page-metamodel.md`](page-metamodel.md) §5.2.
 
 ---
 
+## Top-level helper functions
+
+A pure, **expression-form** `function` may be declared at file root (or directly
+inside a `system { }`), making it an ambient helper visible workspace-wide —
+like a root `valueobject` / `enum`. It **inlines** at every call site during
+lowering (no function is emitted), so it works uniformly on every backend and a
+call inside a `find … where` stays queryable.
+
+```ddd
+function isBlank(s: string): bool = s.trim().length == 0
+function withTax(amount: int, pct: int): int = amount + amount * pct / 100
+
+context Sales {
+  aggregate Invoice {
+    customerName: string
+    net: int
+    invariant !isBlank(customerName)
+    derived gross: int = withTax(net, 20)
+  }
+}
+```
+
+```csharp
+// .NET — inlined, no helper function/class emitted
+if (!(!(CustomerName.Trim().Length == 0))) throw new DomainInvariantException(...);
+public int Gross => (Net + Net * 20 / 100);
+```
+
+Rules:
+
+- **Expression-form only** (`= <expr>`). A block-form top-level function (`{ … }`)
+  is rejected (`loom.function-toplevel-block`) — it has no emission home yet; make
+  it an aggregate / value-object member instead (there it emits as a real method).
+- **No recursion.** Because it inlines, a top-level function must not call itself
+  directly or through a mutual cycle (`loom.function-recursive`). Recursion stays
+  legal for member functions, which emit as real methods.
+- **Shadowing.** A local member (`function` / field / operation / VO constructor)
+  of the same name shadows the top-level one; a top-level function in turn shadows
+  the stdlib builtins (a user `function days(...)` shadows `days()`).
+- **Ambient scope.** The body sees only its parameters (and `currentUser` if
+  present) — pass aggregate fields as arguments; a bare field name won't leak in.
+
+The same `function` keyword declares **member** helpers inside an aggregate /
+value object / workflow; those emit as real methods (`this.<fn>`) and may recurse.
+
+---
+
 ## Expression language
 
 Pragmatic core, similar to a subset of TypeScript / C# expressions.

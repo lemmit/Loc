@@ -10,6 +10,14 @@
 // exhaustiveness) are acceptable.
 
 // ---------------------------------------------------------------------------
+// Top-level (ambient) helper `function` (stdlib Phase B) — pure,
+// expression-form, visible workspace-wide.  INLINES at every call site during
+// lowering (no emitted function), so it needs no owning aggregate.  Exercised
+// in Project's `derived` below.
+// ---------------------------------------------------------------------------
+function isBlank(s: string): bool = s.trim().length == 0
+
+// ---------------------------------------------------------------------------
 // Traceability artifacts (sit above the model).
 // ---------------------------------------------------------------------------
 requirement US-001 {
@@ -171,6 +179,10 @@ system DevPlatform {
 
                 // PrimitiveConversion — `string(<non-string>)` coercion.
                 derived seqLabel: string = "seq-" + string(sequence)
+
+                // Top-level function call (stdlib Phase B) — `isBlank` inlines
+                // to `name.trim().length == 0` here (no emitted function).
+                derived hasName: bool = !isBlank(name)
 
                 // TemplateStr — A6 string interpolation (backtick + `{hole}`);
                 // multi-hole to exercise START / MIDDLE / END segments.
