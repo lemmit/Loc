@@ -1953,7 +1953,12 @@ function exprChildrenForServiceScan(e: ExprIR): ExprIR[] {
 // event param (`s` in `on(s: ShipmentRequested)`) to the Mediator handler's
 // `notification` argument.  Other refs (let-bindings, aggregate locals) pass
 // through unchanged.
-function renderExprWithEventParam(
+/** Render an expression in a reactor / fold body: the bound event param
+ *  (`refKind: "param"`, `name === eventParam`) is rewritten to `notification`
+ *  (the `INotificationHandler.Handle` param), and `this-prop` reads resolve
+ *  against `thisName` (the loaded saga row / projection row).  Exported for the
+ *  projection fold emitter, which renders `on(e)` fold assign values the same way. */
+export function renderExprWithEventParam(
   e: ExprIR,
   eventParam: string,
   resourceClasses?: Map<string, string>,

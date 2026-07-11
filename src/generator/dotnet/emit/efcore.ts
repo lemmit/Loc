@@ -13,6 +13,7 @@ import { isValueCollectionType, valueCollectionsFor } from "../../../ir/util/val
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
 import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { projectionRowClass, projectionRowDbSet } from "../projection-state-emit.js";
 import { renderCsExpr } from "../render-expr.js";
 import {
   esEventDbSet,
@@ -158,6 +159,21 @@ export function renderDbContext(
     (wf) =>
       `        modelBuilder.ApplyConfiguration(new Configurations.${workflowStateClass(wf)}Configuration());`,
   );
+  // Projection read models (projection.md): one DbSet + configuration per
+  // projection, keyed by its correlation column, non-key columns nullable.
+  // Empty (byte-identical) when the context declares no projection.  The
+  // `<Proj>Row` POCO lives in the Persistence.Projections namespace.
+  const projRows = ctx.projections ?? [];
+  const projRowUsings =
+    projRows.length > 0 ? [`using ${ns}.Infrastructure.Persistence.Projections;`] : [];
+  const projRowDbSets = projRows.map(
+    (p) =>
+      `    public DbSet<${projectionRowClass(p)}> ${projectionRowDbSet(p)} => Set<${projectionRowClass(p)}>();`,
+  );
+  const projRowApplyConfigs = projRows.map(
+    (p) =>
+      `        modelBuilder.ApplyConfiguration(new Configurations.${projectionRowClass(p)}Configuration());`,
+  );
   // Event-sourced workflows (workflow-and-applier.md A2-S5b): each persists as
   // an append-only `<wf>_events` stream — a `DbSet<<Wf>EventRecord>` + its
   // configuration, the saga analogue of the aggregate event store (its
@@ -262,6 +278,7 @@ export function renderDbContext(
       ...aggUsings,
       ...joinUsings,
       ...wfStateUsings,
+      ...projRowUsings,
       ...esWfUsings,
       // The scoped principal accessor the per-request tenancy query filters read,
       // plus the id namespace (a registry self-scope filter constructs an `<Agg>Id`).
@@ -293,6 +310,7 @@ export function renderDbContext(
       ...tphBaseDbSets,
       ...joinDbSets,
       ...wfStateDbSets,
+      ...projRowDbSets,
       ...wfEventDbSets,
       ...outboxDbSets,
       ...provenanceDbSets,
@@ -304,6 +322,7 @@ export function renderDbContext(
       ...applyConfigs,
       ...joinApplyConfigs,
       ...wfStateApplyConfigs,
+      ...projRowApplyConfigs,
       ...wfEventApplyConfigs,
       ...outboxApplyConfigs,
       ...provenanceApplyConfigs,
