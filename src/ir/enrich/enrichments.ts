@@ -52,6 +52,7 @@ import type {
 } from "../types/loom-ir.js";
 import {
   buildDeepScopeFilter,
+  buildDenyFilter,
   buildGlobalScopeFilter,
   buildRegistrySelfScopeFilter,
   buildTenantFloorFilter,
@@ -198,7 +199,10 @@ function enrichSystem(
   const subdomainsScoped = subdomains
     .map((m) => applyRegistrySelfScope(m, sys))
     .map((m) => applyPolicyReadLevels(m, sys))
-    .map((m) => applyPolicyWriteLevels(m, sys));
+    .map((m) => applyPolicyWriteLevels(m, sys))
+    // Phase 4 — DENY WINS: runs AFTER the allow read/write-level passes, so an
+    // always-false carve-out dominates any widened allow scope on the same target.
+    .map((m) => applyPolicyDenies(m));
   // Then propagate react deployables' context sets from their targets.
   // Done after subdomain enrichment so frontends see the same enriched
   // contexts every other consumer sees.
@@ -523,6 +527,68 @@ function applyPolicyWriteLevels(m: EnrichedSubdomainIR, sys: SystemIR): Enriched
               ? buildDeepScopeFilter(agg)
               : buildTenantFloorFilter(agg);
           return { ...agg, writeScopeFilter: filter };
+        }),
+      };
+    }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// `policy { deny [write] on X }` — the DENY-WINS carve-out (authorization Phase 4,
+// docs/plans/authorization-phase4-deny.md).  For each denied aggregate:
+//   - deny READ  → append the always-false `buildDenyFilter` sentinel to the
+//     aggregate's read `contextFilters` (every backend ANDs these into every
+//     read, so the read set is empty → findAll `[]`, findById 404; and because
+//     the write command load reuses the read filter, writes fail too).
+//   - deny WRITE → overwrite the aggregate's `writeScopeFilter` with the
+//     sentinel (all 5 backends already consume it → `GetByIdForWrite` loads
+//     nothing → mutation 404).  Reads are untouched.
+// Runs AFTER the allow read/write-level passes, so deny WINS: the appended
+// always-false term dominates any widened allow scope on the same target, and a
+// deny-write sentinel replaces any allow-derived write narrowing.  Deny is NOT
+// restricted to tenant-owned aggregates — the seams it uses exist on every
+// aggregate.  Byte-neutral when no context declares a deny.
+// ---------------------------------------------------------------------------
+
+function applyPolicyDenies(m: EnrichedSubdomainIR): EnrichedSubdomainIR {
+  const anyDeny = m.contexts.some((c) => (c.policyDenies ?? []).length > 0);
+  if (!anyDeny) return m;
+  return {
+    ...m,
+    contexts: m.contexts.map((ctx) => {
+      const denies = ctx.policyDenies ?? [];
+      if (denies.length === 0) return ctx;
+      const readDenied = new Set(denies.filter((d) => d.access === "read").map((d) => d.aggregate));
+      const writeDenied = new Set(
+        denies.filter((d) => d.access === "write").map((d) => d.aggregate),
+      );
+      return {
+        ...ctx,
+        aggregates: ctx.aggregates.map((agg) => {
+          const readHit = readDenied.has(agg.name);
+          const writeHit = writeDenied.has(agg.name);
+          if (!readHit && !writeHit) return agg;
+          let next = agg;
+          if (readHit) {
+            // Append the always-false term to the read filter list (deny wins:
+            // any widened allow scope earlier in the list is dominated).  Keep
+            // `contextFilterOrigins` index-aligned (undefined origin ⇒ the deny
+            // is a bare/hand-written filter, never `ignoring`-bypassable — the
+            // desired semantics for a carve-out) only when origins are tracked.
+            const filters = [...(next.contextFilters ?? []), buildDenyFilter(agg)];
+            next = {
+              ...next,
+              contextFilters: filters,
+              ...(next.contextFilterOrigins
+                ? { contextFilterOrigins: [...next.contextFilterOrigins, undefined] }
+                : {}),
+            };
+          }
+          if (writeHit) {
+            // Overwrite any allow-derived write narrowing with the carve-out.
+            next = { ...next, writeScopeFilter: buildDenyFilter(agg) };
+          }
+          return next;
         }),
       };
     }),

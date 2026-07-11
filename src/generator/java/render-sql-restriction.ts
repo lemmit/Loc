@@ -1,4 +1,5 @@
 import type { ExprIR } from "../../ir/types/loom-ir.js";
+import { isDenyFilter } from "../../ir/util/tenant-stance.js";
 import { snake } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
@@ -15,6 +16,9 @@ import { snake } from "../../util/naming.js";
 // ---------------------------------------------------------------------------
 
 export function renderSqlRestriction(e: ExprIR): string {
+  // DENY carve-out (authorization Phase 4 — deny-wins).  The static (no-principal)
+  // always-false restriction appended to every SELECT for a read-denied entity.
+  if (isDenyFilter(e)) return "1 = 0";
   switch (e.kind) {
     case "paren":
       return `(${renderSqlRestriction(e.inner)})`;

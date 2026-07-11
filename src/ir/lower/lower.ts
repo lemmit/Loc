@@ -124,6 +124,7 @@ import type {
   LoadSegmentIR,
   PayloadIR,
   PermissionDeclIR,
+  PolicyDenyIR,
   PolicyReadLevelIR,
   PolicyWriteLevelIR,
   ProjectionIR,
@@ -994,9 +995,22 @@ function lowerContext(
   // hierarchy requirement, unknown/duplicate target) is phase ⑦.
   const policyReadLevels: PolicyReadLevelIR[] = [];
   const policyWriteLevels: PolicyWriteLevelIR[] = [];
+  const policyDenies: PolicyDenyIR[] = [];
   for (const m of ctx.members) {
     if (!isPolicyDecl(m)) continue;
     for (const r of m.rules) {
+      // `deny [write] on X` (Phase 4) — the deny-wins carve-out.  All-or-nothing
+      // at the aggregate (no level); the optional `write` verb selects the
+      // access.  Enrichment resolves deny-wins after the allow passes.
+      if (r.effect === "deny") {
+        const access = r.verb === "write" ? "write" : "read";
+        policyDenies.push({
+          aggregate: r.target,
+          access,
+          source: `deny ${r.verb ? `${r.verb} ` : ""}on ${r.target}`,
+        });
+        continue;
+      }
       // The optional `verb` (P3.1) selects the ladder: `write` gates
       // mutations; bare / `read` is the Phase 2 read ladder.
       if (r.verb === "write") {
@@ -1040,6 +1054,7 @@ function lowerContext(
     origin: originFor(ctx),
     ...(policyReadLevels.length > 0 ? { policyReadLevels } : {}),
     ...(policyWriteLevels.length > 0 ? { policyWriteLevels } : {}),
+    ...(policyDenies.length > 0 ? { policyDenies } : {}),
   };
 }
 

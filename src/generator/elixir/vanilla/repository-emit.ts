@@ -25,6 +25,7 @@ import type {
   SystemIR,
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
+import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
@@ -192,6 +193,13 @@ function renderRepository(
   // present, a `find_by_id_for_write` mirrors `find_by_id` but scopes on it.
   const writeScope = vanillaWriteScopeFilter(agg, contextModule);
   const writeEff = combineWhere(kindFilter, writeScope);
+  // Does the write-scope predicate actually reference the principal?  A DENY
+  // carve-out (`deny write on X`, authorization Phase 4) is always-false and uses
+  // NO `current_user`, so the `find_by_id_for_write` principal param must be
+  // underscored or `--warnings-as-errors` trips on the unused variable.  The
+  // tenant-floor / deep write scopes DO reference it.
+  const writeScopeUsesPrincipal =
+    agg.writeScopeFilter !== undefined && exprUsesCurrentUser(agg.writeScopeFilter);
   // On insert, a TPH concrete stamps its `kind` discriminator (the migration's
   // NOT-NULL text column) so the shared-table row is routable back to this
   // subtype.  `kind` isn't a cast field (it's not a declared aggregate column),
@@ -354,7 +362,7 @@ ${
     ? `
   @doc "Command-load path (authorization Phase 3 P3.1): scope the by-id load to the WRITE scope; a readable-but-not-writable (or missing) row reads as :not_found → 404."
   @spec find_by_id_for_write(binary(), map() | nil) :: {:ok, ${aggModule}.t()} | {:error, :not_found}
-  def find_by_id_for_write(id, current_user \\\\ nil) when is_binary(id) do
+  def find_by_id_for_write(id, ${writeScopeUsesPrincipal ? "current_user" : "_current_user"} \\\\ nil) when is_binary(id) do
     case Repo.one(from(record in ${aggModule}, where: record.id == ^id and (${writeEff}))) do
       nil -> {:error, :not_found}
       ${findByIdHit}

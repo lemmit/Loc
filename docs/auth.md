@@ -284,7 +284,66 @@ Composition falls out of the ordinary boolean operators
 
 **Not yet shipped (P3.x follow-ups):** the `resource` scope (referencing the
 gated row's fields directly instead of passing them as arguments), field
-masking, `deny`, and hosting policy functions inside the `policy {}` block.
+masking, and hosting policy functions inside the `policy {}` block.
+
+### Deny carve-outs (Phase 4)
+
+A **`deny` rule** is the negative twin of `allow`: a **deny-wins** carve-out that
+removes access to an aggregate. It sits in the same `policy {}` block as the
+`allow` read/write ladder, and — like the bare `allow` form — omits the `read`
+word (bare = read); the shipped `write` verb selects the write access:
+
+```ddd
+policy {
+  allow deep on Invoice   // widen the read scope …
+  deny on Secret          // … but Secret is invisible (total READ carve-out)
+  deny write on Invoice   // … and Invoice is read-only (WRITE carve-out)
+}
+```
+
+- **`deny on X`** denies **read**: `X` becomes invisible — `findAll` returns `[]`
+  and `findById` 404s. Because every backend's write command-load reuses the read
+  filter, writes fail too.
+- **`deny write on X`** denies **write** only: reads still work, but every instance
+  mutation (update-style ops, `destroy`, applier dispatch) 404s.
+
+Deny is **all-or-nothing at the aggregate** — there is no level word (a partial
+deny is field-masking / row-clause territory, a later slice). It composes as an
+**always-false predicate** through the *existing* filter seams — the read
+`contextFilters` (deny read) and the `writeScopeFilter` command load (deny write)
+— so no backend grows new render architecture; each just renders the deny sentinel
+to its native always-false fragment:
+
+```ts
+// node / Hono — deny read ANDs an always-false term into every Secret read
+.where(and(eq(schema.secrets.id, id), and(isNull(schema.secrets.id), isNotNull(schema.secrets.id))))
+```
+```java
+// Java / Spring — deny read is a Hibernate @SQLRestriction on the entity;
+// deny write is `and 1 = 0` in the for-write @Query
+@SQLRestriction("1 = 0")
+@Query("select e from Invoice e where e.id = :id and 1 = 0")
+Optional<Invoice> findByIdForWrite(@Param("id") InvoiceId id);
+```
+
+Deny wins: it is applied **after** the `allow` read/write-level passes, so an
+always-false carve-out dominates any widened allow scope on the same target.
+Unlike the allow ladder, deny is **not** restricted to `tenantOwned` aggregates —
+`contextFilters` / `writeScopeFilter` exist on every aggregate.
+
+| Diagnostic | When |
+| --- | --- |
+| `loom.policy-deny-unknown-aggregate` | the deny target names no aggregate in the context |
+| `loom.policy-deny-duplicate` | the same `(aggregate, access)` is denied twice |
+| `loom.policy-deny-shadows-allow` | *(warning)* an `allow` on the same target+access is shadowed by a `deny` — the allow is dead (deny wins) |
+
+A lone `deny` with no matching `allow` is **not** flagged — aggregates are readable
+by default, so a carve-out with no prior grant is meaningful.
+
+**Not yet shipped (Phase 4.x follow-ups):** field-level masking (`field f { mask
+unless … }` / `deny read`), `data {}` row-attribute clauses, and per-operation /
+`View` / `Workflow` point gates — the larger slices the aggregate-level deny-wins
+primitive lays the plumbing for.
 
 ### View `requires` gates
 

@@ -12,6 +12,7 @@ import {
   DATA_KEY_PATH_DELIMITER,
   deepScopeAnchorClaim,
   isDeepScopeFilter,
+  isDenyFilter,
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
@@ -210,6 +211,15 @@ function lower(
       return renderPyExpr(e);
     }
     case "method-call": {
+      // DENY carve-out (authorization Phase 4 — deny-wins).  An always-false
+      // predicate: a column can't be both NULL and NOT NULL.  Self-contained
+      // (uses the always-present `id` column + `and_`, already an import here),
+      // so no extra SQLAlchemy import and no self-comparison ruff lint.
+      if (isDenyFilter(e)) {
+        ops.add("and_");
+        const idCol = `${row}.id`;
+        return `and_(${idCol}.is_(None), ${idCol}.isnot(None))`;
+      }
       // `deep` read level (multi-tenancy Phase 2 P2.4) — descendant-or-self
       // materialized-path scope with the NULL-dataKey fallback to the tenant
       // floor (see `DEEP_SCOPE_SEMANTICS`).  `Column.startswith(v)` lowers to

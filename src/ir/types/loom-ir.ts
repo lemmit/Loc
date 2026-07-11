@@ -1022,6 +1022,17 @@ export interface BoundedContextIR {
    *  read + write levels.  Undefined / empty when the context declares no
    *  `allow write` rule. */
   policyWriteLevels?: PolicyWriteLevelIR[];
+  /** Per-aggregate DENY carve-outs declared by `policy { deny [write] on X }`
+   *  blocks in this context (authorization Phase 4 —
+   *  docs/plans/authorization-phase4-deny.md).  Each entry names an aggregate
+   *  and the access it denies (`read` = total carve-out, the aggregate becomes
+   *  invisible; `write` = read-only carve-out).  Consumed by `enrichLoomModel`
+   *  (`applyPolicyDenies`), which — AFTER the allow read/write-level passes, so
+   *  DENY WINS — appends an always-false predicate to the aggregate's read
+   *  `contextFilters` (deny read) or overwrites its `writeScopeFilter` (deny
+   *  write) with `buildDenyFilter`.  Undefined / empty when the context declares
+   *  no `deny` rule. */
+  policyDenies?: PolicyDenyIR[];
 }
 
 /** One `allow <level> on <Aggregate>` rule lowered from a `policy {}` block —
@@ -1053,6 +1064,24 @@ export interface PolicyWriteLevelIR {
   /** The directional write level. */
   level: "local" | "deep" | "global";
   /** Source span text for diagnostics (`allow write deep on Invoice`). */
+  source: string;
+}
+
+/** One `deny [write] on <Aggregate>` carve-out lowered from a `policy {}` block
+ *  (authorization Phase 4 — deny-wins, docs/plans/authorization-phase4-deny.md).
+ *  Deny is all-or-nothing at the aggregate (no level word).  `read` denies reads
+ *  (the aggregate becomes invisible; because the write command load reuses the
+ *  read filter, writes fail too); `write` denies only mutations (reads stay).
+ *  Unlike the allow ladder, deny is NOT restricted to tenant-owned aggregates —
+ *  it composes through `contextFilters` / `writeScopeFilter`, which every
+ *  aggregate carries. */
+export interface PolicyDenyIR {
+  /** The aggregate this carve-out denies (by name, in this context).  Resolution
+   *  is validated in phase ⑦ (`loom.policy-deny-unknown-aggregate`). */
+  aggregate: string;
+  /** Which access the rule denies. */
+  access: "read" | "write";
+  /** Source span text for diagnostics (`deny write on Order`). */
   source: string;
 }
 
