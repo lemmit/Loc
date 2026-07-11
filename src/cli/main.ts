@@ -914,7 +914,7 @@ async function runBreakpoints(file: string, options: BreakpointOptions): Promise
     console.log(`${file}:${line} maps to ${targets.length} generated location(s):`);
   }
   for (const t of targets) {
-    console.log(`${t.file}:${t.line}`);
+    console.log(t.column !== undefined ? `${t.file}:${t.line}:${t.column}` : `${t.file}:${t.line}`);
   }
 }
 

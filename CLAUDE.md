@@ -138,7 +138,7 @@ node bin/cli.js generate system <file.ddd> -o <out>    # full multi-deployable t
 node bin/cli.js snapshot        <file.ddd> -o <out>    # capture immutable .loom/snapshots/<ts>-<guid>.loomsnap.json (provenance rule snapshot — like `ef migrations add`, run deliberately)
 node bin/cli.js verify          <file.ddd> --results <results.json> [--out <dir>]  # join an existing test-results JSON onto the requirements graph → .loom/verification.{json,md} (gates the exit code; does NOT run the suites itself)
 node bin/cli.js trace           <logfile>                              # translate a runtime stack-trace back to .ddd source via .loom/sourcemap.json
-node bin/cli.js breakpoints     <file.ddd> --line <n>                  # resolve a .ddd source line to the generated file:line(s) it produced — the reverse of `ddd trace`
+node bin/cli.js breakpoints     <file.ddd> --line <n>                  # resolve a .ddd source line to the generated file:line(s) it produced, or file:line:col when it's a fine expression region — the reverse of `ddd trace`
 ```
 
 Flags: `-o/--out`, `-w/--watch` (legacy generate only), `--dry-run` (print `write`/`skip` plan, touch nothing), `--sourcemap` (`generate system` only — also emit `.loom/sourcemap.json`).
