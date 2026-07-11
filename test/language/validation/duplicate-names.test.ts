@@ -140,7 +140,91 @@ describe("validator: duplicate names — negatives", () => {
   });
 });
 
+// Application-layer handler names share one route-target namespace with
+// workflow `handle`s (unfoldable-api-derivation.md, Layers 3-4): a
+// `route -> Context.<name>` resolves the bare name against their union, so a
+// collision silently deduplicates and the route dispatches ambiguously.
+describe("validator: duplicate handler names — negatives (loom.duplicate-handler)", () => {
+  it("flags two commandHandlers sharing a name in one context", async () => {
+    const { errors } = await parse(`
+      system S { subdomain M { context C {
+        aggregate Order { code: string }
+        commandHandler Place(code: string) { }
+        commandHandler Place(code: string) { }
+      } } }
+    `);
+    expect(
+      errors.some((e) => /Duplicate handler 'Place' in context 'C'/.test(e)),
+      errors.join("\n"),
+    ).toBe(true);
+  });
+
+  it("flags a commandHandler and queryHandler sharing a name", async () => {
+    const { errors } = await parse(`
+      system S { subdomain M { context C {
+        aggregate Order { code: string }
+        commandHandler Foo(code: string) { }
+        queryHandler Foo(code: string): Order { }
+      } } }
+    `);
+    expect(
+      errors.some((e) => /Duplicate handler 'Foo' in context 'C'/.test(e)),
+      errors.join("\n"),
+    ).toBe(true);
+  });
+
+  it("flags a commandHandler colliding with a workflow handle name", async () => {
+    const { errors } = await parse(`
+      system S { subdomain M { context C {
+        aggregate Order { code: string }
+        workflow W { handle Ship(code: string) { } }
+        commandHandler Ship(code: string) { }
+      } } }
+    `);
+    expect(
+      errors.some((e) => /Duplicate handler 'Ship' in context 'C'/.test(e)),
+      errors.join("\n"),
+    ).toBe(true);
+  });
+
+  it("flags a duplicate commandHandler / queryHandler parameter (loom.duplicate-parameter)", async () => {
+    const { errors } = await parse(`
+      system S { subdomain M { context C {
+        aggregate Order { code: string }
+        commandHandler Foo(x: int, x: int) { }
+        queryHandler Bar(y: int, y: int): Order { }
+      } } }
+    `);
+    expect(
+      errors.some((e) => /Duplicate parameter 'x' in commandHandler 'Foo'/.test(e)),
+      errors.join("\n"),
+    ).toBe(true);
+    expect(
+      errors.some((e) => /Duplicate parameter 'y' in queryHandler 'Bar'/.test(e)),
+      errors.join("\n"),
+    ).toBe(true);
+  });
+});
+
 describe("validator: duplicate names — positives", () => {
+  it("allows a commandHandler and queryHandler with distinct names; two workflows may reuse a handle name", async () => {
+    const { errors } = await parse(`
+      system S { subdomain M { context C {
+        aggregate Order { code: string }
+        commandHandler Place(code: string) { }
+        queryHandler Get(code: string): Order { }
+        workflow W1 { handle confirm(code: string) { } }
+        workflow W2 { handle confirm(code: string) { } }
+      } } }
+    `);
+    // The explicit handlers don't collide; workflow-handle reuse across
+    // workflows is not newly policed by loom.duplicate-handler.
+    expect(
+      errors.some((e) => /Duplicate handler/.test(e)),
+      errors.join("\n"),
+    ).toBe(false);
+  });
+
   it("allows the same aggregate name in different contexts", async () => {
     const { errors } = await parse(`
       system S { subdomain M {
