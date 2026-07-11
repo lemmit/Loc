@@ -611,6 +611,52 @@ system Shop {
     expect(peek).toContain("{:ok, record}");
   });
 });
+
+describe("vanilla shape(document) audited RETURNING ops (Route A slice 4f)", () => {
+  const DOC_AUDIT_RET = `
+system Shop {
+  subdomain Sales {
+    context Shop {
+      error TooMany { }
+      aggregate Cart shape(document) with crudish {
+        total: int
+        operation bump() audited: Cart or TooMany {
+          precondition total < 10
+          total := total + 1
+        }
+      }
+      repository Carts for Cart { }
+    }
+  }
+  api ShopApi from Sales { httpStatus TooMany 409 }
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api { platform: elixir, contexts: [Shop], dataSources: [shopState], serves: ShopApi, port: 4000 }
+}
+`;
+
+  it("records the audit row INSIDE the persist transaction + projects off the saved embed", async () => {
+    const facade = file(await generateSystemFiles(DOC_AUDIT_RET), "/shop.ex");
+    const body = facade.slice(facade.indexOf("def bump_cart(%"));
+    // Pre-mutation snapshot, guard hoist, persist + audit in one transaction.
+    expect(body).toContain(
+      "audit_before = Map.merge(%{id: row.id}, (row.data && Map.from_struct(row.data)) || %{})",
+    );
+    expect(body).toContain("with :ok <- ensure(record.total < 10, :precondition_failed) do");
+    expect(body).toContain("Api.Repo.transaction(fn ->");
+    expect(body).toContain("|> Ecto.Changeset.put_embed(:data, Map.from_struct(record))");
+    expect(body).toContain('operation_id: "bumpCart"');
+    expect(body).toContain("before: audit_before");
+    // Post-commit success projects the aggregate wire off the saved embed.
+    expect(body).toContain("case tx_result do");
+    expect(body).toContain(
+      '{:ok, saved} -> {:ok, %{"id" => saved.id, "total" => saved.data.total}}',
+    );
+    expect(body).toContain("{:error, reason} -> {:error, reason}");
+    // Guard precedes the transaction (a denial writes nothing + records no audit).
+    expect(body.indexOf("with :ok <-")).toBeLessThan(body.indexOf("Api.Repo.transaction"));
+  });
+});
 // Document-op guards deny 403/422, not raise → 500 (parity with the relational
 // path).  A scalar/returning document op's `requires`/`precondition` hoists into
 // a leading `with ensure(...)` chain — an expected denial returns a typed tuple

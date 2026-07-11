@@ -219,9 +219,9 @@ system Shop {
     expect(await docScopeErrors(src)).toEqual([]);
   });
 
-  it("still rejects an AUDITED RETURNING operation on a vanilla document aggregate", async () => {
-    // A returning op does not persist on the document path yet (separate bug), so
-    // there is nothing to audit atomically — it stays gated.
+  it("accepts an AUDITED RETURNING operation on a vanilla document aggregate (Route A slice 4f)", async () => {
+    // Now that returning ops persist (#1774), an audited returning op records its
+    // audit row inside the persist transaction — no longer gated.
     const src = `
 system Shop {
   subdomain Sales {
@@ -242,9 +242,7 @@ system Shop {
   deployable api { platform: elixir, contexts: [Shop], dataSources: [shopState], port: 4000 }
 }
 `;
-    const errs = await docScopeErrors(src);
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("named operation(s) bump");
+    expect(await docScopeErrors(src)).toEqual([]);
   });
 
   it("still rejects a DERIVED read in a document operation body", async () => {
