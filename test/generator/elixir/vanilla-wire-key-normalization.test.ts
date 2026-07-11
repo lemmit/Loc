@@ -16,7 +16,7 @@ const SOURCE = `
 system WireKeys {
   subdomain Core {
     context Shop {
-      aggregate Order ids guid {
+      aggregate Order {
         commitSha: string
         startedAt: datetime
         tags: string[]?

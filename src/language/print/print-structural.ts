@@ -736,12 +736,11 @@ function printValueObject(node: ValueObject): string {
 
 function printAggregate(node: Aggregate): string {
   // Header modifiers in grammar order (ddd.langium `Aggregate`):
-  //   [abstract] aggregate <name> [extends <Base>] [ids <kind>] [crossTenant]
+  //   [abstract] aggregate <name> [extends <Base>] [crossTenant]
   //   [persistedAs(…)] [shape(…)] [inheritanceUsing(…)] [with …]
   const abstract = node.isAbstract ? "abstract " : "";
   const ext = node.superType ? ` extends ${node.superType.$refText}` : "";
-  const ids = node.idKind ? ` ids ${node.idKind}` : "";
-  // `crossTenant` (multi-tenancy Phase 1a) sits after `ids`, before the
+  // `crossTenant` (multi-tenancy Phase 1a) is the first header flag, before the
   // paren modifiers — matches the grammar order.
   const crossTenant = node.crossTenant ? " crossTenant" : "";
   // `persistedAs(…)` is a header modifier (between `ids` and `with`),
@@ -752,7 +751,7 @@ function printAggregate(node: Aggregate): string {
     ? ` inheritanceUsing(${node.inheritanceUsing})`
     : "";
   return block(
-    `${abstract}aggregate ${node.name}${ext}${ids}${crossTenant}${persistedAs}${shape}${inheritanceUsing}${printWithClause(node.withClause)}`,
+    `${abstract}aggregate ${node.name}${ext}${crossTenant}${persistedAs}${shape}${inheritanceUsing}${printWithClause(node.withClause)}`,
     node.members.map(printStructural),
   );
 }

@@ -17,7 +17,7 @@ const SRC = `system FulfillmentSys {
       event OrderPlaced { order: Order id, at: datetime }
       event PaymentRegistered { order: Order id, amount: int }
       event FulfillmentCancelled { order: Order id }
-      aggregate Order ids guid {
+      aggregate Order {
         status: string
         create place() { status := "Placed"  emit OrderPlaced { order: id, at: now() } }
       }

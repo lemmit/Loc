@@ -18,7 +18,7 @@ system Sys {
   subdomain Sales {
     context Orders {
       enum OrderStatus { Draft, Shipped, Cancelled }
-      aggregate Order ids guid {
+      aggregate Order {
         code: string
         status: OrderStatus
         operation cancel() when this.status != Shipped && this.status != Cancelled {

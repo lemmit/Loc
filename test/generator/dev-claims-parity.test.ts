@@ -21,8 +21,8 @@ const system = (platform: string) => `
     tenancy by user.tenantId of Organization
     subdomain Sales {
       context Ordering {
-        aggregate Invoice ids guid with tenantOwned { number: string }
-        aggregate Organization ids guid { name: string }
+        aggregate Invoice with tenantOwned { number: string }
+        aggregate Organization { name: string }
       }
     }
     api SalesApi from Sales

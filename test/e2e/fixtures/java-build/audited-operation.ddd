@@ -12,7 +12,7 @@
 system AuditSystem {
   subdomain Core {
     context Ordering {
-      aggregate Order ids guid with crudish {
+      aggregate Order with crudish {
         reference: string
         status: string
         operation cancel() audited {

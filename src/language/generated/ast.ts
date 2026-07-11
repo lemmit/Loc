@@ -163,7 +163,6 @@ export type DddKeywordNames =
     | "hosts"
     | "httpStatus"
     | "id"
-    | "ids"
     | "if"
     | "ignoring"
     | "immutable"
@@ -376,7 +375,6 @@ export interface Aggregate extends langium.AstNode {
     readonly $container: BoundedContext;
     readonly $type: 'Aggregate';
     crossTenant: boolean;
-    idKind?: IdKind;
     inheritanceUsing?: InheritanceLayout;
     isAbstract: boolean;
     members: Array<AggregateMember>;
@@ -390,7 +388,6 @@ export interface Aggregate extends langium.AstNode {
 export const Aggregate = {
     $type: 'Aggregate',
     crossTenant: 'crossTenant',
-    idKind: 'idKind',
     inheritanceUsing: 'inheritanceUsing',
     isAbstract: 'isAbstract',
     members: 'members',
@@ -1526,12 +1523,6 @@ export type HttpMethod = 'DELETE' | 'GET' | 'PATCH' | 'POST' | 'PUT';
 
 export function isHttpMethod(item: unknown): item is HttpMethod {
     return item === 'GET' || item === 'POST' || item === 'PUT' || item === 'PATCH' || item === 'DELETE';
-}
-
-export type IdKind = 'guid';
-
-export function isIdKind(item: unknown): item is IdKind {
-    return item === 'guid';
 }
 
 export interface IdRef extends langium.AstNode {
@@ -4352,10 +4343,6 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 crossTenant: {
                     name: Aggregate.crossTenant,
                     defaultValue: false,
-                    optional: true
-                },
-                idKind: {
-                    name: Aggregate.idKind,
                     optional: true
                 },
                 inheritanceUsing: {

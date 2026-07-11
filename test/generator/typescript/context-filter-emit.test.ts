@@ -92,7 +92,7 @@ system T {
   subdomain S {
     context Sales {
       criterion InCategory(c: string) of Doc = this.category == c
-      aggregate Doc ids guid {
+      aggregate Doc {
         subject: string
         category: string
         isDeleted: bool
@@ -125,7 +125,7 @@ system T {
   subdomain S {
     context Sales {
       criterion InCategory(c: string) of Doc = this.category == c
-      aggregate Doc ids guid {
+      aggregate Doc {
         subject: string
         category: string
       }
@@ -177,7 +177,7 @@ system Bank {
   user { id: string  tenantId: string }
   subdomain Core {
     context Ledger {
-      aggregate Account ids guid {
+      aggregate Account {
         tenantId: string
         balance: int
         filter this.tenantId == currentUser.tenantId

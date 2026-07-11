@@ -11,7 +11,7 @@
 // row projects into the tagged Order variant; absence becomes the error
 // variant, translated to ProblemDetails at the controller edge.
 context Orders {
-  aggregate Order ids guid {
+  aggregate Order {
     code: string
     region: string
   }

@@ -24,7 +24,7 @@ const system = (opts: { policy: string }): string => `
           amount: int
           operation bump(by: int) { amount := amount + by }
         }
-        aggregate Org ids guid {
+        aggregate Org {
           name: string
           implements tenantRegistry
         }

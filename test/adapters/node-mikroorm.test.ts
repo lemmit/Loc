@@ -102,7 +102,7 @@ system D {
   subdomain S {
     context O {
       event Opened { account: Account id, owner: string }
-      aggregate Account ids guid persistedAs(eventLog) {
+      aggregate Account persistedAs(eventLog) {
         owner: string
         create open(owner: string) { emit Opened { account: id, owner: owner } }
         apply(e: Opened) { owner := e.owner }

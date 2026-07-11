@@ -40,13 +40,13 @@ const SHOP_SOURCE = `
 system Shop {
   subdomain Sales {
     context Orders {
-      aggregate Order ids guid {
+      aggregate Order {
         customer: Customer id
         total: int
         contains lines: OrderLine[]
         entity OrderLine { quantity: int }
       }
-      aggregate Customer ids guid {
+      aggregate Customer {
         name: string
       }
       repository Orders for Order { }
@@ -83,7 +83,7 @@ describe("schemaFromModule", () => {
       system Saga {
         subdomain S {
           context C {
-            aggregate Order ids guid { total: int }
+            aggregate Order { total: int }
             repository Orders for Order { }
             event OrderPlaced { order: Order id, at: datetime }
             channel L { carries: OrderPlaced  delivery: broadcast  retention: ephemeral }
@@ -125,7 +125,7 @@ describe("schemaFromModule", () => {
       system Billing {
         subdomain Money {
           context Money {
-            aggregate Invoice ids guid { subtotal: money }
+            aggregate Invoice { subtotal: money }
             repository Invoices for Invoice { }
           }
         }
@@ -370,8 +370,8 @@ describe("buildMigrations", () => {
     // Two modules, only one is reachable from a needsDb deployable.
     const loom = await buildLoomModel(`
 system Twin {
-  subdomain A { context Ca { aggregate X ids guid { n: int } } }
-  subdomain B { context Cb { aggregate Y ids guid { n: int } } }
+  subdomain A { context Ca { aggregate X { n: int } } }
+  subdomain B { context Cb { aggregate Y { n: int } } }
   deployable api { platform: node, contexts: [Ca], port: 3000 }
 }
 `);
@@ -524,7 +524,7 @@ describe("migrationsOwner enrichment", () => {
   it("D-STORAGE-SPLIT: migrationsOwner picks the first needsDb deployable hosting the subdomain's contexts", async () => {
     const loom = await buildLoomModel(`
 system S {
-  subdomain M { context C { aggregate X ids guid { n: int } } }
+  subdomain M { context C { aggregate X { n: int } } }
   storage pg { type: postgres }
   deployable first { platform: node, contexts: [C], port: 3000 }
   deployable second { platform: dotnet, contexts: [C], port: 3001 }
@@ -561,13 +561,13 @@ const DOC_SOURCE = `
 system Shop {
   subdomain Sales {
     context Orders {
-      aggregate Cart ids guid shape(document) {
+      aggregate Cart shape(document) {
         customer: Customer id
         total: int
         contains lines: CartLine[]
         entity CartLine { quantity: int }
       }
-      aggregate Customer ids guid { name: string }
+      aggregate Customer { name: string }
       repository Carts for Cart { }
       repository Customers for Customer { }
     }
@@ -610,13 +610,13 @@ describe("schemaFromModule — embedded shape", () => {
 system Shop {
   subdomain Sales {
     context Orders {
-      aggregate Cart ids guid shape(embedded) {
+      aggregate Cart shape(embedded) {
         customer: Customer id
         total: int
         contains lines: CartLine[]
         entity CartLine { quantity: int }
       }
-      aggregate Customer ids guid { name: string }
+      aggregate Customer { name: string }
       repository Carts for Cart { }
       repository Customers for Customer { }
     }
@@ -646,7 +646,7 @@ describe("buildMigrations — per-projection binding override", () => {
 system Shop {
   subdomain Sales {
     context Orders {
-      aggregate Cart ids guid shape(relational) { total: int }
+      aggregate Cart shape(relational) { total: int }
       repository Carts for Cart { }
     }
   }
@@ -692,11 +692,11 @@ describe("A8.4 — duplicate-table guard", () => {
 system Shop {
   subdomain Commerce {
     context Sales {
-      aggregate Order ids guid { total: int }
+      aggregate Order { total: int }
       repository SalesOrders for Order { }
     }
     context Billing {
-      aggregate Order ids guid { amount: int }
+      aggregate Order { amount: int }
       repository BillingOrders for Order { }
     }
   }
@@ -714,11 +714,11 @@ system Shop {
 system Shop {
   subdomain Commerce {
     context Sales {
-      aggregate Order ids guid { total: int }
+      aggregate Order { total: int }
       repository SalesOrders for Order { }
     }
     context Billing {
-      aggregate Order ids guid { amount: int }
+      aggregate Order { amount: int }
       repository BillingOrders for Order { }
     }
   }

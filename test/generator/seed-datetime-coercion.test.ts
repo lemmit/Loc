@@ -15,7 +15,7 @@ const src = (platform: string, port: number): string => `
   system S {
     subdomain Core {
       context Catalog {
-        aggregate Project ids guid {
+        aggregate Project {
           name: string
           startedAt: datetime
         }

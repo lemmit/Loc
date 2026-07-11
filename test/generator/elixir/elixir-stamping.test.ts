@@ -138,7 +138,7 @@ describe("elixir/vanilla generator — lifecycle stamps", () => {
       user { id: guid  tenantId: string }
       subdomain D { context Ledger {
         stamp onCreate { tenantId := currentUser.tenantId }
-        aggregate Account ids guid {
+        aggregate Account {
           tenantId: string internal
           balance: int
           filter this.tenantId == currentUser.tenantId
@@ -177,7 +177,7 @@ describe("elixir/vanilla generator — lifecycle stamps", () => {
         context Shop {
           stamp onCreate { createdAt := now() }
           event OrderPlaced { order: Order id, code: string }
-          aggregate Order ids guid persistedAs(eventLog) {
+          aggregate Order persistedAs(eventLog) {
             code: string
             createdAt: datetime
             create place(code: string) { emit OrderPlaced { order: id, code: code } }

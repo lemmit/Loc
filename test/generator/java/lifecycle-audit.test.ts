@@ -16,7 +16,7 @@ const SRC = `
 system Billing {
   subdomain Core {
     context Invoicing {
-      aggregate Invoice ids guid {
+      aggregate Invoice {
         total: money
         create(total: money) audited { total := total }
         destroy audited { }

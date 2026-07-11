@@ -11,7 +11,7 @@ import { parseValid } from "../../_helpers/parse.js";
 const SRC = `
   context Shop {
     error NotFound { resource: string }
-    aggregate Order ids guid {
+    aggregate Order {
       code: string
       operation reserve(): Order or NotFound {
         return NotFound { resource: code }

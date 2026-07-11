@@ -9,7 +9,7 @@
 system Ordering {
   subdomain Sales {
     context Orders {
-      aggregate Order ids guid {
+      aggregate Order {
         quantity: int
         unitPrice: int
         discount: int

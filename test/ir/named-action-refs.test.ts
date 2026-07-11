@@ -251,7 +251,7 @@ describe("loom.missing-effect-marker (async-actions-and-effects.md Stage 2)", ()
       system Demo {
         subdomain S {
           context C {
-            aggregate Order ids guid {
+            aggregate Order {
               code: string
               operation place(): Order or Failed { return Failed { reason: code } }
             }

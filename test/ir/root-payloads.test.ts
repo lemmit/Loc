@@ -15,7 +15,7 @@ describe("root-level payloads — surface + resolution", () => {
       `
       error NotFound { resource: string }
       context Shop {
-        aggregate Order ids guid { code: string }
+        aggregate Order { code: string }
         repository Orders for Order { find recent(): Order or NotFound }
       }
     `,
@@ -29,7 +29,7 @@ describe("root-level payloads — surface + resolution", () => {
       `
       error NotFound { resource: string }
       context Shop {
-        aggregate Order ids guid {
+        aggregate Order {
           code: string
           operation lookup(): string or NotFound { return NotFound { resource: code } }
         }
@@ -45,7 +45,7 @@ describe("root-level payloads — surface + resolution", () => {
       `
       error NotFound { resource: string }
       context Shop {
-        aggregate Order ids guid {
+        aggregate Order {
           code: string
           operation lookup(): string or NotFound { return NotFund { resource: code } }
         }
@@ -61,7 +61,7 @@ describe("root-level payloads — lowering + enrichment", () => {
   const SRC = `
     error NotFound { resource: string }
     context Shop {
-      aggregate Order ids guid { code: string }
+      aggregate Order { code: string }
       repository Orders for Order { find recent(): Order or NotFound }
     }
   `;
@@ -86,7 +86,7 @@ describe("root-level payloads — lowering + enrichment", () => {
           error NotFound { resource: string }
           context Shop {
             error NotFound { what: string }
-            aggregate Order ids guid { code: string }
+            aggregate Order { code: string }
             repository Orders for Order { find recent(): Order or NotFound }
           }
         `),

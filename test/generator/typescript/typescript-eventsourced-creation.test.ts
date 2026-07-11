@@ -20,7 +20,7 @@ context Accounts {
   event Opened { account: Account id, owner: string }
   event Deposited { account: Account id, amount: int }
 
-  aggregate Account ids guid persistedAs(eventLog) {
+  aggregate Account persistedAs(eventLog) {
     owner: string
     balance: int
 
@@ -85,7 +85,7 @@ describe("Hono/Drizzle event-sourced creation (persistedAs(eventLog) + create)",
     const { errors } = await parseString(`
       context Accounts {
         event Opened { account: Account id, owner: string }
-        aggregate Account ids guid persistedAs(eventLog) {
+        aggregate Account persistedAs(eventLog) {
           owner: string
           create open(owner: string) { emit Opened { account: id, owner: owner } }
           create reopen(owner: string) { emit Opened { account: id, owner: owner } }
@@ -101,7 +101,7 @@ describe("Hono/Drizzle event-sourced creation (persistedAs(eventLog) + create)",
     const { model } = await parseString(`
       context Accounts {
         event Deposited { account: Account id, amount: int }
-        aggregate Account ids guid persistedAs(eventLog) {
+        aggregate Account persistedAs(eventLog) {
           balance: int
           operation deposit(amount: int) { emit Deposited { account: id, amount: amount } }
           apply(e: Deposited) { balance := balance + e.amount }

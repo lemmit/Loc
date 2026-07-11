@@ -14,7 +14,7 @@ const SYS = (apiBody: string) => `
     subdomain Sales {
       context Shop {
         error OutOfStock { sku: string }
-        aggregate Order ids guid {
+        aggregate Order {
           code: string
           operation reserve(): Order or OutOfStock {
             return OutOfStock { sku: code }
@@ -37,7 +37,7 @@ describe("api httpStatus clause — surface + lowering", () => {
   });
 
   it("does not collide with a `status:` field name (httpStatus is a distinct keyword)", async () => {
-    const { errors } = await parseString(`context C { aggregate A ids guid { status: string } }`, {
+    const { errors } = await parseString(`context C { aggregate A { status: string } }`, {
       validate: false,
     });
     expect(errors).toEqual([]);

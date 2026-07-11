@@ -18,7 +18,7 @@ const SOURCE = `
 system RelParts {
   subdomain Core {
     context Catalog {
-      aggregate Project ids guid {
+      aggregate Project {
         name: string
         active: bool
         contains pipelines: Pipeline[]
@@ -130,7 +130,7 @@ const MUTATION_SOURCE = `
 system RelMut {
   subdomain Core {
     context Catalog {
-      aggregate Project ids guid {
+      aggregate Project {
         name: string
         contains pipelines: Pipeline[]
         entity Pipeline { label: string }

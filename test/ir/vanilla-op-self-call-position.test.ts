@@ -31,7 +31,7 @@ function sys(platform: string, body: string): string {
 system S {
   subdomain D {
     context C {
-      aggregate A ids guid {
+      aggregate A {
         code: string
         operation reserve(): string { return code }
         operation summarize(): string {

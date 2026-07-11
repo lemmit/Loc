@@ -25,7 +25,7 @@ system Auditing {
     context Orders {
       error NotFound { resource: string }
 
-      aggregate Order ids guid {
+      aggregate Order {
         status: string
         operation cancel() audited {
           status := "cancelled"
@@ -60,7 +60,7 @@ const PLAIN = `
 system Plain {
   subdomain Core {
     context Stock {
-      aggregate Item ids guid with crudish {
+      aggregate Item with crudish {
         count: int
         operation bump() { count := count + 1 }
       }

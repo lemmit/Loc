@@ -18,7 +18,7 @@ system Crit {
   subdomain Sales {
     context Orders {
       criterion Active of Order = !this.archived
-      aggregate Order ids guid {
+      aggregate Order {
         code: string
         archived: bool
         filter Active

@@ -34,7 +34,7 @@ const V1 = `
 system Shop {
   subdomain Sales {
     context Orders {
-      aggregate Order ids guid { total: int }
+      aggregate Order { total: int }
       repository Orders for Order { }
     }
   }
@@ -49,7 +49,7 @@ const V2 = `
 system Shop {
   subdomain Sales {
     context Orders {
-      aggregate Order ids guid { total: int  status: string }
+      aggregate Order { total: int  status: string }
       repository Orders for Order { }
     }
   }

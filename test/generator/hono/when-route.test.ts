@@ -12,7 +12,7 @@ import { parseValid } from "../../_helpers/parse.js";
 const SRC = `
   context Orders {
     enum OrderStatus { Draft, Shipped, Cancelled }
-    aggregate Order ids guid {
+    aggregate Order {
       status: OrderStatus
       operation cancel() when this.status != Shipped && this.status != Cancelled {
         status := Cancelled
@@ -57,7 +57,7 @@ describe("hono routes — when canCommand gate", () => {
     const files = generateHono(
       await parseValid(`
         context Orders {
-          aggregate Plain ids guid {
+          aggregate Plain {
             note: string
             operation touch() { note := "x" }
           }

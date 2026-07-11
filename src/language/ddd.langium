@@ -926,21 +926,18 @@ ValueObjectMember:
 Aggregate:
     // `crossTenant` (multi-tenancy Phase 1a) is a header flag mirroring
     // `isAbstract` — declares shared-reference data that opts out of the
-    // tenant filter under a `tenancy by` system.  Positioned after the
-    // `ids` clause, before the paren modifiers and the with-clause:
+    // tenant filter under a `tenancy by` system.  Positioned before the
+    // paren modifiers and the with-clause:
     // `aggregate Plan crossTenant { … }`,
-    // `aggregate Invoice ids guid crossTenant with x { … }`.
-    (isAbstract?='abstract')? 'aggregate' name=ID ('extends' superType=[Aggregate:ID])? ('ids' idKind=IdKind)? (crossTenant?='crossTenant')? ('persistedAs' '(' persistedAs=TruthKind ')')? ('shape' '(' shape=SavingShape ')')? ('inheritanceUsing' '(' inheritanceUsing=InheritanceLayout ')')? withClause=WithClause? '{'
+    // `aggregate Invoice crossTenant with x { … }`.
+    //
+    // The aggregate id is always a `guid` — Loom mints it. The former
+    // `ids guid` explicit spelling (a single-value no-op; `ids int|long|string`
+    // were removed earlier as a footgun) was dropped as pure ceremony: see
+    // docs/plans/non-guid-id-http-params.md.
+    (isAbstract?='abstract')? 'aggregate' name=ID ('extends' superType=[Aggregate:ID])? (crossTenant?='crossTenant')? ('persistedAs' '(' persistedAs=TruthKind ')')? ('shape' '(' shape=SavingShape ')')? ('inheritanceUsing' '(' inheritanceUsing=InheritanceLayout ')')? withClause=WithClause? '{'
         members+=AggregateMember*
     '}';
-
-// The only aggregate id kind Loom emits is `guid`.  `ids int|long|string`
-// were removed: no backend implemented id generation for a non-guid PK (the
-// create path minted a fresh id only for guid; a non-guid create collided on
-// the second insert), so the surface was a footgun.  `ids guid` stays a legal
-// (no-op) explicit spelling of the default.  See docs/plans/non-guid-id-http-params.md.
-IdKind returns string:
-    'guid';
 
 // D-RENAME (amended by D-DOCUMENT-AXIS §4): inheritance table layout — a
 // header paren modifier on aggregates participating in inheritance.
@@ -1444,7 +1441,7 @@ SeedRow:
 //   criterion ActiveCustomer of Customer = active
 //   criterion InRegion(region: string) of Customer = region == region
 //   criterion HasManagerRole of bool = currentUser.role == "manager"
-//   criterion CanForceClose of Order { where: status != Closed }
+//   criterion CanForceClose of Order = status != Closed
 //
 // `of <T>` names the candidate type.  Inside the body, bare names and
 // `this` resolve against the candidate aggregate's fields (the same
@@ -1462,7 +1459,6 @@ Criterion:
     'criterion' name=ID ('(' (params+=Parameter (',' params+=Parameter)*)? ')')? 'of' target=TypeRef
     (
         '=' body=Expression
-      | '{' 'where' ':' body=Expression '}'
     );
 
 // Retrieval — a named query *bundle*: a composed predicate (`where`,

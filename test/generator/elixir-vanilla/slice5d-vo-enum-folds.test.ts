@@ -17,7 +17,7 @@ system L {
       enum Status { active  closed }
       event Opened { account: Account id }
       event Funded { account: Account id, m: Money }
-      aggregate Account ids guid persistedAs(eventLog) {
+      aggregate Account persistedAs(eventLog) {
         status: Status
         balance: Money
         create open() { emit Opened { account: id } }

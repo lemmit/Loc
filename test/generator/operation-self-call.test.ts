@@ -23,7 +23,7 @@ import { parseString } from "../_helpers/index.js";
 
 const SRC = (platform: string) => `
 system S { subdomain D { context C {
-  aggregate A ids guid {
+  aggregate A {
     code: string
     status: string
     function isDraft(): bool = status == "draft"

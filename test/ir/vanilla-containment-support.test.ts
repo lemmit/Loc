@@ -51,7 +51,7 @@ function sys(
 system Shop {
   subdomain Sales {
     context Shop {
-      aggregate Order ids guid${shapeMod} {
+      aggregate Order${shapeMod} {
         code: string${body}
       }
     }

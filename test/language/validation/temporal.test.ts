@@ -11,7 +11,7 @@ import { parseString } from "../../_helpers/parse.js";
 
 const wrap = (body: string): string => `
   context C {
-    aggregate Invoice ids guid {
+    aggregate Invoice {
       name: string
       createdAt: datetime
       dueDate: datetime

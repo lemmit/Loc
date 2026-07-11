@@ -86,7 +86,7 @@ describe("python generator — lifecycle stamps", () => {
     user { id: guid  tenantId: string }
     subdomain D { context Ledger {
       stamp onCreate { tenantId := currentUser.tenantId }
-      aggregate Account ids guid {
+      aggregate Account {
         tenantId: string internal
         balance: int
         filter this.tenantId == currentUser.tenantId
@@ -132,7 +132,7 @@ describe("python generator — lifecycle stamps", () => {
         user { id: guid  name: string }
         subdomain D { context Shop {
           event OrderPlaced { order: Order id, code: string }
-          aggregate Order ids guid persistedAs(eventLog) {
+          aggregate Order persistedAs(eventLog) {
             stamp onUpdate { code := "x" }
             code: string
             create place(code: string) {

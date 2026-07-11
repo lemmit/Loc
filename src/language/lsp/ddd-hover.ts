@@ -99,9 +99,8 @@ export class DddHoverProvider extends AstNodeHoverProvider {
 // ---------------------------------------------------------------------------
 
 function renderAggregate(a: Aggregate): string {
-  const idKind = a.idKind ?? "guid";
   const counts = memberCounts(a);
-  return `${code(`aggregate ${a.name} ids ${idKind}`)}\n\n${counts}`;
+  return `${code(`aggregate ${a.name}`)}\n\n${counts}`;
 }
 
 function renderEntityPart(p: EntityPart): string {

@@ -14,7 +14,7 @@ const SOURCE = `
 system EmbFilter {
   subdomain Sales {
     context Shop {
-      aggregate Wishlist ids guid shape(embedded) {
+      aggregate Wishlist shape(embedded) {
         label: string
         archived: bool
         filter !this.archived

@@ -24,7 +24,7 @@ describe("operation-call return typing (A2 prerequisite)", () => {
     const t = await letType(`
       context Shop {
         error NotFound { resource: string }
-        aggregate Order ids guid {
+        aggregate Order {
           code: string
           operation reserve(): string or NotFound { return NotFound { resource: code } }
           operation wrap() { let x = reserve() }
@@ -43,7 +43,7 @@ describe("operation-call return typing (A2 prerequisite)", () => {
   it("types a plain-typed operation call as its declared return type", async () => {
     const t = await letType(`
       context Shop {
-        aggregate Order ids guid {
+        aggregate Order {
           code: string
           operation label(): string { return code }
           operation wrap() { let x = label() }

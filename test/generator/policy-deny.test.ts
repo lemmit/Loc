@@ -20,7 +20,7 @@ const system = (platform: string) => `
       context C {
         aggregate Account with tenantOwned, crudish { balance: int }
         aggregate Secret with tenantOwned, crudish { code: string }
-        aggregate Org ids guid {
+        aggregate Org {
           name: string
           implements tenantRegistry
         }

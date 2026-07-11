@@ -113,7 +113,7 @@ system Tenancy {
   user { id: guid  tenantId: string }
   subdomain Core {
     context Ledger {
-      aggregate Account ids guid {
+      aggregate Account {
         tenantId: string
         balance: int
       }

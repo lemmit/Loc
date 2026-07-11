@@ -12,7 +12,7 @@ system Wallet {
       event Funded { account: Account id, m: Money }
       event Closed { account: Account id }
 
-      aggregate Account ids guid persistedAs(eventLog) {
+      aggregate Account persistedAs(eventLog) {
         status: Status
         balance: Money
 

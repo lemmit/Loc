@@ -11,7 +11,7 @@ system Tenancy {
 
   subdomain Core {
     context Ledger {
-      aggregate Account ids guid {
+      aggregate Account {
         tenantId: string
         balance: int
         // Always-on row scoping: every read of Account is constrained to the

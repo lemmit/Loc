@@ -40,7 +40,7 @@ const SYSTEM = (extra = "", platform = "node", targets = "") => `
 system S {
   subdomain M {
     context C {
-      aggregate Cart ids guid {
+      aggregate Cart {
         label: string
         derived display: string = label
         status: int
@@ -195,7 +195,7 @@ const SYSTEM_WF = `
 system S {
   subdomain M {
     context C {
-      aggregate Cart ids guid {
+      aggregate Cart {
         label: string
         status: int
         operation cancel(reason: int) audited { status := reason }

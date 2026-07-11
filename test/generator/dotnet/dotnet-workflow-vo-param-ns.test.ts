@@ -38,7 +38,7 @@ const SRC = `
           currency: string
           invariant amount >= 0
         }
-        aggregate Account ids guid {
+        aggregate Account {
           owner: string
           balance: decimal
           operation deposit(amount: decimal) { balance := balance + amount }

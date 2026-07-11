@@ -19,13 +19,13 @@ const SYS = (handlers: string, routes: string) => `
   system Shop {
     subdomain Sales {
       context Ordering {
-        aggregate Order ids guid {
+        aggregate Order {
           code: string
           status: string
           operation cancel() { status := "cancelled" }
         }
         repository Orders for Order { }
-        aggregate Customer ids guid {
+        aggregate Customer {
           status: string
           operation deactivate() { status := "inactive" }
         }

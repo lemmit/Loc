@@ -32,7 +32,7 @@ system ReadsShop {
       event AccountOpened { account: Account id, owner: string }
       event Deposited { account: Account id, amount: int }
 
-      aggregate Account ids guid persistedAs(eventLog) {
+      aggregate Account persistedAs(eventLog) {
         owner: string
         balance: int
 

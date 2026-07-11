@@ -45,7 +45,7 @@ subdomain Inventory {
 
     // Stock on hand for a (product, warehouse) pair.  guid identity is
     // explicit; `lastCountedAt` is server-stamped (`managed`).
-    aggregate StockItem ids guid with crudish {
+    aggregate StockItem with crudish {
       productId: Product id
       warehouseId: Warehouse id
       onHand: Quantity
@@ -87,7 +87,7 @@ subdomain Inventory {
     }
 
     // An append-only movement record (its own guid identity).
-    aggregate StockMovement ids guid with crudish {
+    aggregate StockMovement with crudish {
       productId: Product id
       fromWarehouse: Warehouse id?
       toWarehouse: Warehouse id?

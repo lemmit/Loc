@@ -67,7 +67,7 @@ const filterDdd = (platform: string): string => `
 system Crit {
   subdomain Sales {
     context Orders {
-      aggregate Order ids guid {
+      aggregate Order {
         code: string
         archived: bool
         filter !this.archived
@@ -87,7 +87,7 @@ const provenanceDdd = (platform: string): string => `
 system OrderingSystem {
   subdomain Ordering {
     context Ordering {
-      aggregate Order ids guid {
+      aggregate Order {
         reference: string
         total: int provenanced
         operation reprice(price: int) { total := price }
@@ -105,7 +105,7 @@ const auditedDdd = (platform: string): string => `
 system Shop {
   subdomain Core {
     context Ordering {
-      aggregate Order ids guid {
+      aggregate Order {
         status: string
         operation cancel() audited { status := "cancelled" }
       }
@@ -122,7 +122,7 @@ system Ledger {
   subdomain Core {
     context Accounts {
       event Deposited { account: Account id, amount: int }
-      aggregate Account ids guid persistedAs(eventLog) {
+      aggregate Account persistedAs(eventLog) {
         balance: int
         create open() { emit Deposited { account: id, amount: 0 } }
         operation deposit(amount: int) { emit Deposited { account: id, amount: amount } }

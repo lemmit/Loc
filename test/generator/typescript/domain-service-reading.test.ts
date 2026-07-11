@@ -15,7 +15,7 @@ import { parseString } from "../../_helpers/parse.js";
 const READING_SRC = `
   context Banking {
     valueobject Money { amount: decimal currency: string }
-    aggregate Account ids guid with crudish {
+    aggregate Account with crudish {
       holder: string
       balance: Money
     }

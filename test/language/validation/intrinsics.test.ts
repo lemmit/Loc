@@ -11,7 +11,7 @@ import { parseString } from "../../_helpers/parse.js";
 
 const wrap = (body: string): string => `
   context C {
-    aggregate Product ids guid {
+    aggregate Product {
       name: string
       ${body}
     }
@@ -74,7 +74,7 @@ describe("validation — scalar intrinsic calls", () => {
   it("a non-queryable intrinsic in a find where is rejected with its name (IR gate)", async () => {
     const src = `
       context C {
-        aggregate Product ids guid { name: string }
+        aggregate Product { name: string }
         repository Products for Product {
           find bad(q: string): Product[] where this.name.substring(0, 3) == q
         }
@@ -156,7 +156,7 @@ describe("validation — scalar intrinsic calls", () => {
   it("queryable numeric intrinsics pass the find-where gate (abs/round/min)", async () => {
     const src = `
       context C {
-        aggregate Product ids guid { qty: int amount: decimal }
+        aggregate Product { qty: int amount: decimal }
         repository Products for Product {
           find q1(n: int): Product[] where this.qty.abs() > n
           find q2(a: decimal): Product[] where this.amount.round(2) == a
@@ -176,7 +176,7 @@ describe("validation — scalar intrinsic calls", () => {
   it("queryable intrinsics chain in a find where (trim + toLower)", async () => {
     const src = `
       context C {
-        aggregate Product ids guid { name: string }
+        aggregate Product { name: string }
         repository Products for Product {
           find byName(q: string): Product[] where this.name.trim().toLower() == q
         }

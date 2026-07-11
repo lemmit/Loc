@@ -28,7 +28,7 @@ const hierarchy = (opts: { policy: string; extra?: string }): string => `
         aggregate Invoice with tenantOwned, crudish { amount: int }
         aggregate Order with tenantOwned, crudish { total: int }
         ${opts.extra ?? ""}
-        aggregate Org ids guid {
+        aggregate Org {
           name: string
           implements tenantRegistry
         }

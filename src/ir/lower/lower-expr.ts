@@ -1445,7 +1445,7 @@ export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
       return {
         kind: "id",
         targetName: env.aggregate.name,
-        valueType: (env.aggregate.idKind ?? "guid") as IdValueType,
+        valueType: "guid" as IdValueType,
       };
     }
     // Workflows have no `ids` clause today — their synthetic id defaults to guid.
@@ -2081,9 +2081,7 @@ function inferSuffixType(t: TypeIR, suffix: PostfixSuffix, env: Env): TypeIR {
 
 function memberOnEntity(target: Aggregate | EntityPart, name: string): TypeIR {
   if (name === "id") {
-    const idValue: IdValueType = isAggregate(target)
-      ? ((target.idKind ?? "guid") as IdValueType)
-      : "guid";
+    const idValue: IdValueType = isAggregate(target) ? ("guid" as IdValueType) : "guid";
     return { kind: "id", targetName: target.name, valueType: idValue };
   }
   for (const m of target.members) {

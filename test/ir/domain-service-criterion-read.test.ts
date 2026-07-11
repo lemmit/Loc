@@ -21,7 +21,7 @@ const SYS = (op: string, extra = ""): string => `
 system S {
   subdomain Banking {
     context Accounts {
-      aggregate Account ids guid { holder: string  balance: int }
+      aggregate Account { holder: string  balance: int }
       repository AccountsRepo for Account { }
       criterion Rich of Account = balance > 1000
       criterion Above(n: int) of Account = balance > n

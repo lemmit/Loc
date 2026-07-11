@@ -23,7 +23,7 @@ import { parseValid } from "../../_helpers/parse.js";
 const SRC = `
   context Banking {
     valueobject Money { amount: decimal currency: string invariant amount >= 0 }
-    aggregate Account ids guid with crudish { holder: string balance: Money }
+    aggregate Account with crudish { holder: string balance: Money }
     repository Accounts for Account {
       find byHolder(holder: string): Account? where this.holder == holder
     }
@@ -52,7 +52,7 @@ const SRC = `
 const PURE_SRC = `
   context Sales {
     valueobject Money { amount: decimal currency: string invariant amount >= 0 }
-    aggregate Cart ids guid with crudish { total: Money }
+    aggregate Cart with crudish { total: Money }
     domainService FeeQuote {
       operation forAmount(amount: Money): Money {
         return Money { amount: amount.amount, currency: amount.currency }

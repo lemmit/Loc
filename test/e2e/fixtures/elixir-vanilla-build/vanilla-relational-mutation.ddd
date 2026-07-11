@@ -13,7 +13,7 @@
 system VanillaRelationalMutation {
   subdomain Core {
     context Shop {
-      aggregate Order ids guid {
+      aggregate Order {
         code: string
         contains lines: Line[]
         entity Line { sku: string }

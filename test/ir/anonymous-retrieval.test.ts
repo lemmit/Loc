@@ -21,7 +21,7 @@ system S {
   subdomain Sales {
     context Orders {
       enum Status { Draft, Cancelled }
-      aggregate Order ids guid { code: string  status: Status  region: string }
+      aggregate Order { code: string  status: Status  region: string }
       repository Orders for Order { }
       criterion ActiveOrder of Order = status != Cancelled
       criterion InRegion(rgn: string) of Order = region == rgn

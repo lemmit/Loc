@@ -19,7 +19,7 @@ const SOURCE = `
 system PagedShop {
   subdomain Sales {
     context Orders {
-      aggregate Order ids guid {
+      aggregate Order {
         code: string
         region: string
       }

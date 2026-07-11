@@ -35,7 +35,7 @@ const SOURCE = `
 system Shop {
   subdomain Core {
     context Ordering {
-      aggregate Order ids guid {
+      aggregate Order {
         quantity: int
         unitPrice: int
         discount: int
@@ -281,7 +281,7 @@ const WF_SOURCE = `
 system Shop {
   subdomain Core {
     context Ordering {
-      aggregate Cart ids guid {
+      aggregate Cart {
         label: string
         status: string
         operation close() audited { status := "closed" }

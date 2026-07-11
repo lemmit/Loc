@@ -28,7 +28,7 @@ const SRC = `
   }
 
   context Sales {
-    aggregate Customer ids guid {
+    aggregate Customer {
       name: string
       shipTo: Address
     }

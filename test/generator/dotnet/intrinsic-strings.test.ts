@@ -13,7 +13,7 @@ import { parseString } from "../../_helpers/parse.js";
 
 const SRC = `
   context Catalog {
-    aggregate Product ids guid {
+    aggregate Product {
       name: string
       derived slug: string = name.trim().toLower()
       derived shout: string = name.toUpper()
@@ -60,7 +60,7 @@ describe("dotnet generator — string intrinsics (stdlib A2 batch)", () => {
   it("renders 1-arg substring and split in a derived body", async () => {
     const src = `
       context Catalog {
-        aggregate Doc ids guid {
+        aggregate Doc {
           body: string
           derived tail: string = body.substring(5)
           derived lineCount: int = body.split("\\n").count()

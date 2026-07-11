@@ -21,7 +21,7 @@ context Accounts {
   event Deposited { account: Account id, amount: int }
   event Withdrawn { account: Account id, amount: int }
 
-  aggregate Account ids guid persistedAs(eventLog) {
+  aggregate Account persistedAs(eventLog) {
     owner: string
     balance: int
 

@@ -3,7 +3,7 @@ system Viewing {
   subdomain Sales {
     context Orders {
       enum Status { Draft, Placed, Cancelled }
-      aggregate Order ids guid {
+      aggregate Order {
         code: string
         status: Status
         total: int

@@ -24,7 +24,7 @@ system Ledger {
   subdomain Core {
     context Accounts {
       event Deposited { account: Account id, amount: int }
-      aggregate Account ids guid persistedAs(eventLog) {
+      aggregate Account persistedAs(eventLog) {
         balance: int
         operation deposit(amount: int) { emit Deposited { account: id, amount: amount } }
         apply(e: Deposited) { balance := balance + e.amount }

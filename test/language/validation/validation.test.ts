@@ -383,7 +383,7 @@ describe("validation", () => {
       const { errors } = await parse(`
         context Shop {
           error NotFound { resource: string }
-          aggregate Order ids guid {
+          aggregate Order {
             code: string
             operation lookup(): string or NotFound {
               return NotFound { resource: code }
@@ -398,7 +398,7 @@ describe("validation", () => {
       const { errors } = await parse(`
         context Shop {
           error NotFound { resource: string }
-          aggregate Order ids guid {
+          aggregate Order {
             code: string
             operation lookup(): string or NotFound {
               return NotFund { resource: code }

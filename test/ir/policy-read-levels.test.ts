@@ -27,7 +27,7 @@ const hierarchy = (opts: { policy: string; extra?: string }): string => `
         aggregate Invoice with tenantOwned { amount: int }
         aggregate Order with tenantOwned { total: int }
         ${opts.extra ?? ""}
-        aggregate Org ids guid {
+        aggregate Org {
           name: string
           implements tenantRegistry
         }
@@ -135,7 +135,7 @@ describe("policy read levels — enrichment rewrite", () => {
         subdomain S {
           context C {
             aggregate Invoice with tenantOwned { amount: int }
-            aggregate Org ids guid { name: string }
+            aggregate Org { name: string }
             repository Invoices for Invoice { }
             repository Orgs for Org { }
             policy Reach { allow global on Invoice }

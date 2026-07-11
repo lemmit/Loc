@@ -19,7 +19,7 @@ system Catalog {
   subdomain Core {
     context Shop {
       criterion BigOrders() of Order = this.total > 0
-      aggregate Order ids guid with softDeletable {
+      aggregate Order with softDeletable {
         customerId: string
         total: int
       }

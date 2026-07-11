@@ -417,11 +417,10 @@ export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
         code: "loom.tenancy-claim-type-mismatch",
         message:
           `system '${sys.name}': tenancy claim 'user.${tenancy.claimField}' is typed ` +
-          `'${typeName(claimType)}' but registry '${registry.name}' has 'ids ${registry.idValueType}'. ` +
+          `'${typeName(claimType)}' but registry '${registry.name}' has a ${registry.idValueType} id. ` +
           `The derived registry self-scope filter compares ${registry.name}.id to the claim, so ` +
           `declare the claim as '${tenancy.claimField}: ${registry.idValueType}'` +
-          `${registry.idValueType === "guid" ? ` (or '${tenancy.claimField}: string', bound as a guid at the accessor site)` : ""}, ` +
-          `or change the registry's 'ids'.`,
+          `${registry.idValueType === "guid" ? ` (or '${tenancy.claimField}: string', bound as a guid at the accessor site)` : ""}.`,
         source: `${sys.name}/tenancy`,
       });
     }
@@ -431,7 +430,7 @@ export function validateTenancy(sys: SystemIR, diags: LoomDiagnostic[]): void {
     // claim — a non-string claim (`tenantId: guid`) makes `string == Guid`
     // comparisons that mis-compile the typed backends (.NET/Java).  The
     // registry's own comparison handles guid claims (same-typed against
-    // `ids guid`), so this only fires when a `tenantOwned` aggregate exists.
+    // the registry's guid id), so this only fires when a `tenantOwned` aggregate exists.
     // The proper fix — claim-typed capability fields — is future work; until
     // then, string claims carry guid VALUES fine (the org id round-trips as
     // text), so the suggested fix costs nothing.

@@ -11,7 +11,7 @@ import { parseString } from "../../_helpers/parse.js";
 
 const SRC = `
   context Billing {
-    aggregate Invoice ids guid {
+    aggregate Invoice {
       createdAt: datetime
       dueDate: datetime
       deliveredAt: datetime
@@ -80,7 +80,7 @@ describe("typescript generator — A5 temporal", () => {
   it("value-side datetime ± duration also lowers (fragment side, param binds)", async () => {
     const src = `
       context Billing {
-        aggregate Invoice ids guid { dueDate: datetime }
+        aggregate Invoice { dueDate: datetime }
         repository Invoices for Invoice {
           find w(q: datetime): Invoice[] where this.dueDate < q + days(2)
         }
@@ -96,7 +96,7 @@ describe("typescript generator — A5 temporal", () => {
   it("rejects a non-constructor duration composite in where-position (honest gate)", async () => {
     const src = `
       context Billing {
-        aggregate Invoice ids guid { dueDate: datetime }
+        aggregate Invoice { dueDate: datetime }
         repository Invoices for Invoice {
           find w(q: datetime): Invoice[] where this.dueDate + (days(1) + hours(2)) < q
         }

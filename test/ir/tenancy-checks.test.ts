@@ -282,7 +282,7 @@ describe("loom.tenant-owned-claim-type (1b-tail)", () => {
       subdomain Billing {
         context Invoicing {
           ${agg}
-          aggregate Organization ids guid { name: string }
+          aggregate Organization { name: string }
         }
       }
     }
@@ -290,7 +290,7 @@ describe("loom.tenant-owned-claim-type (1b-tail)", () => {
 
   it("errors when a tenantOwned aggregate exists under a non-string claim", async () => {
     const diags = await tenancyDiags(
-      sys("guid", `aggregate Invoice ids guid with tenantOwned { number: string }`),
+      sys("guid", `aggregate Invoice with tenantOwned { number: string }`),
     );
     const hit = diags.find((d) => d.code === "loom.tenant-owned-claim-type");
     expect(hit?.severity).toBe("error");
@@ -298,15 +298,13 @@ describe("loom.tenant-owned-claim-type (1b-tail)", () => {
   });
 
   it("does not fire for a registry-only system with a guid claim (same-typed self-scope)", async () => {
-    const diags = await tenancyDiags(
-      sys("guid", `aggregate Plan ids guid crossTenant { code: string }`),
-    );
+    const diags = await tenancyDiags(sys("guid", `aggregate Plan crossTenant { code: string }`));
     expect(diags.filter((d) => d.code === "loom.tenant-owned-claim-type")).toEqual([]);
   });
 
   it("does not fire for a string claim with tenantOwned aggregates", async () => {
     const diags = await tenancyDiags(
-      sys("string", `aggregate Invoice ids guid with tenantOwned { number: string }`),
+      sys("string", `aggregate Invoice with tenantOwned { number: string }`),
     );
     expect(diags.filter((d) => d.code === "loom.tenant-owned-claim-type")).toEqual([]);
   });
@@ -328,7 +326,7 @@ describe("tenantRegistry structural checks", () => {
         tenancy by user.tenantId of Organization
         subdomain Platform {
           context Accounts {
-            aggregate Organization ids guid {
+            aggregate Organization {
               name: string
               implements tenantRegistry
             }
@@ -345,7 +343,7 @@ describe("tenantRegistry structural checks", () => {
       system Billder {
         subdomain Platform {
           context Accounts {
-            aggregate Organization ids guid {
+            aggregate Organization {
               name: string
               implements tenantRegistry
             }
@@ -366,11 +364,11 @@ describe("tenantRegistry structural checks", () => {
         tenancy by user.tenantId of Organization
         subdomain Platform {
           context Accounts {
-            aggregate Organization ids guid {
+            aggregate Organization {
               name: string
               implements tenantRegistry
             }
-            aggregate Division ids guid {
+            aggregate Division {
               name: string
               implements tenantRegistry
             }
@@ -390,8 +388,8 @@ describe("tenantRegistry structural checks", () => {
         tenancy by user.tenantId of Organization
         subdomain Platform {
           context Accounts {
-            aggregate Organization ids guid { name: string }
-            aggregate Division ids guid {
+            aggregate Organization { name: string }
+            aggregate Division {
               name: string
               implements tenantRegistry
             }

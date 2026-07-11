@@ -19,7 +19,7 @@ context Listings {
     label: string?
   }
 
-  aggregate Ad ids guid {
+  aggregate Ad {
     code: string
     offer: Offer
   }

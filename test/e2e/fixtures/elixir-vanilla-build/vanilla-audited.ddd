@@ -21,7 +21,7 @@ system VanillaAudited {
     context Orders {
       error NotFound { resource: string }
 
-      aggregate Order ids guid {
+      aggregate Order {
         status: string
         operation cancel() audited {
           status := "cancelled"

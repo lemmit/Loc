@@ -16,7 +16,7 @@ const SRC = `
     tenancy by user.tenantId of Organization
     subdomain Platform {
       context Accounts {
-        aggregate Organization ids guid {
+        aggregate Organization {
           name: string
           implements tenantRegistry
         }
@@ -86,7 +86,7 @@ const SIGNUP_SRC = `
     tenancy by user.tenantId of Organization
     subdomain Platform {
       context Accounts {
-        aggregate Organization ids guid {
+        aggregate Organization {
           name: string
           implements tenantRegistry
           operation setPath(seg: string) { dataKey := seg }

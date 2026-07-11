@@ -22,7 +22,7 @@ import { parseValid } from "../_helpers/parse.js";
 
 const CONTEXT = `
   context Orders {
-    aggregate Order ids guid { code: string  region: string }
+    aggregate Order { code: string  region: string }
     error NotFound { resource: string }
     repository Orders for Order { find recent(): Order or NotFound }
   }
@@ -33,7 +33,7 @@ const CONTEXT = `
 const VANILLA_SYSTEM = `
 system UN {
   subdomain Orders { context Orders {
-    aggregate Order ids guid with crudish { code: string  region: string }
+    aggregate Order with crudish { code: string  region: string }
     error NotFound { resource: string }
     repository Orders for Order { find recent(): Order or NotFound }
   } }

@@ -134,7 +134,7 @@ system AuthedAudit {
   user { id: guid  email: string }
   subdomain Core {
     context Ordering {
-      aggregate Order ids guid {
+      aggregate Order {
         status: string
         operation cancel() audited { status := "cancelled" }
       }

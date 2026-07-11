@@ -33,7 +33,7 @@ function sys(context: string): string {
 
 const SRC = sys(`
   context Billing {
-    aggregate Invoice ids guid {
+    aggregate Invoice {
       createdAt: datetime
       dueDate: datetime
       deliveredAt: datetime
@@ -116,7 +116,7 @@ describe("python generator — A5 temporal", () => {
     const files = await build(
       sys(`
         context Billing {
-          aggregate Invoice ids guid {
+          aggregate Invoice {
             dueDate: datetime
             derived due: datetime = dueDate + days(30)
           }

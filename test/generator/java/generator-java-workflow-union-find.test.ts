@@ -19,7 +19,7 @@ const SRC = `
       context Catalog {
         error ProjectNotFound { resource: string }
 
-        aggregate Project ids guid {
+        aggregate Project {
           name: string
           description: string?
           active: bool

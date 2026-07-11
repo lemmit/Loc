@@ -71,7 +71,7 @@ describe("shared walker migration — repo-read inside a match arm", () => {
   it("derives a read-port for a `repo-read` nested in a match arm", async () => {
     const loom = await buildLoomModel(`
       context Banking {
-        aggregate Account ids guid {
+        aggregate Account {
           holder: string
         }
         repository Accounts for Account {

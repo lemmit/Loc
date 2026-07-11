@@ -63,7 +63,7 @@ function aggregateFrom(model: Model, name: string): AggregateIR {
 
 const WRAP = (members: string) => `
   context C {
-    aggregate Order ids guid {
+    aggregate Order {
       subject: string
       amount:  int
       status:  string

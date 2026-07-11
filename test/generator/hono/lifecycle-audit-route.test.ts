@@ -15,7 +15,7 @@ import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Invoicing {
-    aggregate Invoice ids guid {
+    aggregate Invoice {
       total: money
       create(total: money) audited { total := total }
       destroy audited { }

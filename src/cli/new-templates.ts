@@ -84,7 +84,7 @@ function blankDomain(): DomainBlock {
     context: "Notes",
     source: `  subdomain Core {
     context Notes {
-      aggregate Note ids guid with crudish {
+      aggregate Note with crudish {
         title: string
         body: string
         invariant title.length > 0
@@ -101,7 +101,7 @@ function crudDomain(): DomainBlock {
     context: "Projects",
     source: `  subdomain Core {
     context Projects {
-      aggregate Project ids guid with crudish {
+      aggregate Project with crudish {
         name: string
         invariant name.length > 0
         derived display: string = name
@@ -109,7 +109,7 @@ function crudDomain(): DomainBlock {
 
       repository Projects for Project { }
 
-      aggregate Task ids guid with crudish {
+      aggregate Task with crudish {
         title: string
         done: bool
         project: Project id

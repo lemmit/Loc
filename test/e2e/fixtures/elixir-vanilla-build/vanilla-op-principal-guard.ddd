@@ -11,7 +11,7 @@ system OpGuard {
   user { id: string  role: string }
   subdomain Sales {
     context Selling {
-      aggregate Order ids guid {
+      aggregate Order {
         customer: string
         status: string = "open"
         invariant customer.length > 0

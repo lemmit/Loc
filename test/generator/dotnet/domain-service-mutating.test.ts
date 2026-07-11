@@ -14,7 +14,7 @@ import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Banking {
-    aggregate Account ids guid with crudish {
+    aggregate Account with crudish {
       holder: string
       balance: decimal
       operation withdraw(amount: decimal) {

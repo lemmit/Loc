@@ -14,7 +14,7 @@ const SRC = `
 system Shop {
   subdomain Sales {
     context Orders {
-      aggregate Order ids guid { code: string }
+      aggregate Order { code: string }
       repository Orders for Order { }
     }
   }

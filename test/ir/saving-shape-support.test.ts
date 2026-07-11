@@ -26,7 +26,7 @@ function sys(platform: string, shape: string): string {
 system Shop {
   subdomain Sales {
     context Shop {
-      aggregate Cart ids guid${shapeMod} { total: int }
+      aggregate Cart${shapeMod} { total: int }
     }
   }
   storage pg { type: postgres }
@@ -52,7 +52,7 @@ describe("saving-shape capability validation", () => {
 system Shop {
   subdomain Sales {
     context Shop {
-      aggregate Cart ids guid shape(document) with crudish { total: int }
+      aggregate Cart shape(document) with crudish { total: int }
       repository Carts for Cart { }
     }
   }
@@ -87,7 +87,7 @@ describe("vanilla shape(document) scalar find/op scope (DEBT-07)", () => {
 system Shop {
   subdomain Sales {
     context Shop {
-      aggregate Cart ids guid shape(document) with crudish {
+      aggregate Cart shape(document) with crudish {
         reference: string
       }
       repository Carts for Cart {
@@ -108,7 +108,7 @@ system Shop {
 system Shop {
   subdomain Sales {
     context Shop {
-      aggregate Cart ids guid shape(document) with crudish {
+      aggregate Cart shape(document) with crudish {
         total: int
         operation bump() { total := total + 1 }
       }
@@ -129,7 +129,7 @@ system Shop {
   subdomain Sales {
     context Shop {
       error TooMany { message: string }
-      aggregate Cart ids guid shape(document) with crudish {
+      aggregate Cart shape(document) with crudish {
         total: int
         operation bump(): Cart or TooMany {
           precondition total < 10
@@ -153,7 +153,7 @@ system Shop {
   subdomain Sales {
     context Shop {
       valueobject Money { amount: int  currency: string }
-      aggregate Cart ids guid shape(document) with crudish {
+      aggregate Cart shape(document) with crudish {
         price: Money
         total: int
         function affordable(): bool = price.amount < 100
@@ -180,7 +180,7 @@ system Shop {
 system Shop {
   subdomain Sales {
     context Shop {
-      aggregate Order ids guid shape(document) with crudish {
+      aggregate Order shape(document) with crudish {
         reference: string
         contains lines: OrderLine[]
         entity OrderLine { sku: string  qty: int }
@@ -204,7 +204,7 @@ system Shop {
 system Shop {
   subdomain Sales {
     context Shop {
-      aggregate Cart ids guid shape(document) with crudish {
+      aggregate Cart shape(document) with crudish {
         total: int
         operation bump() audited { total := total + 1 }
       }
@@ -227,7 +227,7 @@ system Shop {
   subdomain Sales {
     context Shop {
       error TooMany { }
-      aggregate Cart ids guid shape(document) with crudish {
+      aggregate Cart shape(document) with crudish {
         total: int
         operation bump() audited: Cart or TooMany {
           precondition total < 10
@@ -250,7 +250,7 @@ system Shop {
 system Shop {
   subdomain Sales {
     context Shop {
-      aggregate Cart ids guid shape(document) with crudish {
+      aggregate Cart shape(document) with crudish {
         total: int
         derived doubled: int = total * 2
         operation sync() { total := doubled }
@@ -273,7 +273,7 @@ system Shop {
 system Shop {
   subdomain Sales {
     context Shop {
-      aggregate Cart ids guid shape(document) with crudish {
+      aggregate Cart shape(document) with crudish {
         reference: string
       }
       repository Carts for Cart {
@@ -296,7 +296,7 @@ system Shop {
   subdomain Sales {
     context Shop {
       error NotFound { }
-      aggregate Cart ids guid shape(document) with crudish {
+      aggregate Cart shape(document) with crudish {
         reference: string
       }
       repository Carts for Cart {
@@ -317,7 +317,7 @@ system Shop {
 system Shop {
   subdomain Sales {
     context Shop {
-      aggregate Cart ids guid shape(document) with crudish { reference: string }
+      aggregate Cart shape(document) with crudish { reference: string }
       repository Carts for Cart { }
     }
   }

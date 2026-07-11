@@ -88,7 +88,7 @@ describe("java workflow-sourced views", () => {
 // the ES instance LIST) and applies the SAME filter IN-MEMORY over the folded
 // state's record accessors.  The route path stays identical to the state path.
 const ES_SRC = `system S { subdomain O { context O {
-  aggregate Order ids guid { total: int  create place() { total := 0  emit OrderPlaced { order: id } } }
+  aggregate Order { total: int  create place() { total := 0  emit OrderPlaced { order: id } } }
   repository Orders for Order { }
   event OrderPlaced { order: Order id }
   event PaymentReceived { order: Order id, amount: int }

@@ -34,7 +34,7 @@ const SOURCE = `
 system Shop {
   subdomain Core {
     context Ordering {
-      aggregate Order ids guid {
+      aggregate Order {
         quantity: int
         unitPrice: int
         discount: int

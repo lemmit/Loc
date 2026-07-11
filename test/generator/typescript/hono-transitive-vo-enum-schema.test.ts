@@ -28,7 +28,7 @@ const SRC = `
   system Sys {
     subdomain Sales {
       context Sales {
-        aggregate Customer ids guid {
+        aggregate Customer {
           name: string
           shipTo: Address
         }

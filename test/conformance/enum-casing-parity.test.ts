@@ -30,7 +30,7 @@ system S {
   subdomain Sales {
     context Orders {
       enum OrderStatus { Draft, Confirmed, Cancelled }
-      aggregate Order ids guid { code: string  status: OrderStatus }
+      aggregate Order { code: string  status: OrderStatus }
       repository Orders for Order { }
     }
   }

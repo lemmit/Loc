@@ -371,10 +371,10 @@ function lowerBase(t: TypeRef | TypeAtom, env?: Env): TypeIR {
     }
     let valueType: IdValueType = "guid";
     if (target && isAggregate(target)) {
-      valueType = (target.idKind ?? "guid") as IdValueType;
+      valueType = "guid" as IdValueType;
     } else if (target && isEntityPart(target)) {
       const owner = ancestorAggregate(target);
-      valueType = (owner?.idKind ?? "guid") as IdValueType;
+      valueType = "guid" as IdValueType;
     } else if (!target && env) {
       // Unresolved ref (a macro- / capability-emitted plain `{ $refText }` ref —
       // e.g. a `Self id` rewritten to `<Host> id`, whose ref the Linker skips):
@@ -382,9 +382,9 @@ function lowerBase(t: TypeRef | TypeAtom, env?: Env): TypeIR {
       // value type matches a hand-written `<Host> id`.
       const refText = base.target?.$refText;
       const found = refText ? findEntityByName(env, refText) : undefined;
-      if (found && isAggregate(found)) valueType = (found.idKind ?? "guid") as IdValueType;
+      if (found && isAggregate(found)) valueType = "guid" as IdValueType;
       else if (found && isEntityPart(found)) {
-        valueType = (ancestorAggregate(found)?.idKind ?? "guid") as IdValueType;
+        valueType = "guid" as IdValueType;
       }
     }
     // Macro-emitted references can lack a `$refNode`, which causes

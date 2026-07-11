@@ -119,14 +119,14 @@ describe("enrichment — idempotency", () => {
     system Shop {
       subdomain Sales {
         context Orders {
-          aggregate Order ids guid {
+          aggregate Order {
             customerId: string
             total: int
             contains lines: OrderLine[]
             derived lineCount: int = lines.count
             entity OrderLine { quantity: int }
           }
-          aggregate Catalog ids guid {
+          aggregate Catalog {
             name: string
             tags: Order id[]
           }

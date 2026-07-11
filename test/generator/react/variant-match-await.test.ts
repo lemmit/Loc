@@ -18,7 +18,7 @@ const STAGE2 = `
     api SalesApi from Sales { httpStatus Failed 422 }
     subdomain Sales {
       context Ordering {
-        aggregate Order ids guid {
+        aggregate Order {
           code: string
           operation placeOrder(): Order or Failed {
             return Failed { reason: code }
@@ -119,7 +119,7 @@ const MULTI = `
       context Ordering {
         error Failed { reason: string }
         error Declined { code: int }
-        aggregate Order ids guid {
+        aggregate Order {
           name: string
           operation confirm(): Order or Failed or Declined {
             return Failed { reason: name }

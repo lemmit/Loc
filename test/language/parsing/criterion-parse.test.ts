@@ -19,7 +19,7 @@ describe("parsing — criterion declaration", () => {
         criterion ActiveCustomer of Customer = active
         criterion InRegion(region: string) of Customer = region == region
         criterion HasManagerRole of bool = currentUser.role == "manager"
-        criterion CanForceClose of Order { where: status != Closed }
+        criterion CanForceClose of Order = status != Closed
       }
     `);
     expect(errors).toEqual([]);

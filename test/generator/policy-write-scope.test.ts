@@ -19,7 +19,7 @@ const system = (platform: string, policy: string) => `
           operation adjust(delta: int) { balance := balance + delta }
           destroy remove() { }
         }
-        aggregate Org ids guid {
+        aggregate Org {
           name: string
           implements tenantRegistry
         }

@@ -144,7 +144,7 @@ system DevPlatform {
                 }
             }
 
-            aggregate Project ids guid with crudish {
+            aggregate Project with crudish {
                 name: string
                 description: string?
                 visibility: Visibility
@@ -437,7 +437,7 @@ system DevPlatform {
 
             // MacroArgBool — `crudish(updateOnly: true)` composes with
             // softDeletable (which owns the create/destroy lifecycle).
-            aggregate Squad ids guid with crudish(updateOnly: true), softDeletable {
+            aggregate Squad with crudish(updateOnly: true), softDeletable {
                 name: string
                 invariant name.length > 0
                 derived display: string = name

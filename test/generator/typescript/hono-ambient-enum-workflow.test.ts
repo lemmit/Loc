@@ -22,7 +22,7 @@ const SRC = `
   system Sys {
     subdomain Ops {
       context Ops {
-        aggregate Task ids guid {
+        aggregate Task {
           title: string
           priority: Priority
         }

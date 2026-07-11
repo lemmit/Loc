@@ -12,16 +12,16 @@ const services = createDddServices(NodeFileSystem).Ddd;
 const expectHoverFor = expectHover(services);
 
 describe("DddHoverProvider", () => {
-  it("hovers an aggregate header with idKind + member counts", async () => {
+  it("hovers an aggregate header with member counts", async () => {
     await expectHoverFor({
       text: `
         context Sales {
-          aggregate <|>Order ids guid {
+          aggregate <|>Order {
             customerId: string
           }
         }`,
       index: 0,
-      hover: /aggregate Order ids guid[\s\S]*1 propert/,
+      hover: /aggregate Order[\s\S]*1 propert/,
     });
   });
 
