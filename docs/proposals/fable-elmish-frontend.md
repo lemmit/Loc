@@ -1,13 +1,20 @@
 # Fable / Feliz / Elmish — an F# frontend target
 
-> Status: **PROPOSED (gap analysis).** Nothing here is implemented. This note
-> is the feasibility/distance companion to
-> [`named-actions-and-stores.md`](named-actions-and-stores.md). It separates
-> the *two* targets that hide under "Fable," estimates the distance to each
-> against the real generator code, identifies the one genuinely
-> un-precedented risk (pack format), and recommends a de-risking sequence.
-> It deliberately does **not** claim the "structural isomorphism" the original
-> external analysis led with — that claim is false against today's IR; see §2.
+> Status: **PROPOSED (gap analysis).** No Fable target is implemented — but its
+> one hard dependency now **is**: [`named-actions-and-stores.md`](named-actions-and-stores.md)
+> shipped its **Stage 1 (named sync `action`s) + Stage 5 (`store`)** across all
+> five UI targets (2026-07, code-verified — `ActionIR`/`StoreIR` in
+> `src/ir/types/loom-ir.ts:287,312`, per-target `named-actions.test.ts`). This
+> note is the feasibility/distance companion to that proposal. It separates the
+> *two* targets that hide under "Fable," estimates the distance to each against
+> the real generator code, identifies the one genuinely un-precedented risk
+> (pack format), and recommends a de-risking sequence. It deliberately does
+> **not** claim the "structural isomorphism" the original external analysis led
+> with — that claim was false against the *anonymous-lambda* IR and is now true
+> **only for the named-action subset**; see §2. The one MVU axis still genuinely
+> future is **async effect outcomes** (server data as `Cmd`): its enabling
+> feature, [`async-actions-and-effects.md`](async-actions-and-effects.md), is
+> unstarted and gated by `loom.action-requires-await`.
 
 ## TL;DR
 
@@ -18,11 +25,13 @@ There is no single "Fable target." There are two, and they are far apart:
    type-safe F# frontend and another strict-compiler CI gate. You do **not**
    get MVU, `update`, or exhaustiveness payoff — it is React, spelled in F#.
 
-2. **Real Elmish** (MVU): was a Phoenix/HEEx-class undertaking (parallel
-   walker engine + `Msg`/`Model` *synthesis* from anonymous lambdas). The
-   [named-actions proposal](named-actions-and-stores.md) removes **both** hard
-   parts, turning Elmish from a research project into an incremental
-   `update`-emitter on top of (1).
+2. **Real Elmish** (MVU): *was* a Phoenix/HEEx-class undertaking (parallel
+   walker engine + `Msg`/`Model` *synthesis* from anonymous lambdas). Named
+   actions + stores **shipped**, removing **both** hard parts — `Msg`/`update`/
+   `Model` are now a direct projection off `ActionIR`/`StoreIR`, not a synthesis
+   — turning Elmish from a research project into an incremental `update`-emitter
+   on top of (1). The residual is the **anonymous-lambda page** (named actions
+   are opt-in, not mandatory): see §2.2 for the three ways to close it.
 
 The largest *unknown* is independent of the MVU question: every Loom design
 pack is Handlebars emitting **markup strings**, and Feliz has no markup layer
@@ -46,44 +55,95 @@ contract (`src/generator/_walker/target.ts`). Four frontends share that engine
 The dividing line between "shares `walkBody`" and "forks it" is the whole
 ballgame for Feliz, so §3 maps each Fable flavor onto it.
 
-## 2. The isomorphism claim is false today — and what makes it true
+## 2. The isomorphism claim — false against lambdas, now true for named actions
 
 The external analysis argued *"Loom already models named, typed actions, so
-the Elmish `Msg` union is a projection."* Against the IR, page handlers are
-**anonymous lambdas** (`{ kind: "lambda"; body?; block?: StmtIR[] }`,
-`src/ir/types/loom-ir.ts:2500-2511`) and page state is a flat list of
-independent cells (`StateFieldIR[]`, `loom-ir.ts:1964-1971`) — the React
-`useState` shape, not an Elmish `Model` record. So a `Msg` union must be
+the Elmish `Msg` union is a projection."* When this note was first written that
+was false: page handlers were **anonymous lambdas**
+(`{ kind: "lambda"; body?; block?: StmtIR[] }`) and page state a flat list of
+independent cells (`StateFieldIR[]`, `loom-ir.ts` `StateFieldIR`) — the React
+`useState` shape, not an Elmish `Model` record — so a `Msg` union had to be
 **synthesized** (gensym a case per handler, thread a model), not projected.
 
-[Named actions](named-actions-and-stores.md) make the claim true:
-`action setCustomer(c: CustomerRef)` → `Msg.SetCustomer of CustomerRef`, a
-pure body → one `update` arm, `state {}` → `Model`. This note assumes that
-proposal as a dependency for flavor (2).
+**[Named actions](named-actions-and-stores.md) shipped, and now make the claim
+true for the named subset.** The IR carries first-class handlers:
+
+```ts
+// src/ir/types/loom-ir.ts:287
+export interface ActionIR { name: string; params: ParamIR[]; body: StmtIR[]; }
+// PageIR.actions / ComponentIR.actions (loom-ir.ts:2364, 2434); StoreIR (loom-ir.ts:312)
+```
+
+So the projection is now a direct emit, no gensym:
+
+- `action setCustomer(c: CustomerRef)` → `Msg.SetCustomer of CustomerRef`
+- the action's `body: StmtIR[]` (a **purity-enforced** `:=`/`+=`/`let`/call/
+  `navigate` block) → one `update` arm
+- `state {}` (`StateFieldIR[]`) → the `Model` record; `store {}` (`StoreIR`) →
+  a second `Model`/`update`/`Msg` triple
+- the view references the action by name (`renderNamedHandler`,
+  `src/generator/_walker/target.ts:569`) → `dispatch Msg.SetCustomer c`
+
+The codegen-time hoist that forced HEEx to fork `walkBody`
+(`hoistLambdaToHandler`) is, for named actions, **already done at IR time** —
+the button carries an action *reference*, so the view collapses to "dispatch
+`Msg.X`" and fits the shared walker. That is the structural change that moves
+Elmish from flavor-(2)-is-a-mountain to flavor-(2)-is-an-increment.
+
+### 2.2 The residual: anonymous-lambda pages
+
+Named actions are **opt-in**, not mandatory — a page may still write inline
+`onClick: () => { count := count + 1 }`. For a JSX target that inlines
+identically; for MVU there is no inline effect position, so an anonymous-lambda
+page is exactly the synthesis case the projection avoids. Three ways to close
+it, cheapest first:
+
+1. **Gate it.** A `loom.mvu-requires-named-action` validator on MVU-targeted
+   `ui`s: any effectful handler must be a named `action`. Honest, zero codegen
+   risk, and it makes the projection total by construction. The purity
+   machinery named actions already ship (`loom.action-payload-mismatch`, the
+   effect-freedom check) is the same shape.
+2. **Auto-name in lowering.** A lowering pass that lifts each anonymous
+   effectful page lambda into a synthesized `ActionIR` (gensym `Action_N`,
+   infer the payload param from the call-site primitive) *before* codegen — so
+   every backend, not just MVU, sees only named actions and the walker's
+   inline-lambda arms become dead. This is the `hoistLambdaToHandler` logic
+   moved from Phoenix codegen into shared IR, done **once**. Higher value
+   (simplifies HEEx too) but a real IR pass with its own tests.
+3. **Synthesize in the MVU emitter only.** Port HEEx's `event_N` gensym into
+   the MVU walker for the lambda case. Lowest shared value, `event_N`-quality
+   `Msg` names, and it re-introduces the per-target hoist named actions
+   removed — **not recommended** except as a fallback for (1).
+
+Recommendation: ship (1) with the target, keep (2) as the follow-up that pays
+for itself across HEEx + MVU. §8 expands the trade-off.
 
 ### 2.1 Distance-to-MVU scorecard (per axis)
 
 What is accurate is **faithful one-way projection** Loom → MVU, not strict
 (bidirectional) isomorphism. Measured per MVU part:
 
-| MVU part | Loom today | Distance | Closed by |
+| MVU part | Loom today | Distance | Status |
 |---|---|---|---|
-| **Model** (one record) | `StateFieldIR[]`, flat typed cells | ≈0 (cosmetic regroup) | emit one record, no DSL change |
-| **view** (`Model → Html`) | `body:` already pure over render primitives | ≈0 | handlers reference a named action |
-| **init** (Model + Cmd) | `state { x = init }` + mount-time data binds | small | map mount binds to init `Cmd` |
-| **Msg** (named, exhaustive union) | anonymous lambdas, no names | **large** | **named actions** |
-| **update** (`(Msg,Model)→(Model,Cmd)`) | inline imperative `:=`+call blocks | medium | named actions + purity rule |
-| **Cmd** — sync (`navigate`/`call`/`emit`) | declared statement forms | medium | purity rule reifies them |
-| **Cmd** — async outcomes (server state) | hooks + boolean/nullable flags | **was the residual gap** | **decided** — see below |
+| **Model** (one record) | `StateFieldIR[]`, flat typed cells | ≈0 (cosmetic regroup) | **ready** — emit one record, no DSL change |
+| **view** (`Model → Html`) | `body:` already pure over render primitives | ≈0 | **ready** — handlers reference a named action |
+| **init** (Model + Cmd) | `state { x = init }` + mount-time data binds | small | **ready** — map mount binds to init `Cmd` |
+| **Msg** (named, exhaustive union) | `ActionIR.name` + typed `params` | **was large** | **✅ shipped** — named actions |
+| **update** (`(Msg,Model)→(Model,Cmd)`) | `ActionIR.body`, purity-enforced | medium | **✅ shipped** — direct emit off the body |
+| **Cmd** — sync (`navigate`/`call`/`emit`) | reified statement forms in `ActionIR.body` | medium | **✅ shipped** — purity rule reifies them |
+| **Cmd** — async outcomes (server state) | hooks + boolean/nullable flags | **the residual gap** | ⏳ **gated** — `loom.action-requires-await` |
 
-Five of six axes are at or near zero today; **named actions** closes Msg /
-update / sync-Cmd in one feature. The sixth — async effect outcomes — was the
-only genuinely unresolved design question, and is now **decided** in
-[named-actions §2.3 / §8.7](named-actions-and-stores.md): reads derive the
-remote-data union from `QueryView`; writes reuse `then:` + an optional
-`onError` arm, projecting to a `Result<T, E>` outcome `Msg`. With that, every
-MVU axis has a settled projection — the only open item left is `store`
-persistence, deferred out of v1.
+Six of seven axes are at zero or **shipped** today: named actions closed Msg /
+update / sync-Cmd (verified — `named-actions.test.ts` per target), and Model /
+view / init were already there. The **only** remaining axis is async effect
+outcomes — the design is *decided* in
+[named-actions §2.3 / §8.7](named-actions-and-stores.md) (reads derive the
+remote-data union from `QueryView`; writes reuse `then:` + optional `onError`,
+projecting to a `Result<T, E>` outcome `Msg`) but the enabling feature,
+[`async-actions-and-effects.md`](async-actions-and-effects.md), is **unstarted
+and actively gated** by `loom.action-requires-await`. So a **sync-only MVU
+target is buildable against `main` today**; full async `Cmd`s wait on that
+follow-up (and `store` persistence, likewise deferred out of v1).
 
 ## 3. Work streams and distance
 
@@ -99,27 +159,38 @@ persistence, deferred out of v1.
 
 **No IR change.** On the order of the Svelte/Angular additions. Not MVU.
 
-### 3b. Real Elmish (MVU) — with named actions as a dependency
+### 3b. Real Elmish (MVU) — its dependency has landed
 
 The reason HEEx forked `walkBody` is that LiveView must **discover anonymous
 inline effectful lambdas during the markup walk and hoist them** into
-`handle_event` (`heex-walker-core.ts:965` gensyms `event_${n}`). Elmish has
-the identical requirement (hoist effects into `update`). Two consequences,
-both dissolved by named actions:
+`handle_event` (`heex-walker-core.ts` gensyms `event_${n}`). Elmish has the
+identical requirement (hoist effects into `update`). Two consequences, **both
+now dissolved by the shipped named-actions feature**:
 
-1. **Synthesis → projection.** `ActionIR` already carries the name + typed
-   param, so `Msg` cases and `update` arms are a direct emit, no gensym.
+1. **Synthesis → projection.** `ActionIR` carries the name + typed param, so
+   `Msg` cases and `update` arms are a direct emit, no gensym — for any handler
+   written as a named `action`.
 2. **Codegen-time hoisting → IR-time hoisting.** Because actions are named and
-   pure *in the IR*, the hoist is already done before codegen. The view
-   collapses to "dispatch `Msg.X`" (trivial — fits the shared walker), and the
-   `update` function is emitted separately from the `ActionIR` list. The exact
-   structural mismatch that forced HEEx's parallel engine moves out of
-   per-target codegen and into the shared IR, *once*.
+   purity-enforced *in the IR*, the hoist is already done before codegen. The
+   view collapses to "dispatch `Msg.X`" (trivial — fits the shared walker), and
+   the `update` function is emitted from the `ActionIR` list. The exact
+   structural mismatch that forced HEEx's parallel engine has moved out of
+   per-target codegen and into the shared IR.
 
-So with named actions, Elmish ≈ 3a's effort **plus** a mechanical
-`update`/`Model`/`Msg` emitter driven by `ActionIR` — an increment, not a
-mountain. Without named actions, it is the HEEx-class slog with `event_N`
-output quality, and is **not recommended**.
+So Elmish ≈ 3a's effort **plus** a mechanical `update`/`Model`/`Msg` emitter
+driven by `ActionIR`/`StoreIR` — an increment, not a mountain. The one caveat
+is the anonymous-lambda page (§2.2): close it with the `loom.mvu-requires-named-
+action` gate (cheapest) or the shared auto-name lowering pass (higher value).
+The `event_N`-synthesis path is now only a **fallback**, not the baseline it
+would have been before named actions shipped.
+
+**Buildable-today scope:** everything except async `Cmd`s. A sync MVU target —
+`Model`/`Msg`/`update` + `Cmd.none`/`navigate`/sync-`emit`, over the
+named-action subset — has every IR input it needs on `main`. Async server-data
+`Cmd`s wait on [`async-actions-and-effects.md`](async-actions-and-effects.md),
+so v1 renders remote reads the way the pre-async DSL already does (the mount-time
+data binds init already carries) and defers `Cmd.OfAsync` outcomes to that
+follow-up.
 
 ## 4. The un-precedented risk: pack format
 
@@ -168,8 +239,12 @@ shape itself (`wireShape`), the e2e harness/smoke-spec structure.
    confirms the "fits more cleanly than Angular" claim empirically.
 3. **Ship Feliz-with-hooks** if the value (type-safe F# + CI gate +
    .NET-shop differentiation) justifies the pack cost. Honest, low-risk.
-4. **Land named actions** on its own merits (its §6 wins stand without F#),
-   then let real Elmish fall out as a mechanical `update`-emitter.
+4. ~~Land named actions~~ **✅ done** (Stage 1 + Stage 5 shipped) — real Elmish
+   now falls out as a mechanical `update`-emitter over `ActionIR`/`StoreIR`.
+   The remaining gate before it is total is the anonymous-lambda page: land
+   `loom.mvu-requires-named-action` (or the shared auto-name pass) per §2.2/§8.
+   Async `Cmd`s track [`async-actions-and-effects.md`](async-actions-and-effects.md)
+   separately and are **not** on the sync-MVU critical path.
 
 ## 7. Spike findings
 
@@ -216,3 +291,72 @@ the offside rule would be the killer.
 (`dotnet fable`) to emit JS, nor exercise the React runtime / Vite bundle /
 Playwright path. So the projection and F# well-formedness are de-risked; the
 full Fable→bundle→runtime pipeline (§3a's "Fable build + CI leg") is not.
+
+## 8. The anonymous-lambda page — the residual, quantified
+
+§2.2 named the one case the shipped named-action projection doesn't cover:
+a hand-authored page that writes state inline (`onClick: () => { count := count + 1 }`)
+instead of through a named `action`. Before choosing how to handle it, split the
+lambda population — because most of it is a non-problem.
+
+### 8.1 Two kinds of lambda; only one is the MVU problem
+
+- **Pure value lambdas** — `.map`/`.filter` bodies, `List` column accessors,
+  `Card`/row renderers, comparators, projections. They are expression-valued
+  and effect-free, so they land on the shared walker's JSX branch and map
+  straight to F# `List.map (fun x -> …)`. **Not an MVU concern.** These are the
+  *only* lambdas scaffolding emits (`scaffold/_body-builders.ts` — every
+  `lambda(...)` there is a `columnAccessor`/row renderer; there is not a single
+  `:=`/`navigate`/`emit` in the file).
+- **Effectful handler lambdas** — inline `onClick`/`onChange` bodies containing
+  `:=`/`+=`/`navigate`/`emit`/a sync call. These are the residual. They have no
+  MVU view position, so each must become a `Msg` + `update` arm.
+
+The consequence is decisive for cost: **scaffolded UIs already have zero
+effectful lambdas** — they route every mutation through declarative primitives
+(`CreateForm(of:)`, `OperationForm(of:, op:)`, `WorkflowForm(runs:)`, `Button`
+with a declarative nav), which the walker already lowers to named API/nav
+calls. So the residual is confined to *hand-written* inline effect handlers — a
+minority, and precisely the pattern Elm-style authoring discourages anyway.
+
+### 8.2 Four dispositions, most-faithful to least
+
+0. **Functional-update escape hatch.** Add one catch-all `Msg.Patch of (Model → Model)`
+   and lower each anonymous effect lambda to `dispatch (Patch (fun m -> { m with … }))`.
+   Zero synthesis, compiles today — but it **discards exhaustiveness and the
+   testable-`update` payoff**, i.e. the entire reason to pick MVU. Keep it as a
+   safety valve, never the default.
+1. **Gate — `loom.mvu-requires-named-action`.** On an MVU-targeted `ui`, an
+   effectful handler must be a named `action`; an inline effect lambda is a
+   validation error with a fix-it ("name this handler"). Makes the projection
+   **total by construction**, needs no codegen, and reuses the exact purity/
+   payload machinery named actions already ship. Viable *specifically because*
+   scaffolds already comply — the gate never fires on generated pages, only on
+   hand-authored inline effects. **Cheapest; recommended for v1.**
+2. **Auto-name lowering pass.** An IR→IR normalization that lifts each effectful
+   page/component lambda into a synthesized `ActionIR` before codegen: derive
+   the `Msg` name from the single write target when the body is one assignment
+   (`count := …` → `SetCount`), gensym `Action_N` for multi-statement bodies;
+   infer the payload param from the call-site primitive (the walker already
+   computes this via `positionalArgs`/`describeReceiver`); route genuinely-async
+   bodies to the `loom.action-requires-await` gate. This is the
+   `hoistLambdaToHandler` logic moved **out of Phoenix codegen and into shared
+   IR, done once** — so it lets HEEx delete its own hoist and makes *every*
+   frontend's handlers named and unit-testable, not just MVU. It is a real pass
+   with its own tests, but it pays for itself across HEEx + MVU + testability.
+   **Highest value; the follow-up after (1).** (It lowers, it does not rewrite
+   `.ddd` source — inline authoring stays legal; `unfold` is unaffected.)
+3. **Per-target `event_N` synthesis in the MVU walker.** Port HEEx's gensym into
+   the MVU emitter for the lambda case. **Rejected** — it re-introduces the
+   per-target hoist named actions just removed, and yields `event_N`-quality
+   `Msg` names. Only reachable as option 0's uglier cousin.
+
+### 8.3 Recommendation
+
+Ship **(1) the gate** with the sync-MVU target: it makes the projection total,
+costs one validator, and — because scaffolds are already effect-lambda-free —
+imposes friction only on the hand-authored inline-effect minority, nudging them
+toward the better authoring model. Then land **(2) the auto-name lowering** as
+the general-value follow-up whose benefit is not MVU-specific: it retires
+HEEx's bespoke hoist and gives every frontend named, testable update logic. Keep
+**(0)** documented as the escape hatch and **(3)** explicitly rejected.
