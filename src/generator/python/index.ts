@@ -8,6 +8,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import { durableEventTypes } from "../../ir/util/channels.js";
+import { mergeContexts } from "../../ir/util/merge-contexts.js";
 import {
   aggregateIsEventSourced,
   effectiveSavingShape,
@@ -18,7 +19,6 @@ import { hierarchyRegistry } from "../../ir/util/tenant-stance.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
-import { dedupeByName } from "../../util/dedupe.js";
 import { plural, snake } from "../../util/naming.js";
 import { embedSpaInto } from "../_frontend/embedded-spa.js";
 import { unionJsonSchema } from "../_payload/union-wire.js";
@@ -434,34 +434,6 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     }
   }
   return out;
-}
-
-/** Multi-context deployables need the shared domain modules to UNION
- *  every context's content rather than overwrite per-context — same
- *  synthetic-merged-context pattern the Hono/.NET orchestrators use.
- *  Ambient root-level enums / VOs are folded into every context by
- *  enrichment, so those dedupe by name. */
-function mergeContexts(contexts: EnrichedBoundedContextIR[]): EnrichedBoundedContextIR {
-  return {
-    name: contexts[0]?.name ?? "merged",
-    enums: dedupeByName(contexts.flatMap((c) => c.enums)),
-    valueObjects: dedupeByName(contexts.flatMap((c) => c.valueObjects)),
-    events: contexts.flatMap((c) => c.events),
-    payloads: contexts.flatMap((c) => c.payloads),
-    aggregates: contexts.flatMap((c) => c.aggregates),
-    repositories: contexts.flatMap((c) => c.repositories),
-    workflows: contexts.flatMap((c) => c.workflows),
-    views: contexts.flatMap((c) => c.views),
-    criteria: contexts.flatMap((c) => c.criteria),
-    domainServices: contexts.flatMap((c) => c.domainServices ?? []),
-    channels: contexts.flatMap((c) => c.channels),
-    projections: contexts.flatMap((c) => c.projections ?? []),
-    retrievals: contexts.flatMap((c) => c.retrievals),
-    seeds: contexts.flatMap((c) => c.seeds),
-    // Re-derived over the merged union when event-triggered workflows
-    // land (S15) — mirrors the Hono orchestrator.
-    eventSubscriptions: contexts.flatMap((c) => c.eventSubscriptions),
-  };
 }
 
 /** PEP 508-safe project name — same camelCase→snake folding the system

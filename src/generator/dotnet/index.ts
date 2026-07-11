@@ -15,6 +15,7 @@ import type { OriginRef } from "../../ir/types/origin.js";
 import { aggHasAuditedTarget } from "../../ir/util/audit-capability.js";
 import { durableEventTypes } from "../../ir/util/channels.js";
 import { isTpcBase, isTphBase, tableOwnerName, tphConcretesOf } from "../../ir/util/inheritance.js";
+import { mergeContexts } from "../../ir/util/merge-contexts.js";
 import {
   aggregateIsEventSourced,
   effectiveSavingShape,
@@ -27,7 +28,6 @@ import { hierarchyRegistry } from "../../ir/util/tenant-stance.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import type { Model } from "../../language/generated/ast.js";
 import { apiRoutePrefix } from "../../util/api-base.js";
-import { dedupeByName } from "../../util/dedupe.js";
 import { plural, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
 import { embedSpaInto } from "../_frontend/embedded-spa.js";
@@ -326,28 +326,10 @@ function emitProjectFromContexts(
   }
   // DbContext + project shell are emitted once, with all aggregates
   // collected from the union of contexts.
-  const merged: EnrichedBoundedContextIR = {
-    name: ns,
-    // Ambient root-level enums / VOs are folded into every context by
-    // enrichment, so a plain union across hosted contexts would emit them
-    // once per context (duplicate enum / class declarations).  Dedupe by
-    // name to collapse the ambient copies.
-    enums: dedupeByName(contexts.flatMap((c) => c.enums)),
-    valueObjects: dedupeByName(contexts.flatMap((c) => c.valueObjects)),
-    events: contexts.flatMap((c) => c.events),
-    payloads: contexts.flatMap((c) => c.payloads),
-    aggregates: contexts.flatMap((c) => c.aggregates),
-    repositories: contexts.flatMap((c) => c.repositories),
-    workflows: contexts.flatMap((c) => c.workflows),
-    views: contexts.flatMap((c) => c.views),
-    criteria: contexts.flatMap((c) => c.criteria),
-    domainServices: contexts.flatMap((c) => c.domainServices ?? []),
-    channels: contexts.flatMap((c) => c.channels),
-    projections: contexts.flatMap((c) => c.projections ?? []),
-    retrievals: contexts.flatMap((c) => c.retrievals),
-    seeds: contexts.flatMap((c) => c.seeds),
-    eventSubscriptions: contexts.flatMap((c) => c.eventSubscriptions),
-  };
+  // Union the hosted contexts into one synthetic context (ambient enums / VOs
+  // deduped by name — see src/ir/util/merge-contexts.ts).  `name` is this
+  // deployable's namespace rather than the first context's.
+  const merged: EnrichedBoundedContextIR = { ...mergeContexts(contexts), name: ns };
   // In-process dispatch (channels.md): one `INotificationHandler<TEvent>` per
   // channel-routed reactor / event-create, derived over the merged context so
   // a reactor in one hosted context can route off another's channel.
