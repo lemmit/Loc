@@ -28,10 +28,25 @@ system FulfillmentSys {
       event OrderPlaced { order: Order id, at: datetime }
       event ShipmentRequested { shipment: Shipment id, order: Order id, at: datetime }
 
+      enum BoardStatus { Placed Shipped }
+
       channel Lifecycle {
         carries: OrderPlaced, ShipmentRequested
         delivery: broadcast
         retention: ephemeral
+      }
+
+      // Projection (projection.md): a read model folded from the SAME channel
+      // events the OrderFulfillment saga consumes — so the dispatcher fans each
+      // event to BOTH the saga handler and this pure fold.  Exercises the
+      // vanilla read-model row schema (Ecto.Enum + datetime + id PK), the pure
+      // fold handler, and the projections read controller under mix compile.
+      projection OrderBoard keyed by order {
+        order: Order id
+        status: BoardStatus
+        at: datetime
+        on(e: OrderPlaced)       { order := e.order  status := Placed   at := e.at }
+        on(e: ShipmentRequested) { status := Shipped  at := e.at }
       }
 
       workflow OrderFulfillment {
