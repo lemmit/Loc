@@ -42,7 +42,7 @@ materialized `derived` · **(c)** error→status mapper (`httpStatus`) ·
 | Built-in behavior | Keyed on | Class | Verdict |
 |---|---|---|---|
 | `versioned` — version column | field | (d)/field | already fine |
-| `versioned` — guarded CAS write + increment | **capability name** | **(a)** | → `writeGuard version == old.version` |
+| `versioned` — guarded CAS write + increment | **capability name** | **(a)** | → `writeGuard this.version == old(this.version)` |
 | `versioned` — atomic zero-rows detection | (infra) | (f) | stays, generic |
 | `versioned` / `unique` / `when` / FK / event-store — **409** | hardcoded | **(c)** | → route through `httpStatus` mapper |
 | `tenantOwned` — `tenantId`/`dataKey` filter + stamp | (prelude body) | (e) | already fine — regular `dataKey` is a `stamp onCreate` off `currentUser.orgPath`; registry/cross-scope `dataKey` (`parent.dataKey + "." + id`) is a hand-written create factory (`prelude.ts:150-156`) |
@@ -73,22 +73,24 @@ A capability body has `filter` (a *read* predicate) and `stamp` (field
 *assignments*), but nothing that conditions the **write** on the persisted
 state. Add:
 
-- **`old`** — a reference to the persisted pre-image in a write-time
-  predicate. (`this` is the being-written state — a mutable cursor that
-  is already "new" by write time — so it cannot name the pre-image;
-  `this.x >= this.x` is a tautology.)
-- **`writeGuard <expr>`** — a guard evaluated against the stored
-  row *at the write*, lowered **atomically** (predicate pushed into the
-  `UPDATE … WHERE` clause, or a `SELECT … FOR UPDATE` fallback). A
-  zero-row result ⇒ the guard's declared conflict error.
+- **`old(<expr>)`** — a **snapshot operator**: the value `<expr>` had *on
+  entry / before this write*. The design-by-contract standard (Eiffel's
+  `old balance`, JML's `\old(balance)`). `this` stays the single anchor —
+  `old(this.version)` is "the value `this.version` had before the write" —
+  so there is no cryptic second scope object, and it wraps any expression,
+  not just a bare field (`old(this.total + this.tax)`).
+- **`writeGuard <expr>`** — a guard evaluated against the stored row *at the
+  write*, lowered **atomically** (predicate pushed into the `UPDATE … WHERE`
+  clause, or a `SELECT … FOR UPDATE` fallback). A zero-row result ⇒ the
+  guard's declared conflict error.
 
 `versioned` becomes an ordinary capability — no name-gate:
 
 ```ddd
 capability versioned {
   version: int token                              // client echoes last-seen value
-  writeGuard version == old.version     // guard: expected == persisted
-  stamp onUpdate { version := old.version + 1 }   // increment off the pre-image
+  writeGuard this.version == old(this.version)    // guard: expected == persisted
+  stamp onUpdate { this.version := old(this.version) + 1 }   // increment off the pre-image
 }
 ```
 
@@ -100,26 +102,22 @@ are impossible today. **A guard is only a `writeGuard` when it references
 `old`** — a predicate over `this` alone is a plain `invariant` (checkable
 before the write, no pre-image needed) and should stay one.
 
-**Scope resolution** (identical to the ordinary bare-vs-`this` rule):
+**Scope resolution** — the ordinary bare-vs-`this` rule, plus one operator:
 
-- **bare `<name>`** → the being-written (new) image: a `param`/`let` if one
-  shadows, else `this.<field>`. Bare *is* new.
-- **`this.<field>`** → the being-written field explicitly (needed under a
-  shadow).
-- **`old.<field>`** → the persisted pre-image — **always explicit** (no bare
-  form). Available in `writeGuard` *and* `stamp onUpdate` (both write-time,
-  both have a pre-image); a reference to `old` at create is a validation
-  error (no prior state).
+- **bare `<name>` / `this.<field>`** → the being-written (new) image (bare is
+  a `param`/`let` if one shadows, else `this.<field>`). Bare *is* new — there
+  is deliberately **no `new` keyword**.
+- **`old(<expr>)`** → the pre-image of `<expr>`. A snapshot operator (not a
+  scope object), valid only in write-time contexts — `writeGuard` *and*
+  `stamp onUpdate`; `old(...)` at create is a validation error (no prior
+  state).
 
-There is deliberately **no `new` alias** — `this`/bare already covers it, so
-adding `new` would be a redundant second spelling (and a costly soft
-keyword). The write-guards are the ones that compare `old` against the new
-image:
+The write-guards compare `old(...)` against the new image:
 
 ```ddd
-writeGuard amount <= old.balance            // can't overdraw the *persisted* balance
-writeGuard this.total >= old.total          // monotonic / append-only
-writeGuard old.status.canGoTo(this.status)  // legal state transition
+writeGuard amount <= old(this.balance)              // can't overdraw the *persisted* balance
+writeGuard this.total >= old(this.total)            // monotonic / append-only
+writeGuard old(this.status).canGoTo(this.status)    // legal state transition
 ```
 
 (`this.balance >= 0` is NOT a write-guard — it's an ordinary invariant.)
@@ -241,8 +239,8 @@ to the built-in ones.
 
 The one genuine risk in primitives 1 & 2 is that a write-guard lowers to a
 *different* mechanism per storage shape, and one shape might not support it
-atomically. Traced against the real write paths (`versioned == old.version`
-plus an inequality guard), through all four shapes:
+atomically. Traced against the real write paths (`this.version ==
+old(this.version)` plus an inequality guard), through all four shapes:
 
 | Shape | Write path today | Guard lowering | Atomic? |
 |---|---|---|---|
@@ -268,7 +266,7 @@ lowerings, all real:
   `invariant`) — corrected above.
 - **Pushable vs. pessimistic.** Equality/inequality over columns or
   JSONB-extractable fields → `WHERE`-push (all non-ES shapes). A
-  method-call predicate SQL can't express (`old.status.canGoTo(…)`) →
+  method-call predicate SQL can't express (`old(this.status).canGoTo(…)`) →
   `SELECT … FOR UPDATE` on relational/document/embedded, or is *naturally*
   atomic on event-sourced (fold → check → append). **v1 = pushable
   predicates only**; the pessimistic path is a later slice.
@@ -387,10 +385,11 @@ shape-triggering) so no name silently carries framework meaning.
    `UniquenessConflict` / `Disallowed` / `ReferencedInUse` first-class
    `error` decls in a prelude, or a fixed internal set the `httpStatus`
    mapper is taught to accept?
-3. **`old` in `stamp`** — the increment `version := old.version + 1` needs
-   `old` inside a `stamp onUpdate`; confirm the pre-image scope extends to
-   stamp bodies, not just `writeGuard`. (The simulation confirms
-   it's *needed*; the question is the scope-plumbing.)
+3. **`old(...)` in `stamp` — RESOLVED.** The increment
+   `this.version := old(this.version) + 1` needs `old(...)` inside a `stamp
+   onUpdate`; the snapshot operator is available in both write-time contexts
+   (`writeGuard` + `stamp onUpdate`), and is a validation error at create
+   (no prior state). No longer open.
 4. **`organizationContext` (preferred cross-scope resolution)** — split
    `currentUser` (principal) from `organizationContext` (operating tenant
    scope). This makes every dataKey a single unconditional stamp off
