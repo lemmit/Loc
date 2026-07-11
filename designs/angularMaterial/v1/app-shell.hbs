@@ -31,9 +31,10 @@ import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from 
       <mat-sidenav mode="side" opened class="loom-sidenav" role="navigation" aria-label="Primary navigation">
         <mat-nav-list data-testid="nav-sidebar">
 {{#each navSections}}          <h3 matSubheader>{{label}}</h3>
-{{#each entries}}{{#if requiresJs}}          @if ({{{requiresJs}}}) { <a mat-list-item routerLink="{{to}}" routerLinkActive="loom-active" data-testid="{{testId}}">{{label}}</a> }
+{{#each entries}}{{#if external}}          <a mat-list-item href="{{href}}" target="_blank" rel="noopener" data-testid="{{testId}}">{{label}}</a>
+{{else}}{{#if requiresJs}}          @if ({{{requiresJs}}}) { <a mat-list-item routerLink="{{to}}" routerLinkActive="loom-active" data-testid="{{testId}}">{{label}}</a> }
 {{else}}          <a mat-list-item routerLink="{{to}}" routerLinkActive="loom-active" data-testid="{{testId}}">{{label}}</a>
-{{/if}}{{/each}}{{/each}}        </mat-nav-list>
+{{/if}}{{/if}}{{/each}}{{/each}}        </mat-nav-list>
       </mat-sidenav>
       <mat-sidenav-content class="loom-content" id="main-content" role="main">
 {{#if authUi}}        <app-auth-gate>

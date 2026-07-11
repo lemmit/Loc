@@ -21,6 +21,7 @@ import {
   PLAYWRIGHT_CONFIG_TS,
 } from "../_frontend/e2e-harness.js";
 import { renderGateExpr } from "../_frontend/gate-expr.js";
+import { deriveSidebarFromUi } from "../_frontend/menu-emitter.js";
 import { smokeSpec } from "../_frontend/smoke-spec.js";
 import { prepareThemeVM } from "../_frontend/theme-preparer.js";
 import { hasAnyView } from "../_frontend/views-module.js";
@@ -215,21 +216,48 @@ export function generateAngularForContexts(
     );
   }
 
-  // Nav sidebar — one entry per routed page (routerLink keeps the
-  // leading-slash absolute path; the route table strips it).  On an `auth: ui`
-  // frontend a page carrying a currentUser-only `requires` gate gets a
-  // `requiresJs` condition the app-shell `@if`-hides — the nav-side mirror of
-  // the page body guard.  The gate validator guarantees a page `requires` is
-  // currentUser-only, so `renderGateExpr` can't throw here (same assumption the
-  // page guard in page-shell.ts relies on).
-  const navEntries = pages.map((p) => ({
-    to: p.route!,
-    label: humanize(p.name),
-    testId: `nav-${pageSlug(p, pageCtx)}`,
-    requiresJs: authUi && p.requires ? renderGateExpr(p.requires, "currentUser") : undefined,
-  }));
-  const navSections =
-    navEntries.length > 0 ? [{ label: humanize(sys.name), entries: navEntries }] : [];
+  // Nav sidebar.  When the `ui` declares an explicit `menu { … }` block (or
+  // custom pages carrying `menu { … }` metadata), honour it via the shared
+  // `deriveSidebarFromUi` — the same driver react / vue / svelte use, so a
+  // menu's sections / labels / order render identically across frontends
+  // (external `link "L" -> "url"` entries render as `<a href target=_blank>`).
+  // With no menu the deriver returns `undefined` and we fall back to the
+  // default single section: one entry per routed page (byte-identical to the
+  // pre-menu behaviour).  On an `auth: ui` frontend a page carrying a
+  // currentUser-only `requires` gate gets a `requiresJs` condition the
+  // app-shell `@if`-hides — the nav-side mirror of the page body guard.  The
+  // gate validator guarantees a page `requires` is currentUser-only, so
+  // `renderGateExpr` can't throw here (same assumption the page guard in
+  // page-shell.ts relies on).
+  const sidebarOverride = ui ? deriveSidebarFromUi(ui, pageCtx, authUi) : undefined;
+  const navSections = sidebarOverride
+    ? sidebarOverride.map((s) => ({
+        label: s.label,
+        entries: s.entries.map((e) => ({
+          to: e.to,
+          label: e.label,
+          testId: e.testId,
+          requiresJs: e.requiresJs,
+          external: !!e.external,
+          href: e.href,
+        })),
+      }))
+    : pages.length > 0
+      ? [
+          {
+            label: humanize(sys.name),
+            entries: pages.map((p) => ({
+              to: p.route!,
+              label: humanize(p.name),
+              testId: `nav-${pageSlug(p, pageCtx)}`,
+              requiresJs:
+                authUi && p.requires ? renderGateExpr(p.requires, "currentUser") : undefined,
+              external: false,
+              href: undefined as string | undefined,
+            })),
+          },
+        ]
+      : [];
 
   // Bind the session user in the app shell only when a nav entry is actually
   // gated — an unused injected member would be an `ng build` strict error.
@@ -241,7 +269,7 @@ export function generateAngularForContexts(
     pack.render("app-shell", {
       systemNameHuman: humanize(sys.name),
       navSections,
-      hasNav: navEntries.length > 0,
+      hasNav: navSections.some((s) => s.entries.length > 0),
       authUi,
       navUsesSession,
     }),
