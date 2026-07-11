@@ -240,15 +240,19 @@ proposal status flip; fix the CLAUDE.md `src/macros/stdlib/audit/` drift.
   pre-existing vanilla bug: an onCreate-only principal stamp left the update
   seam's threaded `current_user` unused, failing `--warnings-as-errors`; the
   param is now underscored when no `onUpdate` stamp reads it).
-- **Still open:** `tenant_id` index (blocked on the
-  `uniqueness-and-indexes.md` surface); **cross-reference the
-  `registry`/`claim` bindings** (`registry=[Aggregate:ID]`,
-  `claim=[UserField:UserFieldName]`) — they ship as bare `ID`s today, the
-  only un-Loomish reference in the grammar. Byte-identical surface, pure
-  tooling win (navigation/rename/diagnostics). See the design-note **"Final
-  recommendation"** section (decision 5) for the rationale and why it stays
-  compatible with R1 (registry remains a system-level fact, not a
-  per-aggregate marker).
+- **Shipped since (1b):** the **`registry`/`claim` cross-reference upgrade** —
+  the bindings are now real Langium cross-references
+  (`registry=[Aggregate:ID]`, `claim=[UserField:UserFieldName]` in
+  `src/language/ddd.langium`), so an unknown claim/registry is a linking error
+  with navigation/rename, not a bare `ID` (consistent with the §1 table's
+  "real cross-reference since 1b.1" rows). Byte-identical surface. The
+  `tenant_id` index also shipped — a derived non-unique `<table>_tenant_id_idx`
+  is emitted for every `tenantOwned` table (`derive("tenant_id")` in
+  `withTenantIndex`, `src/system/migrations-builder.ts`), riding the shared
+  `MigrationsIR` directly (no `index:` surface needed). See the design-note
+  **"Final recommendation"** section (decision 5) for the cross-ref rationale
+  and why it stays compatible with R1 (registry remains a system-level fact,
+  not a per-aggregate marker).
 
 **Phase 2 (unblock plan drafted — see
 [`multi-tenancy-phase2.md`](./multi-tenancy-phase2.md)):** `tenantRegistry`

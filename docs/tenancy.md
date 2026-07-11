@@ -348,12 +348,17 @@ registry read on all five backends shipped as Phase 2 P2.2 (above). Stamping
 `deep`/`global` `policy {}` read ladder (P2.4, above) shipped. The
 materialized-path `dataKey` prefix index (`text_pattern_ops`) + the
 `currentUser.rootOrg` accessor that widens `global` to the root-org subtree
-shipped as P2.5 (above) — **closing multi-tenancy Phase 2**. Deferred:
+shipped as P2.5 (above) — **closing multi-tenancy Phase 2**. Also shipped since:
 
 - **The `claim`/`registry` cross-reference upgrade** (capstone decision 5) —
-  byte-identical surface, tooling win (navigation/rename); still open.
-- **`tenant_id` index** — blocked on the index surface
-  ([`proposals/uniqueness-and-indexes.md`](proposals/uniqueness-and-indexes.md)).
-  (The `dataKey` prefix index rides the shared `MigrationsIR` directly — a
-  derived, non-authored index like `tenant_id_idx` — so it needed no `index:`
-  surface; the `tenant_id` index is a separate, still-blocked item.)
+  the `tenancy by` bindings are now real Langium cross-references
+  (`claim=[UserField:UserFieldName] 'of' registry=[Aggregate:ID]` in
+  `src/language/ddd.langium`), so an unknown claim/registry is a linking error
+  (with navigation/rename) rather than a themed validator code. Byte-identical
+  surface.
+- **`tenant_id` index** — the derived non-unique `<table>_tenant_id_idx` is
+  emitted for every `tenantOwned` table (via `derive("tenant_id")` in
+  `withTenantIndex`, `src/system/migrations-builder.ts`), riding the shared
+  `MigrationsIR` directly like the `dataKey` prefix index — a derived,
+  non-authored index that needed no `index:` surface. (Consistent with the
+  `tenant_id_idx` note under `with tenantOwned` above.)

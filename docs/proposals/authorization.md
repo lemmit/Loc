@@ -1,6 +1,10 @@
 # Loom Authorization Model — DataKey, dataPolicy & Operation Policies
 
-> **Status:** Design proposal (no implementation yet).
+> **Status:** Partially shipped. On `main`: the `policy {}` **read ladder**
+> (P2.4 — `allow local|deep|global on X`), the **write ladder** (P3.1 —
+> `allow write local|deep on X`), and **named policy functions** (P3.2 —
+> `requires`-gated predicates). Still proposed: field-level masking, `deny`,
+> and operation/view/workflow policy gates. See §11 for the phasing.
 > **Build order:** the `DataKey` + directional-ladder half is sequenced in
 > [`docs/plans/multi-tenancy-phase2.md`](../plans/multi-tenancy-phase2.md) (P2.4),
 > which resolves §0 option A and corrects the shared assumption that `dataKey`
@@ -136,9 +140,14 @@ Loom (`loc-ddd-dsl`, CLI `ddd`) already ships *partial* authorization:
   operation/workflow body statement and a page prop,
 - `auth: required` deployables that emit JWT-decode middleware + a verifier hook.
 
-What it lacks: **record-level access control, tenancy, and field-level masking.**
-This proposal adds those as a coherent layer that *extends* the existing
-primitives rather than duplicating them. The earlier research (the
+What it *originally* lacked was record-level access control, tenancy, and
+field-level masking. Since then, **record-level access control and tenancy have
+shipped** — the `tenantOwned` capability's row filter plus the `policy {}` read
+(P2.4) and write (P3.1) ladders rewrite per-row query predicates on all five
+backends, and named policy functions (P3.2) gate operations via `requires`. The
+one piece still missing is **field-level masking**. This proposal added the
+shipped layers (and describes the remaining masking work) as a coherent
+extension of the existing primitives rather than duplicating them. The earlier research (the
 supplementary note and the prior `policies.txt` working draft) explored a
 Salesforce/Dataverse-style `dataPolicy`/`operationPolicy` split and a
 function-style policy DSL; this document reconciles both into one model shaped
@@ -470,22 +479,27 @@ Verified by exploration; cited so the proposal is concrete, not aspirational.
 
 ---
 
-## 11. Implementation phasing (documented; not started)
+## 11. Implementation phasing (items 1–2 shipped; 3–7 still proposed)
 
 > Sequenced against [`../plans/multi-tenancy-phase2.md`](../plans/multi-tenancy-phase2.md):
 > that plan's P2.1–P2.3 deliver the `DataKey` infra (item 1 below); this doc's
-> `policy {}` machinery is P2.4 onward.
+> `policy {}` machinery is P2.4 onward. **Shipped through P3.2** — see
+> [`docs/plans/authorization-phase3.md`](../plans/authorization-phase3.md) (P3.1
+> write ladder) and [`authorization-phase3-2.md`](../plans/authorization-phase3-2.md)
+> (P3.2 named policy functions).
 
-1. **DataKey infra (= Phase 2 plan P2.1–P2.3)** — the `DataKey` built-in type +
-   ops; the derived `currentUser.orgPath` keystone (per-request, not a claim); the
-   `dataKey` column carried by the `tenantOwned` capability (off `wireShape`). No
-   policies yet. `crossTenant` + the flat floor are Phase 1 (already shipped) —
-   not built here.
-2. **`policy { data {} }` reachability** — directions + row-attribute clauses +
-   `function`/`let` helpers → .NET set filter. Baseline = the shipped flat floor
-   (§9); Strict Self is a reviewed opt-in, not the silent default.
-3. **Operation/view/workflow gates** → .NET handler pre-checks (403); relocate
-   gating out of domain bodies.
+1. **DataKey infra (= Phase 2 plan P2.1–P2.3) — SHIPPED.** The `DataKey` derived
+   `currentUser.orgPath` keystone (per-request, not a claim) and the `dataKey`
+   column carried by the `tenantOwned` capability (off `wireShape`). `crossTenant`
+   + the flat floor are Phase 1 (also shipped).
+2. **`policy {}` reachability — SHIPPED (read + write ladders + named fns).** The
+   `allow local|deep|global on X` read ladder (P2.4), the `allow write local|deep`
+   write ladder (P3.1), and named policy functions (P3.2) landed on all five
+   backends — the ladders ride the existing `contextFilters`/`writeScopeFilter`
+   seams, the named fns inline into the `requires` gate. (Field masking — item 6 —
+   is the deferred remainder.)
+3. **Operation/view/workflow gates** → handler pre-checks (403); relocate
+   gating out of domain bodies. *(Still proposed.)*
 4. **TS/Hono + Phoenix/Ecto parity** for phases 2–3.
 5. **`exists <Aggregate>` quantifier** (reuse view resolution + new EXISTS
    rendering) for domain-relationship and `Share`-aggregate access.
