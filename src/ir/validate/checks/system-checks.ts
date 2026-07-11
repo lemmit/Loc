@@ -733,11 +733,14 @@ function docStmtUnsupported(s: StmtIR, allowFnCall: boolean, agg: AggregateIR): 
 /** A user-defined document operation the path can't emit.  `allowFnCall` is set
  *  once per aggregate from whether its `function`s are all doc-safe.  A RETURNING
  *  op is admitted (in-memory tagged tuple) and CONTAINMENT mutation is admitted
- *  (Route A); an AUDITED / PROVENANCED op still needs the transactional persist
- *  the document path deliberately omits. */
+ *  (Route A); an audited NAMED op is admitted (slice 4e — the persist tail records
+ *  an audit row in a `Repo.transaction`).  An audited RETURNING op stays gated (the
+ *  document returning-op path does not persist yet, so there is nothing to audit
+ *  atomically), as does any PROVENANCED op (a jsonb blob has no co-located
+ *  `<field>_provenance` columns to drain a history buffer into). */
 function docOpUnsupported(op: OperationIR, allowFnCall: boolean, agg: AggregateIR): boolean {
   return (
-    op.audited === true ||
+    (op.audited === true && op.returnType != null) ||
     opHasProvSite(op) ||
     op.statements.some((s) => docStmtUnsupported(s, allowFnCall, agg))
   );
@@ -785,7 +788,7 @@ export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnosti
           message:
             `aggregate '${ctxName}.${agg.name}' is shape(document) on elixir, which emits ` +
             `scalar custom finds + named operations but not ${bits.join(" and ")} ` +
-            `(audited/provenanced ops, collection mutation, value-object/derived/` +
+            `(audited returning / provenanced ops, collection mutation, value-object/derived/` +
             `function reads, or non-scalar find predicates). Simplify them to scalar form, host this ` +
             `aggregate on a backend with full document support (node / dotnet / python / java), ` +
             `or use shape(relational) / shape(embedded).`,

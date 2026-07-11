@@ -21,11 +21,13 @@
 // the rehydrated `%<Agg>.Data{}` embed (`record = row.data`) via the SHARED
 // relational body renderer (`renderReturningStmt`) — no `docMap` fork; an op
 // re-embeds the mutated struct + bumps version, a find filters in memory over the
-// struct.  Paged finds build the wire envelope in memory (slice 4c) and union finds
-// return the single-get tuple the shared find controller tags (slice 4d).  The
-// residual the document path can't express yet (audited/provenanced ops, derived /
-// dereferenced-entity / collection-method reads, non-scalar find predicates) is
-// gated at validate time
+// struct.  Paged finds build the wire envelope in memory (slice 4c), union finds
+// return the single-get tuple the shared find controller tags (slice 4d), and an
+// AUDITED named op records its audit row inside the persist transaction (slice 4e).
+// The residual the document path can't express yet (audited RETURNING ops — the
+// returning path doesn't persist yet; provenanced ops — no per-field prov columns
+// on a jsonb blob; derived / dereferenced-entity / collection-method reads;
+// non-scalar find predicates) is gated at validate time
 // (`loom.vanilla-document-unsupported`) rather than misgenerated — see
 // `validateVanillaDocumentScope`.
 // ---------------------------------------------------------------------------
@@ -55,6 +57,7 @@ import { elixirRegexBody, plural, snake, upperFirst } from "../../../util/naming
 import { statementSubRegions } from "../../_trace/sourcemap.js";
 import { opUsesCurrentUser, stmtUsesParam } from "../domain/predicates.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
+import { auditRecordCall, wireSnapshot } from "./audit-emit.js";
 import { NORMALIZE_KEYS_DEFP } from "./key-normalize.js";
 import { managedTimestampNames } from "./managed-timestamps.js";
 import {
@@ -531,32 +534,77 @@ export function renderDocNamedOpFunction(
   const repoMod = `${aggModule}Repository`;
   const { params, body, guardClauses } = docOpStructBody(op, agg, facadeMod, ctx, opFragments);
   const actorParam = opUsesCurrentUser(op) ? ", current_user \\\\ nil" : "";
-  // The re-embed persist tail (shared by both the guarded + guard-free shapes).
-  const persistTail = [
-    "",
-    "    row",
-    "    |> Ecto.Changeset.change(%{version: row.version + 1})",
-    "    |> Ecto.Changeset.put_embed(:data, Map.from_struct(record))",
-    `    |> ${repoMod}.persist_change()`,
-  ];
+  // An AUDITED named op (Route A slice 4e) records a who/what/when + before/after
+  // wire snapshot into `audit_records` INSIDE the persist transaction, so the
+  // history row commits atomically with the embed re-write — parity with the
+  // relational `renderNamedOpFunction` audit path.  The `before` snapshot is the
+  // pre-mutation document (`row` is never rebound — only `record = row.data` is —
+  // so `wireSnapshot("row")` still sees the stored blob); `after` is the saved
+  // row.  The document `wireSnapshot` form (`isDoc`) merges `id` onto the embed's
+  // `Map.from_struct(row.data)` since the embed carries no `id`.
+  const hasAudit = op.audited === true;
+  const appModule = facadeMod.split(".")[0]!;
+  const auditBeforeBind = hasAudit ? [`    audit_before = ${wireSnapshot("row", true)}`] : [];
+  // The re-embed persist tail.  Guard-free/audit-free: the plain `put_embed` pipe.
+  // Audited: build the changeset, then persist + record the audit row in ONE
+  // `Repo.transaction` (the audit commits iff the write does).
+  const persistTail = hasAudit
+    ? [
+        "",
+        "    changeset =",
+        "      row",
+        "      |> Ecto.Changeset.change(%{version: row.version + 1})",
+        "      |> Ecto.Changeset.put_embed(:data, Map.from_struct(record))",
+        "",
+        `    ${appModule}.Repo.transaction(fn ->`,
+        `      case ${repoMod}.persist_change(changeset) do`,
+        "        {:ok, saved} ->",
+        auditRecordCall({
+          appModule,
+          operationId: `${op.name}${aggPascal}`,
+          action: op.name,
+          targetType: aggPascal,
+          targetId: "saved.id",
+          before: "audit_before",
+          after: wireSnapshot("saved", true),
+          indent: "          ",
+        }),
+        "          saved",
+        "",
+        "        {:error, reason} ->",
+        `          ${appModule}.Repo.rollback(reason)`,
+        "      end",
+        "    end)",
+      ]
+    : [
+        "",
+        "    row",
+        "    |> Ecto.Changeset.change(%{version: row.version + 1})",
+        "    |> Ecto.Changeset.put_embed(:data, Map.from_struct(record))",
+        `    |> ${repoMod}.persist_change()`,
+      ];
   // A guarded op hoists its `requires`/`precondition` into a leading
   // `with ensure(...)` chain (403/422 denials) — `record = row.data` + param
-  // binds stay before the `with` (the guards read `record.<field>`), the body +
-  // persist tail move inside the `do` block.  The `{:error, atom()}` spec arm
-  // carries the denial atoms.  A guard-free op keeps the flat layout
-  // (byte-identical).
+  // binds (+ the `audit_before` capture) stay before the `with` (the guards read
+  // `record.<field>`), the body + persist tail move inside the `do` block.  The
+  // `{:error, atom()}` spec arm carries the denial atoms.  A guard-free op keeps
+  // the flat layout (byte-identical when non-audited).
   const bodyContent =
     guardClauses.length > 0
       ? [
+          ...auditBeforeBind,
           `    record = row.data`,
           ...params,
           ...wrapOpBodyWithGuards(guardClauses, [...body, ...persistTail]),
         ].join("\n")
-      : `${[`    record = row.data`, ...params, ...body].join("\n")}\n${persistTail.join("\n")}`;
+      : `${[...auditBeforeBind, `    record = row.data`, ...params, ...body].join("\n")}\n${persistTail.join("\n")}`;
   const denialSpec = guardClauses.length > 0 ? " | {:error, atom()}" : "";
-  return `  @doc "Named operation \`${op.name}\` on \`${aggPascal}\` (document shape) — runs the body against the embedded struct, then re-embeds + bumps version."
+  // Audited persist wraps in `Repo.transaction`, whose failure is `{:error, term()}`;
+  // the plain pipe fails with an `Ecto.Changeset.t()`.
+  const errSpec = hasAudit ? "{:error, term()}" : "{:error, Ecto.Changeset.t()}";
+  return `  @doc "Named operation \`${op.name}\` on \`${aggPascal}\` (document shape) — runs the body against the embedded struct, then re-embeds + bumps version${hasAudit ? " + records an audit row in the persist transaction" : ""}."
   @spec ${opSnake}_${aggSnake}(${aggModule}.t(), map()) ::
-          {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}${denialSpec}
+          {:ok, ${aggModule}.t()} | ${errSpec}${denialSpec}
   def ${opSnake}_${aggSnake}(%${aggModule}{} = row, params${actorParam}) when is_map(params) do
 ${bodyContent}
   end`;

@@ -488,6 +488,59 @@ system Shop {
     expect(ctrl).toContain("defp problem_variant(conn, status, type, title, data) do");
   });
 });
+
+describe("vanilla shape(document) audited named ops (Route A slice 4e)", () => {
+  const DOC_AUDIT = `
+system Shop {
+  subdomain Sales {
+    context Shop {
+      aggregate Cart shape(document) with crudish {
+        total: int
+        operation touch() audited { total := total + 1 }
+        operation bump(by: int) audited {
+          requires by > 0
+          total := total + by
+        }
+      }
+      repository Carts for Cart { }
+    }
+  }
+  api ShopApi from Sales
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api { platform: elixir, contexts: [Shop], dataSources: [shopState], serves: ShopApi, port: 4000 }
+}
+`;
+
+  it("records the audit row INSIDE the persist transaction (atomic with the embed re-write)", async () => {
+    const facade = file(await generateSystemFiles(DOC_AUDIT), "/shop.ex");
+    // before snapshot captured from the pre-mutation root row (document isDoc form).
+    expect(facade).toContain(
+      "audit_before = Map.merge(%{id: row.id}, (row.data && Map.from_struct(row.data)) || %{})",
+    );
+    // persist + audit share one transaction; the embed re-write bumps version.
+    expect(facade).toContain("Api.Repo.transaction(fn ->");
+    expect(facade).toContain("|> Ecto.Changeset.put_embed(:data, Map.from_struct(record))");
+    expect(facade).toContain("case Api.Shop.CartRepository.persist_change(changeset) do");
+    expect(facade).toContain('operation_id: "touchCart"');
+    expect(facade).toContain("before: audit_before");
+    expect(facade).toContain(
+      "after: Map.merge(%{id: saved.id}, (saved.data && Map.from_struct(saved.data)) || %{})",
+    );
+    expect(facade).toContain("Api.Repo.rollback(reason)");
+  });
+
+  it("hoists a guarded audited op's guard OUTSIDE the persist transaction (denial → no audit)", async () => {
+    const facade = file(await generateSystemFiles(DOC_AUDIT), "/shop.ex");
+    // The guard short-circuits BEFORE the transaction — a denied op writes nothing
+    // and records no audit row.
+    const bump = facade.slice(facade.indexOf("def bump_cart("));
+    expect(bump).toContain("with :ok <- ensure(by > 0, :forbidden) do");
+    // audit_before + record bind precede the `with`; the tx is inside the `do`.
+    expect(bump.indexOf("audit_before =")).toBeLessThan(bump.indexOf("with :ok <-"));
+    expect(bump.indexOf("with :ok <-")).toBeLessThan(bump.indexOf("Api.Repo.transaction"));
+  });
+});
 // Document-op guards deny 403/422, not raise → 500 (parity with the relational
 // path).  A scalar/returning document op's `requires`/`precondition` hoists into
 // a leading `with ensure(...)` chain — an expected denial returns a typed tuple
