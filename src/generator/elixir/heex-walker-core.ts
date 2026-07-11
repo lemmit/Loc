@@ -264,6 +264,13 @@ export interface WalkContext {
    *  False ⇒ no `@current_user` exists, so NO gating is emitted and the
    *  button stays byte-identical. */
   authEnabled?: boolean;
+  /** Section/Card nesting depth, so a `Heading` with no explicit `level:`
+   *  derives its rank from structure — `min(6, 2 + headingDepth)`, matching
+   *  the JSX frontends' `WalkEnv.headingDepth` (accessibility.md Phase 2, so
+   *  ranks never skip).  Incremented by `renderSection` / `renderCard` for
+   *  their children; undefined at page top ⇒ depth 0 ⇒ `<h2>` (the app shell
+   *  owns the single `<h1>`). */
+  headingDepth?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -1081,13 +1088,6 @@ export function renderPrimitive(
   const styleHeexAttr = styleIrToHeex(expr);
   if (styleHeexAttr) namedAttrs.unshift(styleHeexAttr);
 
-  // Handle Heading specially: first positional is text, optional
-  // `level:` attribute.
-  if (spec.tag === ".header") {
-    const text = positional[0] ? renderInTemplate(positional[0], ctx) : "";
-    const attrs = namedAttrs.length > 0 ? " " + namedAttrs.join(" ") : "";
-    return `<.header${attrs}>${text}</.header>`;
-  }
   if (spec.tag === ".empty") {
     const attrs = namedAttrs.length > 0 ? " " + namedAttrs.join(" ") : "";
     return `<.empty${attrs} />`;

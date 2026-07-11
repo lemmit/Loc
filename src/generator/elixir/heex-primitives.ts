@@ -874,7 +874,8 @@ export function renderEnumBadge(expr: Extract<ExprIR, { kind: "call" }>, ctx: Wa
  *  src/generator/_walker/registry.ts wires them up by name. */
 const CLOSED_PRIMITIVE_SPECS: Record<string, PrimitiveSpec> = {
   Stack: { tag: "div", staticAttrs: ["class"], takesChildren: true },
-  Heading: { tag: ".header", takesChildren: true },
+  // Heading is rendered by the bespoke `renderHeading` (raw `<h{n}>` with a
+  // structure-derived rank), not through this generic spec table.
   Text: { tag: "p", takesChildren: true },
   Card: { tag: "div", staticAttrs: ["class"], takesChildren: true },
   Toolbar: { tag: "div", staticAttrs: ["class"], takesChildren: true },
@@ -900,8 +901,36 @@ const CLOSED_PRIMITIVE_SPECS: Record<string, PrimitiveSpec> = {
 export function renderStack(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Stack!, expr, ctx);
 }
+/** `Heading("text", level?)` → a raw `<h{n}>` whose rank is the explicit
+ *  `level:` (1..6) or, when absent, DERIVED from the enclosing `Section`/`Card`
+ *  nesting depth: `min(6, 2 + headingDepth)` — matching the JSX frontends
+ *  (`emitHeading` in _walker/primitives/text.ts) so ranks never skip.  At page
+ *  top (depth 0) this is `<h2>`; the app shell owns the single `<h1>`.
+ *
+ *  Emitting a raw `<h{n}>` (vs the fixed-level `.header` CoreComponent, which
+ *  always renders an `<h1>`) is what makes the derived rank observable to
+ *  assistive tech — the `.header`'s subtitle/action slots are unused by Loom's
+ *  `Heading` primitive, so nothing is lost.  The class mirrors `.header`'s own
+ *  typography so the visual result is unchanged. */
 export function renderHeading(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
-  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Heading!, expr, ctx);
+  let level: number | undefined;
+  let testid = "";
+  const positional: ExprIR[] = [];
+  for (let i = 0; i < expr.args.length; i++) {
+    const name = expr.argNames?.[i];
+    const arg = expr.args[i]!;
+    if (!name) {
+      positional.push(arg);
+    } else if (name === "level" && arg.kind === "literal") {
+      level = Number(arg.value);
+    } else if (name === "testid" && arg.kind === "literal") {
+      testid = arg.value;
+    }
+  }
+  const rank = level ?? Math.min(6, 2 + (ctx.headingDepth ?? 0));
+  const text = positional[0] ? renderInTemplate(positional[0], ctx) : "";
+  const testidAttr = testid ? ` data-testid="${testid}"` : "";
+  return `<h${rank} class="text-lg font-semibold leading-8 text-zinc-800"${testidAttr}>${text}</h${rank}>`;
 }
 export function renderText(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Text!, expr, ctx);
@@ -1211,7 +1240,13 @@ export function renderToggle(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkC
   return controlledInput(expr, ctx, "checkbox");
 }
 export function renderCard(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
-  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Card!, expr, ctx);
+  // A Card is a heading-nesting level (like the JSX `emitCard`): a `Heading`
+  // inside it derives a rank one deeper (accessibility.md Phase 2).  Pass a
+  // depth-incremented context so `renderPrimitive`'s child walk sees it.
+  return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Card!, expr, {
+    ...ctx,
+    headingDepth: (ctx.headingDepth ?? 0) + 1,
+  });
 }
 export function renderToolbar(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): string {
   return renderPrimitive(CLOSED_PRIMITIVE_SPECS.Toolbar!, expr, ctx);
@@ -1261,7 +1296,10 @@ export function renderSection(expr: Extract<ExprIR, { kind: "call" }>, ctx: Walk
   }
   const idAttr = id ? ` id="${id}"` : "";
   const testidAttr = testid ? ` data-testid="${testid}"` : "";
-  const childrenHeex = positional.map((c) => renderChild(c, ctx)).join("\n");
+  // A Section is a heading-nesting level (like the JSX `emitSection`): a
+  // `Heading` in its body derives a rank one deeper (accessibility.md Phase 2).
+  const childCtx: WalkContext = { ...ctx, headingDepth: (ctx.headingDepth ?? 0) + 1 };
+  const childrenHeex = positional.map((c) => renderChild(c, childCtx)).join("\n");
   if (childrenHeex.length === 0) {
     return `<section${idAttr}${testidAttr} />`;
   }
