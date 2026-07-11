@@ -199,7 +199,7 @@ system Shop {
     expect(await docScopeErrors(src)).toEqual([]);
   });
 
-  it("still rejects an AUDITED operation on a vanilla document aggregate", async () => {
+  it("accepts an AUDITED named operation on a vanilla document aggregate (Route A slice 4e)", async () => {
     const src = `
 system Shop {
   subdomain Sales {
@@ -207,6 +207,32 @@ system Shop {
       aggregate Cart ids guid shape(document) with crudish {
         total: int
         operation bump() audited { total := total + 1 }
+      }
+      repository Carts for Cart { }
+    }
+  }
+  storage pg { type: postgres }
+  resource shopState { for: Shop, kind: state, use: pg }
+  deployable api { platform: elixir, contexts: [Shop], dataSources: [shopState], port: 4000 }
+}
+`;
+    expect(await docScopeErrors(src)).toEqual([]);
+  });
+
+  it("still rejects an AUDITED RETURNING operation on a vanilla document aggregate", async () => {
+    // A returning op does not persist on the document path yet (separate bug), so
+    // there is nothing to audit atomically — it stays gated.
+    const src = `
+system Shop {
+  subdomain Sales {
+    context Shop {
+      error TooMany { }
+      aggregate Cart ids guid shape(document) with crudish {
+        total: int
+        operation bump() audited: Cart or TooMany {
+          precondition total < 10
+          total := total + 1
+        }
       }
       repository Carts for Cart { }
     }

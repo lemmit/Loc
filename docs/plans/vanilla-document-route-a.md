@@ -152,6 +152,30 @@ The migration stays `create table(:orders) do add :data, :map; add :version …`
    audited/provenanced/derived/paged/union un-gating remain — the renderer now
    supports the struct path, so those become validator + persist-tail follow-ups).
 
+### Find/op un-gate follow-ups (drained after the fork removal)
+
+- **✅ PAGED finds (slice 4c)** and **✅ UNION finds (slice 4d)** — see slice 3 above.
+- **✅ AUDITED named ops (slice 4e, 2026-07-05).** `docOpUnsupported` now admits an
+  audited NAMED op; `renderDocNamedOpFunction` records the audit row (`Api.Audit.record`)
+  INSIDE the persist `Repo.transaction`, so the history row commits atomically with the
+  embed re-write. `audit_before`/`after` use the document `wireSnapshot(_, isDoc)` form
+  (`Map.merge(%{id: r.id}, Map.from_struct(r.data))`). Boot-verified: `touch`/`bump`
+  audited ops → total persists (5→6→9), `audit_records` carries before/after totals, a
+  guarded `bump by:0` denies 403 with NO audit row.
+- **Audited RETURNING ops + derived reads stay gated — both blocked on separate bugs, NOT
+  on Route A machinery:**
+  - **Audited returning ops** need the document returning-op path to persist first. It
+    does **not** today: `renderDocReturningOpFunction` projects `docWireMap` in memory and
+    never `put_embed`s — a mutating `operation bump(): Cart or E { total := total+1 }`
+    returns `total+1` in the response but the DB row is unchanged (the relational sibling
+    `persist_change`s). Filed as **#1774**; audited-returning stays gated until fixed.
+  - **Derived reads** are a shared bug, not a missing document feature: the RELATIONAL
+    op-body path emits `record.<derived>` against a schema with no such column → runtime
+    500 (KeyError; the compiler only warns). Filed as **#1765**. The document gate is
+    correct — un-gating would replicate the bug.
+- **Provenanced ops** can't be supported on a jsonb blob (no co-located
+  `<field>_provenance` columns to drain a history buffer into) — stays gated by design.
+
 ## Risks (all boot-only — the compile gate is blind to them)
 
 1. **Wire format drift.** `embeds_one` dumps by field name; verify the stored
