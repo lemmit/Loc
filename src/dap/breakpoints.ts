@@ -36,6 +36,14 @@ export interface BreakpointTarget {
   file: string;
   /** 1-based generated line — `region.target[0]`. */
   line: number;
+  /** OPTIONAL 1-based generated START column — `region.targetCol[0]`, the
+   *  fine expression-level column a real DAP `setBreakpoints` (V8
+   *  `setBreakpointByUrl` takes url+line+column) needs to arm precisely.
+   *  `undefined` for every column-less (coarse statement/structural)
+   *  region — never synthesized, mirroring the reverse path's "print col
+   *  only when `targetCol` is present" rule (`src/trace/annotate.ts`
+   *  `locationWithColOf`). */
+  column?: number;
   /** The matched region, kept for later `targetCol` (column-level) use. */
   region: WireRegion;
 }
@@ -75,8 +83,15 @@ function samePath(sourcePath: string, dddPath: string): boolean {
  *  4. Sort narrowest-origin-span first (the inverse of `resolveFrame`'s
  *     narrowest-TARGET tie-break, since this direction fans out over
  *     origin spans rather than target spans; ties keep the earlier
- *     region) and de-dup identical `{file, line}` pairs, keeping the
- *     narrowest-span survivor of each.
+ *     region) and de-dup by `{file, line, column}` (column being
+ *     `region.targetCol[0]`, or the empty string when the region carries
+ *     no `targetCol`), keeping the narrowest-span survivor of each key.
+ *     Widening the key from `{file, line}` lets two distinct fine
+ *     expression regions that land on the SAME generated line at
+ *     DIFFERENT columns both survive as separate armable sites — for a
+ *     column-less region the key's column suffix is always the same
+ *     empty string, so collapsing there is byte-identical to before this
+ *     column carried any weight.
  *
  * Returns every match — a `.ddd` line can host nested constructs (e.g. an
  * aggregate declaration and a narrower operation inside it both covering
@@ -99,6 +114,7 @@ export function translateBreakpoint(
   interface Candidate {
     file: string;
     line: number;
+    column: number | undefined;
     region: WireRegion;
     spanWidth: number;
     order: number;
@@ -116,6 +132,7 @@ export function translateBreakpoint(
       candidates.push({
         file: genFile,
         line: region.target[0],
+        column: region.targetCol ? region.targetCol[0] : undefined,
         region,
         spanWidth: source.span.end - source.span.start,
         order: order++,
@@ -128,10 +145,15 @@ export function translateBreakpoint(
   const seen = new Set<string>();
   const out: BreakpointTarget[] = [];
   for (const c of candidates) {
-    const key = `${c.file}:${c.line}`;
+    const key = `${c.file}:${c.line}:${c.column ?? ""}`;
     if (seen.has(key)) continue; // already kept the narrowest-span survivor
     seen.add(key);
-    out.push({ file: c.file, line: c.line, region: c.region });
+    out.push({
+      file: c.file,
+      line: c.line,
+      ...(c.column !== undefined ? { column: c.column } : {}),
+      region: c.region,
+    });
   }
   return out;
 }

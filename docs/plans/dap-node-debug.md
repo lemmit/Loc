@@ -356,6 +356,21 @@ does the debugger actually arm it on?"
   same `readSource` closure, same best-effort exit-0-on-loaded-map ethos),
   registered right after the `trace` command. Tests in
   `test/cli/breakpoints-cli.test.ts` mirror `test/cli/trace-cli.test.ts`.
+- **Milestone 23**: forward-path column awareness — the exact mirror of the
+  reverse path's M16 `targetCol` support. `BreakpointTarget` gained an
+  optional `column?: number` (`region.targetCol[0]`, the 1-based generated
+  start column; `undefined` for every column-less coarse region — never
+  synthesized). The de-dup key widened from `{file, line}` to `{file, line,
+  column}`, so two distinct fine expression regions landing on the SAME
+  generated line at DIFFERENT columns now both survive as separate armable
+  sites (a column-less region's key suffix is always the empty string, so
+  collapsing there stays byte-identical to before). `runBreakpoints` prints
+  `<file>:<line>:<col>` when a target carries a column, else keeps
+  `<file>:<line>`. Tests extend `test/dap/breakpoints.test.ts` (hand-built
+  column fixtures, plus a real round trip over `examples/showcase.ddd`'s
+  `requires currentUser.role == "admin"` guard proving 4 fine regions
+  collapse to 2 distinct armable columns and forward-with-column
+  round-trips through `resolveFrame`) and `test/cli/breakpoints-cli.test.ts`.
 
 ### What's deferred
 
@@ -364,11 +379,12 @@ does the debugger actually arm it on?"
   top of `translateBreakpoint` (and the already-shipped reverse direction,
   `resolveFrame`) in a later slice, the same way `src/cli/main.ts`'s `ddd
   trace` command is glue around `src/trace/`.
-- **Scope/variable remap via `targetCol`** — `BreakpointTarget.region` is
-  kept on the result specifically so a later slice can read `region
-  .targetCol` for column-precise placement / variable-scope resolution;
-  this slice only consumes `region.target[0]` (the line) and does not yet
-  do anything column-aware on the forward path.
+- **Scope/variable remap** — `BreakpointTarget.region` is kept on the result
+  specifically so a later slice can read the full region (construct,
+  origin chain) for variable-scope resolution once a real DAP adapter needs
+  to bind local variables at a paused frame. Column-precise *placement* via
+  `targetCol` landed in Milestone 23 (above); scope/variable remap is the
+  remaining piece.
 - Backend-specific breakpoint arming (translating a `hono_api/domain/
   order.ts:26` result into an actual V8/CDP `setBreakpointByUrl` call, a
   `coreclr` breakpoint, a JDWP request, etc.) — out of scope for a pure

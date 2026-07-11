@@ -29,7 +29,7 @@ ddd verify <file.ddd> --results <results.json>    # join test results onto the r
 ddd snapshot <file.ddd> -o <outdir>               # capture provenance rule snapshots
 ddd patch <file.ddd> --patches <patches.json>     # apply node-addressed model patches
 ddd trace <logfile>                               # translate a runtime stack-trace back to .ddd source
-ddd breakpoints <file.ddd> --line <n>             # resolve a .ddd source line to the generated file:line(s) — the reverse of `trace`
+ddd breakpoints <file.ddd> --line <n>             # resolve a .ddd source line to the generated file:line(s), or file:line:col when the construct maps to a fine expression region — the reverse of `trace`
 ```
 
 `generate system` additionally accepts `--sourcemap`, which also emits
@@ -47,7 +47,14 @@ See [`loom-artifacts.md`](loom-artifacts.md).
 (narrowest construct first — a line can host nested constructs, e.g. an
 aggregate declaration and a narrower operation inside it), sourced from the
 same `.loom/sourcemap.json` (`--map`/`-o, --out` follow the identical
-discovery rule as `trace`). A line with no mapping prints an informative
+discovery rule as `trace`). When the matched construct is a fine expression
+region carrying a `targetCol` (the same TS/Hono marks `trace`'s column-aware
+path already consumes), it resolves to `file:line:col` instead — the
+column-precise armable site a real DAP `setBreakpoints` (V8
+`setBreakpointByUrl` takes url+line+column) needs; every coarser
+statement/structural region keeps the line-granular `file:line`. Two
+distinct fine regions on the same generated line at different columns both
+print as separate targets. A line with no mapping prints an informative
 message and still exits 0 — a future editor/DAP integration's primitive for
 translating "set a breakpoint on this `.ddd` line" into the real
 backend-native breakpoint(s) to arm. See

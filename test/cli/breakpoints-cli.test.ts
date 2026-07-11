@@ -64,6 +64,7 @@ function run(args: string[]): { stdout: string; stderr: string; status: number }
 interface WireRegionLike {
   target: [number, number];
   origin: { kind: string; path?: string; span?: [number, number] };
+  targetCol?: [number, number];
 }
 
 /** Read the emitted map + find the 1-based `.ddd` line hosting `needle`, and
@@ -97,6 +98,50 @@ function findDddLineAndDomainTarget(needle: string): {
   expect(region, `no region in ${domainKey} overlaps .ddd line ${dddLine}`).toBeDefined();
 
   return { dddLine, domainKey: domainKey!, targetLine: region!.target[0] };
+}
+
+/** Same lookup as `findDddLineAndDomainTarget`, but requires the matched
+ *  region to carry a `targetCol` — the fine expression-level mark this
+ *  fixture's op-body statements get (M23, the forward twin of the reverse
+ *  path's `targetCol` support). Used to prove `runBreakpoints` prints
+ *  `file:line:col` for a column-bearing target, derived from the emitted
+ *  sourcemap rather than a hardcoded column (the #1748 pattern). */
+function findColumnBearingDomainTarget(needle: string): {
+  dddLine: number;
+  domainKey: string;
+  targetLine: number;
+  column: number;
+} {
+  const map = JSON.parse(fs.readFileSync(path.join(out, ".loom", "sourcemap.json"), "utf8")) as {
+    files: Record<string, WireRegionLike[]>;
+  };
+
+  const index = new LineIndex(DDL);
+  const needleOffset = DDL.indexOf(needle);
+  expect(needleOffset, `fixture must contain ${JSON.stringify(needle)}`).toBeGreaterThanOrEqual(0);
+  const dddLine = DDL.slice(0, needleOffset).split("\n").length;
+  const lineStart = index.offsetOfLine(dddLine);
+  const lineEnd = index.offsetOfLine(dddLine + 1);
+
+  const domainKey = Object.keys(map.files).find((k) => k.includes("domain/order.ts"));
+  expect(domainKey, "expected a domain/order.ts entry in the sourcemap").toBeDefined();
+
+  const region = map.files[domainKey!]!.find((r) => {
+    if (r.origin.kind !== "source" || !r.origin.span || !r.targetCol) return false;
+    const [s, e] = r.origin.span;
+    return s < lineEnd && e > lineStart;
+  });
+  expect(
+    region,
+    `no column-bearing region in ${domainKey} overlaps .ddd line ${dddLine}`,
+  ).toBeDefined();
+
+  return {
+    dddLine,
+    domainKey: domainKey!,
+    targetLine: region!.target[0],
+    column: region!.targetCol![0],
+  };
 }
 
 describe("ddd breakpoints", () => {
@@ -140,6 +185,38 @@ describe("ddd breakpoints", () => {
     expect(printed[0]).toContain("domain/order.ts:");
     // Fan-out crosses files — a route-file target is also listed.
     expect(printed.some((l) => l.includes("order.routes.ts:"))).toBe(true);
+  });
+
+  it("prints file:line:col when the resolved target carries a column (M23)", () => {
+    const { dddLine, domainKey, targetLine, column } =
+      findColumnBearingDomainTarget("let note = customerName");
+
+    const r = run(["breakpoints", ddd, "--line", String(dddLine), "--out", out]);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(`${domainKey}:${targetLine}:${column}`);
+  });
+
+  it("a column-less line still prints bare file:line (no trailing `:undefined` or stray `:`)", () => {
+    // The aggregate declaration line has no fine expression region, only the
+    // coarse whole-aggregate + route-file regions — every printed line for
+    // it must stay bare `file:line`.
+    const needle = "aggregate Order {";
+    const needleOffset = DDL.indexOf(needle);
+    expect(needleOffset).toBeGreaterThanOrEqual(0);
+    const dddLine = DDL.slice(0, needleOffset).split("\n").length;
+
+    const r = run(["breakpoints", ddd, "--line", String(dddLine), "--out", out]);
+    expect(r.status).toBe(0);
+    const printed = r.stdout
+      .trim()
+      .split("\n")
+      .filter((l) => !l.includes(" maps to "));
+    expect(printed.length).toBeGreaterThan(0);
+    for (const line of printed) {
+      expect(line).not.toContain("undefined");
+      // Exactly one colon (file:line), never two (file:line:col).
+      expect(line.split(":").length - 1).toBe(1);
+    }
   });
 
   it("exits 1 when the source map is present but unparseable", () => {
