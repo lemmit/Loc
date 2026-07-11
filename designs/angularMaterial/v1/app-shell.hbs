@@ -23,18 +23,19 @@ import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from 
 {{#if authUi}}    AuthGateComponent,
 {{/if}}  ],
   template: `
+    <a href="#main-content" class="loom-skip-link">Skip to content</a>
     <mat-toolbar color="primary">
       <a routerLink="/" class="loom-brand">{{systemNameHuman}}</a>
     </mat-toolbar>
     <mat-sidenav-container class="loom-shell">
-      <mat-sidenav mode="side" opened class="loom-sidenav">
+      <mat-sidenav mode="side" opened class="loom-sidenav" role="navigation" aria-label="Primary navigation">
         <mat-nav-list data-testid="nav-sidebar">
 {{#each navSections}}          <h3 matSubheader>{{label}}</h3>
 {{#each entries}}{{#if requiresJs}}          @if ({{{requiresJs}}}) { <a mat-list-item routerLink="{{to}}" routerLinkActive="loom-active" data-testid="{{testId}}">{{label}}</a> }
 {{else}}          <a mat-list-item routerLink="{{to}}" routerLinkActive="loom-active" data-testid="{{testId}}">{{label}}</a>
 {{/if}}{{/each}}{{/each}}        </mat-nav-list>
       </mat-sidenav>
-      <mat-sidenav-content class="loom-content">
+      <mat-sidenav-content class="loom-content" id="main-content" role="main">
 {{#if authUi}}        <app-auth-gate>
           <router-outlet />
         </app-auth-gate>
@@ -49,6 +50,8 @@ import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from 
     .loom-sidenav { width: 240px; }
     .loom-content { padding: 16px; }
     .loom-active { background: rgba(0, 0, 0, 0.06); }
+    .loom-skip-link { position: absolute; left: -9999px; top: 0; z-index: 3000; padding: 8px 16px; background: Canvas; color: CanvasText; border: 1px solid; border-radius: 4px; }
+    .loom-skip-link:focus { left: 8px; top: 8px; }
   `,
   ],
 })

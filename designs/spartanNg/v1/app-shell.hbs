@@ -17,16 +17,17 @@ import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from 
 {{/if}}{{#if authUi}}    AuthGateComponent,
 {{/if}}  ],
   template: `
+    <a href="#main-content" class="loom-skip-link">Skip to content</a>
     <div class="loom-shell">
       <aside class="loom-sidebar" data-testid="nav-sidebar">
         <a routerLink="/" class="loom-brand">{{systemNameHuman}}</a>
-        <nav class="loom-nav">
+        <nav class="loom-nav" aria-label="Primary navigation">
 {{#each navSections}}          <div class="loom-nav-section">{{label}}</div>
 {{#each entries}}{{#if requiresJs}}          @if ({{{requiresJs}}}) { <a routerLink="{{to}}" routerLinkActive="loom-active" class="loom-nav-link" data-testid="{{testId}}">{{label}}</a> }
 {{else}}          <a routerLink="{{to}}" routerLinkActive="loom-active" class="loom-nav-link" data-testid="{{testId}}">{{label}}</a>
 {{/if}}{{/each}}{{/each}}        </nav>
       </aside>
-      <main class="loom-main">
+      <main class="loom-main" id="main-content">
 {{#if authUi}}        <app-auth-gate>
           <router-outlet />
         </app-auth-gate>
@@ -68,6 +69,8 @@ import { RouterLink,{{#if hasNav}} RouterLinkActive,{{/if}} RouterOutlet } from 
     .loom-nav-link:hover { background: hsl(var(--accent)); }
     .loom-active { background: hsl(var(--accent)); color: hsl(var(--accent-foreground)); }
     .loom-main { flex: 1; padding: 1.5rem; min-width: 0; }
+    .loom-skip-link { position: absolute; left: -9999px; top: 0; z-index: 3000; padding: 8px 16px; background: Canvas; color: CanvasText; border: 1px solid; border-radius: 4px; }
+    .loom-skip-link:focus { left: 8px; top: 8px; }
   `,
   ],
 })
