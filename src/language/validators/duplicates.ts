@@ -29,8 +29,15 @@
 //      collisions are owned by `validators/structural.ts`; payload fields by
 //      `validators/payload.ts` (`loom.payload-duplicate-field`).
 //   3. loom.duplicate-parameter      — operation / function / create /
-//      destroy parameter names must be distinct.
+//      destroy / commandHandler / queryHandler parameter names must be
+//      distinct.
 //   4. loom.duplicate-enum-value     — enum values must be distinct.
+//   5. loom.duplicate-handler        — within a context, a `commandHandler` /
+//      `queryHandler` name must not collide with another handler or with a
+//      workflow `handle` in the same context (unfoldable-api-derivation.md,
+//      Layer 3-4).  A `route -> Context.<name>` resolves the bare name against
+//      the UNION of those three, so a collision silently deduplicates in the
+//      resolver and a route would dispatch ambiguously.
 
 import { type AstNode, AstUtils, type ValidationAcceptor } from "langium";
 import type {
@@ -45,6 +52,7 @@ import type {
 import {
   isAggregate,
   isBoundedContext,
+  isCommandHandler,
   isContainment,
   isCreate,
   isDerivedProp,
@@ -52,8 +60,10 @@ import {
   isEnumDecl,
   isEventDecl,
   isFunctionDecl,
+  isHandleDecl,
   isOperation,
   isProperty,
+  isQueryHandler,
   isValueObject,
 } from "../generated/ast.js";
 
@@ -99,6 +109,41 @@ function checkContextTypeNames(ctx: BoundedContext, accept: ValidationAcceptor):
       `event / enum names must be unique within a context (the later one silently replaces the first).`,
     accept,
   );
+}
+
+/** Application-layer handler names within a context — `commandHandler` /
+ *  `queryHandler` context members and workflow `handle` declarations share one
+ *  route-target namespace (`route -> Context.<name>`).  We report on the two
+ *  new context-member kinds only: a command/query handler whose name is already
+ *  taken by an earlier handler or a workflow `handle` in the same context.  We
+ *  do NOT newly police workflow-`handle`-vs-`handle` collisions here (that is
+ *  pre-existing behaviour owned elsewhere); this closes only the ambiguity the
+ *  explicit handlers introduce. */
+function checkHandlerNames(ctx: BoundedContext, accept: ValidationAcceptor): void {
+  // Names already occupying the route-target space before we walk the explicit
+  // handlers: every workflow `handle` in the context.
+  const seen = new Set<string>();
+  for (const node of AstUtils.streamAllContents(ctx)) {
+    if (isHandleDecl(node)) seen.add(node.name);
+  }
+  // Walk the explicit handlers in document order; each collides if its name is
+  // already taken (by a workflow handle or an earlier explicit handler).
+  for (const m of ctx.members) {
+    if (isCommandHandler(m) || isQueryHandler(m)) {
+      const kind = isCommandHandler(m) ? "commandHandler" : "queryHandler";
+      if (seen.has(m.name)) {
+        accept(
+          "error",
+          `Duplicate handler '${m.name}' in context '${ctx.name}'; a ${kind} shares its name ` +
+            `with another handler or a workflow 'handle'. A 'route -> ${ctx.name}.${m.name}' would ` +
+            `be ambiguous — handler and workflow-handle names must be unique within a context.`,
+          { node: m, property: "name", code: "loom.duplicate-handler" },
+        );
+      } else {
+        seen.add(m.name);
+      }
+    }
+  }
 }
 
 /** Field-position names on an aggregate — properties, derived fields, and
@@ -174,8 +219,10 @@ function checkParamNames(
 
 export function checkDuplicateNames(model: Model, accept: ValidationAcceptor): void {
   for (const node of AstUtils.streamAllContents(model)) {
-    if (isBoundedContext(node)) checkContextTypeNames(node, accept);
-    else if (isAggregate(node)) checkAggregateFieldNames(node, accept);
+    if (isBoundedContext(node)) {
+      checkContextTypeNames(node, accept);
+      checkHandlerNames(node, accept);
+    } else if (isAggregate(node)) checkAggregateFieldNames(node, accept);
     else if (isValueObject(node)) checkValueObjectFieldNames(node, accept);
     else if (isEventDecl(node)) checkEventFieldNames(node, accept);
     else if (isEnumDecl(node)) checkEnumValueNames(node, accept);
@@ -186,5 +233,9 @@ export function checkDuplicateNames(model: Model, accept: ValidationAcceptor): v
       checkParamNames(node.params, `create${node.name ? ` '${node.name}'` : ""}`, accept);
     else if (isDestroy(node))
       checkParamNames(node.params, `destroy${node.name ? ` '${node.name}'` : ""}`, accept);
+    else if (isCommandHandler(node))
+      checkParamNames(node.params, `commandHandler '${node.name}'`, accept);
+    else if (isQueryHandler(node))
+      checkParamNames(node.params, `queryHandler '${node.name}'`, accept);
   }
 }
