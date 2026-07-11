@@ -44,15 +44,18 @@ answer today is `extern` or hand-written code.
 The single biggest gap, cutting across every backend at once (`src/language/type-system.ts`,
 `src/util/collection-ops.ts`, `src/generator/_expr/target.ts`):
 
-- **Strings:** only `.length` and `.matches(regex)`. No substring/split/replace/trim/
-  upper/lower/startsWith/padding, and **no string interpolation** — only `+` with explicit
-  `string(x)` conversion.
+- **Strings:** `.length`, `.matches(regex)`, and (**shipped since this audit** —
+  backtick templates, commit `938b99d0` / #1770) **string interpolation** via
+  `` `Order {id} for {customer.name}` ``. Still no substring/split/replace/trim/
+  upper/lower/startsWith/padding.
 - **Math:** operators `+ - * / %` only. No `round`, `floor`, `ceil`, `abs`, `min`, `max`,
   `pow`. A rounding rule on an invoice total is inexpressible.
-- **Dates:** `now()` and comparison only. **No date arithmetic at all** — no
-  `+ days(30)`, no difference, no `duration`/`date`/`time` types, no timezone story,
-  no business-day math. "Due 30 days after issue" — the archetypal domain rule — cannot
-  be written.
+- **Dates:** `now()`, comparison, and (**shipped since this audit** — A5 temporal,
+  #1754) **date arithmetic**: a `duration` primitive (`days`/`hours`/`minutes`
+  constructors) and a closed `datetime`/`duration` algebra (`datetime + duration →
+  datetime`, `datetime - datetime → duration`), so "due 30 days after issue" is now
+  expressible. Still no `date`/`time` types, no calendar-relative offsets
+  (`months`/`years` were deliberately dropped), no timezone story, no business-day math.
 - **Collections:** closed set of 8 ops (`count, sum, all, any, where, first, firstOrNull,
   contains`). No `map`, `sortBy`, `groupBy`, `distinct`, `min/max`, `take/skip`,
   `flatMap`, `reduce`, `join`.
@@ -211,7 +214,8 @@ Reasonable to leave out, but worth a conscious decision:
 If the goal is "a complete language for full business/domain-rich apps," the order that
 unblocks the most real applications per unit of work:
 
-1. **Stdlib sweep** — date arithmetic + `duration`, string ops + interpolation, math
+1. **Stdlib sweep** — ~~date arithmetic + `duration`~~ (shipped, #1754),
+   ~~string interpolation~~ (shipped, #1770), string ops, math
    fns, collection `map/sortBy/groupBy/distinct/min/max`, fallible parses. One
    `ExprTarget` method per backend per op; transforms expressiveness everywhere at once.
 2. **Plain `if`/`else` statement** (and reassignable locals) — small grammar/IR change,

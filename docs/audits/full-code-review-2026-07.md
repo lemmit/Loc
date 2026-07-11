@@ -26,47 +26,56 @@ Nothing found suggests the "no backend IR" bet is wrong — but the cost has vis
 
 ### Silent wrong behavior in generated systems
 
-| # | Finding | Where |
-|---|---|---|
-| 1 | **Typo'd bare identifier → zero diagnostics → emitted verbatim.** `NameRef` is not a cross-reference; `typeOf` returns `unknown` and every downstream gate suppresses on `unknown` assuming an upstream reporter that doesn't exist. *(repro: `total := amout` validates clean, emits `this._total = amout;`)* | `src/language/validators/statements.ts:247`, `types.ts:191` |
-| 2 | **Workflow mutations of outer bindings inside `for-each`/`if-let` are never persisted.** `computeSaves` never descends into bodies for outer bindings. *(repro: `acct.charge(o.total)` in a loop — charge silently lost)* | `src/ir/lower/lower-members.ts:361-408` |
-| 3 | **Domain-service `findAll(Criterion)` drops the criterion** (returns all rows — data-exposure-grade) **and calls a nonexistent repo method.** *(repro)* | `src/ir/lower/repo-read.ts:277-292`, `src/ir/enrich/enrichments.ts:442` |
-| 4 | **Collection-op lambda params typed as a `string` placeholder** → wrong money code inside lambdas (`String(10.00)` concat, raw `>` instead of `.gt`). Falsifies "backends never re-resolve" inside lambdas. *(repro)* | `src/ir/lower/lower-expr.ts:631` |
-| 5 | **Multi-level `extends` silently drops grandparent fields**; migrations emit the column the domain layer never populates → every insert fails. `extends` cycles are also undetected and truncate inheritance. *(repro)* | `src/ir/enrich/enrichments.ts:333-341`; `src/language/validators/inheritance.ts:46-51` |
-| 6 | **Strict `>`/`<` invariant bounds folded to inclusive via `n±1`** — wrong for decimal/money: `weight > 0.5` becomes `z.coerce.number().min(1.5)`, rejecting valid input at the API boundary. *(repro)* | `src/ir/validate/invariant-classify.ts:437-458` |
-| 7 | **Ownership stamp persists the wrong principal attribute on Hono + Java** (`currentUser.role` stamp collapsed to actor id) — declared read filter never matches; per-backend auth divergence. | `src/generator/typescript/emit/audit-stamp.ts:51`, `src/generator/java/emit/entity.ts:290` |
-| 8 | **`isAssignable` accepts any `T?` → any `U?`** (`value.kind === "optional"` disjunct). `int? := string?` validates clean. *(repro)* | `src/language/type-system.ts:273` |
-| 9 | **Ternaries are completely unchecked** (condition needn't be bool; branches needn't agree). *(repro)* | `src/language/type-system.ts:442-448` |
-| 10 | **No duplicate-name checks for aggregates/properties/params/event fields** — duplicates silently replace/retype (a duplicate `aggregate Order` drops the first one's fields entirely). *(repro)* | `src/language/validators/structural.ts` (gap) |
+> **[2026-07-11 remediation status, code-verified against `main` @ `ad81732e`]** A
+> `Status` column is appended below (per the remediation plan's definition-of-done —
+> the snapshot text is left intact). **22 of the 24 findings have landed** via #1629
+> and successors (see `docs/plans/full-review-remediation.md` §Status and the
+> "Remediated in PR #1629" addendum). The **two still-open** findings are **#6**
+> (strict decimal/money bounds — a real correctness bug, fix in progress on a
+> separate branch, still inclusive-folding on `main`) and **#22** (macro expansion
+> under LSP incremental rebuilds — C5, no landing found).
+
+| # | Finding | Where | Status |
+|---|---|---|---|
+| 1 | **Typo'd bare identifier → zero diagnostics → emitted verbatim.** `NameRef` is not a cross-reference; `typeOf` returns `unknown` and every downstream gate suppresses on `unknown` assuming an upstream reporter that doesn't exist. *(repro: `total := amout` validates clean, emits `this._total = amout;`)* | `src/language/validators/statements.ts:247`, `types.ts:191` | ✅ FIXED (A2, #1629 W1 — bare-`NameRef` resolution reported) |
+| 2 | **Workflow mutations of outer bindings inside `for-each`/`if-let` are never persisted.** `computeSaves` never descends into bodies for outer bindings. *(repro: `acct.charge(o.total)` in a loop — charge silently lost)* | `src/ir/lower/lower-members.ts:361-408` | ✅ FIXED (A3, #1629 W1 — shared exhaustive child-walker + `computeSaves`) |
+| 3 | **Domain-service `findAll(Criterion)` drops the criterion** (returns all rows — data-exposure-grade) **and calls a nonexistent repo method.** *(repro)* | `src/ir/lower/repo-read.ts:277-292`, `src/ir/enrich/enrichments.ts:442` | ✅ FIXED (B10, #1629 W2) |
+| 4 | **Collection-op lambda params typed as a `string` placeholder** → wrong money code inside lambdas (`String(10.00)` concat, raw `>` instead of `.gt`). Falsifies "backends never re-resolve" inside lambdas. *(repro)* | `src/ir/lower/lower-expr.ts:631` | ✅ FIXED (B9, #1629 W2 — collection-op lambda element types) |
+| 5 | **Multi-level `extends` silently drops grandparent fields**; migrations emit the column the domain layer never populates → every insert fails. `extends` cycles are also undetected and truncate inheritance. *(repro)* | `src/ir/enrich/enrichments.ts:333-341`; `src/language/validators/inheritance.ts:46-51` | ✅ FIXED (B7 extends-cycle + B11 transitive merge, #1629 W2) |
+| 6 | **Strict `>`/`<` invariant bounds folded to inclusive via `n±1`** — wrong for decimal/money: `weight > 0.5` becomes `z.coerce.number().min(1.5)`, rejecting valid input at the API boundary. *(repro)* | `src/ir/validate/invariant-classify.ts:437-458` | 🔴 **OPEN** — still inclusive-folding on `main` (`:445`/`:449`); fix in progress on a separate branch |
+| 7 | **Ownership stamp persists the wrong principal attribute on Hono + Java** (`currentUser.role` stamp collapsed to actor id) — declared read filter never matches; per-backend auth divergence. | `src/generator/typescript/emit/audit-stamp.ts:51`, `src/generator/java/emit/entity.ts:290` | ✅ FIXED (B17, #1629 W2 — principal-attribute stamp) |
+| 8 | **`isAssignable` accepts any `T?` → any `U?`** (`value.kind === "optional"` disjunct). `int? := string?` validates clean. *(repro)* | `src/language/type-system.ts:273` | ✅ FIXED (B1, #1629 W0 — optional-to-optional assignability) |
+| 9 | **Ternaries are completely unchecked** (condition needn't be bool; branches needn't agree). *(repro)* | `src/language/type-system.ts:442-448` | ✅ FIXED (B2, #1629 W2 — ternary typing) |
+| 10 | **No duplicate-name checks for aggregates/properties/params/event fields** — duplicates silently replace/retype (a duplicate `aggregate Order` drops the first one's fields entirely). *(repro)* | `src/language/validators/structural.ts` (gap) | ✅ FIXED (B4/B6, #1629 W2 — duplicate-name gates) |
 
 ### Generated code that breaks or is exploitable
 
-| # | Finding | Where |
-|---|---|---|
-| 11 | **Elixir string literals emit `#{…}` unescaped** — `mix compile` break; arbitrary Elixir execution from a `.ddd` string literal. *(repro)* | `src/generator/elixir/render-expr.ts:288` (+ heex-walker-core, tests-emit) |
-| 12 | **Elixir `~r/…/` splices the raw pattern** — a `/` or `#{` in a `matches()` pattern breaks compilation/interpolates. *(repro)* | `src/generator/elixir/render-expr.ts:442`, `vanilla/changeset-validators.ts:36` |
-| 13 | **HEEx text position is unescaped** — JSX targets escape via `escapeText`; the parallel HEEx engine never calls it. `Heading { "<%= System.get_env() %>" }` executes at render time; a bare `<` breaks the tokenizer. HEEx literal attribute values also aren't quote-escaped. *(repro, cross-checked against React output)* | `src/generator/elixir/heex-walker-core.ts:1082-1088`, `heex-primitives.ts:42-45` |
-| 14 | **Reserved-word field/param names emit bare on all five backends** (`class`, `def`, `end`, `synchronized`…) — compile failure everywhere; the `escape<Lang>Ident` helpers exist but are wired only for `let`/`lambda` locals. *(repro)* | `src/util/naming.ts:336-364` + each backend's `render-expr.ts` |
-| 15 | **Unquoted SQL DDL identifiers** — a field named `user`/`order`/`end` emits broken `CREATE TABLE`; the seed path in the same file quotes correctly. | `src/generator/sql-pg.ts:134-140` |
+| # | Finding | Where | Status |
+|---|---|---|---|
+| 11 | **Elixir string literals emit `#{…}` unescaped** — `mix compile` break; arbitrary Elixir execution from a `.ddd` string literal. *(repro)* | `src/generator/elixir/render-expr.ts:288` (+ heex-walker-core, tests-emit) | ✅ FIXED (A1, #1629 W1 — centralized target-language escaping + hostile-inputs gate) |
+| 12 | **Elixir `~r/…/` splices the raw pattern** — a `/` or `#{` in a `matches()` pattern breaks compilation/interpolates. *(repro)* | `src/generator/elixir/render-expr.ts:442`, `vanilla/changeset-validators.ts:36` | ✅ FIXED (A1, #1629 W1 — regex materialization) |
+| 13 | **HEEx text position is unescaped** — JSX targets escape via `escapeText`; the parallel HEEx engine never calls it. `Heading { "<%= System.get_env() %>" }` executes at render time; a bare `<` breaks the tokenizer. HEEx literal attribute values also aren't quote-escaped. *(repro, cross-checked against React output)* | `src/generator/elixir/heex-walker-core.ts:1082-1088`, `heex-primitives.ts:42-45` | ✅ FIXED (A1, #1629 W1 — HEEx text position through `escapeText`) |
+| 14 | **Reserved-word field/param names emit bare on all five backends** (`class`, `def`, `end`, `synchronized`…) — compile failure everywhere; the `escape<Lang>Ident` helpers exist but are wired only for `let`/`lambda` locals. *(repro)* | `src/util/naming.ts:336-364` + each backend's `render-expr.ts` | ✅ FIXED (A1, #1629 W1 — `escape<Lang>Ident` for all refKinds) |
+| 15 | **Unquoted SQL DDL identifiers** — a field named `user`/`order`/`end` emits broken `CREATE TABLE`; the seed path in the same file quotes correctly. | `src/generator/sql-pg.ts:134-140` | ✅ FIXED (A1, #1629 W1 — `qIdent` on DDL idents) |
 
 ### Migrations & composition (deploy-time breakage)
 
-| # | Finding | Where |
-|---|---|---|
-| 16 | **Same aggregate name in two contexts derives one migration that creates the same table twice, in the wrong schema** — the canonical DDD scenario (`Sales.Order`/`Billing.Order`), zero diagnostics. *(repro)* | `src/system/migrations-builder.ts:394-427, 501-514` |
-| 17 | **Delta migrations are never schema-qualified** — only `createTable` carries `schema`; every ALTER/DROP on a schema-qualified system targets the wrong relation or fails. *(repro)* | `src/generator/sql-pg.ts:21-45`, `MigrationStep` (no schema field) |
-| 18 | **`dropTable` ignores FK ordering** (creates are Kahn-sorted, drops are alphabetical) → "cannot drop table" abort. *(repro)* | `src/system/migrations-builder.ts:402-407` |
-| 19 | **Adding a required field derives `ADD COLUMN … NOT NULL` with no default** (fails on any populated table); **renames diff to drop+add** (silent data destruction, no warning/gate). *(repro)* | `migrations-builder.ts:441-451` |
-| 20 | **No host-port or service-slug uniqueness validation** — two default-port deployables collide at `docker compose up`; case-variant deployable names silently merge into one output dir + duplicate compose keys; user port 8081 collides with hardcoded Keycloak. *(repro)* | `src/system/index.ts:332-392,653`, `src/ir/lower/lower-deployment.ts:183` |
+| # | Finding | Where | Status |
+|---|---|---|---|
+| 16 | **Same aggregate name in two contexts derives one migration that creates the same table twice, in the wrong schema** — the canonical DDD scenario (`Sales.Order`/`Billing.Order`), zero diagnostics. *(repro)* | `src/system/migrations-builder.ts:394-427, 501-514` | ✅ FIXED (A8.4 — `loom.duplicate-table` + identity resolution) |
+| 17 | **Delta migrations are never schema-qualified** — only `createTable` carries `schema`; every ALTER/DROP on a schema-qualified system targets the wrong relation or fails. *(repro)* | `src/generator/sql-pg.ts:21-45`, `MigrationStep` (no schema field) | ✅ FIXED (A8.1 — `schema?` on every `MigrationStep`) |
+| 18 | **`dropTable` ignores FK ordering** (creates are Kahn-sorted, drops are alphabetical) → "cannot drop table" abort. *(repro)* | `src/system/migrations-builder.ts:402-407` | ✅ FIXED (A8.2 — reverse-topological drops) |
+| 19 | **Adding a required field derives `ADD COLUMN … NOT NULL` with no default** (fails on any populated table); **renames diff to drop+add** (silent data destruction, no warning/gate). *(repro)* | `migrations-builder.ts:441-451` | ✅ FIXED (A8.3 — `MigrationDestructiveError` / `--allow-destructive` gate) |
+| 20 | **No host-port or service-slug uniqueness validation** — two default-port deployables collide at `docker compose up`; case-variant deployable names silently merge into one output dir + duplicate compose keys; user port 8081 collides with hardcoded Keycloak. *(repro)* | `src/system/index.ts:332-392,653`, `src/ir/lower/lower-deployment.ts:183` | ✅ FIXED (B24, #1629 W2 — port/slug uniqueness) |
 
 ### Toolchain robustness
 
-| # | Finding | Where |
-|---|---|---|
-| 21 | **Any validator throw kills every diagnostic for the document** (one monolithic Model-level check) — and two crash paths were verified: unknown `platform:` string (`.adapters` on `undefined`) and a `matches()` pattern starting with `"` (`JSON.parse` outside the try, behind a comment that contradicts CLAUDE.md's own STRING-terminal note). *(both repro)* | `src/language/validators/data/platform-rules.ts:298`; `src/language/validators/match.ts:191-192` |
-| 22 | **Macro expansion is one-shot but LSP incremental rebuilds don't re-fire it** — cross-file macro refs that resolve late never expand, and drained diagnostics vanish on relink; correct for CLI, wrong in a live editor session. | `src/macros/expander.ts:102-127` vs Langium 4.3 `document-builder` |
-| 23 | **Top-level (implicit-composition) system members skip the entire per-System check family** — the same deployable errors nested in `system { }`, validates clean top-level. *(repro)* | `src/language/ddd-validator.ts:198-353` |
-| 24 | **IR validation walks only the primary create's flat statement list** — `handle`/`on` bodies and nested statements skip every body check; `walkExprsInWorkflowStmt` misses 6 of 13 stmt kinds. | `src/ir/validate/checks/workflow-checks.ts:157,375`, `structural-checks.ts:1024-1051` |
+| # | Finding | Where | Status |
+|---|---|---|---|
+| 21 | **Any validator throw kills every diagnostic for the document** (one monolithic Model-level check) — and two crash paths were verified: unknown `platform:` string (`.adapters` on `undefined`) and a `matches()` pattern starting with `"` (`JSON.parse` outside the try, behind a comment that contradicts CLAUDE.md's own STRING-terminal note). *(both repro)* | `src/language/validators/data/platform-rules.ts:298`; `src/language/validators/match.ts:191-192` | ✅ FIXED (B5, #1629 W0 — per-theme validator fault isolation + crash sites) |
+| 22 | **Macro expansion is one-shot but LSP incremental rebuilds don't re-fire it** — cross-file macro refs that resolve late never expand, and drained diagnostics vanish on relink; correct for CLI, wrong in a live editor session. | `src/macros/expander.ts:102-127` vs Langium 4.3 `document-builder` | 🔴 **OPEN** — C5, no landing found; `drainMacroDiagnostics` still WeakMap-deletes (`expander.ts:102-106`) |
+| 23 | **Top-level (implicit-composition) system members skip the entire per-System check family** — the same deployable errors nested in `system { }`, validates clean top-level. *(repro)* | `src/language/ddd-validator.ts:198-353` | ✅ FIXED (B3, #1629 W2 — top-level composition coverage) |
+| 24 | **IR validation walks only the primary create's flat statement list** — `handle`/`on` bodies and nested statements skip every body check; `walkExprsInWorkflowStmt` misses 6 of 13 stmt kinds. | `src/ir/validate/checks/workflow-checks.ts:157,375`, `structural-checks.ts:1024-1051` | ✅ FIXED (A3, #1629 W1 — shared exhaustive IR child-walker) |
 
 ---
 
@@ -161,7 +170,17 @@ the findings above are the original snapshot and are deliberately left intact):
 - **Wave 2 fixes** (riding the seams): B2–B4, B6–B8 (ternary/let-binding typing, duplicate-name gates, top-level composition coverage, extends-cycle + part-ambiguity), B9–B16 (collection-op lambda element types, domain-service criterion, transitive inheritance merge, honest wire id types, `bool = true` default, bare-name run pagination, dotnet principal-filter gate), B17–B20 (principal-attribute stamp, stamp fields out of create DTOs, host-framework dispatch, descriptive unknown-platform errors), B21–B22 (Vue quote-safe seams, Angular nested compound state reads), B24 (port/slug uniqueness).
 - **C/D sweep** (this PR): C8 (env-driven CORS origin on the three backends that emitted wildcard `*`; Java/Elixir already same-origin-safe), C9 (per-project Phoenix `SECRET_KEY_BASE`), C10 (fs-discovery `loom.core` semver gate + unknown-family / malformed-manifest warnings), C13 (CLI output-path containment), C14 (`WalkResult` Angular side-channels → one opaque `sink`), D2–D9 (CLAUDE.md drift, dead-code sweep, pluralisation dedup, `package.json` exclude-list + chevrotain, `emitsCommandRoute` dedup, reserved-hook removal, union-name canonicalisation).
 
-Still open at the time of this note: A5 (WorkflowIR facade retirement), A6.2/A6.3 (behavioral tier beyond Hono, runtime-semantics contract), A7.2/A7.4 + A8.1–A8.4 (adapter-metadata split, fullstack-embed seam, migrations-IR hardening), and the remaining B/C mediums not listed above.
+Still open at the time of this note: A5 (WorkflowIR facade retirement), A6.2/A6.3 (behavioral tier beyond Hono, runtime-semantics contract), A7.2/A7.4 (adapter-metadata split, fullstack-embed seam), and the remaining B/C mediums not listed above.
+
+> **[2026-07-11 update, code-verified against `main` @ `ad81732e`]** The
+> "A8.1–A8.4 (migrations-IR hardening) still open" claim above was written mid-#1629
+> and is stale — **all four landed** (the audit's migration repros #16–19): A8.1
+> `schema?` on every `MigrationStep`, A8.2 reverse-topological drops, A8.3
+> `MigrationDestructiveError`/`--allow-destructive` gate, A8.4 `loom.duplicate-table`
+> (see `docs/plans/full-review-remediation.md` §Status, "A8.1–A8.4 — DONE"). Of the
+> 24 findings, only **#6** (strict decimal/money bounds — fix in progress on a
+> separate branch, still inclusive-folding on `main`) and **#22** (macro LSP
+> incremental rebuild — C5, no landing found) remain open.
 
 ---
 

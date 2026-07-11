@@ -4,6 +4,34 @@
 
  **(Superseded 2026: the Ash foundation was removed. `platform: elixir` now generates plain Ecto/Phoenix only — `foundation: ash` is a validation error and `vanilla` is the default and only valid value. The `elixir·ash` columns/rows below, and the foundation-split framing, are historical; on current `main` only the `elixir·vanilla` surface ships.)**
 
+> **[2026-07-11 re-verified against `main` @ `ad81732e`, code-grounded]** The
+> **matrix and F3 below have been trued up to the post-Ash-removal reality** —
+> `elixir` is now a **single** plain-Ecto/Phoenix platform (the two `elixir·ash` /
+> `elixir·vanilla` columns are collapsed into one `elixir` column reflecting what
+> ships today; no `foundation: ash` gate exists anywhere in `src/ir/validate/` or
+> `src/language/validators/`, and `src/platform/registry.ts` has a single `elixir`
+> entry). Several cells that read as gated/partial have since gone **all-five-backend
+> and are now current**:
+> - **TPH** — `TPH_CAPABLE` = all 5 (`system-checks.ts:2298`).
+> - **`ignoring` filter-bypass** — `FILTER_BYPASS_FAMILIES` = all 5 (`:1576`).
+> - **Event-sourced workflow** — `EVENT_SOURCING_WORKFLOW_BACKENDS` now includes
+>   `elixir` (`:2390`) — previously gated on *both* foundations.
+> - **Provenance / per-op `audited` / lifecycle `audited` / exception-less returns /
+>   event-sourced storage** — `PROVENANCE_BACKENDS` (`:2425`), `AUDIT_OP_BACKENDS`
+>   (`:2469`), `AUDIT_LIFECYCLE_BACKENDS` (`:2470`), `SUPPORTED_RETURN_BACKENDS`
+>   (`structural-checks.ts:605`), `EVENT_SOURCING_BACKENDS` (`:2345`) are each a plain
+>   all-5 set now — `elixir` is a bare member, not reached via a foundation predicate.
+> - **Python capability `filter` on `shape(document)`** — `supportsNonRelationalFilter`
+>   admits `python` for both `document` and `embedded` (`:1418`), so the python
+>   non-relational-filter cell is now ✓ (was ⚠ embedded-only).
+>
+> **Genuinely-open items are left accurate:** elixir full `document` persistence is
+> mid-flight — scalar custom finds + named ops emit, but audited-returning /
+> provenanced ops, collection mutation, VO/derived/function reads, and non-scalar find
+> predicates are honestly gated `loom.vanilla-document-unsupported` (`:787`), so its
+> `shape(document)` cell stays ⚠. Cited gate line numbers were re-synced against
+> `ad81732e` where re-verified.
+
 > **[2026-06-24 refresh, code-verified against `main` @ `e779fcd`]** Two adapter
 > moves landed: **node `auditable` stamping relocated into the persistence layer**
 > on both node adapters — drizzle (#1554) and mikroorm (#1565) — reading the
@@ -71,10 +99,12 @@ Backends audited (the five domain-logic backends):
 | .NET | `dotnet` | ASP.NET + EF Core + Mediator |
 | Java | `java` | Spring Boot + JPA |
 | Python | `python` | FastAPI + SQLAlchemy 2 |
-| Phoenix | `elixir` | LiveView + Ash **or** vanilla Ecto |
+| Phoenix | `elixir` | LiveView + plain Ecto/Phoenix |
 
-Elixir is split into its two **foundations** (`ash` default / `vanilla`) wherever
-the gap is foundation-shaped, not platform-shaped.
+_(Historical: at the 2026-06-21 snapshot elixir was split into two **foundations**
+— `ash` default / `vanilla` — wherever a gap was foundation-shaped. The Ash
+foundation was **removed**; `elixir` is now a single plain-Ecto/Phoenix platform,
+so the matrix above carries one `elixir` column, not the former ash/vanilla pair.)_
 
 Legend: ✓ implemented · ✗ gated (validator error) · ⚠ partial · 🔴 **silent gap**
 (no emit, no gate) · N/A not applicable.
@@ -83,27 +113,27 @@ Legend: ✓ implemented · ✗ gated (validator error) · ⚠ partial · 🔴 **
 
 ## Summary matrix
 
-| Feature | node | dotnet | java | python | elixir·ash | elixir·vanilla | Gate (source of truth) |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|---|
-| Event-sourced storage `persistedAs(eventLog)` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | `EVENT_SOURCING_BACKENDS` · system-checks.ts:1913 |
-| Event-sourced **workflow** (saga appliers) | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | `EVENT_SOURCING_WORKFLOW_BACKENDS` · system-checks.ts:2014 |
-| TPH inheritance `inheritanceUsing(sharedTable)` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `TPH_CAPABLE` · system-checks.ts:1862 |
-| TPC inheritance `inheritanceUsing(ownTable)` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | (universal) |
-| `shape(document)` persistence | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | `PLATFORM_SAVING_SHAPES` · platform-axes.ts:40 |
-| `shape(embedded)` persistence | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `PLATFORM_SAVING_SHAPES` · platform-axes.ts:40 |
-| Discriminated unions (`A or B` / `payload = A\|B` / `T option`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_UNION_BACKENDS` · structural-checks.ts:414 |
-| Generic carriers (`paged<T>`, `envelope<T>`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_PAGED_BACKENDS` · structural-checks.ts:232 |
-| `when` canCommand gate + `can_<op>` query | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_WHEN_BACKENDS` · structural-checks.ts:484 |
-| Exception-less returns (`op(): X or NotFound`) | ✓ | ✓ | ✓ | ✓ | ⚠ return-dominant only | ✓ | `SUPPORTED_RETURN_BACKENDS` · structural-checks.ts:518 |
-| Non-principal capability `filter` (relational) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `LIMITED_FAMILIES` · system-checks.ts:1006 |
-| Principal capability `filter` (`currentUser`/tenancy, relational) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `supportsPrincipalFilter` · system-checks.ts:1021 |
-| Capability `filter` on non-relational shape (doc/embedded) | ✓ | ✓ | ✓ | ⚠ embedded only | ⚠ embedded only | ⚠ embedded only | `supportsNonRelationalFilter` · system-checks.ts:1051 |
-| `ignoring <Cap>` filter-bypass | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | `FILTER_BYPASS_FAMILIES` / `bypassSupported` · system-checks.ts:1199 |
-| Provenanced fields (runtime trace) | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | `PROVENANCE_BACKENDS` · system-checks.ts:2063 |
-| Per-operation `audited` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | `AUDIT_OP_BACKENDS` (+ elixir·vanilla) · system-checks.ts:2124 |
-| Audited **lifecycle** (`audited create`/`destroy`) | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | `AUDIT_LIFECYCLE_BACKENDS` (+ elixir·vanilla) · system-checks.ts:2125 |
-| Audit/context stamping (`with audit` → `contextStamps`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | not gated (all reference it; runtime depth varies — see §6) |
-| `X id[]` reference collections (set) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | not gated — emitted + boot-verified on all 5 (see §7) |
+| Feature | node | dotnet | java | python | elixir | Gate (source of truth) |
+|---|:---:|:---:|:---:|:---:|:---:|---|
+| Event-sourced storage `persistedAs(eventLog)` | ✓ | ✓ | ✓ | ✓ | ✓ | `EVENT_SOURCING_BACKENDS` · system-checks.ts:2345 |
+| Event-sourced **workflow** (saga appliers) | ✓ | ✓ | ✓ | ✓ | ✓ | `EVENT_SOURCING_WORKFLOW_BACKENDS` · system-checks.ts:2390 |
+| TPH inheritance `inheritanceUsing(sharedTable)` | ✓ | ✓ | ✓ | ✓ | ✓ | `TPH_CAPABLE` · system-checks.ts:2298 |
+| TPC inheritance `inheritanceUsing(ownTable)` | ✓ | ✓ | ✓ | ✓ | ✓ | (universal) |
+| `shape(document)` persistence | ✓ | ✓ | ✓ | ✓ | ⚠ scalar ops only | `PLATFORM_SAVING_SHAPES` · platform-axes.ts:22 (+ `loom.vanilla-document-unsupported` · system-checks.ts:787) |
+| `shape(embedded)` persistence | ✓ | ✓ | ✓ | ✓ | ✓ | `PLATFORM_SAVING_SHAPES` · platform-axes.ts:22 |
+| Discriminated unions (`A or B` / `payload = A\|B` / `T option`) | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_UNION_BACKENDS` · structural-checks.ts:414 |
+| Generic carriers (`paged<T>`, `envelope<T>`) | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_PAGED_BACKENDS` · structural-checks.ts:232 |
+| `when` canCommand gate + `can_<op>` query | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_WHEN_BACKENDS` · structural-checks.ts:484 |
+| Exception-less returns (`op(): X or NotFound`) | ✓ | ✓ | ✓ | ✓ | ✓ | `SUPPORTED_RETURN_BACKENDS` · structural-checks.ts:605 |
+| Non-principal capability `filter` (relational) | ✓ | ✓ | ✓ | ✓ | ✓ | `LIMITED_FAMILIES` · system-checks.ts:1006 |
+| Principal capability `filter` (`currentUser`/tenancy, relational) | ✓ | ✓ | ✓ | ✓ | ✓ | `supportsPrincipalFilter` · system-checks.ts:1021 |
+| Capability `filter` on non-relational shape (doc/embedded) | ✓ | ✓ | ✓ | ✓ | ⚠ embedded only | `supportsNonRelationalFilter` · system-checks.ts:1418 |
+| `ignoring <Cap>` filter-bypass | ✓ | ✓ | ✓ | ✓ | ✓ | `FILTER_BYPASS_FAMILIES` / `bypassSupported` · system-checks.ts:1576 |
+| Provenanced fields (runtime trace) | ✓ | ✓ | ✓ | ✓ | ✓ | `PROVENANCE_BACKENDS` · system-checks.ts:2425 |
+| Per-operation `audited` | ✓ | ✓ | ✓ | ✓ | ✓ | `AUDIT_OP_BACKENDS` · system-checks.ts:2469 |
+| Audited **lifecycle** (`audited create`/`destroy`) | ✓ | ✓ | ✓ | ✓ | ✓ | `AUDIT_LIFECYCLE_BACKENDS` · system-checks.ts:2470 |
+| Audit/context stamping (`with audit` → `contextStamps`) | ✓ | ✓ | ✓ | ✓ | ✓ | not gated (all reference it; runtime depth varies — see §6) |
+| `X id[]` reference collections (set) | ✓ | ✓ | ✓ | ✓ | ✓ | not gated — emitted + boot-verified on all 5 (see §7) |
 
 The reference platforms (node/dotnet/react) are now the **trailing** view: the
 big movements since the 2026-06-03 inventory are (1) **TPH is no longer node-only
@@ -112,13 +142,18 @@ big movements since the 2026-06-03 inventory are (1) **TPH is no longer node-onl
 **Phoenix `vanilla` foundation** unlocked ES + document + provenance that the Ash
 foundation still gates, and (4) **provenance landed on Java + Python** (#1490).
 As of [2026-06-23] the remaining cross-cutting items also closed: (5) **per-op +
-lifecycle `audited`** now ship on all four non-elixir backends + elixir·vanilla
-(#1503), (6) **`ignoring` filter-bypass** is all five families incl. both elixir
-foundations, and (7) **`X id[]` reference collections** were drained on both
-elixir foundations (#1533 vanilla / #1551 ash) and boot-verified on all five — the
-last had been an ungated 🔴 silent gap. The standing cross-backend gaps are now
-foundation-shaped (elixir·ash gates ES/document/provenance/audit) rather than
-backend-shaped.
+lifecycle `audited`** now ship on all five backends
+(#1503), (6) **`ignoring` filter-bypass** is all five families, and (7) **`X id[]`
+reference collections** were drained on elixir (#1533) and boot-verified on all
+five — the last had been an ungated 🔴 silent gap.
+
+> **[2026-07-11 update]** With the Ash foundation removed, the "standing gaps are
+> foundation-shaped (elixir·ash gates ES/document/provenance/audit)" framing no
+> longer holds: those features are now plain all-5 gate members (see the top
+> banner). ES/provenance/audit ship on `elixir`. The **only** remaining
+> elixir-shaped gap is **full `shape(document)` persistence** — scalar custom finds
+> and named ops emit, but complex ops/finds stay honestly gated
+> `loom.vanilla-document-unsupported` (§4/F3).
 
 ---
 
@@ -213,9 +248,21 @@ merged). Lifecycle `audited` (`audited create`/`destroy`) was node-only. So the
 cross-cutting/compliance gap had narrowed from "provenance + audit on two
 backends" to "per-op audit on two backends, with the PR open" — now resolved.
 
-### F3 — Elixir foundation split is the dominant elixir story
+### F3 — Elixir foundation split *(obsolete — Ash foundation removed)*
 
-Three features are gated on `elixir·ash` but ship on `elixir·vanilla`:
+> **[2026-07-11] Obsolete on current `main`.** The Ash foundation was removed;
+> `elixir` is a single plain-Ecto/Phoenix platform. The features this finding listed
+> as "gated on `elixir·ash`, ship on `elixir·vanilla`" — event-sourced **aggregate**
+> storage, provenanced fields, per-op/lifecycle `audited`, exception-less returns —
+> now **all ship on `elixir`** as plain all-5 gate members (`EVENT_SOURCING_BACKENDS`,
+> `PROVENANCE_BACKENDS`, `AUDIT_OP_BACKENDS`, `AUDIT_LIFECYCLE_BACKENDS`,
+> `SUPPORTED_RETURN_BACKENDS`). Event-sourced **workflows** also ship now —
+> `EVENT_SOURCING_WORKFLOW_BACKENDS` includes `elixir` (`system-checks.ts:2390`),
+> reversing the "omits elixir entirely" claim below. The **only** remaining
+> elixir-shaped gap is full `shape(document)` persistence (honest `loom.vanilla-document-unsupported`,
+> §4). The original 2026-06-21 finding is kept below for history.
+
+_(Historical, pre-Ash-removal:)_ Three features are gated on `elixir·ash` but ship on `elixir·vanilla`:
 event-sourced **aggregate** storage, `shape(document)`, and provenanced fields.
 Event-sourced **workflows** (saga appliers) are gated on **both** elixir
 foundations (`EVENT_SOURCING_WORKFLOW_BACKENDS` omits elixir entirely) — the
@@ -244,6 +291,14 @@ superseded marker.
 ---
 
 ## Per-feature detail
+
+> **[2026-07-11 note]** The `elixir·ash` / `elixir·vanilla` foundation distinctions
+> in the subsections below are **historical** (the Ash foundation was removed — see
+> the top banner and F3). Read every "gated on `elixir·ash` / ships on
+> `elixir·vanilla`" as: **ships on `elixir`** today, the single plain-Ecto/Phoenix
+> surface — the sole exception being full `shape(document)` persistence, still
+> honestly gated `loom.vanilla-document-unsupported` (§1/§4). The prose is preserved
+> as the migration record.
 
 ### 1. Persistence & storage
 
