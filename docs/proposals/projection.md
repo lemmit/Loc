@@ -382,7 +382,10 @@ workflow-instance surface.
   landable slice is (1) — rebuild-from-`<agg>_events` for ES-sourced projections,
   behind the validator gate — or (2) if we want rebuild for *every* projection
   and accept the extra log. (3) waits on the channel tier. Deferred pending that
-  call.
+  call. **The substrate this all rests on** — per-aggregate event tables vs. one
+  per-context event log, and the three-scope (stream / context-log / broker)
+  model, with a full five-backend blast-radius audit of the collapse — is worked
+  out in [`event-log-architecture.md`](./event-log-architecture.md).
 - **`from <Channel>` binding.** Dropped in v1 (in-process, transport-neutral,
   like today's default dispatch). Re-introduced when a projection needs to fold
   from a broker-backed durable channel — same `channelSource` mechanism reactors
