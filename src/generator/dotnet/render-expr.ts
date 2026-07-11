@@ -22,6 +22,7 @@ import {
   renderExprWith,
 } from "../_expr/target.js";
 import type { UnionMember } from "../_payload/union-wire.js";
+import { renderTypeWith, type TypeTarget } from "../_type/target.js";
 import { joinDbSetName, joinFkPropName } from "./emit/join-entities.js";
 
 // ---------------------------------------------------------------------------
@@ -905,72 +906,61 @@ function renderNew(
 // Type printing
 // ---------------------------------------------------------------------------
 
+// Type printing leaf table — the .NET arm of the shared `TypeTarget` dispatch
+// (`../_type/target.ts`).  C# has no boxing axis, so the `mode` arg is ignored.
+const CS_TYPE_TARGET: TypeTarget = {
+  primitive(name) {
+    switch (name) {
+      case "int":
+        return "int";
+      case "long":
+        return "long";
+      case "decimal":
+        return "decimal";
+      case "money":
+        // C# `decimal` is already precise — money differs from
+        // decimal only at the JSON wire boundary, where the per-
+        // property `[JsonNumberHandling]` attribute (emitted by
+        // dto-mapping.ts) forces a string encoding.
+        return "decimal";
+      case "string":
+        return "string";
+      case "bool":
+        return "bool";
+      case "datetime":
+        return "DateTime";
+      case "guid":
+        return "Guid";
+      case "json":
+        return "System.Text.Json.JsonElement";
+      case "duration":
+        // A5 temporal — absolute duration as a native TimeSpan.
+        // Expression-only (never a field / wire type in this slice);
+        // reachable for duration-typed locals in operation bodies.
+        return "TimeSpan";
+    }
+  },
+  id: (targetName) => `${targetName}Id`,
+  array: (element) => `List<${element}>`,
+  optional: (inner) => `${inner}?`,
+  // Carrier-bounded generic (`order paged`, `event envelope`) → an
+  // idiomatic C# generic record (`Paged<Order>`, `Envelope<string>`),
+  // defined once in the shared runtime (P3b).  Domain-side render: an
+  // entity arg stays the domain class; the controller maps it to the
+  // response record when serializing.
+  genericInstance: (t, recur) => `${upperFirst(t.ctor)}<${recur(t.arg)}>`,
+  // Discriminated union → the polymorphic base record name (P4c).  The
+  // emitter (`emitUnionDtos`) declares it `[JsonPolymorphic("type")]` with
+  // one `[JsonDerivedType]` per variant, so the wire matches the TS
+  // `z.discriminatedUnion("type", …)` byte-for-byte.
+  union: (t) => unionInstanceName(t.variants),
+  // `none` only ever appears inside an option's union (rendered by the
+  // union DTO emitter), never as a standalone C# type — defensive.
+  none: () => "object",
+};
+
 export function renderCsType(t: TypeIR): string {
-  switch (t.kind) {
-    // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
-    case "primitive":
-      switch (t.name) {
-        case "int":
-          return "int";
-        case "long":
-          return "long";
-        case "decimal":
-          return "decimal";
-        case "money":
-          // C# `decimal` is already precise — money differs from
-          // decimal only at the JSON wire boundary, where the per-
-          // property `[JsonNumberHandling]` attribute (emitted by
-          // dto-mapping.ts) forces a string encoding.
-          return "decimal";
-        case "string":
-          return "string";
-        case "bool":
-          return "bool";
-        case "datetime":
-          return "DateTime";
-        case "guid":
-          return "Guid";
-        case "json":
-          return "System.Text.Json.JsonElement";
-        case "duration":
-          // A5 temporal — absolute duration as a native TimeSpan.
-          // Expression-only (never a field / wire type in this slice);
-          // reachable for duration-typed locals in operation bodies.
-          return "TimeSpan";
-      }
-    case "id":
-      return `${t.targetName}Id`;
-    case "enum":
-      return t.name;
-    case "valueobject":
-      return t.name;
-    case "entity":
-      return t.name;
-    case "array":
-      return `List<${renderCsType(t.element)}>`;
-    case "optional":
-      return `${renderCsType(t.inner)}?`;
-    case "action":
-    case "slot":
-      throw new Error("renderCsType: 'slot' type is UI-only and should not reach the backend.");
-    case "genericInstance":
-      // Carrier-bounded generic (`order paged`, `event envelope`) → an
-      // idiomatic C# generic record (`Paged<Order>`, `Envelope<string>`),
-      // defined once in the shared runtime (P3b).  Domain-side render: an
-      // entity arg stays the domain class; the controller maps it to the
-      // response record when serializing.
-      return `${upperFirst(t.ctor)}<${renderCsType(t.arg)}>`;
-    case "union":
-      // Discriminated union → the polymorphic base record name (P4c).  The
-      // emitter (`emitUnionDtos`) declares it `[JsonPolymorphic("type")]` with
-      // one `[JsonDerivedType]` per variant, so the wire matches the TS
-      // `z.discriminatedUnion("type", …)` byte-for-byte.
-      return unionInstanceName(t.variants);
-    case "none":
-      // `none` only ever appears inside an option's union (rendered by the
-      // union DTO emitter), never as a standalone C# type — defensive.
-      return "object";
-  }
+  return renderTypeWith(t, CS_TYPE_TARGET);
 }
 
 export function csValueTypeForId(idValueType: string): string {

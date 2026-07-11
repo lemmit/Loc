@@ -19,6 +19,7 @@ import {
   renderExprWith,
 } from "../_expr/target.js";
 import type { UnionMember } from "../_payload/union-wire.js";
+import { renderTypeWith, type TypeTarget } from "../_type/target.js";
 
 // ---------------------------------------------------------------------------
 // Expression renderer for the Java / Spring backend.
@@ -880,70 +881,59 @@ function renderJavaConvert(target: string, from: string | undefined, v: string):
 // Type printing
 // ---------------------------------------------------------------------------
 
+// Type printing leaf table — the Java arm of the shared `TypeTarget` dispatch
+// (`../_type/target.ts`).  Java is the one backend that reads `mode`: primitives
+// box in `reference` position (array element, nullable optional, generic arg),
+// which the dispatcher enters automatically.  `boxedJavaType` is therefore just
+// a `reference`-mode entry into the same table.
+const JAVA_TYPE_TARGET: TypeTarget = {
+  primitive(name, mode) {
+    switch (name) {
+      case "int":
+        return mode === "reference" ? "Integer" : "int";
+      case "long":
+        return mode === "reference" ? "Long" : "long";
+      case "decimal":
+      case "money":
+        // BigDecimal is the precise type; money differs from decimal
+        // only at the JSON wire boundary (string encoding), handled
+        // by the DTO emitter's Jackson config.
+        return "BigDecimal";
+      case "string":
+        return "String";
+      case "bool":
+        return mode === "reference" ? "Boolean" : "boolean";
+      case "datetime":
+        return "Instant";
+      case "guid":
+        return "UUID";
+      case "json":
+        return "JsonNode";
+      case "duration":
+        // A5 temporal — absolute duration as java.time.Duration.
+        // Expression-only (never a field / wire type in this slice).
+        return "Duration";
+    }
+  },
+  id: (targetName) => `${targetName}Id`,
+  array: (element) => `List<${element}>`,
+  // Java has no `?` types — optionality is a nullable reference, so the inner
+  // (already rendered in `reference` mode → boxed) stands alone.
+  optional: (inner) => inner,
+  genericInstance: (t, recur) => `${upperFirst(t.ctor)}<${recur(t.arg)}>`,
+  union: (t) => unionInstanceName(t.variants),
+  none: () => "Object",
+};
+
 export function renderJavaType(t: TypeIR): string {
-  switch (t.kind) {
-    // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
-    case "primitive":
-      switch (t.name) {
-        case "int":
-          return "int";
-        case "long":
-          return "long";
-        case "decimal":
-        case "money":
-          // BigDecimal is the precise type; money differs from decimal
-          // only at the JSON wire boundary (string encoding), handled
-          // by the DTO emitter's Jackson config.
-          return "BigDecimal";
-        case "string":
-          return "String";
-        case "bool":
-          return "boolean";
-        case "datetime":
-          return "Instant";
-        case "guid":
-          return "UUID";
-        case "json":
-          return "JsonNode";
-        case "duration":
-          // A5 temporal — absolute duration as java.time.Duration.
-          // Expression-only (never a field / wire type in this slice).
-          return "Duration";
-      }
-    case "id":
-      return `${t.targetName}Id`;
-    case "enum":
-    case "valueobject":
-    case "entity":
-      return t.name;
-    case "array":
-      return `List<${boxedJavaType(t.element)}>`;
-    case "optional":
-      // Java has no `?` types — optionality is a nullable reference, so
-      // primitives box (the emitter documents absence as null).
-      return boxedJavaType(t.inner);
-    case "action":
-    case "slot":
-      throw new Error("renderJavaType: 'slot' type is UI-only and should not reach the backend.");
-    case "genericInstance":
-      return `${upperFirst(t.ctor)}<${boxedJavaType(t.arg)}>`;
-    case "union":
-      return unionInstanceName(t.variants);
-    case "none":
-      return "Object";
-  }
+  return renderTypeWith(t, JAVA_TYPE_TARGET);
 }
 
 /** The boxed (reference) spelling of a type — for generic positions and
- *  nullable fields, where Java's primitives don't fit. */
+ *  nullable fields, where Java's primitives don't fit.  A `reference`-mode
+ *  entry into the shared type dispatch. */
 export function boxedJavaType(t: TypeIR): string {
-  if (t.kind === "primitive") {
-    if (t.name === "int") return "Integer";
-    if (t.name === "long") return "Long";
-    if (t.name === "bool") return "Boolean";
-  }
-  if (t.kind === "optional") return boxedJavaType(t.inner);
-  return renderJavaType(t);
+  return renderTypeWith(t, JAVA_TYPE_TARGET, "reference");
 }
 
 /** Imports `renderJavaType` output needs, per type (the emitters merge
