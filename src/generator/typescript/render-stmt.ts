@@ -1,5 +1,6 @@
 import type { ExprIR, PathIR, ProvSite, StmtIR } from "../../ir/types/loom-ir.js";
 import { escapeTsIdent } from "../../util/naming.js";
+import { collectLeaves } from "../_stmt/leaves.js";
 import type { ChunkMark } from "../_trace/sourcemap.js";
 import { renderTsExpr, renderTsExprWithMarks } from "./render-expr.js";
 
@@ -257,7 +258,7 @@ function withTrace(
 ): string {
   if (!emitProvenance || !prov) return base;
   const targetLit = JSON.stringify(prov.target);
-  const inputs = collectLeaves(value)
+  const inputs = collectLeaves(value, renderTsExpr)
     .map((l) => `{ path: ${JSON.stringify(l.path)}, value: ${l.value} }`)
     .join(", ");
   const tmp = `__prov_${index}`;
@@ -271,68 +272,6 @@ function withTrace(
     `${INDENT}this._${field}_provenance = ${lin};`,
     `${INDENT}this._provTraces.push(${lin});`,
   ].join("\n");
-}
-
-/** Bounded walk over the RHS expression collecting leaf inputs —
- *  `this`-props, params and let-bindings (and member-access chains
- *  rooted at them).  Compound nodes recurse; lambdas are skipped (their
- *  bodies reference lambda-local params, not stored leaves). */
-function collectLeaves(
-  e: ExprIR,
-  out: { path: string; value: string }[] = [],
-): { path: string; value: string }[] {
-  switch (e.kind) {
-    case "ref":
-      if (e.refKind === "this-prop" || e.refKind === "param" || e.refKind === "let") {
-        out.push({ path: e.name, value: renderTsExpr(e) });
-      }
-      break;
-    case "member":
-      out.push({ path: leafPath(e), value: renderTsExpr(e) });
-      break;
-    case "method-call":
-      collectLeaves(e.receiver, out);
-      for (const a of e.args) collectLeaves(a, out);
-      break;
-    case "call":
-      for (const a of e.args) collectLeaves(a, out);
-      break;
-    case "paren":
-      collectLeaves(e.inner, out);
-      break;
-    case "unary":
-      collectLeaves(e.operand, out);
-      break;
-    case "binary":
-      collectLeaves(e.left, out);
-      collectLeaves(e.right, out);
-      break;
-    case "ternary":
-      collectLeaves(e.cond, out);
-      collectLeaves(e.then, out);
-      collectLeaves(e.otherwise, out);
-      break;
-    case "match":
-      e.arms.forEach((a) => {
-        collectLeaves(a.cond, out);
-        collectLeaves(a.value, out);
-      });
-      if (e.otherwise) collectLeaves(e.otherwise, out);
-      break;
-    case "new":
-    case "object":
-      for (const f of e.fields) collectLeaves(f.value, out);
-      break;
-  }
-  return out;
-}
-
-/** Dotted source-side path for a member-access chain (e.g. `line.price`). */
-function leafPath(e: ExprIR): string {
-  if (e.kind === "ref") return e.name;
-  if (e.kind === "this") return "this";
-  if (e.kind === "member") return `${leafPath(e.receiver)}.${e.member}`;
-  return "<expr>";
 }
 
 function renderPath(p: PathIR): string {
