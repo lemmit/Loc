@@ -52,6 +52,7 @@ import {
   isLambda,
   isLetStmt,
   isMemberSuffix,
+  isModel,
   isMoneyLit,
   isNamedType,
   isNameRef,
@@ -69,6 +70,7 @@ import {
   isProperty,
   isSlotType,
   isStringLit,
+  isSystem,
   isTemplateStr,
   isTernaryExpr,
   isThisRef,
@@ -728,6 +730,11 @@ function typeOfFreeCall(name: string, env: Env): DddType {
   // (`CanApprove(cap)`) is a boolean predicate.
   if (lookupCriterionByName(name, env)) return T.prim("bool");
   if (lookupPolicyFnByName(name, env)) return T.prim("bool");
+  // Top-level (ambient) helper function (stdlib Phase B) — its declared
+  // return type.  After the shadowing lookups above, before the duration
+  // builtins (a user `function days(...)` shadows the `days()` builtin).
+  const topFn = lookupTopLevelFunction(name, env);
+  if (topFn) return resolveTypeRef(topFn.returnType);
   // A5 duration constructors (`days(n)` / `hours(n)` / `minutes(n)`) —
   // builtins only when no user declaration matched above (a user
   // `function days(...)` shadows the builtin).  Arity / argument type are
@@ -749,6 +756,7 @@ export function isDurationBuiltinCall(name: string, env: Env): boolean {
   const sym = env.resolve(name);
   if (sym && (isFunctionDecl(sym.origin) || isValueObject(sym.origin))) return false;
   if (lookupFunctionInScope(name, env)) return false;
+  if (lookupTopLevelFunction(name, env)) return false;
   if (lookupValueObjectByName(name, env)) return false;
   if (lookupCriterionByName(name, env)) return false;
   return true;
@@ -963,6 +971,28 @@ function lookupFunctionInScope(
     if (!s) continue;
     for (const m of s.members) {
       if (isFunctionDecl(m) && m.name === name) return m;
+    }
+  }
+  return undefined;
+}
+
+/** A TOP-LEVEL (ambient) helper `function` named `name` (stdlib Phase B) —
+ *  declared at file root or inside a `system { }`, visible workspace-wide.
+ *  Checked AFTER local functions / VO ctors / criteria / policy fns (which
+ *  shadow it), mirroring the lowerer's inline precedence (`inlineTopLevelFn`
+ *  only fires when `resolveCallKind` is `"free"`). */
+function lookupTopLevelFunction(
+  name: string,
+  env: Env,
+): import("./generated/ast.js").FunctionDecl | undefined {
+  const anchor = env.aggregate ?? env.part ?? env.valueObject;
+  if (!anchor) return undefined;
+  const model = AstUtils.getContainerOfType(anchor, isModel);
+  if (!model) return undefined;
+  for (const m of model.members) {
+    if (isFunctionDecl(m) && m.name === name) return m;
+    if (isSystem(m)) {
+      for (const sm of m.members) if (isFunctionDecl(sm) && sm.name === name) return sm;
     }
   }
   return undefined;

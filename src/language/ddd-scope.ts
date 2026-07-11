@@ -22,6 +22,7 @@ import {
   isDomainService,
   isEntityPart,
   isEnumDecl,
+  isFunctionDecl,
   isModel,
   isPage,
   isPayloadDecl,
@@ -289,6 +290,17 @@ export class DddScopeComputation extends DefaultScopeComputation {
       // Ui-scoped components stay local and intentionally shadow on
       // collision (resolved at the call site, not here).
       if (isComponent(node) && isModel(node.$container)) {
+        const name = this.nameProvider.getName(node);
+        if (name) {
+          exports.push(this.descriptions.createDescription(node, name, document));
+        }
+      }
+      // Top-level (ambient) helper `function`s (stdlib Phase B) — declared at
+      // file root or directly inside a `system { }`, visible workspace-wide so
+      // a call from any context/file resolves by bare name (they inline at
+      // lowering).  Local aggregate/VO/workflow functions stay member-scoped
+      // (NOT exported here) so they keep the emitted `this.<fn>` path.
+      if (isFunctionDecl(node) && (isModel(node.$container) || isSystem(node.$container))) {
         const name = this.nameProvider.getName(node);
         if (name) {
           exports.push(this.descriptions.createDescription(node, name, document));

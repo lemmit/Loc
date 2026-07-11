@@ -186,18 +186,27 @@ already rejected by the queryable gate). See `docs/language.md` → String inter
 
 ## Phase B — top-level `function` (the Layer-1 enabler)
 
-- **B1 — grammar + scope:** admit `FunctionDecl` as a `ModelMember`/`SystemMember`
-  (file top level), exported into global scope like value objects. Purity rules already
-  exist (no repo/emit/mutation). `print-structural.ts` arm + completeness test;
-  `langium:generate` + committed output.
-- **B2 — lowering = inlining:** expression-form top-level functions inline at call sites
-  during lowering (the `criterion` mechanism, generalised to value-returning
-  expressions), so ExprIR downstream is unchanged — **no backend work at all** and
-  queryability falls out. Block-form top-level functions lower like domain-service
-  operations (real emitted functions, non-queryable) — or are deferred out of B2 if the
-  emission seam is disproportionate; decide in-slice.
-- Validator: recursion rejected for expression-form (inlining must terminate) —
-  `loom.function-recursive`.
+- **B1 — grammar + scope: SHIPPED.** `FunctionDecl` is admitted as a
+  `ModelMember`/`SystemMember` (file top level / inside `system {}`), exported
+  workspace-wide via `ddd-scope.ts` like a root value object / enum. The
+  `print-structural.ts` arm already existed (local functions); `langium:generate`
+  output committed.
+- **B2 — lowering = inlining (expression-form): SHIPPED.** An expression-form
+  top-level function INLINES at each call site during lowering
+  (`inlineTopLevelFn`, mirroring `inlinePolicyFn` — ambient env, arg
+  substitution, cycle guard, paren-wrapped for precedence), gated on
+  `resolveCallKind === "free"` so local members shadow it and it shadows the A5
+  duration builtins. ExprIR downstream is unchanged → **zero backend work**, and
+  a call in a `where:` stays queryable through the existing gate. Call-site
+  return typing goes through `lookupTopLevelFunction` in the type system.
+- **Block-form top-level functions: DEFERRED.** A `{ … }` body has no
+  module-scope emission home yet (it would need a new seam on all 5 domain-logic
+  backends), so a block-form top-level function is rejected —
+  `loom.function-toplevel-block`. (Block-form stays legal as an aggregate / VO /
+  workflow member, where it emits as a real method.)
+- Validator: `loom.function-recursive` rejects direct **and mutual** recursion
+  among expression-form top-level functions (inlining must terminate). Recursion
+  stays legal for local member functions (they emit as real methods).
 
 ```ddd
 function isBlank(s: string): bool = s.trim().length == 0

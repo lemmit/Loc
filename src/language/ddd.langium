@@ -16,6 +16,12 @@ ImportStmt:
 
 ModelMember:
     System | Subdomain | BoundedContext | ValueObject | EnumDecl | PayloadDecl | Requirement | Solution | TestCase | Component
+    // Top-level (ambient) helper `function` (stdlib Phase B): a pure,
+    // expression-form function visible workspace-wide, like a root
+    // `valueobject` / `enum`.  It INLINES at every call site during lowering
+    // (no emitted function), so it needs no owning aggregate.  See
+    // docs/plans/stdlib.md → Phase B.
+    | FunctionDecl
     // Implicit-system composition (Tier 2): the deployment-shape members are
     // also admissible at file top level and compose into the project's single
     // `system` — so deployment can live in its own file.  See
@@ -42,7 +48,7 @@ System:
     '}';
 
 SystemMember:
-    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | AuthBlock | TenancyDecl | ThemeBlock | Ui | Api | Storage | Resource | ChannelSource | Layout | Capability;
+    Subdomain | Deployable | BoundedContext | TestE2E | UserBlock | AuthBlock | TenancyDecl | ThemeBlock | Ui | Api | Storage | Resource | ChannelSource | Layout | Capability | FunctionDecl;
 
 // System-level visual identity — design tokens consumed by every
 // React deployable in this system.  Tokens are intentionally
