@@ -18,6 +18,7 @@ import { hierarchyRegistry } from "../../ir/util/tenant-stance.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
+import { dedupeByName } from "../../util/dedupe.js";
 import { plural, snake } from "../../util/naming.js";
 import { unionJsonSchema } from "../_payload/union-wire.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
@@ -470,15 +471,6 @@ function mergeContexts(contexts: EnrichedBoundedContextIR[]): EnrichedBoundedCon
     // land (S15) — mirrors the Hono orchestrator.
     eventSubscriptions: contexts.flatMap((c) => c.eventSubscriptions),
   };
-}
-
-function dedupeByName<T extends { name: string }>(items: T[]): T[] {
-  const seen = new Set<string>();
-  return items.filter((x) => {
-    if (seen.has(x.name)) return false;
-    seen.add(x.name);
-    return true;
-  });
 }
 
 /** PEP 508-safe project name — same camelCase→snake folding the system
