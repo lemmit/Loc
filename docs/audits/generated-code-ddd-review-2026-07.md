@@ -35,6 +35,24 @@ generator defects.
 > the "compiles as generated" row of the matrix below describes the
 > pre-fix state.
 
+> **🔄 Re-verified against `main` (2026-07-11, `4660b22a`).** Two independent
+> verification passes re-checked every finding against fresh `main`; the audit is
+> now largely drained. **FIXED since the snapshot:** S1 (all three sub-claims —
+> wrong-value #1634, create/update-DTO leak #1629/#1688), S2 (variant-match over
+> union find, all five backends, #1631 / `ab650758`), S5(a) (Phoenix event
+> delivery), S5(c) (Java publisher), S8 (#1723), S9 (incl. Python #1738), and the
+> Phoenix boundary set (mass-assign #1703, cross-field invariant #1710,
+> derived-wire #1718, `requires`→403/422 #1710/#1716, dead hard-delete #1763),
+> plus the Python `reposFor()` `if-let` `NameError`. **Corrected:** S4 is now
+> **⚠️ PARTIAL** — the `versioned` capability ships version columns + guarded
+> writes + 409 on all five backends (`src/ir/util/versioned-capability.ts`); only
+> the *default-on* recommendation is unadopted (proposal `fb02e61d`). S3 is
+> **mostly closed** (showcase now tsc-gated on Hono/.NET/Angular; residual =
+> python-build corpus). **Still open:** S7 (ports), S10 (extern), the
+> `api`-grouping / open-host-service gap, S5(b)/(d), and Phoenix operation-persist
+> re-validation. Per-finding markers below are updated; the original snapshot prose
+> (grade matrix, executive summary) is annotated in place, not rewritten.
+
 ---
 
 ## Executive summary
@@ -67,6 +85,15 @@ practitioner would recognize the intent immediately.
    value on three backends while remaining client-writable on the wire on
    all five.
 
+> **[2026-07-11 re-verify — the three blockers have largely drained]** (1) The
+> `versioned` capability now ships optimistic concurrency (version column + guarded
+> write + 409) on all five backends — the concurrency half exists as opt-in; only
+> default-on is unadopted (S4). (2) Phoenix's boundary is no longer create-only —
+> mass-assign, cross-field invariant, derived-wire, error-status, and event
+> delivery are fixed (see the Phoenix verdict). (3) The two non-compiling trees now
+> compile and `ownerStamped` is fixed all three ways (S1/S2). What remains: the P2
+> polish (S7 ports, S10 extern, api-grouping, S5(b)/(d)) and S4's default-on.
+
 Strategically, the system is **more deliberate than "N CRUD services sharing a
 database" — but the bounded context is only real one layer deep**: schema-per-
 context and database-per-deployable are uniformly right; above the database
@@ -96,6 +123,12 @@ showcase hono output isn't in a tsc-gated corpus.
 (`NameError`, `TypeError`) and would fail `mypy --strict` — showcase isn't in
 the python-build corpus.
 
+> **[2026-07-11 re-verify]** The **Compiles as generated** row and footnotes ¹/²
+> are the **pre-fix** snapshot. S2 (variant-match, #1631) and S1 (stamp, #1634) are
+> fixed on all five backends and the Hono/.NET/Java showcase now compiles in its
+> gated corpus; the remaining gap is the showcase's absence from the python-build
+> corpus (S3). Read the `no` cells as historical.
+
 ---
 
 ## Cross-backend systemic findings
@@ -104,7 +137,7 @@ These are the patterns that repeat across backends — each is one fix decision
 made once (usually at the IR or migrations layer) and applied everywhere,
 rather than five per-backend patches.
 
-### S1 · `ownerStamped` capability is broken three ways (P0 — correctness + security)
+### S1 · `ownerStamped` capability is broken three ways (P0 — correctness + security) — ✅ FIXED (all three ways)
 
 The DSL declares `stamp onCreate { createdByRole := currentUser.role }` +
 `filter this.createdByRole == currentUser.role`. Generated:
@@ -148,7 +181,16 @@ so it lands as an all-backend parity slice (same shape as SYS-1). Python's
 > still rendering/filling raw `agg.fields`) now derives from
 > `createInputFields` like the api-module and Angular already did.
 
-### S2 · Variant-`match` over a union-returning find is broken on four backends (P0)
+> **✅ (a) FIXED** — the wrong-value stamp on Hono/Java/.NET is closed by the
+> claim-stamp substrate fix (#1634): each stamp emitter now renders the *declared*
+> stamp expression against the ambient principal, so `currentUser.role` stamps the
+> role (not the actor id) and the row-security filter matches; the .NET CS0103 on
+> `currentUser.role` is resolved by the same path. With (a)+(b) closed the
+> capability is **fully fixed on all five backends** — pinned by
+> `test/conformance/stamp-request-no-leak-parity.test.ts` (5/5) and
+> `test/generator/tenant-owned-datakey-stamp.test.ts`.
+
+### S2 · Variant-`match` over a union-returning find is broken on four backends (P0) — ✅ FIXED
 
 `find locate(name): Project or ProjectNotFound` lowers the repository find to
 the documented absence shape (`Project | null` / `Project?`), but the
@@ -173,7 +215,14 @@ discriminant probe — no wrapper types needed, and it matches how the
 controllers already handle the same find. (Alternative — reify the union at
 the repository port — is more DDD-expressive but a much bigger parity slice.)
 
-### S3 · The compile gates didn't hold the line (P0 — meta)
+> **✅ FIXED (#1631, `ab650758`)** — the recommended fix shipped on all five
+> backends: variant-`match` over an absence-shape union find lowers to a presence
+> check (`absenceCheck` in each backend's `render-expr.ts` + the shared
+> `src/generator/_expr/target.ts`), so no wrapper/sealed-union types are needed and
+> the aggregate arm binds the non-null value. The "doesn't compile" cells of the
+> grade matrix above (and footnotes ¹/²) describe the **pre-fix** state.
+
+### S3 · The compile gates didn't hold the line (P0 — meta) — ✅ MOSTLY FIXED
 
 Java and .NET showcase output fails compilation on `main`; Hono's fails
 `tsc --strict`; Python's fails `mypy --strict` — yet all per-PR gates are
@@ -184,7 +233,13 @@ corpora don't include the shapes that broke. Whatever slice fixes S1/S2 must
 also close the gate hole: add showcase to the tsc/mypy-gated corpora and check
 why the dotnet/java cells didn't go red.
 
-### S4 · No optimistic concurrency anywhere (P1 — the missing half of "aggregate = consistency boundary")
+> **✅ MOSTLY FIXED** — the showcase is now compile-gated on Hono, .NET, and
+> Angular (the S1/S2 fixes landed with their gate cells), so the Java/.NET/Hono
+> compile breaks are pinned. Residual: adding the showcase to the **python-build**
+> corpus is still open (the two ruff-level emitter cosmetics noted in the P0 status
+> block). Downgraded to P3/meta.
+
+### S4 · No optimistic concurrency anywhere (P1 — the missing half of "aggregate = consistency boundary") — ⚠️ PARTIAL (mechanism now ships; default-on unadopted)
 
 Zero version columns across all five schemas; every operation route is a
 read-modify-write (on Hono even across **two separate transactions** — `getById`
@@ -205,6 +260,16 @@ version=…` → bump, or the native mechanism: EF `IsRowVersion()`/`xmin`, JPA
 assertion pinning the status. The DSL needs no new syntax — this is the
 correct *default* for a toolchain whose pitch is the aggregate boundary; an
 opt-out knob can come later.
+
+> **⚠️ PARTIAL — the "anywhere" claim is now stale.** The `versioned` capability
+> ships the full mechanism on all five backends — a `version` column, guarded
+> writes, and a **409** on conflict (`src/ir/util/versioned-capability.ts` + each
+> backend's schema/repo/error emitters). What remains unadopted is only the
+> *default-on* recommendation (make it the default for every aggregate) — a
+> proposal (`fb02e61d`), not an emitter gap. So the boundary's concurrency half
+> exists as an **opt-in capability**; the finding stands only as "not on by
+> default." "Zero version columns across all five schemas" is no longer true for
+> `versioned` aggregates.
 
 ### S5 · Domain events: right half raised, wrong half delivered (P1/P2)
 
@@ -241,6 +306,17 @@ semantics in conformance. (c) Uniform publisher wiring on Java. (d) Outbox
 documented upgrade path for the `channelSource` broker story — the Python
 emitter's `DomainEventDispatcher` Protocol docstring already names this seam;
 make it real when brokers land.
+
+> **✅ (a) FIXED** — Phoenix now emits events *after* the `{:ok, record}` branch of
+> `persist_change` and routes them through the context `Dispatcher` + a post-commit
+> PubSub fanout (`context-emit.ts` dispatcher + fanout), so the declared
+> `ArchivalTracker` saga is reachable — no more pre-commit phantom events into a
+> subscriber-less topic.
+> **✅ (c) FIXED** — Java's publisher no longer only logs; `java/emit/service.ts`
+> wires real event publication (the code cites "audit §S5c").
+> **Still open:** (b) the .NET/Java saga starter double-append / unpinned order
+> (mitigation present, not conformance-pinned) and (d) the outbox / Hono
+> fire-and-forget upgrade path (by design until brokers land).
 
 ### S6 · Rehydration re-runs creation invariants (P2 — Hono, Python)
 
@@ -298,7 +374,7 @@ name from the shape (`FindAllByActiveNamedBySequenceDesc`) or emit anonymous
 retrievals as private members of the repository implementation, keeping the
 hash out of the domain vocabulary.
 
-> **✅ FIXED** — the hash is replaced by a canonical readable rendering of
+> **✅ FIXED (#1723)** — the hash is replaced by a canonical readable rendering of
 > the shape at the single minting site (`shapeSuffix` in
 > `lower-workflow.ts`): the audit's example now emits exactly
 > `FindAllByActiveNamedBySequenceDescSpec` / `runFindAllByActiveNamedBySequenceDesc`
@@ -321,7 +397,7 @@ hash out of the domain vocabulary.
 - **Phoenix**: idiomatic schemaless-changeset + `new/1` ✔ (dinged only for the
   dropped derived member, part of S12).
 
-> **✅ FIXED** — Python VOs are `@dataclass(frozen=True)` (field-wise
+> **✅ FIXED (Python #1738)** — Python VOs are `@dataclass(frozen=True)` (field-wise
 > `__eq__`/`__hash__`, `FrozenInstanceError` on mutation, invariants in
 > `__post_init__`); Hono VOs gain a type-driven field-wise `equals()` and
 > throw `DomainError` on invariant violation.  Fixing it surfaced (and
@@ -371,6 +447,16 @@ seed positional-args/string-datetime).
 
 ### Phoenix — not signable yet (the priority backend)
 
+> **[2026-07-11 re-verify]** Most of the create-only-boundary items below are now
+> fixed: generic-update mass-assign → dedicated `update_changeset` (#1703);
+> cross-field invariant now rendered (#1710); derived properties now projected to
+> the wire (#1718 — chained/helper-fn/current-user derived stay honestly skipped,
+> no crash); `requires`/`precondition` now map to 403/422 instead of 500
+> (#1710/#1716); the dead hard-`Repo.delete` on softDeletable is gated out (#1763,
+> already ✅ below); events are S5(a) FIXED (post-commit dispatch). **Still open:**
+> operation-persist skips changeset re-validation (PARTIAL — low risk, the domain
+> floor from #1710/#1716 mitigates). The bullets below are the original snapshot.
+
 The skeleton is idiomatic (context facade as sole entry, per-aggregate
 repository modules, pure domain cores, schemaless-changeset VOs, serializable
 transaction where declared, PII-aware `Inspect`), but the boundary is
@@ -400,6 +486,12 @@ create-only:
   Squad's repository.
 
 ### Python — signable after the two runtime breaks + S9
+
+> **[2026-07-11 re-verify]** The two runtime breaks are fixed: `reposFor()` now
+> handles the `if-let` arm (`workflows-builder.ts` — no more unbound-repo
+> `NameError`) and the variant-match break is S2 FIXED. S9's mutable VOs are fixed
+> (`@dataclass(frozen=True)`, #1738). Still open: S7's inverted domain-service
+> import and `to_wire()` on the repository.
 
 The strongest layering discipline of the five in some ways: three cleanly
 separated representations (domain classes / `*Row` persistence / pydantic
@@ -533,6 +625,13 @@ honest `datasources.md` unused-flags.
 | **P2** | S6 rehydration trust, S7 ports, S8 retrieval naming, S9 VO upgrades, S10 extern scoping, .NET `AsNoTracking` + read-side split, Java private fields + projection views, Hono/Python `to_wire` off the repository | per-backend | various |
 | **P2** | Strategic: per-context namespaces + event-union split; `api` → OpenAPI tag groups; artifact honesty (likec4 `needsDb` derivation, deployment.mmd context nodes, frontend edge truth, asyncapi transport honesty, saga table schema, wire-spec context keys) | generators + `src/system/` | `system/{likec4,mermaid,wire-spec}.ts` etc. |
 | **P3** | Language: context-map relations, system-of-record, crudish-vs-gated lint, softDeletable lint, outbox for broker-backed channels | DSL design | proposals |
+
+> **[2026-07-11 re-verify]** The two **P0** rows and the **P1** S5(a)/S5(c) and
+> Phoenix-boundary rows are **done** (see per-finding ✅ above); **P0** S1/S2/S3 are
+> closed except the python-build-corpus tail. **S4** (P1) shipped as an opt-in
+> capability (default-on pending). Remaining live work: **P2** (S7 ports, S10
+> extern, strategic namespaces / api-grouping, S5(b)/(d)) and the **P3** language
+> items.
 
 **Bottom line.** The generated code is recognizably the work of someone who
 knows DDD — the aggregates, factories, typed IDs, specifications, and layering
