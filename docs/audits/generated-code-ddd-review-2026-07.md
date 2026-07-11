@@ -503,6 +503,12 @@ honest `datasources.md` unused-flags.
 - **`softDeletable` with no reachable delete operation** (Squad) — declared
   state + read filter with no writer; warn. (The dead hard-`delete` on the
   Phoenix repository is an emitter defect; the missing route is faithful.)
+  > **✅ FIXED (emitter defect)** — the Phoenix CRUD `delete` seam (repository
+  > `delete/1`, context `delete_<agg>` defdelegate, controller `delete` action)
+  > is now gated on a reachable `destroy` via `emitsRestDelete` (`rest-surface.ts`),
+  > the same predicate the router already used — so no more unrouted hard-`delete`.
+  > The `warn` for a `softDeletable` aggregate that never writes `isDeleted`
+  > (no `softDelete`/`destroy`) remains a P3 language lint.
 - **Payload records don't exist in the output** (`RenameProjectCmd`,
   `ProjectCard`, `ProjectOutcome` — zero hits in any backend): deliberate for
   unreferenced payloads, but a ubiquitous-language cost worth revisiting once

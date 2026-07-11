@@ -46,6 +46,7 @@ import {
   putAssocLines,
   refCollRepoHelpers,
 } from "./ref-collection-emit.js";
+import { emitsRestDelete } from "./rest-surface.js";
 import { usesRelationalContainments } from "./schema-emit.js";
 import {
   aggregateHasStamps,
@@ -307,6 +308,23 @@ function renderRepository(
   const updateErrTail = versioned ? "Ecto.Changeset.t() | :conflict" : "Ecto.Changeset.t()";
   const updateSpecArgTail = `${hasStamps && stampPrincipal ? ", map() | nil" : ""}${versioned ? ", integer() | nil" : ""}`;
 
+  // The CRUD `delete/1` repository fn is emitted only when the aggregate exposes
+  // a REST delete surface (a reachable `destroy`).  Without it the function was
+  // dead code: no route, no context delegate, no LiveView seam reached it (audit
+  // `generated-code-ddd-review-2026-07.md`: the dead hard-`Repo.delete`).  Gated
+  // on the SAME `emitsRestDelete` predicate the router / controller / context use.
+  // The `destroy_<agg>!` LiveView `DestroyForm` seam is a separate `Repo.delete!`
+  // on the context module (its own `hasDestroy` gate), so it is unaffected.
+  const deleteBlock = emitsRestDelete(agg)
+    ? `
+  @spec delete(${aggModule}.t()) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
+  def delete(%${aggModule}{} = record) do
+    Repo.delete(record)
+  end
+
+`
+    : "\n";
+
   return `# Auto-generated.
 defmodule ${repoMod} do
   @moduledoc false${ectoImport}
@@ -357,13 +375,7 @@ ${versionOverride}    record${updatePreload}
     |> ${aggModule}Changeset.${updateChangesetFn}(attrs)${updateStamps}${updatePutAssoc}
     |> Repo.update()${updateRescue}
   end
-
-  @spec delete(${aggModule}.t()) :: {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
-  def delete(%${aggModule}{} = record) do
-    Repo.delete(record)
-  end
-
-  @doc "Persist a pre-built changeset (Slice 5c — named-operation seam)."
+${deleteBlock}  @doc "Persist a pre-built changeset (Slice 5c — named-operation seam)."
   @spec persist_change(Ecto.Changeset.t()) ::
           {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t()}
   def persist_change(%Ecto.Changeset{data: %${aggModule}{}} = changeset) do
