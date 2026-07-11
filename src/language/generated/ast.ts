@@ -4021,7 +4021,7 @@ export function isView(item: unknown): item is View {
     return reflection.isInstance(item, View.$type);
 }
 
-export type ViewSource = Aggregate | Workflow;
+export type ViewSource = Aggregate | Projection | Workflow;
 
 export const ViewSource = {
     $type: 'ViewSource'
@@ -6232,7 +6232,7 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                     name: Projection.name
                 }
             },
-            superTypes: [ContextMember.$type]
+            superTypes: [ContextMember.$type, ViewSource.$type]
         },
         ProjectionMember: {
             name: ProjectionMember.$type,

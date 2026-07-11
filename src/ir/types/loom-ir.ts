@@ -1127,11 +1127,13 @@ export interface SeedRowIR {
  *  repository plus a `GET /views/<snake_name>` route on each
  *  backend.  Joined sources and per-view parameters are not yet
  *  supported. */
-/** A view's source — an aggregate (read through its repository) or a
+/** A view's source — an aggregate (read through its repository), a
  *  workflow (read through its persisted instance / saga-state row;
- *  workflow-instance-views.md).  Must live in the same context as the view. */
+ *  workflow-instance-views.md), or a projection (read through its
+ *  read-model `<Proj>Row` table; projection.md v1.1).  Must live in the same
+ *  context as the view. */
 export interface ViewSourceIR {
-  kind: "aggregate" | "workflow";
+  kind: "aggregate" | "workflow" | "projection";
   name: string;
 }
 

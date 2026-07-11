@@ -1397,7 +1397,7 @@ ProjectionOn:
 // or a workflow (the wire shape is its persisted instance / saga-state row —
 // see docs/proposals/workflow-instance-views.md).  The grammar admits both;
 // the validator restricts the workflow case (shorthand only, non-event-sourced).
-type ViewSource = Aggregate | Workflow;
+type ViewSource = Aggregate | Workflow | Projection;
 
 View:
     'view' name=ID

@@ -25,6 +25,7 @@ import {
   isModel,
   isPage,
   isPayloadDecl,
+  isProjection,
   isSystem,
   isTargetable,
   isUi,
@@ -244,6 +245,15 @@ export class DddScopeComputation extends DefaultScopeComputation {
       // ref (`[ViewSource:ID]`) resolves by bare name, exactly as an aggregate
       // source does (workflow-instance-views.md).
       if (isWorkflow(node)) {
+        const name = this.nameProvider.getName(node);
+        if (name) {
+          exports.push(this.descriptions.createDescription(node, name, document));
+        }
+      }
+      // Projections get a bare-name export too, the same way workflows do, so a
+      // `view X { from <Projection> … }` source ref (`[ViewSource:ID]`) resolves
+      // by bare name — projection-as-view-source (projection.md v1.1).
+      if (isProjection(node)) {
         const name = this.nameProvider.getName(node);
         if (name) {
           exports.push(this.descriptions.createDescription(node, name, document));

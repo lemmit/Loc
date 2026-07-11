@@ -1017,6 +1017,25 @@ export function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): v
         continue;
       }
       columnSource = { fields: wf.stateFields ?? [], contains: [], derived: [] };
+    } else if (view.source.kind === "projection") {
+      // A projection source reads its `<Proj>Row` read-model table (projection.md
+      // v1.1).  Unlike a workflow source, full-form (bind-projected) views ARE
+      // supported — a view is a query, not a replayable fold, so bind-following
+      // a foreign `X id` into its repo at read time is legal (the aggregate
+      // full-form machinery composes over the projection row source).  A
+      // projection always carries a required `keyed by` correlation field, so
+      // there is no "not observable" gate.
+      const proj = ctx.projections.find((p) => p.name === view.source.name);
+      if (!proj) {
+        diags.push({
+          severity: "error",
+          code: "loom.view-unknown-source",
+          message: `view '${view.name}': source '${view.source.name}' is not an aggregate, workflow, or projection in context '${ctx.name}'.`,
+          source: `${ctx.name}/${view.name}`,
+        });
+        continue;
+      }
+      columnSource = { fields: proj.stateFields, contains: [], derived: [] };
     } else {
       const agg = ctx.aggregates.find((a) => a.name === view.source.name);
       if (!agg) {
