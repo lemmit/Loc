@@ -234,11 +234,16 @@ call**. At runtime the generated api code:
 5. The handler returns a contract response, which the api serialises
    to HTTP.
 
-The mediator is **generator-emitted**, not declared in the DSL. It's
-the canonical pattern in .NET (MediatR's `IRequestHandler<T>`
-registrations), straightforward in Hono (a handler table keyed by
-command type), and uniform across Phoenix. Every backend implements
-the same dispatch contract.
+The mediator is **generator-emitted**, not declared in the DSL. On
+.NET it is **already how the backend dispatches every endpoint today** —
+the source-generated `martinothamar/Mediator` package (`ICommandHandler<TCmd,
+TRet>` / `IQueryHandler<TQuery, TRet>` handlers, `_mediator.Send(...)` from
+each minimal-API endpoint; `src/generator/dotnet/emit/cqrs.ts`). So the
+explicit-handler slice **redirects** that existing emission to read the
+`commandHandler` / `queryHandler` / `route` IR rather than only auto-deriving
+from operations — .NET is the natural first backend, not greenfield. It is
+straightforward in Hono (a handler table keyed by command type) and uniform
+across Phoenix. Every backend implements the same dispatch contract.
 
 This is why the contract layer earns its split structurally: it's the
 *only* layer both api and application reference. Without it, api and
