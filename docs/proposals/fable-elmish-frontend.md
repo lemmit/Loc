@@ -31,7 +31,9 @@ There is no single "Fable target." There are two, and they are far apart:
    `Model` are now a direct projection off `ActionIR`/`StoreIR`, not a synthesis
    — turning Elmish from a research project into an incremental `update`-emitter
    on top of (1). The residual is the **anonymous-lambda page** (named actions
-   are opt-in, not mandatory): see §2.2 for the three ways to close it.
+   are opt-in, not mandatory) — but a whole-corpus census (§8) finds it is ~4
+   files, so the fix is to *eliminate the form* (migrate them + a global
+   lambda-purity invariant), not to build a gate that tolerates it.
 
 The largest *unknown* is independent of the MVU question: every Loom design
 pack is Handlebars emitting **markup strings**, and Feliz has no markup layer
@@ -115,8 +117,10 @@ it, cheapest first:
    `Msg` names, and it re-introduces the per-target hoist named actions
    removed — **not recommended** except as a fallback for (1).
 
-Recommendation: ship (1) with the target, keep (2) as the follow-up that pays
-for itself across HEEx + MVU. §8 expands the trade-off.
+Recommendation (developed with a corpus census in §8): because every `.ddd`
+file lives in this repo, the residual is ~4 files — so **eliminate the form**
+(migrate them + a global lambda-purity invariant) rather than build a per-target
+gate to tolerate it. §8 expands the trade-off.
 
 ### 2.1 Distance-to-MVU scorecard (per axis)
 
@@ -240,11 +244,14 @@ shape itself (`wireShape`), the e2e harness/smoke-spec structure.
 3. **Ship Feliz-with-hooks** if the value (type-safe F# + CI gate +
    .NET-shop differentiation) justifies the pack cost. Honest, low-risk.
 4. ~~Land named actions~~ **✅ done** (Stage 1 + Stage 5 shipped) — real Elmish
-   now falls out as a mechanical `update`-emitter over `ActionIR`/`StoreIR`.
-   The remaining gate before it is total is the anonymous-lambda page: land
-   `loom.mvu-requires-named-action` (or the shared auto-name pass) per §2.2/§8.
-   Async `Cmd`s track [`async-actions-and-effects.md`](async-actions-and-effects.md)
-   separately and are **not** on the sync-MVU critical path.
+   now falls out as a mechanical `update`-emitter over `ActionIR`/`StoreIR`. To
+   make the projection *total*, land the standalone language-cleanup PR of §8:
+   migrate the ~4 residual inline-effect files + a **global** `loom.effect-in-lambda`
+   purity invariant (not an MVU-only gate). It stands on its own merits (retires
+   HEEx's `event_N` hoist; uniform testable handlers) and MVU inherits totality
+   for free. Async `Cmd`s track
+   [`async-actions-and-effects.md`](async-actions-and-effects.md) separately and
+   are **not** on the sync-MVU critical path.
 
 ## 7. Spike findings
 
@@ -319,6 +326,31 @@ with a declarative nav), which the walker already lowers to named API/nav
 calls. So the residual is confined to *hand-written* inline effect handlers — a
 minority, and precisely the pattern Elm-style authoring discourages anyway.
 
+### 8.1a The residual is empty enough to delete, not tolerate
+
+There is no external `.ddd` corpus — **every Loom source that exists is in this
+repo** (`examples/` + `web/src/examples/`). That removes the backward-compat
+constraint that would normally force a *tolerant* strategy, so the first move is
+to census the actual residual rather than design machinery for a hypothetical
+one. Grepping the whole corpus for the only shape that breaks the projection —
+a lambda block containing a state write (`=> { … := … }`) or an inline
+effectful handler prop — turns up the complete list:
+
+| File | Handler |
+|---|---|
+| `examples/svelte-shop.ddd:83` | `Button { onClick: e => { count := count + 1 } }` |
+| `web/src/examples/storybook-components.ddd:134` | `Button { onClick: e => { clickCount := clickCount + 1 } }` |
+| `examples/sales-ui.ddd:102,107,111` | `onSubmit: () => step := 1` (×3) |
+
+That is the entire population. Every *other* `:=` in the corpus is backend
+domain logic (aggregate `operation`/`create`/`apply` bodies) or already inside a
+named page/store `action` (`action bump() { count := count + 1 }`); every other
+page-body `=>` is a pure value lambda. And the correct form already ships and
+coexists in the same files (`Button { onClick: reserveNow }`,
+`Button { onClick: addOne }`). So the residual is ~4 files, a handful of
+handlers, each with an obvious name — a 20-minute mechanical migration, not a
+compatibility surface.
+
 ### 8.2 Four dispositions, most-faithful to least
 
 0. **Functional-update escape hatch.** Add one catch-all `Msg.Patch of (Model → Model)`
@@ -326,13 +358,21 @@ minority, and precisely the pattern Elm-style authoring discourages anyway.
    Zero synthesis, compiles today — but it **discards exhaustiveness and the
    testable-`update` payoff**, i.e. the entire reason to pick MVU. Keep it as a
    safety valve, never the default.
-1. **Gate — `loom.mvu-requires-named-action`.** On an MVU-targeted `ui`, an
-   effectful handler must be a named `action`; an inline effect lambda is a
-   validation error with a fix-it ("name this handler"). Makes the projection
-   **total by construction**, needs no codegen, and reuses the exact purity/
-   payload machinery named actions already ship. Viable *specifically because*
-   scaffolds already comply — the gate never fires on generated pages, only on
-   hand-authored inline effects. **Cheapest; recommended for v1.**
+1. **Eliminate the form — a *global* purity invariant (`loom.effect-in-lambda`).**
+   Not an MVU-only gate. Migrate the ~4 residual files to named actions (§8.1a),
+   then make "a lambda body is pure; an effect (`:=`/`+=`/`navigate`/`emit`/a
+   sync mutating call) must live in a named `action`" a validation error for
+   **every** target. This is the strongest option precisely because we own the
+   whole corpus: it does not *tolerate* the inline-effect lambda, it *removes* it
+   from the language, so the projection is total for MVU **and** the language
+   gets smaller and more uniform (one way to write an effect handler, everywhere).
+   Two payoffs no per-target gate delivers: **HEEx's `event_N` hoist
+   (`hoistLambdaToHandler`) becomes dead code** — nothing can reach it — and
+   *every* frontend inherits named, unit-testable handlers. Reuses the purity
+   machinery named actions already ship (`loom.action-payload-mismatch`, the
+   effect-freedom check). **Recommended.** (Contrast the MVU-scoped variant
+   `loom.mvu-requires-named-action`: same effect, but makes MVU stricter than its
+   siblings — a per-target wart with no upside once the corpus is migrated.)
 2. **Auto-name lowering pass.** An IR→IR normalization that lifts each effectful
    page/component lambda into a synthesized `ActionIR` before codegen: derive
    the `Msg` name from the single write target when the body is one assignment
@@ -341,11 +381,12 @@ minority, and precisely the pattern Elm-style authoring discourages anyway.
    computes this via `positionalArgs`/`describeReceiver`); route genuinely-async
    bodies to the `loom.action-requires-await` gate. This is the
    `hoistLambdaToHandler` logic moved **out of Phoenix codegen and into shared
-   IR, done once** — so it lets HEEx delete its own hoist and makes *every*
-   frontend's handlers named and unit-testable, not just MVU. It is a real pass
-   with its own tests, but it pays for itself across HEEx + MVU + testability.
-   **Highest value; the follow-up after (1).** (It lowers, it does not rewrite
-   `.ddd` source — inline authoring stays legal; `unfold` is unaffected.)
+   IR, done once**. It was the recommended baseline when the residual looked
+   large; with the census in §8.1a showing it is ~empty, its *bridge* value is
+   gone (nothing to auto-name), and it survives only as **optional cleanup** if
+   one later decides to keep inline-effect authoring legal after all — a
+   deliberate reversal of (1), not a default. Keeps `.ddd` source unrewritten
+   (`unfold` unaffected).
 3. **Per-target `event_N` synthesis in the MVU walker.** Port HEEx's gensym into
    the MVU emitter for the lambda case. **Rejected** — it re-introduces the
    per-target hoist named actions just removed, and yields `event_N`-quality
@@ -353,10 +394,18 @@ minority, and precisely the pattern Elm-style authoring discourages anyway.
 
 ### 8.3 Recommendation
 
-Ship **(1) the gate** with the sync-MVU target: it makes the projection total,
-costs one validator, and — because scaffolds are already effect-lambda-free —
-imposes friction only on the hand-authored inline-effect minority, nudging them
-toward the better authoring model. Then land **(2) the auto-name lowering** as
-the general-value follow-up whose benefit is not MVU-specific: it retires
-HEEx's bespoke hoist and gives every frontend named, testable update logic. Keep
-**(0)** documented as the escape hatch and **(3)** explicitly rejected.
+**Delete the form, don't tolerate it (option 1).** Because there is no external
+corpus, the tolerant strategies (a per-target gate, an auto-name bridge) solve a
+problem the census says is ~empty. The cheaper *and* cleaner move is to migrate
+the ~4 residual files to named actions and make lambda purity a **global**
+invariant. The projection becomes total for MVU as a side effect of a language
+simplification that stands on its own merits — one effect-handler form
+everywhere, HEEx's `event_N` hoist retired, uniform testable handlers across all
+frontends. This is a decision that is only available *because* all Loom code is
+in-repo; spend that leverage here rather than banking machinery to preserve a
+form nobody depends on.
+
+Sequencing: the migration + `loom.effect-in-lambda` gate is a **standalone
+language-cleanup PR** that need not wait on any Fable work — land it on its own
+merits, and MVU inherits a total projection for free. **(2)** downgrades to
+optional; **(0)** stays a documented escape hatch; **(3)** stays rejected.
