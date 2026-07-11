@@ -81,6 +81,36 @@ describe("explicit api handlers — lowering", () => {
     expect(qry.savesAtExit).toEqual([]);
   });
 
+  it("lowers a handler `return <expr>` to returnValue, not the __bad__ sentinel", async () => {
+    // Regression: handler bodies lower through lowerWorkflowStatement, which has
+    // no `return` arm (workflow handles never return a value) — so a `return`
+    // used to fall through to the `{ kind: "expr-let", name: "__bad__" }`
+    // sentinel and the return value was silently dropped.  It must now surface
+    // as a resolved `returnValue` ExprIR, with no sentinel in the body.
+    const cmd = `
+      commandHandler CancelOrder(id: Order id): Order id {
+        let o = Orders.getById(id)
+        o.cancel()
+        return o.id
+      }`;
+    const qry = `
+      queryHandler GetStatus(id: Order id): string {
+        let o = Orders.getById(id)
+        return o.status
+      }`;
+    const { model } = await parseString(SYS(`${cmd}\n${qry}`, ""), { validate: false });
+    const ctx = allContexts(lowerModel(model)).find((c) => c.name === "Ordering")!;
+    const ch = ctx.commandHandlers![0]!;
+    const qh = ctx.queryHandlers![0]!;
+    // The return is NOT a body statement; the value is captured on returnValue.
+    expect(ch.statements.map((s) => s.kind)).toEqual(["repo-let", "op-call"]);
+    expect(ch.returnValue).toMatchObject({ kind: "member", member: "id" });
+    expect(qh.statements.map((s) => s.kind)).toEqual(["repo-let"]);
+    expect(qh.returnValue).toMatchObject({ kind: "member", member: "status" });
+    // No __bad__ sentinel anywhere in either body.
+    expect(JSON.stringify([ch, qh])).not.toContain("__bad__");
+  });
+
   it("lowers routes onto ApiIR.routes", async () => {
     const { model } = await parseString(SYS(`${OK_CMD}\n${OK_QRY}`, OK_ROUTES), {
       validate: false,

@@ -31,6 +31,7 @@ import {
   isProperty,
   isRepository,
   isRequiresStmt,
+  isReturnStmt,
   isWorkflowCreateDecl,
 } from "../../language/generated/ast.js";
 import { upperFirst } from "../../util/naming.js";
@@ -318,18 +319,24 @@ export function lowerCommandHandler(
     params.push({ name: p.name, type: t });
     inner = withLocal(inner, p.name, "param", t);
   }
-  const statements: WorkflowStmtIR[] = [];
-  for (const s of h.body) {
-    const l = lowerWorkflowStatement(s, inner, aggsByName, reposByName, repoForAgg);
-    statements.push(l.stmt);
-    inner = l.envAfter;
-  }
+  // A handler `return <expr>` is captured separately as `returnValue`, NOT as a
+  // body statement: body statements are `WorkflowStmtIR` and the shared workflow
+  // statement renderer has no `return` arm (workflow handles never return a
+  // value), so a return left in `statements` lowers to the `__bad__` sentinel.
+  const { statements, returnValue } = lowerHandlerBody(
+    h.body,
+    inner,
+    aggsByName,
+    reposByName,
+    repoForAgg,
+  );
   return {
     name: h.name,
     params,
     ...(h.returnType ? { returnType: lowerType(h.returnType, env) } : {}),
     statements,
     savesAtExit: computeSaves(statements, repoForAgg, undefined, saveResolver),
+    ...(returnValue ? { returnValue } : {}),
   };
 }
 
@@ -352,19 +359,49 @@ export function lowerQueryHandler(
     params.push({ name: p.name, type: t });
     inner = withLocal(inner, p.name, "param", t);
   }
-  const statements: WorkflowStmtIR[] = [];
-  for (const s of h.body) {
-    const l = lowerWorkflowStatement(s, inner, aggsByName, reposByName, repoForAgg);
-    statements.push(l.stmt);
-    inner = l.envAfter;
-  }
+  const { statements, returnValue } = lowerHandlerBody(
+    h.body,
+    inner,
+    aggsByName,
+    reposByName,
+    repoForAgg,
+  );
   return {
     name: h.name,
     params,
     returnType: lowerType(h.returnType, env),
     statements,
     savesAtExit: computeSaves(statements, repoForAgg, undefined, saveResolver),
+    ...(returnValue ? { returnValue } : {}),
   };
+}
+
+/** Lower a `commandHandler` / `queryHandler` body: every non-return statement
+ *  through the shared workflow-statement lowerer, and the terminal `return
+ *  <expr>` as a distinct `returnValue` (the workflow statement vocabulary has
+ *  no return form).  A return may only appear as the LAST statement — the
+ *  validator/grammar don't yet forbid a mid-body return, so a defensive guard
+ *  keeps the last-return semantics (an earlier return would be dead code). */
+function lowerHandlerBody(
+  body: readonly Statement[],
+  env: Env,
+  aggsByName: Map<string, Aggregate>,
+  reposByName: Map<string, Repository>,
+  repoForAgg: Map<string, string>,
+): { statements: WorkflowStmtIR[]; returnValue?: ExprIR } {
+  const statements: WorkflowStmtIR[] = [];
+  let returnValue: ExprIR | undefined;
+  let inner = env;
+  for (const s of body) {
+    if (isReturnStmt(s)) {
+      returnValue = lowerExpr(s.value, inner);
+      continue;
+    }
+    const l = lowerWorkflowStatement(s, inner, aggsByName, reposByName, repoForAgg);
+    statements.push(l.stmt);
+    inner = l.envAfter;
+  }
+  return { statements, ...(returnValue ? { returnValue } : {}) };
 }
 
 // Lower an `on(e: Event) { … }` reactor member to its IR (workflow-and-applier.md

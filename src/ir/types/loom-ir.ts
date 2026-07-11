@@ -1316,6 +1316,12 @@ export interface CommandHandlerIR {
   returnType?: TypeIR;
   statements: WorkflowStmtIR[];
   savesAtExit: { name: string; aggName: string; repoName: string }[];
+  /** The lowered `return <expr>` value, when the body ends in a return.  Held
+   *  separately from `statements` (which are `WorkflowStmtIR`, and the shared
+   *  workflow statement renderer has no `return` arm — workflow handles never
+   *  return a value).  A backend renders the body statements, then
+   *  `return <returnValue>`.  Absent for a `: void`-equivalent handler. */
+  returnValue?: ExprIR;
 }
 
 /** A top-level `queryHandler name(params): T { … }` application-layer member
@@ -1328,6 +1334,10 @@ export interface QueryHandlerIR {
   returnType: TypeIR;
   statements: WorkflowStmtIR[];
   savesAtExit: { name: string; aggName: string; repoName: string }[];
+  /** The lowered `return <expr>` value (see `CommandHandlerIR.returnValue`).  A
+   *  query always produces a response, so this is effectively always present —
+   *  optional only so a malformed (return-less) body lowers without a cast. */
+  returnValue?: ExprIR;
 }
 
 /** A workflow starter declared via `create [name](params) [by <expr>] { … }`
