@@ -40,6 +40,7 @@ import { aggregateNeedsUpdateChangeset } from "./changeset-emit.js";
 import { isVanillaDocAgg, renderDocRepository } from "./document-emit.js";
 import { isEventSourced } from "./eventsourced-emit.js";
 import { isAbstractBase, isTphBase, tpcConcretesOf, tphKind } from "./inheritance-emit.js";
+import { readPreloadRels } from "./read-preload.js";
 import {
   containsRefCollField,
   hasRefColls,
@@ -55,7 +56,6 @@ import {
   stampUsesPrincipal,
   stampUsesPrincipalFor,
 } from "./stamp-emit.js";
-import { valueCollectionsWithVo } from "./value-collection-schema-emit.js";
 
 export function emitVanillaRepositories(
   appModule: string,
@@ -130,19 +130,12 @@ function renderRepository(
   const kind = tphKind(agg, pool);
   const kindFilter = kind ? `record.kind == ${JSON.stringify(kind)}` : null;
 
-  // Value-object collections (`charges: Money[]`) are `has_many` associations —
-  // preloaded on every read so the wire shape materialises (an unloaded
-  // `has_many` serialises as `%Ecto.Association.NotLoaded{}`).  Ordered via the
-  // schema's `preload_order: [asc: :ordinal]`.
-  const valueCollectionRels = ctx
-    ? valueCollectionsWithVo(agg, ctx).map((v) => `:${snake(v.vc.fieldName)}`)
-    : [];
-
   // Relational entity-part containments (§11c) are `has_many`/`has_one`
   // associations — preloaded on every read so the wire shape materialises (an
   // unloaded association serialises as `%Ecto.Association.NotLoaded{}`, which
   // Jason can't encode → 500).  Empty on an embedded aggregate (the parts fold
-  // into the jsonb column and load with the row).
+  // into the jsonb column and load with the row).  (Value-object collections
+  // fold into the shared `readPreloadRels` list below alongside these.)
   const containmentRels =
     ctx && usesRelationalContainments(agg, ctx, sys)
       ? agg.contains.map((c) => `:${snake(c.name)}`)
@@ -211,10 +204,12 @@ function renderRepository(
   // for the id-list resolution (`from(t in Target, where: t.id in ^ids)`) and
   // `Repo.preload(...)` on every read so the serializer sees the loaded ids.
   const refColls = hasRefColls(agg);
-  // Reads preload BOTH the value-collection `has_many` and the reference-collection
-  // `many_to_many` relationships in one round-trip, so the serializer materialises
-  // every wire field (an unloaded assoc serialises as `%Ecto.Association.NotLoaded{}`).
-  const preloadRels = [...valueCollectionRels, ...containmentRels, ...preloadList(agg)];
+  // Reads preload the value-collection `has_many`, the relational-containment
+  // `has_many`/`has_one`, AND the reference-collection `many_to_many` in one
+  // round-trip, so the serializer materialises every wire field (an unloaded
+  // assoc serialises as `%Ecto.Association.NotLoaded{}`).  Shared with the
+  // shorthand `view` query (`read-preload.ts`) — both project the same wireShape.
+  const preloadRels = readPreloadRels(agg, ctx, sys);
   const preload = preloadRels.length > 0 ? ` |> Repo.preload([${preloadRels.join(", ")}])` : "";
   const findFns = finds.map((f) =>
     renderFindFn(f, agg, aggModule, contextModule, principal, preload, kindFilter),

@@ -27,6 +27,7 @@ import type {
   AggregateIR,
   BoundedContextIR,
   ExprIR,
+  SystemIR,
   ViewIR,
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
@@ -40,6 +41,7 @@ import {
   combineWhere,
   vanillaCapabilityFilter,
 } from "./capability-filter.js";
+import { readPreloadRels } from "./read-preload.js";
 import { hasRefColls } from "./ref-collection-emit.js";
 import { renderWireSerialize } from "./wire-serialize.js";
 
@@ -57,6 +59,7 @@ export function emitVanillaViewModules(
   appModule: string,
   ctx: BoundedContextIR,
   out: Map<string, string>,
+  sys?: SystemIR,
   sourcemap?: SourceMapRecorder,
 ): void {
   if (ctx.views.length === 0) return;
@@ -85,7 +88,7 @@ export function emitVanillaViewModules(
     const agg = aggsByName.get(view.source.name);
     if (!agg) continue; // validator already errored / non-aggregate source
     const path = `lib/${appName}/${ctxSnake}/views/${snake(view.name)}.ex`;
-    const content = renderVanillaView(view, agg, appModule, contextModule, typesModule);
+    const content = renderVanillaView(view, agg, ctx, sys, appModule, contextModule, typesModule);
     out.set(path, content);
     sourcemap?.file(path, content, view.origin, `${ctx.name}.${view.name}`);
   }
@@ -175,6 +178,8 @@ end
 function renderVanillaView(
   view: ViewIR,
   agg: AggregateIR,
+  bctx: BoundedContextIR,
+  sys: SystemIR | undefined,
   appModule: string,
   contextModule: string,
   typesModule: string,
@@ -200,7 +205,7 @@ function renderVanillaView(
   });
   const isShorthand = !view.output;
   const body = isShorthand
-    ? buildShorthandBody(view, aggModule, renderCtx, cap)
+    ? buildShorthandBody(view, agg, bctx, sys, aggModule, renderCtx, cap)
     : buildFullFormBody(view, aggModule, renderCtx, cap);
   const runSpec = isShorthand
     ? `@spec run(any()) :: [${aggModule}.t()]`
@@ -234,6 +239,9 @@ end
 
 function buildShorthandBody(
   view: ViewIR,
+  agg: AggregateIR,
+  bctx: BoundedContextIR,
+  sys: SystemIR | undefined,
   aggModule: string,
   ctx: RenderCtx,
   cap: string | null,
@@ -242,11 +250,20 @@ function buildShorthandBody(
   // declared string (`filterArgs`); the in-memory `ctx` is for projections.
   const queryCtx: RenderCtx = { ...ctx, filterArgs: true };
   const where = combineWhere(view.filter ? renderExpr(view.filter, queryCtx) : null, cap);
+  // A shorthand view returns the aggregate's STRUCTS, which the ViewsController
+  // then projects through the aggregate's full `wireShape` — so it MUST preload
+  // the same collection associations the REST repository read does, or a
+  // value-object collection / relational containment comes back as
+  // `%Ecto.Association.NotLoaded{}` and the serializer's `Enum.map` over it
+  // raises (→ 500).  Shared list with `repository-emit.ts` (`read-preload.ts`).
+  const preloadRels = readPreloadRels(agg, bctx, sys);
+  const preload =
+    preloadRels.length > 0 ? `\n    |> Repo.preload([${preloadRels.join(", ")}])` : "";
   if (!where) {
-    return `    Repo.all(${aggModule})`;
+    return `    Repo.all(${aggModule})${preload}`;
   }
   return `    from(record in ${aggModule}, where: ${where})
-    |> Repo.all()`;
+    |> Repo.all()${preload}`;
 }
 
 // ---------------------------------------------------------------------------
