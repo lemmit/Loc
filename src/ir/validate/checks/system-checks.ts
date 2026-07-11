@@ -760,20 +760,16 @@ export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnosti
         // reading the jsonb `data` map); if any is not, a body that calls one is
         // gated.  Computed once here and threaded into the op/find checks.
         const allowFnCall = (agg.functions ?? []).every((fn) => !docFunctionUnsupported(fn));
-        // A custom find is unsupported when it's UNION-returning (the tagged-union
-        // wire the document find path doesn't build) or its predicate reads a
-        // non-scalar shape.  A PAGED find is now supported — `renderDocFindFn`
-        // builds the `%{items, page, pageSize, total, totalPages}` envelope
-        // in-memory (Route A slice 4c).
+        // A custom find is unsupported only when its predicate reads a non-scalar
+        // shape.  PAGED finds (Route A slice 4c) and UNION finds (Route A slice 4d)
+        // are now supported: `renderDocFindFn` returns the single-get `{:ok, nil}`/
+        // `{:ok, record}` tuple the shared find controller translates to the tagged
+        // union wire (found → 200 body, absent → 404 / RFC-7807 via `problem_variant`).
         const badFinds = (
           (ctx.repositories ?? []).find((r) => r.aggregateName === agg.name)?.finds ?? []
         )
           .filter((f) => f.name !== "all")
-          .filter(
-            (f) =>
-              f.returnType.kind === "union" ||
-              (f.filter != null && docExprUnsupported(f.filter, allowFnCall)),
-          );
+          .filter((f) => f.filter != null && docExprUnsupported(f.filter, allowFnCall));
         const badOps = agg.operations
           .filter((op) => !VANILLA_DOC_CRUD_OPS.has(op.name))
           .filter((op) => docOpUnsupported(op, allowFnCall, agg));
@@ -789,8 +785,8 @@ export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnosti
           message:
             `aggregate '${ctxName}.${agg.name}' is shape(document) on elixir, which emits ` +
             `scalar custom finds + named operations but not ${bits.join(" and ")} ` +
-            `(returning/audited/provenanced ops, collection mutation, value-object/derived/` +
-            `function reads, or paged/union finds). Simplify them to scalar form, host this ` +
+            `(audited/provenanced ops, collection mutation, value-object/derived/` +
+            `function reads, or non-scalar find predicates). Simplify them to scalar form, host this ` +
             `aggregate on a backend with full document support (node / dotnet / python / java), ` +
             `or use shape(relational) / shape(embedded).`,
           source: `${sys.name}/${dep.name}`,

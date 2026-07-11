@@ -266,12 +266,12 @@ system Shop {
     expect(await docScopeErrors(src)).toEqual([]);
   });
 
-  it("still rejects a UNION-returning custom find on a vanilla document aggregate", async () => {
+  it("accepts a UNION-returning custom find on a vanilla document aggregate (Route A slice 4d)", async () => {
     const src = `
 system Shop {
   subdomain Sales {
     context Shop {
-      error NotFound { message: string }
+      error NotFound { }
       aggregate Cart ids guid shape(document) with crudish {
         reference: string
       }
@@ -285,9 +285,7 @@ system Shop {
   deployable api { platform: elixir, contexts: [Shop], dataSources: [shopState], port: 4000 }
 }
 `;
-    const errs = await docScopeErrors(src);
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toContain("custom find(s) byRef");
+    expect(await docScopeErrors(src)).toEqual([]);
   });
 
   it("accepts a CRUD-only vanilla document aggregate", async () => {

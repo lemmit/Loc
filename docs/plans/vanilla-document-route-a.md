@@ -115,9 +115,16 @@ The migration stays `create table(:orders) do add :data, :map; add :version …`
    enums, no bracket). **✅ PAGED LANDED (2026-07-05, slice 4c):** `renderDocFindFn`
    now builds the `%{items, page, pageSize, total, totalPages}` wire envelope IN
    MEMORY for a `paged` find (filter the whole table → `Enum.slice` the page); the
-   shared paged find-controller action maps `serialize/1` over `items`. Union-tag
-   find builders still deferred (union finds stay gated). Boot-verified (3 tickets,
-   `?page=1&pageSize=2` → 2 items totalPages 2, page 2 → 1 item).
+   shared paged find-controller action maps `serialize/1` over `items`.
+   **✅ UNION LANDED (2026-07-05, slice 4d):** a union-returning find (`Cart or NotFound`)
+   is a single-get whose in-memory `{:ok, List.first(results)}` is exactly the
+   `{:ok, nil}`/`{:ok, record}` tuple the SHARED find controller already translates
+   to the tagged union wire (found → 200 body, absent → 404 / RFC-7807 via
+   `problem_variant/5`) — the doc find fn, defdelegate arity, and controller action
+   were all already correct, so only the `badFinds` union gate came out. Boot-verified
+   (`by_ref?reference=R-1` → 200 found, `?reference=R-9` → 404 ProblemDetails).
+   Paged/union both un-gated; only non-scalar find predicates stay gated. Boot-verified
+   paged (3 tickets, `?page=1&pageSize=2` → 2 items totalPages 2, page 2 → 1 item).
 4. **Containments.** Drop the `document` case from `validateVanillaContainmentSupport`
    (parts now nest via `embeds_many`); wire containment-mutating ops (`lines += …`)
    through the reused relational add/remove arm (`put_embed`).
