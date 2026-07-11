@@ -121,7 +121,9 @@ describe("vanilla provenance runtime (DEBT-06)", () => {
     expect(ctx).toContain("Api.Repo.transaction(fn ->");
     expect(ctx).toContain("Api.Provenance.flush(Api.Repo)");
     // The co-located column rides the same changeset as the declared columns.
-    expect(ctx).toContain("Ecto.Changeset.force_change(:total_provenance, record.total_provenance)");
+    expect(ctx).toContain(
+      "Ecto.Changeset.force_change(:total_provenance, record.total_provenance)",
+    );
   });
 
   it("emits the Provenance SDK (buffer + flush + Json type + Record schema)", async () => {
