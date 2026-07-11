@@ -52,11 +52,11 @@ export interface TypeTarget {
    *  monomorphized record shape on the structural TS backend).  `recur`
    *  renders a sub-type in `reference` mode. */
   genericInstance(t: GenericInstanceType, recur: (t: TypeIR) => string): string;
-  /** A discriminated union (`A or B`, `T option`).  `recur` renders a sub-type
-   *  in `reference` mode — used only by the structural TS backend, which
-   *  inlines the tagged variants; nominal backends return the union's instance
-   *  name and ignore it. */
-  union(t: UnionType, recur: (t: TypeIR) => string): string;
+  /** A discriminated union (`A or B`, `T option`).  Nominal backends return the
+   *  union's instance name; the structural TS backend inlines the tagged
+   *  variants through its own variant renderer (which re-enters via the public
+   *  `renderTsType` wrapper), so no `recur` is threaded here. */
+  union(t: UnionType): string;
   /** The `none` unit type — appears standalone only defensively (it normally
    *  lives inside an option's union). */
   none(): string;
@@ -92,7 +92,7 @@ export function renderTypeWith(t: TypeIR, target: TypeTarget, mode: TypeMode = "
     case "genericInstance":
       return target.genericInstance(t, recur);
     case "union":
-      return target.union(t, recur);
+      return target.union(t);
     case "none":
       return target.none();
   }

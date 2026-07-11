@@ -11,6 +11,7 @@ import {
   type RefExpr,
   renderExprWith,
 } from "../_expr/target.js";
+import { renderTypeWith, type TypeTarget } from "../_type/target.js";
 
 // ---------------------------------------------------------------------------
 // Expression renderer for the Python backend.
@@ -571,57 +572,46 @@ function pyBinOp(op: BinOp): string {
 // Type printing
 // ---------------------------------------------------------------------------
 
+// Type printing leaf table — the Python arm of the shared `TypeTarget` dispatch
+// (`../_type/target.ts`).  Python has no boxing axis, so the `mode` arg is ignored.
+const PY_TYPE_TARGET: TypeTarget = {
+  primitive(name) {
+    switch (name) {
+      case "int":
+      case "long":
+        return "int";
+      case "decimal":
+        return "float";
+      case "money":
+        // Precise decimal — `decimal.Decimal` (parity with decimal.js
+        // on TS / `decimal` on C#).
+        return "Decimal";
+      case "string":
+      case "guid":
+        return "str";
+      case "bool":
+        return "bool";
+      case "datetime":
+        return "datetime";
+      case "json":
+        return "object";
+      case "duration":
+        // A5 temporal — absolute duration as `datetime.timedelta`.
+        // Expression-only (never a field / wire type in this slice).
+        return "timedelta";
+    }
+  },
+  id: (targetName) => `${targetName}Id`,
+  array: (element) => `list[${element}]`,
+  optional: (inner) => `${inner} | None`,
+  // Carrier-bounded generic (`order paged`) → the generic dataclass
+  // the carrier emitter defines (S12), e.g. `Paged[Order]`.
+  genericInstance: (t, recur) => `${upperFirst(t.ctor)}[${recur(t.arg)}]`,
+  // Discriminated union → the tagged-union alias name (S12 emits it).
+  union: (t) => unionInstanceName(t.variants),
+  none: () => "None",
+};
+
 export function renderPyType(t: TypeIR): string {
-  switch (t.kind) {
-    // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
-    case "primitive":
-      switch (t.name) {
-        case "int":
-        case "long":
-          return "int";
-        case "decimal":
-          return "float";
-        case "money":
-          // Precise decimal — `decimal.Decimal` (parity with decimal.js
-          // on TS / `decimal` on C#).
-          return "Decimal";
-        case "string":
-        case "guid":
-          return "str";
-        case "bool":
-          return "bool";
-        case "datetime":
-          return "datetime";
-        case "json":
-          return "object";
-        case "duration":
-          // A5 temporal — absolute duration as `datetime.timedelta`.
-          // Expression-only (never a field / wire type in this slice).
-          return "timedelta";
-      }
-    case "id":
-      return `${t.targetName}Id`;
-    case "enum":
-      return t.name;
-    case "valueobject":
-      return t.name;
-    case "entity":
-      return t.name;
-    case "array":
-      return `list[${renderPyType(t.element)}]`;
-    case "optional":
-      return `${renderPyType(t.inner)} | None`;
-    case "action":
-    case "slot":
-      throw new Error("renderPyType: 'slot' type is UI-only and should not reach the backend.");
-    case "genericInstance":
-      // Carrier-bounded generic (`order paged`) → the generic dataclass
-      // the carrier emitter defines (S12), e.g. `Paged[Order]`.
-      return `${upperFirst(t.ctor)}[${renderPyType(t.arg)}]`;
-    case "union":
-      // Discriminated union → the tagged-union alias name (S12 emits it).
-      return unionInstanceName(t.variants);
-    case "none":
-      return "None";
-  }
+  return renderTypeWith(t, PY_TYPE_TARGET);
 }

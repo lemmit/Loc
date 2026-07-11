@@ -14,6 +14,7 @@ import {
   renderExprWith,
   renderExprWithMarks,
 } from "../_expr/target.js";
+import { renderTypeWith, type TypeTarget } from "../_type/target.js";
 
 // ---------------------------------------------------------------------------
 // Expression renderer for the TypeScript backend.
@@ -558,70 +559,58 @@ function renderMoneyBinary(op: BinOp, left: string, right: string): string {
 // Type printing — used by templates as well
 // ---------------------------------------------------------------------------
 
-export function renderTsType(t: TypeIR): string {
-  switch (t.kind) {
-    // biome-ignore lint/suspicious/noFallthroughSwitchClause: inner switch on the primitive name union is exhaustive (every arm returns)
-    case "primitive":
-      switch (t.name) {
-        case "int":
-        case "long":
-        case "decimal":
-          return "number";
-        case "money":
-          // Precise decimal — mapped to `decimal.js`'s Decimal class
-          // (default-import: `import Decimal from "decimal.js"`).
-          // Backwards-incompatible with the lossy `number` mapping
-          // `decimal` keeps; users opt in per field.
-          return "Decimal";
-        case "string":
-        case "guid":
-          return "string";
-        case "bool":
-          return "boolean";
-        case "datetime":
-          return "Date";
-        case "duration":
-          // A5 temporal — absolute duration as plain milliseconds.
-          // Expression-only (never a field / wire type in this slice).
-          return "number";
-        case "json":
-          return "unknown";
-      }
-    case "id":
-      return `Ids.${t.targetName}Id`;
-    case "enum":
-      return t.name;
-    case "valueobject":
-      return t.name;
-    case "entity":
-      return t.name;
-    case "array":
-      return `${renderTsType(t.element)}[]`;
-    case "optional":
-      return `${renderTsType(t.inner)} | null`;
-    case "action":
-    case "slot":
-      // `slot` is a UI-only param marker; the backend never sees one
-      // on an aggregate / VO / entity field.  Validator rejects
-      // misuse — throwing here keeps the assumption explicit.
-      throw new Error("renderTsType: 'slot' type is UI-only and should not reach the backend.");
-    case "genericInstance": {
-      // Carrier-bounded generic (`order paged`, `event envelope`) renders as
-      // its monomorphized record shape, driven by the stdlib registry so the
-      // domain-side type matches the wire DTO field-for-field (P3b).
-      const fields = genericShape(t.ctor).fields(t.arg);
-      return `{ ${fields.map((f) => `${f.name}: ${renderTsType(f.type)}`).join("; ")} }`;
+// Type printing leaf table — the TS arm of the shared `TypeTarget` dispatch
+// (`../_type/target.ts`).  The 12-arm `TypeIR.kind` switch + recursion live
+// there; this supplies only the TS-divergent leaves.
+const TS_TYPE_TARGET: TypeTarget = {
+  primitive(name) {
+    switch (name) {
+      case "int":
+      case "long":
+      case "decimal":
+        return "number";
+      case "money":
+        // Precise decimal — mapped to `decimal.js`'s Decimal class
+        // (default-import: `import Decimal from "decimal.js"`).
+        // Backwards-incompatible with the lossy `number` mapping
+        // `decimal` keeps; users opt in per field.
+        return "Decimal";
+      case "string":
+      case "guid":
+        return "string";
+      case "bool":
+        return "boolean";
+      case "datetime":
+        return "Date";
+      case "duration":
+        // A5 temporal — absolute duration as plain milliseconds.
+        // Expression-only (never a field / wire type in this slice).
+        return "number";
+      case "json":
+        return "unknown";
     }
-    case "union":
-      // Discriminated union (`A or B`, `T option`) → an inline TS tagged union
-      // (P4b).  Each variant carries the `type` discriminator; record-ish
-      // variants (entity / value object) intersect their domain type, scalars
-      // wrap a `value`, and `none` is the bare unit.  The wire DTO emitters
-      // (Hono routes / React api) produce the matching `z.discriminatedUnion`.
-      return `(${t.variants.map(renderUnionVariantTs).join(" | ")})`;
-    case "none":
-      return `{ type: "none" }`;
-  }
+  },
+  id: (targetName) => `Ids.${targetName}Id`,
+  array: (element) => `${element}[]`,
+  optional: (inner) => `${inner} | null`,
+  genericInstance(t, recur) {
+    // Carrier-bounded generic (`order paged`, `event envelope`) renders as
+    // its monomorphized record shape, driven by the stdlib registry so the
+    // domain-side type matches the wire DTO field-for-field (P3b).
+    const fields = genericShape(t.ctor).fields(t.arg);
+    return `{ ${fields.map((f) => `${f.name}: ${recur(f.type)}`).join("; ")} }`;
+  },
+  // Discriminated union (`A or B`, `T option`) → an inline TS tagged union
+  // (P4b).  Each variant carries the `type` discriminator; record-ish
+  // variants (entity / value object) intersect their domain type, scalars
+  // wrap a `value`, and `none` is the bare unit.  The wire DTO emitters
+  // (Hono routes / React api) produce the matching `z.discriminatedUnion`.
+  union: (t) => `(${t.variants.map(renderUnionVariantTs).join(" | ")})`,
+  none: () => `{ type: "none" }`,
+};
+
+export function renderTsType(t: TypeIR): string {
+  return renderTypeWith(t, TS_TYPE_TARGET);
 }
 
 /** One TS member of a tagged union: `{ type: "Tag" } & Domain` for a record-ish
