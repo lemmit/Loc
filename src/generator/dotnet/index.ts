@@ -30,6 +30,7 @@ import { apiRoutePrefix } from "../../util/api-base.js";
 import { dedupeByName } from "../../util/dedupe.js";
 import { plural, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
+import { embedSpaInto } from "../_frontend/embedded-spa.js";
 import { unionMembers } from "../_payload/union-wire.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { generateReactForContexts } from "../react/index.js";
@@ -602,34 +603,16 @@ function emitProjectFromContexts(
     // see renderDockerfile).
     const embedOpts = { apiBaseUrl: "/api", pathPrefix: "ClientApp/" };
     const uiFw = system.deployable.uiFramework;
-    const embedSvelte = uiFw === "svelte";
     const spaFiles =
       uiFw === "svelte"
         ? generateSvelteForContexts(contexts, system.sys, system.deployable, embedOpts)
         : uiFw === "vue"
           ? generateVueForContexts(contexts, system.sys, system.deployable, embedOpts)
           : generateReactForContexts(contexts, system.sys, system.deployable, embedOpts);
-    for (const [path, content] of spaFiles) {
-      // The React generator's pack also ships `Dockerfile` /
-      // `.dockerignore` / `certs/.gitkeep` at the project root —
-      // duplicates of the .NET project's equivalents and unused in
-      // fullstack mode (the .NET Dockerfile multi-stage owns the
-      // SPA build).  Skip them so the file map stays clean.  The
-      // e2e harness lives outside ClientApp/ in fullstack mode (or
-      // not at all — users own that surface).
-      if (
-        path === "ClientApp/Dockerfile" ||
-        path === "ClientApp/.dockerignore" ||
-        path === "ClientApp/certs/.gitkeep" ||
-        path.startsWith("ClientApp/e2e/")
-      )
-        continue;
-      out.set(path, content);
-    }
-    out.set(
-      "ClientApp/.gitignore",
-      embedSvelte ? "node_modules\nbuild\n.svelte-kit\n" : "node_modules\ndist\n",
-    );
+    // Drop the SPA pack's host-owned root files (Dockerfile / .dockerignore /
+    // certs / e2e) and emit ClientApp/.gitignore — shared with the java /
+    // python embed hosts (see embedded-spa.ts).
+    embedSpaInto(out, spaFiles, uiFw);
   }
   // Layout-aware namespace rewrite (D-REALIZATION-AXES `directoryLayout:`):
   // when the layout adapter relocated files under `Features/`, make each

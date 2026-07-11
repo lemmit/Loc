@@ -19,6 +19,7 @@ import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
 import { plural, snake } from "../../util/naming.js";
+import { embedSpaInto } from "../_frontend/embedded-spa.js";
 import { unionJsonSchema } from "../_payload/union-wire.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { generateReactForContexts } from "../react/index.js";
@@ -243,21 +244,11 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       apiBaseUrl: "/api",
       pathPrefix: "ClientApp/",
     });
-    for (const [path, content] of spaFiles) {
-      // The React pack also ships Dockerfile / .dockerignore / certs /
-      // the e2e harness at the project root — the python project owns
-      // those surfaces in fullstack mode (multi-stage Dockerfile builds
-      // the SPA).  Skip them so the file map stays clean.
-      if (
-        path === "ClientApp/Dockerfile" ||
-        path === "ClientApp/.dockerignore" ||
-        path === "ClientApp/certs/.gitkeep" ||
-        path.startsWith("ClientApp/e2e/")
-      )
-        continue;
-      out.set(path, content);
-    }
-    out.set("ClientApp/.gitignore", "node_modules\ndist\n");
+    // Python embeds React only, so the SPA build dir is Vite's `dist/`
+    // (`"react"` never takes the svelte `.gitignore` branch).  Drop the SPA
+    // pack's host-owned root files and emit ClientApp/.gitignore — shared with
+    // the dotnet / java embed hosts (see embedded-spa.ts).
+    embedSpaInto(out, spaFiles, "react");
   }
 
   out.set("app/domain/__init__.py", "");
