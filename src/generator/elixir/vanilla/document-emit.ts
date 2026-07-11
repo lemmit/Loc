@@ -23,14 +23,12 @@
 // re-embeds the mutated struct + bumps version, a find filters in memory over the
 // struct.  Paged finds build the wire envelope in memory (slice 4c), union finds
 // return the single-get tuple the shared find controller tags (slice 4d), and an
-// AUDITED named op records its audit row inside the persist transaction (slice 4e).
-// A mutating RETURNING op re-embeds + persists its write, projecting the wire off
-// the saved embed (#1774 — it previously dropped the write).  The residual the
-// document path can't express yet (audited RETURNING ops — now unblocked by #1774
-// but still needing the audit-transaction wrapping on the returning path;
-// provenanced ops — no per-field prov columns on a jsonb blob; derived /
-// dereferenced-entity / collection-method reads; non-scalar find predicates) is
-// gated at validate time
+// AUDITED op — named (slice 4e) or returning (slice 4f) — records its audit row
+// inside the persist transaction.  A mutating RETURNING op re-embeds + persists its
+// write, projecting the wire off the saved embed (#1774 — it previously dropped the
+// write).  The residual the document path can't express yet (provenanced ops — no
+// per-field prov columns on a jsonb blob; derived / dereferenced-entity /
+// collection-method reads; non-scalar find predicates) is gated at validate time
 // (`loom.vanilla-document-unsupported`) rather than misgenerated — see
 // `validateVanillaDocumentScope`.
 // ---------------------------------------------------------------------------
@@ -658,6 +656,7 @@ export function renderDocReturningOpFunction(
   const aggSnake = snake(agg.name);
   const aggModule = `${facadeMod}.${aggPascal}`;
   const repoMod = `${aggModule}Repository`;
+  const appModule = facadeMod.split(".")[0]!;
   const actorParam = opUsesCurrentUser(op) ? ", current_user \\\\ nil" : "";
 
   const persists = returningOpPersistsChangeset(op, agg, ctx);
@@ -672,6 +671,11 @@ export function renderDocReturningOpFunction(
     trailingReturn !== undefined &&
     (trailingReturn.value.kind === "this" || trailingReturn.variantTag === agg.name);
   const aggregateSuccess = persists && (fallThrough || trailingIsAggregate);
+  // An AUDITED returning op (slice 4f) records its audit row INSIDE the persist
+  // transaction, so the history row commits atomically with the embed re-write —
+  // the same tail the named-op audit path (slice 4e) uses, wrapped around the
+  // #1774 returning-op persist.  `audit_before` is the pre-mutation document.
+  const hasAudit = op.audited === true;
 
   const { params, body, guardClauses, trailingReturnLine } = docOpStructBody(
     op,
@@ -691,6 +695,50 @@ export function renderDocReturningOpFunction(
     "      |> Ecto.Changeset.put_embed(:data, Map.from_struct(record))",
     "",
   ];
+  const auditCall = hasAudit
+    ? auditRecordCall({
+        appModule,
+        operationId: `${op.name}${aggPascal}`,
+        action: op.name,
+        targetType: aggPascal,
+        targetId: "saved.id",
+        before: "audit_before",
+        after: wireSnapshot("saved", true),
+        indent: "          ",
+      })
+    : "";
+  // Wrap the persist (+ audit tx) around a committed-`saved` success arm.  Audited:
+  // persist + record the audit row in ONE transaction, then project off the saved
+  // row post-commit.  Non-audited: the plain `case persist_change`.  `successArm`
+  // lines sit in the `{:ok, saved} ->` clause (6-space base).
+  const persistThen = (successArm: string[]): string[] =>
+    hasAudit
+      ? [
+          ...persistChangeset,
+          "    tx_result =",
+          `      ${appModule}.Repo.transaction(fn ->`,
+          `      case ${repoMod}.persist_change(changeset) do`,
+          "        {:ok, saved} ->",
+          auditCall,
+          "          saved",
+          "",
+          "        {:error, reason} ->",
+          `          ${appModule}.Repo.rollback(reason)`,
+          "      end",
+          "    end)",
+          "",
+          "    case tx_result do",
+          ...successArm,
+          "      {:error, reason} -> {:error, reason}",
+          "    end",
+        ]
+      : [
+          ...persistChangeset,
+          `    case ${repoMod}.persist_change(changeset) do`,
+          ...successArm,
+          "      {:error, changeset} -> {:error, changeset}",
+          "    end",
+        ];
 
   let tailLines: string[];
   if (!persists) {
@@ -701,28 +749,20 @@ export function renderDocReturningOpFunction(
   } else if (aggregateSuccess) {
     // Mutating success (fall-through OR normalized trailing `return this`): persist,
     // then project the aggregate wire off the SAVED embed.
-    tailLines = [
-      ...persistChangeset,
-      `    case ${repoMod}.persist_change(changeset) do`,
+    tailLines = persistThen([
       `      {:ok, saved} -> {:ok, ${docWireMap(agg, "saved.id", "saved.data")}}`,
-      `      {:error, changeset} -> {:error, changeset}`,
-      `    end`,
-    ];
+    ]);
   } else {
     // Shape C: a mutating body ending in a NON-aggregate success return
     // (`return Reserved {…}`).  Persist FIRST, rebind `record = saved.data`, then
     // render the trailing return over the saved embed so its `this.*` reads reflect
     // the persisted values.
-    tailLines = [
-      ...persistChangeset,
-      `    case ${repoMod}.persist_change(changeset) do`,
-      `      {:ok, saved} ->`,
-      `        record = saved.data`,
+    tailLines = persistThen([
+      "      {:ok, saved} ->",
+      "        record = saved.data",
       `        ${trailingReturnLine}`,
-      ``,
-      `      {:error, changeset} -> {:error, changeset}`,
-      `    end`,
-    ];
+      "",
+    ]);
   }
 
   // `record = row.data` is live when the body reads/writes it, a persist reads it
@@ -735,22 +775,31 @@ export function renderDocReturningOpFunction(
     tailLines.some((l) => /\brecord\b/.test(l)) ||
     guardClauses.some((l) => /\brecord\b/.test(l));
   const recordBind = usesRecord ? [`    record = row.data`] : [];
+  // An audited op captures the pre-mutation snapshot before `record = row.data`
+  // (row is never rebound, so `row.data` still sees the stored blob).
+  const auditBeforeBind = hasAudit ? [`    audit_before = ${wireSnapshot("row", true)}`] : [];
   const rowName = persists || usesRecord ? "row" : "_row";
   // A guarded op hoists its guards into a leading `with ensure(...)` chain
-  // (403/422 denials): `record = row.data` + params stay before the `with`, the
-  // body + the persist/return tail move inside the `do` block.  A guard-free op
-  // keeps the flat layout.
+  // (403/422 denials): the `audit_before` capture + `record = row.data` + params
+  // stay before the `with`, the body + the persist/return tail move inside the `do`
+  // block.  A guard-free op keeps the flat layout.
   const bodyContent =
     guardClauses.length > 0
       ? [
+          ...auditBeforeBind,
           ...recordBind,
           ...params,
           ...wrapOpBodyWithGuards(guardClauses, [...body, ...tailLines]),
         ].join("\n")
-      : [...recordBind, ...params, ...body, ...tailLines].join("\n");
+      : [...auditBeforeBind, ...recordBind, ...params, ...body, ...tailLines].join("\n");
   const denialSpec = guardClauses.length > 0 ? " | {:error, atom()}" : "";
-  // A persisting op can additionally fail its persist changeset validation.
-  const changesetSpec = persists ? " | {:error, Ecto.Changeset.t()}" : "";
+  // A persisting op can additionally fail its persist changeset validation; an
+  // audited persist wraps in `Repo.transaction`, whose failure is `{:error, term()}`.
+  const changesetSpec = persists
+    ? hasAudit
+      ? " | {:error, term()}"
+      : " | {:error, Ecto.Changeset.t()}"
+    : "";
   return `  @doc "Returning operation \`${op.name}\` on \`${aggPascal}\` (document shape, exception-less)${persists ? " — persists the mutated embed" : ""}."
   @spec ${opSnake}_${aggSnake}(${aggModule}.t(), map()) ::
           {:ok, term()} | {:error, binary(), map()}${changesetSpec}${denialSpec}

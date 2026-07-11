@@ -171,9 +171,12 @@ The migration stays `create table(:orders) do add :data, :map; add :version …`
   its `{:error, %Ecto.Changeset{}}` clause, so op fn + controller never disagree. Boot-verified:
   `bumpFall`/`bumpReturn` → total persists (5→6→7), a non-mutating `peek` stays in-memory, `GET`
   reflects the persisted value.
-- **Audited RETURNING ops stay gated — now unblocked by #1774, but still needing the
-  audit-transaction wrapping on the returning path (a clean follow-up; the persist tail is now
-  the same `put_embed` the named-op audit path wraps).**
+- **✅ AUDITED RETURNING ops (slice 4f, 2026-07-05).** With returning ops now persisting (#1774),
+  an audited returning op wraps the same `put_embed` persist tail in a `Repo.transaction` and
+  records the audit row in the `{:ok, saved}` arm (the same shape as the named-op audit path,
+  slice 4e), projecting the success wire off the saved embed post-commit. The `op.audited`
+  document gate is now fully removed (named + returning). Boot-verified: `bump` audited returning
+  → 200 `{total: 6}`, `GET` → 6 persisted, `audit_records` before=5/after=6 committed atomically.
 - **Derived reads stay gated — a shared bug, NOT a missing document feature:**
   - **Derived reads**: the RELATIONAL
     op-body path emits `record.<derived>` against a schema with no such column → runtime

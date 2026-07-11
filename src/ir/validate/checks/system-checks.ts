@@ -732,18 +732,13 @@ function docStmtUnsupported(s: StmtIR, allowFnCall: boolean, agg: AggregateIR): 
 
 /** A user-defined document operation the path can't emit.  `allowFnCall` is set
  *  once per aggregate from whether its `function`s are all doc-safe.  A RETURNING
- *  op is admitted (in-memory tagged tuple) and CONTAINMENT mutation is admitted
- *  (Route A); an audited NAMED op is admitted (slice 4e — the persist tail records
- *  an audit row in a `Repo.transaction`).  An audited RETURNING op stays gated (the
- *  document returning-op path does not persist yet, so there is nothing to audit
- *  atomically), as does any PROVENANCED op (a jsonb blob has no co-located
- *  `<field>_provenance` columns to drain a history buffer into). */
+ *  op is admitted (persisting tagged tuple, #1774) and CONTAINMENT mutation is
+ *  admitted (Route A); an AUDITED op — named (slice 4e) or returning (slice 4f) —
+ *  is admitted (the persist tail records an audit row in a `Repo.transaction`).  A
+ *  PROVENANCED op stays gated (a jsonb blob has no co-located `<field>_provenance`
+ *  columns to drain a history buffer into). */
 function docOpUnsupported(op: OperationIR, allowFnCall: boolean, agg: AggregateIR): boolean {
-  return (
-    (op.audited === true && op.returnType != null) ||
-    opHasProvSite(op) ||
-    op.statements.some((s) => docStmtUnsupported(s, allowFnCall, agg))
-  );
+  return opHasProvSite(op) || op.statements.some((s) => docStmtUnsupported(s, allowFnCall, agg));
 }
 
 export function validateVanillaDocumentScope(sys: SystemIR, diags: LoomDiagnostic[]): void {
