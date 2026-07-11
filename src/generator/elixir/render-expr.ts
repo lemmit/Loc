@@ -152,6 +152,14 @@ export interface RenderCtx {
    *  vanilla document op/find/function body path in place of `docMap`; mutually
    *  exclusive with it. */
   docStruct?: boolean;
+  /** The set of `derived` names currently being INLINED (#1765).  Elixir has no
+   *  computed struct field, so a `this-derived` read inlines the derived's
+   *  defining expression instead of emitting `record.<name>` (a non-existent
+   *  key → runtime `KeyError`).  A derived may reference another derived, so the
+   *  inliner recurses; this stack breaks a (validator-prevented) cycle by falling
+   *  back to the bare accessor rather than looping forever.  Internal — set only
+   *  by the `this-derived` render arm, never by callers. */
+  derivedStack?: ReadonlySet<string>;
 }
 
 const DEFAULT: RenderCtx = { thisName: "record", contextModule: "MyApp" };
@@ -407,8 +415,23 @@ function renderRef(e: RefExpr, ctx: RenderCtx): string {
       // Struct access — relational and (Route A) document alike read the field
       // off the rehydrated struct (`record.<field>`).
       return `${ctx.thisName}.${snake(e.name)}`;
-    case "this-derived":
+    case "this-derived": {
+      // Elixir structs carry no computed field, so a derived read INLINES its
+      // defining expression (parity with the wire serializer, which renders the
+      // same `DerivedIR.expr`) — `record.<name>` would be a non-existent struct
+      // key that raises `KeyError` at runtime (#1765).  Recurse into a
+      // derived-of-derived; the `derivedStack` guard breaks a cycle (validator
+      // -prevented) and the fallback covers a ctx with no aggregate index.
+      const d = ctx.agg?.derived.find((x) => x.name === e.name);
+      if (d && !ctx.derivedStack?.has(e.name)) {
+        const inner: RenderCtx = {
+          ...ctx,
+          derivedStack: new Set([...(ctx.derivedStack ?? []), e.name]),
+        };
+        return `(${renderExpr(d.expr, inner)})`;
+      }
       return `${ctx.thisName}.${snake(e.name)}`;
+    }
     case "helper-fn":
       return snake(e.name);
     case "workflow-fn":
