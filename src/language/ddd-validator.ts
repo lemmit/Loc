@@ -61,6 +61,7 @@ import {
   checkSelfType,
   checkSlotMemberAccess,
   checkSlotTypePosition,
+  checkTemplateHoles,
   checkTenancyDecls,
   checkTernaryExprs,
   checkTheme,
@@ -274,6 +275,8 @@ export class DddValidator {
     guard("intrinsic-calls", model, () => checkIntrinsicCalls(model, accept));
     // A5 duration constructors (days/hours/minutes): arity + int amount.
     guard("duration-constructors", model, () => checkDurationConstructors(model, accept));
+    // A6 string-interpolation hole types (loom.interp-hole-type).
+    guard("template-holes", model, () => checkTemplateHoles(model, accept));
     // Unresolved bare-identifier heads (`total := amout`, `let x = amout`):
     // a `NameRef` is not a cross-reference, so an unresolvable head types as
     // `T.unknown` and every downstream gate suppresses on it — the finding-1

@@ -55,10 +55,12 @@ import {
   isPrimitiveConversion,
   isProperty,
   isStringLit,
+  isTemplateStr,
   isTernaryExpr,
   isThisRef,
   isUnaryExpr,
   isValueObject,
+  type TemplateStr,
 } from "../../language/generated/ast.js";
 import { isCollectionOp } from "../../util/collection-ops.js";
 import { isIntrinsicMatcher } from "../../util/intrinsic-matchers.js";
@@ -725,6 +727,7 @@ export function lowerExpr(expr: Expression | undefined, env: Env): ExprIR {
 function lowerExprInner(expr: Expression | undefined, env: Env): ExprIR {
   if (!expr) return lit("null", "null");
   if (isStringLit(expr)) return lit("string", expr.value);
+  if (isTemplateStr(expr)) return lowerTemplateString(expr, env);
   if (isIntLit(expr)) return lit("int", String(expr.value));
   if (isDecLit(expr)) return lit("decimal", expr.value);
   if (isMoneyLit(expr)) return lit("money", expr.value ?? "0");
@@ -1331,6 +1334,7 @@ function resolveCallKind(
 export function inferExprType(expr: Expression | undefined, env: Env): TypeIR {
   if (!expr) return { kind: "primitive", name: "string" };
   if (isStringLit(expr)) return { kind: "primitive", name: "string" };
+  if (isTemplateStr(expr)) return { kind: "primitive", name: "string" };
   if (isIntLit(expr)) return { kind: "primitive", name: "int" };
   if (isDecLit(expr)) return { kind: "primitive", name: "decimal" };
   if (isMoneyLit(expr)) return { kind: "primitive", name: "money" };
@@ -1725,6 +1729,49 @@ function wrapForStringConcat(value: ExprIR, fromType: TypeIR): ExprIR {
     };
   }
   return wrapInStringConvert(value, fromType);
+}
+
+/** A6 string interpolation — lower a backtick template to plain string
+ *  concatenation, so no backend sees a new node.  `strings` are the N+1
+ *  literal segments (already delimiter-stripped + unescaped by the value
+ *  converter), `holes` the N interleaved expressions.  Each hole rides the
+ *  same `string + X` path as an explicit `"…" + x`: string-typed holes pass
+ *  through unwrapped, other stringifiable holes get the `convert` /
+ *  `.display` wrap (`wrapForStringConcat`).  A non-stringifiable hole is
+ *  reported by `loom.interp-hole-type` (the AST validator); we still lower it
+ *  totally so codegen never sees a half-node.  Empty segments are dropped;
+ *  an all-empty template lowers to `""`. */
+function lowerTemplateString(expr: TemplateStr, env: Env): ExprIR {
+  const stringT: TypeIR = { kind: "primitive", name: "string" };
+  const pieces: ExprIR[] = [];
+  for (let i = 0; i < expr.strings.length; i++) {
+    const seg = expr.strings[i]!;
+    if (seg.length > 0) pieces.push(lit("string", seg));
+    const holeExpr = expr.holes[i];
+    if (holeExpr) {
+      const holeIR = lowerExpr(holeExpr, env);
+      const holeType = inferExprType(holeExpr, env);
+      const isStr = holeType.kind === "primitive" && holeType.name === "string";
+      pieces.push(
+        isStr || !isImplicitlyStringifiableIR(holeType, env)
+          ? holeIR
+          : wrapForStringConcat(holeIR, holeType),
+      );
+    }
+  }
+  if (pieces.length === 0) return lit("string", "");
+  let acc = pieces[0]!;
+  for (let i = 1; i < pieces.length; i++) {
+    acc = {
+      kind: "binary",
+      op: "+",
+      left: acc,
+      right: pieces[i]!,
+      leftType: stringT,
+      resultType: stringT,
+    };
+  }
+  return acc;
 }
 
 /** Mirror of `type-system.ts`'s `isImplicitlyStringifiable`, on

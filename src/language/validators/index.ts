@@ -54,6 +54,7 @@ export {
   checkTypeReferences,
   checkValueObject,
 } from "./structural.js";
+export { checkTemplateHoles } from "./template.js";
 export { checkDurationConstructors } from "./temporal.js";
 export { checkOrgPathReferences, checkTenancyDecls } from "./tenancy.js";
 export { checkTraceability } from "./traceability.js";

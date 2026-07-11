@@ -172,6 +172,10 @@ system DevPlatform {
                 // PrimitiveConversion — `string(<non-string>)` coercion.
                 derived seqLabel: string = "seq-" + string(sequence)
 
+                // TemplateStr — A6 string interpolation (backtick + `{hole}`);
+                // multi-hole to exercise START / MIDDLE / END segments.
+                derived seqTag: string = `seq-{sequence} / budget {budget}`
+
                 function isActive(): bool = active == true
 
                 function badge(): string = !active ? "off" : "on"

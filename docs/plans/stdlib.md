@@ -158,11 +158,31 @@ now() > due_date + interval '30 days'
   per-backend find-predicate work; datetime *comparison* already works
   everywhere.
 
-### A6 (optional, independent) — string interpolation
+### A6 (optional, independent) — string interpolation — **SHIPPED**
 
-`"Order {id} for {customer.name}"` — grammar + lowering to concat of existing pieces;
-no new backend surface (renders through existing `+`/`string()` paths). Can land any
-time after A2.
+Backtick template with `{expr}` holes; lowers to plain string concatenation of the
+literal segments and the `string()`-converted holes — no new IR kind, **zero backend
+emitters** (rides the existing `+` / `convert` paths).
+
+```ddd
+derived label: string = `Order #{quantity} for {customerName}`
+```
+
+```typescript
+// generated TS (Hono) — existing concat / String() path, no interp emitter
+get label(): string { return "Order #" + String(this._quantity) + " for " + this._customerName; }
+```
+
+**Delimiter — backtick, not `"…"`.** Loom `.ddd` files already carry literal `{`/`}`
+inside double-quoted strings (DDL snippets), so `"…{hole}…"` would be a breaking
+change; a distinct backtick delimiter is a pure addition. Holes are full expressions
+(arithmetic, calls, ternaries, nested templates) EXCEPT ones carrying a literal `{ }`
+block (object / `match` / builder literals) — the two-mode lexer (`DddTokenBuilder`)
+drops `{`/`}` inside a hole. A literal brace/backtick in text is escaped `\{` / `\}` /
+`` \` ``. A hole must be string-typed or implicitly stringifiable (number / bool / enum
+/ `X id` / aggregate-with-`display`); a `datetime` / collection hole is rejected by
+`loom.interp-hole-type`. Non-queryable in `where` position (it desugars to `+`/`convert`,
+already rejected by the queryable gate). See `docs/language.md` → String interpolation.
 
 ## Phase B — top-level `function` (the Layer-1 enabler)
 
