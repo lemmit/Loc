@@ -69,8 +69,11 @@ export interface SourceMap {
 }
 
 /** Convert a wire origin ref (JSON `span` tuple) into the IR's `OriginRef`
- *  (`span` object), so `resolveToSource` can be reused as-is. */
-function toOriginRef(o: WireOriginRef): OriginRef {
+ *  (`span` object), so `resolveToSource` can be reused as-is. Exported (not
+ *  just an internal helper) so `src/dap/breakpoints.ts` can walk the same
+ *  origin chain going the opposite direction (`.ddd` line → generated
+ *  location) without hand-rolling a second wire→IR bridge. */
+export function toOriginRef(o: WireOriginRef): OriginRef {
   switch (o.kind) {
     case "source":
       return { kind: "source", path: o.path, span: { start: o.span[0], end: o.span[1] } };
