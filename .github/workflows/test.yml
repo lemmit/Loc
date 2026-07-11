@@ -172,6 +172,10 @@ jobs:
       - name: Generated-code Biome gate
         run: npm run test:biome-gen
 
+      # accessibility.md — static per-pack WCAG-AA design-token contrast gate.
+      - name: Design-token contrast gate
+        run: npm run test:contrast
+
   # Single roll-up status for branch protection: succeeds only when every
   # shard, the coverage merge, and the lint gates pass.  Require THIS
   # check instead of the per-shard `test (shard i/4)` jobs so the shard
