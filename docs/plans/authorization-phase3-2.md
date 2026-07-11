@@ -1,6 +1,6 @@
 # Authorization Phase 3.2 — named policy functions (requires-gated predicates)
 
-Status: in progress. Scope: **P3.2 only** — reusable, named, parameterised
+Status: shipped (PR #1746, merged). Scope: **P3.2 only** — reusable, named, parameterised
 boolean authorization predicates declared at context level and attached to
 operations/actions via the EXISTING `requires` gate. Stacked on P3.1 (the
 policy WRITE ladder, PR #1742). Full design source:

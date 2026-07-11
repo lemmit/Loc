@@ -1,6 +1,6 @@
 # Authorization Phase 3 — the policy WRITE ladder (P3.1)
 
-Status: in progress (PR #1742). Scope of this doc: **P3.1 only** — the write
+Status: shipped (PR #1742, merged). Scope of this doc: **P3.1 only** — the write
 verb on `policy {}` read rules. Later P3.x slices (operation/view/workflow
 gates, field masking, `deny`) are out of scope and untouched.
 

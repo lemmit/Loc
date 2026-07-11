@@ -522,10 +522,15 @@ renaming later is cheap if it grates. Close the open question.
 
 - **1a — shipped, keep as-is.** Surface, `tenantOwned`, `crossTenant`,
   explicit-stance error lint, registry/claim verification.
-- **1b — do soon.** Registry self-scope filter + claim-less `signUp` bootstrap
-  (decision 4); the cross-reference upgrade (decision 5); `tenant_id` index
-  (blocked on `uniqueness-and-indexes.md`).
-- **Phase 2 — stay blocked.** Hierarchy, per the hard "no" above.
+- **1b — shipped.** Registry self-scope filter + claim-less `signUp` bootstrap
+  (decision 4); the cross-reference upgrade (decision 5, now real
+  `[Aggregate:ID]`/`[UserField:…]` cross-refs); `tenant_id` index (the derived
+  `<table>_tenant_id_idx`, emitted via `withTenantIndex` in
+  `src/system/migrations-builder.ts` — it rode the shared `MigrationsIR`
+  directly and needed no `index:` surface).
+- **Phase 2 — shipped.** Hierarchy (`tenantRegistry` + `orgPath` + the
+  `deep`/`global` read ladder) landed after this note's "stay blocked" verdict;
+  see [`docs/tenancy.md`](../tenancy.md) for the shipped roadmap.
 
 ---
 
