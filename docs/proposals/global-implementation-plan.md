@@ -308,7 +308,7 @@ rides the governance spine. Suggested order, low-risk-first:
 | S2 | [`surface-redundancy-cuts`](./surface-redundancy-cuts.md) | — | Deletions with trivial/empty migrations (`ids guid`, criterion block-form, legacy `ui{framework:}`, `write global`). `static` is a separate verify-then-decide. |
 | S3 | [`scaffolded-navigation`](./scaffolded-navigation.md) | — | Removes `PageMenuMeta` + implicit sidebar derivation; needs a page-`menu{}` codemod. |
 | S4 | [`with-implements-split`](./with-implements-split.md) | typed-capabilities (✅) | Codemod is deterministic (expander already classifies name→kind). |
-| S5 | [`expressible-builtins`](./expressible-builtins.md) | versioned (✅), the `httpStatus` mapper (✅) | **Phased:** (a) route structural 409s through the error→status mapper — *additive*; (b) `onWrite precondition` + `old` (write-guards, pushable-only v1); (c) prefix-match filter operator. Retires the `versioned` name-gate. |
+| S5 | [`expressible-builtins`](./expressible-builtins.md) | versioned (✅), the `httpStatus` mapper (✅) | **Phased:** (a) route structural 409s through the error→status mapper — *additive*; (b) versioning default-on for every aggregate (delete the `versioned` capability; ETag/If-Match; `unversioned` opt-out); (c) prefix-match filter operator. No `writeGuard`/`old` — versioning-by-default removed its only consumer. |
 | S6 | [`organization-context`](./organization-context.md) | execution-context (Tier-0, ✅), multi-tenancy substrate (✅), authorization (Tier 4 #3) | On the **governance spine**. Consumes S5(c)'s prefix-match op. Its auth gate is a security surface — sequence with authorization, not before. |
 
 Coordination notes: S5(c) prefix-match op + S6 together retire `tenantOwned`'s

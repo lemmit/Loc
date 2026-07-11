@@ -34,17 +34,15 @@ see. Nothing should hinge on the compiler recognizing a blessed string.
 
 ## What the audit found (classified)
 
-Classification: **(a)** `writeGuard` + `old` · **(b)**
-materialized `derived` · **(c)** error→status mapper (`httpStatus`) ·
-**(d)** field-role (already right) · **(e)** `stamp`/`filter`
+Classification: **(a)** default-on aggregate infrastructure (no surface) ·
+**(b)** prefix-match filter operator · **(c)** error→status mapper
+(`httpStatus`) · **(d)** field-role (already right) · **(e)** `stamp`/`filter`
 (already body-expressible) · **(f)** irreducible infrastructure.
 
 | Built-in behavior | Keyed on | Class | Verdict |
 |---|---|---|---|
-| `versioned` — version column | field | (d)/field | already fine |
-| `versioned` — guarded CAS write + increment | **capability name** | **(a)** | → `writeGuard this.version == old(this.version)` |
-| `versioned` — atomic zero-rows detection | (infra) | (f) | stays, generic |
-| `versioned` / `unique` / `when` / FK / event-store — **409** | hardcoded | **(c)** | → route through `httpStatus` mapper |
+| `versioned` — the whole feature (version column + guarded CAS + increment + 409) | **capability name** | **(a)** | → **make it default for every aggregate** (like `id`); delete the `versioned` capability entirely. See §1. |
+| `unique` / `when` / FK / event-store — **409** | hardcoded | **(c)** | → route through `httpStatus` mapper |
 | `tenantOwned` — `tenantId`/`dataKey` filter + stamp | (prelude body) | (e) | already fine — regular `dataKey` is a `stamp onCreate` off `currentUser.orgPath`; registry/cross-scope `dataKey` (`parent.dataKey + "." + id`) is a hand-written create factory (`prelude.ts:150-156`) |
 | `tenantOwned` — `deep`/`global` scope reads | **capability name** | **(e)** | → `filter` + a **prefix-match operator** (`startsWith`) |
 | `tenantOwned` — `dataKey` prefix index | (infra) | (f) | stays — shape-triggered (field in prefix-filters → btree index) |
@@ -65,75 +63,59 @@ pure `field`/`filter`/`stamp` + a macro emitting real statement bodies.
 They are the proof the model works and the target every other built-in
 should reach.
 
-## The three primitives
+## The moves
 
-### 1. Atomic write-guards — `writeGuard` + `old`
+### 1. Versioning is default-on infrastructure — no surface at all
 
-A capability body has `filter` (a *read* predicate) and `stamp` (field
-*assignments*), but nothing that conditions the **write** on the persisted
-state. Add:
-
-- **`old(<expr>)`** — a **snapshot operator**: the value `<expr>` had *on
-  entry / before this write*. The design-by-contract standard (Eiffel's
-  `old balance`, JML's `\old(balance)`). `this` stays the single anchor —
-  `old(this.version)` is "the value `this.version` had before the write" —
-  so there is no cryptic second scope object, and it wraps any expression,
-  not just a bare field (`old(this.total + this.tax)`).
-- **`writeGuard <expr>`** — a guard evaluated against the stored row *at the
-  write*, lowered **atomically** (predicate pushed into the `UPDATE … WHERE`
-  clause, or a `SELECT … FOR UPDATE` fallback). A zero-row result ⇒ the
-  guard's declared conflict error.
-
-`versioned` becomes an ordinary capability — no name-gate:
+The cleanest de-magic: don't express `versioned`, **remove the opt-in.**
+Optimistic concurrency is an aggregate-level system property that is cheap
+and safe — so make **every aggregate versioned by default**, exactly the way
+every aggregate has a system `id`. There is then no capability name to key
+off, no field to declare, no guard to write — it is simply how a Loom
+aggregate persists.
 
 ```ddd
-capability versioned {
-  version: int token                              // client echoes last-seen value
-  writeGuard this.version == old(this.version)    // guard: expected == persisted
-  stamp onUpdate { this.version := old(this.version) + 1 }   // increment off the pre-image
-}
+aggregate Order { total: money }   // already optimistically-versioned — nothing to add
 ```
 
-The framework loses its `versioned` branch entirely; it keeps only a
-**generic** rule — *"lower an `old`-referencing write-guard into an atomic
-guarded write; zero rows ⇒ the declared error."* Versioning is then the
-simplest instance. The same primitive unlocks user write-invariants that
-are impossible today. **A guard is only a `writeGuard` when it references
-`old`** — a predicate over `this` alone is a plain `invariant` (checkable
-before the write, no pre-image needed) and should stay one.
+Why this is the right endpoint (not a header modifier, not a field role, not
+a capability):
 
-**Scope resolution** — the ordinary bare-vs-`this` rule, plus one operator:
+- **Safe by default** — you cannot *forget* to version and ship a
+  lost-update bug; correctness is the default, not a missable opt-in.
+- **Symmetric with `id`** — every aggregate gets a system `id` (identity) and
+  a system version (consistency); both generated, both invisible in the
+  domain surface.
+- **Free on every target** — a version column + guarded `UPDATE` is native
+  everywhere (`@Version` / `optimistic_lock` / `IsConcurrencyToken` /
+  `version_id_col`). Cost is one int column + one `WHERE` clause.
+- **Event-sourced aggregates are already versioned** (stream `(stream_id,
+  version)`), so it is consistent, not a special case.
+- **"Multiple versioned fields" cannot happen** — it is an aggregate
+  property that mints exactly one system version, like `id`, not a field a
+  user can duplicate.
 
-- **bare `<name>` / `this.<field>`** → the being-written (new) image (bare is
-  a `param`/`let` if one shadows, else `this.<field>`). Bare *is* new — there
-  is deliberately **no `new` keyword**.
-- **`old(<expr>)`** → the pre-image of `<expr>`. A snapshot operator (not a
-  scope object), valid only in write-time contexts — `writeGuard` *and*
-  `stamp onUpdate`; `old(...)` at create is a validation error (no prior
-  state).
+The version lives at the **HTTP layer as an `ETag` / `If-Match`** — *not* a
+body field, so it never touches the DTO wire shape. Read returns an ETag;
+an update sends `If-Match`.
 
-The write-guards compare `old(...)` against the new image:
+**Two things to pin:**
 
-```ddd
-writeGuard amount <= old(this.balance)              // can't overdraw the *persisted* balance
-writeGuard this.total >= old(this.total)            // monotonic / append-only
-writeGuard old(this.status).canGoTo(this.status)    // legal state transition
-```
+1. **Wire strictness.** *Graceful* (default) — no `If-Match` ⇒ fall back to a
+   write-time CAS on the loaded version (still no lost update; what the code
+   does today); naive clients keep working. *Strict* (opt-in per api) —
+   updates **require** `If-Match`, else `428 Precondition Required`, forcing
+   clients to acknowledge concurrency.
+2. **The rare opt-out.** Deliberate last-write-wins / high-contention
+   aggregates use a single `unversioned` header modifier — the exception,
+   mirroring how `crossTenant` is the exception to tenant-scoping. Most
+   aggregates never write it.
 
-(`this.balance >= 0` is NOT a write-guard — it's an ordinary invariant.)
-
-**Atomicity is the contract.** The primitive MUST lower atomically —
-never load-check-then-write, which silently reintroduces a TOCTOU race
-while looking correct. Two generic lowerings:
-
-- **pushable** (column comparison — versioning, `balance >= 0`) →
-  optimistic `WHERE`-push, no lock;
-- **non-pushable** (a method call SQL can't express) → pessimistic
-  `SELECT … FOR UPDATE` + check.
-
-A sane v1 restricts `writeGuard` to *pushable* predicates
-(covers versioning + most numeric/equality invariants) and defers the
-pessimistic path.
+**Result:** the `versioned` capability is **deleted** from the prelude; the
+whole write-guard / `old` / concurrency-token thread is struck. Versioning
+joins the "always-on infrastructure" bucket next to `id` generation. The
+only surface in this area is the `unversioned` opt-out and the strict/graceful
+api toggle.
 
 ### 2. A prefix-match filter operator (NOT a materialized `derived`)
 
@@ -235,54 +217,29 @@ drift (today they're derived independently). No new surface — this reuses
 a mechanism that already ships; it just extends its reach from user errors
 to the built-in ones.
 
-## Simulation — storage-shape lowering & atomicity
+## Simulation — default versioning is atomic on every storage shape
 
-The one genuine risk in primitives 1 & 2 is that a write-guard lowers to a
-*different* mechanism per storage shape, and one shape might not support it
-atomically. Traced against the real write paths (`this.version ==
-old(this.version)` plus an inequality guard), through all four shapes:
+Making versioning default-on is only safe if the per-aggregate version CAS
+lowers atomically on **all four** storage shapes. It does — because
+`versioned` already works on each today; default-on just makes it universal.
+Traced against the real write paths:
 
-| Shape | Write path today | Guard lowering | Atomic? |
+| Shape | Write path today | Version CAS | Atomic? |
 |---|---|---|---|
-| **relational state** | `UPDATE … SET … WHERE id=?` (`repository-save-builder.ts`) | add `AND <guard>` to the WHERE; 0 rows ⇒ conflict | ✅ (this is how `versioned` works today) |
-| **embedded** | root columns + parts JSONB; `UPDATE … WHERE id=?` | root/`version` fields → column WHERE; part fields → `data->>` WHERE | ✅ pushable |
-| **document** | table `(id, data jsonb, **version**)`; `UPDATE … set(data,version) WHERE id=?` (`repository-document-builder.ts:103-110`) | `version` is a **top-level column** → `AND version=?` trivially; domain fields → `(data->>'f')` WHERE | ✅ pushable — the post-hydrate raciness is a **read-filter** concern, not writes |
-| **event-sourced** | append at `version=max+1` vs `unique(stream_id,version)` (`repository-eventsourced-builder.ts:100-110`) | fold stream → check guard → append at V+1; a concurrent append takes V+1 first → 23505 ⇒ conflict | ✅ the **native ES optimistic-append CAS** — serializable write-guards for free |
+| **relational state** | `UPDATE … SET … WHERE id=?` (`repository-save-builder.ts`) | `AND version=$expected`, `version=version+1`; 0 rows ⇒ conflict | ✅ (how `versioned` works today) |
+| **embedded** | root columns + parts JSONB; `UPDATE … WHERE id=?` | `version` is a root column → `AND version=?` | ✅ |
+| **document** | table `(id, data jsonb, **version**)` (`repository-document-builder.ts:103-110`) | `version` is a **top-level column** → `AND version=?` | ✅ (post-hydrate raciness is a read-filter concern, not writes) |
+| **event-sourced** | append at `version=max+1` vs `unique(stream_id,version)` (`repository-eventsourced-builder.ts:100-110`) | intrinsic stream version — a concurrent append hits 23505 ⇒ conflict | ✅ native ES append CAS |
 
-**Verdict: no shape needs to be gated out.** Every shape already has an
-atomic write mechanism (that's how `versioned` works on each today), so the
-primitive *reproduces existing infra*, it doesn't invent atomicity. Three
-lowerings, all real:
+**Verdict: no shape needs gating.** Every shape already has an atomic
+version mechanism, and the version is a **top-level column** (or the ES
+stream version) on all of them — never JSONB-nested — so default-on
+versioning is a trivial, uniform `WHERE version=?` (or the ES append) with
+no new lowering to invent. The 409 on a zero-row CAS routes through the
+error→status mapper (move 3), which must also re-check existence to
+distinguish `409 conflict` from `404 not-found`.
 
-1. relational / embedded / document → **`WHERE`-push** on the UPDATE
-   (top-level column directly; JSONB field via `data->>`),
-2. event-sourced → the **stream-version append CAS** (fold → check →
-   append; the intrinsic `unique(stream_id, version)` rejects concurrent
-   writers, making the fold-then-append serializable).
-
-### Refinements the simulation forced
-
-- **`writeGuard` requires an `old` reference** (else it's a plain
-  `invariant`) — corrected above.
-- **Pushable vs. pessimistic.** Equality/inequality over columns or
-  JSONB-extractable fields → `WHERE`-push (all non-ES shapes). A
-  method-call predicate SQL can't express (`old(this.status).canGoTo(…)`) →
-  `SELECT … FOR UPDATE` on relational/document/embedded, or is *naturally*
-  atomic on event-sourced (fold → check → append). **v1 = pushable
-  predicates only**; the pessimistic path is a later slice.
-- **Zero-rows disambiguation.** On the `WHERE`-push shapes, 0 affected rows
-  means *either* the guard failed *or* the row was deleted — the lowering
-  must re-check existence to return `409 conflict` vs `404 not-found`.
-- **JSONB-cast pushability (document/embedded).** A guard over a *domain*
-  field on a document/embedded aggregate lowers to a cast comparison
-  (`(data->>'total')::numeric <= :x`). v1's "pushable only" must state
-  explicitly whether it *includes* the numeric-cast-from-`data->>` case
-  (a top-level `version` column is trivially pushable; a JSONB-nested field
-  is pushable but needs the cast) or **excludes** JSONB-nested guards until
-  the pessimistic path lands. Recommend: include top-level columns
-  (covers `versioned`), exclude JSONB-nested domain guards in v1.
-
-### `dataKey` (primitive 2) — no materialized-`derived` needed
+### `dataKey` (move 2) — no materialized-`derived` needed
 
 Tracing `dataKey` (see §2 above for the detail): the **regular**
 tenant-owned case is a plain claim-copy `stamp onCreate` off the ambient
@@ -315,7 +272,8 @@ triggered by a *visible declaration*, never a recognized name:
 1. `provenanced` → append-only `provenance_records` table + per-field
    JSONB column (a write *history* — not a recomputable derivation).
 2. `unique(...)` → DB UNIQUE index (partial under `softDeletable`).
-3. `versioned` → the *atomicity* of the zero-rows CAS detection.
+3. **default versioning** → the per-aggregate version column + the *atomic*
+   zero-rows CAS (now universal, like `id` — no longer name-gated).
 4. `persistedAs(eventLog)` → `event_store(stream_id, version)` append-only
    table.
 5. `shape(document/embedded)` → JSONB `data` column + `ON CONFLICT` upsert.
@@ -324,9 +282,10 @@ triggered by a *visible declaration*, never a recognized name:
 8. `tenantOwned` → `dataKey` prefix index for subtree scans.
 
 The distinction that matters: after this proposal, **a reader predicts
-every behavior from declarative shape on screen** — a `writeGuard`, a
-`unique(...)`, a `persistedAs(eventLog)`. No behavior hinges on the
-compiler recognizing a blessed capability string.
+every behavior from declarative shape on screen** — a `unique(...)`, a
+`persistedAs(eventLog)`, a `crossTenant` — or from a *universal* default
+they never have to think about (versioning, like `id`). No behavior hinges
+on the compiler recognizing a blessed capability string.
 
 ## Cross-proposal seams
 
@@ -356,19 +315,22 @@ this proposal cannot edit `authorization.md`; flagged for reconciliation.)
 
 Today `versioned` / `tenantOwned` / `tenantRegistry` are **magic capability
 names** — a user-defined `capability versioned {}` would collide with or
-shadow the built-in, and nothing in the surface signals these four names
-are special. Once (1) and (2) land, `versioned` is an ordinary capability
-using `writeGuard` (no name-gate at all) and `tenantOwned`'s
-name-gate shrinks to the residual index trigger. The remaining reserved
-names should get an explicit validator guard (or move fully to
-shape-triggering) so no name silently carries framework meaning.
+shadow the built-in, and nothing in the surface signals these names are
+special. After the moves above, **`versioned` is deleted entirely** (it's a
+universal default, not a capability), and `tenantOwned`'s name-gate shrinks
+to the residual index trigger. Any remaining reserved names should get an
+explicit validator guard (or move fully to shape-triggering) so no name
+silently carries framework meaning.
 
 ## Phasing (each ships independently)
 
 1. **Unify conflict statuses (3)** — additive, no new surface, immediate
-   consistency win; makes structural 409s overridable.
-2. **`writeGuard` + `old` (1)** — pushable predicates only;
-   retires the `versioned` name-gate and unlocks write-invariants.
+   consistency win; makes the structural 409s overridable and closes the
+   OpenAPI/runtime drift.
+2. **Versioning default-on (1)** — every aggregate versioned by default
+   (ETag/If-Match, graceful mode), the `versioned` capability deleted, an
+   `unversioned` opt-out added. The version CAS already ships on every
+   shape, so this is mostly *removing* the opt-in and generalizing it.
 3. **Prefix-match filter operator (2)** — `startsWith` / `LIKE 'prefix.%'`
    in the filter language. Turns `tenantOwned`'s `deep`/`global` scope into
    an ordinary `filter` (retiring the `__loomDeepScope__` sentinel) and
@@ -378,31 +340,24 @@ shape-triggering) so no name silently carries framework meaning.
 
 ## Open questions
 
-1. **`writeGuard` non-pushable predicates** — the simulation
-   sequences these to a later slice (v1 is pushable-only). Ship the
-   pessimistic `SELECT … FOR UPDATE` lowering then, or restrict forever?
-2. **Built-in error payloads** — are `ConcurrencyConflict` /
+1. **Versioning wire strictness** — is *graceful* (no `If-Match` ⇒ write-time
+   CAS fallback) the fixed default with *strict* (require `If-Match`, else
+   `428`) an opt-in per api, or should some contexts default to strict?
+2. **`unversioned` opt-out** — a header modifier (mirroring `crossTenant`),
+   and does it apply to ES aggregates (which are intrinsically versioned via
+   the stream) as a no-op, or is it a validation error there?
+3. **Built-in error payloads** — are `ConcurrencyConflict` /
    `UniquenessConflict` / `Disallowed` / `ReferencedInUse` first-class
    `error` decls in a prelude, or a fixed internal set the `httpStatus`
    mapper is taught to accept?
-3. **`old(...)` in `stamp` — RESOLVED.** The increment
-   `this.version := old(this.version) + 1` needs `old(...)` inside a `stamp
-   onUpdate`; the snapshot operator is available in both write-time contexts
-   (`writeGuard` + `stamp onUpdate`), and is a validation error at create
-   (no prior state). No longer open.
 4. **`organizationContext` (preferred cross-scope resolution)** — split
    `currentUser` (principal) from `organizationContext` (operating tenant
-   scope). This makes every dataKey a single unconditional stamp off
+   scope). Makes every dataKey a single unconditional stamp off
    `organizationContext.orgPath` and dissolves the cross-scope "stamp
-   override" problem (context varies, not the stamp). Open design surface:
-   (a) how the context is set (header / "act as" action / path); (b) the
-   authorization gate (you may only operate within your write-scope subtree
-   — an unvalidated switch is a cross-tenant write hole); (c) whether it's a
-   new frame on the existing execution-context backbone or a fresh accessor.
-   Without it, the fallback is the workflow-with-explicit-stamp framing,
-   which then needs an "explicit value beats capability default" rule.
+   override" problem. Full design + the security gate in
+   [`organization-context.md`](./organization-context.md).
 
-**Resolved by the simulation:** no storage shape needs gating out (all four
-have an atomic write mechanism today); write-guards require an `old`
-reference (else they're plain invariants); materialized `derived` splits
-into a cheap create-time form (covers tenancy) and a deferred cascade form.
+**Resolved:** no storage shape needs gating (all four carry the version as a
+top-level column / stream version, so default versioning is a uniform atomic
+CAS); the `writeGuard`/`old` operator is **struck** (versioning-by-default
+removed its only consumer); materialized `derived` is dropped (no consumer).
