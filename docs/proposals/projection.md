@@ -345,11 +345,44 @@ workflow-instance surface.
   — reading projection + repos at query time, which is legal because a view is a
   query, not a replayable fold. Kept out of v1 to keep the first slice to
   "fold + own endpoint," mirroring aggregate-views-before-workflow-views.
-- **Replay / rebuild.** v1 folds synchronously in-process at emit time; there is
-  no durable log to replay from and no rebuild command. Replay lands with the
-  durable-log channel tier (`channels.md` `channelSource` → kafka/redis-streams)
-  — a `ddd`-side rebuild that re-folds the `<agg>_events` stream. The pure-fold
-  discipline is what keeps this a pure follow-up, not a redesign.
+- **Replay / rebuild — blocked on a durable replay source; not a drop-in
+  follow-up.** v1 folds synchronously in-process (`projectionTee` decorates the
+  dispatcher, routes each dispatched event to the matching fold, upserts the
+  `<Proj>Row`). Nothing about the *input* is retained — no stored stream, no
+  checkpoint/offset, no rebuild command. Rebuild means re-folding an ordered
+  event stream through the (already pure) handlers; the open question the v1
+  proposal glossed is **what stream** — and on fresh `main` every candidate has a
+  gap, so this cannot land as a single pure-fold slice today:
+
+  1. **Re-fold `<agg>_events`** (the path this section originally named). The only
+     durable, ordered event log that exists is the event-sourced aggregate stream
+     — emitted **only** for aggregates declared `persistedAs(eventLog)`. A
+     projection folding events from a **state-persisted** aggregate has nothing
+     logged (its events were dispatched in-process and discarded), so this covers
+     *only* projections whose every source event originates from an ES aggregate,
+     and needs a validator gate (`loom.projection-rebuild-requires-eventlog-sources`)
+     rejecting `rebuild` for any projection with a non-ES source. Partial by
+     construction.
+  2. **A per-projection durable inbox** — have `projectionTee` append every
+     consumed event to a `<proj>_events` log as it folds, so
+     `ddd rebuild <Proj>` (or a generated rebuild fn / `POST …/rebuild`) can
+     truncate `<Proj>Row` and re-fold that log regardless of how the source
+     aggregate persists. Self-contained (no ES / broker prerequisite) and
+     complete, but it's a **new persistence surface on all five backends** and
+     adds write amplification (each projected event persisted twice).
+  3. **Re-consume a durable-log channel** (`retention: log` +
+     `channelSource: kafka | redis-streams`). The proposal's ultimate target, but
+     the durable channel tier is **name-only today** — the grammar parses
+     `channelSource` / `retention: log`, but no emitter reads it and no broker
+     binding or stored stream is generated. This path is blocked on building the
+     channel-broker runtime first; rebuild would sit on top of it.
+
+  So the earlier "pure follow-up, not a redesign" framing was optimistic: the
+  fold *discipline* is ready, but there is no source to replay from. The smallest
+  landable slice is (1) — rebuild-from-`<agg>_events` for ES-sourced projections,
+  behind the validator gate — or (2) if we want rebuild for *every* projection
+  and accept the extra log. (3) waits on the channel tier. Deferred pending that
+  call.
 - **`from <Channel>` binding.** Dropped in v1 (in-process, transport-neutral,
   like today's default dispatch). Re-introduced when a projection needs to fold
   from a broker-backed durable channel — same `channelSource` mechanism reactors
