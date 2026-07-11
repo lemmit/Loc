@@ -119,6 +119,39 @@ describe("ddd breakpoints", () => {
     expect(r.stdout).toContain(`${domainKey}:${targetLine}`);
   });
 
+  it("prints a count header + narrowest-first list when a line maps to >1 target", () => {
+    // `let note = customerName` maps to the fine statement region in
+    // domain/order.ts AND the coarser enclosing aggregate + route-file
+    // regions — so runBreakpoints takes its `targets.length > 1` branch
+    // (a count header, then every target). The single-region happy-path
+    // tests above never exercise it.
+    const { dddLine } = findDddLineAndDomainTarget("let note = customerName");
+
+    const r = run(["breakpoints", ddd, "--line", String(dddLine), "--out", out]);
+    expect(r.status).toBe(0);
+    // The count header (the >1-targets branch).
+    expect(r.stdout).toContain(`${ddd}:${dddLine} maps to `);
+    expect(r.stdout).toMatch(/maps to \d+ generated location\(s\):/);
+
+    const printed = r.stdout.trim().split("\n").slice(1); // drop the header line
+    expect(printed.length).toBeGreaterThan(1);
+    // Narrowest-origin-span first: the fine domain statement region beats the
+    // whole-file aggregate/route regions, so the domain file leads the list.
+    expect(printed[0]).toContain("domain/order.ts:");
+    // Fan-out crosses files — a route-file target is also listed.
+    expect(printed.some((l) => l.includes("order.routes.ts:"))).toBe(true);
+  });
+
+  it("exits 1 when the source map is present but unparseable", () => {
+    const badOut = path.join(tmp, "bad-sourcemap");
+    fs.mkdirSync(path.join(badOut, ".loom"), { recursive: true });
+    fs.writeFileSync(path.join(badOut, ".loom", "sourcemap.json"), "{ not valid json", "utf8");
+
+    const r = run(["breakpoints", ddd, "--line", "9", "--out", badOut]);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/Could not parse source map/);
+  });
+
   it("a .ddd line with no construct maps to nothing, exit 0", () => {
     // The blank line right after the opening backtick — no `.ddd` construct
     // starts there.
