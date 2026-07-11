@@ -305,3 +305,65 @@ fence already established for their own gated content changes).
   actual `js-debug` session against the emitted `.map`, set a breakpoint on
   a `.ddd` line, confirm it resolves — needs an interactive VS Code
   environment this sandbox doesn't have.
+
+## Phase 8 — breakpoint translation core (first slice, Milestone 21)
+
+**Created:** 2026-07-11
+**Status:** Shipped — pure core only, uncommitted in this session's working
+tree (see the session's own report for the handoff).
+
+See [`../proposals/source-map-and-debugging.md`](../proposals/source-map-and-debugging.md)
+§6E and this doc's own "Fan-out plan" above ("Full `ddd-dap` adapter" — the
+item this slice starts draining). Follows the same **core → protocol
+adapter** precedent `src/trace/` already set for `ddd trace`: `src/trace/`
+is a pure, `fs`-free module that resolves a generated stack frame back to
+`.ddd` source, and `src/cli/main.ts` is the thin IO/exit-code shell around
+it. This slice is the mirror image, one layer earlier in the DAP story: a
+pure, `fs`-free module that resolves a `.ddd` source LINE forward to every
+generated location it produced — the primitive the eventual `ddd-dap`
+adapter needs to answer "the user set a breakpoint on `.ddd` line N; what
+does the debugger actually arm it on?"
+
+### What landed
+
+- **`src/dap/breakpoints.ts` + `src/dap/index.ts`** — a new top-level
+  module, peer to `src/trace/` and `src/mcp/`. `translateBreakpoint(map,
+  dddPath, dddLine, readSource)` returns every `BreakpointTarget {file,
+  line, region}` a `.ddd` file+line maps forward to, sorted narrowest
+  origin-span first, de-duped by `{file, line}`. Pure, no `fs`, browser-safe
+  — mirrors `src/trace/annotate.ts`'s `readSource` injection convention
+  exactly.
+- **`LineIndex.offsetOfLine`** (`src/trace/annotate.ts`) — the one
+  genuinely new primitive: 1-based line → 0-based byte offset (the inverse
+  of the existing `lineOf`), added alongside `lineOf`/`colOf` on the same
+  `starts` table. `LineIndex`'s prior behavior is unchanged (one new private
+  field caching `text.length` for the end-of-file clamp, one new public
+  method).
+- **Reuse, not reinvention**: `SourceMap`/`WireRegion` (types),
+  `matchPath` (already exported), and the wire-origin → `OriginRef` bridge
+  (`toOriginRef` in `src/trace/resolve.ts`, previously private — exported
+  in this slice for `src/dap/` to reuse, and added to the `src/trace/`
+  barrel) all come from `src/trace/` unchanged; the origin-chain walk
+  reuses `resolveToSource` from `src/ir/types/origin.ts` verbatim.
+- Tests: `test/dap/breakpoints.test.ts` (hand-built fixture maps, mirroring
+  `test/trace/annotate.test.ts`'s discipline, plus one real-generator round
+  trip mirroring `test/system/trace-roundtrip.test.ts`) and two new
+  `LineIndex.offsetOfLine` unit tests alongside the existing `lineOf`/`colOf`
+  cases in `test/trace/annotate.test.ts`.
+
+### What's deferred
+
+- The **DAP protocol shell** itself — no `@vscode/debugadapter` dependency,
+  no `packages/ddd-dap` publish-shaped workspace. Those are glue built on
+  top of `translateBreakpoint` (and the already-shipped reverse direction,
+  `resolveFrame`) in a later slice, the same way `src/cli/main.ts`'s `ddd
+  trace` command is glue around `src/trace/`.
+- **Scope/variable remap via `targetCol`** — `BreakpointTarget.region` is
+  kept on the result specifically so a later slice can read `region
+  .targetCol` for column-precise placement / variable-scope resolution;
+  this slice only consumes `region.target[0]` (the line) and does not yet
+  do anything column-aware on the forward path.
+- Backend-specific breakpoint arming (translating a `hono_api/domain/
+  order.ts:26` result into an actual V8/CDP `setBreakpointByUrl` call, a
+  `coreclr` breakpoint, a JDWP request, etc.) — out of scope for a pure
+  core; that's adapter-side work per backend.

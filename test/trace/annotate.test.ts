@@ -177,6 +177,24 @@ describe("LineIndex", () => {
     expect(idx.colOf(4)).toBe(1); // 'd' — first char of line 2
     expect(idx.colOf(6)).toBe(3); // 'f'
   });
+
+  it("offsetOfLine is the inverse of lineOf — round-trips for every in-range line", () => {
+    const idx = new LineIndex("abc\ndef\nghi");
+    expect(idx.offsetOfLine(1)).toBe(0); // 'a'
+    expect(idx.offsetOfLine(2)).toBe(4); // 'd'
+    expect(idx.offsetOfLine(3)).toBe(8); // 'g'
+    for (const line of [1, 2, 3]) {
+      expect(idx.lineOf(idx.offsetOfLine(line))).toBe(line);
+    }
+  });
+
+  it("offsetOfLine clamps out-of-range lines instead of throwing", () => {
+    const idx = new LineIndex("abc\ndef\nghi");
+    expect(idx.offsetOfLine(0)).toBe(0); // before the first line -> start of file
+    expect(idx.offsetOfLine(1)).toBe(0); // line 1 -> 0, always
+    expect(idx.offsetOfLine(4)).toBe(11); // one past the last line -> end of file (text.length)
+    expect(idx.offsetOfLine(100)).toBe(11); // arbitrarily far past the end -> still end of file
+  });
 });
 
 // ---------------------------------------------------------------------------

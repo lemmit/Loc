@@ -21,6 +21,7 @@ import { type Resolution, resolveFrame, type SourceMap } from "./resolve.js";
  *  frame). */
 export class LineIndex {
   private readonly starts: number[];
+  private readonly length: number;
 
   constructor(text: string) {
     const starts = [0];
@@ -28,6 +29,7 @@ export class LineIndex {
       if (text[i] === "\n") starts.push(i + 1);
     }
     this.starts = starts;
+    this.length = text.length;
   }
 
   /** 0-based index into `starts` of the line containing byte offset
@@ -51,6 +53,23 @@ export class LineIndex {
   /** 1-based line number containing byte offset `offset`. */
   lineOf(offset: number): number {
     return this.lineIndexOf(offset) + 1;
+  }
+
+  /** 0-based byte offset of 1-based line `line`'s first character — the
+   *  inverse of `lineOf` (round-trips: `lineOf(offsetOfLine(n)) === n` for
+   *  any in-range `n`). Out-of-range clamps rather than throwing, like
+   *  `lineOf`/`colOf` do for out-of-range offsets: `line <= 1` maps to `0`
+   *  (start of file); `line` past the last line maps to the text length
+   *  (end of file) — which is exactly the "one past the end" a caller
+   *  needs for a half-open `[offsetOfLine(n), offsetOfLine(n + 1))` range
+   *  on the last line. Added for `src/dap/` (breakpoint translation is the
+   *  line→offset inverse of this module's offset→line); kept alongside
+   *  `lineOf`/`colOf` since it shares the same `starts` table and binary
+   *  search discipline. */
+  offsetOfLine(line: number): number {
+    if (line <= 1) return this.starts[0]!;
+    if (line - 1 >= this.starts.length) return this.length;
+    return this.starts[line - 1]!;
   }
 
   /** 1-based column of byte offset `offset` within its line. Deliberately
