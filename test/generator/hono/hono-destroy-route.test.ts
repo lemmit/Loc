@@ -63,7 +63,9 @@ describe("Hono canonical-destroy → DELETE route", () => {
     expect(routes).toContain("return c.body(null, 204);");
     // FK-violation (still-referenced) → 409 mapped locally.
     expect(routes).toContain('status: 409, detail: "Widget is still referenced');
-    expect(routes).toContain('.code === "23503"');
+    expect(routes).toContain(
+      '(((err as { code?: string }).code ?? (err as { cause?: { code?: string } }).cause?.code) === "23503")',
+    );
   });
 
   it("emits an `async delete(id)` method on the crudish aggregate's repository", async () => {

@@ -115,7 +115,11 @@ describe("unique (...) → Hono 23505 conflict mapping", () => {
     );
     const routes = [...files.entries()].find(([p]) => p.endsWith("customer.routes.ts"))?.[1];
     expect(routes, "customer.routes.ts").toBeDefined();
-    expect(routes).toContain('.code === "23505"');
+    // Reads the SQLSTATE off `err.cause.code` (drizzle wraps the driver error)
+    // as well as the raw `err.code`, so a genuine breach 409s instead of 500ing.
+    expect(routes).toContain(
+      '(((err as { code?: string }).code ?? (err as { cause?: { code?: string } }).cause?.code) === "23505")',
+    );
     expect(routes).toMatch(/return problem\(409, "Conflict",/);
   });
 });

@@ -656,9 +656,12 @@ export function buildRoutesFile(
     lines.push(`      } catch (err) {`);
     // PG foreign_key_violation (SQLSTATE 23503) — the row is still
     // referenced.  Map to a 409 problem locally so the shared onError
-    // (and every other route's behaviour) stays untouched.
+    // (and every other route's behaviour) stays untouched.  drizzle-orm
+    // (>= the DrizzleQueryError era, e.g. the v5 zod-4 stack) wraps the driver
+    // error, so the pg SQLSTATE rides `err.cause.code`, not `err.code`; read
+    // both so the map works on the wrapped and the raw (older-drizzle) shapes.
     lines.push(
-      `        if (err && typeof err === "object" && (err as { code?: string }).code === "23503") {`,
+      `        if (err && typeof err === "object" && (((err as { code?: string }).code ?? (err as { cause?: { code?: string } }).cause?.code) === "23503")) {`,
     );
     lines.push(
       `          return c.body(JSON.stringify({ type: "about:blank", title: "Conflict", status: 409, detail: "${agg.name} is still referenced and cannot be deleted.", instance: c.req.path }), 409, { "content-type": "application/problem+json" });`,
@@ -762,11 +765,15 @@ export function buildRoutesFile(
   // Gated on a declared `unique` key so a model with none emits byte-identically
   // (the proposal's strict-additivity guarantee) — only such a table can 23505.
   if ((agg.uniqueKeys?.length ?? 0) > 0) {
+    // drizzle-orm wraps the driver error (DrizzleQueryError), so the pg
+    // SQLSTATE + constraint ride `err.cause`, not `err` directly — read both so
+    // a genuine unique breach maps to 409 under the wrapped (v5) and raw
+    // (older-drizzle) shapes alike, instead of falling through to a 500.
     lines.push(
-      `    if (err && typeof err === "object" && (err as { code?: string }).code === "23505") {`,
+      `    if (err && typeof err === "object" && (((err as { code?: string }).code ?? (err as { cause?: { code?: string } }).cause?.code) === "23505")) {`,
     );
     lines.push(
-      `      ${renderHonoLogCall("disallowed", `aggregate: "${agg.name}", message: (err as { constraint?: string }).constraint ?? "unique_violation", status: 409`)}`,
+      `      ${renderHonoLogCall("disallowed", `aggregate: "${agg.name}", message: (err as { constraint?: string }).constraint ?? (err as { cause?: { constraint?: string } }).cause?.constraint ?? "unique_violation", status: 409`)}`,
     );
     lines.push(
       `      return problem(409, "Conflict", \`A ${agg.name} with these values already exists.\`);`,

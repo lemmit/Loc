@@ -85,7 +85,7 @@ system DevPlatform {
         }
         sessions: jwt
         claims: {
-            role: "realm_access.role",
+            role: "role",
             permissions: "realm_access.roles"
         }
     }
@@ -846,8 +846,11 @@ system DevPlatform {
     }
 
     // Operation route: `rename` mutates a field through a precondition gate.
+    // NB: a distinct name from the "create a project then read it back" test —
+    // `unique (name)` on Project means reusing "Atlas" would collide (23505 →
+    // 409) once both tests actually persist under auth.
     test e2e "renaming a project updates its name" against honoApi {
-        let p = api.projects.create({ name: "Atlas", visibility: "Public", active: true, sequence: 1, externalId: "00000000-0000-0000-0000-000000000000", budget: 100.0, createdAt: "2024-01-01T00:00:00Z" })
+        let p = api.projects.create({ name: "Nebula", visibility: "Public", active: true, sequence: 1, externalId: "00000000-0000-0000-0000-000000000000", budget: 100.0, createdAt: "2024-01-01T00:00:00Z" })
         api.projects.rename(p, { newName: "Orion" })
         let read = api.projects.getById(p)
         expect(read.name).toBe("Orion")
@@ -905,6 +908,16 @@ system DevPlatform {
     // 422 — invariant `name.length > 0` (Catalog.Project) must reject.
     test e2e "creating a project with an empty name is rejected" against dotnetApi {
         expect(api.projects.create({ name: "", visibility: "Public", active: true, sequence: 1, externalId: "00000000-0000-0000-0000-000000000000", budget: 100.0, createdAt: "2024-01-01T00:00:00Z" })).toThrow(422)
+    }
+
+    // 409 — the `unique (name)` domain invariant: a second create with the same
+    // name breaches the derived DB unique index (SQLSTATE 23505) and must map to
+    // 409 Conflict on EVERY backend (the runtime complement to the static parity
+    // gate).  Guards the drizzle-wraps-the-driver-error regression where Hono
+    // read `err.code` (undefined under DrizzleQueryError) and 500'd instead.
+    test e2e "creating a project with a duplicate name is rejected" against honoApi {
+        api.projects.create({ name: "DupeGuard", visibility: "Public", active: true, sequence: 9, externalId: "00000000-0000-0000-0000-000000000000", budget: 0.0, createdAt: "2024-01-01T00:00:00Z" })
+        expect(api.projects.create({ name: "DupeGuard", visibility: "Public", active: true, sequence: 9, externalId: "00000000-0000-0000-0000-000000000000", budget: 0.0, createdAt: "2024-01-01T00:00:00Z" })).toThrow(409)
     }
 
     // 422 — invariant `commitSha.length > 0` (Builds.Build) must reject.

@@ -666,6 +666,35 @@ function renderKeycloakRealm(sys: SystemIR): string {
           },
         ]
       : [];
+  // A scalar `role` claim (`currentUser.role`) is a common RBAC shape, but
+  // Keycloak emits realm roles as an ARRAY (`realm_access.roles`) — nothing
+  // populates a singular claim path, so `currentUser.role` decodes to `null`
+  // out of the box and every `role == "admin"` gate 403s while an
+  // onCreate `stamp createdByRole := currentUser.role` writes NULL (→ a
+  // not-null violation → 500/409).  When the app declares a `role` claim, seed
+  // the demo user with an `admin` role *attribute* and a mapper that projects
+  // it to the declared claim path, so role-gated ops are exercisable.  The
+  // `realm_access.roles` array (permissions) is untouched — it stays
+  // `[user, agent]`, so permission-gated denials still hold.
+  const roleClaim = sys.auth?.claims.find((c) => c.field === "role");
+  const roleMappers = roleClaim
+    ? [
+        {
+          name: "loom-role-claim",
+          protocol: "openid-connect",
+          protocolMapper: "oidc-usermodel-attribute-mapper",
+          consentRequired: false,
+          config: {
+            "user.attribute": "role",
+            "claim.name": roleClaim.path,
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+          },
+        },
+      ]
+    : [];
+  const clientMappers = [...audienceMappers, ...roleMappers];
   const doc = {
     realm,
     enabled: true,
@@ -682,7 +711,7 @@ function renderKeycloakRealm(sys: SystemIR): string {
         directAccessGrantsEnabled: true,
         redirectUris: ["http://localhost:*", "http://127.0.0.1:*"],
         webOrigins: ["*"],
-        ...(audienceMappers.length > 0 ? { protocolMappers: audienceMappers } : {}),
+        ...(clientMappers.length > 0 ? { protocolMappers: clientMappers } : {}),
       },
     ],
     users: [
@@ -695,6 +724,10 @@ function renderKeycloakRealm(sys: SystemIR): string {
         emailVerified: true,
         credentials: [{ type: "password", value: "demo", temporary: false }],
         realmRoles: ["user", "agent"],
+        // Backs the scalar `role` claim mapper above (admin so the demo user
+        // can exercise role-gated operations); only consumed when the app
+        // declares a `role` claim.
+        ...(roleClaim ? { attributes: { role: ["admin"] } } : {}),
       },
     ],
   };

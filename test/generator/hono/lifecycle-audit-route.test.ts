@@ -65,7 +65,7 @@ describe("hono routes — audited lifecycle actions", () => {
     expect(deleteIdx).toBeGreaterThan(auditIdx);
     // 409 FK-violation mapping is preserved on the audited destroy path.
     expect(r).toContain(
-      'if (err && typeof err === "object" && (err as { code?: string }).code === "23503") {',
+      'if (err && typeof err === "object" && (((err as { code?: string }).code ?? (err as { cause?: { code?: string } }).cause?.code) === "23503")) {',
     );
   });
 
