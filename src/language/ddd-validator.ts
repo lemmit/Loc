@@ -65,6 +65,7 @@ import {
   checkTenancyDecls,
   checkTernaryExprs,
   checkTheme,
+  checkThemeContrast,
   checkTopLevelDomainComposition,
   checkTopLevelFunctions,
   checkTraceability,
@@ -184,6 +185,10 @@ export class DddValidator {
     // alternative (`alt:` or `decorative: true`).  Alt text is human content
     // Loom can't derive — a missing alt fails WCAG 1.1.1 (accessibility.md).
     guard("a11y-missing-alt", model, () => checkImageAltText(model, accept));
+    // Accessibility: a user `theme {}` colour whose fill shade leaves no
+    // readable text colour can't produce a WCAG-AA app — warn at compile time
+    // (accessibility.md, `loom.a11y-theme-contrast`).
+    guard("a11y-theme-contrast", model, () => checkThemeContrast(model, accept));
     // Project composition: a top-level `subdomain` (declared outside any
     // `system { }`) folds into the project's single system — enforce that
     // exactly one system exists across the import graph.  See

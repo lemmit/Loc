@@ -22,12 +22,8 @@
 
 import { describe, expect, it } from "vitest";
 import { prepareThemeVM } from "../../../src/generator/_frontend/theme-preparer.js";
-import {
-  AA_NORMAL,
-  bestForegroundRatio,
-  contrastRatio,
-} from "../../../src/generator/_frontend/wcag-contrast.js";
 import { BUILTIN_PACK_FORMATS } from "../../../src/util/builtin-formats.js";
+import { AA_NORMAL, bestForegroundRatio, contrastRatio } from "../../../src/util/color.js";
 
 // The two standard text colours a pack pairs with a coloured surface: a light
 // (near-white) and a dark (near-black "ink").  A surface is usable when one of
