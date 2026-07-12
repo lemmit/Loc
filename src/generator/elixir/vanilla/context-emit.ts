@@ -47,6 +47,7 @@ import {
   renderEnsureHelper,
   renderEsContextBlock,
 } from "./eventsourced-emit.js";
+import { externImplModule, externPersistForceChanges, isExternOp } from "./extern-emit.js";
 import { renderAggregateFunctions } from "./function-emit.js";
 import { isAbstractBase } from "./inheritance-emit.js";
 import {
@@ -557,6 +558,73 @@ function renderContextRefCollHelpers(appModule: string): string {
 // `cast`ing the op's *params* — params are inputs to the formula, not columns,
 // so casting them would raise `unknown field` at runtime.  This is the seam
 // workflows call when their body invokes `<aggregate>.<operation>(args)`.
+//
+// Extern operation context function — the delegating seam (proposal §3a).
+// Runs the preconditions (`ensure/2` guard chain), delegates to the co-located,
+// user-owned `<Agg>ExternImpl.<op>(record, params)` hook, then persists the
+// returned (mutated) struct's scalar columns via `force_change` and re-asserts
+// invariants.  Replaces the old empty-`change(%{})` no-op that silently returned
+// 204.  A missing user impl `raise`s (loud 500), never a silent success.
+function renderExternOpFunction(
+  facadeMod: string,
+  agg: AggregateIR,
+  aggPascal: string,
+  aggSnake: string,
+  op: OperationIR,
+): string {
+  const opSnake = snake(op.name);
+  const aggModule = `${facadeMod}.${aggPascal}`;
+  const repoMod = `${aggModule}Repository`;
+  const implMod = externImplModule(facadeMod, aggPascal);
+  const rc: RenderCtx = {
+    thisName: "record",
+    contextModule: facadeMod,
+    foundation: "vanilla",
+    agg: agg as EnrichedAggregateIR,
+  };
+  // Preconditions → a leading `with :ok <- ensure(...)` chain (identical atoms +
+  // 422 mapping to the non-extern guard path); the extern delegation is the final
+  // with-clause, rebinding `record` to the mutated struct.
+  const guardClauses = op.statements
+    .filter(
+      (s): s is Extract<StmtIR, { kind: "requires" | "precondition" }> =>
+        s.kind === "requires" || s.kind === "precondition",
+    )
+    .map((s) => renderOpGuardClause(s, rc));
+  const withClauses = [...guardClauses, `{:ok, record} <- ${implMod}.${opSnake}(record, params)`];
+  // Bind the params the preconditions reference (`score = Map.get(params,
+  // "score")`) BEFORE the `with` — a precondition like `score >= 0` reads the op
+  // param, not a column, so it needs the local.  Params the guards don't touch
+  // stay inside the `params` map the hook receives (no unused-var warning).
+  const paramBinds = op.params
+    .filter((p) => op.statements.some((s) => stmtUsesParam(s, p.name)))
+    .map((p) => `    ${snake(p.name)} = Map.get(params, ${JSON.stringify(p.name)})\n`)
+    .join("");
+  // Re-assert the aggregate's cross-field invariants after the hook mutates and
+  // before the write (D3c) — byte-identical when the aggregate has none.
+  const changesetMod = `${aggModule}Changeset`;
+  const invPipe = aggregateHasResidualInvariants(agg)
+    ? `\n      |> ${changesetMod}.validate_invariants()`
+    : "";
+  // Persist EVERY scalar column off the returned struct (not the old empty
+  // `change(%{})`): `force_change` because the changeset data already carries the
+  // new value.  See `externPersistForceChanges`.
+  const forceChanges = externPersistForceChanges(agg)
+    .map((b) => `\n      |> ${b}`)
+    .join("");
+  const actorArg = opUsesCurrentUser(op) ? ", current_user \\\\ nil" : "";
+  return `  @doc "Extern operation \`${op.name}\` on \`${aggPascal}\` — runs preconditions, delegates to the ${aggPascal}ExternImpl hook, then re-asserts invariants and persists."
+  @spec ${opSnake}_${aggSnake}(${aggModule}.t(), map()) ::
+          {:ok, ${aggModule}.t()} | {:error, Ecto.Changeset.t() | term()}
+  def ${opSnake}_${aggSnake}(%${aggModule}{} = record, params${actorArg}) when is_map(params) do
+${paramBinds}    with ${withClauses.join(",\n         ")} do
+      record
+      |> Ecto.Changeset.change(%{})${forceChanges}${invPipe}
+      |> ${repoMod}.persist_change()
+    end
+  end`;
+}
+
 function renderNamedOpFunction(
   facadeMod: string,
   ctx: BoundedContextIR,
@@ -571,6 +639,13 @@ function renderNamedOpFunction(
    *  caller when a recorder is present (zero cost otherwise). */
   opFragments?: OpFragment[],
 ): string {
+  // An `extern` op has NO mutating body (only preconditions) — it delegates the
+  // business decision to the user-owned `<Agg>ExternImpl` hook, then persists the
+  // returned struct.  Handled by its own renderer (the empty-changeset path below
+  // was the silent-204 bug this fixes — proposal §1b).
+  if (isExternOp(op)) {
+    return renderExternOpFunction(facadeMod, agg, aggPascal, aggSnake, op);
+  }
   const opSnake = snake(op.name);
   const aggModule = `${facadeMod}.${aggPascal}`;
   const repoMod = `${aggModule}Repository`;

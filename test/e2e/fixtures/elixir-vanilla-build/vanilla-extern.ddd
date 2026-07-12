@@ -1,0 +1,37 @@
+// Extern operation seam (extern-domain-extension-point.md, Slice 1): the body
+// carries only preconditions; the generated context delegates the mutation to a
+// co-located, user-owned `<Agg>ExternImpl` hook (scaffolded once, raises until
+// filled in) and persists the returned struct.  Compiles the RAISING scaffold
+// stub — `mix compile --warnings-as-errors` proves the behaviour + impl +
+// delegation are well-formed Elixir.
+system ExternSys {
+  subdomain Sales {
+    context Sales {
+      enum OrderStatus { Draft, Confirmed, Cancelled }
+      aggregate Order {
+        customerId: string
+        status: OrderStatus
+        riskScore: int
+        invariant riskScore >= 0
+        function isMutable(): bool = status == OrderStatus.Draft
+        operation confirm() extern {
+          precondition isMutable()
+          precondition riskScore < 80
+        }
+        operation flag(score: int) extern { precondition score >= 0 }
+        operation cancel() { precondition isMutable()  status := OrderStatus.Cancelled }
+      }
+      repository Orders for Order { }
+    }
+  }
+  api SalesApi from Sales
+  storage pg { type: postgres }
+  resource salesState { for: Sales, kind: state, use: pg }
+  deployable d {
+    platform: elixir
+    contexts: [Sales]
+    dataSources: [salesState]
+    serves: SalesApi
+    port: 4000
+  }
+}

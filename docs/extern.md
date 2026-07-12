@@ -20,13 +20,17 @@ aggregate Order {
 }
 ```
 
-> **Backend coverage.** `extern` *operations* ship on four of the five
-> backends — Hono, .NET, **Python**, and **Java**.  Elixir/Phoenix has no
-> extern escape hatch (the surface no-ops there).  The two handler-registry
-> layouts walked through below (.NET and Hono) are representative; Python
-> and Java emit the same shape (a typed per-op handler interface / registry,
-> a register/verify gate, and a fail-fast-at-startup check for a missing
-> implementation).
+> **Backend coverage.** `extern` *operations* now ship on **all five**
+> backends — Hono, .NET, **Python**, **Java**, and **Elixir/Phoenix**.  The two
+> handler-registry layouts walked through below (.NET and Hono) are
+> representative for those two; Python and Java emit the same shape (a typed
+> per-op handler interface / registry, a register/verify gate, and a
+> fail-fast-at-startup check for a missing implementation).  **Elixir** uses a
+> different, co-located idiom — a generated `@behaviour` + a scaffold-once
+> user-owned impl module — described under *Elixir/Phoenix* below.  (This is
+> Slice 1 of `docs/proposals/extern-domain-extension-point.md`, which re-homes
+> `extern` from an injected application-layer handler to a domain-internal
+> extension point; the remaining backends migrate in later slices.)
 >
 > Two **frontend** extern hatches exist alongside the operation one:
 > `function … extern from "…"` (a typed frontend-function hook — React, Vue,
@@ -132,6 +136,86 @@ dispatches to the registered handler, then runs invariants and saves.
 
 `createApp(...)` calls `verifyOrderExternHandlersRegistered()` at
 startup, so a missing handler fails fast.
+
+## Elixir/Phoenix (plain Ecto)
+
+Elixir uses a **co-located domain extension point** rather than an injected
+handler registry: the extern op is a member of the aggregate's own module tree,
+scaffolded once and owned by you thereafter.  Two files are generated per
+aggregate that has an extern op:
+
+- **`<Ctx>.<Agg>Extern`** (`lib/<app>/<ctx>/<agg>_extern.ex`) — a generated
+  `@behaviour` with one `@callback` per extern op.  Regenerated every run, so it
+  always tracks the operation signatures.
+- **`<Ctx>.<Agg>ExternImpl`** (`lib/<app>/<ctx>/<agg>_extern_impl.ex`) — the
+  hand-written implementation.  **Scaffolded once** with a raising stub, then
+  **yours** — a `generate system` re-run never overwrites it (see
+  *Regeneration preservation* below).
+
+For the `confirm()` extern op above, the generated behaviour + delegating
+context is:
+
+```elixir
+# lib/sales/sales/order_extern.ex — generated behaviour (one @callback per op)
+defmodule Sales.Sales.OrderExtern do
+  @callback confirm(Sales.Sales.Order.t(), map()) ::
+              {:ok, Sales.Sales.Order.t()} | {:error, term()}
+end
+
+# lib/sales/sales.ex — the context delegates the op to the user hook
+def confirm_order(%Sales.Sales.Order{} = record, params) when is_map(params) do
+  with :ok <- ensure(is_mutable(record), :precondition_failed),
+       {:ok, record} <- Sales.Sales.OrderExternImpl.confirm(record, params) do
+    record
+    |> Ecto.Changeset.change(%{})
+    |> Ecto.Changeset.force_change(:status, record.status)
+    # …one force_change per scalar column, off the returned struct…
+    |> Sales.Sales.OrderRepository.persist_change()
+  end
+end
+```
+
+The scaffolded impl **fails loudly** until you fill it in — a missing
+implementation is an HTTP 500 with a clear message, never a silent success:
+
+```elixir
+# lib/sales/sales/order_extern_impl.ex — SCAFFOLD-ONCE, yours to edit
+# loom:scaffold-once — this file is yours.  Loom scaffolds it on the first
+# `generate` and NEVER overwrites it again …
+defmodule Sales.Sales.OrderExternImpl do
+  @behaviour Sales.Sales.OrderExtern
+
+  @impl true
+  def confirm(%Sales.Sales.Order{} = record, _params) do
+    # Replace the raise with your logic — mutate the struct and return {:ok, record}:
+    {:ok, %{record | status: :Confirmed}}
+    # raise "extern operation `confirm` on Order is not implemented — …"
+  end
+end
+```
+
+The hook runs **after** the preconditions and **before** the framework
+re-asserts invariants and persists (the same load → preconditions → hook →
+invariants → save flow as the other backends).  Mutate the struct and return
+`{:ok, record}`; the context persists every scalar column off the returned
+struct via `force_change`.  Return `{:error, term}` to abort the write.
+Adding a *new* extern op later regenerates the behaviour with a new `@callback`
+the scaffold-once impl doesn't yet satisfy, so `mix compile
+--warnings-as-errors` fails until you implement it — loud at compile time too.
+
+> Scope: the Elixir hook persists **scalar columns**.  Mutating a containment
+> or reference collection from an extern impl is a follow-up.
+
+### Regeneration preservation (scaffold-once)
+
+The Elixir extern impl is the first user of Loom's **scaffold-once** mechanic
+(`src/util/scaffold-once.ts`): a generated file carries a `loom:scaffold-once`
+marker in its first-line comment, and the CLI writer, on seeing that marker,
+**keeps the on-disk copy** whenever the file already exists — writing it only on
+the first `generate`.  `ddd generate system` reports these as
+`preserved (scaffold-once): N`.  The mechanic is in-band (no side-channel), so a
+backend opts a file into it by emitting one comment line; the other extern
+slices (.NET partial classes, TS/Python/Java overridable hooks) reuse it.
 
 ## When to reach for `extern`
 
