@@ -79,8 +79,35 @@ function aggregatesTouched(h: CommandHandlerIR | QueryHandlerIR): Set<string> {
  *    - `loom.query-handler-saves` — a `queryHandler` must not mutate/save.
  *    - `loom.command-handler-multi-aggregate` — a `commandHandler` may touch
  *      only ONE aggregate; a cross-aggregate orchestration must be a workflow.
+ *    - `loom.handler-param-reserved-id` — a handler parameter may not be named
+ *      `id`: in Loom's expression scope a bare `id` always means "the current
+ *      entity's id", so a body reference to an `id` param silently resolves to
+ *      the implicit instead (e.g. `getById(id)` lowers to a `this`-prop read),
+ *      emitting code that references an id that isn't in scope. Rename the param
+ *      (e.g. `orderId`).
  */
 export function validateApplicationHandlers(ctx: BoundedContextIR, diags: LoomDiagnostic[]): void {
+  const handlerKinds: [readonly (CommandHandlerIR | QueryHandlerIR)[], string][] = [
+    [ctx.commandHandlers ?? [], "commandHandler"],
+    [ctx.queryHandlers ?? [], "queryHandler"],
+  ];
+  for (const [handlers, kind] of handlerKinds) {
+    for (const h of handlers) {
+      for (const p of h.params) {
+        if (p.name === "id") {
+          diags.push({
+            severity: "error",
+            code: "loom.handler-param-reserved-id",
+            message:
+              `context '${ctx.name}': ${kind} '${h.name}' has a parameter named 'id', which is ` +
+              `reserved — a bare 'id' in a handler body resolves to the current entity's implicit id, ` +
+              `not the parameter. Rename it (e.g. 'orderId').`,
+            source: `${ctx.name}/${h.name}`,
+          });
+        }
+      }
+    }
+  }
   for (const q of ctx.queryHandlers ?? []) {
     if (handlerMutates(q)) {
       diags.push({
