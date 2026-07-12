@@ -49,9 +49,24 @@ generator defects.
 > the *default-on* recommendation is unadopted (proposal `fb02e61d`). S3 is
 > **mostly closed** (showcase now tsc-gated on Hono/.NET/Angular; residual =
 > python-build corpus). **Still open:** S7 (ports), S10 (extern), the
-> `api`-grouping / open-host-service gap, S5(b)/(d), and Phoenix operation-persist
-> re-validation. Per-finding markers below are updated; the original snapshot prose
-> (grade matrix, executive summary) is annotated in place, not rewritten.
+> `api`-grouping / open-host-service gap, and S5(d). Per-finding markers below are
+> updated; the original snapshot prose (grade matrix, executive summary) is
+> annotated in place, not rewritten.
+>
+> **🔄 Re-verified again (2026-07-12).** Three items this banner still listed as
+> open are in fact drained on `main` and were re-confirmed by regeneration:
+> **S5(b)** — the .NET/Java event-sourced saga starter no-ops when the stream
+> exists (merged create+on into one read-once-branch reactor, #1695), pinned by
+> `test/generator/{dotnet,java}/*-saga-starter-guard.test.ts`; **Phoenix
+> operation-persist re-validation** — a named op's persist pipes through the
+> changeset's `validate_invariants/1` (cross-field `add_error` → 422) before
+> `persist_change` (#1710); and the **duplicated Phoenix op bodies** — the op body
+> now lives only on the context facade (no schema-module core to duplicate).
+> Also FIXED since the 07-11 pass: the Phoenix **shorthand-view `NotLoaded`
+> crash** (#1783 — the view query preloads its wireShape associations). The
+> **genuinely open** remainder is design work, not concrete defects: S7 (ports),
+> S10 (extern), the `api`-grouping / open-host-service gap, and S5(d) (outbox — by
+> design until brokers land).
 
 ---
 
@@ -314,9 +329,16 @@ make it real when brokers land.
 > subscriber-less topic.
 > **✅ (c) FIXED** — Java's publisher no longer only logs; `java/emit/service.ts`
 > wires real event publication (the code cites "audit §S5c").
-> **Still open:** (b) the .NET/Java saga starter double-append / unpinned order
-> (mitigation present, not conformance-pinned) and (d) the outbox / Hono
-> fire-and-forget upgrade path (by design until brokers land).
+> **✅ (b) FIXED** (#1695) — the .NET/Java event-sourced saga starter no longer
+> double-appends: a same-event `create`+`on` pair is merged into ONE reactor that
+> reads the `<wf>_events` stream once and branches (empty → create-logic,
+> non-empty → on-logic), so exactly one event appends regardless of fan-out order
+> — which also removes the unpinned-order facet (there is no second subscriber to
+> race). Structurally pinned per-PR by `test/generator/dotnet/dotnet-saga-starter-guard.test.ts`
+> and `test/generator/java/java-saga-starter-guard.test.ts` (same-event pair →
+> single branching handler; different-event pair → two independent handlers).
+> **Still open:** (d) the outbox / Hono fire-and-forget upgrade path (by design
+> until brokers land).
 
 ### S6 · Rehydration re-runs creation invariants (P2 — Hono, Python)
 
@@ -453,9 +475,16 @@ seed positional-args/string-datetime).
 > the wire (#1718 — chained/helper-fn/current-user derived stay honestly skipped,
 > no crash); `requires`/`precondition` now map to 403/422 instead of 500
 > (#1710/#1716); the dead hard-`Repo.delete` on softDeletable is gated out (#1763,
-> already ✅ below); events are S5(a) FIXED (post-commit dispatch). **Still open:**
-> operation-persist skips changeset re-validation (PARTIAL — low risk, the domain
-> floor from #1710/#1716 mitigates). The bullets below are the original snapshot.
+> already ✅ below); events are S5(a) FIXED (post-commit dispatch).
+> **[2026-07-12 re-verify]** Two more below are drained: **operation-persist
+> re-validation** is FIXED — a named op's persist pipes through the changeset's
+> `validate_invariants/1` (cross-field `add_error` → 422) before `persist_change`
+> (#1710), and the **duplicated op bodies** are gone (the op body lives only on
+> the context facade, no schema-module core to duplicate). Also FIXED: the
+> shorthand-view `NotLoaded` 500 (#1783 — the view query preloads its wireShape
+> associations, sharing the repository read's preload list). **No open Phoenix
+> defects remain from this audit** — the residual is strategic (per-context
+> namespaces, `api`-grouping). The bullets below are the original snapshot.
 
 The skeleton is idiomatic (context facade as sole entry, per-aggregate
 repository modules, pure domain cores, schemaless-changeset VOs, serializable
