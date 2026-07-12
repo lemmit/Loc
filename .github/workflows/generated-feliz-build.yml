@@ -1,0 +1,93 @@
+name: Generated Feliz build
+
+# Generate the Feliz (Fable/F#/Elmish) frontend from a .ddd, then prove the
+# emitted F# compiles via `dotnet fable` and bundles via `vite build` — the
+# analogue of generated-react-build.yml (which tscs the emitted TSX).  Catches
+# generator drift that lowers cleanly to IR but emits non-compiling F# or a
+# broken project shell — invisible to the fast vitest suite.
+#
+# One cell for now (the Counter MVU example, inline below); grows
+# example-by-example as the procedural pack does.  The .ddd is embedded here
+# (not under examples/) so the other example-globbing gates never pick up a
+# feliz-only source.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/generator/feliz/**'
+      - 'src/generator/_walker/**'
+      - 'src/platform/feliz.ts'
+      - 'src/platform/metadata.ts'
+      - 'src/platform/registry.ts'
+      - 'src/language/ddd.langium'
+      - '.github/workflows/generated-feliz-build.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/generator/feliz/**'
+      - 'src/generator/_walker/**'
+      - 'src/platform/feliz.ts'
+      - 'src/platform/metadata.ts'
+      - 'src/platform/registry.ts'
+      - 'src/language/ddd.langium'
+      - '.github/workflows/generated-feliz-build.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  feliz-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install + build the toolchain
+        run: npm ci
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0'
+      - name: Generate the Feliz Counter system
+        run: |
+          mkdir -p ci-feliz
+          cat > ci-feliz/counter.ddd <<'DDD'
+          system CounterApp {
+            subdomain S { context C { } }
+            ui WebApp {
+              framework: feliz
+              page Counter {
+                route: "/"
+                state { count: int = 0 }
+                action inc() { count := count + 1 }
+                action dec() { count := count - 1 }
+                body: Stack {
+                  Heading { "Counter", level: 1 },
+                  Text { "Count: " + count },
+                  Button { "+", onClick: inc },
+                  Button { "-", onClick: dec }
+                }
+              }
+            }
+            deployable api { platform: node contexts: [C] port: 3000 }
+            deployable web { platform: feliz targets: api ui: WebApp port: 3005 }
+          }
+          DDD
+          node bin/cli.js generate system ci-feliz/counter.ddd -o ci-feliz/out
+      - name: Locate the emitted Feliz project
+        id: proj
+        run: echo "dir=$(dirname "$(find ci-feliz/out -name App.fsproj | head -1)")" >> "$GITHUB_OUTPUT"
+      - name: Fable compile (F# → JS)
+        working-directory: ${{ steps.proj.outputs.dir }}
+        run: |
+          dotnet tool restore
+          dotnet fable App.fsproj -o out --extension .js
+      - name: Vite build the bundle
+        working-directory: ${{ steps.proj.outputs.dir }}
+        run: |
+          npm install
+          npx vite build
