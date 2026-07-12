@@ -441,8 +441,9 @@ need:
 1. **`await` + `match` (lint)** — add only the `await` marker (grammar, IR,
    lower, `WalkerTarget` await-lowering seam); `await op()` becomes an expression
    yielding the op's `Result` union, consumed by the **existing** `match`. No
-   `onError`, no `spawn`. A bare remote call is a **warning**; ship a codemod
-   (bare remote call → `await`).
+   `onError`, no `spawn`. A bare remote call starts as a **warning**, with a
+   codemod (bare remote call → `await`) planned before the flip — in the event
+   the flip's census found zero unmarked sites, so no codemod was needed (step 2).
 2. **`await` required** — ✅ **SHIPPED** (2026-07). `loom.missing-effect-marker`
    flipped from warning to **error**: a bare remote mutating call in an action
    body must be `await`-marked and its `Result` handled by `match`. A whole-repo
