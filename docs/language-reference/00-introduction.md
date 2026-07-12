@@ -67,7 +67,7 @@ public sealed class Product
 # SQLAlchemy model (excerpt)
 class Product(Base):
     __tablename__ = "products"
-    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid7)
     name: Mapped[str]
     price: Mapped[Decimal]
 ```

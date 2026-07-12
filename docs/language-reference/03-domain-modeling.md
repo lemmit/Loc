@@ -32,7 +32,7 @@ export const orders = pgTable("orders", {
 ```ts
 // domain/ids.ts — id is a branded string, minted by newOrderId()
 export type OrderId = string & { readonly __brand: "OrderId" };
-export const newOrderId = (): OrderId => randomUUID() as OrderId;
+export const newOrderId = (): OrderId => uuidv7() as OrderId;
 ```
 == dotnet
 ```csharp
@@ -42,7 +42,7 @@ public sealed class Order
     public OrderId Id { get; private set; }
     public string Reference { get; private set; } = default!;
     // private ctor + State rehydrator + Create factory …
-    public static Order Create(string reference) { /* … Id = new OrderId(Guid.NewGuid()); */ }
+    public static Order Create(string reference) { /* … Id = new OrderId(Guid.CreateVersion7()); */ }
 }
 ```
 == java

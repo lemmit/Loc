@@ -13,8 +13,8 @@ just some. Generating an `ids int` aggregate and reading the output showed:
   minted `new TicketId(0)`; the migration PK was a plain `INTEGER NOT NULL`
   (no `SERIAL` / `GENERATED … AS IDENTITY`), and `create` takes no external id.
   So the *first* insert got id `0` and the *second* collided on the primary key.
-  guid is the only kind the create path can actually mint (`randomUUID()` /
-  `Guid.NewGuid()` / `Ecto.UUID` — a fresh unique value each time).
+  guid is the only kind the create path can actually mint (`uuidv7()` /
+  `Guid.CreateVersion7()` / `UUIDv7` — a fresh unique value each time).
 - Type consistency was only partial anyway: .NET / Java / Elixir emitted a
   matching PK-column / DTO / param type, but **Hono** kept a `string` id brand
   (minting a uuid into an integer column), a `z.string()` Response id, and a
