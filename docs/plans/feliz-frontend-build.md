@@ -62,20 +62,31 @@ in hand — not before F# output exists.
 ## Slices
 
 1. ✅ Confirm `view` rides `walkBody` (throwaway prototype).
-2. ⚙ Feliz expression renderer + `felizTarget` view emitter (F#/Feliz) →
-   a compiling Counter Fable project (`dotnet fable` in the SDK:8.0 container
-   per proposal §10).
-3. Minimal procedural Feliz pack — the handful of primitives one example needs,
-   grown example-by-example (NOT all ~80). Adds a procedural pack path to the
-   loader (`src/generator/_packs/`), shaped by this pack's real needs.
-4. Extract the shared frontend expression seam (JS leaves byte-identical;
-   F# leaves for Feliz).
-5. F# wire layer — Thoth.Json decoders + `Cmd`-based api (parallel of
+2. ✅ Feliz expression renderer + `felizTarget` view emitter + MVU projection
+   (Model/Msg/init/update off `state`/`action`s) + a minimal procedural Feliz
+   pack → a Counter Fable project that **compiles clean via `dotnet fable`**
+   (SDK:8.0 container, §10; the compiled JS has a working `Model`/`Msg`/`update`
+   + a `dispatch`-wired `view`). Landed the expression-syntax seam as OPTIONAL
+   `WalkerTarget` leaf methods with JS fallback (React/Vue/Svelte/Angular stay
+   byte-identical — 728 frontend tests green). `src/generator/feliz/*`.
+3. ⚙ Grow the procedural Feliz pack example-by-example (Counter → a scaffold
+   example → …). Currently 4 primitives (Stack/Heading/Text/Button); the seam
+   methods (`renderMatch`/`For`/`navigate`/api hooks) throw loudly until an
+   example needs them.
+4. ⚙ **No-debt convergence:** convert the four JS frontends to an explicit
+   shared `jsExprLeaves` table + REMOVE the `emitExpr` JS fallback (byte-identical
+   gated). This is the end state the seam is staged toward.
+5. `PlatformSurface` + registry entry + `framework: feliz` (+ a `feliz`
+   platform) grammar/validator — mirror the Svelte/Angular adds; a
+   `validateLoomModel`-path test per experience §22. Fable adds a build step
+   (dotnet+vite), so the compose/docker story diverges from the vite-only
+   static hosts.
+6. Runtime proof — vite build + boot the Counter in headless Chromium
+   (the §7.1 pipeline) against the emitted project shell.
+7. F# wire layer — Thoth.Json decoders + `Cmd`-based api (parallel of
    `src/generator/_frontend/`; reuse IR projections like `wireShapeFor`, not the
    TS/zod emitters).
-6. `PlatformSurface` + registry entry + `framework: feliz` grammar/validator
-   (mirror the Svelte/Angular adds).
-7. `generated-feliz-build` CI gate (mirror `generated-react-build.yml`).
+8. `generated-feliz-build` CI gate (mirror `generated-react-build.yml`).
 
 Known-good deps (proposal §10): Fable 4.29 / Feliz 2.8 / Fable.Elmish.React 4.0
 / Fable.SimpleHttp 3.6 / Thoth.Json 10.2 / net8.0. Avoid Thoth.Fetch (promise-CE
