@@ -1,10 +1,12 @@
 name: Generated a11y (axe-core)
 
-# accessibility.md Phase 4 — the axe-core tripwire over the generated
-# frontends.  Generate a frontend for a design pack, `vite build` + `vite
-# preview` it, then drive axe-core over every param-less page route and assert
-# zero serious/critical WCAG 2.x A/AA violations.  Because the output is
-# generated, coverage is exhaustive across the example × pack matrix.
+# accessibility.md Phase 4/5 — the axe-core tripwire over the generated
+# frontends.  Generate a frontend for a design pack, build + preview it (vite
+# for React/Vue/Svelte, `ng build` + a static server for Angular), then drive
+# axe-core over every param-less page route and assert zero serious/critical
+# WCAG 2.x A/AA violations.  The pack name selects the framework, so this one
+# matrix spans all four JSX/markup frontends.  Because the output is generated,
+# coverage is exhaustive across the pack matrix.
 #
 # axe runs REPO-side (root devDeps) against the preview URL — the generated
 # project is untouched — so this never turns the per-PR build/e2e gates red.
@@ -41,9 +43,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pack: ['mantine@v9', 'shadcn@v4', 'mui@v7', 'chakra@v3']
+        # The pack name selects the framework (packFormatForBuiltin): the React
+        # packs scan showcase.ddd; the Vue/Svelte/Angular packs scan the shared
+        # scaffold system.  All four JSX/markup frontends are covered.
+        pack:
+          - 'mantine@v9'        # react
+          - 'shadcn@v4'         # react
+          - 'mui@v7'            # react
+          - 'chakra@v3'         # react
+          - 'vuetify@v3'        # vue
+          - 'shadcnVue@v1'      # vue
+          - 'shadcnSvelte@v1'   # svelte
+          - 'flowbite@v1'       # svelte
+          - 'angularMaterial@v1' # angular
+          - 'primeng@v1'        # angular
+          - 'spartanNg@v1'      # angular
     timeout-minutes: 25
-    name: showcase × ${{ matrix.pack }}
+    name: axe × ${{ matrix.pack }}
     steps:
       - uses: actions/checkout@v6
 

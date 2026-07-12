@@ -69,6 +69,7 @@
     "test:auth-e2e-compose": "LOOM_AUTH_E2E_COMPOSE=1 vitest run test/e2e/auth-oidc-compose-e2e.test.ts",
     "test:auth-e2e-phoenix": "LOOM_AUTH_E2E_PHOENIX=1 vitest run test/e2e/auth-oidc-elixir-compose-e2e.test.ts",
     "test:biome-gen": "LOOM_BIOME=1 vitest run test/e2e/generated-biome.test.ts",
+    "test:contrast": "vitest run test/generator/frontend/theme-contrast.test.ts",
     "prepare": "npm run langium:generate && npm run build && npm run build:web",
     "lint": "biome ci .",
     "format": "biome format --write .",
