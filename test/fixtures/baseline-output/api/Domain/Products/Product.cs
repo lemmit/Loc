@@ -67,7 +67,7 @@ public sealed class Product
     public static Product Create(string sku, Money price)
     {
         var e = new Product();
-        e.Id = new ProductId(Guid.NewGuid());
+        e.Id = new ProductId(Guid.CreateVersion7());
         e.Sku = sku;
         e.Price = price;
         e.AssertInvariants();

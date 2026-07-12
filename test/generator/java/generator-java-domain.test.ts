@@ -81,7 +81,8 @@ describe("java generator — domain layer (S3)", () => {
   it("emits the typed id record with a newId factory", async () => {
     const id = (await byFeatureFiles()).get(`${ROOT}/domain/ids/OrderId.java`)!;
     expect(id).toContain("public record OrderId(UUID value) implements Serializable {");
-    expect(id).toContain("return new OrderId(UUID.randomUUID());");
+    expect(id).toContain("import com.fasterxml.uuid.Generators;");
+    expect(id).toContain("return new OrderId(Generators.timeBasedEpochGenerator().generate());");
   });
 
   it("emits enums with DSL-cased constants (wire parity)", async () => {

@@ -152,7 +152,7 @@ defmodule ${appModule}.Audit do
     row =
       Map.merge(
         %{
-          audit_id: Ecto.UUID.generate(),
+          audit_id: UUIDv7.generate(),
           actor: if(actor_id, do: %{id: actor_id}, else: nil),
           at: DateTime.utc_now() |> DateTime.truncate(:second),
           status: "ok",

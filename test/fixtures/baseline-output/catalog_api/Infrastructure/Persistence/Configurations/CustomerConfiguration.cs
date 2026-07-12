@@ -14,7 +14,7 @@ public sealed class CustomerConfiguration : IEntityTypeConfiguration<Customer>
     {
         builder.ToTable("customers", "customers");
         builder.HasKey(x => x.Id);
-        builder.Property(x => x.Id).HasConversion(v => v.Value, v => new CustomerId(v)).HasColumnName("id");
+        builder.Property(x => x.Id).HasConversion(v => v.Value, v => new CustomerId(v)).HasColumnName("id").ValueGeneratedNever();
         builder.Property(x => x.Username).HasColumnName("username");
         builder.Property(x => x.Email).HasColumnName("email");
         builder.Property(x => x.Age).HasColumnName("age");

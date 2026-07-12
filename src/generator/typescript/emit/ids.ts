@@ -15,12 +15,14 @@ export function renderIds(ctx: BoundedContextIR): string {
   return (
     lines(
       "// Auto-generated.",
-      'import { randomUUID } from "node:crypto";',
+      // UUIDv7 (time-ordered): sortable, better index locality than the random
+      // v4, same portable guid wire shape.  `uuidv7` is a tiny, typed, dep.
+      'import { uuidv7 } from "uuidv7";',
       "",
       ...names.flatMap((name) => [
         `export type ${name}Id = string & { readonly __brand: "${name}Id" };`,
         `export const ${name}Id = (value: string): ${name}Id => value as ${name}Id;`,
-        `export const new${name}Id = (): ${name}Id => randomUUID() as ${name}Id;`,
+        `export const new${name}Id = (): ${name}Id => uuidv7() as ${name}Id;`,
         "",
       ]),
     ) + "\n"

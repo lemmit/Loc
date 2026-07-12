@@ -14,7 +14,7 @@ public sealed class ProductConfiguration : IEntityTypeConfiguration<Product>
     {
         builder.ToTable("products", "products");
         builder.HasKey(x => x.Id);
-        builder.Property(x => x.Id).HasConversion(v => v.Value, v => new ProductId(v)).HasColumnName("id");
+        builder.Property(x => x.Id).HasConversion(v => v.Value, v => new ProductId(v)).HasColumnName("id").ValueGeneratedNever();
         builder.Property(x => x.Sku).HasColumnName("sku");
         builder.OwnsOne<Money>(x => x.Price, o => {
             o.Property(x => x.Amount).HasColumnName("price_amount");

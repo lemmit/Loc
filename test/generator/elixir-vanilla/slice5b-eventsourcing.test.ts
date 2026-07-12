@@ -116,7 +116,7 @@ describe("vanilla — Slice P4.2 event-sourcing emit", () => {
   it("context create/op runners emit→append→fold; guard helper present", async () => {
     const ctx = get(await files(), "lib/api/accounts.ex");
     expect(ctx).toContain("def create_account(attrs) do");
-    expect(ctx).toContain("id = Ecto.UUID.generate()");
+    expect(ctx).toContain("id = UUIDv7.generate()");
     expect(ctx).toContain("Api.Accounts.AccountRepository.append(id, events)");
     expect(ctx).toContain("def deposit_account(%Api.Accounts.Account{} = state, attrs) do");
     expect(ctx).toContain("ensure(amount > 0, :precondition_failed)");

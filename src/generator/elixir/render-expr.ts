@@ -105,7 +105,7 @@ export interface RenderCtx {
   /** Renders the aggregate-`id` expression (`{kind:"id"}`) as this bare
    *  local instead of `<thisName>.id`.  Set by the event-sourced create
    *  command runner, where the new aggregate id is a freshly generated
-   *  local (`id = Ecto.UUID.generate()`) and no `this` struct exists yet.
+   *  local (`id = UUIDv7.generate()`) and no `this` struct exists yet.
    *  Unset everywhere else → `id` stays `<thisName>.id`. */
   idLocal?: string;
   /** When set, a provenanced `field := value` write in this body renders

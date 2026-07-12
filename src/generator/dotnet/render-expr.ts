@@ -986,8 +986,10 @@ export function csNewIdValue(idValueType: string): string {
     case "long":
       return "0";
     case "string":
-      return "Guid.NewGuid().ToString()";
+      // UUIDv7 (time-ordered) — native on net9+; better index locality than
+      // the random v4 without giving up the portable guid wire shape.
+      return "Guid.CreateVersion7().ToString()";
     default:
-      return "Guid.NewGuid()";
+      return "Guid.CreateVersion7()";
   }
 }

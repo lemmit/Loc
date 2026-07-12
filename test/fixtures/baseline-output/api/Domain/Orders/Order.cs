@@ -91,7 +91,7 @@ public sealed class Order
     public static Order Create(string customerId, OrderStatus status, DateTime placedAt)
     {
         var e = new Order();
-        e.Id = new OrderId(Guid.NewGuid());
+        e.Id = new OrderId(Guid.CreateVersion7());
         e.CustomerId = customerId;
         e.Status = status;
         e.PlacedAt = placedAt;

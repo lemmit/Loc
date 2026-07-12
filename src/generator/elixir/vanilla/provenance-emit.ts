@@ -189,7 +189,7 @@ defmodule ${appModule}.Provenance do
     rows =
       Enum.map(drain(), fn lin ->
         %{
-          trace_id: Ecto.UUID.generate(),
+          trace_id: UUIDv7.generate(),
           snapshot_id: lin.snapshot_id,
           target_type: lin.target.type,
           field: lin.target.field,

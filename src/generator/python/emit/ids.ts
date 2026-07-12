@@ -18,14 +18,14 @@ export function renderPyIds(ctx: BoundedContextIR): string {
     `"""Branded id types — one NewType per aggregate / part.  Auto-generated."""`,
     "",
     "from typing import NewType",
-    "from uuid import uuid4",
+    "from uuid6 import uuid7",
     "",
     names.map((name) => `${name}Id = NewType("${name}Id", str)`),
     "",
     names.flatMap((name) => [
       "",
       `def new_${snake(name)}_id() -> ${name}Id:`,
-      `    return ${name}Id(str(uuid4()))`,
+      `    return ${name}Id(str(uuid7()))`,
       "",
     ]),
   );

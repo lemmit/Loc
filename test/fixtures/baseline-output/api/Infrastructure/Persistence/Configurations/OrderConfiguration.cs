@@ -14,7 +14,7 @@ public sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
     {
         builder.ToTable("orders", "orders");
         builder.HasKey(x => x.Id);
-        builder.Property(x => x.Id).HasConversion(v => v.Value, v => new OrderId(v)).HasColumnName("id");
+        builder.Property(x => x.Id).HasConversion(v => v.Value, v => new OrderId(v)).HasColumnName("id").ValueGeneratedNever();
         builder.Property(x => x.CustomerId).HasColumnName("customer_id");
         builder.Property(x => x.Status).HasConversion<string>().HasColumnName("status");
         builder.Property(x => x.PlacedAt).HasColumnName("placed_at");
