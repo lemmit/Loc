@@ -1,1 +1,1 @@
-<div class="flex flex-row items-center justify-between rounded-lg border p-3"><Label>{{label}}</Label><Switch data-testid="{{testId}}" :model-value="!!form.values.{{path}}" @update:model-value="(v) => form.values.{{path}} = !!v" /></div>
+<div class="flex flex-row items-center justify-between rounded-lg border p-3"><Label for="{{testId}}">{{label}}</Label><Switch id="{{testId}}" data-testid="{{testId}}" :model-value="!!form.values.{{path}}" @update:model-value="(v) => form.values.{{path}} = !!v" /></div>
