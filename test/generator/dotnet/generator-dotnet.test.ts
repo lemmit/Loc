@@ -362,9 +362,11 @@ describe(".NET generator", () => {
 
     // 1. The user-implementable handler interface lives under
     //    Application/<Aggregate>/Handlers/.
+    // S10 containment: the handler interface receives the aggregate as the
+    // narrow `IOrderMutator`, NOT the concrete `Order`.
     const iface = files.get("Application/Orders/Handlers/IConfirmOrderHandler.cs")!;
     expect(iface).toMatch(
-      /Task HandleAsync\(Order aggregate, ConfirmOrderRequest request, CancellationToken cancellationToken\)/,
+      /Task HandleAsync\(IOrderMutator aggregate, ConfirmOrderRequest request, CancellationToken cancellationToken\)/,
     );
 
     // 2. The auto Mediator handler injects the user interface and
@@ -372,18 +374,33 @@ describe(".NET generator", () => {
     const handler = files.get("Application/Orders/Commands/ConfirmHandler.cs")!;
     expect(handler).toMatch(/private readonly IConfirmOrderHandler _user;/);
     expect(handler).toMatch(/aggregate\.CheckConfirm\(\);/);
+    // The loaded aggregate upcasts implicitly to IOrderMutator at the call.
     expect(handler).toMatch(/await _user\.HandleAsync\(aggregate, request, cancellationToken\);/);
     expect(handler).toMatch(/aggregate\.AssertInvariants\(\);/);
     // No direct call to a non-existent `aggregate.Confirm()` method.
     expect(handler).not.toMatch(/aggregate\.Confirm\(/);
 
-    // 3. The aggregate exposes RaiseEvent + AssertInvariants as internal
-    //    and widens setters to `internal set` so [ExternHandler] classes
-    //    in the same assembly can mutate state.
+    // 3. S10 containment: the aggregate implements `IOrderMutator` EXPLICITLY
+    //    (get/set per field + RaiseEvent), and its own setters stay `private`.
+    //    So `order.Status = …` on a plain `Order` no longer compiles app-wide;
+    //    the write surface is reachable only through the interface reference.
     const order = files.get("Domain/Orders/Order.cs")!;
-    expect(order).toMatch(/internal void RaiseEvent\(IDomainEvent ev\) =>/);
-    expect(order).toMatch(/internal void AssertInvariants\(\)/);
-    expect(order).toMatch(/public OrderStatus Status \{ get; internal set; \}/);
+    expect(order).toMatch(/public sealed class Order : IOrderMutator/);
+    expect(order).toMatch(/public interface IOrderMutator/);
+    expect(order).toMatch(
+      /OrderStatus IOrderMutator\.Status \{ get => Status; set => Status = value; \}/,
+    );
+    expect(order).toMatch(
+      /void IOrderMutator\.RaiseDomainEvent\(IDomainEvent ev\) => _domainEvents\.Add\(ev\);/,
+    );
+    // CA1716: the interface uses `RaiseDomainEvent`, never the reserved
+    // VB keyword `RaiseEvent`, on its public surface.
+    expect(order).toMatch(/void RaiseDomainEvent\(IDomainEvent ev\);/);
+    // S10 REGRESSION GUARD: NO setter is widened to `internal set` (the leak) —
+    // every declared field property stays `get; private set;`.
+    expect(order).toMatch(/public OrderStatus Status \{ get; private set; \}/);
+    expect(order).not.toMatch(/public OrderStatus Status \{ get; internal set; \}/);
+    expect(order).not.toMatch(/\{ get; internal set; \}/);
     expect(order).toMatch(/public void CheckConfirm\(\)/);
     expect(order).not.toMatch(/public void Confirm\(\)/);
 

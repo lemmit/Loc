@@ -1025,7 +1025,7 @@ function emitOperationRoute(
         `${pad}const handler = externHandlers.${handlerKey};`,
         `${pad}if (!handler) throw new Error("Missing extern handler for ${handlerKey}. Register one via register${upperFirst(op.name)}${agg.name}Handler(...) before app.listen().");`,
         `${pad}try {`,
-        `${pad}  await handler(aggregate, body);`,
+        `${pad}  await handler(aggregate._externEditor(), body);`,
         `${pad}} catch (err) {`,
         `${pad}  if (err instanceof DomainError) throw err;`,
         `${pad}  if (err instanceof ForbiddenError) throw err;`,

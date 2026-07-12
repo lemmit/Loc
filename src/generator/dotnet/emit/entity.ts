@@ -108,15 +108,16 @@ export function weaveLineDirectives(
 // used by repository hydration, and (for the root) a public `Create`
 // factory + `PullEvents()` drainage hook.
 //
-// Extern operations widen the surface: when an aggregate declares
+// Extern operations (S10 containment): when an aggregate declares
 // `operation X(...) extern { precondition ... }`, the generated request
 // handler delegates the business decision to a user-supplied
-// `IXFooHandler`.  That handler needs to mutate state and raise events,
-// so for aggregates with at least one extern op we widen field setters
-// from `private set` to `internal set` and expose
-// `internal void RaiseEvent(IDomainEvent)` + `internal void AssertInvariants()`.
-// Internal access keeps mutation co-located with the generated
-// project's assembly (handlers ship in the same csproj).
+// `IXFooHandler`.  That handler needs to mutate state and raise events —
+// but instead of widening EVERY setter to `internal set` (which let any
+// same-assembly code bypass invariants), the aggregate implements a narrow
+// `I<Agg>Mutator` EXPLICITLY (get/set per field + Id + RaiseDomainEvent).
+// The concrete setters stay `private`; the write surface is reachable only
+// through the interface reference the command handler passes, so
+// `order.Status = …` on a plain `Order` no longer compiles app-wide.
 // ---------------------------------------------------------------------------
 
 /** Identifies the abstract base a concrete aggregate `extends`, so the
@@ -214,7 +215,14 @@ export function renderEntity(
   const appliers = isAgg(entity) ? (entity.appliers ?? []) : [];
   const esCreate = isAgg(entity) ? entity.creates?.[0] : undefined;
   const hasExtern = operations.some((o) => o.extern);
-  const setterVisibility = hasExtern ? "internal" : "private";
+  // S10 containment: an `extern` op no longer widens EVERY setter to
+  // `internal` (which, in a single-assembly app, let any handler / controller
+  // / test do `order.Status = …` and skip invariants).  Setters stay
+  // `private`; the extern handler gets a narrow write surface through an
+  // explicitly-implemented `I<Agg>Mutator` (below) — reachable only via the
+  // interface reference the command handler passes, never on the concrete
+  // aggregate type.
+  const setterVisibility = "private";
   // Auditable capability (capability-stamp-dedup): an aggregate with any
   // `contextStamps` carries audit columns the AuditableInterceptor stamps at
   // SaveChanges.  The interceptor writes them through EF's metadata accessor
@@ -462,16 +470,52 @@ export function renderEntity(
     opLines.push("");
   }
 
-  // For aggregates with at least one extern op, expose RaiseEvent +
-  // AssertInvariants as `internal` so the user's
-  // `[ExternHandler]`-decorated class can mutate state, raise
-  // events, and trigger invariant checks from the same assembly.
+  // S10 containment: for an aggregate with ≥1 extern op, the write surface
+  // the user's `[ExternHandler]` needs (per-field set + RaiseEvent) is
+  // exposed through an EXPLICITLY-implemented `I<Agg>Mutator` rather than by
+  // widening the aggregate's own setters.  Explicit implementation means the
+  // members are reachable ONLY through the interface reference the command
+  // handler passes — `order.Status = …` on a plain `Order` no longer
+  // compiles.  The concrete setters stay `private`; the interface get/set
+  // ride the class's own private setter (legal inside the class body).
   const externHookLines: string[] = [];
+  const mutatorInterfaceLines: string[] = [];
+  const mutatorFields = isAgg(entity)
+    ? entity.fields.filter((f) => !superType?.fieldNames.has(f.name))
+    : [];
   if (isRoot && hasExtern) {
+    const mutatorName = `I${entity.name}Mutator`;
     externHookLines.push(
-      "    /// <summary>Raise a domain event from a [ExternHandler] class.</summary>",
-      "    internal void RaiseEvent(IDomainEvent ev) => _domainEvents.Add(ev);",
+      `    // S10 containment: extern write surface, explicitly implemented so it`,
+      `    // is reachable only through ${mutatorName}, never on ${entity.name} itself.`,
+      `    ${idClass} ${mutatorName}.Id => Id;`,
+    );
+    for (const f of mutatorFields) {
+      const p = upperFirst(f.name);
+      externHookLines.push(
+        `    ${renderCsType(f.type)} ${mutatorName}.${p} { get => ${p}; set => ${p} = value; }`,
+      );
+    }
+    externHookLines.push(
+      // `RaiseDomainEvent`, not `RaiseEvent`: the latter is a reserved VB
+      // keyword and trips CA1716 on a public interface member (/warnaserror).
+      `    void ${mutatorName}.RaiseDomainEvent(IDomainEvent ev) => _domainEvents.Add(ev);`,
       "",
+    );
+    mutatorInterfaceLines.push(
+      "",
+      `/// <summary>Narrow, extern-scoped write surface for ${entity.name} (S10`,
+      "/// containment).  The command handler passes the loaded aggregate as this",
+      `/// interface to the user's [ExternHandler]; the concrete ${entity.name} keeps`,
+      "/// its setters private, so nothing else can bypass invariants.</summary>",
+      `public interface ${mutatorName}`,
+      "{",
+      `    ${idClass} Id { get; }`,
+      ...mutatorFields.map(
+        (f) => `    ${renderCsType(f.type)} ${upperFirst(f.name)} { get; set; }`,
+      ),
+      "    void RaiseDomainEvent(IDomainEvent ev);",
+      "}",
     );
   }
 
@@ -736,7 +780,13 @@ export function renderEntity(
       "",
       `namespace ${ns}.Domain.${plural(rootName)};`,
       "",
-      `public sealed class ${entity.name}${superType ? ` : ${superType.name}` : ""}`,
+      `public sealed class ${entity.name}${(() => {
+        const bases = [
+          superType ? superType.name : null,
+          isRoot && hasExtern ? `I${entity.name}Mutator` : null,
+        ].filter((b): b is string => b != null);
+        return bases.length > 0 ? ` : ${bases.join(", ")}` : "";
+      })()}`,
       "{",
       ...propLines,
       ...eventBlock,
@@ -770,6 +820,7 @@ export function renderEntity(
       ...esCreateFactoryLines,
       ...(snapshotLines.length > 0 ? ["", ...snapshotLines] : []),
       "}",
+      ...mutatorInterfaceLines,
     ) + "\n"
   );
 }

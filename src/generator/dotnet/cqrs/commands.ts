@@ -515,7 +515,7 @@ namespace ${args.ns}.Application.${plural(args.aggName)}.Handlers;
 /// </summary>
 public interface ${args.ifaceName}
 {
-    Task HandleAsync(${args.aggName} aggregate, ${args.requestName} request, CancellationToken cancellationToken);
+    Task HandleAsync(I${args.aggName}Mutator aggregate, ${args.requestName} request, CancellationToken cancellationToken);
 }
 `;
 }
@@ -552,7 +552,7 @@ namespace ${args.ns}.Application.${plural(args.aggName)}.Handlers;
 [ExternHandler]
 public sealed class ${stubName} : ${args.ifaceName}
 {
-    public Task HandleAsync(${args.aggName} aggregate, ${args.requestName} request, CancellationToken cancellationToken)
+    public Task HandleAsync(I${args.aggName}Mutator aggregate, ${args.requestName} request, CancellationToken cancellationToken)
     {
         return Task.CompletedTask;
     }
