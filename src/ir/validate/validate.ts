@@ -22,6 +22,7 @@ import {
   validateFindNameCollisions,
   validateFunctionBlockBodies,
   validateGenericInstancesUnimplemented,
+  validateNestedPartConstruction,
   validateOperationReturnsUnimplemented,
   validatePermissionRefs,
   validateUnionFindShapes,
@@ -214,6 +215,7 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
       backendPlatformsByContext.get(c.name) ?? new Set(),
     );
     validateUnmappedErrorStatuses(c, diags);
+    validateNestedPartConstruction(c, diags);
     validateInheritanceStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateEventSourcedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateEventSourcedWorkflowStorage(

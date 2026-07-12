@@ -1,0 +1,41 @@
+// Two-level collection nest: Order -> Shipment[] -> Label[]
+// The genuinely-ambiguous shape the root-FK model silently mishandles.
+system NodeNest {
+  subdomain Logistics {
+    context Logistics {
+      aggregate Order {
+        code: string
+        contains shipments: Shipment[]
+
+        operation addShipment(carrier: string) {
+          shipments += Shipment { carrier: carrier }
+        }
+
+        entity Shipment {
+          carrier: string
+          contains labels: Label[]
+        }
+
+        entity Label {
+          zpl: string
+        }
+      }
+      repository Orders for Order {
+        find byCode(code: string): Order[] where this.code == code
+      }
+    }
+  }
+
+  api LogisticsApi from Logistics
+
+  storage pg { type: postgres }
+  resource logisticsState { for: Logistics, kind: state, use: pg }
+
+  deployable api {
+    platform: node
+    contexts: [Logistics]
+    dataSources: [logisticsState]
+    serves: LogisticsApi
+    port: 3000
+  }
+}
