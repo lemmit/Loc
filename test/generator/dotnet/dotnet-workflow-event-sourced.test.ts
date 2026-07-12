@@ -75,14 +75,14 @@ describe("dotnet event-sourced workflows", () => {
     expect(h).toContain("var __key = notification.Order;");
     expect(h).toContain("var __sid = __key.Value.ToString();");
     expect(h).toContain(
-      "var __rows = await _db.TallyEvents.Where(e => e.StreamId == __sid).OrderBy(e => e.Version).ToListAsync(cancellationToken);",
+      "var __rows = await _eventStore.LoadStreamAsync(__sid, cancellationToken);",
     );
     expect(h).toContain(
       "var state = TallyState._FromEvents(__key, __rows.Select(TallyState.RowToEvent).ToList());",
     );
-    expect(h).toContain("_db.TallyEvents.Add(new TallyEventRecord");
+    expect(h).toContain("_eventStore.Append(new TallyEventRecord");
     expect(h).toContain("Data = TallyState.ToData(__ev),");
-    expect(h).toContain("await _db.SaveChangesAsync(cancellationToken);");
+    expect(h).toContain("await _eventStore.SaveChangesAsync(cancellationToken);");
     expect(h).toContain("await _events.DispatchAsync(ev, cancellationToken);");
   });
 

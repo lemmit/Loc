@@ -510,19 +510,36 @@ function renderEventReactorHandler(
   // own Application.Workflows namespace); a state-based saga reads its row POCO
   // (Persistence.Workflows).
   if (persisted) {
-    // `global::`-anchor the AppDbContext reference: a deployable named `api`
-    // makes `ns === "Api"`, and a bare `Api.Infrastructure...` inside
-    // `Api.Application.Workflows` mis-resolves the leading `Api` (CS0234).
-    // Mirrors the same fix on the migrations DbContext attribute (emit/migrations.ts).
-    fields.push(`    private readonly global::${ns}.Infrastructure.Persistence.AppDbContext _db;`);
-    ctorParamPairs.push(`global::${ns}.Infrastructure.Persistence.AppDbContext db`);
-    ctorAssigns.push("_db = db");
-    usings.add("Microsoft.EntityFrameworkCore");
-    usings.add(`${ns}.Infrastructure.Persistence.${eventSourced ? "Events" : "Workflows"}`);
+    // Saga persistence via a domain-termed port (audit S7 Slice C), NOT the
+    // concrete AppDbContext.  An event-sourced saga loads/appends its
+    // `<wf>_events` stream through `IWorkflowEventStore<<Wf>EventRecord>`; a
+    // state-based saga loads/mutates/persists its row POCO through
+    // `ISagaStateStore<<Wf>State>` (the store's `FindAsync` returns the EF-tracked
+    // entity, so a `state.Prop = …; SaveChangesAsync()` still persists).  The EF
+    // adapter delegates to the same scoped DbContext — identical semantics.
+    // `global::`-anchor: a deployable named `api` makes `ns === "Api"`, and a
+    // bare `Api.Domain...` inside `Api.Application.Workflows` mis-resolves (CS0234).
     if (eventSourced) {
-      // Stream fold/append uses System.Linq (`Select`/`ToList`) + DateTime.
+      fields.push(
+        `    private readonly global::${ns}.Domain.Common.IWorkflowEventStore<${esEventRecordClass(wf)}> _eventStore;`,
+      );
+      ctorParamPairs.push(
+        `global::${ns}.Domain.Common.IWorkflowEventStore<${esEventRecordClass(wf)}> eventStore`,
+      );
+      ctorAssigns.push("_eventStore = eventStore");
+      usings.add(`${ns}.Infrastructure.Persistence.Events`);
+      // Stream fold uses System.Linq (`Select`/`ToList`) + DateTime (append).
       usings.add("System");
       usings.add("System.Linq");
+    } else {
+      fields.push(
+        `    private readonly global::${ns}.Domain.Common.ISagaStateStore<${workflowStateClass(wf)}> _sagaState;`,
+      );
+      ctorParamPairs.push(
+        `global::${ns}.Domain.Common.ISagaStateStore<${workflowStateClass(wf)}> sagaState`,
+      );
+      ctorAssigns.push("_sagaState = sagaState");
+      usings.add(`${ns}.Infrastructure.Persistence.Workflows`);
     }
     if (trigger === "on") {
       fields.push(`    private readonly ILogger<${className}> _log;`);
@@ -561,11 +578,10 @@ function renderEventReactorHandler(
       // Fold the `<wf>_events` stream into `state`.  A `create` starter folds
       // from-zero (empty stream → seeded defaults); an `on` reactor requires a
       // started saga (non-empty stream) and otherwise drops + logs.
-      const dbSet = esEventDbSet(wf);
       const stateCls = workflowStateClass(wf);
       stmtLines.push("        var __sid = __key.Value.ToString();");
       stmtLines.push(
-        `        var __rows = await _db.${dbSet}.Where(e => e.StreamId == __sid).OrderBy(e => e.Version).ToListAsync(cancellationToken);`,
+        "        var __rows = await _eventStore.LoadStreamAsync(__sid, cancellationToken);",
       );
       if (trigger === "on") {
         stmtLines.push("        if (__rows.Count == 0)");
@@ -584,16 +600,15 @@ function renderEventReactorHandler(
         `        var state = ${stateCls}._FromEvents(__key, __rows.Select(${stateCls}.RowToEvent).ToList());`,
       );
     } else {
-      const dbSet = workflowStateDbSet(wf);
       stmtLines.push(
-        `        var state = await _db.${dbSet}.FirstOrDefaultAsync(x => x.${corrPascal} == __key, cancellationToken);`,
+        `        var state = await _sagaState.FindAsync(x => x.${corrPascal} == __key, cancellationToken);`,
       );
       if (trigger === "create") {
         // A starter creates the instance if its key is new.
         stmtLines.push("        if (state is null)");
         stmtLines.push("        {");
         stmtLines.push(`            state = ${workflowAllocateInitializer(wf, "__key")};`);
-        stmtLines.push(`            _db.${dbSet}.Add(state);`);
+        stmtLines.push("            _sagaState.Add(state);");
         stmtLines.push("        }");
       } else {
         // A continuation needs a started instance; otherwise drop + log.
@@ -654,16 +669,15 @@ function renderEventReactorHandler(
     // an applier (the A1 discipline), so all `_workflowEvents` are own-events;
     // they are also re-published below for choreography.
     if (usage.hasEmit) {
-      const dbSet = esEventDbSet(wf);
       const recordCls = esEventRecordClass(wf);
       const stateCls = workflowStateClass(wf);
       stmtLines.push(
-        `        var __version = await _db.${dbSet}.Where(e => e.StreamId == __sid).Select(e => (int?)e.Version).MaxAsync(cancellationToken) ?? 0;`,
+        "        var __version = await _eventStore.MaxVersionAsync(__sid, cancellationToken);",
       );
       stmtLines.push("        foreach (var __ev in _workflowEvents)");
       stmtLines.push("        {");
       stmtLines.push("            __version++;");
-      stmtLines.push(`            _db.${dbSet}.Add(new ${recordCls}`);
+      stmtLines.push(`            _eventStore.Append(new ${recordCls}`);
       stmtLines.push("            {");
       stmtLines.push("                StreamId = __sid,");
       stmtLines.push("                Version = __version,");
@@ -672,14 +686,14 @@ function renderEventReactorHandler(
       stmtLines.push("                OccurredAt = DateTime.UtcNow,");
       stmtLines.push("            });");
       stmtLines.push("        }");
-      stmtLines.push("        await _db.SaveChangesAsync(cancellationToken);");
+      stmtLines.push("        await _eventStore.SaveChangesAsync(cancellationToken);");
     }
   } else if (persisted) {
     // Persist the saga row (a new allocation, or a `this.<stateField>` mutation).
     if (durableEventTypes(ctx).size > 0) {
       stmtLines.push("        if (__eventId is not null) state.LastEventId = __eventId;");
     }
-    stmtLines.push("        await _db.SaveChangesAsync(cancellationToken);");
+    stmtLines.push("        await _sagaState.SaveChangesAsync(cancellationToken);");
   }
 
   let body = stmtLines.join("\n") + "\n";
@@ -797,15 +811,14 @@ function renderCsEsBranch(
     lines.push(`        await ${fieldName}.SaveAsync(${save.name}, cancellationToken);`);
   }
   if (usage.hasEmit) {
-    const dbSet = esEventDbSet(wf);
     const recordCls = esEventRecordClass(wf);
     const stateCls = workflowStateClass(wf);
     lines.push(
-      `        var __version = await _db.${dbSet}.Where(e => e.StreamId == __sid).Select(e => (int?)e.Version).MaxAsync(cancellationToken) ?? 0;`,
+      "        var __version = await _eventStore.MaxVersionAsync(__sid, cancellationToken);",
       "        foreach (var __ev in _workflowEvents)",
       "        {",
       "            __version++;",
-      `            _db.${dbSet}.Add(new ${recordCls}`,
+      `            _eventStore.Append(new ${recordCls}`,
       "            {",
       "                StreamId = __sid,",
       "                Version = __version,",
@@ -814,7 +827,7 @@ function renderCsEsBranch(
       "                OccurredAt = DateTime.UtcNow,",
       "            });",
       "        }",
-      "        await _db.SaveChangesAsync(cancellationToken);",
+      "        await _eventStore.SaveChangesAsync(cancellationToken);",
       "        foreach (var ev in _workflowEvents)",
       "            await _events.DispatchAsync(ev, cancellationToken);",
     );
@@ -895,10 +908,16 @@ function renderMergedEventSourcedHandler(
     usings.add(`${ns}.Infrastructure.Persistence`);
     for (const aggName of auditAggs) usings.add(`${ns}.Application.${plural(aggName)}.Responses`);
   }
-  fields.push(`    private readonly global::${ns}.Infrastructure.Persistence.AppDbContext _db;`);
-  ctorParamPairs.push(`global::${ns}.Infrastructure.Persistence.AppDbContext db`);
-  ctorAssigns.push("_db = db");
-  usings.add("Microsoft.EntityFrameworkCore");
+  // Event-sourced saga stream via the domain `IWorkflowEventStore` port (audit
+  // S7 Slice C), NOT the concrete AppDbContext.  Both branches (create/on) load
+  // + append through it; the EF adapter delegates to the same scoped DbContext.
+  fields.push(
+    `    private readonly global::${ns}.Domain.Common.IWorkflowEventStore<${esEventRecordClass(wf)}> _eventStore;`,
+  );
+  ctorParamPairs.push(
+    `global::${ns}.Domain.Common.IWorkflowEventStore<${esEventRecordClass(wf)}> eventStore`,
+  );
+  ctorAssigns.push("_eventStore = eventStore");
   usings.add(`${ns}.Infrastructure.Persistence.Events`);
   usings.add("System");
   usings.add("System.Linq");
@@ -917,7 +936,6 @@ function renderMergedEventSourcedHandler(
     ? renderExprWithEventParam(createResolved.correlation, createSub.param, resourceClasses)
     : `notification.${corrPascal}`;
   if (createResolved.correlation) collectCsExprUsings(createResolved.correlation, usings, ns);
-  const dbSet = esEventDbSet(wf);
   const stateCls = workflowStateClass(wf);
 
   const createBranch = renderCsEsBranch(
@@ -950,7 +968,7 @@ function renderMergedEventSourcedHandler(
   const bodyLines: string[] = [
     `        var __key = ${keyExpr};`,
     "        var __sid = __key.Value.ToString();",
-    `        var __rows = await _db.${dbSet}.Where(e => e.StreamId == __sid).OrderBy(e => e.Version).ToListAsync(cancellationToken);`,
+    "        var __rows = await _eventStore.LoadStreamAsync(__sid, cancellationToken);",
     `        var state = ${stateCls}._FromEvents(__key, __rows.Select(${stateCls}.RowToEvent).ToList());`,
     "        if (__rows.Count == 0)",
     "        {",
@@ -1174,11 +1192,11 @@ function renderHandler(
   // IsolationLevel.X enum literal.  Both surfaces may reach namespaces
   // outside the SDK's implicit-usings set — collect them per file.
   const usings = new Set<string>();
+  // The `IsolationLevel.X` enum literal passed to `IUnitOfWork.BeginTransactionAsync`
+  // (audit S7 Slice C) lives in System.Data.  The transaction itself now goes
+  // through the domain `IUnitOfWork` port, NOT `_db.Database.BeginTransactionAsync`,
+  // so the handler no longer needs the EntityFrameworkCore namespace.
   if (wf.transactional && effectiveIsolation) usings.add("System.Data");
-  // BeginTransactionAsync(IsolationLevel, CancellationToken) lives on
-  // RelationalDatabaseFacadeExtensions, so transactional handlers need
-  // the EntityFrameworkCore namespace for the 2-arg overload.
-  if (wf.transactional) usings.add("Microsoft.EntityFrameworkCore");
   if (usesUser) usings.add(`${ns}.Auth`);
   // Field declarations for injected dependencies.
   const repoEntries = [...usage.repos.entries()];
@@ -1197,15 +1215,16 @@ function renderHandler(
     ctorAssigns.push("_events = events");
   }
   if (wf.transactional) {
-    // `global::`-anchor the AppDbContext reference: a deployable named `api`
-    // makes `ns === "Api"`, and a bare `Api.Infrastructure...` inside
-    // `Api.Application.Workflows` mis-resolves the leading `Api` against the
-    // enclosing `Api.Application` namespace (CS0234 — "does not exist in the
-    // namespace 'Api.Api'").  Mirrors the persisted-saga handler + the
-    // migrations DbContext attribute (emit/migrations.ts).
-    fields.push(`    private readonly global::${ns}.Infrastructure.Persistence.AppDbContext _db;`);
-    ctorParamPairs.push(`global::${ns}.Infrastructure.Persistence.AppDbContext db`);
-    ctorAssigns.push("_db = db");
+    // Commit boundary via the domain `IUnitOfWork` port (audit S7 Slice C) —
+    // NOT the concrete `AppDbContext`.  The EF adapter opens the transaction on
+    // the SAME scoped DbContext the repositories share, so `repo.SaveAsync`
+    // inside the transaction commits atomically (identical semantics).
+    // `global::`-anchor: a deployable named `api` makes `ns === "Api"`, and a
+    // bare `Api.Domain...` inside `Api.Application.Workflows` would mis-resolve
+    // the leading `Api` (CS0234).
+    fields.push(`    private readonly global::${ns}.Domain.Common.IUnitOfWork _uow;`);
+    ctorParamPairs.push(`global::${ns}.Domain.Common.IUnitOfWork uow`);
+    ctorAssigns.push("_uow = uow");
   }
   if (usesUser) {
     fields.push("    private readonly ICurrentUserAccessor _currentUser;");
@@ -1361,8 +1380,8 @@ function renderHandler(
   let body: string = startedLog;
   if (wf.transactional) {
     const beginCall = effectiveIsolation
-      ? `_db.Database.BeginTransactionAsync(IsolationLevel.${csIsolationLevel(effectiveIsolation)}, cancellationToken)`
-      : `_db.Database.BeginTransactionAsync(cancellationToken)`;
+      ? `_uow.BeginTransactionAsync(IsolationLevel.${csIsolationLevel(effectiveIsolation)}, cancellationToken)`
+      : `_uow.BeginTransactionAsync(cancellationToken)`;
     body +=
       `        await using var tx = await ${beginCall};\n` +
       `        try\n` +

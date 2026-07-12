@@ -5,6 +5,36 @@
 > domain-termed ports. **HARD INVARIANT: runtime unchanged** — identical
 > transactions, isolation levels, flush timing, and EF change-tracking behavior;
 > the EF adapter delegates 1:1 to the same scoped `AppDbContext`.
+>
+> **STATUS — shipped (approved default).** The DOMAIN/APPLICATION sites are ported
+> (Site 1 `IUnitOfWork`; Sites 2/3 event-sourced saga → `IWorkflowEventStore<TRow>`;
+> Site 3 state saga → `ISagaStateStore<TRow>`; Site 6 projection fold →
+> `IReadModelStore<TRow>`). The read-only **controllers** (Sites 4, 5, 7 —
+> presentation layer) stay on `AppDbContext` (out of scope, per sign-off). Generic
+> `Set<T>()`-based ports; open-generic DI. Ports live in `Domain.Common`, EF
+> adapters in `Infrastructure/Persistence/PersistencePorts.cs`.
+>
+> **Runtime verification (the non-negotiable for this slice):**
+> - `dotnet build /warnaserror` clean on TWO generated systems — showcase (Sites 1
+>   `IUnitOfWork` + 2 merged-ES `IWorkflowEventStore`) and a state-saga+projection
+>   system (Sites 3-state `ISagaStateStore` + 6 `IReadModelStore`).
+> - **Booted the .NET stack on docker-postgres**, migrations applied, `/ready`
+>   green, all 4 port adapters register + inject, and drove a **state-saga
+>   round-trip**: `place_order` → `create` handler `ISagaStateStore.Add(Attempts=0)`
+>   → `SaveChanges`; the emitted `ShipmentRequested` → `on` handler
+>   `ISagaStateStore.FindAsync` (**EF-tracked**) → `state.Attempts = state.Attempts + 1`
+>   → `SaveChanges`. **Re-read the DB row: `Attempts = 1`** — the tracked mutation
+>   persisted through the port (a detached/DTO return would have left it at 0). This
+>   is the exact failure a compile gate cannot catch; it is proven persisted.
+>
+> **Out-of-scope pre-existing bug found (NOT introduced here):** the .NET
+> saga-state + projection EF configs omit `HasColumnName` on the *correlation*
+> column, so EF queries `o."OrderId"` while the migration creates `order_id` (and
+> `o."Order"` vs `order` for a projection keyed by a SQL-keyword field) — a
+> latent runtime mismatch, confirmed **byte-identical on `main`** (my `FindAsync`
+> emits the same SQL the old `_db.<DbSet>.FirstOrDefaultAsync` did). The boot
+> above worked around it with a column rename to isolate the tracked-mutation
+> proof. Worth its own fix PR.
 
 ## Per-site map (exhaustive, fresh `main`)
 

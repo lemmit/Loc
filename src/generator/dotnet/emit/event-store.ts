@@ -22,7 +22,12 @@ import { snake } from "../../../util/naming.js";
 /** The persistence record (POCO) for one event-sourced stream — an aggregate
  *  (`persistedAs(eventLog)`) or an `eventSourced` workflow.  One row per
  *  recorded event, keyed by `(StreamId, Version)`. */
-export function renderEventRecordPoco(name: string, ns: string): string {
+export function renderEventRecordPoco(name: string, ns: string, implementsPort = false): string {
+  // A WORKFLOW event record implements the domain-side `IWorkflowEventRow`
+  // marker (audit S7 Slice C) so the generic `IWorkflowEventStore<TRow>` adapter
+  // can read `StreamId`/`Version` — the FQN keeps the aggregate record (no
+  // marker) byte-identical.  Get/set satisfies the get-only interface members.
+  const marker = implementsPort ? ` : global::${ns}.Domain.Common.IWorkflowEventRow` : "";
   return (
     lines(
       "// Auto-generated.",
@@ -33,7 +38,7 @@ export function renderEventRecordPoco(name: string, ns: string): string {
       "/// aggregate (persistedAs(eventLog)) or workflow (eventSourced).  One row",
       "/// per recorded event, keyed by (StreamId, Version); Data is the JSON",
       "/// event payload.</summary>",
-      `public sealed class ${name}EventRecord`,
+      `public sealed class ${name}EventRecord${marker}`,
       "{",
       "    public string StreamId { get; set; } = default!;",
       "    public int Version { get; set; }",

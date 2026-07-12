@@ -184,11 +184,11 @@ describe(".NET in-process event dispatch emission", () => {
       files.get("Application/Workflows/OrderFulfillmentStartOrderPlacedHandler.cs") ?? "";
     expect(start).toContain("var __key = notification.Order;");
     expect(start).toContain(
-      "var state = await _db.OrderFulfillments.FirstOrDefaultAsync(x => x.OrderId == __key, cancellationToken);",
+      "var state = await _sagaState.FindAsync(x => x.OrderId == __key, cancellationToken);",
     );
     expect(start).toContain("state = new OrderFulfillmentState { OrderId = __key, Attempts = 0 };");
-    expect(start).toContain("_db.OrderFulfillments.Add(state);");
-    expect(start).toContain("await _db.SaveChangesAsync(cancellationToken);");
+    expect(start).toContain("_sagaState.Add(state);");
+    expect(start).toContain("await _sagaState.SaveChangesAsync(cancellationToken);");
 
     // on: route-to-existing, else drop + log event_unrouted (no save).
     const onH =

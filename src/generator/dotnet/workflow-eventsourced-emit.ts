@@ -175,7 +175,7 @@ export function emitEventSourcedWorkflowFiles(
     out.set(`Application/Workflows/${workflowStateClass(wf)}.cs`, renderWorkflowFoldClass(wf, ns));
     out.set(
       `Infrastructure/Persistence/Events/${esEventRecordClass(wf)}.cs`,
-      renderEventRecordPoco(upperFirst(wf.name), ns),
+      renderEventRecordPoco(upperFirst(wf.name), ns, /* implementsPort */ true),
     );
     out.set(
       `Infrastructure/Persistence/Configurations/${esEventRecordClass(wf)}Configuration.cs`,

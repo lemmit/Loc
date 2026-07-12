@@ -980,13 +980,12 @@ describe(".NET generator", () => {
     );
     const files = generateDotnet(doc.parseResult.value as Model);
     const handler = files.get("Application/Workflows/TopUpHandler.cs")!;
-    // `global::`-anchored so a deployable named `api` (root ns `Api`) doesn't
-    // mis-resolve the leading segment against the enclosing namespace.
+    // Transaction via the domain IUnitOfWork port (audit S7 Slice C), `global::`-
+    // anchored so a deployable named `api` (root ns `Api`) doesn't mis-resolve
+    // the leading segment against the enclosing namespace.
+    expect(handler).toMatch(/private readonly global::T\.Domain\.Common\.IUnitOfWork _uow;/);
     expect(handler).toMatch(
-      /private readonly global::T\.Infrastructure\.Persistence\.AppDbContext _db;/,
-    );
-    expect(handler).toMatch(
-      /await using var tx = await _db\.Database\.BeginTransactionAsync\(cancellationToken\);/,
+      /await using var tx = await _uow\.BeginTransactionAsync\(cancellationToken\);/,
     );
     expect(handler).toMatch(/await tx\.CommitAsync\(cancellationToken\);/);
     expect(handler).toMatch(/await tx\.RollbackAsync\(cancellationToken\);/);

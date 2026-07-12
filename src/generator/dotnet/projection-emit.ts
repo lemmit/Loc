@@ -94,7 +94,6 @@ function renderProjectionFoldHandler(
 ): string {
   const corr = proj.correlationField;
   const corrPascal = upperFirst(corr);
-  const dbSet = projectionRowDbSet(proj);
   const rowCls = projectionRowClass(proj);
   const usings = new Set<string>();
   // Routing key: the `by <expr>` value (event param → `notification`), else the
@@ -114,10 +113,10 @@ function renderProjectionFoldHandler(
     );
   }
   const extraUsings = [...usings].sort().map((n) => `using ${n};`);
-  return `// Auto-generated.
+  return (
+    `// Auto-generated.
 using System.Threading;
-using System.Threading.Tasks;
-using Microsoft.EntityFrameworkCore;${extraUsings.length > 0 ? "\n" + extraUsings.join("\n") : ""}
+using System.Threading.Tasks;${extraUsings.length > 0 ? "\n" + extraUsings.join("\n") : ""}
 using Mediator;
 using ${ns}.Domain.Events;
 using ${ns}.Domain.Ids;
@@ -127,24 +126,31 @@ using ${ns}.Infrastructure.Persistence.Projections;
 
 namespace ${ns}.Application.Workflows;
 
+// Read-model fold via the domain IReadModelStore port (audit S7 Slice C), NOT
+// the concrete AppDbContext.  FindAsync returns the EF change-TRACKED row, so
+// the ` +
+    "`state.<Prop> = …; SaveChangesAsync()`" +
+    ` upsert persists unchanged;
+// the EF adapter delegates to the same scoped DbContext.
 public sealed class ${className} : INotificationHandler<${on.event}>
 {
-    private readonly global::${ns}.Infrastructure.Persistence.AppDbContext _db;
-    public ${className}(global::${ns}.Infrastructure.Persistence.AppDbContext db) => _db = db;
+    private readonly global::${ns}.Domain.Common.IReadModelStore<${rowCls}> _readModel;
+    public ${className}(global::${ns}.Domain.Common.IReadModelStore<${rowCls}> readModel) => _readModel = readModel;
 
     public async ValueTask Handle(${on.event} notification, CancellationToken cancellationToken)
     {
         var __key = ${keyExpr};
-        var state = await _db.${dbSet}.FirstOrDefaultAsync(x => x.${corrPascal} == __key, cancellationToken);
+        var state = await _readModel.FindAsync(x => x.${corrPascal} == __key, cancellationToken);
         if (state is null)
         {
             state = new ${rowCls} { ${corrPascal} = __key };
-            _db.${dbSet}.Add(state);
+            _readModel.Add(state);
         }
-${assignLines.length > 0 ? assignLines.join("\n") + "\n" : ""}        await _db.SaveChangesAsync(cancellationToken);
+${assignLines.length > 0 ? assignLines.join("\n") + "\n" : ""}        await _readModel.SaveChangesAsync(cancellationToken);
     }
 }
-`;
+`
+  );
 }
 
 // ---------------------------------------------------------------------------
