@@ -122,15 +122,23 @@ export function renderWorkflowStateConfiguration(
     ? `"${workflowStateTable(wf)}", "${schema}"`
     : `"${workflowStateTable(wf)}"`;
   const fieldConfigs = (wf.stateFields ?? []).flatMap((f) => {
+    // EVERY column carries an explicit `.HasColumnName(snake(f.name))` so the EF
+    // model column name EQUALS the migration DDL column name — the migration
+    // (migrations-builder.ts) names every column `snake(f.name)`.  Without it, EF
+    // falls back to the PascalCase property name and a correlation lookup /
+    // column read throws "column does not exist" at runtime (compile-green).
+    const col = `.HasColumnName("${snake(f.name)}")`;
     if (f.type.kind === "id") {
       return [
-        `        builder.Property(x => x.${upperFirst(f.name)}).HasConversion(v => v.Value, v => new ${f.type.targetName}Id(v));`,
+        `        builder.Property(x => x.${upperFirst(f.name)}).HasConversion(v => v.Value, v => new ${f.type.targetName}Id(v))${col};`,
       ];
     }
     if (f.type.kind === "enum") {
-      return [`        builder.Property(x => x.${upperFirst(f.name)}).HasConversion<string>();`];
+      return [
+        `        builder.Property(x => x.${upperFirst(f.name)}).HasConversion<string>()${col};`,
+      ];
     }
-    return [];
+    return [`        builder.Property(x => x.${upperFirst(f.name)})${col};`];
   });
   return (
     lines(

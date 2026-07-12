@@ -80,12 +80,17 @@ describe(".NET projection runtime", () => {
     const cfg = file(files, "Configurations/OrderBookRowConfiguration.cs");
     expect(cfg).toContain('builder.ToTable("order_books"');
     expect(cfg).toContain("builder.HasKey(x => x.Order);");
-    // key uses the plain converter; the nullable non-key id uses the guarded form
+    // key uses the plain converter; the nullable non-key id uses the guarded form.
+    // EVERY column carries HasColumnName(snake) so EF's model column === migration DDL
+    // column (else a read-by-correlation throws "column does not exist" at runtime).
     expect(cfg).toContain(
-      "builder.Property(x => x.Order).HasConversion(v => v.Value, v => new OrderId(v));",
+      'builder.Property(x => x.Order).HasConversion(v => v.Value, v => new OrderId(v)).HasColumnName("order");',
     );
     expect(cfg).toContain("builder.Property(x => x.Customer).HasConversion(v => v.HasValue");
-    expect(cfg).toContain("builder.Property(x => x.Status).HasConversion<string>();");
+    expect(cfg).toContain('.HasColumnName("customer");');
+    expect(cfg).toContain(
+      'builder.Property(x => x.Status).HasConversion<string>().HasColumnName("status");',
+    );
   });
 
   it("registers the read-model DbSet + configuration in AppDbContext", async () => {

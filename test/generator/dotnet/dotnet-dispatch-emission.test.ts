@@ -161,9 +161,12 @@ describe(".NET in-process event dispatch emission", () => {
     );
     expect(cfg).toContain('builder.ToTable("order_fulfillments");');
     expect(cfg).toContain("builder.HasKey(x => x.OrderId);");
+    // Correlation column carries HasColumnName(snake) so EF's model column === the
+    // migration DDL column (else the correlation lookup throws "column does not exist").
     expect(cfg).toContain(
-      "builder.Property(x => x.OrderId).HasConversion(v => v.Value, v => new OrderId(v));",
+      'builder.Property(x => x.OrderId).HasConversion(v => v.Value, v => new OrderId(v)).HasColumnName("order_id");',
     );
+    expect(cfg).toContain('builder.Property(x => x.Attempts).HasColumnName("attempts");');
 
     // DbContext wires the DbSet + ApplyConfiguration.
     const db = files.get("Infrastructure/Persistence/AppDbContext.cs") ?? "";

@@ -117,6 +117,12 @@ export function renderProjectionRowConfiguration(
   const fieldConfigs = proj.stateFields.flatMap((f) => {
     const isKey = f.name === corr;
     const leaf = f.type.kind === "optional" ? f.type.inner : f.type;
+    // EVERY column carries an explicit `.HasColumnName(snake(f.name))` so the EF
+    // model column name EQUALS the migration DDL column name — `projectionTableShape`
+    // (migrations-builder.ts) names every column `snake(f.name)`.  Without it EF
+    // falls back to the PascalCase property name and a read-by-correlation throws
+    // "column does not exist" at runtime (compile-green).
+    const col = `.HasColumnName("${snake(f.name)}")`;
     if (leaf.kind === "id") {
       const idType = `${leaf.targetName}Id`;
       // The key is NOT NULL → the plain converter; a non-key id column is
@@ -126,13 +132,15 @@ export function renderProjectionRowConfiguration(
       const conv = isKey
         ? `.HasConversion(v => v.Value, v => new ${idType}(v))`
         : `.HasConversion(v => v.HasValue ? v.Value.Value : (${provider}?)null, v => v.HasValue ? (${idType}?)new ${idType}(v.Value) : (${idType}?)null)`;
-      return [`        builder.Property(x => x.${upperFirst(f.name)})${conv};`];
+      return [`        builder.Property(x => x.${upperFirst(f.name)})${conv}${col};`];
     }
     if (leaf.kind === "enum") {
       // `HasConversion<string>()` maps both a non-null enum and a nullable enum.
-      return [`        builder.Property(x => x.${upperFirst(f.name)}).HasConversion<string>();`];
+      return [
+        `        builder.Property(x => x.${upperFirst(f.name)}).HasConversion<string>()${col};`,
+      ];
     }
-    return [];
+    return [`        builder.Property(x => x.${upperFirst(f.name)})${col};`];
   });
   return (
     lines(
