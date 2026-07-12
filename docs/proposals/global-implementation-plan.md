@@ -250,10 +250,11 @@ java-backend).
     (lint→required ramp) — ✅ **first cut SHIPPED** (2026-07, frontend-only):
     `AwaitExpr` + effect-form `MatchStmt` + `variant-match` IR + a
     `renderVariantMatch` seam (await the mutation, reify the thrown ProblemDetails
-    into the error variant, `switch` on the union tag) on all four JS frontends;
-    bare remote call = `loom.missing-effect-marker` **warning** (replaced the hard
-    `loom.action-requires-await`); HEEx pinned as a follow-up. Remaining: the
-    `await`-required flip, `spawn`/`onError`/`attempt`, multi-error reification; **(3)** retire the `Action {}` `then:` arg via a macro over
+    into the error variant, `switch` on the union tag) on all four JS frontends
+    **+ HEEx**; bare remote call = `loom.missing-effect-marker` **error** — the
+    `await`-required flip (Stage 2b) shipped (2026-07) after a whole-repo census
+    found zero unmarked sites (replaced the hard `loom.action-requires-await`).
+    Remaining: `spawn`/`onError`/`attempt`, multi-error reification; **(3)** retire the `Action {}` `then:` arg via a macro over
     a named action; **(4)** async action composition (`async` keyword,
     required+checked); **(5)** `store` — ✅ **SHIPPED in-memory** (grammar/IR/
     lowering + Zustand/Pinia/Svelte/Angular/LiveView emission; the `persist:`/
