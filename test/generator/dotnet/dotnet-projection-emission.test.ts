@@ -104,12 +104,12 @@ describe(".NET projection runtime", () => {
     );
     expect(fold).toContain("var __key = notification.Order;");
     expect(fold).toContain(
-      "var state = await _db.OrderBooks.FirstOrDefaultAsync(x => x.Order == __key, cancellationToken);",
+      "var state = await _readModel.FindAsync(x => x.Order == __key, cancellationToken);",
     );
     expect(fold).toContain("state = new OrderBookRow { Order = __key };");
     expect(fold).toContain("state.Customer = notification.Customer;");
     expect(fold).toContain("state.Status = OrderStatus.Placed;");
-    expect(fold).toContain("await _db.SaveChangesAsync(cancellationToken);");
+    expect(fold).toContain("await _readModel.SaveChangesAsync(cancellationToken);");
     // the correlation `:=` is skipped (immutable key)
     expect(fold).not.toContain("state.Order =");
 

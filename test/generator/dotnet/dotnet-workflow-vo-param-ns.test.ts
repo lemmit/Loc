@@ -66,10 +66,8 @@ describe(".NET workflow VO param — namespace + Request DTO", () => {
     )?.[1];
     expect(handler, "command handler not emitted").toBeDefined();
     // The injected DbContext is global::-anchored — both field + ctor param.
-    expect(handler).toContain(
-      "private readonly global::Api.Infrastructure.Persistence.AppDbContext _db;",
-    );
-    expect(handler).toContain("global::Api.Infrastructure.Persistence.AppDbContext db");
+    expect(handler).toContain("private readonly global::Api.Domain.Common.IUnitOfWork _uow;");
+    expect(handler).toContain("global::Api.Domain.Common.IUnitOfWork uow");
     // No bare reference survives (the leading `Api` would mis-resolve to `Api.Api`).
     expect(handler).not.toMatch(/(?<!global::)\bApi\.Infrastructure\.Persistence\.AppDbContext/);
   });

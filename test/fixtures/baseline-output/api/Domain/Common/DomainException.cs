@@ -1,6 +1,8 @@
 // Auto-generated.
 using System;
 using System.Collections.Generic;
+using System.Data;
+using System.Linq.Expressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Api.Domain.Events;
@@ -109,4 +111,71 @@ public readonly record struct FilterBypass(bool All, IReadOnlyList<string> Capab
     public static readonly FilterBypass None = new(false, Array.Empty<string>());
     public static FilterBypass BypassAll() => new(true, Array.Empty<string>());
     public static FilterBypass Bypass(params string[] capabilities) => new(false, capabilities);
+}
+
+/// <summary>
+/// The commit boundary (audit S7 Slice C).  Orchestration handlers depend on
+/// this instead of the concrete EF <c>AppDbContext</c>; the infrastructure
+/// adapter opens the transaction on the SAME scoped DbContext the repositories
+/// use, so a repository <c>SaveAsync</c> inside the transaction still commits
+/// atomically — byte-identical semantics to the pre-port
+/// <c>_db.Database.BeginTransactionAsync(...)</c>.
+/// </summary>
+public interface IUnitOfWork
+{
+    Task<IDomainTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default);
+    Task<IDomainTransaction> BeginTransactionAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken = default);
+}
+
+/// <summary>A domain-owned transaction handle — commit / rollback / dispose.</summary>
+public interface IDomainTransaction : IAsyncDisposable
+{
+    Task CommitAsync(CancellationToken cancellationToken = default);
+    Task RollbackAsync(CancellationToken cancellationToken = default);
+}
+
+/// <summary>The shape a workflow event-stream record exposes to the event-store
+/// port — the stream key + gap-free version (audit S7 Slice C).</summary>
+public interface IWorkflowEventRow
+{
+    string StreamId { get; }
+    int Version { get; }
+}
+
+/// <summary>
+/// Append-only event-stream port for an event-sourced workflow's
+/// <c>&lt;wf&gt;_events</c> table (audit S7 Slice C).  The EF adapter delegates 1:1
+/// to the same scoped DbContext (<c>Set&lt;TRow&gt;()</c> resolves the same DbSet as
+/// the named property) — identical load / max-version / append / flush.
+/// </summary>
+public interface IWorkflowEventStore<TRow> where TRow : class, IWorkflowEventRow
+{
+    Task<List<TRow>> LoadStreamAsync(string streamId, CancellationToken cancellationToken = default);
+    Task<int> MaxVersionAsync(string streamId, CancellationToken cancellationToken = default);
+    void Append(TRow row);
+    Task SaveChangesAsync(CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Saga-state row port (audit S7 Slice C).  <c>FindAsync</c> returns the EF
+/// change-TRACKED entity off the same scoped DbContext, so a subsequent
+/// <c>state.Prop = …; SaveChangesAsync()</c> persists exactly as before.
+/// </summary>
+public interface ISagaStateStore<TRow> where TRow : class
+{
+    Task<TRow?> FindAsync(Expression<Func<TRow, bool>> predicate, CancellationToken cancellationToken = default);
+    void Add(TRow row);
+    Task SaveChangesAsync(CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Projection read-model row port (audit S7 Slice C).  Same TRACKED-load +
+/// upsert + flush contract as <see cref="ISagaStateStore{TRow}"/>, named for the
+/// projection fold's read model.
+/// </summary>
+public interface IReadModelStore<TRow> where TRow : class
+{
+    Task<TRow?> FindAsync(Expression<Func<TRow, bool>> predicate, CancellationToken cancellationToken = default);
+    void Add(TRow row);
+    Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

@@ -161,6 +161,19 @@ using (var seedScope = app.Services.CreateScope())
     ? `\n// Per-operation audit — stages audit_records onto the request unit of work.\nbuilder.Services.AddScoped<${ns}.Application.Common.IAuditWriter, ${ns}.Infrastructure.Persistence.AuditWriter>();`
     : "";
 
+  // Domain persistence-port adapters (audit S7 Slice C): the orchestration
+  // handlers (transactional workflow command, saga reactors, projection fold)
+  // depend on IUnitOfWork / IWorkflowEventStore / ISagaStateStore /
+  // IReadModelStore instead of the concrete AppDbContext.  All scoped over the
+  // SAME request-scoped AppDbContext (identical transaction/flush semantics).
+  // Emitted when the deployable hosts a workflow or projection (the port users)
+  // — the exact gate PersistencePorts.cs is emitted under (index.ts).
+  const usesPersistencePorts =
+    (ctx.workflows?.length ?? 0) > 0 || (ctx.projections?.length ?? 0) > 0;
+  const portsDi = usesPersistencePorts
+    ? `\n// Domain persistence ports (audit S7 Slice C) — EF adapters over the scoped AppDbContext.\nbuilder.Services.AddScoped<${ns}.Domain.Common.IUnitOfWork, ${ns}.Infrastructure.Persistence.EfUnitOfWork>();\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IWorkflowEventStore<>), typeof(${ns}.Infrastructure.Persistence.EfWorkflowEventStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.ISagaStateStore<>), typeof(${ns}.Infrastructure.Persistence.EfSagaStateStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IReadModelStore<>), typeof(${ns}.Infrastructure.Persistence.EfReadModelStore<>));`
+    : "";
+
   // Per-aggregate list of (op-name, IXAggHandler) pairs for extern
   // operations.  Drives both the Scrutor registration helper text
   // (purely informational) and the startup verification check that
@@ -388,7 +401,7 @@ builder.Services.AddScoped(
 }
 ${dispatcherRegistration}
 
-${repoRegistrations}${readingServicesDi}${auditDi}
+${repoRegistrations}${readingServicesDi}${auditDi}${portsDi}
 ${authDi}
 ${externScan}
 
