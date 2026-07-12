@@ -579,10 +579,11 @@ function checkMethodCallReceiver(
  *  `loom.action-requires-await`).  A BARE (unmarked) call in action-body
  *  position that lowers to a REMOTE, MUTATING backend command
  *  (`Sales.Order.placeOrder(o)` / `Order.placeOrder(o)`) has an invisible async
- *  boundary — it should be `await`-marked so its `Result` is handled by a
- *  `match`.  Stage 2 makes this a WARNING (it becomes an error in Stage 2b once
- *  the codemod has run); an `await`-marked call (the awaited subject of a
- *  variant-`match`) is now ACCEPTED and skipped here.  CONSERVATIVE — only flags
+ *  boundary — it must be `await`-marked so its `Result` is handled by a
+ *  `match`.  Stage 2b makes this an ERROR (was a warning during the Stage-2
+ *  ramp; the corpus carried zero unmarked sites at flip time, so no codemod was
+ *  needed); an `await`-marked call (the awaited subject of a variant-`match`) is
+ *  ACCEPTED and skipped here.  CONSERVATIVE — only flags
  *  a `method-call` we can positively identify as an aggregate-rooted mutating
  *  command:
  *    Pattern E:  `Order.placeOrder(o)`         — `method-call(ref:<Aggregate>, op)`
@@ -623,13 +624,14 @@ function checkMissingEffectMarker(
     (agg.destroys ?? []).some((o) => o.name === op);
   if (!isMutating) return;
   diags.push({
-    severity: "warning",
+    severity: "error",
     code: "loom.missing-effect-marker",
     message:
       `${ctx.where}: action body calls \`${aggName}.${op}(…)\`, a remote mutating command on ` +
       `aggregate '${aggName}', with no effect marker — it has an invisible async boundary. Mark it ` +
-      `\`match await ${aggName}.${op}(…) { … }\` so its Result is handled (async-actions-and-effects.md ` +
-      `Stage 2). This is a warning during the Stage-2 ramp and becomes an error in Stage 2b.`,
+      `\`match await ${aggName}.${op}(…) { … }\` so its Result is handled ` +
+      `(async-actions-and-effects.md Stage 2b — every remote call is explicitly awaited and its ` +
+      `Result matched).`,
     source: ctx.where,
   });
 }

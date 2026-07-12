@@ -24,9 +24,11 @@
 > to the payload/error decls of the contexts the ui's `api X: Y` handles bind to,
 > not globally, so it doesn't leak across contexts), and the JS reify maps the
 > caught ProblemDetails `type` URI back to the matching tag so EVERY named error
-> arm routes (N-error, not just one). **Remaining:** the `await`-required flip
-> (step 2), `spawn` / `onError` / `attempt {}` sugar (step 3), and `async`-keyword
-> composition (step 4). Split
+> arm routes (N-error, not just one). The **`await`-required flip (step 2) has
+> shipped** — `loom.missing-effect-marker` is now an **error** (whole-repo census
+> found zero unmarked sites, so no codemod was needed). **Remaining:** `spawn` /
+> `onError` / `attempt {}` sugar (step 3), and `async`-keyword composition
+> (step 4). Split
 > out of [`named-actions-and-stores.md`](named-actions-and-stores.md) ("Proposal A")
 > because the async surface **changes call semantics** (a remote call must be
 > marked) — it depends on Proposal A, Stage 1.
@@ -441,10 +443,12 @@ need:
    yielding the op's `Result` union, consumed by the **existing** `match`. No
    `onError`, no `spawn`. A bare remote call is a **warning**; ship a codemod
    (bare remote call → `await`).
-2. **`await` required** — flip `loom.missing-effect-marker` /
-   `loom.spurious-effect-marker` to **error** once the codemod has run. Every
-   remote call is now explicitly `await`-marked and its `Result` handled by
-   `match`.
+2. **`await` required** — ✅ **SHIPPED** (2026-07). `loom.missing-effect-marker`
+   flipped from warning to **error**: a bare remote mutating call in an action
+   body must be `await`-marked and its `Result` handled by `match`. A whole-repo
+   census (192 complete systems) found **zero** unmarked sites at flip time, so
+   no codemod was needed — the corpus was already clean. (`loom.spurious-effect-marker`
+   is a reserved name, not yet an emitted diagnostic; nothing to flip there.)
 3. **Chained fallible flows + `spawn`** *(deferred — add when patterns demand it)*
    — the explicit `attempt { }` railway expression (§3c) as the foundation, the
    `onError` postfix/block sugar over `match`/`attempt` (§3a), and `spawn` for

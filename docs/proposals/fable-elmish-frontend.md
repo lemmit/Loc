@@ -13,9 +13,10 @@
 > with — that claim was false against the *anonymous-lambda* IR and is now true
 > **only for the named-action subset**; see §2. The last-maturing MVU axis is
 > **async effect outcomes** (server data as `Cmd`) — but its core primitive
-> `await` + `match await` has now **shipped on all five targets**; what remains
+> `await` + `match await` has now **shipped on all five targets**, and the
+> `await`-required flip shipped (`loom.missing-effect-marker` is now an error —
+> every remote call is explicitly awaited); what remains
 > ([`async-actions-and-effects.md`](async-actions-and-effects.md)) is additive:
-> flipping `await` from warning (`loom.missing-effect-marker`) to required, plus
 > `spawn`/`onError`/`attempt`/`async`-composition sugar. See §2.1.
 
 ## TL;DR
@@ -137,7 +138,7 @@ What is accurate is **faithful one-way projection** Loom → MVU, not strict
 | **Msg** (named, exhaustive union) | `ActionIR.name` + typed `params` | **was large** | **✅ shipped** — named actions |
 | **update** (`(Msg,Model)→(Model,Cmd)`) | `ActionIR.body`, purity-enforced | medium | **✅ shipped** — direct emit off the body |
 | **Cmd** — sync (`navigate`/`call`/`emit`) | reified statement forms in `ActionIR.body` | medium | **✅ shipped** — purity rule reifies them |
-| **Cmd** — async outcomes (server state) | `match await op() { Ok o => … Err e => … }` | **was the residual gap** | **⚙ partial** — core shipped; sugar + enforcement pending |
+| **Cmd** — async outcomes (server state) | `match await op() { Ok o => … Err e => … }` | **was the residual gap** | **⚙ partial** — core + `await`-required enforcement shipped; only additive sugar pending |
 
 Six of seven axes are at zero or **shipped** today: named actions closed Msg /
 update / sync-Cmd (verified — `named-actions.test.ts` per target), and Model /
@@ -153,13 +154,14 @@ success/error `Msg`. The design is *decided* in
 remote-data union from `QueryView`; writes reuse `then:` + optional `onError`,
 projecting to a `Result<T, E>` outcome `Msg`).
 
-What **remains** on the async axis (all additive, per
-[`async-actions-and-effects.md`](async-actions-and-effects.md)):
-- **`await`-required enforcement** — a bare remote mutating call is today a
-  *warning* (`loom.missing-effect-marker`, was `loom.action-requires-await`), not
-  an error; the "Stage 2b" flip to error hasn't happened.
-- **Sugar / composition** — `spawn` (fire-and-forget), `onError`, `attempt {}`
-  railway, `async` action composition: **no grammar surface yet**.
+**`await`-required enforcement shipped** (Stage 2b): a bare remote mutating call
+in an action body is now an **error** (`loom.missing-effect-marker`, was
+`loom.action-requires-await`) — every remote call is explicitly awaited and its
+`Result` matched, so the async→Msg projection has no invisible boundary. What
+**remains** is additive sugar/composition, per
+[`async-actions-and-effects.md`](async-actions-and-effects.md): `spawn`
+(fire-and-forget), `onError`, `attempt {}` railway, `async` action composition —
+**no grammar surface yet**.
 
 So a **sync MVU target is buildable against `main` today**, and an **async** one
 is closer than "gated" implied — its load-bearing primitive (`match await`)
