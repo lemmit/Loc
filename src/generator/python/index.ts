@@ -7,16 +7,18 @@ import type {
   SystemIR,
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
+import {
+  aggregatesHaveUniqueKeys,
+  aggregatesNeedConcurrency,
+} from "../../ir/util/aggregate-flags.js";
 import { durableEventTypes } from "../../ir/util/channels.js";
 import { mergeContexts } from "../../ir/util/merge-contexts.js";
 import {
-  aggregateIsEventSourced,
   effectiveSavingShape,
   resolveContextSchema,
   resolveDataSourceConfig,
 } from "../../ir/util/resolve-datasource.js";
 import { hierarchyRegistry } from "../../ir/util/tenant-stance.js";
-import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { lines } from "../../util/code-builder.js";
 import { plural, snake } from "../../util/naming.js";
@@ -258,9 +260,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // guarded write's stale-write rejection or an event-sourced aggregate's
   // append-time `(stream_id, version)` 23505 collision — a concurrency-free app
   // omits both and stays byte-identical.
-  const hasConcurrency = merged.aggregates.some(
-    (a) => aggregateIsVersioned(a) || aggregateIsEventSourced(a),
-  );
+  const hasConcurrency = aggregatesNeedConcurrency(merged.aggregates);
   out.set("app/domain/errors.py", errorsPy(hasConcurrency));
   out.set("app/domain/value_objects.py", renderPyEnumsAndValueObjects(merged));
   out.set("app/domain/events.py", renderPyEvents(merged));
@@ -321,7 +321,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     "app/http/problem.py",
     renderProblemPy(
       collectOpUnions([merged]),
-      merged.aggregates.some((a) => (a.uniqueKeys?.length ?? 0) > 0),
+      aggregatesHaveUniqueKeys(merged.aggregates),
       hasConcurrency,
     ),
   );

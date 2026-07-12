@@ -12,12 +12,12 @@
 //   Later slices: policies, ProblemDetails parity, workflows + views, CI.
 // ---------------------------------------------------------------------------
 
-import type { PageNameCtx } from "../../../ir/util/page-kind.js";
 import {
-  aggregateIsEventSourced,
-  resolveContextSchema,
-} from "../../../ir/util/resolve-datasource.js";
-import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
+  aggregatesHaveUniqueKeys,
+  aggregatesNeedConcurrency,
+} from "../../../ir/util/aggregate-flags.js";
+import type { PageNameCtx } from "../../../ir/util/page-kind.js";
+import { resolveContextSchema } from "../../../ir/util/resolve-datasource.js";
 import {
   buildPhoenixResourceModules,
   emitPhoenixResourceFiles,
@@ -78,18 +78,14 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // per project; controllers `alias` the public functions.  The 23505 → 409
   // conflict branch is emitted only when some aggregate declares a `unique (...)`
   // key, so a unique-free project stays byte-identical (strict additivity).
-  const hasUniqueKeys = contexts.some((c) =>
-    c.aggregates.some((a) => (a.uniqueKeys?.length ?? 0) > 0),
-  );
+  const hasUniqueKeys = contexts.some((c) => aggregatesHaveUniqueKeys(c.aggregates));
   // The optimistic-concurrency 409 branch (`conflict_response/1`) is emitted when
   // some in-scope aggregate carries the `versioned` capability OR is
   // event-sourced: the `versioned` write rescues `Ecto.StaleEntryError` and the
   // event-log append rescues a `(stream_id, version)` unique_violation, both to
   // `{:error, :conflict}` → this responder.  A project with neither stays
   // byte-identical (strict additivity).
-  const hasConcurrency = contexts.some((c) =>
-    c.aggregates.some((a) => aggregateIsVersioned(a) || aggregateIsEventSourced(a)),
-  );
+  const hasConcurrency = contexts.some((c) => aggregatesNeedConcurrency(c.aggregates));
   out.set(
     `lib/${appName}_web/problem_details.ex`,
     renderVanillaProblemDetailsModule(appModule, hasUniqueKeys, hasConcurrency),

@@ -64,6 +64,7 @@ import {
 } from "../../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../../ir/types/migrations-ir.js";
 import type { OriginRef } from "../../../ir/types/origin.js";
+import { aggregatesNeedConcurrency } from "../../../ir/util/aggregate-flags.js";
 import { contextHasAuditedTarget } from "../../../ir/util/audit-capability.js";
 import { durableEventTypes, realtimeEventTypes } from "../../../ir/util/channels.js";
 import {
@@ -75,13 +76,11 @@ import {
 import { mergeContexts } from "../../../ir/util/merge-contexts.js";
 import { contextsHaveProvenancedField } from "../../../ir/util/prov-id.js";
 import {
-  aggregateIsEventSourced,
   effectiveSavingShape,
   resolveContextSchema,
   resolveDataSourceConfig,
 } from "../../../ir/util/resolve-datasource.js";
 import { hierarchyRegistry } from "../../../ir/util/tenant-stance.js";
-import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import type { Model } from "../../../language/generated/ast.js";
 import { lowerFirst, plural } from "../../../util/naming.js";
 import {
@@ -369,9 +368,7 @@ export function generateTypeScriptForContexts(
   // byte-identical.  An event-sourced aggregate's append site throws
   // `ConcurrencyError` on a `(stream_id, version)` 23505 collision, so it needs
   // the same error class + 409 arm the `versioned` guarded write does.
-  const emitConcurrency = merged.aggregates.some(
-    (a) => aggregateIsVersioned(a) || aggregateIsEventSourced(a),
-  );
+  const emitConcurrency = aggregatesNeedConcurrency(merged.aggregates);
   out.set("domain/errors.ts", errorsTs(emitConcurrency));
   out.set("http/problem-details.ts", PROBLEM_DETAILS_TS);
   if (emitProvenance) out.set("domain/provenance.ts", PROVENANCE_TS);

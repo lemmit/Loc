@@ -12,12 +12,15 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import type { OriginRef } from "../../ir/types/origin.js";
+import {
+  aggregatesHaveUniqueKeys,
+  aggregatesNeedConcurrency,
+} from "../../ir/util/aggregate-flags.js";
 import { aggHasAuditedTarget } from "../../ir/util/audit-capability.js";
 import { durableEventTypes } from "../../ir/util/channels.js";
 import { isTpcBase, isTphBase, tableOwnerName, tphConcretesOf } from "../../ir/util/inheritance.js";
 import { mergeContexts } from "../../ir/util/merge-contexts.js";
 import {
-  aggregateIsEventSourced,
   effectiveSavingShape,
   isDocumentShaped,
   isEmbeddedShaped,
@@ -498,16 +501,14 @@ function emitProjectFromContexts(
   const usesValidators = merged.aggregates.some(hasAnyWireValidator);
   // Only emit the 23505 → 409 arm when some aggregate declares a `unique (...)`
   // key — a unique-free project stays byte-identical (strict additivity).
-  const hasUniqueKeys = merged.aggregates.some((a) => (a.uniqueKeys?.length ?? 0) > 0);
+  const hasUniqueKeys = aggregatesHaveUniqueKeys(merged.aggregates);
   // Only emit the optimistic-concurrency (DbUpdateConcurrencyException → 409)
   // arm when some in-scope aggregate declares the `versioned` capability OR is
   // event-sourced — the EF event-store append translates a `(stream_id,
   // version)` 23505 collision into DbUpdateConcurrencyException, the same
   // exception the guarded write's stale-write raises.  A project with neither
   // stays byte-identical.
-  const hasConcurrency = merged.aggregates.some(
-    (a) => aggregateIsVersioned(a) || aggregateIsEventSourced(a),
-  );
+  const hasConcurrency = aggregatesNeedConcurrency(merged.aggregates);
   out.set(
     "Api/DomainExceptionFilter.cs",
     renderExceptionFilter(ns, {
