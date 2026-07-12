@@ -523,10 +523,14 @@ function renderNew(
   e: NewExpr,
   ctx: TsRenderContext,
 ): string {
+  // A NESTED part's enclosing parent has no id yet at construction — its FK is
+  // stamped from tree position on save — so omit the construction-time parentId
+  // (which would otherwise be the wrong-typed ambient `this` id).  A root-level
+  // part keeps the ambient parent id (byte-identical).
   const parentRef = ctx.thisName === "this" ? "this._id" : `${ctx.thisName}.id`;
   const inits = [
     `id: Ids.new${e.partName}Id()`,
-    `parentId: ${parentRef}`,
+    ...(e.nested ? [] : [`parentId: ${parentRef}`]),
     ...fields.map((f) => `${f.name}: ${f.value}`),
   ];
   return `${e.partName}._create({ ${inits.join(", ")} })`;

@@ -412,11 +412,21 @@ function renderEntity(
       ? `        self._assert_invariants(${JSON.stringify(op)})`
       : "        self._assert_invariants()";
 
+  // A NESTED part (contained by a sibling, not the root) has no parent id at
+  // construction — its FK is stamped from tree position on save — so `parent_id`
+  // is optional (keyword-only, so a default before required fields is legal) and
+  // defaulted in `__init__`.  Root-level parts are byte-identical.
+  const isNested = !e.isRoot && e.parentName != null && e.parentName !== e.rootName;
+  const parentIdParam = (optional: boolean): string | null =>
+    e.isRoot
+      ? null
+      : `parent_id: ${e.parentName ?? e.rootName}Id${optional ? " | None = None" : ""}`;
+
   // Full-state keyword-only parameter list — shared by `__init__` and the
   // `_create` rehydration alias.
   const stateParams = [
     `id: ${e.name}Id`,
-    !e.isRoot ? `parent_id: ${e.parentName ?? e.rootName}Id` : null,
+    parentIdParam(isNested),
     ...e.fields.map((f) => `${snake(f.name)}: ${renderPyType(f.type)}`),
     ...e.contains.map((c) => `${snake(c.name)}: ${containsType(c)}`),
   ].filter((s): s is string => s != null);
@@ -436,7 +446,11 @@ function renderEntity(
   const ctor = [
     `    def __init__(self, *, ${stateParams.join(", ")}, _trust_store: bool = False) -> None:`,
     `        self._id = id`,
-    !e.isRoot ? `        self._parent_id = parent_id` : null,
+    e.isRoot
+      ? null
+      : isNested
+        ? `        self._parent_id = parent_id if parent_id is not None else new_${snake(e.parentName ?? e.name)}_id()`
+        : `        self._parent_id = parent_id`,
     ...e.fields.map((f) => `        self._${snake(f.name)} = ${snake(f.name)}`),
     ...e.contains.map((c) => `        self._${snake(c.name)} = ${snake(c.name)}`),
     e.isRoot ? `        self._events: list[DomainEvent] = []` : null,
@@ -645,7 +659,7 @@ function renderEntity(
   const createParams = hasContains
     ? [
         `id: ${e.name}Id`,
-        !e.isRoot ? `parent_id: ${e.parentName ?? e.rootName}Id` : null,
+        parentIdParam(isNested),
         ...e.fields.map((f) => `${snake(f.name)}: ${renderPyType(f.type)}`),
         ...e.contains.map((c) =>
           c.collection

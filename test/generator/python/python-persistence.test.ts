@@ -220,7 +220,9 @@ describe("python nested part containment", () => {
     // `child` for byte-identity; the nested level uniquifies to __c1), FK
     // column shipment_id.
     expect(repo).toContain("select(LabelRow.id).where(LabelRow.parent_id == child.id)");
-    expect(repo).toContain('"shipment_id": __c1.parent_id,');
+    // FK stamped from tree position (the enclosing shipment loop var), not the
+    // nested label's own parent_id (tree-position parentId).
+    expect(repo).toContain('"shipment_id": child.id,');
     // Hydrate: _hydrate_shipment is async and loads labels by the shipment id,
     // calling the (previously dead) _hydrate_label.
     expect(repo).toContain("async def _hydrate_shipment(self, row: ShipmentRow) -> Shipment:");

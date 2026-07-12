@@ -241,23 +241,39 @@ dropped.
 **All four relational backends now persist + read part-in-part nesting** (java
 Phase 1, python Phase 2, node Phase 3, .NET Phase 4). DEBT-15 is fully drained.
 
-### Construction follow-up — GATED (honest error), full support deferred
+### Construction follow-up — ✅ DONE (tree-position parentId)
 Inline nested construction — a `new <Part> { … }` that supplies the part's OWN
-containment (`Shipment { carrier: c, labels: [Label { … }] }`) — is now
-**rejected at phase ⑦** with `loom.nested-part-construction-unsupported`
-(`validateNestedPartConstruction`, `structural-checks.ts`). The part's id is
-minted inside its `_create` factory, so the inline children have no valid parent
-id: the generated code stamped the enclosing `this` (the aggregate root),
-mis-typing the child's `ParentId` (`OrderId` where a `ShipmentId` is required) —
-a cryptic generated-project compile error on the typed backends, a wrong-parent
-runtime row on elixir. The gate converts that into one clear Loom diagnostic
-pointing at the supported pattern: construct the parent first
-(`shipments += Shipment { carrier: c }`), then add its children in a follow-up
-operation once its id exists. **Full inline support** (mint the parent id into a
-local, hoist it, and stamp it on the nested children across all five backends'
-`renderNew` + statement rendering) is the larger deferred feature — the gate is
-the responsible first step the "confirm before un-gating construction-bearing
-ops" risk note below asked for.
+containment (`Shipment { carrier: c, labels: [Label { … }] }`) — now works on all
+four relational backends. The original problem: a nested child's parent id is
+minted inside the enclosing part's `_create`, so it isn't available at the child
+construction site; the old code stamped the ambient `this` (the aggregate root),
+mis-typing the child's `parentId` (`OrderId` where a `ShipmentId` is required).
+
+The fix reframes **parentId as a tree-derived value, not a construction input**:
+- **Lowering** flags a `new` whose part is nested (contained by a sibling) —
+  `NewExpr.nested` (`lower-expr.ts`, matching `directParentOf(...).nested`).
+- **`renderNew`** omits the construction-time parentId for a nested part on every
+  backend (node/python/.NET/java); a root-level part still passes the ambient
+  parent (byte-identical).
+- **Domain** — a nested part's parentId is optional at construction and defaulted
+  (node/python mint a placeholder in the ctor; .NET State slot is `= default!`;
+  java's FK column is already `insertable=false`). node/python/.NET/java `_create`
+  factories also gained the containment-children slots so the parent can carry
+  them (`Shipment._create(…, labels)`).
+- **Save** stamps the child FK from **tree position** — the enclosing parent's id
+  in the recursive save loop (node/python), or the ORM relationship (EF owned-type
+  graph position / JPA `@OneToMany @JoinColumn`) on .NET/java — never the child's
+  construction-time parentId.
+- **Hydrate** sets parentId from the DB row (correct, from the FK column).
+
+parentId is not on a part's wire shape, so a freshly-constructed (unsaved) part's
+placeholder parentId is never observed. **Boot-verified** on node/python/.NET
+(create-with-nested-child via one API call → the inline label lands under the
+right shipment); java build-verified (same JPA-cascade mechanism as its
+boot-verified storage). The `loom.nested-part-construction-unsupported` gate that
+briefly guarded this is removed. Fixtures exercise it via an `addFull` op
+(`{python,ts,dotnet}-build/nested-parts.ddd`) + a single-containment `setup`
+(`java-build/nested-parts.ddd`).
 
 For each backend, in any order:
 - **node** — make `saveTxBody` persist single containments (not just collections),

@@ -944,9 +944,14 @@ function renderNew(
   e: NewExpr,
   ctx: CsRenderContext,
 ): string {
+  // A NESTED part's enclosing parent has no id yet at construction — EF stamps
+  // the owned FK from graph position on save — so omit the construction-time
+  // ParentId (the ambient `this.Id` would be the wrong-typed root id).  A
+  // root-level part keeps it (byte-identical); State.ParentId is `= default!`,
+  // so an omitted init is valid.
   const inits = [
     `Id = ${e.partName}Id.New()`,
-    `ParentId = ${ctx.thisName}.Id`,
+    ...(e.nested ? [] : [`ParentId = ${ctx.thisName}.Id`]),
     ...fields.map((f) => `${upperFirst(f.name)} = ${f.value}`),
   ];
   return `${e.partName}._Create(new ${e.partName}.State { ${inits.join(", ")} })`;

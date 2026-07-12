@@ -66,4 +66,33 @@ describe("typescript generator — part-in-part containment", () => {
     // Nested label brands to ShipmentId on hydrate.
     expect(repo).toContain("parentId: Ids.ShipmentId(r.parentId)");
   });
+
+  it("supports INLINE nested construction (parentId omitted, stamped on save)", async () => {
+    const { model, errors } = await parseString(`
+      context Logistics {
+        aggregate Order {
+          code: string
+          contains shipments: Shipment[]
+          operation addFull(carrier: string, zpl: string) {
+            shipments += Shipment { carrier: carrier, labels: [Label { zpl: zpl }] }
+          }
+          entity Shipment { carrier: string  contains labels: Label[] }
+          entity Label { zpl: string }
+        }
+        repository Orders for Order { }
+      }
+    `);
+    expect(errors).toEqual([]);
+    const files = generateHono(model);
+    const domain = files.get("domain/order.ts")!;
+    // The nested Label is constructed WITHOUT parentId (no shipment id yet); the
+    // outer Shipment keeps the ambient (order) parent.
+    expect(domain).toContain("Label._create({ id: Ids.newLabelId(), zpl: zpl })");
+    expect(domain).toMatch(/Shipment\._create\(\{ id: Ids\.newShipmentId\(\), parentId: this\._id/);
+    // A nested part defaults its parentId in the ctor (never observed pre-save).
+    expect(domain).toContain("this._parentId = state.parentId ?? Ids.newShipmentId();");
+    // Save stamps the nested label FK from tree position (the shipment loop var).
+    const repo = files.get("db/repositories/order-repository.ts")!;
+    expect(repo).toContain("parentId: child.id");
+  });
 });

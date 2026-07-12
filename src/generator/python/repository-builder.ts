@@ -1206,9 +1206,13 @@ function syncContainment(
   // FK column = the child's DIRECT parent (`shipment_id` for a nested Label,
   // `order_id` for a root-level Shipment) — matching the shared migration DDL.
   const fkCol = `${snake(directParentName(agg, c.partName, tableOwnerName(agg, ctx.aggregates)))}_id`;
+  // A root-level part carries its correct parent id; a NESTED part is stamped
+  // from TREE POSITION (the enclosing parent id in scope) — its construction-time
+  // parent_id isn't reliable (a `new Label` inside `new Shipment` has no shipment
+  // id yet).  Depth 0 keeps `${loopVar}.parent_id` (byte-identical).
   const childPairs: Array<[string, string]> = [
     ["id", `${loopVar}.id`],
-    [fkCol, `${loopVar}.parent_id`],
+    [fkCol, depth > 0 ? ownerIdExpr : `${loopVar}.parent_id`],
   ];
   for (const f of part?.fields ?? []) {
     if (isRefCollectionField(f) || isValueCollectionField(f)) continue;

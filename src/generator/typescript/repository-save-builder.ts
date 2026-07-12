@@ -69,7 +69,7 @@ function saveTxBody(agg: EnrichedAggregateIR, ctx: BoundedContextIR, emitTrace: 
       `${indent}  await tx.delete(schema.${childTable}).where(and(eq(schema.${childTable}.parentId, ${ownerIdExpr}), inArray(schema.${childTable}.id, toDelete${cap})));`,
       `${indent}}`,
       `${indent}for (const ${loopVar} of ${itemsRef}) {`,
-      `${body}const ${rowVar} = ${entityProjection(part, loopVar, ctx)};`,
+      `${body}const ${rowVar} = ${entityProjection(part, loopVar, ctx, depth > 0 ? ownerIdExpr : undefined)};`,
       `${body}await tx.insert(schema.${childTable}).values(${rowVar}).onConflictDoUpdate({ target: schema.${childTable}.id, set: ${rowVar} });`,
       // Classify against existingIds BEFORE the upsert tells us insert vs
       // update with no second DB round-trip; ordering matters for the
@@ -280,10 +280,20 @@ function rootProjection(agg: EnrichedAggregateIR, varExpr: string, ctx: BoundedC
   return projectionObject(varExpr, rootEntries(agg, varExpr, ctx));
 }
 
-function entityProjection(part: EntityPartIR, varExpr: string, ctx: BoundedContextIR): string {
+function entityProjection(
+  part: EntityPartIR,
+  varExpr: string,
+  ctx: BoundedContextIR,
+  /** FK value for the part row.  Defaults to the part's own `parentId` (a
+   *  root-level part carries its correct root parent).  A NESTED part is stamped
+   *  from TREE POSITION instead — the enclosing parent's id in scope — because a
+   *  nested part's construction-time parentId isn't reliable (a `new Label`
+   *  inside `new Shipment` has no shipment id yet). */
+  parentIdExpr?: string,
+): string {
   return projectionObject(varExpr, [
     { fieldName: "id", expr: `${varExpr}.id as string` },
-    { fieldName: "parentId", expr: `${varExpr}.parentId as string` },
+    { fieldName: "parentId", expr: parentIdExpr ?? `${varExpr}.parentId as string` },
     ...part.fields.flatMap((f) => projectFieldEntries(f, varExpr, ctx)),
     ...provColumnEntries(part.fields, varExpr),
   ]);

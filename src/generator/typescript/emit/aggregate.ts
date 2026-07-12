@@ -292,9 +292,17 @@ function renderEntity(
   const hasOwnProvWrite =
     emitProvenance && e.operations.some((op) => op.statements.some(stmtHasProv));
 
+  // A NESTED part (contained by a sibling, not the root) has no parent id at
+  // construction — its FK is stamped from tree position on save — so `parentId`
+  // is optional in construction and defaulted in the ctor.  Root-level parts are
+  // byte-identical (parentName === rootName).
+  const isNested = !e.isRoot && e.parentName != null && e.parentName !== e.rootName;
+  const parentIdField = (optional: boolean): string | null =>
+    e.isRoot ? null : `parentId${optional ? "?" : ""}: Ids.${e.parentName ?? e.rootName}Id`;
+
   const stateFields = [
     `id: Ids.${e.name}Id`,
-    !e.isRoot ? `parentId: Ids.${e.parentName ?? e.rootName}Id` : null,
+    parentIdField(isNested),
     ...e.fields.map((f) => `${f.name}: ${renderTsType(f.type)}`),
     ...provFields.map((f) => `${f.name}_provenance: ProvLineage | null`),
     ...e.contains.map((c) => `${c.name}: ${containsType(c)}`),
@@ -303,20 +311,22 @@ function renderEntity(
 
   // The op-body `new <Part>` factory (`_create`) defaults a part's OWN nested
   // containments — a freshly-constructed part starts with none, and callers
-  // (`renderNew`) only pass declared fields.  Byte-identical for a part with
-  // no containments; `_rehydrate` keeps the full required state contract.
+  // (`renderNew`) only pass declared fields (and, for a nested part, no
+  // parentId).  Byte-identical for a non-nested part with no containments;
+  // `_rehydrate` keeps the full required state contract.
   const hasContains = e.contains.length > 0;
-  const createStateLiteral = hasContains
-    ? `{ ${[
-        `id: Ids.${e.name}Id`,
-        !e.isRoot ? `parentId: Ids.${e.parentName ?? e.rootName}Id` : null,
-        ...e.fields.map((f) => `${f.name}: ${renderTsType(f.type)}`),
-        ...provFields.map((f) => `${f.name}_provenance: ProvLineage | null`),
-        ...e.contains.map((c) => `${c.name}?: ${containsType(c)}`),
-      ]
-        .filter((s): s is string => s != null)
-        .join("; ")} }`
-    : stateLiteral;
+  const createStateLiteral =
+    hasContains || isNested
+      ? `{ ${[
+          `id: Ids.${e.name}Id`,
+          parentIdField(isNested),
+          ...e.fields.map((f) => `${f.name}: ${renderTsType(f.type)}`),
+          ...provFields.map((f) => `${f.name}_provenance: ProvLineage | null`),
+          ...e.contains.map((c) => `${c.name}?: ${containsType(c)}`),
+        ]
+          .filter((s): s is string => s != null)
+          .join("; ")} }`
+      : stateLiteral;
   const createBody = hasContains
     ? `new ${e.name}({ ...state, ${e.contains
         .map((c) => `${c.name}: state.${c.name} ?? ${c.collection ? "[]" : "null"}`)
@@ -347,7 +357,14 @@ function renderEntity(
   const ctorAssignments: string[] = [];
   ctorAssignments.push("    this._id = state.id;");
   if (!e.isRoot) {
-    ctorAssignments.push("    this._parentId = state.parentId;");
+    // A nested part built via `new` carries no parentId — mint a placeholder so
+    // `_parentId` is always a valid id; the real FK is stamped from tree
+    // position on save and the real parentId is set from the DB row on hydrate.
+    ctorAssignments.push(
+      isNested
+        ? `    this._parentId = state.parentId ?? Ids.new${e.parentName}Id();`
+        : "    this._parentId = state.parentId;",
+    );
   }
   for (const f of e.fields) {
     ctorAssignments.push(`    this._${f.name} = state.${f.name};`);

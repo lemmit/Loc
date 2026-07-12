@@ -11,6 +11,12 @@ system NodeNest {
           shipments += Shipment { carrier: carrier }
         }
 
+        // Inline nested construction: build a shipment WITH a label in one call.
+        // The nested Label omits parentId (stamped from tree position on save).
+        operation addFull(carrier: string, zpl: string) {
+          shipments += Shipment { carrier: carrier, labels: [Label { zpl: zpl }] }
+        }
+
         entity Shipment {
           carrier: string
           contains labels: Label[]

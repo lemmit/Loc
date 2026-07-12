@@ -17,6 +17,12 @@ system NestedParts {
       aggregate Order {
         code: string
         contains shipment: Shipment
+        // Inline nested construction: build the shipment WITH its nested label +
+        // stickers in one call.  The nested parts omit parentId (JPA stamps the
+        // FK from the @OneToMany relationship on cascade persist).
+        operation setup(carrier: string, zpl: string, text: string) {
+          shipment := Shipment { carrier: carrier, label: Label { zpl: zpl }, stickers: [Sticker { text: text }] }
+        }
         entity Shipment {
           carrier: string
           // single part-in-part
