@@ -1,3 +1,3 @@
-{{#if hasChildren}}<v-breadcrumbs{{{testidAttr}}}>
+{{#if hasChildren}}<nav aria-label="Breadcrumb" class="loom-breadcrumbs d-flex align-center ga-2 text-body-2 mb-2"{{{testidAttr}}}>
 {{indent}}{{{childrenBlock}}}
-{{closeIndent}}</v-breadcrumbs>{{else}}<v-breadcrumbs{{{testidAttr}}} />{{/if}}
+{{closeIndent}}</nav>{{else}}<nav aria-label="Breadcrumb" class="loom-breadcrumbs"{{{testidAttr}}} />{{/if}}
