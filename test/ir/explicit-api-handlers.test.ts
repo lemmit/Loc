@@ -50,13 +50,13 @@ async function codesFor(handlers: string, routes: string): Promise<string[]> {
 }
 
 const OK_CMD = `
-  commandHandler CancelOrder(id: Order id) {
-    let o = Orders.getById(id)
+  commandHandler CancelOrder(orderId: Order id) {
+    let o = Orders.getById(orderId)
     o.cancel()
   }`;
 const OK_QRY = `
-  queryHandler GetOrder(id: Order id): Order {
-    let o = Orders.getById(id)
+  queryHandler GetOrder(orderId: Order id): Order {
+    let o = Orders.getById(orderId)
   }`;
 const OK_ROUTES = `
   route POST "/orders/{id}/cancellations" -> Ordering.CancelOrder
@@ -72,7 +72,7 @@ describe("explicit api handlers — lowering", () => {
     expect(ctx.queryHandlers?.map((h) => h.name)).toEqual(["GetOrder"]);
     // commandHandler binds its param and derives its exit-save (the touched Order).
     const cmd = ctx.commandHandlers![0]!;
-    expect(cmd.params.map((p) => p.name)).toEqual(["id"]);
+    expect(cmd.params.map((p) => p.name)).toEqual(["orderId"]);
     expect(cmd.returnType).toBeUndefined();
     expect(cmd.savesAtExit.map((s) => s.aggName)).toEqual(["Order"]);
     // queryHandler carries its required return type and saves nothing.
@@ -88,14 +88,14 @@ describe("explicit api handlers — lowering", () => {
     // sentinel and the return value was silently dropped.  It must now surface
     // as a resolved `returnValue` ExprIR, with no sentinel in the body.
     const cmd = `
-      commandHandler CancelOrder(id: Order id): Order id {
-        let o = Orders.getById(id)
+      commandHandler CancelOrder(orderId: Order id): Order id {
+        let o = Orders.getById(orderId)
         o.cancel()
         return o.id
       }`;
     const qry = `
-      queryHandler GetStatus(id: Order id): string {
-        let o = Orders.getById(id)
+      queryHandler GetStatus(orderId: Order id): string {
+        let o = Orders.getById(orderId)
         return o.status
       }`;
     const { model } = await parseString(SYS(`${cmd}\n${qry}`, ""), { validate: false });
@@ -134,12 +134,37 @@ describe("explicit api handlers — layering gates", () => {
 
   it("loom.query-handler-saves — a queryHandler that mutates", async () => {
     const bad = `
-      queryHandler BadQuery(id: Order id): Order {
-        let o = Orders.getById(id)
+      queryHandler BadQuery(orderId: Order id): Order {
+        let o = Orders.getById(orderId)
         o.cancel()
       }`;
     const codes = await codesFor(bad, `route GET "/orders/{id}" -> Ordering.BadQuery`);
     expect(codes).toContain("loom.query-handler-saves");
+  });
+
+  it("loom.handler-param-reserved-id — a handler parameter named `id`", async () => {
+    // `id` is Loom's reserved implicit — a bare `id` in a handler body resolves
+    // to the current entity's id, so a param named `id` is silently shadowed
+    // (emitting a `this`-prop read instead of the param). It must be rejected.
+    const cmdBad = `
+      commandHandler CancelIt(id: Order id) {
+        let o = Orders.getById(id)
+        o.cancel()
+      }`;
+    expect(await codesFor(cmdBad, `route POST "/x" -> Ordering.CancelIt`)).toContain(
+      "loom.handler-param-reserved-id",
+    );
+    const qryBad = `
+      queryHandler LookIt(id: Order id): Order {
+        let o = Orders.getById(id)
+      }`;
+    expect(await codesFor(qryBad, `route GET "/y" -> Ordering.LookIt`)).toContain(
+      "loom.handler-param-reserved-id",
+    );
+    // A non-reserved param name is accepted.
+    expect(
+      await codesFor(OK_CMD, `route POST "/orders/{id}/cancellations" -> Ordering.CancelOrder`),
+    ).not.toContain("loom.handler-param-reserved-id");
   });
 
   it("loom.command-handler-multi-aggregate — a commandHandler touching two aggregates", async () => {
