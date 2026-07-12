@@ -178,3 +178,58 @@ describe("python repository emission", () => {
     expect(routes).toContain("await repo.cheaper_than(Decimal(limit))");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Part-in-part containment (nested-parts-alignment.md Phase 2):
+// Order → Shipment[] → Label[].  A nested part FKs to (and brands its
+// parent_id from) its DIRECT parent, and the repository recursively saves +
+// hydrates the nested level.
+// ---------------------------------------------------------------------------
+
+describe("python nested part containment", () => {
+  const NESTED = fs.readFileSync(
+    path.resolve(here, "../../e2e/fixtures/python-build/nested-parts.ddd"),
+    "utf8",
+  );
+  async function buildNested() {
+    const { model, errors } = await parseString(NESTED);
+    if (errors.length) throw new Error(`fixture has validation errors:\n${errors.join("\n")}`);
+    return generateSystems(model).files;
+  }
+
+  it("FKs a nested part to its direct parent, not the root", async () => {
+    const schema = (await buildNested()).get("api/app/db/schema.py")!;
+    // Shipment (root-level) → order_id; Label (nested) → shipment_id.
+    expect(schema).toContain('    parent_id: Mapped[str] = mapped_column("order_id", Uuid');
+    expect(schema).toContain('    parent_id: Mapped[str] = mapped_column("shipment_id", Uuid');
+  });
+
+  it("brands the nested part parent_id to the direct-parent id type", async () => {
+    const domain = (await buildNested()).get("api/app/domain/order.py")!;
+    // Label's parent is Shipment, so parent_id is ShipmentId (not OrderId).
+    expect(domain).toContain("id: LabelId, parent_id: ShipmentId");
+    // Children-first emission: Label defined before the Shipment that lists it.
+    expect(domain.indexOf("class Label:")).toBeLessThan(domain.indexOf("class Shipment:"));
+    // A freshly-built Shipment defaults its own labels (no shared-mutable arg).
+    expect(domain).toContain("labels=labels if labels is not None else []");
+  });
+
+  it("recursively saves + hydrates the nested level keyed by the direct parent", async () => {
+    const repo = (await buildNested()).get("api/app/db/repositories/order_repository.py")!;
+    // Save: labels diff-synced under each shipment (the depth-0 loop var stays
+    // `child` for byte-identity; the nested level uniquifies to __c1), FK
+    // column shipment_id.
+    expect(repo).toContain("select(LabelRow.id).where(LabelRow.parent_id == child.id)");
+    expect(repo).toContain('"shipment_id": __c1.parent_id,');
+    // Hydrate: _hydrate_shipment is async and loads labels by the shipment id,
+    // calling the (previously dead) _hydrate_label.
+    expect(repo).toContain("async def _hydrate_shipment(self, row: ShipmentRow) -> Shipment:");
+    expect(repo).toContain("select(LabelRow).where(LabelRow.parent_id == row.id)");
+    expect(repo).toContain("labels=[self._hydrate_label(__r) for __r in labels_rows]");
+    expect(repo).toContain("parent_id=ShipmentId(row.parent_id)");
+    // Root construction awaits the now-async shipment hydrate.
+    expect(repo).toContain(
+      "shipments=[await self._hydrate_shipment(__r) for __r in shipments_rows]",
+    );
+  });
+});

@@ -188,13 +188,32 @@ dropped.
   nest), `gradle bootJar` + a real Postgres — Flyway migrate, create a nested
   graph, read it back, assert the right labels land under the right shipment.
 
-### Phases 2–4 — node, .NET, python (one PR each, independent) — ⛔ DEFERRED, RE-SCOPED
+### Phase 2 — python ✅ DONE
+> Landed: part-in-part containment persistence on the python backend. A nested
+> part FKs to (and brands its `parent_id` from) its DIRECT parent
+> (`labels.shipment_id`, `Label.parent_id: ShipmentId`), matching the shared
+> migration DDL; `save` recurses to diff-sync each nested level keyed by its
+> direct-parent id; `_hydrate_<part>` is `async` when the part has children and
+> loads them (calling the previously-dead `_hydrate_<nested>` helpers). Parts are
+> emitted **children-first** (`partsChildrenFirst`, `ir/util/containment-parent.ts`)
+> so a `<Part>` / `<Part>Response` never forward-references a not-yet-defined
+> sibling; `new <Part>`'s `_create` factory defaults a part's own containments
+> (safe `None`-coercion, never a shared-mutable `[]`). Single-level output is
+> byte-identical. **Boot-verified on real Postgres** (create order + shipment via
+> API → SQL-insert a label under the shipment → GET nests it under the right
+> shipment → addShipment re-save preserves the nested label). `ruff` +
+> `mypy --strict` clean; fixture `test/e2e/fixtures/python-build/nested-parts.ddd`.
+> Construction-bearing nested ops (`new Label` inside an inline `new Shipment`)
+> stay a follow-up — the nested-`new` arm doesn't thread the parent-part instance
+> yet (the risk noted below).
+
+### Phases 3–4 — node, .NET (one PR each, independent) — ⛔ DEFERRED, RE-SCOPED
 > **Not "re-key the assembly" — "build part-containment persistence."** Scoping
 > (see the ⚠️ section above) showed node never saves single containments and
-> never loads nested parts, and python hard-codes the nested level empty. So each
-> backend's PR is a real feature, not the tweak this bullet list implies. Kept
-> below as the *direction*, but the work is larger than written. Deferred until an
-> actual `.ddd` needs part-in-part nesting on a non-Java backend.
+> never loads nested parts. So each backend's PR is a real feature, not the tweak
+> this bullet list implies. Kept below as the *direction*, but the work is larger
+> than written. Deferred until an actual `.ddd` needs part-in-part nesting on
+> node/.NET. (Python landed as Phase 2 above; it can serve as the reference port.)
 
 For each backend, in any order:
 - **node** — make `saveTxBody` persist single containments (not just collections),

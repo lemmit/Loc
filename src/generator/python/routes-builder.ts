@@ -20,6 +20,7 @@ import {
   type RepositoryIR,
   type TypeIR,
 } from "../../ir/types/loom-ir.js";
+import { partsChildrenFirst } from "../../ir/util/containment-parent.js";
 import { errorStatuses, type OpErrorKind, problemTitle } from "../../ir/util/openapi-errors.js";
 import {
   camelId,
@@ -72,7 +73,10 @@ export function buildPyRoutesFile(
   hasDispatch = false,
 ): string {
   const slug = snake(plural(agg.name));
-  const parts: EnrichedEntityPartIR[] = agg.parts;
+  // Children-first so a nested part's `<Part>Response` is defined before the
+  // `<Parent>Response` that references it (`list[LabelResponse]`) — no Pydantic
+  // forward-ref.  Byte-identical when there is no part-in-part nesting.
+  const parts: EnrichedEntityPartIR[] = partsChildrenFirst(agg.parts);
   // Extern ops (docs/extern.md, extern (b) Phase 2) route exactly like any
   // other public operation: the aggregate's `<op>` method (preconditions → hook
   // → invariants) is a real method now, so `found.<op>(…)` drives the whole
