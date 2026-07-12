@@ -4,6 +4,7 @@ import { byLayerLayoutAdapter } from "../generator/java/adapters/by-layer-layout
 import { jpaPersistenceAdapter } from "../generator/java/adapters/jpa-persistence.js";
 import { layeredStyleAdapter } from "../generator/java/adapters/layered-style.js";
 import { generateJavaForContexts } from "../generator/java/index.js";
+import { basePackageFor, javaPackageSegment } from "../generator/java/naming.js";
 import {
   type ComposeServiceShape,
   type PlatformSurface,
@@ -104,6 +105,24 @@ const javaPlatform: PlatformSurface = {
       // Package-by-feature is the idiomatic Spring arrangement
       // (java-backend.md adapter menu).
       layout: "byFeature",
+    };
+  },
+  // M26: `--sourcemap`-gated `java` launch config, pointing the editor's
+  // JVM debugger at the emitted @SpringBootApplication class. `ns` mirrors
+  // `emitProject`'s own namespace derivation just above (deployable.name,
+  // unmodified — `basePackageFor`/`javaPackageSegment` do the lower-casing);
+  // `projectName` reuses the exact gradle artifactId `emitProject` passes to
+  // `renderGradleSettings` (see generator/java/index.ts's `slug`), so the two
+  // can't drift.
+  debugLaunch({ deployable, slug }): Record<string, unknown> {
+    const ns = deployable.name;
+    return {
+      type: "java",
+      request: "launch",
+      name: `Debug ${deployable.name} (Java)`,
+      mainClass: `${basePackageFor(ns)}.Application`,
+      projectName: javaPackageSegment(ns),
+      cwd: `\${workspaceFolder}/${slug}`,
     };
   },
 };

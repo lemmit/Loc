@@ -240,15 +240,20 @@ function emitSystem(
 
   out.set("docker-compose.yml", renderDockerCompose(sys));
   out.set("db-init/00-create-databases.sql", renderDbInit(sys));
-  // M18 phase 8 slice 1 (Node debug wiring, --sourcemap only): one VS Code
-  // launch config per node-family deployable, sibling of docker-compose.yml.
-  // See docs/plans/dap-node-debug.md and src/system/launch-config.ts.
+  // M18 phase 8 slice 1 (Node debug wiring) / M26 (.NET + Java): one VS Code
+  // launch config per deployable whose platform implements `debugLaunch`,
+  // sibling of docker-compose.yml, `--sourcemap`-gated.  Each surface owns
+  // its own naming (assembly / main-class FQN); the system layer only
+  // collects the results in deployable order.  See
+  // docs/plans/dap-node-debug.md and src/system/launch-config.ts.
   if (options.sourcemap) {
-    const nodeTargets = sys.deployables
-      .filter((d) => platformFor(d.platform).name === "node")
-      .map((d) => ({ name: d.name, slug: serviceSlug(d.name) }));
-    if (nodeTargets.length > 0) {
-      out.set(".vscode/launch.json", renderVsCodeLaunchJson(nodeTargets));
+    const debugConfigs = sys.deployables
+      .map((d) =>
+        platformFor(d.platform).debugLaunch?.({ deployable: d, slug: serviceSlug(d.name) }),
+      )
+      .filter((c): c is Record<string, unknown> => c !== undefined);
+    if (debugConfigs.length > 0) {
+      out.set(".vscode/launch.json", renderVsCodeLaunchJson(debugConfigs));
     }
   }
   // Opt-in production deployment artifacts (D-K8S-*; docs/kubernetes.md).

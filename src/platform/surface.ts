@@ -286,4 +286,22 @@ export interface PlatformSurface extends PlatformDescriptor {
   /** Default adapter per `persistence:` strategy / `style:` / `layout:`
    *  when the source doesn't pin one.  Present iff `adapters()` is. */
   adapterDefaults?(): PlatformAdapterDefaults;
+
+  /** A single VS Code launch configuration object (the shape that goes
+   *  into `.vscode/launch.json`'s `configurations[]`) for one deployable
+   *  on this platform, or `undefined` when the platform has no
+   *  editor-debug story.  Emitted only under `--sourcemap`
+   *  (`src/system/index.ts` collects the defined results across every
+   *  deployable and wraps them via `renderVsCodeLaunchJson`); `slug` is
+   *  `serviceSlug(deployable.name)`, passed in so the surface doesn't
+   *  re-derive it.  Implemented by node (hono), dotnet, and java — the
+   *  three backends with a native step-through debugger the emitted
+   *  source-map substrate targets (see docs/plans/dap-node-debug.md).
+   *  python, elixir, and every frontend platform omit this method
+   *  entirely (optional — no method is equivalent to always returning
+   *  `undefined`). */
+  debugLaunch?(args: {
+    deployable: DeployableIR;
+    slug: string;
+  }): Record<string, unknown> | undefined;
 }
