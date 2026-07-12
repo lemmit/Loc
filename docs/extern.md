@@ -69,20 +69,23 @@ using Sales.Domain.Orders;
 [ExternHandler]
 public sealed class ConfirmOrderHandler : IConfirmOrderHandler
 {
-    public Task HandleAsync(Order order, ConfirmRequest request, CancellationToken ct)
+    public Task HandleAsync(IOrderMutator order, ConfirmRequest request, CancellationToken ct)
     {
         // Your business decision — talk to the billing engine, etc.
         order.Status = OrderStatus.Confirmed;
-        order.RaiseEvent(new OrderConfirmed(order.Id, DateTime.UtcNow));
+        order.RaiseDomainEvent(new OrderConfirmed(order.Id, DateTime.UtcNow));
         return Task.CompletedTask;
     }
 }
 ```
 
-The Scrutor scan in `Program.cs` picks it up automatically.  Aggregates
-with at least one extern op widen their property setters to `internal`
-and expose `internal void RaiseEvent(IDomainEvent ev)` so handlers in
-the same assembly can mutate state and raise events.
+The Scrutor scan in `Program.cs` picks it up automatically.  The handler
+receives the aggregate as a narrow **`I<Agg>Mutator`** (S10 containment):
+the concrete `Order` keeps its setters `private`, and the mutator interface
+— implemented explicitly (read `Id` + get/set per field + `RaiseDomainEvent`)
+— is the only write surface.  So a handler mutates and raises exactly as
+before, but `order.Status = …` on a plain `Order` no longer compiles
+anywhere else in the app (`CS0272`).
 
 If you forget to provide an implementation, **startup fails**:
 
@@ -99,11 +102,11 @@ The generator emits `domain/<agg>-extern.ts` with a typed registry,
 register helper, and verify gate:
 
 ```ts
-import type { Order } from "./order.js";
+import type { OrderEditor } from "./order.js";
 
 export type ConfirmOrderRequest = Record<string, never>;
 export type ConfirmOrderHandler =
-  (aggregate: Order, request: ConfirmOrderRequest) => Promise<void>;
+  (editor: OrderEditor, request: ConfirmOrderRequest) => Promise<void>;
 
 export function registerConfirmOrderHandler(fn: ConfirmOrderHandler): void;
 export function verifyOrderExternHandlersRegistered(): void;
@@ -125,10 +128,13 @@ registerConfirmOrderHandler(async (order, _request) => {
 });
 ```
 
-Aggregates with at least one extern op expose public setters per
-property plus `raiseEvent(ev)` and `assertInvariants()` on the root.
-The route handler runs `aggregate.checkConfirm()` (preconditions only),
-dispatches to the registered handler, then runs invariants and saves.
+S10 containment: the handler receives a narrow **`OrderEditor`** (read `id`
++ get/set per field + `raiseEvent`), NOT the live `Order`.  The aggregate
+mints it via an in-class `_externEditor()`, and its own fields stay
+`private` behind read-only getters — so `order.status = …` on a plain
+`Order` no longer type-checks (`TS2540`) anywhere else in the app.  The
+route runs `aggregate.checkConfirm()` (preconditions only), hands the
+handler `aggregate._externEditor()`, then runs invariants and saves.
 
 `createApp(...)` calls `verifyOrderExternHandlersRegistered()` at
 startup, so a missing handler fails fast.
