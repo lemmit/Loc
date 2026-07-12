@@ -68,7 +68,7 @@
 // code.
 // ---------------------------------------------------------------------------
 
-import type { ExprIR, StateFieldIR, StoreIR, TypeIR } from "../../ir/types/loom-ir.js";
+import type { ExprIR, LiteralKind, StateFieldIR, StoreIR, TypeIR } from "../../ir/types/loom-ir.js";
 import type { DetectedApiCall } from "./api-hook-detector.js";
 import type { WalkContext } from "./walker-core.js";
 
@@ -647,4 +647,34 @@ export interface WalkerTarget {
    *  until ported.  `renderStmt` is the body-statement renderer the action
    *  bodies reuse (so `:=`/`+=` lower identically to a page action). */
   renderStoreModule?(store: StoreIR): { path: string; content: string };
+
+  // --- Expression-syntax seam (fable-elmish-frontend.md) -------------------
+  //
+  // The shared `emitExpr` renders the pure-syntax `ExprIR` arms (operators,
+  // literals, list/object/lambda spelling) inline as JAVASCRIPT.  Every
+  // JSX-family frontend (React/Vue/Svelte/Angular) embeds JS in its markup, so
+  // that hardcoded JS was correct for all four.  Feliz is the first frontend
+  // whose embedded expression language is F#, not JS.  These OPTIONAL leaf
+  // formatters let a non-JS-embedding target override the divergent arms;
+  // omitted (the four JS frontends) they fall back to the hardcoded JS, so the
+  // existing output stays byte-identical.  Sub-expressions arrive already
+  // rendered — a leaf is a pure formatter, exactly like the backend
+  // `ExprTarget` leaves (src/generator/_expr/target.ts).  SLICE 4 converts the
+  // JS frontends into an explicit `jsExprLeaves` table + removes the fallback,
+  // reaching the single-dispatcher no-debt end state.
+
+  /** Literal formatter — `null` → `None` on F#, string escaping. */
+  exprLiteral?(lit: LiteralKind, value: string): string;
+  /** Binary op — operator spelling (`==` → `=`, `!=` → `<>` on F#). */
+  exprBinary?(left: string, right: string, op: string): string;
+  /** Unary op — `!x` → `not x` on F#. */
+  exprUnary?(op: string, operand: string): string;
+  /** Ternary — `(if c then t else e)` on F#. */
+  exprTernary?(cond: string, then: string, otherwise: string): string;
+  /** `convert` cast — `string x` / `int x` on F# vs `String(x)` on JS. */
+  exprConvert?(value: string, target: string, from: string | undefined): string;
+  /** List literal — `[ a; b ]` on F# vs `[a, b]` on JS. */
+  exprList?(elements: string[]): string;
+  /** Object literal — F# anonymous record `{| n = v |}` vs JS `{ n: v }`. */
+  exprObject?(fields: ReadonlyArray<{ name: string; value: string }>): string;
 }

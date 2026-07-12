@@ -1151,6 +1151,7 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
   }
   switch (expr.kind) {
     case "literal":
+      if (ctx.target.exprLiteral) return ctx.target.exprLiteral(expr.lit, expr.value);
       if (expr.lit === "string") return JSON.stringify(expr.value);
       if (expr.lit === "bool") return expr.value;
       if (expr.lit === "null") return "null";
@@ -1214,6 +1215,9 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // Strict equality on the wire — mirrors the backend renderer
       // (`render-expr.ts`: `==` → `===`) and keeps emitted TSX clean
       // under Biome's recommended `noDoubleEquals`.
+      if (ctx.target.exprBinary) {
+        return ctx.target.exprBinary(emitExpr(expr.left, ctx), emitExpr(expr.right, ctx), expr.op);
+      }
       const op = expr.op === "==" ? "===" : expr.op === "!=" ? "!==" : expr.op;
       return `(${emitExpr(expr.left, ctx)} ${op} ${emitExpr(expr.right, ctx)})`;
     }
@@ -1221,9 +1225,18 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // Conditional value in expression position (e.g. a `bool` cell's
       // `onCall ? "Yes" : "No"`).  Distinct from the markup-child `ternary`
       // arm in `walk`, which renders JSX-element branches.
+      if (ctx.target.exprTernary) {
+        return ctx.target.exprTernary(
+          emitExpr(expr.cond, ctx),
+          emitExpr(expr.then, ctx),
+          emitExpr(expr.otherwise, ctx),
+        );
+      }
       return `(${emitExpr(expr.cond, ctx)} ? ${emitExpr(expr.then, ctx)} : ${emitExpr(expr.otherwise, ctx)})`;
     case "list":
       // List literal (`["EU", "US"]`) — e.g. a SelectField's `options:`.
+      if (ctx.target.exprList)
+        return ctx.target.exprList(expr.elements.map((it) => emitExpr(it, ctx)));
       return `[${expr.elements.map((it) => emitExpr(it, ctx)).join(", ")}]`;
     case "convert": {
       // Mirrors `generator/typescript/render-expr.ts`'s renderTsConvert.
@@ -1232,6 +1245,7 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // the walker emits the same `String(x)` / `x.toString()` form
       // the domain renderer does.
       const v = emitExpr(expr.value, ctx);
+      if (ctx.target.exprConvert) return ctx.target.exprConvert(v, expr.target, expr.from);
       if (expr.target === "string") {
         if (expr.from === "money") return `${v}.toString()`;
         return `String(${v})`;
@@ -1247,6 +1261,7 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       return v;
     }
     case "unary":
+      if (ctx.target.exprUnary) return ctx.target.exprUnary(expr.op, emitExpr(expr.operand, ctx));
       return `(${expr.op}${emitExpr(expr.operand, ctx)})`;
     case "call": {
       // Bare function call as a JS expression.  An extern frontend
@@ -1320,6 +1335,11 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // Object literal: `{ name: name, age: 30 }`
       // emits as plain JS `{ name: name, age: 30 }`.  Field values
       // recurse through emitExpr (so refs/state/binary ops compose).
+      if (ctx.target.exprObject) {
+        return ctx.target.exprObject(
+          expr.fields.map((f) => ({ name: f.name, value: emitExpr(f.value, ctx) })),
+        );
+      }
       const fields = expr.fields.map((f) => `${f.name}: ${emitExpr(f.value, ctx)}`).join(", ");
       return `{ ${fields} }`;
     }
