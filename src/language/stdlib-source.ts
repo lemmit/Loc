@@ -25,4 +25,16 @@ function isBlank(s: string): bool = s.trim().length == 0
 function isPresent(s: string): bool = s.trim().length > 0
 function truncate(s: string, n: int): string = s.substring(0, n)
 `,
+  math: `
+// Loom stdlib — math.
+function clamp(n: int, lo: int, hi: int): int = n.max(lo).min(hi)
+function percentOf(part: decimal, whole: decimal): decimal = part / whole * 100
+function roundTo(n: decimal, places: int): decimal = n.round(places)
+`,
+  temporal: `
+// Loom stdlib — temporal.
+function isOverdue(due: datetime): bool = now() > due
+function isFuture(t: datetime): bool = t > now()
+function isPast(t: datetime): bool = t < now()
+`,
 };

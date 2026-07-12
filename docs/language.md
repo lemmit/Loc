@@ -626,9 +626,13 @@ aggregate Customer {
 }
 ```
 
-Current prelude (`strings`): `isBlank(s)`, `isPresent(s)`, `truncate(s, n)`. The
-set grows over subsequent stdlib slices (math, temporal); see
-`docs/plans/stdlib.md` → Phase C.
+Current prelude:
+
+- **strings** — `isBlank(s)`, `isPresent(s)`, `truncate(s, n)`
+- **math** — `clamp(n, lo, hi)`, `percentOf(part, whole)`, `roundTo(n, places)`
+- **temporal** — `isOverdue(due)`, `isFuture(t)`, `isPast(t)`
+
+The set grows over subsequent stdlib slices; see `docs/plans/stdlib.md` → Phase C.
 
 ---
 
