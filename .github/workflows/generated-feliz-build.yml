@@ -55,32 +55,56 @@ jobs:
       - name: Generate the Feliz showcase system
         run: |
           mkdir -p ci-feliz
+          # Data-driven page — exercises the wire layer (Thoth decoders +
+          # Cmd-based Api + the Remote/QueryView MVU projection, slice 7)
+          # ALONGSIDE the MVU counter (state + action → dispatch) and the pack
+          # primitives (Heading/Badge/Text/Button/Divider/Card + For).
           cat > ci-feliz/showcase.ddd <<'DDD'
-          system ShowcaseApp {
-            subdomain S { context C { } }
+          system Storefront {
+            api ShopApi from Catalog
+
+            subdomain Catalog {
+              context Cat {
+                aggregate Product with crudish {
+                  name:  string
+                  price: money
+                }
+                repository Products for Product { }
+              }
+            }
+
+            storage db { type: postgres }
+            resource catState { for: Cat, kind: state, use: db }
+
             ui WebApp {
-              framework: feliz
-              page Showcase {
+              api Shop: ShopApi
+              page Store {
                 route: "/"
                 state { count: int = 0 }
                 action inc() { count := count + 1 }
-                action dec() { count := count - 1 }
                 body: Stack {
-                  Heading { "Feliz primitives", level: 1 },
-                  Card { "Counter card",
-                    Stack {
-                      Text { "Count: " + count },
-                      Button { "+", onClick: inc },
-                      Button { "-", onClick: dec }
-                    }
-                  },
+                  Heading { "Storefront", level: 1 },
+                  Badge { "beta" },
+                  Text { "Clicks: " + count },
+                  Button { "+", onClick: inc },
                   Divider { },
-                  Badge { "beta" }
+                  QueryView {
+                    of:      Shop.Product.all,
+                    loading: Text { "Loading…" },
+                    error:   Text { "Failed to load" },
+                    empty:   Text { "No products yet." },
+                    data:    rows => Stack {
+                      For { each: rows, p => Card { p.name,
+                        Text { p.price }
+                      } }
+                    }
+                  }
                 }
               }
             }
-            deployable api { platform: node contexts: [C] port: 3000 }
-            deployable web { platform: feliz targets: api ui: WebApp port: 3005 }
+
+            deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 }
+            deployable web { platform: feliz targets: api ui: WebApp { Shop: api } port: 3005 }
           }
           DDD
           node bin/cli.js generate system ci-feliz/showcase.ddd -o ci-feliz/out
