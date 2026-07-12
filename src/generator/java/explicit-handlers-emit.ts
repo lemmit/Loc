@@ -43,11 +43,14 @@ import type {
   ParamIR,
   QueryHandlerIR,
   RouteIR,
+  TypeIR,
   WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
+import { wireTypeInfo } from "../../ir/types/wire-types.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst } from "../../util/naming.js";
 import { collectUnionFindLets, renderWorkflowStmtChunks } from "../_workflow/stmt-target.js";
+import { domainToWire } from "./emit/wire.js";
 import { javaWorkflowStmtTarget, repoField } from "./emit/workflow.js";
 import {
   collectJavaExprImports,
@@ -251,6 +254,34 @@ function wireActionParam(
   return { actionParam: `@PathVariable ${renderJavaType(t)} ${p.name}`, callArg: p.name };
 }
 
+/** The wire-shape projection of a handler's return value (C2, the Java sibling
+ *  of .NET C1 #1830).  An entity return (aggregate or part) is projected to its
+ *  `<Agg>Response` — the SAME static factory the auto-derived read endpoints use
+ *  (`emit/wire.ts` domainToWire; `service.ts` `<Agg>Response::from`) — so the
+ *  route serialises the wire contract, not the raw JPA entity.  Id / scalar / VO
+ *  returns serialise as-is (`result`).  Records the owning aggregate's response
+ *  DTO package into `responsePkgs` so the controller header can import it. */
+function projectReturn(
+  retType: TypeIR,
+  ctx: EnrichedBoundedContextIR,
+  responsePkgOf: (agg: string) => string,
+  responsePkgs: Set<string>,
+): string {
+  const info = wireTypeInfo(retType, "response");
+  if (info.refKind !== "entity") return "result";
+  const owning =
+    ctx.aggregates.find((a) => a.name === info.base) ??
+    ctx.aggregates.find((a) => a.parts.some((p) => p.name === info.base));
+  if (!owning) return "result";
+  responsePkgs.add(responsePkgOf(owning.name));
+  // A bare (non-optional) entity gets the clean factory call; optional /
+  // collection returns defer to the shared wire helper, which null-guards and
+  // maps elements via `<Ent>Response::from`.
+  return retType.kind === "entity"
+    ? `${info.base}Response.from(result)`
+    : domainToWire(retType, "result");
+}
+
 /** Emit one `@RestController` per api whose route list is non-empty: each
  *  `route` becomes an action that coerces its (wire-typed) path params into the
  *  target handler's domain params and calls the handler bean directly.  Returns
@@ -261,10 +292,14 @@ export function emitExplicitRouteController(
   contexts: readonly EnrichedBoundedContextIR[],
   basePkg: string,
   appPkg: string,
+  responsePkgOf: (agg: string) => string,
 ): { name: string; content: string } | null {
   if (routes.length === 0) return null;
   const byName = new Map(contexts.map((c) => [c.name, c]));
   const imports = new Set<string>();
+  // Response DTO packages an entity-returning route projects into (C2) — each
+  // wildcard-imported so the `<Agg>Response.from(...)` projection resolves.
+  const responsePkgs = new Set<string>();
   // handlerName → field name, in first-seen order (deduped across routes that
   // target the same handler).
   const injected = new Map<string, string>();
@@ -310,12 +345,13 @@ export function emitExplicitRouteController(
     const callArgs = h.params
       .map((p) => (pathNames.has(p.name) ? pathArg.get(p.name)!.callArg : `body.${p.name}()`))
       .join(", ");
-    const hasReturn = !!qry || !!cmd?.returnType;
+    // A query always returns; a command returns only with an explicit type.
+    const retType = qry ? qry.returnType : cmd?.returnType;
     const annot = HTTP_ANNOT[r.method] ?? "GetMapping";
-    const callLines = hasReturn
+    const callLines = retType
       ? [
           `        var result = ${field}.handle(${callArgs});`,
-          `        return ResponseEntity.ok(result);`,
+          `        return ResponseEntity.ok(${projectReturn(retType, ctx, responsePkgOf, responsePkgs)});`,
         ]
       : [
           `        ${field}.handle(${callArgs});`,
@@ -347,6 +383,13 @@ export function emitExplicitRouteController(
       `import org.springframework.web.bind.annotation.*;`,
       ``,
       `import ${appPkg}.*;`,
+      // Wildcard-import each entity-returning route's response DTO package so the
+      // `<Agg>Response.from(result)` projection (C2) resolves — plus any nested
+      // `<Part>Response` factories the collection/optional projection references.
+      ...[...responsePkgs]
+        .filter((p) => p !== appPkg)
+        .sort()
+        .map((p) => `import ${p}.*;`),
       `import ${basePkg}.domain.ids.*;`,
       // Body records reference domain value objects / enums by their wildcard
       // packages (Money, etc.); only pulled in when a route carries body params

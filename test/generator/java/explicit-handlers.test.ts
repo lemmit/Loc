@@ -126,6 +126,61 @@ system Shop {
 }
 `;
 
+// C2 (the Java slice of the aggregate-return response-DTO projection; .NET
+// landed as C1 #1830): a handler that returns an aggregate/entity is projected
+// to its wire-shape `<Agg>Response.from(result)` at the route boundary, not
+// serialised as the raw JPA entity. Id / scalar / body returns stay as-is.
+const AGG_RETURN_SRC = `
+system Shop {
+  subdomain Sales {
+    context Ordering {
+      aggregate Order {
+        code: string
+        status: string
+        operation cancel() { status := "cancelled" }
+      }
+      repository Orders for Order { }
+      queryHandler GetOrder(orderId: Order id): Order {
+        let o = Orders.getById(orderId)
+        return o
+      }
+    }
+  }
+  api SalesApi from Sales {
+    route GET "/orders/{orderId}" -> Ordering.GetOrder
+  }
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: java, contexts: [Ordering], dataSources: [st], serves: SalesApi, port: 5001 }
+}
+`;
+
+describe("java — explicit handler aggregate return → wire-shape Response (C2)", () => {
+  it("projects an aggregate return to <Agg>Response.from(result), not the raw entity", async () => {
+    const ctrl = fileEndingWith(
+      await generateSystemFiles(AGG_RETURN_SRC),
+      "SalesApiRoutesController.java",
+    );
+    expect(ctrl).toContain('@GetMapping("/orders/{orderId}")');
+    expect(ctrl).toContain("var result = getOrderHandler.handle(new OrderId(orderId));");
+    // The domain Order is projected to its wire DTO — not serialised raw.
+    expect(ctrl).toContain("return ResponseEntity.ok(OrderResponse.from(result));");
+    expect(ctrl).not.toContain("return ResponseEntity.ok(result);");
+    // The response DTO package is wildcard-imported so `OrderResponse` resolves
+    // (byFeature default → `<base>.features.orders`).
+    expect(ctrl).toContain(".features.orders.*;");
+  });
+
+  it("leaves an id / scalar return unprojected (ResponseEntity.ok(result))", async () => {
+    const m = await files();
+    const ctrl = fileEndingWith(m, "SalesApiRoutesController.java");
+    // CancelOrder returns `Order id` and GetStatus returns `string` — neither is
+    // an entity, so both stay bare `ResponseEntity.ok(result)`.
+    expect(ctrl).toContain("return ResponseEntity.ok(result);");
+    expect(ctrl).not.toContain("Response.from(result)");
+  });
+});
+
 describe("java — explicit route params: {token} → @PathVariable, rest → @RequestBody record", () => {
   it("splits path vs body params: unbound complex params ride in one @RequestBody record", async () => {
     const ctrl = fileEndingWith(

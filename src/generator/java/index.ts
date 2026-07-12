@@ -829,6 +829,7 @@ function emitProjectFromContexts(
         contexts,
         basePkg,
         pkgFor("workflow-service"),
+        (a) => pkgFor("response-dto", a),
       );
       if (controller) place(controller.name, "api-common", controller.content);
     }

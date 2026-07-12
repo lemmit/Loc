@@ -131,6 +131,51 @@ system Shop {
 }
 `;
 
+// C2 (the Hono sibling of the .NET C1 in #1830): a handler that returns a
+// domain aggregate projects it to its wire shape via the owning repo's
+// `toWire(...)` — reusing the repo the query already built — so the route
+// serialises the contract, not the raw domain entity.
+const AGG_RETURN_SRC = `
+system Shop {
+  subdomain Sales {
+    context Ordering {
+      aggregate Order {
+        code: string
+        status: string
+        operation cancel() { status := "cancelled" }
+      }
+      repository Orders for Order { }
+      queryHandler GetOrder(orderId: Order id): Order {
+        let o = Orders.getById(orderId)
+        return o
+      }
+    }
+  }
+  api SalesApi from Sales {
+    route GET "/orders/{orderId}" -> Ordering.GetOrder
+  }
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: node, contexts: [Ordering], dataSources: [st], serves: SalesApi, port: 5001 }
+}
+`;
+
+describe("hono — explicit handler returning a domain aggregate", () => {
+  it("projects the returned aggregate through the loaded repo's toWire(...)", async () => {
+    const router = fileEndingWith(
+      await generateSystemFiles(AGG_RETURN_SRC),
+      "http/salesApi-routes.ts",
+    );
+    // repo built once for the load and reused for the projection.
+    expect(router).toContain("const orders = new OrderRepository(db, events);");
+    expect(router).toContain("const o = await orders.getById(orderId);");
+    // the return wraps the domain entity in `toWire`, not a raw `as unknown` cast.
+    expect(router).toContain("return httpCtx.json(orders.toWire(o), 200);");
+    expect(router).not.toContain("return httpCtx.json(o as unknown, 200);");
+    expect(router).not.toContain("__bad__");
+  });
+});
+
 describe("hono — explicit handler with a value-object body param", () => {
   it("declares the VO wire schema in-scope so the body schema resolves", async () => {
     const router = fileEndingWith(await generateSystemFiles(VO_SRC), "http/salesApi-routes.ts");

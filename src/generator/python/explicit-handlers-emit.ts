@@ -27,9 +27,13 @@
 // params — mirroring the .NET controller→handler split without a message bus.
 //
 // v1 scope (mirrors .NET A1): handler params are ids / scalars (the common REST
-// case); response projection is a `{ "result": <value> }` envelope.  Full
-// response-DTO projection + `[FromBody]` request records ride with the
-// contract-scaffold layer.
+// case); response projection is a `{ "result": <value> }` envelope.
+//
+// C2 (Python sibling of .NET C1/#1830): a handler whose return type resolves to
+// an aggregate/entity projects the domain instance to its wire shape via the
+// repo's `to_wire(...)` (the same projection the auto-derived read routes use) and
+// annotates `-> dict[str, object]`, so the route serialises the contract, not the
+// raw SQLAlchemy row.  Id / scalar / void returns are unchanged.
 // ---------------------------------------------------------------------------
 
 import type {
@@ -40,6 +44,7 @@ import type {
   WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
 import { operationUsesCurrentUser } from "../../ir/types/loom-ir.js";
+import { wireTypeInfo } from "../../ir/types/wire-types.js";
 import { walkExpr } from "../../ir/validate/checks/shared.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
@@ -105,7 +110,6 @@ function renderHandlerModule(
   hasDispatch: boolean,
 ): string {
   const fnName = snake(h.name);
-  const ret = h.returnType ? renderPyType(h.returnType) : "None";
   const usesUser = handlerUsesUser(h, ctx);
 
   const params = [
@@ -115,6 +119,31 @@ function renderHandlerModule(
   ].join(", ");
 
   const repos = collectRepos(h);
+
+  // C2 (Python sibling of .NET C1/#1830): a handler returning an aggregate/entity
+  // projects the domain (SQLAlchemy) instance to its wire shape via the repo's
+  // `to_wire(...)` — the same projection the auto-derived read routes use — so the
+  // route serialises the contract, not the raw ORM row. Id / scalar / void returns
+  // are unchanged. When projecting, the annotation becomes `dict[str, object]`
+  // (`to_wire`'s return type), NOT the aggregate class (which would need a domain
+  // import the module never made and mismatch the dict it returns).
+  let projectRepoHandle: string | undefined;
+  if (h.returnType) {
+    const info = wireTypeInfo(h.returnType, "response");
+    if (info.refKind === "entity") {
+      for (const [repo, agg] of repos) {
+        if (agg === info.base) {
+          projectRepoHandle = snake(repo);
+          break;
+        }
+      }
+    }
+  }
+  const ret = projectRepoHandle
+    ? "dict[str, object]"
+    : h.returnType
+      ? renderPyType(h.returnType)
+      : "None";
   const dispatcherExpr = hasDispatch ? "make_dispatcher(session)" : "NoopDomainEventDispatcher()";
   const repoLines = [...repos].map(
     ([repo, agg]) => `    ${snake(repo)} = ${agg}Repository(session, ${dispatcherExpr})`,
@@ -134,7 +163,12 @@ function renderHandlerModule(
   const saveLines = h.savesAtExit.map(
     (s) => `    await ${snake(s.repoName)}.save(${snake(s.name)})`,
   );
-  const returnLine = h.returnValue ? `    return ${renderPyExpr(h.returnValue)}` : null;
+  const returnExpr = h.returnValue
+    ? projectRepoHandle
+      ? `${projectRepoHandle}.to_wire(${renderPyExpr(h.returnValue)})`
+      : renderPyExpr(h.returnValue)
+    : null;
+  const returnLine = returnExpr ? `    return ${returnExpr}` : null;
 
   const bodyLines = [...repoLines, ...stmtLines, ...saveLines, ...(returnLine ? [returnLine] : [])];
   const body = bodyLines.length > 0 ? bodyLines.join("\n") : "    pass";
