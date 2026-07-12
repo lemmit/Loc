@@ -226,10 +226,18 @@ if (!(!(Name.Trim().Length > 0))) throw new DomainInvariantException(...);
 
 ## Phase C — the `std/` prelude in `.ddd`
 
-- **C1 — distribution:** ship `std/*.ddd` inside the toolchain package; resolve
-  `import "loom:std/strings"` (a `loom:` scheme arm in the project loader next to the
-  file-relative path). Auto-import the prelude set the way `src/macros/prelude.ts`
-  registers capabilities, with the same "user declaration wins" shadowing rule.
+- **C1 — distribution: ambient prelude SHIPPED (first slice).** The prelude is
+  **auto-injected ambient**, not explicitly imported: the built-in top-level
+  functions (`src/language/stdlib-source.ts`) are parsed once into a cached index
+  (`stdFunctions()` in `src/language/stdlib.ts`, `EmptyFileSystem`, browser-safe)
+  that each resolution layer consults with **user-wins** ordering — the
+  unknown-name gate (`validators/names.ts`), the type system
+  (`lookupTopLevelFunction`), and lowering (`topLevelFnIndex` merge). Because they
+  are expression-form (Phase B), a call inlines and an uncalled prelude function
+  emits nothing. This reuses the Phase B path end-to-end. *Deferred follow-ons:*
+  externalising the source to `std/*.ddd` files, and a `loom:std/strings` scheme
+  arm in the loader for selective/explicit import (the ambient path makes explicit
+  import optional).
 - **C2 — content:** `std/strings.ddd`, `std/math.ddd`, `std/temporal.ddd` — curated
   expression-form functions composed from Layer 0 (`isBlank`, `initials`, `clamp`,
   `percentOf`, `isOverdue`, `age`, …), each with `test` blocks. Wire the files into the
