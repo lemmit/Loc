@@ -1869,3 +1869,14 @@ the ones that cost real tool-calls and are non-obvious.
   structural blind spot that let the `#1796` elixir op-persist bug ship uncaught: "no
   per-PR gate does an elixir *operation* round-trip" — the conformance behavioral tier
   doesn't either, because `showcase.ddd` points its op-exercising e2e at dotnet/hono.)
+
+  Re-triggering it via the `run-conformance` label on a docs-only PR **reproduced**
+  the failure identically — so it is NOT a flake but a real `main`-red: every request
+  in the generated api harness returns **`401 Unauthorized` across all five backends**
+  (`:3000` hono, `:8000` python, `:8080` dotnet, `:8081` java, `:4000` phoenix), so the
+  expected `422`/`404` assertions never reach their path. The standalone `Hono OIDC
+  auth (runtime e2e)` gate is green, so auth *codegen* works in isolation — the break
+  is the conformance multi-backend keycloak setup / harness token (candidate: the
+  bundled-Keycloak realm-key rotation gotcha above, or api-e2e token acquisition). The
+  docs-PR-reproduces + all-backends-uniform combo is the tell that it's harness/infra,
+  not any one backend's codegen.
