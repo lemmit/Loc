@@ -41,6 +41,7 @@ import { emitVanillaChangesets } from "./changeset-emit.js";
 import { emitVanillaContextModule } from "./context-emit.js";
 import { emitVanillaEventModules } from "./events-emit.js";
 import { emitVanillaEventSourcedFiles } from "./eventsourced-emit.js";
+import { emitExplicitHandlers, emitExplicitRoutesController } from "./explicit-handlers-emit.js";
 import { emitOpenApiSpec } from "./openapi-emit.js";
 import { renderVanillaProblemDetailsModule } from "./problem-details-emit.js";
 import {
@@ -171,6 +172,11 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
       sourcemap,
     );
     apiRoutes.push(...wfExec.routes);
+    // Explicit application layer (unfoldable-api-derivation.md A2) — one
+    // `<App>.<Ctx>.Handlers.<Name>` module per `commandHandler`/`queryHandler`.
+    // The transport bindings (`route ... -> <Ctx>.<Handler>`) ride on the served
+    // `Api` and are emitted once after the loop (`emitExplicitRoutesController`).
+    emitExplicitHandlers(appModule, ctx, out, resourceModules);
     // Collect this context's command workflows; the single deployable-level
     // `WorkflowsController` aggregating every hosted context is emitted ONCE
     // after the loop (sibling of `emitVanillaViewsController` — one controller
@@ -212,6 +218,16 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // One deployable-level WorkflowsController over every hosted context's command
   // workflows (the per-context emit above intentionally does NOT write it).
   emitVanillaWorkflowsController(appName, appModule, workflowGroups, out);
+  // One `<Api>RoutesController` per served api that declares explicit `route`
+  // bindings — resolves each `route ... -> <Ctx>.<Handler>` against the hosted
+  // contexts' handler modules and splices its POST/GET/... routes into `/api`.
+  for (const apiName of deployable.serves ?? []) {
+    const api = sys.apis.find((a) => a.name === apiName);
+    if (!api || api.routes.length === 0) continue;
+    apiRoutes.push(
+      ...emitExplicitRoutesController(appName, appModule, apiName, api.routes, contexts, out),
+    );
+  }
 
   // --- OpenAPI spec ----------------------------------------------------------
   // Emits the <Api>Spec module, per-aggregate/workflow/view schema modules, and

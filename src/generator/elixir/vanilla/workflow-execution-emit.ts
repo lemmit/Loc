@@ -191,7 +191,7 @@ export function emitVanillaWorkflowsController(
 // Body lowering — per-WorkflowStmtIR-kind translation to plain Elixir.
 // ---------------------------------------------------------------------------
 
-interface BodyLine {
+export interface BodyLine {
   /** `with-clause` lines stack into the `with ... do ... end` chain.
    *  `emit` lines render INSIDE the `do`-branch before the success result,
    *  so they fire only when the with-chain succeeds (a rolled-back
@@ -214,7 +214,7 @@ interface BodyLine {
   origin?: OriginRef;
 }
 
-function lowerStatements(
+export function lowerStatements(
   stmts: WorkflowStmtIR[],
   contextModule: string,
   renderCtx: RenderCtx,
@@ -1063,7 +1063,7 @@ function renderBranchStmt(
  *  Exhaustive over the child-bearing `ExprIR` kinds (a stricter superset
  *  of the validate-layer `walkExpr` — it also descends `list` / `convert`
  *  / `match`, which can appear in a workflow create-body). */
-function collectParamRefs(e: ExprIR | undefined, acc: Set<string>): void {
+export function collectParamRefs(e: ExprIR | undefined, acc: Set<string>): void {
   if (!e) return;
   switch (e.kind) {
     case "ref":
@@ -1151,7 +1151,7 @@ function collectParamRefsInStmt(s: StmtIR, acc: Set<string>): void {
  *  full WorkflowStmtIR union is covered.  Must stay in lock-step with
  *  `lowerStatement`; if a future kind is added without a matching arm
  *  here, an unused param destructure could trip `--warnings-as-errors`. */
-function collectWorkflowStmtParamRefs(st: WorkflowStmtIR, acc: Set<string>): void {
+export function collectWorkflowStmtParamRefs(st: WorkflowStmtIR, acc: Set<string>): void {
   switch (st.kind) {
     case "precondition":
     case "requires":
