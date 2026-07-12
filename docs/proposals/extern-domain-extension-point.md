@@ -265,9 +265,26 @@ depending on the old interface. The genuinely-external-service users move to a
 These are *mechanism* details under the settled decisions above — each fixed
 when its backend slice is built, not gating the direction:
 
-- **Elixir override idiom** (D3) — `defoverridable` default vs `@behaviour` +
-  `@impl` warning vs a required sibling module. Invariant: loud failure when
-  unimplemented (never the silent 204), co-located + user-owned.
+- **Elixir override idiom** (D3) — ✅ **resolved in Slice 1.** A generated
+  `@behaviour` module (`<Ctx>.<Agg>Extern`, one `@callback` per extern op,
+  regenerated each run) + a **scaffold-once** user-owned impl module
+  (`<Ctx>.<Agg>ExternImpl`, `@behaviour` + `@impl` stubs that `raise`). The
+  context delegates the op to the impl and persists the returned struct's scalar
+  columns via `force_change`. Loud both ways: a missing *implementation* is a
+  runtime 500 (the `raise`), and a *newly-added* extern op is a
+  `mix compile --warnings-as-errors` failure (unimplemented behaviour callback).
+  See `docs/extern.md` → *Elixir/Phoenix*.
+
+  **Regeneration-preservation mechanic (Slice 1 owns it for slices 2–5).** The
+  generator had no write-if-absent seam — only `.loomignore` (manual, and it
+  would block first-gen scaffolding). Slice 1 adds `src/util/scaffold-once.ts`:
+  a `loom:scaffold-once` marker in a file's first-line comment tells the CLI
+  writer to KEEP the on-disk copy when the file already exists (writing it only
+  on first `generate`; reported as `preserved (scaffold-once): N`). It travels
+  **in-band** in the file content — no `PlatformSurface.emitProject` signature
+  change — so each later slice opts its user-owned extern file (a .NET partial
+  file, a TS/Python/Java hook module) into preservation by emitting one comment
+  line and reusing `isScaffoldOnce`.
 - **.NET unimplemented-partial semantics** — a `partial void` left unimplemented
   compiles to a no-op; if the hook must be implemented, use a partial method
   *with a return* (C# ≥ 9 / net10) so omission is a compile error, or a

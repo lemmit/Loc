@@ -42,6 +42,7 @@ import { emitVanillaContextModule } from "./context-emit.js";
 import { emitVanillaEventModules } from "./events-emit.js";
 import { emitVanillaEventSourcedFiles } from "./eventsourced-emit.js";
 import { emitExplicitHandlers, emitExplicitRoutesController } from "./explicit-handlers-emit.js";
+import { emitVanillaExternModules } from "./extern-emit.js";
 import { emitOpenApiSpec } from "./openapi-emit.js";
 import { renderVanillaProblemDetailsModule } from "./problem-details-emit.js";
 import {
@@ -142,6 +143,10 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
       sys ? resolveContextSchema(ctx, sys) : undefined,
     );
     emitVanillaContextModule(appModule, ctx, out, sys, sourcemap);
+    // Extern seam — a generated behaviour + scaffold-once user-owned impl module
+    // per aggregate with an `extern` op (proposal §3a).  The context above
+    // delegates each extern op to `<Agg>ExternImpl`.  No-op when no extern ops.
+    emitVanillaExternModules(appModule, ctx, out);
     // Domain services — stateless pure-calculator modules under
     // `<App>.Domain.Services.*` (domain-services.md).  A domain service touches
     // no persistence (the shared `../domain-service-emit`).

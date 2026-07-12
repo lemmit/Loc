@@ -27,6 +27,7 @@ import { captureSnapshots } from "../system/loomsnap.js";
 import { MigrationDestructiveError } from "../system/migrations-builder.js";
 import { fsSnapshotStore, SnapshotReadError } from "../system/snapshot.js";
 import { annotateTrace, type SourceMap } from "../trace/index.js";
+import { isScaffoldOnce } from "../util/scaffold-once.js";
 import {
   renderVerdictGraph,
   renderVerificationJson,
@@ -344,6 +345,9 @@ interface RunResult {
   written?: number;
   unchanged?: number;
   skippedByIgnore?: number;
+  /** Files preserved on regen because they are scaffold-once and already
+   * existed on disk (user-owned extern impls, etc.). */
+  preservedScaffold?: number;
 }
 
 type GenerateTarget = "ts" | "dotnet" | "system";
@@ -470,6 +474,7 @@ async function runGenerate(
   let written = 0;
   let unchanged = 0;
   let skippedByIgnore = 0;
+  let preservedScaffold = 0;
   const resolvedOut = path.resolve(outDir);
   const sortedPaths = [...files.keys()].sort();
   for (const relPath of sortedPaths) {
@@ -488,26 +493,39 @@ async function runGenerate(
     const normalised = relPath.split(path.sep).join("/");
     const ignored = ig.ignores(normalised);
     const full = path.join(outDir, relPath);
+    // Scaffold-once preservation (`src/util/scaffold-once.ts`): a file the
+    // generator marks scaffold-once (an `extern` impl, say) is written on the
+    // FIRST generate but never overwritten again, so the user's hand-written
+    // implementation survives every regen.  Detected in-band from the generated
+    // content's marker; only applies once the file already exists on disk.
+    const preserved = !ignored && isScaffoldOnce(content) && fs.existsSync(full);
     // Classify exactly as the real writer does so a dry run's tallies
     // match the run it previews: an up-to-date file is `unchanged`, not
     // a would-write.  `fileContentMatches` returns false for a missing
     // file (fresh output dir ⇒ everything is a write).
-    const wouldChange = !ignored && !fileContentMatches(full, content);
+    const wouldChange = !ignored && !preserved && !fileContentMatches(full, content);
     if (options.dryRun) {
       const sizeKb = (Buffer.byteLength(content, "utf8") / 1024).toFixed(1);
       const status = ignored
         ? "  skip (.loomignore)"
-        : wouldChange
-          ? "  write              "
-          : "  unchanged          ";
+        : preserved
+          ? "  keep (scaffold-once)"
+          : wouldChange
+            ? "  write              "
+            : "  unchanged          ";
       console.log(`${status}  ${relPath}  (${sizeKb} KB)`);
       if (ignored) skippedByIgnore++;
+      else if (preserved) preservedScaffold++;
       else if (wouldChange) written++;
       else unchanged++;
       continue;
     }
     if (ignored) {
       skippedByIgnore++;
+      continue;
+    }
+    if (preserved) {
+      preservedScaffold++;
       continue;
     }
     // Incremental write: only touch files whose content actually
@@ -526,9 +544,10 @@ async function runGenerate(
   const verb = options.dryRun ? "Would write" : "Wrote";
   const parts: string[] = [`${verb} ${written} file(s) in ${outDir}`];
   if (unchanged > 0) parts.push(`unchanged: ${unchanged}`);
+  if (preservedScaffold > 0) parts.push(`preserved (scaffold-once): ${preservedScaffold}`);
   if (skippedByIgnore > 0) parts.push(`skipped (.loomignore): ${skippedByIgnore}`);
   console.log(parts.join(", "));
-  return { hadError: false, written, unchanged, skippedByIgnore };
+  return { hadError: false, written, unchanged, skippedByIgnore, preservedScaffold };
 }
 
 /** Resolve the current git commit (short) for the snapshot envelope, or
