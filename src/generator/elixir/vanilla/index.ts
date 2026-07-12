@@ -150,7 +150,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     apiRoutes.push(...routes);
     // Views — per-context Ecto query modules; controller + routes collected
     // project-wide (one `ViewsController` for all views).
-    emitVanillaViewModules(appName, appModule, ctx, out, sourcemap);
+    emitVanillaViewModules(appName, appModule, ctx, out, sys, sourcemap);
     for (const view of ctx.views) allViews.push({ ctx, view });
     // Retrievals — per-context Ecto query modules at
     // `lib/<app>/<ctx>/retrievals/<name>.ex` plus a matching
