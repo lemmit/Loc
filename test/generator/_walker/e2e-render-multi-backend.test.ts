@@ -193,3 +193,23 @@ describe("e2e expansion — count assertion", () => {
     expect(itCount).toBe(4);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Auth: an auth-required system rejects every unauthenticated request 401
+// before it reaches the create/validation/not-found path the assertion pins.
+// The generated harness forwards a bearer token from E2E_BEARER_TOKEN (set by
+// the runner) on BOTH verbs, and sends no Authorization header when the var is
+// unset — so an auth-less system's output is unaffected.
+// ---------------------------------------------------------------------------
+describe("e2e harness — bearer-token forwarding", () => {
+  it("threads E2E_BEARER_TOKEN onto POST and GET, without hardcoding a provider", async () => {
+    const e2e = (await generateSystemFiles(BANK_THREE_BACKEND)).get("e2e/Bank.e2e.test.ts")!;
+    // The token is read from the env and only becomes an Authorization header
+    // when present (auth-less runs send nothing).
+    expect(e2e).toContain("const token = process.env.E2E_BEARER_TOKEN;");
+    expect(e2e).toContain("return token ? { authorization: `Bearer ${token}` } : {};");
+    // POST merges the auth header alongside content-type; GET carries it too.
+    expect(e2e).toContain('headers: { "content-type": "application/json", ...__authHeaders() }');
+    expect(e2e).toContain("await fetch(url, { headers: __authHeaders() });");
+  });
+});

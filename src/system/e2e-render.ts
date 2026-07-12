@@ -584,10 +584,22 @@ function serviceSlug(name: string): string {
 }
 
 const E2E_HELPERS = `
+// When the target system requires auth, every request must carry a bearer
+// token or the backend rejects it 401 before the assertion's real path
+// (create/validation/not-found) is ever reached.  The harness stays
+// provider-agnostic: it forwards a token from \`E2E_BEARER_TOKEN\` when set,
+// and sends no Authorization header when it is not (an auth-less system, or a
+// run that hasn't provisioned one).  The runner mints the token once and
+// exports it before invoking this suite.
+function __authHeaders(): Record<string, string> {
+  const token = process.env.E2E_BEARER_TOKEN;
+  return token ? { authorization: \`Bearer \${token}\` } : {};
+}
+
 async function __post(url: string, body: unknown): Promise<unknown> {
   const r = await fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...__authHeaders() },
     body: JSON.stringify(body ?? {}),
   });
   const text = await r.text();
@@ -603,7 +615,7 @@ async function __post(url: string, body: unknown): Promise<unknown> {
 }
 
 async function __get(url: string): Promise<unknown> {
-  const r = await fetch(url);
+  const r = await fetch(url, { headers: __authHeaders() });
   const text = await r.text();
   if (!r.ok) throw new Error(\`GET \${url} → \${r.status} \${r.statusText}\${text ? ": " + text : ""}\`);
   try {

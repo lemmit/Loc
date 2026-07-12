@@ -208,10 +208,22 @@ describe.skipIf(!RUN)("e2e: docker compose smoke", () => {
         stdio: "inherit",
         timeout: 180_000,
       });
+      // When the generated system requires auth (it ships a Keycloak realm
+      // import), the generated harness must present a real bearer token or
+      // every request 401s before reaching its create/validation/not-found
+      // path.  Mint the same demo/demo token the runtime-authorization test
+      // uses and hand it to the suite via E2E_BEARER_TOKEN (the harness sends
+      // no Authorization header when the var is unset, so auth-less systems
+      // are unaffected).
+      const authEnv: NodeJS.ProcessEnv = { ...process.env };
+      if (fs.existsSync(path.join(outDir, "keycloak", "realm.json"))) {
+        authEnv.E2E_BEARER_TOKEN = await keycloakPasswordGrantToken(outDir);
+      }
       execSync(`npx vitest run`, {
         cwd: e2eDir,
         stdio: "inherit",
         timeout: 120_000,
+        env: authEnv,
       });
     },
     600_000,
