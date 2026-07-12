@@ -1,7 +1,8 @@
 # Proposal — Source maps & cross-target debugging
 
-> Status: **IN PROGRESS — phases 0–7 shipped; phase 8's pure cores
-> shipped, protocol shell deferred.** This doc consolidates the whole
+> Status: **IN PROGRESS — phases 0–7 shipped; phase 8's pure cores AND
+> the protocol shell's remap layer shipped; only the full delegating
+> target-debugger proxy remains.** This doc consolidates the whole
 > debugging endeavour: one provenance substrate (the *Origin spine*)
 > threaded `.ddd` → IR → emitted output, and a family of debug features
 > layered on top of it — a generic `.loom/sourcemap.json`, a `ddd trace`
@@ -11,12 +12,19 @@
 > backends), `ddd trace` (column-aware), LSP source↔target nav, statement
 > + char/expression granularity, Source Map v3 sidecars, .NET `#line`→PDB,
 > Java JSR-45 SMAP, node strippable-boot debug wiring, the `ddd
-> breakpoints` CLI, and **both** pure DAP resolution cores
+> breakpoints` CLI, **both** pure DAP resolution cores
 > (`resolveSetBreakpoints` forward + `remapStackFrames` reverse, in
-> `src/dap/`) have all landed on `main`. What remains is the phase-8
-> **protocol shell** — the `@vscode/debugadapter` `DebugSession` in a
-> `packages/ddd-dap` workspace that wires the two shipped cores to a real
-> editor. It is deferred deliberately: its payoff (an editor driving live
+> `src/dap/`), and now the **`ddd-dap` protocol shell's remap layer**
+> (Milestone 27: `packages/ddd-dap` + `src/dap-server/`'s
+> `LoomDebugSession extends DebugSession`, whose `initialize`/
+> `setBreakpoints`/`stackTrace` handlers wire the two shipped cores over
+> an fs-loaded `.loom/sourcemap.json`, unit-tested by invoking the
+> handlers directly plus a real stdio smoke test against the generated
+> `examples/showcase.ddd` map) have all landed on `main`. What remains is
+> the **full delegating target-debugger proxy** — spawning/proxying the
+> target's own debugger (`js-debug`/`coreclr`/JDWP) for `launch`/`attach`/
+> `continue`/`stepIn`/… and remapping only line/scope on top. It is
+> deferred deliberately: its payoff (an editor driving live
 > breakpoints/stepping against a running backend) can only be verified by
 > driving an actual `js-debug`/`coreclr`/JDWP session in an interactive
 > editor, which the headless CI/sandbox can't do — so it is a reviewed
@@ -242,6 +250,34 @@ breakpoint in `.ddd`, run the stack, step in your own language — and it is
 variable inspection, which is why it sequences last, not because it's
 optional. The `ddd-dap` adapter ships as a workspace alongside `ddd-mcp`.
 
+**Milestone 27 shipped the REMAP LAYER**, honestly scoped short of the
+paragraph above's full picture: `packages/ddd-dap` (the publish wrapper,
+mirroring `packages/ddd-mcp`) + `src/dap-server/` (the Node-only island,
+mirroring `src/mcp/`) register a `LoomDebugSession extends DebugSession`
+(`@vscode/debugadapter`) whose `initializeRequest` / `setBreakPointsRequest`
+/ `stackTraceRequest` handlers wire `resolveSetBreakpoints` /
+`remapStackFrames` over an fs-loaded `.loom/sourcemap.json`
+(`src/dap-server/load-map.ts`, reusing the exact `JSON.parse` `ddd trace`
+already uses — no second hand-rolled wire parser). `session.ts` itself stays
+`fs`-free (the map + a `readSource` accessor are constructor-injected), so
+it is unit-tested by invoking the handlers directly
+(`test/dap/session.test.ts`) — including a real round trip over
+`examples/showcase.ddd`'s `requires currentUser.role == "admin"` guard,
+closing the loop through the fs loader too. A manual stdio smoke test
+(hand-framed DAP messages piped through `packages/ddd-dap/bin.js`) confirmed
+the same round trip end-to-end over the real protocol wire format.
+
+**What did NOT ship, and remains the sole open frontier**: the full
+DELEGATING target-debugger proxy this section's opening paragraph describes
+— actually spawning/proxying `js-debug` / `coreclr` / JDWP for `launch` /
+`attach` / `continue` / `stepIn` / … and remapping only line/scope on top of
+a live session. `stackTraceRequest`'s raw frames are supplied through a test
+seam (`fetchRawFrames`, overridden by the unit test) rather than a real
+target debugger, precisely because that full proxy needs a live editor +
+running target debugger to build and verify — unavailable headless. This is
+the one piece of §6E's north star that stays editor-verified, not a
+regression from what was scoped.
+
 ## 7. Macros & synthetic nodes
 
 - **Scaffolded pages / capability-cloned members** → `MacroRef` at the
@@ -286,7 +322,7 @@ build the full arc through DAP.
 | 5 | **Source Map v3 (JS)** | `.map` + `sourceMappingURL` for the 4 JS backends | 1, 4 | Small–Med | ✅ Shipped |
 | 6 | **.NET `#line` + Java SMAP** | enhanced `#line` → PDB; JSR-45 injector | 4 | Med / Med–Hard | ✅ Shipped (both) |
 | 7 | **Char/expression granularity** | `origin` on `ExprIR`; span-tracking `lines()` | 4 | Large | ✅ Shipped |
-| 8 | **DAP** | `ddd-dap` adapter reusing target debuggers (JS/.NET/JVM); scope remap; Python/Elixir enhanced-trace | 5, 6, 7 | Large | 🟡 Pure cores shipped (node debug wiring + strippable boot; `ddd breakpoints` CLI; `translateBreakpoint`, `resolveSetBreakpoints`, `remapStackFrames` in `src/dap/`) — **protocol shell** (`packages/ddd-dap` + `@vscode/debugadapter`) deferred (editor-only verification) |
+| 8 | **DAP** | `ddd-dap` adapter reusing target debuggers (JS/.NET/JVM); scope remap; Python/Elixir enhanced-trace | 5, 6, 7 | Large | 🟡 Pure cores + protocol shell's REMAP LAYER shipped (node debug wiring + strippable boot; `ddd breakpoints` CLI; `translateBreakpoint`, `resolveSetBreakpoints`, `remapStackFrames` in `src/dap/`; Milestone 27 — `packages/ddd-dap` + `src/dap-server/`'s `LoomDebugSession` wiring both cores over `initialize`/`setBreakpoints`/`stackTrace`, unit-tested headlessly) — only the **full delegating target-debugger proxy** (spawning/proxying `js-debug`/`coreclr`/JDWP for `launch`/`attach`/stepping) remains, deferred as editor-only-verifiable |
 
 Phases **0 → 1 → 2** are the core investment and already deliver
 cross-backend post-mortem debugging. **3** is in-editor navigation off the
