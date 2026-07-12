@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // A MINIMAL Debug Adapter Protocol (DAP) type subset — hand-modeled, zero
 // dependency. See the DAP spec's `SetBreakpointsArguments` / `Breakpoint` /
-// `Source` / `SourceBreakpoint` shapes:
+// `Source` / `SourceBreakpoint` / `StackFrame` shapes:
 // https://microsoft.github.io/debug-adapter-protocol/specification
 //
 // These mirror `DebugProtocol.*` from `@vscode/debugprotocol` field-for-field
@@ -47,6 +47,27 @@ export interface DapSetBreakpointsArguments {
   /** DAP: `SetBreakpointsArguments.breakpoints` — the breakpoints to set;
    *  absent/empty means "clear all breakpoints for this source". */
   breakpoints?: DapSourceBreakpoint[];
+}
+
+/** DAP: `StackFrame` — a stack frame within a paused thread (subset). Used
+ *  BOTH as the shape the debugged runtime's target debugger reports (an
+ *  INPUT frame, `source`/`line`/`column` in GENERATED coordinates) and as
+ *  the shape `remapStackFrames` (`src/dap/stack-trace.ts`) returns (an
+ *  OUTPUT frame, rewritten to `.ddd` coordinates when it resolves). */
+export interface DapStackFrame {
+  /** DAP: `StackFrame.id` — opaque frame id; carried through untouched. */
+  id: number;
+  /** DAP: `StackFrame.name` — the frame's display name; carried through. */
+  name: string;
+  /** DAP: `StackFrame.source` — the source of the frame. On INPUT the
+   *  generated file the target debugger reported; on OUTPUT rewritten to
+   *  the `.ddd` source when it resolves. */
+  source?: DapSource;
+  /** DAP: `StackFrame.line` — 1-based line (generated on input, `.ddd` on
+   *  a resolved output frame). */
+  line: number;
+  /** DAP: `StackFrame.column` — 1-based column (same in/out semantics). */
+  column: number;
 }
 
 /** DAP: `Breakpoint` — information about the result of a breakpoint request

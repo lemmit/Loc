@@ -406,6 +406,30 @@ does the debugger actually arm it on?"
   closing the loop back through `resolveFrame`). Pure, `fs`-free, no
   `@vscode/debugadapter` dependency, no `packages/ddd-dap` workspace, no
   protocol I/O — those remain deferred, below.
+- **Milestone 25**: the DAP `stackTrace` remap core — the REVERSE twin of
+  Milestone 24. Where `resolveSetBreakpoints` remaps a `.ddd` breakpoint
+  FORWARD to the generated location to arm, `remapStackFrames(frames, map,
+  readSource): DapStackFrame[]` (`src/dap/stack-trace.ts`) remaps the
+  debugged runtime's reported stack frames BACKWARD: each frame arrives in
+  GENERATED coordinates and is rewritten to `.ddd` source, one output frame
+  per input frame in the same 1:1 order. It reuses the already-shipped
+  `resolveFrame` (building a `ParsedFrame` from the frame's generated
+  `source.path`/`line`/`column`) + `LineIndex` (`lineOf`/`colOf`, cached per
+  resolved `.ddd` path within a call) — no new lookup or column logic; the
+  narrowest-`targetCol` column pick falls out of `resolveFrame` reuse. A
+  frame passes through UNCHANGED (still generated) when it has no
+  `source.path`, resolves to no region, chains to no real `.ddd` source, or
+  its `.ddd` text is unavailable via `readSource` — honest, never guessed.
+  New `DapStackFrame` added to `src/dap/dap-protocol.ts` (reusing
+  `DapSource`), barrel-exported alongside `remapStackFrames`. The
+  `DebugSession.stackTraceRequest` handler becomes `response.body = {
+  stackFrames: remapStackFrames(rawFrames, map, readSource) }` once the shell
+  exists. Tests in `test/dap/stack-trace.test.ts` (hand-built fixture maps
+  mirroring `set-breakpoints.test.ts` + a real round trip over
+  `examples/showcase.ddd`). **With this, the pure DAP core surface is
+  complete in both directions** — arm-breakpoints (forward) and
+  report-stops (reverse); the sole phase-8 remainder is the protocol shell
+  itself (deferred, below), which needs an interactive editor to verify.
 
 ### What's deferred
 
