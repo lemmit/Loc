@@ -76,6 +76,9 @@ export function emitVanillaEventSourcedFiles(
   appModule: string,
   ctx: BoundedContextIR,
   out: Map<string, string>,
+  /** The context's Postgres schema for the shared `<ctx>_events` log's
+   *  `@schema_prefix` (matches the migration `prefix:`); undefined ⇒ public. */
+  ctxSchema?: string,
 ): void {
   const ctxModule = upperFirst(ctx.name);
   const appSnake = toAppSnake(appModule);
@@ -89,7 +92,10 @@ export function emitVanillaEventSourcedFiles(
     const aggSnake = snake(agg.name);
     const base = `lib/${appSnake}/${ctxSnake}`;
     out.set(`${base}/${aggSnake}.ex`, renderStructModule(appModule, ctxModule, agg));
-    out.set(`${base}/${aggSnake}_event_log.ex`, renderEventLogSchema(appModule, ctxModule, agg));
+    out.set(
+      `${base}/${aggSnake}_event_log.ex`,
+      renderEventLogSchema(appModule, ctxModule, agg, ctxSnake, ctxSchema),
+    );
     out.set(`${base}/${aggSnake}_fold.ex`, renderFoldModule(appModule, ctxModule, agg));
     out.set(
       `${base}/${aggSnake}_repository.ex`,
@@ -136,23 +142,40 @@ end
 `;
 }
 
-// --- `<Agg>EventLog` Ecto schema over `<agg>_events` ------------------------
+// --- `<Agg>EventLog` Ecto schema over the shared `<ctx>_events` log ----------
+//
+// The per-context event log (event-log-architecture.md) collapses every ES
+// stream in a context into ONE table; this aggregate's stream is the subset
+// tagged `stream_type = "<Agg>"`.  The composite PK is `(stream_type,
+// stream_id, version)`; `seq` is the DB-assigned bigserial cursor (never
+// selected/inserted here — the fold reads by version, appends omit it).
 
-function renderEventLogSchema(appModule: string, ctxModule: string, agg: AggregateIR): string {
+function renderEventLogSchema(
+  appModule: string,
+  ctxModule: string,
+  agg: AggregateIR,
+  ctxSnake: string,
+  ctxSchema?: string,
+): string {
   const moduleName = `${appModule}.${ctxModule}.${upperFirst(agg.name)}EventLog`;
-  const table = `${snake(agg.name)}_events`;
+  const table = `${ctxSnake}_events`;
+  // `@schema_prefix` targets the migration's `prefix:` schema; without it Ecto
+  // queries `public.<ctx>_events` while the table was created under `<ctx>`.
+  const prefixLine = ctxSchema ? `  @schema_prefix ${JSON.stringify(ctxSchema)}\n` : "";
   return `# Auto-generated.
 defmodule ${moduleName} do
   @moduledoc false
   use Ecto.Schema
 
-  @primary_key false
+${prefixLine}  @primary_key false
   schema "${table}" do
+    field :stream_type, :string, primary_key: true
     field :stream_id, :string, primary_key: true
     field :version, :integer, primary_key: true
     field :type, :string
     field :data, :map
     field :occurred_at, :utc_datetime_usec
+    field :seq, :integer
   end
 end
 `;
@@ -292,6 +315,11 @@ function renderEsRepository(
   // `mix compile --warnings-as-errors`.
   const logShort = `${aggPascal}EventLog`;
   const foldShort = `${aggPascal}Fold`;
+  // Every stream in the shared `<ctx>_events` log is tagged by owner; this
+  // aggregate reads/appends only rows whose `stream_type` is its own name —
+  // the correctness trap of a per-context log is that a sibling aggregate's
+  // events must never fold into this stream.
+  const streamType = JSON.stringify(agg.name);
 
   return `# Auto-generated.
 defmodule ${repoMod} do
@@ -305,7 +333,12 @@ defmodule ${repoMod} do
   @spec list() :: {:ok, [${aggPascal}.t()]} | {:error, term()}
   def list do
     aggregates =
-      Repo.all(from(r in ${logShort}, order_by: [asc: r.stream_id, asc: r.version]))
+      Repo.all(
+        from(r in ${logShort},
+          where: r.stream_type == ^${streamType},
+          order_by: [asc: r.stream_id, asc: r.version]
+        )
+      )
       |> Enum.group_by(& &1.stream_id)
       |> Enum.map(fn {sid, rows} ->
         ${foldShort}.from_events(sid, Enum.map(rows, &row_to_event/1))
@@ -317,7 +350,12 @@ defmodule ${repoMod} do
   @spec find_by_id(binary()) :: {:ok, ${aggPascal}.t()} | {:error, :not_found}
   def find_by_id(id) when is_binary(id) do
     rows =
-      Repo.all(from(r in ${logShort}, where: r.stream_id == ^id, order_by: [asc: r.version]))
+      Repo.all(
+        from(r in ${logShort},
+          where: r.stream_type == ^${streamType} and r.stream_id == ^id,
+          order_by: [asc: r.version]
+        )
+      )
 
     case rows do
       [] -> {:error, :not_found}
@@ -332,13 +370,19 @@ defmodule ${repoMod} do
   def append(id, events) when is_binary(id) and is_list(events) do
     Repo.transaction(fn ->
       prior =
-        Repo.one(from(r in ${logShort}, where: r.stream_id == ^id, select: max(r.version))) || 0
+        Repo.one(
+          from(r in ${logShort},
+            where: r.stream_type == ^${streamType} and r.stream_id == ^id,
+            select: max(r.version)
+          )
+        ) || 0
 
       events
       |> Enum.with_index(prior + 1)
       |> Enum.each(fn {ev, version} ->
         Repo.insert_all(${logShort}, [
           %{
+            stream_type: ${streamType},
             stream_id: id,
             version: version,
             type: event_type(ev),

@@ -61,18 +61,20 @@ public sealed class EfDomainTransaction : IDomainTransaction
 }
 
 /// <summary>EF adapter for <see cref="IWorkflowEventStore{TRow}"/> — 1:1 over the
-/// scoped <c>AppDbContext</c>; <c>Set&lt;TRow&gt;()</c> resolves the same DbSet as
-/// the named <c>&lt;Wf&gt;Events</c> property.</summary>
+/// scoped <c>AppDbContext</c>; <c>Set&lt;TRow&gt;()</c> resolves the shared per-context
+/// <c>Events</c> DbSet.  Every read scopes to <c>streamType</c> as well as
+/// <c>streamId</c> — the shared <c>&lt;ctx&gt;_events</c> log holds every stream in the
+/// context, so a stream_type filter is the correctness guard.</summary>
 public sealed class EfWorkflowEventStore<TRow> : IWorkflowEventStore<TRow> where TRow : class, IWorkflowEventRow
 {
     private readonly AppDbContext _db;
     public EfWorkflowEventStore(AppDbContext db) => _db = db;
 
-    public Task<List<TRow>> LoadStreamAsync(string streamId, CancellationToken cancellationToken = default)
-        => _db.Set<TRow>().Where(e => e.StreamId == streamId).OrderBy(e => e.Version).ToListAsync(cancellationToken);
+    public Task<List<TRow>> LoadStreamAsync(string streamType, string streamId, CancellationToken cancellationToken = default)
+        => _db.Set<TRow>().Where(e => e.StreamType == streamType && e.StreamId == streamId).OrderBy(e => e.Version).ToListAsync(cancellationToken);
 
-    public async Task<int> MaxVersionAsync(string streamId, CancellationToken cancellationToken = default)
-        => await _db.Set<TRow>().Where(e => e.StreamId == streamId).Select(e => (int?)e.Version).MaxAsync(cancellationToken) ?? 0;
+    public async Task<int> MaxVersionAsync(string streamType, string streamId, CancellationToken cancellationToken = default)
+        => await _db.Set<TRow>().Where(e => e.StreamType == streamType && e.StreamId == streamId).Select(e => (int?)e.Version).MaxAsync(cancellationToken) ?? 0;
 
     public void Append(TRow row) => _db.Set<TRow>().Add(row);
     public Task SaveChangesAsync(CancellationToken cancellationToken = default) => _db.SaveChangesAsync(cancellationToken);

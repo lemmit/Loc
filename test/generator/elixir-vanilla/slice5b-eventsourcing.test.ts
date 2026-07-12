@@ -79,12 +79,28 @@ describe("vanilla — Slice P4.2 event-sourcing emit", () => {
     expect(struct).not.toContain("timestamps(");
   });
 
-  it("emits an event-log Ecto schema over <agg>_events", async () => {
+  it("emits an event-log Ecto schema over the shared <ctx>_events log", async () => {
     const log = get(await files(), "/accounts/account_event_log.ex");
-    expect(log).toContain('schema "account_events" do');
+    // Per-context collapse (event-log-architecture.md): the table is
+    // `<ctx>_events`, not `<agg>_events`, discriminated by `stream_type`.
+    expect(log).toContain('schema "accounts_events" do');
+    expect(log).toContain("field :stream_type, :string, primary_key: true");
     expect(log).toContain("field :stream_id, :string, primary_key: true");
     expect(log).toContain("field :version, :integer, primary_key: true");
     expect(log).toContain("field :data, :map");
+    // The inert bigserial cursor column is declared (never selected/inserted).
+    expect(log).toContain("field :seq, :integer");
+  });
+
+  it("the ES repository filters + stamps its own stream_type", async () => {
+    const repo = get(await files(), "/accounts/account_repository.ex");
+    // Every load folds only this aggregate's own events (the per-context-log
+    // correctness trap: two aggregates share one table).
+    expect(repo).toContain('where: r.stream_type == ^"Account"');
+    expect(repo).toContain('r.stream_type == ^"Account" and r.stream_id == ^id');
+    // The append stamps the discriminator (but NOT the DB-assigned seq).
+    expect(repo).toContain('stream_type: "Account"');
+    expect(repo).not.toContain("seq:");
   });
 
   it("emits a fold module (apply_event clauses + from_events fold-from-zero)", async () => {

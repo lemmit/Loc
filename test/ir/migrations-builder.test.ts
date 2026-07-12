@@ -418,7 +418,9 @@ describe("buildMigrations — workflow saga tables land in the context schema", 
 
   it("stamps the context schema on both saga tables (default snake(ctx))", async () => {
     const tables = await sagaSchemas(src("resource ordState { for: Ord, kind: state, use: pg }"));
-    const stream = tables.find((t) => t.name === "tally_events")!;
+    // The ES workflow's stream now lives in the single per-context event log
+    // `<ctx>_events` (event-log-architecture.md), not a per-workflow table.
+    const stream = tables.find((t) => t.name === "ord_events")!;
     const state = tables.find((t) => t.name === "ledgers")!;
     const orders = tables.find((t) => t.name === "orders")!;
     // Saga tables share the context's aggregate schema (default `snake(ctx)`).
@@ -431,7 +433,7 @@ describe("buildMigrations — workflow saga tables land in the context schema", 
     const tables = await sagaSchemas(
       src('resource ordState { for: Ord, kind: state, use: pg, schema: "sales" }'),
     );
-    expect(tables.find((t) => t.name === "tally_events")?.schema).toBe("sales");
+    expect(tables.find((t) => t.name === "ord_events")?.schema).toBe("sales");
     expect(tables.find((t) => t.name === "ledgers")?.schema).toBe("sales");
   });
 

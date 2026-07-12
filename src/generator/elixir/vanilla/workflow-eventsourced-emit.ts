@@ -77,9 +77,19 @@ end
 `;
 }
 
-// --- `<Wf>EventLog` Ecto schema over `<wf>_events` --------------------------
+// --- `<Wf>EventLog` Ecto schema over the shared `<ctx>_events` log ----------
+//
+// Like the ES-aggregate `<Agg>EventLog`, an ES workflow's stream lives in the
+// single per-context event log (event-log-architecture.md), tagged
+// `stream_type = "<Wf>"`.  Composite PK `(stream_type, stream_id, version)`;
+// `seq` is the inert DB-assigned bigserial cursor.
 
-function renderEventLogSchema(contextModule: string, wf: WorkflowIR, schema?: string): string {
+function renderEventLogSchema(
+  contextModule: string,
+  wf: WorkflowIR,
+  ctxSnake: string,
+  schema?: string,
+): string {
   // `@schema_prefix` makes every Repo query/insert target the workflow's
   // context schema (`catalog`), matching the migration `prefix:`.  Omitted →
   // public, byte-identical for binding-free systems.
@@ -90,12 +100,14 @@ defmodule ${wfModule(contextModule, wf)}EventLog do
   use Ecto.Schema
 
 ${prefixLine}  @primary_key false
-  schema "${snake(wf.name)}_events" do
+  schema "${ctxSnake}_events" do
+    field :stream_type, :string, primary_key: true
     field :stream_id, :string, primary_key: true
     field :version, :integer, primary_key: true
     field :type, :string
     field :data, :map
     field :occurred_at, :utc_datetime_usec
+    field :seq, :integer
   end
 end
 `;
@@ -200,6 +212,10 @@ function renderStreamModule(
   const foldMod = `${wfModule(contextModule, wf)}Fold`;
   const foldShort = `${upperFirst(wf.name)}Fold`;
   const stateMod = `${contextModule}.Workflows.${upperFirst(wf.name)}State`;
+  // This workflow's stream is the subset of the shared `<ctx>_events` log
+  // tagged with its own name — sibling streams (aggregates, other workflows)
+  // in the same context must never fold in.
+  const streamType = JSON.stringify(wf.name);
   return `# Auto-generated.
 defmodule ${wfModule(contextModule, wf)}Stream do
   @moduledoc "Event stream IO for the ${upperFirst(wf.name)} event-sourced workflow."
@@ -210,14 +226,24 @@ defmodule ${wfModule(contextModule, wf)}Stream do
 
   @spec load(binary()) :: [struct()]
   def load(stream_id) when is_binary(stream_id) do
-    Repo.all(from(r in ${logShort}, where: r.stream_id == ^stream_id, order_by: [asc: r.version]))
+    Repo.all(
+      from(r in ${logShort},
+        where: r.stream_type == ^${streamType} and r.stream_id == ^stream_id,
+        order_by: [asc: r.version]
+      )
+    )
     |> Enum.map(&row_to_event/1)
   end
 
   @doc "List every running instance: load all streams, group by stream_id, fold each."
   @spec list_instances() :: [${stateMod}.t()]
   def list_instances do
-    Repo.all(from(r in ${logShort}, order_by: [asc: r.stream_id, asc: r.version]))
+    Repo.all(
+      from(r in ${logShort},
+        where: r.stream_type == ^${streamType},
+        order_by: [asc: r.stream_id, asc: r.version]
+      )
+    )
     |> Enum.group_by(& &1.stream_id)
     |> Enum.map(fn {sid, rows} ->
       ${foldShort}.from_events(sid, Enum.map(rows, &row_to_event/1))
@@ -240,14 +266,19 @@ defmodule ${wfModule(contextModule, wf)}Stream do
   def append(stream_id, events) when is_binary(stream_id) and is_list(events) do
     Repo.transaction(fn ->
       prior =
-        Repo.one(from(r in ${logShort}, where: r.stream_id == ^stream_id, select: max(r.version))) ||
-          0
+        Repo.one(
+          from(r in ${logShort},
+            where: r.stream_type == ^${streamType} and r.stream_id == ^stream_id,
+            select: max(r.version)
+          )
+        ) || 0
 
       events
       |> Enum.with_index(prior + 1)
       |> Enum.each(fn {ev, version} ->
         Repo.insert_all(${logShort}, [
           %{
+            stream_type: ${streamType},
             stream_id: stream_id,
             version: version,
             type: event_type(ev),
@@ -301,7 +332,10 @@ export function emitVanillaEsWorkflowFiles(
     const construct = `${ctx.name}.${wf.name}`;
     const files: [string, string][] = [
       [`${base}/${wfSnake}_state.ex`, renderStateStruct(contextModule, wf)],
-      [`${base}/${wfSnake}_event_log.ex`, renderEventLogSchema(contextModule, wf, schema)],
+      [
+        `${base}/${wfSnake}_event_log.ex`,
+        renderEventLogSchema(contextModule, wf, ctxSnake, schema),
+      ],
       [`${base}/${wfSnake}_fold.ex`, renderFoldModule(contextModule, wf)],
       [`${base}/${wfSnake}_stream.ex`, renderStreamModule(appModule, contextModule, wf, events)],
     ];

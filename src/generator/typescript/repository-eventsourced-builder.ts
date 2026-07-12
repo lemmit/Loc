@@ -48,7 +48,10 @@ export function buildEventSourcedRepositoryFile(
   _emitTrace = false,
 ): string {
   const idVar = `Ids.${agg.name}Id`;
-  const table = `${lowerFirst(agg.name)}Events`;
+  // The single per-context event log (event-log-architecture.md); this
+  // aggregate's stream is the subset tagged `stream_type = "<Agg>"`.
+  const table = `${lowerFirst(ctx.name)}Events`;
+  const streamType = agg.name;
   const repoUsesUser = (repo?.finds ?? []).some(findUsesCurrentUser);
 
   // Every event type that can appear in this aggregate's stream — the
@@ -77,7 +80,7 @@ export function buildEventSourcedRepositoryFile(
     `    const rows = await this.db`,
     `      .select()`,
     `      .from(schema.${table})`,
-    `      .where(eq(schema.${table}.streamId, id as string))`,
+    `      .where(and(eq(schema.${table}.streamType, "${streamType}"), eq(schema.${table}.streamId, id as string)))`,
     `      .orderBy(schema.${table}.version);`,
     `    ${renderHonoStoreLogCall("aggregateLoaded", `aggregate: "${agg.name}", id: id as string, found: rows.length > 0`)}`,
     `    if (rows.length === 0) return null;`,
@@ -109,9 +112,10 @@ export function buildEventSourcedRepositoryFile(
     `      const prior = await this.db`,
     `        .select({ version: schema.${table}.version })`,
     `        .from(schema.${table})`,
-    `        .where(eq(schema.${table}.streamId, aggregate.id as string));`,
+    `        .where(and(eq(schema.${table}.streamType, "${streamType}"), eq(schema.${table}.streamId, aggregate.id as string)));`,
     `      let version = prior.reduce((m, r) => Math.max(m, r.version), 0);`,
     `      const rows = pending.map((event) => ({`,
+    `        streamType: "${streamType}",`,
     `        streamId: aggregate.id as string,`,
     `        version: ++version,`,
     `        type: event.type,`,
@@ -144,6 +148,7 @@ export function buildEventSourcedRepositoryFile(
     `    const rows = await this.db`,
     `      .select()`,
     `      .from(schema.${table})`,
+    `      .where(eq(schema.${table}.streamType, "${streamType}"))`,
     `      .orderBy(schema.${table}.streamId, schema.${table}.version);`,
     `    const byStream = new Map<string, Events.DomainEvent[]>();`,
     `    for (const r of rows) {`,
@@ -193,7 +198,7 @@ export function buildEventSourcedRepositoryFile(
     // Domain-side repository PORT this concrete implements (audit S7).
     repoPortImportLine(agg.name),
     `import type { NodePgDatabase } from "drizzle-orm/node-postgres";`,
-    `import { eq } from "drizzle-orm";`,
+    `import { and, eq } from "drizzle-orm";`,
     `import * as schema from "../schema";`,
     repoUsesUser && `import type { User } from "../../auth/user-types";`,
     `import { ${domainImports} } from "../../domain/${lowerFirst(agg.name)}";`,

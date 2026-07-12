@@ -21,6 +21,8 @@ import { lines } from "../../../util/code-builder.js";
 import { plural, snake } from "../../../util/naming.js";
 import {
   columnsForFields,
+  contextEventRowClassName,
+  contextEventsTableName,
   isRefCollectionField,
   joinRowClassName,
   type PyColumn,
@@ -57,11 +59,11 @@ export function renderPySchema(
 ): string {
   const models: string[] = [];
   for (const agg of ctx.aggregates) {
-    if (agg.persistedAs === "eventLog") {
-      const ds14 = resolveDataSource?.(agg);
-      models.push(renderEventLogModel(agg.name, ds14?.schema, ds14?.tablePrefix));
-      continue;
-    }
+    // Event-sourced (`persistedAs(eventLog)`): the aggregate's stream lives in
+    // the single per-context `<ctx>_events` log emitted once below (shared by
+    // every ES aggregate + ES workflow, discriminated by `stream_type`), not a
+    // per-aggregate table.
+    if (agg.persistedAs === "eventLog") continue;
     // shape(document): the whole aggregate tree is one jsonb blob — the
     // canonical document triple `(id, data, version)`.
     if (effectiveSavingShape(agg as EnrichedAggregateIR, resolveDataSource?.(agg)) === "document") {
@@ -135,6 +137,20 @@ export function renderPySchema(
       }
     }
   }
+  // The single per-context event log (event-log-architecture.md): ONE
+  // `<ctx>_events` table shared by every `persistedAs(eventLog)` aggregate and
+  // every `eventSourced` workflow in the context, discriminated by
+  // `stream_type`.  Its schema/prefix follows the context's event-sourced
+  // streams (aggregate binding first, else the workflow schema resolver) —
+  // mirrors the Drizzle call site.
+  const esAgg = ctx.aggregates.find((a) => a.persistedAs === "eventLog");
+  const esWf = ctx.workflows.find((w) => w.eventSourced);
+  if (esAgg || esWf) {
+    const logDs = esAgg ? resolveDataSource?.(esAgg) : undefined;
+    const logSchema = esAgg ? logDs?.schema : resolveWorkflowSchema?.(esWf!);
+    const logPrefix = esAgg ? logDs?.tablePrefix : undefined;
+    models.push(renderEventLogModel(ctx.name, logSchema, logPrefix));
+  }
   // Persisted workflow-correlation state (workflow-and-applier.md A2-S2):
   // one row per running instance, keyed by the correlation field.  The
   // shared migration leaves these unqualified (public schema).  A durable
@@ -142,16 +158,13 @@ export function renderPySchema(
   const durable = durableEventTypes(ctx).size > 0;
   for (const wf of ctx.workflows) {
     if (!wf.correlationField) continue;
+    // An `eventSourced` workflow's stream lives in the shared per-context
+    // `<ctx>_events` log emitted above (folded on load, filtered by
+    // `stream_type`) — no per-workflow state table.
+    if (wf.eventSourced) continue;
     // The saga table lands in the workflow's owning-context schema, matching
     // the migration DDL (unqualified when the context has no binding).
     const wfSchema = resolveWorkflowSchema?.(wf);
-    // An `eventSourced` workflow persists as an append-only `<wf>_events`
-    // stream (the saga analogue of a `persistedAs(eventLog)` aggregate),
-    // not a mutable correlation row (migrations-builder.eventLogTableForStream).
-    if (wf.eventSourced) {
-      models.push(renderEventLogModel(wf.name, wfSchema));
-      continue;
-    }
     models.push(renderWorkflowStateModel(wf, ctx, durable, wfSchema));
   }
   // Projection read models (projection.md): one context-owned read-model row
@@ -172,6 +185,7 @@ export function renderPySchema(
     "BigInteger",
     "Boolean",
     "DateTime",
+    "Identity",
     "Index",
     "Integer",
     "Numeric",
@@ -326,18 +340,29 @@ function renderEmbeddedModel(
   );
 }
 
-/** Append-only event stream for a `persistedAs(eventLog)` aggregate —
- *  `(stream_id, version)`-keyed; state rehydrates by folding. */
-function renderEventLogModel(name: string, schema?: string, prefix?: string): string {
-  const tableName = `${prefix ?? ""}${snake(name)}_events`;
+/** The single per-context append-only event log `<ctx>_events`
+ *  (event-log-architecture.md) — one table per bounded context, shared by
+ *  every `persistedAs(eventLog)` aggregate stream AND every `eventSourced`
+ *  workflow stream.  A row is one recorded event keyed by
+ *  `(stream_type, stream_id, version)`: `stream_type` discriminates the owning
+ *  aggregate/workflow (each fold reads only its own rows), `stream_id` is the
+ *  aggregate id / workflow correlation key, `version` its gap-free per-stream
+ *  position (the optimistic-concurrency control).  `seq` is the context-global
+ *  monotonic cursor (`BIGSERIAL`, DB-assigned, carried inert). */
+function renderEventLogModel(ctxName: string, schema?: string, prefix?: string): string {
+  const tableName = `${prefix ?? ""}${contextEventsTableName(ctxName)}`;
   return lines(
-    `class ${name}EventRow(Base):`,
+    `class ${contextEventRowClassName(ctxName)}(Base):`,
     `    __tablename__ = "${tableName}"`,
     "    __table_args__ = (",
-    `        PrimaryKeyConstraint("stream_id", "version"),`,
+    `        PrimaryKeyConstraint("stream_type", "stream_id", "version"),`,
     ...(schema ? [`        {"schema": "${schema}"},`] : []),
     "    )",
     "",
+    // `seq` — context-global monotonic cursor (bigserial); DB-assigned, so
+    // `Identity()` marks it server-generated (inserts omit it).
+    "    seq: Mapped[int] = mapped_column(BigInteger, Identity(), unique=True)",
+    "    stream_type: Mapped[str] = mapped_column(Text)",
     // The shared DDL types stream_id TEXT (Drizzle parity), not UUID.
     "    stream_id: Mapped[str] = mapped_column(Text)",
     "    version: Mapped[int] = mapped_column(Integer)",

@@ -38,6 +38,10 @@ import {
 export function buildViewsRoutesFile(
   ctx: EnrichedBoundedContextIR,
   aggsByName: Map<string, AggregateIR>,
+  /** Maps an event-sourced workflow name to its OWNING context, so a merged
+   *  multi-context deployable's view reads the same `<owner>_events` const the
+   *  schema emits.  Absent → merged `ctx.name` (byte-identical single-context). */
+  resolveStreamContext?: (name: string) => string | undefined,
 ): string {
   if (ctx.views.length === 0) return "";
   // Workflow-sourced views (workflow-instance-views.md).  The read diverges on
@@ -95,7 +99,9 @@ export function buildViewsRoutesFile(
     for (const { wf } of esWfViews) {
       if (done.has(wf.name)) continue;
       done.add(wf.name);
-      esHelperLines.push(...emitWorkflowFoldHelpers(wf, ctx, { readOnly: true }));
+      esHelperLines.push(
+        ...emitWorkflowFoldHelpers(wf, ctx, { readOnly: true, resolveStreamContext }),
+      );
       esHelperLines.push("");
     }
   }

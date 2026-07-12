@@ -16,11 +16,6 @@ import { plural, snake, upperFirst } from "../../../util/naming.js";
 import { projectionRowClass, projectionRowDbSet } from "../projection-state-emit.js";
 import { renderCsExpr } from "../render-expr.js";
 import {
-  esEventDbSet,
-  esEventRecordClass,
-  eventSourcedWorkflows as esWorkflows,
-} from "../workflow-eventsourced-emit.js";
-import {
   correlationWorkflows,
   workflowStateClass,
   workflowStateDbSet,
@@ -77,6 +72,13 @@ export function renderDbContext(
    *  `audited` operation, AppDbContext maps the append-only `audit_records`
    *  table (AuditRecord entity + configuration).  False ⇒ byte-identical. */
   hasAudit = false,
+  /** Per-context event log (event-log-architecture.md): the
+   *  `<Ctx>EventRecordConfiguration` class names — one per bounded context that
+   *  owns any event-sourced stream (`persistedAs(eventLog)` aggregate or
+   *  `eventSourced` workflow).  Non-empty ⇒ map the ONE shared `Events`
+   *  (`DbSet<EventRecord>`) + apply each context's configuration.  Empty ⇒
+   *  byte-identical (no event log). */
+  eventLogConfigs: readonly string[] = [],
 ): string {
   const isDoc = (name: string) => documentAggs.has(name);
   const isEs = (name: string) => eventSourcedAggs.has(name);
@@ -94,16 +96,24 @@ export function renderDbContext(
   const tphBases = ctx.aggregates.filter((a) => a.isAbstract && isTphBase(a, ctx.aggregates));
   const tpcBases = ctx.aggregates.filter((a) => a.isAbstract && !isTphBase(a, ctx.aggregates));
   const anyDoc = entityAggs.some((a) => isDoc(a.name));
-  const anyEs = entityAggs.some((a) => isEs(a.name));
+  // Per-context event log: the ONE shared `Events` DbSet is mapped when any
+  // bounded context owns an event-sourced stream (aggregate OR workflow) — the
+  // config-class list is the signal (an event-sourced workflow with no ES
+  // aggregate still contributes one).
+  const hasEventLog = eventLogConfigs.length > 0;
   const aggUsings = ctx.aggregates.map((a) => `using ${ns}.Domain.${plural(a.name)};`);
   if (anyDoc) aggUsings.push(`using ${ns}.Infrastructure.Persistence.Documents;`);
-  if (anyEs) aggUsings.push(`using ${ns}.Infrastructure.Persistence.Events;`);
-  const dbSets = entityAggs.map((a) =>
+  if (hasEventLog) aggUsings.push(`using ${ns}.Infrastructure.Persistence.Events;`);
+  // Event-sourced aggregates contribute NO per-aggregate DbSet (their stream
+  // lives in the shared `Events` log below), so drop them here.
+  const dbSets = entityAggs.flatMap((a) =>
     isEs(a.name)
-      ? `    public DbSet<${a.name}EventRecord> ${a.name}Events => Set<${a.name}EventRecord>();`
+      ? []
       : isDoc(a.name)
-        ? `    public DbSet<${a.name}Document> ${plural(upperFirst(a.name))} => Set<${a.name}Document>();`
-        : `    public DbSet<${a.name}> ${plural(upperFirst(a.name))} => Set<${a.name}>();`,
+        ? [
+            `    public DbSet<${a.name}Document> ${plural(upperFirst(a.name))} => Set<${a.name}Document>();`,
+          ]
+        : [`    public DbSet<${a.name}> ${plural(upperFirst(a.name))} => Set<${a.name}>();`],
   );
   // The TPH base's polymorphic DbSet — `find all <Base>` queries it and EF
   // returns every concrete in the shared table.
@@ -111,12 +121,25 @@ export function renderDbContext(
     (a) => `    public DbSet<${a.name}> ${plural(upperFirst(a.name))} => Set<${a.name}>();`,
   );
   const ignoreBases = tpcBases.map((a) => `        modelBuilder.Ignore<${a.name}>();`);
-  const applyConfigs = entityAggs.map((a) =>
+  // Event-sourced aggregates apply no per-aggregate configuration — the shared
+  // per-context event-log config(s) are applied once, below.
+  const applyConfigs = entityAggs.flatMap((a) =>
     isEs(a.name)
-      ? `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}EventRecordConfiguration());`
+      ? []
       : isDoc(a.name)
-        ? `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}DocumentConfiguration());`
-        : `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}Configuration());`,
+        ? [
+            `        modelBuilder.ApplyConfiguration(new Configurations.${a.name}DocumentConfiguration());`,
+          ]
+        : [`        modelBuilder.ApplyConfiguration(new Configurations.${a.name}Configuration());`],
+  );
+  // The ONE shared per-context event log: `DbSet<EventRecord> Events` +
+  // `ApplyConfiguration(new Configurations.<Ctx>EventRecordConfiguration())`
+  // per event-sourced context (aggregates AND workflows share it).
+  const eventLogDbSets = hasEventLog
+    ? ["    public DbSet<EventRecord> Events => Set<EventRecord>();"]
+    : [];
+  const eventLogApplyConfigs = eventLogConfigs.map(
+    (cfg) => `        modelBuilder.ApplyConfiguration(new Configurations.${cfg}());`,
   );
   // The TPH base's configuration owns the shared table + `HasDiscriminator`;
   // apply it FIRST so EF sees the discriminator mapping before the derived
@@ -174,22 +197,11 @@ export function renderDbContext(
     (p) =>
       `        modelBuilder.ApplyConfiguration(new Configurations.${projectionRowClass(p)}Configuration());`,
   );
-  // Event-sourced workflows (workflow-and-applier.md A2-S5b): each persists as
-  // an append-only `<wf>_events` stream — a `DbSet<<Wf>EventRecord>` + its
-  // configuration, the saga analogue of the aggregate event store (its
-  // `<Wf>EventRecord` POCO shares the Persistence.Events namespace, so the
-  // `anyEs` aggregate using already covers it; add it when no ES aggregate did).
-  const esWfs = esWorkflows(ctx.workflows);
-  const esWfUsings =
-    esWfs.length > 0 && !anyEs ? [`using ${ns}.Infrastructure.Persistence.Events;`] : [];
-  const wfEventDbSets = esWfs.map(
-    (wf) =>
-      `    public DbSet<${esEventRecordClass(wf)}> ${esEventDbSet(wf)} => Set<${esEventRecordClass(wf)}>();`,
-  );
-  const wfEventApplyConfigs = esWfs.map(
-    (wf) =>
-      `        modelBuilder.ApplyConfiguration(new Configurations.${esEventRecordClass(wf)}Configuration());`,
-  );
+  // Event-sourced workflows (workflow-and-applier.md A2-S5b) persist to the
+  // SAME per-context `<ctx>_events` log as the aggregates (discriminated by
+  // `stream_type`), so they contribute no per-workflow DbSet/configuration —
+  // the shared `Events` DbSet + `<Ctx>EventRecordConfiguration` cover them
+  // (`eventLogConfigs` is derived from ES aggregates ∪ ES workflows).
   const outboxDbSets = hasOutbox
     ? ["    public DbSet<OutboxMessage> LoomOutbox => Set<OutboxMessage>();"]
     : [];
@@ -279,7 +291,6 @@ export function renderDbContext(
       ...joinUsings,
       ...wfStateUsings,
       ...projRowUsings,
-      ...esWfUsings,
       // The scoped principal accessor the per-request tenancy query filters read,
       // plus the id namespace (a registry self-scope filter constructs an `<Agg>Id`).
       anyPrincipalFilter ? `using ${ns}.Auth;` : null,
@@ -311,7 +322,7 @@ export function renderDbContext(
       ...joinDbSets,
       ...wfStateDbSets,
       ...projRowDbSets,
-      ...wfEventDbSets,
+      ...eventLogDbSets,
       ...outboxDbSets,
       ...provenanceDbSets,
       ...auditDbSets,
@@ -323,7 +334,7 @@ export function renderDbContext(
       ...joinApplyConfigs,
       ...wfStateApplyConfigs,
       ...projRowApplyConfigs,
-      ...wfEventApplyConfigs,
+      ...eventLogApplyConfigs,
       ...outboxApplyConfigs,
       ...provenanceApplyConfigs,
       ...auditApplyConfigs,

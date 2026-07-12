@@ -413,6 +413,16 @@ export function generateTypeScriptForContexts(
         return owningCtx ? resolveContextSchema(owningCtx, system.sys) : undefined;
       }
     : undefined;
+  // Per-stream OWNING-context name — maps an event-sourced aggregate / workflow
+  // to the context that declares it, so the merged multi-context schema names
+  // each `<ctx>_events` log after its owner (matching the per-aggregate
+  // repository + migrations), not the merged context name.
+  const resolveStreamContext = (streamName: string): string | undefined =>
+    contexts.find(
+      (c) =>
+        c.aggregates.some((a) => a.name === streamName) ||
+        c.workflows.some((w) => w.name === streamName),
+    )?.name;
   // Persistence selection (D-REALIZATION-AXES `persistence:`): `mikroorm`
   // replaces the drizzle schema + per-aggregate drizzle repositories + drizzle
   // migrations with an EntitySchema persistence model + MikroORM repositories
@@ -432,6 +442,7 @@ export function generateTypeScriptForContexts(
         resolveDataSource,
         resolveWorkflowSchema,
         resolveProjectionSchema,
+        resolveStreamContext,
       }),
     );
   }
@@ -457,6 +468,7 @@ export function generateTypeScriptForContexts(
       aggsByName,
       resourceSourceTypes,
       workflowOpFragments,
+      resolveStreamContext,
     );
     out.set("http/workflows.ts", workflowsContent);
     if (sourcemap && workflowOpFragments) {
@@ -472,7 +484,7 @@ export function generateTypeScriptForContexts(
   }
   if (merged.views.length > 0) {
     const aggsByName = new Map(merged.aggregates.map((a) => [a.name, a] as const));
-    out.set("http/views.ts", buildViewsRoutesFile(merged, aggsByName));
+    out.set("http/views.ts", buildViewsRoutesFile(merged, aggsByName, resolveStreamContext));
   }
   if (merged.projections.length > 0 && !usingMikro) {
     out.set("http/projections.ts", buildProjectionsFile(merged));

@@ -208,10 +208,55 @@ function writeInitialFile(
     ? renderInitialValueCollectionFile(table, migrationName, appModule)
     : isJoinTable(table)
       ? renderInitialJoinFile(table, migrationName, appModule)
-      : isStateTable(table)
-        ? renderInitialStateFile(table, migrationName, appModule)
-        : renderInitialFile(table, migrationName, appModule);
+      : isEventLogTable(table)
+        ? renderInitialEventLogFile(table, migrationName, appModule)
+        : isStateTable(table)
+          ? renderInitialStateFile(table, migrationName, appModule)
+          : renderInitialFile(table, migrationName, appModule);
   out.set(path, body);
+}
+
+/** The single per-context append-only event log (`<ctx>_events`,
+ *  event-log-architecture.md).  It has no `id` (so it would otherwise fall to
+ *  `renderInitialStateFile`), but unlike a saga-state table it carries a
+ *  `bigserial` `seq` cursor, a composite `(stream_type, stream_id, version)`
+ *  PK, a unique index on `seq`, and NO `timestamps()` (its time column is
+ *  `occurred_at`).  Detected by the `seq` bigserial column, unique to this
+ *  table. */
+function isEventLogTable(t: TableShape): boolean {
+  return t.columns.some((c) => c.name === "seq" && c.type.kind === "bigserial");
+}
+
+/** Render the per-context event-log migration: composite PK columns marked
+ *  `primary_key: true`, the remaining columns (incl. the `bigserial` `seq`)
+ *  as plain adds, then the unique `seq` index.  No `timestamps()` — the log's
+ *  time column is the explicit `occurred_at`. */
+function renderInitialEventLogFile(
+  table: TableShape,
+  migrationName: string,
+  appModule: string,
+): string {
+  const pk = new Set(table.primaryKey);
+  const prefix = prefixOpt(table.schema);
+  const colLines = table.columns.map((c) => {
+    if (pk.has(c.name)) {
+      return `      add :${c.name}, ${ectoPrimaryKeyType(c.type)}, primary_key: true, null: false`;
+    }
+    return "      " + renderEctoColumn(c, table);
+  });
+  const indexLines = table.indexes.map(
+    (i) => `    create index(:${i.table}, [${ectoIndexColumns(i)}]${ectoIndexOpts(i, prefix)})`,
+  );
+  return `defmodule ${appModule}.Repo.Migrations.${migrationName} do
+  use Ecto.Migration
+
+  def change do
+${schemaCreateLine(table.schema)}    create table(:${table.name}, primary_key: false${prefix}) do
+${colLines.join("\n")}
+    end
+${indexLines.join("\n")}${indexLines.length > 0 ? "\n" : ""}  end
+end
+`;
 }
 
 /** A persisted workflow-correlation (saga) state table: keyed by the
@@ -519,6 +564,9 @@ function ectoColumnType(t: ColumnType): string {
       return ":integer";
     case "bigint":
       return ":bigint";
+    case "bigserial":
+      // Ecto's `:bigserial` — bigint + owned sequence (event-log-architecture.md).
+      return ":bigserial";
     case "text":
       return ":text";
     case "bool":

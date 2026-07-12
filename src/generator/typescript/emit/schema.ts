@@ -88,6 +88,14 @@ export function renderSchema(
      *  resolved from the projection's OWNING context (mirrors
      *  `resolveWorkflowSchema`).  Absent / undefined → unqualified `pgTable`. */
     resolveProjectionSchema?: (proj: ProjectionIR) => string | undefined;
+    /** Per-stream OWNING-context name lookup — maps an event-sourced aggregate /
+     *  workflow name to the name of the bounded context that declares it.  This
+     *  `ctx` may be a merged union of several contexts (multi-context
+     *  deployable), so the per-context `<ctx>_events` log must be named after
+     *  the stream's OWNING context (matching the repository + migrations), not
+     *  the merged `ctx.name`.  Absent / undefined → the merged `ctx.name`,
+     *  byte-identical for single-context systems. */
+    resolveStreamContext?: (streamName: string) => string | undefined;
   } = {},
 ): string {
   const lookup = opts.resolveDataSource;
@@ -147,11 +155,11 @@ export function renderSchema(
       continue;
     }
     // Event-sourced (`persistedAs(eventLog)`): the aggregate's truth is its
-    // event stream, so it gets an append-only `<agg>_events` table instead
-    // of a state table.  State is rehydrated by folding the stream through
-    // the appliers (fold-from-zero MVP); no part / join / read-model tables.
+    // event stream, which lives in the single per-context `<ctx>_events` log
+    // (emitted once after this loop, event-log-architecture.md) — no
+    // per-aggregate table.  State is rehydrated by folding the stream, filtered
+    // by `stream_type`, through the appliers.
     if (agg.persistedAs === "eventLog") {
-      tables.push(emitEventLogTable(agg.name, { schema, prefix }));
       continue;
     }
     const shape = effectiveSavingShape(agg, lookup?.(agg));
@@ -197,6 +205,33 @@ export function renderSchema(
       }
     }
   }
+  // The per-context event log (event-log-architecture.md): one `<ctx>_events`
+  // table shared by every `persistedAs(eventLog)` aggregate and every
+  // `eventSourced` workflow in the context, discriminated by `stream_type`.
+  // Keyed by OWNING context, because this `ctx` may be a merged union of
+  // several contexts (multi-context deployable) — each owning context that has
+  // any event-sourced stream gets its own log, named to match the repository +
+  // migrations (`<owner>_events`).  Aggregate binding fixes the schema first
+  // (an owning context with both an ES aggregate and an ES workflow shares one
+  // log), else the workflow schema resolver.
+  const eventLogs = new Map<string, { schema?: string; prefix?: string }>();
+  for (const agg of ctx.aggregates) {
+    if (agg.persistedAs !== "eventLog") continue;
+    const owner = opts.resolveStreamContext?.(agg.name) ?? ctx.name;
+    if (!eventLogs.has(owner)) {
+      eventLogs.set(owner, { schema: schemaFor(agg), prefix: prefixFor(agg) });
+    }
+  }
+  for (const wf of ctx.workflows) {
+    if (!wf.eventSourced) continue;
+    const owner = opts.resolveStreamContext?.(wf.name) ?? ctx.name;
+    if (!eventLogs.has(owner)) {
+      eventLogs.set(owner, { schema: registerSchema(opts.resolveWorkflowSchema?.(wf)) });
+    }
+  }
+  for (const [owner, info] of eventLogs) {
+    tables.push(emitEventLogTable(owner, info));
+  }
   if (opts.audit) tables.push(AUDIT_TABLE);
   if (opts.provenance) tables.push(PROVENANCE_TABLE);
   // Transactional outbox (dispatch-delivery-semantics.md): emitted when any
@@ -216,11 +251,12 @@ export function renderSchema(
     // schema (registered so its `pgSchema(...)` decl is emitted), matching the
     // migration DDL.  Unqualified when the context has no dataSource binding.
     const wfSchema = registerSchema(opts.resolveWorkflowSchema?.(wf));
-    // An `eventSourced` workflow persists as an append-only `<wf>_events`
-    // stream (folded on load), the saga analogue of a `persistedAs(eventLog)`
-    // aggregate — not a mutable state row (workflow-and-applier.md A2-S5b).
-    if (wf.eventSourced) tables.push(emitEventLogTable(wf.name, { schema: wfSchema }));
-    else if (wf.correlationField) tables.push(emitWorkflowStateTable(wf, ctx, wfSchema));
+    // An `eventSourced` workflow's stream lives in the shared per-context
+    // `<ctx>_events` log emitted above (folded on load, filtered by
+    // `stream_type`) — no per-workflow table.  A plain correlation-bearing
+    // workflow keeps its mutable state row.
+    if (!wf.eventSourced && wf.correlationField)
+      tables.push(emitWorkflowStateTable(wf, ctx, wfSchema));
   }
   // Projection read models (projection.md): one context-owned state table per
   // projection, keyed by its correlation column — the fold dispatcher upserts
@@ -248,6 +284,7 @@ export function renderSchema(
     "text",
     "integer",
     "bigint",
+    "bigserial",
     "numeric",
     "boolean",
     "timestamp",
@@ -547,13 +584,19 @@ function emitEventLogTable(
   const constName = `${lowerFirst(name)}Events`;
   return [
     `export const ${constName} = ${tableFactory}("${tableName}", {`,
+    // `seq` — context-global monotonic cursor (event-log-architecture.md).
+    // DB-assigned bigserial; inert until the replay reader lands.
+    `  seq: bigserial("seq", { mode: "number" }).notNull(),`,
+    // `stream_type` — the owning aggregate/workflow name; discriminates the
+    // streams that share this per-context log so a fold reads only its own.
+    `  streamType: text("stream_type").notNull(),`,
     `  streamId: text("stream_id").notNull(),`,
     `  version: integer("version").notNull(),`,
     `  type: text("type").notNull(),`,
     `  data: jsonb("data").notNull(),`,
     `  occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),`,
     `}, (table) => ({`,
-    `  ${constName}Pk: primaryKey({ columns: [table.streamId, table.version] }),`,
+    `  ${constName}Pk: primaryKey({ columns: [table.streamType, table.streamId, table.version] }),`,
     `}));`,
   ].join("\n");
 }

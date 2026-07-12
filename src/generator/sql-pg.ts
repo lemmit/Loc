@@ -141,6 +141,8 @@ export function renderPgType(t: ColumnType): string {
       return "UUID";
     case "int":
       return "INTEGER";
+    case "bigserial":
+      return "BIGSERIAL";
     case "bigint":
       return "BIGINT";
     case "text":

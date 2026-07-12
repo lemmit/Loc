@@ -16,7 +16,7 @@ import { collectJavaExprImports, renderJavaExpr } from "../render-expr.js";
 import type { OpFragment } from "./entity.js";
 import { projectionRowClass } from "./projection-state.js";
 import { javaWorkflowStmtTarget, repoField, reposUsed } from "./workflow.js";
-import { esWorkflowStateClass, esWorkflowStreamTable } from "./workflow-eventsourced.js";
+import { esEventLogTable, esWorkflowStateClass } from "./workflow-eventsourced.js";
 import { workflowStateClass } from "./workflow-state.js";
 
 // ---------------------------------------------------------------------------
@@ -529,7 +529,10 @@ function renderEsHandler(
 
   const hasEmit = bodyHasEmit(resolved.statements);
   const cls = esWorkflowStateClass(wf);
-  const table = esWorkflowStreamTable(wf, schema);
+  // The single per-context event log; this workflow's stream is the subset
+  // tagged `stream_type = "<Wf>"`, so every load/append filters + stamps it.
+  const table = esEventLogTable(ctx.name, schema);
+  const streamType = wf.name;
 
   // Render the body up front (chunked, one lines-array per top-level
   // statement) so we know whether it reads the folded snapshot (a starter
@@ -569,7 +572,7 @@ function renderEsHandler(
     // A continuation needs a started saga (non-empty stream); else drop + log.
     body.push(`        var __rows = jdbc.queryForList(`);
     body.push(
-      `            "select type, data from ${table} where stream_id = ? order by version", __sid);`,
+      `            "select type, data from ${table} where stream_type = ? and stream_id = ? order by version", "${streamType}", __sid);`,
     );
     body.push(`        if (__rows.isEmpty()) {`);
     body.push(
@@ -582,7 +585,7 @@ function renderEsHandler(
     // A starter that reads state folds the (possibly empty) stream from zero.
     body.push(`        var __rows = jdbc.queryForList(`);
     body.push(
-      `            "select type, data from ${table} where stream_id = ? order by version", __sid);`,
+      `            "select type, data from ${table} where stream_type = ? and stream_id = ? order by version", "${streamType}", __sid);`,
     );
     body.push(...loadFold);
   }
@@ -610,13 +613,13 @@ function renderEsHandler(
   if (hasEmit) {
     body.push(
       `        Integer __max = jdbc.queryForObject(`,
-      `            "select max(version) from ${table} where stream_id = ?", Integer.class, __sid);`,
+      `            "select max(version) from ${table} where stream_type = ? and stream_id = ?", Integer.class, "${streamType}", __sid);`,
       `        int __v = __max == null ? 0 : __max;`,
       `        for (var __e : __events) {`,
       `            __v++;`,
       `            jdbc.update(`,
-      `                "insert into ${table} (stream_id, version, type, data) values (?, ?, ?, ?::jsonb)",`,
-      `                __sid, __v, __e.getClass().getSimpleName(), ${cls}._toData(__e));`,
+      `                "insert into ${table} (stream_type, stream_id, version, type, data) values (?, ?, ?, ?, ?::jsonb)",`,
+      `                "${streamType}", __sid, __v, __e.getClass().getSimpleName(), ${cls}._toData(__e));`,
       `        }`,
       `        for (var __e : __events) events.publishEvent(__e);`,
     );
@@ -660,7 +663,8 @@ function esMergedBranchLines(
   opFragments?: OpFragment[],
 ): { lines: string[]; usesState: boolean } {
   const cls = esWorkflowStateClass(wf);
-  const table = esWorkflowStreamTable(wf, schema);
+  const table = esEventLogTable(ctx.name, schema);
+  const streamType = wf.name;
   const hasEmit = bodyHasEmit(resolved.statements);
   const stmtChunks = renderWorkflowStmtChunks(
     resolved.statements,
@@ -699,13 +703,13 @@ function esMergedBranchLines(
   if (hasEmit) {
     out.push(
       `        Integer __max = jdbc.queryForObject(`,
-      `            "select max(version) from ${table} where stream_id = ?", Integer.class, __sid);`,
+      `            "select max(version) from ${table} where stream_type = ? and stream_id = ?", Integer.class, "${streamType}", __sid);`,
       `        int __v = __max == null ? 0 : __max;`,
       `        for (var __e : __events) {`,
       `            __v++;`,
       `            jdbc.update(`,
-      `                "insert into ${table} (stream_id, version, type, data) values (?, ?, ?, ?::jsonb)",`,
-      `                __sid, __v, __e.getClass().getSimpleName(), ${cls}._toData(__e));`,
+      `                "insert into ${table} (stream_type, stream_id, version, type, data) values (?, ?, ?, ?, ?::jsonb)",`,
+      `                "${streamType}", __sid, __v, __e.getClass().getSimpleName(), ${cls}._toData(__e));`,
       `        }`,
       `        for (var __e : __events) events.publishEvent(__e);`,
     );
@@ -735,7 +739,8 @@ function renderEsMergedHandler(
   const corr = wf.correlationField as string;
   const param = createSub.param;
   const cls = esWorkflowStateClass(wf);
-  const table = esWorkflowStreamTable(wf, schema);
+  const table = esEventLogTable(ctx.name, schema);
+  const streamType = wf.name;
   const renderCtx = { thisName: "state" };
   const keyExpr = createResolved.correlation
     ? renderJavaExpr(createResolved.correlation, renderCtx)
@@ -770,7 +775,7 @@ function renderEsMergedHandler(
     `        var __key = ${keyExpr};`,
     `        var __sid = String.valueOf(__key.value());`,
     `        var __rows = jdbc.queryForList(`,
-    `            "select type, data from ${table} where stream_id = ? order by version", __sid);`,
+    `            "select type, data from ${table} where stream_type = ? and stream_id = ? order by version", "${streamType}", __sid);`,
   ];
   if (usesState) {
     // Fold once; both branches read the same folded snapshot.  An empty stream

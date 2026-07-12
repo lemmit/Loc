@@ -132,7 +132,15 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     // Event-sourced aggregates (persistedAs(eventLog)) — struct + event-log
     // Ecto schema + fold + event-store repository (D-VANILLA-ES-HOME).  The
     // state emitters above skip them; the context module + controllers branch.
-    emitVanillaEventSourcedFiles(appModule, ctx, out);
+    // The shared `<ctx>_events` log lives in the context's Postgres schema
+    // (matching the migration `prefix:`), so the `<Agg>EventLog` `@schema_prefix`
+    // and the DDL agree at runtime (mirrors the ES-workflow log below).
+    emitVanillaEventSourcedFiles(
+      appModule,
+      ctx,
+      out,
+      sys ? resolveContextSchema(ctx, sys) : undefined,
+    );
     emitVanillaContextModule(appModule, ctx, out, sys, sourcemap);
     // Domain services — stateless pure-calculator modules under
     // `<App>.Domain.Services.*` (domain-services.md).  A domain service touches

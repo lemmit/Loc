@@ -116,11 +116,19 @@ system D {
     expect(errors).toEqual([]);
     const repo = files.get("api/Infrastructure/Repositories/AccountRepository.cs")!;
     expect(repo).toContain("Account._FromEvents(id, __rows.Select(RowToEvent).ToList());");
-    expect(repo).toContain("INSERT INTO account_events");
+    // The aggregate's stream lives in the single per-context event log
+    // `<ctx>_events` (context `O`), discriminated by `stream_type`
+    // (event-log-architecture.md).
+    expect(repo).toContain(
+      "INSERT INTO o_events (stream_type, stream_id, version, type, data, occurred_at)",
+    );
+    // Reconstruction scopes to this aggregate's stream_type — the correctness
+    // guard now that streams share one table.
+    expect(repo).toContain("WHERE stream_type = @st AND stream_id = @sid");
     expect(repo).toContain('"Opened" => System.Text.Json.JsonSerializer.Deserialize<Opened>');
-    // The stream table ships in the self-applied schema.
+    // The per-context event table ships in the self-applied schema.
     expect(files.get("api/Infrastructure/Persistence/DbSchema.cs")).toContain(
-      "CREATE TABLE IF NOT EXISTS account_events",
+      "CREATE TABLE IF NOT EXISTS o_events",
     );
   });
 });

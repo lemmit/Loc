@@ -193,6 +193,72 @@ describe("phoenix migrations-emit — delta path", () => {
     );
   });
 
+  it("renders the per-context event-log table with a composite PK, the unique seq index, and no timestamps()", () => {
+    // The `<ctx>_events` log (event-log-architecture.md) has no `id` (so it
+    // would otherwise fall to the state-table renderer, which emits no indexes
+    // and appends timestamps()).  It needs the composite (stream_type,
+    // stream_id, version) PK, the bigserial `seq` cursor + its unique index,
+    // and NO timestamps() — its time column is the explicit `occurred_at`.
+    const ir: MigrationsIR = {
+      module: "Ledger",
+      storageName: "",
+      baseline: null,
+      next: EMPTY_SNAP,
+      steps: [
+        {
+          op: "createTable",
+          table: {
+            name: "accounts_events",
+            ownerModule: "Ledger",
+            columns: [
+              { name: "seq", type: { kind: "bigserial" }, nullable: false },
+              { name: "stream_type", type: { kind: "text" }, nullable: false },
+              { name: "stream_id", type: { kind: "text" }, nullable: false },
+              { name: "version", type: { kind: "int" }, nullable: false },
+              { name: "type", type: { kind: "text" }, nullable: false },
+              { name: "data", type: { kind: "json" }, nullable: false },
+              {
+                name: "occurred_at",
+                type: { kind: "datetime" },
+                nullable: false,
+                default: "now()",
+              },
+            ],
+            primaryKey: ["stream_type", "stream_id", "version"],
+            foreignKeys: [],
+            indexes: [
+              {
+                name: "accounts_events_seq_key",
+                table: "accounts_events",
+                columns: ["seq"],
+                unique: true,
+              },
+            ],
+          },
+        },
+      ],
+      version: "20260101000000",
+      name: "Initial",
+    };
+    const body = emit(ir).get("priv/repo/migrations/20260101000000_create_accounts_events.exs")!;
+    // Composite PK — every key column marked primary_key: true.
+    expect(body).toContain("add :stream_type, :string, primary_key: true, null: false");
+    expect(body).toContain("add :stream_id, :string, primary_key: true, null: false");
+    expect(body).toContain("add :version, :integer, primary_key: true, null: false");
+    // The bigserial cursor is a plain column (not a PK).
+    expect(body).toContain("add :seq, :bigserial, null: false");
+    // occurred_at's SQL default is fragment-wrapped for Ecto DSL.
+    expect(body).toContain(
+      'add :occurred_at, :utc_datetime, null: false, default: fragment("now()")',
+    );
+    // The unique seq index carries its deterministic name.
+    expect(body).toContain(
+      'create index(:accounts_events, [:seq], unique: true, name: "accounts_events_seq_key")',
+    );
+    // No Ecto timestamps() — the log's time column is occurred_at.
+    expect(body).not.toContain("timestamps()");
+  });
+
   it("creates the Postgres schema and prefixes table / FK / index when the table is schema-qualified", () => {
     const ir: MigrationsIR = {
       module: "Catalog",

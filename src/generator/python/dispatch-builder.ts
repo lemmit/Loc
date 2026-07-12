@@ -206,9 +206,15 @@ export function buildPyDispatchFile(
   const touchedWorkflows = [...helperDone]
     .map((n) => ctx.workflows.find((w) => w.name === n))
     .filter((w): w is WorkflowIR => w != null);
-  const stateRows = touchedWorkflows.map((w) => (w.eventSourced ? esEventRow(w) : `${w.name}Row`));
+  const stateRows = touchedWorkflows.map((w) =>
+    w.eventSourced ? esEventRow(ctx) : `${w.name}Row`,
+  );
   const projRows = touchedProjections.map((p) => `${p.name}Row`);
-  const schemaRows = [...stateRows, ...projRows, ...(hasOutbox ? ["LoomOutboxRow"] : [])].sort();
+  // Dedupe: multiple ES workflows in one context now share the single
+  // per-context `<Ctx>EventRow` class, so the import must not list it twice.
+  const schemaRows = [
+    ...new Set([...stateRows, ...projRows, ...(hasOutbox ? ["LoomOutboxRow"] : [])]),
+  ].sort();
   // The folded events of an ES workflow are constructed/dispatched in its
   // codec + isinstance fold, so import them alongside the subscribed events.
   const esEventNames = touchedWorkflows

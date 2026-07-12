@@ -8,6 +8,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
+import { contextEventRowClassName } from "./py-columns.js";
 import { wireHelperImport } from "./py-type-imports.js";
 import { renderPyExpr } from "./render-expr.js";
 import { emittableFinds, findExecutedLine, writeGuardAlias } from "./repository-builder.js";
@@ -31,7 +32,11 @@ export function buildPyEventSourcedRepositoryFile(
   repo: RepositoryIR | undefined,
   ctx: EnrichedBoundedContextIR,
 ): string {
-  const row = `${agg.name}EventRow`;
+  // The single per-context event log (event-log-architecture.md); this
+  // aggregate's stream is the subset tagged `stream_type = "<Agg>"`, so every
+  // read filters on it and every append stamps it — two aggregates sharing one
+  // table must each fold only their own events.
+  const row = contextEventRowClassName(ctx.name);
   const events = (agg.appliers ?? [])
     .map((ap) => ctx.events.find((ev) => ev.name === ap.event))
     .filter((ev): ev is EventIR => ev != null);
@@ -45,7 +50,9 @@ export function buildPyEventSourcedRepositoryFile(
     `    async def find_by_id(self, id: ${agg.name}Id) -> ${agg.name} | None:`,
     "        rows = (",
     "            await self._session.execute(",
-    `                select(${row}).where(${row}.stream_id == id).order_by(${row}.version)`,
+    `                select(${row})
+                .where(${row}.stream_type == "${agg.name}", ${row}.stream_id == id)
+                .order_by(${row}.version)`,
     "            )",
     "        ).scalars().all()",
     "        if not rows:",
@@ -63,7 +70,9 @@ export function buildPyEventSourcedRepositoryFile(
     `    async def all(self) -> list[${agg.name}]:`,
     "        rows = (",
     "            await self._session.execute(",
-    `                select(${row}).order_by(${row}.stream_id, ${row}.version)`,
+    `                select(${row})
+                .where(${row}.stream_type == "${agg.name}")
+                .order_by(${row}.stream_id, ${row}.version)`,
     "            )",
     "        ).scalars().all()",
     "        by_stream: dict[str, list[DomainEvent]] = {}",
@@ -79,7 +88,9 @@ export function buildPyEventSourcedRepositoryFile(
     "        if pending:",
     "            prior = (",
     "                await self._session.execute(",
-    `                    select(func.max(${row}.version)).where(${row}.stream_id == aggregate.id)`,
+    `                    select(func.max(${row}.version)).where(
+                        ${row}.stream_type == "${agg.name}", ${row}.stream_id == aggregate.id
+                    )`,
     "                )",
     "            ).scalar()",
     "            version = prior or 0",
@@ -93,6 +104,7 @@ export function buildPyEventSourcedRepositoryFile(
     "                try:",
     "                    await self._session.execute(",
     `                        insert(${row}).values(`,
+    `                            stream_type="${agg.name}",`,
     "                            stream_id=aggregate.id,",
     "                            version=version,",
     "                            type=type(ev).type,",

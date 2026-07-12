@@ -84,7 +84,14 @@ describe("vanilla elixir event-sourced workflows", () => {
       'defp event_type(%Api.Fulfillment.Events.PaymentRegistered{}), do: "PaymentRegistered"',
     );
     const log = files.get(`${WF}/order_fulfillment_event_log.ex`)!;
-    expect(log).toContain('schema "order_fulfillment_events" do');
+    // Per-context collapse: the ES workflow's stream shares the context log
+    // `<ctx>_events`, discriminated by `stream_type`.
+    expect(log).toContain('schema "fulfillment_events" do');
+    expect(log).toContain("field :stream_type, :string, primary_key: true");
+    expect(log).toContain("field :seq, :integer");
+    // Append/load stamp+filter the workflow name as the stream_type.
+    expect(st).toContain('where: r.stream_type == ^"OrderFulfillment"');
+    expect(st).toContain('stream_type: "OrderFulfillment"');
   });
 
   it("the <Wf>Stream exposes list_instances/0 + instance_by_id/1 (fold-on-load reads)", async () => {
@@ -94,9 +101,9 @@ describe("vanilla elixir event-sourced workflows", () => {
     // an empty stream.
     const st = (await gen()).get(`${WF}/order_fulfillment_stream.ex`)!;
     expect(st).toContain("def list_instances do");
-    expect(st).toContain(
-      "Repo.all(from(r in OrderFulfillmentEventLog, order_by: [asc: r.stream_id, asc: r.version]))",
-    );
+    expect(st).toContain("from(r in OrderFulfillmentEventLog,");
+    expect(st).toContain('where: r.stream_type == ^"OrderFulfillment"');
+    expect(st).toContain("order_by: [asc: r.stream_id, asc: r.version]");
     expect(st).toContain("|> Enum.group_by(& &1.stream_id)");
     expect(st).toContain("OrderFulfillmentFold.from_events(sid, Enum.map(rows, &row_to_event/1))");
     expect(st).toContain("def instance_by_id(id) when is_binary(id) do");

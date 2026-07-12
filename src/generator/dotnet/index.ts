@@ -31,7 +31,7 @@ import { hierarchyRegistry } from "../../ir/util/tenant-stance.js";
 import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import type { Model } from "../../language/generated/ast.js";
 import { apiRoutePrefix } from "../../util/api-base.js";
-import { plural, upperFirst } from "../../util/naming.js";
+import { plural, snake, upperFirst } from "../../util/naming.js";
 import type { EmitCtx, LayoutAdapter, StyleAdapter } from "../_adapters/index.js";
 import { embedSpaInto } from "../_frontend/embedded-spa.js";
 import { unionMembers } from "../_payload/union-wire.js";
@@ -419,8 +419,24 @@ function emitProjectFromContexts(
   // still gets the audit_records table + IAuditWriter seam.
   const hasAudit = !usingDapper && merged.aggregates.some(aggHasAuditedTarget);
   if (usingDapper) {
-    out.set("Infrastructure/Persistence/DbSchema.cs", renderDapperSchema(merged.aggregates, ns));
+    out.set(
+      "Infrastructure/Persistence/DbSchema.cs",
+      renderDapperSchema(
+        merged.aggregates,
+        ns,
+        eventLogContexts(contexts).map((c) => snake(c.name)),
+      ),
+    );
   } else {
+    // Per-context event log (event-log-architecture.md): the shared `EventRecord`
+    // POCO + one `<Ctx>EventRecordConfiguration` per event-sourced context, and
+    // the matching config-class list threaded into the DbContext so it maps the
+    // single `Events` DbSet.  The event table lives in the context's dataSource
+    // schema (map-back over `contexts`, since `merged` unions several).
+    const resolveEventLogSchema = system
+      ? (c: EnrichedBoundedContextIR): string | undefined => resolveContextSchema(c, system.sys)
+      : undefined;
+    emitEventLogFiles(contexts, ns, out, resolveEventLogSchema);
     out.set(
       "Infrastructure/Persistence/AppDbContext.cs",
       renderDbContext(
@@ -432,6 +448,7 @@ function emitProjectFromContexts(
         hasOutbox,
         hasProvenance,
         hasAudit,
+        eventLogConfigClasses(contexts),
       ),
     );
     // Provenance runtime shared files — the lineage SDK + the append-only
@@ -489,9 +506,10 @@ function emitProjectFromContexts(
       : undefined;
     emitProjectionRowPersistence(merged.projections, ns, out, resolveProjectionSchema);
     // Event-sourced workflows (workflow-and-applier.md A2-S5b): the `<Wf>State`
-    // fold class + `<Wf>EventRecord` POCO/config (the stream the dispatch
-    // handler folds-on-load / appends to).
-    emitEventSourcedWorkflowFiles(merged.workflows, ns, out, resolveWorkflowSchema);
+    // fold class.  Its stream shares the per-context `<ctx>_events` log (shared
+    // `EventRecord` POCO + `<Ctx>EventRecordConfiguration`, emitted once per
+    // context above), so no per-workflow POCO/config here.
+    emitEventSourcedWorkflowFiles(merged.workflows, ns, out);
     // Domain persistence-port adapters (audit S7 Slice C): the EF
     // implementations of IUnitOfWork / IWorkflowEventStore / ISagaStateStore /
     // IReadModelStore the orchestration handlers depend on INSTEAD of the
@@ -996,14 +1014,17 @@ function emitAggregate(
       `${agg.name}Repository.cs`,
       "repository-impl",
       isEs
-        ? renderDapperEventSourcedRepository(agg, repoWithViews, ns, findBodies)
+        ? renderDapperEventSourcedRepository(agg, repoWithViews, ns, findBodies, ctx.name)
         : renderDapperRepository(agg, repoWithViews, ns, aggRetrievals),
       repoOrigin,
     );
   } else if (isEs) {
-    // Event-sourced: the `<agg>_events` stream repository (fold on load,
-    // append on save) + the EF event-record entity & configuration.  No
-    // normalised entity configuration, no document, no join tables.
+    // Event-sourced: the repository folds the per-context `<ctx>_events` log
+    // (filtered by `stream_type = "<Agg>"`) on load and appends on save.  The
+    // shared `EventRecord` POCO + the per-context `<Ctx>EventRecordConfiguration`
+    // are emitted ONCE per project/context (event-log-architecture.md), not per
+    // aggregate — see `emitEventLogFiles`.  No normalised entity configuration,
+    // no document, no join tables.
     place(
       `${agg.name}Repository.cs`,
       "repository-impl",
@@ -1012,18 +1033,6 @@ function emitAggregate(
         idClass,
       }),
       repoOrigin,
-    );
-    place(
-      `${agg.name}EventRecord.cs`,
-      "event-record-poco",
-      renderEventRecordPoco(agg.name, ns),
-      agg.origin,
-    );
-    place(
-      `${agg.name}EventRecordConfiguration.cs`,
-      "ef-configuration",
-      renderEventRecordConfiguration(agg.name, ns),
-      agg.origin,
     );
   } else {
     place(
@@ -1135,6 +1144,11 @@ function emitInfrastructure(
   usesValidators: boolean,
 ): void {
   const hasOutbox = ctx.eventSubscriptions.length > 0 && durableEventTypes(ctx).size > 0;
+  // Per-context event log (event-log-architecture.md): the shared `EventRecord`
+  // POCO + `<Ctx>EventRecordConfiguration`, plus the config-class list threaded
+  // into the DbContext so it maps the single `Events` DbSet.  No schema in the
+  // legacy single-context path.
+  emitEventLogFiles([ctx], ns, out);
   out.set(
     "Infrastructure/Persistence/AppDbContext.cs",
     renderDbContext(
@@ -1144,6 +1158,9 @@ function emitInfrastructure(
       eventSourcedAggNames([ctx]),
       embeddedAggNames([ctx]),
       hasOutbox,
+      false,
+      false,
+      eventLogConfigClasses([ctx]),
     ),
   );
   emitWorkflowStatePersistence(ctx.workflows, ns, out, durableEventTypes(ctx).size > 0);
@@ -1342,6 +1359,46 @@ function eventSourcedAggNames(contexts: EnrichedBoundedContextIR[]): Set<string>
     }
   }
   return names;
+}
+
+/** Bounded contexts (of the given set) that own any event-sourced stream — a
+ *  `persistedAs(eventLog)` aggregate OR an `eventSourced` workflow.  Each owns
+ *  one shared `<ctx>_events` log (event-log-architecture.md) holding every such
+ *  stream, discriminated by `stream_type`. */
+function eventLogContexts(contexts: EnrichedBoundedContextIR[]): EnrichedBoundedContextIR[] {
+  return contexts.filter(
+    (c) =>
+      c.aggregates.some((a) => a.persistedAs === "eventLog") ||
+      c.workflows.some((w) => w.eventSourced),
+  );
+}
+
+/** The per-context event-log EF configuration class names
+ *  (`<Ctx>EventRecordConfiguration`), one per event-sourced context — consumed
+ *  by `renderDbContext` to wire the ONE shared `Events` DbSet + the
+ *  ApplyConfiguration(s). */
+function eventLogConfigClasses(contexts: EnrichedBoundedContextIR[]): string[] {
+  return eventLogContexts(contexts).map((c) => `${upperFirst(c.name)}EventRecordConfiguration`);
+}
+
+/** Emit the ONE shared `EventRecord` POCO + one `<Ctx>EventRecordConfiguration`
+ *  per event-sourced context (EF path only — dapper ships DDL via DbSchema).
+ *  No-op when no context owns an event log. */
+function emitEventLogFiles(
+  contexts: EnrichedBoundedContextIR[],
+  ns: string,
+  out: Map<string, string>,
+  resolveSchema: (c: EnrichedBoundedContextIR) => string | undefined = () => undefined,
+): void {
+  const esCtxs = eventLogContexts(contexts);
+  if (esCtxs.length === 0) return;
+  out.set("Infrastructure/Persistence/Events/EventRecord.cs", renderEventRecordPoco(ns));
+  for (const c of esCtxs) {
+    out.set(
+      `Infrastructure/Persistence/Configurations/${upperFirst(c.name)}EventRecordConfiguration.cs`,
+      renderEventRecordConfiguration(c.name, ns, resolveSchema(c)),
+    );
+  }
 }
 
 /** Names of embedded-shaped (`shape(embedded)`) aggregates across the given

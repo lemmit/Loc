@@ -66,7 +66,7 @@ describe("dotnet event-sourced saga double-append (S5b)", () => {
     expect(h).toContain("INotificationHandler<ProjectArchived>");
     // Reads the stream ONCE, then branches (empty → create, non-empty → on).
     expect(h).toContain(
-      "var __rows = await _eventStore.LoadStreamAsync(__sid, cancellationToken);",
+      'var __rows = await _eventStore.LoadStreamAsync("Tracker", __sid, cancellationToken);',
     );
     expect(h).toContain("if (__rows.Count == 0)");
     expect(h).toContain("else");

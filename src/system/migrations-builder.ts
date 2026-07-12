@@ -156,12 +156,12 @@ export function schemaFromModule(
     if (isTphBase(agg, pool)) {
       return [tphTableForAggregate(agg, pool, module.name, voLookup)];
     }
-    // Event-sourced (`persistedAs(eventLog)`): an append-only stream table
-    // keyed by `(stream_id, version)`, not a state table.  State is folded
-    // from the stream at load time (appliers A2).  Mirrors the Drizzle
-    // schema's `emitEventLogTable`.
+    // Event-sourced (`persistedAs(eventLog)`): no per-aggregate table — its
+    // stream lives in the single per-context `<ctx>_events` log, emitted once in
+    // the per-context pass below (event-log-architecture.md).  State is folded
+    // from that stream (filtered by `stream_type`) at load time.
     if (agg.persistedAs === "eventLog") {
-      return [eventLogTableForStream(snake(agg.name), module.name)];
+      return [];
     }
     const shape = shapeOf(agg, ctxFor(agg));
     if (shape === "document") {
@@ -222,16 +222,24 @@ export function schemaFromModule(
     // tables — not in `public`, where two contexts each with a `Tracker`
     // workflow would collide on `tracker_events`.
     const ctxSchema = contextSchemaOf(ctx);
+    // The single per-context event log (event-log-architecture.md): one
+    // `<ctx>_events` table when the context has ANY event-sourced stream — a
+    // `persistedAs(eventLog)` aggregate or an `eventSourced` workflow.  Every
+    // such stream shares it, discriminated by `stream_type`.
+    const hasEventStream =
+      ctx.aggregates.some((a) => a.persistedAs === "eventLog") ||
+      ctx.workflows.some((w) => w.eventSourced);
+    if (hasEventStream) {
+      const t = eventLogTableForStream(snake(ctx.name), module.name);
+      if (ctxSchema !== undefined) t.schema = ctxSchema;
+      tables.push(t);
+    }
     for (const wf of ctx.workflows) {
-      // An `eventSourced` workflow persists as an append-only `<wf>_events`
-      // stream (folded on load), not a mutable correlation-state row — the saga
-      // analogue of a `persistedAs(eventLog)` aggregate (workflow-and-applier.md
-      // A2-S5b).  A plain correlation-bearing workflow keeps its state table.
-      if (wf.eventSourced) {
-        const t = eventLogTableForStream(snake(wf.name), module.name);
-        if (ctxSchema !== undefined) t.schema = ctxSchema;
-        tables.push(t);
-      } else if (wf.correlationField) {
+      // An `eventSourced` workflow's stream lives in the shared `<ctx>_events`
+      // log emitted above (folded on load, filtered by `stream_type`) — no
+      // per-workflow table.  A plain correlation-bearing workflow keeps its
+      // mutable state table.
+      if (!wf.eventSourced && wf.correlationField) {
         const t = workflowStateTableShape(wf, module.name, voLookup, durable);
         if (ctxSchema !== undefined) t.schema = ctxSchema;
         tables.push(t);
@@ -484,28 +492,37 @@ function documentTableForAggregate(agg: AggregateIR, ownerModule: string): Table
   };
 }
 
-/** One append-only `<name>_events` stream table — the shared event-sourcing
- *  store shape, used by both a `persistedAs(eventLog)` aggregate (`stream_id` =
- *  aggregate id) and an `eventSourced` workflow (`stream_id` = correlation key).
- *  A row is one recorded event keyed by `(stream_id, version)` — `version` is
- *  its gap-free position in the stream.  `type` discriminates the event for the
- *  fold; `data` is the JSON payload; `occurred_at` defaults to insert time.
- *  No state / part / join tables — the read model is folded at load. */
-function eventLogTableForStream(snakeName: string, ownerModule: string): TableShape {
-  const tableName = `${snakeName}_events`;
+/** The single per-context append-only event log `<ctx>_events`
+ *  (event-log-architecture.md) — the shared event-sourcing store, one table per
+ *  bounded context, holding every `persistedAs(eventLog)` aggregate stream AND
+ *  every `eventSourced` workflow stream in that context.  `stream_type`
+ *  discriminates the owner (aggregate/workflow name); `stream_id` is the
+ *  aggregate id or workflow correlation key; a row is keyed `(stream_type,
+ *  stream_id, version)` with `version` its gap-free per-stream position (the
+ *  optimistic-concurrency control).  `seq` is a context-global monotonic cursor
+ *  (Marten's `mt_events` scoped to a context) that a projection replay reads in
+ *  order — DB-assigned, carried inert until the rebuild reader lands.  `type`
+ *  discriminates the event for the fold; `data` is the JSON payload. */
+function eventLogTableForStream(snakeCtxName: string, ownerModule: string): TableShape {
+  const tableName = `${snakeCtxName}_events`;
   return {
     name: tableName,
     ownerModule,
     columns: [
+      { name: "seq", type: { kind: "bigserial" }, nullable: false },
+      { name: "stream_type", type: { kind: "text" }, nullable: false },
       { name: "stream_id", type: { kind: "text" }, nullable: false },
       { name: "version", type: { kind: "int" }, nullable: false },
       { name: "type", type: { kind: "text" }, nullable: false },
       { name: "data", type: { kind: "json" }, nullable: false },
       { name: "occurred_at", type: { kind: "datetime" }, nullable: false, default: "now()" },
     ],
-    primaryKey: ["stream_id", "version"],
+    primaryKey: ["stream_type", "stream_id", "version"],
     foreignKeys: [],
-    indexes: [],
+    // Unique cursor index — the replay reader scans `WHERE seq > $ckpt ORDER BY
+    // seq`; `bigserial` already guarantees uniqueness, the index makes the scan
+    // range-friendly.
+    indexes: [{ name: `${tableName}_seq_key`, table: tableName, columns: ["seq"], unique: true }],
   };
 }
 

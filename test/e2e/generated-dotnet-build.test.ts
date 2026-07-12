@@ -491,7 +491,7 @@ describe.skipIf(!ENABLED)(
         const proj = path.join(outDir, "api");
         expect(
           fs.readFileSync(path.join(proj, "Infrastructure", "Persistence", "DbSchema.cs"), "utf8"),
-        ).toContain("account_events");
+        ).toContain("accounts_events");
         expect(
           fs.readFileSync(
             path.join(proj, "Infrastructure", "Repositories", "AccountRepository.cs"),
@@ -528,10 +528,11 @@ describe.skipIf(!ENABLED)(
           cwd: repoRoot,
         });
         const proj = path.join(outDir, "dotnet_api");
-        // Sanity: the EF event-record entity + the fold rehydrator made it out.
+        // Sanity: the SHARED per-context event-record entity + the fold
+        // rehydrator made it out (per-context event log — event-log-architecture.md).
         expect(
           fs.existsSync(
-            path.join(proj, "Infrastructure", "Persistence", "Events", "AccountEventRecord.cs"),
+            path.join(proj, "Infrastructure", "Persistence", "Events", "EventRecord.cs"),
           ),
         ).toBe(true);
         expect(
@@ -578,13 +579,7 @@ describe.skipIf(!ENABLED)(
         ).toContain("_FromEvents");
         expect(
           fs.existsSync(
-            path.join(
-              proj,
-              "Infrastructure",
-              "Persistence",
-              "Events",
-              "OrderFulfillmentEventRecord.cs",
-            ),
+            path.join(proj, "Infrastructure", "Persistence", "Events", "EventRecord.cs"),
           ),
         ).toBe(true);
         execSync(`dotnet restore --nologo`, { cwd: proj, stdio: "inherit", timeout: 240_000 });

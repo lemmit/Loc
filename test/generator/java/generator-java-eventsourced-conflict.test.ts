@@ -1,8 +1,9 @@
 // ---------------------------------------------------------------------------
 // Java / Spring Boot — the event-sourced concurrency rider.  An event-sourced
-// (`persistedAs(eventLog)`) aggregate appends to an append-only `<agg>_events`
-// table keyed by a `(stream_id, version)` PRIMARY KEY.  A concurrent append
-// that loses the version race hits a Postgres unique-violation (SQLSTATE
+// (`persistedAs(eventLog)`) aggregate appends to the single per-context
+// `<ctx>_events` log keyed by a `(stream_type, stream_id, version)` PRIMARY KEY.
+// A concurrent append that loses the version race hits a Postgres unique-violation
+// (SQLSTATE
 // 23505), which Spring's JdbcTemplate translates to DuplicateKeyException; the
 // event-store repository catches it and rethrows the SAME
 // ObjectOptimisticLockingFailureException the `versioned` service raises, which

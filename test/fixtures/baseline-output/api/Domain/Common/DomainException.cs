@@ -135,23 +135,27 @@ public interface IDomainTransaction : IAsyncDisposable
 }
 
 /// <summary>The shape a workflow event-stream record exposes to the event-store
-/// port — the stream key + gap-free version (audit S7 Slice C).</summary>
+/// port — the per-context log discriminator + stream key + gap-free version
+/// (audit S7 Slice C; per-context log — event-log-architecture.md).</summary>
 public interface IWorkflowEventRow
 {
+    string StreamType { get; }
     string StreamId { get; }
     int Version { get; }
 }
 
 /// <summary>
-/// Append-only event-stream port for an event-sourced workflow's
-/// <c>&lt;wf&gt;_events</c> table (audit S7 Slice C).  The EF adapter delegates 1:1
-/// to the same scoped DbContext (<c>Set&lt;TRow&gt;()</c> resolves the same DbSet as
-/// the named property) — identical load / max-version / append / flush.
+/// Append-only event-stream port for an event-sourced workflow (audit S7 Slice
+/// C).  The workflow's stream lives in the shared per-context <c>&lt;ctx&gt;_events</c>
+/// log (event-log-architecture.md), so every load / max-version scopes to the
+/// caller's <c>streamType</c> discriminator — the correctness trap: streams
+/// sharing one table must each fold only their own events.  The EF adapter
+/// delegates 1:1 to the same scoped DbContext.
 /// </summary>
 public interface IWorkflowEventStore<TRow> where TRow : class, IWorkflowEventRow
 {
-    Task<List<TRow>> LoadStreamAsync(string streamId, CancellationToken cancellationToken = default);
-    Task<int> MaxVersionAsync(string streamId, CancellationToken cancellationToken = default);
+    Task<List<TRow>> LoadStreamAsync(string streamType, string streamId, CancellationToken cancellationToken = default);
+    Task<int> MaxVersionAsync(string streamType, string streamId, CancellationToken cancellationToken = default);
     void Append(TRow row);
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

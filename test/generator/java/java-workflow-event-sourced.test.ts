@@ -1,8 +1,9 @@
 // ---------------------------------------------------------------------------
 // Java backend — event-sourced workflows (workflow-and-applier.md A2-S5b; java
 // joined EVENT_SOURCING_WORKFLOW_BACKENDS).  An `eventSourced` workflow persists
-// as an append-only `<wf>_events` stream folded through its `apply(...)` blocks
-// — the saga analogue of a `persistedAs(eventLog)` aggregate — instead of a
+// in the single per-context `<ctx>_events` log (its `stream_type = "<Wf>"` rows)
+// folded through its `apply(...)` blocks — the saga analogue of a
+// `persistedAs(eventLog)` aggregate — instead of a
 // mutable JPA correlation-state entity.  Asserts the `<Wf>State` fold class, the
 // absence of a JPA state entity/table, and the fold-load / append-own-events
 // dispatch handlers (JdbcTemplate-backed stream IO).
@@ -81,9 +82,14 @@ describe("java event-sourced workflows", () => {
     expect(d).not.toContain("__loaded");
     expect(d).toContain("__events.add(new PaymentRegistered(p.order(), 0));");
     // Context `O` has a `state` dataSource (`oState`), so its saga stream lands
-    // in the `o` schema — same schema its aggregate tables use.
-    expect(d).toContain("insert into o.tally_events (stream_id, version, type, data)");
-    expect(d).toContain("__sid, __v, __e.getClass().getSimpleName(), TallyState._toData(__e));");
+    // in the `o` schema — the single per-context `o_events` log, its rows tagged
+    // `stream_type = "Tally"`.
+    expect(d).toContain(
+      "insert into o.o_events (stream_type, stream_id, version, type, data) values (?, ?, ?, ?, ?::jsonb)",
+    );
+    expect(d).toContain(
+      '"Tally", __sid, __v, __e.getClass().getSimpleName(), TallyState._toData(__e));',
+    );
     expect(d).toContain("for (var __e : __events) events.publishEvent(__e);");
   });
 

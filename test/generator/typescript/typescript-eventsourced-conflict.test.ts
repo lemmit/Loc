@@ -1,7 +1,8 @@
 // ---------------------------------------------------------------------------
 // Hono / Drizzle backend — the event-sourced concurrency rider.  An
-// event-sourced (`persistedAs(eventLog)`) aggregate appends to an append-only
-// `<agg>_events` table keyed by a `(stream_id, version)` PRIMARY KEY.  Two
+// event-sourced (`persistedAs(eventLog)`) aggregate appends to the single
+// per-context `<ctx>_events` table keyed by a `(stream_type, stream_id,
+// version)` PRIMARY KEY.  Two
 // concurrent `save`s that both read `max(version)=N` and both insert
 // `version=N+1` race; the loser hits a Postgres unique-violation (SQLSTATE
 // 23505).  The repository's append site catches that and rethrows the shared
@@ -91,8 +92,9 @@ describe("hono/drizzle generator — event-sourced concurrency rider", () => {
     const files = await generateSystemFiles(esSystem("node"));
     const repo = fileEndingWith(files, "account-repository.ts");
 
-    // The append is wrapped so a duplicate (stream_id, version) → ConcurrencyError.
-    expect(repo).toContain("await this.db.insert(schema.accountEvents).values(rows);");
+    // The append is wrapped so a duplicate (stream_type, stream_id, version) →
+    // ConcurrencyError.
+    expect(repo).toContain("await this.db.insert(schema.accountsEvents).values(rows);");
     expect(repo).toContain('(err as { code?: string }).code === "23505"');
     expect(repo).toContain('throw new ConcurrencyError("Account", aggregate.id as string);');
     // ConcurrencyError is imported from the domain errors module.

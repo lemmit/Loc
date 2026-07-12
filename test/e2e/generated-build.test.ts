@@ -470,9 +470,10 @@ describe.skipIf(!ENABLED)(
           cwd: repoRoot,
         });
         const proj = path.join(outDir, "api");
-        // Sanity: the event-store table + the fold rehydrator made it out.
+        // Sanity: the per-context event-log table + the fold rehydrator made it
+        // out (context `Accounts` → the shared `accounts_events` stream).
         expect(fs.readFileSync(path.join(proj, "db", "schema.ts"), "utf8")).toContain(
-          "account_events",
+          "accounts_events",
         );
         expect(fs.readFileSync(path.join(proj, "domain", "account.ts"), "utf8")).toContain(
           "_fromEvents",
@@ -508,9 +509,12 @@ describe.skipIf(!ENABLED)(
           cwd: repoRoot,
         });
         const proj = path.join(outDir, CORPUS_DEPLOYABLE);
-        // Sanity: the workflow event stream + the fold made it out (not a state table).
+        // Sanity: the workflow event stream + the fold made it out (not a state
+        // table).  The ES workflow shares the per-context `<ctx>_events` log
+        // (context `Fulfillment` → `fulfillment_events`), discriminated by
+        // stream_type.
         const schema = fs.readFileSync(path.join(proj, "db", "schema.ts"), "utf8");
-        expect(schema).toContain("order_fulfillment_events");
+        expect(schema).toContain("fulfillment_events");
         const wf = fs.readFileSync(path.join(proj, "http", "workflows.ts"), "utf8");
         expect(wf).toContain("function foldOrderFulfillment");
         expect(wf).toContain("appendOrderFulfillmentEvents");
@@ -621,7 +625,7 @@ describe.skipIf(!ENABLED)(
         );
         const proj = path.join(outDir, "api");
         expect(fs.readFileSync(path.join(proj, "db", "entities.ts"), "utf8")).toContain(
-          "AccountEventRow",
+          "AccountsEventRow",
         );
         expect(
           fs.readFileSync(path.join(proj, "db", "repositories", "account-repository.ts"), "utf8"),

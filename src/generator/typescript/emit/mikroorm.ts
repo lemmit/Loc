@@ -61,6 +61,11 @@ const tableOf = (aggName: string): string => plural(snake(aggName));
 /** Row-entity class name for an aggregate (the MikroORM persistence model). */
 const rowClassOf = (aggName: string): string => `${aggName}Row`;
 
+/** Row-entity class name for the shared per-context event-log stream row
+ *  (`<Ctx>EventRow`) — one table for every `persistedAs(eventLog)` aggregate in
+ *  the context, discriminated by `streamType`. */
+const eventRowClassOf = (ctxName: string): string => `${upperFirst(ctxName)}EventRow`;
+
 // ---------------------------------------------------------------------------
 // Column model — one entry per persisted column, matching the drizzle schema's
 // property/column names (id, scalars, VO-flattened `field_sub`, id-ref) so the
@@ -169,41 +174,15 @@ export function renderMikroEntities(
 ): string {
   const blocks: string[] = [];
   const schemaNames: string[] = [];
+  // Event-sourced (`persistedAs(eventLog)`) aggregates share a SINGLE
+  // per-context `<ctx>_events` stream row (event-log-architecture.md),
+  // discriminated by `stream_type`, rather than one table each.  Emitted once
+  // after the per-aggregate walk; MikroORM owns the schema (via
+  // `updateSchema()`), so the composite `(stream_type, stream_id, version)` PK
+  // + inert `seq` cursor land as real columns.
+  const hasEventLog = aggs.some((agg) => agg.persistedAs === "eventLog");
   for (const agg of aggs) {
-    // Event-sourced (`persistedAs(eventLog)`): the aggregate's MikroORM entity
-    // is its append-only `<agg>_events` stream row (composite (streamId,
-    // version) key), not a state row.  MikroORM owns the schema, so this is
-    // self-consistent — the repository queries it via the EntityManager.
-    if (agg.persistedAs === "eventLog") {
-      const cls = `${agg.name}EventRow`;
-      const schemaName = `${cls}Schema`;
-      schemaNames.push(schemaName);
-      blocks.push(
-        lines(
-          `export class ${cls} {`,
-          "  streamId!: string;",
-          "  version!: number;",
-          "  type!: string;",
-          "  data!: unknown;",
-          "  occurredAt!: Date;",
-          "}",
-          "",
-          `export const ${schemaName} = new EntitySchema<${cls}>({`,
-          `  class: ${cls},`,
-          `  tableName: "${snake(agg.name)}_events",`,
-          "  properties: {",
-          '    streamId: { type: "string", primary: true },',
-          '    version: { type: "number", primary: true },',
-          '    type: { type: "string" },',
-          '    data: { type: "json", columnType: "jsonb" },',
-          '    occurredAt: { type: "Date", columnType: "timestamptz" },',
-          "  },",
-          "});",
-          "",
-        ),
-      );
-      continue;
-    }
+    if (agg.persistedAs === "eventLog") continue;
     const cols = columnsOf(agg, ctx);
     const cls = rowClassOf(agg.name);
     const schemaName = `${cls}Schema`;
@@ -229,6 +208,43 @@ export function renderMikroEntities(
         ...propLines,
         `  },`,
         `});`,
+        "",
+      ),
+    );
+  }
+  if (hasEventLog) {
+    const cls = eventRowClassOf(ctx.name);
+    const schemaName = `${cls}Schema`;
+    schemaNames.push(schemaName);
+    blocks.push(
+      lines(
+        `export class ${cls} {`,
+        "  seq!: number;",
+        "  streamType!: string;",
+        "  streamId!: string;",
+        "  version!: number;",
+        "  type!: string;",
+        "  data!: unknown;",
+        "  occurredAt!: Date;",
+        "}",
+        "",
+        `export const ${schemaName} = new EntitySchema<${cls}>({`,
+        `  class: ${cls},`,
+        `  tableName: "${snake(ctx.name)}_events",`,
+        "  properties: {",
+        // `seq` — context-global monotonic cursor (bigserial), inert until the
+        // replay reader lands; not part of the PK.
+        '    seq: { type: "number", columnType: "bigint", autoincrement: true },',
+        // Composite `(stream_type, stream_id, version)` PK: every ES stream in
+        // the context shares this table, discriminated by `streamType`.
+        '    streamType: { type: "string", primary: true },',
+        '    streamId: { type: "string", primary: true },',
+        '    version: { type: "number", primary: true },',
+        '    type: { type: "string" },',
+        '    data: { type: "json", columnType: "jsonb" },',
+        '    occurredAt: { type: "Date", columnType: "timestamptz" },',
+        "  },",
+        "});",
         "",
       ),
     );
@@ -675,7 +691,10 @@ export function renderMikroEventSourcedRepository(
   repo: RepositoryIR | undefined,
   ctx: EnrichedBoundedContextIR,
 ): string {
-  const eventRow = `${agg.name}EventRow`;
+  const eventRow = eventRowClassOf(ctx.name);
+  // This aggregate's slice of the shared per-context event log — discriminated
+  // by `stream_type = "<Agg>"` (mirrors the Drizzle ES repo).
+  const streamType = agg.name;
   const streamEvents: EventIR[] = (agg.appliers ?? [])
     .map((ap) => ctx.events.find((e) => e.name === ap.event))
     .filter((e): e is EventIR => e != null);
@@ -741,7 +760,7 @@ export function renderMikroEventSourcedRepository(
     "",
     `  async findById(id: Ids.${agg.name}Id): Promise<${agg.name} | null> {`,
     "    const em = this.em.fork();",
-    `    const rows = await em.find(${eventRow}, { streamId: id as string }, { orderBy: { version: "ASC" } });`,
+    `    const rows = await em.find(${eventRow}, { streamType: "${streamType}", streamId: id as string }, { orderBy: { version: "ASC" } });`,
     "    if (rows.length === 0) return null;",
     `    return ${agg.name}._fromEvents(`,
     "      id,",
@@ -770,11 +789,12 @@ export function renderMikroEventSourcedRepository(
     "    const pending = aggregate.pullEvents();",
     "    if (pending.length > 0) {",
     "      const streamId = aggregate.id as string;",
-    `      const prior = await em.find(${eventRow}, { streamId }, { orderBy: { version: "DESC" }, limit: 1 });`,
+    `      const prior = await em.find(${eventRow}, { streamType: "${streamType}", streamId }, { orderBy: { version: "DESC" }, limit: 1 });`,
     "      let version = prior.length > 0 ? prior[0]!.version : 0;",
     "      for (const event of pending) {",
     "        version++;",
     `        const r = new ${eventRow}();`,
+    `        r.streamType = "${streamType}";`,
     "        r.streamId = streamId;",
     "        r.version = version;",
     "        r.type = event.type;",
@@ -797,7 +817,7 @@ export function renderMikroEventSourcedRepository(
     "",
     `  private async _loadAll(): Promise<${agg.name}[]> {`,
     "    const em = this.em.fork();",
-    `    const rows = await em.find(${eventRow}, {}, { orderBy: { streamId: "ASC", version: "ASC" } });`,
+    `    const rows = await em.find(${eventRow}, { streamType: "${streamType}" }, { orderBy: { streamId: "ASC", version: "ASC" } });`,
     "    const byStream = new Map<string, Events.DomainEvent[]>();",
     "    for (const r of rows) {",
     "      const list = byStream.get(r.streamId) ?? [];",
