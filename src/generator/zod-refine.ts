@@ -32,9 +32,11 @@ import {
 export function chainSingleFieldNative(inner: string, pattern: SingleFieldPattern): string {
   switch (pattern.kind) {
     case "min":
-      return `${inner}.min(${pattern.n})`;
+      // Exclusive (`weight > 0.5` on a decimal/money field) → zod's `.gt`;
+      // inclusive keeps `.min` byte-for-byte.
+      return `${inner}.${pattern.exclusive ? "gt" : "min"}(${pattern.n})`;
     case "max":
-      return `${inner}.max(${pattern.n})`;
+      return `${inner}.${pattern.exclusive ? "lt" : "max"}(${pattern.n})`;
     case "between":
       return `${inner}.min(${pattern.lo}).max(${pattern.hi})`;
     case "len-min":

@@ -191,9 +191,11 @@ function patternCheck(
     `        if (!(${cond})) errors.add(WireValidationException.error("/${field}", ${JSON.stringify(`Invariant violated: ${source}`)}));`;
   switch (pattern.kind) {
     case "min":
-      return [fail(cmp(">=", pattern.n))];
+      // Exclusive (`weight > 0.5` on a decimal/money field) → strict `>`; the
+      // `cmp` helper already routes decimal/money through `BigDecimal.compareTo`.
+      return [fail(cmp(pattern.exclusive ? ">" : ">=", pattern.n))];
     case "max":
-      return [fail(cmp("<=", pattern.n))];
+      return [fail(cmp(pattern.exclusive ? "<" : "<=", pattern.n))];
     case "between":
       return [fail(`${cmp(">=", pattern.lo)} && ${cmp("<=", pattern.hi)}`)];
     case "len-min":

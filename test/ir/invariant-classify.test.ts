@@ -173,6 +173,111 @@ describe("singleFieldShape", () => {
     });
   });
 
+  // --- strict bounds on NON-integer fields: exclusive, no `n±1` fold ---
+  // (the int-vs-decimal guard bug — `weight > 0.5` must NOT become `min(1.5)`)
+  const DecT = { kind: "primitive" as const, name: "decimal" as const };
+  const MoneyT = { kind: "primitive" as const, name: "money" as const };
+  const litDec = (v: string): ExprIR => ({ kind: "literal", lit: "decimal", value: v });
+
+  it("recognises `f > 0.5` on a DECIMAL field as an EXCLUSIVE min with the raw literal (no +1)", () => {
+    const i = inv({
+      kind: "binary",
+      op: ">",
+      left: { ...refField("weight"), type: DecT },
+      right: litDec("0.5"),
+      leftType: DecT,
+    });
+    expect(singleFieldShape(i)).toEqual({
+      field: "weight",
+      pattern: { kind: "min", n: 0.5, exclusive: true },
+    });
+  });
+
+  it("recognises `f < 2.0` on a DECIMAL field as an EXCLUSIVE max with the raw literal (no -1)", () => {
+    const i = inv({
+      kind: "binary",
+      op: "<",
+      left: { ...refField("weight"), type: DecT },
+      right: litDec("2.0"),
+      leftType: DecT,
+    });
+    expect(singleFieldShape(i)).toEqual({
+      field: "weight",
+      pattern: { kind: "max", n: 2, exclusive: true },
+    });
+  });
+
+  it("keeps `f > N` on an INTEGER field as the inclusive `min(N+1)` fold (byte-identical, no exclusive flag)", () => {
+    const i = inv({
+      kind: "binary",
+      op: ">",
+      left: refField("qty"),
+      right: litInt(4),
+      leftType: IntT,
+    });
+    expect(singleFieldShape(i)).toEqual({
+      field: "qty",
+      pattern: { kind: "min", n: 5 },
+    });
+  });
+
+  it("leaves an inclusive `f >= 0.5` on a DECIMAL field as a plain min (no exclusive flag)", () => {
+    const i = inv({
+      kind: "binary",
+      op: ">=",
+      left: { ...refField("weight"), type: DecT },
+      right: litDec("0.5"),
+      leftType: DecT,
+    });
+    expect(singleFieldShape(i)).toEqual({
+      field: "weight",
+      pattern: { kind: "min", n: 0.5 },
+    });
+  });
+
+  it("treats a strict bound on a MONEY field as exclusive too", () => {
+    const i = inv({
+      kind: "binary",
+      op: ">",
+      left: { ...refField("price"), type: MoneyT },
+      right: litDec("0.99"),
+      leftType: MoneyT,
+    });
+    expect(singleFieldShape(i)).toEqual({
+      field: "price",
+      pattern: { kind: "min", n: 0.99, exclusive: true },
+    });
+  });
+
+  it("does NOT fold two exclusive decimal bounds into `between` (falls through to the faithful refine)", () => {
+    const i = inv({
+      kind: "binary",
+      op: "&&",
+      left: {
+        kind: "binary",
+        op: ">",
+        left: { ...refField("weight"), type: DecT },
+        right: litDec("0.5"),
+        leftType: DecT,
+      },
+      right: {
+        kind: "binary",
+        op: "<",
+        left: { ...refField("weight"), type: DecT },
+        right: litDec("2.0"),
+        leftType: DecT,
+      },
+    });
+    // `singleFieldShape` returns null (no `between` fold), but the constraint
+    // splitter still yields both exclusive bounds for backends that apply
+    // several constraints to one field.
+    expect(singleFieldShape(i)).toBeNull();
+    expect(singleFieldConstraints(i)).toEqual([
+      { field: "weight", pattern: { kind: "min", n: 0.5, exclusive: true } },
+      { field: "weight", pattern: { kind: "max", n: 2, exclusive: true } },
+    ]);
+  });
+
   it("recognises `f.length == N` as len-eq", () => {
     const i = inv({
       kind: "binary",

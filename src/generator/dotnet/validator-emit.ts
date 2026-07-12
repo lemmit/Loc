@@ -181,9 +181,13 @@ ${ruleLines.join("\n")}
 function chainSingleFieldFluent(p: SingleFieldPattern): string {
   switch (p.kind) {
     case "min":
-      return `.GreaterThanOrEqualTo(${p.n})`;
+      // Exclusive bounds only arise on decimal/money fields (a strict `>` on a
+      // non-integer field), so the property being ruled is a C# `decimal` —
+      // suffix the literal with `m` so `.GreaterThan(0.5m)` type-checks (a bare
+      // `0.5` is a `double` with no implicit decimal conversion).
+      return p.exclusive ? `.GreaterThan(${p.n}m)` : `.GreaterThanOrEqualTo(${p.n})`;
     case "max":
-      return `.LessThanOrEqualTo(${p.n})`;
+      return p.exclusive ? `.LessThan(${p.n}m)` : `.LessThanOrEqualTo(${p.n})`;
     case "between":
       return `.InclusiveBetween(${p.lo}, ${p.hi})`;
     case "len-min":
