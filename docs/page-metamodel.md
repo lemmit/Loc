@@ -313,7 +313,10 @@ page PlaceOrderWizard {
 
 An `action` body reuses the `Statement` rule (`let`, `:=`, calls, `emit`); the
 block-body lambda still exists in the render tree, but only for **pure** value
-composition (§8.1).
+composition (§8.1). The split is **read vs write** — a render-tree lambda may
+read `state`/`store`/props and compute freely, but only an `action` may write —
+tabulated allowed/rejected in
+[`docs/actions.md` → "What belongs in a lambda vs an action"](actions.md).
 
 State-mutation lowering across the frontends (inside an `action` body):
 

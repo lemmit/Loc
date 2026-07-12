@@ -33,6 +33,44 @@ accessor). This keeps one effect-handler form across the language and, for the
 [MVU/Elmish study](proposals/fable-elmish-frontend.md), keeps the `Model → Html`
 view pure so `Msg`/`update` project straight off the action list.
 
+## What belongs in a lambda vs an action
+
+The split is **read vs write**, not "no state." A **render-tree lambda** — a
+`Table`/`Column` accessor, a `For`/`.map`/`.filter` callback, a `data:` renderer
+— is a *pure projection*: given a bound item, it returns a value or markup. It
+may read anything and compute freely; it may not perform an effect. An **effect**
+— mutating `state`/`store`, `navigate`/`toast`/`emit` — lives in a named
+`action`, referenced by name from the control (`onClick: bump`). Effects inside
+an `action` body are unrestricted; the rule only governs lambdas in the view.
+
+| In a render-tree lambda | Allowed? | |
+|---|---|---|
+| `o => Text { o.code }` — render a component | ✅ | value/markup |
+| `o => Text { o.active ? "Y" : "N" }` — ternary / `match` value | ✅ | computed value |
+| `o => Text { o.code + label }` — **reads** `state`, concatenates | ✅ | reads are fine |
+| `o => Text { initials(o.code) }` — value-returning function call | ✅ | pure call |
+| `orders.filter(o => o.active)` / `.map(...)` — collection op | ✅ | pure callback |
+| `onClick: bump` — **reference** a named action | ✅ | the effect goes here |
+| `e => { count := count + 1 }` — **writes** `state` | ❌ | `loom.effect-in-lambda` |
+| `e => navigate("/x")` — `navigate` / `toast` / `emit` | ❌ | `loom.effect-in-lambda` |
+
+Rule of thumb: **a lambda is any expression that computes a value; anything that
+*does* something is an `action`.** Reading `state`/`store`/props/derived values
+inside a lambda is always fine — only writing (or a view effect) is rejected.
+
+```ddd
+// ❌ effect inline in the view
+Button { "＋", onClick: e => { count += 1 } }
+
+// ✅ effect named; the view just dispatches
+action inc() { count += 1 }
+Button { "＋", onClick: inc }
+```
+
+(One deliberate exception: a direct api-hook call such as
+`onClick: e => { Orders.Order.create.mutate(v) }` is *not* flagged — it is the
+mutation-hook mechanism, not a free effect statement.)
+
 ## `match await` — awaiting a remote command
 
 When an action needs to run a remote, `Result`-returning aggregate operation
