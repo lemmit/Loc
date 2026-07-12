@@ -214,15 +214,17 @@ const FEATURES: readonly Feature[] = [
     name: "event sourcing (`persistedAs(eventLog)`)",
     code: "loom.event-sourcing-backend-unsupported",
     ddd: eventSourcingDdd,
-    // EVENT_SOURCING_BACKENDS = node/dotnet/python/java/elixir (vanilla's Ecto
-    // fold-on-load data layer emits the account_events log table).
+    // EVENT_SOURCING_BACKENDS = node/dotnet/python/java/elixir.  The stream lives
+    // in the single per-context event log `<ctx>_events` (context `Accounts` →
+    // `accounts_events`), shared by every ES stream in the context and
+    // discriminated by `stream_type` (event-log-architecture.md).
     emits: new Set<Backend>(["node", "dotnet", "java", "python", "elixir"]),
     marker: {
-      node: "account_events",
-      dotnet: "account_events",
-      java: "account_events",
-      python: "account_events",
-      elixir: "account_events",
+      node: "accounts_events",
+      dotnet: "accounts_events",
+      java: "accounts_events",
+      python: "accounts_events",
+      elixir: "accounts_events",
     },
   },
   {

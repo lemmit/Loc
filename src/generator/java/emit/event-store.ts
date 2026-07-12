@@ -1,6 +1,5 @@
 import type { EnrichedAggregateIR, RepositoryIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
-import { snake } from "../../../util/naming.js";
 import {
   collectJavaExprImports,
   javaValueTypeForId,
@@ -14,14 +13,17 @@ import {
   isPagedFind,
   unionFindAsOptionalTwin,
 } from "./repository.js";
+import { esEventLogTable } from "./workflow-eventsourced.js";
 
 // ---------------------------------------------------------------------------
 // Event-sourced persistence (`persistedAs(eventLog)`, appliers A2) — the
 // java counterpart of the Hono / .NET event store.  No state table and
-// no Spring Data interface: the repository impl reads/appends the
-// shared `<agg>_events` stream table (stream_id, version, type, data
-// jsonb, occurred_at — emitted by the shared MigrationsIR) through
-// JdbcTemplate, folds streams via the entity's `_fromEvents` (appliers),
+// no Spring Data interface: the repository impl reads/appends the single
+// per-context `<ctx>_events` log (stream_type, stream_id, version, type,
+// data jsonb, occurred_at — emitted by the shared MigrationsIR) through
+// JdbcTemplate — every read/append filters + stamps `stream_type = "<Agg>"`
+// so two aggregates sharing the log each fold only their own events —
+// folds streams via the entity's `_fromEvents` (appliers),
 // and serialises events with Jackson (records round-trip natively; the
 // same mapper writes and reads, so the storage dialect is consistent).
 // Finds fold every stream and filter in memory (the .NET `_LoadAllAsync`
@@ -34,8 +36,13 @@ export function renderJavaEventSourcedRepositoryImpl(
   ctx: JavaRepoCtx,
   idClass: string,
   schema: string | undefined,
+  contextName: string,
 ): string {
-  const table = schema ? `${schema}.${snake(agg.name)}_events` : `${snake(agg.name)}_events`;
+  // The single per-context event log (event-log-architecture.md): this
+  // aggregate's stream is the subset tagged `stream_type = "<Agg>"`, so every
+  // read/append filters + stamps `stream_type` to fold only its own events.
+  const table = esEventLogTable(contextName, schema);
+  const streamType = agg.name;
   const idJava = javaValueTypeForId(agg.idValueType);
   const parseId =
     idJava === "UUID"
@@ -150,14 +157,14 @@ export function renderJavaEventSourcedRepositoryImpl(
     `        if (!pending.isEmpty()) {`,
     `            var sid = String.valueOf(aggregate.id().value());`,
     `            Integer max = jdbc.queryForObject(`,
-    `                "select max(version) from ${table} where stream_id = ?", Integer.class, sid);`,
+    `                "select max(version) from ${table} where stream_type = ? and stream_id = ?", Integer.class, "${streamType}", sid);`,
     `            int version = max == null ? 0 : max;`,
     `            for (var ev : pending) {`,
     `                version++;`,
     `                try {`,
     `                    jdbc.update(`,
-    `                        "insert into ${table} (stream_id, version, type, data) values (?, ?, ?, ?::jsonb)",`,
-    `                        sid, version, ev.getClass().getSimpleName(), JSON.writeValueAsString(ev));`,
+    `                        "insert into ${table} (stream_type, stream_id, version, type, data) values (?, ?, ?, ?, ?::jsonb)",`,
+    `                        "${streamType}", sid, version, ev.getClass().getSimpleName(), JSON.writeValueAsString(ev));`,
     // The (stream_id, version) PK IS the event stream's optimistic-concurrency
     // control: a competing append that read the same max(version) inserts the
     // same version and loses with a Postgres 23505, which JdbcTemplate maps to
@@ -197,7 +204,7 @@ export function renderJavaEventSourcedRepositoryImpl(
     `    @Override`,
     `    public List<${agg.name}> findAll() {`,
     `        var rows = jdbc.queryForList(`,
-    `            "select stream_id, type, data from ${table} order by stream_id, version");`,
+    `            "select stream_id, type, data from ${table} where stream_type = ? order by stream_id, version", "${streamType}");`,
     `        var byStream = new LinkedHashMap<String, List<DomainEvent>>();`,
     `        for (var row : rows) {`,
     `            byStream.computeIfAbsent((String) row.get("stream_id"), k -> new ArrayList<>())`,
@@ -213,12 +220,12 @@ export function renderJavaEventSourcedRepositoryImpl(
     ``,
     `    @Override`,
     `    public void delete(${agg.name} aggregate) {`,
-    `        jdbc.update("delete from ${table} where stream_id = ?", String.valueOf(aggregate.id().value()));`,
+    `        jdbc.update("delete from ${table} where stream_type = ? and stream_id = ?", "${streamType}", String.valueOf(aggregate.id().value()));`,
     `    }`,
     ``,
     `    private List<DomainEvent> loadStream(String sid) {`,
     `        var rows = jdbc.queryForList(`,
-    `            "select type, data from ${table} where stream_id = ? order by version", sid);`,
+    `            "select type, data from ${table} where stream_type = ? and stream_id = ? order by version", "${streamType}", sid);`,
     `        var out = new ArrayList<DomainEvent>();`,
     `        for (var row : rows) {`,
     `            out.add(rowToEvent((String) row.get("type"), String.valueOf(row.get("data"))));`,

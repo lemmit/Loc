@@ -791,7 +791,13 @@ export function renderEventSourcedRepositoryImpl(
   // union type.  See `unionFindAsOptionalTwin` in find-emit.ts.
   const finds = (repo?.finds ?? []).map((f) => unionFindAsOptionalTwin(f, agg.name));
   const anyFindUsesUser = finds.some(findUsesCurrentUser);
-  const dbSet = `${agg.name}Events`;
+  // The single per-context event log (event-log-architecture.md): the shared
+  // `_db.Events` DbSet over the `EventRecord` POCO.  This aggregate's stream is
+  // the subset tagged `StreamType == "<Agg>"` — every load/append/fold filters
+  // on it so a sibling aggregate/workflow sharing the `<ctx>_events` table is
+  // never folded through this aggregate's appliers (the correctness trap).
+  const dbSet = "Events";
+  const streamType = agg.name;
   // The event types this aggregate's stream can contain — the events its
   // appliers fold.  Drives the `RowToEvent` deserialiser dispatch.
   const eventNames = [...new Set((agg.appliers ?? []).map((a) => a.event))];
@@ -809,6 +815,7 @@ export function renderEventSourcedRepositoryImpl(
     (e) =>
       `            "${e}" => System.Text.Json.JsonSerializer.Deserialize<${e}>(__r.Data, __json)!,`,
   );
+  const recordCls = "EventRecord";
 
   const findMethodLines = finds.flatMap((f) => {
     const body = findBodies.find((b) => b.name === f.name);
@@ -877,7 +884,7 @@ export function renderEventSourcedRepositoryImpl(
       `    public async Task<${agg.name}?> GetByIdAsync(${idClass} id, CancellationToken cancellationToken = default)`,
       "    {",
       "        var __sid = id.Value.ToString();",
-      `        var __rows = await _db.${dbSet}.Where(e => e.StreamId == __sid).OrderBy(e => e.Version).ToListAsync(cancellationToken);`,
+      `        var __rows = await _db.${dbSet}.Where(e => e.StreamType == "${streamType}" && e.StreamId == __sid).OrderBy(e => e.Version).ToListAsync(cancellationToken);`,
       `        ${renderDotnetLogCall("aggregateLoaded", [
         { name: "aggregate", valueExpr: `"${agg.name}"` },
         { name: "id", valueExpr: "id.Value" },
@@ -905,12 +912,13 @@ export function renderEventSourcedRepositoryImpl(
       "        if (__pending.Count > 0)",
       "        {",
       "            var __sid = aggregate.Id.Value.ToString();",
-      `            var __version = await _db.${dbSet}.Where(e => e.StreamId == __sid).Select(e => (int?)e.Version).MaxAsync(cancellationToken) ?? 0;`,
+      `            var __version = await _db.${dbSet}.Where(e => e.StreamType == "${streamType}" && e.StreamId == __sid).Select(e => (int?)e.Version).MaxAsync(cancellationToken) ?? 0;`,
       "            foreach (var __ev in __pending)",
       "            {",
       "                __version++;",
-      `                _db.${dbSet}.Add(new ${agg.name}EventRecord`,
+      `                _db.${dbSet}.Add(new ${recordCls}`,
       "                {",
+      `                    StreamType = "${streamType}",`,
       "                    StreamId = __sid,",
       "                    Version = __version,",
       "                    Type = __ev.GetType().Name,",
@@ -952,7 +960,7 @@ export function renderEventSourcedRepositoryImpl(
       // Load every stream, fold each — the in-memory source for finds.
       `    private async Task<List<${agg.name}>> _LoadAllAsync(CancellationToken cancellationToken)`,
       "    {",
-      `        var __rows = await _db.${dbSet}.OrderBy(e => e.StreamId).ThenBy(e => e.Version).ToListAsync(cancellationToken);`,
+      `        var __rows = await _db.${dbSet}.Where(e => e.StreamType == "${streamType}").OrderBy(e => e.StreamId).ThenBy(e => e.Version).ToListAsync(cancellationToken);`,
       "        var __byStream = new Dictionary<string, List<IDomainEvent>>();",
       "        foreach (var __r in __rows)",
       "        {",
@@ -966,7 +974,7 @@ export function renderEventSourcedRepositoryImpl(
       `        return __byStream.Select(__kv => ${agg.name}._FromEvents(new ${idClass}(${parseId}), __kv.Value)).ToList();`,
       "    }",
       "",
-      `    private static IDomainEvent RowToEvent(${agg.name}EventRecord __r)`,
+      `    private static IDomainEvent RowToEvent(${recordCls} __r)`,
       "    {",
       "        return __r.Type switch",
       "        {",

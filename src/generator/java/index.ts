@@ -1185,7 +1185,7 @@ function emitAggregate(
     place(
       `${agg.name}RepositoryImpl.java`,
       "repository-impl",
-      renderJavaEventSourcedRepositoryImpl(agg, repoWithViews, repoCtx, idClass, schema),
+      renderJavaEventSourcedRepositoryImpl(agg, repoWithViews, repoCtx, idClass, schema, ctx.name),
       agg.name,
       repoOrigin,
       construct,

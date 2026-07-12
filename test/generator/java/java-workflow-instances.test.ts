@@ -110,7 +110,8 @@ describe("java workflow instance read endpoints", () => {
 });
 
 // An event-sourced workflow (workflow-and-applier.md A2-S5b): correlation field
-// + state field + applier.  The instance reads fold the `<wf>_events` stream
+// + state field + applier.  The instance reads fold the per-context `<ctx>_events`
+// log (`stream_type = "<Wf>"` rows)
 // over a shared JdbcTemplate (no mutable state repo); the `<Wf>State` fold class
 // carries record-style accessors so the api-package controller can project it.
 const ES = `system S { subdomain O { context O {
@@ -141,7 +142,7 @@ describe("java event-sourced workflow instance read endpoints", () => {
     expect(ctrl).toContain('@GetMapping("/tally/instances")');
     expect(ctrl).toContain("public List<TallyInstanceResponse> allTallyInstances() {");
     expect(ctrl).toContain(
-      '"select stream_id, type, data from o.tally_events order by stream_id, version");',
+      '"select stream_id, type, data from o.o_events where stream_type = ? order by stream_id, version", "Tally");',
     );
     expect(ctrl).toContain("var __byStream = new LinkedHashMap<String, List<DomainEvent>>();");
     expect(ctrl).toContain(

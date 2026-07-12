@@ -3,8 +3,10 @@
 // java joined EVENT_SOURCING_BACKENDS).  No state table and no Spring
 // Data interface: the entity is a plain domain class (no JPA bindings)
 // folded from the stream via `_fromEvents` / `_apply`; the repository
-// impl appends to the shared `<agg>_events` table (stream_id, version,
-// type, data jsonb) through JdbcTemplate with Jackson event ser/de;
+// impl appends to the single per-context `<ctx>_events` log (stream_type,
+// stream_id, version, type, data jsonb) through JdbcTemplate with Jackson
+// event ser/de, filtering + stamping `stream_type = "<Agg>"` so streams stay
+// isolated;
 // finds fold every stream and filter in memory; the create route rides
 // the `create` action's params (the command shape) instead of the
 // field-derived inputs.  Boot-verified end-to-end against Postgres via
@@ -54,12 +56,26 @@ describe("java generator — event sourcing", () => {
     expect(files_.has(`${ROOT}/features/accounts/AccountJpaRepository.java`)).toBe(false);
     const impl = files_.get(`${ROOT}/features/accounts/AccountRepositoryImpl.java`)!;
     expect(impl).toContain(
-      '"insert into accounts.account_events (stream_id, version, type, data) values (?, ?, ?, ?::jsonb)"',
+      '"insert into accounts.accounts_events (stream_type, stream_id, version, type, data) values (?, ?, ?, ?, ?::jsonb)"',
+    );
+    // The stream_type stamp discriminates this aggregate's rows in the shared log.
+    expect(impl).toContain(
+      '"Account", sid, version, ev.getClass().getSimpleName(), JSON.writeValueAsString(ev)',
     );
     expect(impl).toContain('case "Opened" -> JSON.readValue(data, Opened.class);');
     expect(impl).toContain("Account._fromEvents(id, events)");
     expect(impl).toContain(
-      '"select stream_id, type, data from accounts.account_events order by stream_id, version"',
+      '"select stream_id, type, data from accounts.accounts_events where stream_type = ? order by stream_id, version", "Account"',
+    );
+    // load / delete / max(version) all filter the aggregate's own stream_type.
+    expect(impl).toContain(
+      '"select type, data from accounts.accounts_events where stream_type = ? and stream_id = ? order by version", "Account", sid',
+    );
+    expect(impl).toContain(
+      '"select max(version) from accounts.accounts_events where stream_type = ? and stream_id = ?", Integer.class, "Account", sid',
+    );
+    expect(impl).toContain(
+      '"delete from accounts.accounts_events where stream_type = ? and stream_id = ?", "Account"',
     );
   });
 

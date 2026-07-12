@@ -53,7 +53,12 @@ import type { OpFragment } from "./emit/entity.js";
 import type { CsRenderContext } from "./render-expr.js";
 import { collectCsExprUsings, renderCsExpr, renderCsType } from "./render-expr.js";
 import { collectCsStmtUsings, renderCsStatements } from "./render-stmt.js";
-import { esCorrIdClass, esEventDbSet, esEventRecordClass } from "./workflow-eventsourced-emit.js";
+import {
+  esCorrIdClass,
+  esEventDbSet,
+  esEventRecordClass,
+  esStreamType,
+} from "./workflow-eventsourced-emit.js";
 import {
   workflowAllocateInitializer,
   workflowStateClass,
@@ -578,10 +583,11 @@ function renderEventReactorHandler(
       // Fold the `<wf>_events` stream into `state`.  A `create` starter folds
       // from-zero (empty stream → seeded defaults); an `on` reactor requires a
       // started saga (non-empty stream) and otherwise drops + logs.
+      const st = esStreamType(wf);
       const stateCls = workflowStateClass(wf);
       stmtLines.push("        var __sid = __key.Value.ToString();");
       stmtLines.push(
-        "        var __rows = await _eventStore.LoadStreamAsync(__sid, cancellationToken);",
+        `        var __rows = await _eventStore.LoadStreamAsync("${st}", __sid, cancellationToken);`,
       );
       if (trigger === "on") {
         stmtLines.push("        if (__rows.Count == 0)");
@@ -670,15 +676,17 @@ function renderEventReactorHandler(
     // they are also re-published below for choreography.
     if (usage.hasEmit) {
       const recordCls = esEventRecordClass(wf);
+      const st = esStreamType(wf);
       const stateCls = workflowStateClass(wf);
       stmtLines.push(
-        "        var __version = await _eventStore.MaxVersionAsync(__sid, cancellationToken);",
+        `        var __version = await _eventStore.MaxVersionAsync("${st}", __sid, cancellationToken);`,
       );
       stmtLines.push("        foreach (var __ev in _workflowEvents)");
       stmtLines.push("        {");
       stmtLines.push("            __version++;");
       stmtLines.push(`            _eventStore.Append(new ${recordCls}`);
       stmtLines.push("            {");
+      stmtLines.push(`                StreamType = "${st}",`);
       stmtLines.push("                StreamId = __sid,");
       stmtLines.push("                Version = __version,");
       stmtLines.push("                Type = __ev.GetType().Name,");
@@ -812,14 +820,16 @@ function renderCsEsBranch(
   }
   if (usage.hasEmit) {
     const recordCls = esEventRecordClass(wf);
+    const st = esStreamType(wf);
     const stateCls = workflowStateClass(wf);
     lines.push(
-      "        var __version = await _eventStore.MaxVersionAsync(__sid, cancellationToken);",
+      `        var __version = await _eventStore.MaxVersionAsync("${st}", __sid, cancellationToken);`,
       "        foreach (var __ev in _workflowEvents)",
       "        {",
       "            __version++;",
       `            _eventStore.Append(new ${recordCls}`,
       "            {",
+      `                StreamType = "${st}",`,
       "                StreamId = __sid,",
       "                Version = __version,",
       "                Type = __ev.GetType().Name,",
@@ -936,6 +946,7 @@ function renderMergedEventSourcedHandler(
     ? renderExprWithEventParam(createResolved.correlation, createSub.param, resourceClasses)
     : `notification.${corrPascal}`;
   if (createResolved.correlation) collectCsExprUsings(createResolved.correlation, usings, ns);
+  const st = esStreamType(wf);
   const stateCls = workflowStateClass(wf);
 
   const createBranch = renderCsEsBranch(
@@ -968,7 +979,7 @@ function renderMergedEventSourcedHandler(
   const bodyLines: string[] = [
     `        var __key = ${keyExpr};`,
     "        var __sid = __key.Value.ToString();",
-    "        var __rows = await _eventStore.LoadStreamAsync(__sid, cancellationToken);",
+    `        var __rows = await _eventStore.LoadStreamAsync("${st}", __sid, cancellationToken);`,
     `        var state = ${stateCls}._FromEvents(__key, __rows.Select(${stateCls}.RowToEvent).ToList());`,
     "        if (__rows.Count == 0)",
     "        {",
@@ -2156,15 +2167,16 @@ function renderInstancesController(
     const corrClr = csIdValueClrType(workflowCorrIdValueType(wf));
     if (wf.eventSourced) {
       const eventSet = esEventDbSet(wf);
+      const st = esStreamType(wf);
       const stateCls = workflowStateClass(wf);
       const corrId = esCorrIdClass(wf);
       listBody =
-        `        var __rows = await _db.${eventSet}.AsNoTracking().OrderBy(e => e.StreamId).ThenBy(e => e.Version).ToListAsync();\n` +
+        `        var __rows = await _db.${eventSet}.AsNoTracking().Where(e => e.StreamType == "${st}").OrderBy(e => e.StreamId).ThenBy(e => e.Version).ToListAsync();\n` +
         `        var rows = __rows.GroupBy(e => e.StreamId).Select(g => ${stateCls}._FromEvents(new ${corrId}(${csIdFromString("g.Key", corrClr)}), g.Select(${stateCls}.RowToEvent).ToList()));\n` +
         `        return Ok(rows.Select(x => new ${T}InstanceResponse(${proj("x")})));\n`;
       byIdBody =
         `        var __sid = id.ToString();\n` +
-        `        var __rows = await _db.${eventSet}.AsNoTracking().Where(e => e.StreamId == __sid).OrderBy(e => e.Version).ToListAsync();\n` +
+        `        var __rows = await _db.${eventSet}.AsNoTracking().Where(e => e.StreamType == "${st}" && e.StreamId == __sid).OrderBy(e => e.Version).ToListAsync();\n` +
         `        if (__rows.Count == 0) return NotFound();\n` +
         `        var x = ${stateCls}._FromEvents(new ${corrId}(id), __rows.Select(${stateCls}.RowToEvent).ToList());\n` +
         `        return Ok(new ${T}InstanceResponse(${proj("x")}));\n`;

@@ -1,0 +1,94 @@
+// Per-context event-log collapse (event-log-architecture.md) on
+// `foundation: vanilla`.  TWO `persistedAs(eventLog)` aggregates in ONE context
+// share the single `<ctx>_events` table, discriminated by `stream_type`.  This
+// fixture exists to prove the collapse compiles: two `<Agg>EventLog` Ecto
+// schemas mapping the SAME `banking_events` table, each repository filtering +
+// stamping its own `stream_type`, and a migration that creates one shared log
+// table with the composite (stream_type, stream_id, version) PK + the unique
+// `seq` index — all through `mix compile --warnings-as-errors`.
+system Banking {
+  subdomain Core {
+    context Banking {
+      event Opened { account: Account id, owner: string }
+      event Deposited { account: Account id, amount: int }
+      event Withdrawn { account: Account id, amount: int }
+
+      event LedgerOpened { ledger: Ledger id, name: string }
+      event Posted { ledger: Ledger id, delta: int }
+
+      aggregate Account ids guid persistedAs(eventLog) {
+        owner: string
+        balance: int
+
+        create open(owner: string) {
+          emit Opened { account: id, owner: owner }
+        }
+
+        operation deposit(amount: int) {
+          precondition amount > 0
+          emit Deposited { account: id, amount: amount }
+        }
+
+        operation withdraw(amount: int) {
+          precondition amount > 0
+          precondition balance >= amount
+          emit Withdrawn { account: id, amount: amount }
+        }
+
+        apply(e: Opened) {
+          owner := e.owner
+          balance := 0
+        }
+
+        apply(e: Deposited) {
+          balance := balance + e.amount
+        }
+
+        apply(e: Withdrawn) {
+          balance := balance - e.amount
+        }
+      }
+
+      aggregate Ledger ids guid persistedAs(eventLog) {
+        name: string
+        total: int
+
+        create openLedger(name: string) {
+          emit LedgerOpened { ledger: id, name: name }
+        }
+
+        operation post(delta: int) {
+          emit Posted { ledger: id, delta: delta }
+        }
+
+        apply(e: LedgerOpened) {
+          name := e.name
+          total := 0
+        }
+
+        apply(e: Posted) {
+          total := total + e.delta
+        }
+      }
+
+      repository Accounts for Account {
+        find byOwner(owner: string): Account? where this.owner == owner
+      }
+      repository Ledgers for Ledger {
+        find byName(name: string): Ledger? where this.name == name
+      }
+    }
+  }
+
+  api BankingApi from Core
+  storage pg { type: postgres }
+  resource bankingLog { for: Banking, kind: eventLog, use: pg }
+
+  deployable api {
+    platform: elixir
+    contexts: [Banking]
+    dataSources: [bankingLog]
+    serves: BankingApi
+    port: 4000
+  }
+}

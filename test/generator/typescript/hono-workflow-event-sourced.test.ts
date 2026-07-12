@@ -1,9 +1,9 @@
 // Event-sourced workflows on Hono (workflow-and-applier.md A2-S5b).  An
-// `eventSourced` workflow persists as an append-only `<wf>_events` stream
-// folded through its `apply(...)` blocks — the saga analogue of a
-// `persistedAs(eventLog)` aggregate — instead of a mutable correlation-state
-// row.  Asserts the stream table, the fold helpers, and the fold-load /
-// append-own-events dispatch seam.
+// `eventSourced` workflow persists to the single per-context `<ctx>_events`
+// stream (its `stream_type` slice), folded through its `apply(...)` blocks —
+// the saga analogue of a `persistedAs(eventLog)` aggregate — instead of a
+// mutable correlation-state row.  Asserts the shared stream table, the fold
+// helpers, and the fold-load / append-own-events dispatch seam.
 
 import { describe, expect, it } from "vitest";
 import { generateSystems } from "../../../src/system/index.js";
@@ -34,11 +34,15 @@ const file = (files: Map<string, string>, suffix: string): string =>
   [...files.entries()].find(([k]) => k.endsWith(suffix))?.[1] ?? "";
 
 describe("hono event-sourced workflows", () => {
-  it("persists as an append-only <wf>_events stream, not a state table", async () => {
+  it("persists to the single per-context <ctx>_events stream, not a state table", async () => {
     const schema = file(await gen(), "db/schema.ts");
-    expect(schema).toContain('pgTable("tally_events"');
+    // The ES workflow's stream lives in the shared per-context event log,
+    // discriminated by stream_type — not a per-workflow `tally_events` table.
+    expect(schema).toContain('pgTable("o_events"');
+    expect(schema).toContain('streamType: text("stream_type").notNull(),');
     expect(schema).toContain("streamId: text(");
     expect(schema).toContain("version: integer(");
+    expect(/pgTable\("tally_events"/.test(schema)).toBe(false);
     // No mutable correlation-state table for the event-sourced workflow.
     expect(/pgTable\("tally",/.test(schema)).toBe(false);
   });

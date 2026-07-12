@@ -83,7 +83,8 @@ describe("java workflow-sourced views", () => {
 
 // An event-sourced workflow has no `<Wf>State` correlation table, so a
 // `view = <ESWorkflow>` can't read it through a Spring Data repository.  The
-// views service group-folds the `<wf>_events` stream over a shared JdbcTemplate
+// views service group-folds the per-context `<ctx>_events` log (its
+// `stream_type = "<Wf>"` rows) over a shared JdbcTemplate
 // (load the rows, group by stream_id, fold each via `_fromEvents` — mirroring
 // the ES instance LIST) and applies the SAME filter IN-MEMORY over the folded
 // state's record accessors.  The route path stays identical to the state path.
@@ -106,7 +107,7 @@ describe("java event-sourced workflow-sourced view", () => {
     expect(row).toContain("public record PaidFulfillmentsRow(UUID orderId, int paid) {");
   });
 
-  it("group-folds the <wf>_events stream over JdbcTemplate, filtering IN-MEMORY", async () => {
+  it("group-folds the <ctx>_events stream over JdbcTemplate, filtering IN-MEMORY", async () => {
     const svc = find(await gen(ES_SRC), "OViews.java");
     expect(svc, "views service not emitted").toBeDefined();
     // A shared JdbcTemplate folds the stream — NOT a saga-state repository.
@@ -114,7 +115,7 @@ describe("java event-sourced workflow-sourced view", () => {
     expect(svc).not.toContain("OrderFulfillmentStateRepository");
     expect(svc).toContain("public List<PaidFulfillmentsRow> paidFulfillments() {");
     expect(svc).toContain(
-      '"select stream_id, type, data from order_fulfillment_events order by stream_id, version");',
+      '"select stream_id, type, data from o_events where stream_type = ? order by stream_id, version", "OrderFulfillment");',
     );
     expect(svc).toContain(
       ".map(__e -> OrderFulfillmentState._fromEvents(new OrderId(UUID.fromString(__e.getKey())), __e.getValue()))",

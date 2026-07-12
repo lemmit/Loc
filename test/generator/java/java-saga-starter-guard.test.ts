@@ -3,7 +3,7 @@
 // workflow declares BOTH `create(e)` and `on(e)` for the SAME event, the two
 // @EventListener methods would fan out in unspecified Spring order and both
 // append.  The fix merges them into ONE ordered @EventListener that reads the
-// `<wf>_events` stream once and branches (empty → create-logic, non-empty →
+// per-context `<ctx>_events` stream once and branches (empty → create-logic, non-empty →
 // on-logic), so exactly one appends regardless of fan-out order.  A create + on
 // on DIFFERENT events stays two independent handlers (byte-identical).
 // ---------------------------------------------------------------------------
@@ -57,14 +57,14 @@ describe("java event-sourced saga double-append (S5b)", () => {
     expect(d).not.toContain("onTrackerOnProjectArchived");
     // Reads the stream ONCE, then branches.
     expect(d).toContain(
-      '"select type, data from o.tracker_events where stream_id = ? order by version", __sid);',
+      '"select type, data from o.o_events where stream_type = ? and stream_id = ? order by version", "Tracker", __sid);',
     );
     expect(d).toContain("if (__rows.isEmpty()) {");
     expect(d).toContain("} else {");
     // Single read of the stream for the handler (one queryForList).
     const m = d.slice(d.indexOf("onTrackerProjectArchived"));
     const body = m.slice(0, m.indexOf("\n    }\n"));
-    expect(body.match(/order by version", __sid\);/g)?.length).toBe(1);
+    expect(body.match(/order by version", "Tracker", __sid\);/g)?.length).toBe(1);
   });
 
   it("create+on on DIFFERENT events stay two independent @EventListener methods", async () => {

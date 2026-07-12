@@ -2,8 +2,10 @@
 // An `eventSourced` workflow persists as an append-only `<wf>_events` stream
 // folded through its `apply(...)` blocks — the saga analogue of a
 // `persistedAs(eventLog)` aggregate — instead of a mutable correlation-state
-// row.  Asserts the `<Wf>State` fold block, the `<Wf>EventRow` schema model,
-// and the fold-load / append-own-events dispatch handlers.
+// row.  Its stream lives in the single shared per-context `<ctx>_events` log
+// (discriminated by `stream_type`).  Asserts the `<Wf>State` fold block, the
+// shared event-log schema model, and the fold-load / append-own-events
+// dispatch handlers.
 
 import { describe, expect, it } from "vitest";
 import { generateSystems } from "../../../src/system/index.js";
@@ -56,13 +58,21 @@ describe("python event-sourced workflows", () => {
     );
   });
 
-  it("emits the <Wf>EventRow stream model (no mutable saga-state table)", async () => {
+  it("appends its stream to the shared per-context event log (no mutable saga-state table)", async () => {
     const files = await gen();
     const schema = file(files, "app/db/schema.py");
-    expect(schema).toContain("class TallyEventRow(Base):");
-    expect(schema).toContain('__tablename__ = "tally_events"');
-    // No mutable saga-state row for the event-sourced workflow.
+    // ES workflows share the single per-context `<ctx>_events` log, keyed by
+    // (stream_type, stream_id, version), discriminated by the workflow name.
+    expect(schema).toContain("class OEventRow(Base):");
+    expect(schema).toContain('__tablename__ = "o_events"');
+    expect(schema).toContain('PrimaryKeyConstraint("stream_type", "stream_id", "version")');
+    // No per-workflow stream table, no mutable saga-state row.
+    expect(schema).not.toContain("class TallyEventRow(Base):");
     expect(schema).not.toContain("class TallyRow(Base):");
+    // The append stamps the workflow's stream_type discriminator.
+    const d = file(files, "app/dispatch.py");
+    expect(d).toContain('stream_type="Tally",');
+    expect(d).toContain('OEventRow.stream_type == "Tally"');
   });
 
   it("the create starter folds the stream and appends its own events", async () => {

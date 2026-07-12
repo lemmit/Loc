@@ -1,5 +1,5 @@
 import type { AssociationIR, BoundedContextIR, FieldIR, TypeIR } from "../../ir/types/loom-ir.js";
-import { snake } from "../../util/naming.js";
+import { snake, upperFirst } from "../../util/naming.js";
 
 // ---------------------------------------------------------------------------
 // Column mapping shared by the SQLAlchemy schema emitter and the
@@ -28,6 +28,20 @@ export interface PyColumn {
 /** SQLAlchemy row-model class name for an aggregate / part. */
 export function rowClassName(name: string): string {
   return `${name}Row`;
+}
+
+/** SQLAlchemy row-model class name for the single per-context event log
+ *  (`<ctx>_events`) — the shared event-sourcing store every ES aggregate and
+ *  ES workflow in the context appends to, discriminated by `stream_type`
+ *  (event-log-architecture.md). */
+export function contextEventRowClassName(ctxName: string): string {
+  return `${upperFirst(ctxName)}EventRow`;
+}
+
+/** The per-context event-log table name (`<ctx>_events`), matching the shared
+ *  DDL (`migrations-builder.eventLogTableForStream`). */
+export function contextEventsTableName(ctxName: string): string {
+  return `${snake(ctxName)}_events`;
 }
 
 /** Row-model class name for an association's join table

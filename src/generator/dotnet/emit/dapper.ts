@@ -609,8 +609,16 @@ export function renderDapperEventSourcedRepository(
   repo: RepositoryIR | undefined,
   ns: string,
   findBodies: Array<{ name: string; filterClause: string; projectionClause: string }>,
+  /** The owning bounded context's name — the per-context event log lives in
+   *  `<ctx>_events` (event-log-architecture.md), shared by every stream in the
+   *  context and discriminated by `stream_type`. */
+  ctxName: string,
 ): string {
-  const table = `${snake(agg.name)}_events`;
+  // The single per-context event log (event-log-architecture.md): every load /
+  // append / fold scopes to `stream_type = @st` (this aggregate's name) so a
+  // sibling stream sharing the `<ctx>_events` table is never folded in.
+  const table = `${snake(ctxName)}_events`;
+  const streamType = agg.name;
   const eventNames = [...new Set((agg.appliers ?? []).map((a) => a.event))];
   const idValue = csValueTypeForId(agg.idValueType);
   const parseId =
@@ -686,7 +694,7 @@ export function renderDapperEventSourcedRepository(
       "    {",
       "        var __sid = id.Value.ToString();",
       "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
-      `        var __rows = (await conn.QueryAsync<EvRow>(new CommandDefinition("SELECT stream_id, type, data FROM ${table} WHERE stream_id = @sid ORDER BY version", new { sid = __sid }, cancellationToken: cancellationToken))).ToList();`,
+      `        var __rows = (await conn.QueryAsync<EvRow>(new CommandDefinition("SELECT stream_id, type, data FROM ${table} WHERE stream_type = @st AND stream_id = @sid ORDER BY version", new { st = "${streamType}", sid = __sid }, cancellationToken: cancellationToken))).ToList();`,
       "        if (__rows.Count == 0) return null;",
       `        return ${agg.name}._FromEvents(id, __rows.Select(RowToEvent).ToList());`,
       "    }",
@@ -710,12 +718,12 @@ export function renderDapperEventSourcedRepository(
       "        {",
       "            var __sid = aggregate.Id.Value.ToString();",
       "            await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
-      `            var __version = await conn.ExecuteScalarAsync<int?>(new CommandDefinition("SELECT MAX(version) FROM ${table} WHERE stream_id = @sid", new { sid = __sid }, cancellationToken: cancellationToken)) ?? 0;`,
+      `            var __version = await conn.ExecuteScalarAsync<int?>(new CommandDefinition("SELECT MAX(version) FROM ${table} WHERE stream_type = @st AND stream_id = @sid", new { st = "${streamType}", sid = __sid }, cancellationToken: cancellationToken)) ?? 0;`,
       "            foreach (var __ev in __pending)",
       "            {",
       "                __version++;",
       "                var __data = System.Text.Json.JsonSerializer.Serialize((object)__ev, __json);",
-      `                await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (stream_id, version, type, data, occurred_at) VALUES (@sid, @version, @type, CAST(@data AS jsonb), now())", new { sid = __sid, version = __version, type = __ev.GetType().Name, data = __data }, cancellationToken: cancellationToken));`,
+      `                await conn.ExecuteAsync(new CommandDefinition("INSERT INTO ${table} (stream_type, stream_id, version, type, data, occurred_at) VALUES (@st, @sid, @version, @type, CAST(@data AS jsonb), now())", new { st = "${streamType}", sid = __sid, version = __version, type = __ev.GetType().Name, data = __data }, cancellationToken: cancellationToken));`,
       "            }",
       "        }",
       "        foreach (var ev in __pending) await _events.DispatchAsync(ev, cancellationToken);",
@@ -724,7 +732,7 @@ export function renderDapperEventSourcedRepository(
       `    private async Task<List<${agg.name}>> _LoadAllAsync(CancellationToken cancellationToken)`,
       "    {",
       "        await using var conn = await _db.OpenConnectionAsync(cancellationToken);",
-      `        var __rows = (await conn.QueryAsync<EvRow>(new CommandDefinition("SELECT stream_id, type, data FROM ${table} ORDER BY stream_id, version", cancellationToken: cancellationToken))).ToList();`,
+      `        var __rows = (await conn.QueryAsync<EvRow>(new CommandDefinition("SELECT stream_id, type, data FROM ${table} WHERE stream_type = @st ORDER BY stream_id, version", new { st = "${streamType}" }, cancellationToken: cancellationToken))).ToList();`,
       `        return __rows`,
       "            .GroupBy(__r => __r.stream_id)",
       `            .Select(__g => ${agg.name}._FromEvents(new ${agg.name}Id(${parseId}), __g.Select(RowToEvent).ToList()))`,
@@ -750,43 +758,60 @@ export function renderDapperEventSourcedRepository(
 // aggregate, embedded in a C# helper run once at startup.
 // ---------------------------------------------------------------------------
 
-export function renderDapperSchema(aggs: readonly EnrichedAggregateIR[], ns: string): string {
-  const tables = aggs.map((agg) => {
-    // Event-sourced aggregates get the append-only `<agg>_events` stream table
-    // (mirrors the canonical migration); state aggregates get their state table.
-    if (agg.persistedAs === "eventLog") {
-      return [
-        `CREATE TABLE IF NOT EXISTS ${snake(agg.name)}_events (`,
-        "    stream_id text not null,",
-        "    version int not null,",
-        "    type text not null,",
-        "    data jsonb not null,",
-        "    occurred_at timestamptz not null default now(),",
-        "    primary key (stream_id, version)",
-        ");",
-      ].join("\n");
-    }
-    const cols = columnsOf(agg).map((c, i) => {
-      const pk = i === 0 ? " primary key" : "";
-      const nn = c.nullable || i === 0 ? "" : " not null";
-      return `    ${c.col} ${c.sql}${pk}${nn}`;
+export function renderDapperSchema(
+  aggs: readonly EnrichedAggregateIR[],
+  ns: string,
+  /** Snake-case names of the bounded contexts that own any event-sourced
+   *  stream — one shared `<ctx>_events` log per context (event-log-architecture.md),
+   *  holding every `persistedAs(eventLog)` aggregate stream discriminated by
+   *  `stream_type`.  Empty ⇒ no event log. */
+  eventLogContexts: readonly string[] = [],
+): string {
+  // Event-sourced aggregates own no per-aggregate table — their stream lives in
+  // the shared per-context `<ctx>_events` log emitted after this map.
+  const stateTables = aggs
+    .filter((agg) => agg.persistedAs !== "eventLog")
+    .map((agg) => {
+      const cols = columnsOf(agg).map((c, i) => {
+        const pk = i === 0 ? " primary key" : "";
+        const nn = c.nullable || i === 0 ? "" : " not null";
+        return `    ${c.col} ${c.sql}${pk}${nn}`;
+      });
+      const root = `CREATE TABLE IF NOT EXISTS ${tableOf(agg.name)} (\n${cols.join(",\n")}\n);`;
+      // One join table per reference collection (`X id[]`).  `X id[]` is a set
+      // (membership only, no order): the composite (owner, target) PK is the
+      // whole row — no payload column.  Reads ORDER BY the target FK id.
+      const joins = (agg.associations ?? []).map((a) =>
+        [
+          `CREATE TABLE IF NOT EXISTS ${a.joinTable} (`,
+          `    ${a.ownerFk} ${idTypes(agg.idValueType).sql} not null,`,
+          `    ${a.targetFk} ${idTypes(a.valueType).sql} not null,`,
+          `    primary key (${a.ownerFk}, ${a.targetFk})`,
+          ");",
+        ].join("\n"),
+      );
+      return [root, ...joins].join("\n\n");
     });
-    const root = `CREATE TABLE IF NOT EXISTS ${tableOf(agg.name)} (\n${cols.join(",\n")}\n);`;
-    // One join table per reference collection (`X id[]`).  `X id[]` is a set
-    // (membership only, no order): the composite (owner, target) PK is the
-    // whole row — no payload column.  Reads ORDER BY the target FK id.
-    const joins = (agg.associations ?? []).map((a) =>
-      [
-        `CREATE TABLE IF NOT EXISTS ${a.joinTable} (`,
-        `    ${a.ownerFk} ${idTypes(agg.idValueType).sql} not null,`,
-        `    ${a.targetFk} ${idTypes(a.valueType).sql} not null,`,
-        `    primary key (${a.ownerFk}, ${a.targetFk})`,
-        ");",
-      ].join("\n"),
-    );
-    return [root, ...joins].join("\n\n");
+  // The single per-context event log `<ctx>_events` (event-log-architecture.md):
+  // seq cursor + stream_type discriminator + PK (stream_type, stream_id,
+  // version) + unique seq index — mirrors the canonical migration.
+  const eventLogTables = eventLogContexts.map((ctxSnake) => {
+    const t = `${ctxSnake}_events`;
+    return [
+      `CREATE TABLE IF NOT EXISTS ${t} (`,
+      "    seq bigserial not null,",
+      "    stream_type text not null,",
+      "    stream_id text not null,",
+      "    version int not null,",
+      "    type text not null,",
+      "    data jsonb not null,",
+      "    occurred_at timestamptz not null default now(),",
+      "    primary key (stream_type, stream_id, version)",
+      ");",
+      `CREATE UNIQUE INDEX IF NOT EXISTS ${t}_seq_key ON ${t} (seq);`,
+    ].join("\n");
   });
-  const ddl = tables.join("\n\n");
+  const ddl = [...stateTables, ...eventLogTables].join("\n\n");
   return (
     lines(
       "// Auto-generated.  Dapper schema bootstrap (persistence: dapper).",

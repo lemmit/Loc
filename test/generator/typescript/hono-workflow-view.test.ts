@@ -59,8 +59,9 @@ describe("Hono workflow-sourced view", () => {
 
 // An event-sourced workflow has no `<Wf>State` table, so a `view = <ESWorkflow>`
 // can't push its filter into a SQL `where`.  Instead the route group-folds the
-// `<wf>_events` stream via the file-local `loadAll<T>` helper (the same one the
-// ES instance LIST emits) and applies the filter IN-MEMORY with `.filter`.  The
+// workflow's `stream_type` slice of the shared per-context `<ctx>_events` log
+// via the file-local `loadAll<T>` helper (the same one the ES instance LIST
+// emits) and applies the filter IN-MEMORY with `.filter`.  The
 // operationId / route path / projected wire shape stay identical to the state
 // path — OpenAPI parity by construction.
 const ES_SRC = `system S { subdomain O { context O {
@@ -100,7 +101,7 @@ describe("Hono event-sourced workflow-sourced view", () => {
     expect(vf).toContain(
       "function foldTally(key: string, events: Events.DomainEvent[]): TallyState {",
     );
-    expect(vf).toContain(".from(schema.tallyEvents)");
+    expect(vf).toContain(".from(schema.oEvents)");
   });
 
   it("group-folds the stream and applies the filter IN-MEMORY (no SQL where)", async () => {

@@ -6,9 +6,9 @@ import { parseString } from "../../_helpers/parse.js";
 // ---------------------------------------------------------------------------
 // Hono/Drizzle event-sourcing emission (`persistedAs(eventLog)`, appliers A2).
 //
-// An event-sourced aggregate persists to an append-only `<agg>_events`
-// stream table (no state table); state is rehydrated by folding the stream
-// through the appliers (`_fromEvents`).  Command `emit`s both record the
+// An event-sourced aggregate persists to the single per-context
+// `<ctx>_events` stream table (its `stream_type` slice; no state table); state
+// is rehydrated by folding the stream through the appliers (`_fromEvents`).  Command `emit`s both record the
 // event and fold it (`_apply`) so the in-memory aggregate is consistent for
 // the response.  A top-level context drives the single-project (legacy)
 // generateTypeScript path; the deployable-gating lives in the IR validator
@@ -51,13 +51,17 @@ async function generate(): Promise<Map<string, string>> {
 }
 
 describe("Hono/Drizzle event-sourcing emission (persistedAs(eventLog))", () => {
-  it("emits an append-only <agg>_events stream table (no state table)", async () => {
+  it("emits the single per-context <ctx>_events stream table (no state table)", async () => {
     const schema = (await generate()).get("db/schema.ts")!;
-    expect(schema).toContain('export const accountEvents = pgTable("account_events", {');
+    // One per-context event log, discriminated by stream_type.
+    expect(schema).toContain('export const accountsEvents = pgTable("accounts_events", {');
+    expect(schema).toContain('streamType: text("stream_type").notNull(),');
     expect(schema).toContain('streamId: text("stream_id").notNull(),');
     expect(schema).toContain('version: integer("version").notNull(),');
     expect(schema).toContain('data: jsonb("data").notNull(),');
-    expect(schema).toContain("primaryKey({ columns: [table.streamId, table.version] })");
+    expect(schema).toContain(
+      "primaryKey({ columns: [table.streamType, table.streamId, table.version] })",
+    );
     // No state table for the aggregate.
     expect(schema).not.toContain('pgTable("accounts"');
   });
@@ -87,9 +91,11 @@ describe("Hono/Drizzle event-sourcing emission (persistedAs(eventLog))", () => {
 
   it("repository folds the stream on load and appends pending events on save", async () => {
     const repo = (await generate()).get("db/repositories/account-repository.ts")!;
-    // Load: read stream in version order, fold via _fromEvents.
-    expect(repo).toContain("from(schema.accountEvents)");
-    expect(repo).toContain(".orderBy(schema.accountEvents.version);");
+    // Load: read this aggregate's stream_type slice in version order, fold via
+    // _fromEvents.
+    expect(repo).toContain("from(schema.accountsEvents)");
+    expect(repo).toContain('eq(schema.accountsEvents.streamType, "Account")');
+    expect(repo).toContain(".orderBy(schema.accountsEvents.version);");
     expect(repo).toContain("Account._fromEvents(");
     // Save: append pulled events with gap-free versions continuing the stream.
     expect(repo).toContain("const pending = aggregate.pullEvents();");

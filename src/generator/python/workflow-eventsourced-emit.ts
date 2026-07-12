@@ -7,6 +7,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { snake, upperFirst } from "../../util/naming.js";
+import { contextEventRowClassName } from "./py-columns.js";
 import { renderPyExpr } from "./render-expr.js";
 import { fromData, toData } from "./repository-eventsourced-builder.js";
 
@@ -32,9 +33,11 @@ export function eventSourcedWorkflows(workflows: readonly WorkflowIR[]): Workflo
   return workflows.filter((wf) => wf.eventSourced);
 }
 
-/** `<Wf>EventRow` — the SQLAlchemy stream model (matches `renderEventLogModel`). */
-export function esEventRow(wf: WorkflowIR): string {
-  return `${upperFirst(wf.name)}EventRow`;
+/** The shared per-context event-log row class (`<Ctx>EventRow`) an ES workflow
+ *  appends its stream to — every ES aggregate + workflow in the context shares
+ *  this one table, discriminated by `stream_type` (event-log-architecture.md). */
+export function esEventRow(ctx: EnrichedBoundedContextIR): string {
+  return contextEventRowClassName(ctx.name);
 }
 
 /** The fold-target class name (`TallyState`). */
@@ -151,7 +154,7 @@ export function esWorkflowFoldBlock(wf: WorkflowIR, ctx: EnrichedBoundedContextI
   const T = esStateClass(wf);
   const corr = wf.correlationField as string;
   const corrId = corrIdClass(wf);
-  const row = esEventRow(wf);
+  const row = esEventRow(ctx);
   const fns = esFns(wf);
   const fields = wf.stateFields ?? [];
   const eventNames = [...new Set((wf.appliers ?? []).map((a) => a.event))];
@@ -208,7 +211,11 @@ export function esWorkflowFoldBlock(wf: WorkflowIR, ctx: EnrichedBoundedContextI
   const loadFn = lines(
     `async def ${fns.load}(session: AsyncSession, key: str) -> list[DomainEvent]:`,
     "    rows = (",
-    `        await session.execute(select(${row}).where(${row}.stream_id == key).order_by(${row}.version))`,
+    `        await session.execute(`,
+    `            select(${row})`,
+    `            .where(${row}.stream_type == "${wf.name}", ${row}.stream_id == key)`,
+    `            .order_by(${row}.version)`,
+    "        )",
     "    ).scalars().all()",
     `    return [_${snake(wf.name)}_row_to_event(r) for r in rows]`,
   );
@@ -219,7 +226,11 @@ export function esWorkflowFoldBlock(wf: WorkflowIR, ctx: EnrichedBoundedContextI
   const loadAllFn = lines(
     `async def ${fns.loadAll}(session: AsyncSession) -> list[${T}]:`,
     "    rows = (",
-    `        await session.execute(select(${row}).order_by(${row}.stream_id, ${row}.version))`,
+    `        await session.execute(`,
+    `            select(${row})`,
+    `            .where(${row}.stream_type == "${wf.name}")`,
+    `            .order_by(${row}.stream_id, ${row}.version)`,
+    "        )",
     "    ).scalars().all()",
     "    by_stream: dict[str, list[DomainEvent]] = {}",
     "    for r in rows:",
@@ -231,13 +242,18 @@ export function esWorkflowFoldBlock(wf: WorkflowIR, ctx: EnrichedBoundedContextI
     "    if not events:",
     "        return",
     "    prior = (",
-    `        await session.execute(select(func.max(${row}.version)).where(${row}.stream_id == key))`,
+    `        await session.execute(`,
+    `            select(func.max(${row}.version)).where(`,
+    `                ${row}.stream_type == "${wf.name}", ${row}.stream_id == key`,
+    "            )",
+    "        )",
     "    ).scalar()",
     "    version = prior or 0",
     "    for ev in events:",
     "        version += 1",
     "        await session.execute(",
     `            insert(${row}).values(`,
+    `                stream_type="${wf.name}",`,
     "                stream_id=key,",
     "                version=version,",
     "                type=type(ev).type,",

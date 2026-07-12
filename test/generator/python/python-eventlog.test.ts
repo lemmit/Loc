@@ -25,14 +25,23 @@ async function build() {
 }
 
 describe("python event sourcing", () => {
-  it("emits the append-only stream table instead of a state table", async () => {
+  it("emits the single per-context event-log table instead of a state table", async () => {
     const files = await build();
     const schema = files.get("api/app/db/schema.py")!;
-    expect(schema).toContain("class AccountEventRow(Base):");
-    expect(schema).toContain('    __tablename__ = "account_events"');
-    expect(schema).toContain('PrimaryKeyConstraint("stream_id", "version")');
+    // The single per-context log (event-log-architecture.md): `<ctx>_events`,
+    // keyed by (stream_type, stream_id, version), shared by every ES stream.
+    expect(schema).toContain("class AccountsEventRow(Base):");
+    expect(schema).toContain('    __tablename__ = "accounts_events"');
+    expect(schema).toContain('PrimaryKeyConstraint("stream_type", "stream_id", "version")');
+    // seq — context-global monotonic cursor (bigserial), DB-assigned.
+    expect(schema).toContain(
+      "    seq: Mapped[int] = mapped_column(BigInteger, Identity(), unique=True)",
+    );
+    expect(schema).toContain("    stream_type: Mapped[str] = mapped_column(Text)");
     // stream_id is TEXT in the shared DDL (Drizzle parity).
     expect(schema).toContain("    stream_id: Mapped[str] = mapped_column(Text)");
+    // No per-aggregate stream table, no state table.
+    expect(schema).not.toContain("class AccountEventRow");
     expect(schema).not.toContain("class AccountRow");
   });
 
@@ -58,7 +67,11 @@ describe("python event sourcing", () => {
     expect(repo).toContain(
       "return Account._from_events(id, [self._row_to_event(row) for row in rows])",
     );
-    expect(repo).toContain("select(func.max(AccountEventRow.version))");
+    expect(repo).toContain("select(func.max(AccountsEventRow.version))");
+    // Reads filter, and appends stamp, this aggregate's stream_type — two
+    // aggregates sharing the per-context log must each fold only their own.
+    expect(repo).toContain('AccountsEventRow.stream_type == "Account"');
+    expect(repo).toContain('stream_type="Account",');
     expect(repo).toContain("version += 1");
     expect(repo).toContain("type=type(ev).type,");
     // Wire round-trip dispatchers.

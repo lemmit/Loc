@@ -10,9 +10,9 @@ import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { collectJavaExprImports, javaValueTypeForId, renderJavaExpr } from "../render-expr.js";
 import { collectWireImports, domainToWire, wireJavaType } from "./wire.js";
 import {
+  esEventLogTable,
   esWorkflowCorrIdClass,
   esWorkflowStateClass,
-  esWorkflowStreamTable,
 } from "./workflow-eventsourced.js";
 import { workflowStateClass } from "./workflow-state.js";
 
@@ -253,7 +253,10 @@ export function renderJavaViews(
       esWfs.push(wf);
       const cls = esWorkflowStateClass(wf);
       const corrId = esWorkflowCorrIdClass(wf);
-      const table = esWorkflowStreamTable(wf, vctx.contextSchema);
+      // The single per-context event log; this workflow's stream is the subset
+      // tagged `stream_type = "<Wf>"`.
+      const table = esEventLogTable(ctx.name, vctx.contextSchema);
+      const streamType = wf.name;
       const corr = shape.find((f) => f.source === "id");
       const idJava = javaValueTypeForId(idValueTypeOf(corr));
       imports.add("java.util.ArrayList");
@@ -267,7 +270,7 @@ export function renderJavaViews(
         `    public List<${rowName}> ${findName}() {`,
         ...gateLinesFor(view),
         `        var __rows = jdbc.queryForList(`,
-        `            "select stream_id, type, data from ${table} order by stream_id, version");`,
+        `            "select stream_id, type, data from ${table} where stream_type = ? order by stream_id, version", "${streamType}");`,
         `        var __byStream = new LinkedHashMap<String, List<DomainEvent>>();`,
         `        for (var __r : __rows) {`,
         `            var __sid = (String) __r.get("stream_id");`,

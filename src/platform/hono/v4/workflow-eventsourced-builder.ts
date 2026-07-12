@@ -38,9 +38,11 @@ export function foldedEventNames(wf: WorkflowIR): string[] {
   return [...new Set((wf.appliers ?? []).map((a) => a.event))];
 }
 
-/** The Drizzle stream-table const for a workflow (`tallyEvents`). */
-function streamTable(wf: WorkflowIR): string {
-  return `schema.${lowerFirst(wf.name)}Events`;
+/** The Drizzle stream-table const for a workflow — the single per-context
+ *  `<ctx>_events` log (event-log-architecture.md), shared by every ES aggregate
+ *  and ES workflow in the context and discriminated by `stream_type`. */
+function streamTable(ctx: EnrichedBoundedContextIR): string {
+  return `schema.${lowerFirst(ctx.name)}Events`;
 }
 
 /** `<T>State` type name. */
@@ -131,7 +133,11 @@ export function emitWorkflowFoldHelpers(
 ): string[] {
   const T = upperFirst(wf.name);
   const corr = wf.correlationField as string;
-  const table = streamTable(wf);
+  const table = streamTable(ctx);
+  // The stream-type discriminator that carves this workflow's slice out of the
+  // shared per-context event log — mirrors the ES aggregate repo's
+  // `stream_type = "<Agg>"`.
+  const streamType = T;
   const out: string[] = [];
 
   // State type — every saga state field (the correlation key + folded state).
@@ -184,7 +190,9 @@ export function emitWorkflowFoldHelpers(
     out.push(`  const rows = await db`);
     out.push(`    .select()`);
     out.push(`    .from(${table})`);
-    out.push(`    .where(eq(${table}.streamId, key))`);
+    out.push(
+      `    .where(and(eq(${table}.streamType, "${streamType}"), eq(${table}.streamId, key)))`,
+    );
     out.push(`    .orderBy(${table}.version);`);
     out.push(`  return rows.map((r) => rowToEvent({ type: r.type, data: r.data }));`);
     out.push(`}`);
@@ -199,6 +207,7 @@ export function emitWorkflowFoldHelpers(
   out.push(`  const rows = await db`);
   out.push(`    .select()`);
   out.push(`    .from(${table})`);
+  out.push(`    .where(eq(${table}.streamType, "${streamType}"))`);
   out.push(`    .orderBy(${table}.streamId, ${table}.version);`);
   out.push(`  const byStream = new Map<string, Events.DomainEvent[]>();`);
   out.push(`  for (const r of rows) {`);
@@ -224,9 +233,12 @@ export function emitWorkflowFoldHelpers(
   out.push(`  const prior = await db`);
   out.push(`    .select({ version: ${table}.version })`);
   out.push(`    .from(${table})`);
-  out.push(`    .where(eq(${table}.streamId, key));`);
+  out.push(
+    `    .where(and(eq(${table}.streamType, "${streamType}"), eq(${table}.streamId, key)));`,
+  );
   out.push(`  let version = prior.reduce((m, r) => Math.max(m, r.version), 0);`);
   out.push(`  const rows = events.map((event) => ({`);
+  out.push(`    streamType: "${streamType}",`);
   out.push(`    streamId: key,`);
   out.push(`    version: ++version,`);
   out.push(`    type: event.type,`);

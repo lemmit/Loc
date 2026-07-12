@@ -37,12 +37,15 @@ export function esWorkflowStateClass(wf: WorkflowIR): string {
   return `${upperFirst(wf.name)}State`;
 }
 
-/** The `<wf>_events` stream table, schema-qualified for native SQL when the
- *  workflow's context has a schema (e.g. `catalog.archival_tracker_events`),
- *  matching the shared migration (`eventLogTableForStream`) and the other
- *  ports.  Unqualified when no schema — byte-identical for binding-free systems. */
-export function esWorkflowStreamTable(wf: WorkflowIR, schema?: string): string {
-  const base = `${snake(wf.name)}_events`;
+/** The single per-context event log `<ctx>_events`, schema-qualified for native
+ *  SQL when the context has a schema (e.g. `catalog_ctx.catalog_events`),
+ *  matching the shared migration (`eventLogTableForStream`) and the other ports
+ *  (event-log-architecture.md).  Every `persistedAs(eventLog)` aggregate AND
+ *  every `eventSourced` workflow in the context shares this one table,
+ *  discriminated by `stream_type`.  Unqualified when no schema — byte-identical
+ *  for binding-free systems. */
+export function esEventLogTable(ctxName: string, schema?: string): string {
+  const base = `${snake(ctxName)}_events`;
   return schema ? `${schema}.${base}` : base;
 }
 
@@ -136,8 +139,8 @@ export function renderEsWorkflowFoldClass(
     `import ${basePkg}.domain.valueobjects.*;`,
     ``,
     `/** The folded saga state of an event-sourced workflow.  The truth is the`,
-    ` *  ${esWorkflowStreamTable(wf)} stream; this is the in-memory projection,`,
-    ` *  rebuilt from the stream on every dispatch via _fromEvents. */`,
+    ` *  ${esEventLogTable(ctx.name)} stream (its \`stream_type = "${wf.name}"\` rows);`,
+    ` *  this is the in-memory projection, rebuilt on every dispatch via _fromEvents. */`,
     `public class ${cls} {`,
     `    private static final JsonMapper JSON = JsonMapper.builder().findAndAddModules().build();`,
     ``,

@@ -13,7 +13,7 @@ import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { dtoParam, projectEntityExpr, projectToResponse, wireType } from "./dto-mapping.js";
 import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
-import { esCorrIdClass, esEventDbSet } from "./workflow-eventsourced-emit.js";
+import { esCorrIdClass, esEventDbSet, esStreamType } from "./workflow-eventsourced-emit.js";
 import { workflowStateClass, workflowStateDbSet } from "./workflow-state-emit.js";
 
 // ---------------------------------------------------------------------------
@@ -344,10 +344,11 @@ function renderWorkflowViewHandler(
   let queryBody: string;
   if (eventSourced) {
     const eventSet = esEventDbSet(wf);
+    const st = esStreamType(wf);
     const stateCls = workflowStateClass(wf);
     const corrId = esCorrIdClass(wf);
     queryBody =
-      `        var __rows = await _db.${eventSet}.AsNoTracking().OrderBy(e => e.StreamId).ThenBy(e => e.Version).ToListAsync(cancellationToken);\n` +
+      `        var __rows = await _db.${eventSet}.AsNoTracking().Where(e => e.StreamType == "${st}").OrderBy(e => e.StreamId).ThenBy(e => e.Version).ToListAsync(cancellationToken);\n` +
       `        var rows = __rows.GroupBy(e => e.StreamId).Select(g => ${stateCls}._FromEvents(new ${corrId}(System.Guid.Parse(g.Key)), g.Select(${stateCls}.RowToEvent).ToList()))${where ? `.Where(r => ${where})` : ""};\n` +
       `        return rows.Select(r => new ${responseRecord}(${proj})).ToList();`;
   } else {

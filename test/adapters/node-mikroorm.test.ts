@@ -95,8 +95,8 @@ describe("mikroorm persistence adapter — node/hono (Phase 5d)", () => {
 
   // Event sourcing (appliers, MikroORM edition): a `persistence: mikroorm`
   // deployable accepts a `persistedAs(eventLog)` aggregate and emits the
-  // EntityManager event store + the `<agg>_events` EntitySchema, reusing the
-  // domain fold + CQRS.
+  // EntityManager event store over the single per-context `<ctx>_events`
+  // EntitySchema (discriminated by `stream_type`), reusing the domain fold + CQRS.
   const esSys = `
 system D {
   subdomain S {
@@ -119,12 +119,21 @@ system D {
     const { files, errors } = await emit(esSys);
     expect(errors).toEqual([]);
     const entities = files.get("api/db/entities.ts")!;
-    expect(entities).toContain("export class AccountEventRow");
-    expect(entities).toContain('tableName: "account_events"');
+    // One shared per-context event-log row, discriminated by stream_type, with
+    // a composite (streamType, streamId, version) PK + inert seq cursor.
+    expect(entities).toContain("export class OEventRow");
+    expect(entities).toContain('tableName: "o_events"');
+    expect(entities).toContain('streamType: { type: "string", primary: true }');
+    expect(entities).toContain(
+      'seq: { type: "number", columnType: "bigint", autoincrement: true }',
+    );
     const repo = files.get("api/db/repositories/account-repository.ts")!;
     expect(repo).toContain("Account._fromEvents(");
     expect(repo).toContain("em.persist(r);");
     expect(repo).toContain("function rowToEvent(");
+    // The aggregate's stream is filtered + stamped by its stream_type.
+    expect(repo).toContain('{ streamType: "Account", streamId: id as string }');
+    expect(repo).toContain('r.streamType = "Account";');
   });
 });
 
