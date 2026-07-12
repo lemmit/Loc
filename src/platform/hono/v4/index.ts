@@ -130,6 +130,35 @@ export function makeHonoPlatform(pins: BackendPins): PlatformSurface {
         layout: "byLayer",
       };
     },
+    // M18 phase 8 slice 1 (Node debug wiring) — moved verbatim from the old
+    // `NodeLaunchTarget`-based `renderVsCodeLaunchJson` (src/system/
+    // launch-config.ts) when the seam generalized to per-backend
+    // `debugLaunch` (M26).  BYTE-IDENTICAL with the pre-M26 shape:
+    // `test/system/sourcemap.test.ts`'s byte-identical gate covers node
+    // output. Plain Node against the deployable's own `index.ts` with
+    // `--enable-source-maps` — no `--experimental-strip-types`: the docker
+    // image this project ships (`node:24-alpine`) has type-stripping
+    // unflagged by default, so the config targets that runtime. A LOCAL
+    // host Node older than 23.6 needs the flag added by hand; a host Node
+    // older than 22.6 doesn't support stripping at all. Requires the
+    // sibling `addTsExtensionsForNodeDebug` import rewrite
+    // (src/generator/typescript/debug-imports.ts, applied in
+    // src/platform/hono/v4/emit.ts) — both are gated on the same flag, so
+    // they always ship together.
+    debugLaunch({ deployable, slug }): Record<string, unknown> {
+      return {
+        type: "node",
+        request: "launch",
+        name: `Debug ${deployable.name} (node --enable-source-maps)`,
+        program: `\${workspaceFolder}/${slug}/index.ts`,
+        cwd: `\${workspaceFolder}/${slug}`,
+        runtimeArgs: ["--enable-source-maps"],
+        outFiles: [`\${workspaceFolder}/${slug}/**/*.ts`],
+        resolveSourceMapLocations: [`\${workspaceFolder}/${slug}/**`, "!**/node_modules/**"],
+        skipFiles: ["<node_internals>/**"],
+        console: "integratedTerminal",
+      };
+    },
   };
 }
 

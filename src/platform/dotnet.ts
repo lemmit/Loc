@@ -4,12 +4,22 @@ import { byLayerLayoutAdapter } from "../generator/dotnet/adapters/by-layer-layo
 import { cqrsStyleAdapter } from "../generator/dotnet/adapters/cqrs-style.js";
 import { dapperPersistenceAdapter } from "../generator/dotnet/adapters/dapper-persistence.js";
 import { efcorePersistenceAdapter } from "../generator/dotnet/adapters/efcore-persistence.js";
+import { DOTNET_TFM } from "../generator/dotnet/emit/program.js";
 import { generateDotnetForContexts } from "../generator/dotnet/index.js";
 import {
   type ComposeServiceShape,
   type PlatformSurface,
   STATIC_BUNDLE_FRAMEWORKS,
 } from "./surface.js";
+
+/** Pascal-cased root namespace for a deployable's .NET project — the same
+ *  value `generateDotnetForContexts` uses for `<ns>.csproj` (see
+ *  `emitProject` below) and the DLL name the M26 `coreclr` debug config
+ *  points at (`bin/Debug/<TFM>/<ns>.dll`).  Factored into one helper so
+ *  `emitProject` and `debugLaunch` can never drift apart. */
+export function dotnetNamespace(name: string): string {
+  return name[0]!.toUpperCase() + name.slice(1);
+}
 
 const dotnetPlatform: PlatformSurface = {
   name: "dotnet",
@@ -45,7 +55,7 @@ const dotnetPlatform: PlatformSurface = {
     sourcemap,
     sourceTexts,
   }): Map<string, string> {
-    const namespace = deployable.name[0]!.toUpperCase() + deployable.name.slice(1);
+    const namespace = dotnetNamespace(deployable.name);
     // The orchestrator (`generator/dotnet/index.ts`) dispatches
     // per-aggregate CQRS emission + byLayer path routing through the
     // deployable's RESOLVED style / layout adapters
@@ -118,6 +128,23 @@ const dotnetPlatform: PlatformSurface = {
       persistence: { state: "efcore", eventLog: "efcore" },
       style: "cqrs",
       layout: "byLayer",
+    };
+  },
+  // M26: `--sourcemap`-gated coreclr launch config, pointing VS Code's C#
+  // debugger at the built DLL under this deployable's own `bin/Debug/<TFM>/`
+  // output — the .NET sibling of the node config above.  No
+  // `preLaunchTask`: like node's "assumes a prior boot" story, this assumes
+  // a prior `dotnet build` — a build task is the developer's own to wire.
+  debugLaunch({ deployable, slug }): Record<string, unknown> {
+    const ns = dotnetNamespace(deployable.name);
+    return {
+      type: "coreclr",
+      request: "launch",
+      name: `Debug ${deployable.name} (.NET)`,
+      program: `\${workspaceFolder}/${slug}/bin/Debug/${DOTNET_TFM}/${ns}.dll`,
+      cwd: `\${workspaceFolder}/${slug}`,
+      console: "integratedTerminal",
+      stopAtEntry: false,
     };
   },
 };

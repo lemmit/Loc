@@ -16,15 +16,18 @@ import { parseValid } from "../_helpers/index.js";
 //
 // This suite pins the emission itself: --sourcemap gates a `debug` script,
 // `allowImportingTsExtensions` in tsconfig.json, the import-extension
-// rewrite, and a system-root `.vscode/launch.json` — one config per
-// node-family deployable, none of it touching non-node deployables or the
-// flag-off run.
+// rewrite, and the NODE half of the system-root `.vscode/launch.json` — one
+// `type: node` config per node-family deployable, byte-identical to the M18
+// shape. (M26 extended the same launch.json to also carry `coreclr`/`java`
+// configs for dotnet/java deployables via `PlatformSurface.debugLaunch`;
+// the full cross-backend fan-out is pinned in launch-config.test.ts. Here
+// we only assert node's own config stays exactly as M18 shipped it.)
 // ---------------------------------------------------------------------------
 
 // Two node deployables (so "one config per node deployable" is a real
 // fan-out, not a single-element coincidence) plus one dotnet deployable
-// (so the launch.json filter is proven to EXCLUDE non-node platforms, not
-// just happen to only see node ones).
+// (post-M26 that dotnet deployable ALSO earns a `coreclr` config — this
+// suite checks node's configs are unchanged alongside it).
 const SOURCE = `
 system NodeDebugDemo {
   subdomain Sales {
@@ -125,7 +128,7 @@ describe("Node debug wiring (--sourcemap only)", () => {
     expect(indexTs).not.toMatch(/from "\.\/http\/index"[^.]/);
   });
 
-  it("flag-on: .vscode/launch.json carries one config per node-family deployable, excludes dotnet", async () => {
+  it("flag-on: .vscode/launch.json carries one byte-identical node config per node deployable (alongside M26's dotnet config)", async () => {
     const model = await parseValid(SOURCE);
     const files = generateSystems(model, { sourcemap: true }).files;
 
@@ -144,9 +147,13 @@ describe("Node debug wiring (--sourcemap only)", () => {
       }[];
     };
     expect(launch.version).toBe("0.2.0");
-    expect(launch.configurations).toHaveLength(2);
+    // Two node deployables + one dotnet deployable → three configs post-M26.
+    expect(launch.configurations).toHaveLength(3);
 
-    const bySlug = new Map(launch.configurations.map((c) => [c.program.split("/")[1], c] as const));
+    // The two NODE configs are exactly M18's shape, unchanged by M26.
+    const nodeCfgs = launch.configurations.filter((c) => c.type === "node");
+    expect(nodeCfgs).toHaveLength(2);
+    const bySlug = new Map(nodeCfgs.map((c) => [c.program.split("/")[1], c] as const));
     for (const slug of [HONO_SLUG, HONO2_SLUG]) {
       const cfg = bySlug.get(slug);
       expect(cfg, `missing launch config for ${slug}`).toBeDefined();
@@ -157,13 +164,17 @@ describe("Node debug wiring (--sourcemap only)", () => {
       expect(cfg!.runtimeArgs).toEqual(["--enable-source-maps"]);
       expect(cfg!.skipFiles).toEqual(["<node_internals>/**"]);
     }
-    // No config mentions the dotnet deployable's slug.
-    expect(launch.configurations.some((c) => c.program.includes("dotnet_api"))).toBe(false);
+    // The dotnet deployable earns a `coreclr` config (M26) — pinned in
+    // detail by launch-config.test.ts; here just prove it now appears.
+    expect(launch.configurations.some((c) => c.type === "coreclr")).toBe(true);
   });
 
-  it("flag-on: no launch.json is emitted when a system has no node-family deployable", async () => {
-    const DOTNET_ONLY = `
-system DotnetOnlyDemo {
+  it("flag-on: no launch.json is emitted when no deployable has a debug story (python-only)", async () => {
+    // python has no `debugLaunch` seam, so a python-only system emits no
+    // launch.json — the honest replacement for the pre-M26 "dotnet-only ⇒
+    // no launch.json" case (dotnet now DOES earn a coreclr config).
+    const PYTHON_ONLY = `
+system PythonOnlyDemo {
   subdomain Sales {
     context Orders {
       aggregate Order { customerName: string }
@@ -173,10 +184,10 @@ system DotnetOnlyDemo {
   storage primary { type: postgres }
   resource ordersState { for: Orders, kind: state, use: primary }
   api SalesApi from Sales
-  deployable dotnetApi { platform: dotnet contexts: [Orders] dataSources: [ordersState] serves: SalesApi port: 8080 }
+  deployable pyApi { platform: python contexts: [Orders] dataSources: [ordersState] serves: SalesApi port: 8000 }
 }
 `;
-    const model = await parseValid(DOTNET_ONLY);
+    const model = await parseValid(PYTHON_ONLY);
     const files = generateSystems(model, { sourcemap: true }).files;
     expect(files.has(".vscode/launch.json")).toBe(false);
   });

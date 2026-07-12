@@ -292,10 +292,13 @@ fence already established for their own gated content changes).
   erasable tripwire (`test/generator/typescript/strip-erasable-constructors.test.ts`)
   now covers every emitted `.ts`/`.tsx` file, not just `domain/`.
 - **.NET debug config** (`launch.json` `type: "coreclr"` against the
-  already-shipped `#line` → PDB weave, phase 6a) — later slice, same
-  `.vscode/launch.json` file, additional configurations.
-- **JVM debug config** (`type: "java"`, attaching via JDWP against the
-  already-shipped JSR-45 SMAP injection, phase 6b) — later slice, same file.
+  already-shipped `#line` → PDB weave, phase 6a) — **DONE (Milestone 26).**
+  Landed via the generalized `PlatformSurface.debugLaunch()` seam (below),
+  same `.vscode/launch.json` file, additional configuration.
+- **JVM debug config** (`type: "java"`, against the already-shipped JSR-45
+  SMAP injection, phase 6b) — **DONE (Milestone 26).** Same seam; VS Code
+  manual confirmation (next bullet) remains the open item, same caveat node
+  already carries.
 - **Full `ddd-dap` adapter** (phase 8's actual north star: breakpoints set
   directly in `.ddd`, remapped by the adapter to the generated position via
   the same source-map/SMAP/`#line` substrate every earlier phase built) —

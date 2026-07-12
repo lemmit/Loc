@@ -699,6 +699,12 @@ app.Run();
 `;
 }
 
+/** Target framework moniker the generated projects build against.  Exported
+ *  so the coreclr debug-launch config (`src/platform/dotnet.ts`'s
+ *  `debugLaunch`) can point at the same `bin/Debug/<TFM>/` output directory
+ *  `dotnet build` produces, without a second hardcoded copy. */
+export const DOTNET_TFM = "net10.0";
+
 export function renderCsproj(
   ns: string,
   hasExtern: boolean = false,
@@ -756,7 +762,7 @@ export function renderCsproj(
   return `<!-- Auto-generated. -->
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>${DOTNET_TFM}</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>${ns}</RootNamespace>
@@ -813,7 +819,7 @@ export function renderTestCsproj(ns: string): string {
   return `<!-- Auto-generated. -->
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>${DOTNET_TFM}</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
