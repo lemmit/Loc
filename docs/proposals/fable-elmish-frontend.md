@@ -401,8 +401,9 @@ problem the census says is ~empty. The cheaper *and* cleaner move is to migrate
 the ~4 residual files to named actions and make lambda purity a **global**
 invariant. The projection becomes total for MVU as a side effect of a language
 simplification that stands on its own merits — one effect-handler form
-everywhere, HEEx's `event_N` hoist retired, uniform testable handlers across all
-frontends. This is a decision that is only available *because* all Loom code is
+everywhere and uniform testable handlers across all frontends. (Retiring HEEx's
+`event_N` hoist is a *further* step that the effect-only gate does **not** reach
+— see §8.4.) This is a decision that is only available *because* all Loom code is
 in-repo; spend that leverage here rather than banking machinery to preserve a
 form nobody depends on.
 
@@ -418,3 +419,49 @@ rendering for now (exercised directly by the generator unit tests, which bypass
 `validateLoomModel`); retiring that path + HEEx's `hoistLambdaToHandler` is the
 optional follow-up **(2)**. **(0)** stays a documented escape hatch; **(3)**
 stays rejected. MVU now inherits a total sync projection for free.
+
+### 8.4 The shipped gate is effect-only — it does NOT strand HEEx's `event_N` (verified)
+
+A common shorthand (including an earlier draft of §8.3) is that the cleanup
+"retires HEEx's `event_N` hoist." A direct probe shows that is **not** true of
+what shipped, and the distinction matters. `loom.effect-in-lambda` rejects only
+*effectful* inline lambdas — a block containing `:=`/`+=`/`-=`/`emit`/`call`/
+`variant-match`, or a single-expression `navigate`/`toast`. It does **not**
+reject anonymous **call-shaped** handler lambdas, of which the idiomatic
+api-hook form submit is the prime example:
+
+```ddd
+CreateForm { of: Order, onSubmit: v => create.mutateAsync(v) }   // still ALLOWED
+```
+
+(verified: `validateLoomModel` returns no `loom.effect-in-lambda` for it).
+Because that lambda is anonymous, LiveView still needs a synthesized
+`phx-submit` name, so it still routes through `hoistLambdaToHandler`
+(`heex-walker-core.ts:1060 → :1199`) and still gets an `event_N`
+(`heex-walker-core.ts:1209`). The block path stays live for pure/call-only block
+handlers, and `renderStmt` is shared with the *named-action* hoist
+(`heex-walker-core.ts:346-351`) regardless — so there is no separable dead arm
+to trim. The walker branches on lambda **shape** (block vs single-expression),
+not effect-vs-pure.
+
+**Consequence:** retiring `event_N` needs the *stronger* rule — reject **every**
+handler-slot lambda, forcing named actions even for the call-shaped case — i.e.
+disposition **(2)** applied not just to effects but to all handler lambdas. That
+change breaks the idiomatic `onSubmit: v => create.mutateAsync(v)` pattern
+(hand-authored; scaffolds emit declarative forms, so they are unaffected), which
+is real ergonomic cost. Left **not done** deliberately: the pure-view win that
+MVU needs is already banked by the effect-only gate; `event_N` is a Phoenix
+codegen detail whose removal isn't on the sync-MVU critical path.
+
+### 8.5 Regression caught while auditing the retirement
+
+The retirement audit surfaced (and fixed) an over-broad bug in the shipped gate:
+`checkLambdaPurity` fired on *every* lambda in a body, including the effect
+lambda a caller passes to a component's `action(Order)` param — the
+extern-component Tier 2 behaviour callback
+([`extern-component-escape-hatch.md`](extern-component-escape-hatch.md) §3),
+which legitimately walks the caller's scope. The full suite missed it because
+the generator tests bypass `validateLoomModel`. Fixed with a slot-scoped
+exemption (`componentActionParams` → `exemptLambdas` in
+`src/ir/validate/checks/ui-checks.ts`) + regression tests; the exemption is
+slot-specific, so a stdlib `Button.onClick` in the same page is still gated.
