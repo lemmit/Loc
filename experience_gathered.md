@@ -1880,3 +1880,38 @@ the ones that cost real tool-calls and are non-obvious.
   bundled-Keycloak realm-key rotation gotcha above, or api-e2e token acquisition). The
   docs-PR-reproduces + all-backends-uniform combo is the tell that it's harness/infra,
   not any one backend's codegen.
+
+## 22. Landing a breaking validation change — census first, and mind the two blind spots (2026-07-12)
+
+Shipping `loom.effect-in-lambda` (effects must be named actions) and flipping
+`loom.missing-effect-marker` warning→error (async Stage 2b) both went clean
+because of one discipline and two blind spots that bit / nearly bit.
+
+- **Census before you flip.** Before adding or flipping a validator that rejects
+  previously-valid `.ddd`, run `validateLoomModel` over **every git-tracked
+  `.ddd`** (`git ls-files "*.ddd"`, parse standalone on `EmptyFileSystem`, skip
+  AST-error fragments) and count the diagnostic's sites. **Zero sites = safe to
+  flip, no codemod needed** — both changes had 0 corpus sites, so "ship a
+  codemod first" was moot. Caveat: the standalone-parse census **undercounts**
+  multi-file systems (a file that's a fragment alone but complete via an import
+  graph is skipped), so pair it with green *real-generate* CI, which builds the
+  actual import graphs. Census + green CI together is airtight; neither alone is.
+
+- **Blind spot 1 — e2e fixtures are NOT in `npm test`.** Docker-only build
+  checks (`vanilla-page-stmts`, the react/svelte/vue build matrices) generate
+  from `test/e2e/fixtures/*.ddd` (and `examples/`) via the CLI, which runs
+  `validateLoomModel` and `process.exit(1)`s on error. A validation change can be
+  **green on the 6756-test fast suite and still redden CI** — `effect-in-lambda`
+  did exactly that (`vanilla-page-stmts.ddd` used inline `onClick: e => { count
+  += 1 }`). Census/grep `test/e2e/fixtures/` too, and run the targeted gate
+  locally (`LOOM_PHOENIX_VANILLA_BUILD_CASE=<f>.ddd npx vitest run
+  test/e2e/generated-elixir-vanilla-build.test.ts`) before pushing.
+
+- **Blind spot 2 — generator tests BYPASS `validateLoomModel`.** `test/generator/**`
+  lower+generate directly (`generateSystemFiles`/`toLoomModel`), skipping IR
+  validation. So an **over-broad IR-validate check passes the whole suite yet
+  breaks real generation**: `effect-in-lambda` flagged extern-component
+  `action(Order)`-param lambdas (a deliberate Tier-2 feature) and the ~7000-test
+  suite missed it — only a CLI `generate` or a `validateLoomModel`-path unit test
+  caught it. **A new IR-validate check needs a `validateLoomModel`-path test, not
+  generator coverage.**

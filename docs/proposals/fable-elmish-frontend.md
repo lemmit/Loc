@@ -596,3 +596,44 @@ definitively is the first step of the build (a throwaway `felizTarget` against
 **Net:** the correct next move is to *stop preparing and build when ready* — the
 seams are waiting, and the first pack is what should shape the last two
 mechanisms, not a guess made in advance.
+
+## 10. Build starter kit — the spike's reproducible recipe (handoff)
+
+The §7 spikes were throwaway (not committed). This is what they learned about
+*actually running* Fable here, so the next agent doesn't rediscover it.
+
+**Known-good version set** (compiles + bundles + boots, sync and async):
+`Fable` tool **4.29.0** · `Feliz` **2.8.0** · `Fable.Elmish.React` **4.0.0** ·
+`Fable.SimpleHttp` **3.6.0** · `Thoth.Json` **10.2.0** · SDK `net8.0`. Only
+`react`/`react-dom` are npm deps — Feliz/Elmish ship as Fable-compiled F# under
+`fable_modules/`.
+
+**Fable-in-docker recipe** (host has no dotnet SDK):
+`mcr.microsoft.com/dotnet/sdk:8.0`, and because the agent proxy sits on **host
+loopback**, run the container with **`--network host`** + pass
+`HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY`, and trust the TLS-intercepting CA
+(`cp /root/.ccr/ca-bundle.crt /usr/local/share/ca-certificates/ &&
+update-ca-certificates`) or nuget fails its service-index fetch. Two gotchas:
+the proxy **port drifts on every container restart** — read `$HTTPS_PROXY`
+fresh, never hardcode it (a stale port = `Connection refused`); and
+`dotnet tool install fable` is transiently flaky — retry. Then
+`fable spike.fsproj -o out` → `vite build` → boot (Playwright,
+`executablePath: /opt/pw-browsers/chromium`).
+
+**Version landmines (the async layer):** `Thoth.Fetch` 3.0.1 wants the `promise`
+CE builder (`Fable.Promise`) and clashed with Feliz 2.8's `Fable.Core`
+(`This control construct… 'Return'/'Bind'` + `namespace 'Core' is not defined`),
+and `Async.AwaitPromise` does not exist in this combo. **Resolution used:**
+`Fable.SimpleHttp` (async, no promise CE) + `Thoth.Json` (`Decode.fromString`),
+driven by `Cmd.OfAsync.perform`; or keep a promise-returning fetch and use
+`Cmd.OfPromise.either`. **Avoid `Thoth.Fetch` with this Feliz/Fable combo.**
+
+**Minimal projected shape** (what compiled): `Model` ← `state {}` record;
+`Msg`/`update` one arm per `ActionIR` (projection, no gensym); `view` ← `body:`
+as Feliz `Html.div [ prop.children [ … ] ]` (use the always-available
+`Html.<tag> [ prop.text … ]`, not the bare-string `Html.<tag> "…"` shorthand —
+not every element has it); `Program.mkProgram init update view |>
+Program.withReactSynchronous "root" |> Program.run`. Async op behind `await` →
+`Cmd.OfAsync.perform fetchData url Loaded` where `fetchData : 'a -> Async<Result<T,E>>`,
+and the `Result` discriminates into two `update` arms (the `Ok`/`Err` of
+`match await`).
