@@ -1,5 +1,20 @@
 # Realization-axes rollout — phase plan
 
+> **[2026-07-12 status refresh — axes pruned to two; supersedes the dated notes below.]**
+> Code-verified against `main`: transport/runtime/style/`foundation` were **removed
+> entirely** since the 2026-07-05 note — they are no longer "menu-backed", they are
+> **gone**. `PlatformAdapters` (`src/generator/_adapters/index.ts`) defines only
+> `persistence`/`styles`/`layouts`; `resolveTransport` / `resolveRuntime` no longer
+> exist; every stub adapter is deleted; and the grammar parses only `persistence:` +
+> `directoryLayout:` (`ddd.langium:203-204`; validator `RealizationAxis =
+> "persistence" | "directoryLayout"`). Style is fixed per-backend, not user-selectable.
+> The one still-accurate point from the 07-05 note stands: **`persistence:` is driven
+> by a raw `deployable.persistence` key-branch** (14 sites in `dotnet/index.ts`), and
+> `resolvePersistence()` remains **uninvoked** (currently-unused API);
+> **`directoryLayout:` is the fully adapter-consumed axis** (`layout.pathFor`). Canonical
+> record: the D-REALIZATION-AXES supersession block in [`docs/decisions.md`](../decisions.md).
+> The phase plan below targets the retired six-axis model — read it as history.
+
 > **[2026-06-20 status audit]** 'Done' is understated — the Phase 1 validator ships R1+R3+R4+R6 (`deployable.ts`); Phase 2's `phoenixLiveView→phoenix` is superseded by D-ELIXIR-PLATFORM (`→elixir`); transport/runtime are now adapter-backed (`platform/elixir.ts`, `platform/dotnet.ts`).
 
 > **[2026-07-05 status audit — corrects two claims above/below]** Code-verified against `main`:

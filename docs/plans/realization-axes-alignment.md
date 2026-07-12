@@ -6,6 +6,35 @@
 > `proposals/platform-realization-axes.md`. Where a naming or scope question
 > arises, this plan defers to that decision rather than re-litigating it.
 >
+> **[2026-07-12 status refresh — SUPERSEDED to two axes.]** Code-verified against
+> `main`: the realization block converged to the **two** user-selectable axes that
+> carry real per-backend choice — **`persistence:`** and **`directoryLayout:`** —
+> exactly as recorded in the D-REALIZATION-AXES supersession note in
+> [`docs/decisions.md`](../decisions.md) (canonical). **The six-axis model detailed
+> below (§1 onward) is historical.** What changed:
+> - **`foundation:` removed** — the grammar clause, `DeployableIR.foundation`, and the
+>   R4/R6 rules are gone. `platform: elixir` (`src/generator/elixir/index.ts`) now
+>   *unconditionally* delegates to `generateVanillaElixirProject`; there is **no
+>   `foundation: vanilla` bypass branch** — so the "bypassed the adapter machinery"
+>   framing below is history, not a live gap.
+> - **`application:`/style removed as a user knob** — each backend has one fixed
+>   emission style (`cqrs` on dotnet, `layered` elsewhere), kept only as an internal
+>   `StyleAdapter` (`src/generator/_adapters/index.ts`: *"style is the single
+>   per-backend emission style — no longer user-selectable"*). The **`R`/`S` stub
+>   matrix below is void — every stub adapter was removed**; menus carry real adapters
+>   only.
+> - **`transport:` / `runtime:` removed whole** — name-only registries no emitter read.
+>   `PlatformAdapters` now defines only `persistence`/`styles`/`layouts`;
+>   `resolveTransport` / `resolveRuntime` no longer exist.
+> - **`persistence:` is real but key-branched, not adapter-dispatched** — the
+>   orchestrators branch on the `deployable.persistence` string (14 sites in
+>   `dotnet/index.ts`); `resolvePersistence()` has **zero call sites** (currently-unused
+>   API). **`directoryLayout:` is the one fully adapter-consumed axis** (`layout.pathFor`
+>   via `resolveLayout`). Current menus: dotnet `persistence {efcore, dapper}`, node
+>   `{drizzle, mikroorm}`, java `{jpa}`, elixir `{ecto}`; `directoryLayout {byLayer,
+>   byFeature}` (elixir `byFeature` only). (python's `adapters()` menu is not yet
+>   wired — it parses the axes but exposes no adapter menu.)
+>
 > **Update (2026):** the **Ash foundation has been removed.** `platform: elixir`
 > now generates Phoenix LiveView on **plain Ecto/Phoenix**; on the `foundation:`
 > axis, `vanilla` is the default and only valid value and `foundation: ash` is a
