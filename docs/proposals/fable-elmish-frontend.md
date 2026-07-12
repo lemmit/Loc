@@ -353,11 +353,33 @@ down. The "Fable build + CI leg" is a known, working recipe (SDK container +
 `--network host` proxy + CA trust for nuget; `dotnet fable` → vite → Playwright)
 — it can be an actual CI gate, not a hoped-for one.
 
-**What this still does *not* cover:** it exercised the sync `Model`/`Msg`/
-`update`/`view` counter only — not the API/`Cmd.OfAsync` data layer, the design
-pack's full primitive set (~80), or the `WalkerTarget`-vs-parallel-engine
-question for the `view`. Those are the *build*, now standing on a proven runtime
-floor; the format decision underneath them is settled.
+### 7.2 Async runtime — the `Cmd`/data-layer path also runs (2026-07)
+
+The one remaining un-exercised runtime path — an async `Cmd` firing a real fetch
+and dispatching a discriminated `Result` — was **confidence-checked** and works.
+(This was never an *unknown* the way §7.1's Feliz-markup-is-code was — `Cmd.OfAsync`
+is the most mainstream Elmish pattern — but it was the last path not yet run.) An
+async projection of Loom's `match await Api.load(u) { Ok d => … Err e => … }` —
+`Cmd.OfAsync.perform fetchData url Loaded`, where `fetchData` is a real
+`Fable.SimpleHttp` fetch + `Thoth.Json` decode returning `Result<Data,string>`,
+and `Loaded` is discriminated into two `update` arms — compiled through Fable,
+bundled (74 modules), and ran in headless Chromium:
+
+- **Ok arm** — `load-ok` → fetch `/data.json` → decode → `Loaded (Ok …)` →
+  status `ok:hello-from-async`.
+- **Err arm** — `load-err` → fetch a 404 → `Loaded (Error …)` → status `err`.
+- **zero page errors.**
+
+So the async→`Result`→discriminated-`Msg` cycle — the exact shape the MVU
+projection uses for server data — runs at runtime, not just type-checks. `Thoth.Json`
+decoding (the F# replacement for the TS `zod` layer, §5) works in the bundle.
+
+**What the spikes still do *not* cover** (all *build*, not *risk*): a real
+Loom-generated backend + the actual wire shape and ProblemDetails-tag → F#-union
+error reification (the spikes used a static JSON file); the design pack's full
+primitive set (~80); and the `WalkerTarget`-vs-parallel-engine question for the
+`view`. Those stand on a now-fully-proven runtime floor — sync *and* async — and
+the format decision underneath them is settled.
 
 ## 8. The anonymous-lambda page — the residual, quantified
 
