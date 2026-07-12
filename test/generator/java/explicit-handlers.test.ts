@@ -95,3 +95,58 @@ describe("java — explicit commandHandler/queryHandler → @Service beans", () 
     expect(ctrl).toContain("var result = getStatusHandler.handle(new OrderId(orderId));");
   });
 });
+
+// B2 (the Java slice of the [FromBody] fan-out; .NET landed as B1 #1822): a
+// handler param NOT bound by a `{token}` in the route path rides in a
+// `@RequestBody <Handler>Body` record, not a bogus `@PathVariable`.
+const BODY_SRC = `
+system Shop {
+  subdomain Sales {
+    context Ordering {
+      valueobject Money { amount: int; currency: string }
+      aggregate Order ids guid {
+        code: string
+        status: string
+        operation discount(amount: Money, reason: string) { status := "discounted" }
+      }
+      repository Orders for Order { }
+      commandHandler Discount(orderId: Order id, amount: Money, reason: string): Order id {
+        let o = Orders.getById(orderId)
+        o.discount(amount, reason)
+        return o.id
+      }
+    }
+  }
+  api SalesApi from Sales {
+    route POST "/orders/{orderId}/discounts" -> Ordering.Discount
+  }
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: java, contexts: [Ordering], dataSources: [st], serves: SalesApi, port: 5001 }
+}
+`;
+
+describe("java — explicit route params: {token} → @PathVariable, rest → @RequestBody record", () => {
+  it("splits path vs body params: unbound complex params ride in one @RequestBody record", async () => {
+    const ctrl = fileEndingWith(
+      await generateSystemFiles(BODY_SRC),
+      "SalesApiRoutesController.java",
+    );
+    // The body record is co-located with the controller (package-private).
+    expect(ctrl).toContain("record DiscountBody(Money amount, String reason) {}");
+    // Only the {orderId} token stays a @PathVariable; amount/reason ride the body.
+    expect(ctrl).toContain(
+      "public ResponseEntity<?> discount(@PathVariable UUID orderId, @RequestBody DiscountBody body) {",
+    );
+    // Declared param order preserved in the handler call: path coercion, then
+    // the record accessors.
+    expect(ctrl).toContain(
+      "var result = discountHandler.handle(new OrderId(orderId), body.amount(), body.reason());",
+    );
+    // Nothing bogus: amount/reason are never emitted as @PathVariable.
+    expect(ctrl).not.toContain("@PathVariable Money");
+    expect(ctrl).not.toContain("@PathVariable String reason");
+    // The value-object package is imported so the body record resolves Money.
+    expect(ctrl).toContain("import ");
+  });
+});

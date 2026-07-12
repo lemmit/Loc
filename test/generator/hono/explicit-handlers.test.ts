@@ -100,3 +100,51 @@ describe("hono — explicit commandHandler/queryHandler → app.openapi routes",
     expect(idx).toContain('app.route("/api", salesApiRoutes(db, events));');
   });
 });
+
+// A handler with a value-object body param — the request body schema references
+// `<Vo>Schema`, which must be declared in-scope or the generated project fails
+// `tsc --noEmit` (TS2304: Cannot find name 'MoneySchema').
+const VO_SRC = `
+system Shop {
+  subdomain Sales {
+    context Ordering {
+      valueobject Money { amount: int; currency: string }
+      aggregate Order ids guid {
+        code: string
+        total: Money
+        operation applyDiscount(amount: Money, reason: string) { }
+      }
+      repository Orders for Order { }
+      commandHandler Discount(orderId: Order id, amount: Money, reason: string): Order id {
+        let o = Orders.getById(orderId)
+        o.applyDiscount(amount, reason)
+        return o.id
+      }
+    }
+  }
+  api SalesApi from Sales {
+    route POST "/orders/{orderId}/discounts" -> Ordering.Discount
+  }
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: node, contexts: [Ordering], dataSources: [st], serves: SalesApi, port: 5001 }
+}
+`;
+
+describe("hono — explicit handler with a value-object body param", () => {
+  it("declares the VO wire schema in-scope so the body schema resolves", async () => {
+    const router = fileEndingWith(await generateSystemFiles(VO_SRC), "http/salesApi-routes.ts");
+    // The body schema references the VO schema by name (path id split out).
+    expect(router).toContain(
+      'params: z.object({ orderId: z.string().uuid() }), body: { content: { "application/json": { schema: z.object({ amount: MoneySchema, reason: z.string() }) } } }',
+    );
+    // …and that name is actually in scope — declared in the file (or imported),
+    // not a dangling reference that tsc rejects with TS2304.
+    const declared =
+      /\bconst\s+MoneySchema\s*=/.test(router) ||
+      /import\b[^;]*\bMoneySchema\b[^;]*from/.test(router);
+    expect(declared, "MoneySchema referenced but never declared/imported").toBe(true);
+    // The VO is still constructed from the validated body (runtime coercion).
+    expect(router).toContain("const amount = new Money(body.amount.amount, body.amount.currency);");
+  });
+});

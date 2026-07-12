@@ -205,6 +205,14 @@ function snakePath(path: string): string {
 
 const camelName = (name: string): string => name.charAt(0).toLowerCase() + name.slice(1);
 
+/** The `{token}` names in a route path — the params bound from the URL rather
+ *  than the request body (mirrors the .NET `pathParamNames`). */
+function pathParamNames(path: string): Set<string> {
+  const names = new Set<string>();
+  for (const m of path.matchAll(/\{(\w+)\}/g)) names.add(m[1]);
+  return names;
+}
+
 /** Emit one APIRouter per served api whose route list is non-empty:
  *  `app/http/<snake(api)>_routes.py`.  Each `route` becomes a path-op that
  *  coerces its wire path params into the domain types and calls the handler
@@ -219,6 +227,7 @@ export function emitPyExplicitRouteRouter(
   const byName = new Map<string, EnrichedBoundedContextIR>(contexts.map((c) => [c.name, c]));
 
   const handlerImports = new Set<string>();
+  const modelBlocks: string[] = [];
   const routeBlocks: string[] = [];
   let usesResponse = false;
 
@@ -232,18 +241,41 @@ export function emitPyExplicitRouteRouter(
     handlerImports.add(h.name);
 
     const usesUser = handlerUsesUser(h, ctx);
-    const pathParams = h.params.map((p) => ({
-      decl: `${snake(p.name)}: ${requestPyType(p.type, ctx)}`,
-      arg: pyWireToDomain(snake(p.name), p.type, ctx),
-    }));
+    // Split params: those bound by a `{token}` in the route path stay URL path
+    // params (wire type + call-site coercion); every other param rides in ONE
+    // `body: <Handler>Body` request model. A bare Pydantic-model param would be
+    // inferred as THE body (fields at top level) and a bare scalar as a query
+    // param, so multiple body params must collect into a single model. (Python
+    // sibling of the .NET `[FromBody] <Handler>Body` split — B1/#1822.)
+    const pathNames = pathParamNames(r.path);
+    const pathParams = h.params.filter((p) => pathNames.has(p.name));
+    const bodyParams = h.params.filter((p) => !pathNames.has(p.name));
+
+    let bodyModelName: string | undefined;
+    if (bodyParams.length > 0) {
+      bodyModelName = `${h.name}Body`;
+      modelBlocks.push(
+        lines(
+          `class ${bodyModelName}(BaseModel):`,
+          ...bodyParams.map((p) => `    ${snake(p.name)}: ${requestPyType(p.type, ctx)}`),
+        ),
+      );
+    }
     const sig = [
-      ...pathParams.map((p) => p.decl),
+      ...pathParams.map((p) => `${snake(p.name)}: ${requestPyType(p.type, ctx)}`),
+      ...(bodyModelName ? [`body: ${bodyModelName}`] : []),
       ...(usesUser ? ["request: Request"] : []),
       "session: SessionDep",
     ].join(", ");
+    // Call args stay in declared param order: path params coerce from the route
+    // token, body params read off `body.<snake>` before coercing.
     const callArgs = [
       "session",
-      ...pathParams.map((p) => p.arg),
+      ...h.params.map((p) =>
+        pathNames.has(p.name)
+          ? pyWireToDomain(snake(p.name), p.type, ctx)
+          : pyWireToDomain(`body.${snake(p.name)}`, p.type, ctx),
+      ),
       ...(usesUser ? ["current_user"] : []),
     ].join(", ");
 
@@ -278,10 +310,17 @@ export function emitPyExplicitRouteRouter(
   }
   if (routeBlocks.length === 0) return false;
 
-  const body = routeBlocks.join("\n\n\n");
+  const body = [...modelBlocks, ...routeBlocks].join("\n\n\n");
   const scan = body.replace(/"(?:\\.|[^"\\])*"/g, '""');
   const refersTo = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(scan);
   const usesRequest = refersTo("request");
+
+  // A body param typed as a value object rides as its wire model (`X as XModel`,
+  // requestPyType's "Model" suffix); the call-site coercion still constructs the
+  // DOMAIN class (`X(...)`), imported below from value_objects.
+  const voModelImports = [...new Set(contexts.flatMap((c) => c.valueObjects.map((v) => v.name)))]
+    .filter((n) => refersTo(`${n}Model`))
+    .sort();
 
   // Every `X id` coercion wraps as `XId(...)`; offer every hosted context's
   // aggregate ids and keep the ones actually referenced.
@@ -311,6 +350,7 @@ export function emitPyExplicitRouteRouter(
     ]
       .filter(Boolean)
       .join(", ")}`,
+    refersTo("BaseModel") ? "from pydantic import BaseModel" : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "from typing import Annotated",
     "",
@@ -320,6 +360,9 @@ export function emitPyExplicitRouteRouter(
     idNames.length > 0 ? `from app.domain.ids import ${idNames.join(", ")}` : null,
     voEnumNames.length > 0
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
+      : null,
+    voModelImports.length > 0
+      ? `from app.http.wire_models import ${voModelImports.map((n) => `${n} as ${n}Model`).join(", ")}`
       : null,
     "",
     "SessionDep = Annotated[AsyncSession, Depends(get_session)]",

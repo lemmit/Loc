@@ -27,9 +27,14 @@
 // ref renders as its bare name and the route controller coerces the wire path
 // param into the domain type at the call site (`new <Agg>Id(id)`).
 //
-// v1 scope: handler params are ids / scalars carried as `@PathVariable`s (the
-// common REST case); full response-DTO projection + `@RequestBody` request
-// records ride with the contract-scaffold layer.
+// Route param binding (B2, the Java sibling of .NET B1 #1822): a handler param
+// bound by a `{token}` in the route path stays URL-bound (id → wire type coerced
+// back with `new <Agg>Id`); every other param rides in one `<Handler>Body`
+// `@RequestBody` record (a domain-typed record emitted alongside the controller,
+// package-private so it can share the controller file — Java allows at most one
+// public top-level type per file).  The handler call args keep declared order:
+// path coercions and `body.<name>()` accessors interleaved.
+// v1 scope: full response-DTO projection rides with the contract-scaffold layer.
 // ---------------------------------------------------------------------------
 
 import type {
@@ -217,9 +222,18 @@ const HTTP_ANNOT: Record<string, string> = {
   DELETE: "DeleteMapping",
 };
 
+/** The `{token}` names in a route path — the params bound from the URL rather
+ *  than the request body. */
+function pathParamNames(path: string): Set<string> {
+  const names = new Set<string>();
+  for (const m of path.matchAll(/\{(\w+)\}/g)) names.add(m[1]);
+  return names;
+}
+
 /** The wire-typed `@PathVariable` declaration + the domain-coerced call
- *  argument for a handler param.  v1: id → `UUID`/`long`/`String` path param
- *  wrapped in `new <Agg>Id(...)`; scalar → the rendered domain type verbatim. */
+ *  argument for a PATH-bound handler param: id → `UUID`/`long`/`String` path
+ *  param wrapped in `new <Agg>Id(...)`; scalar → the rendered domain type
+ *  verbatim.  Body params take a separate `@RequestBody` record path below. */
 function wireActionParam(
   p: ParamIR,
   imports: Set<string>,
@@ -255,6 +269,9 @@ export function emitExplicitRouteController(
   // target the same handler).
   const injected = new Map<string, string>();
   const actions: string[] = [];
+  // Package-private `<Handler>Body` records for routes with body params — one
+  // record per route that has any non-path-bound param.
+  const bodyRecords: string[] = [];
   for (const r of routes) {
     const ctx = byName.get(r.target.context);
     if (!ctx) continue;
@@ -265,9 +282,34 @@ export function emitExplicitRouteController(
     const handlerName = `${h.name}Handler`;
     const field = lowerFirst(handlerName);
     injected.set(handlerName, field);
-    const coerced = h.params.map((p) => wireActionParam(p, imports));
-    const actionParams = coerced.map((c) => c.actionParam).join(", ");
-    const callArgs = coerced.map((c) => c.callArg).join(", ");
+
+    // Split params: those bound by a `{token}` in the route path stay
+    // `@PathVariable`s; the rest collect into one `@RequestBody` record.  A bare
+    // complex `@PathVariable Money` param would be unbindable — Spring can't
+    // materialise a value object from a URL segment that isn't even in the path.
+    const pathNames = pathParamNames(r.path);
+    const pathParams = h.params.filter((p) => pathNames.has(p.name));
+    const bodyParams = h.params.filter((p) => !pathNames.has(p.name));
+    const pathArg = new Map(pathParams.map((p) => [p.name, wireActionParam(p, imports)]));
+
+    const actionParamParts = pathParams.map((p) => pathArg.get(p.name)!.actionParam);
+    if (bodyParams.length > 0) {
+      const bodyRecName = `${h.name}Body`;
+      const fields = bodyParams
+        .map((p) => {
+          collectJavaTypeImports(p.type, imports);
+          return `${renderJavaType(p.type)} ${p.name}`;
+        })
+        .join(", ");
+      bodyRecords.push(`record ${bodyRecName}(${fields}) {}`);
+      actionParamParts.push(`@RequestBody ${bodyRecName} body`);
+    }
+    const actionParams = actionParamParts.join(", ");
+    // Handler call args keep declared param order: path params coerce from the
+    // route token, body params read off `body.<name>()` (record accessor).
+    const callArgs = h.params
+      .map((p) => (pathNames.has(p.name) ? pathArg.get(p.name)!.callArg : `body.${p.name}()`))
+      .join(", ");
     const hasReturn = !!qry || !!cmd?.returnType;
     const annot = HTTP_ANNOT[r.method] ?? "GetMapping";
     const callLines = hasReturn
@@ -306,6 +348,11 @@ export function emitExplicitRouteController(
       ``,
       `import ${appPkg}.*;`,
       `import ${basePkg}.domain.ids.*;`,
+      // Body records reference domain value objects / enums by their wildcard
+      // packages (Money, etc.); only pulled in when a route carries body params
+      // so the no-body header stays byte-identical to the path-only emitter.
+      bodyRecords.length > 0 ? `import ${basePkg}.domain.enums.*;` : null,
+      bodyRecords.length > 0 ? `import ${basePkg}.domain.valueobjects.*;` : null,
       ``,
       `@RestController`,
       `public class ${className} {`,
@@ -318,6 +365,10 @@ export function emitExplicitRouteController(
       ...actions,
       `}`,
       ``,
+      // Package-private request-body records, co-located with the controller
+      // (the .NET B1 precedent puts them in the controller file too; Java's
+      // one-public-type-per-file rule forces package-private).
+      ...(bodyRecords.length > 0 ? ["", ...bodyRecords, ""] : []),
     ),
   };
 }

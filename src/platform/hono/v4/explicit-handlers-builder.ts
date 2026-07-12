@@ -31,12 +31,15 @@ import { renderWorkflowStmtChunks } from "../../../generator/_workflow/stmt-targ
 import type {
   CommandHandlerIR,
   EnrichedBoundedContextIR,
+  EnumIR,
   QueryHandlerIR,
   RouteIR,
   TypeIR,
+  ValueObjectIR,
 } from "../../../ir/types/loom-ir.js";
+import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
 import { lowerFirst } from "../../../util/naming.js";
-import { wireToDomainExpr, zodFor } from "./routes-builder.js";
+import { emitWireSchema, wireToDomainExpr, zodFor } from "./routes-builder.js";
 import {
   collectReposForWorkflow,
   honoWorkflowStmtTarget,
@@ -178,6 +181,10 @@ export function buildExplicitRoutesFile(
 ): string | undefined {
   const byName = new Map(contexts.map((c) => [c.name, c] as const));
   const routeBlocks: string[][] = [];
+  // Body params seed the VO/enum wire-schema closure below: every body param
+  // whose type resolves to a value object / enum is rendered by `zodFor` as a
+  // bare `<Name>Schema` reference, so that schema must be declared in-scope.
+  const bodySchemaSeeds: TypeIR[] = [];
   for (const r of routes) {
     const ctx = byName.get(r.target.context);
     if (!ctx) continue;
@@ -185,9 +192,46 @@ export function buildExplicitRoutesFile(
     const qry = (ctx.queryHandlers ?? []).find((hd) => hd.name === r.target.handler);
     const h = cmd ?? qry;
     if (!h) continue;
+    const pathNames = new Set([...r.path.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!));
+    for (const p of h.params) if (!pathNames.has(p.name)) bodySchemaSeeds.push(p.type);
     routeBlocks.push(emitRouteHandler(apiName, r, h, ctx));
   }
   if (routeBlocks.length === 0) return undefined;
+
+  // Wire-schema declarations for every VO / enum a body param references
+  // (transitively, through a VO's own fields).  Same machinery the aggregate
+  // (`routes-builder`) and workflow (`workflow-builder`) routers use — without
+  // these, the request `z.object({ amount: MoneySchema, … })` names an
+  // undeclared symbol and the generated project fails `tsc` (TS2304).  Enums
+  // travel as strings (`z.enum`); value objects emit through `emitWireSchema`.
+  const allVOs = contexts.flatMap((c) => c.valueObjects);
+  const allEnums = contexts.flatMap((c) => c.enums);
+  const reachable = collectReachableTypes(bodySchemaSeeds, allVOs);
+  const dedupeByName = <T extends { name: string }>(items: T[]): T[] => {
+    const seen = new Map<string, T>();
+    for (const it of items) if (!seen.has(it.name)) seen.set(it.name, it);
+    return [...seen.values()];
+  };
+  const usedEnums: EnumIR[] = dedupeByName(allEnums.filter((e) => reachable.enums.has(e.name)));
+  const usedVOs: ValueObjectIR[] = dedupeByName(
+    allVOs.filter((v) => reachable.valueObjects.has(v.name)),
+  );
+  const schemaDecls: string[] = [];
+  for (const e of usedEnums) {
+    const values = e.values.map((v) => `"${v}"`).join(", ");
+    schemaDecls.push(`const ${e.name}Schema = z.enum([${values}]).openapi("${e.name}");`);
+  }
+  for (const vo of usedVOs) {
+    schemaDecls.push(
+      ...emitWireSchema(
+        `const ${vo.name}Schema`,
+        `${vo.name}`,
+        vo.fields.map((f) => ({ name: f.name, base: zodFor(f.type) })),
+        vo.invariants,
+        new Set(vo.fields.map((f) => f.name)),
+      ),
+    );
+  }
 
   const fn = `${lowerFirst(apiName)}Routes`;
   const body: string[] = [];
@@ -262,6 +306,11 @@ export function buildExplicitRoutesFile(
   const imports: string[] = [];
   imports.push("// Auto-generated.  Do not edit by hand.");
   imports.push(`import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";`);
+  // A money-typed VO field renders (via `zodFor`) as `moneySchema` (the shared
+  // Decimal parse chain), which lives in the helpers module, not this file.
+  if (schemaDecls.some((l) => /\bmoneySchema\b/.test(l))) {
+    imports.push(`import { moneySchema } from "../lib/schemas";`);
+  }
   const problemNamed = [
     /\bProblemDetails\b/.test(bodyStr) ? "ProblemDetails" : null,
     "newApp",
@@ -286,5 +335,6 @@ export function buildExplicitRoutesFile(
     imports.push(`import { ${voEnumReferenced.join(", ")} } from "../domain/value-objects";`);
   }
 
-  return `${[...imports, "", ...body].join("\n")}\n`;
+  const schemaSection = schemaDecls.length > 0 ? [...schemaDecls, ""] : [];
+  return `${[...imports, "", ...schemaSection, ...body].join("\n")}\n`;
 }
