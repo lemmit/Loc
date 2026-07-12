@@ -16,16 +16,18 @@ import type {
 import { exprUsesCurrentUser, workflowEmitsCommandRoute } from "../../ir/types/loom-ir.js";
 import type { MigrationsIR } from "../../ir/types/migrations-ir.js";
 import type { OriginRef } from "../../ir/types/origin.js";
+import {
+  aggregatesHaveUniqueKeys,
+  aggregatesNeedConcurrency,
+} from "../../ir/util/aggregate-flags.js";
 import { directParentOf } from "../../ir/util/containment-parent.js";
 import { isTpcBase, isTphBase, tableOwnerName } from "../../ir/util/inheritance.js";
 import {
-  aggregateIsEventSourced,
   effectiveSavingShape,
   resolveContextSchema,
   resolveDataSourceConfig,
 } from "../../ir/util/resolve-datasource.js";
 import { hierarchyRegistry } from "../../ir/util/tenant-stance.js";
-import { aggregateIsVersioned } from "../../ir/util/versioned-capability.js";
 import type { Model } from "../../language/generated/ast.js";
 import { API_BASE_PATH } from "../../util/api-base.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
@@ -308,17 +310,13 @@ function emitProjectFromContexts(
   place("_Namespace.java", "id", renderPackageMarker(pkgFor("id")));
   // 23505 → 409 arm is emitted only when some aggregate declares a `unique (...)`
   // key, so a unique-free project's advice stays byte-identical (strict additivity).
-  const hasUniqueKeys = contexts.some((c) =>
-    c.aggregates.some((a) => (a.uniqueKeys?.length ?? 0) > 0),
-  );
+  const hasUniqueKeys = contexts.some((c) => aggregatesHaveUniqueKeys(c.aggregates));
   // The optimistic-lock → 409 arm is emitted when some aggregate is `versioned`
   // OR event-sourced: the `versioned` service raises
   // ObjectOptimisticLockingFailureException on a stale write, and an
   // event-sourced append rethrows the SAME exception on a `(stream_id, version)`
   // 23505 collision.  A project with neither stays byte-identical.
-  const hasConcurrency = contexts.some((c) =>
-    c.aggregates.some((a) => aggregateIsVersioned(a) || aggregateIsEventSourced(a)),
-  );
+  const hasConcurrency = contexts.some((c) => aggregatesNeedConcurrency(c.aggregates));
   place(
     "ApiExceptionAdvice.java",
     "api-common",
