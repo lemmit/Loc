@@ -76,11 +76,12 @@ system SvelteShop {
                 count: int = 0
                 showDetails: bool = false
             }
+            action bump() { count := count + 1 }
             body: Stack {
                 Heading { "Svelte shop", level: 1 },
                 WelcomeCard { "friend", Text { "(slot content)" } },
                 Group {
-                    Button { "Bump", onClick: e => { count := count + 1 }, testid: "bump" },
+                    Button { "Bump", onClick: bump, testid: "bump" },
                     Toggle { "Show details", bind: showDetails },
                     Stat { "Count", count }
                 },

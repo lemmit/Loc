@@ -94,24 +94,27 @@ ui SalesAdmin with scaffold(subdomains: [Catalog], aggregates: [Customer, Produc
       step:  int               = 0
       draft: PlaceOrderRequest = {}
     }
+    action toItems()  { step := 1 }
+    action toReview() { step := 2 }
+    action submitOrder() {
+      call placeOrder(draft)
+      navigate(OrderConsole, { customerId: draft.customerId })
+    }
 
     body: match {
       step == 0 => Form(
         into:     draft,
         fields:   [customerId],
-        onSubmit: () => step := 1
+        onSubmit: toItems
       )
       step == 1 => Form(
         into:     draft,
         fields:   [items],
-        onSubmit: () => step := 2
+        onSubmit: toReview
       )
       step == 2 => Review(
         of:       draft,
-        onSubmit: () => {
-          call placeOrder(draft)
-          navigate(OrderConsole, { customerId: draft.customerId })
-        }
+        onSubmit: submitOrder
       )
       else => Empty {}
     }
