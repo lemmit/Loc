@@ -408,10 +408,14 @@ export class DddValidator {
           } else {
             apiNamesSeen.set(api.name, api);
           }
-          if (!api.source?.ref) {
+          // `from <Subdomain>` is optional — an api may instead derive its
+          // surface from a `with scaffoldApi(...)` macro or carry explicit
+          // `route` bindings.  Only flag a `from` that was written but doesn't
+          // resolve (source present, ref unresolved).
+          if (api.source && !api.source.ref) {
             accept(
               "error",
-              `api '${api.name}' references undeclared subdomain '${api.source?.$refText ?? "<missing>"}'.  Declare a 'subdomain ${api.source?.$refText ?? "<Name>"} { … }' at system scope first.`,
+              `api '${api.name}' references undeclared subdomain '${api.source.$refText}'.  Declare a 'subdomain ${api.source.$refText} { … }' at system scope first.`,
               { node: api, property: "source" },
             );
           }

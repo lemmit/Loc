@@ -32,8 +32,10 @@ import { AstUtils, DocumentState } from "langium";
 import type { LangiumSharedServices } from "langium/lsp";
 import {
   type Aggregate,
+  type Api,
   type Capability,
   isAggregate,
+  isApi,
   isBoundedContext,
   isCapability,
   isImplementsDecl,
@@ -217,13 +219,14 @@ function expandModel(model: Model, doc: LangiumDocument, shared?: LangiumSharedS
     if (isAggregate(node)) expandHost(node, "aggregate", doc, inv, buildRef);
     else if (isUi(node)) expandHost(node, "ui", doc, inv, buildRef);
     else if (isBoundedContext(node)) expandHost(node, "context", doc, inv, buildRef);
+    else if (isApi(node)) expandHost(node, "api", doc, inv, buildRef);
   }
   void isSystem; // imported for symmetry with future system-level macros
 }
 
 function expandHost(
-  host: Aggregate | Ui | import("../language/generated/ast.js").BoundedContext,
-  kind: "aggregate" | "ui" | "context",
+  host: Aggregate | Ui | import("../language/generated/ast.js").BoundedContext | Api,
+  kind: "aggregate" | "ui" | "context" | "api",
   doc: LangiumDocument,
   inv: Inventory,
   buildRef: BuildRef,
@@ -237,8 +240,9 @@ function expandHost(
   // Typed `implements <Cap>` — a capability application, synonym of `with <Cap>`
   // (typed-capabilities.md).  The legacy `implements "string"` group-opt-in form
   // (`ImplementsDecl.name`) is handled in lowering, not here.  Snapshot the
-  // member list because aggregate-scope expansion splices into it.
-  if (kind !== "ui") {
+  // member list because aggregate-scope expansion splices into it.  Only the
+  // aggregate / context hosts carry `implements` members (an api / ui does not).
+  if (kind === "aggregate" || kind === "context") {
     const members = [...((host as { members?: AstNode[] }).members ?? [])];
     for (const m of members) {
       if (!isImplementsDecl(m) || !m.cap) continue;
@@ -259,8 +263,8 @@ function expandHost(
 
 function expandOneCall(
   call: MacroCall,
-  host: Aggregate | Ui | import("../language/generated/ast.js").BoundedContext,
-  hostKind: "aggregate" | "ui" | "context",
+  host: Aggregate | Ui | import("../language/generated/ast.js").BoundedContext | Api,
+  hostKind: "aggregate" | "ui" | "context" | "api",
   doc: LangiumDocument,
   inv: Inventory,
   buildRef: BuildRef,
@@ -427,20 +431,20 @@ function expandOneCall(
  * A capability is a pure mixin, so it never targets a `ui`. */
 function expandCapability(
   cap: Capability,
-  host: Aggregate | Ui | import("../language/generated/ast.js").BoundedContext,
-  hostKind: "aggregate" | "ui" | "context",
+  host: Aggregate | Ui | import("../language/generated/ast.js").BoundedContext | Api,
+  hostKind: "aggregate" | "ui" | "context" | "api",
   // The AST node the application was written at (a `with` MacroCall or an
   // `implements` ImplementsDecl) — used only as the diagnostic anchor.
   at: AstNode,
   doc: LangiumDocument,
   buildRef: BuildRef,
 ): void {
-  if (hostKind === "ui") {
+  if (hostKind === "ui" || hostKind === "api") {
     recordDiagnostic(doc, {
       severity: "error",
       message:
-        `Capability '${cap.name}' can only be applied to an aggregate or context (got 'ui').  ` +
-        "A capability is a pure mixin over domain state, not a UI concern.",
+        `Capability '${cap.name}' can only be applied to an aggregate or context (got '${hostKind}').  ` +
+        "A capability is a pure mixin over domain state, not a UI or API concern.",
       node: at,
     });
     return;
@@ -524,8 +528,8 @@ function isHostOrDescendant(host: object, candidate: object): boolean {
 }
 
 function spliceMembers(
-  host: Aggregate | Ui | import("../language/generated/ast.js").BoundedContext,
-  hostKind: "aggregate" | "ui" | "context",
+  host: Aggregate | Ui | import("../language/generated/ast.js").BoundedContext | Api,
+  hostKind: "aggregate" | "ui" | "context" | "api",
   members: unknown[],
   // Diagnostic anchor: a `with` MacroCall or an `implements` ImplementsDecl.
   call: AstNode,
@@ -576,7 +580,15 @@ function spliceMembers(
   void hostKind; // reserved for future per-kind validation
 }
 
-/** Merge synthesised `members` into `target.members[]`, scope-locally.
+/** The AST array property a synthesised member is spliced into.  Almost every
+ * host stores its members in `members[]`; an `Api` host stores its transport
+ * bindings in `routes[]` instead (an api-targeted macro emits `Route`s). */
+function memberListKey(target: object): "members" | "routes" {
+  return (target as { $type?: string }).$type === "Api" ? "routes" : "members";
+}
+
+/** Merge synthesised `members` into `target.members[]` (or `target.routes[]`
+ * for an api host), scope-locally.
  *
  * Override-by-name and de-duplication are *scoped*: an existing member (an
  * explicit declaration, or one already merged) suppresses a synthesised member
@@ -586,17 +598,23 @@ function spliceMembers(
  * blocks) no longer collapse onto the first area's copy.  Wires the `$container`
  * triple on every appended node. */
 function spliceIntoTarget(target: object, members: unknown[]): void {
-  if (!Array.isArray((target as { members?: unknown[] }).members)) return;
-  mergeScopedMembers(target, members);
+  const key = memberListKey(target);
+  if (!Array.isArray((target as Record<string, unknown>)[key])) return;
+  mergeScopedMembers(target, members, key);
 }
 
-/** Append `incoming` into `container.members`, honouring scope-local
- *  override-by-name and merging same-named child `area` blocks recursively. */
-function mergeScopedMembers(container: object, incoming: unknown[]): void {
-  const list = (container as { members: unknown[] }).members;
+/** Append `incoming` into `container[key]` (`members` or `routes`), honouring
+ *  scope-local override-by-name and merging same-named child `area` blocks
+ *  recursively.  Routes carry no `name`, so they always append. */
+function mergeScopedMembers(
+  container: object,
+  incoming: unknown[],
+  key: "members" | "routes" = "members",
+): void {
+  const list = (container as Record<string, unknown[]>)[key]!;
   const append = (m: unknown): void => {
     (m as Record<string, unknown>).$container = container;
-    (m as Record<string, unknown>).$containerProperty = "members";
+    (m as Record<string, unknown>).$containerProperty = key;
     (m as Record<string, unknown>).$containerIndex = list.length;
     list.push(m);
   };
@@ -825,8 +843,12 @@ type MacroRefVisitor = (
  * diagnostic re-check and the dependency capture below so the two never drift. */
 function forEachMacroRef(model: Model, visit: MacroRefVisitor): void {
   for (const node of AstUtils.streamAllContents(model)) {
-    if (!isAggregate(node) && !isUi(node) && !isBoundedContext(node)) continue;
-    const host = node as Aggregate | Ui | import("../language/generated/ast.js").BoundedContext;
+    if (!isAggregate(node) && !isUi(node) && !isBoundedContext(node) && !isApi(node)) continue;
+    const host = node as
+      | Aggregate
+      | Ui
+      | import("../language/generated/ast.js").BoundedContext
+      | Api;
     for (const call of host.withClause?.calls ?? []) {
       const macro = call.name ? lookupMacro(call.name) : undefined;
       if (!macro?.params) continue;

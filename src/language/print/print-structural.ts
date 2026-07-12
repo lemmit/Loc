@@ -450,7 +450,10 @@ function printConnectionSource(node: import("../generated/ast.js").ConnectionSou
 }
 
 function printApi(node: Api): string {
-  const head = `api ${node.name} from ${node.source.$refText}`;
+  // `from <Subdomain>` is optional (an api may derive its surface from a
+  // `with scaffoldApi(...)` macro instead); `withClause` prints when present.
+  const from = node.source ? ` from ${node.source.$refText}` : "";
+  const head = `api ${node.name}${printWithClause(node.withClause)}${from}`;
   const items: string[] = [];
   if (node.urlStyle) items.push(`urlStyle: ${node.urlStyle}`);
   for (const s of node.statuses ?? []) items.push(`httpStatus ${s.error} ${s.code}`);

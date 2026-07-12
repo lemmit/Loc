@@ -18,11 +18,16 @@ import type {
   AggregateMember,
   AssignOrCallStmt,
   CallArg,
+  CommandHandler,
+  ContextMember,
   Create,
   Destroy,
   Expression,
   FieldAccess,
+  HandlerRef,
+  HttpMethod,
   IdType,
+  LetStmt,
   LValue,
   MemberSuffix,
   NamedDecl,
@@ -33,6 +38,8 @@ import type {
   PostfixChain,
   PrimitiveType,
   Property,
+  ReturnStmt,
+  Route,
   SelfType,
   Statement,
   TypeRef,
@@ -42,11 +49,14 @@ import { isProperty, isStampDecl, isSubdomain } from "../../language/generated/a
 import {
   mkAssignOrCallStmt,
   mkCallArg,
+  mkCommandHandler,
   mkCreate,
   mkDestroy,
   mkFilterDecl,
+  mkHandlerRef,
   mkIdType,
   mkImplementsDecl,
+  mkLetStmt,
   mkLValue,
   mkMemberSuffix,
   mkNamedType,
@@ -57,6 +67,8 @@ import {
   mkPostfixChain,
   mkPrimitiveType,
   mkProperty,
+  mkReturnStmt,
+  mkRoute,
   mkSelfType,
   mkStampDecl,
   mkThisRef,
@@ -424,6 +436,119 @@ export function assignStmtPath(path: string[], value: Expression): AssignOrCallS
   setContainer(lv, stmt, "target");
   setContainer(value, stmt, "value");
   return stmt;
+}
+
+/** A bare method-call statement: `head.tail1.tail2(args)`.  Unlike
+ * `assignStmt`, this sets the LValue's `call` flag and carries argument
+ * expressions — the statement is an invocation, not an assignment (grammar
+ * `AssignOrCallStmt` with no mutation suffix).  Used to emit the op-call in a
+ * generated `commandHandler` body (`o.cancel()`). */
+export function callStmt(path: string[], args: Expression[] = []): AssignOrCallStmt {
+  if (path.length === 0) throw new Error("callStmt requires at least one path segment");
+  const origin = currentOrigin();
+  const lv: LValue = tag(
+    mkLValue({
+      $type: "LValue",
+      head: path[0]!,
+      tail: path.slice(1),
+      call: true,
+      args,
+    }),
+    origin,
+  );
+  args.forEach((a, i) => {
+    setContainer(a, lv, "args", i);
+  });
+  const stmt: AssignOrCallStmt = tag(
+    mkAssignOrCallStmt({ $type: "AssignOrCallStmt", target: lv }),
+    origin,
+  );
+  setContainer(lv, stmt, "target");
+  return stmt;
+}
+
+/** A `let <name> = <expr>` binding statement.  `name` binds in the rest of
+ * the enclosing body's scope (grammar `LetStmt`).  Used to load an aggregate
+ * in a generated handler body (`let o = Orders.getById(orderId)`). */
+export function letStmt(name: string, expr: Expression): LetStmt {
+  const origin = currentOrigin();
+  const stmt: LetStmt = tag(mkLetStmt({ $type: "LetStmt", name, expr }), origin);
+  setContainer(expr, stmt, "expr");
+  return stmt;
+}
+
+/** A `return <expr>` statement (grammar `ReturnStmt`) — an operation /
+ * handler's designed-in outcome. */
+export function returnStmt(value: Expression): ReturnStmt {
+  const origin = currentOrigin();
+  const stmt: ReturnStmt = tag(mkReturnStmt({ $type: "ReturnStmt", value }), origin);
+  setContainer(value, stmt, "value");
+  return stmt;
+}
+
+// ---------------------------------------------------------------------------
+// Application- + transport-layer factories — the `commandHandler` context
+// member and the `route <METHOD> <PATH> -> Context.Handler` api binding
+// (unfoldable-api-derivation.md, Layers 3-4).  Emitted by the `scaffoldHandlers`
+// (context-targeted) and `scaffoldApi` (api-targeted) stdlib macros.
+// ---------------------------------------------------------------------------
+
+/** An application-layer `commandHandler <name>(params) { body }` context member.
+ * Mirrors `operation()` but builds a `CommandHandler` AST node (a top-level
+ * context member, not an aggregate member).  `returnType` is omitted for the
+ * common destroy-style / void handler. */
+export function commandHandler(
+  name: string,
+  params: Parameter[],
+  body: Statement[],
+  opts: { returnType?: TypeRef } = {},
+): CommandHandler & ContextMember {
+  const origin = currentOrigin();
+  const node: CommandHandler = tag(
+    mkCommandHandler({
+      $type: "CommandHandler",
+      name,
+      params,
+      body,
+      ...(opts.returnType ? { returnType: opts.returnType } : {}),
+    }),
+    origin,
+  );
+  params.forEach((p, i) => {
+    setContainer(p, node, "params", i);
+  });
+  body.forEach((s, i) => {
+    setContainer(s, node, "body", i);
+  });
+  if (opts.returnType) setContainer(opts.returnType, node, "returnType");
+  return node as CommandHandler & ContextMember;
+}
+
+/** A `Context.Handler` handler reference — the target of a `route`.  The
+ * `context` segment is a Langium cross-ref (resolved against global
+ * `BoundedContext` scope); the `handler` segment is a plain name the IR
+ * validator resolves across the context's command/query handlers + workflow
+ * handles. */
+export function handlerRef(contextName: string, handlerName: string): HandlerRef {
+  const origin = currentOrigin();
+  return tag(
+    mkHandlerRef({
+      $type: "HandlerRef",
+      context: makeRef<import("../../language/generated/ast.js").BoundedContext>(contextName),
+      handler: handlerName,
+    }),
+    origin,
+  );
+}
+
+/** A `route <METHOD> <PATH> -> Context.Handler` api-body binding.  `path` is
+ * the raw route path WITHOUT quotes (the `STRING` terminal strips its
+ * delimiters); the printer re-quotes on emission. */
+export function route(method: HttpMethod, path: string, target: HandlerRef): Route {
+  const origin = currentOrigin();
+  const node: Route = tag(mkRoute({ $type: "Route", method, path, target }), origin);
+  setContainer(target, node, "target");
+  return node;
 }
 
 // ---------------------------------------------------------------------------

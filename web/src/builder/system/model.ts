@@ -154,7 +154,9 @@ export function buildSystemGraph(ast: AstNode): SystemGraph {
       }
       case "Api": {
         const a = node as Api;
-        addEdge(nodeId("api", a.name), nodeId("subdomain", a.source.$refText), "from");
+        // `from <Subdomain>` is optional (a scaffoldApi macro may supply the
+        // surface instead) — only draw the edge when it was written.
+        if (a.source) addEdge(nodeId("api", a.name), nodeId("subdomain", a.source.$refText), "from");
         break;
       }
       case "Deployable": {
