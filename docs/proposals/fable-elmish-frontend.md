@@ -165,10 +165,13 @@ in an action body is now an **error** (`loom.missing-effect-marker`, was
 (fire-and-forget), `onError`, `attempt {}` railway, `async` action composition —
 **no grammar surface yet**.
 
-So a **sync MVU target is buildable against `main` today**, and an **async** one
-is closer than "gated" implied — its load-bearing primitive (`match await`)
-ships on every target; the remainder is enforcement + sugar, not the core
-mechanism. (`store` persistence stays deferred out of v1.)
+So a **sync MVU target is buildable against `main` today** — *buildable*, not
+built: **no Feliz generator exists.** "Buildable" means the substrate is in place
+and the build faces no open *research* question (see §9), not that a `.ddd` file
+produces a running Feliz app — it doesn't, until the emitters are written. The
+**async** axis is likewise closer than "gated" implied — its load-bearing
+primitive (`match await`) ships on every target; the remainder is enforcement +
+sugar, not the core mechanism. (`store` persistence stays deferred out of v1.)
 
 ## 3. Work streams and distance
 
@@ -547,3 +550,49 @@ the generator tests bypass `validateLoomModel`. Fixed with a slot-scoped
 exemption (`componentActionParams` → `exemptLambdas` in
 `src/ir/validate/checks/ui-checks.ts`) + regression tests; the exemption is
 slot-specific, so a stdlib `Button.onClick` in the same page is still gated.
+
+## 9. Readiness — build, not research; and don't over-prepare
+
+Where this leaves the architecture, stated plainly so "buildable today" is not
+misread:
+
+**No generator exists.** Nothing turns a `.ddd` into F#. The spikes (§7) proved
+the *target* and *runtime* are viable by hand-writing the F# an emitter would
+produce; they did **not** produce a Feliz app from Loom. The remaining work is a
+real, substantial **build** — the `felizTarget` view emitter, the ~80-primitive
+Feliz pack, the F# wire layer (Thoth decoders + `Cmd`-based api), error
+reification. What the spikes bought is the removal of *research risk*: the build
+faces no open question, only labour.
+
+**The architecture is already prepared — the seams that made this incremental
+are shipped:** platform-neutral fully-resolved IR (the emitter reads
+`wireShape`/`ActionIR`/`StoreIR`, re-resolves nothing); the `WalkerTarget` seam
+(a non-JSX target, Angular, already rides it); named actions (⇒ `Msg`/`update`
+are a *projection*, not synthesis); the pure view (`effect-in-lambda`, no inline
+effects to hoist); the format-keyed pack loader + `PlatformSurface` registration
+slots. There is **no missing seam** blocking Feliz.
+
+**Do not pre-build further — it would make things worse.** The two mechanisms
+still needed — a *procedural* pack format (the spike chose procedural F# over
+Handlebars, and the loader only does Handlebars today) and a neutral/emission
+split in `src/generator/_frontend/` (TS/zod-shaped today) — are **not**
+prepared now on purpose. With only one consumer (TS) to shape them, designing
+them in advance is premature abstraction: **the second consumer designs the
+abstraction.** The first real Feliz pack's concrete needs tell you the right
+shape; guessing now means ripping it out later. This is the repo's own
+discipline (`derive-don't-stamp`, "macros emit final AST not sentinels", no
+reserved-stub adapters) applied to itself.
+
+**The one remaining *architectural* uncertainty** (not build) is whether the
+Feliz `view` rides the shared `walkBody` or forks it like HEEx. The proposal
+leans hard toward *rides it* (§1, §3a): the Feliz view is expression-valued
+(`if c then a else b`, `List.map`, a `match` returning `ReactElement`), landing
+on the React/TSX branch of every seam — and named actions collapse handlers to
+`dispatch Msg.X`, the exact thing that forced HEEx to fork. So Feliz should fit
+*more* cleanly than Angular, which is already in the shared engine. Settling it
+definitively is the first step of the build (a throwaway `felizTarget` against
+`walkBody`), not a preparation to do beforehand.
+
+**Net:** the correct next move is to *stop preparing and build when ready* — the
+seams are waiting, and the first pack is what should shape the last two
+mechanisms, not a guess made in advance.
