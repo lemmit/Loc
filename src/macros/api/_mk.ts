@@ -53,6 +53,8 @@ import type {
   NameRef,
   NowExpr,
   NullLit,
+  ObjectFieldInit,
+  ObjectLit,
   Operation,
   Page,
   PageMenuMeta,
@@ -60,6 +62,7 @@ import type {
   PostfixChain,
   PrimitiveType,
   Property,
+  QueryHandler,
   ReturnStmt,
   Route,
   RouteProp,
@@ -185,6 +188,18 @@ export function mkHandlerRef(shape: AstLiteral<HandlerRef>): HandlerRef {
 
 export function mkCommandHandler(shape: AstLiteral<CommandHandler>): CommandHandler {
   return mkAst<CommandHandler>(shape);
+}
+
+export function mkQueryHandler(shape: AstLiteral<QueryHandler>): QueryHandler {
+  return mkAst<QueryHandler>(shape);
+}
+
+export function mkObjectLit(shape: AstLiteral<ObjectLit>): ObjectLit {
+  return mkAst<ObjectLit>(shape);
+}
+
+export function mkObjectFieldInit(shape: AstLiteral<ObjectFieldInit>): ObjectFieldInit {
+  return mkAst<ObjectFieldInit>(shape);
 }
 
 export function mkUnaryExpr(shape: AstLiteral<UnaryExpr>): UnaryExpr {
