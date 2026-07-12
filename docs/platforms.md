@@ -119,9 +119,15 @@ document/event-store backend is **3rd priority (if ever)**: `D-DOCUMENT-AXIS`
 (see [`decisions.md`](decisions.md)) currently pins *no new Marten backend* —
 the event log lives on the existing relational stores.
 
-Other axes — `directoryLayout: byLayer | byFeature`, `style` / `application`,
-and the greenfield `transport` / `runtime` axes — are at varying stages; the
-rollout tracker above is the source of truth for what's real today.
+The only other user-selectable axis is **`directoryLayout: byLayer | byFeature`**
+(the fully adapter-consumed axis — it routes each artifact's path via
+`layout.pathFor`). The former `style` / `application`, `transport`, and `runtime`
+axes were **removed** — style is now one fixed emission per backend (`cqrs` on
+dotnet, `layered` elsewhere), kept internally but no longer user-selectable, and
+the name-only `transport` / `runtime` registries were deleted whole. So a
+`platform { … }` block accepts only `persistence:` and `directoryLayout:` today
+(`ddd.langium`; validator `RealizationAxis`). See the D-REALIZATION-AXES
+supersession note in `decisions.md`.
 
 ### Phoenix backend (plain Ecto/Phoenix)
 
