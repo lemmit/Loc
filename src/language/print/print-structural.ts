@@ -119,6 +119,7 @@ export const PLATFORM_KEYWORDS: ReadonlySet<string> = new Set([
   "svelte",
   "vue",
   "angular",
+  "feliz",
   "static",
   "elixir",
   "python",
