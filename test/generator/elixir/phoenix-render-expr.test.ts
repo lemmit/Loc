@@ -611,6 +611,46 @@ describe("phoenix renderExpr — member, method-call, call, new, list, lambda", 
     ).toBe("Enum.count(record.items)");
   });
 
+  it("renders the A4 collection transformation ops via Enum", () => {
+    const arr: TypeIR = { kind: "array", element: STRING };
+    const idLambda: ExprIR = {
+      kind: "lambda",
+      param: "x",
+      body: { kind: "ref", name: "x", refKind: "lambda" },
+    };
+    const mc = (member: string, args: ExprIR[]): ExprIR => ({
+      kind: "method-call",
+      receiver: thisProp("items"),
+      member,
+      args,
+      receiverType: arr,
+      isCollectionOp: true,
+    });
+    expect(renderExpr(mc("map", [idLambda]), ctx)).toBe("Enum.map(record.items, fn x -> x end)");
+    expect(renderExpr(mc("sortBy", [idLambda]), ctx)).toBe(
+      "Enum.sort_by(record.items, fn x -> x end)",
+    );
+    expect(
+      renderExpr(mc("sortBy", [idLambda, { kind: "literal", lit: "bool", value: "true" }]), ctx),
+    ).toBe("Enum.sort_by(record.items, fn x -> x end, :desc)");
+    // `distinct` is property-style — a member node, not a method-call.
+    expect(
+      renderExpr(
+        {
+          kind: "member",
+          receiver: thisProp("items"),
+          member: "distinct",
+          receiverType: arr,
+          memberType: arr,
+        },
+        ctx,
+      ),
+    ).toBe("Enum.uniq(record.items)");
+    expect(renderExpr(mc("take", [litInt("2")]), ctx)).toBe("Enum.take(record.items, 2)");
+    expect(renderExpr(mc("skip", [litInt("1")]), ctx)).toBe("Enum.drop(record.items, 1)");
+    expect(renderExpr(mc("join", [litStr(", ")]), ctx)).toBe('Enum.join(record.items, ", ")');
+  });
+
   it("renders function call with receiver prepended (passed first arg)", () => {
     expect(
       renderExpr(

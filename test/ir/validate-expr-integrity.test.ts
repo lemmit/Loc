@@ -26,7 +26,7 @@ import { NodeFileSystem } from "langium/node";
 import { describe, expect, it } from "vitest";
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
-import type { EnrichedLoomModel, ExprIR } from "../../src/ir/types/loom-ir.js";
+import type { EnrichedLoomModel, ExprIR, TypeIR } from "../../src/ir/types/loom-ir.js";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Model } from "../../src/language/generated/ast.js";
@@ -144,6 +144,103 @@ describe("validate-expr-integrity — un-expanded sentinel rejection", () => {
         d.message.includes("'WorkflowsIndex'"),
     );
     expect(scaffoldDiags.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// A4 — collection transformation-op correctness + UI-position gates.
+async function irErrorCodes(source: string): Promise<string[]> {
+  const { parseHelper } = await import("langium/test");
+  const services = createDddServices(NodeFileSystem);
+  const helper = parseHelper<Model>(services.Ddd);
+  const doc = await helper(source, { validation: false });
+  const loom = enrichLoomModel(lowerModel(doc.parseResult.value));
+  return validateLoomModel(loom)
+    .filter((d) => d.severity === "error")
+    .map((d) => d.code);
+}
+
+const wrapAgg = (aggBody: string) => `
+  context Shop {
+    aggregate Order {
+      contains lines: OrderLine[]
+      ${aggBody}
+      entity OrderLine { qty: int }
+    }
+    repository Orders for Order { }
+  }`;
+
+describe("validate-expr-integrity — A4 collection-op correctness gates", () => {
+  it("flags `.distinct` on an entity collection (loom.distinct-non-scalar)", async () => {
+    const codes = await irErrorCodes(wrapAgg("derived dd: int = lines.distinct.count"));
+    expect(codes).toContain("loom.distinct-non-scalar");
+  });
+
+  it("does NOT flag `.distinct` on a scalar (int) collection", async () => {
+    const codes = await irErrorCodes(
+      wrapAgg("derived dd: int = lines.map(l => l.qty).distinct.count"),
+    );
+    expect(codes).not.toContain("loom.distinct-non-scalar");
+  });
+
+  it("flags `.join` on a non-string (int) collection (loom.join-non-string)", async () => {
+    const codes = await irErrorCodes(
+      wrapAgg('derived j: int = lines.map(l => l.qty).join(", ").length'),
+    );
+    expect(codes).toContain("loom.join-non-string");
+  });
+});
+
+describe("validate-expr-integrity — A4 collection-op-in-UI gate", () => {
+  const arr: TypeIR = { kind: "array", element: { kind: "primitive", name: "string" } };
+  const recv: ExprIR = { kind: "ref", name: "tags", refKind: "let" };
+  const idLambda: ExprIR = {
+    kind: "lambda",
+    param: "x",
+    body: { kind: "ref", name: "x", refKind: "lambda" },
+  };
+  const litInt = (v: string): ExprIR => ({ kind: "literal", lit: "int", value: v });
+  const litStr = (v: string): ExprIR => ({ kind: "literal", lit: "string", value: v });
+  const mc = (member: string, args: ExprIR[]): ExprIR => ({
+    kind: "method-call",
+    receiver: recv,
+    member,
+    args,
+    receiverType: arr,
+    isCollectionOp: true,
+  });
+  const distinctMember: ExprIR = {
+    kind: "member",
+    receiver: recv,
+    member: "distinct",
+    receiverType: arr,
+    memberType: arr,
+  };
+
+  async function codesForPageBody(body: ExprIR): Promise<string[]> {
+    const loom = await loadFixture();
+    loom.systems[0]!.uis[0]!.pages[0]!.body = body;
+    return validateLoomModel(loom)
+      .filter((d) => d.severity === "error")
+      .map((d) => d.code);
+  }
+
+  for (const [label, body] of [
+    ["sortBy", mc("sortBy", [idLambda])],
+    ["distinct", distinctMember],
+    ["take", mc("take", [litInt("2")])],
+    ["skip", mc("skip", [litInt("1")])],
+  ] as [string, ExprIR][]) {
+    it(`rejects '.${label}' in a UI page body (loom.collection-op-in-ui)`, async () => {
+      const codes = await codesForPageBody(body);
+      expect(codes).toContain("loom.collection-op-in-ui");
+    });
+  }
+
+  it("does NOT reject 'map' / 'join' in a UI page body (they render on the frontend)", async () => {
+    const mapCodes = await codesForPageBody(mc("map", [idLambda]));
+    expect(mapCodes).not.toContain("loom.collection-op-in-ui");
+    const joinCodes = await codesForPageBody(mc("join", [litStr(", ")]));
+    expect(joinCodes).not.toContain("loom.collection-op-in-ui");
   });
 });
 

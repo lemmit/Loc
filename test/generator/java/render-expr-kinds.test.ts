@@ -256,6 +256,43 @@ describe("java renderJavaExpr — member + method-call", () => {
     };
     expect(renderJavaExpr(sum)).toBe("this.scores.stream().mapToInt(Integer::intValue).sum()");
   });
+
+  it("renders the A4 collection transformation ops via Streams", () => {
+    const arr: TypeIR = { kind: "array", element: STRING };
+    const idLambda: ExprIR = {
+      kind: "lambda",
+      param: "x",
+      body: { kind: "ref", name: "x", refKind: "lambda" },
+    };
+    const mc = (member: string, args: ExprIR[]): ExprIR => ({
+      kind: "method-call",
+      receiver: thisProp("items"),
+      member,
+      args,
+      receiverType: arr,
+      isCollectionOp: true,
+    });
+    expect(renderJavaExpr(mc("map", [idLambda]))).toBe("this.items.stream().map(x -> x).toList()");
+    expect(renderJavaExpr(mc("sortBy", [idLambda]))).toBe(
+      "this.items.stream().sorted(java.util.Comparator.comparing(x -> x)).toList()",
+    );
+    expect(renderJavaExpr(mc("sortBy", [idLambda, litBool("true")]))).toBe(
+      "this.items.stream().sorted(java.util.Comparator.comparing(x -> x).reversed()).toList()",
+    );
+    // `distinct` is property-style — a member node, not a method-call.
+    expect(
+      renderJavaExpr({
+        kind: "member",
+        receiver: thisProp("items"),
+        member: "distinct",
+        receiverType: arr,
+        memberType: arr,
+      }),
+    ).toBe("this.items.stream().distinct().toList()");
+    expect(renderJavaExpr(mc("take", [litInt("2")]))).toBe("this.items.stream().limit(2).toList()");
+    expect(renderJavaExpr(mc("skip", [litInt("1")]))).toBe("this.items.stream().skip(1).toList()");
+    expect(renderJavaExpr(mc("join", [litStr(", ")]))).toBe('String.join(", ", this.items)');
+  });
 });
 
 describe("java renderJavaExpr — call kinds", () => {

@@ -575,6 +575,11 @@ function renderMember(recv: string, e: MemberExpr): string {
   if (e.receiverType.kind === "array" && (e.member === "count" || e.member === "length")) {
     return `${recv}.Count`;
   }
+  // `distinct` is property-style (no parens, like `count`) — route the
+  // member-node form through the shared collection-op table.
+  if (e.receiverType.kind === "array" && e.member === "distinct") {
+    return CS_COLLECTION_RENDERERS.distinct!(recv, []);
+  }
   if (
     e.receiverType.kind === "primitive" &&
     e.receiverType.name === "string" &&
@@ -730,7 +735,7 @@ function renderMethodCall(
     }
   }
   if (e.isCollectionOp) {
-    return renderCollectionOp(`(${recv})`, e.member, args);
+    return renderCollectionOp(`(${recv})`, e.member, args, e);
   }
   // `string.matches(literal)` — domain rendering lowers to
   // Regex.IsMatch from System.Text.RegularExpressions.  Wire-boundary
@@ -756,29 +761,49 @@ function renderMethodCall(
   return `${recv}.${upperFirst(e.member)}(${args.join(", ")})`;
 }
 
-function renderCollectionOp(recv: string, name: string, args: string[]): string {
-  switch (name) {
-    case "count":
-      return `${recv}.Count()`;
-    case "sum":
-      return args.length === 1 ? `${recv}.Sum(${args[0]})` : `${recv}.Sum()`;
-    case "all":
-      return `${recv}.All(${args[0] ?? "_ => true"})`;
-    case "any":
-      return `${recv}.Any(${args[0] ?? "_ => true"})`;
-    case "contains":
-      // Membership: maps to LINQ's `Contains(value)` overload.  The
-      // single arg is the candidate value (rendered already).
-      return `${recv}.Contains(${args[0] ?? "default!"})`;
-    case "where":
-      return `${recv}.Where(${args[0] ?? "_ => true"}).ToList()`;
-    case "first":
-      return `${recv}.First()`;
-    case "firstOrNull":
-      return `${recv}.FirstOrDefault()`;
-    default:
-      return `${recv}.${upperFirst(name)}(${args.join(", ")})`;
-  }
+/** True iff `e.args[1]` is the boolean literal `true` (a `sortBy(λ, true)`
+ *  descending flag — the only collection op carrying a 2nd arg). */
+function isDescendingSort(e: Extract<ExprIR, { kind: "method-call" }>): boolean {
+  const flag = e.args[1];
+  return flag?.kind === "literal" && flag.lit === "bool" && flag.value === "true";
+}
+
+/** Keyed renderer table — one entry per collection op (see the completeness
+ *  pin `test/generator/collection-op-completeness.test.ts`). */
+export const CS_COLLECTION_RENDERERS: Record<
+  string,
+  (recv: string, args: string[], e?: Extract<ExprIR, { kind: "method-call" }>) => string
+> = {
+  count: (recv) => `${recv}.Count()`,
+  sum: (recv, args) => (args.length === 1 ? `${recv}.Sum(${args[0]})` : `${recv}.Sum()`),
+  all: (recv, args) => `${recv}.All(${args[0] ?? "_ => true"})`,
+  any: (recv, args) => `${recv}.Any(${args[0] ?? "_ => true"})`,
+  // Membership: maps to LINQ's `Contains(value)` overload.  The single arg
+  // is the candidate value (rendered already).
+  contains: (recv, args) => `${recv}.Contains(${args[0] ?? "default!"})`,
+  where: (recv, args) => `${recv}.Where(${args[0] ?? "_ => true"}).ToList()`,
+  first: (recv) => `${recv}.First()`,
+  firstOrNull: (recv) => `${recv}.FirstOrDefault()`,
+  map: (recv, args) => `${recv}.Select(${args[0]}).ToList()`,
+  sortBy: (recv, args, e) =>
+    e && isDescendingSort(e)
+      ? `${recv}.OrderByDescending(${args[0]}).ToList()`
+      : `${recv}.OrderBy(${args[0]}).ToList()`,
+  distinct: (recv) => `${recv}.Distinct().ToList()`,
+  take: (recv, args) => `${recv}.Take(${args[0]}).ToList()`,
+  skip: (recv, args) => `${recv}.Skip(${args[0]}).ToList()`,
+  join: (recv, args) => `string.Join(${args[0]}, ${recv})`,
+};
+
+function renderCollectionOp(
+  recv: string,
+  name: string,
+  args: string[],
+  e: Extract<ExprIR, { kind: "method-call" }>,
+): string {
+  const render = CS_COLLECTION_RENDERERS[name];
+  if (render) return render(recv, args, e);
+  return `${recv}.${upperFirst(name)}(${args.join(", ")})`;
 }
 
 function renderCall(args: string[], e: CallExpr, ctx: CsRenderContext): string {

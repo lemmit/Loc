@@ -943,23 +943,96 @@ const SCAFFOLD_PRIMITIVE_NAMES: ReadonlySet<string> = new Set([
   "ViewsIndex",
 ]);
 
+/** Collection ops that have NO valid JS/HEEx array-member spelling — a
+ *  `.sortBy`/`.distinct`/`.take`/`.skip` in a UI page-body expression would
+ *  emit `arr.sortBy(...)`, which is not a real Array method (unlike `.map` /
+ *  `.join`, which render as native member calls on the frontends).  Rejected
+ *  in UI position by `loom.collection-op-in-ui`. */
+const UI_UNSUPPORTED_COLLECTION_OPS: ReadonlySet<string> = new Set([
+  "sortBy",
+  "distinct",
+  "take",
+  "skip",
+]);
+
+/** The element type of a (possibly optional-wrapped) collection receiver, or
+ *  `undefined` when the receiver isn't a collection. */
+function collectionElementOf(t: TypeIR): TypeIR | undefined {
+  const unwrapped = t.kind === "optional" ? t.inner : t;
+  return unwrapped.kind === "array" ? unwrapped.element : undefined;
+}
+
 export function validateExprIntegrity(loom: EnrichedLoomModel, diags: LoomDiagnostic[]): void {
-  const visitor = (source: string) => (e: ExprIR) => {
-    if (e.kind === "call" && SCAFFOLD_PRIMITIVE_NAMES.has(e.name)) {
-      diags.push({
-        severity: "error",
-        code: "loom.scaffold-unexpanded",
-        message: `un-expanded scaffold primitive '${e.name}' — walker-primitive-expander could not resolve its target aggregate/workflow/view; check that the referenced symbol exists in the surrounding context.`,
-        source,
-      });
-    }
-  };
+  const visitor =
+    (source: string, inUi = false) =>
+    (e: ExprIR) => {
+      if (e.kind === "call" && SCAFFOLD_PRIMITIVE_NAMES.has(e.name)) {
+        diags.push({
+          severity: "error",
+          code: "loom.scaffold-unexpanded",
+          message: `un-expanded scaffold primitive '${e.name}' — walker-primitive-expander could not resolve its target aggregate/workflow/view; check that the referenced symbol exists in the surrounding context.`,
+          source,
+        });
+      }
+      // `.distinct` is property-style (no parens, like `count`), so it lowers
+      // to a MEMBER node; every other collection transformation op (`map`/
+      // `sortBy`/`take`/`skip`/`join`) takes an argument and lowers to a
+      // method-call.  Gate each in its own arm.
+      if (e.kind === "member" && e.member === "distinct" && e.receiverType.kind === "array") {
+        const elem = collectionElementOf(e.receiverType);
+        // `.distinct` uses value equality — only scalar / value-object
+        // elements have a well-defined equality; an entity/id collection
+        // would compare by reference / key, which is not what `distinct` means.
+        if (elem?.kind === "entity" || elem?.kind === "id") {
+          diags.push({
+            severity: "error",
+            code: "loom.distinct-non-scalar",
+            message:
+              "`.distinct` requires a scalar or value-object element — it can't dedupe a collection of entities or id references.",
+            source,
+          });
+        }
+        if (inUi) {
+          diags.push({
+            severity: "error",
+            code: "loom.collection-op-in-ui",
+            message:
+              "collection op '.distinct' isn't available in a page body — only 'map' and 'join' render on the frontend; do the transformation in a view or derived property instead.",
+            source,
+          });
+        }
+      }
+      if (e.kind === "method-call" && e.isCollectionOp) {
+        const elem = collectionElementOf(e.receiverType);
+        // `.join` concatenates strings — only a string collection has a
+        // meaningful separator-join.
+        if (e.member === "join" && !(elem?.kind === "primitive" && elem.name === "string")) {
+          diags.push({
+            severity: "error",
+            code: "loom.join-non-string",
+            message: "`.join` requires a string collection.",
+            source,
+          });
+        }
+        // In a UI page body, only the ops with a native frontend array-member
+        // spelling (`map`/`join`) are renderable; the rest have no valid
+        // JS/HEEx member call.
+        if (inUi && UI_UNSUPPORTED_COLLECTION_OPS.has(e.member)) {
+          diags.push({
+            severity: "error",
+            code: "loom.collection-op-in-ui",
+            message: `collection op '.${e.member}' isn't available in a page body — only 'map' and 'join' render on the frontend; do the transformation in a view or derived property instead.`,
+            source,
+          });
+        }
+      }
+    };
 
   for (const sys of loom.systems) {
     for (const ui of sys.uis) {
       for (const page of ui.pages) {
         const source = `${sys.name}/${ui.name}/${page.name}`;
-        const visit = visitor(source);
+        const visit = visitor(source, true);
         walkExpr(page.body, visit);
         walkExpr(page.title, visit);
         walkExpr(page.requires, visit);
@@ -992,6 +1065,17 @@ export function validateExprIntegrity(loom: EnrichedLoomModel, diags: LoomDiagno
         const visit = visitor(source);
         walkExpr(inv.expr, visit);
         walkExpr(inv.guard, visit);
+      }
+      // Derived properties + function bodies — the canonical home for the
+      // collection transformation ops (`total = lines.map(...).sum()`), so the
+      // distinct/join correctness gates must reach them.
+      for (const d of agg.derived ?? []) {
+        walkExpr(d.expr, visitor(`${c.name}/${agg.name}/${d.name}`));
+      }
+      for (const fn of agg.functions ?? []) {
+        const visit = visitor(`${c.name}/${agg.name}/${fn.name}`);
+        if ("expr" in fn.body) walkExpr(fn.body.expr, visit);
+        else for (const st of fn.body.stmts) walkExprsInStmt(st, visit);
       }
     }
     // Views — filter + custom output binds.

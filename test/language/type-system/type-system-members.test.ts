@@ -75,6 +75,12 @@ describe("type-system — membersOfType (single source for member completion)", 
       "first",
       "firstOrNull",
       "contains",
+      "map",
+      "sortBy",
+      "distinct",
+      "take",
+      "skip",
+      "join",
     ]);
   });
 

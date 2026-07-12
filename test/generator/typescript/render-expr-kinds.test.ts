@@ -228,6 +228,65 @@ describe("ts renderTsExpr — member + method-call", () => {
   });
 });
 
+describe("ts renderTsExpr — A4 collection transformation ops", () => {
+  const arr: TypeIR = { kind: "array", element: STRING };
+  // Identity lambda `x => x` — keeps the arg render trivial so the op wrapper
+  // is what the assertion pins.
+  const idLambda: ExprIR = {
+    kind: "lambda",
+    param: "x",
+    body: { kind: "ref", name: "x", refKind: "lambda" },
+  };
+  const mc = (member: string, args: ExprIR[]): ExprIR => ({
+    kind: "method-call",
+    receiver: thisProp("items"),
+    member,
+    args,
+    receiverType: arr,
+    isCollectionOp: true,
+  });
+
+  it("renders `map(λ)` as `.map(λ)`", () => {
+    expect(renderTsExpr(mc("map", [idLambda]))).toBe("(this._items).map((x) => x)");
+  });
+
+  it("renders `sortBy(λ)` as an ascending spread-and-sort", () => {
+    expect(renderTsExpr(mc("sortBy", [idLambda]))).toBe(
+      "[...(this._items)].sort((__a, __b) => { const ka = ((x) => x)(__a), kb = ((x) => x)(__b); return ka < kb ? -1 : ka > kb ? 1 : 0; })",
+    );
+  });
+
+  it("renders `sortBy(λ, true)` descending (flips the comparator)", () => {
+    expect(renderTsExpr(mc("sortBy", [idLambda, litBool("true")]))).toBe(
+      "[...(this._items)].sort((__a, __b) => { const ka = ((x) => x)(__a), kb = ((x) => x)(__b); return kb < ka ? -1 : kb > ka ? 1 : 0; })",
+    );
+  });
+
+  it("renders `distinct` (property-style member) as a Set round-trip", () => {
+    expect(
+      renderTsExpr({
+        kind: "member",
+        receiver: thisProp("items"),
+        member: "distinct",
+        receiverType: arr,
+        memberType: arr,
+      }),
+    ).toBe("[...new Set(this._items)]");
+  });
+
+  it("renders `take(n)` as `.slice(0, n)`", () => {
+    expect(renderTsExpr(mc("take", [litInt("2")]))).toBe("(this._items).slice(0, 2)");
+  });
+
+  it("renders `skip(n)` as `.slice(n)`", () => {
+    expect(renderTsExpr(mc("skip", [litInt("1")]))).toBe("(this._items).slice(1)");
+  });
+
+  it("renders `join(sep)` as `.join(sep)`", () => {
+    expect(renderTsExpr(mc("join", [litStr(", ")]))).toBe('(this._items).join(", ")');
+  });
+});
+
 describe("ts renderTsExpr — call kinds", () => {
   it("renders value-object-ctor as `new <Name>(...)`", () => {
     expect(
