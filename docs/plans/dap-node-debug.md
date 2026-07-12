@@ -371,14 +371,62 @@ does the debugger actually arm it on?"
   `requires currentUser.role == "admin"` guard proving 4 fine regions
   collapse to 2 distinct armable columns and forward-with-column
   round-trips through `resolveFrame`) and `test/cli/breakpoints-cli.test.ts`.
+- **Milestone 24**: the DAP `setBreakpoints` resolution core — the testable
+  heart of the eventual `ddd-dap` adapter. New `src/dap/dap-protocol.ts`, a
+  minimal hand-modeled DAP type subset (`DapSource` / `DapSourceBreakpoint`
+  / `DapSetBreakpointsArguments` / `DapBreakpoint`), field names matching
+  the Debug Adapter Protocol spec exactly, zero dependency (mirrors
+  `DebugProtocol.*` shape-for-shape so a later `@vscode/debugprotocol`
+  dependency is a drop-in widen, not a rewrite). New
+  `src/dap/set-breakpoints.ts`'s `resolveSetBreakpoints(args, map,
+  readSource): DapBreakpoint[]` calls `translateBreakpoint` once per
+  requested `DapSourceBreakpoint`, in the same 1:1 positional order DAP
+  requires: verified with the generated line + column (column only when
+  `BreakpointTarget.column` is defined — never synthesized) when a target
+  exists, unverified (keeping the *requested* `.ddd` line, with a message
+  naming the reason) when none does. `args.source.path` undefined makes
+  every breakpoint unverified (a source-reference-only `Source` isn't
+  resolvable here). **Multi-file fan-out decision (pinned):** a `.ddd` line
+  whose regions fan out to multiple generated files/targets reports only
+  the NARROWEST single target (`targets[0]`, since `translateBreakpoint`
+  already sorts narrowest-origin-span first) as the one verified
+  `DapBreakpoint` — DAP's `Breakpoint` names one location; arming the
+  sibling fan-out targets too is adapter-runtime work for a later slice, not
+  this pure resolver's job. `bp.column` on the *request* is intentionally
+  ignored for lookup (`translateBreakpoint` is line-granular on input) — a
+  request-column-aware forward lookup is a later refinement. Barrel-exported
+  from `src/dap/index.ts` alongside the existing `translateBreakpoint`
+  export. Tests in `test/dap/set-breakpoints.test.ts` (hand-built fixture
+  maps mirroring `test/dap/breakpoints.test.ts`'s discipline — verified
+  line-only, verified with column, unverified-on-no-mapping, 1:1 positional
+  correspondence, multi-file fan-out, `source.path` undefined, empty/absent
+  `breakpoints` — plus a real round trip over `examples/showcase.ddd`'s
+  `requires currentUser.role == "admin"` guard, deriving the expected
+  line/file/column from the emitted sourcemap rather than hardcoding, and
+  closing the loop back through `resolveFrame`). Pure, `fs`-free, no
+  `@vscode/debugadapter` dependency, no `packages/ddd-dap` workspace, no
+  protocol I/O — those remain deferred, below.
 
 ### What's deferred
 
 - The **DAP protocol shell** itself — no `@vscode/debugadapter` dependency,
   no `packages/ddd-dap` publish-shaped workspace. Those are glue built on
-  top of `translateBreakpoint` (and the already-shipped reverse direction,
+  top of `resolveSetBreakpoints` (Milestone 24, which is itself built on
+  `translateBreakpoint` and the already-shipped reverse direction,
   `resolveFrame`) in a later slice, the same way `src/cli/main.ts`'s `ddd
-  trace` command is glue around `src/trace/`.
+  trace` command is glue around `src/trace/`. The DAP
+  `DebugSession.setBreakpointsRequest(response, args)` handler becomes
+  `response.body = { breakpoints: resolveSetBreakpoints(args, map,
+  readSource) }` once that shell exists.
+- **Multi-file fan-out arming** — Milestone 24's resolver reports only the
+  narrowest target per requested breakpoint; actually arming the sibling
+  fan-out targets too (setting additional real backend breakpoints
+  internally when a `.ddd` line produced more than one generated site) is
+  adapter-runtime work, not built yet.
+- **Request-column-aware lookup** — `resolveSetBreakpoints` ignores the
+  column on the incoming `DapSourceBreakpoint`; narrowing candidates to the
+  one whose origin span covers that column too would need a column-aware
+  forward lookup, not built yet.
 - **Scope/variable remap** — `BreakpointTarget.region` is kept on the result
   specifically so a later slice can read the full region (construct,
   origin chain) for variable-scope resolution once a real DAP adapter needs
