@@ -53,6 +53,7 @@ import { renderPySchema } from "./emit/schema.js";
 import { buildPySeedFile } from "./emit/seed.js";
 import { renderPyTestsFile } from "./emit/tests.js";
 import { renderPyEnumsAndValueObjects } from "./emit/value-objects.js";
+import { emitPyExplicitHandlers, emitPyExplicitRouteRouter } from "./explicit-handlers-emit.js";
 import { buildPyExternHandlersFile, externOpsOf } from "./extern-builder.js";
 import { PYTHON_PINS } from "./pins.js";
 import { buildPyProjectionsFile } from "./projections-builder.js";
@@ -232,6 +233,19 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // task.  No durable channel / no subscription → byte-identical boot.
   const startsRelay =
     durableEventTypes(merged).size > 0 && dispatchSubscriptionsOf(merged).length > 0;
+  // Explicit transport layer (unfoldable-api-derivation.md, A2): one APIRouter
+  // per served api whose `route` list resolves to a hosted handler, dispatching
+  // each route to its `app/application/<handler>.py` function.  Emitted before
+  // renderMain so main can `include_router` the ones that landed (the router
+  // files themselves need no dispatcher — only the handler modules do, emitted
+  // below once `hasDispatch` is known).  Routes to non-hosted contexts skip.
+  const explicitRouteApis: string[] = [];
+  for (const apiName of args.deployable.serves) {
+    const api = args.sys.apis.find((a) => a.name === apiName);
+    if (api && emitPyExplicitRouteRouter(api.name, api.routes, args.contexts, out)) {
+      explicitRouteApis.push(api.name);
+    }
+  }
   out.set(
     "app/main.py",
     renderMain(
@@ -246,6 +260,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       hasEmbeddedSpa,
       startsRelay,
       !!oidc,
+      explicitRouteApis,
     ),
   );
   if (hasEmbeddedSpa) {
@@ -448,6 +463,11 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // Pooled domain-side repository PORTS (audit S7).
   const pyPortsFile = renderPyRepositoryPortsFile(pyPortSpecs, merged);
   if (pyPortsFile) out.set(PY_PORT_POOL_PATH, pyPortsFile);
+  // Explicit application layer (unfoldable-api-derivation.md, A2): commandHandler
+  // / queryHandler → app/application/<name>.py.  Per-context (handlers live on a
+  // context); no-op for a deployable with none.  The served-api routers that
+  // call these were emitted before renderMain.
+  for (const ctx of args.contexts) emitPyExplicitHandlers(ctx, out, hasDispatch);
   return out;
 }
 
@@ -627,6 +647,7 @@ function renderMain(
   hasEmbeddedSpa = false,
   startsRelay = false,
   oidc = false,
+  explicitRouteApis: string[] = [],
 ): string {
   // Every router mounts under the shared API base path (`/api/*`) so the
   // SPA's root path namespace stays free for client-side routing.
@@ -695,6 +716,9 @@ function renderMain(
     hasViews ? "from app.http.views_routes import router as views_router" : null,
     hasWorkflows ? "from app.http.workflows_routes import router as workflows_router" : null,
     hasProjections ? "from app.http.projections_routes import router as projections_router" : null,
+    ...explicitRouteApis.map(
+      (name) => `from app.http.${snake(name)}_routes import router as ${snake(name)}_router`,
+    ),
     "from app.obs.log import log",
     "from app.obs.middleware import ObservabilityMiddleware",
     "",
@@ -817,6 +841,7 @@ function renderMain(
     hasViews ? `app.include_router(views_router${routerArgs})` : null,
     hasWorkflows ? `app.include_router(workflows_router${routerArgs})` : null,
     hasProjections ? `app.include_router(projections_router${routerArgs})` : null,
+    ...explicitRouteApis.map((name) => `app.include_router(${snake(name)}_router${routerArgs})`),
     // Auth routers mount under the shared API base (`/api/auth`, set by each
     // router's prefix): the frontend guard probes `${API_BASE_URL}/auth/me`
     // and the handshake redirect lands at `/api/auth/callback`.
