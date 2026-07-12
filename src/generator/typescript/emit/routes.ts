@@ -11,11 +11,28 @@ import { renderHonoBaseLogCall, renderHonoLogCall } from "../../_obs/render-hono
 // what's pleasant to read in a template.  This file owns just the
 // `createApp` composition entry, which mounts each aggregate's
 // sub-router and exposes `/openapi.json`.
+/** A per-served-api explicit-route router (unfoldable-api-derivation.md, A2) to
+ *  mount in `createApp`: the exported factory name, its module path, and the
+ *  base path it mounts at. */
+export interface ExplicitRouterMount {
+  fn: string;
+  module: string;
+  mountPath: string;
+}
+
 export function renderHttpIndex(
   ctx: EnrichedBoundedContextIR,
-  options?: { authRequired?: boolean; persistence?: string },
+  options?: {
+    authRequired?: boolean;
+    persistence?: string;
+    /** Explicit `route <M> <p> -> <Ctx>.<Handler>` routers (A2) — mounted after
+     *  the aggregate/workflow/view routers, before `/openapi.json`.  Empty /
+     *  absent → byte-identical to the pre-A2 output. */
+    explicitRouters?: readonly ExplicitRouterMount[];
+  },
 ): string {
   const authRequired = !!options?.authRequired;
+  const explicitRouters = options?.explicitRouters ?? [];
   // Persistence selection (D-REALIZATION-AXES) — the `db` handle createApp
   // threads is drizzle's `NodePgDatabase` by default, or a MikroORM
   // `EntityManager` when `persistence: mikroorm`.
@@ -135,6 +152,14 @@ export function renderHttpIndex(
   const projectionMount = hasProjections
     ? `  app.route("${API_BASE_PATH}/projections", projectionsRoutes(db));`
     : null;
+  // Explicit-route routers (unfoldable-api-derivation.md, A2) — one per served
+  // api with resolvable `route` bindings.  Byte-identical when none.
+  const explicitRouterImports = explicitRouters.map(
+    (r) => `import { ${r.fn} } from "${r.module}";`,
+  );
+  const explicitRouterMounts = explicitRouters.map(
+    (r) => `  app.route("${r.mountPath}", ${r.fn}(db, events));`,
+  );
   // Auth wiring — when the deployable opts in via `auth: required`,
   // we import the middleware + verifier registry, assert at startup
   // that the user supplied a verifier, and mount the middleware
@@ -170,6 +195,7 @@ export function renderHttpIndex(
       realtimeImport,
       viewImport,
       projectionImport,
+      ...explicitRouterImports,
       usingMikro
         ? 'import { EntityManager } from "@mikro-orm/postgresql";'
         : 'import type { NodePgDatabase } from "drizzle-orm/node-postgres";',
@@ -261,6 +287,7 @@ export function renderHttpIndex(
       realtimeMount,
       viewMount,
       projectionMount,
+      ...explicitRouterMounts,
       "  // OpenAPI 3.1 spec assembled from every sub-router's createRoute()",
       "  // calls.  Diffed against the .NET-emitted /openapi.json by",
       "  // the cross-platform contract check.",

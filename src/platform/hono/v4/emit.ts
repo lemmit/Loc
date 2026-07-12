@@ -88,6 +88,7 @@ import {
 } from "../../../ir/util/resolve-datasource.js";
 import { hierarchyRegistry } from "../../../ir/util/tenant-stance.js";
 import type { Model } from "../../../language/generated/ast.js";
+import { API_BASE_PATH } from "../../../util/api-base.js";
 import { lowerFirst, plural } from "../../../util/naming.js";
 import {
   byLayerLayoutAdapter,
@@ -98,6 +99,7 @@ import { DRIZZLE_CONNECTION_SETUP } from "./adapters/drizzle-persistence.js";
 import { layeredStyleAdapter } from "./adapters/layered-style.js";
 import { resourceAdapterFor } from "./adapters/resource-clients.js";
 import { emitAuthFiles } from "./auth-emit.js";
+import { buildExplicitRoutesFile } from "./explicit-handlers-builder.js";
 import { emitObservabilityFiles } from "./observability-builder.js";
 import { buildProjectionsFile } from "./projection-builder.js";
 import { buildRealtimeFile } from "./realtime-builder.js";
@@ -475,11 +477,32 @@ export function generateTypeScriptForContexts(
   if (merged.projections.length > 0 && !usingMikro) {
     out.set("http/projections.ts", buildProjectionsFile(merged));
   }
+  // Explicit transport layer (unfoldable-api-derivation.md, A2): one router
+  // file per served api whose `route <M> <p> -> <Ctx>.<Handler>` list resolves
+  // to a hosted commandHandler / queryHandler.  A no-op (byte-identical) when
+  // the deployable serves no api with explicit routes.
+  const explicitRouters: { fn: string; module: string; mountPath: string }[] = [];
+  if (system) {
+    for (const apiName of system.deployable.serves) {
+      const api = system.sys.apis.find((a) => a.name === apiName);
+      if (!api || api.routes.length === 0) continue;
+      const content = buildExplicitRoutesFile(api.name, api.routes, contexts);
+      if (!content) continue;
+      const slug = lowerFirst(api.name);
+      out.set(`http/${slug}-routes.ts`, content);
+      explicitRouters.push({
+        fn: `${slug}Routes`,
+        module: `./${slug}-routes`,
+        mountPath: API_BASE_PATH,
+      });
+    }
+  }
   out.set(
     "http/index.ts",
     renderHttpIndex(merged, {
       authRequired,
       persistence: usingMikro ? "mikroorm" : "drizzle",
+      explicitRouters,
     }),
   );
   // Realtime SSE wire (channels.md Part I): any `delivery: broadcast`

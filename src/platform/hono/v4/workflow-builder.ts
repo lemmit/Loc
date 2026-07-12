@@ -1402,7 +1402,7 @@ function collectReposFromStmts(
 // `paramExprs` / `thisName` in scope (the route handler and the saga handler
 // pass different bindings); the dispatch + `for-each` recursion live in the
 // spine.
-function honoWorkflowStmtTarget(
+export function honoWorkflowStmtTarget(
   ctx: BoundedContextIR,
   paramExprs: Map<string, string>,
   thisName = "this",
@@ -1609,7 +1609,7 @@ function lookupOp(
   return ctx.aggregates.find((a) => a.name === aggName)?.operations.find((o) => o.name === opName);
 }
 
-function renderExprWithParams(
+export function renderExprWithParams(
   e: ExprIR,
   paramExprs: Map<string, string>,
   thisName = "this",
@@ -1754,7 +1754,10 @@ function exprChildren(e: ExprIR): ExprIR[] {
   }
 }
 
-function collectReposForWorkflow(wf: WorkflowIR): {
+export function collectReposForWorkflow(wf: {
+  statements: WorkflowStmtIR[];
+  savesAtExit: { name: string; aggName: string; repoName: string }[];
+}): {
   repoName: string;
   aggName: string;
 }[] {
