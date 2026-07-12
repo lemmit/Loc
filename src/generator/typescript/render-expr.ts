@@ -276,6 +276,11 @@ function renderMember(recv: string, e: MemberExpr): string {
   // String length stays as `.length`; arrays expose collection ops without
   // parentheses too — `lines.count` should compile to `.length`.
   if (e.receiverType.kind === "array" && e.member === "count") return `${recv}.length`;
+  // `distinct` is property-style (no parens, like `count`) so it lowers to a
+  // member node — route it through the shared collection-op table.
+  if (e.receiverType.kind === "array" && e.member === "distinct") {
+    return TS_COLLECTION_RENDERERS.distinct!(recv, []);
+  }
   return `${recv}.${e.member}`;
 }
 
@@ -334,7 +339,7 @@ function renderMethodCall(
   _ctx: TsRenderContext,
 ): string {
   if (e.isCollectionOp) {
-    return renderCollectionOp(`(${recv})`, e.member, args);
+    return renderCollectionOp(`(${recv})`, e.member, args, e);
   }
   // `string.matches(literal)` lowers as a method-call so the wire-
   // boundary single-field detector can absorb it as a `regex` pattern.
@@ -362,31 +367,56 @@ function renderMethodCall(
   return `${recv}.${e.member}(${args.join(", ")})`;
 }
 
-function renderCollectionOp(recv: string, name: string, args: string[]): string {
-  switch (name) {
-    case "count":
-      return `${recv}.length`;
-    case "sum":
-      if (args.length === 1) {
-        return `${recv}.reduce((acc, x) => acc + (${args[0]})(x), 0)`;
-      }
-      return `${recv}.reduce((acc, x) => acc + x, 0)`;
-    case "all":
-      return `${recv}.every(${args[0] ?? "() => true"})`;
-    case "any":
-      return `${recv}.some(${args[0] ?? "() => true"})`;
-    case "contains":
-      // Array membership — maps to JS's `.includes(value)`.
-      return `${recv}.includes(${args[0] ?? "undefined"})`;
-    case "where":
-      return `${recv}.filter(${args[0] ?? "() => true"})`;
-    case "first":
-      return `${recv}[0]`;
-    case "firstOrNull":
-      return `(${recv}[0] ?? null)`;
-    default:
-      return `${recv}.${name}(${args.join(", ")})`;
-  }
+/** True iff `e.args[1]` is the boolean literal `true` — the descending flag
+ *  a `sortBy(λ, true)` call carries (the only collection op with a 2nd arg). */
+export function isDescendingSort(e: Extract<ExprIR, { kind: "method-call" }>): boolean {
+  const flag = e.args[1];
+  return flag?.kind === "literal" && flag.lit === "bool" && flag.value === "true";
+}
+
+/** Keyed renderer table — one entry per collection op.  The completeness pin
+ *  (`test/generator/collection-op-completeness.test.ts`) asserts every catalogue
+ *  op has a key here, so a future op is a compile-time-caught omission rather
+ *  than a silent fall-through. */
+export const TS_COLLECTION_RENDERERS: Record<
+  string,
+  (recv: string, args: string[], e?: Extract<ExprIR, { kind: "method-call" }>) => string
+> = {
+  count: (recv) => `${recv}.length`,
+  sum: (recv, args) =>
+    args.length === 1
+      ? `${recv}.reduce((acc, x) => acc + (${args[0]})(x), 0)`
+      : `${recv}.reduce((acc, x) => acc + x, 0)`,
+  all: (recv, args) => `${recv}.every(${args[0] ?? "() => true"})`,
+  any: (recv, args) => `${recv}.some(${args[0] ?? "() => true"})`,
+  // Array membership — maps to JS's `.includes(value)`.
+  contains: (recv, args) => `${recv}.includes(${args[0] ?? "undefined"})`,
+  where: (recv, args) => `${recv}.filter(${args[0] ?? "() => true"})`,
+  first: (recv) => `${recv}[0]`,
+  firstOrNull: (recv) => `(${recv}[0] ?? null)`,
+  map: (recv, args) => `${recv}.map(${args[0]})`,
+  sortBy: (recv, args, e) => {
+    const cmp =
+      e && isDescendingSort(e)
+        ? "kb < ka ? -1 : kb > ka ? 1 : 0"
+        : "ka < kb ? -1 : ka > kb ? 1 : 0";
+    return `[...${recv}].sort((__a, __b) => { const ka = (${args[0]})(__a), kb = (${args[0]})(__b); return ${cmp}; })`;
+  },
+  distinct: (recv) => `[...new Set(${recv})]`,
+  take: (recv, args) => `${recv}.slice(0, ${args[0]})`,
+  skip: (recv, args) => `${recv}.slice(${args[0]})`,
+  join: (recv, args) => `${recv}.join(${args[0]})`,
+};
+
+function renderCollectionOp(
+  recv: string,
+  name: string,
+  args: string[],
+  e: Extract<ExprIR, { kind: "method-call" }>,
+): string {
+  const render = TS_COLLECTION_RENDERERS[name];
+  if (render) return render(recv, args, e);
+  return `${recv}.${name}(${args.join(", ")})`;
 }
 
 function renderCall(

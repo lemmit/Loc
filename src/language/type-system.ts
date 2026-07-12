@@ -948,8 +948,30 @@ function collectionOpType(
     case "any":
     case "contains":
       return T.prim("bool");
+    case "map": {
+      // map returns an array of the lambda's body type — mirrors `sum`'s
+      // lambda-body typing, then wraps in an array.  Without a lambda arg
+      // fall back to an array of the element type (the identity projection).
+      const callArg = ms.args[0];
+      const lambdaArg = callArg?.value;
+      if (lambdaArg && isLambda(lambdaArg) && lambdaArg.body) {
+        const lambdaEnv = makeEnv(
+          env,
+          new Map([[lambdaArg.param, { type: recv.element, origin: lambdaArg }]]),
+        );
+        return T.array(typeOf(lambdaArg.body, lambdaEnv));
+      }
+      return T.array(recv.element);
+    }
+    case "sortBy":
+    case "distinct":
+    case "take":
+    case "skip":
+      return T.array(recv.element);
     case "where":
       return T.array(recv.element);
+    case "join":
+      return T.prim("string");
     case "first":
       return recv.element;
     case "firstOrNull":

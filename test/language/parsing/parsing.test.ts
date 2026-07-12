@@ -72,6 +72,37 @@ describe("id-link & optional-containment syntax", () => {
   });
 });
 
+describe("A4 collection transformation ops — parse + validate clean", () => {
+  it("parses all six ops in derived props with zero errors", async () => {
+    // Element types are chosen so the correctness gates never fire: `join`
+    // targets a string projection, `distinct` an int (scalar) projection.
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(
+      `
+      context Shop {
+        aggregate Order {
+          contains lines: OrderLine[]
+          derived qtys: int[] = lines.map(l => l.qty)
+          derived sortedQtys: int[] = lines.map(l => l.qty).sortBy(q => q)
+          derived sortedDesc: int[] = lines.map(l => l.qty).sortBy(q => q, true)
+          derived uniqQtys: int[] = lines.map(l => l.qty).distinct
+          derived firstTwo: int[] = lines.map(l => l.qty).take(2)
+          derived rest: int[] = lines.map(l => l.qty).skip(1)
+          derived names: string = lines.map(l => l.name).join(", ")
+          entity OrderLine { qty: int  name: string }
+        }
+        repository Orders for Order { }
+      }
+      `,
+      { validation: true },
+    );
+    const errors = (doc.diagnostics ?? []).filter((d) => d.severity === 1).map((d) => d.message);
+    expect(errors).toEqual([]);
+  });
+});
+
 describe("parsing & validation of examples", () => {
   it("parses sales.ddd without errors", async () => {
     const { model, errors } = await parseExample("examples/sales.ddd");

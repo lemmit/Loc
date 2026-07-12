@@ -461,6 +461,11 @@ function renderMember(recv: string, e: MemberExpr): string {
   if (e.receiverType.kind === "array" && (e.member === "count" || e.member === "length")) {
     return `${recv}.size()`;
   }
+  // `distinct` is property-style (no parens, like `count`) — route the
+  // member-node form through the shared collection-op table.
+  if (e.receiverType.kind === "array" && e.member === "distinct") {
+    return JAVA_COLLECTION_RENDERERS.distinct!(recv, []);
+  }
   if (
     e.receiverType.kind === "primitive" &&
     e.receiverType.name === "string" &&
@@ -607,6 +612,56 @@ function sumElementType(e: MethodCallExpr, ctx: JavaRenderContext): TypeIR | und
   return undefined;
 }
 
+/** True iff `e.args[1]` is the boolean literal `true` (a `sortBy(λ, true)`
+ *  descending flag — the only collection op carrying a 2nd arg). */
+function isDescendingSort(e: MethodCallExpr): boolean {
+  const flag = e.args[1];
+  return flag?.kind === "literal" && flag.lit === "bool" && flag.value === "true";
+}
+
+/** Keyed renderer table — one entry per collection op (see the completeness
+ *  pin `test/generator/collection-op-completeness.test.ts`). */
+export const JAVA_COLLECTION_RENDERERS: Record<
+  string,
+  (recv: string, args: string[], e?: MethodCallExpr, ctx?: JavaRenderContext) => string
+> = {
+  count: (recv) => `${recv}.size()`,
+  sum: (recv, args, e, ctx) => {
+    const elem = e && ctx ? unwrapOptional(sumElementType(e, ctx)) : undefined;
+    const stream = args.length === 1 ? `${recv}.stream().map(${args[0]})` : `${recv}.stream()`;
+    if (isMoneyLike(elem)) {
+      return `${stream}.reduce(BigDecimal.ZERO, BigDecimal::add)`;
+    }
+    if (elem?.kind === "primitive" && elem.name === "long") {
+      return args.length === 1
+        ? `${recv}.stream().mapToLong(${args[0]}).sum()`
+        : `${recv}.stream().mapToLong(Long::longValue).sum()`;
+    }
+    return args.length === 1
+      ? `${recv}.stream().mapToInt(${args[0]}).sum()`
+      : `${recv}.stream().mapToInt(Integer::intValue).sum()`;
+  },
+  all: (recv, args) => `${recv}.stream().allMatch(${args[0] ?? "x -> true"})`,
+  any: (recv, args) =>
+    args.length === 1 ? `${recv}.stream().anyMatch(${args[0]})` : `!${recv}.isEmpty()`,
+  contains: (recv, args) => `${recv}.contains(${args[0] ?? "null"})`,
+  where: (recv, args) => `${recv}.stream().filter(${args[0] ?? "x -> true"}).toList()`,
+  first: (recv) => `${recv}.get(0)`,
+  firstOrNull: (recv) => `${recv}.stream().findFirst().orElse(null)`,
+  map: (recv, args) => `${recv}.stream().map(${args[0]}).toList()`,
+  sortBy: (recv, args, e) => {
+    const cmp =
+      e && isDescendingSort(e)
+        ? `java.util.Comparator.comparing(${args[0]}).reversed()`
+        : `java.util.Comparator.comparing(${args[0]})`;
+    return `${recv}.stream().sorted(${cmp}).toList()`;
+  },
+  distinct: (recv) => `${recv}.stream().distinct().toList()`,
+  take: (recv, args) => `${recv}.stream().limit(${args[0]}).toList()`,
+  skip: (recv, args) => `${recv}.stream().skip(${args[0]}).toList()`,
+  join: (recv, args) => `String.join(${args[0]}, ${recv})`,
+};
+
 function renderCollectionOp(
   recv: string,
   name: string,
@@ -614,39 +669,9 @@ function renderCollectionOp(
   e: MethodCallExpr,
   ctx: JavaRenderContext,
 ): string {
-  switch (name) {
-    case "count":
-      return `${recv}.size()`;
-    case "sum": {
-      const elem = unwrapOptional(sumElementType(e, ctx));
-      const stream = args.length === 1 ? `${recv}.stream().map(${args[0]})` : `${recv}.stream()`;
-      if (isMoneyLike(elem)) {
-        return `${stream}.reduce(BigDecimal.ZERO, BigDecimal::add)`;
-      }
-      if (elem?.kind === "primitive" && elem.name === "long") {
-        return args.length === 1
-          ? `${recv}.stream().mapToLong(${args[0]}).sum()`
-          : `${recv}.stream().mapToLong(Long::longValue).sum()`;
-      }
-      return args.length === 1
-        ? `${recv}.stream().mapToInt(${args[0]}).sum()`
-        : `${recv}.stream().mapToInt(Integer::intValue).sum()`;
-    }
-    case "all":
-      return `${recv}.stream().allMatch(${args[0] ?? "x -> true"})`;
-    case "any":
-      return args.length === 1 ? `${recv}.stream().anyMatch(${args[0]})` : `!${recv}.isEmpty()`;
-    case "contains":
-      return `${recv}.contains(${args[0] ?? "null"})`;
-    case "where":
-      return `${recv}.stream().filter(${args[0] ?? "x -> true"}).toList()`;
-    case "first":
-      return `${recv}.get(0)`;
-    case "firstOrNull":
-      return `${recv}.stream().findFirst().orElse(null)`;
-    default:
-      return `${recv}.${name}(${args.join(", ")})`;
-  }
+  const render = JAVA_COLLECTION_RENDERERS[name];
+  if (render) return render(recv, args, e, ctx);
+  return `${recv}.${name}(${args.join(", ")})`;
 }
 
 function renderCall(args: string[], e: CallExpr, ctx: JavaRenderContext): string {

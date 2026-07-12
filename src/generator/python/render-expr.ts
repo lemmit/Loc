@@ -326,6 +326,11 @@ function renderMember(recv: string, e: MemberExpr): string {
   if (e.receiverType.kind === "array" && (e.member === "count" || e.member === "length")) {
     return `len(${recv})`;
   }
+  // `distinct` is property-style (no parens, like `count`) — route the
+  // member-node form through the shared collection-op table.
+  if (e.receiverType.kind === "array" && e.member === "distinct") {
+    return PY_COLLECTION_RENDERERS.distinct!(recv, []);
+  }
   if (
     e.receiverType.kind === "primitive" &&
     e.receiverType.name === "string" &&
@@ -416,7 +421,7 @@ function renderMethodCall(
   _ctx: PyRenderContext,
 ): string {
   if (e.isCollectionOp) {
-    return renderCollectionOp(recv, e.member, args);
+    return renderCollectionOp(recv, e.member, args, e);
   }
   // `string.matches(pattern)` → `re.search(...) is not None` (search
   // semantics match TS `.test` / C# `Regex.IsMatch`).
@@ -435,30 +440,47 @@ function renderMethodCall(
   return `${recv}.${snake(e.member)}(${args.join(", ")})`;
 }
 
-function renderCollectionOp(recv: string, name: string, args: string[]): string {
-  // Collection lambdas arrive rendered as `lambda x: …`; comprehension
-  // shapes apply them to a hygienic loop variable.
-  const applied = (fn: string) => `(${fn})(__x) for __x in ${recv}`;
-  switch (name) {
-    case "count":
-      return `len(${recv})`;
-    case "sum":
-      return args.length === 1 ? `sum(${applied(args[0]!)})` : `sum(${recv})`;
-    case "all":
-      return args.length === 1 ? `all(${applied(args[0]!)})` : "True";
-    case "any":
-      return args.length === 1 ? `any(${applied(args[0]!)})` : `len(${recv}) > 0`;
-    case "contains":
-      return `${args[0] ?? "None"} in ${recv}`;
-    case "where":
-      return args.length === 1 ? `[__x for __x in ${recv} if (${args[0]})(__x)]` : `list(${recv})`;
-    case "first":
-      return `${recv}[0]`;
-    case "firstOrNull":
-      return `(${recv}[0] if ${recv} else None)`;
-    default:
-      return `${recv}.${snake(name)}(${args.join(", ")})`;
-  }
+/** True iff `e.args[1]` is the boolean literal `true` (a `sortBy(λ, true)`
+ *  descending flag — the only collection op carrying a 2nd arg). */
+function isDescendingSort(e: MethodCallExpr): boolean {
+  const flag = e.args[1];
+  return flag?.kind === "literal" && flag.lit === "bool" && flag.value === "true";
+}
+
+/** Keyed renderer table — one entry per collection op (see the completeness
+ *  pin `test/generator/collection-op-completeness.test.ts`).  Collection
+ *  lambdas arrive rendered as `lambda x: …`; comprehension shapes apply them
+ *  to a hygienic loop variable via `applied`. */
+export const PY_COLLECTION_RENDERERS: Record<
+  string,
+  (recv: string, args: string[], e?: MethodCallExpr) => string
+> = {
+  count: (recv) => `len(${recv})`,
+  sum: (recv, args) =>
+    args.length === 1 ? `sum((${args[0]})(__x) for __x in ${recv})` : `sum(${recv})`,
+  all: (recv, args) => (args.length === 1 ? `all((${args[0]})(__x) for __x in ${recv})` : "True"),
+  any: (recv, args) =>
+    args.length === 1 ? `any((${args[0]})(__x) for __x in ${recv})` : `len(${recv}) > 0`,
+  contains: (recv, args) => `${args[0] ?? "None"} in ${recv}`,
+  where: (recv, args) =>
+    args.length === 1 ? `[__x for __x in ${recv} if (${args[0]})(__x)]` : `list(${recv})`,
+  first: (recv) => `${recv}[0]`,
+  firstOrNull: (recv) => `(${recv}[0] if ${recv} else None)`,
+  map: (recv, args) => `[(${args[0]})(__x) for __x in ${recv}]`,
+  sortBy: (recv, args, e) =>
+    e && isDescendingSort(e)
+      ? `sorted(${recv}, key=${args[0]}, reverse=True)`
+      : `sorted(${recv}, key=${args[0]})`,
+  distinct: (recv) => `list(dict.fromkeys(${recv}))`,
+  take: (recv, args) => `${recv}[:${args[0]}]`,
+  skip: (recv, args) => `${recv}[${args[0]}:]`,
+  join: (recv, args) => `${args[0]}.join(${recv})`,
+};
+
+function renderCollectionOp(recv: string, name: string, args: string[], e: MethodCallExpr): string {
+  const render = PY_COLLECTION_RENDERERS[name];
+  if (render) return render(recv, args, e);
+  return `${recv}.${snake(name)}(${args.join(", ")})`;
 }
 
 function renderCall(args: string[], e: CallExpr, ctx: PyRenderContext): string {

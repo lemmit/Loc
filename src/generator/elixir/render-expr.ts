@@ -488,6 +488,11 @@ function renderMember(recv: string, e: MemberExpr, ctx: RenderCtx): string {
   if (e.receiverType.kind === "array" && (e.member === "count" || e.member === "length")) {
     return `Enum.count(${recv})`;
   }
+  // `distinct` is property-style (no parens, like `count`) — route the
+  // member-node form through the shared collection-op table.
+  if (e.receiverType.kind === "array" && e.member === "distinct") {
+    return ELIXIR_COLLECTION_RENDERERS.distinct!(recv, []);
+  }
   if (
     e.receiverType.kind === "primitive" &&
     e.receiverType.name === "string" &&
@@ -652,7 +657,7 @@ function renderMethodCall(recv: string, args: string[], e: MethodCallExpr, ctx: 
     }
   }
   if (e.isCollectionOp) {
-    return renderCollectionOp(recv, e.member, args);
+    return renderCollectionOp(recv, e.member, args, e);
   }
   // string.matches(pattern) → Regex.match?(~r/pattern/, recv)
   if (
@@ -704,27 +709,48 @@ export function renderDeepScopeEcto(thisName: string, anchorClaim = ORG_PATH_CLA
   return `fragment(${JSON.stringify(sql)}, ${dk}, ${dk}, ${org}, ${dk}, ${org}, ${dk}, ${tid}, ${tenant})`;
 }
 
-function renderCollectionOp(recv: string, name: string, args: string[]): string {
-  switch (name) {
-    case "count":
-      return `Enum.count(${recv})`;
-    case "sum":
-      return args.length === 1 ? `Enum.sum(Enum.map(${recv}, ${args[0]}))` : `Enum.sum(${recv})`;
-    case "all":
-      return `Enum.all?(${recv}, ${args[0] ?? "fn _ -> true end"})`;
-    case "any":
-      return `Enum.any?(${recv}, ${args[0] ?? "fn _ -> false end"})`;
-    case "contains":
-      return `Enum.member?(${recv}, ${args[0] ?? "nil"})`;
-    case "where":
-      return `Enum.filter(${recv}, ${args[0] ?? "fn _ -> true end"})`;
-    case "first":
-      return `List.first(${recv})`;
-    case "firstOrNull":
-      return `List.first(${recv})`;
-    default:
-      return `Enum.${snake(name)}(${recv}, ${args.join(", ")})`;
-  }
+/** True iff `e.args[1]` is the boolean literal `true` (a `sortBy(λ, true)`
+ *  descending flag — the only collection op carrying a 2nd arg). */
+function isDescendingSort(e: Extract<ExprIR, { kind: "method-call" }>): boolean {
+  const flag = e.args[1];
+  return flag?.kind === "literal" && flag.lit === "bool" && flag.value === "true";
+}
+
+/** Keyed renderer table — one entry per collection op (see the completeness
+ *  pin `test/generator/collection-op-completeness.test.ts`). */
+export const ELIXIR_COLLECTION_RENDERERS: Record<
+  string,
+  (recv: string, args: string[], e?: Extract<ExprIR, { kind: "method-call" }>) => string
+> = {
+  count: (recv) => `Enum.count(${recv})`,
+  sum: (recv, args) =>
+    args.length === 1 ? `Enum.sum(Enum.map(${recv}, ${args[0]}))` : `Enum.sum(${recv})`,
+  all: (recv, args) => `Enum.all?(${recv}, ${args[0] ?? "fn _ -> true end"})`,
+  any: (recv, args) => `Enum.any?(${recv}, ${args[0] ?? "fn _ -> false end"})`,
+  contains: (recv, args) => `Enum.member?(${recv}, ${args[0] ?? "nil"})`,
+  where: (recv, args) => `Enum.filter(${recv}, ${args[0] ?? "fn _ -> true end"})`,
+  first: (recv) => `List.first(${recv})`,
+  firstOrNull: (recv) => `List.first(${recv})`,
+  map: (recv, args) => `Enum.map(${recv}, ${args[0]})`,
+  sortBy: (recv, args, e) =>
+    e && isDescendingSort(e)
+      ? `Enum.sort_by(${recv}, ${args[0]}, :desc)`
+      : `Enum.sort_by(${recv}, ${args[0]})`,
+  distinct: (recv) => `Enum.uniq(${recv})`,
+  take: (recv, args) => `Enum.take(${recv}, ${args[0]})`,
+  skip: (recv, args) => `Enum.drop(${recv}, ${args[0]})`,
+  join: (recv, args) => `Enum.join(${recv}, ${args[0]})`,
+};
+
+function renderCollectionOp(
+  recv: string,
+  name: string,
+  args: string[],
+  e: Extract<ExprIR, { kind: "method-call" }>,
+): string {
+  const render = ELIXIR_COLLECTION_RENDERERS[name];
+  if (render) return render(recv, args, e);
+  return `Enum.${snake(name)}(${recv}, ${args.join(", ")})`;
 }
 
 // ---------------------------------------------------------------------------

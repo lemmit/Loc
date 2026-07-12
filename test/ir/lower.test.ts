@@ -95,3 +95,76 @@ describe("lowering — name resolution metadata", () => {
     expect(asRef(m.receiver).refKind).toBe("this-prop");
   });
 });
+
+// A4 — collection transformation ops (map/sortBy/distinct/take/skip/join)
+// result typing.  Each derived below chains a trailing property op onto the
+// transform, so the trailing member node's `receiverType` IS the transform's
+// result type — the same handle the `.count` test above reads.
+const A4_SRC = `
+  context Shop {
+    aggregate Order {
+      contains lines: OrderLine[]
+      derived firstQty: int = lines.map(l => l.qty).first
+      derived sortedCount: int = lines.sortBy(l => l.qty).count
+      derived takenCount: int = lines.take(2).count
+      derived skippedCount: int = lines.skip(1).count
+      derived distinctCount: int = lines.map(l => l.sku).distinct.count
+      derived labelLen: int = lines.map(l => l.sku).join(", ").length
+      entity OrderLine { qty: int  sku: string }
+    }
+    repository Orders for Order { }
+  }
+`;
+
+const INT_ARR = { kind: "array", element: { kind: "primitive", name: "int" } };
+const STR_ARR = { kind: "array", element: { kind: "primitive", name: "string" } };
+const ORDERLINE_ARR = { kind: "array", element: { kind: "entity", name: "OrderLine" } };
+
+describe("lowering — A4 collection-op result types", () => {
+  async function derivedExpr(name: string): Promise<Extract<ExprIR, { kind: "member" }>> {
+    const loom = await buildLoomModel(A4_SRC);
+    const order = allAggregates(loom).find((a) => a.name === "Order")!;
+    const d = order.derived.find((x) => x.name === name)!;
+    expect(d, name).toBeDefined();
+    expect(d.expr.kind).toBe("member");
+    return d.expr as Extract<ExprIR, { kind: "member" }>;
+  }
+
+  it("types `map(l => l.qty)` (qty: int) as int[]", async () => {
+    // Trailing `.first` reads the map result: its receiver type is the array
+    // produced by the map, and the ELEMENT is `int` (the lambda body type) —
+    // not the `string` fallback.
+    const first = await derivedExpr("firstQty");
+    expect(first.member).toBe("first");
+    expect(first.receiverType).toEqual(INT_ARR);
+  });
+
+  it("keeps `sortBy(λ)` a T[] (element unchanged)", async () => {
+    const count = await derivedExpr("sortedCount");
+    expect(count.member).toBe("count");
+    expect(count.receiverType).toEqual(ORDERLINE_ARR);
+  });
+
+  it("keeps `take(n)` a T[]", async () => {
+    const count = await derivedExpr("takenCount");
+    expect(count.receiverType).toEqual(ORDERLINE_ARR);
+  });
+
+  it("keeps `skip(n)` a T[]", async () => {
+    const count = await derivedExpr("skippedCount");
+    expect(count.receiverType).toEqual(ORDERLINE_ARR);
+  });
+
+  it("keeps `distinct` a T[] (over a scalar map projection → string[])", async () => {
+    const count = await derivedExpr("distinctCount");
+    expect(count.receiverType).toEqual(STR_ARR);
+  });
+
+  it("types `join(sep)` as string", async () => {
+    // Trailing `.length` (a string member) resolves only if `join` produced a
+    // string — its receiver type IS the join result.
+    const len = await derivedExpr("labelLen");
+    expect(len.member).toBe("length");
+    expect(len.receiverType).toEqual({ kind: "primitive", name: "string" });
+  });
+});

@@ -23,6 +23,12 @@ export const COLLECTION_OP_SIGNATURES: ReadonlyArray<CollectionOpSignature> = [
   { name: "first", signature: "T" },
   { name: "firstOrNull", signature: "T?" },
   { name: "contains", signature: "bool" },
+  { name: "map", signature: "(λ): U[]" },
+  { name: "sortBy", signature: "(λ, desc?: bool): T[]" },
+  { name: "distinct", signature: "T[]" },
+  { name: "take", signature: "(n: int): T[]" },
+  { name: "skip", signature: "(n: int): T[]" },
+  { name: "join", signature: "(sep: string): string" },
 ];
 
 const COLLECTION_OPS = new Set(COLLECTION_OP_SIGNATURES.map((o) => o.name));

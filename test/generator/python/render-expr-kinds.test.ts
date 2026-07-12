@@ -286,6 +286,42 @@ describe("py renderPyExpr — collection ops", () => {
     expect(renderPyExpr(arr("first"))).toBe("self._lines[0]");
     expect(renderPyExpr(arr("firstOrNull"))).toBe("(self._lines[0] if self._lines else None)");
   });
+
+  it("A4 — map → applied comprehension", () => {
+    const idLambda = lam({ kind: "ref", name: "l", refKind: "lambda" });
+    expect(renderPyExpr(arr("map", [idLambda]))).toBe(
+      "[(lambda l: l)(__x) for __x in self._lines]",
+    );
+  });
+
+  it("A4 — sortBy(λ) / sortBy(λ, true) → sorted(key=…[, reverse=True])", () => {
+    const idLambda = lam({ kind: "ref", name: "l", refKind: "lambda" });
+    expect(renderPyExpr(arr("sortBy", [idLambda]))).toBe("sorted(self._lines, key=lambda l: l)");
+    expect(renderPyExpr(arr("sortBy", [idLambda, litBool("true")]))).toBe(
+      "sorted(self._lines, key=lambda l: l, reverse=True)",
+    );
+  });
+
+  it("A4 — distinct (property-style member) → dict.fromkeys round-trip", () => {
+    expect(
+      renderPyExpr({
+        kind: "member",
+        receiver: lines,
+        member: "distinct",
+        receiverType: { kind: "array", element: { kind: "entity", name: "OrderLine" } },
+        memberType: { kind: "array", element: { kind: "entity", name: "OrderLine" } },
+      }),
+    ).toBe("list(dict.fromkeys(self._lines))");
+  });
+
+  it("A4 — take(n) / skip(n) → slices", () => {
+    expect(renderPyExpr(arr("take", [litInt("2")]))).toBe("self._lines[:2]");
+    expect(renderPyExpr(arr("skip", [litInt("1")]))).toBe("self._lines[1:]");
+  });
+
+  it("A4 — join(sep) → `sep.join(recv)`", () => {
+    expect(renderPyExpr(arr("join", [litStr(", ")]))).toBe('", ".join(self._lines)');
+  });
 });
 
 describe("py renderPyExpr — calls / new / object / list", () => {

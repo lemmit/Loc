@@ -621,7 +621,16 @@ function applySuffixToRecv(
     };
     // Result type after a method call — `memberType` handles collection
     // ops, entity/VO members, and the string `.length` case.
-    const nextType = memberType(recvType, ms.member, env);
+    let nextType = memberType(recvType, ms.member, env);
+    // `map(λ)` returns an array of the lambda's body type; `memberType`
+    // can't see the lambda, so type it here at the call site from the
+    // lowered lambda body (best-effort — falls back to the element type).
+    if (collectionOp && ms.member === "map") {
+      const lam = args[0];
+      const bodyT = lam?.kind === "lambda" && lam.body ? irBodyType(lam.body) : undefined;
+      const elem = collectionElementType(recvType) ?? { kind: "primitive", name: "string" };
+      nextType = { kind: "array", element: bodyT ?? elem };
+    }
     return { recv: mcIR, recvType: nextType };
   }
   // Qualified enum value `EnumName.Value` — when the receiver is an
@@ -730,6 +739,40 @@ function lowerLambda(expr: Lambda, env: Env, paramType: TypeIR): ExprIR {
 function collectionElementType(t: TypeIR): TypeIR | undefined {
   const unwrapped = t.kind === "optional" ? t.inner : t;
   return unwrapped.kind === "array" ? unwrapped.element : undefined;
+}
+
+/** Best-effort type of a lambda's expression body, used to type `map(λ)`'s
+ *  result element at the call site (the structural `memberType` pass never
+ *  sees the lambda).  Reads the type carried on the common terminal ExprIR
+ *  shapes; returns `undefined` for anything it can't type cheaply, so the
+ *  caller falls back to the collection's element type. */
+function irBodyType(e: ExprIR): TypeIR | undefined {
+  switch (e.kind) {
+    case "ref":
+      return e.type;
+    case "member":
+      return e.memberType;
+    case "paren":
+      return irBodyType(e.inner);
+    case "convert":
+      return { kind: "primitive", name: e.target };
+    case "ternary":
+      return irBodyType(e.then);
+    case "literal":
+      switch (e.lit) {
+        case "string":
+        case "int":
+        case "long":
+        case "decimal":
+        case "money":
+        case "bool":
+          return { kind: "primitive", name: e.lit };
+        default:
+          return undefined;
+      }
+    default:
+      return undefined;
+  }
 }
 
 /** Lower an expression, then stamp its `.ddd` (or macro-call) origin onto
@@ -2009,6 +2052,13 @@ function memberType(t: TypeIR, name: string, env: Env): TypeIR {
         return { kind: "primitive", name: "bool" };
       case "where":
         return t;
+      case "sortBy":
+      case "distinct":
+      case "take":
+      case "skip":
+        return t;
+      case "join":
+        return { kind: "primitive", name: "string" };
       case "first":
         return t.element;
       case "firstOrNull":

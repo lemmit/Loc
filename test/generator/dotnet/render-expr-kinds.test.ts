@@ -398,6 +398,61 @@ describe("dotnet renderCsExpr — member + method-call", () => {
   });
 });
 
+describe("dotnet renderCsExpr — A4 collection transformation ops", () => {
+  const arr: TypeIR = { kind: "array", element: STRING };
+  const idLambda: ExprIR = {
+    kind: "lambda",
+    param: "x",
+    body: { kind: "ref", name: "x", refKind: "lambda" },
+  };
+  const mc = (member: string, args: ExprIR[]): ExprIR => ({
+    kind: "method-call",
+    receiver: thisProp("items"),
+    member,
+    args,
+    receiverType: arr,
+    isCollectionOp: true,
+  });
+
+  it("renders `map(λ)` as `.Select(λ).ToList()`", () => {
+    expect(renderCsExpr(mc("map", [idLambda]))).toBe("(this.Items).Select(x => x).ToList()");
+  });
+
+  it("renders `sortBy(λ)` as `.OrderBy(λ).ToList()`", () => {
+    expect(renderCsExpr(mc("sortBy", [idLambda]))).toBe("(this.Items).OrderBy(x => x).ToList()");
+  });
+
+  it("renders `sortBy(λ, true)` as `.OrderByDescending(λ).ToList()`", () => {
+    expect(renderCsExpr(mc("sortBy", [idLambda, litBool("true")]))).toBe(
+      "(this.Items).OrderByDescending(x => x).ToList()",
+    );
+  });
+
+  it("renders `distinct` (property-style member) as `.Distinct().ToList()`", () => {
+    expect(
+      renderCsExpr({
+        kind: "member",
+        receiver: thisProp("items"),
+        member: "distinct",
+        receiverType: arr,
+        memberType: arr,
+      }),
+    ).toBe("this.Items.Distinct().ToList()");
+  });
+
+  it("renders `take(n)` as `.Take(n).ToList()`", () => {
+    expect(renderCsExpr(mc("take", [litInt("2")]))).toBe("(this.Items).Take(2).ToList()");
+  });
+
+  it("renders `skip(n)` as `.Skip(n).ToList()`", () => {
+    expect(renderCsExpr(mc("skip", [litInt("1")]))).toBe("(this.Items).Skip(1).ToList()");
+  });
+
+  it("renders `join(sep)` as `string.Join(sep, recv)`", () => {
+    expect(renderCsExpr(mc("join", [litStr(", ")]))).toBe('string.Join(", ", (this.Items))');
+  });
+});
+
 describe("dotnet renderCsExpr — call kinds", () => {
   it("renders value-object-ctor as `new <Name>(...)`", () => {
     expect(
