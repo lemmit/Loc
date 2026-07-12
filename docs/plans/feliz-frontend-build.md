@@ -73,9 +73,12 @@ in hand — not before F# output exists.
    example → …). Currently 4 primitives (Stack/Heading/Text/Button); the seam
    methods (`renderMatch`/`For`/`navigate`/api hooks) throw loudly until an
    example needs them.
-4. ⚙ **No-debt convergence:** convert the four JS frontends to an explicit
-   shared `jsExprLeaves` table + REMOVE the `emitExpr` JS fallback (byte-identical
-   gated). This is the end state the seam is staged toward.
+4. ✅ **No-debt convergence:** the expression-leaf seam methods are now
+   REQUIRED on `WalkerTarget`; `emitExpr` delegates every divergent arm with NO
+   fallback. React/Vue/Svelte/Angular share one `jsExprLeaves` table
+   (`src/generator/_walker/js-expr-leaves.ts`, spread in), Feliz supplies
+   `FS_LEAVES`, HEEx (which forks `emitExpr`) gets fail-loud `unreachableExprLeaves`.
+   One dispatcher, one leaf table per embedded language — byte-identical gated.
 5. `PlatformSurface` + registry entry + `framework: feliz` (+ a `feliz`
    platform) grammar/validator — mirror the Svelte/Angular adds; a
    `validateLoomModel`-path test per experience §22. Fable adds a build step

@@ -1151,12 +1151,7 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
   }
   switch (expr.kind) {
     case "literal":
-      if (ctx.target.exprLiteral) return ctx.target.exprLiteral(expr.lit, expr.value);
-      if (expr.lit === "string") return JSON.stringify(expr.value);
-      if (expr.lit === "bool") return expr.value;
-      if (expr.lit === "null") return "null";
-      // int / decimal / now → emit as numeric literal verbatim.
-      return String(expr.value);
+      return ctx.target.exprLiteral(expr.lit, expr.value);
     case "ref":
       // Lambda-bound param refs resolve to their
       // emitted JS name (e.g. `o → "row"` for column accessors).
@@ -1211,58 +1206,29 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       // name so the generated code references the local.
       if (expr.refKind === "let") return expr.name;
       return `/* unresolved: ${expr.name} */ undefined`;
-    case "binary": {
-      // Strict equality on the wire — mirrors the backend renderer
-      // (`render-expr.ts`: `==` → `===`) and keeps emitted TSX clean
-      // under Biome's recommended `noDoubleEquals`.
-      if (ctx.target.exprBinary) {
-        return ctx.target.exprBinary(emitExpr(expr.left, ctx), emitExpr(expr.right, ctx), expr.op);
-      }
-      const op = expr.op === "==" ? "===" : expr.op === "!=" ? "!==" : expr.op;
-      return `(${emitExpr(expr.left, ctx)} ${op} ${emitExpr(expr.right, ctx)})`;
-    }
+    case "binary":
+      // Operator-spelling + strict-equality mapping lives in the target's leaf
+      // (JS `===`/`!==`; F# `=`/`<>`).
+      return ctx.target.exprBinary(emitExpr(expr.left, ctx), emitExpr(expr.right, ctx), expr.op);
     case "ternary":
       // Conditional value in expression position (e.g. a `bool` cell's
       // `onCall ? "Yes" : "No"`).  Distinct from the markup-child `ternary`
       // arm in `walk`, which renders JSX-element branches.
-      if (ctx.target.exprTernary) {
-        return ctx.target.exprTernary(
-          emitExpr(expr.cond, ctx),
-          emitExpr(expr.then, ctx),
-          emitExpr(expr.otherwise, ctx),
-        );
-      }
-      return `(${emitExpr(expr.cond, ctx)} ? ${emitExpr(expr.then, ctx)} : ${emitExpr(expr.otherwise, ctx)})`;
+      return ctx.target.exprTernary(
+        emitExpr(expr.cond, ctx),
+        emitExpr(expr.then, ctx),
+        emitExpr(expr.otherwise, ctx),
+      );
     case "list":
       // List literal (`["EU", "US"]`) — e.g. a SelectField's `options:`.
-      if (ctx.target.exprList)
-        return ctx.target.exprList(expr.elements.map((it) => emitExpr(it, ctx)));
-      return `[${expr.elements.map((it) => emitExpr(it, ctx)).join(", ")}]`;
-    case "convert": {
-      // Mirrors `generator/typescript/render-expr.ts`'s renderTsConvert.
-      // Implicit-string-concat in page bodies (`"Active: " + count`)
-      // injects a `convert` IR node around the non-string operand;
-      // the walker emits the same `String(x)` / `x.toString()` form
-      // the domain renderer does.
-      const v = emitExpr(expr.value, ctx);
-      if (ctx.target.exprConvert) return ctx.target.exprConvert(v, expr.target, expr.from);
-      if (expr.target === "string") {
-        if (expr.from === "money") return `${v}.toString()`;
-        return `String(${v})`;
-      }
-      if (expr.target === "long" || expr.target === "decimal") {
-        if (expr.from === "money") return `${v}.toNumber()`;
-        return v;
-      }
-      if (expr.target === "money") {
-        if (expr.from === "money") return v;
-        return `new Decimal(${v})`;
-      }
-      return v;
-    }
+      return ctx.target.exprList(expr.elements.map((it) => emitExpr(it, ctx)));
+    case "convert":
+      // Implicit-string-concat in page bodies (`"Active: " + count`) injects a
+      // `convert` IR node around the non-string operand; the leaf emits the
+      // per-language cast (`String(x)` on JS, `string x` on F#).
+      return ctx.target.exprConvert(emitExpr(expr.value, ctx), expr.target, expr.from);
     case "unary":
-      if (ctx.target.exprUnary) return ctx.target.exprUnary(expr.op, emitExpr(expr.operand, ctx));
-      return `(${expr.op}${emitExpr(expr.operand, ctx)})`;
+      return ctx.target.exprUnary(expr.op, emitExpr(expr.operand, ctx));
     case "call": {
       // Bare function call as a JS expression.  An extern frontend
       // function (`function f(…): T extern from "…"`) registers its
@@ -1331,18 +1297,13 @@ export function emitExpr(expr: ExprIR, ctx: WalkContext): string {
       propagateChildFlags(ctx, childCtx);
       return `(${expr.param}) => ${rendered}`;
     }
-    case "object": {
-      // Object literal: `{ name: name, age: 30 }`
-      // emits as plain JS `{ name: name, age: 30 }`.  Field values
-      // recurse through emitExpr (so refs/state/binary ops compose).
-      if (ctx.target.exprObject) {
-        return ctx.target.exprObject(
-          expr.fields.map((f) => ({ name: f.name, value: emitExpr(f.value, ctx) })),
-        );
-      }
-      const fields = expr.fields.map((f) => `${f.name}: ${emitExpr(f.value, ctx)}`).join(", ");
-      return `{ ${fields} }`;
-    }
+    case "object":
+      // Object literal: `{ name: name, age: 30 }` — the leaf owns the
+      // per-language spelling (JS `{ n: v }`, F# record).  Field values recurse
+      // through emitExpr (so refs/state/binary ops compose).
+      return ctx.target.exprObject(
+        expr.fields.map((f) => ({ name: f.name, value: emitExpr(f.value, ctx) })),
+      );
     case "method-call": {
       // When the method-call's receiver is a hook
       // (detected by tryDetectApiHook on the receiver), emit
