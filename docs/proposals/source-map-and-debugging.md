@@ -1,12 +1,27 @@
 # Proposal — Source maps & cross-target debugging
 
-> Status: **PROPOSED.** No code yet. This doc consolidates the whole
+> Status: **IN PROGRESS — phases 0–7 shipped; phase 8's pure cores
+> shipped, protocol shell deferred.** This doc consolidates the whole
 > debugging endeavour: one provenance substrate (the *Origin spine*)
 > threaded `.ddd` → IR → emitted output, and a family of debug features
 > layered on top of it — a generic `.loom/sourcemap.json`, a `ddd trace`
 > stack-trace translator, native per-target debug info (Source Map v3 /
 > `#line`+PDB / JSR-45 SMAP), LSP source↔target navigation, and DAP
-> breakpoints in `.ddd`.
+> breakpoints in `.ddd`. The Origin spine, `.loom/sourcemap.json` (all
+> backends), `ddd trace` (column-aware), LSP source↔target nav, statement
+> + char/expression granularity, Source Map v3 sidecars, .NET `#line`→PDB,
+> Java JSR-45 SMAP, node strippable-boot debug wiring, the `ddd
+> breakpoints` CLI, and **both** pure DAP resolution cores
+> (`resolveSetBreakpoints` forward + `remapStackFrames` reverse, in
+> `src/dap/`) have all landed on `main`. What remains is the phase-8
+> **protocol shell** — the `@vscode/debugadapter` `DebugSession` in a
+> `packages/ddd-dap` workspace that wires the two shipped cores to a real
+> editor. It is deferred deliberately: its payoff (an editor driving live
+> breakpoints/stepping against a running backend) can only be verified by
+> driving an actual `js-debug`/`coreclr`/JDWP session in an interactive
+> editor, which the headless CI/sandbox can't do — so it is a reviewed
+> next step, not abandoned. See the phase table (§9) for the per-phase
+> shipped state.
 >
 > **This is a committed platform pillar, not a minimum-viable slice.** The
 > full arc — through char-level fidelity and live DAP debugging — is the
@@ -261,17 +276,17 @@ phase is independently shippable behind `--sourcemap` and names its gate;
 the ordering is what unblocks what, so value lands continuously while we
 build the full arc through DAP.
 
-| # | Phase | Deliverable | Depends on | Effort |
-|---|---|---|---|---|
-| 0 | **Origin spine** | `OriginRef` type; `origin?` on structural IR; capture in lowering + macro pre-lowering | — | Medium |
-| 1 | **`sourcemap.json`** | `TracedBuilder` bracket in each orchestrator; `src/system/sourcemap.ts`; `--sourcemap` flag | 0 | Medium |
-| 2 | **`ddd trace`** | CLI stack-trace translator (all backends) | 1 | Small |
-| 3 | **LSP nav** | source↔target "go to generated code" | 1 | Medium |
-| 4 | **Statement granularity** | `origin` on `StmtIR`; line-anchored `render-stmt` | 0 | Medium |
-| 5 | **Source Map v3 (JS)** | `.map` + `sourceMappingURL` for the 4 JS backends | 1, 4 | Small–Med |
-| 6 | **.NET `#line` + Java SMAP** | enhanced `#line` → PDB; JSR-45 injector | 4 | Med / Med–Hard |
-| 7 | **Char/expression granularity** | `origin` on `ExprIR`; span-tracking `lines()` | 4 | Large |
-| 8 | **DAP** | `ddd-dap` adapter reusing target debuggers (JS/.NET/JVM); scope remap; Python/Elixir enhanced-trace | 5, 6, 7 | Large |
+| # | Phase | Deliverable | Depends on | Effort | Status |
+|---|---|---|---|---|---|
+| 0 | **Origin spine** | `OriginRef` type; `origin?` on structural IR; capture in lowering + macro pre-lowering | — | Medium | ✅ Shipped |
+| 1 | **`sourcemap.json`** | `TracedBuilder` bracket in each orchestrator; `src/system/sourcemap.ts`; `--sourcemap` flag | 0 | Medium | ✅ Shipped (all backends) |
+| 2 | **`ddd trace`** | CLI stack-trace translator (all backends) | 1 | Small | ✅ Shipped (column-aware) |
+| 3 | **LSP nav** | source↔target "go to generated code" | 1 | Medium | ✅ Shipped |
+| 4 | **Statement granularity** | `origin` on `StmtIR`; line-anchored `render-stmt` | 0 | Medium | ✅ Shipped |
+| 5 | **Source Map v3 (JS)** | `.map` + `sourceMappingURL` for the 4 JS backends | 1, 4 | Small–Med | ✅ Shipped |
+| 6 | **.NET `#line` + Java SMAP** | enhanced `#line` → PDB; JSR-45 injector | 4 | Med / Med–Hard | ✅ Shipped (both) |
+| 7 | **Char/expression granularity** | `origin` on `ExprIR`; span-tracking `lines()` | 4 | Large | ✅ Shipped |
+| 8 | **DAP** | `ddd-dap` adapter reusing target debuggers (JS/.NET/JVM); scope remap; Python/Elixir enhanced-trace | 5, 6, 7 | Large | 🟡 Pure cores shipped (node debug wiring + strippable boot; `ddd breakpoints` CLI; `translateBreakpoint`, `resolveSetBreakpoints`, `remapStackFrames` in `src/dap/`) — **protocol shell** (`packages/ddd-dap` + `@vscode/debugadapter`) deferred (editor-only verification) |
 
 Phases **0 → 1 → 2** are the core investment and already deliver
 cross-backend post-mortem debugging. **3** is in-editor navigation off the
@@ -303,8 +318,13 @@ numbering is just the order the dependencies allow.
   a recorder measures are the bytes written to disk. See
   [`../plans/span-tracking-emission.md`](../plans/span-tracking-emission.md)
   §5 (phase 7 slice 2). (§8)
-- **Open — Java SMAP injection.** Post-`javac` class rewrite vs a javac
-  plugin vs shelling to Kotlin's tooling. (§6C)
+- **RESOLVED — Java SMAP injection.** Shipped (phase 6b) as the
+  **post-`javac` class-rewrite** option: the generated Gradle build emits
+  an ASM-based `injectSmap` task (`finalizedBy("injectSmap")` on
+  `compileJava`) that writes the JSR-45 `SourceDebugExtension` SMAP into
+  each compiled `.class` — no javac plugin, no Kotlin tooling. See
+  `src/generator/java/emit/program.ts` (`injectSmap` task registration)
+  and the phase-6b notes in `docs/plans/`. (§6C)
 
 ## 11. Non-goals
 
