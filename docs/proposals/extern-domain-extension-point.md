@@ -24,6 +24,31 @@ behaviour callback (Elixir) — that is a *member of the aggregate* and therefor
 already inside its encapsulation boundary. The external-service case moves to a
 `commandHandler` that injects a domain-service port.
 
+## 0. Premise — everything is in one repo
+
+Loom-generated output, any hand-written extension code, and the consuming app
+all live in **one repo that compiles together**. There is no separately-built,
+separately-distributed "user project" that the generated code must reach across
+a package boundary.
+
+This premise is load-bearing, because almost the entire current `extern`
+apparatus exists *only* to bridge that (non-existent) boundary:
+
+| Current machinery | Exists to… | Under one-repo… |
+|---|---|---|
+| published per-op handler **interface** | be a stable distribution contract | unnecessary — caller and impl compile together |
+| DI registry / Scrutor assembly scan | discover an impl in another assembly | unnecessary — the impl is a known repo file |
+| dev-stub impl | keep the build alive when the real impl is elsewhere | unnecessary — a missing impl is a **compile error** |
+| `[ExternHandler]` marker | tag the impl for the scan | unnecessary |
+| **runtime** "Missing `[ExternHandler]`" boot check | fail late when no impl was linked | replaced by a **build-time** error |
+
+So the domain-extension-point model below is not a trade against that
+machinery — it is what lets us **delete** it. The extension becomes a
+**repo-local, scaffolded-once, user-owned file** that regeneration preserves
+(the existing `.loomignore` / user-owned-region mechanic), co-versioned next to
+the generated aggregate, and a missing implementation is caught by the same
+build that compiles everything else.
+
 ## 1. The three current failure modes (with generated-code evidence)
 
 Today the framework owns this flow and hands the user handler the **live
@@ -190,19 +215,25 @@ changes is that the guard can no longer be *bypassed from outside* the op.)
 
 ## 4. Migration / breaking change
 
-This changes the `extern` handler surface on the four backends that ship it:
+Under the one-repo premise (§0) there is **no external contract to preserve**,
+so the migration is mechanical: inline the existing handler body into the
+co-located extension file and delete the bridging apparatus.
 
-- **.NET** `[ExternHandler]` classes implementing `I<Op><Agg>Handler` → a
-  `partial` method on the aggregate. The Scrutor scan + `ExternHandlerException`
-  + boot-time "Missing [ExternHandler]" check are removed for the domain case.
+- **.NET** `[ExternHandler]` classes implementing `I<Op><Agg>Handler` → the body
+  moves into a `partial void <Op>Core(…)` in a co-located partial file; the
+  Scrutor scan, `ExternHandlerException`, dev-stub, and boot-time "Missing
+  [ExternHandler]" check are **deleted**, and a missing impl becomes a compile
+  error.
 - **TS / Python / Java** per-op handler interfaces + registries → an overridable
-  aggregate hook.
-- **Elixir** — net-new seam (was a silent no-op), so *additive*, not breaking.
+  aggregate hook; the registry/marker plumbing is deleted.
+- **Elixir** — net-new seam (was a silent no-op), so purely *additive*.
 
-Options: (a) a deprecation window where both spellings compile; (b) a one-shot
-codemod note per backend; (c) gate the old shape behind a flag for one release.
-The external-service users migrate to `commandHandler` — a doc + example, not a
-mechanical rewrite.
+Because everything compiles together, the change can land as a single
+regenerate: the first generation scaffolds the extension file (user-owned
+thereafter), and the old registry files simply stop being emitted. A
+deprecation window is optional, not required — there is no downstream package
+depending on the old interface. The genuinely-external-service users move to a
+`commandHandler` — a doc + example.
 
 ## 5. Open questions (for sign-off before any code)
 
@@ -213,9 +244,11 @@ mechanical rewrite.
 2. **Hook signature.** Does the hook receive the wire request or domain params?
    May it `RaiseEvent` / emit? (Today's handler both mutates and raises — keep
    both.)
-3. **Elixir callback discovery** — config-resolved impl module vs `defoverridable`
-   vs a `@behaviour` the user's `use`-macro wires. Pick one; it decides the
-   ergonomics.
+3. **Elixir callback discovery** — under the one-repo premise (§0) the impl is
+   guaranteed to be a sibling module in the same app, so config-based module
+   resolution is unnecessary; the choice narrows to `defoverridable` (a
+   generated default the user overrides in place) vs a `@behaviour` the user's
+   `use`-macro wires. Pick one; it decides the ergonomics.
 4. **Per-backend consistency** — one uniform intent ("hook is a member of the
    aggregate"), five idiomatic mechanisms. Confirm that's acceptable vs forcing
    a single shape.
