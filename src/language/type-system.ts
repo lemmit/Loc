@@ -80,6 +80,7 @@ import {
   isWorkflow,
   isWorkflowCreateDecl,
 } from "./generated/ast.js";
+import { stdFunction } from "./stdlib.js";
 
 // ---------------------------------------------------------------------------
 // Type representation
@@ -986,16 +987,21 @@ function lookupTopLevelFunction(
   env: Env,
 ): import("./generated/ast.js").FunctionDecl | undefined {
   const anchor = env.aggregate ?? env.part ?? env.valueObject;
-  if (!anchor) return undefined;
-  const model = AstUtils.getContainerOfType(anchor, isModel);
-  if (!model) return undefined;
-  for (const m of model.members) {
-    if (isFunctionDecl(m) && m.name === name) return m;
-    if (isSystem(m)) {
-      for (const sm of m.members) if (isFunctionDecl(sm) && sm.name === name) return sm;
+  if (anchor) {
+    const model = AstUtils.getContainerOfType(anchor, isModel);
+    if (model) {
+      for (const m of model.members) {
+        if (isFunctionDecl(m) && m.name === name) return m;
+        if (isSystem(m)) {
+          for (const sm of m.members) if (isFunctionDecl(sm) && sm.name === name) return sm;
+        }
+      }
     }
   }
-  return undefined;
+  // Ambient std prelude (stdlib Phase C) — after any user-declared top-level
+  // function (which shadows it), so a call to a prelude function types to its
+  // declared return.
+  return stdFunction(name);
 }
 
 /** v2 BuilderCall typing.  The type name resolves against the enclosing

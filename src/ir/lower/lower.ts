@@ -95,6 +95,7 @@ import {
   isView,
   isWorkflow,
 } from "../../language/generated/ast.js";
+import { stdFunctions } from "../../language/stdlib.js";
 import { descriptorFor } from "../../platform/metadata.js";
 import { plural, snake } from "../../util/naming.js";
 import { isConstructible } from "../enrich/wire-projection.js";
@@ -270,6 +271,11 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
     addTopLevelFn(m);
     if (isSystem(m)) for (const sm of m.members) addTopLevelFn(sm);
   }
+  // Ambient std prelude (stdlib Phase C) — merge the built-in functions LAST,
+  // and only for names the user did not declare, so a user top-level function
+  // of the same name shadows the prelude (`addTopLevelFn` is first-wins).
+  for (const [name, fn] of stdFunctions())
+    if (!topLevelFnIndex.has(name)) topLevelFnIndex.set(name, fn);
   setTopLevelFnIndex(topLevelFnIndex);
   // Project-global name → decl index for every value object / enum / entity
   // across the import graph (recursing into systems / subdomains / contexts).

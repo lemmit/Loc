@@ -609,6 +609,27 @@ Rules:
 The same `function` keyword declares **member** helpers inside an aggregate /
 value object / workflow; those emit as real methods (`this.<fn>`) and may recurse.
 
+### The standard prelude
+
+A small set of top-level functions ships with the toolchain and is **ambient** —
+callable in any `.ddd` with nothing imported, like a language builtin. They are
+ordinary expression-form functions, so they inline at the call site and an
+uncalled one emits nothing. A user-declared top-level function of the same name
+**shadows** the prelude.
+
+```ddd
+// no import needed — isBlank / isPresent / truncate are ambient
+aggregate Customer {
+  name: string
+  invariant isPresent(name)
+  derived initial: string = truncate(name, 1)
+}
+```
+
+Current prelude (`strings`): `isBlank(s)`, `isPresent(s)`, `truncate(s, n)`. The
+set grows over subsequent stdlib slices (math, temporal); see
+`docs/plans/stdlib.md` → Phase C.
+
 ---
 
 ## Expression language
