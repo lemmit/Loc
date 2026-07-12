@@ -519,6 +519,9 @@ function ectoColumnType(t: ColumnType): string {
       return ":integer";
     case "bigint":
       return ":bigint";
+    case "bigserial":
+      // Ecto's `:bigserial` — bigint + owned sequence (event-log-architecture.md).
+      return ":bigserial";
     case "text":
       return ":text";
     case "bool":

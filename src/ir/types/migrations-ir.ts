@@ -17,6 +17,11 @@ export type ColumnType =
   | { kind: "uuid" }
   | { kind: "int" }
   | { kind: "bigint" }
+  // Auto-incrementing 64-bit surrogate — Postgres `bigserial` (bigint + owned
+  // sequence + NOT NULL + default).  Used for the per-context event log's global
+  // `seq` cursor (event-log-architecture.md).  DB-assigned; never written by the
+  // app, so it carries no `default` in the ColumnShape (the type IS the default).
+  | { kind: "bigserial" }
   | { kind: "text" }
   | { kind: "bool" }
   | { kind: "decimal" }
