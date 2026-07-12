@@ -1149,6 +1149,14 @@ function emitInfrastructure(
   emitWorkflowStatePersistence(ctx.workflows, ns, out, durableEventTypes(ctx).size > 0);
   emitProjectionRowPersistence(ctx.projections, ns, out);
   emitEventSourcedWorkflowFiles(ctx.workflows, ns, out);
+  // Domain persistence-port adapters (audit S7 Slice C) — the LEGACY
+  // single-context (`generate dotnet`) sibling of the system path's emission.
+  // Gated on the SAME condition renderProgram registers the ports under
+  // (ctx.workflows / ctx.projections), so a project that uses none of these
+  // ports emits neither the registrations NOR this file — never disagree.
+  if (ctx.workflows.length > 0 || ctx.projections.length > 0) {
+    out.set("Infrastructure/Persistence/PersistencePorts.cs", renderPersistencePortAdapters(ns));
+  }
   out.set("Api/DomainExceptionFilter.cs", renderExceptionFilter(ns, { usesValidators }));
   out.set("Api/ProblemDetailsResponsesFilter.cs", renderProblemDetailsFilter(ns));
   out.set("Api/ListResponseWrapperFilter.cs", renderListWrapperFilter(ns, listWrapperPairs([ctx])));
