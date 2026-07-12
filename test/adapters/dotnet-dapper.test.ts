@@ -119,7 +119,9 @@ system D {
     // The aggregate's stream lives in the single per-context event log
     // `<ctx>_events` (context `O`), discriminated by `stream_type`
     // (event-log-architecture.md).
-    expect(repo).toContain("INSERT INTO o_events (stream_type, stream_id, version, type, data, occurred_at)");
+    expect(repo).toContain(
+      "INSERT INTO o_events (stream_type, stream_id, version, type, data, occurred_at)",
+    );
     // Reconstruction scopes to this aggregate's stream_type — the correctness
     // guard now that streams share one table.
     expect(repo).toContain("WHERE stream_type = @st AND stream_id = @sid");
