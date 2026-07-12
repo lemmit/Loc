@@ -88,12 +88,24 @@ in hand — not before F# output exists.
    `validateLoomModel` and generates through the system composer; the emitted
    tree ships a multi-stage Dockerfile (Fable→Vite→nginx). Tests incl. a
    `validateLoomModel`-path reachability test (experience §22).
-6. ⚙ Runtime proof — vite build + boot the Counter in headless Chromium
-   (the §7.1 pipeline) against the emitted project shell.
-7. F# wire layer — Thoth.Json decoders + `Cmd`-based api (parallel of
+6. ✅ Runtime proof — the CLI-generated Counter ran the full §7.1 pipeline:
+   `dotnet fable` → `vite build` → headless Chromium. The MVU loop works
+   (`Count: 0` → +,+ → `2` → - → `1`, zero page errors). Fixed a real emit bug
+   the proof exposed: `index.html` must reference `./out/src/App.js` (Fable
+   mirrors the fsproj layout; the path must be relative for Vite).
+7. ⚙ F# wire layer — Thoth.Json decoders + `Cmd`-based api (parallel of
    `src/generator/_frontend/`; reuse IR projections like `wireShapeFor`, not the
-   TS/zod emitters).
-8. `generated-feliz-build` CI gate (mirror `generated-react-build.yml`).
+   TS/zod emitters). Un-stubs the `felizTarget` api seams
+   (`buildHookUse`/`renderApiCall`). NOT started.
+8. ✅ `generated-feliz-build` CI gate — generate via CLI → `dotnet fable` →
+   `vite build` (`.github/workflows/generated-feliz-build.yml`). Steps proven
+   locally; first Actions run executes on the PR.
+
+## Known gaps / next
+- The procedural pack has 4 primitives (Stack/Heading/Text/Button); the
+  `felizTarget` control-flow + api seams (`renderMatch`/`For`/`navigate`/api
+  hooks) throw loudly until an example needs them (slice 3 grows both).
+- Multi-page routing: `renderAppFs` wires only the first page (visible TODO).
 
 Known-good deps (proposal §10): Fable 4.29 / Feliz 2.8 / Fable.Elmish.React 4.0
 / Fable.SimpleHttp 3.6 / Thoth.Json 10.2 / net8.0. Avoid Thoth.Fetch (promise-CE
