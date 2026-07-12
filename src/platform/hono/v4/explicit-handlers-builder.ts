@@ -22,9 +22,15 @@
 //
 // v1 scope (matches .NET A1): handler params are ids / scalars.  A param whose
 // name appears as `{name}` in the route path binds from the path (coerced from
-// its wire type); every other param binds from the JSON body.  Full
-// response-DTO projection rides with the contract-scaffold layer — the 200 body
-// is declared `z.unknown()` and the returned value is cast through it.
+// its wire type); every other param binds from the JSON body.
+//
+// Aggregate-return projection (C2, the Hono sibling of the .NET C1 in #1830): a
+// handler that returns a domain aggregate/entity projects it to its wire shape
+// via the owning repo's `toWire(...)` — reusing the repo the body already built
+// for that aggregate (or constructing one when the return aggregate was never
+// loaded).  Id / scalar returns serialise as-is (`<expr> as unknown`).  The 200
+// body schema stays `z.unknown()` (the wire object is plain JSON); tightening it
+// to `<Agg>Response` rides with the contract-scaffold layer.
 // ---------------------------------------------------------------------------
 
 import { renderWorkflowStmtChunks } from "../../../generator/_workflow/stmt-target.js";
@@ -37,8 +43,9 @@ import type {
   TypeIR,
   ValueObjectIR,
 } from "../../../ir/types/loom-ir.js";
+import { wireTypeInfo } from "../../../ir/types/wire-types.js";
 import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
-import { lowerFirst } from "../../../util/naming.js";
+import { lowerFirst, plural } from "../../../util/naming.js";
 import { emitWireSchema, wireToDomainExpr, zodFor } from "./routes-builder.js";
 import {
   collectReposForWorkflow,
@@ -72,6 +79,20 @@ function pathParamZod(t: TypeIR): string {
     }
   }
   return "z.string()";
+}
+
+/** The aggregate a handler's return type resolves to, when it returns an
+ *  entity (aggregate or containment part) — the projection target for the
+ *  `repo.toWire(...)` wrap.  Undefined for an id / scalar / void return, which
+ *  serialise as-is. */
+function returnEntityAgg(h: Handler, ctx: EnrichedBoundedContextIR): string | undefined {
+  if (!h.returnType) return undefined;
+  const info = wireTypeInfo(h.returnType, "response");
+  if (info.refKind !== "entity") return undefined;
+  const owning =
+    ctx.aggregates.find((a) => a.name === info.base) ??
+    ctx.aggregates.find((a) => a.parts.some((p) => p.name === info.base));
+  return owning?.name;
 }
 
 /** Emit one `app.openapi(createRoute({...}), async (httpCtx) => {...})` block
@@ -143,8 +164,24 @@ function emitRouteHandler(
   // Repos constructed inline on the request `db` (matches aggregate/workflow
   // routes).  `getById` throws AggregateNotFoundError → 404 via onError, so a
   // load needs no explicit guard.
-  for (const r of collectReposForWorkflow(h)) {
+  const repos = collectReposForWorkflow(h);
+  const repoVarByAgg = new Map(repos.map((r) => [r.aggName, lowerFirst(r.repoName)]));
+  for (const r of repos) {
     out.push(`    const ${lowerFirst(r.repoName)} = new ${r.aggName}Repository(db, events);`);
+  }
+  // A handler that returns a domain aggregate projects it to its wire shape via
+  // the owning repo's `toWire(...)` (the same projection the read/view routes
+  // use), so the route serialises the contract — not the raw domain entity.
+  // Reuse the repo the body already built for that aggregate; construct one when
+  // the return aggregate was never loaded (e.g. a freshly created entity).
+  const retAgg = returnEntityAgg(h, ctx);
+  let retRepoVar: string | undefined;
+  if (retAgg) {
+    retRepoVar = repoVarByAgg.get(retAgg);
+    if (!retRepoVar) {
+      retRepoVar = lowerFirst(plural(retAgg));
+      out.push(`    const ${retRepoVar} = new ${retAgg}Repository(db, events);`);
+    }
   }
   // Load → mutate → save body, rendered through the shared Hono workflow stmt
   // target (handlers carry no `this` state, so the default `thisName` is inert).
@@ -158,9 +195,9 @@ function emitRouteHandler(
     out.push(`    await ${lowerFirst(save.repoName)}.save(${save.name});`);
   }
   if (hasReturn) {
-    out.push(
-      `    return httpCtx.json(${renderExprWithParams(h.returnValue!, paramExprs, "this")} as unknown, 200);`,
-    );
+    const retExpr = renderExprWithParams(h.returnValue!, paramExprs, "this");
+    const payload = retRepoVar ? `${retRepoVar}.toWire(${retExpr})` : `${retExpr} as unknown`;
+    out.push(`    return httpCtx.json(${payload}, 200);`);
   } else {
     out.push(`    return httpCtx.body(null, 204);`);
   }

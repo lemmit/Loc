@@ -97,6 +97,51 @@ describe("python — explicit commandHandler/queryHandler → FastAPI", () => {
   });
 });
 
+// C2 — the Python slice of the aggregate-return wire projection (mirrors .NET
+// C1/#1830): a handler whose return type resolves to an aggregate/entity must
+// project the domain (SQLAlchemy) instance to its wire shape via the repo's
+// `to_wire(...)` — the same projection the auto-derived read routes use — and
+// annotate `-> dict[str, object]` (NOT the aggregate class, which the module
+// never imports and which would mismatch the dict returned). Id / scalar returns
+// stay unchanged.
+const AGG_RETURN_SRC = `
+system Shop {
+  subdomain Sales {
+    context Ordering {
+      aggregate Order { code: string; status: string; operation cancel() { status := "cancelled" } }
+      repository Orders for Order { }
+      queryHandler GetOrder(orderId: Order id): Order { let o = Orders.getById(orderId); return o }
+    }
+  }
+  api SalesApi from Sales {
+    route GET "/orders/{orderId}" -> Ordering.GetOrder
+  }
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: python, contexts: [Ordering], dataSources: [st], serves: SalesApi, port: 5001 }
+}
+`;
+
+describe("python — explicit handler returning an aggregate → to_wire projection", () => {
+  it("projects the domain entity to its wire dict via repo.to_wire, annotated dict[str, object]", async () => {
+    const m = await generateSystemFiles(AGG_RETURN_SRC);
+    const h = fileEndingWith(m, "app/application/get_order.py");
+    // The return annotation is the wire dict, NOT `-> Order` (which the module
+    // never imports and which would mismatch the projected dict).
+    expect(h).toContain(
+      "async def get_order(session: AsyncSession, order_id: OrderId) -> dict[str, object]:",
+    );
+    expect(h).not.toContain("-> Order:");
+    // Load, then project via the repo's to_wire instead of returning the raw row.
+    expect(h).toContain("orders = OrderRepository(session, NoopDomainEventDispatcher())");
+    expect(h).toContain("o = await orders.get_by_id(order_id)");
+    expect(h).toContain("return orders.to_wire(o)");
+    expect(h).not.toContain("    return o\n");
+    // No stray domain-aggregate import (the annotation is a dict now).
+    expect(h).not.toContain("import Order\n");
+  });
+});
+
 // B2 — the Python slice of the [FromBody] fan-out (mirrors .NET B1/#1822):
 // a handler param NOT bound by a `{token}` in the route path must ride in one
 // `body: <Handler>Body` request model, not as a bare FastAPI param (which binds
