@@ -52,24 +52,30 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0'
-      - name: Generate the Feliz Counter system
+      - name: Generate the Feliz showcase system
         run: |
           mkdir -p ci-feliz
-          cat > ci-feliz/counter.ddd <<'DDD'
-          system CounterApp {
+          cat > ci-feliz/showcase.ddd <<'DDD'
+          system ShowcaseApp {
             subdomain S { context C { } }
             ui WebApp {
               framework: feliz
-              page Counter {
+              page Showcase {
                 route: "/"
                 state { count: int = 0 }
                 action inc() { count := count + 1 }
                 action dec() { count := count - 1 }
                 body: Stack {
-                  Heading { "Counter", level: 1 },
-                  Text { "Count: " + count },
-                  Button { "+", onClick: inc },
-                  Button { "-", onClick: dec }
+                  Heading { "Feliz primitives", level: 1 },
+                  Card { "Counter card",
+                    Stack {
+                      Text { "Count: " + count },
+                      Button { "+", onClick: inc },
+                      Button { "-", onClick: dec }
+                    }
+                  },
+                  Divider { },
+                  Badge { "beta" }
                 }
               }
             }
@@ -77,7 +83,7 @@ jobs:
             deployable web { platform: feliz targets: api ui: WebApp port: 3005 }
           }
           DDD
-          node bin/cli.js generate system ci-feliz/counter.ddd -o ci-feliz/out
+          node bin/cli.js generate system ci-feliz/showcase.ddd -o ci-feliz/out
       - name: Locate the emitted Feliz project
         id: proj
         run: echo "dir=$(dirname "$(find ci-feliz/out -name App.fsproj | head -1)")" >> "$GITHUB_OUTPUT"
