@@ -210,7 +210,7 @@ defmodule ${moduleName} do
   use Ecto.Schema
   import Ecto.Changeset
 
-  @primary_key {:id, :binary_id, autogenerate: true}
+  @primary_key {:id, UUIDv7, autogenerate: true}
 ${schemaDecl}
 ${schemaBody}
   end
@@ -341,7 +341,7 @@ defmodule ${moduleName} do
   @moduledoc false
   use Ecto.Schema
 
-  @primary_key {:id, :binary_id, autogenerate: true}
+  @primary_key {:id, UUIDv7, autogenerate: true}
   @foreign_key_type :binary_id
 ${prefixLine}
   schema "${tableName}" do

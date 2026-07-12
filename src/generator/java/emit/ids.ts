@@ -11,12 +11,14 @@ import { javaNewIdValue, javaValueTypeForId } from "../render-expr.js";
 export function renderJavaId(name: string, idValueType: string, basePkg: string): string {
   const valueType = javaValueTypeForId(idValueType);
   const newExpr = javaNewIdValue(idValueType);
-  const needsUuid = valueType === "UUID" || newExpr.startsWith("UUID.");
+  const needsUuid = valueType === "UUID" || newExpr.includes("UUID");
+  const needsGenerators = newExpr.includes("Generators.");
   return lines(
     `package ${basePkg}.domain.ids;`,
     ``,
     `import java.io.Serializable;`,
     needsUuid ? `import java.util.UUID;` : null,
+    needsGenerators ? `import com.fasterxml.uuid.Generators;` : null,
     ``,
     `import jakarta.persistence.Embeddable;`,
     ``,

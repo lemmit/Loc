@@ -161,6 +161,7 @@ defmodule ${appModule}.MixProject do
       {:postgrex, "~> 0.20"},
       {:phoenix_html, "~> 4.1"},
       {:jason, "~> 1.4"},
+      {:uuidv7, "~> 1.0"},
       {:plug_cowboy, "~> 2.6"},
       {:open_api_spex, "~> 3.0"}${liveViewDep}${extraBlock}${oidcDep}
     ]

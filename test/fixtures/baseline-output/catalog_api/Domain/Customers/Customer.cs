@@ -77,7 +77,7 @@ public sealed class Customer
     public static Customer Create(string username, string email, int age)
     {
         var e = new Customer();
-        e.Id = new CustomerId(Guid.NewGuid());
+        e.Id = new CustomerId(Guid.CreateVersion7());
         e.Username = username;
         e.Email = email;
         e.Age = age;

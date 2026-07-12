@@ -638,7 +638,7 @@ function renderCommandRunner(c: CommandCtx): string {
   const paramReads = c.op.params.map(
     (p) => `    ${snake(p.name)} = Map.get(attrs, ${JSON.stringify(p.name)})`,
   );
-  if (c.kind === "create") paramReads.push("    id = Ecto.UUID.generate()");
+  if (c.kind === "create") paramReads.push("    id = UUIDv7.generate()");
 
   // with-clauses: guards + the `events` binding + the append.
   const clauses: string[] = [];

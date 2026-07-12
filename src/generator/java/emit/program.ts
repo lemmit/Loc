@@ -42,6 +42,11 @@ export const SPRINGDOC_VERSION = "3.0.3";
  *  backend doesn't pull), so a version-less coordinate fails to resolve. */
 export const NIMBUS_JOSE_JWT_VERSION = "10.3";
 
+/** java-uuid-generator — supplies UUIDv7 (time-ordered epoch UUIDs) via
+ *  `Generators.timeBasedEpochGenerator()`; the JDK's `UUID` has no v7 factory
+ *  through 21.  Used by the aggregate/part id factories (`XId.newId()`). */
+export const JAVA_UUID_GENERATOR_VERSION = "5.1.0";
+
 /** ASM — the bytecode library the emitted `injectSmap` Gradle task (below)
  *  uses to attach a `.smap` sidecar as a compiled class's
  *  `SourceDebugExtension` attribute (JSR-45, M10 phase 6b).  Only pulled
@@ -183,6 +188,8 @@ export function renderGradleBuild(
     `    implementation("org.jmolecules:jmolecules-ddd:${JMOLECULES_VERSION}")`,
     `    implementation("org.jmolecules:jmolecules-events:${JMOLECULES_VERSION}")`,
     `    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:${SPRINGDOC_VERSION}")`,
+    // UUIDv7 (time-ordered) id generation — the JDK has no v7 factory.
+    `    implementation("com.fasterxml.uuid:java-uuid-generator:${JAVA_UUID_GENERATOR_VERSION}")`,
     // Flyway runs the emitted db/migration/V*.sql on boot.  Spring Boot 4.x
     // no longer auto-configures Flyway from `flyway-core` alone — the
     // `spring-boot-starter-flyway` starter is what wires the

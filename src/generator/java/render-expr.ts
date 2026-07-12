@@ -978,8 +978,9 @@ export function javaNewIdValue(idValueType: string): string {
     case "long":
       return "0";
     case "string":
-      return "UUID.randomUUID().toString()";
+      // UUIDv7 (time-ordered) via java-uuid-generator — no JDK v7 factory.
+      return "Generators.timeBasedEpochGenerator().generate().toString()";
     default:
-      return "UUID.randomUUID()";
+      return "Generators.timeBasedEpochGenerator().generate()";
   }
 }

@@ -404,7 +404,10 @@ export function renderConfiguration(
         // Both default to undefined → byte-identical single-arg `ToTable`.
         `        builder.ToTable(${renderTableArgs(plural(agg.name), options)});`,
         "        builder.HasKey(x => x.Id);",
-        `        builder.Property(x => x.Id).HasConversion(v => v.Value, v => new ${agg.name}Id(v)).HasColumnName("id");`,
+        // ValueGeneratedNever: the id is always minted app-side (Guid.CreateVersion7
+        // in the aggregate factory), so tell EF not to treat the Guid key as
+        // store-/client-generated on Add — its own value is authoritative.
+        `        builder.Property(x => x.Id).HasConversion(v => v.Value, v => new ${agg.name}Id(v)).HasColumnName("id").ValueGeneratedNever();`,
       ];
   // The TPH base maps the hierarchy: a `kind` discriminator column whose value
   // for each concrete is that concrete's name (the cross-backend contract —

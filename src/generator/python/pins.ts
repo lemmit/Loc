@@ -14,6 +14,9 @@ export const PYTHON_PINS = {
     "sqlalchemy[asyncio]>=2.0.36,<3",
     "asyncpg>=0.30,<1",
     "pydantic>=2.10,<3",
+    // UUIDv7 (time-ordered ids) — stdlib `uuid.uuid7` only lands in 3.14;
+    // `uuid6` backports it (`from uuid6 import uuid7`) and is typed.
+    "uuid6>=2024.7.10",
   ],
   devDependencies: ["mypy>=1.13,<2", "ruff>=0.8,<1", "pytest>=8.3,<9", "pytest-asyncio>=0.24,<2"],
 } as const;

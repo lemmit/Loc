@@ -52,7 +52,7 @@ describe("vanilla — Slice 1 CRUD read path", () => {
     expect(schema).toContain('schema "tasks" do');
     expect(schema).toContain("field :title, :string");
     expect(schema).toContain("field :done, :boolean");
-    expect(schema).toContain("@primary_key {:id, :binary_id");
+    expect(schema).toContain("@primary_key {:id, UUIDv7, autogenerate: true}");
   });
 
   it("emits a per-aggregate Repository with find_by_id + list returning {:ok, _}|{:error, _}", async () => {

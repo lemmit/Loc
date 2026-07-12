@@ -68,14 +68,15 @@ async function build() {
 }
 
 describe("python domain primitives", () => {
-  it("ids.py brands one NewType + uuid4 factory per aggregate and part", async () => {
+  it("ids.py brands one NewType + uuid7 factory per aggregate and part", async () => {
     const files = await build();
     const ids = files.get("api/app/domain/ids.py")!;
     expect(ids).toContain('WidgetId = NewType("WidgetId", str)');
     expect(ids).toContain('WidgetNoteId = NewType("WidgetNoteId", str)');
     expect(ids).toContain("def new_widget_id() -> WidgetId:");
     expect(ids).toContain("def new_widget_note_id() -> WidgetNoteId:");
-    expect(ids).toContain("return WidgetId(str(uuid4()))");
+    expect(ids).toContain("from uuid6 import uuid7");
+    expect(ids).toContain("return WidgetId(str(uuid7()))");
   });
 
   it("errors.py carries the three-status error taxonomy", async () => {
