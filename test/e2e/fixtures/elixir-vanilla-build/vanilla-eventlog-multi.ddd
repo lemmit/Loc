@@ -16,7 +16,7 @@ system Banking {
       event LedgerOpened { ledger: Ledger id, name: string }
       event Posted { ledger: Ledger id, delta: int }
 
-      aggregate Account ids guid persistedAs(eventLog) {
+      aggregate Account persistedAs(eventLog) {
         owner: string
         balance: int
 
@@ -49,7 +49,7 @@ system Banking {
         }
       }
 
-      aggregate Ledger ids guid persistedAs(eventLog) {
+      aggregate Ledger persistedAs(eventLog) {
         name: string
         total: int
 
