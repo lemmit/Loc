@@ -2,6 +2,7 @@ import type { Platform } from "../ir/types/loom-ir.js";
 import angularPlatform from "./angular.js";
 import dotnetPlatform from "./dotnet.js";
 import elixirPlatform from "./elixir.js";
+import felizPlatform from "./feliz.js";
 import honoPlatform, { loomManifest as honoV4Manifest } from "./hono/v4/index.js";
 import honoV5Platform, { loomManifest as honoV5Manifest } from "./hono/v5/index.js";
 import javaPlatform from "./java.js";
@@ -75,6 +76,11 @@ const platforms: Record<Platform, PlatformSurface> = {
   // (signals, provideRouter, ng build → static bundle).
   // Same deployable contract as `react` (targets a backend, no DB).
   angular: angularPlatform,
+  // Fifth frontend-only platform — Feliz (Fable/F#/Elmish MVU) SPA.
+  // Built via `dotnet fable` + `vite` (not the vite-only static pipeline),
+  // so it hosts only its own framework.  Same deployable contract as
+  // `react` (targets a backend, no DB).
+  feliz: felizPlatform,
   // `static` is the page-metamodel's UI-only deployable kind.  It
   // shares the React surface — a deployable declared as
   // `platform: static` lowers through the same code path a

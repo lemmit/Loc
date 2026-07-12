@@ -198,6 +198,18 @@ const PLATFORM_DESCRIPTORS: Record<Platform, PlatformDescriptor> = {
     hostableFrameworks: STATIC_BUNDLE_FRAMEWORKS,
     reservedRepositoryFindNames: new Set(),
   },
+  // Feliz (Fable/F#/Elmish MVU) — a frontend whose bundle is built via
+  // `dotnet fable` + `vite`, NOT the vite-only static pipeline, so it hosts
+  // only its own framework (other static hosts can't run the Fable build).
+  feliz: {
+    name: "feliz",
+    defaultPort: 3005,
+    needsDb: false,
+    mountsUi: true,
+    isFrontend: true,
+    hostableFrameworks: new Set(["feliz"]),
+    reservedRepositoryFindNames: new Set(),
+  },
   elixir: {
     name: "elixir",
     defaultPort: 4000,

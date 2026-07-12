@@ -151,6 +151,29 @@ export default defineConfig({
 });
 `;
 
+// Multi-stage build — the Fable step (F# → JS) needs the .NET SDK, the bundle
+// step needs Node, so the build stage carries both; the runtime stage serves
+// the static bundle.  (Compose-boot verification is a follow-up slice; this
+// makes the emitted tree structurally buildable.)
+const DOCKERFILE = `# syntax=docker/dockerfile:1
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /app
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \\
+  && apt-get install -y --no-install-recommends nodejs \\
+  && rm -rf /var/lib/apt/lists/*
+COPY . .
+RUN dotnet tool restore
+RUN npm install
+RUN npm run build
+
+FROM nginx:1.27-alpine AS runtime
+COPY --from=build /app/dist /usr/share/nginx/html
+RUN printf 'server { listen 3000; root /usr/share/nginx/html; location / { try_files $uri /index.html; } }' \\
+  > /etc/nginx/conf.d/default.conf
+EXPOSE 3000
+CMD ["nginx", "-g", "daemon off;"]
+`;
+
 const INDEX_HTML = `<!doctype html>
 <html lang="en">
   <head>
@@ -192,5 +215,6 @@ export function generateFelizForContexts(
   out.set("package.json", PACKAGE_JSON(`${deployable.name}-feliz`));
   out.set("vite.config.js", VITE_CONFIG);
   out.set("index.html", INDEX_HTML);
+  out.set("Dockerfile", DOCKERFILE);
   return out;
 }

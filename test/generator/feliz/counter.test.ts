@@ -5,12 +5,15 @@
 
 import { describe, expect, it } from "vitest";
 import { generateFelizForContexts } from "../../../src/generator/feliz/index.js";
+import { generateSystemFiles } from "../../_helpers/generate.js";
 import { buildLoomModel } from "../../_helpers/ir.js";
+import { parseString } from "../../_helpers/parse.js";
 
 const COUNTER = `
 system CounterApp {
   subdomain S { context C { } }
   ui WebApp {
+    framework: feliz
     page Counter {
       route: "/"
       state { count: int = 0 }
@@ -25,7 +28,7 @@ system CounterApp {
     }
   }
   deployable api { platform: node contexts: [C] port: 3000 }
-  deployable web { platform: react targets: api ui: WebApp port: 3001 }
+  deployable web { platform: feliz targets: api ui: WebApp port: 3005 }
 }
 `;
 
@@ -81,5 +84,22 @@ describe("feliz Counter", () => {
     expect(files.get("App.fsproj")).toContain('Include="Feliz"');
     expect(files.get(".config/dotnet-tools.json")).toContain('"fable"');
     expect(files.has("index.html")).toBe(true);
+    expect(files.get("Dockerfile")).toContain("dotnet tool restore");
+  });
+
+  // Reachability — `platform: feliz` / `framework: feliz` must PARSE + VALIDATE
+  // (generator tests bypass validateLoomModel; experience_gathered.md §22).
+  it("validates cleanly through validateLoomModel", async () => {
+    const { errors } = await parseString(COUNTER, { validate: true });
+    expect(errors).toEqual([]);
+  });
+
+  // End-to-end through the PlatformSurface — `generate system` routes the
+  // `platform: feliz` deployable to the Feliz generator and lands App.fs.
+  it("generates the Feliz project through the system composer", async () => {
+    const files = await generateSystemFiles(COUNTER);
+    const appFs = [...files.entries()].find(([p]) => p.endsWith("src/App.fs"));
+    expect(appFs).toBeDefined();
+    expect(appFs![1]).toContain("Program.mkProgram init update view");
   });
 });
