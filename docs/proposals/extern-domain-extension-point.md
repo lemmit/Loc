@@ -1,11 +1,27 @@
 # `extern` as a domain extension point (not an application-layer injected handler)
 
-> Status: **Decided — implementation phasing D5 (2026-07-12).** Motivated by finding **S10** in
+> Status: **Partially decided — the full reframe (§3a) is GATED on an unresolved
+> case-1/case-2 discriminator (see D1, 2026-07-12 correction).** Motivated by finding **S10** in
 > [`docs/audits/generated-code-ddd-review-2026-07.md`](../audits/generated-code-ddd-review-2026-07.md)
 > and a silent-no-op bug on the Elixir backend (below). Reconciles the
 > `extern` *operation* escape hatch with the four-layer model in
 > [`unfoldable-api-derivation.md`](./unfoldable-api-derivation.md)
 > (`commandHandler` / `queryHandler`, partially landed in #1756 / #1793 / #1830).
+>
+> **⚠️ 2026-07-12 correction — D1 was wrong; the reframe is not fully decided.**
+> The original D1 assumed the external-service case (case 2 below) has a ready
+> home in `commandHandler`. It does not: `commandHandler` / `queryHandler` are
+> **DSL-bodied** — they carry a Loom-expression body and have **no `extern`
+> escape hatch**, so they cannot host a *hand-written* external-service call.
+> Today the only extern-capable orchestration construct is a **workflow**; a
+> `commandHandler` that can host hand-written infra code (`extern commandHandler`)
+> is **undesigned**. Because case 2 has no complete substitute, the
+> **injected-handler mechanism is RETAINED** until that home is settled, and the
+> partial-method/hook reframe in §3a is **gated** on the case-1/case-2
+> discriminator decision. Two pieces proceed independently of that gate:
+> **Slice 1 (Elixir silent-no-op fix)** — a net-new seam, purely additive — and
+> the **S10 containment slice** below, which narrows the .NET/Hono setter leak
+> *without* removing the injected handler.
 
 ## Thesis
 
@@ -23,6 +39,16 @@ point** — a `partial` method (.NET), an overridable hook (TS/Python/Java), a
 behaviour callback (Elixir) — that is a *member of the aggregate* and therefore
 already inside its encapsulation boundary. The external-service case moves to a
 `commandHandler` that injects a domain-service port.
+
+> **⚠️ Gate (2026-07-12).** The sentence above ("the external-service case moves
+> to a `commandHandler`") is the D1 assumption that turned out wrong — see the
+> status-block correction. A `commandHandler` is DSL-bodied and cannot host
+> hand-written infra code, so re-homing `extern` fully *removes* the only place
+> case 2 lives today. This whole "re-home, then delete the injected apparatus"
+> thesis (§3a, §4) therefore **awaits** a decision on where case 2 lands (a
+> workflow, or an undesigned `extern commandHandler`). What ships now is
+> *containment*, not re-homing: the S10 setter leak is narrowed while the
+> injected handler stays.
 
 ## 0. Premise — everything is in one repo
 
@@ -155,7 +181,14 @@ for the second — hence the pathologies.
 
 ## 3. The proposed model
 
-### 3a. `extern` operation → a domain extension point (a member of the aggregate)
+### 3a. `extern` operation → a domain extension point (a member of the aggregate) — ⛔ GATED (on the D1 case-1/case-2 discriminator)
+
+> **This whole subsection is gated** on the D1 correction above: re-homing
+> `extern` fully *deletes* the injected-handler apparatus (§4), which is the only
+> place the **case-2 external-service op** lives today. Until case 2 has a
+> settled home, the apparatus stays and this reframe does not land. The
+> **S10-containment slice (§3d)** ships the encapsulation win *now* without the
+> reframe.
 
 Keep the framework flow (load → preconditions → **hook** → invariants → save →
 drain). Change only **what the hook is**: not an external holder of the entity,
@@ -200,11 +233,53 @@ def confirm_order(%Sales.Order{} = record, params) do
 end
 ```
 
-### 3b. "External service" → a `commandHandler` + domain-service port
+### 3b. "External service" → ⛔ NO ready home (D1 correction)
 
-The genuinely-application-layer case does not touch entity internals at all —
+> **⚠️ CORRECTED 2026-07-12.** The original text claimed the external-service
+> case "moves to a `commandHandler` + domain-service port … needs no new
+> mechanism." **This is the wrong half of the D1 error.** A `commandHandler` is
+> **DSL-bodied** and cannot host a hand-written call into an injected service, so
+> it is *not* a substitute for a case-2 `extern` op. Today the only place a
+> hand-written external-service call lives is a **workflow**; an
+> `extern commandHandler` is undesigned. This case therefore has **no complete
+> home**, which is precisely why the injected-handler mechanism is retained (D1)
+> and §3a is gated. The original claim is preserved below, struck, as the
+> migration record.
+
+~~The genuinely-application-layer case does not touch entity internals at all —
 it orchestrates, calling a domain-service port that an infra adapter
-implements. This is exactly Layer 3 and needs no new mechanism.
+implements. This is exactly Layer 3 and needs no new mechanism.~~
+
+### 3d. S10 containment — narrow the setter leak *without* removing the injected handler (SHIPS NOW)
+
+Independent of the gated §3a reframe, the **S10** encapsulation leak on .NET and
+Hono can be closed today by keeping the injected-handler flow exactly as-is and
+only changing **what write surface the handler is handed** — a *narrow,
+extern-scoped mutator*, instead of widening every setter on the aggregate:
+
+- **.NET** — setters revert to `private`; the aggregate implements a generated
+  `I<Agg>Mutator` interface **explicitly** (get/set per field + `RaiseEvent`).
+  The command handler still receives the aggregate (implicitly upcast to
+  `I<Agg>Mutator`), so `mutator.Status = …; mutator.RaiseEvent(…)` works exactly
+  as before — but `order.Status = …` on a plain `Order` **no longer compiles**
+  app-wide (an explicit-interface member is reachable only through the interface
+  reference, not the concrete type). No `internal`-widening of any setter.
+- **Hono** — the per-field public setters are removed; the aggregate mints a
+  narrow `<Agg>Editor` (get/set per field + `raiseEvent`) via an in-class
+  `_externEditor()` (so it can reach the `private` fields), and the auto route
+  hands *that* to the handler. Entity fields stay `private` behind read-only
+  getters, so `order.status = …` no longer type-checks app-wide.
+- **Java / Python** — Java has no leak (package-private mutable fields; only a
+  `_raiseEvent` hook is added, no setter widening). Python *does* mint per-field
+  setters on `extern` (same shape as Hono) but is out of S10's scope (audit
+  names Hono + .NET only) — tracked as a follow-up.
+
+The injected handler, its interface, the registry/Scrutor/boot-check, the
+dev-stub, and `RaiseEvent` are all **unchanged** — case 2 keeps working. Only the
+aggregate's *app-wide* setter exposure is removed. The residual (an explicit cast
+`((IOrderMutator)order).Status = …` on .NET, or calling `order._externEditor()`
+on Hono) is a deliberate, greppable, extern-scoped escape — not the silent
+`internal set` / public-setter app-wide bypass S10 flagged.
 
 ### 3c. Invariants still re-run
 
@@ -213,7 +288,13 @@ then saves. The extension point is *not* trusted to preserve invariants — it i
 trusted only to make a decision; the aggregate's own guard still fires. (What
 changes is that the guard can no longer be *bypassed from outside* the op.)
 
-## 4. Migration / breaking change
+## 4. Migration / breaking change — ⛔ GATED (deletes case-2's only home)
+
+> **Gated on D1.** Everything below *deletes* the injected-handler apparatus. Per
+> the D1 correction that apparatus is the only home for the **case-2
+> external-service op**, so the deletion **waits** on the case-1/case-2
+> discriminator. The S10-containment slice (§3d) deliberately does **not** delete
+> any of it.
 
 Under the one-repo premise (§0) there is **no external contract to preserve**,
 so the migration is mechanical: inline the existing handler body into the
@@ -237,10 +318,28 @@ depending on the old interface. The genuinely-external-service users move to a
 
 ## 5. Decisions (settled 2026-07-12)
 
-- **D1 — keyword.** Keep `extern`; its meaning narrows to "the op body is a
-  hand-written domain hook, co-located and owned by the aggregate." The
-  external-service case is a `commandHandler` + domain-service port, not
-  `extern`. No new syntax.
+- **D1 — keyword. ⚠️ CORRECTED 2026-07-12 — DEFERRED, was wrong.** The original
+  D1 read: *"Keep `extern`; its meaning narrows to 'the op body is a hand-written
+  domain hook, co-located and owned by the aggregate.' The external-service case
+  is a `commandHandler` + domain-service port, not `extern`."* That last clause
+  is false. `commandHandler` / `queryHandler` are **DSL-bodied** — a Loom
+  expression body, **no `extern` escape hatch** — so a `commandHandler` cannot
+  host a hand-written call into an injected external service. There are genuinely
+  two needs behind `extern`:
+    - **case 1 — pure domain logic** the DSL can't express (compute a score,
+      apply a bespoke transition). This is what the §3a hook re-homes.
+    - **case 2 — call an injected external service** (billing, third-party API).
+      This has **no complete substitute today**: `commandHandler`/`queryHandler`
+      can't host it, domain services are pure, and only a **workflow** can
+      `extern`. A `commandHandler` that hosts hand-written infra
+      (`extern commandHandler`) is **undesigned**.
+
+  Because case 2 has no home, the **case-1/case-2 discriminator is unresolved**
+  and this decision is **deferred**. Consequence: the **injected-handler
+  mechanism is RETAINED** (interface + registry/Scrutor + boot-check + dev-stub +
+  `RaiseEvent`) until case 2 gets a real home; the §3a reframe is **gated** on
+  this discriminator. What ships in the interim is **S10 containment** (below),
+  not the reframe.
 - **D2 — hook signature.** Mirrors the operation's signature: domain-typed
   params in, the op's declared return type out (void / exception-less union).
   Runs post-precondition / pre-invariant; may mutate state and `emit`; the
@@ -254,11 +353,22 @@ depending on the old interface. The genuinely-external-service users move to a
   aggregate, filled by a co-located user file that regeneration preserves), five
   idiomatic mechanisms (.NET `partial`, Java `protected` override, TS/Python
   overridable method, Elixir override).
-- **D5 — scope & phasing.** No grammar/IR change (`extern` already parses; the
-  op carries `extern: true`). Work is per-backend **emission** + deleting the
-  injected-handler machinery. Five independent generator slices, phased by
-  value: (1) Elixir (correctness) → (2) .NET (S10) → (3) TS → (4) Python →
-  (5) Java. External-service migration = docs + example.
+- **D5 — scope & phasing. ⚠️ RE-PHASED 2026-07-12 (D1 correction).** No
+  grammar/IR change (`extern` already parses; the op carries `extern: true`). The
+  original plan — "five slices that delete the injected-handler machinery" — is
+  **gated** on the D1 case-1/case-2 discriminator, because deleting the machinery
+  removes case 2's only home. What proceeds **now**, independent of the gate:
+    - **Slice 1 — Elixir** silent-no-op fix (§1b): a **net-new, additive** seam
+      (Elixir had no injected handler to begin with), so it does not depend on
+      the discriminator. Proceeds.
+    - **S10-containment slice (§3d)** — .NET + Hono: narrow the setter leak while
+      **retaining** the injected handler. Ships the encapsulation win without the
+      reframe.
+
+  The full re-home-and-delete work (the TS/Python/Java machinery deletion and the
+  .NET partial-method form) **waits** on where case 2 lands (a workflow, or an
+  undesigned `extern commandHandler`). The external-service "migration = docs +
+  example" line was predicated on the wrong D1 and is **withdrawn**.
 
 ### Residual mechanism questions (finalized in each slice's design-review, not blockers)
 
@@ -281,8 +391,10 @@ when its backend slice is built, not gating the direction:
 
 ## Relationship to other work
 
-- **S10** (`docs/audits/generated-code-ddd-review-2026-07.md`) — this proposal
-  is the principled resolution; the setter-visibility patch / scoped-facade were
-  narrower alternatives that treat the symptom.
+- **S10** (`docs/audits/generated-code-ddd-review-2026-07.md`) — the full reframe
+  is the principled resolution *once case 2 has a home*; the **scoped-mutator
+  containment (§3d)** is the narrower fix that ships now (it does not treat S10 as
+  merely cosmetic — it removes the app-wide setter surface entirely, just without
+  re-homing the op or deleting the injected handler).
 - **`unfoldable-api-derivation.md`** — the `commandHandler` layer this leans on.
 - **Elixir silent no-op** — folded in as a correctness fix (§1b, §3a).
