@@ -1517,7 +1517,7 @@ function collectDereferencedLoads(stmts: readonly WorkflowStmtIR[]): Set<string>
 // dispatch + `for-each` recursion live in the spine; the base indent
 // (`INDENT`, 8 spaces) is threaded by the driver and `for-each` bodies step
 // +`indentUnit` (4 spaces), reproducing the prior hand-indentation exactly.
-function csWorkflowStmtTarget(
+export function csWorkflowStmtTarget(
   ctx: EnrichedBoundedContextIR,
   renderArg: (e: ExprIR) => string,
   guardLoads: boolean | ReadonlySet<string> = false,
@@ -1835,7 +1835,7 @@ function rewriteExprRefs(
 }
 
 // Render an ExprIR, but rewrite param refs to `command.PascalName`.
-function renderExprWithCmdParams(
+export function renderExprWithCmdParams(
   e: ExprIR,
   paramNames: Set<string>,
   resourceClasses?: Map<string, string>,

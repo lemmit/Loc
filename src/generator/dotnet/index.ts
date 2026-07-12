@@ -118,6 +118,7 @@ import {
   renderTestCsproj,
   renderTestsFile,
 } from "./emit.js";
+import { emitExplicitHandlers, emitExplicitRouteController } from "./explicit-handlers-emit.js";
 import {
   buildFindBodies,
   buildRetrievalBodies,
@@ -318,11 +319,24 @@ function emitProjectFromContexts(
     // `public static class` per `domainService` + its `or`-union return records.
     emitDomainServices(ctx, ns, out);
     emitWorkflows(ctx, ns, out, { routePrefix, sys: system?.sys, sourcemap });
+    // Explicit application layer (unfoldable-api-derivation.md, A1): emit the
+    // `commandHandler` / `queryHandler` Mediator records + handlers.  A no-op
+    // for a context that declares none.
+    emitExplicitHandlers(ctx, ns, out);
     emitWorkflowInstanceReads(ctx, ns, out, { routePrefix });
     // Projection read routes (projection.md) — GET /<prefix>projections/<snake>
     // [/{key}] + the `<Proj>Response` DTOs, over the read-model row DbSet.
     emitProjectionReads(ctx, ns, out, { routePrefix });
     emitViews(ctx, ns, out, { routePrefix, sourcemap });
+  }
+  // Explicit transport layer (unfoldable-api-derivation.md, A1): one
+  // ControllerBase per served api whose `route` list is non-empty, dispatching
+  // each route through Mediator.  Routes to non-hosted contexts are skipped.
+  if (system) {
+    for (const apiName of system.deployable.serves) {
+      const api = system.sys.apis.find((a) => a.name === apiName);
+      if (api) emitExplicitRouteController(api.name, api.routes, contexts, ns, out);
+    }
   }
   // DbContext + project shell are emitted once, with all aggregates
   // collected from the union of contexts.
