@@ -123,7 +123,7 @@ export function productRoutes(repo: ProductRepository): OpenAPIHono {
       try {
         await repo.delete(Ids.ProductId(id));
       } catch (err) {
-        if (err && typeof err === "object" && (err as { code?: string }).code === "23503") {
+        if (err && typeof err === "object" && (((err as { code?: string }).code ?? (err as { cause?: { code?: string } }).cause?.code) === "23503")) {
           return c.body(JSON.stringify({ type: "about:blank", title: "Conflict", status: 409, detail: "Product is still referenced and cannot be deleted.", instance: c.req.path }), 409, { "content-type": "application/problem+json" });
         }
         throw err;
