@@ -98,8 +98,9 @@ in hand — not before F# output exists.
    TS/zod emitters). Un-stubs the `felizTarget` api seams
    (`buildHookUse`/`renderApiCall`). NOT started.
 8. ✅ `generated-feliz-build` CI gate — generate via CLI → `dotnet fable` →
-   `vite build` (`.github/workflows/generated-feliz-build.yml`). Steps proven
-   locally; first Actions run executes on the PR.
+   `vite build` (`.github/workflows/generated-feliz-build.yml`). **Green in
+   GitHub Actions** (run #3; first two runs caught a Node-20 `Object.groupBy`
+   gap, fixed by pinning Node 22).
 
 ## Known gaps / next
 - The procedural pack has 4 primitives (Stack/Heading/Text/Button); the
