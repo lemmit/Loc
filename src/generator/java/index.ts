@@ -151,6 +151,7 @@ import {
   renderWorkflowStateRepository,
   workflowStateClass,
 } from "./emit/workflow-state.js";
+import { emitExplicitHandlers, emitExplicitRouteController } from "./explicit-handlers-emit.js";
 import { basePackageFor, javaPackageSegment, mainSourcePath } from "./naming.js";
 
 // ---------------------------------------------------------------------------
@@ -540,6 +541,18 @@ function emitProjectFromContexts(
         );
       }
     }
+    // Explicit application-layer handlers (unfoldable-api-derivation.md, A2):
+    // `commandHandler` / `queryHandler` context members → plain `@Service`
+    // beans in the shared application package.  A no-op for a context with none.
+    for (const f of emitExplicitHandlers(
+      ctx,
+      basePkg,
+      pkgFor("workflow-service"),
+      (a) => pkgFor("entity", a),
+      (a) => pkgFor("repository-interface", a),
+    )) {
+      place(f.name, "workflow-service", f.content);
+    }
     // Saga-state persistence (workflow-debt-backend-parity.md, Java saga slice
     // 1): a correlation-bearing workflow gets a JPA `@Entity` bound to the
     // Flyway-owned saga table + a Spring Data repository over it — the
@@ -799,6 +812,26 @@ function emitProjectFromContexts(
       },
     });
     if (seedRunner) place(`${ctx.name}SeedRunner.java`, "infra-persistence", seedRunner);
+  }
+
+  // Explicit transport bindings (unfoldable-api-derivation.md, A2): one
+  // `@RestController` per served api, dispatching each `route <M> "<path>" ->
+  // <Ctx>.<Handler>` to its handler bean.  Routes to non-hosted contexts are
+  // skipped.  Only reachable in system mode (an api + its routes live on the
+  // system, not a bare context).
+  if (system) {
+    for (const apiName of system.deployable.serves) {
+      const api = system.sys.apis.find((a) => a.name === apiName);
+      if (!api) continue;
+      const controller = emitExplicitRouteController(
+        api.name,
+        api.routes,
+        contexts,
+        basePkg,
+        pkgFor("workflow-service"),
+      );
+      if (controller) place(controller.name, "api-common", controller.content);
+    }
   }
 
   // Auth surface — only when the deployable opts in via auth: required
