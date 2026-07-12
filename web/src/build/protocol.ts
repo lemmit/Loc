@@ -90,6 +90,12 @@ export type VfsDeleteResult = VfsDeleteOk;
 export interface GenerateParams {
   text?: string;
   entryPath?: string;
+  /** Opt-in Source Map v3 sidecars — threads into `generateSystems` /
+   *  `generateSystemsFromLoom`'s `GenerateSystemOptions.sourcemap`.
+   *  Off (undefined/false) by default so the "generated code" view and
+   *  the download-zip stay byte-identical; only a caller that wants a
+   *  `.ddd`-debuggable run bundle sets this.  See `client.ts`. */
+  sourcemap?: boolean;
 }
 
 export type BuildRpcRequest =

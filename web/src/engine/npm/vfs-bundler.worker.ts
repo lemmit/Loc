@@ -33,6 +33,14 @@ export interface VfsBundleRequest {
    *  main thread resolves from its document url — used for the
    *  vendor/ and npm-mirror/ fetches (see `deployBase`). */
   deployBase?: string;
+  /** Opt-in: bundle with an inline Source Map v3 (`sourcemap: "inline"`
+   *  instead of esbuild's default `false`).  Off by default so the
+   *  bundle stays byte-identical; esbuild composes it from the
+   *  generated `.ts`'s `//# sourceMappingURL` + the `.ts.map` sidecars
+   *  in `generatedFiles` (present only when the caller generated with
+   *  `sourcemap: true` — see `EsbuildRunInput.sourcemap`), chaining the
+   *  bundle's own map straight back to `.ddd`. */
+  sourcemap?: boolean;
 }
 
 export interface VfsBundleResponse {
@@ -181,7 +189,6 @@ const BUILD_COMMON = {
   target: "es2022",
   logLevel: "silent" as const,
   write: false as const,
-  sourcemap: false as const,
   // Generated components use the automatic JSX runtime (no
   // `import React`).  Without this esbuild defaults to the classic
   // transform (React.createElement) → "React is not defined" at
@@ -270,9 +277,14 @@ async function getSlot(
 }
 
 self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
-  const { id, stdinContents, entry, generatedFiles, rootDeps, externalReactRuntime } =
+  const { id, stdinContents, entry, generatedFiles, rootDeps, externalReactRuntime, sourcemap } =
     ev.data;
   if (ev.data.deployBase) deployBase = ev.data.deployBase;
+  // "inline" so the map travels inside the bundle's own text (no second
+  // fetch) — the blob-URL `import()` in `runtime.worker.ts` and DevTools
+  // both read a trailing `//# sourceMappingURL=data:...` directly.  `false`
+  // (esbuild's own default) reproduces today's bundle byte-for-byte.
+  const sourcemapOption: esbuild.BuildOptions["sourcemap"] = sourcemap ? "inline" : false;
   try {
     await ensureInit();
     const isReact = !stdinContents && !!entry;
@@ -293,7 +305,7 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
     if (vendor && entry) {
       const slot = await getSlot(
         "react-vendor",
-        JSON.stringify([entry, aliases]),
+        JSON.stringify([entry, aliases, sourcemapOption]),
         (files) => {
           const externals = { current: new Set<string>() };
           const recorder: esbuild.Plugin = {
@@ -316,6 +328,7 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
           return {
             options: {
               ...BUILD_COMMON,
+              sourcemap: sourcemapOption,
               entryPoints: [entry],
               metafile: true,
               plugins: [
@@ -375,11 +388,13 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
         !!externalReactRuntime,
         aliases,
         stdinContents ?? null,
+        sourcemapOption,
       ]),
       (files) => ({
         options: stdinContents
           ? {
               ...BUILD_COMMON,
+              sourcemap: sourcemapOption,
               plugins: [
                 makeVfsNpmPlugin(files, "/node_modules", !!externalReactRuntime, aliases),
               ],
@@ -392,6 +407,7 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
             }
           : {
               ...BUILD_COMMON,
+              sourcemap: sourcemapOption,
               plugins: [
                 makeVfsNpmPlugin(files, "/node_modules", !!externalReactRuntime, aliases),
               ],
@@ -423,10 +439,19 @@ self.onmessage = async (ev: MessageEvent<VfsBundleRequest>): Promise<void> => {
     );
     const js = out.outputFiles?.find((f) => f.path.endsWith(".js"));
     const css = out.outputFiles?.find((f) => f.path.endsWith(".css"));
+    let code = js?.text ?? out.outputFiles?.[0]?.text ?? "";
+    // Debug polish: a `blob:` module's name in DevTools defaults to the
+    // opaque blob URL — a trailing `//# sourceURL=` directive gives it a
+    // friendly one instead.  Only on the hono bundle, and only when
+    // sourcemaps were actually requested (keeps the default bundle
+    // untouched).
+    if (kind === "hono" && sourcemap) {
+      code += "//# sourceURL=loom://backend.js\n";
+    }
     self.postMessage({
       id,
       ok: true,
-      code: js?.text ?? out.outputFiles?.[0]?.text ?? "",
+      code,
       css: css?.text,
       versions: versionRec,
       installMs,

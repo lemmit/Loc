@@ -51,6 +51,12 @@ This adds, alongside the normal output:
 
 ## 2. Native editor debugging (recommended)
 
+**In the browser playground:** the Run/boot path can bundle the in-browser
+Hono backend with an inline Source Map v3 chaining back to `.ddd` (opt-in,
+off by default so the "generated code" view and the download stay
+byte-identical) — open DevTools → Sources, find the backend's blob module,
+and set a breakpoint on a `.ddd` line; it binds via the inline map.
+
 Open the generated `out/` directory in VS Code. The emitted
 `.vscode/launch.json` already contains a config per backend. Pick one from
 the Run and Debug panel, set a breakpoint **in the `.ddd` file**, and run.

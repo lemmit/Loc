@@ -61,6 +61,14 @@ export interface PrepareInput {
   honoEntry: string;
   /** React deployable entry, when the system emits a frontend. */
   reactEntry?: string;
+  /** Opt-in: bundle the Hono backend with an inline Source Map v3 that
+   *  chains back to `.ddd` (via the `.ts.map` sidecars `files` carries
+   *  when its generate step ran with `sourcemap: true`), so the
+   *  browser's DevTools can breakpoint the running backend in `.ddd`.
+   *  Off by default — undefined/false keeps the bundle byte-identical
+   *  to today's output.  Backend-only (frontend `.ddd`→ debugging is
+   *  out of scope; see `docs/debugging.md`). */
+  sourcemap?: boolean;
 }
 
 /** What `prepare` yields — the same per-kind bundle pair the pipeline

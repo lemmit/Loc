@@ -52,6 +52,11 @@ export interface EsbuildRunInput {
    *  "Invalid hook call" failure that bundling React per-frontend
    *  would cause. */
   externalReactRuntime?: boolean;
+  /** Opt-in: emit an inline Source Map v3 for this bundle (see
+   *  `PrepareInput.sourcemap`).  Off by default; only meaningful on
+   *  the Hono run (the React bundle never sets this — frontend `.ddd`
+   *  debugging is a separate, out-of-scope slice). */
+  sourcemap?: boolean;
 }
 
 export type EsbuildRun = (
@@ -169,6 +174,8 @@ export class NpmInstallBundleEngine implements RuntimeEngine {
         input.honoEntry,
         schemaPathFor(input.honoEntry),
       ),
+      // Backend-only: the React run below never sets this.
+      sourcemap: input.sourcemap,
     });
     // Apply the npm-pglite postprocess HERE — the runtime worker
     // boots `hono.code` verbatim, so nothing else would.  Failure →
