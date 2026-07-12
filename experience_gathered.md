@@ -1851,3 +1851,21 @@ the ones that cost real tool-calls and are non-obvious.
   before acting on it. Note the integration token here lacked `rerun-failed-jobs`
   permission, so re-running to confirm flakiness wasn't available — the main-history
   check is the fallback.)
+
+- **`conformance-full`'s behavioral `test e2e` tier only exercises the backends the
+  `.ddd` actually targets — in `showcase.ddd` that's dotnet + hono + one UI, NOT
+  elixir/python/java — so an elixir-only change cannot cause its DSL-e2e failure.**
+  A nightly `Conformance full` went red in the "generated DSL-level e2e suite runs
+  against the live system" sub-test (the child `npx vitest run` in `<out>/e2e` exited
+  1), on a commit whose only changes were elixir codegen. Exoneration was structural,
+  not statistical: `grep 'test e2e .* against' examples/showcase.ddd` shows every api
+  block targets `honoApi` (8) / `dotnetApi` (5) / `consoleWeb` (1) and **zero** target
+  `phoenixApi` — the elixir backend is built + booted (it rides the `/health` + 5-way
+  OpenAPI parity checks, which passed) but no behavioral test runs against it. So the
+  failing assertion hits dotnet or hono; an elixir diff is not in its runtime path.
+  Diagnosis path for any red conformance behavioral sub-test: read the `against
+  <deployable>` targets of the source system *first* — if your change's backend isn't
+  among them, it's exonerated before you even read the assertion. (This is the same
+  structural blind spot that let the `#1796` elixir op-persist bug ship uncaught: "no
+  per-PR gate does an elixir *operation* round-trip" — the conformance behavioral tier
+  doesn't either, because `showcase.ddd` points its op-exercising e2e at dotnet/hono.)
