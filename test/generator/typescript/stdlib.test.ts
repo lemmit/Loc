@@ -10,9 +10,13 @@ const SRC = `
   context Sales {
     aggregate Order {
       name: string
+      qty: int
+      due: datetime
       invariant isPresent(name)
       derived blank: bool = isBlank(name)
       derived short: string = truncate(name, 8)
+      derived cl: int = clamp(qty, 0, 10)
+      derived od: bool = isOverdue(due)
     }
     repository Orders for Order { }
   }
@@ -31,8 +35,12 @@ describe("typescript generator — stdlib prelude", () => {
     expect(domain).toContain("get blank(): boolean { return (this._name.trim().length === 0); }");
     expect(domain).toContain("this._name.trim().length > 0");
     expect(domain).toContain("this._name.slice(0, (0) + (8))");
+    // math (clamp) + temporal (isOverdue) inline too.
+    expect(domain).toContain("get cl(): number { return (Math.min(Math.max(this._qty, 0), 10)); }");
+    expect(domain).toContain("get od(): boolean { return (new Date() > this._due); }");
     // No standalone helper function emitted for the prelude.
     expect(domain).not.toContain("isBlank(s");
     expect(domain).not.toContain("truncate(s");
+    expect(domain).not.toContain("clamp(n");
   });
 });

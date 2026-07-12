@@ -29,9 +29,18 @@ describe("stdlib prelude — parse-time", () => {
 
   it("exposes the expected prelude functions", () => {
     const names = [...stdFunctions().keys()];
+    // strings
     expect(names).toContain("isBlank");
     expect(names).toContain("isPresent");
     expect(names).toContain("truncate");
+    // math
+    expect(names).toContain("clamp");
+    expect(names).toContain("percentOf");
+    expect(names).toContain("roundTo");
+    // temporal
+    expect(names).toContain("isOverdue");
+    expect(names).toContain("isFuture");
+    expect(names).toContain("isPast");
   });
 });
 
@@ -40,6 +49,27 @@ describe("stdlib prelude — ambient use (no import)", () => {
     const { errors } = await parseString(
       wrap("", `invariant isPresent(name)\n         derived blank: bool = isBlank(name)`),
     );
+    expect(errors).toEqual([]);
+  });
+
+  it("resolves ambient math + temporal prelude calls", async () => {
+    const src = `
+      context C {
+        aggregate A {
+          q: int
+          amt: decimal
+          due: datetime
+          derived cl: int = clamp(q, 0, 10)
+          derived pc: decimal = percentOf(amt, amt)
+          derived rt: decimal = roundTo(amt, 2)
+          derived od: bool = isOverdue(due)
+          derived fut: bool = isFuture(due)
+          derived pst: bool = isPast(due)
+        }
+        repository As for A { }
+      }
+    `;
+    const { errors } = await parseString(src);
     expect(errors).toEqual([]);
   });
 

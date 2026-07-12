@@ -238,11 +238,14 @@ if (!(!(Name.Trim().Length > 0))) throw new DomainInvariantException(...);
   externalising the source to `std/*.ddd` files, and a `loom:std/strings` scheme
   arm in the loader for selective/explicit import (the ambient path makes explicit
   import optional).
-- **C2 — content:** `std/strings.ddd`, `std/math.ddd`, `std/temporal.ddd` — curated
-  expression-form functions composed from Layer 0 (`isBlank`, `initials`, `clamp`,
-  `percentOf`, `isOverdue`, `age`, …), each with `test` blocks. Wire the files into the
-  behavioral corpus + conformance suite so the stdlib doubles as a permanent
-  cross-backend conformance fixture.
+- **C2 — content: strings + math + temporal SHIPPED** (as ambient prelude modules in
+  `src/language/stdlib-source.ts`): `strings` = `isBlank`/`isPresent`/`truncate`;
+  `math` = `clamp`/`percentOf`/`roundTo`; `temporal` = `isOverdue`/`isFuture`/`isPast`.
+  Each is expression-form and composed from Layer 0. *Dropped (not expressible today):*
+  `age` (no `duration`→number extraction) and multi-word `initials` (no `map`/`join`).
+  *Deferred follow-ons:* externalising to `std/*.ddd` files with `test` blocks and
+  wiring them into the behavioral corpus + conformance suite so the stdlib doubles as a
+  permanent cross-backend conformance fixture.
 - **C3 — docs:** `docs/stdlib.md` reference (intrinsics table generated from the
   registry — single source of truth), language.md cross-links.
 
