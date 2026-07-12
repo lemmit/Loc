@@ -43,6 +43,7 @@ These cover a single language feature each.  Each one is self-contained.
 | [`conformance-semantics.md`](conformance-semantics.md) | The **runtime-value** contract the spec-diff is blind to — named RS-rules (camelCase keys, enum casing, no leaked timestamps, association round-trip) seeded from the #1620–#1660 wire-parity sweep. |
 | [`migrations.md`](migrations.md) | `MigrationsIR` — the phase-⑨ schema-delta IR derived once and shared by every DB backend: how IR maps to tables/columns/join-tables, `migrationsOwner`, the shared Postgres SQL renderer, and where each backend applies migrations. |
 | [`verify.md`](verify.md) | The `ddd verify` gate — joins a test-results JSON onto the requirements graph for per-requirement Definition-of-Done verdicts (VERIFIED / FAILING / UNVERIFIED / UNTESTED); CLI flags, `results.json` contract, and the emitted `.loom/verification.*`. |
+| [`debugging.md`](debugging.md) | You want to debug a generated app back to `.ddd` — the `--sourcemap` metadata (Source Map v3 / `#line`→PDB / JSR-45 SMAP), the emitted `.vscode/launch.json` for native editor debugging, the `ddd trace` / `ddd breakpoints` CLI, and the `ddd-dap` debug adapter. |
 
 ## Platforms, packs, stacks
 
