@@ -84,6 +84,10 @@ describe("feliz Counter", () => {
     expect(files.get("App.fsproj")).toContain('Include="Feliz"');
     expect(files.get(".config/dotnet-tools.json")).toContain('"fable"');
     expect(files.has("index.html")).toBe(true);
+    // Fable emits out/src/App.js (mirrors the fsproj `src/App.fs` layout); the
+    // <script> must reference it RELATIVELY so Vite/Rollup resolves it at build
+    // (proven: a root-absolute `/out/App.js` fails `vite build`).
+    expect(files.get("index.html")).toContain('src="./out/src/App.js"');
     expect(files.get("Dockerfile")).toContain("dotnet tool restore");
   });
 

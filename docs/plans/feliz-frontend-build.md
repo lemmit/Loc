@@ -79,12 +79,16 @@ in hand — not before F# output exists.
    (`src/generator/_walker/js-expr-leaves.ts`, spread in), Feliz supplies
    `FS_LEAVES`, HEEx (which forks `emitExpr`) gets fail-loud `unreachableExprLeaves`.
    One dispatcher, one leaf table per embedded language — byte-identical gated.
-5. `PlatformSurface` + registry entry + `framework: feliz` (+ a `feliz`
-   platform) grammar/validator — mirror the Svelte/Angular adds; a
-   `validateLoomModel`-path test per experience §22. Fable adds a build step
-   (dotnet+vite), so the compose/docker story diverges from the vite-only
-   static hosts.
-6. Runtime proof — vite build + boot the Counter in headless Chromium
+5. ✅ `platform: feliz` / `framework: feliz` reachable end-to-end — grammar
+   (langium regen) + `Platform` IR type + `PLATFORM_DESCRIPTORS` +
+   `src/platform/feliz.ts` surface + registry + validator (`FRONTEND_KEYWORDS`)
+   + the `.ddd`-printer `PLATFORM_KEYWORDS` mirror. Feliz hosts only itself
+   (Fable's dotnet+vite build ≠ the vite-only static pipeline, so it's absent
+   from `STATIC_BUNDLE_FRAMEWORKS`/`FRONTEND_GENERATORS`). Validates through
+   `validateLoomModel` and generates through the system composer; the emitted
+   tree ships a multi-stage Dockerfile (Fable→Vite→nginx). Tests incl. a
+   `validateLoomModel`-path reachability test (experience §22).
+6. ⚙ Runtime proof — vite build + boot the Counter in headless Chromium
    (the §7.1 pipeline) against the emitted project shell.
 7. F# wire layer — Thoth.Json decoders + `Cmd`-based api (parallel of
    `src/generator/_frontend/`; reuse IR projections like `wireShapeFor`, not the

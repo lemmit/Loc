@@ -183,7 +183,9 @@ const INDEX_HTML = `<!doctype html>
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/out/App.js"></script>
+    <!-- Fable mirrors the fsproj source layout: src/App.fs → out/src/App.js.
+         Relative (not root-absolute) so Vite/Rollup resolves it at build. -->
+    <script type="module" src="./out/src/App.js"></script>
   </body>
 </html>
 `;
