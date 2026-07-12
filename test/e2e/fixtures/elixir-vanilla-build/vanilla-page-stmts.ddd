@@ -1,8 +1,9 @@
 // LiveView page-statement coverage on the vanilla (plain Ecto) backend — port
-// of the former page-stmt-coverage fixture.  A custom page whose Button
-// handlers exercise the StmtIR kinds the HEEx hoisted-handler renderStmt must
-// emit: scalar `+=`/`-=` on a page-`state` field (→ assign arithmetic),
-// `precondition` (→ flash + halt), `requires` (→ forbidden flash).
+// of the former page-stmt-coverage fixture.  Named `action`s exercise the
+// StmtIR kinds the HEEx hoisted-handler renderStmt must emit: scalar `+=`/`-=`
+// on a page-`state` field (→ assign arithmetic), `precondition` (→ flash +
+// halt), `requires` (→ forbidden flash).  (Effects live in named actions, not
+// inline lambdas — `loom.effect-in-lambda`.)
 system PageStmtCoverage {
   subdomain M {
     context C {
@@ -17,10 +18,15 @@ system PageStmtCoverage {
     page Landing {
       route: "/"
       state { count: int = 0 }
+      // Effects (`+=`/`-=`) must be named actions (`loom.effect-in-lambda`).
+      action inc() { count += 1 }
+      action dec() { count -= 1 }
       body: Stack {
         Heading { "Counter" },
-        Button { "inc", onClick: e => { count += 1 } },
-        Button { "dec", onClick: e => { count -= 1 } },
+        Button { "inc", onClick: inc },
+        Button { "dec", onClick: dec },
+        // `precondition`/`requires` are guard statements, not effects — they
+        // stay admissible inline (the gate flags only state writes / view effects).
         Button { "guard", onClick: e => { precondition count >= 0 } },
         Button { "auth", onClick: e => { requires count > 0 } }
       }
