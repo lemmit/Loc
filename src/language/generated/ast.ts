@@ -148,6 +148,7 @@ export type DddKeywordNames =
     | "extern"
     | "false"
     | "favicon"
+    | "feliz"
     | "filter"
     | "find"
     | "flowbite"
@@ -1446,10 +1447,10 @@ export function isForStmt(item: unknown): item is ForStmt {
     return reflection.isInstance(item, ForStmt.$type);
 }
 
-export type Framework = 'angular' | 'phoenixLiveView' | 'react' | 'svelte' | 'vue';
+export type Framework = 'angular' | 'feliz' | 'phoenixLiveView' | 'react' | 'svelte' | 'vue';
 
 export function isFramework(item: unknown): item is Framework {
-    return item === 'react' || item === 'svelte' || item === 'vue' || item === 'angular' || item === 'phoenixLiveView';
+    return item === 'react' || item === 'svelte' || item === 'vue' || item === 'angular' || item === 'feliz' || item === 'phoenixLiveView';
 }
 
 export interface FunctionDecl extends langium.AstNode {
@@ -2570,10 +2571,10 @@ export function isPermissionsBlock(item: unknown): item is PermissionsBlock {
     return reflection.isInstance(item, PermissionsBlock.$type);
 }
 
-export type Platform = 'angular' | 'dotnet' | 'elixir' | 'java' | 'node' | 'python' | 'react' | 'static' | 'svelte' | 'vue' | string;
+export type Platform = 'angular' | 'dotnet' | 'elixir' | 'feliz' | 'java' | 'node' | 'python' | 'react' | 'static' | 'svelte' | 'vue' | string;
 
 export function isPlatform(item: unknown): item is Platform {
-    return item === 'dotnet' || item === 'node' || item === 'react' || item === 'svelte' || item === 'vue' || item === 'angular' || item === 'static' || item === 'elixir' || item === 'python' || item === 'java' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
+    return item === 'dotnet' || item === 'node' || item === 'react' || item === 'svelte' || item === 'vue' || item === 'angular' || item === 'feliz' || item === 'static' || item === 'elixir' || item === 'python' || item === 'java' || (typeof item === 'string' && (/"(\\.|[^"\\])*"/.test(item)));
 }
 
 export interface PolicyDecl extends langium.AstNode {

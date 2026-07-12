@@ -317,7 +317,7 @@ UiSugarBinding:
 // vue-router) against a vue-format design pack
 // (`vuetify`/`shadcnVue`).
 Framework returns string:
-    'react' | 'svelte' | 'vue' | 'angular' | 'phoenixLiveView';
+    'react' | 'svelte' | 'vue' | 'angular' | 'feliz' | 'phoenixLiveView';
 
 // Backend platforms accept a quoted `family@version` pin
 // (`platform: "node@v4"`) via the STRING alternative — symmetric
@@ -337,7 +337,7 @@ Framework returns string:
 // platform alias was RETIRED — `python` is the only spelling and
 // `platform: fastapi` fails validation as an unknown platform.)
 Platform returns string:
-    'dotnet' | 'node' | 'react' | 'svelte' | 'vue' | 'angular' | 'static' | 'elixir' | 'python' | 'java' | STRING;
+    'dotnet' | 'node' | 'react' | 'svelte' | 'vue' | 'angular' | 'feliz' | 'static' | 'elixir' | 'python' | 'java' | STRING;
 
 // Design-system pack selector — picks the template pack the UI
 // generator renders pages against.  `mantine` (default), `shadcn`,

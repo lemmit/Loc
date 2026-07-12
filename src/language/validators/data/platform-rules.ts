@@ -36,6 +36,7 @@ export const FRONTEND_KEYWORDS: ReadonlySet<string> = new Set([
   "svelte",
   "vue",
   "angular",
+  "feliz",
   "static",
 ]);
 

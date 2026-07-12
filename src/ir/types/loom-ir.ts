@@ -2662,6 +2662,7 @@ export type Platform =
   | "svelte"
   | "vue"
   | "angular"
+  | "feliz"
   | "static"
   | "elixir"
   | "python"

@@ -16,6 +16,7 @@
 
 import type { ExprIR, TypeIR } from "../../../ir/types/loom-ir.js";
 import type { DetectedApiCall } from "../../_walker/api-hook-detector.js";
+import { jsExprLeaves } from "../../_walker/js-expr-leaves.js";
 import {
   defaultInitForJs,
   escapeJsFamilyText,
@@ -77,6 +78,8 @@ function quoteAttrExpr(expr: string, prefer: '"' | "'" = '"'): string {
  *  generator-core slice on) the shared markup walker. */
 export const vueTarget: WalkerTarget = {
   framework: "vue",
+  // Expression-syntax leaves (JS) — shared by all JSX-family frontends.
+  ...jsExprLeaves,
 
   // --- State seam ---------------------------------------------------------
 

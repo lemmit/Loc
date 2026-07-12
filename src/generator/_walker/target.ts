@@ -68,7 +68,7 @@
 // code.
 // ---------------------------------------------------------------------------
 
-import type { ExprIR, StateFieldIR, StoreIR, TypeIR } from "../../ir/types/loom-ir.js";
+import type { ExprIR, LiteralKind, StateFieldIR, StoreIR, TypeIR } from "../../ir/types/loom-ir.js";
 import type { DetectedApiCall } from "./api-hook-detector.js";
 import type { WalkContext } from "./walker-core.js";
 
@@ -647,4 +647,33 @@ export interface WalkerTarget {
    *  until ported.  `renderStmt` is the body-statement renderer the action
    *  bodies reuse (so `:=`/`+=` lower identically to a page action). */
   renderStoreModule?(store: StoreIR): { path: string; content: string };
+
+  // --- Expression-syntax seam (fable-elmish-frontend.md) -------------------
+  //
+  // `emitExpr` renders the pure-syntax `ExprIR` arms (operators, literals,
+  // list/object spelling, the `convert` cast) by delegating to these leaf
+  // formatters — the frontend twin of the backend `ExprTarget`
+  // (src/generator/_expr/target.ts).  The JSX-family frontends
+  // (React/Vue/Svelte/Angular) all embed JAVASCRIPT, so they share ONE leaf
+  // table, `jsExprLeaves` (src/generator/_walker/js-expr-leaves.ts), spread in.
+  // Feliz — the first frontend whose embedded language is F#, not JS — supplies
+  // its own F# leaves (`FS_LEAVES`).  Sub-expressions arrive already rendered,
+  // so each leaf is a pure formatter.  REQUIRED: a new frontend must decide its
+  // expression syntax (the exhaustive delegation in `emitExpr` has no JS
+  // fallback — one dispatcher, one leaf table per embedded language).
+
+  /** Literal formatter — `null` → `null` on JS, `None` on F#. */
+  exprLiteral(lit: LiteralKind, value: string): string;
+  /** Binary op — operator spelling (`==` → `===` on JS, `=` on F#). */
+  exprBinary(left: string, right: string, op: string): string;
+  /** Unary op — `(!x)` on JS, `(not x)` on F#. */
+  exprUnary(op: string, operand: string): string;
+  /** Ternary — `(c ? t : e)` on JS, `(if c then t else e)` on F#. */
+  exprTernary(cond: string, then: string, otherwise: string): string;
+  /** `convert` cast — `String(x)` on JS vs `string x` / `int x` on F#. */
+  exprConvert(value: string, target: string, from: string | undefined): string;
+  /** List literal — `[a, b]` on JS vs `[ a; b ]` on F#. */
+  exprList(elements: string[]): string;
+  /** Object literal — JS `{ n: v }` vs F# anonymous record `{| n = v |}`. */
+  exprObject(fields: ReadonlyArray<{ name: string; value: string }>): string;
 }

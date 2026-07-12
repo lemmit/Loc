@@ -23,11 +23,18 @@
 // ---------------------------------------------------------------------------
 
 import type { TypeIR } from "../../ir/types/loom-ir.js";
+import { unreachableExprLeaves } from "../_walker/js-expr-leaves.js";
 import type { ApiCallSite, RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { escapeHeexText } from "./heex-walker-core.js";
 
 export const heexTarget: WalkerTarget = {
   framework: "phoenixLiveView",
+
+  // Expression-syntax leaves — HEEx runs a PARALLEL walker
+  // (heex-walker-core.ts) and never calls the shared `emitExpr`, so these are
+  // unreachable; they throw (fail-loud) if the fork invariant ever regresses,
+  // rather than silently emitting JS into Elixir output.
+  ...unreachableExprLeaves,
 
   // --- State seam ---------------------------------------------------------
 
