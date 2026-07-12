@@ -385,22 +385,57 @@ function renderEntity(
     return [`${head} {`, renderTsStatements(fn.body.stmts), `  }`];
   });
 
-  // For extern: setters per declared property, plus `raiseEvent` on the
-  // root.  Containment collections stay private (mutation goes through
-  // the existing `add`/`remove` operation paths).
-  const externMutators: string[] = [];
-  if (hasExtern) {
+  // S10 containment: an `extern` op's registered handler needs a write
+  // surface, but the old approach — a public `set <field>` per property —
+  // widened the entity app-wide, so ANY caller could `x.status = …` and
+  // skip invariants.  Instead the aggregate mints a NARROW, extern-scoped
+  // `<Agg>Editor` via an in-class `_externEditor()` (minted in-class so it
+  // can reach the `private` fields); the auto route hands that editor to
+  // the handler.  Entity fields stay `private` behind read-only getters, so
+  // `x.field = …` no longer type-checks outside the aggregate's own methods.
+  // Only `assertInvariants()` stays public — it's an enforcer, not a mutator
+  // (it cannot bypass anything), and the route runs it after the handler.
+  // Containment collections stay private (mutation goes through the existing
+  // `add`/`remove` operation paths).
+  const externHookLines: string[] = [];
+  const editorInterfaceLines: string[] = [];
+  if (hasExtern && e.isRoot) {
+    externHookLines.push(
+      "  /** Narrow, extern-scoped write handle (S10 containment): the only",
+      "   *  surface that mutates this aggregate from outside its own methods.",
+      "   *  Minted in-class so it can reach the `private` fields; handed to the",
+      "   *  registered extern handler by the auto route. */",
+      `  _externEditor(): ${e.name}Editor {`,
+      "    const self = this;",
+      "    return {",
+      `      get id(): Ids.${e.name}Id { return self._id; },`,
+    );
     for (const f of e.fields) {
-      externMutators.push(`  set ${f.name}(v: ${renderTsType(f.type)}) { this._${f.name} = v; }`);
-    }
-    if (e.isRoot) {
-      externMutators.push("  raiseEvent(ev: Events.DomainEvent): void { this._events.push(ev); }");
-      externMutators.push(
-        emitTrace
-          ? `  assertInvariants(): void { this._assertInvariants("extern"); }`
-          : "  assertInvariants(): void { this._assertInvariants(); }",
+      externHookLines.push(
+        `      get ${f.name}(): ${renderTsType(f.type)} { return self._${f.name}; },`,
+        `      set ${f.name}(v: ${renderTsType(f.type)}) { self._${f.name} = v; },`,
       );
     }
+    externHookLines.push(
+      "      raiseEvent(ev: Events.DomainEvent): void { self._events.push(ev); },",
+      "    };",
+      "  }",
+      "",
+      emitTrace
+        ? `  assertInvariants(): void { this._assertInvariants("extern"); }`
+        : "  assertInvariants(): void { this._assertInvariants(); }",
+    );
+    editorInterfaceLines.push(
+      "",
+      `/** Extern-scoped mutation facade for ${e.name} (S10 containment) — the`,
+      " *  narrow write surface handed to a registered extern handler.  Entity",
+      " *  fields stay `private`; this is the only external write path. */",
+      `export interface ${e.name}Editor {`,
+      `  readonly id: Ids.${e.name}Id;`,
+      ...e.fields.map((f) => `  ${f.name}: ${renderTsType(f.type)};`),
+      "  raiseEvent(ev: Events.DomainEvent): void;",
+      "}",
+    );
   }
 
   const ops: string[] = [];
@@ -665,7 +700,7 @@ function renderEntity(
     "  }",
     "",
     ...getters,
-    ...externMutators,
+    ...externHookLines,
     ...fns,
     ...ops,
     ...provDrain,
@@ -695,5 +730,6 @@ function renderEntity(
     ...createFactory,
     ...esCreateFactory,
     "}",
+    ...editorInterfaceLines,
   );
 }

@@ -733,28 +733,43 @@ describe("typescript generator", () => {
     // 1. Per-aggregate extern handler module.
     const extern = files.get("domain/order-extern.ts")!;
     expect(extern).toMatch(/export type ConfirmOrderRequest = Record<string, never>/);
+    // S10 containment: the handler receives a NARROW `OrderEditor` (scoped
+    // write surface), NOT the live `Order` — so nothing outside the aggregate
+    // can bypass invariants.
     expect(extern).toMatch(
-      /export type ConfirmOrderHandler = \(aggregate: Order, request: ConfirmOrderRequest\) => Promise<void>/,
+      /export type ConfirmOrderHandler = \(editor: OrderEditor, request: ConfirmOrderRequest\) => Promise<void>/,
     );
+    expect(extern).toMatch(/import type \{ OrderEditor \} from ".\/order"/);
     expect(extern).toMatch(/externHandlers\.confirmOrder = fn/);
     expect(extern).toMatch(/verifyOrderExternHandlersRegistered/);
     expect(extern).toMatch(/Missing extern handler for 'confirm' on aggregate 'Order'/);
 
-    // 2. Aggregate exposes setters + raiseEvent + assertInvariants.
+    // 2. S10 containment: the aggregate does NOT expose per-field public
+    //    setters app-wide.  Instead it mints a narrow `OrderEditor` via an
+    //    in-class `_externEditor()` (get/set per field + raiseEvent), and the
+    //    entity fields stay private behind read-only getters.
     const order = files.get("domain/order.ts")!;
-    expect(order).toMatch(/set status\(v: OrderStatus\)/);
-    expect(order).toMatch(/raiseEvent\(ev: Events\.DomainEvent\)/);
+    expect(order).toMatch(/_externEditor\(\): OrderEditor/);
+    expect(order).toMatch(/export interface OrderEditor \{/);
+    expect(order).toMatch(/raiseEvent\(ev: Events\.DomainEvent\): void/);
     expect(order).toMatch(/assertInvariants\(\): void/);
+    // S10 REGRESSION GUARD: no app-wide public setter on the class body — the
+    // only `set status` lives inside the `_externEditor()` object literal, not
+    // as a class-level accessor.  A class-level `  set status(...)` (two-space
+    // indent) would re-open the leak.
+    expect(order).not.toMatch(/^ {2}set status\(v: OrderStatus\)/m);
+    expect(order).not.toMatch(/^ {2}set customerId\(/m);
     // 3. The user-named method is replaced by `checkConfirm` (preconditions only).
     expect(order).toMatch(/checkConfirm\(\): void/);
     expect(order).not.toMatch(/public confirm\(\)/);
 
-    // 4. Route dispatches through the registry, not a domain method.
+    // 4. Route dispatches through the registry, handing the handler the narrow
+    //    editor (not the raw aggregate), then asserts invariants on the entity.
     const routes = files.get("http/order.routes.ts")!;
     expect(routes).toMatch(/from "..\/domain\/order-extern"/);
     expect(routes).toMatch(/aggregate\.checkConfirm\(\)/);
     expect(routes).toMatch(/externHandlers\.confirmOrder/);
-    expect(routes).toMatch(/await handler\(aggregate, body\)/);
+    expect(routes).toMatch(/await handler\(aggregate\._externEditor\(\), body\)/);
     expect(routes).toMatch(/aggregate\.assertInvariants\(\)/);
     expect(routes).not.toMatch(/aggregate\.confirm\(\)/);
 
@@ -811,8 +826,9 @@ describe("typescript generator", () => {
       expect(routes).toMatch(
         /import \{ DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, ExternHandlerError \} from "\.\.\/domain\/errors"/,
       );
-      // Wraps the handler call in try/catch.
-      expect(routes).toMatch(/try \{\s+await handler\(aggregate, body\);/);
+      // Wraps the handler call in try/catch; hands the handler the narrow
+      // extern editor (S10 containment), not the raw aggregate.
+      expect(routes).toMatch(/try \{\s+await handler\(aggregate\._externEditor\(\), body\);/);
       // Domain-layer errors re-throw unchanged.
       expect(routes).toMatch(/if \(err instanceof DomainError\) throw err;/);
       expect(routes).toMatch(/if \(err instanceof ForbiddenError\) throw err;/);

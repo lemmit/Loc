@@ -34,7 +34,11 @@ export function buildExternHandlersFile(agg: AggregateIR, ctx: BoundedContextIR)
   if (externUsesMoney) {
     lines.push(`import Decimal from "decimal.js";`);
   }
-  lines.push(`import type { ${agg.name} } from "./${lowerFirst(agg.name)}";`);
+  // S10 containment: the handler is handed a narrow `<Agg>Editor` (scoped
+  // write surface — get/set per field + raiseEvent), NOT the live aggregate.
+  // The entity's own setters stay private, so nothing outside the aggregate
+  // can bypass invariants; the editor is the sole external write path.
+  lines.push(`import type { ${agg.name}Editor } from "./${lowerFirst(agg.name)}";`);
   if (usedVOs.length > 0) {
     lines.push(`import type { ${usedVOs.join(", ")} } from "./value-objects";`);
   }
@@ -63,7 +67,7 @@ export function buildExternHandlersFile(agg: AggregateIR, ctx: BoundedContextIR)
 
   for (const op of externOps) {
     lines.push(
-      `export type ${upperFirst(op.name)}${agg.name}Handler = (aggregate: ${agg.name}, request: ${upperFirst(op.name)}${agg.name}Request) => Promise<void>;`,
+      `export type ${upperFirst(op.name)}${agg.name}Handler = (editor: ${agg.name}Editor, request: ${upperFirst(op.name)}${agg.name}Request) => Promise<void>;`,
     );
   }
   lines.push("");
