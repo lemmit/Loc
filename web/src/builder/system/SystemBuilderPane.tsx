@@ -1119,7 +1119,7 @@ function SystemBuilderInner({ ctx }: { ctx: LayoutCtx }): JSX.Element {
                   data-testid="c4system-deployable-targets"
                   onChange={setTargets}
                 />
-                {uiKind(selected.ast) !== "compose" && uiKind(selected.ast) !== "block" && (
+                {uiKind(selected.ast) !== "compose" && (
                   <Select
                     size="xs"
                     label="ui"
