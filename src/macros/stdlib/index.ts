@@ -5,7 +5,9 @@ import { registerMacro } from "../registry.js";
 import crudish from "./crudish.macro.js";
 import scaffold from "./scaffold/scaffold.macro.js";
 import scaffoldAggregate from "./scaffold/scaffoldAggregate.macro.js";
+import scaffoldApi from "./scaffold/scaffoldApi.macro.js";
 import scaffoldContext from "./scaffold/scaffoldContext.macro.js";
+import scaffoldHandlers from "./scaffold/scaffoldHandlers.macro.js";
 import scaffoldSubdomain from "./scaffold/scaffoldSubdomain.macro.js";
 import scaffoldView from "./scaffold/scaffoldView.macro.js";
 import scaffoldWorkflow from "./scaffold/scaffoldWorkflow.macro.js";
@@ -48,6 +50,11 @@ export function loadStdlibMacros(): void {
   registerMacro(scaffoldContext);
   registerMacro(scaffoldSubdomain);
   registerMacro(scaffold);
+  // Explicit application/transport scaffolds (unfoldable-api-derivation.md, A3):
+  // `scaffoldHandlers` (context) emits the commandHandlers; `scaffoldApi` (api)
+  // emits the routes that bind to them.
+  registerMacro(scaffoldHandlers);
+  registerMacro(scaffoldApi);
 }
 
 /** Test/harness hook: allow tests that reset the registry to

@@ -34,13 +34,16 @@ import type {
   BoolLit,
   CallArg,
   CallSuffix,
+  CommandHandler,
   Create,
   Destroy,
   FilterDecl,
+  HandlerRef,
   IdType,
   ImplementsDecl,
   IntLit,
   Lambda,
+  LetStmt,
   LValue,
   MatchArm,
   MatchExpr,
@@ -57,6 +60,8 @@ import type {
   PostfixChain,
   PrimitiveType,
   Property,
+  ReturnStmt,
+  Route,
   RouteProp,
   SelfType,
   StampDecl,
@@ -155,6 +160,31 @@ export function mkLValue(shape: AstLiteral<LValue>): LValue {
 
 export function mkAssignOrCallStmt(shape: AstLiteral<AssignOrCallStmt>): AssignOrCallStmt {
   return mkAst<AssignOrCallStmt>(shape);
+}
+
+export function mkLetStmt(shape: AstLiteral<LetStmt>): LetStmt {
+  return mkAst<LetStmt>(shape);
+}
+
+export function mkReturnStmt(shape: AstLiteral<ReturnStmt>): ReturnStmt {
+  return mkAst<ReturnStmt>(shape);
+}
+
+// ---------------------------------------------------------------------------
+// api-hosted transport bindings — `route <METHOD> <PATH> -> Context.Handler`
+// and the application-layer `commandHandler` context member the route targets.
+// ---------------------------------------------------------------------------
+
+export function mkRoute(shape: AstLiteral<Route>): Route {
+  return mkAst<Route>(shape);
+}
+
+export function mkHandlerRef(shape: AstLiteral<HandlerRef>): HandlerRef {
+  return mkAst<HandlerRef>(shape);
+}
+
+export function mkCommandHandler(shape: AstLiteral<CommandHandler>): CommandHandler {
+  return mkAst<CommandHandler>(shape);
 }
 
 export function mkUnaryExpr(shape: AstLiteral<UnaryExpr>): UnaryExpr {

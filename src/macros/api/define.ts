@@ -16,8 +16,10 @@
 import type {
   Aggregate,
   AggregateMember,
+  Api,
   BoundedContext,
   ContextMember,
+  Route,
   Ui,
   UiMember,
 } from "../../language/generated/ast.js";
@@ -35,20 +37,24 @@ export type { OriginToken };
  * determines (a) the AST type of `target` in `ExpandContext`,
  * (b) the member type the macro is required to return, (c) which
  * `with` clause positions can invoke it (validator-enforced). */
-export type MacroTarget = "aggregate" | "ui" | "context";
+export type MacroTarget = "aggregate" | "ui" | "context" | "api";
 
 /** Maps a target kind to the AST type of the host node. */
 export interface TargetNodeOf {
   aggregate: Aggregate;
   ui: Ui;
   context: BoundedContext;
+  api: Api;
 }
 
-/** Maps a target kind to the member type the macro must return. */
+/** Maps a target kind to the member type the macro must return.  An
+ * `api`-targeted macro emits `Route`s (the api-hosted transport
+ * bindings) — the expander splices them into the api's `routes[]`. */
 export interface MemberTypeOf {
   aggregate: AggregateMember;
   ui: UiMember;
   context: ContextMember;
+  api: Route;
 }
 
 /** Declares a typed parameter on a macro.  The validator parses

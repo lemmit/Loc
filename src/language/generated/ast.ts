@@ -417,9 +417,10 @@ export interface Api extends langium.AstNode {
     readonly $type: 'Api';
     name: string;
     routes: Array<Route>;
-    source: langium.Reference<Subdomain>;
+    source?: langium.Reference<Subdomain>;
     statuses: Array<ApiStatus>;
     urlStyle?: 'literal' | 'resource';
+    withClause?: WithClause;
 }
 
 export const Api = {
@@ -428,7 +429,8 @@ export const Api = {
     routes: 'routes',
     source: 'source',
     statuses: 'statuses',
-    urlStyle: 'urlStyle'
+    urlStyle: 'urlStyle',
+    withClause: 'withClause'
 } as const;
 
 export function isApi(item: unknown): item is Api {
@@ -4004,7 +4006,7 @@ export function isViewSource(item: unknown): item is ViewSource {
 }
 
 export interface WithClause extends langium.AstNode {
-    readonly $container: Aggregate | BoundedContext | Ui;
+    readonly $container: Aggregate | Api | BoundedContext | Ui;
     readonly $type: 'WithClause';
     calls: Array<MacroCall>;
 }
@@ -4381,7 +4383,8 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 },
                 source: {
                     name: Api.source,
-                    referenceType: Subdomain.$type
+                    referenceType: Subdomain.$type,
+                    optional: true
                 },
                 statuses: {
                     name: Api.statuses,
@@ -4390,6 +4393,10 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 },
                 urlStyle: {
                     name: Api.urlStyle,
+                    optional: true
+                },
+                withClause: {
+                    name: Api.withClause,
                     optional: true
                 }
             },

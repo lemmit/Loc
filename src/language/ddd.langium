@@ -444,7 +444,7 @@ AreaMember:
 // Peer to module / ui / deployable.  Pure declarative — what's
 // available; consumers (ui, deployable) reference it by name.
 Api:
-    'api' name=ID 'from' source=[Subdomain:ID]
+    'api' name=ID withClause=WithClause? ('from' source=[Subdomain:ID])?
         ('{'
             ('urlStyle' ':' urlStyle=('literal' | 'resource'))?
             (statuses+=ApiStatus)*
