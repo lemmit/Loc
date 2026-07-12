@@ -43,6 +43,28 @@ function primitiveText(c: Ctx): string {
   return `Html.p [ ${asChild(String(c.text ?? ""))} ]`;
 }
 
+function primitiveCard(c: Ctx): string {
+  // Card("title", content) — an optional heading + a single content element.
+  const kids: string[] = [];
+  if (c.hasTitle) kids.push(`Html.h3 [ ${asChild(String(c.titleText ?? ""))} ]`);
+  if (c.hasContent) kids.push(String(c.contentJsx ?? ""));
+  const children = kids.length > 0 ? `; prop.children [ ${kids.join("; ")} ]` : "";
+  return `Html.div [ prop.className "loom-card"${children} ]`;
+}
+
+function primitiveBadge(c: Ctx): string {
+  const label = String(c.label ?? "").trim();
+  const inner =
+    label.startsWith("Html.") || label.startsWith("(")
+      ? `prop.children [ ${label} ]`
+      : `prop.text "${label}"`;
+  return `Html.span [ prop.className "loom-badge"; ${inner} ]`;
+}
+
+function primitiveDivider(_c: Ctx): string {
+  return "Html.hr []";
+}
+
 function primitiveButton(c: Ctx): string {
   // A Feliz element list is EITHER all children (ReactElement) OR all props
   // (IReactProperty) — never mixed.  A button carries an onClick prop, so the
@@ -65,6 +87,9 @@ const RENDERERS: Record<string, (c: Ctx) => string> = {
   "primitive-heading": primitiveHeading,
   "primitive-text": primitiveText,
   "primitive-button": primitiveButton,
+  "primitive-card": primitiveCard,
+  "primitive-badge": primitiveBadge,
+  "primitive-divider": primitiveDivider,
 };
 
 /** Build the procedural Feliz pack.  Implements the `LoadedPack` render

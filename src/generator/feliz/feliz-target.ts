@@ -38,12 +38,14 @@ export const felizTarget: WalkerTarget = {
   renderApiCall: unreached("api calls") as WalkerTarget["renderApiCall"],
   renderApiHoisting: () => [],
 
-  // --- Control-flow seams — implemented as examples exercise them ---------
+  // --- Control-flow seams — implemented alongside the wire layer, where
+  // QueryView exercises conditional rendering verifiably (match-in-body hits
+  // Langium grammar friction standalone). ---------------------------------
   renderMatch: unreached("match (value)") as WalkerTarget["renderMatch"],
   renderMatchChild: unreached("match (child)") as WalkerTarget["renderMatchChild"],
+  renderConditionalChild: unreached("conditional child") as WalkerTarget["renderConditionalChild"],
   renderForEach: unreached("For") as WalkerTarget["renderForEach"],
   renderNavigate: unreached("navigate") as WalkerTarget["renderNavigate"],
-  renderConditionalChild: unreached("conditional child") as WalkerTarget["renderConditionalChild"],
 
   defaultInitFor: (type) => fsZeroValue(type),
 

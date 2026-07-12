@@ -103,9 +103,14 @@ in hand — not before F# output exists.
    gap, fixed by pinning Node 22).
 
 ## Known gaps / next
-- The procedural pack has 4 primitives (Stack/Heading/Text/Button); the
-  `felizTarget` control-flow + api seams (`renderMatch`/`For`/`navigate`/api
-  hooks) throw loudly until an example needs them (slice 3 grows both).
+- The procedural pack has 7 primitives (Stack/Group/Heading/Text/Button + Card/
+  Badge/Divider — all Fable-verified); grows example-by-example.
+- The `felizTarget` control-flow seams (`renderMatch`/`renderMatchChild`/
+  `renderConditionalChild`/`For`) + api seams throw loudly until reached. They
+  are best landed WITH the wire layer (slice 7): `QueryView` exercises
+  conditional rendering (loading/error/empty/data) in a position that parses and
+  is Fable-verifiable — a standalone `match`-in-body hits Langium grammar
+  friction and is unused across the whole corpus.
 - Multi-page routing: `renderAppFs` wires only the first page (visible TODO).
 
 Known-good deps (proposal §10): Fable 4.29 / Feliz 2.8 / Fable.Elmish.React 4.0
