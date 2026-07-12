@@ -96,3 +96,54 @@ describe("python — explicit commandHandler/queryHandler → FastAPI", () => {
     expect(main).toContain('app.include_router(sales_api_router, prefix="/api")');
   });
 });
+
+// B2 — the Python slice of the [FromBody] fan-out (mirrors .NET B1/#1822):
+// a handler param NOT bound by a `{token}` in the route path must ride in one
+// `body: <Handler>Body` request model, not as a bare FastAPI param (which binds
+// a scalar from the query string and a Pydantic model as THE top-level body).
+const BODY_SRC = `
+system Shop {
+  subdomain Sales {
+    context Ordering {
+      valueobject Money { amount: int; currency: string }
+      aggregate Order ids guid { code: string; status: string; operation discount(amount: Money, reason: string) { status := reason } }
+      repository Orders for Order { }
+      commandHandler Discount(orderId: Order id, amount: Money, reason: string): Order id { let o = Orders.getById(orderId); o.discount(amount, reason); return o.id }
+    }
+  }
+  api SalesApi from Sales {
+    route POST "/orders/{orderId}/discounts" -> Ordering.Discount
+  }
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: python, contexts: [Ordering], dataSources: [st], serves: SalesApi, port: 5001 }
+}
+`;
+
+describe("python — explicit handler body params → single request model", () => {
+  it("collects non-path params into one <Handler>Body model bound as `body`", async () => {
+    const m = await generateSystemFiles(BODY_SRC);
+    const ctrl = fileEndingWith(m, "app/http/sales_api_routes.py");
+    // The request model: path param (orderId) excluded, body params snake-cased
+    // with their request wire types (Money → its wire model MoneyModel).
+    expect(ctrl).toContain("class DiscountBody(BaseModel):");
+    expect(ctrl).toContain("    amount: MoneyModel");
+    expect(ctrl).toContain("    reason: str");
+    // Route signature: real path param stays a `str` path param; the rest ride
+    // in the single `body: DiscountBody`.
+    expect(ctrl).toContain(
+      "async def discount_route(order_id: str, body: DiscountBody, session: SessionDep) -> dict[str, object]:",
+    );
+    // Call args stay in declared order; body params read off `body.<snake>`,
+    // then coerce to the DOMAIN class (Money(...) constructed from body fields).
+    expect(ctrl).toContain(
+      "result = await discount(session, OrderId(order_id), Money(body.amount.amount, body.amount.currency), body.reason)",
+    );
+    // Imports: the wire model (X as XModel) for the field type, the domain class
+    // for the coercion, BaseModel for the model, and OrderId for the path coerce.
+    expect(ctrl).toContain("from pydantic import BaseModel");
+    expect(ctrl).toContain("from app.http.wire_models import Money as MoneyModel");
+    expect(ctrl).toContain("from app.domain.value_objects import Money");
+    expect(ctrl).toContain("from app.domain.ids import OrderId");
+  });
+});
