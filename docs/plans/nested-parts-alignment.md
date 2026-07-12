@@ -207,13 +207,28 @@ dropped.
 > stay a follow-up — the nested-`new` arm doesn't thread the parent-part instance
 > yet (the risk noted below).
 
-### Phases 3–4 — node, .NET (one PR each, independent) — ⛔ DEFERRED, RE-SCOPED
-> **Not "re-key the assembly" — "build part-containment persistence."** Scoping
-> (see the ⚠️ section above) showed node never saves single containments and
-> never loads nested parts. So each backend's PR is a real feature, not the tweak
-> this bullet list implies. Kept below as the *direction*, but the work is larger
-> than written. Deferred until an actual `.ddd` needs part-in-part nesting on
-> node/.NET. (Python landed as Phase 2 above; it can serve as the reference port.)
+### Phase 3 — node ✅ DONE
+> Landed: part-in-part containment persistence on the node/Hono backend. The
+> Drizzle schema FKs a nested part to (and `references()`) its DIRECT parent
+> (`labels.shipment_id → shipments`); the domain `parentId` brands to the
+> direct-parent id type; `save` recurses (single containments now persist too —
+> they were dropped entirely before — and each nested level diff-syncs keyed by
+> its direct-parent id); the read paths (`findById`, `findManyByIds`, custom
+> finds) recursively bulk-load the nested level into per-direct-parent maps and
+> assemble it into the graph. Wire response DTOs (`z.object`) + the frontend api
+> module emit parts children-first so `z.array(LabelResponse)` never
+> forward-references; `_create` defaults a part's own containments. Single-level
+> output is byte-identical (680 node generator/platform tests green). **Boot-
+> verified on real Postgres** (same create → SQL-insert label → GET-nests →
+> re-save-preserves round-trip as python). `tsc --noEmit` + `tsup` clean; fixture
+> `test/e2e/fixtures/ts-build/nested-parts.ddd`.
+
+### Phase 4 — .NET (one PR) — ⛔ DEFERRED, RE-SCOPED
+> **Not "re-key the assembly" — "build part-containment persistence."** The .NET
+> EF owned-type nesting needs its own careful pass (the shadow FK must move to the
+> direct parent and the emitted DDL agree — see the risk note below). Deferred
+> until an actual `.ddd` needs part-in-part nesting on .NET; **python (Phase 2)
+> and node (Phase 3) are the reference ports.**
 
 For each backend, in any order:
 - **node** — make `saveTxBody` persist single containments (not just collections),

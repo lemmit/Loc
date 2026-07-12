@@ -11,6 +11,7 @@ import type {
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import { durableEventTypes } from "../../../ir/util/channels.js";
+import { directParentName } from "../../../ir/util/containment-parent.js";
 import {
   isTphBase,
   isTphConcrete,
@@ -142,10 +143,15 @@ export function renderSchema(
       const owner = tableOwnerName(agg, ctx.aggregates);
       for (const part of agg.parts) {
         tables.push(
-          emitTable(part.name, part.fields, owner, ctx, new Set(), agg.idValueType, {
-            schema,
-            prefix,
-          }),
+          emitTable(
+            part.name,
+            part.fields,
+            directParentName(agg, part.name, owner),
+            ctx,
+            new Set(),
+            agg.idValueType,
+            { schema, prefix },
+          ),
         );
       }
       continue;
@@ -181,10 +187,15 @@ export function renderSchema(
     );
     for (const part of agg.parts) {
       tables.push(
-        emitTable(part.name, part.fields, agg.name, ctx, new Set(), agg.idValueType, {
-          schema,
-          prefix,
-        }),
+        emitTable(
+          part.name,
+          part.fields,
+          directParentName(agg, part.name, agg.name),
+          ctx,
+          new Set(),
+          agg.idValueType,
+          { schema, prefix },
+        ),
       );
     }
     // Many-to-many join tables for `T id[]` reference collections.

@@ -12,6 +12,7 @@ import type {
   FieldIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
+import { directParentName } from "../../ir/util/containment-parent.js";
 import { isTphConcrete } from "../../ir/util/inheritance.js";
 import { isValueCollectionType, type ValueCollectionIR } from "../../ir/util/value-collections.js";
 import { isRefCollection } from "./repository-associations-builder.js";
@@ -105,11 +106,20 @@ export function hydrateEntityExpr(
 ): string {
   const fields: string[] = [];
   fields.push(`id: Ids.${part.name}Id(${rowVar}.id)`);
-  fields.push(`parentId: Ids.${agg.name}Id(${rowVar}.parentId)`);
+  // A nested part's parentId is branded to its DIRECT parent (a sibling part),
+  // not the aggregate root — matching the schema FK it was loaded through.
+  fields.push(`parentId: Ids.${directParentName(agg, part.name, agg.name)}Id(${rowVar}.parentId)`);
   for (const f of part.fields) {
     fields.push(`${f.name}: ${hydrateFieldExpr(f, rowVar, ctx)}`);
   }
   fields.push(...provHydrateEntries(part.fields, rowVar));
+  // Nested containments: reference the per-direct-parent maps the caller loaded
+  // just before this hydrate (`<name>ByParent`, keyed by this part row's id).
+  for (const nc of part.contains) {
+    fields.push(
+      `${nc.name}: ${nc.name}ByParent.get(${rowVar}.id) ?? ${nc.collection ? "[]" : "null"}`,
+    );
+  }
   return `${part.name}._rehydrate({ ${fields.join(", ")} })`;
 }
 

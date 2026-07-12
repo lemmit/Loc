@@ -31,37 +31,66 @@ function saveTxBody(agg: EnrichedAggregateIR, ctx: BoundedContextIR, emitTrace: 
   // Under TPH the upsert targets the shared base table; non-TPH aggregates
   // resolve to their own table (byte-identical output).
   const tableName = lowerFirst(plural(tableOwnerName(agg, ctx.aggregates)));
-  const containBlocks = agg.contains.flatMap((c): string[] => {
-    if (!c.collection) return [];
+  // Diff-sync one containment level and RECURSE into each part's own nested
+  // containments.  `ownerExpr`/`ownerIdExpr` are the domain object holding this
+  // collection and its id — child rows are reconciled against the DB rows whose
+  // direct-parent FK (the Drizzle `.parentId`, mapped to `<direct-parent>_id`)
+  // equals it.  A SINGLE containment is treated as a 0-or-1 list (was dropped
+  // entirely before).  Depth-0 collection output is byte-identical: `ownerExpr`
+  // = `aggregate`, `itemsRef` = `aggregate.<name>`, loop var `child`, 6-space
+  // indent; nested levels uniquify the loop/row vars and indent inward.
+  const syncContain = (
+    c: (typeof agg.contains)[number],
+    ownerExpr: string,
+    ownerIdExpr: string,
+    indent: string,
+    depth: number,
+  ): string[] => {
     const part = agg.parts.find((p) => p.name === c.partName);
     if (!part) return [];
     const childTable = lowerFirst(plural(part.name));
     const cap = upperFirst(c.name);
+    const loopVar = depth === 0 ? "child" : `child${depth}`;
+    const rowVar = depth === 0 ? "childRow" : `childRow${depth}`;
+    // A collection is already an array; a single containment becomes a 0-or-1
+    // list so the same diff-sync (insert new / update existing / delete removed)
+    // applies uniformly.
+    const itemsRef = c.collection
+      ? `${ownerExpr}.${c.name}`
+      : `(${ownerExpr}.${c.name} ? [${ownerExpr}.${c.name}] : [])`;
+    const body = `${indent}  `;
     return [
       "",
-      `      const existing${cap} = await tx.select({ id: schema.${childTable}.id }).from(schema.${childTable}).where(eq(schema.${childTable}.parentId, aggregate.id));`,
-      `      const existingIds${cap} = new Set(existing${cap}.map((r) => r.id));`,
-      `      const currentIds${cap} = new Set(aggregate.${c.name}.map((e) => e.id as string));`,
-      `      const toDelete${cap} = [...existingIds${cap}].filter((id) => !currentIds${cap}.has(id));`,
-      `      if (toDelete${cap}.length > 0) {`,
-      `        await tx.delete(schema.${childTable}).where(and(eq(schema.${childTable}.parentId, aggregate.id), inArray(schema.${childTable}.id, toDelete${cap})));`,
-      `      }`,
-      `      for (const child of aggregate.${c.name}) {`,
-      `        const childRow = ${entityProjection(part, "child", ctx)};`,
-      `        await tx.insert(schema.${childTable}).values(childRow).onConflictDoUpdate({ target: schema.${childTable}.id, set: childRow });`,
+      `${indent}const existing${cap} = await tx.select({ id: schema.${childTable}.id }).from(schema.${childTable}).where(eq(schema.${childTable}.parentId, ${ownerIdExpr}));`,
+      `${indent}const existingIds${cap} = new Set(existing${cap}.map((r) => r.id));`,
+      `${indent}const currentIds${cap} = new Set(${itemsRef}.map((e) => e.id as string));`,
+      `${indent}const toDelete${cap} = [...existingIds${cap}].filter((id) => !currentIds${cap}.has(id));`,
+      `${indent}if (toDelete${cap}.length > 0) {`,
+      `${indent}  await tx.delete(schema.${childTable}).where(and(eq(schema.${childTable}.parentId, ${ownerIdExpr}), inArray(schema.${childTable}.id, toDelete${cap})));`,
+      `${indent}}`,
+      `${indent}for (const ${loopVar} of ${itemsRef}) {`,
+      `${body}const ${rowVar} = ${entityProjection(part, loopVar, ctx)};`,
+      `${body}await tx.insert(schema.${childTable}).values(${rowVar}).onConflictDoUpdate({ target: schema.${childTable}.id, set: ${rowVar} });`,
       // Classify against existingIds BEFORE the upsert tells us insert vs
       // update with no second DB round-trip; ordering matters for the
       // semantic (current existingIds reflects what was on disk, the
       // upsert is happening now).
       ...(emitTrace
         ? [
-            `        const childAction = existingIds${cap}.has(child.id as string) ? "update" : "insert";`,
-            `        ${renderHonoStoreLogCall("childSynced", `parent: "${agg.name}", part: "${part.name}", id: child.id as string, action: childAction`)}`,
+            `${body}const childAction = existingIds${cap}.has(${loopVar}.id as string) ? "update" : "insert";`,
+            `${body}${renderHonoStoreLogCall("childSynced", `parent: "${agg.name}", part: "${part.name}", id: ${loopVar}.id as string, action: childAction`)}`,
           ]
         : []),
-      `      }`,
+      // Recurse: this part's OWN nested containments, keyed by this child's id.
+      ...part.contains.flatMap((nested) =>
+        syncContain(nested, loopVar, `${loopVar}.id`, body, depth + 1),
+      ),
+      `${indent}}`,
     ];
-  });
+  };
+  const containBlocks = agg.contains.flatMap((c) =>
+    syncContain(c, "aggregate", "aggregate.id", "      ", 0),
+  );
   // Diff-sync each reference collection's join table: delete pairs the
   // aggregate no longer holds, insert the new ones (idempotent via the
   // composite PK).  Set semantics — the wire contract for `Id<T>[]` is a

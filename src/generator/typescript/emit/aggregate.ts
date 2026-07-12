@@ -15,6 +15,7 @@ import type {
   TypeIR,
 } from "../../../ir/types/loom-ir.js";
 import { aggregateUsesMoney, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
+import { directParentName } from "../../../ir/util/containment-parent.js";
 import { stmtHasProv } from "../../../ir/util/prov-id.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst } from "../../../util/naming.js";
@@ -55,6 +56,11 @@ interface EntityShape {
    *  (they have no factory). */
   hasCreate: boolean;
   rootName?: string;
+  /** The entity that DIRECTLY contains this part — the aggregate root for a
+   *  root-level part, a sibling part for a nested one.  Drives the `parentId`
+   *  id-type branding (`ShipmentId`, not `OrderId`, for a Label nested under
+   *  Shipment); equals `rootName` for root-level parts (byte-identical). */
+  parentName?: string;
   fields: FieldIR[];
   contains: ContainmentIR[];
   derived: DerivedIR[];
@@ -196,6 +202,7 @@ function partShape(p: EntityPartIR, root: AggregateIR): EntityShape {
     isRoot: false,
     hasCreate: false,
     rootName: root.name,
+    parentName: directParentName(root, p.name, root.name),
     fields: p.fields,
     contains: p.contains,
     derived: p.derived,
@@ -287,17 +294,39 @@ function renderEntity(
 
   const stateFields = [
     `id: Ids.${e.name}Id`,
-    !e.isRoot ? `parentId: Ids.${e.rootName}Id` : null,
+    !e.isRoot ? `parentId: Ids.${e.parentName ?? e.rootName}Id` : null,
     ...e.fields.map((f) => `${f.name}: ${renderTsType(f.type)}`),
     ...provFields.map((f) => `${f.name}_provenance: ProvLineage | null`),
     ...e.contains.map((c) => `${c.name}: ${containsType(c)}`),
   ].filter((s): s is string => s != null);
   const stateLiteral = `{ ${stateFields.join("; ")} }`;
 
+  // The op-body `new <Part>` factory (`_create`) defaults a part's OWN nested
+  // containments — a freshly-constructed part starts with none, and callers
+  // (`renderNew`) only pass declared fields.  Byte-identical for a part with
+  // no containments; `_rehydrate` keeps the full required state contract.
+  const hasContains = e.contains.length > 0;
+  const createStateLiteral = hasContains
+    ? `{ ${[
+        `id: Ids.${e.name}Id`,
+        !e.isRoot ? `parentId: Ids.${e.parentName ?? e.rootName}Id` : null,
+        ...e.fields.map((f) => `${f.name}: ${renderTsType(f.type)}`),
+        ...provFields.map((f) => `${f.name}_provenance: ProvLineage | null`),
+        ...e.contains.map((c) => `${c.name}?: ${containsType(c)}`),
+      ]
+        .filter((s): s is string => s != null)
+        .join("; ")} }`
+    : stateLiteral;
+  const createBody = hasContains
+    ? `new ${e.name}({ ...state, ${e.contains
+        .map((c) => `${c.name}: state.${c.name} ?? ${c.collection ? "[]" : "null"}`)
+        .join(", ")} })`
+    : `new ${e.name}(state)`;
+
   const fieldDecls: string[] = [];
   fieldDecls.push(`  private _id: Ids.${e.name}Id;`);
   if (!e.isRoot) {
-    fieldDecls.push(`  private _parentId: Ids.${e.rootName}Id;`);
+    fieldDecls.push(`  private _parentId: Ids.${e.parentName ?? e.rootName}Id;`);
   }
   if (e.isRoot) {
     fieldDecls.push("  private _events: Events.DomainEvent[] = [];");
@@ -347,7 +376,9 @@ function renderEntity(
   const getters: string[] = [];
   getters.push(`  get id(): Ids.${e.name}Id { return this._id; }`);
   if (!e.isRoot) {
-    getters.push(`  get parentId(): Ids.${e.rootName}Id { return this._parentId; }`);
+    getters.push(
+      `  get parentId(): Ids.${e.parentName ?? e.rootName}Id { return this._parentId; }`,
+    );
   }
   for (const f of e.fields) {
     getters.push(`  get ${f.name}(): ${renderTsType(f.type)} { return this._${f.name}; }`);
@@ -716,8 +747,8 @@ function renderEntity(
     ...invariants,
     "  }",
     "",
-    `  static _create(state: ${stateLiteral}): ${e.name} {`,
-    `    return new ${e.name}(state);`,
+    `  static _create(state: ${createStateLiteral}): ${e.name} {`,
+    `    return ${createBody};`,
     "  }",
     "",
     "  /** Reconstitution from the store — trusts persisted state, so no",

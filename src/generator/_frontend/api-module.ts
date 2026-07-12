@@ -25,6 +25,7 @@ import {
   type WirePrimitive,
   wireTypeInfo,
 } from "../../ir/types/wire-types.js";
+import { partsChildrenFirst } from "../../ir/util/containment-parent.js";
 import { collectReachableTypes } from "../../ir/util/reachable-types.js";
 import type { ClassifyContext, SingleFieldPattern } from "../../ir/validate/invariant-classify.js";
 import { plural, snake, upperFirst } from "../../util/naming.js";
@@ -169,8 +170,9 @@ export function buildApiModule(
   lines.push("");
 
   // Response schemas.  Inner DTOs must come first so they're declared
-  // before the root references them.
-  for (const part of agg.parts) {
+  // before the root references them — and a nested part before the sibling
+  // that references it (`z.array(LabelResponse)`), hence children-first.
+  for (const part of partsChildrenFirst(agg.parts)) {
     lines.push(...emitResponseSchema(part, ctx, /*isAgg*/ false));
   }
   lines.push(...emitResponseSchema(agg, ctx, /*isAgg*/ true));
