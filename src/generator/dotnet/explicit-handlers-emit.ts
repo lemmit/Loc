@@ -38,8 +38,10 @@ import type {
   TypeIR,
   WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
+import { wireTypeInfo } from "../../ir/types/wire-types.js";
 import { plural, upperFirst } from "../../util/naming.js";
 import { renderWorkflowStmtChunks } from "../_workflow/stmt-target.js";
+import { projectToResponse } from "./dto-mapping.js";
 import { renderCsType } from "./render-expr.js";
 import { csWorkflowStmtTarget, renderExprWithCmdParams } from "./workflow-emit.js";
 
@@ -77,8 +79,28 @@ function primaryAgg(h: Handler): string | undefined {
 const repoField = (repoName: string): string =>
   `_${repoName.charAt(0).toLowerCase()}${repoName.slice(1)}`;
 
+/** The aggregate a handler's return type resolves to, when it returns an
+ *  entity (aggregate or part) — used to import the domain namespace so a
+ *  `IQuery<Order>` / `ValueTask<Order>` signature resolves. Undefined for an
+ *  id / scalar / void return. */
+function returnEntityAgg(h: Handler, ctx: EnrichedBoundedContextIR): string | undefined {
+  if (!h.returnType) return undefined;
+  const info = wireTypeInfo(h.returnType, "response");
+  if (info.refKind !== "entity") return undefined;
+  const owning =
+    ctx.aggregates.find((a) => a.name === info.base) ??
+    ctx.aggregates.find((a) => a.parts.some((p) => p.name === info.base));
+  return owning?.name;
+}
+
 /** Render a handler's `<Name>Command` / `<Name>Query` record. */
-function renderRecord(h: Handler, ns: string, agg: string, kind: "Command" | "Query"): string {
+function renderRecord(
+  h: Handler,
+  ns: string,
+  ctx: EnrichedBoundedContextIR,
+  agg: string,
+  kind: "Command" | "Query",
+): string {
   const recName = `${h.name}${kind}`;
   const params = h.params.map((p) => `${renderCsType(p.type)} ${upperFirst(p.name)}`).join(", ");
   const iface =
@@ -88,11 +110,15 @@ function renderRecord(h: Handler, ns: string, agg: string, kind: "Command" | "Qu
         : "ICommand"
       : `IQuery<${renderCsType(h.returnType!)}>`;
   const folder = kind === "Command" ? "Commands" : "Queries";
+  // A record whose return type is an aggregate needs that aggregate's domain
+  // namespace so `ICommand<Order>` / `IQuery<Order>` resolves.
+  const retAgg = returnEntityAgg(h, ctx);
+  const retUsing = retAgg ? `\nusing ${ns}.Domain.${plural(retAgg)};` : "";
   return `// Auto-generated.
 using Mediator;
 using ${ns}.Domain.Ids;
 using ${ns}.Domain.ValueObjects;
-using ${ns}.Domain.Enums;
+using ${ns}.Domain.Enums;${retUsing}
 
 namespace ${ns}.Application.${plural(agg)}.${folder};
 
@@ -149,7 +175,10 @@ function renderHandlerClass(
     : "        return Unit.Value;";
   const body = [...stmtLines, ...saveLines, returnLine].join("\n");
 
-  const aggUsings = [...new Set([...repos.values(), agg])]
+  // The `Handle` signature (`ValueTask<Order>`) needs the return aggregate's
+  // domain namespace too — usually the same as the loaded one, but not always.
+  const retAgg = returnEntityAgg(h, ctx);
+  const aggUsings = [...new Set([...repos.values(), agg, ...(retAgg ? [retAgg] : [])])]
     .map((a) => `using ${ns}.Domain.${plural(a)};`)
     .join("\n");
 
@@ -190,7 +219,7 @@ export function emitExplicitHandlers(
     if (!agg) continue;
     out.set(
       `Application/${plural(agg)}/Commands/${h.name}Command.cs`,
-      renderRecord(h, ns, agg, "Command"),
+      renderRecord(h, ns, ctx, agg, "Command"),
     );
     out.set(
       `Application/${plural(agg)}/Commands/${h.name}Handler.cs`,
@@ -202,7 +231,7 @@ export function emitExplicitHandlers(
     if (!agg) continue;
     out.set(
       `Application/${plural(agg)}/Queries/${h.name}Query.cs`,
-      renderRecord(h, ns, agg, "Query"),
+      renderRecord(h, ns, ctx, agg, "Query"),
     );
     out.set(
       `Application/${plural(agg)}/Queries/${h.name}Handler.cs`,
@@ -299,10 +328,29 @@ export function emitExplicitRouteController(
 
     const rec = `${h.name}${kind}`;
     const attr = HTTP_ATTR[r.method] ?? "HttpGet";
-    const hasReturn = kind === "Query" || !!cmd?.returnType;
-    const sendBlock = hasReturn
-      ? `        var result = await _mediator.Send(new ${rec}(${ctorArgs}));\n        return Ok(result);`
-      : `        await _mediator.Send(new ${rec}(${ctorArgs}));\n        return NoContent();`;
+    // A query always returns; a command returns only with an explicit type.
+    const retType = kind === "Query" ? qry!.returnType : cmd?.returnType;
+    let sendBlock: string;
+    if (retType) {
+      // An aggregate/entity return is projected to its wire-shape `<Agg>Response`
+      // — the same projection the auto-derived read endpoints use — so the route
+      // serialises the contract, not the raw domain entity. Scalar / id returns
+      // serialise as-is.
+      const info = wireTypeInfo(retType, "response");
+      let okExpr = "result";
+      if (info.refKind === "entity") {
+        const owning =
+          ctx.aggregates.find((a) => a.name === info.base) ??
+          ctx.aggregates.find((a) => a.parts.some((p) => p.name === info.base));
+        if (owning) {
+          okExpr = projectToResponse("result", retType, ctx);
+          nsUsings.add(`${ns}.Application.${plural(owning.name)}.Responses`);
+        }
+      }
+      sendBlock = `        var result = await _mediator.Send(new ${rec}(${ctorArgs}));\n        return Ok(${okExpr});`;
+    } else {
+      sendBlock = `        await _mediator.Send(new ${rec}(${ctorArgs}));\n        return NoContent();`;
+    }
     actions.push(
       `    [${attr}("${r.path}")]\n` +
         `    public async Task<IActionResult> ${h.name}(${actionParams})\n` +

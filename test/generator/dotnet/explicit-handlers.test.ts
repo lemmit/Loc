@@ -142,3 +142,60 @@ describe("dotnet — explicit handler route param binding (path vs [FromBody])",
     expect(ctrl).toContain("new DiscountCommand(new OrderId(orderId), body.Amount, body.Reason)");
   });
 });
+
+// A handler returning an aggregate projects to its wire-shape `<Agg>Response`
+// (the same projection the auto-derived read endpoints use) rather than
+// serialising the raw domain entity.
+const RESP_SRC = `
+system Shop {
+  subdomain Sales {
+    context Ordering {
+      aggregate Order {
+        code: string
+        status: string
+        operation cancel() { status := "cancelled" }
+      }
+      repository Orders for Order { }
+      queryHandler GetOrder(orderId: Order id): Order {
+        let o = Orders.getById(orderId)
+        return o
+      }
+    }
+  }
+  api SalesApi from Sales {
+    route GET "/orders/{orderId}" -> Ordering.GetOrder
+  }
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: dotnet, contexts: [Ordering], dataSources: [st], serves: SalesApi, port: 5001 }
+}
+`;
+
+describe("dotnet — explicit handler aggregate return → wire-shape Response", () => {
+  it("projects an aggregate return to new <Agg>Response(...), not the raw entity", async () => {
+    const ctrl = fileEndingWith(
+      await generateSystemFiles(RESP_SRC),
+      "Api/SalesApiRoutesController.cs",
+    );
+    // The Responses namespace is imported and the domain result projected.
+    expect(ctrl).toContain("using Api.Application.Orders.Responses;");
+    expect(ctrl).toContain(
+      "return Ok(new OrderResponse(result.Id.Value, result.Code, result.Status));",
+    );
+    // Not the raw domain entity.
+    expect(ctrl).not.toContain("return Ok(result);");
+  });
+
+  it("imports the return aggregate's domain namespace on the query record + handler", async () => {
+    // Regression: an aggregate-returning handler emits `IQuery<Order>` /
+    // `ValueTask<Order>` but never imported `Api.Domain.Orders`, so the generated
+    // project failed to compile (CS0246 / CS0311). The return aggregate's domain
+    // namespace must be in scope on both files.
+    const files = await generateSystemFiles(RESP_SRC);
+    const rec = fileEndingWith(files, "Application/Orders/Queries/GetOrderQuery.cs");
+    expect(rec).toContain("using Api.Domain.Orders;");
+    expect(rec).toContain("public sealed record GetOrderQuery(OrderId OrderId) : IQuery<Order>;");
+    const handler = fileEndingWith(files, "Application/Orders/Queries/GetOrderHandler.cs");
+    expect(handler).toContain("using Api.Domain.Orders;");
+  });
+});
