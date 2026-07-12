@@ -212,6 +212,7 @@ how Loom already type-checks expressions. All fail-fast at validate time:
 | `loom.a11y-icon-only-no-name` | icon-only `Button`/`Action` whose accessible name can't be derived and has no `label:` |
 | `loom.a11y-pack-incomplete` | a design-pack template omits the role/ARIA its primitive's contract declares |
 | `loom.a11y-contract-missing` | a registered primitive has no `a11y` contract (completeness test) |
+| `loom.a11y-theme-contrast` | a user `theme {}` colour whose fill shade has no readable text colour (WCAG-AA) — a compile-time **warning** (the pack picks the text colour); the author-override twin of the per-pack token-contrast gate |
 
 These never *downgrade* — an unnameable control is an error, never a control
 shipped without a name (the same fail-fast-not-silent rule the backend parity

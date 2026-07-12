@@ -47,7 +47,7 @@ system DevPlatform {
 
     // System-wide visual identity.
     theme {
-        primary: "#6366f1"
+        primary: "#4f46e5"
         neutral: "#64748b"
         radius: "md"
         fontFamily: "Inter, system-ui, sans-serif"

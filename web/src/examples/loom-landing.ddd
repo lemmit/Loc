@@ -81,7 +81,7 @@ system LoomLanding {
   // Visual identity — projected by every React pack to its idiom.
   // Today only 4 tokens; Phase 2 expands to a full palette.
   theme {
-    primary:    "#8b5cf6"
+    primary:    "#7c3aed"
     neutral:    "#64748b"
     radius:     "lg"
     fontFamily: "Inter, system-ui, -apple-system, sans-serif"

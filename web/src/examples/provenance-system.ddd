@@ -17,7 +17,7 @@ system OrderingSystem {
 
   // Invoice-y indigo for the demo.
   theme {
-    primary: "#6366f1"
+    primary: "#4f46e5"
     radius: "md"
   }
 
