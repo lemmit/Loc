@@ -48,6 +48,12 @@ import { buildRepositoryFile } from "../../../generator/typescript/repository-bu
 import { buildDocumentRepositoryFile } from "../../../generator/typescript/repository-document-builder.js";
 import { buildEmbeddedRepositoryFile } from "../../../generator/typescript/repository-embedded-builder.js";
 import { buildEventSourcedRepositoryFile } from "../../../generator/typescript/repository-eventsourced-builder.js";
+import {
+  PORT_POOL_PATH,
+  portMembersFromSource,
+  type RepoPortSpec,
+  renderRepositoryPortsFile,
+} from "../../../generator/typescript/repository-port-builder.js";
 import { deriveEventSubscriptions, enrichLoomModel } from "../../../ir/enrich/enrichments.js";
 import { lowerModel } from "../../../ir/lower/lower.js";
 import {
@@ -549,6 +555,12 @@ export function generateTypeScriptForContexts(
   // Per-aggregate emission stays per-context — each aggregate file
   // and its repository / routes are emitted in the context that
   // owns the aggregate.
+  //
+  // Each concrete repository `implements` a domain-side `<Agg>RepositoryPort`
+  // (audit S7 — hexagonal ports); the port members are DERIVED from the
+  // concrete's own emitted public method headers (so `implements` always
+  // type-checks) and pooled into one `domain/repository-ports.ts`.
+  const portSpecs: RepoPortSpec[] = [];
   for (const ctx of contexts) {
     for (const agg of ctx.aggregates) {
       // A TPH abstract base owns the shared table (emitted in db/schema.ts)
@@ -577,26 +589,24 @@ export function generateTypeScriptForContexts(
       // containments in jsonb columns; `relational` (default) → the
       // normalised table-per-entity hydrate.
       const shape = effectiveSavingShape(agg, resolveDataSource?.(agg));
-      place(
-        "drizzle-repository",
-        agg.name,
-        usingMikro
-          ? // mikroorm: event-sourced aggregates use the EntityManager event
-            // store (appliers, MikroORM edition); document / embedded /
-            // inheritance stay validator-gated out.
-            agg.persistedAs === "eventLog"
-            ? renderMikroEventSourcedRepository(agg, repo, ctx)
-            : renderMikroRepository(agg, repo, ctx)
-          : agg.persistedAs === "eventLog"
-            ? buildEventSourcedRepositoryFile(agg, repo, ctx, emitTrace)
-            : shape === "document"
-              ? buildDocumentRepositoryFile(agg, repo, ctx, emitTrace)
-              : shape === "embedded"
-                ? buildEmbeddedRepositoryFile(agg, repo, ctx, emitTrace)
-                : buildRepositoryFile(agg, repo, ctx, emitTrace),
-        repo?.origin ?? agg.origin,
-        construct,
-      );
+      const repoContent = usingMikro
+        ? // mikroorm: event-sourced aggregates use the EntityManager event
+          // store (appliers, MikroORM edition); document / embedded /
+          // inheritance stay validator-gated out.
+          agg.persistedAs === "eventLog"
+          ? renderMikroEventSourcedRepository(agg, repo, ctx)
+          : renderMikroRepository(agg, repo, ctx)
+        : agg.persistedAs === "eventLog"
+          ? buildEventSourcedRepositoryFile(agg, repo, ctx, emitTrace)
+          : shape === "document"
+            ? buildDocumentRepositoryFile(agg, repo, ctx, emitTrace)
+            : shape === "embedded"
+              ? buildEmbeddedRepositoryFile(agg, repo, ctx, emitTrace)
+              : buildRepositoryFile(agg, repo, ctx, emitTrace);
+      place("drizzle-repository", agg.name, repoContent, repo?.origin ?? agg.origin, construct);
+      // Derive this aggregate's repository PORT from the concrete just emitted
+      // (audit S7) — pooled into `domain/repository-ports.ts` below.
+      portSpecs.push({ aggName: agg.name, members: portMembersFromSource(repoContent) });
       // Routes file — adapter-dispatched in system mode (the layered
       // StyleAdapter re-derives audit / provenance gates from
       // ctx.contexts so the output matches `buildRoutesFile(...,
@@ -814,6 +824,13 @@ export function generateTypeScriptForContexts(
   out.set("Dockerfile", DOCKERFILE_TS);
   out.set(".dockerignore", DOCKERIGNORE_TS);
   out.set("certs/.gitkeep", "");
+  // Pooled domain-side repository PORTS (audit S7) — the `<Agg>RepositoryPort`
+  // interfaces the concrete repositories `implements` and the domain services
+  // depend on (in place of the concrete class).  A raw `out.set` at a fixed
+  // `domain/` path (like `domain/ids.ts`); its own aggregate imports are fixed
+  // up by the layout post-pass below when byFeature relocates the aggregates.
+  const portsFile = renderRepositoryPortsFile(portSpecs, merged);
+  if (portsFile) out.set(PORT_POOL_PATH, portsFile);
   // D-REALIZATION-AXES `directoryLayout:` — when the layout relocated any
   // per-aggregate file (byFeature), fix up every relative import across the
   // project so the moved modules still resolve.  No-op (byte-identical) for the

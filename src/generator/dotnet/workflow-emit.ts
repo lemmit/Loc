@@ -49,7 +49,6 @@ import {
   wireToCommandArgument,
   wireType,
 } from "./dto-mapping.js";
-import { bypassedFilterNames } from "./emit/efcore.js";
 import type { OpFragment } from "./emit/entity.js";
 import type { CsRenderContext } from "./render-expr.js";
 import { collectCsExprUsings, renderCsExpr, renderCsType } from "./render-expr.js";
@@ -1696,19 +1695,20 @@ export function csWorkflowStmtTarget(
         const lim = st.page.limit ? renderArg(st.page.limit) : "null";
         args.push(`(${off}, ${lim})`);
       }
-      // Inline `ignoring` clause (named-filter-bypass.md §11) → named retrieval-
-      // method args.  `ignoring *` → `ignoreAllFilters: true`; `ignoring <Cap>`
-      // → `ignoreFilters: ["Name1", …]` (the EF filter names the bypassed
-      // capabilities contributed on the target aggregate).
+      // Inline `ignoring` clause (named-filter-bypass.md §11) → the retrieval
+      // method's DOMAIN `bypass` arg (audit S7).  `ignoring *` →
+      // `FilterBypass.BypassAll()`; `ignoring <Cap>` → `FilterBypass.Bypass(<cap
+      // names>)` — the DSL capability names, NOT EF filter names; the repository
+      // adapter translates them (see `emit/repository.ts`).  `FilterBypass`
+      // resolves via the handler file's `using <ns>.Domain.Common;` preamble.
       const bypassArgs: string[] = [];
       if (st.bypassAll) {
-        bypassArgs.push("ignoreAllFilters: true");
+        bypassArgs.push("bypass: FilterBypass.BypassAll()");
       } else if ((st.bypassCaps?.length ?? 0) > 0) {
-        const target = ctx.aggregates.find((a) => a.name === st.aggName);
-        const names = target ? bypassedFilterNames(target, { bypassCaps: st.bypassCaps }) : [];
-        if (names.length > 0) {
-          bypassArgs.push(`ignoreFilters: [${names.map((n) => JSON.stringify(n)).join(", ")}]`);
-        }
+        const caps = st.bypassCaps ?? [];
+        bypassArgs.push(
+          `bypass: FilterBypass.Bypass(${caps.map((c) => JSON.stringify(c)).join(", ")})`,
+        );
       }
       // `cancellationToken` is passed NAMED: the run method has an optional
       // `page` param before it (and the optional `ignore*` params after), so a

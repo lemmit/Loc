@@ -45,6 +45,7 @@ import { snake } from "../../../util/naming.js";
 import { emptyPyTypeImports, visitPyTypeImports } from "../py-type-imports.js";
 import { collectPyExprImports, renderPyType } from "../render-expr.js";
 import { renderPyStatements } from "../render-stmt.js";
+import { PORT_POOL_MODULE, repoPortName } from "../repository-port-builder.js";
 
 /** One emitted file: the module path and its source. */
 export interface PyDomainServiceFile {
@@ -156,10 +157,17 @@ function renderService(svc: DomainServiceIR, ctx: BoundedContextIR): string {
       ? `from app.domain.value_objects import ${voEnumNames.join(", ")}`
       : null,
     ...[...aggNames].sort().map((n) => `from app.domain.${snake(n)} import ${n}`),
-    ...readPortRepos.map(
-      (p) =>
-        `from app.db.repositories.${snake(p.aggregate)}_repository import ${p.aggregate}Repository`,
-    ),
+    // Read-port repository handles are typed against the domain-side PORT
+    // (audit S7 — hexagonal), NOT the concrete infra repository: the domain
+    // layer must not import from `app.db`.  The orchestrating workflow injects
+    // the concrete `<Agg>Repository` (which structurally satisfies the
+    // Protocol — proven by `mypy --strict` at the call site).
+    readPortRepos.length > 0
+      ? `from ${PORT_POOL_MODULE} import ${readPortRepos
+          .map((p) => repoPortName(p.aggregate))
+          .sort()
+          .join(", ")}`
+      : null,
   );
 
   return `${header}\n\n\n${body}\n`;
@@ -174,7 +182,7 @@ function renderOperation(op: DomainServiceOperationIR): string {
   // is unchanged (byte-identical).  Each read-port read awaits the repo method,
   // so a reading op is `async def` (the orchestrator awaits the call at its site).
   const ports = readPortsForOperation(op);
-  const portParams = ports.map((p) => `${snake(p.repo)}: ${p.aggregate}Repository`);
+  const portParams = ports.map((p) => `${snake(p.repo)}: ${repoPortName(p.aggregate)}`);
   const userParams = op.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`);
   const params = [...portParams, ...userParams].join(", ");
   const isReading = ports.length > 0;

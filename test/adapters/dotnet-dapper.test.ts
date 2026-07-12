@@ -316,13 +316,13 @@ system D {
     const { files, errors } = await emit(SRC);
     expect(errors).toEqual([]); // the dapper retrieval gate is lifted
     const repo = files.get("api/Infrastructure/Repositories/CustomerRepository.cs")!;
-    // The retrieval signature carries the two trailing optional filter-bypass
-    // params (named-filter-bypass.md §11) uniformly with the EF path; the Dapper
-    // body doesn't honor capability filters (raw SQL, no EF query filters), so
-    // they are present-but-unused here — a Dapper-specific bypass gate is a later
-    // slice's concern.
+    // The retrieval signature carries the domain-termed `FilterBypass` param
+    // (named-filter-bypass.md §11 / audit S7) uniformly with the EF path — no EF
+    // vocabulary on the port; the Dapper body doesn't honor capability filters
+    // (raw SQL, no EF query filters), so it is present-but-unused here — a
+    // Dapper-specific bypass gate is a later slice's concern.
     expect(repo).toContain(
-      "public async Task<IReadOnlyList<Customer>> RunByNameSortedAsync(string n, (int? offset, int? limit)? page = null, bool ignoreAllFilters = false, string[]? ignoreFilters = null, CancellationToken cancellationToken = default)",
+      "public async Task<IReadOnlyList<Customer>> RunByNameSortedAsync(string n, (int? offset, int? limit)? page = null, FilterBypass bypass = default, CancellationToken cancellationToken = default)",
     );
     // criterion `where: NameIs(n)` → inline SQL with this-prop → column.
     expect(repo).toContain(

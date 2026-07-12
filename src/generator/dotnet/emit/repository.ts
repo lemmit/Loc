@@ -19,6 +19,7 @@ import {
   renderCsExpr,
   renderCsType,
 } from "../render-expr.js";
+import { queryFilterNames } from "./efcore.js";
 import { joinDbSetName, joinEntityName, joinFkPropName } from "./join-entities.js";
 
 // Repository interface (Domain layer) + EF-backed implementation
@@ -64,7 +65,9 @@ export function renderRepositoryInterface(
       // already imports it unconditionally, so mirror that here.
       `using ${ns}.Domain.Enums;`,
       anyFindUsesUser ? `using ${ns}.Auth;` : null,
-      anyFindIsPaged ? `using ${ns}.Domain.Common;` : null,
+      // `Domain.Common` carries `Paged<T>` (paged finds) AND `FilterBypass`
+      // (the `ignoring`-clause bypass param on every `Run<Name>Async`).
+      anyFindIsPaged || retrievals.length > 0 ? `using ${ns}.Domain.Common;` : null,
       "",
       `namespace ${ns}.Domain.${plural(agg.name)};`,
       "",
@@ -272,6 +275,31 @@ export function renderRepositoryImpl(
   // regression guard in retrieval-emit.test.ts pins that whole and an
   // explicit-`loads` retrieval emit the identical query body here.
   const retrievals = options?.retrievals ?? [];
+  // Adapter-side translation of a domain `FilterBypass` (capability names) to
+  // this aggregate's EF Core named query filters (audit S7 — the EF filter
+  // names never appear on the domain PORT; the adapter owns the mapping).  One
+  // `(capability, filterName)` pair per named filter that has a capability
+  // origin (a base filter with no origin can only be dropped via `bypass.All`).
+  const filterNames = queryFilterNames(agg);
+  const filterOrigins = agg.contextFilterOrigins ?? [];
+  const bypassPairs = filterNames
+    .map((filter, i) => ({ cap: filterOrigins[i], filter }))
+    .filter((p): p is { cap: string; filter: string } => p.cap != null);
+  const bypassBody = [
+    "        if (bypass.All) __q = __q.IgnoreQueryFilters();",
+    ...(bypassPairs.length > 0
+      ? [
+          "        else if (bypass.Capabilities is { Count: > 0 })",
+          "        {",
+          `            var __ignore = new (string Capability, string Filter)[] { ${bypassPairs
+            .map((p) => `(${JSON.stringify(p.cap)}, ${JSON.stringify(p.filter)})`)
+            .join(", ")} }`,
+          "                .Where(m => bypass.Capabilities.Contains(m.Capability)).Select(m => m.Filter).ToArray();",
+          "            if (__ignore.Length > 0) __q = __q.IgnoreQueryFilters(__ignore);",
+          "        }",
+        ]
+      : []),
+  ];
   const retrievalMethodLines = retrievals.flatMap((r) => {
     // The retrieval is a reified Ardalis Specification (where + sort, emitted
     // by spec-emit.ts); the method applies it and layers call-site paging.
@@ -280,10 +308,11 @@ export function renderRepositoryImpl(
       `    public async Task<IReadOnlyList<${agg.name}>> Run${upperFirst(r.name)}Async(${renderRetrievalParamsWithCt(r.params)})`,
       "    {",
       // Apply an inline read's `ignoring` clause (named-filter-bypass.md §11)
-      // to the base IQueryable BEFORE the spec composes its WHERE/ORDER.
+      // to the base IQueryable BEFORE the spec composes its WHERE/ORDER.  The
+      // domain `bypass` (capability names) is translated to EF filter names
+      // adapter-side, above.
       `        var __q = _db.${setName}.AsQueryable();`,
-      "        if (ignoreAllFilters) __q = __q.IgnoreQueryFilters();",
-      "        else if (ignoreFilters is { Length: > 0 }) __q = __q.IgnoreQueryFilters(ignoreFilters);",
+      ...bypassBody,
       `        var result = await __q.WithSpecification(new ${upperFirst(r.name)}Spec(${specArgs})).ApplyPaging(page).ToListAsync(cancellationToken);`,
       `        ${renderDotnetLogCall("findExecuted", [
         { name: "aggregate", valueExpr: `"${agg.name}"` },
@@ -977,12 +1006,12 @@ export function renderRetrievalParamsWithCt(params: ParamIR[]): string {
     ...params.map((p) => `${renderCsType(p.type)} ${p.name}`),
     "(int? offset, int? limit)? page = null",
   ].join(", ");
-  // The two `ignore*` params carry an inline read's `ignoring` clause
+  // The `bypass` param carries an inline read's `ignoring` clause
   // (named-filter-bypass.md §11) from the call site to the shared retrieval
-  // method.  `cancellationToken` MUST stay last (CA1068, an error under
-  // `/warnaserror`), so the ignore params sit before it; call sites pass
-  // `cancellationToken` as a NAMED arg (it follows the optional `page`).
-  // `ignoreAllFilters` → `ignoring *`; `ignoreFilters` → the EF named-filter
-  // list for `ignoring <Cap>`.
-  return `${head}, bool ignoreAllFilters = false, string[]? ignoreFilters = null, CancellationToken cancellationToken = default`;
+  // method — in DOMAIN terms (`FilterBypass`, capability names), NOT EF
+  // `IgnoreQueryFilters` vocabulary, so the repository PORT stays ORM-neutral
+  // (audit S7); the adapter translates it.  `cancellationToken` MUST stay last
+  // (CA1068, an error under `/warnaserror`), so `bypass` sits before it; call
+  // sites pass `cancellationToken` NAMED (it follows the optional `page`).
+  return `${head}, FilterBypass bypass = default, CancellationToken cancellationToken = default`;
 }

@@ -38,6 +38,7 @@ import { lines } from "../../../util/code-builder.js";
 import { lowerFirst } from "../../../util/naming.js";
 import { renderTsType } from "../render-expr.js";
 import { renderTsStatements } from "../render-stmt.js";
+import { PORT_POOL_DOMAIN_SPEC, repoPortName } from "../repository-port-builder.js";
 import { renderOperationReturnType } from "./aggregate.js";
 
 /** Emit the `domain/services.ts` file for a context's domain services, or
@@ -94,10 +95,16 @@ export function renderDomainServices(ctx: BoundedContextIR): string | undefined 
         ? `import { ${usedVoOrEnum.join(", ")} } from "./value-objects";`
         : null,
       ...usedAggs.map((n) => `import type { ${n} } from "./${lowerFirst(n)}";`),
-      ...readPortRepos.map(
-        (p) =>
-          `import type { ${p.aggregate}Repository } from "../db/repositories/${lowerFirst(p.aggregate)}-repository";`,
-      ),
+      // Read-port repository handles are typed against the domain-side PORT
+      // (audit S7 — hexagonal), NOT the concrete infra repository: the domain
+      // layer must not import from `db/`.  The orchestrating workflow injects
+      // the concrete `<Agg>Repository` (which `implements` the port) at the
+      // call site.
+      readPortRepos.length > 0
+        ? `import type { ${readPortRepos
+            .map((p) => repoPortName(p.aggregate))
+            .join(", ")} } from "${PORT_POOL_DOMAIN_SPEC}";`
+        : null,
       "",
       body,
     ) + "\n"
@@ -122,7 +129,7 @@ function renderOperation(op: DomainServiceOperationIR, ctx: BoundedContextIR): s
   // (byte-identical).  Each read-port repository read makes the operation `async`
   // (the repo methods are awaited), and its return type is wrapped in a Promise.
   const ports = readPortsForOperation(op);
-  const portParams = ports.map((p) => `${lowerFirst(p.repo)}: ${p.aggregate}Repository`);
+  const portParams = ports.map((p) => `${lowerFirst(p.repo)}: ${repoPortName(p.aggregate)}`);
   const userParams = op.params.map((p) => `${p.name}: ${renderTsType(p.type)}`);
   const params = [...portParams, ...userParams].join(", ");
   const isReading = ports.length > 0;

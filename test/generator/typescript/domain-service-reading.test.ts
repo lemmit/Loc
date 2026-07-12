@@ -49,15 +49,17 @@ describe("typescript generator — domainService reading tier", () => {
     const services = files.get("domain/services.ts")!;
     expect(services).toBeDefined();
     // Reading op: read-port param ahead of the user param, `async`, `Promise<…>`.
+    // The handle is typed against the domain-side PORT (audit S7), NOT the
+    // concrete infra repository.
     expect(services).toContain(
-      "export async function isEmailAvailable(accounts: AccountRepository, holder: string): Promise<boolean>",
+      "export async function isEmailAvailable(accounts: AccountRepositoryPort, holder: string): Promise<boolean>",
     );
     // The `repo-read` arm renders against the threaded handle, await-wrapped.
     expect(services).toContain("return (await accounts.byHolder(holder)) === null;");
-    // The repository class is imported.
-    expect(services).toContain(
-      'import type { AccountRepository } from "../db/repositories/account-repository";',
-    );
+    // The PORT is imported from the domain layer — the concrete `db/repositories`
+    // class is NOT (that backward edge is the S7 defect being fixed).
+    expect(services).toContain('import type { AccountRepositoryPort } from "./repository-ports";');
+    expect(services).not.toContain("db/repositories");
   });
 
   it("keeps the PURE-tier operation byte-identical (no port, no async, no await)", async () => {

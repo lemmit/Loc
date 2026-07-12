@@ -77,15 +77,19 @@ describe("python generator — domainService reading tier", () => {
     const files = await build(READING);
     const svc = files.get("api/app/domain/services/registration.py");
     expect(svc).toBeDefined();
-    // Reading op: read-port param ahead of the user params, `async def`.
+    // Reading op: read-port param ahead of the user params, `async def`.  The
+    // handle is annotated with the domain-side PORT (Protocol) — audit S7 — not
+    // the concrete infra repository.
     expect(svc!).toContain(
-      "async def both_available(accounts: AccountRepository, source: str, dest: str) -> bool:",
+      "async def both_available(accounts: AccountRepositoryPort, source: str, dest: str) -> bool:",
     );
     // The `repo-read` arm renders against the threaded handle, await-wrapped.
     expect(svc!).toContain("await accounts.by_holder(source)");
     expect(svc!).toContain("await accounts.by_holder(dest)");
-    // The repository class is imported for the annotation.
-    expect(svc!).toContain("from app.db.repositories.account_repository import AccountRepository");
+    // The PORT Protocol is imported from the domain layer — the concrete
+    // `app.db.repositories` class is NOT (that backward edge is the S7 defect).
+    expect(svc!).toContain("from app.domain.repository_ports import AccountRepositoryPort");
+    expect(svc!).not.toContain("app.db.repositories");
   });
 
   it("keeps the PURE-tier operation byte-identical (no port, no async, no await)", async () => {

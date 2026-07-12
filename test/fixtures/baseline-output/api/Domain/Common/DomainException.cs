@@ -94,3 +94,19 @@ public interface IDomainEventDispatcher
 public sealed record Paged<T>(IReadOnlyList<T> Items, int Page, int PageSize, int Total, int TotalPages);
 
 public sealed record Envelope<T>(string Id, DateTime Ts, T Body);
+
+/// <summary>
+/// Domain-termed read-scope bypass for a retrieval (the DSL <c>ignoring</c>
+/// clause).  <c>All</c> skips every capability scope (<c>ignoring *</c>);
+/// <c>Capabilities</c> names the specific capabilities to skip by their DOMAIN
+/// names (<c>ignoring &lt;Cap&gt;</c>).  The infrastructure repository adapter
+/// translates this to its own query-filter mechanism, so the domain repository
+/// PORT stays ORM-neutral — no EF <c>IgnoreQueryFilters</c> vocabulary on the
+/// interface (audit S7).
+/// </summary>
+public readonly record struct FilterBypass(bool All, IReadOnlyList<string> Capabilities)
+{
+    public static readonly FilterBypass None = new(false, Array.Empty<string>());
+    public static FilterBypass BypassAll() => new(true, Array.Empty<string>());
+    public static FilterBypass Bypass(params string[] capabilities) => new(false, capabilities);
+}

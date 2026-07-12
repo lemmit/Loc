@@ -1,4 +1,5 @@
 // Auto-generated.  Do not edit by hand.
+import type { ProductRepositoryPort } from "../../domain/repository-ports";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { eq, inArray } from "drizzle-orm";
 import * as schema from "../schema";
@@ -11,7 +12,7 @@ import { requestLog } from "../../obs/als";
 
 type Db = NodePgDatabase<typeof schema>;
 
-export class ProductRepository {
+export class ProductRepository implements ProductRepositoryPort {
   private readonly db: Db;
   private readonly events: DomainEventDispatcher;
   constructor(
