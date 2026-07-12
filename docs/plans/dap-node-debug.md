@@ -303,7 +303,12 @@ fence already established for their own gated content changes).
   directly in `.ddd`, remapped by the adapter to the generated position via
   the same source-map/SMAP/`#line` substrate every earlier phase built) —
   the "Large effort" item the phase table names; this slice's job was
-  de-risking the JS leg of it, which it did.
+  de-risking the JS leg of it, which it did. **The REMAP LAYER shipped
+  (Milestone 27, below)** — `packages/ddd-dap` + `src/dap-server/`'s
+  `LoomDebugSession` wiring both pure cores to real DAP handlers, unit- and
+  smoke-tested headlessly. The full DELEGATING proxy (spawning
+  `js-debug`/`coreclr`/JDWP for `launch`/`attach`/stepping) remains open —
+  see Milestone 27's own entry and "What's deferred."
 - **VS Code manual confirmation** (Phase A finding 4's open item): drive an
   actual `js-debug` session against the emitted `.map`, set a breakpoint on
   a `.ddd` line, confirm it resolves — needs an interactive VS Code
@@ -433,18 +438,86 @@ does the debugger actually arm it on?"
   complete in both directions** — arm-breakpoints (forward) and
   report-stops (reverse); the sole phase-8 remainder is the protocol shell
   itself (deferred, below), which needs an interactive editor to verify.
+- **Milestone 27**: the DAP **protocol shell's REMAP LAYER** — the two
+  homes mirroring `src/mcp/` + `packages/ddd-mcp/` verbatim. `src/dap-server/`
+  (a new Node-only island, its own tsc project like `src/mcp/`) adds:
+  `session.ts` — `LoomDebugSession extends DebugSession`
+  (`@vscode/debugadapter` `^1.68.0` + `@vscode/debugprotocol` `^1.68.0`,
+  both pinned at the exact latest `1.68.0`), constructor-injected with a
+  parsed `SourceMap` + a `readSource` accessor so the class stays `fs`-free
+  and unit-testable. `initializeRequest(response, args)` calls
+  `super.initializeRequest(response, args)` (the base class's own "every
+  `supports*` flag false bar `supportsConfigurationDoneRequest`" honest
+  default, which also calls `sendResponse`) then `sendEvent(new
+  InitializedEvent())`. `setBreakPointsRequest(response, args)` — note the
+  SDK's actual override name is `setBreakPointsRequest` (capital P), not
+  `setBreakpointsRequest` — becomes exactly `response.body = { breakpoints:
+  resolveSetBreakpoints(args, this.map, this.readSource) }` +
+  `sendResponse`: `DapBreakpoint`/`DapSource`/`DapSourceBreakpoint` turned
+  out to be structurally compatible with `DebugProtocol.Breakpoint`/
+  `Source`/`SourceBreakpoint` (every field either core reads or writes is
+  present with a compatible type on both sides), so no field-by-field
+  adapter was needed — the brief's "adapt at the boundary if the SDK's
+  typing is strict" fallback wasn't required. `stackTraceRequest(response,
+  args)` remaps via `remapStackFrames(this.fetchRawFrames(args), this.map,
+  this.readSource)`; `fetchRawFrames(args)` is a new **protected TEST SEAM**
+  (not an SDK override) that returns `[]` by default — in the full
+  delegating adapter (out of scope here) it would return the target
+  debugger's own reported stack, but with no delegate to ask, a test
+  subclass overrides it directly to inject a fixture stack, which is what
+  proves the remap path headlessly. `load-map.ts` is the ONLY `fs`-touching
+  code: `loadSourceMap(path)` is exactly `JSON.parse(fs.readFileSync(path,
+  "utf8")) as SourceMap` — the same call `src/cli/main.ts`'s `ddd trace` /
+  `ddd breakpoints` already make (there is no separate validating parser to
+  reuse beyond that cast) — plus `makeFsReadSource()`, a caching fs-backed
+  `readSource`. `main.ts` is the stdio entrypoint (`--map=<path>` argv /
+  `LOOM_DAP_MAP` env / `.loom/sourcemap.json` default), constructing the
+  session and calling the SDK's `ProtocolServer.start(process.stdin,
+  process.stdout)` (the SDK's own `DebugSession.run()` static helper turned
+  out to only accept `typeof DebugSession` with the base zero-arg
+  constructor shape — it can't thread through the injected `map`/
+  `readSource`, so `main.ts` constructs `new LoomDebugSession(map,
+  readSource)` itself and calls `.start(...)` directly instead). Compiled to
+  `out/dap-server/main.js`. `packages/ddd-dap/` (the publish wrapper,
+  copying `packages/ddd-mcp/` verbatim) carries `bin: { "ddd-dap": "./bin.js"
+  }`, the two `@vscode/*` deps, and `loom: { kind: "dap-server", core:
+  "^1.0.0" }` — `fs-discovery.ts`'s manifest classifier only inspects
+  `kind === "backend"`, so `"dap-server"` (like `ddd-mcp`'s
+  `"mcp-server"`) is classified `notLoom` and quietly skipped; no union
+  needed extending. Tests in `test/dap/session.test.ts`: `initializeRequest`
+  (capability flag + `InitializedEvent` spy), `setBreakPointsRequest`
+  (verified + unverified fixture cases, delegating to
+  `resolveSetBreakpoints`), `stackTraceRequest` via a `TestSession`
+  subclass overriding `fetchRawFrames` (mixed resolved + `<node_internals>`
+  passthrough stack, 1:1 length/order, delegating to `remapStackFrames`),
+  and a real round trip: the fs `loadSourceMap` parses the ACTUAL emitted
+  `--sourcemap` map for `examples/showcase.ddd` (written to a temp dir), and
+  a `LoomDebugSession` built over it verifies a `requires currentUser.role
+  == "admin"`-guard breakpoint at the real generated site
+  (`hono_api/domain/build.ts:45`, column 32, from `.ddd` line 392 in this
+  run — derived from the map, not hardcoded). A manual stdio smoke test
+  (hand-framed `Content-Length` DAP messages piped through `packages/ddd-dap/
+  bin.js` against that same generated map) additionally confirmed the same
+  round trip over the real protocol wire format outside the test harness.
+  **What remains the sole open frontier**: the full DELEGATING
+  target-debugger proxy (spawning/proxying `js-debug`/`coreclr`/JDWP for
+  `launch`/`attach`/`continue`/`stepIn`/… and remapping only line/scope on
+  top of a live session) — `fetchRawFrames`'s test-seam default (`[]`) is
+  exactly the hook a later slice fills in with a real delegate; building and
+  verifying that needs a live editor + running target debugger, unavailable
+  headless, so it stays deferred and editor-verified, not built here.
 
 ### What's deferred
 
-- The **DAP protocol shell** itself — no `@vscode/debugadapter` dependency,
-  no `packages/ddd-dap` publish-shaped workspace. Those are glue built on
-  top of `resolveSetBreakpoints` (Milestone 24, which is itself built on
-  `translateBreakpoint` and the already-shipped reverse direction,
-  `resolveFrame`) in a later slice, the same way `src/cli/main.ts`'s `ddd
-  trace` command is glue around `src/trace/`. The DAP
-  `DebugSession.setBreakpointsRequest(response, args)` handler becomes
-  `response.body = { breakpoints: resolveSetBreakpoints(args, map,
-  readSource) }` once that shell exists.
+- **The full DELEGATING target-debugger proxy** — the protocol shell's
+  REMAP LAYER shipped in Milestone 27 above (`packages/ddd-dap` +
+  `src/dap-server/`'s `LoomDebugSession`, wiring both pure cores to real
+  `initialize`/`setBreakpoints`/`stackTrace` handlers, unit-tested
+  headlessly); what remains is spawning/proxying the target's own debugger
+  (`js-debug`/`coreclr`/JDWP) for `launch`/`attach`/`continue`/`stepIn`/…
+  and remapping only line/scope on top of that live session. Building and
+  verifying that needs an interactive editor + a running target debugger —
+  unavailable headless — so it is a reviewed next step, not abandoned.
 - **Multi-file fan-out arming** — Milestone 24's resolver reports only the
   narrowest target per requested breakpoint; actually arming the sibling
   fan-out targets too (setting additional real backend breakpoints
