@@ -11,10 +11,12 @@
 > (pack format), and recommends a de-risking sequence. It deliberately does
 > **not** claim the "structural isomorphism" the original external analysis led
 > with — that claim was false against the *anonymous-lambda* IR and is now true
-> **only for the named-action subset**; see §2. The one MVU axis still genuinely
-> future is **async effect outcomes** (server data as `Cmd`): its enabling
-> feature, [`async-actions-and-effects.md`](async-actions-and-effects.md), is
-> unstarted and gated by `loom.action-requires-await`.
+> **only for the named-action subset**; see §2. The last-maturing MVU axis is
+> **async effect outcomes** (server data as `Cmd`) — but its core primitive
+> `await` + `match await` has now **shipped on all five targets**; what remains
+> ([`async-actions-and-effects.md`](async-actions-and-effects.md)) is additive:
+> flipping `await` from warning (`loom.missing-effect-marker`) to required, plus
+> `spawn`/`onError`/`attempt`/`async`-composition sugar. See §2.1.
 
 ## TL;DR
 
@@ -135,19 +137,34 @@ What is accurate is **faithful one-way projection** Loom → MVU, not strict
 | **Msg** (named, exhaustive union) | `ActionIR.name` + typed `params` | **was large** | **✅ shipped** — named actions |
 | **update** (`(Msg,Model)→(Model,Cmd)`) | `ActionIR.body`, purity-enforced | medium | **✅ shipped** — direct emit off the body |
 | **Cmd** — sync (`navigate`/`call`/`emit`) | reified statement forms in `ActionIR.body` | medium | **✅ shipped** — purity rule reifies them |
-| **Cmd** — async outcomes (server state) | hooks + boolean/nullable flags | **the residual gap** | ⏳ **gated** — `loom.action-requires-await` |
+| **Cmd** — async outcomes (server state) | `match await op() { Ok o => … Err e => … }` | **was the residual gap** | **⚙ partial** — core shipped; sugar + enforcement pending |
 
 Six of seven axes are at zero or **shipped** today: named actions closed Msg /
 update / sync-Cmd (verified — `named-actions.test.ts` per target), and Model /
-view / init were already there. The **only** remaining axis is async effect
-outcomes — the design is *decided* in
+view / init were already there. The seventh — async effect outcomes — is **no
+longer "unstarted/gated"** (an earlier draft said so): its **core primitive
+`await` + `match await` has shipped on all five targets** (React/Vue/Svelte/
+Angular + HEEx — `AwaitExpr` in the grammar, `variant-match` IR, `renderVariantMatch`
+seam; HEEx renders it as a socket-piped `then/2`, `heex-walker-core.ts:1382-1440`).
+That `match await` discriminates a remote op's `Result` union into `Ok`/`Err`
+arms — precisely the flow that projects to Elmish `Cmd.OfAsync.either` → a
+success/error `Msg`. The design is *decided* in
 [named-actions §2.3 / §8.7](named-actions-and-stores.md) (reads derive the
 remote-data union from `QueryView`; writes reuse `then:` + optional `onError`,
-projecting to a `Result<T, E>` outcome `Msg`) but the enabling feature,
-[`async-actions-and-effects.md`](async-actions-and-effects.md), is **unstarted
-and actively gated** by `loom.action-requires-await`. So a **sync-only MVU
-target is buildable against `main` today**; full async `Cmd`s wait on that
-follow-up (and `store` persistence, likewise deferred out of v1).
+projecting to a `Result<T, E>` outcome `Msg`).
+
+What **remains** on the async axis (all additive, per
+[`async-actions-and-effects.md`](async-actions-and-effects.md)):
+- **`await`-required enforcement** — a bare remote mutating call is today a
+  *warning* (`loom.missing-effect-marker`, was `loom.action-requires-await`), not
+  an error; the "Stage 2b" flip to error hasn't happened.
+- **Sugar / composition** — `spawn` (fire-and-forget), `onError`, `attempt {}`
+  railway, `async` action composition: **no grammar surface yet**.
+
+So a **sync MVU target is buildable against `main` today**, and an **async** one
+is closer than "gated" implied — its load-bearing primitive (`match await`)
+ships on every target; the remainder is enforcement + sugar, not the core
+mechanism. (`store` persistence stays deferred out of v1.)
 
 ## 3. Work streams and distance
 
