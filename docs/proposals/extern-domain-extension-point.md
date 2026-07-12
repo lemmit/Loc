@@ -1,6 +1,6 @@
 # `extern` as a domain extension point (not an application-layer injected handler)
 
-> Status: **Proposal (not started).** Motivated by finding **S10** in
+> Status: **Decided — implementation phasing D5 (2026-07-12).** Motivated by finding **S10** in
 > [`docs/audits/generated-code-ddd-review-2026-07.md`](../audits/generated-code-ddd-review-2026-07.md)
 > and a silent-no-op bug on the Elixir backend (below). Reconciles the
 > `extern` *operation* escape hatch with the four-layer model in
@@ -235,27 +235,49 @@ deprecation window is optional, not required — there is no downstream package
 depending on the old interface. The genuinely-external-service users move to a
 `commandHandler` — a doc + example.
 
-## 5. Open questions (for sign-off before any code)
+## 5. Decisions (settled 2026-07-12)
 
-1. **Keep the `extern` keyword** for the domain-extension-point case and route
-   external-service needs to `commandHandler`? Or introduce distinct syntax
-   (e.g. `operation X() extern` = domain hook; a service is just a
-   `commandHandler`)?
-2. **Hook signature.** Does the hook receive the wire request or domain params?
-   May it `RaiseEvent` / emit? (Today's handler both mutates and raises — keep
-   both.)
-3. **Elixir callback discovery** — under the one-repo premise (§0) the impl is
-   guaranteed to be a sibling module in the same app, so config-based module
-   resolution is unnecessary; the choice narrows to `defoverridable` (a
-   generated default the user overrides in place) vs a `@behaviour` the user's
-   `use`-macro wires. Pick one; it decides the ergonomics.
-4. **Per-backend consistency** — one uniform intent ("hook is a member of the
-   aggregate"), five idiomatic mechanisms. Confirm that's acceptable vs forcing
-   a single shape.
-5. **Scope of the first slice.** Likely: (i) Elixir real-seam (fixes the silent
-   bug) + (ii) .NET partial-method (fixes S10), as the two highest-value ends;
-   TS/Python/Java follow. Or land the language-surface decision first and do all
-   five behind it.
+- **D1 — keyword.** Keep `extern`; its meaning narrows to "the op body is a
+  hand-written domain hook, co-located and owned by the aggregate." The
+  external-service case is a `commandHandler` + domain-service port, not
+  `extern`. No new syntax.
+- **D2 — hook signature.** Mirrors the operation's signature: domain-typed
+  params in, the op's declared return type out (void / exception-less union).
+  Runs post-precondition / pre-invariant; may mutate state and `emit`; the
+  framework re-asserts invariants after. It is the op body, hand-written.
+- **D3 — Elixir.** A generated default + co-located user override
+  (`defoverridable`-style, delegating to a user-owned module scaffolded once).
+  The default **fails loudly** (`raise "extern <op> not implemented"`), never
+  the current silent empty-changeset 204. Exact override idiom fixed in the
+  implementation design-review; the invariant is loud + co-located + user-owned.
+- **D4 — per-backend consistency.** One uniform intent (hook owned by the
+  aggregate, filled by a co-located user file that regeneration preserves), five
+  idiomatic mechanisms (.NET `partial`, Java `protected` override, TS/Python
+  overridable method, Elixir override).
+- **D5 — scope & phasing.** No grammar/IR change (`extern` already parses; the
+  op carries `extern: true`). Work is per-backend **emission** + deleting the
+  injected-handler machinery. Five independent generator slices, phased by
+  value: (1) Elixir (correctness) → (2) .NET (S10) → (3) TS → (4) Python →
+  (5) Java. External-service migration = docs + example.
+
+### Residual mechanism questions (finalized in each slice's design-review, not blockers)
+
+These are *mechanism* details under the settled decisions above — each fixed
+when its backend slice is built, not gating the direction:
+
+- **Elixir override idiom** (D3) — `defoverridable` default vs `@behaviour` +
+  `@impl` warning vs a required sibling module. Invariant: loud failure when
+  unimplemented (never the silent 204), co-located + user-owned.
+- **.NET unimplemented-partial semantics** — a `partial void` left unimplemented
+  compiles to a no-op; if the hook must be implemented, use a partial method
+  *with a return* (C# ≥ 9 / net10) so omission is a compile error, or a
+  `protected abstract`-style shape. Pick the one that makes "forgot to
+  implement" a build error, per the one-repo premise (§0).
+- **TS / Python hook shape** — subclass-override vs an assigned bound method vs a
+  mixin the factory composes; whichever keeps fields private and the extension
+  file user-owned across regen.
+- **`emit` inside the hook** — confirm the hook uses the same `emit`/event-raise
+  path a normal op body uses on each backend (D2 says yes).
 
 ## Relationship to other work
 
