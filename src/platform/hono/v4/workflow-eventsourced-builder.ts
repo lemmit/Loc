@@ -40,9 +40,11 @@ export function foldedEventNames(wf: WorkflowIR): string[] {
 
 /** The Drizzle stream-table const for a workflow — the single per-context
  *  `<ctx>_events` log (event-log-architecture.md), shared by every ES aggregate
- *  and ES workflow in the context and discriminated by `stream_type`. */
-function streamTable(ctx: EnrichedBoundedContextIR): string {
-  return `schema.${lowerFirst(ctx.name)}Events`;
+ *  and ES workflow in the context and discriminated by `stream_type`.  Named
+ *  after the OWNING context so a merged multi-context deployable references the
+ *  same const the schema emits (`<owner>Events`). */
+function streamTable(ownerName: string): string {
+  return `schema.${lowerFirst(ownerName)}Events`;
 }
 
 /** `<T>State` type name. */
@@ -129,11 +131,15 @@ function renderApplierStmt(s: StmtIR, indent: string): string {
 export function emitWorkflowFoldHelpers(
   wf: WorkflowIR,
   ctx: EnrichedBoundedContextIR,
-  opts: { readOnly?: boolean } = {},
+  opts: { readOnly?: boolean; resolveStreamContext?: (name: string) => string | undefined } = {},
 ): string[] {
   const T = upperFirst(wf.name);
   const corr = wf.correlationField as string;
-  const table = streamTable(ctx);
+  // Resolve the workflow's OWNING context — `ctx` may be a merged union of
+  // several contexts (multi-context deployable), so the shared `<ctx>_events`
+  // log const must be named after the owner (matching the schema + migrations).
+  const owner = opts.resolveStreamContext?.(wf.name) ?? ctx.name;
+  const table = streamTable(owner);
   // The stream-type discriminator that carves this workflow's slice out of the
   // shared per-context event log — mirrors the ES aggregate repo's
   // `stream_type = "<Agg>"`.

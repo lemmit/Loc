@@ -82,6 +82,11 @@ export function buildWorkflowsFile(
    *  whole-file region (mirrors the Elixir pooled-file precedent) — these
    *  fragment-only statement regions are the only mapping this file gets. */
   opFragments?: OpFragment[],
+  /** Maps an event-sourced workflow name to its OWNING context name, so the
+   *  shared `<ctx>_events` log const is named after the owner in a merged
+   *  multi-context deployable.  Absent → the merged `ctx.name` (byte-identical
+   *  for single-context systems). */
+  resolveStreamContext?: (name: string) => string | undefined,
 ): string {
   if (ctx.workflows.length === 0) return "";
   // Build the body first; imports are derived from what the body actually
@@ -176,7 +181,7 @@ export function buildWorkflowsFile(
     body.push(...emitWorkflowStreamSerializers(ctx));
     body.push("");
     for (const wf of esInstanceWorkflows) {
-      body.push(...emitWorkflowFoldHelpers(wf, ctx));
+      body.push(...emitWorkflowFoldHelpers(wf, ctx, { resolveStreamContext }));
       body.push("");
       helperDone.add(wf.name);
     }
@@ -261,7 +266,13 @@ export function buildWorkflowsFile(
   if (ctx.eventSubscriptions.length > 0) {
     body.push("");
     body.push(
-      ...emitSubscriptionHandlers(ctx, helperDone, esInstanceWorkflows.length > 0, opFragments),
+      ...emitSubscriptionHandlers(
+        ctx,
+        helperDone,
+        esInstanceWorkflows.length > 0,
+        opFragments,
+        resolveStreamContext,
+      ),
     );
   }
   // Now derive imports from what the body actually references.
@@ -853,6 +864,9 @@ function emitSubscriptionHandlers(
   /** Source-map Milestone 11 — forwarded into each reactor/starter handler
    *  body (see `emitHandlerFn` / `emitEventSourcedHandlerFn`). */
   opFragments?: OpFragment[],
+  /** Owning-context resolver for the shared `<ctx>_events` log const — see
+   *  `buildWorkflowsFile`. */
+  resolveStreamContext?: (name: string) => string | undefined,
 ): string[] {
   const subs = ctx.eventSubscriptions;
   const out: string[] = [];
@@ -872,7 +886,9 @@ function emitSubscriptionHandlers(
     const wf = ctx.workflows.find((w) => w.name === sub.workflow);
     if (wf?.correlationField && !helperDone.has(wf.name)) {
       out.push(
-        ...(wf.eventSourced ? emitWorkflowFoldHelpers(wf, ctx) : emitWorkflowStateHelpers(wf)),
+        ...(wf.eventSourced
+          ? emitWorkflowFoldHelpers(wf, ctx, { resolveStreamContext })
+          : emitWorkflowStateHelpers(wf)),
       );
       out.push("");
       helperDone.add(wf.name);

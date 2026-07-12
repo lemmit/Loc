@@ -88,6 +88,14 @@ export function renderSchema(
      *  resolved from the projection's OWNING context (mirrors
      *  `resolveWorkflowSchema`).  Absent / undefined → unqualified `pgTable`. */
     resolveProjectionSchema?: (proj: ProjectionIR) => string | undefined;
+    /** Per-stream OWNING-context name lookup — maps an event-sourced aggregate /
+     *  workflow name to the name of the bounded context that declares it.  This
+     *  `ctx` may be a merged union of several contexts (multi-context
+     *  deployable), so the per-context `<ctx>_events` log must be named after
+     *  the stream's OWNING context (matching the repository + migrations), not
+     *  the merged `ctx.name`.  Absent / undefined → the merged `ctx.name`,
+     *  byte-identical for single-context systems. */
+    resolveStreamContext?: (streamName: string) => string | undefined;
   } = {},
 ): string {
   const lookup = opts.resolveDataSource;
@@ -197,19 +205,32 @@ export function renderSchema(
       }
     }
   }
-  // The single per-context event log (event-log-architecture.md): one
-  // `<ctx>_events` table shared by every `persistedAs(eventLog)` aggregate and
-  // every `eventSourced` workflow in the context, discriminated by
-  // `stream_type`.  Its schema follows the context's event-sourced streams
-  // (aggregate binding first, else the workflow schema resolver).
-  const esAgg = ctx.aggregates.find((a) => a.persistedAs === "eventLog");
-  const esWf = ctx.workflows.find((w) => w.eventSourced);
-  if (esAgg || esWf) {
-    const logSchema = esAgg
-      ? schemaFor(esAgg)
-      : registerSchema(opts.resolveWorkflowSchema?.(esWf!));
-    const logPrefix = esAgg ? prefixFor(esAgg) : undefined;
-    tables.push(emitEventLogTable(ctx.name, { schema: logSchema, prefix: logPrefix }));
+  // The per-context event log (event-log-architecture.md): one `<ctx>_events`
+  // table shared by every `persistedAs(eventLog)` aggregate and every
+  // `eventSourced` workflow in the context, discriminated by `stream_type`.
+  // Keyed by OWNING context, because this `ctx` may be a merged union of
+  // several contexts (multi-context deployable) — each owning context that has
+  // any event-sourced stream gets its own log, named to match the repository +
+  // migrations (`<owner>_events`).  Aggregate binding fixes the schema first
+  // (an owning context with both an ES aggregate and an ES workflow shares one
+  // log), else the workflow schema resolver.
+  const eventLogs = new Map<string, { schema?: string; prefix?: string }>();
+  for (const agg of ctx.aggregates) {
+    if (agg.persistedAs !== "eventLog") continue;
+    const owner = opts.resolveStreamContext?.(agg.name) ?? ctx.name;
+    if (!eventLogs.has(owner)) {
+      eventLogs.set(owner, { schema: schemaFor(agg), prefix: prefixFor(agg) });
+    }
+  }
+  for (const wf of ctx.workflows) {
+    if (!wf.eventSourced) continue;
+    const owner = opts.resolveStreamContext?.(wf.name) ?? ctx.name;
+    if (!eventLogs.has(owner)) {
+      eventLogs.set(owner, { schema: registerSchema(opts.resolveWorkflowSchema?.(wf)) });
+    }
+  }
+  for (const [owner, info] of eventLogs) {
+    tables.push(emitEventLogTable(owner, info));
   }
   if (opts.audit) tables.push(AUDIT_TABLE);
   if (opts.provenance) tables.push(PROVENANCE_TABLE);
