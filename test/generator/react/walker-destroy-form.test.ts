@@ -50,7 +50,7 @@ describe("DestroyForm — canonical destroy confirmation", () => {
     const files = await generateSystemFiles(`
       system S {
         subdomain M { context C {
-          aggregate Note ids guid { text: string }
+          aggregate Note { text: string }
           repository Notes for Note { }
         } }
         ui WebApp {

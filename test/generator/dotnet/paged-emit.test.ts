@@ -13,7 +13,7 @@ import { parseValid } from "../../_helpers/parse.js";
 
 const SRC = `
   context Orders {
-    aggregate Order ids guid { ref: string  region: string }
+    aggregate Order { ref: string  region: string }
     repository Orders for Order {
       find recent(): Order paged
       find inRegion(region: string): Order paged where this.region == region

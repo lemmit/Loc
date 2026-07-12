@@ -18,7 +18,7 @@ const SRC = `
 system Shop {
   subdomain Catalog {
     context Catalog {
-      aggregate Product ids guid {
+      aggregate Product {
         name: string
         derived cleanName: string = name.trim()
         invariant name.trim().length > 0
@@ -72,7 +72,7 @@ describe("python generator — string.trim() intrinsic (stdlib A1 pilot)", () =>
 system Shop {
   subdomain Catalog {
     context Catalog {
-      aggregate Product ids guid { name: string }
+      aggregate Product { name: string }
       repository Products for Product {
         find byName(q: string): Product[] where this.name == q.trim()
       }
@@ -98,7 +98,7 @@ describe("python generator — string case intrinsics (stdlib A2)", () => {
 system Shop {
   subdomain Catalog {
     context Catalog {
-      aggregate Product ids guid {
+      aggregate Product {
         name: string
         derived slug: string = name.trim().toLower()
       }
@@ -145,7 +145,7 @@ describe("python generator — numeric math intrinsics (stdlib A3)", () => {
 system Shop {
   subdomain Catalog {
     context Catalog {
-      aggregate Product ids guid {
+      aggregate Product {
         qty: int
         weight: decimal
         price: money

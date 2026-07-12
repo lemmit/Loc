@@ -20,7 +20,7 @@ function ctx(opts: { eventSourced?: boolean; command?: string; appliers?: string
   return `
     context Core {
       event Bumped { counter: Counter id, by: int }
-      aggregate Counter ids guid${header} {
+      aggregate Counter${header} {
         total: int
         ${command}
         ${appliers}

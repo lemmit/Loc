@@ -22,7 +22,7 @@ const SOURCE = `
 system Shop {
   subdomain Sales {
     context Orders {
-      aggregate Order ids guid {
+      aggregate Order {
         code: string
         region: string
       }
@@ -106,7 +106,7 @@ system Shop {
   subdomain Sales {
     context Orders {
       error NotFound { resource: string }
-      aggregate Order ids guid {
+      aggregate Order {
         code: string
         operation reserve(): Order or NotFound {
           return NotFound { resource: code }
@@ -154,7 +154,7 @@ system Shop {
   subdomain Sales {
     context Orders {
       error OrderNotFound { }
-      aggregate Order ids guid { code: string }
+      aggregate Order { code: string }
       repository Orders for Order {
         find locate(code: string): Order or OrderNotFound where this.code == code
       }

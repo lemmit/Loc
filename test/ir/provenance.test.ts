@@ -36,7 +36,7 @@ const SYSTEM = (body: string) => `
 system S {
   subdomain M {
     context C {
-      aggregate Cart ids guid {
+      aggregate Cart {
         label: string
         derived display: string = label
         total: int provenanced
@@ -87,7 +87,7 @@ describe("provenanced — validation", () => {
     // `total` is provenanced but no operation assigns it here.
     const src = `
 system S { subdomain M { context C {
-  aggregate Cart ids guid {
+  aggregate Cart {
     label: string
     derived display: string = label
     total: int provenanced
@@ -257,7 +257,7 @@ const SYSTEM_WF = `
 system S {
   subdomain M {
     context C {
-      aggregate Cart ids guid {
+      aggregate Cart {
         label: string
         total: int provenanced
         discount: int

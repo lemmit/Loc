@@ -22,7 +22,7 @@ const SOURCE = `
 system OrderingSystem {
   subdomain Ordering {
     context Ordering {
-      aggregate Order ids guid with crudish {
+      aggregate Order with crudish {
         reference: string
         quantity: int
         unitPrice: int
@@ -63,7 +63,7 @@ const PLAIN = `
 system Plain {
   subdomain Core {
     context Stock {
-      aggregate Item ids guid with crudish {
+      aggregate Item with crudish {
         total: int
         operation bump() { total := total + 1 }
       }

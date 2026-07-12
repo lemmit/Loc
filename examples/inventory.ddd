@@ -14,7 +14,7 @@ context Inventory {
     qty: int
   }
 
-  aggregate Warehouse ids guid with crudish {
+  aggregate Warehouse with crudish {
     code: string
     contains stocks: Stock[]
 

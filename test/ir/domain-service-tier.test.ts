@@ -16,7 +16,7 @@ import { buildLoomModel } from "../_helpers/ir.js";
 const SRC = `
   context Banking {
     valueobject Money { amount: decimal currency: string invariant amount >= 0 }
-    aggregate Account ids guid {
+    aggregate Account {
       holder: string
       balance: Money
       operation withdraw(amount: Money) {

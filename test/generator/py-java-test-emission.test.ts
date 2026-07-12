@@ -27,7 +27,7 @@ const CORE = `
 system Demo {
   subdomain Projects {
     context Catalog {
-      aggregate Project ids guid with crudish {
+      aggregate Project with crudish {
         name: string
         description: string?
         budget: decimal
@@ -59,9 +59,9 @@ system Demo2 {
   subdomain Sales {
     context Orders {
       valueobject Money { amount: money currency: string }
-      aggregate Customer ids guid with crudish { name: string }
+      aggregate Customer with crudish { name: string }
       repository Customers for Customer { }
-      aggregate Order ids guid with crudish {
+      aggregate Order with crudish {
         customerId: Customer id
         total: Money
         placedAt: datetime

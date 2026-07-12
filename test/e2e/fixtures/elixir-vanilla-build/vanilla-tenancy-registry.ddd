@@ -31,12 +31,12 @@ system TenancyRegistryShop {
     context Accounts {
       // The registry — no marker, no hand-written filter; the self-scope is
       // derived from the `tenancy by` line.
-      aggregate Organization ids guid {
+      aggregate Organization {
         name: string
       }
       repository Organizations for Organization { }
 
-      aggregate Account ids guid with tenantOwned {
+      aggregate Account with tenantOwned {
         balance: int
       }
       repository Accounts for Account { }

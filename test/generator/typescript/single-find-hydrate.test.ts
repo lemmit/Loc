@@ -9,13 +9,13 @@ import { parseString } from "../../_helpers/parse.js";
 
 const SRC = `
   context Inventory {
-    aggregate Warehouse ids guid {
+    aggregate Warehouse {
       code: string
       region: string
       contains bays: Bay[]
       entity Bay { label: string }
     }
-    aggregate Sku ids guid { name: string }
+    aggregate Sku { name: string }
     repository Warehouses for Warehouse {
       find byCode(code: string): Warehouse? where this.code == code
     }

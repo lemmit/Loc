@@ -17,7 +17,7 @@ system DocTenancy {
 
   subdomain D {
     context Shop {
-      aggregate Order ids guid shape(document) {
+      aggregate Order shape(document) {
         tenantId: string
         code: string
         // Always-on row scoping: every read of Order is constrained to the

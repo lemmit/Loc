@@ -73,7 +73,7 @@ const ES_SRC = `
   system Sys {
     subdomain Ops {
       context Ops {
-        aggregate Order ids guid { total: int  create place() { total := 0  emit OrderPlaced { order: id } } }
+        aggregate Order { total: int  create place() { total := 0  emit OrderPlaced { order: id } } }
         event OrderPlaced { order: Order id }
         event PaymentReceived { order: Order id, amount: int }
         channel Lifecycle { carries: OrderPlaced, PaymentReceived  delivery: broadcast  retention: ephemeral }

@@ -15,7 +15,7 @@ const tenancySystem = (aggregates: string) => `
     subdomain Sales {
       context Ordering {
         ${aggregates}
-        aggregate Organization ids guid { name: string }
+        aggregate Organization { name: string }
       }
     }
     api SalesApi from Sales
@@ -41,7 +41,7 @@ const sqlOf = (files: Map<string, string>): string =>
 describe("tenantOwned → derived tenant_id index DDL", () => {
   it("derives a non-unique `<table>_tenant_id_idx` on a tenantOwned aggregate", async () => {
     const files = await generateSystemFiles(
-      tenancySystem(`aggregate Invoice ids guid with tenantOwned { number: string }`),
+      tenancySystem(`aggregate Invoice with tenantOwned { number: string }`),
     );
     const sql = sqlOf(files);
     expect(sql).toMatch(/CREATE INDEX "?invoices_tenant_id_idx"? ON \S+ \("?tenant_id"?\)/);
@@ -51,8 +51,8 @@ describe("tenantOwned → derived tenant_id index DDL", () => {
   it("derives none for the registry or a crossTenant aggregate (no tenant_id column)", async () => {
     const files = await generateSystemFiles(
       tenancySystem(
-        `aggregate Invoice ids guid with tenantOwned { number: string }
-         aggregate Plan ids guid crossTenant { code: string }`,
+        `aggregate Invoice with tenantOwned { number: string }
+         aggregate Plan crossTenant { code: string }`,
       ),
     );
     const sql = sqlOf(files);
@@ -62,7 +62,7 @@ describe("tenantOwned → derived tenant_id index DDL", () => {
 
   it("rides MigrationsIR into the Ecto migration on the elixir backend", async () => {
     const files = await generateSystemFiles(
-      tenancySystem(`aggregate Invoice ids guid with tenantOwned { number: string }`).replace(
+      tenancySystem(`aggregate Invoice with tenantOwned { number: string }`).replace(
         "platform: node",
         "platform: elixir",
       ),
@@ -76,7 +76,7 @@ describe("tenantOwned → derived tenant_id index DDL", () => {
 
   it("derives a `<table>_data_key_idx` with `text_pattern_ops` on a tenantOwned aggregate (P2.5)", async () => {
     const files = await generateSystemFiles(
-      tenancySystem(`aggregate Invoice ids guid with tenantOwned { number: string }`),
+      tenancySystem(`aggregate Invoice with tenantOwned { number: string }`),
     );
     const sql = sqlOf(files);
     // The materialized-path prefix index — `text_pattern_ops` makes a
@@ -89,8 +89,8 @@ describe("tenantOwned → derived tenant_id index DDL", () => {
   it("derives no data_key index for the registry / a crossTenant aggregate", async () => {
     const files = await generateSystemFiles(
       tenancySystem(
-        `aggregate Invoice ids guid with tenantOwned { number: string }
-         aggregate Plan ids guid crossTenant { code: string }`,
+        `aggregate Invoice with tenantOwned { number: string }
+         aggregate Plan crossTenant { code: string }`,
       ),
     );
     const sql = sqlOf(files);
@@ -102,7 +102,7 @@ describe("tenantOwned → derived tenant_id index DDL", () => {
 
   it("rides the data_key `text_pattern_ops` index into the Ecto migration (fragment column form)", async () => {
     const files = await generateSystemFiles(
-      tenancySystem(`aggregate Invoice ids guid with tenantOwned { number: string }`).replace(
+      tenancySystem(`aggregate Invoice with tenantOwned { number: string }`).replace(
         "platform: node",
         "platform: elixir",
       ),
@@ -116,9 +116,7 @@ describe("tenantOwned → derived tenant_id index DDL", () => {
 
   it("does not duplicate a hand-declared single-column unique (tenantId) index", async () => {
     const files = await generateSystemFiles(
-      tenancySystem(
-        `aggregate Invoice ids guid with tenantOwned { number: string  unique (tenantId) }`,
-      ),
+      tenancySystem(`aggregate Invoice with tenantOwned { number: string  unique (tenantId) }`),
     );
     const sql = sqlOf(files);
     // The unique index covers the prefix; no extra plain index derived.

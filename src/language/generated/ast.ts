@@ -163,7 +163,6 @@ export type DddKeywordNames =
     | "hosts"
     | "httpStatus"
     | "id"
-    | "ids"
     | "if"
     | "ignoring"
     | "immutable"
@@ -376,7 +375,6 @@ export interface Aggregate extends langium.AstNode {
     readonly $container: BoundedContext;
     readonly $type: 'Aggregate';
     crossTenant: boolean;
-    idKind?: IdKind;
     inheritanceUsing?: InheritanceLayout;
     isAbstract: boolean;
     members: Array<AggregateMember>;
@@ -390,7 +388,6 @@ export interface Aggregate extends langium.AstNode {
 export const Aggregate = {
     $type: 'Aggregate',
     crossTenant: 'crossTenant',
-    idKind: 'idKind',
     inheritanceUsing: 'inheritanceUsing',
     isAbstract: 'isAbstract',
     members: 'members',
@@ -1087,7 +1084,6 @@ export interface Deployable extends langium.AstNode {
     port?: number;
     serves: Array<langium.Reference<Api>>;
     targets?: langium.Reference<Deployable>;
-    uiBlock?: UiBlockBinding;
     uiCompose?: UiComposeBinding;
     uiSugar?: UiSugarBinding;
 }
@@ -1107,7 +1103,6 @@ export const Deployable = {
     port: 'port',
     serves: 'serves',
     targets: 'targets',
-    uiBlock: 'uiBlock',
     uiCompose: 'uiCompose',
     uiSugar: 'uiSugar'
 } as const;
@@ -1526,12 +1521,6 @@ export type HttpMethod = 'DELETE' | 'GET' | 'PATCH' | 'POST' | 'PUT';
 
 export function isHttpMethod(item: unknown): item is HttpMethod {
     return item === 'GET' || item === 'POST' || item === 'PUT' || item === 'PATCH' || item === 'DELETE';
-}
-
-export type IdKind = 'guid';
-
-export function isIdKind(item: unknown): item is IdKind {
-    return item === 'guid';
 }
 
 export interface IdRef extends langium.AstNode {
@@ -3720,23 +3709,6 @@ export function isUiApiParam(item: unknown): item is UiApiParam {
     return reflection.isInstance(item, UiApiParam.$type);
 }
 
-export interface UiBlockBinding extends langium.AstNode {
-    readonly $container: Deployable;
-    readonly $type: 'UiBlockBinding';
-    framework?: Framework;
-    ref: langium.Reference<Ui>;
-}
-
-export const UiBlockBinding = {
-    $type: 'UiBlockBinding',
-    framework: 'framework',
-    ref: 'ref'
-} as const;
-
-export function isUiBlockBinding(item: unknown): item is UiBlockBinding {
-    return reflection.isInstance(item, UiBlockBinding.$type);
-}
-
 export interface UiChannelParam extends langium.AstNode {
     readonly $container: Ui;
     readonly $type: 'UiChannelParam';
@@ -4288,7 +4260,6 @@ export type DddAstType = {
     TypeRef: TypeRef
     Ui: Ui
     UiApiParam: UiApiParam
-    UiBlockBinding: UiBlockBinding
     UiChannelParam: UiChannelParam
     UiComposeBinding: UiComposeBinding
     UiFunction: UiFunction
@@ -4352,10 +4323,6 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 crossTenant: {
                     name: Aggregate.crossTenant,
                     defaultValue: false,
-                    optional: true
-                },
-                idKind: {
-                    name: Aggregate.idKind,
                     optional: true
                 },
                 inheritanceUsing: {
@@ -4990,10 +4957,6 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 targets: {
                     name: Deployable.targets,
                     referenceType: Deployable.$type,
-                    optional: true
-                },
-                uiBlock: {
-                    name: Deployable.uiBlock,
                     optional: true
                 },
                 uiCompose: {
@@ -7051,20 +7014,6 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 }
             },
             superTypes: [UiMember.$type]
-        },
-        UiBlockBinding: {
-            name: UiBlockBinding.$type,
-            properties: {
-                framework: {
-                    name: UiBlockBinding.framework,
-                    optional: true
-                },
-                ref: {
-                    name: UiBlockBinding.ref,
-                    referenceType: Ui.$type
-                }
-            },
-            superTypes: []
         },
         UiChannelParam: {
             name: UiChannelParam.$type,

@@ -50,15 +50,15 @@ export const TENANCY_SELF_SCOPE_ORIGIN = "tenancy";
 /** How the tenancy claim binds against the registry's id in the derived
  *  self-scope comparison (`this.id == currentUser.<claim>`):
  *
- *   - `"same"`   — claim type equals the id's value type (`ids guid` +
+ *   - `"same"`   — claim type equals the id's value type (a guid id +
  *                  `tenantId: guid`, `ids string` + `tenantId: string`, …);
  *                  every backend compares directly.
- *   - `"guid-from-string"` — `ids guid` + a `string` claim (the common JWT
+ *   - `"guid-from-string"` — a guid id + a `string` claim (the common JWT
  *                  shape).  Each backend binds the claim as the id's value
  *                  type at the accessor site (pg casts the text param on
  *                  node/elixir/python; .NET wraps in `Guid.Parse`; Java
  *                  converts in the SpEL principal accessor).
- *   - `"mismatch"` — anything else (e.g. `ids guid` + `tenantId: int`).
+ *   - `"mismatch"` — anything else (e.g. a guid id + `tenantId: int`).
  *                  Enrichment derives NO filter and IR validation rejects it
  *                  (`loom.tenancy-claim-type-mismatch`). */
 export type TenancyClaimBinding = "same" | "guid-from-string" | "mismatch";

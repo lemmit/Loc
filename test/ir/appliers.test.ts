@@ -52,7 +52,7 @@ system Tally {
   subdomain Core {
     context Core {
       event Bumped { counter: Counter id, by: int }
-      aggregate Counter ids guid${header} {
+      aggregate Counter${header} {
         total: int
         ${command}
         ${appliers}

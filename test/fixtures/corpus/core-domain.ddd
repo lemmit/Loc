@@ -6,7 +6,7 @@ system CoreShop {
       enum Status { Draft, Placed, Cancelled }
       valueobject Money { amount: decimal  currency: string }
       event OrderPlaced { code: string }
-      aggregate Order ids guid {
+      aggregate Order {
         code: string
         status: Status
         total: Money

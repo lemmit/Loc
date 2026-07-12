@@ -30,8 +30,8 @@ function findReturn(src: string) {
 
 const REPO = (ret: string): string => `
   context C {
-    aggregate Order ids guid { code: string }
-    aggregate Cancel ids guid { reason: string }
+    aggregate Order { code: string }
+    aggregate Cancel { reason: string }
     repository Orders for Order { find f(): ${ret} }
   }
 `;
@@ -125,7 +125,7 @@ describe("unions — soft-keyword admission (P4)", () => {
   it("keeps a parameter named `or` parsing", () => {
     expect(
       parseRawOk(`context C {
-        aggregate A ids guid { x: int }
+        aggregate A { x: int }
         repository R for A { find g(or: int): A }
       }`),
     ).toBe(true);
@@ -136,7 +136,7 @@ describe("unions — variant validation (P4)", () => {
   it("rejects a duplicate variant in a named union (`loom.union-duplicate-variant`)", async () => {
     const { diagnostics } = await parseString(`
       context C {
-        aggregate A ids guid { x: int }
+        aggregate A { x: int }
         payload F = A | A
       }
     `);
@@ -146,7 +146,7 @@ describe("unions — variant validation (P4)", () => {
   it("rejects a duplicate variant in an anonymous `or` union", async () => {
     const { diagnostics } = await parseString(`
       context C {
-        aggregate Order ids guid { code: string }
+        aggregate Order { code: string }
         repository R for Order { find f(): Order or Order }
       }
     `);
@@ -156,8 +156,8 @@ describe("unions — variant validation (P4)", () => {
   it("accepts a union of distinct variants (no duplicate diagnostic)", async () => {
     const { diagnostics } = await parseString(`
       context C {
-        aggregate Order ids guid { code: string }
-        aggregate Cancel ids guid { reason: string }
+        aggregate Order { code: string }
+        aggregate Cancel { reason: string }
         repository R for Order { find f(): Order or Cancel }
       }
     `);
@@ -167,7 +167,7 @@ describe("unions — variant validation (P4)", () => {
   it("rejects a `slot` union variant (`loom.union-variant-not-carrier`)", async () => {
     const { diagnostics } = await parseString(`
       context C {
-        aggregate Order ids guid { code: string }
+        aggregate Order { code: string }
         repository R for Order { find f(): Order or slot }
       }
     `);
@@ -177,7 +177,7 @@ describe("unions — variant validation (P4)", () => {
   it("rejects an inline union in a stored field position (`loom.union-position`)", async () => {
     const { diagnostics } = await parseString(`
       context C {
-        aggregate Order ids guid { x: string or int }
+        aggregate Order { x: string or int }
       }
     `);
     expect(errorCodes(diagnostics)).toContain("loom.union-position");
@@ -186,8 +186,8 @@ describe("unions — variant validation (P4)", () => {
   it("allows an inline union as a repository find return", async () => {
     const { diagnostics } = await parseString(`
       context C {
-        aggregate Order ids guid { code: string }
-        aggregate Cancel ids guid { reason: string }
+        aggregate Order { code: string }
+        aggregate Cancel { reason: string }
         repository R for Order { find f(): Order or Cancel }
       }
     `);

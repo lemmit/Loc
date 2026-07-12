@@ -15,7 +15,7 @@ const SOURCE = `
 system DocFilter {
   subdomain Sales {
     context Shop {
-      aggregate Cart ids guid shape(document) {
+      aggregate Cart shape(document) {
         label: string
         isDeleted: bool
         filter !this.isDeleted
@@ -88,7 +88,7 @@ system DocTenancy {
   user { id: string  tenantId: string }
   subdomain Sales {
     context Shop {
-      aggregate Order ids guid shape(document) {
+      aggregate Order shape(document) {
         tenantId: string
         code: string
         filter this.tenantId == currentUser.tenantId

@@ -23,7 +23,7 @@ system CamelWire {
   subdomain Core {
     context Builds {
       enum BuildState { queued, running, passed, failed }
-      aggregate Build ids guid {
+      aggregate Build {
         name: string
         commitSha: string
         buildState: BuildState

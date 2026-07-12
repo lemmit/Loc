@@ -28,7 +28,7 @@ const FIXTURE = `
 system Demo {
   subdomain Projects {
     context Catalog {
-      aggregate Project ids guid with crudish {
+      aggregate Project with crudish {
         name: string
         description: string?
         budget: decimal

@@ -144,7 +144,7 @@ system DevPlatform {
                 }
             }
 
-            aggregate Project ids guid with crudish {
+            aggregate Project with crudish {
                 name: string
                 description: string?
                 visibility: Visibility
@@ -437,7 +437,7 @@ system DevPlatform {
 
             // MacroArgBool — `crudish(updateOnly: true)` composes with
             // softDeletable (which owns the create/destroy lifecycle).
-            aggregate Squad ids guid with crudish(updateOnly: true), softDeletable {
+            aggregate Squad with crudish(updateOnly: true), softDeletable {
                 name: string
                 invariant name.length > 0
                 derived display: string = name
@@ -706,8 +706,8 @@ system DevPlatform {
         }
     }
 
-    // ----- UI 2: legacy block-binding form (no api params) + per-page
-    //             menu meta.  A plain page body with no api dependency. -----
+    // ----- UI 2: no api params + per-page menu meta.  A plain page body
+    //             with no api dependency, mounted via `ui:` sugar. -----
     ui Ops {
         page BuildBoard {
             route: "/builds"
@@ -791,11 +791,12 @@ system DevPlatform {
         design: mantine
     }
 
-    // Legacy block-binding form (UiBlockBinding).
+    // Sugar binding of a no-api-param ui (framework defaults to react on a
+    // static host — the removed `ui Ops { framework: react }` block was a no-op).
     deployable opsWeb {
         platform: static
         targets: honoApi
-        ui Ops { framework: react }
+        ui: Ops
         port: 3002
         design: mantine
     }

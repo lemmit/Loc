@@ -15,7 +15,7 @@ const SOURCE = `
 system MultiCtxWf {
   subdomain Sales {
     context Orders {
-      aggregate Order ids guid { code: string  active: bool }
+      aggregate Order { code: string  active: bool }
       repository Orders for Order { }
       workflow placeOrder {
         create(code: string) {
@@ -27,7 +27,7 @@ system MultiCtxWf {
   }
   subdomain Delivery {
     context Shipments {
-      aggregate Shipment ids guid { tracking: string }
+      aggregate Shipment { tracking: string }
       repository Shipments for Shipment { }
       workflow scheduleShipment {
         create(tracking: string) {

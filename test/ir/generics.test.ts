@@ -172,7 +172,7 @@ describe("generics — monomorphization (P3b)", () => {
   it("synthesizes from a repository find return", async () => {
     const payloads = await payloadsOf(
       `system S { subdomain D { context C {
-         aggregate Order ids guid { ref: string }
+         aggregate Order { ref: string }
          repository Orders for Order { find recent(): Order id paged }
        } } }`,
       "C",
@@ -221,7 +221,7 @@ describe("generics — platform-aware emission gate (P3b)", () => {
     system Shop {
       subdomain Sales {
         context Shop {
-          aggregate Order ids guid { ref: string }
+          aggregate Order { ref: string }
           repository Orders for Order { find recent(): Order paged }
         }
       }
@@ -255,7 +255,7 @@ describe("generics — platform-aware emission gate (P3b)", () => {
       system Shop {
         subdomain Sales {
           context Shop {
-            aggregate Order ids guid { ref: string }
+            aggregate Order { ref: string }
             repository Orders for Order { find all(): Order[] }
           }
         }

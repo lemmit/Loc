@@ -24,7 +24,7 @@ system Shop {
   subdomain Sales {
     context Selling {
       valueobject Money { amount: money currency: string invariant amount >= 0.0 }
-      aggregate Order ids guid {
+      aggregate Order {
         customer: string
         status: string
         price: Money?
@@ -115,7 +115,7 @@ describe("elixir domain `test` → ExUnit emission", () => {
 system G {
   user { id: string  role: string }
   subdomain Sales { context Selling {
-    aggregate Order ids guid {
+    aggregate Order {
       customer: string
       status: string = "open"
       operation cancel(reason: string) {

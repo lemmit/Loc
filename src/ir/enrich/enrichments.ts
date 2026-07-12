@@ -356,7 +356,7 @@ function assignMigrationsOwner(
 // tenant claim) stays open by construction.
 //
 // The id-vs-claim type link is enforced by `tenancyClaimBinding`: same-typed
-// claims compare directly; a `string` claim against an `ids guid` registry is
+// claims compare directly; a `string` claim against an a guid id registry is
 // bound as a guid at each backend's accessor site; anything else derives NO
 // filter here and errors in IR validation (`loom.tenancy-claim-type-mismatch`).
 //

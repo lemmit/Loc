@@ -12,7 +12,7 @@ const SRC = `
 system Shop {
   subdomain S {
     context Sales {
-      aggregate Order ids guid with crudish {
+      aggregate Order with crudish {
         total: int
       }
     }

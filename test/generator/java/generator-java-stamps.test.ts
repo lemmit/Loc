@@ -93,7 +93,7 @@ describe("java generator — lifecycle stamps (persist-time JPA auditing)", () =
       user { id: guid  tenantId: string }
       subdomain D { context Ledger {
         stamp onCreate { tenantId := currentUser.tenantId }
-        aggregate Account ids guid {
+        aggregate Account {
           tenantId: string internal
           balance: int
           filter this.tenantId == currentUser.tenantId

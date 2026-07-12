@@ -18,13 +18,13 @@ import { parseString } from "../../_helpers/parse.js";
 
 const SRC = `
   context Shipping {
-    aggregate Account ids guid with crudish {
+    aggregate Account with crudish {
       balance: decimal
       operation charge(amount: decimal) { balance := balance - amount }
     }
     repository Accounts for Account { }
 
-    aggregate Order ids guid with crudish {
+    aggregate Order with crudish {
       total: decimal
       shipped: bool
       operation markShipped() { shipped := true }

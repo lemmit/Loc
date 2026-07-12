@@ -10,7 +10,7 @@ context Shop {
   // ProblemDetails instead of serializing it as a 200 body.
   error NotFound { resource: string }
 
-  aggregate Order ids guid {
+  aggregate Order {
     code: string
 
     // Returns the success variant for now: producer-side payload construction

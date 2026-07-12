@@ -8,7 +8,7 @@
 system DocumentFilter {
   subdomain Sales {
     context Shop {
-      aggregate Cart ids guid shape(document) {
+      aggregate Cart shape(document) {
         label: string
         isDeleted: bool
         // soft-delete capability — every read hides a deleted cart.
@@ -20,7 +20,7 @@ system DocumentFilter {
         find first(l: string): Cart? where label == l
       }
 
-      aggregate Wishlist ids guid shape(embedded) {
+      aggregate Wishlist shape(embedded) {
         label: string
         archived: bool
         // soft-delete on a root scalar column — AND-ed into the SQL where.

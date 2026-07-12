@@ -12,7 +12,7 @@ const SYS = (workflowBody: string) => `
   system S {
     subdomain D {
       context C {
-        aggregate Order ids guid { code: string }
+        aggregate Order { code: string }
         repository Orders for Order { }
         event Placed { order: Order id, at: datetime }
         channel Ch { carries: Placed  delivery: broadcast  retention: ephemeral }

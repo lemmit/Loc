@@ -20,7 +20,7 @@ const SRC = `
     subdomain Sales {
       context Sales {
         enum OrderStatus { Draft, Confirmed, Cancelled }
-        aggregate Order ids guid {
+        aggregate Order {
           reference: string
           status: OrderStatus = Draft
         }

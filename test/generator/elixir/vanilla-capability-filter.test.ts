@@ -20,7 +20,7 @@ const SOURCE = `
 system Catalog {
   subdomain Core {
     context Shop {
-      aggregate Order ids guid {
+      aggregate Order {
         customerId: string
         total: int
         archived: bool

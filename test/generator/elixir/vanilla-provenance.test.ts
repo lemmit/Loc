@@ -20,7 +20,7 @@ const SOURCE = `
 system Ordering {
   subdomain Sales {
     context Orders {
-      aggregate Order ids guid {
+      aggregate Order {
         quantity: int
         unitPrice: int
         discount: int
@@ -58,7 +58,7 @@ const PLAIN = `
 system Plain {
   subdomain Core {
     context Stock {
-      aggregate Item ids guid {
+      aggregate Item {
         total: int
         operation bump() { total := total + 1 }
       }

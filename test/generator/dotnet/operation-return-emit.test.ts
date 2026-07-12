@@ -12,7 +12,7 @@ import { parseString } from "../../_helpers/parse.js";
 const SRC = `
   context Shop {
     error NotFound { resource: string }
-    aggregate Order ids guid {
+    aggregate Order {
       code: string
       operation reserve(): Order or NotFound {
         return NotFound { resource: code }
@@ -81,7 +81,7 @@ describe("dotnet — exception-less operation returns (A3)", () => {
     const src = `
       context Shop {
         error NotFound { resource: string }
-        aggregate Order ids guid {
+        aggregate Order {
           code: string
           contains lines: Line[]
           entity Line { sku: string }

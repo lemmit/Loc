@@ -65,7 +65,7 @@ describe("python wire DTOs", () => {
 system Demo {
   subdomain S {
     context C {
-      aggregate Account ids guid with crudish {
+      aggregate Account with crudish {
         handle: string
         email: string
         invariant handle.length > 0

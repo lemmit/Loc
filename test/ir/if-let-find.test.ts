@@ -20,7 +20,7 @@ system S {
   subdomain Sales {
     context Orders {
       enum Status { Draft, Cancelled }
-      aggregate Order ids guid {
+      aggregate Order {
         code: string  status: Status  region: string
         operation cancel() { status := Cancelled }
       }

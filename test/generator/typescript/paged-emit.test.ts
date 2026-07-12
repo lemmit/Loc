@@ -12,7 +12,7 @@ import { parseString } from "../../_helpers/parse.js";
 
 const SRC = `
   context Inventory {
-    aggregate Warehouse ids guid { code: string  region: string }
+    aggregate Warehouse { code: string  region: string }
     repository Warehouses for Warehouse {
       find recent(): Warehouse paged
       find inRegion(region: string): Warehouse paged where this.region == region

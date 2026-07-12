@@ -11,7 +11,7 @@ import { parseString } from "../../_helpers/parse.js";
 
 const SRC = `
   context Catalog {
-    aggregate Product ids guid {
+    aggregate Product {
       name: string
       derived cleanName: string = name.trim()
       invariant name.trim().length > 0
@@ -43,7 +43,7 @@ describe("dotnet generator — string.trim() intrinsic (stdlib A1 pilot)", () =>
   it("renders a value-side trim (param receiver) the same way", async () => {
     const src = `
       context Catalog {
-        aggregate Product ids guid { name: string }
+        aggregate Product { name: string }
         repository Products for Product {
           find byName(q: string): Product[] where this.name == q.trim()
         }

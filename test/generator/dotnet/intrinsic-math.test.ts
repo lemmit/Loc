@@ -20,7 +20,7 @@ import { parseString } from "../../_helpers/parse.js";
 
 const SRC = `
   context Billing {
-    aggregate Invoice ids guid {
+    aggregate Invoice {
       amount: money
       budget: money
       rate: decimal

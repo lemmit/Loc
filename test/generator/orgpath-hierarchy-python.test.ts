@@ -21,7 +21,7 @@ const hierarchy = `
           owner: string
           filter this.owner == currentUser.orgPath
         }
-        aggregate Org ids guid {
+        aggregate Org {
           name: string
           implements tenantRegistry
         }

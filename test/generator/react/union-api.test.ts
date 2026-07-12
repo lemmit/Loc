@@ -16,7 +16,7 @@ import { parseString } from "../../_helpers/parse.js";
 
 const SRC = `
   context Orders {
-    aggregate Order ids guid { code: string }
+    aggregate Order { code: string }
     error NotFound { resource: string }
     repository Orders for Order { find recent(): Order or NotFound }
   }

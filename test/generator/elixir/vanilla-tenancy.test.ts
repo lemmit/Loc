@@ -27,7 +27,7 @@ system TenancyShop {
   }
   subdomain Core {
     context Ledger {
-      aggregate Account ids guid {
+      aggregate Account {
         tenantId: string
         balance: int
         filter this.tenantId == currentUser.tenantId

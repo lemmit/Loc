@@ -8,7 +8,7 @@
 system VanillaMultiCtxWf {
   subdomain Sales {
     context Orders {
-      aggregate Order ids guid {
+      aggregate Order {
         code: string
         active: bool
       }
@@ -23,7 +23,7 @@ system VanillaMultiCtxWf {
   }
   subdomain Delivery {
     context Shipments {
-      aggregate Shipment ids guid {
+      aggregate Shipment {
         tracking: string
       }
       repository Shipments for Shipment { }

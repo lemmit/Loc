@@ -35,12 +35,12 @@ system TenancyHierarchyShop {
       // The registry opts into hierarchy — `tenantRegistry` provides the
       // immutable `parent` self-FK + the managed `dataKey` path column.  The
       // self-scope filter is still derived from the `tenancy by` line.
-      aggregate Organization ids guid with tenantRegistry {
+      aggregate Organization with tenantRegistry {
         name: string
       }
       repository Organizations for Organization { }
 
-      aggregate Account ids guid with tenantOwned {
+      aggregate Account with tenantOwned {
         balance: int
         // Reads `currentUser.orgPath` — the caller org's materialized path,
         // resolved from the registry `data_key` by the auth plug.

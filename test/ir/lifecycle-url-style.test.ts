@@ -56,7 +56,7 @@ const SYS = (members: string, apiBody = "") => `
 system S {
   subdomain Sales {
     context Sales {
-      aggregate Order ids guid {
+      aggregate Order {
         subject: string
         status:  string
 ${members}
@@ -142,7 +142,7 @@ describe("routeSlug — enrichment derivation", () => {
   it("defaults to literal slugs for a top-level context with no api", async () => {
     const { model } = await parseModel(`
       context C {
-        aggregate Order ids guid {
+        aggregate Order {
           status: string
           operation cancel() { status := "x" }
         }
@@ -161,7 +161,7 @@ describe("urlStyle — conflict validation", () => {
       system S {
         subdomain Sales {
           context Sales {
-            aggregate Order ids guid { status: string }
+            aggregate Order { status: string }
             repository Orders for Order { }
           }
         }
@@ -177,7 +177,7 @@ describe("urlStyle — conflict validation", () => {
       system S {
         subdomain Sales {
           context Sales {
-            aggregate Order ids guid { status: string }
+            aggregate Order { status: string }
             repository Orders for Order { }
           }
         }

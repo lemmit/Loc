@@ -17,7 +17,7 @@ system JavaDocTenancy {
 
   subdomain Core {
     context Ledger {
-      aggregate Account ids guid shape(document) {
+      aggregate Account shape(document) {
         tenantId: string
         balance: int
         // Always-on row scoping by the requesting principal's tenant.

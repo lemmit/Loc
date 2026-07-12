@@ -15,7 +15,7 @@ const SRC = `
   system Sys {
     subdomain Ops {
       context Ops {
-        aggregate Widget ids guid {
+        aggregate Widget {
           name: string
           rating: int = 3
           invariant rating >= 1

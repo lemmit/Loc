@@ -15,7 +15,7 @@ const SYS = (apiBody: string) => `
     subdomain Sales {
       context Shop {
         error OutOfStock { sku: string }
-        aggregate Order ids guid {
+        aggregate Order {
           code: string
           operation reserve(): Order or OutOfStock {
             return OutOfStock { sku: code }

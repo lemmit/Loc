@@ -34,7 +34,7 @@ system S {
   subdomain Sales {
     context Orders {
       error NotFound { resource: string }
-      aggregate Order ids guid { code: string  region: string }
+      aggregate Order { code: string  region: string }
       repository Orders for Order { find recent(): Order or NotFound }
     }
   }

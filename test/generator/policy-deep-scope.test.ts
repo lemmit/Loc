@@ -17,7 +17,7 @@ const system = (platform: string, level: string) => `
         aggregate Account with tenantOwned {
           balance: int
         }
-        aggregate Org ids guid {
+        aggregate Org {
           name: string
           implements tenantRegistry
         }

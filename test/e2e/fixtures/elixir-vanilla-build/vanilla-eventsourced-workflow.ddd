@@ -12,7 +12,7 @@ system FulfillmentSys {
       event PaymentRegistered { order: Order id, amount: int }
       event FulfillmentCancelled { order: Order id }
 
-      aggregate Order ids guid {
+      aggregate Order {
         status: string
         create place() {
           status := "Placed"

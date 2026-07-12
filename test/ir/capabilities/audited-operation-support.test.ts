@@ -26,7 +26,7 @@ function sys(platform: string): string {
 system Shop {
   subdomain Core {
     context Ordering {
-      aggregate Order ids guid {
+      aggregate Order {
         status: string
         operation cancel() audited { status := "cancelled" }
       }
@@ -79,7 +79,7 @@ function lifecycleSys(platform: string): string {
 system Shop {
   subdomain Core {
     context Ordering {
-      aggregate Order ids guid {
+      aggregate Order {
         status: string
         create(status: string) audited { status := status }
         destroy audited { }

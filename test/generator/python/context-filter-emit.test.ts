@@ -21,7 +21,7 @@ const SRC = `
 system Shop {
   subdomain Sales {
     context Sales {
-      aggregate Customer ids guid {
+      aggregate Customer {
         name: string
         isDeleted: bool
         filter !this.isDeleted
@@ -75,7 +75,7 @@ describe("python generator — capability filter (contextFilterPredicate)", () =
 system Shop {
   subdomain Sales {
     context Sales {
-      aggregate Plain ids guid {
+      aggregate Plain {
         name: string
       }
       repository Plains for Plain {

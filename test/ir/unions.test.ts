@@ -31,8 +31,8 @@ async function payloadsOf(src: string, ctxName: string): Promise<PayloadIR[]> {
 
 const REPO = (ret: string): string => `
   context C {
-    aggregate Order ids guid { code: string }
-    aggregate Cancel ids guid { reason: string }
+    aggregate Order { code: string }
+    aggregate Cancel { reason: string }
     repository Orders for Order { find f(): ${ret} }
   }
 `;
@@ -99,8 +99,8 @@ describe("unions — monomorphization (P4b)", () => {
   it("synthesizes a named payload for an anonymous `A or B` find return", async () => {
     const payloads = await payloadsOf(
       `system S { subdomain D { context C {
-         aggregate Order ids guid { code: string }
-         aggregate Cancel ids guid { reason: string }
+         aggregate Order { code: string }
+         aggregate Cancel { reason: string }
          repository Orders for Order { find f(): Order or Cancel }
        } } }`,
       "C",
@@ -132,8 +132,8 @@ describe("unions — monomorphization (P4b)", () => {
   it("dedupes a repeated anonymous union into one payload", async () => {
     const payloads = await payloadsOf(
       `system S { subdomain D { context C {
-         aggregate Order ids guid { code: string }
-         aggregate Cancel ids guid { reason: string }
+         aggregate Order { code: string }
+         aggregate Cancel { reason: string }
          repository Orders for Order { find a(): Order or Cancel  find b(): Order or Cancel }
        } } }`,
       "C",
@@ -175,8 +175,8 @@ describe("unions — platform-aware emission gate (P4b)", () => {
     system Shop {
       subdomain Sales {
         context Shop {
-          aggregate Order ids guid { code: string }
-          aggregate Cancel ids guid { reason: string }
+          aggregate Order { code: string }
+          aggregate Cancel { reason: string }
           repository Orders for Order { find f(): ${ret} }
         }
       }

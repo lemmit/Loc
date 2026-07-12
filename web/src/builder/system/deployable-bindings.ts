@@ -50,13 +50,12 @@ export function deployableServes(node: AstNode): string[] {
 export function deployableTargets(node: AstNode): string | null {
   return asDeployable(node)?.targets?.$refText ?? null;
 }
-/** "sugar" → editable single ui ref; "compose"/"block" → advanced (text-only);
+/** "sugar" → editable single ui ref; "compose" → advanced (text-only);
  *  "none" → no ui binding. */
-export function uiKind(node: AstNode): "sugar" | "compose" | "block" | "none" {
+export function uiKind(node: AstNode): "sugar" | "compose" | "none" {
   const d = asDeployable(node);
   if (!d) return "none";
   if (d.uiCompose) return "compose";
-  if (d.uiBlock) return "block";
   return d.uiSugar ? "sugar" : "none";
 }
 export function deployableUi(node: AstNode): string | null {
@@ -99,7 +98,6 @@ export function setDeployableTargets(source: string, name: string, target: strin
 export function setDeployableUi(source: string, name: string, ui: string | null): string | null {
   return commit(source, name, (d) => {
     d.uiCompose = undefined;
-    d.uiBlock = undefined;
     d.uiSugar = ui ? ({ $type: "UiSugarBinding", ref: ref(ui) } as never) : undefined;
   });
 }

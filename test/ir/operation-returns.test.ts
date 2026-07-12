@@ -15,7 +15,7 @@ import { parseRaw, parseString } from "../_helpers/parse.js";
 const SRC = `
   context Shop {
     error NotFound { resource: string }
-    aggregate Order ids guid {
+    aggregate Order {
       code: string
       operation lookup(): string or NotFound {
         return code
@@ -62,7 +62,7 @@ describe("operation returns — platform-aware emission gate (exception-less spi
       subdomain Sales {
         context Shop {
           error NotFound { resource: string }
-          aggregate Order ids guid {
+          aggregate Order {
             code: string
             operation lookup(): string or NotFound { return code }
           }
@@ -101,7 +101,7 @@ describe("operation returns — platform-aware emission gate (exception-less spi
           context Shop {
             error NotFound { resource: string }
             event Accepted { code: string }
-            aggregate Order ids guid {
+            aggregate Order {
               code: string
               operation accept(): string or NotFound { emit Accepted { code: code }  return code }
             }
@@ -124,8 +124,8 @@ describe("operation returns — platform-aware emission gate (exception-less spi
         subdomain Sales {
           context Shop {
             error NotFound { resource: string }
-            aggregate Tag ids guid { label: string }
-            aggregate Order ids guid {
+            aggregate Tag { label: string }
+            aggregate Order {
               code: string
               tags: Tag id[]
               operation tag(t: Tag id): Order or NotFound { tags += t }
@@ -149,7 +149,7 @@ describe("operation returns — platform-aware emission gate (exception-less spi
         subdomain Sales {
           context Shop {
             error NotFound { resource: string }
-            aggregate Order ids guid {
+            aggregate Order {
               code: string
               reserved: bool
               operation accept(): string or NotFound { reserved := true  return code }
@@ -170,7 +170,7 @@ describe("operation returns — platform-aware emission gate (exception-less spi
   it("does not fire on a plain mutation operation (no return type)", async () => {
     const { model } = await parseString(
       `context Shop {
-        aggregate Order ids guid { code: string  operation rename(c: string) { code := c } }
+        aggregate Order { code: string  operation rename(c: string) { code := c } }
       }`,
       { validate: false },
     );
@@ -190,7 +190,7 @@ describe("operation returns — scalar (non-union) returns stay valid (BUG-003 n
     system Shop {
       subdomain Sales {
         context Shop {
-          aggregate Order ids guid {
+          aggregate Order {
             code: string
             operation describe(): ${ret} { return code }
             derived display: string = code
@@ -216,7 +216,7 @@ describe("operation returns — scalar (non-union) returns stay valid (BUG-003 n
         subdomain Sales {
           context Shop {
             error NotFound { resource: string }
-            aggregate Order ids guid {
+            aggregate Order {
               code: string
               operation lookup(): string or NotFound { return code }
             }

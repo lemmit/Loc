@@ -17,7 +17,7 @@ import { parseString } from "../_helpers/parse.js";
 const SRC = `
   context Orders {
     enum OrderStatus { Draft, Shipped, Cancelled }
-    aggregate Order ids guid {
+    aggregate Order {
       status: OrderStatus
       operation cancel() when this.status != Shipped {
         status := Cancelled
@@ -47,7 +47,7 @@ describe("when gate — language validators", () => {
   it("rejects a parameter reference in the predicate", async () => {
     const errors = await errsOf(`
       context Orders {
-        aggregate Order ids guid {
+        aggregate Order {
           total: int
           operation pay(amount: int) when amount > 0 { total := amount }
         }
@@ -60,7 +60,7 @@ describe("when gate — language validators", () => {
   it("rejects a non-bool predicate", async () => {
     const errors = await errsOf(`
       context Orders {
-        aggregate Order ids guid {
+        aggregate Order {
           note: string
           operation touch() when this.note { note := "x" }
         }
@@ -77,7 +77,7 @@ describe("when gate — backend support (loom.when-unsupported)", () => {
       subdomain D {
         context Orders {
           enum OrderStatus { Draft, Shipped }
-          aggregate Order ids guid {
+          aggregate Order {
             status: OrderStatus
             operation ship() when this.status != Shipped { status := Shipped }
           }

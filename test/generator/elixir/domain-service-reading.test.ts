@@ -28,7 +28,7 @@ system Banking {
         currency: string
         invariant amount >= 0
       }
-      aggregate Account ids guid with crudish {
+      aggregate Account with crudish {
         holder: string
         balance: Money
       }

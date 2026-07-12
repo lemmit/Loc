@@ -20,7 +20,7 @@ const SRC = `
         aggregate Invoice with tenantOwned {
           number: string
         }
-        aggregate Organization ids guid { name: string }
+        aggregate Organization { name: string }
         repository Invoices for Invoice { }
         repository Organizations for Organization { }
       }

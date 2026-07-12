@@ -20,7 +20,7 @@ import { parseString } from "../../_helpers/parse.js";
 const AGG = `
       event Opened { account: Account id, owner: string }
       event Deposited { account: Account id, amount: int }
-      aggregate Account ids guid persistedAs(eventLog) {
+      aggregate Account persistedAs(eventLog) {
         owner: string
         balance: int
         create open(owner: string) { emit Opened { account: id, owner: owner } }
@@ -146,7 +146,7 @@ system L {
   subdomain Core {
     context Accounts {
       event Opened { account: Account id, owner: string }
-      aggregate Account ids guid persistedAs(eventLog) {
+      aggregate Account persistedAs(eventLog) {
         owner: string
         currentBalance: int
         create open(owner: string) { emit Opened { account: id, owner: owner } }

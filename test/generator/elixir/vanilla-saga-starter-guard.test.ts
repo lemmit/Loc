@@ -13,7 +13,7 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 
 const PAIRED = `system S {
   subdomain O { context O {
-    aggregate Order ids guid { name: string  operation archive() { emit ProjectArchived { project: id } } }
+    aggregate Order { name: string  operation archive() { emit ProjectArchived { project: id } } }
     repository Orders for Order { }
     event ProjectArchived { project: Order id }
     event ProjectArchivedRecorded { project: Order id, count: int }
@@ -33,7 +33,7 @@ const PAIRED = `system S {
 
 const UNPAIRED = `system S {
   subdomain O { context O {
-    aggregate Order ids guid { status: string  create place() { status := "P"  emit OrderPlaced { order: id } } }
+    aggregate Order { status: string  create place() { status := "P"  emit OrderPlaced { order: id } } }
     repository Orders for Order { }
     event OrderPlaced { order: Order id }
     event PaymentRegistered { order: Order id, amount: int }

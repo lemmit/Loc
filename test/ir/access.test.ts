@@ -50,7 +50,7 @@ const SYSTEM = (fields: string) => `
 system S {
   subdomain M {
     context C {
-      aggregate Post ids guid {
+      aggregate Post {
 ${fields}
       }
     }

@@ -19,7 +19,7 @@ describe("generics — grammar (P3a)", () => {
   it("parses a postfix carrier on an `X id` base (`Customer id paged`)", () => {
     expect(
       parseRawOk(`context C {
-        aggregate Customer ids guid { name: string }
+        aggregate Customer { name: string }
         valueobject V { refs: Customer id paged }
       }`),
     ).toBe(true);
@@ -89,7 +89,7 @@ describe("generics — position restriction (P3b)", () => {
 
   it("allows a carrier as a repository find return", async () => {
     const { diagnostics } = await parseString(`context C {
-      aggregate Order ids guid { ref: string }
+      aggregate Order { ref: string }
       repository Orders for Order { find recent(): Order id paged }
     }`);
     expect(errorCodes(diagnostics)).not.toContain("loom.generic-position");
@@ -104,7 +104,7 @@ describe("generics — position restriction (P3b)", () => {
 
   it("rejects a carrier as a find parameter", async () => {
     const { diagnostics } = await parseString(`context C {
-      aggregate Order ids guid { ref: string }
+      aggregate Order { ref: string }
       repository Orders for Order { find weird(p: string paged): Order[] }
     }`);
     expect(errorCodes(diagnostics)).toContain("loom.generic-position");

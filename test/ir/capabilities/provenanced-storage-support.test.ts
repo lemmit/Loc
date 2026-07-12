@@ -23,7 +23,7 @@ function sys(platform: string): string {
 system Shop {
   subdomain Core {
     context Ordering {
-      aggregate Order ids guid {
+      aggregate Order {
         total: int provenanced
         operation bump() { total := total + 1 }
       }
@@ -63,7 +63,7 @@ describe("provenanced-field storage capability validation", () => {
 system Shop {
   subdomain Core {
     context Ordering {
-      aggregate Order ids guid {
+      aggregate Order {
         total: int provenanced
         operation bump() { total := total + 1 }
       }

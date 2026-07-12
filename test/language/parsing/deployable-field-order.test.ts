@@ -27,7 +27,7 @@ describe("deployable field order-independence", () => {
     const { model, errors } = await parse(`
       system S {
         subdomain Core { context C {
-          aggregate Thing ids guid with crudish { title: string }
+          aggregate Thing with crudish { title: string }
           repository Things for Thing { }
         } }
         ui WebApp with scaffold(subdomains: [Core]) { }
@@ -71,7 +71,7 @@ describe("deployable field order-independence", () => {
     const { errors } = await parse(`
       system S {
         subdomain Core { context C {
-          aggregate Thing ids guid with crudish { title: string }
+          aggregate Thing with crudish { title: string }
           repository Things for Thing { }
         } }
         ui WebApp with scaffold(subdomains: [Core]) { }

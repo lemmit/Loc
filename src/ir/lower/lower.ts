@@ -1300,7 +1300,7 @@ function lowerAggregate(
   env: Env,
   contextLevelCaps: ContextLevelCapabilities = EMPTY_CONTEXT_CAPABILITIES,
 ): AggregateIR {
-  const idValueType = (agg.idKind ?? "guid") as IdValueType;
+  const idValueType = "guid" as IdValueType;
   const inner = inAggregate(env, agg);
   const props = agg.members.filter(isProperty) as Property[];
   const containments = agg.members.filter(isContainment).map(lowerContainment);

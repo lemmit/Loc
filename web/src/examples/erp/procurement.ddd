@@ -101,7 +101,7 @@ subdomain Procurement {
       }
     }
 
-    aggregate GoodsReceipt ids guid with crudish {
+    aggregate GoodsReceipt with crudish {
       poId: PurchaseOrder id
       warehouseRef: string
       receivedAt: datetime managed

@@ -163,7 +163,7 @@ export function buildSystemGraph(ast: AstNode): SystemGraph {
         for (const r of d.contextRefs) addEdge(from, nodeId("context", r.$refText), "context");
         for (const s of d.serves) addEdge(from, nodeId("api", s.$refText), "serves");
         if (d.targets) addEdge(from, nodeId("deployable", d.targets.$refText), "targets");
-        const uiRef = d.uiSugar?.ref ?? d.uiCompose?.ref ?? d.uiBlock?.ref;
+        const uiRef = d.uiSugar?.ref ?? d.uiCompose?.ref;
         if (uiRef) addEdge(from, nodeId("ui", uiRef.$refText), "ui");
         break;
       }

@@ -18,7 +18,7 @@ const SRC = `
   system Shop {
     subdomain Sales {
       context Ordering {
-        aggregate Order ids guid {
+        aggregate Order {
           code: string
           status: string
           operation cancel() { status := "cancelled" }

@@ -21,7 +21,7 @@ const SRC = `
   valueobject Outer { label: string  inner: Inner }
 
   context Sales {
-    aggregate Customer ids guid {
+    aggregate Customer {
       name: string
       box: Outer
     }

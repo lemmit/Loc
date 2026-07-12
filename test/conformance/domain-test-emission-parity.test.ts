@@ -33,7 +33,7 @@ system S {
   subdomain Sales {
     context Selling {
       valueobject Money { amount: money  currency: string  invariant amount >= 0.0 }
-      aggregate Order ids guid {
+      aggregate Order {
         customer: string
         status: string = "open"
         invariant customer.length > 0

@@ -36,7 +36,7 @@ const TENANCY_SRC = `
         repository Invoices for Invoice { }
       }
       context Accounts {
-        aggregate Organization ids guid { name: string }
+        aggregate Organization { name: string }
         repository Organizations for Organization { }
       }
     }
@@ -88,7 +88,7 @@ describe("registry self-scope filter (enrichment derivation)", () => {
         user { id: guid  tenantId: string }
         subdomain Core {
           context Accounts {
-            aggregate Organization ids guid { name: string }
+            aggregate Organization { name: string }
             repository Organizations for Organization { }
           }
         }
@@ -104,7 +104,7 @@ describe("registry self-scope filter (enrichment derivation)", () => {
         tenancy by user.tenantId of Organization
         subdomain Billing {
           context Accounts {
-            aggregate Organization ids guid {
+            aggregate Organization {
               name: string
               active: bool
               filter this.active
@@ -137,7 +137,7 @@ describe("registry self-scope filter (enrichment derivation)", () => {
     expect(diags.some((d) => d.code === "loom.tenancy-claim-type-mismatch")).toBe(true);
   });
 
-  it("binds a guid claim same-typed (`ids guid` + `tenantId: guid`)", async () => {
+  it("binds a guid claim same-typed (guid registry id + `tenantId: guid`)", async () => {
     const ir = await buildLoomModel(TENANCY_SRC.replace("tenantId: string", "tenantId: guid"));
     const org = findAgg(ir, "Organization");
     expect(org.contextFilters).toHaveLength(1);
@@ -173,7 +173,7 @@ describe("loom.tenancy-claim-type-mismatch", () => {
     expect(diags).toHaveLength(1);
     expect(diags[0]!.severity).toBe("error");
     expect(diags[0]!.message).toContain("'int'");
-    expect(diags[0]!.message).toContain("ids guid");
+    expect(diags[0]!.message).toContain("guid id");
     expect(diags[0]!.message).toContain("tenantId: guid");
   });
 
@@ -193,7 +193,7 @@ describe("registry filter trips the principal-filter auth gate", () => {
         tenancy by user.tenantId of Organization
         subdomain Billing {
           context Accounts {
-            aggregate Organization ids guid { name: string }
+            aggregate Organization { name: string }
             repository Organizations for Organization { }
           }
         }

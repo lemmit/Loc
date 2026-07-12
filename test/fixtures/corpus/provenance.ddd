@@ -4,7 +4,7 @@
 system OrderingSystem {
   subdomain Ordering {
     context Ordering {
-      aggregate Order ids guid with crudish {
+      aggregate Order with crudish {
         reference: string
         quantity: int
         unitPrice: int

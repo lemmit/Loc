@@ -393,15 +393,18 @@ describe("page metamodel — IR shape", () => {
     expect(dep.uiFramework).toBe("react");
   });
 
-  it("attaches uiName + uiFramework to deployable IR (block form)", async () => {
+  it("attaches uiName + uiFramework to deployable IR (framework on the ui decl, sugar-mounted)", async () => {
+    // The removed colon-less `ui WebApp { framework: react }` block binding
+    // is replaced by a `framework:` on the `ui` declaration, mounted via
+    // `ui:` sugar — the declared framework flows onto the deployable IR.
     const loom = await buildLoom(`
       system Acme {
         subdomain M { context C { } }
-        ui WebApp { }
+        ui WebApp { framework: react }
         deployable web {
           platform: static
           targets: api
-          ui WebApp { framework: react }
+          ui: WebApp
           port: 3001
         }
       }

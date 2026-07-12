@@ -11,7 +11,7 @@
 system VanillaRelationalParts {
   subdomain Core {
     context Catalog {
-      aggregate Project ids guid {
+      aggregate Project {
         name: string
         active: bool
         contains pipelines: Pipeline[]

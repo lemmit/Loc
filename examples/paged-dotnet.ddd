@@ -8,7 +8,7 @@
 // `generate dotnet` path emits a complete project.  Two paged finds: one
 // plain, one with a `where`.
 context Orders {
-  aggregate Order ids guid {
+  aggregate Order {
     code: string
     region: string
   }

@@ -18,7 +18,7 @@ system L {
   subdomain Core {
     context Orders {
       error NotFound { resource: string }
-      aggregate Order ids guid {
+      aggregate Order {
         code: string
         operation reserve(): Order or NotFound { return NotFound { resource: code } }
       }

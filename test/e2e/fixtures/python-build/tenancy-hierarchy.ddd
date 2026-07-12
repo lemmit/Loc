@@ -25,7 +25,7 @@ system PythonHierarchy {
         // `orgPath` — a registry `data_key` read, not the claim-copy).
         filter this.owner == currentUser.orgPath
       }
-      aggregate Org ids guid {
+      aggregate Org {
         name: string
         implements tenantRegistry
       }

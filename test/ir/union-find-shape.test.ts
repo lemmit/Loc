@@ -19,8 +19,8 @@ const CODE = "loom.union-find-shape-unsupported";
 
 const loose = (decls: string, ret: string): string => `
   context C {
-    aggregate Order ids guid { code: string }
-    aggregate Cancel ids guid { reason: string }
+    aggregate Order { code: string }
+    aggregate Cancel { reason: string }
     ${decls}
     repository Orders for Order { find f(): ${ret} }
   }
@@ -30,8 +30,8 @@ const sysWith = (platform: string, decls: string, ret: string): string => `
   system S {
     subdomain D {
       context C {
-        aggregate Order ids guid { code: string }
-        aggregate Cancel ids guid { reason: string }
+        aggregate Order { code: string }
+        aggregate Cancel { reason: string }
         ${decls}
         repository Orders for Order { find f(): ${ret} }
       }

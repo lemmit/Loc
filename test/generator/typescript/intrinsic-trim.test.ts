@@ -11,7 +11,7 @@ import { parseString } from "../../_helpers/parse.js";
 
 const SRC = `
   context Catalog {
-    aggregate Product ids guid {
+    aggregate Product {
       name: string
       derived cleanName: string = name.trim()
       invariant name.trim().length > 0
@@ -45,7 +45,7 @@ describe("typescript generator — string.trim() intrinsic (stdlib A1 pilot)", (
   it("renders a value-side trim (param receiver) as plain JS", async () => {
     const src = `
       context Catalog {
-        aggregate Product ids guid { name: string }
+        aggregate Product { name: string }
         repository Products for Product {
           find byName(q: string): Product[] where this.name == q.trim()
         }
@@ -61,7 +61,7 @@ describe("typescript generator — string.trim() intrinsic (stdlib A1 pilot)", (
 describe("typescript generator — A2 string intrinsics end-to-end", () => {
   const SRC2 = `
     context Catalog {
-      aggregate Product ids guid {
+      aggregate Product {
         name: string
         derived slug: string = name.trim().toLower()
         derived initial: string = name.substring(0, 1).toUpper()
@@ -93,7 +93,7 @@ describe("typescript generator — A2 string intrinsics end-to-end", () => {
 describe("typescript generator — A3 math intrinsics end-to-end", () => {
   const SRC3 = `
     context Billing {
-      aggregate Invoice ids guid {
+      aggregate Invoice {
         qty: int
         amount: decimal
         price: money

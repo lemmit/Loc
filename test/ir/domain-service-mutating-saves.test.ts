@@ -15,7 +15,7 @@ import { buildLoomModel } from "../_helpers/index.js";
 
 const SRC = `
   context Banking {
-    aggregate Account ids guid {
+    aggregate Account {
       holder: string
       balance: decimal
       operation withdraw(amount: decimal) {

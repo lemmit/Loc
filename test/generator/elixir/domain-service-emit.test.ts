@@ -17,8 +17,8 @@ system Orders {
   subdomain Sales {
     context Pricing {
       error CouponExpired { code: string }
-      aggregate Customer ids guid { tier: string }
-      aggregate Cart ids guid {
+      aggregate Customer { tier: string }
+      aggregate Cart {
         subtotal: money
         operation reprice() {
           let total = Quotes.quote(this, this)

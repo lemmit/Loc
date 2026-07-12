@@ -20,7 +20,7 @@ const DDL = (platform: string, port: number) => `
 system Demo {
   subdomain S {
     context C {
-      aggregate Parcel ids guid with crudish {
+      aggregate Parcel with crudish {
         weight: decimal
         qty: int
         invariant weight > 0.5

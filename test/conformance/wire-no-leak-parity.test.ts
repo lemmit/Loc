@@ -30,7 +30,7 @@ function system(platform: string): string {
 system S {
   subdomain Sales {
     context Orders {
-      aggregate Order ids guid { code: string  region: string }
+      aggregate Order { code: string  region: string }
       repository Orders for Order { }
     }
   }

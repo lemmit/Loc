@@ -1,6 +1,9 @@
 # Surface redundancy cuts — one spelling per concept
 
-**Status:** PROPOSED
+**Status:** PARTIALLY SHIPPED — cuts #1 (`ids guid`), #2 (`criterion { where: }`),
+and #3 (legacy `ui X { framework }` block binding) landed in PR #1795. Cut #4
+(`write global`) is kept-as-is (validator error, by design); cut #5 (`static`
+platform) was investigated and **dropped** (see §5). Nothing further open here.
 **Theme:** language-surface stability. Removes pure redundancy /
 single-value / always-invalid syntax — "which spelling do I use, do they
 differ?" surprises with **no capability lost**.
@@ -17,7 +20,7 @@ cut.
 
 ## Cuts
 
-### 1. `ids guid` — single-value clause
+### 1. `ids guid` — single-value clause — ✅ SHIPPED (PR #1795)
 
 `('ids' idKind=IdKind)?` with `IdKind returns string: 'guid'`
 (`ddd.langium:927,936`) — one legal value, identical to writing nothing.
@@ -27,7 +30,7 @@ vestigial no-op spelling of the default.
 **Cut:** remove the `('ids' idKind=…)?` clause and the `IdKind` rule.
 **Migration:** delete `ids guid` where sources wrote it (no-op).
 
-### 2. `criterion … { where: e }` — redundant block form
+### 2. `criterion … { where: e }` — redundant block form — ✅ SHIPPED (PR #1795)
 
 ```
 Criterion:  … ( '=' body=Expression | '{' 'where' ':' body=Expression '}' )
@@ -39,31 +42,25 @@ with `sort:`/`loads:` — the criterion block adds nothing over `=`.
 **Cut:** remove the block alternative; keep `criterion X of T = e`.
 **Migration:** `{ where: e }` → `= e`.
 
-### 3. Legacy `ui X { framework: … }` block binding
+### 3. Legacy `ui X { framework: … }` block binding — ✅ SHIPPED (PR #1795)
 
-`UiBlockBinding` (`ddd.langium:301-304`) — the grammar labels it "legacy
-block form". Its only distinguishing payload is a `framework:` override,
-which is now also declarable on the `Ui` block itself (`ui X { framework:
-react }`, `ddd.langium:385`) and on the `ui:`/`ui:{…}` sugar. Three binding
-spellings collapse to two.
+`UiBlockBinding` (the colon-less `ui WebApp { framework: react }` *inside a
+`deployable { }`*) — the grammar labelled it "legacy block form". Its only
+distinguishing payload was a binding-site `framework:` override, redundant
+with the `framework:` the `Ui` *declaration* itself carries.
 
-⚠️ **Verify first — this may be a real capability, not pure redundancy.**
-The binding-site `framework:` override lives **only** in `UiBlockBinding`
-(`ddd.langium:303`); neither `UiSugarBinding` (`:299`) nor `UiComposeBinding`
-(`:250`) has a framework slot, and the `Ui` *declaration*'s `framework:`
-(`:385`) is **one** framework per `ui`. CLAUDE.md notes the same `ui X` can
-be served by different hosts ("a svelte host can also serve a `framework:
-react` bundle") — so if two deployables bind one `ui X` with **divergent**
-frameworks, *only* `UiBlockBinding` expresses that today; collapsing to the
-`Ui` decl loses it.
+**Verified before cutting:** the concern was that only `UiBlockBinding` could
+express *divergent* per-binding frameworks for a shared `ui`. A repo-wide grep
+found **no** such usage — every real adopter (showcase.ddd, and the
+svelte-embed tests) set one framework per `ui`, expressible on the `Ui`
+declaration. So it was pure redundancy, not a capability.
 
-**Cut only if** a grep confirms no source/example binds a shared `ui` with
-divergent per-binding `framework:`. If none: remove the `UiBlockBinding`
-alternative (+ its `deployable.ts` / `print-structural.ts` branches);
-migration = move `framework:` onto the `ui` declaration (note: `ui: X { … }`
-with braces is already `UiComposeBinding` for *param* bindings and has no
-framework slot — only bare `ui: X` sugar remains). If a divergent binding
-exists, this is a **capability removal** — keep it or redesign.
+**Cut (done):** removed the `UiBlockBinding` alternative + rule, its
+`lower-deployment.ts` / `deployable.ts` (old Rule 13) / `print-structural.ts`
+branches. Migration = move `framework:` onto the `ui` declaration and mount
+via bare `ui:` sugar (`ui: X { … }` with braces is `UiComposeBinding` for
+*param* bindings, no framework slot). A negative test pins the colon-less form
+as a hard parse error.
 
 ### 4. `write global` policy level — a parseable always-error
 
@@ -83,19 +80,29 @@ validator error and its message; treat this as already-handled, not a cut.
 (Or, if cut, the parser must emit the *custom* diagnostic, not the default.)
 **Migration:** none.
 
-### 5. `static` platform — alias of `react` *(lower confidence — verify)*
+### 5. `static` platform — ❌ DROPPED from S2 (not a clean cut)
 
-`static: reactPlatform` (`registry.ts:82`); both `react` and `static` are
-`isFrontend` frontend-only platforms mounting the same code path. If `static`
-carries **no** behavior distinct from `react`, it is a redundant second
-keyword for one backend.
+**Resolution (investigated, 2026-07):** not the redundancy it looked like,
+and *not* cut. The verification turned up a deeper fact: the five frontend
+"platforms" (`react`, `svelte`, `vue`, `angular`, `static`) are **one
+static-bundle host + a default framework**, not five technologies. Every
+frontend surface delegates to the same dispatcher —
+`dispatchFrontendProject(deployable.uiFramework, /*fallback*/ "react", …)`
+(`react.ts:26`, and the svelte/vue/angular siblings with their own fallback)
+— so the framework actually rendered comes from **`ui.framework`**; the
+platform keyword only supplies the default when the ui omits it. Given the
+same ui, `platform: react` and `platform: static` emit byte-identical output
+(`static: reactPlatform`, same fallback), and `svelte`/`vue`/`angular` differ
+*only* in their default framework.
 
-**Before cutting, verify** it has no distinct semantics (e.g. a genuinely
-backend-less "static site" mode vs. a react app that `targets:` a backend).
-If distinct, keep it and *document the distinction* (the surprise is the
-undocumented overlap, not the keyword). If not, consolidate on `react`.
-**This one is a judgment call**, not a clean delete — listed for a decision,
-not presumed.
+So `static` is the one *honestly-named* spelling of the static/Vite host;
+`react` is the misleading one (it happily hosts a Svelte ui). Cutting
+`static → react` would delete the framework-neutral name and keep the
+misleading one — the wrong direction. The real redundancy (five platform
+keywords encoding one host + a default, when the framework already lives on
+the `ui`) is the **`platform: vite` unification** already scoped in
+[`embedded-frontend-composition.md`](./embedded-frontend-composition.md) — a
+deliberate design change, not an S2 mechanical cut. Left to that proposal.
 
 ## Not cuts (already done / out of scope)
 

@@ -87,7 +87,7 @@ export function lowerEntityPart(part: EntityPart, agg: Aggregate, outer: Env): E
   return {
     name: part.name,
     parentName: agg.name,
-    parentIdValueType: (agg.idKind ?? "guid") as IdValueType,
+    parentIdValueType: "guid" as IdValueType,
     fields: props.map((p) => lowerField(p, inner)),
     contains: part.members.filter(isContainment).map(lowerContainment),
     derived: part.members.filter(isDerivedProp).map((d) => lowerDerived(d, inner)),

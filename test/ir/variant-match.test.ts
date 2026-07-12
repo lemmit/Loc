@@ -16,7 +16,7 @@ const SYS = (consumer: string) => `
     subdomain Sales {
       context Shop {
         error NF { detail: string }
-        aggregate A ids guid {
+        aggregate A {
           code: string
           operation reserve(): A or NF { return NF { detail: code } }
           ${consumer}
@@ -77,7 +77,7 @@ describe("variant-match", () => {
         subdomain Sales {
           context Shop {
             error NF { detail: string }
-            aggregate A ids guid {
+            aggregate A {
               code: string
             }
             repository As for A {

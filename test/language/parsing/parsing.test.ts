@@ -309,6 +309,17 @@ describe("parsing & validation of examples", () => {
 // See docs/page-metamodel.md.
 // ---------------------------------------------------------------------------
 
+// Parser-level probe: surfaces `parserErrors` directly (parseSnippet reads
+// `doc.diagnostics`, which under validation-off never carries parser errors),
+// for tests that assert a construct is a hard grammar rejection.
+async function parseRaw(src: string): Promise<{ parserErrors: string[] }> {
+  const { parseHelper } = await import("langium/test");
+  const services = createDddServices(NodeFileSystem);
+  const helper = parseHelper(services.Ddd);
+  const doc = await helper(src, { validation: false });
+  return { parserErrors: doc.parseResult.parserErrors.map((e) => e.message) };
+}
+
 async function parseSnippet(src: string): Promise<{ errors: string[]; model: Model }> {
   // This is grammar-only — no IR / validator support for the new
   // constructs yet.  We disable validation so these tests fail iff
@@ -373,8 +384,14 @@ describe("page metamodel — grammar smoke tests", () => {
     expect(errors).toEqual([]);
   });
 
-  it("parses a deployable's full ui-block binding with framework", async () => {
-    const { errors } = await parseSnippet(`
+  it("rejects the removed colon-less ui-block binding (framework lives on the ui decl now)", async () => {
+    // `ui WebApp { framework: react }` inside a deployable (UiBlockBinding)
+    // was removed — the framework belongs on the `ui` declaration, mounted
+    // via `ui:` sugar.  The colon-less form is now a hard parse error (the
+    // parser expects `ui : ID`), so we assert on parserErrors directly
+    // (parseSnippet runs validation-off, so parser errors don't surface as
+    // diagnostics).
+    const { parserErrors } = await parseRaw(`
       system Acme {
         subdomain M { context C { } }
         ui WebApp { }
@@ -386,7 +403,23 @@ describe("page metamodel — grammar smoke tests", () => {
         }
       }
     `);
-    expect(errors).toEqual([]);
+    expect(parserErrors.length).toBeGreaterThan(0);
+  });
+
+  it("parses the replacement idiom: `framework:` on the ui decl + `ui:` sugar mount", async () => {
+    const { parserErrors } = await parseRaw(`
+      system Acme {
+        subdomain M { context C { } }
+        ui WebApp { framework: react }
+        deployable api {
+          platform: static
+          targets: api
+          ui: WebApp
+          port: 3001
+        }
+      }
+    `);
+    expect(parserErrors).toEqual([]);
   });
 
   it("parses a `page` with state, body, and menu metadata", async () => {

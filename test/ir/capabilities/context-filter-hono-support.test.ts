@@ -35,7 +35,7 @@ system Shop {
   user { id: string  tenantId: string }
   subdomain Sales {
     context Shop {
-      aggregate Cart ids guid${shapeMod} {
+      aggregate Cart${shapeMod} {
         total: int
         tenantId: string
         isDeleted: bool
@@ -96,7 +96,7 @@ system Shop {
   user { id: string  tenantId: string }
   subdomain Sales {
     context Shop {
-      aggregate Cart ids guid { total: int  tenantId: string
+      aggregate Cart { total: int  tenantId: string
         filter this.tenantId == currentUser.tenantId }
     }
   }
@@ -270,7 +270,7 @@ system Shop {
   user { id: string  tenantId: string }
   subdomain Sales {
     context Shop {
-      aggregate Cart ids guid { total: int  tenantId: string
+      aggregate Cart { total: int  tenantId: string
         filter this.tenantId == currentUser.tenantId }
     }
   }

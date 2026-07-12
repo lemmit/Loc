@@ -117,7 +117,7 @@ system TS {
   subdomain D {
     context Ledger {
       stamp onCreate { tenantId := currentUser.tenantId }
-      aggregate Account ids guid {
+      aggregate Account {
         tenantId: string internal
         balance: int
         filter this.tenantId == currentUser.tenantId

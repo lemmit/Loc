@@ -20,7 +20,7 @@ system Shop {
         currency: string
         invariant amount >= 0.0
       }
-      aggregate Order ids guid {
+      aggregate Order {
         customer: string
         status: string = "open"
         total: int = 0

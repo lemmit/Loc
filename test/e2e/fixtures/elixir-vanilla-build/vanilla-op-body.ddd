@@ -9,7 +9,7 @@
 system Inventory {
   subdomain Ops {
     context Stock {
-      aggregate Item ids guid {
+      aggregate Item {
         sku: string
         quantity: int
         unitPrice: int

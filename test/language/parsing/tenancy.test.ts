@@ -107,11 +107,11 @@ describe("crossTenant — aggregate header flag grammar", () => {
     expect(plan.crossTenant).toBe(true);
   });
 
-  it("parses after an ids clause and before a with-clause (`ids guid crossTenant with …`)", async () => {
+  it("parses crossTenant before a with-clause (`crossTenant with …`)", async () => {
     const { model, errors } = await parseString(`
       system D {
         subdomain M { context C {
-          aggregate Invoice ids guid crossTenant with auditable { number: string }
+          aggregate Invoice crossTenant with auditable { number: string }
           repository Invoices for Invoice { }
         }}
       }
@@ -119,7 +119,6 @@ describe("crossTenant — aggregate header flag grammar", () => {
     expect(errors).toEqual([]);
     const invoice = aggByName(systemOf(model), "Invoice");
     expect(invoice.crossTenant).toBe(true);
-    expect(invoice.idKind).toBe("guid");
     expect(invoice.withClause?.calls?.[0]?.name).toBe("auditable");
   });
 
@@ -145,7 +144,7 @@ describe("tenancy surface — structural printer roundtrip", () => {
         tenancy by user.tenantId of Organization
         subdomain Billing {
           context Catalog {
-            aggregate Plan ids guid crossTenant { code: string }
+            aggregate Plan crossTenant { code: string }
             aggregate Organization { name: string }
             repository Plans for Plan { }
             repository Organizations for Organization { }
@@ -157,7 +156,7 @@ describe("tenancy surface — structural printer roundtrip", () => {
     expect(errors).toEqual([]);
     const printed = printStructural(systemOf(model));
     expect(printed).toContain("tenancy by user.tenantId of Organization");
-    expect(printed).toContain("aggregate Plan ids guid crossTenant {");
+    expect(printed).toContain("aggregate Plan crossTenant {");
     // Roundtrip: the printed source re-parses to the same declared facts.
     const reparsed = await parseString(printed);
     expect(reparsed.errors).toEqual([]);

@@ -39,7 +39,7 @@ system TenantHierarchy {
       // The tenant registry, opted into the tree.  `setPath` writes the managed
       // materialized path (harness seeds deterministic path strings); the plain
       // create takes `name` + the immutable `parent` self-FK.
-      aggregate Org ids guid {
+      aggregate Org {
         name: string
         implements tenantRegistry
         operation setPath(p: string) { dataKey := p }

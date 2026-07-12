@@ -6,7 +6,7 @@
 // that drops MidpointRounding for translatability).
 context Billing {
 
-  aggregate Invoice ids guid {
+  aggregate Invoice {
     amount: money
     budget: money
     rate: decimal
