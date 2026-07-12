@@ -408,4 +408,58 @@ describe("loom.effect-in-lambda (fable-elmish-frontend.md §8)", () => {
     );
     expect(diags).not.toContain("loom.effect-in-lambda");
   });
+
+  it("does NOT fire on an effect lambda in an extern-component `action`-typed param slot", async () => {
+    // Extern-component Tier 2 behaviour callback (extern-component-escape-hatch.md
+    // §3): the lambda legitimately carries effects that walk in the caller's
+    // scope, so it is exempt — the gate must not break this feature.
+    const diags = await lambdaDiags(`
+      system S {
+        subdomain M { context C { aggregate Order { status: string } repository Orders for Order { } } }
+        api CApi from M
+        ui WebApp {
+          api C: CApi
+          component OrderGrid(orders: Order[], onPick: action(Order)) extern from "widgets/order-grid"
+          page Board {
+            route: "/board"
+            state { note: string = "" }
+            body: OrderGrid { orders: C.Order.all, onPick: o => { note := o.status } }
+          }
+        }
+        storage p { type: postgres }
+        resource cs { for: C, kind: state, use: p }
+        deployable api { platform: node, contexts: [C], dataSources: [cs], serves: CApi, port: 3000 }
+        deployable web { platform: static  targets: api  ui: WebApp { C: api }  port: 3001 }
+      }
+    `);
+    expect(diags).not.toContain("loom.effect-in-lambda");
+  });
+
+  it("STILL fires on a stdlib handler slot in the same page (exemption is slot-scoped)", async () => {
+    // The exemption is specific to the component's action-typed param — a normal
+    // Button.onClick in the same page is still gated.
+    const diags = await lambdaDiags(`
+      system S {
+        subdomain M { context C { aggregate Order { status: string } repository Orders for Order { } } }
+        api CApi from M
+        ui WebApp {
+          api C: CApi
+          component OrderGrid(orders: Order[], onPick: action(Order)) extern from "widgets/order-grid"
+          page Board {
+            route: "/board"
+            state { note: string = "" }
+            body: Stack {
+              OrderGrid { orders: C.Order.all, onPick: o => { note := o.status } },
+              Button { "x", onClick: e => { note := "y" } }
+            }
+          }
+        }
+        storage p { type: postgres }
+        resource cs { for: C, kind: state, use: p }
+        deployable api { platform: node, contexts: [C], dataSources: [cs], serves: CApi, port: 3000 }
+        deployable web { platform: static  targets: api  ui: WebApp { C: api }  port: 3001 }
+      }
+    `);
+    expect(diags).toContain("loom.effect-in-lambda");
+  });
 });

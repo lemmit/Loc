@@ -74,12 +74,23 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
       // function is in `findFunctionInEnv`), so the unresolved-action-ref check
       // must NOT flag it (extern-function-hook-escape-hatch.md).
       const functionNames = new Set<string>((ui.functions ?? []).map((f) => f.name));
+      // Component name → its `action`-typed param names — the extern-component
+      // Tier 2 behaviour-callback slots, exempt from the lambda-purity check.
+      const componentActionParams = new Map<string, ReadonlySet<string>>();
+      for (const comp of ui.components) {
+        const slots = new Set<string>(
+          comp.params.filter((p) => p.type.kind === "action").map((p) => p.name),
+        );
+        if (slots.size > 0) componentActionParams.set(comp.name, slots);
+      }
       for (const page of ui.pages) {
         const actionsByName = new Map(page.actions.map((a) => [a.name, a]));
         const ctx: BodyCheckCtx = {
           aggByName,
           handles,
           functionNames,
+          componentActionParams,
+          exemptLambdas: new Set(),
           scope: new Set(),
           where: pageWhere(page),
           actionsByName,
@@ -95,6 +106,8 @@ export function validateUiBodies(loom: EnrichedLoomModel, diags: LoomDiagnostic[
           aggByName,
           handles,
           functionNames,
+          componentActionParams,
+          exemptLambdas: new Set(),
           scope: new Set(),
           where: `component '${comp.name}'`,
           actionsByName,
@@ -125,6 +138,15 @@ interface BodyCheckCtx {
    *  bare call to one is a legitimate `private-operation`-shaped call in an
    *  action body, not an unresolved action reference. */
   functionNames: ReadonlySet<string>;
+  /** Component name → set of its `action`-typed param names.  A lambda passed
+   *  to such a slot is the extern-component Tier 2 behaviour callback
+   *  (extern-component-escape-hatch.md §3): it legitimately carries effects that
+   *  walk in the CALLER's scope, so it is EXEMPT from `loom.effect-in-lambda`. */
+  componentActionParams: ReadonlyMap<string, ReadonlySet<string>>;
+  /** Lambdas the `call` arm has marked exempt from the purity check because they
+   *  fill an `action`-typed component-param slot.  Shared by reference (object
+   *  identity) across the whole body walk. */
+  exemptLambdas: Set<ExprIR>;
   /** True while walking inside an action body (Fix 4/5).  Drives the
    *  action-body call checks: a bare call that lowered to `private-operation`
    *  is an unresolved action reference here (no such backend op exists on a
@@ -175,6 +197,17 @@ function checkBody(e: ExprIR | undefined, ctx: BodyCheckCtx, diags: LoomDiagnost
       // (`onRowClick: ghost`) names no sibling action and nothing else.
       checkHandlerSlotRefs(e, ctx, diags);
       // Descend, extending scope for any form primitive's lambda args.
+      // Exempt lambdas filling an `action`-typed param of a user component
+      // (extern-component Tier 2 behaviour callbacks) from the purity check.
+      const actionParams = ctx.componentActionParams.get(e.name);
+      if (actionParams) {
+        const names = e.argNames ?? [];
+        for (let i = 0; i < e.args.length; i++) {
+          const a = e.args[i];
+          const n = names[i];
+          if (a?.kind === "lambda" && n && actionParams.has(n)) ctx.exemptLambdas.add(a);
+        }
+      }
       const shellLocals = FORM_SHELL_LOCALS[e.name];
       const childScope = shellLocals ? new Set<string>([...ctx.scope, ...shellLocals]) : ctx.scope;
       for (const a of e.args) checkBody(a, { ...ctx, scope: childScope }, diags);
@@ -335,6 +368,9 @@ function checkLambdaPurity(
   ctx: BodyCheckCtx,
   diags: LoomDiagnostic[],
 ): void {
+  // Extern-component `action`-typed param callback — effects are legitimate and
+  // walk in the caller's scope; the call arm marked it exempt.
+  if (ctx.exemptLambdas.has(lambda)) return;
   // Block form (`e => { count := count + 1 }`): any effectful StmtIR kind.
   // Single-expression form (`e => navigate("/x")`): a bare view-effect call
   // (`navigate`/`toast`) — the only effect an expression body can carry (a
