@@ -38,10 +38,12 @@ There is no single "Fable target." There are two, and they are far apart:
    files, so the fix is to *eliminate the form* (migrate them + a global
    lambda-purity invariant), not to build a gate that tolerates it.
 
-The largest *unknown* is independent of the MVU question: every Loom design
+The largest *unknown* was independent of the MVU question: every Loom design
 pack is Handlebars emitting **markup strings**, and Feliz has no markup layer
-— its "markup" is F# code. That format gap is the cheapest, highest-value
-thing to spike first.
+— its "markup" is F# code. ✅ **That gap is now spiked and closed** (§7.1): a
+`dotnet fable` → vite → headless-browser run proved procedurally-emitted Feliz
+code compiles, bundles, and runs the MVU loop end-to-end. The format decision is
+**procedural F# emission**, and the "Fable build + CI leg" is a working recipe.
 
 The audience caveat is unchanged: F# web is ~5–15k devs. The case for this is
 **generator rigor + .NET-shop differentiation**, never reach.
@@ -233,9 +235,13 @@ candidate formats:
 
 No existing Loom pack target (Mantine/shadcn/MUI/Chakra) has Feliz bindings
 except shadcn, so ≥1 pack is written from scratch against a Feliz-bindable
-system (Feliz shadcn / Bulma / DaisyUI) regardless. **This decision (a vs b)
-is the highest-uncertainty, least-precedented piece — bigger than the
-walker.** Spike it first (§6).
+system (Feliz shadcn / Bulma / DaisyUI) regardless. **This decision (a vs b) was
+the highest-uncertainty, least-precedented piece — bigger than the walker.**
+✅ **Resolved in favour of (b), procedural emission** — the §7.1 spike ran the
+full `dotnet fable` → vite → browser pipeline on procedurally-shaped Feliz code
+and it compiled, bundled, and booted (MVU loop working, zero errors). The format
+question underneath the pack is settled; what remains is the pack's *breadth*
+(~80 primitives), not its *mechanism*.
 
 ## 5. What does not transfer from the TS frontends
 
@@ -253,10 +259,10 @@ shape itself (`wireShape`), the e2e harness/smoke-spec structure.
 
 ## 6. Recommended sequence
 
-1. **Pack-format spike** (≈half a day): emit one or two Feliz primitives both
-   ways (§4 a vs b) and a full `Model/Msg/update/view` for the named-actions
-   checkout example; compile it against real Feliz + Elmish nugets. De-risks
-   the largest unknown cheaply. *(Spike findings: §7.)*
+1. **Pack-format spike** — ✅ **done** (§7 type-surface + §7.1 full
+   `dotnet fable` → vite → browser). Resolved: procedural F# emission (b), and
+   the Fable build+bundle+runtime pipeline works end-to-end. The largest unknown
+   is retired; the format decision is settled.
 2. **Prototype `felizTarget: WalkerTarget`** against `walkBody`, gated by the
    same byte-output discipline the repo used for prior walker extractions —
    confirms the "fits more cleanly than Angular" claim empirically.
@@ -312,11 +318,46 @@ option **(b) procedural emission backed by a typed primitive table** (the safe
 free-form Handlebars string templating — the opposite of the intuition that
 the offside rule would be the killer.
 
-**Scope of the de-risk (what the spike did *not* prove):** it validates the F#
-*type surface* and the MVU projection only. It did **not** run Fable
-(`dotnet fable`) to emit JS, nor exercise the React runtime / Vite bundle /
-Playwright path. So the projection and F# well-formedness are de-risked; the
-full Fable→bundle→runtime pipeline (§3a's "Fable build + CI leg") is not.
+**Scope of the first de-risk:** it validated the F# *type surface* and the MVU
+projection only — it did not run Fable, nor exercise the React runtime / Vite
+bundle / Playwright path. That gap is now closed by a second spike (§7.1).
+
+### 7.1 Second spike — the full Fable→bundle→runtime pipeline (2026-07)
+
+The remaining unknown (§3a's "Fable build + CI leg") is now **de-risked
+end-to-end**. A throwaway spike hand-emitted the F# a Loom Feliz/Elmish generator
+would project from a `page Counter { state { count } action inc()/dec() … }`
+— `Model` from `state {}`, `Msg`/`update` one-arm-per-action (a projection, no
+gensym), `view` from `body:` as a Feliz `Html.div [ … ]` — and ran the whole
+pipeline:
+
+1. **`dotnet fable` compiles it** — Fable **4.29.0** against Feliz **2.8.0** +
+   Fable.Elmish.React **4.0.0** (net8.0 SDK container) emitted clean ES-module
+   JS. The Feliz *code* markup lowered exactly as expected: `Html.div [ … ]` →
+   `createElement("div", …)`, `prop.onClick (fun _ -> dispatch Inc)` →
+   `onClick: () => dispatch(new Msg(0, []))`. So "Feliz markup is F# code, not a
+   template" compiles through Fable with no special handling.
+2. **Vite bundles it** — 64 modules transformed → a 174 kB bundle, `react` /
+   `react-dom` the only npm deps (Feliz/Elmish ship as Fable-compiled F# under
+   `fable_modules/`).
+3. **It boots and the MVU loop runs** — served the bundle, drove it in headless
+   Chromium via Playwright: `count` rendered `0`, two `+` clicks → `2`, one `-`
+   → `1`, **zero page errors**. The dispatch → `update` → re-render cycle works
+   in a real browser.
+
+**Verdict:** the pack-format-critical bet is **confirmed** — *procedural F#
+emission* (the §4/§7-recommended mechanism over Handlebars string templates)
+produces output that compiles via Fable, bundles via Vite, and runs correctly as
+MVU. No template layer is needed or wanted; the Feliz view is code all the way
+down. The "Fable build + CI leg" is a known, working recipe (SDK container +
+`--network host` proxy + CA trust for nuget; `dotnet fable` → vite → Playwright)
+— it can be an actual CI gate, not a hoped-for one.
+
+**What this still does *not* cover:** it exercised the sync `Model`/`Msg`/
+`update`/`view` counter only — not the API/`Cmd.OfAsync` data layer, the design
+pack's full primitive set (~80), or the `WalkerTarget`-vs-parallel-engine
+question for the `view`. Those are the *build*, now standing on a proven runtime
+floor; the format decision underneath them is settled.
 
 ## 8. The anonymous-lambda page — the residual, quantified
 
