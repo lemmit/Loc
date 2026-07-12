@@ -92,3 +92,53 @@ describe("dotnet — explicit commandHandler/queryHandler → Mediator", () => {
     expect(ctrl).toContain("await _mediator.Send(new GetStatusQuery(new OrderId(orderId)));");
   });
 });
+
+// A handler param that isn't bound by a `{token}` in the route path rides in a
+// `[FromBody]` request record, not as a bare action param (which ASP.NET would
+// mis-bind — a second complex `[FromBody]`, or a simple type from the query
+// string).  Path params stay URL-bound; the command ctor args keep declared order.
+const BODY_SRC = `
+system Shop {
+  subdomain Sales {
+    context Ordering {
+      valueobject Money {
+        amount: int
+        currency: string
+      }
+      aggregate Order ids guid {
+        status: string
+        operation applyDiscount(amount: Money, reason: string) { status := "discounted" }
+      }
+      repository Orders for Order { }
+      commandHandler Discount(orderId: Order id, amount: Money, reason: string): Order id {
+        let o = Orders.getById(orderId)
+        o.applyDiscount(amount, reason)
+        return o.id
+      }
+    }
+  }
+  api SalesApi from Sales {
+    route POST "/orders/{orderId}/discounts" -> Ordering.Discount
+  }
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: dotnet, contexts: [Ordering], dataSources: [st], serves: SalesApi, port: 5001 }
+}
+`;
+
+describe("dotnet — explicit handler route param binding (path vs [FromBody])", () => {
+  it("collects non-path params into a [FromBody] request record, path stays URL-bound", async () => {
+    const ctrl = fileEndingWith(
+      await generateSystemFiles(BODY_SRC),
+      "Api/SalesApiRoutesController.cs",
+    );
+    // Body record carries the two non-path params, domain-typed.
+    expect(ctrl).toContain("public sealed record DiscountBody(Money Amount, string Reason);");
+    // Action: id path param stays URL-bound; the rest is one [FromBody] record.
+    expect(ctrl).toContain(
+      "public async Task<IActionResult> Discount(Guid orderId, [FromBody] DiscountBody body)",
+    );
+    // Command ctor args in declared order: path coercion, then body.<Pascal>.
+    expect(ctrl).toContain("new DiscountCommand(new OrderId(orderId), body.Amount, body.Reason)");
+  });
+});

@@ -20,10 +20,12 @@
 // statements, then `return <returnValue>` (the IR field #1793 added — the
 // workflow stmt target has no return arm).
 //
-// v1 scope: handler params are ids / scalars (the common REST case); the record
-// carries domain-typed params and each route action coerces its wire-typed path
-// param into the domain type.  Full response-DTO projection + `[FromBody]`
-// request records ride with the contract-scaffold layer.
+// Route param binding: a handler param bound by a `{token}` in the route path
+// stays URL-bound (id → wire type coerced back with `new <Agg>Id`); every other
+// param rides in one `[FromBody] <Handler>Body` request record (a domain-typed
+// record emitted alongside the controller).  The command/query ctor args keep
+// declared order — path coercions and `body.<Pascal>` reads interleaved.
+// Follow-up: full response-DTO projection for aggregate-returning handlers.
 // ---------------------------------------------------------------------------
 
 import type {
@@ -209,11 +211,18 @@ export function emitExplicitHandlers(
   }
 }
 
-/** The wire-typed action parameter + the domain-coerced command argument for a
- *  handler param.  v1: id → `Guid`/`string` path param wrapped in `new <Agg>Id`;
- *  scalar → direct.  Anything else falls back to the domain type verbatim
- *  (compiles; runtime binding is a contract-layer follow-up). */
-function wireActionParam(p: ParamIR): { actionParam: string; commandArg: string } {
+/** The `{token}` names in a route path — the params bound from the URL rather
+ *  than the request body. */
+function pathParamNames(path: string): Set<string> {
+  const names = new Set<string>();
+  for (const m of path.matchAll(/\{(\w+)\}/g)) names.add(m[1]);
+  return names;
+}
+
+/** A PATH-bound handler param: the wire-typed action parameter + the
+ *  domain-coerced command argument.  id → `Guid`/`long`/`string` route token
+ *  wrapped in `new <Agg>Id`; scalar → direct. */
+function pathActionParam(p: ParamIR): { actionParam: string; commandArg: string } {
   const t: TypeIR = p.type;
   if (t.kind === "id") {
     const wire = t.valueType === "guid" ? "Guid" : t.valueType === "int" ? "long" : "string";
@@ -247,6 +256,7 @@ export function emitExplicitRouteController(
   const byName = new Map<string, EnrichedBoundedContextIR>(contexts.map((c) => [c.name, c]));
   const nsUsings = new Set<string>();
   const actions: string[] = [];
+  const bodyRecords: string[] = [];
   for (const r of routes) {
     const ctx = byName.get(r.target.context);
     if (!ctx) continue;
@@ -258,12 +268,38 @@ export function emitExplicitRouteController(
     if (!agg) continue;
     const kind: "Command" | "Query" = cmd ? "Command" : "Query";
     nsUsings.add(`${ns}.Application.${plural(agg)}.${kind === "Command" ? "Commands" : "Queries"}`);
-    const coerced = h.params.map(wireActionParam);
-    const actionParams = coerced.map((c) => c.actionParam).join(", ");
-    const ctorArgs = coerced.map((c) => c.commandArg).join(", ");
+
+    // Split params: those bound by a `{token}` in the route path stay URL params;
+    // the rest ride in one `[FromBody]` request record. (Multiple bare complex
+    // action params would each be inferred `[FromBody]`, which ASP.NET rejects,
+    // and a simple type would silently bind from the query string instead.)
+    const pathNames = pathParamNames(r.path);
+    const pathParams = h.params.filter((p) => pathNames.has(p.name));
+    const bodyParams = h.params.filter((p) => !pathNames.has(p.name));
+    const pathArg = new Map(pathParams.map((p) => [p.name, pathActionParam(p)]));
+
+    const actionParamParts = pathParams.map((p) => pathArg.get(p.name)!.actionParam);
+    let bodyRecName: string | undefined;
+    if (bodyParams.length > 0) {
+      bodyRecName = `${h.name}Body`;
+      const fields = bodyParams
+        .map((p) => `${renderCsType(p.type)} ${upperFirst(p.name)}`)
+        .join(", ");
+      bodyRecords.push(`public sealed record ${bodyRecName}(${fields});`);
+      actionParamParts.push(`[FromBody] ${bodyRecName} body`);
+    }
+    const actionParams = actionParamParts.join(", ");
+    // Command/query ctor args stay in declared param order: path params coerce
+    // from the route token, body params read off `body.<Pascal>`.
+    const ctorArgs = h.params
+      .map((p) =>
+        pathNames.has(p.name) ? pathArg.get(p.name)!.commandArg : `body.${upperFirst(p.name)}`,
+      )
+      .join(", ");
+
     const rec = `${h.name}${kind}`;
     const attr = HTTP_ATTR[r.method] ?? "HttpGet";
-    const hasReturn = kind === "Query" || !!(cmd && cmd.returnType);
+    const hasReturn = kind === "Query" || !!cmd?.returnType;
     const sendBlock = hasReturn
       ? `        var result = await _mediator.Send(new ${rec}(${ctorArgs}));\n        return Ok(result);`
       : `        await _mediator.Send(new ${rec}(${ctorArgs}));\n        return NoContent();`;
@@ -276,6 +312,7 @@ export function emitExplicitRouteController(
   if (actions.length === 0) return;
   const usings = [...nsUsings].sort().map((u) => `using ${u};`);
   const className = `${apiName}RoutesController`;
+  const bodyBlock = bodyRecords.length > 0 ? `${bodyRecords.join("\n")}\n\n` : "";
   out.set(
     `Api/${className}.cs`,
     `// Auto-generated.
@@ -284,11 +321,13 @@ using System.Threading.Tasks;
 using Mediator;
 using Microsoft.AspNetCore.Mvc;
 using ${ns}.Domain.Ids;
+using ${ns}.Domain.ValueObjects;
+using ${ns}.Domain.Enums;
 ${usings.join("\n")}
 
 namespace ${ns}.Api;
 
-[ApiController]
+${bodyBlock}[ApiController]
 public sealed class ${className} : ControllerBase
 {
     private readonly IMediator _mediator;
