@@ -85,7 +85,7 @@ describe("HEEx primitive — testid: emits data-testid (renderPrimitive)", () =>
     {
       name: "Heading",
       dsl: `Heading("Title", testid: "h")`,
-      tagRx: /<\.header [^>]*data-testid="h"/,
+      tagRx: /<h2 [^>]*data-testid="h"/,
     },
     { name: "Text", dsl: `Text("Body", testid: "t")`, tagRx: /<p [^>]*data-testid="t"/ },
     {
