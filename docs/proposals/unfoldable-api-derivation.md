@@ -6,8 +6,18 @@
 > with a cross-referenced `HandlerRef`, lowering, and the three
 > one-directional layering validators (`loom.query-handler-saves`,
 > `loom.command-handler-multi-aggregate`, `loom.route-handler-unresolved`).
-> No backend reads the new nodes yet — codegen (steps 3+), the
-> `scaffoldApi` stdlib, and the `wireShape` retirement remain design-only.
+> **Codegen has since landed on all five backends** (the "backend reads
+> the new nodes" half of step 5): .NET onto its `martinothamar/Mediator`
+> seam (#1804), then Hono / Phoenix / Python / Java (#1816) — each
+> `commandHandler` / `queryHandler` emits a handler + one route
+> controller/router per served api, with the terminal `return` captured
+> as `CommandHandlerIR.returnValue` (#1793). A fourth validator,
+> `loom.handler-param-reserved-id` (#1818), rejects a handler parameter
+> named `id` (it would silently shadow the implicit entity id). Still
+> design-only: the **`scaffoldApi` stdlib** (steps 3–4 — the macros that
+> *synthesize* these nodes from a subdomain), full response-DTO
+> projection / `[FromBody]` request records, and the **`wireShape`
+> retirement** (steps 6–8). Emitted handler params are ids/scalars only.
 >
 > Companion to [`lifecycle-operations.md`](./lifecycle-operations.md)
 > (lifecycle kinds drive scaffold synthesis),
