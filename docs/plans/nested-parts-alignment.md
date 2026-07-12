@@ -223,12 +223,26 @@ dropped.
 > re-save-preserves round-trip as python). `tsc --noEmit` + `tsup` clean; fixture
 > `test/e2e/fixtures/ts-build/nested-parts.ddd`.
 
-### Phase 4 — .NET (one PR) — ⛔ DEFERRED, RE-SCOPED
-> **Not "re-key the assembly" — "build part-containment persistence."** The .NET
-> EF owned-type nesting needs its own careful pass (the shadow FK must move to the
-> direct parent and the emitted DDL agree — see the risk note below). Deferred
-> until an actual `.ddd` needs part-in-part nesting on .NET; **python (Phase 2)
-> and node (Phase 3) are the reference ports.**
+### Phase 4 — .NET ✅ DONE
+> Landed: part-in-part containment persistence on the .NET/EF Core backend. The
+> owned-type config now NESTS — a part's own containments emit as a nested
+> `OwnsMany`/`OwnsOne` inside its parent's owned-nav builder (`o.OwnsMany<Label>(
+> "_labels", o1 => …)`), with the shadow `ParentId` column named for the DIRECT
+> parent (`o1.Property("ParentId").HasColumnName("shipment_id")`) — matching the
+> migration DDL. The domain `ParentId` brands to the direct-parent id type
+> (`Label.ParentId: ShipmentId`) via a new `parentName` param on `renderEntity`
+> (distinct from `rootName`, which still names the shared aggregate namespace).
+> **No repository changes** — EF materialises + persists the owned graph itself.
+> Single-level output byte-identical (418 .NET generator tests green).
+> `dotnet build /warnaserror` clean and **boot-verified on real Postgres** (same
+> create → SQL-insert label → GET-nests → re-save-preserves round-trip as
+> python/node). Fixture `test/e2e/fixtures/dotnet-build/nested-parts.ddd`.
+
+**All four relational backends now persist + read part-in-part nesting** (java
+Phase 1, python Phase 2, node Phase 3, .NET Phase 4). DEBT-15 is fully drained.
+Remaining follow-up (all backends): construction-bearing NESTED ops (`new Label`
+inside an inline `new Shipment`), where the nested-`new` arm must thread the
+parent-part instance — see the risk note below.
 
 For each backend, in any order:
 - **node** — make `saveTxBody` persist single containments (not just collections),

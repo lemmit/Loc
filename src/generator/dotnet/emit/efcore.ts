@@ -8,6 +8,7 @@ import type {
   ExprIR,
   FieldIR,
 } from "../../../ir/types/loom-ir.js";
+import { directParentName } from "../../../ir/util/containment-parent.js";
 import { isTphBase, ownFieldsOf } from "../../../ir/util/inheritance.js";
 import { isValueCollectionType, valueCollectionsFor } from "../../../ir/util/value-collections.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
@@ -923,6 +924,15 @@ function containmentConfigLines(
   c: ContainmentIR,
   agg: AggregateIR,
   options: { schema?: string; tablePrefix?: string; embedded?: boolean } = {},
+  // The EF builder variable this containment is configured against — `builder`
+  // (the aggregate root config) at the top level, the enclosing owned-nav
+  // builder (`o`, `o1`, …) for a nested part.  `indent` places the emitted
+  // lines; `depth` uniquifies the child lambda parameter (C# forbids a nested
+  // lambda param shadowing an outer one).  Defaults reproduce the historical
+  // top-level, single-level output byte-for-byte.
+  builderVar = "builder",
+  indent = "        ",
+  depth = 0,
 ): string[] {
   const part = agg.parts.find((p) => p.name === c.partName);
   const partFields = part?.fields ?? [];
@@ -930,51 +940,64 @@ function containmentConfigLines(
   // single JSONB column on the root via EF owned-types `.ToJson(...)` —
   // no child table.  The nested owned entities need no key/FK/table;
   // `HasConversion` on their id/enum/VO fields still applies inside JSON.
+  // The owned-nav lambda parameter for this level's child config.  Distinct per
+  // depth so a nested `OwnsMany` doesn't shadow the enclosing one (CS0136).
+  const childVar = depth === 0 ? "o" : `o${depth}`;
+  const inner = `${indent}    `;
   if (options.embedded) {
     const jsonCol = snake(c.name);
     // embedded=true: members are JSON keys inside the ToJson document, not
     // table columns, so HasColumnName must not be emitted here.
     const partFieldLines = partFields.flatMap((f) =>
-      fieldConfigLines(f, "            ", "o", undefined, true),
+      fieldConfigLines(f, inner, childVar, undefined, true),
     );
     if (!c.collection) {
       return [
-        `        builder.OwnsOne<${c.partName}>(x => x.${upperFirst(c.name)}, o => {`,
-        `            o.ToJson("${jsonCol}");`,
+        `${indent}${builderVar}.OwnsOne<${c.partName}>(x => x.${upperFirst(c.name)}, ${childVar} => {`,
+        `${inner}${childVar}.ToJson("${jsonCol}");`,
         ...partFieldLines,
-        "        });",
+        `${indent}});`,
       ];
     }
     return [
-      `        builder.Ignore(x => x.${upperFirst(c.name)});`,
-      `        builder.OwnsMany<${c.partName}>("_${c.name}", o => {`,
-      `            o.ToJson("${jsonCol}");`,
+      `${indent}${builderVar}.Ignore(x => x.${upperFirst(c.name)});`,
+      `${indent}${builderVar}.OwnsMany<${c.partName}>("_${c.name}", ${childVar} => {`,
+      `${inner}${childVar}.ToJson("${jsonCol}");`,
       ...partFieldLines,
-      "        });",
+      `${indent}});`,
     ];
   }
   if (!c.collection) {
-    return [`        builder.OwnsOne<${c.partName}>(x => x.${upperFirst(c.name)});`];
+    return [`${indent}${builderVar}.OwnsOne<${c.partName}>(x => x.${upperFirst(c.name)});`];
   }
-  const partFieldLines = partFields.flatMap((f) => fieldConfigLines(f, "            ", "o"));
+  const partFieldLines = partFields.flatMap((f) => fieldConfigLines(f, inner, childVar));
+  // A nested part FKs to (and its shadow `ParentId` column is named for) its
+  // DIRECT parent — a sibling part for a part-in-part, else the aggregate root
+  // — matching the shared migration DDL (`tableForPart`).
+  const fkColumn = `${snake(directParentName(agg, c.partName, agg.name))}_id`;
   return [
-    "        // Ignore the public read-accessor and tell EF to map the",
-    "        // private backing field instead.",
-    `        builder.Ignore(x => x.${upperFirst(c.name)});`,
-    `        builder.OwnsMany<${c.partName}>("_${c.name}", o => {`,
+    `${indent}// Ignore the public read-accessor and tell EF to map the`,
+    `${indent}// private backing field instead.`,
+    `${indent}${builderVar}.Ignore(x => x.${upperFirst(c.name)});`,
+    `${indent}${builderVar}.OwnsMany<${c.partName}>("_${c.name}", ${childVar} => {`,
     // Containment part tables inherit the aggregate's dataSource
     // schema + prefix — both halves of the parent / part live in
     // the same physical store.
-    `            o.ToTable(${renderTableArgs(plural(c.partName), options)});`,
-    '            o.WithOwner().HasForeignKey("ParentId");',
-    // The owner FK column is the migration's `<owner>_id` (tableForPart in
-    // migrations-builder), not EF's default `ParentId` — map the shadow
+    `${inner}${childVar}.ToTable(${renderTableArgs(plural(c.partName), options)});`,
+    `${inner}${childVar}.WithOwner().HasForeignKey("ParentId");`,
+    // The owner FK column is the migration's `<direct-parent>_id` (tableForPart
+    // in migrations-builder), not EF's default `ParentId` — map the shadow
     // property's column so the child INSERT/SELECT lines up with the DDL.
-    `            o.Property("ParentId").HasColumnName("${snake(agg.name)}_id");`,
-    "            o.HasKey(x => x.Id);",
-    `            o.Property(x => x.Id).HasConversion(v => v.Value, v => new ${c.partName}Id(v)).HasColumnName("id");`,
+    `${inner}${childVar}.Property("ParentId").HasColumnName("${fkColumn}");`,
+    `${inner}${childVar}.HasKey(x => x.Id);`,
+    `${inner}${childVar}.Property(x => x.Id).HasConversion(v => v.Value, v => new ${c.partName}Id(v)).HasColumnName("id");`,
     ...partFieldLines,
-    "        });",
+    // Recurse: this part's OWN nested containments, configured against THIS
+    // child builder so EF nests the owned graph (Order → Shipment → Label).
+    ...(part?.contains ?? []).flatMap((nc) =>
+      containmentConfigLines(nc, agg, options, childVar, inner, depth + 1),
+    ),
+    `${indent}});`,
   ];
 }
 

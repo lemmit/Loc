@@ -149,6 +149,11 @@ export function renderEntity(
   isRoot: boolean,
   ns: string,
   rootName: string,
+  /** The entity whose id brands this part's `ParentId` — its DIRECT parent (a
+   *  sibling part for a part-in-part, else the aggregate root).  Distinct from
+   *  `rootName`, which still names the aggregate folder/namespace all parts
+   *  share.  Equals `rootName` for a root-level part (byte-identical). */
+  parentName: string,
   emitTrace = false,
   /** When true, the entity is part of a document-shaped
    *  (`shape(document)`) aggregate: emit the `ToSnapshot()` /
@@ -276,7 +281,7 @@ export function renderEntity(
     }
   }
   if (!isRoot) {
-    propLines.push(`    public ${rootName}Id ParentId { get; ${setterVisibility} set; }`);
+    propLines.push(`    public ${parentName}Id ParentId { get; ${setterVisibility} set; }`);
   }
   for (const f of entity.fields) {
     // A concrete TPC subtype inherits its base fields from the abstract base
@@ -650,7 +655,7 @@ export function renderEntity(
   stateLines.push("    {");
   stateLines.push(`        public ${idClass} Id { get; init; } = default!;`);
   if (!isRoot) {
-    stateLines.push(`        public ${rootName}Id ParentId { get; init; } = default!;`);
+    stateLines.push(`        public ${parentName}Id ParentId { get; init; } = default!;`);
   }
   for (const f of entity.fields) {
     stateLines.push(

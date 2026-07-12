@@ -18,6 +18,7 @@ import {
 } from "../../ir/util/aggregate-flags.js";
 import { aggHasAuditedTarget } from "../../ir/util/audit-capability.js";
 import { durableEventTypes } from "../../ir/util/channels.js";
+import { directParentName } from "../../ir/util/containment-parent.js";
 import { isTpcBase, isTphBase, tableOwnerName, tphConcretesOf } from "../../ir/util/inheritance.js";
 import { mergeContexts } from "../../ir/util/merge-contexts.js";
 import {
@@ -914,7 +915,15 @@ function emitAggregate(
     place(
       `${part.name}.cs`,
       "entity",
-      renderEntity(part, false, ns, agg.name, emitTrace, isDoc),
+      renderEntity(
+        part,
+        false,
+        ns,
+        agg.name,
+        directParentName(agg, part.name, agg.name),
+        emitTrace,
+        isDoc,
+      ),
       agg.origin,
     );
   }
@@ -942,6 +951,8 @@ function emitAggregate(
       agg,
       true,
       ns,
+      agg.name,
+      // A root aggregate has no ParentId; pass its own name for the unused slot.
       agg.name,
       emitTrace,
       isDoc,
