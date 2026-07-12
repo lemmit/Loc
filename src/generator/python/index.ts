@@ -58,6 +58,12 @@ import { buildPyRepositoryFile } from "./repository-builder.js";
 import { buildPyDocumentRepositoryFile } from "./repository-document-builder.js";
 import { buildPyEmbeddedRepositoryFile } from "./repository-embedded-builder.js";
 import { buildPyEventSourcedRepositoryFile } from "./repository-eventsourced-builder.js";
+import {
+  PORT_POOL_PATH as PY_PORT_POOL_PATH,
+  type RepoPortSpec as PyRepoPortSpec,
+  portMembersFromSource as pyPortMembersFromSource,
+  renderRepositoryPortsFile as renderPyRepositoryPortsFile,
+} from "./repository-port-builder.js";
 import { emitPyResourceFiles } from "./resource-clients.js";
 import { buildPyRoutesFile } from "./routes-builder.js";
 import { buildPyViewsFile } from "./views-builder.js";
@@ -365,6 +371,11 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     for (const f of serviceFiles) out.set(f.path, f.content);
   }
 
+  // Domain-side repository PORTS (audit S7) — the `<Agg>RepositoryPort`
+  // Protocols the domain services depend on (in place of the concrete
+  // `app.db.repositories.*` class).  Members are DERIVED from each concrete
+  // repo's own public async method headers as it is emitted, then pooled.
+  const pyPortSpecs: PyRepoPortSpec[] = [];
   for (const ctx of args.contexts) {
     for (const base of abstractBasesOf(ctx)) {
       const concretes = concretesOf(base, ctx);
@@ -421,6 +432,7 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
               : buildPyRepositoryFile(agg, repo, ctx);
       out.set(repoPath, repoContent);
       sourcemap?.file(repoPath, repoContent, repo?.origin ?? agg.origin, construct);
+      pyPortSpecs.push({ aggName: agg.name, members: pyPortMembersFromSource(repoContent) });
       const routesPath = `app/http/${snake(agg.name)}_routes.py`;
       const routesContent = buildPyRoutesFile(agg, repo, ctx, hasDispatch);
       out.set(routesPath, routesContent);
@@ -433,6 +445,9 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
       }
     }
   }
+  // Pooled domain-side repository PORTS (audit S7).
+  const pyPortsFile = renderPyRepositoryPortsFile(pyPortSpecs, merged);
+  if (pyPortsFile) out.set(PY_PORT_POOL_PATH, pyPortsFile);
   return out;
 }
 

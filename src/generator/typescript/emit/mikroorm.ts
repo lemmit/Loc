@@ -50,6 +50,7 @@ import {
   serializeField,
 } from "../repository-document-builder.js";
 import { hydrateRootExpr } from "../repository-find-builder.js";
+import { repoPortImportLine, repoPortName } from "../repository-port-builder.js";
 import { projectFieldEntries, projectionObject } from "../repository-save-builder.js";
 import { toWireMethod } from "../repository-wire-builder.js";
 import { aggregateIsAudited, insertStampEntries, updateStampEntries } from "./audit-stamp.js";
@@ -537,7 +538,7 @@ export function renderMikroRepository(
     : "";
 
   const body = lines(
-    `export class ${agg.name}Repository {`,
+    `export class ${agg.name}Repository implements ${repoPortName(agg.name)} {`,
     // Explicit field declarations + constructor assignments, not
     // parameter properties — see emit/value-objects.ts's renderValueObject.
     `  private readonly em: EntityManager;`,
@@ -618,6 +619,8 @@ export function renderMikroRepository(
     lines(
       "// Auto-generated.  Do not edit by hand.",
       usesDecimal && `import Decimal from "decimal.js";`,
+      // Domain-side repository PORT this concrete implements (audit S7).
+      repoPortImportLine(agg.name),
       `import { EntityManager } from "@mikro-orm/postgresql";`,
       `import { ${row} } from "../entities";`,
       // Persist-time audit stamping helper — pulled in only when this
@@ -723,7 +726,7 @@ export function renderMikroEventSourcedRepository(
   const repoUsesUser = (repo?.finds ?? []).some(findUsesCurrentUser);
 
   const body = lines(
-    `export class ${agg.name}Repository {`,
+    `export class ${agg.name}Repository implements ${repoPortName(agg.name)} {`,
     // Explicit field declarations + constructor assignments, not
     // parameter properties — see emit/value-objects.ts's renderValueObject.
     "  private readonly em: EntityManager;",
@@ -848,6 +851,8 @@ export function renderMikroEventSourcedRepository(
     lines(
       "// Auto-generated.  Do not edit by hand.",
       usesDecimal && `import Decimal from "decimal.js";`,
+      // Domain-side repository PORT this concrete implements (audit S7).
+      repoPortImportLine(agg.name),
       `import { EntityManager } from "@mikro-orm/postgresql";`,
       `import { ${eventRow} } from "../entities";`,
       `import { ${agg.name} } from "../../domain/${lowerFirst(agg.name)}";`,

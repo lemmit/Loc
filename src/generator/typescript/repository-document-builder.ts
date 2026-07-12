@@ -17,6 +17,7 @@ import { lowerFirst, plural } from "../../util/naming.js";
 import { renderHonoStoreLogCall } from "../_obs/render-hono.js";
 import { renderTsExpr } from "./render-expr.js";
 import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
+import { repoPortImportLine, repoPortName } from "./repository-port-builder.js";
 import { toWireMethod } from "./repository-wire-builder.js";
 
 // ---------------------------------------------------------------------------
@@ -64,7 +65,7 @@ export function buildDocumentRepositoryFile(
   const capX = documentCapabilityBody(agg, "x");
 
   const bodyStr = lines(
-    `export class ${agg.name}Repository {`,
+    `export class ${agg.name}Repository implements ${repoPortName(agg.name)} {`,
     // Explicit field declarations + constructor assignments, not
     // parameter properties — see emit/value-objects.ts's renderValueObject.
     `  private readonly db: Db;`,
@@ -163,6 +164,8 @@ export function buildDocumentRepositoryFile(
   return lines(
     "// Auto-generated.  Do not edit by hand.",
     aggregateUsesMoneyDeep(agg, ctx.valueObjects) && `import Decimal from "decimal.js";`,
+    // Domain-side repository PORT this concrete implements (audit S7).
+    repoPortImportLine(agg.name),
     `import type { NodePgDatabase } from "drizzle-orm/node-postgres";`,
     `import { eq, inArray } from "drizzle-orm";`,
     `import * as schema from "../schema";`,

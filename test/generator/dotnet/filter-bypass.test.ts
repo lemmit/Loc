@@ -79,15 +79,37 @@ describe("dotnet ignoring filter-bypass emission", () => {
     expect(named.length).toBe(2);
   });
 
-  it("inline `Repo.findAll(...) ignoring <Cap>` passes ignoreFilters; `*` passes ignoreAllFilters", async () => {
+  it("inline `Repo.findAll(...) ignoring <Cap>` passes a DOMAIN FilterBypass (capability names), not EF filter names (audit S7)", async () => {
     const handler = get(await files(), "Application/Workflows/SweepHandler.cs");
-    expect(handler).toContain('ignoreFilters: ["IsDeletedFilter"]');
-    expect(handler).toContain("ignoreAllFilters: true");
+    // The call site names the DOMAIN capability (`softDeletable`), NOT the EF
+    // filter name (`IsDeletedFilter`) — the adapter owns that translation.
+    expect(handler).toContain('bypass: FilterBypass.Bypass("softDeletable")');
+    expect(handler).toContain("bypass: FilterBypass.BypassAll()");
+    expect(handler).not.toContain("ignoreFilters");
+    expect(handler).not.toContain("IsDeletedFilter");
   });
 
-  it("the shared retrieval method exposes the bypass parameters", async () => {
+  it("the port's retrieval method takes a domain FilterBypass; the adapter translates it to EF filter names (audit S7)", async () => {
     const repo = get(await files(), "Infrastructure/Repositories/OrderRepository.cs");
-    expect(repo).toContain("bool ignoreAllFilters = false, string[]? ignoreFilters = null");
-    expect(repo).toContain("if (ignoreAllFilters) __q = __q.IgnoreQueryFilters();");
+    // Domain-termed port param — no EF `IgnoreQueryFilters` vocabulary in the
+    // signature.
+    expect(repo).toContain("FilterBypass bypass = default");
+    expect(repo).not.toContain("bool ignoreAllFilters");
+    expect(repo).not.toContain("string[]? ignoreFilters");
+    // Adapter-side: `bypass.All` → IgnoreQueryFilters(); a named capability is
+    // translated to its EF filter name via the generated (cap → filter) map.
+    expect(repo).toContain("if (bypass.All) __q = __q.IgnoreQueryFilters();");
+    expect(repo).toContain(
+      'new (string Capability, string Filter)[] { ("softDeletable", "IsDeletedFilter") }',
+    );
+    expect(repo).toContain(
+      ".Where(m => bypass.Capabilities.Contains(m.Capability)).Select(m => m.Filter).ToArray()",
+    );
+  });
+
+  it("the interface port also takes the domain FilterBypass (no EF vocabulary)", async () => {
+    const iface = get(await files(), "Domain/Orders/IOrderRepository.cs");
+    expect(iface).toContain("FilterBypass bypass = default");
+    expect(iface).not.toContain("ignoreFilters");
   });
 });

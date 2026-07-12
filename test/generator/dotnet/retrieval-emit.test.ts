@@ -44,7 +44,7 @@ describe(".NET generator — retrieval", () => {
     // can name them; `cancellationToken` stays LAST (CA1068) and callers pass
     // it named (it follows the optional `page` + `ignore*` params).
     expect(repo).toMatch(
-      /public async Task<IReadOnlyList<Customer>> RunByRegionAsync\(string rgn, \(int\? offset, int\? limit\)\? page = null, bool ignoreAllFilters = false, string\[\]\? ignoreFilters = null, CancellationToken cancellationToken = default\)/,
+      /public async Task<IReadOnlyList<Customer>> RunByRegionAsync\(string rgn, \(int\? offset, int\? limit\)\? page = null, FilterBypass bypass = default, CancellationToken cancellationToken = default\)/,
     );
     // The retrieval is a reified Ardalis Specification, applied via
     // `.WithSpecification(...)` + the shared `.ApplyPaging(page)` extension over
@@ -81,7 +81,7 @@ describe(".NET generator — retrieval", () => {
     const out = await files();
     const iface = out.get("Domain/Customers/ICustomerRepository.cs")!;
     expect(iface).toMatch(
-      /Task<IReadOnlyList<Customer>> RunByRegionAsync\(string rgn, \(int\? offset, int\? limit\)\? page = null, bool ignoreAllFilters = false, string\[\]\? ignoreFilters = null, CancellationToken cancellationToken = default\);/,
+      /Task<IReadOnlyList<Customer>> RunByRegionAsync\(string rgn, \(int\? offset, int\? limit\)\? page = null, FilterBypass bypass = default, CancellationToken cancellationToken = default\);/,
     );
   });
 

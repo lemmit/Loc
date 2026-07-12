@@ -6,6 +6,19 @@
 > UNCHANGED.** Goal: every backend practices ports-and-adapters — the domain
 > layer depends on a domain-owned, ORM-neutral repository **port**, and the
 > concrete infra adapter is supplied at the composition root.
+>
+> **STATUS — Slice A + B shipped (this PR).** Hono + Python domain services now
+> depend on a domain-owned repository PORT (TS `interface` / Python `Protocol`,
+> pooled per project); the concrete adapters are unchanged in name (TS
+> `implements` the port; Python satisfies the `Protocol` structurally, proven by
+> `mypy --strict`). .NET's `I<Agg>Repository` port no longer speaks EF —
+> `ignoreAllFilters`/`ignoreFilters` are replaced by a domain `FilterBypass`
+> (capability names) that the adapter translates to EF filter names. **Slice C**
+> (.NET `AppDbContext` → `IWorkflowEventStore`/`IUnitOfWork` ports across the 7
+> orchestration/read handler sites) is DEFERRED to a stacked follow-up PR.
+> Gates: `npm test` (fast suite) green, `biome ci` clean, and the generated
+> Hono (`tsc --noEmit`), Python (`uv` + `ruff` + `mypy --strict`), and .NET
+> (`dotnet build /warnaserror`) projects all compile.
 
 ## The defect, per backend (verified on fresh `main` @ `1d87b293`)
 

@@ -31,6 +31,7 @@ import {
 } from "./repository-find-builder.js";
 import { writeScopePredicate } from "./repository-find-predicate.js";
 import { collectEnums, collectValueObjects } from "./repository-imports-builder.js";
+import { repoPortImportLine, repoPortName } from "./repository-port-builder.js";
 import { saveMethod } from "./repository-save-builder.js";
 import { toWireMethod } from "./repository-wire-builder.js";
 
@@ -164,11 +165,34 @@ export function buildRepositoryFile(
       bypassCaps: view.bypassCaps,
     }));
 
+  // Individual methods, hoisted so the same strings feed BOTH the class body
+  // AND the derived repository PORT (audit S7 — the concrete `implements` a
+  // domain-side `<Agg>RepositoryPort`; the members are extracted from these
+  // exact headers, so `implements` always type-checks).  `toWire` is
+  // presentation, not part of the repository contract, so it is excluded from
+  // the port.
+  const findByIdM = findByIdMethod(agg, ctx, emitTrace, filterPred);
+  const getByIdM = getByIdMethod(agg, ctx, drizzleOps);
+  // Bulk loader used by views that follow `X id` references in bind
+  // expressions.  Same hydration path as the array-return finds; filter is a
+  // single `inArray`.
+  const findManyByIdsM = findManyByIdsMethod(agg, ctx, filterPred);
+  const saveM = saveMethod(agg, ctx, emitTrace);
+  // Hard delete — emitted only when the aggregate has a canonical `destroy`
+  // (declared or via `crudish`), so plain aggregates' repos are unchanged.
+  const deleteM = agg.canonicalDestroy ? deleteMethod(agg, ctx) : null;
+  // Find / view queries — capability filter AND-ed into each read.
+  const findMs = (repo?.finds ?? []).map((find) => findQueryMethod(agg, find, ctx, filterPred));
+  const viewFindMs = viewFinds.map((find) => findQueryMethod(agg, find, ctx, filterPred));
+  // `run<Name>` per context retrieval targeting this aggregate.
+  const runMs = aggRetrievals.map((r) => runMethod(agg, r, ctx, filterPred));
+  const toWireM = toWireMethod(agg, ctx);
+
   // Render the class body first so the file's imports + `type Tx` can be
   // narrowed to what's actually referenced — keeps the generated header
   // free of dead names (Biome generated-code gate).
   const bodyStr = lines(
-    `export class ${agg.name}Repository {`,
+    `export class ${agg.name}Repository implements ${repoPortName(agg.name)} {`,
     // Explicit field declarations + constructor assignments, not
     // parameter properties — the latter is non-erasable sugar Node's
     // type stripping rejects; see docs/plans/dap-node-debug.md
@@ -183,32 +207,22 @@ export function buildRepositoryFile(
     `    this.events = events;`,
     `  }`,
     "",
-    findByIdMethod(agg, ctx, emitTrace, filterPred),
+    findByIdM,
     "",
-    getByIdMethod(agg, ctx, drizzleOps),
+    getByIdM,
     "",
-    // Bulk loader used by views that follow `X id` references in bind
-    // expressions.  Same hydration path as the array-return finds;
-    // filter is a single `inArray`.
-    findManyByIdsMethod(agg, ctx, filterPred),
+    findManyByIdsM,
     "",
-    saveMethod(agg, ctx, emitTrace),
+    saveM,
     "",
-    // Hard delete — emitted only when the aggregate has a canonical
-    // `destroy` (declared or via `crudish`), so plain aggregates' repos are
-    // unchanged.  Containment children and join-table rows drop via
-    // `ON DELETE CASCADE`; a still-referenced aggregate (cross-aggregate
-    // `X id` FK is `restrict`) surfaces as a DB error the route maps to 409.
-    ...(agg.canonicalDestroy ? [deleteMethod(agg, ctx), ""] : []),
-    // Find / view queries — capability filter AND-ed into each read.
-    ...(repo?.finds ?? []).flatMap((find) => [findQueryMethod(agg, find, ctx, filterPred), ""]),
-    ...viewFinds.flatMap((find) => [findQueryMethod(agg, find, ctx, filterPred), ""]),
-    // `run<Name>` per context retrieval targeting this aggregate.
-    ...aggRetrievals.flatMap((r) => [runMethod(agg, r, ctx, filterPred), ""]),
+    ...(deleteM ? [deleteM, ""] : []),
+    ...findMs.flatMap((m) => [m, ""]),
+    ...viewFindMs.flatMap((m) => [m, ""]),
+    ...runMs.flatMap((m) => [m, ""]),
     // toWire — domain instance → wire DTO (plain object).  Used by the
     // Hono routes layer to serialize responses; the shape mirrors the
     // .NET <Agg>Response record so the cross-check sees identical specs.
-    toWireMethod(agg, ctx),
+    toWireM,
     "",
     `}`,
   );
@@ -247,9 +261,11 @@ export function buildRepositoryFile(
 
   const repoUsesMoney = aggregateUsesMoneyDeep(agg, ctx.valueObjects);
 
-  return lines(
+  const file = lines(
     "// Auto-generated.  Do not edit by hand.",
     repoUsesMoney && `import Decimal from "decimal.js";`,
+    // Domain-side repository PORT this concrete implements (audit S7).
+    repoPortImportLine(agg.name),
     `import type { NodePgDatabase } from "drizzle-orm/node-postgres";`,
     usedDrizzleOps.length > 0 && `import { ${usedDrizzleOps.join(", ")} } from "drizzle-orm";`,
     `import * as schema from "../schema";`,
@@ -284,6 +300,7 @@ export function buildRepositoryFile(
     bodyStr,
     "",
   );
+  return file;
 }
 
 /** `async getById(id)` — the command-load path (distinct from `findById`, the
