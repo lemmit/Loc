@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { generateSystems } from "../../src/system/index.js";
 import type { VirtualFile } from "../../web/src/build/protocol.js";
 import {
+  inlineSourcemapArtifacts,
   overlaySourcemapArtifacts,
   stripSourcemapArtifacts,
 } from "../../web/src/build/strip-sourcemap.js";
@@ -193,5 +194,65 @@ describe("stripSourcemapArtifacts — narrow defensive filter (not the primary m
   it("is a no-op on a real flag-off generate (nothing to strip)", async () => {
     const { off } = await generateAcmeOffAndOn();
     expect(stripSourcemapArtifacts(off)).toEqual(off);
+  });
+});
+
+describe("inlineSourcemapArtifacts (esbuild-WASM can't read .ts.map sidecars)", () => {
+  const MAP = {
+    version: 3,
+    sources: ["../../examples/showcase.ddd"],
+    sourcesContent: ["system Showcase { }\n"],
+    mappings: "AAAA",
+  };
+
+  it("folds a sidecar .ts.map into an inline data: URI and drops the sidecar", () => {
+    const files: VirtualFile[] = [
+      {
+        path: "hono_api/domain/build.ts",
+        content: "export const x = 1;\n//# sourceMappingURL=build.ts.map\n",
+        size: 0,
+      },
+      {
+        path: "hono_api/domain/build.ts.map",
+        content: JSON.stringify(MAP),
+        size: 0,
+      },
+      { path: "hono_api/index.ts", content: "export {};\n", size: 0 },
+    ];
+    const out = inlineSourcemapArtifacts(files);
+
+    // Sidecar is gone.
+    expect(out.some((f) => f.path.endsWith(".map"))).toBe(false);
+    // Untouched file passes through.
+    expect(out.find((f) => f.path === "hono_api/index.ts")?.content).toBe("export {};\n");
+
+    // The .ts now carries an INLINE data: map that decodes back to the sidecar.
+    const ts = out.find((f) => f.path === "hono_api/domain/build.ts");
+    const m = /\/\/# sourceMappingURL=data:application\/json;base64,(\S+)\n?$/.exec(
+      ts?.content ?? "",
+    );
+    expect(m, "inline data: sourceMappingURL present").not.toBeNull();
+    const decoded = JSON.parse(Buffer.from(m![1], "base64").toString("utf8"));
+    expect(decoded).toEqual(MAP);
+    // The .ddd source + its content survived into the inline map (what makes
+    // esbuild-wasm chain the bundle back to `.ddd`).
+    expect(decoded.sources.some((s: string) => s.endsWith(".ddd"))).toBe(true);
+    expect(decoded.sourcesContent[0].length).toBeGreaterThan(0);
+  });
+
+  it("leaves a file whose sidecar isn't in the set untouched", () => {
+    const files: VirtualFile[] = [
+      {
+        path: "a/b.ts",
+        content: "x;\n//# sourceMappingURL=b.ts.map\n",
+        size: 0,
+      },
+    ];
+    expect(inlineSourcemapArtifacts(files)).toEqual(files);
+  });
+
+  it("is a no-op on a flag-off generate (no directives, no sidecars)", async () => {
+    const { off } = await generateAcmeOffAndOn();
+    expect(inlineSourcemapArtifacts(off)).toEqual(off);
   });
 });

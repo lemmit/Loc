@@ -43,6 +43,69 @@ const MAP_SIDECAR_RE = /\.(map|smap)$/;
 const SOURCEMAP_MANIFEST_PATH = ".loom/sourcemap.json";
 const VSCODE_LAUNCH_PATH = ".vscode/launch.json";
 const SOURCE_MAPPING_URL_RE = /\/\/# sourceMappingURL=\S+\n$/;
+// A trailing `//# sourceMappingURL=<relative>.map` directive whose target is a
+// sidecar file (not already an inline `data:` URI).  Captures the URL so the
+// sidecar can be resolved + inlined for the browser bundler.
+const SIDECAR_DIRECTIVE_RE = /\/\/# sourceMappingURL=(?!data:)(\S+?\.map)\s*$/;
+
+/** UTF-8-safe base64 (the `.ddd` `sourcesContent` in the map is UTF-8; plain
+ *  `btoa` throws on code points > 0xFF). Browser-only (this module is `web/`). */
+function toBase64Utf8(s: string): string {
+  const bytes = new TextEncoder().encode(s);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
+/** Directory prefix of a VFS path (`a/b/c.ts` → `a/b/`, `c.ts` → ``). */
+function dirOf(path: string): string {
+  const i = path.lastIndexOf("/");
+  return i < 0 ? "" : path.slice(0, i + 1);
+}
+
+/**
+ * Rewrite each generated `.ts`/`.tsx` whose trailing `//# sourceMappingURL`
+ * points at a sidecar `.map` file into an INLINE `data:` source map, and drop
+ * the now-redundant sidecar files.
+ *
+ * WHY (the load-bearing reason — see `web/e2e/devtools-sourcemap.spec.ts`):
+ * the in-browser bundler is esbuild-**wasm**, which has no filesystem, so it
+ * CANNOT read a `.ts.map` sidecar referenced by a `//# sourceMappingURL`
+ * comment — it silently skips the chain, and the boot bundle's map then stops
+ * at the generated `.ts` (`vfs:/…`) instead of reaching `.ddd`.  node esbuild
+ * reads the sidecar from disk and composes fine; esbuild-wasm does not.
+ * Inlining the `.ts → .ddd` map into the `.ts` itself (which esbuild-wasm CAN
+ * read, it's in the file content) restores the chain so the bundle's own map
+ * reaches `.ddd`.  Applied ONLY to the map-carrying generate that feeds the
+ * bundler — never to the flag-off view/persist tree.
+ */
+export function inlineSourcemapArtifacts(files: readonly VirtualFile[]): VirtualFile[] {
+  const byPath = new Map(files.map((f) => [f.path, f] as const));
+  const inlinedSidecars = new Set<string>();
+  const out: VirtualFile[] = [];
+  for (const f of files) {
+    const m = SIDECAR_DIRECTIVE_RE.exec(f.content);
+    if (!m) {
+      out.push(f);
+      continue;
+    }
+    const sidecarPath = dirOf(f.path) + m[1];
+    const sidecar = byPath.get(sidecarPath);
+    if (!sidecar) {
+      // Directive with no sidecar in the set — leave the file untouched
+      // (esbuild-wasm just won't chain it; harmless).
+      out.push(f);
+      continue;
+    }
+    const dataUri = `data:application/json;base64,${toBase64Utf8(sidecar.content)}`;
+    const content = f.content.replace(SIDECAR_DIRECTIVE_RE, `//# sourceMappingURL=${dataUri}`);
+    out.push({ path: f.path, content, size: content.length });
+    inlinedSidecars.add(sidecarPath);
+  }
+  // Drop the sidecars we folded inline (they're now redundant; keeping them
+  // would just be dead VFS entries the bundler never reads).
+  return out.filter((f) => !inlinedSidecars.has(f.path));
+}
 
 function isMapArtifactPath(path: string): boolean {
   return (
