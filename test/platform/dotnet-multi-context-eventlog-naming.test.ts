@@ -10,7 +10,10 @@
 //
 // The fix emits `<Ctx>EventRecord` + `<Ctx>Events` per event-sourced context.
 // This pins it in-memory (no docker): TWO event-sourced contexts (Alpha, Beta),
-// so a single shared type would be observably wrong.
+// so a single shared type would be observably wrong.  Beta also carries an ES
+// *workflow* (Counter), so the merged-context dispatch handler + fold class
+// exercise the `esEventRecordClass(wf, ownerOf)` owner-resolution path — the
+// aggregate repos alone run per-context and can't regress it.
 
 import { describe, expect, it } from "vitest";
 import { generateSystems } from "../../src/system/index.js";
@@ -36,6 +39,15 @@ system MC {
       }
       repository Jobs for Job { }
       event Started { job: Job id }
+      event Ticked { job: Job id, by: int }
+      channel L { carries: Started, Ticked  delivery: broadcast  retention: ephemeral }
+      workflow Counter eventSourced {
+        jobId: Job id
+        total: int
+        create(s: Started) by s.job { emit Ticked { job: s.job, by: 1 } }
+        on(t: Ticked) by t.job { emit Ticked { job: t.job, by: total } }
+        apply(t: Ticked) { total := total + t.by }
+      }
     }
   }
   api A from S
@@ -81,5 +93,18 @@ describe("multi-context event-log naming (.NET, two event-sourced contexts)", ()
     const jobRepo = get("Repositories/JobRepository.cs");
     expect(noteRepo).toContain('_db.AlphaEvents.Where(e => e.StreamType == "Note"');
     expect(jobRepo).toContain('_db.BetaEvents.Where(e => e.StreamType == "Job"');
+
+    // The ES workflow (Counter, in Beta) rehydrates from Beta's log — the fold
+    // class + the merged-context dispatch handler resolve the OWNING context via
+    // `ownerOf`, not the merged `ctx.name` (Alpha).  A regression re-types the
+    // event store to `AlphaEventRecord` and mis-routes the stream.
+    const counterState = get("Application/Workflows/CounterState.cs");
+    expect(counterState).toContain("RowToEvent(BetaEventRecord __r)");
+    expect(counterState).not.toContain("AlphaEventRecord");
+    // The dispatch handler injects the event store typed on the OWNING record.
+    // Scan every emitted file so the assertion is path-independent.
+    const allContent = [...files.values()].join("\n");
+    expect(allContent).toContain("IWorkflowEventStore<BetaEventRecord>");
+    expect(allContent).not.toContain("IWorkflowEventStore<AlphaEventRecord>");
   });
 });
