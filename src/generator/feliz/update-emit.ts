@@ -7,7 +7,7 @@ import type { ActionIR, StateFieldIR } from "../../ir/types/loom-ir.js";
 import { upperFirst } from "../../util/naming.js";
 import { type FsExprCtx, renderFsExpr } from "./fs-expr.js";
 import { fsZeroValue, typeToFs } from "./type-fs.js";
-import type { FelizRead } from "./wire.js";
+import type { FelizMutation, FelizRead } from "./wire.js";
 
 /** Msg case name for an action (`inc` → `Inc`, `setCustomer` → `SetCustomer`). */
 export function msgCase(action: string): string {
@@ -93,13 +93,15 @@ export function renderInit(
   return `${prefix}  {\n${inits.join("\n")}\n  }, ${cmd}`;
 }
 
-/** The `Msg` union — one case per action, plus one `Loaded` case per read
- *  carrying the decoded `Result<'T, string>`.  When `routed`, a `UrlChanged`
- *  case carries the new URL segments. */
+/** The `Msg` union — one case per action, one `Loaded` case per read (carrying
+ *  the decoded `Result<'T, string>`), and two cases per mutation (a `Delete<Agg>`
+ *  trigger carrying the target id + a `<Agg>Deleted` result).  When `routed`, a
+ *  `UrlChanged` case carries the new URL segments. */
 export function renderMsg(
   actions: readonly ActionIR[],
   reads: readonly FelizRead[] = [],
   routed = false,
+  mutations: readonly FelizMutation[] = [],
 ): string {
   const cases = [
     ...(routed ? ["  | UrlChanged of string list"] : []),
@@ -108,6 +110,10 @@ export function renderMsg(
       return p ? `  | ${msgCase(a.name)} of ${typeToFs(p.type)}` : `  | ${msgCase(a.name)}`;
     }),
     ...reads.map((r) => `  | ${r.msgCase} of Result<${r.resultType}, string>`),
+    ...mutations.flatMap((m) => [
+      `  | ${m.dispatchCase} of string`,
+      `  | ${m.resultCase} of Result<unit, string>`,
+    ]),
   ];
   if (cases.length === 0) return "type Msg = | NoOp";
   return `type Msg =\n${cases.join("\n")}`;
@@ -145,6 +151,7 @@ export function renderUpdate(
   state: readonly StateFieldIR[],
   reads: readonly FelizRead[] = [],
   routed = false,
+  mutations: readonly FelizMutation[] = [],
 ): string {
   const stateNames = new Set(state.map((s) => s.name));
   const byIdReads = reads.filter((r) => r.single);
@@ -178,7 +185,17 @@ export function renderUpdate(
       `  | ${r.msgCase} (Ok data) -> { model with ${r.field} = Loaded data }, Cmd.none\n` +
       `  | ${r.msgCase} (Error e) -> { model with ${r.field} = LoadError e }, Cmd.none`,
   );
-  const arms = [...routeArms, ...actionArms, ...readArms];
+  // A delete: the trigger fires the `Cmd`; on success navigate to the list
+  // route (the record is gone), on error stay put.
+  const mutationArms = mutations.map((m) => {
+    const nav = `Cmd.navigate(${m.navigateSegs.map((s) => `"${s}"`).join(", ")})`;
+    return (
+      `  | ${m.dispatchCase} id -> model, Cmd.OfAsync.perform Api.${m.apiFn} id ${m.resultCase}\n` +
+      `  | ${m.resultCase} (Ok ()) -> model, ${nav}\n` +
+      `  | ${m.resultCase} (Error _) -> model, Cmd.none`
+    );
+  });
+  const arms = [...routeArms, ...actionArms, ...readArms, ...mutationArms];
   if (arms.length === 0) {
     return "let update (msg: Msg) (model: Model) =\n  match msg with\n  | NoOp -> model, Cmd.none";
   }

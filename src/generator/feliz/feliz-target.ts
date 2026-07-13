@@ -140,6 +140,22 @@ export const felizTarget: WalkerTarget = {
     return routerNavigate(lit[1]!, []);
   },
 
+  // `DestroyForm(of: <Agg>)` → a delete button that DISPATCHES `Delete<Agg> id`
+  // (the route id is bound by the detail page's view fn).  The mutation `Cmd` +
+  // navigate-on-success live in `update` (wired by index.ts's `collectPage
+  // Mutations`); the view only dispatches.  Falls through to the shared comment
+  // path when the `of:` arg isn't a plain aggregate ref.
+  renderDestroyForm: (call, ctx) => {
+    if (call.kind !== "call") return null;
+    const names = call.argNames ?? [];
+    const idx = names.indexOf("of");
+    const ofArg = idx >= 0 ? call.args[idx] : undefined;
+    const agg = ofArg?.kind === "ref" ? ofArg.name : undefined;
+    if (!agg) return null;
+    ctx.usesRouteId = true; // the delete dispatches with the route `id`
+    return `Html.button [ prop.onClick (fun _ -> dispatch (Delete${upperFirst(agg)} id)); prop.text "Delete ${upperFirst(agg)}" ]`;
+  },
+
   defaultInitFor: (type) => fsZeroValue(type),
 
   // --- Markup seams — F# flavoured ---------------------------------------

@@ -29,7 +29,9 @@ import {
   renderUpdate,
 } from "./update-emit.js";
 import {
+  collectPageMutations,
   collectPageReads,
+  type FelizMutation,
   type FelizRead,
   renderApiModule,
   renderViewModule,
@@ -190,6 +192,23 @@ function readsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizRead[]
   return out;
 }
 
+/** The mutations a ui issues, across ALL its pages (deduped by aggregate) —
+ *  v1 covers `DestroyForm(of: X)` deletes. */
+function mutationsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizMutation[] {
+  const aggregateNames = new Set<string>();
+  for (const c of contexts) for (const a of c.aggregates) aggregateNames.add(a.name);
+  const seen = new Set<string>();
+  const out: FelizMutation[] = [];
+  for (const page of ui.pages) {
+    for (const m of collectPageMutations(page, aggregateNames)) {
+      if (seen.has(m.aggregate)) continue;
+      seen.add(m.aggregate);
+      out.push(m);
+    }
+  }
+  return out;
+}
+
 /** A ui's `state {}` fields across ALL pages, deduped by name (multi-page uis
  *  share one flat Model; distinct pages should use distinct field names). */
 function combinedState(ui: UiIR): PageIR["state"][number][] {
@@ -230,7 +249,12 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
   const aggregatesByName = new Map<string, AggregateIR>();
   for (const c of contexts) for (const a of c.aggregates) aggregatesByName.set(a.name, a);
   const reads: FelizRead[] = readsForUi(ui, contexts);
+  const mutations: FelizMutation[] = mutationsForUi(ui, contexts);
   const hasReads = reads.length > 0;
+  const hasMutations = mutations.length > 0;
+  // Http/Api are needed for reads AND mutations; the Thoth decoder/Remote/View
+  // layer only for reads.
+  const hasHttp = hasReads || hasMutations;
   // A ui is routed when it has >1 page OR any page carries a route param (a lone
   // detail page still needs a router to bind its `:id`).
   const routed = pages.length > 1 || pages.some(hasRouteParam);
@@ -242,10 +266,10 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
   const actions = combinedActions(ui);
   const model = renderModel(state, reads, routed);
   const init = renderInit(state, reads, routed);
-  const msg = renderMsg(actions, reads, routed);
-  const update = renderUpdate(actions, state, reads, routed);
+  const msg = renderMsg(actions, reads, routed, mutations);
+  const update = renderUpdate(actions, state, reads, routed, mutations);
   const wire = hasReads ? renderWireTypes(reads, contexts) : { domain: "", decoders: "" };
-  const api = hasReads ? renderApiModule(reads) : "";
+  const api = hasHttp ? renderApiModule(reads, mutations) : "";
 
   // Views: one root `view` (single-page) OR per-page `<page>View` functions +
   // a `React.router` root that switches on `CurrentPage`.  Detail pages take
@@ -268,16 +292,18 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
     "open Elmish",
     "open Elmish.React",
     hasReads && "open Thoth.Json",
-    hasReads && "open Fable.SimpleHttp",
-    // Wire layer (reads only) — records → Remote → decoders → api → View helper.
+    hasHttp && "open Fable.SimpleHttp",
+    // Read wire layer (reads only) — records → Remote → decoders.
     hasReads && "",
     hasReads && wire.domain,
     hasReads && "",
     hasReads && REMOTE_TYPE,
     hasReads && "",
     hasReads && wire.decoders,
-    hasReads && "",
-    hasReads && api,
+    // Api module — reads (fetch + decode) AND mutations (verb request).
+    hasHttp && "",
+    hasHttp && api,
+    // View helpers (reads only) — Remote matchers the QueryView renderer calls.
     hasReads && "",
     hasReads && renderViewModule(reads),
     // Routing table (multi-page only) — Page union + parseUrl, ahead of Model.
@@ -309,8 +335,8 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
 // Fable.SimpleHttp for the fetch, Thoth.Json for the decoders.  A read-free
 // (Counter-class) app omits them so its project stays minimal.
 // A multi-page ui additionally pulls in Feliz.Router for URL routing.
-function fsproj(hasReads: boolean, routed: boolean): string {
-  const wireRefs = hasReads
+function fsproj(hasHttp: boolean, routed: boolean): string {
+  const wireRefs = hasHttp
     ? `
     <PackageReference Include="Fable.SimpleHttp" Version="3.6.0" />
     <PackageReference Include="Thoth.Json" Version="10.2.0" />`
@@ -432,8 +458,13 @@ export function generateFelizForContexts(
       `Feliz deployable '${deployable.name}' references ui '${deployable.uiName}' but no such ui is declared.`,
     );
   }
+  // fsproj package refs must match what `renderAppFs` emits: SimpleHttp/Thoth
+  // when there's any Http (reads or mutations), Feliz.Router when routed (>1
+  // page OR a lone detail page carrying a `:id` route param).
+  const hasHttp = readsForUi(ui, contexts).length > 0 || mutationsForUi(ui, contexts).length > 0;
+  const routed = ui.pages.length > 1 || ui.pages.some(hasRouteParam);
   out.set("src/App.fs", renderAppFs(ui, contexts));
-  out.set("App.fsproj", fsproj(readsForUi(ui, contexts).length > 0, ui.pages.length > 1));
+  out.set("App.fsproj", fsproj(hasHttp, routed));
   out.set(".config/dotnet-tools.json", DOTNET_TOOLS);
   out.set("package.json", PACKAGE_JSON(`${deployable.name}-feliz`));
   out.set("vite.config.js", VITE_CONFIG);
