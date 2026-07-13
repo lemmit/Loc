@@ -2282,3 +2282,42 @@ examples.
 Proven end-to-end: the workflow app (and a scaffold app with a `workflows:` form)
 Fable-compile + vite-build + run (scaffold smoke still green); the CI scaffold leg
 now carries a WorkflowForm. Same prove-it loop as §23–§30.
+
+## 32. Feliz auth gate — the whole app becomes an MVU match on the session (2026-07-13)
+
+The auth gate (D-AUTH-OIDC) is the last frontend-parity frontier. Unlike the
+form slices (which add a Msg/update arm), auth WRAPS the entire app in a session
+gate — a different shape worth noting.
+
+- **The gate renames the root and owns `view`.** The existing root view
+  (single-page `view` or the routed `React.router` root) is renamed to `appView`,
+  and the emitted `view` becomes a `match model.Session with Checking -> spinner
+  | Anon -> sign-in | Authed -> appView model dispatch`. So `Program.mkProgram
+  init update view` still references the same name — the gate is transparent to
+  the program wiring, it just interposes. Parameterizing the root-view fn name
+  (`renderRootView(pages, fnName="view")` + `renderPageView(..., fnName)`) is all
+  it took to slot the gate above the existing view.
+
+- **Status-only probe, no user decode.** The React AuthGate fetches the user
+  claims; the Feliz v1 gate only needs the GATE, so it probes `/api/auth/me` and
+  checks `status = 200` → `Authed`, else `Anon`. No `user{}`-shaped decoder
+  needed for the gate itself (`currentUser.<field>` in page bodies would need it
+  — a follow-up). Simpler and enough to guard the app.
+
+- **`window.location.href` needs `Fable.Browser.Dom`.** The sign-in/out
+  redirects (`window.location.href <- "/api/auth/login"`) require `open
+  Browser.Dom` + a `Fable.Browser.Dom` package ref — it's NOT transitively
+  available. Same class as the `Feliz.Router`-for-`Cmd.navigate` gate (§31): a
+  dependency's `open` + ref must be added for every feature that reaches into it.
+
+- **A no-backend smoke can't test the UNAUTH path.** `vite preview`'s SPA
+  fallback answers `/api/auth/me` with `index.html` (200), so the gate resolves
+  to `Authed` and renders `appView` — the sign-in branch (which needs a real 401)
+  is unreachable without a backend. So the runtime smoke proves the gate machinery
+  RUNS (probe → SessionChecked → appView); the Anon/sign-in emission is pinned by
+  generator tests instead. Split the proof: runtime for the reachable path, unit
+  tests for the rest.
+
+Proven end-to-end: the auth app AND an auth-gated scaffold app Fable-compile +
+vite-build + run (the scaffold smoke passes THROUGH the gate); the CI scaffold
+leg is now auth-gated. Same prove-it loop as §23–§31.

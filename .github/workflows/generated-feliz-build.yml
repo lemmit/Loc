@@ -197,12 +197,15 @@ jobs:
       # paths; this proves a `with scaffold(...)`-generated app (List/New/Detail/
       # Home built from Table/Toolbar/Breadcrumbs/Paper/IdLink/Alert/… primitives,
       # PLUS a WorkflowForm from `workflows:`) also compiles AND runs — e2e parity
-      # with the JSX frontends' scaffold examples.  Reuses the same toolchain +
-      # Playwright install.
+      # with the JSX frontends' scaffold examples.  Wrapped in the AUTH GATE
+      # (`user{}` + `auth: required`/`auth: ui`): the session probe resolves and
+      # the gated app renders (preview's SPA fallback answers /auth/me).  Reuses
+      # the same toolchain + Playwright install.
       - name: Generate the scaffold parity app
         run: |
           cat > ci-feliz/scaffold.ddd <<'DDD'
           system Storefront {
+            user { id: string  role: string }
             api ShopApi from Catalog
             subdomain Catalog {
               context Cat {
@@ -224,8 +227,8 @@ jobs:
             ui WebApp with scaffold(aggregates: [Product], workflows: [restock]) {
               api Shop: ShopApi
             }
-            deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 }
-            deployable web { platform: feliz targets: api ui: WebApp { Shop: api } port: 3005 }
+            deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 auth: required }
+            deployable web { platform: feliz targets: api ui: WebApp { Shop: api } port: 3005 auth: ui }
           }
           DDD
           node bin/cli.js generate system ci-feliz/scaffold.ddd -o ci-feliz/scaffold-out
