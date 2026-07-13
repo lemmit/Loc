@@ -25,6 +25,7 @@ on:
       - 'src/platform/registry.ts'
       - 'src/language/ddd.langium'
       - 'scripts/feliz-smoke.mjs'
+      - 'scripts/feliz-scaffold-smoke.mjs'
       - '.github/workflows/generated-feliz-build.yml'
   pull_request:
     branches: [main]
@@ -36,6 +37,7 @@ on:
       - 'src/platform/registry.ts'
       - 'src/language/ddd.langium'
       - 'scripts/feliz-smoke.mjs'
+      - 'scripts/feliz-scaffold-smoke.mjs'
       - '.github/workflows/generated-feliz-build.yml'
   workflow_dispatch:
 
@@ -190,3 +192,51 @@ jobs:
             sleep 1
           done
           SMOKE_URL=http://localhost:4173/ node "$GITHUB_WORKSPACE/scripts/feliz-smoke.mjs"
+
+      # Scaffold parity — the hand-built showcase above exercises the MVU/wire
+      # paths; this proves a `with scaffold(...)`-generated app (List/New/Detail/
+      # Home built from Table/Toolbar/Breadcrumbs/Paper/IdLink/Alert/… primitives)
+      # also compiles AND runs — e2e parity with the JSX frontends' scaffold
+      # examples.  Reuses the same toolchain + Playwright install.
+      - name: Generate the scaffold parity app
+        run: |
+          cat > ci-feliz/scaffold.ddd <<'DDD'
+          system Storefront {
+            api ShopApi from Catalog
+            subdomain Catalog {
+              context Cat {
+                aggregate Product with crudish {
+                  name:  string
+                  price: money
+                }
+                repository Products for Product { }
+              }
+            }
+            storage db { type: postgres }
+            resource catState { for: Cat, kind: state, use: db }
+            ui WebApp with scaffold(aggregates: [Product]) {
+              api Shop: ShopApi
+            }
+            deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 }
+            deployable web { platform: feliz targets: api ui: WebApp { Shop: api } port: 3005 }
+          }
+          DDD
+          node bin/cli.js generate system ci-feliz/scaffold.ddd -o ci-feliz/scaffold-out
+      - name: Locate the scaffold project
+        id: sproj
+        run: echo "dir=$(dirname "$(find ci-feliz/scaffold-out -name App.fsproj | head -1)")" >> "$GITHUB_OUTPUT"
+      - name: Fable compile + vite build + runtime smoke (scaffold)
+        working-directory: ${{ steps.sproj.outputs.dir }}
+        run: |
+          dotnet tool restore
+          dotnet fable App.fsproj -o out --extension .js
+          npm install
+          npx vite build
+          npx vite preview --port 4175 --strictPort &
+          PREVIEW_PID=$!
+          trap 'kill $PREVIEW_PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:4175/ >/dev/null && break
+            sleep 1
+          done
+          SMOKE_URL=http://localhost:4175/ node "$GITHUB_WORKSPACE/scripts/feliz-scaffold-smoke.mjs"

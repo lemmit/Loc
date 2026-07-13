@@ -2203,3 +2203,45 @@ The smoke was proven locally (fresh generate → fable → vite build → vite p
 → headless Chromium: mount + counter + routing + Remote-state all ran) before
 shipping — same prove-it discipline as §23–§28, one layer up (the whole app, not
 one emit).
+
+## 30. Feliz scaffold primitives — the offside trap is nested multi-line children (2026-07-13)
+
+Filling in the scaffold pack primitives (Paper/Toolbar/Breadcrumbs/Table/IdLink/
+Alert/Skeleton/Empty/KeyValueRow/Anchor/Modal) to reach e2e parity surfaced one
+sharp F# offside rule the earlier single-child emitters never hit.
+
+- **A multi-line container's structural props must NOT be on their own lines.**
+  The naive emit
+  `Html.nav [\n  prop.className "x"\n  prop.children [ … ]\n]` looks fine, but
+  when the walker splices it as a CHILD it re-indents only the first line; the
+  `prop.className` continuation line lands at the PARENT's child column, and F#
+  parses it as an element of the PARENT's list (→ "this value is not a function
+  and cannot be applied", because it tries to apply `Html.nav [...]` to the next
+  sibling). Fix: keep the structural props on the OPENING line
+  (`Html.nav [ prop.className "x"; prop.children [\n<children>\n  ] ]`) so ONLY
+  the children span lines — the exact shape `primitiveStack` already used and
+  which compiles. AND paren-wrap the whole element (§24) so a following sibling
+  isn't absorbed. Both are needed: paren-wrap alone didn't fix it; the
+  separate-line props were the real bug.
+
+- **`yield! rows |> List.map (fun r -> Html.tr [ … ])` inside `prop.children [ ]`
+  is offside-safe** — the Table body renders rows this way and compiles, same as
+  the `For` primitive (§23). Bracket-delimited `yield!` bodies are fine; it's
+  offside-KEYWORD continuations at the wrong column that break.
+
+- **`Anchor(to:)` gives a JS EXPRESSION, not a path.** `to` arrives as the
+  walker's `stringOrRefArgValue` — a quoted JS literal (`"/products"`) or a ref,
+  not a bare path. Naively wrapping it (`prop.href "#${to}"`) yields
+  `prop.href "#"/products""` (the quotes leak, and F# sees a `/` operator). Match
+  the literal (`/^"(.*)"$/`) and fold it into a static `"#/products"`, else
+  concat a ref at runtime (`("#" + to)`). Same class of bug as re-quoting a
+  `STRING` terminal (CLAUDE.md conventions).
+
+- **A no-backend scaffold smoke still proves the primitives + wire ran.** The
+  list Table lives inside a QueryView; with no backend the QueryView shows its
+  error branch — so asserting the list heading + error text proves the toolbar/
+  table/paper rendered AND the Cmd/decoder fired, without a db.
+
+Verified the whole scaffold app end-to-end (generate → dotnet fable → vite build
+→ vite preview → headless Chromium: Home + List(toolbar/table/wire) + New all
+ran) before shipping; the CI gate now runs both the showcase and a scaffold app.
