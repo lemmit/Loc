@@ -1915,3 +1915,53 @@ because of one discipline and two blind spots that bit / nearly bit.
   suite missed it — only a CLI `generate` or a `validateLoomModel`-path unit test
   caught it. **A new IR-validate check needs a `validateLoomModel`-path test, not
   generator coverage.**
+
+## 23. Feliz F# wire layer — F# offside vs the walker's line-1-only re-indent (2026-07-12)
+
+Landing the Feliz frontend's **wire layer** (Thoth decoders + a `Cmd`-based
+`Api` module + the MVU `Remote<'T>` projection for `<param>.<agg>.all` reads,
+slice 7 of `docs/plans/feliz-frontend-build.md`) turned up one load-bearing
+gotcha that dictated the whole design.
+
+- **The shared `walkBody` re-indents only a child's FIRST line.** Children are
+  joined with `\n<indent>` and the pack prefixes the *block* with `indent`
+  once, so a multi-line child keeps the walker's inconsistent internal columns.
+  For the JSX/markup frontends this is invisible (JSX ignores whitespace). Feliz
+  is the first frontend whose embedded language is **offside-sensitive**, so any
+  multi-line `match` / `if…then…else` / `yield!` spliced into a Feliz `[ … ]`
+  children list is *offside of the list context* and fails `dotnet fable`
+  (`error FS0058: … token is offside of context started at …`). Inside plain
+  `[ … ]` brackets F# is lenient (arbitrary element indentation is fine — that's
+  why the Counter's nested `Html.div [ … ]` tree compiled); the offside rule
+  only bites once an offside-*keyword* (`match`/`if`/`yield!`) opens a context.
+
+- **Two fixes, both verified by Fable compile before shipping the emitter:**
+  1. **QueryView → an emitted `View.remoteList` helper**, not an inline `match`.
+     A helper *call* `View.remoteList model.X (loading) (error) (empty) (fun rows
+     -> <data>)` is offside-safe because everything up to the trailing lambda is
+     ONE line and the multi-line `data` body lives inside the `(fun … )` paren
+     (bracket-lenient). The `match` itself sits in a top-level `module View`
+     def I indent correctly. `For` → `yield! coll |> List.map (fun x -> body)`
+     works spliced into `prop.children [ … ]` for the same reason (its body is a
+     bracket-delimited `Html.x [ … ]`).
+  2. **`renderConditionalChild` / `renderMatch*` emit SINGLE-LINE
+     `if/elif/else`.** A one-line expression can't be offside of anything. Safe
+     to flatten the walked arm markup to one line (`\s*\n\s*` → ` `) because
+     Feliz emits **block** comments (`(* … *)`, never `//`, so no EOL-comment
+     swallow) and F#-source newlines here are all structural (string-literal
+     newlines are the two-char escape `\n`). The first cut emitted a multi-line
+     `(if c then\n  a\n else\n  b)` and it Fable-*failed* exactly as above — the
+     one-line rewrite fixed it.
+
+- **F# record fields keep the EXACT wire-shape names (lowercase as written).**
+  The shared `member` arm renders `p.name` verbatim (no casing seam), and Thoth
+  `Decode.field "name"` maps the JSON key straight onto a lowercase F# record
+  field — so decoders, records, and page-body member access all line up with
+  zero casing translation. Don't Pascal-case them "to look idiomatic"; it
+  reintroduces a seam the walker doesn't have.
+
+- **Prove-it discipline paid off twice.** Both offside failures were caught by a
+  10-second `dotnet fable` in the SDK:8.0 container against the REAL generated
+  project (not a hand-written sketch) *before* the emitter shipped — exactly the
+  "prove it or don't ship it" loop the plan calls for. A generator-only test
+  would have gone green on both broken versions (it never compiles F#).

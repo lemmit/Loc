@@ -7,9 +7,28 @@
 // handful of primitives the first example needs and grows example-by-example —
 // NOT all ~80.  A missing primitive returns a visible `(* … *)` comment.
 
+import { lowerFirst } from "../../util/naming.js";
 import type { LoadedPack } from "../_packs/loader.js";
 
 type Ctx = Record<string, string | number | boolean | undefined>;
+
+/** A walked branch that came back as the missing-arg sentinel `"null"` (JS)
+ *  must become `Html.none` — F# has no bare `null` element. */
+function asElement(s: string | undefined): string {
+  const t = (s ?? "").trim();
+  return t === "" || t === "null" ? "Html.none" : t;
+}
+
+/** Collapse a walked element to ONE line — needed for the QueryView branches
+ *  that sit inline on the `View.remoteList` header line (a multi-line arg there
+ *  would be offside).  Safe: Feliz emits block comments (`(* … *)`) only, and
+ *  source newlines here are structural.  (The `data:` render body is exempt —
+ *  it is the trailing lambda's bracket-delimited body, which may span lines.) */
+function oneLineEl(s: string | undefined): string {
+  return asElement(s)
+    .replace(/\s*\n\s*/g, " ")
+    .trim();
+}
 
 /** Wrap a walker-produced text field as a Feliz CHILD element.  The walker
  *  hands text as either a raw string literal (`Counter`) or an already-rendered
@@ -81,8 +100,27 @@ function primitiveButton(c: Ctx): string {
   return `Html.button [ ${props.join("; ")} ]`;
 }
 
+/** QueryView — the MVU RemoteData match, rendered through the `View.remoteList`
+ *  helper (emitted into App.fs by index.ts).  A helper CALL is offside-safe
+ *  inside a Feliz children `[ … ]` list where a raw multi-line `match` is not:
+ *  the four branches sit on the header line (parenthesised) and only the
+ *  `data:` render lambda body spans lines, and that body is bracket-delimited
+ *  markup.  `queryExpr` is the Model field (`AllOrders`); the arm binding the
+ *  `data:` lambda param resolves to is its camelCase (`allOrders`), matching
+ *  `felizTarget.renderQueryDataAccess`. */
+function primitiveQueryView(c: Ctx): string {
+  const field = String(c.queryExpr ?? "");
+  const binding = lowerFirst(field);
+  const loading = oneLineEl(c.loadingJsx as string);
+  const error = oneLineEl(c.errorJsx as string);
+  const empty = oneLineEl(c.emptyJsx as string);
+  const data = asElement(c.dataJsx as string);
+  return `View.remoteList model.${field} (${loading}) (${error}) (${empty}) (fun ${binding} ->\n${data})`;
+}
+
 const RENDERERS: Record<string, (c: Ctx) => string> = {
   "primitive-stack": primitiveStack,
+  "primitive-query-view": primitiveQueryView,
   "primitive-group": primitiveStack,
   "primitive-heading": primitiveHeading,
   "primitive-text": primitiveText,

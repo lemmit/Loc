@@ -93,25 +93,42 @@ in hand — not before F# output exists.
    (`Count: 0` → +,+ → `2` → - → `1`, zero page errors). Fixed a real emit bug
    the proof exposed: `index.html` must reference `./out/src/App.js` (Fable
    mirrors the fsproj layout; the path must be relative for Vite).
-7. ⚙ F# wire layer — Thoth.Json decoders + `Cmd`-based api (parallel of
-   `src/generator/_frontend/`; reuse IR projections like `wireShapeFor`, not the
-   TS/zod emitters). Un-stubs the `felizTarget` api seams
-   (`buildHookUse`/`renderApiCall`). NOT started.
+7. ✅ **F# wire layer** — Thoth.Json decoders + a `Cmd`-based `Api` module,
+   both off `agg.wireShape` (parallel of `src/generator/_frontend/`; reuses the
+   IR projection, not the TS/zod emitters). `src/generator/feliz/wire.ts`.
+   Un-stubbed the `felizTarget` api seams
+   (`buildHookUse`/`renderApiCall`/`renderApiHoisting`/`renderQueryDataAccess`)
+   as an **MVU projection** (§2.3/§7.2): a `<param>.<agg>.all` read → a
+   `Remote<'T list>` Model field + an init `Cmd.OfAsync.perform` + a `Loaded`
+   `Msg` + two `update` arms (`Ok`→`Loaded`, `Error`→`LoadError`). QueryView
+   renders through an emitted `View.remoteList` helper (a helper CALL is
+   offside-safe inside a Feliz `[ … ]` list where a raw multi-line `match` is
+   not). Also landed the deferred control-flow seams: `renderForEach`
+   (`yield! coll |> List.map`), `renderConditionalChild` + `renderMatch`/
+   `renderMatchChild` (single-line `if/elif/else` — offside-safe). All
+   Fable-verified (SDK:8.0 container: decoders + api + MVU + QueryView + For +
+   ternary + `match {}` all compile; `vite build` bundles 74 modules).
+   Read-free pages (Counter) stay byte-identical (no wire layer emitted).
 8. ✅ `generated-feliz-build` CI gate — generate via CLI → `dotnet fable` →
    `vite build` (`.github/workflows/generated-feliz-build.yml`). **Green in
    GitHub Actions** (run #3; first two runs caught a Node-20 `Object.groupBy`
-   gap, fixed by pinning Node 22).
+   gap, fixed by pinning Node 22). Slice 7 grew the inline example to a
+   **data-driven** page (aggregate + repository + api + `QueryView`), so the
+   gate now covers the wire layer end to end.
 
 ## Known gaps / next
-- The procedural pack has 7 primitives (Stack/Group/Heading/Text/Button + Card/
-  Badge/Divider — all Fable-verified); grows example-by-example.
-- The `felizTarget` control-flow seams (`renderMatch`/`renderMatchChild`/
-  `renderConditionalChild`/`For`) + api seams throw loudly until reached. They
-  are best landed WITH the wire layer (slice 7): `QueryView` exercises
-  conditional rendering (loading/error/empty/data) in a position that parses and
-  is Fable-verifiable — a standalone `match`-in-body hits Langium grammar
-  friction and is unused across the whole corpus.
-- Multi-page routing: `renderAppFs` wires only the first page (visible TODO).
+- The procedural pack has 8 primitives (Stack/Group/Heading/Text/Button + Card/
+  Badge/Divider) + `QueryView` (via the `View.remoteList` helper); grows
+  example-by-example.
+- **Wire layer is list-reads only.** `<param>.<agg>.all` (a QueryView list) is
+  projected; single (`byId`) reads (route-`id` args + `option`/single data) and
+  mutations (create/update/delete → `Cmd` + optimistic `Msg`) are the next
+  wire slices. Enum wire fields decode as their string name (a proper DU
+  decoder is a follow-up); nested containment/VO records + decoders ARE emitted
+  (transitive off `wireShape`).
+- `renderNavigate` still throws (no cross-page navigation until routing lands).
+- Multi-page routing: `renderAppFs` wires only the first page (visible TODO) —
+  a read on page 2+ isn't projected. This is the last big piece.
 
 Known-good deps (proposal §10): Fable 4.29 / Feliz 2.8 / Fable.Elmish.React 4.0
 / Fable.SimpleHttp 3.6 / Thoth.Json 10.2 / net8.0. Avoid Thoth.Fetch (promise-CE
