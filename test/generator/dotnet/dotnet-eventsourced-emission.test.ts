@@ -58,7 +58,7 @@ describe(".NET event-sourcing emission (persistedAs(eventLog))", () => {
     const keys = [...files.keys()];
     // ONE shared POCO + ONE per-context config (the `<agg>_events` tables
     // collapsed into the per-context `<ctx>_events` log, event-log-architecture.md).
-    expect(keys).toContain("Infrastructure/Persistence/Events/EventRecord.cs");
+    expect(keys).toContain("Infrastructure/Persistence/Events/AccountsEventRecord.cs");
     expect(keys).toContain(
       "Infrastructure/Persistence/Configurations/AccountsEventRecordConfiguration.cs",
     );
@@ -85,8 +85,8 @@ describe(".NET event-sourcing emission (persistedAs(eventLog))", () => {
       'builder.Property(x => x.Data).HasColumnName("data").HasColumnType("jsonb");',
     );
 
-    const poco = files.get("Infrastructure/Persistence/Events/EventRecord.cs")!;
-    expect(poco).toContain("public sealed class EventRecord");
+    const poco = files.get("Infrastructure/Persistence/Events/AccountsEventRecord.cs")!;
+    expect(poco).toContain("public sealed class AccountsEventRecord");
     expect(poco).toContain("public string StreamType { get; set; }");
     expect(poco).toContain("public long Seq { get; set; }");
   });
@@ -120,13 +120,13 @@ describe(".NET event-sourcing emission (persistedAs(eventLog))", () => {
     expect(repo).toContain("var __pending = aggregate.PullEvents();");
     // Append to the shared per-context log, stamped + scoped by stream_type
     // (the correctness trap — a sibling stream sharing the table must never fold in).
-    expect(repo).toContain("_db.Events.Add(new EventRecord");
+    expect(repo).toContain("_db.AccountsEvents.Add(new AccountsEventRecord");
     expect(repo).toContain('StreamType = "Account",');
     expect(repo).toContain('e.StreamType == "Account"');
     expect(repo).toContain('"Opened" => System.Text.Json.JsonSerializer.Deserialize<Opened>');
     // The DbContext exposes the ONE shared event-log DbSet.
     const ctx = (await generate()).get("Infrastructure/Persistence/AppDbContext.cs")!;
-    expect(ctx).toContain("DbSet<EventRecord> Events");
+    expect(ctx).toContain("DbSet<AccountsEventRecord> AccountsEvents");
   });
 
   it("binds the create command to the create action's params (not the field set)", async () => {

@@ -56,6 +56,13 @@ export function renderPySchema(
   resolveWorkflowSchema?: (wf: WorkflowIR) => string | undefined,
   /** Per-projection read-model-table schema — same owning-context map-back. */
   resolveProjectionSchema?: (proj: ProjectionIR) => string | undefined,
+  /** Per-stream OWNING-context name lookup — maps an event-sourced aggregate /
+   *  workflow name to the context that declares it.  This `ctx` may be a merged
+   *  union (multi-context deployable), so the per-context `<ctx>_events` model
+   *  must be named after the stream's OWNING context (matching the repository +
+   *  migrations), not the merged `ctx.name`.  Absent → the merged `ctx.name`,
+   *  byte-identical for single-context systems. */
+  resolveStreamContext?: (streamName: string) => string | undefined,
 ): string {
   const models: string[] = [];
   for (const agg of ctx.aggregates) {
@@ -143,13 +150,29 @@ export function renderPySchema(
   // `stream_type`.  Its schema/prefix follows the context's event-sourced
   // streams (aggregate binding first, else the workflow schema resolver) —
   // mirrors the Drizzle call site.
-  const esAgg = ctx.aggregates.find((a) => a.persistedAs === "eventLog");
-  const esWf = ctx.workflows.find((w) => w.eventSourced);
-  if (esAgg || esWf) {
-    const logDs = esAgg ? resolveDataSource?.(esAgg) : undefined;
-    const logSchema = esAgg ? logDs?.schema : resolveWorkflowSchema?.(esWf!);
-    const logPrefix = esAgg ? logDs?.tablePrefix : undefined;
-    models.push(renderEventLogModel(ctx.name, logSchema, logPrefix));
+  // Keyed by OWNING context — `ctx` may be a merged union of several contexts
+  // (multi-context deployable), so each owning context that has any
+  // event-sourced stream gets its own `<owner>_events` model, matching the
+  // repository + migrations.  Aggregate binding fixes the schema/prefix first
+  // (an owner with both an ES aggregate and an ES workflow shares one log).
+  const eventLogs = new Map<string, { schema?: string; prefix?: string }>();
+  for (const agg of ctx.aggregates) {
+    if (agg.persistedAs !== "eventLog") continue;
+    const owner = resolveStreamContext?.(agg.name) ?? ctx.name;
+    if (!eventLogs.has(owner)) {
+      const ds = resolveDataSource?.(agg);
+      eventLogs.set(owner, { schema: ds?.schema, prefix: ds?.tablePrefix });
+    }
+  }
+  for (const wf of ctx.workflows) {
+    if (!wf.eventSourced) continue;
+    const owner = resolveStreamContext?.(wf.name) ?? ctx.name;
+    if (!eventLogs.has(owner)) {
+      eventLogs.set(owner, { schema: resolveWorkflowSchema?.(wf) });
+    }
+  }
+  for (const [owner, info] of eventLogs) {
+    models.push(renderEventLogModel(owner, info.schema, info.prefix));
   }
   // Persisted workflow-correlation state (workflow-and-applier.md A2-S2):
   // one row per running instance, keyed by the correlation field.  The

@@ -1,0 +1,37 @@
+// Multi-context event-log gate (event-log-architecture.md): a Python deployable
+// hosting TWO contexts where the event-sourced streams live in the SECOND
+// context (Beta), so the merged-context name (Alpha) differs from the owner.
+// The SQLAlchemy `<Ctx>EventRow` model, the repository import, and the Alembic
+// migration must all agree on the OWNING context (`beta_events`) — a
+// merged-name regression makes the generated project fail to import.
+system MC {
+  subdomain S {
+    context Alpha {
+      aggregate Widget { name: string  operation rename(n: string) { name := n } }
+      repository Widgets for Widget { }
+    }
+    context Beta {
+      aggregate Job persistedAs(eventLog) {
+        label: string
+        create start() { emit Started { job: id } }
+        apply(e: Started) { label := "" }
+      }
+      repository Jobs for Job { }
+      event Started { job: Job id }
+      event Ticked { job: Job id, by: int }
+      channel L { carries: Started, Ticked  delivery: broadcast  retention: ephemeral }
+      workflow Counter eventSourced {
+        jobId: Job id
+        total: int
+        create(s: Started) by s.job { emit Ticked { job: s.job, by: 1 } }
+        on(t: Ticked) by t.job { emit Ticked { job: t.job, by: total } }
+        apply(t: Ticked) { total := total + t.by }
+      }
+    }
+  }
+  api A from S
+  storage pg { type: postgres }
+  resource alphaState { for: Alpha, kind: state, use: pg }
+  resource betaLog { for: Beta, kind: eventLog, use: pg }
+  deployable api { platform: python contexts: [Alpha, Beta] serves: A dataSources: [alphaState, betaLog] port: 8080 }
+}

@@ -20,6 +20,7 @@ import {
   renderCsType,
 } from "../render-expr.js";
 import { queryFilterNames } from "./efcore.js";
+import { eventDbSetName, eventRecordClass } from "./event-store.js";
 import { joinDbSetName, joinEntityName, joinFkPropName } from "./join-entities.js";
 
 // Repository interface (Domain layer) + EF-backed implementation
@@ -782,6 +783,7 @@ export function renderEventSourcedRepositoryImpl(
     filterClause: string;
     projectionClause: string;
   }>,
+  contextName: string,
   options?: { extraUsings?: readonly string[]; idClass?: string },
 ): string {
   const idClass = options?.idClass ?? `${agg.name}Id`;
@@ -796,7 +798,7 @@ export function renderEventSourcedRepositoryImpl(
   // the subset tagged `StreamType == "<Agg>"` — every load/append/fold filters
   // on it so a sibling aggregate/workflow sharing the `<ctx>_events` table is
   // never folded through this aggregate's appliers (the correctness trap).
-  const dbSet = "Events";
+  const dbSet = eventDbSetName(contextName);
   const streamType = agg.name;
   // The event types this aggregate's stream can contain — the events its
   // appliers fold.  Drives the `RowToEvent` deserialiser dispatch.
@@ -815,7 +817,7 @@ export function renderEventSourcedRepositoryImpl(
     (e) =>
       `            "${e}" => System.Text.Json.JsonSerializer.Deserialize<${e}>(__r.Data, __json)!,`,
   );
-  const recordCls = "EventRecord";
+  const recordCls = eventRecordClass(contextName);
 
   const findMethodLines = finds.flatMap((f) => {
     const body = findBodies.find((b) => b.name === f.name);

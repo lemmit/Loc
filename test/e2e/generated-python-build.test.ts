@@ -38,6 +38,11 @@ const CASES: Array<[fixture: string, project: string, flags?: string]> = [
   ["test/e2e/fixtures/python-build/inheritance.ddd", "api"],
   // persistedAs(eventLog): append-only stream + appliers fold.
   ["test/e2e/fixtures/python-build/eventlog.ddd", "api"],
+  // Multi-context event log: ES streams in the SECOND context, so the merged
+  // context name differs from the owner — the `<Ctx>EventRow` model, its repo
+  // import, and the Alembic migration must all resolve to the OWNING context
+  // (`beta_events`), else the generated project fails to import.
+  ["test/e2e/fixtures/python-build/multi-context-eventlog.ddd", "api"],
   // Channels + event-triggered saga (in-process dispatcher, persisted
   // correlation state).
   ["test/e2e/fixtures/python-build/saga.ddd", "api"],

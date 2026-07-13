@@ -23,15 +23,30 @@ import type { EnrichedAggregateIR } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { snake, upperFirst } from "../../../util/naming.js";
 
-/** The single shared persistence record (POCO) for the per-context event log —
- *  one row per recorded event across every event-sourced aggregate/workflow in
- *  the context, keyed by `(StreamType, StreamId, Version)`.  `StreamType`
- *  discriminates the owning stream (aggregate/workflow name); `Seq` is the
- *  context-global bigserial cursor (DB-assigned — EF never writes it).  It
- *  implements the domain-side `IWorkflowEventRow` marker (audit S7 Slice C) so
- *  the generic `IWorkflowEventStore<EventRecord>` port adapter can read the
- *  stream key; get/set satisfies the get-only interface members. */
-export function renderEventRecordPoco(ns: string): string {
+/** The persistence record (POCO) class name for a context's event log —
+ *  `<Ctx>EventRecord`.  ONE per bounded context (not one shared type): EF Core
+ *  maps each CLR entity type to a single table, so a deployable hosting several
+ *  event-sourced contexts needs a distinct entity per `<ctx>_events` table
+ *  (mirrors Python / MikroORM's `<Ctx>EventRow`). */
+export function eventRecordClass(ctxName: string): string {
+  return `${upperFirst(ctxName)}EventRecord`;
+}
+
+/** The per-context event-log `DbSet` name (`<Ctx>Events`). */
+export function eventDbSetName(ctxName: string): string {
+  return `${upperFirst(ctxName)}Events`;
+}
+
+/** The per-context persistence record (POCO) for a context's event log —
+ *  `<Ctx>EventRecord`, one row per recorded event across every event-sourced
+ *  aggregate/workflow in that context, keyed by `(StreamType, StreamId,
+ *  Version)`.  `StreamType` discriminates the owning stream (aggregate/workflow
+ *  name); `Seq` is the context-global bigserial cursor (DB-assigned — EF never
+ *  writes it).  It implements the domain-side `IWorkflowEventRow` marker (audit
+ *  S7 Slice C) so the generic `IWorkflowEventStore<<Ctx>EventRecord>` port
+ *  adapter can read the stream key; get/set satisfies the get-only members. */
+export function renderEventRecordPoco(ns: string, ctxName: string): string {
+  const cls = eventRecordClass(ctxName);
   const marker = ` : global::${ns}.Domain.Common.IWorkflowEventRow`;
   return (
     lines(
@@ -44,7 +59,7 @@ export function renderEventRecordPoco(ns: string): string {
       "/// workflow (eventSourced) in the context; StreamType discriminates the",
       "/// owning stream, keyed by (StreamType, StreamId, Version).  Data is the",
       "/// JSON event payload; Seq is the DB-assigned context-global cursor.</summary>",
-      `public sealed class EventRecord${marker}`,
+      `public sealed class ${cls}${marker}`,
       "{",
       // Context-global monotonic cursor (bigserial).  DB-assigned; EF must NOT
       // write it (ValueGeneratedOnAdd in the configuration).  Carried inert
@@ -71,6 +86,7 @@ export function renderEventRecordConfiguration(
   schema?: string,
 ): string {
   const cls = `${upperFirst(ctxName)}EventRecordConfiguration`;
+  const record = eventRecordClass(ctxName);
   const tableName = `${snake(ctxName)}_events`;
   // `schema` set (the context's dataSource schema) → two-arg ToTable; undefined
   // → single-arg, byte-identical with the unqualified default.
@@ -84,9 +100,9 @@ export function renderEventRecordConfiguration(
       "",
       `namespace ${ns}.Infrastructure.Persistence.Configurations;`,
       "",
-      `public sealed class ${cls} : IEntityTypeConfiguration<EventRecord>`,
+      `public sealed class ${cls} : IEntityTypeConfiguration<${record}>`,
       "{",
-      "    public void Configure(EntityTypeBuilder<EventRecord> builder)",
+      `    public void Configure(EntityTypeBuilder<${record}> builder)`,
       "    {",
       `        builder.ToTable(${toTableArgs});`,
       "        builder.HasKey(x => new { x.StreamType, x.StreamId, x.Version });",

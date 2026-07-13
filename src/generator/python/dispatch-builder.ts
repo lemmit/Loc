@@ -71,6 +71,10 @@ export function buildPyDispatchFile(
    *  recorder is present, so a no-`--sourcemap` run pays no per-statement
    *  bookkeeping cost. */
   opFragments?: OpFragment[],
+  /** Maps an event-sourced workflow name to its OWNING context, so the shared
+   *  `<ctx>_events` row class matches the schema + repository in a merged
+   *  multi-context deployable.  Absent → the merged `ctx.name`. */
+  resolveStreamContext?: (name: string) => string | undefined,
 ): string | null {
   const subs = dispatchSubscriptionsOf(ctx);
   if (subs.length === 0) return null;
@@ -117,7 +121,10 @@ export function buildPyDispatchFile(
     if (wf.correlationField && !helperDone.has(wf.name)) {
       // Event-sourced workflows emit a fold block (state class + appliers +
       // fold/load/append/codec) instead of the mutable-row load/save helper.
-      out.push(wf.eventSourced ? esWorkflowFoldBlock(wf, ctx) : stateHelpers(wf), "");
+      out.push(
+        wf.eventSourced ? esWorkflowFoldBlock(wf, ctx, resolveStreamContext) : stateHelpers(wf),
+        "",
+      );
       helperDone.add(wf.name);
     }
     const resolved = resolveHandlerBody(wf, sub);
@@ -207,7 +214,7 @@ export function buildPyDispatchFile(
     .map((n) => ctx.workflows.find((w) => w.name === n))
     .filter((w): w is WorkflowIR => w != null);
   const stateRows = touchedWorkflows.map((w) =>
-    w.eventSourced ? esEventRow(ctx) : `${w.name}Row`,
+    w.eventSourced ? esEventRow(w, ctx, resolveStreamContext) : `${w.name}Row`,
   );
   const projRows = touchedProjections.map((p) => `${p.name}Row`);
   // Dedupe: multiple ES workflows in one context now share the single

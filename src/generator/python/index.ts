@@ -184,6 +184,16 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
     const owning = args.contexts.find((c) => c.projections.some((p) => p.name === proj.name));
     return owning ? resolveContextSchema(owning, args.sys) : undefined;
   };
+  // Per-stream OWNING-context name — maps an event-sourced aggregate / workflow
+  // to the context that declares it, so the merged multi-context schema names
+  // each `<ctx>_events` model after its owner (matching the per-aggregate
+  // repository + migrations), not the merged context name.
+  const resolveStreamContext = (streamName: string): string | undefined =>
+    args.contexts.find(
+      (c) =>
+        c.aggregates.some((a) => a.name === streamName) ||
+        c.workflows.some((w) => w.name === streamName),
+    )?.name;
   // Auth scaffolding (docs/auth.md): only an `auth: required` deployable
   // (whose system declares a `user { ... }` block) carries the verifier
   // registry + middleware — anonymous deployables stay byte-identical.
@@ -288,7 +298,13 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
 
   out.set(
     "app/db/schema.py",
-    renderPySchema(merged, resolveDs, resolveWorkflowSchema, resolveProjectionSchema),
+    renderPySchema(
+      merged,
+      resolveDs,
+      resolveWorkflowSchema,
+      resolveProjectionSchema,
+      resolveStreamContext,
+    ),
   );
   out.set("app/db/wire.py", WIRE_PY);
   out.set("app/db/migrate.py", MIGRATE_PY);
@@ -326,7 +342,12 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // never gets a whole-file region — only these fragment-only statement
   // regions (mirrors `workflows_routes.py` at Milestone 11).
   const dispatchOpFragments: OpFragment[] | undefined = sourcemap ? [] : undefined;
-  const dispatchFile = buildPyDispatchFile(merged, args.sys, dispatchOpFragments);
+  const dispatchFile = buildPyDispatchFile(
+    merged,
+    args.sys,
+    dispatchOpFragments,
+    resolveStreamContext,
+  );
   const hasDispatch = dispatchFile != null;
   if (dispatchFile != null) {
     out.set("app/dispatch.py", dispatchFile);

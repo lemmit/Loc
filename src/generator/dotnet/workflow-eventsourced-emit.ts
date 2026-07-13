@@ -1,20 +1,23 @@
 import type { WorkflowIR } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
 import { upperFirst } from "../../util/naming.js";
+import { eventDbSetName, eventRecordClass } from "./emit/event-store.js";
 import { renderCsType } from "./render-expr.js";
 import { renderCsStatements } from "./render-stmt.js";
 import { csStateDefault, workflowStateClass } from "./workflow-state-emit.js";
 
 // The per-context event log (event-log-architecture.md) collapses every
-// event-sourced stream — aggregate and workflow — into ONE shared EF entity
-// (`EventRecord`) + ONE `DbSet` (`Events`) per DbContext, discriminated by
-// `StreamType`.  These constants are the single source of truth for that
-// shared shape so the aggregate repository, the workflow handlers, and the
-// instance-read controllers all name the same DbSet/POCO.
-/** The shared per-context event-log DbSet name on the AppDbContext. */
-export const SHARED_EVENT_DBSET = "Events";
-/** The shared per-context event-log persistence POCO class name. */
-export const SHARED_EVENT_RECORD_CLASS = "EventRecord";
+// event-sourced stream — aggregate and workflow — in a bounded context into ONE
+// EF entity (`<Ctx>EventRecord`) + ONE `DbSet` (`<Ctx>Events`) per DbContext,
+// discriminated by `StreamType`.  The type is per-context (not one shared
+// `EventRecord`) because EF maps each CLR entity to a single table, so a
+// deployable hosting several event-sourced contexts needs a distinct entity per
+// `<ctx>_events` table.  `OwnerOf` maps a workflow to its OWNING context name
+// (the emitter's `ctx` may be a merged union of several), so the workflow
+// handlers, the aggregate repository, and the instance-read controllers all
+// name the same per-context DbSet/POCO.
+/** Maps a stream (aggregate/workflow) name to its OWNING bounded-context name. */
+export type OwnerOf = (streamName: string) => string;
 
 // ---------------------------------------------------------------------------
 // Event-sourced workflows on .NET (workflow-and-applier.md A2-S5b) — the saga
@@ -42,16 +45,16 @@ export function eventSourcedWorkflows(workflows: readonly WorkflowIR[]): Workflo
   return workflows.filter((wf) => wf.eventSourced);
 }
 
-/** The shared per-context event-log `DbSet` (`Events`) — every event-sourced
- *  workflow stream shares it with the aggregates, discriminated by
- *  `StreamType` (see `esStreamType`). */
-export function esEventDbSet(_wf: WorkflowIR): string {
-  return SHARED_EVENT_DBSET;
+/** The workflow's per-context event-log `DbSet` (`<Ctx>Events`) — every
+ *  event-sourced workflow stream shares its OWNING context's log with that
+ *  context's aggregates, discriminated by `StreamType` (see `esStreamType`). */
+export function esEventDbSet(wf: WorkflowIR, ownerOf: OwnerOf): string {
+  return eventDbSetName(ownerOf(wf.name));
 }
 
-/** The shared per-context event-log POCO class (`EventRecord`). */
-export function esEventRecordClass(_wf: WorkflowIR): string {
-  return SHARED_EVENT_RECORD_CLASS;
+/** The workflow's per-context event-log POCO class (`<Ctx>EventRecord`). */
+export function esEventRecordClass(wf: WorkflowIR, ownerOf: OwnerOf): string {
+  return eventRecordClass(ownerOf(wf.name));
 }
 
 /** A workflow's `stream_type` discriminator value in the shared per-context
@@ -78,7 +81,7 @@ export function esCorrIdClass(wf: WorkflowIR): string {
  *  `_FromEvents` rehydrator + the stream codec.  Lives in Application.Workflows
  *  (the handler's namespace).  NOT EF-mapped — the stream is the source of
  *  truth, this is the in-memory fold. */
-function renderWorkflowFoldClass(wf: WorkflowIR, ns: string): string {
+function renderWorkflowFoldClass(wf: WorkflowIR, ns: string, ownerOf: OwnerOf): string {
   const cls = workflowStateClass(wf);
   const corr = wf.correlationField as string;
   const corrId = esCorrIdClass(wf);
@@ -161,7 +164,7 @@ function renderWorkflowFoldClass(wf: WorkflowIR, ns: string): string {
       "        return s;",
       "    }",
       "",
-      `    public static IDomainEvent RowToEvent(${esEventRecordClass(wf)} __r)`,
+      `    public static IDomainEvent RowToEvent(${esEventRecordClass(wf, ownerOf)} __r)`,
       "    {",
       "        return __r.Type switch",
       "        {",
@@ -181,16 +184,21 @@ function renderWorkflowFoldClass(wf: WorkflowIR, ns: string): string {
 }
 
 /** Emit the fold class for every event-sourced workflow.  The event-record
- *  POCO + EF configuration are NO LONGER per-workflow: the workflow's stream
- *  shares the per-context `<ctx>_events` log (shared `EventRecord` POCO +
+ *  POCO + EF configuration are NOT per-workflow: the workflow's stream shares
+ *  its OWNING context's `<ctx>_events` log (`<Ctx>EventRecord` POCO +
  *  `<Ctx>EventRecordConfiguration`, emitted once per context in index.ts).
- *  No-op when none (byte-identical for non-ES). */
+ *  `ownerOf` maps each workflow back to its owning context (this `workflows`
+ *  list may be a merged union).  No-op when none (byte-identical for non-ES). */
 export function emitEventSourcedWorkflowFiles(
   workflows: readonly WorkflowIR[],
   ns: string,
   out: Map<string, string>,
+  ownerOf: OwnerOf,
 ): void {
   for (const wf of eventSourcedWorkflows(workflows)) {
-    out.set(`Application/Workflows/${workflowStateClass(wf)}.cs`, renderWorkflowFoldClass(wf, ns));
+    out.set(
+      `Application/Workflows/${workflowStateClass(wf)}.cs`,
+      renderWorkflowFoldClass(wf, ns, ownerOf),
+    );
   }
 }

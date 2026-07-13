@@ -72,6 +72,12 @@ describe.skipIf(!ENABLED)(
       // Floor/Ceiling) AND in `find … where` positions (the EF LINQ path,
       // incl. the round query override that drops MidpointRounding).
       "test/e2e/fixtures/dotnet-build/math-intrinsics.ddd",
+      // Multi-context event log with TWO event-sourced contexts (an ES aggregate
+      // in each + an ES workflow): each `<ctx>_events` table needs its OWN EF
+      // entity (`<Ctx>EventRecord` + `<Ctx>Events` DbSet), since EF maps one CLR
+      // type to one table — a single shared `EventRecord` would map to only one
+      // of the two tables and fail the model build.
+      "test/e2e/fixtures/dotnet-build/multi-context-eventlog.ddd",
     ])("%s — `ddd generate dotnet` output restores + builds", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-"));
       try {

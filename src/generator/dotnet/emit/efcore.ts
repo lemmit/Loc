@@ -72,13 +72,14 @@ export function renderDbContext(
    *  `audited` operation, AppDbContext maps the append-only `audit_records`
    *  table (AuditRecord entity + configuration).  False ⇒ byte-identical. */
   hasAudit = false,
-  /** Per-context event log (event-log-architecture.md): the
-   *  `<Ctx>EventRecordConfiguration` class names — one per bounded context that
-   *  owns any event-sourced stream (`persistedAs(eventLog)` aggregate or
-   *  `eventSourced` workflow).  Non-empty ⇒ map the ONE shared `Events`
-   *  (`DbSet<EventRecord>`) + apply each context's configuration.  Empty ⇒
+  /** Per-context event log (event-log-architecture.md): the NAMES of the
+   *  bounded contexts that own any event-sourced stream (`persistedAs(eventLog)`
+   *  aggregate or `eventSourced` workflow).  Each maps a distinct
+   *  `DbSet<<Ctx>EventRecord> <Ctx>Events` + applies its
+   *  `<Ctx>EventRecordConfiguration` — one entity type per `<ctx>_events` table,
+   *  since EF Core maps each CLR entity to a single table.  Empty ⇒
    *  byte-identical (no event log). */
-  eventLogConfigs: readonly string[] = [],
+  eventLogContexts: readonly string[] = [],
 ): string {
   const isDoc = (name: string) => documentAggs.has(name);
   const isEs = (name: string) => eventSourcedAggs.has(name);
@@ -100,7 +101,7 @@ export function renderDbContext(
   // bounded context owns an event-sourced stream (aggregate OR workflow) — the
   // config-class list is the signal (an event-sourced workflow with no ES
   // aggregate still contributes one).
-  const hasEventLog = eventLogConfigs.length > 0;
+  const hasEventLog = eventLogContexts.length > 0;
   const aggUsings = ctx.aggregates.map((a) => `using ${ns}.Domain.${plural(a.name)};`);
   if (anyDoc) aggUsings.push(`using ${ns}.Infrastructure.Persistence.Documents;`);
   if (hasEventLog) aggUsings.push(`using ${ns}.Infrastructure.Persistence.Events;`);
@@ -132,14 +133,17 @@ export function renderDbContext(
           ]
         : [`        modelBuilder.ApplyConfiguration(new Configurations.${a.name}Configuration());`],
   );
-  // The ONE shared per-context event log: `DbSet<EventRecord> Events` +
-  // `ApplyConfiguration(new Configurations.<Ctx>EventRecordConfiguration())`
-  // per event-sourced context (aggregates AND workflows share it).
-  const eventLogDbSets = hasEventLog
-    ? ["    public DbSet<EventRecord> Events => Set<EventRecord>();"]
-    : [];
-  const eventLogApplyConfigs = eventLogConfigs.map(
-    (cfg) => `        modelBuilder.ApplyConfiguration(new Configurations.${cfg}());`,
+  // One per-context event log per event-sourced context: `DbSet<<Ctx>EventRecord>
+  // <Ctx>Events` + `ApplyConfiguration(new Configurations.<Ctx>EventRecordConfiguration())`.
+  // A distinct entity type per `<ctx>_events` table (aggregates AND workflows in
+  // that context share it) — EF maps each CLR entity to a single table.
+  const eventLogDbSets = eventLogContexts.map((c) => {
+    const rec = `${upperFirst(c)}EventRecord`;
+    return `    public DbSet<${rec}> ${upperFirst(c)}Events => Set<${rec}>();`;
+  });
+  const eventLogApplyConfigs = eventLogContexts.map(
+    (c) =>
+      `        modelBuilder.ApplyConfiguration(new Configurations.${upperFirst(c)}EventRecordConfiguration());`,
   );
   // The TPH base's configuration owns the shared table + `HasDiscriminator`;
   // apply it FIRST so EF sees the discriminator mapping before the derived

@@ -35,9 +35,18 @@ export function eventSourcedWorkflows(workflows: readonly WorkflowIR[]): Workflo
 
 /** The shared per-context event-log row class (`<Ctx>EventRow`) an ES workflow
  *  appends its stream to — every ES aggregate + workflow in the context shares
- *  this one table, discriminated by `stream_type` (event-log-architecture.md). */
-export function esEventRow(ctx: EnrichedBoundedContextIR): string {
-  return contextEventRowClassName(ctx.name);
+ *  this one table, discriminated by `stream_type` (event-log-architecture.md).
+ *  Named after the workflow's OWNING context: `ctx` may be a merged union of
+ *  several contexts (multi-context deployable), so a bare `ctx.name` would
+ *  reference the merge name instead of the row class the schema + repository
+ *  emit.  `resolveStreamContext` maps the workflow back to its owner; absent →
+ *  `ctx.name`, byte-identical for single-context systems. */
+export function esEventRow(
+  wf: WorkflowIR,
+  ctx: EnrichedBoundedContextIR,
+  resolveStreamContext?: (name: string) => string | undefined,
+): string {
+  return contextEventRowClassName(resolveStreamContext?.(wf.name) ?? ctx.name);
 }
 
 /** The fold-target class name (`TallyState`). */
@@ -150,11 +159,15 @@ export function renderApplierStmt(s: StmtIR, indent: string): string {
  *  `app/dispatch.py`: the `<Wf>State` class, per-applier fold functions, the
  *  `_apply_<wf>` dispatch, the `_fold_<wf>` rehydrator, the stream load/append
  *  helpers, and the (de)serialisers. */
-export function esWorkflowFoldBlock(wf: WorkflowIR, ctx: EnrichedBoundedContextIR): string {
+export function esWorkflowFoldBlock(
+  wf: WorkflowIR,
+  ctx: EnrichedBoundedContextIR,
+  resolveStreamContext?: (name: string) => string | undefined,
+): string {
   const T = esStateClass(wf);
   const corr = wf.correlationField as string;
   const corrId = corrIdClass(wf);
-  const row = esEventRow(ctx);
+  const row = esEventRow(wf, ctx, resolveStreamContext);
   const fns = esFns(wf);
   const fields = wf.stateFields ?? [];
   const eventNames = [...new Set((wf.appliers ?? []).map((a) => a.event))];
