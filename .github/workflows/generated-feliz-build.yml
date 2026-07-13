@@ -62,7 +62,8 @@ jobs:
           # (state + action → dispatch), and the pack primitives
           # (Heading/Badge/Text/Button/Divider/Card + For).  The ProductDetail
           # page covers byId-on-navigation: a `:id` route → a `Remote<T option>`
-          # fired via `pageCmd` on entry, rendered through `View.remoteOne`.
+          # fired via `pageCmd` on entry, rendered through `View.remoteOne`, plus
+          # a `DestroyForm` (delete) → a mutation Cmd + navigate-on-success.
           cat > ci-feliz/showcase.ddd <<'DDD'
           system Storefront {
             api ShopApi from Catalog
@@ -127,6 +128,7 @@ jobs:
                       Text { p.price }
                     }
                   },
+                  DestroyForm { of: Product },
                   Button { "Back to products", to: "/products" }
                 }
               }

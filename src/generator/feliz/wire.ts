@@ -107,6 +107,38 @@ export function felizByIdRead(aggregate: string, pageCase: string): FelizRead {
   };
 }
 
+/** A write a page issues, projected to its MVU wiring.  v1 covers `delete` (a
+ *  `DestroyForm(of: X)` on a detail page): a `Delete<Agg> id` dispatch fires a
+ *  `DELETE /api/<agg>/<id>` `Cmd`; on success the app navigates to the
+ *  aggregate's list route (create/update — which need form state + Thoth
+ *  ENCODERS — are the next mutation slices). */
+export interface FelizMutation {
+  /** The aggregate written (`Product`). */
+  aggregate: string;
+  /** `Msg` the trigger dispatches, carrying the target id (`DeleteProduct`). */
+  dispatchCase: string;
+  /** `Msg` carrying the mutation's `Result<unit, string>` (`ProductDeleted`). */
+  resultCase: string;
+  /** F# api function name (`deleteProduct`). */
+  apiFn: string;
+  /** Collection base route (`/api/products`) — the api fn appends `/%s`. */
+  route: string;
+  /** `Router.navigate` segments to land on after success (`["products"]`). */
+  navigateSegs: string[];
+}
+
+/** Build the delete `FelizMutation` for `aggregate`. */
+export function felizDeleteMutation(aggregate: string): FelizMutation {
+  return {
+    aggregate,
+    dispatchCase: `Delete${upperFirst(aggregate)}`,
+    resultCase: `${upperFirst(aggregate)}Deleted`,
+    apiFn: `delete${upperFirst(aggregate)}`,
+    route: `${API_BASE_PATH}/${snake(plural(aggregate))}`,
+    navigateSegs: snake(plural(aggregate)).split("/"),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Read collection — scan a page body for the `.all` query sites its view issues
 // ---------------------------------------------------------------------------
@@ -182,6 +214,42 @@ export function collectPageReads(
     if (!read || seen.has(read.field)) continue;
     seen.add(read.field);
     out.push(read);
+  }
+  return out;
+}
+
+/** Every `DestroyForm(of: <Agg>)` aggregate a page body hosts, in tree order.
+ *  The `of:` arg is a bare aggregate ref (`DestroyForm(of: Product)`). */
+function destroyFormAggs(body: ExprIR, aggregatesByName: ReadonlySet<string>): string[] {
+  const out: string[] = [];
+  const walk = (e: ExprIR): void => {
+    if (e.kind === "call" && e.name === "DestroyForm") {
+      const names = e.argNames ?? [];
+      const idx = names.indexOf("of");
+      const ofArg = idx >= 0 ? e.args[idx] : undefined;
+      if (ofArg?.kind === "ref" && aggregatesByName.has(ofArg.name)) out.push(ofArg.name);
+    }
+    for (const c of exprChildren(e)) walk(c);
+  };
+  walk(body);
+  return out;
+}
+
+/** Collect the mutations a page issues — v1 detects `DestroyForm(of: X)` (a
+ *  delete), deduped by aggregate.  Keyed only by aggregate (a page deletes an
+ *  aggregate once); the wiring names derive from it, matching the
+ *  `renderDestroyForm` seam's button dispatch. */
+export function collectPageMutations(
+  page: PageIR,
+  aggregatesByName: ReadonlySet<string>,
+): FelizMutation[] {
+  if (!page.body) return [];
+  const out: FelizMutation[] = [];
+  const seen = new Set<string>();
+  for (const agg of destroyFormAggs(page.body, aggregatesByName)) {
+    if (seen.has(agg)) continue;
+    seen.add(agg);
+    out.push(felizDeleteMutation(agg));
   }
   return out;
 }
@@ -402,14 +470,35 @@ function renderApiFn(r: FelizRead): (string | undefined)[] {
   ];
 }
 
-/** Emit the `Api` module — one `Cmd`-issuing async read per `FelizRead`,
- *  fetching over `Fable.SimpleHttp` and decoding with the Thoth decoders. */
-export function renderApiModule(reads: FelizRead[]): string {
-  if (reads.length === 0) return "";
+/** One async mutation function.  v1: `delete` — a `DELETE /api/<agg>/<id>`
+ *  returning `Result<unit, string>` (2xx → `Ok ()`).  Uses `Http.request` (not
+ *  `Http.get`) so the verb can be set. */
+function renderMutationFn(m: FelizMutation): (string | undefined)[] {
+  return [
+    `  let ${m.apiFn} (id: string) : Async<Result<unit, string>> =`,
+    "    async {",
+    "      let! response =",
+    `        Http.request (sprintf "${m.route}/%s" id)`,
+    "        |> Http.method DELETE",
+    "        |> Http.send",
+    "      if response.statusCode = 200 || response.statusCode = 204 then",
+    "        return Ok ()",
+    "      else",
+    '        return Error (sprintf "HTTP %d" response.statusCode)',
+    "    }",
+  ];
+}
+
+/** Emit the `Api` module — one `Cmd`-issuing async function per read (fetch +
+ *  Thoth decode → `Result`) and per mutation (verb request → `Result`), all
+ *  over `Fable.SimpleHttp`. */
+export function renderApiModule(reads: FelizRead[], mutations: FelizMutation[] = []): string {
+  if (reads.length === 0 && mutations.length === 0) return "";
+  const fns = [...reads.map((r) => renderApiFn(r)), ...mutations.map((m) => renderMutationFn(m))];
   return lines(
-    "// Api — Cmd-based reads (Fable.SimpleHttp + Thoth → Result).",
+    "// Api — Cmd-based reads + mutations (Fable.SimpleHttp + Thoth → Result).",
     "module Api =",
-    ...reads.flatMap((r, i) => [i > 0 ? "" : undefined, ...renderApiFn(r)]),
+    ...fns.flatMap((fn, i) => [i > 0 ? "" : undefined, ...fn]),
   );
 }
 

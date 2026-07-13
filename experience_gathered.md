@@ -2039,3 +2039,43 @@ Proven the same way as §23/§24: a hand-written byId spike Fable-compiled FIRST
 (locking the `pageCmd`/`parseUrl`/`Page`-param shape), then every emitter slice
 re-verified against the REAL generated 3-page project (`dotnet fable` + `vite
 build`) before commit.
+
+## 26. Feliz delete mutations — the write path is the mirror of the read path (2026-07-13)
+
+Adding delete (`DestroyForm(of: X)`) to the Feliz frontend was the smallest
+mutation slice — it proves the WRITE path end-to-end without the form-state
+machinery create/update need, and it mirrors the read wiring almost exactly.
+
+- **Delete is the clean first mutation.** create/update need Elmish form state
+  (form fields in the Model + per-field update `Msg`s) AND Thoth ENCODERS (the
+  write-direction sibling of the decoders). Delete needs none of that: no
+  payload, no encoder, no form. So it isolates the mutation-`Cmd` pattern (Api
+  verb request → `Result` → success/error `Msg` → `Cmd.navigate`) as a small,
+  independently-shippable increment. When a feature area is large, find the
+  member that exercises the new machinery with the fewest new dependencies.
+
+- **The button DISPATCHES; the effect lives in `update`.** The `renderDestroy
+  Form` seam emits only `Html.button [ prop.onClick (fun _ -> dispatch
+  (DeleteProduct id)) ]` — no effect in the view. `collectPageMutations`
+  (the write-side twin of `collectPageReads`) independently finds the
+  `DestroyForm` and wires the `Api` fn + `Msg` cases + `update` arms. The two
+  sides agree by DERIVING every name from the aggregate (`Delete<Agg>`,
+  `<Agg>Deleted`, `delete<Agg>`) — no shared state to thread, so the view walk
+  and the MVU assembly can't drift.
+
+- **`Http.request |> Http.method DELETE |> Http.send`, not `Http.get`.**
+  Fable.SimpleHttp's `Http.get` is GET-only; a verb needs the builder form,
+  which returns a `response` record (`response.statusCode`) rather than the
+  `(status, body)` tuple `Http.get` yields. A `200 || 204` check covers both
+  "deleted, body returned" and "deleted, no content".
+
+- **Navigate from `update` with `Cmd.navigate`, not `Router.navigate`.**
+  `Router.navigate` is a side-effecting `unit` call for event handlers;
+  navigating from an `update` arm (after a successful delete) needs a
+  `Cmd<Msg>`, which Feliz.Router provides as `Cmd.navigate(<segs>)`. Using
+  `Router.navigate` in `update` type-errors (`unit` where `Cmd<Msg>` is wanted).
+
+Same prove-it loop as §23–§25: a hand-written delete spike Fable-compiled FIRST
+(locking `Http.request`/`Cmd.navigate`/the mutation-arm shape), then the emitter
+re-verified against the real generated 3-page project (`dotnet fable` + `vite
+build`).

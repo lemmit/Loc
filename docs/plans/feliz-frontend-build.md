@@ -141,12 +141,21 @@ in hand — not before F# output exists.
   Fable + vite verified (SDK:8.0 container); the CI example is now a 3-page app
   (counter + list + byId detail). **v1 caveat:** single route param only (bound
   to the magic `id`); multi-param routes bind the first as `id`, the rest `_`.
-- **Wire layer covers list + byId reads.** `<param>.<agg>.all` (list) and
-  `<param>.<agg>.byId(id)` (single) are projected; mutations
-  (create/update/delete → `Cmd` + optimistic `Msg`) are the next wire slice.
-  Enum wire fields decode as their string name (a proper DU decoder is a
-  follow-up); nested containment/VO records + decoders ARE emitted (transitive
-  off `wireShape`).
+- ✅ **Delete mutations.** A `DestroyForm(of: X)` on a detail page emits a
+  delete button that DISPATCHES `Delete<Agg> id` (via the `renderDestroyForm`
+  seam); the mutation lives in `update` — the trigger fires a `DELETE
+  /api/<agg>/<id>` `Cmd` (`Http.request |> Http.method DELETE |> Http.send`, 2xx
+  → `Ok ()`), and on success the app navigates to the aggregate's list route
+  (`Cmd.navigate`). All Fable + vite verified; the CI example's detail page now
+  carries a `DestroyForm`. Read-only uis stay byte-identical (no delete Api/Msg).
+- **Wire layer covers list + byId reads + delete.** `<param>.<agg>.all` (list),
+  `<param>.<agg>.byId(id)` (single), and `DestroyForm` (delete) are projected.
+  **Create / update** (`CreateForm` / `OperationForm`) are the next mutation
+  slice — they need Elmish FORM STATE (form fields in the Model + per-field
+  update `Msg`s) plus Thoth ENCODERS (the write direction of the decoders), a
+  larger increment than delete. Enum wire fields decode as their string name (a
+  proper DU decoder is a follow-up); nested containment/VO records + decoders
+  ARE emitted (transitive off `wireShape`).
 
 Known-good deps (proposal §10): Fable 4.29 / Feliz 2.8 / Fable.Elmish.React 4.0
 / Fable.SimpleHttp 3.6 / Thoth.Json 10.2 / net8.0. Avoid Thoth.Fetch (promise-CE
