@@ -3,7 +3,7 @@
 // lambdas rebind their source param to the emitted `row` identifier via
 // the shared lambda-scope helpers. emitColumn is private to this module.
 
-import type { ExprIR } from "../../../ir/types/loom-ir.js";
+import type { ExprIR, StateFieldIR } from "../../../ir/types/loom-ir.js";
 import { provableStringType } from "../../../util/expr-body-type.js";
 import { renderPrimitive } from "../render-primitive.js";
 import {
@@ -17,6 +17,7 @@ import {
   slugify,
   stringNamed,
 } from "../shared/args.js";
+import type { StateRef } from "../target.js";
 import type { WalkContext } from "../walker-core.js";
 import {
   emitExpr,
@@ -28,13 +29,49 @@ import {
   walk,
 } from "../walker-core.js";
 
+/** Build a `StateRef` for a page-state field named `name`.  Sort state is
+ *  always string-typed (`sortKey: ""`, `sortDir: "asc"`); mirrors the ad-hoc
+ *  ref the ref-case path in `walker-core.ts` constructs. */
+function stateRefFor(name: string): StateRef {
+  return {
+    field: { name, type: { kind: "primitive", name: "string" } } as StateFieldIR,
+    name,
+  };
+}
+
+/** Read a named arg that must be a bare state-field reference (`sortKey:
+ *  sortKey`).  Returns the referenced name, or undefined when the arg is
+ *  absent or not a plain ref. */
+function refArgName(call: ExprIR & { kind: "call" }, name: string): string | undefined {
+  const v = namedArgValue(call, name);
+  return v && v.kind === "ref" ? v.name : undefined;
+}
+
 export function emitTable(
   call: ExprIR & { kind: "call" },
   ctx: WalkContext,
   depth: number,
 ): string {
   const rowsArg = namedArgValue(call, "rows");
-  const rowsExpr = rowsArg ? emitExpr(rowsArg, ctx) : "[]";
+  let rowsExpr = rowsArg ? emitExpr(rowsArg, ctx) : "[]";
+
+  // Client-side column sort (M-T1.1).  Active only when the Table carries
+  // `sortKey:`/`sortDir:` state refs AND the target implements the seam; a
+  // target without the seam ignores the args and renders the plain,
+  // unsorted table (byte-identical to a table with no sort args).
+  const sortKeyName = refArgName(call, "sortKey");
+  const sortDirName = refArgName(call, "sortDir");
+  const sortActive =
+    sortKeyName !== undefined &&
+    sortDirName !== undefined &&
+    ctx.target.renderSortedRows !== undefined &&
+    ctx.target.renderSortableHeader !== undefined;
+  const sortKeyRef = sortKeyName !== undefined ? stateRefFor(sortKeyName) : undefined;
+  const sortDirRef = sortDirName !== undefined ? stateRefFor(sortDirName) : undefined;
+  if (sortActive && sortKeyRef && sortDirRef) {
+    ctx.usesState = true;
+    rowsExpr = ctx.target.renderSortedRows!(rowsExpr, sortKeyRef, sortDirRef);
+  }
   // A named-action reference (`onRowClick: add`) binds the hoisted handler
   // the page-shell emits from `page.actions` (named-actions-and-stores.md,
   // Proposal A Stage 1): a single-payload action receives the clicked `row`;
@@ -43,9 +80,10 @@ export function emitTable(
   const onRowClick = lambdaArg(call, "onRowClick");
 
   const positionals = positionalArgs(call);
+  const sortRefs = sortActive && sortKeyRef && sortDirRef ? { sortKeyRef, sortDirRef } : undefined;
   const cols = positionals
     .filter((a): a is ExprIR & { kind: "call" } => a.kind === "call" && a.name === "Column")
-    .map((c, i) => emitColumn(c, ctx, i, depth + 3));
+    .map((c, i) => emitColumn(c, ctx, i, depth + 3, sortRefs));
 
   const rowVar = "row";
   let onRowClickJs: string | undefined;
@@ -147,6 +185,7 @@ function emitColumn(
   ctx: WalkContext,
   index: number,
   depth: number,
+  sortRefs?: { sortKeyRef: StateRef; sortDirRef: StateRef },
 ): { header: string; cellJsx: string; key: string } {
   const positionals = positionalArgs(call);
   const headerArg = positionals[0];
@@ -179,9 +218,37 @@ function emitColumn(
     }
     propagateChildFlags(ctx, childCtx);
   }
+
+  // A `sortable: true` column with an active sort seam renders a clickable
+  // header driving the page's `sortKey`/`sortDir` state.  The sort field is
+  // the explicit `field:` arg, else the accessor's member (`o => o.name` →
+  // `"name"`); a column whose field can't be resolved stays a plain header.
+  let header = ctx.target.escapeText(headerStr);
+  if (boolNamed(call, "sortable") && sortRefs && ctx.target.renderSortableHeader) {
+    const field = stringNamed(call, "field") ?? sortFieldFromAccessor(accessorArg);
+    if (field) {
+      header = ctx.target.renderSortableHeader({
+        header,
+        field,
+        sortKey: sortRefs.sortKeyRef,
+        sortDir: sortRefs.sortDirRef,
+      });
+    }
+  }
+
   return {
-    header: ctx.target.escapeText(headerStr),
+    header,
     cellJsx,
     key,
   };
+}
+
+/** Infer a column's sort field from a simple accessor lambda `o => o.<field>`.
+ *  Returns undefined for anything more complex (a formatting call, a nested
+ *  chain) — those columns need an explicit `field:` to be sortable. */
+function sortFieldFromAccessor(accessorArg: ExprIR | undefined): string | undefined {
+  if (accessorArg?.kind !== "lambda") return undefined;
+  const body = accessorArg.body;
+  if (body?.kind === "member" && body.receiver.kind === "ref") return body.member;
+  return undefined;
 }

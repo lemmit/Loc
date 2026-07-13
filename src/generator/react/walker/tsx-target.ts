@@ -89,6 +89,41 @@ export const tsxTarget: WalkerTarget = {
     return `${setter}(${value})`;
   },
 
+  // --- Interactive-table seam (M-T1.1) ------------------------------------
+
+  /** A clickable header that drives client-side sort: clicking an
+   *  inactive column selects it ascending; clicking the active column
+   *  toggles the direction.  A ↑/↓ glyph marks the active column. */
+  renderSortableHeader(spec) {
+    const { header, field, sortKey, sortDir } = spec;
+    const k = sortKey.name;
+    const d = sortDir.name;
+    const setK = `set${k[0]!.toUpperCase()}${k.slice(1)}`;
+    const setD = `set${d[0]!.toUpperCase()}${d.slice(1)}`;
+    const q = JSON.stringify(field);
+    const onClick =
+      `() => { if (${k} === ${q}) { ${setD}(${d} === "asc" ? "desc" : "asc"); } ` +
+      `else { ${setK}(${q}); ${setD}("asc"); } }`;
+    const indicator = `{${k} === ${q} ? (${d} === "asc" ? " ↑" : " ↓") : ""}`;
+    return `<span style={{ cursor: "pointer", userSelect: "none" }} onClick={${onClick}}>${header}${indicator}</span>`;
+  },
+
+  /** Sort the rows array by the active `sortKey` column in `sortDir`
+   *  order.  Copies first (`[...]`) so the source array isn't mutated;
+   *  the `as number` casts satisfy the type-checker while relational
+   *  `<` compares strings and numbers correctly at runtime. */
+  renderSortedRows(rowsExpr, sortKey, sortDir) {
+    const k = sortKey.name;
+    const d = sortDir.name;
+    return (
+      `[...(${rowsExpr})].sort((a, b) => { if (!${k}) { return 0; } ` +
+      `const av = (a as Record<string, unknown>)[${k}]; ` +
+      `const bv = (b as Record<string, unknown>)[${k}]; ` +
+      `const c = av === bv ? 0 : (av as number) < (bv as number) ? -1 : 1; ` +
+      `return ${d} === "desc" ? -c : c; })`
+    );
+  },
+
   // --- API binding seam ---------------------------------------------------
 
   /** Turn a detected api call into React-Query naming + import.
