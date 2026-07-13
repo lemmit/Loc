@@ -18,8 +18,8 @@ Sources: [payload-transport-layer](../old/proposals/payload-transport-layer.md) 
 (a) `from <Criterion>(args)` on params/command fields (input validation + UI dropdown + OpenAPI constraints — also unblocks domain-service param criteria); (b) findAll `sort:`/`loads:` + single-result `Repo.find(<Criterion>)`; (c) `private workflow` / workflow-calls-workflow (Crit5); (d) reified-criteria phases: `Criterion<T>` object reification (incl. principal constructor-arg), retire `usesUser` threading, **add criteria reification on Phoenix** (it has none), `isSatisfiedBy` duality, Java `Specification<T>` fallout; (e) explicit `loads:` plans or the autoload inference direction (retrieval Phase 6 / load-specifications v2) — pick one, gate the other honestly.
 Sources: [criterion](../old/proposals/criterion.md), [reified-criteria](../old/proposals/reified-criteria.md), [retrieval](../old/proposals/retrieval.md), [load-specifications](../old/proposals/load-specifications.md), DEBT-24/28.
 
-## M-T5.5 — Stdlib tail — `partial` · **S** · P2 ⚠ verify-first
-A-series mostly shipped (recent: min/max #1858, avg #1864). Remaining: leftover collection batch items, block-form top-level functions (`loom.function-toplevel-block`), storable `duration`/PG interval columns, externalising the prelude to `std/*.ddd`.
+## M-T5.5 — Stdlib tail — `partial` · **S** · P2
+A4 reductions verified complete 2026-07-13 (`src/util/collection-ops.ts:18-34` — count/sum/min/max/avg all registered). Remaining: block-form top-level functions (`loom.function-toplevel-block`), storable `duration`/PG interval columns, externalising the prelude to `std/*.ddd`.
 Sources: [stdlib plan](../old/plans/stdlib.md), completeness-audit Tier 1.
 
 ## M-T5.6 — Strict decimal/money bounds bug — `open` · **S** · P1 ⭐ correctness
@@ -42,8 +42,8 @@ Sources: [reserved-surface-signposting](../old/proposals/reserved-surface-signpo
 `commandHandler`/`queryHandler`/`route` shipped on all 5 (+scaffold A3.2/A3.3 just landed). Remaining: full response-DTO projection + `[FromBody]` request records; the `wireShape` retirement steps 6–8 (coordinate with the shipped consumers per the coordination note); extern handler LSP/scaffold polish.
 Sources: [unfoldable-api-derivation](../old/proposals/unfoldable-api-derivation.md) + [coordination note](../old/proposals/unfoldable-api-derivation-coordination-note.md).
 
-## M-T5.11 — Extern domain extension completion — `in-flight` · **M** · P2 ⚠ verify-first
-Phase 2 re-homing (domain hook + delete injected apparatus) just landed on dotnet/python/java/hono (#1853–#1856); verify elixir + the S10-containment residue, then close [extern-domain-extension-point](../old/proposals/extern-domain-extension-point.md) or carry only what's left.
+## M-T5.11 — Extern domain extension — `done` (verified 2026-07-13) · —
+Phase 2 re-homing is complete on **all five** backends — the injected-registry apparatus is deleted everywhere (`typescript/extern-builder.ts:14`, `python/extern-builder.ts:20`, `dotnet/emit/extern.ts:10`, `elixir/vanilla/extern-emit.ts`). [extern-domain-extension-point](../old/proposals/extern-domain-extension-point.md) is closed. Kept briefly as the record; delete next refresh.
 
 ## M-T5.12 — Typed-capabilities tail — `partial` · **M** · P3
 Phase 5 remainder: LSP tooling (go-to-capability, find-implementors, completion) + marker-interface emission `I<Capability>`; then the [capability-emission-dedup](../old/proposals/capability-emission-dedup.md) stamp-dedup ladder (deferred until a second stamping capability exists). Also the persist-time auditing simulations (node awaiting §7 sign-off; Java §5-vs-§6-ALT fork).

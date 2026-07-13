@@ -7,7 +7,7 @@
 Sources: [phoenix-surface-generator-wiring](../old/plans/phoenix-surface-generator-wiring.md) Phase 6, [vanilla-phoenix-gaps](../old/plans/vanilla-phoenix-gaps.md) §6, D-PHOENIX-SURFACE.
 
 ## M-T6.2 — Vanilla-Phoenix gap register drain — `partial` · **M–L** · P2
-The remaining rows of the old gap register: **§12 residual** document-shape gate still rejects audited/provenanced ops, collection mutation, derived reads (blocked on shared bug #1765), dereferenced-entity members, paged/union finds — drain or leave honestly gated; **§11c residual** part-in-part on relational owner (`loom.vanilla-containment-unsupported`) ⚠ verify against just-landed #1835; **§14 tail** audit `wireSnapshot` + `WorkflowsController` `serialize/1` snake_case leak; **§13** LiveView action-button auth not actor-threaded from `socket.assigns`; Phoenix OpenAPI surface for workflow-instance views.
+The remaining rows of the old gap register (re-verified 2026-07-13): **§12 residual** document-shape gate still rejects audited/provenanced ops, collection mutation, derived reads (blocked on shared bug #1765), dereferenced-entity members, paged/union finds — drain or leave honestly gated; **§11c residual** narrowed by #1835 — single-level nested parts now emit child tables on relational elixir, but a part that itself declares `contains` (deep part-in-part) is still gated (`system-checks.ts:1325`); **ES applier statements** still emit `# unsupported applier statement` comments (`workflow-eventsourced-emit.ts:151`, `eventsourced-emit.ts:240`) — the last silent-if-reached fallthroughs (op-body TODOs are gone, dispatch is exhaustive); **§14 tail** audit `wireSnapshot` + `WorkflowsController` `serialize/1` snake_case leak; **§13** LiveView action-button auth not actor-threaded from `socket.assigns`; Phoenix OpenAPI surface for workflow-instance views.
 Sources: [vanilla-phoenix-gaps](../old/plans/vanilla-phoenix-gaps.md) §11c/§12/§13/§14, [vanilla-document-route-a](../old/plans/vanilla-document-route-a.md).
 
 ## M-T6.3 — Phoenix output hygiene: `mix format` + Dialyzer gates — `open` · **M** · P2
@@ -25,9 +25,8 @@ Sources: weak-spots §6, parity audit findings.
 The last capability-filter cell: `filter` on a python `shape(document)` aggregate (in-app blob filtering like node/java do). Principal-on-document stays a design decision — either implement or pin the gate as permanent with a D-tag.
 Sources: parity register row 1, DEBT-02 residue.
 
-## M-T6.7 — Node criterion filter leak — `in-flight` · **S** · P1 ⭐ correctness
-Criterion `run<Name>` retrieval omits the always-on capability `filter` predicate on node — leaks soft-deleted/other-tenant rows. Thread `filterPred` into `runMethod` + test. Claimed on `claude/node-criterion-filter-leak` — verify it landed; if not, re-drive.
-Sources: [node-criterion-filter-leak](../old/plans/node-criterion-filter-leak.md).
+## M-T6.7 — Node criterion filter leak — `done` (verified 2026-07-13) · —
+Fixed on `main`: `src/generator/typescript/repository-find-builder.ts:587` combines `filterPred` into the `run<Name>` path. Kept briefly as the record; delete next refresh.
 
 ## M-T6.8 — SYS-1: update-path wire validation — `open` · **M** · P1
 `UpdateXRequest` DTOs carry no constraints on any backend (create-path does) — invalid updates reach the domain floor. All-backend parity slice (OpenAPI lockstep forces one PR).
@@ -51,6 +50,12 @@ Sources: [provenanced-wire-pair](../old/proposals/provenanced-wire-pair.md).
 ## M-T6.13 — OpenAPI tag grouping — `open` · **S–M** · P3
 Doc-level `x-tagGroups` per served `api` across the five backends (design audited + simulated; resolve decision (f) on .NET/Java per-op tags first).
 Sources: [api-openapi-tag-grouping](../old/proposals/api-openapi-tag-grouping.md), ddd-review api-grouping gap.
+
+## M-T6.15 — Feliz silent-drop fallthroughs → fail-fast — `open` · **S** · P1 ⭐ wrong failure mode
+The Feliz walker silently discards what it can't render into *compiling* F#: `feliz/update-emit.ts:183` replaces any unhandled action statement kind with `// TODO feliz update: <kind>` (only assign/add/remove/let are handled — control flow vanishes), and `feliz/fs-expr.ts:116` replaces any unhandled expression with `(* unsupported *) ()` unit. No `loom.feliz-*` validator exists. Convert both `default:` arms to fail-fast (throw or a `loom.feliz-unsupported` gate) and then implement the kinds worth having. Found by the 2026-07-13 hollow-work audit (M-T9.8).
+
+## M-T6.16 — Honest gates for grammar-only surface — `open` · **M** · P1
+The showcase HARD gate's allowlist grew to exempt node kinds that parse but aren't consumed by most backends: `Projection`/`ProjectionOn` (Hono runtime only — v1 slice 2, #1732), `PolicyDecl`/`PolicyReadRule`, `CommandHandler`/`QueryHandler`/`Route`/`HandlerRef` ("grammar+IR slice only" comments, `showcase-completeness.test.ts:76-131`). Pair every allowlisted kind with a positive `loom.*-unsupported` validator on the backends that don't emit it (the M-T5.9(a) signposting mechanism is the natural home), and drop each entry when its emitter lands. Same pass: promote `walker-core.ts:1331`'s guarded `undefined` method-call fallthrough to a generate-time diagnostic, and clear or justify the Vue bodyless-page TODO stub (`vue/index.ts:607`) and the Java `embedded` compile-skip (`corpus-java-build.test.ts:44`).
 
 ## M-T6.14 — Small parity leftovers — `open` · **S** · P3
 DEBT-12 Phoenix `verify_token` niche; DEBT-08 `envelope` carrier (deferred — no live use; signpost via M-T5.9a); saga/projection EF `HasColumnName` correlation-column bug (from S7 Slice C review); domain-seam log-catalog §3 residue ⚠ partly stale.

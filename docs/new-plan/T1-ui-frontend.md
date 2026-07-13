@@ -34,9 +34,8 @@ Sources: [async-actions-and-effects](../old/proposals/async-actions-and-effects.
 Unhandled-`await` terminus + render-time error boundary + default fallback page per framework; `errors {}` declarative override; backend `traceId` in the problem+json contract.
 Sources: [error-handling-and-failure-sink](../old/proposals/error-handling-and-failure-sink.md); backend half in M-T5.2.
 
-## M-T1.9 — `store` lifetimes + LiveView state tiers — `partial` · **M** · P2
-`persist:`/`sync:` parse but are gated (`loom.store-lifetime-unsupported`) on all five targets; LiveView `url` tier via `handle_params`/`push_patch`. Ship `local` first if it de-risks.
-Sources: [frontend-state-management](../old/proposals/frontend-state-management.md), parity register frontend row 2.
+## M-T1.9 — `store` lifetimes — `done` (verified 2026-07-13) · —
+The `loom.store-lifetime-unsupported` gate is RETIRED (`store-checks.ts:12,77` — "supported on every frontend"); the parity register's "gated on all targets" row was stale. Residual worth a look before deleting this entry: LiveView in-memory tier + `flow`/`machine` stay demand-pulled per [frontend-state-management](../old/proposals/frontend-state-management.md).
 
 ## M-T1.10 — Realtime beyond toast — `partial` · **L** · P2
 `on <channel>.<Event>` handlers are toast-only (`loom.ui-handler-unsupported`); SSE ships on Hono+React/Vue/Svelte only. Slices: richer handler bodies (refetch/invalidate binding), .NET + Phoenix realtime wire, then rooms/edge-relay/policy-derived routing (blocked on T3 authorization item 3).
@@ -54,9 +53,9 @@ Sources: [accessibility](../old/proposals/accessibility.md), `generated-a11y.yml
 Remove implicit sidebar derivation + per-page `menu {}` bag; every entry traces to a real, unfold-able `menu {}` block (scaffold-materialized codemod so no UI silently loses its sidebar). Resolve the `menu` keyword overload. (= old global-plan S3.)
 Sources: [scaffolded-navigation](../old/proposals/scaffolded-navigation.md).
 
-## M-T1.14 — Angular tails — `in-flight` · **S** · P2
-`X id` form fields render as free-text UUID inputs (should be select/combobox; claimed on `claude/recent-prs-gaps-54kmcg`); page-`requires`/nav-link auth gating parity.
-Sources: [angular-x-id-select](../old/plans/angular-x-id-select.md), [angular-frontend](../old/proposals/angular-frontend.md) tail.
+## M-T1.14 — Angular tails — `partial` · **S** · P2
+`X id` select/combobox is DONE (verified 2026-07-13: `angular/form-fields.ts:226-247` renders mat-select/p-select/native select via hoisted `useAll<X>()`). Remaining: page-`requires`/nav-link auth gating parity.
+Sources: [angular-frontend](../old/proposals/angular-frontend.md) tail.
 
 ## M-T1.15 — Richer list filter inputs — `open` · **S** · P3
 Enum selects, numeric ranges, paged pickers on scaffolded list pages (global-plan T3.14). Subsumed by M-T1.1 where it overlaps; keep for the non-Table inputs.

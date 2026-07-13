@@ -35,7 +35,7 @@ Phase 2 `authorized(<category>)` declassification (2-lite warnings → errors); 
 Sources: [sensitivity-and-compliance](../old/proposals/sensitivity-and-compliance.md).
 
 ## M-T3.9 — Audit promotion: `audited(...)` + `logged` — `partial` · **M** · P2
-Boolean `audited` ships on all five (ops + lifecycle). Remaining: the argument form `audited(actions|access|events|off)` (grammar change on three productions; prerequisite for access-audit mode), the `logged` marker, and the AuditRecord snapshot enrichment. Fold the lifecycle-audit design forks (soft-delete after-state, ES redundancy).
+Boolean `audited` ships on all five, ops AND lifecycle (verified 2026-07-13: `AUDIT_OP_BACKENDS` = `AUDIT_LIFECYCLE_BACKENDS` = all 5, `system-checks.ts:2464-2465`; the old plan's "gate claims node support that ships nowhere" note was stale). Remaining: the argument form `audited(actions|access|events|off)` (grammar change on three productions; prerequisite for access-audit mode), the `logged` marker, and the AuditRecord snapshot enrichment.
 Sources: [audit-and-logging](../old/proposals/audit-and-logging.md), [lifecycle-audit-todo](../old/plans/lifecycle-audit-todo.md).
 
 ## M-T3.10 — Offerability: authz-aware `can_<op>` — `open` · **M** · P3

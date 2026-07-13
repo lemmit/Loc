@@ -43,12 +43,12 @@
 | execution-context.md | partial (backbone complete) | M-T3.11 |
 | expressible-builtins.md | proposed | M-T3.4 (phases 1–2), M-T3.6 (phase 3) |
 | extern-component-escape-hatch.md | partial (React tier 1) | M-T1.4 |
-| extern-domain-extension-point.md | partial (Phase 2 landing) | M-T5.11 |
+| extern-domain-extension-point.md | shipped (Phase 2 verified 2026-07-13, all 5 backends) | — |
 | extern-function-hook-escape-hatch.md | partial | M-T1.4 |
 | fable-elmish-frontend.md | superseded by execution (feliz shipping) | polish → M-T1.16 |
 | failure-taxonomy.md | proposed (reframe) | M-T5.1, M-T5.2 |
 | frontend-acl.md | partial (1–2 shipped) | M-T1.6 |
-| frontend-state-management.md | partial | M-T1.9 |
+| frontend-state-management.md | shipped (lifetime gate retired) | demand-pulled residue noted in M-T1.9 |
 | global-implementation-plan.md | **superseded by this plan** | — |
 | go-backend.md | proposed | M-T10.1 (frozen) |
 | htmx-server-rendered-frontend.md | deferred | M-T10.5 (frozen) |
@@ -114,7 +114,7 @@
 | typed-capabilities.md | shipped (#1388) | OQ#1 tail → M-T5.12 |
 | unfoldable-api-derivation-coordination-note.md | reference | M-T5.10 |
 | unfoldable-api-derivation.md | partial | M-T5.10 |
-| unfoldable-page-scaffolding.md | shipped | index-sentinel residue ⚠ verify → M-T5.15 |
+| unfoldable-page-scaffolding.md | shipped (no sentinel layer left — verified 2026-07-13) | — |
 | uniqueness-and-indexes.md | partial (slice 1) | M-T2.8 |
 | validation-error-extension.md | shipped | — |
 | vanilla-phoenix-foundation.md | partial (slices 0–6) | residue → M-T6.2, M-T6.10 |
@@ -131,7 +131,7 @@
 |---|---|---|
 | a6.2-behavioral-tier-second-backend.md | in-progress (v1 landed) | M-T9.3 |
 | angular-frontend-plan.md | done (banner stale) | — |
-| angular-x-id-select.md | in-flight | M-T1.14 |
+| angular-x-id-select.md | done (verified 2026-07-13) | — |
 | auth-agent-prompt.md | reference template | — |
 | auth-providers-implementation.md | in-progress (P4 reads remain) | M-T3.1, M-T3.5 |
 | authorization-phase3-2.md | done (#1746) | — |
@@ -160,10 +160,10 @@
 | multi-tenancy-implementation.md | 1a/1b shipped | tail → M-T3.7 |
 | multi-tenancy-phase2.md | done | — |
 | nested-parts-alignment.md | done (DEBT-15) | — |
-| node-criterion-filter-leak.md | in-flight | M-T6.7 |
+| node-criterion-filter-leak.md | done (verified 2026-07-13) | — |
 | node-persist-time-auditing-simulation.md | awaiting sign-off | M-T5.12 |
 | non-guid-id-http-params.md | resolved by removal | — |
-| optimistic-concurrency-versioned.md | shipped ⚠ banner stale | default-on → M-T3.4 |
+| optimistic-concurrency-versioned.md | shipped (verified 2026-07-13) | default-on → M-T3.4 |
 | pack-versioning-plan.md | phase 1 done | phase 2 → M-T9.5 |
 | packaging-split.md | P0–P2 done; P3-s5 blocked | M-T8.7 |
 | per-pack-migration.md | reference companion | — |
@@ -188,7 +188,7 @@
 | source-map-debug-kickoff.md | spine shipped | M-T8.2 |
 | span-tracking-emission.md | TS/Hono shipped | M-T8.2 |
 | stack-versioning.md | superseded reference | — |
-| stdlib.md | mostly shipped | tail → M-T5.5 |
+| stdlib.md | mostly shipped (A4 complete, verified 2026-07-13) | tail → M-T5.5 |
 | svelte-frontend-plan.md | done | preview deferral → M-T8.10 |
 | tph-unionall-and-contains.md | done (pattern 3 dropped) | — |
 | type-system-feature-migration.md | substantially shipped | strict-parity + DBT-4/5 → M-T5.x, M-T6.2 |

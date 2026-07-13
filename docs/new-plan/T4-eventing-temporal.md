@@ -6,8 +6,8 @@
 The temporal hole. Time as an event source: a system-scope `timerSource` binding emitting tick events; workflows react via existing `on(e)`/`create(e) by` triggers — zero new workflow grammar (the `schedule every 5m {}` shape was explicitly rejected). Needs per-backend durable drivers (pg-cron/poller, Quartz, Oban, Hangfire-analogue, APScheduler) + saga-deadline sugar on top. Design now — cost grows with every backend.
 Sources: [scheduling.md](../old/proposals/scheduling.md), weak-spots §4, completeness-audit Tier 1.
 
-## M-T4.2 — `projection` read models — `open` · **L** · P2
-`projection <Name> keyed by <field>` folded from foreign events, reusing the ES-saga machinery on all five backends; `GET /projections/<name>` read surface; 8 validators. Deferred v1.1: projection-as-view-source, replay/rebuild (needs durable log), snapshots.
+## M-T4.2 — `projection` read models — `partial` · **L** · P2
+`projection <Name> keyed by <field>` folded from foreign events. Verified 2026-07-13: the grammar + the **Hono runtime** landed (v1 slice 2, #1732); the other four backends don't consume the kinds yet — currently papered over by the showcase allowlist rather than gated (see M-T6.16). Remaining: the four backend runtimes, `GET /projections/<name>` parity, the 8 validators. Deferred v1.1: projection-as-view-source, replay/rebuild (needs durable log), snapshots.
 Sources: [projection.md](../old/proposals/projection.md) (draft 2026-07-05), [workflow-and-applier](../old/proposals/workflow-and-applier.md) §projections, production-readiness §3.5.
 
 ## M-T4.3 — Outbox & delivery completion — `partial` · **M** · P2
