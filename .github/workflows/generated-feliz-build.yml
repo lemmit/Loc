@@ -2,14 +2,17 @@ name: Generated Feliz build
 
 # Generate the Feliz (Fable/F#/Elmish) frontend from a .ddd, then prove the
 # emitted F# compiles via `dotnet fable` and bundles via `vite build` — the
-# analogue of generated-react-build.yml (which tscs the emitted TSX).  Catches
-# generator drift that lowers cleanly to IR but emits non-compiling F# or a
-# broken project shell — invisible to the fast vitest suite.
+# analogue of generated-react-build.yml (which tscs the emitted TSX) — AND that
+# the bundle actually RUNS: a `vite preview` + headless-Chromium smoke drives the
+# MVU loop, routing, and the wire layer's Remote state (the runtime sibling the
+# other frontends get from generated-{vue,svelte}-e2e.yml, folded in here to
+# reuse the single slow `dotnet fable` step).  Catches generator drift that
+# lowers cleanly to IR but emits non-compiling / non-running F# — invisible to
+# the fast vitest suite.
 #
-# One cell for now (the Counter MVU example, inline below); grows
-# example-by-example as the procedural pack does.  The .ddd is embedded here
-# (not under examples/) so the other example-globbing gates never pick up a
-# feliz-only source.
+# One cell (the full CRUD showcase, inline below); grows example-by-example as
+# the procedural pack does.  The .ddd is embedded here (not under examples/) so
+# the other example-globbing gates never pick up a feliz-only source.
 
 on:
   push:
@@ -21,6 +24,7 @@ on:
       - 'src/platform/metadata.ts'
       - 'src/platform/registry.ts'
       - 'src/language/ddd.langium'
+      - 'scripts/feliz-smoke.mjs'
       - '.github/workflows/generated-feliz-build.yml'
   pull_request:
     branches: [main]
@@ -31,6 +35,7 @@ on:
       - 'src/platform/metadata.ts'
       - 'src/platform/registry.ts'
       - 'src/language/ddd.langium'
+      - 'scripts/feliz-smoke.mjs'
       - '.github/workflows/generated-feliz-build.yml'
   workflow_dispatch:
 
@@ -166,3 +171,22 @@ jobs:
         run: |
           npm install
           npx vite build
+      # Runtime e2e — the build gate above proves the bundle COMPILES; this
+      # proves it RUNS.  Serve the static bundle with `vite preview` and drive it
+      # in headless Chromium: the app mounts, the MVU counter dispatches, routing
+      # navigates, and the wire layer's Remote state settles (no backend → the
+      # QueryView shows its error/empty branch, which itself proves the Cmd +
+      # Thoth-decoder path executed).  Pure client-side, so no db sidecar.
+      - name: Install Playwright chromium
+        run: npx playwright install --with-deps chromium
+      - name: Serve the bundle + run the runtime smoke
+        working-directory: ${{ steps.proj.outputs.dir }}
+        run: |
+          npx vite preview --port 4173 --strictPort &
+          PREVIEW_PID=$!
+          trap 'kill $PREVIEW_PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:4173/ >/dev/null && break
+            sleep 1
+          done
+          SMOKE_URL=http://localhost:4173/ node "$GITHUB_WORKSPACE/scripts/feliz-smoke.mjs"

@@ -171,12 +171,20 @@ in hand — not before F# output exists.
   page grew an `OperationForm` (a custom `rename` op). **v1 caveat:** the
   addressed `(of:, op:)` form only (the instance-qualified `OperationForm(inst.
   op)` and prefilling the form from the loaded record are follow-ups).
+- ✅ **Runtime e2e gate.** `generated-feliz-build.yml` now also PROVES THE
+  BUNDLE RUNS (not just compiles): after `vite build` it `vite preview`s the
+  static bundle and drives it in headless Chromium (`scripts/feliz-smoke.mjs`) —
+  the app mounts, the MVU counter dispatches, routing navigates, and the wire
+  layer's `Remote` state settles (no backend → the QueryView's error/empty
+  branch, which itself proves the `Cmd` + Thoth-decoder path executed). Folded
+  into the build workflow (not a separate `-e2e.yml`) to reuse the single slow
+  `dotnet fable` step. The runtime sibling the JSX frontends get from
+  `generated-{vue,svelte}-e2e.yml`.
 - **Wire layer now covers the full CRUD write path.** list + byId reads, create,
-  delete, and operation. Remaining Feliz work is non-data-layer: the runtime
-  e2e gate, broader pack primitive coverage, workflows, and auth. Enum wire
-  fields decode as their string name (a proper DU decoder is a follow-up);
-  nested containment/VO records + decoders ARE emitted (transitive off
-  `wireShape`).
+  delete, and operation. Remaining Feliz work: broader pack primitive coverage,
+  workflows, and auth. Enum wire fields decode as their string name (a proper DU
+  decoder is a follow-up); nested containment/VO records + decoders ARE emitted
+  (transitive off `wireShape`).
 
 Known-good deps (proposal §10): Fable 4.29 / Feliz 2.8 / Fable.Elmish.React 4.0
 / Fable.SimpleHttp 3.6 / Thoth.Json 10.2 / net8.0. Avoid Thoth.Fetch (promise-CE
