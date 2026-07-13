@@ -76,7 +76,10 @@ export function buildSvelteApiModule(
   lines.push("");
 
   for (const op of agg.operations.filter((o) => o.visibility === "public")) {
-    const opInvariants = preconditionsAsInvariants(op);
+    // Field-level invariants (SYS-1): mirror create's wire constraints onto the
+    // update/mutating-op client schema; `available = op.params` drops any
+    // invariant over a field this op doesn't take.
+    const opInvariants = [...agg.invariants, ...preconditionsAsInvariants(op)];
     lines.push(
       ...emitObjectWithRefines(
         `${upperFirst(op.name)}${agg.name}Request`,

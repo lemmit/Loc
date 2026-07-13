@@ -39,6 +39,19 @@ describe("vanilla — T2.i changeset field-constraint validators", () => {
     expect(cs).toContain("|> validate_format(:sku, ~r/[A-Z]{3}/)");
   });
 
+  it("applies the field validators on the UPDATE path too (SYS-1 parity)", async () => {
+    // M-T6.8/SYS-1: Phoenix reaches update-path parity BY CONSTRUCTION — the
+    // crudish `update` routes through the SAME `base_changeset` that carries the
+    // single-field validators, so an invalid update is rejected by the changeset
+    // (no emitter change needed, unlike the other four backends).  This pins that
+    // the update seam keeps piping through base_changeset.
+    const files = await generateSystemFiles(SRC);
+    const repo = files.get(
+      [...files.keys()].find((k) => k.endsWith("/shop/product_repository.ex"))!,
+    )!;
+    expect(repo).toMatch(/def update\([\s\S]*?base_changeset\(/);
+  });
+
   it("keeps base_changeset validator-free when the aggregate has no field invariants", async () => {
     const plain = `
 system P {

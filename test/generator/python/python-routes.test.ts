@@ -92,6 +92,14 @@ system Demo {
     expect(routes).toMatch(/@model_validator\(mode="after"\)/);
     expect(routes).toContain("if not (self.handle != self.email):");
     expect(routes).toContain('raise ValueError("Invariant violated: handle != email")');
+    // M-T6.8/SYS-1: the crudish `update` op's request model mirrors create's
+    // wire constraints — Field(min_length=1) + the cross-field @model_validator
+    // — so an invalid UPDATE is also rejected with 422 at the FastAPI boundary,
+    // not left to the domain floor.
+    const updateBlock = routes.slice(routes.indexOf("class UpdateAccountRequest(BaseModel):"));
+    expect(routes).toContain("class UpdateAccountRequest(BaseModel):");
+    expect(updateBlock).toContain("handle: str = Field(min_length=1)");
+    expect(updateBlock).toContain("if not (self.handle != self.email):");
   });
 });
 

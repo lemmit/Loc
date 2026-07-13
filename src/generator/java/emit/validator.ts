@@ -61,7 +61,12 @@ export function renderJavaValidators(
     specs.push({
       methodName: op.name,
       params: op.params,
-      invariants: preconditions,
+      // Field-level invariants (SYS-1): the op's request validator gets the
+      // SAME wire constraints as create, plus its own preconditions.  The
+      // `available = op.params` set drops any invariant over a field this op
+      // doesn't take (mirrors the create-input filter), so an invalid update
+      // is rejected at the wire boundary instead of reaching the domain floor.
+      invariants: [...agg.invariants, ...preconditions],
       available: new Set(op.params.map((p) => p.name)),
     });
   }

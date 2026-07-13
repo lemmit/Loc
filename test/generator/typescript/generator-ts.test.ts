@@ -1787,6 +1787,18 @@ describe("typescript generator", () => {
       );
     });
 
+    it("mirrors create wire constraints onto the crudish Update<Agg>Request (SYS-1)", async () => {
+      const model = await buildModel("examples/sales.ddd");
+      const files = generateTypeScript(model, HONO_V4_PINS);
+      // M-T6.8/SYS-1: sales.ddd Customer `invariant email.length > 0` now
+      // constrains the UPDATE request DTO too (not just create), so an invalid
+      // update is rejected at the wire boundary (422) instead of the domain floor.
+      const customerRoutes = files.get("http/customer.routes.ts")!;
+      expect(customerRoutes).toMatch(
+        /UpdateCustomerRequest = z\.object\(\{[\s\S]*email: z\.string\(\)\.min\(1\)/,
+      );
+    });
+
     it("excludes invariants referencing aggregate state from Create<Agg>Request", async () => {
       const model = await buildModel("examples/sales.ddd");
       const files = generateTypeScript(model, HONO_V4_PINS);

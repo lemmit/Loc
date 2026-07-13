@@ -15,10 +15,10 @@ const CreateCustomerRequest = z.object({
 const CreateCustomerResponse = z.object({ id: z.string() }).openapi("CreateCustomerResponse");
 
 const UpdateCustomerRequest = z.object({
-  username: z.string(),
+  username: z.string().min(3).max(32),
   email: z.string(),
-  age: z.coerce.number().int(),
-}).openapi("UpdateCustomerRequest");
+  age: z.coerce.number().int().min(18).max(150),
+}).openapi("UpdateCustomerRequest").refine((data) => data.username !== data.email, { path: ["username"], message: "Invariant violated: username != email" }).refine((data) => /^[^@]+@[^@]+\.[^@]+$/.test(data.email) && data.email.length <= 120, { path: ["email"], message: "Invariant violated: email check email.matches(\"^[^@]+@[^@]+\\\\.[^@]+$\") && email.length <= 120" });
 
 const ByEmailQuery = z.object({
   email: z.string(),

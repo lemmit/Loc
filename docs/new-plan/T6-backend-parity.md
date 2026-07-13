@@ -28,8 +28,8 @@ Sources: parity register row 1, DEBT-02 residue.
 ## M-T6.7 — Node criterion filter leak — `done` (verified 2026-07-13) · —
 Fixed on `main`: `src/generator/typescript/repository-find-builder.ts:587` combines `filterPred` into the `run<Name>` path. Kept briefly as the record; delete next refresh.
 
-## M-T6.8 — SYS-1: update-path wire validation — `open` · **M** · P1
-`UpdateXRequest` DTOs carry no constraints on any backend (create-path does) — invalid updates reach the domain floor. All-backend parity slice (OpenAPI lockstep forces one PR).
+## M-T6.8 — SYS-1: update-path wire validation — `done` (PR #1883, 2026-07-13) · —
+Update/mutating-op request DTOs now carry the SAME field-level wire constraints as create — mirrored from `agg.invariants`, filtered to `op.params` (invariants over fields the op doesn't take are dropped, exactly as the create path does). Landed on the four backends that lacked it: TS/Hono (`src/platform/hono/v4/routes-builder.ts:306` op-DTO `emitWireSchema`), .NET FluentValidation (`src/generator/dotnet/validator-emit.ts:77` `renderOperationValidator`), Java (`src/generator/java/emit/validator.ts:56` op loop), Python pydantic (`src/generator/python/routes-builder.ts` `opRequestModel` → `Field(...)` + `@model_validator`). **Phoenix was already at parity** (`update` routes through `base_changeset`'s `validatorBlock`) — lock-in test only. Also mirrored onto the client schemas (`src/generator/_frontend/api-module.ts:120`, `src/generator/svelte/api-builder.ts:78`). Applied uniformly to every public mutating op (closes the identical gap on custom mutators, not just `update`). One generator test per backend + Phoenix lock-in + frontend-client test; `page-emitter-equivalence` baseline re-captured (4 new `UpdateCommandValidator.cs` + 4 constrained routes/client files). Full fast suite green. Kept briefly as the record; delete next refresh.
 Sources: [generated-code-review-2026-06-30](../audits/generated-code-review-2026-06-30.md) SYS-1.
 
 ## M-T6.9 — Adapter subsets: Dapper/MikroORM — `partial` · **L** · P3
