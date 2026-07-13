@@ -2282,3 +2282,71 @@ examples.
 Proven end-to-end: the workflow app (and a scaffold app with a `workflows:` form)
 Fable-compile + vite-build + run (scaffold smoke still green); the CI scaffold leg
 now carries a WorkflowForm. Same prove-it loop as §23–§30.
+
+## 32. Merged-context codegen: `ctx.name` is the *merge* name, not the stream's owner (2026-07-13)
+
+A deployable that hosts several bounded contexts is handed a **merged**
+`EnrichedBoundedContextIR` (`mergeContexts`), so inside any emitter that runs over
+that merged context, **`ctx.name` is the merge name — the FIRST context — not the
+context that declares the stream you're emitting for.** Any emitter that runs over
+the merged context *and* emits a **per-context artifact** (the shared
+`<ctx>_events` log — table, ORM model, EF entity, DbSet) must resolve the stream's
+**owning** context, never `ctx.name`. This class of bug shipped latent three times:
+Hono (fixed #1836), Python + .NET (fixed #1859, found by a code-review pass over
+#1836).
+
+- **The tell — which backends are exposed.** Only backends that **merge contexts**
+  for a deployable are at risk: Hono, Python, .NET emit ONE dispatch/schema file
+  over `merged`. Java and Elixir emit **per-context** (their `emitDispatch` /
+  `renderJavaDispatcher` are called *inside* `for (const ctx of contexts)`), so
+  `ctx.name` there is already the individual owner — **structurally immune.** When
+  auditing a "does backend X have this bug too" question, first check whether X
+  emits the artifact per-context or over the merge; per-context emitters can't
+  regress it.
+- **The fix mirror already exists.** `resolveWorkflowSchema` / `resolveProjectionSchema`
+  were already doing owner map-back for their tables; the fix is the same shape —
+  a `resolveStreamContext(name) → owningCtxName` (Python) / `makeOwnerOf(contexts)`
+  `OwnerOf` (.NET), built by scanning `contexts` for the one whose
+  `aggregates`/`workflows` contains the stream. Thread it into exactly the merged-
+  context emitters; the **per-aggregate repo emit is already per-context** (it runs
+  in the individual-`ctx` loop), so it needs `ctx.name` un-resolved — don't "fix"
+  it.
+- **EF sub-trap (.NET): one CLR entity → one table.** N `IEntityTypeConfiguration<EventRecord>`
+  each `ToTable("<ctx>_events")` on a **shared** `EventRecord` POCO collapse to a
+  single table under EF's last-wins mapping — a co-hosted second ES context routes
+  its streams to the first's table (or fails the model build). The fix is a
+  distinct `<Ctx>EventRecord` entity + `<Ctx>Events` DbSet per context (mirrors
+  Python/MikroORM's `<Ctx>EventRow`), not one shared type with N configs.
+- **Pin it at the fast tier with a merge-name-≠-owner fixture.** The regression is
+  invisible in a single-context system (merge name == owner). The guard needs TWO
+  event-sourced contexts where the streams live in the *second* one, so the merge
+  name (first ctx) deliberately differs; assert the owner's names appear and the
+  merge name does NOT. Cover both the aggregate-repo path AND an ES **workflow**
+  (the merged-dispatch path — `esEventRecordClass(wf, ownerOf)` — is the one the
+  per-context repo path can't catch).
+
+## 33. Polling a PR's CI on fast-moving `main`: the MCP `branch` filter is silently ignored (2026-07-13)
+
+`mcp__github__actions_list method=list_workflow_runs` accepts a `branch` param, but
+it **does not filter** — the call returns the repo's most-recent runs across *all*
+branches regardless. On this repo's fast-moving `main` (parallel agents push
+continuously, ~4 `test.yml` runs/min), your PR's runs scroll off the first pages
+within minutes, so filtering-in-code for your head SHA on page 1 finds **zero**,
+and paginating to reach a 25-min-old run means many 300k–650k-char tool dumps.
+Symptoms this session: five `actions_list` calls, each blowing the token cap and
+saved to a file, none of which cleanly answered "did my SHA's `tests passed` go
+green."
+
+- **Don't poll CI status via `actions_list` at all.** Use the PR object:
+  `pull_request_read method=get` returns `mergeable_state`. `unstable` = mergeable,
+  required checks satisfied, only non-required still pending (safe to merge —
+  branch protection enforces the required roll-up **server-side**, so a premature
+  `merge_pull_request` on a not-yet-green required check returns 405, it can't
+  merge something branch protection would block). `blocked` = a required check is
+  failing/pending. (See §19: `get_status` returns the *legacy commit-status* API,
+  often `total_count:0`, even when the check run is green — don't gate on it.)
+- **CI *success* is not delivered by the `<github-webhook-activity>` subscription**
+  (only failures/comments are). So end the turn and re-check on a timer; don't
+  expect a green webhook. `send_later` needs interactive approval (unavailable in
+  the remote runner), so a backgrounded `sleep N; echo wake` re-invokes the turn as
+  the wake mechanism.
