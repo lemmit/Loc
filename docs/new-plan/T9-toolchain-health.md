@@ -2,8 +2,8 @@
 
 *Weak-spot #5: the expression/statement/walker axes are correctly abstracted and CI-pinned; the persistence-emit axis and the version axis are not, runtime feedback is nightly-only, and one human author + 190 design docs made doc rot a first-class failure mode (this plan is itself the remediation of that last one).*
 
-## M-T9.1 — Langium 3.3 → 4.2 — `open` · **L** · P1 ⭐
-The foundational bump: regenerate `src/language/generated/`, service-container/scope/validation-registry/LSP-provider signature changes, reflection-helper moves, langium-test helpers. Clears the remaining 8 `npm audit` findings (3 high — lodash chain) that CANNOT clear otherwise. Dedicated branch; gate on full `npm test` + `langium-generated.yml` determinism. Use the `dependency-upgrade` skill.
+## M-T9.1 — Langium 3.3 → 4.2 — `done` (verified 2026-07-13) · —
+Already landed on `main`, **exceeding the target**. Evidence (fresh `main`, commit `2495e36`): `package.json` pins `langium`/`langium-cli` at `~4.3.0` (past the 4.2 target) and `typescript` at `~6.0.0` (the TS-6 follow-on landed too); the 4.3 API renames are in place (`ddd-scope.ts:230,328` `collectExportedSymbols` — not `computeExports`; `lsp/ddd-references.ts:77` + `lsp/ddd-rename.ts:68` `findDeclarations` — not `findDeclaration`). Secondary deliverable also met: `npm audit` reports **0 vulnerabilities** (the lodash chain now resolves via `langium-cli@4.3.0 → lodash@4.18.1`, unflagged). `tsc -b` clean on TS 6 + Langium 4.3.
 Sources: [dependency-upgrades](../old/proposals/dependency-upgrades.md).
 
 ## M-T9.2 — Persistence-emit seam (`PersistenceTarget`) — `design-review` · **XL** · P1 ⭐ (design-first)
