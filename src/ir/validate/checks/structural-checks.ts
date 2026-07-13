@@ -6,6 +6,7 @@
 
 import { allPlatformDescriptors } from "../../../platform/metadata.js";
 import { isStdlibError } from "../../../util/error-defaults.js";
+import { bodyTypeOf } from "../../../util/expr-body-type.js";
 import { plural, snake } from "../../../util/naming.js";
 import { typeKey, variantTag } from "../../stdlib/unions.js";
 import type {
@@ -953,6 +954,19 @@ const UI_UNSUPPORTED_COLLECTION_OPS: ReadonlySet<string> = new Set([
   "distinct",
   "take",
   "skip",
+  "min",
+  "max",
+]);
+
+/** Primitive types that have a well-defined total order — the projections
+ *  `.min`/`.max` can reduce over. */
+const COMPARABLE_PRIMITIVES: ReadonlySet<string> = new Set([
+  "int",
+  "long",
+  "decimal",
+  "money",
+  "string",
+  "datetime",
 ]);
 
 /** The element type of a (possibly optional-wrapped) collection receiver, or
@@ -1013,6 +1027,22 @@ export function validateExprIntegrity(loom: EnrichedLoomModel, diags: LoomDiagno
             message: "`.join` requires a string collection.",
             source,
           });
+        }
+        // `.min`/`.max` reduce a projection that must be totally ordered —
+        // int/long/decimal/money/string/datetime.  A bool/enum/entity/vo/id
+        // projection has no meaningful `<`/`>`, so reject it.
+        if (e.member === "min" || e.member === "max") {
+          const lam = e.args[0];
+          const bodyT = lam?.kind === "lambda" && lam.body ? bodyTypeOf(lam.body) : undefined;
+          if (bodyT && !(bodyT.kind === "primitive" && COMPARABLE_PRIMITIVES.has(bodyT.name))) {
+            diags.push({
+              severity: "error",
+              code: "loom.reduction-non-comparable",
+              message:
+                "`.min`/`.max` require a comparable projection (number, money, string, or datetime).",
+              source,
+            });
+          }
         }
         // In a UI page body, only the ops with a native frontend array-member
         // spelling (`map`/`join`) are renderable; the rest have no valid

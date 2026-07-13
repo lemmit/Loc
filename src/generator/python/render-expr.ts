@@ -475,6 +475,9 @@ export const PY_COLLECTION_RENDERERS: Record<
   take: (recv, args) => `${recv}[:${args[0]}]`,
   skip: (recv, args) => `${recv}[${args[0]}:]`,
   join: (recv, args) => `${args[0]}.join(${recv})`,
+  // min/max return the PROJECTED value, empty → None (default=None).
+  min: (recv, args) => `min(((${args[0]})(__x) for __x in ${recv}), default=None)`,
+  max: (recv, args) => `max(((${args[0]})(__x) for __x in ${recv}), default=None)`,
 };
 
 function renderCollectionOp(recv: string, name: string, args: string[], e: MethodCallExpr): string {

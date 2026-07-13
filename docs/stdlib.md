@@ -97,6 +97,8 @@ subquery).  `λ` is a lambda whose parameter is bound to the element type.
 | `take` | `(n: int): T[]` |
 | `skip` | `(n: int): T[]` |
 | `join` | `(sep: string): string` |
+| `min` | `(λ): T?` |
+| `max` | `(λ): T?` |
 
 ## Layer 1 — the ambient prelude
 

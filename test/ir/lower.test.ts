@@ -168,3 +168,49 @@ describe("lowering — A4 collection-op result types", () => {
     expect(len.receiverType).toEqual({ kind: "primitive", name: "string" });
   });
 });
+
+// A4 — reduction ops (min/max) result typing.  min/max return the PROJECTED
+// value, OPTIONAL (empty → null): `<λ-body>?`.  `memberType` can only see the
+// element type, so the call site refines the result to the LAMBDA-BODY type;
+// the same trailing-member handle as above reads it (its `receiverType` IS the
+// reduction's result).  A neutral trailing probe (`.p`) keeps the declared type
+// a bare `string` fallback — what matters is the receiver it captures.
+const MINMAX_SRC = `
+  context Shop {
+    aggregate Order {
+      contains lines: OrderLine[]
+      derived minMoney: string = lines.min(l => l.price).p
+      derived maxInt: string = lines.max(l => l.qty).p
+      derived minAt: string = lines.min(l => l.at).p
+      entity OrderLine { qty: int  price: money  at: datetime }
+    }
+    repository Orders for Order { }
+  }
+`;
+
+const MONEY_OPT = { kind: "optional", inner: { kind: "primitive", name: "money" } };
+const INT_OPT = { kind: "optional", inner: { kind: "primitive", name: "int" } };
+const DATETIME_OPT = { kind: "optional", inner: { kind: "primitive", name: "datetime" } };
+
+describe("lowering — A4 reduction (min/max) result types", () => {
+  async function reductionRecvType(name: string): Promise<unknown> {
+    const loom = await buildLoomModel(MINMAX_SRC);
+    const order = allAggregates(loom).find((a) => a.name === "Order")!;
+    const d = order.derived.find((x) => x.name === name)!;
+    expect(d, name).toBeDefined();
+    expect(d.expr.kind).toBe("member");
+    return (d.expr as Extract<ExprIR, { kind: "member" }>).receiverType;
+  }
+
+  it("types `min(l => l.price)` (price: money) as money? (optional λ-body)", async () => {
+    expect(await reductionRecvType("minMoney")).toEqual(MONEY_OPT);
+  });
+
+  it("types `max(l => l.qty)` (qty: int) as int? (optional λ-body)", async () => {
+    expect(await reductionRecvType("maxInt")).toEqual(INT_OPT);
+  });
+
+  it("types a `min` over a datetime projection as datetime?", async () => {
+    expect(await reductionRecvType("minAt")).toEqual(DATETIME_OPT);
+  });
+});

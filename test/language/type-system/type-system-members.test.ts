@@ -81,6 +81,8 @@ describe("type-system — membersOfType (single source for member completion)", 
       "take",
       "skip",
       "join",
+      "min",
+      "max",
     ]);
   });
 

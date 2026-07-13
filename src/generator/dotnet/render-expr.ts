@@ -10,6 +10,7 @@ import {
   TENANT_OWNED_DATA_KEY_FIELD,
   TENANT_OWNED_TENANT_ID_FIELD,
 } from "../../ir/util/tenant-stance.js";
+import { bodyTypeOf } from "../../util/expr-body-type.js";
 import { intrinsicKey } from "../../util/intrinsics.js";
 import { escapeCsharpIdent, upperFirst } from "../../util/naming.js";
 import {
@@ -793,7 +794,27 @@ export const CS_COLLECTION_RENDERERS: Record<
   take: (recv, args) => `${recv}.Take(${args[0]}).ToList()`,
   skip: (recv, args) => `${recv}.Skip(${args[0]}).ToList()`,
   join: (recv, args) => `string.Join(${args[0]}, ${recv})`,
+  // min/max return the PROJECTED value, empty → null.  LINQ `.Min`/`.Max`
+  // throw on an empty sequence, so guard on `.Count == 0` and spell the
+  // nullable body-type for the `null` branch (bodyTypeOf on the lambda body).
+  min: (recv, args, e) => {
+    const bodyT = projectionBodyType(e);
+    const nullSpell = bodyT ? `(${renderCsType({ kind: "optional", inner: bodyT })})null` : "null";
+    return `(${recv}.Count == 0 ? ${nullSpell} : ${recv}.Min(${args[0]}))`;
+  },
+  max: (recv, args, e) => {
+    const bodyT = projectionBodyType(e);
+    const nullSpell = bodyT ? `(${renderCsType({ kind: "optional", inner: bodyT })})null` : "null";
+    return `(${recv}.Count == 0 ? ${nullSpell} : ${recv}.Max(${args[0]}))`;
+  },
 };
+
+/** The projected body type of a `min`/`max` reduction's lambda, used to spell
+ *  the nullable `null` branch — `undefined` when it can't be typed cheaply. */
+function projectionBodyType(e?: Extract<ExprIR, { kind: "method-call" }>): TypeIR | undefined {
+  const lam = e?.args[0];
+  return lam?.kind === "lambda" && lam.body ? bodyTypeOf(lam.body) : undefined;
+}
 
 function renderCollectionOp(
   recv: string,

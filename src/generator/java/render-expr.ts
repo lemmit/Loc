@@ -660,6 +660,11 @@ export const JAVA_COLLECTION_RENDERERS: Record<
   take: (recv, args) => `${recv}.stream().limit(${args[0]}).toList()`,
   skip: (recv, args) => `${recv}.stream().skip(${args[0]}).toList()`,
   join: (recv, args) => `String.join(${args[0]}, ${recv})`,
+  // min/max return the PROJECTED value, empty → null (Optional.orElse(null)).
+  min: (recv, args) =>
+    `${recv}.stream().map(${args[0]}).min(java.util.Comparator.naturalOrder()).orElse(null)`,
+  max: (recv, args) =>
+    `${recv}.stream().map(${args[0]}).max(java.util.Comparator.naturalOrder()).orElse(null)`,
 };
 
 function renderCollectionOp(

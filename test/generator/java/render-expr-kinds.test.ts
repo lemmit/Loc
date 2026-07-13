@@ -293,6 +293,29 @@ describe("java renderJavaExpr — member + method-call", () => {
     expect(renderJavaExpr(mc("skip", [litInt("1")]))).toBe("this.items.stream().skip(1).toList()");
     expect(renderJavaExpr(mc("join", [litStr(", ")]))).toBe('String.join(", ", this.items)');
   });
+
+  it("renders the A4 reductions min(λ)/max(λ) via Stream + naturalOrder, empty → null", () => {
+    const arr: TypeIR = { kind: "array", element: STRING };
+    const idLambda: ExprIR = {
+      kind: "lambda",
+      param: "x",
+      body: { kind: "ref", name: "x", refKind: "lambda" },
+    };
+    const mc = (member: string, args: ExprIR[]): ExprIR => ({
+      kind: "method-call",
+      receiver: thisProp("items"),
+      member,
+      args,
+      receiverType: arr,
+      isCollectionOp: true,
+    });
+    expect(renderJavaExpr(mc("min", [idLambda]))).toBe(
+      "this.items.stream().map(x -> x).min(java.util.Comparator.naturalOrder()).orElse(null)",
+    );
+    expect(renderJavaExpr(mc("max", [idLambda]))).toBe(
+      "this.items.stream().map(x -> x).max(java.util.Comparator.naturalOrder()).orElse(null)",
+    );
+  });
 });
 
 describe("java renderJavaExpr — call kinds", () => {

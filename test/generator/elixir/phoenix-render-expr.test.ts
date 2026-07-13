@@ -651,6 +651,66 @@ describe("phoenix renderExpr — member, method-call, call, new, list, lambda", 
     expect(renderExpr(mc("join", [litStr(", ")]), ctx)).toBe('Enum.join(record.items, ", ")');
   });
 
+  it("renders the A4 reductions min(λ)/max(λ) with a type-aware Enum sorter", () => {
+    const arr: TypeIR = { kind: "array", element: STRING };
+    const mc = (member: string, args: ExprIR[]): ExprIR => ({
+      kind: "method-call",
+      receiver: thisProp("items"),
+      member,
+      args,
+      receiverType: arr,
+      isCollectionOp: true,
+    });
+    // λ-body projection typed via `member.memberType` (bodyTypeOf reads it).
+    const proj = (member: string, memberType: TypeIR): ExprIR => ({
+      kind: "lambda",
+      param: "x",
+      body: {
+        kind: "member",
+        receiver: { kind: "ref", name: "x", refKind: "lambda" },
+        member,
+        receiverType: { kind: "entity", name: "Line" },
+        memberType,
+      },
+    });
+    const idLambda: ExprIR = {
+      kind: "lambda",
+      param: "x",
+      body: { kind: "ref", name: "x", refKind: "lambda" },
+    };
+
+    // int/long/string (and untyped) → native `&<=/2` (min) / `&>=/2` (max);
+    // empty → nil via the `fn -> nil end` fallback.
+    expect(renderExpr(mc("min", [idLambda]), ctx)).toBe(
+      "Enum.min(Enum.map(record.items, fn x -> x end), &<=/2, fn -> nil end)",
+    );
+    expect(renderExpr(mc("max", [idLambda]), ctx)).toBe(
+      "Enum.max(Enum.map(record.items, fn x -> x end), &>=/2, fn -> nil end)",
+    );
+    expect(renderExpr(mc("min", [proj("qty", INT)]), ctx)).toBe(
+      "Enum.min(Enum.map(record.items, fn x -> x.qty end), &<=/2, fn -> nil end)",
+    );
+
+    // money/decimal → Decimal.compare (native `<=`/`>=` is STRUCTURAL on a
+    // Decimal struct, not numeric): min `!= :gt`, max `!= :lt`.
+    expect(renderExpr(mc("min", [proj("price", MONEY)]), ctx)).toBe(
+      "Enum.min(Enum.map(record.items, fn x -> x.price end), &(Decimal.compare(&1, &2) != :gt), fn -> nil end)",
+    );
+    expect(renderExpr(mc("max", [proj("price", MONEY)]), ctx)).toBe(
+      "Enum.max(Enum.map(record.items, fn x -> x.price end), &(Decimal.compare(&1, &2) != :lt), fn -> nil end)",
+    );
+
+    // datetime → DateTime.compare (native compare is chronological only via
+    // the helper): min `!= :gt`, max `!= :lt`.
+    const DATETIME: TypeIR = { kind: "primitive", name: "datetime" };
+    expect(renderExpr(mc("min", [proj("createdAt", DATETIME)]), ctx)).toBe(
+      "Enum.min(Enum.map(record.items, fn x -> x.created_at end), &(DateTime.compare(&1, &2) != :gt), fn -> nil end)",
+    );
+    expect(renderExpr(mc("max", [proj("createdAt", DATETIME)]), ctx)).toBe(
+      "Enum.max(Enum.map(record.items, fn x -> x.created_at end), &(DateTime.compare(&1, &2) != :lt), fn -> nil end)",
+    );
+  });
+
   it("renders function call with receiver prepended (passed first arg)", () => {
     expect(
       renderExpr(

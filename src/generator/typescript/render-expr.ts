@@ -1,6 +1,7 @@
 import { genericShape } from "../../ir/stdlib/generics.js";
 import { variantTag } from "../../ir/stdlib/unions.js";
 import type { BinOp, ExprIR, LiteralKind, TypeIR } from "../../ir/types/loom-ir.js";
+import { bodyTypeOf } from "../../util/expr-body-type.js";
 import { intrinsicKey } from "../../util/intrinsics.js";
 import { escapeTsIdent, lowerFirst, upperFirst, workflowFnCamel } from "../../util/naming.js";
 import { DURATION_UNIT_MS } from "../../util/temporal.js";
@@ -406,7 +407,28 @@ export const TS_COLLECTION_RENDERERS: Record<
   take: (recv, args) => `${recv}.slice(0, ${args[0]})`,
   skip: (recv, args) => `${recv}.slice(${args[0]})`,
   join: (recv, args) => `${recv}.join(${args[0]})`,
+  // min/max return the PROJECTED value, empty → null.  Uniform comparator-
+  // reduce works for number/string/Date via `<`/`>`.  Money is decimal.js
+  // `Decimal` — its `<`/`>` operators don't compare, so a money projection
+  // dispatches to the `.lt`/`.gt` method form (bodyTypeOf on the lambda body).
+  min: (recv, args, e) =>
+    projectionBodyIsMoney(e)
+      ? `(${recv}.length ? ${recv}.map(${args[0]}).reduce((__a, __b) => (__b.lt(__a) ? __b : __a)) : null)`
+      : `(${recv}.length ? ${recv}.map(${args[0]}).reduce((__a, __b) => (__b < __a ? __b : __a)) : null)`,
+  max: (recv, args, e) =>
+    projectionBodyIsMoney(e)
+      ? `(${recv}.length ? ${recv}.map(${args[0]}).reduce((__a, __b) => (__b.gt(__a) ? __b : __a)) : null)`
+      : `(${recv}.length ? ${recv}.map(${args[0]}).reduce((__a, __b) => (__b > __a ? __b : __a)) : null)`,
 };
+
+/** True iff a `min`/`max` reduction's lambda body types as `money` — its
+ *  projected values are decimal.js `Decimal`s, which need `.lt`/`.gt` rather
+ *  than the native `<`/`>` comparators. */
+function projectionBodyIsMoney(e?: Extract<ExprIR, { kind: "method-call" }>): boolean {
+  const lam = e?.args[0];
+  const bodyT = lam?.kind === "lambda" && lam.body ? bodyTypeOf(lam.body) : undefined;
+  return bodyT?.kind === "primitive" && bodyT.name === "money";
+}
 
 function renderCollectionOp(
   recv: string,
