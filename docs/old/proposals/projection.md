@@ -338,13 +338,47 @@ workflow-instance surface.
 
 ## Deferred / open questions
 
-- **v1.1 — projection as a `view` source.** Add `Projection` to
+- **v1.1 — projection as a `view` source (IN PROGRESS).** Adds `Projection` to
   `type ViewSource = Aggregate | Workflow | Projection` (the exact slice #1037
-  was for workflows). Then a view can curate + bind-follow off a projection row
-  (`view ShippedOrders { from OrderBook where status == Shipped bind customerName = customer.name }`)
+  was for workflows). A view can then curate + bind-follow off a projection row
+  (`view ShippedOrders { customerName: string  from OrderBook where status == Shipped  bind customerName = customer.name }`)
   — reading projection + repos at query time, which is legal because a view is a
-  query, not a replayable fold. Kept out of v1 to keep the first slice to
-  "fold + own endpoint," mirroring aggregate-views-before-workflow-views.
+  query, not a replayable fold. Unlike the workflow arm (shorthand-only,
+  `loom.view-workflow-fullform-unsupported`), a projection source **permits the
+  full-form bind-follow**: it fuses workflow-style source resolution (the
+  `<Proj>Row` read-model table, no ES variant) with the aggregate-style
+  bind-follow path. Backend-only (5 backends emit views); frontends only type the
+  row. Kept out of v1 to keep the first slice to "fold + own endpoint," mirroring
+  aggregate-views-before-workflow-views.
+  - **Per-backend support (as shipped).** *Shorthand* (`view X = P where …`)
+    reads the `<Proj>Row` table on **all five** backends. *Full form* follows the
+    backend's existing aggregate-view capability: **node/Hono and Python** run the
+    full bind-follow (bulk-load followed aggregates via `findManyByIds` /
+    `find_many_by_ids`, re-branding the nullable read-model id column before the
+    load); **Java and Phoenix** emit a follow-free full-form (project row columns)
+    but throw a descriptive codegen error on a cross-aggregate follow — the same
+    limitation their aggregate-view path already has; **.NET** is shorthand-only
+    (a full-form projection view throws), because a `<Proj>Row`'s non-key columns
+    are nullable id/enum value objects the aggregate bind-follow machinery does
+    not yet handle. This asymmetry mirrors the pre-existing aggregate-view matrix
+    (Java already throws on aggregate cross-aggregate follows); a future slice can
+    lift Java/Phoenix/.NET to parity.
+- **v1.1 — event-sourced view source lint (SHIPPED, warning-only).** A `view`
+  whose source is **event-sourced** — an `eventSourced` workflow *or* a
+  `persistedAs(eventLog)` aggregate — is a footgun: it has no state table, so
+  every backend re-folds the whole `<x>_events` stream *in memory at query time*
+  and filters in application code (`emitWorkflowViewRoute`'s ES branch; the
+  aggregate case re-folds through the repository's `findAll`). That is,
+  functionally, *a projection recomputed per request and thrown away* — O(all
+  events) per call, no index, no SQL pushdown. A projection is the correct tool:
+  it folds the same stream **once, at write time**, into an indexed `<Proj>Row`
+  table a projection-view reads with a SQL-pushed filter. This is surfaced as a
+  **WARNING, not a gate** — `loom.view-source-eventsourced-refold`
+  (`ir/validate/checks/workflow-checks.ts`) — that points the author at "define a
+  `projection` and view over it." The ES-source-view path still ships and stays
+  valid; the lint is a nudge, never a rejection, so it can't break existing
+  models. It shipped alongside projection-as-view-source, since the nudge is only
+  actionable once the clean alternative exists.
 - **Replay / rebuild.** v1 folds synchronously in-process at emit time; there is
   no durable log to replay from and no rebuild command. Replay lands with the
   durable-log channel tier (`channels.md` `channelSource` → kafka/redis-streams)

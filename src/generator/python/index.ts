@@ -154,10 +154,12 @@ export function generatePythonForContexts(args: GeneratePythonArgs): Map<string,
   // A workflow-sourced view is observable only when its source workflow has an
   // `instanceWireShape` (correlation-bearing, state-table-backed).
   const wfHasInstanceShape = new Map(merged.workflows.map((w) => [w.name, w.instanceWireShape]));
+  const projHasShape = new Map(merged.projections.map((p) => [p.name, p.wireShape]));
   const hasViews = merged.views.some(
     (v) =>
       v.source.kind === "aggregate" ||
-      (v.source.kind === "workflow" && wfHasInstanceShape.get(v.source.name) != null),
+      (v.source.kind === "workflow" && wfHasInstanceShape.get(v.source.name) != null) ||
+      (v.source.kind === "projection" && projHasShape.get(v.source.name) != null),
   );
   // A command workflow gets a POST route; an observable (correlation-bearing)
   // workflow gets read-only instance endpoints — either means `workflows_routes`

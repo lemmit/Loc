@@ -1135,6 +1135,61 @@ describe("typescript generator", () => {
     expect(customerRepo).toMatch(/\.where\(inArray\(schema\.customers\.id, ids\)\)/);
   });
 
+  it("emits projection-sourced view routes (shorthand read + full-form bind-follow)", async () => {
+    // projection.md v1.1 — a `view` over a projection reads its `<Proj>Row`
+    // read-model table directly (shorthand) and may bind-follow `X id` columns
+    // into repositories (full form).  The full-form follow re-brands the
+    // nullable read-model column via `Ids.<Agg>Id(...)` before `findManyByIds`.
+    const { parseHelper } = await import("langium/test");
+    const services = createDddServices(NodeFileSystem);
+    const helper = parseHelper(services.Ddd);
+    const doc = await helper(
+      `
+      context Sales {
+        enum OrderStatus { Placed, Shipped }
+        event OrderPlaced  { order: Order id, customer: Customer id }
+        event OrderShipped { order: Order id }
+        aggregate Customer { name: string }
+        repository Customers for Customer { }
+        aggregate Order { status: OrderStatus  customer: Customer id }
+        repository Orders for Order { }
+        projection OrderBook keyed by order {
+          order: Order id
+          customer: Customer id
+          status: OrderStatus
+          on(e: OrderPlaced)  { order := e.order  customer := e.customer  status := Placed }
+          on(e: OrderShipped) { status := Shipped }
+        }
+        view ShippedRows = OrderBook where status == Shipped
+        view ShippedOrders {
+          customerName: string
+          from OrderBook where status == Shipped
+          bind customerName = customer.name
+        }
+      }
+    `,
+      { validation: true },
+    );
+    const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
+    const views = files.get("http/views.ts")!;
+
+    // Shorthand: direct SQL-pushed read of the `<Proj>Row` drizzle table, no
+    // aggregate repository, projected through the projection wire shape.
+    expect(views).toMatch(/path: "\/shipped_rows"/);
+    expect(views).toMatch(
+      /await db\.select\(\)\.from\(schema\.orderBooks\)\.where\(eq\(schema\.orderBooks\.status, "Shipped"\)\)/,
+    );
+
+    // Full form: reads the same table, then bulk-loads the followed aggregate —
+    // re-branding the NULLABLE read-model column (`string | null`) via
+    // `Ids.CustomerId(...)` (dropping NULLs) so `findManyByIds` type-checks.
+    expect(views).toMatch(/import \* as Ids from "\.\.\/domain\/ids"/);
+    expect(views).toMatch(
+      /rows\.map\(\(r\) => r\.customer\)\.filter\(\(x\): x is string => x !== null\)\.map\(\(x\) => Ids\.CustomerId\(x\)\)/,
+    );
+    expect(views).toMatch(/customerName: customerById\.get\(r\.customer as string\)!\.name/);
+  });
+
   it("workflow op-call to a parameterless extern calls the aggregate-owned op", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);

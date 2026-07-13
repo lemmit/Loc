@@ -4,6 +4,7 @@ import type {
   AggregateIR,
   EnrichedBoundedContextIR,
   ExprIR,
+  ProjectionIR,
   TypeIR,
   ViewIR,
   WorkflowIR,
@@ -86,6 +87,38 @@ export function buildViewsRoutesFile(
     }
     wfViews.push({ view: v, wf, eventSourced: false, table, where });
   }
+  // Projection-sourced views (projection.md v1.1) — read the persisted
+  // `<Proj>Row` read-model table directly, exactly the state-saga SQL-pushed
+  // path (projections have no event-sourced variant — always a physical row
+  // table).  Unlike workflow sources, a projection source PERMITS the full-form
+  // bind-follow (`view.output`): reading projection + repos at query time is
+  // legal because a view is a query, not a replayable fold.
+  const projViews: Array<{
+    view: ViewIR;
+    proj: ProjectionIR;
+    table: string;
+    where?: string;
+  }> = [];
+  const projDrizzleOps = new Set<string>();
+  for (const v of ctx.views) {
+    if (v.source.kind !== "projection") continue;
+    const proj = ctx.projections.find((p) => p.name === v.source.name);
+    if (!proj) continue;
+    // The projection row table shares the workflow-state naming convention
+    // (`lowerFirst(plural(name))` → the drizzle `schema.<x>` export); the bare
+    // form feeds `lowerToDrizzle`'s `schema.<table>.<col>` refs.
+    const tableBare = lowerFirst(plural(proj.name));
+    const table = `schema.${tableBare}`;
+    let where: string | undefined;
+    if (v.filter) {
+      const lowered = lowerToDrizzle(v.filter, tableBare, ctx);
+      if (lowered) {
+        where = lowered.expr;
+        for (const op of lowered.ops) projDrizzleOps.add(op);
+      }
+    }
+    projViews.push({ view: v, proj, table, where });
+  }
   // Event-sourced workflow-views need the per-workflow fold machinery
   // (apply / fold / loadAll) + the shared stream (de)serialisers in scope — the
   // file-local helpers the ES instance LIST also emits.  Emitted once into THIS
@@ -118,7 +151,7 @@ export function buildViewsRoutesFile(
   // (`db.select().from(...)` for state sagas, the ES fold helpers' stream reads
   // for event-sourced ones); aggregate-only files keep the type-only import.
   lines.push(
-    wfViews.length > 0
+    wfViews.length > 0 || projViews.length > 0
       ? `import * as schema from "../db/schema";`
       : `import type * as schema from "../db/schema";`,
   );
@@ -130,13 +163,20 @@ export function buildViewsRoutesFile(
     new RegExp(`(?<!\\.)\\b${op}\\(`).test(esHelperStr),
   );
   for (const op of esDrizzleOps) wfDrizzleOps.add(op);
+  // Projection-view `where` clauses contribute the same Drizzle ops.
+  for (const op of projDrizzleOps) wfDrizzleOps.add(op);
   if (wfDrizzleOps.size > 0) {
     lines.push(`import { ${[...wfDrizzleOps].sort().join(", ")} } from "drizzle-orm";`);
   }
   if (/\bEvents\.\w/.test(esHelperStr)) {
     lines.push(`import type * as Events from "../domain/events";`);
   }
-  if (/\bIds\.\w/.test(esHelperStr)) {
+  // A projection full-form first-hop follow re-brands nullable row columns with
+  // `Ids.<Agg>Id(...)` (see idsSourceForAux), so it needs the Ids namespace too.
+  const projNeedsIds = projViews.some((p) =>
+    (p.view.output?.auxiliaries ?? []).some((a) => a.path.length === 1),
+  );
+  if (/\bIds\.\w/.test(esHelperStr) || projNeedsIds) {
     lines.push(`import * as Ids from "../domain/ids";`);
   }
   if (/(?<!\.)\bDecimal\b/.test(esHelperStr)) {
@@ -146,6 +186,15 @@ export function buildViewsRoutesFile(
   // aggregates referenced via `X id` follow auxiliaries.
   const aggsTouched = new Set<string>();
   for (const v of ctx.views) {
+    // Projection-sourced views read the `<Proj>Row` table directly (no source
+    // repository), but their full-form bind-follows still bulk-load foreign
+    // aggregates through those aggregates' repositories (projection.md v1.1).
+    if (v.source.kind === "projection") {
+      if (v.output) {
+        for (const aux of v.output.auxiliaries) aggsTouched.add(aux.aggName);
+      }
+      continue;
+    }
     // Workflow-sourced views read the saga-state table directly, not an
     // aggregate repository (workflow-instance-views.md) — emitted separately.
     if (v.source.kind !== "aggregate") continue;
@@ -206,6 +255,16 @@ export function buildViewsRoutesFile(
   }
   if (wfViews.length > 0) lines.push("");
 
+  // Projection-view response schemas — the `<Proj>Row` read-model shape, built
+  // from the source projection's `wireShape` (mirrors the workflow-view schema).
+  // Full-form projection views declare their own record shape, already emitted
+  // by the generic `view.output` loop above, so only shorthand views need this.
+  for (const { view, proj } of projViews) {
+    if (view.output) continue;
+    lines.push(...emitProjectionViewSchema(view, proj, enumValues));
+  }
+  if (projViews.some((p) => !p.view.output)) lines.push("");
+
   // ES fold machinery (module-level, file-local) for any event-sourced
   // workflow-view source.
   if (esHelperLines.length > 0) {
@@ -217,7 +276,11 @@ export function buildViewsRoutesFile(
   // param is unused there — name it `_events` to stay clean under Biome's
   // noUnusedFunctionParameters (callers pass it positionally, so the name is
   // irrelevant to them).
-  const usesEvents = ctx.views.some((v) => v.source.kind === "aggregate");
+  const usesEvents =
+    ctx.views.some((v) => v.source.kind === "aggregate") ||
+    // A full-form projection view with bind-follows constructs foreign-aggregate
+    // repositories (`new XRepository(db, events)`) to bulk-load the followed rows.
+    projViews.some((p) => (p.view.output?.auxiliaries.length ?? 0) > 0);
   lines.push(`export function viewsRoutes(`);
   lines.push(`  db: NodePgDatabase<typeof schema>,`);
   lines.push(`  ${usesEvents ? "events" : "_events"}: DomainEventDispatcher,`);
@@ -238,6 +301,13 @@ export function buildViewsRoutesFile(
   // filter.
   for (const { view, wf, eventSourced, table, where } of wfViews) {
     lines.push(...emitWorkflowViewRoute(view, wf, eventSourced, table, where).map((l) => `  ${l}`));
+    lines.push("");
+  }
+  // Projection-sourced view routes — `GET /<view>` (projection.md v1.1): a
+  // direct SQL-pushed read over the `<Proj>Row` table, then (full-form) the
+  // aggregate-style bind-follow bulk-loads + projected map.
+  for (const { view, proj, table, where } of projViews) {
+    lines.push(...emitProjectionViewRoute(view, proj, table, where).map((l) => `  ${l}`));
     lines.push("");
   }
 
@@ -420,15 +490,113 @@ function emitWorkflowViewRoute(
   return out;
 }
 
+/** A projection-sourced view's response schema (`<View>Row` / `<View>Response`)
+ *  for the SHORTHAND form — the `<Proj>Row` read-model shape, walked from the
+ *  source projection's `wireShape` exactly as `emitWorkflowViewSchema` walks
+ *  `instanceWireShape` (projection.md v1.1).  Full-form views declare their own
+ *  record and reuse the generic `<View>Row` emitted upstream. */
+function emitProjectionViewSchema(
+  view: ViewIR,
+  proj: ProjectionIR,
+  enumValues: Map<string, string[]>,
+): string[] {
+  const T = upperFirst(view.name);
+  const out: string[] = [];
+  out.push(`const ${T}Row = z.object({`);
+  // Inline enum unions via `zodForRow` (the same helper the full-form row
+  // schema uses) rather than `zodForResponse`'s `<Enum>Schema` reference — this
+  // file imports the runtime enum consts, not their zod schema consts.
+  for (const f of proj.wireShape ?? []) {
+    out.push(`  ${f.name}: ${f.source === "id" ? "z.string()" : zodForRow(f.type, enumValues)},`);
+  }
+  out.push(`}).openapi("${T}Row");`);
+  out.push(`const ${T}Response = z.array(${T}Row).openapi("${T}Response");`);
+  return out;
+}
+
+/** A projection-sourced view route: `GET /<view>` (projection.md v1.1).  Reads
+ *  the `<Proj>Row` table directly with the view's filter lowered to a SQL-pushed
+ *  Drizzle `where` (the state-saga path — projections have no ES variant), then:
+ *   - **shorthand** — casts the rows to the projection wire shape (`c.json`
+ *     JSON-serialises branded ids → string), exactly like the state-saga
+ *     workflow-view route;
+ *   - **full-form** — runs the aggregate-style bind-follow (bulk-load every
+ *     `X id` follow through its repository, then a projected `.map`), the same
+ *     machinery `emitViewRoute` uses for an aggregate source — the one path a
+ *     workflow source does NOT get. */
+function emitProjectionViewRoute(
+  view: ViewIR,
+  proj: ProjectionIR,
+  table: string,
+  where: string | undefined,
+): string[] {
+  const T = upperFirst(view.name);
+  const out: string[] = [];
+  const usesUser = viewUsesCurrentUser(view);
+  out.push(`app.openapi(`);
+  out.push(`  createRoute({`);
+  out.push(`    method: "get",`);
+  out.push(`    path: "/${snake(view.name)}",`);
+  out.push(`    tags: ["views", "${snake(plural(proj.name))}"],`);
+  out.push(`    operationId: "${camelId(opView(view.name))}",`);
+  out.push(`    responses: {`);
+  out.push(
+    `      200: { description: "OK", content: { "application/json": { schema: ${T}Response } } },`,
+  );
+  out.push(`    },`);
+  out.push(`  }),`);
+  out.push(`  async (httpCtx) => {`);
+  if (usesUser || view.requires) {
+    out.push(
+      `    const currentUser = (httpCtx as unknown as { get(k: "currentUser"): import("../auth/user-types").User }).get("currentUser");`,
+    );
+  }
+  for (const line of viewGateLines(view)) out.push(line);
+  out.push(`    const rows = await db.select().from(${table})${where ? `.where(${where})` : ""};`);
+  if (view.output) {
+    const pathToMap = new Map<string, { mapVar: string; aggName: string }>();
+    for (const aux of view.output.auxiliaries) {
+      const repoVar = `${lowerFirst(aux.aggName)}Repo`;
+      const mapVar = aux.mapVar;
+      out.push(`    const ${repoVar} = new ${aux.aggName}Repository(db, events);`);
+      const idsSource = idsSourceForAux(aux, pathToMap, true);
+      out.push(
+        `    const ${mapVar} = new Map((await ${repoVar}.findManyByIds(${idsSource})).map((a) => [a.id as string, a]));`,
+      );
+      pathToMap.set(aux.path.join("."), { mapVar, aggName: aux.aggName });
+    }
+    const projectedFields = view.output.binds
+      .map((b) => `      ${b.name}: ${renderBindWithFollows(b.expr, "r", pathToMap)}`)
+      .join(",\n");
+    out.push(`    const projected = rows.map((r) => ({\n${projectedFields},\n    }));`);
+    out.push(`    return httpCtx.json(projected as z.infer<typeof ${T}Response>, 200);`);
+  } else {
+    out.push(`    return httpCtx.json(rows as unknown as z.infer<typeof ${T}Response>, 200);`);
+  }
+  out.push(`  },`);
+  out.push(`);`);
+  return out;
+}
+
 /** Pick the id-source expression for an auxiliary's bulk load.
  *  Length-1 paths source from the row var (`rows.map(r => r.<f>)`);
  *  length-2+ paths source from the prior map (the auxiliary whose
- *  path is the current path's prefix). */
+ *  path is the current path's prefix).
+ *
+ *  `fromRow` distinguishes the projection source: a `<Proj>Row` read-model
+ *  column is nullable `string | null` (not the aggregate's non-nullable branded
+ *  `<Agg>Id`), so a first-hop follow off a projection row drops NULLs and
+ *  re-brands each value with `Ids.<Agg>Id(...)` before `findManyByIds`.  Later
+ *  hops read hydrated aggregates and already hold proper id types. */
 function idsSourceForAux(
   aux: { path: string[]; aggName: string; mapVar: string },
   pathToMap: Map<string, { mapVar: string; aggName: string }>,
+  fromRow = false,
 ): string {
   if (aux.path.length === 1) {
+    if (fromRow) {
+      return `rows.map((r) => r.${aux.path[0]!}).filter((x): x is string => x !== null).map((x) => Ids.${aux.aggName}Id(x))`;
+    }
     return `rows.map((r) => r.${aux.path[0]!})`;
   }
   const prevPath = aux.path.slice(0, -1).join(".");

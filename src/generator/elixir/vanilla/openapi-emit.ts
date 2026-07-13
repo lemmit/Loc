@@ -134,9 +134,10 @@ export function emitOpenApiSpec(args: OpenApiEmitArgs): OpenApiEmitResult {
     for (const wf of ctx.workflows.filter(workflowEmitsCommandRoute))
       allWorkflows.push({ ctx, wf });
     for (const wf of ctx.workflows) if (wf.instanceWireShape) observableWorkflows.push(wf);
-    // Workflow-sourced views (workflow-instance-views.md) are emitted by a
-    // dedicated branch in a later slice; the aggregate-view OpenAPI surface
-    // below stays byte-identical by only gathering aggregate sources.
+    // Workflow-sourced (workflow-instance-views.md) and projection-sourced
+    // (projection.md v1.1) views are served at runtime by the ViewsController but
+    // not yet described in this OpenAPI surface (a later slice); gathering only
+    // aggregate sources keeps the aggregate-view spec byte-identical.
     for (const view of ctx.views)
       if (view.source.kind === "aggregate") allViews.push({ ctx, view });
   }

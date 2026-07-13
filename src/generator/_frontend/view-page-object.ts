@@ -72,6 +72,9 @@ function collectColumnNames(view: ViewIR, ctx: BoundedContextIR): string[] {
   } else if (view.source.kind === "workflow") {
     const wf = ctx.workflows.find((w) => w.name === view.source.name);
     fields = wf?.instanceWireShape?.map((f) => ({ name: f.name, type: f.type })) ?? [];
+  } else if (view.source.kind === "projection") {
+    const proj = ctx.projections.find((p) => p.name === view.source.name);
+    fields = proj?.wireShape?.map((f) => ({ name: f.name, type: f.type })) ?? [];
   } else {
     const agg = ctx.aggregates.find((a) => a.name === view.source.name);
     fields = agg?.fields ?? [];

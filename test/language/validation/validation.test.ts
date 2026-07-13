@@ -2190,10 +2190,15 @@ describe("Loom IR validation (post-lowering)", async () => {
     const diags = validateLoomModel(loom);
     // Langium's cross-ref drops to "Unknown" sentinel when it can't
     // resolve, so the validator surfaces "source 'Unknown' is not an
-    // aggregate".  Either rejection mechanism is fine for the user;
-    // the test asserts the diagnostic exists in some recognisable form.
+    // aggregate, workflow, or projection".  Either rejection mechanism is
+    // fine for the user; the test asserts the diagnostic exists in some
+    // recognisable form.
     expect(
-      diags.some((d) => d.severity === "error" && /is not an aggregate in context/.test(d.message)),
+      diags.some(
+        (d) =>
+          d.severity === "error" &&
+          /is not an aggregate, workflow, or projection in context/.test(d.message),
+      ),
       JSON.stringify(diags),
     ).toBe(true);
   });

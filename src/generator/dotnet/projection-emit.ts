@@ -41,7 +41,7 @@ import { renderExprWithEventParam } from "./workflow-emit.js";
  *  the DTO field (`Guid?` / `OrderStatus?`) + the null-safe `projectToResponse`
  *  projection match the nullable read-model row (python-parity).  The
  *  correlation field (`source: "id"`) stays non-nullable (the NOT NULL key). */
-function wireFieldType(f: WireField): TypeIR {
+export function wireFieldType(f: WireField): TypeIR {
   if (f.source === "id" || f.type.kind === "optional") return f.type;
   return { kind: "optional", inner: f.type };
 }

@@ -1398,11 +1398,15 @@ ProjectionOn:
 //     bind expression evaluated against the source aggregate.
 //
 // See docs/views.md for the full surface.
-// A view's source is an aggregate (the wire shape is its repository read)
-// or a workflow (the wire shape is its persisted instance / saga-state row —
-// see docs/old/proposals/workflow-instance-views.md).  The grammar admits both;
-// the validator restricts the workflow case (shorthand only, non-event-sourced).
-type ViewSource = Aggregate | Workflow;
+// A view's source is an aggregate (the wire shape is its repository read),
+// a workflow (the wire shape is its persisted instance / saga-state row —
+// see docs/old/proposals/workflow-instance-views.md), or a projection (the wire
+// shape is its persisted `<Proj>Row` read model — projection.md v1.1).  The
+// grammar admits all three; the validator restricts the workflow case
+// (shorthand only, non-event-sourced) but permits the full-form bind-follow
+// over a projection source (reading projection + repos at query time is legal
+// because a view is a query, not a replayable fold).
+type ViewSource = Aggregate | Workflow | Projection;
 
 View:
     'view' name=ID

@@ -28,6 +28,12 @@ const SRC = `system Shop { subdomain Sales { context Orders {
     on(e: OrderPlaced)  { order := e.order  customer := e.customer  status := Placed }
     on(e: OrderShipped) { status := Shipped }
   }
+  view ShippedRows = OrderBook where status == Shipped
+  view ShippedLabels {
+    label: OrderStatus
+    from OrderBook where status == Shipped
+    bind label = status
+  }
 } } storage pg { type: postgres }
   resource oState { for: Orders, kind: state, use: pg }
   deployable salesApi { platform: elixir contexts: [Orders] dataSources: [oState] port: 4000 } }`;
@@ -128,5 +134,27 @@ describe("elixir-vanilla projection runtime", () => {
       (k) => k.includes("/projections/") || k.endsWith("projections_controller.ex"),
     );
     expect(projectionFiles).toEqual([]);
+  });
+
+  // projection.md v1.1 — a `view` sourced from a projection reads its `<Proj>Row`
+  // read-model schema directly (the read-side sibling of the projections
+  // controller), projecting through the projection wire shape.
+  it("emits a projection-sourced view module (shorthand: Ecto read of the row table)", async () => {
+    const view = file(await build(SRC), "orders/views/shipped_rows.ex");
+    expect(view).toContain("defmodule SalesApi.Orders.Views.ShippedRows do");
+    expect(view).toContain(
+      'from(record in SalesApi.Orders.Projections.OrderBookRow, where: record.status == "Shipped")',
+    );
+    expect(view).toContain("|> Repo.all()");
+    // Projects the projection wire shape (camelCase key ← snake row column).
+    expect(view).toContain(
+      "|> Enum.map(fn record -> %{order: record.order, customer: record.customer, status: record.status} end)",
+    );
+  });
+
+  it("emits a follow-free full-form projection view (bind over the row column)", async () => {
+    const view = file(await build(SRC), "orders/views/shipped_labels.ex");
+    expect(view).toContain("defmodule SalesApi.Orders.Views.ShippedLabels do");
+    expect(view).toContain("|> Enum.map(fn record -> %{label: record.status} end)");
   });
 });

@@ -1,6 +1,7 @@
 import type {
   EnrichedBoundedContextIR,
   ExprIR,
+  ProjectionIR,
   ViewIR,
   WireField,
   WorkflowIR,
@@ -10,6 +11,7 @@ import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { collectJavaExprImports, javaValueTypeForId, renderJavaExpr } from "../render-expr.js";
 import { voResponseRecords } from "./dto.js";
+import { projectionRepoField } from "./projection-reads.js";
 import { collectWireImports, domainToWire, referencedValueObjects, wireJavaType } from "./wire.js";
 import {
   esEventLogTable,
@@ -92,7 +94,21 @@ export function renderJavaViews(
   const wfViews = ctx.views.filter(
     (v) => v.source.kind === "workflow" && !!wfByName.get(v.source.name)?.instanceWireShape,
   );
-  if (views.length === 0 && wfViews.length === 0) return null;
+  // Projection-sourced views (projection.md v1.1): read the persisted `<Proj>Row`
+  // read-model row through its Spring Data repository and project each row
+  // through the projection's `wireShape` — the read-side analogue of the
+  // state-based workflow view, but reading the projection row table instead of a
+  // saga-state row.  A projection is always a physical row table (no
+  // event-sourced variant), so it always takes this direct-read path.  Unlike a
+  // workflow source, a projection source PERMITS the full-form bind-follow — but
+  // cross-aggregate follows (`auxiliaries`) share the aggregate backend's
+  // limitation on java (thrown below), so in practice only shorthand and
+  // follow-free full-form projection views compile here.
+  const projByName = new Map(ctx.projections.map((p) => [p.name, p] as const));
+  const projViews = ctx.views.filter(
+    (v) => v.source.kind === "projection" && !!projByName.get(v.source.name)?.wireShape,
+  );
+  if (views.length === 0 && wfViews.length === 0 && projViews.length === 0) return null;
   const out = new Map<string, { category: "view-service" | "api-common"; content: string }>();
   const imports = new Set<string>(["java.util.List"]);
   const explicitImports = new Set<string>();
@@ -112,8 +128,8 @@ export function renderJavaViews(
   // is currentUser-only; when it references currentUser the service injects the
   // CurrentUserAccessor and binds a local `currentUser` for the predicate.
   // `requires true` needs neither (and an unused field would be dead code).
-  const anyGate = [...views, ...wfViews].some((v) => v.requires);
-  const anyGateUsesUser = [...views, ...wfViews].some(
+  const anyGate = [...views, ...wfViews, ...projViews].some((v) => v.requires);
+  const anyGateUsesUser = [...views, ...wfViews, ...projViews].some(
     (v) => v.requires && exprUsesCurrentUser(v.requires),
   );
   const gateLinesFor = (view: ViewIR): string[] => {
@@ -330,6 +346,92 @@ export function renderJavaViews(
       ``,
     );
   }
+  // Projection-sourced views — a `<View>Row` record over the source projection's
+  // `wireShape` (shorthand) or its declared `output` (full form), plus a service
+  // method reading the read-model row through the `<Proj>RowRepository`, filtering
+  // in-memory over the row accessors, and projecting each row.
+  const projRows: ProjectionIR[] = [];
+  const seenProjRepo = new Set<string>();
+  for (const view of projViews) {
+    const proj = projByName.get((view.source as { name: string }).name)!;
+    const findName = lowerFirst(view.name);
+    const rowName = `${upperFirst(view.name)}Row`;
+    const shape = proj.wireShape ?? [];
+    if (!seenProjRepo.has(proj.name)) {
+      seenProjRepo.add(proj.name);
+      projRows.push(proj);
+    }
+    const repo = projectionRepoField(proj);
+    // Filter renders to an in-memory boolean over the read-model row's
+    // record-style accessors (`accessorProps` → `x.<col>()`).
+    const filterLine = view.filter
+      ? (() => {
+          collectJavaExprImports(view.filter, imports);
+          return `            .filter(x -> ${renderJavaExpr(view.filter, { thisName: "x", accessorProps: true })})`;
+        })()
+      : undefined;
+    // Row record: full form projects declared fields; shorthand mirrors the
+    // projection's wire shape (same components as `<Proj>Response`).
+    const rowImports = new Set<string>();
+    const fields =
+      view.output?.fields ?? shape.map((f) => ({ name: f.name, type: f.type }) as const);
+    const components = fields.map((f) => {
+      collectWireImports(f.type, rowImports);
+      return `${wireJavaType(f.type, "Response")} ${f.name}`;
+    });
+    out.set(`${rowName}.java`, {
+      category: "view-service",
+      content: lines(
+        `package ${vctx.pkg};`,
+        ``,
+        ...[...rowImports].sort().map((i) => `import ${i};`),
+        rowImports.size > 0 ? `` : null,
+        `import ${vctx.basePkg}.domain.enums.*;`,
+        `import ${vctx.basePkg}.domain.ids.*;`,
+        `import ${vctx.basePkg}.domain.valueobjects.*;`,
+        ``,
+        `public record ${rowName}(${components.join(", ")}) {`,
+        `}`,
+        ``,
+      ),
+    });
+    let projExpr: string;
+    if (view.output) {
+      if (view.output.auxiliaries.length > 0) {
+        throw new Error(
+          `java views: projection view '${view.name}' uses cross-aggregate follows — not yet implemented on the java backend.`,
+        );
+      }
+      projExpr = view.output.binds
+        .map((b) => {
+          collectJavaExprImports(b.expr, imports);
+          return domainToWire(
+            b.type,
+            renderJavaExpr(b.expr, { thisName: "x", accessorProps: true }),
+          );
+        })
+        .join(", ");
+    } else {
+      projExpr = shape.map((f) => domainToWire(f.type, `x.${f.name}()`)).join(", ");
+    }
+    methods.push(
+      `    public List<${rowName}> ${findName}() {`,
+      ...gateLinesFor(view),
+      `        return ${repo}.findAll().stream()`,
+      ...(filterLine ? [filterLine] : []),
+      `            .map(x -> new ${rowName}(${projExpr}))`,
+      `            .toList();`,
+      `    }`,
+      ``,
+    );
+    routes.push(
+      `    @GetMapping("/${snake(view.name)}")`,
+      `    public List<${rowName}> ${findName}() {`,
+      `        return views.${findName}();`,
+      `    }`,
+      ``,
+    );
+  }
   while (methods[methods.length - 1] === "") methods.pop();
   while (routes[routes.length - 1] === "") routes.pop();
 
@@ -353,6 +455,20 @@ export function renderJavaViews(
   const stateCtorAssigns = stateWfs.map(
     (wf) =>
       `        this.${lowerFirst(wf.name)}StateRepository = ${lowerFirst(wf.name)}StateRepository;`,
+  );
+  // Read-model row repos for projection-sourced views (Spring Data, same
+  // `spring-data-repository` package as the saga-state repos).
+  const projRowFields = projRows.map(
+    (p) => `    private final ${upperFirst(p.name)}RowRepository ${projectionRepoField(p)};`,
+  );
+  for (const p of projRows) {
+    explicitImports.add(`${vctx.stateRepoPkg}.${upperFirst(p.name)}RowRepository`);
+  }
+  const projRowCtorParams = projRows.map(
+    (p) => `${upperFirst(p.name)}RowRepository ${projectionRepoField(p)}`,
+  );
+  const projRowCtorAssigns = projRows.map(
+    (p) => `        this.${projectionRepoField(p)} = ${projectionRepoField(p)};`,
   );
   // A single shared JdbcTemplate folds every event-sourced workflow-view's
   // stream (no mutable state repository to inject).
@@ -378,17 +494,20 @@ export function renderJavaViews(
       `public class ${serviceName} {`,
       ...repoFields.map((a) => `    private final ${a}Repository ${repoField(a)};`),
       ...stateFields,
+      ...projRowFields,
       esPresent ? `    private final JdbcTemplate jdbc;` : null,
       anyGateUsesUser ? `    private final CurrentUserAccessor currentUserAccessor;` : null,
       ``,
       `    public ${serviceName}(${[
         ...repoFields.map((a) => `${a}Repository ${repoField(a)}`),
         ...stateCtorParams,
+        ...projRowCtorParams,
         ...(esPresent ? ["JdbcTemplate jdbc"] : []),
         ...(anyGateUsesUser ? ["CurrentUserAccessor currentUserAccessor"] : []),
       ].join(", ")}) {`,
       ...repoFields.map((a) => `        this.${repoField(a)} = ${repoField(a)};`),
       ...stateCtorAssigns,
+      ...projRowCtorAssigns,
       esPresent ? `        this.jdbc = jdbc;` : null,
       anyGateUsesUser ? `        this.currentUserAccessor = currentUserAccessor;` : null,
       `    }`,
