@@ -4,6 +4,7 @@ import {
   type EnrichedBoundedContextIR,
   type ExprIR,
   exprUsesCurrentUser,
+  type ProjectionIR,
   type WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { tableOwnerName } from "../../ir/util/inheritance.js";
@@ -112,6 +113,19 @@ export function lowerToSqlAlchemy(
  *  fires here. */
 export function lowerWorkflowFilterToSqlAlchemy(e: ExprIR, wf: WorkflowIR): PyPredicate | null {
   return lowerOver(e, rowClassName(wf.name), [], "current_user");
+}
+
+/** Lower a projection-sourced view's filter (projection.md v1.1) to a predicate
+ *  over the `<Proj>Row` read-model table — the SAME SQL-pushed path as a
+ *  state-based workflow view, since a projection is always a physical row table
+ *  (no event-sourced variant).  `this.<stateField>` refs bind to the row's
+ *  columns; projection rows carry no reference collections, so the join-table
+ *  `contains` arm never fires here. */
+export function lowerProjectionFilterToSqlAlchemy(
+  e: ExprIR,
+  proj: ProjectionIR,
+): PyPredicate | null {
+  return lowerOver(e, rowClassName(proj.name), [], "current_user");
 }
 
 function lowerOver(

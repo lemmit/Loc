@@ -51,6 +51,10 @@ export function buildViewsApiModule(contexts: BoundedContextIR[]): string {
   const workflowSources = new Set<string>();
   for (const { view } of views) {
     if (view.output) continue;
+    // A projection source has no per-source api module — its shorthand row schema
+    // is emitted inline below from `proj.wireShape` (projection.md v1.1), so it
+    // contributes no import here.
+    if (view.source.kind === "projection") continue;
     // Shorthand views re-export the source's list response: an aggregate's
     // `<Agg>ListResponse` (from `./<agg>`) or a workflow's
     // `<Wf>InstanceListResponse` (from `./workflows`, workflow-instance-views.md).
@@ -72,12 +76,37 @@ export function buildViewsApiModule(contexts: BoundedContextIR[]): string {
   }
   lines.push("");
 
-  for (const { view } of views) {
+  for (const { view, ctx } of views) {
     const slug = snake(view.name);
+    const projShorthand =
+      !view.output && view.source.kind === "projection"
+        ? ctx.projections.find((p) => p.name === view.source.name)
+        : undefined;
     if (view.output) {
       lines.push(`export const ${upperFirst(view.name)}Row = z.object({`);
       for (const f of view.output.fields) {
         lines.push(`  ${f.name}: ${zodForViewResponse(f.type, f.optional)},`);
+      }
+      lines.push(`});`);
+      lines.push(
+        `export type ${upperFirst(view.name)}Row = z.infer<typeof ${upperFirst(view.name)}Row>;`,
+      );
+      lines.push(
+        `export const ${upperFirst(view.name)}Response = z.array(${upperFirst(view.name)}Row);`,
+      );
+      lines.push(
+        `export type ${upperFirst(view.name)}Response = z.infer<typeof ${upperFirst(view.name)}Response>;`,
+      );
+    } else if (projShorthand) {
+      // Shorthand projection view: no per-source api module exists (the source is
+      // a projection, not an aggregate/workflow), so emit the row schema inline
+      // from the projection's `wireShape` — the `<Proj>Row` read-model shape
+      // (projection.md v1.1).
+      lines.push(`export const ${upperFirst(view.name)}Row = z.object({`);
+      for (const f of projShorthand.wireShape ?? []) {
+        lines.push(
+          `  ${f.name}: ${f.source === "id" ? "z.string()" : zodForViewResponse(f.type, f.optional)},`,
+        );
       }
       lines.push(`});`);
       lines.push(
@@ -123,12 +152,25 @@ interface SchemaDep {
   schemaName: string;
 }
 
+/** The field types a view's row schema is built from — full-form output fields,
+ *  or (shorthand projection) the projection's non-id `wireShape` columns.  These
+ *  drive the enum / value-object schema imports the inline row references.
+ *  Aggregate / workflow shorthand views re-export a source list-response and so
+ *  reference no local schema, hence contribute nothing. */
+function viewRowTypes(view: ViewIR, ctx: BoundedContextIR): TypeIR[] {
+  if (view.output) return view.output.fields.map((f) => f.type);
+  if (view.source.kind === "projection") {
+    const proj = ctx.projections.find((p) => p.name === view.source.name);
+    return (proj?.wireShape ?? []).filter((f) => f.source !== "id").map((f) => f.type);
+  }
+  return [];
+}
+
 function collectEnumDeps(views: Array<{ view: ViewIR; ctx: BoundedContextIR }>): SchemaDep[] {
   const out = new Map<string, SchemaDep>();
   for (const { view, ctx } of views) {
-    if (!view.output) continue;
-    for (const f of view.output.fields) {
-      walkType(f.type, (t) => {
+    for (const type of viewRowTypes(view, ctx)) {
+      walkType(type, (t) => {
         if (t.kind === "enum") {
           const owner = findFirstAggregateWith(
             ctx,
@@ -150,9 +192,8 @@ function collectEnumDeps(views: Array<{ view: ViewIR; ctx: BoundedContextIR }>):
 function collectVoDeps(views: Array<{ view: ViewIR; ctx: BoundedContextIR }>): SchemaDep[] {
   const out = new Map<string, SchemaDep>();
   for (const { view, ctx } of views) {
-    if (!view.output) continue;
-    for (const f of view.output.fields) {
-      walkType(f.type, (t) => {
+    for (const type of viewRowTypes(view, ctx)) {
+      walkType(type, (t) => {
         if (t.kind === "valueobject") {
           const owner = findFirstAggregateWith(
             ctx,

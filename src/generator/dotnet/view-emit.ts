@@ -4,6 +4,7 @@ import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   ExprIR,
+  ProjectionIR,
   ViewIR,
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
@@ -12,6 +13,8 @@ import { camelId, opView } from "../../ir/util/openapi-ids.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import type { SourceMapRecorder } from "../_trace/sourcemap.js";
 import { dtoParam, projectEntityExpr, projectToResponse, wireType } from "./dto-mapping.js";
+import { wireFieldType } from "./projection-emit.js";
+import { projectionRowDbSet } from "./projection-state-emit.js";
 import { collectCsExprUsings, renderCsExpr } from "./render-expr.js";
 import { esCorrIdClass, esEventDbSet, esStreamType } from "./workflow-eventsourced-emit.js";
 import { workflowStateClass, workflowStateDbSet } from "./workflow-state-emit.js";
@@ -46,6 +49,7 @@ export function emitViews(
   if (ctx.views.length === 0) return;
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
   const wfByName = new Map(ctx.workflows.map((w) => [w.name, w] as const));
+  const projByName = new Map(ctx.projections.map((p) => [p.name, p] as const));
   const sourcemap = options?.sourcemap;
   for (const view of ctx.views) {
     const construct = `${ctx.name}.${view.name}`;
@@ -61,6 +65,30 @@ export function emitViews(
       sourcemap?.file(queryPath, queryContent, view.origin, construct);
       const handlerPath = `Application/Views/${upperFirst(view.name)}Handler.cs`;
       const handlerContent = renderWorkflowViewHandler(view, wf, ctx, ns);
+      out.set(handlerPath, handlerContent);
+      sourcemap?.file(handlerPath, handlerContent, view.origin, construct);
+      continue;
+    }
+    // Projection-sourced view (projection.md v1.1): a Mediator query whose handler
+    // reads the `<Proj>Row` read-model DbSet with the filter, returning the
+    // projection's `<Proj>Response` (emitted by emitProjectionReads) — the
+    // read-side sibling of the projections controller.  Shorthand only on the
+    // .NET backend: a full-form bind projection over a read-model row (whose
+    // non-key columns are nullable id/enum value objects) is not yet supported.
+    if (view.source.kind === "projection") {
+      const proj = projByName.get(view.source.name);
+      if (!proj?.wireShape) continue; // validator already errored
+      if (view.output) {
+        throw new Error(
+          `dotnet views: projection view '${view.name}' full-form bind projection — not yet implemented on the .NET backend.`,
+        );
+      }
+      const queryPath = `Application/Views/${upperFirst(view.name)}Query.cs`;
+      const queryContent = renderProjectionViewQuery(view, proj, ns);
+      out.set(queryPath, queryContent);
+      sourcemap?.file(queryPath, queryContent, view.origin, construct);
+      const handlerPath = `Application/Views/${upperFirst(view.name)}Handler.cs`;
+      const handlerContent = renderProjectionViewHandler(view, proj, ctx, ns);
       out.set(handlerPath, handlerContent);
       sourcemap?.file(handlerPath, handlerContent, view.origin, construct);
       continue;
@@ -385,6 +413,101 @@ ${gateLines.length > 0 ? gateLines.join("\n") + "\n" : ""}${queryBody}
 `;
 }
 
+// ---------------------------------------------------------------------------
+// Projection-sourced views (projection.md v1.1) — a Mediator query whose handler
+// reads the `<Proj>Row` read-model DbSet with the view filter (SQL `WHERE`) and
+// projects each row through the projection `wireShape`, returning the same
+// `<Proj>Response` the projections controller emits.  A projection is always a
+// physical row table (no event-sourced variant), so this is the only read path.
+// ---------------------------------------------------------------------------
+
+function renderProjectionViewQuery(view: ViewIR, proj: ProjectionIR, ns: string): string {
+  const responseRecord = `${upperFirst(proj.name)}Response`;
+  return `// Auto-generated.
+using System.Collections.Generic;
+using Mediator;
+using ${ns}.Application.Workflows;
+
+namespace ${ns}.Application.Views;
+
+public sealed record ${upperFirst(view.name)}Query() : IQuery<IReadOnlyList<${responseRecord}>>;
+`;
+}
+
+function renderProjectionViewHandler(
+  view: ViewIR,
+  proj: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
+  ns: string,
+): string {
+  const queryName = `${upperFirst(view.name)}Query`;
+  const handlerName = `${upperFirst(view.name)}Handler`;
+  const responseRecord = `${upperFirst(proj.name)}Response`;
+  const dbSet = projectionRowDbSet(proj);
+  const usings = new Set<string>();
+  // The `where` is an EF query over the read-model DbSet; `this.<col>` refs bind
+  // to the row's properties (`r.<Col>`).  Non-key columns are nullable, so an
+  // enum/ id equality is a lifted comparison EF translates to SQL.
+  const where = view.filter
+    ? renderCsExpr(view.filter, { thisName: "r", efQuery: true })
+    : undefined;
+  if (view.filter) collectCsExprUsings(view.filter, usings);
+  if (view.requires) collectCsExprUsings(view.requires, usings);
+  // Row → `<Proj>Response`, field-for-field identical to the projections
+  // controller (null-safe `projectToResponse` over the nullable read-model row).
+  const projFields = (proj.wireShape ?? [])
+    .map((f) => projectToResponse(`r.${upperFirst(f.name)}`, wireFieldType(f), ctx))
+    .join(", ");
+  const extraUsings = [...usings]
+    .sort()
+    .map((n) => `using ${n};`)
+    .join("\n");
+  // Authorization gate — same shape as the workflow/aggregate handlers.
+  const gateUsesUser = !!view.requires && exprUsesCurrentUser(view.requires);
+  const gateLines: string[] = [];
+  if (view.requires) {
+    if (gateUsesUser) gateLines.push(`        var currentUser = _currentUser.User;`);
+    gateLines.push(
+      `        if (!(${renderCsExpr(view.requires)})) throw new ForbiddenException(${JSON.stringify(
+        `Forbidden: view ${view.name}`,
+      )});`,
+    );
+  }
+  const ctorFields = gateUsesUser
+    ? `    private readonly AppDbContext _db;\n    private readonly ICurrentUserAccessor _currentUser;\n    public ${handlerName}(AppDbContext db, ICurrentUserAccessor currentUser)\n    {\n        _db = db;\n        _currentUser = currentUser;\n    }`
+    : `    private readonly AppDbContext _db;\n    public ${handlerName}(AppDbContext db) => _db = db;`;
+  const authUsing = gateUsesUser ? `using ${ns}.Auth;\n` : "";
+  const commonUsing = view.requires ? `using ${ns}.Domain.Common;\n` : "";
+  const queryBody =
+    `        var rows = await _db.${dbSet}.AsNoTracking()${where ? `.Where(r => ${where})` : ""}.ToListAsync(cancellationToken);\n` +
+    `        return rows.Select(r => new ${responseRecord}(${projFields})).ToList();`;
+  return `// Auto-generated.
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;${extraUsings ? "\n" + extraUsings : ""}
+using Microsoft.EntityFrameworkCore;
+using Mediator;
+using ${ns}.Application.Workflows;
+using ${ns}.Domain.Ids;
+using ${ns}.Domain.ValueObjects;
+using ${ns}.Domain.Enums;
+${authUsing}${commonUsing}using ${ns}.Infrastructure.Persistence;
+
+namespace ${ns}.Application.Views;
+
+public sealed class ${handlerName} : IQueryHandler<${queryName}, IReadOnlyList<${responseRecord}>>
+{
+${ctorFields}
+
+    public async ValueTask<IReadOnlyList<${responseRecord}>> Handle(${queryName} query, CancellationToken cancellationToken)
+    {
+${gateLines.length > 0 ? gateLines.join("\n") + "\n" : ""}${queryBody}
+    }
+}
+`;
+}
+
 /** Render a bind expression with chained `X id` follow rewriting
  *  for .NET.  At each `member` whose receiverType is `X id`, the
  *  access becomes `<map>[<receiverRendered>].<Member>`; receiver
@@ -461,7 +584,8 @@ function renderController(ctx: BoundedContextIR, ns: string, routePrefix?: strin
   const route = `${routePrefix ?? ""}views`;
   const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
   const wfByName = new Map(ctx.workflows.map((w) => [w.name, w] as const));
-  let hasWorkflowView = false;
+  const projByName = new Map(ctx.projections.map((p) => [p.name, p] as const));
+  let hasWorkflowsResponse = false;
   const blocks: string[] = [];
   for (const view of ctx.views) {
     let recordName: string;
@@ -469,7 +593,12 @@ function renderController(ctx: BoundedContextIR, ns: string, routePrefix?: strin
       const wf = wfByName.get(view.source.name);
       if (!wf?.instanceWireShape) continue;
       recordName = `${upperFirst(wf.name)}InstanceResponse`;
-      hasWorkflowView = true;
+      hasWorkflowsResponse = true;
+    } else if (view.source.kind === "projection") {
+      const proj = projByName.get(view.source.name);
+      if (!proj?.wireShape || view.output) continue; // shorthand-only on .NET
+      recordName = `${upperFirst(proj.name)}Response`;
+      hasWorkflowsResponse = true; // `<Proj>Response` lives in Application.Workflows
     } else {
       const agg = aggsByName.get(view.source.name);
       if (!agg) continue;
@@ -496,8 +625,9 @@ function renderController(ctx: BoundedContextIR, ns: string, routePrefix?: strin
         .map((a) => `using ${ns}.Application.${plural(a.name)}.Responses;`),
     ),
   ];
-  // Workflow-view responses (`<Wf>InstanceResponse`) live in Application.Workflows.
-  if (hasWorkflowView) aggResponseUsings.push(`using ${ns}.Application.Workflows;`);
+  // Workflow-view (`<Wf>InstanceResponse`) and projection-view (`<Proj>Response`)
+  // response records both live in Application.Workflows.
+  if (hasWorkflowsResponse) aggResponseUsings.push(`using ${ns}.Application.Workflows;`);
   return `// Auto-generated.
 using System.Threading.Tasks;
 using Mediator;

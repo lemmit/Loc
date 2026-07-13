@@ -1,6 +1,7 @@
 import type {
   EnrichedBoundedContextIR,
   ExprIR,
+  ProjectionIR,
   TypeIR,
   ViewIR,
   WireField,
@@ -11,7 +12,11 @@ import { camelId, opView } from "../../ir/util/openapi-ids.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
 import { responsePyType } from "./emit/http-models.js";
-import { lowerWorkflowFilterToSqlAlchemy, type PyPredicate } from "./find-predicate.js";
+import {
+  lowerProjectionFilterToSqlAlchemy,
+  lowerWorkflowFilterToSqlAlchemy,
+  type PyPredicate,
+} from "./find-predicate.js";
 import { dtImportLine, wireHelperImport } from "./py-type-imports.js";
 import { collectPyExprImports, renderPyExpr } from "./render-expr.js";
 import { esFns } from "./workflow-eventsourced-emit.js";
@@ -47,7 +52,24 @@ export function buildPyViewsFile(
   const wfViews = ctx.views.filter(
     (v) => v.source.kind === "workflow" && wfByName.get(v.source.name)?.instanceWireShape != null,
   );
-  if (views.length === 0 && wfViews.length === 0) return null;
+  // Projection-sourced views (projection.md v1.1): read the persisted `<Proj>Row`
+  // read-model table directly with the view filter SQL-pushed (the state-saga
+  // path — projections have no event-sourced variant).  Unlike a workflow
+  // source, a projection source PERMITS the full-form bind-follow (`view.output`)
+  // — a view is a query, not a replayable fold, so reading the projection table
+  // + foreign-aggregate repositories at query time is legal.
+  const projByName = new Map(ctx.projections.map((p) => [p.name, p] as const));
+  const projViews = ctx.views.filter(
+    (v) => v.source.kind === "projection" && projByName.has(v.source.name),
+  );
+  if (views.length === 0 && wfViews.length === 0 && projViews.length === 0) return null;
+  // Lower each projection view's filter once to a SQLAlchemy `where` over the
+  // `<Proj>Row` table (reused by the route + the import scan).
+  const projLowered = new Map<string, PyPredicate | null>();
+  for (const v of projViews) {
+    const proj = projByName.get(v.source.name)!;
+    projLowered.set(v.name, v.filter ? lowerProjectionFilterToSqlAlchemy(v.filter, proj) : null);
+  }
   // Lower each STATE-based workflow view's filter once to SQLAlchemy (reused by
   // the route + import scan).  An event-sourced workflow has no `<Wf>Row` table
   // to push the predicate into — it group-folds the `<wf>_events` stream and
@@ -64,7 +86,9 @@ export function buildPyViewsFile(
   const dispatcherExpr = hasDispatch ? "make_dispatcher(session)" : "NoopDomainEventDispatcher()";
 
   const models: string[] = [];
-  for (const view of views) {
+  // Full-form output records — declared `fields`.  Both aggregate-sourced and
+  // projection-sourced views can carry one; the shape is identical.
+  for (const view of [...views, ...projViews]) {
     if (!view.output) continue;
     models.push(
       lines(
@@ -88,10 +112,27 @@ export function buildPyViewsFile(
     .map((v) => workflowViewModels(v, wfByName.get(v.source.name)!, ctx))
     .join("");
 
+  // Shorthand projection-view response DTOs — the `<Proj>Row` read-model shape
+  // (`<View>Row` / `<View>Response`), built from the source projection's
+  // `wireShape`.  Full-form projection views declare their own record (emitted
+  // by the `models` loop above), so only shorthand views need this.
+  const projModels = projViews
+    .filter((v) => !v.output)
+    .map((v) => projectionViewModels(v, projByName.get(v.source.name)!, ctx))
+    .join("");
+
   const routeBlocks = [
     ...views.map((v) => viewRoute(v, ctx, dispatcherExpr)),
     ...wfViews.map((v) =>
       workflowViewRoute(v, wfByName.get(v.source.name)!, wfLowered.get(v.name) ?? null),
+    ),
+    ...projViews.map((v) =>
+      projectionViewRoute(
+        v,
+        projByName.get(v.source.name)!,
+        projLowered.get(v.name) ?? null,
+        dispatcherExpr,
+      ),
     ),
   ];
   // ES workflow-view filters render to in-memory Python predicates (`row.<col>`)
@@ -104,16 +145,34 @@ export function buildPyViewsFile(
   const needsRe = esFilterImports.has("re");
   const needsMath = esFilterImports.has("math");
   const routes = routeBlocks.join("\n\n\n");
-  const body = `${models.join("")}${wfModels}router = APIRouter(prefix="/views", tags=["views"])\n\n\n${routes}`;
+  const body = `${models.join("")}${wfModels}${projModels}router = APIRouter(prefix="/views", tags=["views"])\n\n\n${routes}`;
 
   const scan = body.replace(/"(?:\\.|[^"\\])*"/g, '""');
   const refersTo = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(scan);
   const sourceAggs = [...new Set(views.map((v) => v.source.name))];
+  // Aux aggregates bulk-loaded by full-form bind-follows — from BOTH aggregate-
+  // sourced and projection-sourced views (projection full-form views read the
+  // projection table for source rows but still follow `X id` into repositories).
   const auxAggs = [
-    ...new Set(views.flatMap((v) => (v.output?.auxiliaries ?? []).map((a) => a.aggName))),
+    ...new Set(
+      [...views, ...projViews].flatMap((v) => (v.output?.auxiliaries ?? []).map((a) => a.aggName)),
+    ),
   ];
   const repoAggs = [...new Set([...sourceAggs, ...auxAggs])]
     .filter((n) => aggsByName.has(n))
+    .sort();
+  // Projection full-form first-hop follows construct `<Agg>Id(row.col)` off the
+  // nullable read-model column, so import each such id NewType from domain.ids.
+  const projIdTypes = [
+    ...new Set(
+      projViews.flatMap((v) =>
+        (v.output?.auxiliaries ?? [])
+          .filter((a) => a.path.length === 1)
+          .map((a) => `${a.aggName}Id`),
+      ),
+    ),
+  ]
+    .filter(refersTo)
     .sort();
   const responseAggs = sourceAggs
     .filter((n) => refersTo(`${n}Response`) || refersTo(`${n}ListResponse`))
@@ -124,12 +183,19 @@ export function buildPyViewsFile(
   // SQLAlchemy helpers a STATE-based workflow-sourced view route calls: `select`
   // for the saga read, plus any `and_`/`or_`/`not_` its lowered filter needs.
   // (ES views fold the stream + filter in memory — no SQLAlchemy.)
-  const saOps = new Set<string>(stateWfViews.length > 0 ? ["select"] : []);
+  // A projection view reads its `<Proj>Row` table with `select` too, and its
+  // lowered filter contributes the same `and_`/`or_`/`not_` ops.
+  const saOps = new Set<string>(stateWfViews.length > 0 || projViews.length > 0 ? ["select"] : []);
   for (const p of wfLowered.values()) for (const op of p?.ops ?? []) saOps.add(op);
-  // Saga-state row classes the STATE-based workflow views read from schema.  ES
-  // views have no `<Wf>Row` table — they fold the event stream via dispatch.
-  const wfRows = [
-    ...new Set(stateWfViews.map((v) => `${wfByName.get(v.source.name)!.name}Row`)),
+  for (const p of projLowered.values()) for (const op of p?.ops ?? []) saOps.add(op);
+  // Row classes read from `app.db.schema`: STATE-based workflow saga rows +
+  // projection read-model rows.  (ES workflow views have no `<Wf>Row` table —
+  // they fold the event stream via dispatch.)
+  const schemaRows = [
+    ...new Set([
+      ...stateWfViews.map((v) => `${wfByName.get(v.source.name)!.name}Row`),
+      ...projViews.map((v) => `${projByName.get(v.source.name)!.name}Row`),
+    ]),
   ].sort();
   // ES workflow-view fold helpers (`_load_all_<wf>`), reused from `app.dispatch`
   // so the read mirrors the dispatch-handler / instance-LIST load machinery.
@@ -139,8 +205,8 @@ export function buildPyViewsFile(
   // Authorization gates: any `view … requires <expr>` pulls in ForbiddenError;
   // a currentUser-referencing gate additionally threads `Request` + the `User`
   // principal type.  `requires true` needs only ForbiddenError.
-  const anyGate = [...views, ...wfViews].some((v) => v.requires);
-  const anyGateUsesUser = [...views, ...wfViews].some((v) => viewGateNeedsUser(v));
+  const anyGate = [...views, ...wfViews, ...projViews].some((v) => v.requires);
+  const anyGateUsesUser = [...views, ...wfViews, ...projViews].some((v) => viewGateNeedsUser(v));
 
   return lines(
     `"""Read-model view routes.  Auto-generated."""`,
@@ -152,14 +218,17 @@ export function buildPyViewsFile(
     dtImportLine(refersTo),
     needsMath || needsRe || dtImportLine(refersTo) != null ? "" : null,
     `from fastapi import APIRouter, Depends${anyGateUsesUser ? ", Request" : ""}`,
-    models.length > 0 || wfModels.length > 0 ? "from pydantic import BaseModel, RootModel" : null,
+    models.length > 0 || wfModels.length > 0 || projModels.length > 0
+      ? "from pydantic import BaseModel, RootModel"
+      : null,
     saOps.size > 0 ? `from sqlalchemy import ${[...saOps].sort().join(", ")}` : null,
     "from sqlalchemy.ext.asyncio import AsyncSession",
     "from typing import Annotated",
     "",
     "from app.db.engine import get_session",
     ...repoAggs.map((n) => `from app.db.repositories.${snake(n)}_repository import ${n}Repository`),
-    wfRows.length > 0 ? `from app.db.schema import ${wfRows.join(", ")}` : null,
+    schemaRows.length > 0 ? `from app.db.schema import ${schemaRows.join(", ")}` : null,
+    projIdTypes.length > 0 ? `from app.domain.ids import ${projIdTypes.join(", ")}` : null,
     esLoadAll.length > 0 ? `from app.dispatch import ${esLoadAll.join(", ")}` : null,
     wireHelperImport(refersTo),
     hasDispatch && refersTo("make_dispatcher") ? "from app.dispatch import make_dispatcher" : null,
@@ -304,6 +373,114 @@ function workflowViewRoute(view: ViewIR, wf: WorkflowIR, pred: PyPredicate | nul
     `    rows = (await session.execute(select(${row})${where})).scalars().all()`,
     `    return [{${proj}} for row in rows]`,
   );
+}
+
+// --- projection-sourced views (projection.md v1.1) ------------------------
+
+/** A SHORTHAND projection-view's response DTOs — `<View>Row` (the source
+ *  projection's `wireShape`, id-source rows as `str`) + a `<View>Response`
+ *  RootModel list carrier.  Structurally identical to `workflowViewModels`
+ *  (the projection `wireShape` mirrors a workflow's `instanceWireShape`), so a
+ *  curated projection view and the raw projection list agree field-for-field. */
+function projectionViewModels(
+  view: ViewIR,
+  proj: ProjectionIR,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  const fieldLines = (proj.wireShape ?? []).map((f) => {
+    const t = f.source === "id" ? "str" : responsePyType(f.type, ctx);
+    const optional = f.optional || f.type.kind === "optional";
+    const suffix = optional && !t.endsWith("| None") ? " | None = None" : optional ? " = None" : "";
+    return `    ${f.name}: ${t}${suffix}`;
+  });
+  return lines(
+    `class ${view.name}Row(BaseModel):`,
+    fieldLines.length > 0 ? fieldLines : ["    pass"],
+    "",
+    "",
+    `class ${view.name}Response(RootModel[list[${view.name}Row]]):`,
+    "    pass",
+    "",
+    "",
+  );
+}
+
+/** `GET /views/<view>` over a projection read model (projection.md v1.1).  The
+ *  source rows always come from a DIRECT `select(<Proj>Row)` with the view's
+ *  filter lowered to a SQLAlchemy `where` (the state-saga path — a projection is
+ *  always a physical row table, never event-sourced).  Then it diverges on the
+ *  form:
+ *
+ *   - **shorthand** — projects each row through the projection `wireShape`
+ *     (`instanceFieldValue`), exactly like the state-based workflow-view route,
+ *     so the wire shape equals the `<Proj>Row` list endpoint field-for-field;
+ *   - **full-form** — the SAME aggregate-style bind-follow machinery `viewRoute`
+ *     uses: bulk-load every `X id` follow via that aggregate's repository (in
+ *     dependency order), then project each source row through the bind
+ *     expressions.  This is the one path a workflow source does NOT get. */
+function projectionViewRoute(
+  view: ViewIR,
+  proj: ProjectionIR,
+  pred: PyPredicate | null,
+  dispatcherExpr: string,
+): string {
+  const fn = snake(view.name);
+  const opId = camelId(opView(view.name));
+  const row = `${proj.name}Row`;
+  const where = pred ? `.where(${pred.expr})` : "";
+  const read = `    rows = (await session.execute(select(${row})${where})).scalars().all()`;
+  if (!view.output) {
+    const proj_ = (proj.wireShape ?? [])
+      .map((f: WireField) => `"${f.name}": ${instanceFieldValue("row", f)}`)
+      .join(", ");
+    return lines(
+      `@router.get("/${fn}", response_model=${view.name}Response, operation_id="${opId}")`,
+      `async def ${fn}_view(${viewSig(view)}) -> list[dict[str, object]]:`,
+      ...viewGateLines(view),
+      read,
+      `    return [{${proj_}} for row in rows]`,
+    );
+  }
+  // Full form: source rows from the projection table, then bulk-load follows
+  // (dependency order — shortest path first) and project binds per row.
+  const out: string[] = [
+    `@router.get("/${fn}", response_model=${view.name}Response, operation_id="${opId}")`,
+    `async def ${fn}_view(${viewSig(view)}) -> list[dict[str, object]]:`,
+    ...viewGateLines(view),
+    read,
+  ];
+  const pathToMap = new Map<string, { mapVar: string; aggName: string }>();
+  for (const aux of view.output.auxiliaries) {
+    const mapVar = snake(aux.mapVar);
+    const repoVar = `${snake(aux.aggName)}_repo`;
+    out.push(`    ${repoVar} = ${aux.aggName}Repository(session, ${dispatcherExpr})`);
+    // First hop sources ids off the read-model ROW, whose `X id` columns are
+    // nullable `str` (not the aggregate's non-nullable `<Agg>Id`).  Cast each to
+    // the id NewType and drop NULLs so `find_many_by_ids(list[<Agg>Id])` type-
+    // checks (unlike the aggregate-sourced route, whose `rows` are aggregates
+    // already holding proper id types).  Later hops read hydrated aggregates.
+    const idsSource =
+      aux.path.length === 1
+        ? `[${aux.aggName}Id(r.${snake(aux.path[0]!)}) for r in rows if r.${snake(aux.path[0]!)} is not None]`
+        : (() => {
+            const prev = pathToMap.get(aux.path.slice(0, -1).join("."));
+            const finalField = snake(aux.path[aux.path.length - 1]!);
+            return prev ? `[a.${finalField} for a in ${prev.mapVar}.values()]` : "[]";
+          })();
+    out.push(
+      `    ${mapVar} = {str(a.id): a for a in await ${repoVar}.find_many_by_ids(${idsSource})}`,
+    );
+    pathToMap.set(aux.path.join("."), { mapVar, aggName: aux.aggName });
+  }
+  out.push("    return [");
+  out.push("        {");
+  for (const b of view.output.binds) {
+    out.push(`            "${b.name}": ${renderBind(b.expr, b.type, pathToMap)},`);
+  }
+  out.push("        }");
+  out.push("        for r in rows");
+  out.push("    ]");
+  return out.join("\n");
 }
 
 /** Money binds serialize as strings on view rows (TS parity — see the

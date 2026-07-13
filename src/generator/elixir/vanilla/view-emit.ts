@@ -27,6 +27,7 @@ import type {
   AggregateIR,
   BoundedContextIR,
   ExprIR,
+  ProjectionIR,
   SystemIR,
   ViewIR,
   WorkflowIR,
@@ -34,7 +35,7 @@ import type {
 import { snake, upperFirst } from "../../../util/naming.js";
 import type { SourceMapRecorder } from "../../_trace/sourcemap.js";
 import type { ApiRoute } from "../api-emit.js";
-import { stateModule } from "../dispatch-emit.js";
+import { projectionRowModule, stateModule } from "../dispatch-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import {
   aggregateUsesPrincipalContextFilter,
@@ -81,6 +82,29 @@ export function emitVanillaViewModules(
       if (!wf?.instanceWireShape) continue; // validator gated / not observable
       const path = `lib/${appName}/${ctxSnake}/views/${snake(view.name)}.ex`;
       const content = renderVanillaWorkflowView(view, wf, appModule, contextModule, typesModule);
+      out.set(path, content);
+      sourcemap?.file(path, content, view.origin, `${ctx.name}.${view.name}`);
+      continue;
+    }
+    // Projection-sourced view (projection.md v1.1): a plain Ecto read of the
+    // persisted `<Proj>Row` read-model schema with the filter pushed into the
+    // query — the read-side sibling of the projections controller.  A projection
+    // is always a physical row table (no event-sourced variant), so it always
+    // takes this direct-read path.  Full-form bind projection is permitted, but a
+    // cross-aggregate follow off a flat read-model row has no Ecto association to
+    // preload (thrown inside `renderVanillaProjectionView`) — same limitation as
+    // the java backend.
+    if (view.source.kind === "projection") {
+      const proj = ctx.projections.find((p) => p.name === view.source.name);
+      if (!proj?.wireShape) continue; // validator already errored / no shape
+      const path = `lib/${appName}/${ctxSnake}/views/${snake(view.name)}.ex`;
+      const content = renderVanillaProjectionView(
+        view,
+        proj,
+        appModule,
+        contextModule,
+        typesModule,
+      );
       out.set(path, content);
       sourcemap?.file(path, content, view.origin, `${ctx.name}.${view.name}`);
       continue;
@@ -170,6 +194,74 @@ ${preamble}  @doc "Execute the view query and return the matching saga instances
   def run(current_user \\\\ nil) do
     _ = current_user
 ${query}    |> Enum.map(fn record -> %{${proj}} end)
+  end
+end
+`;
+}
+
+/** A projection-sourced view module — a plain Ecto read of the `<Proj>Row`
+ *  read-model schema, projecting each row through the projection `wireShape`
+ *  (shorthand) or the view's declared binds (full form).  `run/1` returns plain
+ *  maps, so the project-wide `ViewsController` action's `serialize/1` is the
+ *  identity on them (its `is_map` clause) — no struct handling needed.
+ *
+ *  The `where` is an Ecto QUERY context (enum literals dump to the declared
+ *  STRING via `filterArgs`, since Ecto won't cast an inline atom through
+ *  `Ecto.Enum`); the `bind` projections stay in-memory (`renderCtx`).  A
+ *  full-form view with cross-aggregate follows (`auxiliaries`) throws — a flat
+ *  read-model row carries no Ecto association to preload. */
+function renderVanillaProjectionView(
+  view: ViewIR,
+  proj: ProjectionIR,
+  appModule: string,
+  contextModule: string,
+  typesModule: string,
+): string {
+  const moduleName = `${contextModule}.Views.${upperFirst(view.name)}`;
+  const rowMod = projectionRowModule(contextModule, proj);
+  const renderCtx: RenderCtx = {
+    thisName: "record",
+    contextModule,
+    typesModule,
+    foundation: "vanilla",
+  };
+  const queryCtx: RenderCtx = { ...renderCtx, filterArgs: true };
+  const query =
+    (view.filter
+      ? `    from(record in ${rowMod}, where: ${renderExpr(view.filter, queryCtx)})
+    |> Repo.all()`
+      : `    Repo.all(${rowMod})`) + "\n";
+  const isShorthand = !view.output;
+  let projection: string;
+  if (isShorthand) {
+    projection = (proj.wireShape ?? []).map((f) => `${f.name}: record.${snake(f.name)}`).join(", ");
+  } else {
+    const output = view.output!;
+    if (output.auxiliaries.length > 0) {
+      throw new Error(
+        `vanilla views: projection view '${view.name}' uses cross-aggregate follows — not yet implemented on the vanilla Phoenix backend.`,
+      );
+    }
+    projection = output.binds.map((b) => `${b.name}: ${renderExpr(b.expr, renderCtx)}`).join(", ");
+  }
+  return `# Auto-generated.
+defmodule ${moduleName} do
+  @moduledoc """
+  View: ${upperFirst(view.name)}
+
+  Source projection: ${upperFirst(proj.name)} (read-model row)
+  Form: ${isShorthand ? "shorthand" : "full (bind projection)"}
+  Foundation: vanilla (plain Ecto).
+  """
+
+  import Ecto.Query
+  alias ${appModule}.Repo
+
+  @doc "Execute the view query and return the matching read-model rows."
+  @spec run(any()) :: [map()]
+  def run(current_user \\\\ nil) do
+    _ = current_user
+${query}    |> Enum.map(fn record -> %{${projection}} end)
   end
 end
 `;

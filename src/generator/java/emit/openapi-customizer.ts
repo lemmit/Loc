@@ -358,7 +358,9 @@ export function buildJavaOpenApiContract(
         wrapper = `${aggName}ListResponse`;
         wrappers.set(wrapper, `${aggName}Response`);
       } else {
-        // Workflow-sourced view → `<View>Row` element wrapper.
+        // Workflow- or projection-sourced shorthand view → `<View>Row` element
+        // wrapper (both emit a dedicated row record, unlike an aggregate
+        // shorthand which reuses `<Agg>Response`).
         wrapper = `${upperFirst(view.name)}Response`;
         wrappers.set(wrapper, `${upperFirst(view.name)}Row`);
       }

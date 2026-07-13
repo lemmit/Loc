@@ -742,7 +742,10 @@ function emitProjectFromContexts(
       const viewRowOrigin = new Map<string, ViewIR>(
         ctx.views
           .filter(
-            (v) => v.source.kind === "workflow" || (v.source.kind === "aggregate" && v.output),
+            (v) =>
+              v.source.kind === "workflow" ||
+              v.source.kind === "projection" ||
+              (v.source.kind === "aggregate" && v.output),
           )
           .map((v) => [`${upperFirst(v.name)}Row.java`, v]),
       );
