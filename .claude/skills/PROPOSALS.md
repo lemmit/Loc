@@ -9,7 +9,7 @@ late-caught fallout, half-landed features).
 
 - **`language-feature-developer`** (`.claude/skills/language-feature-developer/`,
   shipped #1472) — the conductor-over-roles workflow for landing a *new* Loom
-  language feature across all nine targets. Covers: state audit → review →
+  language feature across all ten targets. Covers: state audit → review →
   paper-simulation sign-off → implement → tests. The skills below are
   deliberately scoped to the work it *doesn't* cover.
 - **`session-finalizer`** (`.claude/skills/session-finalizer/`) — the META skill:

@@ -75,7 +75,7 @@ Backend emitters build source with `lines(...)` from
 in the design-pack layer.) Casing/pluralisation flows through
 `src/util/naming.ts` (`pascal`/`camel`/`snake`/`plural`). The `STRING` terminal
 strips its delimiters — re-quote on emission (`JSON.stringify`). *Why:*
-consistency across nine targets comes from one set of primitives, not nine
+consistency across ten targets comes from one set of primitives, not ten
 hand-cased conventions.
 
 ## 9. Cross-aggregate references are `X id`

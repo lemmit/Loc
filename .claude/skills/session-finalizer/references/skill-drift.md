@@ -24,10 +24,12 @@ A skill's `description` cites concrete anchors. Check each against `main`:
 - **Backend/frontend COUNT** — the **N-backend-era freeze**, the single highest-yield
   pattern (`status-refresh`). The ground truth is `src/platform/registry.ts`: today
   **5 backends** (`node`/Hono, `dotnet`, `java`, `python`, `elixir` — vanilla Ecto/
-  Phoenix; the Ash foundation was removed, #1568) and **4 frontends** (`react`, `vue`,
-  `svelte`, `angular`). Any skill description saying "five backends and four frontends"
-  is correct *today* but is a freeze candidate the moment the set grows — and any that
-  enumerates a *subset* as if complete ("node/dotnet/phoenix") is already stale. Grep:
+  Phoenix; the Ash foundation was removed, #1568) and **5 frontends** (`react`, `vue`,
+  `svelte`, `angular`, `feliz` — F#/Fable/Elmish, added after the `angular` era). Any
+  skill description saying "five backends and five frontends" is correct *today* but is
+  a freeze candidate the moment the set grows — and any that enumerates a *subset* as if
+  complete ("node/dotnet/phoenix", or "four frontends" now that `feliz` shipped) is
+  already stale. Grep:
   ```
   rg -n "backends?|frontends?|targets?" .claude/skills/*/SKILL.md | rg -n "three|four|five|node/dotnet"
   ```

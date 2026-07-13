@@ -1,7 +1,7 @@
 # Testing — what goes where
 
-Loom has many test tiers because it generates code for **nine** targets
-(five backends, four frontends) and the interesting failures live at
+Loom has many test tiers because it generates code for **ten** targets
+(five backends, five frontends) and the interesting failures live at
 different altitudes. This doc is the **placement guide**: given a change,
 which tier proves it, and where a new test belongs. For the exact run
 commands and env-var gates, `CLAUDE.md` → "Build & test commands" is the

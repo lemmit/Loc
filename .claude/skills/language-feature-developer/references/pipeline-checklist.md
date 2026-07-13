@@ -12,10 +12,13 @@ exits, then touch only those rows. The canonical deep dive is
 ```
 
 Targets: **5 backends** (TypeScript/Hono `node`, .NET, Phoenix vanilla Ecto
-`elixir`, Python/FastAPI, Java/Spring) and **4 frontends** (React, Vue,
-Svelte, Angular). The two seams that let one feature reach all backends:
+`elixir`, Python/FastAPI, Java/Spring) and **5 frontends** (React, Vue,
+Svelte, Angular, Feliz — F#/Fable/Elmish; consumes the shared walker via
+`src/generator/feliz/feliz-target.ts` but emits F#, not JSX, and uses
+`.fsproj`+Fable, not the JS `stacks/` system or design packs). The two seams
+that let one feature reach all backends:
 `ExprTarget` (`src/generator/_expr/target.ts`) for expressions and
-`WalkerTarget` (`src/generator/_walker/target.ts`) for JSX-family page
+`WalkerTarget` (`src/generator/_walker/target.ts`) for JSX-/F#-family page
 rendering. Phoenix HEEx runs a *parallel* walker engine
 (`src/generator/elixir/heex-walker-core.ts`) — it is not driven by the
 shared `walkBody`.
@@ -145,9 +148,9 @@ tells you when it applies.
 | Feature kind | Backends | Frontends |
 |---|---|---|
 | New expr / stmt / type (domain logic) | all 5 (`render-expr`/`render-stmt`) | — |
-| Wire-shape / payload | all 5 DTO emitters + `system/wire-spec.ts` | all 4 (consume `wireShape`) |
+| Wire-shape / payload | all 5 DTO emitters + `system/wire-spec.ts` | all 5 (consume `wireShape`) |
 | Persistence / capability (stamps, soft-delete, stores) | per-backend emit; often one backend per PR, narrowing the `validate.ts` gate as each lands | — |
-| UI page primitive | — | React/Vue/Svelte via shared walker + Phoenix HEEx (separate); Angular via optional seams |
+| UI page primitive | — | React/Vue/Svelte/Feliz via shared walker (Feliz emits F#) + Phoenix HEEx (separate); Angular via optional seams |
 | Validate-only gate | none (just `ir/validate/checks/*` + `validate.ts`) | — |
 | Backend codegen gap-fill | one backend's emitters only | — |
 

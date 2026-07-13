@@ -114,7 +114,7 @@ Three failure shapes, each with a targeted fix (propose as a diff):
 | A skill **fired and was unhelpful/wrong** — wrong scope, sent you down a path the task didn't need | *Narrow* the trigger / add a boundary clause excluding the misfire case |
 | A skill **should have fired and didn't** — you did exactly its work by hand because the trigger didn't match your phrasing | *Widen* the trigger with the phrasing you actually used (the description's whole job is matching real asks) |
 | You did a **multi-file recipe by hand** that a skill covers, but never invoked it | Discoverability gap — strengthen the trigger, or note in the report that the skill exists (maybe the human just didn't `/`-invoke it) |
-| A skill's **reference is now wrong** — a path it cites moved, a count it states is frozen (the "N-backend-era freeze" from `status-refresh`, applied to skill prose: any skill saying "five backends and four frontends" is a freeze candidate as the target set grows) | Patch the reference to current `main` |
+| A skill's **reference is now wrong** — a path it cites moved, a count it states is frozen (the "N-backend-era freeze" from `status-refresh`, applied to skill prose: any skill saying "five backends and five frontends" is a freeze candidate as the target set grows) | Patch the reference to current `main` |
 
 The skill-catalog-drift audit (the "skill-doctor" pass) is the systematic version of
 row 4 — **read `references/skill-drift.md`** for the checklist (description-vs-code,
