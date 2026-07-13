@@ -243,3 +243,47 @@ describe(".NET — extern commandHandler / queryHandler", () => {
     expect(program).toContain("Api.Application.Handlers.IPlaceOrderHandler");
   });
 });
+
+// A commandHandler that hard-deletes via `<Repo>.delete(o)` — the repo-delete
+// handler statement.  The EF repository's `DeleteAsync` takes the AGGREGATE
+// (not its id), and a void command yields `ICommand` / `Unit`.
+const DELETE_SRC = `
+system Shop {
+  subdomain Sales {
+    context Ordering {
+      aggregate Order {
+        status: string
+        destroy { }
+      }
+      repository Orders for Order { }
+      commandHandler DestroyOrder(orderId: Order id) {
+        let o = Orders.getById(orderId)
+        Orders.delete(o)
+      }
+    }
+  }
+  api SalesApi from Sales {
+    route DELETE "/orders/{orderId}" -> Ordering.DestroyOrder
+  }
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: dotnet, contexts: [Ordering], dataSources: [st], serves: SalesApi, port: 5001 }
+}
+`;
+
+describe("dotnet — explicit handler repo-delete (destroy)", () => {
+  it("emits `await _orders.DeleteAsync(o, ct)` (aggregate arg) in a void ICommand handler", async () => {
+    const files = await generateSystemFiles(DELETE_SRC);
+    const h = fileEndingWith(files, "Application/Orders/Commands/DestroyOrderHandler.cs");
+    // Void command → ICommandHandler<..., Unit>, returns Unit.Value.
+    expect(h).toContain("ICommandHandler<DestroyOrderCommand, Unit>");
+    expect(h).toContain("await _orders.GetByIdAsync(command.OrderId, cancellationToken)");
+    // DeleteAsync takes the loaded AGGREGATE, not its id.
+    expect(h).toContain("await _orders.DeleteAsync(o, cancellationToken);");
+    expect(h).toContain("return Unit.Value;");
+    // Route binds DELETE.
+    const ctrl = fileEndingWith(files, "Api/SalesApiRoutesController.cs");
+    expect(ctrl).toContain('[HttpDelete("/orders/{orderId}")]');
+    expect(ctrl).toContain("await _mediator.Send(new DestroyOrderCommand(new OrderId(orderId)));");
+  });
+});

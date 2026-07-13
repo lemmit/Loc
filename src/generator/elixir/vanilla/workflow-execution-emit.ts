@@ -469,6 +469,27 @@ function lowerStatement(
       ];
     }
 
+    case "repo-delete": {
+      // `Orders.delete(o)` →
+      // `{:ok, _} <- Context.delete_order(o)`
+      // The vanilla context's `delete_<agg>/1` delegate (emitted only when the
+      // aggregate exposes a REST delete surface — the SAME `emitsRestDelete`
+      // gate the scaffold's `canonicalDestroy` condition satisfies) fronts the
+      // repository's `delete/1`, which takes the aggregate STRUCT and returns
+      // `{:ok, struct} | {:error, changeset}`.  Discard the returned struct
+      // (mirrors the op-call `{:ok, _}` shape); a failure threads `{:error, _}`
+      // up the with-chain so a transactional workflow rolls back.
+      const action = `delete_${snake(st.aggName)}`;
+      const call = `${contextModule}.${action}(${renderExpr(st.entity, renderCtx)})`;
+      return [
+        {
+          kind: "with-clause",
+          text: `{:ok, _} <- ${call}`,
+          bindName: undefined,
+        },
+      ];
+    }
+
     case "for-each": {
       // `for x in xs { <body> }` →
       // `{:ok, _} <- Enum.reduce_while(xs, {:ok, nil}, fn x, _acc -> ... end)`.
@@ -724,6 +745,7 @@ const NESTED_FLOW_KINDS: ReadonlySet<WorkflowStmtIR["kind"]> = new Set([
   "if-let",
   "repo-run",
   "repo-let",
+  "repo-delete",
 ]);
 
 /** Lower a nested control-flow / repo-bind statement that appears inside a
@@ -866,6 +888,7 @@ function renderLoopBody(
       case "for-each":
       case "if-let":
       case "repo-run":
+      case "repo-delete":
       case "repo-let": {
         // Nested control flow (a loop / if-let inside this loop body) and
         // repo binds reuse the top-level `lowerStatement` dispatch — which
@@ -984,6 +1007,9 @@ function collectWorkflowStmtParamRefsAll(st: WorkflowStmtIR, acc: Set<string>): 
       return;
     case "repo-let":
       for (const a of st.args) collectRefNames(a, acc);
+      return;
+    case "repo-delete":
+      collectRefNames(st.entity, acc);
       return;
     case "resource-call":
       collectRefNames(st.call, acc);
@@ -1172,6 +1198,12 @@ export function collectWorkflowStmtParamRefs(st: WorkflowStmtIR, acc: Set<string
       // custom find maps to `<find>_<agg>(args...)` via the context
       // defdelegate emitted by context-emit.ts.
       for (const a of st.args) collectParamRefs(a, acc);
+      return;
+    case "repo-delete":
+      // `<Repo>.delete(o)` → `Context.delete_<agg>(o)`.  The entity operand may
+      // reference a create-param directly (`Orders.delete(param)`), so surface
+      // its refs for the `run/1` destructure.
+      collectParamRefs(st.entity, acc);
       return;
     case "resource-call":
       collectParamRefs(st.call, acc);

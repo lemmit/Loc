@@ -152,6 +152,27 @@ function buildHandler(t: HandlerTarget) {
       // Return type is the bare aggregate.
       return queryHandler(targetHandlerName(t), params, namedType(t.agg.name), body);
     }
+    case "destroy": {
+      // The canonical hard-delete: load one aggregate by id, then remove it.
+      // `<Repo>.delete(o)` lowers to a first-class `repo-delete` handler
+      // statement (every domain-logic backend renders it to its own repository
+      // delete verb).  A void commandHandler — there is nothing meaningful to
+      // return after a delete (the entity is gone; `return o.id` would read a
+      // just-removed row), so the handler yields no value, exactly like a
+      // fire-and-forget `operation` commandHandler.
+      const idParam = idParamName(t.agg.name);
+      const params = [param(idParam, idRef(t.agg.name))];
+      const body = [
+        // `let o = <Repo>.getById(<idParam>)`
+        letStmt(
+          "o",
+          memberAccess(nameRef(t.repo.name), "getById", { call: true, args: [nameRef(idParam)] }),
+        ),
+        // `<Repo>.delete(o)` — a repo-delete statement.
+        callStmt([t.repo.name, "delete"], [nameRef("o")]),
+      ];
+      return commandHandler(targetHandlerName(t), params, body);
+    }
   }
 }
 

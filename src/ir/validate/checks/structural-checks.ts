@@ -1494,6 +1494,9 @@ export function validatePermissionRefs(ctx: BoundedContextIR, diags: LoomDiagnos
         case "op-call":
           for (const a of s.args) flag(`workflow[${wf.name}]`, a);
           break;
+        case "repo-delete":
+          flag(`workflow[${wf.name}]`, s.entity);
+          break;
       }
     }
   }

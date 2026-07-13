@@ -59,6 +59,7 @@ import type {
   WorkflowStmtIR,
 } from "../types/loom-ir.js";
 import { aggregateOpResolver, type SaveResolver } from "../util/domain-service-tier.js";
+import { isWriteMethod } from "../util/repo-methods.js";
 import { resolveBypass } from "./lower-capabilities.js";
 import {
   inferExprType,
@@ -856,6 +857,33 @@ function lowerWorkflowStatementInner(
                 args: callArgs,
                 serviceRef: { service: svc.name, op },
               },
+            },
+            envAfter: env,
+          };
+        }
+      }
+      // `<Repo>.delete(o)` / `<Repo>.remove(o)` — a repository DELETE
+      // (destroy) call written as a bare handler statement.  Recognised BEFORE
+      // the generic op-call fallback so a repo head naming a write verb isn't
+      // mistaken for an aggregate op-call on a let-binding (which would stamp
+      // `aggName: "Unknown"` and re-save the just-deleted entity at exit).
+      // Lowers to a `repo-delete` WorkflowStmtIR carrying the target repo +
+      // aggregate and the single lowered entity operand.  `computeSaves` never
+      // registers a `repo-delete` as a mutation target, so the removed entity
+      // is not persisted again on the way out.
+      {
+        const deleteRepo = reposByName.get(lv.head);
+        const method = lv.tail[0]!;
+        const deleteArg = (lv.args ?? [])[0];
+        if (deleteRepo && isWriteMethod(method) && deleteArg) {
+          const aggName = deleteRepo.aggregate?.ref?.name ?? "Unknown";
+          const entity = lowerExpr(deleteArg, env);
+          return {
+            stmt: {
+              kind: "repo-delete",
+              repoName: deleteRepo.name,
+              aggName,
+              entity,
             },
             envAfter: env,
           };

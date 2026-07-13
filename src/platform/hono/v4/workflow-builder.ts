@@ -1368,7 +1368,8 @@ function collectReposFromStmts(
   const seen = new Map<string, string>();
   const walk = (stmts: WorkflowStmtIR[]): void => {
     for (const st of stmts) {
-      if (st.kind === "repo-let" || st.kind === "repo-run") seen.set(st.repoName, st.aggName);
+      if (st.kind === "repo-let" || st.kind === "repo-run" || st.kind === "repo-delete")
+        seen.set(st.repoName, st.aggName);
       else if (st.kind === "for-each") {
         for (const sv of st.savesPerIteration) seen.set(sv.repoName, sv.aggName);
         walk(st.body);
@@ -1483,6 +1484,13 @@ export function honoWorkflowStmtTarget(
         ];
       }
       return [callLine];
+    },
+    repoDelete: (st, indent) => {
+      // `<Repo>.delete(o)` → `await <repo>.delete(<entity>.id)`.  The generated
+      // repository's `delete(id)` takes the aggregate's ID token (not the whole
+      // aggregate), so append `.id` to the entity ref.  Repo var mirrors the
+      // repo-let arm (`lowerFirst(repoName)`).
+      return [`${indent}await ${lowerFirst(st.repoName)}.delete(${renderArg(st.entity)}.id);`];
     },
     exprLet: (st, indent) => [`${indent}const ${st.name} = ${renderArg(st.expr)};`],
     // `field := value` — own-state mutation: write `value` onto the loaded
@@ -1722,7 +1730,8 @@ export function collectReposForWorkflow(wf: {
   const seen = new Map<string, string>();
   const walk = (stmts: WorkflowStmtIR[]): void => {
     for (const st of stmts) {
-      if (st.kind === "repo-let" || st.kind === "repo-run") seen.set(st.repoName, st.aggName);
+      if (st.kind === "repo-let" || st.kind === "repo-run" || st.kind === "repo-delete")
+        seen.set(st.repoName, st.aggName);
       else if (st.kind === "for-each") {
         for (const sv of st.savesPerIteration) seen.set(sv.repoName, sv.aggName);
         walk(st.body);

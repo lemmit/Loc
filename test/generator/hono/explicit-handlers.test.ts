@@ -243,3 +243,42 @@ describe("hono — explicit handler with a value-object body param", () => {
     expect(router).toContain("const amount = new Money(body.amount.amount, body.amount.currency);");
   });
 });
+
+// A commandHandler that hard-deletes via `<Repo>.delete(o)` — the repo-delete
+// handler statement.  The generated Hono repository's `delete(id)` takes the
+// aggregate's ID token, so the emitted call appends `.id` to the loaded entity.
+const DELETE_SRC = `
+system Shop {
+  subdomain Sales {
+    context Ordering {
+      aggregate Order ids guid {
+        status: string
+        destroy { }
+      }
+      repository Orders for Order { }
+      commandHandler DestroyOrder(orderId: Order id) {
+        let o = Orders.getById(orderId)
+        Orders.delete(o)
+      }
+    }
+  }
+  api SalesApi from Sales {
+    route DELETE "/orders/{orderId}" -> Ordering.DestroyOrder
+  }
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: node, contexts: [Ordering], dataSources: [st], serves: SalesApi, port: 5001 }
+}
+`;
+
+describe("hono — explicit handler repo-delete (destroy)", () => {
+  it("renders `<Repo>.delete(o.id)` (id arg) on a DELETE route", async () => {
+    const router = fileEndingWith(await generateSystemFiles(DELETE_SRC), "http/salesApi-routes.ts");
+    expect(router).toContain('method: "delete"');
+    // load by id, then delete — the generated repo `delete(id)` takes the id token.
+    expect(router).toContain("const o = await orders.getById(orderId);");
+    expect(router).toContain("await orders.delete(o.id);");
+    // NOT the whole aggregate (that's the .NET/Java shape).
+    expect(router).not.toContain("await orders.delete(o);");
+  });
+});

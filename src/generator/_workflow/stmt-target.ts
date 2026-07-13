@@ -41,6 +41,11 @@ export interface WorkflowStmtTarget {
   assign(st: ByKind<"assign">, indent: string): string[];
   repoRun(st: ByKind<"repo-run">, indent: string): string[];
   opCall(st: ByKind<"op-call">, indent: string): string[];
+  /** `<Repo>.delete(o)` — a repository DELETE (destroy).  Renders to the
+   *  backend's already-emitted repository delete verb.  The argument shape
+   *  diverges per backend (the aggregate value for .NET/Java, `<entity>.id`
+   *  for Hono/Python), so the target renders `st.entity` itself. */
+  repoDelete(st: ByKind<"repo-delete">, indent: string): string[];
   resourceCall(st: ByKind<"resource-call">, indent: string): string[];
   /** `Transfer.run(src, dst, amount)` — a bare orchestrator call into a
    *  `domainService` operation (domain-services.md rev. 4, the `mutating`
@@ -146,6 +151,8 @@ function renderWorkflowStmt(
       return target.repoRun(st, indent);
     case "op-call":
       return target.opCall(st, indent);
+    case "repo-delete":
+      return target.repoDelete(st, indent);
     case "for-each":
       return target.forEach(
         st,

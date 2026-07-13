@@ -20,6 +20,7 @@ import type {
   Aggregate,
   BoundedContext,
   Create,
+  Destroy,
   FindDecl,
   HttpMethod,
   Operation,
@@ -28,6 +29,7 @@ import type {
 import {
   isAggregate,
   isCreate,
+  isDestroy,
   isOperation,
   isRepository,
 } from "../../../language/generated/ast.js";
@@ -82,7 +84,24 @@ export type HandlerTarget =
       readonly repo: Repository;
       readonly find: FindDecl;
     }
-  | { readonly kind: "getById"; readonly agg: Aggregate; readonly repo: Repository };
+  | { readonly kind: "getById"; readonly agg: Aggregate; readonly repo: Repository }
+  | {
+      readonly kind: "destroy";
+      readonly agg: Aggregate;
+      readonly repo: Repository;
+      readonly destroy: Destroy;
+    };
+
+/** The aggregate's CANONICAL destroy — the unnamed `destroy { }` terminator
+ * (`d.name == null`, matching `lowerDestroy`'s `canonical` rule).  This is the
+ * exact source the repository's delete verb is gated on (`agg.canonicalDestroy`
+ * → `delete`/`DeleteAsync`/… emission), so scaffolding a destroy handler only
+ * when one is present keeps the handler body's `<Repo>.delete(o)` call bound to
+ * a delete verb the repo actually emits.  `with crudish` supplies one; an
+ * explicit unnamed `destroy { }` does too. */
+function canonicalDestroyOf(agg: Aggregate): Destroy | undefined {
+  return (agg.members ?? []).filter(isDestroy).find((d) => d.name == null);
+}
 
 /** Every eligible source in `ctx` that has a repository to load its aggregate
  * by id.  An aggregate with no repository is skipped (nothing to `getById`
@@ -91,16 +110,17 @@ export type HandlerTarget =
  *
  * Emitted kinds: `getById` (one per aggregate), `create` (every `create`
  * factory action), `operation` (public operations), `find` (every declared
- * repository find).
+ * repository find), `destroy` (only when the aggregate has a CANONICAL destroy).
  *
- * `destroy` is intentionally NOT emitted.  A destroy handler body would need to
- * express a hard-delete, but Loom's handler-statement vocabulary has no
- * repo-delete verb and the domain entity emits no `destroy()` method — so
- * `o.destroy()` fails to compile (CS1061 on .NET) and an empty-body destroy
- * would silently overwrite the auto-derived `Destroy<Agg>` command with a no-op.
- * Wiring destroy needs generator-side work (an entity `destroy()` emit or a
- * repo-delete statement kind) that is out of the macro layer's reach; it is
- * tracked as a follow-up. */
+ * `destroy` is emitted only for an aggregate carrying a canonical (unnamed)
+ * `destroy { }` terminator — the exact source the repository's delete verb is
+ * gated on.  The handler body loads the aggregate by id then calls
+ * `<Repo>.delete(o)`, a first-class `repo-delete` handler statement (added in
+ * the repo-delete slice) that every domain-logic backend renders to its own
+ * repository delete verb.  An aggregate with no canonical destroy silently skips
+ * the destroy target — mirroring how an aggregate with no repository is skipped
+ * entirely — so a `route DELETE ...` is never emitted for a delete verb the
+ * backend didn't generate. */
 export function handlerTargets(ctx: BoundedContext): HandlerTarget[] {
   const members = ctx.members ?? [];
   const repos = members.filter(isRepository);
@@ -122,6 +142,10 @@ export function handlerTargets(ctx: BoundedContext): HandlerTarget[] {
       if (op.private) continue;
       out.push({ kind: "operation", agg, repo, op });
     }
+    // Destroy: only when a canonical `destroy { }` is present (so the repo emits
+    // the delete verb the handler body calls).  DELETE /<coll>/{<agg>Id}.
+    const destroy = canonicalDestroyOf(agg);
+    if (destroy) out.push({ kind: "destroy", agg, repo, destroy });
   }
   return out;
 }
@@ -134,7 +158,8 @@ export function handlerTargets(ctx: BoundedContext): HandlerTarget[] {
  *   - create    → `Create<Agg>`, or `<Name><Agg>` for a named factory
  *                 (`create place(...)` → `PlaceOrder`)
  *   - find      → `<Find>`                (`byStatus` → `ByStatus`)
- *   - getById   → `Get<Agg>`             (`Order` → `GetOrder`) */
+ *   - getById   → `Get<Agg>`             (`Order` → `GetOrder`)
+ *   - destroy   → `Destroy<Agg>`         (`Order` → `DestroyOrder`) */
 export function targetHandlerName(t: HandlerTarget): string {
   switch (t.kind) {
     case "operation":
@@ -147,12 +172,13 @@ export function targetHandlerName(t: HandlerTarget): string {
       return upperFirst(t.find.name);
     case "getById":
       return `Get${upperFirst(t.agg.name)}`;
+    case "destroy":
+      return `Destroy${upperFirst(t.agg.name)}`;
   }
 }
 
 /** The HTTP method a target binds to: POST for writes (create / operation),
- * GET for reads (find / get-by-id).  (DELETE is reserved for `destroy`, which
- * is not yet emitted — see `handlerTargets`.) */
+ * GET for reads (find / get-by-id), DELETE for `destroy`. */
 export function targetMethod(t: HandlerTarget): HttpMethod {
   switch (t.kind) {
     case "create":
@@ -161,6 +187,8 @@ export function targetMethod(t: HandlerTarget): HttpMethod {
     case "find":
     case "getById":
       return "GET";
+    case "destroy":
+      return "DELETE";
   }
 }
 
@@ -168,7 +196,8 @@ export function targetMethod(t: HandlerTarget): HttpMethod {
  *   - operation → `/<coll>/{<agg>Id}/<op>`
  *   - create    → `/<coll>`
  *   - find      → `/<coll>/<find>`
- *   - getById   → `/<coll>/{<agg>Id}` */
+ *   - getById   → `/<coll>/{<agg>Id}`
+ *   - destroy   → `/<coll>/{<agg>Id}` (same resource, DELETE method) */
 export function targetPath(t: HandlerTarget): string {
   switch (t.kind) {
     case "operation":
@@ -178,6 +207,7 @@ export function targetPath(t: HandlerTarget): string {
     case "find":
       return `${collectionPath(t.agg.name)}/${snake(t.find.name)}`;
     case "getById":
+    case "destroy":
       return `${collectionPath(t.agg.name)}/{${idParamName(t.agg.name)}}`;
   }
 }
