@@ -168,8 +168,9 @@ in hand — not before F# output exists.
   inputs + submit button; the field set is derived identically in the view walk
   and the MVU assembly (both `felizCreateForm` off the same enriched aggregate).
   All Fable + vite verified; the CI example grew a `ProductNew` page.
-  **v1 caveat:** REQUIRED SCALAR create-input fields only (nested part / VO /
-  collection inputs need sub-forms — follow-up).
+  **Caveat:** SCALAR create-input fields (required + optional; an optional field
+  is rendered, exempt from the submit guard, and encodes empty → `null`).  Nested
+  part / value object / collection inputs still need a sub-form (follow-up).
 - ✅ **Operation forms.** An `OperationForm(of: X, op: Y)` on a detail page
   projects to Elmish form state (the op's params) + a curried id-qualified Api
   fn (`POST /api/<agg>/<id>/<op>`, 204 → `unit`) + a `Submit<Op><Agg>Form of
@@ -226,10 +227,23 @@ in hand — not before F# output exists.
   submit `isDisabled()` → fill + toggle checkbox → `isEnabled()`); the showcase
   Product grew a `bool inStock` so all three widget kinds render in CI. All Fable
   + vite + headless-smoke verified.
+- ✅ **Optional scalar form fields (+ optional read decoder fix).** Optional
+  scalar create-input fields — previously DROPPED (`!f.optional` filter) — are now
+  rendered: same typed widget as their required twin, empty string encodes to
+  `Encode.nil` (JSON `null`), and they're exempt from the `Validation` submit
+  guard (an omitted optional is legitimate). Op/workflow forms pick up optional
+  (`x?: T`) params the same way. Also fixed a latent **read-decoder** bug this
+  surfaced: an optional wire field double-wrapped its record type
+  (`string option option`) vs the `get.Optional.Field` decoder's single `option`
+  — a Fable type mismatch that never fired because no prior example READ an
+  optional field. Both now key off one optionality signal. All Fable + vite +
+  smoke verified; the showcase Product grew an optional `note`.
 - **Wire layer covers the full CRUD write path + workflows + auth, with typed
-  validated forms.** list + byId reads, create, delete, operation, workflow runs,
-  the auth gate, and typed/validated form inputs. Remaining Feliz work is polish:
-  deeper pack coverage, the modal open-state, nested/collection form inputs,
+  validated forms + optional fields.** list + byId reads, create, delete,
+  operation, workflow runs, the auth gate, typed/validated form inputs, and
+  optional scalar fields. Remaining Feliz work is polish: deeper pack coverage,
+  the modal open-state, ENUM-as-dropdown + FK-`id` select + nested VO / array
+  form inputs (need enum/context threading + sub-form state),
   `currentUser.<field>` decode. Enum wire fields decode as their string name (a
   proper DU decoder is a follow-up); nested containment/VO records + decoders ARE
   emitted (transitive off `wireShape`).

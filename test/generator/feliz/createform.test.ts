@@ -166,6 +166,58 @@ describe("feliz create forms", () => {
     expect(app).not.toContain("form.inStock)");
   });
 
+  // Optional scalar create-input fields are RENDERED (previously dropped), but
+  // encode empty → null and are exempt from the submit guard.
+  it("renders optional scalar fields — empty encodes to null, exempt from validation", async () => {
+    const app = await appFs(`
+      system Shop {
+        api ShopApi from Catalog
+        subdomain Catalog {
+          context Cat {
+            aggregate Product with crudish { name: string  note: string?  rank: int? }
+            repository Products for Product { }
+          }
+        }
+        storage db { type: postgres }
+        resource catState { for: Cat, kind: state, use: db }
+        ui WebApp {
+          api Shop: ShopApi
+          page Products {
+            route: "/products"
+            body: QueryView {
+              of: Shop.Product.all,
+              loading: Text { "…" }, error: Text { "!" }, empty: Text { "0" },
+              data: rows => Stack { For { each: rows, p => Card { p.name } } }
+            }
+          }
+          page ProductNew {
+            route: "/products/new"
+            body: Stack { CreateForm { of: Product } }
+          }
+        }
+        deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 }
+        deployable web { platform: feliz targets: api ui: WebApp { Shop: api } port: 3005 }
+      }
+    `);
+    // The optional fields ARE in the form record + rendered as inputs.
+    expect(app).toContain("note: string");
+    expect(app).toContain('prop.placeholder "note"');
+    expect(app).toContain('prop.type\'.number; prop.placeholder "rank"');
+    // Empty optional folds to null; a filled value encodes as its base type.
+    expect(app).toContain(
+      '"note", (if form.note = "" then Encode.nil else Encode.string form.note)',
+    );
+    expect(app).toContain(
+      '"rank", (if form.rank = "" then Encode.nil else Encode.int (int form.rank))',
+    );
+    // Only the REQUIRED `name` guards the submit — optionals are exempt.
+    expect(app).toContain(
+      "  let productFormValid (form: ProductForm) : bool =\n    not (System.String.IsNullOrWhiteSpace form.name)",
+    );
+    expect(app).not.toContain("IsNullOrWhiteSpace form.note");
+    expect(app).not.toContain("IsNullOrWhiteSpace form.rank");
+  });
+
   // A read-only ui (no CreateForm) emits no form machinery — creates are additive.
   it("a read-only ui emits no form/encoder machinery", async () => {
     const app = await appFs(`

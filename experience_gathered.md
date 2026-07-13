@@ -2415,3 +2415,38 @@ The proposals/plans corpus (118 + 71 docs, three competing status tables) was co
 - **`docs/build.mjs` gotchas for nested dirs:** `MD_LINK` allowed only ONE path segment (`(?:seg/)?` → needs `*`), and subdir depth was hard-coded to 1 — both needed generalizing for `old/plans/` etc.
 - **Don't pipe `npm test` through `tail`.** The pipeline exit code is tail's, so a red suite reports exit 0, and the failure detail is truncated away. Redirect to a file instead. Corollary: don't rebase/mutate the working tree while vitest is mid-run — imports read at different times see different trees; our "2 failed" run during a rebase was unreproducible noise.
 - **Squash-merge + fast main:** the pre-push merge-tree hook caught upstream conflicts twice in one session (docs/extern.md rewritten upstream while we sed'd it). Resolving = take upstream's newer prose, re-apply the mechanical rewrite.
+
+## 36. Feliz optional form fields — and the latent optional-read decoder bug (2026-07-13)
+
+Optional scalar create fields were DROPPED (`!f.optional` filter), so a user
+could never set an optional field on create. Rendering them is small — but it
+surfaced a latent read-path bug that had been dormant for the whole Feliz build.
+
+- **An optional field is one place of `option`, from two signals.** A wire
+  field can carry optionality as a `FieldIR.optional` FLAG (create fields) OR an
+  `optional`-KIND type (`x?: T` op/workflow params). Read the two consistently
+  (`optional = f.optional || f.type.kind === "optional"`) and peel the type to
+  its base once, or a downstream renderer double-counts.
+
+- **The latent bug: `get.Optional.Field` ALREADY returns `'T option`.** The
+  read decoder emitted `note: string option option` on the record (the wire-shape
+  `optional` flag added ` option`, AND the `optional`-kind type added another via
+  `wireFieldType`) while the decoder — `get.Optional.Field "note" Decode.string`
+  — yields `string option`. A Fable type mismatch. It never fired because NO
+  shipped example read an optional field: every showcase/scaffold aggregate was
+  `{name, price, bool}`. The optional-FORM feature (whose test finally reads an
+  optional field) is what exposed it. Lesson: a codegen arm with no example
+  exercising it is untested even with a green suite — when you add the first
+  example that hits a dormant path, expect it to be broken.
+
+- **Optional encode: fold empty → `Encode.nil` (JSON null), but never a bool.**
+  `(if form.x = "" then Encode.nil else <baseEncode>)` inside `Encode.object`.
+  A bool is exempt (unchecked = `false`, never absent), same reasoning as its
+  validation exemption (§33). An optional numeric especially needs the fold —
+  `int ""` would throw; the empty guard short-circuits before the parse.
+
+- **Prove BOTH directions when the wire type changes.** Adding an optional field
+  touches the encoder (write) AND the decoder (read); the read side is where the
+  dormant bug lived. Generating a project that both READS (QueryView) and CREATES
+  the aggregate, then Fable-compiling, caught it — a form-only or read-only spike
+  would have missed it. Same prove-it loop as §23–§33.

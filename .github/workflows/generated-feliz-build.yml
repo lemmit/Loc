@@ -74,7 +74,8 @@ jobs:
           # `OperationForm` (a custom `rename` op) → an id-qualified POST to
           # /{id}/rename.  The ProductNew page covers a `CreateForm` → Thoth
           # encoders + Elmish form state (inputs → Set Msgs) + a POST Cmd, with
-          # TYPED inputs (a `type: number` price, a `bool` inStock checkbox) and
+          # TYPED inputs (a `type: number` price, a `bool` inStock checkbox, an
+          # OPTIONAL `note` — rendered, empty → null, exempt from the guard) and
           # a `Validation`-gated submit the smoke drives (disabled → enabled).
           cat > ci-feliz/showcase.ddd <<'DDD'
           system Storefront {
@@ -86,6 +87,7 @@ jobs:
                   name:    string
                   price:   money
                   inStock: bool
+                  note:    string?
                   operation rename(newName: string) { name := newName }
                 }
                 repository Products for Product { }
