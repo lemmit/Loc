@@ -65,6 +65,7 @@ import type {
   WorkflowIR,
 } from "../../ir/types/loom-ir.js";
 import { errorTypeUri } from "../../util/error-defaults.js";
+import { provableStringType } from "../../util/expr-body-type.js";
 import { WALKER_LAYOUT_PRIMITIVES } from "../../util/walker-primitive-names.js";
 import type { LoadedPack } from "../_packs/loader.js";
 import { tryDetectApiHook } from "./api-hook-detector.js";
@@ -843,7 +844,11 @@ export function walk(expr: ExprIR, ctx: WalkContext, depth: number): string {
       // of a `<Table.Td>` cell).  Emit as an interpolated JS
       // expression; `emitExpr` resolves the receiver (lambda
       // param, hook, state) and concatenates the member name.
-      return ctx.target.renderInterpolation(emitExpr(expr, ctx));
+      // `provableStringType` is `undefined` for a member (its resolved
+      // type is unreliable for untyped scaffold accessors), so a
+      // text-coercing target keeps its cast — safe today, and the site
+      // widens to the real type once accessors are typed.
+      return ctx.target.renderInterpolation(emitExpr(expr, ctx), provableStringType(expr));
     default:
       return ctx.target.renderComment(`unsupported expr: ${expr.kind}`);
   }
@@ -1875,7 +1880,10 @@ export function renderTextContent(expr: ExprIR, ctx: WalkContext): string | unde
     }
     return undefined;
   }
-  return ctx.target.renderInterpolation(emitExpr(expr, ctx));
+  // A structurally-provable string (a bare literal, a Yes/No conditional of
+  // string literals) lets a text-coercing target (Feliz) drop a redundant cast;
+  // `undefined` — including every member/ref read — means "coerce".
+  return ctx.target.renderInterpolation(emitExpr(expr, ctx), provableStringType(expr));
 }
 
 // The page-file shell (renderCustomLayoutPage, the form-wiring renderers,

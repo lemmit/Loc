@@ -409,8 +409,16 @@ export interface WalkerTarget {
    *  `{expr}`; Vue uses the mustache `\{\{ expr \}\}`; HEEx's own
    *  walker never reaches this (modern HEEx `{expr}` returned for
    *  contract completeness).  The expression is already rendered
-   *  JS — the target only supplies the delimiters. */
-  renderInterpolation(jsExpr: string): string;
+   *  JS — the target only supplies the delimiters.
+   *
+   *  `exprType` is supplied only when the value is *provably* a given
+   *  type from its own structure (via `provableStringType`).  The
+   *  JSX-family targets ignore it (interpolation auto-coerces to text);
+   *  Feliz reads it to drop a redundant `string (…)` coercion when the
+   *  value is already a `string` (`Html.text` needs a string, so
+   *  non-string leaves keep the wrap).  Optional — an omitted/unknown
+   *  type means "coerce". */
+  renderInterpolation(jsExpr: string, exprType?: TypeIR): string;
 
   /** Render a DYNAMIC attribute bound to a JS expression, leading
    *  space included (` name={expr}` on TSX/Svelte; ` :name="expr"`
