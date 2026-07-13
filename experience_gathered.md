@@ -2079,3 +2079,48 @@ Same prove-it loop as §23–§25: a hand-written delete spike Fable-compiled FI
 (locking `Http.request`/`Cmd.navigate`/the mutation-arm shape), then the emitter
 re-verified against the real generated 3-page project (`dotnet fable` + `vite
 build`).
+
+## 27. Feliz create forms — Elmish form state is the encoder's mirror + a Model record (2026-07-13)
+
+Create (`CreateForm(of: X)`) is the first FORM write on Feliz — larger than
+delete because a form has STATE. The Elmish shape is a direct mirror of the read
+path, plus a form record.
+
+- **Form state lives in the Model, not the DOM.** React Hook Form keeps form
+  state in a hook; Elmish has no hook — the in-progress form is a `<Agg>Form`
+  record field ON the Model, every `Html.input` reads `model.<Agg>Form.<field>`
+  and its `onChange` dispatches `Set<Agg>Form<Field>`, and `update` does the
+  functional record update (`{ model with <Agg>Form = { model.<Agg>Form with
+  <field> = v } }`). There is no two-way binding; the round-trip is
+  input→Msg→update→re-render, the same MVU loop as everything else.
+
+- **String-typed fields, encode at submit.** Every form field is a `string`
+  (what an `Html.input` yields); the Thoth ENCODER lifts each back to its wire
+  type at submit (`Encode.decimal (decimal form.price)`). This is the v1
+  simplification — typed form state + per-field parse/validation is a follow-up.
+  `decimal "12.50"` / `int "5"` compile and run in Fable, so the lift is a plain
+  conversion in the encoder, no parse-error handling in v1.
+
+- **Encoders are the decoders' mirror, off `createInputFields`.** The read path
+  emits `Decoders` off `wireShape`; the write path emits `Encoders` off
+  `createInputFields(agg)` (the client-suppliable set — drops managed/token/
+  internal, the same set the backend's POST accepts). v1 keeps the REQUIRED
+  SCALAR fields (mirroring React's `!optional` filter); nested/collection inputs
+  need sub-forms.
+
+- **`Http.method POST |> Http.content (BodyContent.Text body)`** with
+  `Encode.toString 0 (Encoders.<form> form)` as the body and
+  `Headers.contentType "application/json"`; the 2xx response decodes the created
+  record via the existing `Decoders`. Same builder form as the delete verb, with
+  a body.
+
+- **The view seam and the MVU assembly must derive the SAME field set.** The
+  `renderCreateForm` seam (view) and `collectPageForms` (MVU wiring) both call
+  `felizCreateForm(agg)` on the same enriched aggregate, so the input's
+  `Set<Field>` Msg and the `update` arm that handles it can't drift — the field
+  set is computed once, consumed twice.
+
+Proven the same way as §23–§26: a hand-written create spike Fable-compiled FIRST
+(locking the encoder / `BodyContent` / string-form shape), then the emitter
+re-verified against the real generated 4-page project (`dotnet fable` + `vite
+build`).

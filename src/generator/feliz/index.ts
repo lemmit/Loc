@@ -29,11 +29,15 @@ import {
   renderUpdate,
 } from "./update-emit.js";
 import {
+  collectPageForms,
   collectPageMutations,
   collectPageReads,
+  type FelizForm,
   type FelizMutation,
   type FelizRead,
   renderApiModule,
+  renderEncoders,
+  renderFormTypes,
   renderViewModule,
   renderWireTypes,
 } from "./wire.js";
@@ -209,6 +213,23 @@ function mutationsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizMu
   return out;
 }
 
+/** The create forms a ui hosts, across ALL its pages (deduped by aggregate) —
+ *  `CreateForm(of: X)`. */
+function formsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizForm[] {
+  const aggregatesByName = new Map<string, EnrichedBoundedContextIR["aggregates"][number]>();
+  for (const c of contexts) for (const a of c.aggregates) aggregatesByName.set(a.name, a);
+  const seen = new Set<string>();
+  const out: FelizForm[] = [];
+  for (const page of ui.pages) {
+    for (const f of collectPageForms(page, aggregatesByName)) {
+      if (seen.has(f.aggregate)) continue;
+      seen.add(f.aggregate);
+      out.push(f);
+    }
+  }
+  return out;
+}
+
 /** A ui's `state {}` fields across ALL pages, deduped by name (multi-page uis
  *  share one flat Model; distinct pages should use distinct field names). */
 function combinedState(ui: UiIR): PageIR["state"][number][] {
@@ -250,11 +271,12 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
   for (const c of contexts) for (const a of c.aggregates) aggregatesByName.set(a.name, a);
   const reads: FelizRead[] = readsForUi(ui, contexts);
   const mutations: FelizMutation[] = mutationsForUi(ui, contexts);
+  const forms: FelizForm[] = formsForUi(ui, contexts);
   const hasReads = reads.length > 0;
-  const hasMutations = mutations.length > 0;
-  // Http/Api are needed for reads AND mutations; the Thoth decoder/Remote/View
-  // layer only for reads.
-  const hasHttp = hasReads || hasMutations;
+  const hasForms = forms.length > 0;
+  // Http/Api are needed for reads, mutations AND create forms (POST); the Thoth
+  // decoder/Remote/View layer only for reads; form types + encoders only for forms.
+  const hasHttp = hasReads || mutations.length > 0 || hasForms;
   // A ui is routed when it has >1 page OR any page carries a route param (a lone
   // detail page still needs a router to bind its `:id`).
   const routed = pages.length > 1 || pages.some(hasRouteParam);
@@ -264,12 +286,14 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
   // a single-page ui's combined lists are exactly its one page's.
   const state = combinedState(ui);
   const actions = combinedActions(ui);
-  const model = renderModel(state, reads, routed);
-  const init = renderInit(state, reads, routed);
-  const msg = renderMsg(actions, reads, routed, mutations);
-  const update = renderUpdate(actions, state, reads, routed, mutations);
+  const model = renderModel(state, reads, routed, forms);
+  const init = renderInit(state, reads, routed, forms);
+  const msg = renderMsg(actions, reads, routed, mutations, forms);
+  const update = renderUpdate(actions, state, reads, routed, mutations, forms);
   const wire = hasReads ? renderWireTypes(reads, contexts) : { domain: "", decoders: "" };
-  const api = hasHttp ? renderApiModule(reads, mutations) : "";
+  const api = hasHttp ? renderApiModule(reads, mutations, forms) : "";
+  const formTypes = hasForms ? renderFormTypes(forms) : "";
+  const encoders = hasForms ? renderEncoders(forms) : "";
 
   // Views: one root `view` (single-page) OR per-page `<page>View` functions +
   // a `React.router` root that switches on `CurrentPage`.  Detail pages take
@@ -291,7 +315,8 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
     routed && "open Feliz.Router",
     "open Elmish",
     "open Elmish.React",
-    hasReads && "open Thoth.Json",
+    // Thoth is needed for decoders (reads) AND encoders (create forms).
+    (hasReads || hasForms) && "open Thoth.Json",
     hasHttp && "open Fable.SimpleHttp",
     // Read wire layer (reads only) — records → Remote → decoders.
     hasReads && "",
@@ -300,7 +325,12 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
     hasReads && REMOTE_TYPE,
     hasReads && "",
     hasReads && wire.decoders,
-    // Api module — reads (fetch + decode) AND mutations (verb request).
+    // Create-form state (form record types + empty values) → encoders (write dir).
+    hasForms && "",
+    hasForms && formTypes,
+    hasForms && "",
+    hasForms && encoders,
+    // Api module — reads (fetch + decode), mutations (verb request), creates (POST).
     hasHttp && "",
     hasHttp && api,
     // View helpers (reads only) — Remote matchers the QueryView renderer calls.
@@ -461,7 +491,10 @@ export function generateFelizForContexts(
   // fsproj package refs must match what `renderAppFs` emits: SimpleHttp/Thoth
   // when there's any Http (reads or mutations), Feliz.Router when routed (>1
   // page OR a lone detail page carrying a `:id` route param).
-  const hasHttp = readsForUi(ui, contexts).length > 0 || mutationsForUi(ui, contexts).length > 0;
+  const hasHttp =
+    readsForUi(ui, contexts).length > 0 ||
+    mutationsForUi(ui, contexts).length > 0 ||
+    formsForUi(ui, contexts).length > 0;
   const routed = ui.pages.length > 1 || ui.pages.some(hasRouteParam);
   out.set("src/App.fs", renderAppFs(ui, contexts));
   out.set("App.fsproj", fsproj(hasHttp, routed));

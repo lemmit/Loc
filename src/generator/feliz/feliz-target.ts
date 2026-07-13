@@ -11,7 +11,7 @@ import { lowerFirst, upperFirst } from "../../util/naming.js";
 import type { RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { FS_LEAVES, fsString } from "./fs-expr.js";
 import { fsZeroValue } from "./type-fs.js";
-import { byIdFieldName, readFieldName } from "./wire.js";
+import { byIdFieldName, felizCreateForm, readFieldName } from "./wire.js";
 
 /** Msg case name for an action (`inc` → `Inc`). */
 function msgCase(action: string): string {
@@ -154,6 +154,29 @@ export const felizTarget: WalkerTarget = {
     if (!agg) return null;
     ctx.usesRouteId = true; // the delete dispatches with the route `id`
     return `Html.button [ prop.onClick (fun _ -> dispatch (Delete${upperFirst(agg)} id)); prop.text "Delete ${upperFirst(agg)}" ]`;
+  },
+
+  // `CreateForm(of: <Agg>)` → one `Html.input` per required create-input field
+  // (bound to `model.<Agg>Form.<field>` + dispatching `Set<Agg>Form<Field>`) and
+  // a submit button dispatching `Submit<Agg>Form`.  The form STATE + encoder +
+  // POST `Cmd` live in `update`/`Api` (wired by index.ts's `collectPageForms`);
+  // the view only reads/dispatches.  The field set is derived identically here
+  // and in index.ts (both `felizCreateForm` off the same enriched aggregate).
+  renderCreateForm: (call, ctx) => {
+    if (call.kind !== "call") return null;
+    const names = call.argNames ?? [];
+    const idx = names.indexOf("of");
+    const ofArg = idx >= 0 ? call.args[idx] : undefined;
+    const aggName = ofArg?.kind === "ref" ? ofArg.name : undefined;
+    const agg = aggName ? ctx.aggregatesByName.get(aggName) : undefined;
+    if (!agg) return null;
+    const form = felizCreateForm(agg);
+    const inputs = form.fields.map(
+      (fld) =>
+        `Html.input [ prop.placeholder "${fld.wireName}"; prop.value model.${form.formField}.${fld.wireName}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)) ]`,
+    );
+    const submit = `Html.button [ prop.onClick (fun _ -> dispatch ${form.submitMsg}); prop.text "Create ${upperFirst(form.aggregate)}" ]`;
+    return `Html.div [ prop.children [ ${[...inputs, submit].join("; ")} ] ]`;
   },
 
   defaultInitFor: (type) => fsZeroValue(type),
