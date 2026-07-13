@@ -36,8 +36,11 @@ aggregate Order {
 >
 > Two **frontend** extern hatches exist alongside the operation one:
 > `function … extern from "…"` (a typed frontend-function hook — React, Vue,
-> Svelte) and `component … extern from "…"` (hand-written page component —
-> React, Vue, Svelte).
+> Svelte, Angular) and `component … extern from "…"` (hand-written page
+> component — React, Vue, Svelte). On Angular the function hook imports the
+> conformance shim and re-exposes it as a component member (Angular template
+> expressions resolve against the component instance, never a free import), so
+> a body call renders as `{{ initials(name()) }}`.
 
 An `extern` operation's body contains **only** `precondition` statements
 — no assignment, no `emit`, no collection mutation.  The framework owns

@@ -65,6 +65,11 @@ export interface AngularPageShellInput {
   bcByAggregate?: ReadonlyMap<string, BoundedContextIR>;
   workflowsByName?: ReadonlyMap<string, WorkflowIR>;
   bcByWorkflow?: ReadonlyMap<string, BoundedContextIR>;
+  /** Extern frontend function names declared on this ui
+   *  (`function f(…): T extern from "…"`) — an action-body call registers a
+   *  use so the shell imports the shim and re-exposes it as a component member
+   *  (same as a main-body call, resolved via `result.usedExternFunctions`). */
+  externFunctions?: ReadonlySet<string>;
 }
 
 /** PascalCase component class name (`CustomerHome` → `CustomerHomeComponent`).
@@ -254,6 +259,11 @@ export function renderAngularPage(input: AngularPageShellInput): string {
         bcByAggregate: input.bcByAggregate ?? new Map(),
         workflowsByName: input.workflowsByName ?? new Map(),
         bcByWorkflow: input.bcByWorkflow ?? new Map(),
+        // An action body may call an extern frontend function; register the use
+        // into the SHARED result set so the import/member block below covers it
+        // exactly like a main-body call.
+        externFunctions: input.externFunctions ?? new Set(),
+        usedExternFunctions: result.usedExternFunctions,
       };
       const mctx: WalkContext = param
         ? { ...baseCtx, lambdaParams: extendLambdaParams(baseCtx, param, param) }
@@ -364,6 +374,17 @@ export function renderAngularPage(input: AngularPageShellInput): string {
   if (usedHelpers.length > 0) {
     imports.push(`import { ${usedHelpers.join(", ")} } from "../../lib/format";`);
     for (const h of usedHelpers) members.push(`  protected readonly ${h} = ${h};`);
+  }
+
+  // Extern frontend functions the walked body / action bodies call — import
+  // each from its conformance shim (`src/lib/<name>.ts` → `../../lib/<name>`
+  // from `src/app/pages/`) and re-expose it as a component member so the
+  // template interpolation (`{{ initials(name()) }}`) resolves it against the
+  // instance.  Same lift as `FORMAT_HELPERS`; sorted for stable output.
+  const usedExternFns = [...(result.usedExternFunctions ?? new Set<string>())].sort();
+  for (const fn of usedExternFns) {
+    imports.push(`import { ${fn} } from "../../lib/${fn}";`);
+    members.push(`  protected readonly ${fn} = ${fn};`);
   }
 
   // Bind each route param synchronously as a class field so both the template
