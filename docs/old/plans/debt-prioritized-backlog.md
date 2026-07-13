@@ -1,5 +1,12 @@
 # Stubs, TODOs & Debt — Prioritized Backlog
 
+> [!IMPORTANT]
+> **ARCHIVED / SUPERSEDED (2026-07-13).** This document's statuses, orderings, and
+> registers are frozen and no longer maintained. The live roadmap is
+> [`docs/new-plan/README.md`](../../new-plan/README.md); this file's open items are
+> dispositioned in [`docs/new-plan/coverage.md`](../../new-plan/coverage.md).
+> Use this file only as the design record.
+
 > **Status banner (2026-06):** The **Ash foundation has been REMOVED.** `platform: elixir` now generates Phoenix LiveView on PLAIN Ecto/Phoenix (the "vanilla" foundation) only. The `foundation:` knob stays, but `foundation: ash` is now a **validation error**; `vanilla` is the default and only valid value. Many entries below were written while the Ash foundation was live and still talk about an "elixir/ash" vs "elixir/vanilla" split, gates that "stay on ash", or building against "real Ash 3.x" — read those as historical: the single elixir backend is plain Ecto/Phoenix today, and any "(Ash defer)" / "gated on ash" cell now ships on that one elixir backend. The design pack named **ashPhoenix** (HEEx components) is unrelated and stays.
 
 **Created:** 2026-06-18 · **Status:** living backlog (work through top-down)

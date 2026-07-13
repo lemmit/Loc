@@ -1,5 +1,12 @@
 # Vanilla Phoenix backend — feature gaps after Ash removal
 
+> [!IMPORTANT]
+> **ARCHIVED / SUPERSEDED (2026-07-13).** This document's statuses, orderings, and
+> registers are frozen and no longer maintained. The live roadmap is
+> [`docs/new-plan/README.md`](../../new-plan/README.md); this file's open items are
+> dispositioned in [`docs/new-plan/coverage.md`](../../new-plan/coverage.md).
+> Use this file only as the design record.
+
 When the Ash foundation was removed (`platform: elixir` is now vanilla-only —
 plain Ecto/Phoenix LiveView), a handful of features that the Ash foundation
 emitted have **no vanilla equivalent yet**. The cross-backend parity / generator

@@ -1,5 +1,12 @@
 # Platform parity debt — the cross-backend gate inventory
 
+> [!IMPORTANT]
+> **ARCHIVED / SUPERSEDED (2026-07-13).** This document's statuses, orderings, and
+> registers are frozen and no longer maintained. The live roadmap is
+> [`docs/new-plan/README.md`](../../new-plan/README.md); this file's open items are
+> dispositioned in [`docs/new-plan/coverage.md`](../../new-plan/coverage.md).
+> Use this file only as the design record.
+
 > **Status:** SUMMARY / debt register — no new surface; tracks existing gates.
 > **Role:** A single roll-up of every feature that works on some targets but
 > not others, across the **five backends** (node/Hono, dotnet/.NET, java/Spring,

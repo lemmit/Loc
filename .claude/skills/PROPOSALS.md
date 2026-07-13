@@ -327,3 +327,16 @@ clarifying comment, no behaviour change. Recommend landing.
   the stale *code* comment it found — flagged it, stayed docs-only — and handed it to
   `parity-auditor`, which verified then fixed. The docs-only / flag-don't-fix
   boundary worked exactly as designed.)
+
+## PATCH proposal (2026-07-13, session: docs-corpus consolidation): `status-refresh` triggers point at archived trackers
+
+The proposals/plans corpus moved to `docs/old/` and the live status/ordering home is now
+`docs/new-plan/` (tracks + missions + `coverage.md`). The `status-refresh` skill's trigger
+text still says "refresh the trackers / the proposals status table … picking up
+`docs/old/proposals/README.md` or `docs/old/proposals/global-implementation-plan.md`" —
+both are archived and carry ARCHIVED/SUPERSEDED banners; "refreshing" them is now an
+anti-goal (their statuses are deliberately frozen). Proposed patch (propose-only, per the
+hard rule): retarget those trigger examples at `docs/new-plan/README.md` +
+`docs/new-plan/coverage.md`, and add a boundary line: archived docs under `docs/old/` get
+banner/link fixes only, never status refreshes. Second sighting not required — this is a
+mechanical consequence of a landed refactor, same class as a rename scrub.
