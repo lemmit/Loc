@@ -621,8 +621,39 @@ function renderUserComponent(
     const value = renderExpr(expr.args[i]!, { ...ctx, position: "template" });
     attrs.push(`${snake(paramName)}={${value}}`);
   }
+  // Extern component (extern-component-escape-hatch.md) → a hand-written
+  // Phoenix LiveComponent the user owns, embedded via the built-in
+  // `<.live_component>`.  The MODULE reference is the binding — Elixir's native
+  // module system, no import/alias needed (the framework-mismatch analogue of
+  // the JSX frontends' `tsc` fail-fast: a wrong module fails to compile).
+  // `id` is required by `live_component`; the snake component name is stable.
+  if (comp.extern) {
+    const mod = externModuleFromPath(comp.externPath ?? "");
+    const rest = attrs.length > 0 ? ` ${attrs.join(" ")}` : "";
+    return `<.live_component module={${mod}} id="${snake(comp.name)}"${rest} />`;
+  }
   const tag = `${ctx.appModule}Web.Components.UiComponents.${snake(comp.name)}`;
   return attrs.length > 0 ? `<${tag} ${attrs.join(" ")} />` : `<${tag} />`;
+}
+
+/** Derive the Elixir module reference for an `extern` component from its
+ *  `from "<path>"` clause.  Elixir binds by MODULE, not by file path, so the
+ *  path segments (split on `/` or `.`) are PascalCased and joined with `.` —
+ *  e.g. `"widgets/order-chart"` → `Widgets.OrderChart`.  The user writes a
+ *  `Phoenix.LiveComponent` under exactly that module. */
+function externModuleFromPath(path: string): string {
+  const pascalSeg = (seg: string): string =>
+    seg
+      .split(/[^a-zA-Z0-9]+/)
+      .filter(Boolean)
+      .map((w) => upperFirst(w))
+      .join("");
+  return path
+    .replace(/^\.?\//, "")
+    .split(/[/.]/)
+    .filter(Boolean)
+    .map(pascalSeg)
+    .join(".");
 }
 
 /** `Action(<instance>.<operation>, then?)` → a `<.button phx-click=…>`
@@ -742,6 +773,19 @@ function renderCall(expr: Extract<ExprIR, { kind: "call" }>, ctx: WalkContext): 
   // component (`<MyAppWeb.Components.UiComponents.order_panel … />`).
   const userComp = ctx.ui.components.find((c) => c.name === expr.name);
   if (userComp) return renderUserComponent(expr, userComp, ctx);
+  // Extern frontend function (`function f(…): T extern from "…"`,
+  // extern-function-hook-escape-hatch.md) → a FULLY-QUALIFIED call into the
+  // user's hand-written Elixir module (derived from the `from` path), so no
+  // import wiring is needed — Elixir resolves a fully-qualified call without an
+  // `import` (the function twin of the extern-component `<.live_component
+  // module={…}>` binding).  A missing module fails `mix compile` — the
+  // fail-fast, matching the JSX frontends' `tsc` conformance-shim check.
+  const externFn = ctx.ui.functions?.find((f) => f.name === expr.name);
+  if (externFn) {
+    const mod = externModuleFromPath(externFn.externPath);
+    const args = expr.args.map((a) => renderExpr(a, ctx)).join(", ");
+    return `${mod}.${snake(expr.name)}(${args})`;
+  }
   // Registered primitive that the HEEx target doesn't support yet —
   // emit a visible HEEx comment so the divergence shows up in
   // generated output instead of silently producing wrong markup.

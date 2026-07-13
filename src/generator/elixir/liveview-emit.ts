@@ -143,6 +143,10 @@ export function emitLiveViewPages(args: {
   // components it renders (function components are stateless).
   const componentInfo = new Map<string, ComponentActionInfo>();
   for (const c of ui.components) {
+    // Extern components have no walked body — their rendering is a hand-written
+    // LiveComponent embedded via `<.live_component>` (extern-component-escape-
+    // hatch.md).  Nothing to walk, hoist, or emit into `UiComponents`.
+    if (c.extern) continue;
     const synthPage = {
       name: c.name,
       params: c.params,
@@ -244,7 +248,7 @@ export function emitLiveViewPages(args: {
   // Page bodies invoke them fully-qualified, so no import wiring is
   // needed.  (Components hosting Form/Action need handler hoisting to
   // the page LiveView — deferred.)
-  if (ui.components.length > 0) {
+  if (ui.components.some((c) => !c.extern)) {
     out.set(
       `lib/${appName}_web/components/ui_components.ex`,
       renderUiComponents({
@@ -886,39 +890,41 @@ function renderUiComponents(args: {
     authEnabled,
   } = args;
   const webModule = `${appModule}Web`;
-  const defs = ui.components.map((c) => {
-    const synthPage = {
-      name: c.name,
-      params: c.params,
-      state: c.state,
-      derived: c.derived,
-      body: c.body,
-    } as PageIR;
-    const walked = walkBodyToHeex(
-      c.body,
-      synthPage,
-      ui,
-      appModule,
-      aggregatesByName,
-      enumsByName,
-      valueObjectsByName,
-      authEnabled,
-      partContextModule,
-      contextModuleByAggName,
-    );
-    const attrLines = c.params
-      .map((p) => `  attr :${snake(p.name)}, ${attrType(p.type)}, required: true`)
-      .join("\n");
-    // A `Slot()` in the body declares the `:inner_block` slot it renders via
-    // `{render_slot(@inner_block)}` (walker sets `usesSlot`).
-    const slotLine = walked.usesSlot ? "  slot :inner_block, required: true\n" : "";
-    const attrBlock = `${attrLines.length > 0 ? `${attrLines}\n` : ""}${slotLine}`;
-    return `${attrBlock}  def ${snake(c.name)}(assigns) do
+  const defs = ui.components
+    .filter((c) => !c.extern)
+    .map((c) => {
+      const synthPage = {
+        name: c.name,
+        params: c.params,
+        state: c.state,
+        derived: c.derived,
+        body: c.body,
+      } as PageIR;
+      const walked = walkBodyToHeex(
+        c.body,
+        synthPage,
+        ui,
+        appModule,
+        aggregatesByName,
+        enumsByName,
+        valueObjectsByName,
+        authEnabled,
+        partContextModule,
+        contextModuleByAggName,
+      );
+      const attrLines = c.params
+        .map((p) => `  attr :${snake(p.name)}, ${attrType(p.type)}, required: true`)
+        .join("\n");
+      // A `Slot()` in the body declares the `:inner_block` slot it renders via
+      // `{render_slot(@inner_block)}` (walker sets `usesSlot`).
+      const slotLine = walked.usesSlot ? "  slot :inner_block, required: true\n" : "";
+      const attrBlock = `${attrLines.length > 0 ? `${attrLines}\n` : ""}${slotLine}`;
+      return `${attrBlock}  def ${snake(c.name)}(assigns) do
     ~H"""
 ${indent(walked.heex, 4)}
     """
   end`;
-  });
+    });
   return `defmodule ${webModule}.Components.UiComponents do
   use ${webModule}, :html
 
