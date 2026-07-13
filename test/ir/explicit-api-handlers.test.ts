@@ -81,6 +81,38 @@ describe("explicit api handlers — lowering", () => {
     expect(qry.savesAtExit).toEqual([]);
   });
 
+  it("lowers an extern handler bodyless: extern flag set, statements/saves empty, returnType kept", async () => {
+    const cmd = `extern commandHandler PlaceOrder(code: string): Order id;`;
+    const qry = `extern queryHandler GetQuote(orderId: Order id): string;`;
+    const { model } = await parseString(SYS(`${cmd}\n${qry}`, ""), { validate: false });
+    const ctx = allContexts(lowerModel(model)).find((c) => c.name === "Ordering")!;
+    const ch = ctx.commandHandlers!.find((h) => h.name === "PlaceOrder")!;
+    const qh = ctx.queryHandlers!.find((h) => h.name === "GetQuote")!;
+    expect(ch.extern).toBe(true);
+    expect(ch.statements).toEqual([]);
+    expect(ch.savesAtExit).toEqual([]);
+    expect(ch.returnValue).toBeUndefined();
+    expect(ch.returnType).toBeDefined(); // `Order id` return kept as the impl contract
+    expect(ch.params.map((p) => p.name)).toEqual(["code"]);
+    expect(qh.extern).toBe(true);
+    expect(qh.statements).toEqual([]);
+    expect(qh.returnType).toBeDefined();
+  });
+
+  it("extern handlers skip the body-analysis gates (no query-saves / multi-aggregate)", async () => {
+    // A bodyless extern handler has nothing to analyse — neither the query
+    // read-only gate nor the single-aggregate gate may fire on it.
+    const found = await codesFor(
+      `
+        extern queryHandler GetQuote(orderId: Order id): string;
+        extern commandHandler PlaceOrder(code: string): Order id;
+      `,
+      "",
+    );
+    expect(found).not.toContain("loom.query-handler-saves");
+    expect(found).not.toContain("loom.command-handler-multi-aggregate");
+  });
+
   it("lowers a handler `return <expr>` to returnValue, not the __bad__ sentinel", async () => {
     // Regression: handler bodies lower through lowerWorkflowStatement, which has
     // no `return` arm (workflow handles never return a value) — so a `return`

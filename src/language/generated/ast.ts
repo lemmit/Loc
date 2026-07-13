@@ -888,6 +888,7 @@ export interface CommandHandler extends langium.AstNode {
     readonly $container: BoundedContext;
     readonly $type: 'CommandHandler';
     body: Array<Statement>;
+    extern: boolean;
     name: string;
     params: Array<Parameter>;
     returnType?: TypeRef;
@@ -896,6 +897,7 @@ export interface CommandHandler extends langium.AstNode {
 export const CommandHandler = {
     $type: 'CommandHandler',
     body: 'body',
+    extern: 'extern',
     name: 'name',
     params: 'params',
     returnType: 'returnType'
@@ -2800,6 +2802,7 @@ export interface QueryHandler extends langium.AstNode {
     readonly $container: BoundedContext;
     readonly $type: 'QueryHandler';
     body: Array<Statement>;
+    extern: boolean;
     name: string;
     params: Array<Parameter>;
     returnType: TypeRef;
@@ -2808,6 +2811,7 @@ export interface QueryHandler extends langium.AstNode {
 export const QueryHandler = {
     $type: 'QueryHandler',
     body: 'body',
+    extern: 'extern',
     name: 'name',
     params: 'params',
     returnType: 'returnType'
@@ -4745,6 +4749,11 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                     defaultValue: [],
                     optional: true
                 },
+                extern: {
+                    name: CommandHandler.extern,
+                    defaultValue: false,
+                    optional: true
+                },
                 name: {
                     name: CommandHandler.name
                 },
@@ -6272,6 +6281,11 @@ export class DddAstReflection extends langium.AbstractAstReflection {
                 body: {
                     name: QueryHandler.body,
                     defaultValue: [],
+                    optional: true
+                },
+                extern: {
+                    name: QueryHandler.extern,
+                    defaultValue: false,
                     optional: true
                 },
                 name: {

@@ -514,6 +514,7 @@ export function commandHandler(
     mkCommandHandler({
       $type: "CommandHandler",
       name,
+      extern: false,
       params,
       body,
       ...(opts.returnType ? { returnType: opts.returnType } : {}),

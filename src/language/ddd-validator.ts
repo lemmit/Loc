@@ -42,6 +42,7 @@ import {
   checkDurationConstructors,
   checkExpectMatcher,
   checkGenericCarriers,
+  checkHandlerBodies,
   checkImageAltText,
   checkInheritance,
   checkIntrinsicCalls,
@@ -286,6 +287,9 @@ export class DddValidator {
     // Phase B top-level functions: block-form rejection + recursion cycle
     // (loom.function-toplevel-block / loom.function-recursive).
     guard("toplevel-functions", model, () => checkTopLevelFunctions(model, accept));
+    // The `extern` ↔ body pairing on commandHandler / queryHandler
+    // (loom.extern-handler-has-body / loom.handler-missing-body).
+    guard("handler-bodies", model, () => checkHandlerBodies(model, accept));
     // Unresolved bare-identifier heads (`total := amout`, `let x = amout`):
     // a `NameRef` is not a cross-reference, so an unresolvable head types as
     // `T.unknown` and every downstream gate suppresses on it — the finding-1

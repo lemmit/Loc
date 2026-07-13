@@ -40,6 +40,7 @@ import type {
 } from "../../ir/types/loom-ir.js";
 import { wireTypeInfo } from "../../ir/types/wire-types.js";
 import { plural, upperFirst } from "../../util/naming.js";
+import { SCAFFOLD_ONCE_MARKER } from "../../util/scaffold-once.js";
 import { renderWorkflowStmtChunks } from "../_workflow/stmt-target.js";
 import { projectToResponse } from "./dto-mapping.js";
 import { renderCsType } from "./render-expr.js";
@@ -207,6 +208,152 @@ ${body}
 `;
 }
 
+// --- Extern handler (bodyless) — port + [ExternHandler] scaffold-once impl --
+// An `extern` handler has no DSL body and no home aggregate: its Mediator
+// command/query + route wire up as usual, but the Mediator handler delegates to
+// a ctor-injected `I<Name>Handler` port the user's scaffold-once
+// `<Name>HandlerImpl` supplies.  The impl carries `[ExternHandler]`, so the
+// existing Scrutor scan + startup verify in `Program.cs` register it and fail
+// fast when it's missing.  All four files live under a neutral
+// `Application/Handlers/` folder (no aggregate to file them under).
+
+const EXTERN_HANDLERS_NS = (ns: string): string => `${ns}.Application.Handlers`;
+
+/** The port method's C# param list + trailing CancellationToken. */
+function externPortParams(h: Handler): string {
+  return [
+    ...h.params.map((p) => `${renderCsType(p.type)} ${p.name}`),
+    "CancellationToken cancellationToken",
+  ].join(", ");
+}
+
+/** The `<Name>Command` / `<Name>Query` Mediator record for an extern handler. */
+function renderExternRecord(h: Handler, ns: string, kind: "Command" | "Query"): string {
+  const params = h.params.map((p) => `${renderCsType(p.type)} ${upperFirst(p.name)}`).join(", ");
+  const iface =
+    kind === "Command"
+      ? h.returnType
+        ? `ICommand<${renderCsType(h.returnType)}>`
+        : "ICommand"
+      : `IQuery<${renderCsType(h.returnType!)}>`;
+  return `// Auto-generated.
+using Mediator;
+using ${ns}.Domain.Ids;
+using ${ns}.Domain.ValueObjects;
+using ${ns}.Domain.Enums;
+
+namespace ${EXTERN_HANDLERS_NS(ns)};
+
+public sealed record ${h.name}${kind}(${params}) : ${iface};
+`;
+}
+
+/** The generated `I<Name>Handler` port the user impl satisfies. */
+function renderExternPort(h: Handler, ns: string): string {
+  const ret = h.returnType ? `ValueTask<${renderCsType(h.returnType)}>` : "ValueTask";
+  return `// Auto-generated.
+using System.Threading;
+using System.Threading.Tasks;
+using ${ns}.Domain.Ids;
+using ${ns}.Domain.ValueObjects;
+using ${ns}.Domain.Enums;
+
+namespace ${EXTERN_HANDLERS_NS(ns)};
+
+/// <summary>Extern-handler contract for ${h.name} — the one external-service
+/// call this handler wraps.  Implemented by the scaffold-once, user-owned
+/// [ExternHandler] class ${h.name}HandlerImpl (regeneration never overwrites it).</summary>
+public interface I${h.name}Handler
+{
+    ${ret} Handle(${externPortParams(h)});
+}
+`;
+}
+
+/** The generated Mediator handler that delegates to the injected port. */
+function renderExternHandlerClass(h: Handler, ns: string, kind: "Command" | "Query"): string {
+  const recName = `${h.name}${kind}`;
+  const ret = h.returnType ? renderCsType(h.returnType) : "Unit";
+  const iface =
+    kind === "Command"
+      ? `ICommandHandler<${recName}, ${ret}>`
+      : `IQueryHandler<${recName}, ${ret}>`;
+  const args = [...h.params.map((p) => `command.${upperFirst(p.name)}`), "cancellationToken"].join(
+    ", ",
+  );
+  const body = h.returnType
+    ? `        return await _impl.Handle(${args});`
+    : `        await _impl.Handle(${args});\n        return Unit.Value;`;
+  return `// Auto-generated.
+using System.Threading;
+using System.Threading.Tasks;
+using Mediator;
+using ${ns}.Domain.Ids;
+using ${ns}.Domain.ValueObjects;
+using ${ns}.Domain.Enums;
+
+namespace ${EXTERN_HANDLERS_NS(ns)};
+
+public sealed class ${h.name}Handler : ${iface}
+{
+    private readonly I${h.name}Handler _impl;
+    public ${h.name}Handler(I${h.name}Handler impl) => _impl = impl;
+
+    public async ValueTask<${ret}> Handle(${recName} command, CancellationToken cancellationToken)
+    {
+${body}
+    }
+}
+`;
+}
+
+/** The scaffold-once user impl — `[ExternHandler] : I<Name>Handler` — that
+ *  throws loudly until filled in (marker on line 1 → CLI writer preserves it). */
+function renderExternImpl(
+  h: Handler,
+  ns: string,
+  kindLabel: "commandHandler" | "queryHandler",
+): string {
+  const ret = h.returnType ? `ValueTask<${renderCsType(h.returnType)}>` : "ValueTask";
+  const msg = `extern ${kindLabel} '${h.name}' is not implemented — fill in Application/Handlers/${h.name}HandlerImpl.cs`;
+  return `// ${SCAFFOLD_ONCE_MARKER} — this file is yours.  Loom scaffolds it on the first
+// \`generate\` and NEVER overwrites it again, so your implementation survives every
+// regenerate.  Replace the \`throw\` with the extern handler's real logic.
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using ${ns}.Domain.Common;
+using ${ns}.Domain.Ids;
+using ${ns}.Domain.ValueObjects;
+using ${ns}.Domain.Enums;
+
+namespace ${EXTERN_HANDLERS_NS(ns)};
+
+[ExternHandler]
+public sealed class ${h.name}HandlerImpl : I${h.name}Handler
+{
+    public ${ret} Handle(${externPortParams(h)})
+        => throw new NotImplementedException(${JSON.stringify(msg)});
+}
+`;
+}
+
+/** Emit the four `Application/Handlers/` files for an extern handler. */
+function emitExternHandler(
+  h: Handler,
+  ns: string,
+  kind: "Command" | "Query",
+  out: Map<string, string>,
+): void {
+  out.set(`Application/Handlers/${h.name}${kind}.cs`, renderExternRecord(h, ns, kind));
+  out.set(`Application/Handlers/I${h.name}Handler.cs`, renderExternPort(h, ns));
+  out.set(`Application/Handlers/${h.name}Handler.cs`, renderExternHandlerClass(h, ns, kind));
+  out.set(
+    `Application/Handlers/${h.name}HandlerImpl.cs`,
+    renderExternImpl(h, ns, kind === "Command" ? "commandHandler" : "queryHandler"),
+  );
+}
+
 /** Emit `<Name>Command`/`<Name>Query` records + handlers for every explicit
  *  handler in a context.  A no-op for a context with none. */
 export function emitExplicitHandlers(
@@ -215,6 +362,10 @@ export function emitExplicitHandlers(
   out: Map<string, string>,
 ): void {
   for (const h of ctx.commandHandlers ?? []) {
+    if (h.extern) {
+      emitExternHandler(h, ns, "Command", out);
+      continue;
+    }
     const agg = primaryAgg(h);
     if (!agg) continue;
     out.set(
@@ -227,6 +378,10 @@ export function emitExplicitHandlers(
     );
   }
   for (const h of ctx.queryHandlers ?? []) {
+    if (h.extern) {
+      emitExternHandler(h, ns, "Query", out);
+      continue;
+    }
     const agg = primaryAgg(h);
     if (!agg) continue;
     out.set(
@@ -294,9 +449,15 @@ export function emitExplicitRouteController(
     const h = cmd ?? qry;
     if (!h) continue;
     const agg = primaryAgg(h);
-    if (!agg) continue;
+    // A DSL-bodied handler files under its home aggregate; an extern handler has
+    // none and lives in the neutral `Application/Handlers/` namespace.
+    if (!h.extern && !agg) continue;
     const kind: "Command" | "Query" = cmd ? "Command" : "Query";
-    nsUsings.add(`${ns}.Application.${plural(agg)}.${kind === "Command" ? "Commands" : "Queries"}`);
+    nsUsings.add(
+      h.extern
+        ? EXTERN_HANDLERS_NS(ns)
+        : `${ns}.Application.${plural(agg!)}.${kind === "Command" ? "Commands" : "Queries"}`,
+    );
 
     // Split params: those bound by a `{token}` in the route path stay URL params;
     // the rest ride in one `[FromBody]` request record. (Multiple bare complex
@@ -338,7 +499,9 @@ export function emitExplicitRouteController(
       // serialise as-is.
       const info = wireTypeInfo(retType, "response");
       let okExpr = "result";
-      if (info.refKind === "entity") {
+      // Extern handlers own their return shape (no home aggregate to project
+      // through) — serialise the impl's value as-is.
+      if (!h.extern && info.refKind === "entity") {
         const owning =
           ctx.aggregates.find((a) => a.name === info.base) ??
           ctx.aggregates.find((a) => a.parts.some((p) => p.name === info.base));

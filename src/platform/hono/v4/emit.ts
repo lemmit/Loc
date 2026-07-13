@@ -99,7 +99,7 @@ import { DRIZZLE_CONNECTION_SETUP } from "./adapters/drizzle-persistence.js";
 import { layeredStyleAdapter } from "./adapters/layered-style.js";
 import { resourceAdapterFor } from "./adapters/resource-clients.js";
 import { emitAuthFiles } from "./auth-emit.js";
-import { buildExplicitRoutesFile } from "./explicit-handlers-builder.js";
+import { buildExplicitRoutesFile, emitExternHandlerImpls } from "./explicit-handlers-builder.js";
 import { emitObservabilityFiles } from "./observability-builder.js";
 import { buildProjectionsFile } from "./projection-builder.js";
 import { buildRealtimeFile } from "./realtime-builder.js";
@@ -597,6 +597,9 @@ export function generateTypeScriptForContexts(
   // type-checks) and pooled into one `domain/repository-ports.ts`.
   const portSpecs: RepoPortSpec[] = [];
   for (const ctx of contexts) {
+    // Scaffold-once impl modules for any extern commandHandler / queryHandler.
+    // No-op (byte-identical) for a context with none.
+    emitExternHandlerImpls(ctx, out);
     for (const agg of ctx.aggregates) {
       // A TPH abstract base owns the shared table (emitted in db/schema.ts)
       // but is never instantiated — no domain module, repository, routes, or

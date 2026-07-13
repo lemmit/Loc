@@ -886,15 +886,21 @@ ContextMember:
 // handler).  Layering contracts (queryHandler must not save; a
 // commandHandler may touch only one aggregate) are enforced by the IR
 // validator, not the grammar.
+// An `extern` handler is BODYLESS (`;`): it declares the signature (params +
+// return contract) but hands the implementation to a scaffold-once, user-owned
+// impl file the generated dispatch calls (the "case-2" home — one external-
+// service call around one aggregate).  `'{' … '}' | ';'` is the discriminator
+// (distinct tokens — the AST stays non-recursive, mirroring FunctionDecl's
+// `'=' | '{'`); the extern-vs-body pairing is enforced by the AST validator
+// (`loom.extern-handler-has-body` / `loom.handler-missing-body`), not the
+// grammar.
 CommandHandler:
-    'commandHandler' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' (':' returnType=TypeRef)? '{'
-        body+=Statement*
-    '}';
+    (extern?='extern')? 'commandHandler' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' (':' returnType=TypeRef)?
+        ( '{' body+=Statement* '}' | ';' );
 
 QueryHandler:
-    'queryHandler' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' ':' returnType=TypeRef '{'
-        body+=Statement*
-    '}';
+    (extern?='extern')? 'queryHandler' name=ID '(' (params+=Parameter (',' params+=Parameter)*)? ')' ':' returnType=TypeRef
+        ( '{' body+=Statement* '}' | ';' );
 
 EnumDecl:
     'enum' name=ID '{'

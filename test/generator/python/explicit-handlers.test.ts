@@ -192,3 +192,43 @@ describe("python — explicit handler body params → single request model", () 
     expect(ctrl).toContain("from app.domain.ids import OrderId");
   });
 });
+
+// An `extern` handler is bodyless: the generated dispatch delegates to a
+// scaffold-once, user-owned impl the user fills in (extern-handler Phase 1).
+const EXTERN_SRC = `
+system Shop {
+  subdomain Sales {
+    context Ordering {
+      aggregate Order { code: string }
+      repository Orders for Order { }
+      extern commandHandler PlaceOrder(code: string): Order id;
+      extern queryHandler GetQuote(orderId: Order id): string;
+    }
+  }
+  api SalesApi from Sales {
+    route POST "/orders" -> Ordering.PlaceOrder
+    route GET  "/orders/{orderId}/quote" -> Ordering.GetQuote
+  }
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: python, contexts: [Ordering], dataSources: [st], serves: SalesApi, port: 5001 }
+}
+`;
+describe("python — extern commandHandler / queryHandler", () => {
+  it("the dispatch module delegates to the scaffold-once impl", async () => {
+    const m = await generateSystemFiles(EXTERN_SRC);
+    const dispatch = fileEndingWith(m, "app/application/place_order.py");
+    expect(dispatch).toContain(
+      "from app.application.impl.place_order_impl import place_order_impl",
+    );
+    expect(dispatch).toContain("return await place_order_impl(code)");
+  });
+
+  it("emits a scaffold-once impl that raises", async () => {
+    const m = await generateSystemFiles(EXTERN_SRC);
+    const impl = fileEndingWith(m, "app/application/impl/place_order_impl.py");
+    expect(impl.split("\n")[0]).toContain("loom:scaffold-once");
+    expect(impl).toContain("async def place_order_impl(code: str)");
+    expect(impl).toContain("raise NotImplementedError(");
+  });
+});

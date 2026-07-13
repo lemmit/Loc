@@ -79,3 +79,46 @@ describe("explicit api handlers + routes — grammar surface", () => {
     ]);
   });
 });
+
+// An `extern` handler is BODYLESS (`;`): the signature declares the contract and
+// a scaffold-once user file owns the implementation (extern-handler Phase 1).
+const EXTERN_SRC = `
+  system Shop {
+    subdomain Sales {
+      context Ordering {
+        aggregate Order { code: string }
+        repository Orders for Order { }
+
+        extern commandHandler PlaceOrder(code: string): Order id;
+        extern queryHandler   GetQuote(orderId: Order id): string;
+      }
+    }
+    api SalesApi from Sales {
+      route POST "/orders"                  -> Ordering.PlaceOrder
+      route GET  "/orders/{orderId}/quote"  -> Ordering.GetQuote
+    }
+    storage pg { type: postgres }
+    resource orderingState { for: Ordering, kind: state, use: pg }
+    deployable api { platform: node, contexts: [Ordering], dataSources: [orderingState], serves: SalesApi, port: 4000 }
+  }
+`;
+
+describe("extern commandHandler / queryHandler — bodyless grammar surface", () => {
+  it("parses the bodyless `extern … ;` forms with no errors", async () => {
+    const { errors } = await parseString(EXTERN_SRC);
+    expect(errors).toEqual([]);
+  });
+
+  it("marks both handlers extern, with an empty body and the return type kept", async () => {
+    const { model } = await parseString(EXTERN_SRC, { validate: false });
+    const nodes = [...AstUtils.streamAllContents(model)];
+    const cmd = nodes.find(isCommandHandler) as CommandHandler;
+    const qry = nodes.find(isQueryHandler) as QueryHandler;
+    expect(cmd.extern).toBe(true);
+    expect(cmd.body).toEqual([]);
+    expect(cmd.returnType).toBeDefined();
+    expect(qry.extern).toBe(true);
+    expect(qry.body).toEqual([]);
+    expect(qry.returnType).toBeDefined();
+  });
+});

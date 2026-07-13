@@ -1,0 +1,31 @@
+// extern commandHandler / queryHandler — the bodyless "case-2" home: one
+// external-service call around one aggregate, at the application layer.  The
+// handler declares only its signature (params + return contract); Loom
+// scaffolds a user-owned impl file once and the generated dispatch calls it,
+// preserving the user's implementation across regenerations.
+system ExternHandlerSys {
+  subdomain Sales {
+    context Sales {
+      aggregate Order {
+        customerId: string
+        status: string
+      }
+      repository Orders for Order { }
+      extern commandHandler PlaceOrder(customerId: string): Order id;
+      extern queryHandler   GetQuote(sku: string): string;
+    }
+  }
+  api SalesApi from Sales {
+    route POST "/orders"        -> Sales.PlaceOrder
+    route GET  "/quotes/{sku}"  -> Sales.GetQuote
+  }
+  storage pg { type: postgres }
+  resource salesState { for: Sales, kind: state, use: pg }
+  deployable d {
+    platform: __PLATFORM__
+    contexts: [Sales]
+    dataSources: [salesState]
+    serves: SalesApi
+    port: 4000
+  }
+}

@@ -199,3 +199,47 @@ describe("dotnet — explicit handler aggregate return → wire-shape Response",
     expect(handler).toContain("using Api.Domain.Orders;");
   });
 });
+
+// An `extern` handler is bodyless: the Mediator command/handler + route wire up
+// as usual, but the handler delegates to a ctor-injected `I<Name>Handler` port
+// the user's scaffold-once `<Name>HandlerImpl` ([ExternHandler]) supplies.
+const EXTERN_SRC = `
+system Shop {
+  subdomain Sales {
+    context Ordering {
+      aggregate Order { code: string }
+      repository Orders for Order { }
+      extern commandHandler PlaceOrder(code: string): Order id;
+      extern queryHandler GetQuote(orderId: Order id): string;
+    }
+  }
+  api SalesApi from Sales {
+    route POST "/orders" -> Ordering.PlaceOrder
+    route GET  "/orders/{orderId}/quote" -> Ordering.GetQuote
+  }
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: dotnet, contexts: [Ordering], dataSources: [st], serves: SalesApi, port: 5001 }
+}
+`;
+
+describe(".NET — extern commandHandler / queryHandler", () => {
+  it("the Mediator handler delegates to the injected port", async () => {
+    const m = await generateSystemFiles(EXTERN_SRC);
+    const handler = fileEndingWith(m, "Application/Handlers/PlaceOrderHandler.cs");
+    expect(handler).toContain("private readonly IPlaceOrderHandler _impl;");
+    expect(handler).toContain("return await _impl.Handle(command.Code, cancellationToken);");
+  });
+
+  it("emits a scaffold-once [ExternHandler] impl that throws", async () => {
+    const m = await generateSystemFiles(EXTERN_SRC);
+    const impl = fileEndingWith(m, "Application/Handlers/PlaceOrderHandlerImpl.cs");
+    expect(impl.split("\n")[0]).toContain("loom:scaffold-once");
+    expect(impl).toContain("[ExternHandler]");
+    expect(impl).toContain("public sealed class PlaceOrderHandlerImpl : IPlaceOrderHandler");
+    expect(impl).toContain("throw new NotImplementedException(");
+    // Program.cs verifies the impl is registered at startup (Scrutor scan).
+    const program = fileEndingWith(m, "Program.cs");
+    expect(program).toContain("Api.Application.Handlers.IPlaceOrderHandler");
+  });
+});

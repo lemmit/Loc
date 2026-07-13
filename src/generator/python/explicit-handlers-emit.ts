@@ -48,6 +48,7 @@ import { wireTypeInfo } from "../../ir/types/wire-types.js";
 import { walkExpr } from "../../ir/validate/checks/shared.js";
 import { lines } from "../../util/code-builder.js";
 import { snake } from "../../util/naming.js";
+import { SCAFFOLD_ONCE_MARKER } from "../../util/scaffold-once.js";
 import { renderWorkflowStmtChunks } from "../_workflow/stmt-target.js";
 import { requestPyType } from "./emit/http-models.js";
 import { renderPyExpr, renderPyType } from "./render-expr.js";
@@ -55,6 +56,98 @@ import { pyWireToDomain } from "./routes-builder.js";
 import { collectUsedLetNames, pyWorkflowStmtTarget } from "./workflows-builder.js";
 
 type Handler = CommandHandlerIR | QueryHandlerIR;
+
+// --- Extern handler (bodyless) — scaffold-once user impl module -------------
+// An `extern` handler has no DSL body: the generated `app/application/<snake>.py`
+// dispatch still exists (the router imports it unchanged), but instead of a
+// rendered load→mutate→save body it delegates to a scaffold-once, user-owned
+// impl at `app/application/impl/<snake>_impl.py`.  The path/name is
+// DETERMINISTIC and stable forever (renames orphan user code).
+
+/** The user impl module's file path (`out.set` key). */
+const externImplPath = (name: string): string => `app/application/impl/${snake(name)}_impl.py`;
+/** The impl function name (`PlaceOrder` → `place_order_impl`). */
+const externImplFn = (name: string): string => `${snake(name)}_impl`;
+
+/** Domain-type import lines for a handler's params/return signature — the
+ *  ids / value objects / enums the signature actually names (ids/scalars is the
+ *  v1 handler scope, so entity imports aren't derived here). */
+function pyDomainImportLines(signatureText: string, ctx: EnrichedBoundedContextIR): string[] {
+  const scan = signatureText.replace(/"(?:\\.|[^"\\])*"/g, '""');
+  const refersTo = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(scan);
+  const idNames = ctx.aggregates
+    .map((a) => `${a.name}Id`)
+    .filter((n, i, arr) => refersTo(n) && arr.indexOf(n) === i)
+    .sort();
+  const voEnumNames = [
+    ...new Set([...ctx.enums.map((e) => e.name), ...ctx.valueObjects.map((v) => v.name)]),
+  ]
+    .filter(refersTo)
+    .sort();
+  const out: string[] = [];
+  if (idNames.length > 0) out.push(`from app.domain.ids import ${idNames.join(", ")}`);
+  if (voEnumNames.length > 0) {
+    out.push(`from app.domain.value_objects import ${voEnumNames.join(", ")}`);
+  }
+  return out;
+}
+
+/** The generated extern DISPATCH module: same `async def <snake>(session, …)`
+ *  the router already imports, but its body delegates to the user impl.  For a
+ *  void command it awaits without returning; otherwise it returns the impl's
+ *  value verbatim (the impl owns the return contract). */
+function renderPyExternDispatch(h: Handler, ctx: EnrichedBoundedContextIR): string {
+  const fnName = snake(h.name);
+  const implFn = externImplFn(h.name);
+  const paramSig = h.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`);
+  const params = ["session: AsyncSession", ...paramSig].join(", ");
+  const ret = h.returnType ? renderPyType(h.returnType) : "None";
+  const callArgs = h.params.map((p) => snake(p.name)).join(", ");
+  const call = `${implFn}(${callArgs})`;
+  const bodyLine = h.returnType ? `    return await ${call}` : `    await ${call}`;
+  const sigText = `${paramSig.join(" ")} ${ret}`;
+  return lines(
+    `"""${h.name} application handler (extern dispatch).  Auto-generated."""`,
+    "",
+    "from sqlalchemy.ext.asyncio import AsyncSession",
+    "",
+    `from app.application.impl.${implFn} import ${implFn}`,
+    ...pyDomainImportLines(sigText, ctx),
+    "",
+    "",
+    `async def ${fnName}(${params}) -> ${ret}:`,
+    bodyLine,
+    "",
+  );
+}
+
+/** The scaffold-once user impl stub — `app/application/impl/<snake>_impl.py`.
+ *  Raises loudly until the user fills it in (marker on line 1 → the CLI writer
+ *  preserves it on regen). */
+function renderPyExternImpl(h: Handler, ctx: EnrichedBoundedContextIR): string {
+  const implFn = externImplFn(h.name);
+  const paramSig = h.params.map((p) => `${snake(p.name)}: ${renderPyType(p.type)}`);
+  const ret = h.returnType ? renderPyType(h.returnType) : "None";
+  const kind = (ctx.queryHandlers ?? []).includes(h as QueryHandlerIR)
+    ? "queryHandler"
+    : "commandHandler";
+  const msg = `extern ${kind} '${h.name}' is not implemented — fill in ${externImplPath(h.name)}`;
+  const importLines = pyDomainImportLines(`${paramSig.join(" ")} ${ret}`, ctx);
+  return lines(
+    `# ${SCAFFOLD_ONCE_MARKER} — this file is yours.  Loom scaffolds it on the first`,
+    "# `generate` and NEVER overwrites it again, so your implementation survives every",
+    "# regenerate.  Replace the `raise` with the extern handler's real logic.",
+    '"""Hand-written extern handler implementation."""',
+    "",
+    ...(importLines.length > 0 ? [...importLines, ""] : []),
+    "",
+    `async def ${implFn}(${paramSig.join(", ")}) -> ${ret}:`,
+    `    raise NotImplementedError(`,
+    `        ${JSON.stringify(msg)}`,
+    `    )`,
+    "",
+  );
+}
 
 /** The repos a handler body references (repo loads + exit-saves), keyed by
  *  repo name → aggregate name.  The handler constructs `<Agg>Repository(...)`
@@ -109,6 +202,9 @@ function renderHandlerModule(
   ctx: EnrichedBoundedContextIR,
   hasDispatch: boolean,
 ): string {
+  // Extern handler: no DSL body — the dispatch delegates to the scaffold-once
+  // user impl module (emitted separately in `emitPyExplicitHandlers`).
+  if (h.extern) return renderPyExternDispatch(h, ctx);
   const fnName = snake(h.name);
   const usesUser = handlerUsesUser(h, ctx);
 
@@ -225,8 +321,12 @@ export function emitPyExplicitHandlers(
   const handlers = [...(ctx.commandHandlers ?? []), ...(ctx.queryHandlers ?? [])];
   if (handlers.length === 0) return;
   out.set("app/application/__init__.py", "");
+  const hasExtern = handlers.some((h) => h.extern);
+  if (hasExtern) out.set("app/application/impl/__init__.py", "");
   for (const h of handlers) {
     out.set(`app/application/${snake(h.name)}.py`, renderHandlerModule(h, ctx, hasDispatch));
+    // Extern: the scaffold-once user impl the dispatch above delegates to.
+    if (h.extern) out.set(externImplPath(h.name), renderPyExternImpl(h, ctx));
   }
 }
 
@@ -316,7 +416,9 @@ export function emitPyExplicitRouteRouter(
     const method = r.method.toLowerCase();
     const path = snakePath(r.path);
     const opId = camelName(h.name);
-    const hasReturn = !!qry || !!cmd?.returnValue;
+    // A query always returns; a command returns iff its body yields a value
+    // (`returnValue`) OR — for an extern command — it declares a returnType.
+    const hasReturn = !!qry || !!cmd?.returnValue || !!(cmd?.extern && cmd.returnType);
     const routeName = `${snake(h.name)}_route`;
 
     if (hasReturn) {
