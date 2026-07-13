@@ -104,40 +104,6 @@ export function renderWireValidationException(basePkg: string): string {
   );
 }
 
-export function renderExternHandlerException(basePkg: string): string {
-  return lines(
-    `package ${basePkg}.domain.common;`,
-    ``,
-    `/**`,
-    ` * A user-supplied extern-operation handler threw a non-domain exception.`,
-    ` * Wraps the offending op + aggregate names + the original cause so the`,
-    ` * API advice can log the catalog {@code extern_handler_threw} event (naming`,
-    ` * the seam) and return a sanitized 500 — distinct from a generic`,
-    ` * {@code internal_error}.  Domain exceptions raised by a handler are NOT`,
-    ` * wrapped (they re-throw so 400/403/404/409 still apply).`,
-    ` */`,
-    `public class ExternHandlerException extends RuntimeException {`,
-    `    private final String opName;`,
-    `    private final String aggName;`,
-    ``,
-    `    public ExternHandlerException(String opName, String aggName, Throwable cause) {`,
-    `        super("Extern handler '" + opName + "' on '" + aggName + "' threw: " + cause.getMessage(), cause);`,
-    `        this.opName = opName;`,
-    `        this.aggName = aggName;`,
-    `    }`,
-    ``,
-    `    public String opName() {`,
-    `        return opName;`,
-    `    }`,
-    ``,
-    `    public String aggName() {`,
-    `        return aggName;`,
-    `    }`,
-    `}`,
-    ``,
-  );
-}
-
 export function renderPagedRecord(basePkg: string): string {
   return lines(
     `package ${basePkg}.domain.common;`,

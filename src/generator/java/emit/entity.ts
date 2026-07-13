@@ -11,7 +11,7 @@ import type {
 import { exprUsesCurrentUser, operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
-import { plural, snake, upperFirst } from "../../../util/naming.js";
+import { plural, snake } from "../../../util/naming.js";
 import type { UnionMember } from "../../_payload/union-wire.js";
 import type { SourceMapSubRegion } from "../../_trace/sourcemap.js";
 import { promotedFilters, sqlRestrictionFilters } from "../capability-filter.js";
@@ -544,11 +544,28 @@ export function renderJavaEntity(
     const params = [baseParams, usesUser ? "User currentUser" : ""].filter(Boolean).join(", ");
     const traceCtx = { emitTrace, aggregate: entity.name, op: op.name, eventSourced };
     if (op.extern) {
-      // Extern op: `check<Op>` runs preconditions only; the user-supplied
-      // handler owns the business decision (wired by the API slice).
-      opLines.push(`    public void check${upperFirst(op.name)}(${params}) {`);
+      // Extern op (extern-domain-extension-point.md §3a, D2): the op body is a
+      // hand-written domain hook Loom can't express.  The generated method runs
+      // the preconditions inline, delegates to the co-located, scaffold-once
+      // `<Agg>Extern` hook (a static method that reaches this aggregate's
+      // package-private fields + `_raiseEvent` natively), then re-asserts
+      // invariants — the same load → preconditions → hook → invariants → save
+      // flow as before, only *what the hook is* changed (from an injected
+      // application-layer handler to a domain-internal extension point).
+      opLines.push(`    public void ${op.name}(${params}) {`);
       const body = renderJavaStatements(op.statements, renderCtx, traceCtx);
       if (body.length > 0) opLines.push(body);
+      const hookArgs = [
+        "this",
+        ...op.params.map((p) => p.name),
+        ...(usesUser ? ["currentUser"] : []),
+      ].join(", ");
+      opLines.push(`        ${entity.name}Extern.${op.name}(${hookArgs});`);
+      opLines.push(
+        emitTrace
+          ? `        this._assertInvariants("${op.name}");`
+          : `        this._assertInvariants();`,
+      );
       opLines.push(`    }`);
       opLines.push("");
       continue;

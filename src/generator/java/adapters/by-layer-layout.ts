@@ -44,8 +44,6 @@ export type JavaArtifactCategory =
   | "service" // layered-style application service
   | "view-service"
   | "workflow-service"
-  | "extern-handler-interface"
-  | "extern-handler-stub"
   // infrastructure
   | "repository-impl"
   | "spring-data-repository"
@@ -79,8 +77,6 @@ const PER_AGGREGATE = new Set<JavaArtifactCategory>([
   "request-dto",
   "response-dto",
   "service",
-  "extern-handler-interface",
-  "extern-handler-stub",
   "controller",
   "repository-impl",
   "spring-data-repository",
@@ -124,8 +120,6 @@ export function byLayerPackage(
     case "request-dto":
     case "response-dto":
     case "service":
-    case "extern-handler-interface":
-    case "extern-handler-stub":
       return `${basePkg}.application.${agg()}`;
     case "view-service":
       return `${basePkg}.application.views`;

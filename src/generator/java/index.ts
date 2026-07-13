@@ -60,7 +60,6 @@ import {
   renderDisallowedException,
   renderDomainEventInterface,
   renderDomainException,
-  renderExternHandlerException,
   renderForbiddenException,
   renderPackageMarker,
   renderPagedRecord,
@@ -75,7 +74,7 @@ import { type OpFragment, renderJavaAbstractBaseEntity, renderJavaEntity } from 
 import { renderJavaEnum, renderJavaValueObject } from "./emit/enums-vos.js";
 import { renderJavaEventSourcedRepositoryImpl } from "./emit/event-store.js";
 import { renderJavaEvent } from "./emit/events.js";
-import { renderExternHandlerInterface, renderExternHandlerStub } from "./emit/extern.js";
+import { renderJavaExternHook } from "./emit/extern.js";
 import { renderJavaId } from "./emit/ids.js";
 import { renderJpaAuditingConfig } from "./emit/jpa-auditing-config.js";
 import { emitJavaMigrations } from "./emit/migrations.js";
@@ -303,7 +302,6 @@ function emitProjectFromContexts(
     renderAggregateNotFoundException(basePkg),
   );
   place("WireValidationException.java", "domain-common", renderWireValidationException(basePkg));
-  place("ExternHandlerException.java", "domain-common", renderExternHandlerException(basePkg));
   place("Paged.java", "domain-common", renderPagedRecord(basePkg));
   place("DomainEvent.java", "event", renderDomainEventInterface(basePkg));
   place("_Namespace.java", "enum", renderPackageMarker(pkgFor("enum")));
@@ -1275,23 +1273,19 @@ function emitAggregate(
   // variant at its own status (exception-less.md §4).  A tagged union DTO is
   // needed only for a genuine multi-success union, which IR validation rejects
   // for finds.
-  for (const op of agg.operations.filter((o) => o.extern)) {
-    const opConstruct = `${construct}.${op.name}`;
+  // Extern operations (extern-domain-extension-point.md §3a, Phase 2): the
+  // aggregate op delegates to a co-located, scaffold-once `<Agg>Extern` hook
+  // class — same package as the entity, so it reaches the aggregate's
+  // package-private fields natively.  Placed under the `entity` category so it
+  // lands in that package; the CLI writer preserves it on regen (the
+  // `loom:scaffold-once` marker on line 1).
+  const externOps = agg.operations.filter((o) => o.extern);
+  if (externOps.length > 0) {
     place(
-      `${upperFirst(op.name)}${agg.name}Handler.java`,
-      "extern-handler-interface",
-      renderExternHandlerInterface(agg, op, applicationPkg, basePkg, pkgFor("entity", agg.name)),
+      `${agg.name}Extern.java`,
+      "entity",
+      renderJavaExternHook(agg, externOps, pkgFor("entity", agg.name), basePkg),
       agg.name,
-      op.origin ?? agg.origin,
-      opConstruct,
-    );
-    place(
-      `DevStub${upperFirst(op.name)}${agg.name}Handler.java`,
-      "extern-handler-stub",
-      renderExternHandlerStub(agg, op, applicationPkg, basePkg, pkgFor("entity", agg.name)),
-      agg.name,
-      op.origin ?? agg.origin,
-      opConstruct,
     );
   }
   place(

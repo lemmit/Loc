@@ -10,7 +10,7 @@ import type {
 import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { aggregateIsVersioned } from "../../../ir/util/versioned-capability.js";
 import { lines } from "../../../util/code-builder.js";
-import { lowerFirst, upperFirst } from "../../../util/naming.js";
+import { upperFirst } from "../../../util/naming.js";
 import {
   collectJavaExprImports,
   javaValueTypeForId,
@@ -213,18 +213,6 @@ export function renderJavaService(
   // can_<op> companion returns.
   const gatedOps = agg.operations.filter((op) => op.visibility === "public" && !!op.when);
   if (gatedOps.length > 0) imports.add(`${ctx.basePkg}.domain.common.DisallowedException`);
-  // Extern ops: the user handler call is wrapped so a non-domain throw becomes
-  // an ExternHandlerException (→ catalog extern_handler_threw + sanitized 500);
-  // domain exceptions raised by the handler re-throw untranslated so the real
-  // 400/403/404/409 still apply (parity with Hono/.NET/Python).
-  const anyExtern = agg.operations.some((op) => op.visibility === "public" && !!op.extern);
-  if (anyExtern) {
-    imports.add(`${ctx.basePkg}.domain.common.ExternHandlerException`);
-    imports.add(`${ctx.basePkg}.domain.common.DomainException`);
-    imports.add(`${ctx.basePkg}.domain.common.ForbiddenException`);
-    imports.add(`${ctx.basePkg}.domain.common.DisallowedException`);
-    imports.add(`${ctx.basePkg}.domain.common.AggregateNotFoundException`);
-  }
   const whenGateLine = (op: (typeof agg.operations)[number]): string | null =>
     op.when
       ? `        if (!(${renderJavaExpr(op.when, { thisName: "aggregate", accessorProps: true })})) throw new DisallowedException("operation '${op.name}' is not allowed in the current state of ${agg.name}.");`
@@ -281,10 +269,12 @@ export function renderJavaService(
       );
       const opHasValidator = opHasWireValidator(agg, op.name);
       if (op.extern) {
-        // Extern op: preconditions gate (check<Op>), then the
-        // user-supplied handler owns the business decision, then the
-        // invariants re-assert before save.
-        const handlerArgs = ["aggregate", ...op.params.map((p) => p.name)].join(", ");
+        // Extern op (extern-domain-extension-point.md §3a, Phase 2): the op is a
+        // real aggregate method now — it runs its preconditions, delegates to the
+        // co-located scaffold-once `<Agg>Extern` hook, and re-asserts invariants
+        // internally (all inside `aggregate.<op>(...)`).  The service just loads,
+        // guards, calls, saves, drains — identical to a plain void operation; the
+        // injected handler + `ExternHandlerException` wrap are gone.
         return [
           `    public void ${op.name}(${paramSig}) {`,
           ...lets,
@@ -292,15 +282,7 @@ export function renderJavaService(
           `        var aggregate = repository.getById(id);`,
           ifMatchGuard,
           whenGateLine(op),
-          `        aggregate.check${upperFirst(op.name)}(${args});`,
-          `        try {`,
-          `            ${lowerFirst(op.name)}Handler.handle(${handlerArgs});`,
-          `        } catch (DomainException | ForbiddenException | DisallowedException | AggregateNotFoundException e) {`,
-          `            throw e;`,
-          `        } catch (RuntimeException e) {`,
-          `            throw new ExternHandlerException("${op.name}", "${agg.name}", e);`,
-          `        }`,
-          `        aggregate._assertInvariants();`,
+          `        aggregate.${op.name}(${args});`,
           `        repository.save(aggregate);`,
           `        publishEvents(aggregate);`,
           `    }`,
@@ -358,7 +340,6 @@ export function renderJavaService(
         ``,
       ].filter((l): l is string => l !== null);
     });
-  const externOps = agg.operations.filter((op) => op.extern);
 
   // --- destroy (lifecycle) ----------------------------------------------------------
   // Audited destroy: snapshot the loaded wire shape, persist the audit row
@@ -456,27 +437,17 @@ export function renderJavaService(
     `@Transactional`,
     `public class ${agg.name}Service {`,
     `    private final ${agg.name}Repository repository;`,
-    ...externOps.map(
-      (op) =>
-        `    private final ${upperFirst(op.name)}${agg.name}Handler ${lowerFirst(op.name)}Handler;`,
-    ),
     needsUserAccessor ? `    private final CurrentUserAccessor currentUserAccessor;` : null,
     dispatches ? `    private final ApplicationEventPublisher eventPublisher;` : null,
     anyAudited ? `    private final AuditRecordRepository auditRecords;` : null,
     ``,
     `    public ${agg.name}Service(${[
       `${agg.name}Repository repository`,
-      ...externOps.map(
-        (op) => `${upperFirst(op.name)}${agg.name}Handler ${lowerFirst(op.name)}Handler`,
-      ),
       ...(needsUserAccessor ? ["CurrentUserAccessor currentUserAccessor"] : []),
       ...(dispatches ? ["ApplicationEventPublisher eventPublisher"] : []),
       ...(anyAudited ? ["AuditRecordRepository auditRecords"] : []),
     ].join(", ")}) {`,
     `        this.repository = repository;`,
-    ...externOps.map(
-      (op) => `        this.${lowerFirst(op.name)}Handler = ${lowerFirst(op.name)}Handler;`,
-    ),
     needsUserAccessor ? `        this.currentUserAccessor = currentUserAccessor;` : null,
     dispatches ? `        this.eventPublisher = eventPublisher;` : null,
     anyAudited ? `        this.auditRecords = auditRecords;` : null,
