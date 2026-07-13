@@ -1,9 +1,12 @@
-// Multi-context event-log gate (event-log-architecture.md): a Python deployable
-// hosting TWO contexts where the event-sourced streams live in the SECOND
-// context (Beta), so the merged-context name (Alpha) differs from the owner.
-// The SQLAlchemy `<Ctx>EventRow` model, the repository import, and the Alembic
-// migration must all agree on the OWNING context (`beta_events`) — a
-// merged-name regression makes the generated project fail to import.
+// Multi-context event-log gate (event-log-architecture.md): a dotnet deployable
+// hosting TWO event-sourced contexts (an ES aggregate in each — Note/Alpha,
+// Job/Beta — plus an ES workflow Counter in Beta).  EF Core maps each CLR entity
+// to a single table, so the shared `<ctx>_events` log needs a distinct
+// `<Ctx>EventRecord` entity + `<Ctx>Events` DbSet per context; the EF config,
+// the aggregate repository, and the ES-workflow dispatch must all agree on the
+// OWNING context (`beta_events`, not the merged name `alpha`).  A merged-name
+// regression collapses both logs onto one table (EF last-wins) and mis-routes
+// Beta's streams — or fails the model build.
 system MC {
   subdomain S {
     context Alpha {
