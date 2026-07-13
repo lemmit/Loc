@@ -8,6 +8,8 @@ Loom lets you program architecturally correct business apps concisely, with a no
 
 ## How to use this plan (for agents)
 
+**Starting a mission?** The full execution protocol lives in [`RUNBOOK.md`](RUNBOOK.md) — the kickoff prompt for any mission is two lines (mission ID + "follow the runbook"). The rules below are the summary; the runbook is the contract.
+
 1. **Pick a mission** from a track file (`T1`–`T10`). Missions are sized S (≤1 PR, hours), M (1–3 PRs), L (a PR stack / multi-session), XL (an epic with its own sub-plan).
 2. **Re-verify before building.** Statuses here were classified 2026-07-13, and `main` moves fast. A mission's first step is always: check fresh `main` (and open PRs) that the gap still exists. Missions carrying a ⚠ *verify-first* flag have known doubt.
 3. **Claim with a draft PR** naming the mission ID (e.g. `M-T1.1`) before implementing — see CLAUDE.md's claiming protocol.
