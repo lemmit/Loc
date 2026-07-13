@@ -81,10 +81,34 @@ and, unless the generate run passes `--allow-destructive`, **aborts** with a
 `loom.migration-destructive` error naming the offending steps. First-run
 (`Initial`) migrations are always exempt — nothing pre-exists to destroy.
 
-- **Rename detection.** A table with *exactly one* `dropColumn` and *one*
-  `addColumn` **of identical type** is an unambiguous rename → the pair collapses
-  into a single non-destructive `renameColumn` (`ALTER TABLE … RENAME COLUMN a TO
-  b`). Any other drop/add mix stays drop+add and falls under the gate.
+- **Explicit rename intent (M-T2.1).** A top-level `migration "<name>" { Agg.old
+  -> new }` block declares a rename directly, so the diff emits a
+  `renameColumn` (plus an `alterColumnType`/`alterColumnNullable` when the column
+  also changed) instead of drop+add — including the cases the heuristic below
+  **cannot** collapse: **two renames on one table at once** and a
+  **rename that also changes type**. The block is isolated from the domain model
+  and ledger-style: it stays in source permanently and becomes a no-op once the
+  rename is baked into the baseline snapshot (the next diff finds no old column to
+  rename), so no separate applied-history file is needed. Structural checks reject
+  a self-rename and duplicate rename source/target (`loom.rename-*`,
+  `loom.migration-duplicate-name`). See
+  [`docs/new-plan/missions/M-T2.1-migration-surface-design.md`](new-plan/missions/M-T2.1-migration-surface-design.md).
+
+  ```ddd
+  migration "rename-order-qty" {
+    Order.qty       -> quantity
+    Order.shippedAt -> fulfilledAt
+  }
+  ```
+  ```sql
+  ALTER TABLE "orders" RENAME COLUMN "qty" TO "quantity";
+  ALTER TABLE "orders" RENAME COLUMN "shipped_at" TO "fulfilled_at";
+  ```
+- **Rename detection (heuristic fallback).** With no explicit block, a table with
+  *exactly one* `dropColumn` and *one* `addColumn` **of identical type** is an
+  unambiguous rename → the pair collapses into a single non-destructive
+  `renameColumn` (`ALTER TABLE … RENAME COLUMN a TO b`). Any other drop/add mix
+  stays drop+add and falls under the gate.
 - **Drops.** A `dropColumn` or `dropTable` that survives rename-collapse is
   destructive → blocked unless `--allow-destructive`.
 - **Required-column adds.** A NOT-NULL `addColumn` with no default on a

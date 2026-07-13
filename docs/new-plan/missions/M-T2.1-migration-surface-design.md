@@ -28,13 +28,21 @@ domain model**. Aggregates never carry migration state.
 
 ```
 migration "rename-order-qty" {
-  rename Order.qty        -> quantity
-  rename Order.shippedAt  -> fulfilledAt
+  Order.qty        -> quantity
+  Order.shippedAt  -> fulfilledAt
 }
 ```
 
+**Keyword-free steps — no `rename` keyword.** The step is spelled
+`Agg.old -> new`, not `rename Agg.old -> new`: `rename` is used pervasively as a
+domain identifier across the corpus (28 `operation rename`, 12 `workflow rename`,
+a `function rename`, 40+ `.rename` accesses), so introducing it as a keyword would
+break the existing model surface. `migration` is the only new keyword (zero
+declaration-name collisions), admitted as a soft keyword in identifier positions.
+The `->` operator carries the rename intent inside the block.
+
 **Lowering semantics.** The block feeds the existing snapshot→model diff: for each
-`rename A.old -> new`, map the old snapshot column (`qty` on table `orders`) to the
+`A.old -> new`, map the old snapshot column (`qty` on table `orders`) to the
 new model column (`quantity`) *before* `diffSchema` classifies drops/adds, so the
 engine emits an explicit `renameColumn` (plus `alterColumnType` when the type also
 changed) instead of drop + add. This handles the two cases the heuristic cannot.
@@ -54,20 +62,45 @@ model, and it is the natural home for the later data-migration steps
 (`backfill` / `transform` / `sql`) that M-T2.3 needs — one migration surface grown
 over time, instead of a throwaway annotation now plus a second surface later.
 
-## Open questions (for sign-off before coding)
+## Resolved decisions (signed off 2026-07-13)
 
-1. **Lifecycle** — *ledger* (each named block permanent + history-tracked in
-   `.loom/`, a no-op once applied, kept as the audit trail like a Rails/EF
-   migration file — true zero-debt) vs *consumed-once* (read, applied, then
-   deleted — smaller, still isolated from the domain model). Recommendation: ledger.
-2. **Scope of this mission** — ship `rename` only as the first slice (fold M-T2.1),
-   while the block's design leaves room for M-T2.3's data-migration steps.
+1. **Lifecycle — ledger.** Each named block is a permanent, immutable record kept
+   in source as the audit trail. Crucially, **no new `.loom/` history file is
+   needed**: because migrations derive from the snapshot→model diff, a rename block
+   is *naturally inert* once its effect is baked into the baseline snapshot — the
+   next diff simply finds no `qty` column to rename, so the block matches nothing
+   and is a no-op. Permanence and idempotency both fall out of the existing
+   snapshot mechanism. The snapshot *is* the applied-history record.
+2. **Scope — `rename` only** this slice (column rename within an aggregate's
+   table). Aggregate/table rename and M-T2.3's `backfill`/`transform`/`sql` steps
+   are deliberately deferred; the block grammar is shaped so they slot in as
+   further step alternatives.
 
-## Slice (once signed off)
+### Ledger correctness details
 
-Grammar (`migration` block + `rename` clause) → `langium:generate` →
-`MigrationIntentIR` (or fold onto the module) → lower → consume in
-`migrations-builder.ts` diff → validators (rename collisions) →
+- **Chain resolution.** With `qty -> quantity` (gen 1) and later `quantity ->
+  amount` (gen 2), each generate advances the snapshot so each rename fires against
+  the right baseline. If a user stacks both before generating, the builder resolves
+  the transitive chain (`qty → quantity → amount`) against the baseline column that
+  actually exists, emitting the single applicable `renameColumn`. Cycle-guarded.
+- **Validation is structural / snapshot-independent** (a historical ledger block
+  legitimately references names that have since moved on, so we must NOT require
+  `to` to be currently live): `loom.migration-duplicate-name` (block names unique),
+  `loom.rename-to-self` (`from == to`), `loom.rename-duplicate-source` /
+  `loom.rename-duplicate-target` (ambiguous re-mapping of one column). The
+  aggregate is a real cross-reference (`[Aggregate:ID]`), so a bad aggregate name
+  is caught by scoping.
+- **Precedence.** An explicit rename takes priority over the existing one-drop-one-
+  add heuristic (which stays for un-annotated single renames), and it is the *only*
+  path that handles two-at-once and rename+type-change (→ `renameColumn` +
+  `alterColumnType`).
+
+## Slice (shipped)
+
+Grammar (`migration` block + keyword-free `RenameStep`) → `langium:generate` →
+`RenameIntentIR` on `LoomModel` → lower → consume in
+`migrations-builder.ts` diff (`resolveRenames` → `diffTable` rename pass) →
+validators (rename collisions) →
 `print-structural.ts` arm → tests (parsing, negative validator, migration-builder
 unit: two renames → two `renameColumn` + zero drops; rename+type-change →
 `renameColumn` + `alterColumnType`) + the SQL/Ecto emit assertions. **Migration-only

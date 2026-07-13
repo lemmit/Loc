@@ -66,6 +66,7 @@ import {
   isFunctionDecl,
   isInvariant,
   isLayout,
+  isMigration,
   isObjectLit,
   isOperation,
   isPayloadDecl,
@@ -132,6 +133,7 @@ import type {
   ProjectionIR,
   QueryHandlerIR,
   RawLoomModel,
+  RenameIntentIR,
   RepositoryIR,
   RequirementIR,
   RetrievalIR,
@@ -356,6 +358,7 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
   const requirements: RequirementIR[] = [];
   const solutions: SolutionIR[] = [];
   const testCases: TestCaseIR[] = [];
+  const renameIntents: RenameIntentIR[] = [];
   // Root-level VOs / enums have no enclosing context — pass an empty
   // env so `lowerValueObject`'s `inValueObject(env, vo)` still works.
   const rootEnv: Env = { locals: new Map() };
@@ -377,6 +380,24 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
     else if (isRequirement(m)) requirements.push(lowerRequirement(m));
     else if (isSolution(m)) solutions.push(lowerSolution(m));
     else if (isTestCase(m)) testCases.push(lowerTestCase(m));
+    else if (isMigration(m)) {
+      // Schema-evolution intent (M-T2.1): each `rename Agg.old -> new` becomes
+      // a RenameIntentIR the phase-⑨ migration builder folds into its diff.
+      // The aggregate is resolved to its owning bounded context so the builder
+      // can pin the module + Postgres schema.  from/to stay RAW field names
+      // (the builder snake-cases them exactly as it does aggregate fields).
+      for (const step of m.renames) {
+        const agg = step.aggregate.ref;
+        renameIntents.push({
+          migration: m.name,
+          aggregate: agg?.name ?? step.aggregate.$refText,
+          context: AstUtils.getContainerOfType(agg, isBoundedContext)?.name ?? "",
+          from: step.from,
+          to: step.to,
+          origin: originFor(step),
+        });
+      }
+    }
   }
   return {
     systems,
@@ -388,6 +409,7 @@ export function lowerProject(models: ReadonlyArray<Model>): RawLoomModel {
     requirements,
     solutions,
     testCases,
+    renameIntents,
   };
 }
 
@@ -412,6 +434,7 @@ export function mergeLoomModels(models: RawLoomModel[]): RawLoomModel {
     requirements: models.flatMap((m) => m.requirements),
     solutions: models.flatMap((m) => m.solutions),
     testCases: models.flatMap((m) => m.testCases),
+    renameIntents: models.flatMap((m) => m.renameIntents),
   };
 }
 

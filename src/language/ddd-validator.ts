@@ -53,6 +53,7 @@ import {
   checkMatchExpressions,
   checkMatcherArity,
   checkMatchesCalls,
+  checkMigrations,
   checkOrgPathReferences,
   checkPayloads,
   checkPolicyFns,
@@ -246,6 +247,9 @@ export class DddValidator {
     // Seed datasets (database-seeding.md): a seed may only populate
     // aggregates of its own context, and a record may not repeat a field.
     guard("seeds", model, () => checkSeeds(model, accept));
+    // Migration blocks (M-T2.1): structural rename-intent checks — unique block
+    // names, no self-rename, no duplicate rename source/target per aggregate.
+    guard("migrations", model, () => checkMigrations(model, accept));
     // `slot` is a UI-only param marker (PR #632) — reject anywhere
     // outside a component's parameter list with a clear error rather
     // than letting the backend emitter throw at generate time.

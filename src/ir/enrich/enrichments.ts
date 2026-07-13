@@ -119,6 +119,7 @@ export function enrichLoomModel(loom: RawLoomModel): EnrichedLoomModel {
     requirements: loom.requirements,
     solutions: loom.solutions,
     testCases: loom.testCases,
+    renameIntents: loom.renameIntents,
     traceability: computeTraceability(loom),
   } as EnrichedLoomModel;
 }
