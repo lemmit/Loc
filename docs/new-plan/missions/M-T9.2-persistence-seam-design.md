@@ -2,7 +2,7 @@
 
 *Phase 1 (divergence audit) + Phase 2 (seam contract + slicing plan). This is the **design-first deliverable for maintainer sign-off**, per [`M-T9.2-persistence-seam-brief.md`](./M-T9.2-persistence-seam-brief.md) and [`../RUNBOOK.md`](../RUNBOOK.md) step 3. **No extraction code lands until this is signed off.***
 
-> **STATUS: READY FOR REVIEW.** Audit complete (all 5 backends, all named fragment families, `file:line` evidence below). Contract sketch + slicing plan below. Open questions for sign-off in §Phase 2.7.
+> **STATUS: READY FOR REVIEW.** Audit complete (all 5 backends, all named fragment families, `file:line` evidence below). Contract sketch + slicing plan below. **Go/no-go decision in §0.5 (scoped GO — slices 0–6 committed, 7–9 deferred, no backend convergence).** Open questions for sign-off in §Phase 2.7.
 
 ---
 
@@ -17,6 +17,43 @@ The brief's instinct ("abstract the last un-abstracted N, imitate `ExprTarget`/`
 3. **The adapter emit-layer is orphaned dead code.** `PersistenceAdapter.emitRepository`/`emitMigrations`/`emitConnectionSetup`/`emitOutbox` and `resolvePersistence()` are **never called on the real emit path** (`src/system/index.ts` → `emitProject` never touches them; only unit tests + `defaultsFor` in lowering do). The seam must live *inside* each backend's real `src/generator/<platform>/` emitters — **not** by resurrecting the adapter `emit*` methods. Recommendation for M-T6.10: **fold the orphan's removal into this design** (§Phase 2.5).
 
 The net: the seam is worth building, but its shape is **a `src/generator/_persistence/` directory of several narrow per-fragment seams — each with its own in-scope backend set — not one monolithic `PersistenceTarget` interface.** That directly imitates how the repo already did `_expr` / `_walker` / `_stmt/leaves` / `_payload` / `_workflow` (separate seams, shared home), rather than one god-interface.
+
+---
+
+## 0.5 Go/no-go — is the alignment worth it? (considerations + decision)
+
+The audit forces the go/no-go question the brief assumed away ("the seam is worth building" — but *how much* of it?). Two distinct readings of "align the persistence layer," with opposite answers:
+
+### Reading A — align the *emitters* onto shared seams (the extraction). Verdict: **SCOPED GO.**
+
+The ROI is real but **very uneven** across the matrix — most rows either share nothing new (already `▣`) or decline (`○`). Blindly "aligning everything" would mean forcing divergent topologies into a shared core: the exact anti-pattern the decline criterion exists to stop. So the decision is **not** "build the whole seam" and **not** "skip it" — it is **build the high-ROI subset, defer the low-ROI subset, never force the declines.**
+
+**Cost/benefit, honestly:**
+
+- **Cost:** every extraction slice is *pure refactoring* — byte-identical, zero feature payoff **at the time it lands**. The payoff is amortised over *future* storage features. So each slice must clear the bar "the recurring re-landing cost this removes > the one-time extraction + review + byte-gate cost."
+- **Benefit is concentrated, not spread:** much of the raw file-count duplication the brief counts is *already-shared substrate* (`MigrationsIR`, `wireShape`, `sql-pg`, `ExprTarget`) — so the true per-feature re-landing cost is smaller than "elixir 70 / dotnet 61 / …" suggests. The genuine, recurring, not-yet-shared cost lives in a **handful** of rows.
+
+**The decision, per tier:**
+
+| Tier | Slices | Verdict | Why |
+|---|---|---|---|
+| **Pure win** | Slice 0 — delete orphaned adapter emit-layer + `resolvePersistence` | **DO** | No emit change, deletes dead code + dead tests, closes M-T6.10. Zero risk, positive today. |
+| **High ROI** | `QueryTarget` (slice 6) | **DO** | The single best slice: the **read/query path is the recurring pain** (every custom find + every capability-filter predicate), it spans **3 backends** (TS/Py/Java), and it is a proven-pattern `ExprTarget` analogue. This is where "36 files" actually recurs on the query side. |
+| **Cheap + unfreezes T10** | events (1), wire DTO (5), ids (2), enum/VO (4), seed (3) | **DO** | Flat walks, tiny leaves, near-all-5. Low cost, and they establish the `_persistence/` **pattern a 6th backend follows** — this is what "unfreezes T10" concretely (see below). |
+| **Low ROI (2-backend)** | `ColumnTarget` (7), `renderRepositoryWith` writes (9) | **DEFER** | Net only the TS↔Python pair. Real duplication, but do them **when a concrete storage feature would touch them**, not speculatively ("consolidate the present, don't design for the future"). `JoinRowTarget` (8, 3-backend) is the borderline — defer unless association traffic justifies. |
+| **Declines** | writes on .NET/Java/Elixir, stamp injection, embedded mapping, criterion emission, filter-injection on .NET/Java, routes, DI | **DO NOT TOUCH** | Framework-native composition; sharing trips the decline criterion. Keeping them per-backend *is* the correct outcome (the HEEx/`walkBody` and Elixir/`WorkflowStmtTarget` precedent). |
+
+### Reading B — align the *backends themselves* (converge topologies so the seam captures all 5). Verdict: **NO.**
+
+Tempting after the audit: ".NET/Java/Elixir decline only because they're framework-native — rewrite them to the TS/Python relational-SQL procedure so the seam captures 5/5." **Reject this outright.** It would (a) throw away idiomatic EF change-tracking / Spring-Data derivation / Ecto changesets — the per-ecosystem drift is a stated *feature* (CLAUDE.md §Conventions; `src/platform/surface.ts` header: *"That drift is a feature… reads idiomatically for each ecosystem"*); (b) be a massive **non-byte-identical** behaviour change riding a refactor, violating hard-constraint #2; and (c) fight each stack's grain for the sake of a metric. The declines are correct; they stay.
+
+### On the T10 freeze
+
+The brief says *"T10 target growth stays frozen until this exists."* The scoped seam unfreezes T10 **as far as it can be** — not "a 6th backend writes zero persistence code," but "a 6th backend does not **re-buy the shareable surface**": it reuses `QueryTarget` + wire + events + the `▣` substrate, and hand-writes only its framework-native write/injection path (which *every* backend does, and which a 6th backend would have to write regardless). "Seam exists" = the pattern + the shared read/value/query core are in place — **that** is the unfreeze condition, achieved by the "high-ROI + cheap" tiers above; the deferred 2-backend slices are **not** on the T10 critical path.
+
+### Net decision
+
+**Proceed with the scoped subset — slice 0 + the high-ROI + cheap/unfreeze tiers (slices 1–6) — defer the 2-backend slices (7–9) until feature traffic justifies them, and do not converge backend topologies.** This captures the recurring cost where it actually recurs (read/query path, value types, wire), lifts the T10 freeze, and honours the decline criterion instead of fighting it. *(Recommendation pending maintainer confirmation of the §2.7 open questions — those are the finer sign-offs within this GO.)*
 
 ---
 
@@ -209,12 +246,14 @@ Every slice follows the PRs #607–#627 / #843 protocol: **the generated corpus 
 | **4** | `EnumTarget` + `VoTarget` | 4 (Elixir decline) | Bodies already via `ExprTarget`; only framing | byte-identical |
 | **5** | `WireTarget` | all 5 | Brief's slice 3; core already shared, framing regular | byte-identical + conformance-parity |
 | **6** | `QueryTarget` (find-`where` + filter predicate) | TS/Py/Java (+.NET/Elixir per Q3) | **Highest traffic**; the read-path win; direct `ExprTarget` analogue | byte-identical + behavioral-e2e |
-| **7** | `ColumnTarget` | TS + Python | Narrow but real; `ColumnShape` already owns the tree | byte-identical + `LOOM_TS_BUILD`/`python-build` |
-| **8** | `JoinRowTarget` (standalone join-row) | TS/.NET/Python | Topology-A trio; `AssociationIR` already shared | byte-identical + tenancy-e2e (join reads) |
-| **9** | `renderRepositoryWith` (save/findById/getById) | TS + Python (getById +Java) | Real duplication for the pair; **not** the cross-backend slice the brief imagined | byte-identical + behavioral-e2e |
+| **7** | `ColumnTarget` | TS + Python | **DEFER** (§0.5) — 2-backend only; do when a feature touches it | byte-identical + `LOOM_TS_BUILD`/`python-build` |
+| **8** | `JoinRowTarget` (standalone join-row) | TS/.NET/Python | **DEFER** (§0.5) — 3-backend, borderline; gate on association traffic | byte-identical + tenancy-e2e (join reads) |
+| **9** | `renderRepositoryWith` (save/findById/getById) | TS + Python (getById +Java) | **DEFER** (§0.5) — 2-backend pair only; riskiest slice, feature-gated | byte-identical + behavioral-e2e |
 | — | routes | — | **Deferred** — coordinate with M-T5.10 (`RouteIR` landed-but-unread) | — |
 
-Ordering rationale: slices 1–5 are flat walks (no recursion, small leaves) that *prove the seam machinery + gate* cheaply before the two structurally-interesting slices (6 QueryTarget, 9 repository). This is a deliberate inversion of the brief's "CRUD first" — CRUD is the *riskiest* slice, so it goes last, after the gate has been exercised 8 times.
+**Scoped decision (§0.5):** slices **0–6 are the committed GO** (pure-win + high-ROI + cheap/T10-unfreeze). Slices **7–9 are DEFER** — real duplication, but 2–3-backend only and off the T10 critical path; pull them forward only when a concrete storage feature would edit them.
+
+Ordering rationale: slices 1–5 are flat walks (no recursion, small leaves) that *prove the seam machinery + gate* cheaply before the one structurally-interesting committed slice (6 QueryTarget). The deferred repository slice (9) is the *riskiest* — write-side, 2-backend — so it goes last and only on demand. This is a deliberate inversion of the brief's "CRUD first."
 
 ### 2.6.1 Restated acceptance benchmark (honest, per-backend)
 
