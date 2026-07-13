@@ -129,15 +129,24 @@ in hand — not before F# output exists.
 - The procedural pack has 8 primitives (Stack/Group/Heading/Text/Button + Card/
   Badge/Divider) + `QueryView` (via the `View.remoteList` helper); grows
   example-by-example.
-- **Wire layer is list-reads only.** `<param>.<agg>.all` (a QueryView list) is
-  projected; single (`byId`) reads (route-`id` args + `option`/single data) and
-  mutations (create/update/delete → `Cmd` + optimistic `Msg`) are the next
-  wire slices. Enum wire fields decode as their string name (a proper DU
-  decoder is a follow-up); nested containment/VO records + decoders ARE emitted
-  (transitive off `wireShape`).
-- `renderNavigate` still throws (no cross-page navigation until routing lands).
-- Multi-page routing: `renderAppFs` wires only the first page (visible TODO) —
-  a read on page 2+ isn't projected. This is the last big piece.
+- ✅ **byId / detail-page reads.** A `QueryView(of: X.byId(id), single: true)`
+  on a `:id`-param route projects to a `Remote<'T option>` Model field, a
+  `productById (id: string)` Api fetch (`Decode.option` + a `404 → Ok None`
+  arm), and a **page-entry `Cmd`** (`pageCmd`) fired on BOTH init and every
+  `UrlChanged` — so navigating between `/products/:id` for different ids
+  refetches (the byId field resets to `Loading` on entry). The `Page` union
+  case carries the route param (`| ProductDetail of string`); `parseUrl` binds
+  the segment; the root view threads it to the detail view fn. Un-stubbed
+  `renderRouteId → "id"`; rendered through a `View.remoteOne` helper. All
+  Fable + vite verified (SDK:8.0 container); the CI example is now a 3-page app
+  (counter + list + byId detail). **v1 caveat:** single route param only (bound
+  to the magic `id`); multi-param routes bind the first as `id`, the rest `_`.
+- **Wire layer covers list + byId reads.** `<param>.<agg>.all` (list) and
+  `<param>.<agg>.byId(id)` (single) are projected; mutations
+  (create/update/delete → `Cmd` + optimistic `Msg`) are the next wire slice.
+  Enum wire fields decode as their string name (a proper DU decoder is a
+  follow-up); nested containment/VO records + decoders ARE emitted (transitive
+  off `wireShape`).
 
 Known-good deps (proposal §10): Fable 4.29 / Feliz 2.8 / Fable.Elmish.React 4.0
 / Fable.SimpleHttp 3.6 / Thoth.Json 10.2 / net8.0. Avoid Thoth.Fetch (promise-CE

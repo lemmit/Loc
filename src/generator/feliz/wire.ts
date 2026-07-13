@@ -30,34 +30,46 @@ import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { tryDetectApiHook } from "../_walker/api-hook-detector.js";
 import { typeToFs } from "./type-fs.js";
 
-/** A read the page view issues (`<param>.<agg>.all`), projected to everything
- *  the MVU wiring + api module need.  v1 covers list reads (`.all`); single
- *  (`byId`) reads are a follow-up (they carry route-`id` args + `option`
- *  data). */
+/** A read the page view issues, projected to everything the MVU wiring + api
+ *  module need.  Two shapes:
+ *   - LIST (`<param>.<agg>.all`) — a `Remote<'T list>` fired at `init`.
+ *   - SINGLE / byId (`<param>.<agg>.byId(id)` on a `:id`-param route) — a
+ *     `Remote<'T option>` fired on PAGE ENTRY (init + every `UrlChanged`) via
+ *     `pageCmd`, keyed off the route `id`. */
 export interface FelizRead {
-  /** Pascal Model field holding the remote data (`AllOrders`). */
+  /** Pascal Model field holding the remote data (`AllOrders` / `OrderById`). */
   field: string;
   /** `Msg` case carrying the decoded `Result` (`AllOrdersLoaded`). */
   msgCase: string;
-  /** F# api function name (`allOrders`). */
+  /** F# api function name (`allOrders` / `orderById`). */
   apiFn: string;
   /** The aggregate read (`Order`). */
   aggregate: string;
-  /** F# type of the loaded value (`Order list`). */
+  /** F# type of the loaded value (`Order list` / `Order option`). */
   resultType: string;
   /** Thoth decoder expression for the loaded value
-   *  (`(Decode.list Decoders.order)`). */
+   *  (`(Decode.list Decoders.order)` / `(Decode.option Decoders.order)`). */
   decoderExpr: string;
-  /** Relative fetch route (`/api/orders`). */
+  /** Collection base fetch route (`/api/orders`).  A byId read appends `/%s`. */
   route: string;
   /** The match-arm binding the `data:` lambda param resolves to
-   *  (`allOrders` — camelCase of `field`). */
+   *  (`allOrders` / `orderById` — camelCase of `field`). */
   binding: string;
+  /** True for a byId (single-record) read — fired on page entry, not init. */
+  single: boolean;
+  /** For a byId read, the `Page` union case hosting it (`ProductDetail`) — the
+   *  arm `pageCmd` fires the fetch from.  Undefined for list reads. */
+  pageCase?: string;
 }
 
-/** The Model field name for an aggregate list read. */
+/** The Model field name for an aggregate list read (`Order` → `AllOrders`). */
 export function readFieldName(aggregate: string): string {
   return `All${plural(upperFirst(aggregate))}`;
+}
+
+/** The Model field name for an aggregate byId read (`Order` → `OrderById`). */
+export function byIdFieldName(aggregate: string): string {
+  return `${upperFirst(aggregate)}ById`;
 }
 
 /** Build the `FelizRead` for a `.all` read of `aggregate`. */
@@ -72,6 +84,26 @@ export function felizAllRead(aggregate: string): FelizRead {
     decoderExpr: `(Decode.list Decoders.${lowerFirst(aggregate)})`,
     route: `${API_BASE_PATH}/${snake(plural(aggregate))}`,
     binding: lowerFirst(field),
+    single: false,
+  };
+}
+
+/** Build the `FelizRead` for a `byId(id)` read of `aggregate`, hosted by the
+ *  `Page` case `pageCase`.  The loaded value is `'T option` (`None` when the
+ *  record isn't found) and the fetch fires on page entry keyed off the id. */
+export function felizByIdRead(aggregate: string, pageCase: string): FelizRead {
+  const field = byIdFieldName(aggregate);
+  return {
+    field,
+    msgCase: `${field}Loaded`,
+    apiFn: lowerFirst(field),
+    aggregate,
+    resultType: `${upperFirst(aggregate)} option`,
+    decoderExpr: `(Decode.option Decoders.${lowerFirst(aggregate)})`,
+    route: `${API_BASE_PATH}/${snake(plural(aggregate))}`,
+    binding: lowerFirst(field),
+    single: true,
+    pageCase,
   };
 }
 
@@ -136,14 +168,18 @@ export function collectPageReads(
 ): FelizRead[] {
   if (!page.body) return [];
   const detCtx = { apiParamNames, aggregatesByName };
+  const pageCase = upperFirst(page.name);
   const out: FelizRead[] = [];
   const seen = new Set<string>();
   for (const ofArg of queryViewOfArgs(page.body)) {
     const detected = tryDetectApiHook(ofArg, detCtx);
-    // v1 wire layer: aggregate list reads only.
-    if (detected?.kind !== "aggregate" || detected.operation !== "all") continue;
-    const read = felizAllRead(detected.aggregateName);
-    if (seen.has(read.field)) continue;
+    if (detected?.kind !== "aggregate") continue;
+    // List (`.all`) or single (`byId`) reads.  A byId read is keyed to the
+    // hosting page's `Page` case so `pageCmd` can fire it on entry.
+    let read: FelizRead | undefined;
+    if (detected.operation === "all") read = felizAllRead(detected.aggregateName);
+    else if (detected.operation === "byId") read = felizByIdRead(detected.aggregateName, pageCase);
+    if (!read || seen.has(read.field)) continue;
     seen.add(read.field);
     out.push(read);
   }
@@ -332,6 +368,40 @@ export function renderWireTypes(
   return { domain, decoders };
 }
 
+/** One async read function.  A list read is paramless (`GET /api/orders`); a
+ *  byId read takes `(id: string)`, fetches `GET /api/orders/<id>`, and folds a
+ *  `404` to `Ok None` (the record is legitimately absent, not an error). */
+function renderApiFn(r: FelizRead): (string | undefined)[] {
+  if (r.single) {
+    return [
+      `  let ${r.apiFn} (id: string) : Async<Result<${r.resultType}, string>> =`,
+      "    async {",
+      `      let! (status, body) = Http.get (sprintf "${r.route}/%s" id)`,
+      "      if status = 200 then",
+      `        match Decode.fromString ${r.decoderExpr} body with`,
+      "        | Ok data -> return Ok data",
+      "        | Error e -> return Error e",
+      "      elif status = 404 then",
+      "        return Ok None",
+      "      else",
+      '        return Error (sprintf "HTTP %d" status)',
+      "    }",
+    ];
+  }
+  return [
+    `  let ${r.apiFn} () : Async<Result<${r.resultType}, string>> =`,
+    "    async {",
+    `      let! (status, body) = Http.get "${r.route}"`,
+    "      if status = 200 then",
+    `        match Decode.fromString ${r.decoderExpr} body with`,
+    "        | Ok data -> return Ok data",
+    "        | Error e -> return Error e",
+    "      else",
+    '        return Error (sprintf "HTTP %d" status)',
+    "    }",
+  ];
+}
+
 /** Emit the `Api` module — one `Cmd`-issuing async read per `FelizRead`,
  *  fetching over `Fable.SimpleHttp` and decoding with the Thoth decoders. */
 export function renderApiModule(reads: FelizRead[]): string {
@@ -339,18 +409,37 @@ export function renderApiModule(reads: FelizRead[]): string {
   return lines(
     "// Api — Cmd-based reads (Fable.SimpleHttp + Thoth → Result).",
     "module Api =",
-    ...reads.flatMap((r, i) => [
-      i > 0 ? "" : undefined,
-      `  let ${r.apiFn} () : Async<Result<${r.resultType}, string>> =`,
-      "    async {",
-      `      let! (status, body) = Http.get "${r.route}"`,
-      "      if status = 200 then",
-      `        match Decode.fromString ${r.decoderExpr} body with`,
-      "        | Ok data -> return Ok data",
-      "        | Error e -> return Error e",
-      "      else",
-      '        return Error (sprintf "HTTP %d" status)',
-      "    }",
-    ]),
+    ...reads.flatMap((r, i) => [i > 0 ? "" : undefined, ...renderApiFn(r)]),
+  );
+}
+
+/** The `View` helper module — the `Remote<'T>` → element matchers the QueryView
+ *  pack renderer calls (a helper CALL is offside-safe inside a Feliz `[ … ]`
+ *  list where a raw multi-line `match` is not).  `remoteList` is emitted when
+ *  any list read exists, `remoteOne` when any byId read exists. */
+export function renderViewModule(reads: FelizRead[]): string {
+  const hasList = reads.some((r) => !r.single);
+  const hasSingle = reads.some((r) => r.single);
+  const list = [
+    "  let remoteList (r: Remote<'T list>) (loading: ReactElement) (error: ReactElement) (empty: ReactElement) (render: 'T list -> ReactElement) : ReactElement =",
+    "    match r with",
+    "    | Loading -> loading",
+    "    | LoadError _ -> error",
+    "    | Loaded [] -> empty",
+    "    | Loaded items -> render items",
+  ];
+  const one = [
+    "  let remoteOne (r: Remote<'T option>) (loading: ReactElement) (error: ReactElement) (empty: ReactElement) (render: 'T -> ReactElement) : ReactElement =",
+    "    match r with",
+    "    | Loading -> loading",
+    "    | LoadError _ -> error",
+    "    | Loaded None -> empty",
+    "    | Loaded (Some item) -> render item",
+  ];
+  return lines(
+    "module View =",
+    ...(hasList ? list : []),
+    hasList && hasSingle ? "" : undefined,
+    ...(hasSingle ? one : []),
   );
 }
