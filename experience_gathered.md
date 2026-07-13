@@ -2162,3 +2162,44 @@ Proven the same way as §23–§27: an op-form spike Fable-compiled FIRST (locki
 the curried-`Cmd` partial-app + id-carrying submit + 204 shape), then the emitter
 re-verified against the real generated 4-page project (`dotnet fable` + `vite
 build`). The CI example now exercises the whole CRUD write path in one app.
+
+## 29. Feliz runtime e2e — vite preview + headless Chromium, folded into the build gate (2026-07-13)
+
+The Feliz build gate proved the emitted app COMPILES (`dotnet fable` + `vite
+build`); a runtime gate proves it RUNS. Notes from wiring it up:
+
+- **Fold the e2e into the build workflow — don't duplicate the slow step.** The
+  JSX frontends have separate `generated-{vue,svelte}-e2e.yml` workflows, but
+  Feliz's `dotnet fable` step is docker-slow (~13s + restore). Running it twice
+  (build gate + e2e gate) doubles the cost for no benefit. Adding a `vite
+  preview` + Playwright smoke step to the END of the existing build workflow
+  reuses the one fable+build. The build steps ARE the e2e's setup.
+
+- **A no-backend smoke still proves the wire layer executed.** The showcase's
+  reads fetch `/api/products`; with no backend the fetch fails — but that means
+  the QueryView settles on its `error`/`empty` branch, which only renders if the
+  `Cmd.OfAsync.perform` fired, the fetch ran, and the decoder path was reached.
+  So asserting "Failed to load / No products yet" appears is a positive proof the
+  Remote/Cmd/Thoth machinery ran, not just that the shell mounted. Pure
+  client-side → no docker/postgres sidecar (matches the vue/svelte e2e gates).
+
+- **Playwright browser resolution: pinned version vs pre-installed build.** In
+  the sandbox, `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers` has a chromium build
+  that a pinned `playwright` may not match (`playwright.launch()` errors "run
+  npx playwright install"). Launch with an explicit
+  `executablePath: /opt/pw-browsers/chromium-<n>/chrome-linux/chrome` to test
+  locally; in CI, `npx playwright install --with-deps chromium` fetches the
+  matching build so the default launch works. The smoke script takes the path
+  from an env var (`SMOKE_CHROMIUM`) so it's local-testable AND CI-clean.
+
+- **ESM resolves modules from the SCRIPT's location, not cwd.** The smoke runs
+  with cwd = the generated web project (where `vite preview` serves), but its
+  `import { chromium } from "playwright"` resolves from the script file's
+  directory tree — so keeping `scripts/feliz-smoke.mjs` at repo root lets it find
+  the root `playwright` devDep regardless of where it's invoked from. `NODE_PATH`
+  does NOT help for ESM (CJS-only).
+
+The smoke was proven locally (fresh generate → fable → vite build → vite preview
+→ headless Chromium: mount + counter + routing + Remote-state all ran) before
+shipping — same prove-it discipline as §23–§28, one layer up (the whole app, not
+one emit).
