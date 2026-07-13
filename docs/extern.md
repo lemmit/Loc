@@ -47,8 +47,19 @@ aggregate Order {
 > it and re-exposes it as a member, and a body call renders
 > `<ng-container [ngComponentOutlet]="Chart" [ngComponentOutletInputs]="{ … }">`.
 > The typed `<Name>.props.ts` interface (the user types their `@Input()`s
-> against it) emits identically to the JSX frontends. Feliz (F#) and HEEx
-> (LiveView) do not yet carry either frontend hatch.
+> against it) emits identically to the JSX frontends.
+>
+> **HEEx (Phoenix LiveView)** carries both hatches too, bound the idiomatic
+> Elixir way — by MODULE, not file path (the module reference *is* the binding,
+> so a missing module fails `mix compile`, the fail-fast). The module is derived
+> from the `from "<path>"` clause (PascalCased segments — `"widgets/order_chart"`
+> → `Widgets.OrderChart`; write `"my_app_web/widgets/order_chart"` for a
+> namespaced module). A **component** renders via the built-in
+> `<.live_component module={Widgets.OrderChart} id="order_chart" caption={…} />`
+> (the user writes a `Phoenix.LiveComponent`; no `UiComponents` function is
+> emitted for it). A **function** renders fully-qualified —
+> `<%= Helpers.Format.initials(@name) %>` — so no `import`/`alias` wiring is
+> needed. **Feliz (F#)** does not yet carry either frontend hatch.
 
 An `extern` operation's body contains **only** `precondition` statements
 — no assignment, no `emit`, no collection mutation.  The framework owns
