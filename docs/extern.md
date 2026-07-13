@@ -59,7 +59,17 @@ aggregate Order {
 > (the user writes a `Phoenix.LiveComponent`; no `UiComponents` function is
 > emitted for it). A **function** renders fully-qualified —
 > `<%= Helpers.Format.initials(@name) %>` — so no `import`/`alias` wiring is
-> needed. **Feliz (F#)** does not yet carry either frontend hatch.
+> needed.
+>
+> **Feliz (F#/Fable)** carries both hatches too — the last frontend to gain
+> them — bound the same module-first way (segments of the `from` path
+> PascalCased into an F# module; a missing module fails `dotnet fable`). A
+> reference is emitted BARE and the single `App.fs` module `open`s exactly the
+> extern modules used (only *used* names, since F# warns on an unused `open`): a
+> **component** renders as `OrderChart {| caption = "Q3" |}` (an anonymous-record
+> props call into the user's Feliz component function), a **function** as
+> `initials(args)`. So all six frontends — React, Vue, Svelte, Angular, HEEx,
+> and Feliz — now carry both frontend extern hatches.
 
 An `extern` operation's body contains **only** `precondition` statements
 — no assignment, no `emit`, no collection mutation.  The framework owns
