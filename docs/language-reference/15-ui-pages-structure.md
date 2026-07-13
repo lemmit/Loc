@@ -1,6 +1,6 @@
 # 15. UI: pages & structure
 
-The frontend surface: a `ui` block bound to a frontend deployable, holding `page`s (route + body), `component`s (reusable region trees), reactive `state` / `derived` / `action` members, an optional explicit `menu`, page-grouping `area`s, and the `with scaffold(...)` macro that synthesises CRUD pages from the domain. Reach for this chapter to learn exactly what a page or component emits — and where the four frontends diverge.
+The frontend surface: a `ui` block bound to a frontend deployable, holding `page`s (route + body), `component`s (reusable region trees), reactive `state` / `derived` / `action` members, an optional explicit `menu`, page-grouping `area`s, and the `with scaffold(...)` macro that synthesises CRUD pages from the domain. Reach for this chapter to learn exactly what a page or component emits — and where the five frontends diverge.
 
 > **Grammar:** `Ui`, `UiMember`, `Page`, `PageProp`, `Component`, `StateBlock`, `StateField`, `DerivedProp`, `ActionDecl`, `Area`, `MenuBlock`, `Layout` · **Validators:** `loom.react-deployable-missing-ui` · `loom.framework-mismatch` · `loom.ui-framework-unhostable` · `loom.component-missing-body` · `loom.slot-out-of-position` · **Docs:** [`../page-metamodel.md`](../page-metamodel.md), [`../scaffold-macros.md`](../scaffold-macros.md)
 

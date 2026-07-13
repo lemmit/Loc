@@ -39,8 +39,9 @@ hours of re-verification — that is the failure mode this rewrite fixes.
 The ten-phase pipeline, five DB/backends (node/Hono, .NET, Java/Spring
 Boot, Python/FastAPI, elixir — plain Ecto/Phoenix, the `vanilla`
 foundation; the Ash foundation was removed and `foundation: ash` is now
-a validation error), and four frontends (React, Vue, Svelte, Angular) are mature
-(`src/platform/registry.ts`). Recent waves the older docs had not absorbed:
+a validation error), and five frontends (React, Vue, Svelte, Angular mature; Feliz
+— F#/Fable/Elmish — newer) (`src/platform/registry.ts`). Recent waves the older
+docs had not absorbed:
 
 - **Elixir platform rename** (#1043) — `platform: elixir` canonical;
   back-compat aliases for `phoenix`/`phoenixLiveView`.
