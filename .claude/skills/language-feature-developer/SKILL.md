@@ -3,7 +3,7 @@ name: language-feature-developer
 description: >-
   End-to-end workflow for adding a language feature to the Loom DSL compiler
   (the .ddd toolchain in this repo) — from a proposal through grammar, IR,
-  validation, all five backends and four frontends, and tests. Use this
+  validation, all five backends and five frontends, and tests. Use this
   whenever the task is to implement, design, or scope a Loom language feature:
   picking up a doc from docs/proposals/, closing a codegen gap, adding new
   surface syntax, an expression/statement/type, a capability, a UI primitive,
@@ -20,11 +20,12 @@ description: >-
 
 Adding a feature to Loom means walking a ten-phase, strictly one-directional
 pipeline (`.ddd → parse → macro → scope → AST-validate → lower → enrich →
-IR-validate → codegen → compose → write`) and landing it across **nine targets**
+IR-validate → codegen → compose → write`) and landing it across **ten targets**
 (5 backends: TS/Hono, .NET, Phoenix vanilla Ecto, Python/FastAPI, Java/Spring;
-4 frontends: React, Vue, Svelte, Angular). The failure mode this skill exists to
-prevent is a feature that's designed for one backend, half-implemented, or
-rebuilt because it was already shipped on a fast-moving `main`.
+5 frontends: React, Vue, Svelte, Angular, Feliz F#/Fable). The failure mode this
+skill exists to prevent is a feature that's designed for one backend,
+half-implemented, or rebuilt because it was already shipped on a fast-moving
+`main`.
 
 It runs as a **conductor over specialist roles**. You (the conductor) own the
 plan and the user relationship; you spawn each role as a subagent with the prompt
@@ -155,4 +156,4 @@ architecturally-incompatible designs before they cost implementation; the
 cheapest artifact (paper); splitting **developer** and **test developer** keeps
 each focused and lets the test author honestly judge the implementation rather
 than rubber-stamp their own. The whole point is a feature that lands *fully and
-consistently across nine targets*, the way a Loom maintainer would do it by hand.
+consistently across ten targets*, the way a Loom maintainer would do it by hand.

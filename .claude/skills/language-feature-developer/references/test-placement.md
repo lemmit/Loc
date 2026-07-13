@@ -34,7 +34,7 @@ over real Postgres, nightly)**.
 | `test/generator/elixir/`, `elixir-vanilla/` | Phoenix vanilla Ecto + HEEx | `vanilla-audit.test.ts` |
 | `test/generator/python/` | FastAPI/SQLAlchemy emit | `python-aggregate.test.ts` |
 | `test/generator/java/` | Spring Boot/JPA emit | `generator-java-api.test.ts` |
-| `test/generator/react/`, `vue/`, `svelte/`, `angular/` | frontend emit | `auth-ui-emit.test.ts` |
+| `test/generator/react/`, `vue/`, `svelte/`, `angular/`, `feliz/` | frontend emit | `auth-ui-emit.test.ts` |
 | `test/generator/_walker/`, `_packs/` | shared `walkBody` / design-pack dispatch | `builder-page-live-sync.test.ts` |
 | `test/platform/` | registry, `PlatformSurface`, **layering invariants** | `pipeline-layering.test.ts` |
 | `test/system/` | multi-deployable compose, `.loom/` artifacts, migrations | `acme-explicit-architecture.test.ts` |

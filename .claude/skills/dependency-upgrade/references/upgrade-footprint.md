@@ -100,7 +100,10 @@ Consumed by `src/generator/react/templating/render.ts` and
 specifier needs this seam updated too, or the deps bump and the emitted imports
 disagree.
 
-**Backends do not use stacks at all** — only the four frontends do.
+**Backends do not use stacks at all** — only the four JS frontends
+(`react`/`vue`/`svelte`/`angular`) do. The fifth frontend, `feliz` (F#/Fable),
+pins its deps in a `.fsproj`, not the JS `stacks/` `.hbs` system — so a JS stack
+bump never touches it (and a Fable/NuGet bump lives outside `stacks/`).
 
 ---
 
