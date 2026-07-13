@@ -634,16 +634,6 @@ export function validateOperationReturnsUnimplemented(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Unmapped error status (exception-less.md A1).
-//
-// A user-declared `error` returned by an operation that is neither a blessed
-// stdlib error (which carries a default status) nor given an api `httpStatus
-// <Error> <Code>` mapping falls through to a 500 ProblemDetails — almost never
-// what the author intended for a domain-specific failure.  Warn (not error) so
-// the pipeline still runs, prompting an explicit mapping.
-// ---------------------------------------------------------------------------
-
 export function validateUnmappedErrorStatuses(
   ctx: BoundedContextIR,
   diags: LoomDiagnostic[],

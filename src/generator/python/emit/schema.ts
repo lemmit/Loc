@@ -7,6 +7,7 @@ import type {
   WorkflowIR,
 } from "../../../ir/types/loom-ir.js";
 import { durableEventTypes } from "../../../ir/util/channels.js";
+import { directParentName } from "../../../ir/util/containment-parent.js";
 import {
   isTphBase,
   isTphConcrete,
@@ -105,7 +106,16 @@ export function renderPySchema(
     if (isTphConcrete(agg, ctx.aggregates)) {
       const owner = tableOwnerName(agg, ctx.aggregates);
       for (const part of agg.parts) {
-        models.push(renderModel(part.name, part, owner, ctx, schema, prefix));
+        models.push(
+          renderModel(
+            part.name,
+            part,
+            directParentName(agg, part.name, owner),
+            ctx,
+            schema,
+            prefix,
+          ),
+        );
       }
       for (const assoc of (agg as EnrichedAggregateIR).associations ?? []) {
         models.push(renderJoinModel(assoc, schema, prefix));
@@ -127,7 +137,16 @@ export function renderPySchema(
     if (agg.isAbstract) continue;
     models.push(renderModel(agg.name, agg, undefined, ctx, schema, prefix));
     for (const part of agg.parts) {
-      models.push(renderModel(part.name, part, agg.name, ctx, schema, prefix));
+      models.push(
+        renderModel(
+          part.name,
+          part,
+          directParentName(agg, part.name, agg.name),
+          ctx,
+          schema,
+          prefix,
+        ),
+      );
     }
     for (const assoc of (agg as EnrichedAggregateIR).associations ?? []) {
       models.push(renderJoinModel(assoc, schema, prefix));

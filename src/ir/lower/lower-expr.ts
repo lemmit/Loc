@@ -975,7 +975,17 @@ function lowerBuilderCall(expr: BuilderCall, env: Env): ExprIR {
         name: e.name as string,
         value: lowerExpr(e.value, env),
       }));
-    return { kind: "new", partName: name, fields };
+    // A part contained by a SIBLING part (not the aggregate root) is nested:
+    // its enclosing parent has no id at construction time, so the FK is stamped
+    // from tree position on save rather than passed here (tree-position parentId,
+    // nested-parts-alignment.md).  Matches `directParentOf(...).nested`.
+    const agg = AstUtils.getContainerOfType(ent, isAggregate);
+    const nested = (agg?.members ?? []).some(
+      (m) =>
+        isEntityPart(m) &&
+        m.members.some((pm) => isContainment(pm) && pm.partType?.ref?.name === name),
+    );
+    return { kind: "new", partName: name, fields, ...(nested ? { nested: true } : {}) };
   }
   // A payload construction (`NotFound { resource: … }`, exception-less.md) is a
   // structural record, not a class — lower it to an object literal so a

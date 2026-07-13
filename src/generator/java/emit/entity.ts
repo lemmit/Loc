@@ -762,6 +762,20 @@ export function renderJavaEntity(
   // owning `_parent` @OneToOne needs the instance); collection parts
   // take the parent id (their FK is written by the root's @JoinColumn).
   const oneToOneParent = persistence?.oneToOneParentOf;
+  // A part with its OWN nested containments accepts those children as trailing
+  // factory params (`new Shipment { carrier, labels: [...] }`), populating the
+  // @OneToMany collections so a cascade persist writes them with the FK stamped
+  // from the relationship.  Only parts that declare containments carry these —
+  // and part-in-part nesting only exists in nested models, so a plain part is
+  // byte-identical.
+  const partContainParams = entity.contains.map((c) =>
+    c.collection ? `List<${c.partName}> ${c.name}` : `${c.partName} ${c.name}`,
+  );
+  const partContainPopulate = entity.contains.map((c) =>
+    c.collection
+      ? `        if (${c.name} != null) p.${c.name}.addAll(${c.name});`
+      : `        p.${c.name} = ${c.name};`,
+  );
   const partFactoryLines: string[] = !isRoot
     ? [
         `    public static ${entity.name} _create(${[
@@ -769,6 +783,7 @@ export function renderJavaEntity(
             ? `${oneToOneParent} parent`
             : `${persistence?.parentEntityName ?? rootName}Id parentId`,
           ...entity.fields.map((f) => `${renderJavaType(f.type)} ${f.name}`),
+          ...partContainParams,
         ].join(", ")}) {`,
         `        var p = new ${entity.name}();`,
         `        p.id = ${entity.name}Id.newId();`,
@@ -776,6 +791,7 @@ export function renderJavaEntity(
           ? [`        p._parent = parent;`, `        p.parentId = parent.id();`]
           : [`        p.parentId = parentId;`]),
         ...entity.fields.map((f) => `        p.${f.name} = ${f.name};`),
+        ...partContainPopulate,
         emitTrace ? `        p._assertInvariants("<init>");` : `        p._assertInvariants();`,
         `        return p;`,
         `    }`,

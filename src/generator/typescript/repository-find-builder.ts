@@ -164,9 +164,14 @@ function bulkLoadContainmentLines(
   return eagerContains.flatMap(({ c, part }) => {
     const childTable = lowerFirst(plural(part.name));
     const head = `    const ${c.name}Rows = await this.db.select().from(schema.${childTable}).where(inArray(schema.${childTable}.parentId, rootIds));`;
+    // Load this part's OWN nested containments first (keyed by its row ids) so
+    // the hydrate below can reference their `<name>ByParent` maps.  Empty for a
+    // leaf part → byte-identical single-level output.
+    const nested = nestedContainLoads(part, `${c.name}Rows`, "this.db", "    ", agg, ctx);
     if (c.collection) {
       return [
         head,
+        ...nested,
         `    const ${c.name}ByParent = new Map<string, ${part.name}[]>();`,
         `    for (const r of ${c.name}Rows) {`,
         `      const list = ${c.name}ByParent.get(r.parentId) ?? [];`,
@@ -180,12 +185,58 @@ function bulkLoadContainmentLines(
     // on duplicates.
     return [
       head,
+      ...nested,
       `    const ${c.name}ByParent = new Map<string, ${part.name}>();`,
       `    for (const r of ${c.name}Rows) {`,
       `      if (${c.name}ByParent.has(r.parentId)) continue;`,
       `      ${c.name}ByParent.set(r.parentId, ${hydrateEntityExpr(part, "r", agg, ctx)});`,
       `    }`,
     ];
+  });
+}
+
+/** Recursively load a part's OWN nested containments into per-direct-parent
+ *  `<name>ByParent` maps (keyed by the child row's id), emitted BEFORE the
+ *  hydrate that references them.  `rowsVar` is the parent level's already-loaded
+ *  rows local; `dbExpr` the db handle (`tx` for findById, `this.db` for the
+ *  array paths).  Empty for a leaf part, so single-level output is unchanged. */
+function nestedContainLoads(
+  part: EntityPartIR,
+  rowsVar: string,
+  dbExpr: string,
+  indent: string,
+  agg: EnrichedAggregateIR,
+  ctx: BoundedContextIR,
+): string[] {
+  return part.contains.flatMap((nc) => {
+    const ncPart = agg.parts.find((p) => p.name === nc.partName);
+    if (!ncPart) return [];
+    const ncTable = lowerFirst(plural(ncPart.name));
+    const rowsLocal = `${nc.name}Rows`;
+    const out = [
+      `${indent}const ${rowsLocal} = await ${dbExpr}.select().from(schema.${ncTable}).where(inArray(schema.${ncTable}.parentId, ${rowsVar}.map((r) => r.id)));`,
+      // Recurse deeper before grouping THIS level.
+      ...nestedContainLoads(ncPart, rowsLocal, dbExpr, indent, agg, ctx),
+    ];
+    if (nc.collection) {
+      out.push(
+        `${indent}const ${nc.name}ByParent = new Map<string, ${ncPart.name}[]>();`,
+        `${indent}for (const r of ${rowsLocal}) {`,
+        `${indent}  const list = ${nc.name}ByParent.get(r.parentId) ?? [];`,
+        `${indent}  list.push(${hydrateEntityExpr(ncPart, "r", agg, ctx)});`,
+        `${indent}  ${nc.name}ByParent.set(r.parentId, list);`,
+        `${indent}}`,
+      );
+    } else {
+      out.push(
+        `${indent}const ${nc.name}ByParent = new Map<string, ${ncPart.name}>();`,
+        `${indent}for (const r of ${rowsLocal}) {`,
+        `${indent}  if (${nc.name}ByParent.has(r.parentId)) continue;`,
+        `${indent}  ${nc.name}ByParent.set(r.parentId, ${hydrateEntityExpr(ncPart, "r", agg, ctx)});`,
+        `${indent}}`,
+      );
+    }
+    return out;
   });
 }
 
@@ -298,14 +349,20 @@ function txCallbackBody(
     const part = agg.parts.find((p) => p.name === c.partName);
     if (!part) return [];
     const childTable = lowerFirst(plural(part.name));
+    // Nested containments of this part, loaded (keyed by its row ids) before
+    // the hydrate references their `<name>ByParent` maps.  Empty for a leaf
+    // part → byte-identical.
+    const nested = nestedContainLoads(part, `${c.name}Rows`, "tx", "      ", agg, ctx);
     if (c.collection) {
       return [
         `      const ${c.name}Rows = await tx.select().from(schema.${childTable}).where(eq(schema.${childTable}.parentId, id));`,
+        ...nested,
         `      const ${c.name} = ${c.name}Rows.map((r) => ${hydrateEntityExpr(part, "r", agg, ctx)});`,
       ];
     }
     return [
       `      const ${c.name}Rows = await tx.select().from(schema.${childTable}).where(eq(schema.${childTable}.parentId, id)).limit(1);`,
+      ...nested,
       `      const ${c.name} = ${c.name}Rows.length > 0 ? ${hydrateEntityExpr(part, `${c.name}Rows[0]!`, agg, ctx)} : null;`,
     ];
   });

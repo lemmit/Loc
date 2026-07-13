@@ -65,6 +65,13 @@ describe.skipIf(!ENABLED)(
       // aware deep money check (S9 follow-through) — pins the previously
       // ungated latent tsc break + the emitted field-wise VO equals().
       "test/e2e/fixtures/ts-build/money-vo.ddd",
+      // Part-in-part nesting (Order → Shipment[] → Label[]): a nested part's
+      // Drizzle FK + `parentId` brand target its DIRECT parent
+      // (labels.shipment_id / ShipmentId), and the repository recursively saves
+      // + hydrates the nested level (nested-parts-alignment Phase 2 — node).
+      // Pins the previously-latent forward-ref (z.array(LabelResponse)) + the
+      // Shipment._create({...labels}) type-check.
+      "test/e2e/fixtures/ts-build/nested-parts.ddd",
     ])("%s — `ddd generate ts` output type-checks + tsup-bundles", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-tsc-"));
       try {

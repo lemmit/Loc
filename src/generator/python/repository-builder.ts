@@ -18,6 +18,7 @@ import {
   type WorkflowStmtIR,
 } from "../../ir/types/loom-ir.js";
 import { aggHasAuditedTarget } from "../../ir/util/audit-capability.js";
+import { directParentName } from "../../ir/util/containment-parent.js";
 import {
   baseOf,
   discriminatorValue,
@@ -759,11 +760,10 @@ function buildAggConstruction(
   }
   for (const c of agg.contains) {
     const v = snake(c.name);
-    const hydrateOne = `self._hydrate_${snake(c.partName)}`;
     kwargs.push(
       c.collection
-        ? `${v}=[${hydrateOne}(__r) for __r in ${v}_rows]`
-        : `${v}=(${hydrateOne}(${v}_rows[0]) if ${v}_rows else None)`,
+        ? `${v}=[${hydratePartCall(agg, c.partName, "__r")} for __r in ${v}_rows]`
+        : `${v}=(${hydratePartCall(agg, c.partName, `${v}_rows[0]`)} if ${v}_rows else None)`,
     );
   }
   const provFields = provenancedFieldsOf(agg);
@@ -930,26 +930,66 @@ function hydrateManyMethod(agg: EnrichedAggregateIR, ctx: EnrichedBoundedContext
   return out.join("\n");
 }
 
+/** True when `_hydrate_<part>` must be `async` — a part with its own nested
+ *  containments loads their child rows (an `await`ed SELECT), so its hydrate
+ *  becomes a coroutine.  A leaf part (no `contains`) stays a plain sync `def`,
+ *  so single-level output is byte-identical. */
+function partHydrateIsAsync(agg: EnrichedAggregateIR, partName: string): boolean {
+  return (agg.parts.find((p) => p.name === partName)?.contains.length ?? 0) > 0;
+}
+
+/** The `_hydrate_<part>(<arg>)` call, `await`ed iff that part's hydrate is a
+ *  coroutine (it loads nested children).  The enclosing hydrate is always
+ *  `async`, so awaiting is safe. */
+function hydratePartCall(agg: EnrichedAggregateIR, partName: string, argExpr: string): string {
+  const prefix = partHydrateIsAsync(agg, partName) ? "await " : "";
+  return `${prefix}self._hydrate_${snake(partName)}(${argExpr})`;
+}
+
 function partHydrateMethod(
   p: EnrichedEntityPartIR,
   agg: EnrichedAggregateIR,
   ctx: EnrichedBoundedContextIR,
 ): string {
   const partRow = rowClassName(p.name);
+  // A nested part FKs to (and brands its `parent_id` from) its DIRECT parent —
+  // a sibling part for a part-in-part, else the aggregate root.
+  const parentName = directParentName(agg, p.name, agg.name);
+  const isAsync = p.contains.length > 0;
+  const out: string[] = [
+    `    ${isAsync ? "async def" : "def"} _hydrate_${snake(p.name)}(self, row: ${partRow}) -> ${p.name}:`,
+  ];
+  // Load each nested containment's child rows, keyed by THIS part's own id.
+  for (const c of p.contains) {
+    const nestedRow = rowClassName(c.partName);
+    const v = snake(c.name);
+    out.push(
+      `        ${v}_rows = (`,
+      "            await self._session.execute(",
+      `                select(${nestedRow}).where(${nestedRow}.parent_id == row.id)`,
+      "            )",
+      "        ).scalars().all()",
+    );
+  }
   const kwargs = [
     `id=${p.name}Id(row.id)`,
-    `parent_id=${agg.name}Id(row.parent_id)`,
+    `parent_id=${parentName}Id(row.parent_id)`,
     ...p.fields
       .filter((f) => !isRefCollectionField(f) && !isValueCollectionField(f))
       .map((f) => `${snake(f.name)}=${hydrateField("row", f, ctx)}`),
-    ...p.contains.map((c) => `${snake(c.name)}=${c.collection ? "[]" : "None"}`),
+    ...p.contains.map((c) => {
+      const v = snake(c.name);
+      return c.collection
+        ? `${v}=[${hydratePartCall(agg, c.partName, "__r")} for __r in ${v}_rows]`
+        : `${v}=(${hydratePartCall(agg, c.partName, `${v}_rows[0]`)} if ${v}_rows else None)`;
+    }),
   ];
-  return lines(
-    `    def _hydrate_${snake(p.name)}(self, row: ${partRow}) -> ${p.name}:`,
+  out.push(
     `        return ${p.name}._rehydrate(`,
-    kwargs.map((k) => `            ${k},`),
+    ...kwargs.map((k) => `            ${k},`),
     "        )",
   );
+  return out.join("\n");
 }
 
 // --- persistence (domain → row) ---------------------------------------------
@@ -1071,9 +1111,10 @@ function saveMethod(
     out.push("        )");
   }
 
-  // Diff-sync each contained collection.
+  // Diff-sync each contained collection (recursing into nested part-in-part
+  // containments, each keyed by its DIRECT parent's id).
   for (const c of agg.contains) {
-    out.push(...syncContainment(agg, c, ctx, aggVar));
+    out.push(...syncContainment(agg, c, ctx, aggVar, `${aggVar}.id`, "        ", 0));
   }
   // Diff-sync each reference-collection join table.
   for (const f of agg.fields.filter(isRefCollectionField)) {
@@ -1137,48 +1178,78 @@ function saveMethod(
   return out.join("\n");
 }
 
+/** Diff-sync one containment level and RECURSE into each part's own nested
+ *  containments.  `ownerExpr` is the domain object holding this collection
+ *  (`aggregate` at the root, the loop var `__c<depth>` for a nested level) and
+ *  `ownerIdExpr` its id — child rows are reconciled against the DB rows whose
+ *  direct-parent FK equals it.  `indent`/`depth` place + uniquify the emitted
+ *  block so a two-level nest (`Order → Shipment[] → Label[]`) reads/writes each
+ *  child under its DIRECT parent, not the aggregate root.  Root-level output is
+ *  byte-identical (the FK column resolves to the root, `depth` 0, indent 8). */
 function syncContainment(
   agg: EnrichedAggregateIR,
   c: ContainmentIR,
   ctx: EnrichedBoundedContextIR,
-  aggVar: string,
+  ownerExpr: string,
+  ownerIdExpr: string,
+  indent: string,
+  depth: number,
 ): string[] {
   const partRow = rowClassName(c.partName);
   const part = agg.parts.find((p) => p.name === c.partName);
   const v = snake(c.name);
+  // Depth 0 keeps the historical `child` / `child_row` / `__<v>_items` names so
+  // single-level containment output is byte-identical; nested levels uniquify.
+  const loopVar = depth === 0 ? "child" : `__c${depth}`;
+  const rowVar = depth === 0 ? "child_row" : `__c${depth}_row`;
+  const itemsVar = depth === 0 ? `__${v}_items` : `__${v}_items${depth}`;
+  // FK column = the child's DIRECT parent (`shipment_id` for a nested Label,
+  // `order_id` for a root-level Shipment) — matching the shared migration DDL.
+  const fkCol = `${snake(directParentName(agg, c.partName, tableOwnerName(agg, ctx.aggregates)))}_id`;
+  // A root-level part carries its correct parent id; a NESTED part is stamped
+  // from TREE POSITION (the enclosing parent id in scope) — its construction-time
+  // parent_id isn't reliable (a `new Label` inside `new Shipment` has no shipment
+  // id yet).  Depth 0 keeps `${loopVar}.parent_id` (byte-identical).
   const childPairs: Array<[string, string]> = [
-    ["id", "child.id"],
-    [`${snake(tableOwnerName(agg, ctx.aggregates))}_id`, "child.parent_id"],
+    ["id", `${loopVar}.id`],
+    [fkCol, depth > 0 ? ownerIdExpr : `${loopVar}.parent_id`],
   ];
   for (const f of part?.fields ?? []) {
     if (isRefCollectionField(f) || isValueCollectionField(f)) continue;
-    childPairs.push(...persistField("child", f, ctx));
+    childPairs.push(...persistField(loopVar, f, ctx));
   }
-  const children = c.collection ? `${aggVar}.${v}` : `__${v}_items`;
+  const items = c.collection ? `${ownerExpr}.${v}` : itemsVar;
   const out: string[] = [];
   if (!c.collection) {
-    out.push(`        __${v}_items = [${aggVar}.${v}] if ${aggVar}.${v} is not None else []`);
+    out.push(`${indent}${itemsVar} = [${ownerExpr}.${v}] if ${ownerExpr}.${v} is not None else []`);
   }
   out.push(
-    `        ${v}_existing = (`,
-    "            await self._session.execute(",
-    `                select(${partRow}.id).where(${partRow}.parent_id == ${aggVar}.id)`,
-    "            )",
-    "        ).scalars().all()",
-    `        ${v}_current = {child.id for child in ${children}}`,
-    `        ${v}_stale = [__id for __id in ${v}_existing if __id not in ${v}_current]`,
-    `        if ${v}_stale:`,
-    "            await self._session.execute(",
-    `                delete(${partRow}).where(${partRow}.id.in_(${v}_stale))`,
-    "            )",
-    `        for child in ${children}:`,
-    "            child_row = {",
-    ...childPairs.map(([k, val]) => `                "${k}": ${val},`),
-    "            }",
-    "            await self._session.execute(",
-    `                insert(${partRow}).values(**child_row).on_conflict_do_update(index_elements=["id"], set_=child_row)`,
-    "            )",
+    `${indent}${v}_existing = (`,
+    `${indent}    await self._session.execute(`,
+    `${indent}        select(${partRow}.id).where(${partRow}.parent_id == ${ownerIdExpr})`,
+    `${indent}    )`,
+    `${indent}).scalars().all()`,
+    `${indent}${v}_current = {${loopVar}.id for ${loopVar} in ${items}}`,
+    `${indent}${v}_stale = [__id for __id in ${v}_existing if __id not in ${v}_current]`,
+    `${indent}if ${v}_stale:`,
+    `${indent}    await self._session.execute(`,
+    // A stale parent's own nested children cascade (the FK is ON DELETE CASCADE).
+    `${indent}        delete(${partRow}).where(${partRow}.id.in_(${v}_stale))`,
+    `${indent}    )`,
+    `${indent}for ${loopVar} in ${items}:`,
+    `${indent}    ${rowVar} = {`,
+    ...childPairs.map(([k, val]) => `${indent}        "${k}": ${val},`),
+    `${indent}    }`,
+    `${indent}    await self._session.execute(`,
+    `${indent}        insert(${partRow}).values(**${rowVar}).on_conflict_do_update(index_elements=["id"], set_=${rowVar})`,
+    `${indent}    )`,
   );
+  // Recurse: each part's OWN nested containments, keyed by this child's id.
+  for (const nested of part?.contains ?? []) {
+    out.push(
+      ...syncContainment(agg, nested, ctx, loopVar, `${loopVar}.id`, `${indent}    `, depth + 1),
+    );
+  }
   return out;
 }
 

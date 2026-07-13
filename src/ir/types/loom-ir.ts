@@ -3193,6 +3193,14 @@ export type ExprIR =
       kind: "new";
       partName: string;
       fields: { name: string; value: ExprIR }[];
+      /** True when the constructed part is NESTED — contained by a sibling part,
+       *  not the aggregate root (`Order → Shipment → Label`, a `new Label`).
+       *  Its parent (the enclosing part) has no id at construction time, so
+       *  backends OMIT the construction-time `parentId`: the FK is stamped from
+       *  tree position on save and set from the DB row on hydrate.  Absent /
+       *  false for a root-level part (`new Shipment`), which keeps passing the
+       *  ambient `this` id — byte-identical. */
+      nested?: boolean;
       origin?: OriginRef;
     }
   | {

@@ -188,13 +188,92 @@ dropped.
   nest), `gradle bootJar` + a real Postgres — Flyway migrate, create a nested
   graph, read it back, assert the right labels land under the right shipment.
 
-### Phases 2–4 — node, .NET, python (one PR each, independent) — ⛔ DEFERRED, RE-SCOPED
-> **Not "re-key the assembly" — "build part-containment persistence."** Scoping
-> (see the ⚠️ section above) showed node never saves single containments and
-> never loads nested parts, and python hard-codes the nested level empty. So each
-> backend's PR is a real feature, not the tweak this bullet list implies. Kept
-> below as the *direction*, but the work is larger than written. Deferred until an
-> actual `.ddd` needs part-in-part nesting on a non-Java backend.
+### Phase 2 — python ✅ DONE
+> Landed: part-in-part containment persistence on the python backend. A nested
+> part FKs to (and brands its `parent_id` from) its DIRECT parent
+> (`labels.shipment_id`, `Label.parent_id: ShipmentId`), matching the shared
+> migration DDL; `save` recurses to diff-sync each nested level keyed by its
+> direct-parent id; `_hydrate_<part>` is `async` when the part has children and
+> loads them (calling the previously-dead `_hydrate_<nested>` helpers). Parts are
+> emitted **children-first** (`partsChildrenFirst`, `ir/util/containment-parent.ts`)
+> so a `<Part>` / `<Part>Response` never forward-references a not-yet-defined
+> sibling; `new <Part>`'s `_create` factory defaults a part's own containments
+> (safe `None`-coercion, never a shared-mutable `[]`). Single-level output is
+> byte-identical. **Boot-verified on real Postgres** (create order + shipment via
+> API → SQL-insert a label under the shipment → GET nests it under the right
+> shipment → addShipment re-save preserves the nested label). `ruff` +
+> `mypy --strict` clean; fixture `test/e2e/fixtures/python-build/nested-parts.ddd`.
+> Construction-bearing nested ops (`new Label` inside an inline `new Shipment`)
+> stay a follow-up — the nested-`new` arm doesn't thread the parent-part instance
+> yet (the risk noted below).
+
+### Phase 3 — node ✅ DONE
+> Landed: part-in-part containment persistence on the node/Hono backend. The
+> Drizzle schema FKs a nested part to (and `references()`) its DIRECT parent
+> (`labels.shipment_id → shipments`); the domain `parentId` brands to the
+> direct-parent id type; `save` recurses (single containments now persist too —
+> they were dropped entirely before — and each nested level diff-syncs keyed by
+> its direct-parent id); the read paths (`findById`, `findManyByIds`, custom
+> finds) recursively bulk-load the nested level into per-direct-parent maps and
+> assemble it into the graph. Wire response DTOs (`z.object`) + the frontend api
+> module emit parts children-first so `z.array(LabelResponse)` never
+> forward-references; `_create` defaults a part's own containments. Single-level
+> output is byte-identical (680 node generator/platform tests green). **Boot-
+> verified on real Postgres** (same create → SQL-insert label → GET-nests →
+> re-save-preserves round-trip as python). `tsc --noEmit` + `tsup` clean; fixture
+> `test/e2e/fixtures/ts-build/nested-parts.ddd`.
+
+### Phase 4 — .NET ✅ DONE
+> Landed: part-in-part containment persistence on the .NET/EF Core backend. The
+> owned-type config now NESTS — a part's own containments emit as a nested
+> `OwnsMany`/`OwnsOne` inside its parent's owned-nav builder (`o.OwnsMany<Label>(
+> "_labels", o1 => …)`), with the shadow `ParentId` column named for the DIRECT
+> parent (`o1.Property("ParentId").HasColumnName("shipment_id")`) — matching the
+> migration DDL. The domain `ParentId` brands to the direct-parent id type
+> (`Label.ParentId: ShipmentId`) via a new `parentName` param on `renderEntity`
+> (distinct from `rootName`, which still names the shared aggregate namespace).
+> **No repository changes** — EF materialises + persists the owned graph itself.
+> Single-level output byte-identical (418 .NET generator tests green).
+> `dotnet build /warnaserror` clean and **boot-verified on real Postgres** (same
+> create → SQL-insert label → GET-nests → re-save-preserves round-trip as
+> python/node). Fixture `test/e2e/fixtures/dotnet-build/nested-parts.ddd`.
+
+**All four relational backends now persist + read part-in-part nesting** (java
+Phase 1, python Phase 2, node Phase 3, .NET Phase 4). DEBT-15 is fully drained.
+
+### Construction follow-up — ✅ DONE (tree-position parentId)
+Inline nested construction — a `new <Part> { … }` that supplies the part's OWN
+containment (`Shipment { carrier: c, labels: [Label { … }] }`) — now works on all
+four relational backends. The original problem: a nested child's parent id is
+minted inside the enclosing part's `_create`, so it isn't available at the child
+construction site; the old code stamped the ambient `this` (the aggregate root),
+mis-typing the child's `parentId` (`OrderId` where a `ShipmentId` is required).
+
+The fix reframes **parentId as a tree-derived value, not a construction input**:
+- **Lowering** flags a `new` whose part is nested (contained by a sibling) —
+  `NewExpr.nested` (`lower-expr.ts`, matching `directParentOf(...).nested`).
+- **`renderNew`** omits the construction-time parentId for a nested part on every
+  backend (node/python/.NET/java); a root-level part still passes the ambient
+  parent (byte-identical).
+- **Domain** — a nested part's parentId is optional at construction and defaulted
+  (node/python mint a placeholder in the ctor; .NET State slot is `= default!`;
+  java's FK column is already `insertable=false`). node/python/.NET/java `_create`
+  factories also gained the containment-children slots so the parent can carry
+  them (`Shipment._create(…, labels)`).
+- **Save** stamps the child FK from **tree position** — the enclosing parent's id
+  in the recursive save loop (node/python), or the ORM relationship (EF owned-type
+  graph position / JPA `@OneToMany @JoinColumn`) on .NET/java — never the child's
+  construction-time parentId.
+- **Hydrate** sets parentId from the DB row (correct, from the FK column).
+
+parentId is not on a part's wire shape, so a freshly-constructed (unsaved) part's
+placeholder parentId is never observed. **Boot-verified** on node/python/.NET
+(create-with-nested-child via one API call → the inline label lands under the
+right shipment); java build-verified (same JPA-cascade mechanism as its
+boot-verified storage). The `loom.nested-part-construction-unsupported` gate that
+briefly guarded this is removed. Fixtures exercise it via an `addFull` op
+(`{python,ts,dotnet}-build/nested-parts.ddd`) + a single-containment `setup`
+(`java-build/nested-parts.ddd`).
 
 For each backend, in any order:
 - **node** — make `saveTxBody` persist single containments (not just collections),

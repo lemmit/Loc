@@ -1,4 +1,4 @@
-import type { AggregateIR } from "../types/loom-ir.js";
+import type { AggregateIR, EntityPartIR } from "../types/loom-ir.js";
 
 /** The entity that directly declares a part as a containment. */
 export interface DirectParent {
@@ -34,4 +34,41 @@ export function directParentOf(agg: AggregateIR, partName: string): DirectParent
     if (c) return { name: part.name, single: !c.collection, nested: true };
   }
   return undefined;
+}
+
+/** The entity name a part's storage row FKs to — its direct parent when the
+ *  part is nested (a sibling part's table), else `defaultOwner` (the aggregate
+ *  root, or the TPH base table when the caller passes it).  This is the single
+ *  rule the shared migration (`migrations-builder.ts` `tableForPart`) applies
+ *  as `dp?.nested ? dp.name : ownerName`; a per-backend ORM emitter calls this
+ *  so its own FK column (`<name>_id`) lines up with the migration DDL by
+ *  construction.  A root-level part resolves to `defaultOwner`, so existing
+ *  single-level output is unchanged. */
+export function directParentName(agg: AggregateIR, partName: string, defaultOwner: string): string {
+  const dp = directParentOf(agg, partName);
+  return dp?.nested ? dp.name : defaultOwner;
+}
+
+/** Order parts so a CONTAINED part precedes the part that contains it — a
+ *  STABLE topological sort (declaration order preserved among parts with no
+ *  containment dependency between them).  An emitter that renders one
+ *  class/model per part into a single module uses this so a part-in-part type
+ *  reference (`Shipment.labels: list[Label]`) never forward-references a
+ *  not-yet-defined sibling.  For an aggregate with no part-in-part nesting the
+ *  result equals the input order, so single-level output is byte-identical. */
+export function partsChildrenFirst<P extends EntityPartIR>(parts: readonly P[]): P[] {
+  const byName = new Map(parts.map((p) => [p.name, p]));
+  const out: P[] = [];
+  const seen = new Set<string>();
+  const visit = (p: P): void => {
+    if (seen.has(p.name)) return;
+    seen.add(p.name);
+    for (const c of p.contains) {
+      const child = byName.get(c.partName);
+      if (child) visit(child);
+    }
+    out.push(p);
+  };
+  for (const p of parts) visit(p);
+  return out;
 }

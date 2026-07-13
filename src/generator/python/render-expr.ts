@@ -568,10 +568,13 @@ function renderNew(
   e: NewExpr,
   ctx: PyRenderContext,
 ): string {
+  // A NESTED part's enclosing parent has no id yet at construction — its FK is
+  // stamped from tree position on save — so omit the construction-time parent_id
+  // (the ambient `self` id would be the wrong parent).  Root-level parts keep it.
   const parentRef = ctx.thisName === "self" ? "self._id" : `${ctx.thisName}.id`;
   const inits = [
     `id=new_${snake(e.partName)}_id()`,
-    `parent_id=${parentRef}`,
+    ...(e.nested ? [] : [`parent_id=${parentRef}`]),
     ...fields.map((f) => `${snake(f.name)}=${f.value}`),
   ];
   return `${e.partName}._create(${inits.join(", ")})`;

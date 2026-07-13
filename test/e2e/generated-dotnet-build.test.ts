@@ -72,6 +72,11 @@ describe.skipIf(!ENABLED)(
       // Floor/Ceiling) AND in `find … where` positions (the EF LINQ path,
       // incl. the round query override that drops MidpointRounding).
       "test/e2e/fixtures/dotnet-build/math-intrinsics.ddd",
+      // Part-in-part nesting (Order → Shipment[] → Label[]): a nested part's
+      // owned-type config is nested inside its direct parent's OwnsMany, with
+      // the shadow FK column named for the direct parent (labels.shipment_id)
+      // and the domain ParentId branded ShipmentId (nested-parts Phase 4 — .NET).
+      "test/e2e/fixtures/dotnet-build/nested-parts.ddd",
     ])("%s — `ddd generate dotnet` output restores + builds", (example) => {
       const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-dotnet-"));
       try {

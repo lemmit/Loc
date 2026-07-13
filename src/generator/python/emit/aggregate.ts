@@ -16,6 +16,7 @@ import {
   operationUsesCurrentUser,
   type TypeIR,
 } from "../../../ir/types/loom-ir.js";
+import { directParentName, partsChildrenFirst } from "../../../ir/util/containment-parent.js";
 import { lines } from "../../../util/code-builder.js";
 import { snake } from "../../../util/naming.js";
 import { provColumn, provenancedFieldsOf } from "../emit/provenance.js";
@@ -70,6 +71,12 @@ interface EntityShape {
   isRoot: boolean;
   hasCreate: boolean;
   rootName?: string;
+  /** The entity that DIRECTLY contains this part — the aggregate root for a
+   *  root-level part, or a sibling part for a nested one.  Drives the
+   *  `parent_id` id-type branding (`ShipmentId`, not `OrderId`, for a Label
+   *  nested under Shipment).  Equals `rootName` for root-level parts, so
+   *  single-level output is byte-identical. */
+  parentName?: string;
   fields: FieldIR[];
   contains: ContainmentIR[];
   derived: DerivedIR[];
@@ -107,7 +114,9 @@ export function renderPyAggregate(
   // aggregate hosts a `provenanced` field (root fields only — captured at
   // named-operation write sites, which target root columns).
   const emitProvenance = provenancedFieldsOf(agg).length > 0;
-  const shapes = [...agg.parts.map((p) => partShape(p, agg)), rootShape(agg)];
+  // Children-first so a part-in-part class (`Shipment` → `list[Label]`) is
+  // defined after the sibling it references — no forward-ref NameError.
+  const shapes = [...partsChildrenFirst(agg.parts).map((p) => partShape(p, agg)), rootShape(agg)];
   // Entity parts never carry operations (see `partShape`), so they never
   // contribute op fragments — only the root shape's render call does.
   const rendered = shapes.map((s) =>
@@ -340,6 +349,7 @@ function partShape(p: EntityPartIR, root: AggregateIR): EntityShape {
     isRoot: false,
     hasCreate: false,
     rootName: root.name,
+    parentName: directParentName(root, p.name, root.name),
     fields: p.fields,
     contains: p.contains,
     derived: p.derived,
@@ -402,11 +412,21 @@ function renderEntity(
       ? `        self._assert_invariants(${JSON.stringify(op)})`
       : "        self._assert_invariants()";
 
+  // A NESTED part (contained by a sibling, not the root) has no parent id at
+  // construction — its FK is stamped from tree position on save — so `parent_id`
+  // is optional (keyword-only, so a default before required fields is legal) and
+  // defaulted in `__init__`.  Root-level parts are byte-identical.
+  const isNested = !e.isRoot && e.parentName != null && e.parentName !== e.rootName;
+  const parentIdParam = (optional: boolean): string | null =>
+    e.isRoot
+      ? null
+      : `parent_id: ${e.parentName ?? e.rootName}Id${optional ? " | None = None" : ""}`;
+
   // Full-state keyword-only parameter list — shared by `__init__` and the
   // `_create` rehydration alias.
   const stateParams = [
     `id: ${e.name}Id`,
-    !e.isRoot ? `parent_id: ${e.rootName}Id` : null,
+    parentIdParam(isNested),
     ...e.fields.map((f) => `${snake(f.name)}: ${renderPyType(f.type)}`),
     ...e.contains.map((c) => `${snake(c.name)}: ${containsType(c)}`),
   ].filter((s): s is string => s != null);
@@ -426,7 +446,11 @@ function renderEntity(
   const ctor = [
     `    def __init__(self, *, ${stateParams.join(", ")}, _trust_store: bool = False) -> None:`,
     `        self._id = id`,
-    !e.isRoot ? `        self._parent_id = parent_id` : null,
+    e.isRoot
+      ? null
+      : isNested
+        ? `        self._parent_id = parent_id if parent_id is not None else new_${snake(e.parentName ?? e.name)}_id()`
+        : `        self._parent_id = parent_id`,
     ...e.fields.map((f) => `        self._${snake(f.name)} = ${snake(f.name)}`),
     ...e.contains.map((c) => `        self._${snake(c.name)} = ${snake(c.name)}`),
     e.isRoot ? `        self._events: list[DomainEvent] = []` : null,
@@ -452,7 +476,7 @@ function renderEntity(
   ];
   getters.push(...prop("id", `${e.name}Id`, "self._id"));
   if (!e.isRoot) {
-    getters.push(...prop("parent_id", `${e.rootName}Id`, "self._parent_id"));
+    getters.push(...prop("parent_id", `${e.parentName ?? e.rootName}Id`, "self._parent_id"));
   }
   for (const f of e.fields) {
     getters.push(...prop(snake(f.name), renderPyType(f.type), `self._${snake(f.name)}`));
@@ -624,11 +648,44 @@ function renderEntity(
     ...(invariantLines.length > 0 ? invariantLines : ["        pass"]),
   ];
 
+  // `_create` (the op-body `new <Part>` factory) defaults a part's OWN nested
+  // containments — a freshly-constructed part starts with none, and callers
+  // (`renderNew`) only pass declared fields.  Collections default via a safe
+  // in-body `None`-coercion (never a shared mutable `[]` default); a single
+  // containment's type is already `| None`.  Byte-identical for a part with no
+  // containments (`createParams`/`createArgs` fall back to the shared state
+  // lists); `__init__`/`_rehydrate` keep the full required state contract.
+  const hasContains = e.contains.length > 0;
+  const createParams = hasContains
+    ? [
+        `id: ${e.name}Id`,
+        parentIdParam(isNested),
+        ...e.fields.map((f) => `${snake(f.name)}: ${renderPyType(f.type)}`),
+        ...e.contains.map((c) =>
+          c.collection
+            ? `${snake(c.name)}: ${containsType(c)} | None = None`
+            : `${snake(c.name)}: ${containsType(c)} = None`,
+        ),
+      ].filter((s): s is string => s != null)
+    : stateParams;
+  const createArgs = hasContains
+    ? [
+        "id=id",
+        !e.isRoot ? "parent_id=parent_id" : null,
+        ...e.fields.map((f) => `${snake(f.name)}=${snake(f.name)}`),
+        ...e.contains.map((c) =>
+          c.collection
+            ? `${snake(c.name)}=${snake(c.name)} if ${snake(c.name)} is not None else []`
+            : `${snake(c.name)}=${snake(c.name)}`,
+        ),
+      ].filter((s): s is string => s != null)
+    : stateArgs;
+
   const createAlias = [
     "",
     "    @classmethod",
-    `    def _create(cls, *, ${stateParams.join(", ")}) -> ${self}:`,
-    `        return cls(${stateArgs.join(", ")})`,
+    `    def _create(cls, *, ${createParams.join(", ")}) -> ${self}:`,
+    `        return cls(${createArgs.join(", ")})`,
     "",
     "    # Reconstitution from the store — trusts persisted state, so no",
     "    # invariant run: invariants guard transitions (create + operations),",

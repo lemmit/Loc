@@ -149,6 +149,11 @@ export function renderEntity(
   isRoot: boolean,
   ns: string,
   rootName: string,
+  /** The entity whose id brands this part's `ParentId` — its DIRECT parent (a
+   *  sibling part for a part-in-part, else the aggregate root).  Distinct from
+   *  `rootName`, which still names the aggregate folder/namespace all parts
+   *  share.  Equals `rootName` for a root-level part (byte-identical). */
+  parentName: string,
   emitTrace = false,
   /** When true, the entity is part of a document-shaped
    *  (`shape(document)`) aggregate: emit the `ToSnapshot()` /
@@ -273,7 +278,7 @@ export function renderEntity(
     }
   }
   if (!isRoot) {
-    propLines.push(`    public ${rootName}Id ParentId { get; ${setterVisibility} set; }`);
+    propLines.push(`    public ${parentName}Id ParentId { get; ${setterVisibility} set; }`);
   }
   for (const f of entity.fields) {
     // A concrete TPC subtype inherits its base fields from the abstract base
@@ -633,12 +638,28 @@ export function renderEntity(
   stateLines.push("    {");
   stateLines.push(`        public ${idClass} Id { get; init; } = default!;`);
   if (!isRoot) {
-    stateLines.push(`        public ${rootName}Id ParentId { get; init; } = default!;`);
+    stateLines.push(`        public ${parentName}Id ParentId { get; init; } = default!;`);
   }
   for (const f of entity.fields) {
     stateLines.push(
       `        public ${renderCsType(f.type)} ${upperFirst(f.name)} { get; init; } = default!;`,
     );
+  }
+  // A PART with its OWN nested containments accepts those children as optional
+  // State slots (`new Shipment.State { …, Labels = [...] }`); `_Create` seeds the
+  // collection so a cascade save writes them (EF stamps the owned FK from graph
+  // position).  Root-only: the aggregate's own containments load via EF, not the
+  // State/_Create path, and `new` only constructs parts — so the root is
+  // byte-identical.  Part-in-part nesting only exists in nested models, so a
+  // plain part is byte-identical too.
+  if (!isRoot) {
+    for (const c of entity.contains) {
+      stateLines.push(
+        c.collection
+          ? `        public IReadOnlyList<${c.partName}>? ${upperFirst(c.name)} { get; init; }`
+          : `        public ${c.partName}? ${upperFirst(c.name)} { get; init; }`,
+      );
+    }
   }
   stateLines.push("    }");
 
@@ -650,6 +671,18 @@ export function renderEntity(
   if (!isRoot) createInternalLines.push("        e.ParentId = s.ParentId;");
   for (const f of entity.fields) {
     createInternalLines.push(`        e.${upperFirst(f.name)} = s.${upperFirst(f.name)};`);
+  }
+  // Seed nested containment children supplied at construction into the owned
+  // collections — parts only (see the State note above); byte-identical for a
+  // part with no containments and for the root.
+  if (!isRoot) {
+    for (const c of entity.contains) {
+      createInternalLines.push(
+        c.collection
+          ? `        if (s.${upperFirst(c.name)} != null) e._${c.name}.AddRange(s.${upperFirst(c.name)});`
+          : `        if (s.${upperFirst(c.name)} != null) e.${upperFirst(c.name)} = s.${upperFirst(c.name)};`,
+      );
+    }
   }
   // Hydration path — repository's _Create.  Under --trace, label as
   // `"<init>"` so the invariant_evaluated lines for ctor / hydration

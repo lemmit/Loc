@@ -765,12 +765,20 @@ function renderNew(
   }
   const byName = new Map(fields.map((f) => [f.name, f.value]));
   const ordered = part.fields.map((f) => byName.get(f.name) ?? "null");
-  // Single-containment parts take the parent entity (their hidden
-  // owning `_parent` @OneToOne needs the instance); collection parts
-  // take the parent id.
+  // A part with its own containments takes them as trailing factory args
+  // (`Shipment._create(parent, carrier, labels)`); an omitted containment
+  // passes an empty list / null so the collection stays empty.
+  const containArgs = (part.contains ?? []).map(
+    (c) => byName.get(c.name) ?? (c.collection ? "java.util.List.of()" : "null"),
+  );
+  // A NESTED part's enclosing parent has no id at construction; its FK column is
+  // `insertable=false` (owned by the parent's `@OneToMany @JoinColumn`, stamped
+  // from the relationship on cascade persist), so the construction-time parent
+  // is irrelevant — pass `null` rather than the wrong-typed ambient `this` id.
+  // A root-level part keeps the ambient parent (byte-identical).
   const isSingle = ctx.agg?.contains?.some((c) => !c.collection && c.partName === e.partName);
-  const parentArg = isSingle ? ctx.thisName : `${ctx.thisName}.id`;
-  return `${e.partName}._create(${[parentArg, ...ordered].join(", ")})`;
+  const parentArg = e.nested ? "null" : isSingle ? ctx.thisName : `${ctx.thisName}.id`;
+  return `${e.partName}._create(${[parentArg, ...ordered, ...containArgs].join(", ")})`;
 }
 
 function renderBinary(l: string, r: string, e: BinaryExpr): string {

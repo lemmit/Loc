@@ -52,6 +52,7 @@ import {
   type WirePrimitive,
   wireTypeInfo,
 } from "../../../ir/types/wire-types.js";
+import { partsChildrenFirst } from "../../../ir/util/containment-parent.js";
 import {
   camelId,
   opCreate,
@@ -354,11 +355,13 @@ export function buildRoutesFile(
   // Response DTOs — parts first (inner), value-object response variants
   // (already declared above as <Vo>Schema; re-used), then the aggregate
   // root.  Forward references aren't possible in zod, so the order
-  // matters: parts referenced from the root must be declared first.
+  // matters: parts referenced from the root must be declared first —
+  // AND a nested part must precede the sibling that references it
+  // (`Shipment.labels: z.array(LabelResponse)`), hence children-first.
   // Aggregate-level + part-level response schemas are exported so
   // the per-context views router (`http/views.ts`) can reuse them
   // verbatim without duplicating field-by-field declarations.
-  for (const part of agg.parts) {
+  for (const part of partsChildrenFirst(agg.parts)) {
     lines.push(...emitResponseDtoSchema(part, ctx, /*isAgg*/ false));
   }
   lines.push(...emitResponseDtoSchema(agg, ctx, /*isAgg*/ true));
