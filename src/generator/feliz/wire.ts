@@ -16,11 +16,13 @@
 // lands on the record field with no casing seam, and Thoth's `Decode.field
 // "name"` maps the JSON key straight onto it.
 
-import { forApiRead } from "../../ir/enrich/wire-projection.js";
+import { createInputFields, forApiRead } from "../../ir/enrich/wire-projection.js";
 import type {
+  AggregateIR,
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
   ExprIR,
+  FieldIR,
   PageIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
@@ -139,6 +141,113 @@ export function felizDeleteMutation(aggregate: string): FelizMutation {
   };
 }
 
+/** One field of a create form — an F# form-record field (string-typed, bound to
+ *  an `Html.input`), its `Set<Form><Field>` update `Msg`, and the Thoth encoder
+ *  expression that lifts the string back to its wire type at submit. */
+export interface FelizFormField {
+  /** Exact wire field name — the F# form-record field, input binding, and JSON
+   *  key (`name` / `price`). */
+  wireName: string;
+  /** `Msg` an input's `onChange` dispatches (`SetProductFormName`). */
+  setMsg: string;
+  /** Thoth encoder for the field, lifting `form.<wireName>` to its wire type
+   *  (`Encode.string form.name` / `Encode.decimal (decimal form.price)`). */
+  encodeExpr: string;
+}
+
+/** A create form a page hosts (`CreateForm(of: X)`), projected to its full MVU
+ *  wiring: a string-typed `<Agg>Form` record in the Model, one `Set` `Msg` per
+ *  field, a `Submit<Agg>Form` trigger that POSTs the Thoth-encoded body, and a
+ *  `<Agg>Created` result that navigates to the list on success.  v1 renders the
+ *  REQUIRED scalar create-input fields (`createInputFields` minus optionals and
+ *  non-scalars — nested/collection inputs are a follow-up). */
+export interface FelizForm {
+  /** The aggregate created (`Product`). */
+  aggregate: string;
+  /** F# form-record type name (`ProductForm`). */
+  formType: string;
+  /** Model field holding the in-progress form (`ProductForm`). */
+  formField: string;
+  /** The empty-form value binding (`emptyProductForm`). */
+  emptyBinding: string;
+  /** Thoth encoder fn name (`productForm` — `Encoders.productForm`). */
+  encoderFn: string;
+  /** F# api fn name (`createProduct`). */
+  apiFn: string;
+  /** `Msg` the submit button dispatches (`SubmitProductForm`). */
+  submitMsg: string;
+  /** `Msg` carrying the created record `Result` (`ProductCreated`). */
+  resultMsg: string;
+  /** Collection POST route (`/api/products`). */
+  route: string;
+  /** `Router.navigate` segments after a successful create (`["products"]`). */
+  navigateSegs: string[];
+  /** Thoth decoder for the created record (`Decoders.product`). */
+  decoderExpr: string;
+  /** The created record's F# type (`Product`). */
+  resultType: string;
+  /** The form's fields, in create-input order. */
+  fields: FelizFormField[];
+}
+
+/** Thoth encoder expression that lifts a string-typed form field `access`
+ *  (`form.price`) back to its wire type. */
+function encodeExprFor(t: TypeIR, access: string): string {
+  if (t.kind === "primitive") {
+    switch (t.name) {
+      case "int":
+      case "long":
+        return `Encode.int (int ${access})`;
+      case "decimal":
+      case "money":
+        return `Encode.decimal (decimal ${access})`;
+      case "bool":
+        return `Encode.bool (${access} = "true")`;
+      default:
+        return `Encode.string ${access}`; // string, json, datetime (ISO)
+    }
+  }
+  // id / enum (string name) / everything else → the string verbatim.
+  return `Encode.string ${access}`;
+}
+
+/** Whether a create-input field is a SCALAR the v1 string form can render — a
+ *  nested part / value object / collection needs a sub-form (follow-up). */
+function isScalarInput(t: TypeIR): boolean {
+  return t.kind === "primitive" || t.kind === "id" || t.kind === "enum";
+}
+
+/** Build the `FelizForm` for a `CreateForm(of: agg)` from the aggregate's
+ *  create-input contract.  v1 keeps the REQUIRED scalar fields (mirroring the
+ *  React create form's `!optional` filter); non-scalar / optional inputs are a
+ *  follow-up. */
+export function felizCreateForm(agg: AggregateIR): FelizForm {
+  const name = agg.name;
+  const formType = `${upperFirst(name)}Form`;
+  const fields: FelizFormField[] = createInputFields(agg)
+    .filter((f: FieldIR) => !f.optional && isScalarInput(f.type))
+    .map((f: FieldIR) => ({
+      wireName: f.name,
+      setMsg: `Set${formType}${upperFirst(f.name)}`,
+      encodeExpr: encodeExprFor(f.type, `form.${f.name}`),
+    }));
+  return {
+    aggregate: name,
+    formType,
+    formField: formType,
+    emptyBinding: `empty${formType}`,
+    encoderFn: lowerFirst(formType),
+    apiFn: `create${upperFirst(name)}`,
+    submitMsg: `Submit${formType}`,
+    resultMsg: `${upperFirst(name)}Created`,
+    route: `${API_BASE_PATH}/${snake(plural(name))}`,
+    navigateSegs: snake(plural(name)).split("/"),
+    decoderExpr: `Decoders.${lowerFirst(name)}`,
+    resultType: upperFirst(name),
+    fields,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Read collection — scan a page body for the `.all` query sites its view issues
 // ---------------------------------------------------------------------------
@@ -218,12 +327,17 @@ export function collectPageReads(
   return out;
 }
 
-/** Every `DestroyForm(of: <Agg>)` aggregate a page body hosts, in tree order.
- *  The `of:` arg is a bare aggregate ref (`DestroyForm(of: Product)`). */
-function destroyFormAggs(body: ExprIR, aggregatesByName: ReadonlySet<string>): string[] {
+/** Every `<PrimitiveName>(of: <Agg>)` aggregate a page body hosts, in tree order
+ *  (the `of:` arg is a bare aggregate ref).  Shared by the form primitives —
+ *  `DestroyForm` (delete) and `CreateForm` (create). */
+function formOfAggs(
+  body: ExprIR,
+  primitive: string,
+  aggregatesByName: ReadonlySet<string>,
+): string[] {
   const out: string[] = [];
   const walk = (e: ExprIR): void => {
-    if (e.kind === "call" && e.name === "DestroyForm") {
+    if (e.kind === "call" && e.name === primitive) {
       const names = e.argNames ?? [];
       const idx = names.indexOf("of");
       const ofArg = idx >= 0 ? e.args[idx] : undefined;
@@ -246,10 +360,30 @@ export function collectPageMutations(
   if (!page.body) return [];
   const out: FelizMutation[] = [];
   const seen = new Set<string>();
-  for (const agg of destroyFormAggs(page.body, aggregatesByName)) {
+  for (const agg of formOfAggs(page.body, "DestroyForm", aggregatesByName)) {
     if (seen.has(agg)) continue;
     seen.add(agg);
     out.push(felizDeleteMutation(agg));
+  }
+  return out;
+}
+
+/** Collect the create forms a page hosts (`CreateForm(of: X)`), deduped by
+ *  aggregate.  Built from the enriched aggregate (needs its create-input
+ *  contract), so the caller passes a name→aggregate map. */
+export function collectPageForms(
+  page: PageIR,
+  aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
+): FelizForm[] {
+  if (!page.body) return [];
+  const nameSet = new Set(aggregatesByName.keys());
+  const out: FelizForm[] = [];
+  const seen = new Set<string>();
+  for (const aggName of formOfAggs(page.body, "CreateForm", nameSet)) {
+    const agg = aggregatesByName.get(aggName);
+    if (!agg || seen.has(aggName)) continue;
+    seen.add(aggName);
+    out.push(felizCreateForm(agg));
   }
   return out;
 }
@@ -489,16 +623,86 @@ function renderMutationFn(m: FelizMutation): (string | undefined)[] {
   ];
 }
 
+/** One async create function — `POST /api/<agg>` with the Thoth-encoded form
+ *  body; a 2xx decodes the created record, anything else is an error. */
+function renderCreateFn(f: FelizForm): (string | undefined)[] {
+  return [
+    `  let ${f.apiFn} (form: ${f.formType}) : Async<Result<${f.resultType}, string>> =`,
+    "    async {",
+    `      let body = Encode.toString 0 (Encoders.${f.encoderFn} form)`,
+    "      let! response =",
+    `        Http.request "${f.route}"`,
+    "        |> Http.method POST",
+    "        |> Http.content (BodyContent.Text body)",
+    '        |> Http.header (Headers.contentType "application/json")',
+    "        |> Http.send",
+    "      if response.statusCode = 200 || response.statusCode = 201 then",
+    `        match Decode.fromString ${f.decoderExpr} response.responseText with`,
+    "        | Ok created -> return Ok created",
+    "        | Error e -> return Error e",
+    "      else",
+    '        return Error (sprintf "HTTP %d" response.statusCode)',
+    "    }",
+  ];
+}
+
 /** Emit the `Api` module — one `Cmd`-issuing async function per read (fetch +
- *  Thoth decode → `Result`) and per mutation (verb request → `Result`), all
- *  over `Fable.SimpleHttp`. */
-export function renderApiModule(reads: FelizRead[], mutations: FelizMutation[] = []): string {
-  if (reads.length === 0 && mutations.length === 0) return "";
-  const fns = [...reads.map((r) => renderApiFn(r)), ...mutations.map((m) => renderMutationFn(m))];
+ *  Thoth decode → `Result`), per mutation (verb request → `Result`), and per
+ *  create form (encode + POST → decoded record), all over `Fable.SimpleHttp`. */
+export function renderApiModule(
+  reads: FelizRead[],
+  mutations: FelizMutation[] = [],
+  forms: FelizForm[] = [],
+): string {
+  if (reads.length === 0 && mutations.length === 0 && forms.length === 0) return "";
+  const fns = [
+    ...reads.map((r) => renderApiFn(r)),
+    ...mutations.map((m) => renderMutationFn(m)),
+    ...forms.map((f) => renderCreateFn(f)),
+  ];
   return lines(
     "// Api — Cmd-based reads + mutations (Fable.SimpleHttp + Thoth → Result).",
     "module Api =",
     ...fns.flatMap((fn, i) => [i > 0 ? "" : undefined, ...fn]),
+  );
+}
+
+/** Emit the create-form record types + their `empty<Form>` values — every
+ *  field is a `string` (bound to an `Html.input`, encoded at submit). */
+export function renderFormTypes(forms: FelizForm[]): string {
+  if (forms.length === 0) return "";
+  return lines(
+    "// Create-form state — each field a string (bound to Html.input).",
+    ...forms.flatMap((f, i) => [
+      i > 0 ? "" : undefined,
+      `type ${f.formType} =`,
+      "  {",
+      ...f.fields.map((fld) => `    ${fld.wireName}: string`),
+      "  }",
+      "",
+      `let ${f.emptyBinding} : ${f.formType} =`,
+      "  {",
+      ...f.fields.map((fld) => `    ${fld.wireName} = ""`),
+      "  }",
+    ]),
+  );
+}
+
+/** Emit the `Encoders` module — one `Encode.object` per create form, lifting
+ *  its string fields back to their wire types (the write-direction sibling of
+ *  the `Decoders`). */
+export function renderEncoders(forms: FelizForm[]): string {
+  if (forms.length === 0) return "";
+  return lines(
+    "// Thoth.Json encoders — the write direction of the decoders.",
+    "module Encoders =",
+    ...forms.flatMap((f, i) => [
+      i > 0 ? "" : undefined,
+      `  let ${f.encoderFn} (form: ${f.formType}) : JsonValue =`,
+      "    Encode.object [",
+      ...f.fields.map((fld) => `      "${fld.wireName}", ${fld.encodeExpr}`),
+      "    ]",
+    ]),
   );
 }
 

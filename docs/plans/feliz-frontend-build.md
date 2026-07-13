@@ -148,14 +148,23 @@ in hand — not before F# output exists.
   → `Ok ()`), and on success the app navigates to the aggregate's list route
   (`Cmd.navigate`). All Fable + vite verified; the CI example's detail page now
   carries a `DestroyForm`. Read-only uis stay byte-identical (no delete Api/Msg).
-- **Wire layer covers list + byId reads + delete.** `<param>.<agg>.all` (list),
-  `<param>.<agg>.byId(id)` (single), and `DestroyForm` (delete) are projected.
-  **Create / update** (`CreateForm` / `OperationForm`) are the next mutation
-  slice — they need Elmish FORM STATE (form fields in the Model + per-field
-  update `Msg`s) plus Thoth ENCODERS (the write direction of the decoders), a
-  larger increment than delete. Enum wire fields decode as their string name (a
-  proper DU decoder is a follow-up); nested containment/VO records + decoders
-  ARE emitted (transitive off `wireShape`).
+- ✅ **Create forms.** A `CreateForm(of: X)` projects to Elmish form state: a
+  string-typed `<Agg>Form` record in the Model (bound to `Html.input`s), one
+  `Set<Agg>Form<Field>` update `Msg` per field, a `Submit<Agg>Form` trigger that
+  POSTs the **Thoth-encoded** body (`Encoders` module — the write direction of
+  the decoders, off `createInputFields`), and a `<Agg>Created` result that
+  resets the form + navigates to the list. The `renderCreateForm` seam emits the
+  inputs + submit button; the field set is derived identically in the view walk
+  and the MVU assembly (both `felizCreateForm` off the same enriched aggregate).
+  All Fable + vite verified; the CI example grew a `ProductNew` page.
+  **v1 caveat:** REQUIRED SCALAR create-input fields only (nested part / VO /
+  collection inputs need sub-forms — follow-up); all fields string-typed (typed
+  form state + validation is a follow-up).
+- **Wire layer covers list + byId reads + delete + create.** The remaining write
+  slice is **update / operation** (`OperationForm` — a PUT / named-operation
+  endpoint reusing the create form's state machinery). Enum wire fields decode
+  as their string name (a proper DU decoder is a follow-up); nested containment/
+  VO records + decoders ARE emitted (transitive off `wireShape`).
 
 Known-good deps (proposal §10): Fable 4.29 / Feliz 2.8 / Fable.Elmish.React 4.0
 / Fable.SimpleHttp 3.6 / Thoth.Json 10.2 / net8.0. Avoid Thoth.Fetch (promise-CE

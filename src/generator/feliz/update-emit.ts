@@ -7,7 +7,7 @@ import type { ActionIR, StateFieldIR } from "../../ir/types/loom-ir.js";
 import { upperFirst } from "../../util/naming.js";
 import { type FsExprCtx, renderFsExpr } from "./fs-expr.js";
 import { fsZeroValue, typeToFs } from "./type-fs.js";
-import type { FelizMutation, FelizRead } from "./wire.js";
+import type { FelizForm, FelizMutation, FelizRead } from "./wire.js";
 
 /** Msg case name for an action (`inc` → `Inc`, `setCustomer` → `SetCustomer`). */
 export function msgCase(action: string): string {
@@ -21,11 +21,13 @@ export function renderModel(
   state: readonly StateFieldIR[],
   reads: readonly FelizRead[] = [],
   routed = false,
+  forms: readonly FelizForm[] = [],
 ): string {
   const fields = [
     ...(routed ? ["    CurrentPage: Page"] : []),
     ...state.map((f) => `    ${upperFirst(f.name)}: ${typeToFs(f.type)}`),
     ...reads.map((r) => `    ${r.field}: Remote<${r.resultType}>`),
+    ...forms.map((f) => `    ${f.formField}: ${f.formType}`),
   ];
   if (fields.length === 0) return "type Model = { Unit: unit }";
   return `type Model =\n  {\n${fields.join("\n")}\n  }`;
@@ -58,6 +60,7 @@ export function renderInit(
   state: readonly StateFieldIR[],
   reads: readonly FelizRead[] = [],
   routed = false,
+  forms: readonly FelizForm[] = [],
 ): string {
   const hasPageCmd = routed && reads.some((r) => r.single);
   const inits = [
@@ -74,6 +77,7 @@ export function renderInit(
       return `      ${upperFirst(f.name)} = ${v}`;
     }),
     ...reads.map((r) => `      ${r.field} = Loading`),
+    ...forms.map((f) => `      ${f.formField} = ${f.emptyBinding}`),
   ];
   // List reads fire eagerly; byId reads fire on page entry via `pageCmd page`.
   const cmds = reads
@@ -102,6 +106,7 @@ export function renderMsg(
   reads: readonly FelizRead[] = [],
   routed = false,
   mutations: readonly FelizMutation[] = [],
+  forms: readonly FelizForm[] = [],
 ): string {
   const cases = [
     ...(routed ? ["  | UrlChanged of string list"] : []),
@@ -113,6 +118,12 @@ export function renderMsg(
     ...mutations.flatMap((m) => [
       `  | ${m.dispatchCase} of string`,
       `  | ${m.resultCase} of Result<unit, string>`,
+    ]),
+    // A create form: one `Set` per field + a `Submit` trigger + a `Created` result.
+    ...forms.flatMap((f) => [
+      ...f.fields.map((fld) => `  | ${fld.setMsg} of string`),
+      `  | ${f.submitMsg}`,
+      `  | ${f.resultMsg} of Result<${f.resultType}, string>`,
     ]),
   ];
   if (cases.length === 0) return "type Msg = | NoOp";
@@ -152,6 +163,7 @@ export function renderUpdate(
   reads: readonly FelizRead[] = [],
   routed = false,
   mutations: readonly FelizMutation[] = [],
+  forms: readonly FelizForm[] = [],
 ): string {
   const stateNames = new Set(state.map((s) => s.name));
   const byIdReads = reads.filter((r) => r.single);
@@ -195,7 +207,22 @@ export function renderUpdate(
       `  | ${m.resultCase} (Error _) -> model, Cmd.none`
     );
   });
-  const arms = [...routeArms, ...actionArms, ...readArms, ...mutationArms];
+  // A create form: per-field setters (functional record update), a submit that
+  // fires the POST `Cmd`, and a `Created` result that resets the form + navigates.
+  const formArms = forms.map((f) => {
+    const setters = f.fields.map(
+      (fld) =>
+        `  | ${fld.setMsg} v -> { model with ${f.formField} = { model.${f.formField} with ${fld.wireName} = v } }, Cmd.none`,
+    );
+    const nav = `Cmd.navigate(${f.navigateSegs.map((s) => `"${s}"`).join(", ")})`;
+    return [
+      ...setters,
+      `  | ${f.submitMsg} -> model, Cmd.OfAsync.perform Api.${f.apiFn} model.${f.formField} ${f.resultMsg}`,
+      `  | ${f.resultMsg} (Ok _) -> { model with ${f.formField} = ${f.emptyBinding} }, ${nav}`,
+      `  | ${f.resultMsg} (Error _) -> model, Cmd.none`,
+    ].join("\n");
+  });
+  const arms = [...routeArms, ...actionArms, ...readArms, ...mutationArms, ...formArms];
   if (arms.length === 0) {
     return "let update (msg: Msg) (model: Model) =\n  match msg with\n  | NoOp -> model, Cmd.none";
   }
