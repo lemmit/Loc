@@ -69,7 +69,7 @@ import { criterionEligible, renderJavaCriteriaClasses } from "./emit/criteria.js
 import { renderJavaDispatcher } from "./emit/dispatch.js";
 import { renderJavaDocumentRepositoryImpl } from "./emit/document-store.js";
 import { renderJavaDomainServices } from "./emit/domain-service.js";
-import { renderDtoFiles } from "./emit/dto.js";
+import { renderDtoFiles, renderReadModelVoResponseDtos } from "./emit/dto.js";
 import { type OpFragment, renderJavaAbstractBaseEntity, renderJavaEntity } from "./emit/entity.js";
 import { renderJavaEnum, renderJavaValueObject } from "./emit/enums-vos.js";
 import { renderJavaEventSourcedRepositoryImpl } from "./emit/event-store.js";
@@ -715,6 +715,14 @@ function emitProjectFromContexts(
           p ? `${ctx.name}.${p.name}` : undefined,
         );
       }
+    }
+    // `<Vo>Response` records for value objects surfaced on a workflow-instance
+    // or projection read-model wire shape — co-located in `application.workflows`
+    // with the InstanceResponse / ProjectionResponse DTOs that reference them
+    // (and wildcard-imported by their controllers).  Placed with the
+    // `workflow-service` category so the file path matches that package.
+    for (const dto of renderReadModelVoResponseDtos(ctx, pkgFor("workflow-service"), basePkg)) {
+      place(dto.name, "workflow-service", dto.content);
     }
     const viewFiles = renderJavaViews(ctx, {
       basePkg,

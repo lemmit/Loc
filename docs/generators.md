@@ -932,14 +932,21 @@ mount is implemented), resource-op clients, a **principal-referencing
 capability filter on a non-relational aggregate**
 (`loom.context-filter-unsupported` — each half ships alone; only the
 actor + jsonb intersection is deferred), provenance/audited (gated —
-no runtime emitted; the node and .NET backends do implement these), a
-**cross-aggregate view `follows`** (`loom.java-view-follows-unsupported`
-— an output bind reaching another aggregate via `X id`), and a **VO- /
-entity-typed workflow-instance or projection read-model field**
-(`loom.java-workflow-instance-field-unsupported` /
-`loom.java-projection-field-unsupported` — those DTOs carry only
-scalars / ids / enums).  See
+no runtime emitted; the node and .NET backends do implement these), and
+a **cross-aggregate view `follows`** (`loom.java-view-follows-unsupported`
+— an output bind reaching another aggregate via `X id`).  See
 `docs/old/plans/java-backend-implementation.md` for the execution record.
+
+**Value-object read-model fields ARE implemented.** A VO-typed
+workflow-instance field, projection row field, or view Row field emits
+its `<Vo>Response` record co-located in the consuming package
+(`application.workflows` for instance/projection reads,
+`application.views` for view rows), the read-model analogue of an
+aggregate response's nested VO records.  Only an *entity* (containment
+part) read-model field stays gated
+(`loom.java-workflow-instance-field-unsupported` /
+`loom.java-projection-field-unsupported`) — a defensive backstop, since a
+part type never resolves in workflow / projection scope.
 
 Discriminated unions (payload fields / operation returns; union *finds* take
 the untagged optional-style path — see `payloads.md`), `shape(document)` /

@@ -1313,38 +1313,39 @@ export function validateJavaReadModelShapes(sys: SystemIR, diags: LoomDiagnostic
         });
       }
 
-      // (2) VO- / entity-typed saga instance-view field.  Only observable
+      // (2) Entity-typed saga instance-view field.  VO-typed fields now emit
+      // (their `<Vo>Response` is co-located in application.workflows); an entity
+      // (containment part) field would need a `<Part>Response` DTO — but a part
+      // type never resolves in workflow scope, so this is a defensive backstop
+      // for a shape the grammar/scope already forbids.  Only observable
       // workflows (those with an `instanceWireShape`) reach the instance emitter.
       for (const wf of ctx.workflows) {
         for (const f of wf.instanceWireShape ?? []) {
-          const leaf = wireLeafKind(f.type);
-          if (leaf !== "valueobject" && leaf !== "entity") continue;
+          if (wireLeafKind(f.type) !== "entity") continue;
           diags.push({
             severity: "error",
             message:
               `Deployable '${dep.name}' (platform java) hosts workflow '${ctxName}.${wf.name}' with ` +
-              `instance-view field '${f.name}' of ${leaf} type — workflow-instance read models on the ` +
-              `java backend carry only scalars / ids / enums (there is no '<${leaf}>Response' DTO in ` +
-              `the wire packages). Drop the field from the observable state, or host it on a node / ` +
-              `dotnet / python deployable.`,
+              `instance-view field '${f.name}' of entity type — workflow-instance read models on the ` +
+              `java backend do not yet emit a '<Part>Response' DTO. Drop the field from the observable ` +
+              `state, or host it on a node / dotnet / python deployable.`,
             source: `${sys.name}/${dep.name}`,
             code: "loom.java-workflow-instance-field-unsupported",
           });
         }
       }
 
-      // (3) VO- / entity-typed projection row field.
+      // (3) Entity-typed projection row field — same defensive backstop as (2).
       for (const proj of ctx.projections) {
         for (const f of proj.wireShape ?? []) {
-          const leaf = wireLeafKind(f.type);
-          if (leaf !== "valueobject" && leaf !== "entity") continue;
+          if (wireLeafKind(f.type) !== "entity") continue;
           diags.push({
             severity: "error",
             message:
               `Deployable '${dep.name}' (platform java) hosts projection '${ctxName}.${proj.name}' with ` +
-              `row field '${f.name}' of ${leaf} type — projection read models on the java backend carry ` +
-              `only scalars / ids / enums (there is no '<${leaf}>Response' DTO in the wire packages). ` +
-              `Drop the field, or host it on a node / dotnet / python deployable.`,
+              `row field '${f.name}' of entity type — projection read models on the java backend do not ` +
+              `yet emit a '<Part>Response' DTO. Drop the field, or host it on a node / dotnet / python ` +
+              `deployable.`,
             source: `${sys.name}/${dep.name}`,
             code: "loom.java-projection-field-unsupported",
           });

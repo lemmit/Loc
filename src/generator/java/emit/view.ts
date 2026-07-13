@@ -8,7 +8,8 @@ import { exprUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../../util/naming.js";
 import { collectJavaExprImports, javaValueTypeForId, renderJavaExpr } from "../render-expr.js";
-import { collectWireImports, domainToWire, wireJavaType } from "./wire.js";
+import { voResponseRecords } from "./dto.js";
+import { collectWireImports, domainToWire, referencedValueObjects, wireJavaType } from "./wire.js";
 import {
   esEventLogTable,
   esWorkflowCorrIdClass,
@@ -408,6 +409,31 @@ export function renderJavaViews(
       ``,
     ),
   });
+
+  // `<Vo>Response` records for value objects surfaced on a view Row — an
+  // aggregate full-form view's output field or a workflow-sourced view's
+  // saga wire shape.  Co-located in `application.views` (`vctx.pkg`) so the Row
+  // record + `<Ctx>Views` service (`<Vo>Response.from(...)`) resolve them
+  // in-package, the view analogue of the workflow/projection read-model VO DTOs.
+  const voLookup = new Map(ctx.valueObjects.map((v) => [v.name, v.fields] as const));
+  const viewVoNames = new Set<string>();
+  for (const view of views) {
+    if (!view.output || view.output.auxiliaries.length > 0) continue;
+    referencedValueObjects(
+      view.output.fields.map((f) => f.type),
+      viewVoNames,
+    );
+  }
+  for (const view of wfViews) {
+    const wf = wfByName.get((view.source as { name: string }).name)!;
+    referencedValueObjects(
+      (wf.instanceWireShape ?? []).map((f) => f.type),
+      viewVoNames,
+    );
+  }
+  for (const dto of voResponseRecords(viewVoNames, voLookup, vctx.pkg, vctx.basePkg)) {
+    out.set(dto.name, { category: "view-service", content: dto.content });
+  }
 
   return out;
 }
