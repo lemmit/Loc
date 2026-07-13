@@ -257,7 +257,9 @@ function phoenixPath(path: string): string {
 /** Emit one `<Api>RoutesController` per served api whose route list is
  *  non-empty: each `route` becomes a `def <snake(handler)>(conn, params)` that
  *  runs the target handler's `run/1` through the shared `respond/2`.  Returns
- *  the `ApiRoute`s to splice into the router `scope "/api"`.  A no-op (empty
+ *  the `ApiRoute`s to splice into the router root `scope "/"` (each carries the
+ *  `!root:` sentinel — see `renderVanillaRouter`) so they serve at their
+ *  absolute declared path, clear of the auto-CRUD `/api` routes.  A no-op (empty
  *  route list) for an api that declares no explicit `route`s. */
 export function emitExplicitRoutesController(
   appName: string,
@@ -284,7 +286,15 @@ export function emitExplicitRoutesController(
   end`);
     apiRoutes.push({
       method: r.method.toLowerCase() as ApiRoute["method"],
-      path: phoenixPath(r.path),
+      // `!root:` splices the route into the router's root `scope "/"` (served at
+      // its absolute declared path) rather than nesting it under `scope "/api"`.
+      // The explicit `route "<path>" -> ...` path is already absolute (e.g.
+      // `/orders/{id}`), so `/api` nesting both mis-served it (`/api/orders/...`)
+      // AND collided with the always-on auto-CRUD routes (`/api/orders/:id`) —
+      // Phoenix ignores param names, so the shadowed clause fails
+      // `mix compile --warnings-as-errors`.  Root-scoping matches every other
+      // backend (scaffold routes at `/orders/...`, auto-CRUD at `/api/orders/...`).
+      path: `!root:${phoenixPath(r.path)}`,
       controller,
       action: `:${action}`,
     });
