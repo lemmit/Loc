@@ -2124,3 +2124,41 @@ Proven the same way as §23–§26: a hand-written create spike Fable-compiled F
 (locking the encoder / `BodyContent` / string-form shape), then the emitter
 re-verified against the real generated 4-page project (`dotnet fable` + `vite
 build`).
+
+## 28. Feliz operation forms — the create form, id-qualified + curried (2026-07-13)
+
+Operation forms (`OperationForm(of: X, op: Y)`) complete the Feliz CRUD write
+path. They're the create form with three deltas, and factoring the shared parts
+out first (rather than copy-paste) kept the diff small.
+
+- **Extract the shared shape BEFORE the second consumer.** Create and operation
+  forms share the form-record type, the `empty<Form>` value, the Thoth encoder,
+  and the Model field + init. Only the Msg/update/Api wiring differs. Pulling a
+  `FormRecord` interface (`formType`/`formField`/`emptyBinding`/`encoderFn`/
+  `fields`) + a `formFieldsFrom(formType, fields)` builder let `renderFormTypes`/
+  `renderEncoders`/`renderModel`/`renderInit` take `[...createForms, ...opForms]`
+  unchanged — the op form only added its own Msg/update/Api renderers. Second
+  consumer designs the abstraction (same rule as the expr/walker seams).
+
+- **The op is INSTANCE-qualified → the submit Msg carries the route id.**
+  Unlike create (a collection POST, no id), an operation targets one record:
+  `POST /api/<agg>/<id>/<opPath>`. So the submit Msg is `Submit<Op><Agg>Form of
+  string` (carries the id), the button dispatches `dispatch (Submit… id)`, and
+  the Api fn is CURRIED `(id) (form)` so `Cmd.OfAsync.perform (Api.<fn> id)
+  model.<Form> <Done>` partial-applies the id — `Cmd.OfAsync.perform` still gets
+  its `(fn, arg, msg)` triple with `arg = form`.
+
+- **The op path is `snake(op.routeSlug ?? op.name)`.** The backend derives the
+  route segment from the op's enrichment-time `routeSlug` (urlStyle) falling back
+  to the name; matching it means reading the SAME field, not re-deriving from the
+  name alone (a `urlStyle: resource` op pluralises).
+
+- **204, not 201+body.** An operation returns 204 No Content (it mutated the
+  record in place), so the result is `Result<unit, string>` (`Ok ()`), no decode
+  — the delete shape, with a body. Create returns 201 + the created record, so
+  it decodes; the two write shapes differ only there.
+
+Proven the same way as §23–§27: an op-form spike Fable-compiled FIRST (locking
+the curried-`Cmd` partial-app + id-carrying submit + 204 shape), then the emitter
+re-verified against the real generated 4-page project (`dotnet fable` + `vite
+build`). The CI example now exercises the whole CRUD write path in one app.
