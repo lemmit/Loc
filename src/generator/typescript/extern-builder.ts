@@ -65,6 +65,13 @@ export function buildExternSubclassFile(agg: AggregateIR, ctx: BoundedContextIR)
   const scan = sigScanParts.join(" ").replace(/"(?:\\.|[^"\\])*"/g, '""');
   const refersTo = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(scan);
   const imports: string[] = [`import { ${agg.name}Base } from "./${slug}.base";`];
+  // Re-export the entity-part classes (emitted in `<agg>.base.ts`) so
+  // `domain/<agg>` stays the single import surface: consumers (repositories,
+  // the wire mapper) import `<Agg>` + its parts from here regardless of the
+  // base/subclass split.
+  if (agg.parts.length > 0) {
+    imports.push(`export { ${agg.parts.map((p) => p.name).join(", ")} } from "./${slug}.base";`);
+  }
   if (/\bIds\.\w/.test(scan)) imports.push(`import * as Ids from "./ids";`);
   if (/\bUser\b/.test(scan)) imports.push(`import type { User } from "../auth/user-types";`);
   const voEnum = [
