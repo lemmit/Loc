@@ -123,6 +123,7 @@
 | workflow-instance-views.md | shipped (#1037) | Phoenix OpenAPI defer → M-T6.2 |
 | workflow-instance-visibility.md | shipped (#1035) | — |
 | workflow-resource-consumption.md | partial | M-T4.8 |
+| maybe-one-day/dotnet-in-playground.md | parked idea | no mission (revisit with M-T8.7 / server-side generation) |
 
 ## Plans (`docs/old/plans/`)
 
