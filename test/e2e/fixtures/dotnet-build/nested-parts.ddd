@@ -1,37 +1,38 @@
-system DotnetNest {
-  subdomain Logistics {
-    context Logistics {
-      aggregate Order {
-        code: string
-        contains shipments: Shipment[]
-        operation addShipment(carrier: string) {
-          shipments += Shipment { carrier: carrier }
-        }
+// Part-in-part nesting (Order → Shipment[] → Label[]) — .NET compile gate.
+// A nested part's owned-type config is nested inside its direct parent's
+// OwnsMany, with the shadow FK column named for the direct parent
+// (labels.shipment_id) and the domain ParentId branded ShipmentId
+// (nested-parts Phase 4 — .NET).  `addFull` exercises INLINE nested
+// construction: build a shipment WITH a label in one call — the nested
+// Label omits parentId (stamped from tree position on save).
+//
+// Bare `context {…}` (not a `system {…}` wrapper) so legacy
+// `ddd generate dotnet` emits a single buildable project, matching the
+// other fixtures in this suite.
+context Logistics {
 
-        // Inline nested construction: build a shipment WITH a label in one call.
-        // The nested Label omits parentId (stamped from tree position on save).
-        operation addFull(carrier: string, zpl: string) {
-          shipments += Shipment { carrier: carrier, labels: [Label { zpl: zpl }] }
-        }
-        entity Shipment {
-          carrier: string
-          contains labels: Label[]
-        }
-        entity Label { zpl: string }
-      }
-      repository Orders for Order {
-        find byCode(code: string): Order[] where this.code == code
-      }
+  aggregate Order {
+    code: string
+    contains shipments: Shipment[]
+
+    operation addShipment(carrier: string) {
+      shipments += Shipment { carrier: carrier }
     }
+
+    // Inline nested construction: build a shipment WITH a label in one call.
+    // The nested Label omits parentId (stamped from tree position on save).
+    operation addFull(carrier: string, zpl: string) {
+      shipments += Shipment { carrier: carrier, labels: [Label { zpl: zpl }] }
+    }
+
+    entity Shipment {
+      carrier: string
+      contains labels: Label[]
+    }
+    entity Label { zpl: string }
   }
-  api LogisticsApi from Logistics
-  storage pg { type: postgres }
-  resource logisticsState { for: Logistics, kind: state, use: pg }
-  deployable api {
-    platform: dotnet
-    contexts: [Logistics]
-    dataSources: [logisticsState]
-    serves: LogisticsApi
-    port: 8080
+
+  repository Orders for Order {
+    find byCode(code: string): Order[] where this.code == code
   }
 }
