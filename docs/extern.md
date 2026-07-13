@@ -25,13 +25,15 @@ aggregate Order {
 > idioms exist, as `docs/proposals/extern-domain-extension-point.md` re-homes
 > `extern` from an injected application-layer handler to a domain-internal
 > extension point:
-> - **Domain hook (co-located, scaffold-once)** — **Python** (a scaffold-once
->   hook module), **Java** (a co-located `<Agg>Extern` class), and **Elixir** (a
->   generated `@behaviour` + a scaffold-once impl module) — each reaches the
->   aggregate's own private state directly (no injected registry, no setter
->   widening); see *Python*, *Java*, and *Elixir/Phoenix* below.
+> - **Domain hook (co-located, scaffold-once)** — **.NET** (a `partial`-method
+>   hook), **Java** (a co-located `<Agg>Extern` class), **Python** (a
+>   scaffold-once hook module), and **Elixir** (a generated `@behaviour` + a
+>   scaffold-once impl module) — each reaches the aggregate's own private state
+>   directly (no injected registry, no setter widening); see the per-backend
+>   sections below.  A missing hook is a compile error (or fails loudly at
+>   runtime); an unfilled one throws.
 > - **Injected handler (typed per-op interface + register/verify gate)** —
->   **Hono** (walked through below) and **.NET** (same shape: a typed per-op
+>   **Hono** (walked through below; same shape: a typed per-op
 >   handler interface / registry + a fail-fast-at-startup check for a missing
 >   implementation).  These migrate to the domain-hook idiom in later slices.
 >
@@ -52,56 +54,67 @@ The user handler decides what actually happens.
 
 ## .NET (ASP.NET Core + Mediator)
 
-The generator emits a per-op interface in
-`Application/<Aggregate>/Handlers/`:
+On .NET an extern operation is a **domain extension point** — a partial-method
+hook the aggregate *owns* — not an injected application-layer handler.  The
+generated aggregate is `sealed partial`; its `Confirm(...)` method runs the
+preconditions, calls a `private partial ConfirmCore(...)` hook, then re-asserts
+invariants:
 
 ```csharp
-public interface IConfirmOrderHandler
+// generated Domain/Orders/Order.cs — sealed PARTIAL, setters stay private
+public sealed partial class Order
 {
-    Task HandleAsync(Order aggregate, ConfirmRequest request, CancellationToken ct);
+    public OrderStatus Status { get; private set; }
+
+    public void Confirm()
+    {
+        if (!(this.IsMutable())) throw new DomainException("Precondition failed: isMutable()");
+        ConfirmCore();          // ← the hand-written domain hook
+        AssertInvariants();     // ← the aggregate's own guard still fires
+    }
+
+    private partial void ConfirmCore();   // extension point (extended partial → must be implemented)
 }
 ```
 
-You implement it in the same project and decorate with
-`[ExternHandler]`:
+You implement the hook in the **co-located, scaffold-once** partial
+`Domain/Orders/Order.Extern.cs`.  Because the hook is a *member* of `Order`, it
+reaches the aggregate's own `private` state natively — no setter widening:
 
 ```csharp
-using Sales.Application.Orders.Handlers;
-using Sales.Application.Orders.Requests;
-using Sales.Domain.Common;
-using Sales.Domain.Enums;
-using Sales.Domain.Events;
-using Sales.Domain.Orders;
-
-[ExternHandler]
-public sealed class ConfirmOrderHandler : IConfirmOrderHandler
+// Domain/Orders/Order.Extern.cs — a MEMBER of Order → full private access
+public sealed partial class Order
 {
-    public Task HandleAsync(IOrderMutator order, ConfirmRequest request, CancellationToken ct)
+    private partial void ConfirmCore()
     {
         // Your business decision — talk to the billing engine, etc.
-        order.Status = OrderStatus.Confirmed;
-        order.RaiseDomainEvent(new OrderConfirmed(order.Id, DateTime.UtcNow));
-        return Task.CompletedTask;
+        Status = OrderStatus.Confirmed;                       // private setter, reached natively
+        _domainEvents.Add(new OrderConfirmed(Id, DateTime.UtcNow));
     }
 }
 ```
 
-The Scrutor scan in `Program.cs` picks it up automatically.  The handler
-receives the aggregate as a narrow **`I<Agg>Mutator`** (S10 containment):
-the concrete `Order` keeps its setters `private`, and the mutator interface
-— implemented explicitly (read `Id` + get/set per field + `RaiseDomainEvent`)
-— is the only write surface.  So a handler mutates and raises exactly as
-before, but `order.Status = …` on a plain `Order` no longer compiles
-anywhere else in the app (`CS0272`).
+There is no injected `I<Op><Agg>Handler`, no dev-stub, no `[ExternHandler]`
+attribute, no Scrutor scan, and **no `I<Agg>Mutator`** — the aggregate's setters
+stay plain `private` for *every* aggregate (finding S10 is fixed by
+construction, not contained: no external holder ever gets write access).  The
+auto Mediator command handler simply calls `aggregate.Confirm()` directly, and
+a workflow op-call is likewise a plain `order.Confirm()`.
 
-If you forget to provide an implementation, **startup fails**:
+`Order.Extern.cs` is **scaffold-once**: Loom writes it on the first `generate`
+(each `ConfirmCore` body `throw`s `NotImplementedException` until you fill it)
+and **never overwrites it again** (a `loom:scaffold-once` marker on line 1 tells
+the writer to keep your copy).  The hook is declared `private partial`, an
+*extended* partial method — so a **missing** implementation is a **compile
+error**, not a silent no-op:
 
 ```
-System.InvalidOperationException: Missing [ExternHandler] for
-Sales.Application.Orders.Handlers.IConfirmOrderHandler
-(operation 'confirm' on aggregate 'Order'). Add a class decorated
-with [ExternHandler] that implements this interface.
+Domain/Orders/Order.cs(58,26): error CS8795: Partial method 'Order.ConfirmCore()'
+must have an implementation part because it has accessibility modifiers.
 ```
+
+An **unfilled** implementation is a loud runtime `NotImplementedException` (never
+the silent success the old dev-stub reported).  Both directions fail loudly.
 
 ## Hono (TypeScript)
 
@@ -366,6 +379,19 @@ For purely internal mutations (toggle a flag, append an item) plain
 `operation` is simpler and faster: no DI surface, no extra interface,
 no separate user file to maintain.
 
+### Migration — an extern op that calls an external service → `extern commandHandler`
+
+An extern *operation* is now **pure domain logic** the DSL can't express (case 1):
+compute a score, apply a bespoke state transition — code that runs *inside* the
+aggregate's lifecycle and touches only its own state.  If your extern op instead
+**calls out to an external service** (case 2 — a billing engine, a VCS sync, a
+third-party API — e.g. a `syncFromVcs()`), that is an *application-layer*
+concern, not a domain hook: it belongs in an
+[`extern commandHandler` / `extern queryHandler`](#extern-application-layer-handlers-commandhandler--queryhandler)
+(below), which orchestrates from the application layer and can inject the port
+it needs.  Re-home such an op by deleting it from the aggregate and declaring a
+bodyless `extern commandHandler` routed from your `api`.
+
 ## Calling an extern from a workflow
 
 A workflow can invoke a parameterless extern op as if it were any
@@ -379,21 +405,18 @@ workflow placeAndConfirm(orderId: Order id) {
 ```
 
 The generators emit the same lifecycle the auto HTTP route does:
-load → `Check<Op>` preconditions → `IXAggHandler.HandleAsync(...)` /
-`externHandlers.<op><Agg>(...)` user dispatch → `AssertInvariants`
-→ workflow's normal save-at-exit.  The user handler interface gets
-DI-injected on .NET (one extra ctor parameter per distinct extern
-called) or imported from the per-aggregate `<agg>-extern.js`
-registry on Hono.
+load → preconditions → user hook → `AssertInvariants` → workflow's normal
+save-at-exit.  On **.NET** the extern op is an ordinary aggregate method, so the
+workflow op-call is a plain `order.Confirm()` (no injected handler, no dispatch
+dance) — identical to a non-extern op-call.  On the injected-handler backends
+(Hono / Python / Java) the user handler is imported / DI-injected and dispatched
+(load → `Check<Op>` preconditions → `<handler>(...)` → `AssertInvariants`).
 
-Parameterized externs work too — the workflow's domain args are
-converted to wire shape at the request-construction boundary
-(`projectToResponse`-style on .NET via `domainToRequestExpr`,
-direct property pickoff on Hono into a typed object literal).
-That same conversion fixes a latent bug in the auto Mediator
-handler for parameterized externs (commit history: domain types
-were passed to a wire-typed request constructor; `domainToRequestExpr`
-now wraps each arg).
+Parameterized externs work too — on .NET the workflow passes the domain-typed
+command args straight to the aggregate method (`order.Deduct(command.Amount)`);
+on the injected-handler backends the domain args are converted to wire shape at
+the request-construction boundary (direct property pickoff on Hono into a typed
+object literal).
 
 ## `extern` application-layer handlers (commandHandler / queryHandler)
 

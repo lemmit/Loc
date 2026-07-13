@@ -174,41 +174,29 @@ using (var seedScope = app.Services.CreateScope())
     ? `\n// Domain persistence ports (audit S7 Slice C) — EF adapters over the scoped AppDbContext.\nbuilder.Services.AddScoped<${ns}.Domain.Common.IUnitOfWork, ${ns}.Infrastructure.Persistence.EfUnitOfWork>();\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IWorkflowEventStore<>), typeof(${ns}.Infrastructure.Persistence.EfWorkflowEventStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.ISagaStateStore<>), typeof(${ns}.Infrastructure.Persistence.EfSagaStateStore<>));\nbuilder.Services.AddScoped(typeof(${ns}.Domain.Common.IReadModelStore<>), typeof(${ns}.Infrastructure.Persistence.EfReadModelStore<>));`
     : "";
 
-  // Per-aggregate list of (op-name, IXAggHandler) pairs for extern
-  // operations.  Drives both the Scrutor registration helper text
-  // (purely informational) and the startup verification check that
-  // every IXAggHandler resolved from DI.
-  const externHandlers = [
-    ...ctx.aggregates.flatMap((a) =>
-      a.operations
-        .filter((o) => o.extern)
-        .map((o) => ({
-          ifaceFqn: `${ns}.Application.${plural(a.name)}.Handlers.I${upperFirst(o.name)}${a.name}Handler`,
-          opName: o.name,
-          aggName: a.name,
-        })),
-    ),
-    // Extern commandHandler / queryHandler application members — the bodyless
-    // "case-2" home.  Their user impl carries `[ExternHandler]` too, so the same
-    // Scrutor scan registers it under `I<Name>Handler` and the startup verify
-    // fails fast when the user hasn't supplied one.
-    ...[...(ctx.commandHandlers ?? []), ...(ctx.queryHandlers ?? [])]
-      .filter((h) => h.extern)
-      .map((h) => ({
-        ifaceFqn: `${ns}.Application.Handlers.I${h.name}Handler`,
-        opName: h.name,
-        aggName: ctx.name,
-      })),
-  ];
-  // Only emit the Scrutor scan when at least one aggregate declares
-  // an extern op — otherwise the project pulls in a Scrutor reference
-  // for nothing.
+  // Extern application-layer handlers ([ExternHandler] scan targets).  Since
+  // extern (b) Phase 2, an extern aggregate OPERATION is a domain partial-method
+  // hook (no injected handler, no `[ExternHandler]`, no DI registration — a
+  // missing implementation is a COMPILE error), so ONLY the extern
+  // commandHandler / queryHandler application members (Phase 1's case-2 home)
+  // register through the Scrutor scan.  Their user impl carries `[ExternHandler]`;
+  // the same scan registers it under `I<Name>Handler` and the startup verify
+  // fails fast when the user hasn't supplied one.
+  const externHandlers = [...(ctx.commandHandlers ?? []), ...(ctx.queryHandlers ?? [])]
+    .filter((h) => h.extern)
+    .map((h) => ({
+      ifaceFqn: `${ns}.Application.Handlers.I${h.name}Handler`,
+      opName: h.name,
+      aggName: ctx.name,
+    }));
+  // Only emit the Scrutor scan when at least one extern application handler
+  // exists — otherwise the project pulls in a Scrutor reference for nothing.
   const externScan =
     externHandlers.length === 0
       ? ""
-      : `// Extern operation handlers — user implements [ExternHandler]-decorated
-// classes for each I<Op><Agg>Handler interface in
-// Application/<Aggregate>/Handlers/.  Scrutor picks them up by attribute.
+      : `// Extern application handlers — user implements the [ExternHandler]-decorated
+// class for each I<Name>Handler port in Application/Handlers/.  Scrutor picks
+// them up by attribute.
 builder.Services.Scan(s => s
     .FromAssemblyOf<Program>()
     .AddClasses(c => c.WithAttribute<ExternHandlerAttribute>())

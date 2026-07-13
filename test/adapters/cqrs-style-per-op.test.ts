@@ -93,26 +93,28 @@ describe("F5d — cqrs per-operation decomposition", () => {
     }
   });
 
-  it("an extern op additionally yields the user interface + dev stub", async () => {
+  it("an extern op yields the same command trio (the hook is a partial member of the aggregate)", async () => {
     const { agg, ctx, artifacts } = await captureAggregateEmit();
     const byName = new Map(artifacts.map((a) => [a.name, a]));
     const handover = cqrsStyleModule.cqrsStyleAdapter.emitHandlerOrService(
       opNamed(agg, "handover"),
       ctx,
     );
+    // The extern op is now a domain extension point (a `partial` method that is
+    // a member of the aggregate), so its cqrs decomposition is identical to a
+    // normal op — command + validator + handler — with no injected per-op
+    // handler interface or dev stub.  The hook itself lives in the aggregate's
+    // co-located scaffold-once `<Agg>.Extern.cs` partial (emitted at aggregate
+    // level, asserted in the dotnet generator tests).
     expect(handover.map((a) => a.name).sort()).toEqual([
-      "DevStubHandoverOrderHandler.cs",
       "HandoverCommand.cs",
       "HandoverCommandValidator.cs",
       "HandoverHandler.cs",
-      "IHandoverOrderHandler.cs",
     ]);
     expect(handover.map((a) => a.category).sort()).toEqual([
       "command",
       "command-handler",
       "command-validator",
-      "extern-handler-interface",
-      "extern-handler-stub",
     ]);
     for (const a of handover) {
       expect(byName.get(a.name)?.content, a.name).toBe(a.content);

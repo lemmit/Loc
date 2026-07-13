@@ -74,6 +74,7 @@ import {
 import { renderDomainLog, renderExecutionContextBehavior } from "./emit/domain-log.js";
 import { emitDomainServices } from "./emit/domain-service.js";
 import type { OpFragment } from "./emit/entity.js";
+import { renderExternHookImpl } from "./emit/extern.js";
 import { emitDotnetMigrations, emitDotnetProvenanceAuditMigration } from "./emit/migrations.js";
 import {
   renderOutboxDelivery,
@@ -954,6 +955,16 @@ function emitAggregate(
     agg.origin,
     opFragments,
   );
+  // Extern (b) Phase 2: an aggregate with any `extern` op is emitted `partial`;
+  // the user supplies the implementing half of each `<Op>Core` hook in a
+  // co-located SCAFFOLD-ONCE partial (`<Agg>.Extern.cs`) that regeneration
+  // preserves (the `loom:scaffold-once` marker → CLI writer keeps the on-disk
+  // copy).  Routed through `place` so the byFeature layout relocates it +
+  // rewrites its namespace in lockstep with the entity file.
+  const externHookImpl = renderExternHookImpl(agg, ns);
+  if (externHookImpl) {
+    place(`${agg.name}.Extern.cs`, "entity", externHookImpl, agg.origin);
+  }
   // Pure Domain union types for exception-less operation returns — Domain-layer
   // artifacts (the aggregate method produces them), placed alongside the entity.
   for (const f of domainUnionFiles(agg, ctx, ns)) {
@@ -1227,11 +1238,13 @@ function emitProject(
   },
 ): void {
   // Scrutor scan (+ package ref) is needed when the project emits any
-  // `[ExternHandler]` class — extern OPERATIONS or the extern application-layer
-  // commandHandler / queryHandler (both register through the same scan).
-  const hasExtern =
-    ctx.aggregates.some((a) => a.operations.some((o) => o.extern)) ||
-    [...(ctx.commandHandlers ?? []), ...(ctx.queryHandlers ?? [])].some((h) => h.extern);
+  // `[ExternHandler]` class.  Since extern (b) Phase 2 an extern aggregate
+  // OPERATION is a domain partial-method hook (no injected handler, no
+  // `[ExternHandler]`), so only the extern application-layer commandHandler /
+  // queryHandler (Phase 1's case-2 home) still registers through the scan.
+  const hasExtern = [...(ctx.commandHandlers ?? []), ...(ctx.queryHandlers ?? [])].some(
+    (h) => h.extern,
+  );
   const usesValidators = !!options?.usesValidators;
   const usesStamping = !!options?.usesStamping;
   const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;

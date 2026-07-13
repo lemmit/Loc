@@ -42,7 +42,6 @@ import { dotnetResourceAdapterFor, resourceClassName } from "./adapters/resource
 import {
   collectWireUsings,
   csIdValueClrType,
-  domainToRequestExpr,
   dtoParam,
   projectEntityExpr,
   projectToResponse,
@@ -126,7 +125,6 @@ export function emitWorkflows(
   options?: { routePrefix?: string; sys?: SystemIR; sourcemap?: SourceMapRecorder },
 ): void {
   if (ctx.workflows.length === 0) return;
-  const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
   const sourcemap = options?.sourcemap;
 
   // Only command-triggered workflows get the HTTP command path (Request /
@@ -137,7 +135,7 @@ export function emitWorkflows(
   // compile: an event carries no `<Event>Response` wire DTO).
   const commandWfs = ctx.workflows.filter(emitsCommandRoute);
   for (const wf of commandWfs) {
-    const usage = analyseWorkflow(wf, aggsByName);
+    const usage = analyseWorkflow(wf);
     const construct = `${ctx.name}.${wf.name}`;
     const requestPath = `Application/Workflows/${upperFirst(wf.name)}Request.cs`;
     const requestContent = renderRequestDto(wf, ctx, ns);
@@ -273,7 +271,6 @@ export function emitDispatchHandlers(
    *  sub-regions layered on top. */
   sourcemap?: SourceMapRecorder,
 ): void {
-  const aggsByName = new Map(ctx.aggregates.map((a) => [a.name, a] as const));
   // Event-sourced saga double-append (S5b): when an event-sourced workflow has
   // BOTH an `on` reactor and an event-`create` starter for the SAME event, the
   // two `INotificationHandler` classes fan out in unspecified Mediator order —
@@ -335,7 +332,6 @@ export function emitDispatchHandlers(
         createResolved,
         onSub,
         onResolved,
-        aggsByName,
         ns,
         ctx,
         sys,
@@ -366,7 +362,6 @@ export function emitDispatchHandlers(
       resolved.correlation,
       resolved.statements,
       resolved.saves,
-      aggsByName,
       ns,
       ctx,
       sys,
@@ -389,9 +384,11 @@ export function emitDispatchHandlers(
 function analyseStmts(
   statements: WorkflowStmtIR[],
   saves: { name: string; aggName: string; repoName: string }[],
-  aggsByName: Map<string, AggregateIR>,
 ): WorkflowUsage {
   const repos = new Map<string, string>();
+  // Extern (b) Phase 2: an extern aggregate op is an ordinary method (no
+  // injected `I<Op><Agg>Handler` to collect / inject), so `externs` stays empty
+  // — kept only to satisfy the WorkflowUsage shape the handler renderers read.
   const externs = new Map<string, { aggName: string; opName: string }>();
   let hasEmit = false;
   for (const save of saves) repos.set(save.repoName, save.aggName);
@@ -410,11 +407,6 @@ function analyseStmts(
         for (const sv of st.savesInElse) repos.set(sv.repoName, sv.aggName);
         walk(st.thenBody);
         walk(st.elseBody ?? []);
-      } else if (st.kind === "op-call") {
-        const agg = aggsByName.get(st.aggName);
-        const op = agg?.operations.find((o) => o.name === st.op);
-        if (op?.extern)
-          externs.set(`${st.aggName}.${st.op}`, { aggName: st.aggName, opName: st.op });
       }
     }
   };
@@ -445,7 +437,6 @@ function renderEventReactorHandler(
   correlation: ExprIR | undefined,
   statements: WorkflowStmtIR[],
   saves: { name: string; aggName: string; repoName: string }[],
-  aggsByName: Map<string, AggregateIR>,
   ns: string,
   ctx: EnrichedBoundedContextIR,
   sys: SystemIR | undefined,
@@ -457,7 +448,7 @@ function renderEventReactorHandler(
    *  transactional command-handler tab-in). */
   opFragments?: OpFragment[],
 ): string {
-  const usage = analyseStmts(statements, saves, aggsByName);
+  const usage = analyseStmts(statements, saves);
   const usings = new Set<string>();
   const persisted = !!wf.correlationField;
   // An `eventSourced` workflow folds its `<wf>_events` stream into `state`
@@ -781,7 +772,6 @@ function renderCsEsBranch(
   wf: WorkflowIR,
   resolved: ResolvedWorkflowBody,
   paramName: string,
-  aggsByName: Map<string, AggregateIR>,
   ctx: EnrichedBoundedContextIR,
   sys: SystemIR | undefined,
   usings: Set<string>,
@@ -798,7 +788,7 @@ function renderCsEsBranch(
    *  `renderHandler` transactional precedent. */
   opFragments?: OpFragment[],
 ): string[] {
-  const usage = analyseStmts(resolved.statements, resolved.saves, aggsByName);
+  const usage = analyseStmts(resolved.statements, resolved.saves);
   const resourceClasses = buildResourceClasses(sys);
   const renderArg = (e: ExprIR): string => {
     collectCsExprUsings(e, usings, ns);
@@ -870,7 +860,6 @@ function renderMergedEventSourcedHandler(
   createResolved: ResolvedWorkflowBody,
   onSub: EventSubscriptionIR,
   onResolved: ResolvedWorkflowBody,
-  aggsByName: Map<string, AggregateIR>,
   ns: string,
   ctx: EnrichedBoundedContextIR,
   sys: SystemIR | undefined,
@@ -883,7 +872,7 @@ function renderMergedEventSourcedHandler(
 ): string {
   const mergedStatements = [...createResolved.statements, ...onResolved.statements];
   const mergedSaves = [...createResolved.saves, ...onResolved.saves];
-  const usage = analyseStmts(mergedStatements, mergedSaves, aggsByName);
+  const usage = analyseStmts(mergedStatements, mergedSaves);
   const usings = new Set<string>();
 
   // Field declarations + ctor for injected dependencies (union of both branches).
@@ -964,7 +953,6 @@ function renderMergedEventSourcedHandler(
     wf,
     createResolved,
     createSub.param,
-    aggsByName,
     ctx,
     sys,
     usings,
@@ -978,7 +966,6 @@ function renderMergedEventSourcedHandler(
     wf,
     onResolved,
     onSub.param,
-    aggsByName,
     ctx,
     sys,
     usings,
@@ -1060,13 +1047,13 @@ interface WorkflowUsage {
   repos: Map<string, string>;
   /** True when at least one `emit` statement appears. */
   hasEmit: boolean;
-  /** Extern op-calls that need an `IXAggHandler` injected.  Keyed
-   *  by `<aggName>.<opName>` so duplicate calls share one
-   *  injection. */
+  /** Since extern (b) Phase 2 an extern aggregate op is an ordinary method
+   *  (no injected `I<Op><Agg>Handler`), so this stays empty — kept only to hold
+   *  the WorkflowUsage shape the handler renderers still destructure. */
   externs: Map<string, { aggName: string; opName: string }>;
 }
 
-function analyseWorkflow(wf: WorkflowIR, aggsByName: Map<string, AggregateIR>): WorkflowUsage {
+function analyseWorkflow(wf: WorkflowIR): WorkflowUsage {
   const repos = new Map<string, string>();
   const externs = new Map<string, { aggName: string; opName: string }>();
   let hasEmit = false;
@@ -1092,13 +1079,6 @@ function analyseWorkflow(wf: WorkflowIR, aggsByName: Map<string, AggregateIR>): 
         for (const sv of st.savesInElse) repos.set(sv.repoName, sv.aggName);
         walk(st.thenBody);
         walk(st.elseBody ?? []);
-      } else if (st.kind === "op-call") {
-        const agg = aggsByName.get(st.aggName);
-        const op = agg?.operations.find((o) => o.name === st.op);
-        if (op?.extern) {
-          const key = `${st.aggName}.${st.op}`;
-          externs.set(key, { aggName: st.aggName, opName: st.op });
-        }
       }
     }
   };
@@ -1646,24 +1626,11 @@ export function csWorkflowStmtTarget(
       const op = ctx.aggregates
         .find((a) => a.name === st.aggName)
         ?.operations.find((o) => o.name === st.op);
-      if (op?.extern) {
-        const reqName = `${upperFirst(st.op)}${st.aggName}Request`;
-        const handlerField = `_${st.op}${st.aggName}Handler`;
-        // Construct the wire-typed request from the workflow's
-        // domain-typed args.  Each arg renders via the regular
-        // expression renderer (with cmd-param substitution), then
-        // wraps in `domainToRequestExpr` so X id.Value, enum
-        // .ToString(), VO → <VO>Request etc. all line up.
-        const requestArgs = op.params
-          .map((p, i) => domainToRequestExpr(renderArg(st.args[i]!), p.type, ctx))
-          .join(", ");
-        return [
-          `${indent}${st.target}.Check${upperFirst(st.op)}(${argList});`,
-          `${indent}var __${st.op}Request = new ${reqName}(${requestArgs});`,
-          `${indent}await ${handlerField}.HandleAsync(${st.target}, __${st.op}Request, cancellationToken);`,
-          `${indent}${st.target}.AssertInvariants();`,
-        ];
-      }
+      // Extern (b) Phase 2: an `extern` op is an ordinary aggregate method (it
+      // runs preconditions, calls its `<Op>Core` partial hook, then re-asserts
+      // invariants — see `emit/entity.ts`), so a workflow op-call to it is
+      // `st.target.<Op>(...)` exactly like any other op — no injected handler,
+      // no dispatch dance.
       // Operations that reference `currentUser` pick up a trailing
       // `User currentUser` parameter on the aggregate method — pass
       // the workflow handler's local `currentUser` through.

@@ -108,16 +108,16 @@ export function weaveLineDirectives(
 // used by repository hydration, and (for the root) a public `Create`
 // factory + `PullEvents()` drainage hook.
 //
-// Extern operations (S10 containment): when an aggregate declares
-// `operation X(...) extern { precondition ... }`, the generated request
-// handler delegates the business decision to a user-supplied
-// `IXFooHandler`.  That handler needs to mutate state and raise events —
-// but instead of widening EVERY setter to `internal set` (which let any
-// same-assembly code bypass invariants), the aggregate implements a narrow
-// `I<Agg>Mutator` EXPLICITLY (get/set per field + Id + RaiseDomainEvent).
-// The concrete setters stay `private`; the write surface is reachable only
-// through the interface reference the command handler passes, so
-// `order.Status = …` on a plain `Order` no longer compiles app-wide.
+// Extern operations (extern (b) Phase 2): when an aggregate declares
+// `operation X(...) extern { precondition ... }`, the generated `X(...)`
+// method runs the preconditions, then delegates the hand-written business
+// decision to a `private partial X Core(...)` HOOK the aggregate OWNS, then
+// re-asserts invariants.  The hook is a MEMBER of the aggregate, so it reaches
+// its own `private` state natively — no setter widening (finding S10 is fixed
+// by construction, not contained).  The class is emitted `partial` and the
+// user supplies the implementing half of the hook in a co-located
+// scaffold-once `<Agg>.Extern.cs` file (see `emit/extern.ts`); a MISSING
+// implementation is a COMPILE error (extended partial method, CS8795).
 // ---------------------------------------------------------------------------
 
 /** Identifies the abstract base a concrete aggregate `extends`, so the
@@ -215,13 +215,10 @@ export function renderEntity(
   const appliers = isAgg(entity) ? (entity.appliers ?? []) : [];
   const esCreate = isAgg(entity) ? entity.creates?.[0] : undefined;
   const hasExtern = operations.some((o) => o.extern);
-  // S10 containment: an `extern` op no longer widens EVERY setter to
-  // `internal` (which, in a single-assembly app, let any handler / controller
-  // / test do `order.Status = …` and skip invariants).  Setters stay
-  // `private`; the extern handler gets a narrow write surface through an
-  // explicitly-implemented `I<Agg>Mutator` (below) — reachable only via the
-  // interface reference the command handler passes, never on the concrete
-  // aggregate type.
+  // Extern (b) Phase 2: an `extern` op never widens any setter.  The extern
+  // hook (`<Op>Core`) is a member of the aggregate, so it mutates the `private`
+  // setters directly — no `internal`/`public` leak (finding S10 fixed by
+  // construction).  Setters stay `private` for every aggregate.
   const setterVisibility = "private";
   // Auditable capability (capability-stamp-dedup): an aggregate with any
   // `contextStamps` carries audit columns the AuditableInterceptor stamps at
@@ -388,6 +385,11 @@ export function renderEntity(
   });
 
   const opLines: string[] = [];
+  // Extern-operation domain hooks (extern (b) Phase 2): a `private partial`
+  // method the aggregate OWNS, declared here and implemented by the user in a
+  // co-located scaffold-once partial file (`renderExternHookImpl`).  Collected
+  // here and appended to the (now `partial`) class body below.
+  const partialHookLines: string[] = [];
   // Whether any operation references `currentUser`.  When true, we
   // pull in the Auth namespace alongside the existing usings so the
   // `User` type resolves; per-op signatures append a `User currentUser`
@@ -399,12 +401,24 @@ export function renderEntity(
     const baseParams = op.params.map((p) => `${renderCsType(p.type)} ${p.name}`).join(", ");
     const params = [baseParams, userParam].filter(Boolean).join(", ");
     if (op.extern) {
-      // Extern op: emit a `Check<Pascal>` that runs preconditions only.
-      // The auto-generated Mediator handler calls this, then dispatches
-      // to the user-supplied handler, then runs AssertInvariants.  No
-      // `<Pascal>` method exists on the aggregate; the user owns the
-      // business decision.
-      opLines.push(`    public void Check${upperFirst(op.name)}(${params})`);
+      // Extern op (extern (b) Phase 2): a REAL method that runs the
+      // preconditions, delegates the hand-written business decision to a
+      // partial-method HOOK the aggregate OWNS (`<Op>Core`), then re-asserts
+      // invariants.  The framework flow (load → preconditions → hook →
+      // invariants → save) is unchanged; only *what the hook is* changed —
+      // from an injected external holder of the entity to a member of the
+      // aggregate, so it reaches its own `private` state natively (no setter
+      // widening — S10 fixed by construction).  The hook is declared `private
+      // partial`: an extended partial method whose MISSING implementation is a
+      // COMPILE error (CS8795), never a silent no-op.  The user fills it in
+      // the co-located scaffold-once `<Agg>.Extern.cs` partial
+      // (`renderExternHookImpl`).
+      const hookName = `${upperFirst(op.name)}Core`;
+      const callArgs = [...op.params.map((p) => p.name), ...(usesUser ? ["currentUser"] : [])].join(
+        ", ",
+      );
+      const retType = op.returnType ? renderCsType(op.returnType) : "void";
+      opLines.push(`    public ${retType} ${upperFirst(op.name)}(${params})`);
       opLines.push("    {");
       const body = renderCsStatements(op.statements, renderCtx, {
         emitTrace,
@@ -413,7 +427,19 @@ export function renderEntity(
         eventSourced,
       });
       if (body.length > 0) opLines.push(body);
+      if (op.returnType) {
+        // A return-typed (exception-less) extern op returns the hook's tagged
+        // value; the trailing AssertInvariants would be unreachable (mirrors
+        // the regular return-typed op path).
+        opLines.push(`        return ${hookName}(${callArgs});`);
+      } else {
+        opLines.push(`        ${hookName}(${callArgs});`);
+        opLines.push(
+          emitTrace ? `        AssertInvariants("${op.name}");` : "        AssertInvariants();",
+        );
+      }
       opLines.push("    }");
+      partialHookLines.push(`    private partial ${retType} ${hookName}(${params});`);
       opLines.push("");
       continue;
     }
@@ -470,54 +496,11 @@ export function renderEntity(
     opLines.push("");
   }
 
-  // S10 containment: for an aggregate with ≥1 extern op, the write surface
-  // the user's `[ExternHandler]` needs (per-field set + RaiseEvent) is
-  // exposed through an EXPLICITLY-implemented `I<Agg>Mutator` rather than by
-  // widening the aggregate's own setters.  Explicit implementation means the
-  // members are reachable ONLY through the interface reference the command
-  // handler passes — `order.Status = …` on a plain `Order` no longer
-  // compiles.  The concrete setters stay `private`; the interface get/set
-  // ride the class's own private setter (legal inside the class body).
-  const externHookLines: string[] = [];
-  const mutatorInterfaceLines: string[] = [];
-  const mutatorFields = isAgg(entity)
-    ? entity.fields.filter((f) => !superType?.fieldNames.has(f.name))
-    : [];
-  if (isRoot && hasExtern) {
-    const mutatorName = `I${entity.name}Mutator`;
-    externHookLines.push(
-      `    // S10 containment: extern write surface, explicitly implemented so it`,
-      `    // is reachable only through ${mutatorName}, never on ${entity.name} itself.`,
-      `    ${idClass} ${mutatorName}.Id => Id;`,
-    );
-    for (const f of mutatorFields) {
-      const p = upperFirst(f.name);
-      externHookLines.push(
-        `    ${renderCsType(f.type)} ${mutatorName}.${p} { get => ${p}; set => ${p} = value; }`,
-      );
-    }
-    externHookLines.push(
-      // `RaiseDomainEvent`, not `RaiseEvent`: the latter is a reserved VB
-      // keyword and trips CA1716 on a public interface member (/warnaserror).
-      `    void ${mutatorName}.RaiseDomainEvent(IDomainEvent ev) => _domainEvents.Add(ev);`,
-      "",
-    );
-    mutatorInterfaceLines.push(
-      "",
-      `/// <summary>Narrow, extern-scoped write surface for ${entity.name} (S10`,
-      "/// containment).  The command handler passes the loaded aggregate as this",
-      `/// interface to the user's [ExternHandler]; the concrete ${entity.name} keeps`,
-      "/// its setters private, so nothing else can bypass invariants.</summary>",
-      `public interface ${mutatorName}`,
-      "{",
-      `    ${idClass} Id { get; }`,
-      ...mutatorFields.map(
-        (f) => `    ${renderCsType(f.type)} ${upperFirst(f.name)} { get; set; }`,
-      ),
-      "    void RaiseDomainEvent(IDomainEvent ev);",
-      "}",
-    );
-  }
+  // Extern (b) Phase 2: the extern write surface is no longer an injected
+  // `I<Agg>Mutator` — the `<Op>Core` partial hooks (collected in
+  // `partialHookLines`) are MEMBERS of the aggregate, so they reach its own
+  // `private` state natively.  Nothing here widens any setter (S10 fixed by
+  // construction); the hook declarations are appended to the class body below.
 
   const pullEventsLines = isRoot
     ? [
@@ -780,13 +763,12 @@ export function renderEntity(
       "",
       `namespace ${ns}.Domain.${plural(rootName)};`,
       "",
-      `public sealed class ${entity.name}${(() => {
-        const bases = [
-          superType ? superType.name : null,
-          isRoot && hasExtern ? `I${entity.name}Mutator` : null,
-        ].filter((b): b is string => b != null);
-        return bases.length > 0 ? ` : ${bases.join(", ")}` : "";
-      })()}`,
+      // Extern (b) Phase 2: an aggregate with an extern op is `partial` so the
+      // user's co-located scaffold-once file can supply the implementing half
+      // of each `<Op>Core` hook.
+      `public sealed ${isRoot && hasExtern ? "partial " : ""}class ${entity.name}${
+        superType ? ` : ${superType.name}` : ""
+      }`,
       "{",
       ...propLines,
       ...eventBlock,
@@ -797,18 +779,16 @@ export function renderEntity(
       ...derivedLines,
       ...fnLines,
       ...opLines,
-      ...externHookLines,
+      ...partialHookLines,
       "",
       ...pullEventsLines,
-      `    ${hasExtern ? "internal" : "private"} void AssertInvariants(${emitTrace ? 'string __op = "<init>"' : ""})`,
+      `    private void AssertInvariants(${emitTrace ? 'string __op = "<init>"' : ""})`,
       "    {",
       // When no invariants are declared the body is empty, which trips CA1822
       // ("can be marked as static").  AssertInvariants is intentionally kept
-      // on the instance for two reasons: (a) it is called via `e.AssertInvariants()`
-      // from the event-sourcing applier (line ~295) where `e` is an instance,
-      // and (b) user extensions via the `internal` hatch (when `hasExtern`) may
-      // add instance-touching invariants over time.  Emit a `this` discard so
-      // the analyzer sees the method as instance-bound.
+      // on the instance because it is called via `e.AssertInvariants()` from
+      // the event-sourcing applier (line ~295) where `e` is an instance.  Emit
+      // a `this` discard so the analyzer sees the method as instance-bound.
       ...(invariantLines.length === 0 ? ["        _ = this;"] : invariantLines),
       "    }",
       "",
@@ -820,7 +800,6 @@ export function renderEntity(
       ...esCreateFactoryLines,
       ...(snapshotLines.length > 0 ? ["", ...snapshotLines] : []),
       "}",
-      ...mutatorInterfaceLines,
     ) + "\n"
   );
 }
