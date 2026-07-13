@@ -337,7 +337,12 @@ describe(".NET generator", () => {
     expect(cfg).toMatch(/builder\.HasIndex\(x => x\.Status\)/);
   });
 
-  it("emits an IXAggHandler interface + Scrutor scan for extern operations", async () => {
+  it("re-homes an extern operation to a domain partial-method hook + scaffold-once impl", async () => {
+    // extern (b) Phase 2: an aggregate `operation X() extern` is a DOMAIN
+    // extension point (a `private partial XCore` hook the aggregate OWNS), not
+    // an injected application-layer `I<Op><Agg>Handler`.  The hook reaches the
+    // aggregate's own private state natively — no setter widening (finding S10
+    // fixed by construction).
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
@@ -360,66 +365,54 @@ describe(".NET generator", () => {
     );
     const files = generateDotnet(doc.parseResult.value as Model);
 
-    // 1. The user-implementable handler interface lives under
-    //    Application/<Aggregate>/Handlers/.
-    // S10 containment: the handler interface receives the aggregate as the
-    // narrow `IOrderMutator`, NOT the concrete `Order`.
-    const iface = files.get("Application/Orders/Handlers/IConfirmOrderHandler.cs")!;
-    expect(iface).toMatch(
-      /Task HandleAsync\(IOrderMutator aggregate, ConfirmOrderRequest request, CancellationToken cancellationToken\)/,
-    );
+    // 1. NONE of the deleted injected apparatus is emitted for the aggregate op.
+    expect(files.has("Application/Orders/Handlers/IConfirmOrderHandler.cs")).toBe(false);
+    expect(files.has("Application/Orders/Handlers/DevStubConfirmOrderHandler.cs")).toBe(false);
 
-    // 2. The auto Mediator handler injects the user interface and
-    //    delegates: load → CheckX → user.HandleAsync → invariants → save.
-    const handler = files.get("Application/Orders/Commands/ConfirmHandler.cs")!;
-    expect(handler).toMatch(/private readonly IConfirmOrderHandler _user;/);
-    expect(handler).toMatch(/aggregate\.CheckConfirm\(\);/);
-    // The loaded aggregate upcasts implicitly to IOrderMutator at the call.
-    expect(handler).toMatch(/await _user\.HandleAsync\(aggregate, request, cancellationToken\);/);
-    expect(handler).toMatch(/aggregate\.AssertInvariants\(\);/);
-    // No direct call to a non-existent `aggregate.Confirm()` method.
-    expect(handler).not.toMatch(/aggregate\.Confirm\(/);
-
-    // 3. S10 containment: the aggregate implements `IOrderMutator` EXPLICITLY
-    //    (get/set per field + RaiseEvent), and its own setters stay `private`.
-    //    So `order.Status = …` on a plain `Order` no longer compiles app-wide;
-    //    the write surface is reachable only through the interface reference.
+    // 2. The aggregate is `sealed partial`, its op runs preconditions → the
+    //    partial hook → invariants, and the hook is declared `private partial`
+    //    (a MISSING impl is a compile error, CS8795 — not a silent no-op).
     const order = files.get("Domain/Orders/Order.cs")!;
-    expect(order).toMatch(/public sealed class Order : IOrderMutator/);
-    expect(order).toMatch(/public interface IOrderMutator/);
-    expect(order).toMatch(
-      /OrderStatus IOrderMutator\.Status \{ get => Status; set => Status = value; \}/,
-    );
-    expect(order).toMatch(
-      /void IOrderMutator\.RaiseDomainEvent\(IDomainEvent ev\) => _domainEvents\.Add\(ev\);/,
-    );
-    // CA1716: the interface uses `RaiseDomainEvent`, never the reserved
-    // VB keyword `RaiseEvent`, on its public surface.
-    expect(order).toMatch(/void RaiseDomainEvent\(IDomainEvent ev\);/);
-    // S10 REGRESSION GUARD: NO setter is widened to `internal set` (the leak) —
-    // every declared field property stays `get; private set;`.
+    expect(order).toMatch(/public sealed partial class Order/);
+    expect(order).not.toMatch(/IOrderMutator/);
+    expect(order).toMatch(/public void Confirm\(\)/);
+    // Precondition, then the hook, then invariants — in that order.
+    expect(order).toMatch(/if \(!\(this\.IsMutable\(\)\)\)[\s\S]*ConfirmCore\(\);\s*AssertInvariants\(\);/);
+    expect(order).toMatch(/private partial void ConfirmCore\(\);/);
+    // No leftover `Check`-only method, no injected handler.
+    expect(order).not.toMatch(/public void CheckConfirm\(\)/);
+
+    // 3. Setters stay `private` (S10): no `internal set` leak anywhere, and
+    //    AssertInvariants is `private` (no `internal` widening for a hatch).
     expect(order).toMatch(/public OrderStatus Status \{ get; private set; \}/);
-    expect(order).not.toMatch(/public OrderStatus Status \{ get; internal set; \}/);
     expect(order).not.toMatch(/\{ get; internal set; \}/);
-    expect(order).toMatch(/public void CheckConfirm\(\)/);
-    expect(order).not.toMatch(/public void Confirm\(\)/);
+    expect(order).toMatch(/private void AssertInvariants\(/);
+    expect(order).not.toMatch(/internal void AssertInvariants\(/);
 
-    // 4. Common code declares the [ExternHandler] attribute (no Loom
-    //    name leaks into the user-facing surface).
-    const common = files.get("Domain/Common/DomainException.cs")!;
-    expect(common).toMatch(/public sealed class ExternHandlerAttribute : Attribute/);
-    expect(common).not.toMatch(/Loom/);
+    // 4. The user-owned scaffold-once partial carries the marker + a
+    //    compile-forcing implementing shape that throws until filled.
+    const impl = files.get("Domain/Orders/Order.Extern.cs")!;
+    expect(impl).toMatch(/^\/\/ loom:scaffold-once/);
+    expect(impl).toMatch(/public sealed partial class Order/);
+    expect(impl).toMatch(
+      /private partial void ConfirmCore\(\)\s*=> throw new NotImplementedException\(/,
+    );
 
-    // 5. Program.cs registers Scrutor + verifies the handler is wired.
+    // 5. The auto Mediator handler calls the aggregate method DIRECTLY — no
+    //    injected `_user`, no HandleAsync dispatch, no ExternHandlerException.
+    const handler = files.get("Application/Orders/Commands/ConfirmHandler.cs")!;
+    expect(handler).toMatch(/aggregate\.Confirm\(\);/);
+    expect(handler).not.toMatch(/_user\.HandleAsync/);
+    expect(handler).not.toMatch(/IConfirmOrderHandler/);
+
+    // 6. No Scrutor scan / boot-verify / package for a system whose only extern
+    //    is an aggregate op (Phase 1's extern commandHandler/queryHandler keeps
+    //    the scan — this system has none).
     const program = files.get("Program.cs")!;
-    expect(program).toMatch(/builder\.Services\.Scan\(s => s/);
-    expect(program).toMatch(/WithAttribute<ExternHandlerAttribute>/);
-    expect(program).toMatch(/IConfirmOrderHandler.*is null/s);
-    expect(program).toMatch(/Missing \[ExternHandler\] for/);
-
-    // 6. csproj brings in Scrutor.
+    expect(program).not.toMatch(/builder\.Services\.Scan\(s => s/);
+    expect(program).not.toMatch(/Missing \[ExternHandler\] for/);
     const csproj = files.get("Sales.csproj")!;
-    expect(csproj).toMatch(/<PackageReference Include="Scrutor"/);
+    expect(csproj).not.toMatch(/<PackageReference Include="Scrutor"/);
   });
 
   describe("extern handler exception envelope", () => {
@@ -623,9 +616,9 @@ describe(".NET generator", () => {
       const files = generateDotnet(model, { emitTrace: true });
       const order = files.get("Domain/Orders/Order.cs")!;
 
-      // Signature carries the __op param with the "<init>" default so
-      // any external caller (extern handlers) can still invoke
-      // AssertInvariants() without args.
+      // Signature carries the __op param with the "<init>" default so the
+      // event-sourcing applier / hydration can call AssertInvariants() without
+      // args.  (Private since extern (b) Phase 2 — no external caller.)
       expect(order).toMatch(/void AssertInvariants\(string __op = "<init>"\)/);
       // Hydration + Create factory pass "<init>"; each op passes its
       // own name.
@@ -782,44 +775,12 @@ describe(".NET generator", () => {
       expect(files.has("Api/ValidationFilter.cs")).toBe(false);
     });
 
-    it("extern command handler wraps user.HandleAsync in try/catch that rethrows ExternHandlerException", async () => {
-      const { parseHelper } = await import("langium/test");
-      const services = createDddServices(NodeFileSystem);
-      const helper = parseHelper(services.Ddd);
-      const doc = await helper(
-        `
-        context Sales {
-          enum OrderStatus { Draft, Confirmed }
-          aggregate Order {
-            customerId: string
-            status: OrderStatus
-            function isMutable(): bool = status == Draft
-            operation confirm() extern {
-              precondition isMutable()
-            }
-          }
-          repository Orders for Order { }
-        }
-      `,
-        { validation: true },
-      );
-      const files = generateDotnet(doc.parseResult.value as Model);
-      const handler = files.get("Application/Orders/Commands/ConfirmHandler.cs")!;
-      // Try/catch wraps the user call.
-      expect(handler).toMatch(/try\s*\{\s*await _user\.HandleAsync/);
-      // Domain-layer exceptions re-throw unchanged so 400 / 403 /
-      // 404 still apply when the user handler raises one
-      // deliberately.
-      expect(handler).toMatch(/catch \(DomainException\) \{ throw; \}/);
-      expect(handler).toMatch(/catch \(ForbiddenException\) \{ throw; \}/);
-      expect(handler).toMatch(/catch \(AggregateNotFoundException\) \{ throw; \}/);
-      // Cancellation also re-throws so request cancellation isn't
-      // misattributed as a handler failure.
-      expect(handler).toMatch(/catch \(OperationCanceledException\) \{ throw; \}/);
-      // Any other exception wraps as ExternHandlerException with
-      // the op + agg names baked in.
-      expect(handler).toMatch(/throw new ExternHandlerException\("confirm", "Order", ex\);/);
-    });
+    // (Removed: the aggregate-op `try { await _user.HandleAsync } catch …
+    // ExternHandlerException` wrap.  Since extern (b) Phase 2 an extern
+    // aggregate op is an ordinary domain method — a hand-written exception from
+    // its hook bubbles as a generic 500, no injected handler to wrap.  The
+    // ExternHandlerException type + its DomainExceptionFilter arm are retained
+    // for the application-layer extern handler surface, tested above.)
   });
 
   it("emits a Mediator handler + controller for non-transactional workflow", async () => {
@@ -1163,7 +1124,10 @@ describe(".NET generator", () => {
     );
   });
 
-  it("workflow op-call to a parameterless extern emits the dispatch dance", async () => {
+  it("workflow op-call to a parameterless extern calls the aggregate method directly", async () => {
+    // extern (b) Phase 2: an extern op is an ordinary aggregate method (it runs
+    // preconditions, calls its `<Op>Core` hook, re-asserts invariants), so a
+    // workflow op-call is `order.Confirm()` — no injected handler, no dispatch.
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
@@ -1191,23 +1155,20 @@ describe(".NET generator", () => {
     const files = generateDotnet(doc.parseResult.value as Model);
     const handler = files.get("Application/Workflows/PlaceAndConfirmHandler.cs")!;
 
-    // IConfirmOrderHandler is injected.
-    expect(handler).toMatch(/private readonly IConfirmOrderHandler _confirmOrderHandler;/);
-    // Usings cover the handler interface + request namespaces.
-    expect(handler).toMatch(/using Sales\.Application\.Orders\.Handlers;/);
-    expect(handler).toMatch(/using Sales\.Application\.Orders\.Requests;/);
-    // Body: CheckConfirm → new ConfirmRequest → user.HandleAsync → AssertInvariants.
-    expect(handler).toMatch(/order\.CheckConfirm\(\);/);
-    expect(handler).toMatch(/var __confirmRequest = new ConfirmOrderRequest\(\);/);
-    expect(handler).toMatch(
-      /await _confirmOrderHandler\.HandleAsync\(order, __confirmRequest, cancellationToken\);/,
-    );
-    expect(handler).toMatch(/order\.AssertInvariants\(\);/);
+    // Direct method call — no injected `IConfirmOrderHandler`, no dispatch dance.
+    expect(handler).toMatch(/order\.Confirm\(\);/);
+    expect(handler).not.toMatch(/IConfirmOrderHandler/);
+    expect(handler).not.toMatch(/\.HandleAsync\(/);
+    expect(handler).not.toMatch(/CheckConfirm/);
+    expect(handler).not.toMatch(/ConfirmOrderRequest/);
     // Save still happens at workflow exit.
     expect(handler).toMatch(/await _orders\.SaveAsync\(order, cancellationToken\);/);
   });
 
-  it("auto Mediator handler for parameterized extern wraps domain args via domainToRequestExpr", async () => {
+  it("auto Mediator handler for a parameterized extern calls the aggregate method with domain args", async () => {
+    // extern (b) Phase 2: the extern op flows through the regular command path,
+    // so the handler calls `aggregate.AddLine(command.ProductId, ...)` with the
+    // DOMAIN-typed command params — no wire `<Op><Agg>Request`, no HandleAsync.
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
@@ -1236,11 +1197,18 @@ describe(".NET generator", () => {
     const files = generateDotnet(doc.parseResult.value as Model);
     const handler = files.get("Application/Orders/Commands/AddLineHandler.cs")!;
     expect(handler).toMatch(
-      /var request = new AddLineOrderRequest\(command\.ProductId\.Value, command\.Qty, new MoneyRequest\(command\.Price\.Amount, command\.Price\.Currency\)\);/,
+      /aggregate\.AddLine\(command\.ProductId, command\.Qty, command\.Price\);/,
     );
+    expect(handler).not.toMatch(/HandleAsync/);
+    expect(handler).not.toMatch(/AddLineOrderRequest/);
+    // And the aggregate declares the partial hook + implements it (scaffold-once).
+    const order = files.get("Domain/Orders/Order.cs")!;
+    expect(order).toMatch(/private partial void AddLineCore\(OrderId productId, int qty, Money price\);/);
+    const impl = files.get("Domain/Orders/Order.Extern.cs")!;
+    expect(impl).toMatch(/private partial void AddLineCore\(OrderId productId, int qty, Money price\)/);
   });
 
-  it("workflow op-call to parameterized extern emits the dispatch dance with domain→wire conversion", async () => {
+  it("workflow op-call to a parameterized extern calls the aggregate method with cmd-param args", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
@@ -1269,11 +1237,9 @@ describe(".NET generator", () => {
     );
     const files = generateDotnet(doc.parseResult.value as Model);
     const handler = files.get("Application/Workflows/ChargeOrderHandler.cs")!;
-    expect(handler).toMatch(/order\.CheckDeduct\(command\.Amount\);/);
-    expect(handler).toMatch(/var __deductRequest = new DeductOrderRequest\(command\.Amount\);/);
-    expect(handler).toMatch(
-      /await _deductOrderHandler\.HandleAsync\(order, __deductRequest, cancellationToken\);/,
-    );
+    expect(handler).toMatch(/order\.Deduct\(command\.Amount\);/);
+    expect(handler).not.toMatch(/HandleAsync/);
+    expect(handler).not.toMatch(/DeductOrderRequest/);
   });
 
   it("multi-hop X id.Y id.field follow loads aggregates in dependency order", async () => {

@@ -7,7 +7,7 @@ import type {
 import { operationUsesCurrentUser } from "../../../ir/types/loom-ir.js";
 import { plural, upperFirst } from "../../../util/naming.js";
 import { renderDotnetLogCall } from "../../_obs/render-dotnet.js";
-import { domainToRequestExpr, projectEntityExpr } from "../dto-mapping.js";
+import { projectEntityExpr } from "../dto-mapping.js";
 import { renderCommand, renderCommandHandler } from "../emit.js";
 import { renderCsExpr, renderCsType } from "../render-expr.js";
 import { renderCreateValidator, renderOperationValidator } from "../validator-emit.js";
@@ -314,90 +314,11 @@ export function emitOperationCommandAndHandler(
     const callArgs = (usesUser ? [...baseCallArgs, "_currentUser.User"] : baseCallArgs).join(", ");
     const userExtraDeps = usesUser ? [{ type: "ICurrentUserAccessor", field: "_currentUser" }] : [];
     const userExtraUsings = usesUser ? [`${ns}.Auth`] : [];
-    if (op.extern) {
-      // Emit the user-implementable handler interface alongside the
-      // auto Mediator handler, then dispatch through it.
-      const ifaceName = `I${upperFirst(op.name)}${agg.name}Handler`;
-      const reqName = `${upperFirst(op.name)}${agg.name}Request`;
-      // Request record is wire-typed (X id → Guid, enum → string,
-      // datetime → string, value-object → <VO>Request) but `command.X`
-      // is domain-typed.  Convert each param via
-      // `domainToRequestExpr` so the constructor types line up.
-      // Without this, a parameterized extern auto handler fails to
-      // compile (Cannot convert from <Domain> to <Wire>).
-      const reqArgs = op.params
-        .map((p) => domainToRequestExpr(`command.${upperFirst(p.name)}`, p.type, ctx))
-        .join(", ");
-      out.set(
-        `Application/${aggFolder}/Handlers/${ifaceName}.cs`,
-        renderExternHandlerInterface({
-          ns,
-          aggName: agg.name,
-          ifaceName,
-          requestName: reqName,
-        }),
-      );
-      // Dev-stub implementation — decorated with [ExternHandler] so the
-      // Scrutor scan in Program.cs picks it up automatically.  Without it
-      // the boot-time check throws InvalidOperationException("Missing
-      // [ExternHandler] ...").  REPLACE with a real handler in
-      // production by adding your own [ExternHandler] class; multiple
-      // [ExternHandler] registrations for the same interface result in
-      // a DI error, so delete the stub when you ship your own.
-      out.set(
-        `Application/${aggFolder}/Handlers/DevStub${upperFirst(op.name)}${agg.name}Handler.cs`,
-        renderExternHandlerStub({
-          ns,
-          aggName: agg.name,
-          opName: op.name,
-          ifaceName,
-          requestName: reqName,
-        }),
-      );
-      out.set(
-        `Application/${aggFolder}/Commands/${upperFirst(op.name)}Handler.cs`,
-        renderCommandHandler({
-          ns,
-          aggName: agg.name,
-          handlerName: `${upperFirst(op.name)}Handler`,
-          commandName: `${upperFirst(op.name)}Command`,
-          extraDeps: [{ type: ifaceName, field: "_user" }, ...userExtraDeps],
-          extraUsings: [
-            `${ns}.Application.${plural(agg.name)}.Handlers`,
-            `${ns}.Application.${plural(agg.name)}.Requests`,
-            ...userExtraUsings,
-          ],
-          // Wrap the user's HandleAsync in try/catch so any
-          // non-domain exception rethrows as ExternHandlerException
-          // (mapped by DomainExceptionFilter to a descriptive 500).
-          // Domain exceptions raised by the user handler bubble
-          // unchanged so DomainException → 400, ForbiddenException →
-          // 403, AggregateNotFoundException → 404 still apply.
-          body:
-            `        var aggregate = await _repo.${writeCmdLoad(agg)}(command.Id, cancellationToken)\n` +
-            `            ?? throw new AggregateNotFoundException($"${agg.name} {command.Id} not found");\n` +
-            whenGate(agg, op) +
-            `        aggregate.Check${upperFirst(op.name)}(${callArgs});\n` +
-            `        var request = new ${reqName}(${reqArgs});\n` +
-            `        try\n` +
-            `        {\n` +
-            `            await _user.HandleAsync(aggregate, request, cancellationToken);\n` +
-            `        }\n` +
-            `        catch (DomainException) { throw; }\n` +
-            `        catch (ForbiddenException) { throw; }\n` +
-            `        catch (AggregateNotFoundException) { throw; }\n` +
-            `        catch (OperationCanceledException) { throw; }\n` +
-            `        catch (Exception ex)\n` +
-            `        {\n` +
-            `            throw new ExternHandlerException("${op.name}", "${agg.name}", ex);\n` +
-            `        }\n` +
-            `        aggregate.AssertInvariants();\n` +
-            `        await _repo.SaveAsync(aggregate, cancellationToken);\n` +
-            `        return Unit.Value;\n`,
-        }),
-      );
-      return;
-    }
+    // Extern (b) Phase 2: an `extern` op is now an ordinary aggregate method
+    // (its body runs preconditions, calls the `<Op>Core` partial hook, and
+    // re-asserts invariants — see `emit/entity.ts`), so it flows through the
+    // SAME command-handler path below as any other op (`aggregate.<Op>(...)`).
+    // No injected `I<Op><Agg>Handler`, no dev-stub, no dispatch dance.
     // Per-operation audit (audit-and-logging.md): an `audited` op records a
     // who/what/when + before/after wire snapshot.  The before/after are the
     // aggregate's wire projection either side of the mutation; the record is
@@ -485,77 +406,4 @@ export function emitOperationCommandAndHandler(
       }),
     );
   }
-}
-
-/**
- * `IXAggHandler` — the interface a user implements (decorated with
- * `[ExternHandler]`) to own the business decision for an extern
- * operation.  The auto-generated Mediator handler runs preconditions
- * and invariants around the user's call.
- */
-function renderExternHandlerInterface(args: {
-  ns: string;
-  aggName: string;
-  ifaceName: string;
-  requestName: string;
-}): string {
-  return `// Auto-generated.
-using System.Threading;
-using System.Threading.Tasks;
-using ${args.ns}.Domain.${plural(args.aggName)};
-using ${args.ns}.Application.${plural(args.aggName)}.Requests;
-
-namespace ${args.ns}.Application.${plural(args.aggName)}.Handlers;
-
-/// <summary>
-/// User-supplied business decision for an extern operation.  Implement
-/// in the same project, decorate with <c>[ExternHandler]</c>, and
-/// the framework will load the aggregate, run preconditions, invoke
-/// HandleAsync, run invariants, and save in one transaction.
-/// </summary>
-public interface ${args.ifaceName}
-{
-    Task HandleAsync(I${args.aggName}Mutator aggregate, ${args.requestName} request, CancellationToken cancellationToken);
-}
-`;
-}
-
-/**
- * Permissive dev stub for an extern operation handler — emitted alongside
- * the user-facing interface so a generated app boots end-to-end before the
- * user has wired their own implementation.  Body is a no-op (yields
- * `Task.CompletedTask`); the framework still runs preconditions and
- * invariants around the call.  Replace by deleting the stub file and
- * adding your own [ExternHandler] class.
- */
-function renderExternHandlerStub(args: {
-  ns: string;
-  aggName: string;
-  opName: string;
-  ifaceName: string;
-  requestName: string;
-}): string {
-  const stubName = `DevStub${upperFirst(args.opName)}${args.aggName}Handler`;
-  return `// Auto-generated.
-using System.Threading;
-using System.Threading.Tasks;
-using ${args.ns}.Application.${plural(args.aggName)}.Requests;
-using ${args.ns}.Domain.Common;
-using ${args.ns}.Domain.${plural(args.aggName)};
-
-namespace ${args.ns}.Application.${plural(args.aggName)}.Handlers;
-
-/// <summary>Permissive dev stub for the <c>${args.opName}</c> extern op.
-/// Replace by deleting this file and adding your own
-/// <c>[ExternHandler]</c>-decorated class implementing
-/// <see cref="${args.ifaceName}"/>.</summary>
-[ExternHandler]
-public sealed class ${stubName} : ${args.ifaceName}
-{
-    public Task HandleAsync(I${args.aggName}Mutator aggregate, ${args.requestName} request, CancellationToken cancellationToken)
-    {
-        return Task.CompletedTask;
-    }
-}
-`;
 }
