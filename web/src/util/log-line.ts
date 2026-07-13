@@ -6,7 +6,7 @@
 //   - For unstructured console.* calls it's the method name
 //     (`console.warn(...)` → `"warn"`).
 //   - For structured pino lines (emitted by every generated Hono
-//     backend; see docs/proposals/observability.md), it's the level
+//     backend; see docs/old/proposals/observability.md), it's the level
 //     embedded IN the pino payload — NOT the console method pino
 //     chose to call.  This matters for `trace`: pino in browser maps
 //     `logger.trace(...)` to `console.debug(...)`, so reading the
@@ -27,7 +27,7 @@ export interface LogLine {
 }
 
 /** Shape of a pino log object emitted by the generated Hono backend.
- *  Mirrors the envelope pinned in `docs/proposals/observability.md`:
+ *  Mirrors the envelope pinned in `docs/old/proposals/observability.md`:
  *  `ts` / `level` / `event` / `request_id` (when in a request scope) +
  *  arbitrary event-specific fields. */
 export interface StructuredLogPayload {

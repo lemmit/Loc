@@ -1,7 +1,7 @@
 // HEEx walker — Section / Sticky / CodeBlock / Icon primitive emission.
 //
 // Phase D Slice A from
-// `docs/plans/platform-expansion-roadmap.md`.  These four primitives
+// `docs/old/plans/platform-expansion-roadmap.md`.  These four primitives
 // were emitted by the TSX walker but missing entirely on the HEEx
 // side; the registry's `heex:` field for each was undefined, so they
 // produced nothing in Phoenix output.

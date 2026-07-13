@@ -396,7 +396,7 @@ function camelizeSnake(s: string): string {
 // `audited` operation.  One row per successful audited invocation, written
 // in the same transaction as the operation's aggregate save (atomic — the
 // row and the state change commit or roll back together).  See
-// `docs/proposals/audit-and-logging.md`.
+// `docs/old/proposals/audit-and-logging.md`.
 const OUTBOX_TABLE = `export const loomOutbox = pgTable("__loom_outbox", {
   id: uuid("id").defaultRandom().primaryKey(),
   occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),

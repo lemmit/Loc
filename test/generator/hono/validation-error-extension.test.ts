@@ -2,8 +2,8 @@
 //
 // Verifies that the Hono backend emits the RFC 7807 §3.2 `errors[]`
 // extension shape consumed by the frontend ACL's `applyServerErrors`
-// (see docs/proposals/frontend-acl.md +
-// docs/proposals/validation-error-extension.md).
+// (see docs/old/proposals/frontend-acl.md +
+// docs/old/proposals/validation-error-extension.md).
 //
 // What this protects (Phase A — runtime only):
 //  - A single shared `http/problem-details.ts` module is emitted (not
@@ -87,7 +87,7 @@ describe("Hono validation-error extension — emission", () => {
     // §3.2 errors[] extension is now declared on the OpenAPI component
     // schema (Phase D — all three backends move in lockstep so the
     // cross-backend parity gate stays green).  See
-    // docs/proposals/validation-error-extension.md.
+    // docs/old/proposals/validation-error-extension.md.
     expect(src).toMatch(
       /errors:\s*z\.array\(z\.object\(\{\s*pointer:\s*z\.string\(\),\s*message:\s*z\.string\(\)\s*\}\)\)\.nullish\(\)/,
     );
@@ -180,7 +180,7 @@ describe("Hono validation-error extension — emission", () => {
     // Phase D shipped: all three backends now declare 422 in lockstep via
     // the central matrix in src/ir/util/openapi-errors.ts.  Hono's
     // create / operation / workflow routes declare 422 ProblemDetails
-    // alongside 400.  See docs/proposals/validation-error-extension.md.
+    // alongside 400.  See docs/old/proposals/validation-error-extension.md.
     const { files } = generateSystems(await buildAcme());
     const root = honoRootOf(files);
     const customerSrc = files.get(`${root}/http/customer.routes.ts`)!;

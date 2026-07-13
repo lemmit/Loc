@@ -1,4 +1,4 @@
-// Realization-axes alignment (docs/plans/realization-axes-alignment.md) — the
+// Realization-axes alignment (docs/old/plans/realization-axes-alignment.md) — the
 // elixir backend exposes the plain Ecto/Phoenix data layer (`ecto`) on the
 // persistence axis and the `layered` pipeline style (plain Phoenix's
 // controller → context → repository shape, DSL `serviceLayer`) on the

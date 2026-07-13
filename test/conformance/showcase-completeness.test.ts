@@ -95,7 +95,7 @@ const ALLOWLIST = new Set<string>([
   // Tenancy is covered by its dedicated corpus fixtures
   // (test/fixtures/corpus/tenancy-owned.ddd + tenancy-filter.ddd) instead.
   // Tenancy-izing the showcase is a deliberate follow-up, not a drive-by
-  // (docs/plans/multi-tenancy-implementation.md).
+  // (docs/old/plans/multi-tenancy-implementation.md).
   "TenancyDecl",
   // Projections are MID-FLIGHT (v1 slice 2 landed the Hono runtime only —
   // #1732); the other four backends don't consume them yet, and showcase.ddd

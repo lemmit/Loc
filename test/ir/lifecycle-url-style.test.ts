@@ -9,7 +9,7 @@ import type { Model } from "../../src/language/generated/ast.js";
 
 // ---------------------------------------------------------------------------
 // Lifecycle URL style — Phase 2 (urlStyle on the api body + routeSlug
-// enrichment).  See docs/proposals/lifecycle-url-style.md (D-URLSTYLE).
+// enrichment).  See docs/old/proposals/lifecycle-url-style.md (D-URLSTYLE).
 //   - `api X from Sub { urlStyle: literal | resource }`, default literal.
 //   - routeSlug derived per action: canonical => undefined (bare URL),
 //     literal => name, resource => plural(name).

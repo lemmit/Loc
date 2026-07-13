@@ -201,13 +201,13 @@ stepping (`launch`/`attach`/`continue`/`stepIn` against an actual running
 backend) requires the adapter to spawn and proxy the target's own debugger
 (`js-debug` / `coreclr` / JDWP) and remap only line/scope on top — the
 documented, editor-verified frontier (see
-[`docs/proposals/source-map-and-debugging.md`](proposals/source-map-and-debugging.md)
+[`docs/old/proposals/source-map-and-debugging.md`](old/proposals/source-map-and-debugging.md)
 §6E). **For live stepping today, use the native editor path in §2** — it
 drives each target's real debugger directly and needs no delegation.
 
 ## See also
 
-- [`docs/proposals/source-map-and-debugging.md`](proposals/source-map-and-debugging.md)
+- [`docs/old/proposals/source-map-and-debugging.md`](old/proposals/source-map-and-debugging.md)
   — the full design: the Origin spine, per-target metadata, and the phased
   roadmap.
 - [`docs/loom-artifacts.md`](loom-artifacts.md) — the `.loom/` output

@@ -2,7 +2,7 @@
 // Vue `WalkerTarget` — Vue-3-flavoured implementation of the
 // cross-framework walker contract.  See `src/generator/_walker/target.ts`
 // for the contract definition and scope, and
-// `docs/plans/vue-frontend-plan.md` for the platform plan.
+// `docs/old/plans/vue-frontend-plan.md` for the platform plan.
 //
 // Generated pages are SFCs with a `<script setup lang="ts">` block:
 // state fields are `ref()`s and API handles are vue-query composables

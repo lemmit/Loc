@@ -661,7 +661,7 @@ or not.
     reason; DEBT-13 is de-scoped. **Value-object collections keep their
     `ordinal`** — there it's part of the `(parent_id, ordinal)` PK and the
     only way to store an ordered, identity-less list. See
-    `docs/proposals/reference-collection-set-semantics.md`.
+    `docs/old/proposals/reference-collection-set-semantics.md`.
 - **Only `primaryKey` import is conditional.**  Adding `primaryKey` to the
   Drizzle import line unconditionally drifted every existing schema's
   byte-for-byte fixture.  Gate the import on "context has ≥1 join table"
@@ -1095,7 +1095,7 @@ The DDD Specification pattern is named **inconsistently — and sometimes
 backwards — across the frameworks Loom targets**, so reusing a
 framework's term for a generated type silently hands the reader the wrong
 mental model. Map (this surfaced designing reified criteria, see
-`docs/plans/retrieval-implementation.md` Phase 5 + `reified-criteria.md`):
+`docs/old/plans/retrieval-implementation.md` Phase 5 + `reified-criteria.md`):
 
 | Framework | `Specification<T>` means | `Criteria*` means |
 |---|---|---|
@@ -1792,7 +1792,7 @@ the ones that cost real tool-calls and are non-obvious.
 
 - **A design doc's stated *risk / prerequisite* can be silently obsoleted by an
   unrelated fix that merged *after* it was written — re-derive the premise, don't
-  trust the doc.** `docs/plans/vanilla-document-route-a.md` risk 2 said typed VO
+  trust the doc.** `docs/old/plans/vanilla-document-route-a.md` risk 2 said typed VO
   *struct* modules were **mandatory** (the only sound fix for the #1660 VO-subfield
   crash). That was true when written — but #1664 had since fixed #1660 a different
   way (a key-agnostic `Map.get(vo, :k, Map.get(vo, "k"))` fallback that works on a
@@ -1920,7 +1920,7 @@ because of one discipline and two blind spots that bit / nearly bit.
 
 Landing the Feliz frontend's **wire layer** (Thoth decoders + a `Cmd`-based
 `Api` module + the MVU `Remote<'T>` projection for `<param>.<agg>.all` reads,
-slice 7 of `docs/plans/feliz-frontend-build.md`) turned up one load-bearing
+slice 7 of `docs/old/plans/feliz-frontend-build.md`) turned up one load-bearing
 gotcha that dictated the whole design.
 
 - **The shared `walkBody` re-indents only a child's FIRST line.** Children are

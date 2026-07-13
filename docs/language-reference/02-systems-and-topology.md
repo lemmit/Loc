@@ -21,7 +21,7 @@ system Shop {
 }
 ```
 
-**Exactly one `system` per project.** The composition validator requires a single `system { … }` across the whole import graph; a second one (in any reachable file) is a hard error. The system may be *just* a name plus deployment declarations — `subdomain` / `context` can live as top-level members and fold in (see [implicit-system-composition](../proposals/implicit-system-composition.md)), which is what lets you split one-file-per-subdomain with the deployment in its own file.
+**Exactly one `system` per project.** The composition validator requires a single `system { … }` across the whole import graph; a second one (in any reachable file) is a hard error. The system may be *just* a name plus deployment declarations — `subdomain` / `context` can live as top-level members and fold in (see [implicit-system-composition](../old/proposals/implicit-system-composition.md)), which is what lets you split one-file-per-subdomain with the deployment in its own file.
 
 A project with **no** `system` block still parses and generates per-deployable code via the legacy `generate ts` / `generate dotnet` single-file path — but `generate system` (the multi-deployable + compose path) emits nothing without one.
 

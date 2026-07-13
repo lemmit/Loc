@@ -1,5 +1,5 @@
 {
-  "comment": "Corpus for the RST-2 .NET behavioral tier (run-dotnet.mjs). Each case is generated, its `platform: dotnet` (ASP.NET + EF Core) deployable booted against a real Postgres (ConnectionStrings__Default), and its emitted `test e2e` api suite HTTP-dispatched at the booted server. Like the Python tier (corpus-python.json), .NET has no in-process Postgres, so this needs a real DB — see docs/plans/runtime-semantics-tier-followups.md (RST-2).",
+  "comment": "Corpus for the RST-2 .NET behavioral tier (run-dotnet.mjs). Each case is generated, its `platform: dotnet` (ASP.NET + EF Core) deployable booted against a real Postgres (ConnectionStrings__Default), and its emitted `test e2e` api suite HTTP-dispatched at the booted server. Like the Python tier (corpus-python.json), .NET has no in-process Postgres, so this needs a real DB — see docs/old/plans/runtime-semantics-tier-followups.md (RST-2).",
   "cases": [
     { "name": "sales", "ddd": "test/behavioral/corpus-dotnet/sales.ddd" }
   ]

@@ -1,4 +1,4 @@
-// A5 temporal (docs/plans/stdlib.md) — duration constructors
+// A5 temporal (docs/old/plans/stdlib.md) — duration constructors
 // (`days`/`hours`/`minutes`) + the closed temporal arithmetic rules in the
 // type system, and the AST gates:
 //   loom.duration-arity / loom.duration-arg-type

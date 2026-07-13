@@ -1,4 +1,4 @@
-// Temporal checks (A5, docs/plans/stdlib.md) — the duration-constructor
+// Temporal checks (A5, docs/old/plans/stdlib.md) — the duration-constructor
 // builtins `days(n)` / `hours(n)` / `minutes(n)`.
 //
 // The constructors are NOT grammar keywords: they parse as ordinary free

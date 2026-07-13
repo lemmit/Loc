@@ -46,10 +46,10 @@ export type PrimitiveName =
   /** Opaque JSON blob — interior is not modelled by Loom.  Maps to
    *  JSONB / jsonb / `Map` per backend; a leaf in `wireShape` (never
    *  expanded or structurally diffed).  See
-   *  `docs/proposals/document-and-json-hierarchies.md` (Option 1,
+   *  `docs/old/proposals/document-and-json-hierarchies.md` (Option 1,
    *  D-DOCUMENT-AXIS). */
   | "json"
-  /** An ABSOLUTE span of time (A5 temporal, docs/plans/stdlib.md) — fixed
+  /** An ABSOLUTE span of time (A5 temporal, docs/old/plans/stdlib.md) — fixed
    *  millisecond width per unit, so it renders uniformly on every backend.
    *  EXPRESSION-ONLY in this slice: not in the grammar's `PrimitiveType`
    *  rule, so it can never appear in field / param / wire position — it only
@@ -83,7 +83,7 @@ export const PRIMITIVES: readonly PrimitiveName[] = [
 ] as const;
 
 /** Information-flow sensitivity tags carried by a value's type.  See
- * `docs/proposals/sensitivity-and-compliance.md`.  Mirror of
+ * `docs/old/proposals/sensitivity-and-compliance.md`.  Mirror of
  * `SensitivityTags` in `src/language/type-system.ts`; kept as a sorted,
  * unique `readonly string[]` so the IR remains JSON-serialisable for
  * `.loom/wire-spec.json`. */
@@ -194,7 +194,7 @@ export interface FieldIR {
    * `sensitive(<tag>, ...)`.  Sorted + deduped; omitted when the field
    * declared no tags.  Phase 1 only captures the declaration; later
    * phases wire it through the wire-shape, DTO emitters, and sink
-   * type-checking.  See `docs/proposals/sensitivity-and-compliance.md`. */
+   * type-checking.  See `docs/old/proposals/sensitivity-and-compliance.md`. */
   sensitivity?: SensitivityTags;
   /** Resolved access role.  Populated by `enrichLoomModel`; lowering
    * leaves this undefined when the source declared no modifier so
@@ -415,7 +415,7 @@ export interface OperationIR {
    * backend only — hosting an `audited` operation on another backend is
    * rejected at validate time (`loom.audited-backend-unsupported`,
    * `validateAuditedOperationSupport`) rather than silently recording
-   * nothing.  See `docs/proposals/audit-and-logging.md`. */
+   * nothing.  See `docs/old/proposals/audit-and-logging.md`. */
   audited: boolean;
   /** The `when Expr` canCommand state gate (criterion.md, use site 2):
    * a pure predicate over the aggregate's own state, evaluated against
@@ -442,7 +442,7 @@ export interface OperationIR {
  * `validateEventSourcedDiscipline` in phase ⑦); no `emit`, no
  * side-effecting calls.  Not yet consumed by backends (emission is the
  * deferred Phase A2; the event-store/fold/projection layer).  See
- * docs/proposals/workflow-and-applier.md. */
+ * docs/old/proposals/workflow-and-applier.md. */
 export interface ApplyIR {
   /** The event type this applier folds, by name (resolved to a context
    * `EventDecl`).  One applier per event type per aggregate. */
@@ -571,7 +571,7 @@ export interface AggregateIR {
    * additive — no consumer until the bypass surface lands, so byte-neutral. */
   contextFilterOrigins?: (string | undefined)[];
   /** The WRITE-scope predicate an INSTANCE mutation's command load must satisfy
-   *  (authorization Phase 3 P3.1 — `docs/plans/authorization-phase3.md`).
+   *  (authorization Phase 3 P3.1 — `docs/old/plans/authorization-phase3.md`).
    *  Derived in enrichment from the aggregate's `policy` read + write levels,
    *  and set **only when the write scope is strictly narrower than the read
    *  scope** — i.e. when the mutation load (which reuses the read filter on
@@ -600,7 +600,7 @@ export interface AggregateIR {
    * application has already spliced the fields/filter/stamp by this point — this
    * is the surviving identity record, consumed by capability-aware emission
    * (marker interfaces `I<Cap>` and the stamp-interceptor dedup —
-   * docs/proposals/capability-emission-dedup.md) and by tooling
+   * docs/old/proposals/capability-emission-dedup.md) and by tooling
    * (find-implementors). */
   capabilities?: readonly string[];
   /** Pointer to the `derived display: string` field, if the
@@ -1014,7 +1014,7 @@ export interface BoundedContextIR {
   policyReadLevels?: PolicyReadLevelIR[];
   /** Per-aggregate WRITE reachability levels declared by `policy { allow write
    *  <level> on X }` blocks in this context (authorization Phase 3 P3.1 —
-   *  `docs/plans/authorization-phase3.md`).  A write level gates INSTANCE
+   *  `docs/old/plans/authorization-phase3.md`).  A write level gates INSTANCE
    *  mutations (update-style ops, destroy, applier dispatch) on the target
    *  row's write scope; `local` is the flat `tenantId ==` floor (the default),
    *  `deep` the caller's org + descendants.  Consumed by `enrichLoomModel`,
@@ -1024,7 +1024,7 @@ export interface BoundedContextIR {
   policyWriteLevels?: PolicyWriteLevelIR[];
   /** Per-aggregate DENY carve-outs declared by `policy { deny [write] on X }`
    *  blocks in this context (authorization Phase 4 —
-   *  docs/plans/authorization-phase4-deny.md).  Each entry names an aggregate
+   *  docs/old/plans/authorization-phase4-deny.md).  Each entry names an aggregate
    *  and the access it denies (`read` = total carve-out, the aggregate becomes
    *  invisible; `write` = read-only carve-out).  Consumed by `enrichLoomModel`
    *  (`applyPolicyDenies`), which — AFTER the allow read/write-level passes, so
@@ -1068,7 +1068,7 @@ export interface PolicyWriteLevelIR {
 }
 
 /** One `deny [write] on <Aggregate>` carve-out lowered from a `policy {}` block
- *  (authorization Phase 4 — deny-wins, docs/plans/authorization-phase4-deny.md).
+ *  (authorization Phase 4 — deny-wins, docs/old/plans/authorization-phase4-deny.md).
  *  Deny is all-or-nothing at the aggregate (no level word).  `read` denies reads
  *  (the aggregate becomes invisible; because the write command load reuses the
  *  read filter, writes fail too); `write` denies only mutations (reads stay).
@@ -2168,7 +2168,7 @@ export interface AuthIR {
 }
 
 /** System-level tenancy declaration (multi-tenancy Phase 1a —
- *  docs/plans/multi-tenancy-implementation.md).  Lowered from
+ *  docs/old/plans/multi-tenancy-implementation.md).  Lowered from
  *  `tenancy by user.<claimField> of <registryName>`: `claimField` names
  *  the `user { … }` claim that partitions the data; `registryName` the
  *  aggregate acting as the tenant registry.  Both are plain names here,
@@ -3266,7 +3266,7 @@ export type ExprIR =
       origin?: OriginRef;
     }
   /**
-   * Duration constructor (A5 temporal, docs/plans/stdlib.md) —
+   * Duration constructor (A5 temporal, docs/old/plans/stdlib.md) —
    * `days(n)` / `hours(n)` / `minutes(n)`.  Parsed as an ordinary free
    * call; lowered to this node ONLY when the name did not resolve to any
    * user declaration (a user `function days(...)` shadows the builtin and

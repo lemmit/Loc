@@ -4,7 +4,7 @@ import { generateSystems } from "../../src/system/index.js";
 import { parseString, parseValid } from "../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
-// Round-trip test for the `--sourcemap` artifact (docs/plans/
+// Round-trip test for the `--sourcemap` artifact (docs/old/plans/
 // source-map-debug-kickoff.md §5/§6).  All five backends carry the emit
 // bracket, so each must map at least one file per aggregate.
 // ---------------------------------------------------------------------------

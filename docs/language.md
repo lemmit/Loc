@@ -137,7 +137,7 @@ Rules:
 
 See [`tools.md`](tools.md) for the CLI side; the original design
 rationale (stages, work items, deferred cross-context features) is
-preserved at [`plans/multi-file-source.md`](plans/multi-file-source.md).
+preserved at [`plans/multi-file-source.md`](old/plans/multi-file-source.md).
 
 ### Inside a `system`
 
@@ -235,7 +235,7 @@ The underlying value type is always `guid`. `ids guid` may be written
 explicitly (a no-op spelling of the default); `ids int|long|string` were
 removed — no backend implemented id generation for a non-guid primary key, so
 declaring one produced an app that collided on the second insert. See
-[`docs/plans/non-guid-id-http-params.md`](plans/non-guid-id-http-params.md).
+[`docs/old/plans/non-guid-id-http-params.md`](old/plans/non-guid-id-http-params.md).
 
 #### Reference collections — `X id[]`
 
@@ -374,7 +374,7 @@ Storage emission ships on **node, .NET, Python, Java, and Phoenix** (plain
 Ecto/Phoenix): an event-sourced aggregate persists to an append-only
 `<agg>_events` table, constructs and mutates through emitted events, and
 rehydrates by folding the stream on load. See `generators.md` for the
-per-backend matrix and `docs/proposals/workflow-and-applier.md` for the roadmap.
+per-backend matrix and `docs/old/proposals/workflow-and-applier.md` for the roadmap.
 
 #### Provenanced fields
 
@@ -510,7 +510,7 @@ It maps to Postgres `JSONB` (Drizzle `jsonb`, EF `System.Text.Json.JsonElement`,
 Ecto `:map`), TS `unknown`, Zod `z.unknown()`, and a freeform `object`
 in the OpenAPI/wire spec (a leaf — never expanded or structurally
 diffed).  Reach for a `valueobject` instead when the shape is known.
-See [`document-and-json-hierarchies.md`](proposals/document-and-json-hierarchies.md)
+See [`document-and-json-hierarchies.md`](old/proposals/document-and-json-hierarchies.md)
 (D-DOCUMENT-AXIS).
 
 A bare `Identifier` in type position must resolve to one of:
@@ -635,7 +635,7 @@ Current prelude:
 The full library — the ambient prelude, the Layer-0 scalar intrinsics, and the
 collection operations — is catalogued in [`stdlib.md`](stdlib.md) (generated from
 the registries). The set grows over subsequent stdlib slices; see
-`docs/plans/stdlib.md` → Phase C.
+`docs/old/plans/stdlib.md` → Phase C.
 
 ---
 

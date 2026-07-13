@@ -6,7 +6,7 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 import { parseString } from "../../_helpers/parse.js";
 
 // ---------------------------------------------------------------------------
-// Slice P4.1/P4.2 of docs/plans/elixir-eventsourcing-vanilla-plan.md —
+// Slice P4.1/P4.2 of docs/old/plans/elixir-eventsourcing-vanilla-plan.md —
 // event sourcing on the elixir vanilla foundation (D-VANILLA-ES-HOME).
 //
 // Two halves:

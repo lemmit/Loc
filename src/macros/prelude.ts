@@ -89,8 +89,8 @@ function buildSoftDeletable(): Capability {
 /** `capability tenantOwned { tenantId (internal) + dataKey (internal) +
  * onCreate stamp from the principal's claim + orgPath + filter this.tenantId
  * == currentUser.tenantId }` — the tenant-data marker of multi-tenancy Phase
- * 1a (docs/plans/multi-tenancy-implementation.md, slice 1a.2), extended by
- * Phase 2 slice P2.3 (docs/plans/multi-tenancy-phase2.md) with the
+ * 1a (docs/old/plans/multi-tenancy-implementation.md, slice 1a.2), extended by
+ * Phase 2 slice P2.3 (docs/old/plans/multi-tenancy-phase2.md) with the
  * materialized `dataKey` path.  Combines `auditable`'s principal-stamp shape
  * with `softDeletable`'s filter shape: every read is scoped to the caller's
  * tenant, every create is stamped with it, and `internal` keeps both
@@ -138,7 +138,7 @@ function buildTenantOwned(): Capability {
 
 /** `capability tenantRegistry { parent: Self id? (immutable) + dataKey: string?
  * (managed) }` — the tenant-registry TREE capability of multi-tenancy Phase 2
- * (docs/plans/multi-tenancy-phase2.md, slice P2.2).  The registry aggregate —
+ * (docs/old/plans/multi-tenancy-phase2.md, slice P2.2).  The registry aggregate —
  * the `of <Registry>` target of `tenancy by user.<claim> of <Registry>` — opts
  * into hierarchy by carrying `implements tenantRegistry`, which PROVIDES:
  *

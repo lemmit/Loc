@@ -9,7 +9,7 @@ import type { OriginRef } from "../ir/types/origin.js";
 // the output root.  Opt-in — only rendered when `--sourcemap` is passed
 // (see src/system/index.ts).
 //
-// See docs/plans/source-map-debug-kickoff.md §3 for the pinned wire shape.
+// See docs/old/plans/source-map-debug-kickoff.md §3 for the pinned wire shape.
 // ---------------------------------------------------------------------------
 
 interface WireSpan {

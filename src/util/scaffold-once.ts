@@ -4,7 +4,7 @@
 // leaves entirely to the user: subsequent regenerations must NOT overwrite it,
 // so a hand-written implementation survives.  This is the storage seam for
 // user-owned domain-extension code — established by the Elixir `extern` hook
-// (proposal: `docs/proposals/extern-domain-extension-point.md`, Slice 1) and
+// (proposal: `docs/old/proposals/extern-domain-extension-point.md`, Slice 1) and
 // reused by the .NET / TS / Python / Java extern slices (2–5).
 //
 // The bit that says "this file is scaffold-once" travels IN-BAND: the generator

@@ -172,7 +172,7 @@ import { basePackageFor, javaPackageSegment, mainSourcePath } from "./naming.js"
 // `<base>` is `com.loom.<deployable>` (see naming.ts).  Per-aggregate file
 // placement routes through the deployable's resolved layout adapter
 // (byFeature default / byLayer), which owns BOTH the package and the path
-// so they can't drift.  See docs/plans/java-backend-implementation.md.
+// so they can't drift.  See docs/old/plans/java-backend-implementation.md.
 // ---------------------------------------------------------------------------
 
 interface SystemArgs {

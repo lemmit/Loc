@@ -58,7 +58,7 @@ describe.skipIf(!ENABLED)(
         // `--verify-no-changes` makes format a checker (exit non-zero
         // on any change needed) rather than a fixer.  `--severity info`
         // covers whitespace/style; CA-prefixed analyzer rules are a
-        // separate gate (see docs/proposals/cross-stack-static-analysis.md).
+        // separate gate (see docs/old/proposals/cross-stack-static-analysis.md).
         execSync(`dotnet format --verify-no-changes --severity info --no-restore`, {
           cwd: outDir,
           stdio: "inherit",

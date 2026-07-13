@@ -104,4 +104,4 @@ This loop is the in-browser playground chat's intended driver (the playground re
 
 - [api-toolkit.md](api-toolkit.md) — the `src/api/` toolkit the catalog sits on (validate / generate / applyPatches + the navigation verbs and their wire shapes).
 - [decisions.md → D-AGENT-TOOLS](decisions.md#d-agent-tools--one-tool-catalog-over-the-toolkit-mcp-and-in-browser-are-transports) and D-API-TOOLKIT — why one catalog over one toolkit.
-- `docs/proposals/agent-tools-and-mcp.md` — the originating proposal (aspirational; this doc is the shipped subset).
+- `docs/old/proposals/agent-tools-and-mcp.md` — the originating proposal (aspirational; this doc is the shipped subset).

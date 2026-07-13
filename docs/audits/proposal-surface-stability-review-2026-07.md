@@ -164,7 +164,7 @@ The single largest surface-stability risk across the corpus is
 soft-keyword-sprawl or collision debt before the feature exists. **Rule:** do
 not reserve a common-word keyword until its emitter lands; until then, route
 the placeholder syntax through
-[`../proposals/reserved-surface-signposting.md`](../proposals/reserved-surface-signposting.md)
+[`../proposals/reserved-surface-signposting.md`](../old/proposals/reserved-surface-signposting.md)
 as a `reserved-not-emitted` diagnostic rather than declaring it "settled."
 
 ## Method note

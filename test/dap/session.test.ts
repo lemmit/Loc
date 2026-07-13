@@ -24,7 +24,7 @@ const repoRoot = path.resolve(here, "..", "..");
 // cores' own tests use, one layer up. NOT covered here (and out of scope for
 // this slice): a live end-to-end DAP session against a real target debugger
 // — see the module comment in src/dap-server/session.ts and
-// docs/proposals/source-map-and-debugging.md §6E.
+// docs/old/proposals/source-map-and-debugging.md §6E.
 // ---------------------------------------------------------------------------
 
 const DDD_SOURCE = [

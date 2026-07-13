@@ -6,7 +6,7 @@ base; concrete aggregates `extends` it; the `inheritanceUsing(…)` header modif
 picks how the hierarchy maps to tables.
 
 > Design rationale, the full strategy comparison, and the deferred patterns live
-> in [`proposals/aggregate-inheritance.md`](proposals/aggregate-inheritance.md).
+> in [`proposals/aggregate-inheritance.md`](old/proposals/aggregate-inheritance.md).
 > This page is the reference for what ships today.
 
 ## Declaration surface

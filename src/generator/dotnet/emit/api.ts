@@ -605,8 +605,8 @@ public sealed class DomainExceptionFilter : IExceptionFilter
         // Entity, the standard for input-shape errors).  Shape matches
         // Hono's defaultHook output byte-for-byte so the frontend
         // ACL's \`applyServerErrors\` works against either backend.
-        // See docs/proposals/validation-error-extension.md and
-        // docs/proposals/frontend-acl.md.
+        // See docs/old/proposals/validation-error-extension.md and
+        // docs/old/proposals/frontend-acl.md.
         if (context.Exception is FluentValidation.ValidationException fv)
         {
             var problem = new ProblemDetails
@@ -801,7 +801,7 @@ public sealed class ProblemDetailsResponsesFilter : IOperationFilter
     // of DomainExceptionFilter emits on 422 validation responses.
     // Consumed by the frontend ACL's \`applyServerErrors\`.  Idempotent;
     // safe to run per operation.  See
-    // docs/proposals/validation-error-extension.md (Phase D).
+    // docs/old/proposals/validation-error-extension.md (Phase D).
     private static void AugmentProblemDetailsSchema(SchemaRepository repo)
     {
         if (!repo.Schemas.TryGetValue("ProblemDetails", out var problem)) return;

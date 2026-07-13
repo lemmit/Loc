@@ -23,7 +23,7 @@ is the hand-off package for `language-feature-developer`.
 
 ## 0. What "domain-seam" means here, and the in-flight caveat
 
-The catalog tiers events by *concept* (`docs/proposals/observability.md`). The
+The catalog tiers events by *concept* (`docs/old/proposals/observability.md`). The
 **domain-seam** subset is the 18 events that fire from the generated domain /
 application / repository layers — the business narrative, the client/domain
 faults, the system faults, and the mechanism-debug lines. These are the lines a

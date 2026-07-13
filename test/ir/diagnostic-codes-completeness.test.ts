@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 // ---------------------------------------------------------------------------
 // Every IR diagnostic carries a stable `loom.*` code.
 //
-// The structured-diagnostics contract (docs/proposals/ai-diagnostics-contract.md
+// The structured-diagnostics contract (docs/old/proposals/ai-diagnostics-contract.md
 // design goal §2) requires every diagnostic to be matchable by a stable
 // machine code, so the AI authoring loop's repair step keys on identity, not
 // message prose.  The Langium-side validators are gated on codes by their own

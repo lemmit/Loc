@@ -5,12 +5,12 @@ description: >-
   docs-only. Use this whenever the task is about whether the prose still matches
   the code: "the docs are stale", "refresh the trackers / the proposals status
   table", "audit the proposals against main", "is this doc still true?", "bump
-  the last-refreshed line", or picking up `docs/proposals/README.md` or
-  `docs/proposals/global-implementation-plan.md`. ALSO use it after any
+  the last-refreshed line", or picking up `docs/old/proposals/README.md` or
+  `docs/old/proposals/global-implementation-plan.md`. ALSO use it after any
   rename/removal/refactor to scrub the references that outlive the deleted thing:
   "scrub the stale references to X", "I removed `origin`/`source`/`⑤c`, find what
   still mentions it", "this concept was renamed, sweep the docs/comments". Two
-  modes: a broad scoped doc audit (a doc set: `docs/`, `docs/proposals/`,
+  modes: a broad scoped doc audit (a doc set: `docs/`, `docs/old/proposals/`,
   `CLAUDE.md`, code comments) and a post-refactor concept scrub (one renamed/
   removed concept, grepped across `src/`/`test/`/`docs/`). The single highest-yield
   pattern is the "N-backend-era freeze" — prose frozen at "three/four backends"
@@ -89,8 +89,8 @@ from memory. The code wins, every time.
 
 ### Mode A — scoped doc audit
 
-The scope is a doc set: `docs/proposals/README.md` (the status table — the canonical
-drift surface), `docs/proposals/global-implementation-plan.md` (the gap inventory),
+The scope is a doc set: `docs/old/proposals/README.md` (the status table — the canonical
+drift surface), `docs/old/proposals/global-implementation-plan.md` (the gap inventory),
 a reference doc under `docs/`, `CLAUDE.md`, or a `docs/audits/*` snapshot. Walk each
 claim, find the code that proves it, classify, fix. The README table and the
 global-implementation-plan are **meant to agree** — refresh them together.

@@ -6,8 +6,8 @@ stance explicitly, and the toolchain guarantees the read scope on every
 generated query — the "forgot the filter on one query" cross-tenant leak
 becomes a compile error instead of an incident.
 
-Design record: [`proposals/multi-tenancy-design-note.md`](proposals/multi-tenancy-design-note.md)
-(R1–R5); implementation plan: [`plans/multi-tenancy-implementation.md`](plans/multi-tenancy-implementation.md).
+Design record: [`proposals/multi-tenancy-design-note.md`](old/proposals/multi-tenancy-design-note.md)
+(R1–R5); implementation plan: [`plans/multi-tenancy-implementation.md`](old/plans/multi-tenancy-implementation.md).
 
 ## Surface
 
@@ -267,7 +267,7 @@ five backends**, each through its own request-scoped principal seam:
 
 A `policy {}` context member selects a per-aggregate **read reachability level**
 for tenant-owned aggregates — the directional ladder from
-[`proposals/authorization.md`](proposals/authorization.md) §3 (`Self` /
+[`proposals/authorization.md`](old/proposals/authorization.md) §3 (`Self` /
 `Descendants` / `All` ≈ `local` / `deep` / `global`). It is the read side of the
 hierarchy: P2.1–P2.3 wrote `dataKey`; P2.4 reads by it.
 

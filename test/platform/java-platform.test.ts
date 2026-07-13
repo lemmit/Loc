@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Java platform surface + registry wiring (slice S1 of
-// docs/plans/java-backend-implementation.md): `platform: java` resolves
+// docs/old/plans/java-backend-implementation.md): `platform: java` resolves
 // through the registry as `java@v1`, the surface carries the dotnet-like
 // dual-mode flags, and the adapter menu exposes jpa/layered/byLayer/
 // byFeature as real with jooq/axon/cqrs reserved as stubs.

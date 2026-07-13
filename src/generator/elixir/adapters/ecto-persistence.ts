@@ -9,7 +9,7 @@
 // nonetheless implemented faithfully (delegating to the vanilla emitters) so the
 // seam is correct if a later orchestrator rewire routes through it.
 //
-// Naming (D-REALIZATION-AXES; docs/plans/realization-axes-alignment.md §3.1): a
+// Naming (D-REALIZATION-AXES; docs/old/plans/realization-axes-alignment.md §3.1): a
 // `persistence:` value names the *data-access library*.  Ecto is DB-agnostic —
 // the database is chosen by its adapter (Postgrex / ecto_sqlite3) off the
 // `storage` block — so the value is **`ecto`** (singular).

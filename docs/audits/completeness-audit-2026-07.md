@@ -3,7 +3,7 @@
 Independent audit of what Loom still lacks to be a **complete language/platform for full
 business/domain-rich applications**. Conducted bottom-up from the code on `main`
 (grammar, type system, IR, validators, generators, system composer) — deliberately
-*without* reading `docs/plans/`, `docs/proposals/`, or existing gap lists, so it is an
+*without* reading `docs/old/plans/`, `docs/old/proposals/`, or existing gap lists, so it is an
 unbiased second opinion rather than a restatement of the roadmap.
 
 Method: full read of `src/language/ddd.langium` + `src/util/collection-ops.ts` +

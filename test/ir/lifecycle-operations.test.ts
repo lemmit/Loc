@@ -12,7 +12,7 @@ import type { Model } from "../../src/language/generated/ast.js";
 // `OperationIR` with a `kind` tag into the new `creates` / `destroys`
 // arrays (mutate-kind `operation` stays in `operations`), and the
 // name-uniqueness + `this.id`-in-create validator rules fire.
-// See docs/proposals/lifecycle-operations.md.
+// See docs/old/proposals/lifecycle-operations.md.
 // ---------------------------------------------------------------------------
 
 const services = createDddServices(NodeFileSystem);

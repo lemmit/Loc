@@ -91,7 +91,7 @@ import { stdFunction } from "./stdlib.js";
  * declared at field sites via `sensitive(<tag>, ...)`; the type system
  * propagates them through expression composition (concat, ternary,
  * call returns) so a value can't be laundered clean by reshaping the
- * expression.  See `docs/proposals/sensitivity-and-compliance.md`. */
+ * expression.  See `docs/old/proposals/sensitivity-and-compliance.md`. */
 export type SensitivityTags = readonly string[];
 
 export type DddType =
@@ -594,7 +594,7 @@ export function arithmeticResult(a: DddType, b: DddType, op: string): DddType {
 }
 
 /**
- * The closed temporal arithmetic rules (A5 temporal, docs/plans/stdlib.md)
+ * The closed temporal arithmetic rules (A5 temporal, docs/old/plans/stdlib.md)
  * — the duration/datetime twin of `moneyArithmetic`.  At least one operand
  * is duration- or datetime-typed when this runs.  Rules:
  *

@@ -33,7 +33,7 @@ in-process — no docker, no separate Postgres) and runs the suites Loom
   Its own `behavioral-e2e-python.yml` workflow (a `services: postgres`
   sidecar) — the A6.2 second backend for the runtime-semantics RS-rules (see
   `docs/conformance-semantics.md` and
-  `docs/plans/a6.2-behavioral-tier-second-backend.md`). Needs `uv` + a
+  `docs/old/plans/a6.2-behavioral-tier-second-backend.md`). Needs `uv` + a
   reachable `DATABASE_URL`; run: `node run-python.mjs`. `LOOM_BH_PY_BASE`
   dispatches the api tier at an already-running server (and skips `uv sync`,
   so the unit tier is skipped too).
@@ -45,7 +45,7 @@ in-process — no docker, no separate Postgres) and runs the suites Loom
   backend-agnostic api suite at it. Its own `behavioral-e2e-dotnet.yml`
   workflow (a `services: postgres` sidecar) — the RST-2 third backend for the
   runtime-semantics RS-rules (see
-  `docs/plans/runtime-semantics-tier-followups.md`). Needs the .NET SDK
+  `docs/old/plans/runtime-semantics-tier-followups.md`). Needs the .NET SDK
   (`dotnet`) + a reachable `ConnectionStrings__Default`; run:
   `node run-dotnet.mjs`. `LOOM_BH_DOTNET_BASE` dispatches at an
   already-running server (skips the boot).
@@ -57,7 +57,7 @@ in-process — no docker, no separate Postgres) and runs the suites Loom
   real DB, re-pointing the backend-agnostic api suite at it. Its own
   `behavioral-e2e-java.yml` workflow (a `services: postgres` sidecar) — the
   RST-3 fourth backend for the runtime-semantics RS-rules (see
-  `docs/plans/runtime-semantics-tier-followups.md`). Needs JDK 21 + Gradle
+  `docs/old/plans/runtime-semantics-tier-followups.md`). Needs JDK 21 + Gradle
   (`gradle`) + a reachable `SPRING_DATASOURCE_URL`; run: `node run-java.mjs`.
   `LOOM_BH_JAVA_BASE` dispatches at an already-running server (skips the boot).
 

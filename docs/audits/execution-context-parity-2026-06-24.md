@@ -4,7 +4,7 @@
 > (the emitter `.ts` files, judging the source each emits) — one reader per
 > backend, fixed axis template. **Scope:** the runtime execution-context /
 > request-context mechanism only (the proposal
-> [`../proposals/execution-context.md`](../proposals/execution-context.md);
+> [`../proposals/execution-context.md`](../old/proposals/execution-context.md);
 > design pinned **D-CTX-SHAPE** in
 > [`../architecture/request-context.md`](../architecture/request-context.md)).
 > This audit **confirms** the architecture doc's per-backend realisation

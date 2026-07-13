@@ -3,7 +3,7 @@
 //
 // Plain Phoenix + Ecto.  Called from `../index.ts`.
 //
-// Per docs/plans/vanilla-foundation-tdd-plan.md — built in TDD slices.
+// Per docs/old/plans/vanilla-foundation-tdd-plan.md — built in TDD slices.
 //   Slice 0: shell.
 //   Slice 1: per-aggregate schema + repository + context module + read
 //     controllers + spliced router routes.

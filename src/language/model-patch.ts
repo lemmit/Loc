@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Model-patch applier — node-addressed edits over `.ddd` source
-// (docs/proposals/ai-authoring-loop.md §4).
+// (docs/old/proposals/ai-authoring-loop.md §4).
 //
 // The AI authoring loop edits *named model nodes*, not byte ranges: a patch
 // addresses a node by its canonical address (`<keyword> <Context>.<Decl>[.…]`,

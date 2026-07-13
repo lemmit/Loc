@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type HexMirror, startHexMirror } from "./support/hex-mirror";
 
 // ---------------------------------------------------------------------------
-// Slice 6 of docs/plans/vanilla-foundation-tdd-plan.md — CI gate for
+// Slice 6 of docs/old/plans/vanilla-foundation-tdd-plan.md — CI gate for
 // the vanilla emit subtree.  Parallel to test/e2e/generated-elixir-ash-
 // build.test.ts but exercises `foundation: vanilla` deployables and
 // expects no Ash deps in the generated mix.exs.

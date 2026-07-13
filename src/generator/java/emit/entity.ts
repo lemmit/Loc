@@ -308,7 +308,7 @@ export function renderJavaEntity(
   // AuditorAware<UUID> bean).  create-event fields are `updatable = false`
   // (set once, on INSERT).  Event-sourced aggregates and principal stamps
   // without auth are gated upstream (loom.java-stamp-unsupported).  See §5b of
-  // docs/plans/capability-stamp-dedup-simulation.md.
+  // docs/old/plans/capability-stamp-dedup-simulation.md.
   // A CLAIM-valued principal stamp (`tenantId := currentUser.tenantId`) cannot
   // ride @CreatedBy/@LastModifiedBy — the AuditorAware<UUID> bean injects the
   // actor ID, not the claim (a String claim column would get the actor guid,

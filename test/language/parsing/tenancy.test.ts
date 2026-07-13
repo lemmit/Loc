@@ -1,5 +1,5 @@
 // Tenancy surface — grammar slice 1a.1 of multi-tenancy Phase 1a
-// (docs/plans/multi-tenancy-implementation.md), upgraded to real Langium
+// (docs/old/plans/multi-tenancy-implementation.md), upgraded to real Langium
 // cross-references in 1b.1.  Covers the `tenancy by user.<claim> of
 // <Registry>` SystemMember (claim → the system's `user { … }` field,
 // registry → an aggregate; both resolve via `.ref`), the `crossTenant`

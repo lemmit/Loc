@@ -424,7 +424,7 @@ describe("translateBreakpoint — real round trip over a generated system's sour
 // generated (file, line) — one hosting >=2 DISTINCT `targetCol` starts, the
 // de-dup-key-widening proof from real output — is discovered by scanning the
 // emitted sourcemap itself (the #1748 no-hardcode pattern), matching
-// docs/plans/dap-node-debug.md's scouted showcase.ddd fixture (a `requires
+// docs/old/plans/dap-node-debug.md's scouted showcase.ddd fixture (a `requires
 // currentUser.role == "admin"` guard collapsing four fine regions to two
 // armable columns).
 // ---------------------------------------------------------------------------

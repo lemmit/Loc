@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 // never touches the DB), then asserts the structured pino lines we
 // expect appear in stdout with the catalog envelope.  Sister suite to
 // generated-build.test.ts — same shape, same heavy install cost, same
-// opt-in gate.  See docs/proposals/observability.md.
+// opt-in gate.  See docs/old/proposals/observability.md.
 //
 // Slow (~60–90s with cached node_modules) and requires a free local
 // port + outbound npm registry, so it stays opt-in via

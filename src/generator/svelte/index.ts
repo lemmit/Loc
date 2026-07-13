@@ -53,7 +53,7 @@ import { allWorkflows, buildWorkflowsApiModule, hasAnyWorkflow } from "./workflo
 // (src/generator/_walker/walker-core.ts) with `svelteTarget` +
 // a svelte-format design pack supplying the framework surface.
 //
-// See docs/plans/svelte-frontend-plan.md.
+// See docs/old/plans/svelte-frontend-plan.md.
 // ---------------------------------------------------------------------------
 
 export interface GenerateSvelteOptions {

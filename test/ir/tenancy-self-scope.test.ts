@@ -1,5 +1,5 @@
 // Derived registry self-scope filter (multi-tenancy Phase 1b, capstone
-// decision 4 — docs/proposals/multi-tenancy-design-note.md): under
+// decision 4 — docs/old/proposals/multi-tenancy-design-note.md): under
 // `tenancy by user.<claim> of <Registry>`, enrichment appends
 // `this.id == currentUser.<claim>` to the registry's `contextFilters`
 // (origin `TENANCY_SELF_SCOPE_ORIGIN`) — the `tenantId ≡ <Registry>.id`

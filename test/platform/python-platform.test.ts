@@ -12,7 +12,7 @@ import { parseBuiltinPlatformRef, platformFor } from "../../src/platform/registr
 // `python` is the canonical language-ecosystem platform name.  The
 // `fastapi` framework-spelled platform alias was RETIRED (mirroring the
 // retired `hono` → `node` and `phoenix` → `elixir` aliases): `python` is
-// the only spelling.  See docs/plans/python-backend-plan.md (S1).
+// the only spelling.  See docs/old/plans/python-backend-plan.md (S1).
 // ---------------------------------------------------------------------------
 
 async function parse(source: string) {

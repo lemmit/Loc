@@ -1,6 +1,6 @@
 // Minimal vanilla-foundation fixture — one CRUD aggregate on
 // `foundation: vanilla` (plain Ecto, no Ash).  Drives Slice 0 + Slice 1
-// of docs/plans/vanilla-foundation-tdd-plan.md: gate-lift,
+// of docs/old/plans/vanilla-foundation-tdd-plan.md: gate-lift,
 // orchestrator branch, schema/repository/context/api emit, and
 // wire-spec parity with the same `.ddd` under `foundation: vanilla`.
 system Tasks {

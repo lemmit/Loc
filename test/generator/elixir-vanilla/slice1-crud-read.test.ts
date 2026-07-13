@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { generateSystemFiles } from "../../_helpers/generate.js";
 
 // ---------------------------------------------------------------------------
-// Slice 1 of docs/plans/vanilla-foundation-tdd-plan.md — one CRUD
+// Slice 1 of docs/old/plans/vanilla-foundation-tdd-plan.md — one CRUD
 // aggregate end-to-end, read path, structurally parity-closed.
 //
 // Verifies that the vanilla emit subtree produces:

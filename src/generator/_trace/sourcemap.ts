@@ -5,7 +5,7 @@
 // carried in from lowering (see src/ir/types/origin.ts).
 //
 // Construct-granular by default (Milestone 1 — see
-// docs/plans/source-map-debug-kickoff.md §2): `file()` records one region
+// docs/old/plans/source-map-debug-kickoff.md §2): `file()` records one region
 // per emitted file, not per statement/line.  Pooled/merged files
 // (domain/ids.ts, db/schema.ts, ...) are simply never `.file(...)`-recorded
 // — they stay unmapped rather than getting a misleading single-origin
@@ -129,7 +129,7 @@ export function statementSubRegions(
  *  the cursor-walked `statementSubRegions` — the elixir workflow/reactor
  *  bodies, whose bucketing REORDERS statements relative to source order, so
  *  the single-fragment relative-cursor shape doesn't apply; see M13,
- *  docs/plans/source-map-and-debugging.md). */
+ *  docs/old/plans/source-map-and-debugging.md). */
 export function lineCount(content: string): number {
   const parts = content.split("\n");
   const n = content.endsWith("\n") ? parts.length - 1 : parts.length;

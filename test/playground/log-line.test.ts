@@ -13,7 +13,7 @@ import {
 // pino embedded in the payload, not the console method pino called).
 // These tests guard the predicate: tight enough to skip unrelated
 // `console.log({...})` calls, loose enough to admit every catalog line.
-// See docs/proposals/observability.md.
+// See docs/old/proposals/observability.md.
 // ---------------------------------------------------------------------------
 
 describe("asStructuredPayload — catalog payload detection", () => {

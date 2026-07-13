@@ -2,7 +2,7 @@
 // Per-primitive accessibility contract — the single source of truth for the
 // WCAG 2.2 AA semantics each walker primitive must emit.
 //
-// See docs/proposals/accessibility.md.  The thesis: the page DSL is a closed,
+// See docs/old/proposals/accessibility.md.  The thesis: the page DSL is a closed,
 // semantically-named primitive library, so every fact a correct a11y
 // implementation needs (role, accessible name, keyboard pattern, heading
 // level, landmark, live-region politeness) is derivable from the IR.  This

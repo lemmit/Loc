@@ -1,4 +1,4 @@
-// Scalar-intrinsic completeness gate (docs/plans/stdlib.md, Phase A).
+// Scalar-intrinsic completeness gate (docs/old/plans/stdlib.md, Phase A).
 //
 // The catalogue (src/util/intrinsics.ts) is the single source of truth for
 // which scalar ops exist; each backend carries a snippet table for

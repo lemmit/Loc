@@ -7,7 +7,7 @@ import { commitOnSave, GitStore, openGitFs } from "../../web/src/workspace/git/i
 // ---------------------------------------------------------------------------
 // GitStore — async, git-backed durable store (LightningFS +
 // isomorphic-git).  First step of the playground git-VFS migration
-// (docs/plans/playground-git-vfs-implementation.md); the module ships
+// (docs/old/plans/playground-git-vfs-implementation.md); the module ships
 // dark (no consumer wired) so these unit tests are the only gate that
 // the durable store, its notifier seam, and the commit/merge helpers
 // behave.  Reuses the same `fake-indexeddb/auto` harness as

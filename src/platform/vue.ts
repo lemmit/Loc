@@ -16,7 +16,7 @@ import {
 //
 // Deployable contract mirrors `react`: `targets:` a backend, inherits
 // its contexts via enrichment, owns no database.
-// See docs/plans/vue-frontend-plan.md.
+// See docs/old/plans/vue-frontend-plan.md.
 // ---------------------------------------------------------------------------
 
 const vuePlatform: PlatformSurface = {

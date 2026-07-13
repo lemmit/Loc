@@ -470,7 +470,7 @@ function applyPolicyReadLevels(m: EnrichedSubdomainIR, sys: SystemIR): EnrichedS
 
 // ---------------------------------------------------------------------------
 // `policy { allow write <level> on X }` — the WRITE ladder (authorization
-// Phase 3 P3.1, docs/plans/authorization-phase3.md).  Derives each tenant-owned
+// Phase 3 P3.1, docs/old/plans/authorization-phase3.md).  Derives each tenant-owned
 // aggregate's `writeScopeFilter`: the predicate an INSTANCE mutation's command
 // load must satisfy, set ONLY when the write scope is strictly narrower than
 // the read scope (so the mutation load — which reuses the read filter on every
@@ -535,7 +535,7 @@ function applyPolicyWriteLevels(m: EnrichedSubdomainIR, sys: SystemIR): Enriched
 
 // ---------------------------------------------------------------------------
 // `policy { deny [write] on X }` — the DENY-WINS carve-out (authorization Phase 4,
-// docs/plans/authorization-phase4-deny.md).  For each denied aggregate:
+// docs/old/plans/authorization-phase4-deny.md).  For each denied aggregate:
 //   - deny READ  → append the always-false `buildDenyFilter` sentinel to the
 //     aggregate's read `contextFilters` (every backend ANDs these into every
 //     read, so the read set is empty → findAll `[]`, findById 404; and because

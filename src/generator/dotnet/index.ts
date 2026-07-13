@@ -794,7 +794,7 @@ function emitAggregate(
    *  call.  Byte-identical because the adapter wraps the same
    *  `emitCqrs` underneath. */
   emitCtx?: EmitCtx,
-  /** Source-map recorder (docs/plans/source-map-debug-kickoff.md) — present
+  /** Source-map recorder (docs/old/plans/source-map-debug-kickoff.md) — present
    *  only in system-mode emit, same discipline as `emitCtx`.  No-op when
    *  absent (legacy single-context path), so output stays byte-identical. */
   sourcemap?: SourceMapRecorder,

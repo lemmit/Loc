@@ -9,7 +9,7 @@ place instead of being inlined and duplicated across `where` clauses and
 guards.
 
 > **Status.** This ships the *core* of
-> [`docs/proposals/criterion.md`](proposals/criterion.md): the
+> [`docs/old/proposals/criterion.md`](old/proposals/criterion.md): the
 > `criterion` declaration, body validation, and **inline use** in every
 > existing boolean-expression position. A criterion referenced by a
 > [`retrieval`](#reification-retrieval-and-find-criteria)'s or a `find`'s
@@ -113,7 +113,7 @@ involved; criteria ride the existing `where`→SQL path on every backend.
 ## Reification (retrieval and find criteria)
 
 There are positions where a criterion is **not** dissolved into its host:
-when a [`retrieval`](proposals/retrieval.md)'s `where`, or a repository
+when a [`retrieval`](old/proposals/retrieval.md)'s `where`, or a repository
 `find`'s `where`, is *exactly* a named criterion reference. There the
 criterion **reifies** — the backend emits a named, constructed predicate
 object (the Specification pattern made real in generated code) that the
@@ -149,7 +149,7 @@ that is exactly one named criterion reifies; a *composed* one
 (`Active && InRegion(r)`) or an anonymous boolean expression (most
 invariants, preconditions, capability filters) has nothing to reify and
 stays inline. See
-[`docs/proposals/reified-criteria.md`](proposals/reified-criteria.md) for
+[`docs/old/proposals/reified-criteria.md`](old/proposals/reified-criteria.md) for
 the full design and the remaining-work register (the anonymous `filter`
 capability predicates and the principal/tenancy factory are the parts
 that still inline).
@@ -168,9 +168,9 @@ and workflow calls are already excluded by the grammar.
 
 ## See also
 
-- [`docs/proposals/criterion.md`](proposals/criterion.md) — the full
+- [`docs/old/proposals/criterion.md`](old/proposals/criterion.md) — the full
   design, including the deferred `findAll` / `when` / `from` surfaces.
-- [`docs/proposals/reified-criteria.md`](proposals/reified-criteria.md) —
+- [`docs/old/proposals/reified-criteria.md`](old/proposals/reified-criteria.md) —
   the Specification-reification design (shipped for retrieval criteria;
   the remaining-work register for `find` / capability-filter reification).
 - [`docs/views.md`](views.md) — views, whose `where` accepts a criterion.

@@ -3,7 +3,7 @@
 // Each corpus feature is authored ONCE as a platform-agnostic `.ddd` whose
 // deployable spells `platform: __PLATFORM__`; the harness swaps the token for
 // the value below to emit that feature on a given backend.  See
-// `docs/plans/global-test-coverage-plan.md` (Phase 0).
+// `docs/old/plans/global-test-coverage-plan.md` (Phase 0).
 
 /** Stable backend keys used by the manifest + coverage gate.  `vanilla` is the
  *  sole elixir backend (plain Ecto/Phoenix — the Ash foundation was removed). */

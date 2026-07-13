@@ -3,7 +3,7 @@
   "version": "0.0.0-experimental",
   "private": true,
   "type": "module",
-  "description": "Loom DAP (Debug Adapter Protocol) stdio server — wires the pure DAP resolution cores (src/dap/) over a generated .loom/sourcemap.json so an editor can set breakpoints / see stack frames in .ddd source. Ships the REMAP LAYER only: initialize/setBreakpoints/stackTrace handlers over the two shipped cores. The full delegating target-debugger proxy (spawning js-debug/coreclr/JDWP for launch/attach) is the remaining editor-verified frontier — see docs/proposals/source-map-and-debugging.md §6E.",
+  "description": "Loom DAP (Debug Adapter Protocol) stdio server — wires the pure DAP resolution cores (src/dap/) over a generated .loom/sourcemap.json so an editor can set breakpoints / see stack frames in .ddd source. Ships the REMAP LAYER only: initialize/setBreakpoints/stackTrace handlers over the two shipped cores. The full delegating target-debugger proxy (spawning js-debug/coreclr/JDWP for launch/attach) is the remaining editor-verified frontier — see docs/old/proposals/source-map-and-debugging.md §6E.",
   "main": "./index.js",
   "bin": {
     "ddd-dap": "./bin.js"

@@ -3,7 +3,7 @@ import { generateSystemFiles } from "../../_helpers/index.js";
 
 // ---------------------------------------------------------------------------
 // Vanilla-Phoenix aggregate `function` member emit (gap §11b,
-// docs/plans/vanilla-phoenix-gaps.md).
+// docs/old/plans/vanilla-phoenix-gaps.md).
 //
 // An aggregate `function passed(): bool = total > 100` is a pure domain helper
 // callable from op / precondition bodies (`precondition passed()`).  Before this

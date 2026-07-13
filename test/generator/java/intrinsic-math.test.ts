@@ -1,4 +1,4 @@
-// A3 math batch of the scalar-intrinsic catalogue (docs/plans/stdlib.md)
+// A3 math batch of the scalar-intrinsic catalogue (docs/old/plans/stdlib.md)
 // on the Java/Spring backend — abs/min/max on int/long/decimal/money and
 // round/floor/ceil on decimal/money.  In-memory rendering in derived
 // bodies (Math.* for the primitive receivers, the BigDecimal method API

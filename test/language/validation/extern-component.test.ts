@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseString } from "../../_helpers/parse.js";
 
 // ---------------------------------------------------------------------------
-// Extern component — the UI escape hatch (docs/proposals/
+// Extern component — the UI escape hatch (docs/old/proposals/
 // extern-component-escape-hatch.md, Tier 1).  A
 // `component X(...) extern from "<path>"` declares a typed param
 // contract but no `body:`; the generator imports the hand-written

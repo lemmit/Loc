@@ -1,5 +1,5 @@
 // Pins the SHIPPED two-tier error→status contract from
-// `docs/proposals/validation-error-extension.md` on the reference (Hono)
+// `docs/old/proposals/validation-error-extension.md` on the reference (Hono)
 // backend, so the route emitter can't silently drift from
 // `src/util/error-defaults.ts`.
 //

@@ -242,7 +242,7 @@ When a cross-backend runtime bug is fixed:
 
 > **Claimable follow-up tickets** (parallel-agent-ready — RS-9 gating, more
 > backends, the diffable spec artifact, corpus breadth) are enumerated in
-> [`plans/runtime-semantics-tier-followups.md`](plans/runtime-semantics-tier-followups.md).
+> [`plans/runtime-semantics-tier-followups.md`](old/plans/runtime-semantics-tier-followups.md).
 
 - **v1 (this doc):** the registry + well-formedness gate + the T0-tier rules
   gated statically across all five backends — **RS-2** (`enum-casing-parity`),

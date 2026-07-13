@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Java backend — persistence emission (slice S4 of
-// docs/plans/java-backend-implementation.md): JPA annotations bound to the
+// docs/old/plans/java-backend-implementation.md): JPA annotations bound to the
 // MigrationsIR-derived schema, the repository triple (domain port /
 // Spring Data interface with @Query JPQL / impl), Flyway migration files,
 // and the single-containment fail-fast gate.

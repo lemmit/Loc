@@ -391,5 +391,5 @@ elsewhere a bare event/payload name stays unresolved.  See the
 >
 > Still deferred: external brokers (redis / kafka / nats via
 > `channelSource`).  See
-> [`channels.md`](proposals/channels.md) and
-> [`workflow-and-applier.md`](proposals/workflow-and-applier.md).
+> [`channels.md`](old/proposals/channels.md) and
+> [`workflow-and-applier.md`](old/proposals/workflow-and-applier.md).

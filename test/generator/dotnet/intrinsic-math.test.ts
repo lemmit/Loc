@@ -1,4 +1,4 @@
-// A3 math batch of the scalar-intrinsic catalogue (docs/plans/stdlib.md):
+// A3 math batch of the scalar-intrinsic catalogue (docs/old/plans/stdlib.md):
 // numeric abs/min/max ({int,long,decimal,money}) + round/floor/ceil
 // ({decimal,money}) on the .NET backend — in-memory rendering in domain
 // bodies AND the EF LINQ `Where` path.  The catalogue rows live in

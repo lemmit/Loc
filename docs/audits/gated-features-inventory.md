@@ -147,7 +147,7 @@ the inheritance feature can express today.
 - **Partial:** dotnet, phoenix — parsed; runtime parity deferred (the `with audit` /
   `auditable` macros emit `contextStamps`; .NET has a partial auditable interceptor).
 - **Not gated** — co-hosting is allowed; closing this is Tier-1+ work, not Tier-0.
-- **Tracking:** `docs/plans/type-system-feature-migration.md` (DBT register).
+- **Tracking:** `docs/old/plans/type-system-feature-migration.md` (DBT register).
 
 ---
 
@@ -185,7 +185,7 @@ server-managed field access (`managed`/`token`/`internal`/`secret`).
   exposure, and `ddd snapshot` capture.
 - **Gated:** **phoenix** — the keyword is accepted but emits no trace code (a silent
   no-op); now a hard error. **Code:** `loom.provenanced-backend-unsupported`.
-- **Reference:** `docs/provenance.md`, `docs/plans/type-system-feature-migration.md` DBT-1.
+- **Reference:** `docs/provenance.md`, `docs/old/plans/type-system-feature-migration.md` DBT-1.
 
 ---
 
@@ -241,11 +241,11 @@ implementation yet. Filling one lands that concern's adapter for that backend.
 
 | Hook | Concern | Proposal |
 |---|---|---|
-| `emitAuthGate` | authorization gate | `docs/proposals/authorization.md` |
-| `emitAuditInit` | audit subsystem init | `docs/proposals/audit-and-logging.md` |
-| `emitCompliancePolicy` | sensitivity/compliance | `docs/proposals/sensitivity-and-compliance.md` |
-| `emitTenancyFilter` | multi-tenancy isolation | `docs/proposals/multi-tenancy-design-note.md` |
-| `emitI18nAdapter` | i18n catalog | `docs/proposals/i18n.md` |
+| `emitAuthGate` | authorization gate | `docs/old/proposals/authorization.md` |
+| `emitAuditInit` | audit subsystem init | `docs/old/proposals/audit-and-logging.md` |
+| `emitCompliancePolicy` | sensitivity/compliance | `docs/old/proposals/sensitivity-and-compliance.md` |
+| `emitTenancyFilter` | multi-tenancy isolation | `docs/old/proposals/multi-tenancy-design-note.md` |
+| `emitI18nAdapter` | i18n catalog | `docs/old/proposals/i18n.md` |
 
 The `ComposeServiceShape` reserved slots (`auditSidecar`, `policyInitCmd`,
 `i18nCatalogDir`) are the compose-side counterparts — also undefined everywhere.

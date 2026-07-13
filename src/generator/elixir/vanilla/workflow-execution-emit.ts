@@ -1395,7 +1395,7 @@ function renderWorkflowModule(
   // M13 — one `fragment()` anchor per statement, independent of position
   // (assembleBody's with-clause/emit bucketing REORDERS statements relative
   // to source order, so a single cursor-walked fragment can't be used — see
-  // docs/plans/source-map-and-debugging.md).  Each line's own text is put
+  // docs/old/plans/source-map-and-debugging.md).  Each line's own text is put
   // through the SAME `Context`-alias rewrite `aliasedBody` got, so the
   // anchor matches the final content verbatim.
   const statementRegions: { text: string; origin: OriginRef | undefined }[] = wantRegions

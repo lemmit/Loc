@@ -29,7 +29,7 @@ infrastructure a service touches, and only in the upper two tiers.
 > (Evans / Vernon / Cosmic-Python all agree) and can't stay stateless on
 > the change-tracking backends — so it lives in the orchestrator. The
 > design rationale + the five-backend idiom audit are in
-> [`proposals/domain-services.md`](proposals/domain-services.md).
+> [`proposals/domain-services.md`](old/proposals/domain-services.md).
 
 ## Surface
 

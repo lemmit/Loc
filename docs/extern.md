@@ -22,7 +22,7 @@ aggregate Order {
 
 > **Backend coverage.** `extern` *operations* now ship on **all five**
  backends — Hono, .NET, **Python**, **Java**, and **Elixir/Phoenix**.  As
-> `docs/proposals/extern-domain-extension-point.md` re-homes `extern` from an
+> `docs/old/proposals/extern-domain-extension-point.md` re-homes `extern` from an
 > injected application-layer handler to a domain-internal extension point, **all
 > five backends** now use the **domain hook (co-located, scaffold-once)** idiom:
 > the extern op is a member of the aggregate's own lifecycle, delegating to a

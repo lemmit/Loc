@@ -43,7 +43,7 @@ function firstApiHandle(ui: Ui): string | undefined {
  *  (`src/pages/orders/list.tsx`) — origin no longer drives it (slice 3a).  The
  *  emitted component / module identifiers stay the aggregate-qualified
  *  `OrderList` form via `pageEmitName` (output byte-identical).  See
- *  docs/proposals/unfoldable-page-scaffolding.md. */
+ *  docs/old/proposals/unfoldable-page-scaffolding.md. */
 export function areaForAggregate(agg: Aggregate, ui: Ui): Area {
   return area(plural(agg.name), pagesForAggregate(agg, ui));
 }

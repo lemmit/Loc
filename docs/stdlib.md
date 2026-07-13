@@ -12,7 +12,7 @@ ordinary expression-form top-level functions written in Loom on top of Layer 0,
 callable with nothing imported and inlined at each call site.
 
 This page is generated from the registries; see `docs/language.md` for the
-surrounding expression-language reference and `docs/plans/stdlib.md` for the
+surrounding expression-language reference and `docs/old/plans/stdlib.md` for the
 roadmap.
 
 ## Layer 0 — scalar intrinsics

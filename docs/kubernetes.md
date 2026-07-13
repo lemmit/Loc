@@ -201,7 +201,7 @@ the same process, so there is nothing to split.
   `Deployable`), per-platform workload defaults, in-cluster postgres,
   HPA/autoscaling, NetworkPolicy, securityContext hardening, Kustomize
   overlays, CI pipeline generation. See
-  [`proposals/kubernetes-helm.md`](proposals/kubernetes-helm.md) §6.
+  [`proposals/kubernetes-helm.md`](old/proposals/kubernetes-helm.md) §6.
 
 ## Testing
 

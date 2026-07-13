@@ -372,7 +372,7 @@ describe.skipIf(!ENABLED)(
         // (AwesomeAssertions/xunit) that this runner's NuGet environment does
         // not have cached, and build-time restore of them isn't reliable here.
         // Actually compiling the Tests project is a Tier-1 follow-up (see
-        // docs/plans/runtime-conformance-harness.md) once the CI NuGet feed
+        // docs/old/plans/runtime-conformance-harness.md) once the CI NuGet feed
         // carries the test packages.
         const testProj = path.join(proj, "Tests", "DotnetApi.Tests", "DotnetApi.Tests.csproj");
         expect(fs.existsSync(testProj), "generated Tests project").toBe(true);

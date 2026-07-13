@@ -8,8 +8,8 @@
 // (RS-8 `lines`). RS-6 (omitted bool create default) is now gated on Java too —
 // RST-10 boxed the defaulted create-DTO field and materialized the declared
 // default in the request→domain mapping, so `active` is omitted on create and
-// reads back `true`. See docs/plans/runtime-semantics-tier-followups.md
-// (RST-3) + docs/plans/a6.2-behavioral-tier-second-backend.md.
+// reads back `true`. See docs/old/plans/runtime-semantics-tier-followups.md
+// (RST-3) + docs/old/plans/a6.2-behavioral-tier-second-backend.md.
 //
 // RS-4 note: unlike the .NET fixture (which DROPS the placedAt assertion
 // because .NET serializes the instant with 7 fractional digits, tracked as

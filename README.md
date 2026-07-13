@@ -315,10 +315,10 @@ Per-feature references &mdash; [`auth.md`](docs/auth.md),
 derived-artifact directory, and
 [`license-faq.md`](docs/license-faq.md) for usage terms.
 
-In-flight design lives under [`docs/plans/`](docs/plans/); empirical
+In-flight design lives under [`docs/old/plans/`](docs/old/plans/); empirical
 snapshots live under [`docs/audits/`](docs/audits/); unadopted
-proposals live under `docs/proposals/` (not deployed to the docs
-site; [browse on GitHub](https://github.com/lemmit/Loc/tree/main/docs/proposals)).
+proposals live under `docs/old/proposals/` (not deployed to the docs
+site; [browse on GitHub](https://github.com/lemmit/Loc/tree/main/docs/old/proposals)).
 
 Plus [`experience_gathered.md`](experience_gathered.md) &mdash; running
 retrospective of design choices and gotchas; worth reading before

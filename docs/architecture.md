@@ -31,7 +31,7 @@ implicit cross-references between layers.
 may be written at the top level of any `.ddd` file in the import graph
 and composes into the project's single `system` — so a project can be
 split one-file-per-subdomain with the deployment in its own file. See
-[`proposals/implicit-system-composition.md`](./proposals/implicit-system-composition.md).
+[`proposals/implicit-system-composition.md`](old/proposals/implicit-system-composition.md).
 
 
 ## Domain layer

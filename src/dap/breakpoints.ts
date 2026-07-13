@@ -7,8 +7,8 @@
 // translate "set a breakpoint on this `.ddd` line" into the real
 // backend-native breakpoint(s) to arm.
 //
-// See docs/proposals/source-map-and-debugging.md §6E and
-// docs/plans/dap-node-debug.md (phase 8 first slice: this module). No DAP
+// See docs/old/proposals/source-map-and-debugging.md §6E and
+// docs/old/plans/dap-node-debug.md (phase 8 first slice: this module). No DAP
 // protocol wiring, no `@vscode/debugadapter` dependency, no
 // `packages/ddd-dap` workspace here — those are glue built on top of this
 // function later.

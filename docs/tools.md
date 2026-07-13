@@ -58,13 +58,13 @@ print as separate targets. A line with no mapping prints an informative
 message and still exits 0 — a future editor/DAP integration's primitive for
 translating "set a breakpoint on this `.ddd` line" into the real
 backend-native breakpoint(s) to arm. See
-[`docs/plans/dap-node-debug.md`](plans/dap-node-debug.md).
+[`docs/old/plans/dap-node-debug.md`](old/plans/dap-node-debug.md).
 
 ### `patch` — apply node-addressed model patches
 
 `ddd patch <file.ddd> --patches <patches.json>` applies a list of
 node-addressed model patches (the protocol from
-[`proposals/ai-authoring-loop.md`](proposals/ai-authoring-loop.md) §4 —
+[`proposals/ai-authoring-loop.md`](old/proposals/ai-authoring-loop.md) §4 —
 the same patch shape that `parse --json` / `generate --json`
 diagnostics carry in their `fixHint`). `--patches -` reads the JSON
 from stdin; the file may be a bare array or `{ "patches": [...] }`.
@@ -125,7 +125,7 @@ reachable document with the Langium workspace, and produces a single
 project from the merged model.  See
 [`language.md`](language.md#multi-file-projects-import-and-root-level-shared-types)
 for the language surface; the original design rationale is preserved
-at [`plans/multi-file-source.md`](plans/multi-file-source.md).
+at [`plans/multi-file-source.md`](old/plans/multi-file-source.md).
 
 `generate ts` / `generate dotnet` remain single-file: they read just
 the file you point them at, no import-graph walking.

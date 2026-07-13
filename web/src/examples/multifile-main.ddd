@@ -1,7 +1,7 @@
 // Multi-file Loom project — main.ddd imports shared/money.ddd and
 // shared/currency.ddd.  The root-level `valueobject` and `enum` in
 // those files are visible from every context as an ambient shared
-// kernel (see docs/plans/multi-file-source.md).
+// kernel (see docs/old/plans/multi-file-source.md).
 //
 // To browse the imported files: use the tabs above the editor.
 

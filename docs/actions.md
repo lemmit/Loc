@@ -4,7 +4,7 @@ A page or component `action` is a **named event handler**: a block of statements
 wired to a control (`onClick: submit`). Actions come in two flavours — a **sync**
 action that only touches local `state` (Proposal A, Stage 1), and an **async**
 action that invokes a remote command and discriminates its result with
-`match await` (Stage 2 of [`docs/proposals/async-actions-and-effects.md`](proposals/async-actions-and-effects.md)).
+`match await` (Stage 2 of [`docs/old/proposals/async-actions-and-effects.md`](old/proposals/async-actions-and-effects.md)).
 
 This page is the user-facing reference; the design rationale lives in the
 proposals. As always in Loom, every feature carries **two** examples — the `.ddd`
@@ -30,7 +30,7 @@ LiveView `handle_event("inc", …)`), referenced by name from the control. A nam
 (`onClick: e => { count += 1 }`) is rejected by `loom.effect-in-lambda`, so a
 render-tree lambda stays pure (a value projection like a `Table` column
 accessor). This keeps one effect-handler form across the language and, for the
-[MVU/Elmish study](proposals/fable-elmish-frontend.md), keeps the `Model → Html`
+[MVU/Elmish study](old/proposals/fable-elmish-frontend.md), keeps the `Model → Html`
 view pure so `Msg`/`update` project straight off the action list.
 
 ## What belongs in a lambda vs an action
@@ -219,7 +219,7 @@ Reads (`byId`, finders), sibling-action calls, pure helpers, and view-effects
   `state`, `match`, block-body lambdas.
 - [`docs/payloads.md`](payloads.md) — `error` records, the `or`-union carrier, the
   ProblemDetails wire.
-- [`docs/proposals/async-actions-and-effects.md`](proposals/async-actions-and-effects.md),
-  [`named-actions-and-stores.md`](proposals/named-actions-and-stores.md) — design
+- [`docs/old/proposals/async-actions-and-effects.md`](old/proposals/async-actions-and-effects.md),
+  [`named-actions-and-stores.md`](old/proposals/named-actions-and-stores.md) — design
   rationale and the remaining stages (`await`-required flip, `spawn` / `attempt`,
   `async` composition).

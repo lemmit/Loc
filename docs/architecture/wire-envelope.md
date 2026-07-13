@@ -19,7 +19,7 @@ envelope, and never a discriminated wrapper on the success path.
 | 4 | **Event-frame** | event stream / SSE / queue payload | `{ kind, occurredAt, correlationId, data }` |
 
 The HTTP **status code is the discriminator** between success (1/2) and
-error (3). This is [D16](../proposals/implementation-plan.md): an `or`
+error (3). This is [D16](../old/proposals/implementation-plan.md): an `or`
 union that resolves to a success value serialises as the bare value
 (shape 1) or `Paged<T>` (shape 2); it **never** wraps success in a
 `{ kind: "ok", value: … }` envelope. The client reads 2xx → parse as

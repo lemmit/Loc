@@ -88,7 +88,7 @@ jobs:
           LOOM_E2E: '1'
           LOOM_E2E_PARITY_ONLY: '1'
           # Phoenix is back in the parity set — the vanilla showcase gaps
-          # (docs/plans/vanilla-phoenix-gaps.md §11a–g, incl. OpenAPI-spec emission
+          # (docs/old/plans/vanilla-phoenix-gaps.md §11a–g, incl. OpenAPI-spec emission
           # and the project-wide WorkflowsController) are closed and
           # examples/showcase.ddd carries the elixir phoenixApi deployable again, so
           # parity now runs over all five backends (node/.NET/Java/Python/Phoenix).

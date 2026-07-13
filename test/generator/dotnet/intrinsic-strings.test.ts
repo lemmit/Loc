@@ -1,4 +1,4 @@
-// A2 string batch of the scalar-intrinsic catalogue (docs/plans/stdlib.md)
+// A2 string batch of the scalar-intrinsic catalogue (docs/old/plans/stdlib.md)
 // end-to-end on the .NET backend: toUpper/toLower/substring/startsWith/
 // endsWith/contains/replace/split from `.ddd` source through generateDotnet.
 // Semantics contract (src/util/intrinsics.ts): substring is 0-based CLAMPING

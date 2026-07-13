@@ -1,6 +1,6 @@
 // Phase 1 of the sensitivity feature — grammar slot, type-system
 // propagation, isAssignable narrowing, and FieldIR capture.  See
-// `docs/proposals/sensitivity-and-compliance.md`.
+// `docs/old/proposals/sensitivity-and-compliance.md`.
 
 import { AstUtils, EmptyFileSystem, URI } from "langium";
 import { beforeAll, describe, expect, it } from "vitest";

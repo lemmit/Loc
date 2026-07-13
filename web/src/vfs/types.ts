@@ -80,7 +80,7 @@ export type VfsListener = (changed: ReadonlyArray<VfsPath>) => void;
 // unaffected; only the *minimum* a given site can ask for has changed.
 //
 // This is the "interface segregation" step of the git-backed VFS
-// migration (see `docs/plans/playground-git-vfs-implementation.md`):
+// migration (see `docs/old/plans/playground-git-vfs-implementation.md`):
 // narrowing the worker loader to `ReadableVfs` makes its read-only
 // nature a type-level fact and unlocks the later removal of the
 // mutate/observe methods the worker never calls.

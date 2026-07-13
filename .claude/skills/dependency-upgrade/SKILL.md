@@ -5,7 +5,7 @@ description: >-
   surfaces it touches and gate BOTH — so it doesn't leave `main` red one merge
   later. Use this whenever the task is to bump a version: "bump <dep>",
   "upgrade to <runtime> N", "Langium 4 / TS 6 / Node 24 / Spring Boot 4 / PG18",
-  "run the currency batch", picking up `docs/proposals/dependency-upgrades.md`
+  "run the currency batch", picking up `docs/old/proposals/dependency-upgrades.md`
   or `docs/audits/stack-versions-audit.md`, clearing an `npm audit` finding, or
   a Dependabot-shaped task. Reach for it even when the user just says "update
   the postgres image", "move the generated apps to React 19", "bump the .NET
@@ -76,7 +76,7 @@ exist on disk** — only `stacks/{v1,v3,sv1,vue1,ng1}` are present — and lists
 `net10.0` and Spring Boot `4.1.0`). **Trust the on-disk emitter, not the audit
 doc.** Read the pin in the actual source before you decide it needs bumping.
 
-Then read `docs/proposals/dependency-upgrades.md` (the live backlog this skill
+Then read `docs/old/proposals/dependency-upgrades.md` (the live backlog this skill
 operationalizes) and skim `docs/audits/stack-versions-audit.md` for the
 intended-vs-latest deltas — treating its numbers as a hint, re-verified on disk.
 
@@ -199,7 +199,7 @@ apply the documented fix; if it's a new landmine, add an entry so the next bump
 inherits it.
 
 Then: update `docs/audits/stack-versions-audit.md` (snapshot date + new values)
-and tick the line in `docs/proposals/dependency-upgrades.md`. Run the fast suite
+and tick the line in `docs/old/proposals/dependency-upgrades.md`. Run the fast suite
 (`npm test`) and report exactly which gates you ran and their real results —
 never claim a green you didn't see. Commit in coherent per-surface commits; do
 **not** open a PR unless the user asks.
