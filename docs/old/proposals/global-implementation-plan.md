@@ -1,5 +1,12 @@
 # Global Implementation Plan — `docs/old/proposals/`
 
+> [!IMPORTANT]
+> **ARCHIVED / SUPERSEDED (2026-07-13).** This document's statuses, orderings, and
+> registers are frozen and no longer maintained. The live roadmap is
+> [`docs/new-plan/README.md`](../../new-plan/README.md); this file's open items are
+> dispositioned in [`docs/new-plan/coverage.md`](../../new-plan/coverage.md).
+> Use this file only as the design record.
+
 > **Status:** REFERENCE — the authoritative "what's next" for the whole
 > proposal corpus. **Rewritten 2026-06-10 from a code-verified audit**:
 > every claim below was checked directly against the grammar

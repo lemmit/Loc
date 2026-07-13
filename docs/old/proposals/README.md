@@ -1,5 +1,12 @@
 # Loom proposals — index
 
+> [!IMPORTANT]
+> **ARCHIVED / SUPERSEDED (2026-07-13).** This document's statuses, orderings, and
+> registers are frozen and no longer maintained. The live roadmap is
+> [`docs/new-plan/README.md`](../../new-plan/README.md); this file's open items are
+> dispositioned in [`docs/new-plan/coverage.md`](../../new-plan/coverage.md).
+> Use this file only as the design record.
+
 This directory is the live design corpus for Loom. Each doc is a
 single self-contained proposal (problem → proposed surface → grammar
 additions → lowering semantics → open questions). Some are shipped,
