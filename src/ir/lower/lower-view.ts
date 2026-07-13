@@ -4,12 +4,12 @@
 // lowerContext in ./lower.ts; builds on lower-members (lowerField).
 // -------------------------------------------------------------------------
 
-import { isWorkflow, type View } from "../../language/generated/ast.js";
+import { isProjection, isWorkflow, type View } from "../../language/generated/ast.js";
 import type { ExprIR, ViewIR, ViewSourceIR } from "../types/loom-ir.js";
 import { resolveBypass } from "./lower-capabilities.js";
 import { inferExprType, lowerExpr } from "./lower-expr.js";
 import { lowerField } from "./lower-members.js";
-import { type Env, inAggregate, inWorkflow } from "./lower-types.js";
+import { type Env, inAggregate, inProjection, inWorkflow } from "./lower-types.js";
 import { originFor } from "./origin.js";
 
 export function lowerView(view: View, env: Env): ViewIR {
@@ -19,12 +19,18 @@ export function lowerView(view: View, env: Env): ViewIR {
   // workflow source binds `this` to its state fields via `inWorkflow`
   // (workflow-instance-views.md), exactly as an aggregate source uses
   // `inAggregate` — the predicate machinery downstream is source-agnostic.
+  // A projection source binds `this` to its read-model state fields via
+  // `inProjection` (projection.md v1.1), the same source-agnostic path — so the
+  // full-form bind-follow works unchanged over a projection row.
   const source = view.source?.ref;
   let inner = env;
   let sourceIR: ViewSourceIR = { kind: "aggregate", name: "Unknown" };
   if (source && isWorkflow(source)) {
     inner = inWorkflow(env, source);
     sourceIR = { kind: "workflow", name: source.name };
+  } else if (source && isProjection(source)) {
+    inner = inProjection(env, source);
+    sourceIR = { kind: "projection", name: source.name };
   } else if (source) {
     inner = inAggregate(env, source);
     sourceIR = { kind: "aggregate", name: source.name };

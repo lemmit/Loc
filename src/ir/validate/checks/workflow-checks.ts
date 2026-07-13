@@ -979,14 +979,31 @@ export function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): v
         source: `${ctx.name}/${view.name}`,
       });
     }
-    // Resolve the source — an aggregate or a workflow's instance state
-    // (workflow-instance-views.md).  `columnSource` is the member set the
-    // filter's `this.<col>` refs resolve against (an aggregate's fields /
-    // containments / derived, or a workflow's `stateFields`); `agg` is set
-    // only for an aggregate source (the full-form bind path stays
-    // aggregate-only in v1).
+    // Resolve the source — an aggregate, a workflow's instance state
+    // (workflow-instance-views.md), or a projection's `<Proj>Row` read model
+    // (projection.md v1.1).  `columnSource` is the member set the filter's
+    // `this.<col>` refs resolve against (an aggregate's fields / containments /
+    // derived, or a workflow's / projection's `stateFields`).  Full-form
+    // bind-follow is aggregate-only for a workflow source (rejected below) but
+    // PERMITTED for a projection source — reading projection + repos at query
+    // time is legal because a view is a query, not a replayable fold.
     let columnSource: Pick<AggregateIR, "fields" | "contains" | "derived">;
-    if (view.source.kind === "workflow") {
+    if (view.source.kind === "projection") {
+      const proj = ctx.projections.find((p) => p.name === view.source.name);
+      if (!proj) {
+        diags.push({
+          severity: "error",
+          code: "loom.view-unknown-source",
+          message: `view '${view.name}': source '${view.source.name}' is not an aggregate, workflow, or projection in context '${ctx.name}'.`,
+          source: `${ctx.name}/${view.name}`,
+        });
+        continue;
+      }
+      // A projection's read-model schema is its `stateFields`; full-form
+      // bind-follow (`view.output`) is intentionally allowed here (no
+      // `fullform-unsupported` gate, unlike the workflow arm).
+      columnSource = { fields: proj.stateFields, contains: [], derived: [] };
+    } else if (view.source.kind === "workflow") {
       const wf = ctx.workflows.find((w) => w.name === view.source.name);
       if (!wf) {
         diags.push({
@@ -1028,7 +1045,7 @@ export function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): v
         diags.push({
           severity: "error",
           code: "loom.view-unknown-source",
-          message: `view '${view.name}': source '${view.source.name}' is not an aggregate in context '${ctx.name}'.`,
+          message: `view '${view.name}': source '${view.source.name}' is not an aggregate, workflow, or projection in context '${ctx.name}'.`,
           source: `${ctx.name}/${view.name}`,
         });
         continue;
