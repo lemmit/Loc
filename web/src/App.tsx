@@ -8,6 +8,7 @@ import { syncWorkspaceToLsp } from "./lsp/workspace-lsp-sync";
 import { examples, defaultExample, type LoomExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
 import type { GenerateOk, GenerateResult, VfsEntry, VirtualFile } from "./build/protocol";
+import { overlaySourcemapArtifacts } from "./build/strip-sourcemap";
 import type { BundleOk } from "./bundle/protocol";
 import {
   engineRegistry,
@@ -563,6 +564,8 @@ export default function App(): JSX.Element {
   function resetProject(): void {
     generationEpochRef.current++;
     dispatch({ type: "RESET" });
+    lastBundleReadyRef.current = null;
+    lastMappedGenerateRef.current = null;
     setDiagnostics([]);
     setSelectedPath(null);
     setPreviewBundle(null);
@@ -705,6 +708,23 @@ export default function App(): JSX.Element {
     hashTimerRef.current = setTimeout(() => writeHashSource(text), 300);
   };
 
+  // Map-carrying (sourcemap-on) counterpart of `generateSuccess` — the
+  // reducer's `generate` slot holds the flag-OFF result (Files pane must
+  // never show `.ts.map`/`.loom/sourcemap.json`; see `runGenerateStep`),
+  // so the standalone "Bundle" button (used whenever Live mode is off —
+  // the desktop default) can't read maps off pipeline state.
+  // `runGenerate`/`runFull` set this to whatever they'd have bundled
+  // themselves (the mapped generate directly, or the sourcemap-overlaid
+  // merged tree when persisted) so a later manual `runBundle()` bundles
+  // the same map-carrying set the auto-cascade would have. See
+  // `persistGeneratedTree` / `strip-sourcemap.ts`.
+  const lastBundleReadyRef = useRef<GenerateResult | null>(null);
+  // The map-carrying (sourcemap-on) generate of the CURRENT source, set at
+  // the end of `runGenerateStep` alongside the flag-off `result` it
+  // returns.  `null` whenever the mapped generate hasn't landed yet or
+  // failed — every consumer treats that as "bundle without maps" rather
+  // than blocking on it, so a sourcemap hiccup never breaks the boot.
+  const lastMappedGenerateRef = useRef<GenerateOk | null>(null);
   const autoGenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorCountRef = useRef(0);
   const generatingRef = useRef(false);
@@ -864,6 +884,11 @@ export default function App(): JSX.Element {
     }
     entries.push({ kind: "file", path: entryPath, content: sourceRef.current });
     await client.vfsWrite(entries);
+    // The flag-OFF generate — unchanged from before this feature existed,
+    // so it's what drives the Files pane / persist, and byte-identical
+    // output falls out of that by construction rather than needing a
+    // strip step to reproduce it.  See `strip-sourcemap.ts`'s module doc
+    // for why a single-generate-then-strip design was rejected.
     const result = await client.generateFromPath(entryPath);
     // Superseded by a newer project — drop the result so it neither
     // repaints the file view nor drives the live-mode bundle/boot cascade.
@@ -879,6 +904,22 @@ export default function App(): JSX.Element {
       );
     } else {
       setSelectedPath(null);
+    }
+    // Second, map-carrying generate of the SAME source — feeds ONLY the
+    // boot bundle (`runBundleStep` / `persistGeneratedTree`'s overlay),
+    // never the view/persist.  Best-effort: on failure the bundle just
+    // falls back to the (still fully functional, just not `.ddd`-
+    // debuggable) flag-off files — see `lastMappedGenerateRef`.
+    lastMappedGenerateRef.current = null;
+    if (result.ok) {
+      try {
+        const mapped = await client.generateFromPath(entryPath, { sourcemap: true });
+        if (epoch === generationEpochRef.current && mapped.ok) {
+          lastMappedGenerateRef.current = mapped;
+        }
+      } catch {
+        /* best-effort — see comment above */
+      }
     }
     return result;
   }
@@ -909,11 +950,18 @@ export default function App(): JSX.Element {
       return { hono: failed, react: null };
     }
     dispatch({ type: "BUNDLE_START" });
+    // `gen.files` carries the `.ts.map` sidecars (either straight from
+    // `runGenerateStep`'s raw result, or re-attached by
+    // `persistGeneratedTree`'s overlay) — `sourcemap: true` tells the
+    // engine to inline them into the Hono boot bundle so DevTools can
+    // chain a breakpoint back to `.ddd`.  Backend-only; the React run
+    // never sets this (see `PrepareInput.sourcemap`).
     const { hono: honoRes, react: reactRes } = await engine.prepare({
       files: gen.files,
       dependencies: emptyDependencySet(),
       honoEntry: entries.hono,
       reactEntry: entries.react ?? undefined,
+      sourcemap: true,
     });
     dispatch({ type: "BUNDLE_DONE", hono: honoRes, react: reactRes });
     return { hono: honoRes, react: reactRes };
@@ -1008,14 +1056,25 @@ export default function App(): JSX.Element {
     const store = workspace.store;
     if (!store || !result?.ok || result.files.length === 0) return null;
     try {
+      // `result` is always the flag-OFF generate (see `runGenerateStep`) —
+      // the git-backed workspace only ever sees exactly what it would
+      // without this feature.  No strip needed; there's nothing to strip.
       await applyGeneratedTree(store, result.files);
       const merged = await readGeneratedTree(store);
       if (merged.length === 0) return null;
-      return merged.map((f) => ({
+      const mergedFiles: VirtualFile[] = merged.map((f) => ({
         path: f.path,
         content: f.content,
         size: f.content.length,
       }));
+      // Overlay the map-carrying delta (this cycle's separate sourcemap
+      // generate, if it landed) onto the merged tree so the boot bundle
+      // built off it can still chain to `.ddd` — in-memory only, never
+      // persisted.  See `overlaySourcemapArtifacts` for the hand-edit
+      // limitation; falls back to the plain merged tree (no maps, still
+      // functionally correct) when the mapped generate isn't available.
+      const mapped = lastMappedGenerateRef.current;
+      return mapped ? overlaySourcemapArtifacts(mergedFiles, result.files, mapped.files) : mergedFiles;
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn("failed to version generated output:", err);
@@ -1029,7 +1088,17 @@ export default function App(): JSX.Element {
     if (persist && result?.ok) {
       const merged = await persistGeneratedTree(result);
       if (merged) bundleGen = { ...result, files: merged };
+    } else if (result?.ok && lastMappedGenerateRef.current) {
+      // Live-auto (no persist): bundle the map-carrying generate of this
+      // same source directly, so the boot bundle can still chain to
+      // `.ddd`.  Falls back to the flag-off `result` above when the
+      // mapped generate hasn't landed (best-effort, see `runGenerateStep`).
+      bundleGen = lastMappedGenerateRef.current;
     }
+    // Remember the map-carrying set a bundle right now would use, so a
+    // later manual "Bundle" click (Live mode off — the desktop default)
+    // still gets sourcemaps even though this generate didn't cascade.
+    lastBundleReadyRef.current = bundleGen;
     if (
       liveModeRef.current &&
       bundleGen?.ok &&
@@ -1044,8 +1113,9 @@ export default function App(): JSX.Element {
   runGenerateRef.current = () => runGenerate();
 
   async function runBundle(): Promise<void> {
-    if (!generateSuccess) return;
-    const result = await runBundleStep(generateSuccess);
+    const gen = lastBundleReadyRef.current;
+    if (!gen?.ok || gen.files.length === 0) return;
+    const result = await runBundleStep(gen);
     if (liveModeRef.current && result?.hono.ok) {
       await runBootStep(result.hono);
     }
@@ -1078,6 +1148,7 @@ export default function App(): JSX.Element {
     let bundleGen: GenerateOk = gen;
     const merged = await persistGeneratedTree(gen);
     if (merged) bundleGen = { ...gen, files: merged };
+    lastBundleReadyRef.current = bundleGen;
     const bundleRes = await runBundleStep(bundleGen);
     if (!bundleRes?.hono.ok) return;
     const booted = await runBootStep(bundleRes.hono);

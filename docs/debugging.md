@@ -51,11 +51,20 @@ This adds, alongside the normal output:
 
 ## 2. Native editor debugging (recommended)
 
-**In the browser playground:** the Run/boot path can bundle the in-browser
-Hono backend with an inline Source Map v3 chaining back to `.ddd` (opt-in,
-off by default so the "generated code" view and the download stay
-byte-identical) — open DevTools → Sources, find the backend's blob module,
-and set a breakpoint on a `.ddd` line; it binds via the inline map.
+**In the browser playground:** the Run/boot path always bundles the
+in-browser Hono backend with an inline Source Map v3 chaining back to
+`.ddd` — no toggle to find. Open DevTools → Sources, find the backend's
+blob module, and set a breakpoint on a `.ddd` line; it binds via the
+inline map. The Files pane and the git-backed workspace store stay
+byte-identical to a `sourcemap`-off generate: the playground generates
+the source you see/persist and the mapped boot bundle from two separate
+generate calls of the same source, so the maps never leak into what you
+view, hand-edit, or download (see `web/src/build/strip-sourcemap.ts`).
+One caveat: a hand edit to a generated file that carries a map sidecar
+isn't reflected in the *mapped* boot (the freshly-generated version is
+what DevTools can chain back to `.ddd`) — everything else in the
+workspace, including hand edits to files the flag doesn't touch, bundles
+as edited.
 
 Open the generated `out/` directory in VS Code. The emitted
 `.vscode/launch.json` already contains a config per backend. Pick one from
