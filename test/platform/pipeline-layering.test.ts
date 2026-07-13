@@ -249,9 +249,13 @@ describe("pipeline layering — value imports point one way", () => {
       "src/generator/dotnet/index.ts -> generator/react/",
       "src/generator/dotnet/index.ts -> generator/svelte/",
       "src/generator/dotnet/index.ts -> generator/vue/",
-      "src/generator/elixir/index.ts -> generator/react/",
-      "src/generator/elixir/index.ts -> generator/svelte/",
-      "src/generator/elixir/index.ts -> generator/vue/",
+      // Elixir's fullstack embed lives in the vanilla orchestrator (the only
+      // elixir emission) — it interleaves the SPA-project emission with the
+      // serve-wiring (Dockerfile spa-build stage, endpoint Plug.Static, router
+      // `/app` fallback) that the vanilla shell renderers own (M-T6.1).
+      "src/generator/elixir/vanilla/index.ts -> generator/react/",
+      "src/generator/elixir/vanilla/index.ts -> generator/svelte/",
+      "src/generator/elixir/vanilla/index.ts -> generator/vue/",
       "src/generator/java/index.ts -> generator/react/",
       "src/generator/java/index.ts -> generator/svelte/",
       "src/generator/java/index.ts -> generator/vue/",

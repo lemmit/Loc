@@ -62,6 +62,22 @@ function runMixTest(projDir: string, mirror: HexMirror | undefined): void {
   );
 }
 
+// Embedded-SPA host (M-T6.1): a `hosts:` React/Vue/Svelte deployable drops the
+// SPA project under `<proj>/assets/`.  `mix compile` (above) never touches it
+// (elixirc_paths is `lib` only), so the SPA's own tsc + vite build is proved
+// HERE on the host — the Phoenix-embedded equivalent of `generated-react-
+// build.yml`, gating the one path (`basePath: "/app"` + same-origin `/api`)
+// the standalone react-build matrix doesn't exercise.  No-op when no `assets/`
+// project exists (every non-hosting fixture).
+function runSpaBuild(assetsDir: string): void {
+  execSync("npm ci --prefer-offline --no-audit --no-fund || npm install", {
+    cwd: assetsDir,
+    stdio: "inherit",
+    timeout: 600_000,
+  });
+  execSync("npm run build", { cwd: assetsDir, stdio: "inherit", timeout: 600_000 });
+}
+
 // CI shards one fixture per matrix cell (see elixir-vanilla-build.yml) so a cold
 // dep compile fits the per-cell timeout and reseeds its own cache.
 // `LOOM_PHOENIX_VANILLA_BUILD_CASE=<fixture>.ddd` selects that single fixture;
@@ -147,6 +163,13 @@ describe.skipIf(!ENABLED)(
           // emitter wrote an ExUnit suite (+ test_helper.exs) — run it (DB-free).
           if (fs.existsSync(path.join(projDir, "test", "test_helper.exs"))) {
             runMixTest(projDir, mirror);
+          }
+
+          // Embedded-SPA host: build the `assets/` SPA project (tsc + vite) so
+          // the fullstack Phoenix path is compile-proved end to end.
+          const assetsDir = path.join(projDir, "assets");
+          if (fs.existsSync(path.join(assetsDir, "package.json"))) {
+            runSpaBuild(assetsDir);
           }
         }
       } finally {
