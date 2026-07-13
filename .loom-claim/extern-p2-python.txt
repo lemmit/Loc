@@ -1,0 +1,6 @@
+Phase 2 (extern (b)) — Python/FastAPI: re-home aggregate `operation X() extern`
+from the injected per-op handler registry to a domain extension point (a
+user-owned, scaffold-once hook that reaches the aggregate's private fields
+natively), deleting the injected registry apparatus. Mirrors the Elixir analog
+(#1841). Phase 1 `extern commandHandler`/`queryHandler` (#1850) is a DIFFERENT
+feature and is preserved.
