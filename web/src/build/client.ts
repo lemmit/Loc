@@ -103,18 +103,30 @@ export class LoomBuildClient {
   /** Generate from inline source text.  Legacy entry point — kept
    *  callable so existing callers don't break during the Phase 2
    *  migration.  New call sites should write to the VFS first and
-   *  use `generateFromPath` instead. */
-  generate(text: string): Promise<GenerateResult> {
-    return this.call("generate", { text }) as Promise<GenerateResult>;
+   *  use `generateFromPath` instead.
+   *
+   *  `opts.sourcemap` is opt-in (undefined by default) — see
+   *  `GenerateParams.sourcemap`. */
+  generate(text: string, opts?: { sourcemap?: boolean }): Promise<GenerateResult> {
+    return this.call("generate", { text, sourcemap: opts?.sourcemap }) as Promise<GenerateResult>;
   }
 
   /** Generate from a path inside the worker's VFS.  Pair with a
    *  prior `vfsWrite` of the entry file (typically
    *  `/workspace/main.ddd`); the returned promise resolves only
    *  after the worker ACKs the write, so chaining write→generate
-   *  through `await` preserves ordering without a separate barrier. */
-  generateFromPath(entryPath: string): Promise<GenerateResult> {
-    return this.call("generate", { entryPath }) as Promise<GenerateResult>;
+   *  through `await` preserves ordering without a separate barrier.
+   *
+   *  `opts.sourcemap` is opt-in (undefined by default) — see
+   *  `GenerateParams.sourcemap`. */
+  generateFromPath(
+    entryPath: string,
+    opts?: { sourcemap?: boolean },
+  ): Promise<GenerateResult> {
+    return this.call("generate", {
+      entryPath,
+      sourcemap: opts?.sourcemap,
+    }) as Promise<GenerateResult>;
   }
 
   /** Capture provenance rule snapshots — the playground equivalent of the

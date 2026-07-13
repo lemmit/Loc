@@ -118,6 +118,7 @@ export class VfsBundlerClient {
         generatedFiles: input.generatedFiles,
         rootDeps: input.rootDeps,
         externalReactRuntime: input.externalReactRuntime,
+        sourcemap: input.sourcemap,
         // Resolve the configured base (relative "./" on GH Pages) to an
         // absolute url against the main document.  The worker can't do
         // this — a relative fetch there resolves against the worker's

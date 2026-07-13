@@ -47,15 +47,23 @@ const services = createDddServices(EmptyFileSystem);
 const documents = services.shared.workspace.LangiumDocuments;
 const builder = services.shared.workspace.DocumentBuilder;
 
-async function parse(text: string): Promise<{ model?: Model; diagnostics: BuildDiagnostic[] }> {
+async function parse(
+  text: string,
+): Promise<{ model?: Model; diagnostics: BuildDiagnostic[]; sourceTexts: Map<string, string> }> {
   const existing = documents.all.find((d) => d.uri.toString() === DOC_URI.toString());
   if (existing) documents.deleteDocument(existing.uri);
   const doc = documents.createDocument(DOC_URI, text);
   await builder.build([doc], { validation: true });
   const diagnostics = collectDiagnostics([doc]);
+  // Keyed the same way the CLI keys it (`doc.uri.path`) — this is what
+  // `GenerateSystemOptions.sourceTexts` matches an `OriginRef`'s
+  // `SourceRef.path` against to render Source Map v3 `sourcesContent`.
+  // Cheap to always compute; only consumed when a caller opts into
+  // `sourcemap: true`.
+  const sourceTexts = new Map([[doc.uri.path, text]]);
   const errorCount = diagnostics.filter((d) => d.severity === "error").length;
-  if (errorCount > 0) return { diagnostics };
-  return { model: doc.parseResult?.value as Model, diagnostics };
+  if (errorCount > 0) return { diagnostics, sourceTexts };
+  return { model: doc.parseResult?.value as Model, diagnostics, sourceTexts };
 }
 
 /** Project-loader path — used when generate is called with an
@@ -66,17 +74,26 @@ async function parse(text: string): Promise<{ model?: Model; diagnostics: BuildD
  *  `mergeLoomModels`) so we don't double-lower in `handleGenerate`. */
 async function parseProject(
   entryPath: string,
-): Promise<{ loom?: LoomModel; diagnostics: BuildDiagnostic[] }> {
+): Promise<{
+  loom?: LoomModel;
+  diagnostics: BuildDiagnostic[];
+  sourceTexts: Map<string, string>;
+}> {
   try {
     const { all } = await loadProjectFromVfs(entryPath, services.shared, workerVfs);
     const diagnostics = collectDiagnostics(all);
+    // Every reachable document, keyed by `doc.uri.path` — the multi-file
+    // sibling of `parse()`'s single-entry map (mirrors the CLI's
+    // `parseProject` in `src/cli/main.ts`).
+    const sourceTexts = new Map<string, string>();
+    for (const doc of all) sourceTexts.set(doc.uri.path, doc.textDocument.getText());
     if (diagnostics.some((d) => d.severity === "error")) {
-      return { diagnostics };
+      return { diagnostics, sourceTexts };
     }
     // Compose the whole import graph as one project (top-level subdomains
     // fold into the lone system) — see implicit-system-composition.md.
     const merged = lowerProject(all.map((d) => d.parseResult?.value as Model));
-    return { loom: merged, diagnostics };
+    return { loom: merged, diagnostics, sourceTexts };
   } catch (err) {
     return {
       diagnostics: [
@@ -86,6 +103,7 @@ async function parseProject(
           source: "loom-project",
         },
       ],
+      sourceTexts: new Map(),
     };
   }
 }
@@ -119,24 +137,47 @@ function filesFromMap(map: Map<string, string>): VirtualFile[] {
   return out;
 }
 
-async function handleGenerateFromText(text: string): Promise<GenerateResult> {
+async function handleGenerateFromText(
+  text: string,
+  sourcemap?: boolean,
+): Promise<GenerateResult> {
   const parsed = await parse(text);
   if (!parsed.model) return { ok: false, diagnostics: parsed.diagnostics };
-  return generateFromAst({ model: parsed.model, diagnostics: parsed.diagnostics });
+  return generateFromAst({
+    model: parsed.model,
+    diagnostics: parsed.diagnostics,
+    sourcemap,
+    sourceTexts: parsed.sourceTexts,
+  });
 }
 
-async function handleGenerateFromPath(entryPath: string): Promise<GenerateResult> {
+async function handleGenerateFromPath(
+  entryPath: string,
+  sourcemap?: boolean,
+): Promise<GenerateResult> {
   const parsed = await parseProject(entryPath);
   if (!parsed.loom) return { ok: false, diagnostics: parsed.diagnostics };
-  return generateFromLoom({ loom: parsed.loom, diagnostics: parsed.diagnostics });
+  return generateFromLoom({
+    loom: parsed.loom,
+    diagnostics: parsed.diagnostics,
+    sourcemap,
+    sourceTexts: parsed.sourceTexts,
+  });
 }
 
 /** Single-document generation path.  Keeps the legacy single-file
  *  shape — `generateSystems(model)` does its own lower+enrich
- *  internally, matching pre-multi-file behaviour exactly. */
+ *  internally, matching pre-multi-file behaviour exactly.
+ *
+ *  `sourcemap`/`sourceTexts` are opt-in (both undefined by default) —
+ *  threading them into `generateSystems`'s `GenerateSystemOptions` is a
+ *  no-op unless a caller explicitly requests `sourcemap: true`, so the
+ *  default "generated code" view / download output is unaffected. */
 async function generateFromAst(input: {
   model: Model;
   diagnostics: BuildDiagnostic[];
+  sourcemap?: boolean;
+  sourceTexts?: Map<string, string>;
 }): Promise<GenerateResult> {
   let loom: EnrichedLoomModel;
   try {
@@ -152,7 +193,10 @@ async function generateFromAst(input: {
     // import-header note + the dynamic-import seam for future server-side gen).
     const { generateSystems } = await import("../../../src/system/index.js");
     return wrapGenerate("system", input.diagnostics, irDiags, () =>
-      generateSystems(input.model).files,
+      generateSystems(input.model, {
+        sourcemap: input.sourcemap,
+        sourceTexts: input.sourceTexts,
+      }).files,
     );
   }
   if (loom.contexts.length > 0) {
@@ -172,6 +216,8 @@ async function generateFromAst(input: {
 async function generateFromLoom(input: {
   loom: LoomModel;
   diagnostics: BuildDiagnostic[];
+  sourcemap?: boolean;
+  sourceTexts?: Map<string, string>;
 }): Promise<GenerateResult> {
   let loom: EnrichedLoomModel;
   try {
@@ -185,7 +231,10 @@ async function generateFromLoom(input: {
   if (loom.systems.length > 0) {
     const { generateSystemsFromLoom } = await import("../../../src/system/index.js");
     return wrapGenerate("system", input.diagnostics, irDiags, () =>
-      generateSystemsFromLoom(loom).files,
+      generateSystemsFromLoom(loom, {
+        sourcemap: input.sourcemap,
+        sourceTexts: input.sourceTexts,
+      }).files,
     );
   }
   // Multi-file project with only loose contexts (no `system` block)
@@ -338,8 +387,8 @@ self.onmessage = async (ev: MessageEvent<BuildRpcRequest>) => {
         const src = classifySource(req.params);
         response.result =
           src.kind === "text"
-            ? await handleGenerateFromText(src.text)
-            : await handleGenerateFromPath(src.entryPath);
+            ? await handleGenerateFromText(src.text, req.params.sourcemap)
+            : await handleGenerateFromPath(src.entryPath, req.params.sourcemap);
         break;
       }
       case "snapshot": {
