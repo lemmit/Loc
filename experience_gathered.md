@@ -1965,3 +1965,39 @@ gotcha that dictated the whole design.
   project (not a hand-written sketch) *before* the emitter shipped — exactly the
   "prove it or don't ship it" loop the plan calls for. A generator-only test
   would have gone green on both broken versions (it never compiles F#).
+
+## 24. Feliz multi-page routing — a non-last child absorbs its sibling as an argument (2026-07-13)
+
+Wiring multi-page routing into the Feliz target (Page union + `parseUrl` +
+`React.router` root over a combined Model, via `Feliz.Router`) turned up two
+F#-specific gotchas beyond §23's offside rule.
+
+- **A multi-line call that isn't the LAST child in a Feliz `[ … ]` list
+  absorbs the next sibling as a curried argument.** The QueryView emits
+  `View.remoteList … (fun rows -> <multi-line body>)`. When it was the last
+  child (every earlier example) it compiled; the moment a sibling followed it
+  (`Stack { QueryView{…}, Button{…} }`) Fable failed with *"This value is not a
+  function and cannot be applied"* — F# parsed `(View.remoteList … (fun …))
+  Html.button …` as APPLICATION, treating the button as an extra argument. Fix:
+  wrap the whole helper call in parens (`(View.remoteList … (fun …))`) so it
+  reads as one delimited list element. The lesson generalizes: any multi-line
+  emitted child that ends in a `)`-closed application must be paren-wrapped if
+  it can have a following sibling — being the last child is not something the
+  emitter can assume.
+
+- **`Router.navigate()` with zero args doesn't compile** — Feliz.Router's
+  `navigate` needs ≥1 segment. A `Button(to: "/")` (root) split to zero
+  segments and emitted `Router.navigate()` → *"not a function and cannot be
+  applied"*. Root navigation is `Router.navigate("")` (one empty segment →
+  `#/`). Caught by making the CI example a real 2-page app with a *back-home*
+  link, not just a forward link — the forward case (`/products`) hid it.
+
+- **Combined flat Model, unique-name assumption.** Multi-page state/reads
+  flatten into one Model (the walker resolves `model.<Field>` with no page
+  context, so per-page sub-models would need a walker seam). Deduped by name;
+  same-named fields across pages share a cell. Documented as a v1 caveat rather
+  than built around — most multi-page apps use distinct field names.
+
+Both compile failures were caught by `dotnet fable` against the REAL generated
+2-page project before the emitter shipped — the same prove-it loop as §23. A
+generator-only test would have gone green on both broken versions.

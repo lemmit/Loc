@@ -115,7 +115,10 @@ function primitiveQueryView(c: Ctx): string {
   const error = oneLineEl(c.errorJsx as string);
   const empty = oneLineEl(c.emptyJsx as string);
   const data = asElement(c.dataJsx as string);
-  return `View.remoteList model.${field} (${loading}) (${error}) (${empty}) (fun ${binding} ->\n${data})`;
+  // Wrap the whole call in parens so it reads as ONE list element: when a
+  // QueryView has a sibling AFTER it, the trailing multi-line lambda would
+  // otherwise let F# absorb the next child as an extra curried argument.
+  return `(View.remoteList model.${field} (${loading}) (${error}) (${empty}) (fun ${binding} ->\n${data}))`;
 }
 
 const RENDERERS: Record<string, (c: Ctx) => string> = {

@@ -117,6 +117,15 @@ in hand — not before F# output exists.
    gate now covers the wire layer end to end.
 
 ## Known gaps / next
+- ✅ **Multi-page routing.** A >1-page ui emits a `Page` union + `parseUrl` +
+  a `React.router` root over a **combined Model** (`CurrentPage` + all pages'
+  deduped state/reads), per-page `<page>View` functions, and `UrlChanged`
+  wiring — via `Feliz.Router`. Cross-page nav (`Button(to:)` / `navigate`) →
+  `Router.navigate(<segments>)`. Single-page uis stay byte-identical (no
+  router, no Page union). All Fable + vite verified; the CI example is a
+  2-page routed app. **Caveat:** the flat combined Model assumes distinct
+  state-field names across pages (same-named fields share one cell); per-page
+  sub-models are a follow-up if that bites.
 - The procedural pack has 8 primitives (Stack/Group/Heading/Text/Button + Card/
   Badge/Divider) + `QueryView` (via the `View.remoteList` helper); grows
   example-by-example.
