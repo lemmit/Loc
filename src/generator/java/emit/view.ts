@@ -1,5 +1,6 @@
 import type {
   EnrichedBoundedContextIR,
+  ExprIR,
   ViewIR,
   WireField,
   WorkflowIR,
@@ -137,10 +138,27 @@ export function renderJavaViews(
     repoAggs.add(aggName);
     const findName = lowerFirst(view.name);
     if (view.output) {
-      if (view.output.auxiliaries.length > 0) {
-        throw new Error(
-          `java views: view '${view.name}' uses cross-aggregate follows — not yet implemented on the java backend.`,
-        );
+      // Cross-aggregate `follows`: one `Map<idValue, Agg>` per foreign
+      // aggregate (deduped), each loaded via its own tenancy-scoped `findAll()`;
+      // the bind renderer rewrites `X id` traversals into map lookups.  Empty
+      // when the view has no follows (the map lines / rewrite are then no-ops).
+      const pathToMap = new Map<string, FollowMap>();
+      const mapLines: string[] = [];
+      const aggMapVar = new Map<string, string>();
+      for (const aux of view.output.auxiliaries) {
+        repoAggs.add(aux.aggName);
+        let mapVar = aggMapVar.get(aux.aggName);
+        if (!mapVar) {
+          mapVar = `${lowerFirst(aux.aggName)}ById`;
+          aggMapVar.set(aux.aggName, mapVar);
+          imports.add("java.util.Map");
+          imports.add("java.util.stream.Collectors");
+          mapLines.push(
+            `        var ${mapVar} = ${repoField(aux.aggName)}.findAll().stream()`,
+            `            .collect(Collectors.toMap(__a -> __a.id().value(), __a -> __a));`,
+          );
+        }
+        pathToMap.set(aux.path.join("."), { mapVar, aggName: aux.aggName });
       }
       // Row record from the declared fields + bind expressions.
       const rowName = `${upperFirst(view.name)}Row`;
@@ -167,12 +185,16 @@ export function renderJavaViews(
       });
       const args = view.output.binds.map((b) => {
         collectJavaExprImports(b.expr, imports);
-        const rendered = renderJavaExpr(b.expr, { thisName: "a", accessorProps: true });
+        const rendered =
+          pathToMap.size > 0
+            ? renderBindWithFollows(b.expr, "a", pathToMap)
+            : renderJavaExpr(b.expr, { thisName: "a", accessorProps: true });
         return domainToWire(b.type, rendered);
       });
       methods.push(
         `    public List<${rowName}> ${findName}() {`,
         ...gateLinesFor(view),
+        ...mapLines,
         `        return ${repoField(aggName)}.${findName}().stream()`,
         `            .map(a -> new ${rowName}(${args.join(", ")}))`,
         `            .toList();`,
@@ -440,6 +462,68 @@ export function renderJavaViews(
 
 function repoField(aggName: string): string {
   return `${lowerFirst(plural(aggName))}Repository`;
+}
+
+// ---------------------------------------------------------------------------
+// Cross-aggregate view `follows` (`output.auxiliaries`) — the java analogue of
+// the node / python / dotnet bulk-load-and-rewrite.  Each auxiliary's foreign
+// aggregate is loaded via its own (already tenancy-scoped) `findAll()` into a
+// `Map<idValue, Agg>` keyed by `.id().value()`; a bind expression that follows
+// an `X id` into that aggregate rewrites the member access to a map lookup.
+// `findAll()` is used rather than a bulk-by-ids method so the read stays behind
+// the foreign repository's principal `@Query` scoping (a `findAllById` on the
+// Spring-Data interface would bypass it).
+// ---------------------------------------------------------------------------
+
+interface FollowMap {
+  mapVar: string;
+  aggName: string;
+}
+
+/** Local copy of the lowering's `idFollowPath` for emission-time path checks —
+ *  the chain of Id-typed field accesses from the source row outward. */
+function idFollowPath(e: ExprIR): string[] | undefined {
+  if (e.kind === "ref" && e.type?.kind === "id") return [e.name];
+  if (e.kind === "member" && e.receiverType.kind === "id") {
+    const inner = idFollowPath(e.receiver);
+    if (!inner) return undefined;
+    return [...inner, e.member];
+  }
+  return undefined;
+}
+
+/** Render an Id-typed expression to its raw key value (`a.customerId().value()`
+ *  for a single hop; each intermediate hop resolves through its map first). */
+function renderIdReceiver(e: ExprIR, thisName: string, pathToMap: Map<string, FollowMap>): string {
+  if (e.kind === "ref") return `${thisName}.${e.name}().value()`;
+  if (e.kind === "member" && e.receiverType.kind === "id") {
+    const path = idFollowPath(e.receiver);
+    const map = path && pathToMap.get(path.join("."));
+    if (map) {
+      const inner = renderIdReceiver(e.receiver, thisName, pathToMap);
+      return `${map.mapVar}.get(${inner}).${e.member}().value()`;
+    }
+  }
+  return renderJavaExpr(e, { thisName, accessorProps: true });
+}
+
+/** Render a view bind expression, rewriting a top-level `X id` follow
+ *  (`customerId.name`) into `<map>.get(<key>).name()`.  Non-follow shapes fall
+ *  back to the standard java expression renderer. */
+function renderBindWithFollows(
+  e: ExprIR,
+  thisName: string,
+  pathToMap: Map<string, FollowMap>,
+): string {
+  if (e.kind === "member" && e.receiverType.kind === "id") {
+    const path = idFollowPath(e.receiver);
+    const map = path && pathToMap.get(path.join("."));
+    if (map) {
+      const recv = renderIdReceiver(e.receiver, thisName, pathToMap);
+      return `${map.mapVar}.get(${recv}).${e.member}()`;
+    }
+  }
+  return renderJavaExpr(e, { thisName, accessorProps: true });
 }
 
 /** The correlation id's value type, off the `source: "id"` wire field. */

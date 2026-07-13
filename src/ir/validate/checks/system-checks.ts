@@ -1259,21 +1259,15 @@ export function validateJavaContainmentSupport(sys: SystemIR, diags: LoomDiagnos
 }
 
 // ---------------------------------------------------------------------------
-// Java read-model shapes the backend's view / workflow-instance / projection
-// emitters cannot render.  Each was an ungated `throw new Error` that crashed
-// codegen mid-emit on valid `.ddd`; gated here so the model fails at validation
-// with a clear diagnostic instead (the emitter throws stay as unreachable
-// backstops).  The three shapes:
-//   - a cross-aggregate view `follows` (`output.auxiliaries`) — the view
-//     emitter would bulk-load foreign aggregates (java/emit/view.ts);
-//   - a VO- / entity-typed saga instance-view field — the InstanceResponse DTO
-//     rides the enums / ids / valueobjects wire wildcards, and a VO- or
-//     entity-typed state field would need a `<Vo>Response` / `<Part>Response`
-//     DTO those packages don't carry (java/emit/workflow-instances.ts);
-//   - a VO- / entity-typed projection row field — the same DTO constraint on
-//     the read-model row (java/emit/projection-reads.ts).
-// Java DOES emit plain views / workflows / projections (scalars / ids / enums),
-// so only these three shapes gate.
+// Java read-model backstop gates.  Cross-aggregate view `follows` and VO-typed
+// read-model fields (workflow-instance / projection / view) are now emitted
+// (java/emit/view.ts + the read-model VO records in java/emit/dto.ts).  What
+// remains here is a defensive gate for an ENTITY (containment-part) read-model
+// field: it would need a `<Part>Response` DTO the emitter doesn't build, but a
+// part type never resolves in workflow / projection scope, so the gate is an
+// unreachable backstop mirroring the emitters' `guardInstanceField` /
+// `guardProjectionField` throws — kept so the shape fails honestly rather than
+// crashing if that scope rule ever changes.
 // ---------------------------------------------------------------------------
 
 /** Peel optional / array wrappers to the leaf type kind — the emitters' own
@@ -1298,22 +1292,7 @@ export function validateJavaReadModelShapes(sys: SystemIR, diags: LoomDiagnostic
       const ctx = ctxByName.get(ctxName);
       if (!ctx) continue;
 
-      // (1) Cross-aggregate view `follows`.
-      for (const view of ctx.views) {
-        if ((view.output?.auxiliaries.length ?? 0) === 0) continue;
-        diags.push({
-          severity: "error",
-          message:
-            `Deployable '${dep.name}' (platform java) hosts view '${ctxName}.${view.name}' with a ` +
-            `cross-aggregate 'follows' (an output bind reaches another aggregate via 'X id') — not ` +
-            `yet implemented on the java backend. Drop the follow (keep the view on the source ` +
-            `aggregate's own fields), or host it on a node / dotnet / python deployable.`,
-          source: `${sys.name}/${dep.name}`,
-          code: "loom.java-view-follows-unsupported",
-        });
-      }
-
-      // (2) Entity-typed saga instance-view field.  VO-typed fields now emit
+      // (1) Entity-typed saga instance-view field.  VO-typed fields now emit
       // (their `<Vo>Response` is co-located in application.workflows); an entity
       // (containment part) field would need a `<Part>Response` DTO — but a part
       // type never resolves in workflow scope, so this is a defensive backstop
@@ -1335,7 +1314,7 @@ export function validateJavaReadModelShapes(sys: SystemIR, diags: LoomDiagnostic
         }
       }
 
-      // (3) Entity-typed projection row field — same defensive backstop as (2).
+      // (2) Entity-typed projection row field — same defensive backstop as (1).
       for (const proj of ctx.projections) {
         for (const f of proj.wireShape ?? []) {
           if (wireLeafKind(f.type) !== "entity") continue;

@@ -931,11 +931,17 @@ hosting (`loom.java-fullstack-unsupported` — the `ui:` embedded-SPA
 mount is implemented), resource-op clients, a **principal-referencing
 capability filter on a non-relational aggregate**
 (`loom.context-filter-unsupported` — each half ships alone; only the
-actor + jsonb intersection is deferred), provenance/audited (gated —
-no runtime emitted; the node and .NET backends do implement these), and
-a **cross-aggregate view `follows`** (`loom.java-view-follows-unsupported`
-— an output bind reaching another aggregate via `X id`).  See
+actor + jsonb intersection is deferred), and provenance/audited (gated —
+no runtime emitted; the node and .NET backends do implement these).  See
 `docs/old/plans/java-backend-implementation.md` for the execution record.
+
+**Cross-aggregate view `follows` IS implemented.** A full-form view whose
+output bind reaches another aggregate via `X id` (`customerName =
+customerId.name`, single- or multi-hop) bulk-loads each foreign aggregate
+through its own (tenancy-scoped) `findAll()` into a `Map<idValue, Agg>`
+and rewrites the traversal to a map lookup — the java analogue of the
+node / python / .NET pattern (`findAll()` rather than a bulk-by-ids method
+so the read stays behind the foreign repository's principal `@Query`).
 
 **Value-object read-model fields ARE implemented.** A VO-typed
 workflow-instance field, projection row field, or view Row field emits

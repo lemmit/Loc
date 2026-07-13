@@ -1,13 +1,14 @@
 // ---------------------------------------------------------------------------
-// Java read-model shapes (M-T6.4).  Two shapes that used to CRASH java codegen
-// with an ungated `throw new Error`:
+// Java read-model shapes (M-T6.4).  Shapes that used to CRASH java codegen with
+// an ungated `throw new Error`, now IMPLEMENTED:
 //
-//   1. VO-typed workflow-instance / projection read-model fields — now EMIT: the
-//      `<Vo>Response` record is co-located in application.workflows and the
-//      InstanceResponse / ProjectionResponse DTOs reference it (parity with the
-//      aggregate response path).
-//   2. cross-aggregate view `follows` — still gated honestly with
-//      `loom.java-view-follows-unsupported` (feature not yet on java).
+//   1. VO-typed workflow-instance / projection / view read-model fields — the
+//      `<Vo>Response` record is co-located in the consuming package
+//      (application.workflows / application.views) and the read-model DTO / Row
+//      references it (parity with the aggregate response path).
+//   2. cross-aggregate view `follows` — the foreign aggregate is bulk-loaded via
+//      its tenancy-scoped `findAll()` into a `Map<idValue, Agg>` and the `X id`
+//      traversal is rewritten to a map lookup.
 //
 // The entity (containment-part) variant of the read-model fields stays a
 // defensive `loom.java-*-field-unsupported` backstop, but a part type never
@@ -160,13 +161,22 @@ describe("java read-model VO fields (M-T6.4 implementation)", () => {
   });
 });
 
-describe("java cross-aggregate view follows (still gated, M-T6.4)", () => {
-  it("gates a cross-aggregate view follows on java", async () => {
-    expect(await codesFor(viewFollowsDdd("java"))).toContain("loom.java-view-follows-unsupported");
-  });
-  it("does not gate the same view follows on node", async () => {
-    expect(await codesFor(viewFollowsDdd("node"))).not.toContain(
+describe("java cross-aggregate view follows (M-T6.4 implementation)", () => {
+  it("no longer gates a cross-aggregate view follows on java", async () => {
+    expect(await codesFor(viewFollowsDdd("java"))).not.toContain(
       "loom.java-view-follows-unsupported",
     );
+  });
+
+  it("bulk-loads the foreign aggregate and rewrites the follow to a map lookup", async () => {
+    const files = await generateSystemFiles(viewFollowsDdd("java"));
+    const svc = files.get(`${VIEW_ROOT}/OrdersViews.java`)!;
+    // Foreign aggregate loaded via its tenancy-scoped findAll() into an id map.
+    expect(svc).toContain("var customerById = customersRepository.findAll().stream()");
+    expect(svc).toContain("Collectors.toMap(__a -> __a.id().value(), __a -> __a)");
+    // The `customerId.name` follow is rewritten to a map lookup by id value.
+    expect(svc).toContain("customerById.get(a.customerId().value()).name()");
+    // The foreign repository is injected.
+    expect(svc).toContain("CustomerRepository customersRepository");
   });
 });
