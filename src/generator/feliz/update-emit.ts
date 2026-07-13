@@ -15,12 +15,15 @@ export function msgCase(action: string): string {
 }
 
 /** The `Model` record type declaration — one field per state cell, plus one
- *  `Remote<'T>` field per api read (its loading/error/loaded envelope). */
+ *  `Remote<'T>` field per api read (its loading/error/loaded envelope).  When
+ *  `routed`, a `CurrentPage: Page` field leads (multi-page routing). */
 export function renderModel(
   state: readonly StateFieldIR[],
   reads: readonly FelizRead[] = [],
+  routed = false,
 ): string {
   const fields = [
+    ...(routed ? ["    CurrentPage: Page"] : []),
     ...state.map((f) => `    ${upperFirst(f.name)}: ${typeToFs(f.type)}`),
     ...reads.map((r) => `    ${r.field}: Remote<${r.resultType}>`),
   ];
@@ -29,12 +32,15 @@ export function renderModel(
 }
 
 /** `let init () = { … }, <Cmd>` — reads start `Loading` and fire their fetch
- *  `Cmd` at init (batched when there is more than one). */
+ *  `Cmd` at init (batched when there is more than one).  When `routed`, the
+ *  initial `CurrentPage` is parsed from the current URL. */
 export function renderInit(
   state: readonly StateFieldIR[],
   reads: readonly FelizRead[] = [],
+  routed = false,
 ): string {
   const inits = [
+    ...(routed ? ["      CurrentPage = parseUrl (Router.currentUrl ())"] : []),
     ...state.map((f) => {
       const ctx: FsExprCtx = { stateNames: new Set(), locals: new Set() };
       const v = f.init ? renderFsExpr(f.init, ctx) : fsZeroValue(f.type);
@@ -54,9 +60,15 @@ export function renderInit(
 }
 
 /** The `Msg` union — one case per action, plus one `Loaded` case per read
- *  carrying the decoded `Result<'T, string>`. */
-export function renderMsg(actions: readonly ActionIR[], reads: readonly FelizRead[] = []): string {
+ *  carrying the decoded `Result<'T, string>`.  When `routed`, a `UrlChanged`
+ *  case carries the new URL segments. */
+export function renderMsg(
+  actions: readonly ActionIR[],
+  reads: readonly FelizRead[] = [],
+  routed = false,
+): string {
   const cases = [
+    ...(routed ? ["  | UrlChanged of string list"] : []),
     ...actions.map((a) => {
       const p = a.params[0];
       return p ? `  | ${msgCase(a.name)} of ${typeToFs(p.type)}` : `  | ${msgCase(a.name)}`;
@@ -92,13 +104,18 @@ function renderUpdateStmt(stmt: ActionIR["body"][number], ctx: FsExprCtx): strin
 }
 
 /** The `update` function — one arm per action, plus two arms per read (the
- *  decoded `Ok` stores `Loaded`, the `Error` stores `LoadError`). */
+ *  decoded `Ok` stores `Loaded`, the `Error` stores `LoadError`).  When
+ *  `routed`, a `UrlChanged` arm re-parses the URL into `CurrentPage`. */
 export function renderUpdate(
   actions: readonly ActionIR[],
   state: readonly StateFieldIR[],
   reads: readonly FelizRead[] = [],
+  routed = false,
 ): string {
   const stateNames = new Set(state.map((s) => s.name));
+  const routeArms = routed
+    ? ["  | UrlChanged segments -> { model with CurrentPage = parseUrl segments }, Cmd.none"]
+    : [];
   const actionArms = actions.map((a) => {
     const p = a.params[0];
     const ctx: FsExprCtx = {
@@ -114,7 +131,7 @@ export function renderUpdate(
       `  | ${r.msgCase} (Ok data) -> { model with ${r.field} = Loaded data }, Cmd.none\n` +
       `  | ${r.msgCase} (Error e) -> { model with ${r.field} = LoadError e }, Cmd.none`,
   );
-  const arms = [...actionArms, ...readArms];
+  const arms = [...routeArms, ...actionArms, ...readArms];
   if (arms.length === 0) {
     return "let update (msg: Msg) (model: Model) =\n  match msg with\n  | NoOp -> model, Cmd.none";
   }

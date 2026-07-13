@@ -16,6 +16,7 @@ import type {
   UiIR,
 } from "../../ir/types/loom-ir.js";
 import { lines } from "../../util/code-builder.js";
+import { lowerFirst, upperFirst } from "../../util/naming.js";
 import { walkBody } from "../_walker/walker-core.js";
 import { felizTarget } from "./feliz-target.js";
 import { felizPack } from "./pack.js";
@@ -68,17 +69,18 @@ function dispatchWrappers(page: PageIR, used: ReadonlySet<string>): string[] {
     });
 }
 
-/** Render one page's `view` function.  Threads the ui's api params + reachable
- *  aggregates so the shared walker's api-hook detection fires on
+/** Render one page's view function under `fnName` (`view` for a single-page
+ *  ui, `<pageCamel>View` under routing).  Threads the ui's api params +
+ *  reachable aggregates so the shared walker's api-hook detection fires on
  *  `<param>.<agg>.all` reads (the Feliz seams project them to Model reads). */
-function renderView(
+function renderPageView(
   page: PageIR,
   ui: UiIR,
   aggregatesByName: ReadonlyMap<string, AggregateIR>,
+  fnName: string,
 ): string {
-  if (!page.body) {
-    return `let view (model: Model) (dispatch: Msg -> unit) =\n    Html.none`;
-  }
+  const head = `let ${fnName} (model: Model) (dispatch: Msg -> unit) =`;
+  if (!page.body) return `${head}\n    Html.none`;
   const stateNames = new Set(page.state.map((s) => s.name));
   const result = walkBody(
     page.body,
@@ -93,55 +95,146 @@ function renderView(
   const wrappers = dispatchWrappers(page, result.usedActions ?? new Set());
   const body = indentBlock(result.tsx, 4);
   const preamble = wrappers.length > 0 ? `${wrappers.join("\n")}\n` : "";
-  return `let view (model: Model) (dispatch: Msg -> unit) =\n${preamble}${body}`;
+  return `${head}\n${preamble}${body}`;
 }
 
-/** The api reads the ui's wired page (`pages[0]`) issues — the single source
- *  both `App.fs` (wire layer + MVU) and `App.fsproj` (package refs) read. */
+// --- Multi-page routing helpers (Feliz.Router) ----------------------------
+
+/** F# `Page` union case for a page (`page Products` → `Products`). */
+function pageCase(page: PageIR): string {
+  return upperFirst(page.name);
+}
+/** Per-page view function name (`page Products` → `productsView`). */
+function pageViewFn(page: PageIR): string {
+  return `${lowerFirst(page.name)}View`;
+}
+/** URL segments of a page's `route:` — `/` → `[]`, `/orders/:id` → the F# list
+ *  pattern `[ "orders"; _ ]` (a `:param` segment matches as a wildcard). */
+function routePattern(route: string | undefined): string {
+  const segs = (route ?? "/").split("/").filter((s) => s.length > 0);
+  if (segs.length === 0) return "[]";
+  return `[ ${segs.map((s) => (s.startsWith(":") ? "_" : `"${s}"`)).join("; ")} ]`;
+}
+
+/** The `Page` union + `parseUrl` — URL segments → the active `Page`.  Arms are
+ *  emitted in page order; the first page is the catch-all fallback. */
+function renderRouting(pages: readonly PageIR[]): string {
+  const union = `type Page =\n${pages.map((p) => `  | ${pageCase(p)}`).join("\n")}`;
+  const arms = pages.map((p) => `  | ${routePattern(p.route)} -> ${pageCase(p)}`);
+  const parse =
+    `let parseUrl (segments: string list) : Page =\n  match segments with\n` +
+    `${arms.join("\n")}\n  | _ -> ${pageCase(pages[0]!)}`;
+  return `${union}\n\n${parse}`;
+}
+
+/** The root `view` — a `React.router` that dispatches `UrlChanged` and renders
+ *  the active page's view function. */
+function renderRootView(pages: readonly PageIR[]): string {
+  const arms = pages.map((p) => `      | ${pageCase(p)} -> ${pageViewFn(p)} model dispatch`);
+  return [
+    "let view (model: Model) (dispatch: Msg -> unit) =",
+    "  React.router [",
+    "    router.onUrlChanged (UrlChanged >> dispatch)",
+    "    router.children [",
+    "      match model.CurrentPage with",
+    ...arms,
+    "    ]",
+    "  ]",
+  ].join("\n");
+}
+
+/** The api reads a ui issues, across ALL its pages (deduped by Model field) —
+ *  the single source both `App.fs` (wire layer + MVU) and `App.fsproj` (package
+ *  refs) read. */
 function readsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizRead[] {
-  const page = ui.pages[0];
-  if (!page) return [];
   const aggregateNames = new Set<string>();
   for (const c of contexts) for (const a of c.aggregates) aggregateNames.add(a.name);
-  return collectPageReads(page, new Set(ui.apiParams.map((p) => p.name)), aggregateNames);
+  const apiParamNames = new Set(ui.apiParams.map((p) => p.name));
+  const seen = new Set<string>();
+  const out: FelizRead[] = [];
+  for (const page of ui.pages) {
+    for (const r of collectPageReads(page, apiParamNames, aggregateNames)) {
+      if (seen.has(r.field)) continue;
+      seen.add(r.field);
+      out.push(r);
+    }
+  }
+  return out;
 }
 
-/** Assemble the single `App.fs` module for a ui.  When the wired page issues
- *  api reads, the file also carries the wire layer (Thoth decoders + a
- *  `Cmd`-based `Api` module + the `Remote`/`View` helpers) ahead of the MVU
- *  triple; a read-free page (Counter-class) stays byte-for-byte as before. */
+/** A ui's `state {}` fields across ALL pages, deduped by name (multi-page uis
+ *  share one flat Model; distinct pages should use distinct field names). */
+function combinedState(ui: UiIR): PageIR["state"][number][] {
+  const seen = new Set<string>();
+  const out: PageIR["state"][number][] = [];
+  for (const page of ui.pages)
+    for (const f of page.state)
+      if (!seen.has(f.name)) {
+        seen.add(f.name);
+        out.push(f);
+      }
+  return out;
+}
+
+/** A ui's named `action`s across ALL pages, deduped by name. */
+function combinedActions(ui: UiIR): PageIR["actions"][number][] {
+  const seen = new Set<string>();
+  const out: PageIR["actions"][number][] = [];
+  for (const page of ui.pages)
+    for (const a of page.actions)
+      if (!seen.has(a.name)) {
+        seen.add(a.name);
+        out.push(a);
+      }
+  return out;
+}
+
+/** Assemble the single `App.fs` module for a ui.  A ui with >1 page emits a
+ *  `Page` union + `parseUrl` + a `React.router` root over a combined Model
+ *  (`Feliz.Router`); a single-page ui stays byte-for-byte as before.  When any
+ *  page issues api reads the file also carries the wire layer (Thoth decoders +
+ *  a `Cmd`-based `Api` module + the `Remote`/`View` helpers). */
 function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
-  const page = ui.pages[0];
-  if (!page) {
+  const pages = ui.pages;
+  if (pages.length === 0) {
     return `module App\n\nopen Feliz\n\n// ui '${ui.name}' declares no pages\n`;
   }
   const aggregatesByName = new Map<string, AggregateIR>();
   for (const c of contexts) for (const a of c.aggregates) aggregatesByName.set(a.name, a);
   const reads: FelizRead[] = readsForUi(ui, contexts);
   const hasReads = reads.length > 0;
+  const routed = pages.length > 1;
 
-  const model = renderModel(page.state, reads);
-  const init = renderInit(page.state, reads);
-  const msg = renderMsg(page.actions, reads);
-  const update = renderUpdate(page.actions, page.state, reads);
-  const view = renderView(page, ui, aggregatesByName);
+  // MVU triple is built from the COMBINED (all-page, deduped) state + actions;
+  // a single-page ui's combined lists are exactly its one page's.
+  const state = combinedState(ui);
+  const actions = combinedActions(ui);
+  const model = renderModel(state, reads, routed);
+  const init = renderInit(state, reads, routed);
+  const msg = renderMsg(actions, reads, routed);
+  const update = renderUpdate(actions, state, reads, routed);
   const wire = hasReads ? renderWireTypes(reads, contexts) : { domain: "", decoders: "" };
   const api = hasReads ? renderApiModule(reads) : "";
 
-  const multiPageNote =
-    ui.pages.length > 1
-      ? `\n// TODO(feliz): ui '${ui.name}' has ${ui.pages.length} pages; v1 wires only '${page.name}'. Routing is a follow-up.\n`
-      : undefined;
+  // Views: one root `view` (single-page) OR per-page `<page>View` functions +
+  // a `React.router` root that switches on `CurrentPage`.
+  const views = routed
+    ? [
+        ...pages.map((p) => renderPageView(p, ui, aggregatesByName, pageViewFn(p))),
+        "",
+        renderRootView(pages),
+      ]
+    : [renderPageView(pages[0]!, ui, aggregatesByName, "view")];
 
   return lines(
     "module App",
     "",
     "open Feliz",
+    routed && "open Feliz.Router",
     "open Elmish",
     "open Elmish.React",
     hasReads && "open Thoth.Json",
     hasReads && "open Fable.SimpleHttp",
-    multiPageNote,
     // Wire layer (reads only) — records → Remote → decoders → api → View helper.
     hasReads && "",
     hasReads && wire.domain,
@@ -153,6 +246,9 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
     hasReads && api,
     hasReads && "",
     hasReads && VIEW_MODULE,
+    // Routing table (multi-page only) — Page union + parseUrl, ahead of Model.
+    routed && "",
+    routed && renderRouting(pages),
     "",
     model,
     "",
@@ -162,7 +258,7 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
     "",
     update,
     "",
-    view,
+    views.join("\n"),
     "",
     "Program.mkProgram init update view",
     '|> Program.withReactSynchronous "root"',
@@ -174,11 +270,16 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
 // The wire layer pulls in two more packages (proposal §10 known-good pins):
 // Fable.SimpleHttp for the fetch, Thoth.Json for the decoders.  A read-free
 // (Counter-class) app omits them so its project stays minimal.
-function fsproj(hasReads: boolean): string {
+// A multi-page ui additionally pulls in Feliz.Router for URL routing.
+function fsproj(hasReads: boolean, routed: boolean): string {
   const wireRefs = hasReads
     ? `
     <PackageReference Include="Fable.SimpleHttp" Version="3.6.0" />
     <PackageReference Include="Thoth.Json" Version="10.2.0" />`
+    : "";
+  const routerRef = routed
+    ? `
+    <PackageReference Include="Feliz.Router" Version="4.0.0" />`
     : "";
   return `<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
@@ -191,7 +292,7 @@ function fsproj(hasReads: boolean): string {
   <ItemGroup>
     <PackageReference Include="Fable.Core" Version="4.3.0" />
     <PackageReference Include="Feliz" Version="2.8.0" />
-    <PackageReference Include="Fable.Elmish.React" Version="4.0.0" />${wireRefs}
+    <PackageReference Include="Fable.Elmish.React" Version="4.0.0" />${routerRef}${wireRefs}
   </ItemGroup>
 </Project>
 `;
@@ -294,7 +395,7 @@ export function generateFelizForContexts(
     );
   }
   out.set("src/App.fs", renderAppFs(ui, contexts));
-  out.set("App.fsproj", fsproj(readsForUi(ui, contexts).length > 0));
+  out.set("App.fsproj", fsproj(readsForUi(ui, contexts).length > 0, ui.pages.length > 1));
   out.set(".config/dotnet-tools.json", DOTNET_TOOLS);
   out.set("package.json", PACKAGE_JSON(`${deployable.name}-feliz`));
   out.set("vite.config.js", VITE_CONFIG);

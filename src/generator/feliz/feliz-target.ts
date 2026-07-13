@@ -18,9 +18,25 @@ function msgCase(action: string): string {
   return upperFirst(action);
 }
 
-const unreached = (what: string) => (): never => {
-  throw new Error(`feliz: ${what} not yet supported by the Feliz walker`);
-};
+/** A route path → a `Router.navigate(<segments>)` call (Feliz.Router).  Each
+ *  literal path segment becomes a quoted arg; a `:param` segment interpolates
+ *  the matching named arg's value (or its bare name when no arg matches). */
+function routerNavigate(
+  routeTemplate: string,
+  args: ReadonlyArray<{ name: string; value: string }>,
+): string {
+  const byName = new Map(args.map((a) => [a.name, a.value]));
+  const segs = routeTemplate.split("/").filter((s) => s.length > 0);
+  const rendered = segs.map((s) => {
+    if (!s.startsWith(":")) return fsString(s);
+    const name = s.slice(1);
+    // `Router.navigate` args are `obj[]`; a param value renders as `string <v>`.
+    return `(string ${byName.get(name) ?? name})`;
+  });
+  // `Router.navigate` needs ≥1 arg; the root path (`/`) navigates to `""`.
+  if (rendered.length === 0) return `Router.navigate("")`;
+  return `Router.navigate(${rendered.join(", ")})`;
+}
 
 /** Collapse a walked markup fragment to ONE line.  The walker joins children
  *  with `\n<indent>`, but only re-indents a child's FIRST line, so a multi-line
@@ -103,7 +119,18 @@ export const felizTarget: WalkerTarget = {
     const frag = `React.fragment (${coll} |> List.map (fun ${itemVar} -> ${oneLine(body)}))`;
     return `(if List.isEmpty ${coll} then ${oneLine(emptyBody)} else ${frag})`;
   },
-  renderNavigate: unreached("navigate") as WalkerTarget["renderNavigate"],
+  // Cross-page navigation → `Router.navigate(<segments>)` (Feliz.Router).  A
+  // `then: navigate(<Page>)` / `Anchor(to:)` reaches here with the target
+  // page's route template; `:param` segments interpolate the matching arg.
+  renderNavigate: (routeTemplate, args) => routerNavigate(routeTemplate, args),
+
+  // `Button(to: "/products")` → `Router.navigate("products")`.  A literal path
+  // is split into segments; a non-literal (a ref) navigates to it as one.
+  renderNavigateExpr: (toArg) => {
+    const lit = toArg.match(/^"(.*)"$/);
+    if (!lit) return `Router.navigate(${toArg})`;
+    return routerNavigate(lit[1]!, []);
+  },
 
   defaultInitFor: (type) => fsZeroValue(type),
 

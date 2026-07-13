@@ -55,10 +55,11 @@ jobs:
       - name: Generate the Feliz showcase system
         run: |
           mkdir -p ci-feliz
-          # Data-driven page — exercises the wire layer (Thoth decoders +
-          # Cmd-based Api + the Remote/QueryView MVU projection, slice 7)
-          # ALONGSIDE the MVU counter (state + action → dispatch) and the pack
-          # primitives (Heading/Badge/Text/Button/Divider/Card + For).
+          # Two-page routed app — exercises multi-page routing (Page union +
+          # parseUrl + React.router + Router.navigate) ALONGSIDE the wire layer
+          # (Thoth decoders + Cmd-based Api + the Remote/QueryView MVU
+          # projection), the MVU counter (state + action → dispatch), and the
+          # pack primitives (Heading/Badge/Text/Button/Divider/Card + For).
           cat > ci-feliz/showcase.ddd <<'DDD'
           system Storefront {
             api ShopApi from Catalog
@@ -78,7 +79,7 @@ jobs:
 
             ui WebApp {
               api Shop: ShopApi
-              page Store {
+              page Home {
                 route: "/"
                 state { count: int = 0 }
                 action inc() { count := count + 1 }
@@ -88,6 +89,13 @@ jobs:
                   Text { "Clicks: " + count },
                   Button { "+", onClick: inc },
                   Divider { },
+                  Button { "Browse products", to: "/products" }
+                }
+              }
+              page Products {
+                route: "/products"
+                body: Stack {
+                  Heading { "Products", level: 1 },
                   QueryView {
                     of:      Shop.Product.all,
                     loading: Text { "Loading…" },
@@ -98,7 +106,8 @@ jobs:
                         Text { p.price }
                       } }
                     }
-                  }
+                  },
+                  Button { "Back home", to: "/" }
                 }
               }
             }
