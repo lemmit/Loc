@@ -53,7 +53,10 @@ import {
   validateInheritanceStorage,
   validateJavaContainmentSupport,
   validateJavaFullstackSupport,
+  validateJavaProjectionFieldSupport,
+  validateJavaSagaInstanceFieldSupport,
   validateJavaStampSupport,
+  validateJavaViewFollowsSupport,
   validateMikroOrmSupport,
   validateNeedCapabilities,
   validateNodeStampSupport,
@@ -223,6 +226,17 @@ export function validateLoomModel(loom: EnrichedLoomModel): LoomDiagnostic[] {
     );
     validateProvenancedStorage(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
     validateAuditedOperationSupport(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
+    validateJavaViewFollowsSupport(c, diags, backendPlatformsByContext.get(c.name) ?? new Set());
+    validateJavaSagaInstanceFieldSupport(
+      c,
+      diags,
+      backendPlatformsByContext.get(c.name) ?? new Set(),
+    );
+    validateJavaProjectionFieldSupport(
+      c,
+      diags,
+      backendPlatformsByContext.get(c.name) ?? new Set(),
+    );
   }
   validateExprIntegrity(loom, diags);
   // Explicit transport bindings (unfoldable-api-derivation.md, Layer 4): every

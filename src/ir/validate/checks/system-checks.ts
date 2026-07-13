@@ -34,6 +34,7 @@ import type {
   SubdomainIR,
   SystemIR,
   TypeIR,
+  WireField,
   WorkflowIR,
   WorkflowStmtIR,
 } from "../../types/loom-ir.js";
@@ -2519,6 +2520,119 @@ export function validateAuditedOperationSupport(
         capableLabel,
       );
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Java codegen gates (M-T6.4) — three shapes the Java generator cannot emit
+// yet crash codegen on with a raw `throw new Error` (they pass every earlier
+// validation and only blow up at emit time).  The other four backends emit all
+// three, so these are java-scoped: fail fast with an honest `loom.java-*`
+// diagnostic when a java deployable hosts the context, mirroring
+// `validateJavaFullstackSupport` / `validateJavaStampSupport`.  When the
+// feature lands on Java the gate is removed (the "gated xor emitted" contract).
+//
+//   1. cross-aggregate view `follows` — a view whose custom output binds follow
+//      an `X id` reference into another aggregate (populates `output.auxiliaries`).
+//      `src/generator/java/emit/view.ts` throws; node/dotnet/python/elixir emit
+//      the `findManyByIds` bulk-load + projection (views.md §Slice 3).
+//   2. valueobject/entity-typed persisted-saga instance fields — the workflow
+//      instance-read row projects through the domain wildcard imports
+//      (enums/ids/valueobjects), which carry no `<Vo>Response`/`<Part>Response`
+//      DTO, so `src/generator/java/emit/workflow-instances.ts` throws.
+//   3. valueobject/entity-typed projection row fields — same wildcard-import
+//      limitation on the read-model row; `projection-reads.ts` throws.
+// ---------------------------------------------------------------------------
+
+/** The leaf domain type a wire field carries, peeling `optional` then `array`
+ *  (then an inner `optional` element) — the exact unwrap the Java saga /
+ *  projection emitters guard on. */
+function wireLeafType(f: WireField): TypeIR {
+  const t = f.type.kind === "optional" ? f.type.inner : f.type;
+  if (t.kind !== "array") return t;
+  return t.element.kind === "optional" ? t.element.inner : t.element;
+}
+
+export function validateJavaViewFollowsSupport(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+  backendPlatforms: Set<string>,
+): void {
+  if (!backendPlatforms.has("java")) return;
+  for (const view of ctx.views) {
+    // Only aggregate-sourced custom-output views carry auxiliaries; workflow
+    // views are filter-only (full-form is rejected upstream).
+    if (!view.output || view.output.auxiliaries.length === 0) continue;
+    const aggs = [...new Set(view.output.auxiliaries.map((a) => a.aggName))].sort().join(", ");
+    diags.push({
+      severity: "error",
+      code: "loom.java-view-follows-unsupported",
+      message:
+        `view '${view.name}' follows an 'X id' reference into another aggregate ` +
+        `(${aggs}) in its output binds, but cross-aggregate view follows are not yet ` +
+        `implemented on the java backend — the emitter would crash. Host the context ` +
+        `on a node / dotnet / python / elixir deployable (all emit the bulk-load join), ` +
+        `or drop the cross-aggregate bind(s) from the view. Tracked in views.md (Slice 3) / M-T6.4.`,
+      source: `${ctx.name}/${view.name}`,
+    });
+  }
+}
+
+export function validateJavaSagaInstanceFieldSupport(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+  backendPlatforms: Set<string>,
+): void {
+  if (!backendPlatforms.has("java")) return;
+  for (const wf of ctx.workflows) {
+    // Only correlation-bearing workflows expose an instance-read surface.
+    const shape = wf.instanceWireShape;
+    if (!shape) continue;
+    const bad = shape.filter((f) => {
+      const leaf = wireLeafType(f);
+      return leaf.kind === "valueobject" || leaf.kind === "entity";
+    });
+    if (bad.length === 0) continue;
+    const names = bad.map((f) => `${f.name} (${wireLeafType(f).kind})`).join(", ");
+    diags.push({
+      severity: "error",
+      code: "loom.java-saga-instance-field-unsupported",
+      message:
+        `workflow '${wf.name}' has instance field(s) ${names} whose type is a valueobject/entity, ` +
+        `but the java backend emits the workflow instance-read row through the domain wildcard ` +
+        `imports (enums / ids / valueobjects) which carry no matching Response DTO — the emitter ` +
+        `would crash. Host the context on a node / dotnet / python / elixir deployable, or reduce ` +
+        `the saga state to scalar / id / enum fields. Tracked in M-T6.4.`,
+      source: `${ctx.name}/${wf.name}`,
+    });
+  }
+}
+
+export function validateJavaProjectionFieldSupport(
+  ctx: BoundedContextIR,
+  diags: LoomDiagnostic[],
+  backendPlatforms: Set<string>,
+): void {
+  if (!backendPlatforms.has("java")) return;
+  for (const proj of ctx.projections) {
+    const shape = proj.wireShape ?? [];
+    const bad = shape.filter((f) => {
+      const leaf = wireLeafType(f);
+      return leaf.kind === "valueobject" || leaf.kind === "entity";
+    });
+    if (bad.length === 0) continue;
+    const names = bad.map((f) => `${f.name} (${wireLeafType(f).kind})`).join(", ");
+    diags.push({
+      severity: "error",
+      code: "loom.java-projection-field-unsupported",
+      message:
+        `projection '${proj.name}' has row field(s) ${names} whose type is a valueobject/entity, ` +
+        `but the java backend emits the read-model row through the domain wildcard imports ` +
+        `(enums / ids / valueobjects) which carry no matching Response DTO — the emitter would ` +
+        `crash. Host the context on a node / dotnet / python / elixir deployable, or reduce the ` +
+        `projection to scalar / id / enum fields. Tracked in M-T6.4.`,
+      source: `${ctx.name}/${proj.name}`,
+    });
   }
 }
 

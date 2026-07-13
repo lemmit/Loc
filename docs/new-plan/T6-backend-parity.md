@@ -14,8 +14,8 @@ Sources: [vanilla-phoenix-gaps](../old/plans/vanilla-phoenix-gaps.md) §11c/§12
 Generated output fails `mix format --check` on ~53% of files; no Credo/Dialyzer gate. Emitter formatting cleanup first, then the CI gate (`LOOM_PHOENIX_FORMAT` exists — activate); Dialyzer nightly-only. Include Elixir in the per-PR OpenAPI parity boot (currently skipped).
 Sources: [vanilla-phoenix-gaps](../old/plans/vanilla-phoenix-gaps.md) §7, [static-analysis-followups](../old/proposals/static-analysis-followups.md) Slices 1–2.
 
-## M-T6.4 — Java crash gates → honest validators — `open` · **S** · P1 ⭐ wrong failure mode
-Three ungated `throw new Error` sites crash codegen on valid `.ddd`: cross-aggregate view `follows` (`java/emit/view.ts`), non-id-typed saga instance fields (`workflow-instances.ts`), non-id projection fields (`projection-reads.ts`). Add `loom.*` validator gates (an afternoon each) — then implement the features on their own schedule.
+## M-T6.4 — Java crash gates → honest validators — `done` (2026-07-13, #1880) · **S** · P1 ⭐ wrong failure mode
+All three ungated `throw new Error` sites now fail fast as java-scoped `loom.*` validator gates (the shapes emit fine on node/dotnet/python/elixir): cross-aggregate view `follows` → `loom.java-view-follows-unsupported`; valueobject/entity-typed saga instance fields → `loom.java-saga-instance-field-unsupported`; valueobject/entity-typed projection row fields → `loom.java-projection-field-unsupported`. Evidence: `src/ir/validate/checks/system-checks.ts` (`validateJavaViewFollowsSupport`/`validateJavaSagaInstanceFieldSupport`/`validateJavaProjectionFieldSupport`, wired in `validate.ts`); `test/ir/java-codegen-gates.test.ts` (18 tests: java fires, the four other backends don't, scalar-only doesn't). Emitter throws retained as unreachable backstops; the features stay to implement on their own schedule.
 Sources: weak-spots §6, parity audit findings.
 
 ## M-T6.5 — Java `hosts:` fullstack embed (DEBT-14) — `open` · **M** · P3

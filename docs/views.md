@@ -183,9 +183,10 @@ How it lowers:
   one extra query per auxiliary aggregate, regardless of how many
   rows came back from the source.  **Java** does not yet implement
   cross-aggregate follows: a view whose binds follow an `X id`
-  reference into another aggregate is an explicit emit-time error
-  on the Java backend ("cross-aggregate follows — not yet
-  implemented on the java backend").
+  reference into another aggregate is rejected at compile time on
+  the Java backend by the `loom.java-view-follows-unsupported`
+  validator gate (host the context on a node / dotnet / python /
+  elixir deployable, or drop the cross-aggregate bind).
 - The route / handler runs the source view query, then for each
   auxiliary calls `findManyByIds` with the deduped list of source-
   field values, building a `Map<id, Aggregate>` (TS) /
