@@ -1220,7 +1220,12 @@ function emitProject(
     orgPathResolver?: boolean;
   },
 ): void {
-  const hasExtern = ctx.aggregates.some((a) => a.operations.some((o) => o.extern));
+  // Scrutor scan (+ package ref) is needed when the project emits any
+  // `[ExternHandler]` class — extern OPERATIONS or the extern application-layer
+  // commandHandler / queryHandler (both register through the same scan).
+  const hasExtern =
+    ctx.aggregates.some((a) => a.operations.some((o) => o.extern)) ||
+    [...(ctx.commandHandlers ?? []), ...(ctx.queryHandlers ?? [])].some((h) => h.extern);
   const usesValidators = !!options?.usesValidators;
   const usesStamping = !!options?.usesStamping;
   const hasEmbeddedSpa = !!options?.hasEmbeddedSpa;

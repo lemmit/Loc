@@ -212,7 +212,7 @@ ${body}
 // An `extern` handler has no DSL body and no home aggregate: its Mediator
 // command/query + route wire up as usual, but the Mediator handler delegates to
 // a ctor-injected `I<Name>Handler` port the user's scaffold-once
-// `<Name>HandlerImpl` supplies.  The impl carries `[ExternHandler]`, so the
+// `<Name>ExternHandler` supplies.  The impl carries `[ExternHandler]`, so the
 // existing Scrutor scan + startup verify in `Program.cs` register it and fail
 // fast when it's missing.  All four files live under a neutral
 // `Application/Handlers/` folder (no aggregate to file them under).
@@ -262,7 +262,7 @@ namespace ${EXTERN_HANDLERS_NS(ns)};
 
 /// <summary>Extern-handler contract for ${h.name} — the one external-service
 /// call this handler wraps.  Implemented by the scaffold-once, user-owned
-/// [ExternHandler] class ${h.name}HandlerImpl (regeneration never overwrites it).</summary>
+/// [ExternHandler] class ${h.name}ExternHandler (regeneration never overwrites it).</summary>
 public interface I${h.name}Handler
 {
     ${ret} Handle(${externPortParams(h)});
@@ -315,7 +315,7 @@ function renderExternImpl(
   kindLabel: "commandHandler" | "queryHandler",
 ): string {
   const ret = h.returnType ? `ValueTask<${renderCsType(h.returnType)}>` : "ValueTask";
-  const msg = `extern ${kindLabel} '${h.name}' is not implemented — fill in Application/Handlers/${h.name}HandlerImpl.cs`;
+  const msg = `extern ${kindLabel} '${h.name}' is not implemented — fill in Application/Handlers/${h.name}ExternHandler.cs`;
   return `// ${SCAFFOLD_ONCE_MARKER} — this file is yours.  Loom scaffolds it on the first
 // \`generate\` and NEVER overwrites it again, so your implementation survives every
 // regenerate.  Replace the \`throw\` with the extern handler's real logic.
@@ -330,7 +330,7 @@ using ${ns}.Domain.Enums;
 namespace ${EXTERN_HANDLERS_NS(ns)};
 
 [ExternHandler]
-public sealed class ${h.name}HandlerImpl : I${h.name}Handler
+public sealed class ${h.name}ExternHandler : I${h.name}Handler
 {
     public ${ret} Handle(${externPortParams(h)})
         => throw new NotImplementedException(${JSON.stringify(msg)});
@@ -349,7 +349,7 @@ function emitExternHandler(
   out.set(`Application/Handlers/I${h.name}Handler.cs`, renderExternPort(h, ns));
   out.set(`Application/Handlers/${h.name}Handler.cs`, renderExternHandlerClass(h, ns, kind));
   out.set(
-    `Application/Handlers/${h.name}HandlerImpl.cs`,
+    `Application/Handlers/${h.name}ExternHandler.cs`,
     renderExternImpl(h, ns, kind === "Command" ? "commandHandler" : "queryHandler"),
   );
 }
