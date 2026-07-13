@@ -42,11 +42,20 @@ Loom lets you program architecturally correct business apps concisely, with a no
 
 ## Priority shortlist (if you only take five things)
 
-1. **M-T1.1** paged/sorted/filtered `Table` — cheapest, highest-visibility product win (the wire already ships `paged`).
-2. **M-T2.1 + M-T2.2** rename intent + migration-baseline safety — closes the silent-data-loss class.
-3. **M-T3.1** deny-by-default + find gating — the security default flip.
-4. **M-T9.1** Langium 3.3→4.2 — unblocks the security-audit findings and the whole dependency chase.
-5. **M-T4.1** `timerSource` (scheduling) — the temporal hole; design first, it gets more expensive with every backend added.
+**Architecture-risk work outranks feature breadth.** The [weak-spot review](../audits/architecture-weak-spots-2026-07.md) is the ranking authority: anything it names as a structural risk (silent data loss, silent/crash parity failure modes, security defaults, the un-abstracted persistence axis, the nightly-only feedback loop) is P1 by default, ahead of new surface area. We strive for excellence — a smaller platform whose claims all hold beats a wider one with hollow cells.
+
+1. **M-T2.1 + M-T2.2** rename intent + migration-baseline safety — closes the silent-data-loss class.
+2. **M-T6.1 + M-T6.4 + M-T6.7 + M-T6.8** the wrong-failure-mode set — silent SPA-embed hole, Java codegen crashes, node filter leak, update-path wire validation. Small missions, correctness-grade.
+3. **M-T3.1 + M-T3.4** deny-by-default + versioned-on/409-mapper — the security-default flips.
+4. **M-T9.1 + M-T9.2 + M-T9.3** Langium 4, the persistence-emit seam, per-PR boot gates — the three structural investments everything else compounds on.
+5. **M-T1.1** paged/sorted/filtered `Table` — the cheapest, highest-visibility product win (the wire already ships `paged`).
+
+## Statuses rot — verify, then verify the verifier
+
+Two standing rules beyond the per-mission verify-first step:
+
+- **No status flip without code evidence.** Marking a mission `done` requires the PR link *and* the gate/emitter/test evidence line — the same standard the old corpus failed to keep (its three status tables drifted apart within weeks).
+- **Audit for pretended work.** In a repo where parallel agents land PRs continuously, "merged" is not "real": gates get softened, dead code gets left unwired, TODOs get emitted into output. **M-T9.8** is the recurring adversarial sweep for this class; run it after any large multi-agent push.
 
 ## Provenance & coverage
 

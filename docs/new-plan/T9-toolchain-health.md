@@ -28,3 +28,6 @@ Sources: weak-spots §5, old global-plan T1.4.
 
 ## M-T9.7 — Repo-admin one-clicks — `blocked(admin)` · **S** · P3
 RST-4: add `behavioral-python` to branch-protection required checks. Anything else needing owner action collects here.
+
+## M-T9.8 — Hollow-work audit — `recurring` · **M** · P1
+Parallel agents sometimes *claim* done what isn't: dead code never wired in, gates softened/reverted to get CI green, skip-lists and allowlists that quietly grow, emitters that write `TODO` comments into compiling output, validators defined but unreachable, tests without assertions. Run an adversarial sweep for this class on a cadence (and after any large multi-agent push): (a) dead `render*/emit*/build*` exports in `src/generator/`+`src/platform/`; (b) every skip/allowlist + `HARD_GATE`-style flag audited against its justification; (c) generated-output TODO/placeholder strings vs honest fail-fast throws; (d) diagnostic codes defined but unemittable; (e) assertion-free tests; (f) parity gates that exclude the case they claim to cover (`LOOM_E2E_SKIP_*`, normalize filters). Confirmed hollow claims get a mission + a status correction here; the best generic checks graduate into permanent CI gates. First run: 2026-07-13 (results folded into this plan's statuses).
