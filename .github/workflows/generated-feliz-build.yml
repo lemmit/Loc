@@ -63,9 +63,10 @@ jobs:
           # (Heading/Badge/Text/Button/Divider/Card + For).  The ProductDetail
           # page covers byId-on-navigation: a `:id` route → a `Remote<T option>`
           # fired via `pageCmd` on entry, rendered through `View.remoteOne`, plus
-          # a `DestroyForm` (delete) → a mutation Cmd + navigate-on-success.  The
-          # ProductNew page covers a `CreateForm` → Thoth encoders + Elmish form
-          # state (per-field inputs → Set Msgs) + a POST Cmd + navigate.
+          # a `DestroyForm` (delete) → a mutation Cmd + navigate-on-success and an
+          # `OperationForm` (a custom `rename` op) → an id-qualified POST to
+          # /{id}/rename.  The ProductNew page covers a `CreateForm` → Thoth
+          # encoders + Elmish form state (inputs → Set Msgs) + a POST Cmd.
           cat > ci-feliz/showcase.ddd <<'DDD'
           system Storefront {
             api ShopApi from Catalog
@@ -75,6 +76,7 @@ jobs:
                 aggregate Product with crudish {
                   name:  string
                   price: money
+                  operation rename(newName: string) { name := newName }
                 }
                 repository Products for Product { }
               }
@@ -139,6 +141,7 @@ jobs:
                       Text { p.price }
                     }
                   },
+                  OperationForm { of: Product, op: rename },
                   DestroyForm { of: Product },
                   Button { "Back to products", to: "/products" }
                 }

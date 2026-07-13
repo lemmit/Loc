@@ -160,11 +160,23 @@ in hand — not before F# output exists.
   **v1 caveat:** REQUIRED SCALAR create-input fields only (nested part / VO /
   collection inputs need sub-forms — follow-up); all fields string-typed (typed
   form state + validation is a follow-up).
-- **Wire layer covers list + byId reads + delete + create.** The remaining write
-  slice is **update / operation** (`OperationForm` — a PUT / named-operation
-  endpoint reusing the create form's state machinery). Enum wire fields decode
-  as their string name (a proper DU decoder is a follow-up); nested containment/
-  VO records + decoders ARE emitted (transitive off `wireShape`).
+- ✅ **Operation forms.** An `OperationForm(of: X, op: Y)` on a detail page
+  projects to Elmish form state (the op's params) + a curried id-qualified Api
+  fn (`POST /api/<agg>/<id>/<op>`, 204 → `unit`) + a `Submit<Op><Agg>Form of
+  string` trigger (carrying the route id) + a `<Op><Agg>Done` result that resets
+  + navigates. Reuses the create-form record/encoder/type renderers via a shared
+  `FormRecord`; the delta is the id-qualified endpoint, the curried `Cmd`
+  (`Api.<fn> id`), and the id-carrying submit. The `renderOperationForm` seam
+  emits the inputs + submit. All Fable + vite verified; the CI example's detail
+  page grew an `OperationForm` (a custom `rename` op). **v1 caveat:** the
+  addressed `(of:, op:)` form only (the instance-qualified `OperationForm(inst.
+  op)` and prefilling the form from the loaded record are follow-ups).
+- **Wire layer now covers the full CRUD write path.** list + byId reads, create,
+  delete, and operation. Remaining Feliz work is non-data-layer: the runtime
+  e2e gate, broader pack primitive coverage, workflows, and auth. Enum wire
+  fields decode as their string name (a proper DU decoder is a follow-up);
+  nested containment/VO records + decoders ARE emitted (transitive off
+  `wireShape`).
 
 Known-good deps (proposal §10): Fable 4.29 / Feliz 2.8 / Fable.Elmish.React 4.0
 / Fable.SimpleHttp 3.6 / Thoth.Json 10.2 / net8.0. Avoid Thoth.Fetch (promise-CE

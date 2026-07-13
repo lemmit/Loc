@@ -11,7 +11,7 @@ import { lowerFirst, upperFirst } from "../../util/naming.js";
 import type { RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { FS_LEAVES, fsString } from "./fs-expr.js";
 import { fsZeroValue } from "./type-fs.js";
-import { byIdFieldName, felizCreateForm, readFieldName } from "./wire.js";
+import { byIdFieldName, felizCreateForm, felizOperationForm, readFieldName } from "./wire.js";
 
 /** Msg case name for an action (`inc` → `Inc`). */
 function msgCase(action: string): string {
@@ -176,6 +176,32 @@ export const felizTarget: WalkerTarget = {
         `Html.input [ prop.placeholder "${fld.wireName}"; prop.value model.${form.formField}.${fld.wireName}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)) ]`,
     );
     const submit = `Html.button [ prop.onClick (fun _ -> dispatch ${form.submitMsg}); prop.text "Create ${upperFirst(form.aggregate)}" ]`;
+    return `Html.div [ prop.children [ ${[...inputs, submit].join("; ")} ] ]`;
+  },
+
+  // `OperationForm(of: <Agg>, op: <op>)` → one `Html.input` per op param + a
+  // submit button dispatching `Submit<Op><Agg>Form id` (the op is instance-
+  // qualified, so it carries the route id).  The form state + encoder + POST
+  // live in `update`/`Api` (wired by index.ts's `collectPageOperationForms`).
+  // Falls through when the args aren't `of:`+`op:` refs or the op is unknown /
+  // non-public / paramless.
+  renderOperationForm: (call, ctx) => {
+    if (call.kind !== "call") return null;
+    const names = call.argNames ?? [];
+    const ofArg = names.indexOf("of") >= 0 ? call.args[names.indexOf("of")] : undefined;
+    const opArg = names.indexOf("op") >= 0 ? call.args[names.indexOf("op")] : undefined;
+    if (ofArg?.kind !== "ref" || opArg?.kind !== "ref") return null;
+    const agg = ctx.aggregatesByName.get(ofArg.name);
+    const op = agg?.operations.find((o) => o.name === opArg.name && o.visibility === "public");
+    if (!agg || !op) return null;
+    const form = felizOperationForm(agg, op);
+    if (form.fields.length === 0) return null;
+    ctx.usesRouteId = true; // the op dispatches with the route `id`
+    const inputs = form.fields.map(
+      (fld) =>
+        `Html.input [ prop.placeholder "${fld.wireName}"; prop.value model.${form.formField}.${fld.wireName}; prop.onChange (fun (v: string) -> dispatch (${fld.setMsg} v)) ]`,
+    );
+    const submit = `Html.button [ prop.onClick (fun _ -> dispatch (${form.submitMsg} id)); prop.text "${upperFirst(form.op)} ${upperFirst(form.aggregate)}" ]`;
     return `Html.div [ prop.children [ ${[...inputs, submit].join("; ")} ] ]`;
   },
 

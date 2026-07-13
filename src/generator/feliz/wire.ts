@@ -23,6 +23,7 @@ import type {
   EnrichedBoundedContextIR,
   ExprIR,
   FieldIR,
+  OperationIR,
   PageIR,
   TypeIR,
 } from "../../ir/types/loom-ir.js";
@@ -155,23 +156,32 @@ export interface FelizFormField {
   encodeExpr: string;
 }
 
+/** The record-shaped aspects a form (create OR operation) shares — the F#
+ *  form-record type + its `empty<Form>` value + Thoth encoder + fields.  The
+ *  type/encoder/Model-field/init renderers consume this; only the Msg/update/Api
+ *  wiring differs between create and operation forms. */
+export interface FormRecord {
+  /** F# form-record type name (`ProductForm` / `RenameProductForm`). */
+  formType: string;
+  /** Model field holding the in-progress form (same as `formType`). */
+  formField: string;
+  /** The empty-form value binding (`emptyProductForm`). */
+  emptyBinding: string;
+  /** Thoth encoder fn name (`Encoders.<encoderFn>`). */
+  encoderFn: string;
+  /** The form's fields. */
+  fields: FelizFormField[];
+}
+
 /** A create form a page hosts (`CreateForm(of: X)`), projected to its full MVU
  *  wiring: a string-typed `<Agg>Form` record in the Model, one `Set` `Msg` per
  *  field, a `Submit<Agg>Form` trigger that POSTs the Thoth-encoded body, and a
  *  `<Agg>Created` result that navigates to the list on success.  v1 renders the
  *  REQUIRED scalar create-input fields (`createInputFields` minus optionals and
  *  non-scalars — nested/collection inputs are a follow-up). */
-export interface FelizForm {
+export interface FelizForm extends FormRecord {
   /** The aggregate created (`Product`). */
   aggregate: string;
-  /** F# form-record type name (`ProductForm`). */
-  formType: string;
-  /** Model field holding the in-progress form (`ProductForm`). */
-  formField: string;
-  /** The empty-form value binding (`emptyProductForm`). */
-  emptyBinding: string;
-  /** Thoth encoder fn name (`productForm` — `Encoders.productForm`). */
-  encoderFn: string;
   /** F# api fn name (`createProduct`). */
   apiFn: string;
   /** `Msg` the submit button dispatches (`SubmitProductForm`). */
@@ -186,8 +196,45 @@ export interface FelizForm {
   decoderExpr: string;
   /** The created record's F# type (`Product`). */
   resultType: string;
-  /** The form's fields, in create-input order. */
-  fields: FelizFormField[];
+}
+
+/** An operation form a page hosts (`OperationForm(of: X, op: Y)`), projected to
+ *  its MVU wiring: a string-typed `<Op><Agg>Form` record, one `Set` `Msg` per
+ *  op param, a `Submit<Op><Agg>Form of string` trigger (carrying the route id)
+ *  that POSTs to `/api/<agg>/<id>/<op>`, and a `<Op><Agg>Done` result (204, no
+ *  body → `unit`) that navigates to the list.  v1 renders the scalar op params;
+ *  the form lives on a detail page (route `id`). */
+export interface FelizOperationForm extends FormRecord {
+  /** The aggregate operated on (`Product`). */
+  aggregate: string;
+  /** The operation name (`rename`). */
+  op: string;
+  /** F# api fn name (`renameProduct`) — CURRIED `(id) (form)`. */
+  apiFn: string;
+  /** `Msg` the submit button dispatches, carrying the route id
+   *  (`SubmitRenameProductForm`). */
+  submitMsg: string;
+  /** `Msg` carrying the op's `Result<unit, string>` (`RenameProductDone`). */
+  doneMsg: string;
+  /** Collection base route (`/api/products`) — the api fn appends `/<id>/<op>`. */
+  route: string;
+  /** The op's URL path segment (`rename` — `snake(routeSlug ?? name)`). */
+  opPath: string;
+  /** `Router.navigate` segments after success (`["products"]`). */
+  navigateSegs: string[];
+}
+
+/** Build the shared form fields (`Set` Msg + encoder) for a form of `formType`
+ *  from a `{name, type}` field/param list.  Reused by create + operation forms. */
+function formFieldsFrom(
+  formType: string,
+  fields: readonly { name: string; type: TypeIR }[],
+): FelizFormField[] {
+  return fields.map((f) => ({
+    wireName: f.name,
+    setMsg: `Set${formType}${upperFirst(f.name)}`,
+    encodeExpr: encodeExprFor(f.type, `form.${f.name}`),
+  }));
 }
 
 /** Thoth encoder expression that lifts a string-typed form field `access`
@@ -224,13 +271,10 @@ function isScalarInput(t: TypeIR): boolean {
 export function felizCreateForm(agg: AggregateIR): FelizForm {
   const name = agg.name;
   const formType = `${upperFirst(name)}Form`;
-  const fields: FelizFormField[] = createInputFields(agg)
-    .filter((f: FieldIR) => !f.optional && isScalarInput(f.type))
-    .map((f: FieldIR) => ({
-      wireName: f.name,
-      setMsg: `Set${formType}${upperFirst(f.name)}`,
-      encodeExpr: encodeExprFor(f.type, `form.${f.name}`),
-    }));
+  const fields = formFieldsFrom(
+    formType,
+    createInputFields(agg).filter((f: FieldIR) => !f.optional && isScalarInput(f.type)),
+  );
   return {
     aggregate: name,
     formType,
@@ -244,6 +288,35 @@ export function felizCreateForm(agg: AggregateIR): FelizForm {
     navigateSegs: snake(plural(name)).split("/"),
     decoderExpr: `Decoders.${lowerFirst(name)}`,
     resultType: upperFirst(name),
+    fields,
+  };
+}
+
+/** Build the `FelizOperationForm` for an `OperationForm(of: agg, op: op)`.  The
+ *  form fields are the op's scalar params; the endpoint is
+ *  `/api/<agg>/<id>/<opPath>` (the op's route slug).  Returns undefined when the
+ *  op has no renderable scalar params (nothing to submit). */
+export function felizOperationForm(agg: AggregateIR, op: OperationIR): FelizOperationForm {
+  const name = agg.name;
+  const opCap = `${upperFirst(op.name)}${upperFirst(name)}`;
+  const formType = `${opCap}Form`;
+  const fields = formFieldsFrom(
+    formType,
+    op.params.filter((p) => isScalarInput(p.type)),
+  );
+  return {
+    aggregate: name,
+    op: op.name,
+    formType,
+    formField: formType,
+    emptyBinding: `empty${formType}`,
+    encoderFn: lowerFirst(formType),
+    apiFn: `${op.name}${upperFirst(name)}`,
+    submitMsg: `Submit${formType}`,
+    doneMsg: `${opCap}Done`,
+    route: `${API_BASE_PATH}/${snake(plural(name))}`,
+    opPath: snake(op.routeSlug ?? op.name),
+    navigateSegs: snake(plural(name)).split("/"),
     fields,
   };
 }
@@ -384,6 +457,53 @@ export function collectPageForms(
     if (!agg || seen.has(aggName)) continue;
     seen.add(aggName);
     out.push(felizCreateForm(agg));
+  }
+  return out;
+}
+
+/** Every `OperationForm(of: <Agg>, op: <opName>)` spec a page body hosts, in
+ *  tree order (both args are bare refs; `op` names a public operation). */
+function operationFormSpecs(
+  body: ExprIR,
+  aggregatesByName: ReadonlySet<string>,
+): { agg: string; op: string }[] {
+  const out: { agg: string; op: string }[] = [];
+  const walk = (e: ExprIR): void => {
+    if (e.kind === "call" && e.name === "OperationForm") {
+      const names = e.argNames ?? [];
+      const ofArg = names.indexOf("of") >= 0 ? e.args[names.indexOf("of")] : undefined;
+      const opArg = names.indexOf("op") >= 0 ? e.args[names.indexOf("op")] : undefined;
+      if (ofArg?.kind === "ref" && opArg?.kind === "ref" && aggregatesByName.has(ofArg.name)) {
+        out.push({ agg: ofArg.name, op: opArg.name });
+      }
+    }
+    for (const c of exprChildren(e)) walk(c);
+  };
+  walk(body);
+  return out;
+}
+
+/** Collect the operation forms a page hosts (`OperationForm(of: X, op: Y)`),
+ *  deduped by (aggregate, op).  Skips ops that are missing / non-public / have
+ *  no renderable scalar params (nothing to submit). */
+export function collectPageOperationForms(
+  page: PageIR,
+  aggregatesByName: ReadonlyMap<string, EnrichedAggregateIR>,
+): FelizOperationForm[] {
+  if (!page.body) return [];
+  const nameSet = new Set(aggregatesByName.keys());
+  const out: FelizOperationForm[] = [];
+  const seen = new Set<string>();
+  for (const { agg: aggName, op: opName } of operationFormSpecs(page.body, nameSet)) {
+    const agg = aggregatesByName.get(aggName);
+    if (!agg) continue;
+    const op = agg.operations.find((o) => o.name === opName && o.visibility === "public");
+    if (!op) continue;
+    const form = felizOperationForm(agg, op);
+    const key = form.formType;
+    if (form.fields.length === 0 || seen.has(key)) continue;
+    seen.add(key);
+    out.push(form);
   }
   return out;
 }
@@ -646,19 +766,50 @@ function renderCreateFn(f: FelizForm): (string | undefined)[] {
   ];
 }
 
+/** One async operation function — CURRIED `(id) (form)`, POSTs the encoded body
+ *  to `/api/<agg>/<id>/<opPath>`; a 2xx is `Ok ()` (the op returns 204, no body). */
+function renderOperationFn(f: FelizOperationForm): (string | undefined)[] {
+  return [
+    `  let ${f.apiFn} (id: string) (form: ${f.formType}) : Async<Result<unit, string>> =`,
+    "    async {",
+    `      let body = Encode.toString 0 (Encoders.${f.encoderFn} form)`,
+    "      let! response =",
+    `        Http.request (sprintf "${f.route}/%s/${f.opPath}" id)`,
+    "        |> Http.method POST",
+    "        |> Http.content (BodyContent.Text body)",
+    '        |> Http.header (Headers.contentType "application/json")',
+    "        |> Http.send",
+    "      if response.statusCode = 200 || response.statusCode = 204 then",
+    "        return Ok ()",
+    "      else",
+    '        return Error (sprintf "HTTP %d" response.statusCode)',
+    "    }",
+  ];
+}
+
 /** Emit the `Api` module — one `Cmd`-issuing async function per read (fetch +
- *  Thoth decode → `Result`), per mutation (verb request → `Result`), and per
- *  create form (encode + POST → decoded record), all over `Fable.SimpleHttp`. */
+ *  Thoth decode → `Result`), per mutation (verb request → `Result`), per create
+ *  form (encode + POST → decoded record), and per operation form (encode + POST
+ *  to `/<id>/<op>` → `unit`), all over `Fable.SimpleHttp`. */
 export function renderApiModule(
   reads: FelizRead[],
   mutations: FelizMutation[] = [],
   forms: FelizForm[] = [],
+  operationForms: FelizOperationForm[] = [],
 ): string {
-  if (reads.length === 0 && mutations.length === 0 && forms.length === 0) return "";
+  if (
+    reads.length === 0 &&
+    mutations.length === 0 &&
+    forms.length === 0 &&
+    operationForms.length === 0
+  ) {
+    return "";
+  }
   const fns = [
     ...reads.map((r) => renderApiFn(r)),
     ...mutations.map((m) => renderMutationFn(m)),
     ...forms.map((f) => renderCreateFn(f)),
+    ...operationForms.map((f) => renderOperationFn(f)),
   ];
   return lines(
     "// Api — Cmd-based reads + mutations (Fable.SimpleHttp + Thoth → Result).",
@@ -667,12 +818,13 @@ export function renderApiModule(
   );
 }
 
-/** Emit the create-form record types + their `empty<Form>` values — every
- *  field is a `string` (bound to an `Html.input`, encoded at submit). */
-export function renderFormTypes(forms: FelizForm[]): string {
+/** Emit the form record types + their `empty<Form>` values — every field is a
+ *  `string` (bound to an `Html.input`, encoded at submit).  Shared by create +
+ *  operation forms (both `FormRecord`). */
+export function renderFormTypes(forms: FormRecord[]): string {
   if (forms.length === 0) return "";
   return lines(
-    "// Create-form state — each field a string (bound to Html.input).",
+    "// Form state — each field a string (bound to Html.input).",
     ...forms.flatMap((f, i) => [
       i > 0 ? "" : undefined,
       `type ${f.formType} =`,
@@ -688,10 +840,10 @@ export function renderFormTypes(forms: FelizForm[]): string {
   );
 }
 
-/** Emit the `Encoders` module — one `Encode.object` per create form, lifting
- *  its string fields back to their wire types (the write-direction sibling of
- *  the `Decoders`). */
-export function renderEncoders(forms: FelizForm[]): string {
+/** Emit the `Encoders` module — one `Encode.object` per form, lifting its
+ *  string fields back to their wire types (the write-direction sibling of the
+ *  `Decoders`).  Shared by create + operation forms. */
+export function renderEncoders(forms: FormRecord[]): string {
   if (forms.length === 0) return "";
   return lines(
     "// Thoth.Json encoders — the write direction of the decoders.",

@@ -31,9 +31,11 @@ import {
 import {
   collectPageForms,
   collectPageMutations,
+  collectPageOperationForms,
   collectPageReads,
   type FelizForm,
   type FelizMutation,
+  type FelizOperationForm,
   type FelizRead,
   renderApiModule,
   renderEncoders,
@@ -230,6 +232,23 @@ function formsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizForm[]
   return out;
 }
 
+/** The operation forms a ui hosts, across ALL its pages (deduped by form type) —
+ *  `OperationForm(of: X, op: Y)`. */
+function operationFormsForUi(ui: UiIR, contexts: EnrichedBoundedContextIR[]): FelizOperationForm[] {
+  const aggregatesByName = new Map<string, EnrichedBoundedContextIR["aggregates"][number]>();
+  for (const c of contexts) for (const a of c.aggregates) aggregatesByName.set(a.name, a);
+  const seen = new Set<string>();
+  const out: FelizOperationForm[] = [];
+  for (const page of ui.pages) {
+    for (const f of collectPageOperationForms(page, aggregatesByName)) {
+      if (seen.has(f.formType)) continue;
+      seen.add(f.formType);
+      out.push(f);
+    }
+  }
+  return out;
+}
+
 /** A ui's `state {}` fields across ALL pages, deduped by name (multi-page uis
  *  share one flat Model; distinct pages should use distinct field names). */
 function combinedState(ui: UiIR): PageIR["state"][number][] {
@@ -272,9 +291,11 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
   const reads: FelizRead[] = readsForUi(ui, contexts);
   const mutations: FelizMutation[] = mutationsForUi(ui, contexts);
   const forms: FelizForm[] = formsForUi(ui, contexts);
+  const operationForms: FelizOperationForm[] = operationFormsForUi(ui, contexts);
+  const formRecords = [...forms, ...operationForms]; // shared record/encoder/type wiring
   const hasReads = reads.length > 0;
-  const hasForms = forms.length > 0;
-  // Http/Api are needed for reads, mutations AND create forms (POST); the Thoth
+  const hasForms = formRecords.length > 0;
+  // Http/Api are needed for reads, mutations AND forms (POST); the Thoth
   // decoder/Remote/View layer only for reads; form types + encoders only for forms.
   const hasHttp = hasReads || mutations.length > 0 || hasForms;
   // A ui is routed when it has >1 page OR any page carries a route param (a lone
@@ -286,14 +307,14 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
   // a single-page ui's combined lists are exactly its one page's.
   const state = combinedState(ui);
   const actions = combinedActions(ui);
-  const model = renderModel(state, reads, routed, forms);
-  const init = renderInit(state, reads, routed, forms);
-  const msg = renderMsg(actions, reads, routed, mutations, forms);
-  const update = renderUpdate(actions, state, reads, routed, mutations, forms);
+  const model = renderModel(state, reads, routed, formRecords);
+  const init = renderInit(state, reads, routed, formRecords);
+  const msg = renderMsg(actions, reads, routed, mutations, forms, operationForms);
+  const update = renderUpdate(actions, state, reads, routed, mutations, forms, operationForms);
   const wire = hasReads ? renderWireTypes(reads, contexts) : { domain: "", decoders: "" };
-  const api = hasHttp ? renderApiModule(reads, mutations, forms) : "";
-  const formTypes = hasForms ? renderFormTypes(forms) : "";
-  const encoders = hasForms ? renderEncoders(forms) : "";
+  const api = hasHttp ? renderApiModule(reads, mutations, forms, operationForms) : "";
+  const formTypes = hasForms ? renderFormTypes(formRecords) : "";
+  const encoders = hasForms ? renderEncoders(formRecords) : "";
 
   // Views: one root `view` (single-page) OR per-page `<page>View` functions +
   // a `React.router` root that switches on `CurrentPage`.  Detail pages take
@@ -494,7 +515,8 @@ export function generateFelizForContexts(
   const hasHttp =
     readsForUi(ui, contexts).length > 0 ||
     mutationsForUi(ui, contexts).length > 0 ||
-    formsForUi(ui, contexts).length > 0;
+    formsForUi(ui, contexts).length > 0 ||
+    operationFormsForUi(ui, contexts).length > 0;
   const routed = ui.pages.length > 1 || ui.pages.some(hasRouteParam);
   out.set("src/App.fs", renderAppFs(ui, contexts));
   out.set("App.fsproj", fsproj(hasHttp, routed));

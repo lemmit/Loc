@@ -7,7 +7,13 @@ import type { ActionIR, StateFieldIR } from "../../ir/types/loom-ir.js";
 import { upperFirst } from "../../util/naming.js";
 import { type FsExprCtx, renderFsExpr } from "./fs-expr.js";
 import { fsZeroValue, typeToFs } from "./type-fs.js";
-import type { FelizForm, FelizMutation, FelizRead } from "./wire.js";
+import type {
+  FelizForm,
+  FelizMutation,
+  FelizOperationForm,
+  FelizRead,
+  FormRecord,
+} from "./wire.js";
 
 /** Msg case name for an action (`inc` → `Inc`, `setCustomer` → `SetCustomer`). */
 export function msgCase(action: string): string {
@@ -21,7 +27,7 @@ export function renderModel(
   state: readonly StateFieldIR[],
   reads: readonly FelizRead[] = [],
   routed = false,
-  forms: readonly FelizForm[] = [],
+  forms: readonly FormRecord[] = [],
 ): string {
   const fields = [
     ...(routed ? ["    CurrentPage: Page"] : []),
@@ -60,7 +66,7 @@ export function renderInit(
   state: readonly StateFieldIR[],
   reads: readonly FelizRead[] = [],
   routed = false,
-  forms: readonly FelizForm[] = [],
+  forms: readonly FormRecord[] = [],
 ): string {
   const hasPageCmd = routed && reads.some((r) => r.single);
   const inits = [
@@ -107,6 +113,7 @@ export function renderMsg(
   routed = false,
   mutations: readonly FelizMutation[] = [],
   forms: readonly FelizForm[] = [],
+  operationForms: readonly FelizOperationForm[] = [],
 ): string {
   const cases = [
     ...(routed ? ["  | UrlChanged of string list"] : []),
@@ -124,6 +131,13 @@ export function renderMsg(
       ...f.fields.map((fld) => `  | ${fld.setMsg} of string`),
       `  | ${f.submitMsg}`,
       `  | ${f.resultMsg} of Result<${f.resultType}, string>`,
+    ]),
+    // An operation form: `Set` per param + a `Submit … of string` (carries the
+    // route id) + a `Done` result (the op returns 204 → `unit`).
+    ...operationForms.flatMap((f) => [
+      ...f.fields.map((fld) => `  | ${fld.setMsg} of string`),
+      `  | ${f.submitMsg} of string`,
+      `  | ${f.doneMsg} of Result<unit, string>`,
     ]),
   ];
   if (cases.length === 0) return "type Msg = | NoOp";
@@ -164,6 +178,7 @@ export function renderUpdate(
   routed = false,
   mutations: readonly FelizMutation[] = [],
   forms: readonly FelizForm[] = [],
+  operationForms: readonly FelizOperationForm[] = [],
 ): string {
   const stateNames = new Set(state.map((s) => s.name));
   const byIdReads = reads.filter((r) => r.single);
@@ -222,7 +237,30 @@ export function renderUpdate(
       `  | ${f.resultMsg} (Error _) -> model, Cmd.none`,
     ].join("\n");
   });
-  const arms = [...routeArms, ...actionArms, ...readArms, ...mutationArms, ...formArms];
+  // An operation form: per-field setters, a submit that fires the id-qualified
+  // POST `Cmd` (the api fn is curried `(id) (form)`), and a `Done` result that
+  // resets the form + navigates.
+  const operationArms = operationForms.map((f) => {
+    const setters = f.fields.map(
+      (fld) =>
+        `  | ${fld.setMsg} v -> { model with ${f.formField} = { model.${f.formField} with ${fld.wireName} = v } }, Cmd.none`,
+    );
+    const nav = `Cmd.navigate(${f.navigateSegs.map((s) => `"${s}"`).join(", ")})`;
+    return [
+      ...setters,
+      `  | ${f.submitMsg} id -> model, Cmd.OfAsync.perform (Api.${f.apiFn} id) model.${f.formField} ${f.doneMsg}`,
+      `  | ${f.doneMsg} (Ok ()) -> { model with ${f.formField} = ${f.emptyBinding} }, ${nav}`,
+      `  | ${f.doneMsg} (Error _) -> model, Cmd.none`,
+    ].join("\n");
+  });
+  const arms = [
+    ...routeArms,
+    ...actionArms,
+    ...readArms,
+    ...mutationArms,
+    ...formArms,
+    ...operationArms,
+  ];
   if (arms.length === 0) {
     return "let update (msg: Msg) (model: Model) =\n  match msg with\n  | NoOp -> model, Cmd.none";
   }
