@@ -86,9 +86,14 @@ this.email.trim().length > 0  sql`trim(${schema.customers.name}) = ${q}`
 ### A2 — string batch
 
 `trim, toUpper, toLower, substring(start, len?), startsWith, endsWith, contains,
-replace(find, repl), split(sep) → string[], indexOf → int, padStart/padEnd(n, s)`.
-All queryable except `split` (collection-producing; DB-dialect-dependent — mark
-non-queryable in v1).
+replace(find, repl), split(sep) → string[]` **SHIPPED** (only `trim`/`toUpper`/
+`toLower` queryable; the rest non-queryable in v1). **`indexOf` / `padStart` /
+`padEnd` dropped** — they don't translate uniformly across the 5 backends and
+would re-introduce the `months`-style break: `.NET`/`Python` pad take a single
+fill *char* (not a string), and Elixir has no 0-based *grapheme* `indexOf`
+(`:binary.match` is byte-offset, unit-inconsistent with the shipped grapheme
+`substring`, and yields no `-1`). Revisit only with a char-restriction gate +
+per-backend helpers if real demand appears.
 
 ### A3 — math batch
 
@@ -246,8 +251,14 @@ if (!(!(Name.Trim().Length > 0))) throw new DomainInvariantException(...);
   *Deferred follow-ons:* externalising to `std/*.ddd` files with `test` blocks and
   wiring them into the behavioral corpus + conformance suite so the stdlib doubles as a
   permanent cross-backend conformance fixture.
-- **C3 — docs:** `docs/stdlib.md` reference (intrinsics table generated from the
-  registry — single source of truth), language.md cross-links.
+- **C3 — docs: SHIPPED.** `docs/stdlib.md` is generated from the registries
+  (`renderStdlibMarkdown()` in `src/system/stdlib-doc.ts`, written by
+  `scripts/gen-stdlib-docs.mjs` / `npm run docs:stdlib`) — Layer-0 scalar
+  intrinsics (grouped by receiver, with the queryable flag), collection ops, and
+  the ambient Layer-1 prelude. A drift-gate test
+  (`test/system/stdlib-doc-sync.test.ts`) re-renders and compares byte-for-byte,
+  so a registry change without a doc regen fails CI. Cross-linked from
+  `docs/language.md` + `docs/README.md`.
 
 ## Sequencing & gates
 

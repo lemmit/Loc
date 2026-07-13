@@ -36,6 +36,7 @@ These cover a single language feature each.  Each one is self-contained.
 | [`tenancy.md`](tenancy.md) | Multi-tenancy — `tenancy by user.<claim> of <Registry>`, the `tenantOwned` capability, `crossTenant`, and the explicit-stance rule. |
 | [`domain-services.md`](domain-services.md) | `domainService` — stateless cross-aggregate pure calculators, the no-infra contract, and per-backend emission. |
 | [`scaffold-macros.md`](scaffold-macros.md) | The `scaffold`, `crudish`, `audit`, and `softDelete` macros — what they expand to. |
+| [`stdlib.md`](stdlib.md) | The standard library — Layer-0 scalar intrinsics, collection operations, and the ambient prelude. Generated from the registries. |
 | [`provenance.md`](provenance.md) | `provenanced` field modifier, the `ddd snapshot` capture step, and the Hono runtime trace SDK. |
 | [`observability.md`](observability.md) | The catalog envelope, per-backend log emission, the catalog extension surface. |
 | [`traceability.md`](traceability.md) | `requirement` / `solution` / `testCase` artefacts and the generated coverage report. |
