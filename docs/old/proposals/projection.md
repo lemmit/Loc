@@ -363,24 +363,22 @@ workflow-instance surface.
     not yet handle. This asymmetry mirrors the pre-existing aggregate-view matrix
     (Java already throws on aggregate cross-aggregate follows); a future slice can
     lift Java/Phoenix/.NET to parity.
-- **Consideration (follow-up to v1.1) — gate views over an event-sourced
-  source.** Once projection-views ship, a `view` whose source is
-  **event-sourced** — an ES workflow *or* an ES aggregate — is a footgun: it has
-  no state table, so every backend re-folds the whole `<x>_events` stream *in
-  memory at query time* and filters in application code (`emitWorkflowViewRoute`'s
-  ES branch; the aggregate case re-folds through the repository's `findAll`).
-  That is, functionally, *a projection recomputed per request and thrown away* —
-  O(all events) per call, no index, no SQL pushdown. A projection is the correct
-  tool: it folds the same stream **once, at write time**, into an indexed
-  `<Proj>Row` table that a projection-view reads with a SQL-pushed filter. So a
-  future validate-only slice should **flag** (warning first, not a hard error —
-  the ES-workflow-view path ships today and can't break) a view sourced from an
-  event-sourced workflow/aggregate, with a `loom.view-source-eventsourced-refold`
-  diagnostic that points the author at "define a `projection` and view over it."
-  Deliberately deferred until projection-views land, since the nudge is only
-  actionable once the clean alternative exists. Owner axis: this is a per-source
-  `view` validator gate (`ir/validate/checks/query-checks.ts` /
-  `workflow-checks.ts`), not a projection-emission change.
+- **v1.1 — event-sourced view source lint (SHIPPED, warning-only).** A `view`
+  whose source is **event-sourced** — an `eventSourced` workflow *or* a
+  `persistedAs(eventLog)` aggregate — is a footgun: it has no state table, so
+  every backend re-folds the whole `<x>_events` stream *in memory at query time*
+  and filters in application code (`emitWorkflowViewRoute`'s ES branch; the
+  aggregate case re-folds through the repository's `findAll`). That is,
+  functionally, *a projection recomputed per request and thrown away* — O(all
+  events) per call, no index, no SQL pushdown. A projection is the correct tool:
+  it folds the same stream **once, at write time**, into an indexed `<Proj>Row`
+  table a projection-view reads with a SQL-pushed filter. This is surfaced as a
+  **WARNING, not a gate** — `loom.view-source-eventsourced-refold`
+  (`ir/validate/checks/workflow-checks.ts`) — that points the author at "define a
+  `projection` and view over it." The ES-source-view path still ships and stays
+  valid; the lint is a nudge, never a rejection, so it can't break existing
+  models. It shipped alongside projection-as-view-source, since the nudge is only
+  actionable once the clean alternative exists.
 - **Replay / rebuild.** v1 folds synchronously in-process at emit time; there is
   no durable log to replay from and no rebuild command. Replay lands with the
   durable-log channel tier (`channels.md` `channelSource` → kafka/redis-streams)

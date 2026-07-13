@@ -49,6 +49,17 @@ import { firstColumnVsColumn, firstNonQueryableNode, firstUnknownColumnRef } fro
 // A workflow's event consumers — `on(e: Event)` reactors and event-triggered
 // `create(e: Event) by` starters — as `{ event, label }` pairs.  Shared by the
 // channel-routing checks (`reactor-event-uncarried`, `reactor-channel-ambiguous`).
+/** Lint message for a view whose source is event-sourced — see the two
+ *  `diags.push` sites in the view loop (kept inline there so the diagnostic-code
+ *  completeness scan sees the literal `code:`). */
+function eventSourcedRefoldMessage(
+  viewName: string,
+  sourceName: string,
+  sourceKind: "workflow" | "aggregate",
+): string {
+  return `view '${viewName}': source '${sourceName}' is an event-sourced ${sourceKind}, so this view re-folds its event stream in memory on every request (O(all events), no index). Consider a \`projection\` folded from the same events and a view over that instead.`;
+}
+
 function eventConsumersOf(wf: WorkflowIR): { event: string; label: string }[] {
   return [
     ...(wf.subscriptions ?? []).map((s) => ({ event: s.event, label: `on(${s.event})` })),
@@ -1038,6 +1049,20 @@ export function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): v
         });
         continue;
       }
+      // An event-sourced workflow has no state table, so a view over it
+      // re-folds the whole `<wf>_events` stream in memory on every request and
+      // filters in application code — functionally a projection recomputed per
+      // call (O(all events), no index, no SQL pushdown).  Nudge the author
+      // toward a projection; a WARNING, not an error — the ES-workflow-view path
+      // ships and stays valid.
+      if (wf.eventSourced) {
+        diags.push({
+          severity: "warning",
+          code: "loom.view-source-eventsourced-refold",
+          message: eventSourcedRefoldMessage(view.name, wf.name, "workflow"),
+          source: `${ctx.name}/${view.name}`,
+        });
+      }
       columnSource = { fields: wf.stateFields ?? [], contains: [], derived: [] };
     } else {
       const agg = ctx.aggregates.find((a) => a.name === view.source.name);
@@ -1049,6 +1074,18 @@ export function validateViews(ctx: BoundedContextIR, diags: LoomDiagnostic[]): v
           source: `${ctx.name}/${view.name}`,
         });
         continue;
+      }
+      // Same refold cost for an event-sourced aggregate (`persistedAs(eventLog)`):
+      // the read re-folds the event stream through the repository's findAll on
+      // every query.  A projection folds it once at write time into an indexed
+      // row table a projection-view reads with a SQL-pushed filter.  Warning only.
+      if (agg.persistedAs === "eventLog") {
+        diags.push({
+          severity: "warning",
+          code: "loom.view-source-eventsourced-refold",
+          message: eventSourcedRefoldMessage(view.name, agg.name, "aggregate"),
+          source: `${ctx.name}/${view.name}`,
+        });
       }
       columnSource = agg;
     }
