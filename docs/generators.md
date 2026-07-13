@@ -931,8 +931,14 @@ hosting (`loom.java-fullstack-unsupported` — the `ui:` embedded-SPA
 mount is implemented), resource-op clients, a **principal-referencing
 capability filter on a non-relational aggregate**
 (`loom.context-filter-unsupported` — each half ships alone; only the
-actor + jsonb intersection is deferred), and provenance/audited (gated —
-no runtime emitted; the node and .NET backends do implement these).  See
+actor + jsonb intersection is deferred), provenance/audited (gated —
+no runtime emitted; the node and .NET backends do implement these), a
+**cross-aggregate view `follows`** (`loom.java-view-follows-unsupported`
+— an output bind reaching another aggregate via `X id`), and a **VO- /
+entity-typed workflow-instance or projection read-model field**
+(`loom.java-workflow-instance-field-unsupported` /
+`loom.java-projection-field-unsupported` — those DTOs carry only
+scalars / ids / enums).  See
 `docs/old/plans/java-backend-implementation.md` for the execution record.
 
 Discriminated unions (payload fields / operation returns; union *finds* take

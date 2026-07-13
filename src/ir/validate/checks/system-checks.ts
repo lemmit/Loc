@@ -1259,6 +1259,102 @@ export function validateJavaContainmentSupport(sys: SystemIR, diags: LoomDiagnos
 }
 
 // ---------------------------------------------------------------------------
+// Java read-model shapes the backend's view / workflow-instance / projection
+// emitters cannot render.  Each was an ungated `throw new Error` that crashed
+// codegen mid-emit on valid `.ddd`; gated here so the model fails at validation
+// with a clear diagnostic instead (the emitter throws stay as unreachable
+// backstops).  The three shapes:
+//   - a cross-aggregate view `follows` (`output.auxiliaries`) — the view
+//     emitter would bulk-load foreign aggregates (java/emit/view.ts);
+//   - a VO- / entity-typed saga instance-view field — the InstanceResponse DTO
+//     rides the enums / ids / valueobjects wire wildcards, and a VO- or
+//     entity-typed state field would need a `<Vo>Response` / `<Part>Response`
+//     DTO those packages don't carry (java/emit/workflow-instances.ts);
+//   - a VO- / entity-typed projection row field — the same DTO constraint on
+//     the read-model row (java/emit/projection-reads.ts).
+// Java DOES emit plain views / workflows / projections (scalars / ids / enums),
+// so only these three shapes gate.
+// ---------------------------------------------------------------------------
+
+/** Peel optional / array wrappers to the leaf type kind — the emitters' own
+ *  guard shape: `T?` → `T`, `T[]` → element, `T?[]` element-optional → `T`. */
+function wireLeafKind(t: TypeIR): TypeIR["kind"] {
+  const inner = t.kind === "optional" ? t.inner : t;
+  const leaf =
+    inner.kind === "array"
+      ? inner.element.kind === "optional"
+        ? inner.element.inner
+        : inner.element
+      : inner;
+  return leaf.kind;
+}
+
+export function validateJavaReadModelShapes(sys: SystemIR, diags: LoomDiagnostic[]): void {
+  const ctxByName = new Map<string, BoundedContextIR>();
+  for (const m of sys.subdomains) for (const c of m.contexts) ctxByName.set(c.name, c);
+  for (const dep of sys.deployables) {
+    if (platformFamily(dep.platform) !== "java") continue;
+    for (const ctxName of dep.contextNames) {
+      const ctx = ctxByName.get(ctxName);
+      if (!ctx) continue;
+
+      // (1) Cross-aggregate view `follows`.
+      for (const view of ctx.views) {
+        if ((view.output?.auxiliaries.length ?? 0) === 0) continue;
+        diags.push({
+          severity: "error",
+          message:
+            `Deployable '${dep.name}' (platform java) hosts view '${ctxName}.${view.name}' with a ` +
+            `cross-aggregate 'follows' (an output bind reaches another aggregate via 'X id') — not ` +
+            `yet implemented on the java backend. Drop the follow (keep the view on the source ` +
+            `aggregate's own fields), or host it on a node / dotnet / python deployable.`,
+          source: `${sys.name}/${dep.name}`,
+          code: "loom.java-view-follows-unsupported",
+        });
+      }
+
+      // (2) VO- / entity-typed saga instance-view field.  Only observable
+      // workflows (those with an `instanceWireShape`) reach the instance emitter.
+      for (const wf of ctx.workflows) {
+        for (const f of wf.instanceWireShape ?? []) {
+          const leaf = wireLeafKind(f.type);
+          if (leaf !== "valueobject" && leaf !== "entity") continue;
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform java) hosts workflow '${ctxName}.${wf.name}' with ` +
+              `instance-view field '${f.name}' of ${leaf} type — workflow-instance read models on the ` +
+              `java backend carry only scalars / ids / enums (there is no '<${leaf}>Response' DTO in ` +
+              `the wire packages). Drop the field from the observable state, or host it on a node / ` +
+              `dotnet / python deployable.`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.java-workflow-instance-field-unsupported",
+          });
+        }
+      }
+
+      // (3) VO- / entity-typed projection row field.
+      for (const proj of ctx.projections) {
+        for (const f of proj.wireShape ?? []) {
+          const leaf = wireLeafKind(f.type);
+          if (leaf !== "valueobject" && leaf !== "entity") continue;
+          diags.push({
+            severity: "error",
+            message:
+              `Deployable '${dep.name}' (platform java) hosts projection '${ctxName}.${proj.name}' with ` +
+              `row field '${f.name}' of ${leaf} type — projection read models on the java backend carry ` +
+              `only scalars / ids / enums (there is no '<${leaf}>Response' DTO in the wire packages). ` +
+              `Drop the field, or host it on a node / dotnet / python deployable.`,
+            source: `${sys.name}/${dep.name}`,
+            code: "loom.java-projection-field-unsupported",
+          });
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Nested entity parts on an elixir aggregate.
 //
 // On a `shape(embedded)` aggregate, `contains <part>: <Part>[]` persists inline:

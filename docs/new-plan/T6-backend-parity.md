@@ -14,8 +14,8 @@ Sources: [vanilla-phoenix-gaps](../old/plans/vanilla-phoenix-gaps.md) §11c/§12
 Generated output fails `mix format --check` on ~53% of files; no Credo/Dialyzer gate. Emitter formatting cleanup first, then the CI gate (`LOOM_PHOENIX_FORMAT` exists — activate); Dialyzer nightly-only. Include Elixir in the per-PR OpenAPI parity boot (currently skipped).
 Sources: [vanilla-phoenix-gaps](../old/plans/vanilla-phoenix-gaps.md) §7, [static-analysis-followups](../old/proposals/static-analysis-followups.md) Slices 1–2.
 
-## M-T6.4 — Java crash gates → honest validators — `open` · **S** · P1 ⭐ wrong failure mode
-Three ungated `throw new Error` sites crash codegen on valid `.ddd`: cross-aggregate view `follows` (`java/emit/view.ts`), non-id-typed saga instance fields (`workflow-instances.ts`), non-id projection fields (`projection-reads.ts`). Add `loom.*` validator gates (an afternoon each) — then implement the features on their own schedule.
+## M-T6.4 — Java crash gates → honest validators — `done` (PR #1879, verified 2026-07-13) · **S** · P1 ⭐ wrong failure mode
+The three ungated `throw new Error` sites that crashed codegen on valid `.ddd` now fail honestly at validation via `validateJavaReadModelShapes` (`src/ir/validate/checks/system-checks.ts`, wired in `validate.ts`): cross-aggregate view `follows` → `loom.java-view-follows-unsupported`; a VO-/entity-typed saga instance field → `loom.java-workflow-instance-field-unsupported`; a VO-/entity-typed projection row field → `loom.java-projection-field-unsupported`. (The reachable-on-valid-`.ddd` crashes were the VO/entity *field-shape* throws in `workflow-instances.ts`/`projection-reads.ts`, not the correlation-must-be-id throws — those are unreachable backstops, id-typed correlation is already IR-enforced.) The emitter throws stay as defensive backstops behind the gate. Negative tests: `test/generator/java/generator-java-readmodel-gates.test.ts`. Features can now land on their own schedule. Kept briefly as the record; delete next refresh.
 Sources: weak-spots §6, parity audit findings.
 
 ## M-T6.5 — Java `hosts:` fullstack embed (DEBT-14) — `open` · **M** · P3
