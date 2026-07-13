@@ -55,11 +55,14 @@ jobs:
       - name: Generate the Feliz showcase system
         run: |
           mkdir -p ci-feliz
-          # Two-page routed app — exercises multi-page routing (Page union +
+          # Three-page routed app — exercises multi-page routing (Page union +
           # parseUrl + React.router + Router.navigate) ALONGSIDE the wire layer
           # (Thoth decoders + Cmd-based Api + the Remote/QueryView MVU
-          # projection), the MVU counter (state + action → dispatch), and the
-          # pack primitives (Heading/Badge/Text/Button/Divider/Card + For).
+          # projection — BOTH list `.all` and byId detail reads), the MVU counter
+          # (state + action → dispatch), and the pack primitives
+          # (Heading/Badge/Text/Button/Divider/Card + For).  The ProductDetail
+          # page covers byId-on-navigation: a `:id` route → a `Remote<T option>`
+          # fired via `pageCmd` on entry, rendered through `View.remoteOne`.
           cat > ci-feliz/showcase.ddd <<'DDD'
           system Storefront {
             api ShopApi from Catalog
@@ -108,6 +111,23 @@ jobs:
                     }
                   },
                   Button { "Back home", to: "/" }
+                }
+              }
+              page ProductDetail {
+                route: "/products/:id"
+                body: Stack {
+                  Heading { "Product", level: 1 },
+                  QueryView {
+                    of:      Shop.Product.byId(id),
+                    single:  true,
+                    loading: Text { "Loading…" },
+                    error:   Text { "Failed to load" },
+                    empty:   Text { "Product not found." },
+                    data:    p => Card { p.name,
+                      Text { p.price }
+                    }
+                  },
+                  Button { "Back to products", to: "/products" }
                 }
               }
             }

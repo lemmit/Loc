@@ -2001,3 +2001,41 @@ F#-specific gotchas beyond §23's offside rule.
 Both compile failures were caught by `dotnet fable` against the REAL generated
 2-page project before the emitter shipped — the same prove-it loop as §23. A
 generator-only test would have gone green on both broken versions.
+
+## 25. Feliz byId detail pages — the fetch fires on page ENTRY, not init (2026-07-13)
+
+Adding byId/detail reads to the Feliz frontend (`QueryView(of: X.byId(id),
+single: true)` on a `:id` route) surfaced one non-obvious MVU design point and
+reused the §23/§24 prove-it loop.
+
+- **A list read fires at `init`; a byId read fires on page ENTRY.** `.all` data
+  is page-independent (fetch once, eagerly). A byId read is keyed off the route
+  `id`, which only exists once you're on the detail page AND changes when you
+  navigate between `/products/1` and `/products/2` — so firing it at `init` is
+  both wrong (no id yet on other pages) and insufficient (won't refetch on
+  id change). The fix is a `pageCmd (page: Page) : Cmd<Msg>` helper that maps
+  each detail `Page` case to its fetch `Cmd`, invoked from BOTH `init` (for a
+  deep-link into a detail URL) and the `UrlChanged` arm (for in-app nav). The
+  `UrlChanged` arm also resets the byId field to `Loading` so the detail view
+  shows the spinner while refetching. This is the general Elmish idiom for
+  "load data on route entry" — there is no per-route effect hook; you thread it
+  through the one `update`/`UrlChanged` seam.
+
+- **The route param rides the `Page` union, not a separate `id` field.** A
+  detail page's case carries its param (`| ProductDetail of string`); `parseUrl`
+  binds the URL segment (`| [ "products"; id ] -> ProductDetail id`); the root
+  view passes it to the page view fn (`| ProductDetail id -> productDetailView
+  model dispatch id`). `renderRouteId → "id"` then resolves the body's
+  `byId(id)` to that local. Keeping the id ON the page case (rather than a
+  Model field) means the type system enforces that only detail pages have one —
+  a paramless page case can't be constructed with an id, and vice versa.
+
+- **`Decode.option` + a `404 → Ok None` arm** is the single-record decoder.
+  A present record decodes to `Some`, a JSON `null` to `None`, and an HTTP 404
+  folds to `Ok None` (a missing record is a legitimate empty, not an error) —
+  so `View.remoteOne`'s `Loaded None -> empty` arm lights the "not found" branch.
+
+Proven the same way as §23/§24: a hand-written byId spike Fable-compiled FIRST
+(locking the `pageCmd`/`parseUrl`/`Page`-param shape), then every emitter slice
+re-verified against the REAL generated 3-page project (`dotnet fable` + `vite
+build`) before commit.

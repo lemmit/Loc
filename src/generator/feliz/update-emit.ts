@@ -31,16 +31,43 @@ export function renderModel(
   return `type Model =\n  {\n${fields.join("\n")}\n  }`;
 }
 
-/** `let init () = { … }, <Cmd>` — reads start `Loading` and fire their fetch
- *  `Cmd` at init (batched when there is more than one).  When `routed`, the
- *  initial `CurrentPage` is parsed from the current URL. */
+/** The page-entry `Cmd` dispatcher — one arm per byId read, firing its fetch
+ *  keyed off the route `id` bound by the hosting `Page` case.  Emitted only
+ *  when byId reads exist (they fetch on page entry, not at init); returns "".
+ *
+ *      let pageCmd (page: Page) : Cmd<Msg> =
+ *        match page with
+ *        | ProductDetail id -> Cmd.OfAsync.perform Api.productById id ProductByIdLoaded
+ *        | _ -> Cmd.none
+ */
+export function renderPageCmd(reads: readonly FelizRead[] = []): string {
+  const byId = reads.filter((r) => r.single);
+  if (byId.length === 0) return "";
+  const arms = byId.map(
+    (r) => `  | ${r.pageCase} id -> Cmd.OfAsync.perform Api.${r.apiFn} id ${r.msgCase}`,
+  );
+  return `let pageCmd (page: Page) : Cmd<Msg> =\n  match page with\n${arms.join("\n")}\n  | _ -> Cmd.none`;
+}
+
+/** `let init () = { … }, <Cmd>` — every read field starts `Loading`.  List reads
+ *  fire their fetch `Cmd` at init; byId reads instead fire via `pageCmd` (so a
+ *  detail page loads on entry, not eagerly).  When `routed`, the initial
+ *  `CurrentPage` is parsed from the current URL — bound to a `let page` when
+ *  there is a `pageCmd` to feed it. */
 export function renderInit(
   state: readonly StateFieldIR[],
   reads: readonly FelizRead[] = [],
   routed = false,
 ): string {
+  const hasPageCmd = routed && reads.some((r) => r.single);
   const inits = [
-    ...(routed ? ["      CurrentPage = parseUrl (Router.currentUrl ())"] : []),
+    ...(routed
+      ? [
+          hasPageCmd
+            ? "      CurrentPage = page"
+            : "      CurrentPage = parseUrl (Router.currentUrl ())",
+        ]
+      : []),
     ...state.map((f) => {
       const ctx: FsExprCtx = { stateNames: new Set(), locals: new Set() };
       const v = f.init ? renderFsExpr(f.init, ctx) : fsZeroValue(f.type);
@@ -48,15 +75,22 @@ export function renderInit(
     }),
     ...reads.map((r) => `      ${r.field} = Loading`),
   ];
-  const cmds = reads.map((r) => `Cmd.OfAsync.perform Api.${r.apiFn} () ${r.msgCase}`);
+  // List reads fire eagerly; byId reads fire on page entry via `pageCmd page`.
+  const cmds = reads
+    .filter((r) => !r.single)
+    .map((r) => `Cmd.OfAsync.perform Api.${r.apiFn} () ${r.msgCase}`);
+  if (hasPageCmd) cmds.push("pageCmd page");
   const cmd =
     cmds.length === 0
       ? "Cmd.none"
       : cmds.length === 1
         ? cmds[0]!
         : `Cmd.batch [\n${cmds.map((c) => `    ${c}`).join("\n")}\n  ]`;
+  const prefix = hasPageCmd
+    ? "let init () =\n  let page = parseUrl (Router.currentUrl ())\n"
+    : "let init () =\n";
   if (inits.length === 0) return `let init () = { Unit = () }, ${cmd}`;
-  return `let init () =\n  {\n${inits.join("\n")}\n  }, ${cmd}`;
+  return `${prefix}  {\n${inits.join("\n")}\n  }, ${cmd}`;
 }
 
 /** The `Msg` union — one case per action, plus one `Loaded` case per read
@@ -113,8 +147,21 @@ export function renderUpdate(
   routed = false,
 ): string {
   const stateNames = new Set(state.map((s) => s.name));
+  const byIdReads = reads.filter((r) => r.single);
+  const hasPageCmd = routed && byIdReads.length > 0;
+  // On navigation, re-parse the URL.  With byId reads, entering a detail page
+  // must refetch: reset every byId field to `Loading` and fire `pageCmd` (which
+  // issues the fetch for the newly-active detail page, or `Cmd.none`).
   const routeArms = routed
-    ? ["  | UrlChanged segments -> { model with CurrentPage = parseUrl segments }, Cmd.none"]
+    ? hasPageCmd
+      ? [
+          "  | UrlChanged segments ->\n" +
+            "      let page = parseUrl segments\n" +
+            `      { model with CurrentPage = page; ${byIdReads
+              .map((r) => `${r.field} = Loading`)
+              .join("; ")} }, pageCmd page`,
+        ]
+      : ["  | UrlChanged segments -> { model with CurrentPage = parseUrl segments }, Cmd.none"]
     : [];
   const actionArms = actions.map((a) => {
     const p = a.params[0];

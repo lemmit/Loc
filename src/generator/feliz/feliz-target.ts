@@ -11,7 +11,7 @@ import { lowerFirst, upperFirst } from "../../util/naming.js";
 import type { RenderPosition, StateRef, WalkerTarget } from "../_walker/target.js";
 import { FS_LEAVES, fsString } from "./fs-expr.js";
 import { fsZeroValue } from "./type-fs.js";
-import { readFieldName } from "./wire.js";
+import { byIdFieldName, readFieldName } from "./wire.js";
 
 /** Msg case name for an action (`inc` → `Inc`). */
 function msgCase(action: string): string {
@@ -83,13 +83,21 @@ export const felizTarget: WalkerTarget = {
   // So `buildHookUse` names the Model field, `renderApiCall` returns it as the
   // value QueryView matches on, and `renderApiHoisting` emits nothing (there is
   // no page-top hoist to make).
-  buildHookUse: (detected) => ({
-    varName: readFieldName(detected.aggregateName),
-    hookName: lowerFirst(readFieldName(detected.aggregateName)),
-    importFrom: "",
-    argsRendered: [],
-  }),
+  buildHookUse: (detected) => {
+    // A `byId` read resolves to the `<Agg>ById` Model field (its `Remote<'T
+    // option>` envelope); `all` (and any other read) to `All<Plural>`.  The
+    // page-entry `Cmd` — not this call — issues the byId fetch, so the view
+    // only names the field it matches on.
+    const field =
+      detected.operation === "byId"
+        ? byIdFieldName(detected.aggregateName)
+        : readFieldName(detected.aggregateName);
+    return { varName: field, hookName: lowerFirst(field), importFrom: "", argsRendered: [] };
+  },
   renderApiCall: (call) => call.varName ?? readFieldName(call.aggregateName),
+  // The magic route `id` (`byId(id)`) resolves to the local `id` the page view
+  // function binds from its `Page` case (`| ProductDetail id -> …View … id`).
+  renderRouteId: () => "id",
   renderApiHoisting: () => [],
   // The `data:` lambda param binds to the match arm the QueryView pack emits
   // (`| Loaded <binding> -> …`), so a read handle's data dereferences to that

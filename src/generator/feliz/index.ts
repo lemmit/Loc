@@ -20,8 +20,21 @@ import { lowerFirst, upperFirst } from "../../util/naming.js";
 import { walkBody } from "../_walker/walker-core.js";
 import { felizTarget } from "./feliz-target.js";
 import { felizPack } from "./pack.js";
-import { msgCase, renderInit, renderModel, renderMsg, renderUpdate } from "./update-emit.js";
-import { collectPageReads, type FelizRead, renderApiModule, renderWireTypes } from "./wire.js";
+import {
+  msgCase,
+  renderInit,
+  renderModel,
+  renderMsg,
+  renderPageCmd,
+  renderUpdate,
+} from "./update-emit.js";
+import {
+  collectPageReads,
+  type FelizRead,
+  renderApiModule,
+  renderViewModule,
+  renderWireTypes,
+} from "./wire.js";
 
 /** The `Remote<'T>` envelope every read's Model field carries — the MVU
  *  analogue of TanStack's `{ isLoading, isError, data }` (§2.3). */
@@ -29,18 +42,6 @@ const REMOTE_TYPE = `type Remote<'T> =
   | Loading
   | LoadError of string
   | Loaded of 'T`;
-
-/** The `View` helper module — a `Remote<'T list>` → element matcher.  A helper
- *  CALL is offside-safe inside a Feliz children `[ … ]` list where a raw
- *  multi-line `match` is not, so the QueryView pack renderer emits a call to
- *  this rather than an inline match (see `pack.ts` primitiveQueryView). */
-const VIEW_MODULE = `module View =
-  let remoteList (r: Remote<'T list>) (loading: ReactElement) (error: ReactElement) (empty: ReactElement) (render: 'T list -> ReactElement) : ReactElement =
-    match r with
-    | Loading -> loading
-    | LoadError _ -> error
-    | Loaded [] -> empty
-    | Loaded items -> render items`;
 
 export interface GenerateFelizOptions {
   apiBaseUrl?: string;
@@ -78,8 +79,12 @@ function renderPageView(
   ui: UiIR,
   aggregatesByName: ReadonlyMap<string, AggregateIR>,
   fnName: string,
+  takesRouteId = false,
 ): string {
-  const head = `let ${fnName} (model: Model) (dispatch: Msg -> unit) =`;
+  // A detail page's view takes the route `id` (bound by its `Page` case); the
+  // body's `byId(id)` renders through the `renderRouteId` seam to this local.
+  const idParam = takesRouteId ? " (id: string)" : "";
+  const head = `let ${fnName} (model: Model) (dispatch: Msg -> unit)${idParam} =`;
   if (!page.body) return `${head}\n    Html.none`;
   const stateNames = new Set(page.state.map((s) => s.name));
   const result = walkBody(
@@ -108,19 +113,38 @@ function pageCase(page: PageIR): string {
 function pageViewFn(page: PageIR): string {
   return `${lowerFirst(page.name)}View`;
 }
-/** URL segments of a page's `route:` — `/` → `[]`, `/orders/:id` → the F# list
- *  pattern `[ "orders"; _ ]` (a `:param` segment matches as a wildcard). */
+/** A page carries a route param when its `route:` has a `:param` segment
+ *  (`/products/:id`) — a detail page.  v1 binds only the FIRST such param, as
+ *  the magic route `id`. */
+function hasRouteParam(page: PageIR): boolean {
+  return (page.route ?? "/").split("/").some((s) => s.startsWith(":"));
+}
+/** URL segments of a page's `route:` as an F# list pattern.  `/` → `[]`;
+ *  `/orders/:id` → `[ "orders"; id ]` (the first `:param` binds the local `id`,
+ *  further params match as `_` — single-param detail routes are the v1 shape). */
 function routePattern(route: string | undefined): string {
   const segs = (route ?? "/").split("/").filter((s) => s.length > 0);
   if (segs.length === 0) return "[]";
-  return `[ ${segs.map((s) => (s.startsWith(":") ? "_" : `"${s}"`)).join("; ")} ]`;
+  let bound = false;
+  const pats = segs.map((s) => {
+    if (!s.startsWith(":")) return `"${s}"`;
+    if (bound) return "_";
+    bound = true;
+    return "id";
+  });
+  return `[ ${pats.join("; ")} ]`;
 }
 
-/** The `Page` union + `parseUrl` — URL segments → the active `Page`.  Arms are
- *  emitted in page order; the first page is the catch-all fallback. */
+/** The `Page` union + `parseUrl` — URL segments → the active `Page`.  A detail
+ *  page's case carries its route param (`| ProductDetail of string`); `parseUrl`
+ *  binds the segment.  Arms are emitted in page order; the first page is the
+ *  catch-all fallback (paramless, so a valid fallback ctor). */
 function renderRouting(pages: readonly PageIR[]): string {
-  const union = `type Page =\n${pages.map((p) => `  | ${pageCase(p)}`).join("\n")}`;
-  const arms = pages.map((p) => `  | ${routePattern(p.route)} -> ${pageCase(p)}`);
+  const caseDecl = (p: PageIR): string =>
+    hasRouteParam(p) ? `  | ${pageCase(p)} of string` : `  | ${pageCase(p)}`;
+  const ctor = (p: PageIR): string => (hasRouteParam(p) ? `${pageCase(p)} id` : pageCase(p));
+  const union = `type Page =\n${pages.map(caseDecl).join("\n")}`;
+  const arms = pages.map((p) => `  | ${routePattern(p.route)} -> ${ctor(p)}`);
   const parse =
     `let parseUrl (segments: string list) : Page =\n  match segments with\n` +
     `${arms.join("\n")}\n  | _ -> ${pageCase(pages[0]!)}`;
@@ -128,9 +152,13 @@ function renderRouting(pages: readonly PageIR[]): string {
 }
 
 /** The root `view` — a `React.router` that dispatches `UrlChanged` and renders
- *  the active page's view function. */
+ *  the active page's view function (threading the route `id` to detail pages). */
 function renderRootView(pages: readonly PageIR[]): string {
-  const arms = pages.map((p) => `      | ${pageCase(p)} -> ${pageViewFn(p)} model dispatch`);
+  const arms = pages.map((p) =>
+    hasRouteParam(p)
+      ? `      | ${pageCase(p)} id -> ${pageViewFn(p)} model dispatch id`
+      : `      | ${pageCase(p)} -> ${pageViewFn(p)} model dispatch`,
+  );
   return [
     "let view (model: Model) (dispatch: Msg -> unit) =",
     "  React.router [",
@@ -203,7 +231,10 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
   for (const c of contexts) for (const a of c.aggregates) aggregatesByName.set(a.name, a);
   const reads: FelizRead[] = readsForUi(ui, contexts);
   const hasReads = reads.length > 0;
-  const routed = pages.length > 1;
+  // A ui is routed when it has >1 page OR any page carries a route param (a lone
+  // detail page still needs a router to bind its `:id`).
+  const routed = pages.length > 1 || pages.some(hasRouteParam);
+  const pageCmd = renderPageCmd(reads); // "" unless byId reads exist
 
   // MVU triple is built from the COMBINED (all-page, deduped) state + actions;
   // a single-page ui's combined lists are exactly its one page's.
@@ -217,10 +248,13 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
   const api = hasReads ? renderApiModule(reads) : "";
 
   // Views: one root `view` (single-page) OR per-page `<page>View` functions +
-  // a `React.router` root that switches on `CurrentPage`.
+  // a `React.router` root that switches on `CurrentPage`.  Detail pages take
+  // the route `id`.
   const views = routed
     ? [
-        ...pages.map((p) => renderPageView(p, ui, aggregatesByName, pageViewFn(p))),
+        ...pages.map((p) =>
+          renderPageView(p, ui, aggregatesByName, pageViewFn(p), hasRouteParam(p)),
+        ),
         "",
         renderRootView(pages),
       ]
@@ -245,7 +279,7 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
     hasReads && "",
     hasReads && api,
     hasReads && "",
-    hasReads && VIEW_MODULE,
+    hasReads && renderViewModule(reads),
     // Routing table (multi-page only) — Page union + parseUrl, ahead of Model.
     routed && "",
     routed && renderRouting(pages),
@@ -253,6 +287,10 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
     model,
     "",
     msg,
+    // `pageCmd` (byId reads only) fires a detail read on entry; sits after Msg
+    // (it references the read's `Loaded` case) and before init (which feeds it).
+    pageCmd ? "" : false,
+    pageCmd || undefined,
     "",
     init,
     "",
