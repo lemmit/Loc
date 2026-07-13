@@ -2,7 +2,32 @@
 
 *Phase 1 (divergence audit) + Phase 2 (seam contract + slicing plan). This is the **design-first deliverable for maintainer sign-off**, per [`M-T9.2-persistence-seam-brief.md`](./M-T9.2-persistence-seam-brief.md) and [`../RUNBOOK.md`](../RUNBOOK.md) step 3. **No extraction code lands until this is signed off.***
 
-> **STATUS: READY FOR REVIEW.** Audit complete (all 5 backends, all named fragment families, `file:line` evidence below). Contract sketch + slicing plan below. **Go/no-go decision in §0.5 (scoped GO — slices 0–6 committed, 7–9 deferred, no backend convergence).** Open questions for sign-off in §Phase 2.7.
+> **STATUS: IMPLEMENTED + CONCLUDED.** Audit complete (all 5 backends). **Seed spine extracted (#1876, byte-identical, merged).** Then, on byte-level scoping, every other candidate fragment declined (§0.4 events/ids/enum; §0.6 wire; **§0.7 QueryTarget** — the flagship). **Net conclusion in §0.7:** the persistence surface's *byte-identical-realizable* shared content is the seed spine + the already-shared substrate; "regular-shaped" (parallel decision tree) turned out to be a weaker property than "byte-identical-extractable" (shared *composition*), which almost nothing outside seed has. Go/no-go history in §0.5; open questions in §2.7.
+
+---
+
+## 0.7 Implementation finding #3 (the conclusion) — `QueryTarget` declines too; the realizable seam is seed + the already-shared substrate
+
+*(Recorded after reading `lowerToDrizzle` and `lowerToSqlAlchemy` at the byte level to build the seam — the "recommended" slice 2.)*
+
+`QueryTarget` was the mission's flagship: the audit called `lowerToDrizzle` ↔ `lowerToSqlAlchemy` "nearly line-for-line." At the **decision-tree** level that's true — both walk the same logical predicate (deny/deep/`&&`/`||`/compare/temporal/`refColl.contains`/intrinsic). But **byte-identical extraction needs shared *composition*, and the composition topology diverges**:
+
+| | Drizzle (TS) | SQLAlchemy (Python) |
+|---|---|---|
+| comparison | `eq(col, val)` — **function combinator**; must *split* operands by role (`renderColumnRef` vs `renderValue` — different functions) | `(l op r)` — **native operator overload**; recurses *both* operands through the same `lower()` |
+| logical | `and(l, r)` / `or(l, r)` | `and_(l, r)` / `or_(l, r)` |
+| bare bool `filter this.isActive` | `eq(col, true)` — **extra normalization arm** | `Row.is_active` — a column *is* a boolean expr (no arm) |
+| `!this.isDeleted` | `not(eq(col, true))` — **extra normalization arm** | `not_(Row.is_deleted)` — uniform |
+
+A shared dispatcher cannot unify a **uniform-recurse** walk (Python) with a **split-by-role** walk (TS): Drizzle *must* identify which operand is the column to build `eq(col, val)`, so there is no uniform-recurse form, and TS carries two normalization arms (bare-bool, unary-bool) that Python doesn't need. This is the same class of divergence the audit flagged on Axis A (function-combinator vs native-operator), now confirmed at the arm level. And the genuinely **shared** part — the detection (`isDenyFilter`/`isDeepScopeFilter`) and the intrinsic classification (`intrinsicKey`/`intrinsicFor`) — **is already extracted** into `util/intrinsics.js` + the shared filter-shape helpers. What would remain for a `QueryTarget` is a ~15-line recursion skeleton whose arms mostly diverge, behind a ~10-method interface — **net-negative indirection**, the same verdict as wire/events/ids. **`QueryTarget` declines.**
+
+### The mission's real conclusion
+
+The brief framed this as "the last un-abstracted N" and expected a large multi-fragment seam. The byte-identical discipline revealed the opposite: **"regular-shaped" (conceptually parallel decision tree) is a strictly weaker property than "byte-identical-extractable" (shared composition API).** Almost every persistence fragment is regular-shaped, but each ORM composes through a *different API* — Drizzle combinators, SQLAlchemy operator overloads, EF fluent config, JPA annotations, Ecto changesets — so the *composition* (the actual emitted bytes) diverges even where the decision tree is parallel. The **one** fragment that was both parallel *and* composition-free was **seed** (pure structural grouping — `groupByDataset`, no ORM API touched), which is exactly the one that extracted cleanly.
+
+So the realizable persistence seam is: **the seed spine (landed) + the substrate that was *already* shared** (`MigrationsIR`, `wireShape`, `sql-pg`, `ExprTarget`, `intrinsicKey`, deny/deep detection). The rest is deliberately per-backend, reason recorded — which is precisely the brief's stated success criterion ("every divergent one deliberately per-backend with the reason recorded"), not a failure. The remaining committed item that is **not** a byte-identical extraction — **slice 3, removing the orphaned adapter emit-layer (§2.5, closes M-T6.10)** — still stands; it's dead-code cleanup, unaffected by this finding.
+
+**Consequence for T10:** the "unfreeze" is effectively complete *now* — a 6th backend inherits the entire already-shared substrate + the seed pattern, and its persistence composition was always going to be per-ORM (that's not debt the seam could have removed; it's the nature of ORMs). The brief's premise that a seam would let a 6th backend avoid "re-buying the whole surface" was partly mistaken: most of that surface is irreducibly per-ORM composition.
 
 ---
 
@@ -253,19 +278,31 @@ Every slice follows the PRs #607–#627 / #843 protocol: **the generated corpus 
 
 | # | Slice | Backends | Status | Gate |
 |---|---|---|---|---|
-| **1** | `seed-datasets` spine (`groupByDataset` + `usedAggregates` + model) | TS/.NET/Python | ✅ **LANDED** — establishes `_persistence/`, byte-identical green | byte-identical ✓ + 31 seed tests ✓ + layering ✓ |
-| **2** | `WireTarget` (DTO framing over `wireShape`) | all 5 | **NEXT** — core already shared, framing regular | byte-identical + conformance-parity |
-| **3** | `QueryTarget` (find-`where` + filter predicate) | TS/Py/Java (+.NET/Elixir per Q3) | committed — **highest traffic**; read-path win; `ExprTarget` analogue | byte-identical + behavioral-e2e |
-| **4** | Remove orphaned adapter emit-layer + `resolvePersistence` (§2.5) | — | committed — closes M-T6.10; pending Q1 sign-off | `npm test` (deletes dead tests); not byte-gated |
+| **1** | `seed-datasets` spine (`groupByDataset` + `usedAggregates` + model) | TS/.NET/Python | ✅ **LANDED (#1876)** — establishes `_persistence/`, byte-identical green | byte-identical ✓ + 31 seed tests ✓ + layering ✓ |
+| **2** | Remove orphaned `resolvePersistence()` **+ the four dead `emit*` methods** (§2.5/§2.7-Q1) | — | ✅ **DONE** — **fully closes M-T6.10**; interface + 6 adapter impls + dead helpers + 6 test files cleaned; 494 tests green; byte-identical (emitters stay live via the orchestrator) | `npm test` ✓ |
+| — | ~~`QueryTarget`~~ | — | **DECLINED (§0.7)** — combinator-vs-operator tree topology diverges; detection already shared; net-negative | — |
+| — | ~~`WireTarget`~~ | — | **DROPPED (§0.6)** — composition diverges (.NET flag-flatten vs recurse); thin shared skeleton | — |
 | — | ~~events / ids / enum warm-ups~~ | — | **DROPPED (§0.4)** — one-line shared core, net-negative indirection | — |
-| — | `ColumnTarget` | TS + Python | **DEFER (§0.5)** — 2-backend only; feature-gated | byte-identical + `LOOM_TS_BUILD`/`python-build` |
-| — | `JoinRowTarget` (standalone join-row) | TS/.NET/Python | **DEFER (§0.5)** — 3-backend, borderline | byte-identical + tenancy-e2e |
-| — | `renderRepositoryWith` (save/findById/getById) | TS + Python (getById +Java) | **DEFER (§0.5)** — riskiest, 2-backend pair | byte-identical + behavioral-e2e |
+| — | `ColumnTarget` / `JoinRowTarget` / `renderRepositoryWith` | — | **DEFER→likely-decline (§0.5+§0.7)** — same combinator-vs-operator composition divergence expected; revisit only under real feature traffic | — |
 | — | routes | — | **Deferred** — coordinate with M-T5.10 (`RouteIR` landed-but-unread) | — |
 
-**Committed set (post-§0.4 revision):** the seed spine (landed) → `WireTarget` → `QueryTarget` → adapter-emit removal. The value-type warm-ups are dropped (§0.4); the 2–3-backend slices stay deferred (§0.5) until feature traffic justifies them.
+**Committed set (final):** the seed spine (**landed, #1876**) + the adapter-emit dead-code removal (slice 2 above, closes M-T6.10). Every `Target`-style extraction candidate **declined at the byte level** (§0.4/§0.6/§0.7) — "regular-shaped" ≠ "byte-identical-extractable" once each ORM's composition API differs. This is the brief's stated success criterion (divergent fragments per-backend, reason recorded), not a shortfall.
 
-Ordering rationale: slices 1–5 are flat walks (no recursion, small leaves) that *prove the seam machinery + gate* cheaply before the one structurally-interesting committed slice (6 QueryTarget). The deferred repository slice (9) is the *riskiest* — write-side, 2-backend — so it goes last and only on demand. This is a deliberate inversion of the brief's "CRUD first."
+## 0.6 Implementation finding #2 — `WireTarget` is thin too; `QueryTarget` is the *only* substantial seam left
+
+*(Recorded while scoping slice 2, from reading the actual wire + query emitters.)*
+
+Reading the three wire type-spelling mappers (`python/emit/http-models.ts:wireFieldType`, `dotnet/dto-mapping.ts:wireType`, `java/emit/wire.ts:wireJavaType`) shows the **composition diverges structurally**, not just in spelling:
+
+- **.NET** flattens `array`/`optional` into `isCollection`/`isNullable` **flags** (via `wireTypeInfo`) and applies them as `IReadOnlyList<>`/`?` suffixes — a **non-recursive** traversal.
+- **Python** recurses: `list[…]` for array, `… | None` for optional.
+- **Java** recurses too but differently: `List<boxed element>` for array, and optional just **unwraps to the boxed inner** (no marker).
+
+The only byte-parallel arms are `enum → t.name` and `entity → ${name}Response`; every other arm is per-language spelling *and* the array/optional composition is three different shapes. A uniform recursive `WireTarget` dispatcher cannot reproduce .NET's flag-flatten byte-identically, and Python/Java diverge from each other on both `array` and `optional`. So `WireTarget` is the **events/ids situation one level up**: a thin `switch(t.kind)` skeleton whose every arm is a leaf → net-negative indirection. **Dropped.**
+
+**The consolidated conclusion.** After the already-shared substrate (`MigrationsIR`, `wireShape`, `sql-pg`, `ExprTarget`, **`intrinsicKey`/`intrinsicFor` in `util/intrinsics.js`**, and the **`isDenyFilter`/`isDeepScopeFilter` detection** — all already imported cross-backend) **plus the now-extracted seed spine**, the persistence-emit surface has far less *substantial* extractable-shared content than the raw file-counts implied. The value-shaped fragments (ids, events, enum, wire types/DTOs) are all thin-skeleton/divergent-leaf. **The one remaining seam with a genuinely substantial shared decision tree is `QueryTarget`** — the find-`where`/capability-filter predicate lowering (`lowerToDrizzle` ↔ `lowerToSqlAlchemy`, ~600/508 near-parallel lines: deny/deep/`&&`/`||`/COMPARE_OP/temporal/column-value-split/bare-boolean/`refColl.contains`). Its substrate is already shared; the work is the ~10-method dispatch seam + a per-backend leaf table (`sql\`…\`` for Drizzle, `func.*`/operator for SQLAlchemy, JPQL string for Java — the intrinsic tables stay legit per-backend leaves). This also means the **T10 unfreeze is largely already banked**: a 6th backend inherits the whole shared substrate + the seed pattern, and `QueryTarget` (once landed) covers its highest-traffic read surface.
+
+Ordering rationale: the seed spine (landed) proved the `_persistence/` home + byte-identical gate cheaply. `QueryTarget` is the one structurally-interesting, high-value slice — done next, TS↔Python first (near-line-for-line), Java after (its JPQL string form is more divergent). This is a deliberate inversion of the brief's "CRUD first."
 
 ### 2.6.1 Restated acceptance benchmark (honest, per-backend)
 
@@ -273,7 +310,7 @@ The brief's epic acceptance ("re-run part-in-part → shared-tree edits + ≤1 l
 
 ## 2.7 Open questions for sign-off
 
-1. **Slice 0 (adapter-emit removal).** OK to delete the orphaned `PersistenceAdapter.emit*` methods + per-backend bodies + `resolvePersistence()` + resolve-only tests, keeping the live capability/menu half? (Closes M-T6.10 as "removed." Alternative: leave dead, wire nothing — but that leaves a misleading abstraction in the field the seam contradicts.) **Recommend: remove.**
+1. **Adapter-emit removal — DONE (fully).** ✅ **`resolvePersistence()` removed** (the precise M-T6.10 orphan — 0 production callers; the 6 test files that used it as an accessor were rewired to the live `adaptersFor(...).persistence[name]` menu). ✅ **The four heavy emit methods removed too** (`emitConnectionSetup`/`emitRepository`/`emitMigrations`/`emitOutbox` — 0 production callers) from the `PersistenceAdapter` interface + all 6 backend adapter impls, plus the now-dead private helpers each impl carried (`findRepoFor`/`contextOf`/`nsOf`/…) and the `contract-shape`/`stub-throws`/`dotnet-efcore`/`hono-drizzle` test assertions on them. **Correction to §2.5:** the emit-layer was **not** entirely dead — `PersistenceAdapter.emitProjectDeps` **has a live caller** (`hono/v4/emit.ts:808`), so it + the capability half (`name`/`supportedStrategies`/`supportedShapes`/`supports`) + the menu/defaults **stay**; each removed method's underlying emitter (`renderRepositoryImpl`, `emitDotnetMigrations`, `DRIZZLE_CONNECTION_SETUP`, …) is still consumed by the real orchestrator, so nothing on the emit path changed (494 adapter+platform+migration tests green, byte-identical output). The wrappers were scaffolding for the abandoned "route the orchestrator through the adapter registry" rewire (superseded by §0.7). **M-T6.10 fully closed.**
 2. **Seam granularity.** Confirm the `_persistence/` **directory of per-fragment seams** over a single `PersistenceTarget` god-interface. (Recommend the directory — matches `_expr`/`_walker`/`_payload` precedent and lets decline-backends abstain per-fragment.)
 3. **`QueryTarget` scope for .NET/Elixir.** They already lower queries through `ExprTarget`. Options: (a) leave them as-is, `QueryTarget` unifies only TS/Py/Java; (b) give them thin `QueryTarget` leaves that delegate to their `renderExpr`, so all 5 share one dispatcher. **Recommend (a)** for slice 6 (smaller, byte-safe), revisit (b) only if a later feature needs it — "consolidate the present."
 4. **Java's 3× query multiplicity.** Accept that Java instantiates `QueryTarget` three times (JPQL/Criteria/SQLRestriction) over the shared dispatcher — a Java-only leaf concern, not a dispatcher concern? (Recommend: yes; it's framework-imposed, and the dispatcher stays single.)

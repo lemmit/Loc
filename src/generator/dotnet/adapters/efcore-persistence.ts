@@ -10,14 +10,11 @@
 // into one entry per platform — no semantic change to the output.
 // ---------------------------------------------------------------------------
 
-import type { AggregateIR, DataSourceIR, StorageIR } from "../../../ir/types/loom-ir.js";
+import type { AggregateIR } from "../../../ir/types/loom-ir.js";
 import { dedupeByName } from "../../../util/dedupe.js";
 import { PLATFORM_SAVING_SHAPES } from "../../../util/platform-axes.js";
 import type { EmitCtx, Lines, PersistenceAdapter } from "../../_adapters/index.js";
 import { renderConfiguration, renderDbContext } from "../emit/efcore.js";
-import { emitDotnetMigrations } from "../emit/migrations.js";
-import { renderRepositoryImpl } from "../emit/repository.js";
-import { buildFindBodies, collectFindBodyUsings } from "../find-emit.js";
 
 /** Per-deployable namespace — every dotnet emit fn keys off it for
  *  `using` directives + class declarations.  Mirrors the `ns` parameter
@@ -30,7 +27,7 @@ function nsOf(ctx: EmitCtx): string {
 
 /** Find the matching repository declaration in any of the deployable's
  *  contexts.  Mirrors `findRepoFor` in `../index.ts`. */
-function findRepoFor(ctx: EmitCtx, aggName: string) {
+function _findRepoFor(ctx: EmitCtx, aggName: string) {
   for (const c of ctx.contexts) {
     const r = c.repositories.find((repo) => repo.aggregateName === aggName);
     if (r) return r;
@@ -79,90 +76,6 @@ export const efcorePersistenceAdapter: PersistenceAdapter = {
       `    </PackageReference>`,
       `    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.2" />`,
     ];
-  },
-
-  emitConnectionSetup(_physicalStores: readonly StorageIR[], ctx: EmitCtx): Lines {
-    // DbContext registration spliced into Program.cs by the existing
-    // template (program.ts:206-213).  The `usesStamping` branch adds
-    // the AuditableInterceptor — emit the auditable-aware form when
-    // any aggregate carries `contextStamps`, mirroring the inline
-    // logic in `renderProgram`.
-    const ns = nsOf(ctx);
-    const usesStamping = ctx.contexts.some((c) =>
-      c.aggregates.some((a) => (a.contextStamps?.length ?? 0) > 0),
-    );
-    if (usesStamping) {
-      return [
-        `builder.Services.AddScoped<${ns}.Infrastructure.Persistence.AuditableInterceptor>();`,
-        `builder.Services.AddDbContext<AppDbContext>((sp, opts) =>`,
-        `{`,
-        `    opts.UseNpgsql(builder.Configuration.GetConnectionString("Default"));`,
-        `    opts.AddInterceptors(sp.GetRequiredService<${ns}.Infrastructure.Persistence.AuditableInterceptor>());`,
-        `});`,
-      ];
-    }
-    return [
-      `builder.Services.AddDbContext<AppDbContext>(opts =>`,
-      `    opts.UseNpgsql(builder.Configuration.GetConnectionString("Default")));`,
-    ];
-  },
-
-  emitRepository(agg: AggregateIR, _logical: DataSourceIR, ctx: EmitCtx): Lines {
-    // Wraps `renderRepositoryImpl` — the per-aggregate EF repository
-    // class.  The orchestrator still calls `renderRepositoryImpl`
-    // directly today (../index.ts:emitAggregate); future wire-up
-    // routes through this adapter.  Logical config (schema /
-    // tablePrefix) is unused today — see `renderConfiguration` for
-    // where it'll plug in.
-    const ns = nsOf(ctx);
-    const repo = findRepoFor(ctx, agg.name);
-    // Find filters using regex etc. declare their namespaces; mirrors
-    // the orchestrator's local Set<string>.
-    const extra = collectFindBodyUsings(repo);
-    // EnrichedAggregateIR cast is safe: ctx.contexts are
-    // EnrichedBoundedContextIR, so every aggregate the orchestrator
-    // would pass through here is already enriched.
-    const enriched = agg as import("../../../ir/types/loom-ir.js").EnrichedAggregateIR;
-    const findBodies = buildFindBodies(enriched, repo);
-    return splitLines(
-      renderRepositoryImpl(enriched, repo, ns, findBodies, {
-        extraUsings: [...extra].sort(),
-        emitTrace: !!ctx.emitTrace,
-      }),
-    );
-  },
-
-  emitMigrations(
-    _aggs: readonly AggregateIR[],
-    _physicalStores: readonly StorageIR[],
-    ctx: EmitCtx,
-  ): Lines | null {
-    // Per-deployable migration emission — already a separate
-    // file-emit fn that writes into the passed Map.  We wrap it
-    // here by collecting into a temporary map, then flattening the
-    // emitted file paths + contents into a Lines stream (one block
-    // per file, blank-line separated) so the adapter contract
-    // (Lines | null) holds.  The orchestrator's `emitDotnetMigrations`
-    // call in ../index.ts owns the actual file placement today.
-    if (!ctx.migrations || ctx.migrations.length === 0) return null;
-    const ns = nsOf(ctx);
-    const collected = new Map<string, string>();
-    emitDotnetMigrations(ctx.migrations, ns, collected);
-    const out: string[] = [];
-    for (const [path, content] of [...collected.entries()].sort()) {
-      out.push(`// ---- ${path} ----`);
-      out.push(...content.split("\n"));
-      out.push("");
-    }
-    return out;
-  },
-
-  emitOutbox(_physical: StorageIR, _aggs: readonly AggregateIR[], _ctx: EmitCtx): Lines | null {
-    // Transactional outbox emission is deferred to a later slice of
-    // the micro-plan (the validator already rejects `publish:
-    // integration | both` without a transactional store, so reaching
-    // here today is a capability gap rather than silent success).
-    return null;
   },
 };
 

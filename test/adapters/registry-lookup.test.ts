@@ -11,7 +11,6 @@ import {
   defaultsFor,
   hasAdapters,
   resolveLayout,
-  resolvePersistence,
   resolveStyle,
 } from "../../src/platform/resolve-adapters.js";
 
@@ -46,7 +45,7 @@ describe("adapter registry — lookup", () => {
     const name = defaultsFor(platform)!.persistence.eventLog;
     // `availableAdapterNames` lists REAL adapters only (stubs excluded).
     expect(availableAdapterNames(platform, "persistence")).toContain(name);
-    const adapter = resolvePersistence(platform, name, "eventLog");
+    const adapter = adaptersFor(platform)!.persistence[name];
     expect(adapter.supportedStrategies).toContain("eventLog");
   });
 
@@ -64,20 +63,22 @@ describe("adapter registry — lookup", () => {
     expect(d.layout).toBe("byFeature");
   });
 
-  it("resolves a bareword `platform: dotnet` to its defaults", () => {
-    expect(resolvePersistence("dotnet", null, "state").name).toBe("efcore");
-    expect(resolvePersistence("dotnet", undefined, "state").name).toBe("efcore");
-    expect(resolvePersistence("dotnet", "", "state").name).toBe("efcore");
+  it("a bareword `platform: dotnet` default name resolves to a real adapter", () => {
+    // `resolvePersistence` (default-name → adapter object) was removed as an
+    // uninvoked orphan (M-T9.2 / M-T6.10); the live path reads the default
+    // NAME via `defaultsFor` and the adapter from the menu.
+    const d = defaultsFor("dotnet")!;
+    expect(adaptersFor("dotnet")!.persistence[d.persistence.state].name).toBe("efcore");
     // DEBT-20: the eventLog default resolves to the real efcore adapter, not the
     // marten stub (an event-sourced aggregate with no explicit `persistence:`
     // must land on an adapter that actually emits the store).
-    expect(resolvePersistence("dotnet", null, "eventLog").name).toBe("efcore");
+    expect(adaptersFor("dotnet")!.persistence[d.persistence.eventLog].name).toBe("efcore");
     expect(resolveStyle("dotnet", null).name).toBe("cqrs");
     expect(resolveLayout("dotnet", null).name).toBe("byLayer");
   });
 
-  it("resolves an explicit `persistence: dapper` to the stub", () => {
-    const dapper = resolvePersistence("dotnet", "dapper");
+  it("reads an explicit `persistence: dapper` from the menu", () => {
+    const dapper = adaptersFor("dotnet")!.persistence.dapper;
     expect(dapper.name).toBe("dapper");
     // Capability fields answer; emit throws (verified in stub-throws.test.ts).
     expect(dapper.supports("postgres", "state", "state")).toBe(true);
@@ -85,21 +86,8 @@ describe("adapter registry — lookup", () => {
     expect(dapper.supports("postgres", "eventLog", "eventLog")).toBe(true);
   });
 
-  it("rejects an unknown adapter name with the error listing siblings", () => {
-    try {
-      resolvePersistence("dotnet", "nopeql");
-      throw new Error("should have thrown");
-    } catch (e) {
-      expect(e).toBeInstanceOf(AdapterNotImplementedError);
-      const err = e as AdapterNotImplementedError;
-      expect(err.adapterName).toBe("nopeql");
-      expect(err.message).toContain("dapper");
-      expect(err.message).toContain("efcore");
-    }
-  });
-
-  it("throws for an adapter lookup against a frontend platform", () => {
-    expect(() => resolvePersistence("react", null)).toThrow(AdapterNotImplementedError);
+  it("a frontend platform has no adapter menu; style resolution throws", () => {
+    expect(adaptersFor("react")).toBeUndefined();
     expect(() => resolveStyle("static", null)).toThrow(AdapterNotImplementedError);
   });
 

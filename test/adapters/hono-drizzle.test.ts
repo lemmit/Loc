@@ -15,7 +15,7 @@ import {
   drizzlePersistenceAdapter,
   emitDrizzleSchema,
 } from "../../src/platform/hono/v4/adapters/drizzle-persistence.js";
-import { resolvePersistence } from "../../src/platform/resolve-adapters.js";
+import { adaptersFor } from "../../src/platform/resolve-adapters.js";
 import { parseValid } from "../_helpers/parse.js";
 
 const SRC = `
@@ -52,7 +52,7 @@ async function buildCtx(): Promise<EmitCtx> {
 
 describe("drizzle PersistenceAdapter (real)", () => {
   it("is registered as the hono drizzle persistence adapter", () => {
-    const resolved = resolvePersistence("node", "drizzle");
+    const resolved = adaptersFor("node")!.persistence.drizzle;
     expect(resolved).toBe(drizzlePersistenceAdapter);
     expect(resolved.name).toBe("drizzle");
   });
@@ -81,42 +81,11 @@ describe("drizzle PersistenceAdapter (real)", () => {
     expect(joined).toContain('"@types/pg":');
   });
 
-  it("emitConnectionSetup returns the pool + drizzle bootstrap lines", async () => {
-    const ctx = await buildCtx();
-    const lines = drizzlePersistenceAdapter.emitConnectionSetup([], ctx);
-    const joined = lines.join("\n");
-    expect(joined).toContain("DATABASE_URL is required");
-    expect(joined).toContain("new pg.Pool({");
-    expect(joined).toContain("drizzle(pool, { schema })");
-    expect(joined).toContain('pool.on("error"');
-  });
-
-  it("emitRepository wraps buildRepositoryFile end-to-end", async () => {
-    const ctx = await buildCtx();
-    const agg = ctx.contexts[0]!.aggregates.find((a) => a.name === "Order")!;
-    const ds = ctx.sys.dataSources[0]!;
-    const lines = drizzlePersistenceAdapter.emitRepository(agg, ds, ctx);
-    const joined = lines.join("\n");
-    // Drizzle repository emits a `findById`/`save`/`toWire` surface for
-    // the aggregate plus the user-declared find.
-    expect(joined).toContain("findById");
-    expect(joined).toContain("byName");
-    expect(joined).toContain("toWire");
-    // The buildRepositoryFile output reaches into drizzle-orm's
-    // operator surface (eq / and / inArray are the default trio).
-    expect(joined).toContain('from "drizzle-orm"');
-  });
-
-  it("emitMigrations returns null when ctx has no migrations", async () => {
-    const ctx = await buildCtx();
-    expect(drizzlePersistenceAdapter.emitMigrations([], [], ctx)).toBeNull();
-  });
-
-  it("emitOutbox returns null (not yet implemented)", async () => {
-    const ctx = await buildCtx();
-    const storage = ctx.sys.storages[0]!;
-    expect(drizzlePersistenceAdapter.emitOutbox(storage, [], ctx)).toBeNull();
-  });
+  // NOTE: the emitConnectionSetup / emitRepository / emitMigrations / emitOutbox
+  // adapter methods were removed as never-invoked scaffolding (M-T9.2 / M-T6.10);
+  // the connection block still ships as the exported DRIZZLE_CONNECTION_SETUP
+  // const (spliced by emit.ts), and buildRepositoryFile / emitTypescriptMigrations
+  // run through the real orchestrator path + emitDrizzleSchema below.
 
   it("emitDrizzleSchema helper wraps renderSchema for the merged contexts", async () => {
     const ctx = await buildCtx();

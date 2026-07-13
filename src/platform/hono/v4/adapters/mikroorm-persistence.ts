@@ -18,25 +18,15 @@
 // ---------------------------------------------------------------------------
 
 import type { EmitCtx, Lines, PersistenceAdapter } from "../../../../generator/_adapters/index.js";
-import {
-  MIKRO_DEPS,
-  mikroConnectionSetup,
-  renderMikroRepository,
-} from "../../../../generator/typescript/emit/mikroorm.js";
-import type {
-  AggregateIR,
-  DataSourceIR,
-  EnrichedAggregateIR,
-  EnrichedBoundedContextIR,
-  StorageIR,
-} from "../../../../ir/types/loom-ir.js";
+import { MIKRO_DEPS } from "../../../../generator/typescript/emit/mikroorm.js";
+import type { EnrichedBoundedContextIR } from "../../../../ir/types/loom-ir.js";
 
 /** The owning bounded context for an aggregate. */
-function contextOf(ctx: EmitCtx, aggName: string): EnrichedBoundedContextIR | undefined {
+function _contextOf(ctx: EmitCtx, aggName: string): EnrichedBoundedContextIR | undefined {
   return ctx.contexts.find((c) => c.aggregates.some((a) => a.name === aggName));
 }
 
-function findRepoFor(ctx: EmitCtx, aggName: string) {
+function _findRepoFor(ctx: EmitCtx, aggName: string) {
   for (const c of ctx.contexts) {
     const r = c.repositories.find((repo) => repo.aggregateName === aggName);
     if (r) return r;
@@ -44,7 +34,7 @@ function findRepoFor(ctx: EmitCtx, aggName: string) {
   return undefined;
 }
 
-const splitLines = (s: string): Lines => s.split("\n");
+const _splitLines = (s: string): Lines => s.split("\n");
 
 export const mikroOrmPersistenceAdapter: PersistenceAdapter = {
   name: "mikroorm",
@@ -65,27 +55,5 @@ export const mikroOrmPersistenceAdapter: PersistenceAdapter = {
 
   emitProjectDeps(_ctx: EmitCtx): Lines {
     return [...MIKRO_DEPS];
-  },
-
-  emitConnectionSetup(_physicalStores: readonly StorageIR[], _ctx: EmitCtx): Lines {
-    return mikroConnectionSetup();
-  },
-
-  emitRepository(agg: AggregateIR, _logical: DataSourceIR, ctx: EmitCtx): Lines {
-    const owningCtx = contextOf(ctx, agg.name);
-    if (!owningCtx) return [];
-    const enriched = agg as EnrichedAggregateIR;
-    return splitLines(renderMikroRepository(enriched, findRepoFor(ctx, agg.name), owningCtx));
-  },
-
-  emitMigrations(): Lines | null {
-    // MikroORM owns its schema via `orm.schema.updateSchema()` at startup — no
-    // drizzle-style per-deployable migration files.
-    return null;
-  },
-
-  emitOutbox(): Lines | null {
-    // Integration-event outbox is out of scope for mikroorm v1.
-    return null;
   },
 };
