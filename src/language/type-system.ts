@@ -992,6 +992,25 @@ function collectionOpType(
       }
       return T.opt(recv.element);
     }
+    case "avg": {
+      // avg projects the collection through the lambda and returns the MEAN,
+      // optional (empty collection → null).  A money projection averages to
+      // `money?`; every other numeric projection (int/long/decimal) to
+      // `decimal?`.  Mirrors `sum`'s lambda-env typing.
+      const callArg = ms.args[0];
+      const lambdaArg = callArg?.value;
+      if (lambdaArg && isLambda(lambdaArg) && lambdaArg.body) {
+        const lambdaEnv = makeEnv(
+          env,
+          new Map([[lambdaArg.param, { type: recv.element, origin: lambdaArg }]]),
+        );
+        const bodyT = typeOf(lambdaArg.body, lambdaEnv);
+        const isMoney = bodyT.kind === "primitive" && bodyT.name === "money";
+        return T.opt(T.prim(isMoney ? "money" : "decimal"));
+      }
+      const isMoney = recv.element.kind === "primitive" && recv.element.name === "money";
+      return T.opt(T.prim(isMoney ? "money" : "decimal"));
+    }
     default:
       return T.unknown;
   }

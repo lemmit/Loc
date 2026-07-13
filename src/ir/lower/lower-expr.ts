@@ -610,6 +610,62 @@ function applySuffixToRecv(
     const collectionOp =
       isCollectionOp(ms.member) &&
       !(recvType.kind === "primitive" && intrinsicFor(recvType.name, ms.member) !== undefined);
+    // `avg(λ)` has NO renderer — it DESUGARS here to
+    // `count == 0 ? null : sum(λ) / count`, riding the (now money/decimal-
+    // correct) `sum` fold and the money/decimal-safe `/` division.  `numPrim`
+    // is `money` when the λ-body types as money, else `decimal`; the whole
+    // expression is optional (empty collection → null).  The `recv` is
+    // duplicated (structuredClone) across the count/sum reads — both are
+    // side-effect-free field reads, and sharing one node object across the
+    // tree would double-visit under the marks-recording renderer.
+    if (collectionOp && ms.member === "avg") {
+      const lam = args[0];
+      const bodyT = lam?.kind === "lambda" && lam.body ? bodyTypeOf(lam.body) : undefined;
+      const numPrim: TypeIR =
+        bodyT?.kind === "primitive" && bodyT.name === "money"
+          ? { kind: "primitive", name: "money" }
+          : { kind: "primitive", name: "decimal" };
+      const countCall = (): ExprIR => ({
+        kind: "method-call",
+        receiver: structuredClone(recv),
+        member: "count",
+        args: [],
+        receiverType: recvType,
+        isCollectionOp: true,
+      });
+      const sumCall: ExprIR = {
+        kind: "method-call",
+        receiver: structuredClone(recv),
+        member: "sum",
+        args,
+        receiverType: recvType,
+        isCollectionOp: true,
+      };
+      const cond: ExprIR = {
+        kind: "binary",
+        op: "==",
+        left: countCall(),
+        right: { kind: "literal", lit: "int", value: "0" },
+        leftType: { kind: "primitive", name: "int" },
+        resultType: { kind: "primitive", name: "bool" },
+      };
+      const div: ExprIR = {
+        kind: "binary",
+        op: "/",
+        left: sumCall,
+        right: countCall(),
+        leftType: numPrim,
+        resultType: numPrim,
+      };
+      const ternary: ExprIR = {
+        kind: "ternary",
+        cond,
+        // biome-ignore lint/suspicious/noThenProperty: the ternary IR node's branch field is named `then` across the IR
+        then: { kind: "literal", lit: "null", value: "null" },
+        otherwise: div,
+      };
+      return { recv: ternary, recvType: { kind: "optional", inner: numPrim } };
+    }
     const mcIR: ExprIR = {
       kind: "method-call",
       receiver: recv,
@@ -2054,6 +2110,12 @@ function memberType(t: TypeIR, name: string, env: Env): TypeIR {
       case "min":
       case "max":
         return { kind: "optional", inner: t.element };
+      // `avg` desugars to `sum/count` at the call site and never reaches a
+      // renderer as an `avg` node; this arm is the fallback for any structural
+      // path that types a bare `.avg` — an optional decimal (money widens to
+      // decimal here; the call site is the money-preserving path).
+      case "avg":
+        return { kind: "optional", inner: { kind: "primitive", name: "decimal" } };
       default:
         return { kind: "primitive", name: "string" };
     }

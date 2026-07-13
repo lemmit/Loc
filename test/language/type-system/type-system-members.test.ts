@@ -83,6 +83,7 @@ describe("type-system — membersOfType (single source for member completion)", 
       "join",
       "min",
       "max",
+      "avg",
     ]);
   });
 

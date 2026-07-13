@@ -343,6 +343,57 @@ describe("ts renderTsExpr — A4 reductions min(λ)/max(λ)", () => {
   });
 });
 
+describe("ts renderTsExpr — sum type-awareness (money folds decimal.js)", () => {
+  const DECIMAL: TypeIR = { kind: "primitive", name: "decimal" };
+  // λ-body projections typed via `member.memberType` (bodyTypeOf reads it).
+  const proj = (member: string, memberType: TypeIR): ExprIR => ({
+    kind: "lambda",
+    param: "x",
+    body: {
+      kind: "member",
+      receiver: { kind: "ref", name: "x", refKind: "lambda" },
+      member,
+      receiverType: { kind: "entity", name: "Line" },
+      memberType,
+    },
+  });
+  const sumMc = (elem: TypeIR, args: ExprIR[]): ExprIR => ({
+    kind: "method-call",
+    receiver: thisProp("items"),
+    member: "sum",
+    args,
+    receiverType: { kind: "array", element: elem },
+    isCollectionOp: true,
+  });
+
+  // MONEY → decimal.js `Decimal`: fold with `.plus` from a `new Decimal(0)`
+  // seed (a native `0 + Decimal` coerces to a string).
+  it("folds a money `sum(λ)` via `.plus` from a `new Decimal(0)` seed", () => {
+    expect(renderTsExpr(sumMc(MONEY, [proj("price", MONEY)]))).toBe(
+      "(this._items).reduce((acc, x) => acc.plus(((x) => x.price)(x)), new Decimal(0))",
+    );
+  });
+
+  it("folds a no-arg money `sum` (money[] receiver) via `.plus` / `new Decimal(0)`", () => {
+    expect(renderTsExpr(sumMc(MONEY, []))).toBe(
+      "(this._items).reduce((acc, x) => acc.plus(x), new Decimal(0))",
+    );
+  });
+
+  // int/long/decimal are plain `number` on this backend → native `+`/`0` seed.
+  it("keeps an int `sum(λ)` on the native `+`/`0`-seed reduce", () => {
+    expect(renderTsExpr(sumMc(INT, [proj("qty", INT)]))).toBe(
+      "(this._items).reduce((acc, x) => acc + ((x) => x.qty)(x), 0)",
+    );
+  });
+
+  it("keeps a decimal `sum(λ)` on the native `+`/`0`-seed reduce (decimal is `number` here)", () => {
+    expect(renderTsExpr(sumMc(DECIMAL, [proj("d", DECIMAL)]))).toBe(
+      "(this._items).reduce((acc, x) => acc + ((x) => x.d)(x), 0)",
+    );
+  });
+});
+
 describe("ts renderTsExpr — call kinds", () => {
   it("renders value-object-ctor as `new <Name>(...)`", () => {
     expect(

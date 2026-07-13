@@ -24,8 +24,15 @@ const TABLES: Record<string, Record<string, unknown>> = {
   "elixir (ELIXIR_COLLECTION_RENDERERS)": ELIXIR_COLLECTION_RENDERERS,
 };
 
+// Ops that DESUGAR in lowering to other ops and never reach a renderer — so
+// they carry no `*_COLLECTION_RENDERERS` entry (and must be skipped by the
+// per-table completeness assertion below).  `avg(λ)` desugars to
+// `count == 0 ? null : sum(λ) / count`.
+const DESUGARED_COLLECTION_OPS = new Set(["avg"]);
+
 describe("collection-op completeness — every catalogue op renders on every backend", () => {
   for (const op of COLLECTION_OP_SIGNATURES) {
+    if (DESUGARED_COLLECTION_OPS.has(op.name)) continue;
     it(`${op.name}: renderer on all 5 backends`, () => {
       for (const [label, table] of Object.entries(TABLES)) {
         expect(table[op.name], `missing renderer for '${op.name}' in ${label}`).toBeTypeOf(

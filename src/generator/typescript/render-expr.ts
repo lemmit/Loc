@@ -384,10 +384,19 @@ export const TS_COLLECTION_RENDERERS: Record<
   (recv: string, args: string[], e?: Extract<ExprIR, { kind: "method-call" }>) => string
 > = {
   count: (recv) => `${recv}.length`,
-  sum: (recv, args) =>
-    args.length === 1
-      ? `${recv}.reduce((acc, x) => acc + (${args[0]})(x), 0)`
-      : `${recv}.reduce((acc, x) => acc + x, 0)`,
+  // `sum` over MONEY (decimal.js `Decimal`) must fold with `.plus` from a
+  // `new Decimal(0)` seed — a native `0 + Decimal` coerces to a string.  int/
+  // long/decimal are plain `number` on this backend, so they keep the native
+  // `+`/`0`-seed form.  Numeric type is the λ-body type (lambda form) or the
+  // receiver's element type (no-arg `money[]` sum).
+  sum: (recv, args, e) =>
+    sumBodyIsMoney(e)
+      ? args.length === 1
+        ? `${recv}.reduce((acc, x) => acc.plus((${args[0]})(x)), new Decimal(0))`
+        : `${recv}.reduce((acc, x) => acc.plus(x), new Decimal(0))`
+      : args.length === 1
+        ? `${recv}.reduce((acc, x) => acc + (${args[0]})(x), 0)`
+        : `${recv}.reduce((acc, x) => acc + x, 0)`,
   all: (recv, args) => `${recv}.every(${args[0] ?? "() => true"})`,
   any: (recv, args) => `${recv}.some(${args[0] ?? "() => true"})`,
   // Array membership — maps to JS's `.includes(value)`.
@@ -428,6 +437,23 @@ function projectionBodyIsMoney(e?: Extract<ExprIR, { kind: "method-call" }>): bo
   const lam = e?.args[0];
   const bodyT = lam?.kind === "lambda" && lam.body ? bodyTypeOf(lam.body) : undefined;
   return bodyT?.kind === "primitive" && bodyT.name === "money";
+}
+
+/** True iff a `sum` reduction's numeric type is `money` — the λ-body type for
+ *  `sum(λ)`, the receiver's element type for a no-arg `money[]` sum.  A money
+ *  sum folds decimal.js `Decimal`s (`.plus` from a `new Decimal(0)` seed); a
+ *  numeric sum stays native `+`/`0`. */
+function sumBodyIsMoney(e?: Extract<ExprIR, { kind: "method-call" }>): boolean {
+  if (!e) return false;
+  const lam = e.args[0];
+  if (lam?.kind === "lambda" && lam.body) {
+    const bodyT = bodyTypeOf(lam.body);
+    return bodyT?.kind === "primitive" && bodyT.name === "money";
+  }
+  const rt = e.receiverType;
+  const unwrapped = rt.kind === "optional" ? rt.inner : rt;
+  const elem = unwrapped.kind === "array" ? unwrapped.element : undefined;
+  return elem?.kind === "primitive" && elem.name === "money";
 }
 
 function renderCollectionOp(
