@@ -1,0 +1,116 @@
+name: Behavioral e2e — Elixir (plain Ecto/Phoenix)
+
+# M-T9.3 — the behavioral tier's FIFTH and final backend. The node tier
+# (behavioral-e2e.yml) boots Hono in-process on PGlite; Phoenix has no
+# in-process Postgres, so this boots the GENERATED Phoenix backend as a real
+# process against a `services: postgres` sidecar and HTTP-dispatches the SAME
+# emitted `test e2e` api suite at it (the emitted suite is backend-agnostic —
+# written against the HTTP contract).
+#
+# This moves the *behavioral* runtime-semantics RS-rules
+# (docs/conformance-semantics.md) onto a FIFTH backend per-PR: camelCase keys
+# both directions (RS-1), enum declared casing (RS-2), no leaked columns
+# (RS-3), temporal round-trip (RS-4), bool create default (RS-6), value-object
+# survival (RS-7), association round-trip (RS-8). See
+# docs/new-plan/T9-toolchain-health.md (M-T9.3).
+#
+# Reuses the proven boot recipe from elixir-vanilla-obs-e2e.yml (setup-beam +
+# mix deps.get + ecto.create/migrate + phx.server against DATABASE_URL) and the
+# harness wiring from behavioral-e2e-java.yml. CI runners have direct hex.pm
+# access, so no hex mirror is needed here (unlike local runs behind a
+# TLS-fingerprint egress proxy — see CLAUDE.md).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'bin/**'
+      - 'web/src/testing/**'
+      - 'test/behavioral/**'
+      - 'package.json'
+      - '.github/workflows/behavioral-e2e-elixir.yml'
+  pull_request:
+    paths:
+      - 'src/ir/**'
+      - 'src/generator/elixir/**'
+      - 'src/generator/_expr/**'
+      - 'src/platform/elixir.ts'
+      - 'web/src/testing/**'
+      - 'test/behavioral/**'
+      - '.github/workflows/behavioral-e2e-elixir.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  behavioral-elixir:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Ecto's DATABASE_URL (config/dev.exs honors it). Point at the postgres
+      # sidecar above (POSTGRES_DB: app).
+      DATABASE_URL: ecto://postgres:postgres@127.0.0.1:5432/app
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # erlef/setup-beam — pinned to match elixir-vanilla-obs-e2e.yml so the
+      # generated project's dep set resolves deterministically.
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.3'
+          elixir-version: '1.18.4'
+
+      # Cache the hex dep tree + _build outputs across runs. The key tracks the
+      # vanilla shell-emit module that emits mix.exs so a dep change mints a
+      # fresh entry, but unrelated emitter tweaks reuse the warm cache.
+      - name: Cache hex deps + _build
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.hex
+            ~/.mix
+          key: hex-mix-behavioral-${{ hashFiles('src/generator/elixir/vanilla/shell-emit.ts') }}
+          restore-keys: |
+            hex-mix-behavioral-
+
+      - name: Install Loom toolchain
+        run: npm ci
+
+      - name: Build toolchain
+        run: npm run build
+
+      - name: Install behavioral harness deps
+        working-directory: test/behavioral
+        run: npm ci || npm install --no-audit --no-fund
+
+      - name: Run Elixir behavioral tier (api gate, real Postgres)
+        working-directory: test/behavioral
+        run: node run-elixir.mjs

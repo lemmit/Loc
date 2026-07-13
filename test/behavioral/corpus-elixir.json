@@ -1,0 +1,6 @@
+{
+  "comment": "Corpus for the M-T9.3 Elixir behavioral tier (run-elixir.mjs) — the FIFTH and final backend on the per-PR behavioral tier. Each case is generated, its `platform: elixir` (plain Ecto/Phoenix) deployable booted against a real Postgres (DATABASE_URL) after `mix deps.get` + `ecto.create` + `ecto.migrate`, and its emitted `test e2e` api suite HTTP-dispatched at the booted server. Like the .NET/Java/Python tiers, Phoenix has no in-process Postgres, so this needs a real DB — see docs/new-plan/T9-toolchain-health.md (M-T9.3).",
+  "cases": [
+    { "name": "sales", "ddd": "test/behavioral/corpus-elixir/sales.ddd" }
+  ]
+}
