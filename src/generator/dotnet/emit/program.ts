@@ -178,15 +178,28 @@ using (var seedScope = app.Services.CreateScope())
   // operations.  Drives both the Scrutor registration helper text
   // (purely informational) and the startup verification check that
   // every IXAggHandler resolved from DI.
-  const externHandlers = ctx.aggregates.flatMap((a) =>
-    a.operations
-      .filter((o) => o.extern)
-      .map((o) => ({
-        ifaceFqn: `${ns}.Application.${plural(a.name)}.Handlers.I${upperFirst(o.name)}${a.name}Handler`,
-        opName: o.name,
-        aggName: a.name,
+  const externHandlers = [
+    ...ctx.aggregates.flatMap((a) =>
+      a.operations
+        .filter((o) => o.extern)
+        .map((o) => ({
+          ifaceFqn: `${ns}.Application.${plural(a.name)}.Handlers.I${upperFirst(o.name)}${a.name}Handler`,
+          opName: o.name,
+          aggName: a.name,
+        })),
+    ),
+    // Extern commandHandler / queryHandler application members — the bodyless
+    // "case-2" home.  Their user impl carries `[ExternHandler]` too, so the same
+    // Scrutor scan registers it under `I<Name>Handler` and the startup verify
+    // fails fast when the user hasn't supplied one.
+    ...[...(ctx.commandHandlers ?? []), ...(ctx.queryHandlers ?? [])]
+      .filter((h) => h.extern)
+      .map((h) => ({
+        ifaceFqn: `${ns}.Application.Handlers.I${h.name}Handler`,
+        opName: h.name,
+        aggName: ctx.name,
       })),
-  );
+  ];
   // Only emit the Scrutor scan when at least one aggregate declares
   // an extern op — otherwise the project pulls in a Scrutor reference
   // for nothing.

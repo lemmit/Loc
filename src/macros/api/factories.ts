@@ -514,6 +514,7 @@ export function commandHandler(
     mkCommandHandler({
       $type: "CommandHandler",
       name,
+      extern: false,
       params,
       body,
       ...(opts.returnType ? { returnType: opts.returnType } : {}),
@@ -543,7 +544,7 @@ export function queryHandler(
 ): QueryHandler & ContextMember {
   const origin = currentOrigin();
   const node: QueryHandler = tag(
-    mkQueryHandler({ $type: "QueryHandler", name, params, returnType, body }),
+    mkQueryHandler({ $type: "QueryHandler", name, extern: false, params, returnType, body }),
     origin,
   );
   params.forEach((p, i) => {

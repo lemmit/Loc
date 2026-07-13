@@ -37,6 +37,7 @@ import type {
   RouteIR,
 } from "../../../ir/types/loom-ir.js";
 import { snake, upperFirst } from "../../../util/naming.js";
+import { SCAFFOLD_ONCE_MARKER } from "../../../util/scaffold-once.js";
 import type { ApiRoute } from "../api-emit.js";
 import { type RenderCtx, renderExpr } from "../render-expr.js";
 import {
@@ -76,6 +77,77 @@ function assembleHandlerBody(lines: BodyLine[], resultExpr: string): string {
   return `${clauseBlock} do\n${doLines.map((l) => `      ${l}`).join("\n")}\n    end`;
 }
 
+/** The OTP app atom for `Application.get_env` — snake_case of the app module. */
+const appAtom = (appModule: string): string =>
+  appModule.replace(/([A-Z])/g, (_, c, i) => (i ? "_" : "") + c.toLowerCase());
+
+/** The extern dispatch module — `<App>.<Ctx>.Handlers.<Name>` — whose `run/1`
+ *  delegates to the scaffold-once user impl (`<Name>Impl`), resolved through
+ *  `Application.get_env` so a test/prod config can swap the implementation.  No
+ *  DSL body is rendered (extern is bodyless). */
+function renderExternDispatchModule(
+  h: Handler,
+  kindLabel: "Command handler" | "Query handler",
+  appModule: string,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  const contextModuleFq = `${appModule}.${upperFirst(ctx.name)}`;
+  const moduleName = `${contextModuleFq}.Handlers.${upperFirst(h.name)}`;
+  const implModule = `${moduleName}Impl`;
+  return `# Auto-generated.
+defmodule ${moduleName} do
+  @moduledoc """
+  ${kindLabel} \`${h.name}\` — plain Elixir (application layer, extern).
+
+  This handler is \`extern\`: it has no DSL body.  \`run/1\` delegates to the
+  scaffold-once, user-owned \`${implModule}\` (yours — regeneration never
+  overwrites it).  Override the implementation via config if needed:
+
+      config :${appAtom(appModule)}, ${moduleName}, MyApp.SomeOtherImpl
+  """
+
+  @spec run(map()) :: {:ok, term()} | {:error, term()}
+  def run(params) when is_map(params) do
+    Application.get_env(:${appAtom(appModule)}, __MODULE__, ${implModule}).run(params)
+  end
+end
+`;
+}
+
+/** The scaffold-once user impl module — `<App>.<Ctx>.Handlers.<Name>Impl` —
+ *  that raises loudly until filled in (marker on line 1 → CLI writer preserves
+ *  it on regen). */
+function renderExternImplModule(
+  h: Handler,
+  kindLabel: "commandHandler" | "queryHandler",
+  appModule: string,
+  ctx: EnrichedBoundedContextIR,
+): string {
+  const contextModuleFq = `${appModule}.${upperFirst(ctx.name)}`;
+  const moduleName = `${contextModuleFq}.Handlers.${upperFirst(h.name)}Impl`;
+  const appSnake = appAtom(appModule);
+  const ctxSnake = snake(ctx.name);
+  const fileRel = `lib/${appSnake}/${ctxSnake}/handlers/${snake(h.name)}_impl.ex`;
+  return `# ${SCAFFOLD_ONCE_MARKER} — this file is yours.  Loom scaffolds it on the first
+# \`generate\` and NEVER overwrites it again, so your implementation survives every
+# regenerate.  Replace the \`raise\` with the extern handler's real logic (the one
+# external-service call this handler wraps).
+defmodule ${moduleName} do
+  @moduledoc """
+  Hand-written implementation for the extern ${kindLabel} \`${h.name}\`.  Receives
+  the string-keyed request \`params\` map; return \`{:ok, result}\` or
+  \`{:error, reason}\`.
+  """
+
+  @spec run(map()) :: {:ok, term()} | {:error, term()}
+  def run(params) when is_map(params) do
+    _ = params
+    raise "extern ${kindLabel} \`${h.name}\` is not implemented — fill in ${fileRel}"
+  end
+end
+`;
+}
+
 /** Render one handler module — `<App>.<Ctx>.Handlers.<Name>` exposing `run/1`. */
 function renderHandlerModule(
   h: Handler,
@@ -84,6 +156,8 @@ function renderHandlerModule(
   ctx: EnrichedBoundedContextIR,
   resourceModules: Map<string, string>,
 ): string {
+  // Extern handler: bodyless — the dispatch delegates to the scaffold-once impl.
+  if (h.extern) return renderExternDispatchModule(h, kindLabel, appModule, ctx);
   const ctxModule = upperFirst(ctx.name);
   const contextModuleFq = `${appModule}.${ctxModule}`;
   const moduleName = `${contextModuleFq}.Handlers.${upperFirst(h.name)}`;
@@ -138,18 +212,26 @@ export function emitExplicitHandlers(
 ): void {
   const ctxSnake = snake(ctx.name);
   const appSnake = appModule.replace(/([A-Z])/g, (_, c, i) => (i ? "_" : "") + c.toLowerCase());
-  for (const h of ctx.commandHandlers ?? []) {
+  const emit = (h: Handler, kind: "Command handler" | "Query handler"): void => {
     out.set(
       `lib/${appSnake}/${ctxSnake}/handlers/${snake(h.name)}.ex`,
-      renderHandlerModule(h, "Command handler", appModule, ctx, resourceModules),
+      renderHandlerModule(h, kind, appModule, ctx, resourceModules),
     );
-  }
-  for (const h of ctx.queryHandlers ?? []) {
-    out.set(
-      `lib/${appSnake}/${ctxSnake}/handlers/${snake(h.name)}.ex`,
-      renderHandlerModule(h, "Query handler", appModule, ctx, resourceModules),
-    );
-  }
+    // Extern: the scaffold-once user impl the dispatch above delegates to.
+    if (h.extern) {
+      out.set(
+        `lib/${appSnake}/${ctxSnake}/handlers/${snake(h.name)}_impl.ex`,
+        renderExternImplModule(
+          h,
+          kind === "Command handler" ? "commandHandler" : "queryHandler",
+          appModule,
+          ctx,
+        ),
+      );
+    }
+  };
+  for (const h of ctx.commandHandlers ?? []) emit(h, "Command handler");
+  for (const h of ctx.queryHandlers ?? []) emit(h, "Query handler");
 }
 
 /** Resolve a `route`'s `Context.Handler` target to the handler's IR + kind. */

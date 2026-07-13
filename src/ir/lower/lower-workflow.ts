@@ -319,6 +319,20 @@ export function lowerCommandHandler(
     params.push({ name: p.name, type: t });
     inner = withLocal(inner, p.name, "param", t);
   }
+  // Extern handler (`extern commandHandler … ;`): BODYLESS.  There is no DSL
+  // body to lower — statements / savesAtExit / returnValue stay empty, and only
+  // the signature (params + optional returnType) survives.  The generated
+  // dispatch calls a scaffold-once user impl instead of an emitted body.
+  if (h.extern) {
+    return {
+      name: h.name,
+      params,
+      extern: true,
+      ...(h.returnType ? { returnType: lowerType(h.returnType, env) } : {}),
+      statements: [],
+      savesAtExit: [],
+    };
+  }
   // A handler `return <expr>` is captured separately as `returnValue`, NOT as a
   // body statement: body statements are `WorkflowStmtIR` and the shared workflow
   // statement renderer has no `return` arm (workflow handles never return a
@@ -358,6 +372,19 @@ export function lowerQueryHandler(
     const t = lowerType(p.type, env);
     params.push({ name: p.name, type: t });
     inner = withLocal(inner, p.name, "param", t);
+  }
+  // Extern queryHandler (`extern queryHandler … ;`): BODYLESS — see
+  // `lowerCommandHandler`.  The required `returnType` is preserved (the user
+  // impl file's return contract); statements / savesAtExit stay empty.
+  if (h.extern) {
+    return {
+      name: h.name,
+      params,
+      extern: true,
+      returnType: lowerType(h.returnType, env),
+      statements: [],
+      savesAtExit: [],
+    };
   }
   const { statements, returnValue } = lowerHandlerBody(
     h.body,

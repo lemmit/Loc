@@ -1308,12 +1308,20 @@ export interface HandleIR {
  *  (unfoldable-api-derivation.md, Layer 3) — a workflow `handle` lifted out of a
  *  workflow when the orchestration is single-aggregate.  `returnType` is optional
  *  (a `commandHandler` may omit it, `: void`-equivalent).  Body statements are
- *  `WorkflowStmtIR` (load → mutate → save → return), same as `HandleIR`.  These
- *  ride alongside the IR and are not yet read by any backend. */
+ *  `WorkflowStmtIR` (load → mutate → save → return), same as `HandleIR`.  Every
+ *  backend's explicit-handlers emitter reads these. */
 export interface CommandHandlerIR {
   name: string;
   params: ParamIR[];
   returnType?: TypeIR;
+  /** Stamped SOURCE FACT — the user wrote `extern commandHandler … ;`.  An
+   *  extern handler is BODYLESS: its implementation is a scaffold-once,
+   *  user-owned impl file the generated dispatch calls (the "case-2" home).
+   *  When set, `statements` / `returnValue` / `savesAtExit` are empty and only
+   *  the signature (`params` + optional `returnType`) is load-bearing.  Same
+   *  kind of stamped fact as `OperationIR.extern`; do NOT derive an
+   *  `isBodyless` from it. */
+  extern?: boolean;
   statements: WorkflowStmtIR[];
   savesAtExit: { name: string; aggName: string; repoName: string }[];
   /** The lowered `return <expr>` value, when the body ends in a return.  Held
@@ -1332,6 +1340,11 @@ export interface QueryHandlerIR {
   name: string;
   params: ParamIR[];
   returnType: TypeIR;
+  /** Stamped SOURCE FACT — the user wrote `extern queryHandler … ;`.  See
+   *  {@link CommandHandlerIR.extern}.  For a queryHandler the `returnType` is
+   *  required and load-bearing as the user impl file's return contract (the
+   *  external read-projection it produces). */
+  extern?: boolean;
   statements: WorkflowStmtIR[];
   savesAtExit: { name: string; aggName: string; repoName: string }[];
   /** The lowered `return <expr>` value (see `CommandHandlerIR.returnValue`).  A

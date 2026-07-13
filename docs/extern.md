@@ -263,3 +263,71 @@ That same conversion fixes a latent bug in the auto Mediator
 handler for parameterized externs (commit history: domain types
 were passed to a wire-typed request constructor; `domainToRequestExpr`
 now wraps each arg).
+
+## `extern` application-layer handlers (commandHandler / queryHandler)
+
+The `extern` operations above are the aggregate-*member* escape hatch (business
+logic inside one aggregate's lifecycle). The **application-layer** twin is a
+bodyless `extern commandHandler` / `extern queryHandler` — the "case-2" home:
+**one external-service call around one aggregate**, at the application layer,
+routed straight from an `api`. Like an extern operation it has no DSL body; Loom
+scaffolds a **user-owned impl file once** and the generated dispatch calls it,
+preserving your implementation across regenerations.
+
+```ddd
+context Ordering {
+  aggregate Order { code: string }
+  repository Orders for Order { }
+
+  // Bodyless (`;`) — the signature is the contract; the impl is yours.
+  extern commandHandler PlaceOrder(code: string): Order id;
+  extern queryHandler   GetQuote(sku: string): string;   // external read-projection
+}
+
+api SalesApi from Ordering {
+  route POST "/orders"       -> Ordering.PlaceOrder
+  route GET  "/quotes/{sku}" -> Ordering.GetQuote
+}
+```
+
+A non-extern handler still requires a `{ … }` body; an `extern` one must be
+bodyless. The validator pins the pairing: `loom.extern-handler-has-body`
+(an `extern` handler with a body) and `loom.handler-missing-body` (a non-extern
+handler written `;`).
+
+Each backend expresses the same intent idiomatically — the generated dispatch
+wires the route + DTO exactly as a normal handler but calls a scaffold-once,
+user-owned impl instead of a DSL-lowered body:
+
+| Backend | Generated dispatch | Scaffold-once user impl (`loom:scaffold-once`) |
+|---|---|---|
+| Hono | route imports the impl module | `src/application/<kebab>-handler-impl.ts` — `throw new ExternHandlerError(...)` |
+| .NET | Mediator handler ctor-injects `I<Name>Handler`; Scrutor registers the `[ExternHandler]` impl + a startup verify | `Application/Handlers/<Name>ExternHandler.cs` — `throw new NotImplementedException(...)` |
+| Java | `@Service` handler ctor-injects `<Name>Port` (Spring auto-wires) | `<Name>HandlerImpl.java` — `throw new UnsupportedOperationException(...)` |
+| Python | `app/application/<snake>.py` dispatch imports + calls the impl | `app/application/impl/<snake>_impl.py` — `raise NotImplementedError(...)` |
+| Elixir | `run/1` delegates via `Application.get_env` (config-swappable) | `lib/<app>/<ctx>/handlers/<snake>_impl.ex` — `raise "... not implemented"` |
+
+The impl file's path is **deterministic and stable** — a rename would orphan
+your code, so it never changes. The stub **fails loudly** (throws/raises) until
+you fill it in, so a forgotten implementation surfaces as a 500 naming the file,
+never a silent no-op. The generated Hono impl for the example above:
+
+```ts
+// src/application/place-order-handler-impl.ts
+// loom:scaffold-once — this file is yours.  Loom scaffolds it on the first
+// `generate` and NEVER overwrites it again …
+import { ExternHandlerError } from "../domain/errors";
+import * as Ids from "../domain/ids";
+
+export async function placeOrderImpl(code: string): Promise<Ids.OrderId> {
+  throw new ExternHandlerError(
+    "PlaceOrder",
+    "Ordering",
+    new Error("extern commandHandler 'PlaceOrder' is not implemented — fill in src/application/place-order-handler-impl.ts"),
+  );
+}
+```
+
+Use it when the *whole* handler is an outbound call (a payment gateway, a quote
+service, an external search) rather than a DSL-expressible load→mutate→save. For
+that, write a normal bodied `commandHandler` / `queryHandler`.

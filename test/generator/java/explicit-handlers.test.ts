@@ -205,3 +205,45 @@ describe("java — explicit route params: {token} → @PathVariable, rest → @R
     expect(ctrl).toContain("import ");
   });
 });
+
+// An `extern` handler is bodyless: the generated dispatch delegates to a
+// scaffold-once, user-owned impl the user fills in (extern-handler Phase 1).
+const EXTERN_SRC = `
+system Shop {
+  subdomain Sales {
+    context Ordering {
+      aggregate Order { code: string }
+      repository Orders for Order { }
+      extern commandHandler PlaceOrder(code: string): Order id;
+      extern queryHandler GetQuote(orderId: Order id): string;
+    }
+  }
+  api SalesApi from Sales {
+    route POST "/orders" -> Ordering.PlaceOrder
+    route GET  "/orders/{orderId}/quote" -> Ordering.GetQuote
+  }
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: java, contexts: [Ordering], dataSources: [st], serves: SalesApi, port: 5001 }
+}
+`;
+describe("java — extern commandHandler / queryHandler", () => {
+  it("the @Service handler ctor-injects the port and delegates", async () => {
+    const m = await generateSystemFiles(EXTERN_SRC);
+    const handler = fileEndingWith(m, "PlaceOrderHandler.java");
+    expect(handler).toContain("private final PlaceOrderPort placeOrderPort;");
+    expect(handler).toContain("return placeOrderPort.handle(code);");
+    // The port interface is generated alongside.
+    const port = fileEndingWith(m, "PlaceOrderPort.java");
+    expect(port).toContain("public interface PlaceOrderPort {");
+    expect(port).toContain("OrderId handle(String code);");
+  });
+
+  it("emits a scaffold-once @Service impl that throws", async () => {
+    const m = await generateSystemFiles(EXTERN_SRC);
+    const impl = fileEndingWith(m, "PlaceOrderHandlerImpl.java");
+    expect(impl.split("\n")[0]).toContain("loom:scaffold-once");
+    expect(impl).toContain("public class PlaceOrderHandlerImpl implements PlaceOrderPort");
+    expect(impl).toContain("throw new UnsupportedOperationException(");
+  });
+});

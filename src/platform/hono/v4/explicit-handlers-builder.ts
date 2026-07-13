@@ -34,6 +34,7 @@
 // ---------------------------------------------------------------------------
 
 import { renderWorkflowStmtChunks } from "../../../generator/_workflow/stmt-target.js";
+import { renderTsType } from "../../../generator/typescript/render-expr.js";
 import type {
   CommandHandlerIR,
   EnrichedBoundedContextIR,
@@ -45,7 +46,8 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { wireTypeInfo } from "../../../ir/types/wire-types.js";
 import { collectReachableTypes } from "../../../ir/util/reachable-types.js";
-import { lowerFirst, plural } from "../../../util/naming.js";
+import { lowerFirst, plural, snake } from "../../../util/naming.js";
+import { SCAFFOLD_ONCE_MARKER } from "../../../util/scaffold-once.js";
 import { emitWireSchema, wireToDomainExpr, zodFor } from "./routes-builder.js";
 import {
   collectReposForWorkflow,
@@ -54,6 +56,25 @@ import {
 } from "./workflow-builder.js";
 
 type Handler = CommandHandlerIR | QueryHandlerIR;
+
+// --- Extern handler (bodyless) — scaffold-once user impl file --------------
+// An `extern commandHandler`/`extern queryHandler` has NO DSL body: the route
+// still wires up identically (metadata + param coercion), but instead of a
+// rendered workflow body it calls a scaffold-once, user-owned impl module the
+// user fills in.  The impl path/name is DETERMINISTIC and stable forever
+// (renames would orphan user code): `src/application/<kebab>-handler-impl.ts`
+// exporting `<camelName>Impl`.
+
+/** Kebab basename of a handler impl file (`PlaceOrder` → `place-order`). */
+const handlerKebab = (name: string): string => snake(name).replace(/_/g, "-");
+/** The exported impl function name (`PlaceOrder` → `placeOrderImpl`). */
+const externImplFn = (name: string): string => `${lowerFirst(name)}Impl`;
+/** Emitted impl file path (`out.set` key), rooted at the project src dir. */
+const externImplFilePath = (name: string): string =>
+  `application/${handlerKebab(name)}-handler-impl.ts`;
+/** Import specifier from an `http/*-routes.ts` router to the impl module. */
+const externImplModule = (name: string): string =>
+  `../application/${handlerKebab(name)}-handler-impl`;
 
 /** Path-param zod for a wire-coerced route segment.  Ids resolve by their value
  *  type (guid → uuid string, int/long → coerced integer, string → plain);
@@ -108,7 +129,10 @@ function emitRouteHandler(
   const pathParams = h.params.filter((p) => pathNames.has(p.name));
   const bodyParams = h.params.filter((p) => !pathNames.has(p.name));
   const method = route.method.toLowerCase();
-  const hasReturn = !!h.returnValue;
+  // An extern handler returns iff it declares a returnType (there's no lowered
+  // returnValue — the body is bodyless); a DSL-bodied handler returns iff its
+  // body ends in a `return` (`returnValue`).
+  const hasReturn = h.extern ? !!h.returnType : !!h.returnValue;
   const out: string[] = [];
   out.push(`app.openapi(`);
   out.push(`  createRoute({`);
@@ -160,6 +184,23 @@ function emitRouteHandler(
   }
   for (const p of h.params) {
     out.push(`    const ${p.name} = ${paramExprs.get(p.name)};`);
+  }
+  // Extern handler: no DSL body — no repos, no workflow statements, no wire
+  // projection.  Delegate to the scaffold-once user impl module (imported by
+  // `buildExplicitRoutesFile`), passing the domain-coerced param locals.  The
+  // impl owns the return shape, so it serialises as-is.
+  if (h.extern) {
+    const call = `${externImplFn(h.name)}(${h.params.map((p) => p.name).join(", ")})`;
+    if (hasReturn) {
+      out.push(`    const result = await ${call};`);
+      out.push(`    return httpCtx.json(result as unknown, 200);`);
+    } else {
+      out.push(`    await ${call};`);
+      out.push(`    return httpCtx.body(null, 204);`);
+    }
+    out.push(`  },`);
+    out.push(`);`);
+    return out;
   }
   // Repos constructed inline on the request `db` (matches aggregate/workflow
   // routes).  `getById` throws AggregateNotFoundError → 404 via onError, so a
@@ -222,6 +263,9 @@ export function buildExplicitRoutesFile(
   // whose type resolves to a value object / enum is rendered by `zodFor` as a
   // bare `<Name>Schema` reference, so that schema must be declared in-scope.
   const bodySchemaSeeds: TypeIR[] = [];
+  // Extern handlers routed by this api → the scaffold-once impl modules the
+  // router imports (`<camelName>Impl` from `../application/<kebab>-handler-impl`).
+  const externImplImports = new Map<string, string>();
   for (const r of routes) {
     const ctx = byName.get(r.target.context);
     if (!ctx) continue;
@@ -231,6 +275,7 @@ export function buildExplicitRoutesFile(
     if (!h) continue;
     const pathNames = new Set([...r.path.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!));
     for (const p of h.params) if (!pathNames.has(p.name)) bodySchemaSeeds.push(p.type);
+    if (h.extern) externImplImports.set(externImplFn(h.name), externImplModule(h.name));
     routeBlocks.push(emitRouteHandler(apiName, r, h, ctx));
   }
   if (routeBlocks.length === 0) return undefined;
@@ -360,6 +405,10 @@ export function buildExplicitRoutesFile(
   imports.push(`import type { DomainEventDispatcher } from "../domain/events";`);
   imports.push(`import type { NodePgDatabase } from "drizzle-orm/node-postgres";`);
   imports.push(`import type * as schema from "../db/schema";`);
+  // Scaffold-once extern impl modules (one per extern handler routed here).
+  for (const [fn, module] of [...externImplImports].sort()) {
+    imports.push(`import { ${fn} } from "${module}";`);
+  }
   for (const aggName of [...new Set(aggsReferenced)]) {
     imports.push(`import { ${aggName} } from "../domain/${lowerFirst(aggName)}";`);
   }
@@ -374,4 +423,72 @@ export function buildExplicitRoutesFile(
 
   const schemaSection = schemaDecls.length > 0 ? [...schemaDecls, ""] : [];
   return `${[...imports, "", ...schemaSection, ...body].join("\n")}\n`;
+}
+
+/** Render one extern handler's scaffold-once impl module.  The generated route
+ *  imports `<camelName>Impl` and calls it; this file is the user's — Loom
+ *  writes it once (the `loom:scaffold-once` marker on line 1 tells the CLI
+ *  writer to PRESERVE it on regen), and the default body throws loudly so a
+ *  forgotten implementation surfaces as a 500 naming the file, not a silent
+ *  no-op.  Params are domain-typed (the route coerces wire→domain before the
+ *  call); the return type is the user's contract. */
+function renderExternHandlerImpl(h: Handler, ctx: EnrichedBoundedContextIR): string {
+  const fn = externImplFn(h.name);
+  const params = h.params.map((p) => `${p.name}: ${renderTsType(p.type)}`).join(", ");
+  const ret = h.returnType ? renderTsType(h.returnType) : "void";
+  const sig = `export async function ${fn}(${params}): Promise<${ret}>`;
+  const kind = (ctx.queryHandlers ?? []).includes(h as QueryHandlerIR)
+    ? "queryHandler"
+    : "commandHandler";
+  const throwMsg = `extern ${kind} '${h.name}' is not implemented — fill in src/${externImplFilePath(h.name)}`;
+  // Import scan: blank string literals, then look for whole-word references so
+  // the header only imports the domain types the signature actually names.
+  // `renderTsType` namespaces ids (`Ids.<Agg>Id`), leaves entities / value
+  // objects / enums bare (imported from their own modules).
+  const scan = `${params} ${ret}`.replace(/"(?:\\.|[^"\\])*"/g, '""');
+  const refersTo = (n: string): boolean => new RegExp(`\\b${n}\\b`).test(scan);
+  const aggRefs = ctx.aggregates
+    .map((a) => a.name)
+    .filter(refersTo)
+    .sort();
+  const voEnumNames = [
+    ...new Set([...ctx.valueObjects.map((v) => v.name), ...ctx.enums.map((e) => e.name)]),
+  ]
+    .filter(refersTo)
+    .sort();
+  const imports: string[] = [`import { ExternHandlerError } from "../domain/errors";`];
+  if (/\bIds\.\w/.test(scan)) imports.push(`import * as Ids from "../domain/ids";`);
+  for (const agg of aggRefs) {
+    imports.push(`import { ${agg} } from "../domain/${lowerFirst(agg)}";`);
+  }
+  if (voEnumNames.length > 0) {
+    imports.push(`import { ${voEnumNames.join(", ")} } from "../domain/value-objects";`);
+  }
+  return `// ${SCAFFOLD_ONCE_MARKER} — this file is yours.  Loom scaffolds it on the first
+// \`generate\` and NEVER overwrites it again, so your implementation survives
+// every regenerate.  Replace the \`throw\` with the extern handler's real logic
+// (the one external-service call this handler wraps).
+${imports.join("\n")}
+
+${sig} {
+  throw new ExternHandlerError(
+    ${JSON.stringify(h.name)},
+    ${JSON.stringify(ctx.name)},
+    new Error(${JSON.stringify(throwMsg)}),
+  );
+}
+`;
+}
+
+/** Emit the scaffold-once impl module for every extern `commandHandler` /
+ *  `queryHandler` in a context (`src/application/<kebab>-handler-impl.ts`).  A
+ *  no-op for a context with no extern handler — byte-identical output. */
+export function emitExternHandlerImpls(
+  ctx: EnrichedBoundedContextIR,
+  out: Map<string, string>,
+): void {
+  for (const h of [...(ctx.commandHandlers ?? []), ...(ctx.queryHandlers ?? [])]) {
+    if (!h.extern) continue;
+    out.set(externImplFilePath(h.name), renderExternHandlerImpl(h, ctx));
+  }
 }

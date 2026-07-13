@@ -1056,22 +1056,24 @@ function printOperation(node: Operation): string {
   );
 }
 
-// `commandHandler name(params)[: T] { … }` application-layer context member
-// (unfoldable-api-derivation.md, Layer 3).  Return type is optional.
+// `[extern] commandHandler name(params)[: T] { … } | ;` application-layer
+// context member (unfoldable-api-derivation.md, Layer 3).  Return type is
+// optional.  An `extern` handler is BODYLESS (`;`) — the impl is a scaffold-once
+// user file the generated dispatch calls.
 function printCommandHandler(node: import("../generated/ast.js").CommandHandler): string {
   const params = node.params.map(printParameter).join(", ");
   const ret = node.returnType ? `: ${printTypeRef(node.returnType)}` : "";
-  return block(`commandHandler ${node.name}(${params})${ret}`, node.body.map(printStmt));
+  const head = `${node.extern ? "extern " : ""}commandHandler ${node.name}(${params})${ret}`;
+  return node.extern ? `${head};` : block(head, node.body.map(printStmt));
 }
 
-// `queryHandler name(params): T { … }` application-layer context member
-// (unfoldable-api-derivation.md, Layer 3).  Return type is required.
+// `[extern] queryHandler name(params): T { … } | ;` application-layer context
+// member (unfoldable-api-derivation.md, Layer 3).  Return type is required.  An
+// `extern` handler is BODYLESS (`;`).
 function printQueryHandler(node: import("../generated/ast.js").QueryHandler): string {
   const params = node.params.map(printParameter).join(", ");
-  return block(
-    `queryHandler ${node.name}(${params}): ${printTypeRef(node.returnType)}`,
-    node.body.map(printStmt),
-  );
+  const head = `${node.extern ? "extern " : ""}queryHandler ${node.name}(${params}): ${printTypeRef(node.returnType)}`;
+  return node.extern ? `${head};` : block(head, node.body.map(printStmt));
 }
 
 function printCreate(node: import("../generated/ast.js").Create): string {

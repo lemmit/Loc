@@ -176,6 +176,56 @@ describe("hono — explicit handler returning a domain aggregate", () => {
   });
 });
 
+// An `extern` handler is bodyless: the route still wires up, but instead of a
+// rendered load→mutate→save body it calls a scaffold-once, user-owned impl
+// module (`src/application/<kebab>-handler-impl.ts`).
+const EXTERN_SRC = `
+system Shop {
+  subdomain Sales {
+    context Ordering {
+      aggregate Order { code: string }
+      repository Orders for Order { }
+      extern commandHandler PlaceOrder(code: string): Order id;
+      extern queryHandler GetQuote(orderId: Order id): string;
+    }
+  }
+  api SalesApi from Sales {
+    route POST "/orders" -> Ordering.PlaceOrder
+    route GET  "/orders/{orderId}/quote" -> Ordering.GetQuote
+  }
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: node, contexts: [Ordering], dataSources: [st], serves: SalesApi, port: 5001 }
+}
+`;
+
+describe("hono — extern commandHandler / queryHandler", () => {
+  it("route dispatch calls the scaffold-once impl and returns its value", async () => {
+    const m = await generateSystemFiles(EXTERN_SRC);
+    const router = fileEndingWith(m, "http/salesApi-routes.ts");
+    // Imports + calls the user impl module (not an inline repo/workflow body).
+    expect(router).toContain(
+      'import { placeOrderImpl } from "../application/place-order-handler-impl";',
+    );
+    expect(router).toContain("const result = await placeOrderImpl(code);");
+    expect(router).toContain("return httpCtx.json(result as unknown, 200);");
+    expect(router).not.toContain("new OrderRepository(");
+    // The extern query dispatches likewise (path-coerced id passed through).
+    expect(router).toContain("const result = await getQuoteImpl(orderId);");
+  });
+
+  it("emits a scaffold-once impl stub that throws loudly", async () => {
+    const m = await generateSystemFiles(EXTERN_SRC);
+    const impl = fileEndingWith(m, "application/place-order-handler-impl.ts");
+    expect(impl.split("\n")[0]).toContain("loom:scaffold-once");
+    expect(impl).toContain(
+      "export async function placeOrderImpl(code: string): Promise<Ids.OrderId>",
+    );
+    expect(impl).toContain("throw new ExternHandlerError(");
+    expect(impl).toContain("is not implemented");
+  });
+});
+
 describe("hono — explicit handler with a value-object body param", () => {
   it("declares the VO wire schema in-scope so the body schema resolves", async () => {
     const router = fileEndingWith(await generateSystemFiles(VO_SRC), "http/salesApi-routes.ts");

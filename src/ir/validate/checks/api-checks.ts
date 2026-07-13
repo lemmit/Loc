@@ -109,6 +109,9 @@ export function validateApplicationHandlers(ctx: BoundedContextIR, diags: LoomDi
     }
   }
   for (const q of ctx.queryHandlers ?? []) {
+    // An extern handler has no DSL body to analyse — its implementation lives in
+    // a scaffold-once user file — so the body-mutation gate doesn't apply.
+    if (q.extern) continue;
     if (handlerMutates(q)) {
       diags.push({
         severity: "error",
@@ -122,6 +125,8 @@ export function validateApplicationHandlers(ctx: BoundedContextIR, diags: LoomDi
     }
   }
   for (const c of ctx.commandHandlers ?? []) {
+    // Extern: no DSL body, so the single-aggregate gate has nothing to count.
+    if (c.extern) continue;
     const touched = aggregatesTouched(c);
     if (touched.size > 1) {
       diags.push({

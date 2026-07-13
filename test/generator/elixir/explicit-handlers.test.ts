@@ -103,3 +103,42 @@ describe("elixir — explicit commandHandler/queryHandler → plain Ecto/Phoenix
     );
   });
 });
+
+// An `extern` handler is bodyless: the generated dispatch delegates to a
+// scaffold-once, user-owned impl the user fills in (extern-handler Phase 1).
+const EXTERN_SRC = `
+system Shop {
+  subdomain Sales {
+    context Ordering {
+      aggregate Order { code: string }
+      repository Orders for Order { }
+      extern commandHandler PlaceOrder(code: string): Order id;
+      extern queryHandler GetQuote(orderId: Order id): string;
+    }
+  }
+  api SalesApi from Sales {
+    route POST "/orders" -> Ordering.PlaceOrder
+    route GET  "/orders/{orderId}/quote" -> Ordering.GetQuote
+  }
+  storage pg { type: postgres }
+  resource st { for: Ordering, kind: state, use: pg }
+  deployable api { platform: elixir, contexts: [Ordering], dataSources: [st], serves: SalesApi, port: 5001 }
+}
+`;
+describe("elixir — extern commandHandler / queryHandler", () => {
+  it("the dispatch module delegates to the scaffold-once impl via config", async () => {
+    const m = await generateSystemFiles(EXTERN_SRC);
+    const dispatch = fileEndingWith(m, "lib/api/ordering/handlers/place_order.ex");
+    expect(dispatch).toContain(
+      "Application.get_env(:api, __MODULE__, Api.Ordering.Handlers.PlaceOrderImpl).run(params)",
+    );
+  });
+
+  it("emits a scaffold-once impl module that raises", async () => {
+    const m = await generateSystemFiles(EXTERN_SRC);
+    const impl = fileEndingWith(m, "lib/api/ordering/handlers/place_order_impl.ex");
+    expect(impl.split("\n")[0]).toContain("loom:scaffold-once");
+    expect(impl).toContain("defmodule Api.Ordering.Handlers.PlaceOrderImpl do");
+    expect(impl).toContain("raise ");
+  });
+});

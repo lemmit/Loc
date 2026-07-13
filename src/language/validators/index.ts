@@ -23,6 +23,7 @@ export {
 } from "./deployable.js";
 export { checkDuplicateNames } from "./duplicates.js";
 export { checkGenericCarriers, checkSelfType } from "./generics.js";
+export { checkHandlerBodies } from "./handlers.js";
 export { checkInheritance } from "./inheritance.js";
 export { checkMacroExpansion } from "./macros.js";
 export {

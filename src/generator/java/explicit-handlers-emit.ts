@@ -49,6 +49,7 @@ import type {
 import { wireTypeInfo } from "../../ir/types/wire-types.js";
 import { lines } from "../../util/code-builder.js";
 import { lowerFirst } from "../../util/naming.js";
+import { SCAFFOLD_ONCE_MARKER } from "../../util/scaffold-once.js";
 import { collectUnionFindLets, renderWorkflowStmtChunks } from "../_workflow/stmt-target.js";
 import { domainToWire } from "./emit/wire.js";
 import { javaWorkflowStmtTarget, repoField } from "./emit/workflow.js";
@@ -88,6 +89,125 @@ function reposUsed(h: Handler): string[] {
 }
 
 const baseRenderCtx: JavaRenderContext = { thisName: "this" };
+
+// --- Extern handler (bodyless) — port + scaffold-once impl bean -------------
+// An `extern` handler has no DSL body: the generated `<Name>Handler` @Service
+// still exists (the controller injects + calls it unchanged), but delegates to
+// a `<Name>Port` the user's scaffold-once `<Name>HandlerImpl` @Service supplies
+// — Spring auto-wires the impl by type (idiomatic DI, no explicit registration).
+// The `<Name>Port` method + `<Name>HandlerImpl` @Override make a signature
+// mismatch a COMPILE error after a regenerate; a missing impl is caught at
+// startup; an unimplemented stub throws loudly at call time.
+
+/** The wildcard domain imports every extern-handler file needs (params /
+ *  returns resolve through the domain packages). */
+const externDomainImports = (basePkg: string): string[] => [
+  `import ${basePkg}.domain.common.*;`,
+  `import ${basePkg}.domain.enums.*;`,
+  `import ${basePkg}.domain.ids.*;`,
+  `import ${basePkg}.domain.valueobjects.*;`,
+];
+
+/** The `<retType> handle(<params>)` signature shared by the port, the handler,
+ *  and the impl. */
+function externHandleSig(h: Handler): { ret: string; params: string; argNames: string } {
+  return {
+    ret: h.returnType ? renderJavaType(h.returnType) : "void",
+    params: h.params.map((p) => `${renderJavaType(p.type)} ${p.name}`).join(", "),
+    argNames: h.params.map((p) => p.name).join(", "),
+  };
+}
+
+/** The generated `<Name>Handler` @Service for an extern handler: injects the
+ *  port and delegates.  Return type keys off `returnType` (extern has no
+ *  lowered `returnValue`). */
+function renderExternHandlerClass(
+  h: Handler,
+  kind: "command" | "query",
+  basePkg: string,
+  appPkg: string,
+): string {
+  const handlerName = `${h.name}Handler`;
+  const portName = `${h.name}Port`;
+  const field = lowerFirst(portName);
+  const { ret, params, argNames } = externHandleSig(h);
+  const tx = kind === "command" ? "@Transactional" : "@Transactional(readOnly = true)";
+  const call = h.returnType
+    ? `return ${field}.handle(${argNames});`
+    : `${field}.handle(${argNames});`;
+  return lines(
+    `package ${appPkg};`,
+    ``,
+    ...externDomainImports(basePkg),
+    ``,
+    `import org.springframework.stereotype.Service;`,
+    `import org.springframework.transaction.annotation.Transactional;`,
+    ``,
+    `@Service`,
+    tx,
+    `public class ${handlerName} {`,
+    `    private final ${portName} ${field};`,
+    ``,
+    `    public ${handlerName}(${portName} ${field}) {`,
+    `        this.${field} = ${field};`,
+    `    }`,
+    ``,
+    `    public ${ret} handle(${params}) {`,
+    `        ${call}`,
+    `    }`,
+    `}`,
+    ``,
+  );
+}
+
+/** The `<Name>Port` interface the user impl satisfies (regenerated each run). */
+function renderExternPort(h: Handler, basePkg: string, appPkg: string): string {
+  const { ret, params } = externHandleSig(h);
+  return lines(
+    `package ${appPkg};`,
+    ``,
+    ...externDomainImports(basePkg),
+    ``,
+    `/** Extern-handler contract for \`${h.name}\` — the one external-service call`,
+    ` *  this handler wraps.  Implemented by the scaffold-once, user-owned`,
+    ` *  \`${h.name}HandlerImpl\` (yours; regeneration never overwrites it). */`,
+    `public interface ${h.name}Port {`,
+    `    ${ret} handle(${params});`,
+    `}`,
+    ``,
+  );
+}
+
+/** The scaffold-once user impl bean — `<Name>HandlerImpl.java` (marker on line
+ *  1 → the CLI writer preserves it).  Throws loudly until filled in. */
+function renderExternImpl(
+  h: Handler,
+  kind: "commandHandler" | "queryHandler",
+  basePkg: string,
+  appPkg: string,
+): string {
+  const { ret, params } = externHandleSig(h);
+  const msg = `extern ${kind} '${h.name}' is not implemented — fill in ${h.name}HandlerImpl.java`;
+  return lines(
+    `// ${SCAFFOLD_ONCE_MARKER} — this file is yours.  Loom scaffolds it on the first`,
+    `// \`generate\` and NEVER overwrites it again, so your implementation survives`,
+    `// every regenerate.  Replace the \`throw\` with the extern handler's real logic.`,
+    `package ${appPkg};`,
+    ``,
+    ...externDomainImports(basePkg),
+    ``,
+    `import org.springframework.stereotype.Service;`,
+    ``,
+    `@Service`,
+    `public class ${h.name}HandlerImpl implements ${h.name}Port {`,
+    `    @Override`,
+    `    public ${ret} handle(${params}) {`,
+    `        throw new UnsupportedOperationException(${JSON.stringify(msg)});`,
+    `    }`,
+    `}`,
+    ``,
+  );
+}
 
 /** Render one `commandHandler` / `queryHandler` as a `@Service` bean. */
 function renderHandlerClass(
@@ -202,18 +322,32 @@ export function emitExplicitHandlers(
   repoPkgOf: (agg: string) => string,
 ): { name: string; content: string }[] {
   const files: { name: string; content: string }[] = [];
-  for (const h of ctx.commandHandlers ?? []) {
+  const pushHandler = (h: Handler, kind: "command" | "query"): void => {
+    if (h.extern) {
+      // Extern: generated port + delegating @Service handler + scaffold-once impl.
+      files.push({ name: `${h.name}Port.java`, content: renderExternPort(h, basePkg, appPkg) });
+      files.push({
+        name: `${h.name}Handler.java`,
+        content: renderExternHandlerClass(h, kind, basePkg, appPkg),
+      });
+      files.push({
+        name: `${h.name}HandlerImpl.java`,
+        content: renderExternImpl(
+          h,
+          kind === "command" ? "commandHandler" : "queryHandler",
+          basePkg,
+          appPkg,
+        ),
+      });
+      return;
+    }
     files.push({
       name: `${h.name}Handler.java`,
-      content: renderHandlerClass(h, "command", basePkg, appPkg, ctx, entityPkgOf, repoPkgOf),
+      content: renderHandlerClass(h, kind, basePkg, appPkg, ctx, entityPkgOf, repoPkgOf),
     });
-  }
-  for (const h of ctx.queryHandlers ?? []) {
-    files.push({
-      name: `${h.name}Handler.java`,
-      content: renderHandlerClass(h, "query", basePkg, appPkg, ctx, entityPkgOf, repoPkgOf),
-    });
-  }
+  };
+  for (const h of ctx.commandHandlers ?? []) pushHandler(h, "command");
+  for (const h of ctx.queryHandlers ?? []) pushHandler(h, "query");
   return files;
 }
 
