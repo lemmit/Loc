@@ -8,7 +8,7 @@ import { syncWorkspaceToLsp } from "./lsp/workspace-lsp-sync";
 import { examples, defaultExample, type LoomExample } from "./examples";
 import { LoomBuildClient } from "./build/client";
 import type { GenerateOk, GenerateResult, VfsEntry, VirtualFile } from "./build/protocol";
-import { overlaySourcemapArtifacts } from "./build/strip-sourcemap";
+import { inlineSourcemapArtifacts, overlaySourcemapArtifacts } from "./build/strip-sourcemap";
 import type { BundleOk } from "./bundle/protocol";
 import {
   engineRegistry,
@@ -915,7 +915,15 @@ export default function App(): JSX.Element {
       try {
         const mapped = await client.generateFromPath(entryPath, { sourcemap: true });
         if (epoch === generationEpochRef.current && mapped.ok) {
-          lastMappedGenerateRef.current = mapped;
+          // Inline the `.ts → .ddd` sidecar maps into the `.ts` files: the
+          // in-browser bundler is esbuild-WASM, which can't read `.ts.map`
+          // sidecars (no filesystem), so without this the boot bundle's map
+          // stops at the generated `.ts` and never reaches `.ddd`. See
+          // `inlineSourcemapArtifacts` + `web/e2e/devtools-sourcemap.spec.ts`.
+          lastMappedGenerateRef.current = {
+            ...mapped,
+            files: inlineSourcemapArtifacts(mapped.files),
+          };
         }
       } catch {
         /* best-effort — see comment above */

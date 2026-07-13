@@ -2363,3 +2363,45 @@ without touching the string record — the least-invasive path to zod-parity.
   fields → fill name+price + toggle the checkbox → assert `isEnabled()`. The
   showcase Product gained a `bool inStock` so all three widget kinds (text /
   number / checkbox) render in the gated leg. Same prove-it loop as §23–§32.
+
+## 34. esbuild-WASM can't read `.ts.map` sidecars — a node-esbuild unit test lies about the browser bundler (2026-07-13)
+
+The playground DevTools `.ddd`-debugging feature bundles the in-browser Hono
+backend with an inline source map that should chain back to `.ddd`. It shipped
+"green" — the unit test generated with `--sourcemap`, ran esbuild over the
+`.ts` (which carries `//# sourceMappingURL=build.ts.map`), and asserted the
+output map's `sources` reached `.ddd`. A real-browser e2e added afterward
+proved the *shipped* feature did NOT reach `.ddd` at all: the running module's
+map stopped at the generated `.ts` (`vfs:/…`).
+
+- **The trap: the unit test used *node* esbuild; production uses esbuild-WASM.**
+  Node esbuild, told to compose maps, follows a `//# sourceMappingURL=X.map`
+  comment by **reading `X.map` off the filesystem**. esbuild-WASM in the browser
+  has **no filesystem**, so it silently can't read the sidecar — it just doesn't
+  chain, and the bundle map ends at the `.ts`. Same esbuild API, opposite
+  behaviour on the exact input. A unit test on node esbuild gives false
+  confidence about the browser bundler; **only a real-browser e2e gates
+  esbuild-WASM behaviour.** (General rule: when the production runtime is WASM/
+  browser and the test runtime is node, sidecar-file / fs-touching behaviour is
+  a prime divergence — test it where it runs.)
+
+- **The fix: inline the map into the `.ts` (`data:` URI), don't rely on a
+  sidecar.** esbuild-WASM *can* read an inline `//# sourceMappingURL=data:…`
+  because it's in the file content, no fs needed. A `web/`-side
+  `inlineSourcemapArtifacts` folds each `.ts.map` into its `.ts` before the
+  bundler sees it (and drops the now-redundant sidecar). Chain restored:
+  bundle → `.ts` → `.ddd`.
+
+- **How to e2e a worker-scoped module's source map without CDP.** The goal was
+  "attach CDP, read `Debugger.scriptParsed.sourceMapURL`." Dead end through
+  Playwright's public API: `context.newCDPSession(target)` **rejects Worker
+  targets** ("expected Page or Frame"), and `Target.setAutoAttach({flatten})`
+  delivers the attach event but the child session's `Debugger.*` messages aren't
+  routable through Playwright's 1:1 `CDPSession` wrapper. What works instead:
+  `context.addInitScript` a `Worker.prototype.postMessage` interceptor that
+  captures the exact `bundleCode` posted to the runtime worker's `boot` RPC —
+  byte-identical to what the worker `import()`s — then decode its trailing inline
+  map in the test. One layer below "debugger attached," but it inspects the real
+  running bytes and exercises the real esbuild-WASM path (which is what caught
+  this bug). Decouple the capture from a *successful* boot: the map is in the
+  bytes the instant they're posted, so don't gate on PGlite/jsdelivr coming up.
