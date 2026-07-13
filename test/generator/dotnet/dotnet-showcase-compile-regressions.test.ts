@@ -37,7 +37,7 @@ const SRC = `
 
         criterion ActiveNamed(needle: string) of Project = this.active == true && this.name == needle
 
-        aggregate Project {
+        aggregate Project with crudish {
           name: string
           description: string?
           active: bool
@@ -148,8 +148,8 @@ describe(".NET showcase compile regressions (conformance-parity breakers)", () =
           }
           operation addTag(t: string) {`,
     ).replace(
-      "aggregate Project {",
-      "aggregate Project {\n          entity Step { label: string }",
+      "aggregate Project with crudish {",
+      "aggregate Project with crudish {\n          entity Step { label: string }",
     );
     const files = generateSystems(await parseValid(src)).files;
     const carrier = find(files, "Domain/Projects/ProjectOrProjectNotFound.cs");

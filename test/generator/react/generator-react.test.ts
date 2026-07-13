@@ -949,7 +949,7 @@ describe("react generator", () => {
           system Acme {
             subdomain M {
               context Auth {
-                aggregate User {
+                aggregate User with crudish {
                   email: string
                   derived display: string = email
                   invariant email.matches("^[^@]+@.+$")
@@ -1012,7 +1012,7 @@ describe("react generator", () => {
           system Acme {
             subdomain M {
               context Catalog {
-                aggregate Product {
+                aggregate Product with crudish {
                   sku:  string check sku.length >= 1 && sku.length <= 32
                   derived display: string = sku
                   name: string check name.length <= 120
@@ -1043,7 +1043,7 @@ describe("react generator", () => {
           system Acme {
             subdomain M {
               context Acct {
-                aggregate User {
+                aggregate User with crudish {
                   username: string
                   derived display: string = username
                   private invariant username.length >= 3

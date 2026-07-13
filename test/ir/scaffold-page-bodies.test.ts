@@ -94,6 +94,7 @@ const SCAFFOLD_AGGREGATE_DDD = `
         aggregate Order {
           subject: string
           derived display: string = subject
+          create(subject: string) { subject := subject }
           operation confirm() {}
         }
         repository Orders for Order {}

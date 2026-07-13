@@ -11,11 +11,11 @@ system TenantOwned {
 
   subdomain Core {
     context Billing {
-      aggregate Invoice with tenantOwned {
+      aggregate Invoice with tenantOwned, crudish {
         number: string
         amountDue: int
       }
-      aggregate Plan crossTenant {
+      aggregate Plan crossTenant with crudish {
         code: string
         monthlyPrice: int
       }
@@ -24,7 +24,7 @@ system TenantOwned {
       }
     }
     context Accounts {
-      aggregate Organization {
+      aggregate Organization with crudish {
         name: string
       }
     }

@@ -15,8 +15,8 @@ import {
 import { wireShapeFor } from "../../../ir/enrich/enrichments.js";
 import {
   createInputFields,
+  emitsRestCreate,
   forApiRead,
-  hasCreate,
   wireCreateDefault,
 } from "../../../ir/enrich/wire-projection.js";
 import {
@@ -241,7 +241,7 @@ export function buildRoutesFile(
   // An event-sourced aggregate is constructible only via an emitting `create`
   // action (validator-enforced); without one it exposes no POST route (rather
   // than calling the suppressed field-based factory).
-  const emitCreate = esCreate ? true : agg.persistedAs === "eventLog" ? false : hasCreate(agg);
+  const emitCreate = emitsRestCreate(agg);
   // Unified create-input shape: `{ name, type, optional, default }`.  ES
   // takes the create action's params (no defaults); state takes the
   // create-input field set (server-controlled fields excluded).

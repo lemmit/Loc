@@ -10,11 +10,11 @@ system TPH {
         name: string
         capacity: int
       }
-      aggregate Car extends Vehicle {
+      aggregate Car extends Vehicle with crudish {
         doors: int
         operation refit(d: int) { doors := d }
       }
-      aggregate Truck extends Vehicle {
+      aggregate Truck extends Vehicle with crudish {
         payloadKg: int
       }
       repository Cars for Car { }

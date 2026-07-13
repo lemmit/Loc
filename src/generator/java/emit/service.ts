@@ -1,4 +1,4 @@
-import { forCreateInput, hasCreate } from "../../../ir/enrich/wire-projection.js";
+import { forCreateInput } from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
@@ -136,7 +136,7 @@ export function renderJavaService(
       ]
     : [];
   const createLines =
-    hasCreate(agg) || ctx.esCreateParams
+    agg.canonicalCreate != null || ctx.esCreateParams
       ? [
           `    public ${idClass} create${agg.name}(Create${agg.name}Request request) {`,
           ...createLets,

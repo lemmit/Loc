@@ -24,22 +24,22 @@ system TenantHierarchy {
   subdomain Core {
     context Books {
       // deep — caller's own org node + every org beneath it (materialized path).
-      aggregate Account with tenantOwned {
+      aggregate Account with tenantOwned, crudish {
         label: string
         amount: int
       }
       // global — the caller's ROOT-org subtree (root-org widening, P2.5).
-      aggregate Entry with tenantOwned {
+      aggregate Entry with tenantOwned, crudish {
         label: string
       }
       // local (the default) — only own-org rows (the flat tenant floor).
-      aggregate Memo with tenantOwned {
+      aggregate Memo with tenantOwned, crudish {
         label: string
       }
       // The tenant registry, opted into the tree.  `setPath` writes the managed
       // materialized path (harness seeds deterministic path strings); the plain
       // create takes `name` + the immutable `parent` self-FK.
-      aggregate Org {
+      aggregate Org with crudish {
         name: string
         implements tenantRegistry
         operation setPath(p: string) { dataKey := p }

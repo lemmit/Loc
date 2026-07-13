@@ -1,6 +1,6 @@
 import {
   createInputFields,
-  hasCreate,
+  emitsRestCreate,
   wireCreateDefault,
 } from "../../../ir/enrich/wire-projection.js";
 import { unionInstanceName } from "../../../ir/stdlib/unions.js";
@@ -57,8 +57,11 @@ export function emitResponseDtos(
     name: `${agg.name}Response`,
     params: aggregateResponseParams(agg, ctx),
   });
-  // Create-response (the new id) only when the aggregate is constructible.
-  if (hasCreate(agg)) {
+  // Create-response (the new id) only when the aggregate exposes a REST
+  // create surface (an explicit / crudish canonical create, or an ES
+  // creation event) — the SAME gate as the Create command / controller
+  // action, so the response DTO is never orphaned.
+  if (emitsRestCreate(agg)) {
     records.push({
       name: `Create${agg.name}Response`,
       params: dtoParam(csIdValueClrType(agg.idValueType), "Id"),
@@ -273,8 +276,9 @@ export function emitRequestDtos(
   // `forCreateInput` excludes `managed` / `token` / `internal` (server-
   // owned or domain-only), keeps `immutable` (settable at creation) and
   // `secret` (client supplies password hashes / API keys).  Gated on
-  // `hasCreate`: a non-constructible aggregate emits no CreateRequest.
-  if (createInputOverride || hasCreate(agg)) {
+  // `emitsRestCreate`: an aggregate with no canonical create emits no
+  // CreateRequest.
+  if (createInputOverride || emitsRestCreate(agg)) {
     const requiredFields = createInputOverride ?? createInputFields(agg);
     const rendered = requiredFields.map((f) => {
       // Explicit `= default` → optional request field via a record default

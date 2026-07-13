@@ -15,7 +15,7 @@ const SRC = `
   system Sys {
     subdomain Ops {
       context Ops {
-        aggregate Widget {
+        aggregate Widget with crudish {
           name: string
           rating: int = 3
           invariant rating >= 1

@@ -104,11 +104,11 @@ system Demo {
 });
 
 describe("python routes", () => {
-  it("create route only on constructible aggregates (201 + {id})", async () => {
+  it("create route only on aggregates with a canonical create (201 + {id})", async () => {
     const files = await build("domain.ddd");
     const order = files.get("api/app/http/order_routes.py")!;
     const customer = files.get("api/app/http/customer_routes.py")!;
-    // Order is not constructible — no POST create route, no domain import.
+    // Order declares no canonical create — no POST create route, no domain import.
     expect(order).not.toContain('@router.post("", status_code=201');
     expect(order).not.toContain("from app.domain.order import Order\n");
     // Customer is — full create route.

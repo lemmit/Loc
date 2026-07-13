@@ -1,4 +1,3 @@
-import { hasCreate } from "../../../ir/enrich/wire-projection.js";
 import type {
   EnrichedAggregateIR,
   EnrichedBoundedContextIR,
@@ -259,7 +258,7 @@ export function renderJavaController(
       : [];
 
   const createRoute =
-    hasCreate(agg) || ctx.esConstructible
+    agg.canonicalCreate != null || ctx.esConstructible
       ? [
           `    @PostMapping`,
           `    public ResponseEntity<Create${agg.name}Response> create${agg.name}(@RequestBody Create${agg.name}Request request) {`,

@@ -1,4 +1,4 @@
-import { createInputFields, hasCreate } from "../../ir/enrich/wire-projection.js";
+import { createInputFields, emitsRestCreate } from "../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   EnrichedAggregateIR,
@@ -71,7 +71,7 @@ export function emitCqrs(
         (p) => ({ name: p.name, type: p.type, optional: false }) as AggregateIR["fields"][number],
       )
     : createInputFields(agg);
-  const aggHasCreate = esCreate ? true : hasCreate(agg);
+  const aggHasCreate = emitsRestCreate(agg);
 
   emitResponseDtos(agg, ctx, ns, aggFolder, out);
   // Discriminated-union response DTOs (P4c) — polymorphic base + variant

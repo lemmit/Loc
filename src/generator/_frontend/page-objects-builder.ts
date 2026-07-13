@@ -1,4 +1,4 @@
-import { createInputFields } from "../../ir/enrich/wire-projection.js";
+import { createInputFields, emitsRestCreate } from "../../ir/enrich/wire-projection.js";
 import type { AggregateIR, BoundedContextIR, TypeIR } from "../../ir/types/loom-ir.js";
 import { lowerFirst, plural, snake, upperFirst } from "../../util/naming.js";
 import { unwrapOpt } from "./form-helpers.js";
@@ -29,6 +29,12 @@ export function buildPageObjectModule(
 ): string {
   const slug = snake(plural(agg.name));
   const aggCap = upperFirst(agg.name);
+  // The New page (and its list "New" button + create() navigation) exists
+  // only when the aggregate exposes a REST create surface — the SAME
+  // `emitsRestCreate` gate the scaffold uses to drop the `<Agg>New` page and
+  // the `Create<Agg>Request` schema.  Without it, emit no NewPage page object
+  // and no ListPage.create() (which would dangle on the dropped types/route).
+  const restCreate = emitsRestCreate(agg);
   const ops = agg.operations.filter((o) => o.visibility === "public");
   // The New-page fill targets the inputs the CreateForm actually renders:
   // the non-optional create-input contract (`createInputFields` — excludes
@@ -38,7 +44,8 @@ export function buildPageObjectModule(
   // Collect the candidate api/* type imports, then narrow them once the
   // body is assembled — page-object classes rarely use every Request/Response,
   // and dead `import type {}` lines fail the generated-code Biome gate.
-  const candidateApiTypes: string[] = [`Create${agg.name}Request`];
+  const candidateApiTypes: string[] = [];
+  if (restCreate) candidateApiTypes.push(`Create${agg.name}Request`);
   for (const op of ops) candidateApiTypes.push(`${upperFirst(op.name)}${agg.name}Request`);
   candidateApiTypes.push(`${agg.name}Response`);
 
@@ -62,11 +69,13 @@ export function buildPageObjectModule(
   lines.push(`    return this;`);
   lines.push(`  }`);
   lines.push("");
-  lines.push(`  async create(): Promise<${aggCap}NewPage> {`);
-  lines.push(`    await this.page.getByTestId("${slug}-list-create").click();`);
-  lines.push(`    return new ${aggCap}NewPage(this.page);`);
-  lines.push(`  }`);
-  lines.push("");
+  if (restCreate) {
+    lines.push(`  async create(): Promise<${aggCap}NewPage> {`);
+    lines.push(`    await this.page.getByTestId("${slug}-list-create").click();`);
+    lines.push(`    return new ${aggCap}NewPage(this.page);`);
+    lines.push(`  }`);
+    lines.push("");
+  }
   lines.push(`  row(id: string): Locator {`);
   lines.push(`    return this.page.getByTestId(\`${slug}-row-\${id}\`);`);
   lines.push(`  }`);
@@ -84,44 +93,46 @@ export function buildPageObjectModule(
   lines.push("");
 
   // ---------------------------------------------------------------------
-  // New page
+  // New page — only when the aggregate exposes a REST create surface.
   // ---------------------------------------------------------------------
-  lines.push(`export class ${aggCap}NewPage {`);
-  lines.push(`  static readonly url = "/${slug}/new";`);
-  // Explicit field declaration + constructor assignment, not a
-  // parameter property — see emit/value-objects.ts's renderValueObject.
-  lines.push(`  readonly page: Page;`);
-  lines.push(`  constructor(page: Page) {`);
-  lines.push(`    this.page = page;`);
-  lines.push(`  }`);
-  lines.push("");
-  lines.push(`  async goto(): Promise<this> {`);
-  lines.push(`    await this.page.goto(${aggCap}NewPage.url);`);
-  lines.push(`    await this.page.getByTestId("${slug}-new").waitFor();`);
-  lines.push(`    return this;`);
-  lines.push(`  }`);
-  lines.push("");
-  lines.push(`  async fill(input: Partial<Create${agg.name}Request>): Promise<this> {`);
-  for (const f of required) {
-    lines.push(
-      ...fillBlock(`input`, f.name, f.type, ctx, `${slug}-new-input-${f.name}`, selectStyle).map(
-        (l) => `    ${l}`,
-      ),
-    );
+  if (restCreate) {
+    lines.push(`export class ${aggCap}NewPage {`);
+    lines.push(`  static readonly url = "/${slug}/new";`);
+    // Explicit field declaration + constructor assignment, not a
+    // parameter property — see emit/value-objects.ts's renderValueObject.
+    lines.push(`  readonly page: Page;`);
+    lines.push(`  constructor(page: Page) {`);
+    lines.push(`    this.page = page;`);
+    lines.push(`  }`);
+    lines.push("");
+    lines.push(`  async goto(): Promise<this> {`);
+    lines.push(`    await this.page.goto(${aggCap}NewPage.url);`);
+    lines.push(`    await this.page.getByTestId("${slug}-new").waitFor();`);
+    lines.push(`    return this;`);
+    lines.push(`  }`);
+    lines.push("");
+    lines.push(`  async fill(input: Partial<Create${agg.name}Request>): Promise<this> {`);
+    for (const f of required) {
+      lines.push(
+        ...fillBlock(`input`, f.name, f.type, ctx, `${slug}-new-input-${f.name}`, selectStyle).map(
+          (l) => `    ${l}`,
+        ),
+      );
+    }
+    lines.push(`    return this;`);
+    lines.push(`  }`);
+    lines.push("");
+    lines.push(`  async submit(): Promise<${aggCap}DetailPage> {`);
+    lines.push(`    await this.page.getByTestId("${slug}-new-submit").click();`);
+    lines.push(`    // Wait for the detail page to render rather than matching`);
+    lines.push(`    // the URL — \`/${slug}/new\` itself matches a naive regex.`);
+    lines.push(`    await this.page.getByTestId("${slug}-detail").waitFor();`);
+    lines.push(`    const id = this.page.url().split("/").pop()!;`);
+    lines.push(`    return new ${aggCap}DetailPage(this.page, id);`);
+    lines.push(`  }`);
+    lines.push(`}`);
+    lines.push("");
   }
-  lines.push(`    return this;`);
-  lines.push(`  }`);
-  lines.push("");
-  lines.push(`  async submit(): Promise<${aggCap}DetailPage> {`);
-  lines.push(`    await this.page.getByTestId("${slug}-new-submit").click();`);
-  lines.push(`    // Wait for the detail page to render rather than matching`);
-  lines.push(`    // the URL — \`/${slug}/new\` itself matches a naive regex.`);
-  lines.push(`    await this.page.getByTestId("${slug}-detail").waitFor();`);
-  lines.push(`    const id = this.page.url().split("/").pop()!;`);
-  lines.push(`    return new ${aggCap}DetailPage(this.page, id);`);
-  lines.push(`  }`);
-  lines.push(`}`);
-  lines.push("");
 
   // ---------------------------------------------------------------------
   // Detail page

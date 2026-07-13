@@ -81,7 +81,7 @@ describe("page metamodel — IR shape", () => {
     // the Phase 4 finalisation commit).
     const loom = await buildLoom(`
       system Acme {
-        subdomain M { context A { aggregate Order { x: int } repository Orders for Order { } } }
+        subdomain M { context A { aggregate Order with crudish { x: int } repository Orders for Order { } } }
         ui WebApp with scaffold(subdomains: [M]) {
         }
       }

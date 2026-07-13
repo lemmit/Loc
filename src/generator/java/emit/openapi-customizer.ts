@@ -1,4 +1,4 @@
-import { forApiRead, hasCreate } from "../../../ir/enrich/wire-projection.js";
+import { forApiRead } from "../../../ir/enrich/wire-projection.js";
 import { unionInstanceName } from "../../../ir/stdlib/unions.js";
 import type {
   EnrichedAggregateIR,
@@ -210,7 +210,7 @@ export function buildJavaOpenApiContract(
       }
 
       // POST /<plural>  (create) → 400, 422
-      if (hasCreate(agg) || isEsConstructible(agg)) {
+      if (agg.canonicalCreate != null || isEsConstructible(agg)) {
         routes.push({ method: "post", path: route, errors: err(errorStatuses("create")) });
         const createInput = agg.createInput ?? [];
         for (const c of createInput) noteEnumRefs(c.field.type, c.field.name);

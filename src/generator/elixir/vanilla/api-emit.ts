@@ -14,7 +14,6 @@
 // extension shape byte-identical to the other backends) lands in Slice 4.
 // ---------------------------------------------------------------------------
 
-import { hasCreate } from "../../../ir/enrich/wire-projection.js";
 import type {
   AggregateIR,
   BoundedContextIR,
@@ -70,17 +69,19 @@ export interface VanillaApiEmitResult {
  * (the class of bug where the controller `create` action was generated and
  * documented but left unrouted).
  *
- * Matches the node/dotnet/python/java backends, which gate create on
- * **constructibility** (`hasCreate` = `isConstructible`): a constructible
- * non-ES aggregate is created via the generic `create_<agg>` domain function
- * even without an explicit `create` operation.  Event-sourced aggregates keep
- * the explicit-create gate — their `create_<agg>` returns `:not_constructible`
- * unless a create event is declared.  An abstract inheritance base is
- * read-only (no `create` action emitted), so it never exposes create.
+ * Matches the node/dotnet/python/java backends, which gate the REST create
+ * on an EXPLICIT canonical `create` (`agg.canonicalCreate != null` — written
+ * by hand or synthesised by `with crudish`), symmetric with how DELETE gates
+ * on a canonical `destroy`.  Merely being constructible (`isConstructible`)
+ * no longer exposes a POST — that predicate now gates only the DOMAIN factory
+ * seeds/tests call.  Event-sourced aggregates keep the creation-event gate —
+ * they are created via their declared `create` event.  An abstract
+ * inheritance base is read-only (no `create` action emitted), so it never
+ * exposes create.
  */
 export function emitsRestCreate(agg: AggregateIR): boolean {
   if (isAbstractBase(agg)) return false;
-  return isEventSourced(agg) ? (agg.creates ?? []).length > 0 : hasCreate(agg);
+  return isEventSourced(agg) ? (agg.creates ?? []).length > 0 : agg.canonicalCreate != null;
 }
 
 export function emitVanillaApiControllers(
@@ -147,8 +148,10 @@ export function emitVanillaApiControllers(
       });
     }
     // Event-sourced aggregates have no generic field-update / delete surface —
-    // their only mutations are the per-operation member endpoints below.
-    if (!es && agg.operations.length > 0) {
+    // their only mutations are the per-operation member endpoints below.  The
+    // generic PATCH is now gated on an EXPLICIT `update` operation (symmetric
+    // with create/destroy), not merely on the aggregate having some operation.
+    if (!es && agg.operations.some((o) => o.name === "update")) {
       routes.push({
         method: "patch",
         path: `/${aggsPath}/:id`,
@@ -326,8 +329,14 @@ ${GUARD_RESCUE}
   const createMeta = createAuditMeta(agg);
   const destroyMeta = destroyAuditMeta(agg);
 
-  const createAction = auditCreate
-    ? `  def create(conn, params) do
+  // The `:create` controller action rides the SAME `emitsRestCreate` gate as
+  // its router route + OpenAPI `post` — an aggregate with no canonical create
+  // emits no create action (rather than an orphaned `def create` no route
+  // reaches, mirroring how `delete` is `emitsRestDelete`-gated below).
+  const createAction = !emitsRestCreate(agg)
+    ? ""
+    : auditCreate
+      ? `  def create(conn, params) do
 ${createCuBind}    result =
       ${appModule}.Repo.transaction(fn ->
         case ${ctxModule}.create_${aggSnake}(params${createActor}) do
@@ -365,7 +374,7 @@ ${auditRecordCall({
         ProblemDetails.validation_error_response(conn, changeset)
     end
   end`
-    : `  def create(conn, params) do
+      : `  def create(conn, params) do
 ${createCuBind}    case ${ctxModule}.create_${aggSnake}(params${createActor}) do
       {:ok, record} ->
         ${renderPhoenixLogCall("aggregateCreated", [
@@ -475,7 +484,17 @@ ${cuBind}    with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),
   // The mutating actions (create / update / delete).  An abstract inheritance
   // base is read-only — it emits none of these (no write-seam context fns to
   // call).  Concrete / plain aggregates emit the full set, as before.
-  const updateAction = `  def update(conn, %{"id" => id} = params) do
+  // The generic field-update `:update` action is emitted only when the
+  // aggregate declares an EXPLICIT `update` operation — the SAME gate the
+  // PATCH route (above) and the `update_<agg>` context defdelegate use, so a
+  // routed action is never left calling an undefined context fn and no unused
+  // action survives `--warnings-as-errors`.  (The generic action does
+  // `Map.drop(params, ["id"])` → `update_<agg>`; it does not dispatch to the
+  // op body — the op's own member endpoint does.)
+  const hasUpdateOp = agg.operations.some((o) => o.name === "update");
+  const updateAction = !hasUpdateOp
+    ? ""
+    : `  def update(conn, %{"id" => id} = params) do
     attrs = Map.drop(params, ["id"])
 ${cuBind}${updateCuBind}${versionBind}
     with {:ok, record} <- ${ctxModule}.${cmdGet}(id${getActor}),

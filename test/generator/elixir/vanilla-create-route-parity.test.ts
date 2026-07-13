@@ -7,18 +7,19 @@ import { generateSystemFiles } from "../../_helpers/generate.js";
 //
 // Regression gate for a divergence where the vanilla backend GENERATED and
 // DOCUMENTED a create endpoint but never ROUTED it: the router gated
-// `POST /<plural>` on the aggregate's explicit `creates`, while the OpenAPI
-// spec emitted the `post` operation UNCONDITIONALLY and the controller emitted
-// the `create` action by constructibility.  A bare `aggregate Order { ... }`
-// (constructible, but with no explicit `create` operation) therefore had a
-// documented + implemented create that `POST /api/orders` 404'd on — invisible
-// to the conformance-parity gate, which diffs SPECS across backends, not a
-// backend's spec against its own routes.
+// `POST /<plural>` on one predicate while the OpenAPI spec + controller used
+// another.  The fix routes BOTH the route and the `post` operation off ONE
+// shared predicate (`emitsRestCreate`).  These tests pin that they can never
+// drift: every aggregate the router create-routes is create-documented, and
+// vice versa.
 //
-// The fix routes BOTH the route and the `post` operation off ONE shared
-// predicate (`emitsRestCreate`).  These tests pin that they can never drift:
-// every aggregate the router create-routes is create-documented, and vice
-// versa.
+// The create surface is now gated on an EXPLICIT canonical `create`
+// (`emitsRestCreate` → `canonicalCreate != null`), symmetric with the DELETE
+// gate — mere `isConstructible` no longer exposes a POST.  The fixture below
+// therefore carries `with crudish` so `Order` has a canonical create; the
+// parity assertions then exercise a create-bearing aggregate.  (A bare
+// `aggregate Order { … }` with no create would correctly route NO POST and
+// document none — parity still holds, but vacuously.)
 // ---------------------------------------------------------------------------
 
 /** Aggregates the router wires a `POST /<plural>` create route for. */
@@ -45,15 +46,14 @@ function file(files: Map<string, string>, suffix: string): string {
   return files.get(key!)!;
 }
 
-// A bare, constructible aggregate — no `with crudish`, no operations.  This is
-// the exact shape the bug dropped: constructible (no blocking invariant), so
-// every other backend exposes `POST /orders`, but the vanilla router used to
-// gate on `creates` and leave it unrouted.
+// A create-bearing aggregate (`with crudish` → canonical create).  Every
+// backend exposes `POST /orders`; this pins that the vanilla router and its
+// OpenAPI spec agree on that surface.
 const BARE = `
 system Shop {
   subdomain Sales {
     context Orders {
-      aggregate Order {
+      aggregate Order with crudish {
         code: string
         region: string
       }
@@ -74,7 +74,7 @@ system Shop {
 `;
 
 describe("vanilla create-route ⟺ OpenAPI parity", () => {
-  it("routes POST /<plural> for a bare constructible aggregate (the regressed case)", async () => {
+  it("routes POST /<plural> for a create-bearing (crudish) aggregate", async () => {
     const files = await generateSystemFiles(BARE);
     const router = file(files, "/router.ex");
     expect(router).toContain('post "/orders", OrderController, :create');
@@ -93,14 +93,14 @@ describe("vanilla create-route ⟺ OpenAPI parity", () => {
     expect(ctrl).not.toContain("json(conn, %{items: Enum.map(records");
   });
 
-  it("documents the create in the OpenAPI spec for the same bare aggregate", async () => {
+  it("documents the create in the OpenAPI spec for the same aggregate", async () => {
     const files = await generateSystemFiles(BARE);
     const specKey = [...files.keys()].find((k) => k.endsWith("_spec.ex") && k.includes("/api/"));
     const spec = files.get(specKey!)!;
     expect(spec).toContain('summary: "Create Order"');
   });
 
-  it("router create-routes and OpenAPI create-docs are the same set (bare aggregate)", async () => {
+  it("router create-routes and OpenAPI create-docs are the same set", async () => {
     const files = await generateSystemFiles(BARE);
     const router = file(files, "/router.ex");
     const specKey = [...files.keys()].find((k) => k.endsWith("_spec.ex") && k.includes("/api/"));
