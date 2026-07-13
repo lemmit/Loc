@@ -40,7 +40,7 @@ import { lowerFirst } from "../../../../util/naming.js";
 export type HonoArtifactCategory =
   // domain/
   | "domain-aggregate" // per-aggregate root module (domain/<lowerFirst>.ts)
-  | "domain-extern" // per-aggregate extern handlers (domain/<lowerFirst>-extern.ts)
+  | "domain-aggregate-base" // abstract base for an extern aggregate (domain/<lowerFirst>.base.ts)
   | "domain-test" // per-aggregate test file (domain/<lowerFirst>.test.ts)
   | "domain-ids" // pooled domain/ids.ts
   | "domain-value-objects" // pooled domain/value-objects.ts
@@ -96,9 +96,9 @@ function pathForCategory(artifact: HonoArtifact): string {
     case "domain-aggregate":
       if (!agg) throw new Error(`byLayer.pathFor: 'domain-aggregate' missing aggregateName`);
       return `domain/${slug(agg)}.ts`;
-    case "domain-extern":
-      if (!agg) throw new Error(`byLayer.pathFor: 'domain-extern' missing aggregateName`);
-      return `domain/${slug(agg)}-extern.ts`;
+    case "domain-aggregate-base":
+      if (!agg) throw new Error(`byLayer.pathFor: 'domain-aggregate-base' missing aggregateName`);
+      return `domain/${slug(agg)}.base.ts`;
     case "domain-test":
       if (!agg) throw new Error(`byLayer.pathFor: 'domain-test' missing aggregateName`);
       return `domain/${slug(agg)}.test.ts`;

@@ -40,7 +40,7 @@ describe("byFeature LayoutAdapter — hono/node (real, Phase 5b)", () => {
     expect(p("domain-aggregate", "Order")).toBe("features/order/order.ts");
     expect(p("drizzle-repository", "Order")).toBe("features/order/order-repository.ts");
     expect(p("http-routes", "Order")).toBe("features/order/order.routes.ts");
-    expect(p("domain-extern", "Order")).toBe("features/order/order-extern.ts");
+    expect(p("domain-aggregate-base", "Order")).toBe("features/order/order.base.ts");
     expect(p("domain-test", "Order")).toBe("features/order/order.test.ts");
   });
 

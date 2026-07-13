@@ -21,21 +21,18 @@ aggregate Order {
 ```
 
 > **Backend coverage.** `extern` *operations* now ship on **all five**
- backends — Hono, .NET, **Python**, **Java**, and **Elixir/Phoenix**.  Two
-> idioms exist, as `docs/proposals/extern-domain-extension-point.md` re-homes
-> `extern` from an injected application-layer handler to a domain-internal
-> extension point:
-> - **Domain hook (co-located, scaffold-once)** — **.NET** (a `partial`-method
->   hook), **Java** (a co-located `<Agg>Extern` class), **Python** (a
->   scaffold-once hook module), and **Elixir** (a generated `@behaviour` + a
->   scaffold-once impl module) — each reaches the aggregate's own private state
->   directly (no injected registry, no setter widening); see the per-backend
->   sections below.  A missing hook is a compile error (or fails loudly at
->   runtime); an unfilled one throws.
-> - **Injected handler (typed per-op interface + register/verify gate)** —
->   **Hono** (walked through below; same shape: a typed per-op
->   handler interface / registry + a fail-fast-at-startup check for a missing
->   implementation).  These migrate to the domain-hook idiom in later slices.
+ backends — Hono, .NET, **Python**, **Java**, and **Elixir/Phoenix**.  As
+> `docs/proposals/extern-domain-extension-point.md` re-homes `extern` from an
+> injected application-layer handler to a domain-internal extension point, **all
+> five backends** now use the **domain hook (co-located, scaffold-once)** idiom:
+> the extern op is a member of the aggregate's own lifecycle, delegating to a
+> **scaffold-once** user-owned implementation that reaches the aggregate's own
+> private state directly (no injected registry, no setter widening).  Per
+> backend: **.NET** a `partial`-method hook, **Java** a co-located `<Agg>Extern`
+> class, **Python** a scaffold-once hook module, **Hono** an abstract hook on
+> `<Agg>Base` + a concrete subclass, and **Elixir** a generated `@behaviour` +
+> an impl module — see the per-backend sections below.  A missing hook is a
+> compile error (or fails loudly at runtime); an unfilled one throws.
 >
 > Two **frontend** extern hatches exist alongside the operation one:
 > `function … extern from "…"` (a typed frontend-function hook — React, Vue,
@@ -118,115 +115,63 @@ the silent success the old dev-stub reported).  Both directions fail loudly.
 
 ## Hono (TypeScript)
 
-The generator emits `domain/<agg>-extern.ts` with a typed registry,
-register helper, and verify gate:
+The `extern` operation is a **domain extension point that is a member of the
+aggregate** — not an injected handler.  The generator splits the aggregate into
+two files:
+
+- `domain/<agg>.base.ts` — the regenerated `abstract class <Agg>Base`.  The
+  operation method runs the framework flow and calls a `protected abstract`
+  hook; fields are `protected` (no app-wide setter):
+
+  ```ts
+  export abstract class OrderBase {
+    protected _status: OrderStatus;
+    // ...
+    public confirm(): void {
+      this.checkConfirm();     // preconditions
+      this.confirmExtern();    // your hook
+      this._assertInvariants();
+    }
+    /** Extension point for `extern` operation `confirm`. */
+    protected abstract confirmExtern(): void;
+    protected _raiseEvent(ev: Events.DomainEvent): void { /* ... */ }
+  }
+  ```
+
+- `domain/<agg>.ts` — the **scaffold-once** concrete `class <Agg> extends
+  <Agg>Base` you own.  Loom writes it once (default hook `throw`s loudly) and
+  never overwrites it.  Fill in each `*Extern` method: it is a MEMBER of the
+  aggregate, so it reaches the aggregate's own state directly (no editor, no
+  setters):
+
+  ```ts
+  // loom:scaffold-once — this file is yours.
+  import { OrderBase } from "./order.base.js";
+  import { OrderStatus } from "./value-objects.js";
+
+  export class Order extends OrderBase {
+    protected override confirmExtern(): void {
+      this._status = OrderStatus.Confirmed;                 // mutate directly
+      this._raiseEvent({ type: "OrderConfirmed", order: this._id, at: new Date() });
+    }
+  }
+  ```
+
+Everyone still imports the concrete `Order` from `./domain/order.js`, so nothing
+else changes.  Because `confirmExtern` is `abstract`, a **missing implementation
+is a compile error** (and, if a stub is left in, a loud runtime `throw`) — and a
+newly-added `extern` op fails the build until its hook is written.  There is no
+handler registry, no `register*` call, and no boot-time verify.  S10 is fixed by
+construction: fields are `protected` (writable only inside the aggregate's own
+class hierarchy), so `order.status = …` never type-checks elsewhere in the app.
+
+The route (and any workflow) calls the operation exactly like a non-extern one:
 
 ```ts
-import type { OrderEditor } from "./order.js";
-
-export type ConfirmOrderRequest = Record<string, never>;
-export type ConfirmOrderHandler =
-  (editor: OrderEditor, request: ConfirmOrderRequest) => Promise<void>;
-
-export function registerConfirmOrderHandler(fn: ConfirmOrderHandler): void;
-export function verifyOrderExternHandlersRegistered(): void;
+const aggregate = await repo.getById(Ids.OrderId(id));
+aggregate.confirm();   // preconditions → hook → invariants, all inside the method
+await repo.save(aggregate);
 ```
-
-You register your handler before `app.listen()`:
-
-```ts
-import { registerConfirmOrderHandler } from "./domain/order-extern.js";
-
-registerConfirmOrderHandler(async (order, _request) => {
-  // Your business decision.
-  order.status = "Confirmed";
-  order.raiseEvent({
-    type: "OrderConfirmed",
-    order: order.id,
-    at: new Date(),
-  });
-});
-```
-
-S10 containment: the handler receives a narrow **`OrderEditor`** (read `id`
-+ get/set per field + `raiseEvent`), NOT the live `Order`.  The aggregate
-mints it via an in-class `_externEditor()`, and its own fields stay
-`private` behind read-only getters — so `order.status = …` on a plain
-`Order` no longer type-checks (`TS2540`) anywhere else in the app.  The
-route runs `aggregate.checkConfirm()` (preconditions only), hands the
-handler `aggregate._externEditor()`, then runs invariants and saves.
-
-`createApp(...)` calls `verifyOrderExternHandlersRegistered()` at
-startup, so a missing handler fails fast.
-
-## Python (FastAPI + SQLAlchemy)
-
-Python uses a **co-located domain extension point**, not an injected handler
-registry.  The extern op is a real method on the aggregate — it runs its
-preconditions, delegates the mutation to a user-owned hook function, then
-re-asserts invariants:
-
-```python
-# app/domain/order.py — generated, regenerated every run
-class Order:
-    def confirm(self) -> None:
-        if not (self._is_mutable()):
-            raise DomainError("Precondition failed: isMutable()")
-        if not (self._risk_score < 80):
-            raise DomainError("Precondition failed: riskScore < 80")
-        order_extern.confirm(self)      # ← the hook
-        self._assert_invariants()       # invariants re-run after it mutates
-```
-
-The hook lives in a **scaffold-once** module, `app/domain/extern/<agg>_extern.py`
-— generated once with a loud raising stub, then **yours** (a `generate system`
-re-run never overwrites it; see *Regeneration preservation* below).  It receives
-the loaded aggregate and mutates its **own private state directly** — no
-per-field setters are minted, so the aggregate stays encapsulated:
-
-```python
-# app/domain/extern/order_extern.py — scaffolded once, then yours
-# loom:scaffold-once — this file is yours. …
-from __future__ import annotations
-
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING
-
-from app.domain.events import OrderConfirmed
-from app.domain.value_objects import OrderStatus
-
-if TYPE_CHECKING:
-    from app.domain.order import Order
-
-
-def confirm(order: Order) -> None:
-    # Your business decision — a bespoke state transition, a computed score, …
-    order._status = OrderStatus.Confirmed
-    order.raise_event(OrderConfirmed(order=order.id, at=datetime.now(UTC)))
-```
-
-The generated stub each op starts as **raises loudly** until you fill it in, so a
-missing implementation is never a silent success:
-
-```python
-def confirm(order: Order) -> None:
-    raise NotImplementedError(
-        "extern operation `confirm` on Order is not implemented — "
-        "fill in app/domain/extern/order_extern.py"
-    )
-```
-
-The aggregate imports the hook module at load time; the hook imports the
-aggregate **`TYPE_CHECKING`-only** (annotations are deferred via
-`from __future__ import annotations`), so there is no import cycle and the whole
-project still passes `ruff` + `mypy --strict`.  The auto route drives the op
-exactly like a non-extern one (`found.confirm()` → save), and a workflow can
-call it too (`order.confirm()`).
-
-> **External-service case.** If the op needs to *talk to an external service*
-> rather than run pure domain logic, that is the case-2 home — an
-> `extern commandHandler` / `queryHandler` (see the end of this doc), not the
-> aggregate-op hook above.
 
 ## Elixir/Phoenix (plain Ecto)
 
@@ -404,19 +349,15 @@ workflow placeAndConfirm(orderId: Order id) {
 }
 ```
 
-The generators emit the same lifecycle the auto HTTP route does:
-load → preconditions → user hook → `AssertInvariants` → workflow's normal
-save-at-exit.  On **.NET** the extern op is an ordinary aggregate method, so the
-workflow op-call is a plain `order.Confirm()` (no injected handler, no dispatch
-dance) — identical to a non-extern op-call.  On the injected-handler backends
-(Hono / Python / Java) the user handler is imported / DI-injected and dispatched
-(load → `Check<Op>` preconditions → `<handler>(...)` → `AssertInvariants`).
+The generators emit the same lifecycle the auto HTTP route does on **every
+backend**: load → preconditions → user hook → invariant re-assertion →
+workflow's normal save-at-exit.  `extern` is now aggregate-owned on all five
+backends, so the workflow op-call is a plain `order.confirm()` — the operation
+method runs preconditions → hook → invariants internally, identical to a
+non-extern op-call, with no injected handler or dispatch dance.
 
-Parameterized externs work too — on .NET the workflow passes the domain-typed
-command args straight to the aggregate method (`order.Deduct(command.Amount)`);
-on the injected-handler backends the domain args are converted to wire shape at
-the request-construction boundary (direct property pickoff on Hono into a typed
-object literal).
+Parameterized externs work too — the workflow passes the domain-typed args
+straight to the aggregate method (`order.deduct(amount)`).
 
 ## `extern` application-layer handlers (commandHandler / queryHandler)
 

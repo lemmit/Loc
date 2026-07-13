@@ -707,7 +707,7 @@ describe("typescript generator", () => {
     expect(repo).toMatch(/shipping: shippingByParent\.get\(root\.id\) \?\? null/);
   });
 
-  it("emits a typed extern handler registry + verify gate for extern operations", async () => {
+  it("re-homes an extern operation to an aggregate-owned hook (base + scaffold-once subclass)", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
@@ -730,59 +730,48 @@ describe("typescript generator", () => {
     );
     const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
 
-    // 1. Per-aggregate extern handler module.
-    const extern = files.get("domain/order-extern.ts")!;
-    expect(extern).toMatch(/export type ConfirmOrderRequest = Record<string, never>/);
-    // S10 containment: the handler receives a NARROW `OrderEditor` (scoped
-    // write surface), NOT the live `Order` — so nothing outside the aggregate
-    // can bypass invariants.
-    expect(extern).toMatch(
-      /export type ConfirmOrderHandler = \(editor: OrderEditor, request: ConfirmOrderRequest\) => Promise<void>/,
+    // 1. The old injected handler registry is GONE (extern (b) Phase 2).
+    expect(files.has("domain/order-extern.ts")).toBe(false);
+
+    // 2. Generated ABSTRACT base — fields `protected` (no app-wide setter, S10
+    //    fixed by construction); the op runs preconditions → hook → invariants;
+    //    the hook is a `protected abstract` MEMBER of the aggregate.
+    const base = files.get("domain/order.base.ts")!;
+    expect(base).toMatch(/export abstract class OrderBase \{/);
+    expect(base).toMatch(/protected _status: OrderStatus;/);
+    expect(base).toMatch(/public confirm\(\): void \{/);
+    expect(base).toMatch(/this\.checkConfirm\(\);/);
+    expect(base).toMatch(/this\.confirmExtern\(\);/);
+    expect(base).toMatch(/this\._assertInvariants\(\);/);
+    expect(base).toMatch(/protected abstract confirmExtern\(\): void;/);
+    // The editor + public setters are gone.
+    expect(base).not.toMatch(/_externEditor/);
+    expect(base).not.toMatch(/OrderEditor/);
+    expect(base).not.toMatch(/^ {2}set status\(/m);
+    // Factories are `this`-polymorphic so they construct the concrete subclass.
+    expect(base).toMatch(/static _create<T extends OrderBase>/);
+
+    // 3. Scaffold-once concrete subclass — user-owned, preserved on regen; the
+    //    default hook throws loudly (mirrors the Elixir analog's raise).
+    const subclass = files.get("domain/order.ts")!;
+    expect(subclass).toMatch(/loom:scaffold-once/);
+    expect(subclass).toMatch(/import \{ OrderBase \} from ".\/order.base"/);
+    expect(subclass).toMatch(/export class Order extends OrderBase \{/);
+    expect(subclass).toMatch(/protected override confirmExtern\(\): void \{/);
+    expect(subclass).toMatch(
+      /throw new Error\("extern operation 'confirm' on Order is not implemented/,
     );
-    expect(extern).toMatch(/import type \{ OrderEditor \} from ".\/order"/);
-    expect(extern).toMatch(/externHandlers\.confirmOrder = fn/);
-    expect(extern).toMatch(/verifyOrderExternHandlersRegistered/);
-    expect(extern).toMatch(/Missing extern handler for 'confirm' on aggregate 'Order'/);
 
-    // 2. S10 containment: the aggregate does NOT expose per-field public
-    //    setters app-wide.  Instead it mints a narrow `OrderEditor` via an
-    //    in-class `_externEditor()` (get/set per field + raiseEvent), and the
-    //    entity fields stay private behind read-only getters.
-    const order = files.get("domain/order.ts")!;
-    expect(order).toMatch(/_externEditor\(\): OrderEditor/);
-    expect(order).toMatch(/export interface OrderEditor \{/);
-    expect(order).toMatch(/raiseEvent\(ev: Events\.DomainEvent\): void/);
-    expect(order).toMatch(/assertInvariants\(\): void/);
-    // S10 REGRESSION GUARD: no app-wide public setter on the class body — the
-    // only `set status` lives inside the `_externEditor()` object literal, not
-    // as a class-level accessor.  A class-level `  set status(...)` (two-space
-    // indent) would re-open the leak.
-    expect(order).not.toMatch(/^ {2}set status\(v: OrderStatus\)/m);
-    expect(order).not.toMatch(/^ {2}set customerId\(/m);
-    // 3. The user-named method is replaced by `checkConfirm` (preconditions only).
-    expect(order).toMatch(/checkConfirm\(\): void/);
-    expect(order).not.toMatch(/public confirm\(\)/);
-
-    // 4. Route dispatches through the registry, handing the handler the narrow
-    //    editor (not the raw aggregate), then asserts invariants on the entity.
+    // 4. Route calls the operation directly — no registry, no editor.
     const routes = files.get("http/order.routes.ts")!;
-    expect(routes).toMatch(/from "..\/domain\/order-extern"/);
-    expect(routes).toMatch(/aggregate\.checkConfirm\(\)/);
-    expect(routes).toMatch(/externHandlers\.confirmOrder/);
-    expect(routes).toMatch(/await handler\(aggregate\._externEditor\(\), body\)/);
-    expect(routes).toMatch(/aggregate\.assertInvariants\(\)/);
-    expect(routes).not.toMatch(/aggregate\.confirm\(\)/);
+    expect(routes).toMatch(/import \{ Order \} from "\.\.\/domain\/order"/);
+    expect(routes).not.toMatch(/order-extern/);
+    expect(routes).not.toMatch(/externHandlers/);
+    expect(routes).toMatch(/aggregate\.confirm\(\);/);
 
-    // 5. http/index.ts wires the verify gate at startup AND emits a
-    // structured `extern_handlers_registered` (debug) line per aggregate
-    // — so an operator confirming a deploy can read the catalog of
-    // wired handlers off the startup log instead of grepping source.
+    // 5. No boot-time registry verify — a missing impl is a COMPILE error now.
     const httpIndex = files.get("http/index.ts")!;
-    expect(httpIndex).toMatch(/verifyOrderExternHandlersRegistered/);
-    expect(httpIndex).toMatch(/import \{ baseLogger \} from "\.\.\/obs\/log"/);
-    expect(httpIndex).toMatch(
-      /baseLogger\.debug\(\{ event: "extern_handlers_registered", aggregate: "Order", count: 1, ops: \["confirm"\] \}\)/,
-    );
+    expect(httpIndex).not.toMatch(/ExternHandlersRegistered/);
   });
 
   describe("extern handler exception envelope", () => {
@@ -799,7 +788,7 @@ describe("typescript generator", () => {
       expect(errors).toMatch(/Extern handler '\$\{opName\}' on '\$\{aggName\}' threw/);
     });
 
-    it("per-aggregate routes wrap the user handler call and onError maps ExternHandlerError to 500", async () => {
+    it("per-aggregate routes call the extern op directly — no handler wrap, no editor", async () => {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);
       const helper = parseHelper(services.Ddd);
@@ -822,22 +811,15 @@ describe("typescript generator", () => {
       );
       const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
       const routes = files.get("http/order.routes.ts")!;
-      // Imports the new error type.
-      expect(routes).toMatch(
-        /import \{ DomainError, AggregateNotFoundError, DisallowedError, ForbiddenError, ExternHandlerError \} from "\.\.\/domain\/errors"/,
-      );
-      // Wraps the handler call in try/catch; hands the handler the narrow
-      // extern editor (S10 containment), not the raw aggregate.
-      expect(routes).toMatch(/try \{\s+await handler\(aggregate\._externEditor\(\), body\);/);
-      // Domain-layer errors re-throw unchanged.
-      expect(routes).toMatch(/if \(err instanceof DomainError\) throw err;/);
-      expect(routes).toMatch(/if \(err instanceof ForbiddenError\) throw err;/);
-      expect(routes).toMatch(/if \(err instanceof AggregateNotFoundError\) throw err;/);
-      // Anything else wraps as ExternHandlerError with op + agg names.
-      expect(routes).toMatch(/throw new ExternHandlerError\("confirm", "Order", err\);/);
-      // onError checks ExternHandlerError before the generic 500.
-      expect(routes).toMatch(/if \(err instanceof ExternHandlerError\)/);
-      // Generic 500 fallback returns an RFC 7807 problem body.
+      // The op is aggregate-owned now: the route just calls it (preconditions →
+      // hook → invariants run inside the method).  No editor, no registry, no
+      // per-op ExternHandlerError wrap.
+      expect(routes).toMatch(/aggregate\.confirm\(\);/);
+      expect(routes).not.toMatch(/_externEditor/);
+      expect(routes).not.toMatch(/externHandlers/);
+      expect(routes).not.toMatch(/throw new ExternHandlerError\(/);
+      // The shared onError still maps a stray ExternHandlerError (a Phase-1
+      // extern commandHandler failure) to a 500 problem body.
       expect(routes).toMatch(/return problem\(500, "Internal Server Error", "internal"\)/);
     });
 
@@ -854,7 +836,7 @@ describe("typescript generator", () => {
       expect(orderRoutes).not.toMatch(/defaultHook/);
     });
 
-    it("workflow extern op-call wraps the user handler the same way", async () => {
+    it("workflow extern op-call calls the aggregate-owned op directly", async () => {
       const { parseHelper } = await import("langium/test");
       const services = createDddServices(NodeFileSystem);
       const helper = parseHelper(services.Ddd);
@@ -881,42 +863,13 @@ describe("typescript generator", () => {
       );
       const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
       const wf = files.get("http/workflows.ts")!;
-      // Same import line as the per-aggregate router.
-      expect(wf).toMatch(
-        /import \{ DomainError, AggregateNotFoundError, ForbiddenError, ExternHandlerError \} from "\.\.\/domain\/errors"/,
-      );
-      // Try/catch around the workflow's handler invocation.
-      expect(wf).toMatch(/try \{\s+await handler\(order/);
-      expect(wf).toMatch(/throw new ExternHandlerError\("confirm", "Order", err\);/);
-      // onError chain knows about ExternHandlerError.
-      expect(wf).toMatch(/if \(err instanceof ExternHandlerError\)/);
-    });
-
-    it("per-aggregate extern registry re-exports ExternHandlerError", async () => {
-      const { parseHelper } = await import("langium/test");
-      const services = createDddServices(NodeFileSystem);
-      const helper = parseHelper(services.Ddd);
-      const doc = await helper(
-        `
-        context Sales {
-          enum OrderStatus { Draft, Confirmed }
-          aggregate Order {
-            customerId: string
-            status: OrderStatus
-            function isMutable(): bool = status == Draft
-            operation confirm() extern { precondition isMutable() }
-          }
-          repository Orders for Order { }
-        }
-      `,
-        { validation: true },
-      );
-      const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
-      const extern = files.get("domain/order-extern.ts")!;
-      // User handler code can import ExternHandlerError straight
-      // from the per-aggregate file rather than reaching for
-      // domain/errors.js itself.
-      expect(extern).toMatch(/export \{ ExternHandlerError \} from "\.\/errors"/);
+      // The op is aggregate-owned now: the workflow just calls it (preconditions
+      // → hook → invariants run inside the method).  No registry, no editor, no
+      // per-op ExternHandlerError wrap.
+      expect(wf).toMatch(/order\.confirm\(\);/);
+      expect(wf).not.toMatch(/order-extern/);
+      expect(wf).not.toMatch(/externHandlers/);
+      expect(wf).not.toMatch(/await handler\(order/);
     });
   });
 
@@ -1182,7 +1135,7 @@ describe("typescript generator", () => {
     expect(customerRepo).toMatch(/\.where\(inArray\(schema\.customers\.id, ids\)\)/);
   });
 
-  it("workflow op-call to a parameterless extern emits the dispatch dance", async () => {
+  it("workflow op-call to a parameterless extern calls the aggregate-owned op", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
@@ -1210,20 +1163,15 @@ describe("typescript generator", () => {
     const files = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS);
     const wf = files.get("http/workflows.ts")!;
 
-    // Per-aggregate extern registry is imported with an alias.
-    expect(wf).toMatch(
-      /import \{ externHandlers as orderExternHandlers \} from "..\/domain\/order-extern"/,
-    );
-    // Body: order.checkConfirm → handler lookup + invocation → assertInvariants.
-    expect(wf).toMatch(/order\.checkConfirm\(\);/);
-    expect(wf).toMatch(/const handler = orderExternHandlers\.confirmOrder;/);
-    expect(wf).toMatch(/await handler\(order, \{\} as Record<string, never>\);/);
-    expect(wf).toMatch(/order\.assertInvariants\(\);/);
+    // No registry import, no handler dance — the op is aggregate-owned.
+    expect(wf).not.toMatch(/order-extern/);
+    expect(wf).not.toMatch(/externHandlers/);
+    expect(wf).toMatch(/order\.confirm\(\);/);
     // Save still happens at workflow exit.
     expect(wf).toMatch(/await orders\.save\(order\);/);
   });
 
-  it("workflow op-call to parameterized extern emits the dispatch dance with object-literal request", async () => {
+  it("workflow op-call to a parameterized extern passes the args straight through", async () => {
     const { parseHelper } = await import("langium/test");
     const services = createDddServices(NodeFileSystem);
     const helper = parseHelper(services.Ddd);
@@ -1253,8 +1201,8 @@ describe("typescript generator", () => {
     const wf = generateTypeScript(doc.parseResult.value as Model, HONO_V4_PINS).get(
       "http/workflows.ts",
     )!;
-    expect(wf).toMatch(/order\.checkDeduct\(amount\);/);
-    expect(wf).toMatch(/await handler\(order, \{ amount: amount \}\);/);
+    expect(wf).toMatch(/order\.deduct\(amount\);/);
+    expect(wf).not.toMatch(/await handler\(order/);
   });
 
   it("multi-hop X id.Y id.field follow loads aggregates in dependency order", async () => {

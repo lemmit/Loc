@@ -37,9 +37,9 @@ describe("byLayer LayoutAdapter — hono (real)", () => {
     );
   });
 
-  it("routes the per-aggregate extern + test files into domain/", () => {
-    expect(p({ name: "x", category: "domain-extern", aggregateName: "Order" })).toBe(
-      "domain/order-extern.ts",
+  it("routes the per-aggregate extern base + test files into domain/", () => {
+    expect(p({ name: "x", category: "domain-aggregate-base", aggregateName: "Order" })).toBe(
+      "domain/order.base.ts",
     );
     expect(p({ name: "x", category: "domain-test", aggregateName: "Order" })).toBe(
       "domain/order.test.ts",

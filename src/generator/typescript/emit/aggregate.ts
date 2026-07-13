@@ -272,12 +272,30 @@ function renderEntity(
     `${c.partName}${c.collection ? "[]" : " | null"}`;
   const containsGetterType = (c: ContainmentIR): string =>
     c.collection ? `readonly ${c.partName}[]` : `${c.partName} | null`;
-  // When at least one operation is `extern`, the user's registered
-  // handler needs to mutate properties and raise events.  For TS we
-  // expose public setters per property + `raiseEvent` + a public
-  // `assertInvariants()` (the auto route handler runs it after the
-  // user's handler returns).
+  // Extern operations (extern-domain-extension-point.md §3a, decision (b)
+  // Phase 2) re-home to a DOMAIN extension point that is a MEMBER of the
+  // aggregate — a `protected abstract <op>Extern(...)` hook the operation
+  // method calls, implemented by a co-located scaffold-once subclass the user
+  // owns (`domain/<agg>.ts`, extending this generated base `domain/<agg>.base.ts`).
+  // Because the hook is a subclass member it reaches the aggregate's own state
+  // directly — no injected handler registry, no app-wide setter leak (S10).
+  // For extern roots the class is emitted as `<Agg>Base` (abstract, regenerated);
+  // the concrete `<Agg>` subclass is the user-owned file everyone imports.
   const hasExtern = e.operations.some((o) => o.extern);
+  const isExternRoot = hasExtern && e.isRoot;
+  // The emitted class name — the abstract base for extern roots, the concrete
+  // class otherwise.  Consumers still import the concrete `<Agg>` (the
+  // scaffold-once subclass, exported from `domain/<agg>.ts`), so nothing
+  // downstream changes.
+  const className = isExternRoot ? `${e.name}Base` : e.name;
+  // Extern roots relax backing fields from `private` to `protected` (the
+  // subclass hook mutates them directly) and open the constructor to `public`
+  // (the inherited generic factories construct the concrete subclass via
+  // `new this(...)`).  `protected` is NOT a public setter — no code outside the
+  // aggregate's own class hierarchy can write, so the S10 app-wide leak is gone
+  // by construction.  Non-extern aggregates keep `private` (byte-identical).
+  const fieldVis = isExternRoot ? "protected" : "private";
+  const ctorVis = isExternRoot ? "public" : "private";
 
   // Constructor parameter list — `id`, then optional `parentId`, then
   // every field, then every containment.  Used in three places: the
@@ -327,31 +345,35 @@ function renderEntity(
           .filter((s): s is string => s != null)
           .join("; ")} }`
       : stateLiteral;
+  // Callee is `new this` for an extern-root base class (the static factory is
+  // polymorphic so `<Agg>Base._create` constructs the concrete subclass and
+  // never forward-references it), else the plain `new <Agg>` form.
+  const createCallee = isExternRoot ? "this" : e.name;
   const createBody = hasContains
-    ? `new ${e.name}({ ...state, ${e.contains
+    ? `new ${createCallee}({ ...state, ${e.contains
         .map((c) => `${c.name}: state.${c.name} ?? ${c.collection ? "[]" : "null"}`)
         .join(", ")} })`
-    : `new ${e.name}(state)`;
+    : `new ${createCallee}(state)`;
 
   const fieldDecls: string[] = [];
-  fieldDecls.push(`  private _id: Ids.${e.name}Id;`);
+  fieldDecls.push(`  ${fieldVis} _id: Ids.${e.name}Id;`);
   if (!e.isRoot) {
-    fieldDecls.push(`  private _parentId: Ids.${e.parentName ?? e.rootName}Id;`);
+    fieldDecls.push(`  ${fieldVis} _parentId: Ids.${e.parentName ?? e.rootName}Id;`);
   }
   if (e.isRoot) {
-    fieldDecls.push("  private _events: Events.DomainEvent[] = [];");
+    fieldDecls.push(`  ${fieldVis} _events: Events.DomainEvent[] = [];`);
   }
   for (const f of e.fields) {
-    fieldDecls.push(`  private _${f.name}: ${renderTsType(f.type)};`);
+    fieldDecls.push(`  ${fieldVis} _${f.name}: ${renderTsType(f.type)};`);
   }
   for (const f of provFields) {
-    fieldDecls.push(`  private _${f.name}_provenance: ProvLineage | null;`);
+    fieldDecls.push(`  ${fieldVis} _${f.name}_provenance: ProvLineage | null;`);
   }
   for (const c of e.contains) {
-    fieldDecls.push(`  private _${c.name}: ${containsType(c)};`);
+    fieldDecls.push(`  ${fieldVis} _${c.name}: ${containsType(c)};`);
   }
   if (hasOwnProvWrite) {
-    fieldDecls.push("  private _provTraces: ProvLineage[] = [];");
+    fieldDecls.push(`  ${fieldVis} _provTraces: ProvLineage[] = [];`);
   }
 
   const ctorAssignments: string[] = [];
@@ -433,56 +455,20 @@ function renderEntity(
     return [`${head} {`, renderTsStatements(fn.body.stmts), `  }`];
   });
 
-  // S10 containment: an `extern` op's registered handler needs a write
-  // surface, but the old approach — a public `set <field>` per property —
-  // widened the entity app-wide, so ANY caller could `x.status = …` and
-  // skip invariants.  Instead the aggregate mints a NARROW, extern-scoped
-  // `<Agg>Editor` via an in-class `_externEditor()` (minted in-class so it
-  // can reach the `private` fields); the auto route hands that editor to
-  // the handler.  Entity fields stay `private` behind read-only getters, so
-  // `x.field = …` no longer type-checks outside the aggregate's own methods.
-  // Only `assertInvariants()` stays public — it's an enforcer, not a mutator
-  // (it cannot bypass anything), and the route runs it after the handler.
-  // Containment collections stay private (mutation goes through the existing
-  // `add`/`remove` operation paths).
+  // Extern extension points (extern-domain-extension-point.md §3a, decision (b)
+  // Phase 2).  The hook is a MEMBER of the aggregate (`protected abstract
+  // <op>Extern(...)`, emitted per op in the ops loop below); the operation
+  // method calls it between preconditions and invariants.  The co-located
+  // scaffold-once subclass implements each hook, reaching the (now `protected`)
+  // fields directly — so there is NO injected handler registry and NO editor.
+  // `_raiseEvent` lets a hook emit a domain event through the same buffer the
+  // framework drains (`pullEvents`).
   const externHookLines: string[] = [];
-  const editorInterfaceLines: string[] = [];
-  if (hasExtern && e.isRoot) {
+  if (isExternRoot) {
     externHookLines.push(
-      "  /** Narrow, extern-scoped write handle (S10 containment): the only",
-      "   *  surface that mutates this aggregate from outside its own methods.",
-      "   *  Minted in-class so it can reach the `private` fields; handed to the",
-      "   *  registered extern handler by the auto route. */",
-      `  _externEditor(): ${e.name}Editor {`,
-      "    const self = this;",
-      "    return {",
-      `      get id(): Ids.${e.name}Id { return self._id; },`,
-    );
-    for (const f of e.fields) {
-      externHookLines.push(
-        `      get ${f.name}(): ${renderTsType(f.type)} { return self._${f.name}; },`,
-        `      set ${f.name}(v: ${renderTsType(f.type)}) { self._${f.name} = v; },`,
-      );
-    }
-    externHookLines.push(
-      "      raiseEvent(ev: Events.DomainEvent): void { self._events.push(ev); },",
-      "    };",
-      "  }",
-      "",
-      emitTrace
-        ? `  assertInvariants(): void { this._assertInvariants("extern"); }`
-        : "  assertInvariants(): void { this._assertInvariants(); }",
-    );
-    editorInterfaceLines.push(
-      "",
-      `/** Extern-scoped mutation facade for ${e.name} (S10 containment) — the`,
-      " *  narrow write surface handed to a registered extern handler.  Entity",
-      " *  fields stay `private`; this is the only external write path. */",
-      `export interface ${e.name}Editor {`,
-      `  readonly id: Ids.${e.name}Id;`,
-      ...e.fields.map((f) => `  ${f.name}: ${renderTsType(f.type)};`),
-      "  raiseEvent(ev: Events.DomainEvent): void;",
-      "}",
+      "  /** Raise a domain event from within an `extern` operation hook.  Buffered",
+      "   *  like any other emitted event; drained by `pullEvents()`. */",
+      "  protected _raiseEvent(ev: Events.DomainEvent): void { this._events.push(ev); }",
     );
   }
 
@@ -499,22 +485,50 @@ function renderEntity(
     const userParam = usesUser ? "currentUser: User" : "";
     const params = [baseParams, userParam].filter(Boolean).join(", ");
     if (op.extern) {
-      // Extern: emit `check<Pascal>(...)` running preconditions only.
-      // The auto Hono route calls this, then dispatches to the
-      // user-registered handler, then `assertInvariants()`.  No
-      // user-named method exists on the aggregate; the user owns the
-      // business decision.
+      // Extern operation (case-1 domain logic): the route/workflow calls
+      // `aggregate.<op>(...)`, which runs preconditions → the aggregate-owned
+      // hook → invariants (the framework flow, unchanged).  The hook is a
+      // `protected abstract <op>Extern(...)` the scaffold-once subclass fills.
       const checkName = `check${op.name[0]!.toUpperCase()}${op.name.slice(1)}`;
+      const hookName = `${lowerFirst(op.name)}Extern`;
+      const callArgs = [op.params.map((p) => p.name).join(", "), usesUser ? "currentUser" : ""]
+        .filter(Boolean)
+        .join(", ");
+      const retType = op.returnType ? renderOperationReturnType(op.returnType, ctx) : "void";
+      // Preconditions kept as their own method (parity with the prior shape).
       ops.push(`  ${checkName}(${params}): void {`);
-      const body = renderTsStatements(op.statements, emitProvenance, {
+      const checkBody = renderTsStatements(op.statements, emitProvenance, {
         emitTrace,
         aggregate: e.name,
         op: op.name,
         eventSourced: e.eventSourced,
       });
-      if (body.length > 0) ops.push(body);
+      if (checkBody.length > 0) ops.push(checkBody);
       ops.push("  }");
       ops.push("");
+      // The operation method — preconditions → hook → invariants.
+      ops.push(`  public ${lowerFirst(op.name)}(${params}): ${retType} {`);
+      ops.push(`    this.${checkName}(${callArgs});`);
+      if (op.returnType) {
+        ops.push(`    return this.${hookName}(${callArgs});`);
+      } else {
+        ops.push(`    this.${hookName}(${callArgs});`);
+        ops.push(
+          emitTrace ? `    this._assertInvariants("${op.name}");` : "    this._assertInvariants();",
+        );
+      }
+      ops.push("  }");
+      ops.push("");
+      // The extension point — a member of the aggregate, implemented by the
+      // co-located scaffold-once `${e.name}` subclass.
+      ops.push(
+        `  /** Extension point for \`extern\` operation \`${op.name}\` — hand-written`,
+        `   *  domain logic.  Implement in the co-located \`${e.name}\` subclass`,
+        `   *  (\`domain/${lowerFirst(e.name)}.ts\`): mutate this aggregate's fields and`,
+        `   *  \`_raiseEvent(...)\` as needed; the framework re-asserts invariants after. */`,
+        `  protected abstract ${hookName}(${params}): ${retType};`,
+        "",
+      );
       continue;
     }
     // An exception-less operation (`operation foo(): X or NotFound`) returns its
@@ -614,6 +628,22 @@ function renderEntity(
     if (f.optional) return "null";
     return serverInitSeed(f.type);
   };
+  // Factory shape helpers.  An extern root is an ABSTRACT base whose concrete
+  // subclass (`${e.name}`, scaffold-once) is what callers reference, so its
+  // static factories are `this`-polymorphic (`new this(...)`) — typed so the
+  // `this` receiver must be a CONCRETE constructor (calling a factory on the
+  // abstract base is a tsc error, calling it on `${e.name}` yields `${e.name}`).
+  // Non-extern aggregates keep the plain `new ${e.name}(...)` form
+  // (byte-identical).
+  const newSelf = (args: string): string =>
+    isExternRoot ? `new this(${args})` : `new ${e.name}(${args})`;
+  // Bare constructor callee (`new this` / `new ${e.name}`) for the multi-line
+  // object-literal create factory, whose `({` / `});` framing is emitted around it.
+  const newSelfCallee = isExternRoot ? "new this" : `new ${e.name}`;
+  const factoryHead = (name: string, param: string, ret: string): string =>
+    isExternRoot
+      ? `  static ${name}<T extends ${className}>(this: new (state: ${stateLiteral}, trustStore?: boolean) => T, ${param}): T {`
+      : `  static ${name}(${param}): ${ret} {`;
   // Event-sourced create factory (appliers A2.2): an event-sourced
   // aggregate is constructed from its creation event, not by writing state.
   // The single `create` lifecycle action's emit-only body runs against a
@@ -625,10 +655,14 @@ function renderEntity(
   const esCreateFactory =
     e.isRoot && e.eventSourced && esCreate
       ? [
-          `  static create(input: { ${esCreate.params
-            .map((p) => `${p.name}: ${renderTsType(p.type)}`)
-            .join("; ")} }): ${e.name} {`,
-          `    const inst = new ${e.name}({ id: Ids.new${e.name}Id() } as unknown as ${stateLiteral});`,
+          factoryHead(
+            "create",
+            `input: { ${esCreate.params
+              .map((p) => `${p.name}: ${renderTsType(p.type)}`)
+              .join("; ")} }`,
+            e.name,
+          ),
+          `    const inst = ${newSelf(`{ id: Ids.new${e.name}Id() } as unknown as ${stateLiteral}`)};`,
           `    inst._init(${esCreate.params.map((p) => `input.${p.name}`).join(", ")});`,
           `    return inst;`,
           `  }`,
@@ -653,10 +687,14 @@ function renderEntity(
   const createFactory =
     e.isRoot && e.hasCreate && !e.eventSourced
       ? [
-          `  static create(input: { ${createInputs
-            .map((f) => `${f.name}${f.optional ? "?" : ""}: ${renderTsType(f.type)}`)
-            .join("; ")} }): ${e.name} {`,
-          `    return new ${e.name}({`,
+          factoryHead(
+            "create",
+            `input: { ${createInputs
+              .map((f) => `${f.name}${f.optional ? "?" : ""}: ${renderTsType(f.type)}`)
+              .join("; ")} }`,
+            e.name,
+          ),
+          `    return ${newSelfCallee}({`,
           `      id: Ids.new${e.name}Id(),`,
           ...e.fields.map((f) => `      ${f.name}: ${fieldInit(f)},`),
           ...provFields.map((f) => `      ${f.name}_provenance: null,`),
@@ -731,8 +769,12 @@ function renderEntity(
           "    }",
           "  }",
           "",
-          `  static _fromEvents(id: Ids.${e.name}Id, events: Events.DomainEvent[]): ${e.name} {`,
-          `    const inst = ${e.name}._rehydrate({ id } as unknown as ${stateLiteral});`,
+          isExternRoot
+            ? `  static _fromEvents<T extends ${className}>(this: new (state: ${stateLiteral}, trustStore?: boolean) => T, id: Ids.${e.name}Id, events: Events.DomainEvent[]): T {`
+            : `  static _fromEvents(id: Ids.${e.name}Id, events: Events.DomainEvent[]): ${e.name} {`,
+          isExternRoot
+            ? `    const inst = new this({ id } as unknown as ${stateLiteral}, true);`
+            : `    const inst = ${e.name}._rehydrate({ id } as unknown as ${stateLiteral});`,
           "    for (const ev of events) inst._apply(ev);",
           "    return inst;",
           "  }",
@@ -741,9 +783,9 @@ function renderEntity(
       : [];
 
   return lines(
-    `export class ${e.name} {`,
+    `export ${isExternRoot ? "abstract " : ""}class ${className} {`,
     ...fieldDecls,
-    `  private constructor(state: ${stateLiteral}, trustStore = false) {`,
+    `  ${ctorVis} constructor(state: ${stateLiteral}, trustStore = false) {`,
     ...ctorAssignments,
     "  }",
     "",
@@ -764,7 +806,7 @@ function renderEntity(
     ...invariants,
     "  }",
     "",
-    `  static _create(state: ${createStateLiteral}): ${e.name} {`,
+    factoryHead("_create", `state: ${createStateLiteral}`, e.name),
     `    return ${createBody};`,
     "  }",
     "",
@@ -772,12 +814,11 @@ function renderEntity(
     "   *  invariant run: invariants guard transitions (create + operations),",
     "   *  not loads.  Repository hydration only; domain code constructs via",
     "   *  `create`/`_create`, which assert. */",
-    `  static _rehydrate(state: ${stateLiteral}): ${e.name} {`,
-    `    return new ${e.name}(state, true);`,
+    factoryHead("_rehydrate", `state: ${stateLiteral}`, e.name),
+    `    return ${newSelf("state, true")};`,
     "  }",
     ...createFactory,
     ...esCreateFactory,
     "}",
-    ...editorInterfaceLines,
   );
 }

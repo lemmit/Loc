@@ -34,7 +34,7 @@ import { byLayerLayoutAdapter, type HonoArtifact } from "./by-layer-layout.js";
  *  Everything else delegates to byLayer (shared / cross-cutting). */
 const FEATURE_CATEGORIES: ReadonlySet<HonoArtifact["category"]> = new Set([
   "domain-aggregate",
-  "domain-extern",
+  "domain-aggregate-base",
   "domain-test",
   "drizzle-repository",
   "http-routes",
