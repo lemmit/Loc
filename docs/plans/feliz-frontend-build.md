@@ -202,11 +202,23 @@ in hand — not before F# output exists.
   now opens `Feliz.Router` (+ refs it) for `Cmd.navigate` (create/op/workflow
   all navigate on success — previously only routed uis opened the router). All
   Fable + vite verified; the CI scaffold leg now includes a `workflows:` form.
-- **Wire layer now covers the full CRUD write path + workflows.** list + byId
-  reads, create, delete, operation, and workflow runs. Remaining Feliz work:
-  **auth** (login/session) and deeper pack coverage. Enum wire fields decode as
-  their string name (a proper DU decoder is a follow-up); nested containment/VO
-  records + decoders ARE emitted (transitive off `wireShape`).
+- ✅ **Auth session gate (D-AUTH-OIDC).** When the target backend is `auth:
+  required` AND this ui opts in with `auth: ui` AND the system declares a `user
+  {}` claim block (mirrors the React `authUi` gate), the whole app is wrapped in
+  an MVU session gate: a `SessionState` (`Checking`/`Authed`/`Anon`) Model field,
+  an `Auth` module that probes `/api/auth/me` (status-only) at init and redirects
+  to the backend's `/auth/login`/`/auth/logout` via `window.location.href`
+  (`Browser.Dom`), and a root `view` that shows a spinner → a sign-in prompt →
+  the real `appView` (the existing root, renamed). Loom owns no auth runtime —
+  it's the OIDC-handshake redirect the JSX frontends emit. All Fable + vite +
+  headless-smoke verified; the CI scaffold leg is now auth-gated. Non-auth uis
+  stay byte-identical.
+- **Wire layer covers the full CRUD write path + workflows + auth.** list + byId
+  reads, create, delete, operation, workflow runs, and the auth gate. Remaining
+  Feliz work is polish: deeper pack coverage, the modal open-state, typed form
+  state. Enum wire fields decode as their string name (a proper DU decoder is a
+  follow-up); nested containment/VO records + decoders ARE emitted (transitive
+  off `wireShape`).
 
 Known-good deps (proposal §10): Fable 4.29 / Feliz 2.8 / Fable.Elmish.React 4.0
 / Fable.SimpleHttp 3.6 / Thoth.Json 10.2 / net8.0. Avoid Thoth.Fetch (promise-CE

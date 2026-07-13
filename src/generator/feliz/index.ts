@@ -54,6 +54,39 @@ const REMOTE_TYPE = `type Remote<'T> =
   | LoadError of string
   | Loaded of 'T`;
 
+/** The auth session gate (D-AUTH-OIDC).  `SessionState` gates the whole app;
+ *  the `Auth` module probes `/api/auth/me` (status-only) and redirects to the
+ *  backend's `/auth/login`/`/auth/logout` handshake (Loom owns no auth runtime).
+ *  Emitted only when the target backend is `auth: required` + this ui `auth: ui`. */
+const SESSION_TYPE = `type SessionState =
+  | Checking
+  | Authed
+  | Anon`;
+const AUTH_MODULE = `module Auth =
+  let checkSession () : Async<bool> =
+    async {
+      let! (status, _) = Http.get "/api/auth/me"
+      return status = 200
+    }
+  let signIn () : unit = window.location.href <- "/api/auth/login"
+  let signOut () : unit = window.location.href <- "/api/auth/logout"`;
+
+/** The gate `view` — matches `Session`: a probe-in-flight spinner, an
+ *  unauthenticated sign-in prompt, or the real `appView` once authed. */
+function renderAuthGate(): string {
+  return [
+    "let view (model: Model) (dispatch: Msg -> unit) =",
+    "  match model.Session with",
+    '  | Checking -> Html.p [ Html.text "Loading…" ]',
+    "  | Anon ->",
+    "      Html.div [ prop.children [",
+    '        Html.p [ Html.text "Please sign in." ]',
+    '        Html.button [ prop.onClick (fun _ -> Auth.signIn ()); prop.text "Sign in" ]',
+    "      ] ]",
+    "  | Authed -> appView model dispatch",
+  ].join("\n");
+}
+
 export interface GenerateFelizOptions {
   apiBaseUrl?: string;
 }
@@ -165,16 +198,17 @@ function renderRouting(pages: readonly PageIR[]): string {
   return `${union}\n\n${parse}`;
 }
 
-/** The root `view` — a `React.router` that dispatches `UrlChanged` and renders
- *  the active page's view function (threading the route `id` to detail pages). */
-function renderRootView(pages: readonly PageIR[]): string {
+/** The root routing `view` — a `React.router` that dispatches `UrlChanged` and
+ *  renders the active page's view fn (threading the route `id` to detail pages).
+ *  Named `view` normally; `appView` under an auth gate (the gate owns `view`). */
+function renderRootView(pages: readonly PageIR[], fnName = "view"): string {
   const arms = pages.map((p) =>
     hasRouteParam(p)
       ? `      | ${pageCase(p)} id -> ${pageViewFn(p)} model dispatch id`
       : `      | ${pageCase(p)} -> ${pageViewFn(p)} model dispatch`,
   );
   return [
-    "let view (model: Model) (dispatch: Msg -> unit) =",
+    `let ${fnName} (model: Model) (dispatch: Msg -> unit) =`,
     "  React.router [",
     "    router.onUrlChanged (UrlChanged >> dispatch)",
     "    router.children [",
@@ -310,7 +344,7 @@ function combinedActions(ui: UiIR): PageIR["actions"][number][] {
  *  (`Feliz.Router`); a single-page ui stays byte-for-byte as before.  When any
  *  page issues api reads the file also carries the wire layer (Thoth decoders +
  *  a `Cmd`-based `Api` module + the `Remote`/`View` helpers). */
-function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
+function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[], authUi = false): string {
   const pages = ui.pages;
   if (pages.length === 0) {
     return `module App\n\nopen Feliz\n\n// ui '${ui.name}' declares no pages\n`;
@@ -326,9 +360,9 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
   const formRecords = [...forms, ...operationForms, ...workflowForms]; // shared type/encoder wiring
   const hasReads = reads.length > 0;
   const hasForms = formRecords.length > 0;
-  // Http/Api are needed for reads, mutations AND forms (POST); the Thoth
-  // decoder/Remote/View layer only for reads; form types + encoders only for forms.
-  const hasHttp = hasReads || mutations.length > 0 || hasForms;
+  // Http/Api are needed for reads, mutations AND forms (POST); the auth probe
+  // also uses `Http.get`.  The Thoth decoder/Remote/View layer only for reads.
+  const hasHttp = hasReads || mutations.length > 0 || hasForms || authUi;
   // A ui is routed when it has >1 page OR any page carries a route param (a lone
   // detail page still needs a router to bind its `:id`).
   const routed = pages.length > 1 || pages.some(hasRouteParam);
@@ -338,9 +372,18 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
   // a single-page ui's combined lists are exactly its one page's.
   const state = combinedState(ui);
   const actions = combinedActions(ui);
-  const model = renderModel(state, reads, routed, formRecords);
-  const init = renderInit(state, reads, routed, formRecords);
-  const msg = renderMsg(actions, reads, routed, mutations, forms, operationForms, workflowForms);
+  const model = renderModel(state, reads, routed, formRecords, authUi);
+  const init = renderInit(state, reads, routed, formRecords, authUi);
+  const msg = renderMsg(
+    actions,
+    reads,
+    routed,
+    mutations,
+    forms,
+    operationForms,
+    workflowForms,
+    authUi,
+  );
   const update = renderUpdate(
     actions,
     state,
@@ -350,6 +393,7 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
     forms,
     operationForms,
     workflowForms,
+    authUi,
   );
   const wire = hasReads ? renderWireTypes(reads, contexts) : { domain: "", decoders: "" };
   const api = hasHttp
@@ -358,18 +402,20 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
   const formTypes = hasForms ? renderFormTypes(formRecords) : "";
   const encoders = hasForms ? renderEncoders(formRecords) : "";
 
-  // Views: one root `view` (single-page) OR per-page `<page>View` functions +
-  // a `React.router` root that switches on `CurrentPage`.  Detail pages take
-  // the route `id`.
-  const views = routed
+  // Views: one root view (single-page) OR per-page `<page>View` functions + a
+  // `React.router` root.  Under an auth gate the root is named `appView` and the
+  // emitted `view` is the gate (Checking → Anon sign-in → Authed appView).
+  const rootFn = authUi ? "appView" : "view";
+  const rootViews = routed
     ? [
         ...pages.map((p) =>
           renderPageView(p, ui, aggregatesByName, workflowsByName, pageViewFn(p), hasRouteParam(p)),
         ),
         "",
-        renderRootView(pages),
+        renderRootView(pages, rootFn),
       ]
-    : [renderPageView(pages[0]!, ui, aggregatesByName, workflowsByName, "view")];
+    : [renderPageView(pages[0]!, ui, aggregatesByName, workflowsByName, rootFn)];
+  const views = authUi ? [...rootViews, "", renderAuthGate()] : rootViews;
 
   return lines(
     "module App",
@@ -383,6 +429,13 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
     // Thoth is needed for decoders (reads) AND encoders (create forms).
     (hasReads || hasForms) && "open Thoth.Json",
     hasHttp && "open Fable.SimpleHttp",
+    // Browser.Dom provides `window` for the auth sign-in/out redirects.
+    authUi && "open Browser.Dom",
+    // Auth session gate — SessionState (gates the Model) + the Auth probe module.
+    authUi && "",
+    authUi && SESSION_TYPE,
+    authUi && "",
+    authUi && AUTH_MODULE,
     // Read wire layer (reads only) — records → Remote → decoders.
     hasReads && "",
     hasReads && wire.domain,
@@ -430,7 +483,7 @@ function renderAppFs(ui: UiIR, contexts: EnrichedBoundedContextIR[]): string {
 // Fable.SimpleHttp for the fetch, Thoth.Json for the decoders.  A read-free
 // (Counter-class) app omits them so its project stays minimal.
 // A multi-page ui additionally pulls in Feliz.Router for URL routing.
-function fsproj(hasHttp: boolean, needsRouter: boolean): string {
+function fsproj(hasHttp: boolean, needsRouter: boolean, authUi = false): string {
   const wireRefs = hasHttp
     ? `
     <PackageReference Include="Fable.SimpleHttp" Version="3.6.0" />
@@ -439,6 +492,11 @@ function fsproj(hasHttp: boolean, needsRouter: boolean): string {
   const routerRef = needsRouter
     ? `
     <PackageReference Include="Feliz.Router" Version="4.0.0" />`
+    : "";
+  // The auth gate's sign-in/out redirects use `window` (Fable.Browser.Dom).
+  const authRef = authUi
+    ? `
+    <PackageReference Include="Fable.Browser.Dom" Version="2.14.0" />`
     : "";
   return `<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
@@ -451,7 +509,7 @@ function fsproj(hasHttp: boolean, needsRouter: boolean): string {
   <ItemGroup>
     <PackageReference Include="Fable.Core" Version="4.3.0" />
     <PackageReference Include="Feliz" Version="2.8.0" />
-    <PackageReference Include="Fable.Elmish.React" Version="4.0.0" />${routerRef}${wireRefs}
+    <PackageReference Include="Fable.Elmish.React" Version="4.0.0" />${routerRef}${wireRefs}${authRef}
   </ItemGroup>
 </Project>
 `;
@@ -557,15 +615,23 @@ export function generateFelizForContexts(
   // when there's any Http (reads or mutations/forms), Feliz.Router when routed
   // (>1 page OR a lone `:id` detail page) OR any form exists (forms navigate via
   // `Cmd.navigate` on success).
+  // Auth gate (D-AUTH-OIDC, `auth: ui`): this feliz deployable opts in AND its
+  // target backend enforces auth AND the system declares a `user { }` claim
+  // shape — mirrors the React frontend's `authUi` gate.
+  const target = sys.deployables.find((d) => d.name === deployable.targetName);
+  const authUi = !!(deployable.auth?.ui && target?.auth?.required && sys.user);
   const anyForm =
     formsForUi(ui, contexts).length > 0 ||
     operationFormsForUi(ui, contexts).length > 0 ||
     workflowFormsForUi(ui, contexts).length > 0;
   const hasHttp =
-    readsForUi(ui, contexts).length > 0 || mutationsForUi(ui, contexts).length > 0 || anyForm;
+    readsForUi(ui, contexts).length > 0 ||
+    mutationsForUi(ui, contexts).length > 0 ||
+    anyForm ||
+    authUi;
   const needsRouter = ui.pages.length > 1 || ui.pages.some(hasRouteParam) || anyForm;
-  out.set("src/App.fs", renderAppFs(ui, contexts));
-  out.set("App.fsproj", fsproj(hasHttp, needsRouter));
+  out.set("src/App.fs", renderAppFs(ui, contexts, authUi));
+  out.set("App.fsproj", fsproj(hasHttp, needsRouter, authUi));
   out.set(".config/dotnet-tools.json", DOTNET_TOOLS);
   out.set("package.json", PACKAGE_JSON(`${deployable.name}-feliz`));
   out.set("vite.config.js", VITE_CONFIG);

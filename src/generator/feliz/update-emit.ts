@@ -29,8 +29,10 @@ export function renderModel(
   reads: readonly FelizRead[] = [],
   routed = false,
   forms: readonly FormRecord[] = [],
+  authUi = false,
 ): string {
   const fields = [
+    ...(authUi ? ["    Session: SessionState"] : []),
     ...(routed ? ["    CurrentPage: Page"] : []),
     ...state.map((f) => `    ${upperFirst(f.name)}: ${typeToFs(f.type)}`),
     ...reads.map((r) => `    ${r.field}: Remote<${r.resultType}>`),
@@ -68,9 +70,11 @@ export function renderInit(
   reads: readonly FelizRead[] = [],
   routed = false,
   forms: readonly FormRecord[] = [],
+  authUi = false,
 ): string {
   const hasPageCmd = routed && reads.some((r) => r.single);
   const inits = [
+    ...(authUi ? ["      Session = Checking"] : []),
     ...(routed
       ? [
           hasPageCmd
@@ -91,6 +95,8 @@ export function renderInit(
     .filter((r) => !r.single)
     .map((r) => `Cmd.OfAsync.perform Api.${r.apiFn} () ${r.msgCase}`);
   if (hasPageCmd) cmds.push("pageCmd page");
+  // The auth gate probes the session at init (batched with the reads).
+  if (authUi) cmds.push("Cmd.OfAsync.perform Auth.checkSession () SessionChecked");
   const cmd =
     cmds.length === 0
       ? "Cmd.none"
@@ -116,8 +122,10 @@ export function renderMsg(
   forms: readonly FelizForm[] = [],
   operationForms: readonly FelizOperationForm[] = [],
   workflowForms: readonly FelizWorkflowForm[] = [],
+  authUi = false,
 ): string {
   const cases = [
+    ...(authUi ? ["  | SessionChecked of bool"] : []),
     ...(routed ? ["  | UrlChanged of string list"] : []),
     ...actions.map((a) => {
       const p = a.params[0];
@@ -188,9 +196,17 @@ export function renderUpdate(
   forms: readonly FelizForm[] = [],
   operationForms: readonly FelizOperationForm[] = [],
   workflowForms: readonly FelizWorkflowForm[] = [],
+  authUi = false,
 ): string {
   const stateNames = new Set(state.map((s) => s.name));
   const byIdReads = reads.filter((r) => r.single);
+  // The auth gate: the session probe resolves to Authed / Anon.
+  const authArms = authUi
+    ? [
+        "  | SessionChecked true -> { model with Session = Authed }, Cmd.none\n" +
+          "  | SessionChecked false -> { model with Session = Anon }, Cmd.none",
+      ]
+    : [];
   const hasPageCmd = routed && byIdReads.length > 0;
   // On navigation, re-parse the URL.  With byId reads, entering a detail page
   // must refetch: reset every byId field to `Loading` and fire `pageCmd` (which
@@ -278,6 +294,7 @@ export function renderUpdate(
     ].join("\n");
   });
   const arms = [
+    ...authArms,
     ...routeArms,
     ...actionArms,
     ...readArms,
