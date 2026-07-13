@@ -13,7 +13,7 @@ import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Model } from "../../src/language/generated/ast.js";
 import { mikroOrmPersistenceAdapter } from "../../src/platform/hono/v4/adapters/mikroorm-persistence.js";
-import { resolvePersistence } from "../../src/platform/resolve-adapters.js";
+import { adaptersFor } from "../../src/platform/resolve-adapters.js";
 import { generateSystems } from "../../src/system/index.js";
 
 /** Lower + enrich + run parse diagnostics AND the IR validator (where
@@ -57,7 +57,7 @@ system M {
 
 describe("mikroorm persistence adapter — node/hono (Phase 5d)", () => {
   it("is registered as a real persistence adapter", () => {
-    expect(resolvePersistence("node", "mikroorm")).toBe(mikroOrmPersistenceAdapter);
+    expect(adaptersFor("node")!.persistence.mikroorm).toBe(mikroOrmPersistenceAdapter);
     expect(mikroOrmPersistenceAdapter.name).toBe("mikroorm");
     expect(mikroOrmPersistenceAdapter.supportedStrategies).toEqual(["state", "eventLog"]);
   });

@@ -15,7 +15,7 @@ import {
   drizzlePersistenceAdapter,
   emitDrizzleSchema,
 } from "../../src/platform/hono/v4/adapters/drizzle-persistence.js";
-import { resolvePersistence } from "../../src/platform/resolve-adapters.js";
+import { adaptersFor } from "../../src/platform/resolve-adapters.js";
 import { parseValid } from "../_helpers/parse.js";
 
 const SRC = `
@@ -52,7 +52,7 @@ async function buildCtx(): Promise<EmitCtx> {
 
 describe("drizzle PersistenceAdapter (real)", () => {
   it("is registered as the hono drizzle persistence adapter", () => {
-    const resolved = resolvePersistence("node", "drizzle");
+    const resolved = adaptersFor("node")!.persistence.drizzle;
     expect(resolved).toBe(drizzlePersistenceAdapter);
     expect(resolved.name).toBe("drizzle");
   });

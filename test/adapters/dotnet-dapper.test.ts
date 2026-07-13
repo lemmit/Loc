@@ -12,7 +12,7 @@ import { lowerModel } from "../../src/ir/lower/lower.js";
 import { validateLoomModel } from "../../src/ir/validate/validate.js";
 import { createDddServices } from "../../src/language/ddd-module.js";
 import type { Model } from "../../src/language/generated/ast.js";
-import { resolvePersistence } from "../../src/platform/resolve-adapters.js";
+import { adaptersFor } from "../../src/platform/resolve-adapters.js";
 import { generateSystems } from "../../src/system/index.js";
 
 /** Lower + enrich + run BOTH the Langium parse diagnostics and the IR-level
@@ -56,7 +56,7 @@ system D {
 
 describe("dapper persistence adapter — dotnet (Phase 5c)", () => {
   it("is registered as a real persistence adapter", () => {
-    expect(resolvePersistence("dotnet", "dapper")).toBe(dapperPersistenceAdapter);
+    expect(adaptersFor("dotnet")!.persistence.dapper).toBe(dapperPersistenceAdapter);
     expect(dapperPersistenceAdapter.name).toBe("dapper");
     expect(dapperPersistenceAdapter.supportedShapes).toEqual(["relational"]);
     expect(dapperPersistenceAdapter.supportedStrategies).toEqual(["state", "eventLog"]);

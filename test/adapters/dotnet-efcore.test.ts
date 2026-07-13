@@ -16,7 +16,7 @@ import {
 import { enrichLoomModel } from "../../src/ir/enrich/enrichments.js";
 import { lowerModel } from "../../src/ir/lower/lower.js";
 import type { EnrichedBoundedContextIR } from "../../src/ir/types/loom-ir.js";
-import { resolvePersistence } from "../../src/platform/resolve-adapters.js";
+import { adaptersFor } from "../../src/platform/resolve-adapters.js";
 import { parseValid } from "../_helpers/parse.js";
 
 const SRC = `
@@ -55,7 +55,7 @@ async function buildCtx(): Promise<EmitCtx> {
 
 describe("efcore PersistenceAdapter (real)", () => {
   it("is registered as the dotnet efcore persistence adapter", () => {
-    const resolved = resolvePersistence("dotnet", "efcore");
+    const resolved = adaptersFor("dotnet")!.persistence.efcore;
     expect(resolved).toBe(efcorePersistenceAdapter);
     expect(resolved.name).toBe("efcore");
   });

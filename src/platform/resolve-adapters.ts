@@ -21,7 +21,6 @@ import {
   ADAPTER_IS_STUB,
   AdapterNotImplementedError,
   type LayoutAdapter,
-  type PersistenceAdapter,
   type PlatformAdapterDefaults,
   type PlatformAdapters,
   type StyleAdapter,
@@ -92,36 +91,13 @@ function adapterBagFor(
   }
 }
 
-/** Resolve a persistence adapter by platform + name.  Falls back to the
- *  platform's default (per persistence strategy) when `name` is null /
- *  undefined / empty.  Throws AdapterNotImplementedError if the named
- *  adapter isn't in the menu.
- *
- *  Pure lookup — does not invoke any `emit*` method, so stubs return
- *  cleanly (their capability fields answer; only emit throws). */
-export function resolvePersistence(
-  platform: Platform,
-  name: string | null | undefined,
-  strategy: "state" | "eventLog" = "state",
-): PersistenceAdapter {
-  const surface = platformFor(platform);
-  const adapters = surface.adapters?.();
-  const defaults = surface.adapterDefaults?.();
-  if (!adapters || !defaults) {
-    throw new AdapterNotImplementedError("persistence", name ?? "<default>", platform, []);
-  }
-  const resolved = name && name.length > 0 ? name : defaults.persistence[strategy];
-  const adapter = adapters.persistence[resolved];
-  if (!adapter) {
-    throw new AdapterNotImplementedError(
-      "persistence",
-      resolved,
-      platform,
-      Object.keys(adapters.persistence),
-    );
-  }
-  return adapter;
-}
+// NOTE: `resolvePersistence()` was removed (M-T9.2 / closes M-T6.10) — it was
+// never invoked on the production emit path (lowering reads the default NAME
+// via `defaultsFor`, and no emitter resolves a persistence adapter OBJECT).
+// The live capability surface is `adaptersFor(...).persistence[name]` +
+// `defaultsFor(...)`; callers that want a named adapter read the menu directly.
+// `resolveStyle` / `resolveLayout` are retained (style/layout resolution is
+// still the shape the validator/menu code expects).
 
 export function resolveStyle(platform: Platform, name: string | null | undefined): StyleAdapter {
   const surface = platformFor(platform);

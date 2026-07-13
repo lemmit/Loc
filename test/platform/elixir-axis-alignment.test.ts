@@ -7,8 +7,8 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  adaptersFor,
   availableAdapterNames,
-  resolvePersistence,
   resolveStyle,
 } from "../../src/platform/resolve-adapters.js";
 
@@ -28,7 +28,7 @@ describe("elixir realization-axes alignment", () => {
   });
 
   it("resolves the ecto persistence adapter (DB-agnostic: name is the library, not per-DB)", () => {
-    const ecto = resolvePersistence("elixir", "ecto");
+    const ecto = adaptersFor("elixir")!.persistence.ecto;
     expect(ecto.name).toBe("ecto");
     // Per the naming principle (§3.1): Ecto is the data-access library; the DB
     // rides `storage`.  It supports the state strategy on postgres.
@@ -36,7 +36,7 @@ describe("elixir realization-axes alignment", () => {
   });
 
   it("ecto hosts eventLog too — it's the elixir backend's ES adapter (DEBT-20)", () => {
-    const ecto = resolvePersistence("elixir", "ecto", "eventLog");
+    const ecto = adaptersFor("elixir")!.persistence.ecto;
     expect(ecto.name).toBe("ecto");
     expect(ecto.supportedStrategies).toContain("eventLog");
     // The elixir backend emits the full event-sourced store; ecto is its
