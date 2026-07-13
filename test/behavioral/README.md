@@ -60,6 +60,21 @@ in-process — no docker, no separate Postgres) and runs the suites Loom
   `docs/old/plans/runtime-semantics-tier-followups.md`). Needs JDK 21 + Gradle
   (`gradle`) + a reachable `SPRING_DATASOURCE_URL`; run: `node run-java.mjs`.
   `LOOM_BH_JAVA_BASE` dispatches at an already-running server (skips the boot).
+- **elixir** — the SAME emitted api e2e, run against a booted **generated
+  Phoenix backend** (plain Ecto/Phoenix) over real HTTP (`run-elixir.mjs`,
+  corpus `corpus-elixir.json` + `corpus-elixir/`). Like Python/.NET/Java,
+  Phoenix has no in-process Postgres, so this boots the generated project as a
+  real process (`mix deps.get` + `ecto.create` + `ecto.migrate` + `phx.server`)
+  against a real DB and re-points the backend-agnostic api suite at it. Its own
+  `behavioral-e2e-elixir.yml` workflow (a `services: postgres` sidecar) — the
+  M-T9.3 FIFTH and final backend on the behavioral tier (see
+  `docs/new-plan/T9-toolchain-health.md`). Needs Erlang/OTP + Elixir (`mix`) +
+  a reachable `DATABASE_URL` (ecto:// form); run: `node run-elixir.mjs`.
+  `LOOM_BH_ELIXIR_BASE` dispatches at an already-running server (skips the
+  boot). Behind a TLS-fingerprint-allowlisting egress proxy, `mix deps.get`
+  can't reach hex.pm from Elixir's `:ssl` — set `HEX_MIRROR_URL` or run the
+  repo's loopback hex mirror (CLAUDE.md → "Egress proxy wrinkle"); CI runners
+  have direct hex.pm access, so no mirror is needed there.
 
 ## Why
 
