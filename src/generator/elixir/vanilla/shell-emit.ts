@@ -25,6 +25,7 @@ import {
   renderCoreComponents,
   renderLayouts,
   renderRootLayout,
+  renderSpaController,
 } from "../shell/web.js";
 import { renderTelemetry } from "../telemetry-emit.js";
 
@@ -43,6 +44,12 @@ export function emitVanillaShellFiles(
   // no browser pipeline, no layouts/CoreComponents/Nav).
   liveRoutes: LiveRoute[] = [],
   hasSidebar = false,
+  // Embedded-SPA mode (D-PHOENIX-SURFACE phase 6): the deployable `hosts:` a
+  // react/vue/svelte ui, so this project serves that SPA from `priv/static/app`
+  // under `/app` — the endpoint gains a `Plug.Static` for it and the router a
+  // `SpaController` catch-all.  Mutually exclusive with `hasLiveView` (an
+  // embedded SPA owns the UI; no LiveView pages are emitted).
+  embedSpa = false,
 ): void {
   const hasLiveView = liveRoutes.length > 0 || hasSidebar;
   out.set(
@@ -73,11 +80,22 @@ export function emitVanillaShellFiles(
   // in the endpoint after Plug.RequestId.
   out.set(`lib/${appName}/request_context.ex`, renderRequestContext(appModule));
   out.set(`lib/${appName}_web.ex`, renderVanillaWebModule(appName, appModule, hasLiveView));
-  out.set(`lib/${appName}_web/endpoint.ex`, renderVanillaEndpoint(appName, appModule, hasLiveView));
+  out.set(
+    `lib/${appName}_web/endpoint.ex`,
+    renderVanillaEndpoint(appName, appModule, hasLiveView, embedSpa),
+  );
   out.set(
     `lib/${appName}_web/router.ex`,
-    renderVanillaRouter(appModule, apiRoutes, authEnabled, oidc, liveRoutes),
+    renderVanillaRouter(appModule, apiRoutes, authEnabled, oidc, liveRoutes, embedSpa),
   );
+  // SpaController — serves the embedded SPA's `index.html` for any deep-linked
+  // `/app/*` client-side route (the router catch-all points here).
+  if (embedSpa) {
+    out.set(
+      `lib/${appName}_web/controllers/spa_controller.ex`,
+      renderSpaController(appName, appModule),
+    );
+  }
   // LiveView spine files — only when a HEEx `ui:` is mounted.  The
   // CoreComponents library + layouts (module + root/app HEEx) + the Nav
   // on_mount hook reuse the shared shell renderers.  Omitted on a
@@ -315,23 +333,38 @@ end
 `;
 }
 
-function renderVanillaEndpoint(appName: string, appModule: string, hasLiveView: boolean): string {
+function renderVanillaEndpoint(
+  appName: string,
+  appModule: string,
+  hasLiveView: boolean,
+  embedSpa = false,
+): string {
   // LiveView spine: the live socket carries the WebSocket connection
   // (session forwarded so a future auth slice can read it), and
   // `Plug.Static` serves `priv/static` so the root layout's
   // `~p"/assets/app.css"` / `app.js` references resolve.  A JSON-API-only
   // deployable serves no static assets and mounts no live socket.
-  const liveViewPlugs = hasLiveView
-    ? `  socket "/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]]
-
-  plug Plug.Static,
+  //
+  // Embedded-SPA mode: no live socket, but `Plug.Static` serves the SPA
+  // bundle at `priv/static/app` — `at: "/"` maps `/app/index.html` +
+  // `/app/assets/*` to `priv/static/app/*`, so the `app` allowlist entry is
+  // all that's needed.  Non-file `/app/*` deep links fall through to the
+  // router's SpaController catch-all.
+  const staticPlug =
+    hasLiveView || embedSpa
+      ? `  plug Plug.Static,
     at: "/",
     from: :${appName},
     gzip: false,
-    only: ~w(assets fonts images favicon.ico robots.txt)
+    only: ~w(${hasLiveView ? "assets fonts images favicon.ico robots.txt" : "app"})
 
 `
-    : "";
+      : "";
+  const liveViewPlugs = hasLiveView
+    ? `  socket "/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]]
+
+${staticPlug}`
+    : staticPlug;
   return `# Auto-generated.
 defmodule ${appModule}Web.Endpoint do
   use Phoenix.Endpoint, otp_app: :${appName}
@@ -366,6 +399,7 @@ function renderVanillaRouter(
   authEnabled: boolean,
   oidc: boolean,
   liveRoutes: LiveRoute[] = [],
+  embedSpa = false,
 ): string {
   // Routes prefixed with `!root:` (e.g. the OpenAPI spec endpoint) sit OUTSIDE
   // the `/api` scope so they're served at the router root (cross-backend
@@ -453,6 +487,19 @@ ${liveLines}
   end
 `
     : "";
+  // Embedded-SPA catch-all: `Plug.Static` (endpoint) serves the built bundle
+  // for real files under `/app`; any other `/app/*` path is a client-side
+  // route, so serve `index.html` and let the SPA router take over.  The
+  // SpaController sets its own `text/html` content-type, so no `:accepts`
+  // pipeline is needed.
+  const spaScope = embedSpa
+    ? `
+  scope "/app", ${appModule}Web do
+    get "/", SpaController, :index
+    get "/*path", SpaController, :index
+  end
+`
+    : "";
   return `# Auto-generated.
 defmodule ${appModule}Web.Router do
   use ${appModule}Web, :router
@@ -468,7 +515,7 @@ ${browserPipeline}
   scope "/ready" do
     get "/", ${appModule}Web.HealthController, :readiness
   end
-${rootApiScope}${liveScope}${authScope}
+${rootApiScope}${liveScope}${authScope}${spaScope}
   scope "/api", ${appModule}Web do
     pipe_through :api
 ${routeLines}

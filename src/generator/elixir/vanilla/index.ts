@@ -18,6 +18,10 @@ import {
 } from "../../../ir/util/aggregate-flags.js";
 import type { PageNameCtx } from "../../../ir/util/page-kind.js";
 import { resolveContextSchema } from "../../../ir/util/resolve-datasource.js";
+import { embedSpaInto } from "../../_frontend/embedded-spa.js";
+import { generateReactForContexts } from "../../react/index.js";
+import { generateSvelteForContexts } from "../../svelte/index.js";
+import { generateVueForContexts } from "../../vue/index.js";
 import {
   buildPhoenixResourceModules,
   emitPhoenixResourceFiles,
@@ -320,6 +324,28 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   }
   const hasLiveView = liveRoutes.length > 0 || hasSidebar;
 
+  // Embedded SPA (D-PHOENIX-SURFACE phase 6) — when the deployable `hosts:` a
+  // `framework: react|vue|svelte` ui, this Phoenix project is a JSON-API
+  // backend that ALSO serves that SPA (no LiveView pages; `embedReact` above
+  // gated them off).  Generate the SPA under `assets/` (its own Vite build,
+  // separate from `mix assets.deploy`), same-origin against `/api`, base-href
+  // `/app` so its asset URLs + client-side routes resolve under the prefix
+  // Plug.Static + the SpaController catch-all serve.  The multi-stage
+  // Dockerfile's `spa-build` stage (renderDockerfile below, `embedReact`)
+  // `npm run build`s it into `priv/static/app`.  Mirrors the .NET/Java/Python
+  // `ClientApp/` embed; `embedSpaInto` drops the SPA pack's host-owned root
+  // files (its own Dockerfile / .dockerignore / certs / e2e).
+  if (deployable.uiName && embedReact) {
+    const embedOpts = { apiBaseUrl: "/api", pathPrefix: "assets/", basePath: "/app" };
+    const spaFiles =
+      deployable.uiFramework === "svelte"
+        ? generateSvelteForContexts(contexts, sys, deployable, embedOpts)
+        : deployable.uiFramework === "vue"
+          ? generateVueForContexts(contexts, sys, deployable, embedOpts)
+          : generateReactForContexts(contexts, sys, deployable, embedOpts);
+    embedSpaInto(out, spaFiles, deployable.uiFramework, "assets/");
+  }
+
   // Auth modules — the Auth plug (Bearer-JWT → `conn.assigns
   // .current_user`), LiveAuth on_mount, and /auth controller.  Emitted when the
   // deployable requires auth — the request principal a tenancy (principal)
@@ -355,6 +381,7 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
     !!sys.auth?.oidc,
     liveRoutes,
     hasSidebar,
+    embedReact,
   );
 
   // Deployment + boot machinery — the Elixir release, Dockerfile, and Ecto
@@ -366,7 +393,11 @@ export function generateVanillaElixirProject(args: GenerateElixirArgs): Map<stri
   // the Ecto schema drops the bundled `timestamps()` macro (it would collide),
   // so the migration must too.
   emitMigrations(appName, args.migrations ?? [], appModule, out);
-  out.set("Dockerfile", renderDockerfile(appName));
+  // Embedded-SPA Dockerfile: prepend the `spa-build` stage that Vite-builds
+  // the `assets/` SPA and copies its `dist/` (svelte: `build/`) into
+  // `priv/static/app`.  SvelteKit's adapter-static writes `build/`.
+  const spaOutDir = deployable.uiFramework === "svelte" ? "build" : "dist";
+  out.set("Dockerfile", renderDockerfile(appName, embedReact, spaOutDir));
   out.set(".dockerignore", renderDockerignore());
   out.set("certs/.gitkeep", "");
   out.set("rel/env.sh.eex", renderRelEnv(appName));

@@ -18,15 +18,16 @@ export const EMBEDDED_SPA_PREFIX = "ClientApp/";
 
 /** Root files the SPA pack ships that the HOST backend owns in fullstack
  *  mode: its multi-stage Dockerfile builds the SPA, and its own root ships
- *  the Dockerfile / .dockerignore / certs (and, outside `ClientApp/`, the
+ *  the Dockerfile / .dockerignore / certs (and, outside the SPA prefix, the
  *  e2e harness).  Dropped from the embedded copy so the file map stays
- *  clean. */
-export function isHostOwnedSpaFile(path: string): boolean {
+ *  clean.  `prefix` is the folder the SPA sits under (`ClientApp/` for the
+ *  dotnet/java/python hosts, `assets/` for the Phoenix host). */
+export function isHostOwnedSpaFile(path: string, prefix: string = EMBEDDED_SPA_PREFIX): boolean {
   return (
-    path === "ClientApp/Dockerfile" ||
-    path === "ClientApp/.dockerignore" ||
-    path === "ClientApp/certs/.gitkeep" ||
-    path.startsWith("ClientApp/e2e/")
+    path === `${prefix}Dockerfile` ||
+    path === `${prefix}.dockerignore` ||
+    path === `${prefix}certs/.gitkeep` ||
+    path.startsWith(`${prefix}e2e/`)
   );
 }
 
@@ -37,16 +38,19 @@ export function embeddedSpaGitignore(uiFramework: string | undefined): string {
 }
 
 /** Copy an already-generated SPA's files into the host `out` map, dropping
- *  the host-owned root files, then emit `ClientApp/.gitignore` for the
- *  hosted framework. */
+ *  the host-owned root files, then emit `<prefix>.gitignore` for the hosted
+ *  framework.  `prefix` defaults to `ClientApp/` (dotnet/java/python); the
+ *  Phoenix host passes `assets/` (its own multi-stage Dockerfile builds the
+ *  SPA source that lives there — see `elixir/shell/project.ts`). */
 export function embedSpaInto(
   out: Map<string, string>,
   spaFiles: Map<string, string>,
   uiFramework: string | undefined,
+  prefix: string = EMBEDDED_SPA_PREFIX,
 ): void {
   for (const [path, content] of spaFiles) {
-    if (isHostOwnedSpaFile(path)) continue;
+    if (isHostOwnedSpaFile(path, prefix)) continue;
     out.set(path, content);
   }
-  out.set(`${EMBEDDED_SPA_PREFIX}.gitignore`, embeddedSpaGitignore(uiFramework));
+  out.set(`${prefix}.gitignore`, embeddedSpaGitignore(uiFramework));
 }
