@@ -41,15 +41,15 @@ public sealed class ForbiddenException : Exception
 
 /// <summary>
 /// Wraps an exception thrown by a user-supplied <c>[ExternHandler]</c>
-/// implementation.  The auto-generated extern command handler catches
-/// any non-domain exception coming out of <c>HandleAsync</c> and
-/// rethrows as this type so the <see cref="DomainExceptionFilter"/> can
-/// emit a 500 envelope that names the offending op + aggregate
-/// instead of the bare <c>{ "error": "internal" }</c> operators see
-/// otherwise.  Domain-layer exceptions (DomainException,
-/// ForbiddenException, AggregateNotFoundException) raised by the
-/// user handler are NOT wrapped — they bubble through and the
-/// filter maps them to their usual status codes.
+/// implementation, so the <see cref="DomainExceptionFilter"/> can emit a
+/// 500 envelope that names the offending handler instead of the bare
+/// <c>{ "error": "internal" }</c> operators see otherwise.  (Since extern
+/// (b) Phase 2, an extern aggregate OPERATION is an ordinary domain method
+/// — a hand-written exception from its hook bubbles as a generic 500, the
+/// same as any other op body.  This wrap + filter arm is retained for the
+/// application-layer extern handler surface.)  Domain-layer exceptions
+/// (DomainException, ForbiddenException, AggregateNotFoundException) are
+/// NOT wrapped — they bubble through to their usual status codes.
 /// </summary>
 public sealed class ExternHandlerException : Exception
 {
@@ -64,11 +64,14 @@ public sealed class ExternHandlerException : Exception
 }
 
 /// <summary>
-/// Marker for user-supplied extern operation handlers.  The Scrutor
-/// scan in <see cref="Program"/> picks up every class decorated with
-/// this attribute and registers it under its implemented IXAggHandler
-/// interface.  See <c>Application/&lt;Aggregate&gt;/Handlers/IXAggHandler.cs</c>
-/// for the per-operation interfaces the user must implement.
+/// Marker for user-supplied extern application-layer handlers (the
+/// <c>extern commandHandler</c> / <c>queryHandler</c> case-2 home).  The
+/// Scrutor scan in <see cref="Program"/> picks up every class decorated with
+/// this attribute and registers it under its implemented <c>I&lt;Name&gt;Handler</c>
+/// port.  See <c>Application/Handlers/I&lt;Name&gt;Handler.cs</c> for the ports
+/// the user must implement.  (Extern aggregate OPERATIONS use a domain
+/// partial-method hook instead — no attribute, no scan; see
+/// <c>Domain/&lt;Plural&gt;/&lt;Agg&gt;.Extern.cs</c>.)
 /// </summary>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
 public sealed class ExternHandlerAttribute : Attribute

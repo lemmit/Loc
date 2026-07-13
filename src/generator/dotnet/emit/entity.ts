@@ -780,7 +780,7 @@ export function renderEntity(
       ...fnLines,
       ...opLines,
       ...partialHookLines,
-      ...(partialHookLines.length > 0 ? [""] : []),
+      "",
       ...pullEventsLines,
       `    private void AssertInvariants(${emitTrace ? 'string __op = "<init>"' : ""})`,
       "    {",
