@@ -88,10 +88,17 @@ describe("feliz workflow forms", () => {
     );
   });
 
-  it("the WorkflowForm renders inputs + a paramless submit", async () => {
+  it("the WorkflowForm renders typed inputs + a validity-guarded paramless submit", async () => {
     const app = await appFs(WF);
+    // `name: string` → text; `initial: money` → a `type: number` input.
     expect(app).toContain(
-      'Html.button [ prop.onClick (fun _ -> dispatch SubmitOpenAccountForm); prop.text "Run OpenAccount" ]',
+      'Html.input [ prop.placeholder "name"; prop.value model.OpenAccountForm.name; prop.onChange (fun (v: string) -> dispatch (SetOpenAccountFormName v)) ]',
+    );
+    expect(app).toContain(
+      'Html.input [ prop.type\'.number; prop.placeholder "initial"; prop.value model.OpenAccountForm.initial; prop.onChange (fun (v: string) -> dispatch (SetOpenAccountFormInitial v)) ]',
+    );
+    expect(app).toContain(
+      'Html.button [ prop.disabled (not (Validation.openAccountFormValid model.OpenAccountForm)); prop.onClick (fun _ -> dispatch SubmitOpenAccountForm); prop.text "Run OpenAccount" ]',
     );
   });
 

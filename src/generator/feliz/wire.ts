@@ -143,9 +143,16 @@ export function felizDeleteMutation(aggregate: string): FelizMutation {
   };
 }
 
+/** The HTML input widget a form field renders as — derived from its wire type so
+ *  the browser enforces the shape at entry (`number` for numerics, a `checkbox`
+ *  for bools, `text` otherwise).  The form record itself stays all-string
+ *  (raw input is a string; the encoder lifts it back at submit). */
+export type FelizInputKind = "text" | "number" | "checkbox";
+
 /** One field of a create form — an F# form-record field (string-typed, bound to
- *  an `Html.input`), its `Set<Form><Field>` update `Msg`, and the Thoth encoder
- *  expression that lifts the string back to its wire type at submit. */
+ *  an `Html.input`), its `Set<Form><Field>` update `Msg`, the Thoth encoder
+ *  expression that lifts the string back to its wire type at submit, and the
+ *  input widget kind the type maps to. */
 export interface FelizFormField {
   /** Exact wire field name — the F# form-record field, input binding, and JSON
    *  key (`name` / `price`). */
@@ -155,6 +162,8 @@ export interface FelizFormField {
   /** Thoth encoder for the field, lifting `form.<wireName>` to its wire type
    *  (`Encode.string form.name` / `Encode.decimal (decimal form.price)`). */
   encodeExpr: string;
+  /** HTML input widget (`number` / `checkbox` / `text`) derived from the type. */
+  inputKind: FelizInputKind;
 }
 
 /** The record-shaped aspects a form (create OR operation) shares — the F#
@@ -170,6 +179,9 @@ export interface FormRecord {
   emptyBinding: string;
   /** Thoth encoder fn name (`Encoders.<encoderFn>`). */
   encoderFn: string;
+  /** Client-side validity predicate fn name (`Validation.<validFn>`), true when
+   *  every required field is non-empty — the submit guard. */
+  validFn: string;
   /** The form's fields. */
   fields: FelizFormField[];
 }
@@ -225,8 +237,29 @@ export interface FelizOperationForm extends FormRecord {
   navigateSegs: string[];
 }
 
-/** Build the shared form fields (`Set` Msg + encoder) for a form of `formType`
- *  from a `{name, type}` field/param list.  Reused by create + operation forms. */
+/** The HTML input widget a field type maps to — numerics render `type: number`,
+ *  bools a `checkbox`, everything else a plain text input.  Purely derived from
+ *  the wire type (no stamped field); the form record stays all-string. */
+function inputKindFor(t: TypeIR): FelizInputKind {
+  if (t.kind === "primitive") {
+    switch (t.name) {
+      case "int":
+      case "long":
+      case "decimal":
+      case "money":
+        return "number";
+      case "bool":
+        return "checkbox";
+      default:
+        return "text";
+    }
+  }
+  return "text"; // id / enum (string name) / everything else
+}
+
+/** Build the shared form fields (`Set` Msg + encoder + input kind) for a form of
+ *  `formType` from a `{name, type}` field/param list.  Reused by create +
+ *  operation + workflow forms. */
 function formFieldsFrom(
   formType: string,
   fields: readonly { name: string; type: TypeIR }[],
@@ -235,6 +268,7 @@ function formFieldsFrom(
     wireName: f.name,
     setMsg: `Set${formType}${upperFirst(f.name)}`,
     encodeExpr: encodeExprFor(f.type, `form.${f.name}`),
+    inputKind: inputKindFor(f.type),
   }));
 }
 
@@ -282,6 +316,7 @@ export function felizCreateForm(agg: AggregateIR): FelizForm {
     formField: formType,
     emptyBinding: `empty${formType}`,
     encoderFn: lowerFirst(formType),
+    validFn: `${lowerFirst(formType)}Valid`,
     apiFn: `create${upperFirst(name)}`,
     submitMsg: `Submit${formType}`,
     resultMsg: `${upperFirst(name)}Created`,
@@ -312,6 +347,7 @@ export function felizOperationForm(agg: AggregateIR, op: OperationIR): FelizOper
     formField: formType,
     emptyBinding: `empty${formType}`,
     encoderFn: lowerFirst(formType),
+    validFn: `${lowerFirst(formType)}Valid`,
     apiFn: `${op.name}${upperFirst(name)}`,
     submitMsg: `Submit${formType}`,
     doneMsg: `${opCap}Done`,
@@ -357,6 +393,7 @@ export function felizWorkflowForm(wf: WorkflowIR): FelizWorkflowForm {
     formField: formType,
     emptyBinding: `empty${formType}`,
     encoderFn: lowerFirst(formType),
+    validFn: `${lowerFirst(formType)}Valid`,
     apiFn: `run${wfCap}`,
     submitMsg: `Submit${formType}`,
     doneMsg: `${wfCap}Done`,
@@ -963,6 +1000,36 @@ export function renderEncoders(forms: FormRecord[]): string {
       ...f.fields.map((fld) => `      "${fld.wireName}", ${fld.encodeExpr}`),
       "    ]",
     ]),
+  );
+}
+
+/** Emit the `Validation` module — one `<form>Valid` predicate per form, true
+ *  when every TEXT/NUMBER field is non-empty (the create/op/workflow fields are
+ *  all required — the create builder strips optionals, params are inherently
+ *  required).  Checkbox (bool) fields are excluded: an unchecked box is a
+ *  legitimate `false`, never "unfilled", so a bool-only form is always valid.
+ *  The submit button's `prop.disabled` reads this, so an incomplete form can't
+ *  POST (the zod-`.min(1)`-parity guard). */
+export function renderValidation(forms: FormRecord[]): string {
+  const withFields = forms.filter((f) => f.fields.length > 0);
+  if (withFields.length === 0) return "";
+  return lines(
+    "// Client-side validation — required text/number fields must be non-empty.",
+    "module Validation =",
+    ...withFields.flatMap((f, i) => {
+      const required = f.fields.filter((fld) => fld.inputKind !== "checkbox");
+      const body =
+        required.length > 0
+          ? required
+              .map((fld) => `not (System.String.IsNullOrWhiteSpace form.${fld.wireName})`)
+              .join(" && ")
+          : "true"; // a bool-only form has nothing to require
+      return [
+        i > 0 ? "" : undefined,
+        `  let ${f.validFn} (form: ${f.formType}) : bool =`,
+        `    ${body}`,
+      ];
+    }),
   );
 }
 

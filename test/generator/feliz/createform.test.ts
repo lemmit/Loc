@@ -102,17 +102,68 @@ describe("feliz create forms", () => {
     expect(app).toContain("  | ProductCreated (Error _) -> model, Cmd.none");
   });
 
-  it("the CreateForm renders inputs bound to the form + a submit button", async () => {
+  it("the CreateForm renders typed inputs + a validity-guarded submit button", async () => {
     const app = await appFs(CREATE);
+    // A `string` field → a plain text input.
     expect(app).toContain(
       'Html.input [ prop.placeholder "name"; prop.value model.ProductForm.name; prop.onChange (fun (v: string) -> dispatch (SetProductFormName v)) ]',
     );
+    // A `money` field → a `type: number` input (browser-enforced numeric entry).
     expect(app).toContain(
-      'Html.button [ prop.onClick (fun _ -> dispatch SubmitProductForm); prop.text "Create Product" ]',
+      'Html.input [ prop.type\'.number; prop.placeholder "price"; prop.value model.ProductForm.price; prop.onChange (fun (v: string) -> dispatch (SetProductFormPrice v)) ]',
+    );
+    // The submit is disabled until the form validates (both fields non-empty).
+    expect(app).toContain(
+      'Html.button [ prop.disabled (not (Validation.productFormValid model.ProductForm)); prop.onClick (fun _ -> dispatch SubmitProductForm); prop.text "Create Product" ]',
     );
     // No React/RHF sentinel leaked from the shared CreateForm default path.
     expect(app).not.toContain("useForm");
     expect(app).not.toContain("zodResolver");
+  });
+
+  it("emits a Validation module — every field must be non-empty to submit", async () => {
+    const app = await appFs(CREATE);
+    expect(app).toContain("module Validation =");
+    expect(app).toContain("  let productFormValid (form: ProductForm) : bool =");
+    expect(app).toContain(
+      "    not (System.String.IsNullOrWhiteSpace form.name) && not (System.String.IsNullOrWhiteSpace form.price)",
+    );
+  });
+
+  // A `bool` create field → a checkbox widget (not a text input): `isChecked`
+  // reads the "true" string state, and the bool `onChange` writes it back.
+  it("renders a bool field as a checkbox bound to the string state", async () => {
+    const app = await appFs(`
+      system Shop {
+        api ShopApi from Catalog
+        subdomain Catalog {
+          context Cat {
+            aggregate Product with crudish { name: string  inStock: bool }
+            repository Products for Product { }
+          }
+        }
+        storage db { type: postgres }
+        resource catState { for: Cat, kind: state, use: db }
+        ui WebApp {
+          api Shop: ShopApi
+          page ProductNew {
+            route: "/products/new"
+            body: Stack { CreateForm { of: Product } }
+          }
+        }
+        deployable api { platform: node contexts: [Cat] dataSources: [catState] serves: ShopApi port: 3000 }
+        deployable web { platform: feliz targets: api ui: WebApp { Shop: api } port: 3005 }
+      }
+    `);
+    expect(app).toContain(
+      'Html.input [ prop.type\'.checkbox; prop.isChecked (model.ProductForm.inStock = "true"); prop.onChange (fun (v: bool) -> dispatch (SetProductFormInStock (if v then "true" else "false"))) ]',
+    );
+    // The checkbox is EXCLUDED from validation — a bool is never "unfilled"
+    // (unchecked = a legitimate false), so only the required text field guards.
+    expect(app).toContain(
+      "  let productFormValid (form: ProductForm) : bool =\n    not (System.String.IsNullOrWhiteSpace form.name)",
+    );
+    expect(app).not.toContain("form.inStock)");
   });
 
   // A read-only ui (no CreateForm) emits no form machinery — creates are additive.

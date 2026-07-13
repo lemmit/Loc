@@ -102,10 +102,12 @@ describe("feliz operation forms", () => {
     expect(app).toContain(
       'Html.input [ prop.placeholder "newName"; prop.value model.RenameProductForm.newName; prop.onChange (fun (v: string) -> dispatch (SetRenameProductFormNewName v)) ]',
     );
-    // The submit carries the route id (instance-qualified op).
+    // The submit carries the route id (instance-qualified op) + a validity guard.
     expect(app).toContain(
-      'Html.button [ prop.onClick (fun _ -> dispatch (SubmitRenameProductForm id)); prop.text "Rename Product" ]',
+      'Html.button [ prop.disabled (not (Validation.renameProductFormValid model.RenameProductForm)); prop.onClick (fun _ -> dispatch (SubmitRenameProductForm id)); prop.text "Rename Product" ]',
     );
+    // The op form's field is validated too (shares the Validation module).
+    expect(app).toContain("  let renameProductFormValid (form: RenameProductForm) : bool =");
     expect(app).not.toContain("useForm");
     expect(app).not.toContain("mutateAsync");
   });
