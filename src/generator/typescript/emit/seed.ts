@@ -28,20 +28,9 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, upperFirst } from "../../../util/naming.js";
+import { type Entry, groupByDataset, usedAggregates } from "../../_persistence/seed-datasets.js";
 import { renderSeedRowInsert } from "../../sql-pg.js";
 import { renderTsExpr } from "../render-expr.js";
-
-/** A seed row plus its block's path (domain create vs raw insert). */
-interface Entry {
-  row: SeedRowIR;
-  raw: boolean;
-}
-
-/** One dataset's merged entries (across all `seed <dataset>` blocks). */
-interface Dataset {
-  name: string;
-  entries: Entry[];
-}
 
 export function emitTypescriptSeeds(ctx: EnrichedBoundedContextIR, out: Map<string, string>): void {
   const datasets = groupByDataset(ctx);
@@ -76,34 +65,6 @@ export function emitTypescriptSeeds(ctx: EnrichedBoundedContextIR, out: Map<stri
     renderSeedFile(body, callLines, usedAggregates(datasets, seedable), voEnumNames),
   );
   out.set("db/seed-cli.ts", renderSeedCliFile());
-}
-
-/** Group every `SeedIR` row by dataset, preserving source order + path. */
-function groupByDataset(ctx: EnrichedBoundedContextIR): Dataset[] {
-  const byName = new Map<string, Dataset>();
-  const order: string[] = [];
-  for (const seed of ctx.seeds) {
-    let ds = byName.get(seed.dataset);
-    if (!ds) {
-      ds = { name: seed.dataset, entries: [] };
-      byName.set(seed.dataset, ds);
-      order.push(seed.dataset);
-    }
-    for (const row of seed.rows) ds.entries.push({ row, raw: seed.path === "raw" });
-  }
-  return order.map((n) => byName.get(n)!);
-}
-
-/** Aggregate names whose domain class/repository are imported — `raw` rows
- *  emit pure SQL and import nothing. */
-function usedAggregates(datasets: Dataset[], seedable: Set<string>): string[] {
-  const used = new Set<string>();
-  for (const ds of datasets) {
-    for (const e of ds.entries) {
-      if (!e.raw && seedable.has(e.row.aggregate)) used.add(e.row.aggregate);
-    }
-  }
-  return [...used].sort();
 }
 
 /** Render one `async function seed<Dataset>(db, requested)`. */

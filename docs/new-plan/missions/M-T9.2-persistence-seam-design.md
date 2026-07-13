@@ -20,6 +20,18 @@ The net: the seam is worth building, but its shape is **a `src/generator/_persis
 
 ---
 
+## 0.4 Implementation finding — the "cheap warm-up" slices are net-negative; skip them
+
+*(Recorded during implementation, on close reading of the actual emitters — supersedes the events/ids/enum rows of the original slicing table.)*
+
+The audit ranked events / ids / enum as the "cheapest" first slices (by *ease*). Reading the emitters line-by-line shows ease here means **there is almost nothing to share**: the shared decision tree is a **one-line walk**, and 90% of each emitter is *divergent* framing that must stay a per-backend leaf.
+
+- **events** — the only shared logic is `fields.map(f → renderType(f) + name)`. Everything else diverges: file-per-event (.NET/Java) vs one module (TS/Python); positional record params (`record Name(T a)`) vs member block (`interface`/`@dataclass`) vs `defstruct`; the marker interface, the `DomainEvent` union, the dispatcher boundary, the import systems — all per-backend. A `EventTarget` interface would be *more* code than the duplication it removes.
+- **ids** — shared logic is the 3-line name walk (`for a of aggregates: push a.name; for p of a.parts: push p.name`). The emission (`branded string + uuidv7` / `NewType + uuid7` / `record struct` / `@Embeddable record`) is entirely divergent leaf.
+- **enum** — a name-list → language enum; the DSL casing is the wire contract, so there is no decision to share, just a trivial spelling.
+
+**Decision:** **drop events / ids / enum as `Target` seams** — extracting a 5-method dispatch interface to wrap a one-line loop is exactly the *speculative-generality debt* the repo warns against (retro §"no stub adapters"). The pattern-establishment value the brief wanted from a cheap first slice is better bought by the **smallest slice with a genuinely shared *tree*** — `groupByDataset` (byte-identical across TS/.NET/Python), which is what Slice 3 (seed) actually lands first. A `Target` seam earns its interface only when the shared decision tree is substantial (query lowering, seed spine, wire projection); a fragment whose shared part is one line stays inlined per-backend. This refines, not contradicts, §0.5: the committed set narrows to **slice 0 + seed + wire + QueryTarget**; the value is still real, just concentrated in fewer, meatier slices.
+
 ## 0.5 Go/no-go — is the alignment worth it? (considerations + decision)
 
 The audit forces the go/no-go question the brief assumed away ("the seam is worth building" — but *how much* of it?). Two distinct readings of "align the persistence layer," with opposite answers:
@@ -208,13 +220,13 @@ export function renderColumnsWith(agg, migrations: MigrationsIR, t: ColumnTarget
 ```
 In-scope: TS/Hono + Python. **Decline:** EF/JPA (no column type — CLR inference), Elixir (VO→jsonb). *Do not* extend to them.
 
-### 2.3.4 Value-type seams — `IdTarget`, `EventTarget`, `EnumTarget`, `VoTarget`
+### 2.3.4 Value-type seams — ~~`IdTarget`, `EventTarget`, `EnumTarget`, `VoTarget`~~ **DROPPED (§0.4)**
 
-Each is a tiny walk (`for each name → framed decl`) with a 1–3 cell leaf table. Could be one `_persistence/value-types.ts` with four dispatchers or four files; recommend four small modules for symmetry with the others. In-scope: 4/5 for id/enum/VO (Elixir declines), **5/5 for events**.
+**Cut during implementation.** On close reading the shared decision tree for id/event/enum is a *one-line walk*; the emission framing is entirely divergent leaf, so a `Target` interface would add more indirection than it removes. See §0.4. These fragments stay inlined per-backend.
 
-### 2.3.5 `SeedSpine` — dataset grouping + `renderDatasetFn`
+### 2.3.5 `SeedSpine` — dataset grouping + `renderDatasetFn` **(first landed slice)**
 
-`groupByDataset` + the guard/decl/row/mark skeleton are already byte-parallel and pinned by D-SEED-*; the row SQL is already shared (`renderSeedRowInsert`). Extract the spine; leaf table = `save`-call framing + import collection + datetime coercion. In-scope: TS/.NET/Python (Java/Elixir seed to be spot-checked in the slice).
+`groupByDataset` + `usedAggregates` + the `Entry`/`Dataset` model are **byte-identical across TS/.NET/Python** — verified and **extracted to `src/generator/_persistence/seed-datasets.ts` (landed; byte-identical gate green)**. The guard/decl/row/mark skeleton (`renderDatasetFn`) is pinned by D-SEED-* and the row SQL is already shared (`renderSeedRowInsert`); the remaining `renderDatasetFn` framing (`save`-call shape, import collection, datetime coercion) stays the per-backend leaf. This is the slice that *establishes the `_persistence/` home + the byte-identical gate* — deliberately chosen over the dropped value-type warm-ups because it has a genuinely shared tree. Java/Elixir seed spot-checked as decline (own framing).
 
 ### 2.3.6 Repository CRUD — a **TS↔Python-pair-only** seam (not the brief's slice 1)
 
@@ -237,21 +249,21 @@ Per the decline criterion, and to be honest about the ceiling: **stamp injection
 
 Every slice follows the PRs #607–#627 / #843 protocol: **the generated corpus must be byte-identical before and after** (`git diff` the generated output over `examples/` + `web/src/examples/` × the relevant targets is empty), gated by the existing generator/fixture tests + a spot `LOOM_TS_BUILD`/`LOOM_*_BUILD` compile. No behavior change ever rides an extraction slice. Elixir last on any seam it's in-scope for, decline option open at each step.
 
-| # | Slice | Backends | Why here | Gate |
+*(Revised during implementation — §0.4 dropped the value-type warm-ups; seed is now the machinery-proving first slice.)*
+
+| # | Slice | Backends | Status | Gate |
 |---|---|---|---|---|
-| **0** | Remove orphaned adapter emit-layer + `resolvePersistence` (2.5) | — | Clean the field; closes M-T6.10 | `npm test` (deletes dead tests); **not** byte-gated (no emit change) |
-| **1** | `EventTarget` | all 5 | Cheapest warm-up; proves the `_persistence/` home + gate on the flattest fragment | byte-identical, all 5 compile |
-| **2** | `IdTarget` | 4 (Elixir decline) | Tiny 2-cell leaf; records the first decline in-code | byte-identical |
-| **3** | `SeedSpine` | TS/.NET/Python | `groupByDataset` already parallel; row SQL already shared | byte-identical + seed e2e |
-| **4** | `EnumTarget` + `VoTarget` | 4 (Elixir decline) | Bodies already via `ExprTarget`; only framing | byte-identical |
-| **5** | `WireTarget` | all 5 | Brief's slice 3; core already shared, framing regular | byte-identical + conformance-parity |
-| **6** | `QueryTarget` (find-`where` + filter predicate) | TS/Py/Java (+.NET/Elixir per Q3) | **Highest traffic**; the read-path win; direct `ExprTarget` analogue | byte-identical + behavioral-e2e |
-| **7** | `ColumnTarget` | TS + Python | **DEFER** (§0.5) — 2-backend only; do when a feature touches it | byte-identical + `LOOM_TS_BUILD`/`python-build` |
-| **8** | `JoinRowTarget` (standalone join-row) | TS/.NET/Python | **DEFER** (§0.5) — 3-backend, borderline; gate on association traffic | byte-identical + tenancy-e2e (join reads) |
-| **9** | `renderRepositoryWith` (save/findById/getById) | TS + Python (getById +Java) | **DEFER** (§0.5) — 2-backend pair only; riskiest slice, feature-gated | byte-identical + behavioral-e2e |
+| **1** | `seed-datasets` spine (`groupByDataset` + `usedAggregates` + model) | TS/.NET/Python | ✅ **LANDED** — establishes `_persistence/`, byte-identical green | byte-identical ✓ + 31 seed tests ✓ + layering ✓ |
+| **2** | `WireTarget` (DTO framing over `wireShape`) | all 5 | **NEXT** — core already shared, framing regular | byte-identical + conformance-parity |
+| **3** | `QueryTarget` (find-`where` + filter predicate) | TS/Py/Java (+.NET/Elixir per Q3) | committed — **highest traffic**; read-path win; `ExprTarget` analogue | byte-identical + behavioral-e2e |
+| **4** | Remove orphaned adapter emit-layer + `resolvePersistence` (§2.5) | — | committed — closes M-T6.10; pending Q1 sign-off | `npm test` (deletes dead tests); not byte-gated |
+| — | ~~events / ids / enum warm-ups~~ | — | **DROPPED (§0.4)** — one-line shared core, net-negative indirection | — |
+| — | `ColumnTarget` | TS + Python | **DEFER (§0.5)** — 2-backend only; feature-gated | byte-identical + `LOOM_TS_BUILD`/`python-build` |
+| — | `JoinRowTarget` (standalone join-row) | TS/.NET/Python | **DEFER (§0.5)** — 3-backend, borderline | byte-identical + tenancy-e2e |
+| — | `renderRepositoryWith` (save/findById/getById) | TS + Python (getById +Java) | **DEFER (§0.5)** — riskiest, 2-backend pair | byte-identical + behavioral-e2e |
 | — | routes | — | **Deferred** — coordinate with M-T5.10 (`RouteIR` landed-but-unread) | — |
 
-**Scoped decision (§0.5):** slices **0–6 are the committed GO** (pure-win + high-ROI + cheap/T10-unfreeze). Slices **7–9 are DEFER** — real duplication, but 2–3-backend only and off the T10 critical path; pull them forward only when a concrete storage feature would edit them.
+**Committed set (post-§0.4 revision):** the seed spine (landed) → `WireTarget` → `QueryTarget` → adapter-emit removal. The value-type warm-ups are dropped (§0.4); the 2–3-backend slices stay deferred (§0.5) until feature traffic justifies them.
 
 Ordering rationale: slices 1–5 are flat walks (no recursion, small leaves) that *prove the seam machinery + gate* cheaply before the one structurally-interesting committed slice (6 QueryTarget). The deferred repository slice (9) is the *riskiest* — write-side, 2-backend — so it goes last and only on demand. This is a deliberate inversion of the brief's "CRUD first."
 

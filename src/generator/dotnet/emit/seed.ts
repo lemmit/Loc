@@ -33,18 +33,9 @@ import type {
 } from "../../../ir/types/loom-ir.js";
 import { lines } from "../../../util/code-builder.js";
 import { lowerFirst, plural, upperFirst } from "../../../util/naming.js";
+import { type Entry, groupByDataset } from "../../_persistence/seed-datasets.js";
 import { renderSeedRowInsert } from "../../sql-pg.js";
 import { renderCsExpr } from "../render-expr.js";
-
-interface Entry {
-  row: SeedRowIR;
-  raw: boolean;
-}
-
-interface Dataset {
-  name: string;
-  entries: Entry[];
-}
 
 export function emitDotnetSeeds(
   ctx: EnrichedBoundedContextIR,
@@ -77,21 +68,6 @@ export function emitDotnetSeeds(
     "Infrastructure/Persistence/Seed.cs",
     renderSeedFile(ns, fnBlocks, callLines, [...usedAggs].sort(), ctx),
   );
-}
-
-function groupByDataset(ctx: EnrichedBoundedContextIR): Dataset[] {
-  const byName = new Map<string, Dataset>();
-  const order: string[] = [];
-  for (const seed of ctx.seeds) {
-    let ds = byName.get(seed.dataset);
-    if (!ds) {
-      ds = { name: seed.dataset, entries: [] };
-      byName.set(seed.dataset, ds);
-      order.push(seed.dataset);
-    }
-    for (const row of seed.rows) ds.entries.push({ row, raw: seed.path === "raw" });
-  }
-  return order.map((n) => byName.get(n)!);
 }
 
 function renderDatasetFn(
